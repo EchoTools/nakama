@@ -824,30 +824,6 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 	d.preselectRoleInOptions(roleOptions, roles.ServerHost)
 	d.preselectRoleInOptions(roleOptions, roles.Suspended)
 	d.preselectRoleInOptions(roleOptions, roles.Allocator)
-		baseRoleOptions = append(baseRoleOptions, discordgo.SelectMenuOption{
-			Label:       role.Name,
-			Value:       role.ID,
-			Description: fmt.Sprintf("Role: %s", role.Name),
-		})
-	}
-
-	roles := metadata.RoleMap
-
-	// Helper to clone options and set default
-	cloneAndPreselect := func(options []discordgo.SelectMenuOption, roleID string) []discordgo.SelectMenuOption {
-		cloned := make([]discordgo.SelectMenuOption, len(options))
-		for i, opt := range options {
-			cloned[i] = opt
-			cloned[i].Default = (opt.Value == roleID)
-		}
-		return cloned
-	}
-
-	memberOptions := cloneAndPreselect(baseRoleOptions, roles.Member)
-	enforcerOptions := cloneAndPreselect(baseRoleOptions, roles.Enforcer)
-	serverHostOptions := cloneAndPreselect(baseRoleOptions, roles.ServerHost)
-	suspendedOptions := cloneAndPreselect(baseRoleOptions, roles.Suspended)
-	allocatorOptions := cloneAndPreselect(baseRoleOptions, roles.Allocator)
 	// Build the configuration interface with select menus for each role type
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
@@ -855,7 +831,7 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 				discordgo.SelectMenu{
 					CustomID:    "role_select:member",
 					Placeholder: "Select Member Role",
-					Options:     memberOptions,
+					Options:     roleOptions,
 					MaxValues:   1,
 				},
 			},
@@ -982,7 +958,6 @@ func (d *DiscordAppBot) handleRoleSelect(ctx context.Context, logger runtime.Log
 	return d.handleConfigureRoles(ctx, logger, s, i, userID, groupID)
 }
 
-func (d *DiscordAppBot) preselectRoleInOptions(options []discordgo.SelectMenuOption, roleID string) {
 func (d *DiscordAppBot) preselectRoleInOptions(options []discordgo.SelectMenuOption, roleID string) {
 	// Reset all options to not be default
 	for i := range options {
