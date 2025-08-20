@@ -677,7 +677,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 							ownerDiscordID := p.discordCache.UserIDToDiscordID(ownerIDs[0])
 							go func() {
 								if err := p.discordCache.SendDisplayNameInUseNotification(ctx, params.profile.DiscordID(), ownerDiscordID, dn, params.profile.Username()); err != nil {
-									logger.Warn("Failed to send display name in use notification", zap.Error(err))
+									logger.Debug("Failed to send display name in use notification", zap.Error(err))
 								}
 							}()
 						}

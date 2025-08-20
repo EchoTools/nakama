@@ -335,6 +335,8 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		}
 	case "configure_roles":
 		return d.handleConfigureRoles(ctx, logger, s, i, userID, groupID)
+	case "configure_channels":
+		return d.handleConfigureChannels(ctx, logger, s, i, userID, groupID)
 	case "role_select":
 		return d.handleRoleSelect(ctx, logger, s, i, userID, groupID, value)
 	case "igp":
@@ -914,6 +916,63 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 	}
 
 	return s.InteractionRespond(i.Interaction, response)
+}
+
+func (d *DiscordAppBot) handleConfigureChannels(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) error {
+	// Get the current guild group metadata to get current channel settings
+	metadata, err := GroupMetadataLoad(ctx, d.db, groupID)
+	if err != nil {
+		return fmt.Errorf("failed to get guild group metadata: %w", err)
+	}
+
+	// Show modal with current channel settings
+	modal := &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseModal,
+		Data: &discordgo.InteractionResponseData{
+			CustomID: "channels_modal",
+			Title:    "Configure Channels",
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "command_channel_input",
+							Label:       "Command Channel ID",
+							Value:       metadata.CommandChannelID,
+							Style:       discordgo.TextInputShort,
+							Placeholder: "Enter command channel ID (optional)",
+							Required:    false,
+						},
+					},
+				},
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "audit_channel_input",
+							Label:       "Audit Channel ID",
+							Value:       metadata.AuditChannelID,
+							Style:       discordgo.TextInputShort,
+							Placeholder: "Enter audit channel ID (optional)",
+							Required:    false,
+						},
+					},
+				},
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "error_channel_input",
+							Label:       "Error Channel ID",
+							Value:       metadata.ErrorChannelID,
+							Style:       discordgo.TextInputShort,
+							Placeholder: "Enter error channel ID (optional)",
+							Required:    false,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	return s.InteractionRespond(i.Interaction, modal)
 }
 
 func (d *DiscordAppBot) handleRoleSelect(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string, roleType string) error {

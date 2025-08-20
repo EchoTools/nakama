@@ -625,6 +625,10 @@ var (
 			Description: "Configure guild roles for EchoVRCE features. Non-members can only join private matches.",
 		},
 		{
+			Name:        "set-channels",
+			Description: "Configure command, audit, and error channels for EchoVRCE features.",
+		},
+		{
 			Name:        "allocate",
 			Description: "Allocate a session on a game server in a specific region",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -2414,6 +2418,48 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			return s.InteractionRespond(i.Interaction, response)
 		},
+		"set-channels": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+			// Ensure the user is the owner of the guild
+			if user == nil || i.Member == nil || i.Member.User.ID == "" || i.GuildID == "" {
+				return nil
+			}
+
+			guild, err := s.Guild(i.GuildID)
+			if err != nil || guild == nil {
+				return errors.New("failed to get guild")
+			}
+
+			if guild.OwnerID != user.ID {
+				// Check if the user is a global developer
+				if ok, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalDevelopers); err != nil {
+					return errors.New("failed to check group membership")
+				} else if !ok {
+					return errors.New("you do not have permission to use this command")
+				}
+			}
+
+			// Create a message with a "Configure Channels" button
+			response := &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "Click the button below to configure channels for EchoVRCE features.",
+					Components: []discordgo.MessageComponent{
+						discordgo.ActionsRow{
+							Components: []discordgo.MessageComponent{
+								discordgo.Button{
+									Label:    "Configure Channels",
+									Style:    discordgo.PrimaryButton,
+									CustomID: "configure_channels",
+								},
+							},
+						},
+					},
+					Flags: discordgo.MessageFlagsEphemeral,
+				},
+			}
+
+			return s.InteractionRespond(i.Interaction, response)
+		},
 
 		"region-status": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
@@ -3017,6 +3063,27 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						},
 					})
 				}
+			case "channels_modal":
+				userID := d.cache.DiscordIDToUserID(user.ID)
+				groupID := d.cache.GuildIDToGroupID(i.GuildID)
+				if err := d.handleChannelsModalSubmit(ctx, logger, i, user, groupID); err != nil {
+					logger.Error("Failed to handle channels modal submit", zap.Error(err))
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "Failed to update channels: " + err.Error(),
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					})
+				} else {
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "✅ Channels configuration updated successfully!",
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					})
+				}
 
 			default:
 				logger.Info("Unhandled modal submit: %v", i.ModalSubmitData().CustomID)
@@ -3456,17 +3523,130 @@ func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, mes
 	return nil, nil
 }
 
+func (d *DiscordAppBot) createUserErrorEmbed(userID, discordID, message string, matchPresence *EvrMatchPresence, lobbyParams *LobbySessionParameters, serverInfo *GameServerPresence) []*discordgo.MessageEmbed {
+	embeds := []*discordgo.MessageEmbed{}
+	
+	// Main error embed
+	errorEmbed := &discordgo.MessageEmbed{
+		Title:       "User Error",
+		Description: message,
+		Color:       0xFF0000, // Red color for errors
+		Timestamp:   time.Now().Format(time.RFC3339),
+		Fields:      []*discordgo.MessageEmbedField{},
+	}
+	
+	// Add user information using Discord ID (never Nakama ID)
+	if discordID != "" {
+		errorEmbed.Fields = append(errorEmbed.Fields, &discordgo.MessageEmbedField{
+			Name:   "User",
+			Value:  fmt.Sprintf("<@%s>", discordID),
+			Inline: true,
+		})
+	}
+	
+	// Always include current match presence if available
+	if matchPresence != nil {
+		presenceValue := "Not in match"
+		if matchPresence.SessionID != uuid.Nil {
+			presenceValue = fmt.Sprintf("Session: %s", matchPresence.SessionID.String()[:8])
+			if matchPresence.DisplayName != "" {
+				presenceValue += fmt.Sprintf("\nDisplay Name: %s", matchPresence.DisplayName)
+			}
+			if matchPresence.PartyID != uuid.Nil {
+				presenceValue += fmt.Sprintf("\nParty: %s", matchPresence.PartyID.String()[:8])
+			}
+		}
+		errorEmbed.Fields = append(errorEmbed.Fields, &discordgo.MessageEmbedField{
+			Name:   "Match Presence",
+			Value:  presenceValue,
+			Inline: true,
+		})
+	}
+	
+	embeds = append(embeds, errorEmbed)
+	
+	// Add lobbyparams embed for lobbyfindsession errors
+	if lobbyParams != nil {
+		lobbyEmbed := &discordgo.MessageEmbed{
+			Title: "Lobby Parameters",
+			Color: 0xFFAA00, // Orange color for additional info
+			Fields: []*discordgo.MessageEmbedField{
+				{
+					Name:   "Mode",
+					Value:  lobbyParams.Mode.String(),
+					Inline: true,
+				},
+				{
+					Name:   "Region",
+					Value:  lobbyParams.RegionCode,
+					Inline: true,
+				},
+			},
+		}
+		
+		if lobbyParams.Level != 0 {
+			lobbyEmbed.Fields = append(lobbyEmbed.Fields, &discordgo.MessageEmbedField{
+				Name:   "Level",
+				Value:  lobbyParams.Level.String(),
+				Inline: true,
+			})
+		}
+		
+		if lobbyParams.PartySize != nil && lobbyParams.PartySize.Load() > 0 {
+			lobbyEmbed.Fields = append(lobbyEmbed.Fields, &discordgo.MessageEmbedField{
+				Name:   "Party Size",
+				Value:  fmt.Sprintf("%d", lobbyParams.PartySize.Load()),
+				Inline: true,
+			})
+		}
+		
+		embeds = append(embeds, lobbyEmbed)
+	}
+	
+	// Add server embed for connection/disconnect errors
+	if serverInfo != nil {
+		serverEmbed := &discordgo.MessageEmbed{
+			Title: "Server Information",
+			Color: 0x0088FF, // Blue color for server info
+			Fields: []*discordgo.MessageEmbedField{
+				{
+					Name:   "Endpoint",
+					Value:  fmt.Sprintf("`%s`", serverInfo.Endpoint.String()),
+					Inline: true,
+				},
+			},
+		}
+		
+		if serverInfo.OperatorID != uuid.Nil {
+			serverEmbed.Fields = append(serverEmbed.Fields, &discordgo.MessageEmbedField{
+				Name:   "Operator",
+				Value:  serverInfo.OperatorID.String(),
+				Inline: true,
+			})
+		}
+		
+		if len(serverInfo.RegionCodes) > 0 {
+			serverEmbed.Fields = append(serverEmbed.Fields, &discordgo.MessageEmbedField{
+				Name:   "Regions",
+				Value:  strings.Join(serverInfo.RegionCodes, ", "),
+				Inline: true,
+			})
+		}
+		
+		embeds = append(embeds, serverEmbed)
+	}
+	
+	return embeds
+}
+
 func (d *DiscordAppBot) LogUserErrorMessage(ctx context.Context, groupID string, message string, replaceMentions bool) (*discordgo.Message, error) {
+	return d.LogUserErrorMessageWithContext(ctx, groupID, message, "", nil, nil, nil, replaceMentions)
+}
+
+// LogUserErrorMessageWithContext sends an error message with optional context data as embeds
+func (d *DiscordAppBot) LogUserErrorMessageWithContext(ctx context.Context, groupID string, message string, userID string, matchPresence *EvrMatchPresence, lobbyParams *LobbySessionParameters, serverInfo *GameServerPresence, replaceMentions bool) (*discordgo.Message, error) {
 	if d == nil {
 		return nil, fmt.Errorf("discord session is not initialized")
-	}
-	// replace all <@uuid> mentions with <@discordID>
-	if replaceMentions {
-		message = d.cache.ReplaceMentions(message)
-	}
-
-	if err := d.LogServiceUserErrorMessage(message); err != nil {
-		return nil, err
 	}
 
 	gg := d.guildGroupRegistry.Get(groupID)
@@ -3474,9 +3654,33 @@ func (d *DiscordAppBot) LogUserErrorMessage(ctx context.Context, groupID string,
 		return nil, fmt.Errorf("group not found")
 	}
 
+	// Get Discord ID if we have a userID
+	discordID := ""
+	if userID != "" {
+		discordID = d.cache.UserIDToDiscordID(userID)
+	}
+
+	// Create embeds with context
+	embeds := d.createUserErrorEmbed(userID, discordID, message, matchPresence, lobbyParams, serverInfo)
+
+	// Replace mentions in message if needed
+	if replaceMentions {
+		for _, embed := range embeds {
+			if embed.Description != "" {
+				embed.Description = d.cache.ReplaceMentions(embed.Description)
+			}
+		}
+	}
+
+	// Log to service error channel
+	if err := d.LogServiceUserErrorMessage(message); err != nil {
+		return nil, err
+	}
+
+	// Send to guild error channel as embeds
 	if gg.ErrorChannelID != "" {
 		return d.dg.ChannelMessageSendComplex(gg.ErrorChannelID, &discordgo.MessageSend{
-			Content:         message,
+			Embeds:          embeds,
 			AllowedMentions: &discordgo.MessageAllowedMentions{},
 		})
 	}
@@ -3484,12 +3688,30 @@ func (d *DiscordAppBot) LogUserErrorMessage(ctx context.Context, groupID string,
 	return nil, nil
 }
 
-func (d *DiscordAppBot) SendErrorToUser(userID string, userErr error) error {
+// LogLobbyFindSessionError logs a lobby find session error with lobby parameters
+func (d *DiscordAppBot) LogLobbyFindSessionError(ctx context.Context, groupID string, message string, userID string, matchPresence *EvrMatchPresence, lobbyParams *LobbySessionParameters) (*discordgo.Message, error) {
+	return d.LogUserErrorMessageWithContext(ctx, groupID, message, userID, matchPresence, lobbyParams, nil, true)
+}
 
+// LogServerConnectionError logs a server connection/disconnect error with server information  
+func (d *DiscordAppBot) LogServerConnectionError(ctx context.Context, groupID string, message string, userID string, matchPresence *EvrMatchPresence, serverInfo *GameServerPresence) (*discordgo.Message, error) {
+	return d.LogUserErrorMessageWithContext(ctx, groupID, message, userID, matchPresence, nil, serverInfo, true)
+}
+
+// LogDisplayNameError logs a display name related error
+func (d *DiscordAppBot) LogDisplayNameError(ctx context.Context, groupID string, message string, userID string, matchPresence *EvrMatchPresence) (*discordgo.Message, error) {
+	return d.LogUserErrorMessageWithContext(ctx, groupID, message, userID, matchPresence, nil, nil, true)
+}
+
+func (d *DiscordAppBot) SendErrorToUser(userID string, userErr error) error {
+	return d.SendErrorToUserWithContext(userID, userErr, nil, nil, nil)
+}
+
+// SendErrorToUserWithContext sends an error message directly to a user with optional context
+func (d *DiscordAppBot) SendErrorToUserWithContext(userID string, userErr error, matchPresence *EvrMatchPresence, lobbyParams *LobbySessionParameters, serverInfo *GameServerPresence) error {
 	if userErr == nil {
 		return nil
 	}
-	var err error
 	if d.dg == nil {
 		return fmt.Errorf("discord session is not initialized")
 	}
@@ -3499,12 +3721,17 @@ func (d *DiscordAppBot) SendErrorToUser(userID string, userErr error) error {
 		return fmt.Errorf("discordID not found for user %s", userID)
 	}
 
-	_, err = d.dg.UserChannelCreate(discordID)
+	channel, err := d.dg.UserChannelCreate(discordID)
 	if err != nil {
-		return fmt.Errorf("failed to send message: %w", err)
+		return fmt.Errorf("failed to create user channel: %w", err)
 	}
 
-	_, err = d.dg.ChannelMessageSend(discordID, userErr.Error())
+	// Create embeds for the error
+	embeds := d.createUserErrorEmbed(userID, discordID, userErr.Error(), matchPresence, lobbyParams, serverInfo)
+
+	_, err = d.dg.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
+		Embeds: embeds,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
@@ -3535,4 +3762,52 @@ func IsDiscordErrorCode(err error, code int) bool {
 		return true
 	}
 	return false
+}
+
+// handleChannelsModalSubmit handles the submission of the channels configuration modal
+func (d *DiscordAppBot) handleChannelsModalSubmit(ctx context.Context, logger runtime.Logger, i *discordgo.InteractionCreate, user *discordgo.User, groupID string) error {
+	data := i.ModalSubmitData()
+
+	// Extract channel IDs from modal inputs
+	commandChannelID := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+	auditChannelID := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+	errorChannelID := data.Components[2].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+
+	// Clean up channel IDs (remove extra spaces and validate format)
+	commandChannelID = strings.TrimSpace(commandChannelID)
+	auditChannelID = strings.TrimSpace(auditChannelID)
+	errorChannelID = strings.TrimSpace(errorChannelID)
+
+	// Load current metadata
+	metadata, err := GroupMetadataLoad(ctx, d.db, groupID)
+	if err != nil {
+		return fmt.Errorf("failed to load group metadata: %w", err)
+	}
+
+	// Update the channel settings
+	metadata.CommandChannelID = commandChannelID
+	metadata.AuditChannelID = auditChannelID
+	metadata.ErrorChannelID = errorChannelID
+
+	// Save the updated metadata
+	if err := GroupMetadataSave(ctx, d.db, groupID, metadata); err != nil {
+		return fmt.Errorf("failed to store group metadata: %w", err)
+	}
+
+	// Update the guild group registry
+	gg := d.guildGroupRegistry.Get(groupID)
+	if gg != nil {
+		gg.CommandChannelID = commandChannelID
+		gg.AuditChannelID = auditChannelID
+		gg.ErrorChannelID = errorChannelID
+	}
+
+	logger.Info("Updated channel configuration", 
+		zap.String("guild_id", i.GuildID),
+		zap.String("user_id", user.ID),
+		zap.String("command_channel", commandChannelID),
+		zap.String("audit_channel", auditChannelID),
+		zap.String("error_channel", errorChannelID))
+
+	return nil
 }
