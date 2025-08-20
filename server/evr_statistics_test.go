@@ -156,14 +156,21 @@ func TestFloat64ToScore(t *testing.T) {
 			input:         1e16,
 			expectedScore: 0,
 			expectedSub:   0,
-			expectedError: fmt.Errorf("value out of range: %f", 1e16),
+			expectedError: fmt.Errorf("value out of range: %f (valid range: %f to %f)", 1e16, -(1e15-1), 1e15),
 		},
 		{
 			name:          "too large negative",
-			input:         -1e16,
+			input:         -1e15,  // Now invalid - was causing the issue
 			expectedScore: 0,
 			expectedSub:   0,
-			expectedError: fmt.Errorf("value out of range: %f", -1e16),
+			expectedError: fmt.Errorf("value out of range: %f (valid range: %f to %f)", -1e15, -(1e15-1), 1e15),
+		},
+		{
+			name:          "maximum valid negative",
+			input:         -(1e15 - 1),  // This should work
+			expectedScore: 0,
+			expectedSub:   0,
+			expectedError: nil,
 		},
 	}
 
