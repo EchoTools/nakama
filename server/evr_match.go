@@ -94,6 +94,8 @@ type MatchSettings struct {
 	TeamSize            int
 	StartTime           time.Time
 	SpawnedBy           string
+	Owner               string                // User ID of the match owner (has same permissions as SpawnedBy)
+	Classification      SessionClassification // Priority classification for purging logic
 	GroupID             uuid.UUID
 	Description         string
 	RequiredFeatures    []string
