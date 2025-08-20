@@ -61,7 +61,6 @@ func (s *IPInfoCache) Get(ctx context.Context, ip string) (IPInfo, error) {
 }
 
 func (s *IPInfoCache) IsVPN(ip string) bool {
-
 	result, err := s.Get(s.ctx, ip)
 	if err != nil {
 		s.logger.Warn("Failed to get IPQS details, failing open.", zap.Error(err))
