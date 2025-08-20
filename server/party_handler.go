@@ -249,9 +249,10 @@ func (p *PartyHandler) Join(presences []*Presence) {
 		}
 	}
 
-	members := p.members.List()
-
 	p.Unlock()
+
+	// Get sorted member list with leader first
+	members := p.ListSorted()
 
 	memberUserPresences := make([]*rtapi.UserPresence, 0, len(members))
 	for _, member := range members {
@@ -664,4 +665,39 @@ func (p *PartyHandler) DataSend(sessionID, node string, opCode int64, data []byt
 	p.router.SendToPresenceIDs(p.logger, recipients, envelope, true)
 
 	return nil
+}
+
+// ListSorted returns the party members list with the leader first.
+// This ensures the party state is self-describing and the leader can be identified
+// by position even if RT messages are missed.
+func (p *PartyHandler) ListSorted() []*PartyPresenceListItem {
+	p.RLock()
+	defer p.RUnlock()
+	
+	members := p.members.List()
+	if len(members) <= 1 || p.leader == nil {
+		// No sorting needed if there's one or fewer members, or no leader
+		return members
+	}
+	
+	// Create a copy to avoid modifying the original slice
+	sorted := make([]*PartyPresenceListItem, len(members))
+	copy(sorted, members)
+	
+	// Find the leader and move it to the front
+	leaderSessionID := p.leader.PresenceID.SessionID
+	leaderNode := p.leader.PresenceID.Node
+	
+	for i, member := range sorted {
+		if member.PresenceID.SessionID == leaderSessionID && member.PresenceID.Node == leaderNode {
+			// Move leader to front if not already there
+			if i != 0 {
+				// Swap the leader to the front
+				sorted[0], sorted[i] = sorted[i], sorted[0]
+			}
+			break
+		}
+	}
+	
+	return sorted
 }
