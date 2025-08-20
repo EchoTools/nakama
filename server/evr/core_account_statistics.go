@@ -294,10 +294,20 @@ func (s *ArenaStatistics) CalculateFields() {
 
 	gamesPlayed := 0.0
 	if s.ArenaWins != nil {
-		gamesPlayed += s.ArenaWins.GetValue()
+		winsValue := s.ArenaWins.GetValue()
+		// Validate wins value to prevent corrupted statistics
+		if winsValue < 0 || winsValue > 1e6 {
+			winsValue = 0
+		}
+		gamesPlayed += winsValue
 	}
 	if s.ArenaLosses != nil {
-		gamesPlayed += s.ArenaLosses.GetValue()
+		lossesValue := s.ArenaLosses.GetValue()
+		// Validate losses value to prevent corrupted statistics
+		if lossesValue < 0 || lossesValue > 1e6 {
+			lossesValue = 0
+		}
+		gamesPlayed += lossesValue
 	}
 
 	s.GamesPlayed = &StatisticValue{
@@ -329,99 +339,169 @@ func (s *ArenaStatistics) CalculateFields() {
 		}
 
 		if s.ArenaWins != nil {
+			// Validate ArenaWins value to prevent corrupted statistics
+			winsValue := s.ArenaWins.GetValue()
+			if winsValue < 0 || winsValue > gamesPlayed || winsValue > 1e6 {
+				winsValue = 0
+			}
 			s.ArenaWinPercentage = &StatisticValue{
-				Value: s.ArenaWins.GetValue() / gamesPlayed * 100,
+				Value: winsValue / gamesPlayed * 100,
 				Count: 1,
 			}
 		}
 
 		if s.Assists != nil {
+			// Validate Assists value to prevent corrupted statistics
+			assistsValue := s.Assists.GetValue()
+			if assistsValue < 0 || assistsValue > 1e6 {
+				assistsValue = 0
+			}
 			s.AssistsPerGame = &StatisticValue{
-				Value: s.Assists.GetValue() / gamesPlayed,
+				Value: assistsValue / gamesPlayed,
 				Count: 1,
 			}
 		}
 
 		if s.Points != nil {
+			// Validate Points value to prevent corrupted statistics
+			pointsValue := s.Points.GetValue()
+			if pointsValue < 0 || pointsValue > 1e9 {
+				pointsValue = 0
+			}
 			s.AveragePointsPerGame = &StatisticValue{
-				Value: float64(s.Points.GetValue()) / gamesPlayed,
+				Value: pointsValue / gamesPlayed,
 				Count: 1,
 			}
 		}
 
 		if s.PossessionTime != nil {
+			// Validate PossessionTime value to prevent corrupted statistics
+			possessionValue := s.PossessionTime.GetValue()
+			if possessionValue < 0 || possessionValue > 1e8 {
+				possessionValue = 0
+			}
 			s.AveragePossessionTimePerGame = &StatisticValue{
-				Value: s.PossessionTime.GetValue() / gamesPlayed,
+				Value: possessionValue / gamesPlayed,
 				Count: 1,
 			}
 		}
 
 		if s.TopSpeedsTotal != nil {
+			// Validate TopSpeedsTotal value to prevent corrupted statistics
+			topSpeedsValue := s.TopSpeedsTotal.GetValue()
+			if topSpeedsValue < 0 || topSpeedsValue > 1e8 {
+				topSpeedsValue = 0
+			}
 			s.AverageTopSpeedPerGame = &StatisticValue{
-				Value: s.TopSpeedsTotal.GetValue() / gamesPlayed,
+				Value: topSpeedsValue / gamesPlayed,
 				Count: 1,
 			}
 		}
 
 		if s.Saves != nil && s.ShotsOnGoalAgainst != nil {
-			if s.ShotsOnGoalAgainst.GetValue() > 0 {
+			savesValue := s.Saves.GetValue()
+			shotsAgainstValue := s.ShotsOnGoalAgainst.GetValue()
+			// Validate values to prevent corrupted statistics
+			if savesValue >= 0 && savesValue <= shotsAgainstValue && 
+			   savesValue <= 1e6 && shotsAgainstValue > 0 && shotsAgainstValue <= 1e6 {
 				s.GoalSavePercentage = &StatisticValue{
-					Value: s.Saves.GetValue() / s.ShotsOnGoalAgainst.GetValue() * 100,
+					Value: savesValue / shotsAgainstValue * 100,
 					Count: 1,
 				}
 			}
 		}
 
 		if s.Goals != nil && s.ShotsOnGoal != nil {
-			if s.ShotsOnGoal.GetValue() > 0 {
+			goalsValue := s.Goals.GetValue()
+			shotsValue := s.ShotsOnGoal.GetValue()
+			// Validate values to prevent corrupted statistics
+			if goalsValue >= 0 && goalsValue <= shotsValue && 
+			   goalsValue <= 1e6 && shotsValue > 0 && shotsValue <= 1e6 {
 				s.GoalScorePercentage = &StatisticValue{
-					Value: s.Goals.GetValue() / s.ShotsOnGoal.GetValue() * 100,
+					Value: goalsValue / shotsValue * 100,
 					Count: 1,
 				}
 			}
-
 		}
 
 		if s.Goals != nil {
+			// Validate Goals value to prevent corrupted statistics
+			goalsValue := s.Goals.GetValue()
+			if goalsValue < 0 || goalsValue > 1e6 {
+				goalsValue = 0
+			}
 			s.GoalsPerGame = &StatisticValue{
-				Value: s.Goals.GetValue() / gamesPlayed,
+				Value: goalsValue / gamesPlayed,
 				Count: 1,
 			}
 		}
 
 		if s.Saves != nil {
+			// Validate Saves value to prevent corrupted statistics
+			savesValue := s.Saves.GetValue()
+			if savesValue < 0 || savesValue > 1e6 {
+				savesValue = 0
+			}
 			s.SavesPerGame = &StatisticValue{
-				Value: s.Saves.GetValue() / gamesPlayed,
+				Value: savesValue / gamesPlayed,
 				Count: 1,
 			}
 		}
 
 		if s.PunchesReceived != nil && s.PunchesReceived.GetValue() > 0 {
-			if s.Stuns != nil {
-				s.StunPercentage = &StatisticValue{
-					Value: s.Stuns.GetValue() / s.PunchesReceived.GetValue() * 100,
-					Count: 1,
+			punchesValue := s.PunchesReceived.GetValue()
+			// Validate PunchesReceived value to prevent corrupted statistics
+			if punchesValue < 0 || punchesValue > 1e6 {
+				// Skip percentage calculations if invalid
+			} else {
+				if s.Stuns != nil {
+					stunsValue := s.Stuns.GetValue()
+					// Validate Stuns value to prevent corrupted statistics
+					if stunsValue >= 0 && stunsValue <= punchesValue && stunsValue <= 1e6 {
+						s.StunPercentage = &StatisticValue{
+							Value: stunsValue / punchesValue * 100,
+							Count: 1,
+						}
+					}
 				}
-			}
-			if s.Blocks != nil {
-				s.BlockPercentage = &StatisticValue{
-					Value: s.Blocks.GetValue() / s.PunchesReceived.GetValue() * 100,
-					Count: 1,
+				if s.Blocks != nil {
+					blocksValue := s.Blocks.GetValue()
+					// Validate Blocks value to prevent corrupted statistics
+					if blocksValue >= 0 && blocksValue <= punchesValue && blocksValue <= 1e6 {
+						s.BlockPercentage = &StatisticValue{
+							Value: blocksValue / punchesValue * 100,
+							Count: 1,
+						}
+					}
 				}
 			}
 		}
 
 		if s.Stuns != nil {
+			// Validate Stuns value to prevent corrupted statistics
+			stunsValue := s.Stuns.GetValue()
+			if stunsValue < 0 || stunsValue > 1e6 {
+				stunsValue = 0
+			}
 			s.StunsPerGame = &StatisticValue{
-				Value: s.Stuns.GetValue() / gamesPlayed,
+				Value: stunsValue / gamesPlayed,
 				Count: 1,
 			}
 		}
 
 		if s.SkillRatingMu != nil && s.SkillRatingSigma != nil {
+			// Validate skill rating values to prevent corrupted statistics
+			mu := s.SkillRatingMu.GetValue()
+			sigma := s.SkillRatingSigma.GetValue()
+			if mu < 0 || mu > 100 || sigma < 0 || sigma > 100 {
+				// Use default skill rating values if corrupted
+				mu = 25.0
+				sigma = 8.333
+			}
+			
 			r := types.Rating{
-				Sigma: s.SkillRatingSigma.GetValue(),
-				Mu:    s.SkillRatingMu.GetValue(),
+				Sigma: sigma,
+				Mu:    mu,
 				Z:     3,
 			}
 
@@ -476,11 +556,21 @@ type CombatStatistics struct {
 func (s *CombatStatistics) CalculateFields() {
 	gamesPlayed := 0
 	if s.CombatWins != nil {
-		gamesPlayed += int(s.CombatWins.GetValue())
+		winsValue := s.CombatWins.GetValue()
+		// Validate wins value to prevent corrupted statistics
+		if winsValue < 0 || winsValue > 1e6 {
+			winsValue = 0
+		}
+		gamesPlayed += int(winsValue)
 	}
 
 	if s.CombatLosses != nil {
-		gamesPlayed += int(s.CombatLosses.GetValue())
+		lossesValue := s.CombatLosses.GetValue()
+		// Validate losses value to prevent corrupted statistics
+		if lossesValue < 0 || lossesValue > 1e6 {
+			lossesValue = 0
+		}
+		gamesPlayed += int(lossesValue)
 	}
 
 	s.GamesPlayed = &StatisticValue{
@@ -489,25 +579,58 @@ func (s *CombatStatistics) CalculateFields() {
 	}
 
 	if s.CombatWins != nil && s.GamesPlayed != nil && s.GamesPlayed.Value != 0 {
-		s.CombatWinPercentage.Value = float64(s.CombatWins.Value) / float64(s.GamesPlayed.Value) * 100
+		// Validate CombatWins value to prevent corrupted statistics
+		winsValue := s.CombatWins.GetValue()
+		if winsValue < 0 || winsValue > float64(gamesPlayed) || winsValue > 1e6 {
+			winsValue = 0
+		}
+		s.CombatWinPercentage.Value = winsValue / float64(s.GamesPlayed.Value) * 100
 	}
 
 	if s.CombatAssists != nil && s.GamesPlayed != nil && s.GamesPlayed.Value != 0 {
-		s.CombatAverageEliminationDeathRatio.Value = float64(s.CombatAssists.Value) / float64(s.GamesPlayed.Value)
+		// Validate CombatAssists value to prevent corrupted statistics
+		assistsValue := s.CombatAssists.GetValue()
+		if assistsValue < 0 || assistsValue > 1e6 {
+			assistsValue = 0
+		}
+		s.CombatAverageEliminationDeathRatio.Value = assistsValue / float64(s.GamesPlayed.Value)
 	}
 
 	if s.CombatPayloadWins != nil && s.CombatPayloadGamesPlayed != nil && s.CombatPayloadGamesPlayed.Value != 0 {
-		s.CombatPayloadWinPercentage.Value = float64(s.CombatPayloadWins.Value) / float64(s.CombatPayloadGamesPlayed.Value) * 100
+		// Validate payload values to prevent corrupted statistics
+		payloadWinsValue := s.CombatPayloadWins.GetValue()
+		payloadGamesValue := s.CombatPayloadGamesPlayed.GetValue()
+		if payloadWinsValue < 0 || payloadWinsValue > payloadGamesValue || payloadWinsValue > 1e6 ||
+		   payloadGamesValue < 0 || payloadGamesValue > 1e6 {
+			payloadWinsValue = 0
+		}
+		s.CombatPayloadWinPercentage.Value = payloadWinsValue / payloadGamesValue * 100
 	}
 
 	if s.CombatPointCaptureWins != nil && s.CombatPointCaptureGamesPlayed != nil && s.CombatPointCaptureGamesPlayed.Value != 0 {
-		s.CombatPointCaptureWinPercentage.Value = float64(s.CombatPointCaptureWins.Value) / float64(s.CombatPointCaptureGamesPlayed.Value) * 100
+		// Validate point capture values to prevent corrupted statistics
+		captureWinsValue := s.CombatPointCaptureWins.GetValue()
+		captureGamesValue := s.CombatPointCaptureGamesPlayed.GetValue()
+		if captureWinsValue < 0 || captureWinsValue > captureGamesValue || captureWinsValue > 1e6 ||
+		   captureGamesValue < 0 || captureGamesValue > 1e6 {
+			captureWinsValue = 0
+		}
+		s.CombatPointCaptureWinPercentage.Value = captureWinsValue / captureGamesValue * 100
 	}
 
 	if s.SkillRatingMu != nil && s.SkillRatingSigma != nil {
+		// Validate skill rating values to prevent corrupted statistics
+		mu := s.SkillRatingMu.GetValue()
+		sigma := s.SkillRatingSigma.GetValue()
+		if mu < 0 || mu > 100 || sigma < 0 || sigma > 100 {
+			// Use default skill rating values if corrupted
+			mu = 25.0
+			sigma = 8.333
+		}
+		
 		r := types.Rating{
-			Sigma: s.SkillRatingSigma.GetValue(),
-			Mu:    s.SkillRatingMu.GetValue(),
+			Sigma: sigma,
+			Mu:    mu,
 			Z:     3,
 		}
 
