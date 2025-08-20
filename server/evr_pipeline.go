@@ -308,8 +308,8 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		switch msg := in.(type) {
 		case *evr.BroadcasterRegistrationRequest: // Legacy message
 			envelope = &rtapi.Envelope{
-				Message: &rtapi.Envelope_GameServerRegistration{
-					GameServerRegistration: &rtapi.GameServerRegistrationMessage{
+				Message: &rtapi.Envelope_GameServerRegistrationRequest{
+					GameServerRegistrationRequest: &rtapi.GameServerRegistrationMessage{
 						ServerId:          msg.ServerID,
 						InternalIpAddress: msg.InternalIP.String(),
 						Port:              uint32(msg.Port),
@@ -740,7 +740,7 @@ func (p *EvrPipeline) ProcessProtobufRequest(logger *zap.Logger, session Session
 
 	// Process the request based on its type
 	switch in.Message.(type) {
-	case *rtapi.Envelope_GameServerRegistration:
+	case *rtapi.Envelope_GameServerRegistrationRequest:
 		pipelineFn = p.gameserverRegistrationRequest
 	case *rtapi.Envelope_LobbyEntrantConnected:
 		pipelineFn = p.lobbyEntrantConnected

@@ -109,8 +109,8 @@ func (ti *TelemetryIntegration) HandleMatchEnd(ctx context.Context, matchID stri
 		Players:           players,
 		PerRoundStats:     perRoundStats,
 		DurationSeconds:   duration,
-		MinPing:           minPing,
-		MaxPing:           maxPing,
+		MinPing:           int(minPing),
+		MaxPing:           int(maxPing),
 		AvgPing:           avgPing,
 		FinalRoundScores:  finalScores,
 		EvrMatchPresences: nil, // Would be populated with actual presence data

@@ -24,6 +24,8 @@ const (
 	EventMatchData              = "match_data"
 	matchDataDatabaseName       = "nevr"
 	matchDataCollectionName     = "match_data"
+	eventDispatchTimeout        = 30 * time.Second
+	redisQueueBatchSize         = 100
 )
 
 type Event interface {
