@@ -228,7 +228,7 @@ func (sm *SessionsChannelManager) createSessionEmbed(label *MatchLabel, guildGro
 	playerCount := len(label.Players)
 	maxPlayers := 8 // Default for most game modes
 	if label.Mode == evr.ModeArenaPublic || label.Mode == evr.ModeCombatPublic {
-		maxPlayers = MaxPlayersArenaCombatPublic
+		maxPlayers = 8 // Arena and Combat support 8 players
 	}
 	
 	// Determine server location (approximate)
