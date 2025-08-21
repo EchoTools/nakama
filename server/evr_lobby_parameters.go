@@ -160,58 +160,33 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		return nil, fmt.Errorf("failed to load user matchmaking settings: %w", err)
 	}
 
-	if userSettings.NextMatchDiscordID != "" {
-		// Get the host's user ID
-		hostUserIDStr := p.discordCache.DiscordIDToUserID(userSettings.NextMatchDiscordID)
-
-		// If the host userID exists, and is in a match, set the next match ID to the host's match ID
-		if hostUserID := uuid.FromStringOrNil(hostUserIDStr); !hostUserID.IsNil() {
-
-			// Get the MatchIDs for the user from it's presence
-			presences, _ := p.nk.StreamUserList(StreamModeService, hostUserID.String(), "", StreamLabelMatchService, false, true)
-			for _, presence := range presences {
-				matchID := MatchIDFromStringOrNil(presence.GetStatus())
-				if !matchID.IsNil() {
-					userSettings.NextMatchID = matchID
-				}
-			}
-		}
-	}
-
 	entrantRole := request.GetEntrantRole(0)
 
+	// Use cached next match information instead of making fresh DB calls
 	nextMatchID := MatchID{}
+	if nextMatchInfo := sessionParams.GetNextMatchInfo(); nextMatchInfo != nil {
+		mode = nextMatchInfo.Mode
+		nextMatchID = nextMatchInfo.MatchID
 
-	if !userSettings.NextMatchID.IsNil() {
-
-		if label, err := MatchLabelByID(ctx, nk, userSettings.NextMatchID); err != nil {
-			logger.Warn("Next match not found", zap.String("mid", userSettings.NextMatchID.String()))
-		} else {
-			mode = label.Mode
-
-			// Match exists, set the next match ID and role
-			nextMatchID = userSettings.NextMatchID
-
-			if userSettings.NextMatchRole != "" {
-				switch userSettings.NextMatchRole {
-				case "orange":
-					entrantRole = evr.TeamOrange
-				case "blue":
-					entrantRole = evr.TeamBlue
-				case "spectator":
-					entrantRole = evr.TeamSpectator
-				case "moderator":
-					entrantRole = evr.TeamModerator
-				case "any":
-					entrantRole = evr.TeamUnassigned
-				}
+		if nextMatchInfo.Role != "" {
+			switch nextMatchInfo.Role {
+			case "orange":
+				entrantRole = evr.TeamOrange
+			case "blue":
+				entrantRole = evr.TeamBlue
+			case "moderator":
+				entrantRole = evr.TeamModerator
+			case "spectator":
+				entrantRole = evr.TeamSpectator
+			case "any":
+				entrantRole = evr.TeamUnassigned
 			}
-
-			userSettings.NextMatchRole = ""
-
 		}
 
-		// Always clear the settings
+		// Clear the next match info after using it
+		sessionParams.SetNextMatchInfo(nil)
+		
+		// Clear the settings in background 
 		go func() {
 			userSettings.NextMatchID = MatchID{}
 			userSettings.NextMatchRole = ""
@@ -222,15 +197,9 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		}()
 	}
 
-	if _, isJoinRequest := request.(*evr.LobbyJoinSessionRequest); isJoinRequest {
-
-		// Set mode based on the match to join.
-		label, err := MatchLabelByID(ctx, nk, nextMatchID)
-		if err != nil {
-			logger.Warn("Failed to load next match", zap.Error(err))
-		} else {
-			mode = label.Mode
-		}
+	if _, isJoinRequest := request.(*evr.LobbyJoinSessionRequest); isJoinRequest && !nextMatchID.IsNil() {
+		// For join requests, we already have the match info cached, no need for additional DB call
+		// The mode is already set from cached next match info above
 	}
 
 	matchmakingQueryAddons := []string{
@@ -248,34 +217,8 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		userSettings.CreateQueryAddon,
 	}
 
-	// Load friends to get blocked (ghosted) players
-	cursor := ""
-	friends := make([]*api.Friend, 0)
-
-	for {
-
-		var users []*api.Friend
-		users, cursor, err = nk.FriendsList(ctx, session.UserID().String(), 100, nil, cursor)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list friends: %w", err)
-		}
-
-		friends = append(friends, users...)
-
-		if cursor == "" {
-			break
-		}
-	}
-
-	// Add blocked players who are online to the Matchmaking Query Addon
-	blockedIDs := make([]string, 0)
-	for _, f := range friends {
-		if api.Friend_State(f.GetState().Value) == api.Friend_BLOCKED {
-			if f.GetUser().GetOnline() {
-				blockedIDs = append(blockedIDs, f.GetUser().GetId())
-			}
-		}
-	}
+	// Use cached blocked player IDs instead of loading friends list
+	blockedIDs := sessionParams.GetBlockedPlayerIDs()
 
 	var lobbyGroupName string
 	var partyID uuid.UUID
@@ -328,21 +271,26 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		if userSettings.StaticBaseRankPercentile > 0 {
 			rankPercentile = userSettings.StaticBaseRankPercentile
 		} else {
-			rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.nk, userID, groupIDStr, mmMode)
-			if err != nil {
-				return nil, fmt.Errorf("failed to calculate smoothed player rank percentile: %w", err)
+			// Use cached rank percentile instead of calculating fresh
+			rankPercentile = sessionParams.GetRankPercentile(groupIDStr, mmMode)
+			if rankPercentile == 0.0 {
+				// Fallback to calculation if not cached (shouldn't normally happen)
+				rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.nk, userID, groupIDStr, mmMode)
+				if err != nil {
+					return nil, fmt.Errorf("failed to calculate smoothed player rank percentile: %w", err)
+				}
+				// Cache the calculated value
+				sessionParams.SetRankPercentile(groupIDStr, mmMode, rankPercentile)
 			}
 
+			// Store the rank percentile (this might be needed for leaderboards)
 			if err := MatchmakingRankPercentileStore(ctx, p.nk, userID, session.Username(), groupIDStr, mmMode, rankPercentile); err != nil {
 				logger.Warn("Failed to store user rank percentile", zap.Error(err))
 			}
 		}
 
-		matchmakingRating, err = MatchmakingRatingLoad(ctx, p.nk, userID, groupIDStr, mmMode)
-		if err != nil {
-			logger.Warn("Failed to load matchmaking rating", zap.String("group_id", groupIDStr), zap.String("mode", mmMode.String()), zap.Error(err))
-			matchmakingRating = NewDefaultRating()
-		}
+		// Use cached matchmaking rating instead of loading fresh
+		matchmakingRating = sessionParams.GetMatchmakingRating(groupIDStr, mmMode)
 
 		matchmakingOrdinal = rating.Ordinal(matchmakingRating)
 	}

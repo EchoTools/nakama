@@ -4,9 +4,25 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/intinig/go-openskill/types"
 	"go.uber.org/atomic"
 )
+
+type (
+	ctxSessionParametersKey struct{}
+)
+
+// NextMatchInfo holds cached information about a user's next match
+type NextMatchInfo struct {
+	MatchID     MatchID
+	Role        string
+	Mode        evr.Symbol
+	DiscordID   string
+	HostUserID  string
+}
 
 type SessionParameters struct {
 	node          string     // The node name
@@ -50,6 +66,13 @@ type SessionParameters struct {
 	isIGPOpen                    *atomic.Bool                     // The user has IGPU open
 	gameModeSuspensionsByGroupID ActiveGuildEnforcements          // The active suspension records
 	ignoreDisabledAlternates     bool                             // Ignore disabled
+
+	// Cached lobby session data to avoid repeated DB/storage calls
+	friendsList                  []*api.Friend                                  // Cached friends list loaded at session init
+	blockedPlayerIDs             []string                                       // Cached list of blocked player IDs from friends
+	matchmakingRatingsByGroup    map[string]map[evr.Symbol]*atomic.Pointer[types.Rating] // Cached matchmaking ratings by group and mode
+	rankPercentilesByGroup       map[string]map[evr.Symbol]*atomic.Float64      // Cached rank percentiles by group and mode
+	nextMatchInfo                *NextMatchInfo                                 // Cached next match information
 }
 
 func (s SessionParameters) UserID() string {
@@ -126,6 +149,75 @@ func (s *SessionParameters) GeoHash() string {
 		return ""
 	}
 	return s.ipInfo.GeoHash(2)
+}
+
+func (s *SessionParameters) GetBlockedPlayerIDs() []string {
+	if s.blockedPlayerIDs == nil {
+		return []string{}
+	}
+	return s.blockedPlayerIDs
+}
+
+func (s *SessionParameters) GetMatchmakingRating(groupID string, mode evr.Symbol) types.Rating {
+	if s.matchmakingRatingsByGroup == nil {
+		return NewDefaultRating()
+	}
+	if groupRatings, ok := s.matchmakingRatingsByGroup[groupID]; ok {
+		if ratingPtr, ok := groupRatings[mode]; ok && ratingPtr != nil {
+			if rating := ratingPtr.Load(); rating != nil {
+				return *rating
+			}
+		}
+	}
+	return NewDefaultRating()
+}
+
+func (s *SessionParameters) SetMatchmakingRating(groupID string, mode evr.Symbol, rating types.Rating) {
+	if s.matchmakingRatingsByGroup == nil {
+		s.matchmakingRatingsByGroup = make(map[string]map[evr.Symbol]*atomic.Pointer[types.Rating])
+	}
+	if s.matchmakingRatingsByGroup[groupID] == nil {
+		s.matchmakingRatingsByGroup[groupID] = make(map[evr.Symbol]*atomic.Pointer[types.Rating])
+	}
+	if s.matchmakingRatingsByGroup[groupID][mode] == nil {
+		s.matchmakingRatingsByGroup[groupID][mode] = atomic.NewPointer(&rating)
+	} else {
+		s.matchmakingRatingsByGroup[groupID][mode].Store(&rating)
+	}
+}
+
+func (s *SessionParameters) GetRankPercentile(groupID string, mode evr.Symbol) float64 {
+	if s.rankPercentilesByGroup == nil {
+		return 0.0
+	}
+	if groupPercentiles, ok := s.rankPercentilesByGroup[groupID]; ok {
+		if percentilePtr, ok := groupPercentiles[mode]; ok && percentilePtr != nil {
+			return percentilePtr.Load()
+		}
+	}
+	return 0.0
+}
+
+func (s *SessionParameters) SetRankPercentile(groupID string, mode evr.Symbol, percentile float64) {
+	if s.rankPercentilesByGroup == nil {
+		s.rankPercentilesByGroup = make(map[string]map[evr.Symbol]*atomic.Float64)
+	}
+	if s.rankPercentilesByGroup[groupID] == nil {
+		s.rankPercentilesByGroup[groupID] = make(map[evr.Symbol]*atomic.Float64)
+	}
+	if s.rankPercentilesByGroup[groupID][mode] == nil {
+		s.rankPercentilesByGroup[groupID][mode] = atomic.NewFloat64(percentile)
+	} else {
+		s.rankPercentilesByGroup[groupID][mode].Store(percentile)
+	}
+}
+
+func (s *SessionParameters) GetNextMatchInfo() *NextMatchInfo {
+	return s.nextMatchInfo
+}
+
+func (s *SessionParameters) SetNextMatchInfo(info *NextMatchInfo) {
+	s.nextMatchInfo = info
 }
 
 func StoreParams(ctx context.Context, params *SessionParameters) {

@@ -756,6 +756,24 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		params.matchmakingSettings = &settings
 	}
 
+	// Load and cache friends list to avoid repeated DB calls during lobby requests
+	if err := p.loadAndCacheFriendsData(ctx, logger, session, params); err != nil {
+		logger.Warn("Failed to load and cache friends data", zap.Error(err))
+		return fmt.Errorf("failed to load and cache friends data: %w", err)
+	}
+
+	// Load and cache matchmaking ratings and rank percentiles for all groups
+	if err := p.loadAndCacheMatchmakingData(ctx, logger, session, params); err != nil {
+		logger.Warn("Failed to load and cache matchmaking data", zap.Error(err))
+		return fmt.Errorf("failed to load and cache matchmaking data: %w", err)
+	}
+
+	// Load and cache next match information
+	if err := p.loadAndCacheNextMatchInfo(ctx, logger, session, params); err != nil {
+		logger.Warn("Failed to load and cache next match info", zap.Error(err))
+		// Don't fail initialization for next match issues, just log it
+	}
+
 	if !params.profile.IgnoreBrokenCosmetics {
 		if u := params.profile.FixBrokenCosmetics(); u {
 			metadataUpdated = true
@@ -1363,4 +1381,147 @@ func MatchIDsByEvrID(ctx context.Context, nk runtime.NakamaModule, evrID evr.Evr
 		}
 	}
 	return matchIDs, nil
+}
+
+// loadAndCacheFriendsData loads and caches the friends list to avoid repeated DB calls during lobby requests
+func (p *EvrPipeline) loadAndCacheFriendsData(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) error {
+	// Load friends to get blocked (ghosted) players
+	cursor := ""
+	friends := make([]*api.Friend, 0)
+
+	for {
+		var users []*api.Friend
+		var err error
+		users, cursor, err = p.nk.FriendsList(ctx, session.UserID().String(), 100, nil, cursor)
+		if err != nil {
+			return fmt.Errorf("failed to list friends: %w", err)
+		}
+
+		friends = append(friends, users...)
+
+		if cursor == "" {
+			break
+		}
+	}
+
+	// Cache the friends list
+	params.friendsList = friends
+
+	// Extract blocked players who are online for matchmaking
+	blockedIDs := make([]string, 0)
+	for _, f := range friends {
+		if api.Friend_State(f.GetState().Value) == api.Friend_BLOCKED {
+			if f.GetUser().GetOnline() {
+				blockedIDs = append(blockedIDs, f.GetUser().GetId())
+			}
+		}
+	}
+	params.blockedPlayerIDs = blockedIDs
+
+	logger.Debug("Cached friends data", zap.Int("total_friends", len(friends)), zap.Int("blocked_online", len(blockedIDs)))
+	return nil
+}
+
+// loadAndCacheMatchmakingData loads and caches matchmaking ratings and rank percentiles for all user's groups
+func (p *EvrPipeline) loadAndCacheMatchmakingData(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) error {
+	userID := session.userID.String()
+	
+	// Initialize the caching maps
+	params.matchmakingRatingsByGroup = make(map[string]map[evr.Symbol]*atomic.Pointer[types.Rating])
+	params.rankPercentilesByGroup = make(map[string]map[evr.Symbol]*atomic.Float64)
+
+	// Load matchmaking data for all the user's groups and relevant modes
+	modes := []evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic, evr.ModeSocialPublic}
+	
+	for groupIDStr := range params.guildGroups {
+		params.matchmakingRatingsByGroup[groupIDStr] = make(map[evr.Symbol]*atomic.Pointer[types.Rating])
+		params.rankPercentilesByGroup[groupIDStr] = make(map[evr.Symbol]*atomic.Float64)
+		
+		for _, mode := range modes {
+			// Load matchmaking rating
+			rating, err := MatchmakingRatingLoad(ctx, p.nk, userID, groupIDStr, mode)
+			if err != nil {
+				logger.Warn("Failed to load matchmaking rating", zap.String("group_id", groupIDStr), zap.String("mode", mode.String()), zap.Error(err))
+				rating = NewDefaultRating()
+			}
+			params.matchmakingRatingsByGroup[groupIDStr][mode] = atomic.NewPointer(&rating)
+
+			// Load rank percentile
+			percentile, err := CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.nk, userID, groupIDStr, mode)
+			if err != nil {
+				logger.Warn("Failed to calculate rank percentile", zap.String("group_id", groupIDStr), zap.String("mode", mode.String()), zap.Error(err))
+				percentile = 0.0
+			}
+			params.rankPercentilesByGroup[groupIDStr][mode] = atomic.NewFloat64(percentile)
+		}
+	}
+
+	logger.Debug("Cached matchmaking data", zap.Int("groups", len(params.guildGroups)), zap.Int("modes", len(modes)))
+	return nil
+}
+
+// loadAndCacheNextMatchInfo loads and caches next match information to avoid repeated lookups
+func (p *EvrPipeline) loadAndCacheNextMatchInfo(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) error {
+	if params.matchmakingSettings == nil {
+		return nil // No matchmaking settings available
+	}
+
+	userSettings := params.matchmakingSettings
+	
+	// Check if user has a next match Discord ID set
+	if userSettings.NextMatchDiscordID != "" {
+		hostUserIDStr := p.discordCache.DiscordIDToUserID(userSettings.NextMatchDiscordID)
+		if hostUserIDStr != "" {
+			hostUserID := uuid.FromStringOrNil(hostUserIDStr)
+			if !hostUserID.IsNil() {
+				// Get the MatchIDs for the user from its presence
+				if presences, err := p.nk.StreamUserList(StreamModeService, hostUserID.String(), "", StreamLabelMatchService, false, true); err == nil {
+					for _, presence := range presences {
+						if matchID := MatchIDFromStringOrNil(presence.GetStatus()); !matchID.IsNil() {
+							userSettings.NextMatchID = matchID
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	var nextMatchInfo *NextMatchInfo
+
+	// If we have a next match ID, validate it and cache the info
+	if !userSettings.NextMatchID.IsNil() {
+		if label, err := MatchLabelByID(ctx, p.nk, userSettings.NextMatchID); err != nil {
+			logger.Warn("Next match not found", zap.String("mid", userSettings.NextMatchID.String()))
+			// Clear invalid next match info
+			userSettings.NextMatchRole = ""
+			userSettings.NextMatchID = MatchID{}
+			userSettings.NextMatchDiscordID = ""
+		} else {
+			// Match exists, cache the information
+			nextMatchInfo = &NextMatchInfo{
+				MatchID:     userSettings.NextMatchID,
+				Role:        userSettings.NextMatchRole,
+				Mode:        label.Mode,
+				DiscordID:   userSettings.NextMatchDiscordID,
+			}
+
+			// Set role based on settings if specified
+			if userSettings.NextMatchRole != "" {
+				switch userSettings.NextMatchRole {
+				case "moderator":
+					nextMatchInfo.Role = "moderator"
+				case "spectator":
+					nextMatchInfo.Role = "spectator"
+				default:
+					nextMatchInfo.Role = ""
+				}
+			}
+
+			logger.Debug("Cached next match info", zap.String("match_id", nextMatchInfo.MatchID.String()), zap.String("role", nextMatchInfo.Role))
+		}
+	}
+
+	params.nextMatchInfo = nextMatchInfo
+	return nil
 }
