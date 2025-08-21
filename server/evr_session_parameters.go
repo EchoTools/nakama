@@ -11,10 +11,6 @@ import (
 	"go.uber.org/atomic"
 )
 
-type (
-	ctxSessionParametersKey struct{}
-)
-
 // NextMatchInfo holds cached information about a user's next match
 type NextMatchInfo struct {
 	MatchID     MatchID
