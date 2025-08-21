@@ -824,14 +824,6 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 	d.preselectRoleInOptions(roleOptions, roles.ServerHost)
 	d.preselectRoleInOptions(roleOptions, roles.Suspended)
 	d.preselectRoleInOptions(roleOptions, roles.Allocator)
-		baseRoleOptions = append(baseRoleOptions, discordgo.SelectMenuOption{
-			Label:       role.Name,
-			Value:       role.ID,
-			Description: fmt.Sprintf("Role: %s", role.Name),
-		})
-	}
-
-	roles := metadata.RoleMap
 
 	// Helper to clone options and set default
 	cloneAndPreselect := func(options []discordgo.SelectMenuOption, roleID string) []discordgo.SelectMenuOption {
@@ -843,11 +835,11 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 		return cloned
 	}
 
-	memberOptions := cloneAndPreselect(baseRoleOptions, roles.Member)
-	enforcerOptions := cloneAndPreselect(baseRoleOptions, roles.Enforcer)
-	serverHostOptions := cloneAndPreselect(baseRoleOptions, roles.ServerHost)
-	suspendedOptions := cloneAndPreselect(baseRoleOptions, roles.Suspended)
-	allocatorOptions := cloneAndPreselect(baseRoleOptions, roles.Allocator)
+	memberOptions := cloneAndPreselect(roleOptions, roles.Member)
+	enforcerOptions := cloneAndPreselect(roleOptions, roles.Enforcer)
+	serverHostOptions := cloneAndPreselect(roleOptions, roles.ServerHost)
+	suspendedOptions := cloneAndPreselect(roleOptions, roles.Suspended)
+	allocatorOptions := cloneAndPreselect(roleOptions, roles.Allocator)
 	// Build the configuration interface with select menus for each role type
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
@@ -865,7 +857,7 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 				discordgo.SelectMenu{
 					CustomID:    "role_select:moderator",
 					Placeholder: "Select Moderator Role",
-					Options:     roleOptions,
+					Options:     enforcerOptions,
 					MaxValues:   1,
 				},
 			},
@@ -875,7 +867,7 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 				discordgo.SelectMenu{
 					CustomID:    "role_select:serverhost",
 					Placeholder: "Select Server Host Role",
-					Options:     roleOptions,
+					Options:     serverHostOptions,
 					MaxValues:   1,
 				},
 			},
@@ -885,7 +877,7 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 				discordgo.SelectMenu{
 					CustomID:    "role_select:suspension",
 					Placeholder: "Select Suspension Role",
-					Options:     roleOptions,
+					Options:     suspendedOptions,
 					MaxValues:   1,
 				},
 			},
@@ -895,7 +887,7 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 				discordgo.SelectMenu{
 					CustomID:    "role_select:allocator",
 					Placeholder: "Select Allocator Role",
-					Options:     roleOptions,
+					Options:     allocatorOptions,
 					MaxValues:   1,
 				},
 			},
