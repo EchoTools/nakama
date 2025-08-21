@@ -335,6 +335,8 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		}
 	case "configure_roles":
 		return d.handleConfigureRoles(ctx, logger, s, i, userID, groupID)
+	case "configure_channels":
+		return d.handleConfigureChannels(ctx, logger, s, i, userID, groupID)
 	case "role_select":
 		return d.handleRoleSelect(ctx, logger, s, i, userID, groupID, value)
 	case "igp":
@@ -824,14 +826,6 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 	d.preselectRoleInOptions(roleOptions, roles.ServerHost)
 	d.preselectRoleInOptions(roleOptions, roles.Suspended)
 	d.preselectRoleInOptions(roleOptions, roles.Allocator)
-		baseRoleOptions = append(baseRoleOptions, discordgo.SelectMenuOption{
-			Label:       role.Name,
-			Value:       role.ID,
-			Description: fmt.Sprintf("Role: %s", role.Name),
-		})
-	}
-
-	roles := metadata.RoleMap
 
 	// Helper to clone options and set default
 	cloneAndPreselect := func(options []discordgo.SelectMenuOption, roleID string) []discordgo.SelectMenuOption {
@@ -843,11 +837,11 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 		return cloned
 	}
 
-	memberOptions := cloneAndPreselect(baseRoleOptions, roles.Member)
-	enforcerOptions := cloneAndPreselect(baseRoleOptions, roles.Enforcer)
-	serverHostOptions := cloneAndPreselect(baseRoleOptions, roles.ServerHost)
-	suspendedOptions := cloneAndPreselect(baseRoleOptions, roles.Suspended)
-	allocatorOptions := cloneAndPreselect(baseRoleOptions, roles.Allocator)
+	memberOptions := cloneAndPreselect(roleOptions, roles.Member)
+	enforcerOptions := cloneAndPreselect(roleOptions, roles.Enforcer)
+	serverHostOptions := cloneAndPreselect(roleOptions, roles.ServerHost)
+	suspendedOptions := cloneAndPreselect(roleOptions, roles.Suspended)
+	allocatorOptions := cloneAndPreselect(roleOptions, roles.Allocator)
 	// Build the configuration interface with select menus for each role type
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
@@ -865,7 +859,7 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 				discordgo.SelectMenu{
 					CustomID:    "role_select:moderator",
 					Placeholder: "Select Moderator Role",
-					Options:     roleOptions,
+					Options:     enforcerOptions,
 					MaxValues:   1,
 				},
 			},
@@ -875,7 +869,7 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 				discordgo.SelectMenu{
 					CustomID:    "role_select:serverhost",
 					Placeholder: "Select Server Host Role",
-					Options:     roleOptions,
+					Options:     serverHostOptions,
 					MaxValues:   1,
 				},
 			},
@@ -885,7 +879,7 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 				discordgo.SelectMenu{
 					CustomID:    "role_select:suspension",
 					Placeholder: "Select Suspension Role",
-					Options:     roleOptions,
+					Options:     suspendedOptions,
 					MaxValues:   1,
 				},
 			},
@@ -895,7 +889,7 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 				discordgo.SelectMenu{
 					CustomID:    "role_select:allocator",
 					Placeholder: "Select Allocator Role",
-					Options:     roleOptions,
+					Options:     allocatorOptions,
 					MaxValues:   1,
 				},
 			},
@@ -922,6 +916,63 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 	}
 
 	return s.InteractionRespond(i.Interaction, response)
+}
+
+func (d *DiscordAppBot) handleConfigureChannels(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) error {
+	// Get the current guild group metadata to get current channel settings
+	metadata, err := GroupMetadataLoad(ctx, d.db, groupID)
+	if err != nil {
+		return fmt.Errorf("failed to get guild group metadata: %w", err)
+	}
+
+	// Show modal with current channel settings
+	modal := &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseModal,
+		Data: &discordgo.InteractionResponseData{
+			CustomID: "channels_modal",
+			Title:    "Configure Channels",
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "command_channel_input",
+							Label:       "Command Channel ID",
+							Value:       metadata.CommandChannelID,
+							Style:       discordgo.TextInputShort,
+							Placeholder: "Enter command channel ID (optional)",
+							Required:    false,
+						},
+					},
+				},
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "audit_channel_input",
+							Label:       "Audit Channel ID",
+							Value:       metadata.AuditChannelID,
+							Style:       discordgo.TextInputShort,
+							Placeholder: "Enter audit channel ID (optional)",
+							Required:    false,
+						},
+					},
+				},
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "error_channel_input",
+							Label:       "Error Channel ID",
+							Value:       metadata.ErrorChannelID,
+							Style:       discordgo.TextInputShort,
+							Placeholder: "Enter error channel ID (optional)",
+							Required:    false,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	return s.InteractionRespond(i.Interaction, modal)
 }
 
 func (d *DiscordAppBot) handleRoleSelect(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string, roleType string) error {
