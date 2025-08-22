@@ -1,4 +1,4 @@
-package server
+package service
 
 import (
 	"context"
@@ -7,6 +7,12 @@ import (
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
+)
+
+var (
+	matchDataJournalEventThreshold = 100
+	matchDataJournalMaxAge         = 5 * time.Minute
+	redisMatchDataJournalQueueKey  = "match_data_journal_queue"
 )
 
 var _ = Event(&EventMatchDataJournal{})
@@ -99,7 +105,7 @@ func (e *EventMatchDataJournal) persistJournal(ctx context.Context, logger runti
 
 func (e *EventMatchDataJournal) queueToRedis(ctx context.Context, logger runtime.Logger, dispatcher *EventDispatcher, journal *MatchDataJournal) error {
 	// Get Redis client from dispatcher if available
-	redisClient := dispatcher.getRedisClient()
+	redisClient := dispatcher.redisClient
 	if redisClient == nil {
 		logger.Warn("Redis client not available, falling back to direct MongoDB insertion")
 		return e.directMongoPersist(ctx, logger, dispatcher, journal)

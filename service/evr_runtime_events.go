@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/go-redis/redis"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server"
@@ -61,6 +62,8 @@ type EventDispatcher struct {
 	statisticsQueue *StatisticsQueue
 	vrmlScanQueue   *VRMLScanQueue
 
+	mongoClient          *mongo.Client
+	redisClient          *redis.Client
 	eventUnmarshaler     func(event *api.Event) (Event, error)
 	queue                chan *api.Event
 	matchJournals        map[MatchID]*MatchDataJournal
@@ -68,7 +71,7 @@ type EventDispatcher struct {
 	playerAuthorizations map[string]map[string]struct{} // map[sessionID]map[groupID]struct{}
 }
 
-func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, sessionRegistry server.SessionRegistry, matchRegistry server.MatchRegistry, mongoClient *mongo.Client, dg *discordgo.Session, statisticsQueue *StatisticsQueue, vrmlScanQueue *VRMLScanQueue) (*EventDispatcher, error) {
+func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, sessionRegistry server.SessionRegistry, matchRegistry server.MatchRegistry, mongoClient *mongo.Client, redisClient *redis.Client, dg *discordgo.Session, statisticsQueue *StatisticsQueue, vrmlScanQueue *VRMLScanQueue) (*EventDispatcher, error) {
 
 	dispatch := &EventDispatcher{
 		ctx:             ctx,
@@ -82,6 +85,9 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 		vrmlScanQueue:   vrmlScanQueue,
 		statisticsQueue: statisticsQueue,
+
+		redisClient: redisClient,
+		mongoClient: mongoClient,
 
 		queue:                make(chan *api.Event, 100),
 		matchJournals:        make(map[MatchID]*MatchDataJournal),

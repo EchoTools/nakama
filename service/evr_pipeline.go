@@ -714,7 +714,7 @@ func (p *EvrPipeline) ProcessProtobufRequest(logger *zap.Logger, session server.
 	case *rtapi.Envelope_LobbySessionEvent:
 		pipelineFn = p.lobbySessionEvent
 	case *rtapi.Envelope_LobbyEntrantRemoved:
-		pipelineFn = p.lobbyEntrantsRemove
+		pipelineFn = p.lobbyEntrantRemoved
 	default:
 		// For all other messages, use the generic protobuf handler
 		return fmt.Errorf("unhandled protobuf message type: %T", in.Message)

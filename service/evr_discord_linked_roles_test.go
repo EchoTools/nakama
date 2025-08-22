@@ -1,4 +1,4 @@
-package server
+package service
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zapcore"
@@ -26,8 +27,8 @@ func (m *mockNakamaModule) StorageRead(ctx context.Context, reads []*runtime.Sto
 }
 
 func TestDiscordLinkedRolesHandler_ServeHTTP(t *testing.T) {
-	consoleLogger := NewJSONLogger(os.Stdout, zapcore.ErrorLevel, JSONFormat)
-	logger := NewRuntimeGoLogger(consoleLogger)
+	consoleLogger := server.NewJSONLogger(os.Stdout, zapcore.ErrorLevel, server.JSONFormat)
+	logger := server.NewRuntimeGoLogger(consoleLogger)
 	ctx := context.Background()
 
 	// Create a mock database and nakama module
@@ -119,8 +120,8 @@ func TestDiscordLinkedRolesMetadata_JSON(t *testing.T) {
 }
 
 func TestDiscordLinkedRolesHandler_CORS(t *testing.T) {
-	consoleLogger := NewJSONLogger(os.Stdout, zapcore.ErrorLevel, JSONFormat)
-	logger := NewRuntimeGoLogger(consoleLogger)
+	consoleLogger := server.NewJSONLogger(os.Stdout, zapcore.ErrorLevel, server.JSONFormat)
+	logger := server.NewRuntimeGoLogger(consoleLogger)
 	ctx := context.Background()
 
 	var db *sql.DB

@@ -1,13 +1,13 @@
-package server
+package service
 
 import (
 	"context"
 	"testing"
 	"time"
 
+	evr "github.com/echotools/nakama/v3/protocol"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 // testLogger is a simple logger for testing
@@ -46,7 +46,7 @@ func (l *testLogger) Fields() map[string]interface{} {
 func TestSessionsChannelManager_Basic(t *testing.T) {
 	// Test that the sessions manager can be created without panicking
 	ctx := context.Background()
-	
+
 	// Create a mock sessions manager (without Discord)
 	manager := &SessionsChannelManager{
 		ctx:            ctx,
@@ -54,7 +54,7 @@ func TestSessionsChannelManager_Basic(t *testing.T) {
 		activeMessages: make(map[string]*SessionMessageTracker),
 		stopCh:         make(chan struct{}),
 	}
-	
+
 	// Test adding and removing a session tracker manually (without using RemoveSessionMessage)
 	sessionID := uuid.Must(uuid.NewV4()).String()
 	tracker := &SessionMessageTracker{
@@ -65,16 +65,16 @@ func TestSessionsChannelManager_Basic(t *testing.T) {
 		LastUpdated: time.Now(),
 		CreatedAt:   time.Now(),
 	}
-	
+
 	manager.activeMessages[sessionID] = tracker
-	
+
 	if len(manager.activeMessages) != 1 {
 		t.Errorf("Expected 1 active message, got %d", len(manager.activeMessages))
 	}
-	
+
 	// Manually remove instead of using RemoveSessionMessage to avoid storage calls
 	delete(manager.activeMessages, sessionID)
-	
+
 	if len(manager.activeMessages) != 0 {
 		t.Errorf("Expected 0 active messages after removal, got %d", len(manager.activeMessages))
 	}
@@ -83,14 +83,14 @@ func TestSessionsChannelManager_Basic(t *testing.T) {
 func TestSessionsChannelManager_EmbedCreation(t *testing.T) {
 	// Test that session embeds can be created without panicking
 	ctx := context.Background()
-	
+
 	manager := &SessionsChannelManager{
 		ctx:            ctx,
 		logger:         &testLogger{t: t},
 		activeMessages: make(map[string]*SessionMessageTracker),
 		stopCh:         make(chan struct{}),
 	}
-	
+
 	// Create a mock match label
 	matchID := MatchID{UUID: uuid.Must(uuid.NewV4())}
 	label := &MatchLabel{
@@ -102,31 +102,31 @@ func TestSessionsChannelManager_EmbedCreation(t *testing.T) {
 			Endpoint: evr.Endpoint{},
 		},
 	}
-	
+
 	guildGroup := &GuildGroup{
 		GroupMetadata: GroupMetadata{
 			GuildID:           "test_guild",
 			SessionsChannelID: "test_sessions_channel",
 		},
 	}
-	
+
 	// This should not panic
 	embeds, components := manager.createSessionEmbed(label, guildGroup)
-	
+
 	if len(embeds) == 0 {
 		t.Error("Expected at least one embed to be created")
 	}
-	
+
 	if len(components) == 0 {
 		t.Error("Expected at least one component to be created")
 	}
-	
+
 	// Check that the first embed has the expected fields
 	mainEmbed := embeds[0]
 	if mainEmbed.Title == "" {
 		t.Error("Expected embed title to be set")
 	}
-	
+
 	if len(mainEmbed.Fields) == 0 {
 		t.Error("Expected embed to have fields")
 	}

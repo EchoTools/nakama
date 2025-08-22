@@ -1,4 +1,4 @@
-package server
+package service
 
 import (
 	"encoding/json"
@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/heroiclabs/nakama/v3/server/evr"
+	evr "github.com/echotools/nakama/v3/protocol"
 )
 
 func TestNewLoginHistory(t *testing.T) {
@@ -113,10 +113,10 @@ func TestMatchIgnoredAltPattern(t *testing.T) {
 func TestLoginHistoryEntryKey(t *testing.T) {
 	xpid := evr.EvrId{PlatformCode: evr.OVR, AccountId: 12345}
 	ip := "192.168.1.1"
-	
+
 	got := loginHistoryEntryKey(xpid, ip)
 	want := "OVR-12345:192.168.1.1"
-	
+
 	if got != want {
 		t.Errorf("loginHistoryEntryKey() = %v, want %v", got, want)
 	}
@@ -272,7 +272,7 @@ func TestLoginHistoryEntry_Items(t *testing.T) {
 	}
 
 	got := entry.Items()
-	
+
 	// Should have 4 items: ClientIP, HMDSerialNumber, XPID token, SystemProfile
 	if len(got) != 4 {
 		t.Errorf("LoginHistoryEntry.Items() length = %v, want 4", len(got))
@@ -766,11 +766,11 @@ func TestLoginHistory_SearchPatterns(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := tt.history.SearchPatterns()
-			
+
 			// Sort both slices for comparison since order may vary
 			slices.Sort(got)
 			slices.Sort(tt.want)
-			
+
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("LoginHistory.SearchPatterns() = %v, want %v", got, tt.want)
 			}
@@ -780,9 +780,9 @@ func TestLoginHistory_SearchPatterns(t *testing.T) {
 
 func TestLoginHistory_AlternateIDs(t *testing.T) {
 	tests := []struct {
-		name            string
-		history         *LoginHistory
-		wantFirstDegree []string
+		name             string
+		history          *LoginHistory
+		wantFirstDegree  []string
 		wantSecondDegree []string
 	}{
 		{
@@ -836,17 +836,17 @@ func TestLoginHistory_Update(t *testing.T) {
 	}
 
 	tests := []struct {
-		name               string
-		history            *LoginHistory
-		xpid               evr.EvrId
-		ip                 string
-		loginData          *evr.LoginProfile
-		isAuthenticated    bool
-		wantIsNew          bool
-		wantAllowed        bool
-		wantHistoryEntry   bool
-		wantActiveEntry    bool
-		wantAuthorizedIP   bool
+		name             string
+		history          *LoginHistory
+		xpid             evr.EvrId
+		ip               string
+		loginData        *evr.LoginProfile
+		isAuthenticated  bool
+		wantIsNew        bool
+		wantAllowed      bool
+		wantHistoryEntry bool
+		wantActiveEntry  bool
+		wantAuthorizedIP bool
 	}{
 		{
 			name:             "new authenticated login",
@@ -911,7 +911,7 @@ func TestLoginHistory_Update(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gotIsNew, gotAllowed := tt.history.Update(tt.xpid, tt.ip, tt.loginData, tt.isAuthenticated)
-			
+
 			if gotIsNew != tt.wantIsNew {
 				t.Errorf("LoginHistory.Update() isNew = %v, want %v", gotIsNew, tt.wantIsNew)
 			}
@@ -1107,9 +1107,9 @@ func TestLoginHistory_NotifyGroup(t *testing.T) {
 }
 func TestLoginHistory_AlternateMaps(t *testing.T) {
 	tests := []struct {
-		name            string
-		history         *LoginHistory
-		wantFirstDegree map[string]map[string]bool
+		name             string
+		history          *LoginHistory
+		wantFirstDegree  map[string]map[string]bool
 		wantSecondDegree map[string]bool
 	}{
 		{
@@ -1158,7 +1158,7 @@ func TestLoginHistory_AlternateMaps(t *testing.T) {
 			}
 
 			gotFirst, gotSecond := tt.history.AlternateMaps()
-			
+
 			if !reflect.DeepEqual(gotFirst, tt.wantFirstDegree) {
 				t.Errorf("LoginHistory.AlternateMaps() first degree = %v, want %v", gotFirst, tt.wantFirstDegree)
 			}

@@ -15,6 +15,7 @@ type TeamMetadata struct {
 type GameState struct {
 	BlueScore              int                        `json:"blue_score"`                        // The score for the blue team
 	OrangeScore            int                        `json:"orange_score"`                      // The score for the orange team
+	RoundNumber            int                        `json:"round_number"`                      // The current round number
 	RoundClock             *RoundClock                `json:"round_clock,omitempty"`             // The round clock
 	MatchOver              bool                       `json:"match_over,omitempty"`              // Whether the round is over
 	EquilibriumCoefficient float64                    `json:"equilibrium_coefficient,omitempty"` // The equilibrium coefficient for the game (how much the game is balanced)

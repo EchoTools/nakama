@@ -33,7 +33,7 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
 	label, err := LobbyGameServerAllocate(ctx, server.NewRuntimeGoLogger(logger), nk, []string{params.GroupID.String()}, latestRTTs, settings, []string{params.RegionCode}, false, false, queryAddon)
 	if err != nil {
-		if strings.Contains("bad request:", err.Error()) {
+		if strings.Contains(err.Error(), "bad request:") {
 			err = NewLobbyErrorf(BadRequest, "required features not supported")
 		}
 		logger.Warn("Failed to allocate game server", zap.Error(err), zap.Any("settings", settings))
@@ -42,16 +42,13 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 
 	// Return the prepared session
 	matchID := label.ID
-	
-	// Post to Discord sessions channel if available
-	if appBot := globalAppBot.Load(); appBot != nil && appBot.sessionsManager != nil {
-		// Get the guild group for this session
-		if guildGroup := appBot.guildGroupRegistry.Get(params.GroupID.String()); guildGroup != nil {
-			if err := appBot.sessionsManager.PostSessionMessage(label, guildGroup); err != nil {
-				logger.Warn("Failed to post session message to Discord", zap.Error(err))
-			}
+
+	// Get the guild group for this session
+	if guildGroup := p.appBot.guildGroupRegistry.Get(params.GroupID.String()); guildGroup != nil {
+		if err := p.appBot.sessionsChannelManager.PostSessionMessage(label, guildGroup); err != nil {
+			logger.Warn("Failed to post session message to Discord", zap.Error(err))
 		}
 	}
-	
+
 	return matchID, nil
 }

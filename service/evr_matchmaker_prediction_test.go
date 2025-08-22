@@ -88,7 +88,7 @@ func retrieveDataFromRemoteNakamaRPC[T any](uri string, dst T) error {
 func generateMatchmakerEntries(count int) []*server.MatchmakerEntry {
 	groupID := uuid.Must(uuid.NewV4()).String()
 	entries := make([]*server.MatchmakerEntry, 0, count)
-	for i := range count {
+	for i := 0; i < count; i++ {
 		var (
 			dn        = RandomDisplayName()
 			sessionID = uuid.NewV5(uuid.Nil, fmt.Sprintf("%d", i))
@@ -194,7 +194,8 @@ func BenchmarkPredictOutcomes(b *testing.B) {
 	candidates := generateMatchmakerCandidates(24)
 	b.Logf("candidate count: %d", len(candidates))
 
-	for b.Loop() {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
 		b.ReportMetric(float64(len(candidates)), "candidates")
 		predictions := make([]PredictedMatch, 0, len(candidates))
 		for p := range predictCandidateOutcomes(candidates) {

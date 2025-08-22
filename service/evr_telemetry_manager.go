@@ -1,13 +1,19 @@
-package server
+package service
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server"
+)
+
+const (
+	StreamModeLobbySessionTelemetry uint8 = 0x25
 )
 
 // TelemetrySubscription represents a session's subscription to lobby telemetry
@@ -58,7 +64,7 @@ func (ltm *LobbyTelemetryManager) Subscribe(ctx context.Context, sessionID, user
 	ltm.subscriptions[lobbyID][sessionID] = subscription
 
 	// Join the session to the lobby telemetry stream
-	stream := PresenceStream{
+	stream := server.PresenceStream{
 		Mode:    StreamModeLobbySessionTelemetry,
 		Subject: lobbyID,
 		Label:   "telemetry",
@@ -71,7 +77,7 @@ func (ltm *LobbyTelemetryManager) Subscribe(ctx context.Context, sessionID, user
 	}
 
 	// Add session to the telemetry stream
-	success, err := ltm.nk.StreamUserJoin(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, userID.String(), sessionID.String(), false, false, string(status))
+	success, err := ltm.nk.StreamUserJoin(stream.Mode, stream.Subject.String(), "", stream.Label, userID.String(), sessionID.String(), false, false, string(status))
 	if err != nil || !success {
 		delete(ltm.subscriptions[lobbyID], sessionID)
 		return fmt.Errorf("failed to join telemetry stream: %w", err)
@@ -98,13 +104,13 @@ func (ltm *LobbyTelemetryManager) Unsubscribe(ctx context.Context, sessionID, us
 	}
 
 	// Leave the telemetry stream
-	stream := PresenceStream{
+	stream := server.PresenceStream{
 		Mode:    StreamModeLobbySessionTelemetry,
 		Subject: lobbyID,
 		Label:   "telemetry",
 	}
 
-	if err := ltm.nk.StreamUserLeave(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, userID.String(), sessionID.String()); err != nil {
+	if err := ltm.nk.StreamUserLeave(stream.Mode, stream.Subject.String(), "", stream.Label, userID.String(), sessionID.String()); err != nil {
 		ltm.logger.Warn("Failed to leave telemetry stream: session_id=%s, error=%v", sessionID.String(), err)
 		// Don't return error as subscription is already removed from memory
 	}
@@ -148,14 +154,14 @@ func (ltm *LobbyTelemetryManager) BroadcastTelemetry(ctx context.Context, lobbyI
 		}
 
 		// Create individual session stream for telemetry delivery
-		sessionStream := PresenceStream{
+		sessionStream := server.PresenceStream{
 			Mode:    StreamModeLobbySessionTelemetry,
 			Subject: sessionID, // Use sessionID as subject for individual delivery
 			Label:   fmt.Sprintf("lobby_%s", lobbyID.String()),
 		}
 
 		// Send the telemetry data to the session's stream
-		if err := ltm.nk.StreamUserUpdate(sessionStream.Mode, sessionStream.Subject.String(), sessionStream.Subcontext.String(), sessionStream.Label,
+		if err := ltm.nk.StreamUserUpdate(sessionStream.Mode, sessionStream.Subject.String(), "", sessionStream.Label,
 			subscription.UserID.String(), subscription.SessionID.String(), false, false, string(messageBytes)); err != nil {
 			ltm.logger.Warn("Failed to send telemetry to session: session_id=%s, lobby_id=%s, error=%v", sessionID.String(), lobbyID.String(), err)
 			continue
@@ -208,13 +214,13 @@ func (ltm *LobbyTelemetryManager) CleanupSession(ctx context.Context, sessionID,
 			}
 
 			// Leave the telemetry stream
-			stream := PresenceStream{
+			stream := server.PresenceStream{
 				Mode:    StreamModeLobbySessionTelemetry,
 				Subject: lobbyID,
 				Label:   "telemetry",
 			}
 
-			if err := ltm.nk.StreamUserLeave(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, userID.String(), sessionID.String()); err != nil {
+			if err := ltm.nk.StreamUserLeave(stream.Mode, stream.Subject.String(), "", stream.Label, userID.String(), sessionID.String()); err != nil {
 				ltm.logger.Warn("Failed to leave telemetry stream during cleanup: session_id=%s, lobby_id=%s, error=%v", sessionID.String(), subscription.LobbyID.String(), err)
 			}
 		}

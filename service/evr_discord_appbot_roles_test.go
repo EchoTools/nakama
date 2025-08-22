@@ -1,4 +1,4 @@
-package server
+package service
 
 import (
 	"testing"
@@ -76,9 +76,9 @@ func TestPreselectRoleInOptions(t *testing.T) {
 
 func TestRoleTypeHandling(t *testing.T) {
 	tests := []struct {
-		name           string
-		roleType       string
-		expectedValid  bool
+		name          string
+		roleType      string
+		expectedValid bool
 	}{
 		{"member role", "member", true},
 		{"moderator role", "moderator", true},

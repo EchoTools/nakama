@@ -148,6 +148,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	statisticsQueue := NewStatisticsQueue(logger, db, nk)
 
 	// Initialize the VRML scan queue if the configuration is set
+	var redisClient *redis.Client
 	var vrmlScanQueue *VRMLScanQueue
 	if vars["VRML_REDIS_URI"] == "" || vars["VRML_OAUTH_REDIRECT_URL"] == "" || vars["VRML_OAUTH_CLIENT_ID"] == "" {
 		logger.Warn("VRML OAuth configuration is not set, VRML verification will not be available.")
@@ -155,7 +156,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		redisURI := vars["VRML_REDIS_URI"]
 		vrmlOAuthRedirectURL := vars["VRML_OAUTH_REDIRECT_URL"]
 		vrmlOAuthClientID := vars["VRML_OAUTH_CLIENT_ID"]
-		redisClient, err := connectRedis(ctx, redisURI)
+		redisClient, err = connectRedis(ctx, redisURI)
 		if err != nil {
 			return fmt.Errorf("failed to connect to Redis for VRML scan queue: %w", err)
 		}
@@ -175,7 +176,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	}
 
 	// Register the event dispatch
-	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, sessionRegistry, matchRegistry, mongoClient, dg, statisticsQueue, vrmlScanQueue)
+	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, sessionRegistry, matchRegistry, mongoClient, redisClient, dg, statisticsQueue, vrmlScanQueue)
 	if err != nil {
 		return fmt.Errorf("unable to create event dispatch: %w", err)
 	}

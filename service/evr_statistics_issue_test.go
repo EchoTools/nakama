@@ -1,17 +1,17 @@
-package server
+package service
 
 import (
-	"testing"
 	"math"
+	"testing"
 )
 
 // Test the specific fix for the profile statistics issue
 func TestFloat64ToScoreProfileStatisticsIssue(t *testing.T) {
 	// Test the specific problematic values from the issue
 	problematicValues := []struct {
-		value         float64
-		shouldReject  bool
-		description   string
+		value        float64
+		shouldReject bool
+		description  string
 	}{
 		{
 			value:        -1000000000000000, // Exactly -1e15
@@ -46,7 +46,7 @@ func TestFloat64ToScoreProfileStatisticsIssue(t *testing.T) {
 
 			if tc.shouldReject {
 				if err == nil {
-					t.Errorf("Expected encoding of %f to be rejected, but got score=%d, subscore=%d", 
+					t.Errorf("Expected encoding of %f to be rejected, but got score=%d, subscore=%d",
 						tc.value, score, subscore)
 				}
 				return
@@ -72,7 +72,7 @@ func TestFloat64ToScoreProfileStatisticsIssue(t *testing.T) {
 			}
 
 			if math.Abs(decoded-tc.value) > 1e-8 {
-				t.Errorf("Round-trip failed for %f: got %f, diff %e", tc.value, decoded, 
+				t.Errorf("Round-trip failed for %f: got %f, diff %e", tc.value, decoded,
 					math.Abs(decoded-tc.value))
 			}
 		})
@@ -83,7 +83,7 @@ func TestFloat64ToScoreProfileStatisticsIssue(t *testing.T) {
 func TestFloat64ToScoreNeverNegative(t *testing.T) {
 	// Test a wide range of values
 	testValues := []float64{
-		-999999999999999, -100000, -1000, -100, -10, -1, -0.1, 
+		-999999999999999, -100000, -1000, -100, -10, -1, -0.1,
 		0, 0.1, 1, 10, 100, 1000, 100000, 999999999999999,
 	}
 

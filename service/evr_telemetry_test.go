@@ -1,4 +1,4 @@
-package server
+package service
 
 import (
 	"context"
@@ -10,41 +10,41 @@ import (
 )
 
 // Simple logger implementation for testing
-type testLogger struct {
+type eventTestLogger struct {
 	messages []string
 }
 
-func (l *testLogger) Debug(format string, v ...interface{}) {
+func (l *eventTestLogger) Debug(msg string, keysAndValues ...interface{}) {
 	l.messages = append(l.messages, "DEBUG")
 }
 
-func (l *testLogger) Info(format string, v ...interface{}) {
+func (l *eventTestLogger) Info(msg string, keysAndValues ...interface{}) {
 	l.messages = append(l.messages, "INFO")
 }
 
-func (l *testLogger) Warn(format string, v ...interface{}) {
+func (l *eventTestLogger) Warn(msg string, keysAndValues ...interface{}) {
 	l.messages = append(l.messages, "WARN")
 }
 
-func (l *testLogger) Error(format string, v ...interface{}) {
+func (l *eventTestLogger) Error(msg string, keysAndValues ...interface{}) {
 	l.messages = append(l.messages, "ERROR")
 }
 
-func (l *testLogger) Fields() map[string]interface{} {
+func (l *eventTestLogger) Fields() map[string]interface{} {
 	return make(map[string]interface{})
 }
 
-func (l *testLogger) WithField(key string, value interface{}) runtime.Logger {
+func (l *eventTestLogger) WithField(key string, value interface{}) runtime.Logger {
 	return l
 }
 
-func (l *testLogger) WithFields(map[string]interface{}) runtime.Logger {
+func (l *eventTestLogger) WithFields(map[string]interface{}) runtime.Logger {
 	return l
 }
 
 func TestEventJournal_Journal(t *testing.T) {
 	// Test that event journaling works without Redis (graceful degradation)
-	logger := &testLogger{}
+	logger := &eventTestLogger{}
 
 	eventJournal := NewEventJournal(nil, logger)
 

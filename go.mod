@@ -5,11 +5,6 @@ go 1.25.0
 require (
 	github.com/anyascii/go v0.3.3
 	github.com/bits-and-blooms/bitset v1.24.0
-	github.com/blugelabs/bluge v0.2.2
-	github.com/blugelabs/bluge_segment_api v0.2.0
-	github.com/blugelabs/query_string v0.3.0
-	github.com/dgryski/dgoogauth v0.0.0-20190221195224-5a805980a5f3
-	github.com/dop251/goja v0.0.0-20250309171923-bcd7cc6bf64c
 	github.com/echotools/nevr-common/v3 v3.1.0
 	github.com/echotools/vrmlgo/v5 v5.0.1
 	github.com/go-redis/redis v6.15.9+incompatible
@@ -47,7 +42,11 @@ require (
 )
 
 require (
-	github.com/echotools/nevr-common v1.1.0 // indirect
+	github.com/blugelabs/bluge v0.2.2 // indirect
+	github.com/blugelabs/bluge_segment_api v0.2.0 // indirect
+	github.com/blugelabs/query_string v0.3.0 // indirect
+	github.com/dgryski/dgoogauth v0.0.0-20190221195224-5a805980a5f3 // indirect
+	github.com/dop251/goja v0.0.0-20250309171923-bcd7cc6bf64c // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/gorilla/handlers v1.5.2 // indirect
 	github.com/gorilla/mux v1.8.1 // indirect

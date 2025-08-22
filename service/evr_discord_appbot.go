@@ -56,6 +56,8 @@ type DiscordAppBot struct {
 	choiceCache *server.MapOf[string, []*discordgo.ApplicationCommandOptionChoice]
 	igpRegistry *server.MapOf[string, *InGamePanel]
 
+	sessionsChannelManager *SessionsChannelManager
+
 	debugChannels  map[string]string // map[groupID]channelID
 	userID         string            // Nakama UserID of the bot
 	partyStatusChs *server.MapOf[string, chan error]
@@ -68,6 +70,8 @@ type DiscordAppBot struct {
 func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics server.Metrics, config server.Config, discordCache *DiscordIntegrator, profileRegistry *ProfileCache, statusRegistry server.StatusRegistry, sessionRegistry server.SessionRegistry, dg *discordgo.Session, ipInfoCache *IPInfoCache, guildGroupRegistry *GuildGroupRegistry) (*DiscordAppBot, error) {
 
 	logger = logger.WithField("system", "discordAppBot")
+
+	sessionsChannelManager := NewSessionsChannelManager(ctx, logger, nk, dg)
 
 	appbot := DiscordAppBot{
 		ctx: ctx,
@@ -83,11 +87,13 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		statusRegistry:  statusRegistry,
 		sessionRegistry: sessionRegistry,
 
-		dg:                 dg,
-		guildGroupRegistry: guildGroupRegistry,
-		cache:              discordCache,
-		ipInfoCache:        ipInfoCache,
-		choiceCache:        &server.MapOf[string, []*discordgo.ApplicationCommandOptionChoice]{},
+		dg:                     dg,
+		guildGroupRegistry:     guildGroupRegistry,
+		sessionsChannelManager: sessionsChannelManager,
+
+		cache:       discordCache,
+		ipInfoCache: ipInfoCache,
+		choiceCache: &server.MapOf[string, []*discordgo.ApplicationCommandOptionChoice]{},
 
 		igpRegistry:               &server.MapOf[string, *InGamePanel]{},
 		prepareMatchRatePerSecond: 1.0 / 60,
