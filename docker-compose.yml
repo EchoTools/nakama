@@ -8,11 +8,9 @@ services:
     volumes:
       - data:/var/lib/postgresql/data
     expose:
-      - "8080"
       - "5432"
     ports:
       - "5432:5432"
-      - "8080:8080"
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres", "-d", "nakama"]
       interval: 3s
@@ -26,9 +24,7 @@ services:
     entrypoint:
       - "/bin/sh"
       - "-ecx"
-      - >
-          /nakama/nakama migrate up --database.address postgres:localdb@postgres:5432/nakama &&
-          exec /nakama/nakama --name nakama1 --database.address postgres:localdb@postgres:5432/nakama --logger.level DEBUG --session.token_expiry_sec 7200
+      - /nakama/nakama migrate up && exec /nakama/nakama --config=/data/nakama.yml
    
     restart: unless-stopped
     depends_on:
@@ -49,6 +45,32 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+  redis:
+    image: redis:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - ./redis_conf:/usr/local/etc/redis
+      - redis_data:/data # Mounts a volume for data persistence
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+  mongo:
+    image: mongo:latest
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "127.0.0.1:27017:27017"
+    networks:
+      - backend
 volumes:
   data:
-
+  redis_data:
+  mongo_data:
+networks:
+  backend:
