@@ -28,7 +28,7 @@ var (
 	ErrFailedToTrackEntrantStream = errors.New("failed to track entrant stream")
 )
 
-func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, presences ...*EvrMatchPresence) error {
+func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, presences ...*MatchPresence) error {
 	if len(presences) == 0 {
 		return ErrNoPresences
 	}
@@ -45,7 +45,7 @@ func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, p
 
 	return LobbyJoinEntrants(logger, p.matchRegistry, p.tracker, session, serverSession, label, presences...)
 }
-func LobbyJoinEntrants(logger *zap.Logger, matchRegistry server.MatchRegistry, tracker server.Tracker, session server.Session, serverSession server.Session, label *MatchLabel, entrants ...*EvrMatchPresence) error {
+func LobbyJoinEntrants(logger *zap.Logger, matchRegistry server.MatchRegistry, tracker server.Tracker, session server.Session, serverSession server.Session, label *MatchLabel, entrants ...*MatchPresence) error {
 	if session == nil || serverSession == nil {
 		return server.ErrSessionNotFound
 	}
@@ -104,7 +104,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry server.MatchRegistry, t
 	if isNew {
 
 		// The match handler will return an updated entrant presence.
-		e = &EvrMatchPresence{}
+		e = &MatchPresence{}
 		if err := json.Unmarshal([]byte(reason), e); err != nil {
 			return fmt.Errorf("failed to unmarshal match presence: %w", err)
 		}

@@ -128,17 +128,17 @@ type MatchState struct {
 	meta           *MatchMeta
 	open           bool
 	startedAt      time.Time
-	presenceMap    map[string]*EvrMatchPresence
+	presenceMap    map[string]*MatchPresence
 	emptyTicks     int64                // The number of ticks the match has been empty.
 	joinTimestamps map[string]time.Time // The timestamps of when players joined the match. map[sessionId]time.Time
-	broadcaster    *EvrMatchPresence    // The broadcaster's presence
+	broadcaster    *MatchPresence       // The broadcaster's presence
 	alignments     map[string]int       // map[userID]TeamIndex
 }
 
 func NewMatchState(meta *MatchMeta) *MatchState {
 	return &MatchState{
 		meta:           meta,
-		presenceMap:    make(map[string]*EvrMatchPresence),
+		presenceMap:    make(map[string]*MatchPresence),
 		joinTimestamps: make(map[string]time.Time),
 		alignments:     make(map[string]int),
 	}

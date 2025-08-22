@@ -116,7 +116,7 @@ func (p *EvrPipeline) matchmakingTicketTimeout() time.Duration {
 	return time.Duration(maxIntervals*intervalSecs) * time.Second
 }
 
-func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *zap.Logger, session *sessionEVR, lobbyParams *LobbySessionParameters, partyLabel *PartyLabel, entrants ...*EvrMatchPresence) (err error) {
+func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *zap.Logger, session *sessionEVR, lobbyParams *LobbySessionParameters, partyLabel *PartyLabel, entrants ...*MatchPresence) (err error) {
 
 	stream := lobbyParams.GuildGroupStream()
 	count, err := p.nk.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)

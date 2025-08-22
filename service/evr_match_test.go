@@ -57,7 +57,7 @@ func TestEvrMatch_EvrMatchState(t *testing.T) {
 }
 
 func TestSelectTeamForPlayer(t *testing.T) {
-	presencesstr := map[string]*EvrMatchPresence{
+	presencesstr := map[string]*MatchPresence{
 		"player1": {RoleAlignment: evr.TeamBlue},
 		"player2": {RoleAlignment: evr.TeamOrange},
 		"spec1":   {RoleAlignment: evr.TeamSpectator},
@@ -69,7 +69,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		"spec2":   {RoleAlignment: evr.TeamSpectator},
 	}
 
-	presences := make(map[string]*EvrMatchPresence)
+	presences := make(map[string]*MatchPresence)
 	for k, v := range presencesstr {
 		u := uuid.NewV5(uuid.Nil, k).String()
 		presences[u] = v
@@ -83,7 +83,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		name           string
 		preferred      int
 		lobbyType      LobbyType
-		presences      map[string]*EvrMatchPresence
+		presences      map[string]*MatchPresence
 		expectedTeam   int
 		expectedResult bool
 	}{
@@ -91,7 +91,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 			name:           "UnassignedPlayer",
 			lobbyType:      PrivateLobby,
 			preferred:      evr.TeamUnassigned,
-			presences:      map[string]*EvrMatchPresence{},
+			presences:      map[string]*MatchPresence{},
 			expectedTeam:   evr.TeamBlue,
 			expectedResult: true,
 		},
@@ -99,7 +99,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 			name:      "Public match, blue team full, puts the player on orange",
 			lobbyType: PublicLobby,
 			preferred: evr.TeamBlue,
-			presences: map[string]*EvrMatchPresence{
+			presences: map[string]*MatchPresence{
 				"player1": {RoleAlignment: evr.TeamBlue},
 				"player2": {RoleAlignment: evr.TeamBlue},
 				"player3": {RoleAlignment: evr.TeamBlue},
@@ -116,7 +116,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 			name:      "Public match, orange team full, puts the player on blue",
 			lobbyType: PublicLobby,
 			preferred: evr.TeamOrange,
-			presences: map[string]*EvrMatchPresence{
+			presences: map[string]*MatchPresence{
 				"player1": {RoleAlignment: evr.TeamSpectator},
 				"player2": {RoleAlignment: evr.TeamBlue},
 				"player3": {RoleAlignment: evr.TeamBlue},
@@ -133,7 +133,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 			name:      "Public match, teams equal, use preference",
 			lobbyType: PublicLobby,
 			preferred: evr.TeamOrange,
-			presences: map[string]*EvrMatchPresence{
+			presences: map[string]*MatchPresence{
 				"player1": {RoleAlignment: evr.TeamSpectator},
 				"player2": {RoleAlignment: evr.TeamBlue},
 				"player3": {RoleAlignment: evr.TeamBlue},
@@ -150,7 +150,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 			name:      "Public match, full reject",
 			lobbyType: PublicLobby,
 			preferred: evr.TeamBlue,
-			presences: map[string]*EvrMatchPresence{
+			presences: map[string]*MatchPresence{
 				"player1": {RoleAlignment: evr.TeamBlue},
 				"player2": {RoleAlignment: evr.TeamBlue},
 				"player3": {RoleAlignment: evr.TeamBlue},
@@ -167,7 +167,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 			name:      "Public match, spectators full, reject",
 			lobbyType: PublicLobby,
 			preferred: evr.TeamSpectator,
-			presences: map[string]*EvrMatchPresence{
+			presences: map[string]*MatchPresence{
 				"player1": {RoleAlignment: evr.TeamBlue},
 				"player2": {RoleAlignment: evr.TeamBlue},
 				"player3": {RoleAlignment: evr.TeamSpectator},
@@ -184,7 +184,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 			name:      "Private match, use preference",
 			lobbyType: PrivateLobby,
 			preferred: evr.TeamOrange,
-			presences: map[string]*EvrMatchPresence{
+			presences: map[string]*MatchPresence{
 				"player1": {RoleAlignment: evr.TeamBlue},
 				"player2": {RoleAlignment: evr.TeamBlue},
 				"player3": {RoleAlignment: evr.TeamBlue},
@@ -201,7 +201,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 			name:      "Private match, use preference (5 player teams)",
 			lobbyType: PrivateLobby,
 			preferred: evr.TeamOrange,
-			presences: map[string]*EvrMatchPresence{
+			presences: map[string]*MatchPresence{
 				"player1": {RoleAlignment: evr.TeamSpectator},
 				"player2": {RoleAlignment: evr.TeamBlue},
 				"player3": {RoleAlignment: evr.TeamBlue},
@@ -218,7 +218,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 			name:      "Private match, preference full, put on other team",
 			lobbyType: PrivateLobby,
 			preferred: evr.TeamOrange,
-			presences: map[string]*EvrMatchPresence{
+			presences: map[string]*MatchPresence{
 				"player1":  {RoleAlignment: evr.TeamSpectator},
 				"player2":  {RoleAlignment: evr.TeamBlue},
 				"player3":  {RoleAlignment: evr.TeamBlue},
@@ -237,7 +237,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 			name:      "Full private match, puts the player on spectator",
 			lobbyType: PrivateLobby,
 			preferred: evr.TeamOrange,
-			presences: map[string]*EvrMatchPresence{
+			presences: map[string]*MatchPresence{
 				"player1":  {RoleAlignment: evr.TeamBlue},
 				"player2":  {RoleAlignment: evr.TeamBlue},
 				"player3":  {RoleAlignment: evr.TeamBlue},
@@ -256,7 +256,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 			name:      "Private match, spectators full, reject",
 			lobbyType: PrivateLobby,
 			preferred: evr.TeamSpectator,
-			presences: map[string]*EvrMatchPresence{
+			presences: map[string]*MatchPresence{
 				"player1": {RoleAlignment: evr.TeamBlue},
 				"player2": {RoleAlignment: evr.TeamBlue},
 				"player3": {RoleAlignment: evr.TeamSpectator},
@@ -273,7 +273,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 			name:      "full social lobby, reject",
 			lobbyType: PublicLobby,
 			preferred: evr.TeamSpectator,
-			presences: map[string]*EvrMatchPresence{
+			presences: map[string]*MatchPresence{
 				"player1":  {RoleAlignment: evr.TeamSocial},
 				"player2":  {RoleAlignment: evr.TeamSocial},
 				"player3":  {RoleAlignment: evr.TeamSocial},
@@ -294,7 +294,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 			name:      "social lobby, moderator, allow",
 			lobbyType: PublicLobby,
 			preferred: evr.TeamModerator,
-			presences: map[string]*EvrMatchPresence{
+			presences: map[string]*MatchPresence{
 				"player1":  {RoleAlignment: evr.TeamSocial},
 				"player2":  {RoleAlignment: evr.TeamSocial},
 				"player3":  {RoleAlignment: evr.TeamSocial},
@@ -313,10 +313,10 @@ func TestSelectTeamForPlayer(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		presence := &EvrMatchPresence{
+		presence := &MatchPresence{
 			RoleAlignment: tt.preferred,
 		}
-		presencestr := make(map[string]*EvrMatchPresence)
+		presencestr := make(map[string]*MatchPresence)
 		for k, v := range tt.presences {
 			u := uuid.NewV5(uuid.Nil, k).String()
 			presencestr[u] = v
@@ -413,16 +413,16 @@ func TestSelectTeamForPlayer_With_Alighment(t *testing.T) {
 
 	for _, tt := range tests {
 		// Existing players
-		presences := make(map[string]*EvrMatchPresence)
+		presences := make(map[string]*MatchPresence)
 		for _, player := range tt.players {
 			u := uuid.NewV5(uuid.Nil, player).String()
-			presences[u] = &EvrMatchPresence{
+			presences[u] = &MatchPresence{
 				RoleAlignment: alignments[player],
 			}
 		}
 
 		// New Player
-		presence := &EvrMatchPresence{
+		presence := &MatchPresence{
 			EvrID:         *lo.Must(evr.ParseEvrId(tt.newPlayer)),
 			RoleAlignment: tt.preferredTeam,
 		}
@@ -535,7 +535,7 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 				state_: &MatchLabel{
 					emptyTicks: 0,
 					tickRate:   10,
-					presenceMap: map[string]*EvrMatchPresence{
+					presenceMap: map[string]*MatchPresence{
 						uuid.Must(uuid.NewV4()).String(): {},
 					},
 				},
@@ -551,7 +551,7 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 				state_: func() *MatchLabel {
 					state := &MatchLabel{}
 					state.sessionStartExpiry = 10 * 10
-					state.presenceMap = map[string]*EvrMatchPresence{
+					state.presenceMap = map[string]*MatchPresence{
 						uuid.Must(uuid.NewV4()).String(): {},
 					}
 
@@ -613,9 +613,9 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 			Level:            evr.LevelUnloaded,
 			RequiredFeatures: make([]string, 0),
 			Players:          make([]PlayerInfo, 0, SocialLobbyMaxSize),
-			presenceMap:      make(map[string]*EvrMatchPresence, SocialLobbyMaxSize),
+			presenceMap:      make(map[string]*MatchPresence, SocialLobbyMaxSize),
 			reservationMap:   make(map[string]*slotReservation, 2),
-			presenceByEvrID:  make(map[evr.EvrId]*EvrMatchPresence, SocialLobbyMaxSize),
+			presenceByEvrID:  make(map[evr.EvrId]*MatchPresence, SocialLobbyMaxSize),
 			goals:            make([]*evr.MatchGoal, 0),
 
 			TeamAlignments:       make(map[string]int, SocialLobbyMaxSize),
@@ -629,10 +629,10 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 		return state
 	}
 
-	presences := make([]*EvrMatchPresence, 0)
+	presences := make([]*MatchPresence, 0)
 	for i := 0; i < 10; i++ {
 		s := strconv.FormatInt(int64(i), 10)
-		presence := &EvrMatchPresence{
+		presence := &MatchPresence{
 			Node:           "testnode",
 			SessionID:      uuid.NewV5(uuid.Nil, fmt.Sprintf("session-%d", i)),
 			LoginSessionID: uuid.NewV5(uuid.Nil, fmt.Sprintf("login-%d", i)),
@@ -703,8 +703,8 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 					state.Size = 2
 					state.PlayerLimit = 2
 					state.PlayerCount = 2
-					state.presenceMap = func() map[string]*EvrMatchPresence {
-						m := make(map[string]*EvrMatchPresence)
+					state.presenceMap = func() map[string]*MatchPresence {
+						m := make(map[string]*MatchPresence)
 						for _, p := range presences[1:3] {
 							m[p.EntrantID(state.ID).String()] = p
 						}
@@ -732,8 +732,8 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				state.Size = 3
 				state.PlayerLimit = 2
 				state.PlayerCount = 2
-				state.presenceMap = func() map[string]*EvrMatchPresence {
-					m := make(map[string]*EvrMatchPresence)
+				state.presenceMap = func() map[string]*MatchPresence {
+					m := make(map[string]*MatchPresence)
 					for _, p := range presences[1:3] {
 						m[p.EntrantID(state.ID).String()] = p
 					}
@@ -761,8 +761,8 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 					state.Size = 2
 					state.PlayerLimit = 2
 					state.PlayerCount = 2
-					state.presenceMap = func() map[string]*EvrMatchPresence {
-						m := make(map[string]*EvrMatchPresence)
+					state.presenceMap = func() map[string]*MatchPresence {
+						m := make(map[string]*MatchPresence)
 						for _, p := range presences[1:3] {
 							m[p.EntrantID(state.ID).String()] = p
 						}
@@ -784,8 +784,8 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				state.Size = 2
 				state.PlayerLimit = 2
 				state.PlayerCount = 2
-				state.presenceMap = func() map[string]*EvrMatchPresence {
-					m := make(map[string]*EvrMatchPresence)
+				state.presenceMap = func() map[string]*MatchPresence {
+					m := make(map[string]*MatchPresence)
 					for _, p := range presences[1:3] {
 						m[p.EntrantID(state.ID).String()] = p
 					}
@@ -811,8 +811,8 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 					state.Size = 2
 					state.PlayerLimit = 2
 					state.PlayerCount = 2
-					state.presenceMap = func() map[string]*EvrMatchPresence {
-						m := make(map[string]*EvrMatchPresence)
+					state.presenceMap = func() map[string]*MatchPresence {
+						m := make(map[string]*MatchPresence)
 						for _, p := range presences[1:3] {
 							m[p.EntrantID(state.ID).String()] = p
 						}
@@ -830,8 +830,8 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				state.Size = 2
 				state.PlayerLimit = 2
 				state.PlayerCount = 2
-				state.presenceMap = func() map[string]*EvrMatchPresence {
-					m := make(map[string]*EvrMatchPresence)
+				state.presenceMap = func() map[string]*MatchPresence {
+					m := make(map[string]*MatchPresence)
 					for _, p := range presences[1:3] {
 						m[p.EntrantID(state.ID).String()] = p
 					}
@@ -854,8 +854,8 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 					state.Size = 2
 					state.PlayerLimit = 2
 					state.PlayerCount = 2
-					state.presenceMap = func() map[string]*EvrMatchPresence {
-						m := make(map[string]*EvrMatchPresence)
+					state.presenceMap = func() map[string]*MatchPresence {
+						m := make(map[string]*MatchPresence)
 						for _, p := range presences[1:3] {
 							m[p.EntrantID(state.ID).String()] = p
 						}
@@ -873,8 +873,8 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				state.Size = 2
 				state.PlayerLimit = 2
 				state.PlayerCount = 2
-				state.presenceMap = func() map[string]*EvrMatchPresence {
-					m := make(map[string]*EvrMatchPresence)
+				state.presenceMap = func() map[string]*MatchPresence {
+					m := make(map[string]*MatchPresence)
 					for _, p := range presences[1:3] {
 						m[p.EntrantID(state.ID).String()] = p
 					}
@@ -943,9 +943,9 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 			Level:            evr.LevelUnloaded,
 			RequiredFeatures: make([]string, 0),
 			Players:          make([]PlayerInfo, 0, SocialLobbyMaxSize),
-			presenceMap:      make(map[string]*EvrMatchPresence, SocialLobbyMaxSize),
+			presenceMap:      make(map[string]*MatchPresence, SocialLobbyMaxSize),
 			reservationMap:   make(map[string]*slotReservation, 2),
-			presenceByEvrID:  make(map[evr.EvrId]*EvrMatchPresence, SocialLobbyMaxSize),
+			presenceByEvrID:  make(map[evr.EvrId]*MatchPresence, SocialLobbyMaxSize),
 			goals:            make([]*evr.MatchGoal, 0),
 
 			TeamAlignments:       make(map[string]int, SocialLobbyMaxSize),
@@ -959,10 +959,10 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 		return state
 	}
 
-	presences := make([]*EvrMatchPresence, 0)
+	presences := make([]*MatchPresence, 0)
 	for i := 0; i < 10; i++ {
 		s := strconv.FormatInt(int64(i), 10)
-		presence := &EvrMatchPresence{
+		presence := &MatchPresence{
 			Node:           "testnode",
 			SessionID:      uuid.NewV5(uuid.Nil, fmt.Sprintf("session-%d", i)),
 			LoginSessionID: uuid.NewV5(uuid.Nil, fmt.Sprintf("login-%d", i)),
@@ -1006,8 +1006,8 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 					state.PlayerLimit = 8
 					state.TeamSize = 4
 
-					state.presenceMap = func() map[string]*EvrMatchPresence {
-						m := make(map[string]*EvrMatchPresence)
+					state.presenceMap = func() map[string]*MatchPresence {
+						m := make(map[string]*MatchPresence)
 						for i, p := range presences[1:9] {
 							if i >= 4 {
 								p.RoleAlignment = evr.TeamOrange
@@ -1041,8 +1041,8 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 					state.PlayerLimit = 8
 					state.TeamSize = 4
 
-					state.presenceMap = func() map[string]*EvrMatchPresence {
-						m := make(map[string]*EvrMatchPresence)
+					state.presenceMap = func() map[string]*MatchPresence {
+						m := make(map[string]*MatchPresence)
 						for i, p := range presences[1:9] {
 							if i >= 4 {
 								p.RoleAlignment = evr.TeamOrange

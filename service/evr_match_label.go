@@ -2,26 +2,27 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"slices"
-	"sort"
 
-	"strings"
 	"time"
-
-	"golang.org/x/exp/constraints"
 
 	evr "github.com/echotools/nakama/v3/protocol"
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/intinig/go-openskill/rating"
-	"github.com/intinig/go-openskill/types"
 )
 
-type slotReservation struct {
-	Presence *EvrMatchPresence
-	Expiry   time.Time
-}
+var (
+	ErrJoinRejectReasonUnassignedLobby           = errors.New("unassigned lobby")
+	ErrJoinRejectReasonDuplicateJoin             = errors.New("duplicate join")
+	ErrJoinRejectDuplicateEvrID                  = errors.New("duplicate evr id")
+	ErrJoinRejectReasonLobbyFull                 = errors.New("lobby full")
+	ErrJoinRejectReasonFailedToAssignTeam        = errors.New("failed to assign team")
+	ErrJoinInvalidRoleForLevel                   = errors.New("invalid role for level")
+	ErrJoinRejectReasonPartyMembersMustHaveRoles = errors.New("party members must have roles")
+	ErrJoinRejectReasonMatchTerminating          = errors.New("match terminating")
+	ErrJoinRejectReasonMatchClosed               = errors.New("match closed to new entrants")
+	ErrJoinRejectReasonFeatureMismatch           = errors.New("feature mismatch")
+)
 
 type MatchLabel struct {
 	ID             MatchID      `json:"id"`                   // The Session Id used by EVR (the same as match id)
@@ -50,33 +51,6 @@ type MatchLabel struct {
 	SessionSettings *evr.LobbySessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
 	TeamAlignments  map[string]int            `json:"team_alignments,omitempty"`  // map[userID]TeamIndex
 
-	server          runtime.Presence                // The broadcaster's presence
-	levelLoaded     bool                            // Whether the server has been sent the start instruction.
-	presenceMap     map[string]*EvrMatchPresence    // [sessionId]EvrMatchPresence
-	reservationMap  map[string]*slotReservation     // map[sessionID]slotReservation
-	presenceByEvrID map[evr.EvrId]*EvrMatchPresence // map[evrID]EvrMatchPresence
-
-	joinTimestamps       map[string]time.Time // The timestamps of when players joined the match. map[sessionId]time.Time
-	joinTimeMilliseconds map[string]int64     // The round clock time of when players joined the match. map[sessionId]time.Time
-	sessionStartExpiry   int64                // The tick count at which the match will be shut down if it has not started.
-	tickRate             int64                // The number of ticks per second.
-	emptyTicks           int64                // The number of ticks the match has been empty.
-	terminateTick        int64                // The tick count at which the match will be shut down.
-	goals                []*evr.MatchGoal     // The goals scored in the match.
-}
-
-func (s *MatchLabel) LoadAndDeleteReservation(sessionID string) (*EvrMatchPresence, bool) {
-	r, ok := s.reservationMap[sessionID]
-
-	if !ok || r.Expiry.Before(time.Now()) {
-		delete(s.reservationMap, sessionID)
-		return nil, false
-	}
-
-	delete(s.reservationMap, sessionID)
-	s.rebuildCache()
-
-	return r.Presence, true
 }
 
 func (s *MatchLabel) IsPublic() bool {
@@ -248,282 +222,6 @@ func (s *MatchLabel) GetEntrantConnectMessage(role int, isPCVR bool, disableEncr
 	return evr.NewLobbySessionSuccess(s.Mode, s.ID.UUID, s.GetGroupID(), s.GameServer.Endpoint, int16(role), isPCVR, disableEncryption, disableMAC).Version5()
 }
 
-func (s *MatchLabel) MetricsTags() map[string]string {
-
-	tags := map[string]string{
-		"mode":        s.Mode.String(),
-		"level":       s.Level.String(),
-		"type":        s.LobbyType.String(),
-		"group_id":    s.GetGroupID().String(),
-		"operator_id": s.GameServer.OperatorID.String(),
-	}
-
-	if s.server != nil {
-		tags["operator_username"] = strings.TrimPrefix("broadcaster:", s.server.GetUsername())
-	}
-	return tags
-}
-
-func (s *MatchLabel) ratingOrdinal() float64 {
-	ordinals := make([]float64, 0, len(s.Players))
-	for _, p := range s.Players {
-		if p.RatingOrdinal == 0 || !p.IsCompetitor() {
-			continue
-		}
-		ordinals = append(ordinals, p.RatingOrdinal)
-	}
-	// Ignoring this error because we're sure to always being good guys with this
-	return median(ordinals)
-}
-
-// rebuildCache is called after the presences map is updated.
-func (s *MatchLabel) rebuildCache() {
-	presences := make([]*EvrMatchPresence, 0, len(s.presenceMap))
-	for _, p := range s.presenceMap {
-		presences = append(presences, p)
-	}
-
-	// Include the reservations in the cache.
-	for id, r := range s.reservationMap {
-		if r.Expiry.Before(time.Now()) {
-			delete(s.reservationMap, id)
-			continue
-		}
-		// Include the reservation in the cache.
-		presences = append(presences, r.Presence)
-	}
-
-	// Rebuild the lookup tables.
-	s.Size = len(presences)
-	s.Players = make([]PlayerInfo, 0, s.Size)
-	s.PlayerCount = 0
-	ratingScores := s.CalculateRatingWeights()
-	for _, p := range presences {
-		// Do not include spectators or moderators in player count
-		if p.RoleAlignment != evr.TeamSpectator && p.RoleAlignment != evr.TeamModerator {
-			s.PlayerCount++
-		}
-
-		if p.RoleAlignment == evr.TeamSpectator {
-			s.Players = append(s.Players, PlayerInfo{
-				UserID:      p.UserID.String(),
-				Username:    p.Username,
-				DisplayName: p.DisplayName,
-				EvrID:       p.EvrID,
-				Team:        TeamIndex(p.RoleAlignment),
-				ClientIP:    p.ClientIP,
-				DiscordID:   p.DiscordID,
-				SessionID:   p.SessionID.String(),
-				JoinTime:    s.joinTimeMilliseconds[p.SessionID.String()],
-				GeoHash:     p.GeoHash,
-			})
-		} else {
-			ordinal := rating.Ordinal(p.Rating)
-			switch s.Mode {
-			case evr.ModeArenaPublic:
-				s.Players = append(s.Players, PlayerInfo{
-					UserID:         p.UserID.String(),
-					Username:       p.Username,
-					DisplayName:    p.DisplayName,
-					EvrID:          p.EvrID,
-					Team:           TeamIndex(p.RoleAlignment),
-					ClientIP:       p.ClientIP,
-					DiscordID:      p.DiscordID,
-					PartyID:        p.PartyID.String(),
-					RatingMu:       p.Rating.Mu,
-					RatingSigma:    p.Rating.Sigma,
-					RatingOrdinal:  ordinal,
-					RatingScore:    ratingScores[p.EvrID],
-					JoinTime:       s.joinTimeMilliseconds[p.SessionID.String()],
-					RankPercentile: p.RankPercentile,
-					SessionID:      p.SessionID.String(),
-					IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
-					GeoHash:        p.GeoHash,
-					PingMillis:     p.PingMillis,
-				})
-			case evr.ModeCombatPublic, evr.ModeSocialPublic:
-				s.Players = append(s.Players, PlayerInfo{
-					UserID:         p.UserID.String(),
-					Username:       p.Username,
-					DisplayName:    p.DisplayName,
-					EvrID:          p.EvrID,
-					Team:           TeamIndex(p.RoleAlignment),
-					ClientIP:       p.ClientIP,
-					DiscordID:      p.DiscordID,
-					PartyID:        p.PartyID.String(),
-					JoinTime:       s.joinTimeMilliseconds[p.SessionID.String()],
-					RatingMu:       p.Rating.Mu,
-					RatingSigma:    p.Rating.Sigma,
-					RatingOrdinal:  ordinal,
-					RatingScore:    ratingScores[p.EvrID],
-					RankPercentile: p.RankPercentile,
-					SessionID:      p.SessionID.String(),
-					IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
-					GeoHash:        p.GeoHash,
-					PingMillis:     p.PingMillis,
-				})
-
-			case evr.ModeArenaPrivate, evr.ModeCombatPrivate:
-				s.Players = append(s.Players, PlayerInfo{
-					UserID:        p.UserID.String(),
-					Username:      p.Username,
-					DisplayName:   p.DisplayName,
-					EvrID:         p.EvrID,
-					Team:          AnyTeam, // Roles are not tracked in private matches.
-					ClientIP:      p.ClientIP,
-					DiscordID:     p.DiscordID,
-					PartyID:       p.PartyID.String(),
-					SessionID:     p.SessionID.String(),
-					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
-					GeoHash:       p.GeoHash,
-					PingMillis:    p.PingMillis,
-				})
-			case evr.ModeSocialPrivate:
-				s.Players = append(s.Players, PlayerInfo{
-					UserID:        p.UserID.String(),
-					Username:      p.Username,
-					DisplayName:   p.DisplayName,
-					EvrID:         p.EvrID,
-					Team:          TeamIndex(p.RoleAlignment),
-					ClientIP:      p.ClientIP,
-					DiscordID:     p.DiscordID,
-					PartyID:       p.PartyID.String(),
-					SessionID:     p.SessionID.String(),
-					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
-					GeoHash:       p.GeoHash,
-					PingMillis:    p.PingMillis,
-				})
-			default:
-				s.Players = append(s.Players, PlayerInfo{
-					UserID:        p.UserID.String(),
-					Username:      p.Username,
-					DisplayName:   p.DisplayName,
-					EvrID:         p.EvrID,
-					Team:          TeamIndex(p.RoleAlignment),
-					ClientIP:      p.ClientIP,
-					DiscordID:     p.DiscordID,
-					PartyID:       p.PartyID.String(),
-					SessionID:     p.SessionID.String(),
-					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
-					GeoHash:       p.GeoHash,
-					PingMillis:    p.PingMillis,
-				})
-			}
-		}
-		if p.MatchmakingAt != nil {
-			s.joinTimestamps[p.SessionID.String()] = *p.MatchmakingAt
-		}
-		switch s.Mode {
-		case evr.ModeArenaPublic:
-			teamRatings := make([]types.Team, 2)
-
-			teams := make(map[TeamIndex]RatedTeam, 2)
-			for _, p := range s.Players {
-				if p.Team != BlueTeam && p.Team != OrangeTeam {
-					continue
-				}
-				teams[p.Team] = append(teams[p.Team], p.Rating())
-				teamRatings[p.Team] = append(teamRatings[p.Team], p.Rating())
-			}
-
-			// Calculate the average rank percentile for each team
-			rankPercentileAverages := make(map[TeamIndex]float64, 2)
-			for _, p := range s.Players {
-				if p.Team != BlueTeam && p.Team != OrangeTeam {
-					continue
-				}
-				rankPercentileAverages[p.Team] += p.RankPercentile
-			}
-
-			for t, r := range rankPercentileAverages {
-				if r > 0 {
-					rankPercentileAverages[t] = r / float64(len(teams[t]))
-				}
-			}
-
-			winPredictions := rating.PredictWin(teamRatings, nil)
-			meta := make(map[TeamIndex]TeamMetadata, 2)
-			for _, t := range [...]TeamIndex{BlueTeam, OrangeTeam} {
-				meta[t] = TeamMetadata{
-					Strength:              teams[t].Strength(),
-					RankPercentileAverage: rankPercentileAverages[t],
-					PredictWin:            winPredictions[t],
-				}
-			}
-
-			if s.GameState == nil {
-				s.GameState = &GameState{}
-			}
-			s.GameState.Teams = meta
-		}
-	}
-	// Sort the players by team, party ID, and join time.
-	sort.SliceStable(s.Players, func(i, j int) bool {
-		// by team
-		if s.Players[i].Team < s.Players[j].Team {
-			return true
-		}
-		if s.Players[i].Team > s.Players[j].Team {
-			return false
-		}
-
-		// by party ID
-		if s.Players[i].PartyID < s.Players[j].PartyID {
-			return true
-		}
-		if s.Players[i].PartyID > s.Players[j].PartyID {
-			return false
-		}
-
-		// by join time
-		return s.Players[i].JoinTime < s.Players[j].JoinTime
-	})
-
-	// Recalculate the match's aggregate rank percentile
-	s.RankPercentile = 0.0
-
-	s.RatingOrdinal = s.ratingOrdinal()
-
-	count := 0
-	if len(s.Players) > 0 {
-		for _, p := range s.Players {
-			if (p.Team != BlueTeam && p.Team != OrangeTeam) || p.RankPercentile == 0 {
-				continue
-			}
-			count++
-			s.RankPercentile += p.RankPercentile
-		}
-		if count > 0 {
-			s.RankPercentile = s.RankPercentile / float64(count)
-		}
-	}
-}
-
-func (l *MatchLabel) CalculateRatingWeights() map[evr.EvrId]int {
-	// Calculate the weight of each player's rating in the match
-	byPlayer := make(map[evr.EvrId]int)
-	byTeam := make(map[TeamIndex]int)
-	for _, g := range l.goals {
-		byPlayer[g.XPID] += g.PointsValue            // Shooter gets the points
-		byTeam[TeamIndex(g.TeamID)] += g.PointsValue // Team gets the points
-		if !g.PrevPlayerXPID.IsNil() && g.PrevPlayerXPID != g.XPID {
-			byPlayer[g.PrevPlayerXPID] += g.PointsValue - 1 // Assist gets the points - 1
-		}
-	}
-
-	winningTeam := BlueTeam
-	if byTeam[BlueTeam] < byTeam[OrangeTeam] {
-		winningTeam = OrangeTeam
-	}
-
-	for _, p := range l.Players {
-		if p.Team == winningTeam {
-			byPlayer[p.EvrID] += 4
-		}
-	}
-	return byPlayer
-}
-
 func (l *MatchLabel) PublicView() *MatchLabel {
 	// Remove private data
 	var gs *GameState
@@ -597,27 +295,4 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 
 	}
 	return v
-}
-
-type Number interface {
-	constraints.Float | constraints.Integer
-}
-
-func median[T Number](data []T) float64 {
-	dataCopy := make([]T, len(data))
-	copy(dataCopy, data)
-
-	slices.Sort(dataCopy)
-
-	var median float64
-	l := len(dataCopy)
-	if l == 0 {
-		return 0
-	} else if l%2 == 0 {
-		median = float64((dataCopy[l/2-1] + dataCopy[l/2]) / 2.0)
-	} else {
-		median = float64(dataCopy[l/2])
-	}
-
-	return median
 }

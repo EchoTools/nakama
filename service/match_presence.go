@@ -20,10 +20,8 @@ func init() {
 	EntrantIDSaltStr = EntrantIDSalt.String()
 }
 
-var _ runtime.Presence = &EvrMatchPresence{}
-
 // Represents identity information for a single match participant.
-type EvrMatchPresence struct {
+type MatchPresence struct {
 	Node              string       `json:"node,omitempty"`
 	SessionID         uuid.UUID    `json:"session_id,omitempty"`       // The Player's "match" connection session ID
 	LoginSessionID    uuid.UUID    `json:"login_session_id,omitempty"` // The Player's "login" connection session ID
@@ -49,56 +47,56 @@ type EvrMatchPresence struct {
 	MatchmakingAt     *time.Time   `json:"matchmaking_at,omitempty"` // Whether the player is matchmaking
 }
 
-func (p EvrMatchPresence) EntrantID(matchID MatchID) uuid.UUID {
+func (p MatchPresence) EntrantID(matchID MatchID) uuid.UUID {
 	return NewEntrantID(matchID, p.EvrID)
 }
 
-func (p EvrMatchPresence) GetUserId() string {
+func (p MatchPresence) GetUserId() string {
 	return p.UserID.String()
 }
-func (p EvrMatchPresence) GetSessionId() string {
+func (p MatchPresence) GetSessionId() string {
 	return p.SessionID.String()
 }
-func (p EvrMatchPresence) GetNodeId() string {
+func (p MatchPresence) GetNodeId() string {
 	return p.Node
 }
-func (p EvrMatchPresence) GetHidden() bool {
+func (p MatchPresence) GetHidden() bool {
 	return false
 }
-func (p EvrMatchPresence) GetPersistence() bool {
+func (p MatchPresence) GetPersistence() bool {
 	return false
 }
-func (p EvrMatchPresence) GetUsername() string {
+func (p MatchPresence) GetUsername() string {
 	return p.Username
 }
-func (p EvrMatchPresence) GetStatus() string {
+func (p MatchPresence) GetStatus() string {
 	data, _ := json.Marshal(p)
 	return string(data)
 }
-func (p *EvrMatchPresence) GetReason() runtime.PresenceReason {
+func (p *MatchPresence) GetReason() runtime.PresenceReason {
 	return runtime.PresenceReasonUnknown
 }
-func (p EvrMatchPresence) GetEvrID() string {
+func (p MatchPresence) GetEvrID() string {
 	return p.EvrID.Token()
 }
 
-func (p EvrMatchPresence) IsPlayer() bool {
+func (p MatchPresence) IsPlayer() bool {
 	return p.RoleAlignment != evr.TeamModerator && p.RoleAlignment != evr.TeamSpectator
 }
 
-func (p EvrMatchPresence) IsModerator() bool {
+func (p MatchPresence) IsModerator() bool {
 	return p.RoleAlignment == evr.TeamModerator
 }
 
-func (p EvrMatchPresence) IsSpectator() bool {
+func (p MatchPresence) IsSpectator() bool {
 	return p.RoleAlignment == evr.TeamSpectator
 }
 
-func (p EvrMatchPresence) IsSocial() bool {
+func (p MatchPresence) IsSocial() bool {
 	return p.RoleAlignment == evr.TeamSocial
 }
 
-func (p EvrMatchPresence) String() string {
+func (p MatchPresence) String() string {
 	data, err := json.Marshal(p)
 	if err != nil {
 		return ""
@@ -110,14 +108,14 @@ func NewEntrantID(matchID MatchID, evrID evr.EvrId) uuid.UUID {
 	return uuid.NewV5(matchID.UUID, EntrantIDSaltStr+evrID.String())
 }
 
-func EntrantPresenceFromSession(session server.Session, partyID uuid.UUID, roleAlignment int, rating types.Rating, rankPercentile float64, groupID string, ping int, query string) (*EvrMatchPresence, error) {
+func EntrantPresenceFromSession(session server.Session, partyID uuid.UUID, roleAlignment int, rating types.Rating, rankPercentile float64, groupID string, ping int, query string) (*MatchPresence, error) {
 
 	params, ok := LoadParams(session.Context())
 	if !ok {
 		return nil, errors.New("failed to get session parameters")
 	}
 
-	return &EvrMatchPresence{
+	return &MatchPresence{
 		Node:              params.node,
 		UserID:            session.UserID(),
 		SessionID:         session.ID(),

@@ -293,7 +293,7 @@ func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.
 	}
 }
 
-func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, entrants ...*EvrMatchPresence) (*MatchLabel, error) {
+func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, entrants ...*MatchPresence) (*MatchLabel, error) {
 	if createLobbyMu.TryLock() {
 		go func() {
 			// Hold the lock for enough time to create the server
@@ -331,7 +331,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 	return label, nil
 }
 
-func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, session server.Session, lobbyParams *LobbySessionParameters, enableFailsafe bool, entrants ...*EvrMatchPresence) error {
+func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, session server.Session, lobbyParams *LobbySessionParameters, enableFailsafe bool, entrants ...*MatchPresence) error {
 	interval := 3 * time.Second
 	if lobbyParams.Mode == evr.ModeSocialPublic {
 		interval = 1 * time.Second
@@ -576,9 +576,9 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 	return nil
 }
 
-func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry server.SessionRegistry, lobbyParams *LobbySessionParameters, sessionIDs ...uuid.UUID) ([]*EvrMatchPresence, error) {
+func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry server.SessionRegistry, lobbyParams *LobbySessionParameters, sessionIDs ...uuid.UUID) ([]*MatchPresence, error) {
 
-	entrantPresences := make([]*EvrMatchPresence, 0, len(sessionIDs))
+	entrantPresences := make([]*MatchPresence, 0, len(sessionIDs))
 	for _, sessionID := range sessionIDs {
 		session := sessionRegistry.Get(sessionID)
 		if session == nil {

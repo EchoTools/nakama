@@ -7,7 +7,7 @@ import (
 func TestMatchState_SelectRole(t *testing.T) {
 	type fields struct {
 		meta        *MatchMeta
-		presenceMap map[string]*EvrMatchPresence
+		presenceMap map[string]*MatchPresence
 		alignments  map[string]int
 	}
 	type args struct {
@@ -27,7 +27,7 @@ func TestMatchState_SelectRole(t *testing.T) {
 					Visibility: "public",
 					Mode:       "arena",
 				},
-				presenceMap: map[string]*EvrMatchPresence{
+				presenceMap: map[string]*MatchPresence{
 					"1": {RoleAlignment: BlueRole},
 					"2": {RoleAlignment: BlueRole},
 					"3": {RoleAlignment: BlueRole},
@@ -51,7 +51,7 @@ func TestMatchState_SelectRole(t *testing.T) {
 					Visibility: "public",
 					Mode:       "combat",
 				},
-				presenceMap: map[string]*EvrMatchPresence{
+				presenceMap: map[string]*MatchPresence{
 					"1":  {RoleAlignment: BlueRole},
 					"2":  {RoleAlignment: BlueRole},
 					"3":  {RoleAlignment: BlueRole},
@@ -77,7 +77,7 @@ func TestMatchState_SelectRole(t *testing.T) {
 					Visibility: "public",
 					Mode:       "combat",
 				},
-				presenceMap: map[string]*EvrMatchPresence{
+				presenceMap: map[string]*MatchPresence{
 					"1": {RoleAlignment: BlueRole},
 					"2": {RoleAlignment: BlueRole},
 					"3": {RoleAlignment: BlueRole},
@@ -103,7 +103,7 @@ func TestMatchState_SelectRole(t *testing.T) {
 					Visibility: "public",
 					Mode:       "combat",
 				},
-				presenceMap: map[string]*EvrMatchPresence{
+				presenceMap: map[string]*MatchPresence{
 					"1": {RoleAlignment: BlueRole},
 					"2": {RoleAlignment: BlueRole},
 					"3": {RoleAlignment: BlueRole},
@@ -129,7 +129,7 @@ func TestMatchState_SelectRole(t *testing.T) {
 					Visibility: "public",
 					Mode:       "arena",
 				},
-				presenceMap: map[string]*EvrMatchPresence{
+				presenceMap: map[string]*MatchPresence{
 					"1": {RoleAlignment: BlueRole},
 					"2": {RoleAlignment: BlueRole},
 					"3": {RoleAlignment: BlueRole},
@@ -155,7 +155,7 @@ func TestMatchState_SelectRole(t *testing.T) {
 					Visibility: "public",
 					Mode:       "arena",
 				},
-				presenceMap: map[string]*EvrMatchPresence{
+				presenceMap: map[string]*MatchPresence{
 					"1": {RoleAlignment: BlueRole},
 					"2": {RoleAlignment: BlueRole},
 					"3": {RoleAlignment: BlueRole},
@@ -182,7 +182,7 @@ func TestMatchState_SelectRole(t *testing.T) {
 					Visibility: "public",
 					Mode:       "arena",
 				},
-				presenceMap: map[string]*EvrMatchPresence{
+				presenceMap: map[string]*MatchPresence{
 					"1": {RoleAlignment: BlueRole},
 					"2": {RoleAlignment: BlueRole},
 					"3": {RoleAlignment: BlueRole},
@@ -209,7 +209,7 @@ func TestMatchState_SelectRole(t *testing.T) {
 					Visibility: "public",
 					Mode:       "arena",
 				},
-				presenceMap: map[string]*EvrMatchPresence{
+				presenceMap: map[string]*MatchPresence{
 					"1": {RoleAlignment: BlueRole},
 					"2": {RoleAlignment: BlueRole},
 					"3": {RoleAlignment: BlueRole},
@@ -236,7 +236,7 @@ func TestMatchState_SelectRole(t *testing.T) {
 					Visibility: "public",
 					Mode:       "arena",
 				},
-				presenceMap: map[string]*EvrMatchPresence{
+				presenceMap: map[string]*MatchPresence{
 					"1": {RoleAlignment: BlueRole},
 					"2": {RoleAlignment: BlueRole},
 					"3": {RoleAlignment: BlueRole},
@@ -263,7 +263,7 @@ func TestMatchState_SelectRole(t *testing.T) {
 					Visibility: "public",
 					Mode:       "arena",
 				},
-				presenceMap: map[string]*EvrMatchPresence{
+				presenceMap: map[string]*MatchPresence{
 					"1": {RoleAlignment: BlueRole},
 					"2": {RoleAlignment: BlueRole},
 					"3": {RoleAlignment: BlueRole},
@@ -290,7 +290,7 @@ func TestMatchState_SelectRole(t *testing.T) {
 					Visibility: "private",
 					Mode:       "combat",
 				},
-				presenceMap: map[string]*EvrMatchPresence{
+				presenceMap: map[string]*MatchPresence{
 					"1": {RoleAlignment: BlueRole},
 					//"2": {RoleAlignment: BlueRole},
 					//"3": {RoleAlignment: BlueRole},
@@ -317,7 +317,7 @@ func TestMatchState_SelectRole(t *testing.T) {
 					Visibility: "private",
 					Mode:       "combat",
 				},
-				presenceMap: map[string]*EvrMatchPresence{
+				presenceMap: map[string]*MatchPresence{
 					//"1": {RoleAlignment: BlueRole},
 					"2": {RoleAlignment: BlueRole},
 					"3": {RoleAlignment: BlueRole},
@@ -344,7 +344,7 @@ func TestMatchState_SelectRole(t *testing.T) {
 					Visibility: "public",
 					Mode:       "social",
 				},
-				presenceMap: map[string]*EvrMatchPresence{
+				presenceMap: map[string]*MatchPresence{
 					//"1": {RoleAlignment: BlueRole},
 					//"2": {RoleAlignment: BlueRole},
 					//"3": {RoleAlignment: BlueRole},
@@ -384,7 +384,7 @@ func TestMatchState_SelectRole(t *testing.T) {
 					Visibility: "public",
 					Mode:       "social",
 				},
-				presenceMap: map[string]*EvrMatchPresence{
+				presenceMap: map[string]*MatchPresence{
 					//"1": {RoleAlignment: BlueRole},
 					//"2": {RoleAlignment: BlueRole},
 					//"3": {RoleAlignment: BlueRole},
@@ -424,7 +424,7 @@ func TestMatchState_SelectRole(t *testing.T) {
 					Visibility: "public",
 					Mode:       "social",
 				},
-				presenceMap: map[string]*EvrMatchPresence{},
+				presenceMap: map[string]*MatchPresence{},
 			},
 			args: args{
 				desired: BlueRole,

@@ -32,14 +32,14 @@ type MatchDataStarted struct {
 }
 
 type MatchDataPlayerJoin struct {
-	State    *MatchLabel       `json:"state"`
-	Presence *EvrMatchPresence `json:"presence"`
+	State    *MatchLabel    `json:"state"`
+	Presence *MatchPresence `json:"presence"`
 }
 
 type MatchDataPlayerLeave struct {
-	State    *MatchLabel       `json:"state"`
-	Presence *EvrMatchPresence `json:"presence"`
-	Reason   string            `json:"reason"`
+	Label    *MatchLabel    `json:"state"`
+	Presence *MatchPresence `json:"presence"`
+	Reason   string         `json:"reason"`
 }
 
 type MatchDataRemoteLogSet struct {

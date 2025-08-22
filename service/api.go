@@ -12,31 +12,72 @@ import (
 	"github.com/go-redis/redis"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server"
-	"github.com/jackc/pgtype"
+	"github.com/heroiclabs/nakama/v3/social"
+	"github.com/jackc/pgx/v5/pgtype"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 	_ "google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.DB, config server.Config, nk runtime.NakamaModule, initializer runtime.Initializer, sessionRegistry server.SessionRegistry, matchRegistry server.MatchRegistry, tracker server.Tracker, metrics server.Metrics, sessionCache server.SessionCache) (err error) {
-	// Add the environment variables to the context
+var (
+	nakamaStartTime = time.Now().UTC()
+)
 
-	/*
-		if err := registerAPIGuards(initializer); err != nil {
-			return fmt.Errorf("unable to register API guards: %w", err)
-		}
-	*/
+const (
+	GroupGlobalDevelopers        = "Global Developers"
+	GroupGlobalOperators         = "Global Operators"
+	GroupGlobalTesters           = "Global Testers"
+	GroupGlobalBots              = "Global Bots"
+	GroupGlobalBadgeAdmins       = "Global Badge Admins"
+	GroupGlobalPrivateDataAccess = "Global Private Data Access"
+	GroupGlobalRequire2FA        = "Global Require 2FA"
+	SystemGroupLangTag           = "system"
+	GuildGroupLangTag            = "guild"
+)
+
+func StartEVRServer(logger *zap.Logger,
+	startupLogger *zap.Logger,
+	db *sql.DB,
+	protojsonMarshaler *protojson.MarshalOptions,
+	protojsonUnmarshaler *protojson.UnmarshalOptions,
+	config server.Config,
+	version string,
+	socialClient *social.Client,
+	storageIndex server.StorageIndex,
+	leaderboardCache server.LeaderboardCache,
+	leaderboardRankCache server.LeaderboardRankCache,
+	leaderboardScheduler server.LeaderboardScheduler,
+	sessionRegistry server.SessionRegistry,
+	sessionCache server.SessionCache,
+	statusRegistry server.StatusRegistry,
+	matchRegistry server.MatchRegistry,
+	matchmaker server.Matchmaker,
+	partyRegistry server.PartyRegistry,
+	tracker server.Tracker,
+	router server.MessageRouter,
+	streamManager server.StreamManager,
+	metrics server.Metrics,
+	runtime *server.Runtime,
+	runtimeInfo *server.RuntimeInfo,
+	nkPipeline *server.Pipeline,
+) (*EVRPipeline, error) {
 
 	var (
 		vars = config.GetRuntime().Environment
 		sbmm = NewSkillBasedMatchmaker()
 	)
 
+	runtime.AfterReadStorageObjects = func(ctx context.Context, logger *zap.Logger, userID, username string, vars map[string]string, expiry int64, clientIP, clientPort string, out *api.StorageObjects, in *api.ReadStorageObjectsRequest) error {
+
+	}
 	// Register hooks
 	if err = initializer.RegisterAfterReadStorageObjects(AfterReadStorageObjectsHook); err != nil {
 		return fmt.Errorf("unable to register AfterReadStorageObjects hook: %w", err)
@@ -188,19 +229,161 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	return nil
 }
 
-// connectRedis connects to the Redis server using the provided URL and returns a redis.Client.
-func connectRedis(ctx context.Context, redisURL string) (*redis.Client, error) {
-	redisOptions, err := redis.ParseURL(redisURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse Redis URI: %v", err)
+func registerRPCs(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, dg *discordgo.Session, matchmaker server.Matchmaker, sbmm *SkillBasedMatchmaker) error {
+	rpcHandler := NewRPCHandler(ctx, db, dg)
+
+	// Register RPC's for device linking
+	rpcs := map[string]func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error){
+		"account/search":                AccountSearchRPC,
+		"account/lookup":                rpcHandler.AccountLookupRPC,
+		"account/authenticate/password": AuthenticatePasswordRPC,
+		"leaderboard/haystack":          rpcHandler.LeaderboardHaystackRPC,
+		"leaderboard/records":           rpcHandler.LeaderboardRecordsListRPC,
+		"link/device":                   LinkDeviceRpc,
+		"link/usernamedevice":           LinkUserIdDeviceRpc,
+		"signin/discord":                DiscordSignInRpc,
+		"match/public":                  rpcHandler.MatchListPublicRPC,
+		"match":                         MatchRPC,
+		"match/prepare":                 PrepareMatchRPC,
+		"match/terminate":               shutdownMatchRpc,
+		"match/build":                   BuildMatchRPC,
+		"matchmaker/stream":             MatchmakerStreamRPC,
+		"matchmaker/state":              MatchmakerStateRPCFactory(matchmaker),
+		"player/setnextmatch":           SetNextMatchRPC,
+		"player/statistics":             PlayerStatisticsRPC,
+		"player/kick":                   KickPlayerRPC,
+		"player/profile":                UserServerProfileRPC,
+		"link":                          LinkingAppRpc,
+		"evr/servicestatus":             rpcHandler.ServiceStatusRPC,
+		"importloadouts":                ImportLoadoutsRpc,
+		"matchmaker/candidates":         MatchmakerCandidatesRPCFactory(sbmm),
+		"stream/join":                   StreamJoinRPC,
+		"server/score":                  ServerScoreRPC,
+		"server/scores":                 ServerScoresRPC,
+		"forcecheck":                    CheckForceUserRPC,
+		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
 	}
-	redisClient := redis.NewClient(redisOptions)
-	if err := redisClient.WithContext(ctx).Ping().Err(); err != nil {
-		// If the connection fails, return an error
-		redisClient.Close()
-		return nil, fmt.Errorf("failed to connect to Redis: %v", err)
+
+	for name, rpc := range rpcs {
+		if err := initializer.RegisterRpc(name, rpc); err != nil {
+			return fmt.Errorf("unable to register %s: %w", name, err)
+		}
 	}
-	return redisClient, nil
+	for name, rpc := range rpcs {
+		if err := initializer.RegisterRpc(name, rpc); err != nil {
+			return fmt.Errorf("unable to register %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// the pipeline is not available to (required for partyHandler, etc.) is not available to the RuntimeGoNakamaModule
+// the constructs all the required dependencies for those components, without isolating from the existing runtime module.
+// it copies the initializer's fields
+func buildInternalComponents(ctx context.Context, runtimeLogger runtime.Logger, zapLogger *zap.Logger, db *sql.DB, nk *server.RuntimeGoNakamaModule, initializer *server.RuntimeGoInitializer, config Config, router MessageRouter, eventQueue *server.RuntimeEventQueue, tracker server.Tracker, streamManager StreamManager, metrics server.Metrics, lobbyBuilder *LobbyBuilder, sbmm *SkillBasedMatchmaker) (PartyRegistry, server.Matchmaker, *server.Runtime) {
+
+	// The matchmaker only uses the runtime module for the override functions.
+	events := &RuntimeEventFunctions{}
+	if len(initializer.eventFunctions) > 0 {
+		events.eventFunction = func(ctx context.Context, evt *api.Event) {
+			eventQueue.Queue(func() {
+				for _, fn := range initializer.eventFunctions {
+					fn(ctx, initializer.logger, evt)
+				}
+			})
+		}
+		nk.SetEventFn(events.eventFunction)
+	}
+	if len(initializer.sessionStartFunctions) > 0 {
+		events.sessionStartFunction = func(userID, username string, vars map[string]string, expiry int64, sessionID, clientIP, clientPort, lang string, evtTimeSec int64) {
+			ctx := NewRuntimeGoContext(context.Background(), initializer.node, initializer.version, initializer.env, RuntimeExecutionModeEvent, nil, nil, expiry, userID, username, vars, sessionID, clientIP, clientPort, lang)
+			evt := &api.Event{
+				Name:      "session_start",
+				Timestamp: &timestamppb.Timestamp{Seconds: evtTimeSec},
+			}
+			eventQueue.Queue(func() {
+				for _, fn := range initializer.sessionStartFunctions {
+					fn(ctx, initializer.logger, evt)
+				}
+			})
+		}
+	}
+	if len(initializer.sessionEndFunctions) > 0 {
+		events.sessionEndFunction = func(userID, username string, vars map[string]string, expiry int64, sessionID, clientIP, clientPort, lang string, evtTimeSec int64, reason string) {
+			ctx := NewRuntimeGoContext(context.Background(), initializer.node, initializer.version, initializer.env, RuntimeExecutionModeEvent, nil, nil, expiry, userID, username, vars, sessionID, clientIP, clientPort, lang)
+			evt := &api.Event{
+				Name:       "session_end",
+				Properties: map[string]string{"reason": reason},
+				Timestamp:  &timestamppb.Timestamp{Seconds: evtTimeSec},
+			}
+			eventQueue.Queue(func() {
+				for _, fn := range initializer.sessionEndFunctions {
+					fn(ctx, initializer.logger, evt)
+				}
+			})
+		}
+	}
+	runtime := &Runtime{
+		matchCreateFunction:                    nk.matchCreateFn,
+		rpcFunctions:                           initializer.rpc,
+		beforeRtFunctions:                      initializer.beforeRt,
+		afterRtFunctions:                       initializer.afterRt,
+		beforeReqFunctions:                     initializer.beforeReq,
+		afterReqFunctions:                      initializer.afterReq,
+		matchmakerMatchedFunction:              lobbyBuilder.matchmakerMatchedFn,
+		matchmakerOverrideFunction:             sbmm.matchmakerOverrideFn,
+		tournamentEndFunction:                  initializer.tournamentEnd,
+		tournamentResetFunction:                initializer.tournamentReset,
+		purchaseNotificationAppleFunction:      initializer.purchaseNotificationApple,
+		subscriptionNotificationAppleFunction:  initializer.subscriptionNotificationApple,
+		purchaseNotificationGoogleFunction:     initializer.purchaseNotificationGoogle,
+		subscriptionNotificationGoogleFunction: initializer.subscriptionNotificationGoogle,
+		storageIndexFilterFunctions:            initializer.storageIndexFunctions,
+		httpHandlers:                           initializer.httpHandlers,
+		leaderboardResetFunction:               initializer.leaderboardReset,
+		eventFunctions:                         events,
+		shutdownFunction:                       initializer.shutdownFunction,
+		fleetManager:                           nk.fleetManager,
+	}
+	matchmaker := NewLocalMatchmaker(zapLogger, zapLogger, config, router, metrics, runtime)
+
+	partyRegistry := NewLocalPartyRegistry(zapLogger, config, matchmaker, tracker, streamManager, router, config.GetName())
+	tracker.SetPartyJoinListener(partyRegistry.Join)
+	tracker.SetPartyLeaveListener(partyRegistry.Leave)
+	// NOTE: this runtime will isolated:
+	// - before and after RT functions
+	// - rpc functions
+	// (i.e. they will have to be added to this as well as through the initializer)
+	return partyRegistry, matchmaker, runtime
+}
+
+func ServiceSettingsLoop(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) {
+	if _, err := ServiceSettingsLoad(ctx, nk); err != nil {
+		logger.WithField("err", err).Error("Failed to load global settings")
+		panic(err)
+	}
+	// Load the service settings every 30 seconds
+	interval := 30 * time.Second
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			ticker.Stop()
+			return
+		case <-ticker.C:
+			if _, err := ServiceSettingsLoad(ctx, nk); err != nil {
+				logger.WithField("error", err).Warn("Failed to load global settings")
+			}
+		}
+	}
+	return nil
+}
+
+type MatchLabelMeta struct {
+	TickRate  int
+	Presences []*rtapi.UserPresence
+	State     *MatchLabel
 }
 
 func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
@@ -249,8 +432,9 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 func RegisterIndexes(initializer runtime.Initializer) error {
 
 	// Register storage indexes for any Storables
-	storables := []StorableIndexer{
+	storables := []IndexedStorable{
 		&DisplayNameHistory{},
+		&GuildEnforcementJournal{},
 		&DeveloperApplications{},
 		&MatchmakingSettings{},
 		&VRMLPlayerSummary{},
@@ -291,7 +475,7 @@ func GetUserIDByDiscordID(ctx context.Context, db *sql.DB, customID string) (use
 		}
 	}
 	if !found {
-		return uuid.Nil.String(), server.ErrAccountNotFound
+		return uuid.Nil.String(), ErrAccountNotFound
 	}
 
 	return dbUserID, nil
@@ -379,7 +563,7 @@ func PartyMemberList(ctx context.Context, nk runtime.NakamaModule, partyID uuid.
 		return nil, status.Error(codes.Internal, "error getting node from context")
 	}
 	// Get the MatchIDs for the user from it's presence
-	presences, err := nk.StreamUserList(server.StreamModeParty, partyID.String(), "", node, true, true)
+	presences, err := nk.StreamUserList(StreamModeParty, partyID.String(), "", node, true, true)
 	if err != nil {
 		return nil, err
 	}
@@ -465,7 +649,7 @@ func PresenceByEntrantID(nk runtime.NakamaModule, matchID MatchID, entrantID uui
 
 func GetMatchIDBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID MatchID, presence runtime.Presence, err error) {
 
-	presences, err := nk.StreamUserList(StreamModeService, sessionID.String(), "", StreamLabelMatchService, false, true)
+	presences, err := nk.StreamUserList(StreamModeService, sessionID.String(), "", "", false, true)
 	if err != nil {
 		return MatchID{}, nil, fmt.Errorf("failed to get stream presences: %w", err)
 	}
@@ -476,7 +660,7 @@ func GetMatchIDBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchI
 	matchID = MatchIDFromStringOrNil(presences[0].GetStatus())
 	if !matchID.IsNil() {
 		// Verify that the user is actually in the match
-		if meta, err := nk.StreamUserGet(server.StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil || meta == nil {
+		if meta, err := nk.StreamUserGet(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil || meta == nil {
 			return MatchID{}, nil, ErrMatchNotFound
 		}
 		return matchID, presence, nil
@@ -544,7 +728,7 @@ func KickPlayerFromMatch(ctx context.Context, nk runtime.NakamaModule, matchID M
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
 
-	presences, err := nk.StreamUserList(server.StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, false, true)
+	presences, err := nk.StreamUserList(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, false, true)
 	if err != nil {
 		return fmt.Errorf("failed to get stream presences: %w", err)
 	}
@@ -584,38 +768,27 @@ func DisconnectUserID(ctx context.Context, nk runtime.NakamaModule, userID strin
 		}
 	}
 
-	// Get the user's presences
-	labels := []string{StreamLabelMatchService}
-	if includeLogin {
-		labels = append(labels, StreamLabelLoginService)
-	} else if includeGameserver {
-		labels = append(labels, StreamLabelGameServerService)
+	presences, err := nk.StreamUserList(StreamModeService, userID, "", "", false, true)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get stream presences: %w", err)
 	}
-
 	cnt := 0
-	for _, l := range labels {
+	for _, presence := range presences {
 
-		presences, err := nk.StreamUserList(StreamModeService, userID, "", l, false, true)
-		if err != nil {
-			return 0, fmt.Errorf("failed to get stream presences: %w", err)
-		}
+		// Add a delay to allow the match to process the kick
+		go func() {
+			if kickFirst {
+				<-time.After(5 * time.Second)
+			}
+			if err := nk.SessionDisconnect(ctx, presence.GetSessionId(), runtime.PresenceReasonDisconnect); err != nil {
+				// Ignore the error
+				return
+			}
+		}()
 
-		for _, presence := range presences {
-
-			// Add a delay to allow the match to process the kick
-			go func() {
-				if kickFirst {
-					<-time.After(5 * time.Second)
-				}
-				if err := nk.SessionDisconnect(ctx, presence.GetSessionId(), runtime.PresenceReasonDisconnect); err != nil {
-					// Ignore the error
-					return
-				}
-			}()
-
-			cnt++
-		}
+		cnt++
 	}
+
 	return cnt, nil
 }
 
@@ -668,8 +841,7 @@ func GetPartyGroupUserIDs(ctx context.Context, nk runtime.NakamaModule, groupNam
 }
 
 func RuntimeLoggerToZapLogger(logger runtime.Logger) *zap.Logger {
-	// TODO: This needs a refactor across the entire code-base.
-	panic("not implemented")
+	return logger.(*server.RuntimeGoLogger).logger
 }
 
 func SetNextMatchID(ctx context.Context, nk runtime.NakamaModule, userID string, matchID MatchID, role TeamIndex, hostDiscordID string) error {
@@ -687,19 +859,4 @@ func SetNextMatchID(ctx context.Context, nk runtime.NakamaModule, userID string,
 	}
 
 	return nil
-}
-
-func connectMongoDB(ctx context.Context, mongoURI string) (*mongo.Client, error) {
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to MongoDB: %v", err)
-	}
-
-	// Ping the database to verify connection
-	if err := client.Ping(ctx, nil); err != nil {
-		client.Disconnect(ctx)
-		return nil, fmt.Errorf("failed to ping MongoDB: %v", err)
-	}
-
-	return client, nil
 }

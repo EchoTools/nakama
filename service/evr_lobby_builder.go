@@ -173,7 +173,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*server.Matchma
 
 	// Split the entrants into teams, half and half
 
-	entrantPresences := make([]*EvrMatchPresence, 0, len(entrants))
+	entrantPresences := make([]*MatchPresence, 0, len(entrants))
 	sessions := make([]server.Session, 0, len(entrants))
 	for teamIndex, players := range teams {
 
@@ -260,16 +260,16 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*server.Matchma
 		return nil, fmt.Errorf("failed to get server session")
 	}
 
-	successful := make([]*EvrMatchPresence, 0, len(entrants))
-	errored := make([]*EvrMatchPresence, 0, len(entrants))
+	successful := make([]*MatchPresence, 0, len(entrants))
+	errored := make([]*MatchPresence, 0, len(entrants))
 	wg := &sync.WaitGroup{}
 	wg.Add(len(entrantPresences))
 
-	erroredCh := make(chan *EvrMatchPresence, len(entrantPresences))
-	succeededCh := make(chan *EvrMatchPresence, len(entrantPresences))
+	erroredCh := make(chan *MatchPresence, len(entrantPresences))
+	succeededCh := make(chan *MatchPresence, len(entrantPresences))
 
 	for i, p := range entrantPresences {
-		go func(session server.Session, p *EvrMatchPresence) {
+		go func(session server.Session, p *MatchPresence) {
 			defer wg.Done()
 			if p == nil {
 				return
