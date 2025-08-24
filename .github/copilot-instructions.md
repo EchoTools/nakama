@@ -188,3 +188,74 @@ curl "127.0.0.1:7350/v2/account/authenticate/device?create=true" \
 - EVR unit tests: 2-3 minutes
 
 **REMEMBER**: Cancel all operations that take more than 10 minutes.
+
+## PR and Ticket Management Workflow
+
+### Always Check Related Issues and PRs
+
+Before starting work and regularly throughout development:
+
+1. **Identify Related Issues**:
+   ```bash
+   # Use GitHub CLI or check the PR description for linked issues
+   gh issue list --search "in:title,body <keywords from your work>"
+   gh pr view <pr-number> --json body,title
+   ```
+
+2. **Check for Assigned Team Members**:
+   - Look for issue assignees and reviewers
+   - Check PR review requests and comments
+   - Identify subject matter experts mentioned in discussions
+
+3. **Review Comments and Feedback**:
+   - Read all issue comments from assigned team members
+   - Check PR review comments and suggestions
+   - Look for design decisions or requirements in discussions
+   - Pay attention to any concerns raised by reviewers
+
+### Incorporate Team Feedback
+
+Always consider feedback from:
+- **Issue Assignees**: Original issue owners and responsible parties
+- **PR Reviewers**: Requested reviewers and anyone who has commented
+- **Mentioned Users**: Anyone @mentioned in related discussions
+- **Previous Contributors**: Authors of related code changes
+
+### Before Completing Work
+
+**MANDATORY PRE-COMPLETION CHECKLIST**:
+
+- [ ] Check for new comments on related issues since last review
+- [ ] Check for new PR comments or review feedback
+- [ ] Verify all reviewer concerns have been addressed
+- [ ] Confirm implementation aligns with any design decisions in discussions
+- [ ] Check if any team members have provided additional requirements
+- [ ] Review any linked documentation or specifications mentioned in comments
+
+### GitHub Integration Commands
+
+```bash
+# List issues related to current work
+gh issue list --assignee @me --state open
+
+# Check specific issue comments
+gh issue view <issue-number> --comments
+
+# View PR with all comments
+gh pr view <pr-number> --comments
+
+# Check review status
+gh pr checks <pr-number>
+gh pr review --list <pr-number>
+```
+
+### Red Flags to Watch For
+
+Stop and ask for clarification if you encounter:
+- Conflicting feedback from different team members
+- Requests for major architectural changes
+- Security or performance concerns raised by reviewers
+- Requests for additional testing or validation
+- Mentions of breaking changes or compatibility issues
+
+**ALWAYS double-check related issues and PR comments before submitting your final work.**
