@@ -8,7 +8,7 @@ import (
 
 // OtherUserProfileFailure represents a message from server to client indicating a failure in OtherUserProfileRequest.
 type OtherUserProfileFailure struct {
-	EvrId      EvrId  // The identifier of the associated user.
+	EvrId      XPID   // The identifier of the associated user.
 	StatusCode uint64 // The status code returned with the failure. (These are http status codes)
 	Message    string // The message returned with the failure.
 }
@@ -21,7 +21,7 @@ func (m *OtherUserProfileFailure) Symbol() Symbol {
 	return SymbolOf(m)
 }
 
-func NewOtherUserProfileFailure(evrId EvrId, statusCode uint64, message string) *OtherUserProfileFailure {
+func NewOtherUserProfileFailure(evrId XPID, statusCode uint64, message string) *OtherUserProfileFailure {
 	return &OtherUserProfileFailure{
 		EvrId:      evrId,
 		StatusCode: statusCode,

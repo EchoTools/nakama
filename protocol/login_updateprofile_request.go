@@ -8,7 +8,7 @@ import (
 
 type UpdateClientProfile struct {
 	LoginSessionID uuid.UUID
-	XPID           EvrId
+	XPID           XPID
 	Payload        ClientProfile
 }
 

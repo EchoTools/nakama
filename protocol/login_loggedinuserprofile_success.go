@@ -7,7 +7,7 @@ import (
 // SNSLoggedInUserProfileResponse is a message from client to
 // server requesting the user profile for their logged-in account.
 type LoggedInUserProfileSuccess struct {
-	UserId  EvrId
+	UserId  XPID
 	Payload UserProfiles
 }
 
@@ -29,7 +29,7 @@ func (r LoggedInUserProfileSuccess) String() string {
 	return fmt.Sprintf("LoggedInUserProfileSuccess(user_id=%v)", r.UserId)
 }
 
-func NewLoggedInUserProfileSuccess(xpid EvrId, client *ClientProfile, server *ServerProfile) *LoggedInUserProfileSuccess {
+func NewLoggedInUserProfileSuccess(xpid XPID, client *ClientProfile, server *ServerProfile) *LoggedInUserProfileSuccess {
 	return &LoggedInUserProfileSuccess{
 		UserId: xpid,
 		Payload: UserProfiles{

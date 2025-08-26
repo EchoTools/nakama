@@ -9,11 +9,11 @@ import (
 // It contains profile information about the requested user.
 type OtherUserProfileSuccess struct {
 	Message
-	EvrId             EvrId
-	ServerProfileJSON json.RawMessage
+	XPID        XPID
+	ProfileData json.RawMessage // ServerProfile as JSON
 }
 
-func NewOtherUserProfileSuccess(evrId EvrId, profile *ServerProfile) *OtherUserProfileSuccess {
+func NewOtherUserProfileSuccess(evrId XPID, profile *ServerProfile) *OtherUserProfileSuccess {
 	var data json.RawMessage
 	data, err := json.Marshal(profile)
 	if err != nil {
@@ -21,21 +21,21 @@ func NewOtherUserProfileSuccess(evrId EvrId, profile *ServerProfile) *OtherUserP
 	}
 
 	return &OtherUserProfileSuccess{
-		EvrId:             evrId,
-		ServerProfileJSON: data,
+		XPID:        evrId,
+		ProfileData: data,
 	}
 }
 
 func (m *OtherUserProfileSuccess) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamStruct(&m.EvrId) },
+		func() error { return s.StreamStruct(&m.XPID) },
 		func() error {
 
-			return s.StreamJSONRawMessage(&m.ServerProfileJSON, true, ZstdCompression)
+			return s.StreamJSONRawMessage(&m.ProfileData, true, ZstdCompression)
 		},
 	})
 }
 
 func (m *OtherUserProfileSuccess) String() string {
-	return fmt.Sprintf("%T(user_id=%s)", m, m.EvrId.Token())
+	return fmt.Sprintf("%T(user_id=%s)", m, m.XPID.Token())
 }

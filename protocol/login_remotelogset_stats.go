@@ -78,10 +78,10 @@ type MatchGoal struct {
 	GoalType              string  `json:"goal_type"`
 	DisplayName           string  `json:"player_display_name"`
 	TeamID                int64   `json:"player_team_id"`
-	XPID                  EvrId   `json:"player_user_id"`
+	XPID                  XPID    `json:"player_user_id"`
 	PrevPlayerDisplayName string  `json:"prev_player_display_name"`
 	PrevPlayerTeamID      int64   `json:"prev_player_team_id"`
-	PrevPlayerXPID        EvrId   `json:"prev_player_user_id"`
+	PrevPlayerXPID        XPID    `json:"prev_player_user_id"`
 	WasHeadbutt           bool    `json:"was_headbutt"`
 	PointsValue           int     `json:"points_value"`
 }

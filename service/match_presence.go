@@ -20,13 +20,14 @@ func init() {
 	EntrantIDSaltStr = EntrantIDSalt.String()
 }
 
+// TODO: Break out the pcvr, encryption, mac, and supported features into a separate struct
 // Represents identity information for a single match participant.
-type MatchPresence struct {
+type LobbyPresence struct {
 	Node              string       `json:"node,omitempty"`
 	SessionID         uuid.UUID    `json:"session_id,omitempty"`       // The Player's "match" connection session ID
 	LoginSessionID    uuid.UUID    `json:"login_session_id,omitempty"` // The Player's "login" connection session ID
 	UserID            uuid.UUID    `json:"user_id,omitempty"`
-	EvrID             evr.EvrId    `json:"evr_id,omitempty"`
+	XPID              evr.XPID     `json:"evr_id,omitempty"`
 	DiscordID         string       `json:"discord_id,omitempty"`
 	ClientIP          string       `json:"client_ip,omitempty"`
 	ClientPort        string       `json:"client_port,omitempty"`
@@ -34,69 +35,69 @@ type MatchPresence struct {
 	Username          string       `json:"username,omitempty"`
 	DisplayName       string       `json:"display_name,omitempty"`
 	PartyID           uuid.UUID    `json:"party_id,omitempty"`
-	RoleAlignment     int          `json:"role,omitempty"` // The team they want to be on
 	SupportedFeatures []string     `json:"supported_features,omitempty"`
 	SessionExpiry     int64        `json:"session_expiry,omitempty"`
 	IsPCVR            bool         `json:"is_pcvr,omitempty"` // PCVR or Standalone
 	DisableEncryption bool         `json:"disable_encryption,omitempty"`
 	DisableMAC        bool         `json:"disable_mac,omitempty"`
 	Query             string       `json:"query,omitempty"` // Their matchmaking query
-	RankPercentile    float64      `json:"rank_percentile,omitempty"`
 	Rating            types.Rating `json:"rating,omitempty"`
-	PingMillis        int          `json:"ping_ms,omitempty"`
+	RoleAlignment     RoleIndex    `json:"role,omitempty"` // The team they want to be on
+	JoinTime          time.Time    `json:"join_time,omitempty"`
 	MatchmakingAt     *time.Time   `json:"matchmaking_at,omitempty"` // Whether the player is matchmaking
+	PingMillis        int          `json:"ping_ms,omitempty"`
 }
 
-func (p MatchPresence) EntrantID(matchID MatchID) uuid.UUID {
-	return NewEntrantID(matchID, p.EvrID)
+func (p LobbyPresence) EntrantID(matchID MatchID) uuid.UUID {
+	return NewEntrantID(matchID, p.XPID)
 }
 
-func (p MatchPresence) GetUserId() string {
+func (p LobbyPresence) GetUserId() string {
 	return p.UserID.String()
 }
-func (p MatchPresence) GetSessionId() string {
+func (p LobbyPresence) GetSessionId() string {
 	return p.SessionID.String()
 }
-func (p MatchPresence) GetNodeId() string {
+func (p LobbyPresence) GetNodeId() string {
 	return p.Node
 }
-func (p MatchPresence) GetHidden() bool {
+func (p LobbyPresence) GetHidden() bool {
 	return false
 }
-func (p MatchPresence) GetPersistence() bool {
+func (p LobbyPresence) GetPersistence() bool {
 	return false
 }
-func (p MatchPresence) GetUsername() string {
+func (p LobbyPresence) GetUsername() string {
 	return p.Username
 }
-func (p MatchPresence) GetStatus() string {
+func (p LobbyPresence) GetStatus() string {
 	data, _ := json.Marshal(p)
 	return string(data)
 }
-func (p *MatchPresence) GetReason() runtime.PresenceReason {
+func (p *LobbyPresence) GetReason() runtime.PresenceReason {
 	return runtime.PresenceReasonUnknown
 }
-func (p MatchPresence) GetEvrID() string {
-	return p.EvrID.Token()
+func (p LobbyPresence) GetEvrID() string {
+	return p.XPID.String()
 }
 
-func (p MatchPresence) IsPlayer() bool {
-	return p.RoleAlignment != evr.TeamModerator && p.RoleAlignment != evr.TeamSpectator
+func (p LobbyPresence) IsPlayer() bool {
+	return p.RoleAlignment != Moderator && p.RoleAlignment != Spectator
 }
 
-func (p MatchPresence) IsModerator() bool {
-	return p.RoleAlignment == evr.TeamModerator
+func (p LobbyPresence) IsModerator() bool {
+	return p.RoleAlignment == Moderator
 }
 
-func (p MatchPresence) IsSpectator() bool {
-	return p.RoleAlignment == evr.TeamSpectator
+func (p LobbyPresence) IsSpectator() bool {
+	return p.RoleAlignment == Spectator
 }
 
-func (p MatchPresence) IsSocial() bool {
-	return p.RoleAlignment == evr.TeamSocial
+func (p LobbyPresence) IsSocial() bool {
+	return p.RoleAlignment == SocialLobbyParticipant
 }
 
-func (p MatchPresence) String() string {
+func (p LobbyPresence) String() string {
 	data, err := json.Marshal(p)
 	if err != nil {
 		return ""
@@ -104,25 +105,25 @@ func (p MatchPresence) String() string {
 	return string(data)
 }
 
-func NewEntrantID(matchID MatchID, evrID evr.EvrId) uuid.UUID {
+func NewEntrantID(matchID MatchID, evrID evr.XPID) uuid.UUID {
 	return uuid.NewV5(matchID.UUID, EntrantIDSaltStr+evrID.String())
 }
 
-func EntrantPresenceFromSession(session server.Session, partyID uuid.UUID, roleAlignment int, rating types.Rating, rankPercentile float64, groupID string, ping int, query string) (*MatchPresence, error) {
+func EntrantPresenceFromSession(session server.Session, partyID uuid.UUID, roleAlignment RoleIndex, rating types.Rating, rankPercentile float64, groupID string, ping int, query string) (*LobbyPresence, error) {
 
 	params, ok := LoadParams(session.Context())
 	if !ok {
 		return nil, errors.New("failed to get session parameters")
 	}
 
-	return &MatchPresence{
+	return &LobbyPresence{
 		Node:              params.node,
 		UserID:            session.UserID(),
 		SessionID:         session.ID(),
 		LoginSessionID:    params.loginSession.ID(),
 		Username:          session.Username(),
 		DisplayName:       params.profile.GetGroupIGN(groupID),
-		EvrID:             params.xpID,
+		XPID:              params.xpID,
 		PartyID:           partyID,
 		RoleAlignment:     roleAlignment,
 		DiscordID:         params.DiscordID(),
@@ -132,7 +133,6 @@ func EntrantPresenceFromSession(session server.Session, partyID uuid.UUID, roleA
 		IsPCVR:            params.IsPCVR(),
 		Rating:            rating,
 		SupportedFeatures: params.supportedFeatures,
-		RankPercentile:    rankPercentile,
 
 		DisableEncryption: params.disableEncryption,
 		DisableMAC:        params.disableMAC,

@@ -1,15 +1,14 @@
 package evr
 
 import (
-	"fmt"
+	"encoding/json"
 	"strings"
 
 	"github.com/gofrs/uuid/v5"
-	"github.com/samber/lo"
 )
 
 type ChannelInfoResponse struct {
-	ChannelInfo ChannelInfoResource
+	ChannelInfo json.RawMessage
 }
 
 func (m *ChannelInfoResponse) Token() string {
@@ -21,7 +20,7 @@ func (m *ChannelInfoResponse) Symbol() Symbol {
 }
 
 type ChannelInfoResource struct {
-	Groups []ChannelGroup `json:"group" validate:"required,notempty"`
+	Groups [4]ChannelGroup `json:"group" validate:"required,notempty"`
 }
 
 func (m *ChannelInfoResponse) Stream(s *EasyStream) error {
@@ -29,15 +28,13 @@ func (m *ChannelInfoResponse) Stream(s *EasyStream) error {
 }
 
 func (m *ChannelInfoResponse) String() string {
-	channelNames := lo.Map(m.ChannelInfo.Groups, func(group ChannelGroup, i int) string {
-		return group.Name
-	})
-	return fmt.Sprintf("%s(%s)", m.Token(), strings.Join(channelNames, "; "))
+	return "ChannelInfo{}"
 }
 
 func NewSNSChannelInfoResponse(channelInfo *ChannelInfoResource) *ChannelInfoResponse {
+	data, _ := json.Marshal(channelInfo)
 	return &ChannelInfoResponse{
-		ChannelInfo: *channelInfo,
+		ChannelInfo: data,
 	}
 }
 
@@ -67,7 +64,7 @@ func NewChannelGroup() ChannelGroup {
 
 func NewChannelInfoResource() *ChannelInfoResource {
 	return &ChannelInfoResource{
-		Groups: []ChannelGroup{
+		Groups: [4]ChannelGroup{
 			{
 				ChannelUuid:  "90DD4DB5-B5DD-4655-839E-FDBE5F4BC0BF",
 				Name:         "LOBBY A",

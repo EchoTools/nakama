@@ -6,7 +6,7 @@ import (
 )
 
 type UpdateProfileFailure struct {
-	EvrId      EvrId
+	EvrId      XPID
 	statusCode uint64 // HTTP Status Code
 	Message    string
 }
@@ -31,7 +31,7 @@ func (m *UpdateProfileFailure) Stream(s *EasyStream) error {
 	})
 }
 
-func NewUpdateProfileFailure(evrId EvrId, statusCode uint64, message string) *UpdateProfileFailure {
+func NewUpdateProfileFailure(evrId XPID, statusCode uint64, message string) *UpdateProfileFailure {
 	return &UpdateProfileFailure{
 		EvrId:      evrId,
 		statusCode: statusCode,

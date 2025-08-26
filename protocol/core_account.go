@@ -8,7 +8,7 @@ import (
 
 type ClientProfile struct {
 	DisplayName        string            `json:"displayname,omitempty"` // Ignored and set by nakama
-	EvrID              EvrId             `json:"xplatformid,omitempty"` // Ignored and set by nakama
+	EvrID              XPID              `json:"xplatformid,omitempty"` // Ignored and set by nakama
 	ModifyTime         int64             `json:"modifytime"`            // Ignored and set by nakama
 	TeamName           string            `json:"teamname,omitempty"`    // The team name shown on the spectator scoreboard overlay
 	CombatWeapon       string            `json:"weapon"`
@@ -42,7 +42,7 @@ type Customization struct {
 }
 
 type Players struct {
-	Players []EvrId `json:"users"` // List of user IDs
+	Players []XPID `json:"users"` // List of user IDs
 }
 
 type LegalConsents struct {
@@ -85,7 +85,7 @@ type ServerSocial struct {
 
 type ServerProfile struct {
 	DisplayName       string                     `json:"displayname"`
-	EvrID             EvrId                      `json:"xplatformid"`
+	XPID              XPID                       `json:"xplatformid"`
 	SchemaVersion     int16                      `json:"_version"`        // Version of the schema(?)
 	PublisherLock     string                     `json:"publisher_lock"`  // unused atm
 	PurchasedCombat   uint64                     `json:"purchasedcombat"` // unused (combat was made free)
@@ -131,8 +131,8 @@ func (p ServerProfile) MarshallJSON() ([]byte, error) {
 }
 
 type DeveloperFeatures struct {
-	DisableAfkTimeout bool  `json:"disable_afk_timeout,omitempty"`
-	EvrIDOverride     EvrId `json:"xplatformid,omitempty"`
+	DisableAfkTimeout bool `json:"disable_afk_timeout,omitempty"`
+	EvrIDOverride     XPID `json:"xplatformid,omitempty"`
 }
 
 type EquippedCosmetics struct {
@@ -1257,7 +1257,7 @@ func NewServerProfile() ServerProfile {
 				ChassisBodyS10A: true,
 			},
 		}.ToMap(),
-		EvrID: EvrId{},
+		XPID: XPID{},
 	}
 }
 

@@ -6,16 +6,16 @@ import (
 )
 
 type EntrantMetadata struct {
-	Presence     *MatchPresence
-	Reservations []*MatchPresence
+	Presence     *LobbyPresence
+	Reservations []*LobbyPresence
 }
 
-func NewJoinMetadata(p *MatchPresence) *EntrantMetadata {
+func NewJoinMetadata(p *LobbyPresence) *EntrantMetadata {
 	return &EntrantMetadata{Presence: p}
 }
 
-func (m EntrantMetadata) Presences() []*MatchPresence {
-	return append([]*MatchPresence{m.Presence}, m.Reservations...)
+func (m EntrantMetadata) Presences() []*LobbyPresence {
+	return append([]*LobbyPresence{m.Presence}, m.Reservations...)
 }
 
 func (m EntrantMetadata) ToMatchMetadata() map[string]string {

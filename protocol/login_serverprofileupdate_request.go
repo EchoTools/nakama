@@ -7,7 +7,7 @@ import (
 )
 
 type UserServerProfileUpdateRequest struct {
-	EvrID   EvrId
+	EvrID   XPID
 	Payload json.RawMessage
 }
 
@@ -63,17 +63,6 @@ func (m UpdatePayload) MarshalJSON() ([]byte, error) {
 	return json.Marshal(aux)
 }
 
-func (m UpdatePayload) IsWinner() bool {
-	switch m.mode {
-	case ModeArenaPublic:
-		return m.Update.Statistics.Arena.ArenaWins.Value > 0
-	case ModeCombatPublic:
-		return m.Update.Statistics.Combat.CombatWins.Value > 0
-	default:
-		return false
-	}
-}
-
 type ServerProfileUpdate struct {
 	Statistics *ServerProfileUpdateStatistics `json:"stats,omitempty"`
 	Unlocks    *ServerProfileUpdateUnlocks    `json:"unlocks,omitempty"`
@@ -82,6 +71,20 @@ type ServerProfileUpdate struct {
 type ServerProfileUpdateStatistics struct {
 	Arena  *ArenaStatistics  `json:"arena,omitempty"`
 	Combat *CombatStatistics `json:"combat,omitempty"`
+}
+
+func (m ServerProfileUpdateStatistics) IsWinner() bool {
+	isWinner := false
+
+	if m.Arena != nil && m.Arena.ArenaWins.Value > 0 {
+		isWinner = true
+	}
+
+	if m.Combat != nil && m.Combat.CombatWins.Value > 0 {
+		isWinner = true
+	}
+
+	return isWinner
 }
 
 type ServerProfileUpdateUnlocks struct {

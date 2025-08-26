@@ -5,7 +5,7 @@ import (
 )
 
 type UpdateProfileSuccess struct {
-	XPID EvrId
+	XPID XPID
 }
 
 func (lr *UpdateProfileSuccess) String() string {
@@ -15,7 +15,7 @@ func (lr *UpdateProfileSuccess) String() string {
 func (m *UpdateProfileSuccess) Stream(s *EasyStream) error {
 	return s.StreamStruct(&m.XPID)
 }
-func NewUpdateProfileSuccess(xpID *EvrId) *UpdateProfileSuccess {
+func NewUpdateProfileSuccess(xpID *XPID) *UpdateProfileSuccess {
 	return &UpdateProfileSuccess{
 		XPID: *xpID,
 	}

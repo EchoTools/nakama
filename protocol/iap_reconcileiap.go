@@ -10,7 +10,7 @@ import (
 type ReconcileIAP struct {
 	Message
 	Session uuid.UUID
-	EvrId   EvrId
+	EvrId   XPID
 }
 
 func (m ReconcileIAP) Token() string {
@@ -25,7 +25,7 @@ func (m ReconcileIAP) String() string {
 	return fmt.Sprintf("%s()", m.Token())
 }
 
-func NewReconcileIAP(userID EvrId, session uuid.UUID) *ReconcileIAP {
+func NewReconcileIAP(userID XPID, session uuid.UUID) *ReconcileIAP {
 	return &ReconcileIAP{
 		EvrId:   userID,
 		Session: session,
@@ -47,6 +47,6 @@ func (m *ReconcileIAP) GetLoginSessionID() uuid.UUID {
 	return m.Session
 }
 
-func (m *ReconcileIAP) GetEvrID() EvrId {
+func (m *ReconcileIAP) GetEvrID() XPID {
 	return m.EvrId
 }

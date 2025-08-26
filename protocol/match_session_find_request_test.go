@@ -48,7 +48,7 @@ func TestLobbyFindSessionRequest_UnmarshalJSON(t *testing.T) {
 				},
 				Entrants: []Entrant{
 					{
-						EvrID: EvrId{
+						EvrID: XPID{
 							PlatformCode: 4,
 							AccountId:    3963667097037078,
 						},
@@ -90,7 +90,7 @@ func TestLobbyFindSessionRequest_UnmarshalJSON(t *testing.T) {
 				},
 				Entrants: []Entrant{
 					{
-						EvrID: EvrId{
+						EvrID: XPID{
 							PlatformCode: 4,
 							AccountId:    3963667097037078,
 						},
@@ -139,7 +139,7 @@ func TestLobbyFindSessionRequest_UnmarshalJSON(t *testing.T) {
 				},
 				Entrants: []Entrant{
 					{
-						EvrID: EvrId{
+						EvrID: XPID{
 							PlatformCode: 7,
 							AccountId:    8582873777389537089,
 						},

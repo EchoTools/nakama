@@ -40,7 +40,7 @@ type LobbyJoinSessionRequest struct {
 	Flags            uint64
 	CrossPlayEnabled bool
 	SessionSettings  LobbySessionSettings
-	OtherEvrID       EvrId
+	OtherEvrID       XPID
 	Entrants         []Entrant
 }
 
@@ -139,9 +139,9 @@ func (m *LobbyJoinSessionRequest) GetLoginSessionID() uuid.UUID {
 	return m.LoginSessionID
 }
 
-func (m *LobbyJoinSessionRequest) GetEvrID() EvrId {
+func (m *LobbyJoinSessionRequest) GetEvrID() XPID {
 	if len(m.Entrants) == 0 {
-		return EvrId{}
+		return XPID{}
 	}
 	return m.Entrants[0].EvrID
 }

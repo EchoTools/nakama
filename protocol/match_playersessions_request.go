@@ -12,10 +12,10 @@ import (
 // LobbyPlayerSessionsRequest is a message from client to server, asking it to obtain game server sessions for a given list of user identifiers.
 type LobbyPlayerSessionsRequest struct {
 	LoginSessionID uuid.UUID
-	EvrId          EvrId
+	EvrId          XPID
 	LobbyID        uuid.UUID
 	Platform       Symbol
-	PlayerEvrIDs   []EvrId
+	PlayerEvrIDs   []XPID
 }
 
 func (m LobbyPlayerSessionsRequest) Token() string {
@@ -37,7 +37,7 @@ func (m *LobbyPlayerSessionsRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &playerCount) },
 		func() error {
 			if s.Mode == DecodeMode {
-				m.PlayerEvrIDs = make([]EvrId, playerCount)
+				m.PlayerEvrIDs = make([]XPID, playerCount)
 			}
 			for i := range m.PlayerEvrIDs {
 				if err := s.StreamStruct(&m.PlayerEvrIDs[i]); err != nil {
@@ -50,7 +50,7 @@ func (m *LobbyPlayerSessionsRequest) Stream(s *EasyStream) error {
 }
 
 func (m *LobbyPlayerSessionsRequest) String() string {
-	evrIDstrs := strings.Join(lo.Map(m.PlayerEvrIDs, func(id EvrId, i int) string { return id.Token() }), ", ")
+	evrIDstrs := strings.Join(lo.Map(m.PlayerEvrIDs, func(id XPID, i int) string { return id.Token() }), ", ")
 	return fmt.Sprintf("%T(login_session_id=%s, evr_id=%s, lobby_id=%s, evr_ids=%s)", m, m.LoginSessionID, m.EvrId, m.LobbyID, evrIDstrs)
 }
 
@@ -58,7 +58,7 @@ func (m *LobbyPlayerSessionsRequest) GetLoginSessionID() uuid.UUID {
 	return m.LoginSessionID
 }
 
-func (m *LobbyPlayerSessionsRequest) GetEvrID() EvrId {
+func (m *LobbyPlayerSessionsRequest) GetEvrID() XPID {
 	return m.EvrId
 }
 

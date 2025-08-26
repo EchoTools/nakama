@@ -22,7 +22,7 @@ var KnownBuilds = []BuildNumber{
 // LoginRequest represents a message from client to server requesting for a user sign-in.
 type LoginRequest struct {
 	PreviousSessionID uuid.UUID // This is the old session id, if it had one.
-	XPID              EvrId
+	XPID              XPID
 	Payload           LoginProfile
 }
 
@@ -39,7 +39,7 @@ func (m *LoginRequest) Stream(s *EasyStream) error {
 	})
 }
 
-func NewLoginRequest(session uuid.UUID, userId EvrId, loginData LoginProfile) (*LoginRequest, error) {
+func NewLoginRequest(session uuid.UUID, userId XPID, loginData LoginProfile) (*LoginRequest, error) {
 	return &LoginRequest{
 		PreviousSessionID: session,
 		XPID:              userId,
@@ -47,7 +47,7 @@ func NewLoginRequest(session uuid.UUID, userId EvrId, loginData LoginProfile) (*
 	}, nil
 }
 
-func (m *LoginRequest) GetEvrID() EvrId {
+func (m *LoginRequest) GetEvrID() XPID {
 	return m.XPID
 }
 

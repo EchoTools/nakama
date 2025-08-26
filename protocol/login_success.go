@@ -9,10 +9,10 @@ import (
 
 type LoginSuccess struct {
 	Session uuid.UUID
-	EvrId   EvrId
+	EvrId   XPID
 }
 
-func NewLoginSuccess(session uuid.UUID, evrId EvrId) *LoginSuccess {
+func NewLoginSuccess(session uuid.UUID, evrId XPID) *LoginSuccess {
 	return &LoginSuccess{
 		Session: session,
 		EvrId:   evrId,
@@ -44,6 +44,6 @@ func (m *LoginSuccess) GetLoginSessionID() uuid.UUID {
 	return m.Session
 }
 
-func (m *LoginSuccess) GetEvrID() EvrId {
+func (m *LoginSuccess) GetEvrID() XPID {
 	return m.EvrId
 }

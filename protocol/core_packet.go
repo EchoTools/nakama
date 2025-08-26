@@ -284,6 +284,11 @@ func ParsePacket(data []byte) ([]Message, error) {
 		typ, ok := SymbolTypes[sym]
 		if !ok || typ == nil {
 			// Skip unimplemented message types.
+			message := &UnimplementedMessage{
+				SymbolHash: Symbol(sym),
+				Data:       b,
+			}
+			messages = append(messages, message)
 			continue
 		}
 

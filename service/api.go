@@ -1,862 +1,646 @@
+// Copyright 2018 The Nakama Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package service
 
 import (
+	"compress/flate"
+	"compress/gzip"
 	"context"
+	"crypto"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
-	"encoding/json"
+	"encoding/base64"
+	"errors"
 	"fmt"
+	"math"
+	"net"
 	"net/http"
+	"strings"
+	"sync"
 	"time"
 
-	"github.com/bwmarrin/discordgo"
-	"github.com/go-redis/redis"
 	"github.com/gofrs/uuid/v5"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/gorilla/handlers"
+	"github.com/gorilla/mux"
+	grpcgw "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/heroiclabs/nakama-common/api"
-	"github.com/heroiclabs/nakama-common/rtapi"
-	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/apigrpc"
 	"github.com/heroiclabs/nakama/v3/server"
 	"github.com/heroiclabs/nakama/v3/social"
-	"github.com/jackc/pgx/v5/pgtype"
-	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
-
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
+	_ "google.golang.org/grpc/encoding/gzip" // enable gzip compression on server for grpc
+	"google.golang.org/grpc/grpclog"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
-	_ "google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-var (
-	nakamaStartTime = time.Now().UTC()
-)
+var once sync.Once
 
-const (
-	GroupGlobalDevelopers        = "Global Developers"
-	GroupGlobalOperators         = "Global Operators"
-	GroupGlobalTesters           = "Global Testers"
-	GroupGlobalBots              = "Global Bots"
-	GroupGlobalBadgeAdmins       = "Global Badge Admins"
-	GroupGlobalPrivateDataAccess = "Global Private Data Access"
-	GroupGlobalRequire2FA        = "Global Require 2FA"
-	SystemGroupLangTag           = "system"
-	GuildGroupLangTag            = "guild"
-)
+// Used as part of JSON input validation.
+const byteBracket byte = '{'
 
-func StartEVRServer(logger *zap.Logger,
-	startupLogger *zap.Logger,
-	db *sql.DB,
-	protojsonMarshaler *protojson.MarshalOptions,
-	protojsonUnmarshaler *protojson.UnmarshalOptions,
-	config server.Config,
-	version string,
-	socialClient *social.Client,
-	storageIndex server.StorageIndex,
-	leaderboardCache server.LeaderboardCache,
-	leaderboardRankCache server.LeaderboardRankCache,
-	leaderboardScheduler server.LeaderboardScheduler,
-	sessionRegistry server.SessionRegistry,
-	sessionCache server.SessionCache,
-	statusRegistry server.StatusRegistry,
-	matchRegistry server.MatchRegistry,
-	matchmaker server.Matchmaker,
-	partyRegistry server.PartyRegistry,
-	tracker server.Tracker,
-	router server.MessageRouter,
-	streamManager server.StreamManager,
-	metrics server.Metrics,
-	runtime *server.Runtime,
-	runtimeInfo *server.RuntimeInfo,
-	nkPipeline *server.Pipeline,
-) (*EVRPipeline, error) {
+// Keys used for storing/retrieving user information in the context of a request after authentication.
+type ctxUserIDKey = struct{}
+type ctxUsernameKey = struct{}
+type ctxVarsKey = struct{}
+type ctxExpiryKey = struct{}
+type ctxTokenIDKey = struct{}
+type ctxTokenIssuedAtKey = struct{}
 
-	var (
-		vars = config.GetRuntime().Environment
-		sbmm = NewSkillBasedMatchmaker()
-	)
+type ctxFullMethodKey struct{}
 
-	runtime.AfterReadStorageObjects = func(ctx context.Context, logger *zap.Logger, userID, username string, vars map[string]string, expiry int64, clientIP, clientPort string, out *api.StorageObjects, in *api.ReadStorageObjectsRequest) error {
+type ApiServer struct {
+	apigrpc.UnimplementedNakamaServer
+	logger               *zap.Logger
+	db                   *sql.DB
+	config               server.Config
+	version              string
+	socialClient         *social.Client
+	storageIndex         server.StorageIndex
+	leaderboardCache     server.LeaderboardCache
+	leaderboardRankCache server.LeaderboardRankCache
+	sessionCache         server.SessionCache
+	sessionRegistry      server.SessionRegistry
+	statusRegistry       server.StatusRegistry
+	matchRegistry        server.MatchRegistry
+	tracker              server.Tracker
+	router               server.MessageRouter
+	streamManager        server.StreamManager
+	metrics              server.Metrics
+	matchmaker           server.Matchmaker
+	runtime              *server.Runtime
+	grpcServer           *grpc.Server
+	grpcGatewayServer    *http.Server
+}
 
-	}
-	// Register hooks
-	if err = initializer.RegisterAfterReadStorageObjects(AfterReadStorageObjectsHook); err != nil {
-		return fmt.Errorf("unable to register AfterReadStorageObjects hook: %w", err)
-	}
-
-	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_ENV, vars)
-	// Initialize the discord bot if the token is set
-	if appBotToken, ok := vars["DISCORD_BOT_TOKEN"]; !ok || appBotToken == "" {
-		logger.Warn("DISCORD_BOT_TOKEN is not set, Discord bot will not be used")
-		panic("Bot token is not set in context.") // TODO: remove bot dependency
+// TODO: Refactor to remove this upstream code
+func StartApiServer(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config server.Config, version string, socialClient *social.Client, storageIndex server.StorageIndex, leaderboardCache server.LeaderboardCache, leaderboardRankCache server.LeaderboardRankCache, sessionRegistry server.SessionRegistry, sessionCache server.SessionCache, statusRegistry server.StatusRegistry, matchRegistry server.MatchRegistry, matchmaker server.Matchmaker, tracker server.Tracker, router server.MessageRouter, streamManager server.StreamManager, metrics server.Metrics, pipeline *server.Pipeline, runtime *server.Runtime, evrPipeline *EvrPipeline) *ApiServer {
+	var gatewayContextTimeoutMs string
+	if config.GetSocket().IdleTimeoutMs > 500 {
+		// Ensure the GRPC Gateway timeout is just under the idle timeout (if possible) to ensure it has priority.
+		grpcgw.DefaultContextTimeout = time.Duration(config.GetSocket().IdleTimeoutMs-500) * time.Millisecond
+		gatewayContextTimeoutMs = fmt.Sprintf("%vm", config.GetSocket().IdleTimeoutMs-500)
 	} else {
-		if dg, err = discordgo.New("Bot " + appBotToken); err != nil {
-			logger.Error("Unable to create bot", zap.Error(err))
-			return fmt.Errorf("unable to create discord bot: %w", err)
-		}
-		dg.StateEnabled = true
+		grpcgw.DefaultContextTimeout = time.Duration(config.GetSocket().IdleTimeoutMs) * time.Millisecond
+		gatewayContextTimeoutMs = fmt.Sprintf("%vm", config.GetSocket().IdleTimeoutMs)
 	}
 
-	// Register RPC's for device linking
-	rpcHandler := NewRPCHandler(ctx, logger, db, nk, initializer, sessionRegistry, matchRegistry, tracker, metrics, sessionCache, config, dg)
-	rpcs := map[string]func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error){
-		"account/search":                AccountSearchRPC,
-		"account/lookup":                rpcHandler.AccountLookupRPC,
-		"account/authenticate/password": rpcHandler.AuthenticatePasswordRPC,
-		"leaderboard/haystack":          rpcHandler.LeaderboardHaystackRPC,
-		"leaderboard/records":           rpcHandler.LeaderboardRecordsListRPC,
-		"link/device":                   LinkDeviceRpc,
-		"link/usernamedevice":           LinkUserIdDeviceRpc,
-		"signin/discord":                DiscordSignInRpc,
-		"match/public":                  rpcHandler.MatchListPublicRPC,
-		"match":                         MatchRPC,
-		"match/prepare":                 PrepareMatchRPC,
-		"match/allocate":                AllocateMatchRPC,
-		"match/terminate":               shutdownMatchRpc,
-		"match/build":                   rpcHandler.BuildMatchRPC,
-		"player/setnextmatch":           SetNextMatchRPC,
-		"player/statistics":             PlayerStatisticsRPC,
-		"player/kick":                   KickPlayerRPC,
-		"player/profile":                UserServerProfileRPC,
-		"link":                          LinkingAppRpc,
-		"evr/servicestatus":             rpcHandler.ServiceStatusRPC,
-		"importloadouts":                ImportLoadoutsRpc,
-		"matchmaker/stream":             MatchmakerStreamRPC,
-		"matchmaker/state":              MatchmakerStateRPC,
-		"matchmaker/candidates":         MatchmakerCandidatesRPCFactory(sbmm),
-		"stream/join":                   StreamJoinRPC,
-		"server/score":                  ServerScoreRPC,
-		"server/scores":                 ServerScoresRPC,
-		"forcecheck":                    CheckForceUserRPC,
-		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
-	}
-	for name, rpc := range rpcs {
-		if err = initializer.RegisterRpc(name, rpc); err != nil {
-			return fmt.Errorf("unable to register %s: %w", name, err)
-		}
-	}
-
-	if db != nil && nk != nil { // Avoid panic's during some automated tests
-		go func() {
-			if err := RegisterIndexes(initializer); err != nil {
-				panic(fmt.Errorf("unable to register indexes: %v", err))
+	serverOpts := []grpc.ServerOption{
+		grpc.StatsHandler(&server.MetricsGrpcHandler{MetricsFn: metrics.Api, Metrics: metrics}),
+		grpc.MaxRecvMsgSize(int(config.GetSocket().MaxRequestSizeBytes)),
+		grpc.UnaryInterceptor(func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+			ctx, err := securityInterceptorFunc(logger, config, sessionCache, ctx, req, info)
+			if err != nil {
+				return nil, err
 			}
-		}()
-
-		// Remove all LinkTickets
-		if err := nk.StorageDelete(ctx, []*runtime.StorageDelete{{
-			Collection: AuthorizationCollection,
-			Key:        LinkTicketKey,
-		}}); err != nil {
-			return fmt.Errorf("unable to delete LinkTickets: %w", err)
-		}
-
-		// Create the core groups
-		if err := createCoreGroups(ctx, logger, db, nk, initializer); err != nil {
-			return fmt.Errorf("unable to create core groups: %w", err)
-		}
+			return handler(ctx, req)
+		}),
 	}
-
-	// Register the "matchmaking" handler
-	if err := initializer.RegisterMatch(EVRLobbySessionMatchModule, func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) (runtime.Match, error) {
-		return &EvrMatch{}, nil
-	}); err != nil {
-		return err
+	if config.GetSocket().TLSCert != nil {
+		serverOpts = append(serverOpts, grpc.Creds(credentials.NewServerTLSFromCert(&config.GetSocket().TLSCert[0])))
 	}
+	grpcServer := grpc.NewServer(serverOpts...)
 
-	// Register HTTP Handler for the evr/api service
-	appAcceptorFn := NewAppAPIAcceptor(ctx, logger, db, nk, initializer, config)
-	if err := initializer.RegisterHttp("/apievr/v1/{id:.*}", appAcceptorFn, http.MethodGet, http.MethodPost); err != nil {
-		return fmt.Errorf("unable to register /evr/api service: %w", err)
-	}
-
-	// The statistics queue handles inserting match statistics into the leaderboard records
-	statisticsQueue := NewStatisticsQueue(logger, db, nk)
-
-	// Initialize the VRML scan queue if the configuration is set
-	var redisClient *redis.Client
-	var vrmlScanQueue *VRMLScanQueue
-	if vars["VRML_REDIS_URI"] == "" || vars["VRML_OAUTH_REDIRECT_URL"] == "" || vars["VRML_OAUTH_CLIENT_ID"] == "" {
-		logger.Warn("VRML OAuth configuration is not set, VRML verification will not be available.")
-	} else {
-		redisURI := vars["VRML_REDIS_URI"]
-		vrmlOAuthRedirectURL := vars["VRML_OAUTH_REDIRECT_URL"]
-		vrmlOAuthClientID := vars["VRML_OAUTH_CLIENT_ID"]
-		redisClient, err = connectRedis(ctx, redisURI)
-		if err != nil {
-			return fmt.Errorf("failed to connect to Redis for VRML scan queue: %w", err)
-		}
-		if vrmlScanQueue, err = NewVRMLScanQueue(ctx, logger, db, nk, initializer, dg, redisClient, vrmlOAuthRedirectURL, vrmlOAuthClientID); err != nil {
-			return fmt.Errorf("failed to create VRML scan queue: %w", err)
-		}
-	}
-
-	// Initialize MongoDB client for match summarization
-	var mongoClient *mongo.Client
-	if mongoURI := vars["MONGODB_URI"]; mongoURI != "" {
-		if mongoClient, err = connectMongoDB(ctx, mongoURI); err != nil {
-			logger.Warn("Failed to connect to MongoDB, match summarization will not be available", zap.Error(err))
-		}
-	} else {
-		logger.Info("MongoDB URI not configured, match summarization will not be available")
-	}
-
-	// Register the event dispatch
-	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, sessionRegistry, matchRegistry, mongoClient, redisClient, dg, statisticsQueue, vrmlScanQueue)
+	// Set grpc logger
+	grpcLogger, err := server.NewGrpcCustomLogger(logger)
 	if err != nil {
-		return fmt.Errorf("unable to create event dispatch: %w", err)
+		startupLogger.Fatal("failed to set up grpc logger", zap.Error(err))
+	}
+	once.Do(func() { grpclog.SetLoggerV2(grpcLogger) })
+
+	s := &ApiServer{
+		logger:               logger,
+		db:                   db,
+		config:               config,
+		version:              version,
+		socialClient:         socialClient,
+		leaderboardCache:     leaderboardCache,
+		leaderboardRankCache: leaderboardRankCache,
+		storageIndex:         storageIndex,
+		sessionCache:         sessionCache,
+		sessionRegistry:      sessionRegistry,
+		statusRegistry:       statusRegistry,
+		matchRegistry:        matchRegistry,
+		tracker:              tracker,
+		router:               router,
+		streamManager:        streamManager,
+		metrics:              metrics,
+		matchmaker:           matchmaker,
+		runtime:              runtime,
+		grpcServer:           grpcServer,
 	}
 
-	// Register the event handler
-	if err := initializer.RegisterEvent(eventDispatch.eventFn); err != nil {
-		return err
-	}
-
-	// Register the matchmaking override
-	if err := initializer.RegisterMatchmakerOverride(sbmm.EvrMatchmakerFn); err != nil {
-		return fmt.Errorf("unable to register matchmaker override: %w", err)
-	}
-
-	// Migrate any system level data
-	go MigrateSystem(ctx, logger, db, nk)
-
-	// Update the metrics with match data
+	// Register and start GRPC server.
+	apigrpc.RegisterNakamaServer(grpcServer, s)
+	startupLogger.Info("Starting API server for gRPC requests", zap.Int("port", config.GetSocket().Port-1))
 	go func() {
-		<-time.After(15 * time.Second)
-		metricsUpdateLoop(ctx, logger, nk.(*server.RuntimeGoNakamaModule), db, matchRegistry)
+		listener, err := net.Listen("tcp", fmt.Sprintf("%v:%d", config.GetSocket().Address, config.GetSocket().Port-1))
+		if err != nil {
+			startupLogger.Fatal("API server listener failed to start", zap.Error(err))
+		}
+
+		if err := grpcServer.Serve(listener); err != nil {
+			startupLogger.Fatal("API server listener failed", zap.Error(err))
+		}
 	}()
 
-	logger.Info("Initialized runtime module.")
-	return nil
-}
-
-func registerRPCs(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, dg *discordgo.Session, matchmaker server.Matchmaker, sbmm *SkillBasedMatchmaker) error {
-	rpcHandler := NewRPCHandler(ctx, db, dg)
-
-	// Register RPC's for device linking
-	rpcs := map[string]func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error){
-		"account/search":                AccountSearchRPC,
-		"account/lookup":                rpcHandler.AccountLookupRPC,
-		"account/authenticate/password": AuthenticatePasswordRPC,
-		"leaderboard/haystack":          rpcHandler.LeaderboardHaystackRPC,
-		"leaderboard/records":           rpcHandler.LeaderboardRecordsListRPC,
-		"link/device":                   LinkDeviceRpc,
-		"link/usernamedevice":           LinkUserIdDeviceRpc,
-		"signin/discord":                DiscordSignInRpc,
-		"match/public":                  rpcHandler.MatchListPublicRPC,
-		"match":                         MatchRPC,
-		"match/prepare":                 PrepareMatchRPC,
-		"match/terminate":               shutdownMatchRpc,
-		"match/build":                   BuildMatchRPC,
-		"matchmaker/stream":             MatchmakerStreamRPC,
-		"matchmaker/state":              MatchmakerStateRPCFactory(matchmaker),
-		"player/setnextmatch":           SetNextMatchRPC,
-		"player/statistics":             PlayerStatisticsRPC,
-		"player/kick":                   KickPlayerRPC,
-		"player/profile":                UserServerProfileRPC,
-		"link":                          LinkingAppRpc,
-		"evr/servicestatus":             rpcHandler.ServiceStatusRPC,
-		"importloadouts":                ImportLoadoutsRpc,
-		"matchmaker/candidates":         MatchmakerCandidatesRPCFactory(sbmm),
-		"stream/join":                   StreamJoinRPC,
-		"server/score":                  ServerScoreRPC,
-		"server/scores":                 ServerScoresRPC,
-		"forcecheck":                    CheckForceUserRPC,
-		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
-	}
-
-	for name, rpc := range rpcs {
-		if err := initializer.RegisterRpc(name, rpc); err != nil {
-			return fmt.Errorf("unable to register %s: %w", name, err)
-		}
-	}
-	for name, rpc := range rpcs {
-		if err := initializer.RegisterRpc(name, rpc); err != nil {
-			return fmt.Errorf("unable to register %s: %w", name, err)
-		}
-	}
-	return nil
-}
-
-// the pipeline is not available to (required for partyHandler, etc.) is not available to the RuntimeGoNakamaModule
-// the constructs all the required dependencies for those components, without isolating from the existing runtime module.
-// it copies the initializer's fields
-func buildInternalComponents(ctx context.Context, runtimeLogger runtime.Logger, zapLogger *zap.Logger, db *sql.DB, nk *server.RuntimeGoNakamaModule, initializer *server.RuntimeGoInitializer, config Config, router MessageRouter, eventQueue *server.RuntimeEventQueue, tracker server.Tracker, streamManager StreamManager, metrics server.Metrics, lobbyBuilder *LobbyBuilder, sbmm *SkillBasedMatchmaker) (PartyRegistry, server.Matchmaker, *server.Runtime) {
-
-	// The matchmaker only uses the runtime module for the override functions.
-	events := &RuntimeEventFunctions{}
-	if len(initializer.eventFunctions) > 0 {
-		events.eventFunction = func(ctx context.Context, evt *api.Event) {
-			eventQueue.Queue(func() {
-				for _, fn := range initializer.eventFunctions {
-					fn(ctx, initializer.logger, evt)
-				}
-			})
-		}
-		nk.SetEventFn(events.eventFunction)
-	}
-	if len(initializer.sessionStartFunctions) > 0 {
-		events.sessionStartFunction = func(userID, username string, vars map[string]string, expiry int64, sessionID, clientIP, clientPort, lang string, evtTimeSec int64) {
-			ctx := NewRuntimeGoContext(context.Background(), initializer.node, initializer.version, initializer.env, RuntimeExecutionModeEvent, nil, nil, expiry, userID, username, vars, sessionID, clientIP, clientPort, lang)
-			evt := &api.Event{
-				Name:      "session_start",
-				Timestamp: &timestamppb.Timestamp{Seconds: evtTimeSec},
+	// Register and start GRPC Gateway server.
+	// Should start after GRPC server itself because RegisterNakamaHandlerFromEndpoint below tries to dial GRPC.
+	ctx := context.Background()
+	grpcGateway := grpcgw.NewServeMux(
+		grpcgw.WithRoutingErrorHandler(handleRoutingError),
+		grpcgw.WithMetadata(func(ctx context.Context, r *http.Request) metadata.MD {
+			// For RPC GET operations pass through any custom query parameters.
+			if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/v2/rpc/") {
+				return metadata.MD{}
 			}
-			eventQueue.Queue(func() {
-				for _, fn := range initializer.sessionStartFunctions {
-					fn(ctx, initializer.logger, evt)
+
+			q := r.URL.Query()
+			p := make(map[string][]string, len(q))
+			for k, vs := range q {
+				if k == "http_key" {
+					// Skip Nakama's own query params, only process custom ones.
+					continue
 				}
-			})
-		}
-	}
-	if len(initializer.sessionEndFunctions) > 0 {
-		events.sessionEndFunction = func(userID, username string, vars map[string]string, expiry int64, sessionID, clientIP, clientPort, lang string, evtTimeSec int64, reason string) {
-			ctx := NewRuntimeGoContext(context.Background(), initializer.node, initializer.version, initializer.env, RuntimeExecutionModeEvent, nil, nil, expiry, userID, username, vars, sessionID, clientIP, clientPort, lang)
-			evt := &api.Event{
-				Name:       "session_end",
-				Properties: map[string]string{"reason": reason},
-				Timestamp:  &timestamppb.Timestamp{Seconds: evtTimeSec},
+				p["q_"+k] = vs
 			}
-			eventQueue.Queue(func() {
-				for _, fn := range initializer.sessionEndFunctions {
-					fn(ctx, initializer.logger, evt)
+			return p
+		}),
+		grpcgw.WithMarshalerOption(grpcgw.MIMEWildcard, &grpcgw.HTTPBodyMarshaler{
+			Marshaler: &grpcgw.JSONPb{
+				MarshalOptions: protojson.MarshalOptions{
+					UseProtoNames:  true,
+					UseEnumNumbers: true,
+				},
+				UnmarshalOptions: protojson.UnmarshalOptions{
+					DiscardUnknown: true,
+				},
+			},
+		}),
+	)
+	dialAddr := fmt.Sprintf("127.0.0.1:%d", config.GetSocket().Port-1)
+	if config.GetSocket().Address != "" {
+		dialAddr = fmt.Sprintf("%v:%d", config.GetSocket().Address, config.GetSocket().Port-1)
+	}
+	dialOpts := []grpc.DialOption{
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallSendMsgSize(int(config.GetSocket().MaxRequestSizeBytes)),
+			grpc.MaxCallRecvMsgSize(math.MaxInt32),
+		),
+		//grpc.WithStatsHandler(&ocgrpc.ClientHandler{}),
+	}
+	if config.GetSocket().TLSCert != nil {
+		// GRPC-Gateway only ever dials 127.0.0.1 so we can be lenient on server certificate validation.
+		certPool := x509.NewCertPool()
+		if !certPool.AppendCertsFromPEM(config.GetSocket().CertPEMBlock) {
+			startupLogger.Fatal("Failed to load PEM certificate from socket SSL certificate file")
+		}
+		cert := credentials.NewTLS(&tls.Config{RootCAs: certPool, InsecureSkipVerify: true})
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(cert))
+	} else {
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+	if err := apigrpc.RegisterNakamaHandlerFromEndpoint(ctx, grpcGateway, dialAddr, dialOpts); err != nil {
+		startupLogger.Fatal("API server gateway registration failed", zap.Error(err))
+	}
+	//if err := apigrpc.RegisterNakamaHandlerServer(ctx, grpcGateway, s); err != nil {
+	//	startupLogger.Fatal("API server gateway registration failed", zap.Error(err))
+	//}
+
+	grpcGatewayRouter := mux.NewRouter()
+	// Special case routes. Do NOT enable compression on WebSocket route, it results in "http: response.Write on hijacked connection" errors.
+	grpcGatewayRouter.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }).Methods(http.MethodGet)
+	grpcGatewayRouter.HandleFunc("/ws", NewSocketWSEVRAcceptor(logger, config, sessionRegistry, sessionCache, statusRegistry, matchmaker, tracker, metrics, runtime, protojsonMarshaler, protojsonUnmarshaler, pipeline, evrPipeline)).Methods(http.MethodGet)
+	// Another nested router to hijack RPC requests bound for GRPC Gateway.
+	grpcGatewayMux := mux.NewRouter()
+	grpcGatewayMux.HandleFunc("/v2/rpc/{id:.*}", s.RpcFuncHttp).Methods(http.MethodGet, http.MethodPost)
+	/*
+		for _, handler := range evrRuntime.httpHandlers {
+			if handler == nil {
+				continue
+			}
+			route := grpcGatewayMux.HandleFunc(handler.PathPattern, handler.Handler)
+			if len(handler.Methods) > 0 {
+				route.Methods(handler.Methods...)
+			}
+			logger.Info("Registered custom HTTP handler", zap.String("path_pattern", handler.PathPattern))
+		}
+	*/
+	grpcGatewayMux.NewRoute().Handler(grpcGateway)
+
+	// Enable stats recording on all request paths except:
+	// "/" is not tracked at all.
+	// "/ws" implements its own separate tracking.
+	//handlerWithStats := &ochttp.Handler{
+	//	Handler:          grpcGatewayMux,
+	//	IsPublicEndpoint: true,
+	//}
+
+	// Default to passing request to GRPC Gateway.
+	// Enable max size check on requests coming arriving the gateway.
+	// Enable compression on responses sent by the gateway.
+	// Enable decompression on requests received by the gateway.
+	handlerWithDecompressRequest := decompressHandler(logger, grpcGatewayMux)
+	handlerWithCompressResponse := handlers.CompressHandler(handlerWithDecompressRequest)
+	maxMessageSizeBytes := config.GetSocket().MaxRequestSizeBytes
+	handlerWithMaxBody := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check max body size before decompressing incoming request body.
+		r.Body = http.MaxBytesReader(w, r.Body, maxMessageSizeBytes)
+		handlerWithCompressResponse.ServeHTTP(w, r)
+	})
+	grpcGatewayRouter.NewRoute().HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Ensure some request headers have required values.
+		// Override any value set by the client if needed.
+		r.Header.Set("Grpc-Timeout", gatewayContextTimeoutMs)
+
+		// Add constant response headers.
+		w.Header().Add("Cache-Control", "no-store, no-cache, must-revalidate")
+
+		// Allow GRPC Gateway to handle the request.
+		handlerWithMaxBody.ServeHTTP(w, r)
+	})
+
+	// Enable CORS on all requests.
+	CORSHeaders := handlers.AllowedHeaders([]string{"Authorization", "Content-Type", "User-Agent"})
+	CORSOrigins := handlers.AllowedOrigins([]string{"*"})
+	CORSMethods := handlers.AllowedMethods([]string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodDelete})
+	handlerWithCORS := handlers.CORS(CORSHeaders, CORSOrigins, CORSMethods)(grpcGatewayRouter)
+
+	// Enable configured response headers, if any are set. Do not override values that may have been set by server processing.
+	optionalResponseHeaderHandler := handlerWithCORS
+	if headers := config.GetSocket().Headers; len(headers) > 0 {
+		optionalResponseHeaderHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Preemptively set custom response headers. Further processing will override them if needed for proper functionality.
+			wHeaders := w.Header()
+			for key, value := range headers {
+				if wHeaders.Get(key) == "" {
+					wHeaders.Set(key, value)
 				}
-			})
-		}
-	}
-	runtime := &Runtime{
-		matchCreateFunction:                    nk.matchCreateFn,
-		rpcFunctions:                           initializer.rpc,
-		beforeRtFunctions:                      initializer.beforeRt,
-		afterRtFunctions:                       initializer.afterRt,
-		beforeReqFunctions:                     initializer.beforeReq,
-		afterReqFunctions:                      initializer.afterReq,
-		matchmakerMatchedFunction:              lobbyBuilder.matchmakerMatchedFn,
-		matchmakerOverrideFunction:             sbmm.matchmakerOverrideFn,
-		tournamentEndFunction:                  initializer.tournamentEnd,
-		tournamentResetFunction:                initializer.tournamentReset,
-		purchaseNotificationAppleFunction:      initializer.purchaseNotificationApple,
-		subscriptionNotificationAppleFunction:  initializer.subscriptionNotificationApple,
-		purchaseNotificationGoogleFunction:     initializer.purchaseNotificationGoogle,
-		subscriptionNotificationGoogleFunction: initializer.subscriptionNotificationGoogle,
-		storageIndexFilterFunctions:            initializer.storageIndexFunctions,
-		httpHandlers:                           initializer.httpHandlers,
-		leaderboardResetFunction:               initializer.leaderboardReset,
-		eventFunctions:                         events,
-		shutdownFunction:                       initializer.shutdownFunction,
-		fleetManager:                           nk.fleetManager,
-	}
-	matchmaker := NewLocalMatchmaker(zapLogger, zapLogger, config, router, metrics, runtime)
-
-	partyRegistry := NewLocalPartyRegistry(zapLogger, config, matchmaker, tracker, streamManager, router, config.GetName())
-	tracker.SetPartyJoinListener(partyRegistry.Join)
-	tracker.SetPartyLeaveListener(partyRegistry.Leave)
-	// NOTE: this runtime will isolated:
-	// - before and after RT functions
-	// - rpc functions
-	// (i.e. they will have to be added to this as well as through the initializer)
-	return partyRegistry, matchmaker, runtime
-}
-
-func ServiceSettingsLoop(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) {
-	if _, err := ServiceSettingsLoad(ctx, nk); err != nil {
-		logger.WithField("err", err).Error("Failed to load global settings")
-		panic(err)
-	}
-	// Load the service settings every 30 seconds
-	interval := 30 * time.Second
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			ticker.Stop()
-			return
-		case <-ticker.C:
-			if _, err := ServiceSettingsLoad(ctx, nk); err != nil {
-				logger.WithField("error", err).Warn("Failed to load global settings")
 			}
-		}
-	}
-	return nil
-}
 
-type MatchLabelMeta struct {
-	TickRate  int
-	Presences []*rtapi.UserPresence
-	State     *MatchLabel
-}
-
-func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
-	// Create user for use by the discord bot (and core group ownership)
-	userId, _, _, err := nk.AuthenticateDevice(ctx, SystemUserID, "discordbot", true)
-	if err != nil {
-		logger.WithField("err", err).Error("Error creating discordbot user: %v", err)
+			// Allow core server processing to handle the request.
+			handlerWithCORS.ServeHTTP(w, r)
+		})
 	}
 
-	coreGroups := []string{
-		GroupGlobalDevelopers,
-		GroupGlobalOperators,
-		GroupGlobalTesters,
-		GroupGlobalBadgeAdmins,
-		GroupGlobalBots,
-		GroupGlobalPrivateDataAccess,
-		GroupGlobalRequire2FA,
+	// Set up and start GRPC Gateway server.
+	s.grpcGatewayServer = &http.Server{
+		ReadTimeout:    time.Millisecond * time.Duration(int64(config.GetSocket().ReadTimeoutMs)),
+		WriteTimeout:   time.Millisecond * time.Duration(int64(config.GetSocket().WriteTimeoutMs)),
+		IdleTimeout:    time.Millisecond * time.Duration(int64(config.GetSocket().IdleTimeoutMs)),
+		MaxHeaderBytes: 5120,
+		Handler:        optionalResponseHeaderHandler,
+	}
+	if config.GetSocket().TLSCert != nil {
+		s.grpcGatewayServer.TLSConfig = &tls.Config{Certificates: config.GetSocket().TLSCert}
 	}
 
-	for _, name := range coreGroups {
-		// Search for group first
-		groups, _, err := nk.GroupsList(ctx, name, "", nil, nil, 1, "")
+	startupLogger.Info("Starting API server gateway for HTTP requests", zap.Int("port", config.GetSocket().Port))
+	go func() {
+		listener, err := net.Listen(config.GetSocket().Protocol, fmt.Sprintf("%v:%d", config.GetSocket().Address, config.GetSocket().Port))
 		if err != nil {
-			logger.WithField("err", err).Error("Group list error: %v", err)
-		}
-		// remove groups that are not lang tag of 'system'
-		for i, group := range groups {
-			if group.LangTag != SystemGroupLangTag {
-				groups = append(groups[:i], groups[i+1:]...)
-			}
+			startupLogger.Fatal("API server gateway listener failed to start", zap.Error(err))
 		}
 
-		if len(groups) == 0 {
-			// Create a nakama core group
-			_, err = nk.GroupCreate(ctx, userId, name, userId, SystemGroupLangTag, name, "", false, map[string]interface{}{}, 1000)
+		if config.GetSocket().TLSCert != nil {
+			if err := s.grpcGatewayServer.ServeTLS(listener, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				startupLogger.Fatal("API server gateway listener failed", zap.Error(err))
+			}
+		} else {
+			if err := s.grpcGatewayServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				startupLogger.Fatal("API server gateway listener failed", zap.Error(err))
+			}
+		}
+	}()
+
+	return s
+}
+
+func (s *ApiServer) Stop() {
+	// 1. Stop GRPC Gateway server first as it sits above GRPC server. This also closes the underlying listener.
+	if err := s.grpcGatewayServer.Shutdown(context.Background()); err != nil {
+		s.logger.Error("API server gateway listener shutdown failed", zap.Error(err))
+	}
+	// 2. Stop GRPC server. This also closes the underlying listener.
+	s.grpcServer.GracefulStop()
+}
+
+func (s *ApiServer) Healthcheck(ctx context.Context, in *emptypb.Empty) (*emptypb.Empty, error) {
+	return &emptypb.Empty{}, nil
+}
+
+func securityInterceptorFunc(logger *zap.Logger, config server.Config, sessionCache server.SessionCache, ctx context.Context, req interface{}, info *grpc.UnaryServerInfo) (context.Context, error) {
+	switch info.FullMethod {
+	case "/nakama.api.Nakama/Healthcheck":
+		// Healthcheck has no security.
+		return ctx, nil
+	case "/nakama.api.Nakama/SessionRefresh":
+		fallthrough
+	case "/nakama.api.Nakama/AuthenticateApple":
+		fallthrough
+	case "/nakama.api.Nakama/AuthenticateCustom":
+		fallthrough
+	case "/nakama.api.Nakama/AuthenticateDevice":
+		fallthrough
+	case "/nakama.api.Nakama/AuthenticateEmail":
+		fallthrough
+	case "/nakama.api.Nakama/AuthenticateFacebook":
+		fallthrough
+	case "/nakama.api.Nakama/AuthenticateFacebookInstantGame":
+		fallthrough
+	case "/nakama.api.Nakama/AuthenticateGameCenter":
+		fallthrough
+	case "/nakama.api.Nakama/AuthenticateGoogle":
+		fallthrough
+	case "/nakama.api.Nakama/AuthenticateSteam":
+		// Session refresh and authentication functions only require server key.
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			logger.Error("Cannot extract metadata from incoming context")
+			return nil, status.Error(codes.FailedPrecondition, "Cannot extract metadata from incoming context")
+		}
+		auth, ok := md["authorization"]
+		if !ok {
+			auth, ok = md["grpcgateway-authorization"]
+		}
+		if !ok {
+			// Neither "authorization" nor "grpc-authorization" were supplied.
+			return nil, status.Error(codes.Unauthenticated, "Server key required")
+		}
+		if len(auth) != 1 {
+			// Value of "authorization" or "grpc-authorization" was empty or repeated.
+			return nil, status.Error(codes.Unauthenticated, "Server key required")
+		}
+		username, _, ok := parseBasicAuth(auth[0])
+		if !ok {
+			// Value of "authorization" or "grpc-authorization" was malformed.
+			return nil, status.Error(codes.Unauthenticated, "Server key invalid")
+		}
+		if username != config.GetSocket().ServerKey {
+			// Value of "authorization" or "grpc-authorization" username component did not match server key.
+			return nil, status.Error(codes.Unauthenticated, "Server key invalid")
+		}
+	case "/nakama.api.Nakama/RpcFunc":
+		// RPC allows full user authentication or HTTP key authentication.
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			logger.Error("Cannot extract metadata from incoming context")
+			return nil, status.Error(codes.FailedPrecondition, "Cannot extract metadata from incoming context")
+		}
+		auth, ok := md["authorization"]
+		if !ok {
+			auth, ok = md["grpcgateway-authorization"]
+		}
+		if !ok {
+			// Neither "authorization" nor "grpc-authorization" were supplied. Try to validate HTTP key instead.
+			in, ok := req.(*api.Rpc)
+			if !ok {
+				logger.Error("Cannot extract Rpc from incoming request")
+				return nil, status.Error(codes.FailedPrecondition, "Auth token or HTTP key required")
+			}
+			if in.HttpKey == "" {
+				// HTTP key not present.
+				return nil, status.Error(codes.Unauthenticated, "Auth token or HTTP key required")
+			}
+			if in.HttpKey != config.GetRuntime().HTTPKey {
+				// Value of HTTP key username component did not match.
+				return nil, status.Error(codes.Unauthenticated, "HTTP key invalid")
+			}
+			return ctx, nil
+		}
+		if len(auth) != 1 {
+			// Value of "authorization" or "grpc-authorization" was empty or repeated.
+			return nil, status.Error(codes.Unauthenticated, "Auth token invalid")
+		}
+		userID, username, vars, exp, tokenId, tokenIssuedAt, ok := parseBearerAuth([]byte(config.GetSession().EncryptionKey), auth[0])
+		if !ok {
+			// Value of "authorization" or "grpc-authorization" was malformed or expired.
+			return nil, status.Error(codes.Unauthenticated, "Auth token invalid")
+		}
+		if !sessionCache.IsValidSession(userID, exp, tokenId) {
+			return nil, status.Error(codes.Unauthenticated, "Auth token invalid")
+		}
+		ctx = context.WithValue(context.WithValue(context.WithValue(context.WithValue(context.WithValue(context.WithValue(ctx, ctxUserIDKey{}, userID), ctxUsernameKey{}, username), ctxVarsKey{}, vars), ctxExpiryKey{}, exp), ctxTokenIDKey{}, tokenId), ctxTokenIssuedAtKey{}, tokenIssuedAt)
+	default:
+		// Unless explicitly defined above, handlers require full user authentication.
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			logger.Error("Cannot extract metadata from incoming context")
+			return nil, status.Error(codes.FailedPrecondition, "Cannot extract metadata from incoming context")
+		}
+		auth, ok := md["authorization"]
+		if !ok {
+			auth, ok = md["grpcgateway-authorization"]
+		}
+		if !ok {
+			// Neither "authorization" nor "grpc-authorization" were supplied.
+			return nil, status.Error(codes.Unauthenticated, "Auth token required")
+		}
+		if len(auth) != 1 {
+			// Value of "authorization" or "grpc-authorization" was empty or repeated.
+			return nil, status.Error(codes.Unauthenticated, "Auth token invalid")
+		}
+		userID, username, vars, exp, tokenId, tokenIssuedAt, ok := parseBearerAuth([]byte(config.GetSession().EncryptionKey), auth[0])
+		if !ok {
+			// Value of "authorization" or "grpc-authorization" was malformed or expired.
+			return nil, status.Error(codes.Unauthenticated, "Auth token invalid")
+		}
+		if !sessionCache.IsValidSession(userID, exp, tokenId) {
+			return nil, status.Error(codes.Unauthenticated, "Auth token invalid")
+		}
+		ctx = context.WithValue(context.WithValue(context.WithValue(context.WithValue(context.WithValue(context.WithValue(ctx, ctxUserIDKey{}, userID), ctxUsernameKey{}, username), ctxVarsKey{}, vars), ctxExpiryKey{}, exp), ctxTokenIDKey{}, tokenId), ctxTokenIssuedAtKey{}, tokenIssuedAt)
+	}
+	return context.WithValue(ctx, ctxFullMethodKey{}, info.FullMethod), nil
+}
+
+func parseBasicAuth(auth string) (username, password string, ok bool) {
+	if auth == "" {
+		return
+	}
+	const prefix = "Basic "
+	if !strings.HasPrefix(auth, prefix) {
+		return
+	}
+	c, err := base64.StdEncoding.DecodeString(auth[len(prefix):])
+	if err != nil {
+		return
+	}
+	cs := string(c)
+	s := strings.IndexByte(cs, ':')
+	if s < 0 {
+		return
+	}
+	return cs[:s], cs[s+1:], true
+}
+
+func parseBearerAuth(hmacSecretByte []byte, auth string) (userID uuid.UUID, username string, vars map[string]string, exp int64, tokenId string, issuedAt int64, ok bool) {
+	if auth == "" {
+		return
+	}
+	const prefix = "Bearer "
+	if !strings.HasPrefix(auth, prefix) {
+		return
+	}
+	return parseToken(hmacSecretByte, auth[len(prefix):])
+}
+
+func parseToken(hmacSecretByte []byte, tokenString string) (userID uuid.UUID, username string, vars map[string]string, exp int64, tokenId string, issuedAt int64, ok bool) {
+	jwtToken, err := jwt.ParseWithClaims(tokenString, &server.SessionTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if s, ok := token.Method.(*jwt.SigningMethodHMAC); !ok || s.Hash != crypto.SHA256 {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return hmacSecretByte, nil
+	})
+	if err != nil {
+		return
+	}
+	claims, ok := jwtToken.Claims.(*server.SessionTokenClaims)
+	if !ok || !jwtToken.Valid {
+		return
+	}
+	userID, err = uuid.FromString(claims.UserId)
+	if err != nil {
+		return
+	}
+	return userID, claims.Username, claims.Vars, claims.ExpiresAt, claims.TokenId, claims.IssuedAt, true
+}
+
+func decompressHandler(logger *zap.Logger, h http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("Content-Encoding") {
+		case "gzip":
+			gr, err := gzip.NewReader(r.Body)
 			if err != nil {
-				logger.WithField("err", err).Warn("Group `%s` create error: %v", name, err)
+				logger.Debug("Error processing gzip request body, attempting to read uncompressed", zap.Error(err))
+				break
+			}
+			r.Body = gr
+		case "deflate":
+			r.Body = flate.NewReader(r.Body)
+		default:
+			// No request compression.
+		}
+		h.ServeHTTP(w, r)
+	}
+}
+
+func extractClientAddressFromContext(logger *zap.Logger, ctx context.Context) (string, string) {
+	var clientAddr string
+	md, _ := metadata.FromIncomingContext(ctx)
+	if ips := md.Get("x-forwarded-for"); len(ips) > 0 {
+		// Look for gRPC-Gateway / LB header.
+		clientAddr = strings.Split(ips[0], ",")[0]
+	} else if peerInfo, ok := peer.FromContext(ctx); ok {
+		// If missing, try to look up gRPC peer info.
+		clientAddr = peerInfo.Addr.String()
+	}
+
+	return extractClientAddress(logger, clientAddr, ctx, "context")
+}
+
+func extractClientAddressFromRequest(logger *zap.Logger, r *http.Request) (string, string) {
+	var clientAddr string
+	if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
+		clientAddr = ip
+	} else if ips := r.Header.Get("x-forwarded-for"); len(ips) > 0 {
+		clientAddr = strings.Split(ips, ",")[0]
+	} else {
+		clientAddr = r.RemoteAddr
+	}
+
+	return extractClientAddress(logger, clientAddr, r, "request")
+}
+
+func extractClientAddress(logger *zap.Logger, clientAddr string, source interface{}, sourceType string) (string, string) {
+	var clientIP, clientPort string
+
+	if clientAddr != "" {
+		// It's possible the request metadata had no client address string.
+
+		clientAddr = strings.TrimSpace(clientAddr)
+		if host, port, err := net.SplitHostPort(clientAddr); err == nil {
+			clientIP = host
+			clientPort = port
+		} else {
+			var addrErr *net.AddrError
+			if errors.As(err, &addrErr) {
+				switch addrErr.Err {
+				case "missing port in address":
+					fallthrough
+				case "too many colons in address":
+					clientIP = clientAddr
+				default:
+					// Unknown address error, ignore the address.
+				}
 			}
 		}
+		// At this point err may still be a non-nil value that's not a *net.AddrError, ignore the address.
 	}
 
-	return nil
-}
-
-// Register Indexes for the login service
-func RegisterIndexes(initializer runtime.Initializer) error {
-
-	// Register storage indexes for any Storables
-	storables := []IndexedStorable{
-		&DisplayNameHistory{},
-		&GuildEnforcementJournal{},
-		&DeveloperApplications{},
-		&MatchmakingSettings{},
-		&VRMLPlayerSummary{},
-		&LoginHistory{},
-	}
-	for _, s := range storables {
-		for _, idx := range s.StorageIndexes() {
-			if err := initializer.RegisterStorageIndex(
-				idx.Name,
-				idx.Collection,
-				idx.Key,
-				idx.Fields,
-				idx.SortableFields,
-				idx.MaxEntries,
-				idx.IndexOnly,
-			); err != nil {
-				return err
-			}
+	if clientIP == "" {
+		if r, isRequest := source.(*http.Request); isRequest {
+			source = map[string]interface{}{"headers": r.Header, "remote_addr": r.RemoteAddr}
 		}
+		logger.Warn("cannot extract client address", zap.String("address_source_type", sourceType), zap.Any("address_source", source))
 	}
 
-	return nil
+	return clientIP, clientPort
 }
 
-func GetUserIDByDiscordID(ctx context.Context, db *sql.DB, customID string) (userID string, err error) {
+func traceApiBefore(ctx context.Context, logger *zap.Logger, metrics server.Metrics, fullMethodName string, fn func(clientIP, clientPort string) error) error {
+	clientIP, clientPort := extractClientAddressFromContext(logger, ctx)
+	start := time.Now()
 
-	// Look for an existing account.
-	query := "SELECT id, disable_time FROM users WHERE custom_id = $1"
-	var dbUserID string
-	var dbDisableTime pgtype.Timestamptz
-	var found = true
-	err = db.QueryRowContext(ctx, query, customID).Scan(&dbUserID, &dbDisableTime)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			found = false
-		} else {
-			return uuid.Nil.String(), fmt.Errorf("error finding user by discord ID: %w", err)
-		}
-	}
-	if !found {
-		return uuid.Nil.String(), ErrAccountNotFound
-	}
+	// Execute the before hook itself.
+	err := fn(clientIP, clientPort)
 
-	return dbUserID, nil
+	metrics.ApiBefore(fullMethodName, time.Since(start), err != nil)
+
+	return err
 }
 
-func GetGroupIDByGuildID(ctx context.Context, db *sql.DB, guildID string) (groupID string, err error) {
-	// Look for an existing account.
-	query := "SELECT id FROM groups WHERE lang_tag = 'guild' AND metadata->>'guild_id' = $1"
-	var dbGroupID string
-	var found = true
-	if err = db.QueryRowContext(ctx, query, guildID).Scan(&dbGroupID); err != nil {
-		if err == sql.ErrNoRows {
-			found = false
-		} else {
-			return uuid.Nil.String(), fmt.Errorf("error finding guild ID: %w", err)
-		}
-	}
-	if !found {
-		return uuid.Nil.String(), status.Error(codes.NotFound, "guild ID not found")
-	}
+func traceApiAfter(ctx context.Context, logger *zap.Logger, metrics server.Metrics, fullMethodName string, fn func(clientIP, clientPort string) error) {
+	clientIP, clientPort := extractClientAddressFromContext(logger, ctx)
+	start := time.Now()
 
-	return dbGroupID, nil
+	// Execute the after hook itself.
+	err := fn(clientIP, clientPort)
+
+	metrics.ApiAfter(fullMethodName, time.Since(start), err != nil)
 }
 
-func GetDiscordIDByUserID(ctx context.Context, db *sql.DB, userID string) (discordID string, err error) {
-	// Look for an existing account.
-	query := "SELECT custom_id FROM users WHERE id = $1"
-	var dbCustomID sql.NullString
-	var found = true
-	if err = db.QueryRowContext(ctx, query, userID).Scan(&dbCustomID); err != nil {
-		if err == sql.ErrNoRows {
-			found = false
-		} else {
-			return "", fmt.Errorf("error finding discord ID: %w", err)
-		}
-	}
-	if !found {
-		return "", status.Error(codes.NotFound, "discord ID not found")
+func handleRoutingError(ctx context.Context, mux *grpcgw.ServeMux, marshaler grpcgw.Marshaler, w http.ResponseWriter, r *http.Request, httpStatus int) {
+	sterr := status.Error(codes.Internal, "Unexpected routing error")
+	switch httpStatus {
+	case http.StatusBadRequest:
+		sterr = status.Error(codes.InvalidArgument, http.StatusText(httpStatus))
+	case http.StatusMethodNotAllowed:
+		sterr = status.Error(codes.Unimplemented, http.StatusText(httpStatus))
+	case http.StatusNotFound:
+		sterr = status.Error(codes.NotFound, http.StatusText(httpStatus))
 	}
 
-	return dbCustomID.String, nil
-}
-
-func GetGuildIDByGroupID(ctx context.Context, db *sql.DB, groupID string) (guildID string, err error) {
-	// Look for an existing account.
-	query := "SELECT metadata->>'guild_id' FROM groups WHERE id = $1"
-	var dbGuildID string
-	var found = true
-	if err = db.QueryRowContext(ctx, query, groupID).Scan(&dbGuildID); err != nil {
-		if err == sql.ErrNoRows {
-			found = false
-		} else {
-			return "", fmt.Errorf("error finding guild ID: %w", err)
-		}
-	}
-	if !found {
-		return "", status.Error(codes.NotFound, "guild ID not found")
-	}
-
-	return dbGuildID, nil
-}
-
-func MatchLabelByID(ctx context.Context, nk runtime.NakamaModule, matchID MatchID) (*MatchLabel, error) {
-	match, err := nk.MatchGet(ctx, matchID.String())
-	if err != nil {
-		return nil, err
-	} else if match == nil {
-		return nil, ErrMatchNotFound
-	}
-
-	label := MatchLabel{}
-	if err = json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
-		return nil, err
-	}
-	if label.GroupID == nil {
-		label.GroupID = &uuid.Nil
-	}
-
-	return &label, nil
-}
-
-func PartyMemberList(ctx context.Context, nk runtime.NakamaModule, partyID uuid.UUID) ([]runtime.Presence, error) {
-	node, ok := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
-	if !ok {
-		return nil, status.Error(codes.Internal, "error getting node from context")
-	}
-	// Get the MatchIDs for the user from it's presence
-	presences, err := nk.StreamUserList(StreamModeParty, partyID.String(), "", node, true, true)
-	if err != nil {
-		return nil, err
-	}
-	return presences, nil
-}
-
-func CheckSystemGroupMembership(ctx context.Context, db *sql.DB, userID, groupName string) (bool, error) {
-	return CheckGroupMembershipByName(ctx, db, userID, groupName, SystemGroupLangTag)
-}
-
-func CheckGroupMembershipByName(ctx context.Context, db *sql.DB, userID, groupName, groupType string) (bool, error) {
-	query := `
-SELECT ge.state FROM groups g, group_edge ge WHERE g.id = ge.destination_id AND g.lang_tag = $1 AND g.name = $2 
-AND ge.source_id = $3 AND ge.state >= 0 AND ge.state <= 2;
-`
-
-	params := make([]interface{}, 0, 4)
-	params = append(params, groupType)
-	params = append(params, groupName)
-	params = append(params, userID)
-	rows, err := db.QueryContext(ctx, query, params...)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return false, nil
-		}
-		return false, err
-	}
-	defer rows.Close()
-	if !rows.Next() {
-		return false, nil
-	}
-	return true, nil
-}
-
-func CheckGroupMembershipByID(ctx context.Context, db *sql.DB, userID, groupID, groupType string) (bool, error) {
-	query := `
-SELECT ge.state FROM groups g, group_edge ge WHERE g.id = ge.destination_id AND g.lang_tag = $1 AND g.id = $2
-AND ge.source_id = $3 AND ge.state >= 0 AND ge.state <= $4;
-`
-
-	params := make([]interface{}, 0, 4)
-	params = append(params, groupType)
-	params = append(params, groupID)
-	params = append(params, userID)
-	params = append(params, int32(api.UserGroupList_UserGroup_MEMBER))
-
-	rows, err := db.QueryContext(ctx, query, params...)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return false, nil
-		}
-		return false, err
-	}
-	defer rows.Close()
-	if !rows.Next() {
-		return false, nil
-	}
-	return true, nil
-}
-
-func PresenceByEntrantID(nk runtime.NakamaModule, matchID MatchID, entrantID uuid.UUID) (presence *MatchPresence, err error) {
-
-	presences, err := nk.StreamUserList(StreamModeEntrant, entrantID.String(), "", matchID.Node, false, true)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get stream presences for entrant %s: %w", entrantID.String(), err)
-	}
-
-	if len(presences) == 0 {
-		return nil, ErrEntrantNotFound
-	}
-
-	if len(presences) > 1 {
-		return nil, ErrMultipleEntrantsFound
-	}
-
-	mp := &MatchPresence{}
-	if err := json.Unmarshal([]byte(presences[0].GetStatus()), mp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal presence: %w", err)
-	}
-
-	return mp, nil
-}
-
-func GetMatchIDBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID MatchID, presence runtime.Presence, err error) {
-
-	presences, err := nk.StreamUserList(StreamModeService, sessionID.String(), "", "", false, true)
-	if err != nil {
-		return MatchID{}, nil, fmt.Errorf("failed to get stream presences: %w", err)
-	}
-	if len(presences) == 0 {
-		return MatchID{}, nil, ErrMatchNotFound
-	}
-	presence = presences[0]
-	matchID = MatchIDFromStringOrNil(presences[0].GetStatus())
-	if !matchID.IsNil() {
-		// Verify that the user is actually in the match
-		if meta, err := nk.StreamUserGet(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil || meta == nil {
-			return MatchID{}, nil, ErrMatchNotFound
-		}
-		return matchID, presence, nil
-	}
-
-	return MatchID{}, nil, ErrMatchNotFound
-}
-
-func GetLobbyGroupID(ctx context.Context, db *sql.DB, userID string) (string, uuid.UUID, error) {
-	query := "SELECT value->>'group_id' FROM storage WHERE collection = $1 AND key = $2 and user_id = $3"
-	var dbPartyGroupName string
-	var found = true
-	err := db.QueryRowContext(ctx, query, MatchmakerStorageCollection, MatchmakingConfigStorageKey, userID).Scan(&dbPartyGroupName)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			found = false
-		} else {
-			return "", uuid.Nil, fmt.Errorf("error finding lobby group id: %w", err)
-		}
-	}
-	if !found {
-		return "", uuid.Nil, status.Error(codes.NotFound, "lobby group id not found")
-	}
-	if dbPartyGroupName == "" {
-		return "", uuid.Nil, nil
-	}
-	return dbPartyGroupName, uuid.NewV5(EntrantIDSalt, dbPartyGroupName), nil
-}
-
-// returns map[guildID]groupID
-func GetGuildGroupIDsByUser(ctx context.Context, db *sql.DB, userID string) (map[string]string, error) {
-	if userID == "" {
-		return nil, status.Error(codes.InvalidArgument, "user ID is required")
-	}
-	query := `
-	SELECT g.id, g.metadata->>'guild_id' 
-	FROM group_edge ge, groups g 
-	WHERE g.id = ge.source_id AND ge.destination_id = $1 AND g.lang_tag = 'guild' AND ge.state <= 2
-						  `
-
-	var dbGroupID string
-	var dbGuildID string
-	rows, err := db.QueryContext(ctx, query, userID)
-	if err != nil {
-		return nil, fmt.Errorf("error finding guild groups: %w", err)
-	}
-
-	groups := make(map[string]string, 0)
-
-	for rows.Next() {
-		if err := rows.Scan(&dbGroupID, &dbGuildID); err != nil {
-			return nil, err
-		}
-		groups[dbGuildID] = dbGroupID
-	}
-	_ = rows.Close()
-	return groups, nil
-}
-
-func KickPlayerFromMatch(ctx context.Context, nk runtime.NakamaModule, matchID MatchID, userID string) error {
-	// Get the user's presences
-
-	label, err := MatchLabelByID(ctx, nk, matchID)
-	if err != nil {
-		return fmt.Errorf("failed to get match label: %w", err)
-	}
-
-	presences, err := nk.StreamUserList(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, false, true)
-	if err != nil {
-		return fmt.Errorf("failed to get stream presences: %w", err)
-	}
-
-	for _, presence := range presences {
-		if presence.GetUserId() != userID {
-			continue
-		}
-		if presence.GetSessionId() == label.GameServer.SessionID.String() {
-			// Do not kick the game server
-			continue
-		}
-
-		signal := SignalKickEntrantsPayload{
-			UserIDs: []uuid.UUID{uuid.FromStringOrNil(userID)},
-		}
-
-		data := NewSignalEnvelope(userID, SignalKickEntrants, signal).String()
-
-		// Signal the match to kick the entrants
-		if _, err := nk.MatchSignal(ctx, matchID.String(), data); err != nil {
-			return fmt.Errorf("failed to signal match: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func DisconnectUserID(ctx context.Context, nk runtime.NakamaModule, userID string, kickFirst bool, includeLogin bool, includeGameserver bool) (int, error) {
-
-	if kickFirst {
-		// Kick the user from any matches they are in
-		if matchID, _, err := GetMatchIDBySessionID(nk, uuid.FromStringOrNil(userID)); err == nil && !matchID.IsNil() {
-			if err := KickPlayerFromMatch(ctx, nk, matchID, userID); err != nil {
-				return 0, fmt.Errorf("failed to kick player from match: %w", err)
-			}
-		}
-	}
-
-	presences, err := nk.StreamUserList(StreamModeService, userID, "", "", false, true)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get stream presences: %w", err)
-	}
-	cnt := 0
-	for _, presence := range presences {
-
-		// Add a delay to allow the match to process the kick
-		go func() {
-			if kickFirst {
-				<-time.After(5 * time.Second)
-			}
-			if err := nk.SessionDisconnect(ctx, presence.GetSessionId(), runtime.PresenceReasonDisconnect); err != nil {
-				// Ignore the error
-				return
-			}
-		}()
-
-		cnt++
-	}
-
-	return cnt, nil
-}
-
-func GetUserIDByDeviceID(ctx context.Context, db *sql.DB, deviceID string) (string, error) {
-	query := `
-	SELECT ud.user_id FROM user_device ud WHERE ud.id = $1`
-	var dbUserID string
-	var found = true
-	err := db.QueryRowContext(ctx, query, deviceID).Scan(&dbUserID)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			found = false
-		} else {
-			return "", fmt.Errorf("error finding user ID By Evr ID: %w", err)
-		}
-	}
-	if !found {
-		return "", status.Error(codes.NotFound, "user account not found")
-	}
-	if dbUserID == "" {
-		return "", nil
-	}
-	return dbUserID, nil
-}
-
-func GetPartyGroupUserIDs(ctx context.Context, nk runtime.NakamaModule, groupName string) ([]string, error) {
-	if groupName == "" {
-		return nil, status.Error(codes.InvalidArgument, "user ID is required")
-	}
-
-	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, ActivePartyGroupIndex, fmt.Sprintf("+value.group_id:%s", groupName), 100, nil, "")
-	if err != nil {
-		return nil, fmt.Errorf("error listing party group users: %w", err)
-	}
-
-	if len(objs.Objects) == 0 {
-		return nil, status.Error(codes.NotFound, "party group not found")
-	}
-
-	userIDs := make([]string, 0, len(objs.Objects))
-
-	for _, obj := range objs.Objects {
-		if obj.GetUserId() == SystemUserID {
-			continue
-		}
-		userIDs = append(userIDs, obj.GetUserId())
-	}
-
-	return userIDs, nil
-}
-
-func RuntimeLoggerToZapLogger(logger runtime.Logger) *zap.Logger {
-	return logger.(*server.RuntimeGoLogger).logger
-}
-
-func SetNextMatchID(ctx context.Context, nk runtime.NakamaModule, userID string, matchID MatchID, role TeamIndex, hostDiscordID string) error {
-	settings, err := LoadMatchmakingSettings(ctx, nk, userID)
-	if err != nil {
-		return fmt.Errorf("Error loading matchmaking settings: %w", err)
-	}
-
-	settings.NextMatchID = matchID
-	settings.NextMatchRole = role.String()
-	settings.NextMatchDiscordID = hostDiscordID
-
-	if err = StoreMatchmakingSettings(ctx, nk, userID, settings); err != nil {
-		return fmt.Errorf("Error storing matchmaking settings: %w", err)
-	}
-
-	return nil
+	// Set empty ServerMetadata to prevent logging error on nil metadata.
+	grpcgw.DefaultHTTPErrorHandler(grpcgw.NewServerMetadataContext(ctx, grpcgw.ServerMetadata{}), mux, marshaler, w, r, sterr)
 }

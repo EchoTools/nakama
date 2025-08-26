@@ -10,7 +10,7 @@ import (
 // client -> nakama: request the user profile for their logged-in account.
 type LoggedInUserProfileRequest struct {
 	Session            uuid.UUID
-	EvrID              EvrId
+	EvrID              XPID
 	ProfileRequestData ProfileRequestData
 }
 
@@ -27,7 +27,7 @@ func (m *LoggedInUserProfileRequest) Stream(s *EasyStream) error {
 	})
 }
 
-func NewLoggedInUserProfileRequest(session uuid.UUID, evrId EvrId, profileRequestData ProfileRequestData) LoggedInUserProfileRequest {
+func NewLoggedInUserProfileRequest(session uuid.UUID, evrId XPID, profileRequestData ProfileRequestData) LoggedInUserProfileRequest {
 	return LoggedInUserProfileRequest{
 		Session:            session,
 		EvrID:              evrId,
@@ -38,7 +38,7 @@ func (m *LoggedInUserProfileRequest) GetLoginSessionID() uuid.UUID {
 	return m.Session
 }
 
-func (m *LoggedInUserProfileRequest) GetEvrID() EvrId {
+func (m *LoggedInUserProfileRequest) GetEvrID() XPID {
 	return m.EvrID
 }
 

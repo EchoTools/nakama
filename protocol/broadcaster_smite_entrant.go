@@ -8,7 +8,7 @@ import (
 
 // SNSLobbySmiteEntrant represents a message from server to client indicating a failure in OtherUserProfileRequest.
 type SNSLobbySmiteEntrant struct {
-	EvrId      EvrId  // The identifier of the associated user.
+	EvrId      XPID   // The identifier of the associated user.
 	StatusCode uint64 // The status code returned with the failure. (These are http status codes)
 	Message    string // The message returned with the failure.
 }
@@ -21,7 +21,7 @@ func (m *SNSLobbySmiteEntrant) Symbol() Symbol {
 	return SymbolOf(m)
 }
 
-func NewSNSLobbySmiteEntrant(evrId EvrId, statusCode uint64, message string) *SNSLobbySmiteEntrant {
+func NewSNSLobbySmiteEntrant(evrId XPID, statusCode uint64, message string) *SNSLobbySmiteEntrant {
 	return &SNSLobbySmiteEntrant{
 		EvrId:      evrId,
 		StatusCode: statusCode,

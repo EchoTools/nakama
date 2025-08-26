@@ -18,7 +18,7 @@ const (
 )
 
 type RemoteLogSet struct {
-	EvrID    EvrId
+	EvrID    XPID
 	Unk0     uint64
 	Unk1     uint64
 	Unk2     uint64

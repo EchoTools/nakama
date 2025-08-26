@@ -11,12 +11,12 @@ type GenericMessage struct {
 	Session     uuid.UUID
 	AcctId      uint64
 	MessageType Symbol
-	OtherEvrID  EvrId
+	OtherEvrID  XPID
 	RoomID      int64
 	PartyData   GenericMessageData
 }
 
-func NewGenericMessage(session uuid.UUID, acctId uint64, messageType Symbol, otherEvrId EvrId, partyData GenericMessageData) *GenericMessage {
+func NewGenericMessage(session uuid.UUID, acctId uint64, messageType Symbol, otherEvrId XPID, partyData GenericMessageData) *GenericMessage {
 	return &GenericMessage{
 		Session:     session,
 		AcctId:      acctId,

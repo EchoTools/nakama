@@ -14,7 +14,7 @@ type LoginIdentifier interface {
 
 type XPIdentifier interface {
 	LoginIdentifier
-	GetEvrID() EvrId
+	GetEvrID() XPID
 }
 
 type LobbySessionMessage interface {
@@ -37,7 +37,7 @@ type LobbySessionRequest interface {
 }
 
 type Entrant struct {
-	EvrID EvrId
+	EvrID XPID
 	Role  int8 // -1 for any team
 }
 

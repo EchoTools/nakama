@@ -13,14 +13,14 @@ type LobbyEntrant struct {
 	EntrantIDs []uuid.UUID // Unk1, The player session token obtained for the requested player user identifier.
 
 	Unk0      byte      // V2, V3
-	EvrID     EvrId     // V2, V3
+	EvrID     XPID      // V2, V3
 	EntrantID uuid.UUID // V2, V3
 	TeamIndex int16     // V3
 	Unk1      uint16    // V3
 	Unk2      uint32    // V3
 }
 
-func NewLobbyEntrant(evrId EvrId, matchingSession uuid.UUID, playerSession uuid.UUID, playerSessions []uuid.UUID, teamIndex int16) *LobbyEntrant {
+func NewLobbyEntrant(evrId XPID, matchingSession uuid.UUID, playerSession uuid.UUID, playerSessions []uuid.UUID, teamIndex int16) *LobbyEntrant {
 	return &LobbyEntrant{
 		LobbyID:    matchingSession,
 		EntrantIDs: playerSessions,

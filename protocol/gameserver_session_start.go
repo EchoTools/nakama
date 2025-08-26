@@ -139,7 +139,7 @@ func (s *GameServerSessionStart) String() string {
 		s, s.MatchID, s.PlayerLimit, ToSymbol(s.Settings.Mode).Token(), ToSymbol(s.Settings.Level).Token())
 }
 
-func NewGameServerSessionStart(sessionID uuid.UUID, channel uuid.UUID, playerLimit uint8, lobbyType uint8, appID string, mode Symbol, level Symbol, features []string, entrants []EvrId) *GameServerSessionStart {
+func NewGameServerSessionStart(sessionID uuid.UUID, channel uuid.UUID, playerLimit uint8, lobbyType uint8, appID string, mode Symbol, level Symbol, features []string, entrants []XPID) *GameServerSessionStart {
 	descriptors := make([]EntrantDescriptor, len(entrants))
 	for i, entrant := range entrants {
 		descriptors[i] = *NewEntrantDescriptor(entrant)
@@ -220,7 +220,7 @@ func (s *LobbySessionSettings) String() string {
 
 type EntrantDescriptor struct {
 	Unk0  uuid.UUID
-	EvrID EvrId
+	EvrID XPID
 	Flags uint64
 }
 
@@ -228,7 +228,7 @@ func (m *EntrantDescriptor) String() string {
 	return fmt.Sprintf("EREntrantDescriptor(unk0=%s, player_id=%s, flags=%d)", m.Unk0, m.EvrID.String(), m.Flags)
 }
 
-func NewEntrantDescriptor(playerId EvrId) *EntrantDescriptor {
+func NewEntrantDescriptor(playerId XPID) *EntrantDescriptor {
 	return &EntrantDescriptor{
 		Unk0:  uuid.Must(uuid.NewV4()),
 		EvrID: playerId,
@@ -240,7 +240,7 @@ func RandomBotEntrantDescriptor() EntrantDescriptor {
 	botuuid, _ := uuid.NewV4()
 	return EntrantDescriptor{
 		Unk0:  botuuid,
-		EvrID: EvrId{PlatformCode: BOT, AccountId: rand.Uint64()},
+		EvrID: XPID{PlatformCode: BOT, AccountId: rand.Uint64()},
 		Flags: 0x0044BB8000,
 	}
 }

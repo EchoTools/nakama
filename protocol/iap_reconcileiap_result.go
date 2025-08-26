@@ -5,7 +5,7 @@ import (
 )
 
 type ReconcileIAPResult struct {
-	EvrId   EvrId
+	EvrId   XPID
 	IAPData IAPData
 }
 
@@ -28,7 +28,7 @@ type IAPEchoPoints struct {
 
 // ReconcileIAPResult represents a response related to in-app purchases.
 
-func NewReconcileIAPResult(userID EvrId) *ReconcileIAPResult {
+func NewReconcileIAPResult(userID XPID) *ReconcileIAPResult {
 	return &ReconcileIAPResult{
 		EvrId: userID,
 		IAPData: IAPData{

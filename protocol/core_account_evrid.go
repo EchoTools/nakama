@@ -25,23 +25,23 @@ const (
 	TEN                         // Tencent
 )
 
-// EvrId represents an identifier for a user on the platform.
-type EvrId struct {
+// XPID represents an identifier for a user on the platform.
+type XPID struct {
 	PlatformCode PlatformCode
 	AccountId    uint64
 }
 
-func (e EvrId) MarshalText() ([]byte, error) {
+func (e XPID) MarshalText() ([]byte, error) {
 	if e.PlatformCode == 0 && e.AccountId == 0 {
 		return []byte{}, nil
 	}
 	return []byte(e.Token()), nil
 }
 
-func (e *EvrId) UnmarshalText(b []byte) error {
+func (e *XPID) UnmarshalText(b []byte) error {
 	s := string(b)
 	if s == "" {
-		*e = EvrId{}
+		*e = XPID{}
 	}
 	parsed, err := ParseEvrId(s)
 	if err != nil {
@@ -51,19 +51,19 @@ func (e *EvrId) UnmarshalText(b []byte) error {
 	return nil
 }
 
-func (xpi EvrId) Valid() bool {
+func (xpi XPID) Valid() bool {
 	return xpi.PlatformCode > STM && xpi.PlatformCode < TEN && xpi.AccountId > 0
 }
 
-func (xpi EvrId) Nil() bool {
+func (xpi XPID) Nil() bool {
 	return xpi.PlatformCode == 0 && xpi.AccountId == 0
 }
 
-func (xpi EvrId) NotNil() bool {
+func (xpi XPID) NotNil() bool {
 	return xpi.PlatformCode != 0 && xpi.AccountId != 0
 }
 
-func (xpi EvrId) UUID() uuid.UUID {
+func (xpi XPID) UUID() uuid.UUID {
 	if xpi.PlatformCode == 0 || xpi.AccountId == 0 {
 		return uuid.Nil
 	}
@@ -71,11 +71,11 @@ func (xpi EvrId) UUID() uuid.UUID {
 }
 
 // Parse parses a string into a given platform identifier.
-func ParseEvrId(s string) (*EvrId, error) {
+func ParseEvrId(s string) (*XPID, error) {
 	// Obtain the position of the last dash.
 	dashIndex := strings.LastIndex(s, "-")
 	if len(s) == 0 {
-		return &EvrId{}, nil
+		return &XPID{}, nil
 	}
 	if dashIndex < 0 {
 		return nil, fmt.Errorf("invalid format: %s", s)
@@ -95,43 +95,43 @@ func ParseEvrId(s string) (*EvrId, error) {
 	}
 
 	// Create the identifier
-	platformId := &EvrId{PlatformCode: platformCode, AccountId: accountId}
+	platformId := &XPID{PlatformCode: platformCode, AccountId: accountId}
 	return platformId, nil
 }
 
-func (xpi EvrId) String() string {
+func (xpi XPID) String() string {
 	return xpi.Token()
 }
 
-func (xpi EvrId) Token() string {
+func (xpi XPID) Token() string {
 	return xpi.PlatformCode.Abbrevation() + "-" + strconv.FormatUint(xpi.AccountId, 10)
 }
 
-func (xpi EvrId) Equals(other EvrId) bool {
+func (xpi XPID) Equals(other XPID) bool {
 	return xpi.PlatformCode == other.PlatformCode && xpi.AccountId == other.AccountId
 }
 
-func (xpi EvrId) IsNil() bool {
+func (xpi XPID) IsNil() bool {
 	return xpi.PlatformCode == 0 && xpi.AccountId == 0
 }
 
-func (xpi EvrId) IsNotNil() bool {
+func (xpi XPID) IsNotNil() bool {
 	return xpi.PlatformCode != 0 && xpi.AccountId != 0
 }
 
-func (xpi EvrId) IsValid() bool {
+func (xpi XPID) IsValid() bool {
 	return xpi.PlatformCode >= STM && xpi.PlatformCode <= TEN && xpi.AccountId > 0
 }
 
-func (xpi *EvrId) Stream(s *EasyStream) error {
+func (xpi *XPID) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamNumber(binary.LittleEndian, &xpi.PlatformCode) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &xpi.AccountId) },
 	})
 }
 
-func NewEchoUserId(platformCode PlatformCode, accountId uint64) *EvrId {
-	return &EvrId{PlatformCode: platformCode, AccountId: accountId}
+func NewEchoUserId(platformCode PlatformCode, accountId uint64) *XPID {
+	return &XPID{PlatformCode: platformCode, AccountId: accountId}
 }
 
 // GetPrefix obtains a platform prefix string for a given PlatformCode.

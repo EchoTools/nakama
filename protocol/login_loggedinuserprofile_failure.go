@@ -8,7 +8,7 @@ import (
 
 // nakama -> client: failure response to LoggedInUserProfileFailure.
 type LoggedInUserProfileFailure struct {
-	EvrId        EvrId
+	EvrId        XPID
 	StatusCode   uint64 // HTTP status code
 	ErrorMessage string
 }
@@ -34,7 +34,7 @@ func (m *LoggedInUserProfileFailure) Stream(s *EasyStream) error {
 	})
 }
 
-func NewLoggedInUserProfileFailure(evrId EvrId, statusCode int, message string) *LoggedInUserProfileFailure {
+func NewLoggedInUserProfileFailure(evrId XPID, statusCode int, message string) *LoggedInUserProfileFailure {
 	return &LoggedInUserProfileFailure{
 		EvrId:        evrId,
 		StatusCode:   uint64(statusCode),

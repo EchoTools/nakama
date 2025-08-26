@@ -45,7 +45,7 @@ func TestEvrId_UUID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			xpi := &EvrId{
+			xpi := &XPID{
 				PlatformCode: tt.fields.PlatformCode,
 				AccountId:    tt.fields.AccountId,
 			}
@@ -58,11 +58,11 @@ func TestEvrId_UUID(t *testing.T) {
 
 func TestEvrId_Equal(t *testing.T) {
 
-	evrID1 := EvrId{
+	evrID1 := XPID{
 		PlatformCode: 1,
 		AccountId:    1,
 	}
-	evrID2 := EvrId{
+	evrID2 := XPID{
 		PlatformCode: 1,
 		AccountId:    1,
 	}
@@ -78,7 +78,7 @@ func TestEvrId_Equals(t *testing.T) {
 		AccountId    uint64
 	}
 	type args struct {
-		other EvrId
+		other XPID
 	}
 	tests := []struct {
 		name   string
@@ -93,7 +93,7 @@ func TestEvrId_Equals(t *testing.T) {
 				AccountId:    1,
 			},
 			args: args{
-				EvrId{
+				XPID{
 					PlatformCode: 1,
 					AccountId:    1,
 				},
@@ -107,7 +107,7 @@ func TestEvrId_Equals(t *testing.T) {
 				AccountId:    1,
 			},
 			args: args{
-				EvrId{
+				XPID{
 					PlatformCode: 1,
 					AccountId:    1,
 				},
@@ -121,7 +121,7 @@ func TestEvrId_Equals(t *testing.T) {
 				AccountId:    0,
 			},
 			args: args{
-				EvrId{
+				XPID{
 					PlatformCode: 1,
 					AccountId:    1,
 				},
@@ -135,7 +135,7 @@ func TestEvrId_Equals(t *testing.T) {
 				AccountId:    1,
 			},
 			args: args{
-				EvrId{
+				XPID{
 					PlatformCode: 2,
 					AccountId:    2,
 				},
@@ -145,7 +145,7 @@ func TestEvrId_Equals(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			xpi := &EvrId{
+			xpi := &XPID{
 				PlatformCode: tt.fields.PlatformCode,
 				AccountId:    tt.fields.AccountId,
 			}
@@ -201,7 +201,7 @@ func TestEvrId_IsNil(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			xpi := &EvrId{
+			xpi := &XPID{
 				PlatformCode: tt.fields.PlatformCode,
 				AccountId:    tt.fields.AccountId,
 			}
@@ -262,7 +262,7 @@ func TestEvrId_MarshalText(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := EvrId{
+			e := XPID{
 				PlatformCode: tt.fields.PlatformCode,
 				AccountId:    tt.fields.AccountId,
 			}
@@ -339,7 +339,7 @@ func TestEvrId_UnmarshalJSON(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := &EvrId{
+			e := &XPID{
 				PlatformCode: tt.fields.PlatformCode,
 				AccountId:    tt.fields.AccountId,
 			}
@@ -357,7 +357,7 @@ func TestParseEvrId(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    args
-		want    *EvrId
+		want    *XPID
 		wantErr bool
 	}{
 		{
@@ -365,7 +365,7 @@ func TestParseEvrId(t *testing.T) {
 			args: args{
 				s: "",
 			},
-			want: &EvrId{
+			want: &XPID{
 				PlatformCode: 0,
 				AccountId:    0,
 			},
@@ -376,7 +376,7 @@ func TestParseEvrId(t *testing.T) {
 			args: args{
 				s: "STM-1",
 			},
-			want: &EvrId{
+			want: &XPID{
 				PlatformCode: 1,
 				AccountId:    1,
 			},
@@ -387,7 +387,7 @@ func TestParseEvrId(t *testing.T) {
 			args: args{
 				s: "UNK-1",
 			},
-			want: &EvrId{
+			want: &XPID{
 				PlatformCode: 0,
 				AccountId:    1,
 			},
@@ -398,7 +398,7 @@ func TestParseEvrId(t *testing.T) {
 			args: args{
 				s: "STM-0",
 			},
-			want: &EvrId{
+			want: &XPID{
 				PlatformCode: 1,
 				AccountId:    0,
 			},
@@ -409,7 +409,7 @@ func TestParseEvrId(t *testing.T) {
 			args: args{
 				s: "OVR_ORG-3963667097037078",
 			},
-			want: &EvrId{
+			want: &XPID{
 				PlatformCode: 4,
 				AccountId:    3963667097037078,
 			},
@@ -420,7 +420,7 @@ func TestParseEvrId(t *testing.T) {
 			args: args{
 				s: "OVR-ORG-3963667097037078",
 			},
-			want: &EvrId{
+			want: &XPID{
 				PlatformCode: 4,
 				AccountId:    3963667097037078,
 			},
