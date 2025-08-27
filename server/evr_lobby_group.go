@@ -44,7 +44,7 @@ func (g *LobbyGroup) List() []*PartyPresenceListItem {
 	if g.ph == nil {
 		return nil
 	}
-	return g.ph.members.List()
+	return g.ph.ListSorted()
 }
 
 func (g *LobbyGroup) Size() int {
