@@ -1606,19 +1606,20 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return nil
 			}
 
+			var isMember bool
+			isMember, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalBadgeAdmins)
+			if err != nil {
+				return status.Error(codes.Internal, "failed to check group membership")
+			}
+			if !isMember {
+				return status.Error(codes.PermissionDenied, "you do not have permission to use this command")
+			}
+
 			switch options[0].Name {
 			case "assign":
 				options = options[0].Options
 				// Check that the user is a developer
 
-				var isMember bool
-				isMember, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalBadgeAdmins)
-				if err != nil {
-					return status.Error(codes.Internal, "failed to check group membership")
-				}
-				if !isMember {
-					return status.Error(codes.PermissionDenied, "you do not have permission to use this command")
-				}
 				if len(options) < 2 {
 					return status.Error(codes.InvalidArgument, "you must specify a user and a badge")
 				}
