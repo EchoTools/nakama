@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
 	"net"
 	"regexp"
 	goruntime "runtime"
@@ -1614,19 +1613,20 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return nil
 			}
 
+			var isMember bool
+			isMember, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalBadgeAdmins)
+			if err != nil {
+				return status.Error(codes.Internal, "failed to check group membership")
+			}
+			if !isMember {
+				return status.Error(codes.PermissionDenied, "you do not have permission to use this command")
+			}
+
 			switch options[0].Name {
 			case "assign":
 				options = options[0].Options
 				// Check that the user is a developer
 
-				var isMember bool
-				isMember, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalBadgeAdmins)
-				if err != nil {
-					return status.Error(codes.Internal, "failed to check group membership")
-				}
-				if !isMember {
-					return status.Error(codes.PermissionDenied, "you do not have permission to use this command")
-				}
 				if len(options) < 2 {
 					return status.Error(codes.InvalidArgument, "you must specify a user and a badge")
 				}
@@ -1716,6 +1716,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 				simpleInteractionResponse(s, i, fmt.Sprintf("Assigned VRML cosmetics `%s` to user `%s`", badgeCodestr, target.Username))
 			case "link-player":
+
 				// Link the player page directly
 				options = options[0].Options
 				if len(options) == 0 {
@@ -3318,111 +3319,6 @@ var discordMarkdownEscapeReplacer = strings.NewReplacer(
 
 func EscapeDiscordMarkdown(s string) string {
 	return discordMarkdownEscapeReplacer.Replace(s)
-}
-
-func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID string, e *LoginHistoryEntry, ipInfo IPInfo) error {
-	// Get the user's discord ID
-	discordID, err := GetDiscordIDByUserID(ctx, d.db, userID)
-	if err != nil {
-		return err
-	}
-
-	// Send the message to the user
-	channel, err := d.dg.UserChannelCreate(discordID)
-	if err != nil {
-		return err
-	}
-
-	// Send the message
-	embeds, components := IPVerificationEmbed(e, ipInfo)
-	_, err = d.dg.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
-		Embeds:     embeds,
-		Components: components,
-	})
-
-	return err
-}
-
-func IPVerificationEmbed(entry *LoginHistoryEntry, ipInfo IPInfo) ([]*discordgo.MessageEmbed, []discordgo.MessageComponent) {
-
-	code := fmt.Sprintf("%02d", entry.CreatedAt.Nanosecond()%100)
-
-	codes := []string{code}
-
-	numCodes := 5
-
-	// Generate 3 more random numbers
-	for len(codes) < numCodes {
-		s := fmt.Sprintf("%02d", rand.Intn(100))
-		if slices.Contains(codes, s) {
-			continue
-		}
-		codes = append(codes, s)
-	}
-
-	// Shuffle the numbers
-	rand.Shuffle(len(codes), func(i, j int) {
-		codes[i], codes[j] = codes[j], codes[i]
-	})
-
-	options := make([]discordgo.SelectMenuOption, 0, len(codes))
-
-	for _, code := range codes {
-		options = append(options, discordgo.SelectMenuOption{
-			Label: code,
-			Value: entry.ClientIP + ":" + code,
-		})
-	}
-
-	embed := &discordgo.MessageEmbed{
-		Title:       "New Login Location",
-		Description: "Please verify the login attempt.",
-		Color:       0x00ff00,
-		Fields: []*discordgo.MessageEmbedField{
-			{
-				Name:   "IP Address",
-				Value:  entry.ClientIP,
-				Inline: true,
-			}},
-	}
-
-	if ipInfo != nil {
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   "Location (may be inaccurate)",
-			Value:  fmt.Sprintf("%s, %s, %s", ipInfo.City(), ipInfo.Region(), ipInfo.CountryCode()),
-			Inline: true,
-		})
-
-	}
-	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-		Name:   "Note",
-		Value:  "Report this message, If you were not instructed (in your headset) to look for this message. Use the **Report** button below.",
-		Inline: false,
-	})
-
-	components := []discordgo.MessageComponent{
-		discordgo.ActionsRow{
-			Components: []discordgo.MessageComponent{
-				&discordgo.SelectMenu{
-					CustomID:    "approve_ip",
-					Placeholder: "Select the correct code",
-					Options:     options,
-				},
-			},
-		},
-		discordgo.ActionsRow{
-			Components: []discordgo.MessageComponent{
-				&discordgo.Button{
-					Label:    "Report to EchoVRCE",
-					Style:    discordgo.LinkButton,
-					URL:      ServiceSettings().ReportURL,
-					Disabled: false,
-				},
-			},
-		},
-	}
-
-	return []*discordgo.MessageEmbed{embed}, components
 }
 
 func (d *DiscordAppBot) interactionToSignature(prefix string, options []*discordgo.ApplicationCommandInteractionDataOption) string {

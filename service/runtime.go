@@ -75,12 +75,6 @@ func NewNEVRRuntime(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		dg.StateEnabled = true
 	}
 
-	go func() {
-		if err := RegisterIndexes(storageIndex); err != nil {
-			panic(fmt.Errorf("unable to register indexes: %v", err))
-		}
-	}()
-
 	// Remove all LinkTickets
 	if err := nk.StorageDelete(ctx, []*runtime.StorageDelete{{
 		Collection: AuthorizationCollection,
@@ -175,7 +169,7 @@ func createCoreGroups(ctx context.Context, db *sql.DB, nk runtime.NakamaModule) 
 		// Search for group first
 		groups, _, err := nk.GroupsList(ctx, name, "", nil, nil, 1, "")
 		if err != nil {
-			return fmt.Errorf("Group list error: %v", err)
+			return fmt.Errorf("group list error: %v", err)
 		}
 		// remove groups that are not lang tag of 'system'
 		for i, group := range groups {
@@ -188,7 +182,7 @@ func createCoreGroups(ctx context.Context, db *sql.DB, nk runtime.NakamaModule) 
 			// Create a nakama core group
 			_, err = nk.GroupCreate(ctx, userId, name, userId, SystemGroupLangTag, name, "", false, map[string]interface{}{}, 1000)
 			if err != nil {
-				return fmt.Errorf("Group `%s` create error: %v", name, err)
+				return fmt.Errorf("group `%s` create error: %v", name, err)
 			}
 		}
 	}
@@ -196,8 +190,8 @@ func createCoreGroups(ctx context.Context, db *sql.DB, nk runtime.NakamaModule) 
 	return nil
 }
 
-// Register Indexes for the login service
-func RegisterIndexes(storageIndex server.StorageIndex) error {
+// Register Indexes for any Storables
+func RegisterIndexes(ctx context.Context, storageIndex server.StorageIndex) error {
 
 	// Register storage indexes for any Storables
 	storables := []StorableIndexer{
@@ -210,7 +204,7 @@ func RegisterIndexes(storageIndex server.StorageIndex) error {
 	}
 	for _, s := range storables {
 		for _, idx := range s.StorageIndexes() {
-			if err := storageIndex.CreateIndex(context.Background(), idx.Name, idx.Collection, idx.Key, idx.Fields, idx.SortableFields, idx.MaxEntries, idx.IndexOnly); err != nil {
+			if err := storageIndex.CreateIndex(ctx, idx.Name, idx.Collection, idx.Key, idx.Fields, idx.SortableFields, idx.MaxEntries, idx.IndexOnly); err != nil {
 				return err
 			}
 		}
@@ -218,26 +212,27 @@ func RegisterIndexes(storageIndex server.StorageIndex) error {
 	return nil
 }
 
-func GetUserIDByDiscordID(ctx context.Context, db *sql.DB, customID string) (userID string, err error) {
+func GetUserIDByDiscordID(ctx context.Context, db *sql.DB, customID string) (userID, username string, err error) {
 
 	// Look for an existing account.
-	query := "SELECT id, disable_time FROM users WHERE custom_id = $1"
+	query := "SELECT id, username, disable_time FROM users WHERE custom_id = $1"
 	var dbUserID string
+	var dbUsername string
 	var dbDisableTime pgtype.Timestamptz
 	var found = true
-	err = db.QueryRowContext(ctx, query, customID).Scan(&dbUserID, &dbDisableTime)
+	err = db.QueryRowContext(ctx, query, customID).Scan(&dbUserID, &dbUsername, &dbDisableTime)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			found = false
 		} else {
-			return uuid.Nil.String(), fmt.Errorf("error finding user by discord ID: %w", err)
+			return "", "", fmt.Errorf("error finding user by discord ID: %w", err)
 		}
 	}
 	if !found {
-		return uuid.Nil.String(), server.ErrAccountNotFound
+		return "", "", server.ErrAccountNotFound
 	}
 
-	return dbUserID, nil
+	return dbUserID, dbUsername, nil
 }
 
 func GetGroupIDByGuildID(ctx context.Context, db *sql.DB, guildID string) (groupID string, err error) {

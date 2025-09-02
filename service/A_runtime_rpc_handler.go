@@ -62,7 +62,7 @@ func (d *RPCHandler) DiscordIDToUserID(discordID string) string {
 	userID, ok := d.idcache.Load(discordID)
 	if !ok {
 		var err error
-		userID, err = GetUserIDByDiscordID(d.ctx, d.db, discordID)
+		userID, _, err = GetUserIDByDiscordID(d.ctx, d.db, discordID)
 		if err != nil {
 			return ""
 		}
@@ -163,7 +163,7 @@ func (h *RPCHandler) AuthenticatePasswordRPC(ctx context.Context, logger runtime
 			userID = request.UserID
 
 		case request.DiscordID != "":
-			userID, err = GetUserIDByDiscordID(ctx, db, request.DiscordID)
+			userID, _, err = GetUserIDByDiscordID(ctx, db, request.DiscordID)
 			if err != nil {
 				return "", err
 			}

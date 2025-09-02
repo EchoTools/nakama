@@ -459,7 +459,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	}
 
 	// Generate a profile for this group
-	profile, err := PlayerProfileFromParameters(ctx, p.db, p.nk, params, groupID, []evr.Symbol{lobbyParams.Mode}, lobbyParams.Mode)
+	profile, err := NewPlayerProfile(ctx, p.db, p.nk, params.profile, params.xpID, groupID, []evr.Symbol{lobbyParams.Mode}, lobbyParams.Mode, params.profile.GetGroupIGN(groupID))
 	if err != nil {
 		return fmt.Errorf("failed to create user server profile: %w", err)
 	}
@@ -468,7 +468,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		// Give the user a gold name if they are enabled as a moderator in the guild, and want it.
 		profile.DeveloperFeatures = &evr.DeveloperFeatures{}
 	}
-	if err := StorePlayerProfileData(ctx, server.NewRuntimeGoLogger(logger), p.nk, userID, profile); err != nil {
+	if err := PlayerProfileStore(ctx, server.NewRuntimeGoLogger(logger), p.nk, userID, profile); err != nil {
 		logger.Warn("Failed to store player profile data", zap.Error(err))
 	}
 

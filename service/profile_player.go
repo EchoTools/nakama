@@ -50,7 +50,7 @@ func (h *PlayerProfile) StorageIndexes() []StorableIndexMeta {
 	return []StorableIndexMeta{{
 		Name:           StorageIndexPlayerProfile,
 		Collection:     StorageCollectionPlayerProfile,
-		Fields:         []string{"xplatformid", "social.channel", "displayname"},
+		Fields:         []string{"xplatformid", "social", "displayname"},
 		SortableFields: nil,
 		MaxEntries:     500,
 		IndexOnly:      false,
@@ -69,7 +69,7 @@ func NewPlayerProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, 
 	}
 
 	cosmetics := make(map[string]map[string]bool)
-	for m, c := range cosmeticDefaults(evrProfile.EnableAllCosmetics) {
+	for m, c := range cosmeticDefaults(evrProfile.Options.EnableAllCosmetics) {
 		cosmetics[m] = make(map[string]bool, len(c))
 		maps.Copy(cosmetics[m], c)
 	}
@@ -84,7 +84,7 @@ func NewPlayerProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, 
 
 	var developerFeatures *evr.DeveloperFeatures
 
-	if evrProfile.GoldDisplayNameActive {
+	if evrProfile.Options.GoldDisplayNameActive {
 		developerFeatures = &evr.DeveloperFeatures{}
 	}
 
@@ -103,7 +103,7 @@ func NewPlayerProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, 
 		return nil, fmt.Errorf("failed to get user tablet statistics: %w", err)
 	}
 
-	if evrProfile.DisableAFKTimeout {
+	if evrProfile.Options.DisableAFKTimeout {
 		developerFeatures = &evr.DeveloperFeatures{
 			DisableAfkTimeout: true,
 		}
@@ -135,8 +135,8 @@ func NewPlayerProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, 
 	}, nil
 }
 
-// GetPlayerProfileData retrieves the player profile data (JSON bytes) for a given xplatformid
-func GetPlayerProfileData(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, callerID string, xpid evr.XPID) (json.RawMessage, error) {
+// PlayerProfileLoad retrieves the player profile data (JSON bytes) for a given xplatformid
+func PlayerProfileLoad(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, callerID string, xpid evr.XPID) (json.RawMessage, error) {
 	query := fmt.Sprintf("+value.xplatformid:%s", xpid.String())
 	order := []string{"-value.xplatformid"}
 	objs, _, err := nk.StorageIndexList(ctx, callerID, StorageIndexPlayerProfile, query, 1, order, "")
@@ -149,7 +149,7 @@ func GetPlayerProfileData(ctx context.Context, logger runtime.Logger, nk runtime
 	return json.RawMessage(data), nil
 }
 
-func StorePlayerProfileData(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID string, profile *evr.ServerProfile) error {
+func PlayerProfileStore(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID string, profile *evr.ServerProfile) error {
 	pProfile := &PlayerProfile{
 		ServerProfile: *profile,
 	}

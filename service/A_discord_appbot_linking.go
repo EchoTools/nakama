@@ -17,7 +17,6 @@ func (d *DiscordAppBot) linkHeadset(ctx context.Context, logger runtime.Logger, 
 	var (
 		nk        = d.nk
 		groupID   = d.cache.GuildIDToGroupID(user.GuildID)
-		userID    = d.cache.DiscordIDToUserID(user.User.ID) // Will be blank for new users
 		discordID = user.User.ID
 		username  = user.User.Username
 	)
@@ -43,28 +42,30 @@ func (d *DiscordAppBot) linkHeadset(ctx context.Context, logger runtime.Logger, 
 		}
 
 		// Authenticate/create an account.
-		if userID == "" {
-			tags["new_account"] = "true"
-			userID, _, _, err = d.nk.AuthenticateCustom(ctx, discordID, username, true)
-			if err != nil {
-				return fmt.Errorf("failed to authenticate (or create) user %s: %w", discordID, err)
-			}
-		}
 
+		userID, _, created, err := d.nk.AuthenticateCustom(ctx, discordID, username, true)
+		if err != nil {
+			return fmt.Errorf("failed to authenticate (or create) user %s: %w", discordID, err)
+		}
+		if created {
+			tags["new_account"] = "true"
+		}
+		// Add the user to the group.
 		if err := d.nk.GroupUsersAdd(ctx, SystemUserID, groupID, []string{userID}); err != nil {
 			return fmt.Errorf("error joining group: %w", err)
 		}
 
-		if err := nk.LinkDevice(ctx, userID, ticket.XPID.Token()); err != nil {
+		// Link the device to the account.
+		if err := nk.LinkDevice(ctx, userID, ticket.XPID.String()); err != nil {
 			return fmt.Errorf("failed to link headset: %w", err)
 		}
 		d.metrics.CustomCounter("link_headset", tags, 1)
 		// Set the client IP as authorized in the LoginHistory
-		history := &LoginHistory{}
+		history := NewLoginHistory(userID)
 		if err := StorableReadNk(ctx, nk, userID, history, true); err != nil {
 			return fmt.Errorf("failed to load login history: %w", err)
 		}
-		history.Update(ticket.XPID, ticket.ClientIP, ticket.LoginProfile, true)
+		history.Update(ticket.XPID, ticket.ClientIP, &ticket.LoginProfile, true)
 
 		if err := StorableWriteNk(ctx, nk, userID, history); err != nil {
 			return fmt.Errorf("failed to save login history: %w", err)

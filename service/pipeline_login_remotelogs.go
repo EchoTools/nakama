@@ -61,6 +61,18 @@ func filterRemoteLogs(logs []string) []string {
 	return filteredLogs
 }
 
+func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
+	request := in.(*evr.RemoteLogSet)
+
+	go func() {
+		if err := p.processRemoteLogSets(ctx, logger, session, request.EvrID, request); err != nil {
+			logger.Error("Failed to process remote log set", zap.Error(err))
+		}
+	}()
+
+	return nil
+}
+
 func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logger, session *sessionEVR, evrID evr.XPID, request *evr.RemoteLogSet) error {
 	if !session.userID.IsNil() {
 		p.userRemoteLogJournalRegistry.Add(session.id, session.userID, filterRemoteLogs(request.Logs))

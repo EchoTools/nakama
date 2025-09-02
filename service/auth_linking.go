@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,15 +27,15 @@ var (
 // It contains the link code, xplatform ID string, and HMD serial number.
 // TODO move this to evr-common
 type LinkTicket struct {
-	Code         string            `json:"link_code"`          // the code the user will exchange to link the account
-	XPID         evr.XPID          `json:"xp_id"`              // the xplatform ID used by the client/server
-	ClientIP     string            `json:"client_ip"`          // the client IP address that generated this link ticket
-	LoginProfile *evr.LoginProfile `json:"game_login_request"` // the login request payload that generated this link ticket
-	CreatedAt    time.Time         `json:"created_at"`         // the time the link ticket was created
+	Code         string           `json:"link_code"`          // the code the user will exchange to link the account
+	XPID         evr.XPID         `json:"xp_id"`              // the xplatform ID used by the client/server
+	ClientIP     string           `json:"client_ip"`          // the client IP address that generated this link ticket
+	LoginProfile evr.LoginProfile `json:"game_login_request"` // the login request payload that generated this link ticket
+	CreatedAt    time.Time        `json:"created_at"`         // the time the link ticket was created
 }
 
 type LinkTicketStore struct {
-	Tickets map[string]*LinkTicket `json:"tickets"`
+	Tickets []LinkTicket `json:"tickets"`
 	meta    StorableMetadata
 }
 
@@ -65,7 +66,7 @@ func (l *LinkTicketStore) StorageIndexes() []StorableIndexMeta {
 			Name:       StorageIndexLinkTickets,
 			Collection: AuthorizationCollection,
 			Key:        StorageKeyLinkTickets,
-			Fields:     []string{"link_code", "xp_id"},
+			Fields:     []string{"tickets"},
 			MaxEntries: 1000,
 			IndexOnly:  false,
 		},
@@ -74,7 +75,9 @@ func (l *LinkTicketStore) StorageIndexes() []StorableIndexMeta {
 
 func LinkTicketByCode(ctx context.Context, nk runtime.NakamaModule, code string) (*LinkTicket, error) {
 	// Use the storage index to find the link ticket by code or xp_id
-	result, _, err := nk.StorageIndexList(ctx, SystemUserID, StorageIndexLinkTickets, fmt.Sprintf(`+link_code:%s`, code), 1, nil, "")
+	query := fmt.Sprintf(`+value.tickets.link_code:%s`, code)
+
+	result, _, err := nk.StorageIndexList(ctx, SystemUserID, StorageIndexLinkTickets, query, 1, nil, "")
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +94,8 @@ func LinkTicketByCode(ctx context.Context, nk runtime.NakamaModule, code string)
 }
 
 func LinkTicketByXPID(ctx context.Context, nk runtime.NakamaModule, xpid evr.XPID) (*LinkTicket, error) {
-	result, _, err := nk.StorageIndexList(ctx, SystemUserID, StorageIndexLinkTickets, fmt.Sprintf("xp_id:%s", xpid), 1, nil, "")
+	query := fmt.Sprintf("+value.tickets.xp_id:%s", xpid.String())
+	result, _, err := nk.StorageIndexList(ctx, SystemUserID, StorageIndexLinkTickets, query, 1, nil, "")
 	if err != nil {
 		return nil, err
 	}
@@ -100,20 +104,29 @@ func LinkTicketByXPID(ctx context.Context, nk runtime.NakamaModule, xpid evr.XPI
 	}
 	obj := result.GetObjects()[0]
 
-	var ticket LinkTicket
-	if err := json.Unmarshal([]byte(obj.Value), &ticket); err != nil {
+	var store LinkTicketStore
+	if err := json.Unmarshal([]byte(obj.Value), &store); err != nil {
 		return nil, err
 	}
+
+	var ticket LinkTicket
+	found := false
+	for _, t := range store.Tickets {
+		if t.XPID == xpid {
+			ticket = t
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, ErrLinkTicketNotFound
+	}
+
 	return &ticket, nil
 }
 
 // linkTicket generates a link ticket for the provided xplatformId and hmdSerialNumber.
-func IssueLinkTicket(ctx context.Context, nk runtime.NakamaModule, xpid evr.XPID, clientIP string, loginData *evr.LoginProfile) (*LinkTicket, error) {
-
-	if loginData == nil {
-		// This should't happen. A login request is required to create a link ticket.
-		return nil, fmt.Errorf("loginData is nil")
-	}
+func IssueLinkTicket(ctx context.Context, nk runtime.NakamaModule, xpid evr.XPID, clientIP string, loginData evr.LoginProfile) (*LinkTicket, error) {
 
 	// Check if a link ticket already exists for the given XPID
 	if ticket, err := LinkTicketByXPID(ctx, nk, xpid); err == nil {
@@ -131,7 +144,7 @@ func IssueLinkTicket(ctx context.Context, nk runtime.NakamaModule, xpid evr.XPID
 	}
 
 	// Create a new link ticket
-	ticket := &LinkTicket{
+	ticket := LinkTicket{
 		Code:         code,
 		XPID:         xpid,
 		ClientIP:     clientIP,
@@ -143,16 +156,13 @@ func IssueLinkTicket(ctx context.Context, nk runtime.NakamaModule, xpid evr.XPID
 		return nil, err
 	}
 
-	if linkTicketStore.Tickets == nil {
-		linkTicketStore.Tickets = make(map[string]*LinkTicket)
-	}
-	linkTicketStore.Tickets[code] = ticket
+	linkTicketStore.Tickets = append(linkTicketStore.Tickets, ticket)
 
 	if err := StorableWriteNk(ctx, nk, SystemUserID, linkTicketStore); err != nil {
 		return nil, err
 	}
 
-	return ticket, nil
+	return &ticket, nil
 }
 
 // generateLinkCode generates a 4 character random link code (excluding homoglyphs, vowels, and numbers).
@@ -181,32 +191,29 @@ func ExchangeLinkCode(ctx context.Context, nk runtime.NakamaModule, logger runti
 	// Normalize the link code to uppercase.
 	linkCode = strings.ToUpper(linkCode)
 
-	// Check if a link ticket already exists for the given XPID
-	if ticket, err := LinkTicketByCode(ctx, nk, linkCode); err == nil {
-		// Link ticket already exists for this XPID, return it
-		return ticket, nil
-	}
-
 	store := &LinkTicketStore{}
 	if err := StorableReadNk(ctx, nk, SystemUserID, store, true); err != nil {
 		return nil, err
 	}
-	if store.Tickets == nil {
-		store.Tickets = make(map[string]*LinkTicket)
-	}
 
-	linkTicket, ok := store.Tickets[linkCode]
-	if !ok {
+	var linkTicket LinkTicket
+	for i, t := range store.Tickets {
+		if t.Code == linkCode {
+			linkTicket = store.Tickets[i]
+			// Remove the ticket from the slice
+			store.Tickets = slices.Delete(store.Tickets, i, i+1)
+			break
+		}
+	}
+	if linkTicket.XPID.IsNil() {
 		return nil, runtime.NewError(fmt.Sprintf("link code `%s` not found", linkCode), StatusNotFound)
 	}
-
-	delete(store.Tickets, linkCode)
 
 	if err := StorableWriteNk(ctx, nk, SystemUserID, store); err != nil {
 		return nil, err
 	}
 
-	return linkTicket, nil
+	return &linkTicket, nil
 }
 
 // verifyJWT parses and verifies a JWT token using the provided key function.

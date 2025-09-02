@@ -272,14 +272,6 @@ func DisplayNameHistoryLoad(ctx context.Context, nk runtime.NakamaModule, userID
 	return history, nil
 }
 
-func DisplayNameHistoryStore(ctx context.Context, nk runtime.NakamaModule, userID string, history *DisplayNameHistory) error {
-	if err := StorableWriteNk(ctx, nk, userID, history); err != nil {
-		return fmt.Errorf("error writing display name history: %w", err)
-	}
-
-	return nil
-}
-
 func DisplayNameHistoryUpdate(ctx context.Context, nk runtime.NakamaModule, userID string, groupID string, displayName string, username string, isInGame bool) error {
 	history, err := DisplayNameHistoryLoad(ctx, nk, userID)
 	if err != nil {
@@ -288,8 +280,8 @@ func DisplayNameHistoryUpdate(ctx context.Context, nk runtime.NakamaModule, user
 
 	history.Update(groupID, displayName, username, isInGame)
 
-	if err := DisplayNameHistoryStore(ctx, nk, userID, history); err != nil {
-		return fmt.Errorf("error storing display name history: %w", err)
+	if err := StorableWriteNk(ctx, nk, userID, history); err != nil {
+		return fmt.Errorf("error writing display name cache: %w", err)
 	}
 
 	return nil
@@ -482,8 +474,8 @@ func DisplayNameOwnerSearch(ctx context.Context, nk runtime.NakamaModule, displa
 		}
 		// Store the history back to prune it.
 		for userID, history := range updates {
-			if err := DisplayNameHistoryStore(ctx, nk, userID, history); err != nil {
-				return nil, fmt.Errorf("error storing display name history: %w", err)
+			if err := StorableWriteNk(ctx, nk, userID, history); err != nil {
+				return nil, fmt.Errorf("error writing display name cache: %w", err)
 			}
 		}
 

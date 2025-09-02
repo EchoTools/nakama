@@ -22,16 +22,20 @@ func TestNewLoginHistory(t *testing.T) {
 			name:   "creates new history with user ID",
 			userID: "test-user-123",
 			want: &LoginHistory{
-				userID:  "test-user-123",
-				version: "*",
+				meta: StorableMetadata{
+					UserID:  "test-user-123",
+					Version: "*",
+				},
 			},
 		},
 		{
 			name:   "creates new history with empty user ID",
 			userID: "",
 			want: &LoginHistory{
-				userID:  "",
-				version: "*",
+				meta: StorableMetadata{
+					UserID:  "",
+					Version: "*",
+				},
 			},
 		},
 	}
@@ -39,11 +43,11 @@ func TestNewLoginHistory(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := NewLoginHistory(tt.userID)
-			if got.userID != tt.want.userID {
-				t.Errorf("NewLoginHistory() userID = %v, want %v", got.userID, tt.want.userID)
+			if got.UserID() != tt.want.UserID() {
+				t.Errorf("NewLoginHistory() userID = %v, want %v", got.UserID(), tt.want.UserID())
 			}
-			if got.version != tt.want.version {
-				t.Errorf("NewLoginHistory() version = %v, want %v", got.version, tt.want.version)
+			if got.meta.Version != tt.want.meta.Version {
+				t.Errorf("NewLoginHistory() version = %v, want %v", got.meta.Version, tt.want.meta.Version)
 			}
 			// Check that all maps are initialized to nil (lazy initialization)
 			if got.Active != nil {
@@ -958,7 +962,9 @@ func TestLoginHistory_Update(t *testing.T) {
 
 func TestLoginHistory_MarshalJSON_SizeLimit(t *testing.T) {
 	history := &LoginHistory{
-		userID: "test-user",
+		meta: StorableMetadata{
+			UserID: "testuser",
+		},
 	}
 
 	// Create a large history that exceeds 5MB

@@ -268,7 +268,13 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			}
 
 			groupID := params.profile.GetActiveGroupID().String()
-			serverProfile, err := PlayerProfileFromParameters(ctx, db, nk, params, groupID, modes, 0)
+			displayName := profile.GetGroupIGN(groupID)
+			xpid, err := evr.ParseEvrId(msg.UserID)
+			if err != nil {
+				logger.WithField("error", err).Warn("Failed to parse evr ID")
+				continue
+			}
+			serverProfile, err := NewPlayerProfile(ctx, db, nk, profile, *xpid, groupID, modes, 0, displayName)
 			if err != nil {
 				return fmt.Errorf("failed to get server profile: %w", err)
 			}

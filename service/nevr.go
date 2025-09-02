@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 
 	"github.com/gofrs/uuid/v5"
@@ -11,7 +12,10 @@ import (
 
 type NEVRNakamaModule struct {
 	*server.RuntimeGoNakamaModule
-	zapLogger *zap.Logger
+	zapLogger    *zap.Logger
+	db           *sql.DB
+	metrics      server.Metrics
+	storageIndex server.StorageIndex
 }
 
 func (n *NEVRNakamaModule) Logger() *zap.Logger {
@@ -67,4 +71,12 @@ func (n *NEVRNakamaModule) MatchLabelList(ctx context.Context, limit int, minSiz
 	}
 
 	return labels, nil
+}
+
+func (n *NEVRNakamaModule) StorableRead(ctx context.Context, userID string, dst StorableAdapter, create bool) error {
+	return StorableRead(ctx, n.zapLogger, n.db, n.storageIndex, n.metrics, userID, dst, create)
+}
+
+func (n *NEVRNakamaModule) StorableWrite(ctx context.Context, userID string, src StorableAdapter) error {
+	return StorableWrite(ctx, n.zapLogger, n.db, n.storageIndex, n.metrics, userID, src)
 }

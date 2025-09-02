@@ -72,7 +72,7 @@ func LoginAlternatePatternSearch(ctx context.Context, nk runtime.NakamaModule, l
 		for _, obj := range result.Objects {
 
 			// Skip the current user.
-			if skipSelf && obj.UserId == loginHistory.userID {
+			if skipSelf && obj.UserId == loginHistory.UserID() {
 				continue
 			}
 
@@ -123,7 +123,7 @@ func LoginDeniedClientIPAddressSearch(ctx context.Context, nk runtime.NakamaModu
 }
 
 func loginHistoryCompare(a, b *LoginHistory) []*AlternateSearchMatch {
-	if a.userID == b.userID {
+	if a.UserID() == b.UserID() {
 		return nil // Skip self-comparison.
 	}
 	if a == nil || b == nil || len(a.History) == 0 || len(b.History) == 0 {
@@ -158,7 +158,7 @@ func loginHistoryCompare(a, b *LoginHistory) []*AlternateSearchMatch {
 			// If there are matching items, create a match entry.
 			if len(matchingItems) > 0 {
 				matches = append(matches, &AlternateSearchMatch{
-					OtherUserID: b.userID,
+					OtherUserID: b.UserID(),
 					Items:       matchingItems,
 				})
 			}

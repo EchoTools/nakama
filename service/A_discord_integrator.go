@@ -267,7 +267,7 @@ func (d *DiscordIntegrator) DiscordIDToUserID(discordID string) string {
 	userID, ok := d.idcache.Load(discordID)
 	if !ok {
 		var err error
-		userID, err = GetUserIDByDiscordID(d.ctx, d.db, discordID)
+		userID, _, err = GetUserIDByDiscordID(d.ctx, d.db, discordID)
 		if err != nil {
 			return ""
 		}
@@ -775,8 +775,8 @@ func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logg
 	}
 	// Update and store the display name history.
 	history.Update(guildGroup.IDStr(), displayName, member.User.Username, false)
-	err = DisplayNameHistoryStore(ctx, d.nk, profile.ID(), history)
-	if err != nil {
+
+	if err := StorableWriteNk(ctx, d.nk, profile.ID(), history); err != nil {
 		return fmt.Errorf("error storing display name history: %w", err)
 	}
 

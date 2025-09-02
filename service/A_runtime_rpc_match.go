@@ -55,7 +55,7 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		request.OwnerId = userID
 	} else if uuid.FromStringOrNil(request.OwnerId) == uuid.Nil {
 		// Assume the owner ID is a discord ID and convert it to a user ID
-		if request.OwnerId, err = GetUserIDByDiscordID(ctx, db, request.OwnerId); err != nil {
+		if request.OwnerId, _, err = GetUserIDByDiscordID(ctx, db, request.OwnerId); err != nil {
 			return "", runtime.NewError("Failed to get userID by discord ID: "+err.Error(), StatusNotFound)
 		}
 	}
@@ -97,7 +97,7 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		var userUUID uuid.UUID
 		if uuid.FromStringOrNil(id) == uuid.Nil {
 			// Assume the id is a discord ID and convert it to a user ID
-			userID, err := GetUserIDByDiscordID(ctx, db, id)
+			userID, _, err := GetUserIDByDiscordID(ctx, db, id)
 			if err != nil {
 				return "", runtime.NewError("Failed to get userID by discord ID: "+err.Error(), StatusNotFound)
 			}

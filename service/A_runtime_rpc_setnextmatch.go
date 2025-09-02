@@ -37,7 +37,7 @@ func SetNextMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	callerUserID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 
 	if request.TargetDiscordID != "" {
-		request.TargetUserID, _ = GetUserIDByDiscordID(ctx, db, request.TargetDiscordID)
+	request.TargetUserID, _, _ = GetUserIDByDiscordID(ctx, db, request.TargetDiscordID)
 	}
 
 	if request.TargetUserID == "" {

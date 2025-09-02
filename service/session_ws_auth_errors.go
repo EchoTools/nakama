@@ -49,16 +49,7 @@ func formatLoginErrorMessage(xpID evr.XPID, discordID string, err error) string 
 	return errContent
 }
 
-// DeviceNotLinkedError is returned when a user tries to log in with a device that is not linked to their account.
-type DeviceNotLinkedError struct {
-	Code         string
-	Instructions string
-}
-
-func (e *DeviceNotLinkedError) Error() string {
-	return fmt.Sprintf("Your Code is: >>> %s <<<\n%s", e.Code, e.Instructions)
-}
-
+// AccountDisabledError is returned when a user tries to log in to a disabled account.
 type AccountDisabledError struct {
 	message   string
 	reportURL string
@@ -75,6 +66,16 @@ func (e AccountDisabledError) Error() string {
 func (e AccountDisabledError) Is(target error) bool {
 	_, ok := target.(AccountDisabledError)
 	return ok
+}
+
+// DeviceNotLinkedError is returned when a user tries to log in with a device that is not linked to their account.
+type DeviceNotLinkedError struct {
+	Code         string
+	Instructions string
+}
+
+func (e *DeviceNotLinkedError) Error() string {
+	return fmt.Sprintf("Your Code is: >>> %s <<<\n%s", e.Code, e.Instructions)
 }
 
 type NewLocationError struct {

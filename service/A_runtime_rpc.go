@@ -880,7 +880,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	}
 
 	if request.SpawnedBy != "" {
-		if userID, err := GetUserIDByDiscordID(ctx, db, request.SpawnedBy); err != nil {
+		if userID, _, err := GetUserIDByDiscordID(ctx, db, request.SpawnedBy); err != nil {
 			return "", runtime.NewError("Failed to get spawned by userID: "+err.Error(), StatusNotFound)
 		} else {
 			request.SpawnedBy = userID
@@ -905,7 +905,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	// Translate the discord ID to the nakama ID for the team Alignments
 	for discordID, teamIndex := range request.Alignments {
 		// Get the nakama ID from the discord ID
-		userID, err := GetUserIDByDiscordID(ctx, db, discordID)
+		userID, _, err := GetUserIDByDiscordID(ctx, db, discordID)
 		if err != nil {
 			return "", runtime.NewError(err.Error(), StatusNotFound)
 		}
@@ -971,7 +971,7 @@ func parseAccountLookupQueryParams(queryParams map[string][]string) (*AccountLoo
 	if userID, ok := queryParams["user_id"]; ok && len(userID) > 0 {
 		uid, err := uuid.FromString(userID[0])
 		if err != nil {
-			return nil, runtime.NewError("invalid user id", StatusInvalidArgument)
+			return nil, runtime.NewError("invalid user ID", StatusInvalidArgument)
 		}
 		request.UserID = uid
 	}
@@ -1013,7 +1013,8 @@ func lookupUserID(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, requ
 		return users[0].Id, nil
 
 	case request.DiscordID != "":
-		return GetUserIDByDiscordID(ctx, db, request.DiscordID)
+		userID, _, err := GetUserIDByDiscordID(ctx, db, request.DiscordID)
+		return userID, err
 
 	case request.DisplayName != "":
 		ownerMap, err := DisplayNameOwnerSearch(ctx, nk, []string{request.DisplayName})
@@ -1596,7 +1597,7 @@ func ServerScoresRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	latencies := make(map[string][]int, 2)
 
 	for _, discordID := range request.DiscordIDs {
-		userID, err := GetUserIDByDiscordID(ctx, db, discordID)
+		userID, _, err := GetUserIDByDiscordID(ctx, db, discordID)
 		if err != nil {
 			return "", err
 		}
@@ -1667,7 +1668,7 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 			request.UserID = uuid.FromStringOrNil(userID)
 		}
 	case request.DiscordID != "":
-		if userID, err := GetUserIDByDiscordID(ctx, db, request.DiscordID); err != nil {
+		if userID, _, err := GetUserIDByDiscordID(ctx, db, request.DiscordID); err != nil {
 			return "", fmt.Errorf("failed to get user ID by discord ID: %w", err)
 		} else {
 			request.UserID = uuid.FromStringOrNil(userID)

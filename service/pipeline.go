@@ -237,7 +237,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		guildGroupRegistry:           guildGroupRegistry,
 		ipInfoCache:                  ipInfoCache,
 
-		placeholderEmail: config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
+		placeholderEmail: config.GetRuntime().Environment[EnvVarPlaceholderEmailDomain],
 		linkDeviceURL:    config.GetRuntime().Environment["LINK_DEVICE_URL"],
 	}
 
@@ -246,7 +246,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 func (p *EvrPipeline) Stop() {}
 
-func (p *EvrPipeline) ProcessRequest(logger *zap.Logger, session server.Session, in evr.Message) bool {
+func (p *EvrPipeline) ProcessRequest(logger *zap.Logger, session *sessionEVR, in evr.Message) bool {
 
 	// Handle legacy messages
 
@@ -396,8 +396,29 @@ func (p *EvrPipeline) ProcessRequest(logger *zap.Logger, session server.Session,
 		isAuthenticationRequired = false
 		pipelineFn = p.remoteLogSetv3
 	case *evr.LoginRequest:
-		isAuthenticationRequired = false
-		pipelineFn = p.loginRequest
+		params, _ := LoadParams(session.Context())
+		// Set the game settings based on the service settings
+		gameSettings := evr.NewDefaultGameSettings()
+		if params.enableAllRemoteLogs {
+			gameSettings.RemoteLogSocial = true
+			gameSettings.RemoteLogWarnings = true
+			gameSettings.RemoteLogErrors = true
+			gameSettings.RemoteLogRichPresence = true
+			gameSettings.RemoteLogMetrics = true
+		}
+
+		if err := session.SendEVR(Envelope{
+			ServiceType: ServiceTypeLogin,
+			Messages: []evr.Message{
+				evr.NewLoginSuccess(session.id, session.xpid),
+				unrequireMessage,
+				gameSettings,
+			},
+		}); err != nil {
+			logger.Error("Failed to send login success message", zap.Error(err))
+			return false
+		}
+
 	case *evr.DocumentRequest:
 		pipelineFn = p.documentRequest
 	case *evr.LoggedInUserProfileRequest:
@@ -459,7 +480,7 @@ func (p *EvrPipeline) ProcessRequest(logger *zap.Logger, session server.Session,
 				case evr.LobbySessionRequest:
 					// associate lobby session with login session
 					// If the message is an identifying message, validate the session and evr id.
-					if err := LobbySession(session.(*sessionEVR), p.sessionRegistry, idmessage.GetLoginSessionID()); err != nil {
+					if err := LobbySession(session, p.sessionRegistry, idmessage.GetLoginSessionID()); err != nil {
 						logger.Error("Invalid session", zap.Error(err))
 						// Disconnect the client if the session is invalid.
 						return false
@@ -510,7 +531,7 @@ func (p *EvrPipeline) ProcessRequest(logger *zap.Logger, session server.Session,
 		logger = logger.With(zap.String("uid", session.UserID().String()), zap.String("sid", session.ID().String()), zap.String("username", session.Username()), zap.String("evrid", params.xpID.String()))
 	}
 
-	if err := pipelineFn(session.Context(), logger, session.(*sessionEVR), in); err != nil {
+	if err := pipelineFn(session.Context(), logger, session, in); err != nil {
 		// Unwrap the error
 		logger.Error("server.Pipeline error", zap.Error(err))
 		logger.Error("server.Pipeline error", zap.Error(err))

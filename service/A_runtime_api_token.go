@@ -40,7 +40,8 @@ func (d *DeveloperApplications) StorageIndexes() []StorableIndexMeta {
 		Name:       StorageIndexDeveloperAppTokens,
 		Collection: StorageCollectionDeveloper,
 		Key:        StorageKeyApplications,
-		Fields:     []string{"value.applications.token"},
+		// XXX: FIXME: this needs to be a top level field in the storage object to be indexed correctly
+		Fields:     []string{"applications.token"},
 		MaxEntries: 10000,
 		IndexOnly:  true,
 	}}

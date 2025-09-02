@@ -111,23 +111,26 @@ type LoginHistory struct {
 	AlternateMatches         map[string][]*AlternateSearchMatch `json:"alternate_accounts"`         // map of alternate user IDs and what they have in common
 	GroupNotifications       map[string]map[string]time.Time    `json:"notified_groups"`            // list of groups that have been notified of this alternate login
 	IgnoreDisabledAlternates bool                               `json:"ignore_disabled_alternates"` // Ignore disabled alternates
-	userID                   string                             // user ID
-	version                  string                             // storage record version
+	meta                     StorableMetadata
+}
+
+func (h LoginHistory) UserID() string {
+	return h.meta.UserID
 }
 
 func (h *LoginHistory) StorageMeta() StorableMetadata {
 	return StorableMetadata{
+		UserID:          h.meta.UserID,
 		Collection:      LoginStorageCollection,
 		Key:             LoginHistoryStorageKey,
 		PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
 		PermissionWrite: runtime.STORAGE_PERMISSION_NO_WRITE,
-		Version:         h.version,
+		Version:         h.meta.Version,
 	}
 }
 
 func (h *LoginHistory) SetStorageMeta(meta StorableMetadata) {
-	h.userID = meta.UserID
-	h.version = meta.Version
+	h.meta = meta
 }
 
 func (h *LoginHistory) StorageIndexes() []StorableIndexMeta {
@@ -143,10 +146,9 @@ func (h *LoginHistory) StorageIndexes() []StorableIndexMeta {
 }
 
 func NewLoginHistory(userID string) *LoginHistory {
-	return &LoginHistory{
-		userID:  userID,
-		version: "*", // don't overwrite existing data
-	}
+	h := &LoginHistory{}
+	h.meta.UserID = userID
+	return h
 }
 
 func (h *LoginHistory) AlternateIDs() (firstDegree, secondDegree []string) {
@@ -446,14 +448,14 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, logger runtime.Logg
 	}
 
 	// prune the second degree alts
-	delete(secondMap, h.userID)
+	delete(secondMap, h.meta.UserID)
 	h.SecondDegreeAlternates = make([]string, 0, len(matches))
 	for userID := range h.AlternateMatches {
 		delete(secondMap, userID)
 	}
 
 	// Remove excluded user IDs
-	for _, userID := range append(excludeUserIDs, h.userID) {
+	for _, userID := range append(excludeUserIDs, h.meta.UserID) {
 		delete(secondMap, userID)
 		delete(h.AlternateMatches, userID)
 	}
@@ -503,7 +505,7 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, logger runtime.Logg
 		if err := StorableReadNk(ctx, nk, alternateUserID, alternateHistory, false); err != nil {
 			// Log warning but continue - don't fail the entire operation
 			logger.WithFields(map[string]interface{}{
-				"current_user_id":   h.userID,
+				"current_user_id":   h.meta.UserID,
 				"alternate_user_id": alternateUserID,
 				"error":             err,
 			}).Warn("Failed to load alternate user's login history for bidirectional update")
@@ -519,13 +521,13 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, logger runtime.Logg
 		currentUserMatches := loginHistoryCompare(alternateHistory, h)
 		if len(currentUserMatches) > 0 {
 			// Update the alternate's matches to include current user
-			alternateHistory.AlternateMatches[h.userID] = currentUserMatches
+			alternateHistory.AlternateMatches[h.meta.UserID] = currentUserMatches
 
 			// Save the updated alternate history
 			if err := StorableWriteNk(ctx, nk, alternateUserID, alternateHistory); err != nil {
 				// Log warning but continue - don't fail the entire operation
 				logger.WithFields(map[string]interface{}{
-					"current_user_id":   h.userID,
+					"current_user_id":   h.meta.UserID,
 					"alternate_user_id": alternateUserID,
 					"error":             err,
 				}).Warn("Failed to save alternate user's login history for bidirectional update")
@@ -602,7 +604,7 @@ func (h *LoginHistory) rebuildCache() {
 }
 
 func (h *LoginHistory) MarshalJSON() ([]byte, error) {
-	if h.userID == "" {
+	if h.meta.UserID == "" {
 		return nil, fmt.Errorf("missing user ID")
 	}
 

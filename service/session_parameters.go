@@ -5,13 +5,11 @@ import (
 	"fmt"
 
 	evr "github.com/echotools/nakama/v3/protocol"
-	"github.com/heroiclabs/nakama-common/api"
 	"go.uber.org/atomic"
 )
 
-type ctxSessionParametersKey = struct{}
-
-// SessionParameters holds all the parameters related to a user session.
+// Keys used for storing/retrieving user information in the context of a request after authentication.
+type ctxSessionParametersKey struct{} // The Session Parameters
 
 type SessionParameters struct {
 	node          string      // The node name
@@ -26,7 +24,6 @@ type SessionParameters struct {
 	userDisplayNameOverride  string // The display name override (user-defined)
 
 	externalServerAddr string // The external server address (IP:port)
-	geoHash            string // The geohash of the user IP
 	geoHashPrecision   int    // The geohash precision
 	isVPN              bool   // The user is using a VPN
 	ipInfo             IPInfo // The IPQS data
@@ -46,7 +43,6 @@ type SessionParameters struct {
 	serverRegions       []string            // []string of the server regions
 	urlParameters       map[string][]string // The URL parameters
 
-	party                        *atomic.Pointer[*api.Party]      // The party group the user is in
 	profile                      *EVRProfile                      // The account
 	matchmakingSettings          *MatchmakingSettings             // The matchmaking settings
 	guildGroups                  map[string]*GuildGroup           // map[string]*GuildGroup

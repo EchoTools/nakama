@@ -39,7 +39,7 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	switch {
 	case request.UserID != "":
 	case request.DiscordID != "":
-		if userID, err := GetUserIDByDiscordID(ctx, db, request.DiscordID); err != nil {
+		if userID, _, err := GetUserIDByDiscordID(ctx, db, request.DiscordID); err != nil {
 			return "", fmt.Errorf("failed to get user ID by discord ID: %w", err)
 		} else {
 			request.UserID = userID

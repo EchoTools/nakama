@@ -33,10 +33,7 @@ type EVRProfile struct {
 	DiscordDebugMessages   bool                       `json:"discord_debug_messages"`    // Enable debug messages in Discord
 	RelayMessagesToDiscord bool                       `json:"relay_messages_to_discord"` // Relay messages to Discord
 	TeamName               string                     `json:"team_name"`                 // The team name
-	DisableAFKTimeout      bool                       `json:"disable_afk_timeout"`       // Disable AFK detection
-	IgnoreBrokenCosmetics  bool                       `json:"ignore_broken_cosmetics"`   // Allow broken cosmetics
-	EnableAllCosmetics     bool                       `json:"enable_all_cosmetics"`      // Enable all cosmetics
-	GoldDisplayNameActive  bool                       `json:"gold_display_name"`         // The gold name displa
+	Options                ProfileOptions             `json:"options"`                   // Profile flags
 	LoadoutCosmetics       AccountCosmetics           `json:"cosmetic_loadout"`          // The equipped cosmetics
 	CombatLoadout          CombatLoadout              `json:"combat_loadout"`            // The combat loadout
 	MutedPlayers           []evr.XPID                 `json:"muted_players"`             // The muted players
@@ -103,8 +100,11 @@ func (e EVRProfile) IsOnline() bool {
 	return e.account.User.GetOnline()
 }
 
-func (e EVRProfile) DiscordID() string {
-	return e.account.GetCustomId()
+func (e *EVRProfile) DiscordID() string {
+	if e != nil && e.account != nil {
+		return e.account.GetCustomId()
+	}
+	return ""
 }
 
 func (e EVRProfile) CreatedAt() time.Time {
@@ -319,6 +319,7 @@ func (a *EVRProfile) FixBrokenCosmetics() bool {
 
 	return updated
 }
+
 func (a EVRProfile) VRMLUserID() string {
 	for _, d := range a.account.Devices {
 		if playerID, found := strings.CutPrefix(d.Id, DeviceIDPrefixVRML); found {
@@ -327,6 +328,7 @@ func (a EVRProfile) VRMLUserID() string {
 	}
 	return ""
 }
+
 func EVRProfileLoad(ctx context.Context, nk runtime.NakamaModule, userID string) (*EVRProfile, error) {
 	account, err := nk.AccountGetId(ctx, userID)
 	if err != nil {

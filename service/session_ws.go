@@ -103,7 +103,7 @@ type sessionEVR struct {
 	activeSuspensionRecords map[string]map[string]GuildEnforcementRecord // The active suspension records map[groupID]map[userID]GuildEnforcementRecord
 }
 
-func NewSessionWSEVR(logger *zap.Logger, config server.Config, sessionID, userID uuid.UUID, username string, profile *EVRProfile, xpid evr.XPID, loginPayload *evr.LoginProfile, vars map[string]string, clientIP, clientPort string, ipInfo IPInfo, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, service *serviceWS, sessionRegistry server.SessionRegistry, statusRegistry server.StatusRegistry, matchmaker server.Matchmaker, tracker server.Tracker, metrics server.Metrics, runtime *server.Runtime, evrPipeline *EvrPipeline) *sessionEVR {
+func NewSessionWSEVR(logger *zap.Logger, config server.Config, sessionID, userID uuid.UUID, username string, xpid evr.XPID, loginPayload *evr.LoginProfile, vars map[string]string, clientIP, clientPort string, ipInfo IPInfo, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, service *serviceWS, sessionRegistry server.SessionRegistry, statusRegistry server.StatusRegistry, matchmaker server.Matchmaker, tracker server.Tracker, metrics server.Metrics, runtime *server.Runtime, evrPipeline *EvrPipeline) *sessionEVR {
 
 	ctx, ctxCancelFn := context.WithCancel(context.Background())
 	logger = logger.With(

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -219,6 +220,139 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, p
 	}
 
 	return entries, nil
+}
+
+func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) (err error) {
+	request := in.(*evr.LoggedInUserProfileRequest)
+	// Start a timer to add to the metrics
+	timer := time.Now()
+	defer func() { p.nevr.MetricsTimerRecord("loggedInUserProfileRequest", nil, time.Since(timer)) }()
+
+	params, ok := LoadParams(ctx)
+	if !ok {
+		return errors.New("session parameters not found")
+	}
+	userID := session.userID.String()
+	groupID := params.profile.GetActiveGroupID().String()
+
+	modes := []evr.Symbol{
+		evr.ModeArenaPublic,
+		evr.ModeCombatPublic,
+	}
+
+	serverProfile, err := NewPlayerProfile(ctx, p.db, p.nk, params.profile, params.xpID, groupID, modes, 0, params.profile.GetGroupIGN(groupID))
+	if err != nil {
+		return fmt.Errorf("failed to create user server profile: %w", err)
+	}
+
+	clientProfile := NewClientProfile(ctx, params.profile, serverProfile)
+
+	// Check if the user is required to go through community values
+	journal := NewGuildEnforcementJournal(userID)
+	if err := p.nevr.StorableRead(ctx, userID, journal, true); err != nil {
+		logger.Warn("Failed to search for community values", zap.Error(err))
+	} else if journal.CommunityValuesCompletedAt.IsZero() {
+		clientProfile.Social.CommunityValuesVersion = 0
+	}
+
+	return session.SendEVR(Envelope{
+		ServiceType: ServiceTypeLogin,
+		Messages: []evr.Message{
+			evr.NewLoggedInUserProfileSuccess(request.EvrID, clientProfile, serverProfile),
+		},
+	})
+}
+
+func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
+	request := in.(*evr.UpdateClientProfile)
+
+	if err := p.handleClientProfileUpdate(ctx, logger, session, request.XPID, request.Payload); err != nil {
+		if err := session.SendEVR(Envelope{
+			ServiceType: ServiceTypeLogin,
+			Messages: []evr.Message{
+				evr.NewUpdateProfileFailure(request.XPID, uint64(500), err.Error()),
+			},
+			State: RequireStateUnrequired,
+		}); err != nil {
+			logger.Error("Failed to send UpdateProfileFailure", zap.Error(err))
+		}
+	}
+
+	return session.SendEVR(Envelope{
+		ServiceType: ServiceTypeLogin,
+		Messages: []evr.Message{
+			evr.NewUpdateProfileSuccess(&request.XPID),
+		},
+		State: RequireStateUnrequired,
+	})
+}
+
+func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap.Logger, session *sessionEVR, evrID evr.XPID, update evr.ClientProfile) error {
+	// Set the EVR ID from the context
+	update.EvrID = evrID
+
+	params, ok := LoadParams(ctx)
+	if !ok {
+		return errors.New("session parameters not found")
+	}
+	userID := session.userID.String()
+	groupID := params.profile.GetActiveGroupID().String()
+	gg := p.guildGroupRegistry.Get(groupID)
+	if gg == nil {
+		return fmt.Errorf("guild group not found: %s", groupID)
+	}
+
+	hasCompleted := update.Social.CommunityValuesVersion != 0
+
+	if hasCompleted {
+
+		// Check if the user is required to go through community values
+		journal := NewGuildEnforcementJournal(userID)
+		if err := p.nevr.StorableRead(ctx, userID, journal, true); err != nil {
+			logger.Warn("Failed to search for community values", zap.Error(err))
+		} else if journal.CommunityValuesCompletedAt.IsZero() {
+
+			journal.CommunityValuesCompletedAt = time.Now().UTC()
+
+			if err := p.nevr.StorableWrite(ctx, userID, journal); err != nil {
+				logger.Warn("Failed to write community values", zap.Error(err))
+			}
+
+			// Log the audit message
+			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("User <@%s> (%s) has accepted the community values.", params.DiscordID(), params.profile.Username()), false); err != nil {
+				logger.Warn("Failed to log audit message", zap.Error(err))
+			}
+		}
+
+	}
+
+	profile, err := EVRProfileLoad(ctx, p.nk, userID)
+	if err != nil {
+		return fmt.Errorf("failed to load account profile: %w", err)
+	}
+
+	profile.TeamName = update.TeamName
+
+	profile.CombatLoadout = CombatLoadout{
+		CombatWeapon:       update.CombatWeapon,
+		CombatGrenade:      update.CombatGrenade,
+		CombatDominantHand: update.CombatDominantHand,
+		CombatAbility:      update.CombatAbility,
+	}
+
+	profile.LegalConsents = update.LegalConsents
+	profile.GhostedPlayers = update.GhostedPlayers.Players
+	profile.MutedPlayers = update.MutedPlayers.Players
+	profile.NewUnlocks = update.NewUnlocks
+	profile.CustomizationPOIs = update.Customization
+
+	if err := EVRProfileUpdate(ctx, p.nk, userID, profile); err != nil {
+		return fmt.Errorf("failed to update account profile: %w", err)
+	}
+
+	params.profile = profile
+	StoreParams(ctx, &params)
+	return nil
 }
 
 func WriteStatistics(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, entries []*StatisticsQueueEntry) error {

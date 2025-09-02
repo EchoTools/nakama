@@ -73,13 +73,14 @@ type serviceWS struct {
 
 	metrics server.Metrics
 
-	stopped                *atomic.Bool
+	stopped                bool
 	conn                   *websocket.Conn
 	receivedMessageCounter int
 	pingTimer              *time.Timer
 	pingTimerCAS           *atomic.Uint32
 	outgoingCh             chan []byte
 	serviceCh              chan []byte
+	closeMu                sync.Mutex
 }
 
 func NewServiceWS(logger *zap.Logger, clientIP, clientPort string, conn *websocket.Conn, config server.Config, metrics server.Metrics) *serviceWS {
@@ -99,7 +100,7 @@ func NewServiceWS(logger *zap.Logger, clientIP, clientPort string, conn *websock
 		writeWaitDuration:  time.Duration(config.GetSocket().WriteWaitMs) * time.Millisecond,
 		metrics:            metrics,
 
-		stopped:                atomic.NewBool(false),
+		stopped:                false,
 		conn:                   conn,
 		receivedMessageCounter: config.GetSocket().PingBackoffThreshold,
 		pingTimer:              time.NewTimer(time.Duration(config.GetSocket().PingPeriodMs) * time.Millisecond),
@@ -110,7 +111,7 @@ func NewServiceWS(logger *zap.Logger, clientIP, clientPort string, conn *websock
 }
 
 func (s *serviceWS) IsStopped() bool {
-	return s.stopped.Load()
+	return s.stopped
 }
 
 func (s *serviceWS) Context() context.Context {
@@ -200,10 +201,14 @@ func (s *serviceWS) maybeResetPingTimer() bool {
 	}
 	defer s.pingTimerCAS.CompareAndSwap(0, 1)
 
-	if s.IsStopped() {
+	s.Lock()
+	if s.stopped {
+		s.Unlock()
 		return false
 	}
-	s.Lock()
+	// Stop the ping timer and drain it if needed.
+	// This is needed to ensure the timer is in a known state before resetting it.
+	// See https://pkg.go.dev/time#Timer.Stop for details.
 	// CAS ensures concurrency is not a problem here.
 	if !s.pingTimer.Stop() {
 		select {
@@ -237,21 +242,15 @@ OutgoingLoop:
 				break OutgoingLoop
 			}
 		case payload := <-s.outgoingCh:
-			if s.IsStopped() {
+			s.Lock()
+			// If the session has been stopped then abort processing.
+			if s.stopped {
 				// The connection may have stopped between the payload being queued on the outgoing channel and reaching here.
 				// If that's the case then abort outgoing processing at this point and exit.
+				s.Unlock()
 				break OutgoingLoop
 			}
-			messages, err := evr.ParsePacket(payload)
-			if err != nil {
-				s.logger.Warn("Failed to parse packet", zap.Error(err))
-			} else {
-				for _, message := range messages {
-					s.logger.Debug("Sending message", zap.String("message_type", fmt.Sprintf("%T", message)), zap.Any("message", message))
-				}
-			}
 
-			s.Lock()
 			// Process the outgoing message queue.
 			if err := s.conn.SetWriteDeadline(time.Now().Add(s.writeWaitDuration)); err != nil {
 				s.Unlock()
@@ -269,15 +268,15 @@ OutgoingLoop:
 			s.metrics.MessageBytesSent(int64(len(payload)))
 		}
 	}
-
 	s.Close()
 }
 
 func (s *serviceWS) pingNow() (string, bool) {
-	if s.IsStopped() {
+	s.Lock()
+	if s.stopped {
+		s.Unlock()
 		return "", false
 	}
-	s.Lock()
 	if err := s.conn.SetWriteDeadline(time.Now().Add(s.writeWaitDuration)); err != nil {
 		s.Unlock()
 		s.logger.Warn("Could not set write deadline to ping", zap.Error(err))
@@ -309,10 +308,6 @@ func (s *serviceWS) SendBytes(payload []byte, reliable bool) error {
 }
 
 func (s *serviceWS) SendEVR(envelope Envelope) error {
-	if s.IsStopped() {
-		return errors.New("service is stopped, not sending message")
-	}
-
 	if envelope.State == RequireStateUnrequired {
 		envelope.Messages = append(envelope.Messages, &evr.STcpConnectionUnrequireEvent{})
 	}
@@ -340,15 +335,28 @@ func (s *serviceWS) SendEVR(envelope Envelope) error {
 	return nil
 }
 
+func (s *serviceWS) CloseLock() {
+	s.closeMu.Lock()
+}
+
+func (s *serviceWS) CloseUnlock() {
+	s.closeMu.Unlock()
+}
+
 func (s *serviceWS) Close() {
-
-	// Cancel any ongoing operations tied to this session.
+	s.CloseLock()
 	s.ctxCancelFn()
+	s.CloseLock()
 
-	if s.IsStopped() {
+	s.Lock()
+	if s.stopped {
+		s.Unlock()
 		return // Already stopped.
 	}
-	s.stopped.Store(true)
+	s.stopped = true
+	s.Unlock()
+
+	// Log the cleanup.
 
 	if s.logger.Core().Enabled(zap.DebugLevel) {
 		s.logger.Info("Cleaning up closed client connection")

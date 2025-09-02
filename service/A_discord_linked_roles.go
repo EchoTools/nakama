@@ -86,7 +86,7 @@ func (h *DiscordLinkedRolesHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 	}
 
 	// Find the corresponding Nakama user ID
-	userID, err := GetUserIDByDiscordID(h.ctx, h.db, discordUserID)
+	userID, _, err := GetUserIDByDiscordID(h.ctx, h.db, discordUserID)
 	if err != nil {
 		h.logger.Error("Failed to find user by Discord ID", zap.String("discord_id", discordUserID), zap.Error(err))
 		// Return empty metadata for users not found in our system

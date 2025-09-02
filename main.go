@@ -207,13 +207,6 @@ func main() {
 	tracker.SetPartyJoinListener(partyRegistry.Join)
 	tracker.SetPartyLeaveListener(partyRegistry.Leave)
 
-	storageIndex.RegisterFilters(runtime)
-	go func() {
-		if err = storageIndex.Load(ctx); err != nil {
-			logger.Error("Failed to load storage index entries from database", zap.Error(err))
-		}
-	}()
-
 	leaderboardScheduler.Start(runtime)
 	googleRefundScheduler.Start(runtime)
 
@@ -230,12 +223,23 @@ func main() {
 		startupLogger.Fatal("Failed initializing NEVR runtime", zap.Error(err))
 	}
 
+	// Register any configured storage indexes.
+	if err := service.RegisterIndexes(ctx, storageIndex); err != nil {
+		logger.Fatal("Failed to register storage indexes", zap.Error(err))
+	}
+	storageIndex.RegisterFilters(runtime)
+	go func() {
+		if err = storageIndex.Load(ctx); err != nil {
+			logger.Error("Failed to load storage index entries from database", zap.Error(err))
+		}
+	}()
+
 	nk := server.NewRuntimeGoNakamaModule(logger, db, jsonpbMarshaler, config, socialClient, leaderboardCache, leaderboardRankCache, leaderboardScheduler, sessionRegistry, sessionCache, statusRegistry, matchRegistry, partyRegistry, tracker, metrics, streamManager, router, storageIndex, nil)
 
 	go service.ServiceSettingsLoop(ctx, server.NewRuntimeGoLogger(logger), nk)
 
 	nkApiServer := server.StartApiServer(logger, startupLogger, db, jsonpbMarshaler, jsonpbUnmarshaler, config, version, socialClient, storageIndex, leaderboardCache, leaderboardRankCache, sessionRegistry, sessionCache, statusRegistry, matchRegistry, partyRegistry, matchmaker, tracker, router, streamManager, metrics, pipeline, runtime)
-	apiServer := service.StartApiServer(logger, startupLogger, db, jsonpbMarshaler, jsonpbUnmarshaler, config, version, socialClient, storageIndex, leaderboardCache, leaderboardRankCache, sessionRegistry, sessionCache, statusRegistry, matchRegistry, matchmaker, tracker, router, streamManager, metrics, pipeline, runtime, evrPipeline)
+	apiServer := service.StartGameAPI(logger, startupLogger, db, jsonpbMarshaler, jsonpbUnmarshaler, config, version, socialClient, storageIndex, leaderboardCache, leaderboardRankCache, sessionRegistry, sessionCache, statusRegistry, matchRegistry, matchmaker, tracker, router, streamManager, metrics, pipeline, runtime, evrPipeline)
 
 	consoleServer := server.StartConsoleServer(logger, startupLogger, db, config, tracker, router, streamManager, metrics, sessionRegistry, sessionCache, consoleSessionCache, loginAttemptCache, statusRegistry, statusHandler, runtimeInfo, matchRegistry, configWarnings, semver, leaderboardCache, leaderboardRankCache, leaderboardScheduler, storageIndex, nkApiServer, runtime, cookie)
 

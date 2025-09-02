@@ -19,13 +19,10 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto"
-	"crypto/tls"
-	"crypto/x509"
 	"database/sql"
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"math"
 	"net"
 	"net/http"
 	"strings"
@@ -34,8 +31,6 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/gorilla/handlers"
-	"github.com/gorilla/mux"
 	grpcgw "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/apigrpc"
@@ -44,10 +39,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 	_ "google.golang.org/grpc/encoding/gzip" // enable gzip compression on server for grpc
-	"google.golang.org/grpc/grpclog"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
@@ -90,44 +82,11 @@ type ApiServer struct {
 	metrics              server.Metrics
 	matchmaker           server.Matchmaker
 	runtime              *server.Runtime
-	grpcServer           *grpc.Server
-	grpcGatewayServer    *http.Server
+	gameAPIServer        *http.Server
 }
 
 // TODO: Refactor to remove this upstream code
-func StartApiServer(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config server.Config, version string, socialClient *social.Client, storageIndex server.StorageIndex, leaderboardCache server.LeaderboardCache, leaderboardRankCache server.LeaderboardRankCache, sessionRegistry server.SessionRegistry, sessionCache server.SessionCache, statusRegistry server.StatusRegistry, matchRegistry server.MatchRegistry, matchmaker server.Matchmaker, tracker server.Tracker, router server.MessageRouter, streamManager server.StreamManager, metrics server.Metrics, pipeline *server.Pipeline, runtime *server.Runtime, evrPipeline *EvrPipeline) *ApiServer {
-	var gatewayContextTimeoutMs string
-	if config.GetSocket().IdleTimeoutMs > 500 {
-		// Ensure the GRPC Gateway timeout is just under the idle timeout (if possible) to ensure it has priority.
-		grpcgw.DefaultContextTimeout = time.Duration(config.GetSocket().IdleTimeoutMs-500) * time.Millisecond
-		gatewayContextTimeoutMs = fmt.Sprintf("%vm", config.GetSocket().IdleTimeoutMs-500)
-	} else {
-		grpcgw.DefaultContextTimeout = time.Duration(config.GetSocket().IdleTimeoutMs) * time.Millisecond
-		gatewayContextTimeoutMs = fmt.Sprintf("%vm", config.GetSocket().IdleTimeoutMs)
-	}
-
-	serverOpts := []grpc.ServerOption{
-		grpc.StatsHandler(&server.MetricsGrpcHandler{MetricsFn: metrics.Api, Metrics: metrics}),
-		grpc.MaxRecvMsgSize(int(config.GetSocket().MaxRequestSizeBytes)),
-		grpc.UnaryInterceptor(func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-			ctx, err := securityInterceptorFunc(logger, config, sessionCache, ctx, req, info)
-			if err != nil {
-				return nil, err
-			}
-			return handler(ctx, req)
-		}),
-	}
-	if config.GetSocket().TLSCert != nil {
-		serverOpts = append(serverOpts, grpc.Creds(credentials.NewServerTLSFromCert(&config.GetSocket().TLSCert[0])))
-	}
-	grpcServer := grpc.NewServer(serverOpts...)
-
-	// Set grpc logger
-	grpcLogger, err := server.NewGrpcCustomLogger(logger)
-	if err != nil {
-		startupLogger.Fatal("failed to set up grpc logger", zap.Error(err))
-	}
-	once.Do(func() { grpclog.SetLoggerV2(grpcLogger) })
+func StartGameAPI(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config server.Config, version string, socialClient *social.Client, storageIndex server.StorageIndex, leaderboardCache server.LeaderboardCache, leaderboardRankCache server.LeaderboardRankCache, sessionRegistry server.SessionRegistry, sessionCache server.SessionCache, statusRegistry server.StatusRegistry, matchRegistry server.MatchRegistry, matchmaker server.Matchmaker, tracker server.Tracker, router server.MessageRouter, streamManager server.StreamManager, metrics server.Metrics, pipeline *server.Pipeline, runtime *server.Runtime, evrPipeline *EvrPipeline) *ApiServer {
 
 	s := &ApiServer{
 		logger:               logger,
@@ -148,190 +107,33 @@ func StartApiServer(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		metrics:              metrics,
 		matchmaker:           matchmaker,
 		runtime:              runtime,
-		grpcServer:           grpcServer,
-	}
-
-	// Register and start GRPC server.
-	apigrpc.RegisterNakamaServer(grpcServer, s)
-	startupLogger.Info("Starting API server for gRPC requests", zap.Int("port", config.GetSocket().Port-1))
-	go func() {
-		listener, err := net.Listen("tcp", fmt.Sprintf("%v:%d", config.GetSocket().Address, config.GetSocket().Port-1))
-		if err != nil {
-			startupLogger.Fatal("API server listener failed to start", zap.Error(err))
-		}
-
-		if err := grpcServer.Serve(listener); err != nil {
-			startupLogger.Fatal("API server listener failed", zap.Error(err))
-		}
-	}()
-
-	// Register and start GRPC Gateway server.
-	// Should start after GRPC server itself because RegisterNakamaHandlerFromEndpoint below tries to dial GRPC.
-	ctx := context.Background()
-	grpcGateway := grpcgw.NewServeMux(
-		grpcgw.WithRoutingErrorHandler(handleRoutingError),
-		grpcgw.WithMetadata(func(ctx context.Context, r *http.Request) metadata.MD {
-			// For RPC GET operations pass through any custom query parameters.
-			if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/v2/rpc/") {
-				return metadata.MD{}
-			}
-
-			q := r.URL.Query()
-			p := make(map[string][]string, len(q))
-			for k, vs := range q {
-				if k == "http_key" {
-					// Skip Nakama's own query params, only process custom ones.
-					continue
-				}
-				p["q_"+k] = vs
-			}
-			return p
-		}),
-		grpcgw.WithMarshalerOption(grpcgw.MIMEWildcard, &grpcgw.HTTPBodyMarshaler{
-			Marshaler: &grpcgw.JSONPb{
-				MarshalOptions: protojson.MarshalOptions{
-					UseProtoNames:  true,
-					UseEnumNumbers: true,
-				},
-				UnmarshalOptions: protojson.UnmarshalOptions{
-					DiscardUnknown: true,
-				},
-			},
-		}),
-	)
-	dialAddr := fmt.Sprintf("127.0.0.1:%d", config.GetSocket().Port-1)
-	if config.GetSocket().Address != "" {
-		dialAddr = fmt.Sprintf("%v:%d", config.GetSocket().Address, config.GetSocket().Port-1)
-	}
-	dialOpts := []grpc.DialOption{
-		grpc.WithDefaultCallOptions(
-			grpc.MaxCallSendMsgSize(int(config.GetSocket().MaxRequestSizeBytes)),
-			grpc.MaxCallRecvMsgSize(math.MaxInt32),
-		),
-		//grpc.WithStatsHandler(&ocgrpc.ClientHandler{}),
-	}
-	if config.GetSocket().TLSCert != nil {
-		// GRPC-Gateway only ever dials 127.0.0.1 so we can be lenient on server certificate validation.
-		certPool := x509.NewCertPool()
-		if !certPool.AppendCertsFromPEM(config.GetSocket().CertPEMBlock) {
-			startupLogger.Fatal("Failed to load PEM certificate from socket SSL certificate file")
-		}
-		cert := credentials.NewTLS(&tls.Config{RootCAs: certPool, InsecureSkipVerify: true})
-		dialOpts = append(dialOpts, grpc.WithTransportCredentials(cert))
-	} else {
-		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	}
-	if err := apigrpc.RegisterNakamaHandlerFromEndpoint(ctx, grpcGateway, dialAddr, dialOpts); err != nil {
-		startupLogger.Fatal("API server gateway registration failed", zap.Error(err))
-	}
-	//if err := apigrpc.RegisterNakamaHandlerServer(ctx, grpcGateway, s); err != nil {
-	//	startupLogger.Fatal("API server gateway registration failed", zap.Error(err))
-	//}
-
-	grpcGatewayRouter := mux.NewRouter()
-	// Special case routes. Do NOT enable compression on WebSocket route, it results in "http: response.Write on hijacked connection" errors.
-	grpcGatewayRouter.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }).Methods(http.MethodGet)
-	grpcGatewayRouter.HandleFunc("/ws", NewSocketWSEVRAcceptor(logger, config, sessionRegistry, sessionCache, statusRegistry, matchmaker, tracker, metrics, runtime, protojsonMarshaler, protojsonUnmarshaler, pipeline, evrPipeline)).Methods(http.MethodGet)
-	// Another nested router to hijack RPC requests bound for GRPC Gateway.
-	grpcGatewayMux := mux.NewRouter()
-	grpcGatewayMux.HandleFunc("/v2/rpc/{id:.*}", s.RpcFuncHttp).Methods(http.MethodGet, http.MethodPost)
-	/*
-		for _, handler := range evrRuntime.httpHandlers {
-			if handler == nil {
-				continue
-			}
-			route := grpcGatewayMux.HandleFunc(handler.PathPattern, handler.Handler)
-			if len(handler.Methods) > 0 {
-				route.Methods(handler.Methods...)
-			}
-			logger.Info("Registered custom HTTP handler", zap.String("path_pattern", handler.PathPattern))
-		}
-	*/
-	grpcGatewayMux.NewRoute().Handler(grpcGateway)
-
-	// Enable stats recording on all request paths except:
-	// "/" is not tracked at all.
-	// "/ws" implements its own separate tracking.
-	//handlerWithStats := &ochttp.Handler{
-	//	Handler:          grpcGatewayMux,
-	//	IsPublicEndpoint: true,
-	//}
-
-	// Default to passing request to GRPC Gateway.
-	// Enable max size check on requests coming arriving the gateway.
-	// Enable compression on responses sent by the gateway.
-	// Enable decompression on requests received by the gateway.
-	handlerWithDecompressRequest := decompressHandler(logger, grpcGatewayMux)
-	handlerWithCompressResponse := handlers.CompressHandler(handlerWithDecompressRequest)
-	maxMessageSizeBytes := config.GetSocket().MaxRequestSizeBytes
-	handlerWithMaxBody := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Check max body size before decompressing incoming request body.
-		r.Body = http.MaxBytesReader(w, r.Body, maxMessageSizeBytes)
-		handlerWithCompressResponse.ServeHTTP(w, r)
-	})
-	grpcGatewayRouter.NewRoute().HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Ensure some request headers have required values.
-		// Override any value set by the client if needed.
-		r.Header.Set("Grpc-Timeout", gatewayContextTimeoutMs)
-
-		// Add constant response headers.
-		w.Header().Add("Cache-Control", "no-store, no-cache, must-revalidate")
-
-		// Allow GRPC Gateway to handle the request.
-		handlerWithMaxBody.ServeHTTP(w, r)
-	})
-
-	// Enable CORS on all requests.
-	CORSHeaders := handlers.AllowedHeaders([]string{"Authorization", "Content-Type", "User-Agent"})
-	CORSOrigins := handlers.AllowedOrigins([]string{"*"})
-	CORSMethods := handlers.AllowedMethods([]string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodDelete})
-	handlerWithCORS := handlers.CORS(CORSHeaders, CORSOrigins, CORSMethods)(grpcGatewayRouter)
-
-	// Enable configured response headers, if any are set. Do not override values that may have been set by server processing.
-	optionalResponseHeaderHandler := handlerWithCORS
-	if headers := config.GetSocket().Headers; len(headers) > 0 {
-		optionalResponseHeaderHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Preemptively set custom response headers. Further processing will override them if needed for proper functionality.
-			wHeaders := w.Header()
-			for key, value := range headers {
-				if wHeaders.Get(key) == "" {
-					wHeaders.Set(key, value)
-				}
-			}
-
-			// Allow core server processing to handle the request.
-			handlerWithCORS.ServeHTTP(w, r)
-		})
 	}
 
 	// Set up and start GRPC Gateway server.
-	s.grpcGatewayServer = &http.Server{
+	s.gameAPIServer = &http.Server{
 		ReadTimeout:    time.Millisecond * time.Duration(int64(config.GetSocket().ReadTimeoutMs)),
 		WriteTimeout:   time.Millisecond * time.Duration(int64(config.GetSocket().WriteTimeoutMs)),
 		IdleTimeout:    time.Millisecond * time.Duration(int64(config.GetSocket().IdleTimeoutMs)),
 		MaxHeaderBytes: 5120,
-		Handler:        optionalResponseHeaderHandler,
-	}
-	if config.GetSocket().TLSCert != nil {
-		s.grpcGatewayServer.TLSConfig = &tls.Config{Certificates: config.GetSocket().TLSCert}
 	}
 
-	startupLogger.Info("Starting API server gateway for HTTP requests", zap.Int("port", config.GetSocket().Port))
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/ws", NewSocketWSEVRAcceptor(logger, config, sessionRegistry, sessionCache, statusRegistry, matchmaker, tracker, metrics, runtime, protojsonMarshaler, protojsonUnmarshaler, pipeline, evrPipeline))
+
+	s.gameAPIServer.Handler = mux
+
+	startupLogger.Info("Starting game API server for WebSocket requests", zap.Int("port", config.GetSocket().Port-3))
 	go func() {
-		listener, err := net.Listen(config.GetSocket().Protocol, fmt.Sprintf("%v:%d", config.GetSocket().Address, config.GetSocket().Port))
+		listener, err := net.Listen(config.GetSocket().Protocol, fmt.Sprintf("%v:%d", config.GetSocket().Address, config.GetSocket().Port-3))
 		if err != nil {
-			startupLogger.Fatal("API server gateway listener failed to start", zap.Error(err))
+			startupLogger.Fatal("game API server listener failed to start", zap.Error(err))
 		}
 
-		if config.GetSocket().TLSCert != nil {
-			if err := s.grpcGatewayServer.ServeTLS(listener, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				startupLogger.Fatal("API server gateway listener failed", zap.Error(err))
-			}
-		} else {
-			if err := s.grpcGatewayServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				startupLogger.Fatal("API server gateway listener failed", zap.Error(err))
-			}
+		if err := s.gameAPIServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			startupLogger.Fatal("game API server listener failed", zap.Error(err))
 		}
+
 	}()
 
 	return s
@@ -339,11 +141,9 @@ func StartApiServer(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 func (s *ApiServer) Stop() {
 	// 1. Stop GRPC Gateway server first as it sits above GRPC server. This also closes the underlying listener.
-	if err := s.grpcGatewayServer.Shutdown(context.Background()); err != nil {
-		s.logger.Error("API server gateway listener shutdown failed", zap.Error(err))
+	if err := s.gameAPIServer.Shutdown(context.Background()); err != nil {
+		s.logger.Error("game API server listener shutdown failed", zap.Error(err))
 	}
-	// 2. Stop GRPC server. This also closes the underlying listener.
-	s.grpcServer.GracefulStop()
 }
 
 func (s *ApiServer) Healthcheck(ctx context.Context, in *emptypb.Empty) (*emptypb.Empty, error) {
