@@ -832,7 +832,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	// Send the response
 	embedBatches := SplitEmbedsBySize(embeds)
-	
+
 	// If we have multiple batches, send them sequentially
 	if len(embedBatches) > 1 {
 		// Send the first batch as initial response
@@ -851,10 +851,10 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		for batchIndex, batch := range embedBatches[1:] {
 			partNum := batchIndex + 2 // +2 because we start from the second batch and want 1-based numbering
 			content := "📊 User Profile (Part " + fmt.Sprintf("%d", partNum) + " of " + fmt.Sprintf("%d", len(embedBatches)) + ")"
-			
+
 			if _, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
-				Flags:  discordgo.MessageFlagsEphemeral,
-				Embeds: batch,
+				Flags:   discordgo.MessageFlagsEphemeral,
+				Embeds:  batch,
 				Content: content,
 			}); err != nil {
 				logger.Error("failed to send follow-up message", "error", err, "part", partNum)

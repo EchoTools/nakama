@@ -51,7 +51,7 @@ func TestCalculateEmbedSize(t *testing.T) {
 func TestSplitEmbedsBySize(t *testing.T) {
 	// Create a large embed that should be split
 	largeEmbed := &discordgo.MessageEmbed{
-		Title: "Large Embed",
+		Title:  "Large Embed",
 		Fields: make([]*discordgo.MessageEmbedField, 30), // Exceeds DiscordEmbedMaxFields
 	}
 
@@ -70,14 +70,14 @@ func TestSplitEmbedsBySize(t *testing.T) {
 		// Check if the split embeds all fit in one batch
 		splitResults := splitLargeEmbed(largeEmbed)
 		t.Logf("splitLargeEmbed returned %d embeds", len(splitResults))
-		
+
 		totalSplitSize := 0
 		for i, splitEmbed := range splitResults {
 			splitInfo := CalculateEmbedSize(splitEmbed)
 			totalSplitSize += splitInfo.TotalSize
 			t.Logf("Split embed %d: TotalSize=%d, FieldCount=%d, ExceedsLimits=%v", i, splitInfo.TotalSize, splitInfo.FieldCount, splitInfo.ExceedsLimits)
 		}
-		
+
 		if len(splitResults) > 1 && len(result) == 1 && len(result[0]) == len(splitResults) {
 			t.Logf("All %d split embeds fit in one batch (total size: %d)", len(splitResults), totalSplitSize)
 			// This is actually correct behavior - the splits fit in one message
@@ -107,13 +107,13 @@ func TestSplitEmbedsBySize(t *testing.T) {
 func TestSplitEmbedsBySize_MultipleBatches(t *testing.T) {
 	// Create multiple large embeds that should require multiple batches
 	embeds := make([]*discordgo.MessageEmbed, 15)
-	
+
 	for i := 0; i < 15; i++ {
 		embeds[i] = &discordgo.MessageEmbed{
-			Title: "Embed " + string(rune(i+'A')),
+			Title:  "Embed " + string(rune(i+'A')),
 			Fields: make([]*discordgo.MessageEmbedField, 20),
 		}
-		
+
 		// Fill with fields
 		for j := 0; j < 20; j++ {
 			embeds[i].Fields[j] = &discordgo.MessageEmbedField{

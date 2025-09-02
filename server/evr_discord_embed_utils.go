@@ -124,19 +124,19 @@ func SplitEmbedsBySize(embeds []*discordgo.MessageEmbed) [][]*discordgo.MessageE
 		}
 
 		info := CalculateEmbedSize(embed)
-		
+
 		// If a single embed exceeds limits, try to split its fields
 		if info.ExceedsLimits {
 			if splitEmbeds := splitLargeEmbed(embed); len(splitEmbeds) > 0 {
 				// Process each split embed
 				for _, splitEmbed := range splitEmbeds {
 					splitInfo := CalculateEmbedSize(splitEmbed)
-					
+
 					// Check if we can add this split embed to current batch
-					if len(currentBatch) > 0 && 
-						(len(currentBatch)+1 > DiscordMessageMaxEmbeds || 
-						 currentBatchSize+splitInfo.TotalSize > DiscordEmbedMaxSize*len(currentBatch)) {
-						
+					if len(currentBatch) > 0 &&
+						(len(currentBatch)+1 > DiscordMessageMaxEmbeds ||
+							currentBatchSize+splitInfo.TotalSize > DiscordEmbedMaxSize*len(currentBatch)) {
+
 						// Start new batch
 						result = append(result, currentBatch)
 						currentBatch = []*discordgo.MessageEmbed{splitEmbed}
@@ -152,10 +152,10 @@ func SplitEmbedsBySize(embeds []*discordgo.MessageEmbed) [][]*discordgo.MessageE
 		}
 
 		// Check if we can add this embed to current batch
-		if len(currentBatch) > 0 && 
-			(len(currentBatch)+1 > DiscordMessageMaxEmbeds || 
-			 currentBatchSize+info.TotalSize > DiscordEmbedMaxSize*len(currentBatch)) {
-			
+		if len(currentBatch) > 0 &&
+			(len(currentBatch)+1 > DiscordMessageMaxEmbeds ||
+				currentBatchSize+info.TotalSize > DiscordEmbedMaxSize*len(currentBatch)) {
+
 			// Start new batch
 			result = append(result, currentBatch)
 			currentBatch = []*discordgo.MessageEmbed{embed}
@@ -182,7 +182,7 @@ func splitLargeEmbed(embed *discordgo.MessageEmbed) []*discordgo.MessageEmbed {
 	}
 
 	var result []*discordgo.MessageEmbed
-	
+
 	// Create base embed structure (without fields)
 	baseEmbed := &discordgo.MessageEmbed{
 		Title:       embed.Title,
@@ -198,7 +198,7 @@ func splitLargeEmbed(embed *discordgo.MessageEmbed) []*discordgo.MessageEmbed {
 
 	// Calculate base size without fields
 	baseInfo := CalculateEmbedSize(baseEmbed)
-	
+
 	// If base embed itself exceeds limits, we need to truncate
 	if baseInfo.ExceedsLimits {
 		// Truncate description if too long
@@ -238,19 +238,19 @@ func splitLargeEmbed(embed *discordgo.MessageEmbed) []*discordgo.MessageEmbed {
 		fieldSize := len(fieldName) + len(fieldValue)
 
 		// Check if adding this field would exceed limits
-		if fieldCount > 0 && 
-			(fieldCount+1 > DiscordEmbedMaxFields || 
-			 currentSize+fieldSize > DiscordEmbedMaxSize) {
-			
+		if fieldCount > 0 &&
+			(fieldCount+1 > DiscordEmbedMaxFields ||
+				currentSize+fieldSize > DiscordEmbedMaxSize) {
+
 			// Finalize current embed and start a new one
 			result = append(result, &currentEmbed)
-			
+
 			// Start new embed
 			currentEmbed = *baseEmbed // Copy base embed
 			currentEmbed.Fields = nil
 			currentSize = baseInfo.TotalSize
 			fieldCount = 0
-			
+
 			// Add continuation indicator to title if this is not the first split
 			if len(result) == 1 {
 				if currentEmbed.Title != "" {
@@ -326,7 +326,7 @@ func ValidateEmbeds(embeds []*discordgo.MessageEmbed) error {
 		if embed == nil {
 			continue
 		}
-		
+
 		info := CalculateEmbedSize(embed)
 		if info.ExceedsLimits {
 			return ErrEmbedTooLarge.WithIndex(i)
