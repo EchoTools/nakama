@@ -831,42 +831,92 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 
 	// Send the response
-	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Flags:  discordgo.MessageFlagsEphemeral,
-			Embeds: embeds,
-		},
-	}); err != nil {
+	embedBatches := SplitEmbedsBySize(embeds)
+	
+	// If we have multiple batches, send them sequentially
+	if len(embedBatches) > 1 {
+		// Send the first batch as initial response
+		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Flags:   discordgo.MessageFlagsEphemeral,
+				Embeds:  embedBatches[0],
+				Content: "📊 User Profile (Part 1 of " + fmt.Sprintf("%d", len(embedBatches)) + ")",
+			},
+		}); err != nil {
+			return d.handleProfileRequestFallback(ctx, logger, nk, s, i, target, embeds, opts, err)
+		}
 
-		if opts.SendFileOnError {
-			// Try and send a message with a file attachment of the embeds if the interaction response fails
-			logger.Error("failed to respond to interaction", "error", err)
-			embedData, err := json.MarshalIndent(embeds, "", "  ")
-			if err != nil {
-				return fmt.Errorf("failed to marshal embeds: %w", err)
+		// Send remaining batches as follow-up messages
+		for batchIndex, batch := range embedBatches[1:] {
+			partNum := batchIndex + 2 // +2 because we start from the second batch and want 1-based numbering
+			content := "📊 User Profile (Part " + fmt.Sprintf("%d", partNum) + " of " + fmt.Sprintf("%d", len(embedBatches)) + ")"
+			
+			if _, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+				Flags:  discordgo.MessageFlagsEphemeral,
+				Embeds: batch,
+				Content: content,
+			}); err != nil {
+				logger.Error("failed to send follow-up message", "error", err, "part", partNum)
+				// Continue with remaining parts even if one fails
 			}
+		}
+	} else if len(embedBatches) == 1 {
+		// Send single batch normally
+		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Flags:  discordgo.MessageFlagsEphemeral,
+				Embeds: embedBatches[0],
+			},
+		}); err != nil {
+			return d.handleProfileRequestFallback(ctx, logger, nk, s, i, target, embeds, opts, err)
+		}
+	} else {
+		// No embeds to send - this shouldn't happen but handle gracefully
+		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Flags:   discordgo.MessageFlagsEphemeral,
+				Content: "No profile information available.",
+			},
+		}); err != nil {
+			return fmt.Errorf("failed to send empty response: %w", err)
+		}
+	}
 
-			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Content: "The profile is too large to display in an embed. Here is the raw data.",
-					Flags:   discordgo.MessageFlagsEphemeral,
-					Files: []*discordgo.File{
-						{
-							Name:        targetID + "_lookup.json",
-							ContentType: "application/json",
-							Reader:      strings.NewReader(string(embedData)),
-						},
+	return nil
+}
+
+// handleProfileRequestFallback handles the case where normal embed sending fails
+func (d *DiscordAppBot) handleProfileRequestFallback(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, target *discordgo.User, embeds []*discordgo.MessageEmbed, opts UserProfileRequestOptions, originalErr error) error {
+	if opts.SendFileOnError {
+		// Try and send a message with a file attachment of the embeds if the interaction response fails
+		logger.Error("failed to respond to interaction", "error", originalErr)
+		embedData, err := json.MarshalIndent(embeds, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal embeds: %w", err)
+		}
+
+		targetID := d.cache.DiscordIDToUserID(target.ID)
+		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "The profile is too large to display in an embed. Here is the raw data.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+				Files: []*discordgo.File{
+					{
+						Name:        targetID + "_lookup.json",
+						ContentType: "application/json",
+						Reader:      strings.NewReader(string(embedData)),
 					},
 				},
-			}); err != nil {
-				return fmt.Errorf("failed to send message with embeds: %w", err)
-			}
-
-		} else {
-			return fmt.Errorf("failed to respond to interaction: %w", err)
+			},
+		}); err != nil {
+			return fmt.Errorf("failed to send message with embeds: %w", err)
 		}
+	} else {
+		return fmt.Errorf("failed to respond to interaction: %w", originalErr)
 	}
 
 	return nil
