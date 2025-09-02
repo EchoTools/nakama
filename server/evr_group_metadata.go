@@ -35,6 +35,7 @@ type GroupMetadata struct {
 	SuspensionInheritanceGroupIDs        []string          `json:"suspension_inheritence_group_ids"`         // Groups that this group inherits suspensions from
 	DisplayNameForceNickToIGN            bool              `json:"force_nick_to_ign"`                        // Force nicknames to be the same as the in-game name
 	DisplayNameInUseNotifications        bool              `json:"display_name_in_use_notifications"`        // Display name in use notification on nick change
+	EnableGlobalPingForServers           bool              `json:"enable_global_ping_for_servers"`           // Enable global ping for servers (they will be in all pools for ping checks)
 }
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {
