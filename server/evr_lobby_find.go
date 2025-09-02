@@ -539,6 +539,13 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 		return fmt.Errorf("Error listing game servers: %v", err)
 	}
 
+	// Include any global game servers
+	globalPresences, err := p.nk.StreamUserList(StreamModeGameServer, uuid.Nil.String(), "", "", false, true)
+	if err != nil {
+		return fmt.Errorf("Error listing global game servers: %v", err)
+	}
+	presences = append(presences, globalPresences...)
+
 	endpointMap := make(map[string]evr.Endpoint, len(presences))
 	hostIPs := make([]string, 0, len(presences))
 	for _, presence := range presences {
