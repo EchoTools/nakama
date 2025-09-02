@@ -174,6 +174,15 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 		return errors.New("failed to send lobby session success to game server")
 	}
 
+	if ServiceSettings().PingServerBeforeJoin {
+		// Send a ping request to the client to measure latency to the game server.
+		if err := SendEVRMessages(session, true, evr.NewLobbyPingRequest(250, []evr.Endpoint{label.GameServer.Endpoint})); err != nil {
+			return fmt.Errorf("failed to send ping request: %v", err)
+		}
+		// Wait a short moment to allow the client to process the ping request before sending the join acceptance.
+		<-time.After(125 * time.Millisecond)
+	}
+
 	// Send the lobby session success message to the game client.
 	<-time.After(150 * time.Millisecond)
 
