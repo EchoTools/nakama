@@ -47,6 +47,7 @@ type ServiceSettingsData struct {
 	EnableSessionDebug                    bool                      `json:"enable_session_debug"`
 	version                               string
 	serviceStatusMessage                  string
+	PingServerBeforeJoin                  bool `json:"ping_server_before_join"` // Ping the server before joining to measure latency
 }
 
 type PruneSettings struct {
