@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, session server.Session, params *LobbySessionParameters) (MatchID, error) {
+func (p *Pipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, session server.Session, params *LobbySessionParameters) (MatchID, error) {
 	nk := p.nk
 
 	// Do authorization checks related to the guild.

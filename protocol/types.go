@@ -14,7 +14,7 @@ type LoginIdentifier interface {
 
 type XPIdentifier interface {
 	LoginIdentifier
-	GetEvrID() XPID
+	GetXPID() XPID
 }
 
 type LobbySessionMessage interface {

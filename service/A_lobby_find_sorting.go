@@ -16,7 +16,7 @@ type backfillSortItem struct {
 	withinRatingRange bool
 }
 
-func (p *EvrPipeline) sortBackfillOptions(filteredMatches []*MatchLabelMeta, lobbyParams *LobbySessionParameters) []*MatchLabelMeta {
+func (p *Pipeline) sortBackfillOptions(filteredMatches []*MatchLabelMeta, lobbyParams *LobbySessionParameters) []*MatchLabelMeta {
 
 	var (
 		partySize     = lobbyParams.GetPartySize()

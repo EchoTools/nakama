@@ -18,7 +18,7 @@ type NextMatchMetadata struct {
 }
 
 // lobbyJoinSessionRequest is a request to join a specific existing session.
-func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session *sessionEVR, lobbyParams *LobbySessionParameters, matchID MatchID) error {
+func (p *Pipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session *sessionEVR, lobbyParams *LobbySessionParameters, matchID MatchID) error {
 
 	label, err := MatchLabelByID(ctx, p.nk, matchID)
 	if err != nil {
@@ -63,7 +63,12 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 			// Delay sending the error message to the client.
 			// There are situations where the client will spam the server with join requests.
 			<-time.After(3 * time.Second)
-			if err := SendEVRMessages(session, false, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
+			if err := session.SendEVR(Envelope{
+				ServiceType: ServiceTypeLobby,
+				Messages: []evr.Message{
+					LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err),
+				},
+			}); err != nil {
 				logger.Debug("Failed to send error message", zap.Error(err))
 			}
 		}()

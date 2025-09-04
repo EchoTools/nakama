@@ -58,7 +58,7 @@ func (m *LobbyPlayerSessionsRequest) GetLoginSessionID() uuid.UUID {
 	return m.LoginSessionID
 }
 
-func (m *LobbyPlayerSessionsRequest) GetEvrID() XPID {
+func (m *LobbyPlayerSessionsRequest) GetXPID() XPID {
 	return m.EvrId
 }
 

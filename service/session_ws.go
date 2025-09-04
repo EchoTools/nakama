@@ -2,9 +2,7 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strings"
 	"sync"
 
 	evr "github.com/echotools/nakama/v3/protocol"
@@ -83,41 +81,33 @@ type sessionEVR struct {
 	outgoingCh chan Envelope
 	closeMu    sync.Mutex
 
-	pipeline *EvrPipeline
+	pipeline *Pipeline
 
+	// TODO relayOutgoing should be a slice of message types the user wants relayed to them.
 	relayOutgoing bool // The user wants (some) outgoing messages relayed to them via discord
 	debug         bool // The user wants debug information
 
-	xpid                    evr.XPID
-	profile                 *atomic.Pointer[EVRProfile]                  // The account profile
-	loginPayload            *evr.LoginProfile                            // The login payload
-	ipInfo                  IPInfo                                       // The IP information
-	matchmakingSettings     *MatchmakingSettings                         // The matchmaking settings
-	displayNames            *DisplayNameHistory                          // The display name history
-	guildGroups             map[string]*GuildGroup                       // map[string]*GuildGroup
-	earlyQuitConfig         *atomic.Pointer[EarlyQuitConfig]             // The early quit config
-	isGoldNameTag           *atomic.Bool                                 // If this user should have a gold name tag
-	lastMatchmakingError    *atomic.Error                                // The last matchmaking error
-	latencyHistory          *atomic.Pointer[LatencyHistory]              // The latency history
-	isIGPOpen               *atomic.Bool                                 // The user has IGPU open
-	activeSuspensionRecords map[string]map[string]GuildEnforcementRecord // The active suspension records map[groupID]map[userID]GuildEnforcementRecord
+	xpid evr.XPID
 }
 
-func NewSessionWSEVR(logger *zap.Logger, config server.Config, sessionID, userID uuid.UUID, username string, xpid evr.XPID, loginPayload *evr.LoginProfile, vars map[string]string, clientIP, clientPort string, ipInfo IPInfo, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, service *serviceWS, sessionRegistry server.SessionRegistry, statusRegistry server.StatusRegistry, matchmaker server.Matchmaker, tracker server.Tracker, metrics server.Metrics, runtime *server.Runtime, evrPipeline *EvrPipeline) *sessionEVR {
+func NewSessionWSEVR(logger *zap.Logger, config server.Config, sessionID, userID uuid.UUID, params SessionParameters, vars map[string]string, clientIP, clientPort string, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, service *serviceWS, sessionRegistry server.SessionRegistry, statusRegistry server.StatusRegistry, matchmaker server.Matchmaker, tracker server.Tracker, metrics server.Metrics, runtime *server.Runtime, pipeline *Pipeline) *sessionEVR {
 
 	ctx, ctxCancelFn := context.WithCancel(context.Background())
 	logger = logger.With(
 		zap.String("sid", sessionID.String()),
 		zap.String("uid", userID.String()),
-		zap.String("username", username),
-		zap.String("xpid", xpid.String()))
+		zap.String("username", params.UserID()),
+		zap.String("xpid", params.xpID.String()))
+
+	// Store the session parameters in the context for access by services.
+	ctx = context.WithValue(ctx, ctxSessionParametersKey{}, atomic.NewPointer(&params))
 
 	return &sessionEVR{
 		logger:               logger,
 		config:               config,
 		id:                   sessionID,
 		userID:               userID,
-		username:             atomic.NewString(username),
+		username:             atomic.NewString(params.profile.Username()),
 		vars:                 vars,
 		clientIP:             clientIP,
 		clientPort:           clientPort,
@@ -140,23 +130,10 @@ func NewSessionWSEVR(logger *zap.Logger, config server.Config, sessionID, userID
 		incomingCh: make(chan []byte, config.GetSocket().OutgoingQueueSize),
 		outgoingCh: make(chan Envelope, config.GetSocket().OutgoingQueueSize),
 
-		pipeline: evrPipeline,
-
-		xpid:                    xpid,
-		profile:                 atomic.NewPointer[EVRProfile](nil),
-		loginPayload:            loginPayload,
-		ipInfo:                  ipInfo,
-		matchmakingSettings:     nil,
-		displayNames:            nil,
-		relayOutgoing:           false,
-		debug:                   false,
-		earlyQuitConfig:         atomic.NewPointer[EarlyQuitConfig](nil),
-		isGoldNameTag:           atomic.NewBool(false),
-		lastMatchmakingError:    atomic.NewError(nil),
-		latencyHistory:          atomic.NewPointer[LatencyHistory](nil),
-		isIGPOpen:               atomic.NewBool(false),
-		guildGroups:             make(map[string]*GuildGroup),
-		activeSuspensionRecords: make(map[string]map[string]GuildEnforcementRecord),
+		pipeline:      pipeline,
+		xpid:          params.xpID,
+		relayOutgoing: false,
+		debug:         false,
 	}
 }
 
@@ -208,7 +185,6 @@ func (s *sessionEVR) Consume() {
 
 	go s.processOutgoing()
 	var reason string
-	var symbolErr = errors.New("unknown message type")
 	var data []byte
 IncomingLoop:
 	for {
@@ -218,10 +194,6 @@ IncomingLoop:
 		case data = <-s.incomingCh:
 			messages, err := evr.ParsePacket(data)
 			if err != nil {
-				if errors.As(err, symbolErr) {
-					s.logger.Debug("Received unknown message", zap.Error(err))
-					continue
-				}
 				// If the payload is malformed the client is incompatible or misbehaving, either way disconnect it now.
 				s.logger.Warn("Received malformed payload", zap.Binary("data", data), zap.Error(err))
 				reason = "received malformed payload"
@@ -234,6 +206,11 @@ IncomingLoop:
 					logger = logger.With(zap.String("request", fmt.Sprintf("%s", message)))
 					logger.Debug("Received message")
 				}
+				if _, ok := message.(*evr.UnimplementedMessage); ok {
+					logger.Warn("Received unimplemented message", zap.Any("message", message))
+					continue // skip unimplemented messages
+				}
+
 				// Send to the Evr pipeline for routing/processing.
 				if !s.pipeline.ProcessRequest(logger, s, message) {
 					reason = "error processing message"
@@ -413,21 +390,6 @@ func (s *sessionEVR) AddService(serviceType ServiceType, service *serviceWS) err
 	return nil
 }
 
-func (s *sessionEVR) DiscordID() string {
-	if s.Profile() == nil {
-		return ""
-	}
-	return s.Profile().DiscordID()
-}
-
-func (s *sessionEVR) Profile() *EVRProfile {
-	return s.profile.Load()
-}
-
-func (s *sessionEVR) SetProfile(profile *EVRProfile) {
-	s.profile.Store(profile)
-}
-
 func (s *sessionEVR) SendEVR(envelope Envelope) error {
 	select {
 	case s.outgoingCh <- envelope:
@@ -436,74 +398,4 @@ func (s *sessionEVR) SendEVR(envelope Envelope) error {
 		// The outgoing queue is full, likely because the remote client can't keep up.
 		return server.ErrSessionQueueFull
 	}
-}
-
-func (s *sessionEVR) IsVR() bool {
-	return s.loginPayload.SystemInfo.HeadsetType != "No VR"
-}
-
-func (s *sessionEVR) IsPCVR() bool {
-	return s.loginPayload.BuildNumber != evr.StandaloneBuildNumber
-}
-
-func (s *sessionEVR) BuildNumber() evr.BuildNumber {
-	return s.loginPayload.BuildNumber
-}
-
-func (s *sessionEVR) IsWebsocketAuthenticated() bool {
-	return s.vars["auth_discord_id"] != ""
-}
-func (s *sessionEVR) MetricsTags() map[string]string {
-	return map[string]string{
-		"websocket_auth": fmt.Sprintf("%t", s.vars["auth_discord_id"] != ""),
-		"is_vr":          fmt.Sprintf("%t", s.IsVR()),
-		"is_pcvr":        fmt.Sprintf("%t", s.IsPCVR()),
-		"build_version":  fmt.Sprintf("%d", s.BuildNumber()),
-		"device_type":    s.DeviceType(),
-	}
-}
-
-func (s *sessionEVR) DeviceType() string {
-	return normalizeHeadsetType(s.loginPayload.SystemInfo.HeadsetType)
-}
-
-func (s *sessionEVR) UserDisplayNameOverride() string {
-	return s.vars["user_display_name_override"]
-}
-
-func (s *sessionEVR) GeoHash() string {
-	if s.ipInfo == nil {
-		return ""
-	}
-	return s.ipInfo.GeoHash(2)
-}
-
-func (s *sessionEVR) SupportedFeatures() []string {
-	if s.vars["features"] == "" {
-		return nil
-	}
-	return strings.Split(s.vars["features"], ",")
-}
-
-func (s *sessionEVR) RequiredFeatures() []string {
-	if s.vars["required_features"] == "" {
-		return nil
-	}
-	return strings.Split(s.vars["required_features"], ",")
-}
-
-func (s *sessionEVR) DisableEncryption() bool {
-	return s.vars["disable_encryption"] == "true"
-}
-
-func (s *sessionEVR) DisableMAC() bool {
-	return s.vars["disable_mac"] == "true"
-}
-
-func (s *sessionEVR) IsIGPOpen() bool {
-	return s.isIGPOpen.Load()
-}
-
-func (s *sessionEVR) IsVPN() bool {
-	return s.vars["is_vpn"] == "true"
 }

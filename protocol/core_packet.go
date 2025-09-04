@@ -54,7 +54,7 @@ var (
 		0x7777777777770600: (*GameServerJoinAllowed)(nil),             // Legacy message
 		0x7777777777770700: (*GameServerJoinRejected)(nil),            // Legacy message
 		0x7777777777770800: (*GameServerPlayerRemoved)(nil),           // Legacy message
-		0x7777777777777777: (*BroadcasterRegistrationRequest)(nil),    // Legacy message
+		0x7777777777777777: (*GameServerRegistrationRequest)(nil),     // Legacy message
 		0x82869f0b37eb4378: (*ConfigRequest)(nil),
 		0xb9cdaf586f7bd012: (*ConfigSuccess)(nil),
 		0x9e687a63dddd3870: (*ConfigFailure)(nil),
@@ -195,7 +195,7 @@ type Message interface {
 // Marshal returns the wire-format encoding of multiple messages.
 func Marshal(msgs ...Message) ([]byte, error) {
 	var errs error
-	b := make([]byte, 0)
+	b := make([]byte, 0, 1024)
 	for _, m := range msgs {
 		// Encode the message.
 		s := NewEasyStream(EncodeMode, []byte{})
@@ -221,8 +221,7 @@ func Marshal(msgs ...Message) ([]byte, error) {
 }
 
 func WrapBytes(symbol Symbol, data []byte) ([]byte, error) {
-	b := make([]byte, 0)
-
+	b := make([]byte, 0, 16+len(data))
 	// Write the Header (Marker + Symbol + Data Length)
 	b = append(b, MessageMarker...)
 	b = appendUint64(b, uint64(symbol))

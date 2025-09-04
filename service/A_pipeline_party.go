@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (p *EvrPipeline) processPartyMessage(logger *zap.Logger, session server.Session, in *nkrtapi.Envelope) (err error) {
+func (p *Pipeline) processPartyMessage(logger *zap.Logger, session server.Session, in *nkrtapi.Envelope) (err error) {
 
 	// If this is the party leader, then update the label with the party message contents.
 

@@ -23,6 +23,7 @@ var (
 	ErrDeviceLinkMismatch      = errors.New("device linked to a different account")
 	ErrMissingDiscordID        = errors.New("missing Discord ID for authentication")
 	ErrMissingPassword         = errors.New("missing password for Discord authentication")
+	ErrInvalidXPID             = errors.New("invalid XPID format")
 	ErrGetAccount              = errors.New("error getting account")
 	ErrFailedLinkDevice        = errors.New("failed to link device")
 	ErrLinkTicket              = errors.New("error creating link ticket")
@@ -34,52 +35,88 @@ var (
 // AuthenticateDiscordPassword authenticates a user using their Discord ID and password.
 // It also links a device (xpID) to the user's account if it is not already linked.
 // It will set a password for the account, if linked to a device and does not have one set.
-func AuthenticateDiscordPassword(ctx context.Context, logger *zap.Logger, db *sql.DB, config server.Config, statusRegistry server.StatusRegistry, xpID evr.XPID, discordID, password string) (userID string, username string, newLink bool, err error) {
-	userID, username, err = GetUserIDByDiscordID(ctx, db, discordID)
-	if err == server.ErrAccountNotFound {
-		// No account found for the given Discord ID.
-		return "", "", false, nil
-	} else if err != nil {
-		// Some other error occurred while trying to get the user ID.
-		return "", "", false, fmt.Errorf("error getting user ID by Discord ID: %w", err)
+func (p *Pipeline) authenticateSession(ctx context.Context, logger *zap.Logger, db *sql.DB, config server.Config, statusRegistry server.StatusRegistry, xpID evr.XPID, clientIP string, loginPayload *evr.LoginProfile, discordID, password string) (profile *EVRProfile, err error) {
+
+	var (
+		userID   string
+		username string
+	)
+
+	if discordID != "" {
+		if password == "" {
+			// Password is required for Discord authentication.
+			return nil, ErrMissingPassword
+		}
+		_, username, err = GetUserIDByDiscordID(ctx, db, discordID)
+		if err != nil && err != server.ErrAccountNotFound {
+			// Some other error occurred while trying to get the user ID.
+			return nil, fmt.Errorf("error getting user ID by Discord ID: %w", err)
+		}
+
+		// Authenticate the user with password.
+		userID, err = server.AuthenticateUsername(ctx, logger, db, username, password)
+		if err != nil && status.Code(err) != codes.Unauthenticated {
+			logger.Warn("Username/password authentication failed.", zap.Error(err), zap.String("discord_id", discordID))
+			return nil, err
+		}
 	}
+	isPasswordAuthenticated := userID != "" // If userID is set, password authentication succeeded.
 
 	// Check if the device is linked to the account.
-	ownerID, ownerUsername, _, err := server.AuthenticateDevice(ctx, logger, db, xpID.String(), "", false)
-	if status.Code(err) == codes.NotFound {
-		// Device is not linked to an account. Link it to this one
-		if err := server.LinkDevice(ctx, logger, db, uuid.FromStringOrNil(userID), xpID.String()); err != nil {
-			return "", "", false, fmt.Errorf("failed to link device: %w", err)
-		}
-		return userID, username, true, nil
-	} else if err != nil {
-		return "", "", false, fmt.Errorf("error authenticating device: %w", err)
-	} else if ownerID != userID {
-		// Device is linked to a different account.
-		logger.Warn("Device is linked to a different account.", zap.String("device_user_id", ownerID), zap.String("session_user_id", userID))
-		return ownerID, ownerUsername, false, ErrDeviceLinkMismatch
+	deviceUserID, _, deviceErr := AuthenticateXPID(ctx, logger, db, statusRegistry, xpID)
+	if err != nil && err != ErrDeviceNotLinked {
+		// Some other error occurred while trying to authenticate the device.
+		return nil, fmt.Errorf("error authenticating device: %w", deviceErr)
 	}
 
-	// Get the account
-	account, err := server.GetAccount(ctx, logger, db, statusRegistry, uuid.FromStringOrNil(userID))
+	if deviceErr == ErrDeviceNotLinked && !isPasswordAuthenticated {
+		// Device is not linked to an account, and Discord did not return a user ID.
+		return nil, ErrDeviceNotLinked
+	}
+
+	if isPasswordAuthenticated && userID != deviceUserID {
+		// Device is linked to a different account.
+		logger.Warn("Device is linked to a different account.", zap.String("device_user_id", deviceUserID), zap.String("session_user_id", userID))
+		return nil, ErrDeviceLinkMismatch
+	}
+
+	// At this point, either the device is linked to the account, or Discord authentication succeeded.
+	userID = deviceUserID
+
+	profile, err = EVRProfileLoad(ctx, p.nk, deviceUserID)
 	if err != nil {
-		return "", "", false, fmt.Errorf("error getting account: %w", err)
-	} else if account.Email == "" {
+		return nil, fmt.Errorf("failed to load user profile")
+	}
+
+	if profile.HasPasswordSet() && !isPasswordAuthenticated {
+		// Account requires password authentication.
+		return profile, ErrAccountRequiresPassword
+	}
+
+	// Authorize the client IP.
+	if err := p.authorizeClientIP(ctx, logger, profile, xpID, clientIP, loginPayload, isPasswordAuthenticated); err != nil {
+		return profile, err
+	}
+
+	if profile.IsDisabled() {
+		return profile, &AuthenticationError{
+			Tag: "account_disabled",
+			Message: strings.Join([]string{
+				"Account Disabled",
+				"Report issues to " + ServiceSettings().ReportURL,
+			}, "\n"),
+		}
+	}
+
+	if discordID != "" && password != "" && !profile.HasPasswordSet() {
 		// Account does not have a password set, set it.
 		placeholderEmail := config.GetRuntime().Environment[EnvVarPlaceholderEmailDomain]
 		if err := server.LinkEmail(ctx, logger, db, uuid.FromStringOrNil(userID), userID+"@"+placeholderEmail, password); err != nil {
-			return "", "", false, fmt.Errorf("failed to link email: %w", err)
+			return nil, fmt.Errorf("failed to link email: %w", err)
 		}
-		return userID, username, false, nil
 	}
 
-	// Account has a password set. Authenticate to verify.
-	if _, err := server.AuthenticateUsername(ctx, logger, db, username, password); err != nil {
-		logger.Warn("Username/password authentication failed.", zap.Error(err), zap.String("discord_id", discordID))
-		return "", "", false, err
-	}
-
-	return userID, username, false, nil
+	return profile, nil
 }
 
 func AuthenticateXPID(ctx context.Context, logger *zap.Logger, db *sql.DB, statusRegistry server.StatusRegistry, xpID evr.XPID) (userID string, username string, err error) {
@@ -108,21 +145,17 @@ func (e *AuthenticationError) Unwrap() error {
 	return e.Wrapped
 }
 
-func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, xpID evr.XPID, loginPayload *evr.LoginProfile, profile *EVRProfile, ipInfo IPInfo, clientIP, systemUnavailableMessage, reportURL string, isPasswordAuthenticated bool) error {
+func (p *Pipeline) authorizeClientIP(ctx context.Context, logger *zap.Logger, profile *EVRProfile, xpID evr.XPID, clientIP string, loginPayload *evr.LoginProfile, autoAuthorize bool) error {
 
-	// Check if the system is temporarily unavailable.
-	if msg := ServiceSettings().DisableLoginMessage; msg != "" {
-		return &AuthenticationError{
-			Tag:     "system_unavailable",
-			Message: "System is Temporarily Unavailable:\n" + msg,
-		}
-	}
 	// Load the login history for audit purposes.
 	loginHistory := NewLoginHistory(profile.ID())
 	if err := StorableReadNk(ctx, p.nk, profile.ID(), loginHistory, true); err != nil {
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
-
+	ipInfo, err := p.ipInfoCache.Get(ctx, clientIP)
+	if err != nil {
+		logger.Warn("Failed to get IP info", zap.String("ip", clientIP), zap.Error(err))
+	}
 	// Check if the IP is on the deny list.
 	if userIDs, err := LoginDeniedClientIPAddressSearch(ctx, p.nk, clientIP); err != nil {
 		return &AuthenticationError{
@@ -135,24 +168,13 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 			Tag: "ip_deny_list",
 			Message: strings.Join([]string{
 				"Account disabled by EchoVRCE Admins",
-				"Report issues to " + reportURL,
-			}, "\n"),
-		}
-	}
-
-	// The account is now authenticated. Authorize the session.
-	if profile.IsDisabled() {
-		return &AuthenticationError{
-			Tag: "account_disabled",
-			Message: strings.Join([]string{
-				"Account Disabled",
-				"Report issues to " + reportURL,
+				"Report issues to " + ServiceSettings().ReportURL,
 			}, "\n"),
 		}
 	}
 
 	// If IP is already authorized or user is password authenticated, allow access
-	if authorized := loginHistory.IsAuthorizedIP(clientIP); authorized || isPasswordAuthenticated {
+	if authorized := loginHistory.IsAuthorizedIP(clientIP); authorized || autoAuthorize {
 		// Update the last used time for this IP
 		if isNew := loginHistory.AuthorizeIP(clientIP); isNew {
 			if err := SendIPAuthorizationNotification(p.discordCache.dg, profile.ID(), clientIP); err != nil {
@@ -163,32 +185,19 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		return nil
 	}
 
-	// Require IP verification, if the session is not authenticated.
-	if !loginHistory.IsAuthorizedIP(clientIP) {
-		// IP is not authorized. Add a pending authorization entry.
-		entry := loginHistory.AddPendingAuthorizationIP(xpID, clientIP, loginPayload)
-		if err := StorableWriteNk(ctx, p.nk, profile.ID(), loginHistory); err != nil {
-			return fmt.Errorf("failed to load login history: %w", err)
-		}
-
-		// Use the last two digits of the nanos seconds as the 2FA code.
-		activeGroupID := profile.GetActiveGroupID().String()
-		discordID := profile.DiscordID()
-		return p.SendIPApprovalRequest(ctx, profile.ID(), discordID, entry, ipInfo, activeGroupID)
+	// IP is not authorized. Add a pending authorization entry.
+	entry := loginHistory.AddPendingAuthorizationIP(xpID, clientIP, loginPayload)
+	if err := StorableWriteNk(ctx, p.nk, profile.ID(), loginHistory); err != nil {
+		return fmt.Errorf("failed to load login history: %w", err)
 	}
 
-	SendEvent(ctx, p.nk, &EventUserAuthenticated{
-		UserID:                   profile.ID(),
-		XPID:                     xpID,
-		ClientIP:                 clientIP,
-		LoginPayload:             loginPayload,
-		IsWebSocketAuthenticated: isPasswordAuthenticated,
-	})
-
-	return nil
+	// Use the last two digits of the nanos seconds as the 2FA code.
+	activeGroupID := profile.GetActiveGroupID().String()
+	discordID := profile.DiscordID()
+	return p.SendIPApprovalRequest(ctx, profile.ID(), discordID, entry, ipInfo, activeGroupID)
 }
 
-func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger, session *sessionEVR, params *SessionParameters) error {
+func (p *Pipeline) initializeSessionParameters(ctx context.Context, logger *zap.Logger, userID string, params *SessionParameters) error {
 	var err error
 	serviceSettings := ServiceSettings()
 	// Enable session debugging if the account metadata or global settings have Debug set.
@@ -242,37 +251,23 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		metadataUpdated = true
 	}
 
-	if ismember, err := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalDevelopers); err != nil {
-		metricsTags["error"] = "group_check_failed"
-		return fmt.Errorf("failed to check system group membership: %w", err)
-	} else if ismember {
-		params.isGlobalDeveloper = true
-		params.isGlobalOperator = true
-
-	} else if ismember, err := CheckSystemGroupMembership(ctx, p.db, params.profile.UserID(), GroupGlobalOperators); err != nil {
-		metricsTags["error"] = "group_check_failed"
-		return fmt.Errorf("failed to check system group membership: %w", err)
-	} else if ismember {
-		params.isGlobalOperator = true
-	}
-
 	// Update in-memory account metadata for guilds that the user has
 	// the force username role.
 	for groupID, gg := range params.guildGroups {
-		if gg.HasRole(session.userID.String(), gg.RoleMap.UsernameOnly) {
+		if gg.HasRole(userID, gg.RoleMap.UsernameOnly) {
 			params.profile.SetGroupDisplayName(groupID, params.profile.Username())
 		}
 	}
 
 	latencyHistory := &LatencyHistory{}
-	if err := p.nevr.StorableRead(ctx, session.userID.String(), latencyHistory, true); err != nil {
+	if err := p.nevr.StorableRead(ctx, userID, latencyHistory, true); err != nil {
 		metricsTags["error"] = "failed_load_latency_history"
 		return fmt.Errorf("failed to load latency history: %w", err)
 	}
 	params.latencyHistory.Store(latencyHistory)
 
 	// Load the display name history for the player.
-	displayNameHistory, err := DisplayNameHistoryLoad(ctx, p.nk, session.userID.String())
+	displayNameHistory, err := DisplayNameHistoryLoad(ctx, p.nk, userID)
 	if err != nil {
 		logger.Warn("Failed to load display name history", zap.Error(err))
 		return fmt.Errorf("failed to load display name history: %w", err)
@@ -283,12 +278,14 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		// Default to the username, or whatever was last used.
 		groupIGN := params.profile.GetGroupIGNData(groupID)
 
-		if params.userDisplayNameOverride != "" {
-			// If the user has provided a display name override, use that.
-			groupIGN.DisplayName = params.userDisplayNameOverride
-			groupIGN.IsOverride = true
-		}
-
+		// TODO FIXME: Need to move this to a context or something.
+		/*
+			if params.userDisplayNameOverride != "" {
+				// If the user has provided a display name override, use that.
+				groupIGN.DisplayName = params.userDisplayNameOverride
+				groupIGN.IsOverride = true
+			}
+		*/
 		if groupIGN.DisplayName == "" {
 			// Use the latest in-game name from the display name history.
 			if dn, _ := displayNameHistory.LatestGroup(groupID); dn != "" {
@@ -359,11 +356,11 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	activeGroupDisplayName := params.profile.GetGroupIGN(params.profile.ActiveGroupID)
 	displayNameHistory.Update(params.profile.ActiveGroupID, activeGroupDisplayName, params.profile.Username(), true)
 
-	if err := p.nevr.StorableWrite(ctx, session.userID.String(), displayNameHistory); err != nil {
+	if err := p.nevr.StorableWrite(ctx, userID, displayNameHistory); err != nil {
 		return fmt.Errorf("error writing display name history: %w", err)
 	}
 
-	if settings, err := LoadMatchmakingSettings(ctx, p.nk, session.userID.String()); err != nil {
+	if settings, err := LoadMatchmakingSettings(ctx, p.nk, userID); err != nil {
 		logger.Warn("Failed to load matchmaking settings", zap.Error(err))
 		return fmt.Errorf("failed to load matchmaking settings: %w", err)
 	} else {
@@ -407,7 +404,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		}
 
 		if updated {
-			if err := StoreMatchmakingSettings(ctx, p.nk, session.userID.String(), settings); err != nil {
+			if err := StoreMatchmakingSettings(ctx, p.nk, userID, settings); err != nil {
 				logger.Warn("Failed to save matchmaking settings", zap.Error(err))
 				return fmt.Errorf("failed to save matchmaking settings: %w", err)
 			}

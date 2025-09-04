@@ -2,6 +2,7 @@ package evr
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 )
 
@@ -9,14 +10,14 @@ import (
 type ConfigSuccess struct {
 	Type     Symbol
 	Id       Symbol
-	Resource any
+	Resource json.RawMessage
 }
 
 func (m ConfigSuccess) String() string {
 	return fmt.Sprintf("%T(type=%v, id=%v)", m, m.Type, m.Id)
 }
 
-func NewConfigSuccess(_type string, id string, resource any) *ConfigSuccess {
+func NewConfigSuccess(_type string, id string, resource json.RawMessage) *ConfigSuccess {
 	return &ConfigSuccess{
 		Type:     ToSymbol(_type),
 		Id:       ToSymbol(id),
@@ -28,7 +29,7 @@ func (m *ConfigSuccess) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Type) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Id) },
-		func() error { return s.StreamJson(&m.Resource, true, ZstdCompression) },
+		func() error { return s.StreamJSONRawMessage(&m.Resource, true, ZstdCompression) },
 	})
 }
 
@@ -74,11 +75,12 @@ const (
 		"discord_link": "https://en.wikipedia.org/wiki/Lone_Echo"
 		}`
 	DefaultActiveBattlePassSeasonConfigResource string = `{
-		"learn_more_link": null,
-		"archives": {
-			"marketing_menu": null,
-			"marketing_lobby": null
-		},
+			"learn_more_link": null,
+			"archives": {
+				"marketing_menu": null,
+				"marketing_lobby": null
+				},
+		"type": "active_battle_pass_season"
 		"id": "active_battle_pass_season",
 		"offseason": false,
 		"days_remaining_to_trigger_upsell": 0,
@@ -123,7 +125,6 @@ const (
 		"menu_link": null,
 		"bp_xp_boost_reward_party": 0,
 		"title": "Echo Pass",
-		"type": "active_battle_pass_season"
 	}`
 
 	DefaultActiveStoreEntryConfigResource string = `{

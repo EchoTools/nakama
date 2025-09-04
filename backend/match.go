@@ -836,17 +836,6 @@ func (m *NEVRMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db
 
 	if state != nil {
 
-		/*
-			// Send return to lobby message.
-			if s := nk.(*server.RuntimeGoNakamaModule).sessionRegistry.Get(uuid.FromStringOrNil(state.server.GetSessionId())); s != nil {
-				if err := service.SendEVRMessages(s, false, &evr.NEVRLobbyReturnToLobbyV1{}); err != nil {
-					logger.Warn("Failed to send return to lobby message: %v", err)
-				} else {
-					logger.Debug("Sent return to lobby message to game server.")
-				}
-			}
-		*/
-
 		entrantIDs := make([]uuid.UUID, 0, len(state.Presences))
 
 		for _, mp := range state.Presences {

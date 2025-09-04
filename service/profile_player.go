@@ -26,8 +26,6 @@ const (
 // PlayerProfile is a wrapper around evr.ServerProfile to implement StorableIndexer
 type PlayerProfile struct {
 	evr.ServerProfile
-	// internal metadata for storage
-	meta StorableMetadata
 }
 
 func (h *PlayerProfile) GuildGroupID() string {
@@ -73,13 +71,13 @@ func NewPlayerProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, 
 		cosmetics[m] = make(map[string]bool, len(c))
 		maps.Copy(cosmetics[m], c)
 	}
-	cosmetics = walletToCosmetics(wallet, cosmetics)
+	cosmetics = CosmeticsFromWallet(wallet, cosmetics)
 
 	cosmeticLoadout := evrProfile.LoadoutCosmetics.Loadout
 	// If the player has "kissy lips" emote equipped, set their emote to default.
 	if cosmeticLoadout.Emote == "emote_kissy_lips_a" {
 		cosmeticLoadout.Emote = "emote_blink_smiley_a"
-		cosmeticLoadout.SecondEmote = "emote_blink_smiley_a"
+		cosmeticLoadout.SecondEmote = cosmeticLoadout.Emote
 	}
 
 	var developerFeatures *evr.DeveloperFeatures

@@ -40,7 +40,6 @@ func (s StorableMetadata) String() string {
 
 // Storable defines the interface for objects that can be indexed within the storage system.
 type StorableIndexer interface {
-	StorableAdapter
 	StorageIndexes() []StorableIndexMeta
 }
 

@@ -30,7 +30,7 @@ func init() {
 
 }
 
-func walletToCosmetics(wallet map[string]int64, unlocks map[string]map[string]bool) map[string]map[string]bool {
+func CosmeticsFromWallet(wallet map[string]int64, unlocks map[string]map[string]bool) map[string]map[string]bool {
 	if unlocks == nil {
 		unlocks = make(map[string]map[string]bool)
 	}

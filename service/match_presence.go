@@ -24,8 +24,7 @@ func init() {
 // Represents identity information for a single match participant.
 type LobbyPresence struct {
 	Node              string       `json:"node,omitempty"`
-	SessionID         uuid.UUID    `json:"session_id,omitempty"`       // The Player's "match" connection session ID
-	LoginSessionID    uuid.UUID    `json:"login_session_id,omitempty"` // The Player's "login" connection session ID
+	SessionID         uuid.UUID    `json:"session_id,omitempty"`
 	UserID            uuid.UUID    `json:"user_id,omitempty"`
 	XPID              evr.XPID     `json:"evr_id,omitempty"`
 	DiscordID         string       `json:"discord_id,omitempty"`
@@ -77,7 +76,7 @@ func (p LobbyPresence) GetStatus() string {
 func (p *LobbyPresence) GetReason() runtime.PresenceReason {
 	return runtime.PresenceReasonUnknown
 }
-func (p LobbyPresence) GetEvrID() string {
+func (p LobbyPresence) GetXPID() string {
 	return p.XPID.String()
 }
 
@@ -115,12 +114,12 @@ func EntrantPresenceFromSession(session server.Session, partyID uuid.UUID, roleA
 	if !ok {
 		return nil, errors.New("failed to get session parameters")
 	}
-
+	disableEncryption := session.Vars()["disable_encryption"] == "true"
+	disableMAC := session.Vars()["disable_mac"] == "true"
 	return &LobbyPresence{
 		Node:              params.node,
 		UserID:            session.UserID(),
 		SessionID:         session.ID(),
-		LoginSessionID:    params.loginSession.ID(),
 		Username:          session.Username(),
 		DisplayName:       params.profile.GetGroupIGN(groupID),
 		XPID:              params.xpID,
@@ -134,8 +133,8 @@ func EntrantPresenceFromSession(session server.Session, partyID uuid.UUID, roleA
 		Rating:            rating,
 		SupportedFeatures: params.supportedFeatures,
 
-		DisableEncryption: params.disableEncryption,
-		DisableMAC:        params.disableMAC,
+		DisableEncryption: disableEncryption,
+		DisableMAC:        disableMAC,
 		PingMillis:        ping,
 		Query:             query,
 	}, nil

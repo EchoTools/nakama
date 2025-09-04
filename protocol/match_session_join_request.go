@@ -139,7 +139,7 @@ func (m *LobbyJoinSessionRequest) GetLoginSessionID() uuid.UUID {
 	return m.LoginSessionID
 }
 
-func (m *LobbyJoinSessionRequest) GetEvrID() XPID {
+func (m *LobbyJoinSessionRequest) GetXPID() XPID {
 	if len(m.Entrants) == 0 {
 		return XPID{}
 	}

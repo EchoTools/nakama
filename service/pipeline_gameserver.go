@@ -62,149 +62,122 @@ func errFailedRegistration(session *sessionEVR, logger *zap.Logger, err error, c
 	return fmt.Errorf("failed to register game server: %w", err)
 }
 
-// gameserverRegistrationRequest handles the game server registration request from the game server.
-//
-// This function utilizes various URL parameters that are parsed during WebSocket session initialization.
-// For comprehensive documentation of all URL parameters, see: docs/game-server-url-parameters.md
-//
-// Key URL parameters used in this function:
-//   - discordid/discord_id: Discord user ID for authentication
-//   - password: Authentication password
-//   - serveraddr: External server address (IP:port format)
-//   - tags: Comma-delimited server tags
-//   - guilds: Comma-delimited Discord guild IDs
-//   - regions: Comma-delimited geographic regions
-//   - features: Comma-delimited supported features
-//   - geo_precision: Geohash precision (0-12)
-//   - debug: Enable debug mode
-//   - verbose: Enable verbose logging
-func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session *sessionEVR, in *rtapi.Envelope) error {
-	request := in.GetGameServerRegistration()
-	var (
-		loginSessionID = uuid.FromStringOrNil(request.LoginSessionId)
-		serverID       = request.ServerId
-		regionHash     = evr.Symbol(request.Region)
-		internalIP     = net.ParseIP(request.InternalIpAddress)
-		externalIP     = net.ParseIP(session.ClientIP())
-		externalPort   = uint16(request.Port)
-		versionLock    = evr.Symbol(request.VersionLock)
-	)
+// gameServerRegistrationParams holds all extracted and validated parameters
+type gameServerRegistrationParams struct {
+	loginSessionID uuid.UUID
+	serverID       uint64
+	regionHash     evr.Symbol
+	internalIP     net.IP
+	externalIP     net.IP
+	externalPort   uint16
+	versionLock    evr.Symbol
+	isNative       bool
+	version        string
+	timeStepUsecs  uint32
+	sessionParams  SessionParameters
+	ipInfo         IPInfo
+}
 
-	isNative := false
-	if uuid.FromStringOrNil(request.LoginSessionId) != uuid.Nil {
-		isNative = true
-		logger.Info("Game server registration request", zap.String("login_session_id", loginSessionID.String()), zap.Uint64("server_id", serverID), zap.String("internal_ip", internalIP.String()), zap.Uint16("port", externalPort), zap.String("region", regionHash.String()), zap.String("version_lock", versionLock.String()), zap.Uint32("time_step_usecs", request.TimeStepUsecs), zap.String("version", request.Version))
-		if request.Version < MINIMUM_NATIVE_SERVER_VERSION {
-			logger.Warn("Game server version is below minimum required version", zap.String("version", request.Version), zap.String("minimum_version", MINIMUM_NATIVE_SERVER_VERSION))
-			return errFailedRegistration(session, logger, fmt.Errorf("game server version is below minimum required version: %s < %s", request.Version, MINIMUM_NATIVE_SERVER_VERSION), evr.BroadcasterRegistration_Unknown)
-		}
-
-		// Get the login session ID
-		loginSession := p.sessionRegistry.Get(loginSessionID)
-		if loginSession == nil {
-			return errFailedRegistration(session, logger, errors.New("failed to get login session"), evr.BroadcasterRegistration_Unknown)
-		}
-
-		if err := Secondary(session, loginSession.(*sessionEVR), true, false); err != nil {
-			return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Unknown)
-		}
+// extractAndValidateParams extracts and validates all parameters from the request and session
+func extractAndValidateParams(request *rtapi.GameServerRegistrationMessage, s *sessionEVR) (*gameServerRegistrationParams, error) {
+	if request == nil {
+		return nil, fmt.Errorf("request is nil")
 	}
 
-	if session.userID.IsNil() {
-		return errFailedRegistration(session, logger, errors.New("game server is not authenticated."), evr.BroadcasterRegistration_Unknown)
+	params := &gameServerRegistrationParams{
+		loginSessionID: uuid.FromStringOrNil(request.LoginSessionId),
+		serverID:       request.ServerId,
+		regionHash:     evr.Symbol(request.Region),
+		internalIP:     net.ParseIP(request.InternalIpAddress),
+		externalIP:     net.ParseIP(s.ClientIP()),
+		externalPort:   uint16(request.Port),
+		versionLock:    evr.Symbol(request.VersionLock),
+		version:        request.Version,
+		timeStepUsecs:  request.TimeStepUsecs,
 	}
 
-	ctx := session.Context()
-	params, ok := LoadParams(ctx)
+	// Check if this is a native server
+	params.isNative = params.loginSessionID != uuid.Nil
+
+	// Validate native server version
+	if params.isNative && params.version < MINIMUM_NATIVE_SERVER_VERSION {
+		return nil, fmt.Errorf("game server version is below minimum required version: %s < %s", params.version, MINIMUM_NATIVE_SERVER_VERSION)
+	}
+
+	// Extract session parameters
+	ctx := s.Context()
+	sessionParams, ok := LoadParams(ctx)
 	if !ok {
-		return fmt.Errorf("session parameters not provided")
+		return nil, fmt.Errorf("session parameters not provided")
+	}
+	params.sessionParams = sessionParams
+
+	return params, nil
+}
+
+// validateSessionAndUser validates the session and user authentication
+func (p *Pipeline) validateSessionAndUser(s *sessionEVR, params *gameServerRegistrationParams, logger *zap.Logger) error {
+	if s.userID.IsNil() {
+		return fmt.Errorf("game server is not authenticated")
 	}
 
-	userIDStr := session.userID.String()
+	s.tracker.TrackMulti(s.Context(), s.id, []*server.TrackerOp{
+		// EVR packet data stream for the login session by Session ID and broadcaster ID
+		{
+			Stream: server.PresenceStream{Mode: StreamModeService, Subject: s.userID, Label: StreamLabelGameServerService},
+			Meta:   server.PresenceMeta{Format: s.Format(), Username: s.username.String(), Hidden: false},
+		},
+		// EVR packet data stream by session ID and broadcaster ID
+		{
+			Stream: server.PresenceStream{Mode: StreamModeService, Subject: s.id, Label: StreamLabelGameServerService},
+			Meta:   server.PresenceMeta{Format: s.Format(), Username: s.username.String(), Hidden: false},
+		},
+	}, s.userID)
 
-	if err := BroadcasterSession(session, session.userID, "broadcaster:"+session.Username(), serverID); err != nil {
-		return fmt.Errorf("failed to create broadcaster session: %w", err)
-	}
+	return nil
+}
 
-	logger = logger.With(zap.String("uid", userIDStr), zap.String("discord_id", params.DiscordID()))
-
-	// Get a list of the user's guild memberships and set to the largest one
-	guildGroups, err := GuildUserGroupsList(ctx, p.nk, p.guildGroupRegistry, userIDStr)
-	if err != nil {
-		return fmt.Errorf("failed to get guild groups: %w", err)
-	}
+// getHostingGroupIDs filters guild groups to determine which ones this server can host for
+func getHostingGroupIDs(userID string, guildGroups map[string]*GuildGroup, sessionParams SessionParameters) ([]uuid.UUID, error) {
 	if len(guildGroups) == 0 {
-		return fmt.Errorf("user is not in any guild groups")
-	}
-
-	params.guildGroups = guildGroups
-	StoreParams(ctx, &params)
-
-	// By default, use the client's IP address as the external IP address
-
-	// If the external IP address is specified in the config.json, use it instead of the system's external IP
-	if params.externalServerAddr != "" {
-		parts := strings.Split(params.externalServerAddr, ":")
-		if len(parts) != 2 {
-			return errFailedRegistration(session, logger, fmt.Errorf("invalid external IP address: %s. it must be `ip:port`", params.externalServerAddr), evr.BroadcasterRegistration_Unknown)
-		}
-
-		// If the external IP address is not a valid IP address, look it up as a hostname
-		if externalIP = net.ParseIP(parts[0]); externalIP == nil {
-			if ips, err := net.LookupIP(parts[0]); err != nil {
-				return errFailedRegistration(session, logger, fmt.Errorf("invalid address `%s`: %w", parts[0], err), evr.BroadcasterRegistration_Unknown)
-			} else {
-				externalIP = ips[0]
-			}
-		}
-
-		// Parse the external port
-		if p, err := strconv.Atoi(parts[1]); err != nil {
-			return errFailedRegistration(session, logger, fmt.Errorf("invalid external port: %s", parts[1]), evr.BroadcasterRegistration_Unknown)
-		} else {
-			externalPort = uint16(p)
-		}
+		return nil, fmt.Errorf("user is not in any guild groups")
 	}
 
 	// Include all guilds by default, or if "any" is in the list
-	includeAll := false
-	if len(params.serverGuilds) == 0 || slices.Contains(params.serverGuilds, "any") {
-		includeAll = true
-	}
+	includeAll := len(sessionParams.serverGuilds) == 0 || slices.Contains(sessionParams.serverGuilds, "any")
 
 	// Filter the guild groups to host for
 	hostingGroupIDs := make([]uuid.UUID, 0)
 	for _, gg := range guildGroups {
-
 		// Must be a server host and not suspended
-		if !gg.IsServerHost(userIDStr) || gg.IsSuspended(userIDStr, nil) {
+		if !gg.IsServerHost(userID) || gg.IsSuspended(userID, nil) {
 			continue
 		}
 
 		// Include the group if it is in the list of server guilds, includes "any" or is empty
-		if includeAll || slices.Contains(params.serverGuilds, gg.GuildID) {
+		if includeAll || slices.Contains(sessionParams.serverGuilds, gg.GuildID) {
 			hostingGroupIDs = append(hostingGroupIDs, gg.ID())
 		}
 	}
 
-	// Configure the region codes to use for finding the game server
-	regionCodes := make([]string, 0, len(params.serverRegions))
+	return hostingGroupIDs, nil
+}
 
-	if len(params.serverRegions) == 0 {
+// buildRegionCodes constructs the region codes for server discovery
+func buildRegionCodes(regionHash evr.Symbol, sessionParams SessionParameters, ipInfo IPInfo) []string {
+	regionCodes := make([]string, 0, len(sessionParams.serverRegions))
+
+	if len(sessionParams.serverRegions) == 0 {
 		regionCodes = append(regionCodes, "default")
 	}
 
 	// Add the server regions specified in the config.json
-	for _, r := range params.serverRegions {
-		regionCodes = append(regionCodes, r)
-	}
+	regionCodes = append(regionCodes, sessionParams.serverRegions...)
 
 	switch regionHash {
-
 	// If the region is unspecified, use the default region, otherwise use the region hash passed on the command line
 	case evr.UnspecifiedRegion, 0:
 		regionCodes = append(regionCodes, "default")
-
 	default:
 		regionCodes = append(regionCodes, regionHash.String())
 	}
@@ -214,47 +187,66 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		regionCodes = regionCodes[:10]
 	}
 
-	// Truncate all region codes to 16 characters
+	// Truncate all region codes to 32 characters
 	for i, r := range regionCodes {
+		slices.Sort(regionCodes)
 		if len(r) > 32 {
 			regionCodes[i] = r[:32]
 		}
 	}
 
-	logger = logger.With(zap.Any("group_ids", hostingGroupIDs), zap.Strings("tags", params.serverTags), zap.Strings("regions", regionCodes))
+	// Add IP-based region codes if available
+	if slices.Contains(regionCodes, "default") {
+		regionCodes = append(regionCodes,
+			LocationToRegionCode(ipInfo.CountryCode(), ipInfo.Region(), ipInfo.City()),
+			LocationToRegionCode(ipInfo.CountryCode(), ipInfo.Region(), ""),
+			LocationToRegionCode(ipInfo.CountryCode(), "", ""),
+		)
+	}
 
-	// Add the server id, as displayed by the game server once registered (i.e. "0x5A700FE2D34D5B6D")
-	regionCodes = append(regionCodes, fmt.Sprintf("0x%x", serverID))
+	return regionCodes
+}
 
-	var ipInfo IPInfo
-	if p.ipInfoCache != nil {
-		ipInfo, err = p.ipInfoCache.Get(ctx, externalIP.String())
-		if err != nil {
-			logger.Warn("Failed to get IPQS data", zap.Error(err))
+// resolveExternalAddress handles external IP and port resolution including DNS lookup
+func resolveExternalAddress(params *gameServerRegistrationParams) (net.IP, uint16, error) {
+	externalIP := params.externalIP
+	externalPort := params.externalPort
+
+	// If the external IP address is specified in the config.json, use it instead of the system's external IP
+	if params.sessionParams.externalServerAddr != "" {
+		parts := strings.Split(params.sessionParams.externalServerAddr, ":")
+		if len(parts) != 2 {
+			return nil, 0, fmt.Errorf("invalid external IP address: %s. it must be `ip:port`", params.sessionParams.externalServerAddr)
 		}
-		if slices.Contains(regionCodes, "default") {
-			regionCodes = append(regionCodes,
-				LocationToRegionCode(ipInfo.CountryCode(), ipInfo.Region(), ipInfo.City()),
-				LocationToRegionCode(ipInfo.CountryCode(), ipInfo.Region(), ""),
-				LocationToRegionCode(ipInfo.CountryCode(), "", ""),
-			)
+
+		// If the external IP address is not a valid IP address, look it up as a hostname
+		if externalIP = net.ParseIP(parts[0]); externalIP == nil {
+			if ips, err := net.LookupIP(parts[0]); err != nil {
+				return nil, 0, fmt.Errorf("invalid address `%s`: %w", parts[0], err)
+			} else {
+				externalIP = ips[0]
+			}
+		}
+
+		// Parse the external port
+		if p, err := strconv.Atoi(parts[1]); err != nil {
+			return nil, 0, fmt.Errorf("invalid external port: %s", parts[1])
+		} else {
+			externalPort = uint16(p)
 		}
 	}
 
-	// Create the broadcaster config
-	config := NewGameServerPresence(session.UserID(), session.id, serverID, internalIP, externalIP, externalPort, hostingGroupIDs, regionCodes, versionLock, params.serverTags, params.supportedFeatures, request.TimeStepUsecs, ipInfo, params.geoHashPrecision, isNative, request.Version)
+	return externalIP, externalPort, nil
+}
 
-	logger = logger.With(zap.String("internal_ip", internalIP.String()), zap.String("external_ip", externalIP.String()), zap.Uint16("port", externalPort))
-
+// checkBroadcasterAlive validates connectivity to the game server with retries
+func (p *Pipeline) checkBroadcasterAlive(config *GameServerPresence, retries int) (bool, error) {
 	// Give the server some time to start up
 	time.Sleep(2 * time.Second)
 
-	// Validate connectivity to the game server.
-	isAlive := false
-
-	// Check if the broadcaster is available
-	retries := 5
 	var rtt time.Duration
+	var err error
+
 	for i := 0; i < retries; i++ {
 		// TODO: This shouldn't be locked to internal IP
 		rtt, err = BroadcasterHealthcheck(p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
@@ -265,41 +257,47 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 				time.Sleep(500 * time.Millisecond)
 				continue
 			}
-
 		}
 		if rtt >= 0 {
-			isAlive = true
-			break
-		}
-	}
-	if !isAlive {
-		// If the broadcaster is not available, send an error message to the user on discord
-		logger.Error("Broadcaster could not be reached", zap.Error(err))
-		errorMessage := fmt.Sprintf("Broadcaster (Endpoint ID: %s, Server ID: %d) could not be reached. Error: %v", config.Endpoint.ExternalAddress(), config.ServerID, err)
-		go sendDiscordError(errors.New(errorMessage), params.DiscordID(), logger, p.discordCache.dg)
-		return errFailedRegistration(session, logger, errors.New(errorMessage), evr.BroadcasterRegistration_Failure)
-	}
-
-	status := config.GetStatus()
-
-	// Join the monitoring stream
-	if err := p.nk.StreamUserUpdate(StreamModeGameServer, session.ID().String(), "", "", config.GetUserId(), config.GetSessionId(), false, false, status); err != nil {
-		logger.Warn("Failed to update game server stream", zap.Error(err))
-		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
-	}
-
-	// Join the game server to the game server pool streams
-	for _, gID := range config.GroupIDs {
-		if err := p.nk.StreamUserUpdate(StreamModeGameServer, gID.String(), "", "", config.GetUserId(), config.GetSessionId(), false, false, status); err != nil {
-			logger.Warn("Failed to update game server stream", zap.Error(err))
-			return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
+			return true, nil
 		}
 	}
 
-	// Monitor the game server and create new parking matches as needed.
+	return false, fmt.Errorf("broadcaster could not be reached after %d retries: %w", retries, err)
+}
+
+// handleRegistrationError handles error logging, Discord notifications, and error responses
+func (p *Pipeline) handleRegistrationError(params *gameServerRegistrationParams, session *sessionEVR, logger *zap.Logger, err error, code evr.BroadcasterRegistrationFailureCode) error {
+	if params != nil {
+		errorMessage := fmt.Sprintf("Broadcaster (Server ID: %d) registration failed. Error: %v", params.serverID, err)
+		go sendDiscordError(errors.New(errorMessage), params.sessionParams.DiscordID(), logger, p.discordCache.dg)
+	}
+	return errFailedRegistration(session, logger, err, code)
+}
+
+// updateLoggerContext enhances the logger with consistent context information
+func updateLoggerContext(logger *zap.Logger, params *gameServerRegistrationParams, hostingGroupIDs []uuid.UUID, regionCodes []string, externalIP net.IP, externalPort uint16) *zap.Logger {
+	if params == nil {
+		return logger
+	}
+
+	return logger.With(
+		zap.String("uid", params.sessionParams.UserID()),
+		zap.String("discord_id", params.sessionParams.DiscordID()),
+		zap.Any("group_ids", hostingGroupIDs),
+		zap.Strings("tags", params.sessionParams.serverTags),
+		zap.Strings("regions", regionCodes),
+		zap.String("internal_ip", params.internalIP.String()),
+		zap.String("external_ip", externalIP.String()),
+		zap.Uint16("port", externalPort),
+	)
+}
+
+// startGameServerMonitoring launches the background monitoring goroutine for the game server
+func (p *Pipeline) startGameServerMonitoring(session *sessionEVR, config *GameServerPresence, params *gameServerRegistrationParams, logger *zap.Logger) {
 	go func() {
 		// Create the initial parking match for the game server.
-		if _, err = p.newGameServerParkingMatch(server.NewRuntimeGoLogger(logger), p.nk, config); err != nil {
+		if _, err := p.newGameServerParkingMatch(server.NewRuntimeGoLogger(logger), p.nk, config); err != nil {
 			errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
 			session.Close("Game server match lookup error", runtime.PresenceReasonDisconnect)
 			return
@@ -317,7 +315,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 					logger.Warn("Game server is not responding", zap.Error(err), zap.String("endpoint", config.Endpoint.String()))
 					// Send the discord error
 					errorMessage := fmt.Sprintf("Game server (Endpoint ID: %s, Server ID: %d) is not responding. Error: %v", config.Endpoint.ExternalAddress(), config.ServerID, err)
-					go sendDiscordError(errors.New(errorMessage), params.DiscordID(), logger, p.discordCache.dg)
+					go sendDiscordError(errors.New(errorMessage), params.sessionParams.DiscordID(), logger, p.discordCache.dg)
 				}
 			}
 			// If the game server is alive, check if it is still in a match
@@ -347,20 +345,151 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 			}
 		}
 	}()
+}
 
+// gameserverRegistrationRequest handles the game server registration request from the game server.
+//
+// This function utilizes various URL parameters that are parsed during WebSocket session initialization.
+// For comprehensive documentation of all URL parameters, see: docs/game-server-url-parameters.md
+//
+// Key URL parameters used in this function:
+//   - discordid/discord_id: Discord user ID for authentication
+//   - password: Authentication password
+//   - serveraddr: External server address (IP:port format)
+//   - tags: Comma-delimited server tags
+//   - guilds: Comma-delimited Discord guild IDs
+//   - regions: Comma-delimited geographic regions
+//   - features: Comma-delimited supported features
+//   - geo_precision: Geohash precision (0-12)
+//   - debug: Enable debug mode
+//   - verbose: Enable verbose logging
+func (p *Pipeline) gameserverRegistrationRequest(logger *zap.Logger, s *sessionEVR, in *rtapi.Envelope) error {
+	request := in.GetGameServerRegistration()
+
+	// Extract and validate all parameters
+	params, err := extractAndValidateParams(request, s)
+	if err != nil {
+		return p.handleRegistrationError(params, s, logger, err, evr.BroadcasterRegistration_Unknown)
+	}
+
+	// Log the registration request for native servers
+	if params.isNative {
+		logger.Info("Game server registration request",
+			zap.String("login_session_id", params.loginSessionID.String()),
+			zap.Uint64("server_id", params.serverID),
+			zap.String("internal_ip", params.internalIP.String()),
+			zap.Uint16("port", params.externalPort),
+			zap.String("region", params.regionHash.String()),
+			zap.String("version_lock", params.versionLock.String()),
+			zap.Uint32("time_step_usecs", params.timeStepUsecs),
+			zap.String("version", params.version))
+	}
+
+	// Validate session and user authentication
+	if err := p.validateSessionAndUser(s, params, logger); err != nil {
+		return p.handleRegistrationError(params, s, logger, err, evr.BroadcasterRegistration_Unknown)
+	}
+
+	// Get user guild groups
+	guildGroups, err := GuildUserGroupsList(s.Context(), p.nk, p.guildGroupRegistry, s.userID.String())
+	if err != nil {
+		return p.handleRegistrationError(params, s, logger, fmt.Errorf("failed to get guild groups: %w", err), evr.BroadcasterRegistration_Unknown)
+	}
+
+	// Update session parameters with guild groups
+	params.sessionParams.guildGroups = guildGroups
+	StoreParams(s.Context(), &params.sessionParams)
+
+	// Determine which guild groups this server can host for
+	hostingGroupIDs, err := getHostingGroupIDs(s.userID.String(), guildGroups, params.sessionParams)
+	if err != nil {
+		return p.handleRegistrationError(params, s, logger, err, evr.BroadcasterRegistration_Unknown)
+	}
+
+	// Resolve external IP and port
+	externalIP, externalPort, err := resolveExternalAddress(params)
+	if err != nil {
+		return p.handleRegistrationError(params, s, logger, err, evr.BroadcasterRegistration_Unknown)
+	}
+
+	// Get IP information for region codes
+	if p.ipInfoCache != nil {
+		params.ipInfo, err = p.ipInfoCache.Get(s.Context(), externalIP.String())
+		if err != nil {
+			logger.Warn("Failed to get IPQS data", zap.Error(err))
+		}
+	}
+
+	// Build region codes for server discovery
+	regionCodes := buildRegionCodes(params.regionHash, params.sessionParams, params.ipInfo)
+
+	// Add the server ID as a region code for direct connection
+	regionCodes = append(regionCodes, fmt.Sprintf("0x%x", params.serverID))
+
+	// Update logger with comprehensive context
+	logger = updateLoggerContext(logger, params, hostingGroupIDs, regionCodes, externalIP, externalPort)
+
+	// Create the game server presence configuration
+	config := NewGameServerPresence(
+		s.UserID(),
+		s.id,
+		params.serverID,
+		params.internalIP,
+		externalIP,
+		externalPort,
+		hostingGroupIDs,
+		regionCodes,
+		params.versionLock,
+		params.sessionParams.serverTags,
+		params.sessionParams.supportedFeatures,
+		params.timeStepUsecs,
+		params.ipInfo,
+		params.sessionParams.geoHashPrecision,
+		params.isNative,
+		params.version)
+
+	// Check if the broadcaster is alive and reachable
+	isAlive, err := p.checkBroadcasterAlive(config, 5)
+	if !isAlive {
+		logger.Error("Broadcaster could not be reached", zap.Error(err))
+		errorMessage := fmt.Sprintf("Broadcaster (Endpoint ID: %s, Server ID: %d) could not be reached. Error: %v", config.Endpoint.ExternalAddress(), config.ServerID, err)
+		go sendDiscordError(errors.New(errorMessage), params.sessionParams.DiscordID(), logger, p.discordCache.dg)
+		return p.handleRegistrationError(params, s, logger, errors.New(errorMessage), evr.BroadcasterRegistration_Failure)
+	}
+
+	status := config.GetStatus()
+
+	// Join the monitoring stream
+	if err := p.nk.StreamUserUpdate(StreamModeGameServer, s.ID().String(), "", "", config.GetUserId(), config.GetSessionId(), false, false, status); err != nil {
+		logger.Warn("Failed to update game server stream", zap.Error(err))
+		return p.handleRegistrationError(params, s, logger, err, evr.BroadcasterRegistration_Failure)
+	}
+
+	// Join the game server to the game server pool streams
+	for _, gID := range config.GroupIDs {
+		if err := p.nk.StreamUserUpdate(StreamModeGameServer, gID.String(), "", "", config.GetUserId(), config.GetSessionId(), false, false, status); err != nil {
+			logger.Warn("Failed to update game server stream", zap.Error(err))
+			return p.handleRegistrationError(params, s, logger, err, evr.BroadcasterRegistration_Failure)
+		}
+	}
+
+	// Start background monitoring
+	p.startGameServerMonitoring(s, config, params, logger)
+
+	// Start continuous health checking if enabled
 	if ServiceSettings().EnableContinuousGameserverHealthCheck {
-		go HealthCheckStart(ctx, logger, p.nk, session, p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
+		go HealthCheckStart(s.Context(), logger, p.nk, s, p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
 	}
 
 	// Send the registration success message
-	return session.SendEVR(Envelope{
+	return s.SendEVR(Envelope{
 		ServiceType: ServiceTypeServer,
 		Messages:    []evr.Message{evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP)},
 		State:       RequireStateUnrequired,
 	})
 }
 
-func (p *EvrPipeline) newGameServerParkingMatch(logger runtime.Logger, nk runtime.NakamaModule, presence runtime.Presence) (*MatchID, error) {
+func (p *Pipeline) newGameServerParkingMatch(logger runtime.Logger, nk runtime.NakamaModule, presence runtime.Presence) (*MatchID, error) {
 	ctx := context.Background()
 	params := map[string]any{
 		"gameserver": presence.GetStatus(),

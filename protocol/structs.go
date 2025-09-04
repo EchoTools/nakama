@@ -46,7 +46,7 @@ type Chunk struct {
 		BroadcasterPlayersAccepted         *GameServerJoinAllowed             `struct-case:"0x7777777777770600" json:",omitempty"`
 		BroadcasterPlayersRejected         *GameServerJoinRejected            `struct-case:"0x7777777777770700" json:",omitempty"`
 		BroadcasterPlayerRemoved           *GameServerPlayerRemoved           `struct-case:"0x7777777777770800" json:",omitempty"`
-		BroadcasterRegistrationRequest     *BroadcasterRegistrationRequest    `struct-case:"0x7777777777777777" json:",omitempty"`
+		BroadcasterRegistrationRequest     *GameServerRegistrationRequest     `struct-case:"0x7777777777777777" json:",omitempty"`
 		ConfigRequest                      *ConfigRequest                     `struct-case:"0x82869f0b37eb4378" json:",omitempty"`
 		ConfigSuccess                      *ConfigSuccess                     `struct-case:"0xb9cdaf586f7bd012" json:",omitempty"`
 		ConfigFailure                      *ConfigFailure                     `struct-case:"0x9e687a63dddd3870" json:",omitempty"`

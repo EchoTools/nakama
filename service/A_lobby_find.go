@@ -28,7 +28,7 @@ var LobbyTestCounter = 0
 var ErrCreateLock = errors.New("failed to acquire create lock")
 
 // lobbyJoinSessionRequest is a request to join a specific existing session.
-func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session *sessionEVR, lobbyParams *LobbySessionParameters) error {
+func (p *Pipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session *sessionEVR, lobbyParams *LobbySessionParameters) error {
 
 	startTime := time.Now()
 
@@ -114,7 +114,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		tags["party_size"] = strconv.Itoa(lobbyParams.GetPartySize())
 		p.metrics.CustomTimer("lobby_find_duration", tags, time.Since(startTime))
 
-		logger.Debug("Lobby find complete", zap.String("group_id", lobbyParams.GroupID.String()), zap.Int("party_size", lobbyParams.GetPartySize()), zap.String("mode", lobbyParams.Mode.String()), zap.String("role", string(lobbyParams.Role)), zap.Bool("leader", isLeader), zap.Int("duration", int(time.Since(startTime).Seconds())))
+		logger.Debug("Lobby find complete", zap.String("group_id", lobbyParams.GroupID.String()), zap.Int("party_size", lobbyParams.GetPartySize()), zap.String("mode", lobbyParams.Mode.String()), zap.String("role", lobbyParams.Role.String()), zap.Bool("leader", isLeader), zap.Int("duration", int(time.Since(startTime).Seconds())))
 	}()
 
 	// Check latency to active game servers.
@@ -178,7 +178,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 }
 
-func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, session *sessionEVR, lobbyParams *LobbySessionParameters) (*PartyLabel, []uuid.UUID, bool, error) {
+func (p *Pipeline) configureParty(ctx context.Context, logger *zap.Logger, session *sessionEVR, lobbyParams *LobbySessionParameters) (*PartyLabel, []uuid.UUID, bool, error) {
 
 	// Join the party if a player has a party group id set.
 	// The lobby group is the party that the user is currently in.
@@ -269,7 +269,7 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 	return partyLabel, memberSessionIDs, isLeader, nil
 }
 
-func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.Logger, session *sessionEVR, lobbyParams *LobbySessionParameters, cancelFn context.CancelFunc) {
+func (p *Pipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.Logger, session *sessionEVR, lobbyParams *LobbySessionParameters, cancelFn context.CancelFunc) {
 
 	// Monitor the stream and cancel the context (and matchmaking) if the stream is closed.
 	// This stream tracks the user's matchmaking status.
@@ -293,7 +293,7 @@ func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.
 	}
 }
 
-func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, entrants ...*LobbyPresence) (*MatchLabel, error) {
+func (p *Pipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, entrants ...*LobbyPresence) (*MatchLabel, error) {
 	if createLobbyMu.TryLock() {
 		go func() {
 			// Hold the lock for enough time to create the server
@@ -331,7 +331,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 	return label, nil
 }
 
-func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, session server.Session, lobbyParams *LobbySessionParameters, enableFailsafe bool, entrants ...*LobbyPresence) error {
+func (p *Pipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, session server.Session, lobbyParams *LobbySessionParameters, enableFailsafe bool, entrants ...*LobbyPresence) error {
 	interval := 3 * time.Second
 	if lobbyParams.Mode == evr.ModeSocialPublic {
 		interval = 1 * time.Second
@@ -529,7 +529,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, ses
 	}
 }
 
-func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, session *sessionEVR, groupID string) error {
+func (p *Pipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, session *sessionEVR, groupID string) error {
 
 	params, ok := LoadParams(session.Context())
 	if !ok {
@@ -569,9 +569,13 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 		}
 	}
 
-	if err := SendEVRMessages(session, true, evr.NewLobbyPingRequest(275, candidates)); err != nil {
-		return fmt.Errorf("failed to send ping request: %v", err)
-	}
+	session.SendEVR(Envelope{
+		ServiceType: ServiceTypeLobby,
+		Messages: []evr.Message{
+			evr.NewLobbyPingRequest(275, candidates),
+		},
+		State: RequireStateUnrequired,
+	})
 
 	return nil
 }
@@ -618,7 +622,7 @@ func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, nk runtime
 	return entrantPresences, nil
 }
 
-func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, session *sessionEVR, params *LobbySessionParameters, partyLabel *PartyLabel) error {
+func (p *Pipeline) PartyFollow(ctx context.Context, logger *zap.Logger, session *sessionEVR, params *LobbySessionParameters, partyLabel *PartyLabel) error {
 
 	logger.Debug("User is member of party", zap.String("leader", partyLabel.Leader.GetUsername()))
 

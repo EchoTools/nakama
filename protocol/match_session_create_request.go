@@ -148,7 +148,7 @@ func (m *LobbyCreateSessionRequest) GetLoginSessionID() uuid.UUID {
 	return m.LoginSessionID
 }
 
-func (m *LobbyCreateSessionRequest) GetEvrID() XPID {
+func (m *LobbyCreateSessionRequest) GetXPID() XPID {
 	if len(m.Entrants) == 0 {
 		return XPID{}
 	}

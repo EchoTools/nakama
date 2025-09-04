@@ -28,7 +28,7 @@ var (
 	}
 )
 
-func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
+func (p *Pipeline) documentRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	request := in.(*evr.DocumentRequest)
 
 	params, ok := LoadParams(ctx)
@@ -72,7 +72,7 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 	}
 }
 
-func (p *EvrPipeline) generateEULA(ctx context.Context, logger *zap.Logger, language string) (evr.EULADocument, error) {
+func (p *Pipeline) generateEULA(ctx context.Context, logger *zap.Logger, language string) (evr.EULADocument, error) {
 	// Retrieve the contents from storage
 	key := fmt.Sprintf("eula,%s", language)
 	document := evr.DefaultEULADocument(language)
@@ -140,7 +140,7 @@ func (p *EvrPipeline) generateEULA(ctx context.Context, logger *zap.Logger, lang
 	return document, nil
 }
 
-func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
+func (p *Pipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	_ = in.(*evr.ChannelInfoRequest)
 
 	params, ok := LoadParams(ctx)

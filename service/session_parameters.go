@@ -12,16 +12,8 @@ import (
 type ctxSessionParametersKey struct{} // The Session Parameters
 
 type SessionParameters struct {
-	node          string      // The node name
-	xpID          evr.XPID    // The Cross-Platform ID
-	loginSession  *sessionEVR // The login session
-	lobbySession  *sessionEVR // The match session
-	serverSession *sessionEVR // The server session
-
-	IsWebsocketAuthenticated bool   // The session was authenticated successfully via HTTP headers or query parameters
-	authDiscordID            string // The Discord ID use for authentication
-	authPassword             string // The Password use for authentication
-	userDisplayNameOverride  string // The display name override (user-defined)
+	node string   // The node name
+	xpID evr.XPID // The Cross-Platform ID
 
 	externalServerAddr string // The external server address (IP:port)
 	geoHashPrecision   int    // The geohash precision
@@ -30,18 +22,13 @@ type SessionParameters struct {
 
 	supportedFeatures []string          // features from the urlparam
 	requiredFeatures  []string          // required_features from the urlparam
-	disableEncryption bool              // The user has disabled encryption
-	disableMAC        bool              // The user has disabled MAC
 	loginPayload      *evr.LoginProfile // The login payload
-	isGlobalDeveloper bool              // The user is a developer
-	isGlobalOperator  bool              // The user is a moderator
 
-	relayOutgoing       bool                // The user wants (some) outgoing messages relayed to them via discord
-	enableAllRemoteLogs bool                // The user wants debug information
-	serverTags          []string            // []string of the server tags
-	serverGuilds        []string            // []string of the server guilds
-	serverRegions       []string            // []string of the server regions
-	urlParameters       map[string][]string // The URL parameters
+	relayOutgoing       bool     // The user wants (some) outgoing messages relayed to them via discord
+	enableAllRemoteLogs bool     // The user wants debug information
+	serverTags          []string // []string of the server tags
+	serverGuilds        []string // []string of the server guilds
+	serverRegions       []string // []string of the server regions
 
 	profile                      *EVRProfile                      // The account
 	matchmakingSettings          *MatchmakingSettings             // The matchmaking settings
@@ -66,9 +53,6 @@ func (s SessionParameters) DisplayName(groupID string) string {
 	if s.profile == nil {
 		return ""
 	}
-	if s.userDisplayNameOverride != "" {
-		return s.userDisplayNameOverride
-	}
 	return s.profile.GetGroupIGN(groupID)
 }
 
@@ -81,11 +65,10 @@ func (s *SessionParameters) IsIGPOpen() bool {
 
 func (s *SessionParameters) MetricsTags() map[string]string {
 	return map[string]string{
-		"websocket_auth": fmt.Sprintf("%t", s.IsWebsocketAuthenticated),
-		"is_vr":          fmt.Sprintf("%t", s.IsVR()),
-		"is_pcvr":        fmt.Sprintf("%t", s.IsPCVR()),
-		"build_version":  fmt.Sprintf("%d", s.BuildNumber()),
-		"device_type":    s.DeviceType(),
+		"is_vr":         fmt.Sprintf("%t", s.IsVR()),
+		"is_pcvr":       fmt.Sprintf("%t", s.IsPCVR()),
+		"build_version": fmt.Sprintf("%d", s.BuildNumber()),
+		"device_type":   s.DeviceType(),
 	}
 }
 

@@ -53,7 +53,7 @@ const (
 
 type Runtime struct{}
 
-func NewNEVRRuntime(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config server.Config, version string, socialClient *social.Client, storageIndex server.StorageIndex, leaderboardCache server.LeaderboardCache, leaderboardRankCache server.LeaderboardRankCache, leaderboardScheduler server.LeaderboardScheduler, sessionRegistry server.SessionRegistry, sessionCache server.SessionCache, statusRegistry server.StatusRegistry, matchRegistry server.MatchRegistry, matchmaker server.Matchmaker, partyRegistry server.PartyRegistry, tracker server.Tracker, router server.MessageRouter, streamManager server.StreamManager, metrics server.Metrics, nkruntime *server.Runtime, runtimeInfo *server.RuntimeInfo, nkPipeline *server.Pipeline, pipeline *EvrPipeline) (*Runtime, error) {
+func NewNEVRRuntime(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config server.Config, version string, socialClient *social.Client, storageIndex server.StorageIndex, leaderboardCache server.LeaderboardCache, leaderboardRankCache server.LeaderboardRankCache, leaderboardScheduler server.LeaderboardScheduler, sessionRegistry server.SessionRegistry, sessionCache server.SessionCache, statusRegistry server.StatusRegistry, matchRegistry server.MatchRegistry, matchmaker server.Matchmaker, partyRegistry server.PartyRegistry, tracker server.Tracker, router server.MessageRouter, streamManager server.StreamManager, metrics server.Metrics, nkruntime *server.Runtime, runtimeInfo *server.RuntimeInfo, nkPipeline *server.Pipeline, pipeline *Pipeline) (*Runtime, error) {
 	var (
 		vars          = config.GetRuntime().Environment
 		ctx           = context.WithValue(context.Background(), runtime.RUNTIME_CTX_ENV, vars)
@@ -201,6 +201,7 @@ func RegisterIndexes(ctx context.Context, storageIndex server.StorageIndex) erro
 		&VRMLPlayerSummary{},
 		&LoginHistory{},
 		&LinkTicketStore{},
+		&ConfigDocumentData{},
 	}
 	for _, s := range storables {
 		for _, idx := range s.StorageIndexes() {

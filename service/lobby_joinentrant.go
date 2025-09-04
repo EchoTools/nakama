@@ -33,7 +33,7 @@ var (
 	ErrFailedToTrackEntrantStream = errors.New("failed to track entrant stream")
 )
 
-func (p *EvrPipeline) LobbyJoinEntrants(logger runtime.Logger, label *MatchLabel, presences ...*LobbyPresence) error {
+func (p *Pipeline) LobbyJoinEntrants(logger runtime.Logger, label *MatchLabel, presences ...*LobbyPresence) error {
 	if len(presences) == 0 {
 		return ErrNoPresences
 	}
@@ -146,23 +146,19 @@ func LobbyJoinEntrants(logger runtime.Logger, matchRegistry server.MatchRegistry
 	ops := []*server.TrackerOp{
 		{
 			Stream: guildGroupStream,
-			Meta:   server.PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: false},
+			Meta:   server.PresenceMeta{Format: session.Format(), Username: e.Username, Status: matchIDStr, Hidden: false},
 		},
 		{
 			Stream: server.PresenceStream{Mode: StreamModeService, Subject: e.SessionID, Label: StreamLabelMatchService},
-			Meta:   server.PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: false},
-		},
-		{
-			Stream: server.PresenceStream{Mode: StreamModeService, Subject: e.LoginSessionID, Label: StreamLabelMatchService},
-			Meta:   server.PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: false},
+			Meta:   server.PresenceMeta{Format: session.Format(), Username: e.Username, Status: matchIDStr, Hidden: false},
 		},
 		{
 			Stream: server.PresenceStream{Mode: StreamModeService, Subject: e.UserID, Label: StreamLabelMatchService},
-			Meta:   server.PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: false},
+			Meta:   server.PresenceMeta{Format: session.Format(), Username: e.Username, Status: matchIDStr, Hidden: false},
 		},
 		{
 			Stream: server.PresenceStream{Mode: StreamModeService, Subject: e.XPID.UUID(), Label: StreamLabelMatchService},
-			Meta:   server.PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: false},
+			Meta:   server.PresenceMeta{Format: session.Format(), Username: e.Username, Status: matchIDStr, Hidden: false},
 		},
 	}
 
@@ -179,17 +175,25 @@ func LobbyJoinEntrants(logger runtime.Logger, matchRegistry server.MatchRegistry
 	connectionSettings := label.GetEntrantConnectMessage(int(e.RoleAlignment), e.IsPCVR, e.DisableEncryption, e.DisableMAC)
 
 	// Send the lobby session success message to the game server.
-	if err := SendEVRMessages(serverSession, false, connectionSettings); err != nil {
-		return errors.New("failed to send lobby session success to game server")
-	}
 
+	if s, ok := serverSession.(*sessionEVR); ok {
+		if err := s.SendEVR(Envelope{
+			ServiceType: ServiceTypeLobby,
+			Messages:    []evr.Message{connectionSettings},
+		}); err != nil {
+			return fmt.Errorf("failed to send lobby session success to game server: %w", err)
+		}
+	}
 	// Send the lobby session success message to the game client.
 	<-time.After(150 * time.Millisecond)
-
-	if err := SendEVRMessages(session, false, connectionSettings); err != nil {
-		return errors.New("failed to send lobby session success to game client")
+	if s, ok := session.(*sessionEVR); ok {
+		if err := s.SendEVR(Envelope{
+			ServiceType: ServiceTypeLobby,
+			Messages:    []evr.Message{connectionSettings},
+		}); err != nil {
+			return fmt.Errorf("failed to send lobby session success to client: %w", err)
+		}
 	}
-
 	logger.WithFields(map[string]any{
 		"mid": label.ID.UUID.String(),
 		"uid": e.UserID.String(),
@@ -200,7 +204,7 @@ func LobbyJoinEntrants(logger runtime.Logger, matchRegistry server.MatchRegistry
 }
 
 // lobbyAuthorize checks if the user is allowed to join the lobby based on various criteria such as guild membership, suspensions, and account age.
-func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, session server.Session, lobbyParams *LobbySessionParameters) error {
+func (p *Pipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, session server.Session, lobbyParams *LobbySessionParameters) error {
 	groupID := lobbyParams.GroupID.String()
 	metricsTags := map[string]string{
 		"group_id": groupID,

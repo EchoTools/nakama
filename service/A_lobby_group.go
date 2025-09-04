@@ -10,7 +10,7 @@ import (
 	"github.com/heroiclabs/nakama/v3/server"
 )
 
-func (p *EvrPipeline) JoinPartyGroup(ctx context.Context, session *sessionEVR, lobbyParams *LobbySessionParameters) (*PartyLabel, bool, error) {
+func (p *Pipeline) JoinPartyGroup(ctx context.Context, session *sessionEVR, lobbyParams *LobbySessionParameters) (*PartyLabel, bool, error) {
 
 	userPresence := &rtapi.UserPresence{
 		UserId:    session.UserID().String(),

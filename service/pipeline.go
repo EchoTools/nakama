@@ -19,7 +19,6 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/echotools/nevr-common/v3/rtapi"
 	"github.com/go-redis/redis"
-	"github.com/gofrs/uuid/v5"
 
 	evr "github.com/echotools/nakama/v3/protocol"
 	nkrtapi "github.com/heroiclabs/nakama-common/rtapi"
@@ -35,13 +34,13 @@ var unrequireMessage = evr.NewSTcpConnectionUnrequireEvent()
 var globalMatchmaker = atomic.NewPointer[server.LocalMatchmaker](nil)
 var GlobalAppBot = atomic.NewPointer[DiscordAppBot](nil)
 
-type EvrPipeline struct {
+type Pipeline struct {
 	sync.RWMutex
 	ctx context.Context
 
-	node              string
-	broadcasterUserID string // The userID used for broadcaster connections
-	internalIP        net.IP
+	node string
+
+	internalIP net.IP
 
 	logger *zap.Logger
 	db     *sql.DB
@@ -79,10 +78,17 @@ type EvrPipeline struct {
 
 type ctxDiscordBotTokenKey struct{}
 
-func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config server.Config, version string, socialClient *social.Client, storageIndex server.StorageIndex, leaderboardScheduler server.LeaderboardScheduler, leaderboardCache server.LeaderboardCache, leaderboardRankCache server.LeaderboardRankCache, sessionRegistry server.SessionRegistry, sessionCache server.SessionCache, statusRegistry server.StatusRegistry, matchRegistry server.MatchRegistry, partyRegistry server.PartyRegistry, matchmaker server.Matchmaker, tracker server.Tracker, router server.MessageRouter, streamManager server.StreamManager, metrics server.Metrics, pipeline *server.Pipeline, nkruntime *server.Runtime) *EvrPipeline {
+func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config server.Config, version string, socialClient *social.Client, storageIndex server.StorageIndex, leaderboardScheduler server.LeaderboardScheduler, leaderboardCache server.LeaderboardCache, leaderboardRankCache server.LeaderboardRankCache, sessionRegistry server.SessionRegistry, sessionCache server.SessionCache, statusRegistry server.StatusRegistry, matchRegistry server.MatchRegistry, partyRegistry server.PartyRegistry, matchmaker server.Matchmaker, tracker server.Tracker, router server.MessageRouter, streamManager server.StreamManager, metrics server.Metrics, pipeline *server.Pipeline, nkruntime *server.Runtime) *Pipeline {
 	globalMatchmaker.Store(matchmaker.(*server.LocalMatchmaker))
 
 	nk := server.NewRuntimeGoNakamaModule(logger, db, protojsonMarshaler, config, socialClient, leaderboardCache, leaderboardRankCache, leaderboardScheduler, sessionRegistry, sessionCache, statusRegistry, matchRegistry, partyRegistry, tracker, metrics, streamManager, router, storageIndex, nil)
+	nevr := &NEVRNakamaModule{
+		RuntimeGoNakamaModule: nk,
+		zapLogger:             logger,
+		db:                    db,
+		metrics:               metrics,
+		storageIndex:          storageIndex,
+	}
 
 	// Add the bot token to the context
 	vars := config.GetRuntime().Environment
@@ -206,7 +212,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		logger.Fatal("Discord bot is not ready after 10 seconds")
 	}
 
-	evrPipeline := &EvrPipeline{
+	evrPipeline := &Pipeline{
 		ctx:     ctx,
 		node:    config.GetName(),
 		version: version,
@@ -228,6 +234,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		runtime:         nkruntime,
 
 		nk:            nk,
+		nevr:          nevr,
 		runtimeLogger: runtimeLogger,
 
 		discordCache: discordIntegrator,
@@ -244,9 +251,9 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	return evrPipeline
 }
 
-func (p *EvrPipeline) Stop() {}
+func (p *Pipeline) Stop() {}
 
-func (p *EvrPipeline) ProcessRequest(logger *zap.Logger, session *sessionEVR, in evr.Message) bool {
+func (p *Pipeline) ProcessRequest(logger *zap.Logger, session *sessionEVR, in evr.Message) bool {
 
 	// Handle legacy messages
 
@@ -277,7 +284,7 @@ func (p *EvrPipeline) ProcessRequest(logger *zap.Logger, session *sessionEVR, in
 		// TODO: Extract this to a separate file/function
 		// Handle legacy messages that are not encapsulated in NEVR protobuf messages
 		switch msg := in.(type) {
-		case *evr.BroadcasterRegistrationRequest: // Legacy message
+		case *evr.GameServerRegistrationRequest: // Legacy message
 			envelope = &rtapi.Envelope{
 				Message: &rtapi.Envelope_GameServerRegistration{
 					GameServerRegistration: &rtapi.GameServerRegistrationMessage{
@@ -377,23 +384,10 @@ func (p *EvrPipeline) ProcessRequest(logger *zap.Logger, session *sessionEVR, in
 	// TODO: Remove ctx from the function call. It should be part of the session.
 	var pipelineFn func(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error
 
-	isAuthenticationRequired := true
-
 	switch in.(type) {
-
-	// Config service
-	//case *evr.ConfigRequest:
-	//isAuthenticationRequired = false
-	//pipelineFn = p.configRequest
-
-	// Transaction (IAP) service (unused)
-	case *evr.ReconcileIAP:
-		isAuthenticationRequired = false
-		pipelineFn = p.reconcileIAP
 
 	// Login/Profile Service
 	case *evr.RemoteLogSet:
-		isAuthenticationRequired = false
 		pipelineFn = p.remoteLogSetv3
 	case *evr.LoginRequest:
 		params, _ := LoadParams(session.Context())
@@ -418,7 +412,7 @@ func (p *EvrPipeline) ProcessRequest(logger *zap.Logger, session *sessionEVR, in
 			logger.Error("Failed to send login success message", zap.Error(err))
 			return false
 		}
-
+		return true
 	case *evr.DocumentRequest:
 		pipelineFn = p.documentRequest
 	case *evr.LoggedInUserProfileRequest:
@@ -434,7 +428,6 @@ func (p *EvrPipeline) ProcessRequest(logger *zap.Logger, session *sessionEVR, in
 	case *evr.GenericMessage:
 		pipelineFn = p.genericMessage
 
-	// server.Matchmaker service
 	// server.Matchmaker service
 	case *evr.LobbyFindSessionRequest:
 		pipelineFn = p.lobbySessionRequest
@@ -458,82 +451,8 @@ func (p *EvrPipeline) ProcessRequest(logger *zap.Logger, session *sessionEVR, in
 		}
 	}
 
-	if isAuthenticationRequired && session.UserID().IsNil() {
-
-		// set/validate the login session
-		if idmessage, ok := in.(evr.LoginIdentifier); ok {
-
-			if idmessage.GetLoginSessionID().IsNil() {
-				logger.Error("Login session ID is nil")
-				return false
-			}
-
-			params, ok := LoadParams(session.Context())
-			if !ok {
-				logger.Error("Failed to get lobby parameters")
-				return false
-			}
-
-			loginSession := params.loginSession
-			if loginSession == nil {
-				switch idmessage.(type) {
-				case evr.LobbySessionRequest:
-					// associate lobby session with login session
-					// If the message is an identifying message, validate the session and evr id.
-					if err := LobbySession(session, p.sessionRegistry, idmessage.GetLoginSessionID()); err != nil {
-						logger.Error("Invalid session", zap.Error(err))
-						// Disconnect the client if the session is invalid.
-						return false
-					}
-				default:
-					logger.Error("Login session not found", zap.String("login_session_id", idmessage.GetLoginSessionID().String()))
-					return false
-				}
-			} else if !loginSession.id.IsNil() && loginSession.id != idmessage.GetLoginSessionID() {
-				// If the ID message is not associated with the current session, log the error and return.
-				logger.Error("mismatched login session id", zap.String("login_session_id", idmessage.GetLoginSessionID().String()), zap.String("login_session_id", loginSession.id.String()))
-				return false
-			}
-
-		}
-
-		// Set/validate the XPI
-		if xpimessage, ok := in.(evr.XPIdentifier); ok {
-
-			params, ok := LoadParams(session.Context())
-			if !ok {
-				logger.Error("Failed to get lobby parameters")
-				return false
-			}
-
-			if !params.xpID.Equals(xpimessage.GetEvrID()) {
-				logger.Error("mismatched evr id", zap.String("evrid", xpimessage.GetEvrID().String()), zap.String("evrid2", params.xpID.String()))
-				return false
-			}
-		}
-
-		// If the session is not authenticated, log the error and return.
-		if session != nil && session.UserID() == uuid.Nil {
-
-			logger.Warn("Received unauthenticated message", zap.Any("message", in))
-
-			// Send an unrequire
-			if err := SendEVRMessages(session, false, unrequireMessage); err != nil {
-				logger.Error("Failed to send unrequire message", zap.Error(err))
-				return false
-			}
-
-			return true
-		}
-	}
-
-	if params, ok := LoadParams(session.Context()); ok && !params.xpID.IsNil() {
-		logger = logger.With(zap.String("uid", session.UserID().String()), zap.String("sid", session.ID().String()), zap.String("username", session.Username()), zap.String("evrid", params.xpID.String()))
-	}
-
 	if err := pipelineFn(session.Context(), logger, session, in); err != nil {
 		// Unwrap the error
-		logger.Error("server.Pipeline error", zap.Error(err))
 		logger.Error("server.Pipeline error", zap.Error(err))
 		// TODO: Handle errors and close the connection
 	}
@@ -542,7 +461,7 @@ func (p *EvrPipeline) ProcessRequest(logger *zap.Logger, session *sessionEVR, in
 }
 
 // Process outgoing protobuf envelopes and translate them to Evr messages
-func (p *EvrPipeline) ProcessOutgoing(logger *zap.Logger, session *sessionEVR, in *nkrtapi.Envelope) ([]evr.Message, error) {
+func (p *Pipeline) ProcessOutgoing(logger *zap.Logger, session *sessionEVR, in *nkrtapi.Envelope) ([]evr.Message, error) {
 
 	switch in.Message.(type) {
 
@@ -665,7 +584,7 @@ func (p *EvrPipeline) ProcessOutgoing(logger *zap.Logger, session *sessionEVR, i
 	return nil, nil
 }
 
-func (p *EvrPipeline) ProcessProtobufRequest(logger *zap.Logger, session server.Session, in *rtapi.Envelope) error {
+func (p *Pipeline) ProcessProtobufRequest(logger *zap.Logger, session server.Session, in *rtapi.Envelope) error {
 	if in.Message == nil {
 		return fmt.Errorf("received empty protobuf message")
 	}

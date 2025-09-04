@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *sessionEVR, in *rtapi.Envelope) error {
+func (p *Pipeline) lobbyEntrantConnected(logger *zap.Logger, session *sessionEVR, in *rtapi.Envelope) error {
 	message := in.GetLobbyEntraConnected()
 
 	baseLogger := logger.With(zap.String("mid", message.LobbySessionId))
@@ -130,7 +130,7 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 	})
 }
 
-func (p *EvrPipeline) lobbyEntrantRemoved(logger *zap.Logger, session *sessionEVR, in *rtapi.Envelope) error {
+func (p *Pipeline) lobbyEntrantRemoved(logger *zap.Logger, session *sessionEVR, in *rtapi.Envelope) error {
 	message := in.GetLobbyEntrantRemove()
 	matchID, _ := NewMatchID(uuid.FromStringOrNil(message.LobbySessionId), p.node)
 	presence, err := PresenceByEntrantID(p.nk, matchID, uuid.FromStringOrNil(message.EntrantId))
@@ -151,7 +151,7 @@ func (p *EvrPipeline) lobbyEntrantRemoved(logger *zap.Logger, session *sessionEV
 	return nil
 }
 
-func (p *EvrPipeline) lobbySessionEvent(logger *zap.Logger, session *sessionEVR, in *rtapi.Envelope) error {
+func (p *Pipeline) lobbySessionEvent(logger *zap.Logger, session *sessionEVR, in *rtapi.Envelope) error {
 	message := in.GetLobbySessionEvent()
 	matchID, _ := NewMatchID(uuid.FromStringOrNil(message.LobbySessionId), p.node)
 	var opcode SignalOpCode

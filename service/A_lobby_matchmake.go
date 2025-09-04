@@ -110,13 +110,13 @@ var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakingTicketParameters{
 	},
 }
 
-func (p *EvrPipeline) matchmakingTicketTimeout() time.Duration {
+func (p *Pipeline) matchmakingTicketTimeout() time.Duration {
 	maxIntervals := p.config.GetMatchmaker().MaxIntervals
 	intervalSecs := p.config.GetMatchmaker().IntervalSec
 	return time.Duration(maxIntervals*intervalSecs) * time.Second
 }
 
-func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *zap.Logger, session *sessionEVR, lobbyParams *LobbySessionParameters, partyLabel *PartyLabel, entrants ...*LobbyPresence) (err error) {
+func (p *Pipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *zap.Logger, session *sessionEVR, lobbyParams *LobbySessionParameters, partyLabel *PartyLabel, entrants ...*LobbyPresence) (err error) {
 
 	stream := lobbyParams.GuildGroupStream()
 	count, err := p.nk.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
@@ -186,7 +186,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	}
 }
 
-func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session *sessionEVR, lobbyParams *LobbySessionParameters, partyLabel *PartyLabel, ticketConfig MatchmakingTicketParameters) (string, error) {
+func (p *Pipeline) addTicket(ctx context.Context, logger *zap.Logger, session *sessionEVR, lobbyParams *LobbySessionParameters, partyLabel *PartyLabel, ticketConfig MatchmakingTicketParameters) (string, error) {
 	var err error
 
 	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(&ticketConfig)

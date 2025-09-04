@@ -124,7 +124,7 @@ func NewMessageFromHash(hash uint64) Message {
 	case 0x7777777777770800:
 		return &GameServerPlayerRemoved{}
 	case 0x7777777777777777:
-		return &BroadcasterRegistrationRequest{}
+		return &GameServerRegistrationRequest{}
 	case 0x82869f0b37eb4378:
 		return &ConfigRequest{}
 	case 0xb9cdaf586f7bd012:

@@ -7,46 +7,11 @@ import (
 	"slices"
 
 	"github.com/bwmarrin/discordgo"
-	evr "github.com/echotools/nakama/v3/protocol"
 	"go.uber.org/zap"
 )
 
-// IP2FAFlow handles IP-based two-factor authentication
-type IP2FAFlow struct {
-	pipeline *EvrPipeline
-}
-
-// NewIP2FAFlow creates a new IP2FA flow handler
-func NewIP2FAFlow(pipeline *EvrPipeline) *IP2FAFlow {
-	return &IP2FAFlow{pipeline: pipeline}
-}
-
-// CheckIPAuthorization checks if an IP is authorized and handles 2FA flow
-func (p *EvrPipeline) CheckIPAuthorization(ctx context.Context, logger *zap.Logger, loginHistory *LoginHistory, userID string, discordID string, xpID evr.XPID, clientIP string, isPasswordAuthenticated bool, loginPayload *evr.LoginProfile) (error, bool) {
-	// If IP is already authorized or user is password authenticated, allow access
-	if authorized := loginHistory.IsAuthorizedIP(clientIP); authorized || isPasswordAuthenticated {
-		// Update the last used time for this IP
-		if isNew := loginHistory.AuthorizeIP(clientIP); isNew {
-			if err := SendIPAuthorizationNotification(p.discordCache.dg, userID, clientIP); err != nil {
-				// Log the error, but don't return it as it's not critical
-				logger.Warn("Failed to send IP authorization notification", zap.Error(err))
-			}
-		}
-		return nil, true
-	}
-
-	// IP is not authorized - add a pending authorization entry
-	_ = loginHistory.AddPendingAuthorizationIP(xpID, clientIP, loginPayload)
-	if err := StorableWriteNk(ctx, p.nk, userID, loginHistory); err != nil {
-		return fmt.Errorf("failed to save login history: %w", err), false
-	}
-
-	// IP verification required
-	return nil, false
-}
-
 // SendIPApprovalRequest sends an IP approval request to the user via Discord
-func (p *EvrPipeline) SendIPApprovalRequest(ctx context.Context, userID string, discordID string, entry *LoginHistoryEntry, ipInfo IPInfo, activeGroupID string) error {
+func (p *Pipeline) SendIPApprovalRequest(ctx context.Context, userID string, discordID string, entry *LoginHistoryEntry, ipInfo IPInfo, activeGroupID string) error {
 	// Try to send DM first
 	channel, err := p.discordCache.dg.UserChannelCreate(discordID)
 	if err == nil {
@@ -57,6 +22,7 @@ func (p *EvrPipeline) SendIPApprovalRequest(ctx context.Context, userID string, 
 			Components: components,
 		})
 		if err == nil {
+			// Success
 			return NewLocationError{
 				code:        fmt.Sprintf("%02d", entry.CreatedAt.Nanosecond()%100),
 				botUsername: p.discordCache.dg.State.User.Username,

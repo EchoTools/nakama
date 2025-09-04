@@ -17,6 +17,12 @@ import (
 	"go.uber.org/zap"
 )
 
+var payloadPool = &sync.Pool{
+	New: func() any {
+		return make([]byte, 0, 1024)
+	},
+}
+
 type ServiceType string
 
 const (
@@ -48,7 +54,7 @@ func MessageServiceType(m evr.Message) ServiceType {
 		*evr.LobbyMatchmakerStatusRequest, *evr.LobbyPingResponse, *evr.LobbyPlayerSessionsRequest,
 		*evr.LobbyPendingSessionCancel:
 		return ServiceTypeLobby
-	case *evr.BroadcasterRegistrationRequest, *evr.GameServerJoinAttempt, *evr.GameServerPlayerRemoved,
+	case *evr.GameServerRegistrationRequest, *evr.GameServerJoinAttempt, *evr.GameServerPlayerRemoved,
 		*evr.BroadcasterPlayerSessionsLocked, *evr.BroadcasterPlayerSessionsUnlocked, *evr.BroadcasterSessionEnded:
 		return ServiceTypeServer
 	default:
@@ -108,6 +114,14 @@ func NewServiceWS(logger *zap.Logger, clientIP, clientPort string, conn *websock
 		outgoingCh:             make(chan []byte, config.GetSocket().OutgoingQueueSize),
 		serviceCh:              make(chan []byte, config.GetSocket().OutgoingQueueSize),
 	}
+}
+
+func (s *serviceWS) ClientIP() string {
+	return s.clientIP
+}
+
+func (s *serviceWS) ClientPort() string {
+	return s.clientPort
 }
 
 func (s *serviceWS) IsStopped() bool {
@@ -312,25 +326,21 @@ func (s *serviceWS) SendEVR(envelope Envelope) error {
 		envelope.Messages = append(envelope.Messages, &evr.STcpConnectionUnrequireEvent{})
 	}
 
-	payload := make([]byte, 0, 1024)
+	payload := payloadPool.Get().([]byte) // Get a byte slice from the pool
+	defer func() {
+		payloadPool.Put(payload) //lint:ignore SA6002 // []byte is safe here
+	}()
 	for _, message := range envelope.Messages {
-		s.logger.Debug("Sending message", zap.String("message_type", fmt.Sprintf("%T", message)), zap.Any("message", message))
+		if s.logger.Core().Enabled(zap.DebugLevel) { // remove extra heavy reflection processing
+			s.logger.Debug("Sending message", zap.String("message_type", fmt.Sprintf("%T", message)), zap.Any("message", message))
+		}
 		data, err := evr.Marshal(message)
 		if err != nil {
 			return fmt.Errorf("failed to marshal message: %w", err)
 		}
-		if len(payload)+len(data) > int(s.config.GetSocket().MaxMessageSizeBytes) {
-			// Send the message in chunks if it exceeds the maximum size.
-			if err := s.SendBytes(payload, true); err != nil {
-				return fmt.Errorf("failed to send message: %w", err)
-			}
-			payload = make([]byte, 0, 1024)
+		if err := s.SendBytes(data, true); err != nil {
+			return fmt.Errorf("failed to send message: %w", err)
 		}
-
-		payload = append(payload, data...)
-	}
-	if err := s.SendBytes(payload, true); err != nil {
-		return fmt.Errorf("failed to send message: %w", err)
 	}
 	return nil
 }
@@ -346,7 +356,7 @@ func (s *serviceWS) CloseUnlock() {
 func (s *serviceWS) Close() {
 	s.CloseLock()
 	s.ctxCancelFn()
-	s.CloseLock()
+	s.CloseUnlock()
 
 	s.Lock()
 	if s.stopped {

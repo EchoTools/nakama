@@ -17,6 +17,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/gorilla/websocket"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -30,7 +31,7 @@ var (
 	tagsPattern        = regexp.MustCompile(`^[-.A-Za-z0-9_:]+$`)
 )
 
-func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionRegistry server.SessionRegistry, sessionCache server.SessionCache, statusRegistry server.StatusRegistry, matchmaker server.Matchmaker, tracker server.Tracker, metrics server.Metrics, runtime *server.Runtime, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, nkpipeline *server.Pipeline, pipeline *EvrPipeline) func(http.ResponseWriter, *http.Request) {
+func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionRegistry server.SessionRegistry, sessionCache server.SessionCache, statusRegistry server.StatusRegistry, matchmaker server.Matchmaker, tracker server.Tracker, metrics server.Metrics, runtime *server.Runtime, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, nkpipeline *server.Pipeline, pipeline *Pipeline) func(http.ResponseWriter, *http.Request) {
 	upgrader := &websocket.Upgrader{
 		ReadBufferSize:  config.GetSocket().ReadBufferSizeBytes,
 		WriteBufferSize: config.GetSocket().WriteBufferSizeBytes,
@@ -59,13 +60,20 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 		metrics.CountWebsocketOpened(1)
 		defer metrics.CountWebsocketClosed(1)
 
+		// Check if the system is temporarily unavailable.
+		if msg := ServiceSettings().DisableLoginMessage; msg != "" {
+			// Send 403 Forbidden and close the connection.
+			conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "System is Temporarily Unavailable:\n"+msg))
+			conn.Close()
+		}
+
 		// Add the URL parameters to the context
 		urlParams := make(map[string][]string, 0)
 		maps.Copy(urlParams, r.URL.Query())
 
 		vars := make(map[string]string, 0)
 		// Parse the geo precision value
-		vars["geo_precision"] = "8"
+		geoPrecision := 8
 		if s := parseUserQueryFunc(r, "geo_precision", 2, nil); s != "" {
 			v, err := strconv.Atoi(s)
 			if err != nil {
@@ -77,55 +85,61 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 				if v > 12 {
 					v = 12
 				}
-				vars["geo_precision"] = strconv.Itoa(v)
+				geoPrecision = v
 			}
 		}
 
 		// user_display_name_override overrides the in-game name of the user
 		vars["user_display_name_override"] = parseUserQueryFunc(r, "ign", 20, nil)
-		// auth_discord_id is the Discord ID of the user
-		vars["auth_discord_id"] = parseUserQueryFunc(r, "discordid", 20, discordIDPattern)
-		if v := parseUserQueryFunc(r, "discord_id", 20, discordIDPattern); v != "" {
-			vars["auth_discord_id"] = v
-		}
-		// auth_password is the password of the user's nakama account
-		vars["auth_password"] = parseUserQueryFunc(r, "password", 32, nil)
-		// disable_encryption disables encryption for game server connections
-		vars["disable_encryption"] = parseUserQueryFunc(r, "disable_encryption", 5, nil)
-		// disable_mac disables message authentication codes for game server connections
-		vars["disable_mac"] = parseUserQueryFunc(r, "disable_mac", 5, nil)
-		// is_vpn indicates if the client is detected as using VPN
-		vars["is_vpn"] = strconv.FormatBool(pipeline.ipInfoCache.IsVPN(clientIP))
-		// features is a comma-delimited list of features supported by the client
-		vars["features"] = strings.Join(parseUserQueryCommaDelimited(r, "features", 32, featurePattern), ",")
-		// requires is a comma-delimited list of features required by the client (client only)
-		vars["requires"] = strings.Join(parseUserQueryCommaDelimited(r, "requires", 32, featurePattern), ",")
-		// server_addr specifies the incoming server address (ip or host) and port. (server only)
-		vars["server_addr"] = parseUserQueryFunc(r, "server_addr", 64, nil)
-		// tags is a comma-delimited list of tags associated with the game server (server only)
-		vars["tags"] = strings.Join(parseUserQueryCommaDelimited(r, "tags", 32, tagsPattern), ",")
-		// guilds is a comma-delimited list of guilds associated with the game server (server only)
-		vars["guilds"] = strings.Join(parseUserQueryCommaDelimited(r, "guilds", 32, guildPattern), ",")
-		// regions is a comma-delimited list of region pools to use for matchmaking (server only)
-		vars["regions"] = strings.Join(parseUserQueryCommaDelimited(r, "regions", 32, regionPattern), ",")
-		// verbose enables verbose logging for the connection
-		vars["verbose"] = parseUserQueryFunc(r, "verbose", 5, nil)
-		// debug enables debug mode for the connection
-		vars["debug"] = parseUserQueryFunc(r, "debug", 5, nil)
 
-		service := NewServiceWS(logger, clientIP, clientPort, conn, config, metrics)
+		params := SessionParameters{
+			node: config.GetName(),
+
+			externalServerAddr:   parseUserQueryFunc(r, "server_addr", 64, nil),
+			geoHashPrecision:     geoPrecision,
+			isVPN:                pipeline.ipInfoCache.IsVPN(clientIP),
+			supportedFeatures:    parseUserQueryCommaDelimited(r, "features", 32, featurePattern),
+			requiredFeatures:     parseUserQueryCommaDelimited(r, "requires", 32, featurePattern),
+			serverTags:           parseUserQueryCommaDelimited(r, "tags", 32, tagsPattern),
+			serverGuilds:         parseUserQueryCommaDelimited(r, "guilds", 32, guildPattern),
+			serverRegions:        parseUserQueryCommaDelimited(r, "regions", 32, regionPattern),
+			relayOutgoing:        parseUserQueryFunc(r, "verbose", 5, nil) == "true",
+			enableAllRemoteLogs:  parseUserQueryFunc(r, "debug", 5, nil) == "true",
+			lastMatchmakingError: atomic.NewError(nil),
+			guildGroups:          make(map[string]*GuildGroup),
+			isIGPOpen:            atomic.NewBool(false),
+			earlyQuitConfig:      atomic.NewPointer[EarlyQuitConfig](nil),
+			isGoldNameTag:        atomic.NewBool(false),
+			latencyHistory:       atomic.NewPointer[LatencyHistory](nil),
+		}
+
+		// remove any empty values from vars
+		for k, v := range vars {
+			if v == "" {
+				delete(vars, k)
+			}
+		}
+		authLogger := logger.With(zap.String("client_ip", clientIP), zap.String("client_port", clientPort))
+		if len(urlParams) > 0 {
+			authLogger = authLogger.With(zap.Any("url_params", urlParams), zap.Any("vars", vars))
+		}
+
+		var (
+			service         = NewServiceWS(logger, clientIP, clientPort, conn, config, metrics)
+			incomingCh      = service.Start()
+			in              evr.Message
+			payload         []byte
+			failureResponse func(err error)
+		)
 
 		defer service.Close()
 
-		incomingCh := service.Start()
-		var in evr.Message
-		var payload []byte
 	InitLoop:
 		for {
 			var messages []evr.Message
 			select {
 			case <-service.ctx.Done():
-				// The client has not sent any messages, so we can assume that the connection is closed.
+				// The client has not sent any messages, so assume the connection is closed.
 				return
 			case payload = <-incomingCh:
 			}
@@ -147,7 +161,19 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 						logger.Warn("Failed to process request", zap.Error(err))
 						return
 					}
+
+				case *evr.ReconcileIAP:
+					// Return a stub response for now
+					if err := service.SendEVR(Envelope{
+						ServiceType: ServiceTypeIAP,
+						Messages:    []evr.Message{evr.NewReconcileIAPResult(msg.XPID)},
+					}); err != nil {
+						logger.Warn("Failed to process request", zap.Error(err))
+						return
+					}
+
 				case evr.LoginIdentifier:
+					// Associate with an existing session.
 					sessionID := msg.GetLoginSessionID()
 					if !sessionID.IsNil() {
 						// If the client has specified a login session ID, check if the session exists.
@@ -167,132 +193,162 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 							return
 						}
 					}
-				default:
+				case *evr.GameServerRegistrationRequest:
+
+					failureResponse = func(err error) {
+						if err := service.SendEVR(Envelope{
+							ServiceType: ServiceTypeServer,
+							Messages:    []evr.Message{evr.NewBroadcasterRegistrationFailure(evr.BroadcasterRegistration_Failure)},
+							State:       RequireStateUnrequired,
+						}); err != nil {
+							logger.Warn("Failed to send lobby registration failure", zap.Error(err))
+						}
+					}
+					// Handle legacy game server registration requests (that do not associate themselves with a login connection)
+					authDiscordID, authPassword := extractDiscordUserCredentials(r)
+					if authDiscordID != "" {
+						if authPassword == "" {
+							// Password is required for Discord authentication.
+							failureResponse(ErrMissingPassword)
+							return
+						}
+						_, username, err := GetUserIDByDiscordID(service.Context(), pipeline.db, authDiscordID)
+						if err != nil && err != server.ErrAccountNotFound {
+							// Some other error occurred while trying to get the user ID.
+							failureResponse(err)
+							return
+						}
+
+						// Authenticate the user with password.
+						userID, err := server.AuthenticateUsername(service.Context(), logger, pipeline.db, username, authPassword)
+						if err != nil {
+							logger.Warn("Username/password authentication failed.", zap.Error(err), zap.String("discord_id", authDiscordID))
+							failureResponse(err)
+							return
+						}
+						params.profile, err = EVRProfileLoad(service.Context(), pipeline.nk, userID)
+						if err != nil {
+							logger.Warn("Failed to load user profile", zap.Error(err), zap.String("user_id", userID))
+							failureResponse(err)
+							return
+						}
+					}
 					// The session does not exist, so create a new session.
-					if _, ok := in.(*evr.LoginRequest); !ok {
-						logger.Warn("Received unexpected message while expecting login", zap.String("request_type", fmt.Sprintf("%T", msg)))
+					break InitLoop
+				case *evr.LoginRequest:
+
+					params.xpID = msg.XPID
+					params.loginPayload = &msg.Payload
+					ctx := service.Context()
+					// Handle login requests
+					if err = validateLoginPayload(service.Context(), logger, msg); err != nil {
+						service.SendEVR(Envelope{
+							ServiceType: ServiceTypeLogin,
+							Messages: []evr.Message{
+								evr.NewLoginFailure(msg.XPID, formatLoginErrorMessage(msg.XPID, "", err)),
+							},
+							State: RequireStateUnrequired,
+						})
+						logger.Warn("Login payload validation failed", zap.Error(err), zap.String("xp_id", msg.XPID.String()))
 						return
 					}
-					break InitLoop
+
+					authLogger = authLogger.With(zap.String("xp_id", msg.XPID.String()))
+					failureResponse = func(err error) {
+						service.SendEVR(Envelope{
+							ServiceType: ServiceTypeLogin,
+							Messages: []evr.Message{
+								evr.NewLoginFailure(msg.XPID, formatLoginErrorMessage(msg.XPID, "", err)),
+							},
+							State: RequireStateUnrequired,
+						})
+					}
+					authDiscordID, authPassword := extractDiscordUserCredentials(r)
+
+					params.profile, err = pipeline.authenticateSession(ctx, logger, pipeline.db, config, statusRegistry, msg.XPID, clientIP, &msg.Payload, authDiscordID, authPassword)
+					switch err {
+					case nil:
+						// Authenticated successfully.
+						SendEvent(ctx, pipeline.nk, &EventUserAuthenticated{
+							UserID:                   params.profile.ID(),
+							XPID:                     msg.XPID,
+							ClientIP:                 clientIP,
+							LoginPayload:             &msg.Payload,
+							IsWebSocketAuthenticated: params.profile.HasPasswordSet(),
+						})
+						break InitLoop
+					case ErrDeviceNotLinked:
+						if params.profile.HasPasswordSet() {
+							// Device is not linked to an account. Link it to the one that was authenticated via Discord ID and password.
+							if err := server.LinkDevice(ctx, logger, pipeline.db, uuid.FromStringOrNil(params.profile.ID()), msg.XPID.String()); err != nil {
+								failureResponse(err)
+								authLogger.Warn("Failed to link device to account", zap.Error(err))
+								return
+							}
+						}
+
+						// Special case for unlinked devices.
+						ticket, err := IssueLinkTicket(service.Context(), pipeline.nk, msg.XPID, clientIP, msg.Payload)
+						if err != nil {
+							authLogger.Warn("Failed to issue link ticket", zap.Error(err))
+						}
+						errMessage := (&DeviceNotLinkedError{
+							Code:         ticket.Code,
+							Instructions: ServiceSettings().LinkInstructions,
+						}).Error()
+						service.SendEVR(Envelope{
+							ServiceType: ServiceTypeLogin,
+							Messages: []evr.Message{
+								evr.NewLoginFailure(msg.XPID, errMessage),
+							},
+							State: RequireStateUnrequired,
+						})
+						authLogger.Info("Device not linked", zap.String("link_code", ticket.Code))
+						return
+					default:
+						// Some other error occurred.
+						failureResponse(err)
+						authLogger.Warn("XPID authentication failed", zap.Error(err))
+						return
+					}
+
+				default:
+					// The session does not exist, so create a new session.
+					logger.Warn("Received unexpected message while expecting login", zap.String("request_type", fmt.Sprintf("%T", msg)))
+					return
+
 				}
 			}
 		}
 
 		var (
-			ctx                      = service.Context()
-			msg                      = in.(*evr.LoginRequest)
-			userID                   string
-			username                 string
-			isWebsocketAuthenticated bool
-			profile                  *EVRProfile
+			ctx    = service.Context()
+			userID = params.profile.ID()
 		)
 
-		authLogger := logger.With(zap.String("xp_id", msg.XPID.String()), zap.String("client_ip", clientIP), zap.String("client_port", clientPort))
-		if len(urlParams) > 0 {
-			authLogger = authLogger.With(zap.Any("url_params", urlParams), zap.Any("vars", vars))
-		}
-
-		sendFailure := func(err error) {
-			service.SendEVR(Envelope{
-				ServiceType: ServiceTypeLogin,
-				Messages: []evr.Message{
-					evr.NewLoginFailure(msg.XPID, formatLoginErrorMessage(msg.XPID, profile.DiscordID(), err)),
-				},
-				State: RequireStateUnrequired,
-			})
-		}
-
-		// Validate the payload of the login message
-		err = validateLoginPayload(ctx, authLogger, msg)
-		if err != nil {
-			sendFailure(err)
-			authLogger.Warn("Login payload validation failed", zap.Error(err), zap.String("xp_id", msg.XPID.String()))
-			return
-		}
-
-		if authDiscordID := vars["auth_discord_id"]; authDiscordID != "" {
-			// Authenticate with Discord ID and password, linking the device if necessary.
-			authPassword := vars["auth_password"]
-			if authPassword == "" {
-				sendFailure(newLoginError("missing_password", "missing password for Discord ID authentication"))
-				authLogger.Warn("Missing password for Discord ID authentication")
-				return
-			}
-			userID, _, _, err = AuthenticateDiscordPassword(ctx, logger, pipeline.db, config, statusRegistry, msg.XPID, authDiscordID, authPassword)
-			if err != nil {
-				authLogger.Debug("Discord ID authentication failed", zap.Error(err))
-				sendFailure(err)
-				return
-			}
-			isWebsocketAuthenticated = true
-		} else {
-			// Authenticate the XPID to get the linked user ID.
-			deviceUserID, _, err := AuthenticateXPID(ctx, logger, pipeline.db, statusRegistry, msg.XPID)
-			switch err {
-			case ErrDeviceNotLinked:
-				// Special case for unlinked devices.
-				code, err := IssueLinkTicket(ctx, pipeline.nk, msg.XPID, clientIP, msg.Payload)
-				if err != nil {
-					authLogger.Warn("Failed to issue link ticket", zap.Error(err))
-				}
-				errMessage := (&DeviceNotLinkedError{
-					Code:         code.Code,
-					Instructions: ServiceSettings().LinkInstructions,
-				}).Error()
-				service.SendEVR(Envelope{
-					ServiceType: ServiceTypeLogin,
-					Messages: []evr.Message{
-						evr.NewLoginFailure(msg.XPID, errMessage),
-					},
-					State: RequireStateUnrequired,
-				})
-				authLogger.Info("Device not linked", zap.String("link_code", code.Code))
-				return
-			case nil:
-				// Authenticated successfully.
-				userID = deviceUserID
-			default:
-				// Some other error occurred.
-				sendFailure(err)
-				authLogger.Warn("XPID authentication failed", zap.Error(err))
-				return
-			}
-		}
 		authLogger = authLogger.With(zap.String("uid", userID))
-		// Load the user profile.
-		profile, err = EVRProfileLoad(ctx, pipeline.nk, userID)
-		if err != nil {
-			sendFailure(err)
-			authLogger.Warn("Failed to load user profile", zap.Error(err), zap.String("user_id", userID))
-			return
-		}
-		username = profile.Username()
-		authLogger = authLogger.With(zap.String("username", username))
+		authLogger = authLogger.With(zap.String("username", params.profile.Username()))
 
 		authLogger.Info("User authenticated")
 
 		// Get the IPQS Data
-		var ipInfo IPInfo
+
 		if pipeline.ipInfoCache != nil {
-			if ipInfo, err = pipeline.ipInfoCache.Get(ctx, clientIP); err != nil {
+			if params.ipInfo, err = pipeline.ipInfoCache.Get(ctx, clientIP); err != nil {
 				logger.Debug("Failed to get IPQS details", zap.Error(err))
 			}
 		}
 
-		var (
-			disableLoginMessage = ServiceSettings().DisableLoginMessage
-			reportURL           = ServiceSettings().ReportURL
-		)
-		if err = pipeline.authorizeSession(ctx, authLogger, msg.XPID, &msg.Payload, profile, ipInfo, clientIP, disableLoginMessage, reportURL, isWebsocketAuthenticated); err != nil {
-			sendFailure(err)
-			authLogger.Info("Authorization failed", zap.Error(err))
+		sessionID := uuid.Must(sessionIdGen.NewV1())
+
+		if err := pipeline.initializeSessionParameters(ctx, authLogger, userID, &params); err != nil {
+			failureResponse(err)
+			authLogger.Warn("Failed to initialize session", zap.Error(err))
 			return
 		}
 
-		sessionID := uuid.Must(sessionIdGen.NewV1())
-
 		userUUID := uuid.FromStringOrNil(userID)
-		session := NewSessionWSEVR(logger, config, sessionID, userUUID, username, msg.XPID, &msg.Payload, vars, clientIP, clientPort, ipInfo, protojsonMarshaler, protojsonUnmarshaler, service, sessionRegistry, statusRegistry, matchmaker, tracker, metrics, runtime, pipeline)
+		session := NewSessionWSEVR(logger, config, sessionID, userUUID, params, vars, clientIP, clientPort, protojsonMarshaler, protojsonUnmarshaler, service, sessionRegistry, statusRegistry, matchmaker, tracker, metrics, runtime, pipeline)
 		session.AddService(ServiceTypeLogin, service)
 		// Add to the session registry.
 		sessionRegistry.Add(server.Session(session))
@@ -331,6 +387,17 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 		session.Consume()
 
 	}
+}
+
+func extractDiscordUserCredentials(r *http.Request) (string, string) {
+	// Authenticate the websocket connection out-of-band, before creating a session.
+	authDiscordID := parseUserQueryFunc(r, "discordid", 20, discordIDPattern)
+	if v := parseUserQueryFunc(r, "discord_id", 20, discordIDPattern); v != "" {
+		authDiscordID = v
+	}
+	// auth_password is the password of the user's nakama account
+	authPassword := parseUserQueryFunc(r, "password", 32, nil)
+	return authDiscordID, authPassword
 }
 
 // parseUserQueryFunc extracts and sanitizes a single string URL parameter from the request.

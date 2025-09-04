@@ -38,7 +38,7 @@ func (m *LoggedInUserProfileRequest) GetLoginSessionID() uuid.UUID {
 	return m.Session
 }
 
-func (m *LoggedInUserProfileRequest) GetEvrID() XPID {
+func (m *LoggedInUserProfileRequest) GetXPID() XPID {
 	return m.EvrID
 }
 

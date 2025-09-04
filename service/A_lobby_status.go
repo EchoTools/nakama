@@ -33,7 +33,7 @@ type GuildLobbyLabel struct {
 	GroupID string `json:"group_id"`
 }
 
-func (p *EvrPipeline) JoinMatchmakingStream(logger *zap.Logger, s *sessionEVR, lobbyParams *LobbySessionParameters) error {
+func (p *Pipeline) JoinMatchmakingStream(logger *zap.Logger, s *sessionEVR, lobbyParams *LobbySessionParameters) error {
 
 	stream := lobbyParams.MatchmakingStream()
 

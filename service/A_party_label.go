@@ -98,7 +98,7 @@ func GetPartyGroupByID(ctx context.Context, partyRegistry server.PartyRegistry, 
 	return parties[0], nil
 }
 
-func (p *EvrPipeline) updatePartyLeaderFromMessage(session *sessionEVR, in *nkrtapi.Envelope) error {
+func (p *Pipeline) updatePartyLeaderFromMessage(session *sessionEVR, in *nkrtapi.Envelope) error {
 	ctx := session.Context()
 	params, ok := LoadParams(ctx)
 	if !ok {

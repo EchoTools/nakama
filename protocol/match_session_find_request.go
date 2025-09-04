@@ -140,7 +140,7 @@ func (m *LobbyFindSessionRequest) GetGroupID() uuid.UUID { return m.GroupID }
 
 func (m LobbyFindSessionRequest) GetLoginSessionID() uuid.UUID { return m.LoginSessionID }
 
-func (m LobbyFindSessionRequest) GetEvrID() (evrID XPID) {
+func (m LobbyFindSessionRequest) GetXPID() (evrID XPID) {
 	if len(m.Entrants) > 0 {
 		return m.Entrants[0].EvrID
 	}

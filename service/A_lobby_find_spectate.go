@@ -17,7 +17,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger, session *sessionEVR, params *LobbySessionParameters) error {
+func (p *Pipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger, session *sessionEVR, params *LobbySessionParameters) error {
 
 	var (
 		limit   = 100
@@ -102,10 +102,12 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 
 				if err := p.LobbyJoinEntrants(server.NewRuntimeGoLogger(logger), label, entrant); err != nil {
 					// Send the error to the client
-					if err := SendEVRMessages(session, false, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
-						logger.Debug("Failed to send error message", zap.Error(err))
-						return err
-					}
+					session.SendEVR(Envelope{
+						ServiceType: ServiceTypeLobby,
+						Messages: []evr.Message{
+							LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err),
+						},
+					})
 				}
 				return nil
 			}

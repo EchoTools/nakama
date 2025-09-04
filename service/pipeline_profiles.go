@@ -16,7 +16,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger *zap.Logger, evrID evr.XPID, label *MatchLabel, statistics *evr.ServerProfileUpdateStatistics) error {
+func (p *Pipeline) processUserServerProfileUpdate(ctx context.Context, logger *zap.Logger, evrID evr.XPID, label *MatchLabel, statistics *evr.ServerProfileUpdateStatistics) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
@@ -222,7 +222,7 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, p
 	return entries, nil
 }
 
-func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) (err error) {
+func (p *Pipeline) loggedInUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) (err error) {
 	request := in.(*evr.LoggedInUserProfileRequest)
 	// Start a timer to add to the metrics
 	timer := time.Now()
@@ -263,7 +263,7 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	})
 }
 
-func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
+func (p *Pipeline) updateClientProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	request := in.(*evr.UpdateClientProfile)
 
 	if err := p.handleClientProfileUpdate(ctx, logger, session, request.XPID, request.Payload); err != nil {
@@ -287,7 +287,7 @@ func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *za
 	})
 }
 
-func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap.Logger, session *sessionEVR, evrID evr.XPID, update evr.ClientProfile) error {
+func (p *Pipeline) handleClientProfileUpdate(ctx context.Context, logger *zap.Logger, session *sessionEVR, evrID evr.XPID, update evr.ClientProfile) error {
 	// Set the EVR ID from the context
 	update.EvrID = evrID
 

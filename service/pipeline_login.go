@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (p *EvrPipeline) genericMessage(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
+func (p *Pipeline) genericMessage(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	request := in.(*evr.GenericMessage)
 	logger.Debug("Received generic message", zap.Any("message", request))
 
@@ -32,15 +32,9 @@ func (p *EvrPipeline) genericMessage(ctx context.Context, logger *zap.Logger, se
 	return nil
 }
 
-func mostRecentThursday() time.Time {
-	now := time.Now()
-	offset := (int(now.Weekday()) - int(time.Thursday) + 7) % 7
-	return now.AddDate(0, 0, -offset).UTC()
-}
-
 // A profile update request is sent from the game server's login connection.
 // It is sent 45 seconds before the sessionend is sent, right after the match ends.
-func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
+func (p *Pipeline) userServerProfileUpdateRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	message := in.(*evr.UserServerProfileUpdateRequest)
 
 	// Get the lobby for the user
@@ -81,7 +75,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	return nil
 }
 
-func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
+func (p *Pipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	var (
 		request   = in.(*evr.OtherUserProfileRequest)
 		data      json.RawMessage
@@ -100,7 +94,7 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 
 	if data, err = PlayerProfileLoad(ctx, server.NewRuntimeGoLogger(logger), p.nk, session.userID.String(), request.XPID); err != nil {
 		tags["error"] = "failed_load_profile"
-		logger.Warn("Failed to get player profile data", zap.String("evrId", request.XPID.String()))
+		logger.Warn("Failed to get player profile data", zap.String("xpid", request.XPID.String()))
 
 		// Return a generic profile for the user
 		profile := evr.NewServerProfile()
