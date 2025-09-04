@@ -24,7 +24,7 @@ type ChannelInfoResource struct {
 }
 
 func (m *ChannelInfoResponse) Stream(s *EasyStream) error {
-	return s.StreamJson(&m.ChannelInfo, false, ZlibCompression)
+	return s.StreamJSONRawMessage(&m.ChannelInfo, false, ZlibCompression)
 }
 
 func (m *ChannelInfoResponse) String() string {

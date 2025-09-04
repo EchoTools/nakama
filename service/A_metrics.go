@@ -157,7 +157,7 @@ func ListMatchStates(ctx context.Context, nk runtime.NakamaModule, matchRegistry
 	return matchStates, nil
 }
 
-func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, matchRegistry server.MatchRegistry) {
+func MetricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, matchRegistry server.MatchRegistry) {
 
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()

@@ -73,7 +73,6 @@ type sessionEVR struct {
 	matchmaker      server.Matchmaker
 	tracker         server.Tracker
 	metrics         server.Metrics
-	runtime         *server.Runtime
 
 	stopped    bool
 	services   *server.MapOf[ServiceType, *serviceWS]
@@ -90,7 +89,7 @@ type sessionEVR struct {
 	xpid evr.XPID
 }
 
-func NewSessionWSEVR(logger *zap.Logger, config server.Config, sessionID, userID uuid.UUID, params SessionParameters, vars map[string]string, clientIP, clientPort string, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, service *serviceWS, sessionRegistry server.SessionRegistry, statusRegistry server.StatusRegistry, matchmaker server.Matchmaker, tracker server.Tracker, metrics server.Metrics, runtime *server.Runtime, pipeline *Pipeline) *sessionEVR {
+func NewSessionWSEVR(logger *zap.Logger, config server.Config, sessionID, userID uuid.UUID, params SessionParameters, vars map[string]string, clientIP, clientPort string, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, service *serviceWS, sessionRegistry server.SessionRegistry, statusRegistry server.StatusRegistry, matchmaker server.Matchmaker, tracker server.Tracker, metrics server.Metrics, pipeline *Pipeline) *sessionEVR {
 
 	ctx, ctxCancelFn := context.WithCancel(context.Background())
 	logger = logger.With(
@@ -123,7 +122,6 @@ func NewSessionWSEVR(logger *zap.Logger, config server.Config, sessionID, userID
 		matchmaker:      matchmaker,
 		tracker:         tracker,
 		metrics:         metrics,
-		runtime:         runtime,
 
 		stopped:    false,
 		services:   &server.MapOf[ServiceType, *serviceWS]{},
@@ -367,10 +365,6 @@ func (s *sessionEVR) Close(msg string, reason runtime.PresenceReason, envelopes 
 
 	s.logger.Info("Closed client connection")
 
-	// Fire an event for session end.
-	if fn := s.runtime.EventSessionEnd(); fn != nil {
-		fn(s.userID.String(), s.username.Load(), s.vars, s.expiry, s.id.String(), s.clientIP, s.clientPort, s.lang, time.Now().UTC().Unix(), msg)
-	}
 }
 
 func (s *sessionEVR) AddService(serviceType ServiceType, service *serviceWS) error {

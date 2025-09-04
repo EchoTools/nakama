@@ -37,6 +37,7 @@ import (
 	"github.com/heroiclabs/nakama/v3/social"
 	"github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/jackc/pgx/v5/stdlib" // Blank import to register SQL driver
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -198,11 +199,44 @@ func main() {
 		logger.Fatal("Failed to initialize storage index", zap.Error(err))
 	}
 	partyRegistry := server.NewLocalPartyRegistry(ctx, logger, startupLogger, config, config.GetName())
+
+	// Inject the dependencies for the runtimes.
+
+	pipelineDependencies := &service.PipelineDependencies{
+		DB:                   db,
+		Logger:               logger,
+		StartupLogger:        startupLogger,
+		Config:               config,
+		SocialClient:         socialClient,
+		StorageIndex:         storageIndex,
+		LeaderboardCache:     leaderboardCache,
+		LeaderboardRankCache: leaderboardRankCache,
+		LeaderboardScheduler: leaderboardScheduler,
+		SessionRegistry:      sessionRegistry,
+		SessionCache:         sessionCache,
+		StatusRegistry:       statusRegistry,
+		MatchRegistry:        matchRegistry,
+		Matchmaker:           atomic.NewPointer[server.LocalMatchmaker](nil),
+		PartyRegistry:        partyRegistry,
+		Tracker:              tracker,
+		Router:               router,
+		StreamManager:        streamManager,
+		Metrics:              metrics,
+		ProtojsonMarshaler:   jsonpbMarshaler,
+		ProtojsonUnmarshaler: jsonpbUnmarshaler,
+		Version:              semver,
+	}
+
+	ctx = context.WithValue(ctx, service.PipelineDependenciesKey{}, pipelineDependencies)
+
 	runtime, runtimeInfo, err := server.NewRuntime(ctx, logger, startupLogger, db, jsonpbMarshaler, jsonpbUnmarshaler, config, version, socialClient, leaderboardCache, leaderboardRankCache, leaderboardScheduler, sessionRegistry, sessionCache, statusRegistry, matchRegistry, partyRegistry, tracker, metrics, streamManager, router, storageIndex, fmCallbackHandler)
 	if err != nil {
 		startupLogger.Fatal("Failed initializing runtime modules", zap.Error(err))
 	}
 	matchmaker := server.NewLocalMatchmaker(logger, startupLogger, config, router, metrics, runtime)
+
+	pipelineDependencies.SetMatchmaker(matchmaker.(*server.LocalMatchmaker))
+
 	partyRegistry.Init(matchmaker, tracker, streamManager, router)
 	tracker.SetPartyJoinListener(partyRegistry.Join)
 	tracker.SetPartyLeaveListener(partyRegistry.Leave)
@@ -211,17 +245,12 @@ func main() {
 	googleRefundScheduler.Start(runtime)
 
 	pipeline := server.NewPipeline(logger, config, db, jsonpbMarshaler, jsonpbUnmarshaler, sessionRegistry, statusRegistry, matchRegistry, partyRegistry, matchmaker, tracker, router, runtime)
+
 	statusHandler := server.NewLocalStatusHandler(logger, sessionRegistry, matchRegistry, tracker, metrics, config.GetName())
 
 	telemetryEnabled := os.Getenv("NAKAMA_TELEMETRY") != "0"
 	console.UIFS.Nt = !telemetryEnabled
 	cookie := newOrLoadCookie(telemetryEnabled, config)
-
-	evrPipeline := service.NewEvrPipeline(logger, startupLogger, db, jsonpbMarshaler, jsonpbUnmarshaler, config, version, socialClient, storageIndex, leaderboardScheduler, leaderboardCache, leaderboardRankCache, sessionRegistry, sessionCache, statusRegistry, matchRegistry, partyRegistry, matchmaker, tracker, router, streamManager, metrics, pipeline, runtime)
-	nevrRuntime, err := service.NewNEVRRuntime(logger, startupLogger, db, jsonpbMarshaler, jsonpbUnmarshaler, config, version, socialClient, storageIndex, leaderboardCache, leaderboardRankCache, leaderboardScheduler, sessionRegistry, sessionCache, statusRegistry, matchRegistry, matchmaker, partyRegistry, tracker, router, streamManager, metrics, runtime, runtimeInfo, pipeline, evrPipeline)
-	if err != nil {
-		startupLogger.Fatal("Failed initializing NEVR runtime", zap.Error(err))
-	}
 
 	// Register any configured storage indexes.
 	if err := service.RegisterIndexes(ctx, storageIndex); err != nil {
@@ -234,14 +263,9 @@ func main() {
 		}
 	}()
 
-	nk := server.NewRuntimeGoNakamaModule(logger, db, jsonpbMarshaler, config, socialClient, leaderboardCache, leaderboardRankCache, leaderboardScheduler, sessionRegistry, sessionCache, statusRegistry, matchRegistry, partyRegistry, tracker, metrics, streamManager, router, storageIndex, nil)
+	apiServer := server.StartApiServer(logger, startupLogger, db, jsonpbMarshaler, jsonpbUnmarshaler, config, version, socialClient, storageIndex, leaderboardCache, leaderboardRankCache, sessionRegistry, sessionCache, statusRegistry, matchRegistry, partyRegistry, matchmaker, tracker, router, streamManager, metrics, pipeline, runtime)
 
-	go service.ServiceSettingsLoop(ctx, server.NewRuntimeGoLogger(logger), nk)
-
-	nkApiServer := server.StartApiServer(logger, startupLogger, db, jsonpbMarshaler, jsonpbUnmarshaler, config, version, socialClient, storageIndex, leaderboardCache, leaderboardRankCache, sessionRegistry, sessionCache, statusRegistry, matchRegistry, partyRegistry, matchmaker, tracker, router, streamManager, metrics, pipeline, runtime)
-	apiServer := service.StartGameAPI(logger, startupLogger, db, jsonpbMarshaler, jsonpbUnmarshaler, config, version, socialClient, storageIndex, leaderboardCache, leaderboardRankCache, sessionRegistry, sessionCache, statusRegistry, matchRegistry, matchmaker, tracker, router, streamManager, metrics, pipeline, runtime, evrPipeline)
-
-	consoleServer := server.StartConsoleServer(logger, startupLogger, db, config, tracker, router, streamManager, metrics, sessionRegistry, sessionCache, consoleSessionCache, loginAttemptCache, statusRegistry, statusHandler, runtimeInfo, matchRegistry, configWarnings, semver, leaderboardCache, leaderboardRankCache, leaderboardScheduler, storageIndex, nkApiServer, runtime, cookie)
+	consoleServer := server.StartConsoleServer(logger, startupLogger, db, config, tracker, router, streamManager, metrics, sessionRegistry, sessionCache, consoleSessionCache, loginAttemptCache, statusRegistry, statusHandler, runtimeInfo, matchRegistry, configWarnings, semver, leaderboardCache, leaderboardRankCache, leaderboardScheduler, storageIndex, apiServer, runtime, cookie)
 
 	if telemetryEnabled {
 		const telemetryKey = "YU1bIKUhjQA9WC0O6ouIRIWTaPlJ5kFs"
@@ -266,7 +290,6 @@ func main() {
 	ctxCancelFn()
 
 	// Gracefully stop remaining server components.
-	nevrRuntime.Stop()
 	apiServer.Stop()
 	consoleServer.Stop()
 	matchmaker.Stop()

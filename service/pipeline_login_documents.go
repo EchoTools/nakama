@@ -16,17 +16,20 @@ import (
 const (
 	DocumentStorageCollection    = "GameDocuments"
 	StorageCollectionChannelInfo = "ChannelInfo"
+	StorageIndexChannelInfo      = "ChannelInfoIndex"
 )
 
-var (
-	channelInfoIndex = StorableIndexMeta{
-		Name:       "ChannelInfoIndex",
+type ChannelInfoData struct{}
+
+func (c *ChannelInfoData) StorageIndexes() []StorableIndexMeta {
+	return []StorableIndexMeta{{
+		Name:       StorageIndexChannelInfo,
 		Collection: StorageCollectionChannelInfo,
 		Fields:     []string{"channeluuid"},
 		MaxEntries: 200,
 		IndexOnly:  false,
-	}
-)
+	}}
+}
 
 func (p *Pipeline) documentRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	request := in.(*evr.DocumentRequest)
@@ -156,11 +159,11 @@ func (p *Pipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger, s
 
 	// Use the Index
 	query := "+key:%s" + groupID.String()
-	objs, _, err := p.nk.StorageIndexList(ctx, SystemUserID, channelInfoIndex.Name, query, 1, nil, "")
+	objs, _, err := p.nk.StorageIndexList(ctx, SystemUserID, StorageIndexChannelInfo, query, 1, nil, "")
 	if err != nil {
 		return fmt.Errorf("failed to query channel info: %w", err)
 	}
-	if len(objs.Objects) > 0 {
+	if len(objs.Objects) > 0 && objs.GetObjects()[0].GetUpdateTime().AsTime().After(time.Now().Add(10*time.Minute)) {
 		// send the document to the client
 		return session.SendEVR(Envelope{
 			ServiceType: ServiceTypeLogin,

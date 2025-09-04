@@ -92,7 +92,7 @@ func (e EVRProfile) XPIDs() []evr.XPID {
 	return xpids
 }
 
-func (e EVRProfile) HasPasswordSet() bool {
+func (e *EVRProfile) HasPasswordSet() bool {
 	return e.account.GetEmail() != ""
 }
 

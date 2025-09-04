@@ -9,7 +9,6 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"time"
 
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -18,7 +17,6 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/echotools/nevr-common/v3/rtapi"
-	"github.com/go-redis/redis"
 
 	evr "github.com/echotools/nakama/v3/protocol"
 	nkrtapi "github.com/heroiclabs/nakama-common/rtapi"
@@ -31,7 +29,6 @@ var dg *discordgo.Session
 
 var unrequireMessage = evr.NewSTcpConnectionUnrequireEvent()
 
-var globalMatchmaker = atomic.NewPointer[server.LocalMatchmaker](nil)
 var GlobalAppBot = atomic.NewPointer[DiscordAppBot](nil)
 
 type Pipeline struct {
@@ -53,16 +50,14 @@ type Pipeline struct {
 	statusRegistry  server.StatusRegistry
 	partyRegistry   server.PartyRegistry
 	tracker         server.Tracker
-	matchmaker      server.Matchmaker
 	router          server.MessageRouter
 	streamManager   server.StreamManager
 	metrics         server.Metrics
 
 	version string
 
-	runtime       *server.Runtime
-	nk            *server.RuntimeGoNakamaModule
-	nevr          *NEVRNakamaModule
+	nk            runtime.NakamaModule
+	nevr          *RuntimeGoNEVRModule
 	runtimeLogger runtime.Logger
 
 	discordCache *DiscordIntegrator
@@ -76,144 +71,17 @@ type Pipeline struct {
 	linkDeviceURL    string
 }
 
-type ctxDiscordBotTokenKey struct{}
+func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config server.Config, version string, socialClient *social.Client, storageIndex server.StorageIndex, leaderboardScheduler server.LeaderboardScheduler, leaderboardCache server.LeaderboardCache, leaderboardRankCache server.LeaderboardRankCache, sessionRegistry server.SessionRegistry, sessionCache server.SessionCache, statusRegistry server.StatusRegistry, matchRegistry server.MatchRegistry, partyRegistry server.PartyRegistry, matchmaker *atomic.Pointer[server.LocalMatchmaker], tracker server.Tracker, router server.MessageRouter, streamManager server.StreamManager, metrics server.Metrics, discordIntegrator *DiscordIntegrator, appBot *DiscordAppBot, userRemoteLogJournalRegistry *UserLogJouralRegistry, guildGroupRegistry *GuildGroupRegistry, ipInfoCache *IPInfoCache) *Pipeline {
 
-func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config server.Config, version string, socialClient *social.Client, storageIndex server.StorageIndex, leaderboardScheduler server.LeaderboardScheduler, leaderboardCache server.LeaderboardCache, leaderboardRankCache server.LeaderboardRankCache, sessionRegistry server.SessionRegistry, sessionCache server.SessionCache, statusRegistry server.StatusRegistry, matchRegistry server.MatchRegistry, partyRegistry server.PartyRegistry, matchmaker server.Matchmaker, tracker server.Tracker, router server.MessageRouter, streamManager server.StreamManager, metrics server.Metrics, pipeline *server.Pipeline, nkruntime *server.Runtime) *Pipeline {
-	globalMatchmaker.Store(matchmaker.(*server.LocalMatchmaker))
-
-	nk := server.NewRuntimeGoNakamaModule(logger, db, protojsonMarshaler, config, socialClient, leaderboardCache, leaderboardRankCache, leaderboardScheduler, sessionRegistry, sessionCache, statusRegistry, matchRegistry, partyRegistry, tracker, metrics, streamManager, router, storageIndex, nil)
-	nevr := &NEVRNakamaModule{
-		RuntimeGoNakamaModule: nk,
+	nevr := &RuntimeGoNEVRModule{
+		RuntimeGoNakamaModule: nk.(*server.RuntimeGoNakamaModule),
 		zapLogger:             logger,
 		db:                    db,
 		metrics:               metrics,
 		storageIndex:          storageIndex,
 	}
 
-	// Add the bot token to the context
-	vars := config.GetRuntime().Environment
-	ctx := context.WithValue(context.Background(), ctxDiscordBotTokenKey{}, vars["DISCORD_BOT_TOKEN"])
-	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_ENV, vars)
-
-	// TODO: move this to a Start() function
-	// Load the global settings
-	if _, err := ServiceSettingsLoad(ctx, nk); err != nil {
-		logger.Fatal("Failed to load global settings", zap.Error(err))
-	}
-
-	// TODO: move this to a Start() function
-	go func() {
-
-		interval := 30 * time.Second
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				ticker.Stop()
-				return
-			case <-ticker.C:
-				if _, err := ServiceSettingsLoad(ctx, nk); err != nil {
-					logger.Error("Failed to load global settings", zap.Error(err))
-				}
-			}
-		}
-	}()
-
-	botToken, ok := ctx.Value(ctxDiscordBotTokenKey{}).(string)
-	if !ok {
-		panic("Bot token is not set in context.")
-	}
-
-	var err error
-	if botToken != "" {
-		dg, err = discordgo.New("Bot " + botToken)
-		if err != nil {
-			logger.Error("Unable to create bot")
-		}
-		dg.StateEnabled = true
-	}
-
-	runtimeLogger := server.NewRuntimeGoLogger(logger)
-
-	guildGroupRegistry := NewGuildGroupRegistry(ctx, runtimeLogger, nk, db)
-
-	// TODO: Move component creation to main.go
-	lobbyBuilder := NewLobbyBuilder(runtimeLogger, nk, sessionRegistry, matchRegistry, tracker, metrics)
-	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
-
-	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(ctx, logger, nk, sessionRegistry)
-
-	// TODO: Move component creation to main.go
-	// Connect to the redis server
-	var redisClient *redis.Client
-	if vars["REDIS_URI"] != "" {
-		redisClient, err = connectRedis(ctx, vars["REDIS_URI"])
-		if err != nil {
-			logger.Fatal("Failed to connect to Redis", zap.Error(err))
-		}
-	}
-
-	// TODO: Move component creation to main.go
-	var ipInfoCache *IPInfoCache
-	if redisClient != nil {
-		var providers []IPInfoProvider
-		if vars["IPAPI_API_KEY"] != "" {
-			ipqsClient, err := NewIPQSClient(logger, metrics, redisClient, vars["IPQS_API_KEY"])
-			if err != nil {
-				logger.Fatal("Failed to create IPQS client", zap.Error(err))
-			}
-			providers = append(providers, ipqsClient)
-		}
-
-		ipapiClient, err := NewIPAPIClient(logger, metrics, redisClient)
-		if err != nil {
-			logger.Fatal("Failed to create IPAPI client", zap.Error(err))
-		}
-		providers = append(providers, ipapiClient)
-
-		ipInfoCache, err = NewIPInfoCache(logger, metrics, providers...)
-		if err != nil {
-			logger.Fatal("Failed to create IP info cache", zap.Error(err))
-		}
-	}
-
-	var appBot *DiscordAppBot
-	var discordIntegrator *DiscordIntegrator
-
-	// TODO: Move component creation to main.go
-	discordIntegrator = NewDiscordIntegrator(ctx, logger, config, metrics, nk, db, dg, guildGroupRegistry)
-	discordIntegrator.Start()
-
-	// TODO: Move component creation to main.go
-	appBot, err = NewDiscordAppBot(ctx, runtimeLogger, nk, db, metrics, config, discordIntegrator, statusRegistry, sessionRegistry, dg, ipInfoCache, guildGroupRegistry)
-	if err != nil {
-		logger.Error("Failed to create app bot", zap.Error(err))
-
-	}
-	// Store the app bot in a global variable for later use
-	GlobalAppBot.Store(appBot) // TODO: This is a temporary solution, we should refactor this to avoid global state
-
-	// Add a once handler to wait for the bot to connect
-	readyCh := make(chan struct{})
-	dg.AddHandlerOnce(func(s *discordgo.Session, r *discordgo.Ready) {
-		close(readyCh)
-	})
-
-	if err = dg.Open(); err != nil {
-		logger.Fatal("Failed to open discord bot connection: %w", zap.Error(err))
-	}
-
-	select {
-	case <-readyCh:
-		logger.Info("Discord bot is ready")
-	case <-time.After(10 * time.Second):
-		logger.Fatal("Discord bot is not ready after 10 seconds")
-	}
-
 	evrPipeline := &Pipeline{
-		ctx:     ctx,
 		node:    config.GetName(),
 		version: version,
 
@@ -227,15 +95,13 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		statusRegistry:  statusRegistry,
 		partyRegistry:   partyRegistry,
 		tracker:         tracker,
-		matchmaker:      matchmaker,
 		router:          router,
 		streamManager:   streamManager,
 		metrics:         metrics,
-		runtime:         nkruntime,
 
-		nk:            nk,
+		nk:            nevr,
 		nevr:          nevr,
-		runtimeLogger: runtimeLogger,
+		runtimeLogger: server.NewRuntimeGoLogger(logger),
 
 		discordCache: discordIntegrator,
 		appBot:       appBot,

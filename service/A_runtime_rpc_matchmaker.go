@@ -91,8 +91,11 @@ type MatchmakerStateResponse struct {
 	Index []*server.MatchmakerExtract `json:"index"`
 }
 
+/*
 func MatchmakerStateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 
+	deps := ctx.Value(PipelineDependenciesKey{}).(*PipelineDependencies)
+	globalMatchmaker := deps.GetMatchmaker()
 	matchmaker := globalMatchmaker.Load()
 	if matchmaker == nil {
 		return "", runtime.NewError("server.Matchmaker not initialized", StatusInternalError)
@@ -110,6 +113,7 @@ func MatchmakerStateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 
 	return string(data), nil
 }
+*/
 
 type BuildMatchRequest struct {
 	Entries []*server.MatchmakerEntry `json:"entries"`

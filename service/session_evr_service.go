@@ -93,6 +93,8 @@ func NewServiceWS(logger *zap.Logger, clientIP, clientPort string, conn *websock
 
 	ctx, ctxCancelFn := context.WithCancel(context.Background())
 
+	logger.Info("Creating new service websocket", zap.String("client_addr", clientIP+":"+clientPort))
+
 	return &serviceWS{
 		logger:             logger,
 		config:             config,

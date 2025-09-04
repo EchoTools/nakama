@@ -137,7 +137,7 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 }
 
-func (h *EventDispatcher) eventFn(ctx context.Context, logger runtime.Logger, evt *api.Event) {
+func (h *EventDispatcher) EventFn(ctx context.Context, logger runtime.Logger, evt *api.Event) {
 	select {
 	case h.queue <- evt:
 		logger.WithField("event", evt.Name).Debug("event queued for processing")

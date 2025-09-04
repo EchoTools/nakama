@@ -78,15 +78,17 @@ func NewVRMLScanQueue(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		return nil, fmt.Errorf("failed to register VRML redirect RPC: %v", err)
 	}
 
-	verifier.Start()
-
 	return verifier, nil
 }
-func (v *VRMLScanQueue) Start() error {
+func (v *VRMLScanQueue) Start() {
+	if v == nil {
+		return
+	}
 
 	ledger, err := VRMLEntitlementLedgerLoad(v.ctx, v.nk)
 	if err != nil {
-		return fmt.Errorf("failed to load VRML entitlement ledger: %v", err)
+		v.logger.WithField("error", err).Error("Failed to load VRML entitlement ledger")
+		return
 	}
 
 	go func() {
@@ -189,8 +191,6 @@ func (v *VRMLScanQueue) Start() error {
 		}
 
 	}()
-
-	return nil
 }
 
 func (v *VRMLScanQueue) cachePlayerLists() error {

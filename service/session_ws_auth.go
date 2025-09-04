@@ -19,17 +19,18 @@ import (
 )
 
 var (
-	ErrDeviceNotLinked         = errors.New("device not linked to an account")
-	ErrDeviceLinkMismatch      = errors.New("device linked to a different account")
-	ErrMissingDiscordID        = errors.New("missing Discord ID for authentication")
-	ErrMissingPassword         = errors.New("missing password for Discord authentication")
-	ErrInvalidXPID             = errors.New("invalid XPID format")
-	ErrGetAccount              = errors.New("error getting account")
-	ErrFailedLinkDevice        = errors.New("failed to link device")
-	ErrLinkTicket              = errors.New("error creating link ticket")
-	ErrDeviceLinkedToOther     = errors.New("device linked to a different account")
-	ErrFailedLinkEmail         = errors.New("failed to link email")
-	ErrAccountRequiresPassword = errors.New("account requires password authentication")
+	ErrSystemTemporarilyUnavailable = errors.New("system temporarily unavailable")
+	ErrDeviceNotLinked              = errors.New("device not linked to an account")
+	ErrDeviceLinkMismatch           = errors.New("device linked to a different account")
+	ErrMissingDiscordID             = errors.New("missing Discord ID for authentication")
+	ErrMissingPassword              = errors.New("missing password for Discord authentication")
+	ErrInvalidXPID                  = errors.New("invalid XPID format")
+	ErrGetAccount                   = errors.New("error getting account")
+	ErrFailedLinkDevice             = errors.New("failed to link device")
+	ErrLinkTicket                   = errors.New("error creating link ticket")
+	ErrDeviceLinkedToOther          = errors.New("device linked to a different account")
+	ErrFailedLinkEmail              = errors.New("failed to link email")
+	ErrAccountRequiresPassword      = errors.New("account requires password authentication")
 )
 
 // AuthenticateDiscordPassword authenticates a user using their Discord ID and password.
@@ -64,7 +65,7 @@ func (p *Pipeline) authenticateSession(ctx context.Context, logger *zap.Logger, 
 
 	// Check if the device is linked to the account.
 	deviceUserID, _, deviceErr := AuthenticateXPID(ctx, logger, db, statusRegistry, xpID)
-	if err != nil && err != ErrDeviceNotLinked {
+	if deviceErr != nil && err != ErrDeviceNotLinked {
 		// Some other error occurred while trying to authenticate the device.
 		return nil, fmt.Errorf("error authenticating device: %w", deviceErr)
 	}

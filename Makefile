@@ -16,15 +16,20 @@ all: nakama
 nakama: dev
 
 dev: $(SRC_FILES)
-	GOWORK=off CGO_ENABLED=1 CGO_CFLAGS="-O0 -g" go build \
+	CGO_ENABLED=1 CGO_CFLAGS="-O0 -g" go build \
 		$(DEBUG_FLAGS) \
 		-ldflags "-X main.version=$(GIT_DESCRIBE) -X main.commitID=$(COMMIT)" \
 		-o nakama-debug
 
 build: $(SRC_FILES)
-		docker buildx build \
-			--build-arg VERSION=$(GIT_DESCRIBE) \
-			-t echotools/nakama:$(TAG) . -f build/Dockerfile.local
+	docker buildx build \
+		--build-arg VERSION=$(GIT_DESCRIBE) \
+		-t echotools/nakama:$(TAG) . -f build/Dockerfile.local
+
+module:
+	CGO_ENABLED=1 CGO_CFLAGS="-O0 -g" go build \
+		$(DEBUG_FLAGS) \
+		-buildmode=plugin -trimpath -o ./data/modules/backend.so backend/module/main.go
 
 release: build
 	@if [ "$(TAG)" == "dev" ]; then \

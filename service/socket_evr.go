@@ -31,7 +31,7 @@ var (
 	tagsPattern        = regexp.MustCompile(`^[-.A-Za-z0-9_:]+$`)
 )
 
-func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionRegistry server.SessionRegistry, sessionCache server.SessionCache, statusRegistry server.StatusRegistry, matchmaker server.Matchmaker, tracker server.Tracker, metrics server.Metrics, runtime *server.Runtime, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, nkpipeline *server.Pipeline, pipeline *Pipeline) func(http.ResponseWriter, *http.Request) {
+func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionRegistry server.SessionRegistry, sessionCache server.SessionCache, statusRegistry server.StatusRegistry, matchmakerRef *atomic.Pointer[server.LocalMatchmaker], tracker server.Tracker, metrics server.Metrics, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, pipeline *Pipeline) func(http.ResponseWriter, *http.Request) {
 	upgrader := &websocket.Upgrader{
 		ReadBufferSize:  config.GetSocket().ReadBufferSizeBytes,
 		WriteBufferSize: config.GetSocket().WriteBufferSizeBytes,
@@ -213,7 +213,7 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 							return
 						}
 						_, username, err := GetUserIDByDiscordID(service.Context(), pipeline.db, authDiscordID)
-						if err != nil && err != server.ErrAccountNotFound {
+						if err != nil {
 							// Some other error occurred while trying to get the user ID.
 							failureResponse(err)
 							return
@@ -232,6 +232,11 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 							failureResponse(err)
 							return
 						}
+					}
+					if params.profile == nil {
+						// Must be authenticated to register a game server.
+						failureResponse(ErrAuthenticateFailed)
+						return
 					}
 					// The session does not exist, so create a new session.
 					break InitLoop
@@ -278,7 +283,7 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 						})
 						break InitLoop
 					case ErrDeviceNotLinked:
-						if params.profile.HasPasswordSet() {
+						if params.profile != nil && params.profile.HasPasswordSet() {
 							// Device is not linked to an account. Link it to the one that was authenticated via Discord ID and password.
 							if err := server.LinkDevice(ctx, logger, pipeline.db, uuid.FromStringOrNil(params.profile.ID()), msg.XPID.String()); err != nil {
 								failureResponse(err)
@@ -347,8 +352,14 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 			return
 		}
 
+		matchmaker := matchmakerRef.Load()
+		if matchmaker == nil {
+			authLogger.Warn("Matchmaker not available")
+			failureResponse(ErrSystemTemporarilyUnavailable)
+		}
+
 		userUUID := uuid.FromStringOrNil(userID)
-		session := NewSessionWSEVR(logger, config, sessionID, userUUID, params, vars, clientIP, clientPort, protojsonMarshaler, protojsonUnmarshaler, service, sessionRegistry, statusRegistry, matchmaker, tracker, metrics, runtime, pipeline)
+		session := NewSessionWSEVR(logger, config, sessionID, userUUID, params, vars, clientIP, clientPort, protojsonMarshaler, protojsonUnmarshaler, service, sessionRegistry, statusRegistry, matchmaker, tracker, metrics, pipeline)
 		session.AddService(ServiceTypeLogin, service)
 		// Add to the session registry.
 		sessionRegistry.Add(server.Session(session))

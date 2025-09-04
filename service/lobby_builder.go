@@ -53,17 +53,21 @@ func NewLobbyBuilder(logger runtime.Logger, nk runtime.NakamaModule, sessionRegi
 	}
 }
 
-func (b *LobbyBuilder) handleMatchedEntries(entries [][]*server.MatchmakerEntry) {
+func (b *LobbyBuilder) MatchmakerMatchedFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, entries []runtime.MatchmakerEntry) (string, error) {
 	// build matches one at a time.
-	for _, entrants := range entries {
-		if _, err := b.buildMatch(b.logger, entrants); err != nil {
-			b.logger.WithFields(map[string]any{
-				"err":      err,
-				"entrants": entrants,
-			}).Error("Failed to build match")
-			return
-		}
+	entrants := make([]*server.MatchmakerEntry, len(entries))
+	for i, e := range entries {
+		entrants[i] = e.(*server.MatchmakerEntry)
 	}
+	matchID, err := b.buildMatch(b.logger, entrants)
+	if err != nil {
+		b.logger.WithFields(map[string]any{
+			"err":      err,
+			"entrants": entrants,
+		}).Error("Failed to build match")
+		return "", err
+	}
+	return matchID.String(), nil
 }
 
 func (b *LobbyBuilder) extractLatenciesFromEntrants(entrants []*server.MatchmakerEntry) (map[string][][]float64, map[string]map[string]float64) {

@@ -22,9 +22,10 @@ type GuildGroupRegistry struct {
 	writeMu        sync.Mutex                              // Mutex to protect writes to the guildGroups map
 	guildGroups    *atomic.Pointer[map[string]*GuildGroup] // map[groupID]GuildGroup
 	inheritanceMap *atomic.Pointer[map[string][]string]    // map[srcGroupID][]dstGroupID
+	botDiscordID   string
 }
 
-func NewGuildGroupRegistry(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB) *GuildGroupRegistry {
+func NewGuildGroupRegistry(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, botDiscordID string) *GuildGroupRegistry {
 
 	registry := &GuildGroupRegistry{
 		ctx:    ctx,
@@ -34,6 +35,7 @@ func NewGuildGroupRegistry(ctx context.Context, logger runtime.Logger, nk runtim
 
 		guildGroups:    atomic.NewPointer(&map[string]*GuildGroup{}),
 		inheritanceMap: atomic.NewPointer(&map[string][]string{}),
+		botDiscordID:   botDiscordID,
 	}
 	// Regularly update the guild groups from the database.
 	go func() {
@@ -94,7 +96,7 @@ func (r *GuildGroupRegistry) rebuildGuildGroups() {
 
 		for _, group := range groups {
 			// Load the state
-			state, err := GuildGroupStateLoad(ctx, nk, ServiceSettings().DiscordBotUserID, group.Id)
+			state, err := GuildGroupStateLoad(ctx, nk, r.botDiscordID, group.Id)
 			if err != nil {
 				logger.WithField("error", err).Warn("Error loading guild group state")
 				continue
