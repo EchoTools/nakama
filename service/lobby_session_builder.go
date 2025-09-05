@@ -230,10 +230,8 @@ func (b *LobbyBuilder) buildMatch(logger runtime.Logger, entrants []*server.Matc
 		return nil, fmt.Errorf("missing mode property")
 	}
 
-	mode := evr.ToSymbol(modestr)
-
 	settings := &LobbySessionSettings{
-		Mode:              mode,
+		Mode:              Mode(modestr),
 		Level:             b.selectNextMap(mode),
 		CreatorID:         uuid.FromStringOrNil(SystemUserID),
 		GroupID:           groupID,

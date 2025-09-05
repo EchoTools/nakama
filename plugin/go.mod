@@ -1,4 +1,4 @@
-module github.com/echotools/nakama/backend
+module github.com/echotools/nakama/plugin
 
 go 1.25.0
 

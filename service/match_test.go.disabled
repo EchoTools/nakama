@@ -1,4 +1,4 @@
-package backend
+package service
 
 import (
 	"context"
@@ -90,7 +90,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 	}{
 		{
 			name:           "UnassignedPlayer",
-			lobbyType:      service.PrivateLobby,
+			lobbyType:      PrivateLobby,
 			preferred:      AnyTeam,
 			presences:      map[string]*LobbyPresence{},
 			expectedTeam:   BlueTeam,
@@ -98,7 +98,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		},
 		{
 			name:      "Public match, blue team full, puts the player on orange",
-			lobbyType: service.PublicLobby,
+			lobbyType: PublicLobby,
 			preferred: BlueTeam,
 			presences: map[string]*LobbyPresence{
 				"player1": {RoleAlignment: BlueTeam},
@@ -115,7 +115,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		},
 		{
 			name:      "Public match, orange team full, puts the player on blue",
-			lobbyType: service.PublicLobby,
+			lobbyType: PublicLobby,
 			preferred: OrangeTeam,
 			presences: map[string]*LobbyPresence{
 				"player1": {RoleAlignment: Spectator},
@@ -132,7 +132,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		},
 		{
 			name:      "Public match, teams equal, use preference",
-			lobbyType: service.PublicLobby,
+			lobbyType: PublicLobby,
 			preferred: OrangeTeam,
 			presences: map[string]*LobbyPresence{
 				"player1": {RoleAlignment: Spectator},
@@ -149,7 +149,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		},
 		{
 			name:      "Public match, full reject",
-			lobbyType: service.PublicLobby,
+			lobbyType: PublicLobby,
 			preferred: BlueTeam,
 			presences: map[string]*LobbyPresence{
 				"player1": {RoleAlignment: BlueTeam},
@@ -166,7 +166,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		},
 		{
 			name:      "Public match, spectators full, reject",
-			lobbyType: service.PublicLobby,
+			lobbyType: PublicLobby,
 			preferred: Spectator,
 			presences: map[string]*LobbyPresence{
 				"player1": {RoleAlignment: BlueTeam},
@@ -183,7 +183,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		},
 		{
 			name:      "Private match, use preference",
-			lobbyType: service.PrivateLobby,
+			lobbyType: PrivateLobby,
 			preferred: OrangeTeam,
 			presences: map[string]*LobbyPresence{
 				"player1": {RoleAlignment: BlueTeam},
@@ -200,7 +200,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		},
 		{
 			name:      "Private match, use preference (5 player teams)",
-			lobbyType: service.PrivateLobby,
+			lobbyType: PrivateLobby,
 			preferred: OrangeTeam,
 			presences: map[string]*LobbyPresence{
 				"player1": {RoleAlignment: Spectator},
@@ -217,7 +217,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		},
 		{
 			name:      "Private match, preference full, put on other team",
-			lobbyType: service.PrivateLobby,
+			lobbyType: PrivateLobby,
 			preferred: OrangeTeam,
 			presences: map[string]*LobbyPresence{
 				"player1":  {RoleAlignment: Spectator},
@@ -236,7 +236,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		},
 		{
 			name:      "Full private match, puts the player on spectator",
-			lobbyType: service.PrivateLobby,
+			lobbyType: PrivateLobby,
 			preferred: OrangeTeam,
 			presences: map[string]*LobbyPresence{
 				"player1":  {RoleAlignment: BlueTeam},
@@ -255,7 +255,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		},
 		{
 			name:      "Private match, spectators full, reject",
-			lobbyType: service.PrivateLobby,
+			lobbyType: PrivateLobby,
 			preferred: Spectator,
 			presences: map[string]*LobbyPresence{
 				"player1": {RoleAlignment: BlueTeam},
@@ -272,7 +272,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		},
 		{
 			name:      "full social lobby, reject",
-			lobbyType: service.PublicLobby,
+			lobbyType: PublicLobby,
 			preferred: Spectator,
 			presences: map[string]*LobbyPresence{
 				"player1":  {RoleAlignment: SocialLobbyParticipant},
@@ -293,7 +293,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		},
 		{
 			name:      "social lobby, moderator, allow",
-			lobbyType: service.PublicLobby,
+			lobbyType: PublicLobby,
 			preferred: Moderator,
 			presences: map[string]*LobbyPresence{
 				"player1":  {RoleAlignment: SocialLobbyParticipant},
@@ -324,9 +324,9 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		}
 
 		state.Presences = presencestr
-		state.Metadata.MaxSize = service.SocialLobbyMaxSize
+		state.Metadata.MaxSize = SocialLobbyMaxSize
 		state.Metadata.Visibility = tt.lobbyType
-		if state.Metadata.Visibility == service.PublicLobby {
+		if state.Metadata.Visibility == PublicLobby {
 			state.Metadata.TeamSize = 4
 		} else {
 			state.Metadata.TeamSize = 5
@@ -399,7 +399,7 @@ func TestSelectTeamForPlayer_With_Alighment(t *testing.T) {
 	}{
 		{
 			name:      "Follows alignment even when unbalanced",
-			lobbyType: service.PublicLobby,
+			lobbyType: PublicLobby,
 			players: []string{
 				DMO_1,
 				DMO_2,
@@ -431,11 +431,11 @@ func TestSelectTeamForPlayer_With_Alighment(t *testing.T) {
 		// Match State
 		state := &State{
 			Presences: presences,
-			Metadata: &service.LobbyMetadata{
+			Metadata: &LobbyMetadata{
 				Visibility: tt.lobbyType,
-				MaxSize:    service.SocialLobbyMaxSize,
+				MaxSize:    SocialLobbyMaxSize,
 				TeamSize: func() int {
-					if tt.lobbyType == service.PublicLobby {
+					if tt.lobbyType == PublicLobby {
 						return 4
 					} else {
 						return 5
@@ -488,7 +488,7 @@ func TestNEVRMatch_MatchLoop(t *testing.T) {
 				state_: func() *State {
 					state := &State{}
 					state.SessionStartExpiry = 10 * 10
-					state.Server = &service.GameServerPresence{}
+					state.Server = &GameServerPresence{}
 					return state
 				}(),
 
@@ -504,7 +504,7 @@ func TestNEVRMatch_MatchLoop(t *testing.T) {
 				state_: func() *State {
 					state := &State{}
 					state.SessionStartExpiry = 10 * 10
-					state.Server = &service.GameServerPresence{}
+					state.Server = &GameServerPresence{}
 
 					return state
 				}(),
@@ -522,7 +522,7 @@ func TestNEVRMatch_MatchLoop(t *testing.T) {
 				tick: 0,
 				state_: &State{
 					StartTime:  time.Now().Add(-30 * time.Minute),
-					Server:     &service.GameServerPresence{},
+					Server:     &GameServerPresence{},
 					EmptyTicks: 10 * 30,
 					TickRate:   10,
 				},
@@ -610,17 +610,17 @@ func TestNEVRMatch_MatchJoinAttempt(t *testing.T) {
 		state := &State{
 			CreateTime: now,
 			Server:     &ServerConfig,
-			Metadata: &service.LobbyMetadata{
-				Visibility:       service.UnassignedLobby,
+			Metadata: &LobbyMetadata{
+				Visibility:       UnassignedLobby,
 				Mode:             evr.ModeUnloaded,
 				Level:            evr.LevelUnloaded,
 				RequiredFeatures: make([]string, 0),
-				MaxSize:          service.SocialLobbyMaxSize,
+				MaxSize:          SocialLobbyMaxSize,
 			},
-			Presences:          make(map[uuid.UUID]*LobbyPresence, service.SocialLobbyMaxSize),
+			Presences:          make(map[uuid.UUID]*LobbyPresence, SocialLobbyMaxSize),
 			Reservations:       make(map[uuid.UUID]*Reservation, 2),
-			Alignments:         make(map[uuid.UUID]Role, service.SocialLobbyMaxSize),
-			JoinTimes:          make(map[uuid.UUID]time.Time, service.SocialLobbyMaxSize),
+			Alignments:         make(map[uuid.UUID]Role, SocialLobbyMaxSize),
+			JoinTimes:          make(map[uuid.UUID]time.Time, SocialLobbyMaxSize),
 			Goals:              make([]*evr.MatchGoal, 0),
 			EmptyTicks:         0,
 			TickRate:           10,
@@ -697,7 +697,7 @@ func TestNEVRMatch_MatchJoinAttempt(t *testing.T) {
 					state.StartTime = time.Now()
 					state.terminateTick = 0
 					state.Open = false
-					state.Metadata.Visibility = service.PublicLobby
+					state.Metadata.Visibility = PublicLobby
 					state.Mode = evr.ModeArenaPublic
 					state.MaxSize = 3
 					state.Size = 2
@@ -726,7 +726,7 @@ func TestNEVRMatch_MatchJoinAttempt(t *testing.T) {
 				state.StartTime = time.Now()
 				state.terminateTick = 0
 				state.Open = false
-				state.Metadata.Visibility = service.PublicLobby
+				state.Metadata.Visibility = PublicLobby
 				state.Mode = evr.ModeArenaPublic
 				state.MaxSize = 3
 				state.Size = 3
@@ -755,7 +755,7 @@ func TestNEVRMatch_MatchJoinAttempt(t *testing.T) {
 					state.StartTime = time.Now()
 					state.terminateTick = 100
 					state.Open = false
-					state.Metadata.Visibility = service.PublicLobby
+					state.Metadata.Visibility = PublicLobby
 					state.Mode = evr.ModeArenaPublic
 					state.MaxSize = 3
 					state.Size = 2
@@ -805,7 +805,7 @@ func TestNEVRMatch_MatchJoinAttempt(t *testing.T) {
 				state_: func() *State {
 					state := &State{}
 					state.Open = true
-					state.Metadata.Visibility = service.PublicLobby
+					state.Metadata.Visibility = PublicLobby
 					state.Mode = evr.ModeArenaPublic
 					state.MaxSize = 3
 					state.Size = 2
@@ -848,7 +848,7 @@ func TestNEVRMatch_MatchJoinAttempt(t *testing.T) {
 			args: args{
 				state_: func() *State {
 					state := &State{}
-					state.Metadata.Visibility = service.PublicLobby
+					state.Metadata.Visibility = PublicLobby
 					state.Mode = evr.ModeArenaPublic
 					state.MaxSize = 3
 					state.Size = 2
@@ -942,15 +942,15 @@ func TestNEVRMatch_MatchJoinAttempt_Counts(t *testing.T) {
 			Mode:             evr.ModeUnloaded,
 			Level:            evr.LevelUnloaded,
 			RequiredFeatures: make([]string, 0),
-			Players:          make([]PlayerInfo, 0, service.SocialLobbyMaxSize),
-			Presences:        make(map[uuid.UUID]*LobbyPresence, service.SocialLobbyMaxSize),
+			Players:          make([]PlayerInfo, 0, SocialLobbyMaxSize),
+			Presences:        make(map[uuid.UUID]*LobbyPresence, SocialLobbyMaxSize),
 			reservationMap:   make(map[string]*Reservation, 2),
-			presenceByXPID:   make(map[evr.XPID]*LobbyPresence, service.SocialLobbyMaxSize),
+			presenceByXPID:   make(map[evr.XPID]*LobbyPresence, SocialLobbyMaxSize),
 			goals:            make([]*evr.MatchGoal, 0),
 
-			TeamAlignments:       make(map[string]int, service.SocialLobbyMaxSize),
-			joinTimestamps:       make(map[string]time.Time, service.SocialLobbyMaxSize),
-			joinTimeMilliseconds: make(map[string]int64, service.SocialLobbyMaxSize),
+			TeamAlignments:       make(map[string]int, SocialLobbyMaxSize),
+			joinTimestamps:       make(map[string]time.Time, SocialLobbyMaxSize),
+			joinTimeMilliseconds: make(map[string]int64, SocialLobbyMaxSize),
 			EmptyTicks:           0,
 			TickRate:             10,
 			RankPercentile:       0.0,
@@ -1000,7 +1000,7 @@ func TestNEVRMatch_MatchJoinAttempt_Counts(t *testing.T) {
 				state_: func() *State {
 					state := testStateFn()
 					state.Open = true
-					state.Metadata.Visibility = service.PublicLobby
+					state.Metadata.Visibility = PublicLobby
 					state.Mode = evr.ModeArenaPublic
 					state.MaxSize = 16
 					state.PlayerLimit = 8
@@ -1035,7 +1035,7 @@ func TestNEVRMatch_MatchJoinAttempt_Counts(t *testing.T) {
 				state_: func() *State {
 					state := testStateFn()
 					state.Open = true
-					state.Metadata.Visibility = service.PublicLobby
+					state.Metadata.Visibility = PublicLobby
 					state.Mode = evr.ModeArenaPublic
 					state.MaxSize = 16
 					state.PlayerLimit = 8

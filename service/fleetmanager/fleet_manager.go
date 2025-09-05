@@ -120,11 +120,11 @@ func (fm *EVRFleetFleetManager) Init(nk runtime.NakamaModule, callbackHandler ru
 	return nil
 }
 
-func GameSessionPlacementInput(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, settings *service.MatchmakingSettings, groupIDs, regions []string, requireRegion, requireDefaultRegion bool, queryAddon string, rttsByExternalIP map[string]int) (*service.MatchLabel, error) {
+func GameSessionPlacementInput(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, settings *MatchmakingSettings, groupIDs, regions []string, requireRegion, requireDefaultRegion bool, queryAddon string, rttsByExternalIP map[string]int) (*MatchLabel, error) {
 
 	// Load the server ratings storage object
 	qparts := []string{
-		fmt.Sprintf("+value.server.group_ids:%s", service.Query.CreateMatchPattern(groupIDs)),
+		fmt.Sprintf("+value.server.group_ids:%s", Query.CreateMatchPattern(groupIDs)),
 		queryAddon,
 	}
 
@@ -225,7 +225,7 @@ func GameSessionPlacementInput(ctx context.Context, nk runtime.NakamaModule, log
 	sortLabelIndexes(indexes)
 
 	// Find the first available game server
-	var label *service.MatchLabel
+	var label *MatchLabel
 	for _, index := range indexes {
 		if index.Label.LobbyType != UnassignedLobby {
 			continue
@@ -246,13 +246,13 @@ func GameSessionPlacementInput(ctx context.Context, nk runtime.NakamaModule, log
 }
 
 func (fm *EVRFleetFleetManager) Create(ctx context.Context, maxPlayers int, userIDs []string, latencies []runtime.FleetUserLatencies, metadata map[string]any, callback runtime.FmCreateCallbackFn) error {
-	var queryData service.LobbyAllocationMetadata
-	if m, ok := metadata[service.FleetManagerMetadataKey]; !ok {
-		return fmt.Errorf("missing metadata key '%s'", service.FleetManagerMetadataKey)
+	var queryData LobbyAllocationMetadata
+	if m, ok := metadata[FleetManagerMetadataKey]; !ok {
+		return fmt.Errorf("missing metadata key '%s'", FleetManagerMetadataKey)
 	} else if s, ok := m.(string); !ok {
-		return fmt.Errorf("invalid metadata key '%s' value: must be a string", service.FleetManagerMetadataKey)
+		return fmt.Errorf("invalid metadata key '%s' value: must be a string", FleetManagerMetadataKey)
 	} else if err := json.Unmarshal([]byte(s), &queryData); err != nil {
-		return fmt.Errorf("invalid metadata key '%s' value: %w", service.FleetManagerMetadataKey, err)
+		return fmt.Errorf("invalid metadata key '%s' value: %w", FleetManagerMetadataKey, err)
 	}
 
 	var gameSessionData *string
@@ -268,7 +268,7 @@ func (fm *EVRFleetFleetManager) Create(ctx context.Context, maxPlayers int, user
 
 	placementInput := GameSessionPlacementInput(ctx, nk, logger)
 
-	placementOutput, err := fm.glService.StartGameSessionPlacement(ctx, placementInput)
+	placementOutput, err := fm.glStartGameSessionPlacement(ctx, placementInput)
 	if err != nil {
 		return err
 	}
@@ -299,7 +299,7 @@ func (fm *EVRFleetFleetManager) Get(ctx context.Context, id string) (instance *r
 		Limit:         aws.Int32(1),
 	}
 
-	out, err := fm.glService.DescribeGameSessions(ctx, params)
+	out, err := fm.glDescribeGameSessions(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -395,7 +395,7 @@ func (fm *EVRFleetFleetManager) listEVRFleetGameSessions(ctx context.Context, cu
 	}
 
 	instances := make([]*runtime.InstanceInfo, 0)
-	out, err := fm.glService.SearchGameSessions(ctx, params)
+	out, err := fm.glSearchGameSessions(ctx, params)
 	if err != nil {
 		return nil, "", err
 	}
@@ -548,7 +548,7 @@ func (fm *EVRFleetFleetManager) Join(ctx context.Context, id string, userIds []s
 			PlayerData:    playerData,
 		}
 
-		cps, err := fm.glService.CreatePlayerSession(ctx, input)
+		cps, err := fm.glCreatePlayerSession(ctx, input)
 		if err != nil {
 			return nil, err
 		}
@@ -565,7 +565,7 @@ func (fm *EVRFleetFleetManager) Join(ctx context.Context, id string, userIds []s
 			PlayerDataMap: metadata,
 		}
 
-		cpss, err := fm.glService.CreatePlayerSessions(ctx, input)
+		cpss, err := fm.glCreatePlayerSessions(ctx, input)
 		if err != nil {
 			return nil, err
 		}
@@ -713,7 +713,7 @@ func (fm *EVRFleetFleetManager) Update(ctx context.Context, id string, playerCou
 		return fmt.Errorf("failed to update db instance info: %s", err.Error())
 	}
 
-	if _, err = fm.glService.UpdateGameSession(ctx, &evrfleet.UpdateGameSessionInput{
+	if _, err = fm.glUpdateGameSession(ctx, &evrfleet.UpdateGameSessionInput{
 		GameSessionId:  aws.String(dbInfo.Id),
 		GameProperties: gameProps,
 	}); err != nil {
@@ -791,7 +791,7 @@ func (fm *EVRFleetFleetManager) processSqsPlacementEvents() {
 		case <-ctx.Done():
 			return
 		default:
-			message, err := fm.sqsService.ReceiveMessage(ctx, receiveMessageInput)
+			message, err := fm.sqsReceiveMessage(ctx, receiveMessageInput)
 			if err != nil {
 				if errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "context canceled") {
 					return
@@ -855,7 +855,7 @@ func (fm *EVRFleetFleetManager) processSqsPlacementEvents() {
 				logger.Warn("unhandled game session placement state: %s", placementEventMsg.Detail.Type)
 			}
 
-			if _, err = fm.sqsService.DeleteMessage(ctx, &sqs.DeleteMessageInput{
+			if _, err = fm.sqsDeleteMessage(ctx, &sqs.DeleteMessageInput{
 				QueueUrl:      aws.String(fm.cfg.AwsPlacementEventsSqsUrl),
 				ReceiptHandle: m.ReceiptHandle,
 			}); err != nil {
@@ -934,7 +934,7 @@ func (fm *EVRFleetFleetManager) listGameliftActiveInstances(ctx context.Context,
 		params.NextToken = aws.String(cursor)
 	}
 
-	out, err := fm.glService.DescribeGameSessions(ctx, params)
+	out, err := fm.glDescribeGameSessions(ctx, params)
 	if err != nil {
 		return nil, "", err
 	}

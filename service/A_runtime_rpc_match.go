@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	evr "github.com/echotools/nakama/v3/protocol"
 	nevrapi "github.com/echotools/nevr-common/v3/api"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -77,7 +76,7 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	}
 
 	// Build the team alignments map from the request
-	var teamAlignments = make(map[uuid.UUID]RoleIndex, len(request.TeamAlignments))
+	var teamAlignments = make(map[string]RoleIndex, len(request.TeamAlignments))
 	for id, roleName := range request.TeamAlignments {
 
 		// Set the roleID based on the roleName
@@ -94,31 +93,30 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		default:
 			return "", runtime.NewError("invalid team alignment role: "+roleName, StatusInvalidArgument)
 		}
-		var userUUID uuid.UUID
+		var userID string
 		if uuid.FromStringOrNil(id) == uuid.Nil {
 			// Assume the id is a discord ID and convert it to a user ID
-			userID, _, err := GetUserIDByDiscordID(ctx, db, id)
+			userID, _, err = GetUserIDByDiscordID(ctx, db, id)
 			if err != nil {
 				return "", runtime.NewError("Failed to get userID by discord ID: "+err.Error(), StatusNotFound)
 			}
 			if userID == "" {
 				return "", runtime.NewError("discord user not found: "+id, StatusNotFound)
 			}
-			userUUID = uuid.FromStringOrNil(userID)
 		} else {
-			userUUID = uuid.FromStringOrNil(id)
+			userID = id
 		}
-		teamAlignments[userUUID] = roleID // Assuming id is a user ID
+		teamAlignments[userID] = roleID // Assuming id is a user ID
 	}
 
 	// Otherwise, find an open server in the given region
 	settings := &LobbySessionSettings{
-		Mode:             evr.ToSymbol(request.Mode),
-		Level:            evr.ToSymbol(request.Level),
-		TeamSize:         int(request.TeamSize.GetValue()),
-		ScheduledTime:    request.ExpiryTime.AsTime().UTC(),
-		CreatorID:        uuid.FromStringOrNil(request.OwnerId),
-		GroupID:          uuid.FromStringOrNil(request.GroupId),
+		Mode:             Mode(request.Mode),
+		Level:            Level(request.Level),
+		TeamSize:         request.TeamSize.GetValue(),
+		MatchExpiry:      request.ExpiryTime.AsTime().UTC(),
+		CreatorID:        request.OwnerId,
+		GroupID:          request.GroupId,
 		RequiredFeatures: request.RequiredFeatures,
 		TeamAlignments:   teamAlignments,
 	}

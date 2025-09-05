@@ -1,4 +1,4 @@
-package backend
+package service
 
 import (
 	"context"
@@ -12,7 +12,6 @@ import (
 	"time"
 
 	evr "github.com/echotools/nakama/v3/protocol"
-	"github.com/echotools/nakama/v3/service"
 	"github.com/echotools/nevr-common/v3/rtapi"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -21,64 +20,34 @@ import (
 )
 
 type (
-	MatchID            = service.MatchID
-	Role               = service.RoleIndex
-	LobbyPresence      = service.LobbyPresence
-	GameServerPresence = service.GameServerPresence
-	MatchSettings      = service.LobbySessionSettings
-	Label              = service.MatchLabel
-	PlayerInfo         = service.PlayerInfo
-	LobbyType          = service.LobbyType
-	State              = service.LobbySessionState
-	Reservation        = service.LobbySlotReservation
-	EntrantMetadata    = service.EntrantMetadata
-	MatchPresence      = service.LobbyPresence
+	MatchSettings = LobbySessionSettings
+	Label         = MatchLabel
+	State         = LobbySessionState
+	Reservation   = LobbySlotReservation
+	MatchPresence = LobbyPresence
 )
 
 var (
 	LobbySizeByMode = map[evr.Symbol]int{
-		evr.ModeArenaPublic:   service.MatchLobbyMaxSize,
-		evr.ModeArenaPrivate:  service.MatchLobbyMaxSize,
-		evr.ModeCombatPublic:  service.MatchLobbyMaxSize,
-		evr.ModeCombatPrivate: service.MatchLobbyMaxSize,
-		evr.ModeSocialPublic:  service.SocialLobbyMaxSize,
-		evr.ModeSocialPrivate: service.SocialLobbyMaxSize,
+		evr.ModeArenaPublic:   MatchLobbyMaxSize,
+		evr.ModeArenaPrivate:  MatchLobbyMaxSize,
+		evr.ModeCombatPublic:  MatchLobbyMaxSize,
+		evr.ModeCombatPrivate: MatchLobbyMaxSize,
+		evr.ModeSocialPublic:  SocialLobbyMaxSize,
+		evr.ModeSocialPrivate: SocialLobbyMaxSize,
 	}
-)
-
-const (
-	AnyTeam                = service.AnyTeam
-	BlueTeam               = service.BlueTeam
-	OrangeTeam             = service.OrangeTeam
-	SocialLobbyParticipant = service.SocialLobbyParticipant
-	Spectator              = service.Spectator
-	Moderator              = service.Moderator
-)
-
-func DefaultLobbySize(mode evr.Symbol) int {
-	if size, ok := LobbySizeByMode[mode]; ok {
-		return size
-	}
-	return service.MatchLobbyMaxSize
-}
-
-const (
-	OpCodeBroadcasterDisconnected int64 = iota
-	OpCodeEVRPacketData
-	OpCodeMatchGameStateUpdate
-	OpCodeGameServerLobbyStatus
 )
 
 // This is the match handler for all matches.
 // There always is one per broadcaster.
 // The match is spawned and managed directly by nakama.
-// The match can only be communicated with through service.MatchSignal() and service.MatchData messages.
+// The match can only be communicated with through MatchSignal() and MatchData messages.
 type NEVRMatch struct{}
 
 // MatchInit is called when the match is created.
 func (m *NEVRMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, params map[string]any) (any, int, string) {
 
-	var gameServer *service.GameServerPresence
+	var gameServer *GameServerPresence
 	if b, ok := params["gameserver"].([]byte); ok {
 		if err := json.Unmarshal(b, &gameServer); err != nil {
 			logger.Error("Failed to unmarshal gameserver config: %v", err)
@@ -91,7 +60,7 @@ func (m *NEVRMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sq
 		ID:           MatchIDFromContext(ctx),
 		CreateTime:   time.Now().UTC(),
 		Server:       gameServer,
-		Presences:    make(map[uuid.UUID]*LobbyPresence, service.SocialLobbyMaxSize),
+		Presences:    make(map[uuid.UUID]*LobbyPresence, SocialLobbyMaxSize),
 		Reservations: make(map[uuid.UUID]*Reservation, 2),
 		Goals:        make([]*evr.MatchGoal, 0),
 		EmptyTicks:   0,
@@ -111,12 +80,12 @@ func (m *NEVRMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sq
 }
 
 // MatchIDFromContext is a helper function to extract the match id from the context.
-func MatchIDFromContext(ctx context.Context) service.MatchID {
+func MatchIDFromContext(ctx context.Context) MatchID {
 	matchIDStr, ok := ctx.Value(runtime.RUNTIME_CTX_MATCH_ID).(string)
 	if !ok {
-		return service.MatchID{}
+		return MatchID{}
 	}
-	matchID := service.MatchIDFromStringOrNil(matchIDStr)
+	matchID := MatchIDFromStringOrNil(matchIDStr)
 	return matchID
 }
 
@@ -144,12 +113,12 @@ func (m *NEVRMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger,
 		return state, true, ""
 	}
 
-	if state.Metadata.Visibility == service.UnassignedLobby {
-		return state, false, service.ErrJoinRejectReasonUnassignedLobby.Error()
+	if state.Metadata.Visibility == UnassignedLobby {
+		return state, false, ErrJoinRejectReasonUnassignedLobby.Error()
 	}
 
 	// This is a player joining.
-	meta := &service.EntrantMetadata{}
+	meta := &EntrantMetadata{}
 	if err := meta.FromMatchMetadata(metadata); err != nil {
 		return state, false, fmt.Sprintf("failed to unmarshal metadata: %v", err)
 	}
@@ -159,12 +128,12 @@ func (m *NEVRMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger,
 
 		// Reject if the match is terminating
 		if state.IsStarted() && state.TerminateTick > 0 {
-			return state, false, service.ErrJoinRejectReasonMatchTerminating.Error()
+			return state, false, ErrJoinRejectReasonMatchTerminating.Error()
 		}
 
 		// Only allow spectators to join closed/ending matches
 		if !meta.Presence.IsSpectator() {
-			return state, false, service.ErrJoinRejectReasonMatchClosed.Error()
+			return state, false, ErrJoinRejectReasonMatchClosed.Error()
 		}
 	}
 
@@ -185,27 +154,27 @@ func (m *NEVRMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger,
 		// Ensure the player has the required features
 		for _, f := range state.Metadata.RequiredFeatures {
 			if !slices.Contains(meta.Reservations[i].SupportedFeatures, f) {
-				return state, false, service.ErrJoinRejectReasonFeatureMismatch.Error()
+				return state, false, ErrJoinRejectReasonFeatureMismatch.Error()
 			}
 		}
 	}
 
-	// Check both the match's presence and reservation map for a duplicate join with the same service.XPID
+	// Check both the match's presence and reservation map for a duplicate join with the same XPID
 	for _, p := range meta.Presences() {
 		for _, e := range state.Presences {
 			if e.XPID.Equals(p.XPID) {
 				logger.WithFields(map[string]any{
 					"evrid": p.XPID,
 					"uid":   p.GetUserId(),
-				}).Error("Duplicate service.EVR-ID join attempt.")
-				return state, false, service.ErrJoinRejectDuplicateXPID.Error()
+				}).Error("Duplicate EVR-ID join attempt.")
+				return state, false, ErrJoinRejectDuplicateXPID.Error()
 			}
 		}
 	}
 
 	// Ensure the match has enough slots available
 	if state.OpenSlots() < len(meta.Presences()) {
-		return state, false, service.ErrJoinRejectReasonLobbyFull.Error()
+		return state, false, ErrJoinRejectReasonLobbyFull.Error()
 	}
 
 	// If this is a reservation, load the reservation
@@ -218,23 +187,23 @@ func (m *NEVRMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger,
 	// If this player has a team alignment, load it
 	if teamIndex, ok := state.Alignments[meta.Presence.UserID]; ok {
 		// Do not try to load the alignment if the player is a spectator or moderator
-		if teamIndex != service.Spectator && teamIndex != Moderator {
+		if teamIndex != Spectator && teamIndex != Moderator {
 			meta.Presence.RoleAlignment = teamIndex
 		}
 	}
 
 	// Public and social lobbies require a role alignment
-	if meta.Presence.RoleAlignment == service.AnyTeam {
+	if meta.Presence.RoleAlignment == AnyTeam {
 		switch state.Metadata.Mode {
 		case evr.ModeSocialPublic, evr.ModeSocialPrivate:
-			meta.Presence.RoleAlignment = service.SocialLobbyParticipant
+			meta.Presence.RoleAlignment = SocialLobbyParticipant
 
 		case evr.ModeArenaPublic, evr.ModeCombatPublic:
 			// Select the team with the fewest players
-			if state.RoleCount(service.BlueTeam) < state.RoleCount(service.OrangeTeam) {
-				meta.Presence.RoleAlignment = service.BlueTeam
+			if state.RoleCount(BlueTeam) < state.RoleCount(OrangeTeam) {
+				meta.Presence.RoleAlignment = BlueTeam
 			} else {
-				meta.Presence.RoleAlignment = service.OrangeTeam
+				meta.Presence.RoleAlignment = OrangeTeam
 			}
 		}
 	}
@@ -253,9 +222,9 @@ func (m *NEVRMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger,
 
 	// check the available slots
 	if slots, err := state.OpenSlotsByRole(meta.Presence.RoleAlignment); err != nil {
-		return state, false, service.ErrJoinRejectReasonFailedToAssignTeam.Error()
+		return state, false, ErrJoinRejectReasonFailedToAssignTeam.Error()
 	} else if slots < len(meta.Presences()) {
-		return state, false, service.ErrJoinRejectReasonLobbyFull.Error()
+		return state, false, ErrJoinRejectReasonLobbyFull.Error()
 	}
 
 	// Add reservations to the reservation map
@@ -343,7 +312,7 @@ func (m *NEVRMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sq
 			nk.MetricsTimerRecord("match_player_join_duration", tags, time.Since(state.JoinTimes[sessionID]))
 		}
 
-		service.MatchDataEvent(ctx, nk, state.ID, service.MatchDataPlayerJoin{
+		MatchDataEvent(ctx, nk, state.ID, MatchDataPlayerJoin{
 			Presence: state.Presences[sessionID],
 			State:    state,
 		})
@@ -395,14 +364,14 @@ func (m *NEVRMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *s
 
 	if state.IsStarted() && len(state.Presences) == 0 {
 		// If the match is empty, and the server has left, then shut down.
-		logger.Debug("Match is empty. service.Shutting down.")
+		logger.Debug("Match is empty. Shutting down.")
 		return nil
 	}
 
 	// if the server is in the presences, then shut down.
 	for _, p := range presences {
 		if p.GetSessionId() == state.Server.SessionID.String() {
-			logger.Debug("Server left the match. service.Shutting down.")
+			logger.Debug("Server left the match. Shutting down.")
 			state = nil
 			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 2)
 		}
@@ -445,7 +414,7 @@ func (m *NEVRMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *s
 			}
 
 			// The entrant stream presence is only present when the player has not disconnect from the server yet.
-			if userPresences, err := nk.StreamUserList(service.StreamModeEntrant, mp.EntrantID(state.ID).String(), "", node, false, true); err != nil {
+			if userPresences, err := nk.StreamUserList(StreamModeEntrant, mp.EntrantID(state.ID).String(), "", node, false, true); err != nil {
 				logger.Error("Failed to list user streams: %v", err)
 
 			} else if len(userPresences) > 0 || p.GetReason() == runtime.PresenceReasonDisconnect {
@@ -453,18 +422,18 @@ func (m *NEVRMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *s
 
 				rejects = append(rejects, mp.EntrantID(state.ID))
 
-				if err := nk.StreamUserLeave(service.StreamModeEntrant, mp.EntrantID(state.ID).String(), "", node, mp.GetUserId(), mp.GetSessionId()); err != nil {
+				if err := nk.StreamUserLeave(StreamModeEntrant, mp.EntrantID(state.ID).String(), "", node, mp.GetUserId(), mp.GetSessionId()); err != nil {
 					logger.Warn("Failed to leave user stream: %v", err)
 				}
 
 			} else {
 				tags["reject_sent"] = "false"
-				logger.Info("Player disconnected from game server. service.Removing from handler.")
+				logger.Info("Player disconnected from game server. Removing from handler.")
 			}
 
 			nk.MetricsCounterAdd("match_entrant_leave_count", tags, 1)
 
-			if err := service.MatchDataEvent(ctx, nk, state.ID, service.MatchDataPlayerLeave{
+			if err := MatchDataEvent(ctx, nk, state.ID, MatchDataPlayerLeave{
 				Label:    state.Label(),
 				Presence: mp,
 				Reason:   reason,
@@ -502,11 +471,11 @@ func (m *NEVRMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *s
 						}).Debug("Incrementing early quit for player.")
 
 						for _, r := range [...]evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime} {
-							boardID := service.StatisticBoardID(state.GroupID().String(), state.Mode(), service.EarlyQuitStatisticID, r)
+							boardID := StatisticBoardID(state.GroupID().String(), state.Mode(), EarlyQuitStatisticID, r)
 
 							if _, err := nk.LeaderboardRecordWrite(ctx, boardID, mp.UserID.String(), mp.DisplayName, 1, 0, nil, nil); err != nil {
 								if errors.Is(err, server.ErrLeaderboardNotFound) {
-									if err = nk.LeaderboardCreate(ctx, boardID, true, "desc", "incr", service.ResetScheduleToCron(r), nil, true); err != nil {
+									if err = nk.LeaderboardCreate(ctx, boardID, true, "desc", "incr", ResetScheduleToCron(r), nil, true); err != nil {
 										logger.Warn("Failed to create early quit leaderboard: %v", err)
 									}
 								}
@@ -540,7 +509,7 @@ func (m *NEVRMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *s
 	if len(state.Presences) == 0 {
 		// Lock the match
 		state.LockTime = time.Now()
-		logger.Debug("Match is empty. service.Closing it.")
+		logger.Debug("Match is empty. Closing it.")
 	}
 
 	// Update the label that includes the new player list.
@@ -558,13 +527,13 @@ func recordGameServerTimeToLeaderboard(ctx context.Context, nk runtime.NakamaMod
 	}
 
 	for _, period := range resetSchedules {
-		id := service.StatisticBoardID(groupID, mode, service.GameServerTimeStatisticsID, period)
+		id := StatisticBoardID(groupID, mode, GameServerTimeStatisticsID, period)
 
 		// Write the record
 		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, matchTimeSecs, 0, nil, nil); err != nil {
 
 			// Try to create the leaderboard
-			if err = nk.LeaderboardCreate(ctx, id, true, "desc", "incr", service.ResetScheduleToCron(period), nil, true); err != nil {
+			if err = nk.LeaderboardCreate(ctx, id, true, "desc", "incr", ResetScheduleToCron(period), nil, true); err != nil {
 				return fmt.Errorf("Leaderboard create error: %w", err)
 			} else if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, matchTimeSecs, 0, nil, nil); err != nil {
 				return fmt.Errorf("Leaderboard record write error: %w", err)
@@ -581,13 +550,13 @@ func recordMatchTimeToLeaderboard(ctx context.Context, nk runtime.NakamaModule, 
 	}
 
 	for _, period := range resetSchedules {
-		id := service.StatisticBoardID(groupID, mode, service.LobbyTimeStatisticID, period)
+		id := StatisticBoardID(groupID, mode, LobbyTimeStatisticID, period)
 
 		// Write the record
 		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, matchTimeSecs, 0, nil, nil); err != nil {
 
 			// Try to create the leaderboard
-			if err = nk.LeaderboardCreate(ctx, id, true, "desc", "incr", service.ResetScheduleToCron(period), nil, true); err != nil {
+			if err = nk.LeaderboardCreate(ctx, id, true, "desc", "incr", ResetScheduleToCron(period), nil, true); err != nil {
 				return fmt.Errorf("Leaderboard create error: %w", err)
 			} else if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, matchTimeSecs, 0, nil, nil); err != nil {
 				return fmt.Errorf("Leaderboard record write error: %w", err)
@@ -611,9 +580,9 @@ func (m *NEVRMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sq
 	// Handle the messages, one by one
 	for _, in := range messages {
 		switch in.GetOpCode() {
-		case service.OpCodeMatchGameStateUpdate:
+		case OpCodeMatchGameStateUpdate:
 
-			update := service.MatchGameStateUpdate{}
+			update := MatchGameStateUpdate{}
 			if err := json.Unmarshal(in.GetData(), &update); err != nil {
 				logger.Error("Failed to unmarshal match update: %v", err)
 				continue
@@ -643,7 +612,7 @@ func (m *NEVRMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sq
 				}
 				updateLabel = true
 			}
-		case service.OpCodeGameServerLobbyStatus:
+		case OpCodeGameServerLobbyStatus:
 			/*
 				lobbyStatus := evr.NEVRLobbyStatusV1{}
 				if err := json.Unmarshal(in.GetData(), &lobbyStatus); err != nil {
@@ -681,7 +650,7 @@ func (m *NEVRMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sq
 
 			var messageFn func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *State, in runtime.MatchData, msg evr.Message) (*State, error)
 
-			// Switch on the message type. service.This is where the match logic is handled.
+			// Switch on the message type. This is where the match logic is handled.
 			switch msg := msg.(type) {
 			default:
 				logger.Warn("Unknown message type: %T", msg)
@@ -703,7 +672,7 @@ func (m *NEVRMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sq
 	if state == nil {
 		state.EmptyTicks++
 		if state.EmptyTicks > 60*state.TickRate {
-			logger.Warn("Match has been empty for too long. service.Shutting down.")
+			logger.Warn("Match has been empty for too long. Shutting down.")
 			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
 		}
 	} else if state.EmptyTicks > 0 {
@@ -719,7 +688,7 @@ func (m *NEVRMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sq
 		return state
 	}
 
-	if state.Visibility() == service.UnassignedLobby {
+	if state.Visibility() == UnassignedLobby {
 		return state
 	}
 
@@ -748,7 +717,7 @@ func (m *NEVRMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sq
 	if state.IsStarted() && len(state.Presences) == 0 {
 		state.EmptyTicks++
 		if state.EmptyTicks > 60*state.TickRate {
-			logger.Warn("Started match has been empty for too long. service.Shutting down.")
+			logger.Warn("Started match has been empty for too long. Shutting down.")
 			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
 		}
 	} else {
@@ -799,8 +768,8 @@ func (m *NEVRMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, d
 		nk.SessionDisconnect(ctx, state.Server.GetSessionId(), runtime.PresenceReasonDisconnect)
 	}
 
-	// Cleanup service.Discord session message if it exists
-	if appBot := service.GlobalAppBot.Load(); appBot != nil && appBot.SessionsChannelManager != nil {
+	// Cleanup Discord session message if it exists
+	if appBot := GlobalAppBot.Load(); appBot != nil && appBot.SessionsChannelManager != nil {
 		appBot.SessionsChannelManager.RemoveSessionMessage(state.ID.String())
 	}
 
@@ -817,7 +786,7 @@ func (m *NEVRMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db
 	nk.MetricsCounterAdd("match_shutdown_count", state.MetricsTags(), 1)
 
 	nk.MetricsTimerRecord("lobby_session_duration", state.MetricsTags(), time.Since(state.StartTime))
-	if state != nil && slices.Contains(service.ValidLeaderboardModes, state.Mode()) {
+	if state != nil && slices.Contains(ValidLeaderboardModes, state.Mode()) {
 		if err := recordGameServerTimeToLeaderboard(ctx, nk, state.Server.GetUserId(), state.Server.GetUsername(), state.GroupID().String(), state.Mode(), int64(time.Since(state.StartTime).Seconds())); err != nil {
 			logger.Warn("Failed to record game server time to leaderboard: %v", err)
 		}
@@ -867,22 +836,22 @@ func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *
 	state, ok := state_.(*State)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
-		return nil, service.SignalResponse{Message: "invalid match state"}.String()
+		return nil, SignalResponse{Message: "invalid match state"}.String()
 	}
 
 	// TODO protobuf's would be nice here.
-	signal := &service.SignalEnvelope{}
+	signal := &SignalEnvelope{}
 	err := json.Unmarshal([]byte(data), signal)
 	if err != nil {
-		return state, service.SignalResponse{Message: fmt.Sprintf("failed to unmarshal signal: %v", err)}.String()
+		return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal signal: %v", err)}.String()
 	}
 
 	switch signal.OpCode {
-	case service.SignalKickEntrants:
-		var data service.SignalKickEntrantsPayload
+	case SignalKickEntrants:
+		var data SignalKickEntrantsPayload
 
 		if err := json.Unmarshal(signal.Payload, &data); err != nil {
-			return state, service.SignalResponse{Message: fmt.Sprintf("failed to unmarshal shutdown payload: %v", err)}.String()
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal shutdown payload: %v", err)}.String()
 		}
 		entrantIDs := make([]uuid.UUID, 0, len(data.UserIDs))
 		for _, e := range data.UserIDs {
@@ -895,7 +864,7 @@ func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *
 
 		if len(entrantIDs) > 0 {
 			if err := m.kickEntrants(ctx, logger, dispatcher, state, entrantIDs...); err != nil {
-				return state, service.SignalResponse{Message: fmt.Sprintf("failed to kick player: %v", err)}.String()
+				return state, SignalResponse{Message: fmt.Sprintf("failed to kick player: %v", err)}.String()
 			}
 		}
 
@@ -904,12 +873,12 @@ func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *
 			"entrant_ids":        entrantIDs,
 		}).Debug("Kicking players from the match.")
 
-	case service.SignalShutdown:
+	case SignalShutdown:
 
-		var data service.SignalShutdownPayload
+		var data SignalShutdownPayload
 
 		if err := json.Unmarshal(signal.Payload, &data); err != nil {
-			return state, service.SignalResponse{Message: fmt.Sprintf("failed to unmarshal shutdown payload: %v", err)}.String()
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal shutdown payload: %v", err)}.String()
 		}
 
 		if data.DisconnectGameServer {
@@ -933,7 +902,7 @@ func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *
 
 				if len(entrantIDs) > 0 {
 					if err := m.kickEntrants(ctx, logger, dispatcher, state, entrantIDs...); err != nil {
-						return state, service.SignalResponse{Message: fmt.Sprintf("failed to kick player: %v", err)}.String()
+						return state, SignalResponse{Message: fmt.Sprintf("failed to kick player: %v", err)}.String()
 					}
 				}
 
@@ -941,68 +910,63 @@ func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *
 			}
 		}
 
-		return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, data.GraceSeconds), service.SignalResponse{Success: true}.String()
+		return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, data.GraceSeconds), SignalResponse{Success: true}.String()
 
-	case service.SignalPruneUnderutilized:
+	case SignalPruneUnderutilized:
 		// Prune this match if it's utilization is low.
 		if len(state.Presences) <= 3 {
 			// Free the resources.
-			return nil, service.SignalResponse{Success: true}.String()
+			return nil, SignalResponse{Success: true}.String()
 		}
-	case service.SignalGetEndpoint:
+	case SignalGetEndpoint:
 		jsonData, err := json.Marshal(state.Server.Endpoint)
 		if err != nil {
 			return state, fmt.Sprintf("failed to marshal endpoint: %v", err)
 		}
-		return state, service.SignalResponse{Success: true, Payload: string(jsonData)}.String()
+		return state, SignalResponse{Success: true, Payload: string(jsonData)}.String()
 
-	case service.SignalGetPresences:
+	case SignalGetPresences:
 		// Return the presences in the match.
 
 		jsonData, err := json.Marshal(state.Presences)
 		if err != nil {
 			return state, fmt.Sprintf("failed to marshal presences: %v", err)
 		}
-		return state, service.SignalResponse{Success: true, Payload: string(jsonData)}.String()
+		return state, SignalResponse{Success: true, Payload: string(jsonData)}.String()
 
-	case service.SignalPrepareSession:
+	case SignalPrepareSession:
 
 		// if the match is already started, return an error.
-		if state.Visibility() != service.UnassignedLobby {
+		if state.Visibility() != UnassignedLobby {
 			logger.Error("Failed to prepare session: session already prepared")
-			return state, service.SignalResponse{Message: "session already prepared"}.String()
+			return state, SignalResponse{Message: "session already prepared"}.String()
 		}
 
-		settings := service.LobbySessionSettings{}
+		settings := LobbySessionSettings{}
 
 		if err := json.Unmarshal(signal.Payload, &settings); err != nil {
-			return state, service.SignalResponse{Message: fmt.Sprintf("failed to unmarshal settings: %v", err)}.String()
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal settings: %v", err)}.String()
 		}
 
 		for _, f := range settings.RequiredFeatures {
 			if !slices.Contains(state.Server.Features, f) {
-				return state, service.SignalResponse{Message: fmt.Sprintf("bad request: feature not supported: %v", f)}.String()
+				return state, SignalResponse{Message: fmt.Sprintf("bad request: feature not supported: %v", f)}.String()
 			}
 		}
 
-		if ok, err := service.CheckSystemGroupMembership(ctx, db, settings.CreatorID.String(), service.GroupGlobalDevelopers); err != nil {
-			return state, service.SignalResponse{Message: fmt.Sprintf("failed to check group membership: %v", err)}.String()
+		if ok, err := CheckSystemGroupMembership(ctx, db, settings.CreatorID, GroupGlobalDevelopers); err != nil {
+			return state, SignalResponse{Message: fmt.Sprintf("failed to check group membership: %v", err)}.String()
 		} else if !ok {
-
-			// Validate the mode
-			if levels, ok := service.LevelsByMode[settings.Mode]; !ok {
-				return state, service.SignalResponse{Message: fmt.Sprintf("bad request: invalid mode: %v", settings.Mode)}.String()
-
-			} else {
-				// Set the level to a random level if it is not set.
-				if settings.Level == 0xffffffffffffffff || settings.Level == 0 {
-					settings.Level = levels[rand.Intn(len(levels))]
-
-					// Validate the level, if provided.
-				} else if !slices.Contains(levels, settings.Level) {
-					return state, service.SignalResponse{Message: fmt.Sprintf("bad request: invalid level `%v` for mode `%v`", settings.Level, settings.Mode)}.String()
-				}
+			valid, ok := GameModeConfigurations[settings.Mode]
+			if !ok {
+				return state, SignalResponse{Message: fmt.Sprintf("bad request: invalid mode: %v", settings.Mode)}.String()
 			}
+			levels := valid.Levels
+
+			if !slices.Contains(levels, settings.Level) {
+				settings.Level = levels[rand.Intn(len(levels))]
+			}
+
 		}
 
 		state.Metadata.Mode = settings.Mode
@@ -1014,7 +978,7 @@ func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *
 
 		// If the start time is in the past, set it to now.
 		// If the start time is not set, set it to 10 minutes from now.
-		if settings.ScheduledTime.IsZero() {
+		if settings.MatchExpiry.IsZero() {
 			state.StartTime = time.Now().UTC().Add(10 * time.Minute)
 		} else if settings.ScheduledTime.Before(time.Now()) {
 			state.StartTime = time.Now().UTC()
@@ -1031,47 +995,47 @@ func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *
 		// Set the lobby and team sizes
 		switch settings.Mode {
 
-		case evr.ModeSocialPublic:
-			state.Metadata.Visibility = service.PublicLobby
-			state.Metadata.MaxSize = service.SocialLobbyMaxSize
-			state.Metadata.TeamSize = service.SocialLobbyMaxSize
-			state.Metadata.PlayerLimit = service.SocialLobbyMaxSize
+		case ModeSocialPublic:
+			state.Metadata.Visibility = PublicLobby
+			state.Metadata.MaxSize = SocialLobbyMaxSize
+			state.Metadata.TeamSize = SocialLobbyMaxSize
+			state.Metadata.PlayerLimit = SocialLobbyMaxSize
 
-		case evr.ModeSocialPrivate:
-			state.Metadata.Visibility = service.PrivateLobby
-			state.Metadata.MaxSize = service.SocialLobbyMaxSize
-			state.Metadata.TeamSize = service.SocialLobbyMaxSize
-			state.Metadata.PlayerLimit = service.SocialLobbyMaxSize
+		case ModeSocialPrivate:
+			state.Metadata.Visibility = PrivateLobby
+			state.Metadata.MaxSize = SocialLobbyMaxSize
+			state.Metadata.TeamSize = SocialLobbyMaxSize
+			state.Metadata.PlayerLimit = SocialLobbyMaxSize
 
-		case evr.ModeArenaPublic:
-			state.Metadata.Visibility = service.PublicLobby
-			state.Metadata.MaxSize = service.MatchLobbyMaxSize
-			state.Metadata.TeamSize = service.DefaultPublicArenaTeamSize
+		case ModeArenaPublic:
+			state.Metadata.Visibility = PublicLobby
+			state.Metadata.MaxSize = MatchLobbyMaxSize
+			state.Metadata.TeamSize = DefaultPublicArenaTeamSize
 			state.Metadata.PlayerLimit = min(state.Metadata.TeamSize*2, state.Metadata.MaxSize)
 
-		case evr.ModeCombatPublic:
-			state.Metadata.Visibility = service.PublicLobby
-			state.Metadata.MaxSize = service.MatchLobbyMaxSize
-			state.Metadata.TeamSize = service.DefaultPublicCombatTeamSize
+		case ModeCombatPublic:
+			state.Metadata.Visibility = PublicLobby
+			state.Metadata.MaxSize = MatchLobbyMaxSize
+			state.Metadata.TeamSize = DefaultPublicCombatTeamSize
 			state.Metadata.PlayerLimit = min(state.TeamSize()*2, state.Metadata.MaxSize)
 
 		default:
-			state.Metadata.Visibility = service.PrivateLobby
-			state.Metadata.MaxSize = service.MatchLobbyMaxSize
-			state.Metadata.TeamSize = service.MatchLobbyMaxSize
+			state.Metadata.Visibility = PrivateLobby
+			state.Metadata.MaxSize = MatchLobbyMaxSize
+			state.Metadata.TeamSize = MatchLobbyMaxSize
 			state.Metadata.PlayerLimit = state.Metadata.MaxSize
 		}
 
 		if settings.TeamSize > 0 && settings.TeamSize <= 5 {
-			state.Metadata.TeamSize = settings.TeamSize
+			state.Metadata.TeamSize = int(settings.TeamSize)
 			state.Metadata.PlayerLimit = min(state.TeamSize()*2, state.Metadata.MaxSize)
 		}
 
 		state.Alignments = make(map[uuid.UUID]Role, state.Metadata.MaxSize)
 
 		for userID, role := range settings.TeamAlignments {
-			if !userID.IsNil() {
-				state.Alignments[userID] = role
+			if u := uuid.FromStringOrNil(userID); !u.IsNil() {
+				state.Alignments[u] = role
 			}
 		}
 
@@ -1082,16 +1046,16 @@ func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *
 			}
 		}
 
-	case service.SignalStartSession:
+	case SignalStartSession:
 
 		if !state.IsStarted() {
 			// Set the start time to now will trigger the match to start.
 			state.StartTime = time.Now().UTC()
 		} else {
-			return state, service.SignalResponse{Message: "failed to start session: already started"}.String()
+			return state, SignalResponse{Message: "failed to start session: already started"}.String()
 		}
 
-	case service.SignalLockSession:
+	case SignalLockSession:
 
 		switch state.Mode() {
 		case evr.ModeCombatPublic:
@@ -1101,7 +1065,7 @@ func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *
 			state.LockTime = time.Now().UTC()
 		}
 
-	case service.SignalUnlockSession:
+	case SignalUnlockSession:
 
 		switch state.Mode() {
 		case evr.ModeArenaPublic:
@@ -1114,17 +1078,17 @@ func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *
 			state.LockTime = time.Time{}
 		}
 
-	case service.SignalEndedSession:
-		// Trigger the service.MatchLeave event for the game server.
+	case SignalEndedSession:
+		// Trigger the MatchLeave event for the game server.
 		if err := nk.StreamUserLeave(server.StreamModeMatchAuthoritative, state.ID.UUID.String(), "", state.ID.Node, state.Server.GetUserId(), state.Server.GetSessionId()); err != nil {
 			logger.Warn("Failed to leave match stream", zap.Error(err))
-			return nil, service.SignalResponse{Message: fmt.Sprintf("failed to leave match stream: %v", err)}.String()
+			return nil, SignalResponse{Message: fmt.Sprintf("failed to leave match stream: %v", err)}.String()
 		}
 
-	case service.SignalPlayerUpdate:
-		update := service.MatchPlayerUpdate{}
+	case SignalPlayerUpdate:
+		update := MatchPlayerUpdate{}
 		if err := json.Unmarshal(signal.Payload, &update); err != nil {
-			return state, service.SignalResponse{Message: fmt.Sprintf("failed to unmarshal player update: %v", err)}.String()
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal player update: %v", err)}.String()
 		}
 		sessionID := uuid.FromStringOrNil(update.SessionID)
 		if mp, ok := state.Presences[sessionID]; ok {
@@ -1143,17 +1107,17 @@ func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *
 
 	default:
 		logger.Warn("Unknown signal: %v", signal.OpCode)
-		return state, service.SignalResponse{Success: false, Message: "unknown signal"}.String()
+		return state, SignalResponse{Success: false, Message: "unknown signal"}.String()
 	}
 
 	if err := m.updateLabel(logger, dispatcher, state); err != nil {
 		logger.Error("failed to update label: %v", err)
-		return state, service.SignalResponse{Message: fmt.Sprintf("failed to update label: %v", err)}.String()
+		return state, SignalResponse{Message: fmt.Sprintf("failed to update label: %v", err)}.String()
 	}
 
 	nk.MetricsCounterAdd("match_prepare_count", state.MetricsTags(), 1)
 
-	return state, service.SignalResponse{Success: true, Payload: state.Label().String()}.String()
+	return state, SignalResponse{Success: true, Payload: state.Label().String()}.String()
 
 }
 
@@ -1186,7 +1150,7 @@ func (m *NEVRMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk ru
 
 	messages := []evr.Message{
 		message,
-		evr.NewGameServerSessionStart(state.ID.UUID, groupID, uint8(state.MaxSize()), uint8(state.Visibility()), state.Server.AppID, state.Mode(), state.Level(), state.RequiredFeatures(), []evr.XPID{}), // Legacy service.Message for the game server.
+		evr.NewGameServerSessionStart(state.ID.UUID, groupID, uint8(state.MaxSize()), uint8(state.Visibility()), state.Server.AppID, state.Mode(), state.Level(), state.RequiredFeatures(), []evr.XPID{}), // Legacy Message for the game server.
 	}
 
 	nk.MetricsCounterAdd("match_start_count", state.MetricsTags(), 1)
@@ -1196,7 +1160,7 @@ func (m *NEVRMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk ru
 	}
 	state.IsLoaded = true
 
-	service.MatchDataEvent(ctx, nk, state.ID, service.MatchDataStarted{
+	MatchDataEvent(ctx, nk, state.ID, MatchDataStarted{
 		State: state.Label(),
 	})
 	return state, nil

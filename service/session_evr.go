@@ -267,7 +267,7 @@ func (s *sessionEVR) Send(envelope *rtapi.Envelope, reliable bool) error {
 		return nil
 	}
 
-	// Route them to the correct service.
+	// Route them to the correct
 	for i, msg := range messages {
 		if msg == nil {
 			s.logger.Warn("Nil message in outgoing messages")
@@ -359,7 +359,7 @@ func (s *sessionEVR) Close(msg string, reason runtime.PresenceReason, envelopes 
 	}
 
 	s.services.Range(func(key ServiceType, service *serviceWS) bool {
-		service.Close()
+		Close()
 		return true
 	})
 
@@ -376,9 +376,9 @@ func (s *sessionEVR) AddService(serviceType ServiceType, service *serviceWS) err
 		return nil
 	}
 	s.Unlock()
-	service.Lock()
-	service.serviceCh = s.incomingCh
-	service.Unlock()
+	Lock()
+	serviceCh = s.incomingCh
+	Unlock()
 	// The connection is stopped, so just replace it.
 	s.services.Store(serviceType, service)
 	return nil

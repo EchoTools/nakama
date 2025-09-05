@@ -4,6 +4,9 @@ go 1.25.0
 
 require (
 	github.com/anyascii/go v0.3.3
+	github.com/aws/aws-sdk-go-v2 v1.38.3
+	github.com/aws/aws-sdk-go-v2/service/gamelift v1.46.2
+	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.3
 	github.com/bits-and-blooms/bitset v1.24.0
 	github.com/echotools/nevr-common/v3 v3.1.0
 	github.com/echotools/vrmlgo/v5 v5.0.1
@@ -12,11 +15,10 @@ require (
 	github.com/gofrs/uuid/v5 v5.3.2
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/go-cmp v0.7.0
-	github.com/gorilla/handlers v1.5.2
-	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.1
 	github.com/heroiclabs/nakama-common v1.40.0
+	github.com/heroiclabs/nakama-gamelift v0.0.0-20250218094607-f28292bf6968
 	github.com/heroiclabs/nakama/v3 v3.30.0
 	github.com/heroiclabs/sql-migrate v0.0.0-20241125131053-95a7949783b0
 	github.com/intinig/go-openskill v0.0.0-20250324193118-8ce0c35c4815
@@ -42,12 +44,18 @@ require (
 )
 
 require (
+	github.com/aws/aws-sdk-go-v2/credentials v1.16.14 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.6 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.6 // indirect
+	github.com/aws/smithy-go v1.23.0 // indirect
 	github.com/blugelabs/bluge v0.2.2 // indirect
 	github.com/blugelabs/bluge_segment_api v0.2.0 // indirect
 	github.com/blugelabs/query_string v0.3.0 // indirect
 	github.com/dgryski/dgoogauth v0.0.0-20190221195224-5a805980a5f3 // indirect
 	github.com/dop251/goja v0.0.0-20250309171923-bcd7cc6bf64c // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
+	github.com/gorilla/handlers v1.5.2 // indirect
+	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/kamstrup/intmap v0.5.1 // indirect

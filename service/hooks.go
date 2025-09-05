@@ -1,11 +1,10 @@
-package backend
+package service
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
 
-	"github.com/echotools/nakama/v3/service"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -28,7 +27,7 @@ func AfterReadStorageObjectsHook(ctx context.Context, logger runtime.Logger, db 
 		return nil
 	}
 
-	vars, err := service.SessionVarsFromRuntimeContext(ctx)
+	vars, err := SessionVarsFromRuntimeContext(ctx)
 	if err != nil {
 		logger.Error("Failed to parse session variables from context", zap.Error(err))
 		return err
@@ -99,7 +98,7 @@ func BeforeListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.D
 	in.Label = nil                           // Clear the label to prevent any filtering by label.
 	in.Authoritative = wrapperspb.Bool(true) // Set authoritative to false to allow listing all matches.
 
-	vars, err := service.SessionVarsFromRuntimeContext(ctx)
+	vars, err := SessionVarsFromRuntimeContext(ctx)
 	if err != nil {
 		logger.Error("Failed to parse session variables from context", zap.Error(err))
 		return nil, err
