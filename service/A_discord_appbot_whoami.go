@@ -759,7 +759,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	if w.opts.IncludeCurrentMatchesEmbed {
 		// Get the players current lobby sessions
-		presences, err := d.nk.StreamUserList(StreamModeService, targetID, "", StreamLabelMatchService, false, true)
+		presences, err := d.nk.StreamUserList(StreamModeService, targetID, "", "", false, true)
 		if err != nil {
 			return err
 		}

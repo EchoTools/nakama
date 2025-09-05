@@ -50,7 +50,7 @@ func (p *Pipeline) lobbyEntrantConnected(logger *zap.Logger, session *sessionEVR
 		ctx := s.Context()
 		// Update tracker with the entrant's presence.
 		for _, subject := range [...]uuid.UUID{presence.SessionID, presence.UserID, presence.XPID.UUID()} {
-			session.tracker.Update(ctx, s.ID(), server.PresenceStream{Mode: StreamModeService, Subject: subject, Label: StreamLabelMatchService}, s.UserID(), server.PresenceMeta{Format: s.Format(), Hidden: false, Status: matchID.String()})
+			session.tracker.Update(ctx, s.ID(), server.PresenceStream{Mode: StreamModeService, Subject: subject, Label: ""}, s.UserID(), server.PresenceMeta{Format: s.Format(), Hidden: false, Status: matchID.String()})
 		}
 
 		// Trigger the MatchJoin event.

@@ -126,7 +126,7 @@ func (p *Pipeline) handleLobbySessionRequest(ctx context.Context, logger *zap.Lo
 	return nil
 }
 
-func LobbyPrepareSession(ctx context.Context, nk runtime.NakamaModule, matchID MatchID, settings *MatchSettings) (*MatchLabel, error) {
+func LobbyPrepareSession(ctx context.Context, nk runtime.NakamaModule, matchID MatchID, settings *LobbySessionSettings) (*MatchLabel, error) {
 
 	response, err := SignalMatch(ctx, nk, matchID, SignalPrepareSession, settings)
 	if err != nil {

@@ -19,7 +19,7 @@ func CheckForceUserRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 		loginSessionID = strings.ToLower(v[0])
 	}
 
-	presences, err := nk.StreamUserList(StreamModeService, loginSessionID, "", StreamLabelLoginService, false, true)
+	presences, err := nk.StreamUserList(StreamModeService, loginSessionID, "", "", false, true)
 	if err != nil {
 
 		return "", runtime.NewError("failed to get stream presences", StatusInternalError)

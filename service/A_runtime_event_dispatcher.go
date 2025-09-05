@@ -457,7 +457,7 @@ func ScheduleKick(ctx context.Context, nk runtime.NakamaModule, logger runtime.L
 		case <-time.After(delay):
 		}
 
-		presences, err := nk.StreamUserList(StreamModeService, userID, "", StreamLabelMatchService, false, true)
+		presences, err := nk.StreamUserList(StreamModeService, userID, "", "", false, true)
 		if err != nil {
 			logger.WithField("error", err).Warn("failed to get user presences")
 			return

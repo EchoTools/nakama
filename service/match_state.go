@@ -36,7 +36,7 @@ type LobbyMetadata struct {
 // LobbySessionState holds the state of a match.
 type LobbySessionState struct {
 	ID                 MatchID                             `json:"id"`                   // The match ID
-	Metadata           *LobbyMetadata                      `json:"settings"`             // The match settings
+	Metadata           *LobbyMetadata                      `json:"settings,omitempty"`   // The match settings
 	CreateTime         time.Time                           `json:"create_time"`          // The time the match was created
 	StartTime          time.Time                           `json:"start_time"`           // The time the match started
 	LockTime           time.Time                           `json:"lock_time"`            // The time the match was locked (no new players can join)
@@ -54,37 +54,71 @@ type LobbySessionState struct {
 }
 
 func (s *LobbySessionState) Mode() evr.Symbol {
+	if s.Metadata == nil {
+		return evr.Symbol(0)
+	}
 	return s.Metadata.Mode
 }
 
 func (s *LobbySessionState) Level() evr.Symbol {
+	if s.Metadata == nil {
+		return evr.Symbol(0)
+	}
 	return s.Metadata.Level
 }
 
 func (s *LobbySessionState) Visibility() LobbyType {
+	if s.Metadata == nil {
+		return UnassignedLobby
+	}
 	return s.Metadata.Visibility
 }
 
 func (s *LobbySessionState) RequiredFeatures() []string {
+	if s.Metadata == nil {
+		return nil
+	}
 	return s.Metadata.RequiredFeatures
 }
 func (s *LobbySessionState) TeamAlignments() map[uuid.UUID]Role {
+	if s.Metadata == nil {
+		return nil
+	}
 	return s.Alignments
 }
 
-func (s *LobbySessionState) GroupID() string {
-	return s.Metadata.GroupID.String()
+func (s *LobbySessionState) SpawnedBy() uuid.UUID {
+	if s.Metadata == nil {
+		return uuid.Nil
+	}
+	return s.Metadata.SpawnedBy
+}
+
+func (s *LobbySessionState) GroupID() uuid.UUID {
+	if s.Metadata == nil {
+		return uuid.Nil
+	}
+	return s.Metadata.GroupID
 }
 
 func (s *LobbySessionState) MaxSize() int {
+	if s.Metadata == nil {
+		return 0
+	}
 	return s.Metadata.MaxSize
 }
 
 func (s *LobbySessionState) PlayerLimit() int {
+	if s.Metadata == nil {
+		return 0
+	}
 	return s.Metadata.PlayerLimit
 }
 
 func (s *LobbySessionState) TeamSize() int {
+	if s.Metadata == nil {
+		return 0
+	}
 	return s.Metadata.TeamSize
 }
 
@@ -220,10 +254,10 @@ func (l *LobbySessionState) caculateRatingWeights() map[evr.XPID]int {
 func (s *LobbySessionState) MetricsTags() map[string]string {
 
 	tags := map[string]string{
-		"mode":        s.Metadata.Mode.String(),
-		"level":       s.Metadata.Level.String(),
-		"type":        s.Metadata.Visibility.String(),
-		"group_id":    s.Metadata.GroupID.String(),
+		"mode":        s.Mode().String(),
+		"level":       s.Level().String(),
+		"type":        s.Visibility().String(),
+		"group_id":    s.GroupID().String(),
 		"operator_id": s.Server.GetUserId(),
 	}
 
@@ -235,7 +269,7 @@ func (s *LobbySessionState) MetricsTags() map[string]string {
 
 func (s *LobbySessionState) GameState() *GameState {
 	gameState := &GameState{}
-	switch s.Metadata.Mode {
+	switch s.Mode() {
 	case evr.ModeArenaPublic:
 		teamRatings := make([]types.Team, 2)
 		teams := make(map[Role]RatedTeam, 2)
@@ -266,24 +300,25 @@ func (s *LobbySessionState) Label() *MatchLabel {
 	ratingOrdinal := calculateMedianRating(players)
 	nonPlayerCount := len(s.NonPlayers())
 	playerCount := s.Size() - nonPlayerCount
+	groupID := s.GroupID()
 	return &MatchLabel{
 		ID:               s.ID,
 		Open:             s.IsOpen(),
 		LockedAt:         s.LockTime,
-		LobbyType:        s.Metadata.Visibility,
-		Mode:             s.Metadata.Mode,
-		Level:            s.Metadata.Level,
+		LobbyType:        s.Visibility(),
+		Mode:             s.Mode(),
+		Level:            s.Level(),
 		Size:             playerCount + nonPlayerCount,
 		PlayerCount:      playerCount,
 		Players:          players,
 		RatingOrdinal:    ratingOrdinal,
 		GameState:        s.GameState(),
-		TeamSize:         s.Metadata.TeamSize,
-		MaxSize:          s.Metadata.MaxSize,
-		PlayerLimit:      s.Metadata.PlayerLimit,
-		RequiredFeatures: s.Metadata.RequiredFeatures,
-		GroupID:          &s.Metadata.GroupID,
-		SpawnedBy:        s.Metadata.SpawnedBy.String(),
+		TeamSize:         s.TeamSize(),
+		MaxSize:          s.MaxSize(),
+		PlayerLimit:      s.PlayerLimit(),
+		RequiredFeatures: s.RequiredFeatures(),
+		GroupID:          groupID.String(),
+		SpawnedBy:        s.SpawnedBy().String(),
 		StartTime:        s.StartTime,
 		CreatedAt:        s.CreateTime,
 		GameServer:       s.Server,

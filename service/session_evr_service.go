@@ -26,6 +26,7 @@ var payloadPool = &sync.Pool{
 type ServiceType string
 
 const (
+	ServiceTypeUndefined    ServiceType = ""
 	ServiceTypeIAP          ServiceType = "api"
 	ServiceTypeConfig       ServiceType = "config"
 	ServiceTypeLogin        ServiceType = "login"
@@ -33,11 +34,6 @@ const (
 	ServiceTypeServer       ServiceType = "server"
 	ServiceTypeNativeServer ServiceType = "native_server"
 	ServiceTypeUnknown      ServiceType = "unknown"
-)
-const (
-	StreamLabelMatchService      = "matchservice"
-	StreamLabelLoginService      = "loginservice"
-	StreamLabelGameServerService = "serverservice"
 )
 
 func MessageServiceType(m evr.Message) ServiceType {

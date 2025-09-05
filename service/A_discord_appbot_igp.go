@@ -95,7 +95,7 @@ func (p *InGamePanel) UserID() string {
 }
 
 func (p *InGamePanel) retrieveActiveLoginSession(userID string) (server.Session, error) {
-	presences, err := p.nk.StreamUserList(StreamModeService, userID, "", StreamLabelLoginService, false, true)
+	presences, err := p.nk.StreamUserList(StreamModeService, userID, "", "", false, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list igp users: %w", err)
 	}
@@ -124,7 +124,7 @@ func (p *InGamePanel) displayMessage(content string) (*discordgo.Message, error)
 
 func (p *InGamePanel) retrieveCurrentMatchLabel(ctx context.Context, userID string) (*MatchLabel, error) {
 	// Get the list of players in the match
-	presences, err := p.nk.StreamUserList(StreamModeService, userID, "", StreamLabelMatchService, false, true)
+	presences, err := p.nk.StreamUserList(StreamModeService, userID, "", "", false, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get stream presences: %w", err)
 	}

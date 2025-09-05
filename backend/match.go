@@ -25,7 +25,7 @@ type (
 	Role               = service.RoleIndex
 	LobbyPresence      = service.LobbyPresence
 	GameServerPresence = service.GameServerPresence
-	MatchSettings      = service.MatchSettings
+	MatchSettings      = service.LobbySessionSettings
 	Label              = service.MatchLabel
 	PlayerInfo         = service.PlayerInfo
 	LobbyType          = service.LobbyType
@@ -76,7 +76,7 @@ const (
 type NEVRMatch struct{}
 
 // MatchInit is called when the match is created.
-func (m *NEVRMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, params map[string]interface{}) (interface{}, int, string) {
+func (m *NEVRMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, params map[string]any) (any, int, string) {
 
 	var gameServer *service.GameServerPresence
 	if b, ok := params["gameserver"].([]byte); ok {
@@ -121,7 +121,7 @@ func MatchIDFromContext(ctx context.Context) service.MatchID {
 }
 
 // MatchJoinAttempt decides whether to accept or deny the player session.
-func (m *NEVRMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, joinPresence runtime.Presence, metadata map[string]string) (interface{}, bool, string) {
+func (m *NEVRMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ any, joinPresence runtime.Presence, metadata map[string]string) (any, bool, string) {
 	state, ok := state_.(*State)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
@@ -173,9 +173,7 @@ func (m *NEVRMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger,
 		sID := meta.Reservations[i].SessionID
 
 		// Remove any existing reservations for this player.
-		if _, found := state.Reservations[sID]; found {
-			delete(state.Reservations, sID)
-		}
+		delete(state.Reservations, sID)
 
 		// Remove existing players from the reservation entrants
 		if _, found := state.Presences[sID]; found {
@@ -196,7 +194,7 @@ func (m *NEVRMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger,
 	for _, p := range meta.Presences() {
 		for _, e := range state.Presences {
 			if e.XPID.Equals(p.XPID) {
-				logger.WithFields(map[string]interface{}{
+				logger.WithFields(map[string]any{
 					"evrid": p.XPID,
 					"uid":   p.GetUserId(),
 				}).Error("Duplicate service.EVR-ID join attempt.")
@@ -289,7 +287,7 @@ func (m *NEVRMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger,
 	// Check team sizes
 	if state.Mode() == evr.ModeArenaPublic {
 		if state.RoleCount(BlueTeam) > state.TeamSize() || state.RoleCount(OrangeTeam) > state.TeamSize() {
-			logger.WithFields(map[string]interface{}{
+			logger.WithFields(map[string]any{
 				"blue":   state.RoleCount(BlueTeam),
 				"orange": state.RoleCount(OrangeTeam),
 			}).Error("Oversized team.")
@@ -301,7 +299,7 @@ func (m *NEVRMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger,
 
 // MatchJoin is called after the join attempt.
 // MatchJoin updates the match data, and should not have any decision logic.
-func (m *NEVRMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, presences []runtime.Presence) interface{} {
+func (m *NEVRMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ any, presences []runtime.Presence) any {
 	state, ok := state_.(*State)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
@@ -322,13 +320,13 @@ func (m *NEVRMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sq
 		}
 
 		if mp, ok := state.Presences[sessionID]; !ok {
-			logger.WithFields(map[string]interface{}{
+			logger.WithFields(map[string]any{
 				"username": p.GetUsername(),
 				"uid":      p.GetUserId(),
 			}).Error("Presence not found. this should never happen.")
 			return nil
 		} else {
-			logger.WithFields(map[string]interface{}{
+			logger.WithFields(map[string]any{
 				"username": p.GetUsername(),
 				"uid":      p.GetUserId(),
 				"sid":      p.GetSessionId(),
@@ -339,7 +337,7 @@ func (m *NEVRMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sq
 				"level":    state.Level().String(),
 				"type":     state.Visibility().String(),
 				"role":     fmt.Sprintf("%d", mp.RoleAlignment),
-				"group_id": state.GroupID(),
+				"group_id": state.GroupID().String(),
 			}
 			nk.MetricsCounterAdd("match_entrant_join_count", tags, 1)
 			nk.MetricsTimerRecord("match_player_join_duration", tags, time.Since(state.JoinTimes[sessionID]))
@@ -359,7 +357,7 @@ func (m *NEVRMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sq
 var PresenceReasonKicked runtime.PresenceReason = 16
 
 // MatchLeave is called after a player leaves the match.
-func (m *NEVRMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, presences []runtime.Presence) interface{} {
+func (m *NEVRMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ any, presences []runtime.Presence) any {
 	state, ok := state_.(*State)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
@@ -373,7 +371,7 @@ func (m *NEVRMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *s
 		class := "Player"
 		_, ok := state.Presences[sessionID]
 		if !ok {
-			logger.WithFields(map[string]interface{}{
+			logger.WithFields(map[string]any{
 				"username": p.GetUsername(),
 				"uid":      p.GetUserId(),
 				"sid":      sessionID,
@@ -386,7 +384,7 @@ func (m *NEVRMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *s
 			joinTime = state.CreateTime
 			class = "Server"
 		}
-		logger.WithFields(map[string]interface{}{
+		logger.WithFields(map[string]any{
 			"username": p.GetUsername(),
 			"uid":      p.GetUserId(),
 			"sid":      p.GetSessionId(),
@@ -413,7 +411,7 @@ func (m *NEVRMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *s
 	rejects := make([]uuid.UUID, 0)
 
 	for _, p := range presences {
-		logger := logger.WithFields(map[string]interface{}{
+		logger := logger.WithFields(map[string]any{
 			"username": p.GetUsername(),
 			"uid":      p.GetUserId(),
 			"sid":      p.GetSessionId(),
@@ -442,7 +440,7 @@ func (m *NEVRMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *s
 				"level":    state.Level().String(),
 				"type":     state.Visibility().String(),
 				"role":     fmt.Sprintf("%d", mp.RoleAlignment),
-				"group_id": state.GroupID(),
+				"group_id": state.GroupID().String(),
 				"reason":   reason,
 			}
 
@@ -479,7 +477,7 @@ func (m *NEVRMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *s
 
 			// Store the player's time in the match to a leaderboard
 
-			if err := recordMatchTimeToLeaderboard(ctx, nk, mp.GetUserId(), mp.DisplayName, state.GroupID(), state.Mode(), int64(time.Since(ts).Seconds())); err != nil {
+			if err := recordMatchTimeToLeaderboard(ctx, nk, mp.GetUserId(), mp.DisplayName, state.GroupID().String(), state.Mode(), int64(time.Since(ts).Seconds())); err != nil {
 				logger.Warn("Failed to record match time to leaderboard: %v", err)
 			}
 
@@ -496,7 +494,7 @@ func (m *NEVRMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *s
 
 						nk.MetricsCounterAdd("match_entrant_early_quit", tags, 1)
 
-						logger.WithFields(map[string]interface{}{
+						logger.WithFields(map[string]any{
 							"uid":          mp.GetUserId(),
 							"username":     mp.Username,
 							"evrid":        mp.XPID,
@@ -504,7 +502,7 @@ func (m *NEVRMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *s
 						}).Debug("Incrementing early quit for player.")
 
 						for _, r := range [...]evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime} {
-							boardID := service.StatisticBoardID(state.GroupID(), state.Mode(), service.EarlyQuitStatisticID, r)
+							boardID := service.StatisticBoardID(state.GroupID().String(), state.Mode(), service.EarlyQuitStatisticID, r)
 
 							if _, err := nk.LeaderboardRecordWrite(ctx, boardID, mp.UserID.String(), mp.DisplayName, 1, 0, nil, nil); err != nil {
 								if errors.Is(err, server.ErrLeaderboardNotFound) {
@@ -530,7 +528,7 @@ func (m *NEVRMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *s
 		msgs := []evr.Message{
 			evr.NewGameServerEntrantRejected(code, rejects...),
 		}
-		logger.WithFields(map[string]interface{}{
+		logger.WithFields(map[string]any{
 			"rejects": rejects,
 			"code":    code,
 		}).Debug("Sending reject message to game server.")
@@ -600,7 +598,7 @@ func recordMatchTimeToLeaderboard(ctx context.Context, nk runtime.NakamaModule, 
 }
 
 // MatchLoop is called every tick of the match and handles state, plus messages from the client.
-func (m *NEVRMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, messages []runtime.MatchData) interface{} {
+func (m *NEVRMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ any, messages []runtime.MatchData) any {
 	state, ok := state_.(*State)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
@@ -774,7 +772,7 @@ func (m *NEVRMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sq
 }
 
 // MatchTerminate is called when the match is being terminated.
-func (m *NEVRMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, graceSeconds int) interface{} {
+func (m *NEVRMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ any, graceSeconds int) any {
 	state, ok := state_.(*State)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
@@ -809,7 +807,7 @@ func (m *NEVRMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, d
 	return nil
 }
 
-func (m *NEVRMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, graceSeconds int) interface{} {
+func (m *NEVRMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ any, graceSeconds int) any {
 	state, ok := state_.(*State)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
@@ -820,7 +818,7 @@ func (m *NEVRMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db
 
 	nk.MetricsTimerRecord("lobby_session_duration", state.MetricsTags(), time.Since(state.StartTime))
 	if state != nil && slices.Contains(service.ValidLeaderboardModes, state.Mode()) {
-		if err := recordGameServerTimeToLeaderboard(ctx, nk, state.Server.GetUserId(), state.Server.GetUsername(), state.GroupID(), state.Mode(), int64(time.Since(state.StartTime).Seconds())); err != nil {
+		if err := recordGameServerTimeToLeaderboard(ctx, nk, state.Server.GetUserId(), state.Server.GetUsername(), state.GroupID().String(), state.Mode(), int64(time.Since(state.StartTime).Seconds())); err != nil {
 			logger.Warn("Failed to record game server time to leaderboard: %v", err)
 		}
 	}
@@ -865,7 +863,7 @@ func (m *NEVRMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db
 }
 
 // MatchSignal is called when a signal is sent into the match.
-func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, data string) (interface{}, string) {
+func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ any, data string) (any, string) {
 	state, ok := state_.(*State)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
@@ -975,7 +973,7 @@ func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *
 			return state, service.SignalResponse{Message: "session already prepared"}.String()
 		}
 
-		settings := service.MatchSettings{}
+		settings := service.LobbySessionSettings{}
 
 		if err := json.Unmarshal(signal.Payload, &settings); err != nil {
 			return state, service.SignalResponse{Message: fmt.Sprintf("failed to unmarshal settings: %v", err)}.String()
@@ -987,12 +985,12 @@ func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *
 			}
 		}
 
-		if ok, err := service.CheckSystemGroupMembership(ctx, db, settings.SpawnedBy.String(), service.GroupGlobalDevelopers); err != nil {
+		if ok, err := service.CheckSystemGroupMembership(ctx, db, settings.CreatorID.String(), service.GroupGlobalDevelopers); err != nil {
 			return state, service.SignalResponse{Message: fmt.Sprintf("failed to check group membership: %v", err)}.String()
 		} else if !ok {
 
 			// Validate the mode
-			if levels, ok := evr.LevelsByMode[settings.Mode]; !ok {
+			if levels, ok := service.LevelsByMode[settings.Mode]; !ok {
 				return state, service.SignalResponse{Message: fmt.Sprintf("bad request: invalid mode: %v", settings.Mode)}.String()
 
 			} else {
@@ -1024,8 +1022,8 @@ func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *
 			state.StartTime = settings.ScheduledTime.UTC()
 		}
 
-		if !settings.SpawnedBy.IsNil() {
-			state.Metadata.SpawnedBy = settings.SpawnedBy
+		if !settings.CreatorID.IsNil() {
+			state.Metadata.SpawnedBy = settings.CreatorID
 		} else {
 			state.Metadata.SpawnedBy = uuid.FromStringOrNil(signal.UserID)
 		}
@@ -1224,7 +1222,7 @@ func (m *NEVRMatch) dispatchMessages(_ context.Context, logger runtime.Logger, d
 func (m *NEVRMatch) updateLabel(logger runtime.Logger, dispatcher runtime.MatchDispatcher, state *State) error {
 	if dispatcher != nil {
 		if err := dispatcher.MatchLabelUpdate(state.Label().String()); err != nil {
-			logger.WithFields(map[string]interface{}{
+			logger.WithFields(map[string]any{
 				"state": state,
 				"error": err,
 			}).Error("Failed to update label.")

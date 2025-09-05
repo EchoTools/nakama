@@ -2293,23 +2293,23 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return simpleInteractionResponse(s, i, "this command must be used from a guild")
 
 			}
-			mode := evr.ModeArenaPrivate
+			mode := ModeArenaPrivate
 			region := "default"
-			level := evr.LevelUnspecified
+			level := LevelUnspecified
 			for _, o := range options {
 				switch o.Name {
 				case "region":
 					region = o.StringValue()
 				case "mode":
-					mode = evr.ToSymbol(o.StringValue())
+					mode = Mode(o.StringValue())
 				case "level":
-					level = evr.ToSymbol(o.StringValue())
+					level = Level(o.StringValue())
 				}
 			}
 
-			if levels, ok := evr.LevelsByMode[mode]; !ok {
+			if valid, ok := GameModeConfigurations[mode]; !ok {
 				return fmt.Errorf("invalid mode `%s`", mode)
-			} else if level != evr.LevelUnspecified && !slices.Contains(levels, level) {
+			} else if level != LevelUnspecified && !slices.Contains(valid.Levels, level) {
 				return fmt.Errorf("invalid level `%s`", level)
 			}
 
@@ -2319,8 +2319,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				"userID":    userID,
 				"guildID":   i.GuildID,
 				"region":    region,
-				"mode":      mode.String(),
-				"level":     level.String(),
+				"mode":      mode,
+				"level":     level,
 				"startTime": startTime,
 			})
 
@@ -2392,7 +2392,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return errors.New("failed to get target user ID")
 			}
 
-			presences, err := d.nk.StreamUserList(StreamModeService, targetUserID, "", StreamLabelMatchService, false, true)
+			presences, err := d.nk.StreamUserList(StreamModeService, targetUserID, "", "", false, true)
 			if err != nil {
 				return err
 			}

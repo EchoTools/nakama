@@ -478,13 +478,13 @@ func (sm *SessionsChannelManager) updateSessionMessage(tracker *SessionMessageTr
 func (sm *SessionsChannelManager) getGuildGroupForMatch(label *MatchLabel) (*GuildGroup, error) {
 	// Get the guild group registry from the global app bot
 	if appBot := GlobalAppBot.Load(); appBot != nil {
-		if guildGroup := appBot.guildGroupRegistry.Get(label.GroupID.String()); guildGroup != nil {
+		if guildGroup := appBot.guildGroupRegistry.Get(label.GroupID); guildGroup != nil {
 			return guildGroup, nil
 		}
 	}
 
 	// Fallback - return an error if we can't find the guild group
-	return nil, fmt.Errorf("guild group not found for group ID: %s", label.GroupID.String())
+	return nil, fmt.Errorf("guild group not found for group ID: %s", label.GroupID)
 }
 
 // RemoveSessionMessage removes a session from tracking

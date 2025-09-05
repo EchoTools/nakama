@@ -112,12 +112,12 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	}
 
 	// Otherwise, find an open server in the given region
-	settings := &MatchSettings{
+	settings := &LobbySessionSettings{
 		Mode:             evr.ToSymbol(request.Mode),
 		Level:            evr.ToSymbol(request.Level),
 		TeamSize:         int(request.TeamSize.GetValue()),
 		ScheduledTime:    request.ExpiryTime.AsTime().UTC(),
-		SpawnedBy:        uuid.FromStringOrNil(request.OwnerId),
+		CreatorID:        uuid.FromStringOrNil(request.OwnerId),
 		GroupID:          uuid.FromStringOrNil(request.GroupId),
 		RequiredFeatures: request.RequiredFeatures,
 		TeamAlignments:   teamAlignments,

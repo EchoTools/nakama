@@ -51,6 +51,7 @@ func sendDiscordError(e error, discordId string, logger *zap.Logger, bot *discor
 
 // errFailedRegistration sends a failure message to the broadcaster and closes the session
 func errFailedRegistration(session *sessionEVR, logger *zap.Logger, err error, code evr.BroadcasterRegistrationFailureCode) error {
+	logger = logger.WithOptions(zap.AddCallerSkip(1))
 	logger.Warn("Failed to register game server", zap.Error(err))
 	if err := session.SendEVR(Envelope{
 		ServiceType: ServiceTypeServer,
@@ -124,12 +125,12 @@ func (p *Pipeline) validateSessionAndUser(s *sessionEVR, params *gameServerRegis
 	s.tracker.TrackMulti(s.Context(), s.id, []*server.TrackerOp{
 		// EVR packet data stream for the login session by Session ID and broadcaster ID
 		{
-			Stream: server.PresenceStream{Mode: StreamModeService, Subject: s.userID, Label: StreamLabelGameServerService},
+			Stream: server.PresenceStream{Mode: StreamModeService, Subject: s.userID},
 			Meta:   server.PresenceMeta{Format: s.Format(), Username: s.username.String(), Hidden: false},
 		},
 		// EVR packet data stream by session ID and broadcaster ID
 		{
-			Stream: server.PresenceStream{Mode: StreamModeService, Subject: s.id, Label: StreamLabelGameServerService},
+			Stream: server.PresenceStream{Mode: StreamModeService, Subject: s.id},
 			Meta:   server.PresenceMeta{Format: s.Format(), Username: s.username.String(), Hidden: false},
 		},
 	}, s.userID)
@@ -500,7 +501,7 @@ func (p *Pipeline) newGameServerParkingMatch(logger runtime.Logger, nk runtime.N
 		return nil, fmt.Errorf("failed to create parking match: %w", err)
 	}
 	// Update the game server stream with the match ID.
-	if err := nk.StreamUserUpdate(StreamModeGameServer, presence.GetSessionId(), "", StreamLabelMatchService, presence.GetUserId(), presence.GetSessionId(), false, false, matchIDStr); err != nil {
+	if err := nk.StreamUserUpdate(StreamModeGameServer, presence.GetSessionId(), "", "", presence.GetUserId(), presence.GetSessionId(), false, false, matchIDStr); err != nil {
 		return nil, fmt.Errorf("failed to update game server stream: %w", err)
 	}
 	matchID := MatchIDFromStringOrNil(matchIDStr)
@@ -520,10 +521,8 @@ func (p *Pipeline) newGameServerParkingMatch(logger runtime.Logger, nk runtime.N
 			Username: session.Username(),
 			Format:   session.Format(),
 		}
-		if success, _ := p.tracker.Track(session.Context(), session.ID(), stream, session.UserID(), m); success {
-			// Kick the user from any other matches they may be part of.
-			// WARNING This cannot be used during transition. It will kick the player from their current match.
-			//p.tracker.UntrackLocalByModes(session.ID(), matchStreamModes, stream)
+		if success, _ := p.tracker.Track(session.Context(), session.ID(), stream, session.UserID(), m); !success {
+			return nil, fmt.Errorf("failed to track user in match: %s", matchIDStr)
 		}
 	}
 
@@ -795,7 +794,7 @@ func BroadcasterRTTcheck(rIP net.IP, port, count int, timeout time.Duration) (rt
 
 func GameServerBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (MatchID, runtime.Presence, error) {
 	// Get the game server presence. The MatchID is stored in the status field of the presence.
-	presences, err := nk.StreamUserList(StreamModeGameServer, sessionID.String(), "", StreamLabelMatchService, false, true)
+	presences, err := nk.StreamUserList(StreamModeGameServer, sessionID.String(), "", "", false, true)
 	if err != nil {
 		return MatchID{}, nil, err
 	}

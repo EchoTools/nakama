@@ -124,6 +124,7 @@ func RegisterIndexes(ctx context.Context, storageIndex server.StorageIndex) erro
 		&LinkTicketStore{},
 		&ConfigDocumentData{},
 		&ChannelInfoData{},
+		&GuildGroupState{},
 	}
 	for _, s := range storables {
 		for _, idx := range s.StorageIndexes() {

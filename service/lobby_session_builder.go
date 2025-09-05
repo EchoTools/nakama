@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -21,6 +22,10 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+)
+
+const (
+	FleetManagerMetadataKey = "payload"
 )
 
 // Builds the match after the matchmaker has created it
@@ -227,10 +232,10 @@ func (b *LobbyBuilder) buildMatch(logger runtime.Logger, entrants []*server.Matc
 
 	mode := evr.ToSymbol(modestr)
 
-	settings := &MatchSettings{
+	settings := &LobbySessionSettings{
 		Mode:              mode,
 		Level:             b.selectNextMap(mode),
-		SpawnedBy:         uuid.FromStringOrNil(SystemUserID),
+		CreatorID:         uuid.FromStringOrNil(SystemUserID),
 		GroupID:           groupID,
 		Reservations:      entrantPresences,
 		ReservationExpiry: time.Now().Add(20 * time.Second),
@@ -509,135 +514,77 @@ func LobbyGameServerList(ctx context.Context, nk runtime.NakamaModule, query str
 	return labels, nil
 }
 
-func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupIDs []string, rttsByExternalIP map[string]int, settings *MatchSettings, regions []string, requireDefaultRegion bool, requireRegion bool, queryAddon string) (*MatchLabel, error) {
+type LobbyAllocationMetadata struct {
+	GlobalMatchmakingSettings GlobalMatchmakingSettings    `json:"global_matchmaking_settings"`
+	SessionSettings           LobbySessionSettings         `json:"session_settings"`
+	AllocatorGroupIDs         []string                     `json:"allocator_group_ids"`
+	MandatoryRegionCodes      []string                     `json:"required_region_codes"`
+	PreferredRegionCodes      []string                     `json:"optional_region_codes"`
+	QueryAddon                string                       `json:"query_addon,string"`
+	Latencies                 []runtime.FleetUserLatencies `json:"user_latencies"`
+}
 
-	if len(groupIDs) == 0 {
-		return nil, fmt.Errorf("no group IDs provided")
+func (m LobbyAllocationMetadata) String() string {
+	b, _ := json.Marshal(m)
+	return string(b)
+}
+
+func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, queryData LobbyAllocationMetadata) (*MatchLabel, error) {
+	queryData.GlobalMatchmakingSettings = ServiceSettings().Matchmaking
+	userIDs := []string{queryData.SessionSettings.OwnerID}
+
+	maxSlots := MatchLobbyMaxSize
+	valid, ok := GameModeConfigurations[queryData.SessionSettings.Mode]
+	if ok {
+		maxSlots = int(valid.MaxSlots)
 	}
-	// Load the server ratings storage object
-	globalSettings := ServiceSettings().Matchmaking
-
-	qparts := []string{
-		fmt.Sprintf("+label.broadcaster.group_ids:%s", Query.CreateMatchPattern(groupIDs)),
-		queryAddon,
-	}
-
-	if requireDefaultRegion {
-		qparts = append(qparts, "+label.broadcaster.region_codes:/(default)/")
-	}
-
-	if len(regions) > 0 {
-		prefix := ""
-		if requireRegion {
-			prefix = "+"
-		}
-
-		qparts = append(qparts, fmt.Sprintf("%slabel.broadcaster.region_codes:%s", prefix, Query.CreateMatchPattern(regions)))
-	}
-
-	query := strings.Join(qparts, " ")
-
-	// Create a set of regions for fast lookup
-	regionSet := make(map[string]struct{}, len(regions))
-	for _, region := range regions {
-		regionSet[region] = struct{}{}
+	metadata := map[string]any{
+		FleetManagerMetadataKey: queryData.String(),
 	}
 
-	// Get the list of matches
-	matches, err := nk.MatchList(ctx, 100, true, "", nil, nil, query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find matches: %w", err)
+	type callbackResult struct {
+		status       runtime.FmCreateStatus
+		instanceInfo *runtime.InstanceInfo
+		sessionInfo  []*runtime.SessionInfo
+		metadata     map[string]any
+		err          error
 	}
 
-	if len(matches) == 0 {
-		return nil, ErrMatchmakingNoAvailableServers
-	}
+	resultChan := make(chan callbackResult, 1)
 
-	// Create a slice containing the match labels
-	var (
-		availableServers    = make([]*MatchLabel, 0, len(matches))
-		activeCountByHostID = make(map[string]int, len(matches))
-	)
-	for _, match := range matches {
-		label := &MatchLabel{}
-		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal match label: %w", err)
-		}
-		if label.GameServer == nil {
-			continue
-		}
-
-		if label.LobbyType == UnassignedLobby {
-			availableServers = append(availableServers, label)
-		} else {
-			activeCountByHostID[label.GameServer.Endpoint.GetHostID()]++
+	callbackFn := func(status runtime.FmCreateStatus, instanceInfo *runtime.InstanceInfo, sessionInfo []*runtime.SessionInfo, metadata map[string]any, err error) {
+		resultChan <- callbackResult{
+			status:       status,
+			instanceInfo: instanceInfo,
+			sessionInfo:  sessionInfo,
+			metadata:     metadata,
+			err:          err,
 		}
 	}
 
-	if len(availableServers) == 0 {
-		return nil, ErrMatchmakingNoAvailableServers
+	// Use Fleet Manager to create a game session
+	if err := nk.GetFleetManager().Create(ctx, maxSlots, userIDs, queryData.Latencies, metadata, callbackFn); err != nil {
+		return nil, fmt.Errorf("failed to create game session: %w", err)
 	}
 
-	indexes := make([]labelIndex, len(availableServers))
-	for i, label := range availableServers {
-		extIP := label.GameServer.Endpoint.ExternalIP.String()
-		hostID := label.GameServer.Endpoint.GetHostID()
-		regionMatch := false
-		for _, region := range label.GameServer.RegionCodes {
-			if region == "default" {
-				continue
-			}
-			if _, ok := regionSet[region]; ok {
-				regionMatch = true
-			}
-		}
+	result := <-resultChan
 
-		rating, ok := globalSettings.ServerRatings.ByExternalIP[extIP]
-		if !ok {
-			if rating, ok = globalSettings.ServerRatings.ByOperatorUsername[label.GameServer.Username]; !ok {
-				rating = 0
-			}
-		}
-
-		// Skip servers with a rating of -999
-		if rating == -999 {
-			continue
-		}
-
-		indexes[i] = labelIndex{
-			Label:             label,
-			RTT:               (rttsByExternalIP[extIP] + 10) / 20 * 20,
-			IsReachable:       rttsByExternalIP[extIP] != 0,
-			Rating:            rating,
-			IsPriorityForMode: slices.Contains(label.GameServer.DesignatedModes, settings.Mode),
-			ActiveCount:       activeCountByHostID[hostID],
-			IsRegionMatch:     regionMatch,
-			IsHighLatency:     rttsByExternalIP[extIP] > 100,
-		}
+	if result.err != nil {
+		return nil, fmt.Errorf("failed to create game session: %w", result.err)
+	}
+	if result.status != runtime.CreateSuccess {
+		return nil, fmt.Errorf("failed to create game session: status %d", result.status)
+	}
+	labelJSON, ok := result.metadata["label"].(string)
+	if !ok {
+		return nil, errors.New("missing label in metadata")
 	}
 
-	sortLabelIndexes(indexes)
-
-	// Find the first available game server
-	var label *MatchLabel
-	for _, index := range indexes {
-		if index.Label.LobbyType != UnassignedLobby {
-			continue
-		}
-
-		label, err = LobbyPrepareSession(ctx, nk, index.Label.ID, settings)
-		if err != nil {
-			logger.WithFields(map[string]any{
-				"mid": index.Label.ID.UUID.String(),
-				"err": err,
-			}).Warn("Failed to prepare session")
-			continue
-		}
-
-		return label, nil
+	label := &MatchLabel{}
+	if err := json.Unmarshal([]byte(labelJSON), label); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal match label: %w", err)
 	}
-
-	return nil, ErrMatchmakingNoAvailableServers
+	return label, nil
 }
 
 type labelIndex struct {

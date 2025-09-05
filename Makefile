@@ -19,7 +19,7 @@ dev: $(SRC_FILES)
 	CGO_ENABLED=1 CGO_CFLAGS="-O0 -g" go build \
 		$(DEBUG_FLAGS) \
 		-ldflags "-X main.version=$(GIT_DESCRIBE) -X main.commitID=$(COMMIT)" \
-		-o nakama-debug
+		-trimpath -o nakama-debug
 
 build: $(SRC_FILES)
 	docker buildx build \

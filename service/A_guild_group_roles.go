@@ -3,6 +3,7 @@ package service
 import (
 	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/bits-and-blooms/bitset"
 )
@@ -19,6 +20,22 @@ type GuildGroupRoles struct {
 	VPNBypass        string `json:"vpn_bypass"`
 	AccountLinked    string `json:"headset_linked"`
 	UsernameOnly     string `json:"username_only"`
+}
+
+// Roles returns a map of role name (json field name) to role ID
+func (r *GuildGroupRoles) AsMap() map[string]string {
+	v := reflect.ValueOf(*r)
+	roles := make(map[string]string, v.NumField())
+
+	for i := 0; i < v.NumField(); i++ {
+		role := v.Field(i).String()
+		if role != "" {
+			field := v.Type().Field(i)
+			jsonTag, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+			roles[jsonTag] = role
+		}
+	}
+	return roles
 }
 
 // Roles returns a slice of role IDs

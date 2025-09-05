@@ -169,7 +169,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		if hostUserID := uuid.FromStringOrNil(hostUserIDStr); !hostUserID.IsNil() {
 
 			// Get the MatchIDs for the user from it's presence
-			presences, _ := p.nk.StreamUserList(StreamModeService, hostUserID.String(), "", StreamLabelMatchService, false, true)
+			presences, _ := p.nk.StreamUserList(StreamModeService, hostUserID.String(), "", "", false, true)
 			for _, presence := range presences {
 				matchID := MatchIDFromStringOrNil(presence.GetStatus())
 				if !matchID.IsNil() {

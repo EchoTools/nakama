@@ -19,11 +19,11 @@ func (p *Pipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, session 
 		return MatchID{}, err
 	}
 
-	settings := &MatchSettings{
+	settings := &LobbySessionSettings{
 		Mode:             params.Mode,
 		Level:            params.Level,
 		ScheduledTime:    time.Now().UTC(),
-		SpawnedBy:        session.UserID(),
+		CreatorID:        session.UserID(),
 		GroupID:          params.GroupID,
 		RequiredFeatures: params.RequiredFeatures,
 		TeamAlignments:   map[uuid.UUID]RoleIndex{session.UserID(): params.Role},

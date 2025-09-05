@@ -89,11 +89,10 @@ func (g *GuildGroup) RoleCacheUpdate(account *EVRProfile, roles []string) bool {
 	g.State.updated = false
 
 	roleSet := g.RoleMap.AsSet()
-	// Ignore irrelevant roles
-	for i := 0; i < len(roles); i++ {
+	// Remove roles that are no longer assigned
+	for i := len(roles) - 1; i >= 0; i-- {
 		if _, ok := roleSet[roles[i]]; !ok {
 			roles = slices.Delete(roles, i, i+1)
-			i--
 		}
 	}
 
@@ -104,22 +103,11 @@ func (g *GuildGroup) RoleCacheUpdate(account *EVRProfile, roles []string) bool {
 	}
 
 	// Update the roles
-	for _, rID := range g.RoleMap.AsSlice() {
+	for rName, rID := range g.RoleMap.AsMap() {
 		if _, ok := updatedRoles[rID]; ok {
-			if userIDs, ok := g.State.RoleCache[rID]; !ok {
-				g.State.RoleCache[rID] = map[string]struct{}{account.ID(): {}}
-				g.State.updated = true
-			} else {
-				if _, ok := userIDs[account.ID()]; !ok {
-					userIDs[account.ID()] = struct{}{}
-					g.State.updated = true
-				}
-			}
-		} else if userIDs, ok := g.State.RoleCache[rID]; ok {
-			if _, ok := userIDs[account.ID()]; ok {
-				delete(userIDs, account.ID())
-				g.State.updated = true
-			}
+			g.State.updated = g.State.updated || g.State.RoleCache.Add(account.ID(), rID, rName)
+		} else {
+			g.State.updated = g.State.updated || g.State.RoleCache.Remove(account.ID(), rID, rName)
 		}
 	}
 

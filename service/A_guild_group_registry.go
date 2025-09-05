@@ -13,6 +13,8 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
+// TODO Replace this with an index
+
 type GuildGroupRegistry struct {
 	ctx    context.Context
 	logger runtime.Logger
@@ -65,7 +67,6 @@ func NewGuildGroupRegistry(ctx context.Context, logger runtime.Logger, nk runtim
 					}
 				}
 			}
-			logger.Debug("Guild group registry updated")
 		}
 	}()
 

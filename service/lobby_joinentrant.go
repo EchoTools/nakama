@@ -149,15 +149,15 @@ func LobbyJoinEntrants(logger runtime.Logger, matchRegistry server.MatchRegistry
 			Meta:   server.PresenceMeta{Format: session.Format(), Username: e.Username, Status: matchIDStr, Hidden: false},
 		},
 		{
-			Stream: server.PresenceStream{Mode: StreamModeService, Subject: e.SessionID, Label: StreamLabelMatchService},
+			Stream: server.PresenceStream{Mode: StreamModeService, Subject: e.SessionID, Label: ""},
 			Meta:   server.PresenceMeta{Format: session.Format(), Username: e.Username, Status: matchIDStr, Hidden: false},
 		},
 		{
-			Stream: server.PresenceStream{Mode: StreamModeService, Subject: e.UserID, Label: StreamLabelMatchService},
+			Stream: server.PresenceStream{Mode: StreamModeService, Subject: e.UserID, Label: ""},
 			Meta:   server.PresenceMeta{Format: session.Format(), Username: e.Username, Status: matchIDStr, Hidden: false},
 		},
 		{
-			Stream: server.PresenceStream{Mode: StreamModeService, Subject: e.XPID.UUID(), Label: StreamLabelMatchService},
+			Stream: server.PresenceStream{Mode: StreamModeService, Subject: e.XPID.UUID(), Label: ""},
 			Meta:   server.PresenceMeta{Format: session.Format(), Username: e.Username, Status: matchIDStr, Hidden: false},
 		},
 	}

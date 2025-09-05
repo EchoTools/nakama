@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server"
 	"github.com/heroiclabs/nakama/v3/social"
@@ -87,9 +86,6 @@ func (n *RuntimeGoNEVRModule) LobbyGet(ctx context.Context, matchID string) (*Ma
 	if err = json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
 		return nil, err
 	}
-	if label.GroupID == nil {
-		label.GroupID = &uuid.Nil
-	}
 	return &label, nil
 }
 
@@ -116,9 +112,7 @@ func (n *RuntimeGoNEVRModule) MatchLabelList(ctx context.Context, limit int, min
 		if err = json.Unmarshal([]byte(m.GetLabel().GetValue()), &label); err != nil {
 			return nil, err
 		}
-		if label.GroupID == nil {
-			label.GroupID = &uuid.Nil
-		}
+
 		labels = append(labels, &label)
 	}
 

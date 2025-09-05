@@ -43,7 +43,7 @@ type MatchLabel struct {
 	PlayerLimit      int      `json:"player_limit,omitempty"` // The number of players in the match (not including spectators).
 	RequiredFeatures []string `json:"features,omitempty"`     // The required features for the match.
 
-	GroupID        *uuid.UUID              `json:"group_id,omitempty"`        // The channel id of the broadcaster. (EVR)
+	GroupID        string                  `json:"group_id,omitempty"`        // The channel id of the broadcaster. (EVR)
 	SpawnedBy      string                  `json:"spawned_by,omitempty"`      // The userId of the player that spawned this match.
 	StartTime      time.Time               `json:"start_time,omitempty"`      // The time the match was, or will be started.
 	CreatedAt      time.Time               `json:"created_at,omitempty"`      // The time the match was created.
@@ -207,10 +207,7 @@ func (s *MatchLabel) GetLabelIndented() string {
 }
 
 func (s *MatchLabel) GetGroupID() uuid.UUID {
-	if s.GroupID == nil {
-		return uuid.Nil
-	}
-	return *s.GroupID
+	return uuid.FromStringOrNil(s.GroupID)
 }
 
 func (s *MatchLabel) GetEndpoint() evr.Endpoint {

@@ -364,7 +364,7 @@ func KickPlayerRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 	}
 
 	// Get the match of the user
-	presences, err := nk.StreamUserList(StreamModeService, request.UserID, "", StreamLabelMatchService, false, true)
+	presences, err := nk.StreamUserList(StreamModeService, request.UserID, "", "", false, true)
 	if err != nil {
 		return "", err
 	}
@@ -891,13 +891,13 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		request.StartTime = time.Now().Add(10 * time.Minute)
 	}
 
-	settings := &MatchSettings{
+	settings := &LobbySessionSettings{
 		Mode:             request.Mode.Symbol(),
 		TeamSize:         request.TeamSize,
 		Level:            request.Level.Symbol(),
 		RequiredFeatures: request.RequiredFeatures,
 		ScheduledTime:    request.StartTime.UTC(),
-		SpawnedBy:        uuid.FromStringOrNil(request.SpawnedBy),
+		CreatorID:        uuid.FromStringOrNil(request.SpawnedBy),
 		GroupID:          uuid.FromStringOrNil(groupID),
 		TeamAlignments:   make(map[uuid.UUID]RoleIndex, len(request.Alignments)),
 	}

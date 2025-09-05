@@ -10,8 +10,6 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	evr "github.com/echotools/nakama/v3/protocol"
-	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -369,10 +367,9 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 	return nil
 }
 
-func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.Logger, userID, guildID string, regionCode string, mode, level evr.Symbol, startTime time.Time) (l *MatchLabel, rtt float64, err error) {
+func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.Logger, userID, guildID, regionCode string, mode Mode, level Level, startTime time.Time) (l *MatchLabel, rtt float64, err error) {
 
 	// Find a parking match to prepare
-
 	groupID := d.cache.GuildIDToGroupID(guildID)
 
 	// Get a list of the groups that this user has allocate access to
@@ -401,31 +398,43 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	if err := StorableReadNk(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
 		return nil, 0, status.Errorf(codes.Internal, "failed to read latency history: %v", err)
 	}
-
 	latestRTTs := latencyHistory.LatestRTTs()
 
-	// Prepare the session for the match.
-	settings := &MatchSettings{
-		Mode:          mode,
-		Level:         level,
-		GroupID:       uuid.FromStringOrNil(groupID),
-		ScheduledTime: startTime.UTC().Add(10 * time.Minute),
-		SpawnedBy:     uuid.FromStringOrNil(userID),
+	valid, ok := GameModeConfigurations[mode]
+	if !ok {
+		return nil, 0, status.Error(codes.InvalidArgument, "invalid game mode")
 	}
-	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Allocate
-	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, allocatorGroupIDs, latestRTTs, settings, []string{regionCode}, false, true, queryAddon)
+
+	queryData := LobbyAllocationMetadata{
+		// Prepare the session for the match.
+		SessionSettings: LobbySessionSettings{
+			Mode:        mode,
+			Level:       level,
+			TeamSize:    valid.DefaultTeamSize,
+			MatchExpiry: startTime.UTC().Add(10 * time.Minute),
+			CreatorID:   userID,
+			OwnerID:     userID,
+			GroupID:     groupID,
+		},
+		AllocatorGroupIDs:    allocatorGroupIDs,
+		MandatoryRegionCodes: []string{regionCode},
+		QueryAddon:           ServiceSettings().Matchmaking.QueryAddons.Allocate,
+		Latencies:            RuntimeLatenciesFromLatencyHistory(latestRTTs, userID),
+	}
+
+	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, queryData)
 	if err != nil {
 		if strings.Contains("bad request:", err.Error()) {
 			err = NewLobbyErrorf(BadRequest, "required features not supported")
 		}
-		logger.Warn("Failed to allocate game server", zap.Error(err), zap.Any("settings", settings))
+		logger.Warn("Failed to allocate game server", zap.Error(err), zap.Any("query", queryData))
 		return nil, 0, fmt.Errorf("failed to allocate game server: %w", err)
 	}
 
 	return label, rtt, nil
 }
 
-func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Logger, userID, guildID, region string, mode, level evr.Symbol, startTime time.Time) (l *MatchLabel, latencyMillis int, err error) {
+func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Logger, userID, guildID, region string, mode Mode, level Level, startTime time.Time) (l *MatchLabel, latencyMillis int, err error) {
 
 	// Find a parking match to prepare
 	groupID := d.cache.GuildIDToGroupID(guildID)
@@ -457,18 +466,33 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	if err := StorableReadNk(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
 		return nil, 0, status.Errorf(codes.Internal, "failed to read latency history: %v", err)
 	}
-	extIPs := latencyHistory.AverageRTTs(true)
 
-	settings := &MatchSettings{
-		Mode:          mode,
-		Level:         level,
-		GroupID:       uuid.FromStringOrNil(groupID),
-		ScheduledTime: startTime.UTC().Add(1 * time.Minute),
-		SpawnedBy:     uuid.FromStringOrNil(userID),
+	latestRTTs := latencyHistory.LatestRTTs()
+
+	valid, ok := GameModeConfigurations[mode]
+	if !ok {
+		return nil, 0, status.Error(codes.InvalidArgument, "invalid game mode")
 	}
 
-	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
-	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, extIPs, settings, []string{region}, true, false, queryAddon)
+	queryData := LobbyAllocationMetadata{
+		// Prepare the session for the match.
+		SessionSettings: LobbySessionSettings{
+			Mode:        mode,
+			Level:       level,
+			TeamSize:    valid.DefaultTeamSize,
+			MatchExpiry: startTime.UTC().Add(1 * time.Minute),
+			CreatorID:   userID,
+			OwnerID:     userID,
+			GroupID:     groupID,
+		},
+		AllocatorGroupIDs:    []string{groupID},
+		MandatoryRegionCodes: []string{"default"},
+		PreferredRegionCodes: []string{region},
+		QueryAddon:           ServiceSettings().Matchmaking.QueryAddons.Create,
+		Latencies:            RuntimeLatenciesFromLatencyHistory(latestRTTs, userID),
+	}
+
+	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, queryData)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to allocate game server: %w", err)
 	}
@@ -540,7 +564,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			}
 		}
 	}
-	presences, err := d.nk.StreamUserList(StreamModeService, targetUserID, "", StreamLabelMatchService, false, true)
+	presences, err := d.nk.StreamUserList(StreamModeService, targetUserID, "", "", false, true)
 	if err != nil {
 		return err
 	}
@@ -782,7 +806,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 	return nil
 }
 
-func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) error {
+func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID, groupID string) error {
 	// Get the current guild roles
 	metadata, err := GroupMetadataLoad(ctx, d.db, groupID)
 	if err != nil {

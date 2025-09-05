@@ -179,7 +179,8 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 						// If the client has specified a login session ID, check if the session exists.
 						if session, ok := sessionRegistry.Get(sessionID).(*sessionEVR); !ok || session == nil {
 							// The session does not exist, so create a new session.
-							break InitLoop
+							logger.Warn("Session not found, closing connection.", zap.String("sid", sessionID.String()))
+							return
 						} else if err = session.AddService(MessageServiceType(in), service); err != nil {
 							logger.Warn("Failed to add service to session", zap.Error(err), zap.String("sid", sessionID.String()))
 							return
@@ -372,12 +373,12 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 		tracker.TrackMulti(session.Context(), session.id, []*server.TrackerOp{
 			// EVR packet data stream for the login session by user ID, and service ID, with EVR ID
 			{
-				Stream: server.PresenceStream{Mode: StreamModeService, Subject: session.userID, Label: StreamLabelLoginService},
+				Stream: server.PresenceStream{Mode: StreamModeService, Subject: session.userID},
 				Meta:   server.PresenceMeta{Format: session.Format(), Username: session.Username(), Hidden: false},
 			},
 			// EVR packet data stream for the login session by session ID and service ID, with EVR ID
 			{
-				Stream: server.PresenceStream{Mode: StreamModeService, Subject: session.id, Label: StreamLabelLoginService},
+				Stream: server.PresenceStream{Mode: StreamModeService, Subject: session.id},
 				Meta:   server.PresenceMeta{Format: session.Format(), Username: session.Username(), Hidden: false},
 			},
 			// Notification presence.

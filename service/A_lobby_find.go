@@ -312,10 +312,10 @@ func (p *Pipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyParams
 
 	p.metrics.CustomCounter("lobby_new", metricsTags, 1)
 
-	settings := &MatchSettings{
+	settings := &LobbySessionSettings{
 		Mode:              lobbyParams.Mode,
 		Level:             lobbyParams.Level,
-		SpawnedBy:         lobbyParams.UserID,
+		CreatorID:         lobbyParams.UserID,
 		GroupID:           lobbyParams.GroupID,
 		ScheduledTime:     time.Now().UTC(),
 		Reservations:      entrants,
@@ -649,7 +649,7 @@ func (p *Pipeline) PartyFollow(ctx context.Context, logger *zap.Logger, session 
 		stream := server.PresenceStream{
 			Mode:    StreamModeService,
 			Subject: leaderSessionID,
-			Label:   StreamLabelMatchService,
+			Label:   "",
 		}
 
 		// Check if the leader is still matchmaking. If so, continue waiting.
@@ -680,7 +680,7 @@ func (p *Pipeline) PartyFollow(ctx context.Context, logger *zap.Logger, session 
 		stream = server.PresenceStream{
 			Mode:    StreamModeService,
 			Subject: session.id,
-			Label:   StreamLabelMatchService,
+			Label:   "",
 		}
 		memberMatchID := MatchID{}
 		presence = p.tracker.GetLocalBySessionIDStreamUserID(session.id, stream, session.userID)

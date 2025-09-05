@@ -7,6 +7,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/heroiclabs/nakama-common/runtime"
 )
 
 const (
@@ -245,4 +247,16 @@ func sortPingCandidatesByLatencyHistory(hostIPs []string, latencyHistory *Latenc
 
 		return 0
 	})
+}
+
+func RuntimeLatenciesFromLatencyHistory(RTTs map[string]int, userID string) []runtime.FleetUserLatencies {
+	fleetLatencies := make([]runtime.FleetUserLatencies, 0, len(RTTs))
+	for extIP, rtt := range RTTs {
+		fleetLatencies = append(fleetLatencies, runtime.FleetUserLatencies{
+			UserId:                userID,
+			RegionIdentifier:      extIP,
+			LatencyInMilliseconds: float32(rtt),
+		})
+	}
+	return fleetLatencies
 }
