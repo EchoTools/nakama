@@ -447,7 +447,7 @@ func (m RemoteLogRepairMatrix) SessionUUID() uuid.UUID {
 }
 
 func (m RemoteLogRepairMatrix) GameTime() time.Duration {
-	return time.Duration(m.GameInfoGameTime) * time.Second
+	return time.Duration(m.GameInfoGameTime * float64(time.Second))
 }
 
 type RemoteLogGhostAll struct {
@@ -477,7 +477,7 @@ type RemoteLogGoal struct {
 	GoalType               string  `json:"[goal_type]"`
 	PlayerInfoDisplayName  string  `json:"[player_info][displayname]"`
 	PlayerInfoTeamID       int64   `json:"[player_info][teamid]"`
-	PlaterInfoXPID         string  `json:"[player_info][userid]"`
+	PlayerXPID             string  `json:"[player_info][userid]"`
 	PrevPlayerDisplayname  string  `json:"[prev_player][displayname]"`
 	PrevPlayerTeamID       int64   `json:"[prev_player][teamid]"`
 	PrevPlayerXPID         string  `json:"[prev_player][userid]"`
@@ -490,7 +490,7 @@ func (m RemoteLogGoal) SessionUUID() uuid.UUID {
 }
 
 func (m RemoteLogGoal) GameTime() time.Duration {
-	return time.Duration(m.GameInfoGameTime) * time.Second
+	return time.Duration(m.GameInfoGameTime * float64(time.Second))
 }
 
 func (m RemoteLogGoal) Points() int {
@@ -569,7 +569,7 @@ func (m RemoteLogUserDisconnected) SessionUUID() uuid.UUID {
 }
 
 func (m RemoteLogUserDisconnected) GameTime() time.Duration {
-	return time.Duration(m.GameInfoGameTime) * time.Second
+	return time.Duration(m.GameInfoGameTime * float64(time.Second))
 }
 
 // VOIP LOUDNESS
@@ -597,7 +597,7 @@ func (m RemoteLogVOIPLoudness) SessionUUID() uuid.UUID {
 }
 
 func (m RemoteLogVOIPLoudness) GameTime() time.Duration {
-	return time.Duration(m.GameInfoGameTime) * time.Second
+	return time.Duration(m.GameInfoGameTime * float64(time.Second))
 }
 
 type RemoteLogGearStatsPerRound struct {
@@ -686,7 +686,7 @@ func (m RemoteLogGearStatsPerRound) SessionUUID() uuid.UUID {
 }
 
 func (m RemoteLogGearStatsPerRound) GameTime() time.Duration {
-	return time.Duration(m.GameInfoGameTime) * time.Second
+	return time.Duration(m.GameInfoGameTime * float64(time.Second))
 }
 
 type RemoteLogNetExplosion struct {
@@ -718,7 +718,7 @@ func (m RemoteLogNetExplosion) SessionUUID() uuid.UUID {
 }
 
 func (m RemoteLogNetExplosion) GameTime() time.Duration {
-	return time.Duration(m.GameInfoGameTime) * time.Second
+	return time.Duration(m.GameInfoGameTime * float64(time.Second))
 }
 
 type RemoteLogPlayerDeath struct {
@@ -771,7 +771,7 @@ func (m RemoteLogPlayerDeath) SessionUUID() uuid.UUID {
 }
 
 func (m RemoteLogPlayerDeath) GameTime() time.Duration {
-	return time.Duration(m.GameInfoGameTime) * time.Second
+	return time.Duration(m.GameInfoGameTime * float64(time.Second))
 }
 
 type RemoteLogRoundOver struct {
@@ -800,7 +800,7 @@ func (m RemoteLogRoundOver) SessionUUID() uuid.UUID {
 }
 
 func (m RemoteLogRoundOver) GameTime() time.Duration {
-	return time.Duration(m.GameInfoGameTime) * time.Second
+	return time.Duration(m.GameInfoGameTime * float64(time.Second))
 }
 
 type RemoteLogThreatScanner struct {
@@ -830,7 +830,7 @@ func (m RemoteLogThreatScanner) SessionUUID() uuid.UUID {
 }
 
 func (m RemoteLogThreatScanner) GameTime() time.Duration {
-	return time.Duration(m.GameInfoGameTime) * time.Second
+	return time.Duration(m.GameInfoGameTime * float64(time.Second))
 }
 
 type RemoteLogUnknownUnlocks struct {
