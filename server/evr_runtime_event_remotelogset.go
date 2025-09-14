@@ -174,7 +174,10 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			*/
 
 		case *evr.RemoteLogGoal:
-
+			if msg.GameInfoIsSocial {
+				// Social matches do not have a game clock or pauses
+				continue
+			}
 			sessionID := msg.SessionUUID()
 
 			if sessionID.IsNil() {
@@ -183,8 +186,7 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			}
 
 			update, _ = updates.LoadOrStore(sessionID, &MatchGameStateUpdate{})
-
-			update.FromGoal(msg)
+			processMatchGoalIntoUpdate(msg, update)
 
 		case *evr.RemoteLogGhostUser:
 			// This is a ghost user message.
@@ -381,7 +383,7 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 		case *evr.RemoteLogPostMatchMatchStats:
 			update, _ = updates.LoadOrStore(msg.SessionUUID(), &MatchGameStateUpdate{})
 			update.MatchOver = true
-
+			update.CurrentGameClock = 0
 			// Increment the completed matches for the player
 			if err := s.incrementCompletedMatches(ctx, logger, nk, sessionRegistry, s.UserID, s.SessionID); err != nil {
 				logger.WithField("error", err).Warn("Failed to increment completed matches")
@@ -389,6 +391,8 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			}
 
 		case *evr.RemoteLogPostMatchTypeStats:
+			update.MatchOver = true
+			update.CurrentGameClock = 0
 			// Process the post match stats into the player's statistics
 			if err := s.processPostMatchTypeStats(ctx, logger, db, nk, sessionRegistry, statisticsQueue, msg); err != nil {
 				logger.WithFields(map[string]any{
@@ -400,12 +404,12 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			}
 		case *evr.RemoteLogLoadStats:
 
-			if msg.LoadTime > 45 {
+			if msg.ClientLoadTime > 45 {
 
 				var gg *GuildGroup
 				metadata := make(map[string]any)
 				msgJSON, _ := json.MarshalIndent(msg, "", "  ")
-				content := fmt.Sprintf("High load time detected: %ds\n```json\n%s\n```", int(msg.LoadTime), string(msgJSON))
+				content := fmt.Sprintf("High load time detected: %ds\n```json\n%s\n```", int(msg.ClientLoadTime), string(msgJSON))
 
 				matchID, presence, _ := GetMatchIDBySessionID(nk, uuid.FromStringOrNil(s.SessionID))
 
@@ -614,4 +618,29 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 	}
 
 	return entries, nil
+}
+
+func processMatchGoalIntoUpdate(msg *evr.RemoteLogGoal, update *MatchGameStateUpdate) {
+	playerInfoXPID := evr.XPIDFromStringOrNil(msg.PlayerXPID)
+	prevPlayerXPID := evr.XPIDFromStringOrNil(msg.PrevPlayerXPID)
+
+	// Arena goals have a predictable pause duration
+
+	update.CurrentGameClock = time.Duration(msg.GameInfoGameTime * float64(time.Second))
+
+	if update.CurrentGameClock > 0 && msg.GameInfoIsArena && !msg.GameInfoIsPrivate {
+		update.PauseDuration = AfterGoalDuration + RespawnDuration + CatapultDuration
+	}
+	update.Goals = append(update.Goals, &evr.MatchGoal{
+		GoalTime:              msg.GameInfoGameTime,
+		GoalType:              msg.GoalType,
+		DisplayName:           msg.PlayerInfoDisplayName,
+		TeamID:                int64(msg.PlayerInfoTeamID),
+		XPID:                  playerInfoXPID,
+		PrevPlayerDisplayName: msg.PrevPlayerDisplayname,
+		PrevPlayerTeamID:      int64(msg.PrevPlayerTeamID),
+		PrevPlayerXPID:        prevPlayerXPID,
+		WasHeadbutt:           msg.WasHeadbutt,
+		PointsValue:           GoalTypeToPoints(msg.GoalType),
+	})
 }

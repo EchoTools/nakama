@@ -21,6 +21,13 @@ type GameState struct {
 	Teams                  map[TeamIndex]TeamMetadata `json:"teams,omitempty"`                   // Metadata for each team
 }
 
+func (g *GameState) GetRoundClock() *RoundClock {
+	if g.RoundClock == nil {
+		return nil
+	}
+	return g.RoundClock
+}
+
 func NewGameState() *GameState {
 	return &GameState{}
 }

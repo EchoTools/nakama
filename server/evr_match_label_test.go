@@ -78,7 +78,6 @@ func TestMatchLabel_GetPlayerCount(t *testing.T) {
 				presenceMap:          tt.fields.presenceMap,
 				joinTimestamps:       tt.fields.joinTimestamps,
 				joinTimeMilliseconds: tt.fields.joinTimeMilliseconds,
-				sessionStartExpiry:   tt.fields.sessionStartExpiry,
 				tickRate:             tt.fields.tickRate,
 				emptyTicks:           tt.fields.emptyTicks,
 				terminateTick:        tt.fields.terminateTick,

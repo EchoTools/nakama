@@ -110,7 +110,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	}
 
 	if session.userID.IsNil() {
-		return errFailedRegistration(session, logger, errors.New("game server is not authenticated."), evr.BroadcasterRegistration_Unknown)
+		return errFailedRegistration(session, logger, errors.New("game server is not authenticated"), evr.BroadcasterRegistration_Unknown)
 	}
 
 	ctx := session.Context()
@@ -199,9 +199,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	}
 
 	// Add the server regions specified in the config.json
-	for _, r := range params.serverRegions {
-		regionCodes = append(regionCodes, r)
-	}
+	regionCodes = append(regionCodes, params.serverRegions...)
 
 	switch regionHash {
 
@@ -231,11 +229,11 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	regionCodes = append(regionCodes, fmt.Sprintf("0x%x", serverID))
 
 	var ipInfo IPInfo
-	if p.ipInfoCache != nil {
-		ipInfo, err = p.ipInfoCache.Get(ctx, externalIP.String())
-		if err != nil {
-			logger.Warn("Failed to get IPQS data", zap.Error(err))
-		}
+
+	ipInfo, err = p.ipInfoCache.Get(ctx, externalIP.String())
+	if err != nil {
+		logger.Warn("Failed to get IPQS data", zap.Error(err))
+	} else if ipInfo != nil {
 		if slices.Contains(regionCodes, "default") {
 			regionCodes = append(regionCodes,
 				LocationToRegionCode(ipInfo.CountryCode(), ipInfo.Region(), ipInfo.City()),
@@ -296,6 +294,17 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		if err := p.nk.StreamUserUpdate(StreamModeGameServer, gID.String(), "", "", config.GetUserId(), config.GetSessionId(), false, false, status); err != nil {
 			logger.Warn("Failed to update game server stream", zap.Error(err))
 			return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
+		}
+	}
+
+	// If this server is hosting for any guild with EnableGlobalPingForServers enabled, include it in the global ping pool.
+	for _, gg := range guildGroups {
+		if gg.EnableGlobalPingForServers {
+			if err := p.nk.StreamUserUpdate(StreamModeGameServer, uuid.Nil.String(), "", "", config.GetUserId(), config.GetSessionId(), false, false, status); err != nil {
+				logger.Warn("Failed to update game server stream", zap.Error(err))
+				return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
+			}
+			break
 		}
 	}
 
