@@ -56,13 +56,13 @@ type MatchLabel struct {
 	reservationMap  map[string]*slotReservation     // map[sessionID]slotReservation
 	presenceByEvrID map[evr.EvrId]*EvrMatchPresence // map[evrID]EvrMatchPresence
 
-	joinTimestamps       map[string]time.Time // The timestamps of when players joined the match. map[sessionId]time.Time
-	joinTimeMilliseconds map[string]int64     // The round clock time of when players joined the match. map[sessionId]time.Time
-	sessionStartExpiry   int64                // The tick count at which the match will be shut down if it has not started.
-	tickRate             int64                // The number of ticks per second.
-	emptyTicks           int64                // The number of ticks the match has been empty.
-	terminateTick        int64                // The tick count at which the match will be shut down.
-	goals                []*evr.MatchGoal     // The goals scored in the match.
+	joinTimestamps       map[string]time.Time             // The timestamps of when players joined the match. map[sessionId]time.Time
+	joinTimeMilliseconds map[string]int64                 // The round clock time of when players joined the match. map[sessionId]time.Time
+	disconnectInfos      map[string]*PlayerDisconnectInfo // map[userID]*PlayerDisconnectInfo
+	tickRate             int64                            // The number of ticks per second.
+	emptyTicks           int64                            // The number of ticks the match has been empty.
+	terminateTick        int64                            // The tick count at which the match will be shut down.
+	goals                []*evr.MatchGoal                 // The goals scored in the match.
 }
 
 func (s *MatchLabel) LoadAndDeleteReservation(sessionID string) (*EvrMatchPresence, bool) {

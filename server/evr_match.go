@@ -433,9 +433,10 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 		if state.GameState != nil && state.GameState.RoundClock != nil {
 			// Do not overwrite an existing value
 			if _, ok := state.joinTimeMilliseconds[p.GetSessionId()]; !ok {
-				state.joinTimeMilliseconds[p.GetSessionId()] = state.GameState.RoundClock.Current().Milliseconds()
+				state.joinTimeMilliseconds[p.GetSessionId()] = state.GameState.RoundClock.Elapsed().Milliseconds()
 			}
 		}
+		isBackfill := time.Now().After(state.StartTime.Add(PublicMatchWaitTime))
 
 		if mp, ok := state.presenceMap[p.GetSessionId()]; !ok {
 			logger.WithFields(map[string]interface{}{
@@ -456,6 +457,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 				"type":     state.LobbyType.String(),
 				"role":     fmt.Sprintf("%d", mp.RoleAlignment),
 				"group_id": state.GetGroupID().String(),
+				"backfill": strconv.FormatBool(isBackfill),
 			}
 			nk.MetricsCounterAdd("match_entrant_join_count", tags, 1)
 			nk.MetricsTimerRecord("match_player_join_duration", tags, time.Since(state.joinTimestamps[p.GetSessionId()]))
@@ -466,6 +468,13 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			State:    state,
 		})
 
+		if info, ok := state.disconnectInfos[p.GetUserId()]; ok {
+			// If the player has disconnect info, calculate the disconnect duration
+			info.LeaveTime = time.Time{}
+		} else {
+			// If the player has no disconnect info, create it now
+			state.disconnectInfos[p.GetUserId()] = NewPlayerDisconnectInfo(ctx, logger, db, nk, state, presences[0].GetUserId())
+		}
 	}
 
 	//m.updateLabel(logger, dispatcher, state)
@@ -589,9 +598,12 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 				logger.Warn("Failed to record match time to leaderboard: %v", err)
 			}
 
+			if info, ok := state.disconnectInfos[p.GetUserId()]; ok {
+				// If the player has disconnect info, calculate the disconnect duration
+				info.LeaveEvent(state)
+			}
 			// If the round is not over, then add an early quit count to the player.
-			if state.Mode == evr.ModeArenaPublic && time.Since(state.StartTime) >= (time.Second*60) && state.GameState != nil && state.GameState.MatchOver == false {
-
+			if state.Mode == evr.ModeArenaPublic && time.Now().After(state.StartTime.Add(time.Second*60)) && state.GameState != nil && !state.GameState.MatchOver {
 				for _, p := range presences {
 					if mp, ok := state.presenceMap[p.GetSessionId()]; ok {
 						// Only players
@@ -602,9 +614,9 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 						nk.MetricsCounterAdd("match_entrant_early_quit", tags, 1)
 
 						logger.WithFields(map[string]interface{}{
-							"uid":         mp.GetUserId(),
-							"username":    mp.Username,
-							"evrid":       mp.EvrID,
+							"uid":          mp.GetUserId(),
+							"username":     mp.Username,
+							"evrid":        mp.EvrID,
 							"display_name": mp.DisplayName,
 						}).Debug("Incrementing early quit for player.")
 
@@ -638,8 +650,6 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 			delete(state.presenceMap, p.GetSessionId())
 			delete(state.presenceByEvrID, mp.EvrID)
-			delete(state.joinTimestamps, p.GetSessionId())
-
 		}
 	}
 
@@ -886,6 +896,47 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		logger.Info("Closing the match in response to a lock.")
 		state.Open = false
 		updateLabel = true
+	}
+
+	// Every 2 seconds, update the disconnect info durations for players that are still connected to the game server.
+	if state.Mode == evr.ModeArenaPublic && tick%(2*state.tickRate) == 0 {
+		delta := 2 * time.Second
+		// The amount of time the teams are full.
+		var integrityTime, disadvantageBlueTime, disadvantageOrangeTime time.Duration
+
+		if state.OpenPlayerSlots() == 0 {
+			integrityTime = delta
+		} else if state.RoleCount(evr.TeamBlue) < state.RoleCount(evr.TeamOrange) {
+			disadvantageBlueTime = delta
+		} else if state.RoleCount(evr.TeamOrange) < state.RoleCount(evr.TeamBlue) {
+			disadvantageOrangeTime = delta
+		}
+
+		for _, p := range state.disconnectInfos {
+			// If the player is still here, increase the counts.
+			if !p.LeaveTime.IsZero() {
+				continue
+			}
+			p.IntegrityDuration += integrityTime
+
+			if p.Team == BlueTeam {
+				p.DisadvantageDuration += disadvantageBlueTime
+			}
+			if p.Team == OrangeTeam {
+				p.DisadvantageDuration += disadvantageOrangeTime
+			}
+		}
+
+		// If the match is over, submit the early quit counts.
+		if state.GameState.MatchOver {
+			for _, info := range state.disconnectInfos {
+				if info.LeaveTime.IsZero() {
+					// Mark the player as having left when the match ended.
+					info.LeaveEvent(state)
+				}
+				info.LogEarlyQuitMetrics(nk, state)
+			}
+		}
 	}
 
 	if updateLabel {
