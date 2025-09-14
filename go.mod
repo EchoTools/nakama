@@ -98,6 +98,7 @@ require (
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/twmb/murmur3 v1.1.8 // indirect
+	github.com/yohcop/openid-go v1.0.1
 	go.uber.org/multierr v1.10.0 // indirect
 	golang.org/x/net v0.37.0 // indirect
 	golang.org/x/sync v0.14.0 // indirect

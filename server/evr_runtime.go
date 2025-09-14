@@ -13,6 +13,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/socialauth"
 	"github.com/jackc/pgtype"
 	"go.uber.org/zap"
 
@@ -54,6 +55,9 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	)
 
 	// Register hooks
+	//if err = initializer.RegisterBeforeReadStorageObjects(BeforeReadStorageObjectsHook); err != nil {
+	//		return fmt.Errorf("unable to register AfterReadStorageObjects hook: %w", err)
+	//	}
 	if err = initializer.RegisterAfterReadStorageObjects(AfterReadStorageObjectsHook); err != nil {
 		return fmt.Errorf("unable to register AfterReadStorageObjects hook: %w", err)
 	}
@@ -188,6 +192,9 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		<-time.After(15 * time.Second)
 		metricsUpdateLoop(ctx, logger, nk.(*RuntimeGoNakamaModule), db)
 	}()
+
+	// Register oauth http handlers
+	socialauth.InitializeSocialAuth(ctx, logger, db, nk, initializer)
 
 	logger.Info("Initialized runtime module.")
 	return nil

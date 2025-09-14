@@ -19,6 +19,7 @@ import (
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/internal/intents"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
@@ -1107,7 +1108,7 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 			return "", RPCErrInvalidRequest
 		}
 
-		sessionVars := SessionVars{}
+		sessionVars := intents.SessionVars{}
 
 		// If the user requests intents, they must be a global developer
 		if request.IntentStr != "" {
