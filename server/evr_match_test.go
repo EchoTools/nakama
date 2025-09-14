@@ -483,7 +483,6 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 				tick: 15 * 60 * 10 * 2,
 				state_: func() *MatchLabel {
 					state := &MatchLabel{}
-					state.sessionStartExpiry = 10 * 10
 					state.server = &Presence{}
 					return state
 				}(),
@@ -499,7 +498,6 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 				tick: 500,
 				state_: func() *MatchLabel {
 					state := &MatchLabel{}
-					state.sessionStartExpiry = 10 * 10
 					state.server = &Presence{}
 
 					return state
@@ -549,7 +547,6 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 				tick: 5 * 10,
 				state_: func() *MatchLabel {
 					state := &MatchLabel{}
-					state.sessionStartExpiry = 10 * 10
 					state.presenceMap = map[string]*EvrMatchPresence{
 						uuid.Must(uuid.NewV4()).String(): {},
 					}

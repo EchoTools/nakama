@@ -1,8 +1,11 @@
 package server
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/assert"
 )
@@ -221,4 +224,64 @@ func TestTypeStatsToScoreMap_AllFieldsSet(t *testing.T) {
 		assert.Equal(t, wantedEntries[i].Metadata, entry.Metadata, "Metadata mismatch at entry %d", i)
 	}
 
+}
+
+func TestHandleMatchGoal(t *testing.T) {
+	data := `{                                                                                                                   
+      "message": "Goal",                                                                                                
+      "message_type": "GOAL",                                                                                           
+      "userid": "",                                                                                                     
+      "[game_info][game_time]": 62.53521,                                                                               
+      "[game_info][is_arena]": true,                                                                                    
+      "[game_info][is_capture_point]": false,                                                                           
+      "[game_info][is_combat]": false,                                                                                  
+      "[game_info][is_payload]": false,                                                                                 
+      "[game_info][is_private]": false,                                                                                 
+      "[game_info][is_social]": false,                                                                                  
+      "[game_info][level]": "mpl_arena_a",                                                                              
+      "[game_info][match_type]": "Echo_Arena",                                                                          
+      "[goal_type]": "LONG SHOT",                                                                                       
+      "[player_info][displayname]": "foobar",                                                         
+      "[player_info][teamid]": 0,                                                                                       
+      "[player_info][userid]": "OVR-ORG-123412342134",                                                              
+      "[prev_player][displayname]": "baz-",                                                                          
+      "[prev_player][teamid]": 0,                                                                                       
+      "[prev_player][userid]": "OVR-ORG-1234123412341234",                                                              
+      "[session][uuid]": "{188A744E-3957-4737-B652-6FB6888493C9}",                                                      
+      "[was_headbutt]": false                                                                                           
+    }`
+	g := &evr.RemoteLogGoal{}
+	_ = json.Unmarshal([]byte(data), g)
+
+	got := &MatchGameStateUpdate{}
+
+	processMatchGoalIntoUpdate(g, got)
+
+	want := &MatchGameStateUpdate{
+		CurrentGameClock: time.Duration(62.53521 * float64(time.Second)),
+		PauseDuration:    28 * time.Second,
+		Goals: []*evr.MatchGoal{
+			{
+				GoalTime:    62.53521,
+				GoalType:    "LONG SHOT",
+				DisplayName: "foobar",
+				TeamID:      0,
+				XPID: evr.EvrId{
+					PlatformCode: evr.OVR_ORG,
+					AccountId:    123412342134,
+				},
+				PrevPlayerDisplayName: "baz-",
+				PrevPlayerTeamID:      0,
+				PrevPlayerXPID: evr.EvrId{
+					PlatformCode: evr.OVR_ORG,
+					AccountId:    1234123412341234,
+				},
+				PointsValue: 3,
+			},
+		},
+	}
+
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("FromGoal() mismatch (-want +got):\n%s", diff)
+	}
 }

@@ -238,3 +238,11 @@ func platformCodeFromString(s string) (PlatformCode, bool) {
 		return 0, false
 	}
 }
+
+func XPIDFromStringOrNil(s string) EvrId {
+	xpi, err := ParseEvrId(s)
+	if err != nil {
+		return EvrId{}
+	}
+	return *xpi
+}
