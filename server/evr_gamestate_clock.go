@@ -55,7 +55,7 @@ func (r *RoundClock) RemainingTime() time.Duration {
 	if r == nil {
 		return 0
 	}
-	return min(0, r.RoundDuration-r.Elapsed())
+	return max(0, r.RoundDuration-r.Elapsed())
 }
 
 func (r *RoundClock) IsPaused() bool {

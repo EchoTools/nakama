@@ -135,7 +135,7 @@ func (p *PlayerDisconnectInfo) LeaveEvent(state *MatchLabel) {
 	p.DisconnectsAtLeave = totalLeaves - p.DisconnectsAtJoin
 
 	for _, info := range state.disconnectInfos {
-		if info.PlayerInfo.UserID != p.PlayerInfo.UserID && info.Team == p.PlayerInfo.Team && time.Since(info.LeaveTime) < 10*time.Second {
+		if info.PlayerInfo.UserID != p.PlayerInfo.UserID && info.Team == p.Team && time.Since(info.LeaveTime) < 10*time.Second {
 			p.IsTeamWipeMember = true
 			break
 		}
@@ -223,10 +223,10 @@ func calculateHazardEvents(state *MatchLabel, teamID int, minGameTime float64) (
 		items = append(items, index{ts: goal.GoalTime, team: int(goal.TeamID)})
 	}
 	for _, info := range state.disconnectInfos {
-		if info.GameDurationAtLeave < time.Duration(minGameTime/float64(time.Second)) {
+		if info.GameDurationAtLeave.Seconds() < minGameTime {
 			continue
 		}
-		items = append(items, index{ts: float64(info.GameDurationAtLeave) / float64(time.Second), team: int(info.Team)})
+		items = append(items, index{ts: float64(info.GameDurationAtLeave.Milliseconds()) / 1000, team: int(info.Team)})
 	}
 
 	// Sort by timestamp
