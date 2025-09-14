@@ -44,11 +44,9 @@ const (
 func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) (err error) {
 	// Add the environment variables to the context
 
-	/*
-		if err := registerAPIGuards(initializer); err != nil {
-			return fmt.Errorf("unable to register API guards: %w", err)
-		}
-	*/
+	if err := registerAPIGuards(initializer); err != nil {
+		return fmt.Errorf("unable to register API guards: %w", err)
+	}
 
 	var (
 		vars = nk.(*RuntimeGoNakamaModule).config.GetRuntime().Environment
