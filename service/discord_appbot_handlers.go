@@ -400,7 +400,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	}
 	latestRTTs := latencyHistory.LatestRTTs()
 
-	valid, ok := GameModeConfigurations[mode]
+	valid, ok := LobbyModeSettings[mode]
 	if !ok {
 		return nil, 0, status.Error(codes.InvalidArgument, "invalid game mode")
 	}
@@ -469,7 +469,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 
 	latestRTTs := latencyHistory.LatestRTTs()
 
-	valid, ok := GameModeConfigurations[mode]
+	valid, ok := LobbyModeSettings[mode]
 	if !ok {
 		return nil, 0, status.Error(codes.InvalidArgument, "invalid game mode")
 	}

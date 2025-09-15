@@ -10,7 +10,7 @@ require (
 )
 
 require (
-	github.com/echotools/nevr-common/v3 v3.1.0 // indirect
+	github.com/echotools/nevr-common v3.1.0 // indirect
 	github.com/go-restruct/restruct v1.2.0-alpha // indirect
 	github.com/gofrs/uuid/v5 v5.3.2 // indirect
 	github.com/intinig/go-openskill v0.0.0-20250324193118-8ce0c35c4815 // indirect

@@ -44,7 +44,7 @@ func (p *Pipeline) JoinPartyGroup(ctx context.Context, session *sessionEVR, lobb
 	var isLeader bool
 	var label *PartyLabel
 	if party != nil {
-		// If the party already exists, we can use it.
+		// If the party already exists, use it.
 		partyUUID = uuid.FromStringOrNil(party.GetPartyId())
 		isNew, err := p.partyRegistry.PartyJoinRequest(ctx, partyUUID, p.node, presence)
 		if err != nil {
@@ -58,7 +58,7 @@ func (p *Pipeline) JoinPartyGroup(ctx context.Context, session *sessionEVR, lobb
 				return nil, false, errors.New("invalid party label")
 			}
 		}
-		// If the party already exists, we can use it.
+
 		return label, false, nil // Already in the party, no need to rejoin.
 	}
 
@@ -67,6 +67,9 @@ func (p *Pipeline) JoinPartyGroup(ctx context.Context, session *sessionEVR, lobb
 		Subject: partyUUID,
 		Label:   p.node,
 	}
+
+	// XXX: FIXME: The below code is very broken.
+
 	// If successful, the creator becomes the first user to join the party.
 	if success, isNew := p.tracker.Track(session.Context(), session.ID(), stream, session.UserID(), presenceMeta); !success {
 		_ = session.Send(&rtapi.Envelope{Message: &rtapi.Envelope_Error{Error: &rtapi.Error{
@@ -76,9 +79,9 @@ func (p *Pipeline) JoinPartyGroup(ctx context.Context, session *sessionEVR, lobb
 		return nil, false, errors.New("failed to track party creation")
 	} else if isNew {
 		out := &rtapi.Envelope{Message: &rtapi.Envelope_Party{Party: &rtapi.Party{
-			PartyId:   party.PartyId,
-			Open:      party.Open,
-			MaxSize:   int32(party.MaxSize),
+			PartyId:   partyUUID.String(),
+			Open:      false,
+			MaxSize:   4,
 			Self:      userPresence,
 			Leader:    userPresence,
 			Presences: []*rtapi.UserPresence{userPresence},

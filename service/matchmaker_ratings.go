@@ -65,7 +65,7 @@ func (t RatedTeam) Ordinal() float64 {
 
 func NewRating[T int | int64 | float64](z, mu, sigma T) types.Rating {
 	r := NewDefaultRating()
-	if zInt, ok := any(z).(int); ok {
+	if zInt, ok := any(z).(int); ok && zInt > 0 {
 		r.Z = zInt
 	}
 	if muFloat := float64(mu); muFloat > 0 {

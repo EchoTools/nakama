@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/go-redis/redis"
@@ -13,19 +12,11 @@ import (
 	"github.com/heroiclabs/nakama/v3/server"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.uber.org/atomic"
 
 	_ "google.golang.org/protobuf/proto"
 )
 
 var (
-	appAcceptorPtr     = atomic.NewPointer[func(http.ResponseWriter, *http.Request)](nil)
-	AppAcceptorProxyFn = func(w http.ResponseWriter, r *http.Request) {
-		if fn := appAcceptorPtr.Load(); fn != nil {
-			(*fn)(w, r)
-		}
-	}
-
 	nakamaStartTime = time.Now().UTC()
 )
 

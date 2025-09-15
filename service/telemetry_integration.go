@@ -7,7 +7,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
-// TelemetryIntegration provides integration points for telemetry with existing EVR systems
+// TelemetryIntegration provides integration points for rtapi with existing EVR systems
 type TelemetryIntegration struct {
 	eventJournal      *EventJournal
 	telemetryManager  *LobbyTelemetryManager
@@ -15,7 +15,7 @@ type TelemetryIntegration struct {
 	logger            runtime.Logger
 }
 
-// NewTelemetryIntegration creates a new telemetry integration instance
+// NewTelemetryIntegration creates a new rtapi integration instance
 func NewTelemetryIntegration(eventJournal *EventJournal, telemetryManager *LobbyTelemetryManager, matchSummaryStore *MatchSummaryStore, logger runtime.Logger) *TelemetryIntegration {
 	return &TelemetryIntegration{
 		eventJournal:      eventJournal,
@@ -31,22 +31,22 @@ func (ti *TelemetryIntegration) HandleSNSTelemetryEvent(ctx context.Context, ses
 		return nil // Graceful degradation when journaling is not available
 	}
 
-	// Journal the telemetry event
+	// Journal the rtapi event
 	if err := ti.eventJournal.JournalTelemetry(ctx, userID, sessionID, lobbyID, telemetryData); err != nil {
-		ti.logger.Error("Failed to journal telemetry event: %v", err)
+		ti.logger.Error("Failed to journal rtapi event: %v", err)
 		return err
 	}
 
-	// Broadcast to subscribed sessions if telemetry manager is available
+	// Broadcast to subscribed sessions if rtapi manager is available
 	if ti.telemetryManager != nil {
 		lobbyUUID, err := uuid.FromString(lobbyID)
 		if err != nil {
-			ti.logger.Error("Invalid lobby ID for telemetry broadcast: %v", err)
+			ti.logger.Error("Invalid lobby ID for rtapi broadcast: %v", err)
 			return err
 		}
 
 		if err := ti.telemetryManager.BroadcastTelemetry(ctx, lobbyUUID, telemetryData); err != nil {
-			ti.logger.Error("Failed to broadcast telemetry: %v", err)
+			ti.logger.Error("Failed to broadcast rtapi: %v", err)
 			return err
 		}
 	}
@@ -153,7 +153,7 @@ func calculatePingStats() (min, max int, avg float64) {
 
 // Example integration function that could be called from EVR match handling
 func IntegrateTelemetryWithEVRMatch(nk runtime.NakamaModule, logger runtime.Logger, integration *TelemetryIntegration) {
-	// This would be called during match events to integrate telemetry
+	// This would be called during match events to integrate rtapi
 	// For example, in the EVR match signal handler or data message handler
 
 	logger.Info("Telemetry integration ready for EVR matches")
@@ -164,7 +164,7 @@ func IntegrateTelemetryWithEVRMatch(nk runtime.NakamaModule, logger runtime.Logg
 		case OpCodeEVRPacketData:
 			// Handle regular EVR packet data
 
-			// Extract telemetry if it's a telemetry packet
+			// Extract rtapi if it's a rtapi packet
 			if isTelemetryPacket(data) {
 				telemetryData := extractTelemetryData(data)
 				integration.HandleSNSTelemetryEvent(ctx, sessionID, userID, lobbyID, telemetryData)

@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	evr "github.com/echotools/nakama/v3/protocol"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -39,7 +38,9 @@ type LobbyBuilder struct {
 	tracker         server.Tracker
 	metrics         server.Metrics
 
-	mapQueue map[evr.Symbol][]evr.Symbol // map[mode][]level
+	// TODO: Add a queue that keeps track of recently played maps (by mode by player) to avoid repeats.
+	//       The map picked should be the least recently played map by the players in the lobby.
+	mapQueue map[Mode][]Level
 }
 
 func NewLobbyBuilder(logger runtime.Logger, nk runtime.NakamaModule, sessionRegistry server.SessionRegistry, matchRegistry server.MatchRegistry, tracker server.Tracker, metrics server.Metrics) *LobbyBuilder {
@@ -54,7 +55,7 @@ func NewLobbyBuilder(logger runtime.Logger, nk runtime.NakamaModule, sessionRegi
 		tracker:         tracker,
 		metrics:         metrics,
 
-		mapQueue: make(map[evr.Symbol][]evr.Symbol),
+		mapQueue: make(map[Mode][]Level, len(ValidGameSettings)),
 	}
 }
 
@@ -223,21 +224,39 @@ func (b *LobbyBuilder) buildMatch(logger runtime.Logger, entrants []*server.Matc
 	}
 
 	// gameServers := b.rankEndpointsByServerScore(entrants)
-	meanRTTByExtIP, latenciesByPlayerByExtIP := b.rankEndpointsByAverageLatency(entrants)
-
+	_, latenciesByPlayerByExtIP := b.rankEndpointsByAverageLatency(entrants)
+	latencies := make([]runtime.FleetUserLatencies, 0, len(latenciesByPlayerByExtIP))
+	for userID, latenciesByExtIP := range latenciesByPlayerByExtIP {
+		for extIP, rtt := range latenciesByExtIP {
+			latencies = append(latencies, runtime.FleetUserLatencies{
+				UserId:                userID,
+				RegionIdentifier:      extIP,
+				LatencyInMilliseconds: float32(rtt),
+			})
+		}
+	}
 	modestr, ok := entrants[0].StringProperties["game_mode"]
 	if !ok {
 		return nil, fmt.Errorf("missing mode property")
 	}
+	mode := Mode(modestr)
+
+	const lobbySessionGracePeriod = 1 * time.Minute
+	const defaultReservationDuration = 20 * time.Second
 
 	settings := &LobbySessionSettings{
-		Mode:              Mode(modestr),
-		Level:             b.selectNextMap(mode),
-		CreatorID:         uuid.FromStringOrNil(SystemUserID),
-		GroupID:           groupID,
-		Reservations:      entrantPresences,
-		ReservationExpiry: time.Now().Add(20 * time.Second),
-		ScheduledTime:     time.Now().UTC(),
+		Mode:               mode,
+		Level:              b.selectNextMap(mode),
+		TeamSize:           int32(teamSize),
+		CreatorID:          SystemUserID,
+		OwnerID:            SystemUserID,
+		GroupID:            groupID.String(),
+		RequiredFeatures:   nil,
+		TeamAlignments:     nil,
+		Reservations:       entrantPresences,
+		ReservationsExpiry: time.Now().Add(defaultReservationDuration),
+		MatchExpiry:        time.Now().Add(lobbySessionGracePeriod), // Example expiry
+		Metadata:           nil,
 	}
 
 	var label *MatchLabel
@@ -251,7 +270,15 @@ func (b *LobbyBuilder) buildMatch(logger runtime.Logger, entrants []*server.Matc
 			return nil, ErrMatchmakingNoAvailableServers
 		default:
 		}
-		label, err = LobbyGameServerAllocate(ctx, logger, b.nk, []string{groupID.String()}, meanRTTByExtIP, settings, nil, true, false, queryAddon)
+		allocation := LobbyAllocationMetadata{
+			GlobalMatchmakingSettings: ServiceSettings().Matchmaking,
+			SessionSettings:           *settings,
+			AllocatorGroupIDs:         []string{groupID.String()},
+			MandatoryRegionCodes:      []string{"default"},
+			QueryAddon:                queryAddon,
+			Latencies:                 latencies, // Fill if needed
+		}
+		label, err = LobbyGameServerAllocate(ctx, logger, b.nk, allocation)
 		if err != nil || label == nil {
 			logger.Error("Failed to allocate game server.", zap.Error(err))
 			<-time.After(5 * time.Second)
@@ -393,37 +420,49 @@ func countByExtIP(labels []*MatchLabel) map[string]int {
 	return countByExtIP
 }
 
-func (b *LobbyBuilder) selectNextMap(mode evr.Symbol) evr.Symbol {
-	queue := b.mapQueue[mode]
+func (b *LobbyBuilder) selectNextMap(mode Mode) Level {
+	// Get the valid levels for the mode
+	validLevels := ValidGameSettings.ValidLevels(mode)
 
-	if levels, ok := b.mapQueue[mode]; !ok || len(levels) == 0 {
-		return evr.LevelUnspecified
-	} else if len(evr.LevelsByMode[mode]) == 1 {
-		return evr.LevelsByMode[mode][0]
+	if b.mapQueue == nil {
+		b.mapQueue = make(map[Mode][]Level, len(ValidGameSettings))
 	}
 
-	if len(queue) <= 1 {
-		// Fill the queue with the available levels and shuffle.
-		queue = append(queue, evr.LevelsByMode[mode]...)
+	// If there are no valid levels for the mode, return LevelUnspecified
+	if len(validLevels) == 0 {
+		return LevelUnspecified
+	}
+	// If there is only one valid level, return it
+	if len(validLevels) == 1 {
+		return validLevels[0]
+	}
 
-		rand.Shuffle(len(queue), func(i, j int) {
-			// leave the first (next) level in place
-			if i == 0 || j == 0 {
-				return
-			}
-			queue[i], queue[j] = queue[j], queue[i]
-		})
+	queue, ok := b.mapQueue[mode]
+	if !ok {
+		queue = make([]Level, 0, 10)
+	}
 
-		// If the first two levels are the same, move the first level to the end of the queue.
-		if queue[0] == queue[1] {
+	var nextLevel Level = LevelUnspecified
+
+	// Pop the first level from the queue if there is one
+	if len(queue) >= 1 {
+		nextLevel = queue[0]
+		queue = queue[1:]
+	}
+
+	if len(queue) == 0 {
+		// Fill the empty queue with the available levels, and shuffle.
+		queue = append(queue, ValidGameSettings.ValidLevels(mode)...)
+		rand.Shuffle(len(queue), func(i, j int) { queue[i], queue[j] = queue[j], queue[i] })
+		// If the first level matches the next level, move it to the end of the queue.
+		if queue[0] == nextLevel {
 			queue = append(queue[1:], queue[0])
 		}
 	}
 
-	// Pop the first level from the queue
-	b.mapQueue[mode] = queue[1:]
+	b.mapQueue[mode] = queue
 
-	return queue[0]
+	return nextLevel
 }
 
 // CompactedFrequencySort sorts a slice of items by frequency and removes duplicates.
@@ -518,7 +557,7 @@ type LobbyAllocationMetadata struct {
 	AllocatorGroupIDs         []string                     `json:"allocator_group_ids"`
 	MandatoryRegionCodes      []string                     `json:"required_region_codes"`
 	PreferredRegionCodes      []string                     `json:"optional_region_codes"`
-	QueryAddon                string                       `json:"query_addon,string"`
+	QueryAddon                string                       `json:"query_addon"`
 	Latencies                 []runtime.FleetUserLatencies `json:"user_latencies"`
 }
 
@@ -532,7 +571,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	userIDs := []string{queryData.SessionSettings.OwnerID}
 
 	maxSlots := MatchLobbyMaxSize
-	valid, ok := GameModeConfigurations[queryData.SessionSettings.Mode]
+	valid, ok := LobbyModeSettings[queryData.SessionSettings.Mode]
 	if ok {
 		maxSlots = int(valid.MaxSlots)
 	}
@@ -585,7 +624,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	return label, nil
 }
 
-type labelIndex struct {
+type LabelIndex struct {
 	Label             *MatchLabel
 	RTT               int
 	IsReachable       bool
@@ -596,9 +635,9 @@ type labelIndex struct {
 	IsRegionMatch     bool
 }
 
-func sortLabelIndexes(labels []labelIndex) {
+func SortLabelIndexes(labels []LabelIndex) {
 	// Sort the labels
-	slices.SortStableFunc(labels, func(a, b labelIndex) int {
+	slices.SortStableFunc(labels, func(a, b LabelIndex) int {
 
 		// Sort by whether the server is reachable or not
 		if a.IsReachable && !b.IsReachable {

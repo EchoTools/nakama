@@ -307,7 +307,7 @@ func main() {
 
 // Help improve Nakama by sending anonymous usage statistics.
 //
-// You can disable the telemetry completely before server start by setting the
+// You can disable the rtapi completely before server start by setting the
 // environment variable "NAKAMA_TELEMETRY" - i.e. NAKAMA_TELEMETRY=0 nakama
 //
 // These properties are collected:

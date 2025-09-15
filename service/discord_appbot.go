@@ -2119,24 +2119,28 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return simpleInteractionResponse(s, i, "no options provided")
 			}
 
-			mode := evr.ModeArenaPrivate
-			region := "default"
-			level := evr.LevelUnspecified
+			var (
+				mode   Mode  = ModeArenaPrivate
+				level  Level = LevelUnspecified
+				region       = "default"
+			)
 			for _, o := range options {
 				switch o.Name {
 				case "region":
 					region = o.StringValue()
 				case "mode":
-					mode = evr.ToSymbol(o.StringValue())
+					mode = Mode(o.StringValue())
 				case "level":
-					level = evr.ToSymbol(o.StringValue())
+					level = Level(o.StringValue())
 				}
 			}
 
-			if levels, ok := evr.LevelsByMode[mode]; !ok {
+			validSettings, ok := LobbyModeSettings[mode]
+			if !ok {
 				return fmt.Errorf("invalid mode `%s`", mode)
-			} else if level != evr.LevelUnspecified && !slices.Contains(levels, level) {
-				return fmt.Errorf("invalid level `%s`", level)
+			}
+			if !slices.Contains(validSettings.Levels, level) && level != LevelUnspecified {
+				return fmt.Errorf("invalid level `%s` for mode `%s`", level, mode)
 			}
 
 			startTime := time.Now().Add(90 * time.Second)
@@ -2145,8 +2149,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				"userID":    userID,
 				"guildID":   i.GuildID,
 				"region":    region,
-				"mode":      mode.String(),
-				"level":     level.String(),
+				"mode":      mode,
+				"level":     level,
 				"startTime": startTime,
 			})
 
@@ -2168,16 +2172,16 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			content := fmt.Sprintf("Reservation will timeout <t:%d:R>. \n\nClick play or start matchmaking to automatically join your match.", startTime.Unix())
 
-			niceNameMap := map[evr.Symbol]string{
-				evr.ModeArenaPrivate:  "Private Arena Match",
-				evr.ModeArenaPublic:   "Public Arena Match",
-				evr.ModeCombatPrivate: "Private Combat Match",
-				evr.ModeCombatPublic:  "Public Combat Match",
-				evr.ModeSocialPrivate: "Private Social Lobby",
+			niceNameMap := map[Mode]string{
+				ModeArenaPrivate:  "Private Arena Match",
+				ModeArenaPublic:   "Public Arena Match",
+				ModeCombatPrivate: "Private Combat Match",
+				ModeCombatPublic:  "Public Combat Match",
+				ModeSocialPrivate: "Private Social Lobby",
 			}
 			prettyName, ok := niceNameMap[mode]
 			if !ok {
-				prettyName = mode.String()
+				prettyName = string(mode)
 			}
 
 			serverLocation := "Unknown"
@@ -2307,7 +2311,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			}
 
-			if valid, ok := GameModeConfigurations[mode]; !ok {
+			if valid, ok := LobbyModeSettings[mode]; !ok {
 				return fmt.Errorf("invalid mode `%s`", mode)
 			} else if level != LevelUnspecified && !slices.Contains(valid.Levels, level) {
 				return fmt.Errorf("invalid level `%s`", level)
@@ -2790,7 +2794,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			metadata, err := EVRProfileLoad(ctx, d.nk, userID)
 			if err != nil {
-				return fmt.Errorf("Failed to get account metadata: %w", err)
+				return fmt.Errorf("failed to get account metadata: %w", err)
 			}
 
 			switch options[0].Name {

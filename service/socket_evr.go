@@ -126,19 +126,19 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 
 		var (
 			service         = NewServiceWS(logger, clientIP, clientPort, conn, config, metrics)
-			incomingCh      = Start()
+			incomingCh      = service.Start()
 			in              evr.Message
 			payload         []byte
 			failureResponse func(err error)
 		)
 
-		defer Close()
+		defer service.Close()
 
 	InitLoop:
 		for {
 			var messages []evr.Message
 			select {
-			case <-ctx.Done():
+			case <-service.ctx.Done():
 				// The client has not sent any messages, so assume the connection is closed.
 				return
 			case payload = <-incomingCh:
@@ -157,14 +157,14 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 				// Config service
 				switch msg := in.(type) {
 				case *evr.ConfigRequest:
-					if err := pipeline.configRequest(Context(), logger, service, in); err != nil {
+					if err := pipeline.configRequest(service.Context(), logger, service, in); err != nil {
 						logger.Warn("Failed to process request", zap.Error(err))
 						return
 					}
 
 				case *evr.ReconcileIAP:
 					// Return a stub response for now
-					if err := SendEVR(Envelope{
+					if err := service.SendEVR(Envelope{
 						ServiceType: ServiceTypeIAP,
 						Messages:    []evr.Message{evr.NewReconcileIAPResult(msg.XPID)},
 					}); err != nil {
@@ -197,7 +197,7 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 				case *evr.GameServerRegistrationRequest:
 
 					failureResponse = func(err error) {
-						if err := SendEVR(Envelope{
+						if err := service.SendEVR(Envelope{
 							ServiceType: ServiceTypeServer,
 							Messages:    []evr.Message{evr.NewBroadcasterRegistrationFailure(evr.BroadcasterRegistration_Failure)},
 							State:       RequireStateUnrequired,
@@ -213,7 +213,7 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 							failureResponse(ErrMissingPassword)
 							return
 						}
-						_, username, err := GetUserIDByDiscordID(Context(), pipeline.db, authDiscordID)
+						_, username, err := GetUserIDByDiscordID(service.Context(), pipeline.db, authDiscordID)
 						if err != nil {
 							// Some other error occurred while trying to get the user ID.
 							failureResponse(err)
@@ -221,13 +221,13 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 						}
 
 						// Authenticate the user with password.
-						userID, err := server.AuthenticateUsername(Context(), logger, pipeline.db, username, authPassword)
+						userID, err := server.AuthenticateUsername(service.Context(), logger, pipeline.db, username, authPassword)
 						if err != nil {
 							logger.Warn("Username/password authentication failed.", zap.Error(err), zap.String("discord_id", authDiscordID))
 							failureResponse(err)
 							return
 						}
-						params.profile, err = EVRProfileLoad(Context(), pipeline.nk, userID)
+						params.profile, err = EVRProfileLoad(service.Context(), pipeline.nk, userID)
 						if err != nil {
 							logger.Warn("Failed to load user profile", zap.Error(err), zap.String("user_id", userID))
 							failureResponse(err)
@@ -245,10 +245,10 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 
 					params.xpID = msg.XPID
 					params.loginPayload = &msg.Payload
-					ctx := Context()
+					ctx := service.Context()
 					// Handle login requests
-					if err = validateLoginPayload(Context(), logger, msg); err != nil {
-						SendEVR(Envelope{
+					if err = validateLoginPayload(service.Context(), logger, msg); err != nil {
+						service.SendEVR(Envelope{
 							ServiceType: ServiceTypeLogin,
 							Messages: []evr.Message{
 								evr.NewLoginFailure(msg.XPID, formatLoginErrorMessage(msg.XPID, "", err)),
@@ -261,7 +261,7 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 
 					authLogger = authLogger.With(zap.String("xp_id", msg.XPID.String()))
 					failureResponse = func(err error) {
-						SendEVR(Envelope{
+						service.SendEVR(Envelope{
 							ServiceType: ServiceTypeLogin,
 							Messages: []evr.Message{
 								evr.NewLoginFailure(msg.XPID, formatLoginErrorMessage(msg.XPID, "", err)),
@@ -294,7 +294,7 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 						}
 
 						// Special case for unlinked devices.
-						ticket, err := IssueLinkTicket(Context(), pipeline.nk, msg.XPID, clientIP, msg.Payload)
+						ticket, err := IssueLinkTicket(service.Context(), pipeline.nk, msg.XPID, clientIP, msg.Payload)
 						if err != nil {
 							authLogger.Warn("Failed to issue link ticket", zap.Error(err))
 						}
@@ -302,7 +302,7 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 							Code:         ticket.Code,
 							Instructions: ServiceSettings().LinkInstructions,
 						}).Error()
-						SendEVR(Envelope{
+						service.SendEVR(Envelope{
 							ServiceType: ServiceTypeLogin,
 							Messages: []evr.Message{
 								evr.NewLoginFailure(msg.XPID, errMessage),
@@ -328,7 +328,7 @@ func NewSocketWSEVRAcceptor(logger *zap.Logger, config server.Config, sessionReg
 		}
 
 		var (
-			ctx    = Context()
+			ctx    = service.Context()
 			userID = params.profile.ID()
 		)
 

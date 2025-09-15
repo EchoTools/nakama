@@ -1,8 +1,8 @@
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/echotools/nevr-common/v3 v3.1.0 h1:OQRQD089RhkZFxuXIVicb+ct/3k2t1ApVlQ0jMXkEdo=
-github.com/echotools/nevr-common/v3 v3.1.0/go.mod h1:S11aZ9DkC6+quMbL4+LSq9k7LM5iR/Y3qUjghhh38RU=
+github.com/echotools/nevr-common v3.1.0 h1:OQRQD089RhkZFxuXIVicb+ct/3k2t1ApVlQ0jMXkEdo=
+github.com/echotools/nevr-common v3.1.0/go.mod h1:S11aZ9DkC6+quMbL4+LSq9k7LM5iR/Y3qUjghhh38RU=
 github.com/go-restruct/restruct v1.2.0-alpha h1:2Lp474S/9660+SJjpVxoKuWX09JsXHSrdV7Nv3/gkvc=
 github.com/go-restruct/restruct v1.2.0-alpha/go.mod h1:KqrpKpn4M8OLznErihXTGLlsXFGeLxHUrLRRI/1YjGk=
 github.com/gofrs/uuid/v5 v5.3.2 h1:2jfO8j3XgSwlz/wHqemAEugfnTlikAYHhnqQ8Xh4fE0=

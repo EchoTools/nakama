@@ -2,11 +2,10 @@ module github.com/echotools/nakama/plugin
 
 go 1.25.0
 
-replace github.com/echotools/nakama/v3 => ..
+replace github.com/echotools/nakama/v3 => ../
 
 require (
 	github.com/echotools/nakama/v3 v3.0.0-00010101000000-000000000000
-	github.com/echotools/nevr-common/v3 v3.1.0
 	github.com/gofrs/uuid/v5 v5.3.2
 	github.com/google/go-cmp v0.7.0
 	github.com/heroiclabs/nakama-common v1.40.0

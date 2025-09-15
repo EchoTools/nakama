@@ -8,10 +8,14 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
+	// gRPC + h2c for serving gRPC over Nakama's HTTP server
+	// Optional: enable server reflection when desired
+	// "google.golang.org/grpc/reflection"
+	// TODO: Replace with the actual import path for your generated apigrpc package.
+	// apigrpc "github.com/your/module/path/to/apigrpc"
 )
 
 type NEVRLobby struct{}
@@ -191,10 +195,6 @@ func InitModule(ctx context.Context, runtimeLogger runtime.Logger, db *sql.DB, n
 		ipInfoCache,
 	)
 	if err := initializer.RegisterHttp("/evr", NewSocketWSEVRAcceptor(d.Logger, d.Config, d.SessionRegistry, d.SessionCache, d.StatusRegistry, d.Matchmaker, d.Tracker, d.Metrics, d.ProtojsonMarshaler, d.ProtojsonUnmarshaler, evrPipeline), http.MethodGet); err != nil {
-		return fmt.Errorf("unable to register /evr/api service: %w", err)
-	}
-
-	if err := initializer.RegisterHttp("/api/v3/{id:.*}", AppAcceptorProxyFn, http.MethodGet, http.MethodPost); err != nil {
 		return fmt.Errorf("unable to register /evr/api service: %w", err)
 	}
 

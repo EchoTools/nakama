@@ -16,7 +16,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/echotools/nevr-common/v3/rtapi"
+	"github.com/echotools/nevr-common/gen/go/rtapi"
 
 	evr "github.com/echotools/nakama/v3/protocol"
 	nkrtapi "github.com/heroiclabs/nakama-common/rtapi"
@@ -173,8 +173,8 @@ func (p *Pipeline) ProcessRequest(logger *zap.Logger, session *sessionEVR, in ev
 				entrantIDStrs = append(entrantIDStrs, id.String())
 			}
 			envelope = &rtapi.Envelope{
-				Message: &rtapi.Envelope_LobbyEntraConnected{
-					LobbyEntraConnected: &rtapi.LobbyEntrantsConnectedMessage{
+				Message: &rtapi.Envelope_LobbyEntrantConnected{
+					LobbyEntrantConnected: &rtapi.LobbyEntrantsConnectedMessage{
 						LobbySessionId: matchID.UUID.String(),
 						EntrantIds:     entrantIDStrs,
 					},
@@ -461,7 +461,7 @@ func (p *Pipeline) ProcessProtobufRequest(logger *zap.Logger, session server.Ses
 	switch in.Message.(type) {
 	case *rtapi.Envelope_GameServerRegistration:
 		pipelineFn = p.gameserverRegistrationRequest
-	case *rtapi.Envelope_LobbyEntraConnected:
+	case *rtapi.Envelope_LobbyEntrantConnected:
 		pipelineFn = p.lobbyEntrantConnected
 	case *rtapi.Envelope_LobbySessionEvent:
 		pipelineFn = p.lobbySessionEvent

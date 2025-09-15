@@ -77,7 +77,7 @@ Create a `.env` file in the project root with your Discord bot configuration:
 DISCORD_BOT_TOKEN=your_discord_bot_token_here
 
 # Optional: Additional configuration
-NAKAMA_TELEMETRY=0  # Disable telemetry
+NAKAMA_TELEMETRY=0  # Disable rtapi
 ```
 
 **Important:** EchoTools Nakama requires a valid Discord bot token to run. See the [Discord Bot Setup](#discord-bot-setup) section above for instructions on creating a Discord bot.
@@ -180,7 +180,7 @@ export DISCORD_BOT_TOKEN="your_discord_bot_token_here"
 
 ### Optional Environment Variables
 
-- **`NAKAMA_TELEMETRY`** - Set to `0` to disable telemetry (default: enabled)
+- **`NAKAMA_TELEMETRY`** - Set to `0` to disable rtapi (default: enabled)
 
 ### Configuration Files
 

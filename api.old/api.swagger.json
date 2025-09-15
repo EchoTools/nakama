@@ -1,0 +1,2409 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "EVR API",
+    "version": "2.0",
+    "contact": {
+      "name": "The EVR Authors \u0026 Contributors",
+      "url": "https://github.com/EchoTools/evr-backend"
+    }
+  },
+  "tags": [
+    {
+      "name": "EvrHttp"
+    },
+    {
+      "name": "Evr"
+    }
+  ],
+  "host": "127.0.0.1:7350",
+  "schemes": [
+    "http"
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/v2/rpc/account/authenticate/password": {
+      "post": {
+        "operationId": "EvrHttp_AuthenticatePassword",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrSession"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrAuthenticatePasswordRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ],
+        "security": [
+          {
+            "BasicAuth": []
+          }
+        ]
+      }
+    },
+    "/v2/rpc/account/lookup": {
+      "post": {
+        "operationId": "EvrHttp_AccountLookup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrAccountLookupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrAccountLookupRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/account/search": {
+      "post": {
+        "operationId": "EvrHttp_AccountSearch",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrAccountSearchResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrAccountSearchRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/evr/servicestatus": {
+      "get": {
+        "operationId": "EvrHttp_GetStatus",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrServiceStatusResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/forcecheck": {
+      "post": {
+        "operationId": "EvrHttp_CheckForceUser",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrCheckForceUserResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrCheckForceUserRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/importloadouts": {
+      "post": {
+        "operationId": "EvrHttp_ImportLoadouts",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrImportLoadoutsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrImportLoadoutsRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/leaderboard/haystack": {
+      "post": {
+        "operationId": "EvrHttp_LeaderboardHaystack",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrLeaderboardHaystackResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrLeaderboardHaystackRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/leaderboard/records": {
+      "post": {
+        "operationId": "EvrHttp_LeaderboardRecordsList",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrLeaderboardRecordsListResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrLeaderboardRecordsListRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/link": {
+      "post": {
+        "operationId": "EvrHttp_LinkingApp",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrLinkingAppResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrLinkingAppRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/link/device": {
+      "post": {
+        "operationId": "EvrHttp_LinkDevice",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrLinkDeviceResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrLinkDeviceRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/link/usernamedevice": {
+      "post": {
+        "operationId": "EvrHttp_LinkUserIdDevice",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrLinkUserIdDeviceResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrLinkUserIdDeviceRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/match": {
+      "post": {
+        "operationId": "EvrHttp_GetMatch",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrMatchResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrMatchRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/match/allocate": {
+      "post": {
+        "operationId": "EvrHttp_AllocateMatch",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrAllocateMatchResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrAllocateMatchRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/match/build": {
+      "post": {
+        "operationId": "EvrHttp_BuildMatch",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrBuildMatchResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrBuildMatchRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/match/prepare": {
+      "post": {
+        "operationId": "EvrHttp_PrepareMatch",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrPrepareMatchResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrPrepareMatchRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/match/public": {
+      "get": {
+        "operationId": "EvrHttp_MatchListPublic",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrMatchListPublicResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/match/terminate": {
+      "post": {
+        "operationId": "EvrHttp_ShutdownMatch",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrShutdownMatchResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrShutdownMatchRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/matchmaker/candidates": {
+      "get": {
+        "operationId": "EvrHttp_MatchmakerCandidates",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrMatchmakerCandidatesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/matchmaker/state": {
+      "get": {
+        "operationId": "EvrHttp_MatchmakerState",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrMatchmakerStateResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/matchmaker/stream": {
+      "post": {
+        "operationId": "EvrHttp_MatchmakerStream",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrMatchmakerStreamResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrMatchmakerStreamRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/player/kick": {
+      "post": {
+        "operationId": "EvrHttp_KickPlayer",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrKickPlayerResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrKickPlayerRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/player/profile": {
+      "post": {
+        "operationId": "EvrHttp_GetUserServerProfile",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrUserServerProfileResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrUserServerProfileRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/player/setnextmatch": {
+      "post": {
+        "operationId": "EvrHttp_SetNextMatch",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrSetNextMatchResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrSetNextMatchRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/player/statistics": {
+      "post": {
+        "operationId": "EvrHttp_GetPlayerStatistics",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrPlayerStatisticsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrPlayerStatisticsRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/server/score": {
+      "post": {
+        "operationId": "EvrHttp_GetServerScore",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrServerScoreResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrServerScoreRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/server/scores": {
+      "post": {
+        "operationId": "EvrHttp_GetServerScores",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrServerScoresResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrServerScoresRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    },
+    "/v2/rpc/signin/discord": {
+      "post": {
+        "operationId": "EvrHttp_DiscordSignIn",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrDiscordSignInResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrDiscordSignInRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ],
+        "security": [
+          {
+            "BasicAuth": []
+          }
+        ]
+      }
+    },
+    "/v2/rpc/stream/join": {
+      "post": {
+        "operationId": "EvrHttp_StreamJoin",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/evrStreamJoinResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/evrStreamJoinRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EvrHttp"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "evrAccountLookupRequest": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "discordId": {
+          "type": "string"
+        },
+        "xpid": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        }
+      }
+    },
+    "evrAccountLookupResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "discordId": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "avatarUrl": {
+          "type": "string"
+        },
+        "ipqsData": {
+          "$ref": "#/definitions/protobufAny"
+        }
+      }
+    },
+    "evrAccountSearchRequest": {
+      "type": "object",
+      "properties": {
+        "displayNamePattern": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "evrAccountSearchResponse": {
+      "type": "object",
+      "properties": {
+        "cursor": {
+          "type": "string"
+        },
+        "displayNameMatches": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/evrDisplayNameMatchItem"
+          }
+        }
+      }
+    },
+    "evrAllocateMatchRequest": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "type": "string"
+        },
+        "ownerId": {
+          "type": "string"
+        },
+        "expiryTime": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "teamAlignments": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "mode": {
+          "type": "string"
+        },
+        "level": {
+          "type": "string"
+        },
+        "teamSize": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "requiredFeatures": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "region": {
+          "type": "string"
+        }
+      }
+    },
+    "evrAllocateMatchResponse": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "$ref": "#/definitions/evrMatchLabel"
+        }
+      }
+    },
+    "evrAuthenticatePasswordRequest": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string"
+        },
+        "discordId": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string"
+        },
+        "refreshToken": {
+          "type": "string"
+        },
+        "intents": {
+          "type": "string"
+        }
+      }
+    },
+    "evrBuildMatchRequest": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/evrMatchmakerEntry"
+          }
+        }
+      }
+    },
+    "evrBuildMatchResponse": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string",
+          "format": "byte"
+        }
+      }
+    },
+    "evrCheckForceUserRequest": {
+      "type": "object",
+      "properties": {
+        "loginSessionId": {
+          "type": "string"
+        }
+      }
+    },
+    "evrCheckForceUserResponse": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "type": "string"
+        }
+      }
+    },
+    "evrCosmeticLoadout": {
+      "type": "object",
+      "properties": {
+        "banner": {
+          "type": "string"
+        },
+        "booster": {
+          "type": "string"
+        },
+        "bracer": {
+          "type": "string"
+        },
+        "chassis": {
+          "type": "string"
+        },
+        "decal": {
+          "type": "string"
+        },
+        "decalBody": {
+          "type": "string"
+        },
+        "emissive": {
+          "type": "string"
+        },
+        "emote": {
+          "type": "string"
+        },
+        "goalFx": {
+          "type": "string"
+        },
+        "medal": {
+          "type": "string"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "patternBody": {
+          "type": "string"
+        },
+        "pip": {
+          "type": "string"
+        },
+        "secondEmote": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "tint": {
+          "type": "string"
+        },
+        "tintAlignmentA": {
+          "type": "string"
+        },
+        "tintAlignmentB": {
+          "type": "string"
+        },
+        "tintBody": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      }
+    },
+    "evrDiscordSignInRequest": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "oauthRedirectUrl": {
+          "type": "string"
+        }
+      }
+    },
+    "evrDiscordSignInResponse": {
+      "type": "object",
+      "properties": {
+        "sessionToken": {
+          "type": "string"
+        },
+        "discordUsername": {
+          "type": "string"
+        }
+      }
+    },
+    "evrDisplayNameMatchItem": {
+      "type": "object",
+      "properties": {
+        "displayName": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "groupId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "evrEndpoint": {
+      "type": "object",
+      "properties": {
+        "externalIp": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "evrEvrId": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "evrEvrMatchPresence": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "evrId": {
+          "$ref": "#/definitions/evrEvrId"
+        },
+        "teamIndex": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "roleAlignment": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "partyId": {
+          "type": "string"
+        },
+        "supportedFeatures": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "matchmakingAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "clientIp": {
+          "type": "string"
+        },
+        "pingMillis": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "evrGameServerPresence": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        },
+        "operatorId": {
+          "type": "string"
+        },
+        "groupIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "region": {
+          "type": "string"
+        },
+        "endpointJson": {
+          "type": "string"
+        },
+        "endpoint": {
+          "$ref": "#/definitions/evrEndpoint"
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "appId": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "serverId": {
+          "type": "string"
+        },
+        "latitude": {
+          "type": "number",
+          "format": "float"
+        },
+        "longitude": {
+          "type": "number",
+          "format": "float"
+        }
+      }
+    },
+    "evrGameState": {
+      "type": "object",
+      "properties": {
+        "roundClock": {
+          "$ref": "#/definitions/evrRoundClock"
+        },
+        "matchOver": {
+          "type": "boolean"
+        }
+      }
+    },
+    "evrImportLoadoutsRequest": {
+      "type": "object",
+      "properties": {
+        "loadouts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/evrCosmeticLoadout"
+          }
+        }
+      }
+    },
+    "evrImportLoadoutsResponse": {
+      "type": "object",
+      "properties": {
+        "loadoutIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "evrKickPlayerRequest": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string"
+        }
+      }
+    },
+    "evrKickPlayerResponse": {
+      "type": "object",
+      "properties": {
+        "sessionIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "evrLeaderboardHaystackRecord": {
+      "type": "object",
+      "properties": {
+        "displayName": {
+          "type": "string"
+        },
+        "ownerId": {
+          "type": "string"
+        },
+        "rank": {
+          "type": "string",
+          "format": "int64"
+        },
+        "score": {
+          "type": "string",
+          "format": "int64"
+        },
+        "subscore": {
+          "type": "string",
+          "format": "int64"
+        },
+        "numScore": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "createTime": {
+          "type": "string",
+          "format": "int64"
+        },
+        "updateTime": {
+          "type": "string",
+          "format": "int64"
+        },
+        "expiryTime": {
+          "type": "string",
+          "format": "int64"
+        },
+        "metadata": {
+          "type": "string",
+          "format": "byte"
+        }
+      }
+    },
+    "evrLeaderboardHaystackRequest": {
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string"
+        },
+        "ownerDiscordId": {
+          "type": "string"
+        },
+        "leaderboardId": {
+          "type": "string"
+        },
+        "guildId": {
+          "type": "string"
+        },
+        "groupId": {
+          "type": "string"
+        },
+        "gameMode": {
+          "$ref": "#/definitions/evrSymbol"
+        },
+        "resetSchedule": {
+          "type": "string"
+        },
+        "statName": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "cursor": {
+          "type": "string"
+        }
+      }
+    },
+    "evrLeaderboardHaystackResponse": {
+      "type": "object",
+      "properties": {
+        "prevCursor": {
+          "type": "string"
+        },
+        "nextCursor": {
+          "type": "string"
+        },
+        "rankCount": {
+          "type": "string",
+          "format": "int64"
+        },
+        "ownerRecords": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/evrLeaderboardHaystackRecord"
+          }
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/evrLeaderboardHaystackRecord"
+          }
+        }
+      }
+    },
+    "evrLeaderboardRecordsListItem": {
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        },
+        "rank": {
+          "type": "string",
+          "format": "int64"
+        },
+        "score": {
+          "type": "string",
+          "format": "int64"
+        },
+        "subscore": {
+          "type": "string",
+          "format": "int64"
+        },
+        "numScore": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "createTime": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updateTime": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiryTime": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "metadata": {
+          "type": "string",
+          "format": "byte"
+        }
+      }
+    },
+    "evrLeaderboardRecordsListRequest": {
+      "type": "object",
+      "properties": {
+        "leaderboardId": {
+          "type": "string"
+        },
+        "guildId": {
+          "type": "string"
+        },
+        "groupId": {
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/definitions/evrSymbol"
+        },
+        "statName": {
+          "type": "string"
+        },
+        "resetSchedule": {
+          "type": "string"
+        },
+        "fromRank": {
+          "type": "string",
+          "format": "int64"
+        },
+        "limit": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "cursor": {
+          "type": "string"
+        }
+      }
+    },
+    "evrLeaderboardRecordsListResponse": {
+      "type": "object",
+      "properties": {
+        "leaderboardId": {
+          "type": "string"
+        },
+        "nextCursor": {
+          "type": "string"
+        },
+        "prevCursor": {
+          "type": "string"
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/evrLeaderboardRecordsListItem"
+          }
+        }
+      }
+    },
+    "evrLinkDeviceRequest": {
+      "type": "object",
+      "properties": {
+        "sessionToken": {
+          "type": "string"
+        },
+        "linkCode": {
+          "type": "string"
+        }
+      }
+    },
+    "evrLinkDeviceResponse": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        }
+      }
+    },
+    "evrLinkUserIdDeviceRequest": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string"
+        },
+        "linkCode": {
+          "type": "string"
+        }
+      }
+    },
+    "evrLinkUserIdDeviceResponse": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        }
+      }
+    },
+    "evrLinkingAppRequest": {
+      "type": "object"
+    },
+    "evrLinkingAppResponse": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "evrLobbySessionParameters": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "$ref": "#/definitions/evrSymbol"
+        },
+        "level": {
+          "$ref": "#/definitions/evrSymbol"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "partyId": {
+          "type": "string"
+        },
+        "partySize": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "teamIndex": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "versionLock": {
+          "type": "string",
+          "format": "int64"
+        },
+        "requiredFeatures": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "evrMatchLabel": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "startTime": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lockedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "gameServer": {
+          "$ref": "#/definitions/evrGameServerPresence"
+        },
+        "open": {
+          "type": "boolean"
+        },
+        "lobbyType": {
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/definitions/evrSymbol"
+        },
+        "level": {
+          "$ref": "#/definitions/evrSymbol"
+        },
+        "maxSize": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "teamSize": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "playerLimit": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "requiredFeatures": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "players": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/evrPlayerInfo"
+          }
+        },
+        "gameState": {
+          "$ref": "#/definitions/evrGameState"
+        },
+        "sessionSettings": {
+          "$ref": "#/definitions/evrSessionSettings"
+        },
+        "groupId": {
+          "type": "string"
+        },
+        "spawnedBy": {
+          "type": "string"
+        },
+        "teamAlignments": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "levelLoaded": {
+          "type": "boolean"
+        },
+        "terminateTick": {
+          "type": "string",
+          "format": "int64"
+        },
+        "rankPercentile": {
+          "type": "number",
+          "format": "double"
+        }
+      }
+    },
+    "evrMatchListPublicResponse": {
+      "type": "object",
+      "properties": {
+        "uptimeMins": {
+          "type": "string",
+          "format": "int64"
+        },
+        "updateTime": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lobbySessionCount": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "gameserverCount": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "playerCount": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "activeMatchmakingCounts": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/evrMatchmakingTickets"
+          }
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/evrMatchLabel"
+          }
+        },
+        "gameservers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/evrGameServerPresence"
+          }
+        }
+      }
+    },
+    "evrMatchRequest": {
+      "type": "object",
+      "properties": {
+        "matchIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "query": {
+          "type": "string"
+        }
+      }
+    },
+    "evrMatchResponse": {
+      "type": "object",
+      "properties": {
+        "systemStartTime": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "byte"
+          }
+        }
+      }
+    },
+    "evrMatchmakerCandidatesResponse": {
+      "type": "object",
+      "properties": {
+        "candidates": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/evrMatchmakerEntryList"
+          }
+        },
+        "matches": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/evrMatchmakerEntryList"
+          }
+        }
+      }
+    },
+    "evrMatchmakerEntry": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        },
+        "parameters": {
+          "$ref": "#/definitions/evrLobbySessionParameters"
+        }
+      }
+    },
+    "evrMatchmakerEntryList": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/evrMatchmakerEntry"
+          }
+        }
+      }
+    },
+    "evrMatchmakerExtract": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/definitions/protobufAny",
+          "description": "This is a complex structure, using Any for now."
+        }
+      }
+    },
+    "evrMatchmakerStateResponse": {
+      "type": "object",
+      "properties": {
+        "stats": {
+          "$ref": "#/definitions/protobufAny"
+        },
+        "index": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/evrMatchmakerExtract"
+          }
+        }
+      }
+    },
+    "evrMatchmakerStreamRequest": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "type": "string"
+        }
+      }
+    },
+    "evrMatchmakerStreamResponse": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "presences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/evrMatchmakingPresence"
+          }
+        }
+      }
+    },
+    "evrMatchmakingPresence": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        },
+        "parameters": {
+          "$ref": "#/definitions/evrLobbySessionParameters"
+        }
+      }
+    },
+    "evrMatchmakingTickets": {
+      "type": "object",
+      "properties": {
+        "tickets": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      }
+    },
+    "evrPlayerInfo": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "teamIndex": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "clientIp": {
+          "type": "string"
+        }
+      }
+    },
+    "evrPlayerStatistics": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/definitions/protobufAny",
+          "description": "This is a complex structure, using Any for now."
+        }
+      }
+    },
+    "evrPlayerStatisticsRequest": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string"
+        },
+        "groupId": {
+          "type": "string"
+        },
+        "guildId": {
+          "type": "string"
+        },
+        "discordId": {
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/definitions/evrSymbol"
+        }
+      }
+    },
+    "evrPlayerStatisticsResponse": {
+      "type": "object",
+      "properties": {
+        "stats": {
+          "$ref": "#/definitions/evrPlayerStatistics"
+        }
+      }
+    },
+    "evrPrepareMatchRequest": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/definitions/evrSymbol"
+        },
+        "level": {
+          "$ref": "#/definitions/evrSymbol"
+        },
+        "requiredFeatures": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "teamSize": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "roleAlignments": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/evrTeamIndex"
+          }
+        },
+        "guildId": {
+          "type": "string"
+        },
+        "startTime": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "spawnedBy": {
+          "type": "string"
+        },
+        "label": {
+          "$ref": "#/definitions/evrMatchLabel"
+        }
+      }
+    },
+    "evrPrepareMatchResponse": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "$ref": "#/definitions/evrMatchLabel"
+        }
+      }
+    },
+    "evrRoundClock": {
+      "type": "object",
+      "properties": {
+        "startTime": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "endTime": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "durationMillis": {
+          "type": "string",
+          "format": "int64"
+        }
+      }
+    },
+    "evrServerScoreRequest": {
+      "type": "object",
+      "properties": {
+        "rtts": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "minRtt": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "maxRtt": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "thresholdRtt": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "evrServerScoreResponse": {
+      "type": "object",
+      "properties": {
+        "score": {
+          "type": "number",
+          "format": "double"
+        }
+      }
+    },
+    "evrServerScoresRequest": {
+      "type": "object",
+      "properties": {
+        "discordIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "minRtt": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "maxRtt": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "thresholdRtt": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "evrServerScoresResponse": {
+      "type": "object",
+      "properties": {
+        "scores": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      }
+    },
+    "evrServiceStatus": {
+      "type": "object",
+      "properties": {
+        "serviceid": {
+          "type": "string"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "evrServiceStatusData": {
+      "type": "object",
+      "properties": {
+        "isActive": {
+          "type": "boolean"
+        },
+        "statuses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/evrServiceStatus"
+          }
+        }
+      }
+    },
+    "evrServiceStatusResponse": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/definitions/evrServiceStatusData"
+        }
+      }
+    },
+    "evrSession": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string"
+        },
+        "refreshToken": {
+          "type": "string"
+        }
+      }
+    },
+    "evrSessionSettings": {
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/definitions/evrSymbol"
+        },
+        "level": {
+          "$ref": "#/definitions/evrSymbol"
+        },
+        "requiredFeatures": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "evrSetNextMatchRequest": {
+      "type": "object",
+      "properties": {
+        "discordId": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "matchId": {
+          "type": "string"
+        },
+        "hostDiscordId": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        }
+      }
+    },
+    "evrSetNextMatchResponse": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string"
+        },
+        "matchId": {
+          "type": "string"
+        }
+      }
+    },
+    "evrShutdownMatchRequest": {
+      "type": "object",
+      "properties": {
+        "matchId": {
+          "type": "string"
+        },
+        "graceSeconds": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "evrShutdownMatchResponse": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "response": {
+          "type": "string"
+        }
+      }
+    },
+    "evrStreamJoinRequest": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "subcontext": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "persistence": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        }
+      }
+    },
+    "evrStreamJoinResponse": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "presences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/evrEvrMatchPresence"
+          }
+        }
+      }
+    },
+    "evrSymbol": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string",
+          "format": "uint64"
+        }
+      },
+      "title": "General purpose messages"
+    },
+    "evrTeamIndex": {
+      "type": "string",
+      "enum": [
+        "UNASSIGNED",
+        "BLUE",
+        "ORANGE",
+        "SPECTATOR",
+        "MODERATOR",
+        "SOCIAL"
+      ],
+      "default": "UNASSIGNED"
+    },
+    "evrUserServerProfile": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/definitions/protobufAny",
+          "description": "This is a complex structure, using Any for now."
+        }
+      }
+    },
+    "evrUserServerProfileRequest": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string"
+        },
+        "xpid": {
+          "$ref": "#/definitions/evrEvrId"
+        },
+        "discordId": {
+          "type": "string"
+        },
+        "guildId": {
+          "type": "string"
+        },
+        "groupId": {
+          "type": "string"
+        }
+      }
+    },
+    "evrUserServerProfileResponse": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "$ref": "#/definitions/evrUserServerProfile"
+        }
+      }
+    },
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string",
+          "description": "A URL/resource name that uniquely identifies the type of the serialized\nprotocol buffer message. This string must contain at least\none \"/\" character. The last segment of the URL's path must represent\nthe fully qualified name of the type (as in\n`path/google.protobuf.Duration`). The name should be in a canonical form\n(e.g., leading \".\" is not accepted).\n\nIn practice, teams usually precompile into the binary all types that they\nexpect it to use in the context of Any. However, for URLs which use the\nscheme `http`, `https`, or no scheme, one can optionally set up a type\nserver that maps type URLs to message definitions as follows:\n\n* If no scheme is provided, `https` is assumed.\n* An HTTP GET on the URL must yield a [google.protobuf.Type][]\n  value in binary format, or produce an error.\n* Applications are allowed to cache lookup results based on the\n  URL, or have them precompiled into a binary to avoid any\n  lookup. Therefore, binary compatibility needs to be preserved\n  on changes to types. (Use versioned type names to manage\n  breaking changes.)\n\nNote: this functionality is not currently available in the official\nprotobuf release, and it is not used for type URLs beginning with\ntype.googleapis.com. As of May 2023, there are no widely used type server\nimplementations and no plans to implement one.\n\nSchemes other than `http`, `https` (or the empty scheme) might be\nused with implementation specific semantics."
+        }
+      },
+      "additionalProperties": {},
+      "description": "`Any` contains an arbitrary serialized protocol buffer message along with a\nURL that describes the type of the serialized message.\n\nProtobuf library provides support to pack/unpack Any values in the form\nof utility functions or additional generated methods of the Any type.\n\nExample 1: Pack and unpack a message in C++.\n\n    Foo foo = ...;\n    Any any;\n    any.PackFrom(foo);\n    ...\n    if (any.UnpackTo(\u0026foo)) {\n      ...\n    }\n\nExample 2: Pack and unpack a message in Java.\n\n    Foo foo = ...;\n    Any any = Any.pack(foo);\n    ...\n    if (any.is(Foo.class)) {\n      foo = any.unpack(Foo.class);\n    }\n    // or ...\n    if (any.isSameTypeAs(Foo.getDefaultInstance())) {\n      foo = any.unpack(Foo.getDefaultInstance());\n    }\n\n Example 3: Pack and unpack a message in Python.\n\n    foo = Foo(...)\n    any = Any()\n    any.Pack(foo)\n    ...\n    if any.Is(Foo.DESCRIPTOR):\n      any.Unpack(foo)\n      ...\n\n Example 4: Pack and unpack a message in Go\n\n     foo := \u0026pb.Foo{...}\n     any, err := anypb.New(foo)\n     if err != nil {\n       ...\n     }\n     ...\n     foo := \u0026pb.Foo{}\n     if err := any.UnmarshalTo(foo); err != nil {\n       ...\n     }\n\nThe pack methods provided by protobuf library will by default use\n'type.googleapis.com/full.type.name' as the type URL and the unpack\nmethods only use the fully qualified type name after the last '/'\nin the type URL, for example \"foo.bar.com/x/y.z\" will yield type\nname \"y.z\".\n\nJSON\n====\nThe JSON representation of an `Any` value uses the regular\nrepresentation of the deserialized, embedded message, with an\nadditional field `@type` which contains the type URL. Example:\n\n    package google.profile;\n    message Person {\n      string first_name = 1;\n      string last_name = 2;\n    }\n\n    {\n      \"@type\": \"type.googleapis.com/google.profile.Person\",\n      \"firstName\": \u003cstring\u003e,\n      \"lastName\": \u003cstring\u003e\n    }\n\nIf the embedded message type is well-known and has a custom JSON\nrepresentation, that representation will be embedded adding a field\n`value` which holds the custom JSON in addition to the `@type`\nfield. Example (for message [google.protobuf.Duration][]):\n\n    {\n      \"@type\": \"type.googleapis.com/google.protobuf.Duration\",\n      \"value\": \"1.212s\"\n    }"
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    }
+  },
+  "securityDefinitions": {
+    "BasicAuth": {
+      "type": "basic"
+    },
+    "BearerJwt": {
+      "type": "apiKey",
+      "name": "Authorization",
+      "in": "header"
+    },
+    "HttpKeyAuth": {
+      "type": "apiKey",
+      "name": "http_key",
+      "in": "header"
+    }
+  },
+  "security": [
+    {
+      "BearerJwt": []
+    }
+  ],
+  "externalDocs": {
+    "description": "EVR server documentation",
+    "url": "https://github.com/EchoTools/evr-backend"
+  }
+}

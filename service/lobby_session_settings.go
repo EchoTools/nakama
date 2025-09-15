@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"math/rand"
+	"slices"
 	"time"
 )
 
@@ -75,28 +76,243 @@ const (
 
 	PublicSession  Visibility = "public"
 	PrivateSession Visibility = "private"
+
+	DefaultRegionCode = "default"
 )
 
-type (
-	Mode                string
-	Level               string
-	RoleName            string
-	Visibility          string
-	MatchStatGroup      string
-	MatchLevelSelection string
-)
+type Mode string
 
-type ModeFilter struct {
-	Levels          []Level
-	MaxSlots        int32
-	MaxTeamSize     int32
-	Roles           []RoleName
-	DefaultRole     RoleName
-	DefaultTeamSize int32
+func (m Mode) IsPrivate() bool {
+	return !slices.Contains([]Mode{ModeSocialPublic, ModeArenaPublic, ModeCombatPublic, ModeArenaPublicAI}, m)
 }
 
+func (m Mode) IsSocial() bool {
+	return m == ModeSocialPublic || m == ModeSocialPrivate || m == ModeSocialNPE
+}
+
+func (m Mode) IsArena() bool {
+	return slices.Contains([]Mode{ModeArenaPublic, ModeArenaPrivate, ModeArenaTournment, ModeArenaPracticeAI, ModeArenaPublicAI}, m)
+}
+
+func (m Mode) IsCombat() bool {
+	return slices.Contains([]Mode{ModeCombatPublic, ModeCombatPrivate, ModeEchoCombatTournament}, m)
+}
+
+func (m Mode) String() string {
+	return string(m)
+}
+
+type Level string
+
+func (l Level) String() string {
+	return string(l)
+}
+
+func (l Level) IsValid() bool {
+	for _, levels := range LobbyModeSettings {
+		for _, level := range levels.Levels {
+			if l == level {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+type RoleName string
+
+func (r RoleName) String() string {
+	return string(r)
+}
+
+func (r RoleName) IsValid() bool {
+	if r == TeamUnassigned {
+		return true
+	}
+	for _, roles := range LobbyModeSettings {
+		for _, role := range roles.Roles {
+			if r == role {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+type (
+	Visibility           string
+	MatchStatGroup       string
+	MatchLevelSelection  string
+	LobbySettingsOptions struct {
+		Levels          []Level
+		MaxSlots        int32
+		MaxTeamSize     int32
+		Roles           []RoleName
+		DefaultRole     RoleName
+		DefaultTeamSize int32
+	}
+)
+
+// TODO: move this to the protobuf definitions
+type LobbySessionSettings struct {
+	// The game mode, e.g. "combat_private"
+	Mode Mode `json:"mode"`
+	// The level to play on, e.g. "mpl_arena"
+	Level Level `json:"level"`
+	// The number of players per team (1-5)
+	TeamSize int32 `json:"team_size"`
+	// The user/Discord ID of the lobby creator/allocator
+	CreatorID string `json:"creator_id"`
+	// The user/Discord ID of the lobby owner/admin.
+	OwnerID string `json:"owner_id"`
+	// The group/Guild ID to which the lobby belongs.
+	GroupID string `json:"group_id"`
+	// Any required features that must be supported by the game server/clients.
+	RequiredFeatures []string `json:"required_features"`
+	// The team assignments for each user/Discord ID in the lobby.
+	TeamAlignments map[string]RoleIndex `json:"team_alignments"`
+	// The list of users who have reserved a spot in the lobby.
+	Reservations []*LobbyPresence `json:"reservations"`
+	// The expiry time for the reservations.
+	ReservationsExpiry time.Time `json:"reservations_expiry"`
+	// The time when the match will expire if no players join.
+	MatchExpiry time.Time `json:"match_expiry"`
+	// Extra metadata for the lobby session.
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+func (s LobbySessionSettings) String() string {
+	data, _ := json.Marshal(s)
+	return string(data)
+}
+
+type validGameSettings map[Mode]LobbySettingsOptions
+
+// IsValidMode checks if the given mode is valid.
+func (v validGameSettings) IsValidMode(mode Mode) bool {
+	_, ok := v[mode]
+	return ok
+}
+
+// IsValidLevel checks if the given level is valid for the given mode.
+func (v validGameSettings) IsValidLevel(mode Mode, level Level) bool {
+	if !v.IsValidMode(mode) {
+		return false
+	}
+	for _, l := range v[mode].Levels {
+		if l == level {
+			return true
+		}
+	}
+	return false
+}
+
+// IsValidRole checks if the given role is valid for the given mode.
+func (v validGameSettings) IsValidRole(mode Mode, role RoleName) bool {
+	if !v.IsValidMode(mode) {
+		return false
+	}
+	for _, r := range v[mode].Roles {
+		if r == role {
+			return true
+		}
+	}
+	return false
+}
+
+// IsValidMaxSlots checks if the given size is valid for the given mode.
+func (v validGameSettings) IsValidTeamSize(mode Mode, size int32) bool {
+	if !v.IsValidMode(mode) {
+		return false
+	}
+	return size > 0 && size <= v[mode].MaxTeamSize
+}
+
+// IsValidMaxSlots checks if the given size is a valid max slots for the given mode.
+func (v validGameSettings) IsValidMaxSlots(mode Mode, size int32) bool {
+	if !v.IsValidMode(mode) {
+		return false
+	}
+	return size > 0 && size <= v[mode].MaxSlots
+}
+
+// DefaultRole returns a default role for the given mode. If the mode is invalid, it returns TeamUnassigned.
+func (v validGameSettings) DefaultRole(mode Mode) RoleName {
+	if !v.IsValidMode(mode) {
+		return TeamUnassigned
+	}
+	return v[mode].DefaultRole
+}
+
+// DefaultTeamSize returns a default team size for the given mode. If the mode is invalid, it returns 0.
+func (v validGameSettings) DefaultTeamSize(mode Mode) int32 {
+	if !v.IsValidMode(mode) {
+		return 0
+	}
+	return v[mode].DefaultTeamSize
+}
+
+// DefaultLevel returns a default level for the given mode. If there's only one level, it returns that level.
+// If there are multiple levels, it returns a random level from the list.
+func (v validGameSettings) RandomLevel(mode Mode) Level {
+	if !v.IsValidMode(mode) || len(v[mode].Levels) == 0 {
+		return LevelUnspecified
+	}
+	// If there's only one level, return it
+	if len(v[mode].Levels) == 1 {
+		return v[mode].Levels[0]
+	}
+	// Return a random level instead of the first
+	levels := v[mode].Levels[:]
+	return levels[rand.Intn(len(levels))]
+}
+
+// ValidModes returns a list of all valid modes.
+func (v validGameSettings) ValidModes() []Mode {
+	modes := make([]Mode, 0, len(v))
+	for mode := range v {
+		modes = append(modes, mode)
+	}
+	return modes
+}
+
+// MaxSlots returns the max slots for the given mode. If the mode is invalid, it returns 0.
+func (v validGameSettings) MaxSlots(mode Mode) int32 {
+	if !v.IsValidMode(mode) {
+		return 0
+	}
+	return v[mode].MaxSlots
+}
+
+// MaxTeamSize returns the max team size for the given mode. If the mode is invalid, it returns 0.
+func (v validGameSettings) MaxTeamSize(mode Mode) int32 {
+	if !v.IsValidMode(mode) {
+		return 0
+	}
+	return v[mode].MaxTeamSize
+}
+
+// ValidRoles returns a list of all valid roles for the given mode.
+func (v validGameSettings) ValidRoles(mode Mode) []RoleName {
+	if !v.IsValidMode(mode) {
+		return nil
+	}
+	return v[mode].Roles[:]
+}
+
+// ValidLevels returns a list of all valid levels for the given mode.
+func (v validGameSettings) ValidLevels(mode Mode) []Level {
+	if !v.IsValidMode(mode) {
+		return nil
+	}
+	return v[mode].Levels[:]
+}
+
+// ValidGameSettings is a global variable/functions for all valid game settings.
+var ValidGameSettings = validGameSettings(LobbyModeSettings)
+
 var (
-	GameModeConfigurations = map[Mode]ModeFilter{
+	LobbyModeSettings = map[Mode]LobbySettingsOptions{
 		ModeCombatPublic: {
 			MaxSlots:        MatchLobbyMaxSize,
 			MaxTeamSize:     5,
@@ -144,53 +360,3 @@ var (
 		},
 	}
 )
-
-func RandomLevelByMode(mode Mode) Level {
-	valid, ok := GameModeConfigurations[mode]
-	if !ok {
-		return LevelUnspecified
-	}
-	levels := valid.Levels
-	return levels[rand.Intn(len(levels))]
-}
-
-func DefaultLobbySize(mode Mode) int32 {
-	valid, ok := GameModeConfigurations[mode]
-	if !ok {
-		return 0
-	}
-	return valid.MaxSlots
-}
-
-// TODO: move this to the protobuf definitions
-type LobbySessionSettings struct {
-	// The game mode, e.g. "combat_private"
-	Mode Mode `json:"mode"`
-	// The level to play on, e.g. "mpl_arena"
-	Level Level `json:"level"`
-	// The number of players per team (1-5)
-	TeamSize int32 `json:"team_size"`
-	// The user/Discord ID of the lobby creator/allocator
-	CreatorID string `json:"creator_id"`
-	// The user/Discord ID of the lobby owner/admin.
-	OwnerID string `json:"owner_id"`
-	// The group/Guild ID to which the lobby belongs.
-	GroupID string `json:"group_id"`
-	// Any required features that must be supported by the game server/clients.
-	RequiredFeatures []string `json:"required_features"`
-	// The team assignments for each user/Discord ID in the lobby.
-	TeamAlignments map[string]RoleIndex `json:"team_alignments"`
-	// The list of users who have reserved a spot in the lobby.
-	Reservations []*LobbyPresence `json:"reservations"`
-	// The expiry time for the reservations.
-	ReservationExpiry time.Time `json:"reservation_expiry"`
-	// The time when the match will expire if no players join.
-	MatchExpiry time.Time `json:"match_expiry"`
-	// Extra metadata for the lobby session.
-	Metadata map[string]any `json:"metadata,omitempty"`
-}
-
-func (s LobbySessionSettings) String() string {
-	data, _ := json.Marshal(s)
-	return string(data)
-}

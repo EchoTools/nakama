@@ -312,19 +312,40 @@ func (p *Pipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyParams
 
 	p.metrics.CustomCounter("lobby_new", metricsTags, 1)
 
-	settings := &LobbySessionSettings{
-		Mode:              lobbyParams.Mode,
-		Level:             lobbyParams.Level,
-		CreatorID:         lobbyParams.UserID,
-		GroupID:           lobbyParams.GroupID,
-		ScheduledTime:     time.Now().UTC(),
-		Reservations:      entrants,
-		ReservationExpiry: time.Now().Add(30 * time.Second),
+	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
+	mode := Mode(lobbyParams.Mode.String())
+	level := Level(lobbyParams.Level.String())
+	userID := lobbyParams.UserID.String()
+	groupID := lobbyParams.GroupID.String()
+	teamSize := ValidGameSettings.DefaultTeamSize(mode)
+	expiry := time.Now().UTC()
+	latestRTTs := lobbyParams.latencyHistory.Load().LatestRTTs()
+	latencies := RuntimeLatenciesFromLatencyHistory(latestRTTs, userID)
+
+	queryData := LobbyAllocationMetadata{
+		// Prepare the session for the match.
+		SessionSettings: LobbySessionSettings{
+			Mode:             mode,
+			Level:            level,
+			TeamSize:         teamSize,
+			MatchExpiry:      expiry,
+			CreatorID:        userID,
+			OwnerID:          SystemUserID,
+			GroupID:          groupID,
+			Reservations:     entrants,
+			RequiredFeatures: lobbyParams.RequiredFeatures,
+			TeamAlignments:   map[string]RoleIndex{userID: lobbyParams.Role},
+		},
+		AllocatorGroupIDs:    []string{groupID},
+		MandatoryRegionCodes: []string{"default"},
+		PreferredRegionCodes: []string{lobbyParams.RegionCode},
+		QueryAddon:           queryAddon,
+		Latencies:            latencies,
 	}
 
-	label, err := LobbyGameServerAllocate(ctx, server.NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, []string{lobbyParams.RegionCode}, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
+	label, err := LobbyGameServerAllocate(ctx, server.NewRuntimeGoLogger(logger), p.nk, queryData)
 	if err != nil {
-		logger.Warn("Failed to allocate game server", zap.Error(err), zap.Any("settings", settings))
+		logger.Warn("Failed to allocate game server", zap.Error(err), zap.Any("query_data", lobbyParams))
 		return nil, err
 	}
 

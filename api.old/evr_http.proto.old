@@ -1,0 +1,237 @@
+syntax = "proto3";
+
+package nevr;
+
+import "google/api/annotations.proto";
+import "nevr.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option csharp_namespace = "Nevr.API";
+option go_package = "github.com/echotools/nevr/v3/apigrpc";
+option java_multiple_files = true;
+option java_outer_classname = "NevrApiGrpc";
+option java_package = "com.github.echotools.nevr.api";
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "NEVR API"
+    version: "3.0"
+    contact: {
+      name: "The NEVR Authors & Contributors"
+      url: "https://github.com/echotools/nevr"
+      email: ""
+    }
+  }
+  host: "127.0.0.1:7350"
+  external_docs: {
+    url: "https://github.com/echotools/nevr"
+    description: "NEVR server documentation"
+  }
+  schemes: HTTP
+  consumes: "application/json"
+  produces: "application/json"
+  security_definitions: {
+    security: {
+      key: "BasicAuth"
+      value: {type: TYPE_BASIC}
+    }
+    security: {
+      key: "BearerJwt"
+      value: {
+        type: TYPE_API_KEY
+        in: IN_HEADER
+        name: "Authorization"
+      }
+    }
+    security: {
+      key: "HttpKeyAuth"
+      value: {
+        type: TYPE_API_KEY
+        in: IN_HEADER
+        name: "http_key"
+      }
+    }
+  }
+  // Default security definition.
+  security: {
+    security_requirement: {
+      key: "BearerJwt"
+      value: {}
+    }
+  }
+};
+
+// NevrHttp service definition
+service Nevr {
+  rpc AccountSearch(AccountSearchRequest) returns (AccountSearchResponse) {
+    option (google.api.http) = {
+      post: "/v3/lobby"
+      body: "*"
+    };
+  }
+  rpc AccountLookup(AccountLookupRequest) returns (AccountLookupResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/account/lookup"
+      body: "*"
+    };
+  }
+  rpc AuthenticatePassword(AuthenticatePasswordRequest) returns (Session) {
+    option (google.api.http) = {
+      post: "/v3/rpc/account/authenticate/password"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      security: {
+        security_requirement: {
+          key: "BasicAuth"
+          value: {}
+        }
+      }
+    };
+  }
+  rpc LeaderboardHaystack(LeaderboardHaystackRequest) returns (LeaderboardHaystackResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/leaderboard/haystack"
+      body: "*"
+    };
+  }
+  rpc LeaderboardRecordsList(LeaderboardRecordsListRequest) returns (LeaderboardRecordsListResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/leaderboard/records"
+      body: "*"
+    };
+  }
+  rpc LinkDevice(LinkDeviceRequest) returns (LinkDeviceResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/link/device"
+      body: "*"
+    };
+  }
+  rpc LinkUserIdDevice(LinkUserIdDeviceRequest) returns (LinkUserIdDeviceResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/link/usernamedevice"
+      body: "*"
+    };
+  }
+  rpc DiscordSignIn(DiscordSignInRequest) returns (DiscordSignInResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/signin/discord"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      security: {
+        security_requirement: {
+          key: "BasicAuth"
+          value: {}
+        }
+      }
+    };
+  }
+  rpc MatchListPublic(MatchListPublicRequest) returns (MatchListPublicResponse) {
+    option (google.api.http) = {get: "/v3/rpc/match/public"};
+  }
+  rpc GetMatch(MatchRequest) returns (MatchResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/match"
+      body: "*"
+    };
+  }
+  rpc PrepareMatch(PrepareMatchRequest) returns (PrepareMatchResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/match/prepare"
+      body: "*"
+    };
+  }
+  rpc AllocateMatch(AllocateMatchRequest) returns (AllocateMatchResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/match/allocate"
+      body: "*"
+    };
+  }
+  rpc ShutdownMatch(ShutdownMatchRequest) returns (ShutdownMatchResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/match/terminate"
+      body: "*"
+    };
+  }
+  rpc BuildMatch(BuildMatchRequest) returns (BuildMatchResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/match/build"
+      body: "*"
+    };
+  }
+  rpc SetNextMatch(SetNextMatchRequest) returns (SetNextMatchResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/player/setnextmatch"
+      body: "*"
+    };
+  }
+  rpc GetPlayerStatistics(PlayerStatisticsRequest) returns (PlayerStatisticsResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/player/statistics"
+      body: "*"
+    };
+  }
+  rpc KickPlayer(KickPlayerRequest) returns (KickPlayerResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/player/kick"
+      body: "*"
+    };
+  }
+  rpc GetUserServerProfile(UserServerProfileRequest) returns (UserServerProfileResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/player/profile"
+      body: "*"
+    };
+  }
+  rpc LinkingApp(LinkingAppRequest) returns (LinkingAppResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/link"
+      body: "*"
+    };
+  }
+  rpc GetStatus(ServiceStatusRequest) returns (ServiceStatusResponse) {
+    option (google.api.http) = {get: "/v3/rpc/evr/servicestatus"};
+  }
+  rpc ImportLoadouts(ImportLoadoutsRequest) returns (ImportLoadoutsResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/importloadouts"
+      body: "*"
+    };
+  }
+  rpc MatchmakerStream(MatchmakerStreamRequest) returns (MatchmakerStreamResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/matchmaker/stream"
+      body: "*"
+    };
+  }
+  rpc MatchmakerState(MatchmakerStateRequest) returns (MatchmakerStateResponse) {
+    option (google.api.http) = {get: "/v3/rpc/matchmaker/state"};
+  }
+  rpc MatchmakerCandidates(MatchmakerCandidatesRequest) returns (MatchmakerCandidatesResponse) {
+    option (google.api.http) = {get: "/v3/rpc/matchmaker/candidates"};
+  }
+  rpc StreamJoin(StreamJoinRequest) returns (StreamJoinResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/stream/join"
+      body: "*"
+    };
+  }
+  rpc GetServerScore(ServerScoreRequest) returns (ServerScoreResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/server/score"
+      body: "*"
+    };
+  }
+  rpc GetServerScores(ServerScoresRequest) returns (ServerScoresResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/server/scores"
+      body: "*"
+    };
+  }
+  rpc CheckForceUser(CheckForceUserRequest) returns (CheckForceUserResponse) {
+    option (google.api.http) = {
+      post: "/v3/rpc/forcecheck"
+      body: "*"
+    };
+  }
+}

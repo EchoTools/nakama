@@ -12,7 +12,7 @@ import (
 	"time"
 
 	evr "github.com/echotools/nakama/v3/protocol"
-	"github.com/echotools/nevr-common/v3/rtapi"
+	"github.com/echotools/nevr-common/gen/go/rtapi"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server"
@@ -957,7 +957,7 @@ func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *
 		if ok, err := CheckSystemGroupMembership(ctx, db, settings.CreatorID, GroupGlobalDevelopers); err != nil {
 			return state, SignalResponse{Message: fmt.Sprintf("failed to check group membership: %v", err)}.String()
 		} else if !ok {
-			valid, ok := GameModeConfigurations[settings.Mode]
+			valid, ok := LobbyModeSettings[settings.Mode]
 			if !ok {
 				return state, SignalResponse{Message: fmt.Sprintf("bad request: invalid mode: %v", settings.Mode)}.String()
 			}
@@ -969,10 +969,10 @@ func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *
 
 		}
 
-		state.Metadata.Mode = settings.Mode
-		state.Metadata.Level = settings.Level
+		state.Metadata.Mode = evr.ToSymbol(settings.Mode)
+		state.Metadata.Level = evr.ToSymbol(settings.Level)
 		state.Metadata.RequiredFeatures = settings.RequiredFeatures
-		state.Metadata.GroupID = settings.GroupID
+		state.Metadata.GroupID = uuid.FromStringOrNil(settings.GroupID)
 
 		state.CreateTime = time.Now().UTC()
 
@@ -980,14 +980,14 @@ func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *
 		// If the start time is not set, set it to 10 minutes from now.
 		if settings.MatchExpiry.IsZero() {
 			state.StartTime = time.Now().UTC().Add(10 * time.Minute)
-		} else if settings.ScheduledTime.Before(time.Now()) {
+		} else if settings.MatchExpiry.Before(time.Now()) {
 			state.StartTime = time.Now().UTC()
 		} else {
-			state.StartTime = settings.ScheduledTime.UTC()
+			state.StartTime = settings.MatchExpiry.UTC()
 		}
 
-		if !settings.CreatorID.IsNil() {
-			state.Metadata.SpawnedBy = settings.CreatorID
+		if u := uuid.FromStringOrNil(settings.CreatorID); !u.IsNil() {
+			state.Metadata.SpawnedBy = u
 		} else {
 			state.Metadata.SpawnedBy = uuid.FromStringOrNil(signal.UserID)
 		}
@@ -1042,7 +1042,7 @@ func (m *NEVRMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *
 		for _, e := range settings.Reservations {
 			state.Reservations[e.SessionID] = &Reservation{
 				LobbyPresence:     e,
-				ReservationExpiry: settings.ReservationExpiry,
+				ReservationExpiry: settings.ReservationsExpiry,
 			}
 		}
 

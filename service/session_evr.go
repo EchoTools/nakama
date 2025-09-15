@@ -359,7 +359,7 @@ func (s *sessionEVR) Close(msg string, reason runtime.PresenceReason, envelopes 
 	}
 
 	s.services.Range(func(key ServiceType, service *serviceWS) bool {
-		Close()
+		service.Close()
 		return true
 	})
 
@@ -376,9 +376,10 @@ func (s *sessionEVR) AddService(serviceType ServiceType, service *serviceWS) err
 		return nil
 	}
 	s.Unlock()
-	Lock()
-	serviceCh = s.incomingCh
-	Unlock()
+	service.Lock()
+	// Receive messages from the service.
+	service.serviceCh = s.incomingCh
+	service.Unlock()
 	// The connection is stopped, so just replace it.
 	s.services.Store(serviceType, service)
 	return nil

@@ -5,14 +5,14 @@ import (
 	"fmt"
 
 	evr "github.com/echotools/nakama/v3/protocol"
-	"github.com/echotools/nevr-common/v3/rtapi"
+	"github.com/echotools/nevr-common/gen/go/rtapi"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server"
 	"go.uber.org/zap"
 )
 
 func (p *Pipeline) lobbyEntrantConnected(logger *zap.Logger, session *sessionEVR, in *rtapi.Envelope) error {
-	message := in.GetLobbyEntraConnected()
+	message := in.GetLobbyEntrantConnected()
 
 	baseLogger := logger.With(zap.String("mid", message.LobbySessionId))
 

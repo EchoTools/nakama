@@ -18,7 +18,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	evr "github.com/echotools/nakama/v3/protocol"
-	"github.com/echotools/nevr-common/v3/rtapi"
+	"github.com/echotools/nevr-common/gen/go/rtapi"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server"

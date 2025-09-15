@@ -1,6 +1,6 @@
 # Redis Streams Event Journaling, MongoDB Summarization, and StreamModeLobbySessionTelemetry
 
-This document describes the new telemetry and event journaling features implemented for the Nakama EVR module.
+This document describes the new rtapi and event journaling features implemented for the Nakama EVR module.
 
 ## Overview
 
@@ -8,7 +8,7 @@ The implementation adds three main features:
 
 1. **Redis Streams Event Journaling** - Durable event storage using Redis Streams
 2. **MongoDB Match Summarization** - Long-term match data storage and analytics
-3. **StreamModeLobbySessionTelemetry** - Real-time lobby telemetry subscription system
+3. **StreamModeLobbySessionTelemetry** - Real-time lobby rtapi subscription system
 
 ## Configuration
 
@@ -41,7 +41,7 @@ Provides durable storage for events using Redis Streams with consumer group supp
 
 - `events:player_actions` - Player game actions
 - `events:purchases` - Purchase transactions
-- `events:telemetry` - Lobby and match telemetry data
+- `events:rtapi` - Lobby and match rtapi data
 
 #### Usage
 
@@ -53,7 +53,7 @@ err := eventJournal.JournalPlayerAction(ctx, userID, sessionID, matchID, "goal_s
     "timestamp": time.Now(),
 })
 
-// Journal telemetry data
+// Journal rtapi data
 err := eventJournal.JournalTelemetry(ctx, userID, sessionID, lobbyID, telemetryData)
 
 // Journal a purchase
@@ -114,20 +114,20 @@ summary, err := matchSummaryStore.Get(ctx, "match-123")
 
 ### 3. StreamModeLobbySessionTelemetry API
 
-Enables sessions to subscribe to real-time lobby telemetry streams.
+Enables sessions to subscribe to real-time lobby rtapi streams.
 
 #### Stream Mode
 
 - **Constant**: `StreamModeLobbySessionTelemetry = 0x16`
-- **Purpose**: Dedicated stream mode for lobby session telemetry
-- **Usage**: Sessions can subscribe to receive telemetry data from specific lobbies
+- **Purpose**: Dedicated stream mode for lobby session rtapi
+- **Usage**: Sessions can subscribe to receive rtapi data from specific lobbies
 
 #### API Endpoints
 
 ##### Subscribe to Lobby Telemetry
 
 ```http
-POST /telemetry/subscribe
+POST /rtapi/subscribe
 Headers:
   X-Session-ID: session-uuid
   X-User-ID: user-uuid
@@ -142,7 +142,7 @@ Response:
 ```json
 {
   "success": true,
-  "message": "Successfully subscribed to lobby telemetry",
+  "message": "Successfully subscribed to lobby rtapi",
   "lobby_id": "lobby-uuid",
   "session_id": "session-uuid"
 }
@@ -151,7 +151,7 @@ Response:
 ##### Unsubscribe from Lobby Telemetry
 
 ```http
-POST /telemetry/unsubscribe
+POST /rtapi/unsubscribe
 Headers:
   X-Session-ID: session-uuid
   X-User-ID: user-uuid
@@ -165,7 +165,7 @@ Headers:
 ##### Get Active Subscriptions
 
 ```http
-GET /telemetry/subscriptions?lobby_id=lobby-uuid
+GET /rtapi/subscriptions?lobby_id=lobby-uuid
 ```
 
 Response:
@@ -187,7 +187,7 @@ Response:
 #### Telemetry Broadcasting
 
 ```go
-// Broadcast telemetry to all subscribed sessions
+// Broadcast rtapi to all subscribed sessions
 telemetryData := map[string]interface{}{
     "event_type": "player_movement",
     "player_id": "player-123",
@@ -205,7 +205,7 @@ err := telemetryManager.BroadcastTelemetry(ctx, lobbyID, telemetryData)
 func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, data string) (interface{}, string) {
     // ... existing match logic
     
-    // Handle telemetry events
+    // Handle rtapi events
     if telemetryIntegration != nil {
         switch opcode {
         case OpCodeEVRPacketData:

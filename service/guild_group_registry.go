@@ -157,4 +157,8 @@ func (r *GuildGroupRegistry) Add(gg *GuildGroup) {
 	r.guildGroups.Store(&newMap)
 }
 
+func (r *GuildGroupRegistry) ListForUser(userID string) (map[string]*GuildGroup, error) {
+	return GuildUserGroupsList(r.ctx, r.nk, r, userID)
+}
+
 func (r *GuildGroupRegistry) Stop() {}

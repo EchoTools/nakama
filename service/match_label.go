@@ -49,7 +49,6 @@ type MatchLabel struct {
 	CreatedAt      time.Time               `json:"created_at,omitempty"`      // The time the match was created.
 	GameServer     *GameServerPresence     `json:"broadcaster,omitempty"`     // The broadcaster's data
 	TeamAlignments map[uuid.UUID]RoleIndex `json:"team_alignments,omitempty"` // map[userID]TeamIndex
-
 }
 
 func (s *MatchLabel) IsPublic() bool {

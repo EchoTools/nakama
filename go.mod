@@ -8,7 +8,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/gamelift v1.46.2
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.3
 	github.com/bits-and-blooms/bitset v1.24.0
-	github.com/echotools/nevr-common/v3 v3.1.0
 	github.com/echotools/vrmlgo/v5 v5.0.1
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/go-restruct/restruct v1.2.0-alpha
@@ -64,6 +63,10 @@ require (
 	github.com/onsi/ginkgo v1.16.5 // indirect
 	github.com/onsi/gomega v1.37.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
+	github.com/tidwall/gjson v1.14.4 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
+	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/uber-go/tally/v4 v4.1.17 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect
@@ -88,6 +91,7 @@ require (
 	github.com/bwmarrin/discordgo v0.29.0
 	github.com/caio/go-tdigest v3.1.0+incompatible // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/cloudflare/cloudflare-go/v3 v3.1.0
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dgryski/go-metro v0.0.0-20250106013310-edb8663e5e33 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect

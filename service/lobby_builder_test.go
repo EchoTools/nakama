@@ -171,40 +171,40 @@ func TestGroupByTicket(t *testing.T) {
 func TestSortLabelIndexes(t *testing.T) {
 	tests := []struct {
 		name     string
-		labels   []labelIndex
-		expected []labelIndex
+		labels   []LabelIndex
+		expected []LabelIndex
 	}{
 		{
 			name: "Sort by regionMatches",
-			labels: []labelIndex{
+			labels: []LabelIndex{
 				{IsRegionMatch: false},
 				{IsRegionMatch: true},
 			},
-			expected: []labelIndex{
+			expected: []LabelIndex{
 				{IsRegionMatch: true},
 				{IsRegionMatch: false},
 			},
 		},
 		{
 			name: "Sort by rtt",
-			labels: []labelIndex{
+			labels: []LabelIndex{
 				{RTT: 100},
 				{RTT: 30},
 			},
-			expected: []labelIndex{
+			expected: []LabelIndex{
 				{RTT: 30},
 				{RTT: 100},
 			},
 		},
 		{
 			name: "Sort by rating",
-			labels: []labelIndex{
+			labels: []LabelIndex{
 				{Rating: 50},
 				{Rating: 100},
 				{Rating: 25},
 				{Rating: 75},
 			},
-			expected: []labelIndex{
+			expected: []LabelIndex{
 				{Rating: 100},
 				{Rating: 75},
 				{Rating: 50},
@@ -213,25 +213,25 @@ func TestSortLabelIndexes(t *testing.T) {
 		},
 		{
 			name: "Sort by isPriorityForMode",
-			labels: []labelIndex{
+			labels: []LabelIndex{
 				{IsPriorityForMode: false},
 				{IsPriorityForMode: true},
 			},
-			expected: []labelIndex{
+			expected: []LabelIndex{
 				{IsPriorityForMode: true},
 				{IsPriorityForMode: false},
 			},
 		},
 		{
 			name: "Sort by isHighLatency",
-			labels: []labelIndex{
+			labels: []LabelIndex{
 				{IsHighLatency: false},
 				{IsHighLatency: true},
 				{IsHighLatency: false},
 				{IsHighLatency: true},
 				{IsHighLatency: false},
 			},
-			expected: []labelIndex{
+			expected: []LabelIndex{
 				{IsHighLatency: false},
 				{IsHighLatency: false},
 				{IsHighLatency: false},
@@ -241,35 +241,35 @@ func TestSortLabelIndexes(t *testing.T) {
 		},
 		{
 			name: "Sort by isReachable",
-			labels: []labelIndex{
+			labels: []LabelIndex{
 				{IsReachable: false},
 				{IsReachable: true},
 			},
-			expected: []labelIndex{
+			expected: []LabelIndex{
 				{IsReachable: true},
 				{IsReachable: false},
 			},
 		},
 		{
 			name: "Sort by activeCount",
-			labels: []labelIndex{
+			labels: []LabelIndex{
 				{ActiveCount: 2},
 				{ActiveCount: 1},
 			},
-			expected: []labelIndex{
+			expected: []LabelIndex{
 				{ActiveCount: 1},
 				{ActiveCount: 2},
 			},
 		},
 		{
 			name: "Sort by activeCount and rtt",
-			labels: []labelIndex{
+			labels: []LabelIndex{
 				{IsRegionMatch: true, RTT: 50, IsReachable: true, ActiveCount: 2},
 				{IsRegionMatch: true, RTT: 40, IsReachable: true, ActiveCount: 3},
 				{IsRegionMatch: true, RTT: 55, IsReachable: true, ActiveCount: 2},
 				{IsRegionMatch: true, RTT: 70, IsReachable: true, ActiveCount: 1},
 			},
-			expected: []labelIndex{
+			expected: []LabelIndex{
 				{IsRegionMatch: true, RTT: 70, IsReachable: true, ActiveCount: 1},
 				{IsRegionMatch: true, RTT: 50, IsReachable: true, ActiveCount: 2},
 				{IsRegionMatch: true, RTT: 55, IsReachable: true, ActiveCount: 2},
@@ -278,13 +278,13 @@ func TestSortLabelIndexes(t *testing.T) {
 		},
 		{
 			name: "Complex sorting",
-			labels: []labelIndex{
+			labels: []LabelIndex{
 				{IsRegionMatch: true, RTT: 100, IsPriorityForMode: false, IsReachable: false, ActiveCount: 2},
 				{IsRegionMatch: true, RTT: 50, IsPriorityForMode: true, IsReachable: true, ActiveCount: 1},
 				{IsRegionMatch: true, RTT: 50, IsPriorityForMode: true, IsReachable: true, ActiveCount: 2},
 				{IsRegionMatch: true, RTT: 100, IsPriorityForMode: false, IsReachable: false, ActiveCount: 1},
 			},
-			expected: []labelIndex{
+			expected: []LabelIndex{
 				{IsRegionMatch: true, RTT: 50, IsPriorityForMode: true, IsReachable: true, ActiveCount: 1},
 				{IsRegionMatch: true, RTT: 50, IsPriorityForMode: true, IsReachable: true, ActiveCount: 2},
 				{IsRegionMatch: true, RTT: 100, IsPriorityForMode: false, IsReachable: false, ActiveCount: 1},
@@ -293,11 +293,11 @@ func TestSortLabelIndexes(t *testing.T) {
 		},
 		{
 			name: "RTT difference less than 30",
-			labels: []labelIndex{
+			labels: []LabelIndex{
 				{RTT: 60},
 				{RTT: 50},
 			},
-			expected: []labelIndex{
+			expected: []LabelIndex{
 				{RTT: 60},
 				{RTT: 50},
 			},
@@ -306,10 +306,10 @@ func TestSortLabelIndexes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			labelsCopy := make([]labelIndex, len(tt.labels))
+			labelsCopy := make([]LabelIndex, len(tt.labels))
 			copy(labelsCopy, tt.labels)
 
-			sortLabelIndexes(labelsCopy)
+			SortLabelIndexes(labelsCopy)
 			if diff := cmp.Diff(labelsCopy, tt.expected); diff != "" {
 				t.Errorf("sortLabelIndexes() mismatch (-got +want):\n%s", diff)
 			}

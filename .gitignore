@@ -728,3 +728,5 @@ __debug_*
 local.yml
 
 _local/
+
+.continue/

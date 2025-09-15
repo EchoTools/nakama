@@ -11,7 +11,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
-// TelemetryAPI handles telemetry-related HTTP endpoints
+// TelemetryAPI handles rtapi-related HTTP endpoints
 type TelemetryAPI struct {
 	logger            runtime.Logger
 	db                *sql.DB
@@ -57,19 +57,19 @@ type TelemetryUnsubscribeResponse struct {
 	Message string `json:"message,omitempty"`
 }
 
-// RegisterTelemetryEndpoints registers the telemetry API endpoints
+// RegisterTelemetryEndpoints registers the rtapi API endpoints
 func (api *TelemetryAPI) RegisterTelemetryEndpoints(initializer runtime.Initializer) error {
-	// Register HTTP handlers for telemetry API
-	if err := initializer.RegisterHttp("/telemetry/subscribe", http.HandlerFunc(api.handleTelemetrySubscribeHTTP), http.MethodPost); err != nil {
-		return fmt.Errorf("failed to register telemetry subscribe endpoint: %w", err)
+	// Register HTTP handlers for rtapi API
+	if err := initializer.RegisterHttp("/rtapi/subscribe", http.HandlerFunc(api.handleTelemetrySubscribeHTTP), http.MethodPost); err != nil {
+		return fmt.Errorf("failed to register rtapi subscribe endpoint: %w", err)
 	}
 
-	if err := initializer.RegisterHttp("/telemetry/unsubscribe", http.HandlerFunc(api.handleTelemetryUnsubscribeHTTP), http.MethodPost); err != nil {
-		return fmt.Errorf("failed to register telemetry unsubscribe endpoint: %w", err)
+	if err := initializer.RegisterHttp("/rtapi/unsubscribe", http.HandlerFunc(api.handleTelemetryUnsubscribeHTTP), http.MethodPost); err != nil {
+		return fmt.Errorf("failed to register rtapi unsubscribe endpoint: %w", err)
 	}
 
-	if err := initializer.RegisterHttp("/telemetry/subscriptions", http.HandlerFunc(api.handleGetSubscriptionsHTTP), http.MethodGet); err != nil {
-		return fmt.Errorf("failed to register telemetry subscriptions endpoint: %w", err)
+	if err := initializer.RegisterHttp("/rtapi/subscriptions", http.HandlerFunc(api.handleGetSubscriptionsHTTP), http.MethodGet); err != nil {
+		return fmt.Errorf("failed to register rtapi subscriptions endpoint: %w", err)
 	}
 
 	return nil
@@ -88,7 +88,7 @@ func (api *TelemetryAPI) handleGetSubscriptionsHTTP(w http.ResponseWriter, r *ht
 	api.handleGetSubscriptions(r.Context(), api.logger, api.db, api.nk, w, r)
 }
 
-// handleTelemetrySubscribe handles POST /telemetry/subscribe
+// handleTelemetrySubscribe handles POST /rtapi/subscribe
 func (api *TelemetryAPI) handleTelemetrySubscribe(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, w http.ResponseWriter, r *http.Request) {
 	// Get session information from context or headers
 	sessionID, userID, err := api.getSessionInfo(r)
@@ -111,9 +111,9 @@ func (api *TelemetryAPI) handleTelemetrySubscribe(ctx context.Context, logger ru
 		return
 	}
 
-	// Subscribe to telemetry
+	// Subscribe to rtapi
 	if err := api.telemetryManager.Subscribe(ctx, sessionID, userID, lobbyID); err != nil {
-		api.writeErrorResponse(w, http.StatusInternalServerError, "Failed to subscribe to telemetry", err)
+		api.writeErrorResponse(w, http.StatusInternalServerError, "Failed to subscribe to rtapi", err)
 		return
 	}
 
@@ -129,7 +129,7 @@ func (api *TelemetryAPI) handleTelemetrySubscribe(ctx context.Context, logger ru
 	// Send success response
 	response := TelemetrySubscribeResponse{
 		Success:   true,
-		Message:   "Successfully subscribed to lobby telemetry",
+		Message:   "Successfully subscribed to lobby rtapi",
 		LobbyID:   req.LobbyID,
 		SessionID: sessionID.String(),
 	}
@@ -137,7 +137,7 @@ func (api *TelemetryAPI) handleTelemetrySubscribe(ctx context.Context, logger ru
 	api.writeJSONResponse(w, http.StatusOK, response)
 }
 
-// handleTelemetryUnsubscribe handles POST /telemetry/unsubscribe
+// handleTelemetryUnsubscribe handles POST /rtapi/unsubscribe
 func (api *TelemetryAPI) handleTelemetryUnsubscribe(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, w http.ResponseWriter, r *http.Request) {
 	// Get session information
 	sessionID, userID, err := api.getSessionInfo(r)
@@ -160,9 +160,9 @@ func (api *TelemetryAPI) handleTelemetryUnsubscribe(ctx context.Context, logger 
 		return
 	}
 
-	// Unsubscribe from telemetry
+	// Unsubscribe from rtapi
 	if err := api.telemetryManager.Unsubscribe(ctx, sessionID, userID, lobbyID); err != nil {
-		api.writeErrorResponse(w, http.StatusInternalServerError, "Failed to unsubscribe from telemetry", err)
+		api.writeErrorResponse(w, http.StatusInternalServerError, "Failed to unsubscribe from rtapi", err)
 		return
 	}
 
@@ -178,13 +178,13 @@ func (api *TelemetryAPI) handleTelemetryUnsubscribe(ctx context.Context, logger 
 	// Send success response
 	response := TelemetryUnsubscribeResponse{
 		Success: true,
-		Message: "Successfully unsubscribed from lobby telemetry",
+		Message: "Successfully unsubscribed from lobby rtapi",
 	}
 
 	api.writeJSONResponse(w, http.StatusOK, response)
 }
 
-// handleGetSubscriptions handles GET /telemetry/subscriptions
+// handleGetSubscriptions handles GET /rtapi/subscriptions
 func (api *TelemetryAPI) handleGetSubscriptions(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, w http.ResponseWriter, r *http.Request) {
 	// Get lobby ID from query parameters
 	lobbyIDStr := r.URL.Query().Get("lobby_id")

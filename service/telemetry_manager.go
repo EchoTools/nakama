@@ -16,7 +16,7 @@ const (
 	StreamModeLobbySessionTelemetry uint8 = 0x25
 )
 
-// TelemetrySubscription represents a session's subscription to lobby telemetry
+// TelemetrySubscription represents a session's subscription to lobby rtapi
 type TelemetrySubscription struct {
 	SessionID uuid.UUID `json:"session_id"`
 	UserID    uuid.UUID `json:"user_id"`
@@ -24,7 +24,7 @@ type TelemetrySubscription struct {
 	Active    bool      `json:"active"`
 }
 
-// LobbyTelemetryManager manages telemetry subscriptions and streaming
+// LobbyTelemetryManager manages rtapi subscriptions and streaming
 type LobbyTelemetryManager struct {
 	mu            sync.RWMutex
 	subscriptions map[uuid.UUID]map[uuid.UUID]*TelemetrySubscription // lobbyID -> sessionID -> subscription
@@ -43,7 +43,7 @@ func NewLobbyTelemetryManager(nk runtime.NakamaModule, logger runtime.Logger, ev
 	}
 }
 
-// Subscribe adds a session to a lobby's telemetry stream
+// Subscribe adds a session to a lobby's rtapi stream
 func (ltm *LobbyTelemetryManager) Subscribe(ctx context.Context, sessionID, userID, lobbyID uuid.UUID) error {
 	ltm.mu.Lock()
 	defer ltm.mu.Unlock()
@@ -63,11 +63,11 @@ func (ltm *LobbyTelemetryManager) Subscribe(ctx context.Context, sessionID, user
 
 	ltm.subscriptions[lobbyID][sessionID] = subscription
 
-	// Join the session to the lobby telemetry stream
+	// Join the session to the lobby rtapi stream
 	stream := server.PresenceStream{
 		Mode:    StreamModeLobbySessionTelemetry,
 		Subject: lobbyID,
-		Label:   "telemetry",
+		Label:   "rtapi",
 	}
 
 	// Get the session status for the presence
@@ -76,19 +76,19 @@ func (ltm *LobbyTelemetryManager) Subscribe(ctx context.Context, sessionID, user
 		return fmt.Errorf("failed to marshal subscription status: %w", err)
 	}
 
-	// Add session to the telemetry stream
+	// Add session to the rtapi stream
 	success, err := ltm.nk.StreamUserJoin(stream.Mode, stream.Subject.String(), "", stream.Label, userID.String(), sessionID.String(), false, false, string(status))
 	if err != nil || !success {
 		delete(ltm.subscriptions[lobbyID], sessionID)
-		return fmt.Errorf("failed to join telemetry stream: %w", err)
+		return fmt.Errorf("failed to join rtapi stream: %w", err)
 	}
 
-	ltm.logger.Info("Session subscribed to lobby telemetry: session_id=%s, user_id=%s, lobby_id=%s", sessionID.String(), userID.String(), lobbyID.String())
+	ltm.logger.Info("Session subscribed to lobby rtapi: session_id=%s, user_id=%s, lobby_id=%s", sessionID.String(), userID.String(), lobbyID.String())
 
 	return nil
 }
 
-// Unsubscribe removes a session from a lobby's telemetry stream
+// Unsubscribe removes a session from a lobby's rtapi stream
 func (ltm *LobbyTelemetryManager) Unsubscribe(ctx context.Context, sessionID, userID, lobbyID uuid.UUID) error {
 	ltm.mu.Lock()
 	defer ltm.mu.Unlock()
@@ -103,24 +103,24 @@ func (ltm *LobbyTelemetryManager) Unsubscribe(ctx context.Context, sessionID, us
 		}
 	}
 
-	// Leave the telemetry stream
+	// Leave the rtapi stream
 	stream := server.PresenceStream{
 		Mode:    StreamModeLobbySessionTelemetry,
 		Subject: lobbyID,
-		Label:   "telemetry",
+		Label:   "rtapi",
 	}
 
 	if err := ltm.nk.StreamUserLeave(stream.Mode, stream.Subject.String(), "", stream.Label, userID.String(), sessionID.String()); err != nil {
-		ltm.logger.Warn("Failed to leave telemetry stream: session_id=%s, error=%v", sessionID.String(), err)
+		ltm.logger.Warn("Failed to leave rtapi stream: session_id=%s, error=%v", sessionID.String(), err)
 		// Don't return error as subscription is already removed from memory
 	}
 
-	ltm.logger.Info("Session unsubscribed from lobby telemetry: session_id=%s, user_id=%s, lobby_id=%s", sessionID.String(), userID.String(), lobbyID.String())
+	ltm.logger.Info("Session unsubscribed from lobby rtapi: session_id=%s, user_id=%s, lobby_id=%s", sessionID.String(), userID.String(), lobbyID.String())
 
 	return nil
 }
 
-// BroadcastTelemetry sends telemetry data to all subscribed sessions for a lobby
+// BroadcastTelemetry sends rtapi data to all subscribed sessions for a lobby
 func (ltm *LobbyTelemetryManager) BroadcastTelemetry(ctx context.Context, lobbyID uuid.UUID, telemetryData map[string]interface{}) error {
 	ltm.mu.RLock()
 	subscriptions := ltm.subscriptions[lobbyID]
@@ -134,7 +134,7 @@ func (ltm *LobbyTelemetryManager) BroadcastTelemetry(ctx context.Context, lobbyI
 		return nil
 	}
 
-	// Create the telemetry message
+	// Create the rtapi message
 	telemetryMessage := map[string]interface{}{
 		"type":      "lobby_telemetry",
 		"lobby_id":  lobbyID.String(),
@@ -144,7 +144,7 @@ func (ltm *LobbyTelemetryManager) BroadcastTelemetry(ctx context.Context, lobbyI
 
 	messageBytes, err := json.Marshal(telemetryMessage)
 	if err != nil {
-		return fmt.Errorf("failed to marshal telemetry message: %w", err)
+		return fmt.Errorf("failed to marshal rtapi message: %w", err)
 	}
 
 	// Send to each subscribed session's individual stream
@@ -153,21 +153,21 @@ func (ltm *LobbyTelemetryManager) BroadcastTelemetry(ctx context.Context, lobbyI
 			continue
 		}
 
-		// Create individual session stream for telemetry delivery
+		// Create individual session stream for rtapi delivery
 		sessionStream := server.PresenceStream{
 			Mode:    StreamModeLobbySessionTelemetry,
 			Subject: sessionID, // Use sessionID as subject for individual delivery
 			Label:   fmt.Sprintf("lobby_%s", lobbyID.String()),
 		}
 
-		// Send the telemetry data to the session's stream
+		// Send the rtapi data to the session's stream
 		if err := ltm.nk.StreamUserUpdate(sessionStream.Mode, sessionStream.Subject.String(), "", sessionStream.Label,
 			subscription.UserID.String(), subscription.SessionID.String(), false, false, string(messageBytes)); err != nil {
-			ltm.logger.Warn("Failed to send telemetry to session: session_id=%s, lobby_id=%s, error=%v", sessionID.String(), lobbyID.String(), err)
+			ltm.logger.Warn("Failed to send rtapi to session: session_id=%s, lobby_id=%s, error=%v", sessionID.String(), lobbyID.String(), err)
 			continue
 		}
 
-		// Journal the telemetry for this specific session
+		// Journal the rtapi for this specific session
 		if ltm.eventJournal != nil {
 			ltm.eventJournal.JournalTelemetry(ctx, subscription.UserID.String(), subscription.SessionID.String(), lobbyID.String(), telemetryData)
 		}
@@ -213,18 +213,18 @@ func (ltm *LobbyTelemetryManager) CleanupSession(ctx context.Context, sessionID,
 				delete(ltm.subscriptions, lobbyID)
 			}
 
-			// Leave the telemetry stream
+			// Leave the rtapi stream
 			stream := server.PresenceStream{
 				Mode:    StreamModeLobbySessionTelemetry,
 				Subject: lobbyID,
-				Label:   "telemetry",
+				Label:   "rtapi",
 			}
 
 			if err := ltm.nk.StreamUserLeave(stream.Mode, stream.Subject.String(), "", stream.Label, userID.String(), sessionID.String()); err != nil {
-				ltm.logger.Warn("Failed to leave telemetry stream during cleanup: session_id=%s, lobby_id=%s, error=%v", sessionID.String(), subscription.LobbyID.String(), err)
+				ltm.logger.Warn("Failed to leave rtapi stream during cleanup: session_id=%s, lobby_id=%s, error=%v", sessionID.String(), subscription.LobbyID.String(), err)
 			}
 		}
 	}
 
-	ltm.logger.Debug("Cleaned up telemetry subscriptions for session: session_id=%s, user_id=%s", sessionID.String(), userID.String())
+	ltm.logger.Debug("Cleaned up rtapi subscriptions for session: session_id=%s, user_id=%s", sessionID.String(), userID.String())
 }

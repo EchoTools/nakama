@@ -100,20 +100,20 @@ func (ej *EventJournal) JournalPurchase(ctx context.Context, userID, sessionID s
 	return ej.Journal(ctx, "purchases", event)
 }
 
-// JournalTelemetry journals telemetry data
+// JournalTelemetry journals rtapi data
 func (ej *EventJournal) JournalTelemetry(ctx context.Context, userID, sessionID, lobbyID string, telemetryData map[string]interface{}) error {
 	event := &JournalEvent{
-		Type:      "telemetry",
+		Type:      "rtapi",
 		Timestamp: time.Now(),
 		UserID:    userID,
 		SessionID: sessionID,
 		Data: map[string]interface{}{
 			"lobby_id":  lobbyID,
-			"telemetry": telemetryData,
+			"rtapi": telemetryData,
 		},
 	}
 
-	return ej.Journal(ctx, "telemetry", event)
+	return ej.Journal(ctx, "rtapi", event)
 }
 
 // EventConsumer handles consuming events from Redis Streams

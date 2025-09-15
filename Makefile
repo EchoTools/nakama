@@ -40,3 +40,4 @@ release: build
 			--build-arg VERSION=$(GIT_DESCRIBE) \
 			-t echotools/nakama:latest . -f build/Dockerfile.local; \
 	fi
+

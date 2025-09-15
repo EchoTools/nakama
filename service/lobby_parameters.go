@@ -486,18 +486,18 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 	}
 
 	// Ensure the match is not full
-	playerLimit := 0
+	playerLimit := int32(MatchLobbyMaxSize)
 	switch p.Mode {
 	case evr.ModeArenaPublic:
 		playerLimit = DefaultPublicArenaTeamSize * 2
 	case evr.ModeCombatPublic:
 		playerLimit = DefaultPublicCombatTeamSize * 2
 	case evr.ModeSocialPublic:
-		playerLimit = DefaultLobbySize(evr.ModeSocialPublic)
+		playerLimit = ValidGameSettings.MaxSlots(Mode(p.Mode.String()))
 	}
 
 	if playerLimit > 0 {
-		qparts = append(qparts, fmt.Sprintf("+label.player_count:<=%d", playerLimit-p.GetPartySize()))
+		qparts = append(qparts, fmt.Sprintf("+label.player_count:<=%d", int(playerLimit)-p.GetPartySize()))
 	}
 
 	if includeMaxRTT {
