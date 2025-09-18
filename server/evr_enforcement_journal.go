@@ -187,6 +187,8 @@ func (s *GuildEnforcementJournal) AddRecord(groupID, enforcerUserID, enforcerDis
 	now := time.Now().UTC()
 	record := GuildEnforcementRecord{
 		ID:                      uuid.Must(uuid.NewV4()).String(),
+		UserID:                  s.UserID,
+		GroupID:                 groupID,
 		EnforcerUserID:          enforcerUserID,
 		EnforcerDiscordID:       enforcerDiscordID,
 		CreatedAt:               now,
