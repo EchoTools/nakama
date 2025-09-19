@@ -2,28 +2,27 @@ package socialauth
 
 import (
 	"context"
-	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/internal/intents"
 	"golang.org/x/oauth2"
 	"google.golang.org/grpc/codes"
 )
 
-func (s *SocialAuthHandler) InitializeDiscordOAuth2(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
-	if err := initializer.RegisterHttp("/v2/auth/discord/login", s.discordHttpLoginHandler, http.MethodGet); err != nil {
-		return err
-	}
-
-	if err := initializer.RegisterHttp("/v2/auth/discord/callback", s.discordHttpCallbackHandler, http.MethodGet); err != nil {
-		return err
-	}
-	return nil
-}
+const (
+	EnvDiscordClientID      = "DISCORD_CLIENT_ID"
+	EnvDiscordClientSecret  = "DISCORD_CLIENT_SECRET"
+	EnvDiscordRedirectURI   = "DISCORD_REDIRECT_URI"
+	EnvSteamCallbackURL     = "STEAM_CALLBACK_URL"
+	EnvSessionEncryptionKey = "SESSION_ENCRYPTION_KEY"
+)
 
 func (s *SocialAuthHandler) discordHttpLoginHandler(w http.ResponseWriter, r *http.Request) {
 	// Redirect user to Steam OpenID login page
@@ -33,7 +32,6 @@ func (s *SocialAuthHandler) discordHttpLoginHandler(w http.ResponseWriter, r *ht
 
 func (s *SocialAuthHandler) discordHttpCallbackHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	logger := s.logger
 
 	queryParams := r.URL.Query()
 	code, err := s.extractAndValidateOAuth2Callback(queryParams)
@@ -41,35 +39,34 @@ func (s *SocialAuthHandler) discordHttpCallbackHandler(w http.ResponseWriter, r 
 		http.Error(w, "Invalid OAuth2 callback: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	// Link or create a Nakama user account based on the Discord user ID
-	userID, username, _, err := s.AuthenticateDiscord(ctx, logger, code)
+
+	userID, username, _, err := s.nk.AuthenticateCustom(ctx, code, "", true)
 	if err != nil {
 		http.Error(w, "Discord authentication failed: "+err.Error(), http.StatusInternalServerError)
-		return
 	}
-	sessionVars := intents.SessionVars{}
 
-	// Check if they have the required intents
-	sessionVars.IsGlobalOperator, err = CheckGroupMembershipByName(ctx, s.db, userID, "Global Operators", "system")
+	sessionVars, err := setUpSessionVars(ctx, s.db, userID)
 	if err != nil {
-		http.Error(w, "Failed to check group membership: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to set up session variables: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	sessionVars.IsGlobalOperator, err = CheckGroupMembershipByName(ctx, s.db, userID, "Global Developers", "system")
+	expiration := time.Now().Add(jwtTokenLifetimeDuration)
+	token, _, err := s.nk.AuthenticateTokenGenerate(userID, username, expiration.Unix(), sessionVars)
 	if err != nil {
-		http.Error(w, "Failed to check group membership: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to generate session token: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	vars := sessionVars.MarshalVars()
-	expiration := time.Now().Add(24 * time.Hour * 7) // 7 days
-	token, _, err := s.nk.AuthenticateTokenGenerate(userID, username, expiration.Unix(), vars)
-
 	// Set the authenticated user cookie
-	setJWTAuthCookie(w, token)
-	// Return the Nakama user ID
+	setRefreshTokenCookie(w, token)
 
+	// If there was a redirect path specified, redirect there
+	if redirectPath := queryParams.Get("redirect"); redirectPath != "" {
+		http.Redirect(w, r, redirectPath, http.StatusFound)
+		return
+	}
+
+	// Return the Nakama user ID
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(userID))
 
@@ -91,6 +88,22 @@ func (s *SocialAuthHandler) generateDiscordURL(redirectURI string) string {
 	return u.String()
 }
 
+func (s *SocialAuthHandler) NewOAuth2State(expiry time.Duration) string {
+	state := uuid.Must(uuid.NewV4()).String()
+	s.stateStore.Store(state, true)
+	go func() {
+		// Automatically delete the state after 5 minutes to prevent memory bloat
+		<-time.After(expiry)
+		s.stateStore.Delete(state)
+	}()
+	return state
+}
+
+func (s *SocialAuthHandler) ValidateState(state string) bool {
+	_, found := s.stateStore.LoadAndDelete(state)
+	return found
+}
+
 func (s *SocialAuthHandler) extractAndValidateOAuth2Callback(urlValues url.Values) (code string, err error) {
 	// Extract query parameters from the context
 	// Extract the authorization code from the query parameters
@@ -108,7 +121,8 @@ func (s *SocialAuthHandler) extractAndValidateOAuth2Callback(urlValues url.Value
 	return
 }
 
-func (s *SocialAuthHandler) AuthenticateDiscord(ctx context.Context, logger runtime.Logger, code string) (string, string, bool, error) {
+func AuthenticateDiscord(ctx context.Context, logger runtime.Logger, redirectURL, clientID, clientSecret, code string) (string, string, error) {
+
 	// Exchange the code for an access token
 	conf := &oauth2.Config{
 		Endpoint: oauth2.Endpoint{
@@ -117,34 +131,159 @@ func (s *SocialAuthHandler) AuthenticateDiscord(ctx context.Context, logger runt
 			AuthStyle: oauth2.AuthStyleInParams,
 		},
 		Scopes:       []string{"identify"},
-		RedirectURL:  s.discordRedirectURI,
-		ClientID:     s.discordClientID,
-		ClientSecret: s.discordClientSecret,
+		RedirectURL:  redirectURL,
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
 	}
 
-	token, err := conf.Exchange(context.Background(), code)
+	token, err := conf.Exchange(ctx, code)
 	if err != nil {
-		return "", "", false, runtime.NewError("code exchange failed: "+err.Error(), int(codes.Internal))
+		return "", "", fmt.Errorf("code exchange failed: %w", err)
 	}
 
 	// Create a Discord client
 	discord, err := discordgo.New("Bearer " + token.AccessToken)
 	if err != nil {
-		logger.WithField("err", err).Error("Unable to create Discord client")
-		return "", "", false, runtime.NewError("Unable to create Discord client", int(codes.Internal))
+		return "", "", fmt.Errorf("unable to create Discord client: %w", err)
 	}
 
 	// Get the Discord user
 	user, err := discord.User("@me")
 	if err != nil {
-		logger.WithField("err", err).Error("Unable to get Discord user")
-		return "", "", false, runtime.NewError("Unable to get Discord user", int(codes.Internal))
+		return "", "", fmt.Errorf("unable to get Discord user: %w", err)
+	}
+	// Return the Discord user ID and username
+	return user.ID, user.Username, nil
+}
+
+// ExchangeDiscordCodeForToken exchanges the authorization code for an access token and returns the oauth2 token.
+func ExchangeDiscordCodeForToken(ctx context.Context, logger runtime.Logger, redirectURL, clientID, clientSecret, code string) (*oauth2.Token, error) {
+	conf := &oauth2.Config{
+		Endpoint: oauth2.Endpoint{
+			AuthURL:   "https://discord.com/api/oauth2/authorize",
+			TokenURL:  "https://discord.com/api/oauth2/token",
+			AuthStyle: oauth2.AuthStyleInParams,
+		},
+		Scopes:       []string{"identify"},
+		RedirectURL:  redirectURL,
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+	}
+	token, err := conf.Exchange(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("code exchange failed: %w", err)
+	}
+	return token, nil
+}
+
+// GetDiscordUserInfo retrieves the Discord user information using the provided access token.
+func GetDiscordUserInfo(ctx context.Context, accessToken string) (*discordgo.User, error) {
+	discord, err := discordgo.New("Bearer " + accessToken)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create Discord client: %w", err)
+	}
+	user, err := discord.User("@me", discordgo.WithContext(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("unable to get Discord user: %w", err)
+	}
+	return user, nil
+}
+
+// CheckDiscordSession checks token validity and refreshes if needed, logs out if revoked.
+func CheckDiscordSession(ctx context.Context, nk runtime.NakamaModule, userID string, conf *oauth2.Config) (*oauth2.Token, error) {
+	query := fmt.Sprintf(`+value.user_id:%s +value.expiry<="%s"`, userID, time.Now().Format("2006-01-02T15:04:05Z"))
+
+	result, _, err := nk.StorageIndexList(ctx, uuid.Nil.String(), StorageIndexDiscordToken, query, 1, nil, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query Discord tokens: %w", err)
 	}
 
-	// Authenticate/create an account.
-	userID, username, created, err := s.nk.AuthenticateCustom(ctx, user.ID, user.Username, true)
-	if err != nil {
-		return "", "", false, runtime.NewError("Unable to create user", int(codes.Internal))
+	if len(result.Objects) == 0 {
+		// No tokens found, user must authenticate
+		return nil, errors.New("no Discord tokens found, user must authenticate")
 	}
-	return userID, username, created, nil
+
+	token := &oauth2.Token{}
+	err = json.Unmarshal([]byte(result.Objects[0].Value), token)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal Discord token: %w", err)
+	}
+
+	// If token is expired, attempt to refresh
+	if !token.Valid() {
+		tokenSource := conf.TokenSource(ctx, token)
+		newToken, err := tokenSource.Token()
+		if err != nil {
+			// Token refresh failed, treat as revoked and log out user
+			return nil, errors.New("discord token expired or revoked, user must reauthenticate")
+		}
+		// Store new token
+		if err := StoreDiscordTokens(ctx, nk, userID, newToken); err != nil {
+			return nil, fmt.Errorf("failed to update Discord token: %w", err)
+		}
+		token = newToken
+	}
+	// Optionally, check token with isDiscordTokenValid
+	if !isDiscordTokenValid(ctx, token.AccessToken) {
+		return nil, errors.New("discord token invalid, user must reauthenticate")
+	}
+	return token, nil
+}
+
+// StoreDiscordTokens saves the Discord tokens securely in the database.
+func StoreDiscordTokens(ctx context.Context, nk runtime.NakamaModule, userID string, token *oauth2.Token) error {
+	// Example: encrypt before storing in production!
+
+	// Serialize for storage (replace with your DB logic)
+	b, err := json.Marshal(token)
+	if err != nil {
+		return err
+	}
+	// Store in Nakama storage
+	if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
+		{
+			Collection:      StorageCollectionSocialAuth,
+			Key:             StorageKeyDiscordToken,
+			UserID:          userID,
+			Value:           string(b),
+			PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
+			PermissionWrite: runtime.STORAGE_PERMISSION_NO_WRITE,
+		}}); err != nil {
+		return fmt.Errorf("failed to write Discord tokens to storage: %w", err)
+	}
+	return err
+}
+
+// LoadDiscordTokens loads Discord tokens for a user from the database.
+func LoadDiscordTokens(ctx context.Context, nk runtime.NakamaModule, userID string) (*oauth2.Token, error) {
+	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
+		{
+			Collection: StorageCollectionSocialAuth,
+			Key:        StorageKeyDiscordToken,
+			UserID:     userID,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(objs) == 0 {
+		return nil, errors.New("no Discord tokens found for user")
+	}
+	data := oauth2.Token{}
+	err = json.Unmarshal([]byte(objs[0].Value), &data)
+	if err != nil {
+		return nil, err
+	}
+	return &data, nil
+}
+
+// isDiscordTokenValid checks if the provided Discord access token is still valid.
+func isDiscordTokenValid(ctx context.Context, accessToken string) bool {
+	req, _ := http.NewRequestWithContext(ctx, "GET", "https://discord.com/api/users/@me", nil)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != 200 {
+		return false
+	}
+	return true
 }

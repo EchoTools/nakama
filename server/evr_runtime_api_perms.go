@@ -32,7 +32,7 @@ func AfterReadStorageObjectsHook(ctx context.Context, logger runtime.Logger, db 
 	}
 	isAuthoritative := false
 
-	if vars != nil && vars.Intents.StorageObjects || vars.Intents.IsGlobalOperator {
+	if vars != nil && (vars.Intents.StorageObjects || vars.Intents.IsGlobalOperator) {
 		isAuthoritative = true
 	}
 
@@ -86,11 +86,14 @@ func AfterReadStorageObjectsHook(ctx context.Context, logger runtime.Logger, db 
 	return nil
 }
 
+// BeforeListMatchesHook is a hook that runs before listing matches.
 func BeforeListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, in *api.ListMatchesRequest) (*api.ListMatchesRequest, error) {
 	if in == nil {
 		return nil, nil
 	}
 
+	// TODO: Probably better to just restrict the matches that are returned.
+	in.Limit = wrapperspb.Int32(min(in.GetLimit().GetValue(), 100)) // Enforce a maximum limit of 100 matches.
 	// Set the default values for the request.
 	in.Label = nil                           // Clear the label to prevent any filtering by label.
 	in.Authoritative = wrapperspb.Bool(true) // Set authoritative to false to allow listing all matches.
@@ -102,7 +105,7 @@ func BeforeListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.D
 	}
 
 	// Append restrictions to the query
-	query := in.Query.GetValue()
+	query := in.GetQuery().GetValue()
 	if !vars.Intents.Matches {
 		// No limits
 	} else if vars.Intents.GuildMatches {
@@ -111,6 +114,8 @@ func BeforeListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.D
 		// Limit to public matches only.
 		query = query + ` +label.mode:public`
 	}
+
+	in.Query = &wrapperspb.StringValue{Value: query}
 	// Otherwise, we return an empty response.
 	return in, nil
 }
@@ -154,7 +159,7 @@ func registerAPIGuards(initializer runtime.Initializer) error {
 		"PartyDataSend",
 		//"Ping",
 		//"Pong",
-		"Rpc",
+		//"Rpc",
 		"StatusFollow",
 		"StatusUnfollow",
 		"StatusUpdate",
@@ -162,7 +167,7 @@ func registerAPIGuards(initializer runtime.Initializer) error {
 
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeAddGroupUsers)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateApple)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateCustom)
+	//RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateCustom)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateDevice)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateEmail)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateFacebook)
@@ -171,23 +176,16 @@ func registerAPIGuards(initializer runtime.Initializer) error {
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateGoogle)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateSteam)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeBanGroupUsers)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeBlockFriends)
+	//RestrictAPIFunctionAccess(initializer.RegisterBeforeBlockFriends)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeCreateGroup)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteFriends)
+	//RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteFriends)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteGroup)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteLeaderboardRecord)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteNotifications)
+	//RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteNotifications)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteStorageObjects)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteTournamentRecord)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeDemoteGroupUsers)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteFriends)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteGroup)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteLeaderboardRecord)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteNotifications)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteStorageObjects)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteTournamentRecord)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeDemoteGroupUsers)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeGetAccount)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeGetSubscription)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeGetUsers)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeImportFacebookFriends)
@@ -207,15 +205,15 @@ func registerAPIGuards(initializer runtime.Initializer) error {
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeLinkSteam)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListChannelMessages)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListFriends)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListGroupUsers)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListGroups)
+	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListGroupUsers)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListLeaderboardRecords)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListLeaderboardRecordsAroundOwner)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListMatches)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListNotifications)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListStorageObjects)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeListSubscriptions)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListTournamentRecords)
+	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListSubscriptions)
+	RestrictAPIFunctionAccess(initializer.RegisterBeforeListTournamentRecords)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListTournamentRecordsAroundOwner)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListTournaments)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListUserGroups)

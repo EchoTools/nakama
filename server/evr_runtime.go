@@ -13,7 +13,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/socialauth"
+	apiAuth "github.com/heroiclabs/nakama/v3/server/socialauth"
 	"github.com/jackc/pgtype"
 	"go.uber.org/zap"
 
@@ -62,7 +62,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register AfterReadStorageObjects hook: %w", err)
 	}
 
-	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_ENV, vars)
+	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_ENV, vars) // ignore lint
 	// Initialize the discord bot if the token is set
 	if appBotToken, ok := vars["DISCORD_BOT_TOKEN"]; !ok || appBotToken == "" {
 		logger.Warn("DISCORD_BOT_TOKEN is not set, Discord bot will not be used")
@@ -106,6 +106,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"server/score":                  ServerScoreRPC,
 		"server/scores":                 ServerScoresRPC,
 		"forcecheck":                    CheckForceUserRPC,
+		"guildgroup":                    GuildGroupGetRPC,
 		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
 	}
 	for name, rpc := range rpcs {
@@ -193,8 +194,18 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		metricsUpdateLoop(ctx, logger, nk.(*RuntimeGoNakamaModule), db)
 	}()
 
-	// Register oauth http handlers
-	socialauth.InitializeSocialAuth(ctx, logger, db, nk, initializer)
+	if err := apiAuth.InitModule(ctx, logger, db, nk, initializer); err != nil {
+		return fmt.Errorf("unable to initialize social auth module: %w", err)
+	}
+
+	// If running in a dev environment, start a simple file server for static content
+	if vars["ENABLE_STATIC_HTTP_SERVER"] == "true" {
+		fs := http.FileServer(http.Dir("./data/static"))
+		if err := initializer.RegisterHttp("/static", http.StripPrefix("/static", fs).ServeHTTP, http.MethodGet); err != nil {
+			return fmt.Errorf("unable to register /static/ file server: %w", err)
+		}
+		logger.Info("Registered /static/ file server for development environment.")
+	}
 
 	logger.Info("Initialized runtime module.")
 	return nil

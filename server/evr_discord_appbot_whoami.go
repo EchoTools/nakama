@@ -399,7 +399,6 @@ func (w *WhoAmI) createGuildMembershipsEmbedFieldValue() string {
 	}
 
 	return strings.Join(lines, "\n")
-
 }
 
 func (w *WhoAmI) createSuspensionsEmbed() *discordgo.MessageEmbed {
@@ -831,13 +830,14 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 
 	// Send the response
-	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Flags:  discordgo.MessageFlagsEphemeral,
 			Embeds: embeds,
 		},
-	}); err != nil {
+	})
+	if true && err != nil {
 
 		if opts.SendFileOnError {
 			// Try and send a message with a file attachment of the embeds if the interaction response fails
@@ -847,11 +847,25 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 				return fmt.Errorf("failed to marshal embeds: %w", err)
 			}
 
+			url := d.config.GetRuntime().Environment["STATIC_HTTP_BASE_URL"] + "/player-lookup/" + targetID
+
 			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
 					Content: "The profile is too large to display in an embed. Here is the raw data.",
 					Flags:   discordgo.MessageFlagsEphemeral,
+					Components: []discordgo.MessageComponent{
+						discordgo.ActionsRow{
+							Components: []discordgo.MessageComponent{
+								&discordgo.Button{
+									Label:    "View on Website",
+									Style:    discordgo.LinkButton,
+									URL:      url,
+									Disabled: false,
+								},
+							},
+						},
+					},
 					Files: []*discordgo.File{
 						{
 							Name:        targetID + "_lookup.json",
