@@ -1,27 +1,12 @@
 package socialauth
 
 import (
-	"context"
-	"database/sql"
 	"fmt"
 	"net/http"
 	"strings"
 
-	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/yohcop/openid-go"
 )
-
-func (s *SocialAuthHandler) InitializeSteamOpenID(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
-	if err := initializer.RegisterHttp("/v2/auth/steam/login", s.steamLoginHttpHandler, http.MethodGet); err != nil {
-		return err
-	}
-
-	if err := initializer.RegisterHttp("/v2/auth/steam/callback", s.authSteamHttpHandler, http.MethodGet); err != nil {
-		return err
-	}
-
-	return nil
-}
 
 func (s *SocialAuthHandler) steamLoginHttpHandler(w http.ResponseWriter, r *http.Request) {
 	const steamOpenIDProvider = "https://steamcommunity.com/openid"

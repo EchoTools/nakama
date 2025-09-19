@@ -10,11 +10,11 @@ import (
 )
 
 type Intent struct {
-	GuildMatches      bool `json:"guild_matches"` // Access to guild matches.
-	Matches           bool `json:"matches"`       // Access to all matches.
-	StorageObjects    bool `json:"storage"`       // Access to read/write all storage objects.
-	IsGlobalOperator  bool `json:"global_operator"`
-	IsGlobalDeveloper bool `json:"global_developer"`
+	GuildMatches      bool `json:"guild_matches"`    // Access to all private guild matches.
+	Matches           bool `json:"matches"`          // Access to all matches.
+	StorageObjects    bool `json:"storage"`          // Access to read/write all storage objects.
+	IsGlobalOperator  bool `json:"global_operator"`  // Is a global operator.
+	IsGlobalDeveloper bool `json:"global_developer"` // Is a global developer.
 }
 
 func (i Intent) MarshalText() ([]byte, error) {
@@ -103,29 +103,27 @@ func IntentFromString(s string) (Intent, error) {
 }
 
 type SessionVars struct {
-	Intents           Intent
-	IsGlobalOperator  bool   // Whether the user is a member of the "Global Operators" group.
-	IsGlobalDeveloper bool   // Whether the user is a member of the "Global Developers" group.
-	GuildID           string // Optional guild ID for the session.
+	Intents Intent
+	GuildID string // Optional guild ID for the session.
 }
 
 func (s *SessionVars) MarshalVars() map[string]string {
 
-	intentMap := map[string]string{
+	varMap := map[string]string{
 		"int": s.Intents.String(),
 		"gid": s.GuildID,
 	}
 
-	for k, v := range intentMap {
+	for k, v := range varMap {
 		if v == "" {
-			delete(intentMap, k) // Remove empty values to keep the map clean.
+			delete(varMap, k) // Remove empty values to keep the map clean.
 		}
 	}
-	if len(intentMap) == 0 {
+	if len(varMap) == 0 {
 		return map[string]string{}
 	}
 
-	return intentMap
+	return varMap
 }
 
 func (s *SessionVars) UnmarshalVars(vars map[string]string) error {
