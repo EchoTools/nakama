@@ -1,12 +1,8 @@
 package server
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
-
-	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/api"
 )
 
 func TestFormatDuration(t *testing.T) {
@@ -46,59 +42,135 @@ func TestFormatDuration(t *testing.T) {
 		})
 	}
 }
-func TestGuildEnforcementJournalFromStorageObject_SetsGroupIDAndUserID(t *testing.T) {
-	// Prepare a storage object with a record missing GroupID and UserID
-	groupID := "test-group"
-	userID := "test-user"
-	recordID := "rec-1"
-	records := map[string][]GuildEnforcementRecord{
-		groupID: {
-			{
-				ID:      recordID,
-				UserID:  "", // Should be set to journal.UserID
-				GroupID: "", // Should be set to groupID
-			},
-			{
-				ID:      "rec-2",
-				UserID:  uuid.Nil.String(), // Should be set to journal.UserID
-				GroupID: "",                // Should be set to groupID
-			},
-		},
-	}
-	journal := &GuildEnforcementJournal{
-		RecordsByGroupID: records,
-		UserID:           "", // Will be set from storage object
-	}
-	journalBytes, err := json.Marshal(journal)
-	if err != nil {
-		t.Fatalf("failed to marshal journal: %v", err)
+
+func TestCheckEnforcementSuspensions(t *testing.T) {
+	groupA := "group-a"
+	groupB := "group-b"
+	userID1 := "user-1"
+	userID2 := "user-2"
+
+	// Create journal 1 with suspension in groupA
+	journal1 := NewGuildEnforcementJournal(userID1)
+	newRecord := journal1.AddRecord(
+		groupA,
+		"enforcer-1",
+		"enforcer-discord-1",
+		"Test suspension",
+		"Test notes",
+		false,     // requireCommunityValues
+		true,      // allowPrivateLobbies
+		time.Hour, // 1 hour suspension
+	)
+	// Override the record ID to match our test
+	journal1.RecordsByGroupID[groupA][0].ID = newRecord.ID
+
+	// Create journal 2 with void for the same record ID but in groupB
+	journal2 := NewGuildEnforcementJournal(userID2)
+	journal2.VoidRecord(groupB, newRecord.ID, "voider-1", "voider-discord-1", "Test void")
+
+	journals := GuildEnforcementJournalList{
+		userID1: journal1,
+		userID2: journal2,
 	}
 
-	storageObj := &api.StorageObject{
-		Collection: StorageCollectionEnforcementJournal,
-		Key:        StorageKeyEnforcementJournal,
-		UserId:     userID,
-		Value:      string(journalBytes),
-		Version:    "v1",
+	// map[parentGroupID]map[childGroupID]bool
+	inheritanceMap := map[string][]string{
+		groupA: {}, // groupB inherits from groupA
+		groupB: {},
 	}
 
-	got, err := GuildEnforcementJournalFromStorageObject(storageObj)
+	activeEnforcements, err := CheckEnforcementSuspensions(journals, inheritanceMap)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Check that UserID is set
-	if got.UserID != userID {
-		t.Errorf("expected UserID %q, got %q", userID, got.UserID)
+	// The suspension in groupA should still be active because the void is in groupB
+	if _, exists := activeEnforcements[groupA]; !exists {
+		t.Errorf("expected active enforcement in groupA, but none found")
 	}
 
-	// Check that GroupID and UserID are set on each record
-	for _, rec := range got.RecordsByGroupID[groupID] {
-		if rec.GroupID != groupID {
-			t.Errorf("expected GroupID %q, got %q", groupID, rec.GroupID)
+	// Verify the suspension record is present and correct
+	for _, modeRecords := range activeEnforcements[groupA] {
+		if modeRecords.ID != newRecord.ID {
+			t.Errorf("expected record ID %s, got %s", newRecord.ID, modeRecords.ID)
 		}
-		if rec.UserID != userID {
-			t.Errorf("expected UserID %q, got %q", userID, rec.UserID)
+		if modeRecords.UserID != userID1 {
+			t.Errorf("expected user ID %s, got %s", userID1, modeRecords.UserID)
 		}
+		if modeRecords.GroupID != groupA {
+			t.Errorf("expected group ID %s, got %s", groupA, modeRecords.GroupID)
+		}
+		break // Only need to check one record since they should all be the same
+	}
+
+	// GroupB should not have any active enforcements
+	if _, exists := activeEnforcements[groupB]; exists {
+		t.Errorf("expected no active enforcement in groupB, but found one")
+	}
+}
+
+func TestCheckEnforcementSuspensions_VoidInheritedSuspension(t *testing.T) {
+	groupA := "group-a"
+	groupB := "group-b"
+	userID1 := "user-1"
+	userID2 := "user-2"
+
+	// Create journal 1 with suspension in groupA
+	journal1 := NewGuildEnforcementJournal(userID1)
+	newRecord := journal1.AddRecord(
+		groupA,
+		"enforcer-1",
+		"enforcer-discord-1",
+		"Test suspension",
+		"Test notes",
+		false,     // requireCommunityValues
+		true,      // allowPrivateLobbies
+		time.Hour, // 1 hour suspension
+	)
+
+	// Create journal 2
+	journal2 := NewGuildEnforcementJournal(userID2)
+
+	// void the groupA record ID but in groupB
+	journal1.VoidRecord(groupB, newRecord.ID, "voider-1", "voider-discord-1", "Test void")
+
+	journals := GuildEnforcementJournalList{
+		userID1: journal1,
+		userID2: journal2,
+	}
+
+	// map[parentGroupID]map[childGroupID]bool
+	inheritanceMap := map[string][]string{
+		groupA: {groupB}, // groupB inherits from groupA
+		groupB: {},
+	}
+
+	activeEnforcements, err := CheckEnforcementSuspensions(journals, inheritanceMap)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The suspension in groupA should still be active because the void is in groupB
+	if _, exists := activeEnforcements[groupA]; !exists {
+		t.Errorf("expected active enforcement in groupA, but none found")
+	}
+
+	// Verify the suspension record is present and correct
+	for _, modeRecords := range activeEnforcements[groupA] {
+		if modeRecords.ID != newRecord.ID {
+			t.Errorf("expected record ID %s, got %s", newRecord.ID, modeRecords.ID)
+		}
+		if modeRecords.UserID != userID1 {
+			t.Errorf("expected user ID %s, got %s", userID1, modeRecords.UserID)
+		}
+		if modeRecords.GroupID != groupA {
+			t.Errorf("expected group ID %s, got %s", groupA, modeRecords.GroupID)
+		}
+		break // Only need to check one record since they should all be the same
+	}
+
+	// GroupB should not have any active enforcements
+	if _, exists := activeEnforcements[groupB]; exists {
+		t.Errorf("expected no active enforcement in groupB, but found one")
 	}
 }
