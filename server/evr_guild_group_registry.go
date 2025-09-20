@@ -123,7 +123,7 @@ func (r *GuildGroupRegistry) rebuildGuildGroups() {
 }
 
 // map[parentGroupID]map[childGroupID]bool
-func (r *GuildGroupRegistry) InheretanceByParentGroupID() map[string][]string {
+func (r *GuildGroupRegistry) InheritanceByParentGroupID() map[string][]string {
 	return *r.inheritanceMap.Load()
 }
 

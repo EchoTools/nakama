@@ -3,165 +3,14 @@ package server
 import (
 	"context"
 	"database/sql"
-	"reflect"
-	"strconv"
-	"strings"
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/internal/intents"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
-
-type Intent struct {
-	GuildMatches   bool `json:"guild_matches"` // Access to guild matches.
-	Matches        bool `json:"matches"`       // Access to all matches.
-	StorageObjects bool `json:"storage"`       // Access to read/write all storage objects.
-}
-
-func (i Intent) MarshalText() ([]byte, error) {
-	// Marshal as a comma separated list.
-	var parts []string
-	v := reflect.ValueOf(i)
-	t := reflect.TypeOf(i)
-	for idx := 0; idx < v.NumField(); idx++ {
-		if v.Field(idx).Bool() {
-			tag := t.Field(idx).Tag.Get("json")
-			if tag != "" {
-				parts = append(parts, tag)
-			}
-		}
-	}
-	return []byte(strconv.QuoteToASCII(strings.Join(parts, ","))), nil
-}
-
-func (i *Intent) UnmarshalText(data []byte) error {
-	// Unmarshal from a comma separated list using reflection.
-	str := strings.Trim(string(data), "\"")
-	if str == "" {
-		return nil // No intents set, nothing to do.
-	}
-
-	parts := strings.Split(str, ",")
-	t := reflect.TypeOf(*i)
-	v := reflect.ValueOf(i).Elem()
-
-	for _, part := range parts {
-		for idx := 0; idx < t.NumField(); idx++ {
-			tag := t.Field(idx).Tag.Get("json")
-			if tag == part {
-				v.Field(idx).SetBool(true)
-				break
-			}
-		}
-	}
-	return nil
-}
-
-func (i Intent) PackAsBits() int {
-	var bits int
-	v := reflect.ValueOf(i)
-	for idx := 0; idx < v.NumField(); idx++ {
-		if v.Field(idx).Bool() {
-			bits |= 1 << idx
-		}
-	}
-	return bits
-}
-
-func (i Intent) UnpackFromBits(bits int) Intent {
-	var intent Intent
-	v := reflect.ValueOf(&intent).Elem()
-	for idx := 0; idx < v.NumField(); idx++ {
-		if bits&(1<<idx) != 0 {
-			v.Field(idx).SetBool(true)
-		}
-	}
-	return intent
-}
-
-func (i Intent) String() string {
-	// Convert the intent to a string representation by packing it as bits.
-	bits := i.PackAsBits()
-	if bits == 0 {
-		return "" // Return an empty string if no intents are set.
-	}
-	// Convert the bits to a string representation.
-	return strconv.Itoa(bits)
-}
-
-func IntentFromString(s string) (Intent, error) {
-	if s == "" {
-		return Intent{}, nil // Return an empty intent if the string is empty.
-	}
-	bits, err := strconv.Atoi(s)
-	if err != nil {
-		return Intent{}, err // Return an error if the string cannot be converted to an integer.
-	}
-
-	intent := Intent{}
-	intent = intent.UnpackFromBits(bits)
-	return intent, nil
-}
-
-type SessionVars struct {
-	Intents Intent
-	GuildID string // Optional guild ID for the session.
-}
-
-func (s *SessionVars) MarshalVars() map[string]string {
-
-	intentMap := map[string]string{
-		"int": s.Intents.String(),
-		"gid": s.GuildID,
-	}
-
-	for k, v := range intentMap {
-		if v == "" {
-			delete(intentMap, k) // Remove empty values to keep the map clean.
-		}
-	}
-	if len(intentMap) == 0 {
-		return map[string]string{}
-	}
-
-	return intentMap
-}
-
-func (s *SessionVars) UnmarshalVars(vars map[string]string) error {
-	intentStr, exists := vars["int"]
-	if !exists {
-		return nil // No intents set, nothing to do.
-	}
-	intent, err := IntentFromString(intentStr)
-	if err != nil {
-		return err
-	}
-	s.Intents = intent
-
-	guildID, exists := vars["gid"]
-	if exists {
-		s.GuildID = guildID // Set the guild ID if it exists.
-	} else {
-		s.GuildID = "" // Default to an empty string if no guild ID is set
-	}
-	return nil
-}
-
-func SessionVarsFromRuntimeContext(ctx context.Context) (*SessionVars, error) {
-	vars, ok := ctx.Value(runtime.RUNTIME_CTX_VARS).(map[string]string)
-	if !ok {
-		return nil, nil // No session variables found.
-	}
-
-	sessionVars := &SessionVars{}
-	if err := sessionVars.UnmarshalVars(vars); err != nil {
-		return nil, err
-	}
-
-	return sessionVars, nil
-}
 
 // AfterReadStorageObjectsHook is a hook that runs after reading storage objects.
 // It checks if the intent includes storage objects access and retries the request as the system user if any objects were not returned.
@@ -170,7 +19,7 @@ func AfterReadStorageObjectsHook(ctx context.Context, logger runtime.Logger, db 
 		return nil
 	}
 
-	vars, err := SessionVarsFromRuntimeContext(ctx)
+	vars, err := intents.SessionVarsFromRuntimeContext(ctx)
 	if err != nil {
 		logger.Error("Failed to parse session variables from context", zap.Error(err))
 		return err
@@ -181,8 +30,13 @@ func AfterReadStorageObjectsHook(ctx context.Context, logger runtime.Logger, db 
 		Key        string
 		UserID     string
 	}
+	isAuthoritative := false
 
-	if vars != nil && vars.Intents.StorageObjects {
+	if vars != nil && (vars.Intents.StorageObjects || vars.Intents.IsGlobalOperator) {
+		isAuthoritative = true
+	}
+
+	if isAuthoritative {
 		// If the returned value was empty, retry the request as the system user.
 		returnedMap := make(map[objCompact]struct{})
 		for _, obj := range out.Objects {
@@ -232,23 +86,30 @@ func AfterReadStorageObjectsHook(ctx context.Context, logger runtime.Logger, db 
 	return nil
 }
 
+// BeforeListMatchesHook is a hook that runs before listing matches.
 func BeforeListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, in *api.ListMatchesRequest) (*api.ListMatchesRequest, error) {
 	if in == nil {
 		return nil, nil
 	}
 
+	// TODO: Probably better to just restrict the matches that are returned.
+	in.Limit = wrapperspb.Int32(min(in.GetLimit().GetValue(), 100)) // Enforce a maximum limit of 100 matches.
 	// Set the default values for the request.
 	in.Label = nil                           // Clear the label to prevent any filtering by label.
 	in.Authoritative = wrapperspb.Bool(true) // Set authoritative to false to allow listing all matches.
 
-	vars, err := SessionVarsFromRuntimeContext(ctx)
+	vars, err := intents.SessionVarsFromRuntimeContext(ctx)
 	if err != nil {
 		logger.Error("Failed to parse session variables from context", zap.Error(err))
 		return nil, err
 	}
 
 	// Append restrictions to the query
-	query := in.Query.GetValue()
+	var query string
+	if in.GetQuery() != nil {
+		query = in.GetQuery().GetValue()
+	}
+
 	if !vars.Intents.Matches {
 		// No limits
 	} else if vars.Intents.GuildMatches {
@@ -257,6 +118,8 @@ func BeforeListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.D
 		// Limit to public matches only.
 		query = query + ` +label.mode:public`
 	}
+
+	in.Query = &wrapperspb.StringValue{Value: query}
 	// Otherwise, we return an empty response.
 	return in, nil
 }
@@ -300,7 +163,7 @@ func registerAPIGuards(initializer runtime.Initializer) error {
 		"PartyDataSend",
 		//"Ping",
 		//"Pong",
-		"Rpc",
+		//"Rpc",
 		"StatusFollow",
 		"StatusUnfollow",
 		"StatusUpdate",
@@ -308,7 +171,7 @@ func registerAPIGuards(initializer runtime.Initializer) error {
 
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeAddGroupUsers)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateApple)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateCustom)
+	//RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateCustom)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateDevice)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateEmail)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateFacebook)
@@ -317,23 +180,16 @@ func registerAPIGuards(initializer runtime.Initializer) error {
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateGoogle)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateSteam)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeBanGroupUsers)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeBlockFriends)
+	//RestrictAPIFunctionAccess(initializer.RegisterBeforeBlockFriends)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeCreateGroup)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteFriends)
+	//RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteFriends)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteGroup)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteLeaderboardRecord)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteNotifications)
+	//RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteNotifications)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteStorageObjects)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteTournamentRecord)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeDemoteGroupUsers)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteFriends)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteGroup)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteLeaderboardRecord)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteNotifications)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteStorageObjects)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteTournamentRecord)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeDemoteGroupUsers)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeGetAccount)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeGetSubscription)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeGetUsers)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeImportFacebookFriends)
@@ -353,20 +209,20 @@ func registerAPIGuards(initializer runtime.Initializer) error {
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeLinkSteam)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListChannelMessages)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListFriends)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListGroupUsers)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListGroups)
+	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListGroupUsers)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListLeaderboardRecords)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListLeaderboardRecordsAroundOwner)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListMatches)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListNotifications)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListStorageObjects)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeListSubscriptions)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListTournamentRecords)
+	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListSubscriptions)
+	RestrictAPIFunctionAccess(initializer.RegisterBeforeListTournamentRecords)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListTournamentRecordsAroundOwner)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListTournaments)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListUserGroups)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforePromoteGroupUsers)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeReadStorageObjects)
+	//RestrictAPIFunctionAccess(initializer.RegisterBeforeReadStorageObjects)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeSessionLogout)
 	//RestrictAPIFunctionAccess(initializer.RegisterBeforeSessionRefresh)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeUnlinkApple)

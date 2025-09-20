@@ -399,7 +399,6 @@ func (w *WhoAmI) createGuildMembershipsEmbedFieldValue() string {
 	}
 
 	return strings.Join(lines, "\n")
-
 }
 
 func (w *WhoAmI) createSuspensionsEmbed() *discordgo.MessageEmbed {
@@ -686,7 +685,12 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 
 	firstIDs, _ := loginHistory.AlternateIDs()
-	activeSuspensions, err := CheckEnforcementSuspensions(ctx, nk, d.guildGroupRegistry, profile.ID(), firstIDs)
+	journals, err := EnforcementJournalsLoad(ctx, d.nk, append(firstIDs, targetID))
+	if err != nil {
+		return fmt.Errorf("failed to load enforcement journals: %w", err)
+	}
+	inheritanceMap := d.guildGroupRegistry.InheritanceByParentGroupID()
+	activeSuspensions, err := CheckEnforcementSuspensions(journals, inheritanceMap)
 	if err != nil {
 		return fmt.Errorf("failed to check enforcement suspensions: %w", err)
 	}
@@ -694,11 +698,6 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	guildGroups, err := GuildUserGroupsList(ctx, nk, d.guildGroupRegistry, targetID)
 	if err != nil {
 		return fmt.Errorf("error getting guild groups: %w", err)
-	}
-
-	journals, err := EnforcementJournalsLoad(ctx, nk, []string{targetID})
-	if err != nil {
-		return fmt.Errorf("failed to load enforcement journals: %w", err)
 	}
 
 	journal := NewGuildEnforcementJournal(profile.ID())
@@ -830,16 +829,19 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		}
 	}
 
+	// Paginate the embeds based on their byte size
+	const FieldMaxLen = 800
+	const MaxFieldsPerEmbed = 25
+	embeds = PaginateEmbeds(embeds, MaxFieldsPerEmbed, FieldMaxLen)
 	// Send the response
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Flags:  discordgo.MessageFlagsEphemeral,
 			Embeds: embeds,
-		},
-	}); err != nil {
-
+		}}); err != nil {
 		if opts.SendFileOnError {
+			// If the error is due to the message being too long, try and send a file with the embeds instead
 			// Try and send a message with a file attachment of the embeds if the interaction response fails
 			logger.Error("failed to respond to interaction", "error", err)
 			embedData, err := json.MarshalIndent(embeds, "", "  ")
@@ -847,11 +849,25 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 				return fmt.Errorf("failed to marshal embeds: %w", err)
 			}
 
+			url := d.config.GetRuntime().Environment["STATIC_HTTP_BASE_URL"] + "/player-lookup/" + targetID
+
 			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
 					Content: "The profile is too large to display in an embed. Here is the raw data.",
 					Flags:   discordgo.MessageFlagsEphemeral,
+					Components: []discordgo.MessageComponent{
+						discordgo.ActionsRow{
+							Components: []discordgo.MessageComponent{
+								&discordgo.Button{
+									Label:    "View on Website",
+									Style:    discordgo.LinkButton,
+									URL:      url,
+									Disabled: false,
+								},
+							},
+						},
+					},
 					Files: []*discordgo.File{
 						{
 							Name:        targetID + "_lookup.json",
@@ -863,11 +879,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			}); err != nil {
 				return fmt.Errorf("failed to send message with embeds: %w", err)
 			}
-
-		} else {
-			return fmt.Errorf("failed to respond to interaction: %w", err)
 		}
 	}
-
 	return nil
 }
