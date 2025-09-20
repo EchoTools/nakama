@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -148,7 +149,6 @@ func (s *GuildEnforcementJournal) ActiveSuspensions() map[string]GuildEnforcemen
 	active := make(map[string]GuildEnforcementRecord, 0)
 	for groupID, records := range s.RecordsByGroupID {
 		for _, r := range records {
-
 			if !r.IsSuspension() || s.IsVoid(groupID, r.ID) || r.IsExpired() {
 				continue
 			}
@@ -187,6 +187,8 @@ func (s *GuildEnforcementJournal) AddRecord(groupID, enforcerUserID, enforcerDis
 	now := time.Now().UTC()
 	record := GuildEnforcementRecord{
 		ID:                      uuid.Must(uuid.NewV4()).String(),
+		UserID:                  s.UserID,
+		GroupID:                 groupID,
 		EnforcerUserID:          enforcerUserID,
 		EnforcerDiscordID:       enforcerDiscordID,
 		CreatedAt:               now,
@@ -223,9 +225,7 @@ func (s *GuildEnforcementJournal) GroupVoids(groupID ...string) map[string]Guild
 	voids := make(map[string]GuildEnforcementRecordVoid)
 	for _, g := range groupID {
 		if groupVoids, ok := s.VoidsByRecordIDByGroupID[g]; ok {
-			for k, v := range groupVoids {
-				voids[k] = v
-			}
+			maps.Copy(voids, groupVoids)
 		}
 	}
 	return voids
@@ -295,19 +295,12 @@ func EnforcementJournalsLoad(ctx context.Context, nk runtime.NakamaModule, userI
 type ActiveGuildEnforcements map[string]map[evr.Symbol]GuildEnforcementRecord
 
 // map[GroupID]map[GameMode]GuildEnforcementRecord
-func CheckEnforcementSuspensions(ctx context.Context, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, userID string, firstAltIDs []string) (ActiveGuildEnforcements, error) {
-
-	journals, err := EnforcementJournalsLoad(ctx, nk, append(firstAltIDs, userID))
-	if err != nil {
-		return nil, fmt.Errorf("failed to load enforcement journals: %w", err)
-	}
+func CheckEnforcementSuspensions(journals GuildEnforcementJournalList, inheritanceMap map[string][]string) (ActiveGuildEnforcements, error) {
 
 	type index struct {
 		GroupID  string
 		GameMode evr.Symbol
 	}
-
-	inheretanceMap := guildGroupRegistry.InheretanceByParentGroupID()
 
 	// Collect all active suspensions for the user and their alts
 	activeRecords := make(map[index]GuildEnforcementRecord, len(journals))
@@ -315,7 +308,8 @@ func CheckEnforcementSuspensions(ctx context.Context, nk runtime.NakamaModule, g
 		// Check if the user has an active suspension
 		for srcGroupID, r := range journal.ActiveSuspensions() {
 			// Include the groups that will inherit the suspension
-			affectedGroupIDs := append(inheretanceMap[srcGroupID][:], srcGroupID)
+			// map[parentGroupID]map[childGroupID]bool
+			affectedGroupIDs := append(inheritanceMap[srcGroupID][:], srcGroupID)
 			// Apply the suspension to all affected modes
 			affectedModes := evr.AllModes
 			if r.SuspensionExcludesPrivateLobbies() {
@@ -328,7 +322,7 @@ func CheckEnforcementSuspensions(ctx context.Context, nk runtime.NakamaModule, g
 						GroupID:  affectedGroupID,
 						GameMode: mode,
 					}
-					if a := activeRecords[idx]; a.Expiry.Before(r.Expiry) {
+					if a := activeRecords[idx]; a.Expiry.Before(r.Expiry) && !journal.IsVoid(affectedGroupID, r.ID) {
 						activeRecords[idx] = r
 					}
 				}

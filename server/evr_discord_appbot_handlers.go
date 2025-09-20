@@ -476,11 +476,6 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		return errors.New("failed to get group ID")
 	}
 
-	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, callerUserID, GroupGlobalOperators)
-	if err != nil {
-		return fmt.Errorf("error checking global operator status: %w", err)
-	}
-
 	// Parse minutes, hours, days, and weeks (m, h, d, w)
 	if duration != "" {
 		var unit time.Duration
@@ -537,7 +532,13 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		isEnforcer = true
 	}
 
+	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, callerUserID, GroupGlobalOperators)
+	if err != nil {
+		return fmt.Errorf("error checking global operator status: %w", err)
+	}
+
 	if isEnforcer || isGlobalOperator {
+		// Kick the player if this is not a voiding action
 		if !voidActiveSuspensions {
 			kickPlayer = true
 		}
@@ -555,33 +556,34 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 
 		} else if voidActiveSuspensions {
 
-			thisGroupID := groupID
+			currentGroupID := groupID
 
-			groupIDs := []string{thisGroupID}
+			groupIDs := []string{currentGroupID}
+			// Add inherited groups
 			if gg.SuspensionInheritanceGroupIDs != nil {
 				groupIDs = append(groupIDs, gg.SuspensionInheritanceGroupIDs...)
 			}
 
-			// Void any inherited suspensions
-			for _, groupID := range groupIDs {
-				if recordsByGroupID[groupID] == nil {
-					recordsByGroupID[groupID] = make([]GuildEnforcementRecord, 0)
+			// Void any active suspensions for this group and any inherited groups
+			for _, gID := range groupIDs {
+				if recordsByGroupID[gID] == nil {
+					recordsByGroupID[gID] = make([]GuildEnforcementRecord, 0)
 				}
 
-				for _, record := range journal.GroupRecords(groupID) {
-					if record.IsExpired() || journal.IsVoid(groupID, record.ID) || journal.IsVoid(thisGroupID, record.ID) {
+				for _, record := range journal.GroupRecords(gID) {
+					// Ignore expired or already-voided records
+					if record.IsExpired() || journal.IsVoid(gID, record.ID) || journal.IsVoid(currentGroupID, record.ID) {
 						continue
 					}
-					// Void the suspension
-					actions = append(actions, fmt.Sprintf("suspension removed:\n  <t:%d:R> by <@%s> (expires <t:%d:R>): %s", record.CreatedAt.Unix(), record.EnforcerDiscordID, record.Expiry.Unix(), record.UserNoticeText))
+					actions = append(actions, fmt.Sprintf("suspension voided:\n  <t:%d:R> by <@%s> (expires <t:%d:R>): %s", record.CreatedAt.Unix(), record.EnforcerDiscordID, record.Expiry.Unix(), record.UserNoticeText))
 
-					recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
+					recordsByGroupID[currentGroupID] = append(recordsByGroupID[currentGroupID], record)
 
 					details := userNotice
 					if notes != "" {
 						details += "\n" + notes
 					}
-					void := journal.VoidRecord(thisGroupID, record.ID, callerUserID, caller.User.ID, details)
+					void := journal.VoidRecord(currentGroupID, record.ID, callerUserID, caller.User.ID, details)
 					voids[void.RecordID] = void
 				}
 			}

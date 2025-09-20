@@ -14,15 +14,15 @@ import (
 
 type GuildGroup struct {
 	GroupMetadata
-	State *GuildGroupState
-	Group *api.Group
+	State *GuildGroupState `json:"state,omitempty"`
+	Group *api.Group       `json:"group,omitempty"`
 }
 
 func NewGuildGroup(group *api.Group, state *GuildGroupState) (*GuildGroup, error) {
 
 	md := &GroupMetadata{}
 	if err := json.Unmarshal([]byte(group.Metadata), md); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal group metadata: %v", err)
 	}
 
 	// Ensure the matchmaking channel IDs have been initialized
@@ -82,7 +82,7 @@ func (g *GuildGroup) RoleCacheUpdate(account *EVRProfile, roles []string) bool {
 	defer g.State.Unlock()
 	// Ensure the role cache has been initialized
 	if g.State.RoleCache == nil {
-		g.State.RoleCache = make(map[string]map[string]struct{})
+		g.State.RoleCache = make(map[string]map[string]bool)
 	}
 
 	g.State.updated = false
@@ -106,11 +106,11 @@ func (g *GuildGroup) RoleCacheUpdate(account *EVRProfile, roles []string) bool {
 	for _, rID := range g.RoleMap.AsSlice() {
 		if _, ok := updatedRoles[rID]; ok {
 			if userIDs, ok := g.State.RoleCache[rID]; !ok {
-				g.State.RoleCache[rID] = map[string]struct{}{account.ID(): {}}
+				g.State.RoleCache[rID] = map[string]bool{account.ID(): true}
 				g.State.updated = true
 			} else {
 				if _, ok := userIDs[account.ID()]; !ok {
-					userIDs[account.ID()] = struct{}{}
+					userIDs[account.ID()] = true
 					g.State.updated = true
 				}
 			}
@@ -234,6 +234,50 @@ func (g *GuildGroup) IsAllowedMatchmaking(userID string) bool {
 	return false
 }
 
+// TODO: Use an index to speed this up
+func GuildGroupsLoad(ctx context.Context, nk runtime.NakamaModule, groupIDs []string) ([]*GuildGroup, error) {
+	groups, err := nk.GroupsGetId(ctx, groupIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get group: %v", err)
+	}
+	if len(groups) == 0 {
+		return nil, fmt.Errorf("group not found")
+	}
+
+	// Trim any groups that do not have a langTag of "guild"
+	for i := 0; i < len(groups); i++ {
+		if groups[i].LangTag != GuildGroupLangTag {
+			groups = slices.Delete(groups, i, i+1)
+			i--
+		}
+	}
+
+	states, err := GuildGroupStatesLoad(ctx, nk, ServiceSettings().DiscordBotUserID, groupIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load guild group states: %v", err)
+	}
+
+	stateMap := make(map[string]*GuildGroupState, len(states))
+	for _, state := range states {
+		stateMap[state.GroupID] = state
+	}
+
+	guildGroups := make([]*GuildGroup, 0, len(states))
+	for _, group := range groups {
+		state, ok := stateMap[group.Id]
+		if !ok {
+			continue
+		}
+		gg, err := NewGuildGroup(group, state)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create guild group: %v", err)
+		}
+		guildGroups = append(guildGroups, gg)
+	}
+
+	return guildGroups, nil
+}
+
 func GuildGroupLoad(ctx context.Context, nk runtime.NakamaModule, groupID string) (*GuildGroup, error) {
 	groups, err := nk.GroupsGetId(ctx, []string{groupID})
 	if err != nil {
@@ -274,37 +318,54 @@ func GuildGroupStore(ctx context.Context, nk runtime.NakamaModule, guildGroupReg
 }
 
 func GuildUserGroupsList(ctx context.Context, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, userID string) (map[string]*GuildGroup, error) {
-	guildGroups := make(map[string]*GuildGroup, 0)
+
+	groups := make(map[string]*api.Group, 0)
 	cursor := ""
 	for {
 		// Fetch the groups using the provided userId
-		groups, _, err := nk.UserGroupsList(ctx, userID, 100, nil, cursor)
+		var result []*api.UserGroupList_UserGroup
+		var err error
+		result, cursor, err = nk.UserGroupsList(ctx, userID, 100, nil, cursor)
 		if err != nil {
 			return nil, fmt.Errorf("error getting user groups: %w", err)
 		}
-		for _, ug := range groups {
-			if ug.State.Value > int32(api.UserGroupList_UserGroup_MEMBER) {
+
+		for _, ug := range result {
+			if ug.Group.LangTag != GuildGroupLangTag || ug.State.Value > int32(api.UserGroupList_UserGroup_MEMBER) {
 				continue
 			}
-			switch ug.Group.GetLangTag() {
-			case GuildGroupLangTag:
-
-				if guildGroupRegistry != nil {
-					if gg := guildGroupRegistry.Get(ug.Group.Id); gg != nil {
-						guildGroups[ug.Group.Id] = gg
-					}
-				} else {
-					group, err := GuildGroupLoad(ctx, nk, ug.Group.Id)
-					if err != nil {
-						return nil, fmt.Errorf("error loading guild group: %w", err)
-					}
-					guildGroups[ug.Group.Id] = group
-				}
-			}
+			groups[ug.Group.Id] = ug.Group
 		}
 		if cursor == "" {
 			break
 		}
 	}
+
+	guildGroups := make(map[string]*GuildGroup, len(groups))
+	if guildGroupRegistry != nil {
+		for groupID := range groups {
+			if gg := guildGroupRegistry.Get(groupID); gg != nil {
+				guildGroups[groupID] = gg
+			}
+		}
+		return guildGroups, nil
+	}
+	groupIDs := make([]string, 0, len(groups))
+	for groupID := range groups {
+		groupIDs = append(groupIDs, groupID)
+	}
+
+	states, err := GuildGroupStatesLoad(ctx, nk, ServiceSettings().DiscordBotUserID, groupIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load guild group states: %v", err)
+	}
+
+	for _, state := range states {
+		guildGroups[state.GroupID], err = NewGuildGroup(groups[state.GroupID], state)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create guild group: %v", err)
+		}
+	}
+
 	return guildGroups, nil
 }
