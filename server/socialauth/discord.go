@@ -251,7 +251,7 @@ func StoreDiscordTokens(ctx context.Context, nk runtime.NakamaModule, userID str
 		}}); err != nil {
 		return fmt.Errorf("failed to write Discord tokens to storage: %w", err)
 	}
-	return err
+	return nil
 }
 
 // LoadDiscordTokens loads Discord tokens for a user from the database.

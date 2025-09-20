@@ -16,7 +16,7 @@ import (
 
 const (
 	StorageCollectionSocialAuth = "SocialAuth"
-	StorageKeyDiscordToken      = "discordAauth2Token"
+	StorageKeyDiscordToken      = "discordOAuth2Token"
 	StorageIndexDiscordToken    = "discordTokenIdx"
 	StorageKeyGitHubToken       = "githubOAuth2Token"
 	StorageIndexGitHubToken     = "githubTokenIdx"

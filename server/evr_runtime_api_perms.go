@@ -105,7 +105,11 @@ func BeforeListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.D
 	}
 
 	// Append restrictions to the query
-	query := in.GetQuery().GetValue()
+	var query string
+	if in.GetQuery() != nil {
+		query = in.GetQuery().GetValue()
+	}
+
 	if !vars.Intents.Matches {
 		// No limits
 	} else if vars.Intents.GuildMatches {
