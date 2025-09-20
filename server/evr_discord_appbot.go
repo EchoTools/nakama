@@ -31,6 +31,14 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+const (
+	EmbedColorBlue   = 0x2274A5 // #2274A5
+	EmbedColorOrange = 0xFE9920 // #FE9920
+	EmbedColorGreen  = 0x499F68 // #499F68
+	EmbedColorViolet = 0x4B244A // #4B244A
+	EmbedColorRed    = 0xB02E0C // #B02E0C
+)
+
 type DiscordAppBot struct {
 	sync.Mutex
 

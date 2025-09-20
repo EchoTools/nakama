@@ -18,7 +18,7 @@ const (
 type GuildGroupState struct {
 	sync.RWMutex                              // for storage operations
 	GroupID        string                     `json:"group_id"`
-	RoleCache      map[string]map[string]bool `json:"role_cache"`        // map[RoleID]map[UserID]struct{}
+	RoleCache      map[string]map[string]bool `json:"role_cache"`        // map[RoleID]map[UserID]true
 	SuspendedXPIDs map[evr.EvrId]string       `json:"suspended_devices"` // map[XPID]UserID
 	RulesText      string                     `json:"rules_text"`        // The rules text displayed on the main menu
 
