@@ -829,8 +829,12 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		}
 	}
 
+	// Paginate the embeds based on their byte size
+	const FieldMaxLen = 800
+	const MaxFieldsPerEmbed = 25
+	embeds = PaginateEmbeds(embeds, MaxFieldsPerEmbed, FieldMaxLen)
 	// Send the response
-	if err := PaginateInteractionResponseOnRESTError(s, i.Interaction, &discordgo.InteractionResponse{
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Flags:  discordgo.MessageFlagsEphemeral,
