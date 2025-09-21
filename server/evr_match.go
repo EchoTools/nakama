@@ -153,6 +153,7 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 		TeamAlignments:       make(map[string]int, SocialLobbyMaxSize),
 		joinTimestamps:       make(map[string]time.Time, SocialLobbyMaxSize),
 		joinTimeMilliseconds: make(map[string]int64, SocialLobbyMaxSize),
+		disconnectInfos:      make(map[string]*PlayerDisconnectInfo, SocialLobbyMaxSize),
 		emptyTicks:           0,
 		tickRate:             10,
 		RankPercentile:       0.0,

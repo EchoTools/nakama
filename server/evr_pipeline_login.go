@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"os"
 
 	"errors"
 	"fmt"
@@ -1135,9 +1134,6 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		logger.Warn("Failed to marshal profile update request", zap.Error(err))
 	} else if len(data) > 0 {
 		logger.Debug("Received user server profile update request", zap.Any("update", in))
-		if err := os.WriteFile("/tmp/evr_profile_update.json", data, 0644); err != nil {
-			logger.Warn("Failed to write profile update request to file", zap.Error(err))
-		}
 	}
 
 	if err := session.SendEvr(evr.NewUserServerProfileUpdateSuccess(request.EvrID)); err != nil {
