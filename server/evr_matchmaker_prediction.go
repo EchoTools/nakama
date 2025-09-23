@@ -167,7 +167,7 @@ func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) <-chan Pre
 
 			// Sort groups by best rating first
 			sort.SliceStable(groups, func(i, j int) bool {
-				return ranks[i] > ranks[j]
+				return ranks[i] < ranks[j]
 			})
 
 			// Create teams
