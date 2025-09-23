@@ -80,23 +80,24 @@ func ScoreToFloat64Legacy(score int64) float64 {
 
 // Float64ToScore converts a float64 (including negative values) into two int64 values for leaderboard storage.
 // Returns (score, subscore, error) where both score and subscore are used to maintain proper sort order.
-// 
+//
 // The encoding algorithm ensures that leaderboard records sort correctly when using standard
 // integer comparison (score first, then subscore), maintaining the same order as the original float64 values.
 // All score and subscore values are non-negative to comply with Nakama's leaderboard requirements.
 //
 // Supported range: -1e15 to +1e15 with ~1e-9 fractional precision.
-// 
+//
 // Examples:
-//   Float64ToScore(-2.5)  -> (999999999999997, 499999999, nil)  // Negative values
-//   Float64ToScore(0.0)   -> (1000000000000000, 0, nil)         // Zero  
-//   Float64ToScore(1.7)   -> (1000000000000001, 700000000, nil) // Positive values
+//
+//	Float64ToScore(-2.5)  -> (999999999999997, 499999999, nil)  // Negative values
+//	Float64ToScore(0.0)   -> (1000000000000000, 0, nil)         // Zero
+//	Float64ToScore(1.7)   -> (1000000000000001, 700000000, nil) // Positive values
 func Float64ToScore(f float64) (int64, int64, error) {
 	// Check for invalid values
 	if math.IsNaN(f) || math.IsInf(f, 0) {
 		return 0, 0, fmt.Errorf("invalid value: %f", f)
 	}
-	
+
 	// Limit to reasonable range to prevent overflow
 	if f > 1e15 || f < -1e15 {
 		return 0, 0, fmt.Errorf("value out of range: %f", f)
@@ -104,35 +105,35 @@ func Float64ToScore(f float64) (int64, int64, error) {
 
 	const fracScale = LeaderboardScoreScalingFactor // 1e9 for fractional precision
 	const scoreOffset = int64(1e15)                 // Offset to ensure all scores are non-negative
-	
+
 	if f < 0 {
 		// For negative numbers: use lower range [0, scoreOffset)
 		absF := -f
-		intPart := int64(absF)                     // Get the integer magnitude
-		fracPart := absF - float64(intPart)       // Get the fractional part (0.0 to 1.0)
-		
+		intPart := int64(absF)              // Get the integer magnitude
+		fracPart := absF - float64(intPart) // Get the fractional part (0.0 to 1.0)
+
 		// Encode so more negative values have smaller scores
 		// Use range [0, scoreOffset-1] for all negative values
-		score := scoreOffset - 1 - intPart                 // More negative = smaller score
-		
+		score := scoreOffset - 1 - intPart // More negative = smaller score
+
 		// For exact integers (fracPart == 0), subscore should be 0
 		// For fractional values, invert the fractional part for proper ordering
 		var subscore int64
 		if fracPart == 0.0 {
 			subscore = 0
 		} else {
-			subscore = int64((1.0 - fracPart) * float64(fracScale - 1))
+			subscore = int64((1.0 - fracPart) * float64(fracScale-1))
 		}
-		
+
 		return score, subscore, nil
 	} else {
 		// For zero and positive numbers: use upper range [scoreOffset, ∞)
-		intPart := int64(f)                     // Get the integer part
-		fracPart := f - float64(intPart)       // Get the fractional part
-		
-		score := scoreOffset + intPart           // Offset ensures non-negative
+		intPart := int64(f)              // Get the integer part
+		fracPart := f - float64(intPart) // Get the fractional part
+
+		score := scoreOffset + intPart          // Offset ensures non-negative
 		subscore := int64(fracPart * fracScale) // Scale fractional part
-		
+
 		return score, subscore, nil
 	}
 }
@@ -141,15 +142,17 @@ func Float64ToScore(f float64) (int64, int64, error) {
 // This is the inverse operation of Float64ToScore.
 //
 // Parameters:
-//   score:    The primary leaderboard score field (must be non-negative)
-//   subscore: The secondary leaderboard score field (must be 0 <= subscore < 1e9)
+//
+//	score:    The primary leaderboard score field (must be non-negative)
+//	subscore: The secondary leaderboard score field (must be 0 <= subscore < 1e9)
 //
 // Returns the original float64 value (within precision limits) or an error for invalid inputs.
 //
 // Examples:
-//   ScoreToFloat64(999999999999997, 499999999) -> -2.5
-//   ScoreToFloat64(1000000000000000, 0)        -> 0.0  
-//   ScoreToFloat64(1000000000000001, 700000000) -> 1.7
+//
+//	ScoreToFloat64(999999999999997, 499999999) -> -2.5
+//	ScoreToFloat64(1000000000000000, 0)        -> 0.0
+//	ScoreToFloat64(1000000000000001, 700000000) -> 1.7
 func ScoreToFloat64(score int64, subscore int64) (float64, error) {
 	// Validate input ranges
 	if score < 0 {
@@ -161,23 +164,23 @@ func ScoreToFloat64(score int64, subscore int64) (float64, error) {
 
 	const fracScale = LeaderboardScoreScalingFactor
 	const scoreOffset = int64(1e15)
-	
+
 	if score < scoreOffset {
 		// Negative number: score in range [0, scoreOffset)
-		intPart := scoreOffset - 1 - score               // Convert back to magnitude
-		
+		intPart := scoreOffset - 1 - score // Convert back to magnitude
+
 		// Handle exact integers vs fractional values
 		var fracPart float64
 		if subscore == 0 {
 			fracPart = 0.0
 		} else {
-			fracPart = 1.0 - (float64(subscore) / float64(fracScale - 1)) // Uninvert the fractional part
+			fracPart = 1.0 - (float64(subscore) / float64(fracScale-1)) // Uninvert the fractional part
 		}
-		
+
 		return -(float64(intPart) + fracPart), nil
 	} else {
 		// Zero or positive number: score in range [scoreOffset, ∞)
-		intPart := score - scoreOffset               // Remove offset
+		intPart := score - scoreOffset // Remove offset
 		fracPart := float64(subscore) / fracScale
 		return float64(intPart) + fracPart, nil
 	}
@@ -365,6 +368,7 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 	slices.Sort(modes)
 	modes = slices.Compact(modes)
 
+	// Determine which stats to load
 	for _, m := range modes {
 		if m == evr.Symbol(0) {
 			continue
@@ -381,10 +385,9 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 	boardIDs := make([]string, 0, len(boardMap))
 	gamesPlayedBoardIDs := make(map[evr.StatisticsGroup]string)
 
-	// Build the stats structs
+	// Map boardIDs to the playerStatistics struct fields
 	for m, resetSchedules := range statGroups {
 		for _, r := range resetSchedules {
-
 			var stats evr.Statistics
 			switch m {
 			case evr.ModeCombatPublic:
@@ -413,23 +416,23 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 
 			for i := 0; i < statsType.NumField(); i++ {
 				fieldType := statsType.Field(i)
-
-				boardID := StatisticBoardID(groupID, m, fieldType.Name, r)
-				boardIDs = append(boardIDs, boardID)
-
-				if fieldType.Name == "GamesPlayed" {
-					gamesPlayedBoardIDs[evr.StatisticsGroup{
-						Mode:          m,
-						ResetSchedule: r,
-					}] = boardID
-				}
-
 				fieldValue := statsValue.Elem().Field(i)
-				fieldValue.Set(reflect.New(fieldType.Type.Elem()))
-				boardMap[boardID] = fieldValue.Interface().(*evr.StatisticValue)
+
+				// Only operate on pointer fields of type *evr.StatisticValue
+				if fieldValue.Kind() == reflect.Pointer && fieldValue.Type().Elem() == reflect.TypeOf(evr.StatisticValue{}) {
+					boardID := StatisticBoardID(groupID, m, fieldType.Name, r)
+					boardIDs = append(boardIDs, boardID)
+					// Set if nil
+					if fieldValue.IsNil() {
+						fieldValue.Set(reflect.New(fieldType.Type.Elem()))
+					}
+					v, ok := fieldValue.Interface().(*evr.StatisticValue)
+					if ok {
+						boardMap[boardID] = v
+					}
+				}
 			}
 		}
-
 	}
 
 	query := `
@@ -439,16 +442,9 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 			lr.subscore
 		FROM 
 			leaderboard_record lr
-		JOIN
-			ROWS FROM (
-				unnest(
-                $2::TEXT[]
-				)
-			) t(id)
-		ON 
-			lr.leaderboard_id = t.id
 		WHERE 
 			lr.owner_id = $1
+			AND lr.leaderboard_id = ANY($2)
 			AND (lr.expiry_time > NOW() OR lr.expiry_time = '1970-01-01 00:00:00+00') -- Include "alltime" records
 			`
 
@@ -554,6 +550,8 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 			}
 		}
 	}
+
+	// Integrate the boardMap values into the playerStatistics
 
 	return playerStatistics, boardMap, nil
 }
