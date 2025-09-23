@@ -137,7 +137,8 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	state := MatchLabel{
-		CreatedAt:        time.Now().UTC(),
+		CreatedAt: time.Now().UTC(),
+
 		GameServer:       &gameserverConfig,
 		Open:             false,
 		LobbyType:        UnassignedLobby,
@@ -469,12 +470,14 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			State:    state,
 		})
 
-		if info, ok := state.disconnectInfos[p.GetUserId()]; ok {
+		if info, ok := state.disconnectInfos[p.GetUserId()]; ok && info != nil {
 			// If the player has disconnect info, calculate the disconnect duration
 			info.LeaveTime = time.Time{}
 		} else {
 			// If the player has no disconnect info, create it now
-			state.disconnectInfos[p.GetUserId()] = NewPlayerDisconnectInfo(ctx, logger, db, nk, state, presences[0].GetUserId())
+			if info := NewPlayerDisconnectInfo(ctx, logger, db, nk, state, presences[0].GetUserId()); info != nil {
+				state.disconnectInfos[p.GetUserId()] = info
+			}
 		}
 	}
 
@@ -914,6 +917,9 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		}
 
 		for _, p := range state.disconnectInfos {
+			if p == nil {
+				continue
+			}
 			// If the player is still here, increase the counts.
 			if !p.LeaveTime.IsZero() {
 				continue
@@ -929,8 +935,11 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		}
 
 		// If the match is over, submit the early quit counts.
-		if state.GameState.MatchOver {
+		if state.GameState != nil && state.GameState.MatchOver {
 			for _, info := range state.disconnectInfos {
+				if info == nil {
+					continue
+				}
 				if info.LeaveTime.IsZero() {
 					// Mark the player as having left when the match ended.
 					info.LeaveEvent(state)

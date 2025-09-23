@@ -73,7 +73,14 @@ func (r *RoundClock) IsOver() bool {
 	if r.RoundDuration == 0 {
 		return true
 	}
-	return r.Elapsed() >= r.RoundDuration
+	elapsed := r.GameTime + time.Since(r.UpdatedAt)
+	if r.IsPaused() {
+		elapsed = r.GameTime
+	}
+
+	// Otherwise return the game time plus the time since the last updat
+
+	return elapsed >= r.RoundDuration
 }
 
 func (r *RoundClock) Update(gameTime time.Duration) {

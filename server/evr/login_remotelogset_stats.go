@@ -54,14 +54,17 @@ type MatchTypeStats struct {
 	HighestArenaWinStreak        int64   `json:"HighestArenaWinStreak,omitempty"`
 	HighestPoints                int64   `json:"HighestPoints,omitempty"`
 	HighestSaves                 int64   `json:"HighestSaves,omitempty"`
+	HighestSpeed                 float64 `json:"HighestSpeed,omitempty"`
 	HighestStuns                 int64   `json:"HighestStuns,omitempty"`
 	Interceptions                int64   `json:"Interceptions,omitempty"`
+	LongestPossession            float64 `json:"LongestPossession,omitempty"`
 	Passes                       int64   `json:"Passes,omitempty"`
 	Points                       int64   `json:"Points,omitempty"`
 	PossessionTime               float64 `json:"PossessionTime,omitempty"`
 	PunchesReceived              int64   `json:"PunchesReceived,omitempty"`
 	Saves                        int64   `json:"Saves,omitempty"`
 	SavesPerGame                 float64 `json:"SavesPerGame,omitempty"`
+	Score                        int64   `json:"Score,omitempty"`
 	ShotsOnGoal                  int64   `json:"ShotsOnGoal,omitempty"`
 	ShotsOnGoalAgainst           int64   `json:"ShotsOnGoalAgainst,omitempty"`
 	Steals                       int64   `json:"Steals,omitempty"`
