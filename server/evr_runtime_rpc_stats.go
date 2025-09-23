@@ -75,10 +75,11 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 			evr.ModeSocialPublic,
 			evr.ModeSocialPrivate,
 		}
+
+		request.Mode = evr.Symbol(evr.ModeArenaPublic)
 	} else {
 		modes = []evr.Symbol{request.Mode}
 	}
-
 	stats, _, err := PlayerStatisticsGetID(ctx, db, nk, request.UserID, request.GroupID, modes, request.Mode)
 	if err != nil {
 		return "", err
