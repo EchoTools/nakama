@@ -383,7 +383,6 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 		case *evr.RemoteLogPostMatchMatchStats:
 			update, _ = updates.LoadOrStore(msg.SessionUUID(), &MatchGameStateUpdate{})
 			update.MatchOver = true
-			update.CurrentGameClock = 0
 			// Increment the completed matches for the player
 			if err := s.incrementCompletedMatches(ctx, logger, nk, sessionRegistry, s.UserID, s.SessionID); err != nil {
 				logger.WithField("error", err).Warn("Failed to increment completed matches")
@@ -391,8 +390,8 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			}
 
 		case *evr.RemoteLogPostMatchTypeStats:
+			update, _ = updates.LoadOrStore(msg.SessionUUID(), &MatchGameStateUpdate{})
 			update.MatchOver = true
-			update.CurrentGameClock = 0
 			// Process the post match stats into the player's statistics
 			if err := s.processPostMatchTypeStats(ctx, logger, db, nk, sessionRegistry, statisticsQueue, msg); err != nil {
 				logger.WithFields(map[string]any{
@@ -402,6 +401,22 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 
 				continue
 			}
+		case *evr.RemoteLogPostMatchMatchTypeXPLevel:
+			// This provides the XP gain from the match
+			/*
+							{
+				    "message": "process post-match match type xp level",
+				    "message_type": "POST_MATCH_MATCH_TYPE_XP_LEVEL",
+				    "CurrentLevel": 2,
+				    "CurrentXP": 1000,
+				    "PreviousLevel": 1,
+				    "PreviousXP": 0,
+				    "RemainingXP": 500,
+				    "[session][uuid]": "{8DFB17C0-4CF3-481A-B898-F090343A5DA1}",
+				    "match_type": "Echo_Arena",
+				    "userid": "OVR-ORG-8185598851511174"
+				  },
+			*/
 		case *evr.RemoteLogLoadStats:
 
 			if msg.ClientLoadTime > 45 {
