@@ -38,6 +38,7 @@ func NewPlayerDisconnectInfo(ctx context.Context, logger runtime.Logger, db *sql
 	}
 	player := state.GetPlayerByUserID(userID)
 
+	node := ctx.Value(runtime.RUNTIME_CTX_MATCH_NODE).(string)
 	// Count how many players are in the same party
 	partySize := 1
 	if player.PartyID != "" {
