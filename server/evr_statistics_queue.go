@@ -65,9 +65,8 @@ func NewStatisticsQueue(logger runtime.Logger, db *sql.DB, nk runtime.NakamaModu
 					logger.WithField("error", err).Error("Failed to prune expired leaderboard records")
 				}
 			case entries := <-ch:
-
 				for _, e := range entries {
-
+					// This expects the score and subscore to already be translated to the correct values.
 					if e.Score < 0 {
 						logger.WithFields(map[string]any{
 							"leaderboard_id": e.BoardMeta.ID(),

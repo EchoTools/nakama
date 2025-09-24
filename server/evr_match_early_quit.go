@@ -42,7 +42,7 @@ func NewPlayerDisconnectInfo(ctx context.Context, logger runtime.Logger, db *sql
 	// Count how many players are in the same party
 	partySize := 1
 	if player.PartyID != "" {
-		count, err := nk.StreamCount(StreamModeParty, player.PartyID, "", "")
+		count, err := nk.StreamCount(StreamModeParty, player.PartyID, "", node)
 		if err != nil {
 			logger.Warn("Failed to get party size for player %s: %v", userID, err)
 		}
@@ -121,6 +121,9 @@ type PlayerDisconnectInfo struct {
 }
 
 func (p *PlayerDisconnectInfo) LeaveEvent(state *MatchLabel) {
+	if p == nil {
+		return
+	}
 	if state == nil || state.GameState == nil || state.GameState.RoundClock == nil {
 		return
 	}
@@ -136,6 +139,9 @@ func (p *PlayerDisconnectInfo) LeaveEvent(state *MatchLabel) {
 	p.DisconnectsAtLeave = totalLeaves - p.DisconnectsAtJoin
 
 	for _, info := range state.disconnectInfos {
+		if info == nil || info.PlayerInfo == nil {
+			continue
+		}
 		if info.PlayerInfo.UserID != p.PlayerInfo.UserID && info.Team == p.Team && time.Since(info.LeaveTime) < 10*time.Second {
 			p.IsTeamWipeMember = true
 			break
@@ -152,7 +158,7 @@ func (p *PlayerDisconnectInfo) LogEarlyQuitMetrics(nk runtime.NakamaModule, stat
 	}
 
 	// Check if the player left at the same time as another player on their team
-	wasLosingAtLeave := (p.Team == BlueTeam && p.ScoresAtLeave[1] > p.ScoresAtLeave[0])
+	wasLosingAtLeave := (p.Team == BlueTeam && p.ScoresAtLeave[0] < p.ScoresAtLeave[1])
 	scoreDeltaAtJoin := p.ScoresAtJoin[0] - p.ScoresAtJoin[1]
 	scoreDeltaAtLeave := p.ScoresAtLeave[0] - p.ScoresAtLeave[1]
 	teamDisadvantageAtJoin := p.TeamSizesAtJoin[0] - p.TeamSizesAtJoin[1]
@@ -180,7 +186,6 @@ func (p *PlayerDisconnectInfo) LogEarlyQuitMetrics(nk runtime.NakamaModule, stat
 		"ping_band":                  string(p.PingBand),
 		"disconnects_at_join":        fmt.Sprintf("%d", p.DisconnectsAtJoin),
 		"disconnects_at_leave":       fmt.Sprintf("%d", p.DisconnectsAtLeave),
-		"integrity_duration":         fmt.Sprintf("%v", p.IntegrityDuration),
 	}
 
 	nk.MetricsCounterAdd("match_abandon_total", tags, 1)
@@ -224,6 +229,9 @@ func calculateHazardEvents(state *MatchLabel, teamID int, minGameTime float64) (
 		items = append(items, index{ts: goal.GoalTime, team: int(goal.TeamID)})
 	}
 	for _, info := range state.disconnectInfos {
+		if info == nil || info.PlayerInfo == nil {
+			continue
+		}
 		if info.GameDurationAtLeave.Seconds() < minGameTime {
 			continue
 		}

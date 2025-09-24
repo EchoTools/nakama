@@ -626,8 +626,11 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 						for _, r := range [...]evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime} {
 							boardID := StatisticBoardID(state.GetGroupID().String(), state.Mode, EarlyQuitStatisticID, r)
-
-							if _, err := nk.LeaderboardRecordWrite(ctx, boardID, mp.UserID.String(), mp.DisplayName, 1, 0, nil, nil); err != nil {
+							score, subscore, err := Float64ToScore(float64(1))
+							if err != nil {
+								return fmt.Errorf("invalid match time: %w", err)
+							}
+							if _, err := nk.LeaderboardRecordWrite(ctx, boardID, mp.UserID.String(), mp.DisplayName, score, subscore, nil, nil); err != nil {
 								if errors.Is(err, ErrLeaderboardNotFound) {
 									if err = nk.LeaderboardCreate(ctx, boardID, true, "desc", "incr", ResetScheduleToCron(r), nil, true); err != nil {
 										logger.Warn("Failed to create early quit leaderboard: %v", err)
@@ -693,14 +696,17 @@ func recordGameServerTimeToLeaderboard(ctx context.Context, nk runtime.NakamaMod
 
 	for _, period := range resetSchedules {
 		id := StatisticBoardID(groupID, mode, GameServerTimeStatisticsID, period)
-
+		score, subscore, err := Float64ToScore(float64(matchTimeSecs))
+		if err != nil {
+			return fmt.Errorf("invalid match time: %w", err)
+		}
 		// Write the record
-		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, matchTimeSecs, 0, nil, nil); err != nil {
+		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subscore, nil, nil); err != nil {
 
 			// Try to create the leaderboard
 			if err = nk.LeaderboardCreate(ctx, id, true, "desc", "incr", ResetScheduleToCron(period), nil, true); err != nil {
 				return fmt.Errorf("Leaderboard create error: %w", err)
-			} else if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, matchTimeSecs, 0, nil, nil); err != nil {
+			} else if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subscore, nil, nil); err != nil {
 				return fmt.Errorf("Leaderboard record write error: %w", err)
 			}
 		}
@@ -716,14 +722,16 @@ func recordMatchTimeToLeaderboard(ctx context.Context, nk runtime.NakamaModule, 
 
 	for _, period := range resetSchedules {
 		id := StatisticBoardID(groupID, mode, LobbyTimeStatisticID, period)
-
+		score, subscore, err := Float64ToScore(float64(matchTimeSecs))
+		if err != nil {
+			return fmt.Errorf("invalid match time: %w", err)
+		}
 		// Write the record
-		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, matchTimeSecs, 0, nil, nil); err != nil {
-
+		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, subscore, nil, nil); err != nil {
 			// Try to create the leaderboard
 			if err = nk.LeaderboardCreate(ctx, id, true, "desc", "incr", ResetScheduleToCron(period), nil, true); err != nil {
 				return fmt.Errorf("Leaderboard create error: %w", err)
-			} else if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, matchTimeSecs, 0, nil, nil); err != nil {
+			} else if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, subscore, nil, nil); err != nil {
 				return fmt.Errorf("Leaderboard record write error: %w", err)
 			}
 		}
