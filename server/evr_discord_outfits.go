@@ -4,15 +4,17 @@ import "github.com/heroiclabs/nakama-common/runtime"
 
 const (
 	CustomizationStorageCollection = "Customization"
-	SavedOutfitsStorageKey         = "outfits"
+	WardrobeStorageKey             = "wardrobe"
 )
 
-type Wardrobe map[string]*AccountCosmetics
+type Wardrobe struct {
+	Outfits map[string]*AccountCosmetics `json:"outfits"`
+}
 
 func (w Wardrobe) StorageMeta() StorableMetadata {
 	return StorableMetadata{
 		Collection:      CustomizationStorageCollection,
-		Key:             SavedOutfitsStorageKey,
+		Key:             WardrobeStorageKey,
 		PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
 		PermissionWrite: runtime.STORAGE_PERMISSION_OWNER_WRITE,
 		Version:         "*", // Always overwrite for maps without version tracking

@@ -2782,15 +2782,18 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return nil
 			}
 
-			outfits := make(Wardrobe)
+			wardrobe := &Wardrobe{}
 
-			if err := StorableRead(ctx, d.nk, userID, outfits, true); err != nil {
+			if err := StorableRead(ctx, d.nk, userID, wardrobe, true); err != nil {
 				return fmt.Errorf("failed to read saved outfits: %w", err)
 			}
 
+			if wardrobe.Outfits == nil {
+				wardrobe.Outfits = make(map[string]*AccountCosmetics)
+			}
 			metadata, err := EVRProfileLoad(ctx, d.nk, userID)
 			if err != nil {
-				return fmt.Errorf("Failed to get account metadata: %w", err)
+				return fmt.Errorf("failed to get account metadata: %w", err)
 			}
 
 			switch options[0].Name {
@@ -2803,25 +2806,25 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				switch options[0].Options[0].StringValue() {
 				case "save":
 					// limit set arbitrarily
-					if len(outfits) >= 25 {
+					if len(wardrobe.Outfits) >= 25 {
 						return fmt.Errorf("cannot save more than 25 outfits")
 
 					}
 
-					outfits[outfitName] = &metadata.LoadoutCosmetics
+					wardrobe.Outfits[outfitName] = &metadata.LoadoutCosmetics
 
-					if err := StorableWrite(ctx, d.nk, userID, outfits); err != nil {
+					if err := StorableWrite(ctx, d.nk, userID, wardrobe); err != nil {
 						return fmt.Errorf("failed to write saved outfits: %w", err)
 					}
 
 					return simpleInteractionResponse(s, i, fmt.Sprintf("Saved current outfit as `%s`", outfitName))
 
 				case "load":
-					if _, ok := outfits[outfitName]; !ok {
+					if _, ok := wardrobe.Outfits[outfitName]; !ok {
 						return simpleInteractionResponse(s, i, fmt.Sprintf("Outfit `%s` does not exist.", outfitName))
 					}
 
-					metadata.LoadoutCosmetics = *outfits[outfitName]
+					metadata.LoadoutCosmetics = *wardrobe.Outfits[outfitName]
 
 					if err := EVRProfileUpdate(ctx, d.nk, userID, metadata); err != nil {
 						return fmt.Errorf("failed to set account metadata: %w", err)
@@ -2830,14 +2833,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					return simpleInteractionResponse(s, i, fmt.Sprintf("Applied outfit `%s`. If the changes do not take effect in your next match, Please re-open your game.", outfitName))
 
 				case "delete":
-					if _, ok := outfits[outfitName]; !ok {
+					if _, ok := wardrobe.Outfits[outfitName]; !ok {
 						simpleInteractionResponse(s, i, fmt.Sprintf("Outfit `%s` does not exist.", outfitName))
 						return nil
 					}
 
-					delete(outfits, outfitName)
+					delete(wardrobe.Outfits, outfitName)
 
-					if err := StorableWrite(ctx, d.nk, userID, outfits); err != nil {
+					if err := StorableWrite(ctx, d.nk, userID, wardrobe); err != nil {
 						return fmt.Errorf("failed to write saved outfits: %w", err)
 					}
 
@@ -2845,13 +2848,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 			case "list":
-				if len(outfits) == 0 {
+				if len(wardrobe.Outfits) == 0 {
 					return simpleInteractionResponse(s, i, "No saved outfits.")
 				}
 
 				responseString := "Available profiles: "
 
-				for k := range outfits {
+				for k := range wardrobe.Outfits {
 					responseString += fmt.Sprintf("`%s`, ", k)
 				}
 
