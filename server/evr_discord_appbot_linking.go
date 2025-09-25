@@ -60,7 +60,7 @@ func (d *DiscordAppBot) linkHeadset(ctx context.Context, logger runtime.Logger, 
 		}
 		d.metrics.CustomCounter("link_headset", tags, 1)
 		// Set the client IP as authorized in the LoginHistory
-		history := &LoginHistory{}
+		history := NewLoginHistory(userID)
 		if err := StorableRead(ctx, nk, userID, history, true); err != nil {
 			return fmt.Errorf("failed to load login history: %w", err)
 		}
