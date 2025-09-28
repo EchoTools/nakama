@@ -374,6 +374,10 @@ func (p *InGamePanel) createUpdateEdit(guildID string, label *MatchLabel, recent
 					Style:    discordgo.SecondaryButton,
 					CustomID: "igp:" + p.userID + ":set_ign",
 				},
+			},
+		},
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
 				discordgo.SelectMenu{
 					MenuType:      discordgo.StringSelectMenu,
 					CustomID:      "igp:" + p.userID + ":select_player",
