@@ -52,7 +52,6 @@ require (
 )
 
 require (
-	github.com/echotools/nevr-common v1.1.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/jackc/pgio v1.0.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
