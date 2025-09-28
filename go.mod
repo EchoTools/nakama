@@ -52,6 +52,7 @@ require (
 )
 
 require (
+	github.com/echotools/nevr-common v1.1.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/jackc/pgio v1.0.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
@@ -98,7 +99,6 @@ require (
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/twmb/murmur3 v1.1.8 // indirect
-	github.com/yohcop/openid-go v1.0.1
 	go.uber.org/multierr v1.10.0 // indirect
 	golang.org/x/net v0.43.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
