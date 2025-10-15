@@ -156,7 +156,9 @@ func (p *PlayerDisconnectInfo) LogEarlyQuitMetrics(nk runtime.NakamaModule, stat
 	if state == nil || state.GameState == nil || state.GameState.RoundClock == nil {
 		return
 	}
-
+	// XXX: This cardinality is too high, and causes the system to crash after a few days (memory usage).
+	//      Disabling for now.
+	return
 	// Check if the player left at the same time as another player on their team
 	wasLosingAtLeave := (p.Team == BlueTeam && p.ScoresAtLeave[0] < p.ScoresAtLeave[1])
 	scoreDeltaAtJoin := p.ScoresAtJoin[0] - p.ScoresAtJoin[1]
