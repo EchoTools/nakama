@@ -61,6 +61,12 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	if err = initializer.RegisterAfterReadStorageObjects(AfterReadStorageObjectsHook); err != nil {
 		return fmt.Errorf("unable to register AfterReadStorageObjects hook: %w", err)
 	}
+	if err = initializer.RegisterBeforeWriteStorageObjects(BeforeWriteStorageObjectsHook); err != nil {
+		return fmt.Errorf("unable to register BeforeWriteStorageObjects hook: %w", err)
+	}
+	if err = initializer.RegisterBeforeDeleteStorageObjects(BeforeDeleteStorageObjectsHook); err != nil {
+		return fmt.Errorf("unable to register BeforeDeleteStorageObjects hook: %w", err)
+	}
 
 	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_ENV, vars) // ignore lint
 	// Initialize the discord bot if the token is set
