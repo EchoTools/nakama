@@ -13,7 +13,7 @@ import (
 )
 
 // AfterReadStorageObjectsHook is a hook that runs after reading storage objects.
-// It checks if the intent includes storage objects access and retries the request as the system user if any objects were not returned.
+// It checks if the intent includes storage objects access and retries the request as the system user if zero objects were not returned.
 func AfterReadStorageObjectsHook(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, out *api.StorageObjects, in *api.ReadStorageObjectsRequest) error {
 	if out == nil || in == nil {
 		return nil
@@ -86,6 +86,60 @@ func AfterReadStorageObjectsHook(ctx context.Context, logger runtime.Logger, db 
 	return nil
 }
 
+// BeforeWriteStorageObjectsHook is a hook that runs before writing storage objects.
+// It checks if the intent includes storage objects access and blocks the request if not authorized.
+func BeforeWriteStorageObjectsHook(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, in *api.WriteStorageObjectsRequest) (*api.WriteStorageObjectsRequest, error) {
+	if in == nil {
+		return nil, nil
+	}
+
+	vars, err := intents.SessionVarsFromRuntimeContext(ctx)
+	if err != nil {
+		logger.Error("Failed to parse session variables from context", zap.Error(err))
+		return nil, err
+	}
+
+	isAuthoritative := false
+
+	if vars != nil && (vars.Intents.StorageObjects || vars.Intents.IsGlobalOperator) {
+		isAuthoritative = true
+	}
+
+	if !isAuthoritative {
+		// Block the request by returning nil
+		return nil, nil
+	}
+
+	return in, nil
+}
+
+// BeforeDeleteStorageObjectsHook is a hook that runs before deleting storage objects.
+// It checks if the intent includes storage objects access and blocks the request if not authorized.
+func BeforeDeleteStorageObjectsHook(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, in *api.DeleteStorageObjectsRequest) (*api.DeleteStorageObjectsRequest, error) {
+	if in == nil {
+		return nil, nil
+	}
+
+	vars, err := intents.SessionVarsFromRuntimeContext(ctx)
+	if err != nil {
+		logger.Error("Failed to parse session variables from context", zap.Error(err))
+		return nil, err
+	}
+
+	isAuthoritative := false
+
+	if vars != nil && (vars.Intents.StorageObjects || vars.Intents.IsGlobalOperator) {
+		isAuthoritative = true
+	}
+
+	if !isAuthoritative {
+		// Block the request by returning nil
+		return nil, nil
+	}
+
+	return in, nil
+}
+
 // BeforeListMatchesHook is a hook that runs before listing matches.
 func BeforeListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, in *api.ListMatchesRequest) (*api.ListMatchesRequest, error) {
 	if in == nil {
@@ -114,6 +168,7 @@ func BeforeListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.D
 		// No limits
 	} else if vars.Intents.GuildMatches {
 		// Limit to guild matches only (including private matches).
+		// TODO
 	} else {
 		// Limit to public matches only.
 		query = query + ` +label.mode:public`
@@ -243,7 +298,7 @@ func registerAPIGuards(initializer runtime.Initializer) error {
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeValidateSubscriptionApple)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeValidateSubscriptionGoogle)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeWriteLeaderboardRecord)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeWriteStorageObjects)
+	//RestrictAPIFunctionAccess(initializer.RegisterBeforeWriteStorageObjects)
 	RestrictAPIFunctionAccess(initializer.RegisterBeforeWriteTournamentRecord)
 
 	for _, rtMessage := range rtMessages {
