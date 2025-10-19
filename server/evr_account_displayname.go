@@ -11,7 +11,7 @@ const DisplayNameMaxLength = 24
 const DisplayNameMinLength = 1
 
 var (
-	DisplayNameFilterRegex  = regexp.MustCompile(`[^-0-9A-Za-z_\[\]#!?@%&=+|:;,.(){}<>~\s]`)
+	DisplayNameFilterRegex  = regexp.MustCompile(`[^-0-9A-Za-z_\[\]#!@%&=+|:;,.(){}<>~\s]`)
 	emojiFilterPattern      = regexp.MustCompile(`:[a-zA-Z0-9_]+:`)
 	displayNameMatchPattern = regexp.MustCompile(`[A-Za-z]`)
 	displayNameScorePattern = regexp.MustCompile(`\s\(\d+\)\s\[\d+\.\d+%]`)
