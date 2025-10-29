@@ -336,6 +336,62 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 	case "igp":
 
 		return d.handleInGamePanelInteraction(i, value)
+
+	case "lookup":
+		// Handle lookup button interactions (e.g., "set_ign_override")
+		action, params, _ := strings.Cut(value, ":")
+		switch action {
+		case "set_ign_override":
+			// Parse targetUserID:groupID
+			parts := strings.SplitN(params, ":", 2)
+			if len(parts) != 2 {
+				return fmt.Errorf("invalid parameters for set_ign_override")
+			}
+			targetUserID := parts[0]
+			targetGroupID := parts[1]
+
+			// Verify caller has permissions
+			callerGuildGroups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userID)
+			if err != nil {
+				return fmt.Errorf("failed to get guild groups: %w", err)
+			}
+
+			isAuditorOrEnforcer := false
+			if gg, ok := callerGuildGroups[groupID]; ok && (gg.IsAuditor(userID) || gg.IsEnforcer(userID)) {
+				isAuditorOrEnforcer = true
+			}
+			isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+			isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
+
+			if !isAuditorOrEnforcer {
+				return simpleInteractionResponse(s, i, "You do not have permission to set IGN overrides.")
+			}
+
+			// Load target profile
+			targetProfile, err := EVRProfileLoad(ctx, nk, targetUserID)
+			if err != nil {
+				return fmt.Errorf("failed to load target profile: %w", err)
+			}
+
+			// Get current IGN data
+			groupIGN := targetProfile.GetGroupIGNData(targetGroupID)
+			currentDisplayName := groupIGN.DisplayName
+			if currentDisplayName == "" {
+				// Fallback to username
+				if a, err := nk.AccountGetId(ctx, targetUserID); err == nil {
+					currentDisplayName = a.User.Username
+				}
+			}
+
+			// Show modal with prepopulated data
+			modal := d.createLookupSetIGNModal(currentDisplayName, groupIGN.IsLocked)
+			// Store context in customID for modal submission
+			modal.Data.CustomID = fmt.Sprintf("lookup:set_ign_modal:%s:%s", targetUserID, targetGroupID)
+			return s.InteractionRespond(i.Interaction, modal)
+
+		default:
+			return fmt.Errorf("unknown lookup action: %s", action)
+		}
 	}
 
 	return nil
