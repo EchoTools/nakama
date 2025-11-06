@@ -17,19 +17,19 @@ func TestFloat64ToScoreAndBack(t *testing.T) {
 		{"negative integer", -3.0},
 		{"positive float", 2.5},
 		{"negative float", -1.7},
-		
+
 		// Edge cases near zero
 		{"small positive", 0.000001},
 		{"small negative", -0.000001},
 		{"very small positive", 1e-8},
 		{"very small negative", -1e-8},
-		
+
 		// Larger values
 		{"large positive", 1000000.0},
 		{"large negative", -999999.0},
 		{"large positive float", 1234567.89},
 		{"large negative float", -987654.321},
-		
+
 		// Precision edge cases
 		{"max fractional precision", 0.999999999},
 		{"negative max fractional", -0.999999999},
@@ -110,7 +110,7 @@ func TestLeaderboardSortingCorrectness(t *testing.T) {
 		subscore int64
 		original float64
 	}
-	
+
 	encoded := make([]scorePair, len(testValues))
 	for i, v := range testValues {
 		score, subscore, err := Float64ToScore(v)
@@ -132,14 +132,14 @@ func TestLeaderboardSortingCorrectness(t *testing.T) {
 	for i, pair := range encoded {
 		expectedValue := testValues[i]
 		if math.Abs(pair.original-expectedValue) > 1e-10 {
-			t.Errorf("Sort order incorrect at position %d: expected %f, got %f", 
+			t.Errorf("Sort order incorrect at position %d: expected %f, got %f",
 				i, expectedValue, pair.original)
 		}
 	}
 }
 
 func TestLeaderboardSortingDescending(t *testing.T) {
-	// Test values for descending sort order  
+	// Test values for descending sort order
 	testValues := []float64{
 		-5.5, -2.3, -0.1, 0.0, 0.1, 2.3, 5.5, 10.0,
 	}
@@ -150,7 +150,7 @@ func TestLeaderboardSortingDescending(t *testing.T) {
 		subscore int64
 		original float64
 	}
-	
+
 	encoded := make([]scorePair, len(testValues))
 	for i, v := range testValues {
 		score, subscore, err := Float64ToScore(v)
@@ -179,7 +179,7 @@ func TestLeaderboardSortingDescending(t *testing.T) {
 	for i, pair := range encoded {
 		expectedValue := expectedOrder[i]
 		if math.Abs(pair.original-expectedValue) > 1e-10 {
-			t.Errorf("Descending sort order incorrect at position %d: expected %f, got %f", 
+			t.Errorf("Descending sort order incorrect at position %d: expected %f, got %f",
 				i, expectedValue, pair.original)
 		}
 	}
@@ -212,8 +212,8 @@ func TestScoreToFloat64ErrorCases(t *testing.T) {
 func TestEncodingConsistency(t *testing.T) {
 	// Test that similar values encode to similar scores
 	testCases := []struct {
-		v1, v2   float64
-		name     string
+		v1, v2        float64
+		name          string
 		shouldBeClose bool
 	}{
 		{1.0, 1.1, "close positive values", true},
@@ -227,7 +227,7 @@ func TestEncodingConsistency(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			score1, _, err1 := Float64ToScore(tc.v1)
 			score2, _, err2 := Float64ToScore(tc.v2)
-			
+
 			if err1 != nil || err2 != nil {
 				t.Fatalf("Encoding failed: %v, %v", err1, err2)
 			}
@@ -236,7 +236,7 @@ func TestEncodingConsistency(t *testing.T) {
 			if tc.shouldBeClose {
 				// For close values, scores should be close (within 1)
 				if scoreDiff < -1 || scoreDiff > 1 {
-					t.Errorf("Scores not close for %f vs %f: %d vs %d", 
+					t.Errorf("Scores not close for %f vs %f: %d vs %d",
 						tc.v1, tc.v2, score1, score2)
 				}
 			}
