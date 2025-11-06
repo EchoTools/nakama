@@ -44,6 +44,13 @@ Game servers connect to Nakama using WebSocket connections with various URL para
 - **Description**: Server tags used for server identification and filtering
 - **Usage**: Used in match creation and server discovery
 - **Example**: `wss://example.com/ws?tags=competitive,ranked,na-west`
+- **Special Tags**:
+  - `novalidation` - Skips connectivity validation during registration. For testing purposes only. When used:
+    - Initial healthcheck is skipped, allowing the server to register even if unreachable
+    - An audit message is sent to all guild channels the server is hosting for
+    - A Discord DM is sent to the server owner warning about testing-only usage
+    - The server will continue to be monitored with ping checks, and failures will generate Discord DMs to the owner
+    - Example: `wss://example.com/ws?tags=novalidation,test-server`
 
 #### `guilds`
 - **Type**: Comma-delimited string list
@@ -165,6 +172,12 @@ wss://nakama.example.com/ws?discordid=123456789012345678&password=mypassword&ser
 ```
 wss://nakama.example.com/ws?discordid=123456789012345678&password=mypassword&debug=true&verbose=true&ign=TestServer
 ```
+
+### Local Testing with No Validation
+```
+wss://nakama.example.com/ws?discordid=123456789012345678&password=mypassword&tags=novalidation&serveraddr=localhost:6792
+```
+**Note**: The `novalidation` tag is for testing purposes only. It skips connectivity validation during registration but the server will still be monitored for connectivity issues. If monitoring detects connectivity problems, Discord DMs will be sent to the server owner but the server will NOT be automatically disconnected.
 
 ## Implementation Details
 
