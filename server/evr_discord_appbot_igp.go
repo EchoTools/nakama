@@ -758,12 +758,16 @@ func (d *DiscordAppBot) handleModalSubmit(logger runtime.Logger, i *discordgo.In
 		}
 
 		// Update the IGN with override and lock
+		sanitizedDisplayName := sanitizeDisplayName(displayName)
+		if sanitizedDisplayName == "" {
+			return fmt.Errorf("invalid display name: must contain at least one valid character")
+		}
 		if targetProfile.InGameNames == nil {
 			targetProfile.InGameNames = make(map[string]GroupInGameName)
 		}
 		targetProfile.InGameNames[groupID] = GroupInGameName{
 			GroupID:     groupID,
-			DisplayName: sanitizeDisplayName(displayName),
+			DisplayName: sanitizedDisplayName,
 			IsOverride:  true,
 			IsLocked:    isLocked,
 		}
