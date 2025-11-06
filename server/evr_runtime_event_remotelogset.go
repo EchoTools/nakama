@@ -665,12 +665,13 @@ func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runt
 	playerInfo := label.GetPlayerByEvrID(*xpid)
 	if playerInfo == nil {
 		// If the player isn't in the match, don't process
-		return fmt.Errorf("player not in match: %s", msg.PlayerInfoUserid)
+		return fmt.Errorf("player %s not found in match %s", msg.PlayerInfoUserid, matchID.String())
 	}
 
 	// Only process for actual players (not spectators)
 	if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
-		return fmt.Errorf("non-player loudness update: %s", msg.PlayerInfoUserid)
+		return fmt.Errorf("player %s is not on a playing team (team: %d, expected Blue=%d or Orange=%d)", 
+			msg.PlayerInfoUserid, playerInfo.Team, BlueTeam, OrangeTeam)
 	}
 
 	groupIDStr := label.GetGroupID().String()
@@ -741,10 +742,10 @@ func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runt
 		}
 	}
 
-	// Calculate average loudness for the leaderboard score
-	// We store the total loudness in the score field, and calculate average on read
-	// The average will be calculated as: total_loudness / session_time
-	// For now, we store the total so we can divide by session time later
+	// Store total loudness in the leaderboard score field
+	// Note: The daily average (total_loudness / session_time) is calculated when reading
+	// the data by dividing this total by the GameServerTime leaderboard value.
+	// See PLAYER_LOUDNESS_STAT.md for calculation details.
 	score, subscore, err := Float64ToScore(totalLoudness)
 	if err != nil {
 		return fmt.Errorf("failed to convert loudness to score: %w", err)
