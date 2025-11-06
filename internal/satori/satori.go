@@ -1053,8 +1053,9 @@ func (s *SatoriClient) MessageDelete(ctx context.Context, id, messageId string) 
 	}
 }
 
-// ServerEventsPublish - stub implementation to satisfy interface
+// ServerEventsPublish is a stub implementation to satisfy the runtime.Satori interface.
+// Server events don't require an identity ID.
+// Returns an error indicating the feature is not implemented.
 func (s *SatoriClient) ServerEventsPublish(ctx context.Context, events []*runtime.Event, ipAddress ...string) error {
-	// This is a stub implementation. Server events don't require an identity ID.
 	return fmt.Errorf("ServerEventsPublish not implemented")
 }

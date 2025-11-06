@@ -670,8 +670,8 @@ func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runt
 
 	// Only process for actual players (not spectators)
 	if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
-		return fmt.Errorf("player %s is not on a playing team (team: %d, expected Blue=%d or Orange=%d)", 
-			msg.PlayerInfoUserid, playerInfo.Team, BlueTeam, OrangeTeam)
+		return fmt.Errorf("player %s is not on a playing team (team: %d, expected Blue or Orange)",
+			msg.PlayerInfoUserid, playerInfo.Team)
 	}
 
 	groupIDStr := label.GetGroupID().String()
