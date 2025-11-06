@@ -253,7 +253,9 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	// User is suspended from the group.
 	if gg.IsSuspended(userID, &params.xpID) {
 		// User is suspended from the group.
-		return joinRejected("suspended_user", "You are suspended from this guild. (role-based)", "is suspended via role: <@&"+gg.RoleMap.Suspended+">")
+		guildName := gg.Name()
+		reason := fmt.Sprintf("You are suspended from %s (role-based). Discord ID: %s", guildName, lobbyParams.DiscordID)
+		return joinRejected("suspended_user", reason, "is suspended via role: <@&"+gg.RoleMap.Suspended+">")
 	}
 
 	var (
