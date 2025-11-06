@@ -172,8 +172,28 @@ func BeforeListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.D
 		// No limits
 	} else if vars.Intents.GuildMatches {
 		// Limit to guild matches only (including private matches).
-		if vars.GuildID != "" {
-			query = query + fmt.Sprintf(" +label.group_id:%s", Query.QuoteStringValue(vars.GuildID))
+		// Get the user ID from context
+		userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+		if !ok || userID == "" {
+			logger.Warn("Failed to get user ID from context for GuildMatches intent")
+		} else {
+			// Get the user's guild groups
+			guildGroups, err := GuildUserGroupsList(ctx, nk, nil, userID)
+			if err != nil {
+				logger.Error("Failed to get guild groups for user", zap.Error(err), zap.String("user_id", userID))
+			} else {
+				// Filter for groups where the user has allocator role
+				allocatorGroupIDs := make([]string, 0, len(guildGroups))
+				for groupID, group := range guildGroups {
+					if group.IsAllocator(userID) {
+						allocatorGroupIDs = append(allocatorGroupIDs, groupID)
+					}
+				}
+				// Add query filter for allocator group IDs
+				if len(allocatorGroupIDs) > 0 {
+					query = query + fmt.Sprintf(" +label.group_id:%s", Query.CreateMatchPattern(allocatorGroupIDs))
+				}
+			}
 		}
 	} else {
 		// Limit to public matches only.
