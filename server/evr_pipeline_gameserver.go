@@ -281,7 +281,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		if !isAlive {
 			// If the broadcaster is not available, send an error message to the user on discord
 			logger.Error("Broadcaster could not be reached", zap.Error(err))
-			errorMessage := fmt.Sprintf("Broadcaster (Endpoint ID: %s, Server ID: %d) could not be reached. Error: %v", config.Endpoint.ExternalAddress(), config.ServerID, err)
+			errorMessage := fmt.Sprintf("Broadcaster (Endpoint ID: %s, Server ID: %d) could not be reached. Error: %v", config.Endpoint.String(), config.ServerID, err)
 			go sendDiscordError(errors.New(errorMessage), params.DiscordID(), logger, p.discordCache.dg)
 			return errFailedRegistration(session, logger, errors.New(errorMessage), evr.BroadcasterRegistration_Failure)
 		}
@@ -290,7 +290,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		logger.Warn("Game server registered with 'novalidation' tag", zap.Strings("tags", params.serverTags))
 
 		// Send audit message to all guilds this server is hosting for
-		auditMessage := fmt.Sprintf("Game server registered with 'novalidation' tag by <@%s> (Server ID: %d, Endpoint: %s)", params.DiscordID(), config.ServerID, config.Endpoint.ExternalAddress())
+		auditMessage := fmt.Sprintf("Game server registered with 'novalidation' tag by <@%s> (Server ID: %d, Endpoint: %s)", params.DiscordID(), config.ServerID, config.Endpoint.String())
 		for _, gg := range guildGroups {
 			go func(guildGroup *GuildGroup) {
 				if _, err := AuditLogSendGuild(p.discordCache.dg, guildGroup, auditMessage); err != nil {
@@ -300,7 +300,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		}
 
 		// Send DM to the user
-		dmMessage := fmt.Sprintf("⚠️ Your game server (Server ID: %d, Endpoint: %s) has been registered with 'novalidation' tag. This is for testing purposes only. The server will not be validated for connectivity.", config.ServerID, config.Endpoint.ExternalAddress())
+		dmMessage := fmt.Sprintf("⚠️ Your game server (Server ID: %d, Endpoint: %s) has been registered with 'novalidation' tag. This is for testing purposes only. The server will not be validated for connectivity.", config.ServerID, config.Endpoint.String())
 		if _, err := SendUserMessage(ctx, p.discordCache.dg, params.DiscordID(), dmMessage); err != nil {
 			logger.Warn("Failed to send DM to user", zap.Error(err))
 		}
@@ -353,7 +353,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 				if err != nil || len(rtts) == 0 {
 					logger.Warn("Game server is not responding", zap.Error(err), zap.String("endpoint", config.Endpoint.String()))
 					// Send the discord error
-					errorMessage := fmt.Sprintf("Game server (Endpoint ID: %s, Server ID: %d) is not responding. Error: %v", config.Endpoint.ExternalAddress(), config.ServerID, err)
+					errorMessage := fmt.Sprintf("Game server (Endpoint ID: %s, Server ID: %d) is not responding. Error: %v", config.Endpoint.String(), config.ServerID, err)
 					go sendDiscordError(errors.New(errorMessage), params.DiscordID(), logger, p.discordCache.dg)
 				}
 			}
