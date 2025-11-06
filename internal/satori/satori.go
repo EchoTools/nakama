@@ -1052,3 +1052,10 @@ func (s *SatoriClient) MessageDelete(ctx context.Context, id, messageId string) 
 		return fmt.Errorf("%d status code", res.StatusCode)
 	}
 }
+
+func (s *SatoriClient) ServerEventsPublish(ctx context.Context, events []*runtime.Event, ipAddress ...string) error {
+if s.invalidConfig {
+return runtime.ErrSatoriConfigurationInvalid
+}
+return nil
+}
