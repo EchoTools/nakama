@@ -50,11 +50,17 @@ func GetPlayerDailyAverageLoudness(ctx context.Context, nk runtime.NakamaModule,
         return 0, 0, 0, 0, err
     }
     
-    // Extract metadata
+    // Extract metadata (stored as strings)
     metadata := record.Metadata.(map[string]interface{})
-    minLoudness = metadata["min_loudness"].(float64)
-    maxLoudness = metadata["max_loudness"].(float64)
-    count = int64(metadata["count"].(float64))
+    if val, ok := metadata["min_loudness"].(string); ok {
+        fmt.Sscanf(val, "%f", &minLoudness)
+    }
+    if val, ok := metadata["max_loudness"].(string); ok {
+        fmt.Sscanf(val, "%f", &maxLoudness)
+    }
+    if val, ok := metadata["count"].(string); ok {
+        fmt.Sscanf(val, "%d", &count)
+    }
     
     // Get session time
     sessionTimeID := StatisticBoardID(groupID, mode, GameServerTimeStatisticsID, evr.ResetScheduleDaily)

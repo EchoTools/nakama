@@ -701,13 +701,19 @@ func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runt
 		// Extract metadata (stored as strings)
 		if metadata, ok := record.Metadata.(map[string]interface{}); ok {
 			if val, ok := metadata["min_loudness"].(string); ok {
-				fmt.Sscanf(val, "%f", &minLoudness)
+				if _, err := fmt.Sscanf(val, "%f", &minLoudness); err != nil {
+					logger.WithField("error", err).Warn("Failed to parse min_loudness from metadata")
+				}
 			}
 			if val, ok := metadata["max_loudness"].(string); ok {
-				fmt.Sscanf(val, "%f", &maxLoudness)
+				if _, err := fmt.Sscanf(val, "%f", &maxLoudness); err != nil {
+					logger.WithField("error", err).Warn("Failed to parse max_loudness from metadata")
+				}
 			}
 			if val, ok := metadata["count"].(string); ok {
-				fmt.Sscanf(val, "%d", &count)
+				if _, err := fmt.Sscanf(val, "%d", &count); err != nil {
+					logger.WithField("error", err).Warn("Failed to parse count from metadata")
+				}
 			}
 		}
 	}
