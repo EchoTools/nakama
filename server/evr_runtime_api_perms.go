@@ -87,6 +87,23 @@ func AfterReadStorageObjectsHook(ctx context.Context, logger runtime.Logger, db 
 	return nil
 }
 
+// checkStorageObjectAuthorization checks if the context has authorization to access storage objects.
+// Returns true if authorized (has StorageObjects or IsGlobalOperator intent), false otherwise.
+
+func checkStorageObjectAuthorization(ctx context.Context, logger runtime.Logger) (bool, error) {
+	vars, err := intents.SessionVarsFromRuntimeContext(ctx)
+	if err != nil {
+		logger.Error("Failed to parse session variables from context", zap.Error(err))
+		return false, err
+	}
+
+	if vars != nil && (vars.Intents.StorageObjects || vars.Intents.IsGlobalOperator) {
+		return true, nil
+	}
+
+	return false, nil
+}
+
 // BeforeWriteStorageObjectsHook is a hook that runs before writing storage objects.
 // It checks if the intent includes storage objects access and blocks the request if not authorized.
 func BeforeWriteStorageObjectsHook(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, in *api.WriteStorageObjectsRequest) (*api.WriteStorageObjectsRequest, error) {
@@ -94,19 +111,12 @@ func BeforeWriteStorageObjectsHook(ctx context.Context, logger runtime.Logger, d
 		return nil, nil
 	}
 
-	vars, err := intents.SessionVarsFromRuntimeContext(ctx)
+	isAuthorized, err := checkStorageObjectAuthorization(ctx, logger)
 	if err != nil {
-		logger.Error("Failed to parse session variables from context", zap.Error(err))
 		return nil, err
 	}
 
-	isAuthoritative := false
-
-	if vars != nil && (vars.Intents.StorageObjects || vars.Intents.IsGlobalOperator) {
-		isAuthoritative = true
-	}
-
-	if !isAuthoritative {
+	if !isAuthorized {
 		// Block the request by returning nil
 		return nil, nil
 	}
@@ -121,19 +131,12 @@ func BeforeDeleteStorageObjectsHook(ctx context.Context, logger runtime.Logger, 
 		return nil, nil
 	}
 
-	vars, err := intents.SessionVarsFromRuntimeContext(ctx)
+	isAuthorized, err := checkStorageObjectAuthorization(ctx, logger)
 	if err != nil {
-		logger.Error("Failed to parse session variables from context", zap.Error(err))
 		return nil, err
 	}
 
-	isAuthoritative := false
-
-	if vars != nil && (vars.Intents.StorageObjects || vars.Intents.IsGlobalOperator) {
-		isAuthoritative = true
-	}
-
-	if !isAuthoritative {
+	if !isAuthorized {
 		// Block the request by returning nil
 		return nil, nil
 	}
