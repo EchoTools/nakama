@@ -841,7 +841,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	if gg, ok := callerGuildGroups[groupID]; ok && (gg.IsAuditor(callerID) || gg.IsEnforcer(callerID)) {
 		isAuditorOrEnforcer = true
 	}
-	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, db, callerID, GroupGlobalOperators)
+	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, callerID, GroupGlobalOperators)
 	isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
 
 	if isAuditorOrEnforcer {

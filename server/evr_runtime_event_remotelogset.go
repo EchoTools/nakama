@@ -699,28 +699,15 @@ func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runt
 			totalLoudness = 0
 		}
 
-		// Extract metadata (stored as strings)
-		if metadata, ok := record.Metadata.(map[string]interface{}); ok {
-			if val, ok := metadata["min_loudness"].(string); ok {
-				if parsed, err := strconv.ParseFloat(val, 64); err != nil {
-					logger.WithField("error", err).Warn("Failed to parse min_loudness from metadata")
-				} else {
-					minLoudness = parsed
-				}
-			}
-			if val, ok := metadata["max_loudness"].(string); ok {
-				if parsed, err := strconv.ParseFloat(val, 64); err != nil {
-					logger.WithField("error", err).Warn("Failed to parse max_loudness from metadata")
-				} else {
-					maxLoudness = parsed
-				}
-			}
-			if val, ok := metadata["count"].(string); ok {
-				if parsed, err := strconv.ParseInt(val, 10, 64); err != nil {
-					logger.WithField("error", err).Warn("Failed to parse count from metadata")
-				} else {
-					count = parsed
-				}
+		// Decode existing metadata
+		if record.Metadata != "" {
+			md, err := VOIPLoudnessRecordMetadataFromString(record.Metadata)
+			if err != nil {
+				logger.WithField("error", err).Warn("Failed to decode existing loudness metadata")
+			} else {
+				minLoudness = md.MinLoudness
+				maxLoudness = md.MaxLoudness
+				count = md.Count
 			}
 		}
 	}
@@ -752,11 +739,13 @@ func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runt
 	}
 
 	// Create metadata with min, max, and count
-	metadata := map[string]string{
-		"min_loudness": fmt.Sprintf("%f", minLoudness),
-		"max_loudness": fmt.Sprintf("%f", maxLoudness),
-		"count":        fmt.Sprintf("%d", count),
+	md := VOIPLoudnessRecordMetadata{
+		MinLoudness: minLoudness,
+		MaxLoudness: maxLoudness,
+		Count:       count,
 	}
+
+	mdMap := md.ToMap()
 
 	// Queue the leaderboard update
 	entry := &StatisticsQueueEntry{
@@ -771,7 +760,7 @@ func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runt
 		DisplayName: playerInfo.DisplayName,
 		Score:       score,
 		Subscore:    subscore,
-		Metadata:    metadata,
+		Metadata:    mdMap,
 	}
 
 	return statisticsQueue.Add([]*StatisticsQueueEntry{entry})
@@ -800,4 +789,46 @@ func processMatchGoalIntoUpdate(msg *evr.RemoteLogGoal, update *MatchGameStateUp
 		WasHeadbutt:           msg.WasHeadbutt,
 		PointsValue:           GoalTypeToPoints(msg.GoalType),
 	})
+}
+
+type VOIPLoudnessRecordMetadata struct {
+	MinLoudness float64 `json:"min_loudness"`
+	MaxLoudness float64 `json:"max_loudness"`
+	Count       int64   `json:"count"`
+}
+
+func (m *VOIPLoudnessRecordMetadata) ToMap() map[string]string {
+	return map[string]string{
+		"min_loudness": fmt.Sprintf("%f", m.MinLoudness),
+		"max_loudness": fmt.Sprintf("%f", m.MaxLoudness),
+		"count":        fmt.Sprintf("%d", m.Count),
+	}
+}
+
+func VOIPLoudnessRecordMetadataFromString(data string) (*VOIPLoudnessRecordMetadata, error) {
+	var dataMap map[string]string
+	if err := json.Unmarshal([]byte(data), &dataMap); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal VOIP loudness metadata: %w", err)
+	}
+
+	minLoudness, err := strconv.ParseFloat(dataMap["min_loudness"], 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse min_loudness: %w", err)
+	}
+
+	maxLoudness, err := strconv.ParseFloat(dataMap["max_loudness"], 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse max_loudness: %w", err)
+	}
+
+	count, err := strconv.ParseInt(dataMap["count"], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse count: %w", err)
+	}
+
+	return &VOIPLoudnessRecordMetadata{
+		MinLoudness: minLoudness,
+		MaxLoudness: maxLoudness,
+		Count:       count,
+	}, nil
 }
