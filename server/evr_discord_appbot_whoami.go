@@ -316,7 +316,7 @@ func (WhoAmI) createPastDisplayNameEmbed(history *DisplayNameHistory, groupID st
 		for dn, ts := range items {
 			dn = fmt.Sprintf("`%s`", dn)
 			if e, ok := displayNameMap[dn]; !ok || e.After(ts) {
-				displayNameMap[dn] = e
+				displayNameMap[dn] = ts
 			}
 		}
 	}
