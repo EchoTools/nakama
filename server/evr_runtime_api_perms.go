@@ -14,7 +14,7 @@ import (
 )
 
 // AfterReadStorageObjectsHook is a hook that runs after reading storage objects.
-// It checks if the intent includes storage objects access and retries the request as the system user if zero objects were not returned.
+// It checks if the intent includes storage objects access and retries the request as the system user if any objects are missing from the response.
 func AfterReadStorageObjectsHook(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, out *api.StorageObjects, in *api.ReadStorageObjectsRequest) error {
 	if out == nil || in == nil {
 		return nil
