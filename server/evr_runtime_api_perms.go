@@ -86,8 +86,9 @@ func AfterReadStorageObjectsHook(ctx context.Context, logger runtime.Logger, db 
 	return nil
 }
 
-// checkStorageObjectAuthorization checks if the session has authorization to access storage objects.
-// It returns true if the session has storage objects permission or is a global operator.
+// checkStorageObjectAuthorization checks if the context has authorization to access storage objects.
+// Returns true if authorized (has StorageObjects or IsGlobalOperator intent), false otherwise.
+
 func checkStorageObjectAuthorization(ctx context.Context, logger runtime.Logger) (bool, error) {
 	vars, err := intents.SessionVarsFromRuntimeContext(ctx)
 	if err != nil {
