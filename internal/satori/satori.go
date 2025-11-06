@@ -1052,3 +1052,9 @@ func (s *SatoriClient) MessageDelete(ctx context.Context, id, messageId string) 
 		return fmt.Errorf("%d status code", res.StatusCode)
 	}
 }
+
+// ServerEventsPublish - stub implementation to satisfy interface
+func (s *SatoriClient) ServerEventsPublish(ctx context.Context, events []*runtime.Event, ipAddress ...string) error {
+	// This is a stub implementation. Server events don't require an identity ID.
+	return fmt.Errorf("ServerEventsPublish not implemented")
+}

@@ -192,6 +192,13 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			// This is a ghost user message.
 
 		case *evr.RemoteLogVOIPLoudness:
+			// Process VOIP loudness data
+			if err := s.processVOIPLoudness(ctx, logger, db, nk, statisticsQueue, msg); err != nil {
+				logger.WithFields(map[string]any{
+					"error": err,
+					"msg":   msg,
+				}).Warn("Failed to process VOIP loudness")
+			}
 
 		case *evr.RemoteLogSessionStarted:
 
@@ -633,6 +640,128 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 	}
 
 	return entries, nil
+}
+
+func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, statisticsQueue *StatisticsQueue, msg *evr.RemoteLogVOIPLoudness) error {
+	// Get the match ID
+	matchID, err := NewMatchID(msg.SessionUUID(), s.Node)
+	if err != nil {
+		return fmt.Errorf("failed to create match ID: %w", err)
+	}
+
+	// Get the match label
+	label, err := MatchLabelByID(ctx, nk, matchID)
+	if err != nil || label == nil {
+		return fmt.Errorf("failed to get match label: %w", err)
+	}
+
+	// Parse the player's EVR ID
+	xpid, err := evr.ParseEvrId(msg.PlayerInfoUserid)
+	if err != nil {
+		return fmt.Errorf("failed to parse evr ID: %w", err)
+	}
+
+	// Get the player's information from the match
+	playerInfo := label.GetPlayerByEvrID(*xpid)
+	if playerInfo == nil {
+		// If the player isn't in the match, don't process
+		return fmt.Errorf("player not in match: %s", msg.PlayerInfoUserid)
+	}
+
+	// Only process for actual players (not spectators)
+	if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
+		return fmt.Errorf("non-player loudness update: %s", msg.PlayerInfoUserid)
+	}
+
+	groupIDStr := label.GetGroupID().String()
+	mode := label.Mode
+
+	// Get the loudness value from the message
+	loudnessDB := msg.VoiceLoudnessDB
+
+	// Read the current leaderboard record to get existing metadata
+	boardID := StatisticBoardID(groupIDStr, mode, PlayerLoudnessStatisticID, evr.ResetScheduleDaily)
+
+	_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{playerInfo.UserID}, 1, "", 0)
+
+	// Initialize metadata values
+	var totalLoudness, minLoudness, maxLoudness float64
+	var count int64
+
+	if err == nil && len(ownerRecords) > 0 {
+		record := ownerRecords[0]
+
+		// Decode existing total loudness from score/subscore
+		totalLoudness, err = ScoreToFloat64(record.Score, record.Subscore)
+		if err != nil {
+			logger.WithField("error", err).Warn("Failed to decode existing loudness score")
+			totalLoudness = 0
+		}
+
+		// Extract metadata
+		if metadata, ok := record.Metadata.(map[string]interface{}); ok {
+			if val, ok := metadata["min_loudness"].(float64); ok {
+				minLoudness = val
+			}
+			if val, ok := metadata["max_loudness"].(float64); ok {
+				maxLoudness = val
+			}
+			if val, ok := metadata["count"].(float64); ok {
+				count = int64(val)
+			}
+		}
+	}
+
+	// Update values
+	totalLoudness += loudnessDB
+	count++
+
+	// Update min/max
+	if count == 1 {
+		minLoudness = loudnessDB
+		maxLoudness = loudnessDB
+	} else {
+		if loudnessDB < minLoudness {
+			minLoudness = loudnessDB
+		}
+		if loudnessDB > maxLoudness {
+			maxLoudness = loudnessDB
+		}
+	}
+
+	// Calculate average loudness for the leaderboard score
+	// We store the total loudness in the score field, and calculate average on read
+	// The average will be calculated as: total_loudness / session_time
+	// For now, we store the total so we can divide by session time later
+	score, subscore, err := Float64ToScore(totalLoudness)
+	if err != nil {
+		return fmt.Errorf("failed to convert loudness to score: %w", err)
+	}
+
+	// Create metadata with min, max, and count
+	metadata := map[string]string{
+		"min_loudness": fmt.Sprintf("%f", minLoudness),
+		"max_loudness": fmt.Sprintf("%f", maxLoudness),
+		"count":        fmt.Sprintf("%d", count),
+	}
+
+	// Queue the leaderboard update
+	entry := &StatisticsQueueEntry{
+		BoardMeta: LeaderboardMeta{
+			GroupID:       groupIDStr,
+			Mode:          mode,
+			StatName:      PlayerLoudnessStatisticID,
+			Operator:      OperatorSet, // We're setting the total value each time
+			ResetSchedule: evr.ResetScheduleDaily,
+		},
+		UserID:      playerInfo.UserID,
+		DisplayName: playerInfo.DisplayName,
+		Score:       score,
+		Subscore:    subscore,
+		Metadata:    metadata,
+	}
+
+	return statisticsQueue.Add([]*StatisticsQueueEntry{entry})
 }
 
 func processMatchGoalIntoUpdate(msg *evr.RemoteLogGoal, update *MatchGameStateUpdate) {
