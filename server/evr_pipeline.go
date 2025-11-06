@@ -158,11 +158,16 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 			logger.Fatal("Failed to create IPAPI client", zap.Error(err))
 		}
 		providers = append(providers, ipapiClient)
-
+	} else {
+		logger.Warn("Redis client not configured, IP info cache will be disabled")
 	}
+
 	ipInfoCache, err := NewIPInfoCache(logger, metrics, providers...)
 	if err != nil {
 		logger.Fatal("Failed to create IP info cache", zap.Error(err))
+	}
+	if len(providers) == 0 {
+		logger.Warn("No IP info providers configured, IP geolocation and VPN detection will be disabled")
 	}
 
 	var appBot *DiscordAppBot
