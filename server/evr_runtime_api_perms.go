@@ -171,7 +171,7 @@ func BeforeListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.D
 		// No limits
 	} else if vars.Intents.GuildMatches {
 		// Limit to guild matches only (including private matches).
-		// TODO
+		// TODO: Implement filtering logic to limit results to guild matches only, including private matches.
 	} else {
 		// Limit to public matches only.
 		query = query + ` +label.mode:public`
