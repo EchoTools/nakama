@@ -462,6 +462,17 @@ func (e *event) setTimestamp() {
 }
 
 // @group satori
+// @summary Publish server events.
+// @param ctx(type=context.Context) The context object represents information about the server and requester.
+// @param events(type=[]*runtime.Event) An array of events to publish.
+// @param ipAddress(type=string, optional=true, default="") An optional client IP address to pass on to Satori for geo-IP lookup.
+// @return error(error) An optional error value if an error occurred.
+func (s *SatoriClient) ServerEventsPublish(ctx context.Context, events []*runtime.Event, ipAddress ...string) error {
+	// Server events are published without a specific identity ID
+	return s.EventsPublish(ctx, "", events, ipAddress...)
+}
+
+// @group satori
 // @summary Publish an event.
 // @param ctx(type=context.Context) The context object represents information about the server and requester.
 // @param id(type=string) The identifier of the identity.
