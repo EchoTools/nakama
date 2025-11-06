@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -147,28 +148,37 @@ func TestLeaderboardMetadataFormat(t *testing.T) {
 
 	// This simulates the metadata we'll store
 	metadata := map[string]string{
-		"min_loudness": "-35.500000",
-		"max_loudness": "-20.300000",
-		"count":        "42",
+		"min_loudness": fmt.Sprintf("%f", minLoudness),
+		"max_loudness": fmt.Sprintf("%f", maxLoudness),
+		"count":        fmt.Sprintf("%d", count),
 	}
 
-	// Verify we can parse it back
+	// Verify we can parse it back using strconv
 	var parsedMin, parsedMax float64
 	var parsedCount int64
 
-	_, err := fmt.Sscanf(metadata["min_loudness"], "%f", &parsedMin)
-	if err != nil {
-		t.Errorf("Failed to parse min_loudness: %v", err)
+	if val, ok := metadata["min_loudness"]; ok {
+		if parsed, err := strconv.ParseFloat(val, 64); err == nil {
+			parsedMin = parsed
+		} else {
+			t.Errorf("Failed to parse min_loudness: %v", err)
+		}
 	}
 
-	_, err = fmt.Sscanf(metadata["max_loudness"], "%f", &parsedMax)
-	if err != nil {
-		t.Errorf("Failed to parse max_loudness: %v", err)
+	if val, ok := metadata["max_loudness"]; ok {
+		if parsed, err := strconv.ParseFloat(val, 64); err == nil {
+			parsedMax = parsed
+		} else {
+			t.Errorf("Failed to parse max_loudness: %v", err)
+		}
 	}
 
-	_, err = fmt.Sscanf(metadata["count"], "%d", &parsedCount)
-	if err != nil {
-		t.Errorf("Failed to parse count: %v", err)
+	if val, ok := metadata["count"]; ok {
+		if parsed, err := strconv.ParseInt(val, 10, 64); err == nil {
+			parsedCount = parsed
+		} else {
+			t.Errorf("Failed to parse count: %v", err)
+		}
 	}
 
 	if parsedMin != minLoudness {
