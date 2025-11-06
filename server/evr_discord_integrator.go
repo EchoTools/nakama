@@ -962,6 +962,9 @@ func (d *DiscordIntegrator) handleGuildRoleUpdate(ctx context.Context, logger *z
 	)
 
 	// Fetch the audit log to determine who made the change
+	// Note: We fetch only the most recent entry (limit=1) for the role update action.
+	// In the case of rapid concurrent updates to different roles, the entry is verified
+	// against the target role ID to ensure we're processing the correct event.
 	auditLogs, err := s.GuildAuditLog(e.GuildID, "", "", int(discordgo.AuditLogActionRoleUpdate), 1)
 	if err != nil {
 		logger.Warn("Error fetching audit log for role update", zap.Error(err))
@@ -978,7 +981,9 @@ func (d *DiscordIntegrator) handleGuildRoleUpdate(ctx context.Context, logger *z
 
 	// Verify this audit log entry is for the role we're tracking
 	if latestUpdate.TargetID != e.Role.ID {
-		logger.Debug("Latest audit log entry does not match the role ID", zap.String("target_id", latestUpdate.TargetID))
+		logger.Info("Latest audit log entry does not match the role ID - possible race condition with multiple role updates", 
+			zap.String("target_id", latestUpdate.TargetID),
+			zap.String("expected_role_id", e.Role.ID))
 		return nil
 	}
 
@@ -988,20 +993,10 @@ func (d *DiscordIntegrator) handleGuildRoleUpdate(ctx context.Context, logger *z
 		return nil
 	}
 
-	// Fetch the user who made the change
-	issuer, err := s.User(latestUpdate.UserID)
-	if err != nil {
-		logger.Warn("Failed to fetch user who made the role change", zap.Error(err), zap.String("user_id", latestUpdate.UserID))
-		// Continue anyway, we can still log the event
-	}
-
 	// Build the audit message
-	var issuerMention string
-	if issuer != nil {
-		issuerMention = fmt.Sprintf("<@%s>", issuer.ID)
-	} else {
-		issuerMention = fmt.Sprintf("User ID: %s", latestUpdate.UserID)
-	}
+	// Note: We use the UserID from the audit log directly to avoid an extra API call
+	// The audit log already contains the necessary user identification
+	issuerMention := fmt.Sprintf("<@%s>", latestUpdate.UserID)
 
 	// Extract changes from audit log if available
 	var changeDetails string
