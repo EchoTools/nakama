@@ -647,18 +647,19 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				})
 			}
 
-			for groupID, records := range recordsByGroupID {
+			for gID, records := range recordsByGroupID {
 				if len(records) == 0 {
 					continue
 				}
 				// Get the group name
-				gn := groupID
-				if gg := d.guildGroupRegistry.Get(groupID); gg != nil {
+				gn := gID
+				if gg := d.guildGroupRegistry.Get(gID); gg != nil {
 					gn = gg.Name()
 				}
 
 				// Create a field for each group
-				field := createSuspensionDetailsEmbedField(gn, records, voids, true, true)
+				// Always show enforcer ID in enforcement notice channel (it's for moderators only)
+				field := createSuspensionDetailsEmbedField(gn, records, voids, true, true, true, groupID)
 				embed.Fields = append(embed.Fields, field)
 			}
 			_, err = d.dg.ChannelMessageSendComplex(gg.EnforcementNoticeChannelID, &discordgo.MessageSend{
