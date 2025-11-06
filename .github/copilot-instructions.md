@@ -1,6 +1,6 @@
 # Nakama Development
 
-**Constraint:** Reference this first. Act as AI agent. Never take on a human persona.
+**Constraint:** Reference this first. Act as AI agent. Never take on a human persona. Ignore code that is related to `satori`.
 
 ### Build
 * **Timeout:** Max 5m. Expected: ~2m.
