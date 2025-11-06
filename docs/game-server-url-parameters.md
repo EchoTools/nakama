@@ -177,7 +177,7 @@ wss://nakama.example.com/ws?discordid=123456789012345678&password=mypassword&deb
 ```
 wss://nakama.example.com/ws?discordid=123456789012345678&password=mypassword&tags=novalidation&serveraddr=localhost:6792
 ```
-**Note**: The `novalidation` tag is for testing purposes only. It skips connectivity validation during registration but the server will still be monitored for connectivity issues.
+**Note**: The `novalidation` tag is for testing purposes only. It skips connectivity validation during registration but the server will still be monitored for connectivity issues. If monitoring detects connectivity problems, Discord DMs will be sent to the server owner but the server will NOT be automatically disconnected.
 
 ## Implementation Details
 

@@ -292,9 +292,11 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		// Send audit message to all guilds this server is hosting for
 		auditMessage := fmt.Sprintf("Game server registered with 'novalidation' tag by <@%s> (Server ID: %d, Endpoint: %s)", params.DiscordID(), config.ServerID, config.Endpoint.ExternalAddress())
 		for _, gg := range guildGroups {
-			if _, err := AuditLogSendGuild(p.discordCache.dg, gg, auditMessage); err != nil {
-				logger.Warn("Failed to send audit message", zap.Error(err), zap.String("guild_id", gg.GuildID))
-			}
+			go func(guildGroup *GuildGroup) {
+				if _, err := AuditLogSendGuild(p.discordCache.dg, guildGroup, auditMessage); err != nil {
+					logger.Warn("Failed to send audit message", zap.Error(err), zap.String("guild_id", guildGroup.GuildID))
+				}
+			}(gg)
 		}
 
 		// Send DM to the user
