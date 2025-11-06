@@ -40,6 +40,7 @@ type UserProfileRequestOptions struct {
 	IncludeAllGuilds               bool
 	ShowLoginsSince                time.Time
 	SendFileOnError                bool // If true, send a file with the error message instead of an ephemeral message
+	IncludeSetIGNButton            bool // If true, include a button to set the IGN override
 }
 
 const (

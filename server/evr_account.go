@@ -22,6 +22,7 @@ type GroupInGameName struct {
 	GroupID     string `json:"group_id"`
 	DisplayName string `json:"display_name"`
 	IsOverride  bool   `json:"is_override"` // If this is an override for the group
+	Lock        bool   `json:"lock"`        // If true, prevents users from changing their IGN override
 }
 
 type EVRProfile struct {

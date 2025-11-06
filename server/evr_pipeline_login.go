@@ -627,9 +627,15 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		groupIGN := params.profile.GetGroupIGNData(groupID)
 
 		if params.userDisplayNameOverride != "" {
-			// If the user has provided a display name override, use that.
-			groupIGN.DisplayName = params.userDisplayNameOverride
-			groupIGN.IsOverride = true
+			// Check if the IGN is locked
+			if groupIGN.Lock {
+				// If locked, prevent user from changing it, keep the existing display name
+				logger.Debug("IGN is locked, ignoring user override", zap.String("groupID", groupID), zap.String("userID", params.UserID()))
+			} else {
+				// If the user has provided a display name override, use that.
+				groupIGN.DisplayName = params.userDisplayNameOverride
+				groupIGN.IsOverride = true
+			}
 		}
 
 		if groupIGN.DisplayName == "" {
@@ -652,6 +658,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 			} else if memberNick == "" {
 				// If the group in-game name is empty, remove it; the active group ID will be used.
 				params.profile.DeleteGroupDisplayName(groupID)
+			}
 			}
 		}
 		// Use the in-game name from the guild member.
