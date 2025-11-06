@@ -1267,6 +1267,16 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			if displayName == "" || displayName == "-" || displayName == user.Username {
+				// Prevent deletion if the IGN entry is locked
+				if groupIGN, exists := md.InGameNames[groupID]; exists && groupIGN.IsLocked {
+					return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Flags:   discordgo.MessageFlagsEphemeral,
+							Content: "Your display name is locked and cannot be changed. Contact a moderator for assistance.",
+						},
+					})
+				}
 				delete(md.InGameNames, groupID)
 			} else {
 				if md.InGameNames == nil {
