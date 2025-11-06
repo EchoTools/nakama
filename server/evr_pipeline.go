@@ -145,7 +145,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 	var providers []IPInfoProvider
 	if redisClient != nil {
-		if vars["IPAPI_API_KEY"] != "" {
+		if vars["IPQS_API_KEY"] != "" {
 			ipqsClient, err := NewIPQSClient(logger, metrics, redisClient, vars["IPQS_API_KEY"])
 			if err != nil {
 				logger.Fatal("Failed to create IPQS client", zap.Error(err))

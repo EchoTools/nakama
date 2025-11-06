@@ -11,10 +11,9 @@ import (
 // TestIPInfoCacheNoProviders tests that IPInfoCache works correctly with no providers
 func TestIPInfoCacheNoProviders(t *testing.T) {
 	logger := NewConsoleLogger(os.Stdout, true)
-	metrics := &LocalMetrics{}
 
-	// Create cache with no providers
-	cache, err := NewIPInfoCache(logger, metrics)
+	// Create cache with no providers (metrics can be nil as it's not used in the tested methods)
+	cache, err := NewIPInfoCache(logger, nil)
 	if err != nil {
 		t.Fatalf("NewIPInfoCache failed with no providers: %v", err)
 	}
@@ -64,11 +63,10 @@ func TestIPInfoCacheNoProviders(t *testing.T) {
 // TestIPInfoCacheWithStubProvider tests IPInfoCache with a stub provider
 func TestIPInfoCacheWithStubProvider(t *testing.T) {
 	logger := NewConsoleLogger(os.Stdout, true)
-	metrics := &LocalMetrics{}
 
 	// Create a stub provider
 	stubProvider := &stubIPInfoProvider{}
-	cache, err := NewIPInfoCache(logger, metrics, stubProvider)
+	cache, err := NewIPInfoCache(logger, nil, stubProvider)
 	if err != nil {
 		t.Fatalf("NewIPInfoCache failed: %v", err)
 	}
