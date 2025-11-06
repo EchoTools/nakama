@@ -1052,3 +1052,72 @@ func (s *SatoriClient) MessageDelete(ctx context.Context, id, messageId string) 
 		return fmt.Errorf("%d status code", res.StatusCode)
 	}
 }
+
+func (s *SatoriClient) ServerEventsPublish(ctx context.Context, events []*runtime.Event, ipAddress ...string) error {
+	if s.invalidConfig {
+		return runtime.ErrSatoriConfigurationInvalid
+	}
+
+	ip := ""
+	if len(ipAddress) > 0 {
+		ip = ipAddress[0]
+	}
+
+	eventsData := make([]map[string]any, 0, len(events))
+	for _, event := range events {
+		eventData := map[string]any{
+			"name": event.Name,
+		}
+		if event.Id != "" {
+			eventData["id"] = event.Id
+		}
+		if event.Metadata != nil {
+			eventData["metadata"] = event.Metadata
+		}
+		if event.Value != "" {
+			eventData["value"] = event.Value
+		}
+		if event.Timestamp != 0 {
+			eventData["timestamp"] = event.Timestamp
+		}
+		eventsData = append(eventsData, eventData)
+	}
+
+	body := map[string]any{
+		"events": eventsData,
+	}
+
+	bodyJson, err := json.Marshal(body)
+if err != nil {
+return err
+}
+
+req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.urlString+"/v1/event", bytes.NewReader(bodyJson))
+if err != nil {
+return err
+}
+
+req.Header.Set("Content-Type", "application/json")
+if ip != "" {
+req.Header.Set("X-Forwarded-For", ip)
+}
+
+req.SetBasicAuth(s.apiKeyName, s.apiKey)
+
+res, err := s.httpc.Do(req)
+if err != nil {
+return err
+}
+defer res.Body.Close()
+
+switch res.StatusCode {
+case 200:
+return nil
+default:
+errBody, err := io.ReadAll(res.Body)
+if err == nil && len(errBody) > 0 {
+return fmt.Errorf("%d status code: %s", res.StatusCode, string(errBody))
+}
+return fmt.Errorf("%d status code", res.StatusCode)
+}
+}
