@@ -28,6 +28,7 @@ const (
 	LobbyTimeStatisticID          = "LobbyTime"
 	GameServerTimeStatisticsID    = "GameServerTime"
 	EarlyQuitStatisticID          = "EarlyQuits"
+	PlayerLoudnessStatisticID     = "PlayerLoudness"
 
 	LeaderboardScoreScalingFactor = float64(1000000000)
 )
