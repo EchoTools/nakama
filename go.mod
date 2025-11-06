@@ -22,7 +22,7 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.3
-	github.com/heroiclabs/nakama-common v1.42.2
+	github.com/heroiclabs/nakama-common v1.37.0
 	github.com/heroiclabs/sql-migrate v0.0.0-20241125131053-95a7949783b0
 	github.com/intinig/go-openskill v0.0.0-20250324193118-8ce0c35c4815
 	github.com/jackc/pgerrcode v0.0.0-20250907135507-afb5586c32a6
