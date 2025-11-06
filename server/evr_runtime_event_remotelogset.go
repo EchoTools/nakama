@@ -698,16 +698,16 @@ func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runt
 			totalLoudness = 0
 		}
 
-		// Extract metadata
+		// Extract metadata (stored as strings)
 		if metadata, ok := record.Metadata.(map[string]interface{}); ok {
-			if val, ok := metadata["min_loudness"].(float64); ok {
-				minLoudness = val
+			if val, ok := metadata["min_loudness"].(string); ok {
+				fmt.Sscanf(val, "%f", &minLoudness)
 			}
-			if val, ok := metadata["max_loudness"].(float64); ok {
-				maxLoudness = val
+			if val, ok := metadata["max_loudness"].(string); ok {
+				fmt.Sscanf(val, "%f", &maxLoudness)
 			}
-			if val, ok := metadata["count"].(float64); ok {
-				count = int64(val)
+			if val, ok := metadata["count"].(string); ok {
+				fmt.Sscanf(val, "%d", &count)
 			}
 		}
 	}
