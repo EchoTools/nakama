@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
@@ -168,7 +169,9 @@ func BeforeListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.D
 		// No limits
 	} else if vars.Intents.GuildMatches {
 		// Limit to guild matches only (including private matches).
-		// TODO
+		if vars.GuildID != "" {
+			query = query + fmt.Sprintf(" +label.group_id:%s", Query.QuoteStringValue(vars.GuildID))
+		}
 	} else {
 		// Limit to public matches only.
 		query = query + ` +label.mode:public`
