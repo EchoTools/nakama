@@ -918,10 +918,38 @@ func (d *DiscordIntegrator) handleGuildRoleUpdate(ctx context.Context, logger *z
 		return nil
 	}
 
-	// Check if the updated role is a managed role (specifically the linked role)
-	if e.Role.ID != guildGroup.RoleMap.AccountLinked {
+	// Check if the updated role is a managed role
+	managedRoleSet := guildGroup.RoleMap.AsSet()
+	if _, isManagedRole := managedRoleSet[e.Role.ID]; !isManagedRole {
 		// Not a managed role we care about, ignore
 		return nil
+	}
+
+	// Determine which managed role this is for better logging
+	roleType := "unknown"
+	switch e.Role.ID {
+	case guildGroup.RoleMap.AccountLinked:
+		roleType = "linked"
+	case guildGroup.RoleMap.Member:
+		roleType = "member"
+	case guildGroup.RoleMap.Enforcer:
+		roleType = "enforcer"
+	case guildGroup.RoleMap.Auditor:
+		roleType = "auditor"
+	case guildGroup.RoleMap.ServerHost:
+		roleType = "server_host"
+	case guildGroup.RoleMap.Allocator:
+		roleType = "allocator"
+	case guildGroup.RoleMap.Suspended:
+		roleType = "suspended"
+	case guildGroup.RoleMap.APIAccess:
+		roleType = "api_access"
+	case guildGroup.RoleMap.AccountAgeBypass:
+		roleType = "account_age_bypass"
+	case guildGroup.RoleMap.VPNBypass:
+		roleType = "vpn_bypass"
+	case guildGroup.RoleMap.UsernameOnly:
+		roleType = "username_only"
 	}
 
 	logger = logger.With(
@@ -929,6 +957,7 @@ func (d *DiscordIntegrator) handleGuildRoleUpdate(ctx context.Context, logger *z
 		zap.String("guild_id", e.GuildID),
 		zap.String("role_id", e.Role.ID),
 		zap.String("role_name", e.Role.Name),
+		zap.String("role_type", roleType),
 		zap.String("group_id", groupID),
 	)
 
@@ -984,8 +1013,9 @@ func (d *DiscordIntegrator) handleGuildRoleUpdate(ctx context.Context, logger *z
 	}
 
 	auditMessage := fmt.Sprintf(
-		"⚠️ Managed role `%s` (linked role) was modified by %s%s",
+		"⚠️ Managed role `%s` (%s) was modified by %s%s",
 		e.Role.Name,
+		roleType,
 		issuerMention,
 		changeDetails,
 	)
