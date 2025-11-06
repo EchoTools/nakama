@@ -357,7 +357,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 			}
 
 			isAuditorOrEnforcer := false
-			if gg, ok := callerGuildGroups[groupID]; ok && (gg.IsAuditor(userID) || gg.IsEnforcer(userID)) {
+			if gg, ok := callerGuildGroups[targetGroupID]; ok && (gg.IsAuditor(userID) || gg.IsEnforcer(userID)) {
 				isAuditorOrEnforcer = true
 			}
 			isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
