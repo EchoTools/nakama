@@ -421,7 +421,7 @@ func (w *WhoAmI) createSuspensionsEmbed() *discordgo.MessageEmbed {
 			if gg, ok := w.guildGroups[groupID]; ok {
 				gName = EscapeDiscordMarkdown(gg.Name())
 			}
-			if field := createSuspensionDetailsEmbedField(gName, records, voids, w.opts.IncludeInactiveSuspensions, w.opts.IncludeSuspensionAuditorNotes); field != nil {
+			if field := createSuspensionDetailsEmbedField(gName, records, voids, w.opts.IncludeInactiveSuspensions, w.opts.IncludeSuspensionAuditorNotes, w.opts.IncludeSuspensionAuditorNotes, w.GroupID); field != nil {
 				if field.Value != "" {
 					fields = append(fields, field)
 				}

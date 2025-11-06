@@ -77,7 +77,7 @@ func StorableRead(ctx context.Context, nk runtime.NakamaModule, userID string, d
 	case 0:
 		// No objects found
 		if create {
-			meta.Version = "*"                           // Disallow overwriting existing objects.
+			meta.Version = "*"                         // Disallow overwriting existing objects.
 			return StorableWrite(ctx, nk, userID, dst) // Attempt to write the object if it doesn't exist.
 		}
 		return status.Errorf(codes.NotFound, "no %s/%s found", userID, meta.String())
