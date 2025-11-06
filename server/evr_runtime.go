@@ -15,6 +15,8 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	apiAuth "github.com/heroiclabs/nakama/v3/server/socialauth"
 	"github.com/jackc/pgtype"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
 	"google.golang.org/grpc/codes"
@@ -218,6 +220,24 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register telemetry stream RPCs: %w", err)
 	}
 
+	// Initialize MongoDB client if configured
+	var mongoClient *mongo.Client
+	if mongoURI, ok := vars["MONGO_URI"]; ok && mongoURI != "" {
+		mongoClient, err = connectMongo(ctx, mongoURI)
+		if err != nil {
+			logger.Warn("Failed to connect to MongoDB, session events will not be available.", zap.Error(err))
+		} else {
+			logger.Info("Connected to MongoDB for session events")
+
+			// Register session event RPCs
+			if err := RegisterSessionEventRPCs(ctx, logger, db, nk, initializer, mongoClient); err != nil {
+				return fmt.Errorf("unable to register session event RPCs: %w", err)
+			}
+		}
+	} else {
+		logger.Warn("MONGO_URI is not set, session event RPCs will not be available.")
+	}
+
 	logger.Info("Initialized runtime module.")
 	return nil
 }
@@ -235,6 +255,28 @@ func connectRedis(ctx context.Context, redisURL string) (*redis.Client, error) {
 		return nil, fmt.Errorf("failed to connect to Redis: %v", err)
 	}
 	return redisClient, nil
+}
+
+// connectMongo connects to MongoDB using the provided URI and returns a mongo.Client.
+func connectMongo(ctx context.Context, mongoURI string) (*mongo.Client, error) {
+	clientOptions := options.Client().ApplyURI(mongoURI)
+
+	// Set a timeout for the connection
+	connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	client, err := mongo.Connect(connectCtx, clientOptions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to MongoDB: %w", err)
+	}
+
+	// Verify the connection
+	if err := client.Ping(connectCtx, nil); err != nil {
+		client.Disconnect(ctx)
+		return nil, fmt.Errorf("failed to ping MongoDB: %w", err)
+	}
+
+	return client, nil
 }
 
 func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
