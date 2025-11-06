@@ -75,11 +75,11 @@ func TestFloat64ToScoreLegacy(t *testing.T) {
 // Test the new dual-value Float64ToScore function
 func TestFloat64ToScore(t *testing.T) {
 	testCases := []struct {
-		name           string
-		input          float64
-		expectedScore  int64
-		expectedSub    int64
-		expectedError  error
+		name          string
+		input         float64
+		expectedScore int64
+		expectedSub   int64
+		expectedError error
 	}{
 		{
 			name:          "zero value",
@@ -119,7 +119,7 @@ func TestFloat64ToScore(t *testing.T) {
 		{
 			name:          "small positive",
 			input:         0.1,
-			expectedScore: 1000000000000000, // 1e15 
+			expectedScore: 1000000000000000, // 1e15
 			expectedSub:   100000000,        // 0.1 * 1e9
 			expectedError: nil,
 		},
@@ -328,7 +328,7 @@ func TestZeroValueNotSkipCondition(t *testing.T) {
 	expectedScore := int64(1e15)
 	expectedSubscore := int64(0)
 	if score != expectedScore || subscore != expectedSubscore {
-		t.Errorf("Zero value incorrectly encoded as (%d, %d), should be (%d, %d)", 
+		t.Errorf("Zero value incorrectly encoded as (%d, %d), should be (%d, %d)",
 			score, subscore, expectedScore, expectedSubscore)
 	}
 

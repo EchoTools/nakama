@@ -382,7 +382,7 @@ func FormatDuration(d time.Duration) string {
 	return "0s"
 }
 
-func createSuspensionDetailsEmbedField(guildName string, records []GuildEnforcementRecord, voids map[string]GuildEnforcementRecordVoid, includeInactive, includeAuditorNotes bool) *discordgo.MessageEmbedField {
+func createSuspensionDetailsEmbedField(guildName string, records []GuildEnforcementRecord, voids map[string]GuildEnforcementRecordVoid, includeInactive, includeAuditorNotes, showEnforcerID bool, currentGuildID string) *discordgo.MessageEmbedField {
 	if len(records) == 0 {
 		return nil
 	}
@@ -402,8 +402,14 @@ func createSuspensionDetailsEmbedField(guildName string, records []GuildEnforcem
 			durationText = fmt.Sprintf("~~%s~~", durationText)
 		}
 
+		// Show enforcer Discord ID only if viewer is a moderator AND suspension is for current guild
+		enforcerInfo := ""
+		if showEnforcerID && r.GroupID == currentGuildID {
+			enforcerInfo = fmt.Sprintf(" by <@!%s>", r.EnforcerDiscordID)
+		}
+
 		parts = append(parts,
-			fmt.Sprintf("<t:%d:R> by <@!%s> %s:", r.CreatedAt.UTC().Unix(), r.EnforcerDiscordID, durationText),
+			fmt.Sprintf("<t:%d:R>%s %s:", r.CreatedAt.UTC().Unix(), enforcerInfo, durationText),
 			fmt.Sprintf("- `%s`", r.UserNoticeText),
 		)
 
