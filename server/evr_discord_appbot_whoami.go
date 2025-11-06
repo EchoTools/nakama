@@ -833,12 +833,38 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	const FieldMaxLen = 800
 	const MaxFieldsPerEmbed = 25
 	embeds = PaginateEmbeds(embeds, MaxFieldsPerEmbed, FieldMaxLen)
+
+	// Add "Set IGN Override" button for enforcers
+	components := []discordgo.MessageComponent{}
+	callerGuildGroups, _ := GuildUserGroupsList(ctx, nk, d.guildGroupRegistry, callerID)
+	isAuditorOrEnforcer := false
+	if gg, ok := callerGuildGroups[groupID]; ok && (gg.IsAuditor(callerID) || gg.IsEnforcer(callerID)) {
+		isAuditorOrEnforcer = true
+	}
+	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, db, callerID, GroupGlobalOperators)
+	isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
+
+	if isAuditorOrEnforcer {
+		components = []discordgo.MessageComponent{
+			discordgo.ActionsRow{
+				Components: []discordgo.MessageComponent{
+					&discordgo.Button{
+						Label:    "Set IGN Override",
+						Style:    discordgo.PrimaryButton,
+						CustomID: fmt.Sprintf("lookup:set_ign_override:%s:%s", targetID, groupID),
+					},
+				},
+			},
+		}
+	}
+
 	// Send the response
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
-			Flags:  discordgo.MessageFlagsEphemeral,
-			Embeds: embeds,
+			Flags:      discordgo.MessageFlagsEphemeral,
+			Embeds:     embeds,
+			Components: components,
 		}}); err != nil {
 		if opts.SendFileOnError {
 			// If the error is due to the message being too long, try and send a file with the embeds instead
