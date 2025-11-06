@@ -27,6 +27,7 @@ import (
 )
 
 const MINIMUM_NATIVE_SERVER_VERSION = "2.0.0"
+const NoValidationTag = "novalidation"
 
 var (
 	ErrGameServerPresenceNotFound = errors.New("game server presence not found")
@@ -249,7 +250,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	logger = logger.With(zap.String("internal_ip", internalIP.String()), zap.String("external_ip", externalIP.String()), zap.Uint16("port", externalPort))
 
 	// Check if "novalidation" tag is present
-	hasNoValidation := slices.Contains(params.serverTags, "novalidation")
+	hasNoValidation := slices.Contains(params.serverTags, NoValidationTag)
 
 	// Give the server some time to start up
 	time.Sleep(2 * time.Second)
