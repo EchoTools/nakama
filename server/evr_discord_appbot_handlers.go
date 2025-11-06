@@ -659,7 +659,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 
 				// Create a field for each group
 				// Always show enforcer ID in enforcement notice channel (it's for moderators only)
-				field := createSuspensionDetailsEmbedField(gn, records, voids, true, true, true, groupID)
+				field := createSuspensionDetailsEmbedField(gn, records, voids, true, true, true, gID)
 				embed.Fields = append(embed.Fields, field)
 			}
 			_, err = d.dg.ChannelMessageSendComplex(gg.EnforcementNoticeChannelID, &discordgo.MessageSend{
