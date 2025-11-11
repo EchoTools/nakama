@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -172,5 +173,157 @@ func TestCheckEnforcementSuspensions_VoidInheritedSuspension(t *testing.T) {
 	// GroupB should not have any active enforcements
 	if _, exists := activeEnforcements[groupB]; exists {
 		t.Errorf("expected no active enforcement in groupB, but found one")
+	}
+}
+
+func TestCreateSuspensionDetailsEmbedField(t *testing.T) {
+	groupA := "group-a"
+	groupB := "group-b"
+	userID := "user-1"
+	enforcerUserID := "enforcer-1"
+	enforcerDiscordID := "enforcer-discord-1"
+
+	testCases := []struct {
+		name                string
+		guildName           string
+		records             []GuildEnforcementRecord
+		voids               map[string]GuildEnforcementRecordVoid
+		includeInactive     bool
+		includeAuditorNotes bool
+		showEnforcerID      bool
+		currentGuildID      string
+		expectedContains    []string
+		expectedNotContains []string
+	}{
+		{
+			name:      "Show enforcer ID when moderator views current guild suspension",
+			guildName: "Guild A",
+			records: []GuildEnforcementRecord{
+				{
+					ID:                userID + "-record-1",
+					UserID:            userID,
+					GroupID:           groupA,
+					EnforcerUserID:    enforcerUserID,
+					EnforcerDiscordID: enforcerDiscordID,
+					CreatedAt:         time.Now().Add(-1 * time.Hour),
+					UpdatedAt:         time.Now().Add(-1 * time.Hour),
+					UserNoticeText:    "Test suspension",
+					Expiry:            time.Now().Add(1 * time.Hour),
+					AuditorNotes:      "Test notes",
+				},
+			},
+			voids:               nil,
+			includeInactive:     false,
+			includeAuditorNotes: true,
+			showEnforcerID:      true,
+			currentGuildID:      groupA,
+			expectedContains:    []string{"<@!" + enforcerDiscordID + ">", "Test suspension"},
+			expectedNotContains: []string{},
+		},
+		{
+			name:      "Hide enforcer ID when non-moderator views suspension",
+			guildName: "Guild A",
+			records: []GuildEnforcementRecord{
+				{
+					ID:                userID + "-record-1",
+					UserID:            userID,
+					GroupID:           groupA,
+					EnforcerUserID:    enforcerUserID,
+					EnforcerDiscordID: enforcerDiscordID,
+					CreatedAt:         time.Now().Add(-1 * time.Hour),
+					UpdatedAt:         time.Now().Add(-1 * time.Hour),
+					UserNoticeText:    "Test suspension",
+					Expiry:            time.Now().Add(1 * time.Hour),
+					AuditorNotes:      "Test notes",
+				},
+			},
+			voids:               nil,
+			includeInactive:     false,
+			includeAuditorNotes: false,
+			showEnforcerID:      false,
+			currentGuildID:      groupA,
+			expectedContains:    []string{"Test suspension"},
+			expectedNotContains: []string{"<@!" + enforcerDiscordID + ">"},
+		},
+		{
+			name:      "Hide enforcer ID when moderator views different guild suspension",
+			guildName: "Guild B",
+			records: []GuildEnforcementRecord{
+				{
+					ID:                userID + "-record-1",
+					UserID:            userID,
+					GroupID:           groupA,
+					EnforcerUserID:    enforcerUserID,
+					EnforcerDiscordID: enforcerDiscordID,
+					CreatedAt:         time.Now().Add(-1 * time.Hour),
+					UpdatedAt:         time.Now().Add(-1 * time.Hour),
+					UserNoticeText:    "Test suspension",
+					Expiry:            time.Now().Add(1 * time.Hour),
+					AuditorNotes:      "Test notes",
+				},
+			},
+			voids:               nil,
+			includeInactive:     false,
+			includeAuditorNotes: true,
+			showEnforcerID:      true,
+			currentGuildID:      groupB,
+			expectedContains:    []string{"Test suspension"},
+			expectedNotContains: []string{"<@!" + enforcerDiscordID + ">"},
+		},
+		{
+			name:      "Hide auditor notes when not moderator",
+			guildName: "Guild A",
+			records: []GuildEnforcementRecord{
+				{
+					ID:                userID + "-record-1",
+					UserID:            userID,
+					GroupID:           groupA,
+					EnforcerUserID:    enforcerUserID,
+					EnforcerDiscordID: enforcerDiscordID,
+					CreatedAt:         time.Now().Add(-1 * time.Hour),
+					UpdatedAt:         time.Now().Add(-1 * time.Hour),
+					UserNoticeText:    "Test suspension",
+					Expiry:            time.Now().Add(1 * time.Hour),
+					AuditorNotes:      "Test notes",
+				},
+			},
+			voids:               nil,
+			includeInactive:     false,
+			includeAuditorNotes: false,
+			showEnforcerID:      false,
+			currentGuildID:      groupA,
+			expectedContains:    []string{"Test suspension"},
+			expectedNotContains: []string{"Test notes", "<@!" + enforcerDiscordID + ">"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			field := createSuspensionDetailsEmbedField(
+				tc.guildName,
+				tc.records,
+				tc.voids,
+				tc.includeInactive,
+				tc.includeAuditorNotes,
+				tc.showEnforcerID,
+				tc.currentGuildID,
+			)
+
+			if field == nil {
+				t.Fatal("expected field to be non-nil")
+			}
+
+			for _, expected := range tc.expectedContains {
+				if !strings.Contains(field.Value, expected) {
+					t.Errorf("expected field value to contain %q, but it did not. Field value: %s", expected, field.Value)
+				}
+			}
+
+			for _, notExpected := range tc.expectedNotContains {
+				if strings.Contains(field.Value, notExpected) {
+					t.Errorf("expected field value to NOT contain %q, but it did. Field value: %s", notExpected, field.Value)
+				}
+			}
+		})
 	}
 }
