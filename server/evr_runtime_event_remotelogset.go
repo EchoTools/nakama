@@ -192,6 +192,13 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			// This is a ghost user message.
 
 		case *evr.RemoteLogVOIPLoudness:
+			// Process VOIP loudness data
+			if err := s.processVOIPLoudness(ctx, logger, db, nk, statisticsQueue, msg); err != nil {
+				logger.WithFields(map[string]any{
+					"error": err,
+					"msg":   msg,
+				}).Warn("Failed to process VOIP loudness")
+			}
 
 		case *evr.RemoteLogSessionStarted:
 
@@ -635,6 +642,130 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 	return entries, nil
 }
 
+func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, statisticsQueue *StatisticsQueue, msg *evr.RemoteLogVOIPLoudness) error {
+	// Get the match ID
+	matchID, err := NewMatchID(msg.SessionUUID(), s.Node)
+	if err != nil {
+		return fmt.Errorf("failed to create match ID: %w", err)
+	}
+
+	// Get the match label
+	label, err := MatchLabelByID(ctx, nk, matchID)
+	if err != nil || label == nil {
+		return fmt.Errorf("failed to get match label: %w", err)
+	}
+
+	// Parse the player's EVR ID
+	xpid, err := evr.ParseEvrId(msg.PlayerInfoUserid)
+	if err != nil {
+		return fmt.Errorf("failed to parse evr ID: %w", err)
+	}
+
+	// Get the player's information from the match
+	playerInfo := label.GetPlayerByEvrID(*xpid)
+	if playerInfo == nil {
+		// If the player isn't in the match, don't process
+		return fmt.Errorf("player %s not found in match %s", msg.PlayerInfoUserid, matchID.String())
+	}
+
+	// Only process for actual players (not spectators)
+	if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
+		return fmt.Errorf("player %s is not on a playing team (team: %d, expected Blue or Orange)",
+			msg.PlayerInfoUserid, playerInfo.Team)
+	}
+
+	groupIDStr := label.GetGroupID().String()
+	mode := label.Mode
+
+	// Get the loudness value from the message
+	loudnessDB := msg.VoiceLoudnessDB
+
+	// Read the current leaderboard record to get existing metadata
+	boardID := StatisticBoardID(groupIDStr, mode, PlayerLoudnessStatisticID, evr.ResetScheduleDaily)
+
+	_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{playerInfo.UserID}, 1, "", 0)
+
+	// Initialize metadata values
+	var totalLoudness, minLoudness, maxLoudness float64
+	var count int64
+
+	if err == nil && len(ownerRecords) > 0 {
+		record := ownerRecords[0]
+
+		// Decode existing total loudness from score/subscore
+		totalLoudness, err = ScoreToFloat64(record.Score, record.Subscore)
+		if err != nil {
+			logger.WithField("error", err).Warn("Failed to decode existing loudness score")
+			totalLoudness = 0
+		}
+
+		// Decode existing metadata
+		if record.Metadata != "" {
+			md, err := VOIPLoudnessRecordMetadataFromString(record.Metadata)
+			if err != nil {
+				logger.WithField("error", err).Warn("Failed to decode existing loudness metadata")
+			} else {
+				minLoudness = md.MinLoudness
+				maxLoudness = md.MaxLoudness
+				count = md.Count
+			}
+		}
+	}
+
+	// Update values
+	totalLoudness += loudnessDB
+	count++
+
+	// Update min/max
+	if count == 1 {
+		minLoudness = loudnessDB
+		maxLoudness = loudnessDB
+	} else {
+		if loudnessDB < minLoudness {
+			minLoudness = loudnessDB
+		}
+		if loudnessDB > maxLoudness {
+			maxLoudness = loudnessDB
+		}
+	}
+
+	// Store total loudness in the leaderboard score field
+	// Note: The daily average (total_loudness / session_time) is calculated when reading
+	// the data by dividing this total by the GameServerTime leaderboard value.
+	// See PLAYER_LOUDNESS_STAT.md for calculation details.
+	score, subscore, err := Float64ToScore(totalLoudness)
+	if err != nil {
+		return fmt.Errorf("failed to convert loudness to score: %w", err)
+	}
+
+	// Create metadata with min, max, and count
+	md := VOIPLoudnessRecordMetadata{
+		MinLoudness: minLoudness,
+		MaxLoudness: maxLoudness,
+		Count:       count,
+	}
+
+	mdMap := md.ToMap()
+
+	// Queue the leaderboard update
+	entry := &StatisticsQueueEntry{
+		BoardMeta: LeaderboardMeta{
+			GroupID:       groupIDStr,
+			Mode:          mode,
+			StatName:      PlayerLoudnessStatisticID,
+			Operator:      OperatorSet, // We're setting the total value each time
+			ResetSchedule: evr.ResetScheduleDaily,
+		},
+		UserID:      playerInfo.UserID,
+		DisplayName: playerInfo.DisplayName,
+		Score:       score,
+		Subscore:    subscore,
+		Metadata:    mdMap,
+	}
+
+	return statisticsQueue.Add([]*StatisticsQueueEntry{entry})
+}
+
 func processMatchGoalIntoUpdate(msg *evr.RemoteLogGoal, update *MatchGameStateUpdate) {
 	playerInfoXPID := evr.XPIDFromStringOrNil(msg.PlayerXPID)
 	prevPlayerXPID := evr.XPIDFromStringOrNil(msg.PrevPlayerXPID)
@@ -658,4 +789,46 @@ func processMatchGoalIntoUpdate(msg *evr.RemoteLogGoal, update *MatchGameStateUp
 		WasHeadbutt:           msg.WasHeadbutt,
 		PointsValue:           GoalTypeToPoints(msg.GoalType),
 	})
+}
+
+type VOIPLoudnessRecordMetadata struct {
+	MinLoudness float64 `json:"min_loudness"`
+	MaxLoudness float64 `json:"max_loudness"`
+	Count       int64   `json:"count"`
+}
+
+func (m *VOIPLoudnessRecordMetadata) ToMap() map[string]string {
+	return map[string]string{
+		"min_loudness": fmt.Sprintf("%f", m.MinLoudness),
+		"max_loudness": fmt.Sprintf("%f", m.MaxLoudness),
+		"count":        fmt.Sprintf("%d", m.Count),
+	}
+}
+
+func VOIPLoudnessRecordMetadataFromString(data string) (*VOIPLoudnessRecordMetadata, error) {
+	var dataMap map[string]string
+	if err := json.Unmarshal([]byte(data), &dataMap); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal VOIP loudness metadata: %w", err)
+	}
+
+	minLoudness, err := strconv.ParseFloat(dataMap["min_loudness"], 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse min_loudness: %w", err)
+	}
+
+	maxLoudness, err := strconv.ParseFloat(dataMap["max_loudness"], 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse max_loudness: %w", err)
+	}
+
+	count, err := strconv.ParseInt(dataMap["count"], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse count: %w", err)
+	}
+
+	return &VOIPLoudnessRecordMetadata{
+		MinLoudness: minLoudness,
+		MaxLoudness: maxLoudness,
+		Count:       count,
+	}, nil
 }
