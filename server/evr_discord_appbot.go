@@ -1255,7 +1255,28 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("failed to load account metadata: %w", err)
 			}
 
+			// Check if the IGN is locked for this group
+			if groupIGN, exists := md.InGameNames[groupID]; exists && groupIGN.IsLocked {
+				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: "Your display name is locked and cannot be changed. Contact a moderator for assistance.",
+					},
+				})
+			}
+
 			if displayName == "" || displayName == "-" || displayName == user.Username {
+				// Prevent deletion if the IGN entry is locked
+				if groupIGN, exists := md.InGameNames[groupID]; exists && groupIGN.IsLocked {
+					return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Flags:   discordgo.MessageFlagsEphemeral,
+							Content: "Your display name is locked and cannot be changed. Contact a moderator for assistance.",
+						},
+					})
+				}
 				delete(md.InGameNames, groupID)
 			} else {
 				if md.InGameNames == nil {
@@ -3552,6 +3573,46 @@ func (d *DiscordAppBot) LogUserErrorMessage(ctx context.Context, groupID string,
 	}
 
 	return nil, nil
+}
+
+func (d *DiscordAppBot) createLookupSetIGNModal(currentDisplayName string, isLocked bool) *discordgo.InteractionResponse {
+	lockValue := "false"
+	if isLocked {
+		lockValue = "true"
+	}
+	return &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseModal,
+		Data: &discordgo.InteractionResponseData{
+			CustomID: "lookup:set_ign_modal",
+			Title:    "Set IGN Override",
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "display_name_input",
+							Label:       "Display Name",
+							Value:       currentDisplayName,
+							Style:       discordgo.TextInputShort,
+							Required:    true,
+							Placeholder: "Enter the desired IGN",
+						},
+					},
+				},
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "lock_input",
+							Label:       "Lock IGN (true/false)",
+							Value:       lockValue,
+							Style:       discordgo.TextInputShort,
+							Required:    true,
+							Placeholder: "true or false",
+						},
+					},
+				},
+			},
+		},
+	}
 }
 
 func (d *DiscordAppBot) SendErrorToUser(userID string, userErr error) error {

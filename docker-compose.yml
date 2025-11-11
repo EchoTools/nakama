@@ -27,7 +27,7 @@ services:
       - >
           /nakama/nakama migrate up --database.address postgres:localdb@postgres:5432/nakama &&
           exec /nakama/nakama --name nakama1 --database.address postgres:localdb@postgres:5432/nakama --config=/data/nakama.yml --logger.level DEBUG --session.token_expiry_sec 7200
-   
+
     restart: unless-stopped
     depends_on:
       postgres:
@@ -47,6 +47,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+  mongo:
+    image: mongo:latest
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "127.0.0.1:27017:27017"
 volumes:
+  mongo_data:
   data:
 

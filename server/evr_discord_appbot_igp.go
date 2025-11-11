@@ -701,6 +701,110 @@ func (d *DiscordAppBot) handleModalSubmit(logger runtime.Logger, i *discordgo.In
 		notes := data.Components[2].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 
 		return d.kickPlayer(logger, i, caller, target, duration, userNotice, notes, false, false)
+
+	case "set_ign_modal":
+		// Handle IGN override modal submission from lookup command
+		// targetUserID:groupID
+		parts := strings.SplitN(value, ":", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid parameters for set_ign_modal")
+		}
+		targetUserID := parts[0]
+		groupID := parts[1]
+
+		// Get caller info
+		callerID := d.cache.DiscordIDToUserID(i.Member.User.ID)
+		if callerID == "" {
+			return fmt.Errorf("caller not found")
+		}
+
+		callerGuildGroups, err := GuildUserGroupsList(d.ctx, d.nk, d.guildGroupRegistry, callerID)
+		if err != nil {
+			return fmt.Errorf("failed to get guild groups: %w", err)
+		}
+
+		isAuditorOrEnforcer := false
+		if gg, ok := callerGuildGroups[groupID]; ok && (gg.IsAuditor(callerID) || gg.IsEnforcer(callerID)) {
+			isAuditorOrEnforcer = true
+		}
+		isGlobalOperator, _ := CheckSystemGroupMembership(d.ctx, d.db, callerID, GroupGlobalOperators)
+		isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
+
+		if !isAuditorOrEnforcer {
+			return simpleInteractionResponse(d.dg, i, "You do not have permission to set IGN overrides.")
+		}
+
+		// Get the submitted display name and lock status
+		displayName := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		lockInput := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+
+		lockInput = strings.ToLower(strings.TrimSpace(lockInput))
+		isLocked := lockInput == "true" || lockInput == "yes" || lockInput == "1"
+
+		// Load target profile
+		targetProfile, err := EVRProfileLoad(d.ctx, d.nk, targetUserID)
+		if err != nil {
+			return fmt.Errorf("failed to load target profile: %w", err)
+		}
+
+		// Get original display name for audit log
+		originalIGN := targetProfile.GetGroupIGNData(groupID)
+		originalDisplayName := originalIGN.DisplayName
+		if originalDisplayName == "" {
+			// Fallback to username
+			if a, err := d.nk.AccountGetId(d.ctx, targetUserID); err == nil {
+				originalDisplayName = a.User.Username
+			}
+		}
+
+		// Update the IGN with override and lock
+		sanitizedDisplayName := sanitizeDisplayName(displayName)
+		if sanitizedDisplayName == "" {
+			return fmt.Errorf("invalid display name: must contain at least one valid character")
+		}
+		if targetProfile.InGameNames == nil {
+			targetProfile.InGameNames = make(map[string]GroupInGameName)
+		}
+		targetProfile.InGameNames[groupID] = GroupInGameName{
+			GroupID:     groupID,
+			DisplayName: sanitizedDisplayName,
+			IsOverride:  true,
+			IsLocked:    isLocked,
+		}
+
+		// Save the profile
+		if err := EVRProfileUpdate(d.ctx, d.nk, targetUserID, targetProfile); err != nil {
+			return fmt.Errorf("failed to update target profile: %w", err)
+		}
+
+		// Get target Discord user for audit log
+		targetDiscordID := d.cache.UserIDToDiscordID(targetUserID)
+		var targetMention string
+		if targetDiscordID != "" {
+			targetMention = fmt.Sprintf("<@%s>", targetDiscordID)
+		} else {
+			targetMention = targetUserID
+		}
+
+		lockStatus := "unlocked"
+		if isLocked {
+			lockStatus = "locked"
+		}
+		auditMessage := fmt.Sprintf("<@%s> set IGN override for %s to **%s** (%s) (originally: **%s**)",
+			i.Member.User.ID, targetMention, displayName, lockStatus, originalDisplayName)
+
+		if _, err := d.LogAuditMessage(d.ctx, groupID, auditMessage, false); err != nil {
+			logger.WithField("error", err).Warn("Failed to send audit log message")
+		}
+
+		return d.dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Flags:   discordgo.MessageFlagsEphemeral,
+				Content: fmt.Sprintf("IGN override set successfully to **%s** (%s)", displayName, lockStatus),
+			},
+		})
+
 	default:
 		return fmt.Errorf("unknown action: %s", action)
 	}

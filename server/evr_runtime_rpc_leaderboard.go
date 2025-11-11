@@ -173,16 +173,6 @@ func (h *RPCHandler) LeaderboardHaystackRPC(ctx context.Context, logger runtime.
 		return "", runtime.NewError("No owner ID specified", StatusInvalidArgument)
 	}
 
-	if request.GuildID != "" {
-		if request.GroupID = h.GuildIDToGroupID(request.GuildID); request.GroupID == "" {
-			return "", errors.New("failed to get group ID by discord ID")
-		}
-	}
-
-	if request.Mode.IsNil() {
-		return "", runtime.NewError("No game mode specified", StatusInvalidArgument)
-	}
-
 	var leaderboardID string
 	if request.LeaderboardID != "" {
 		meta, err := LeaderboardMetaFromID(request.LeaderboardID)
@@ -197,6 +187,16 @@ func (h *RPCHandler) LeaderboardHaystackRPC(ctx context.Context, logger runtime.
 		leaderboardID = meta.ID()
 
 	} else {
+
+		if request.GuildID != "" {
+			if request.GroupID = h.GuildIDToGroupID(request.GuildID); request.GroupID == "" {
+				return "", errors.New("failed to get group ID by discord ID")
+			}
+		}
+
+		if request.Mode.IsNil() {
+			return "", runtime.NewError("No game mode specified", StatusInvalidArgument)
+		}
 
 		if request.GroupID == "" {
 			return "", runtime.NewError("No group ID specified", StatusInvalidArgument)

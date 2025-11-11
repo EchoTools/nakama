@@ -22,6 +22,7 @@ type GroupInGameName struct {
 	GroupID     string `json:"group_id"`
 	DisplayName string `json:"display_name"`
 	IsOverride  bool   `json:"is_override"` // If this is an override for the group
+	IsLocked    bool   `json:"is_locked"`   // If true, prevents user from changing the override
 }
 
 type EVRProfile struct {
@@ -237,6 +238,7 @@ func (a *EVRProfile) SetGroupDisplayName(groupID, displayName string) (updated b
 		GroupID:     groupID,
 		DisplayName: displayName,
 		IsOverride:  current.IsOverride,
+		IsLocked:    current.IsLocked,
 	}
 	return true
 }

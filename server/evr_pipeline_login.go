@@ -626,8 +626,8 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		// Default to the username, or whatever was last used.
 		groupIGN := params.profile.GetGroupIGNData(groupID)
 
-		if params.userDisplayNameOverride != "" {
-			// If the user has provided a display name override, use that.
+		if params.userDisplayNameOverride != "" && !groupIGN.IsLocked {
+			// If the user has provided a display name override and the IGN is not locked, use that.
 			groupIGN.DisplayName = params.userDisplayNameOverride
 			groupIGN.IsOverride = true
 		}
@@ -642,7 +642,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 			}
 		}
 
-		if !groupIGN.IsOverride {
+		if !groupIGN.IsOverride && !groupIGN.IsLocked {
 			// Update the in-game name for the guild.
 			if member, err := p.discordCache.GuildMember(gg.GuildID, params.profile.DiscordID()); err != nil {
 				logger.Warn("Failed to get guild member", zap.String("guild_id", gg.GuildID), zap.String("discord_id", params.profile.DiscordID()), zap.Error(err))
