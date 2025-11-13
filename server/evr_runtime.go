@@ -115,6 +115,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"server/scores":                 ServerScoresRPC,
 		"forcecheck":                    CheckForceUserRPC,
 		"guildgroup":                    GuildGroupGetRPC,
+		"enforcement/journal/list":      ListEnforcementJournalEntriesByGuilds,
 		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
 	}
 	for name, rpc := range rpcs {
@@ -331,6 +332,7 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 		&MatchmakingSettings{},
 		&VRMLPlayerSummary{},
 		&LoginHistory{},
+		&GuildEnforcementJournal{},
 	}
 	for _, s := range storables {
 		for _, idx := range s.StorageIndexes() {
