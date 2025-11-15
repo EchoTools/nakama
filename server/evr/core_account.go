@@ -883,7 +883,7 @@ type ArenaUnlocks struct {
 	RWDEmote0009                bool `json:"rwd_emote_0009,omitempty"`
 	RWDEmote0013                bool `json:"rwd_emote_0013,omitempty"`
 	RWDEmote0014                bool `json:"rwd_emote_0014,omitempty"`
-	RWDEmoteGhost               bool `json:"rwd_emote_0015" validate:"restricted"`
+	RWDEmoteGhost               bool `json:"rwd_emote_0015",omitempty"`
 	RWDEmote0021                bool `json:"rwd_emote_0021,omitempty"`
 	RWDEmote0022                bool `json:"rwd_emote_0022,omitempty"`
 	RWDEmote0023                bool `json:"rwd_emote_0023,omitempty"`
@@ -994,7 +994,7 @@ type ArenaUnlocks struct {
 	TagStub0054                 bool `json:"rwd_tag_0054" validate:"blocked"`
 	TagCitrus                   bool `json:"rwd_tag_0024"`
 	TagToriA                    bool `json:"rwd_tag_tori_a,omitempty"`
-	TagSpectrum                 bool `json:"rwd_tag_0022" validate:"restricted"`
+	TagSpectrum                 bool `json:"rwd_tag_0022"`
 	TagVRMLPreseason            bool `json:"rwd_tag_s1_vrml_preseason" validate:"restricted"`
 	TagVRMLS1                   bool `json:"rwd_tag_s1_vrml_s1" validate:"restricted"`
 	TagVRMLS1Champion           bool `json:"rwd_tag_s1_vrml_s1_champion" validate:"restricted"`
