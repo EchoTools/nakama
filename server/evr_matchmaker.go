@@ -166,10 +166,9 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 		}
 
 		// Always allow the player matchmaking the longest to have priority
-		if predictions[i].OldestTicketTimestamp == oldestTicketTimestamp && predictions[j].OldestTicketTimestamp != oldestTicketTimestamp {
-			return true
-		} else if predictions[i].OldestTicketTimestamp != oldestTicketTimestamp && predictions[j].OldestTicketTimestamp == oldestTicketTimestamp {
-			return false
+		// Sort by oldest ticket timestamp (smaller timestamp = older = higher priority)
+		if predictions[i].OldestTicketTimestamp != predictions[j].OldestTicketTimestamp {
+			return predictions[i].OldestTicketTimestamp < predictions[j].OldestTicketTimestamp
 		}
 
 		if predictions[i].DivisionCount != predictions[j].DivisionCount {
