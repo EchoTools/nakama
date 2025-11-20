@@ -192,6 +192,12 @@ func (c *DiscordIntegrator) Start() {
 	})
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.GuildDelete) {
+		if m.Unavailable {
+			// This is not an error; the guild is just temporarily unavailable.
+			logger.Warn("Guild became unavailable", zap.Any("guildDelete", m))
+			return
+		}
+		logger.Info("Guild Delete", zap.Any("guildDelete", m))
 		if err := c.handleGuildDelete(logger, s, m); err != nil {
 			logger.Error("Error handling guild delete", zap.Any("guildDelete", m), zap.Error(err))
 		}
