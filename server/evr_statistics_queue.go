@@ -81,8 +81,12 @@ func NewStatisticsQueue(logger runtime.Logger, db *sql.DB, nk runtime.NakamaModu
 					if !slices.Contains(ValidLeaderboardModes, e.BoardMeta.Mode) {
 						continue
 					}
+					md := make(map[string]any)
+					for k, v := range e.Metadata {
+						md[k] = v
+					}
 
-					if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, map[string]any{}, e.Override()); err != nil {
+					if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, md, e.Override()); err != nil {
 
 						// Try to create the leaderboard
 						if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, "desc", string(e.BoardMeta.Operator), ResetScheduleToCron(e.BoardMeta.ResetSchedule), map[string]any{}, true); err != nil {
@@ -97,7 +101,7 @@ func NewStatisticsQueue(logger runtime.Logger, db *sql.DB, nk runtime.NakamaModu
 								"leaderboard_id": e.BoardMeta.ID(),
 							}).Debug("Leaderboard created")
 
-							if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, map[string]any{}, e.Override()); err != nil {
+							if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, md, e.Override()); err != nil {
 								logger.WithFields(map[string]any{
 									"error":          err.Error(),
 									"leaderboard_id": e.BoardMeta.ID(),
