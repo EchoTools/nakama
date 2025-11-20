@@ -44,8 +44,8 @@ type MatchTypeStats struct {
 	BumperShots                  int64   `json:"BumperShots,omitempty" op:"add"`
 	Catches                      int64   `json:"Catches,omitempty" op:"add"`
 	Clears                       int64   `json:"Clears,omitempty" op:"add"`
-	CurrentArenaMVPStreak        int64   `json:"CurrentArenaMVPStreak,omitempty" op:"add"`
-	CurrentArenaWinStreak        int64   `json:"CurrentArenaWinStreak,omitempty" op:"add"`
+	CurrentArenaMVPStreak        int64   `json:"CurrentArenaMVPStreak,omitempty" op:"rep"`
+	CurrentArenaWinStreak        int64   `json:"CurrentArenaWinStreak,omitempty" op:"rep"`
 	GoalSavePercentage           float64 `json:"GoalSavePercentage,omitempty" op:"rep"`
 	GoalScorePercentage          float64 `json:"GoalScorePercentage,omitempty" op:"rep"`
 	Goals                        int64   `json:"Goals,omitempty" op:"add"`
