@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
@@ -14,19 +16,25 @@ var _ = Event(&EventServerProfileUpdate{})
 
 type EventServerProfileUpdate struct {
 	UserID      string                  `json:"user_id"`
+	SessionID   string                  `json:"session_id"`
 	GroupID     string                  `json:"group_id"`
 	DisplayName string                  `json:"display_name"`
 	Mode        evr.Symbol              `json:"mode"`
 	Update      evr.ServerProfileUpdate `json:"update"`
+	MatchLabel  *MatchLabel             `json:"match_label,omitempty"`
+	BlueWins    bool                    `json:"blue_wins"`
 }
 
-func NewEventServerProfileUpdate(userID, groupID, displayName string, mode evr.Symbol, update evr.ServerProfileUpdate) *EventServerProfileUpdate {
+func NewEventServerProfileUpdate(userID, sessionID, groupID, displayName string, mode evr.Symbol, update evr.ServerProfileUpdate, matchLabel *MatchLabel, blueWins bool) *EventServerProfileUpdate {
 	return &EventServerProfileUpdate{
 		UserID:      userID,
+		SessionID:   sessionID,
 		GroupID:     groupID,
 		DisplayName: displayName,
 		Mode:        mode,
 		Update:      update,
+		MatchLabel:  matchLabel,
+		BlueWins:    blueWins,
 	}
 }
 
@@ -34,8 +42,43 @@ func (s *EventServerProfileUpdate) Process(ctx context.Context, logger runtime.L
 	var (
 		db              = dispatcher.db
 		nk              = dispatcher.nk
+		sessionRegistry = dispatcher.sessionRegistry
 		statisticsQueue = dispatcher.statisticsQueue
 	)
+
+	// Increment completed matches for the player
+	if err := incrementCompletedMatches(ctx, logger, nk, sessionRegistry, s.UserID, s.SessionID); err != nil {
+		logger.WithField("error", err).Warn("Failed to increment completed matches")
+	}
+
+	// Update matchmaking ratings and rank percentile if applicable
+	serviceSettings := ServiceSettings()
+	validModes := []evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}
+
+	if serviceSettings.UseSkillBasedMatchmaking() && slices.Contains(validModes, s.Mode) && s.MatchLabel != nil {
+		// Calculate and store new player ratings
+		ratings := CalculateNewPlayerRatings(s.MatchLabel.Players, s.BlueWins)
+		if rating, ok := ratings[s.SessionID]; ok {
+			if err := MatchmakingRatingStore(ctx, nk, s.UserID, "", s.DisplayName, s.GroupID, s.Mode, rating); err != nil {
+				logger.WithField("error", err).Warn("Failed to record rating to leaderboard")
+			}
+		} else {
+			logger.WithField("session_id", s.SessionID).Warn("Failed to get player rating")
+		}
+
+		// Calculate a new rank percentile
+		zapLogger := RuntimeLoggerToZapLogger(logger)
+		if rankPercentile, err := CalculateSmoothedPlayerRankPercentile(ctx, zapLogger, db, nk, s.UserID, s.GroupID, s.Mode); err != nil {
+			logger.WithField("error", err).Warn("Failed to calculate new player rank percentile")
+		} else if err := MatchmakingRankPercentileStore(ctx, nk, s.UserID, s.DisplayName, s.GroupID, s.Mode, rankPercentile); err != nil {
+			logger.WithField("error", err).Warn("Failed to record rank percentile to leaderboard")
+		}
+	}
+
+	// Update the player's statistics, if the service settings allow it
+	if serviceSettings.DisableStatisticsUpdates {
+		return nil
+	}
 
 	var stats evr.Statistics
 
@@ -72,6 +115,26 @@ func (s *EventServerProfileUpdate) Process(ctx context.Context, logger runtime.L
 	}
 
 	return statisticsQueue.Add(entries)
+}
+
+// incrementCompletedMatches increments the completed matches counter for a player
+// This is shared logic between EventServerProfileUpdate and EventRemoteLogSet
+func incrementCompletedMatches(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, userID, sessionID string) error {
+	eqconfig := NewEarlyQuitConfig()
+	if err := StorableRead(ctx, nk, userID, eqconfig, true); err != nil {
+		logger.WithField("error", err).Warn("Failed to load early quitter config")
+	} else {
+		eqconfig.IncrementCompletedMatches()
+		if err := StorableWrite(ctx, nk, userID, eqconfig); err != nil {
+			logger.WithField("error", err).Warn("Failed to store early quitter config")
+		}
+	}
+	if playerSession := sessionRegistry.Get(uuid.FromStringOrNil(sessionID)); playerSession != nil {
+		if params, ok := LoadParams(playerSession.Context()); ok {
+			params.earlyQuitConfig.Store(eqconfig)
+		}
+	}
+	return nil
 }
 
 func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, prev, update evr.Statistics) ([]*StatisticsQueueEntry, error) {

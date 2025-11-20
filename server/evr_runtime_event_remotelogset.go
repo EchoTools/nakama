@@ -470,22 +470,8 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 }
 
 func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, userID, sessionID string) error {
-	// Decrease the early quitter count for the player
-	eqconfig := NewEarlyQuitConfig()
-	if err := StorableRead(ctx, nk, userID, eqconfig, true); err != nil {
-		logger.WithField("error", err).Warn("Failed to load early quitter config")
-	} else {
-		eqconfig.IncrementCompletedMatches()
-		if err := StorableWrite(ctx, nk, userID, eqconfig); err != nil {
-			logger.WithField("error", err).Warn("Failed to store early quitter config")
-		}
-	}
-	if playerSession := sessionRegistry.Get(uuid.FromStringOrNil(sessionID)); playerSession != nil {
-		if params, ok := LoadParams(playerSession.Context()); ok {
-			params.earlyQuitConfig.Store(eqconfig)
-		}
-	}
-	return nil
+	// Delegate to the shared incrementCompletedMatches function
+	return incrementCompletedMatches(ctx, logger, nk, sessionRegistry, userID, sessionID)
 }
 
 func (s *EventRemoteLogSet) processPostMatchTypeStats(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, sessionRegistry SessionRegistry, statisticsQueue *StatisticsQueue, msg *evr.RemoteLogPostMatchTypeStats) error {
