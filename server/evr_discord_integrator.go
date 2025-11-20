@@ -967,7 +967,6 @@ func (d *DiscordIntegrator) handleGuildRoleUpdate(ctx context.Context, logger *z
 	// against the target role ID to ensure we're processing the correct event.
 	auditLogs, err := s.GuildAuditLog(e.GuildID, "", "", int(discordgo.AuditLogActionRoleUpdate), 1)
 	if err != nil {
-		logger.Warn("Error fetching audit log for role update", zap.Error(err))
 		return fmt.Errorf("error fetching audit log: %w", err)
 	}
 
