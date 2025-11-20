@@ -37,6 +37,9 @@ const (
 	EmbedColorGreen  = 0x499F68 // #499F68
 	EmbedColorViolet = 0x4B244A // #4B244A
 	EmbedColorRed    = 0xB02E0C // #B02E0C
+
+	MaximumOutfitCount      = 100 // Maximum number of saved outfits per user
+	MaximumOutfitNameLength = 72  // Maximum length of an outfit name
 )
 
 type DiscordAppBot struct {
@@ -2808,10 +2811,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if err := StorableRead(ctx, d.nk, userID, wardrobe, true); err != nil {
 				return fmt.Errorf("failed to read saved outfits: %w", err)
 			}
-
-			if wardrobe.Outfits == nil {
-				wardrobe.Outfits = make(map[string]*AccountCosmetics)
-			}
 			metadata, err := EVRProfileLoad(ctx, d.nk, userID)
 			if err != nil {
 				return fmt.Errorf("failed to get account metadata: %w", err)
@@ -2819,20 +2818,28 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			switch options[0].Name {
 			case "manage":
-				outfitName := options[0].Options[1].StringValue()
-				if len(outfitName) > 72 {
-					return errors.New("invalid profile name. It must be less than 72 characters long")
+				if len(options[0].Options) < 2 {
+					return errors.New("not enough options provided")
 				}
 
-				switch options[0].Options[0].StringValue() {
+				var (
+					operation  = options[0].Options[0].StringValue()
+					outfitName = options[0].Options[1].StringValue()
+				)
+
+				if len(outfitName) > MaximumOutfitNameLength {
+					return fmt.Errorf("invalid profile name. Must be less than %d characters", MaximumOutfitNameLength+1)
+				}
+
+				switch operation {
 				case "save":
 					// limit set arbitrarily
-					if len(wardrobe.Outfits) >= 25 {
-						return fmt.Errorf("cannot save more than 25 outfits")
+					if len(wardrobe.Outfits) >= MaximumOutfitCount {
+						return fmt.Errorf("cannot save more than %d outfits", MaximumOutfitCount)
 
 					}
 
-					wardrobe.Outfits[outfitName] = &metadata.LoadoutCosmetics
+					wardrobe.SetOutfit(outfitName, metadata.LoadoutCosmetics)
 
 					if err := StorableWrite(ctx, d.nk, userID, wardrobe); err != nil {
 						return fmt.Errorf("failed to write saved outfits: %w", err)
@@ -2841,11 +2848,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					return simpleInteractionResponse(s, i, fmt.Sprintf("Saved current outfit as `%s`", outfitName))
 
 				case "load":
-					if _, ok := wardrobe.Outfits[outfitName]; !ok {
+					outfit, ok := wardrobe.GetOutfit(outfitName)
+					if !ok || outfit == nil {
 						return simpleInteractionResponse(s, i, fmt.Sprintf("Outfit `%s` does not exist.", outfitName))
 					}
 
-					metadata.LoadoutCosmetics = *wardrobe.Outfits[outfitName]
+					metadata.LoadoutCosmetics = *outfit
 
 					if err := EVRProfileUpdate(ctx, d.nk, userID, metadata); err != nil {
 						return fmt.Errorf("failed to set account metadata: %w", err)
@@ -2854,12 +2862,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					return simpleInteractionResponse(s, i, fmt.Sprintf("Applied outfit `%s`. If the changes do not take effect in your next match, Please re-open your game.", outfitName))
 
 				case "delete":
-					if _, ok := wardrobe.Outfits[outfitName]; !ok {
+					if deleted := wardrobe.DeleteOutfit(outfitName); !deleted {
 						simpleInteractionResponse(s, i, fmt.Sprintf("Outfit `%s` does not exist.", outfitName))
 						return nil
 					}
-
-					delete(wardrobe.Outfits, outfitName)
 
 					if err := StorableWrite(ctx, d.nk, userID, wardrobe); err != nil {
 						return fmt.Errorf("failed to write saved outfits: %w", err)
