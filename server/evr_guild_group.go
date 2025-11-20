@@ -378,23 +378,32 @@ func GuildUserGroupsList(ctx context.Context, nk runtime.NakamaModule, guildGrou
 // MarkGuildGroupInactive marks a guild group as inactive instead of deleting it.
 // It updates the group name with an inactive prefix and sets the inactive flag in metadata.
 func MarkGuildGroupInactive(ctx context.Context, nk runtime.NakamaModule, groupID string, reason string) error {
-	// Load the guild group to get its current metadata
-	gg, err := GuildGroupLoad(ctx, nk, groupID)
+	// Load the group directly to check if it exists and get its metadata
+	groups, err := nk.GroupsGetId(ctx, []string{groupID})
 	if err != nil {
-		return fmt.Errorf("failed to load guild group: %w", err)
+		return fmt.Errorf("failed to get group: %w", err)
+	}
+	if len(groups) == 0 {
+		return fmt.Errorf("group not found")
 	}
 
 	// Check if already inactive
-	if gg.Inactive {
+	if isGuildGroupInactive(groups[0]) {
 		return nil // Already inactive, nothing to do
 	}
 
+	// Load the metadata
+	md := &GroupMetadata{}
+	if err := json.Unmarshal([]byte(groups[0].Metadata), md); err != nil {
+		return fmt.Errorf("failed to unmarshal group metadata: %w", err)
+	}
+
 	// Update the metadata to mark as inactive
-	gg.Inactive = true
-	gg.InactiveReason = reason
+	md.Inactive = true
+	md.InactiveReason = reason
 
 	// Prefix the group name to indicate inactive status
-	newName := InactiveGroupNamePrefix + gg.Group.Name
+	newName := InactiveGroupNamePrefix + groups[0].Name
 
 	// Update the group with the new name and metadata
 	_nk, ok := nk.(*RuntimeGoNakamaModule)
@@ -403,7 +412,7 @@ func MarkGuildGroupInactive(ctx context.Context, nk runtime.NakamaModule, groupI
 	}
 
 	// Save the metadata
-	if err := GroupMetadataSave(ctx, _nk.db, groupID, &gg.GroupMetadata); err != nil {
+	if err := GroupMetadataSave(ctx, _nk.db, groupID, md); err != nil {
 		return fmt.Errorf("failed to save guild group metadata: %w", err)
 	}
 
