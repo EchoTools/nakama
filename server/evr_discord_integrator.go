@@ -595,12 +595,13 @@ func (d *DiscordIntegrator) handleGuildDelete(logger *zap.Logger, s *discordgo.S
 		return nil
 	}
 
-	// Log the metadata of the group before deleting it.
+	// Log the metadata of the group before marking it inactive.
 	gg := d.guildGroupRegistry.Get(groupID)
-	logger.Info("Deleting guild group", zap.String("group_id", groupID), zap.Any("metadata", gg.GroupMetadata))
+	logger.Info("Marking guild group as inactive", zap.String("group_id", groupID), zap.Any("metadata", gg.GroupMetadata))
 
-	if err := d.nk.GroupDelete(d.ctx, groupID); err != nil {
-		return fmt.Errorf("error deleting group: %w", err)
+	// Mark the group as inactive instead of deleting it
+	if err := MarkGuildGroupInactive(d.ctx, d.nk, groupID, "Discord guild deleted"); err != nil {
+		return fmt.Errorf("error marking group as inactive: %w", err)
 	}
 	d.Purge(e.Guild.ID)
 	return nil

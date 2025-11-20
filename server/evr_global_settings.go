@@ -52,8 +52,8 @@ type ServiceSettingsData struct {
 
 type PruneSettings struct {
 	LeaveOrphanedGuilds  bool `json:"leave_orphan_guilds"` // Prune Discord guilds that do not have a corresponding Nakama group
-	DeleteOrphanedGroups bool `json:"leave_orphan_groups"` // Prune Nakama groups that do not have a corresponding Discord guild
-	SafetyLimit          int  `json:"safety_limit"`        // The maximum number of orphaned groups or guilds that can be deleted/left before the pruning operation is aborted
+	DeleteOrphanedGroups bool `json:"leave_orphan_groups"` // Mark Nakama groups as inactive when they do not have a corresponding Discord guild
+	SafetyLimit          int  `json:"safety_limit"`        // The maximum number of orphaned groups or guilds that can be marked inactive/left before the pruning operation is aborted
 }
 
 type GlobalMatchmakingSettings struct {

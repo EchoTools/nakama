@@ -42,6 +42,7 @@ const (
 	GroupGlobalRequire2FA        = "Global Require 2FA"
 	SystemGroupLangTag           = "system"
 	GuildGroupLangTag            = "guild"
+	InactiveGroupNamePrefix      = "[INACTIVE] "
 )
 
 func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) (err error) {
