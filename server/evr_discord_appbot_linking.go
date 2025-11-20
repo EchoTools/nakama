@@ -4,13 +4,152 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
+
+func (d *DiscordAppBot) handleAuthenticationConflict(ctx context.Context, logger runtime.Logger, discordID string, username string) (string, error) {
+	nk := d.nk
+
+	logger.WithFields(map[string]interface{}{
+		"discord_id": discordID,
+		"username":   username,
+	}).Info("authentication conflict: recovering...")
+
+	// Find account by username
+	users, err := nk.UsersGetUsername(ctx, []string{username})
+	if err != nil {
+		logger.WithFields(map[string]interface{}{
+			"discord_id": discordID,
+			"username":   username,
+			"error":      err,
+		}).Error("Couldn't lookup name")
+		return "", fmt.Errorf("failed to lookup conflicting username: %w", err)
+	}
+
+	if len(users) == 0 {
+		// Username exists in database but lookup returned no results (edge case)
+		logger.WithFields(map[string]interface{}{
+			"discord_id": discordID,
+			"username":   username,
+		}).Warn("Username not found in lookup despite conflict - possible race condition")
+		return "", errors.New("conflicting account no longer accessible")
+	}
+
+	conflictingUser := users[0]
+	conflictingUserID := conflictingUser.Id
+
+	logger.WithFields(map[string]interface{}{
+		"discord_id":          discordID,
+		"username":            username,
+		"conflicting_user_id": conflictingUserID,
+	}).Info("Found conflicting account")
+
+	// Look up the full account to get custom_id information
+	account, err := nk.AccountGetId(ctx, conflictingUserID)
+	if err != nil {
+		logger.WithFields(map[string]interface{}{
+			"discord_id":          discordID,
+			"conflicting_user_id": conflictingUserID,
+			"error":               err,
+		}).Error("Failed to get account details")
+		return "", fmt.Errorf("failed to get account details: %w", err)
+	}
+
+	conflictingCustomID := account.GetCustomId()
+
+	logger.WithFields(map[string]interface{}{
+		"discord_id":          discordID,
+		"username":            username,
+		"conflicting_user_id": conflictingUserID,
+		"custom_id":           conflictingCustomID,
+	}).Info("Retrieved account details - evaluating recovery path")
+
+	// Check if the conflicting account already has a discord custom_id
+	if conflictingCustomID != "" {
+		if conflictingCustomID == discordID {
+			// Return the existing user ID - they're already linked.
+			logger.WithFields(map[string]interface{}{
+				"discord_id": discordID,
+				"user_id":    conflictingUserID,
+				"username":   username,
+			}).Info("Recovery successful: user already linked with matching custom_id")
+			return conflictingUserID, nil
+		}
+
+		// This is for cases where a different user owns the conflicting account.
+		// This cannot be automatically resolved.
+		logger.WithFields(map[string]interface{}{
+			"discord_id":       discordID,
+			"conflicting_user": conflictingCustomID,
+			"username":         username,
+		}).Warn("Account conflict: different discord user owns the username")
+		return "", errors.New(
+			"Username is already linked to a different discord account. " +
+				"Reference: CONFLICT_DIFFERENT_OWNER",
+		)
+	}
+
+	// Link the account to the current discord user
+	logger.WithFields(map[string]interface{}{
+		"discord_id":          discordID,
+		"conflicting_user_id": conflictingUserID,
+		"username":            username,
+	}).Info("Attempting to recover by linking custom_id to conflicting account")
+
+	if err := d.linkCustomID(ctx, logger, conflictingUserID, discordID); err != nil {
+		logger.WithFields(map[string]interface{}{
+			"discord_id":          discordID,
+			"conflicting_user_id": conflictingUserID,
+			"error":               err,
+		}).Error("Failed to link custom ID during conflict recovery")
+		return "", fmt.Errorf("failed to recover account: %w", err)
+	}
+
+	logger.WithFields(map[string]interface{}{
+		"discord_id": discordID,
+		"user_id":    conflictingUserID,
+		"username":   username,
+	}).Info("Recovery successful: custom_id linked to conflicting account")
+
+	return conflictingUserID, nil
+}
+
+// Update a user's "custom_id" to a given discord ID
+func (d *DiscordAppBot) linkCustomID(ctx context.Context, logger runtime.Logger, userID string, customID string) error {
+	nk := d.nk
+	err := nk.LinkCustom(ctx, userID, customID)
+	if err != nil {
+		return err
+	}
+	logger.WithFields(map[string]interface{}{
+		"user_id":   userID,
+		"custom_id": customID,
+	}).Info("Successfully linked custom_id")
+	return nil
+}
+
+func (d *DiscordAppBot) isAlreadyExistsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check if the error is a gRPC AlreadyExists status error
+	st, ok := status.FromError(err)
+	if ok && st.Code() == codes.AlreadyExists {
+		return true
+	}
+	// Also check the error message string for the AlreadyExists code
+	// Good for cases where the error is wrapped or stringified
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "code = AlreadyExists") || strings.Contains(errMsg, "AlreadyExists")
+}
 
 func (d *DiscordAppBot) linkHeadset(ctx context.Context, logger runtime.Logger, user *discordgo.Member, linkCode string) error {
 
@@ -47,7 +186,31 @@ func (d *DiscordAppBot) linkHeadset(ctx context.Context, logger runtime.Logger, 
 			tags["new_account"] = "true"
 			userID, _, _, err = d.nk.AuthenticateCustom(ctx, discordID, username, true)
 			if err != nil {
-				return fmt.Errorf("failed to authenticate (or create) user %s: %w", discordID, err)
+				// Check if the error is an AlreadyExists error indicating username conflict
+				if d.isAlreadyExistsError(err) && strings.Contains(err.Error(), "Username is already in use") {
+					logger.WithFields(map[string]interface{}{
+						"discord_id": discordID,
+						"username":   username,
+					}).Info("Username conflict detected")
+
+					// Attempt to recover from the conflict by checking the existing account
+					recoveredUserID, recoveryErr := d.handleAuthenticationConflict(ctx, logger, discordID, username)
+					if recoveryErr != nil {
+						// Recovery failed - return the specific error to the user
+						return fmt.Errorf("failed to recover from username conflict: %w", recoveryErr)
+					}
+
+					// Recovery succeeded - use the recovered user ID
+					userID = recoveredUserID
+					tags["new_account"] = "false"
+					logger.WithFields(map[string]interface{}{
+						"discord_id":     discordID,
+						"recovered_user": userID,
+					}).Info("Successfully recovered from username conflict")
+				} else {
+					// Not a username conflict - return the original error
+					return fmt.Errorf("failed to authenticate (or create) user %s: %w", discordID, err)
+				}
 			}
 		}
 
