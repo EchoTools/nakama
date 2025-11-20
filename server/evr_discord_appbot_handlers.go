@@ -364,7 +364,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 			isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
 
 			if !isAuditorOrEnforcer {
-				return simpleInteractionResponse(s, i, "You do not have permission to set IGN overrides.")
+				return simpleInteractionResponse(s, i, "You do not have permission to override in-game display names.")
 			}
 
 			// Load target profile

@@ -3582,34 +3582,33 @@ func (d *DiscordAppBot) LogUserErrorMessage(ctx context.Context, groupID string,
 }
 
 func (d *DiscordAppBot) createLookupSetIGNModal(currentDisplayName string, isLocked bool) *discordgo.InteractionResponse {
-	lockValue := "false"
-	if isLocked {
-		lockValue = "true"
-	}
+	allowPlayerToChangeIGN := !isLocked
+
 	return &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
 			CustomID: "lookup:set_ign_modal",
-			Title:    "Set IGN Override",
+			Title:    "Override In-Game Name",
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
 							CustomID:    "display_name_input",
-							Label:       "Display Name",
+							Label:       "In-Game Display Name",
 							Value:       currentDisplayName,
 							Style:       discordgo.TextInputShort,
 							Required:    true,
-							Placeholder: "Enter the desired IGN",
+							Placeholder: "Enter the desired In-Game Display Name",
 						},
 					},
 				},
+				// TODO this should be a true/false toggle or select menu, or set to "yes/no"
 				discordgo.ActionsRow{
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
 							CustomID:    "lock_input",
-							Label:       "Lock IGN (true/false)",
-							Value:       lockValue,
+							Label:       "Allow player to change in-game display name? (true/false)",
+							Value:       fmt.Sprintf("%t", allowPlayerToChangeIGN),
 							Style:       discordgo.TextInputShort,
 							Required:    true,
 							Placeholder: "true or false",

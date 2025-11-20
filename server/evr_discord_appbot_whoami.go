@@ -834,28 +834,32 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	const MaxFieldsPerEmbed = 25
 	embeds = PaginateEmbeds(embeds, MaxFieldsPerEmbed, FieldMaxLen)
 
-	// Add "Set IGN Override" button for enforcers
-	components := []discordgo.MessageComponent{}
-	callerGuildGroups, _ := GuildUserGroupsList(ctx, nk, d.guildGroupRegistry, callerID)
-	isAuditorOrEnforcer := false
-	if gg, ok := callerGuildGroups[groupID]; ok && (gg.IsAuditor(callerID) || gg.IsEnforcer(callerID)) {
-		isAuditorOrEnforcer = true
-	}
-	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, callerID, GroupGlobalOperators)
-	isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
+	// Add "Override In-Game Name" button for enforcers
+	components := make([]discordgo.MessageComponent, 0)
 
-	if isAuditorOrEnforcer {
-		components = []discordgo.MessageComponent{
+	callerGuildGroups, _ := GuildUserGroupsList(ctx, nk, d.guildGroupRegistry, callerID)
+
+	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, callerID, GroupGlobalOperators)
+
+	allowIGNOverride := false
+	if gg, ok := callerGuildGroups[groupID]; ok && (gg.IsAuditor(callerID) || gg.IsEnforcer(callerID)) {
+		allowIGNOverride = true
+	}
+
+	// Allow global operators as well
+	allowIGNOverride = allowIGNOverride || isGlobalOperator
+
+	if allowIGNOverride {
+		components = append(components,
 			discordgo.ActionsRow{
 				Components: []discordgo.MessageComponent{
 					&discordgo.Button{
-						Label:    "Set IGN Override",
+						Label:    "Override In-Game Name",
 						Style:    discordgo.PrimaryButton,
 						CustomID: fmt.Sprintf("lookup:set_ign_override:%s:%s", targetID, groupID),
 					},
 				},
-			},
-		}
+			})
 	}
 
 	// Send the response
