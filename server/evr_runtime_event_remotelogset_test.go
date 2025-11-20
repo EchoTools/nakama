@@ -107,13 +107,4 @@ func TestTypeStatsToScoreMap_Realistic(t *testing.T) {
 
 }
 
-func operatorFromTag(tag string) LeaderboardOperator {
-	switch tag {
-	case "add":
-		return OperatorIncrement
-	case "max":
-		return OperatorBest
-	default:
-		return OperatorSet
-	}
-}
+// operatorFromTag removed; use shared TestOperatorFromTag from test helpers.
