@@ -67,7 +67,7 @@ func NewStatisticsQueue(logger runtime.Logger, db *sql.DB, nk runtime.NakamaModu
 			case entries := <-ch:
 				for _, e := range entries {
 					// This expects the score and subscore to already be translated to the correct values.
-					if e.Score < 0 {
+					if e.Score < 0 || e.Subscore < 0 {
 						logger.WithFields(map[string]any{
 							"leaderboard_id": e.BoardMeta.ID(),
 							"score":          e.Score,
