@@ -420,7 +420,13 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		}
 	}
 
-	if !gg.IsAllocator(userID) {
+	isGlobalOperator := false
+	isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+	if err != nil {
+		return nil, 0, status.Errorf(codes.Internal, "error checking global operator status: %v", err)
+	}
+
+	if !gg.IsAllocator(userID) && !isGlobalOperator {
 		return nil, 0, status.Error(codes.PermissionDenied, "user does not have the allocator role in this guild.")
 	}
 
