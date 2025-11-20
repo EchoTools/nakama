@@ -926,31 +926,7 @@ func (d *DiscordIntegrator) handleGuildRoleUpdate(ctx context.Context, logger *z
 	}
 
 	// Determine which managed role this is for better logging
-	roleType := "unknown"
-	switch e.Role.ID {
-	case guildGroup.RoleMap.AccountLinked:
-		roleType = "linked"
-	case guildGroup.RoleMap.Member:
-		roleType = "member"
-	case guildGroup.RoleMap.Enforcer:
-		roleType = "enforcer"
-	case guildGroup.RoleMap.Auditor:
-		roleType = "auditor"
-	case guildGroup.RoleMap.ServerHost:
-		roleType = "server_host"
-	case guildGroup.RoleMap.Allocator:
-		roleType = "allocator"
-	case guildGroup.RoleMap.Suspended:
-		roleType = "suspended"
-	case guildGroup.RoleMap.APIAccess:
-		roleType = "api_access"
-	case guildGroup.RoleMap.AccountAgeBypass:
-		roleType = "account_age_bypass"
-	case guildGroup.RoleMap.VPNBypass:
-		roleType = "vpn_bypass"
-	case guildGroup.RoleMap.UsernameOnly:
-		roleType = "username_only"
-	}
+	roleType := guildGroup.RoleMap.GetRoleType(e.Role.ID)
 
 	logger = logger.With(
 		zap.String("event", "GuildRoleUpdate"),
@@ -980,7 +956,7 @@ func (d *DiscordIntegrator) handleGuildRoleUpdate(ctx context.Context, logger *z
 
 	// Verify this audit log entry is for the role we're tracking
 	if latestUpdate.TargetID != e.Role.ID {
-		logger.Info("Latest audit log entry does not match the role ID - possible race condition with multiple role updates", 
+		logger.Info("Latest audit log entry does not match the role ID - possible race condition with multiple role updates",
 			zap.String("target_id", latestUpdate.TargetID),
 			zap.String("expected_role_id", e.Role.ID))
 		return nil

@@ -48,6 +48,36 @@ func (r *GuildGroupRoles) AsSet() map[string]struct{} {
 	return roleset
 }
 
+// GetRoleType returns a human-readable role type for the given role ID, or "unknown" if not found
+func (r *GuildGroupRoles) GetRoleType(roleID string) string {
+	switch roleID {
+	case r.AccountLinked:
+		return "linked"
+	case r.Member:
+		return "member"
+	case r.Enforcer:
+		return "enforcer"
+	case r.Auditor:
+		return "auditor"
+	case r.ServerHost:
+		return "server_host"
+	case r.Allocator:
+		return "allocator"
+	case r.Suspended:
+		return "suspended"
+	case r.APIAccess:
+		return "api_access"
+	case r.AccountAgeBypass:
+		return "account_age_bypass"
+	case r.VPNBypass:
+		return "vpn_bypass"
+	case r.UsernameOnly:
+		return "username_only"
+	default:
+		return "unknown"
+	}
+}
+
 type guildGroupPermissions struct {
 	IsAllowedMatchmaking bool
 	IsEnforcer           bool // Has kick/join/tc. access
