@@ -838,7 +838,7 @@ func (d *DiscordAppBot) handleSetIGNModalSubmit(_ context.Context, logger runtim
 	isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
 
 		if !isAuditorOrEnforcer {
-			return simpleInteractionResponse(d.dg, i, "You do not have permission to Override in-game names.")
+			return simpleInteractionResponse(d.dg, i, "You do not have permission to override in-game names.")
 		}
 
 	// Get the submitted display name and lock status
