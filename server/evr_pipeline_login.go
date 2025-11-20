@@ -1187,31 +1187,10 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 	}
 	logger = logger.With(zap.String("player_uid", playerInfo.UserID), zap.String("player_sid", playerInfo.SessionID), zap.String("player_xpid", playerInfo.EvrID.String()))
 
-	var profile *EVRProfile
-	// Decrease the early quitter count for the player
-	if playerSession := p.nk.sessionRegistry.Get(uuid.FromStringOrNil(playerInfo.SessionID)); playerSession != nil {
-		eqconfig := NewEarlyQuitConfig()
-		if err := StorableRead(ctx, p.nk, playerInfo.UserID, eqconfig, true); err != nil {
-			logger.Warn("Failed to load early quitter config", zap.Error(err))
-		} else {
-			eqconfig.IncrementCompletedMatches()
-			if err := StorableWrite(ctx, p.nk, playerInfo.UserID, eqconfig); err != nil {
-				logger.Warn("Failed to store early quitter config", zap.Error(err))
-			} else if session := p.sessionRegistry.Get(playerSession.ID()); session != nil {
-				if params, ok := LoadParams(session.Context()); ok {
-					params.earlyQuitConfig.Store(eqconfig)
-				}
-			}
-		}
-	}
-
-	var err error
-	if profile == nil {
-		// If the player isn't a member of the group, do not update the stats
-		profile, err = EVRProfileLoad(ctx, p.nk, playerInfo.UserID)
-		if err != nil {
-			return fmt.Errorf("failed to get account profile: %w", err)
-		}
+	// Validate that the player is a member of the group
+	profile, err := EVRProfileLoad(ctx, p.nk, playerInfo.UserID)
+	if err != nil {
+		return fmt.Errorf("failed to get account profile: %w", err)
 	}
 	groupIDStr := label.GetGroupID().String()
 
@@ -1220,43 +1199,17 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 		return nil
 	}
 
-	serviceSettings := ServiceSettings()
-
-	validModes := []evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}
-
-	if serviceSettings.UseSkillBasedMatchmaking() && slices.Contains(validModes, label.Mode) {
-
-		// Determine winning team
-		blueWins := playerInfo.Team == BlueTeam && payload.IsWinner()
-		ratings := CalculateNewPlayerRatings(label.Players, blueWins)
-		if rating, ok := ratings[playerInfo.SessionID]; ok {
-			if err := MatchmakingRatingStore(ctx, p.nk, playerInfo.UserID, playerInfo.DiscordID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
-				logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
-			}
-		} else {
-			logger.Warn("Failed to get player rating", zap.String("sessionID", playerInfo.SessionID))
-		}
-
-		// Calculate a new rank percentile
-		if rankPercentile, err := CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.nk, playerInfo.UserID, groupIDStr, label.Mode); err != nil {
-			logger.Error("Failed to calculate new player rank percentile", zap.Error(err))
-			// Store the rank percentile in the leaderboards.
-		} else if err := MatchmakingRankPercentileStore(ctx, p.nk, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rankPercentile); err != nil {
-			logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
-		}
-	}
-
-	// Update the player's statistics, if the service settings allow it
-	if serviceSettings.DisableStatisticsUpdates {
-		return nil
-	}
-
+	// Delegate all processing to EventServerProfileUpdate
+	// This consolidates the logic to use the event-based pattern
 	return SendEvent(ctx, p.nk, &EventServerProfileUpdate{
 		UserID:      playerInfo.UserID,
+		SessionID:   playerInfo.SessionID,
 		GroupID:     groupIDStr,
 		DisplayName: playerInfo.DisplayName,
 		Mode:        label.Mode,
 		Update:      payload.Update,
+		MatchLabel:  label,
+		BlueWins:    playerInfo.Team == BlueTeam && payload.IsWinner(),
 	})
 }
 
