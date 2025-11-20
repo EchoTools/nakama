@@ -604,11 +604,6 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 				statValue = float64(updateField.Float())
 			}
 
-			// Skip stats that are not set or negative
-			if statValue <= 0 {
-				continue
-			}
-
 			score, subscore, err := Float64ToScore(statValue)
 			if err != nil {
 				return nil, fmt.Errorf("failed to convert float64 to int64 pair: %w", err)
