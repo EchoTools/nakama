@@ -68,8 +68,7 @@ func TestTypeStatsToScoreMap_Realistic(t *testing.T) {
 
 		// Create entries for each reset schedule
 		for _, schedule := range resetSchedules {
-			opTag := fieldType.Tag.Get("op")
-			operator := operatorFromTag(opTag)
+			operator := operatorFromStatField(t, fieldName)
 			entry := &StatisticsQueueEntry{
 				BoardMeta: LeaderboardMeta{
 					GroupID:       groupID,
@@ -106,5 +105,3 @@ func TestTypeStatsToScoreMap_Realistic(t *testing.T) {
 	}
 
 }
-
-// operatorFromTag removed; use shared TestOperatorFromTag from test helpers.
