@@ -187,7 +187,7 @@ func (d *DiscordAppBot) linkHeadset(ctx context.Context, logger runtime.Logger, 
 			userID, _, _, err = d.nk.AuthenticateCustom(ctx, discordID, username, true)
 			if err != nil {
 				// Check if the error is an AlreadyExists error indicating username conflict
-				if d.isAlreadyExistsError(err) && strings.Contains(err.Error(), "Username is already in use") {
+				if d.isAlreadyExistsError(err) {
 					logger.WithFields(map[string]interface{}{
 						"discord_id": discordID,
 						"username":   username,
