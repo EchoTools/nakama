@@ -36,6 +36,8 @@ type GroupMetadata struct {
 	DisplayNameForceNickToIGN            bool              `json:"force_nick_to_ign"`                        // Force nicknames to be the same as the in-game name
 	DisplayNameInUseNotifications        bool              `json:"display_name_in_use_notifications"`        // Display name in use notification on nick change
 	EnableGlobalPingForServers           bool              `json:"enable_global_ping_for_servers"`           // Enable global ping for servers (they will be in all pools for ping checks)
+	Inactive                             bool              `json:"inactive"`                                 // Marks the group as inactive (in graveyard)
+	InactiveReason                       string            `json:"inactive_reason,omitempty"`                // Reason for inactivation
 }
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {
