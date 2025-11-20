@@ -28,51 +28,51 @@ type MatchStats struct {
 
 // Post-match match type statistics sent in the remote log message
 type MatchTypeStats struct {
-	ArenaLosses                  int64   `json:"ArenaLosses,omitempty"`
-	ArenaMVPPercentage           float64 `json:"ArenaMVPPercentage,omitempty"`
-	ArenaMVPs                    int64   `json:"ArenaMVPs,omitempty"`
-	ArenaWinPercentage           float64 `json:"ArenaWinPercentage,omitempty"`
-	ArenaWins                    int64   `json:"ArenaWins,omitempty"`
-	Assists                      int64   `json:"Assists,omitempty"`
-	AssistsPerGame               float64 `json:"AssistsPerGame,omitempty"`
-	AveragePointsPerGame         float64 `json:"AveragePointsPerGame,omitempty"`
-	AveragePossessionTimePerGame float64 `json:"AveragePossessionTimePerGame,omitempty"`
-	AverageTopSpeedPerGame       float64 `json:"AverageTopSpeedPerGame,omitempty"`
-	BlockPercentage              float64 `json:"BlockPercentage,omitempty"`
-	Blocks                       int64   `json:"Blocks,omitempty"`
-	BounceGoals                  int64   `json:"BounceGoals,omitempty"`
-	BumperShots                  int64   `json:"BumperShots,omitempty"`
-	Catches                      int64   `json:"Catches,omitempty"`
-	Clears                       int64   `json:"Clears,omitempty"`
-	CurrentArenaMVPStreak        int64   `json:"CurrentArenaMVPStreak,omitempty"`
-	CurrentArenaWinStreak        int64   `json:"CurrentArenaWinStreak,omitempty"`
-	GoalSavePercentage           float64 `json:"GoalSavePercentage,omitempty"`
-	GoalScorePercentage          float64 `json:"GoalScorePercentage,omitempty"`
-	Goals                        int64   `json:"Goals,omitempty"`
-	GoalsPerGame                 float64 `json:"GoalsPerGame,omitempty"`
-	HatTricks                    int64   `json:"HatTricks,omitempty"`
-	HeadbuttGoals                int64   `json:"HeadbuttGoals,omitempty"`
-	HighestArenaMVPStreak        int64   `json:"HighestArenaMVPStreak,omitempty"`
-	HighestArenaWinStreak        int64   `json:"HighestArenaWinStreak,omitempty"`
-	HighestPoints                int64   `json:"HighestPoints,omitempty"`
-	HighestSaves                 int64   `json:"HighestSaves,omitempty"`
-	HighestStuns                 int64   `json:"HighestStuns,omitempty"`
-	Interceptions                int64   `json:"Interceptions,omitempty"`
-	Passes                       int64   `json:"Passes,omitempty"`
-	Points                       int64   `json:"Points,omitempty"`
-	PossessionTime               float64 `json:"PossessionTime,omitempty"`
-	PunchesReceived              int64   `json:"PunchesReceived,omitempty"`
-	Saves                        int64   `json:"Saves,omitempty"`
-	SavesPerGame                 float64 `json:"SavesPerGame,omitempty"`
-	ShotsOnGoal                  int64   `json:"ShotsOnGoal,omitempty"`
-	ShotsOnGoalAgainst           int64   `json:"ShotsOnGoalAgainst,omitempty"`
-	Steals                       int64   `json:"Steals,omitempty"`
-	Stuns                        int64   `json:"Stuns,omitempty"`
-	StunsPerGame                 float64 `json:"StunsPerGame,omitempty"`
-	ThreePointGoals              int64   `json:"ThreePointGoals,omitempty"`
-	TopSpeedsTotal               float64 `json:"TopSpeedsTotal,omitempty"`
-	TwoPointGoals                int64   `json:"TwoPointGoals,omitempty"`
-	XP                           float64 `json:"XP,omitempty"`
+	ArenaLosses                  int64   `json:"ArenaLosses,omitempty" op:"add"`
+	ArenaMVPPercentage           float64 `json:"ArenaMVPPercentage,omitempty" op:"rep"`
+	ArenaMVPs                    int64   `json:"ArenaMVPs,omitempty" op:"add"`
+	ArenaWinPercentage           float64 `json:"ArenaWinPercentage,omitempty" op:"rep"`
+	ArenaWins                    int64   `json:"ArenaWins,omitempty" op:"add"`
+	Assists                      int64   `json:"Assists,omitempty" op:"add"`
+	AssistsPerGame               float64 `json:"AssistsPerGame,omitempty" op:"avg"`
+	AveragePointsPerGame         float64 `json:"AveragePointsPerGame,omitempty" op:"avg"`
+	AveragePossessionTimePerGame float64 `json:"AveragePossessionTimePerGame,omitempty" op:"avg"`
+	AverageTopSpeedPerGame       float64 `json:"AverageTopSpeedPerGame,omitempty" op:"avg"`
+	BlockPercentage              float64 `json:"BlockPercentage,omitempty" op:"rep"`
+	Blocks                       int64   `json:"Blocks,omitempty" op:"add"`
+	BounceGoals                  int64   `json:"BounceGoals,omitempty" op:"add"`
+	BumperShots                  int64   `json:"BumperShots,omitempty" op:"add"`
+	Catches                      int64   `json:"Catches,omitempty" op:"add"`
+	Clears                       int64   `json:"Clears,omitempty" op:"add"`
+	CurrentArenaMVPStreak        int64   `json:"CurrentArenaMVPStreak,omitempty" op:"add"`
+	CurrentArenaWinStreak        int64   `json:"CurrentArenaWinStreak,omitempty" op:"add"`
+	GoalSavePercentage           float64 `json:"GoalSavePercentage,omitempty" op:"rep"`
+	GoalScorePercentage          float64 `json:"GoalScorePercentage,omitempty" op:"rep"`
+	Goals                        int64   `json:"Goals,omitempty" op:"add"`
+	GoalsPerGame                 float64 `json:"GoalsPerGame,omitempty" op:"avg"`
+	HatTricks                    int64   `json:"HatTricks,omitempty" op:"add"`
+	HeadbuttGoals                int64   `json:"HeadbuttGoals,omitempty" op:"add"`
+	HighestArenaMVPStreak        int64   `json:"HighestArenaMVPStreak,omitempty" op:"max"`
+	HighestArenaWinStreak        int64   `json:"HighestArenaWinStreak,omitempty" op:"max"`
+	HighestPoints                int64   `json:"HighestPoints,omitempty" op:"max"`
+	HighestSaves                 int64   `json:"HighestSaves,omitempty" op:"max"`
+	HighestStuns                 int64   `json:"HighestStuns,omitempty" op:"max"`
+	Interceptions                int64   `json:"Interceptions,omitempty" op:"add"`
+	Passes                       int64   `json:"Passes,omitempty" op:"add"`
+	Points                       int64   `json:"Points,omitempty" op:"add"`
+	PossessionTime               float64 `json:"PossessionTime,omitempty" op:"add"`
+	PunchesReceived              int64   `json:"PunchesReceived,omitempty" op:"add"`
+	Saves                        int64   `json:"Saves,omitempty" op:"add"`
+	SavesPerGame                 float64 `json:"SavesPerGame,omitempty" op:"avg"`
+	ShotsOnGoal                  int64   `json:"ShotsOnGoal,omitempty" op:"add"`
+	ShotsOnGoalAgainst           int64   `json:"ShotsOnGoalAgainst,omitempty" op:"add"`
+	Steals                       int64   `json:"Steals,omitempty" op:"add"`
+	Stuns                        int64   `json:"Stuns,omitempty" op:"add"`
+	StunsPerGame                 float64 `json:"StunsPerGame,omitempty" op:"avg"`
+	ThreePointGoals              int64   `json:"ThreePointGoals,omitempty" op:"add"`
+	TopSpeedsTotal               float64 `json:"TopSpeedsTotal,omitempty" op:"add"`
+	TwoPointGoals                int64   `json:"TwoPointGoals,omitempty" op:"add"`
+	XP                           float64 `json:"XP,omitempty" op:"add"`
 }
 
 type MatchGoal struct {
