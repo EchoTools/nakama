@@ -1,6 +1,7 @@
 package server
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -25,45 +26,9 @@ func TestStatisticsToEntries(t *testing.T) {
 				Clears: 10,
 			},
 			expected: []*StatisticsQueueEntry{
-				{
-					BoardMeta: LeaderboardMeta{
-						GroupID:       "group1",
-						Mode:          evr.ModeArenaPublic,
-						StatName:      "Clears",
-						Operator:      OperatorSet,
-						ResetSchedule: evr.ResetScheduleDaily,
-					},
-					UserID:      "user1",
-					DisplayName: "User One",
-					Score:       1000000000000010, // 10.0 with new encoding: 1e15 + 10
-					Subscore:    0,
-				},
-				{
-					BoardMeta: LeaderboardMeta{
-						GroupID:       "group1",
-						Mode:          evr.ModeArenaPublic,
-						StatName:      "Clears",
-						Operator:      OperatorSet,
-						ResetSchedule: evr.ResetScheduleWeekly,
-					},
-					UserID:      "user1",
-					DisplayName: "User One",
-					Score:       1000000000000010, // 10.0 with new encoding: 1e15 + 10
-					Subscore:    0,
-				},
-				{
-					BoardMeta: LeaderboardMeta{
-						GroupID:       "group1",
-						Mode:          evr.ModeArenaPublic,
-						StatName:      "Clears",
-						Operator:      OperatorSet,
-						ResetSchedule: evr.ResetScheduleAllTime,
-					},
-					UserID:      "user1",
-					DisplayName: "User One",
-					Score:       1000000000000010, // 10.0 with new encoding: 1e15 + 10
-					Subscore:    0,
-				},
+				newStatQueueEntry("group1", evr.ModeArenaPublic, "Clears", operatorFromStatField(t, "Clears"), evr.ResetScheduleDaily, "user1", "User One", 1000000000000010, 0),
+				newStatQueueEntry("group1", evr.ModeArenaPublic, "Clears", operatorFromStatField(t, "Clears"), evr.ResetScheduleWeekly, "user1", "User One", 1000000000000010, 0),
+				newStatQueueEntry("group1", evr.ModeArenaPublic, "Clears", operatorFromStatField(t, "Clears"), evr.ResetScheduleAllTime, "user1", "User One", 1000000000000010, 0),
 			},
 		},
 	}
@@ -77,5 +42,72 @@ func TestStatisticsToEntries(t *testing.T) {
 		if cmp.Diff(entries, test.expected) != "" {
 			t.Errorf("StatisticsToEntries returned unexpected entries: %v", cmp.Diff(entries, test.expected))
 		}
+	}
+}
+
+func TestTypeStatsToScoreMap_UsesOperatorTags(t *testing.T) {
+	entries, err := typeStatsToScoreMap(
+		"user2",
+		"User Two",
+		"group2",
+		evr.ModeArenaPublic,
+		evr.MatchTypeStats{
+			HatTricks:                    2,
+			HighestPoints:                11,
+			AveragePossessionTimePerGame: 42.5,
+		},
+	)
+	if err != nil {
+		t.Fatalf("typeStatsToScoreMap returned unexpected error: %v", err)
+	}
+
+	ops := make(map[string]LeaderboardOperator)
+	for _, entry := range entries {
+		if entry.BoardMeta.ResetSchedule != evr.ResetScheduleDaily {
+			continue
+		}
+		ops[entry.BoardMeta.StatName] = entry.BoardMeta.Operator
+	}
+
+	if ops["HatTricks"] != OperatorIncrement {
+		t.Fatalf("expected HatTricks to use OperatorIncrement, got %s", ops["HatTricks"])
+	}
+	if ops["HighestPoints"] != OperatorBest {
+		t.Fatalf("expected HighestPoints to use OperatorBest, got %s", ops["HighestPoints"])
+	}
+	if ops["AveragePossessionTimePerGame"] != OperatorSet {
+		t.Fatalf("expected AveragePossessionTimePerGame to use OperatorSet, got %s", ops["AveragePossessionTimePerGame"])
+	}
+}
+
+func newStatQueueEntry(groupID string, mode evr.Symbol, statName string, operator LeaderboardOperator, reset evr.ResetSchedule, userID, displayName string, score, subscore int64) *StatisticsQueueEntry {
+	return &StatisticsQueueEntry{
+		BoardMeta: LeaderboardMeta{
+			GroupID:       groupID,
+			Mode:          mode,
+			StatName:      statName,
+			Operator:      operator,
+			ResetSchedule: reset,
+		},
+		UserID:      userID,
+		DisplayName: displayName,
+		Score:       score,
+		Subscore:    subscore,
+	}
+}
+
+func operatorFromStatField(t *testing.T, fieldName string) LeaderboardOperator {
+	t.Helper()
+	field, ok := reflect.TypeOf(evr.MatchTypeStats{}).FieldByName(fieldName)
+	if !ok {
+		t.Fatalf("field %s not found on MatchTypeStats", fieldName)
+	}
+	switch field.Tag.Get("op") {
+	case "add":
+		return OperatorIncrement
+	case "max":
+		return OperatorBest
+	default:
+		return OperatorSet
 	}
 }
