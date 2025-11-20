@@ -81,9 +81,12 @@ func NewStatisticsQueue(logger runtime.Logger, db *sql.DB, nk runtime.NakamaModu
 					if !slices.Contains(ValidLeaderboardModes, e.BoardMeta.Mode) {
 						continue
 					}
-					md := make(map[string]any)
-					for k, v := range e.Metadata {
-						md[k] = v
+					var md map[string]any
+					if e.Metadata != nil {
+						md = make(map[string]any)
+						for k, v := range e.Metadata {
+							md[k] = v
+						}
 					}
 
 					if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, md, e.Override()); err != nil {
