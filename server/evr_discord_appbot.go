@@ -2658,7 +2658,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			// Check online status using statusRegistry
-			onlineEnforcers := make([]string, 0)
+			onlineEnforcers := make([]string, 0, len(enforcerUserIDs))
 			for enforcerUserID := range enforcerUserIDs {
 				enforcerUUID := uuid.FromStringOrNil(enforcerUserID)
 				if d.statusRegistry.IsOnline(enforcerUUID) {
@@ -2666,6 +2666,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					discordID := d.cache.UserIDToDiscordID(enforcerUserID)
 					if discordID != "" {
 						onlineEnforcers = append(onlineEnforcers, fmt.Sprintf("<@%s>", discordID))
+					} else {
+						logger.Warn("Online enforcer has no Discord ID", zap.String("user_id", enforcerUserID))
 					}
 				}
 			}
