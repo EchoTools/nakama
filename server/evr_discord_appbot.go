@@ -866,6 +866,10 @@ var (
 				},
 			},
 		},
+		{
+			Name:        "online-enforcers",
+			Description: "List all online enforcers for this guild.",
+		},
 	}
 )
 
@@ -2625,6 +2629,62 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			}()
 			return nil
+		},
+
+		"online-enforcers": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+			// Check permissions - must be enforcer or global operator
+			gg, err := GuildGroupLoad(ctx, d.nk, groupID)
+			if err != nil {
+				return simpleInteractionResponse(s, i, "Failed to load guild information.")
+			}
+
+			isGlobalOperator, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+			if err != nil {
+				return simpleInteractionResponse(s, i, "Failed to check permissions.")
+			}
+
+			if !isGlobalOperator && !gg.IsEnforcer(userID) {
+				return simpleInteractionResponse(s, i, "You must be a guild enforcer to use this command.")
+			}
+
+			// Get all users with enforcer role from the role cache
+			gg.State.RLock()
+			enforcerRoleID := gg.RoleMap.Enforcer
+			enforcerUserIDs, hasEnforcerRole := gg.State.RoleCache[enforcerRoleID]
+			gg.State.RUnlock()
+
+			if !hasEnforcerRole || len(enforcerUserIDs) == 0 {
+				return simpleInteractionResponse(s, i, "No enforcers found for this guild.")
+			}
+
+			// Check online status using statusRegistry
+			onlineEnforcers := make([]string, 0)
+			for enforcerUserID := range enforcerUserIDs {
+				enforcerUUID := uuid.FromStringOrNil(enforcerUserID)
+				if d.statusRegistry.IsOnline(enforcerUUID) {
+					// Get Discord ID for display
+					discordID := d.cache.UserIDToDiscordID(enforcerUserID)
+					if discordID != "" {
+						onlineEnforcers = append(onlineEnforcers, fmt.Sprintf("<@%s>", discordID))
+					}
+				}
+			}
+
+			// Format and send response
+			var content string
+			if len(onlineEnforcers) == 0 {
+				content = "No enforcers are currently online."
+			} else {
+				content = fmt.Sprintf("**Online Enforcers (%d):**\n%s", len(onlineEnforcers), strings.Join(onlineEnforcers, "\n"))
+			}
+
+			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: content,
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
 		},
 
 		"party": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
