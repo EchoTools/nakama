@@ -31,6 +31,15 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	startTime := time.Now()
 
+	// Check if this is a secondary connection and prevent social lobby access
+	sessionCount := p.sessionRegistry.CountSessionsForUser(session.UserID())
+	if sessionCount > 1 && lobbyParams.Mode == evr.ModeSocialPublic {
+		logger.Warn("Secondary connection attempted to access social lobby",
+			zap.String("user_id", session.UserID().String()),
+			zap.String("session_id", session.ID().String()))
+		return NewLobbyError(SecondaryConnectionRestricted, "secondary connections cannot access social lobbies")
+	}
+
 	// Do authorization checks related to the guild.
 	if err := p.lobbyAuthorize(ctx, logger, session, lobbyParams); err != nil {
 		return err

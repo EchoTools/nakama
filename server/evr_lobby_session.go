@@ -16,6 +16,40 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 	var err error
 	var matchID MatchID
 
+	// Check if this is a secondary connection and restrict it 
+	sessionCount := p.sessionRegistry.CountSessionsForUser(session.UserID())
+	if sessionCount > 1 {
+		// This user has multiple sessions open
+		switch in.(type) {
+		case *evr.LobbyFindSessionRequest:
+			// For find requests, only allow spectator role
+			if lobbyParams.Role != evr.TeamSpectator {
+				logger.Warn("Secondary connection attempted to join as player",
+					zap.String("user_id", session.UserID().String()),
+					zap.String("session_id", session.ID().String()),
+					zap.String("role", TeamIndex(lobbyParams.Role).String()))
+				return NewLobbyError(SecondaryConnectionRestricted, "secondary connections can only spectate")
+			}
+
+		case *evr.LobbyJoinSessionRequest:
+			// Join requests also need spectator check if non-spectator role requested
+			if lobbyParams.Role != evr.TeamSpectator {
+				logger.Warn("Secondary connection attempted to join as player",
+					zap.String("user_id", session.UserID().String()),
+					zap.String("session_id", session.ID().String()),
+					zap.String("role", TeamIndex(lobbyParams.Role).String()))
+				return NewLobbyError(SecondaryConnectionRestricted, "secondary connections can only spectate")
+			}
+
+		case *evr.LobbyCreateSessionRequest:
+			// Secondary connections cannot create sessions
+			logger.Warn("Secondary connection attempted to create session",
+				zap.String("user_id", session.UserID().String()),
+				zap.String("session_id", session.ID().String()))
+			return NewLobbyError(SecondaryConnectionRestricted, "secondary connections cannot create sessions")
+		}
+	}
+
 	switch in.(type) {
 	case *evr.LobbyFindSessionRequest:
 
