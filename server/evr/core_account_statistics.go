@@ -112,7 +112,7 @@ func (g *StatisticsGroup) UnmarshalText(data []byte) error {
 type PlayerStatistics map[StatisticsGroup]Statistics
 
 func (s PlayerStatistics) MarshalJSON() (b []byte, err error) {
-	top := make(map[string]map[string]json.RawMessage)
+	top := make(map[string]any)
 	for g, stats := range s {
 
 		switch g.Mode {
@@ -140,32 +140,7 @@ func (s PlayerStatistics) MarshalJSON() (b []byte, err error) {
 			stats.CalculateFields()
 		}
 
-		// Remove the stats with 0 count
-		statMap := make(map[string]json.RawMessage)
-
-		v := reflect.ValueOf(stats).Elem()
-		t := v.Type()
-		for i := 0; i < v.NumField(); i++ {
-			tag := t.Field(i).Tag.Get("json")
-			s := strings.SplitN(tag, ",", 2)[0]
-
-			// marshal the field
-			if val, ok := v.Field(i).Interface().(*StatisticValue); ok && !v.Field(i).IsNil() {
-				if val.GetCount() > 0 {
-					b, err := val.MarshalJSON()
-					if err != nil {
-						return nil, err
-					}
-
-					// include it if it's not a zero count
-					if !bytes.Contains(b, []byte(`"cnt":0`)) {
-						statMap[s] = b
-					}
-				}
-			}
-		}
-
-		top[g.String()] = statMap
+		top[g.String()] = stats
 	}
 
 	return json.Marshal(top)
@@ -271,6 +246,10 @@ type ArenaStatistics struct {
 	LobbyTime                    *StatisticValue `json:"LobbyTime,omitempty" op:"rep,omitzero" type:"float"`
 	EarlyQuits                   *StatisticValue `json:"EarlyQuits,omitempty" op:"add,omitzero" type:"int"`
 	EarlyQuitPercentage          *StatisticValue `json:"EarlyQuitPercentage,omitempty" op:"rep,omitzero" type:"float"`
+}
+
+func (s *ArenaStatistics) MarshalJSON() ([]byte, error) {
+	return marshalStatisticsStruct(s)
 }
 
 func (s *ArenaStatistics) CalculateFields() {
@@ -467,6 +446,10 @@ type CombatStatistics struct {
 	LobbyTime                          *StatisticValue `json:"LobbyTime,omitempty" op:"rep,omitzero" type:"float"`
 }
 
+func (s *CombatStatistics) MarshalJSON() ([]byte, error) {
+	return marshalStatisticsStruct(s)
+}
+
 func (s *CombatStatistics) CalculateFields() {
 	gamesPlayed := 0
 	if s.CombatWins != nil {
@@ -517,10 +500,45 @@ type GenericStats struct { // Privates and Social Lobby
 	LobbyTime *StatisticValue `json:"LobbyTime,omitempty" op:"add,omitzero" type:"float"`
 }
 
+func (s *GenericStats) MarshalJSON() ([]byte, error) {
+	return marshalStatisticsStruct(s)
+}
+
 func (GenericStats) CalculateFields() {}
 
 func statisticMarshalJSON[T int64 | float64 | float32](op string, cnt int64, val T) ([]byte, error) {
-	return fmt.Appendf(nil, "{\"val\":%v,\"op\":\"%s\",\"cnt\":%d}", float32(val), op, cnt), nil
+	return fmt.Appendf(nil, "{\"cnt\":%d,\"op\":\"%s\",\"val\":%v}", cnt, op, val), nil
+}
+
+func marshalStatisticsStruct(stats any) ([]byte, error) {
+	statMap := make(map[string]json.RawMessage)
+
+	v := reflect.ValueOf(stats).Elem()
+	t := v.Type()
+	for i := 0; i < v.NumField(); i++ {
+		tag := t.Field(i).Tag.Get("json")
+		s := strings.SplitN(tag, ",", 2)[0]
+
+		// Get op from tag
+		opTag := t.Field(i).Tag.Get("op")
+		op, _, _ := strings.Cut(opTag, ",")
+
+		// marshal the field
+		if val, ok := v.Field(i).Interface().(*StatisticValue); ok && !v.Field(i).IsNil() {
+			if val.GetCount() > 0 {
+				b, err := val.MarshalJSONWithOp(op)
+				if err != nil {
+					return nil, err
+				}
+
+				// include it if it's not a zero count
+				if !bytes.Contains(b, []byte(`"cnt":0`)) {
+					statMap[s] = b
+				}
+			}
+		}
+	}
+	return json.Marshal(statMap)
 }
 
 type Statistics interface {
@@ -586,13 +604,17 @@ func (s *StatisticValue) ValueType() string {
 func (s *StatisticValue) MarshalJSON() ([]byte, error) {
 	// get the value of op field tag
 	op := s.Operator()
+	return s.MarshalJSONWithOp(op)
+}
+
+func (s *StatisticValue) MarshalJSONWithOp(op string) ([]byte, error) {
 	switch s.ValueType() {
 	case "int":
 		return statisticMarshalJSON(op, s.Count, int64(s.Value))
 	case "float":
-		return statisticMarshalJSON(op, s.Count, float32(s.Value))
+		return statisticMarshalJSON(op, s.Count, s.Value)
 	default:
-		return statisticMarshalJSON(op, s.Count, float32(s.Value))
+		return statisticMarshalJSON(op, s.Count, s.Value)
 	}
 }
 
