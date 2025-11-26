@@ -338,10 +338,14 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 			}
 		}
 
-		matchmakingRating, err = MatchmakingRatingLoad(ctx, p.nk, userID, groupIDStr, mmMode)
-		if err != nil {
-			logger.Warn("Failed to load matchmaking rating", zap.String("group_id", groupIDStr), zap.String("mode", mmMode.String()), zap.Error(err))
-			matchmakingRating = NewDefaultRating()
+		if userSettings.StaticRatingMu != nil && userSettings.StaticRatingSigma != nil {
+			matchmakingRating = types.Rating{Mu: *userSettings.StaticRatingMu, Sigma: *userSettings.StaticRatingSigma}
+		} else {
+			matchmakingRating, err = MatchmakingRatingLoad(ctx, p.nk, userID, groupIDStr, mmMode)
+			if err != nil {
+				logger.Warn("Failed to load matchmaking rating", zap.String("group_id", groupIDStr), zap.String("mode", mmMode.String()), zap.Error(err))
+				matchmakingRating = NewDefaultRating()
+			}
 		}
 
 		matchmakingOrdinal = rating.Ordinal(matchmakingRating)

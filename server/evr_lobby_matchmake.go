@@ -265,6 +265,8 @@ type MatchmakingSettings struct {
 	NextMatchRole            string   `json:"next_match_role"`           // The role to join the next match as
 	NextMatchDiscordID       string   `json:"next_match_discord_id"`     // The discord ID to join the next match as
 	StaticBaseRankPercentile float64  `json:"static_rank_percentile"`    // The static rank percentile to use
+	StaticRatingMu           *float64 `json:"static_rating_mu"`          // The static rating mu to use
+	StaticRatingSigma        *float64 `json:"static_rating_sigma"`       // The static rating sigma to use
 	Divisions                []string `json:"divisions"`                 // The division to use
 	ExcludedDivisions        []string `json:"excluded_divisions"`        // The division to use
 }
