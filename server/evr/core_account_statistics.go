@@ -611,8 +611,6 @@ func (s *StatisticValue) MarshalJSONWithOp(op string) ([]byte, error) {
 	switch s.ValueType() {
 	case "int":
 		return statisticMarshalJSON(op, s.Count, int64(s.Value))
-	case "float":
-		return statisticMarshalJSON(op, s.Count, s.Value)
 	default:
 		return statisticMarshalJSON(op, s.Count, s.Value)
 	}

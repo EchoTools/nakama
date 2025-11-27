@@ -605,7 +605,11 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
 
 	entries := make([]*StatisticsQueueEntry, 0)
+	var conversionErr error
 	iterateMatchTypeStatsFields(stats, func(statName string, op LeaderboardOperator, value float64) {
+		if conversionErr != nil {
+			return
+		}
 		for _, r := range resetSchedules {
 			meta := LeaderboardMeta{
 				GroupID:       groupID,
@@ -617,7 +621,7 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 
 			score, subscore, err := Float64ToScore(value)
 			if err != nil {
-				entries = nil
+				conversionErr = fmt.Errorf("failed to convert stat %s: %w", statName, err)
 				return
 			}
 			entries = append(entries, &StatisticsQueueEntry{
@@ -631,6 +635,9 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 		}
 	})
 
+	if conversionErr != nil {
+		return nil, conversionErr
+	}
 	return entries, nil
 }
 
