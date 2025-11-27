@@ -559,21 +559,25 @@ func (s *EventRemoteLogSet) processPostMatchTypeStats(ctx context.Context, logge
 	return statisticsQueue.Add(statEntries)
 }
 
-func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, stats evr.MatchTypeStats) ([]*StatisticsQueueEntry, error) {
-	// Modify the update based on the previous stats
-	updateElem := reflect.ValueOf(stats)
-	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
+func iterateMatchTypeStatsFields(stats evr.MatchTypeStats, fn func(statName string, op LeaderboardOperator, value float64)) {
+	statsBaseType := reflect.TypeOf(stats)
+	statsValue := reflect.ValueOf(stats)
+	for i := 0; i < statsBaseType.NumField(); i++ {
+		field := statsBaseType.Field(i)
+		value := statsValue.Field(i)
 
-	statsBaseType := reflect.ValueOf(stats).Type()
+		opTag := field.Tag.Get("op")
+		opParts := strings.Split(opTag, ",")
 
-	nameOperatorMap := make(map[string]LeaderboardOperator, statsBaseType.NumField())
-	// Create a map of stat names to their corresponding operator
-	for i := range statsBaseType.NumField() {
-		jsonTag := statsBaseType.Field(i).Tag.Get("json")
+		if value.IsZero() && slices.Contains(opParts, "omitzero") {
+			continue
+		}
+
+		jsonTag := field.Tag.Get("json")
 		statName := strings.SplitN(jsonTag, ",", 2)[0]
-		opTag := statsBaseType.Field(i).Tag.Get("op")
+
 		op := OperatorSet
-		switch opTag {
+		switch opParts[0] {
 		case "avg":
 			op = OperatorSet
 		case "add":
@@ -583,46 +587,43 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 		case "rep":
 			op = OperatorSet
 		}
-		nameOperatorMap[statName] = op
+
+		var statValue float64 = 0
+		if value.CanInt() {
+			statValue = float64(value.Int())
+		} else if value.CanUint() {
+			statValue = float64(value.Uint())
+		} else if value.CanFloat() {
+			statValue = float64(value.Float())
+		}
+
+		fn(statName, op, statValue)
 	}
+}
 
-	// construct the entries
-	entries := make([]*StatisticsQueueEntry, 0, len(resetSchedules)*updateElem.NumField())
+func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, stats evr.MatchTypeStats) ([]*StatisticsQueueEntry, error) {
+	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
 
-	for i := range updateElem.NumField() {
-		updateField := updateElem.Field(i)
-
+	entries := make([]*StatisticsQueueEntry, 0)
+	var conversionErr error
+	iterateMatchTypeStatsFields(stats, func(statName string, op LeaderboardOperator, value float64) {
+		if conversionErr != nil {
+			return
+		}
 		for _, r := range resetSchedules {
-			if updateField.IsZero() {
-				continue
-			}
-			// Extract the JSON and operator tags from the struct field
-			jsonTag := updateElem.Type().Field(i).Tag.Get("json")
-			statName := strings.SplitN(jsonTag, ",", 2)[0]
-
 			meta := LeaderboardMeta{
 				GroupID:       groupID,
 				Mode:          mode,
 				StatName:      statName,
-				Operator:      nameOperatorMap[statName],
+				Operator:      op,
 				ResetSchedule: r,
 			}
 
-			var statValue float64 = 0
-
-			if updateField.CanInt() {
-				statValue = float64(updateField.Int())
-			} else if updateField.CanUint() {
-				statValue = float64(updateField.Uint())
-			} else if updateField.CanFloat() {
-				statValue = float64(updateField.Float())
-			}
-
-			score, subscore, err := Float64ToScore(statValue)
+			score, subscore, err := Float64ToScore(value)
 			if err != nil {
-				return nil, fmt.Errorf("failed to convert float64 to int64 pair: %w", err)
+				conversionErr = fmt.Errorf("failed to convert stat %s: %w", statName, err)
+				return
 			}
-
 			entries = append(entries, &StatisticsQueueEntry{
 				BoardMeta:   meta,
 				UserID:      userID,
@@ -632,8 +633,11 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 				Metadata:    nil,
 			})
 		}
-	}
+	})
 
+	if conversionErr != nil {
+		return nil, conversionErr
+	}
 	return entries, nil
 }
 
@@ -650,6 +654,10 @@ func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runt
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
 
+	if label.Mode != evr.ModeArenaPublic && label.Mode != evr.ModeCombatPublic && label.Mode != evr.ModeSocialPublic {
+		return nil // Only process VOIP loudness for arena, combat, and social modes
+	}
+
 	// Parse the player's EVR ID
 	xpid, err := evr.ParseEvrId(msg.PlayerInfoUserid)
 	if err != nil {
@@ -664,8 +672,8 @@ func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runt
 	}
 
 	// Only process for actual players (not spectators)
-	if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
-		return fmt.Errorf("player %s is not on a playing team (team: %d, expected Blue or Orange)",
+	if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam && playerInfo.Team != SocialLobbyParticipant {
+		return fmt.Errorf("player %s is not on a playing team (team: %d, expected blue, orange, or social)",
 			msg.PlayerInfoUserid, playerInfo.Team)
 	}
 

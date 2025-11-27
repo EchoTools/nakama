@@ -140,7 +140,7 @@ func TestFullStatisticsGeneration(t *testing.T) {
 		return
 	}
 
-	got, err := json.MarshalIndent(stats, "", "  ")
+	got, err := json.MarshalIndent(&stats, "", "  ")
 	if err != nil {
 		t.Errorf("json.Marshal() error = %v", err)
 		return
@@ -150,6 +150,42 @@ func TestFullStatisticsGeneration(t *testing.T) {
 		t.Errorf("MarshalJSON() want/got (-/+) = %v", cmp.Diff(string(got), string(want)))
 	}
 
+}
+
+func TestArenaStatistics_MarshalJSON_IncludesOp(t *testing.T) {
+	stats := &ArenaStatistics{
+		ArenaWins: &StatisticValue{
+			Count: 1,
+			Value: 10,
+		},
+	}
+
+	data, err := json.Marshal(stats)
+	if err != nil {
+		t.Fatalf("Failed to marshal ArenaStatistics: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Failed to unmarshal result: %v", err)
+	}
+
+	wins, ok := result["ArenaWins"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("ArenaWins not found or invalid format")
+	}
+
+	if op, ok := wins["op"].(string); !ok || op != "add" {
+		t.Errorf("Expected op='add', got '%v'", wins["op"])
+	}
+
+	if cnt, ok := wins["cnt"].(float64); !ok || cnt != 1 {
+		t.Errorf("Expected cnt=1, got %v", wins["cnt"])
+	}
+
+	if val, ok := wins["val"].(float64); !ok || val != 10 {
+		t.Errorf("Expected val=10, got %v", wins["val"])
+	}
 }
 
 var preshutdownProfileStatistics = []byte(`
