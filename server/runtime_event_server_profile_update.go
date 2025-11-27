@@ -59,7 +59,14 @@ func (s *EventServerProfileUpdate) Process(ctx context.Context, logger runtime.L
 		// Calculate and store new player ratings
 		ratings := CalculateNewPlayerRatings(s.MatchLabel.Players, s.BlueWins)
 		if rating, ok := ratings[s.SessionID]; ok {
-			if err := MatchmakingRatingStore(ctx, nk, s.UserID, "", s.DisplayName, s.GroupID, s.Mode, rating); err != nil {
+			var discordID string
+			for _, playerInfo := range s.MatchLabel.Players {
+				if playerInfo.SessionID == s.SessionID {
+					discordID = playerInfo.DiscordID
+					break
+				}
+			}
+			if err := MatchmakingRatingStore(ctx, nk, s.UserID, discordID, s.DisplayName, s.GroupID, s.Mode, rating); err != nil {
 				logger.WithField("error", err).Warn("Failed to record rating to leaderboard")
 			}
 		} else {
