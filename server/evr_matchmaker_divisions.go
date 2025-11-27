@@ -45,21 +45,3 @@ func DivisionFromName(name string) Division {
 		return DivisionGreen
 	}
 }
-
-func DivisionFromScore(rankPercentile float64) Division {
-	if rankPercentile >= 0.99 {
-		return DivisionMaster
-	} else if rankPercentile >= 0.95 {
-		return DivisionDiamond
-	} else if rankPercentile >= 0.85 {
-		return DivisionPlatinum
-	} else if rankPercentile >= 0.70 {
-		return DivisionGold
-	} else if rankPercentile >= 0.50 {
-		return DivisionSilver
-	} else if rankPercentile >= 0.25 {
-		return DivisionBronze
-	} else {
-		return DivisionGreen
-	}
-}
