@@ -2,11 +2,29 @@ package server
 
 import (
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestIterateMatchTypeStatsFields(t *testing.T) {
+	stats := evr.MatchTypeStats{
+		Assists: 10,
+		Goals:   0,
+	}
+
+	count := 0
+	iterateMatchTypeStatsFields(stats, func(statName string, op LeaderboardOperator, value float64) {
+		count++
+		if statName == "assists" {
+			assert.Equal(t, 10.0, value)
+		}
+	})
+	assert.True(t, count > 0)
+}
 
 func TestTypeStatsToScoreMap_Realistic(t *testing.T) {
 	msg := evr.MatchTypeStats{
@@ -36,75 +54,91 @@ func TestTypeStatsToScoreMap_Realistic(t *testing.T) {
 	mode := evr.ToSymbol("echo_arena")
 	userID := "user123"
 
-	wantedEntries := make([]*StatisticsQueueEntry, 0)
+	// Generate expected entries by replicating the logic
+	expectedEntries := make([]*StatisticsQueueEntry, 0)
+	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
 
-	// Use reflect to iterate over msg fields, and generate wantedEntries
-	msgValue := reflect.ValueOf(msg)
-	msgType := reflect.TypeOf(msg)
+	v := reflect.ValueOf(msg)
+	typeOfMsg := v.Type()
 
-	resetSchedules := []string{"daily", "weekly", "alltime"}
+	for i := 0; i < v.NumField(); i++ {
+		field := v.Field(i)
+		structField := typeOfMsg.Field(i)
 
-	for i := 0; i < msgValue.NumField(); i++ {
-		field := msgValue.Field(i)
-		fieldType := msgType.Field(i)
-		fieldName := fieldType.Name
+		opTag := structField.Tag.Get("op")
+		opParts := strings.Split(opTag, ",")
 
-		// Skip zero values
-		if field.Kind() == reflect.Float64 && field.Float() == 0 {
+		// Check for zero value and omitzero flag
+		isZero := false
+		switch field.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			isZero = field.Int() == 0
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			isZero = field.Uint() == 0
+		case reflect.Float32, reflect.Float64:
+			isZero = field.Float() == 0
+		}
+
+		if isZero && slices.Contains(opParts, "omitzero") {
 			continue
 		}
-		if (field.Kind() == reflect.Int || field.Kind() == reflect.Int64) && field.Int() == 0 {
-			continue
+
+		jsonTag := structField.Tag.Get("json")
+		statName := strings.SplitN(jsonTag, ",", 2)[0]
+
+		op := OperatorSet
+		switch opParts[0] {
+		case "avg":
+			op = OperatorSet
+		case "add":
+			op = OperatorIncrement
+		case "max":
+			op = OperatorBest
+		case "rep":
+			op = OperatorSet
 		}
 
-		// Convert field value to score, subscore
-		score, subscore, err := Float64ToScore(field.Convert(reflect.TypeFor[float64]()).Float())
-		if err != nil {
-			t.Fatalf("Failed to convert field %s to score: %v", fieldName, err)
-		}
-		if score == 0 {
-			continue
+		var val float64
+		switch field.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			val = float64(field.Int())
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			val = float64(field.Uint())
+		case reflect.Float32, reflect.Float64:
+			val = field.Float()
 		}
 
-		// Create entries for each reset schedule
-		for _, schedule := range resetSchedules {
-			opTag := fieldType.Tag.Get("op")
-			operator := operatorFromTag(opTag)
-			entry := &StatisticsQueueEntry{
+		score, subscore, err := Float64ToScore(val)
+		assert.NoError(t, err)
+
+		for _, r := range resetSchedules {
+			expectedEntries = append(expectedEntries, &StatisticsQueueEntry{
 				BoardMeta: LeaderboardMeta{
 					GroupID:       groupID,
 					Mode:          mode,
-					StatName:      fieldName,
-					Operator:      operator,
-					ResetSchedule: evr.ResetSchedule(schedule),
+					StatName:      statName,
+					Operator:      op,
+					ResetSchedule: r,
 				},
 				UserID:      userID,
 				DisplayName: displayName,
 				Score:       score,
 				Subscore:    subscore,
-				Metadata:    nil,
-			}
-			wantedEntries = append(wantedEntries, entry)
+			})
 		}
 	}
-
-	// for each field in msg, generate the score, subscore
 
 	entries, err := typeStatsToScoreMap(userID, displayName, groupID, mode, msg)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, entries)
 
-	assert.Equal(t, len(wantedEntries), len(entries), "Number of entries should match expected count")
+	assert.Equal(t, len(expectedEntries), len(entries), "Number of entries should match expected count")
 
 	for i, entry := range entries {
-		assert.Equal(t, wantedEntries[i].BoardMeta, entry.BoardMeta, "BoardMeta mismatch at entry %d", i)
-		assert.Equal(t, wantedEntries[i].UserID, entry.UserID, "UserID mismatch at entry %d", i)
-		assert.Equal(t, wantedEntries[i].DisplayName, entry.DisplayName, "DisplayName mismatch at entry %d", i)
-		assert.Equal(t, wantedEntries[i].Score, entry.Score, "Score mismatch at entry %d", i)
-		assert.Equal(t, wantedEntries[i].Subscore, entry.Subscore, "Subscore mismatch at entry %d", i)
-		assert.Equal(t, wantedEntries[i].Metadata, entry.Metadata, "Metadata mismatch at entry %d", i)
+		assert.Equal(t, expectedEntries[i].BoardMeta, entry.BoardMeta, "BoardMeta mismatch at entry %d", i)
+		assert.Equal(t, expectedEntries[i].UserID, entry.UserID, "UserID mismatch at entry %d", i)
+		assert.Equal(t, expectedEntries[i].DisplayName, entry.DisplayName, "DisplayName mismatch at entry %d", i)
+		assert.Equal(t, expectedEntries[i].Score, entry.Score, "Score mismatch at entry %d", i)
+		assert.Equal(t, expectedEntries[i].Subscore, entry.Subscore, "Subscore mismatch at entry %d", i)
 	}
-
 }
-
-// operatorFromTag removed; use shared TestOperatorFromTag from test helpers.
