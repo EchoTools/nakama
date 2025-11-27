@@ -636,6 +636,10 @@ func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runt
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
 
+	if label.Mode != evr.ModeArenaPublic && label.Mode != evr.ModeCombatPublic && label.Mode != evr.ModeSocialPublic {
+		return nil // Only process VOIP loudness for arena, combat, and social modes
+	}
+
 	// Parse the player's EVR ID
 	xpid, err := evr.ParseEvrId(msg.PlayerInfoUserid)
 	if err != nil {
@@ -650,8 +654,8 @@ func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runt
 	}
 
 	// Only process for actual players (not spectators)
-	if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
-		return fmt.Errorf("player %s is not on a playing team (team: %d, expected Blue or Orange)",
+	if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam && playerInfo.Team != SocialLobbyParticipant {
+		return fmt.Errorf("player %s is not on a playing team (team: %d, expected blue, orange, or social)",
 			msg.PlayerInfoUserid, playerInfo.Team)
 	}
 
