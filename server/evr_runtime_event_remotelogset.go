@@ -536,15 +536,6 @@ func (s *EventRemoteLogSet) processPostMatchTypeStats(ctx context.Context, logge
 		} else {
 			logger.WithField("target_sid", playerInfo.SessionID).Warn("No rating found for player in matchmaking ratings")
 		}
-
-		zapLogger := RuntimeLoggerToZapLogger(logger)
-		// Calculate a new rank percentile
-		if rankPercentile, err := CalculateSmoothedPlayerRankPercentile(ctx, zapLogger, db, nk, playerInfo.UserID, groupIDStr, label.Mode); err != nil {
-			logger.WithField("error", err).Warn("Failed to calculate new player rank percentile")
-			// Store the rank percentile in the leaderboards.
-		} else if err := MatchmakingRankPercentileStore(ctx, nk, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rankPercentile); err != nil {
-			logger.WithField("error", err).Warn("Failed to record rank percentile to leaderboard")
-		}
 	}
 
 	// Update the player's statistics, if the service settings allow it

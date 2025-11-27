@@ -52,12 +52,9 @@ type LobbySessionParameters struct {
 	MatchmakingRating            *atomic.Pointer[types.Rating] `json:"matchmaking_rating"`
 	EarlyQuitPenaltyLevel        int                           `json:"early_quit_penalty_level"`
 	EnableSBMM                   bool                          `json:"disable_sbmm"`
-	EnableRankPercentileRange    bool                          `json:"enable_rank_percentile_range"`
 	EnableOrdinalRange           bool                          `json:"enable_ordinal_range"`
 	EnableDivisions              bool                          `json:"enable_divisions"`
 	MatchmakingRatingRange       float64                       `json:"rating_range"`
-	RankPercentile               *atomic.Float64               `json:"rank_percentile"` // Updated when party is created
-	RankPercentileMaxDelta       float64                       `json:"rank_percentile_max_delta"`
 	MatchmakingDivisions         []string                      `json:"divisions"`
 	MatchmakingExcludedDivisions []string                      `json:"excluded_divisions"`
 	MaxServerRTT                 int                           `json:"max_server_rtt"`
@@ -77,13 +74,6 @@ func (p *LobbySessionParameters) SetPartySize(size int) {
 	p.PartySize.Store(int64(size))
 }
 
-func (p *LobbySessionParameters) GetRankPercentile() float64 {
-	if p.RankPercentile == nil {
-		return 0.0
-	}
-	return p.RankPercentile.Load()
-}
-
 func (p *LobbySessionParameters) GetRating() types.Rating {
 	if p.MatchmakingRating == nil || p.MatchmakingRating.Load() == nil {
 		return NewDefaultRating()
@@ -96,14 +86,6 @@ func (p *LobbySessionParameters) SetRating(rating types.Rating) {
 		p.MatchmakingRating = atomic.NewPointer(&rating)
 	} else {
 		p.MatchmakingRating.Store(&rating)
-	}
-}
-
-func (p *LobbySessionParameters) SetRankPercentile(percentile float64) {
-	if p.RankPercentile == nil {
-		p.RankPercentile = atomic.NewFloat64(percentile)
-	} else {
-		p.RankPercentile.Store(percentile)
 	}
 }
 
@@ -293,8 +275,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		currentMatchID = MatchID{UUID: request.GetCurrentLobbyID(), Node: node}
 	}
 
-	rankPercentileMaxDelta := 1.0
-	rankPercentile := globalSettings.RankPercentile.Default
 	matchmakingRating := NewDefaultRating()
 	mmMode := mode
 
@@ -302,23 +282,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		mmMode = evr.ModeArenaPublic
 	}
 	if (mode == evr.ModeArenaPublic || mode == evr.ModeCombatPublic) && globalSettings.EnableSBMM && groupID != uuid.Nil {
-
-		if globalSettings.RankPercentile.MaxDelta > 0 {
-			rankPercentileMaxDelta = globalSettings.RankPercentile.MaxDelta
-		}
-
-		if userSettings.StaticBaseRankPercentile > 0 {
-			rankPercentile = userSettings.StaticBaseRankPercentile
-		} else {
-			rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.nk, userID, groupIDStr, mmMode)
-			if err != nil {
-				return nil, fmt.Errorf("failed to calculate smoothed player rank percentile: %w", err)
-			}
-
-			if err := MatchmakingRankPercentileStore(ctx, p.nk, userID, session.Username(), groupIDStr, mmMode, rankPercentile); err != nil {
-				logger.Warn("Failed to store user rank percentile", zap.Error(err))
-			}
-		}
 
 		if userSettings.StaticRatingMu != nil && userSettings.StaticRatingSigma != nil {
 			matchmakingRating = types.Rating{Mu: *userSettings.StaticRatingMu, Sigma: *userSettings.StaticRatingSigma}
@@ -402,14 +365,11 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		BlockedIDs:                   blockedIDs,
 		EnableSBMM:                   globalSettings.EnableSBMM,
 		EnableDivisions:              globalSettings.EnableDivisions,
-		EnableRankPercentileRange:    globalSettings.EnableRankPercentileRange,
 		EnableOrdinalRange:           globalSettings.EnableOrdinalRange,
 		MatchmakingRating:            atomic.NewPointer(&matchmakingRating),
 		MatchmakingRatingRange:       globalSettings.RatingRange,
 		Verbose:                      sessionParams.profile.DiscordDebugMessages,
 		EarlyQuitPenaltyLevel:        earlyQuitPenaltyLevel,
-		RankPercentile:               atomic.NewFloat64(rankPercentile),
-		RankPercentileMaxDelta:       rankPercentileMaxDelta,
 		MatchmakingDivisions:         matchmakingDivisions,
 		MatchmakingExcludedDivisions: matchmakingExcludedDivisions,
 		MaxServerRTT:                 maxServerRTT,
@@ -527,9 +487,7 @@ func (p *LobbySessionParameters) FromMatchmakerEntry(entry *MatchmakerEntry) {
 	p.BlockedIDs = strings.Split(stringProperties["blocked_ids"], " ")
 	p.DisplayName = stringProperties["display_name"]
 	p.SetRating(rating)
-	p.SetRankPercentile(numericProperties["rank_percentile"])
 	p.MatchmakingTimestamp, _ = time.Parse(time.RFC3339, stringProperties["submission_time"])
-	p.RankPercentileMaxDelta = numericProperties["rank_percentile_max"]
 	p.MaxServerRTT = 180
 
 	serverRTTs := make(map[string]int)
@@ -555,9 +513,8 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	}
 
 	numericProperties := map[string]float64{
-		"timestamp":                 float64(time.Now().UTC().Unix()),
-		"rank_percentile_max_delta": p.RankPercentileMaxDelta,
-		"max_rtt":                   float64(p.MaxServerRTT),
+		"timestamp": float64(time.Now().UTC().Unix()),
+		"max_rtt":   float64(p.MaxServerRTT),
 	}
 
 	qparts := []string{
@@ -622,34 +579,9 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 			}
 		*/
 
-		if p.EnableRankPercentileRange {
-
-			if rankPercentile := p.GetRankPercentile(); rankPercentile > 0.0 {
-				numericProperties["rank_percentile"] = rankPercentile
-
-				if p.RankPercentileMaxDelta > 0 {
-					rankLower := min(rankPercentile-p.RankPercentileMaxDelta, 1.0-2.0*p.RankPercentileMaxDelta)
-					rankUpper := max(rankPercentile+p.RankPercentileMaxDelta, 2.0*p.RankPercentileMaxDelta)
-					rankLower = max(rankLower, 0.0)
-					rankUpper = min(rankUpper, 1.0)
-					numericProperties["rank_percentile_min"] = rankLower
-					numericProperties["rank_percentile_max"] = rankUpper
-
-					qparts = append(qparts,
-						// Exclusion
-						fmt.Sprintf("-properties.rank_percentile:<%f", rankLower),
-						fmt.Sprintf("-properties.rank_percentile:>%f", rankUpper),
-
-						// Reverse
-						fmt.Sprintf("-properties.rank_percentile_min:>%f", rankPercentile),
-						fmt.Sprintf("-properties.rank_percentile_max:<%f", rankPercentile),
-					)
-				}
-
-			}
-		}
-
 	}
+
+	//maxDelta := 60 // milliseconds
 
 	//maxDelta := 60 // milliseconds
 	rttDeltas := ServiceSettings().Matchmaking.ServerSelection.RTTDelta

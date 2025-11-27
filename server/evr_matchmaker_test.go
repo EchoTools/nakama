@@ -628,11 +628,8 @@ func newMatchmakingEntryFromExisting(entry *MatchmakerEntry, minCount, maxCount,
 			entry.NumericProperties[k] = v
 		}
 	}
-	params.FromMatchmakerEntry(entry)
 
-	if params.RankPercentileMaxDelta == 0 {
-		params.RankPercentileMaxDelta = 0.3
-	}
+	params.FromMatchmakerEntry(entry)
 
 	ticketParams := MatchmakingTicketParameters{
 		MinCount:                   minCount,
@@ -642,6 +639,7 @@ func newMatchmakingEntryFromExisting(entry *MatchmakerEntry, minCount, maxCount,
 		IncludeEarlyQuitPenalty:    true,
 		IncludeRequireCommonServer: true,
 	}
+
 
 	_, stringProps, numericProps := params.MatchmakingParameters(&ticketParams)
 

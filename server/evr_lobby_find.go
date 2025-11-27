@@ -193,7 +193,6 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 	}
 	logger.Debug("Joined party group", zap.String("partyID", lobbyGroup.IDStr()))
 
-	rankPercentiles := make([]float64, 0, lobbyGroup.Size())
 	// If this is the leader, then set the presence status to the current match ID.
 	if isLeader {
 		if !lobbyParams.CurrentMatchID.IsNil() && lobbyParams.Mode != evr.ModeSocialPublic {
@@ -224,31 +223,11 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 				if err := p.nk.StreamUserKick(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, member.Presence); err != nil {
 					return nil, nil, false, fmt.Errorf("failed to kick party member: %w", err)
 				}
-			} else {
-				/*
-					memberParams := &LobbySessionParameters{}
-					if err := json.Unmarshal([]byte(member.Presence.GetStatus()), &memberParams); err != nil {
-						return nil, nil, false, fmt.Errorf("failed to unmarshal member params: %w", err)
-					}
-
-					rankPercentiles = append(rankPercentiles, memberParams.GetRankPercentile())
-				*/
 			}
 		}
 
 		partySize := lobbyGroup.Size()
 		logger.Debug("Party is ready", zap.String("leader", session.id.String()), zap.Int("size", partySize), zap.Strings("members", memberUsernames))
-
-		if len(rankPercentiles) > 0 {
-			// Average the rank percentiles
-			averageRankPercentile := 0.0
-			for _, rankPercentile := range rankPercentiles {
-				averageRankPercentile += rankPercentile
-			}
-			averageRankPercentile /= float64(partySize)
-
-			lobbyParams.SetRankPercentile(averageRankPercentile)
-		}
 
 		lobbyParams.SetPartySize(partySize)
 	}
@@ -604,19 +583,13 @@ func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, nk runtime
 			mmMode = evr.ModeArenaPublic
 		}
 
-		rankPercentile, err := MatchmakingRankPercentileLoad(ctx, nk, session.UserID().String(), lobbyParams.GroupID.String(), mmMode)
-		if err != nil {
-			logger.Warn("Failed to load rank percentile", zap.String("sid", sessionID.String()), zap.Error(err))
-			rankPercentile = ServiceSettings().Matchmaking.RankPercentile.Default
-		}
-
 		rating, err := MatchmakingRatingLoad(ctx, nk, session.UserID().String(), lobbyParams.GroupID.String(), mmMode)
 		if err != nil {
 			logger.Warn("Failed to load rating", zap.String("sid", sessionID.String()), zap.Error(err))
 			rating = NewDefaultRating()
 		}
 
-		presence, err := EntrantPresenceFromSession(session, lobbyParams.PartyID, lobbyParams.Role, rating, rankPercentile, lobbyParams.GroupID.String(), 0, "")
+		presence, err := EntrantPresenceFromSession(session, lobbyParams.PartyID, lobbyParams.Role, rating, lobbyParams.GroupID.String(), 0, "")
 		if err != nil {
 			logger.Warn("Failed to create entrant presence", zap.String("session_id", session.ID().String()), zap.Error(err))
 			continue

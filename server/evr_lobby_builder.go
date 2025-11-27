@@ -188,10 +188,6 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 			mu := entry.NumericProperties["rating_mu"]
 			sigma := entry.NumericProperties["rating_sigma"]
 			rating := NewRating(0, mu, sigma)
-			percentile, ok := entry.NumericProperties["rank_percentile"]
-			if !ok {
-				percentile = 0.0
-			}
 
 			query, ok := entry.StringProperties["query"]
 			if !ok {
@@ -200,7 +196,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 			sessions = append(sessions, session)
 
-			if entrant, err := EntrantPresenceFromSession(session, MatchIDFromStringOrNil(entry.GetPartyId()).UUID, teamIndex, rating, percentile, groupID.String(), 0, query); err != nil {
+			if entrant, err := EntrantPresenceFromSession(session, MatchIDFromStringOrNil(entry.GetPartyId()).UUID, teamIndex, rating, groupID.String(), 0, query); err != nil {
 				logger.Error("Failed to create entrant presence", zap.String("sid", session.ID().String()), zap.Error(err))
 				continue
 			} else {

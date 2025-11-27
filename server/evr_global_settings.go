@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/atomic"
 )
 
@@ -63,14 +62,12 @@ type GlobalMatchmakingSettings struct {
 	DisableArenaBackfill           bool                    `json:"disable_arena_backfill"`              // Disable backfilling for arena matches
 	QueryAddons                    QueryAddons             `json:"query_addons"`                        // Additional queries to add to matchmaking queries
 	MaxServerRTT                   int                     `json:"max_server_rtt"`                      // The maximum RTT to allow
-	RankPercentile                 RankPercentileSettings  `json:"rank_percentile"`                     // The rank percentile settings
 	EnableSBMM                     bool                    `json:"enable_skill_based_mm"`               // Disable SBMM
 	EnableDivisions                bool                    `json:"enable_divisions"`                    // Enable divisions
 	GreenDivisionMaxAccountAgeDays int                     `json:"green_division_max_account_age_days"` // The maximum account age to be in the green division
 	EnableEarlyQuitPenalty         bool                    `json:"enable_early_quit_penalty"`           // Disable early quit penalty
 	ServerSelection                ServerSelectionSettings `json:"server_selection"`                    // The server selection settings
 	EnableOrdinalRange             bool                    `json:"enable_ordinal_range"`                // Enable ordinal range
-	EnableRankPercentileRange      bool                    `json:"enable_rank_percentile_range"`        // Enable rank percentile range
 	RatingRange                    float64                 `json:"rating_range"`                        // The rating range
 	MatchmakingTicketsUseMu        bool                    `json:"sbmm_matchmaking_tickets_use_mu"`     // Use Mu instead of Ordinal for matchmaking tickets
 	BackfillQueriesUseMu           bool                    `json:"sbmm_backfill_queries_use_mu"`        // Use Mu instead of Ordinal for backfill queries
@@ -86,16 +83,6 @@ type QueryAddons struct {
 	Allocate     string `json:"allocate"`
 	Matchmaking  string `json:"matchmaking_ticket"`
 	RPCAllocate  string `json:"rpc_allocate"`
-}
-
-type RankPercentileSettings struct {
-	ResetSchedule       evr.ResetSchedule                 `json:"reset_schedule"`       // The reset schedule to use for rankings
-	ResetScheduleDamper evr.ResetSchedule                 `json:"damping_schedule"`     // The reset schedule to use for rankings
-	DampeningFactor     float64                           `json:"damping_factor"`       // The damping factor to use for rank percentile
-	Default             float64                           `json:"default"`              // The default rank percentile to use
-	MaxDelta            float64                           `json:"player_range"`         // The upper limit percentile range to matchmake with
-	DisplayRankInName   bool                              `json:"rank_in_display_name"` // Display the rank in the display name
-	LeaderboardWeights  map[evr.Symbol]map[string]float64 `json:"board_weights"`        // The weights to use for ranking boards map[mode][board]weight
 }
 
 type ServerSelectionSettings struct {
@@ -164,9 +151,6 @@ func FixDefaultServiceSettings(data *ServiceSettingsData) {
 	if data.Matchmaking.ServerSelection.Ratings == nil {
 		data.Matchmaking.ServerSelection.Ratings = make(map[string]float64)
 	}
-	if data.Matchmaking.RankPercentile.LeaderboardWeights == nil {
-		data.Matchmaking.RankPercentile.LeaderboardWeights = make(map[evr.Symbol]map[string]float64)
-	}
 
 	if data.Matchmaking.MatchmakingTimeoutSecs == 0 {
 		data.Matchmaking.MatchmakingTimeoutSecs = 360
@@ -182,26 +166,6 @@ func FixDefaultServiceSettings(data *ServiceSettingsData) {
 
 	if data.Matchmaking.MaxServerRTT == 0 {
 		data.Matchmaking.MaxServerRTT = 180
-	}
-
-	if data.Matchmaking.RankPercentile.Default == 0 {
-		data.Matchmaking.RankPercentile.Default = 0.5
-	}
-
-	if data.Matchmaking.RankPercentile.MaxDelta == 0 {
-		data.Matchmaking.RankPercentile.MaxDelta = 0.3
-	}
-
-	if data.Matchmaking.RankPercentile.DampeningFactor == 0 {
-		data.Matchmaking.RankPercentile.DampeningFactor = 0.5
-	}
-
-	if data.Matchmaking.RankPercentile.ResetSchedule == "" {
-		data.Matchmaking.RankPercentile.ResetSchedule = "daily"
-	}
-
-	if data.Matchmaking.RankPercentile.ResetScheduleDamper == "" {
-		data.Matchmaking.RankPercentile.ResetScheduleDamper = "weekly"
 	}
 
 	if data.Matchmaking.SBMMMinPlayerCount == 0 {
