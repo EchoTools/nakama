@@ -73,13 +73,6 @@ func (s *EventServerProfileUpdate) Process(ctx context.Context, logger runtime.L
 			logger.WithField("session_id", s.SessionID).Warn("Failed to get player rating")
 		}
 
-		// Calculate a new rank percentile
-		zapLogger := RuntimeLoggerToZapLogger(logger)
-		if rankPercentile, err := CalculateSmoothedPlayerRankPercentile(ctx, zapLogger, db, nk, s.UserID, s.GroupID, s.Mode); err != nil {
-			logger.WithField("error", err).Warn("Failed to calculate new player rank percentile")
-		} else if err := MatchmakingRankPercentileStore(ctx, nk, s.UserID, s.DisplayName, s.GroupID, s.Mode, rankPercentile); err != nil {
-			logger.WithField("error", err).Warn("Failed to record rank percentile to leaderboard")
-		}
 	}
 
 	// Update the player's statistics, if the service settings allow it
