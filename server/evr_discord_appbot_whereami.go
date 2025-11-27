@@ -104,6 +104,19 @@ func (d *DiscordAppBot) getWhereAmIData(ctx context.Context, logger runtime.Logg
 	return data, nil
 }
 
+// formatPlayerList formats a list of players for Discord display
+func formatPlayerList(players []PlayerInfo) []string {
+	playerList := make([]string, 0, len(players))
+	for _, p := range players {
+		if p.DiscordID != "" {
+			playerList = append(playerList, fmt.Sprintf("<@%s>", p.DiscordID))
+		} else {
+			playerList = append(playerList, fmt.Sprintf("`%s`", EscapeDiscordMarkdown(p.DisplayName)))
+		}
+	}
+	return playerList
+}
+
 // createWhereAmIEmbed creates a Discord embed with the whereami information
 func (d *DiscordAppBot) createWhereAmIEmbed(data *WhereAmIData) *discordgo.MessageEmbed {
 	embed := &discordgo.MessageEmbed{
@@ -172,14 +185,7 @@ func (d *DiscordAppBot) createWhereAmIEmbed(data *WhereAmIData) *discordgo.Messa
 
 	// Players in match
 	if len(data.Players) > 0 {
-		playerList := make([]string, 0, len(data.Players))
-		for _, p := range data.Players {
-			if p.DiscordID != "" {
-				playerList = append(playerList, fmt.Sprintf("<@%s>", p.DiscordID))
-			} else {
-				playerList = append(playerList, fmt.Sprintf("`%s`", EscapeDiscordMarkdown(p.DisplayName)))
-			}
-		}
+		playerList := formatPlayerList(data.Players)
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:   fmt.Sprintf("Players (%d)", len(data.Players)),
 			Value:  strings.Join(playerList, ", "),
@@ -226,7 +232,7 @@ const (
 
 // Server issue report input constraints
 const (
-	IssueDetailsMinLength = 10
+	IssueDetailsMinLength = 0
 	IssueDetailsMaxLength = 1000
 )
 
@@ -236,7 +242,7 @@ const (
 	// for a match to be considered "active" vs "idle"
 	MinActiveMatchSize = 2
 	// MaxMatchListSize is the maximum number of matches to retrieve for server statistics
-	MaxMatchListSize = 1000
+	MaxMatchListSize = 100
 )
 
 // handleReportServerIssue handles the "Report Server Issue" context menu command
@@ -308,10 +314,10 @@ func (d *DiscordAppBot) handleServerIssueTypeSelection(ctx context.Context, logg
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
 							CustomID:    "issue_details",
-							Label:       "Issue Details",
+							Label:       "Issue Details (optional)",
 							Style:       discordgo.TextInputParagraph,
 							Placeholder: "Please describe the issue in detail...",
-							Required:    true,
+							Required:    false,
 							MinLength:   IssueDetailsMinLength,
 							MaxLength:   IssueDetailsMaxLength,
 						},
@@ -425,12 +431,16 @@ func (d *DiscordAppBot) createServerIssueReportEmbed(user *discordgo.User, issue
 				Value:  issueTypeLabel,
 				Inline: true,
 			},
-			{
-				Name:   "Details",
-				Value:  issueDetails,
-				Inline: false,
-			},
 		},
+	}
+
+	// Add details field only if provided
+	if issueDetails != "" {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "Details",
+			Value:  issueDetails,
+			Inline: false,
+		})
 	}
 
 	// Add match information if available
@@ -485,14 +495,7 @@ func (d *DiscordAppBot) createServerIssueReportEmbed(user *discordgo.User, issue
 
 		// Players in match
 		if len(data.Players) > 0 {
-			playerList := make([]string, 0, len(data.Players))
-			for _, p := range data.Players {
-				if p.DiscordID != "" {
-					playerList = append(playerList, fmt.Sprintf("<@%s>", p.DiscordID))
-				} else {
-					playerList = append(playerList, fmt.Sprintf("`%s`", EscapeDiscordMarkdown(p.DisplayName)))
-				}
-			}
+			playerList := formatPlayerList(data.Players)
 			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 				Name:   fmt.Sprintf("Players (%d)", len(data.Players)),
 				Value:  strings.Join(playerList, ", "),
