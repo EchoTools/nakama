@@ -42,7 +42,6 @@ type EvrMatchPresence struct {
 	DisableEncryption bool         `json:"disable_encryption,omitempty"`
 	DisableMAC        bool         `json:"disable_mac,omitempty"`
 	Query             string       `json:"query,omitempty"` // Their matchmaking query
-	RankPercentile    float64      `json:"rank_percentile,omitempty"`
 	Rating            types.Rating `json:"rating,omitempty"`
 	PingMillis        int          `json:"ping_ms,omitempty"`
 	MatchmakingAt     *time.Time   `json:"matchmaking_at,omitempty"` // Whether the player is matchmaking
@@ -109,7 +108,7 @@ func NewEntrantID(matchID MatchID, evrID evr.EvrId) uuid.UUID {
 	return uuid.NewV5(matchID.UUID, EntrantIDSaltStr+evrID.String())
 }
 
-func EntrantPresenceFromSession(session Session, partyID uuid.UUID, roleAlignment int, rating types.Rating, rankPercentile float64, groupID string, ping int, query string) (*EvrMatchPresence, error) {
+func EntrantPresenceFromSession(session Session, partyID uuid.UUID, roleAlignment int, rating types.Rating, groupID string, ping int, query string) (*EvrMatchPresence, error) {
 
 	params, ok := LoadParams(session.Context())
 	if !ok {
@@ -133,7 +132,6 @@ func EntrantPresenceFromSession(session Session, partyID uuid.UUID, roleAlignmen
 		IsPCVR:            params.IsPCVR(),
 		Rating:            rating,
 		SupportedFeatures: params.supportedFeatures,
-		RankPercentile:    rankPercentile,
 
 		DisableEncryption: params.disableEncryption,
 		DisableMAC:        params.disableMAC,
