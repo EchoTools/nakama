@@ -88,7 +88,11 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, p
 	if prev != nil {
 		total = prev
 	} else {
-		total = reflect.New(reflect.TypeOf(update).Elem()).Interface().(evr.Statistics)
+		newTotal := reflect.New(reflect.TypeOf(update).Elem()).Interface()
+		var ok bool
+		if total, ok = newTotal.(evr.Statistics); !ok {
+			return nil, fmt.Errorf("failed to assert type to evr.Statistics")
+		}
 	}
 
 	totalElem := reflect.ValueOf(total).Elem()
