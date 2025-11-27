@@ -37,7 +37,10 @@ For negative values (f < 0):
   intPart = floor(absF)
   fracPart = absF - intPart
   score = 1e15 - 1 - intPart
-  subscore = (1.0 - fracPart) * (1e9 - 1)
+  if fracPart == 0:
+    subscore = 1e9
+  else:
+    subscore = (1.0 - fracPart) * (1e9 - 1)
 
 For zero and positive values (f >= 0):  
   intPart = floor(f)
@@ -51,7 +54,7 @@ For zero and positive values (f >= 0):
 | Float64 Value | Score | Subscore | Explanation |
 |---------------|-------|----------|-------------|
 | -2.5 | 999999999999997 | 499999999 | Negative: more negative = smaller score |
-| -1.0 | 999999999999999 | 0 | Negative integer |
+| -1.0 | 999999999999998 | 1000000000 | Negative integer (max subscore) |
 | -0.1 | 999999999999999 | 899999999 | Small negative |
 | 0.0 | 1000000000000000 | 0 | Zero baseline |
 | 0.1 | 1000000000000000 | 100000000 | Small positive |
@@ -97,7 +100,13 @@ func Float64ToScore(f float64) (int64, int64, error) {
         fracPart := absF - float64(intPart)
         
         score := scoreOffset - 1 - intPart
-        subscore := int64((1.0 - fracPart) * float64(fracScale - 1))
+        
+        var subscore int64
+        if fracPart == 0.0 {
+            subscore = int64(fracScale)
+        } else {
+            subscore = int64((1.0 - fracPart) * float64(fracScale - 1))
+        }
         
         return score, subscore, nil
     } else {
@@ -118,7 +127,7 @@ func ScoreToFloat64(score int64, subscore int64) (float64, error) {
     if score < 0 {
         return 0, fmt.Errorf("invalid score: %d (must be non-negative)", score)
     }
-    if subscore < 0 || subscore >= int64(LeaderboardScoreScalingFactor) {
+    if subscore < 0 || subscore > int64(LeaderboardScoreScalingFactor) {
         return 0, fmt.Errorf("invalid subscore: %d", subscore)
     }
 
@@ -128,7 +137,14 @@ func ScoreToFloat64(score int64, subscore int64) (float64, error) {
     if score < scoreOffset {
         // Negative number: score in range [0, scoreOffset)
         intPart := scoreOffset - 1 - score
-        fracPart := 1.0 - (float64(subscore) / float64(fracScale - 1))
+        
+        var fracPart float64
+        if subscore == int64(fracScale) {
+            fracPart = 0.0
+        } else {
+            fracPart = 1.0 - (float64(subscore) / float64(fracScale - 1))
+        }
+        
         return -(float64(intPart) + fracPart), nil
     } else {
         // Zero or positive number: score in range [scoreOffset, ∞)
@@ -186,7 +202,11 @@ def float64_to_score(f):
         frac_part = abs_f - int_part
         
         score = score_offset - 1 - int_part
-        subscore = int((1.0 - frac_part) * (frac_scale - 1))
+        
+        if frac_part == 0.0:
+            subscore = frac_scale
+        else:
+            subscore = int((1.0 - frac_part) * (frac_scale - 1))
         
         return score, subscore
     else:
@@ -204,7 +224,7 @@ def score_to_float64(score, subscore):
     # Validate inputs
     if score < 0:
         raise ValueError(f"Invalid score: {score} (must be non-negative)")
-    if subscore < 0 or subscore >= LEADERBOARD_SCORE_SCALING_FACTOR:
+    if subscore < 0 or subscore > LEADERBOARD_SCORE_SCALING_FACTOR:
         raise ValueError(f"Invalid subscore: {subscore}")
 
     frac_scale = LEADERBOARD_SCORE_SCALING_FACTOR
@@ -213,7 +233,12 @@ def score_to_float64(score, subscore):
     if score < score_offset:
         # Negative number: score in range [0, score_offset)
         int_part = score_offset - 1 - score
-        frac_part = 1.0 - (subscore / (frac_scale - 1))
+        
+        if subscore == frac_scale:
+            frac_part = 0.0
+        else:
+            frac_part = 1.0 - (subscore / (frac_scale - 1))
+            
         return -(int_part + frac_part)
     else:
         # Zero or positive number: score in range [score_offset, ∞)
@@ -271,7 +296,16 @@ public static class Float64ScoreEncoder
             double fracPart = absF - intPart;
             
             long score = scoreOffset - 1 - intPart;
-            long subscore = (long)((1.0 - fracPart) * (fracScale - 1));
+            long subscore;
+            
+            if (fracPart == 0.0)
+            {
+                subscore = (long)fracScale;
+            }
+            else
+            {
+                subscore = (long)((1.0 - fracPart) * (fracScale - 1));
+            }
             
             return (score, subscore);
         }
@@ -298,7 +332,7 @@ public static class Float64ScoreEncoder
         {
             throw new ArgumentException($"Invalid score: {score} (must be non-negative)");
         }
-        if (subscore < 0 || subscore >= (long)LEADERBOARD_SCORE_SCALING_FACTOR)
+        if (subscore < 0 || subscore > (long)LEADERBOARD_SCORE_SCALING_FACTOR)
         {
             throw new ArgumentException($"Invalid subscore: {subscore}");
         }
@@ -310,7 +344,17 @@ public static class Float64ScoreEncoder
         {
             // Negative number: score in range [0, scoreOffset)
             long intPart = scoreOffset - 1 - score;
-            double fracPart = 1.0 - (subscore / (fracScale - 1));
+            double fracPart;
+            
+            if (subscore == (long)fracScale)
+            {
+                fracPart = 0.0;
+            }
+            else
+            {
+                fracPart = 1.0 - (subscore / (fracScale - 1));
+            }
+            
             return -(intPart + fracPart);
         }
         else

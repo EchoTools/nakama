@@ -90,6 +90,8 @@ func TestLeaderboardSortingCorrectness(t *testing.T) {
 		-10.75,
 		-2.5,
 		-1.3,
+		-1.1,
+		-1.0,
 		-0.9,
 		-0.1,
 		-0.001,
@@ -195,7 +197,7 @@ func TestScoreToFloat64ErrorCases(t *testing.T) {
 	}{
 		{"negative score", -1, 0},
 		{"negative subscore", 1, -1},
-		{"subscore too large", 1, 1000000000},
+		{"subscore too large", 1, 1000000001},
 		{"way too large subscore", 0, 2000000000},
 	}
 
@@ -241,5 +243,38 @@ func TestEncodingConsistency(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestNegativeIntegerSorting(t *testing.T) {
+	// This test specifically targets the bug where -1.0 was sorting as "smaller" than -1.1
+	// because of incorrect subscore handling for exact negative integers.
+
+	v1 := -1.1
+	v2 := -1.0
+
+	s1, ss1, err := Float64ToScore(v1)
+	if err != nil {
+		t.Fatalf("Failed to encode %f: %v", v1, err)
+	}
+
+	s2, ss2, err := Float64ToScore(v2)
+	if err != nil {
+		t.Fatalf("Failed to encode %f: %v", v2, err)
+	}
+
+	// In ascending sort, -1.1 should come before -1.0
+	// So (s1, ss1) should be "less than" (s2, ss2)
+
+	isLess := false
+	if s1 < s2 {
+		isLess = true
+	} else if s1 == s2 && ss1 < ss2 {
+		isLess = true
+	}
+
+	if !isLess {
+		t.Errorf("Sorting error: %f should be less than %f, but encoded values are (%d, %d) and (%d, %d)",
+			v1, v2, s1, ss1, s2, ss2)
 	}
 }
