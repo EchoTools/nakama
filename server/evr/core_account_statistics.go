@@ -242,7 +242,6 @@ type ArenaStatistics struct {
 	SkillRatingMu                *StatisticValue `json:"SkillRatingMu,omitempty" op:"rep,omitzero" type:"float"`
 	SkillRatingSigma             *StatisticValue `json:"SkillRatingSigma,omitempty" op:"rep,omitzero" type:"float"`
 	SkillRatingOrdinal           *StatisticValue `json:"SkillRatingOrdinal,omitempty" op:"rep,omitzero" type:"float"`
-	RankPercentile               *StatisticValue `json:"RankPercentile,omitempty" op:"rep,omitzero" type:"float"`
 	LobbyTime                    *StatisticValue `json:"LobbyTime,omitempty" op:"rep,omitzero" type:"float"`
 	EarlyQuits                   *StatisticValue `json:"EarlyQuits,omitempty" op:"add,omitzero" type:"int"`
 	EarlyQuitPercentage          *StatisticValue `json:"EarlyQuitPercentage,omitempty" op:"rep,omitzero" type:"float"`
@@ -442,7 +441,6 @@ type CombatStatistics struct {
 	SkillRatingMu                      *StatisticValue `json:"SkillRatingMu,omitempty" op:"rep,omitzero" type:"float"`
 	SkillRatingSigma                   *StatisticValue `json:"SkillRatingSigma,omitempty" op:"rep,omitzero" type:"float"`
 	SkillRatingOrdinal                 *StatisticValue `json:"SkillRatingOrdinal,omitempty" op:"rep,omitzero" type:"float"`
-	RankPercentile                     *StatisticValue `json:"RankPercentile,omitempty" op:"rep,omitzero" type:"float"`
 	LobbyTime                          *StatisticValue `json:"LobbyTime,omitempty" op:"rep,omitzero" type:"float"`
 }
 

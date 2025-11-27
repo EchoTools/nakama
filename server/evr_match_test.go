@@ -619,7 +619,6 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 			joinTimeMilliseconds: make(map[string]int64, SocialLobbyMaxSize),
 			emptyTicks:           0,
 			tickRate:             10,
-			RankPercentile:       0.0,
 		}
 		state.rebuildCache()
 		return state
@@ -949,7 +948,6 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 			joinTimeMilliseconds: make(map[string]int64, SocialLobbyMaxSize),
 			emptyTicks:           0,
 			tickRate:             10,
-			RankPercentile:       0.0,
 		}
 		state.rebuildCache()
 		return state

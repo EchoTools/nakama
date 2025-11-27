@@ -9,25 +9,23 @@ import (
 )
 
 type PlayerInfo struct {
-	DisplayName    string     `json:"display_name,omitempty"`
-	PartyID        string     `json:"party_id,omitempty"`
-	IsReservation  bool       `json:"is_reservation,omitempty"`
-	Team           TeamIndex  `json:"team"`
-	JoinTime       int64      `json:"join_time_ms,omitempty"` // The time on the round clock that the player joined
-	RankPercentile float64    `json:"rank_percentile,omitempty"`
-	RatingMu       float64    `json:"rating_mu,omitempty"`
-	RatingSigma    float64    `json:"rating_sigma,omitempty"`
-	RatingOrdinal  float64    `json:"rating_ordinal,omitempty"`
-	RatingScore    int        `json:"rating_score,omitempty"`
-	Username       string     `json:"username,omitempty"`
-	DiscordID      string     `json:"discord_id,omitempty"`
-	UserID         string     `json:"user_id,omitempty"`
-	EvrID          evr.EvrId  `json:"evr_id,omitempty"`
-	ClientIP       string     `json:"client_ip,omitempty"`
-	SessionID      string     `json:"session_id,omitempty"`
-	GeoHash        string     `json:"geohash,omitempty"`
-	PingMillis     int        `json:"ping_ms,omitempty"` // The latency as measured from the ping check.
-	MatchmakingAt  *time.Time `json:"matchmaking_at,omitempty"`
+	DisplayName   string     `json:"display_name,omitempty"`
+	PartyID       string     `json:"party_id,omitempty"`
+	IsReservation bool       `json:"is_reservation,omitempty"`
+	Team          TeamIndex  `json:"team"`
+	JoinTime      int64      `json:"join_time_ms,omitempty"` // The time on the round clock that the player joined
+	RatingMu      float64    `json:"rating_mu,omitempty"`
+	RatingSigma   float64    `json:"rating_sigma,omitempty"`
+	RatingScore   int        `json:"rating_score,omitempty"`
+	Username      string     `json:"username,omitempty"`
+	DiscordID     string     `json:"discord_id,omitempty"`
+	UserID        string     `json:"user_id,omitempty"`
+	EvrID         evr.EvrId  `json:"evr_id,omitempty"`
+	ClientIP      string     `json:"client_ip,omitempty"`
+	SessionID     string     `json:"session_id,omitempty"`
+	GeoHash       string     `json:"geohash,omitempty"`
+	PingMillis    int        `json:"ping_ms,omitempty"` // The latency as measured from the ping check.
+	MatchmakingAt *time.Time `json:"matchmaking_at,omitempty"`
 }
 
 // The player joined after the round clock started

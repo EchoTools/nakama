@@ -188,10 +188,6 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 			mu := entry.NumericProperties["rating_mu"]
 			sigma := entry.NumericProperties["rating_sigma"]
 			rating := NewRating(0, mu, sigma)
-			percentile, ok := entry.NumericProperties["rank_percentile"]
-			if !ok {
-				percentile = 0.0
-			}
 
 			query, ok := entry.StringProperties["query"]
 			if !ok {
@@ -200,7 +196,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 			sessions = append(sessions, session)
 
-			if entrant, err := EntrantPresenceFromSession(session, MatchIDFromStringOrNil(entry.GetPartyId()).UUID, teamIndex, rating, percentile, groupID.String(), 0, query); err != nil {
+			if entrant, err := EntrantPresenceFromSession(session, MatchIDFromStringOrNil(entry.GetPartyId()).UUID, teamIndex, rating, groupID.String(), 0, query); err != nil {
 				logger.Error("Failed to create entrant presence", zap.String("sid", session.ID().String()), zap.Error(err))
 				continue
 			} else {
@@ -574,6 +570,11 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	for i, label := range availableServers {
 		extIP := label.GameServer.Endpoint.ExternalIP.String()
 		hostID := label.GameServer.Endpoint.GetHostID()
+
+		if slices.Contains(globalSettings.ServerSelection.ExcludeList, label.GameServer.Username) || slices.Contains(globalSettings.ServerSelection.ExcludeList, extIP) {
+			continue
+		}
+
 		regionMatch := false
 		for _, region := range label.GameServer.RegionCodes {
 			if region == "default" {
@@ -584,9 +585,9 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 			}
 		}
 
-		rating, ok := globalSettings.ServerRatings.ByExternalIP[extIP]
+		rating, ok := globalSettings.ServerSelection.Ratings[extIP]
 		if !ok {
-			if rating, ok = globalSettings.ServerRatings.ByOperatorUsername[label.GameServer.Username]; !ok {
+			if rating, ok = globalSettings.ServerSelection.Ratings[label.GameServer.Username]; !ok {
 				rating = 0
 			}
 		}
@@ -596,9 +597,17 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 			continue
 		}
 
+		rtt := rttsByExternalIP[extIP]
+		if delta, ok := globalSettings.ServerSelection.RTTDelta[label.GameServer.Username]; ok {
+			rtt += delta
+		}
+		if delta, ok := globalSettings.ServerSelection.RTTDelta[extIP]; ok {
+			rtt += delta
+		}
+
 		indexes[i] = labelIndex{
 			Label:             label,
-			RTT:               (rttsByExternalIP[extIP] + 10) / 20 * 20,
+			RTT:               (rtt + 10) / 20 * 20,
 			IsReachable:       rttsByExternalIP[extIP] != 0,
 			Rating:            rating,
 			IsPriorityForMode: slices.Contains(label.GameServer.DesignatedModes, settings.Mode),

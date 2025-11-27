@@ -21,7 +21,6 @@ const (
 	TabletStatisticFloatValue
 
 	GamesPlayedStatisticID        = "GamesPlayed"
-	RankPercentileStatisticID     = "RankPercentile"
 	SkillRatingMuStatisticID      = "SkillRatingMu"
 	SkillRatingSigmaStatisticID   = "SkillRatingSigma"
 	SkillRatingOrdinalStatisticID = "SkillRatingOrdinal"
@@ -269,57 +268,6 @@ func MatchmakingRatingStore(ctx context.Context, nk runtime.NakamaModule, userID
 			if err != nil {
 				return fmt.Errorf("Leaderboard create error: %w", err)
 			} else if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, subscore, metadata, nil); err != nil {
-				return fmt.Errorf("Leaderboard record write error: %w", err)
-			}
-		}
-	}
-
-	return nil
-}
-
-func MatchmakingRankPercentileLoad(ctx context.Context, nk runtime.NakamaModule, userID, groupID string, mode evr.Symbol) (percentile float64, err error) {
-
-	boardID := StatisticBoardID(groupID, mode, RankPercentileStatisticID, "alltime")
-
-	_, records, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 10000, "", 0)
-	if err != nil {
-		return ServiceSettings().Matchmaking.RankPercentile.Default, nil
-	}
-
-	if len(records) == 0 {
-		return ServiceSettings().Matchmaking.RankPercentile.Default, nil
-	}
-
-	val, err := ScoreToFloat64(records[0].Score, records[0].Subscore)
-	if err != nil {
-		return ServiceSettings().Matchmaking.RankPercentile.Default, fmt.Errorf("failed to decode rank percentile score: %w", err)
-	}
-	return val, nil
-}
-
-func MatchmakingRankPercentileStore(ctx context.Context, nk runtime.NakamaModule, userID, username, groupID string, mode evr.Symbol, percentile float64) error {
-
-	id := StatisticBoardID(groupID, mode, RankPercentileStatisticID, "alltime")
-
-	score, subscore, err := Float64ToScore(percentile)
-	if err != nil {
-		return fmt.Errorf("failed to convert float64 to int64 pair: %w", err)
-	}
-
-	if score == 0 && subscore == 0 {
-		return nil
-	}
-	// Write the record
-	if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subscore, nil, nil); err != nil {
-		// Try to create the leaderboard
-		err = nk.LeaderboardCreate(ctx, id, true, "asc", "set", "", nil, true)
-
-		if err != nil {
-			return fmt.Errorf("Leaderboard create error: %w", err)
-		} else {
-			// Retry the write
-			_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subscore, nil, nil)
-			if err != nil {
 				return fmt.Errorf("Leaderboard record write error: %w", err)
 			}
 		}

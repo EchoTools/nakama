@@ -295,7 +295,7 @@ func TestCharacterizationMatchmaker(t *testing.T) {
 		t.Logf("  Match %d: %s", count, strings.Join(playerIds, ", "))
 		count++
 
-		c := CandidateList(match)
+		c := MatchmakerEntries(match)
 		teams := make([]types.Team, 0, 2)
 		teams = append(teams, c[:4].Ratings())
 		teams = append(teams, c[4:].Ratings())
@@ -305,7 +305,7 @@ func TestCharacterizationMatchmaker(t *testing.T) {
 			ordinals = append(ordinals, rating.Ordinal(r))
 		}
 
-		groups := make(map[string]CandidateList, 2)
+		groups := make(map[string]MatchmakerEntries, 2)
 		for _, e := range c {
 			groups[e.GetTicket()] = append(groups[e.GetTicket()], e)
 		}

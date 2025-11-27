@@ -1236,14 +1236,6 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 		} else {
 			logger.Warn("Failed to get player rating", zap.String("sessionID", playerInfo.SessionID))
 		}
-
-		// Calculate a new rank percentile
-		if rankPercentile, err := CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.nk, playerInfo.UserID, groupIDStr, label.Mode); err != nil {
-			logger.Error("Failed to calculate new player rank percentile", zap.Error(err))
-			// Store the rank percentile in the leaderboards.
-		} else if err := MatchmakingRankPercentileStore(ctx, p.nk, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rankPercentile); err != nil {
-			logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
-		}
 	}
 
 	// Update the player's statistics, if the service settings allow it

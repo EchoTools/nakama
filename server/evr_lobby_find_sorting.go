@@ -19,14 +19,14 @@ type backfillSortItem struct {
 func (p *EvrPipeline) sortBackfillOptions(filteredMatches []*MatchLabelMeta, lobbyParams *LobbySessionParameters) []*MatchLabelMeta {
 
 	var (
-		partySize     = lobbyParams.GetPartySize()
-		rtts          = lobbyParams.latencyHistory.Load().LatestRTTs()
-		ratingOrdinal = 0.5
-		items         = make([]backfillSortItem, 0, len(filteredMatches))
+		partySize = lobbyParams.GetPartySize()
+		rtts      = lobbyParams.latencyHistory.Load().LatestRTTs()
+		rating    = 0.5
+		items     = make([]backfillSortItem, 0, len(filteredMatches))
 	)
 
 	if lobbyParams.Mode == evr.ModeArenaPublic || lobbyParams.Mode == evr.ModeCombatPublic {
-		ratingOrdinal = lobbyParams.GetOrdinal()
+		rating = lobbyParams.GetRating().Mu
 	}
 
 	for _, m := range filteredMatches {
@@ -34,8 +34,10 @@ func (p *EvrPipeline) sortBackfillOptions(filteredMatches []*MatchLabelMeta, lob
 		var (
 			rtt, isReachable = rtts[m.State.GameServer.Endpoint.GetExternalIP()]
 			openSlots        = m.State.OpenPlayerSlots()
-			ratingDelta      = math.Abs(m.State.RatingOrdinal - ratingOrdinal)
+			matchRating      = m.State.RatingMu
 		)
+
+		ratingDelta := math.Abs(matchRating - rating)
 
 		// Skip matches that are full
 		if openSlots < partySize {
@@ -56,7 +58,7 @@ func (p *EvrPipeline) sortBackfillOptions(filteredMatches []*MatchLabelMeta, lob
 			rtt:               rtt,
 			ratingDelta:       ratingDelta,
 			openSlots:         openSlots,
-			withinRatingRange: ratingDelta <= lobbyParams.MatchmakingOrdinalRange,
+			withinRatingRange: ratingDelta <= lobbyParams.MatchmakingRatingRange,
 		}
 
 		items = append(items, item)

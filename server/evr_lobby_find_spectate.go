@@ -91,7 +91,7 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 			})
 
 			for _, label := range labels {
-				entrant, err := EntrantPresenceFromSession(session, uuid.Nil, SpectatorRole, types.Rating{}, 0, label.GetGroupID().String(), 0, "")
+				entrant, err := EntrantPresenceFromSession(session, uuid.Nil, SpectatorRole, types.Rating{}, label.GetGroupID().String(), 0, "")
 				if err != nil {
 					logger.Warn("Failed to create entrant presence", zap.String("session_id", session.ID().String()), zap.Error(err))
 					continue
