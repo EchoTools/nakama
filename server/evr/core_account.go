@@ -883,7 +883,7 @@ type ArenaUnlocks struct {
 	RWDEmote0009                bool `json:"rwd_emote_0009,omitempty"`
 	RWDEmote0013                bool `json:"rwd_emote_0013,omitempty"`
 	RWDEmote0014                bool `json:"rwd_emote_0014,omitempty"`
-	RWDEmoteGhost               bool `json:"rwd_emote_0015",omitempty"`
+	RWDEmoteGhost               bool `json:"rwd_emote_0015,omitempty"`
 	RWDEmote0021                bool `json:"rwd_emote_0021,omitempty"`
 	RWDEmote0022                bool `json:"rwd_emote_0022,omitempty"`
 	RWDEmote0023                bool `json:"rwd_emote_0023,omitempty"`
