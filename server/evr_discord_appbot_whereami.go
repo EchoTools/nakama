@@ -12,17 +12,28 @@ import (
 
 // WhereAmIData holds the information about a player's current match
 type WhereAmIData struct {
-	ServerHostIP    string
-	RegionCode      string
-	GuildName       string
-	EchoTaxiLink    string
-	MatchMode       string
-	MatchID         string
-	CreatorUserID   string
-	CreatorDiscord  string
-	OperatorUserID  string
+	// ServerHostIP is the external IP address of the game server
+	ServerHostIP string
+	// RegionCode is the auto-generated region code for the server location
+	RegionCode string
+	// GuildName is the name of the Discord guild/server hosting the match
+	GuildName string
+	// EchoTaxiLink is the link to join the match via echo.taxi (spark link)
+	EchoTaxiLink string
+	// MatchMode is the game mode (Arena, Combat, Social, etc.)
+	MatchMode string
+	// MatchID is the unique identifier for the match
+	MatchID string
+	// CreatorUserID is the Nakama user ID of the player who created/spawned the match
+	CreatorUserID string
+	// CreatorDiscord is the Discord ID of the match creator
+	CreatorDiscord string
+	// OperatorUserID is the Nakama user ID of the game server operator
+	OperatorUserID string
+	// OperatorDiscord is the Discord ID of the game server operator
 	OperatorDiscord string
-	Players         []PlayerInfo
+	// Players is the list of players currently in the match
+	Players []PlayerInfo
 }
 
 // getWhereAmIData retrieves the current match information for a user
@@ -207,8 +218,25 @@ func (d *DiscordAppBot) handleWhereAmI(ctx context.Context, logger runtime.Logge
 
 // Server Issue Report Types
 const (
-	ServerIssueTypeLag   = "server_lag"
+	// ServerIssueTypeLag represents lag or stuttering issues with the game server
+	ServerIssueTypeLag = "server_lag"
+	// ServerIssueTypeOther represents any other server-related issue
 	ServerIssueTypeOther = "other"
+)
+
+// Server issue report input constraints
+const (
+	IssueDetailsMinLength = 10
+	IssueDetailsMaxLength = 1000
+)
+
+// Server statistics constants
+const (
+	// MinActiveMatchSize is the minimum number of players (including the game server)
+	// for a match to be considered "active" vs "idle"
+	MinActiveMatchSize = 2
+	// MaxMatchListSize is the maximum number of matches to retrieve for server statistics
+	MaxMatchListSize = 1000
 )
 
 // handleReportServerIssue handles the "Report Server Issue" context menu command
@@ -283,8 +311,8 @@ func (d *DiscordAppBot) handleServerIssueTypeSelection(ctx context.Context, logg
 							Style:       discordgo.TextInputParagraph,
 							Placeholder: "Please describe the issue in detail...",
 							Required:    true,
-							MinLength:   10,
-							MaxLength:   1000,
+							MinLength:   IssueDetailsMinLength,
+							MaxLength:   IssueDetailsMaxLength,
 						},
 					},
 				},
@@ -478,13 +506,15 @@ func (d *DiscordAppBot) createServerIssueReportEmbed(user *discordgo.User, issue
 // getServerStatsByHost returns a summary of active and idle servers by host
 func (d *DiscordAppBot) getServerStatsByHost(ctx context.Context, logger runtime.Logger) string {
 	// Get all matches
-	matches, err := d.nk.MatchList(ctx, 1000, true, "", nil, nil, "")
+	matches, err := d.nk.MatchList(ctx, MaxMatchListSize, true, "", nil, nil, "")
 	if err != nil {
 		logger.WithField("error", err).Warn("Failed to get match list for server stats")
 		return ""
 	}
 
 	// Count servers by host IP
+	// Active: matches with players (Size >= MinActiveMatchSize)
+	// Idle: matches with only the game server connected
 	type hostStats struct {
 		Active int
 		Idle   int
@@ -506,7 +536,7 @@ func (d *DiscordAppBot) getServerStatsByHost(ctx context.Context, logger runtime
 			statsByHost[hostIP] = &hostStats{}
 		}
 
-		if label.Size > 1 { // More than just the game server
+		if label.Size >= MinActiveMatchSize {
 			statsByHost[hostIP].Active++
 		} else {
 			statsByHost[hostIP].Idle++
