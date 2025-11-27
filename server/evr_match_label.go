@@ -34,7 +34,7 @@ type MatchLabel struct {
 	PlayerCount    int          `json:"player_count"`         // The number of participants (not including spectators) in the match.
 	Players        []PlayerInfo `json:"players,omitempty"`    // The displayNames of the players (by team name) in the match.
 	RankPercentile float64      `json:"rank_percentile"`      // The average percentile rank of the players in the match.
-	RatingOrdinal  float64      `json:"rating_ordinal"`       // The average rating ordinal of the players in the match.
+	RatingMu       float64      `json:"rating_mu"`            // The average rating mu of the players in the match.
 	GameState      *GameState   `json:"game_state,omitempty"` // The game state for the match.
 
 	TeamSize         int      `json:"team_size,omitempty"`    // The size of each team in arena/combat (either 4 or 5)
@@ -264,16 +264,23 @@ func (s *MatchLabel) MetricsTags() map[string]string {
 	return tags
 }
 
-func (s *MatchLabel) ratingOrdinal() float64 {
-	ordinals := make([]float64, 0, len(s.Players))
+func (s *MatchLabel) ratingMu() float64 {
+	mus := make([]float64, 0, len(s.Players))
 	for _, p := range s.Players {
-		if p.RatingOrdinal == 0 || !p.IsCompetitor() {
+		if p.RatingMu == 0 || !p.IsCompetitor() {
 			continue
 		}
-		ordinals = append(ordinals, p.RatingOrdinal)
+		mus = append(mus, p.RatingMu)
 	}
-	// Ignoring this error because we're sure to always being good guys with this
-	return median(ordinals)
+	if len(mus) == 0 {
+		return 0.0
+	}
+	var sum float64
+	for _, v := range mus {
+		sum += v
+	}
+	return sum / float64(len(mus))
+
 }
 
 // rebuildCache is called after the presences map is updated.
@@ -318,7 +325,6 @@ func (s *MatchLabel) rebuildCache() {
 				GeoHash:     p.GeoHash,
 			})
 		} else {
-			ordinal := rating.Ordinal(p.Rating)
 			switch s.Mode {
 			case evr.ModeArenaPublic:
 				s.Players = append(s.Players, PlayerInfo{
@@ -332,7 +338,6 @@ func (s *MatchLabel) rebuildCache() {
 					PartyID:        p.PartyID.String(),
 					RatingMu:       p.Rating.Mu,
 					RatingSigma:    p.Rating.Sigma,
-					RatingOrdinal:  ordinal,
 					RatingScore:    ratingScores[p.EvrID],
 					JoinTime:       s.joinTimeMilliseconds[p.SessionID.String()],
 					RankPercentile: p.RankPercentile,
@@ -354,7 +359,6 @@ func (s *MatchLabel) rebuildCache() {
 					JoinTime:       s.joinTimeMilliseconds[p.SessionID.String()],
 					RatingMu:       p.Rating.Mu,
 					RatingSigma:    p.Rating.Sigma,
-					RatingOrdinal:  ordinal,
 					RatingScore:    ratingScores[p.EvrID],
 					RankPercentile: p.RankPercentile,
 					SessionID:      p.SessionID.String(),
@@ -482,7 +486,7 @@ func (s *MatchLabel) rebuildCache() {
 	// Recalculate the match's aggregate rank percentile
 	s.RankPercentile = 0.0
 
-	s.RatingOrdinal = s.ratingOrdinal()
+	s.RatingMu = s.ratingMu()
 
 	count := 0
 	if len(s.Players) > 0 {
@@ -568,7 +572,7 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 		},
 		Players:        make([]PlayerInfo, 0),
 		RankPercentile: l.RankPercentile,
-		RatingOrdinal:  l.RatingOrdinal,
+		RatingMu:       l.RatingMu,
 	}
 	if l.LobbyType == PrivateLobby || l.LobbyType == UnassignedLobby {
 		// Set the last bytes to FF to hide the ID
@@ -589,7 +593,6 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 				JoinTime:       l.Players[i].JoinTime,
 				RatingMu:       l.Players[i].RatingMu,
 				RatingSigma:    l.Players[i].RatingSigma,
-				RatingOrdinal:  l.Players[i].RatingOrdinal,
 				RankPercentile: l.Players[i].RankPercentile,
 				RatingScore:    l.Players[i].RatingScore,
 			})

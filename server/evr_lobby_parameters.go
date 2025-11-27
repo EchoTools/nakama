@@ -16,7 +16,6 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
 )
@@ -51,13 +50,12 @@ type LobbySessionParameters struct {
 	Verbose                      bool                          `json:"verbose"`
 	BlockedIDs                   []string                      `json:"blocked_ids"`
 	MatchmakingRating            *atomic.Pointer[types.Rating] `json:"matchmaking_rating"`
-	MatchmakingOrdinal           *atomic.Float64               `json:"matchmaking_ordinal"`
 	EarlyQuitPenaltyLevel        int                           `json:"early_quit_penalty_level"`
 	EnableSBMM                   bool                          `json:"disable_sbmm"`
 	EnableRankPercentileRange    bool                          `json:"enable_rank_percentile_range"`
 	EnableOrdinalRange           bool                          `json:"enable_ordinal_range"`
 	EnableDivisions              bool                          `json:"enable_divisions"`
-	MatchmakingOrdinalRange      float64                       `json:"ordinal_range"`
+	MatchmakingRatingRange       float64                       `json:"rating_range"`
 	RankPercentile               *atomic.Float64               `json:"rank_percentile"` // Updated when party is created
 	RankPercentileMaxDelta       float64                       `json:"rank_percentile_max_delta"`
 	MatchmakingDivisions         []string                      `json:"divisions"`
@@ -98,21 +96,6 @@ func (p *LobbySessionParameters) SetRating(rating types.Rating) {
 		p.MatchmakingRating = atomic.NewPointer(&rating)
 	} else {
 		p.MatchmakingRating.Store(&rating)
-	}
-}
-
-func (p *LobbySessionParameters) GetOrdinal() float64 {
-	if p.MatchmakingOrdinal == nil {
-		return 0.0
-	}
-	return p.MatchmakingOrdinal.Load()
-}
-
-func (p *LobbySessionParameters) SetOrdinal(ordinal float64) {
-	if p.MatchmakingOrdinal == nil {
-		p.MatchmakingOrdinal = atomic.NewFloat64(ordinal)
-	} else {
-		p.MatchmakingOrdinal.Store(ordinal)
 	}
 }
 
@@ -313,7 +296,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	rankPercentileMaxDelta := 1.0
 	rankPercentile := globalSettings.RankPercentile.Default
 	matchmakingRating := NewDefaultRating()
-	matchmakingOrdinal := 0.0
 	mmMode := mode
 
 	if mode == evr.ModeSocialPublic || mode == evr.ModeArenaPublicAI {
@@ -347,8 +329,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 				matchmakingRating = NewDefaultRating()
 			}
 		}
-
-		matchmakingOrdinal = rating.Ordinal(matchmakingRating)
 	}
 
 	maxServerRTT := globalSettings.MaxServerRTT
@@ -425,8 +405,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		EnableRankPercentileRange:    globalSettings.EnableRankPercentileRange,
 		EnableOrdinalRange:           globalSettings.EnableOrdinalRange,
 		MatchmakingRating:            atomic.NewPointer(&matchmakingRating),
-		MatchmakingOrdinal:           atomic.NewFloat64(matchmakingOrdinal),
-		MatchmakingOrdinalRange:      globalSettings.OrdinalRange,
+		MatchmakingRatingRange:       globalSettings.RatingRange,
 		Verbose:                      sessionParams.profile.DiscordDebugMessages,
 		EarlyQuitPenaltyLevel:        earlyQuitPenaltyLevel,
 		RankPercentile:               atomic.NewFloat64(rankPercentile),
@@ -472,10 +451,14 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 	}
 
 	if includeMMR {
+		key := "rating_mu"
+		val := p.GetRating().Mu
+		rng := p.MatchmakingRatingRange
+
 		qparts = append(qparts,
 			// Exclusion
-			fmt.Sprintf("-label.rating_ordinal:<%f", p.GetOrdinal()-p.MatchmakingOrdinalRange),
-			fmt.Sprintf("-label.rating_ordinal:>%f", p.GetOrdinal()+p.MatchmakingOrdinalRange),
+			fmt.Sprintf("-label.%s:<%f", key, val-rng),
+			fmt.Sprintf("-label.%s:>%f", key, val+rng),
 		)
 	}
 
@@ -607,23 +590,26 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		rating := p.GetRating()
 		numericProperties["rating_mu"] = rating.Mu
 		numericProperties["rating_sigma"] = rating.Sigma
-		numericProperties["rating_ordinal"] = p.GetOrdinal()
 
 		if p.EnableOrdinalRange && ticketParams.IncludeSBMMRanges {
-			if ordinal := p.GetOrdinal(); ordinal != 0.0 {
-				ordinalLower := ordinal - p.MatchmakingOrdinalRange
-				ordinalUpper := ordinal + p.MatchmakingOrdinalRange
-				numericProperties["rating_ordinal_min"] = ordinalLower
-				numericProperties["rating_ordinal_max"] = ordinalUpper
+			key := "rating_mu"
+			val := rating.Mu
+			rng := p.MatchmakingRatingRange
+
+			if val != 0.0 {
+				lower := val - rng
+				upper := val + rng
+				numericProperties[key+"_min"] = lower
+				numericProperties[key+"_max"] = upper
 
 				qparts = append(qparts,
 					// Exclusion
-					fmt.Sprintf("-properties.rating_ordinal:<%f", ordinalLower),
-					fmt.Sprintf("-properties.rating_ordinal:>%f", ordinalUpper),
+					fmt.Sprintf("-properties.%s:<%f", key, lower),
+					fmt.Sprintf("-properties.%s:>%f", key, upper),
 
 					// Reverse
-					fmt.Sprintf("-properties.rating_ordinal_min:>%f", ordinal),
-					fmt.Sprintf("-properties.rating_ordinal_max:<%f", ordinal),
+					fmt.Sprintf("-properties.%s_min:>%f", key, val),
+					fmt.Sprintf("-properties.%s_max:<%f", key, val),
 				)
 			}
 		}

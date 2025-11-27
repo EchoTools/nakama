@@ -57,21 +57,26 @@ type PruneSettings struct {
 }
 
 type GlobalMatchmakingSettings struct {
-	MatchmakingTimeoutSecs         int                    `json:"matchmaking_timeout_secs"`            // The matchmaking timeout
-	FailsafeTimeoutSecs            int                    `json:"failsafe_timeout_secs"`               // The failsafe timeout
-	FallbackTimeoutSecs            int                    `json:"fallback_timeout_secs"`               // The fallback timeout
-	DisableArenaBackfill           bool                   `json:"disable_arena_backfill"`              // Disable backfilling for arena matches
-	QueryAddons                    QueryAddons            `json:"query_addons"`                        // Additional queries to add to matchmaking queries
-	MaxServerRTT                   int                    `json:"max_server_rtt"`                      // The maximum RTT to allow
-	RankPercentile                 RankPercentileSettings `json:"rank_percentile"`                     // The rank percentile settings
-	EnableSBMM                     bool                   `json:"enable_skill_based_mm"`               // Disable SBMM
-	EnableDivisions                bool                   `json:"enable_divisions"`                    // Enable divisions
-	GreenDivisionMaxAccountAgeDays int                    `json:"green_division_max_account_age_days"` // The maximum account age to be in the green division
-	EnableEarlyQuitPenalty         bool                   `json:"enable_early_quit_penalty"`           // Disable early quit penalty
-	ServerRatings                  ServerRatings          `json:"server_ratings"`                      // The server ratings
-	EnableOrdinalRange             bool                   `json:"enable_ordinal_range"`                // Enable ordinal range
-	EnableRankPercentileRange      bool                   `json:"enable_rank_percentile_range"`        // Enable rank percentile range
-	OrdinalRange                   float64                `json:"ordinal_range"`                       // The ordinal range
+	MatchmakingTimeoutSecs         int                     `json:"matchmaking_timeout_secs"`            // The matchmaking timeout
+	FailsafeTimeoutSecs            int                     `json:"failsafe_timeout_secs"`               // The failsafe timeout
+	FallbackTimeoutSecs            int                     `json:"fallback_timeout_secs"`               // The fallback timeout
+	DisableArenaBackfill           bool                    `json:"disable_arena_backfill"`              // Disable backfilling for arena matches
+	QueryAddons                    QueryAddons             `json:"query_addons"`                        // Additional queries to add to matchmaking queries
+	MaxServerRTT                   int                     `json:"max_server_rtt"`                      // The maximum RTT to allow
+	RankPercentile                 RankPercentileSettings  `json:"rank_percentile"`                     // The rank percentile settings
+	EnableSBMM                     bool                    `json:"enable_skill_based_mm"`               // Disable SBMM
+	EnableDivisions                bool                    `json:"enable_divisions"`                    // Enable divisions
+	GreenDivisionMaxAccountAgeDays int                     `json:"green_division_max_account_age_days"` // The maximum account age to be in the green division
+	EnableEarlyQuitPenalty         bool                    `json:"enable_early_quit_penalty"`           // Disable early quit penalty
+	ServerSelection                ServerSelectionSettings `json:"server_selection"`                    // The server selection settings
+	EnableOrdinalRange             bool                    `json:"enable_ordinal_range"`                // Enable ordinal range
+	EnableRankPercentileRange      bool                    `json:"enable_rank_percentile_range"`        // Enable rank percentile range
+	RatingRange                    float64                 `json:"rating_range"`                        // The rating range
+	MatchmakingTicketsUseMu        bool                    `json:"sbmm_matchmaking_tickets_use_mu"`     // Use Mu instead of Ordinal for matchmaking tickets
+	BackfillQueriesUseMu           bool                    `json:"sbmm_backfill_queries_use_mu"`        // Use Mu instead of Ordinal for backfill queries
+	MatchmakerUseMu                bool                    `json:"sbmm_matchmaker_use_mu"`              // Use Mu instead of Ordinal for matchmaker player MMR values
+	BackfillMinTimeSecs            int                     `json:"backfill_min_time_secs"`              // Minimum time in seconds before backfilling a player to a match
+	SBMMMinPlayerCount             int                     `json:"sbmm_min_player_count"`               // Minimum player count to enable skill-based matchmaking
 }
 
 type QueryAddons struct {
@@ -93,9 +98,10 @@ type RankPercentileSettings struct {
 	LeaderboardWeights  map[evr.Symbol]map[string]float64 `json:"board_weights"`        // The weights to use for ranking boards map[mode][board]weight
 }
 
-type ServerRatings struct {
-	ByExternalIP       map[string]float64 `json:"by_external_ip"`
-	ByOperatorUsername map[string]float64 `json:"by_operator_username"`
+type ServerSelectionSettings struct {
+	Ratings     map[string]float64 `json:"ratings"`
+	ExcludeList []string           `json:"exclude_list"`
+	RTTDelta    map[string]int     `json:"rtt_delta"`
 }
 
 func (g *ServiceSettingsData) String() string {
@@ -155,11 +161,8 @@ func ServiceSettingsLoad(ctx context.Context, nk runtime.NakamaModule) (*Service
 
 func FixDefaultServiceSettings(data *ServiceSettingsData) {
 
-	if data.Matchmaking.ServerRatings.ByExternalIP == nil {
-		data.Matchmaking.ServerRatings.ByExternalIP = make(map[string]float64)
-	}
-	if data.Matchmaking.ServerRatings.ByOperatorUsername == nil {
-		data.Matchmaking.ServerRatings.ByOperatorUsername = make(map[string]float64)
+	if data.Matchmaking.ServerSelection.Ratings == nil {
+		data.Matchmaking.ServerSelection.Ratings = make(map[string]float64)
 	}
 	if data.Matchmaking.RankPercentile.LeaderboardWeights == nil {
 		data.Matchmaking.RankPercentile.LeaderboardWeights = make(map[evr.Symbol]map[string]float64)
@@ -199,6 +202,14 @@ func FixDefaultServiceSettings(data *ServiceSettingsData) {
 
 	if data.Matchmaking.RankPercentile.ResetScheduleDamper == "" {
 		data.Matchmaking.RankPercentile.ResetScheduleDamper = "weekly"
+	}
+
+	if data.Matchmaking.SBMMMinPlayerCount == 0 {
+		data.Matchmaking.SBMMMinPlayerCount = 24
+	}
+
+	if data.Matchmaking.ServerSelection.RTTDelta == nil {
+		data.Matchmaking.ServerSelection.RTTDelta = make(map[string]int)
 	}
 
 	if data.RemoteLogFilters == nil {
