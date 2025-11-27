@@ -329,6 +329,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 
 func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, enableFailsafe bool, entrants ...*EvrMatchPresence) error {
 	interval := 3 * time.Second
+
 	if lobbyParams.Mode == evr.ModeSocialPublic {
 		interval = 1 * time.Second
 	}
@@ -337,6 +338,16 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, ses
 	if lobbyParams.DisableArenaBackfill && lobbyParams.Mode == evr.ModeArenaPublic {
 		// Set a long backfill interval for arena matches.
 		interval = 15 * time.Minute
+	}
+
+	if lobbyParams.EnableSBMM && lobbyParams.Mode == evr.ModeArenaPublic && len(entrants) == 1 {
+		if minTime := ServiceSettings().Matchmaking.BackfillMinTimeSecs; minTime > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(minTime) * time.Second):
+			}
+		}
 	}
 
 	// Backfill search query
@@ -359,7 +370,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, ses
 	// If there are fewer players online, reduce the fallback delay
 	if !strings.Contains(p.node, "dev") {
 		// If there are fewer than 16 players online, reduce the fallback delay
-		if count < 24 {
+		if count < ServiceSettings().Matchmaking.SBMMMinPlayerCount {
 			includeMMR = false
 		}
 	}

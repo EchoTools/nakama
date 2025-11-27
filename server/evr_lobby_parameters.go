@@ -652,8 +652,13 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	}
 
 	//maxDelta := 60 // milliseconds
+	rttDeltas := ServiceSettings().Matchmaking.ServerSelection.RTTDelta
 	for k, v := range p.latencyHistory.Load().AverageRTTs(true) {
-		numericProperties[RTTPropertyPrefix+k] = float64(v)
+		rtt := v
+		if delta, ok := rttDeltas[k]; ok {
+			rtt += delta
+		}
+		numericProperties[RTTPropertyPrefix+k] = float64(rtt)
 		//qparts = append(qparts, fmt.Sprintf("properties.%s:<=%d", k, v+maxDelta))
 	}
 
