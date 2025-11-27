@@ -3146,7 +3146,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 			default:
-				logger.Info("Unhandled modal submit: %v", i.ModalSubmitData().CustomID)
+				logger.WithField("custom_id", i.ModalSubmitData().CustomID).Info("Unhandled modal submit")
 			}
 		default:
 			logger.Info("Unhandled interaction type: %v", i.Type)

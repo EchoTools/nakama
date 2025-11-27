@@ -292,6 +292,7 @@ func (d *DiscordAppBot) handleServerIssueTypeSelection(ctx context.Context, logg
 	// Get the selected issue type
 	data := i.MessageComponentData()
 	if len(data.Values) == 0 {
+		logger.Warn("Discord select menu submitted with no values. This should not happen. InteractionID: %s, UserID: %s", i.Interaction.ID, i.Interaction.Member.User.ID)
 		return simpleInteractionResponse(s, i, "No issue type selected.")
 	}
 	issueType := data.Values[0]
@@ -553,5 +554,5 @@ func (d *DiscordAppBot) getServerStatsByHost(ctx context.Context, logger runtime
 		sb.WriteString(fmt.Sprintf("`%s`: %d active, %d idle\n", host, stats.Active, stats.Idle))
 	}
 
-	return sb.String()
+	return strings.TrimRight(sb.String(), "\n")
 }
