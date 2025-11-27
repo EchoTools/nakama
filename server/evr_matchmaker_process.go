@@ -51,7 +51,7 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	return candidates, madeMatches, filterCounts
 }
 
-// Filter out candidates where players do not have a common server with in the max RTT
+// Filter out candidates where players do not have a common server within the max RTT
 func (m *SkillBasedMatchmaker) filterWithinMaxRTT(candidates [][]runtime.MatchmakerEntry) int {
 
 	var filteredCount int
