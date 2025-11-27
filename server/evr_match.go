@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"reflect"
 	"slices"
 	"strconv"
 	"time"
@@ -808,37 +807,43 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				}
 			*/
 		default:
-			typ, found := evr.SymbolTypes[uint64(in.GetOpCode())]
-			if !found {
-				logger.Error("Unknown opcode: %v", in.GetOpCode())
-				continue
-			}
-
-			logger.Debug("Received match message %T(%s) from %s (%s)", typ, string(in.GetData()), in.GetUsername(), in.GetSessionId())
-			// Unmarshal the message into an interface, then switch on the type.
-			msg := reflect.New(reflect.TypeOf(typ).Elem()).Interface().(evr.Message)
-			if err := json.Unmarshal(in.GetData(), &msg); err != nil {
-				logger.Error("Failed to unmarshal message: %v", err)
-			}
-
-			var messageFn func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *MatchLabel, in runtime.MatchData, msg evr.Message) (*MatchLabel, error)
-
-			// Switch on the message type. This is where the match logic is handled.
-			switch msg := msg.(type) {
-			default:
-				logger.Warn("Unknown message type: %T", msg)
-			}
-
-			// Time the execution
-			start := time.Now()
-			// Execute the message function
-			if messageFn != nil {
-				state, err = messageFn(ctx, logger, db, nk, dispatcher, state, in, msg)
-				if err != nil {
-					logger.Error("match pipeline: %v", err)
+			logger.Warn("Unknown match message type: %T", in)
+			/*
+				typ, found := evr.SymbolTypes[uint64(in.GetOpCode())]
+				if !found {
+					logger.Error("Unknown opcode: %v", in.GetOpCode())
+					continue
 				}
-			}
-			logger.Debug("Message %T took %dms", msg, time.Since(start)/time.Millisecond)
+
+				logger.Debug("Received match message %T(%s) from %s (%s)", typ, string(in.GetData()), in.GetUsername(), in.GetSessionId())
+				// Unmarshal the message into an interface, then switch on the type.
+				msg := reflect.New(reflect.TypeOf(typ).Elem()).Interface().(evr.Message)
+				if err := json.Unmarshal(in.GetData(), &msg); err != nil {
+					logger.Error("Failed to unmarshal message: %v", err)
+				}
+
+				var messageFn func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *MatchLabel, in runtime.MatchData, msg evr.Message) (*MatchLabel, error)
+
+				// Switch on the message type. This is where the match logic is handled.
+				switch msg := msg.(type) {
+
+				default:
+					logger.Warn("Unknown message type: %T", msg)
+				}
+
+				// Time the execution
+				start := time.Now()
+				// Execute the message function
+				if messageFn == nil {
+					logger.Warn("No handler for message type: %T", msg)
+				} else {
+					state, err = messageFn(ctx, logger, db, nk, dispatcher, state, in, msg)
+					if err != nil {
+						logger.Error("match pipeline: %v", err)
+					}
+				}
+				logger.Debug("Message %T took %dms", msg, time.Since(start)/time.Millisecond)
+			*/
 		}
 	}
 

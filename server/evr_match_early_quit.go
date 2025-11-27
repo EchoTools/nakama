@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"sort"
 	"time"
 
@@ -156,47 +155,50 @@ func (p *PlayerDisconnectInfo) LogEarlyQuitMetrics(nk runtime.NakamaModule, stat
 	if state == nil || state.GameState == nil || state.GameState.RoundClock == nil {
 		return
 	}
-	// XXX: This cardinality is too high, and causes the system to crash after a few days (memory usage).
-	//      Disabling for now.
-	return
-	// Check if the player left at the same time as another player on their team
-	wasLosingAtLeave := (p.Team == BlueTeam && p.ScoresAtLeave[0] < p.ScoresAtLeave[1])
-	scoreDeltaAtJoin := p.ScoresAtJoin[0] - p.ScoresAtJoin[1]
-	scoreDeltaAtLeave := p.ScoresAtLeave[0] - p.ScoresAtLeave[1]
-	teamDisadvantageAtJoin := p.TeamSizesAtJoin[0] - p.TeamSizesAtJoin[1]
-	teamDisadvantageAtLeave := p.TeamSizesAtLeave[0] - p.TeamSizesAtLeave[1]
-	if p.Team == OrangeTeam {
-		teamDisadvantageAtJoin = -teamDisadvantageAtJoin
-		teamDisadvantageAtLeave = -teamDisadvantageAtLeave
-		scoreDeltaAtJoin = -scoreDeltaAtJoin
-		scoreDeltaAtLeave = -scoreDeltaAtLeave
-	}
 
-	// Log metrics
-	tags := map[string]string{
-		"is_abandon":                 fmt.Sprintf("%t", p.IsAbandoner),
-		"team":                       p.Team.String(),
-		"was_losing_at_leave":        fmt.Sprintf("%t", wasLosingAtLeave),
-		"is_team_wipe_member":        fmt.Sprintf("%t", p.IsTeamWipeMember),
-		"score_delta_at_join":        fmt.Sprintf("%d", scoreDeltaAtJoin),
-		"score_delta_at_leave":       fmt.Sprintf("%d", scoreDeltaAtLeave),
-		"team_disadvantage_at_join":  fmt.Sprintf("%d", teamDisadvantageAtJoin),
-		"team_disadvantage_at_leave": fmt.Sprintf("%d", teamDisadvantageAtLeave),
-		"total_hazard_events":        fmt.Sprintf("%d", p.TeamHazardEvents),
-		"consecutive_hazard_events":  fmt.Sprintf("%d", p.TeamConsecutiveHazards),
-		"party_size":                 fmt.Sprintf("%d", p.PartySize),
-		"ping_band":                  string(p.PingBand),
-		"disconnects_at_join":        fmt.Sprintf("%d", p.DisconnectsAtJoin),
-		"disconnects_at_leave":       fmt.Sprintf("%d", p.DisconnectsAtLeave),
-	}
+	/*
 
-	nk.MetricsCounterAdd("match_abandon_total", tags, 1)
-	nk.MetricsTimerRecord("match_abandon_game_duration_at_join_seconds", tags, p.GameDurationAtJoin)
-	nk.MetricsTimerRecord("match_abandon_game_duration_at_leave_seconds", tags, p.GameDurationAtLeave)
-	nk.MetricsTimerRecord("match_abandon_session_duration_seconds", tags, p.LeaveTime.Sub(p.JoinTime))
-	nk.MetricsTimerRecord("match_abandon_integrity_duration_seconds", tags, p.IntegrityDuration)
-	nk.MetricsTimerRecord("match_abandon_disadvantage_duration_seconds", tags, p.DisadvantageDuration)
+		// XXX: This cardinality is too high, and causes the system to crash after a few days (memory usage).
+		//      Disabling for now.
 
+			// Check if the player left at the same time as another player on their team
+				wasLosingAtLeave := (p.Team == BlueTeam && p.ScoresAtLeave[0] < p.ScoresAtLeave[1])
+				scoreDeltaAtJoin := p.ScoresAtJoin[0] - p.ScoresAtJoin[1]
+				scoreDeltaAtLeave := p.ScoresAtLeave[0] - p.ScoresAtLeave[1]
+				teamDisadvantageAtJoin := p.TeamSizesAtJoin[0] - p.TeamSizesAtJoin[1]
+				teamDisadvantageAtLeave := p.TeamSizesAtLeave[0] - p.TeamSizesAtLeave[1]
+				if p.Team == OrangeTeam {
+					teamDisadvantageAtJoin = -teamDisadvantageAtJoin
+					teamDisadvantageAtLeave = -teamDisadvantageAtLeave
+					scoreDeltaAtJoin = -scoreDeltaAtJoin
+					scoreDeltaAtLeave = -scoreDeltaAtLeave
+				}
+
+				// Log metrics
+				tags := map[string]string{
+					"is_abandon":                 fmt.Sprintf("%t", p.IsAbandoner),
+					"team":                       p.Team.String(),
+					"was_losing_at_leave":        fmt.Sprintf("%t", wasLosingAtLeave),
+					"is_team_wipe_member":        fmt.Sprintf("%t", p.IsTeamWipeMember),
+					"score_delta_at_join":        fmt.Sprintf("%d", scoreDeltaAtJoin),
+					"score_delta_at_leave":       fmt.Sprintf("%d", scoreDeltaAtLeave),
+					"team_disadvantage_at_join":  fmt.Sprintf("%d", teamDisadvantageAtJoin),
+					"team_disadvantage_at_leave": fmt.Sprintf("%d", teamDisadvantageAtLeave),
+					"total_hazard_events":        fmt.Sprintf("%d", p.TeamHazardEvents),
+					"consecutive_hazard_events":  fmt.Sprintf("%d", p.TeamConsecutiveHazards),
+					"party_size":                 fmt.Sprintf("%d", p.PartySize),
+					"ping_band":                  string(p.PingBand),
+					"disconnects_at_join":        fmt.Sprintf("%d", p.DisconnectsAtJoin),
+					"disconnects_at_leave":       fmt.Sprintf("%d", p.DisconnectsAtLeave),
+				}
+
+				nk.MetricsCounterAdd("match_abandon_total", tags, 1)
+				nk.MetricsTimerRecord("match_abandon_game_duration_at_join_seconds", tags, p.GameDurationAtJoin)
+				nk.MetricsTimerRecord("match_abandon_game_duration_at_leave_seconds", tags, p.GameDurationAtLeave)
+				nk.MetricsTimerRecord("match_abandon_session_duration_seconds", tags, p.LeaveTime.Sub(p.JoinTime))
+				nk.MetricsTimerRecord("match_abandon_integrity_duration_seconds", tags, p.IntegrityDuration)
+				nk.MetricsTimerRecord("match_abandon_disadvantage_duration_seconds", tags, p.DisadvantageDuration)
+	*/
 }
 
 func calculateHazardEvents(state *MatchLabel, teamID int, minGameTime float64) (total int, consecutive int) {

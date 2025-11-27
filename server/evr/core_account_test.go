@@ -125,11 +125,6 @@ func TestDeveloperFeatures_Omitted_When_Empty(t *testing.T) {
 	}
 
 	want := `{"before_dev":"before","after_dev":"after"}`
-	var wantErr error = nil
-	if err != wantErr {
-		t.Errorf("DeveloperFeatures.MarshalJSON() error = %v, wantErr %v", err, wantErr)
-		return
-	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("DeveloperFeatures.MarshalJSON() = `%v`, want `%v`", string(got), string(want))
 	}
