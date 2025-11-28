@@ -15,6 +15,7 @@ var (
 	emojiFilterPattern      = regexp.MustCompile(`:[a-zA-Z0-9_]+:`)
 	displayNameMatchPattern = regexp.MustCompile(`[A-Za-z]`)
 	displayNameScorePattern = regexp.MustCompile(`\s\(\d+\)\s\[\d+\.\d+%]`)
+	cockFilterPattern       = regexp.MustCompile(`(?i)cock`)
 )
 
 // sanitizeDisplayName filters the provided displayName to ensure it is valid.
@@ -29,6 +30,9 @@ func sanitizeDisplayName(displayName string) string {
 	for k, v := range mapping {
 		displayName = strings.ReplaceAll(displayName, k, v)
 	}
+
+	// Replace 'cock' with 'rooster' in display names (case-insensitive)
+	displayName = cockFilterPattern.ReplaceAllLiteralString(displayName, "rooster")
 
 	// Removes the discord score (i.e. ` (71) [62.95%]`) suffix from display names
 	displayName = displayNameScorePattern.ReplaceAllLiteralString(displayName, "")
