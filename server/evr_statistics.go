@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -164,6 +166,11 @@ func ScoreToFloat64(score int64, subscore int64) (float64, error) {
 
 	const fracScale = LeaderboardScoreScalingFactor
 	const scoreOffset = int64(1e15)
+
+	// Fix for corrupted scores due to 'incr' operator usage
+	if score >= 2*scoreOffset {
+		score = scoreOffset + (score % scoreOffset)
+	}
 
 	if score < scoreOffset {
 		// Negative number: score in range [0, scoreOffset)
@@ -503,4 +510,75 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 	// Integrate the boardMap values into the playerStatistics
 
 	return playerStatistics, boardMap, nil
+}
+
+// AccumulateLeaderboardStat adds a value to a leaderboard statistic using a Read-Modify-Write pattern.
+// This is necessary because the leaderboard uses a float64 encoding that is not compatible with the atomic 'incr' operator.
+func AccumulateLeaderboardStat(ctx context.Context, nk runtime.NakamaModule, userID, username, groupID string, mode evr.Symbol, statID string, value float64) error {
+	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
+	if value == 0 {
+		return nil
+	}
+
+	for _, period := range resetSchedules {
+		id := StatisticBoardID(groupID, mode, statID, period)
+
+		err := UpdateLeaderboardStat(ctx, nk, id, userID, username, func(currentScore float64, currentMetadata map[string]any) (float64, map[string]any, error) {
+			return currentScore + value, nil, nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// UpdateLeaderboardStat updates a leaderboard statistic using a Read-Modify-Write pattern with a callback.
+func UpdateLeaderboardStat(ctx context.Context, nk runtime.NakamaModule, leaderboardID, userID, username string, updateFn func(currentScore float64, currentMetadata map[string]any) (float64, map[string]any, error)) error {
+	var currentScore float64
+	var currentMetadata map[string]any
+
+	_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, leaderboardID, []string{userID}, 1, "", 0)
+	if err != nil {
+		if !errors.Is(err, runtime.ErrLeaderboardNotFound) {
+			return fmt.Errorf("failed to list leaderboard records: %w", err)
+		}
+	} else if len(ownerRecords) > 0 {
+		currentScore, err = ScoreToFloat64(ownerRecords[0].Score, ownerRecords[0].Subscore)
+		if err != nil {
+			return fmt.Errorf("failed to decode score: %w", err)
+		}
+		if ownerRecords[0].Metadata != "" {
+			if err := json.Unmarshal([]byte(ownerRecords[0].Metadata), &currentMetadata); err != nil {
+				return fmt.Errorf("failed to unmarshal metadata: %w", err)
+			}
+		}
+	}
+
+	newScore, newMetadata, err := updateFn(currentScore, currentMetadata)
+	if err != nil {
+		return err
+	}
+
+	score, subscore, err := Float64ToScore(newScore)
+	if err != nil {
+		return fmt.Errorf("invalid score value: %w", err)
+	}
+
+	op := 2 // SET
+	// Write the record
+	if _, err := nk.LeaderboardRecordWrite(ctx, leaderboardID, userID, username, score, subscore, newMetadata, &op); err != nil {
+		// Try to create the leaderboard
+		_, _, _, resetSchedule, err := ParseStatisticBoardID(leaderboardID)
+		if err != nil {
+			return fmt.Errorf("failed to parse leaderboard ID: %w", err)
+		}
+
+		if err = nk.LeaderboardCreate(ctx, leaderboardID, true, "desc", "set", ResetScheduleToCron(evr.ResetSchedule(resetSchedule)), nil, true); err != nil {
+			return fmt.Errorf("Leaderboard create error: %w", err)
+		} else if _, err := nk.LeaderboardRecordWrite(ctx, leaderboardID, userID, username, score, subscore, newMetadata, &op); err != nil {
+			return fmt.Errorf("Leaderboard record write error: %w", err)
+		}
+	}
+	return nil
 }
