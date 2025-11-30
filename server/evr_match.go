@@ -596,7 +596,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 			// Store the player's time in the match to a leaderboard
 
-			if err := accumulateLeaderboardStat(ctx, nk, mp.GetUserId(), mp.DisplayName, state.GetGroupID().String(), state.Mode, LobbyTimeStatisticID, time.Since(ts).Seconds()); err != nil {
+			if err := AccumulateLeaderboardStat(ctx, nk, mp.GetUserId(), mp.DisplayName, state.GetGroupID().String(), state.Mode, LobbyTimeStatisticID, time.Since(ts).Seconds()); err != nil {
 				logger.Warn("Failed to record match time to leaderboard: %v", err)
 			}
 
@@ -622,7 +622,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 							"display_name": mp.DisplayName,
 						}).Debug("Incrementing early quit for player.")
 
-						if err := accumulateLeaderboardStat(ctx, nk, mp.GetUserId(), mp.DisplayName, state.GetGroupID().String(), state.Mode, EarlyQuitStatisticID, 1); err != nil {
+						if err := AccumulateLeaderboardStat(ctx, nk, mp.GetUserId(), mp.DisplayName, state.GetGroupID().String(), state.Mode, EarlyQuitStatisticID, 1); err != nil {
 							logger.Warn("Failed to record early quit to leaderboard: %v", err)
 						}
 					}
@@ -672,47 +672,6 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	return state
-}
-
-func accumulateLeaderboardStat(ctx context.Context, nk runtime.NakamaModule, userID, username, groupID string, mode evr.Symbol, statID string, value float64) error {
-	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
-	if value == 0 {
-		return nil
-	}
-
-	for _, period := range resetSchedules {
-		id := StatisticBoardID(groupID, mode, statID, period)
-
-		var currentScore float64
-		_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, id, []string{userID}, 1, "", 0)
-		if err != nil {
-			if !errors.Is(err, ErrLeaderboardNotFound) {
-				return fmt.Errorf("failed to list leaderboard records: %w", err)
-			}
-		} else if len(ownerRecords) > 0 {
-			currentScore, err = ScoreToFloat64(ownerRecords[0].Score, ownerRecords[0].Subscore)
-			if err != nil {
-				return fmt.Errorf("failed to decode score: %w", err)
-			}
-		}
-
-		score, subscore, err := Float64ToScore(currentScore + value)
-		if err != nil {
-			return fmt.Errorf("invalid match time: %w", err)
-		}
-
-		op := 2 // SET
-		// Write the record
-		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subscore, nil, &op); err != nil {
-			// Try to create the leaderboard
-			if err = nk.LeaderboardCreate(ctx, id, true, "desc", "set", ResetScheduleToCron(period), nil, true); err != nil {
-				return fmt.Errorf("Leaderboard create error: %w", err)
-			} else if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subscore, nil, &op); err != nil {
-				return fmt.Errorf("Leaderboard record write error: %w", err)
-			}
-		}
-	}
-	return nil
 }
 
 // MatchLoop is called every tick of the match and handles state, plus messages from the client.
@@ -991,7 +950,7 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 
 	nk.MetricsTimerRecord("lobby_session_duration", state.MetricsTags(), time.Since(state.StartTime))
 	if state.server != nil && slices.Contains(ValidLeaderboardModes, state.Mode) {
-		if err := accumulateLeaderboardStat(ctx, nk, state.server.GetUserId(), state.server.GetUsername(), state.GetGroupID().String(), state.Mode, GameServerTimeStatisticsID, time.Since(state.StartTime).Seconds()); err != nil {
+		if err := AccumulateLeaderboardStat(ctx, nk, state.server.GetUserId(), state.server.GetUsername(), state.GetGroupID().String(), state.Mode, GameServerTimeStatisticsID, time.Since(state.StartTime).Seconds()); err != nil {
 			logger.Warn("Failed to record game server time to leaderboard: %v", err)
 		}
 	}
