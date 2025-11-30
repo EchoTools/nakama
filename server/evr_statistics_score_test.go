@@ -278,3 +278,30 @@ func TestNegativeIntegerSorting(t *testing.T) {
 			v1, v2, s1, ss1, s2, ss2)
 	}
 }
+
+func TestScoreToFloat64Corrupted(t *testing.T) {
+	// Test cases for corrupted scores (multiple increments of offset)
+	testCases := []struct {
+		name     string
+		score    int64
+		subscore int64
+		expected float64
+	}{
+		{"corrupted 12", 12000000000000012, 0, 12.0},
+		{"corrupted 1", 2000000000000001, 0, 1.0},
+		{"corrupted large", 5000000000000123, 0, 123.0},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			decoded, err := ScoreToFloat64(tc.score, tc.subscore)
+			if err != nil {
+				t.Fatalf("Failed to decode (%d, %d): %v", tc.score, tc.subscore, err)
+			}
+
+			if math.Abs(decoded-tc.expected) > 1e-8 {
+				t.Errorf("Correction failed for %d: got %f, expected %f", tc.score, decoded, tc.expected)
+			}
+		})
+	}
+}
