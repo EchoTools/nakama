@@ -165,6 +165,11 @@ func ScoreToFloat64(score int64, subscore int64) (float64, error) {
 	const fracScale = LeaderboardScoreScalingFactor
 	const scoreOffset = int64(1e15)
 
+	// Fix for corrupted scores due to 'incr' operator usage
+	if score >= 2*scoreOffset {
+		score = scoreOffset + (score % scoreOffset)
+	}
+
 	if score < scoreOffset {
 		// Negative number: score in range [0, scoreOffset)
 		intPart := scoreOffset - 1 - score // Convert back to magnitude
