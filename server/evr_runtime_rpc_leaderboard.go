@@ -238,22 +238,22 @@ func (h *RPCHandler) LeaderboardHaystackRPC(ctx context.Context, logger runtime.
 		return "{}", nil
 	}
 
-	if len(recordsList.OwnerRecords) == 0 && len(recordsList.Records) == 0 {
-		// No records found, return an empty response.
-		return "{}", nil
-	}
-
 	response := &LeaderboardHaystackResponse{
-		Records:    make([]LeaderboardHaystackRecord, len(recordsList.Records)),
-		RankCount:  recordsList.RankCount,
-		PrevCursor: recordsList.PrevCursor,
-		NextCursor: recordsList.NextCursor,
+		OwnerRecords: make([]LeaderboardHaystackRecord, len(recordsList.OwnerRecords)),
+		Records:      make([]LeaderboardHaystackRecord, len(recordsList.Records)),
+		RankCount:    recordsList.RankCount,
+		PrevCursor:   recordsList.PrevCursor,
+		NextCursor:   recordsList.NextCursor,
 	}
 
 	for i, r := range recordsList.OwnerRecords {
+		displayName := ""
+		if r.Username != nil {
+			displayName = r.Username.Value
+		}
 		response.OwnerRecords[i] = LeaderboardHaystackRecord{
 			OwnerID:     r.OwnerId,
-			DisplayName: r.Username.Value,
+			DisplayName: displayName,
 			NumScore:    r.NumScore,
 			Score:       r.Score,
 			Subscore:    r.Subscore,
@@ -266,9 +266,13 @@ func (h *RPCHandler) LeaderboardHaystackRPC(ctx context.Context, logger runtime.
 	}
 
 	for i, r := range recordsList.Records {
+		displayName := ""
+		if r.Username != nil {
+			displayName = r.Username.Value
+		}
 		response.Records[i] = LeaderboardHaystackRecord{
 			OwnerID:     r.OwnerId,
-			DisplayName: r.Username.Value,
+			DisplayName: displayName,
 			NumScore:    r.NumScore,
 			Score:       r.Score,
 			Subscore:    r.Subscore,
