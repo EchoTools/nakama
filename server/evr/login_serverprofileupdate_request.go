@@ -63,17 +63,6 @@ func (m UpdatePayload) MarshalJSON() ([]byte, error) {
 	return json.Marshal(aux)
 }
 
-func (m UpdatePayload) IsWinner() bool {
-	switch m.mode {
-	case ModeArenaPublic:
-		return m.Update.Statistics.Arena.ArenaWins.Value > 0
-	case ModeCombatPublic:
-		return m.Update.Statistics.Combat.CombatWins.Value > 0
-	default:
-		return false
-	}
-}
-
 type ServerProfileUpdate struct {
 	Statistics *ServerProfileUpdateStatistics `json:"stats,omitempty"`
 	Unlocks    *ServerProfileUpdateUnlocks    `json:"unlocks,omitempty"`

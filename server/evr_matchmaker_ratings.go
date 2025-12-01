@@ -5,6 +5,7 @@ import (
 
 	"slices"
 
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
 	"go.uber.org/thriftrw/ptr"
@@ -87,7 +88,9 @@ func NewDefaultRating() types.Rating {
 }
 
 // CalculateNewPlayerRatings calculates the new player ratings based on the match outcome.
-func CalculateNewPlayerRatings(players []PlayerInfo, blueWins bool) map[string]types.Rating {
+func CalculateNewPlayerRatings(playerInfos []PlayerInfo, playerStats map[evr.EvrId]evr.MatchTypeStats, blueWins bool) map[string]types.Rating {
+
+	const WinningTeamBonus = 4
 
 	winningTeam := BlueTeam
 	if !blueWins {
@@ -95,25 +98,36 @@ func CalculateNewPlayerRatings(players []PlayerInfo, blueWins bool) map[string]t
 	}
 
 	// copy the players slice so as to not modify the original
-	players = players[:]
+	playerInfos = slices.Clone(playerInfos)
 
 	// Remove players that are not on blue/orange
-	for i := 0; i < len(players); i++ {
-		if !players[i].IsCompetitor() {
-			players = slices.Delete(players, i, i+1)
+	for i := 0; i < len(playerInfos); i++ {
+		if !playerInfos[i].IsCompetitor() {
+			playerInfos = slices.Delete(playerInfos, i, i+1)
 			i--
 			continue
 		}
 	}
 
 	// Create a map of player scores
-	playerScores := make(map[string]int, len(players))
-	for _, p := range players {
-		playerScores[p.SessionID] = p.RatingScore
+	playerScores := make(map[string]int, len(playerInfos))
+	for _, p := range playerInfos {
+		var score int64 = 0
+		if stats, ok := playerStats[p.EvrID]; ok {
+			score += stats.Points
+			score += stats.Assists * 2
+			score += stats.Saves * 3
+			score += stats.Passes * 1
+			score -= stats.ShotsOnGoal * 1 // penalty for missed shots
+		}
+		if p.Team == winningTeam {
+			score += WinningTeamBonus
+		}
+		playerScores[p.SessionID] = int(score)
 	}
 
 	// Sort the players by score
-	slices.SortStableFunc(players, func(a, b PlayerInfo) int {
+	slices.SortStableFunc(playerInfos, func(a, b PlayerInfo) int {
 		// Sort winning team first
 		if a.Team == winningTeam && b.Team != winningTeam {
 			return -1
@@ -126,14 +140,14 @@ func CalculateNewPlayerRatings(players []PlayerInfo, blueWins bool) map[string]t
 	})
 
 	// Split the roster by teamRatings (all players are separated on their own team)
-	teamRatings := make([]types.Team, len(players))
-	for i, p := range players {
+	teamRatings := make([]types.Team, len(playerInfos))
+	for i, p := range playerInfos {
 		teamRatings[i] = types.Team{p.Rating()}
 	}
 
 	// Create a map of player scores; used to weight the new ratings
-	scores := make([]int, len(players))
-	for i, p := range players {
+	scores := make([]int, len(playerInfos))
+	for i, p := range playerInfos {
 		scores[i] = playerScores[p.SessionID]
 	}
 
@@ -143,9 +157,9 @@ func CalculateNewPlayerRatings(players []PlayerInfo, blueWins bool) map[string]t
 		Tau:   ptr.Float64(0.3), // prevent sigma from dropping too low
 	})
 
-	ratingMap := make(map[string]types.Rating, len(players))
+	ratingMap := make(map[string]types.Rating, len(playerInfos))
 	for i, team := range teamRatings {
-		sID := players[i].SessionID
+		sID := playerInfos[i].SessionID
 		ratingMap[sID] = team[0]
 	}
 
