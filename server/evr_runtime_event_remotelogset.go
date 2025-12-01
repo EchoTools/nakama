@@ -550,8 +550,45 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 			// Calculate new ratings
 			ratings := CalculateNewPlayerRatings(label.Players, statsByPlayer, blueWins)
 			if rating, ok := ratings[playerInfo.SessionID]; ok {
-				if err := MatchmakingRatingStore(ctx, nk, playerInfo.UserID, playerInfo.DiscordID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
-					logger.WithField("error", err).Warn("Failed to record rating to leaderboard")
+				// Add skill rating entries to the statistics queue
+				muScore, muSubscore, err := Float64ToScore(rating.Mu)
+				if err != nil {
+					logger.WithField("error", err).Warn("Failed to convert Mu rating to score")
+				} else {
+					allStatEntries = append(allStatEntries, &StatisticsQueueEntry{
+						BoardMeta: LeaderboardMeta{
+							GroupID:       groupIDStr,
+							Mode:          label.Mode,
+							StatName:      SkillRatingMuStatisticID,
+							Operator:      OperatorSet,
+							ResetSchedule: evr.ResetScheduleAllTime,
+						},
+						UserID:      playerInfo.UserID,
+						DisplayName: playerInfo.DisplayName,
+						Score:       muScore,
+						Subscore:    muSubscore,
+						Metadata:    map[string]string{"discord_id": playerInfo.DiscordID},
+					})
+				}
+
+				sigmaScore, sigmaSubscore, err := Float64ToScore(rating.Sigma)
+				if err != nil {
+					logger.WithField("error", err).Warn("Failed to convert Sigma rating to score")
+				} else {
+					allStatEntries = append(allStatEntries, &StatisticsQueueEntry{
+						BoardMeta: LeaderboardMeta{
+							GroupID:       groupIDStr,
+							Mode:          label.Mode,
+							StatName:      SkillRatingSigmaStatisticID,
+							Operator:      OperatorSet,
+							ResetSchedule: evr.ResetScheduleAllTime,
+						},
+						UserID:      playerInfo.UserID,
+						DisplayName: playerInfo.DisplayName,
+						Score:       sigmaScore,
+						Subscore:    sigmaSubscore,
+						Metadata:    map[string]string{"discord_id": playerInfo.DiscordID},
+					})
 				}
 			} else {
 				logger.WithField("target_sid", playerInfo.SessionID).Warn("No rating found for player in matchmaking ratings")
