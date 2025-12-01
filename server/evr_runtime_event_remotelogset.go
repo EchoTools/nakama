@@ -115,6 +115,9 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 	// Collect the updates to the match's game metadata (e.g. game clock)
 	updates := MapOf[uuid.UUID, *MatchGameStateUpdate]{}
 
+	// Collect the post-match messages for processing
+	postMatchMessages := make(map[uuid.UUID][]evr.RemoteLog)
+
 	for _, e := range entries {
 		logger := logger.WithField("message_type", fmt.Sprintf("%T", e))
 
@@ -390,40 +393,15 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 		case *evr.RemoteLogPostMatchMatchStats:
 			update, _ = updates.LoadOrStore(msg.SessionUUID(), &MatchGameStateUpdate{})
 			update.MatchOver = true
-			// Increment the completed matches for the player
-			if err := s.incrementCompletedMatches(ctx, logger, nk, sessionRegistry, s.UserID, s.SessionID); err != nil {
-				logger.WithField("error", err).Warn("Failed to increment completed matches")
-				continue
-			}
+			postMatchMessages[msg.SessionUUID()] = append(postMatchMessages[msg.SessionUUID()], msg)
 
 		case *evr.RemoteLogPostMatchTypeStats:
 			update, _ = updates.LoadOrStore(msg.SessionUUID(), &MatchGameStateUpdate{})
 			update.MatchOver = true
-			// Process the post match stats into the player's statistics
-			if err := s.processPostMatchTypeStats(ctx, logger, db, nk, sessionRegistry, statisticsQueue, msg); err != nil {
-				logger.WithFields(map[string]any{
-					"error": err,
-					"msg":   msg,
-				}).Warn("Failed to process post match type stats")
+			postMatchMessages[msg.SessionUUID()] = append(postMatchMessages[msg.SessionUUID()], msg)
 
-				continue
-			}
 		case *evr.RemoteLogPostMatchMatchTypeXPLevel:
-			// This provides the XP gain from the match
-			/*
-							{
-				    "message": "process post-match match type xp level",
-				    "message_type": "POST_MATCH_MATCH_TYPE_XP_LEVEL",
-				    "CurrentLevel": 2,
-				    "CurrentXP": 1000,
-				    "PreviousLevel": 1,
-				    "PreviousXP": 0,
-				    "RemainingXP": 500,
-				    "[session][uuid]": "{8DFB17C0-4CF3-481A-B898-F090343A5DA1}",
-				    "match_type": "Echo_Arena",
-				    "userid": "OVR-ORG-8185598851511174"
-				  },
-			*/
+			postMatchMessages[msg.SessionUUID()] = append(postMatchMessages[msg.SessionUUID()], msg)
 		case *evr.RemoteLogLoadStats:
 
 			if msg.ClientLoadTime > 45 {
@@ -461,6 +439,17 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
+	for sessionUUID, msgs := range postMatchMessages {
+		matchID, err := NewMatchID(sessionUUID, s.Node)
+		if err != nil {
+			logger.Warn("Failed to create match ID for post match processing")
+			continue
+		}
+		if err := s.processPostMatchMessages(ctx, logger, db, nk, sessionRegistry, statisticsQueue, matchID, msgs); err != nil {
+			logger.WithField("error", err).Warn("Failed to process post match messages")
+		}
+	}
+
 	updates.Range(func(key uuid.UUID, value *MatchGameStateUpdate) bool {
 		matchRegistry.SendData(key, s.Node, uuid.FromStringOrNil(s.UserID), uuid.FromStringOrNil(s.SessionID), s.Username, s.Node, OpCodeMatchGameStateUpdate, value.Bytes(), false, time.Now().Unix())
 		return true
@@ -488,66 +477,102 @@ func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logge
 	return nil
 }
 
-func (s *EventRemoteLogSet) processPostMatchTypeStats(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, sessionRegistry SessionRegistry, statisticsQueue *StatisticsQueue, msg *evr.RemoteLogPostMatchTypeStats) error {
-	var err error
-	matchID, err := NewMatchID(msg.SessionUUID(), s.Node)
-	if err != nil {
-		return fmt.Errorf("failed to create match ID: %w", err)
+func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, sessionRegistry SessionRegistry, statisticsQueue *StatisticsQueue, matchID MatchID, msgs []evr.RemoteLog) error {
+	var statsByPlayer = make(map[evr.EvrId]evr.MatchTypeStats, 8)
+
+	//var xpLevel *evr.RemoteLogPostMatchMatchTypeXPLevel
+
+	for _, msg := range msgs {
+		switch m := msg.(type) {
+		case *evr.RemoteLogPostMatchMatchTypeXPLevel:
+			continue
+		case *evr.RemoteLogPostMatchMatchStats:
+			continue
+		case *evr.RemoteLogPostMatchTypeStats:
+
+			xpid, err := evr.ParseEvrId(m.XPID)
+			if err != nil {
+				return fmt.Errorf("failed to parse evr ID: %w", err)
+			}
+			statsByPlayer[*xpid] = m.Stats
+
+		}
 	}
-	// Get the match label
+
 	label, err := MatchLabelByID(ctx, nk, matchID)
 	if err != nil || label == nil {
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
-	xpid, err := evr.ParseEvrId(msg.XPID)
-	if err != nil {
-		return fmt.Errorf("failed to parse evr ID: %w", err)
+	if label.Mode != evr.ModeArenaPublic {
+		return nil // Only process type stats for arena mode
 	}
-	// Get the player's information
-	playerInfo := label.GetPlayerByEvrID(*xpid)
-	if playerInfo == nil {
-		// If the player isn't in the match, do not update the stats
-		return fmt.Errorf("player not in match: %s", msg.XPID)
-	}
-
-	// If the player isn't in the match, or isn't a player, do not update the stats
-	if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
-		return fmt.Errorf("non-player profile update request: %s", msg.XPID)
-	}
-	logger = logger.WithFields(map[string]any{
-		"player_uid":  playerInfo.UserID,
-		"player_sid":  playerInfo.SessionID,
-		"player_xpid": playerInfo.EvrID.String(),
-	})
 
 	groupIDStr := label.GetGroupID().String()
-	validModes := []evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}
 
-	serviceSettings := ServiceSettings()
-	if serviceSettings.UseSkillBasedMatchmaking() && slices.Contains(validModes, label.Mode) {
+	logger = logger.WithFields(map[string]any{
+		"mid": matchID.String(),
+	})
 
-		// Determine winning team
-		blueWins := playerInfo.Team == BlueTeam && msg.IsWinner()
-		ratings := CalculateNewPlayerRatings(label.Players, blueWins)
-		if rating, ok := ratings[playerInfo.SessionID]; ok {
-			if err := MatchmakingRatingStore(ctx, nk, playerInfo.UserID, playerInfo.DiscordID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
-				logger.WithField("error", err).Warn("Failed to record rating to leaderboard")
+	allStatEntries := make([]*StatisticsQueueEntry, 0)
+
+	for xpid, typeStats := range statsByPlayer {
+		// Get the match label
+
+		// Get the player's information
+		playerInfo := label.GetPlayerByEvrID(xpid)
+		if playerInfo == nil {
+			// If the player isn't in the match, do not update the stats
+			return fmt.Errorf("player not in match: %s", xpid.String())
+		}
+
+		// If the player isn't in the match, or isn't a player, do not update the stats
+		if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
+			return fmt.Errorf("non-competitor player cannot have stats updated: %s", xpid.String())
+		}
+
+		logger = logger.WithFields(map[string]any{
+			"player_uid":  playerInfo.UserID,
+			"player_sid":  playerInfo.SessionID,
+			"player_xpid": playerInfo.EvrID.String(),
+		})
+
+		// Increment the completed matches for the player
+		if err := s.incrementCompletedMatches(ctx, logger, nk, sessionRegistry, playerInfo.UserID, playerInfo.SessionID); err != nil {
+			logger.WithField("error", err).Warn("Failed to increment completed matches")
+		}
+
+		serviceSettings := ServiceSettings()
+		if serviceSettings.UseSkillBasedMatchmaking() {
+
+			// Determine winning team
+			blueWins := (playerInfo.Team == BlueTeam && typeStats.ArenaWins > 0) || (playerInfo.Team == OrangeTeam && typeStats.ArenaLosses > 0)
+
+			// Calculate new ratings
+			ratings := CalculateNewPlayerRatings(label.Players, statsByPlayer, blueWins)
+			if rating, ok := ratings[playerInfo.SessionID]; ok {
+				if err := MatchmakingRatingStore(ctx, nk, playerInfo.UserID, playerInfo.DiscordID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
+					logger.WithField("error", err).Warn("Failed to record rating to leaderboard")
+				}
+			} else {
+				logger.WithField("target_sid", playerInfo.SessionID).Warn("No rating found for player in matchmaking ratings")
 			}
-		} else {
-			logger.WithField("target_sid", playerInfo.SessionID).Warn("No rating found for player in matchmaking ratings")
+		}
+
+		// Update the player's statistics, if the service settings allow it
+		if !serviceSettings.DisableStatisticsUpdates {
+			statEntries, err := typeStatsToScoreMap(playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, typeStats)
+			if err != nil {
+				return fmt.Errorf("failed to convert type stats to score map: %w", err)
+			}
+			allStatEntries = append(allStatEntries, statEntries...)
 		}
 	}
 
-	// Update the player's statistics, if the service settings allow it
-	if serviceSettings.DisableStatisticsUpdates {
-		return nil
+	if len(allStatEntries) > 0 {
+		return statisticsQueue.Add(allStatEntries)
 	}
 
-	statEntries, err := typeStatsToScoreMap(playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, msg.Stats)
-	if err != nil {
-		return fmt.Errorf("failed to convert type stats to score map: %w", err)
-	}
-	return statisticsQueue.Add(statEntries)
+	return nil
 }
 
 func iterateMatchTypeStatsFields(stats evr.MatchTypeStats, fn func(statName string, op LeaderboardOperator, value float64)) {

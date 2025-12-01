@@ -16,7 +16,6 @@ type PlayerInfo struct {
 	JoinTime      int64      `json:"join_time_ms,omitempty"` // The time on the round clock that the player joined
 	RatingMu      float64    `json:"rating_mu,omitempty"`
 	RatingSigma   float64    `json:"rating_sigma,omitempty"`
-	RatingScore   int        `json:"rating_score,omitempty"`
 	Username      string     `json:"username,omitempty"`
 	DiscordID     string     `json:"discord_id,omitempty"`
 	UserID        string     `json:"user_id,omitempty"`

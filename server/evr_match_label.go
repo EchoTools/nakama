@@ -303,7 +303,6 @@ func (s *MatchLabel) rebuildCache() {
 	s.Size = len(presences)
 	s.Players = make([]PlayerInfo, 0, s.Size)
 	s.PlayerCount = 0
-	ratingScores := s.CalculateRatingWeights()
 	for _, p := range presences {
 		// Do not include spectators or moderators in player count
 		if p.RoleAlignment != evr.TeamSpectator && p.RoleAlignment != evr.TeamModerator {
@@ -337,7 +336,6 @@ func (s *MatchLabel) rebuildCache() {
 					PartyID:       p.PartyID.String(),
 					RatingMu:      p.Rating.Mu,
 					RatingSigma:   p.Rating.Sigma,
-					RatingScore:   ratingScores[p.EvrID],
 					JoinTime:      s.joinTimeMilliseconds[p.SessionID.String()],
 					SessionID:     p.SessionID.String(),
 					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
@@ -357,7 +355,6 @@ func (s *MatchLabel) rebuildCache() {
 					JoinTime:      s.joinTimeMilliseconds[p.SessionID.String()],
 					RatingMu:      p.Rating.Mu,
 					RatingSigma:   p.Rating.Sigma,
-					RatingScore:   ratingScores[p.EvrID],
 					SessionID:     p.SessionID.String(),
 					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
 					GeoHash:       p.GeoHash,
@@ -556,7 +553,6 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 				JoinTime:    l.Players[i].JoinTime,
 				RatingMu:    l.Players[i].RatingMu,
 				RatingSigma: l.Players[i].RatingSigma,
-				RatingScore: l.Players[i].RatingScore,
 			})
 		}
 
