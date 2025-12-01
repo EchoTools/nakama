@@ -441,6 +441,9 @@ func (w *WhoAmI) createSuspensionsEmbed() *discordgo.MessageEmbed {
 			Title:  "Suspensions",
 			Color:  WhoAmISecondaryColor,
 			Fields: fields,
+			Footer: &discordgo.MessageEmbedFooter{
+				Text: "Confidential. Do not share.",
+			},
 		}
 		// If any of the suspensions are active, set the color to red
 
