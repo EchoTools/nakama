@@ -253,36 +253,6 @@ func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, userID,
 	return NewRating(0, mu, sigma), nil
 }
 
-func MatchmakingRatingStore(ctx context.Context, nk runtime.NakamaModule, userID, discordID, displayName, groupID string, mode evr.Symbol, r types.Rating) error {
-
-	scores := map[string]float64{
-		StatisticBoardID(groupID, mode, SkillRatingSigmaStatisticID, "alltime"): r.Sigma,
-		StatisticBoardID(groupID, mode, SkillRatingMuStatisticID, "alltime"):    r.Mu,
-	}
-	metadata := map[string]any{
-		"discord_id": discordID,
-	}
-	for id, value := range scores {
-		score, subscore, err := Float64ToScore(value)
-		if err != nil {
-			return fmt.Errorf("failed to convert float64 to int64 pair: %w", err)
-		}
-
-		// Write the record
-		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, subscore, metadata, nil); err != nil {
-			// Try to create the leaderboard
-			err = nk.LeaderboardCreate(ctx, id, true, "desc", "set", "", nil, true)
-			if err != nil {
-				return fmt.Errorf("Leaderboard create error: %w", err)
-			} else if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, subscore, metadata, nil); err != nil {
-				return fmt.Errorf("Leaderboard record write error: %w", err)
-			}
-		}
-	}
-
-	return nil
-}
-
 func StatisticBoardID(groupID string, mode evr.Symbol, statName string, resetSchedule evr.ResetSchedule) string {
 	return fmt.Sprintf("%s:%s:%s:%s", groupID, mode.String(), statName, resetSchedule)
 }
@@ -540,7 +510,7 @@ func UpdateLeaderboardStat(ctx context.Context, nk runtime.NakamaModule, leaderb
 
 	_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, leaderboardID, []string{userID}, 1, "", 0)
 	if err != nil {
-		if !errors.Is(err, runtime.ErrLeaderboardNotFound) {
+		if !errors.Is(err, runtime.ErrLeaderboardNotFound) && !errors.Is(err, ErrLeaderboardNotFound) {
 			return fmt.Errorf("failed to list leaderboard records: %w", err)
 		}
 	} else if len(ownerRecords) > 0 {
