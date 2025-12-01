@@ -114,7 +114,7 @@ func CalculateNewPlayerRatings(playerInfos []PlayerInfo, playerStats map[evr.Evr
 	for _, p := range playerInfos {
 		var score int64 = 0
 		if stats, ok := playerStats[p.EvrID]; ok {
-			score += stats.Goals * 2
+			score += stats.Points
 			score += stats.Assists * 2
 			score += stats.Saves * 3
 			score += stats.Passes * 1

@@ -537,7 +537,7 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		})
 
 		// Increment the completed matches for the player
-		if err := s.incrementCompletedMatches(ctx, logger, nk, sessionRegistry, s.UserID, s.SessionID); err != nil {
+		if err := s.incrementCompletedMatches(ctx, logger, nk, sessionRegistry, playerInfo.UserID, playerInfo.SessionID); err != nil {
 			logger.WithField("error", err).Warn("Failed to increment completed matches")
 		}
 
@@ -545,7 +545,7 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		if serviceSettings.UseSkillBasedMatchmaking() {
 
 			// Determine winning team
-			blueWins := playerInfo.Team == BlueTeam && typeStats.ArenaWins > 0 || playerInfo.Team == OrangeTeam && typeStats.ArenaLosses > 0
+			blueWins := (playerInfo.Team == BlueTeam && typeStats.ArenaWins > 0) || (playerInfo.Team == OrangeTeam && typeStats.ArenaLosses > 0)
 
 			// Calculate new ratings
 			ratings := CalculateNewPlayerRatings(label.Players, statsByPlayer, blueWins)
@@ -566,11 +566,12 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 			}
 			allStatEntries = append(allStatEntries, statEntries...)
 		}
-
-		if len(allStatEntries) > 0 {
-			return statisticsQueue.Add(allStatEntries)
-		}
 	}
+
+	if len(allStatEntries) > 0 {
+		return statisticsQueue.Add(allStatEntries)
+	}
+
 	return nil
 }
 
