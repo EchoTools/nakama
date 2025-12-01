@@ -1222,22 +1222,6 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 
 	serviceSettings := ServiceSettings()
 
-	validModes := []evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}
-
-	if serviceSettings.UseSkillBasedMatchmaking() && slices.Contains(validModes, label.Mode) {
-
-		// Determine winning team
-		blueWins := playerInfo.Team == BlueTeam && payload.IsWinner()
-		ratings := CalculateNewPlayerRatings(label.Players, blueWins)
-		if rating, ok := ratings[playerInfo.SessionID]; ok {
-			if err := MatchmakingRatingStore(ctx, p.nk, playerInfo.UserID, playerInfo.DiscordID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
-				logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
-			}
-		} else {
-			logger.Warn("Failed to get player rating", zap.String("sessionID", playerInfo.SessionID))
-		}
-	}
-
 	// Update the player's statistics, if the service settings allow it
 	if serviceSettings.DisableStatisticsUpdates {
 		return nil
