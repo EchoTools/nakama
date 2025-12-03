@@ -458,20 +458,47 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 	return nil
 }
 
-func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, userID, sessionID string) error {
+func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, sessionRegistry SessionRegistry, userID, sessionID string) error {
 	// Decrease the early quitter count for the player
 	eqconfig := NewEarlyQuitConfig()
 	if err := StorableRead(ctx, nk, userID, eqconfig, true); err != nil {
 		logger.WithField("error", err).Warn("Failed to load early quitter config")
 	} else {
 		eqconfig.IncrementCompletedMatches()
+
+		// Check for tier change after completing match
+		serviceSettings := ServiceSettings()
+		oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
+
 		if err := StorableWrite(ctx, nk, userID, eqconfig); err != nil {
 			logger.WithField("error", err).Warn("Failed to store early quitter config")
-		}
-	}
-	if playerSession := sessionRegistry.Get(uuid.FromStringOrNil(sessionID)); playerSession != nil {
-		if params, ok := LoadParams(playerSession.Context()); ok {
-			params.earlyQuitConfig.Store(eqconfig)
+		} else {
+			// Update session cache
+			if playerSession := sessionRegistry.Get(uuid.FromStringOrNil(sessionID)); playerSession != nil {
+				if params, ok := LoadParams(playerSession.Context()); ok {
+					params.earlyQuitConfig.Store(eqconfig)
+				}
+			}
+
+			// Send Discord DM if tier changed
+			if tierChanged {
+				discordID, err := GetDiscordIDByUserID(ctx, db, userID)
+				if err != nil {
+					logger.WithField("error", err).Warn("Failed to get Discord ID for tier notification")
+				} else if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
+					var message string
+					if oldTier < newTier {
+						// Degraded to Tier 2+
+						message = "Matchmaking Status Update: Account flagged for early quitting.\nYou have been moved to the Tier 2 priority queue. All incoming Tier 1 requests\nare now cutting in front of you. You will remain in a holding pattern until no\nother players are available to match.\n\nComplete full matches to restore Tier 1 status."
+					} else {
+						// Recovered to Tier 1
+						message = "Matchmaking Priority Restored: You have returned to Tier 1 status. Complete full matches to maintain your standing."
+					}
+					if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
+						logger.WithField("error", err).Warn("Failed to send tier change DM")
+					}
+				}
+			}
 		}
 	}
 	return nil
@@ -537,7 +564,7 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		})
 
 		// Increment the completed matches for the player
-		if err := s.incrementCompletedMatches(ctx, logger, nk, sessionRegistry, playerInfo.UserID, playerInfo.SessionID); err != nil {
+		if err := s.incrementCompletedMatches(ctx, logger, nk, db, sessionRegistry, playerInfo.UserID, playerInfo.SessionID); err != nil {
 			logger.WithField("error", err).Warn("Failed to increment completed matches")
 		}
 
