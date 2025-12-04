@@ -258,21 +258,43 @@ func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.
 	// Monitor the stream and cancel the context (and matchmaking) if the stream is closed.
 	// This stream tracks the user's matchmaking status.
 	// This stream is untracked when the user cancels matchmaking.
+	//
+	// IMPORTANT: This function does NOT call LeaveMatchmakingStream on exit.
+	// The matchmaking stream cleanup is handled by:
+	// - LobbyJoinEntrants (when player joins a match)
+	// - lobbyPendingSessionCancel (when player explicitly cancels)
+	// - JoinMatchmakingStream (when player re-queues, it cleans up old streams)
 
 	stream := lobbyParams.MatchmakingStream()
-	defer LeaveMatchmakingStream(logger, session)
+	const checkInterval = 1 * time.Second
+	const gracePeriod = 1 * time.Second
+
 	for {
 		select {
 		case <-ctx.Done():
-			// Check if the cancel was because of a timeout
+			// Context was canceled (timeout, player joined match, or external cancel)
+			// Do NOT clean up the matchmaking stream here - let the appropriate handler do it
 			return
-		case <-time.After(1 * time.Second):
+		case <-time.After(checkInterval):
 		}
 
-		// Check if the matchmaking stream has been closed.  (i.e. the user has canceled matchmaking)
+		// Check if the matchmaking stream has been closed (i.e., the user has canceled matchmaking)
 		if session.tracker.GetLocalBySessionIDStreamUserID(session.id, stream, session.userID) == nil {
-			<-time.After(1 * time.Second)
-			cancelFn()
+			// Wait grace period before canceling to handle race condition where player re-queues
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(gracePeriod):
+			}
+
+			// Re-check after grace period - the presence might have been re-added if player re-queued
+			if session.tracker.GetLocalBySessionIDStreamUserID(session.id, stream, session.userID) == nil {
+				logger.Debug("Matchmaking stream closed, canceling matchmaking")
+				cancelFn()
+				return
+			}
+			// Player re-queued during grace period, continue monitoring
+			logger.Debug("Player re-queued during grace period, continuing to monitor")
 		}
 	}
 }
