@@ -24,18 +24,17 @@ type slotReservation struct {
 }
 
 type MatchLabel struct {
-	ID             MatchID      `json:"id"`                   // The Session Id used by EVR (the same as match id)
-	Open           bool         `json:"open"`                 // Whether the lobby is open to new players (Matching Only)
-	LockedAt       time.Time    `json:"locked_at,omitempty"`  // The time the match was locked.
-	LobbyType      LobbyType    `json:"lobby_type"`           // The type of lobby (Public, Private, Unassigned) (EVR)
-	Mode           evr.Symbol   `json:"mode,omitempty"`       // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
-	Level          evr.Symbol   `json:"level,omitempty"`      // The level to play on (EVR).
-	Size           int          `json:"size"`                 // The number of players (including spectators) in the match.
-	PlayerCount    int          `json:"player_count"`         // The number of participants (not including spectators) in the match.
-	Players        []PlayerInfo `json:"players,omitempty"`    // The displayNames of the players (by team name) in the match.
-	RankPercentile float64      `json:"rank_percentile"`      // The average percentile rank of the players in the match.
-	RatingOrdinal  float64      `json:"rating_ordinal"`       // The average rating ordinal of the players in the match.
-	GameState      *GameState   `json:"game_state,omitempty"` // The game state for the match.
+	ID          MatchID      `json:"id"`                   // The Session Id used by EVR (the same as match id)
+	Open        bool         `json:"open"`                 // Whether the lobby is open to new players (Matching Only)
+	LockedAt    time.Time    `json:"locked_at,omitempty"`  // The time the match was locked.
+	LobbyType   LobbyType    `json:"lobby_type"`           // The type of lobby (Public, Private, Unassigned) (EVR)
+	Mode        evr.Symbol   `json:"mode,omitempty"`       // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
+	Level       evr.Symbol   `json:"level,omitempty"`      // The level to play on (EVR).
+	Size        int          `json:"size"`                 // The number of players (including spectators) in the match.
+	PlayerCount int          `json:"player_count"`         // The number of participants (not including spectators) in the match.
+	Players     []PlayerInfo `json:"players,omitempty"`    // The displayNames of the players (by team name) in the match.
+	RatingMu    float64      `json:"rating_mu"`            // The average rating mu of the players in the match.
+	GameState   *GameState   `json:"game_state,omitempty"` // The game state for the match.
 
 	TeamSize         int      `json:"team_size,omitempty"`    // The size of each team in arena/combat (either 4 or 5)
 	MaxSize          int      `json:"limit,omitempty"`        // The total lobby size limit (players + specs)
@@ -264,16 +263,23 @@ func (s *MatchLabel) MetricsTags() map[string]string {
 	return tags
 }
 
-func (s *MatchLabel) ratingOrdinal() float64 {
-	ordinals := make([]float64, 0, len(s.Players))
+func (s *MatchLabel) ratingMu() float64 {
+	mus := make([]float64, 0, len(s.Players))
 	for _, p := range s.Players {
-		if p.RatingOrdinal == 0 || !p.IsCompetitor() {
+		if p.RatingMu == 0 || !p.IsCompetitor() {
 			continue
 		}
-		ordinals = append(ordinals, p.RatingOrdinal)
+		mus = append(mus, p.RatingMu)
 	}
-	// Ignoring this error because we're sure to always being good guys with this
-	return median(ordinals)
+	if len(mus) == 0 {
+		return 0.0
+	}
+	var sum float64
+	for _, v := range mus {
+		sum += v
+	}
+	return sum / float64(len(mus))
+
 }
 
 // rebuildCache is called after the presences map is updated.
@@ -297,7 +303,6 @@ func (s *MatchLabel) rebuildCache() {
 	s.Size = len(presences)
 	s.Players = make([]PlayerInfo, 0, s.Size)
 	s.PlayerCount = 0
-	ratingScores := s.CalculateRatingWeights()
 	for _, p := range presences {
 		// Do not include spectators or moderators in player count
 		if p.RoleAlignment != evr.TeamSpectator && p.RoleAlignment != evr.TeamModerator {
@@ -318,49 +323,42 @@ func (s *MatchLabel) rebuildCache() {
 				GeoHash:     p.GeoHash,
 			})
 		} else {
-			ordinal := rating.Ordinal(p.Rating)
 			switch s.Mode {
 			case evr.ModeArenaPublic:
 				s.Players = append(s.Players, PlayerInfo{
-					UserID:         p.UserID.String(),
-					Username:       p.Username,
-					DisplayName:    p.DisplayName,
-					EvrID:          p.EvrID,
-					Team:           TeamIndex(p.RoleAlignment),
-					ClientIP:       p.ClientIP,
-					DiscordID:      p.DiscordID,
-					PartyID:        p.PartyID.String(),
-					RatingMu:       p.Rating.Mu,
-					RatingSigma:    p.Rating.Sigma,
-					RatingOrdinal:  ordinal,
-					RatingScore:    ratingScores[p.EvrID],
-					JoinTime:       s.joinTimeMilliseconds[p.SessionID.String()],
-					RankPercentile: p.RankPercentile,
-					SessionID:      p.SessionID.String(),
-					IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
-					GeoHash:        p.GeoHash,
-					PingMillis:     p.PingMillis,
+					UserID:        p.UserID.String(),
+					Username:      p.Username,
+					DisplayName:   p.DisplayName,
+					EvrID:         p.EvrID,
+					Team:          TeamIndex(p.RoleAlignment),
+					ClientIP:      p.ClientIP,
+					DiscordID:     p.DiscordID,
+					PartyID:       p.PartyID.String(),
+					RatingMu:      p.Rating.Mu,
+					RatingSigma:   p.Rating.Sigma,
+					JoinTime:      s.joinTimeMilliseconds[p.SessionID.String()],
+					SessionID:     p.SessionID.String(),
+					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
+					GeoHash:       p.GeoHash,
+					PingMillis:    p.PingMillis,
 				})
 			case evr.ModeCombatPublic, evr.ModeSocialPublic:
 				s.Players = append(s.Players, PlayerInfo{
-					UserID:         p.UserID.String(),
-					Username:       p.Username,
-					DisplayName:    p.DisplayName,
-					EvrID:          p.EvrID,
-					Team:           TeamIndex(p.RoleAlignment),
-					ClientIP:       p.ClientIP,
-					DiscordID:      p.DiscordID,
-					PartyID:        p.PartyID.String(),
-					JoinTime:       s.joinTimeMilliseconds[p.SessionID.String()],
-					RatingMu:       p.Rating.Mu,
-					RatingSigma:    p.Rating.Sigma,
-					RatingOrdinal:  ordinal,
-					RatingScore:    ratingScores[p.EvrID],
-					RankPercentile: p.RankPercentile,
-					SessionID:      p.SessionID.String(),
-					IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
-					GeoHash:        p.GeoHash,
-					PingMillis:     p.PingMillis,
+					UserID:        p.UserID.String(),
+					Username:      p.Username,
+					DisplayName:   p.DisplayName,
+					EvrID:         p.EvrID,
+					Team:          TeamIndex(p.RoleAlignment),
+					ClientIP:      p.ClientIP,
+					DiscordID:     p.DiscordID,
+					PartyID:       p.PartyID.String(),
+					JoinTime:      s.joinTimeMilliseconds[p.SessionID.String()],
+					RatingMu:      p.Rating.Mu,
+					RatingSigma:   p.Rating.Sigma,
+					SessionID:     p.SessionID.String(),
+					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
+					GeoHash:       p.GeoHash,
+					PingMillis:    p.PingMillis,
 				})
 
 			case evr.ModeArenaPrivate, evr.ModeCombatPrivate:
@@ -426,28 +424,12 @@ func (s *MatchLabel) rebuildCache() {
 				teamRatings[p.Team] = append(teamRatings[p.Team], p.Rating())
 			}
 
-			// Calculate the average rank percentile for each team
-			rankPercentileAverages := make(map[TeamIndex]float64, 2)
-			for _, p := range s.Players {
-				if p.Team != BlueTeam && p.Team != OrangeTeam {
-					continue
-				}
-				rankPercentileAverages[p.Team] += p.RankPercentile
-			}
-
-			for t, r := range rankPercentileAverages {
-				if r > 0 {
-					rankPercentileAverages[t] = r / float64(len(teams[t]))
-				}
-			}
-
 			winPredictions := rating.PredictWin(teamRatings, nil)
 			meta := make(map[TeamIndex]TeamMetadata, 2)
 			for _, t := range [...]TeamIndex{BlueTeam, OrangeTeam} {
 				meta[t] = TeamMetadata{
-					Strength:              teams[t].Strength(),
-					RankPercentileAverage: rankPercentileAverages[t],
-					PredictWin:            winPredictions[t],
+					Strength:   teams[t].Strength(),
+					PredictWin: winPredictions[t],
 				}
 			}
 
@@ -479,24 +461,7 @@ func (s *MatchLabel) rebuildCache() {
 		return s.Players[i].JoinTime < s.Players[j].JoinTime
 	})
 
-	// Recalculate the match's aggregate rank percentile
-	s.RankPercentile = 0.0
-
-	s.RatingOrdinal = s.ratingOrdinal()
-
-	count := 0
-	if len(s.Players) > 0 {
-		for _, p := range s.Players {
-			if (p.Team != BlueTeam && p.Team != OrangeTeam) || p.RankPercentile == 0 {
-				continue
-			}
-			count++
-			s.RankPercentile += p.RankPercentile
-		}
-		if count > 0 {
-			s.RankPercentile = s.RankPercentile / float64(count)
-		}
-	}
+	s.RatingMu = s.ratingMu()
 }
 
 func (l *MatchLabel) CalculateRatingWeights() map[evr.EvrId]int {
@@ -566,9 +531,8 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 			Region:      l.GameServer.Region,
 			CountryCode: l.GameServer.CountryCode,
 		},
-		Players:        make([]PlayerInfo, 0),
-		RankPercentile: l.RankPercentile,
-		RatingOrdinal:  l.RatingOrdinal,
+		Players:  make([]PlayerInfo, 0),
+		RatingMu: l.RatingMu,
 	}
 	if l.LobbyType == PrivateLobby || l.LobbyType == UnassignedLobby {
 		// Set the last bytes to FF to hide the ID
@@ -583,15 +547,12 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 				Username:      l.Players[i].Username,
 				DisplayName:   l.Players[i].DisplayName,
 				//EvrID:          l.Players[i].EvrID,
-				Team:           l.Players[i].Team,
-				DiscordID:      l.Players[i].DiscordID,
-				PartyID:        l.Players[i].PartyID,
-				JoinTime:       l.Players[i].JoinTime,
-				RatingMu:       l.Players[i].RatingMu,
-				RatingSigma:    l.Players[i].RatingSigma,
-				RatingOrdinal:  l.Players[i].RatingOrdinal,
-				RankPercentile: l.Players[i].RankPercentile,
-				RatingScore:    l.Players[i].RatingScore,
+				Team:        l.Players[i].Team,
+				DiscordID:   l.Players[i].DiscordID,
+				PartyID:     l.Players[i].PartyID,
+				JoinTime:    l.Players[i].JoinTime,
+				RatingMu:    l.Players[i].RatingMu,
+				RatingSigma: l.Players[i].RatingSigma,
 			})
 		}
 

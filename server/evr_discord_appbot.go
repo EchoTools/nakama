@@ -1871,6 +1871,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				IncludePasswordSetState:        true,
 				IncludeGuildRoles:              true,
 				IncludeAllGuilds:               true,
+				IncludeMatchmakingTier:         true,
 				ShowLoginsSince:                time.Now().Add(-30 * 24 * time.Hour),
 				SendFileOnError:                false,
 			}
@@ -2098,7 +2099,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			isGuildAuditor = isGuildAuditor || isGlobalOperator
-			isGuildEnforcer = isGuildEnforcer || isGuildAuditor
+			isGuildEnforcer = isGuildEnforcer || isGuildAuditor || isGlobalOperator
 
 			loginsSince := time.Now().Add(-30 * 24 * time.Hour)
 			if !isGlobalOperator {
@@ -2106,7 +2107,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			opts := UserProfileRequestOptions{
-				IncludeSuspensionsEmbed:      true,
+				IncludeSuspensionsEmbed:      isGuildEnforcer,
 				IncludePastSuspensions:       isGuildEnforcer,
 				IncludeCurrentMatchesEmbed:   isGuildEnforcer,
 				IncludeVRMLHistoryEmbed:      isGlobalOperator,
@@ -2125,6 +2126,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				IncludePasswordSetState:        isGuildAuditor,
 				IncludeGuildRoles:              isGuildAuditor,
 				IncludeAllGuilds:               isGlobalOperator,
+				IncludeMatchmakingTier:         isGuildAuditor,
 				ShowLoginsSince:                loginsSince,
 				SendFileOnError:                isGlobalOperator,
 			}

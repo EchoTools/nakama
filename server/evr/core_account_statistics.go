@@ -112,7 +112,7 @@ func (g *StatisticsGroup) UnmarshalText(data []byte) error {
 type PlayerStatistics map[StatisticsGroup]Statistics
 
 func (s PlayerStatistics) MarshalJSON() (b []byte, err error) {
-	top := make(map[string]map[string]json.RawMessage)
+	top := make(map[string]any)
 	for g, stats := range s {
 
 		switch g.Mode {
@@ -140,32 +140,7 @@ func (s PlayerStatistics) MarshalJSON() (b []byte, err error) {
 			stats.CalculateFields()
 		}
 
-		// Remove the stats with 0 count
-		statMap := make(map[string]json.RawMessage)
-
-		v := reflect.ValueOf(stats).Elem()
-		t := v.Type()
-		for i := 0; i < v.NumField(); i++ {
-			tag := t.Field(i).Tag.Get("json")
-			s := strings.SplitN(tag, ",", 2)[0]
-
-			// marshal the field
-			if val, ok := v.Field(i).Interface().(*StatisticValue); ok && !v.Field(i).IsNil() {
-				if val.GetCount() > 0 {
-					b, err := val.MarshalJSON()
-					if err != nil {
-						return nil, err
-					}
-
-					// include it if it's not a zero count
-					if !bytes.Contains(b, []byte(`"cnt":0`)) {
-						statMap[s] = b
-					}
-				}
-			}
-		}
-
-		top[g.String()] = statMap
+		top[g.String()] = stats
 	}
 
 	return json.Marshal(top)
@@ -213,64 +188,67 @@ func (s *PlayerStatistics) UnmarshalJSON(data []byte) error {
 }
 
 type ArenaStatistics struct {
-	ArenaLosses                  *StatisticValue `json:"ArenaLosses,omitempty" op:"add" type:"int"`
-	ArenaMVPPercentage           *StatisticValue `json:"ArenaMVPPercentage,omitempty" op:"rep" type:"float"`
-	ArenaMVPs                    *StatisticValue `json:"ArenaMVPs,omitempty" op:"add" type:"int"`
-	ArenaTies                    *StatisticValue `json:"ArenaTies,omitempty" op:"add" type:"int"`
-	ArenaWinPercentage           *StatisticValue `json:"ArenaWinPercentage,omitempty" op:"rep" type:"float"`
-	ArenaWins                    *StatisticValue `json:"ArenaWins,omitempty" op:"add" type:"int"`
-	Assists                      *StatisticValue `json:"Assists,omitempty" op:"add" type:"int"`
-	AssistsPerGame               *StatisticValue `json:"AssistsPerGame,omitempty" op:"avg" type:"float"`
-	AveragePointsPerGame         *StatisticValue `json:"AveragePointsPerGame,omitempty" op:"avg" type:"float"`
-	AveragePossessionTimePerGame *StatisticValue `json:"AveragePossessionTimePerGame,omitempty" op:"avg" type:"float"`
-	AverageTopSpeedPerGame       *StatisticValue `json:"AverageTopSpeedPerGame,omitempty" op:"avg" type:"float"`
-	BlockPercentage              *StatisticValue `json:"BlockPercentage,omitempty" op:"rep" type:"float"`
-	Blocks                       *StatisticValue `json:"Blocks,omitempty" op:"add" type:"int"`
-	BounceGoals                  *StatisticValue `json:"BounceGoals,omitempty" op:"add" type:"int"`
-	BumperShots                  *StatisticValue `json:"BumperShots,omitempty" op:"add" type:"int"`
-	Catches                      *StatisticValue `json:"Catches,omitempty" op:"add" type:"int"`
-	Clears                       *StatisticValue `json:"Clears,omitempty" op:"add" type:"int"`
-	CurrentArenaMVPStreak        *StatisticValue `json:"CurrentArenaMVPStreak,omitempty" op:"add" type:"int"`
-	CurrentArenaWinStreak        *StatisticValue `json:"CurrentArenaWinStreak,omitempty" op:"add" type:"int"`
-	GoalSavePercentage           *StatisticValue `json:"GoalSavePercentage,omitempty" op:"rep" type:"float"`
-	GoalScorePercentage          *StatisticValue `json:"GoalScorePercentage,omitempty" op:"rep" type:"float"`
-	Goals                        *StatisticValue `json:"Goals,omitempty" op:"add" type:"int"`
-	GoalsPerGame                 *StatisticValue `json:"GoalsPerGame,omitempty" op:"avg" type:"float"`
-	HatTricks                    *StatisticValue `json:"HatTricks,omitempty" op:"add" type:"int"`
-	HeadbuttGoals                *StatisticValue `json:"HeadbuttGoals,omitempty" op:"add" type:"int"`
-	HighestArenaMVPStreak        *StatisticValue `json:"HighestArenaMVPStreak,omitempty" op:"max" type:"int"`
-	HighestArenaWinStreak        *StatisticValue `json:"HighestArenaWinStreak,omitempty" op:"max" type:"int"`
-	HighestPoints                *StatisticValue `json:"HighestPoints,omitempty" op:"max" type:"int"`
-	HighestSaves                 *StatisticValue `json:"HighestSaves,omitempty" op:"max" type:"int"`
-	HighestStuns                 *StatisticValue `json:"HighestStuns,omitempty" op:"max" type:"int"`
-	Interceptions                *StatisticValue `json:"Interceptions,omitempty" op:"add" type:"int"`
-	JoustsWon                    *StatisticValue `json:"JoustsWon,omitempty" op:"add" type:"int"`
-	Level                        *StatisticValue `json:"Level,omitempty" op:"add" type:"int"`
-	OnePointGoals                *StatisticValue `json:"OnePointGoals,omitempty" op:"add" type:"int"`
-	Passes                       *StatisticValue `json:"Passes,omitempty" op:"add" type:"int"`
-	Points                       *StatisticValue `json:"Points,omitempty" op:"add" type:"int"`
-	PossessionTime               *StatisticValue `json:"PossessionTime,omitempty" op:"add" type:"float"`
-	PunchesReceived              *StatisticValue `json:"PunchesReceived,omitempty" op:"add" type:"int"`
-	Saves                        *StatisticValue `json:"Saves,omitempty" op:"add" type:"int"`
-	SavesPerGame                 *StatisticValue `json:"SavesPerGame,omitempty" op:"avg" type:"float"`
-	ShotsOnGoal                  *StatisticValue `json:"ShotsOnGoal,omitempty" op:"add" type:"int"`
-	ShotsOnGoalAgainst           *StatisticValue `json:"ShotsOnGoalAgainst,omitempty" op:"add" type:"int"`
-	Steals                       *StatisticValue `json:"Steals,omitempty" op:"add" type:"int"`
-	StunPercentage               *StatisticValue `json:"StunPercentage,omitempty" op:"rep" type:"float"`
-	Stuns                        *StatisticValue `json:"Stuns,omitempty" op:"add" type:"int"`
-	StunsPerGame                 *StatisticValue `json:"StunsPerGame,omitempty" op:"avg" type:"float"`
-	ThreePointGoals              *StatisticValue `json:"ThreePointGoals,omitempty" op:"add" type:"int"`
-	TopSpeedsTotal               *StatisticValue `json:"TopSpeedsTotal,omitempty" op:"add" type:"float"`
-	TwoPointGoals                *StatisticValue `json:"TwoPointGoals,omitempty" op:"add" type:"int"`
-	XP                           *StatisticValue `json:"XP,omitempty" op:"add" type:"float"`
-	GamesPlayed                  *StatisticValue `json:"GamesPlayed,omitempty" op:"add" type:"int"`
-	SkillRatingMu                *StatisticValue `json:"SkillRatingMu,omitempty" op:"rep" type:"float"`
-	SkillRatingSigma             *StatisticValue `json:"SkillRatingSigma,omitempty" op:"rep" type:"float"`
-	SkillRatingOrdinal           *StatisticValue `json:"SkillRatingOrdinal,omitempty" op:"rep" type:"float"`
-	RankPercentile               *StatisticValue `json:"RankPercentile,omitempty" op:"rep" type:"float"`
-	LobbyTime                    *StatisticValue `json:"LobbyTime,omitempty" op:"rep" type:"float"`
-	EarlyQuits                   *StatisticValue `json:"EarlyQuits,omitempty" op:"add" type:"int"`
-	EarlyQuitPercentage          *StatisticValue `json:"EarlyQuitPercentage,omitempty" op:"rep" type:"float"`
+	ArenaLosses                  *StatisticValue `json:"ArenaLosses,omitempty" op:"add,omitzero" type:"int"`
+	ArenaMVPPercentage           *StatisticValue `json:"ArenaMVPPercentage,omitempty" op:"rep,omitzero" type:"float"`
+	ArenaMVPs                    *StatisticValue `json:"ArenaMVPs,omitempty" op:"add,omitzero" type:"int"`
+	ArenaTies                    *StatisticValue `json:"ArenaTies,omitempty" op:"add,omitzero" type:"int"`
+	ArenaWinPercentage           *StatisticValue `json:"ArenaWinPercentage,omitempty" op:"rep,omitzero" type:"float"`
+	ArenaWins                    *StatisticValue `json:"ArenaWins,omitempty" op:"add,omitzero" type:"int"`
+	Assists                      *StatisticValue `json:"Assists,omitempty" op:"add,omitzero" type:"int"`
+	AssistsPerGame               *StatisticValue `json:"AssistsPerGame,omitempty" op:"avg,omitzero" type:"float"`
+	AveragePointsPerGame         *StatisticValue `json:"AveragePointsPerGame,omitempty" op:"avg,omitzero" type:"float"`
+	AveragePossessionTimePerGame *StatisticValue `json:"AveragePossessionTimePerGame,omitempty" op:"avg,omitzero" type:"float"`
+	AverageTopSpeedPerGame       *StatisticValue `json:"AverageTopSpeedPerGame,omitempty" op:"avg,omitzero" type:"float"`
+	BlockPercentage              *StatisticValue `json:"BlockPercentage,omitempty" op:"rep,omitzero" type:"float"`
+	Blocks                       *StatisticValue `json:"Blocks,omitempty" op:"add,omitzero" type:"int"`
+	BounceGoals                  *StatisticValue `json:"BounceGoals,omitempty" op:"add,omitzero" type:"int"`
+	BumperShots                  *StatisticValue `json:"BumperShots,omitempty" op:"add,omitzero" type:"int"`
+	Catches                      *StatisticValue `json:"Catches,omitempty" op:"add,omitzero" type:"int"`
+	Clears                       *StatisticValue `json:"Clears,omitempty" op:"add,omitzero" type:"int"`
+	CurrentArenaMVPStreak        *StatisticValue `json:"CurrentArenaMVPStreak,omitempty" op:"add,omitzero" type:"int"`
+	CurrentArenaWinStreak        *StatisticValue `json:"CurrentArenaWinStreak,omitempty" op:"add,omitzero" type:"int"`
+	GoalSavePercentage           *StatisticValue `json:"GoalSavePercentage,omitempty" op:"rep,omitzero" type:"float"`
+	GoalScorePercentage          *StatisticValue `json:"GoalScorePercentage,omitempty" op:"rep,omitzero" type:"float"`
+	Goals                        *StatisticValue `json:"Goals,omitempty" op:"add,omitzero" type:"int"`
+	GoalsPerGame                 *StatisticValue `json:"GoalsPerGame,omitempty" op:"avg,omitzero" type:"float"`
+	HatTricks                    *StatisticValue `json:"HatTricks,omitempty" op:"add,omitzero" type:"int"`
+	HeadbuttGoals                *StatisticValue `json:"HeadbuttGoals,omitempty" op:"add,omitzero" type:"int"`
+	HighestArenaMVPStreak        *StatisticValue `json:"HighestArenaMVPStreak,omitempty" op:"max,omitzero" type:"int"`
+	HighestArenaWinStreak        *StatisticValue `json:"HighestArenaWinStreak,omitempty" op:"max,omitzero" type:"int"`
+	HighestPoints                *StatisticValue `json:"HighestPoints,omitempty" op:"max,omitzero" type:"int"`
+	HighestSaves                 *StatisticValue `json:"HighestSaves,omitempty" op:"max,omitzero" type:"int"`
+	HighestStuns                 *StatisticValue `json:"HighestStuns,omitempty" op:"max,omitzero" type:"int"`
+	Interceptions                *StatisticValue `json:"Interceptions,omitempty" op:"add,omitzero" type:"int"`
+	JoustsWon                    *StatisticValue `json:"JoustsWon,omitempty" op:"add,omitzero" type:"int"`
+	Level                        *StatisticValue `json:"Level,omitempty" op:"add,omitzero" type:"int"`
+	OnePointGoals                *StatisticValue `json:"OnePointGoals,omitempty" op:"add,omitzero" type:"int"`
+	Passes                       *StatisticValue `json:"Passes,omitempty" op:"add,omitzero" type:"int"`
+	Points                       *StatisticValue `json:"Points,omitempty" op:"add,omitzero" type:"int"`
+	PossessionTime               *StatisticValue `json:"PossessionTime,omitempty" op:"add,omitzero" type:"float"`
+	PunchesReceived              *StatisticValue `json:"PunchesReceived,omitempty" op:"add,omitzero" type:"int"`
+	Saves                        *StatisticValue `json:"Saves,omitempty" op:"add,omitzero" type:"int"`
+	SavesPerGame                 *StatisticValue `json:"SavesPerGame,omitempty" op:"avg,omitzero" type:"float"`
+	ShotsOnGoal                  *StatisticValue `json:"ShotsOnGoal,omitempty" op:"add,omitzero" type:"int"`
+	ShotsOnGoalAgainst           *StatisticValue `json:"ShotsOnGoalAgainst,omitempty" op:"add,omitzero" type:"int"`
+	Steals                       *StatisticValue `json:"Steals,omitempty" op:"add,omitzero" type:"int"`
+	StunPercentage               *StatisticValue `json:"StunPercentage,omitempty" op:"rep,omitzero" type:"float"`
+	Stuns                        *StatisticValue `json:"Stuns,omitempty" op:"add,omitzero" type:"int"`
+	StunsPerGame                 *StatisticValue `json:"StunsPerGame,omitempty" op:"avg,omitzero" type:"float"`
+	ThreePointGoals              *StatisticValue `json:"ThreePointGoals,omitempty" op:"add,omitzero" type:"int"`
+	TopSpeedsTotal               *StatisticValue `json:"TopSpeedsTotal,omitempty" op:"add,omitzero" type:"float"`
+	TwoPointGoals                *StatisticValue `json:"TwoPointGoals,omitempty" op:"add,omitzero" type:"int"`
+	XP                           *StatisticValue `json:"XP,omitempty" op:"add,omitzero" type:"float"`
+	GamesPlayed                  *StatisticValue `json:"GamesPlayed,omitempty" op:"add,omitzero" type:"int"`
+	SkillRatingMu                *StatisticValue `json:"SkillRatingMu,omitempty" op:"rep,omitzero" type:"float"`
+	SkillRatingSigma             *StatisticValue `json:"SkillRatingSigma,omitempty" op:"rep,omitzero" type:"float"`
+	SkillRatingOrdinal           *StatisticValue `json:"SkillRatingOrdinal,omitempty" op:"rep,omitzero" type:"float"`
+	LobbyTime                    *StatisticValue `json:"LobbyTime,omitempty" op:"rep,omitzero" type:"float"`
+	EarlyQuits                   *StatisticValue `json:"EarlyQuits,omitempty" op:"add,omitzero" type:"int"`
+	EarlyQuitPercentage          *StatisticValue `json:"EarlyQuitPercentage,omitempty" op:"rep,omitzero" type:"float"`
+}
+
+func (s *ArenaStatistics) MarshalJSON() ([]byte, error) {
+	return marshalStatisticsStruct(s)
 }
 
 func (s *ArenaStatistics) CalculateFields() {
@@ -428,43 +406,46 @@ func (s *ArenaStatistics) CalculateFields() {
 }
 
 type CombatStatistics struct {
-	CombatAssists                      *StatisticValue `json:"CombatAssists,omitempty" op:"add" type:"int"`
-	CombatAverageEliminationDeathRatio *StatisticValue `json:"CombatAverageEliminationDeathRatio" op:"rep" type:"float"`
-	CombatBestEliminationStreak        *StatisticValue `json:"CombatBestEliminationStreak,omitempty" op:"add" type:"int"`
-	CombatDamage                       *StatisticValue `json:"CombatDamage,omitempty" op:"add" type:"float"`
-	CombatDamageAbsorbed               *StatisticValue `json:"CombatDamageAbsorbed,omitempty" op:"add" type:"float"`
-	CombatDamageTaken                  *StatisticValue `json:"CombatDamageTaken,omitempty" op:"add" type:"float"`
-	CombatDeaths                       *StatisticValue `json:"CombatDeaths,omitempty" op:"add" type:"int"`
-	CombatEliminations                 *StatisticValue `json:"CombatEliminations,omitempty" op:"add" type:"int"`
-	CombatHeadshotKills                *StatisticValue `json:"CombatHeadshotKills,omitempty" op:"add" type:"int"`
-	CombatHealing                      *StatisticValue `json:"CombatHealing,omitempty" op:"add" type:"float"`
-	CombatHillCaptures                 *StatisticValue `json:"CombatHillCaptures,omitempty" op:"add" type:"int"`
-	CombatHillDefends                  *StatisticValue `json:"CombatHillDefends,omitempty" op:"add" type:"int"`
-	CombatKills                        *StatisticValue `json:"CombatKills,omitempty" op:"add" type:"int"`
-	CombatMVPs                         *StatisticValue `json:"CombatMVPs,omitempty" op:"add" type:"int"`
-	CombatObjectiveDamage              *StatisticValue `json:"CombatObjectiveDamage,omitempty" op:"add" type:"float"`
-	CombatObjectiveEliminations        *StatisticValue `json:"CombatObjectiveEliminations,omitempty" op:"add" type:"int"`
-	CombatObjectiveTime                *StatisticValue `json:"CombatObjectiveTime,omitempty" op:"add" type:"float"`
-	CombatPayloadGamesPlayed           *StatisticValue `json:"CombatPayloadGamesPlayed,omitempty" op:"add" type:"int"`
-	CombatPayloadWinPercentage         *StatisticValue `json:"CombatPayloadWinPercentage,omitempty" op:"rep" type:"float"`
-	CombatPayloadWins                  *StatisticValue `json:"CombatPayloadWins,omitempty" op:"add" type:"int"`
-	CombatPointCaptureGamesPlayed      *StatisticValue `json:"CombatPointCaptureGamesPlayed,omitempty" op:"add" type:"int"`
-	CombatPointCaptureWinPercentage    *StatisticValue `json:"CombatPointCaptureWinPercentage,omitempty" op:"rep" type:"float"`
-	CombatPointCaptureWins             *StatisticValue `json:"CombatPointCaptureWins,omitempty" op:"add" type:"int"`
-	CombatSoloKills                    *StatisticValue `json:"CombatSoloKills,omitempty" op:"add" type:"int"`
-	CombatStuns                        *StatisticValue `json:"CombatStuns,omitempty" op:"add" type:"int"`
-	CombatTeammateHealing              *StatisticValue `json:"CombatTeammateHealing,omitempty" op:"add" type:"float"`
-	CombatWins                         *StatisticValue `json:"CombatWins,omitempty" op:"add" type:"int"`
-	CombatLosses                       *StatisticValue `json:"CombatLosses,omitempty" op:"add" type:"int"`
-	CombatWinPercentage                *StatisticValue `json:"CombatWinPercentage,omitempty" op:"rep" type:"float"`
-	Level                              *StatisticValue `json:"Level,omitempty" op:"add" type:"int"`
-	XP                                 *StatisticValue `json:"XP,omitempty" op:"rep" type:"float"`
-	GamesPlayed                        *StatisticValue `json:"GamesPlayed,omitempty" op:"add" type:"int"`
-	SkillRatingMu                      *StatisticValue `json:"SkillRatingMu,omitempty" op:"rep" type:"float"`
-	SkillRatingSigma                   *StatisticValue `json:"SkillRatingSigma,omitempty" op:"rep" type:"float"`
-	SkillRatingOrdinal                 *StatisticValue `json:"SkillRatingOrdinal,omitempty" op:"rep" type:"float"`
-	RankPercentile                     *StatisticValue `json:"RankPercentile,omitempty" op:"rep" type:"float"`
-	LobbyTime                          *StatisticValue `json:"LobbyTime,omitempty" op:"rep" type:"float"`
+	CombatAssists                      *StatisticValue `json:"CombatAssists,omitempty" op:"add,omitzero" type:"int"`
+	CombatAverageEliminationDeathRatio *StatisticValue `json:"CombatAverageEliminationDeathRatio" op:"rep,omitzero" type:"float"`
+	CombatBestEliminationStreak        *StatisticValue `json:"CombatBestEliminationStreak,omitempty" op:"add,omitzero" type:"int"`
+	CombatDamage                       *StatisticValue `json:"CombatDamage,omitempty" op:"add,omitzero" type:"float"`
+	CombatDamageAbsorbed               *StatisticValue `json:"CombatDamageAbsorbed,omitempty" op:"add,omitzero" type:"float"`
+	CombatDamageTaken                  *StatisticValue `json:"CombatDamageTaken,omitempty" op:"add,omitzero" type:"float"`
+	CombatDeaths                       *StatisticValue `json:"CombatDeaths,omitempty" op:"add,omitzero" type:"int"`
+	CombatEliminations                 *StatisticValue `json:"CombatEliminations,omitempty" op:"add,omitzero" type:"int"`
+	CombatHeadshotKills                *StatisticValue `json:"CombatHeadshotKills,omitempty" op:"add,omitzero" type:"int"`
+	CombatHealing                      *StatisticValue `json:"CombatHealing,omitempty" op:"add,omitzero" type:"float"`
+	CombatHillCaptures                 *StatisticValue `json:"CombatHillCaptures,omitempty" op:"add,omitzero" type:"int"`
+	CombatHillDefends                  *StatisticValue `json:"CombatHillDefends,omitempty" op:"add,omitzero" type:"int"`
+	CombatKills                        *StatisticValue `json:"CombatKills,omitempty" op:"add,omitzero" type:"int"`
+	CombatMVPs                         *StatisticValue `json:"CombatMVPs,omitempty" op:"add,omitzero" type:"int"`
+	CombatObjectiveDamage              *StatisticValue `json:"CombatObjectiveDamage,omitempty" op:"add,omitzero" type:"float"`
+	CombatObjectiveEliminations        *StatisticValue `json:"CombatObjectiveEliminations,omitempty" op:"add,omitzero" type:"int"`
+	CombatObjectiveTime                *StatisticValue `json:"CombatObjectiveTime,omitempty" op:"add,omitzero" type:"float"`
+	CombatPayloadGamesPlayed           *StatisticValue `json:"CombatPayloadGamesPlayed,omitempty" op:"add,omitzero" type:"int"`
+	CombatPayloadWinPercentage         *StatisticValue `json:"CombatPayloadWinPercentage,omitempty" op:"rep,omitzero" type:"float"`
+	CombatPayloadWins                  *StatisticValue `json:"CombatPayloadWins,omitempty" op:"add,omitzero" type:"int"`
+	CombatPointCaptureGamesPlayed      *StatisticValue `json:"CombatPointCaptureGamesPlayed,omitempty" op:"add,omitzero" type:"int"`
+	CombatPointCaptureWinPercentage    *StatisticValue `json:"CombatPointCaptureWinPercentage,omitempty" op:"rep,omitzero" type:"float"`
+	CombatPointCaptureWins             *StatisticValue `json:"CombatPointCaptureWins,omitempty" op:"add,omitzero" type:"int"`
+	CombatSoloKills                    *StatisticValue `json:"CombatSoloKills,omitempty" op:"add,omitzero" type:"int"`
+	CombatStuns                        *StatisticValue `json:"CombatStuns,omitempty" op:"add,omitzero" type:"int"`
+	CombatTeammateHealing              *StatisticValue `json:"CombatTeammateHealing,omitempty" op:"add,omitzero" type:"float"`
+	CombatWins                         *StatisticValue `json:"CombatWins,omitempty" op:"add,omitzero" type:"int"`
+	CombatLosses                       *StatisticValue `json:"CombatLosses,omitempty" op:"add,omitzero" type:"int"`
+	CombatWinPercentage                *StatisticValue `json:"CombatWinPercentage,omitempty" op:"rep,omitzero" type:"float"`
+	Level                              *StatisticValue `json:"Level,omitempty" op:"add,omitzero" type:"int"`
+	XP                                 *StatisticValue `json:"XP,omitempty" op:"rep,omitzero" type:"float"`
+	GamesPlayed                        *StatisticValue `json:"GamesPlayed,omitempty" op:"add,omitzero" type:"int"`
+	SkillRatingMu                      *StatisticValue `json:"SkillRatingMu,omitempty" op:"rep,omitzero" type:"float"`
+	SkillRatingSigma                   *StatisticValue `json:"SkillRatingSigma,omitempty" op:"rep,omitzero" type:"float"`
+	SkillRatingOrdinal                 *StatisticValue `json:"SkillRatingOrdinal,omitempty" op:"rep,omitzero" type:"float"`
+	LobbyTime                          *StatisticValue `json:"LobbyTime,omitempty" op:"rep,omitzero" type:"float"`
+}
+
+func (s *CombatStatistics) MarshalJSON() ([]byte, error) {
+	return marshalStatisticsStruct(s)
 }
 
 func (s *CombatStatistics) CalculateFields() {
@@ -514,13 +495,48 @@ func (s *CombatStatistics) CalculateFields() {
 }
 
 type GenericStats struct { // Privates and Social Lobby
-	LobbyTime *StatisticValue `json:"LobbyTime,omitempty" op:"add" type:"float"`
+	LobbyTime *StatisticValue `json:"LobbyTime,omitempty" op:"add,omitzero" type:"float"`
+}
+
+func (s *GenericStats) MarshalJSON() ([]byte, error) {
+	return marshalStatisticsStruct(s)
 }
 
 func (GenericStats) CalculateFields() {}
 
 func statisticMarshalJSON[T int64 | float64 | float32](op string, cnt int64, val T) ([]byte, error) {
-	return []byte(fmt.Sprintf("{\"val\":%v,\"op\":\"%s\",\"cnt\":%d}", float32(val), op, cnt)), nil
+	return fmt.Appendf(nil, "{\"cnt\":%d,\"op\":\"%s\",\"val\":%v}", cnt, op, val), nil
+}
+
+func marshalStatisticsStruct(stats any) ([]byte, error) {
+	statMap := make(map[string]json.RawMessage)
+
+	v := reflect.ValueOf(stats).Elem()
+	t := v.Type()
+	for i := 0; i < v.NumField(); i++ {
+		tag := t.Field(i).Tag.Get("json")
+		s := strings.SplitN(tag, ",", 2)[0]
+
+		// Get op from tag
+		opTag := t.Field(i).Tag.Get("op")
+		op, _, _ := strings.Cut(opTag, ",")
+
+		// marshal the field
+		if val, ok := v.Field(i).Interface().(*StatisticValue); ok && !v.Field(i).IsNil() {
+			if val.GetCount() > 0 {
+				b, err := val.MarshalJSONWithOp(op)
+				if err != nil {
+					return nil, err
+				}
+
+				// include it if it's not a zero count
+				if !bytes.Contains(b, []byte(`"cnt":0`)) {
+					statMap[s] = b
+				}
+			}
+		}
+	}
+	return json.Marshal(statMap)
 }
 
 type Statistics interface {
@@ -544,7 +560,7 @@ func (s *StatisticValue) SetCount(c int64) {
 }
 
 func (s *StatisticValue) GetName() string {
-	if t := reflect.TypeOf(s); t != nil {
+	if t := reflect.TypeFor[*StatisticValue](); t != nil {
 		if f, ok := t.Elem().FieldByName("name"); ok {
 			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
 			return name
@@ -564,15 +580,18 @@ func (s *StatisticValue) SetValue(v float64) {
 }
 
 func (s *StatisticValue) Operator() string {
-	if t := reflect.TypeOf(s); t != nil {
+	if t := reflect.TypeFor[*StatisticValue](); t != nil {
 		if f, ok := t.Elem().FieldByName("op"); ok {
-			return f.Tag.Get("op")
+			opTag := f.Tag.Get("op")
+			op, _, _ := strings.Cut(opTag, ",")
+			return op
 		}
 	}
 	return ""
 }
+
 func (s *StatisticValue) ValueType() string {
-	if t := reflect.TypeOf(s); t != nil {
+	if t := reflect.TypeFor[*StatisticValue](); t != nil {
 		if f, ok := t.Elem().FieldByName("type"); ok {
 			return f.Tag.Get("type")
 		}
@@ -582,22 +601,16 @@ func (s *StatisticValue) ValueType() string {
 
 func (s *StatisticValue) MarshalJSON() ([]byte, error) {
 	// get the value of op field tag
-	var op, typ string
-	if t := reflect.TypeOf(s); t != nil {
-		if f, ok := t.Elem().FieldByName("op"); ok {
-			op = f.Tag.Get("op")
-		}
-		if f, ok := t.Elem().FieldByName("type"); ok {
-			typ = f.Tag.Get("type")
-		}
-	}
-	switch typ {
+	op := s.Operator()
+	return s.MarshalJSONWithOp(op)
+}
+
+func (s *StatisticValue) MarshalJSONWithOp(op string) ([]byte, error) {
+	switch s.ValueType() {
 	case "int":
 		return statisticMarshalJSON(op, s.Count, int64(s.Value))
-	case "float":
-		return statisticMarshalJSON(op, s.Count, float32(s.Value))
 	default:
-		return statisticMarshalJSON(op, s.Count, float32(s.Value))
+		return statisticMarshalJSON(op, s.Count, s.Value)
 	}
 }
 

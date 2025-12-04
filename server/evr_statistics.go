@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -21,7 +23,6 @@ const (
 	TabletStatisticFloatValue
 
 	GamesPlayedStatisticID        = "GamesPlayed"
-	RankPercentileStatisticID     = "RankPercentile"
 	SkillRatingMuStatisticID      = "SkillRatingMu"
 	SkillRatingSigmaStatisticID   = "SkillRatingSigma"
 	SkillRatingOrdinalStatisticID = "SkillRatingOrdinal"
@@ -117,11 +118,11 @@ func Float64ToScore(f float64) (int64, int64, error) {
 		// Use range [0, scoreOffset-1] for all negative values
 		score := scoreOffset - 1 - intPart // More negative = smaller score
 
-		// For exact integers (fracPart == 0), subscore should be 0
+		// For exact integers (fracPart == 0), subscore should be max (fracScale)
 		// For fractional values, invert the fractional part for proper ordering
 		var subscore int64
 		if fracPart == 0.0 {
-			subscore = 0
+			subscore = int64(fracScale)
 		} else {
 			subscore = int64((1.0 - fracPart) * float64(fracScale-1))
 		}
@@ -159,12 +160,17 @@ func ScoreToFloat64(score int64, subscore int64) (float64, error) {
 	if score < 0 {
 		return 0, fmt.Errorf("invalid score: %d (must be non-negative)", score)
 	}
-	if subscore < 0 || subscore >= int64(LeaderboardScoreScalingFactor) {
+	if subscore < 0 || subscore > int64(LeaderboardScoreScalingFactor) {
 		return 0, fmt.Errorf("invalid subscore: %d", subscore)
 	}
 
 	const fracScale = LeaderboardScoreScalingFactor
 	const scoreOffset = int64(1e15)
+
+	// Fix for corrupted scores due to 'incr' operator usage
+	if score >= 2*scoreOffset {
+		score = scoreOffset + (score % scoreOffset)
+	}
 
 	if score < scoreOffset {
 		// Negative number: score in range [0, scoreOffset)
@@ -172,7 +178,7 @@ func ScoreToFloat64(score int64, subscore int64) (float64, error) {
 
 		// Handle exact integers vs fractional values
 		var fracPart float64
-		if subscore == 0 {
+		if subscore == int64(fracScale) {
 			fracPart = 0.0
 		} else {
 			fracPart = 1.0 - (float64(subscore) / float64(fracScale-1)) // Uninvert the fractional part
@@ -245,87 +251,6 @@ func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, userID,
 		*ptr = val
 	}
 	return NewRating(0, mu, sigma), nil
-}
-
-func MatchmakingRatingStore(ctx context.Context, nk runtime.NakamaModule, userID, discordID, displayName, groupID string, mode evr.Symbol, r types.Rating) error {
-
-	scores := map[string]float64{
-		StatisticBoardID(groupID, mode, SkillRatingSigmaStatisticID, "alltime"): r.Sigma,
-		StatisticBoardID(groupID, mode, SkillRatingMuStatisticID, "alltime"):    r.Mu,
-	}
-	metadata := map[string]any{
-		"discord_id": discordID,
-	}
-	for id, value := range scores {
-		score, subscore, err := Float64ToScore(value)
-		if err != nil {
-			return fmt.Errorf("failed to convert float64 to int64 pair: %w", err)
-		}
-
-		// Write the record
-		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, subscore, metadata, nil); err != nil {
-			// Try to create the leaderboard
-			err = nk.LeaderboardCreate(ctx, id, true, "desc", "set", "", nil, true)
-			if err != nil {
-				return fmt.Errorf("Leaderboard create error: %w", err)
-			} else if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, subscore, metadata, nil); err != nil {
-				return fmt.Errorf("Leaderboard record write error: %w", err)
-			}
-		}
-	}
-
-	return nil
-}
-
-func MatchmakingRankPercentileLoad(ctx context.Context, nk runtime.NakamaModule, userID, groupID string, mode evr.Symbol) (percentile float64, err error) {
-
-	boardID := StatisticBoardID(groupID, mode, RankPercentileStatisticID, "alltime")
-
-	_, records, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 10000, "", 0)
-	if err != nil {
-		return ServiceSettings().Matchmaking.RankPercentile.Default, nil
-	}
-
-	if len(records) == 0 {
-		return ServiceSettings().Matchmaking.RankPercentile.Default, nil
-	}
-
-	val, err := ScoreToFloat64(records[0].Score, records[0].Subscore)
-	if err != nil {
-		return ServiceSettings().Matchmaking.RankPercentile.Default, fmt.Errorf("failed to decode rank percentile score: %w", err)
-	}
-	return val, nil
-}
-
-func MatchmakingRankPercentileStore(ctx context.Context, nk runtime.NakamaModule, userID, username, groupID string, mode evr.Symbol, percentile float64) error {
-
-	id := StatisticBoardID(groupID, mode, RankPercentileStatisticID, "alltime")
-
-	score, subscore, err := Float64ToScore(percentile)
-	if err != nil {
-		return fmt.Errorf("failed to convert float64 to int64 pair: %w", err)
-	}
-
-	if score == 0 && subscore == 0 {
-		return nil
-	}
-	// Write the record
-	if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subscore, nil, nil); err != nil {
-		// Try to create the leaderboard
-		err = nk.LeaderboardCreate(ctx, id, true, "asc", "set", "", nil, true)
-
-		if err != nil {
-			return fmt.Errorf("Leaderboard create error: %w", err)
-		} else {
-			// Retry the write
-			_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subscore, nil, nil)
-			if err != nil {
-				return fmt.Errorf("Leaderboard record write error: %w", err)
-			}
-		}
-	}
-
-	return nil
 }
 
 func StatisticBoardID(groupID string, mode evr.Symbol, statName string, resetSchedule evr.ResetSchedule) string {
@@ -555,4 +480,75 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 	// Integrate the boardMap values into the playerStatistics
 
 	return playerStatistics, boardMap, nil
+}
+
+// AccumulateLeaderboardStat adds a value to a leaderboard statistic using a Read-Modify-Write pattern.
+// This is necessary because the leaderboard uses a float64 encoding that is not compatible with the atomic 'incr' operator.
+func AccumulateLeaderboardStat(ctx context.Context, nk runtime.NakamaModule, userID, username, groupID string, mode evr.Symbol, statID string, value float64) error {
+	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
+	if value == 0 {
+		return nil
+	}
+
+	for _, period := range resetSchedules {
+		id := StatisticBoardID(groupID, mode, statID, period)
+
+		err := UpdateLeaderboardStat(ctx, nk, id, userID, username, func(currentScore float64, currentMetadata map[string]any) (float64, map[string]any, error) {
+			return currentScore + value, nil, nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// UpdateLeaderboardStat updates a leaderboard statistic using a Read-Modify-Write pattern with a callback.
+func UpdateLeaderboardStat(ctx context.Context, nk runtime.NakamaModule, leaderboardID, userID, username string, updateFn func(currentScore float64, currentMetadata map[string]any) (float64, map[string]any, error)) error {
+	var currentScore float64
+	var currentMetadata map[string]any
+
+	_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, leaderboardID, []string{userID}, 1, "", 0)
+	if err != nil {
+		if !errors.Is(err, runtime.ErrLeaderboardNotFound) && !errors.Is(err, ErrLeaderboardNotFound) {
+			return fmt.Errorf("failed to list leaderboard records: %w", err)
+		}
+	} else if len(ownerRecords) > 0 {
+		currentScore, err = ScoreToFloat64(ownerRecords[0].Score, ownerRecords[0].Subscore)
+		if err != nil {
+			return fmt.Errorf("failed to decode score: %w", err)
+		}
+		if ownerRecords[0].Metadata != "" {
+			if err := json.Unmarshal([]byte(ownerRecords[0].Metadata), &currentMetadata); err != nil {
+				return fmt.Errorf("failed to unmarshal metadata: %w", err)
+			}
+		}
+	}
+
+	newScore, newMetadata, err := updateFn(currentScore, currentMetadata)
+	if err != nil {
+		return err
+	}
+
+	score, subscore, err := Float64ToScore(newScore)
+	if err != nil {
+		return fmt.Errorf("invalid score value: %w", err)
+	}
+
+	op := 2 // SET
+	// Write the record
+	if _, err := nk.LeaderboardRecordWrite(ctx, leaderboardID, userID, username, score, subscore, newMetadata, &op); err != nil {
+		// Try to create the leaderboard
+		_, _, _, resetSchedule, err := ParseStatisticBoardID(leaderboardID)
+		if err != nil {
+			return fmt.Errorf("failed to parse leaderboard ID: %w", err)
+		}
+
+		if err = nk.LeaderboardCreate(ctx, leaderboardID, true, "desc", "set", ResetScheduleToCron(evr.ResetSchedule(resetSchedule)), nil, true); err != nil {
+			return fmt.Errorf("Leaderboard create error: %w", err)
+		} else if _, err := nk.LeaderboardRecordWrite(ctx, leaderboardID, userID, username, score, subscore, newMetadata, &op); err != nil {
+			return fmt.Errorf("Leaderboard record write error: %w", err)
+		}
+	}
+	return nil
 }

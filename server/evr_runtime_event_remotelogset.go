@@ -115,6 +115,9 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 	// Collect the updates to the match's game metadata (e.g. game clock)
 	updates := MapOf[uuid.UUID, *MatchGameStateUpdate]{}
 
+	// Collect the post-match messages for processing
+	postMatchMessages := make(map[uuid.UUID][]evr.RemoteLog)
+
 	for _, e := range entries {
 		logger := logger.WithField("message_type", fmt.Sprintf("%T", e))
 
@@ -390,40 +393,15 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 		case *evr.RemoteLogPostMatchMatchStats:
 			update, _ = updates.LoadOrStore(msg.SessionUUID(), &MatchGameStateUpdate{})
 			update.MatchOver = true
-			// Increment the completed matches for the player
-			if err := s.incrementCompletedMatches(ctx, logger, nk, sessionRegistry, s.UserID, s.SessionID); err != nil {
-				logger.WithField("error", err).Warn("Failed to increment completed matches")
-				continue
-			}
+			postMatchMessages[msg.SessionUUID()] = append(postMatchMessages[msg.SessionUUID()], msg)
 
 		case *evr.RemoteLogPostMatchTypeStats:
 			update, _ = updates.LoadOrStore(msg.SessionUUID(), &MatchGameStateUpdate{})
 			update.MatchOver = true
-			// Process the post match stats into the player's statistics
-			if err := s.processPostMatchTypeStats(ctx, logger, db, nk, sessionRegistry, statisticsQueue, msg); err != nil {
-				logger.WithFields(map[string]any{
-					"error": err,
-					"msg":   msg,
-				}).Warn("Failed to process post match type stats")
+			postMatchMessages[msg.SessionUUID()] = append(postMatchMessages[msg.SessionUUID()], msg)
 
-				continue
-			}
 		case *evr.RemoteLogPostMatchMatchTypeXPLevel:
-			// This provides the XP gain from the match
-			/*
-							{
-				    "message": "process post-match match type xp level",
-				    "message_type": "POST_MATCH_MATCH_TYPE_XP_LEVEL",
-				    "CurrentLevel": 2,
-				    "CurrentXP": 1000,
-				    "PreviousLevel": 1,
-				    "PreviousXP": 0,
-				    "RemainingXP": 500,
-				    "[session][uuid]": "{8DFB17C0-4CF3-481A-B898-F090343A5DA1}",
-				    "match_type": "Echo_Arena",
-				    "userid": "OVR-ORG-8185598851511174"
-				  },
-			*/
+			postMatchMessages[msg.SessionUUID()] = append(postMatchMessages[msg.SessionUUID()], msg)
 		case *evr.RemoteLogLoadStats:
 
 			if msg.ClientLoadTime > 45 {
@@ -461,6 +439,17 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
+	for sessionUUID, msgs := range postMatchMessages {
+		matchID, err := NewMatchID(sessionUUID, s.Node)
+		if err != nil {
+			logger.Warn("Failed to create match ID for post match processing")
+			continue
+		}
+		if err := s.processPostMatchMessages(ctx, logger, db, nk, sessionRegistry, statisticsQueue, matchID, msgs); err != nil {
+			logger.WithField("error", err).Warn("Failed to process post match messages")
+		}
+	}
+
 	updates.Range(func(key uuid.UUID, value *MatchGameStateUpdate) bool {
 		matchRegistry.SendData(key, s.Node, uuid.FromStringOrNil(s.UserID), uuid.FromStringOrNil(s.SessionID), s.Username, s.Node, OpCodeMatchGameStateUpdate, value.Bytes(), false, time.Now().Unix())
 		return true
@@ -469,111 +458,206 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 	return nil
 }
 
-func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, userID, sessionID string) error {
+func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, sessionRegistry SessionRegistry, userID, sessionID string) error {
 	// Decrease the early quitter count for the player
 	eqconfig := NewEarlyQuitConfig()
 	if err := StorableRead(ctx, nk, userID, eqconfig, true); err != nil {
 		logger.WithField("error", err).Warn("Failed to load early quitter config")
 	} else {
 		eqconfig.IncrementCompletedMatches()
+
+		// Check for tier change after completing match
+		serviceSettings := ServiceSettings()
+		oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
+
 		if err := StorableWrite(ctx, nk, userID, eqconfig); err != nil {
 			logger.WithField("error", err).Warn("Failed to store early quitter config")
-		}
-	}
-	if playerSession := sessionRegistry.Get(uuid.FromStringOrNil(sessionID)); playerSession != nil {
-		if params, ok := LoadParams(playerSession.Context()); ok {
-			params.earlyQuitConfig.Store(eqconfig)
+		} else {
+			// Update session cache
+			if playerSession := sessionRegistry.Get(uuid.FromStringOrNil(sessionID)); playerSession != nil {
+				if params, ok := LoadParams(playerSession.Context()); ok {
+					params.earlyQuitConfig.Store(eqconfig)
+				}
+			}
+
+			// Send Discord DM if tier changed
+			if tierChanged {
+				discordID, err := GetDiscordIDByUserID(ctx, db, userID)
+				if err != nil {
+					logger.WithField("error", err).Warn("Failed to get Discord ID for tier notification")
+				} else if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
+					var message string
+					if oldTier < newTier {
+						// Degraded to Tier 2+
+						message = TierDegradedMessage
+					} else {
+						// Recovered to Tier 1
+						message = TierRestoredMessage
+					}
+					if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
+						logger.WithField("error", err).Warn("Failed to send tier change DM")
+					}
+				}
+			}
 		}
 	}
 	return nil
 }
 
-func (s *EventRemoteLogSet) processPostMatchTypeStats(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, sessionRegistry SessionRegistry, statisticsQueue *StatisticsQueue, msg *evr.RemoteLogPostMatchTypeStats) error {
-	var err error
-	matchID, err := NewMatchID(msg.SessionUUID(), s.Node)
-	if err != nil {
-		return fmt.Errorf("failed to create match ID: %w", err)
+func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, sessionRegistry SessionRegistry, statisticsQueue *StatisticsQueue, matchID MatchID, msgs []evr.RemoteLog) error {
+	var statsByPlayer = make(map[evr.EvrId]evr.MatchTypeStats, 8)
+
+	//var xpLevel *evr.RemoteLogPostMatchMatchTypeXPLevel
+
+	for _, msg := range msgs {
+		switch m := msg.(type) {
+		case *evr.RemoteLogPostMatchMatchTypeXPLevel:
+			continue
+		case *evr.RemoteLogPostMatchMatchStats:
+			continue
+		case *evr.RemoteLogPostMatchTypeStats:
+
+			xpid, err := evr.ParseEvrId(m.XPID)
+			if err != nil {
+				return fmt.Errorf("failed to parse evr ID: %w", err)
+			}
+			statsByPlayer[*xpid] = m.Stats
+
+		}
 	}
-	// Get the match label
+
 	label, err := MatchLabelByID(ctx, nk, matchID)
 	if err != nil || label == nil {
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
-	xpid, err := evr.ParseEvrId(msg.XPID)
-	if err != nil {
-		return fmt.Errorf("failed to parse evr ID: %w", err)
+	if label.Mode != evr.ModeArenaPublic {
+		return nil // Only process type stats for arena mode
 	}
-	// Get the player's information
-	playerInfo := label.GetPlayerByEvrID(*xpid)
-	if playerInfo == nil {
-		// If the player isn't in the match, do not update the stats
-		return fmt.Errorf("player not in match: %s", msg.XPID)
-	}
-
-	// If the player isn't in the match, or isn't a player, do not update the stats
-	if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
-		return fmt.Errorf("non-player profile update request: %s", msg.XPID)
-	}
-	logger = logger.WithFields(map[string]any{
-		"player_uid":  playerInfo.UserID,
-		"player_sid":  playerInfo.SessionID,
-		"player_xpid": playerInfo.EvrID.String(),
-	})
 
 	groupIDStr := label.GetGroupID().String()
-	validModes := []evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}
 
-	serviceSettings := ServiceSettings()
-	if serviceSettings.UseSkillBasedMatchmaking() && slices.Contains(validModes, label.Mode) {
+	logger = logger.WithFields(map[string]any{
+		"mid": matchID.String(),
+	})
 
-		// Determine winning team
-		blueWins := playerInfo.Team == BlueTeam && msg.IsWinner()
-		ratings := CalculateNewPlayerRatings(label.Players, blueWins)
-		if rating, ok := ratings[playerInfo.SessionID]; ok {
-			if err := MatchmakingRatingStore(ctx, nk, playerInfo.UserID, playerInfo.DiscordID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
-				logger.WithField("error", err).Warn("Failed to record rating to leaderboard")
+	allStatEntries := make([]*StatisticsQueueEntry, 0)
+
+	for xpid, typeStats := range statsByPlayer {
+		// Get the match label
+
+		// Get the player's information
+		playerInfo := label.GetPlayerByEvrID(xpid)
+		if playerInfo == nil {
+			// If the player isn't in the match, do not update the stats
+			return fmt.Errorf("player not in match: %s", xpid.String())
+		}
+
+		// If the player isn't in the match, or isn't a player, do not update the stats
+		if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
+			return fmt.Errorf("non-competitor player cannot have stats updated: %s", xpid.String())
+		}
+
+		logger = logger.WithFields(map[string]any{
+			"player_uid":  playerInfo.UserID,
+			"player_sid":  playerInfo.SessionID,
+			"player_xpid": playerInfo.EvrID.String(),
+		})
+
+		// Increment the completed matches for the player
+		if err := s.incrementCompletedMatches(ctx, logger, nk, db, sessionRegistry, playerInfo.UserID, playerInfo.SessionID); err != nil {
+			logger.WithField("error", err).Warn("Failed to increment completed matches")
+		}
+
+		serviceSettings := ServiceSettings()
+		if serviceSettings.UseSkillBasedMatchmaking() {
+
+			// Determine winning team
+			blueWins := (playerInfo.Team == BlueTeam && typeStats.ArenaWins > 0) || (playerInfo.Team == OrangeTeam && typeStats.ArenaLosses > 0)
+
+			// Calculate new ratings
+			ratings := CalculateNewPlayerRatings(label.Players, statsByPlayer, blueWins)
+			if rating, ok := ratings[playerInfo.SessionID]; ok {
+				// Add skill rating entries to the statistics queue
+				muScore, muSubscore, err := Float64ToScore(rating.Mu)
+				if err != nil {
+					logger.WithField("error", err).Warn("Failed to convert Mu rating to score")
+				} else {
+					allStatEntries = append(allStatEntries, &StatisticsQueueEntry{
+						BoardMeta: LeaderboardMeta{
+							GroupID:       groupIDStr,
+							Mode:          label.Mode,
+							StatName:      SkillRatingMuStatisticID,
+							Operator:      OperatorSet,
+							ResetSchedule: evr.ResetScheduleAllTime,
+						},
+						UserID:      playerInfo.UserID,
+						DisplayName: playerInfo.DisplayName,
+						Score:       muScore,
+						Subscore:    muSubscore,
+						Metadata:    map[string]string{"discord_id": playerInfo.DiscordID},
+					})
+				}
+
+				sigmaScore, sigmaSubscore, err := Float64ToScore(rating.Sigma)
+				if err != nil {
+					logger.WithField("error", err).Warn("Failed to convert Sigma rating to score")
+				} else {
+					allStatEntries = append(allStatEntries, &StatisticsQueueEntry{
+						BoardMeta: LeaderboardMeta{
+							GroupID:       groupIDStr,
+							Mode:          label.Mode,
+							StatName:      SkillRatingSigmaStatisticID,
+							Operator:      OperatorSet,
+							ResetSchedule: evr.ResetScheduleAllTime,
+						},
+						UserID:      playerInfo.UserID,
+						DisplayName: playerInfo.DisplayName,
+						Score:       sigmaScore,
+						Subscore:    sigmaSubscore,
+						Metadata:    map[string]string{"discord_id": playerInfo.DiscordID},
+					})
+				}
+			} else {
+				logger.WithField("target_sid", playerInfo.SessionID).Warn("No rating found for player in matchmaking ratings")
 			}
-		} else {
-			logger.WithField("target_sid", playerInfo.SessionID).Warn("No rating found for player in matchmaking ratings")
 		}
 
-		zapLogger := RuntimeLoggerToZapLogger(logger)
-		// Calculate a new rank percentile
-		if rankPercentile, err := CalculateSmoothedPlayerRankPercentile(ctx, zapLogger, db, nk, playerInfo.UserID, groupIDStr, label.Mode); err != nil {
-			logger.WithField("error", err).Warn("Failed to calculate new player rank percentile")
-			// Store the rank percentile in the leaderboards.
-		} else if err := MatchmakingRankPercentileStore(ctx, nk, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rankPercentile); err != nil {
-			logger.WithField("error", err).Warn("Failed to record rank percentile to leaderboard")
+		// Update the player's statistics, if the service settings allow it
+		if !serviceSettings.DisableStatisticsUpdates {
+			statEntries, err := typeStatsToScoreMap(playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, typeStats)
+			if err != nil {
+				return fmt.Errorf("failed to convert type stats to score map: %w", err)
+			}
+			allStatEntries = append(allStatEntries, statEntries...)
 		}
 	}
 
-	// Update the player's statistics, if the service settings allow it
-	if serviceSettings.DisableStatisticsUpdates {
-		return nil
+	if len(allStatEntries) > 0 {
+		return statisticsQueue.Add(allStatEntries)
 	}
 
-	statEntries, err := typeStatsToScoreMap(playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, msg.Stats)
-	if err != nil {
-		return fmt.Errorf("failed to convert type stats to score map: %w", err)
-	}
-	return statisticsQueue.Add(statEntries)
+	return nil
 }
 
-func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, stats evr.MatchTypeStats) ([]*StatisticsQueueEntry, error) {
-	// Modify the update based on the previous stats
-	updateElem := reflect.ValueOf(stats)
-	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
+func iterateMatchTypeStatsFields(stats evr.MatchTypeStats, fn func(statName string, op LeaderboardOperator, value float64)) {
+	statsBaseType := reflect.TypeOf(stats)
+	statsValue := reflect.ValueOf(stats)
+	for i := 0; i < statsBaseType.NumField(); i++ {
+		field := statsBaseType.Field(i)
+		value := statsValue.Field(i)
 
-	statsBaseType := reflect.ValueOf(stats).Type()
+		opTag := field.Tag.Get("op")
+		opParts := strings.Split(opTag, ",")
 
-	nameOperatorMap := make(map[string]LeaderboardOperator, statsBaseType.NumField())
-	// Create a map of stat names to their corresponding operator
-	for i := range statsBaseType.NumField() {
-		jsonTag := statsBaseType.Field(i).Tag.Get("json")
+		if value.IsZero() && slices.Contains(opParts, "omitzero") {
+			continue
+		}
+
+		jsonTag := field.Tag.Get("json")
 		statName := strings.SplitN(jsonTag, ",", 2)[0]
-		opTag := statsBaseType.Field(i).Tag.Get("op")
+
 		op := OperatorSet
-		switch opTag {
+		switch opParts[0] {
 		case "avg":
 			op = OperatorSet
 		case "add":
@@ -583,51 +667,43 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 		case "rep":
 			op = OperatorSet
 		}
-		nameOperatorMap[statName] = op
+
+		var statValue float64 = 0
+		if value.CanInt() {
+			statValue = float64(value.Int())
+		} else if value.CanUint() {
+			statValue = float64(value.Uint())
+		} else if value.CanFloat() {
+			statValue = float64(value.Float())
+		}
+
+		fn(statName, op, statValue)
 	}
+}
 
-	// construct the entries
-	entries := make([]*StatisticsQueueEntry, 0, len(resetSchedules)*updateElem.NumField())
+func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, stats evr.MatchTypeStats) ([]*StatisticsQueueEntry, error) {
+	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
 
-	for i := range updateElem.NumField() {
-		updateField := updateElem.Field(i)
-
+	entries := make([]*StatisticsQueueEntry, 0)
+	var conversionErr error
+	iterateMatchTypeStatsFields(stats, func(statName string, op LeaderboardOperator, value float64) {
+		if conversionErr != nil {
+			return
+		}
 		for _, r := range resetSchedules {
-			if updateField.IsZero() {
-				continue
-			}
-			// Extract the JSON and operator tags from the struct field
-			jsonTag := updateElem.Type().Field(i).Tag.Get("json")
-			statName := strings.SplitN(jsonTag, ",", 2)[0]
-
 			meta := LeaderboardMeta{
 				GroupID:       groupID,
 				Mode:          mode,
 				StatName:      statName,
-				Operator:      nameOperatorMap[statName],
+				Operator:      op,
 				ResetSchedule: r,
 			}
 
-			var statValue float64 = 0
-
-			if updateField.CanInt() {
-				statValue = float64(updateField.Int())
-			} else if updateField.CanUint() {
-				statValue = float64(updateField.Uint())
-			} else if updateField.CanFloat() {
-				statValue = float64(updateField.Float())
-			}
-
-			// Skip stats that are not set or negative
-			if statValue <= 0 {
-				continue
-			}
-
-			score, subscore, err := Float64ToScore(statValue)
+			score, subscore, err := Float64ToScore(value)
 			if err != nil {
-				return nil, fmt.Errorf("failed to convert float64 to int64 pair: %w", err)
+				conversionErr = fmt.Errorf("failed to convert stat %s: %w", statName, err)
+				return
 			}
-
 			entries = append(entries, &StatisticsQueueEntry{
 				BoardMeta:   meta,
 				UserID:      userID,
@@ -637,8 +713,11 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 				Metadata:    nil,
 			})
 		}
-	}
+	})
 
+	if conversionErr != nil {
+		return nil, conversionErr
+	}
 	return entries, nil
 }
 
@@ -655,6 +734,10 @@ func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runt
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
 
+	if label.Mode != evr.ModeArenaPublic && label.Mode != evr.ModeCombatPublic && label.Mode != evr.ModeSocialPublic {
+		return nil // Only process VOIP loudness for arena, combat, and social modes
+	}
+
 	// Parse the player's EVR ID
 	xpid, err := evr.ParseEvrId(msg.PlayerInfoUserid)
 	if err != nil {
@@ -669,8 +752,8 @@ func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runt
 	}
 
 	// Only process for actual players (not spectators)
-	if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
-		return fmt.Errorf("player %s is not on a playing team (team: %d, expected Blue or Orange)",
+	if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam && playerInfo.Team != SocialLobbyParticipant {
+		return fmt.Errorf("player %s is not on a playing team (team: %d, expected blue, orange, or social)",
 			msg.PlayerInfoUserid, playerInfo.Team)
 	}
 
@@ -683,87 +766,63 @@ func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runt
 	// Read the current leaderboard record to get existing metadata
 	boardID := StatisticBoardID(groupIDStr, mode, PlayerLoudnessStatisticID, evr.ResetScheduleDaily)
 
-	_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{playerInfo.UserID}, 1, "", 0)
-
-	// Initialize metadata values
-	var totalLoudness, minLoudness, maxLoudness float64
-	var count int64
-
-	if err == nil && len(ownerRecords) > 0 {
-		record := ownerRecords[0]
-
-		// Decode existing total loudness from score/subscore
-		totalLoudness, err = ScoreToFloat64(record.Score, record.Subscore)
-		if err != nil {
-			logger.WithField("error", err).Warn("Failed to decode existing loudness score")
-			totalLoudness = 0
-		}
+	err = UpdateLeaderboardStat(ctx, nk, boardID, playerInfo.UserID, playerInfo.DisplayName, func(currentScore float64, currentMetadata map[string]any) (float64, map[string]any, error) {
+		var minLoudness, maxLoudness float64
+		var count int64
 
 		// Decode existing metadata
-		if record.Metadata != "" {
-			md, err := VOIPLoudnessRecordMetadataFromString(record.Metadata)
-			if err != nil {
-				logger.WithField("error", err).Warn("Failed to decode existing loudness metadata")
-			} else {
-				minLoudness = md.MinLoudness
-				maxLoudness = md.MaxLoudness
-				count = md.Count
+		if currentMetadata != nil {
+			if v, ok := currentMetadata["min_loudness"]; ok {
+				if s, ok := v.(string); ok {
+					minLoudness, _ = strconv.ParseFloat(s, 64)
+				}
+			}
+			if v, ok := currentMetadata["max_loudness"]; ok {
+				if s, ok := v.(string); ok {
+					maxLoudness, _ = strconv.ParseFloat(s, 64)
+				}
+			}
+			if v, ok := currentMetadata["count"]; ok {
+				if s, ok := v.(string); ok {
+					count, _ = strconv.ParseInt(s, 10, 64)
+				}
 			}
 		}
-	}
 
-	// Update values
-	totalLoudness += loudnessDB
-	count++
+		// Update values
+		currentScore += loudnessDB
+		count++
 
-	// Update min/max
-	if count == 1 {
-		minLoudness = loudnessDB
-		maxLoudness = loudnessDB
-	} else {
-		if loudnessDB < minLoudness {
+		// Update min/max
+		if count == 1 {
 			minLoudness = loudnessDB
-		}
-		if loudnessDB > maxLoudness {
 			maxLoudness = loudnessDB
+		} else {
+			if loudnessDB < minLoudness {
+				minLoudness = loudnessDB
+			}
+			if loudnessDB > maxLoudness {
+				maxLoudness = loudnessDB
+			}
 		}
-	}
 
-	// Store total loudness in the leaderboard score field
-	// Note: The daily average (total_loudness / session_time) is calculated when reading
-	// the data by dividing this total by the GameServerTime leaderboard value.
-	// See PLAYER_LOUDNESS_STAT.md for calculation details.
-	score, subscore, err := Float64ToScore(totalLoudness)
-	if err != nil {
-		return fmt.Errorf("failed to convert loudness to score: %w", err)
-	}
+		// Create metadata with min, max, and count
+		md := VOIPLoudnessRecordMetadata{
+			MinLoudness: minLoudness,
+			MaxLoudness: maxLoudness,
+			Count:       count,
+		}
 
-	// Create metadata with min, max, and count
-	md := VOIPLoudnessRecordMetadata{
-		MinLoudness: minLoudness,
-		MaxLoudness: maxLoudness,
-		Count:       count,
-	}
+		// Convert map[string]string to map[string]any
+		mdMap := make(map[string]any)
+		for k, v := range md.ToMap() {
+			mdMap[k] = v
+		}
 
-	mdMap := md.ToMap()
+		return currentScore, mdMap, nil
+	})
 
-	// Queue the leaderboard update
-	entry := &StatisticsQueueEntry{
-		BoardMeta: LeaderboardMeta{
-			GroupID:       groupIDStr,
-			Mode:          mode,
-			StatName:      PlayerLoudnessStatisticID,
-			Operator:      OperatorSet, // We're setting the total value each time
-			ResetSchedule: evr.ResetScheduleDaily,
-		},
-		UserID:      playerInfo.UserID,
-		DisplayName: playerInfo.DisplayName,
-		Score:       score,
-		Subscore:    subscore,
-		Metadata:    mdMap,
-	}
-
-	return statisticsQueue.Add([]*StatisticsQueueEntry{entry})
+	return err
 }
 
 func processMatchGoalIntoUpdate(msg *evr.RemoteLogGoal, update *MatchGameStateUpdate) {
