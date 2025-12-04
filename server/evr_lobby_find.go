@@ -165,6 +165,9 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	}
 
 	switch lobbyParams.Mode {
+	case evr.ModeSocialPublic:
+		// Social lobbies do not use matchmaking.
+		break
 	case evr.ModeArenaPublic:
 		// Only allow Tier 1 players to use the matchmaker. Tier 2+ players are forced into backfill-only mode.
 		if lobbyParams.EarlyQuitMatchmakingTier != MatchmakingTier1 {
@@ -178,7 +181,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	default:
 		go func() {
 			if err := p.lobbyMatchMakeWithFallback(ctx, logger, session, lobbyParams, lobbyGroup, entrants...); err != nil {
-				logger.Error("Failed to matchmake", zap.Error(err))
+				logger.Warn("Failed to matchmake", zap.Error(err))
 			}
 		}()
 	}
