@@ -630,11 +630,21 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 					eqconfig := NewEarlyQuitConfig()
 					_nk := nk.(*RuntimeGoNakamaModule)
 					if err := StorableRead(ctx, nk, mp.GetUserId(), eqconfig, true); err != nil {
-						logger.Warn("Failed to load early quitter config", zap.Error(err))
+						logger.WithField("error", err).Warn("Failed to load early quitter config")
 					} else {
+
+						eqconfig.IncrementEarlyQuit()
+
 						// Check for tier change after early quit
 						serviceSettings := ServiceSettings()
 						oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
+
+						logger.WithFields(map[string]interface{}{
+							"old_tier":     oldTier,
+							"new_tier":     newTier,
+							"tier_changed": tierChanged,
+							"eqconfig":     eqconfig,
+						}).Debug("Early quitter tier update.")
 
 						if err := StorableWrite(ctx, nk, mp.GetUserId(), eqconfig); err != nil {
 							logger.Warn("Failed to write early quitter config", zap.Error(err))
@@ -652,7 +662,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 									logger.Warn("Failed to get Discord ID for tier notification", zap.Error(err))
 								} else if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
 									var message string
-									if oldTier < newTier {
+									if oldTier > newTier {
 										// Degraded to Tier 2+
 										message = TierDegradedMessage
 									} else {
