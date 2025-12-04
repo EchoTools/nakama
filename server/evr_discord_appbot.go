@@ -342,6 +342,14 @@ var (
 			Description: "Receive your account information (privately).",
 		},
 		{
+			Name:        "whereami",
+			Description: "Get information about your current match and game server.",
+		},
+		{
+			Name:        "report-server-issue",
+			Description: "Report an issue with the current game server.",
+		},
+		{
 			Name:        "next-match",
 			Description: "Set your next match.",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -1883,6 +1891,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}).Debug("whoami")
 			return err
 		},
+		"whereami":            d.handleWhereAmI,
+		"report-server-issue": d.handleReportServerIssue,
 		"next-match": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			if user == nil {
 				return nil
@@ -3117,8 +3127,28 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					})
 				}
 
+			case "server_issue_modal":
+				// Parse issue type and match ID from value (format: "issueType:matchID")
+				parts := strings.SplitN(value, ":", 2)
+				issueType := ServerIssueTypeOther
+				matchID := value
+				if len(parts) == 2 {
+					issueType = parts[0]
+					matchID = parts[1]
+				}
+				if err := d.handleServerIssueModalSubmit(ctx, logger, s, i, issueType, matchID); err != nil {
+					logger.Error("Failed to handle server issue modal submit", zap.Error(err))
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "Failed to submit server issue report: " + err.Error(),
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					})
+				}
+
 			default:
-				logger.Info("Unhandled modal submit: %v", i.ModalSubmitData().CustomID)
+				logger.WithField("custom_id", i.ModalSubmitData().CustomID).Info("Unhandled modal submit")
 			}
 		default:
 			logger.Info("Unhandled interaction type: %v", i.Type)

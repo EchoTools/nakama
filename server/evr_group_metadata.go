@@ -25,6 +25,7 @@ type GroupMetadata struct {
 	AuditChannelID                       string            `json:"audit_channel_id"`              // The audit channel
 	ErrorChannelID                       string            `json:"error_channel_id"`              // The error channel
 	CommandChannelID                     string            `json:"command_channel_id"`            // The command channel
+	ServerReportsChannelID               string            `json:"server_reports_channel_id"`     // The server reports channel for issue reporting
 	BlockVPNUsers                        bool              `json:"block_vpn_users"`               // Block VPN users
 	FraudScoreThreshold                  int               `json:"fraud_score_threshold"`         // The fraud score threshold
 	AllowedFeatures                      []string          `json:"allowed_features"`              // Allowed features
