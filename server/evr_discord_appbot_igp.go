@@ -65,8 +65,11 @@ func (p *InGamePanel) Stop() {
 		return
 	}
 	p.cancelFn()
-	if p.dg.InteractionResponseDelete(p.Interaction()) != nil {
-		p.logger.WithField("error", "failed to delete interaction").Warn("Failed to delete interaction")
+	interaction := p.Interaction()
+	if interaction != nil && p.dg != nil {
+		if p.dg.InteractionResponseDelete(interaction) != nil {
+			p.logger.WithField("error", "failed to delete interaction").Warn("Failed to delete interaction")
+		}
 	}
 	p.isStopped.Store(true)
 }
@@ -80,11 +83,19 @@ func (p *InGamePanel) Swap(i *discordgo.InteractionCreate) *discordgo.Interactio
 }
 
 func (p *InGamePanel) Interaction() *discordgo.Interaction {
-	return p.interactionCreate.Load().Interaction
+	ic := p.interactionCreate.Load()
+	if ic == nil {
+		return nil
+	}
+	return ic.Interaction
 }
 
 func (p *InGamePanel) GuildID() string {
-	return p.interactionCreate.Load().GuildID
+	ic := p.interactionCreate.Load()
+	if ic == nil {
+		return ""
+	}
+	return ic.GuildID
 }
 
 func (p *InGamePanel) UserID() string {
@@ -110,9 +121,13 @@ func (p *InGamePanel) displayErrorMessage(err error) (*discordgo.Message, error)
 }
 
 func (p *InGamePanel) displayMessage(content string) (*discordgo.Message, error) {
+	interaction := p.Interaction()
+	if interaction == nil || p.dg == nil {
+		return nil, fmt.Errorf("panel not ready")
+	}
 	embeds := make([]*discordgo.MessageEmbed, 0)
 	components := make([]discordgo.MessageComponent, 0)
-	return p.dg.InteractionResponseEdit(p.Interaction(), &discordgo.WebhookEdit{
+	return p.dg.InteractionResponseEdit(interaction, &discordgo.WebhookEdit{
 		Content:    ptr.String(content),
 		Components: &components,
 		Embeds:     &embeds,
@@ -301,9 +316,11 @@ SessionLoop:
 				prevInteraction = interaction
 				// Update the mode panel
 				webHookEdit := p.createUpdateEdit(guildID, label, recentPlayers)
-				if _, err := p.dg.InteractionResponseEdit(p.Interaction(), webHookEdit); err != nil {
-					logger.WithField("error", err).Error("Failed to edit message")
-					return
+				if interaction != nil && p.dg != nil {
+					if _, err := p.dg.InteractionResponseEdit(interaction, webHookEdit); err != nil {
+						logger.WithField("error", err).Error("Failed to edit message")
+						return
+					}
 				}
 			}
 
