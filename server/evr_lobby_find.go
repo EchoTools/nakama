@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -147,7 +146,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 		// Notify the user that they are an early quitter.
 		message := fmt.Sprintf("Your early quit penalty is active (level %d), your matchmaking has been delayed by %d seconds.", lobbyParams.EarlyQuitPenaltyLevel, int(interval.Seconds()))
-		if _, err := SendUserMessage(ctx, dg, lobbyParams.DiscordID, message); err != nil {
+		if _, err := SendUserMessage(ctx, p.appBot.dg, lobbyParams.DiscordID, message); err != nil {
 			logger.Warn("Failed to send message to user", zap.Error(err))
 		}
 		if guildGroup := p.guildGroupRegistry.Get(lobbyParams.GroupID.String()); guildGroup != nil {
@@ -165,8 +164,18 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 	}
 
-	if slices.Contains([]evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}, lobbyParams.Mode) {
-		// Start the matchmaking process.
+	switch lobbyParams.Mode {
+	case evr.ModeArenaPublic:
+		// Only allow Tier 1 players to use the matchmaker. Tier 2+ players are forced into backfill-only mode.
+		if lobbyParams.EarlyQuitMatchmakingTier == MatchmakingTier1 {
+			logger.Debug("Player in Tier 2+ (backfill-only mode)", zap.Int32("tier", lobbyParams.EarlyQuitMatchmakingTier))
+			break
+		}
+		fallthrough
+	case evr.ModeCombatPublic:
+		// Combat does not have tiers, so always allow matchmaking.
+		fallthrough
+	default:
 		go func() {
 			if err := p.lobbyMatchMakeWithFallback(ctx, logger, session, lobbyParams, lobbyGroup, entrants...); err != nil {
 				logger.Error("Failed to matchmake", zap.Error(err))
