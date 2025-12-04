@@ -5,71 +5,88 @@ import (
 	"testing"
 )
 
+// Helper function to create int32 pointers
+func ptrInt32(v int32) *int32 {
+	return &v
+}
+
 func TestEarlyQuitConfig_UpdateTier(t *testing.T) {
 	tests := []struct {
 		name           string
 		penaltyLevel   int32
-		tier1Threshold int32
+		tier1Threshold *int32
 		expectedTier   int32
 	}{
 		{
 			name:           "New player with no penalty stays in Tier 1",
 			penaltyLevel:   0,
-			tier1Threshold: 0,
+			tier1Threshold: ptrInt32(0),
 			expectedTier:   MatchmakingTier1,
 		},
 		{
 			name:           "Player with negative penalty stays in Tier 1",
 			penaltyLevel:   -1,
-			tier1Threshold: 0,
+			tier1Threshold: ptrInt32(0),
 			expectedTier:   MatchmakingTier1,
 		},
 		{
 			name:           "Player with penalty level 1 moves to Tier 2 (default threshold)",
 			penaltyLevel:   1,
-			tier1Threshold: 0,
+			tier1Threshold: ptrInt32(0),
 			expectedTier:   MatchmakingTier2,
 		},
 		{
 			name:           "Player with penalty level 2 stays in Tier 2",
 			penaltyLevel:   2,
-			tier1Threshold: 0,
+			tier1Threshold: ptrInt32(0),
 			expectedTier:   MatchmakingTier2,
 		},
 		{
 			name:           "Player with penalty level 3 (max) stays in Tier 2",
 			penaltyLevel:   3,
-			tier1Threshold: 0,
+			tier1Threshold: ptrInt32(0),
 			expectedTier:   MatchmakingTier2,
 		},
 		{
 			name:           "Custom threshold: penalty 1 stays in Tier 1 with threshold 1",
 			penaltyLevel:   1,
-			tier1Threshold: 1,
+			tier1Threshold: ptrInt32(1),
 			expectedTier:   MatchmakingTier1,
 		},
 		{
 			name:           "Custom threshold: penalty 2 moves to Tier 2 with threshold 1",
 			penaltyLevel:   2,
-			tier1Threshold: 1,
+			tier1Threshold: ptrInt32(1),
 			expectedTier:   MatchmakingTier2,
 		},
 		{
 			name:           "Custom threshold: penalty 2 stays in Tier 1 with threshold 2",
 			penaltyLevel:   2,
-			tier1Threshold: 2,
+			tier1Threshold: ptrInt32(2),
 			expectedTier:   MatchmakingTier1,
 		},
 		{
 			name:           "Boundary: penalty equals threshold stays in Tier 1",
 			penaltyLevel:   0,
-			tier1Threshold: 0,
+			tier1Threshold: ptrInt32(0),
 			expectedTier:   MatchmakingTier1,
 		},
 		{
 			name:           "Boundary: penalty just above threshold moves to Tier 2",
 			penaltyLevel:   1,
-			tier1Threshold: 0,
+			tier1Threshold: ptrInt32(0),
+			expectedTier:   MatchmakingTier2,
+		},
+		{
+			name:           "Nil threshold defaults to 0",
+			penaltyLevel:   0,
+			tier1Threshold: nil,
+			expectedTier:   MatchmakingTier1,
+		},
+		{
+			name:           "Nil threshold with penalty defaults to 0",
+			penaltyLevel:   1,
+			tier1Threshold: nil,
 			expectedTier:   MatchmakingTier2,
 		},
 	}
@@ -85,11 +102,11 @@ func TestEarlyQuitConfig_UpdateTier(t *testing.T) {
 				t.Errorf("UpdateTier() newTier = %v, want %v", newTier, tt.expectedTier)
 			}
 
-			if oldTier != 0 {
-				t.Errorf("UpdateTier() oldTier = %v, want 0 (initial tier)", oldTier)
+			if oldTier != MatchmakingTier1 {
+				t.Errorf("UpdateTier() oldTier = %v, want %v (initial tier)", oldTier, MatchmakingTier1)
 			}
 
-			// For cases where we start at tier 0 and stay at tier 0, changed should be false
+			// For cases where we start at Tier 1 and move to a higher tier, changed should be true
 			expectChanged := (tt.expectedTier != MatchmakingTier1)
 			if changed != expectChanged {
 				t.Errorf("UpdateTier() changed = %v, want %v", changed, expectChanged)
@@ -107,7 +124,7 @@ func TestEarlyQuitConfig_UpdateTier_NoChange(t *testing.T) {
 	config.EarlyQuitPenaltyLevel = 1
 	config.MatchmakingTier = MatchmakingTier2
 
-	oldTier, newTier, changed := config.UpdateTier(0)
+	oldTier, newTier, changed := config.UpdateTier(ptrInt32(0))
 
 	if oldTier != MatchmakingTier2 {
 		t.Errorf("oldTier = %v, want %v", oldTier, MatchmakingTier2)
@@ -130,7 +147,7 @@ func TestEarlyQuitConfig_UpdateTier_TierChange(t *testing.T) {
 	// Reduce penalty to move back to Tier 1
 	config.EarlyQuitPenaltyLevel = 0
 
-	oldTier, newTier, changed := config.UpdateTier(0)
+	oldTier, newTier, changed := config.UpdateTier(ptrInt32(0))
 
 	if oldTier != MatchmakingTier2 {
 		t.Errorf("oldTier = %v, want %v", oldTier, MatchmakingTier2)
@@ -259,7 +276,7 @@ func TestEarlyQuitConfig_ConcurrentUpdateTier(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			config.UpdateTier(0)
+			config.UpdateTier(ptrInt32(0))
 		}()
 	}
 
@@ -276,21 +293,21 @@ func TestEarlyQuitConfig_TierTransitionFlow(t *testing.T) {
 	config := NewEarlyQuitConfig()
 
 	// Start in Tier 1
-	_, tier, _ := config.UpdateTier(0)
+	_, tier, _ := config.UpdateTier(ptrInt32(0))
 	if tier != MatchmakingTier1 {
 		t.Errorf("Initial tier = %v, want %v", tier, MatchmakingTier1)
 	}
 
 	// Early quit moves to Tier 2
 	config.IncrementEarlyQuit()
-	oldTier, newTier, changed := config.UpdateTier(0)
+	oldTier, newTier, changed := config.UpdateTier(ptrInt32(0))
 	if oldTier != MatchmakingTier1 || newTier != MatchmakingTier2 || !changed {
 		t.Errorf("After early quit: oldTier=%v, newTier=%v, changed=%v, want Tier1→Tier2", oldTier, newTier, changed)
 	}
 
 	// Complete match returns to Tier 1
 	config.IncrementCompletedMatches()
-	oldTier, newTier, changed = config.UpdateTier(0)
+	oldTier, newTier, changed = config.UpdateTier(ptrInt32(0))
 	if oldTier != MatchmakingTier2 || newTier != MatchmakingTier1 || !changed {
 		t.Errorf("After completed match: oldTier=%v, newTier=%v, changed=%v, want Tier2→Tier1", oldTier, newTier, changed)
 	}
