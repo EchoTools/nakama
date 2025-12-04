@@ -14,7 +14,7 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 		config := NewEarlyQuitConfig()
 
 		// Start in Tier 1
-		oldTier, newTier, changed := config.UpdateTier(0)
+		oldTier, newTier, changed := config.UpdateTier(ptrInt32(0))
 		if newTier != MatchmakingTier1 {
 			t.Fatalf("Expected initial tier to be Tier 1, got %d", newTier)
 		}
@@ -23,7 +23,7 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 		config.IncrementEarlyQuit()
 
 		// Check tier change
-		oldTier, newTier, changed = config.UpdateTier(0)
+		oldTier, newTier, changed = config.UpdateTier(ptrInt32(0))
 		if !changed {
 			t.Error("Expected tier to change after early quit")
 		}
@@ -55,7 +55,7 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 		config.IncrementCompletedMatches()
 
 		// Check tier change
-		oldTier, newTier, changed := config.UpdateTier(0)
+		oldTier, newTier, changed := config.UpdateTier(ptrInt32(0))
 		if !changed {
 			t.Error("Expected tier to change after completed match")
 		}
@@ -75,11 +75,11 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 
 		// First early quit
 		config.IncrementEarlyQuit()
-		_, tier1, _ := config.UpdateTier(0)
+		_, tier1, _ := config.UpdateTier(ptrInt32(0))
 
 		// Second early quit
 		config.IncrementEarlyQuit()
-		oldTier, tier2, changed := config.UpdateTier(0)
+		oldTier, tier2, changed := config.UpdateTier(ptrInt32(0))
 
 		if tier1 != MatchmakingTier2 || tier2 != MatchmakingTier2 {
 			t.Error("Expected player to remain in Tier 2 after multiple early quits")
@@ -97,13 +97,13 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 
 		// With threshold 1, penalty level 1 should keep player in Tier 1
 		config.EarlyQuitPenaltyLevel = 1
-		_, tier, _ := config.UpdateTier(1)
+		_, tier, _ := config.UpdateTier(ptrInt32(1))
 		if tier != MatchmakingTier1 {
 			t.Errorf("With threshold 1, penalty 1 should be Tier 1, got tier %d", tier)
 		}
 
 		// With threshold 0, penalty level 1 should move to Tier 2
-		_, tier, _ = config.UpdateTier(0)
+		_, tier, _ = config.UpdateTier(ptrInt32(0))
 		if tier != MatchmakingTier2 {
 			t.Errorf("With threshold 0, penalty 1 should be Tier 2, got tier %d", tier)
 		}
@@ -113,14 +113,14 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 		config := NewEarlyQuitConfig()
 
 		// Initial tier setting
-		config.UpdateTier(0)
+		config.UpdateTier(ptrInt32(0))
 		if !config.LastTierChange.IsZero() {
 			t.Error("LastTierChange should be zero initially even after first UpdateTier call")
 		}
 
 		// Trigger tier change
 		config.IncrementEarlyQuit()
-		_, _, changed := config.UpdateTier(0)
+		_, _, changed := config.UpdateTier(ptrInt32(0))
 
 		if !changed {
 			t.Fatal("Expected tier to change")
@@ -139,7 +139,7 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 		}
 
 		// Should be in Tier 2
-		_, tier, _ := config.UpdateTier(0)
+		_, tier, _ := config.UpdateTier(ptrInt32(0))
 		if tier != MatchmakingTier2 {
 			t.Errorf("Expected Tier 2 at max penalty, got tier %d", tier)
 		}
@@ -162,7 +162,7 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 		}
 
 		// Should be in Tier 1
-		_, tier, _ := config.UpdateTier(0)
+		_, tier, _ := config.UpdateTier(ptrInt32(0))
 		if tier != MatchmakingTier1 {
 			t.Errorf("Expected Tier 1 at min penalty, got tier %d", tier)
 		}
