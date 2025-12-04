@@ -592,11 +592,11 @@ func (p *InGamePanel) createSuspendPlayerModal(targetDiscordID, displayName stri
 	}
 }
 
-func (p *InGamePanel) createSetIGNModal(currentDisplayName string) *discordgo.InteractionResponse {
+func (p *InGamePanel) createSetIGNModal(userID, groupID, currentDisplayName string) *discordgo.InteractionResponse {
 	return &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
-			CustomID: "igp:set_ign_modal",
+			CustomID: fmt.Sprintf("igp:set_ign_modal:%s:%s", userID, groupID),
 			Title:    "Set IGN",
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{
@@ -646,7 +646,7 @@ func (p *InGamePanel) HandleInteraction(i *discordgo.InteractionCreate, command 
 		}
 
 		// Get the selected user ID
-		modal := p.createSetIGNModal(evrProfile.GetGroupIGN(groupID))
+		modal := p.createSetIGNModal(userID, groupID, evrProfile.GetGroupIGN(groupID))
 		return p.dg.InteractionRespond(i.Interaction, modal)
 
 	case "select_player":
