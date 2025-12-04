@@ -1879,6 +1879,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				IncludePasswordSetState:        true,
 				IncludeGuildRoles:              true,
 				IncludeAllGuilds:               true,
+				IncludeMatchmakingTier:         true,
 				ShowLoginsSince:                time.Now().Add(-30 * 24 * time.Hour),
 				SendFileOnError:                false,
 			}
@@ -2135,6 +2136,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				IncludePasswordSetState:        isGuildAuditor,
 				IncludeGuildRoles:              isGuildAuditor,
 				IncludeAllGuilds:               isGlobalOperator,
+				IncludeMatchmakingTier:         isGuildAuditor,
 				ShowLoginsSince:                loginsSince,
 				SendFileOnError:                isGlobalOperator,
 			}

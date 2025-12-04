@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -147,7 +146,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 		// Notify the user that they are an early quitter.
 		message := fmt.Sprintf("Your early quit penalty is active (level %d), your matchmaking has been delayed by %d seconds.", lobbyParams.EarlyQuitPenaltyLevel, int(interval.Seconds()))
-		if _, err := SendUserMessage(ctx, dg, lobbyParams.DiscordID, message); err != nil {
+		if _, err := SendUserMessage(ctx, p.appBot.dg, lobbyParams.DiscordID, message); err != nil {
 			logger.Warn("Failed to send message to user", zap.Error(err))
 		}
 		if guildGroup := p.guildGroupRegistry.Get(lobbyParams.GroupID.String()); guildGroup != nil {
@@ -165,8 +164,18 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 	}
 
-	if slices.Contains([]evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}, lobbyParams.Mode) {
-		// Start the matchmaking process.
+	switch lobbyParams.Mode {
+	case evr.ModeArenaPublic:
+		// Only allow Tier 1 players to use the matchmaker. Tier 2+ players are forced into backfill-only mode.
+		if lobbyParams.EarlyQuitMatchmakingTier != MatchmakingTier1 {
+			logger.Debug("Player in Tier 2+ (backfill-only mode)", zap.Int32("tier", lobbyParams.EarlyQuitMatchmakingTier))
+			break
+		}
+		fallthrough
+	case evr.ModeCombatPublic:
+		// Combat does not have tiers, so always allow matchmaking.
+		fallthrough
+	default:
 		go func() {
 			if err := p.lobbyMatchMakeWithFallback(ctx, logger, session, lobbyParams, lobbyGroup, entrants...); err != nil {
 				logger.Error("Failed to matchmake", zap.Error(err))
@@ -249,21 +258,43 @@ func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.
 	// Monitor the stream and cancel the context (and matchmaking) if the stream is closed.
 	// This stream tracks the user's matchmaking status.
 	// This stream is untracked when the user cancels matchmaking.
+	//
+	// IMPORTANT: This function does NOT call LeaveMatchmakingStream on exit.
+	// The matchmaking stream cleanup is handled by:
+	// - LobbyJoinEntrants (when player joins a match)
+	// - lobbyPendingSessionCancel (when player explicitly cancels)
+	// - JoinMatchmakingStream (when player re-queues, it cleans up old streams)
 
 	stream := lobbyParams.MatchmakingStream()
-	defer LeaveMatchmakingStream(logger, session)
+	const checkInterval = 1 * time.Second
+	const gracePeriod = 1 * time.Second
+
 	for {
 		select {
 		case <-ctx.Done():
-			// Check if the cancel was because of a timeout
+			// Context was canceled (timeout, player joined match, or external cancel)
+			// Do NOT clean up the matchmaking stream here - let the appropriate handler do it
 			return
-		case <-time.After(1 * time.Second):
+		case <-time.After(checkInterval):
 		}
 
-		// Check if the matchmaking stream has been closed.  (i.e. the user has canceled matchmaking)
+		// Check if the matchmaking stream has been closed (i.e., the user has canceled matchmaking)
 		if session.tracker.GetLocalBySessionIDStreamUserID(session.id, stream, session.userID) == nil {
-			<-time.After(1 * time.Second)
-			cancelFn()
+			// Wait grace period before canceling to handle race condition where player re-queues
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(gracePeriod):
+			}
+
+			// Re-check after grace period - the presence might have been re-added if player re-queued
+			if session.tracker.GetLocalBySessionIDStreamUserID(session.id, stream, session.userID) == nil {
+				logger.Debug("Matchmaking stream closed, canceling matchmaking")
+				cancelFn()
+				return
+			}
+			// Player re-queued during grace period, continue monitoring
+			logger.Debug("Player re-queued during grace period, continuing to monitor")
 		}
 	}
 }

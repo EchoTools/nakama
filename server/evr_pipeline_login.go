@@ -1188,22 +1188,6 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 	logger = logger.With(zap.String("player_uid", playerInfo.UserID), zap.String("player_sid", playerInfo.SessionID), zap.String("player_xpid", playerInfo.EvrID.String()))
 
 	var profile *EVRProfile
-	// Decrease the early quitter count for the player
-	if playerSession := p.nk.sessionRegistry.Get(uuid.FromStringOrNil(playerInfo.SessionID)); playerSession != nil {
-		eqconfig := NewEarlyQuitConfig()
-		if err := StorableRead(ctx, p.nk, playerInfo.UserID, eqconfig, true); err != nil {
-			logger.Warn("Failed to load early quitter config", zap.Error(err))
-		} else {
-			eqconfig.IncrementCompletedMatches()
-			if err := StorableWrite(ctx, p.nk, playerInfo.UserID, eqconfig); err != nil {
-				logger.Warn("Failed to store early quitter config", zap.Error(err))
-			} else if session := p.sessionRegistry.Get(playerSession.ID()); session != nil {
-				if params, ok := LoadParams(session.Context()); ok {
-					params.earlyQuitConfig.Store(eqconfig)
-				}
-			}
-		}
-	}
 
 	var err error
 	if profile == nil {
@@ -1221,22 +1205,6 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 	}
 
 	serviceSettings := ServiceSettings()
-
-	validModes := []evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}
-
-	if serviceSettings.UseSkillBasedMatchmaking() && slices.Contains(validModes, label.Mode) {
-
-		// Determine winning team
-		blueWins := playerInfo.Team == BlueTeam && payload.IsWinner()
-		ratings := CalculateNewPlayerRatings(label.Players, blueWins)
-		if rating, ok := ratings[playerInfo.SessionID]; ok {
-			if err := MatchmakingRatingStore(ctx, p.nk, playerInfo.UserID, playerInfo.DiscordID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
-				logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
-			}
-		} else {
-			logger.Warn("Failed to get player rating", zap.String("sessionID", playerInfo.SessionID))
-		}
-	}
 
 	// Update the player's statistics, if the service settings allow it
 	if serviceSettings.DisableStatisticsUpdates {

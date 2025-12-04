@@ -51,6 +51,7 @@ type LobbySessionParameters struct {
 	BlockedIDs                   []string                      `json:"blocked_ids"`
 	MatchmakingRating            *atomic.Pointer[types.Rating] `json:"matchmaking_rating"`
 	EarlyQuitPenaltyLevel        int                           `json:"early_quit_penalty_level"`
+	EarlyQuitMatchmakingTier     int32                         `json:"early_quit_matchmaking_tier"`
 	EnableSBMM                   bool                          `json:"disable_sbmm"`
 	EnableOrdinalRange           bool                          `json:"enable_ordinal_range"`
 	EnableDivisions              bool                          `json:"enable_divisions"`
@@ -327,9 +328,11 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	}
 
 	earlyQuitPenaltyLevel := 0
-	if !serviceSettings.Matchmaking.EnableEarlyQuitPenalty {
+	earlyQuitMatchmakingTier := int32(MatchmakingTier1)
+	if serviceSettings.Matchmaking.EnableEarlyQuitPenalty {
 		if config := sessionParams.earlyQuitConfig.Load(); config != nil {
 			earlyQuitPenaltyLevel = config.GetPenaltyLevel()
+			earlyQuitMatchmakingTier = config.GetTier()
 		}
 	}
 
@@ -370,6 +373,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		MatchmakingRatingRange:       globalSettings.RatingRange,
 		Verbose:                      sessionParams.profile.DiscordDebugMessages,
 		EarlyQuitPenaltyLevel:        earlyQuitPenaltyLevel,
+		EarlyQuitMatchmakingTier:     earlyQuitMatchmakingTier,
 		MatchmakingDivisions:         matchmakingDivisions,
 		MatchmakingExcludedDivisions: matchmakingExcludedDivisions,
 		MaxServerRTT:                 maxServerRTT,
