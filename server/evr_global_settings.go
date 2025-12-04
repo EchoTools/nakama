@@ -66,6 +66,8 @@ type GlobalMatchmakingSettings struct {
 	EnableDivisions                bool                    `json:"enable_divisions"`                    // Enable divisions
 	GreenDivisionMaxAccountAgeDays int                     `json:"green_division_max_account_age_days"` // The maximum account age to be in the green division
 	EnableEarlyQuitPenalty         bool                    `json:"enable_early_quit_penalty"`           // Disable early quit penalty
+	EarlyQuitTier1Threshold        int32                   `json:"early_quit_tier1_threshold"`          // Penalty level threshold for Tier 1 (good standing). Players with penalty <= threshold stay in Tier 1.
+	EarlyQuitTier2Threshold        int32                   `json:"early_quit_tier2_threshold"`          // Penalty level threshold for Tier 2 (reserved for future Tier 3+ implementation)
 	ServerSelection                ServerSelectionSettings `json:"server_selection"`                    // The server selection settings
 	EnableOrdinalRange             bool                    `json:"enable_ordinal_range"`                // Enable ordinal range
 	RatingRange                    float64                 `json:"rating_range"`                        // The rating range
@@ -170,6 +172,16 @@ func FixDefaultServiceSettings(data *ServiceSettingsData) {
 
 	if data.Matchmaking.SBMMMinPlayerCount == 0 {
 		data.Matchmaking.SBMMMinPlayerCount = 24
+	}
+
+	// Set default tier thresholds if not configured
+	// Tier 1 threshold default: 0 (players with penalty 0 or less are in good standing)
+	// Tier 2 threshold default: 1 (reserved for future Tier 3+ implementation)
+	if data.Matchmaking.EarlyQuitTier1Threshold == 0 {
+		data.Matchmaking.EarlyQuitTier1Threshold = 0
+	}
+	if data.Matchmaking.EarlyQuitTier2Threshold == 0 {
+		data.Matchmaking.EarlyQuitTier2Threshold = 1
 	}
 
 	if data.Matchmaking.ServerSelection.RTTDelta == nil {
