@@ -392,6 +392,9 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		default:
 			return fmt.Errorf("unknown lookup action: %s", action)
 		}
+	case "server_issue_type":
+		// Handle server issue type selection
+		return d.handleServerIssueTypeSelection(ctx, logger, s, i, value)
 	}
 
 	return nil
