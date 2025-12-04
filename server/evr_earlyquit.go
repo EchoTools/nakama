@@ -14,11 +14,15 @@ const (
 	MaxEarlyQuitPenaltyLevel   = 3
 
 	// Matchmaking Tier Constants
-	// Tier 0 = Good standing (Tier 1)
-	// Tier 1 = Penalty tier (Tier 2)
-	// Tier 2+ = Reserved for future expansion (Tier 3+)
+	// Tier 1 (internal value 1) = Good standing
+	// Tier 2 (internal value 2) = Penalty tier
+	// Tier 3+ (internal value 3+) = Reserved for future expansion
 	MatchmakingTier1 = 1
 	MatchmakingTier2 = 2
+
+	// Discord DM messages for tier changes
+	TierDegradedMessage = "Matchmaking Status Update: Account flagged for early quitting.\nYou have been moved to the Tier 2 priority queue. All incoming Tier 1 requests\nare now cutting in front of you. You will remain in a holding pattern until no\nother players are available to match.\n\nComplete full matches to restore Tier 1 status."
+	TierRestoredMessage = "Matchmaking Priority Restored: You have returned to Tier 1 status. Complete full matches to maintain your standing."
 )
 
 type EarlyQuitConfig struct {
@@ -44,7 +48,9 @@ func CalculatePlayerReliabilityRating(earlyQuits, completedMatches int32) float6
 }
 
 func NewEarlyQuitConfig() *EarlyQuitConfig {
-	return &EarlyQuitConfig{}
+	return &EarlyQuitConfig{
+		MatchmakingTier: MatchmakingTier1,
+	}
 }
 
 func (s *EarlyQuitConfig) StorageMeta() StorableMetadata {
@@ -105,6 +111,7 @@ func (s *EarlyQuitConfig) GetTier() int32 {
 
 // UpdateTier updates the matchmaking tier based on the penalty level and tier threshold.
 // Returns (oldTier, newTier, changed) where changed indicates if the tier was modified.
+// If tier1Threshold is nil, defaults to 0 (players with penalty 0 or less are in good standing).
 //
 // Current implementation (Tier 1 and Tier 2 only):
 //   - penalty <= tier1Threshold: Tier 1 (good standing)
@@ -114,14 +121,20 @@ func (s *EarlyQuitConfig) GetTier() int32 {
 //   - penalty > tier2Threshold: Tier 3+
 //   - penalty > tier1Threshold: Tier 2
 //   - penalty <= tier1Threshold: Tier 1
-func (s *EarlyQuitConfig) UpdateTier(tier1Threshold int32) (oldTier, newTier int32, changed bool) {
+func (s *EarlyQuitConfig) UpdateTier(tier1Threshold *int32) (oldTier, newTier int32, changed bool) {
 	s.Lock()
 	defer s.Unlock()
 
 	oldTier = s.MatchmakingTier
 
+	// Use default threshold if nil
+	threshold := int32(0)
+	if tier1Threshold != nil {
+		threshold = *tier1Threshold
+	}
+
 	// Determine new tier based on penalty level
-	if s.EarlyQuitPenaltyLevel <= tier1Threshold {
+	if s.EarlyQuitPenaltyLevel <= threshold {
 		newTier = MatchmakingTier1 // Good standing
 	} else {
 		newTier = MatchmakingTier2 // Penalty tier
