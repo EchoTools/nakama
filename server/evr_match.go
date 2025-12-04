@@ -631,11 +631,39 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 					_nk := nk.(*RuntimeGoNakamaModule)
 					if err := StorableRead(ctx, nk, mp.GetUserId(), eqconfig, true); err != nil {
 						logger.Warn("Failed to load early quitter config", zap.Error(err))
-					} else if err := StorableWrite(ctx, nk, mp.GetUserId(), eqconfig); err != nil {
-						logger.Warn("Failed to write early quitter config", zap.Error(err))
-					} else if s := _nk.sessionRegistry.Get(uuid.FromStringOrNil(mp.GetSessionId())); s != nil {
-						if params, ok := LoadParams(s.Context()); ok {
-							params.earlyQuitConfig.Store(eqconfig)
+					} else {
+						// Check for tier change after early quit
+						serviceSettings := ServiceSettings()
+						oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
+
+						if err := StorableWrite(ctx, nk, mp.GetUserId(), eqconfig); err != nil {
+							logger.Warn("Failed to write early quitter config", zap.Error(err))
+						} else {
+							if s := _nk.sessionRegistry.Get(uuid.FromStringOrNil(mp.GetSessionId())); s != nil {
+								if params, ok := LoadParams(s.Context()); ok {
+									params.earlyQuitConfig.Store(eqconfig)
+								}
+							}
+
+							// Send Discord DM if tier changed
+							if tierChanged {
+								discordID, err := GetDiscordIDByUserID(ctx, db, mp.GetUserId())
+								if err != nil {
+									logger.Warn("Failed to get Discord ID for tier notification", zap.Error(err))
+								} else if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
+									var message string
+									if oldTier < newTier {
+										// Degraded to Tier 2+
+										message = "Matchmaking Status Update: Account flagged for early quitting.\nYou have been moved to the Tier 2 priority queue. All incoming Tier 1 requests\nare now cutting in front of you. You will remain in a holding pattern until no\nother players are available to match.\n\nComplete full matches to restore Tier 1 status."
+									} else {
+										// Recovered to Tier 1
+										message = "Matchmaking Priority Restored: You have returned to Tier 1 status. Complete full matches to maintain your standing."
+									}
+									if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
+										logger.Warn("Failed to send tier change DM", zap.Error(err))
+									}
+								}
+							}
 						}
 					}
 				}

@@ -205,7 +205,6 @@ func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) <-chan Pre
 				OldestTicketTimestamp: int64(ageByTicket[c[0].GetTicket()]),
 			}
 		}
-
 	}()
 	return predictCh
 }

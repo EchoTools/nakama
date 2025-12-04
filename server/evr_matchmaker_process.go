@@ -29,20 +29,23 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	}
 
 	sort.SliceStable(predictions, func(i, j int) bool {
+		// First priority: Match size (larger matches preferred)
 		if predictions[i].Size != predictions[j].Size {
 			return predictions[i].Size > predictions[j].Size
 		}
 
-		// Always allow the player matchmaking the longest to have priority
+		// Second priority: Oldest ticket gets priority
 		// Sort by oldest ticket timestamp (smaller timestamp = older = higher priority)
 		if predictions[i].OldestTicketTimestamp != predictions[j].OldestTicketTimestamp {
 			return predictions[i].OldestTicketTimestamp < predictions[j].OldestTicketTimestamp
 		}
 
+		// Third priority: Division diversity (fewer divisions preferred for more balanced matches)
 		if predictions[i].DivisionCount != predictions[j].DivisionCount {
 			return predictions[i].DivisionCount < predictions[j].DivisionCount
 		}
 
+		// Final tiebreaker: Match draw probability (higher draw probability = more evenly matched)
 		return predictions[i].Draw > predictions[j].Draw
 	})
 
