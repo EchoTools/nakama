@@ -329,7 +329,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 
 	earlyQuitPenaltyLevel := 0
 	earlyQuitMatchmakingTier := int32(MatchmakingTier1)
-	if !serviceSettings.Matchmaking.EnableEarlyQuitPenalty {
+	if serviceSettings.Matchmaking.EnableEarlyQuitPenalty {
 		if config := sessionParams.earlyQuitConfig.Load(); config != nil {
 			earlyQuitPenaltyLevel = config.GetPenaltyLevel()
 			earlyQuitMatchmakingTier = config.GetTier()

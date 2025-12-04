@@ -167,7 +167,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	switch lobbyParams.Mode {
 	case evr.ModeArenaPublic:
 		// Only allow Tier 1 players to use the matchmaker. Tier 2+ players are forced into backfill-only mode.
-		if lobbyParams.EarlyQuitMatchmakingTier == MatchmakingTier1 {
+		if lobbyParams.EarlyQuitMatchmakingTier != MatchmakingTier1 {
 			logger.Debug("Player in Tier 2+ (backfill-only mode)", zap.Int32("tier", lobbyParams.EarlyQuitMatchmakingTier))
 			break
 		}

@@ -489,10 +489,10 @@ func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logge
 					var message string
 					if oldTier < newTier {
 						// Degraded to Tier 2+
-						message = "Matchmaking Status Update: Account flagged for early quitting.\nYou have been moved to the Tier 2 priority queue. All incoming Tier 1 requests\nare now cutting in front of you. You will remain in a holding pattern until no\nother players are available to match.\n\nComplete full matches to restore Tier 1 status."
+						message = TierDegradedMessage
 					} else {
 						// Recovered to Tier 1
-						message = "Matchmaking Priority Restored: You have returned to Tier 1 status. Complete full matches to maintain your standing."
+						message = TierRestoredMessage
 					}
 					if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
 						logger.WithField("error", err).Warn("Failed to send tier change DM")
