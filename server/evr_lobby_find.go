@@ -128,30 +128,20 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		<-time.After(3 * time.Second)
 	}
 
-	// Only Apply the early quit penalty if it's a public arena match.
-	if lobbyParams.Mode == evr.ModeArenaPublic && lobbyParams.EarlyQuitPenaltyLevel > 0 && ServiceSettings().Matchmaking.EnableEarlyQuitPenalty {
+	// Only Apply the early quit penalty if it's a public arena match and player is in Tier 2+.
+	if lobbyParams.Mode == evr.ModeArenaPublic && lobbyParams.EarlyQuitMatchmakingTier >= MatchmakingTier2 && ServiceSettings().Matchmaking.EnableEarlyQuitPenalty {
 
-		// Default backfill interval
-		interval := 1 * time.Second
+		// Tier 2 players get a matchmaking delay
+		interval := 60 * time.Second
 
-		// Early quitters have a longer backfill interval.
-		switch lobbyParams.EarlyQuitPenaltyLevel {
-		case 1:
-			interval = 60 * time.Second
-		case 2:
-			interval = 120 * time.Second
-		case 3:
-			interval = 240 * time.Second
-		}
-
-		// Notify the user that they are an early quitter.
-		message := fmt.Sprintf("Your early quit penalty is active (level %d), your matchmaking has been delayed by %d seconds.", lobbyParams.EarlyQuitPenaltyLevel, int(interval.Seconds()))
+		// Notify the user that they are in the penalty tier.
+		message := fmt.Sprintf("You are in Tier %d matchmaking. Your matchmaking has been delayed by %d seconds. Complete full matches to restore Tier 1 status.", lobbyParams.EarlyQuitMatchmakingTier, int(interval.Seconds()))
 		if _, err := SendUserMessage(ctx, p.appBot.dg, lobbyParams.DiscordID, message); err != nil {
 			logger.Warn("Failed to send message to user", zap.Error(err))
 		}
 		if guildGroup := p.guildGroupRegistry.Get(lobbyParams.GroupID.String()); guildGroup != nil {
 			// Send an audit log message to the guild group.
-			content := fmt.Sprintf("notified early quitter <@!%s> (%s): %s ", lobbyParams.DiscordID, session.Username(), message)
+			content := fmt.Sprintf("notified early quitter (Tier %d) <@!%s> (%s): %s ", lobbyParams.EarlyQuitMatchmakingTier, lobbyParams.DiscordID, session.Username(), message)
 			if _, err = AuditLogSendGuild(p.appBot.dg, guildGroup, content); err != nil {
 				logger.Warn("Failed to send audit log message", zap.Error(err))
 			}

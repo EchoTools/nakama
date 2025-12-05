@@ -133,8 +133,8 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 	t.Run("Tier workflow with max penalty", func(t *testing.T) {
 		config := NewEarlyQuitConfig()
 
-		// Increment to max penalty
-		for i := 0; i <= int(MaxEarlyQuitPenaltyLevel); i++ {
+		// Increment to max penalty (3)
+		for i := 0; i <= 3; i++ {
 			config.IncrementEarlyQuit()
 		}
 
@@ -144,9 +144,9 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 			t.Errorf("Expected Tier 2 at max penalty, got tier %d", tier)
 		}
 
-		// Verify penalty is capped
-		if config.EarlyQuitPenaltyLevel != MaxEarlyQuitPenaltyLevel {
-			t.Errorf("Expected penalty to be capped at %d, got %d", MaxEarlyQuitPenaltyLevel, config.EarlyQuitPenaltyLevel)
+		// Verify penalty is capped at max (3)
+		if config.EarlyQuitPenaltyLevel != 3 {
+			t.Errorf("Expected penalty to be capped at %d, got %d", 3, config.EarlyQuitPenaltyLevel)
 		}
 	})
 
@@ -167,9 +167,9 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 			t.Errorf("Expected Tier 1 at min penalty, got tier %d", tier)
 		}
 
-		// Verify penalty is floored
-		if config.EarlyQuitPenaltyLevel != MinEarlyQuitPenaltyLevel {
-			t.Errorf("Expected penalty to be floored at %d, got %d", MinEarlyQuitPenaltyLevel, config.EarlyQuitPenaltyLevel)
+		// Verify penalty is floored at min (-1)
+		if config.EarlyQuitPenaltyLevel != -1 {
+			t.Errorf("Expected penalty to be floored at %d, got %d", -1, config.EarlyQuitPenaltyLevel)
 		}
 	})
 }

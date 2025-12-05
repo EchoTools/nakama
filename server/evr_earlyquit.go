@@ -10,8 +10,10 @@ import (
 const (
 	StorageCollectionEarlyQuit = "EarlyQuit"
 	StorageKeyEarlyQuit        = "statistics"
-	MinEarlyQuitPenaltyLevel   = -1
-	MaxEarlyQuitPenaltyLevel   = 3
+
+	// Internal penalty level bounds (used for storage/tracking only)
+	minPenaltyLevel = -1
+	maxPenaltyLevel = 3
 
 	// Matchmaking Tier Constants
 	// Tier 1 (internal value 1) = Good standing
@@ -82,8 +84,8 @@ func (s *EarlyQuitConfig) IncrementEarlyQuit() {
 	defer s.Unlock()
 	s.LastEarlyQuitTime = time.Now().UTC()
 	s.EarlyQuitPenaltyLevel++
-	if s.EarlyQuitPenaltyLevel > MaxEarlyQuitPenaltyLevel {
-		s.EarlyQuitPenaltyLevel = MaxEarlyQuitPenaltyLevel // Max penalty level
+	if s.EarlyQuitPenaltyLevel > maxPenaltyLevel {
+		s.EarlyQuitPenaltyLevel = maxPenaltyLevel // Max penalty level
 	}
 }
 
@@ -92,15 +94,9 @@ func (s *EarlyQuitConfig) IncrementCompletedMatches() {
 	defer s.Unlock()
 	s.LastEarlyQuitTime = time.Time{}
 	s.EarlyQuitPenaltyLevel--
-	if s.EarlyQuitPenaltyLevel < MinEarlyQuitPenaltyLevel {
-		s.EarlyQuitPenaltyLevel = MinEarlyQuitPenaltyLevel // Reset penalty level
+	if s.EarlyQuitPenaltyLevel < minPenaltyLevel {
+		s.EarlyQuitPenaltyLevel = minPenaltyLevel // Reset penalty level
 	}
-}
-
-func (s *EarlyQuitConfig) GetPenaltyLevel() int {
-	s.Lock()
-	defer s.Unlock()
-	return int(s.EarlyQuitPenaltyLevel)
 }
 
 func (s *EarlyQuitConfig) GetTier() int32 {

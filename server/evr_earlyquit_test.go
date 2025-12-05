@@ -183,12 +183,12 @@ func TestEarlyQuitConfig_IncrementEarlyQuit(t *testing.T) {
 
 func TestEarlyQuitConfig_IncrementEarlyQuit_MaxPenalty(t *testing.T) {
 	config := NewEarlyQuitConfig()
-	config.EarlyQuitPenaltyLevel = MaxEarlyQuitPenaltyLevel
+	config.EarlyQuitPenaltyLevel = 3 // Max penalty level
 
 	config.IncrementEarlyQuit()
 
-	if config.EarlyQuitPenaltyLevel != MaxEarlyQuitPenaltyLevel {
-		t.Errorf("EarlyQuitPenaltyLevel = %v, want %v (max)", config.EarlyQuitPenaltyLevel, MaxEarlyQuitPenaltyLevel)
+	if config.EarlyQuitPenaltyLevel != 3 {
+		t.Errorf("EarlyQuitPenaltyLevel = %v, want %v (max)", config.EarlyQuitPenaltyLevel, 3)
 	}
 }
 
@@ -209,12 +209,12 @@ func TestEarlyQuitConfig_IncrementCompletedMatches(t *testing.T) {
 
 func TestEarlyQuitConfig_IncrementCompletedMatches_MinPenalty(t *testing.T) {
 	config := NewEarlyQuitConfig()
-	config.EarlyQuitPenaltyLevel = MinEarlyQuitPenaltyLevel
+	config.EarlyQuitPenaltyLevel = -1 // Min penalty level
 
 	config.IncrementCompletedMatches()
 
-	if config.EarlyQuitPenaltyLevel != MinEarlyQuitPenaltyLevel {
-		t.Errorf("EarlyQuitPenaltyLevel = %v, want %v (min)", config.EarlyQuitPenaltyLevel, MinEarlyQuitPenaltyLevel)
+	if config.EarlyQuitPenaltyLevel != -1 {
+		t.Errorf("EarlyQuitPenaltyLevel = %v, want %v (min)", config.EarlyQuitPenaltyLevel, -1)
 	}
 }
 
@@ -226,17 +226,6 @@ func TestEarlyQuitConfig_GetTier(t *testing.T) {
 
 	if tier != MatchmakingTier2 {
 		t.Errorf("GetTier() = %v, want %v", tier, MatchmakingTier2)
-	}
-}
-
-func TestEarlyQuitConfig_GetPenaltyLevel(t *testing.T) {
-	config := NewEarlyQuitConfig()
-	config.EarlyQuitPenaltyLevel = 2
-
-	level := config.GetPenaltyLevel()
-
-	if level != 2 {
-		t.Errorf("GetPenaltyLevel() = %v, want 2", level)
 	}
 }
 
@@ -259,10 +248,10 @@ func TestEarlyQuitConfig_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 
-	// Verify the config is still in a valid state
-	level := config.GetPenaltyLevel()
-	if level < int(MinEarlyQuitPenaltyLevel) || level > int(MaxEarlyQuitPenaltyLevel) {
-		t.Errorf("Penalty level %v is outside valid range [%v, %v]", level, MinEarlyQuitPenaltyLevel, MaxEarlyQuitPenaltyLevel)
+	// Verify the config is still in a valid state by checking tier can be retrieved
+	tier := config.GetTier()
+	if tier != MatchmakingTier1 && tier != MatchmakingTier2 {
+		t.Errorf("Tier %v is not a valid tier", tier)
 	}
 }
 
