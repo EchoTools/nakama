@@ -272,9 +272,9 @@ func (d *DiscordAppBot) handleReportServerIssue(ctx context.Context, logger runt
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
 							CustomID:    "issue_type",
-							Label:       "Issue Type (lag or other)",
+							Label:       "Issue Type (lag/stutter or other)",
 							Style:       discordgo.TextInputShort,
-							Placeholder: "Enter 'lag' for Server Lag/Stuttering, or 'other'",
+							Placeholder: "Enter 'lag' or 'stutter' for lag issues, or 'other'",
 							Required:    true,
 							MinLength:   1,
 							MaxLength:   50,
@@ -376,10 +376,19 @@ func (d *DiscordAppBot) handleServerIssueModalSubmit(ctx context.Context, logger
 	if issueType == "" && issueTypeInput != "" {
 		// Parse the issue type from user input
 		lowerInput := strings.ToLower(strings.TrimSpace(issueTypeInput))
-		if strings.Contains(lowerInput, "lag") || strings.Contains(lowerInput, "stutter") {
+		// Check for exact matches first (case-insensitive)
+		switch lowerInput {
+		case "lag", "stutter", "stuttering", "server_lag", "latency":
 			issueType = ServerIssueTypeLag
-		} else {
+		case "other":
 			issueType = ServerIssueTypeOther
+		default:
+			// Fallback to contains-based matching for more flexible input
+			if strings.Contains(lowerInput, "lag") || strings.Contains(lowerInput, "stutter") {
+				issueType = ServerIssueTypeLag
+			} else {
+				issueType = ServerIssueTypeOther
+			}
 		}
 	}
 
