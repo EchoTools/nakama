@@ -458,52 +458,6 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 	return nil
 }
 
-func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, sessionRegistry SessionRegistry, userID, sessionID string) error {
-	// Decrease the early quitter count for the player
-	eqconfig := NewEarlyQuitConfig()
-	if err := StorableRead(ctx, nk, userID, eqconfig, true); err != nil {
-		logger.WithField("error", err).Warn("Failed to load early quitter config")
-	} else {
-		eqconfig.IncrementCompletedMatches()
-
-		// Check for tier change after completing match
-		serviceSettings := ServiceSettings()
-		oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
-
-		if err := StorableWrite(ctx, nk, userID, eqconfig); err != nil {
-			logger.WithField("error", err).Warn("Failed to store early quitter config")
-		} else {
-			// Update session cache
-			if playerSession := sessionRegistry.Get(uuid.FromStringOrNil(sessionID)); playerSession != nil {
-				if params, ok := LoadParams(playerSession.Context()); ok {
-					params.earlyQuitConfig.Store(eqconfig)
-				}
-			}
-
-			// Send Discord DM if tier changed
-			if tierChanged {
-				discordID, err := GetDiscordIDByUserID(ctx, db, userID)
-				if err != nil {
-					logger.WithField("error", err).Warn("Failed to get Discord ID for tier notification")
-				} else if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
-					var message string
-					if oldTier < newTier {
-						// Degraded to Tier 2+
-						message = TierDegradedMessage
-					} else {
-						// Recovered to Tier 1
-						message = TierRestoredMessage
-					}
-					if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
-						logger.WithField("error", err).Warn("Failed to send tier change DM")
-					}
-				}
-			}
-		}
-	}
-	return nil
-}
-
 func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, sessionRegistry SessionRegistry, statisticsQueue *StatisticsQueue, matchID MatchID, msgs []evr.RemoteLog) error {
 	var statsByPlayer = make(map[evr.EvrId]evr.MatchTypeStats, 8)
 
@@ -563,9 +517,17 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 			"player_xpid": playerInfo.EvrID.String(),
 		})
 
-		// Increment the completed matches for the player
-		if err := s.incrementCompletedMatches(ctx, logger, nk, db, sessionRegistry, playerInfo.UserID, playerInfo.SessionID); err != nil {
-			logger.WithField("error", err).Warn("Failed to increment completed matches")
+		// Send match completed event - all storage/tier/notification logic is handled by the event processor
+		event := NewEventMatchCompleted(
+			playerInfo.UserID,
+			playerInfo.SessionID,
+			matchID,
+			playerInfo.DisplayName,
+			groupIDStr,
+			label.Mode,
+		)
+		if err := SendEvent(ctx, nk, event); err != nil {
+			logger.WithField("error", err).Warn("Failed to send match completed event")
 		}
 
 		serviceSettings := ServiceSettings()

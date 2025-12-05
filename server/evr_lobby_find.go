@@ -134,7 +134,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		// Default backfill interval
 		interval := 1 * time.Second
 
-		// Early quitters have a shorter backfill interval.
+		// Early quitters have a longer backfill interval.
 		switch lobbyParams.EarlyQuitPenaltyLevel {
 		case 1:
 			interval = 60 * time.Second
