@@ -261,36 +261,44 @@ func (d *DiscordAppBot) handleReportServerIssue(ctx context.Context, logger runt
 		return simpleInteractionResponse(s, i, "You are not currently in a match. You can only report server issues while in a match.")
 	}
 
-	// Show a message with select menu options first
-	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
+	// Show a modal with both issue type selection and details input
+	modal := &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
-			Flags:   discordgo.MessageFlagsEphemeral,
-			Content: "Select the type of server issue you're experiencing:",
+			CustomID: fmt.Sprintf("server_issue_modal:%s", data.MatchID),
+			Title:    "Report Server Issue",
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{
 					Components: []discordgo.MessageComponent{
-						discordgo.SelectMenu{
-							CustomID:    fmt.Sprintf("server_issue_type:%s", data.MatchID),
-							Placeholder: "Select issue type",
-							Options: []discordgo.SelectMenuOption{
-								{
-									Label:       "Server Lag/Stuttering",
-									Value:       ServerIssueTypeLag,
-									Description: "The server is experiencing lag or stuttering",
-								},
-								{
-									Label:       "Other",
-									Value:       ServerIssueTypeOther,
-									Description: "Other server-related issue",
-								},
-							},
+						discordgo.TextInput{
+							CustomID:    "issue_type",
+							Label:       "Issue Type (lag or other)",
+							Style:       discordgo.TextInputShort,
+							Placeholder: "Enter 'lag' for Server Lag/Stuttering, or 'other'",
+							Required:    true,
+							MinLength:   1,
+							MaxLength:   50,
+						},
+					},
+				},
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "issue_details",
+							Label:       "Issue Details (optional)",
+							Style:       discordgo.TextInputParagraph,
+							Placeholder: "Please describe the issue in detail...",
+							Required:    false,
+							MinLength:   IssueDetailsMinLength,
+							MaxLength:   IssueDetailsMaxLength,
 						},
 					},
 				},
 			},
 		},
-	})
+	}
+
+	return s.InteractionRespond(i.Interaction, modal)
 }
 
 // handleServerIssueTypeSelection handles the select menu for issue type selection
@@ -344,17 +352,34 @@ func (d *DiscordAppBot) handleServerIssueModalSubmit(ctx context.Context, logger
 	modalData := i.ModalSubmitData()
 
 	var issueDetails string
+	var issueTypeInput string
 
 	for _, row := range modalData.Components {
 		if actionRow, ok := row.(*discordgo.ActionsRow); ok {
 			for _, comp := range actionRow.Components {
 				switch c := comp.(type) {
 				case *discordgo.TextInput:
-					if c.CustomID == "issue_details" {
+					switch c.CustomID {
+					case "issue_details":
 						issueDetails = c.Value
+					case "issue_type":
+						issueTypeInput = c.Value
 					}
 				}
 			}
+		}
+	}
+
+	// Determine the issue type from input
+	// If the issueType parameter is empty (new modal format), use the input from modal
+	// If the issueType parameter is provided (legacy format), use it
+	if issueType == "" && issueTypeInput != "" {
+		// Parse the issue type from user input
+		lowerInput := strings.ToLower(strings.TrimSpace(issueTypeInput))
+		if strings.Contains(lowerInput, "lag") || strings.Contains(lowerInput, "stutter") {
+			issueType = ServerIssueTypeLag
+		} else {
+			issueType = ServerIssueTypeOther
 		}
 	}
 
