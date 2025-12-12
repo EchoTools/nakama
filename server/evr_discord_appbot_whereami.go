@@ -261,13 +261,32 @@ func (d *DiscordAppBot) handleReportServerIssue(ctx context.Context, logger runt
 		return simpleInteractionResponse(s, i, "You are not currently in a match. You can only report server issues while in a match.")
 	}
 
-	// Show a modal with both issue type selection and details input
+	// Create a brief server info summary for the modal
+	serverInfo := fmt.Sprintf("Server: %s | Region: %s | Mode: %s", data.ServerHostIP, data.RegionCode, data.MatchMode)
+	if data.GuildName != "" {
+		serverInfo = fmt.Sprintf("Guild: %s | %s", data.GuildName, serverInfo)
+	}
+
+	// Show a modal with server info, issue type selection, and details input
 	modal := &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
 			CustomID: fmt.Sprintf("server_issue_modal:%s", data.MatchID),
 			Title:    "Report Server Issue",
 			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:  "server_info",
+							Label:     "Current Server (read-only reference)",
+							Style:     discordgo.TextInputShort,
+							Value:     serverInfo,
+							Required:  false,
+							MinLength: 0,
+							MaxLength: 100,
+						},
+					},
+				},
 				discordgo.ActionsRow{
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
