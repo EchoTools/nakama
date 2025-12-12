@@ -89,6 +89,78 @@ func NewStatisticsQueue(logger runtime.Logger, db *sql.DB, nk runtime.NakamaModu
 						}
 					}
 
+					// If the operator is increment or decrement, read the current value, decode it, add the delta, and write it back.
+					// This is because the leaderboard uses a float64 encoding that is not compatible with simple integer arithmetic.
+					if e.BoardMeta.Operator == OperatorIncrement || e.BoardMeta.Operator == OperatorDecrement {
+						var currentVal float64
+						// Handle the case where the leaderboard might not exist yet.
+						_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, e.BoardMeta.ID(), []string{e.UserID}, 1, "", 0)
+						if err != nil {
+							if err == ErrLeaderboardNotFound {
+								// Leaderboard doesn't exist, so current value is 0.
+								currentVal = 0
+							} else {
+								logger.WithFields(map[string]any{
+									"error":          err.Error(),
+									"leaderboard_id": e.BoardMeta.ID(),
+								}).Error("Failed to list leaderboard records")
+								continue
+							}
+						} else {
+							if len(ownerRecords) > 0 {
+								currentVal, err = ScoreToFloat64(ownerRecords[0].Score, ownerRecords[0].Subscore)
+								if err != nil {
+									logger.WithFields(map[string]any{
+										"error":          err.Error(),
+										"leaderboard_id": e.BoardMeta.ID(),
+									}).Error("Failed to decode current score")
+									continue
+								}
+							} else {
+								// Record doesn't exist, so current value is 0.
+								currentVal = 0
+							}
+						}
+
+						deltaVal, err := ScoreToFloat64(e.Score, e.Subscore)
+						if err != nil {
+							logger.WithFields(map[string]any{
+								"error":          err.Error(),
+								"leaderboard_id": e.BoardMeta.ID(),
+							}).Error("Failed to decode delta score")
+							continue
+						}
+
+						var newVal float64
+						if e.BoardMeta.Operator == OperatorIncrement {
+							newVal = currentVal + deltaVal
+						} else {
+							newVal = currentVal - deltaVal
+						}
+
+						newScore, newSubscore, err := Float64ToScore(newVal)
+						if err != nil {
+							logger.WithFields(map[string]any{
+								"error":          err.Error(),
+								"leaderboard_id": e.BoardMeta.ID(),
+							}).Error("Failed to encode new score")
+							continue
+						}
+
+						// Update the entry to be a SET operation with the new value
+						e.Score = newScore
+						e.Subscore = newSubscore
+						e.BoardMeta.Operator = OperatorSet
+					}
+
+					var md map[string]any
+					if e.Metadata != nil {
+						md = make(map[string]any)
+						for k, v := range e.Metadata {
+							md[k] = v
+						}
+					}
+
 					if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, md, e.Override()); err != nil {
 
 						// Try to create the leaderboard

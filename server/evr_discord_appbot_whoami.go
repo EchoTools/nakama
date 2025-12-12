@@ -38,6 +38,7 @@ type UserProfileRequestOptions struct {
 	IncludePasswordSetState        bool
 	IncludeGuildRoles              bool
 	IncludeAllGuilds               bool
+	IncludeMatchmakingTier         bool
 	ShowLoginsSince                time.Time
 	SendFileOnError                bool // If true, send a file with the error message instead of an ephemeral message
 }
@@ -59,10 +60,11 @@ type WhoAmI struct {
 	journal             *GuildEnforcementJournal
 	activeSuspensions   ActiveGuildEnforcements
 	potentialAlternates map[string]*api.Account
+	earlyQuitConfig     *EarlyQuitConfig
 	opts                UserProfileRequestOptions
 }
 
-func NewWhoAmI(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, cache *DiscordIntegrator, profile *EVRProfile, loginHistory *LoginHistory, matchmakingSettings *MatchmakingSettings, guildGroups map[string]*GuildGroup, displayNameHistory *DisplayNameHistory, journal *GuildEnforcementJournal, potentialAlternates map[string]*api.Account, activeSuspensions ActiveGuildEnforcements, opts UserProfileRequestOptions, groupID string) *WhoAmI {
+func NewWhoAmI(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, cache *DiscordIntegrator, profile *EVRProfile, loginHistory *LoginHistory, matchmakingSettings *MatchmakingSettings, guildGroups map[string]*GuildGroup, displayNameHistory *DisplayNameHistory, journal *GuildEnforcementJournal, potentialAlternates map[string]*api.Account, activeSuspensions ActiveGuildEnforcements, earlyQuitConfig *EarlyQuitConfig, opts UserProfileRequestOptions, groupID string) *WhoAmI {
 
 	return &WhoAmI{
 		GroupID: groupID,
@@ -75,6 +77,7 @@ func NewWhoAmI(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModu
 		journal:             journal,
 		activeSuspensions:   activeSuspensions,
 		potentialAlternates: potentialAlternates,
+		earlyQuitConfig:     earlyQuitConfig,
 		opts:                opts,
 	}
 }
@@ -89,6 +92,7 @@ func (w *WhoAmI) createUserAccountDetailsEmbed() *discordgo.MessageEmbed {
 		defaultMatchmakingGuildName string
 		recentLogins                string
 		linkedDevices               string
+		matchmakingTier             string
 	)
 
 	// If the player is online, set the last seen time to now.
@@ -137,6 +141,18 @@ func (w *WhoAmI) createUserAccountDetailsEmbed() *discordgo.MessageEmbed {
 
 	if w.opts.IncludeRecentLogins {
 		recentLogins = w.createRecentLoginsFieldValue()
+	}
+
+	if w.opts.IncludeMatchmakingTier && w.earlyQuitConfig != nil {
+		tier := w.earlyQuitConfig.GetTier()
+		switch tier {
+		case MatchmakingTier1:
+			matchmakingTier = "Tier 1 (Good Standing)"
+		case MatchmakingTier2:
+			matchmakingTier = "Tier 2 (Penalty Tier)"
+		default:
+			matchmakingTier = fmt.Sprintf("Tier %d", tier)
+		}
 	}
 
 	passwordState := ""
@@ -191,6 +207,11 @@ func (w *WhoAmI) createUserAccountDetailsEmbed() *discordgo.MessageEmbed {
 				Inline: true,
 			},
 			{
+				Name:   "Matchmaking Tier",
+				Value:  matchmakingTier,
+				Inline: true,
+			},
+			{
 				Name:   "Linked Devices",
 				Value:  linkedDevices,
 				Inline: false,
@@ -205,6 +226,7 @@ func (w *WhoAmI) createUserAccountDetailsEmbed() *discordgo.MessageEmbed {
 				Value:  strings.Join(activeDisplayNames, "\n"),
 				Inline: false,
 			},
+
 			{
 				Name:   "Guild Memberships",
 				Value:  w.createGuildMembershipsEmbedFieldValue(),
@@ -441,6 +463,9 @@ func (w *WhoAmI) createSuspensionsEmbed() *discordgo.MessageEmbed {
 			Title:  "Suspensions",
 			Color:  WhoAmISecondaryColor,
 			Fields: fields,
+			Footer: &discordgo.MessageEmbedFooter{
+				Text: "Confidential. Do not share.",
+			},
 		}
 		// If any of the suspensions are active, set the color to red
 
@@ -711,6 +736,16 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 	matchmakingSettings = &settings
 
+	// Load early quit config
+	earlyQuitConfig := NewEarlyQuitConfig()
+	if err := StorableRead(ctx, nk, targetID, earlyQuitConfig, true); err != nil {
+		if status.Code(err) != codes.NotFound {
+			logger.WithField("error", err).Warn("failed to load early quit config")
+		}
+		// If not found, use the default config
+		earlyQuitConfig = nil
+	}
+
 	// Make sure that all guilds with enforcement records are included in the guildGroups
 	for groupID := range journal.RecordsByGroupID {
 		if _, ok := guildGroups[groupID]; !ok {
@@ -734,7 +769,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		}
 	}
 
-	w := NewWhoAmI(ctx, logger, nk, d.guildGroupRegistry, d.cache, profile, loginHistory, matchmakingSettings, guildGroups, displayNameHistory, journal, potentialAlternates, activeSuspensions, opts, groupID)
+	w := NewWhoAmI(ctx, logger, nk, d.guildGroupRegistry, d.cache, profile, loginHistory, matchmakingSettings, guildGroups, displayNameHistory, journal, potentialAlternates, activeSuspensions, earlyQuitConfig, opts, groupID)
 
 	if w.opts.IncludePastDisplayNamesEmbed {
 		pastDisplayNameEmbed = w.createPastDisplayNameEmbed(displayNameHistory, groupID)

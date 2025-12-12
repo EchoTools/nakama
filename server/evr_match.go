@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"reflect"
 	"slices"
 	"strconv"
 	"time"
@@ -157,7 +156,6 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 		disconnectInfos:      make(map[string]*PlayerDisconnectInfo, SocialLobbyMaxSize),
 		emptyTicks:           0,
 		tickRate:             10,
-		RankPercentile:       0.0,
 	}
 
 	state.ID = MatchIDFromContext(ctx)
@@ -598,7 +596,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 			// Store the player's time in the match to a leaderboard
 
-			if err := recordMatchTimeToLeaderboard(ctx, nk, mp.GetUserId(), mp.DisplayName, state.GetGroupID().String(), state.Mode, int64(time.Since(ts).Seconds())); err != nil {
+			if err := AccumulateLeaderboardStat(ctx, nk, mp.GetUserId(), mp.DisplayName, state.GetGroupID().String(), state.Mode, LobbyTimeStatisticID, time.Since(ts).Seconds()); err != nil {
 				logger.Warn("Failed to record match time to leaderboard: %v", err)
 			}
 
@@ -624,32 +622,58 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 							"display_name": mp.DisplayName,
 						}).Debug("Incrementing early quit for player.")
 
-						for _, r := range [...]evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime} {
-							boardID := StatisticBoardID(state.GetGroupID().String(), state.Mode, EarlyQuitStatisticID, r)
-							score, subscore, err := Float64ToScore(float64(1))
-							if err != nil {
-								return fmt.Errorf("invalid match time: %w", err)
-							}
-							if _, err := nk.LeaderboardRecordWrite(ctx, boardID, mp.UserID.String(), mp.DisplayName, score, subscore, nil, nil); err != nil {
-								if errors.Is(err, ErrLeaderboardNotFound) {
-									if err = nk.LeaderboardCreate(ctx, boardID, true, "desc", "incr", ResetScheduleToCron(r), nil, true); err != nil {
-										logger.Warn("Failed to create early quit leaderboard: %v", err)
-									}
-								}
-								logger.Warn("Failed to write early quit record: %v", err)
-							}
+						if err := AccumulateLeaderboardStat(ctx, nk, mp.GetUserId(), mp.DisplayName, state.GetGroupID().String(), state.Mode, EarlyQuitStatisticID, 1); err != nil {
+							logger.Warn("Failed to record early quit to leaderboard: %v", err)
 						}
 					}
 
 					eqconfig := NewEarlyQuitConfig()
 					_nk := nk.(*RuntimeGoNakamaModule)
 					if err := StorableRead(ctx, nk, mp.GetUserId(), eqconfig, true); err != nil {
-						logger.Warn("Failed to load early quitter config", zap.Error(err))
-					} else if err := StorableWrite(ctx, nk, mp.GetUserId(), eqconfig); err != nil {
-						logger.Warn("Failed to write early quitter config", zap.Error(err))
-					} else if s := _nk.sessionRegistry.Get(uuid.FromStringOrNil(mp.GetSessionId())); s != nil {
-						if params, ok := LoadParams(s.Context()); ok {
-							params.earlyQuitConfig.Store(eqconfig)
+						logger.WithField("error", err).Warn("Failed to load early quitter config")
+					} else {
+
+						eqconfig.IncrementEarlyQuit()
+
+						// Check for tier change after early quit
+						serviceSettings := ServiceSettings()
+						oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
+
+						logger.WithFields(map[string]interface{}{
+							"old_tier":     oldTier,
+							"new_tier":     newTier,
+							"tier_changed": tierChanged,
+							"eqconfig":     eqconfig,
+						}).Debug("Early quitter tier update.")
+
+						if err := StorableWrite(ctx, nk, mp.GetUserId(), eqconfig); err != nil {
+							logger.Warn("Failed to write early quitter config", zap.Error(err))
+						} else {
+							if s := _nk.sessionRegistry.Get(uuid.FromStringOrNil(mp.GetSessionId())); s != nil {
+								if params, ok := LoadParams(s.Context()); ok {
+									params.earlyQuitConfig.Store(eqconfig)
+								}
+							}
+
+							// Send Discord DM if tier changed
+							if tierChanged {
+								discordID, err := GetDiscordIDByUserID(ctx, db, mp.GetUserId())
+								if err != nil {
+									logger.Warn("Failed to get Discord ID for tier notification", zap.Error(err))
+								} else if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
+									var message string
+									if oldTier > newTier {
+										// Degraded to Tier 2+
+										message = TierDegradedMessage
+									} else {
+										// Recovered to Tier 1
+										message = TierRestoredMessage
+									}
+									if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
+										logger.Warn("Failed to send tier change DM", zap.Error(err))
+									}
+								}
+							}
 						}
 					}
 				}
@@ -686,57 +710,6 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	return state
-}
-
-func recordGameServerTimeToLeaderboard(ctx context.Context, nk runtime.NakamaModule, userID, username, groupID string, mode evr.Symbol, matchTimeSecs int64) error {
-	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
-	if matchTimeSecs <= 0 {
-		return nil
-	}
-
-	for _, period := range resetSchedules {
-		id := StatisticBoardID(groupID, mode, GameServerTimeStatisticsID, period)
-		score, subscore, err := Float64ToScore(float64(matchTimeSecs))
-		if err != nil {
-			return fmt.Errorf("invalid match time: %w", err)
-		}
-		// Write the record
-		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subscore, nil, nil); err != nil {
-
-			// Try to create the leaderboard
-			if err = nk.LeaderboardCreate(ctx, id, true, "desc", "incr", ResetScheduleToCron(period), nil, true); err != nil {
-				return fmt.Errorf("Leaderboard create error: %w", err)
-			} else if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subscore, nil, nil); err != nil {
-				return fmt.Errorf("Leaderboard record write error: %w", err)
-			}
-		}
-	}
-	return nil
-}
-
-func recordMatchTimeToLeaderboard(ctx context.Context, nk runtime.NakamaModule, userID, displayName, groupID string, mode evr.Symbol, matchTimeSecs int64) error {
-	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
-	if matchTimeSecs <= 0 {
-		return nil
-	}
-
-	for _, period := range resetSchedules {
-		id := StatisticBoardID(groupID, mode, LobbyTimeStatisticID, period)
-		score, subscore, err := Float64ToScore(float64(matchTimeSecs))
-		if err != nil {
-			return fmt.Errorf("invalid match time: %w", err)
-		}
-		// Write the record
-		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, subscore, nil, nil); err != nil {
-			// Try to create the leaderboard
-			if err = nk.LeaderboardCreate(ctx, id, true, "desc", "incr", ResetScheduleToCron(period), nil, true); err != nil {
-				return fmt.Errorf("Leaderboard create error: %w", err)
-			} else if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, subscore, nil, nil); err != nil {
-				return fmt.Errorf("Leaderboard record write error: %w", err)
-			}
-		}
-	}
-	return nil
 }
 
 // MatchLoop is called every tick of the match and handles state, plus messages from the client.
@@ -808,37 +781,43 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				}
 			*/
 		default:
-			typ, found := evr.SymbolTypes[uint64(in.GetOpCode())]
-			if !found {
-				logger.Error("Unknown opcode: %v", in.GetOpCode())
-				continue
-			}
-
-			logger.Debug("Received match message %T(%s) from %s (%s)", typ, string(in.GetData()), in.GetUsername(), in.GetSessionId())
-			// Unmarshal the message into an interface, then switch on the type.
-			msg := reflect.New(reflect.TypeOf(typ).Elem()).Interface().(evr.Message)
-			if err := json.Unmarshal(in.GetData(), &msg); err != nil {
-				logger.Error("Failed to unmarshal message: %v", err)
-			}
-
-			var messageFn func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *MatchLabel, in runtime.MatchData, msg evr.Message) (*MatchLabel, error)
-
-			// Switch on the message type. This is where the match logic is handled.
-			switch msg := msg.(type) {
-			default:
-				logger.Warn("Unknown message type: %T", msg)
-			}
-
-			// Time the execution
-			start := time.Now()
-			// Execute the message function
-			if messageFn != nil {
-				state, err = messageFn(ctx, logger, db, nk, dispatcher, state, in, msg)
-				if err != nil {
-					logger.Error("match pipeline: %v", err)
+			logger.Warn("Unknown match message type: %T", in)
+			/*
+				typ, found := evr.SymbolTypes[uint64(in.GetOpCode())]
+				if !found {
+					logger.Error("Unknown opcode: %v", in.GetOpCode())
+					continue
 				}
-			}
-			logger.Debug("Message %T took %dms", msg, time.Since(start)/time.Millisecond)
+
+				logger.Debug("Received match message %T(%s) from %s (%s)", typ, string(in.GetData()), in.GetUsername(), in.GetSessionId())
+				// Unmarshal the message into an interface, then switch on the type.
+				msg := reflect.New(reflect.TypeOf(typ).Elem()).Interface().(evr.Message)
+				if err := json.Unmarshal(in.GetData(), &msg); err != nil {
+					logger.Error("Failed to unmarshal message: %v", err)
+				}
+
+				var messageFn func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *MatchLabel, in runtime.MatchData, msg evr.Message) (*MatchLabel, error)
+
+				// Switch on the message type. This is where the match logic is handled.
+				switch msg := msg.(type) {
+
+				default:
+					logger.Warn("Unknown message type: %T", msg)
+				}
+
+				// Time the execution
+				start := time.Now()
+				// Execute the message function
+				if messageFn == nil {
+					logger.Warn("No handler for message type: %T", msg)
+				} else {
+					state, err = messageFn(ctx, logger, db, nk, dispatcher, state, in, msg)
+					if err != nil {
+						logger.Error("match pipeline: %v", err)
+					}
+				}
+				logger.Debug("Message %T took %dms", msg, time.Since(start)/time.Millisecond)
+			*/
 		}
 	}
 
@@ -1009,7 +988,7 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 
 	nk.MetricsTimerRecord("lobby_session_duration", state.MetricsTags(), time.Since(state.StartTime))
 	if state.server != nil && slices.Contains(ValidLeaderboardModes, state.Mode) {
-		if err := recordGameServerTimeToLeaderboard(ctx, nk, state.server.GetUserId(), state.server.GetUsername(), state.GetGroupID().String(), state.Mode, int64(time.Since(state.StartTime).Seconds())); err != nil {
+		if err := AccumulateLeaderboardStat(ctx, nk, state.server.GetUserId(), state.server.GetUsername(), state.GetGroupID().String(), state.Mode, GameServerTimeStatisticsID, time.Since(state.StartTime).Seconds()); err != nil {
 			logger.Warn("Failed to record game server time to leaderboard: %v", err)
 		}
 	}

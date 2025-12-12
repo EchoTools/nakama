@@ -11,7 +11,6 @@ import (
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"gonum.org/v1/gonum/stat"
 )
 
 type MatchLabelMeta struct {
@@ -197,8 +196,6 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 
 		groupIDs := make(map[string]struct{})
 
-		percentileVariances := make(map[MatchStateTags][]float64)
-		matchRankPercentiles := make(map[MatchStateTags][]float64)
 		playerSet := make(map[string]struct{})
 
 		for _, state := range matchStates {
@@ -240,17 +237,10 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 
 			matchPlayerCounts[stateTags] = append(matchPlayerCounts[stateTags], activePlayerCount)
 
-			rank_percentiles := make([]float64, 0, len(state.State.Players))
-
 			for _, player := range state.State.Players {
 				tags := NewPlayerTags(groupID, state.State.Mode, player.GeoHash, state.State.GameServer.GeoHash, player.PingMillis)
 				playerData[tags] += 1
-
-				rank_percentiles = append(rank_percentiles, float64(player.RankPercentile))
 			}
-
-			percentileVariances[stateTags] = append(percentileVariances[stateTags], stat.Variance(rank_percentiles, nil))
-			matchRankPercentiles[stateTags] = append(matchRankPercentiles[stateTags], state.State.RankPercentile)
 		}
 
 		seenPlayers := make(map[PlayerTags]struct{})
@@ -285,8 +275,6 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 
 			nk.metrics.CustomGauge("match_active_gauge", tagMap, float64(len(matchCounts)))
 			nk.metrics.CustomGauge("player_active_gauge", tagMap, float64(playerCount))
-			nk.metrics.CustomGauge("match_rank_percentile_average_variance", tagMap, stat.Mean(percentileVariances[tags], nil))
-			nk.metrics.CustomGauge("match_rank_percentile_average", tagMap, stat.Mean(matchRankPercentiles[tags], nil))
 		}
 
 		// Zero out the metrics for the previously seen, but not currently seen matches
@@ -295,8 +283,6 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 				tagMap := tags.AsMap()
 				nk.metrics.CustomGauge("match_active_gauge", tagMap, 0)
 				nk.metrics.CustomGauge("player_active_gauge", tagMap, 0)
-				nk.metrics.CustomGauge("match_rank_percentile_average_variance", tagMap, 0)
-				nk.metrics.CustomGauge("match_rank_percentile_average", tagMap, 0)
 			}
 		}
 

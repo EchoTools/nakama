@@ -41,6 +41,9 @@ func (s *EventServerProfileUpdate) Process(ctx context.Context, logger runtime.L
 
 	// Select the correct statistics based on the mode
 	switch s.Mode {
+	case evr.ModeArenaPublic:
+		// Arena stats are processed from the remote log set
+		// see evr_runtime_event_remotelogset.go
 	case evr.ModeCombatPublic:
 		if s.Update.Statistics.Combat == nil {
 			return fmt.Errorf("missing combat statistics")
@@ -76,82 +79,101 @@ func (s *EventServerProfileUpdate) Process(ctx context.Context, logger runtime.L
 
 func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, prev, update evr.Statistics) ([]*StatisticsQueueEntry, error) {
 
-	// Update the calculated fields
-	if prev != nil {
-		prev.CalculateFields()
-	}
-	update.CalculateFields()
+	// Merge the update (match stats) into the previous stats (totals)
+	// to get the new totals.
 
-	// Modify the update based on the previous stats
-	updateElem := reflect.ValueOf(update).Elem()
-	prevValue := reflect.ValueOf(prev)
-	for i := range updateElem.NumField() {
-		if field := updateElem.Field(i); !field.IsNil() && prevValue.IsValid() && !prevValue.IsNil() {
-			stat := field.Interface().(*evr.StatisticValue)
-			if stat == nil {
-				continue
-			}
-			// If this is the XP field, just set it to the new value
-			if stat.GetName() == "XP" {
-				stat.SetValue(stat.GetValue())
-			}
-			// If the previous field exists, subtract the previous value from the current value
-			prevField := prevValue.Elem().Field(i)
-			if prevField.IsValid() && !prevField.IsNil() {
-				if val := prevField.Interface().(*evr.StatisticValue); val != nil {
-					stat.SetValue(stat.GetValue() - val.GetValue())
-				}
-			}
+	// Use prev as the base for total.
+	// If prev is nil, create a new instance.
+	var total evr.Statistics
+	if prev != nil {
+		total = prev
+	} else {
+		newTotal := reflect.New(reflect.TypeOf(update).Elem()).Interface()
+		var ok bool
+		if total, ok = newTotal.(evr.Statistics); !ok {
+			return nil, fmt.Errorf("failed to assert type to evr.Statistics")
 		}
 	}
 
-	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
+	totalElem := reflect.ValueOf(total).Elem()
+	updateElem := reflect.ValueOf(update).Elem()
 
-	opMap := map[string]LeaderboardOperator{
-		"avg": OperatorSet,
-		"add": OperatorIncrement,
-		"max": OperatorBest,
-		"rep": OperatorSet,
-	}
-
-	// Create a map of stat names to their corresponding operator
-	statsBaseType := reflect.ValueOf(evr.ArenaStatistics{}).Type()
-	nameOperatorMap := make(map[string]LeaderboardOperator, statsBaseType.NumField())
-	for i := range statsBaseType.NumField() {
-		jsonTag := statsBaseType.Field(i).Tag.Get("json")
-		statName := strings.SplitN(jsonTag, ",", 2)[0]
-		opTag := statsBaseType.Field(i).Tag.Get("op")
-		nameOperatorMap[statName] = opMap[opTag]
-	}
-
-	// construct the entries
-	entries := make([]*StatisticsQueueEntry, 0, len(resetSchedules)*updateElem.NumField())
+	// Iterate over the fields in the update
 	for i := 0; i < updateElem.NumField(); i++ {
 		updateField := updateElem.Field(i)
+		if updateField.IsNil() {
+			continue
+		}
+
+		fieldType := updateElem.Type().Field(i)
+		jsonTag := fieldType.Tag.Get("json")
+		statName := strings.SplitN(jsonTag, ",", 2)[0]
+
+		opTag := fieldType.Tag.Get("op")
+		opName, _, _ := strings.Cut(opTag, ",")
+
+		// Handle XP specially as it might be marked as 'rep' in some structs but should be additive
+		if statName == "XP" {
+			opName = "add"
+		}
+
+		totalField := totalElem.Field(i)
+		if totalField.IsNil() {
+			totalField.Set(reflect.New(fieldType.Type.Elem()))
+		}
+
+		totalStat := totalField.Interface().(*evr.StatisticValue)
+		updateStat := updateField.Interface().(*evr.StatisticValue)
+
+		switch opName {
+		case "add":
+			totalStat.SetValue(totalStat.GetValue() + updateStat.GetValue())
+			totalStat.SetCount(totalStat.GetCount() + updateStat.GetCount())
+		case "max":
+			if updateStat.GetValue() > totalStat.GetValue() {
+				totalStat.SetValue(updateStat.GetValue())
+			}
+			// case "rep", "avg":
+			// Ignore calculated fields or replacements from match stats
+		}
+	}
+
+	// Recalculate fields (percentages, averages, etc.) based on the new totals
+	total.CalculateFields()
+
+	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
+
+	// Use OperatorSet for everything because the absolute totals have been calculated.
+	// This avoids the Float64ToScore offset accumulation issue with OperatorIncrement.
+	operator := OperatorSet
+
+	// construct the entries
+	entries := make([]*StatisticsQueueEntry, 0, len(resetSchedules)*totalElem.NumField())
+	for i := 0; i < totalElem.NumField(); i++ {
+		totalField := totalElem.Field(i)
+		if totalField.IsNil() {
+			continue
+		}
+
+		fieldType := totalElem.Type().Field(i)
+		jsonTag := fieldType.Tag.Get("json")
+		statName := strings.SplitN(jsonTag, ",", 2)[0]
+
+		statValue := totalField.Interface().(*evr.StatisticValue).GetValue()
+
+		// Skip stats that are not set or negative
+		if statValue <= 0 {
+			continue
+		}
 
 		for _, r := range resetSchedules {
-
-			if updateField.IsNil() {
-				continue
-			}
-
-			// Extract the JSON tag from the struct field
-			jsonTag := updateElem.Type().Field(i).Tag.Get("json")
-			statName := strings.SplitN(jsonTag, ",", 2)[0]
 
 			meta := LeaderboardMeta{
 				GroupID:       groupID,
 				Mode:          mode,
 				StatName:      statName,
-				Operator:      nameOperatorMap[statName],
+				Operator:      operator,
 				ResetSchedule: r,
-			}
-
-			statValue := updateField.Interface().(*evr.StatisticValue).GetValue()
-
-			// Skip stats that are not set or negative
-			if statValue <= 0 {
-				continue
 			}
 
 			score, subscore, err := Float64ToScore(statValue)

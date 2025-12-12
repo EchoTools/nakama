@@ -241,7 +241,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		} else {
 			// If the member role is not set, the user must be a member of the guild.
 			if guildMember, err := p.discordCache.GuildMember(gg.GuildID, lobbyParams.DiscordID); err != nil {
-				if err != nil && !IsDiscordErrorCode(err, discordgo.ErrCodeUnknownMember) {
+				if !IsDiscordErrorCode(err, discordgo.ErrCodeUnknownMember) {
 					p.logger.Warn("Failed to get guild member. failing open.", zap.String("guild_id", gg.GuildID), zap.Error(err))
 				}
 			} else if guildMember == nil || guildMember.Pending {

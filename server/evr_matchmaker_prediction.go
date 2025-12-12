@@ -20,13 +20,13 @@ type PredictedMatch struct {
 	OldestTicketTimestamp int64                     `json:"oldest_ticket"`
 }
 
-type CandidateList []runtime.MatchmakerEntry
+type MatchmakerEntries []runtime.MatchmakerEntry
 
-func (g CandidateList) Len() int {
+func (g MatchmakerEntries) Len() int {
 	return len(g)
 }
 
-func (g CandidateList) Ratings() []types.Rating {
+func (g MatchmakerEntries) Ratings() []types.Rating {
 	ratings := make([]types.Rating, len(g))
 	for i, e := range g {
 		mu := e.GetProperties()["rating_mu"].(float64)
@@ -35,7 +35,7 @@ func (g CandidateList) Ratings() []types.Rating {
 	}
 	return ratings
 }
-func (g CandidateList) DivisionSet() map[string]struct{} {
+func (g MatchmakerEntries) DivisionSet() map[string]struct{} {
 	divisionSet := make(map[string]struct{}, len(g))
 	for _, e := range g {
 		divisions := strings.Split(e.GetProperties()["divisions"].(string), ",")
@@ -45,15 +45,15 @@ func (g CandidateList) DivisionSet() map[string]struct{} {
 	}
 	return divisionSet
 }
-func (g CandidateList) TeamRating() types.TeamRating {
+func (g MatchmakerEntries) TeamRating() types.TeamRating {
 	return types.TeamRating{Team: g.Ratings()}
 }
 
-func (g CandidateList) TeamOrdinal() float64 {
+func (g MatchmakerEntries) TeamOrdinal() float64 {
 	return rating.TeamOrdinal(g.TeamRating())
 }
 
-func (g CandidateList) Strength() float64 {
+func (g MatchmakerEntries) Strength() float64 {
 	var strength float64
 	for _, e := range g {
 		strength += e.GetProperties()["rating_mu"].(float64)
@@ -94,13 +94,13 @@ func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) <-chan Pre
 		}
 
 		var (
-			allTickets          = make(map[string]CandidateList, validCandidates)
+			allTickets          = make(map[string]MatchmakerEntries, validCandidates)
 			candidateHashSet    = make(map[uint64]struct{}, validCandidates)
 			ratingsByGroup      = make([]types.Team, 0, 10)
-			candidateTickets    = make(map[string]CandidateList, 10)
-			groups              = make([]CandidateList, 0, 10)
-			teamA               = make(CandidateList, 0, 10)
-			teamB               = make(CandidateList, 0, 10)
+			candidateTickets    = make(map[string]MatchmakerEntries, 10)
+			groups              = make([]MatchmakerEntries, 0, 10)
+			teamA               = make(MatchmakerEntries, 0, 10)
+			teamB               = make(MatchmakerEntries, 0, 10)
 			teamRatingsA        = make([]types.Rating, 0, 5)
 			teamRatingsB        = make([]types.Rating, 0, 5)
 			ratingsByTicket     = make(map[string]types.Team, 10)
@@ -205,7 +205,6 @@ func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) <-chan Pre
 				OldestTicketTimestamp: int64(ageByTicket[c[0].GetTicket()]),
 			}
 		}
-
 	}()
 	return predictCh
 }
