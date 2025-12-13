@@ -19,9 +19,9 @@ type GuildEnforcementRecord struct {
 	CommunityValuesRequired bool      `json:"community_values_required"`
 	AuditorNotes            string    `json:"notes"`
 	AllowPrivateLobbies     bool      `json:"allow_private_lobbies"`
-	RuleViolated            string    `json:"rule_violated,omitempty"`            // Specific rule that was violated (for standardized reasons)
-	IsPubliclyVisible       bool      `json:"is_publicly_visible,omitempty"`      // Whether this record should appear in public logs
-	DMNotificationSent      bool      `json:"dm_notification_sent,omitempty"`     // Tracks if DM notification was successfully sent
+	RuleViolated            string    `json:"rule_violated,omitempty"`             // Specific rule that was violated (for standardized reasons)
+	IsPubliclyVisible       bool      `json:"is_publicly_visible,omitempty"`       // Whether this record should appear in public logs
+	DMNotificationSent      bool      `json:"dm_notification_sent,omitempty"`      // Tracks if DM notification was successfully sent
 	DMNotificationAttempted time.Time `json:"dm_notification_attempted,omitempty"` // When DM notification was attempted
 }
 

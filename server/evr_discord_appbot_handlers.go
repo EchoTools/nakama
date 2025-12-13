@@ -643,9 +643,9 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			if gg != nil {
 				guildName = gg.Name()
 			}
-			sent, err := SendEnforcementNotification(ctx, s, record, target.User.ID, guildName)
+			sent, err := SendEnforcementNotification(ctx, d.dg, record, target.ID, guildName)
 			if err != nil {
-				logger.Warn("Failed to send enforcement notification DM", zap.Error(err), zap.String("user_id", target.User.ID))
+				logger.Warn("Failed to send enforcement notification DM", zap.Error(err), zap.String("user_id", target.ID))
 			}
 			// Update the record with notification status
 			if updateErr := journal.UpdateRecordNotificationStatus(groupID, record.ID, sent); updateErr != nil {

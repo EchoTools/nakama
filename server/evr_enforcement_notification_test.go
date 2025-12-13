@@ -51,14 +51,14 @@ func TestGuildEnforcementRecord_GetNotificationMessage(t *testing.T) {
 		{
 			name: "Kick without suspension",
 			record: GuildEnforcementRecord{
-				ID:                "test-id-2",
-				UserID:            "user-2",
-				GroupID:           "group-2",
-				CreatedAt:         time.Now(),
-				UpdatedAt:         time.Now(),
-				UserNoticeText:    "Spamming chat",
-				Expiry:            time.Time{}, // Zero time means kick, not suspension
-				RuleViolated:      "Spam or Advertising",
+				ID:                  "test-id-2",
+				UserID:              "user-2",
+				GroupID:             "group-2",
+				CreatedAt:           time.Now(),
+				UpdatedAt:           time.Now(),
+				UserNoticeText:      "Spamming chat",
+				Expiry:              time.Time{}, // Zero time means kick, not suspension
+				RuleViolated:        "Spam or Advertising",
 				AllowPrivateLobbies: false,
 			},
 			guildName: "Another Guild",
