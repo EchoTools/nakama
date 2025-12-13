@@ -408,7 +408,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 		maxAgeSecs := ServiceSettings().Matchmaking.ArenaBackfillMaxAgeSecs
 		if maxAgeSecs > 0 {
 			// Exclude matches that started more than maxAgeSecs ago
-			qparts = append(qparts, fmt.Sprintf("-label.start_time:<=%d", time.Now().UTC().Add(-time.Duration(maxAgeSecs)*time.Second).Unix()))
+			qparts = append(qparts, fmt.Sprintf("-label.start_time:<%d", time.Now().UTC().Add(-time.Duration(maxAgeSecs)*time.Second).Unix()))
 		}
 	}
 
