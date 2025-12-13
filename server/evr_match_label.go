@@ -26,7 +26,7 @@ type slotReservation struct {
 type MatchLabel struct {
 	ID          MatchID      `json:"id"`                   // The Session Id used by EVR (the same as match id)
 	Open        bool         `json:"open"`                 // Whether the lobby is open to new players (Matching Only)
-	LockedAt    time.Time    `json:"locked_at,omitempty"`  // The time the match was locked.
+	LockedAt    *time.Time   `json:"locked_at,omitempty"`  // The time the match was locked.
 	LobbyType   LobbyType    `json:"lobby_type"`           // The type of lobby (Public, Private, Unassigned) (EVR)
 	Mode        evr.Symbol   `json:"mode,omitempty"`       // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
 	Level       evr.Symbol   `json:"level,omitempty"`      // The level to play on (EVR).
@@ -111,7 +111,7 @@ func (s *MatchLabel) IsPublicMatch() bool {
 }
 
 func (s *MatchLabel) IsLocked() bool {
-	if !s.Open || !s.LockedAt.IsZero() {
+	if !s.Open || (s.LockedAt != nil && !s.LockedAt.IsZero()) {
 		return true
 	}
 	return false
@@ -498,8 +498,8 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 			OrangeScore: l.GameState.OrangeScore,
 			Teams:       l.GameState.Teams,
 		}
-		if l.GameState.RoundClock != nil {
-			gs.RoundClock = l.GameState.RoundClock.LatestAsNewClock()
+		if l.GameState.SessionScoreboard != nil {
+			gs.SessionScoreboard = l.GameState.SessionScoreboard.LatestAsNewScoreboard()
 		}
 	}
 
@@ -522,14 +522,14 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 		PlayerLimit:      l.PlayerLimit,
 		TeamSize:         l.TeamSize,
 		GameServer: &GameServerPresence{
-			OperatorID:  l.GameServer.OperatorID,
-			GroupIDs:    l.GameServer.GroupIDs,
-			VersionLock: l.GameServer.VersionLock,
-			//RegionCodes: l.GameServer.RegionCodes,
-			Tags:        l.GameServer.Tags,
-			Features:    l.GameServer.Features,
-			Region:      l.GameServer.Region,
-			CountryCode: l.GameServer.CountryCode,
+			OperatorID:    l.GameServer.OperatorID,
+			GroupIDs:      l.GameServer.GroupIDs,
+			VersionLock:   l.GameServer.VersionLock,
+			DefaultRegion: l.GameServer.DefaultRegion,
+			Tags:          l.GameServer.Tags,
+			Features:      l.GameServer.Features,
+			Region:        l.GameServer.Region,
+			CountryCode:   l.GameServer.CountryCode,
 		},
 		Players:  make([]PlayerInfo, 0),
 		RatingMu: l.RatingMu,

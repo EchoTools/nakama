@@ -24,6 +24,7 @@ type GameServerPresence struct {
 	Endpoint        evr.Endpoint `json:"endpoint,omitempty"`         // The endpoint data used for connections.
 	VersionLock     evr.Symbol   `json:"version_lock,omitempty"`     // The game build version. (EVR)
 	AppID           string       `json:"app_id,omitempty"`           // The game app id. (EVR)
+	DefaultRegion   string       `json:"default_region,omitempty"`   // The default region code for the server.
 	RegionCodes     []string     `json:"region_codes,omitempty"`     // The region the match is hosted in. (Matching Only) (EVR)
 	ServerID        uint64       `json:"server_id,omitempty"`        // The server id of the server. (EVR)
 	Features        []string     `json:"features,omitempty"`         // The features of the server.
@@ -95,7 +96,7 @@ func (g *GameServerPresence) IsPriorityFor(mode evr.Symbol) bool {
 	return slices.Contains(g.DesignatedModes, mode)
 }
 
-func NewGameServerPresence(userId, sessionId uuid.UUID, serverId uint64, internalIP, externalIP net.IP, port uint16, groupIDs []uuid.UUID, regionCodes []string, versionLock evr.Symbol, tags, features []string, timeStepUsecs uint32, ipInfo IPInfo, geoPrecision int, isNative bool, nativeVersion string) *GameServerPresence {
+func NewGameServerPresence(userId, sessionId uuid.UUID, serverId uint64, internalIP, externalIP net.IP, port uint16, groupIDs []uuid.UUID, defaultRegion string, regionCodes []string, versionLock evr.Symbol, tags, features []string, timeStepUsecs uint32, ipInfo IPInfo, geoPrecision int, isNative bool, nativeVersion string) *GameServerPresence {
 
 	var asn int
 	var lat, lon float64
@@ -126,6 +127,7 @@ func NewGameServerPresence(userId, sessionId uuid.UUID, serverId uint64, interna
 			ExternalIP: externalIP,
 			Port:       port,
 		},
+		DefaultRegion: defaultRegion,
 		RegionCodes:   regionCodes,
 		VersionLock:   versionLock,
 		GroupIDs:      groupIDs,

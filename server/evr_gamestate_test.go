@@ -59,9 +59,9 @@ func TestGameState_Update(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := &GameState{
-				RoundClock:  NewRoundClock(10*time.Minute, time.Now()),
-				BlueScore:   0,
-				OrangeScore: 0}
+				SessionScoreboard: NewSessionScoreboard(10*time.Minute, time.Now()),
+				BlueScore:         0,
+				OrangeScore:       0}
 
 			g.Update(tt.goals)
 			if g.BlueScore != tt.wantBlue {

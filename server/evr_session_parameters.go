@@ -38,6 +38,7 @@ type SessionParameters struct {
 	serverTags          []string            // []string of the server tags
 	serverGuilds        []string            // []string of the server guilds
 	serverRegions       []string            // []string of the server regions
+	defaultRegion       string              // The default region code for the server
 	urlParameters       map[string][]string // The URL parameters
 
 	profile                      *EVRProfile                      // The account
