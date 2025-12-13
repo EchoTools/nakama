@@ -429,11 +429,11 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			delete(state.TeamAlignments, p.GetUserId())
 		}
 
-		// If the round clock is being used, set the join clock time
-		if state.GameState != nil && state.GameState.RoundClock != nil {
+		// If the session scoreboard is being used, set the join clock time
+		if state.GameState != nil && state.GameState.SessionScoreboard != nil {
 			// Do not overwrite an existing value
 			if _, ok := state.joinTimeMilliseconds[p.GetSessionId()]; !ok {
-				state.joinTimeMilliseconds[p.GetSessionId()] = state.GameState.RoundClock.Elapsed().Milliseconds()
+				state.joinTimeMilliseconds[p.GetSessionId()] = state.GameState.SessionScoreboard.Elapsed().Milliseconds()
 			}
 		}
 		isBackfill := time.Now().After(state.StartTime.Add(PublicMatchWaitTime))
@@ -734,6 +734,23 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				continue
 			}
 
+			isPublicMatch := state.Mode == evr.ModeArenaPublic || state.Mode == evr.ModeCombatPublic
+
+			if isPublicMatch {
+				// Close public matches on round over
+				if update.MatchOver && state.Open {
+					logger.Info("Received round over for public match, locking match.")
+					state.GameState.MatchOver = true
+					state.Open = false
+
+					if state.LockedAt == nil {
+						now := time.Now().UTC()
+						state.LockedAt = &now
+						logger.Info("Locking public match on round over")
+					}
+				}
+			}
+
 			if state.GameState != nil {
 				logger.WithField("update", update).Debug("Received match update message.")
 				gs := state.GameState
@@ -743,16 +760,12 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					state.goals = append(state.goals, u.Goals...)
 				}
 
-				if update.MatchOver {
-					state.GameState.MatchOver = true
-				}
-
-				if state.GameState.RoundClock != nil {
+				if state.GameState.SessionScoreboard != nil {
 					if u.CurrentGameClock != 0 {
 						if u.PauseDuration != 0 {
-							gs.RoundClock.UpdateWithPause(u.CurrentGameClock, u.PauseDuration)
+							gs.SessionScoreboard.UpdateWithPause(u.CurrentGameClock, u.PauseDuration)
 						} else {
-							gs.RoundClock.Update(u.CurrentGameClock)
+							gs.SessionScoreboard.Update(u.CurrentGameClock)
 						}
 					}
 				}
@@ -883,7 +896,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	// Lock the match if it is open and the lock time has passed.
-	if state.Open && !state.LockedAt.IsZero() && time.Now().After(state.LockedAt) {
+	if state.Open && state.LockedAt != nil && !state.LockedAt.IsZero() && time.Now().After(*state.LockedAt) {
 		logger.Info("Closing the match in response to a lock.")
 		state.Open = false
 		updateLabel = true
@@ -1273,14 +1286,8 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 
 	case SignalLockSession:
-
-		switch state.Mode {
-		case evr.ModeCombatPublic:
-			logger.Debug("Ignoring lock signal for combat public match.")
-		default:
-			logger.Debug("Locking session")
-			state.LockedAt = time.Now().UTC()
-		}
+		// Lock signals are logged but have no effect - matches are locked via round over events
+		logger.Info("Lock signal received (no effect)")
 
 	case SignalUnlockSession:
 
@@ -1290,7 +1297,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		default:
 			logger.Debug("Unlocking session")
 			if state.GameState != nil {
-				state.LockedAt = time.Time{}
+				state.LockedAt = nil
 			}
 			state.Open = true
 		}
@@ -1346,11 +1353,11 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 	switch state.Mode {
 	case evr.ModeArenaPublic:
 		state.GameState = &GameState{
-			RoundClock: NewRoundClock(RoundDuration, time.Now().Add(PublicMatchWaitTime)),
+			SessionScoreboard: NewSessionScoreboard(RoundDuration, time.Now().Add(PublicMatchWaitTime)),
 		}
 	case evr.ModeArenaPrivate:
 		state.GameState = &GameState{
-			RoundClock: NewRoundClock(0, time.Time{}),
+			SessionScoreboard: NewSessionScoreboard(0, time.Time{}),
 		}
 	}
 

@@ -1113,9 +1113,9 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 		// If the user requests intents, they must be a global developer
 		if request.IntentStr != "" {
 			// Check if they have the required intents
-			if isMember, err := CheckGroupMembershipByName(ctx, db, userID, GroupGlobalDevelopers, "system"); err != nil {
+			if isGlobalDeveloper, err := CheckGroupMembershipByName(ctx, db, userID, GroupGlobalDevelopers, "system"); err != nil {
 				return "", err
-			} else if isMember {
+			} else if isGlobalDeveloper {
 				sessionVars.Intents.UnmarshalText([]byte(request.IntentStr))
 			}
 		}

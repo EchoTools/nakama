@@ -32,7 +32,7 @@ func PingToBand(ping int) PingBand {
 }
 
 func NewPlayerDisconnectInfo(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, state *MatchLabel, userID string) *PlayerDisconnectInfo {
-	if state == nil || state.GameState == nil || state.GameState.RoundClock == nil {
+	if state == nil || state.GameState == nil || state.GameState.SessionScoreboard == nil {
 		return nil
 	}
 	player := state.GetPlayerByUserID(userID)
@@ -63,8 +63,8 @@ func NewPlayerDisconnectInfo(ctx context.Context, logger runtime.Logger, db *sql
 		PartySize:            partySize,
 		PingBand:             PingToBand(player.PingMillis),
 		JoinTime:             time.Now(),
-		ClockRemainingAtJoin: state.GameState.RoundClock.RemainingTime(),
-		GameDurationAtJoin:   state.GameState.RoundClock.Elapsed(),
+		ClockRemainingAtJoin: state.GameState.SessionScoreboard.RemainingTime(),
+		GameDurationAtJoin:   state.GameState.SessionScoreboard.Elapsed(),
 		ScoresAtJoin:         [2]int{state.GameState.BlueScore, state.GameState.OrangeScore},
 		DisadvantageAtJoin:   state.RoleCount(teamID) - state.RoleCount(otherTeamID),
 		DisconnectsAtJoin:    totalLeaves,
@@ -123,13 +123,13 @@ func (p *PlayerDisconnectInfo) LeaveEvent(state *MatchLabel) {
 	if p == nil {
 		return
 	}
-	if state == nil || state.GameState == nil || state.GameState.RoundClock == nil {
+	if state == nil || state.GameState == nil || state.GameState.SessionScoreboard == nil {
 		return
 	}
 	p.IsAbandoner = !state.GameState.MatchOver
 	p.LeaveTime = time.Now()
-	p.ClockRemainingAtLeave = state.GameState.RoundClock.RemainingTime()
-	p.GameDurationAtLeave = state.GameState.RoundClock.Elapsed()
+	p.ClockRemainingAtLeave = state.GameState.SessionScoreboard.RemainingTime()
+	p.GameDurationAtLeave = state.GameState.SessionScoreboard.Elapsed()
 	p.ScoresAtLeave = [2]int{state.GameState.BlueScore, state.GameState.OrangeScore}
 	p.TeamSizesAtLeave = [2]int{state.RoleCount(0), state.RoleCount(1)}
 
@@ -152,7 +152,7 @@ func (p *PlayerDisconnectInfo) LeaveEvent(state *MatchLabel) {
 }
 
 func (p *PlayerDisconnectInfo) LogEarlyQuitMetrics(nk runtime.NakamaModule, state *MatchLabel) {
-	if state == nil || state.GameState == nil || state.GameState.RoundClock == nil {
+	if state == nil || state.GameState == nil || state.GameState.SessionScoreboard == nil {
 		return
 	}
 

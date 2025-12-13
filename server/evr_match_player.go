@@ -13,7 +13,7 @@ type PlayerInfo struct {
 	PartyID       string     `json:"party_id,omitempty"`
 	IsReservation bool       `json:"is_reservation,omitempty"`
 	Team          TeamIndex  `json:"team"`
-	JoinTime      int64      `json:"join_time_ms,omitempty"` // The time on the round clock that the player joined
+	JoinTime      int64      `json:"join_time_ns,omitempty"` // The time on the round clock that the player joined
 	RatingMu      float64    `json:"rating_mu,omitempty"`
 	RatingSigma   float64    `json:"rating_sigma,omitempty"`
 	Username      string     `json:"username,omitempty"`

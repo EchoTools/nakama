@@ -14,17 +14,17 @@ type TeamMetadata struct {
 type GameState struct {
 	BlueScore              int                        `json:"blue_score"`                        // The score for the blue team
 	OrangeScore            int                        `json:"orange_score"`                      // The score for the orange team
-	RoundClock             *RoundClock                `json:"round_clock,omitempty"`             // The round clock
+	SessionScoreboard      *SessionScoreboard         `json:"session_scoreboard,omitempty"`      // The session scoreboard
 	MatchOver              bool                       `json:"match_over,omitempty"`              // Whether the round is over
 	EquilibriumCoefficient float64                    `json:"equilibrium_coefficient,omitempty"` // The equilibrium coefficient for the game (how much the game is balanced)
 	Teams                  map[TeamIndex]TeamMetadata `json:"teams,omitempty"`                   // Metadata for each team
 }
 
-func (g *GameState) GetRoundClock() *RoundClock {
-	if g.RoundClock == nil {
+func (g *GameState) GetSessionScoreboard() *SessionScoreboard {
+	if g.SessionScoreboard == nil {
 		return nil
 	}
-	return g.RoundClock
+	return g.SessionScoreboard
 }
 
 func NewGameState() *GameState {
