@@ -434,6 +434,29 @@ func (w *WhoAmI) createSuspensionsEmbed() *discordgo.MessageEmbed {
 		// Loop until the embed size is less than 1024 bytes
 		fields := make([]*discordgo.MessageEmbedField, 0, len(w.journal.RecordsByGroupID))
 
+		// Check for active suspensions first to add a warning
+		activeSuspensions := w.journal.ActiveSuspensions()
+		if len(activeSuspensions) > 0 {
+			// Add a prominent warning field at the top for active suspensions
+			activeWarnings := make([]string, 0)
+			for groupID, record := range activeSuspensions {
+				gName := groupID
+				if gg, ok := w.guildGroups[groupID]; ok {
+					gName = EscapeDiscordMarkdown(gg.Name())
+				}
+				expiryStr := fmt.Sprintf("<t:%d:R>", record.Expiry.UTC().Unix())
+				warning := fmt.Sprintf("⚠️ **%s**: %s (expires %s)", gName, record.UserNoticeText, expiryStr)
+				activeWarnings = append(activeWarnings, warning)
+			}
+			if len(activeWarnings) > 0 {
+				fields = append(fields, &discordgo.MessageEmbedField{
+					Name:   "⚠️ ACTIVE ENFORCEMENT ACTIONS",
+					Value:  strings.Join(activeWarnings, "\n"),
+					Inline: false,
+				})
+			}
+		}
+
 		for groupID, records := range w.journal.RecordsByGroupID {
 			if !w.opts.IncludeAllGuilds && !slices.Contains(groupIDs, groupID) {
 				continue
@@ -454,23 +477,26 @@ func (w *WhoAmI) createSuspensionsEmbed() *discordgo.MessageEmbed {
 			return nil
 		}
 
-		// Sort the fields by group name
-		sort.SliceStable(fields, func(i, j int) bool {
-			return fields[i].Name < fields[j].Name
-		})
+		// Sort the fields by group name (but keep active warnings first)
+		if len(fields) > 1 {
+			sort.SliceStable(fields[1:], func(i, j int) bool {
+				return fields[i+1].Name < fields[j+1].Name
+			})
+		}
 
 		embed := &discordgo.MessageEmbed{
-			Title:  "Suspensions",
+			Title:  "Enforcement History",
 			Color:  WhoAmISecondaryColor,
 			Fields: fields,
 			Footer: &discordgo.MessageEmbedFooter{
-				Text: "Confidential. Do not share.",
+				Text: "ℹ️ If you received an enforcement action, check your Discord DMs for details. Confidential - Do not share.",
 			},
 		}
 		// If any of the suspensions are active, set the color to red
 
-		if len(w.journal.ActiveSuspensions()) > 0 {
+		if len(activeSuspensions) > 0 {
 			embed.Color = 0xCC0000 // Red if there are active suspensions
+			embed.Title = "⚠️ Active Enforcement Actions"
 		}
 
 		return embed
