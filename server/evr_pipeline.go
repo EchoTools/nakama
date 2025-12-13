@@ -89,7 +89,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_ENV, vars)
 
 	// Load the global settings
-	if _, err := ServiceSettingsLoad(ctx, nk); err != nil {
+	if _, err := ServiceSettingsLoad(ctx, logger, nk); err != nil {
 		logger.Fatal("Failed to load global settings", zap.Error(err))
 	}
 
@@ -105,7 +105,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 				ticker.Stop()
 				return
 			case <-ticker.C:
-				if _, err := ServiceSettingsLoad(ctx, nk); err != nil {
+				if _, err := ServiceSettingsLoad(ctx, logger, nk); err != nil {
 					logger.Error("Failed to load global settings", zap.Error(err))
 				}
 			}
