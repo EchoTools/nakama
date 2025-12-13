@@ -4,13 +4,12 @@ go 1.25.0
 
 require (
 	github.com/anyascii/go v0.3.3
-	github.com/bits-and-blooms/bitset v1.24.3
+	github.com/bits-and-blooms/bitset v1.24.4
 	github.com/blugelabs/bluge v0.2.2
 	github.com/blugelabs/bluge_segment_api v0.2.0
 	github.com/blugelabs/query_string v0.3.0
 	github.com/dgryski/dgoogauth v0.0.0-20190221195224-5a805980a5f3
-	github.com/dop251/goja v0.0.0-20251103141225-af2ceb9156d7
-	github.com/echotools/nevr-common/v3 v3.1.0
+	github.com/dop251/goja v0.0.0-20251201205617-2bb4c724c0f9
 	github.com/echotools/nevr-common/v4 v4.0.0
 	github.com/echotools/vrmlgo/v5 v5.0.1
 	github.com/go-redis/redis v6.15.9+incompatible
@@ -28,44 +27,45 @@ require (
 	github.com/jackc/pgerrcode v0.0.0-20250907135507-afb5586c32a6
 	github.com/jackc/pgtype v1.14.4
 	github.com/jackc/pgx/v5 v5.7.6
-	github.com/klauspost/compress v1.18.1
+	github.com/klauspost/compress v1.18.2
 	github.com/muesli/reflow v0.3.0
 	github.com/prometheus/client_golang v1.23.2
-	github.com/prometheus/common v0.67.2
+	github.com/prometheus/common v0.67.4
 	github.com/samber/lo v1.52.0
 	github.com/stretchr/testify v1.11.1
 	github.com/uber-go/tally/v4 v4.1.17
 	go.mongodb.org/mongo-driver v1.17.6
 	go.uber.org/atomic v1.11.0
 	go.uber.org/thriftrw v1.33.0
-	go.uber.org/zap v1.27.0
-	golang.org/x/crypto v0.43.0
-	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546
-	golang.org/x/oauth2 v0.32.0
+	go.uber.org/zap v1.27.1
+	golang.org/x/crypto v0.46.0
+	golang.org/x/exp v0.0.0-20251209150349-8475f28825e9
+	golang.org/x/oauth2 v0.34.0
 	golang.org/x/time v0.14.0
 	gonum.org/v1/gonum v0.16.0
-	google.golang.org/genproto/googleapis/api v0.0.0-20251103181224-f26f9409b101
-	google.golang.org/grpc v1.76.0
-	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
-	google.golang.org/protobuf v1.36.10
+	google.golang.org/genproto/googleapis/api v0.0.0-20251213004720-97cd9d5aeac2
+	google.golang.org/grpc v1.77.0
+	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.6.0
+	google.golang.org/protobuf v1.36.11
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
+	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.3.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/jackc/pgio v1.0.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/kamstrup/intmap v0.5.1 // indirect
+	github.com/kamstrup/intmap v0.5.2 // indirect
 	github.com/mattn/go-runewidth v0.0.19 // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
 	github.com/onsi/ginkgo v1.16.5 // indirect
-	github.com/onsi/gomega v1.37.0 // indirect
-	github.com/rogpeppe/go-internal v1.13.1 // indirect
+	github.com/onsi/gomega v1.38.3 // indirect
+	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
-	github.com/xdg-go/scram v1.1.2 // indirect
+	github.com/xdg-go/scram v1.2.0 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
@@ -93,7 +93,7 @@ require (
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
-	github.com/google/pprof v0.0.0-20251007162407-5df77e3f7d1d // indirect
+	github.com/google/pprof v0.0.0-20251213031049-b05bdaca462f // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/mmcloughlin/geohash v0.10.0
@@ -105,9 +105,9 @@ require (
 	github.com/prometheus/procfs v0.19.2 // indirect
 	github.com/twmb/murmur3 v1.1.8 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/net v0.46.0 // indirect
-	golang.org/x/sync v0.17.0 // indirect
-	golang.org/x/sys v0.37.0 // indirect
-	golang.org/x/text v0.30.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20251103181224-f26f9409b101 // indirect
+	golang.org/x/net v0.48.0 // indirect
+	golang.org/x/sync v0.19.0 // indirect
+	golang.org/x/sys v0.39.0 // indirect
+	golang.org/x/text v0.32.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20251213004720-97cd9d5aeac2 // indirect
 )
