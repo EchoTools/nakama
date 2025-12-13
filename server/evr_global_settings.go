@@ -7,7 +7,6 @@ import (
 
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 )
 
 const (
@@ -216,7 +215,7 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 		for key := range data.SkillRating.TeamStatMultipliers {
 			if !ValidTeamStatFields[key] {
 				if logger != nil {
-          logger.WithField("key", key).Warn("Removing invalid team stat multiplier key from configuration")
+					logger.WithField("key", key).Warn("Removing invalid team stat multiplier key from configuration")
 				}
 				delete(data.SkillRating.TeamStatMultipliers, key)
 			}
@@ -235,7 +234,7 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 		for key := range data.SkillRating.PlayerStatMultipliers {
 			if !ValidTeamStatFields[key] {
 				if logger != nil {
-					 logger.WithField("key", key).Warn("Removing invalid player stat multiplier key from configuration")
+					logger.WithField("key", key).Warn("Removing invalid player stat multiplier key from configuration")
 				}
 				delete(data.SkillRating.PlayerStatMultipliers, key)
 			}

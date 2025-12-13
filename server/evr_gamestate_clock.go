@@ -95,7 +95,6 @@ func (r *SessionScoreboard) Update(gameTime time.Duration) {
 		return
 	}
 	// Otherwise, just update the updated at time
-	r.UpdatedAt = time.Now()
 	r.GameTime = gameTime
 }
 
