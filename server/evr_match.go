@@ -746,7 +746,6 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					if state.LockedAt == nil {
 						now := time.Now().UTC()
 						state.LockedAt = &now
-						state.Open = false
 						logger.Info("Locking public match on round over")
 					}
 				}
