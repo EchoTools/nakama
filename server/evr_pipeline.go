@@ -17,7 +17,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/echotools/nevr-common/v3/rtapi"
+	"github.com/echotools/nevr-common/v4/gen/go/rtapi"
 	"github.com/go-redis/redis"
 	"github.com/gofrs/uuid/v5"
 
@@ -315,8 +315,8 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		switch msg := in.(type) {
 		case *evr.BroadcasterRegistrationRequest: // Legacy message
 			envelope = &rtapi.Envelope{
-				Message: &rtapi.Envelope_GameServerRegistrationRequest{
-					GameServerRegistrationRequest: &rtapi.GameServerRegistrationMessage{
+				Message: &rtapi.Envelope_GameServerRegistration{
+					GameServerRegistration: &rtapi.GameServerRegistrationMessage{
 						ServerId:          msg.ServerID,
 						InternalIpAddress: msg.InternalIP.String(),
 						Port:              uint32(msg.Port),
@@ -367,7 +367,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 				Message: &rtapi.Envelope_LobbySessionEvent{
 					LobbySessionEvent: &rtapi.LobbySessionEventMessage{
 						LobbySessionId: matchID.UUID.String(),
-						Code:           int32(rtapi.LobbySessionEventMessage_LOCKED),
+						Code:           int32(rtapi.LobbySessionEventMessage_CODE_LOCKED),
 					},
 				},
 			}
@@ -381,7 +381,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 				Message: &rtapi.Envelope_LobbySessionEvent{
 					LobbySessionEvent: &rtapi.LobbySessionEventMessage{
 						LobbySessionId: matchID.UUID.String(),
-						Code:           int32(rtapi.LobbySessionEventMessage_UNLOCKED),
+						Code:           int32(rtapi.LobbySessionEventMessage_CODE_UNLOCKED),
 					},
 				},
 			}
@@ -395,7 +395,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 				Message: &rtapi.Envelope_LobbySessionEvent{
 					LobbySessionEvent: &rtapi.LobbySessionEventMessage{
 						LobbySessionId: matchID.UUID.String(),
-						Code:           int32(rtapi.LobbySessionEventMessage_ENDED),
+						Code:           int32(rtapi.LobbySessionEventMessage_CODE_ENDED),
 					},
 				},
 			}
@@ -747,7 +747,7 @@ func (p *EvrPipeline) ProcessProtobufRequest(logger *zap.Logger, session Session
 
 	// Process the request based on its type
 	switch in.Message.(type) {
-	case *rtapi.Envelope_GameServerRegistrationRequest:
+	case *rtapi.Envelope_GameServerRegistration:
 		pipelineFn = p.gameserverRegistrationRequest
 	case *rtapi.Envelope_LobbyEntrantConnected:
 		pipelineFn = p.lobbyEntrantConnected

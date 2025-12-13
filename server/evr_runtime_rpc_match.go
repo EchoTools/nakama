@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	nevrapi "github.com/echotools/nevr-common/v3/api"
+	nevrapi "github.com/echotools/nevr-common/v4/gen/go/api"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -32,20 +32,20 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	}
 
 	// Unmarshal the request payload into a PrepareMatchRequest
-	request := &nevrapi.PrepareMatchRequest{}
+	request := &nevrapi.LobbySessionCreateRequest{}
 	if err := protojson.Unmarshal([]byte(payload), request); err != nil {
 		return "", runtime.NewError("failed to unmarshal request: "+err.Error(), StatusInvalidArgument)
 	}
-	if request.GroupId == "" {
+	if request.GuildGroupId == "" {
 		return "", runtime.NewError("group/guild ID must be specified", StatusInvalidArgument)
 	}
 
-	if uuid.FromStringOrNil(request.GroupId) == uuid.Nil {
+	if uuid.FromStringOrNil(request.GuildGroupId) == uuid.Nil {
 		// Assume the groupId is a guild ID and convert it to a group ID
-		request.GroupId, err = GetGroupIDByGuildID(ctx, db, request.GroupId)
+		request.GuildGroupId, err = GetGroupIDByGuildID(ctx, db, request.GuildGroupId)
 		if err != nil {
 			return "", runtime.NewError(err.Error(), StatusInternalError)
-		} else if request.GroupId == "" {
+		} else if request.GuildGroupId == "" {
 			return "", runtime.NewError("guild group not found", StatusNotFound)
 		}
 	}
@@ -61,7 +61,7 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	}
 
 	// Validate that this userID has permission to signal this match
-	gg, err := GuildGroupLoad(ctx, nk, request.GroupId)
+	gg, err := GuildGroupLoad(ctx, nk, request.GuildGroupId)
 	if err != nil {
 		return "", runtime.NewError(err.Error(), StatusInternalError)
 	}
@@ -72,29 +72,32 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	}
 
 	// Increase the expiry time to a minimum of 1 minute from now
-	if request.ExpiryTime.AsTime().Before(time.Now().Add(1 * time.Minute)) {
-		request.ExpiryTime = timestamppb.New(time.Now().Add(1 * time.Minute))
+	if request.MatchExpiry.AsTime().Before(time.Now().Add(1 * time.Minute)) {
+		request.MatchExpiry = timestamppb.New(time.Now().Add(1 * time.Minute))
 	}
 
 	// Build the team alignments map from the request
-	var teamAlignments = make(map[string]int, len(request.TeamAlignments))
-	for id, roleName := range request.TeamAlignments {
-
-		// Set the roleID based on the roleName
-		roleID := -1
-		switch roleName {
-		case "blue":
-			roleID = 0
-		case "orange":
-			roleID = 1
-		case "spectator":
-			roleID = 2
-		case "social":
-			roleID = 3
+	var teamAlignments = make(map[string]int, len(request.Reservations))
+	for _, entrant := range request.Reservations {
+		id := entrant.GetId()
+		roleAlignment := nevrapi.LobbySessionCreateRequest_EntrantReservation_RoleAlignment(entrant.GetRoleAlignment())
+		// Set the teamIndex based on the roleName
+		teamIndex := AnyTeam
+		switch roleAlignment {
+		case nevrapi.LobbySessionCreateRequest_EntrantReservation_ROLE_ALIGNMENT_BLUE:
+			teamIndex = BlueTeam
+		case nevrapi.LobbySessionCreateRequest_EntrantReservation_ROLE_ALIGNMENT_ORANGE:
+			teamIndex = OrangeTeam
+		case nevrapi.LobbySessionCreateRequest_EntrantReservation_ROLE_ALIGNMENT_SPECTATOR:
+			teamIndex = Spectator
+		case nevrapi.LobbySessionCreateRequest_EntrantReservation_ROLE_ALIGNMENT_SOCIAL:
+			teamIndex = SocialLobbyParticipant
 		default:
-			return "", runtime.NewError("invalid team alignment role: "+roleName, StatusInvalidArgument)
+			return "", runtime.NewError("invalid team alignment role", StatusInvalidArgument)
 		}
-		teamAlignments[userID] = roleID
+
+		roleID := int(teamIndex)
+		teamAlignments[userID] = int(roleID) // Ensure the caller is always in the map
 
 		if uuid.FromStringOrNil(id) == uuid.Nil {
 			// Assume the id is a discord ID and convert it to a user ID
@@ -103,7 +106,7 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 				return "", runtime.NewError("Failed to get userID by discord ID: "+err.Error(), StatusNotFound)
 			}
 			if userID == "" {
-				return "", runtime.NewError("discord user not found: "+id, StatusNotFound)
+				return "", runtime.NewError(fmt.Sprintf("discord user not found: %s", id), StatusNotFound)
 			}
 			teamAlignments[userID] = roleID // Assuming roleName is an int32 representing the team index
 		}
@@ -116,10 +119,10 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	settings := &MatchSettings{
 		Mode:             evr.ToSymbol(request.Mode),
 		Level:            evr.ToSymbol(request.Level),
-		TeamSize:         int(request.TeamSize.GetValue()),
-		StartTime:        request.ExpiryTime.AsTime().UTC(),
+		TeamSize:         int(request.GetTeamSize()),
+		StartTime:        request.GetMatchExpiry().AsTime().UTC(),
 		SpawnedBy:        request.OwnerId,
-		GroupID:          uuid.FromStringOrNil(request.GroupId),
+		GroupID:          uuid.FromStringOrNil(request.GetGuildGroupId()),
 		RequiredFeatures: request.RequiredFeatures,
 		TeamAlignments:   teamAlignments,
 	}
@@ -130,9 +133,9 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		return "", runtime.NewError("Failed to read latency history: "+err.Error(), StatusInternalError)
 	}
 
-	// Allocate a server by region or match ID
+	// Allocate a server by region code
 	var label *MatchLabel
-	if matchID := MatchIDFromStringOrNil(request.Region); !matchID.IsNil() {
+	if matchID := MatchIDFromStringOrNil(request.GetRegionCode()); !matchID.IsNil() {
 		// If the region is a match ID, get the match label by ID
 		match, err := nk.MatchGet(ctx, matchID.String())
 		if err != nil {
@@ -154,10 +157,10 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	} else {
 		// Allocate a game server for the given group ID and region.
 		// Default to the "default" region if no region is specified
-		if request.Region == "" {
-			request.Region = "default"
+		if request.GetRegionCode() == "" {
+			request.RegionCode = "default"
 		}
-		label, err = LobbyGameServerAllocate(ctx, logger, nk, []string{request.GroupId}, latencyHistory.LatestRTTs(), settings, []string{request.Region}, false, true, ServiceSettings().Matchmaking.QueryAddons.RPCAllocate)
+		label, err = LobbyGameServerAllocate(ctx, logger, nk, []string{request.GetGuildGroupId()}, latencyHistory.LatestRTTs(), settings, []string{request.GetRegionCode()}, false, true, ServiceSettings().Matchmaking.QueryAddons.RPCAllocate)
 		if err != nil || label == nil {
 			if strings.Contains(err.Error(), "bad request:") {
 				err = runtime.NewError("required features not supported", StatusInvalidArgument)
@@ -169,7 +172,7 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 	// Guild-specified server-hosts and the server's operators may signal their own game servers.
 	// Otherwise, the game server must host for the guild.
-	if label.GameServer.OperatorID.String() != userID && !slices.Contains(label.GameServer.GroupIDs, uuid.FromStringOrNil(request.GroupId)) {
+	if label.GameServer.OperatorID.String() != userID && !slices.Contains(label.GameServer.GroupIDs, uuid.FromStringOrNil(request.GetGuildGroupId())) {
 		return "", runtime.NewError("game server does not host for that guild.", StatusPermissionDenied)
 	}
 
@@ -189,8 +192,8 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	logger.WithFields(map[string]any{
 		"mid":       label.ID.String(),
 		"caller_id": userID,
-		"gid":       request.GroupId,
-		"owner_id":  request.OwnerId,
+		"gid":       request.GetGuildGroupId(),
+		"owner_id":  request.GetOwnerId(),
 		"mode":      label.Mode,
 		"state":     string(label.GetLabel()),
 	}).Info("Match prepared")

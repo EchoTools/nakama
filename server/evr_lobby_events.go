@@ -26,9 +26,9 @@ type ctxMongoClientKey struct{}
 
 // SessionEvent represents a simple session event object
 type SessionEvent struct {
-	MatchID MatchID                       `bson:"match_id" json:"match_id"`
-	UserID  string                        `bson:"user_id,omitempty" json:"user_id,omitempty"`
-	Data    *rtapi.LobbySessionStateFrame `bson:"data,omitempty" json:"data,omitempty"`
+	MatchID MatchID                         `bson:"match_id" json:"match_id"`
+	UserID  string                          `bson:"user_id,omitempty" json:"user_id,omitempty"`
+	Data    *rtapi.LobbySessionStateMessage `bson:"data,omitempty" json:"data,omitempty"`
 }
 
 // StoreSessionEvent stores a session event to MongoDB
@@ -147,7 +147,7 @@ func GetSessionEventsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 func StoreSessionEventRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	// Parse the payload as SessionEvent
 
-	msg := &rtapi.LobbySessionStateFrame{}
+	msg := &rtapi.LobbySessionStateMessage{}
 
 	if err := protojson.Unmarshal([]byte(payload), msg); err != nil {
 		return "", fmt.Errorf("invalid request payload: %w", err)
@@ -156,7 +156,7 @@ func StoreSessionEventRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 	node := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
 
 	matchID := MatchID{
-		UUID: uuid.FromStringOrNil(msg.GetSession().GetSessionId()),
+		UUID: uuid.FromStringOrNil(msg.GetSessionState().GetSessionId()),
 		Node: node,
 	}
 	if !matchID.IsValid() {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/echotools/nevr-common/v3/rtapi"
+	"github.com/echotools/nevr-common/v4/gen/go/rtapi"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -151,13 +151,13 @@ func (p *EvrPipeline) lobbySessionEvent(logger *zap.Logger, session *sessionWS, 
 	matchID, _ := NewMatchID(uuid.FromStringOrNil(message.LobbySessionId), p.node)
 	var opcode SignalOpCode
 	switch rtapi.LobbySessionEventMessage_Code(message.Code) {
-	case rtapi.LobbySessionEventMessage_LOCKED:
+	case rtapi.LobbySessionEventMessage_CODE_LOCKED:
 		opcode = SignalLockSession
-	case rtapi.LobbySessionEventMessage_UNLOCKED:
+	case rtapi.LobbySessionEventMessage_CODE_UNLOCKED:
 		opcode = SignalUnlockSession
-	case rtapi.LobbySessionEventMessage_STARTED:
+	case rtapi.LobbySessionEventMessage_CODE_STARTED:
 		opcode = SignalStartedSession
-	case rtapi.LobbySessionEventMessage_ENDED:
+	case rtapi.LobbySessionEventMessage_CODE_ENDED:
 		opcode = SignalEndedSession
 	default:
 		return fmt.Errorf("unknown lobby session event code: %d", message.Code)
