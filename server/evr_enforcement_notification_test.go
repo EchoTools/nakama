@@ -282,8 +282,9 @@ func TestGuildEnforcementJournal_UpdateRecordNotificationStatus(t *testing.T) {
 
 func TestStandardEnforcementRules(t *testing.T) {
 	// Verify that standard rules are defined
-	if len(StandardEnforcementRules) == 0 {
-		t.Error("StandardEnforcementRules should not be empty")
+	rules := GetStandardEnforcementRules()
+	if len(rules) == 0 {
+		t.Error("GetStandardEnforcementRules() should not return empty slice")
 	}
 
 	// Verify expected rules are present
@@ -296,15 +297,27 @@ func TestStandardEnforcementRules(t *testing.T) {
 
 	for _, expected := range expectedRules {
 		found := false
-		for _, rule := range StandardEnforcementRules {
+		for _, rule := range rules {
 			if rule == expected {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("Expected rule %q not found in StandardEnforcementRules", expected)
+			t.Errorf("Expected rule %q not found in standard rules", expected)
 		}
+	}
+
+	// Verify that modifying returned slice doesn't affect subsequent calls
+	rules1 := GetStandardEnforcementRules()
+	originalLen := len(rules1)
+	rules1[0] = "Modified"
+	rules2 := GetStandardEnforcementRules()
+	if rules2[0] == "Modified" {
+		t.Error("Modifying returned slice should not affect subsequent calls")
+	}
+	if len(rules2) != originalLen {
+		t.Error("Length should remain consistent across calls")
 	}
 }
 

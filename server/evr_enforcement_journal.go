@@ -545,8 +545,11 @@ func createEnforcementActionComponents(record GuildEnforcementRecord, profile *E
 // SendEnforcementNotification sends a DM to the user about their enforcement action
 // Returns whether the notification was sent successfully
 func SendEnforcementNotification(ctx context.Context, dg *discordgo.Session, record GuildEnforcementRecord, targetDiscordID, guildName string) (bool, error) {
-	if dg == nil || targetDiscordID == "" {
-		return false, fmt.Errorf("discord session or target ID is empty")
+	if dg == nil {
+		return false, fmt.Errorf("discord session is nil")
+	}
+	if targetDiscordID == "" {
+		return false, fmt.Errorf("target Discord ID is empty")
 	}
 
 	// Get the formatted notification message
@@ -556,6 +559,7 @@ func SendEnforcementNotification(ctx context.Context, dg *discordgo.Session, rec
 	_, err := SendUserMessage(ctx, dg, targetDiscordID, message)
 	if err != nil {
 		// Log but don't fail the enforcement action if DM fails
+		// Common reasons: user has DMs disabled, user blocked the bot, user is not in a shared server
 		return false, fmt.Errorf("failed to send DM to user %s: %w", targetDiscordID, err)
 	}
 

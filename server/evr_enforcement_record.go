@@ -40,18 +40,21 @@ func (r GuildEnforcementRecord) RequiresCommunityValues() bool {
 	return r.CommunityValuesRequired
 }
 
-// StandardEnforcementRules defines common rule violation categories for standardized enforcement
-var StandardEnforcementRules = []string{
-	"Harassment or Hate Speech",
-	"Cheating or Exploiting",
-	"Toxic Behavior",
-	"Inappropriate Content",
-	"Spam or Advertising",
-	"Team Griefing",
-	"Match Abandonment",
-	"Voice/Chat Abuse",
-	"Impersonation",
-	"Other Rule Violation",
+// GetStandardEnforcementRules returns the list of standard rule violation categories
+// Returns a copy to prevent runtime modification
+func GetStandardEnforcementRules() []string {
+	return []string{
+		"Harassment or Hate Speech",
+		"Cheating or Exploiting",
+		"Toxic Behavior",
+		"Inappropriate Content",
+		"Spam or Advertising",
+		"Team Griefing",
+		"Match Abandonment",
+		"Voice/Chat Abuse",
+		"Impersonation",
+		"Other Rule Violation",
+	}
 }
 
 // GetNotificationMessage returns a formatted message for DM notification to the user
@@ -87,6 +90,10 @@ func (r GuildEnforcementRecord) GetNotificationMessage(guildName string) string 
 	// Duration and expiry
 	if r.IsSuspension() {
 		duration := r.Expiry.Sub(r.CreatedAt)
+		// Handle edge case where expiry is before creation (data inconsistency)
+		if duration < 0 {
+			duration = 0
+		}
 		expiryTimestamp := fmt.Sprintf("<t:%d:R>", r.Expiry.UTC().Unix())
 		parts = append(parts, fmt.Sprintf("**Duration:** %s (expires %s)", FormatDuration(duration), expiryTimestamp))
 

@@ -645,9 +645,13 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			}
 			sent, err := SendEnforcementNotification(ctx, d.dg, record, target.ID, guildName)
 			if err != nil {
+				// Note: DM failures are logged but don't block enforcement.
+				// Common failures: user has DMs disabled, blocked bot, or left shared servers.
+				// The enforcement action still applies, and users can check /whoami for details.
+				// Failed attempts are tracked in metrics and notification status for review.
 				logger.Warn("Failed to send enforcement notification DM", zap.Error(err), zap.String("user_id", target.ID))
 			}
-			// Update the record with notification status
+			// Update the record with notification status (tracks both success and failure)
 			if updateErr := journal.UpdateRecordNotificationStatus(groupID, record.ID, sent); updateErr != nil {
 				logger.Warn("Failed to update notification status", zap.Error(updateErr))
 			}

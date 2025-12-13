@@ -53,10 +53,14 @@ func NewPublicEnforcementLog(groupID string) *PublicEnforcementLog {
 }
 
 func (p *PublicEnforcementLog) StorageMeta() StorableMetadata {
+	// Note: Public read permission allows visibility of enforcement logs.
+	// While sensitive information (moderator identity, internal notes) is filtered,
+	// guilds should control whether public logging is enabled via the Enabled flag.
+	// Application-level access controls should further restrict who can query these logs.
 	return StorableMetadata{
 		Collection:      StorageCollectionPublicEnforcementLog,
 		Key:             StorageKeyPublicEnforcementLog,
-		PermissionRead:  runtime.STORAGE_PERMISSION_PUBLIC_READ, // Public read
+		PermissionRead:  runtime.STORAGE_PERMISSION_PUBLIC_READ, // Public read (with filtering)
 		PermissionWrite: runtime.STORAGE_PERMISSION_NO_WRITE,    // Only server can write
 		Version:         p.version,
 		UserID:          p.GroupID, // Use GroupID as the storage owner
