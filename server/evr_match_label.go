@@ -498,8 +498,8 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 			OrangeScore: l.GameState.OrangeScore,
 			Teams:       l.GameState.Teams,
 		}
-		if l.GameState.RoundClock != nil {
-			gs.RoundClock = l.GameState.RoundClock.LatestAsNewClock()
+		if l.GameState.SessionScoreboard != nil {
+			gs.SessionScoreboard = l.GameState.SessionScoreboard.LatestAsNewScoreboard()
 		}
 	}
 
