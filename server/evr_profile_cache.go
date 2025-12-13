@@ -208,6 +208,26 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 		return nil, fmt.Errorf("failed to get user tablet statistics: %w", err)
 	}
 
+	// Apply level override from player metadata if set
+	if evrProfile.LevelOverride != nil {
+		levelValue := &evr.StatisticValue{
+			Count: 1,
+			Value: float64(*evrProfile.LevelOverride),
+		}
+		for g, stats := range statsBySchedule {
+			switch g.Mode {
+			case evr.ModeArenaPublic:
+				if arenaStats, ok := stats.(*evr.ArenaStatistics); ok {
+					arenaStats.Level = levelValue
+				}
+			case evr.ModeCombatPublic:
+				if combatStats, ok := stats.(*evr.CombatStatistics); ok {
+					combatStats.Level = levelValue
+				}
+			}
+		}
+	}
+
 	if evrProfile.Options.DisableAFKTimeout {
 		developerFeatures = &evr.DeveloperFeatures{
 			DisableAfkTimeout: true,
