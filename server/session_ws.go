@@ -190,6 +190,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		serverTags:           parseUserQueryCommaDelimited(&request, "tags", 32, tagsPattern),
 		serverGuilds:         parseUserQueryCommaDelimited(&request, "guilds", 32, guildPattern),
 		serverRegions:        parseUserQueryCommaDelimited(&request, "regions", 32, regionPattern),
+		defaultRegion:        parseUserQueryFunc(&request, "default_region", 32, regionPattern),
 		relayOutgoing:        parseUserQueryFunc(&request, "verbose", 5, nil) == "true",
 		enableAllRemoteLogs:  parseUserQueryFunc(&request, "debug", 5, nil) == "true",
 		urlParameters:        urlParams,

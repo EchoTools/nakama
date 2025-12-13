@@ -2,19 +2,19 @@ package server
 
 import "time"
 
-type RoundClock struct {
-	GameTime      time.Duration `json:"game_time"`      // The time on the game clock
-	RoundDuration time.Duration `json:"round_duration"` // The duration of the round
-	UpdatedAt     time.Time     `json:"updated_at"`     // The time at which the round clock was last updated
-	PausedAt      time.Time     `json:"paused_at"`      // The time at which the game was paused
-	PauseDuration time.Duration `json:"pause_duration"` // The duration of the pause
+type SessionScoreboard struct {
+	GameTime      time.Duration `json:"game_time_ns"`                // The time on the game clock in milliseconds
+	RoundDuration time.Duration `json:"round_duration_ns"`           // The duration of the round in milliseconds
+	UpdatedAt     time.Time     `json:"updated_at"`                  // The time at which the scoreboard was last updated
+	PausedAt      *time.Time    `json:"paused_at,omitempty"`         // The time at which the game was paused
+	PauseDuration time.Duration `json:"pause_duration_ns,omitempty"` // The duration of the pause in milliseconds
 }
 
-func NewRoundClock(duration time.Duration, startAt time.Time) *RoundClock {
+func NewSessionScoreboard(duration time.Duration, startAt time.Time) *SessionScoreboard {
 	if duration <= 0 {
 		return nil
 	}
-	c := &RoundClock{
+	c := &SessionScoreboard{
 		RoundDuration: duration,
 		UpdatedAt:     time.Now(),
 	}
@@ -25,11 +25,11 @@ func NewRoundClock(duration time.Duration, startAt time.Time) *RoundClock {
 	return c
 }
 
-func (r *RoundClock) LatestAsNewClock() *RoundClock {
+func (r *SessionScoreboard) LatestAsNewScoreboard() *SessionScoreboard {
 	if r == nil {
 		return nil
 	}
-	return &RoundClock{
+	return &SessionScoreboard{
 		RoundDuration: r.RoundDuration,
 		GameTime:      r.Elapsed(),
 		UpdatedAt:     time.Now(),
@@ -37,7 +37,7 @@ func (r *RoundClock) LatestAsNewClock() *RoundClock {
 	}
 }
 
-func (r *RoundClock) Elapsed() time.Duration {
+func (r *SessionScoreboard) Elapsed() time.Duration {
 	// If the game is over return the round duration
 	if r.IsOver() {
 		return r.RoundDuration
@@ -51,21 +51,21 @@ func (r *RoundClock) Elapsed() time.Duration {
 	return r.GameTime + time.Since(r.UpdatedAt)
 }
 
-func (r *RoundClock) RemainingTime() time.Duration {
+func (r *SessionScoreboard) RemainingTime() time.Duration {
 	if r == nil {
 		return 0
 	}
 	return max(0, r.RoundDuration-r.Elapsed())
 }
 
-func (r *RoundClock) IsPaused() bool {
+func (r *SessionScoreboard) IsPaused() bool {
 	if r == nil {
 		return false
 	}
-	return !r.PausedAt.IsZero() && time.Since(r.PausedAt) < r.PauseDuration
+	return r.PausedAt != nil && !r.PausedAt.IsZero() && time.Since(*r.PausedAt) < r.PauseDuration
 }
 
-func (r *RoundClock) IsOver() bool {
+func (r *SessionScoreboard) IsOver() bool {
 	if r == nil {
 		return false
 	}
@@ -78,12 +78,12 @@ func (r *RoundClock) IsOver() bool {
 		elapsed = r.GameTime
 	}
 
-	// Otherwise return the game time plus the time since the last updat
+	// Otherwise return the game time plus the time since the last update
 
 	return elapsed >= r.RoundDuration
 }
 
-func (r *RoundClock) Update(gameTime time.Duration) {
+func (r *SessionScoreboard) Update(gameTime time.Duration) {
 	r.UpdatedAt = time.Now()
 
 	// If the elapsed time has increased, update it
@@ -91,24 +91,24 @@ func (r *RoundClock) Update(gameTime time.Duration) {
 		r.GameTime = gameTime
 		// Clear any pause state
 		r.PauseDuration = 0
-		r.PausedAt = time.Time{}
+		r.PausedAt = nil
 		return
 	}
 	// Otherwise, just update the updated at time
-	r.UpdatedAt = time.Now()
 	r.GameTime = gameTime
 }
 
-func (r *RoundClock) UpdateWithPause(elapsed time.Duration, pauseDuration time.Duration) {
+func (r *SessionScoreboard) UpdateWithPause(elapsed time.Duration, pauseDuration time.Duration) {
 	r.GameTime = elapsed
 	r.UpdatedAt = time.Now()
 	r.PauseDuration = pauseDuration
-	r.PausedAt = time.Now()
+	now := time.Now()
+	r.PausedAt = &now
 }
 
-func (r *RoundClock) Unpause(elapsed time.Duration) {
+func (r *SessionScoreboard) Unpause(elapsed time.Duration) {
 	r.GameTime = elapsed
 	r.UpdatedAt = time.Now()
 	r.PauseDuration = 0
-	r.PausedAt = time.Time{}
+	r.PausedAt = nil
 }
