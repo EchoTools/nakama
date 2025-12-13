@@ -42,6 +42,7 @@ type EVRProfile struct {
 	LegalConsents          evr.LegalConsents          `json:"legal_consents"`            // The legal consents
 	CustomizationPOIs      *evr.Customization         `json:"customization_pois"`        // The customization POIs
 	MatchmakingDivision    string                     `json:"matchmaking_division"`      // The matchmaking division (e.g. bronze, silver, gold, etc.)
+	LevelOverride          *int                       `json:"level_override,omitempty"`  // Override the player's level in the ServerProfile
 	account                *api.Account
 }
 
@@ -277,6 +278,16 @@ func (a EVRProfile) GetGhosted() []evr.EvrId {
 		return make([]evr.EvrId, 0)
 	}
 	return a.GhostedPlayers
+}
+
+// GetLevelOverride returns the level override value if set, otherwise nil
+func (a EVRProfile) GetLevelOverride() *int {
+	return a.LevelOverride
+}
+
+// SetLevelOverride sets the level override value; pass nil to clear it
+func (a *EVRProfile) SetLevelOverride(level *int) {
+	a.LevelOverride = level
 }
 
 func (a *EVRProfile) FixBrokenCosmetics() bool {
