@@ -7,6 +7,7 @@ import (
 
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 )
 
 const (
@@ -24,6 +25,32 @@ func ServiceSettingsUpdate(data *ServiceSettingsData) {
 	serviceSettings.Store(data)
 }
 
+// RatingDefaults contains the default values for skill ratings
+type RatingDefaults struct {
+	Z     int     `json:"z"`     // Number of standard deviations for ordinal calculation
+	Mu    float64 `json:"mu"`    // Initial mean skill rating
+	Sigma float64 `json:"sigma"` // Initial uncertainty (standard deviation)
+	Tau   float64 `json:"tau"`   // Dynamics factor - prevents sigma from dropping too low
+}
+
+// SkillRatingSettings contains configuration for skill-based matchmaking ratings
+type SkillRatingSettings struct {
+	Defaults RatingDefaults `json:"defaults"` // Default rating values
+
+	// TeamStatMultipliers are used for team-based rating calculations
+	// Keys should match the JSON field names from evr.MatchTypeStats
+	// Example: {"Points": 1.0, "Assists": 2.0, "Saves": 3.0, "Passes": 1.0, "ShotsOnGoal": -1.0}
+	TeamStatMultipliers map[string]float64 `json:"team_stat_multipliers"`
+
+	// PlayerStatMultipliers are used for individual player rating calculations
+	// Uses a simpler formula focused on personal contribution
+	// Example: {"Points": 1.0, "Assists": 1.0, "Saves": 2.0}
+	PlayerStatMultipliers map[string]float64 `json:"player_stat_multipliers"`
+
+	// WinningTeamBonus is added to winning team players' scores before rating calculation
+	WinningTeamBonus float64 `json:"winning_team_bonus"`
+}
+
 type ServiceSettingsData struct {
 	LinkInstructions                      string                    `json:"link_instructions"`     // Instructions for linking the headset
 	DisableLoginMessage                   string                    `json:"disable_login_message"` // Disable the login, and show this message
@@ -31,6 +58,7 @@ type ServiceSettingsData struct {
 	DisableStatisticsUpdates              bool                      `json:"disable_statistics_updates"`
 	DisableRatingsUpdates                 bool                      `json:"disable_ratings_updates"`
 	PruneSettings                         PruneSettings             `json:"prune_settings"` // Settings for pruning Discord guilds and Nakama groups
+	SkillRating                           SkillRatingSettings       `json:"skill_rating"`   // Skill rating configuration
 	Matchmaking                           GlobalMatchmakingSettings `json:"matchmaking"`
 	RemoteLogFilters                      map[string][]string       `json:"remote_logs_filter"` //	Ignore remote logs from specific servers
 	ReportURL                             string                    `json:"report_url"`         // URL to report issues
@@ -103,7 +131,7 @@ func (g ServiceSettingsData) UseSkillBasedMatchmaking() bool {
 	return g.Matchmaking.EnableSBMM
 }
 
-func ServiceSettingsLoad(ctx context.Context, nk runtime.NakamaModule) (*ServiceSettingsData, error) {
+func ServiceSettingsLoad(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) (*ServiceSettingsData, error) {
 
 	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 		{
@@ -125,7 +153,7 @@ func ServiceSettingsLoad(ctx context.Context, nk runtime.NakamaModule) (*Service
 			return nil, fmt.Errorf("failed to unmarshal global settings: %w", err)
 		}
 	}
-	FixDefaultServiceSettings(&data)
+	FixDefaultServiceSettings(logger, &data)
 
 	// If the object doesn't exist, or this is the first start
 	// write the settings to the storage
@@ -149,7 +177,75 @@ func ServiceSettingsLoad(ctx context.Context, nk runtime.NakamaModule) (*Service
 	return &data, nil
 }
 
-func FixDefaultServiceSettings(data *ServiceSettingsData) {
+// ValidTeamStatFields contains the valid JSON field names from evr.MatchTypeStats that can be used in stat multipliers
+var ValidTeamStatFields = map[string]bool{
+	"Assists": true, "Blocks": true, "BounceGoals": true, "Catches": true, "Clears": true,
+	"Goals": true, "HatTricks": true, "Interceptions": true, "Passes": true, "Points": true,
+	"PossessionTime": true, "PunchesReceived": true, "Saves": true, "ShotsOnGoal": true,
+	"ShotsOnGoalAgainst": true, "Steals": true, "Stuns": true, "ThreePointGoals": true,
+	"TwoPointGoals": true,
+}
+
+func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData) {
+
+	// Initialize skill rating defaults
+	if data.SkillRating.Defaults.Z == 0 {
+		data.SkillRating.Defaults.Z = 3
+	}
+	if data.SkillRating.Defaults.Mu == 0 {
+		data.SkillRating.Defaults.Mu = 10.0
+	}
+	if data.SkillRating.Defaults.Sigma == 0 {
+		data.SkillRating.Defaults.Sigma = data.SkillRating.Defaults.Mu / float64(data.SkillRating.Defaults.Z)
+	}
+	if data.SkillRating.Defaults.Tau == 0 {
+		data.SkillRating.Defaults.Tau = 0.3
+	}
+
+	// Initialize default team stat multipliers
+	if data.SkillRating.TeamStatMultipliers == nil {
+		data.SkillRating.TeamStatMultipliers = map[string]float64{
+			"Points":      1.0,  // base points
+			"Assists":     2.0,  // bonus for assists
+			"Saves":       3.0,  // bonus for saves
+			"Passes":      1.0,  // bonus for successful passes
+			"ShotsOnGoal": -1.0, // penalty for missed shots
+		}
+	} else {
+		// Validate and remove invalid stat multiplier keys
+		for key := range data.SkillRating.TeamStatMultipliers {
+			if !ValidTeamStatFields[key] {
+				if logger != nil {
+          logger.WithField("key", key).Warn("Removing invalid team stat multiplier key from configuration")
+				}
+				delete(data.SkillRating.TeamStatMultipliers, key)
+			}
+		}
+	}
+
+	// Initialize default player stat multipliers
+	if data.SkillRating.PlayerStatMultipliers == nil {
+		data.SkillRating.PlayerStatMultipliers = map[string]float64{
+			"Points":  1.0, // base points
+			"Assists": 1.0, // same as points
+			"Saves":   2.0, // bonus for saves
+		}
+	} else {
+		// Validate and remove invalid stat multiplier keys
+		for key := range data.SkillRating.PlayerStatMultipliers {
+			if !ValidTeamStatFields[key] {
+				if logger != nil {
+					 logger.WithField("key", key).Warn("Removing invalid player stat multiplier key from configuration")
+				}
+				delete(data.SkillRating.PlayerStatMultipliers, key)
+			}
+		}
+	}
+
+	// Initialize default winning team bonus
+	if data.SkillRating.WinningTeamBonus == 0 {
+		data.SkillRating.WinningTeamBonus = 4.0
+	}
 
 	if data.Matchmaking.ServerSelection.Ratings == nil {
 		data.Matchmaking.ServerSelection.Ratings = make(map[string]float64)

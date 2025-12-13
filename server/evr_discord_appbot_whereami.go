@@ -245,7 +245,8 @@ const (
 	MaxMatchListSize = 100
 )
 
-// handleReportServerIssue handles the "Report Server Issue" context menu command
+// handleReportServerIssue handles the /report-server-issue slash command
+// It displays server information and provides buttons to report lag or other issues
 func (d *DiscordAppBot) handleReportServerIssue(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 	if user == nil {
 		return nil
@@ -261,36 +262,259 @@ func (d *DiscordAppBot) handleReportServerIssue(ctx context.Context, logger runt
 		return simpleInteractionResponse(s, i, "You are not currently in a match. You can only report server issues while in a match.")
 	}
 
-	// Show a message with select menu options first
+	// Create the server info embed
+	embed := d.createServerInfoEmbed(data)
+
+	// Create buttons with match context encoded in CustomID
+	// Format: report_server_issue:<issue_type>:<matchID>:<serverIP>:<regionCode>
+	serverContext := fmt.Sprintf("%s:%s:%s", data.MatchID, data.ServerHostIP, data.RegionCode)
+
+	components := []discordgo.MessageComponent{
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				&discordgo.Button{
+					Label:    "Report Server Lag",
+					Style:    discordgo.DangerButton,
+					CustomID: fmt.Sprintf("report_server_issue:lag:%s", serverContext),
+					Emoji:    &discordgo.ComponentEmoji{Name: "⚡"},
+				},
+				&discordgo.Button{
+					Label:    "Report Other Issue...",
+					Style:    discordgo.SecondaryButton,
+					CustomID: fmt.Sprintf("report_server_issue:other:%s", serverContext),
+					Emoji:    &discordgo.ComponentEmoji{Name: "📝"},
+				},
+			},
+		},
+	}
+
 	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
-			Flags:   discordgo.MessageFlagsEphemeral,
-			Content: "Select the type of server issue you're experiencing:",
+			Flags:      discordgo.MessageFlagsEphemeral,
+			Embeds:     []*discordgo.MessageEmbed{embed},
+			Components: components,
+		},
+	})
+}
+
+// createServerInfoEmbed creates an embed showing current server information
+func (d *DiscordAppBot) createServerInfoEmbed(data *WhereAmIData) *discordgo.MessageEmbed {
+	embed := &discordgo.MessageEmbed{
+		Title:       "Current Server Information",
+		Description: "Select an option below to report an issue with this server.",
+		Color:       EmbedColorBlue,
+		Fields:      []*discordgo.MessageEmbedField{},
+	}
+
+	if data.ServerHostIP != "" {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "Server Host",
+			Value:  data.ServerHostIP,
+			Inline: true,
+		})
+	}
+
+	if data.RegionCode != "" {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "Region",
+			Value:  data.RegionCode,
+			Inline: true,
+		})
+	}
+
+	if data.GuildName != "" {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "Guild",
+			Value:  EscapeDiscordMarkdown(data.GuildName),
+			Inline: true,
+		})
+	}
+
+	if data.MatchMode != "" {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "Match Mode",
+			Value:  data.MatchMode,
+			Inline: true,
+		})
+	}
+
+	if data.OperatorDiscord != "" {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "Server Operator",
+			Value:  fmt.Sprintf("<@%s>", data.OperatorDiscord),
+			Inline: true,
+		})
+	}
+
+	// Players in match
+	if len(data.Players) > 0 {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "Players",
+			Value:  fmt.Sprintf("%d in match", len(data.Players)),
+			Inline: true,
+		})
+	}
+
+	return embed
+}
+
+// handleReportServerIssueLag handles the "Report Server Lag" button click
+func (d *DiscordAppBot) handleReportServerIssueLag(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, serverContext string) error {
+	user := getScopedUser(i)
+	if user == nil {
+		return fmt.Errorf("user is nil")
+	}
+
+	userID := d.cache.DiscordIDToUserID(user.ID)
+	groupID := d.cache.GuildIDToGroupID(i.GuildID)
+
+	// Parse server context: matchID:serverIP:regionCode
+	parts := strings.SplitN(serverContext, ":", 3)
+	if len(parts) < 3 {
+		return fmt.Errorf("invalid server context")
+	}
+	matchID := parts[0]
+	serverIP := parts[1]
+	regionCode := parts[2]
+
+	// Get current match data for additional context
+	data, _ := d.getWhereAmIData(ctx, logger, userID, groupID)
+
+	// Create the report embed
+	embed := d.createServerIssueReportEmbed(user, ServerIssueTypeLag, "", data)
+
+	// Add reported server info if we don't have current data
+	if data == nil {
+		embed.Fields = append(embed.Fields,
+			&discordgo.MessageEmbedField{
+				Name:   "Reported Match ID",
+				Value:  matchID,
+				Inline: true,
+			},
+			&discordgo.MessageEmbedField{
+				Name:   "Reported Server",
+				Value:  serverIP,
+				Inline: true,
+			},
+			&discordgo.MessageEmbedField{
+				Name:   "Reported Region",
+				Value:  regionCode,
+				Inline: true,
+			},
+		)
+	}
+
+	// Get server statistics
+	serverStats := d.getServerStatsByHost(ctx, logger)
+	if serverStats != "" {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "Server Statistics",
+			Value:  serverStats,
+			Inline: false,
+		})
+	}
+
+	// Post to audit/reports channels
+	d.postServerIssueReport(ctx, logger, s, groupID, data, embed)
+
+	// Update the original message to disable buttons and show confirmation
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseUpdateMessage,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Title:       "✅ Thank You for Reporting!",
+					Description: "Your lag report has been submitted. This helps us identify and address server issues.",
+					Color:       EmbedColorGreen,
+					Fields: []*discordgo.MessageEmbedField{
+						{
+							Name:   "Server Reported",
+							Value:  fmt.Sprintf("%s (%s)", serverIP, regionCode),
+							Inline: false,
+						},
+					},
+				},
+			},
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{
 					Components: []discordgo.MessageComponent{
-						discordgo.SelectMenu{
-							CustomID:    fmt.Sprintf("server_issue_type:%s", data.MatchID),
-							Placeholder: "Select issue type",
-							Options: []discordgo.SelectMenuOption{
-								{
-									Label:       "Server Lag/Stuttering",
-									Value:       ServerIssueTypeLag,
-									Description: "The server is experiencing lag or stuttering",
-								},
-								{
-									Label:       "Other",
-									Value:       ServerIssueTypeOther,
-									Description: "Other server-related issue",
-								},
-							},
+						&discordgo.Button{
+							Label:    "Lag Report Submitted",
+							Style:    discordgo.SuccessButton,
+							CustomID: "nil",
+							Disabled: true,
+							Emoji:    &discordgo.ComponentEmoji{Name: "✅"},
 						},
 					},
 				},
 			},
 		},
-	})
+	}); err != nil {
+		return fmt.Errorf("failed to respond to interaction: %w", err)
+	}
+
+	return nil
+}
+
+// handleReportServerIssueOther handles the "Report Other Issue" button click by showing a modal
+func (d *DiscordAppBot) handleReportServerIssueOther(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, serverContext string) error {
+	// Show a modal for the user to describe the issue
+	modal := &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseModal,
+		Data: &discordgo.InteractionResponseData{
+			CustomID: fmt.Sprintf("server_issue_modal:other:%s", serverContext),
+			Title:    "Report Server Issue",
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "issue_details",
+							Label:       "Describe the issue",
+							Style:       discordgo.TextInputParagraph,
+							Placeholder: "Please describe the issue you're experiencing...",
+							Required:    true,
+							MinLength:   10,
+							MaxLength:   IssueDetailsMaxLength,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	return s.InteractionRespond(i.Interaction, modal)
+}
+
+// postServerIssueReport posts the issue report to the appropriate channels
+func (d *DiscordAppBot) postServerIssueReport(ctx context.Context, logger runtime.Logger, s *discordgo.Session, groupID string, data *WhereAmIData, embed *discordgo.MessageEmbed) {
+	gg := d.guildGroupRegistry.Get(groupID)
+	if gg == nil {
+		return
+	}
+
+	// Post to audit channel
+	if gg.AuditChannelID != "" {
+		if _, err := s.ChannelMessageSendEmbed(gg.AuditChannelID, embed); err != nil {
+			logger.WithField("error", err).Warn("Failed to send server issue report to audit channel")
+		}
+	}
+
+	// Post to server reports channel
+	if gg.ServerReportsChannelID != "" {
+		// Mention operator if available
+		content := ""
+		if data != nil && data.OperatorDiscord != "" {
+			content = fmt.Sprintf("<@%s>", data.OperatorDiscord)
+		}
+
+		if _, err := s.ChannelMessageSendComplex(gg.ServerReportsChannelID, &discordgo.MessageSend{
+			Content: content,
+			Embed:   embed,
+		}); err != nil {
+			logger.WithField("error", err).Warn("Failed to send server issue report to server reports channel")
+		}
+	}
 }
 
 // handleServerIssueTypeSelection handles the select menu for issue type selection
@@ -331,7 +555,7 @@ func (d *DiscordAppBot) handleServerIssueTypeSelection(ctx context.Context, logg
 }
 
 // handleServerIssueModalSubmit handles the modal submission for server issue reports
-func (d *DiscordAppBot) handleServerIssueModalSubmit(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, issueType, matchID string) error {
+func (d *DiscordAppBot) handleServerIssueModalSubmit(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, issueType, serverContext string) error {
 	user := getScopedUser(i)
 	if user == nil {
 		return fmt.Errorf("user is nil")
@@ -340,20 +564,59 @@ func (d *DiscordAppBot) handleServerIssueModalSubmit(ctx context.Context, logger
 	userID := d.cache.DiscordIDToUserID(user.ID)
 	groupID := d.cache.GuildIDToGroupID(i.GuildID)
 
+	// Parse server context: matchID:serverIP:regionCode
+	var reportedMatchID, reportedServerIP, reportedRegionCode string
+	contextParts := strings.SplitN(serverContext, ":", 3)
+	if len(contextParts) >= 1 {
+		reportedMatchID = contextParts[0]
+	}
+	if len(contextParts) >= 2 {
+		reportedServerIP = contextParts[1]
+	}
+	if len(contextParts) >= 3 {
+		reportedRegionCode = contextParts[2]
+	}
+
 	// Get modal data
 	modalData := i.ModalSubmitData()
 
 	var issueDetails string
+	var issueTypeInput string
 
 	for _, row := range modalData.Components {
 		if actionRow, ok := row.(*discordgo.ActionsRow); ok {
 			for _, comp := range actionRow.Components {
 				switch c := comp.(type) {
 				case *discordgo.TextInput:
-					if c.CustomID == "issue_details" {
+					switch c.CustomID {
+					case "issue_details":
 						issueDetails = c.Value
+					case "issue_type":
+						issueTypeInput = c.Value
 					}
 				}
+			}
+		}
+	}
+
+	// Determine the issue type from input
+	// If the issueType parameter is empty (new modal format), use the input from modal
+	// If the issueType parameter is provided (legacy format), use it
+	if issueType == "" && issueTypeInput != "" {
+		// Parse the issue type from user input
+		lowerInput := strings.ToLower(strings.TrimSpace(issueTypeInput))
+		// Check for exact matches first (case-insensitive)
+		switch lowerInput {
+		case "lag", "stutter", "stuttering", "server_lag", "latency":
+			issueType = ServerIssueTypeLag
+		case "other":
+			issueType = ServerIssueTypeOther
+		default:
+			// Fallback to contains-based matching for more flexible input
+			if strings.Contains(lowerInput, "lag") || strings.Contains(lowerInput, "stutter") {
+				issueType = ServerIssueTypeLag
+			} else {
+				issueType = ServerIssueTypeOther
 			}
 		}
 	}
@@ -367,6 +630,31 @@ func (d *DiscordAppBot) handleServerIssueModalSubmit(ctx context.Context, logger
 	// Create the report embed
 	embed := d.createServerIssueReportEmbed(user, issueType, issueDetails, data)
 
+	// If we don't have current match data but have server context from the button, add it
+	if data == nil && (reportedServerIP != "" || reportedRegionCode != "") {
+		if reportedMatchID != "" {
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+				Name:   "Reported Match ID",
+				Value:  reportedMatchID,
+				Inline: true,
+			})
+		}
+		if reportedServerIP != "" {
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+				Name:   "Reported Server",
+				Value:  reportedServerIP,
+				Inline: true,
+			})
+		}
+		if reportedRegionCode != "" {
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+				Name:   "Reported Region",
+				Value:  reportedRegionCode,
+				Inline: true,
+			})
+		}
+	}
+
 	// Get server statistics (active/idle servers by host)
 	serverStats := d.getServerStatsByHost(ctx, logger)
 	if serverStats != "" {
@@ -377,32 +665,8 @@ func (d *DiscordAppBot) handleServerIssueModalSubmit(ctx context.Context, logger
 		})
 	}
 
-	// Post to audit log
-	gg := d.guildGroupRegistry.Get(groupID)
-	if gg != nil {
-		// Post to audit channel
-		if gg.AuditChannelID != "" {
-			if _, err := s.ChannelMessageSendEmbed(gg.AuditChannelID, embed); err != nil {
-				logger.WithField("error", err).Warn("Failed to send server issue report to audit channel")
-			}
-		}
-
-		// Post to server reports channel
-		if gg.ServerReportsChannelID != "" {
-			// Mention operator if available
-			content := ""
-			if data != nil && data.OperatorDiscord != "" {
-				content = fmt.Sprintf("<@%s>", data.OperatorDiscord)
-			}
-
-			if _, err := s.ChannelMessageSendComplex(gg.ServerReportsChannelID, &discordgo.MessageSend{
-				Content: content,
-				Embed:   embed,
-			}); err != nil {
-				logger.WithField("error", err).Warn("Failed to send server issue report to server reports channel")
-			}
-		}
-	}
+	// Post to audit/reports channels
+	d.postServerIssueReport(ctx, logger, s, groupID, data, embed)
 
 	// Respond to the user
 	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{

@@ -22,14 +22,17 @@ const (
 	TabletStatisticIntegerValue = iota
 	TabletStatisticFloatValue
 
-	GamesPlayedStatisticID        = "GamesPlayed"
-	SkillRatingMuStatisticID      = "SkillRatingMu"
-	SkillRatingSigmaStatisticID   = "SkillRatingSigma"
-	SkillRatingOrdinalStatisticID = "SkillRatingOrdinal"
-	LobbyTimeStatisticID          = "LobbyTime"
-	GameServerTimeStatisticsID    = "GameServerTime"
-	EarlyQuitStatisticID          = "EarlyQuits"
-	PlayerLoudnessStatisticID     = "PlayerLoudness"
+	GamesPlayedStatisticID              = "GamesPlayed"
+	TeamSkillRatingMuStatisticID        = "TeamSkillRatingMu"        // Team-based skill rating Mu
+	TeamSkillRatingSigmaStatisticID     = "TeamSkillRatingSigma"     // Team-based skill rating Sigma
+	PlayerSkillRatingMuStatisticID      = "PlayerSkillRatingMu"      // Individual player skill rating Mu
+	PlayerSkillRatingSigmaStatisticID   = "PlayerSkillRatingSigma"   // Individual player skill rating Sigma
+	TeamSkillRatingOrdinalStatisticID   = "TeamSkillRatingOrdinal"   // Team-based skill rating Ordinal
+	PlayerSkillRatingOrdinalStatisticID = "PlayerSkillRatingOrdinal" // Individual player skill rating Ordinal
+	LobbyTimeStatisticID                = "LobbyTime"
+	GameServerTimeStatisticsID          = "GameServerTime"
+	EarlyQuitStatisticID                = "EarlyQuits"
+	PlayerLoudnessStatisticID           = "PlayerLoudness"
 
 	LeaderboardScoreScalingFactor = float64(1000000000)
 )
@@ -227,8 +230,39 @@ func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, userID,
 	var sigma, mu float64
 
 	structMap := map[string]*float64{
-		SkillRatingMuStatisticID:    &mu,
-		SkillRatingSigmaStatisticID: &sigma,
+		TeamSkillRatingMuStatisticID:    &mu,
+		TeamSkillRatingSigmaStatisticID: &sigma,
+	}
+
+	for statName, ptr := range structMap {
+		boardID := StatisticBoardID(groupID, mode, statName, evr.ResetScheduleAllTime)
+
+		_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 1, "", 0)
+		if err != nil {
+			return NewDefaultRating(), err
+		}
+
+		if len(ownerRecords) == 0 {
+			return NewDefaultRating(), nil
+		}
+
+		record := ownerRecords[0]
+		val, err := ScoreToFloat64(record.Score, record.Subscore)
+		if err != nil {
+			return NewDefaultRating(), fmt.Errorf("failed to decode score for %s: %w", statName, err)
+		}
+		*ptr = val
+	}
+	return NewRating(0, mu, sigma), nil
+}
+
+// MatchmakingPlayerRatingLoad loads the individual player skill rating from leaderboards.
+func MatchmakingPlayerRatingLoad(ctx context.Context, nk runtime.NakamaModule, userID, groupID string, mode evr.Symbol) (types.Rating, error) {
+	var sigma, mu float64
+
+	structMap := map[string]*float64{
+		PlayerSkillRatingMuStatisticID:    &mu,
+		PlayerSkillRatingSigmaStatisticID: &sigma,
 	}
 
 	for statName, ptr := range structMap {

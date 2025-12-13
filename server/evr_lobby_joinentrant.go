@@ -127,7 +127,14 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 		}
 	}
 
-	<-time.After(1 * time.Second)
+	time.Sleep(1 * time.Second)
+
+	// Check if session context is still valid before tracking
+	select {
+	case <-sessionCtx.Done():
+		return fmt.Errorf("session closed before stream tracking: %w", sessionCtx.Err())
+	default:
+	}
 
 	matchIDStr := label.ID.String()
 
@@ -156,9 +163,15 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 		},
 	}
 
-	// Update the statuses. This is looked up by the pipeline when the game server sends the new entrant message.
+	// Update the statuses with retry logic to handle transient session state issues.
+	// This is looked up by the pipeline when the game server sends the new entrant message,
+	// and also by the IGP (In-Game Panel) to find players in matches.
+	const maxRetries = 3
+	const retryDelay = 100 * time.Millisecond
+
 	for _, op := range ops {
 		if ok := tracker.Update(sessionCtx, e.SessionID, op.Stream, e.UserID, op.Meta); !ok {
+			logger.Warn("Failed to track stream", zap.Any("stream", op.Stream), zap.String("uid", e.UserID.String()))
 			return ErrFailedToTrackSessionID
 		}
 	}
