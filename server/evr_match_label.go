@@ -26,7 +26,7 @@ type slotReservation struct {
 type MatchLabel struct {
 	ID          MatchID      `json:"id"`                   // The Session Id used by EVR (the same as match id)
 	Open        bool         `json:"open"`                 // Whether the lobby is open to new players (Matching Only)
-	LockedAt    time.Time    `json:"locked_at,omitempty"`  // The time the match was locked.
+	LockedAt    *time.Time   `json:"locked_at,omitempty"`  // The time the match was locked.
 	LobbyType   LobbyType    `json:"lobby_type"`           // The type of lobby (Public, Private, Unassigned) (EVR)
 	Mode        evr.Symbol   `json:"mode,omitempty"`       // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
 	Level       evr.Symbol   `json:"level,omitempty"`      // The level to play on (EVR).
@@ -111,7 +111,7 @@ func (s *MatchLabel) IsPublicMatch() bool {
 }
 
 func (s *MatchLabel) IsLocked() bool {
-	if !s.Open || !s.LockedAt.IsZero() {
+	if !s.Open || (s.LockedAt != nil && !s.LockedAt.IsZero()) {
 		return true
 	}
 	return false
