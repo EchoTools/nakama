@@ -7,6 +7,7 @@ import (
 
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 )
 
 const (
@@ -129,7 +130,7 @@ func (g ServiceSettingsData) UseSkillBasedMatchmaking() bool {
 	return g.Matchmaking.EnableSBMM
 }
 
-func ServiceSettingsLoad(ctx context.Context, nk runtime.NakamaModule) (*ServiceSettingsData, error) {
+func ServiceSettingsLoad(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) (*ServiceSettingsData, error) {
 
 	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 		{
@@ -151,7 +152,7 @@ func ServiceSettingsLoad(ctx context.Context, nk runtime.NakamaModule) (*Service
 			return nil, fmt.Errorf("failed to unmarshal global settings: %w", err)
 		}
 	}
-	FixDefaultServiceSettings(&data)
+	FixDefaultServiceSettings(logger, &data)
 
 	// If the object doesn't exist, or this is the first start
 	// write the settings to the storage
@@ -184,7 +185,7 @@ var ValidTeamStatFields = map[string]bool{
 	"TwoPointGoals": true,
 }
 
-func FixDefaultServiceSettings(data *ServiceSettingsData) {
+func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData) {
 
 	// Initialize skill rating defaults
 	if data.SkillRating.Defaults.Z == 0 {
@@ -213,6 +214,9 @@ func FixDefaultServiceSettings(data *ServiceSettingsData) {
 		// Validate and remove invalid stat multiplier keys
 		for key := range data.SkillRating.TeamStatMultipliers {
 			if !ValidTeamStatFields[key] {
+				if logger != nil {
+					logger.Warn("Removing invalid team stat multiplier key from configuration", zap.String("key", key))
+				}
 				delete(data.SkillRating.TeamStatMultipliers, key)
 			}
 		}
@@ -229,6 +233,9 @@ func FixDefaultServiceSettings(data *ServiceSettingsData) {
 		// Validate and remove invalid stat multiplier keys
 		for key := range data.SkillRating.PlayerStatMultipliers {
 			if !ValidTeamStatFields[key] {
+				if logger != nil {
+					logger.Warn("Removing invalid player stat multiplier key from configuration", zap.String("key", key))
+				}
 				delete(data.SkillRating.PlayerStatMultipliers, key)
 			}
 		}

@@ -136,7 +136,7 @@ func TestOverrideFn(t *testing.T) {
 	t.Logf("Processing %d candidate matches", len(runtimeCombinations))
 	startTime := time.Now()
 	globalSettings := &ServiceSettingsData{}
-	FixDefaultServiceSettings(globalSettings)
+	FixDefaultServiceSettings(nil, globalSettings)
 	_, returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations)
 	t.Logf("Matched %d candidate matches in %s", len(returnedEntries), time.Since(startTime))
 
