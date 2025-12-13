@@ -503,6 +503,12 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 		}
 	}
 
+	// Get the default region code from the game server
+	var defaultRegion string
+	if l.GameServer != nil && len(l.GameServer.RegionCodes) > 0 {
+		defaultRegion = l.GameServer.RegionCodes[0]
+	}
+
 	v := &MatchLabel{
 		LobbyType:        l.LobbyType,
 		ID:               l.ID,
@@ -522,14 +528,14 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 		PlayerLimit:      l.PlayerLimit,
 		TeamSize:         l.TeamSize,
 		GameServer: &GameServerPresence{
-			OperatorID:  l.GameServer.OperatorID,
-			GroupIDs:    l.GameServer.GroupIDs,
-			VersionLock: l.GameServer.VersionLock,
-			//RegionCodes: l.GameServer.RegionCodes,
-			Tags:        l.GameServer.Tags,
-			Features:    l.GameServer.Features,
-			Region:      l.GameServer.Region,
-			CountryCode: l.GameServer.CountryCode,
+			OperatorID:    l.GameServer.OperatorID,
+			GroupIDs:      l.GameServer.GroupIDs,
+			VersionLock:   l.GameServer.VersionLock,
+			DefaultRegion: defaultRegion,
+			Tags:          l.GameServer.Tags,
+			Features:      l.GameServer.Features,
+			Region:        l.GameServer.Region,
+			CountryCode:   l.GameServer.CountryCode,
 		},
 		Players:  make([]PlayerInfo, 0),
 		RatingMu: l.RatingMu,
