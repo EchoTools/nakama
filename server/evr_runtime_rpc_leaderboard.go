@@ -113,7 +113,7 @@ func (h *RPCHandler) LeaderboardRecordsListRPC(ctx context.Context, logger runti
 		NextCursor:    nextCursor,
 		PrevCursor:    prevCursor,
 	}
-	data, err := json.MarshalIndent(response, "", "  ")
+	data, err := json.Marshal(response)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal records: %w", err)
 	}
