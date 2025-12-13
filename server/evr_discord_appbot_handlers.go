@@ -661,6 +661,11 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				logger.Warn("Failed to record public enforcement", zap.Error(err))
 			}
 
+			// Record metrics for this enforcement action
+			if err := RecordEnforcementMetrics(ctx, nk, record, sent); err != nil {
+				logger.Warn("Failed to record enforcement metrics", zap.Error(err))
+			}
+
 		} else if voidActiveSuspensions {
 
 			currentGroupID := groupID
@@ -696,6 +701,11 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 					// Record voiding to public enforcement log if enabled
 					if err := RecordPublicEnforcement(ctx, nk, record, true, void.VoidedAt); err != nil {
 						logger.Warn("Failed to record voided enforcement to public log", zap.Error(err))
+					}
+
+					// Record voiding metrics
+					if err := RecordVoidingMetrics(ctx, nk, currentGroupID, targetUserID); err != nil {
+						logger.Warn("Failed to record voiding metrics", zap.Error(err))
 					}
 				}
 			}
