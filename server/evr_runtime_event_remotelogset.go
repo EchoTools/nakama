@@ -574,19 +574,20 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 			// Determine winning team
 			blueWins := (playerInfo.Team == BlueTeam && typeStats.ArenaWins > 0) || (playerInfo.Team == OrangeTeam && typeStats.ArenaLosses > 0)
 
-			// Calculate new ratings
-			ratings := CalculateNewPlayerRatings(label.Players, statsByPlayer, blueWins)
-			if rating, ok := ratings[playerInfo.SessionID]; ok {
-				// Add skill rating entries to the statistics queue
+			// Calculate new team-based ratings
+			teamRatings := CalculateNewTeamRatings(label.Players, statsByPlayer, blueWins)
+			if rating, ok := teamRatings[playerInfo.SessionID]; ok {
+				// Add team skill rating entries to the statistics queue
 				muScore, muSubscore, err := Float64ToScore(rating.Mu)
 				if err != nil {
-					logger.WithField("error", err).Warn("Failed to convert Mu rating to score")
+					logger.WithField("error", err).Warn("Failed to convert Team Mu rating to score")
 				} else {
+					// Write to new TeamSkillRating stat
 					allStatEntries = append(allStatEntries, &StatisticsQueueEntry{
 						BoardMeta: LeaderboardMeta{
 							GroupID:       groupIDStr,
 							Mode:          label.Mode,
-							StatName:      SkillRatingMuStatisticID,
+							StatName:      TeamSkillRatingMuStatisticID,
 							Operator:      OperatorSet,
 							ResetSchedule: evr.ResetScheduleAllTime,
 						},
@@ -600,13 +601,14 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 
 				sigmaScore, sigmaSubscore, err := Float64ToScore(rating.Sigma)
 				if err != nil {
-					logger.WithField("error", err).Warn("Failed to convert Sigma rating to score")
+					logger.WithField("error", err).Warn("Failed to convert Team Sigma rating to score")
 				} else {
+					// Write to new TeamSkillRating stat
 					allStatEntries = append(allStatEntries, &StatisticsQueueEntry{
 						BoardMeta: LeaderboardMeta{
 							GroupID:       groupIDStr,
 							Mode:          label.Mode,
-							StatName:      SkillRatingSigmaStatisticID,
+							StatName:      TeamSkillRatingSigmaStatisticID,
 							Operator:      OperatorSet,
 							ResetSchedule: evr.ResetScheduleAllTime,
 						},
@@ -618,7 +620,54 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 					})
 				}
 			} else {
-				logger.WithField("target_sid", playerInfo.SessionID).Warn("No rating found for player in matchmaking ratings")
+				logger.WithField("target_sid", playerInfo.SessionID).Warn("No team rating found for player in matchmaking ratings")
+			}
+
+			// Calculate new individual player ratings
+			playerRatings := CalculateNewIndividualRatings(label.Players, statsByPlayer, blueWins)
+			if rating, ok := playerRatings[playerInfo.SessionID]; ok {
+				// Add player skill rating entries to the statistics queue
+				muScore, muSubscore, err := Float64ToScore(rating.Mu)
+				if err != nil {
+					logger.WithField("error", err).Warn("Failed to convert Player Mu rating to score")
+				} else {
+					allStatEntries = append(allStatEntries, &StatisticsQueueEntry{
+						BoardMeta: LeaderboardMeta{
+							GroupID:       groupIDStr,
+							Mode:          label.Mode,
+							StatName:      PlayerSkillRatingMuStatisticID,
+							Operator:      OperatorSet,
+							ResetSchedule: evr.ResetScheduleAllTime,
+						},
+						UserID:      playerInfo.UserID,
+						DisplayName: playerInfo.DisplayName,
+						Score:       muScore,
+						Subscore:    muSubscore,
+						Metadata:    map[string]string{"discord_id": playerInfo.DiscordID},
+					})
+				}
+
+				sigmaScore, sigmaSubscore, err := Float64ToScore(rating.Sigma)
+				if err != nil {
+					logger.WithField("error", err).Warn("Failed to convert Player Sigma rating to score")
+				} else {
+					allStatEntries = append(allStatEntries, &StatisticsQueueEntry{
+						BoardMeta: LeaderboardMeta{
+							GroupID:       groupIDStr,
+							Mode:          label.Mode,
+							StatName:      PlayerSkillRatingSigmaStatisticID,
+							Operator:      OperatorSet,
+							ResetSchedule: evr.ResetScheduleAllTime,
+						},
+						UserID:      playerInfo.UserID,
+						DisplayName: playerInfo.DisplayName,
+						Score:       sigmaScore,
+						Subscore:    sigmaSubscore,
+						Metadata:    map[string]string{"discord_id": playerInfo.DiscordID},
+					})
+				}
+			} else {
+				logger.WithField("target_sid", playerInfo.SessionID).Warn("No player rating found for player in matchmaking ratings")
 			}
 		}
 

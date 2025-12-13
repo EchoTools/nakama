@@ -239,9 +239,15 @@ type ArenaStatistics struct {
 	TwoPointGoals                *StatisticValue `json:"TwoPointGoals,omitempty" op:"add,omitzero" type:"int"`
 	XP                           *StatisticValue `json:"XP,omitempty" op:"add,omitzero" type:"float"`
 	GamesPlayed                  *StatisticValue `json:"GamesPlayed,omitempty" op:"add,omitzero" type:"int"`
-	SkillRatingMu                *StatisticValue `json:"SkillRatingMu,omitempty" op:"rep,omitzero" type:"float"`
-	SkillRatingSigma             *StatisticValue `json:"SkillRatingSigma,omitempty" op:"rep,omitzero" type:"float"`
-	SkillRatingOrdinal           *StatisticValue `json:"SkillRatingOrdinal,omitempty" op:"rep,omitzero" type:"float"`
+	SkillRatingMu                *StatisticValue `json:"SkillRatingMu,omitempty" op:"rep,omitzero" type:"float"`            // Deprecated: Use TeamSkillRatingMu
+	SkillRatingSigma             *StatisticValue `json:"SkillRatingSigma,omitempty" op:"rep,omitzero" type:"float"`         // Deprecated: Use TeamSkillRatingSigma
+	SkillRatingOrdinal           *StatisticValue `json:"SkillRatingOrdinal,omitempty" op:"rep,omitzero" type:"float"`       // Deprecated: Use TeamSkillRatingOrdinal
+	TeamSkillRatingMu            *StatisticValue `json:"TeamSkillRatingMu,omitempty" op:"rep,omitzero" type:"float"`        // Team-based skill rating Mu
+	TeamSkillRatingSigma         *StatisticValue `json:"TeamSkillRatingSigma,omitempty" op:"rep,omitzero" type:"float"`     // Team-based skill rating Sigma
+	TeamSkillRatingOrdinal       *StatisticValue `json:"TeamSkillRatingOrdinal,omitempty" op:"rep,omitzero" type:"float"`   // Team-based skill rating Ordinal
+	PlayerSkillRatingMu          *StatisticValue `json:"PlayerSkillRatingMu,omitempty" op:"rep,omitzero" type:"float"`      // Individual player skill rating Mu
+	PlayerSkillRatingSigma       *StatisticValue `json:"PlayerSkillRatingSigma,omitempty" op:"rep,omitzero" type:"float"`   // Individual player skill rating Sigma
+	PlayerSkillRatingOrdinal     *StatisticValue `json:"PlayerSkillRatingOrdinal,omitempty" op:"rep,omitzero" type:"float"` // Individual player skill rating Ordinal
 	LobbyTime                    *StatisticValue `json:"LobbyTime,omitempty" op:"rep,omitzero" type:"float"`
 	EarlyQuits                   *StatisticValue `json:"EarlyQuits,omitempty" op:"add,omitzero" type:"int"`
 	EarlyQuitPercentage          *StatisticValue `json:"EarlyQuitPercentage,omitempty" op:"rep,omitzero" type:"float"`
@@ -390,6 +396,7 @@ func (s *ArenaStatistics) CalculateFields() {
 			}
 		}
 
+		// Calculate legacy skill rating ordinal (for backwards compatibility)
 		if s.SkillRatingMu != nil && s.SkillRatingSigma != nil {
 			r := types.Rating{
 				Sigma: s.SkillRatingSigma.GetValue(),
@@ -398,6 +405,34 @@ func (s *ArenaStatistics) CalculateFields() {
 			}
 
 			s.SkillRatingOrdinal = &StatisticValue{
+				Value: rating.Ordinal(r),
+				Count: 1,
+			}
+		}
+
+		// Calculate team skill rating ordinal
+		if s.TeamSkillRatingMu != nil && s.TeamSkillRatingSigma != nil {
+			r := types.Rating{
+				Sigma: s.TeamSkillRatingSigma.GetValue(),
+				Mu:    s.TeamSkillRatingMu.GetValue(),
+				Z:     3,
+			}
+
+			s.TeamSkillRatingOrdinal = &StatisticValue{
+				Value: rating.Ordinal(r),
+				Count: 1,
+			}
+		}
+
+		// Calculate player skill rating ordinal
+		if s.PlayerSkillRatingMu != nil && s.PlayerSkillRatingSigma != nil {
+			r := types.Rating{
+				Sigma: s.PlayerSkillRatingSigma.GetValue(),
+				Mu:    s.PlayerSkillRatingMu.GetValue(),
+				Z:     3,
+			}
+
+			s.PlayerSkillRatingOrdinal = &StatisticValue{
 				Value: rating.Ordinal(r),
 				Count: 1,
 			}
@@ -438,9 +473,15 @@ type CombatStatistics struct {
 	Level                              *StatisticValue `json:"Level,omitempty" op:"add,omitzero" type:"int"`
 	XP                                 *StatisticValue `json:"XP,omitempty" op:"rep,omitzero" type:"float"`
 	GamesPlayed                        *StatisticValue `json:"GamesPlayed,omitempty" op:"add,omitzero" type:"int"`
-	SkillRatingMu                      *StatisticValue `json:"SkillRatingMu,omitempty" op:"rep,omitzero" type:"float"`
-	SkillRatingSigma                   *StatisticValue `json:"SkillRatingSigma,omitempty" op:"rep,omitzero" type:"float"`
-	SkillRatingOrdinal                 *StatisticValue `json:"SkillRatingOrdinal,omitempty" op:"rep,omitzero" type:"float"`
+	SkillRatingMu                      *StatisticValue `json:"SkillRatingMu,omitempty" op:"rep,omitzero" type:"float"`            // Deprecated: Use TeamSkillRatingMu
+	SkillRatingSigma                   *StatisticValue `json:"SkillRatingSigma,omitempty" op:"rep,omitzero" type:"float"`         // Deprecated: Use TeamSkillRatingSigma
+	SkillRatingOrdinal                 *StatisticValue `json:"SkillRatingOrdinal,omitempty" op:"rep,omitzero" type:"float"`       // Deprecated: Use TeamSkillRatingOrdinal
+	TeamSkillRatingMu                  *StatisticValue `json:"TeamSkillRatingMu,omitempty" op:"rep,omitzero" type:"float"`        // Team-based skill rating Mu
+	TeamSkillRatingSigma               *StatisticValue `json:"TeamSkillRatingSigma,omitempty" op:"rep,omitzero" type:"float"`     // Team-based skill rating Sigma
+	TeamSkillRatingOrdinal             *StatisticValue `json:"TeamSkillRatingOrdinal,omitempty" op:"rep,omitzero" type:"float"`   // Team-based skill rating Ordinal
+	PlayerSkillRatingMu                *StatisticValue `json:"PlayerSkillRatingMu,omitempty" op:"rep,omitzero" type:"float"`      // Individual player skill rating Mu
+	PlayerSkillRatingSigma             *StatisticValue `json:"PlayerSkillRatingSigma,omitempty" op:"rep,omitzero" type:"float"`   // Individual player skill rating Sigma
+	PlayerSkillRatingOrdinal           *StatisticValue `json:"PlayerSkillRatingOrdinal,omitempty" op:"rep,omitzero" type:"float"` // Individual player skill rating Ordinal
 	LobbyTime                          *StatisticValue `json:"LobbyTime,omitempty" op:"rep,omitzero" type:"float"`
 }
 
@@ -479,6 +520,7 @@ func (s *CombatStatistics) CalculateFields() {
 		s.CombatPointCaptureWinPercentage.Value = float64(s.CombatPointCaptureWins.Value) / float64(s.CombatPointCaptureGamesPlayed.Value) * 100
 	}
 
+	// Calculate legacy skill rating ordinal (for backwards compatibility)
 	if s.SkillRatingMu != nil && s.SkillRatingSigma != nil {
 		r := types.Rating{
 			Sigma: s.SkillRatingSigma.GetValue(),
@@ -487,6 +529,34 @@ func (s *CombatStatistics) CalculateFields() {
 		}
 
 		s.SkillRatingOrdinal = &StatisticValue{
+			Value: rating.Ordinal(r),
+			Count: 1,
+		}
+	}
+
+	// Calculate team skill rating ordinal
+	if s.TeamSkillRatingMu != nil && s.TeamSkillRatingSigma != nil {
+		r := types.Rating{
+			Sigma: s.TeamSkillRatingSigma.GetValue(),
+			Mu:    s.TeamSkillRatingMu.GetValue(),
+			Z:     3,
+		}
+
+		s.TeamSkillRatingOrdinal = &StatisticValue{
+			Value: rating.Ordinal(r),
+			Count: 1,
+		}
+	}
+
+	// Calculate player skill rating ordinal
+	if s.PlayerSkillRatingMu != nil && s.PlayerSkillRatingSigma != nil {
+		r := types.Rating{
+			Sigma: s.PlayerSkillRatingSigma.GetValue(),
+			Mu:    s.PlayerSkillRatingMu.GetValue(),
+			Z:     3,
+		}
+
+		s.PlayerSkillRatingOrdinal = &StatisticValue{
 			Value: rating.Ordinal(r),
 			Count: 1,
 		}
