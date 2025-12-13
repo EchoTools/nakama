@@ -638,6 +638,24 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			record := journal.AddRecord(groupID, callerUserID, caller.User.ID, userNotice, notes, requireCommunityValues, allowPrivateLobbies, suspensionDuration)
 			recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
 
+			// Send DM notification to the user
+			guildName := ""
+			if gg != nil {
+				guildName = gg.Name()
+			}
+			sent, err := SendEnforcementNotification(ctx, s, record, target.User.ID, guildName)
+			if err != nil {
+				logger.Warn("Failed to send enforcement notification DM", zap.Error(err), zap.String("user_id", target.User.ID))
+			}
+			// Update the record with notification status
+			if updateErr := journal.UpdateRecordNotificationStatus(groupID, record.ID, sent); updateErr != nil {
+				logger.Warn("Failed to update notification status", zap.Error(updateErr))
+			}
+			// Save the updated journal with notification status
+			if err := StorableWrite(ctx, nk, targetUserID, journal); err != nil {
+				logger.Warn("Failed to save journal after notification update", zap.Error(err))
+			}
+
 		} else if voidActiveSuspensions {
 
 			currentGroupID := groupID
