@@ -304,8 +304,8 @@ func CalculateNewTeamRatingsWithConfig(playerInfos []PlayerInfo, playerStats map
 	return ratingMap
 }
 
-// CalculateNewPlayerRatings calculates the new individual player ratings based on personal performance.
-// This uses the PlayerStatMultipliers from service settings (Points, Assists, Saves by default).
+// CalculateNewPlayerRatings is retained for backwards compatibility.
+// This now delegates to CalculateNewTeamRatings, which uses TeamStatMultipliers from service settings.
 // Deprecated: Use CalculateNewTeamRatings for team-based ratings or CalculateNewIndividualRatings for individual ratings.
 func CalculateNewPlayerRatings(playerInfos []PlayerInfo, playerStats map[evr.EvrId]evr.MatchTypeStats, blueWins bool) map[string]types.Rating {
 	// For backwards compatibility, delegate to team ratings

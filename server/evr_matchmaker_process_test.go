@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"go.uber.org/zap"
 )
 
 // Test filtering candidates based on max RTT to common servers
