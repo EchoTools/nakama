@@ -3128,19 +3128,18 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 			case "server_issue_modal":
-				// Parse match ID from value (format: "matchID" or legacy "issueType:matchID")
-				// In the new format, issueType is extracted from the modal data
-				// In the legacy format (from select menu), issueType was part of the CustomID
+				// Parse the value which contains issue type and server context
+				// Format: "other:matchID:serverIP:regionCode" (from Report Other button)
+				// or legacy format: "matchID" (old modal format)
 				parts := strings.SplitN(value, ":", 2)
 				issueType := ""
-				matchID := value
-				if len(parts) == 2 {
-					// Legacy format: issueType:matchID
+				serverContext := value
+				if len(parts) >= 2 {
 					issueType = parts[0]
-					matchID = parts[1]
+					serverContext = parts[1]
 				}
 				// If issueType is empty, handleServerIssueModalSubmit will extract it from modal data
-				if err := d.handleServerIssueModalSubmit(ctx, logger, s, i, issueType, matchID); err != nil {
+				if err := d.handleServerIssueModalSubmit(ctx, logger, s, i, issueType, serverContext); err != nil {
 					logger.Error("Failed to handle server issue modal submit", zap.Error(err))
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
