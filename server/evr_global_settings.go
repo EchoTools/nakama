@@ -130,7 +130,7 @@ func (g ServiceSettingsData) UseSkillBasedMatchmaking() bool {
 	return g.Matchmaking.EnableSBMM
 }
 
-func ServiceSettingsLoad(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule) (*ServiceSettingsData, error) {
+func ServiceSettingsLoad(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) (*ServiceSettingsData, error) {
 
 	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 		{
@@ -185,7 +185,7 @@ var ValidTeamStatFields = map[string]bool{
 	"TwoPointGoals": true,
 }
 
-func FixDefaultServiceSettings(logger *zap.Logger, data *ServiceSettingsData) {
+func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData) {
 
 	// Initialize skill rating defaults
 	if data.SkillRating.Defaults.Z == 0 {
@@ -214,7 +214,9 @@ func FixDefaultServiceSettings(logger *zap.Logger, data *ServiceSettingsData) {
 		// Validate and remove invalid stat multiplier keys
 		for key := range data.SkillRating.TeamStatMultipliers {
 			if !ValidTeamStatFields[key] {
-				logger.Warn("Removing invalid team stat multiplier key from configuration", zap.String("key", key))
+				if logger != nil {
+          logger.WithField("key", key).Warn("Removing invalid team stat multiplier key from configuration")
+				}
 				delete(data.SkillRating.TeamStatMultipliers, key)
 			}
 		}
@@ -231,7 +233,9 @@ func FixDefaultServiceSettings(logger *zap.Logger, data *ServiceSettingsData) {
 		// Validate and remove invalid stat multiplier keys
 		for key := range data.SkillRating.PlayerStatMultipliers {
 			if !ValidTeamStatFields[key] {
-				logger.Warn("Removing invalid player stat multiplier key from configuration", zap.String("key", key))
+				if logger != nil {
+					 logger.WithField("key", key).Warn("Removing invalid player stat multiplier key from configuration")
+				}
 				delete(data.SkillRating.PlayerStatMultipliers, key)
 			}
 		}
