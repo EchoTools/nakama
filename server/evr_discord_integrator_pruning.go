@@ -10,7 +10,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
-// pruneSafetyThreshold is the maximum number of orphaned groups or guilds that can be deleted/left before the pruning operation is aborted.
+// pruneSafetyThreshold is the maximum number of orphaned groups or guilds that can be marked inactive/left before the pruning operation is aborted.
 
 func (d *DiscordIntegrator) pruneGuildGroups(ctx context.Context, logger runtime.Logger, doGuildLeaves, doGroupDeletes bool, pruneSafetyThreshold int) error {
 	var (
@@ -78,8 +78,8 @@ func (d *DiscordIntegrator) pruneGuildGroups(ctx context.Context, logger runtime
 		logger.WithFields(map[string]any{
 			"orphan_groups": orphanGroups,
 			"orphan_guilds": orphanGuilds,
-		}).Error(fmt.Sprintf("Pruning Discord guilds and groups will leave more than %d, skipping to avoid mass leave", pruneSafetyThreshold))
-		return fmt.Errorf("Pruning Discord guilds and groups will leave more than %d, skipping to avoid mass leave", pruneSafetyThreshold)
+		}).Error(fmt.Sprintf("Pruning Discord guilds and groups will mark more than %d inactive, skipping to avoid mass operation", pruneSafetyThreshold))
+		return fmt.Errorf("Pruning Discord guilds and groups will mark more than %d inactive, skipping to avoid mass operation", pruneSafetyThreshold)
 	}
 
 	// Remove any guilds that are not in Nakama
@@ -104,9 +104,9 @@ func (d *DiscordIntegrator) pruneGuildGroups(ctx context.Context, logger runtime
 				"group_id":   g.GetId(),
 				"group_name": g.GetName(),
 				"metadata":   g.GetMetadata(),
-			}).Info("Deleting orphaned group from Nakama")
-			if err := d.nk.GroupDelete(ctx, g.GetId()); err != nil {
-				logger.WithField("error", err).Warn("Failed to delete orphaned group from Nakama")
+			}).Info("Marking orphaned group as inactive in Nakama")
+			if err := MarkGuildGroupInactive(ctx, d.nk, g.GetId(), "Orphaned group - bot not in Discord guild"); err != nil {
+				logger.WithField("error", err).Warn("Failed to mark orphaned group as inactive in Nakama")
 				continue
 			}
 		}
@@ -115,8 +115,8 @@ func (d *DiscordIntegrator) pruneGuildGroups(ctx context.Context, logger runtime
 	// Log the results
 	if len(orphanGroups)+len(orphanGuilds) > 0 {
 		logger.WithFields(map[string]any{
-			"deleted_groups": len(orphanGroups),
-			"left_guilds":    len(orphanGuilds),
+			"inactive_groups": len(orphanGroups),
+			"left_guilds":     len(orphanGuilds),
 		}).Info("Pruned unused groups and guilds")
 	}
 
