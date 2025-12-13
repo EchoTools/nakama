@@ -3,11 +3,11 @@ package server
 import "time"
 
 type SessionScoreboard struct {
-	GameTime      time.Duration `json:"game_time_ms"`                // The time on the game clock in milliseconds
-	RoundDuration time.Duration `json:"round_duration_ms"`           // The duration of the round in milliseconds
+	GameTime      time.Duration `json:"game_time_ns"`                // The time on the game clock in milliseconds
+	RoundDuration time.Duration `json:"round_duration_ns"`           // The duration of the round in milliseconds
 	UpdatedAt     time.Time     `json:"updated_at"`                  // The time at which the scoreboard was last updated
 	PausedAt      *time.Time    `json:"paused_at,omitempty"`         // The time at which the game was paused
-	PauseDuration time.Duration `json:"pause_duration_ms,omitempty"` // The duration of the pause in milliseconds
+	PauseDuration time.Duration `json:"pause_duration_ns,omitempty"` // The duration of the pause in milliseconds
 }
 
 func NewSessionScoreboard(duration time.Duration, startAt time.Time) *SessionScoreboard {
