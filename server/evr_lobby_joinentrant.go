@@ -170,25 +170,8 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	const retryDelay = 100 * time.Millisecond
 
 	for _, op := range ops {
-		var tracked bool
-		for attempt := range maxRetries {
-			tracked = tracker.Update(sessionCtx, e.SessionID, op.Stream, e.UserID, op.Meta)
-			if tracked {
-				break
-			}
-			// Check if session is still valid before retrying
-			select {
-			case <-sessionCtx.Done():
-				logger.Warn("Session closed during stream tracking", zap.Int("attempt", attempt+1))
-				return fmt.Errorf("session closed during stream tracking: %w", sessionCtx.Err())
-			default:
-				// Continue to retry after sleeping
-			}
-			time.Sleep(retryDelay)
-			logger.Debug("Retrying stream tracking", zap.Int("attempt", attempt+1), zap.Any("stream", op.Stream))
-		}
-		if !tracked {
-			logger.Warn("Failed to track stream after retries", zap.Any("stream", op.Stream), zap.String("uid", e.UserID.String()))
+		if ok := tracker.Update(sessionCtx, e.SessionID, op.Stream, e.UserID, op.Meta); !ok {
+			logger.Warn("Failed to track stream", zap.Any("stream", op.Stream), zap.String("uid", e.UserID.String()))
 			return ErrFailedToTrackSessionID
 		}
 	}
