@@ -60,6 +60,7 @@ type GlobalMatchmakingSettings struct {
 	FailsafeTimeoutSecs            int                     `json:"failsafe_timeout_secs"`               // The failsafe timeout
 	FallbackTimeoutSecs            int                     `json:"fallback_timeout_secs"`               // The fallback timeout
 	DisableArenaBackfill           bool                    `json:"disable_arena_backfill"`              // Disable backfilling for arena matches
+	ArenaBackfillMaxAgeSecs        int                     `json:"arena_backfill_max_age_secs"`         // Maximum age of arena matches to backfill (default 270s)
 	QueryAddons                    QueryAddons             `json:"query_addons"`                        // Additional queries to add to matchmaking queries
 	MaxServerRTT                   int                     `json:"max_server_rtt"`                      // The maximum RTT to allow
 	EnableSBMM                     bool                    `json:"enable_skill_based_mm"`               // Disable SBMM
@@ -168,6 +169,10 @@ func FixDefaultServiceSettings(data *ServiceSettingsData) {
 
 	if data.Matchmaking.MaxServerRTT == 0 {
 		data.Matchmaking.MaxServerRTT = 180
+	}
+
+	if data.Matchmaking.ArenaBackfillMaxAgeSecs == 0 {
+		data.Matchmaking.ArenaBackfillMaxAgeSecs = 270 // Default to 270 seconds (4.5 minutes)
 	}
 
 	if data.Matchmaking.SBMMMinPlayerCount == 0 {
