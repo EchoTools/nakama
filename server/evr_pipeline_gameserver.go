@@ -198,7 +198,13 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	// Get the default region from urlparam if specified
 	defaultRegion := params.defaultRegion
 
-	
+	// Validate region codes: no spaces, all lowercase
+	for _, r := range params.serverRegions {
+		validated := strings.ToLower(strings.ReplaceAll(r, " ", ""))
+		if validated != "" {
+			regionCodes = append(regionCodes, validated)
+		}
+	}
 
 	if len(regionCodes) == 0 {
 		regionCodes = append(regionCodes, "default")
