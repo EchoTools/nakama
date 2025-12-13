@@ -395,6 +395,25 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 	case "server_issue_type":
 		// Handle server issue type selection
 		return d.handleServerIssueTypeSelection(ctx, logger, s, i, value)
+
+	case "report_server_issue":
+		// Handle report server issue button clicks
+		// value format: <issue_type>:<matchID>:<serverIP>:<regionCode>
+		parts := strings.SplitN(value, ":", 2)
+		if len(parts) < 2 {
+			return fmt.Errorf("invalid report_server_issue format")
+		}
+		issueType := parts[0]
+		serverContext := parts[1]
+
+		switch issueType {
+		case "lag":
+			return d.handleReportServerIssueLag(ctx, logger, s, i, serverContext)
+		case "other":
+			return d.handleReportServerIssueOther(ctx, logger, s, i, serverContext)
+		default:
+			return fmt.Errorf("unknown issue type: %s", issueType)
+		}
 	}
 
 	return nil
