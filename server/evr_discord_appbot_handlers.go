@@ -656,6 +656,11 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				logger.Warn("Failed to save journal after notification update", zap.Error(err))
 			}
 
+			// Record to public enforcement log if enabled
+			if err := RecordPublicEnforcement(ctx, nk, record, false, time.Time{}); err != nil {
+				logger.Warn("Failed to record public enforcement", zap.Error(err))
+			}
+
 		} else if voidActiveSuspensions {
 
 			currentGroupID := groupID
@@ -687,6 +692,11 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 					}
 					void := journal.VoidRecord(currentGroupID, record.ID, callerUserID, caller.User.ID, details)
 					voids[void.RecordID] = void
+
+					// Record voiding to public enforcement log if enabled
+					if err := RecordPublicEnforcement(ctx, nk, record, true, void.VoidedAt); err != nil {
+						logger.Warn("Failed to record voided enforcement to public log", zap.Error(err))
+					}
 				}
 			}
 		}
