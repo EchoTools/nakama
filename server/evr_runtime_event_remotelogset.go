@@ -15,6 +15,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/intinig/go-openskill/types"
 )
 
 var _ = Event(&EventRemoteLogSet{})
@@ -542,6 +543,71 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 
 	allStatEntries := make([]*StatisticsQueueEntry, 0)
 
+	// Load individual player ratings from leaderboards for MMR calculation
+	// This is necessary because label.Players contains matchmaking ratings (aggregate for parties)
+	// rather than individual player ratings
+	playersWithTeamRatings := make([]PlayerInfo, len(label.Players))
+	playersWithPlayerRatings := make([]PlayerInfo, len(label.Players))
+	copy(playersWithTeamRatings, label.Players)
+	copy(playersWithPlayerRatings, label.Players)
+
+	serviceSettings := ServiceSettings()
+	if serviceSettings.UseSkillBasedMatchmaking() {
+		for i, p := range playersWithTeamRatings {
+			// Only load ratings for competitors (blue/orange team)
+			if !p.IsCompetitor() {
+				continue
+			}
+
+			// Load the player's individual team-based rating from leaderboards
+			teamRating, err := MatchmakingRatingLoad(ctx, nk, p.UserID, groupIDStr, label.Mode)
+			if err != nil {
+				logger.WithFields(map[string]any{
+					"error":   err,
+					"user_id": p.UserID,
+				}).Warn("Failed to load team rating, using default")
+				teamRating = NewDefaultRating()
+			}
+			playersWithTeamRatings[i].RatingMu = teamRating.Mu
+			playersWithTeamRatings[i].RatingSigma = teamRating.Sigma
+
+			// Load the player's individual player-based rating from leaderboards
+			playerRating, err := MatchmakingPlayerRatingLoad(ctx, nk, p.UserID, groupIDStr, label.Mode)
+			if err != nil {
+				logger.WithFields(map[string]any{
+					"error":   err,
+					"user_id": p.UserID,
+				}).Warn("Failed to load player rating, using default")
+				playerRating = NewDefaultRating()
+			}
+			playersWithPlayerRatings[i].RatingMu = playerRating.Mu
+			playersWithPlayerRatings[i].RatingSigma = playerRating.Sigma
+		}
+	}
+
+	// Determine winning team once for the entire match
+	// Check the first player's stats to determine which team won
+	var blueWins bool
+	for _, playerInfo := range label.Players {
+		if playerInfo.Team == BlueTeam || playerInfo.Team == OrangeTeam {
+			if stats, ok := statsByPlayer[playerInfo.EvrID]; ok {
+				blueWins = (playerInfo.Team == BlueTeam && stats.ArenaWins > 0) || (playerInfo.Team == OrangeTeam && stats.ArenaLosses > 0)
+				break
+			}
+		}
+	}
+
+	// Calculate new ratings once for all players (before the loop to avoid O(n²) complexity)
+	var teamRatings map[string]types.Rating
+	var playerRatings map[string]types.Rating
+	if serviceSettings.UseSkillBasedMatchmaking() {
+		// Calculate new team-based ratings using individual player ratings loaded from leaderboards
+		teamRatings = CalculateNewTeamRatings(playersWithTeamRatings, statsByPlayer, blueWins)
+
+		// Calculate new individual player ratings using individual player ratings loaded from leaderboards
+		playerRatings = CalculateNewIndividualRatings(playersWithPlayerRatings, statsByPlayer, blueWins)
+	}
+
 	for xpid, typeStats := range statsByPlayer {
 		// Get the match label
 
@@ -568,14 +634,9 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 			logger.WithField("error", err).Warn("Failed to increment completed matches")
 		}
 
-		serviceSettings := ServiceSettings()
 		if serviceSettings.UseSkillBasedMatchmaking() {
 
-			// Determine winning team
-			blueWins := (playerInfo.Team == BlueTeam && typeStats.ArenaWins > 0) || (playerInfo.Team == OrangeTeam && typeStats.ArenaLosses > 0)
-
-			// Calculate new team-based ratings
-			teamRatings := CalculateNewTeamRatings(label.Players, statsByPlayer, blueWins)
+			// Use the pre-calculated team ratings for this player
 			if rating, ok := teamRatings[playerInfo.SessionID]; ok {
 				// Add team skill rating entries to the statistics queue
 				muScore, muSubscore, err := Float64ToScore(rating.Mu)
@@ -623,8 +684,7 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 				logger.WithField("target_sid", playerInfo.SessionID).Warn("No team rating found for player in matchmaking ratings")
 			}
 
-			// Calculate new individual player ratings
-			playerRatings := CalculateNewIndividualRatings(label.Players, statsByPlayer, blueWins)
+			// Use the pre-calculated individual player ratings for this player
 			if rating, ok := playerRatings[playerInfo.SessionID]; ok {
 				// Add player skill rating entries to the statistics queue
 				muScore, muSubscore, err := Float64ToScore(rating.Mu)
