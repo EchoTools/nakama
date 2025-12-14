@@ -480,7 +480,7 @@ func (w *WhoAmI) createSuspensionsEmbed() *discordgo.MessageEmbed {
 		// Sort the fields by group name (but keep active warnings first)
 		if len(fields) > 1 {
 			sort.SliceStable(fields[1:], func(i, j int) bool {
-				return fields[i+1].Name < fields[j+1].Name
+				return fields[1:][i].Name < fields[1:][j].Name
 			})
 		}
 
