@@ -42,19 +42,23 @@ func (r GuildEnforcementRecord) RequiresCommunityValues() bool {
 
 // GetStandardEnforcementRules returns the list of standard rule violation categories
 // Returns a copy to prevent runtime modification
+var standardEnforcementRules = []string{
+	"Harassment or Hate Speech",
+	"Cheating or Exploiting",
+	"Toxic Behavior",
+	"Inappropriate Content",
+	"Spam or Advertising",
+	"Team Griefing",
+	"Match Abandonment",
+	"Voice/Chat Abuse",
+	"Impersonation",
+	"Other Rule Violation",
+}
+
 func GetStandardEnforcementRules() []string {
-	return []string{
-		"Harassment or Hate Speech",
-		"Cheating or Exploiting",
-		"Toxic Behavior",
-		"Inappropriate Content",
-		"Spam or Advertising",
-		"Team Griefing",
-		"Match Abandonment",
-		"Voice/Chat Abuse",
-		"Impersonation",
-		"Other Rule Violation",
-	}
+	rulesCopy := make([]string, len(standardEnforcementRules))
+	copy(rulesCopy, standardEnforcementRules)
+	return rulesCopy
 }
 
 // GetNotificationMessage returns a formatted message for DM notification to the user
