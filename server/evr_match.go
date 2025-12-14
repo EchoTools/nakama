@@ -738,11 +738,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 			if isPublicMatch {
 				// Close public matches on round over
-				if update.MatchOver && state.Open {
-					logger.Info("Received round over for public match, locking match.")
-					state.GameState.MatchOver = true
-					state.Open = false
-
+				if update.MatchOver && state.Open && state.GameState != nil {
 					if state.LockedAt == nil {
 						now := time.Now().UTC()
 						state.LockedAt = &now
