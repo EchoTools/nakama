@@ -245,7 +245,7 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 
 			// Sort groups by best rating first
 			sort.SliceStable(groups, func(i, j int) bool {
-				return ranks[i] > ranks[j]
+				return ranks[i] < ranks[j]
 			})
 
 			// Collect division set - reuse map from cache
@@ -293,18 +293,16 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 
 						// Determine which team gets this group using snake pattern
 						// Group index 0: A, 1-2: B, 3-4: A, 5-6: B, 7: A
-						assignToA := false
-						switch {
-						case groupIndex == 0:
-							assignToA = true
-						case groupIndex <= 2:
-							assignToA = false
-						case groupIndex <= 4:
-							assignToA = true
-						case groupIndex <= 6:
-							assignToA = false
-						default:
-							assignToA = true
+						// General snake draft assignment for any group size
+						// For two teams: alternate direction every round of 2 picks
+						roundSize := 2
+						round := groupIndex / roundSize
+						posInRound := groupIndex % roundSize
+						var assignToA bool
+						if round%2 == 0 {
+							assignToA = (posInRound == 0)
+						} else {
+							assignToA = (posInRound == 1)
 						}
 
 						// Check if assignment would exceed team size, flip if needed
