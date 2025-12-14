@@ -445,7 +445,7 @@ func (w *WhoAmI) createSuspensionsEmbed() *discordgo.MessageEmbed {
 					gName = EscapeDiscordMarkdown(gg.Name())
 				}
 				expiryStr := fmt.Sprintf("<t:%d:R>", record.Expiry.UTC().Unix())
-				warning := fmt.Sprintf("⚠️ **%s**: %s (expires %s)", gName, record.UserNoticeText, expiryStr)
+				warning := fmt.Sprintf("⚠️ **%s**: %s (expires %s)", gName, EscapeDiscordMarkdown(record.UserNoticeText), expiryStr)
 				activeWarnings = append(activeWarnings, warning)
 			}
 			if len(activeWarnings) > 0 {
