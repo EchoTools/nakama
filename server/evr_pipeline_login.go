@@ -168,6 +168,11 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		gameSettings.RemoteLogRichPresence = true
 		gameSettings.RemoteLogMetrics = true
 	}
+	go func() {
+		<-session.Context().Done()
+		// Record the session duration
+		p.nk.metrics.CustomGauge("session_duration_seconds", params.MetricsTags(), time.Since(timer).Seconds())
+	}()
 
 	return session.SendEvr(
 		evr.NewLoginSuccess(session.id, request.XPID),
