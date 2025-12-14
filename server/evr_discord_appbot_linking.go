@@ -96,6 +96,10 @@ func (d *DiscordAppBot) handleLinkHeadset(ctx context.Context, logger runtime.Lo
 	member, err := s.GuildMember(i.GuildID, user.ID)
 	if err != nil {
 		logger.WithField("user_id", user.ID).Error("Failed to get guild member")
+		return fmt.Errorf("Failed to get guild member: %w", err)
+	}
+	if member == nil {
+		return fmt.Errorf("Guild member is nil for user_id: %s", user.ID)
 	}
 
 	if err := d.linkHeadset(ctx, logger, member, linkCode); err != nil {
