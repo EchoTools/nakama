@@ -709,6 +709,10 @@ var (
 							Name:  "Social Private",
 							Value: "social_2.0_private",
 						},
+						{
+							Name:  "Social Public",
+							Value: "social_2.0",
+						},
 					},
 				},
 				{
