@@ -20,6 +20,14 @@ const (
 	RosterVariantSnakeDraft                      // Snake draft for balanced teams
 )
 
+// PredictionConfig contains settings for match outcome prediction
+type PredictionConfig struct {
+	PartyBoostPercent      float64         // Boost party effective skill by this percentage
+	EnableRosterVariants   bool            // Generate multiple roster variants for better match selection
+	UseSnakeDraftFormation bool            // Use snake draft instead of sequential filling
+	Variants               []RosterVariant // Pre-computed list of variants to generate (if set, overrides other variant settings)
+}
+
 type PredictedMatch struct {
 	Candidate             []runtime.MatchmakerEntry `json:"match"`
 	Draw                  float32                   `json:"draw"`
@@ -115,20 +123,36 @@ func HashMatchmakerEntries[E runtime.MatchmakerEntry](entries []E) uint64 {
 
 func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) <-chan PredictedMatch {
 	// Get settings for party boost and roster variants
-	var partyBoostPercent float64
-	var enableRosterVariants bool
-	var useSnakeDraft bool
+	config := PredictionConfig{}
 	if settings := ServiceSettings(); settings != nil {
-		partyBoostPercent = settings.Matchmaking.PartySkillBoostPercent
-		enableRosterVariants = settings.Matchmaking.EnableRosterVariants
-		useSnakeDraft = settings.Matchmaking.UseSnakeDraftTeamFormation
+		config.PartyBoostPercent = settings.Matchmaking.PartySkillBoostPercent
+		config.EnableRosterVariants = settings.Matchmaking.EnableRosterVariants
+		config.UseSnakeDraftFormation = settings.Matchmaking.UseSnakeDraftTeamFormation
 	}
 
-	return predictCandidateOutcomesWithSettings(candidates, partyBoostPercent, enableRosterVariants, useSnakeDraft)
+	return predictCandidateOutcomesWithConfig(candidates, config)
 }
 
-// predictCandidateOutcomesWithSettings allows testing with specific settings
-func predictCandidateOutcomesWithSettings(candidates [][]runtime.MatchmakerEntry, partyBoostPercent float64, enableRosterVariants bool, useSnakeDraft bool) <-chan PredictedMatch {
+// predictCandidateOutcomesWithConfig allows testing with specific settings
+func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, config PredictionConfig) <-chan PredictedMatch {
+	// Generate roster variants based on config if not already specified
+	variants := config.Variants
+	if len(variants) == 0 {
+		if config.UseSnakeDraftFormation {
+			variants = append(variants, RosterVariantSnakeDraft)
+		} else {
+			variants = append(variants, RosterVariantSequential)
+		}
+		// If roster variants are enabled, generate both types
+		if config.EnableRosterVariants {
+			if config.UseSnakeDraftFormation {
+				variants = append(variants, RosterVariantSequential)
+			} else {
+				variants = append(variants, RosterVariantSnakeDraft)
+			}
+		}
+	}
+
 	predictCh := make(chan PredictedMatch)
 
 	go func() {
@@ -223,22 +247,6 @@ func predictCandidateOutcomesWithSettings(candidates [][]runtime.MatchmakerEntry
 			}
 
 			teamSize := len(c) / 2
-
-			// Generate roster variants based on settings
-			variants := []RosterVariant{}
-			if useSnakeDraft {
-				variants = append(variants, RosterVariantSnakeDraft)
-			} else {
-				variants = append(variants, RosterVariantSequential)
-			}
-			// If roster variants are enabled, generate both types
-			if enableRosterVariants {
-				if useSnakeDraft {
-					variants = append(variants, RosterVariantSequential)
-				} else {
-					variants = append(variants, RosterVariantSnakeDraft)
-				}
-			}
 
 			for _, variant := range variants {
 				// Create teams based on variant

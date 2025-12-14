@@ -399,7 +399,9 @@ func TestBalancedTeamFormation_SnakeDraft(t *testing.T) {
 	}
 
 	var sequentialResult PredictedMatch
-	for p := range predictCandidateOutcomesWithSettings(seqCandidates, 0, false, false) {
+	for p := range predictCandidateOutcomesWithConfig(seqCandidates, PredictionConfig{
+		Variants: []RosterVariant{RosterVariantSequential},
+	}) {
 		sequentialResult = p
 	}
 
@@ -413,7 +415,9 @@ func TestBalancedTeamFormation_SnakeDraft(t *testing.T) {
 	}
 
 	var snakeDraftResult PredictedMatch
-	for p := range predictCandidateOutcomesWithSettings(snakeCandidates, 0, false, true) {
+	for p := range predictCandidateOutcomesWithConfig(snakeCandidates, PredictionConfig{
+		Variants: []RosterVariant{RosterVariantSnakeDraft},
+	}) {
 		snakeDraftResult = p
 	}
 
@@ -582,7 +586,9 @@ func TestVariantSelection_SharedPlayers(t *testing.T) {
 
 	// Generate predictions with roster variants enabled
 	predictions := []PredictedMatch{}
-	for p := range predictCandidateOutcomesWithSettings(candidates, 0, true, false) {
+	for p := range predictCandidateOutcomesWithConfig(candidates, PredictionConfig{
+		EnableRosterVariants: true,
+	}) {
 		predictions = append(predictions, p)
 	}
 
