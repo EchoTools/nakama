@@ -135,7 +135,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	)
 
 	ticketConfig, ok := DefaultMatchmakerTicketConfigs[lobbyParams.Mode]
-	if !ok {
+	if !ok && lobbyParams.Mode != evr.ModeSocialPublic {
 		return fmt.Errorf("matchmaking ticket config not found for mode %s", lobbyParams.Mode)
 	}
 
