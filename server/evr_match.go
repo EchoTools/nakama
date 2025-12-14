@@ -740,7 +740,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				// Close public matches on round over
 				if update.MatchOver && state.Open {
 					logger.Info("Received round over for public match, locking match.")
-					state.GameState.MatchOver = true
+
 					state.Open = false
 
 					if state.LockedAt == nil {
@@ -752,20 +752,21 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			}
 
 			if state.GameState != nil {
-				logger.WithField("update", update).Debug("Received match update message.")
-				gs := state.GameState
-				u := update
 
-				if len(u.Goals) > 0 {
-					state.goals = append(state.goals, u.Goals...)
+				logger.WithField("update", update).Debug("Received match update message.")
+
+				state.GameState.MatchOver = true
+
+				if len(update.Goals) > 0 {
+					state.goals = append(state.goals, update.Goals...)
 				}
 
 				if state.GameState.SessionScoreboard != nil {
-					if u.CurrentGameClock != 0 {
-						if u.PauseDuration != 0 {
-							gs.SessionScoreboard.UpdateWithPause(u.CurrentGameClock, u.PauseDuration)
+					if update.CurrentGameClock != 0 {
+						if update.PauseDuration != 0 {
+							state.GameState.SessionScoreboard.UpdateWithPause(update.CurrentGameClock, update.PauseDuration)
 						} else {
-							gs.SessionScoreboard.Update(u.CurrentGameClock)
+							state.GameState.SessionScoreboard.Update(update.CurrentGameClock)
 						}
 					}
 				}
@@ -866,7 +867,8 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	// If the match is prepared and the start time has been reached, start it.
-	if !state.levelLoaded && (len(state.presenceMap) != 0 || state.Started()) {
+	// Ensure the game server presence exists to avoid nil dispatch crashes.
+	if !state.levelLoaded && state.server != nil && (len(state.presenceMap) != 0 || state.Started()) {
 		if state, err = m.MatchStart(ctx, logger, nk, dispatcher, state); err != nil {
 			logger.Error("failed to start session: %v", err)
 			return nil
@@ -1345,6 +1347,10 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 }
 
 func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *MatchLabel) (*MatchLabel, error) {
+	// Do not attempt to start without a game server presence; avoids nil dispatch.
+	if state.server == nil {
+		return state, fmt.Errorf("cannot start match: server presence is nil")
+	}
 	groupID := uuid.Nil
 	if state.GroupID != nil {
 		groupID = *state.GroupID
