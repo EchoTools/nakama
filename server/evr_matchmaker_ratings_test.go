@@ -782,16 +782,24 @@ func BenchmarkCalculateNewTeamRatings(b *testing.B) {
 // This is a regression test for the issue where party members would have their individual MMR
 // overwritten by the party's aggregate MMR.
 func TestPartyRatingsNotUsedForIndividualMMR(t *testing.T) {
+	// Test constants for readability
+	const (
+		lowSkilledPlayerMu        = 10.0
+		highSkilledPlayerMu       = 27.0
+		testSigma                 = 3.333
+		ratingDifferenceThreshold = 0.1 // Minimum difference to detect distinct rating calculations
+	)
+
 	// Setup: Create two players with different individual ratings
-	player1IndividualRating := types.Rating{Z: 3, Mu: 10.0, Sigma: 3.333}  // Low-skilled player
-	player2IndividualRating := types.Rating{Z: 3, Mu: 27.0, Sigma: 3.333}  // High-skilled player
-	
+	player1IndividualRating := types.Rating{Z: 3, Mu: lowSkilledPlayerMu, Sigma: testSigma}  // Low-skilled player
+	player2IndividualRating := types.Rating{Z: 3, Mu: highSkilledPlayerMu, Sigma: testSigma} // High-skilled player
+
 	// Simulate a party scenario: both players are in a party with an aggregate rating
 	// (average of their ratings for matchmaking purposes)
 	partyAggregateRating := types.Rating{
 		Z:     3,
 		Mu:    (player1IndividualRating.Mu + player2IndividualRating.Mu) / 2.0, // 18.5
-		Sigma: 3.333,
+		Sigma: testSigma,
 	}
 
 	// Create PlayerInfo with aggregate matchmaking ratings (this is what would be in label.Players)
@@ -800,14 +808,14 @@ func TestPartyRatingsNotUsedForIndividualMMR(t *testing.T) {
 			SessionID:   "player1",
 			EvrID:       evr.EvrId{PlatformCode: 4, AccountId: 1},
 			Team:        BlueTeam,
-			RatingMu:    partyAggregateRating.Mu,    // This is the aggregate party rating
+			RatingMu:    partyAggregateRating.Mu, // This is the aggregate party rating
 			RatingSigma: partyAggregateRating.Sigma,
 		},
 		{
 			SessionID:   "player2",
 			EvrID:       evr.EvrId{PlatformCode: 4, AccountId: 2},
 			Team:        BlueTeam,
-			RatingMu:    partyAggregateRating.Mu,    // This is the aggregate party rating
+			RatingMu:    partyAggregateRating.Mu, // This is the aggregate party rating
 			RatingSigma: partyAggregateRating.Sigma,
 		},
 		{
@@ -815,14 +823,14 @@ func TestPartyRatingsNotUsedForIndividualMMR(t *testing.T) {
 			EvrID:       evr.EvrId{PlatformCode: 4, AccountId: 3},
 			Team:        OrangeTeam,
 			RatingMu:    18.0,
-			RatingSigma: 3.333,
+			RatingSigma: testSigma,
 		},
 		{
 			SessionID:   "player4",
 			EvrID:       evr.EvrId{PlatformCode: 4, AccountId: 4},
 			Team:        OrangeTeam,
 			RatingMu:    19.0,
-			RatingSigma: 3.333,
+			RatingSigma: testSigma,
 		},
 	}
 
@@ -832,14 +840,14 @@ func TestPartyRatingsNotUsedForIndividualMMR(t *testing.T) {
 			SessionID:   "player1",
 			EvrID:       evr.EvrId{PlatformCode: 4, AccountId: 1},
 			Team:        BlueTeam,
-			RatingMu:    player1IndividualRating.Mu,    // Individual rating, not party aggregate
+			RatingMu:    player1IndividualRating.Mu, // Individual rating, not party aggregate
 			RatingSigma: player1IndividualRating.Sigma,
 		},
 		{
 			SessionID:   "player2",
 			EvrID:       evr.EvrId{PlatformCode: 4, AccountId: 2},
 			Team:        BlueTeam,
-			RatingMu:    player2IndividualRating.Mu,    // Individual rating, not party aggregate
+			RatingMu:    player2IndividualRating.Mu, // Individual rating, not party aggregate
 			RatingSigma: player2IndividualRating.Sigma,
 		},
 		{
@@ -847,14 +855,14 @@ func TestPartyRatingsNotUsedForIndividualMMR(t *testing.T) {
 			EvrID:       evr.EvrId{PlatformCode: 4, AccountId: 3},
 			Team:        OrangeTeam,
 			RatingMu:    18.0,
-			RatingSigma: 3.333,
+			RatingSigma: testSigma,
 		},
 		{
 			SessionID:   "player4",
 			EvrID:       evr.EvrId{PlatformCode: 4, AccountId: 4},
 			Team:        OrangeTeam,
 			RatingMu:    19.0,
-			RatingSigma: 3.333,
+			RatingSigma: testSigma,
 		},
 	}
 
@@ -876,20 +884,20 @@ func TestPartyRatingsNotUsedForIndividualMMR(t *testing.T) {
 	// Player 1 should have a different rating change when using individual vs aggregate
 	bugRating1 := ratingsWithBug["player1"]
 	fixedRating1 := ratingsFixed["player1"]
-	
+
 	// The fixed version should result in a smaller Mu increase for player1 (who started lower)
 	// compared to using the aggregate rating
-	if math.Abs(bugRating1.Mu - fixedRating1.Mu) < 0.1 {
-		t.Errorf("Expected different rating changes when using individual vs aggregate ratings, but they were similar: bug=%.2f, fixed=%.2f", 
+	if math.Abs(bugRating1.Mu-fixedRating1.Mu) < ratingDifferenceThreshold {
+		t.Errorf("Expected different rating changes when using individual vs aggregate ratings, but they were similar: bug=%.2f, fixed=%.2f",
 			bugRating1.Mu, fixedRating1.Mu)
 	}
 
 	// Player 2 should also have different rating changes
 	bugRating2 := ratingsWithBug["player2"]
 	fixedRating2 := ratingsFixed["player2"]
-	
-	if math.Abs(bugRating2.Mu - fixedRating2.Mu) < 0.1 {
-		t.Errorf("Expected different rating changes when using individual vs aggregate ratings for player2, but they were similar: bug=%.2f, fixed=%.2f", 
+
+	if math.Abs(bugRating2.Mu-fixedRating2.Mu) < ratingDifferenceThreshold {
+		t.Errorf("Expected different rating changes when using individual vs aggregate ratings for player2, but they were similar: bug=%.2f, fixed=%.2f",
 			bugRating2.Mu, fixedRating2.Mu)
 	}
 
@@ -903,7 +911,7 @@ func TestPartyRatingsNotUsedForIndividualMMR(t *testing.T) {
 	t.Logf("Bug scenario - Using aggregate rating %.2f for both players:", partyAggregateRating.Mu)
 	t.Logf("  Player 1 (actual rating %.2f): %.2f -> %.2f", player1IndividualRating.Mu, partyAggregateRating.Mu, bugRating1.Mu)
 	t.Logf("  Player 2 (actual rating %.2f): %.2f -> %.2f", player2IndividualRating.Mu, partyAggregateRating.Mu, bugRating2.Mu)
-	
+
 	t.Logf("Fixed scenario - Using individual ratings:")
 	t.Logf("  Player 1: %.2f -> %.2f", player1IndividualRating.Mu, fixedRating1.Mu)
 	t.Logf("  Player 2: %.2f -> %.2f", player2IndividualRating.Mu, fixedRating2.Mu)
