@@ -12,12 +12,21 @@ import (
 	"github.com/intinig/go-openskill/types"
 )
 
+// RosterVariant indicates the team formation strategy used
+type RosterVariant int8
+
+const (
+	RosterVariantSequential RosterVariant = iota // Original sequential filling
+	RosterVariantSnakeDraft                      // Snake draft for balanced teams
+)
+
 type PredictedMatch struct {
 	Candidate             []runtime.MatchmakerEntry `json:"match"`
 	Draw                  float32                   `json:"draw"`
 	Size                  int8                      `json:"size"`
 	DivisionCount         int8                      `json:"division_count"`
 	OldestTicketTimestamp int64                     `json:"oldest_ticket"`
+	Variant               RosterVariant             `json:"variant"` // Which team formation strategy was used
 }
 
 type MatchmakerEntries []runtime.MatchmakerEntry
@@ -35,10 +44,34 @@ func (g MatchmakerEntries) Ratings() []types.Rating {
 	}
 	return ratings
 }
+
+// RatingsWithPartyBoost returns ratings with an optional boost for parties (groups with multiple members)
+func (g MatchmakerEntries) RatingsWithPartyBoost(boostPercent float64) []types.Rating {
+	ratings := make([]types.Rating, len(g))
+	isParty := len(g) > 1
+	for i, e := range g {
+		mu := e.GetProperties()["rating_mu"].(float64)
+		sigma := e.GetProperties()["rating_sigma"].(float64)
+		// Apply party boost to Mu for rank prediction purposes
+		if isParty && boostPercent > 0 {
+			mu = mu * (1 + boostPercent)
+		}
+		ratings[i] = NewRating(0, mu, sigma)
+	}
+	return ratings
+}
 func (g MatchmakerEntries) DivisionSet() map[string]struct{} {
 	divisionSet := make(map[string]struct{}, len(g))
 	for _, e := range g {
-		divisions := strings.Split(e.GetProperties()["divisions"].(string), ",")
+		divisionsVal, ok := e.GetProperties()["divisions"]
+		if !ok || divisionsVal == nil {
+			continue
+		}
+		divisionsStr, ok := divisionsVal.(string)
+		if !ok || divisionsStr == "" {
+			continue
+		}
+		divisions := strings.Split(divisionsStr, ",")
 		for _, division := range divisions {
 			divisionSet[division] = struct{}{}
 		}
@@ -81,6 +114,21 @@ func HashMatchmakerEntries[E runtime.MatchmakerEntry](entries []E) uint64 {
 }
 
 func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) <-chan PredictedMatch {
+	// Get settings for party boost and roster variants
+	var partyBoostPercent float64
+	var enableRosterVariants bool
+	var useSnakeDraft bool
+	if settings := ServiceSettings(); settings != nil {
+		partyBoostPercent = settings.Matchmaking.PartySkillBoostPercent
+		enableRosterVariants = settings.Matchmaking.EnableRosterVariants
+		useSnakeDraft = settings.Matchmaking.UseSnakeDraftTeamFormation
+	}
+
+	return predictCandidateOutcomesWithSettings(candidates, partyBoostPercent, enableRosterVariants, useSnakeDraft)
+}
+
+// predictCandidateOutcomesWithSettings allows testing with specific settings
+func predictCandidateOutcomesWithSettings(candidates [][]runtime.MatchmakerEntry, partyBoostPercent float64, enableRosterVariants bool, useSnakeDraft bool) <-chan PredictedMatch {
 	predictCh := make(chan PredictedMatch)
 
 	go func() {
@@ -94,7 +142,6 @@ func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) <-chan Pre
 		}
 
 		var (
-			allTickets          = make(map[string]MatchmakerEntries, validCandidates)
 			candidateHashSet    = make(map[uint64]struct{}, validCandidates)
 			ratingsByGroup      = make([]types.Team, 0, 10)
 			candidateTickets    = make(map[string]MatchmakerEntries, 10)
@@ -126,27 +173,25 @@ func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) <-chan Pre
 				delete(candidateTickets, k)
 			}
 
-			// Collect tickets efficiently
+			// Collect tickets efficiently - group entries by ticket
 			for _, e := range c {
 				ticket := e.GetTicket()
-				if existing, found := allTickets[ticket]; found {
-					candidateTickets[ticket] = existing
-				} else {
-					continue
-				}
 				candidateTickets[ticket] = append(candidateTickets[ticket], e)
 			}
 
-			// Update allTickets selectively
-			maps.Copy(allTickets, candidateTickets)
+			// Skip if no groups formed
+			if len(candidateTickets) == 0 {
+				continue
+			}
 
 			for ticket, entries := range candidateTickets {
-				ratingsByTicket[ticket] = entries.Ratings()
+				// Use boosted ratings for parties when calculating ranks
+				ratingsByTicket[ticket] = entries.RatingsWithPartyBoost(partyBoostPercent)
 				divisionSetByTicket[ticket] = entries.DivisionSet()
 				oldest := float64(time.Now().UTC().Unix())
 				for _, entry := range entries {
-					if entry.GetProperties()["submission_time"].(float64) < oldest {
-						oldest = entry.GetProperties()["submission_time"].(float64)
+					if st, ok := entry.GetProperties()["submission_time"].(float64); ok && st < oldest {
+						oldest = st
 					}
 				}
 				ageByTicket[ticket] = oldest
@@ -167,42 +212,130 @@ func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) <-chan Pre
 
 			// Sort groups by best rating first
 			sort.SliceStable(groups, func(i, j int) bool {
-				return ranks[i] < ranks[j]
+				return ranks[i] > ranks[j]
 			})
 
-			// Create teams
-
-			teamA, teamB = teamA[:0], teamB[:0]
-			teamRatingsA, teamRatingsB = teamRatingsA[:0], teamRatingsB[:0]
+			// Collect division set
 			divisionSet = make(map[string]struct{}, 10)
-
-			teamSize := len(c) / 2
 			for _, entries := range groups {
 				ticket := entries[0].GetTicket()
 				maps.Copy(divisionSet, divisionSetByTicket[ticket])
-				if len(teamA)+len(entries) <= teamSize {
-					teamA = append(teamA, entries...)
-					teamRatingsA = append(teamRatingsA, ratingsByTicket[ticket]...)
+			}
+
+			teamSize := len(c) / 2
+
+			// Generate roster variants based on settings
+			variants := []RosterVariant{}
+			if useSnakeDraft {
+				variants = append(variants, RosterVariantSnakeDraft)
+			} else {
+				variants = append(variants, RosterVariantSequential)
+			}
+			// If roster variants are enabled, generate both types
+			if enableRosterVariants {
+				if useSnakeDraft {
+					variants = append(variants, RosterVariantSequential)
 				} else {
-					teamB = append(teamB, entries...)
-					teamRatingsB = append(teamRatingsB, ratingsByTicket[ticket]...)
+					variants = append(variants, RosterVariantSnakeDraft)
 				}
 			}
 
-			if len(teamA) != len(teamB) {
-				continue
-			}
+			for _, variant := range variants {
+				// Create teams based on variant
+				teamA, teamB = teamA[:0], teamB[:0]
+				teamRatingsA, teamRatingsB = teamRatingsA[:0], teamRatingsB[:0]
 
-			// Copy teams into candidate slice
-			copy(c[:len(teamA)], teamA)
-			copy(c[len(teamA):], teamB)
+				switch variant {
+				case RosterVariantSequential:
+					// Original sequential filling (best groups fill Team A first)
+					for _, entries := range groups {
+						ticket := entries[0].GetTicket()
+						if len(teamA)+len(entries) <= teamSize {
+							teamA = append(teamA, entries...)
+							teamRatingsA = append(teamRatingsA, ratingsByTicket[ticket]...)
+						} else {
+							teamB = append(teamB, entries...)
+							teamRatingsB = append(teamRatingsB, ratingsByTicket[ticket]...)
+						}
+					}
 
-			predictCh <- PredictedMatch{
-				Candidate:             c,
-				Draw:                  float32(rating.PredictDraw([]types.Team{teamRatingsA, teamRatingsB}, nil)),
-				Size:                  int8(len(c)),
-				DivisionCount:         int8(len(divisionSet)),
-				OldestTicketTimestamp: int64(ageByTicket[c[0].GetTicket()]),
+				case RosterVariantSnakeDraft:
+					// Snake draft: alternates team assignment to balance strength
+					// Pattern for 8 picks: A, B, B, A, A, B, B, A (creates balance by giving
+					// the weaker team consecutive picks)
+					// For groups sorted by rank (best first):
+					// - 1st (best) → A
+					// - 2nd, 3rd → B
+					// - 4th, 5th → A
+					// - 6th, 7th → B
+					// - 8th → A
+					for groupIndex, entries := range groups {
+						ticket := entries[0].GetTicket()
+
+						// Determine which team gets this group using snake pattern
+						// Group index 0: A, 1-2: B, 3-4: A, 5-6: B, 7: A
+						assignToA := false
+						switch {
+						case groupIndex == 0:
+							assignToA = true
+						case groupIndex <= 2:
+							assignToA = false
+						case groupIndex <= 4:
+							assignToA = true
+						case groupIndex <= 6:
+							assignToA = false
+						default:
+							assignToA = true
+						}
+
+						// Check if assignment would exceed team size, flip if needed
+						if assignToA && len(teamA)+len(entries) > teamSize {
+							assignToA = false
+						} else if !assignToA && len(teamB)+len(entries) > teamSize {
+							assignToA = true
+						}
+
+						if assignToA {
+							teamA = append(teamA, entries...)
+							teamRatingsA = append(teamRatingsA, ratingsByTicket[ticket]...)
+						} else {
+							teamB = append(teamB, entries...)
+							teamRatingsB = append(teamRatingsB, ratingsByTicket[ticket]...)
+						}
+					}
+				}
+
+				if len(teamA) != len(teamB) {
+					continue
+				}
+
+				// Create a copy of the candidate slice for this variant
+				variantCandidate := make([]runtime.MatchmakerEntry, len(c))
+				copy(variantCandidate[:len(teamA)], teamA)
+				copy(variantCandidate[len(teamA):], teamB)
+
+				// Get actual (non-boosted) ratings for draw probability calculation
+				actualTeamRatingsA := make([]types.Rating, 0, len(teamA))
+				actualTeamRatingsB := make([]types.Rating, 0, len(teamB))
+				for _, e := range teamA {
+					mu := e.GetProperties()["rating_mu"].(float64)
+					sigma := e.GetProperties()["rating_sigma"].(float64)
+					actualTeamRatingsA = append(actualTeamRatingsA, NewRating(0, mu, sigma))
+				}
+				for _, e := range teamB {
+					mu := e.GetProperties()["rating_mu"].(float64)
+					sigma := e.GetProperties()["rating_sigma"].(float64)
+					actualTeamRatingsB = append(actualTeamRatingsB, NewRating(0, mu, sigma))
+				}
+
+				predictCh <- PredictedMatch{
+					Candidate:             variantCandidate,
+					Draw:                  float32(rating.PredictDraw([]types.Team{actualTeamRatingsA, actualTeamRatingsB}, nil)),
+					Size:                  int8(len(variantCandidate)),
+					DivisionCount:         int8(len(divisionSet)),
+					OldestTicketTimestamp: int64(ageByTicket[variantCandidate[0].GetTicket()]),
+					Variant:               variant,
+				}
 			}
 		}
 	}()
