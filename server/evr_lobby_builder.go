@@ -577,7 +577,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 
 		regionMatch := false
 		for _, region := range label.GameServer.RegionCodes {
-			if region == "default" {
+			if region == RegionDefault {
 				continue
 			}
 			if _, ok := regionSet[region]; ok {

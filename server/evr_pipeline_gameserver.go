@@ -28,6 +28,9 @@ import (
 
 const MINIMUM_NATIVE_SERVER_VERSION = "2.0.0"
 const NoValidationTag = "novalidation"
+const RegionDefault = "default"
+const RegionCodesMaxCount = 10
+const RegionCodeMaxLength = 32
 
 var (
 	ErrGameServerPresenceNotFound = errors.New("game server presence not found")
@@ -192,81 +195,19 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		}
 	}
 
-	// Configure the region codes to use for finding the game server
-	regionCodes := make([]string, 0, len(params.serverRegions))
-
-	// Get the default region from urlparam if specified
-	defaultRegion := params.defaultRegion
-
-	// Validate region codes: no spaces, all lowercase
-	for _, r := range params.serverRegions {
-		validated := strings.ToLower(strings.ReplaceAll(r, " ", ""))
-		if validated != "" {
-			regionCodes = append(regionCodes, validated)
-		}
+	// Warn the user that using regionHash is deprecated.
+	if regionHash != evr.DefaultRegion {
+		// Send the message to the user
+		warning := "The -serverregion command line argument is deprecated. Please use the 'regions' URL parameter instead. Include 'default' to be in the public matchmaking pool."
+		go SendUserMessage(ctx, p.discordCache.dg, params.DiscordID(), warning)
+		logger.Warn(warning, zap.String("region_hash", regionHash.String()))
+		params.serverRegions = append(params.serverRegions, "default")
 	}
 
-	if len(regionCodes) == 0 {
-		regionCodes = append(regionCodes, "default")
-	}
-
-	switch regionHash {
-
-	// If the region is unspecified, use the default region, otherwise use the region hash passed on the command line
-	case evr.UnspecifiedRegion, 0:
-		regionCodes = append(regionCodes, "default")
-
-	default:
-		regionCodes = append(regionCodes, regionHash.String())
-	}
-
-	// Limit to first 10 regions
-	if len(regionCodes) > 10 {
-		regionCodes = regionCodes[:10]
-	}
-
-	// Truncate all region codes to 16 characters
-	for i, r := range regionCodes {
-		if len(r) > 32 {
-			regionCodes[i] = r[:32]
-		}
-	}
+	// Build region codes and default region using a helper
+	regionCodes, defaultRegion, ipInfo := p.buildRegionCodes(ctx, logger, params.serverRegions, params.defaultRegion, externalIP, serverID)
 
 	logger = logger.With(zap.Any("group_ids", hostingGroupIDs), zap.Strings("tags", params.serverTags), zap.Strings("regions", regionCodes))
-
-	// Add the server id, as displayed by the game server once registered (i.e. "0x5A700FE2D34D5B6D")
-	regionCodes = append(regionCodes, fmt.Sprintf("0x%x", serverID))
-
-	var ipInfo IPInfo
-
-	ipInfo, err = p.ipInfoCache.Get(ctx, externalIP.String())
-	if err != nil {
-		logger.Warn("Failed to get IPQS data", zap.Error(err))
-	} else if ipInfo != nil {
-		ipqsRegion := LocationToRegionCode(ipInfo.CountryCode(), ipInfo.Region(), ipInfo.City())
-		ipqsRegionShort := LocationToRegionCode(ipInfo.CountryCode(), ipInfo.Region(), "")
-		ipqsCountry := LocationToRegionCode(ipInfo.CountryCode(), "", "")
-
-		// If default region is not set via urlparam, use IPQS region
-		if defaultRegion == "" {
-			defaultRegion = ipqsRegion
-		}
-
-		// Ensure IPQS-derived region codes are first in the list (after removing duplicates)
-		if slices.Contains(regionCodes, "default") {
-			// Build new region codes list with IPQS regions first
-			newRegionCodes := []string{ipqsRegion, ipqsRegionShort, ipqsCountry}
-			for _, r := range regionCodes {
-				if r != "default" && !slices.Contains(newRegionCodes, r) {
-					newRegionCodes = append(newRegionCodes, r)
-				}
-			}
-			regionCodes = newRegionCodes
-		}
-	}
-
-	// Validate default region (no spaces, lowercase)
-	defaultRegion = strings.ToLower(strings.ReplaceAll(defaultRegion, " ", ""))
 
 	// Create the broadcaster config
 	config := NewGameServerPresence(session.UserID(), session.id, serverID, internalIP, externalIP, externalPort, hostingGroupIDs, defaultRegion, regionCodes, versionLock, params.serverTags, params.supportedFeatures, request.TimeStepUsecs, ipInfo, params.geoHashPrecision, isNative, request.Version)
@@ -415,6 +356,81 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 
 	// Send the registration success message
 	return session.SendEvrUnrequire(evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP))
+}
+
+// buildRegionCodes constructs the region codes list and determines the default region.
+// It respects URL-provided regions, preserves "default" if present, adds command-line region
+// hash, prioritizes IP-derived regions when available, and enforces limits/truncation.
+func (p *EvrPipeline) buildRegionCodes(ctx context.Context, logger *zap.Logger, serverRegions []string, generatedRegion string, externalIP net.IP, serverID uint64) ([]string, string, IPInfo) {
+	// Start with URL params regions
+	regionCodes := make([]string, 0, len(serverRegions))
+
+	if len(serverRegions) == 0 {
+		regionCodes = append(regionCodes, RegionDefault)
+	} else {
+		// Append the user provided regions first
+		regionCodes = append(regionCodes, serverRegions...)
+	}
+
+	// Limit early to RegionCodesMaxCount to keep processing light
+	if len(regionCodes) > RegionCodesMaxCount {
+		regionCodes = regionCodes[:RegionCodesMaxCount]
+	}
+
+	// Truncate to RegionCodeMaxLength characters
+	for i, r := range regionCodes {
+		if len(r) > RegionCodeMaxLength {
+			regionCodes[i] = r[:RegionCodeMaxLength]
+		}
+	}
+
+	// Append server ID marker (as used by client UI)
+	regionCodes = append(regionCodes, fmt.Sprintf("0x%x", serverID))
+
+	// Pull IP intelligence and prioritize IPQS-derived regions
+	var ipInfo IPInfo
+	if info, err := p.ipInfoCache.Get(ctx, externalIP.String()); err != nil {
+		logger.Warn("Failed to get IPQS data", zap.Error(err))
+	} else if info != nil {
+		ipInfo = info
+		ipqsRegion := LocationToRegionCode(info.CountryCode(), info.Region(), info.City())
+		ipqsRegionShort := LocationToRegionCode(info.CountryCode(), info.Region(), "")
+		ipqsCountry := LocationToRegionCode(info.CountryCode(), "", "")
+
+		// Set default region from IPQS if not already set
+		if generatedRegion == "" {
+			generatedRegion = ipqsRegion
+		}
+
+		regionCodes = append(regionCodes, ipqsRegion, ipqsRegionShort, ipqsCountry)
+	}
+
+	// Normalize defaultRegion
+	generatedRegion = strings.ToLower(strings.ReplaceAll(generatedRegion, " ", ""))
+
+	// Validate and normalize all region codes
+	for _, r := range serverRegions {
+		validated := strings.ToLower(strings.ReplaceAll(r, " ", "-"))
+		if validated != "" {
+			regionCodes = append(regionCodes, validated)
+		}
+	}
+	slices.Sort(regionCodes)
+
+	if !slices.Contains(regionCodes, generatedRegion) {
+		regionCodes = append(regionCodes, generatedRegion)
+	} else {
+		// Move generatedRegion to the beginning to prioritize it
+		for i, r := range regionCodes {
+			if r == generatedRegion {
+				copy(regionCodes[1:i+1], regionCodes[0:i])
+				regionCodes[0] = generatedRegion
+				break
+			}
+		}
+	}
+
+	return regionCodes, generatedRegion, ipInfo
 }
 
 func newGameServerParkingMatch(logger runtime.Logger, nk runtime.NakamaModule, p runtime.Presence) (*MatchID, error) {
