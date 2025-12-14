@@ -46,8 +46,9 @@ func (g MatchmakerEntries) Len() int {
 func (g MatchmakerEntries) Ratings() []types.Rating {
 	ratings := make([]types.Rating, len(g))
 	for i, e := range g {
-		mu := e.GetProperties()["rating_mu"].(float64)
-		sigma := e.GetProperties()["rating_sigma"].(float64)
+		props := e.GetProperties()
+		mu := props["rating_mu"].(float64)
+		sigma := props["rating_sigma"].(float64)
 		ratings[i] = NewRating(0, mu, sigma)
 	}
 	return ratings
@@ -58,8 +59,9 @@ func (g MatchmakerEntries) RatingsWithPartyBoost(boostPercent float64) []types.R
 	ratings := make([]types.Rating, len(g))
 	isParty := len(g) > 1
 	for i, e := range g {
-		mu := e.GetProperties()["rating_mu"].(float64)
-		sigma := e.GetProperties()["rating_sigma"].(float64)
+		props := e.GetProperties()
+		mu := props["rating_mu"].(float64)
+		sigma := props["rating_sigma"].(float64)
 		// Apply party boost to Mu for rank prediction purposes
 		if isParty && boostPercent > 0 {
 			mu = mu * (1 + boostPercent)
@@ -71,7 +73,8 @@ func (g MatchmakerEntries) RatingsWithPartyBoost(boostPercent float64) []types.R
 func (g MatchmakerEntries) DivisionSet() map[string]struct{} {
 	divisionSet := make(map[string]struct{}, len(g))
 	for _, e := range g {
-		divisionsVal, ok := e.GetProperties()["divisions"]
+		props := e.GetProperties()
+		divisionsVal, ok := props["divisions"]
 		if !ok || divisionsVal == nil {
 			continue
 		}
@@ -174,9 +177,11 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 			teamB               = make(MatchmakerEntries, 0, 10)
 			teamRatingsA        = make([]types.Rating, 0, 5)
 			teamRatingsB        = make([]types.Rating, 0, 5)
-			ratingsByTicket     = make(map[string]types.Team, 10)
-			divisionSetByTicket = make(map[string]map[string]struct{}, 10)
-			ageByTicket         = make(map[string]float64, 10)
+			actualTeamRatingsA  = make([]types.Rating, 0, 5)
+			actualTeamRatingsB  = make([]types.Rating, 0, 5)
+			ratingsByTicket     = make(map[string]types.Team, 40)
+			divisionSetByTicket = make(map[string]map[string]struct{}, 40)
+			ageByTicket         = make(map[string]float64, 40)
 			divisionSet         = make(map[string]struct{}, 10)
 		)
 
@@ -209,12 +214,16 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 			}
 
 			for ticket, entries := range candidateTickets {
-				// Use boosted ratings for parties when calculating ranks
-				ratingsByTicket[ticket] = entries.RatingsWithPartyBoost(partyBoostPercent)
-				divisionSetByTicket[ticket] = entries.DivisionSet()
+				// Check cache to avoid recomputing identical tickets
+				if _, ok := ratingsByTicket[ticket]; !ok {
+					// Use boosted ratings for parties when calculating ranks
+					ratingsByTicket[ticket] = entries.RatingsWithPartyBoost(config.PartyBoostPercent)
+					divisionSetByTicket[ticket] = entries.DivisionSet()
+				}
 				oldest := float64(time.Now().UTC().Unix())
 				for _, entry := range entries {
-					if st, ok := entry.GetProperties()["submission_time"].(float64); ok && st < oldest {
+					props := entry.GetProperties()
+					if st, ok := props["submission_time"].(float64); ok && st < oldest {
 						oldest = st
 					}
 				}
@@ -239,8 +248,10 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 				return ranks[i] > ranks[j]
 			})
 
-			// Collect division set
-			divisionSet = make(map[string]struct{}, 10)
+			// Collect division set - reuse map from cache
+			for k := range divisionSet {
+				delete(divisionSet, k)
+			}
 			for _, entries := range groups {
 				ticket := entries[0].GetTicket()
 				maps.Copy(divisionSet, divisionSetByTicket[ticket])
@@ -322,17 +333,19 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 				copy(variantCandidate[:len(teamA)], teamA)
 				copy(variantCandidate[len(teamA):], teamB)
 
-				// Get actual (non-boosted) ratings for draw probability calculation
-				actualTeamRatingsA := make([]types.Rating, 0, len(teamA))
-				actualTeamRatingsB := make([]types.Rating, 0, len(teamB))
+				// Get actual (non-boosted) ratings for draw probability calculation - reuse slices
+				actualTeamRatingsA = actualTeamRatingsA[:0]
+				actualTeamRatingsB = actualTeamRatingsB[:0]
 				for _, e := range teamA {
-					mu := e.GetProperties()["rating_mu"].(float64)
-					sigma := e.GetProperties()["rating_sigma"].(float64)
+					props := e.GetProperties()
+					mu := props["rating_mu"].(float64)
+					sigma := props["rating_sigma"].(float64)
 					actualTeamRatingsA = append(actualTeamRatingsA, NewRating(0, mu, sigma))
 				}
 				for _, e := range teamB {
-					mu := e.GetProperties()["rating_mu"].(float64)
-					sigma := e.GetProperties()["rating_sigma"].(float64)
+					props := e.GetProperties()
+					mu := props["rating_mu"].(float64)
+					sigma := props["rating_sigma"].(float64)
 					actualTeamRatingsB = append(actualTeamRatingsB, NewRating(0, mu, sigma))
 				}
 
