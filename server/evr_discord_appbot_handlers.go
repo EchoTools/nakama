@@ -18,6 +18,94 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+const errCompoundDurationWithDW = "compound durations with 'd' (days) or 'w' (weeks) are not supported; use simple format like '2d' or convert to hours (e.g., '48h' instead of '2d')"
+
+// parseSuspensionDuration parses a duration string for suspension/ban durations.
+// Supports formats like: "15m", "2h", "7d", "1w", "2h30m", "1h30m45s"
+// If no unit is specified (e.g., "15"), defaults to minutes.
+// Returns the parsed duration or an error if the format is invalid.
+func parseSuspensionDuration(inputDuration string) (time.Duration, error) {
+	duration := strings.TrimSpace(inputDuration)
+
+	if duration == "" {
+		return 0, nil
+	}
+
+	if duration == "0" {
+		// Zero duration means void existing suspension
+		return 0, nil
+	}
+
+	// Check for compound durations with unsupported units (d or w)
+	// Count occurrences of unit letters and check if d/w appears with other units
+	hasD := strings.Contains(duration, "d")
+	hasW := strings.Contains(duration, "w")
+	hasOtherUnits := strings.ContainsAny(duration, "mhs")
+
+	// Check if both d and w are present (e.g., "1w2d")
+	if hasD && hasW {
+		return 0, fmt.Errorf(errCompoundDurationWithDW)
+	}
+
+	// Check if d or w appears with other standard units
+	if (hasD || hasW) && hasOtherUnits {
+		return 0, fmt.Errorf(errCompoundDurationWithDW)
+	}
+
+	// Try parsing with Go's time.ParseDuration first for compound durations (e.g., "2h25m")
+	// Note: time.ParseDuration supports ns, us, ms, s, m, h but not d (days) or w (weeks)
+	if parsedDuration, err := time.ParseDuration(duration); err == nil {
+		// Successfully parsed compound duration like "2h25m" or "1h30m45s"
+		// Reject negative durations
+		if parsedDuration < 0 {
+			return 0, fmt.Errorf("duration must be positive, got: %v", parsedDuration)
+		}
+		return parsedDuration, nil
+	}
+
+	// Fallback to custom parsing for simple durations with d/w units
+	// Additional safety check to prevent panic
+	if len(duration) == 0 {
+		return 0, fmt.Errorf("invalid duration format: empty string")
+	}
+
+	var unit time.Duration
+	var numStr string
+	lastChar := duration[len(duration)-1]
+
+	switch lastChar {
+	case 'm':
+		unit = time.Minute
+		numStr = duration[:len(duration)-1]
+	case 'h':
+		unit = time.Hour
+		numStr = duration[:len(duration)-1]
+	case 'd':
+		unit = 24 * time.Hour
+		numStr = duration[:len(duration)-1]
+	case 'w':
+		unit = 7 * 24 * time.Hour
+		numStr = duration[:len(duration)-1]
+	default:
+		// No unit specified, default to minutes
+		unit = time.Minute
+		numStr = duration // Use the entire string as the numeric part
+	}
+
+	// Parse the numeric part
+	durationVal, err := strconv.Atoi(numStr)
+	if err != nil {
+		return 0, fmt.Errorf("invalid duration format: %w", err)
+	}
+
+	// Reject negative durations
+	if durationVal < 0 {
+		return 0, fmt.Errorf("duration must be positive, got: %d", durationVal)
+	}
+
+	return time.Duration(durationVal) * unit, nil
+}
+
 func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, commandName string, commandFn DiscordCommandHandlerFn) error {
 	user, member := getScopedUserMember(i)
 
@@ -560,35 +648,23 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		return errors.New("failed to get group ID")
 	}
 
-	// Parse minutes, hours, days, and weeks (m, h, d, w)
+	// Parse duration using shared helper function
 	if duration != "" {
-		var unit time.Duration
-		if duration == "0" {
+		var err error
+		suspensionDuration, err = parseSuspensionDuration(duration)
+		if err != nil {
+			helpMessage := fmt.Sprintf("Duration parse error: %s\n\n**Use a number followed by m, h, d, or w (e.g., 30m, 1h, 2d, 1w) or compound durations (e.g., 2h30m)**", err.Error())
+			if i != nil {
+				return simpleInteractionResponse(d.dg, i, helpMessage)
+			}
+			return errors.New(helpMessage)
+		}
+
+		if suspensionDuration == 0 {
+			// Zero duration means void existing suspension
 			suspensionExpiry = time.Now()
 		} else {
-			switch duration[len(duration)-1] {
-			case 'm':
-				unit = time.Minute
-			case 'h':
-				unit = time.Hour
-			case 'd':
-				unit = 24 * time.Hour
-			case 'w':
-				unit = 7 * 24 * time.Hour
-			default:
-				duration += "m"
-				unit = time.Minute
-			}
-			if duration, err := strconv.Atoi(duration[:len(duration)-1]); err == nil {
-				suspensionDuration = time.Duration(duration) * unit
-				suspensionExpiry = time.Now().Add(time.Duration(duration) * unit)
-			} else {
-				helpMessage := fmt.Sprintf("Duration parse error (`%s`).\n\n**Use a number followed by m, h, d, or w (e.g., 30m, 1h, 2d, 1w)**", err.Error())
-				if i != nil {
-					return simpleInteractionResponse(d.dg, i, helpMessage)
-				}
-				return errors.New(helpMessage) // Return an error if the duration is invalid
-			}
+			suspensionExpiry = time.Now().Add(suspensionDuration)
 		}
 	}
 	presences, err := d.nk.StreamUserList(StreamModeService, targetUserID, "", StreamLabelMatchService, false, true)
