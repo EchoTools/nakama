@@ -104,6 +104,9 @@ type GlobalMatchmakingSettings struct {
 	MatchmakerUseMu                bool                    `json:"sbmm_matchmaker_use_mu"`              // Use Mu instead of Ordinal for matchmaker player MMR values
 	BackfillMinTimeSecs            int                     `json:"backfill_min_time_secs"`              // Minimum time in seconds before backfilling a player to a match
 	SBMMMinPlayerCount             int                     `json:"sbmm_min_player_count"`               // Minimum player count to enable skill-based matchmaking
+	PartySkillBoostPercent         float64                 `json:"party_skill_boost_percent"`           // Boost party effective skill by this percentage (e.g., 0.10 = 10%) to account for coordination advantage
+	EnableRosterVariants           bool                    `json:"enable_roster_variants"`              // Generate multiple roster variants (balanced/stacked) for better match selection
+	UseSnakeDraftTeamFormation     bool                    `json:"use_snake_draft_team_formation"`      // Use snake draft instead of sequential filling for team formation
 }
 
 type QueryAddons struct {
@@ -272,6 +275,12 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 
 	if data.Matchmaking.SBMMMinPlayerCount == 0 {
 		data.Matchmaking.SBMMMinPlayerCount = 24
+	}
+
+	// Set default party skill boost (10% = 0.10)
+	// This accounts for coordination advantage of parties
+	if data.Matchmaking.PartySkillBoostPercent == 0 {
+		data.Matchmaking.PartySkillBoostPercent = 0.10
 	}
 
 	// Set default tier thresholds if not configured
