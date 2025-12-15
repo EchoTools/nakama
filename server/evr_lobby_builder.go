@@ -54,7 +54,31 @@ func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistr
 
 func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 	// build matches one at a time.
-	for _, entrants := range entries {
+	for matchIdx, entrants := range entries {
+		// Log match composition for debugging party split issues
+		partyMap := make(map[string][]string)
+		for _, e := range entrants {
+			ticket := e.GetTicket()
+			username := e.Presence.GetUsername()
+			partyMap[ticket] = append(partyMap[ticket], username)
+		}
+		
+		numParties := 0
+		numSoloPlayers := 0
+		for _, members := range partyMap {
+			if len(members) > 1 {
+				numParties++
+			} else {
+				numSoloPlayers++
+			}
+		}
+		
+		b.logger.Info("Processing matched entrants", 
+			zap.Int("match_index", matchIdx),
+			zap.Int("total_players", len(entrants)),
+			zap.Int("num_parties", numParties),
+			zap.Int("num_solo_players", numSoloPlayers))
+			
 		if _, err := b.buildMatch(b.logger, entrants); err != nil {
 			b.logger.With(zap.Any("entries", entries)).Error("Failed to build match", zap.Error(err))
 			return
@@ -163,11 +187,57 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 	groupID, err := b.groupIDFromEntrants(entrants)
 
+	// Log party composition for debugging party split issues
+	partyMap := make(map[string][]string)
+	for _, e := range entrants {
+		ticket := e.GetTicket()
+		username := e.Presence.GetUsername()
+		partyMap[ticket] = append(partyMap[ticket], username)
+	}
+	
+	// Log parties with more than 1 member
+	for ticket, members := range partyMap {
+		if len(members) > 1 {
+			logger.Info("Party in matchmaking", 
+				zap.String("ticket", ticket[:8]),  // First 8 chars for brevity
+				zap.Strings("members", members),
+				zap.Int("size", len(members)))
+		}
+	}
+
 	// Divide the entrants into two equal-sized teams
 	teamSize := len(entrants) / 2
 	teams := [2][]*MatchmakerEntry{}
 	for i, e := range entrants {
 		teams[i/teamSize] = append(teams[i/teamSize], e)
+	}
+	
+	// Log how parties are distributed across teams
+	for teamIdx, team := range teams {
+		teamPartyMap := make(map[string]int)
+		for _, e := range team {
+			teamPartyMap[e.GetTicket()]++
+		}
+		
+		for ticket, count := range teamPartyMap {
+			if partySize := len(partyMap[ticket]); partySize > 1 {
+				logger.Warn("Party team assignment", 
+					zap.Int("team", teamIdx),
+					zap.String("ticket", ticket[:8]),
+					zap.Int("members_in_team", count),
+					zap.Int("party_size", partySize))
+				
+				// If party is split across teams, log an error
+				if count != partySize {
+					logger.Error("PARTY SPLIT DETECTED",
+						zap.String("ticket", ticket[:8]),
+						zap.Int("team", teamIdx),
+						zap.Int("members_in_team", count),
+						zap.Int("total_party_size", partySize),
+						zap.Int("members_on_other_team", partySize-count))
+				}
+			}
+		}
 	}
 
 	// Split the entrants into teams, half and half

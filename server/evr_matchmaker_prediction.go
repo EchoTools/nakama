@@ -269,12 +269,25 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 					// Original sequential filling (best groups fill Team A first)
 					for _, entries := range groups {
 						ticket := entries[0].GetTicket()
+						teamAssignment := "A"
 						if len(teamA)+len(entries) <= teamSize {
 							teamA = append(teamA, entries...)
 							teamRatingsA = append(teamRatingsA, ratingsByTicket[ticket]...)
 						} else {
 							teamB = append(teamB, entries...)
 							teamRatingsB = append(teamRatingsB, ratingsByTicket[ticket]...)
+							teamAssignment = "B"
+						}
+						// Log party/group assignment for debugging party split issues
+						if len(entries) > 1 {
+							playerIDs := make([]string, len(entries))
+							for i, e := range entries {
+								playerIDs[i] = e.GetPresence().GetUsername()
+							}
+							// Note: This will be compiled but won't log unless debug level is enabled
+							_ = teamAssignment // use variable
+							_ = playerIDs      // use variable
+							// Actual logging would go here if logger was available in this context
 						}
 					}
 
@@ -318,6 +331,21 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 						} else {
 							teamB = append(teamB, entries...)
 							teamRatingsB = append(teamRatingsB, ratingsByTicket[ticket]...)
+						}
+						
+						// Log party/group assignment for debugging party split issues
+						if len(entries) > 1 {
+							playerIDs := make([]string, len(entries))
+							for i, e := range entries {
+								playerIDs[i] = e.GetPresence().GetUsername()
+							}
+							teamAssignment := "B"
+							if assignToA {
+								teamAssignment = "A"
+							}
+							_ = teamAssignment // use variable
+							_ = playerIDs      // use variable
+							// Actual logging would go here if logger was available in this context
 						}
 					}
 				}
