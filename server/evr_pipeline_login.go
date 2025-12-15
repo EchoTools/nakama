@@ -651,7 +651,9 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		if !groupIGN.IsOverride && !groupIGN.IsLocked {
 			// Update the in-game name for the guild.
 			if member, err := p.discordCache.GuildMember(gg.GuildID, params.profile.DiscordID()); err != nil {
-				logger.Warn("Failed to get guild member", zap.String("guild_id", gg.GuildID), zap.String("discord_id", params.profile.DiscordID()), zap.Error(err))
+				if !IsDiscordErrorCode(err, discordgo.ErrCodeUnknownMember) {
+					logger.Warn("Failed to get guild member", zap.String("guild_id", gg.GuildID), zap.String("discord_id", params.profile.DiscordID()), zap.Error(err))
+				}
 			} else if memberNick := InGameName(member); memberNick != "" {
 				// If the member is found, use it as their in-game name.
 				groupIGN.DisplayName = memberNick

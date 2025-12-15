@@ -268,6 +268,17 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
+	// Check if the main presence is already in the match (idempotent join or reconnection)
+	if existing, found := state.presenceMap[meta.Presence.GetSessionId()]; found {
+		// If the session is already in the match, treat this as a successful idempotent join
+		logger.WithFields(map[string]interface{}{
+			"evrid": existing.EvrID,
+			"uid":   existing.GetUserId(),
+			"sid":   existing.GetSessionId(),
+		}).Debug("Session already in match, allowing idempotent join.")
+		return state, true, ""
+	}
+
 	// Remove any reservations of existing players (i.e. party members already in the match)
 	for i := 0; i < len(meta.Reservations); i++ {
 		s := meta.Reservations[i].GetSessionId()
@@ -297,10 +308,14 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	for _, p := range meta.Presences() {
 
 		for _, e := range state.presenceMap {
-			if e.EvrID.Equals(p.EvrID) {
+			// Only reject if it's a different session with the same EVR-ID (true duplicate)
+			// The same session check is now handled above, but keep this safety check
+			if e.EvrID.Equals(p.EvrID) && e.GetSessionId() != p.GetSessionId() {
 				logger.WithFields(map[string]interface{}{
-					"evrid": p.EvrID,
-					"uid":   p.GetUserId(),
+					"evrid":            p.EvrID,
+					"uid":              p.GetUserId(),
+					"existing_session": e.GetSessionId(),
+					"new_session":      p.GetSessionId(),
 				}).Error("Duplicate EVR-ID join attempt.")
 				return state, false, ErrJoinRejectDuplicateEvrID.Error()
 			}
