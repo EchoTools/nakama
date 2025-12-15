@@ -72,7 +72,7 @@ This will fail the build if performance regresses beyond the threshold.
 
 ## Notes
 
-- Benchmarks use `-count=6` for statistical reliability
+- Benchmarks use `-count=5` for statistical reliability
 - Default regression threshold is 10%
 - Results may vary slightly between runs due to system load
 - Compare benchmarks on the same machine for accurate results
