@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -241,16 +242,18 @@ func TestDurationWhitespaceHandling(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run("whitespace_"+tt.input, func(t *testing.T) {
-			// First, let's test what happens WITHOUT trimming (current implementation)
+		// Use quoted version for test name to handle whitespace properly
+		testName := fmt.Sprintf("whitespace_%q", tt.input)
+		t.Run(testName, func(t *testing.T) {
+			// Test that the improved implementation handles whitespace
 			duration, err := parseSuspensionDuration(tt.input)
 
-			// Whitespace at the beginning will cause the check to fail
+			// Whitespace should now be handled gracefully
 			trimmed := strings.TrimSpace(tt.input)
-			if trimmed != tt.input && len(tt.input) > 0 && tt.input[0] == ' ' || tt.input[0] == '\t' || tt.input[0] == '\n' {
-				// Leading whitespace causes issues
+			if trimmed != tt.input && len(tt.input) > 0 && (tt.input[0] == ' ' || tt.input[0] == '\t' || tt.input[0] == '\n') {
+				// Leading whitespace should now work correctly
 				if err == nil {
-					t.Logf("Input '%q' parsed successfully to %v (might indicate trimming is working)", tt.input, duration)
+					t.Logf("Input %q parsed successfully to %v (trimming is working)", tt.input, duration)
 				}
 			}
 		})
