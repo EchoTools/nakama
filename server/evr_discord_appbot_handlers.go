@@ -19,8 +19,13 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// Regular expression to detect compound durations with days or weeks
+// e.g., "2d3h" or "1w2d" which are not supported
+var compoundDurationWithDWRegex = regexp.MustCompile(`\d+[dw].*[a-z]|\d+[a-z].*[dw]`)
+
 // parseSuspensionDuration parses a duration string for suspension/ban durations.
 // Supports formats like: "15m", "2h", "7d", "1w", "2h30m", "1h30m45s"
+// If no unit is specified (e.g., "15"), defaults to minutes.
 // Returns the parsed duration or an error if the format is invalid.
 func parseSuspensionDuration(inputDuration string) (time.Duration, error) {
 	duration := strings.TrimSpace(inputDuration)
@@ -36,8 +41,7 @@ func parseSuspensionDuration(inputDuration string) (time.Duration, error) {
 
 	// Check for compound durations with unsupported units (d or w)
 	// e.g., "2d3h" or "1w2d" should fail with a clear message
-	compoundWithDW := regexp.MustCompile(`\d+[dw].*[a-z]|\d+[a-z].*[dw]`)
-	if compoundWithDW.MatchString(duration) {
+	if compoundDurationWithDWRegex.MatchString(duration) {
 		return 0, fmt.Errorf("compound durations with 'd' (days) or 'w' (weeks) are not supported; use simple format like '2d' or convert to hours (e.g., '48h' instead of '2d')")
 	}
 
