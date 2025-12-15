@@ -139,12 +139,18 @@ func (m *EnforcementActionMetrics) recordActionForDate(userID, actionType string
 	}
 
 	// Track unique users
+	// Note: AffectedUsers map is not serialized (json:"-") so it will be nil after load.
+	// We only increment UniqueUsersAffected if we're adding a user not already in the session map.
+	// This means the count will be accurate within a session but may undercount after reload.
 	if userID != "" {
 		if daily.AffectedUsers == nil {
 			daily.AffectedUsers = make(map[string]bool)
 		}
-		daily.AffectedUsers[userID] = true
-		daily.UniqueUsersAffected = len(daily.AffectedUsers)
+		// Only increment if this is a new user in the current session
+		if !daily.AffectedUsers[userID] {
+			daily.AffectedUsers[userID] = true
+			daily.UniqueUsersAffected++
+		}
 	}
 
 	m.ActionsByDate[dateStr] = daily
