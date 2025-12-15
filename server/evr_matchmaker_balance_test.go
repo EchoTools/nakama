@@ -400,7 +400,8 @@ func TestBalancedTeamFormation_SnakeDraft(t *testing.T) {
 
 	var sequentialResult PredictedMatch
 	for p := range predictCandidateOutcomesWithConfig(seqCandidates, PredictionConfig{
-		Variants: []RosterVariant{RosterVariantSequential},
+		Variants:         []RosterVariant{RosterVariantSequential},
+		OpenSkillOptions: &types.OpenSkillOptions{},
 	}) {
 		sequentialResult = p
 	}
@@ -416,7 +417,8 @@ func TestBalancedTeamFormation_SnakeDraft(t *testing.T) {
 
 	var snakeDraftResult PredictedMatch
 	for p := range predictCandidateOutcomesWithConfig(snakeCandidates, PredictionConfig{
-		Variants: []RosterVariant{RosterVariantSnakeDraft},
+		Variants:         []RosterVariant{RosterVariantSnakeDraft},
+		OpenSkillOptions: &types.OpenSkillOptions{},
 	}) {
 		snakeDraftResult = p
 	}
@@ -588,6 +590,7 @@ func TestVariantSelection_SharedPlayers(t *testing.T) {
 	predictions := []PredictedMatch{}
 	for p := range predictCandidateOutcomesWithConfig(candidates, PredictionConfig{
 		EnableRosterVariants: true,
+		OpenSkillOptions:     &types.OpenSkillOptions{},
 	}) {
 		predictions = append(predictions, p)
 	}
