@@ -97,7 +97,6 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		}
 
 		roleID := int(teamIndex)
-		teamAlignments[userID] = int(roleID) // Ensure the caller is always in the map
 
 		if uuid.FromStringOrNil(id) == uuid.Nil {
 			// Assume the id is a discord ID and convert it to a user ID
