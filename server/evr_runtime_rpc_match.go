@@ -122,7 +122,7 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		StartTime:        request.GetMatchExpiry().AsTime().UTC(),
 		SpawnedBy:        request.OwnerId,
 		GroupID:          uuid.FromStringOrNil(request.GetGuildGroupId()),
-		RequiredFeatures: request.RequiredFeatures,
+		RequiredFeatures: request.GetRequiredFeatures(),
 		TeamAlignments:   teamAlignments,
 	}
 
