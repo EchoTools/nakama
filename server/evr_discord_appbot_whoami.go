@@ -807,7 +807,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 				}
 				label, err := MatchLabelByID(ctx, nk, mid)
 				if err != nil {
-					logger.Warn("failed to get match label", "error", err)
+					logger.WithField("mid", mid).Warn("failed to get match label", "error", err)
 					continue
 				}
 
