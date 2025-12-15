@@ -9,7 +9,7 @@ PWD=$(shell pwd)
 
 DEBUG_FLAGS=-trimpath -mod=vendor -gcflags "-trimpath $(PWD)" -gcflags="all=-N -l" -asmflags "-trimpath $(PWD)"
 RELEASE_FLAGS=-trimpath -mod=vendor -gcflags "-trimpath $(PWD)" -asmflags "-trimpath $(PWD)"
-.PHONY: all dev release push
+.PHONY: all dev release push bench-baseline bench-compare bench-check
 
 all: nakama
 
@@ -35,3 +35,20 @@ release: build
 			--build-arg VERSION=$(GIT_DESCRIBE) \
 			-t echotools/nakama:latest . -f build/Dockerfile.local; \
 	fi
+
+# Benchmark targets
+bench-baseline:
+	@echo "Creating benchmark baseline (this takes ~30 seconds)..."
+	@mkdir -p _benchmarks
+	@go test -run='^$$' -bench='BenchmarkPredictOutcomes$$' -benchmem -count=6 ./server/ 2>&1 | \
+		grep -E '^(goos|goarch|pkg|cpu|Benchmark|PASS|ok)' > _benchmarks/predict_outcomes_baseline.txt
+	@echo "Baseline saved to _benchmarks/predict_outcomes_baseline.txt"
+	@$$(go env GOPATH)/bin/benchstat _benchmarks/predict_outcomes_baseline.txt || \
+		(echo "Installing benchstat..." && go install golang.org/x/perf/cmd/benchstat@latest && \
+		$$(go env GOPATH)/bin/benchstat _benchmarks/predict_outcomes_baseline.txt)
+
+bench-compare:
+	@./scripts/bench-compare.sh
+
+bench-check: bench-compare
+	@echo "Benchmark regression check passed"
