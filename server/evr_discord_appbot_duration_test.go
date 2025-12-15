@@ -13,11 +13,11 @@ import (
 // TestParseDuration tests the duration parsing logic used in IGP suspension
 func TestParseDuration(t *testing.T) {
 	tests := []struct {
-		name           string
-		input          string
-		expectedDur    time.Duration
-		expectError    bool
-		errorContains  string
+		name          string
+		input         string
+		expectedDur   time.Duration
+		expectError   bool
+		errorContains string
 	}{
 		// Basic single unit tests
 		{
@@ -98,10 +98,29 @@ func TestParseDuration(t *testing.T) {
 			errorContains: "invalid syntax",
 		},
 		{
-			name:          "invalid format - empty after trim",
-			input:         "",
-			expectedDur:   0,
-			expectError:   false,
+			name:        "invalid format - empty after trim",
+			input:       "",
+			expectedDur: 0,
+			expectError: false,
+		},
+		// Additional compound duration tests
+		{
+			name:        "1h30m compound duration",
+			input:       "1h30m",
+			expectedDur: 1*time.Hour + 30*time.Minute,
+			expectError: false,
+		},
+		{
+			name:        "3h45m15s compound duration with seconds",
+			input:       "3h45m15s",
+			expectedDur: 3*time.Hour + 45*time.Minute + 15*time.Second,
+			expectError: false,
+		},
+		{
+			name:        "90m as single unit",
+			input:       "90m",
+			expectedDur: 90 * time.Minute,
+			expectError: false,
 		},
 	}
 
@@ -146,7 +165,7 @@ func parseSuspensionDuration(inputDuration string) (time.Duration, error) {
 				// Fallback to custom parsing for simple durations and d/w units
 				var unit time.Duration
 				lastChar := duration[len(duration)-1]
-				
+
 				switch lastChar {
 				case 'm':
 					unit = time.Minute
@@ -161,7 +180,7 @@ func parseSuspensionDuration(inputDuration string) (time.Duration, error) {
 					duration += "m"
 					unit = time.Minute
 				}
-				
+
 				// Parse the numeric part
 				numStr := duration[:len(duration)-1]
 				if durationVal, err := strconv.Atoi(numStr); err == nil {
@@ -225,7 +244,7 @@ func TestDurationWhitespaceHandling(t *testing.T) {
 		t.Run("whitespace_"+tt.input, func(t *testing.T) {
 			// First, let's test what happens WITHOUT trimming (current implementation)
 			duration, err := parseSuspensionDuration(tt.input)
-			
+
 			// Whitespace at the beginning will cause the check to fail
 			trimmed := strings.TrimSpace(tt.input)
 			if trimmed != tt.input && len(tt.input) > 0 && tt.input[0] == ' ' || tt.input[0] == '\t' || tt.input[0] == '\n' {

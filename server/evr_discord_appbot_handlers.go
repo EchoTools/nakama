@@ -578,7 +578,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				// Fallback to custom parsing for simple durations and d/w units
 				var unit time.Duration
 				lastChar := duration[len(duration)-1]
-				
+
 				switch lastChar {
 				case 'm':
 					unit = time.Minute
@@ -593,7 +593,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 					duration += "m"
 					unit = time.Minute
 				}
-				
+
 				// Parse the numeric part
 				numStr := duration[:len(duration)-1]
 				if durationVal, err := strconv.Atoi(numStr); err == nil {
