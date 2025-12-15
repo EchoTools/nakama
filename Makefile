@@ -40,7 +40,7 @@ release: build
 bench-baseline:
 	@echo "Creating benchmark baseline (this takes ~30 seconds)..."
 	@mkdir -p _benchmarks
-	@go test -run='^$$' -bench='BenchmarkPredictOutcomes$$' -benchmem -count=5 ./server/ 2>&1 | \
+	@go test -run='^$$' -bench='BenchmarkPredictOutcomes$$' -benchmem -count=6 ./server/ 2>&1 | \
 		grep -E '^(goos|goarch|pkg|cpu|Benchmark|PASS|ok)' > _benchmarks/predict_outcomes_baseline.txt
 	@echo "Baseline saved to _benchmarks/predict_outcomes_baseline.txt"
 	@$$(go env GOPATH)/bin/benchstat _benchmarks/predict_outcomes_baseline.txt || \
