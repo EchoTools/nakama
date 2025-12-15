@@ -20,8 +20,9 @@ import (
 )
 
 // Regular expression to detect compound durations with days or weeks
-// e.g., "2d3h" or "1w2d" which are not supported
-var compoundDurationWithDWRegex = regexp.MustCompile(`\d+[dw].*[a-z]|\d+[a-z].*[dw]`)
+// Catches any duration string that contains both 'd'/'w' and any other unit letter
+// e.g., "2d3h", "3h2d", "1w30m", "2d5s" are all invalid
+var compoundDurationWithDWRegex = regexp.MustCompile(`[dw].*\d+[a-z]|\d+[a-z].*[dw]`)
 
 // parseSuspensionDuration parses a duration string for suspension/ban durations.
 // Supports formats like: "15m", "2h", "7d", "1w", "2h30m", "1h30m45s"
@@ -639,7 +640,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			return errors.New(helpMessage)
 		}
 
-		if duration == "0" || suspensionDuration == 0 {
+		if suspensionDuration == 0 {
 			// Zero duration means void existing suspension
 			suspensionExpiry = time.Now()
 		} else {

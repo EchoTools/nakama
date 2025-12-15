@@ -134,6 +134,24 @@ func TestParseDuration(t *testing.T) {
 			expectError:   true,
 			errorContains: "compound durations with",
 		},
+		{
+			name:          "compound hours before days should fail",
+			input:         "3h2d",
+			expectError:   true,
+			errorContains: "compound durations with",
+		},
+		{
+			name:          "compound days with seconds should fail",
+			input:         "2d5s",
+			expectError:   true,
+			errorContains: "compound durations with",
+		},
+		{
+			name:          "compound weeks with minutes should fail",
+			input:         "1w30m",
+			expectError:   true,
+			errorContains: "compound durations with",
+		},
 	}
 
 	for _, tt := range tests {
