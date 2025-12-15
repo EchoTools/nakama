@@ -189,10 +189,12 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 	// Log party composition for debugging party split issues
 	partyMap := make(map[string][]string)
+	ticketToPartySize := make(map[string]int)
 	for _, e := range entrants {
 		ticket := e.GetTicket()
 		username := e.Presence.GetUsername()
 		partyMap[ticket] = append(partyMap[ticket], username)
+		ticketToPartySize[ticket] = len(partyMap[ticket])
 	}
 	
 	// Log parties with more than 1 member
@@ -206,37 +208,43 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	}
 
 	// Divide the entrants into two equal-sized teams
+	// IMPORTANT: The prediction algorithm has already arranged entrants as [teamA..., teamB...]
+	// with parties kept together. We just need to split at the halfway point.
 	teamSize := len(entrants) / 2
 	teams := [2][]*MatchmakerEntry{}
 	for i, e := range entrants {
 		teams[i/teamSize] = append(teams[i/teamSize], e)
 	}
 	
-	// Log how parties are distributed across teams
+	// Verify that parties weren't split across teams
+	// This can happen if the entrants list order was changed after prediction
+	teamPartyCount := [2]map[string]int{make(map[string]int), make(map[string]int)}
 	for teamIdx, team := range teams {
-		teamPartyMap := make(map[string]int)
 		for _, e := range team {
-			teamPartyMap[e.GetTicket()]++
+			teamPartyCount[teamIdx][e.GetTicket()]++
+		}
+	}
+	
+	// Check each party and log/fix any splits
+	for ticket, partySize := range ticketToPartySize {
+		if partySize <= 1 {
+			continue // Solo player, no issue
 		}
 		
-		for ticket, count := range teamPartyMap {
-			if partySize := len(partyMap[ticket]); partySize > 1 {
-				logger.Warn("Party team assignment", 
-					zap.Int("team", teamIdx),
-					zap.String("ticket", ticket[:8]),
-					zap.Int("members_in_team", count),
-					zap.Int("party_size", partySize))
-				
-				// If party is split across teams, log an error
-				if count != partySize {
-					logger.Error("PARTY SPLIT DETECTED",
-						zap.String("ticket", ticket[:8]),
-						zap.Int("team", teamIdx),
-						zap.Int("members_in_team", count),
-						zap.Int("total_party_size", partySize),
-						zap.Int("members_on_other_team", partySize-count))
-				}
-			}
+		team0Count := teamPartyCount[0][ticket]
+		team1Count := teamPartyCount[1][ticket]
+		
+		// Party is split across teams
+		if team0Count > 0 && team1Count > 0 {
+			logger.Error("PARTY SPLIT DETECTED - Matchmaker prediction did not preserve party grouping",
+				zap.String("ticket", ticket[:8]),
+				zap.Int("team_0_count", team0Count),
+				zap.Int("team_1_count", team1Count),
+				zap.Int("total_party_size", partySize),
+				zap.Strings("party_members", partyMap[ticket]))
+			// Note: The split has already happened at this point.
+			// The prediction algorithm should have prevented this.
+			// This log helps diagnose where the issue occurred.
 		}
 	}
 
