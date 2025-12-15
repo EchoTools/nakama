@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/intinig/go-openskill/types"
 )
 
 // Process potential matches from candidates, applying filters and predictions
@@ -16,11 +17,26 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	// Filter out players who are too far away from each other
 	filterCounts["max_rtt"] = m.filterWithinMaxRTT(candidates)
 
+	config := PredictionConfig{}
+	if settings := ServiceSettings(); settings != nil {
+		mu := settings.SkillRating.Defaults.Mu
+		sigma := settings.SkillRating.Defaults.Sigma
+		z := settings.SkillRating.Defaults.Z
+		config.PartyBoostPercent = settings.Matchmaking.PartySkillBoostPercent
+		config.EnableRosterVariants = settings.Matchmaking.EnableRosterVariants
+		config.UseSnakeDraftFormation = settings.Matchmaking.UseSnakeDraftTeamFormation
+		config.OpenSkillOptions = &types.OpenSkillOptions{
+			Mu:    &mu,
+			Sigma: &sigma,
+			Z:     &z,
+		}
+	}
+
 	// predict the outcome of the matches
 	oldestTicket := ""
 	oldestTicketTimestamp := time.Now().UTC().Unix()
 	predictions := make([]PredictedMatch, 0, len(candidates))
-	for c := range predictCandidateOutcomes(candidates) {
+	for c := range predictCandidateOutcomesWithConfig(candidates, config) {
 		predictions = append(predictions, c)
 		if oldestTicket == "" || c.OldestTicketTimestamp < oldestTicketTimestamp {
 			oldestTicket = c.Candidate[0].GetTicket()
@@ -46,7 +62,7 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 		}
 
 		// Final tiebreaker: Match draw probability (higher draw probability = more evenly matched)
-		return predictions[i].Draw > predictions[j].Draw
+		return predictions[i].DrawProb > predictions[j].DrawProb
 	})
 
 	madeMatches := m.assembleUniqueMatches(predictions)
