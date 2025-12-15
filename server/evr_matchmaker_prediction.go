@@ -45,6 +45,15 @@ func (g MatchmakerEntries) Len() int {
 }
 
 func (g MatchmakerEntries) Ratings(opts *types.OpenSkillOptions) []types.Rating {
+	// Use default rating if opts is nil
+	if opts == nil {
+		defaultRating := NewDefaultRating()
+		opts = &types.OpenSkillOptions{
+			Mu:    &defaultRating.Mu,
+			Sigma: &defaultRating.Sigma,
+			Z:     &defaultRating.Z,
+		}
+	}
 	ratings := make([]types.Rating, len(g))
 	for i, e := range g {
 		props := e.GetProperties()
@@ -67,6 +76,15 @@ func (g MatchmakerEntries) Ratings(opts *types.OpenSkillOptions) []types.Rating 
 
 // RatingsInto fills the provided ratings slice with no allocations
 func (g MatchmakerEntries) RatingsInto(ratings []types.Rating, opts *types.OpenSkillOptions) {
+	// Use default rating if opts is nil
+	if opts == nil {
+		defaultRating := NewDefaultRating()
+		opts = &types.OpenSkillOptions{
+			Mu:    &defaultRating.Mu,
+			Sigma: &defaultRating.Sigma,
+			Z:     &defaultRating.Z,
+		}
+	}
 	for i, e := range g {
 		props := e.GetProperties()
 		mu, ok := props["rating_mu"].(float64)
@@ -87,6 +105,15 @@ func (g MatchmakerEntries) RatingsInto(ratings []types.Rating, opts *types.OpenS
 
 // RatingsWithPartyBoost returns ratings with an optional boost for parties (groups with multiple members)
 func (g MatchmakerEntries) RatingsWithPartyBoost(boostPercent float64, opts *types.OpenSkillOptions) []types.Rating {
+	// Use default rating if opts is nil
+	if opts == nil {
+		defaultRating := NewDefaultRating()
+		opts = &types.OpenSkillOptions{
+			Mu:    &defaultRating.Mu,
+			Sigma: &defaultRating.Sigma,
+			Z:     &defaultRating.Z,
+		}
+	}
 	ratings := make([]types.Rating, len(g))
 	isParty := len(g) > 1
 	for i, e := range g {

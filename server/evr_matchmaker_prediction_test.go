@@ -475,6 +475,7 @@ func BenchmarkPredictCandidateOutcomesWithConfig(b *testing.B) {
 				PartyBoostPercent:      0.0,
 				EnableRosterVariants:   false,
 				UseSnakeDraftFormation: false,
+				OpenSkillOptions:       &types.OpenSkillOptions{},
 			},
 		},
 		{
@@ -483,6 +484,7 @@ func BenchmarkPredictCandidateOutcomesWithConfig(b *testing.B) {
 				PartyBoostPercent:      0.0,
 				EnableRosterVariants:   false,
 				UseSnakeDraftFormation: true,
+				OpenSkillOptions:       &types.OpenSkillOptions{},
 			},
 		},
 		{
@@ -491,6 +493,7 @@ func BenchmarkPredictCandidateOutcomesWithConfig(b *testing.B) {
 				PartyBoostPercent:      0.0,
 				EnableRosterVariants:   true,
 				UseSnakeDraftFormation: false,
+				OpenSkillOptions:       &types.OpenSkillOptions{},
 			},
 		},
 		{
@@ -499,6 +502,7 @@ func BenchmarkPredictCandidateOutcomesWithConfig(b *testing.B) {
 				PartyBoostPercent:      0.10,
 				EnableRosterVariants:   false,
 				UseSnakeDraftFormation: true,
+				OpenSkillOptions:       &types.OpenSkillOptions{},
 			},
 		},
 		{
@@ -507,6 +511,7 @@ func BenchmarkPredictCandidateOutcomesWithConfig(b *testing.B) {
 				PartyBoostPercent:      0.10,
 				EnableRosterVariants:   true,
 				UseSnakeDraftFormation: true,
+				OpenSkillOptions:       &types.OpenSkillOptions{},
 			},
 		},
 	}
@@ -544,7 +549,7 @@ func BenchmarkPredictCandidateOutcomesWithConfig_Throughput(b *testing.B) {
 		PartyBoostPercent:      0.10,
 		EnableRosterVariants:   true,
 		UseSnakeDraftFormation: true,
-		OpenSkillOptions:       &OpenSkillOptions{},
+		OpenSkillOptions:       &types.OpenSkillOptions{},
 	}
 
 	b.ReportAllocs()
@@ -642,6 +647,7 @@ done:
 		PartyBoostPercent:      0.10,
 		EnableRosterVariants:   true,
 		UseSnakeDraftFormation: true,
+		OpenSkillOptions:       &types.OpenSkillOptions{},
 	}
 
 	b.ReportAllocs()
@@ -671,6 +677,7 @@ func BenchmarkPredictCandidateOutcomesWithConfig_DuplicateFiltering(b *testing.B
 		PartyBoostPercent:      0.0,
 		EnableRosterVariants:   false,
 		UseSnakeDraftFormation: true,
+		OpenSkillOptions:       &types.OpenSkillOptions{},
 	}
 
 	b.Run("WithDuplicates", func(b *testing.B) {
