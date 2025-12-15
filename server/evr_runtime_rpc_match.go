@@ -72,7 +72,7 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	}
 
 	// Increase the expiry time to a minimum of 1 minute from now
-	if request.MatchExpiry.AsTime().Before(time.Now().Add(1 * time.Minute)) {
+	if request.GetMatchExpiry().AsTime().Before(time.Now().Add(1 * time.Minute)) {
 		request.MatchExpiry = timestamppb.New(time.Now().Add(1 * time.Minute))
 	}
 
