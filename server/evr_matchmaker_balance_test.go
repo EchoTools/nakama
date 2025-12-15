@@ -143,7 +143,7 @@ func TestCharacterizationTeamFormation_SequentialFilling(t *testing.T) {
 
 			// Process through prediction
 			var result PredictedMatch
-			for p := range predictCandidateOutcomes(candidates) {
+			for p := range predictCandidateOutcomesWithConfig(candidates, defaultPredictionConfig()) {
 				result = p
 			}
 
@@ -161,7 +161,7 @@ func TestCharacterizationTeamFormation_SequentialFilling(t *testing.T) {
 			t.Logf("Description: %s", tt.description)
 			t.Logf("Team A strength: %.1f (players: %v)", strengthA, getPlayerMus(teamA))
 			t.Logf("Team B strength: %.1f (players: %v)", strengthB, getPlayerMus(teamB))
-			t.Logf("Draw probability: %.3f", result.Draw)
+			t.Logf("Draw probability: %.3f", result.DrawProb)
 
 			// Calculate imbalance ratio
 			totalStrength := strengthA + strengthB
@@ -216,7 +216,7 @@ func TestCharacterizationTeamFormation_PartiesKeptTogether(t *testing.T) {
 	candidates := [][]runtime.MatchmakerEntry{entries}
 
 	var result PredictedMatch
-	for p := range predictCandidateOutcomes(candidates) {
+	for p := range predictCandidateOutcomesWithConfig(candidates, defaultPredictionConfig()) {
 		result = p
 	}
 
@@ -300,8 +300,8 @@ func TestCharacterizationAssembleUniqueMatches(t *testing.T) {
 		{
 			name: "Larger match wins",
 			predictions: []PredictedMatch{
-				{Candidate: candidateA, Size: 8, Draw: 0.5, OldestTicketTimestamp: 100},
-				{Candidate: candidateB, Size: 6, Draw: 0.6, OldestTicketTimestamp: 100}, // Smaller
+				{Candidate: candidateA, Size: 8, DrawProb: 0.5, OldestTicketTimestamp: 100},
+				{Candidate: candidateB, Size: 6, DrawProb: 0.6, OldestTicketTimestamp: 100}, // Smaller
 			},
 			wantFirst: 0,
 			reason:    "Size takes priority",
@@ -309,8 +309,8 @@ func TestCharacterizationAssembleUniqueMatches(t *testing.T) {
 		{
 			name: "Older ticket wins when same size",
 			predictions: []PredictedMatch{
-				{Candidate: candidateA, Size: 8, Draw: 0.5, OldestTicketTimestamp: 200},
-				{Candidate: candidateB, Size: 8, Draw: 0.5, OldestTicketTimestamp: 100}, // Older
+				{Candidate: candidateA, Size: 8, DrawProb: 0.5, OldestTicketTimestamp: 200},
+				{Candidate: candidateB, Size: 8, DrawProb: 0.5, OldestTicketTimestamp: 100}, // Older
 			},
 			wantFirst: 1,
 			reason:    "Older ticket timestamp has priority",
@@ -318,8 +318,8 @@ func TestCharacterizationAssembleUniqueMatches(t *testing.T) {
 		{
 			name: "Fewer divisions wins when same size and age",
 			predictions: []PredictedMatch{
-				{Candidate: candidateA, Size: 8, Draw: 0.5, OldestTicketTimestamp: 100, DivisionCount: 3},
-				{Candidate: candidateB, Size: 8, Draw: 0.5, OldestTicketTimestamp: 100, DivisionCount: 2}, // Fewer divisions
+				{Candidate: candidateA, Size: 8, DrawProb: 0.5, OldestTicketTimestamp: 100, DivisionCount: 3},
+				{Candidate: candidateB, Size: 8, DrawProb: 0.5, OldestTicketTimestamp: 100, DivisionCount: 2}, // Fewer divisions
 			},
 			wantFirst: 1,
 			reason:    "Fewer divisions preferred for balanced matches",
@@ -327,8 +327,8 @@ func TestCharacterizationAssembleUniqueMatches(t *testing.T) {
 		{
 			name: "Higher draw probability wins as final tiebreaker",
 			predictions: []PredictedMatch{
-				{Candidate: candidateA, Size: 8, Draw: 0.4, OldestTicketTimestamp: 100, DivisionCount: 2},
-				{Candidate: candidateB, Size: 8, Draw: 0.6, OldestTicketTimestamp: 100, DivisionCount: 2}, // Higher draw
+				{Candidate: candidateA, Size: 8, DrawProb: 0.4, OldestTicketTimestamp: 100, DivisionCount: 2},
+				{Candidate: candidateB, Size: 8, DrawProb: 0.6, OldestTicketTimestamp: 100, DivisionCount: 2}, // Higher draw
 			},
 			wantFirst: 1,
 			reason:    "Higher draw probability means more balanced match",
@@ -350,7 +350,7 @@ func TestCharacterizationAssembleUniqueMatches(t *testing.T) {
 				if tt.predictions[i].DivisionCount != tt.predictions[j].DivisionCount {
 					return tt.predictions[i].DivisionCount < tt.predictions[j].DivisionCount
 				}
-				return tt.predictions[i].Draw > tt.predictions[j].Draw
+				return tt.predictions[i].DrawProb > tt.predictions[j].DrawProb
 			})
 
 			matches := m.assembleUniqueMatches(tt.predictions)
@@ -366,7 +366,7 @@ func TestCharacterizationAssembleUniqueMatches(t *testing.T) {
 
 			t.Logf("Reason for selection: %s", tt.reason)
 			t.Logf("First match size=%d, draw=%.2f, age=%d, divisions=%d",
-				tt.predictions[0].Size, tt.predictions[0].Draw,
+				tt.predictions[0].Size, tt.predictions[0].DrawProb,
 				tt.predictions[0].OldestTicketTimestamp, tt.predictions[0].DivisionCount)
 		})
 	}
@@ -400,7 +400,8 @@ func TestBalancedTeamFormation_SnakeDraft(t *testing.T) {
 
 	var sequentialResult PredictedMatch
 	for p := range predictCandidateOutcomesWithConfig(seqCandidates, PredictionConfig{
-		Variants: []RosterVariant{RosterVariantSequential},
+		Variants:         []RosterVariant{RosterVariantSequential},
+		OpenSkillOptions: &types.OpenSkillOptions{},
 	}) {
 		sequentialResult = p
 	}
@@ -416,7 +417,8 @@ func TestBalancedTeamFormation_SnakeDraft(t *testing.T) {
 
 	var snakeDraftResult PredictedMatch
 	for p := range predictCandidateOutcomesWithConfig(snakeCandidates, PredictionConfig{
-		Variants: []RosterVariant{RosterVariantSnakeDraft},
+		Variants:         []RosterVariant{RosterVariantSnakeDraft},
+		OpenSkillOptions: &types.OpenSkillOptions{},
 	}) {
 		snakeDraftResult = p
 	}
@@ -437,12 +439,12 @@ func TestBalancedTeamFormation_SnakeDraft(t *testing.T) {
 	t.Logf("Sequential filling:")
 	t.Logf("  Team A: %v = %.1f", getPlayerMus(seqTeamA), seqStrengthA)
 	t.Logf("  Team B: %v = %.1f", getPlayerMus(seqTeamB), seqStrengthB)
-	t.Logf("  Imbalance: %.2f%%, Draw: %.3f", seqImbalance, sequentialResult.Draw)
+	t.Logf("  Imbalance: %.2f%%, Draw: %.3f", seqImbalance, sequentialResult.DrawProb)
 
 	t.Logf("Snake draft:")
 	t.Logf("  Team A: %v = %.1f", getPlayerMus(snakeTeamA), snakeStrengthA)
 	t.Logf("  Team B: %v = %.1f", getPlayerMus(snakeTeamB), snakeStrengthB)
-	t.Logf("  Imbalance: %.2f%%, Draw: %.3f", snakeImbalance, snakeDraftResult.Draw)
+	t.Logf("  Imbalance: %.2f%%, Draw: %.3f", snakeImbalance, snakeDraftResult.DrawProb)
 
 	// Snake draft should produce more balanced teams (lower imbalance)
 	if snakeImbalance >= seqImbalance {
@@ -451,9 +453,9 @@ func TestBalancedTeamFormation_SnakeDraft(t *testing.T) {
 	}
 
 	// Snake draft should have higher draw probability
-	if snakeDraftResult.Draw <= sequentialResult.Draw {
+	if snakeDraftResult.DrawProb <= sequentialResult.DrawProb {
 		t.Errorf("Snake draft should have higher draw probability (snake=%.3f vs seq=%.3f)",
-			snakeDraftResult.Draw, sequentialResult.Draw)
+			snakeDraftResult.DrawProb, sequentialResult.DrawProb)
 	}
 }
 
@@ -463,8 +465,8 @@ func TestPartySkillBoost(t *testing.T) {
 
 	// Solo player
 	solo := MatchmakerEntries{createTestEntry("t1", "p1", 20.0, 3.0)}
-	soloRatings := solo.Ratings()
-	soloRatingsWithBoost := solo.RatingsWithPartyBoost(0.10)
+	soloRatings := solo.Ratings(nil)
+	soloRatingsWithBoost := solo.RatingsWithPartyBoost(0.10, nil)
 
 	// Solo should NOT get boost
 	if soloRatings[0].Mu != soloRatingsWithBoost[0].Mu {
@@ -485,8 +487,8 @@ func TestPartySkillBoost(t *testing.T) {
 		partyEntries = append(partyEntries, e)
 	}
 
-	partyRatings := partyEntries.Ratings()
-	partyRatingsWithBoost := partyEntries.RatingsWithPartyBoost(0.10)
+	partyRatings := partyEntries.Ratings(nil)
+	partyRatingsWithBoost := partyEntries.RatingsWithPartyBoost(0.10, nil)
 
 	// Party SHOULD get 10% boost
 	expectedBoostedMu1 := 20.0 * 1.10
@@ -588,6 +590,7 @@ func TestVariantSelection_SharedPlayers(t *testing.T) {
 	predictions := []PredictedMatch{}
 	for p := range predictCandidateOutcomesWithConfig(candidates, PredictionConfig{
 		EnableRosterVariants: true,
+		OpenSkillOptions:     &types.OpenSkillOptions{},
 	}) {
 		predictions = append(predictions, p)
 	}
@@ -613,7 +616,7 @@ func TestVariantSelection_SharedPlayers(t *testing.T) {
 		}
 
 		t.Logf("Prediction %d [%s]: Draw=%.3f, Imbalance=%.2f%%, Size=%d",
-			i, variantName, p.Draw, imbalance, p.Size)
+			i, variantName, p.DrawProb, imbalance, p.Size)
 		t.Logf("  Team A: %v = %.1f", getPlayerMus(teamA), strengthA)
 		t.Logf("  Team B: %v = %.1f", getPlayerMus(teamB), strengthB)
 	}
@@ -632,7 +635,7 @@ func TestVariantSelection_SharedPlayers(t *testing.T) {
 		if predictions[i].DivisionCount != predictions[j].DivisionCount {
 			return predictions[i].DivisionCount < predictions[j].DivisionCount
 		}
-		return predictions[i].Draw > predictions[j].Draw
+		return predictions[i].DrawProb > predictions[j].DrawProb
 	})
 
 	matches := m.assembleUniqueMatches(predictions)
@@ -678,7 +681,7 @@ func BenchmarkTeamFormation(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		for range predictCandidateOutcomes(candidates) {
+		for range predictCandidateOutcomesWithConfig(candidates, defaultPredictionConfig()) {
 			// consume
 		}
 	}
