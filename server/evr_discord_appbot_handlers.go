@@ -50,25 +50,29 @@ func parseSuspensionDuration(inputDuration string) (time.Duration, error) {
 
 	// Fallback to custom parsing for simple durations with d/w units
 	var unit time.Duration
+	var numStr string
 	lastChar := duration[len(duration)-1]
 
 	switch lastChar {
 	case 'm':
 		unit = time.Minute
+		numStr = duration[:len(duration)-1]
 	case 'h':
 		unit = time.Hour
+		numStr = duration[:len(duration)-1]
 	case 'd':
 		unit = 24 * time.Hour
+		numStr = duration[:len(duration)-1]
 	case 'w':
 		unit = 7 * 24 * time.Hour
+		numStr = duration[:len(duration)-1]
 	default:
 		// No unit specified, default to minutes
-		duration += "m"
 		unit = time.Minute
+		numStr = duration // Use the entire string as the numeric part
 	}
 
 	// Parse the numeric part
-	numStr := duration[:len(duration)-1]
 	durationVal, err := strconv.Atoi(numStr)
 	if err != nil {
 		return 0, fmt.Errorf("invalid duration format: %w", err)
