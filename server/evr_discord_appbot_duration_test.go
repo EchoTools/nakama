@@ -2,8 +2,6 @@ package server
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -96,7 +94,7 @@ func TestParseDuration(t *testing.T) {
 			name:          "invalid format - letters only",
 			input:         "abc",
 			expectError:   true,
-			errorContains: "invalid syntax",
+			errorContains: "invalid",
 		},
 		{
 			name:        "invalid format - empty after trim",
@@ -123,6 +121,19 @@ func TestParseDuration(t *testing.T) {
 			expectedDur: 90 * time.Minute,
 			expectError: false,
 		},
+		// Compound durations with d/w should fail
+		{
+			name:          "compound with days should fail",
+			input:         "2d3h",
+			expectError:   true,
+			errorContains: "compound durations with 'd'",
+		},
+		{
+			name:          "compound with weeks should fail",
+			input:         "1w2d",
+			expectError:   true,
+			errorContains: "compound durations with",
+		},
 	}
 
 	for _, tt := range tests {
@@ -140,59 +151,6 @@ func TestParseDuration(t *testing.T) {
 			}
 		})
 	}
-}
-
-// parseSuspensionDuration replicates the improved logic from kickPlayer function
-// This is extracted for testing purposes
-func parseSuspensionDuration(inputDuration string) (time.Duration, error) {
-	duration := inputDuration
-	var suspensionDuration time.Duration
-
-	// Parse minutes, hours, days, and weeks (m, h, d, w)
-	// Trim whitespace to handle accidental spaces
-	duration = strings.TrimSpace(duration)
-	if duration != "" {
-		if duration == "0" {
-			// Zero duration means void existing suspension
-			return 0, nil
-		} else {
-			// Try parsing with Go's time.ParseDuration first for compound durations (e.g., "2h25m")
-			// Note: time.ParseDuration requires nanosecond precision units (ns, us, ms, s, m, h)
-			// but doesn't support 'd' (days) or 'w' (weeks), so we handle those separately
-			if parsedDuration, err := time.ParseDuration(duration); err == nil {
-				// Successfully parsed compound duration like "2h25m" or "1h30m45s"
-				suspensionDuration = parsedDuration
-			} else {
-				// Fallback to custom parsing for simple durations and d/w units
-				var unit time.Duration
-				lastChar := duration[len(duration)-1]
-
-				switch lastChar {
-				case 'm':
-					unit = time.Minute
-				case 'h':
-					unit = time.Hour
-				case 'd':
-					unit = 24 * time.Hour
-				case 'w':
-					unit = 7 * 24 * time.Hour
-				default:
-					// No unit specified, default to minutes
-					duration += "m"
-					unit = time.Minute
-				}
-
-				// Parse the numeric part
-				numStr := duration[:len(duration)-1]
-				if durationVal, err := strconv.Atoi(numStr); err == nil {
-					suspensionDuration = time.Duration(durationVal) * unit
-				} else {
-					return 0, err
-				}
-			}
-		}
-	}
-	return suspensionDuration, nil
 }
 
 // Test the actual scenario from the bug report
@@ -227,7 +185,7 @@ func TestIGPSuspensionDurationBugReport(t *testing.T) {
 	})
 }
 
-// Test to verify that whitespace handling is important
+// Test to verify that whitespace handling works correctly
 func TestDurationWhitespaceHandling(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -245,17 +203,11 @@ func TestDurationWhitespaceHandling(t *testing.T) {
 		// Use quoted version for test name to handle whitespace properly
 		testName := fmt.Sprintf("whitespace_%q", tt.input)
 		t.Run(testName, func(t *testing.T) {
-			// Test that the improved implementation handles whitespace
 			duration, err := parseSuspensionDuration(tt.input)
 
-			// Whitespace should now be handled gracefully
-			trimmed := strings.TrimSpace(tt.input)
-			if trimmed != tt.input && len(tt.input) > 0 && (tt.input[0] == ' ' || tt.input[0] == '\t' || tt.input[0] == '\n') {
-				// Leading whitespace should now work correctly
-				if err == nil {
-					t.Logf("Input %q parsed successfully to %v (trimming is working)", tt.input, duration)
-				}
-			}
+			// All whitespace inputs should parse successfully
+			require.NoError(t, err, "Expected no error for input %q", tt.input)
+			assert.Equal(t, tt.expected, duration, "Duration mismatch for input %q", tt.input)
 		})
 	}
 }
