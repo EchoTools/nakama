@@ -544,6 +544,7 @@ func BenchmarkPredictCandidateOutcomesWithConfig_Throughput(b *testing.B) {
 		PartyBoostPercent:      0.10,
 		EnableRosterVariants:   true,
 		UseSnakeDraftFormation: true,
+		OpenSkillOptions:       &OpenSkillOptions{},
 	}
 
 	b.ReportAllocs()
