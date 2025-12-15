@@ -18,6 +18,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+const errCompoundDurationWithDW = "compound durations with 'd' (days) or 'w' (weeks) are not supported; use simple format like '2d' or convert to hours (e.g., '48h' instead of '2d')"
+
 // parseSuspensionDuration parses a duration string for suspension/ban durations.
 // Supports formats like: "15m", "2h", "7d", "1w", "2h30m", "1h30m45s"
 // If no unit is specified (e.g., "15"), defaults to minutes.
@@ -42,12 +44,12 @@ func parseSuspensionDuration(inputDuration string) (time.Duration, error) {
 
 	// Check if both d and w are present (e.g., "1w2d")
 	if hasD && hasW {
-		return 0, fmt.Errorf("compound durations with 'd' (days) or 'w' (weeks) are not supported; use simple format like '2d' or convert to hours (e.g., '48h' instead of '2d')")
+		return 0, fmt.Errorf(errCompoundDurationWithDW)
 	}
 
 	// Check if d or w appears with other standard units
 	if (hasD || hasW) && hasOtherUnits {
-		return 0, fmt.Errorf("compound durations with 'd' (days) or 'w' (weeks) are not supported; use simple format like '2d' or convert to hours (e.g., '48h' instead of '2d')")
+		return 0, fmt.Errorf(errCompoundDurationWithDW)
 	}
 
 	// Try parsing with Go's time.ParseDuration first for compound durations (e.g., "2h25m")
@@ -62,6 +64,11 @@ func parseSuspensionDuration(inputDuration string) (time.Duration, error) {
 	}
 
 	// Fallback to custom parsing for simple durations with d/w units
+	// Additional safety check to prevent panic
+	if len(duration) == 0 {
+		return 0, fmt.Errorf("invalid duration format: empty string")
+	}
+
 	var unit time.Duration
 	var numStr string
 	lastChar := duration[len(duration)-1]
