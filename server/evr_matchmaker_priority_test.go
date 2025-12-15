@@ -48,7 +48,7 @@ func TestOldestTicketPriority(t *testing.T) {
 				&mockMatchmakerEntry{ticket: "player-c"},
 			},
 			Size:                  1,
-			Draw:                  0.5,
+			DrawProb:              0.5,
 			DivisionCount:         1,
 			OldestTicketTimestamp: now - 10,
 		},
@@ -57,7 +57,7 @@ func TestOldestTicketPriority(t *testing.T) {
 				&mockMatchmakerEntry{ticket: "player-a"},
 			},
 			Size:                  1,
-			Draw:                  0.5,
+			DrawProb:              0.5,
 			DivisionCount:         1,
 			OldestTicketTimestamp: now - 100,
 		},
@@ -66,7 +66,7 @@ func TestOldestTicketPriority(t *testing.T) {
 				&mockMatchmakerEntry{ticket: "player-b"},
 			},
 			Size:                  1,
-			Draw:                  0.5,
+			DrawProb:              0.5,
 			DivisionCount:         1,
 			OldestTicketTimestamp: now - 50,
 		},
@@ -88,7 +88,7 @@ func TestOldestTicketPriority(t *testing.T) {
 			return predictions[i].DivisionCount < predictions[j].DivisionCount
 		}
 
-		return predictions[i].Draw > predictions[j].Draw
+		return predictions[i].DrawProb > predictions[j].DrawProb
 	})
 
 	// The oldest ticket should be first
@@ -127,7 +127,7 @@ func TestOldestTicketPriorityMultiplePlayers(t *testing.T) {
 				&mockMatchmakerEntry{ticket: "player-3"},
 			},
 			Size:                  1,
-			Draw:                  0.5,
+			DrawProb:              0.5,
 			DivisionCount:         1,
 			OldestTicketTimestamp: now - 30,
 		},
@@ -136,7 +136,7 @@ func TestOldestTicketPriorityMultiplePlayers(t *testing.T) {
 				&mockMatchmakerEntry{ticket: "player-1"},
 			},
 			Size:                  1,
-			Draw:                  0.5,
+			DrawProb:              0.5,
 			DivisionCount:         1,
 			OldestTicketTimestamp: now - 10,
 		},
@@ -145,7 +145,7 @@ func TestOldestTicketPriorityMultiplePlayers(t *testing.T) {
 				&mockMatchmakerEntry{ticket: "player-5"},
 			},
 			Size:                  1,
-			Draw:                  0.5,
+			DrawProb:              0.5,
 			DivisionCount:         1,
 			OldestTicketTimestamp: now - 50,
 		},
@@ -154,7 +154,7 @@ func TestOldestTicketPriorityMultiplePlayers(t *testing.T) {
 				&mockMatchmakerEntry{ticket: "player-2"},
 			},
 			Size:                  1,
-			Draw:                  0.5,
+			DrawProb:              0.5,
 			DivisionCount:         1,
 			OldestTicketTimestamp: now - 20,
 		},
@@ -163,7 +163,7 @@ func TestOldestTicketPriorityMultiplePlayers(t *testing.T) {
 				&mockMatchmakerEntry{ticket: "player-4"},
 			},
 			Size:                  1,
-			Draw:                  0.5,
+			DrawProb:              0.5,
 			DivisionCount:         1,
 			OldestTicketTimestamp: now - 40,
 		},
@@ -185,7 +185,7 @@ func TestOldestTicketPriorityMultiplePlayers(t *testing.T) {
 			return predictions[i].DivisionCount < predictions[j].DivisionCount
 		}
 
-		return predictions[i].Draw > predictions[j].Draw
+		return predictions[i].DrawProb > predictions[j].DrawProb
 	})
 
 	// Expected order: player-5 (50s), player-4 (40s), player-3 (30s), player-2 (20s), player-1 (10s)
