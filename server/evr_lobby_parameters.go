@@ -193,7 +193,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		// Set mode based on the match to join.
 		label, err := MatchLabelByID(ctx, nk, nextMatchID)
 		if err != nil {
-			logger.Warn("Failed to load next match", zap.Error(err))
+			logger.Warn("Failed to load next match", zap.Any("mid", nextMatchID), zap.Error(err))
 		} else {
 			mode = label.Mode
 		}
