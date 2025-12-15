@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -18,11 +17,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
-
-// Regular expression to detect compound durations with days or weeks
-// Catches any duration string that contains both 'd'/'w' and any other unit letter
-// e.g., "2d3h", "3h2d", "1w30m", "2d5s" are all invalid
-var compoundDurationWithDWRegex = regexp.MustCompile(`[dw].*\d+[a-z]|\d+[a-z].*[dw]`)
 
 // parseSuspensionDuration parses a duration string for suspension/ban durations.
 // Supports formats like: "15m", "2h", "7d", "1w", "2h30m", "1h30m45s"
@@ -41,8 +35,18 @@ func parseSuspensionDuration(inputDuration string) (time.Duration, error) {
 	}
 
 	// Check for compound durations with unsupported units (d or w)
-	// e.g., "2d3h" or "1w2d" should fail with a clear message
-	if compoundDurationWithDWRegex.MatchString(duration) {
+	// Count occurrences of unit letters and check if d/w appears with other units
+	hasD := strings.Contains(duration, "d")
+	hasW := strings.Contains(duration, "w")
+	hasOtherUnits := strings.ContainsAny(duration, "mhs")
+
+	// Check if both d and w are present (e.g., "1w2d")
+	if hasD && hasW {
+		return 0, fmt.Errorf("compound durations with 'd' (days) or 'w' (weeks) are not supported; use simple format like '2d' or convert to hours (e.g., '48h' instead of '2d')")
+	}
+
+	// Check if d or w appears with other standard units
+	if (hasD || hasW) && hasOtherUnits {
 		return 0, fmt.Errorf("compound durations with 'd' (days) or 'w' (weeks) are not supported; use simple format like '2d' or convert to hours (e.g., '48h' instead of '2d')")
 	}
 
@@ -50,6 +54,10 @@ func parseSuspensionDuration(inputDuration string) (time.Duration, error) {
 	// Note: time.ParseDuration supports ns, us, ms, s, m, h but not d (days) or w (weeks)
 	if parsedDuration, err := time.ParseDuration(duration); err == nil {
 		// Successfully parsed compound duration like "2h25m" or "1h30m45s"
+		// Reject negative durations
+		if parsedDuration < 0 {
+			return 0, fmt.Errorf("duration must be positive, got: %v", parsedDuration)
+		}
 		return parsedDuration, nil
 	}
 
@@ -81,6 +89,11 @@ func parseSuspensionDuration(inputDuration string) (time.Duration, error) {
 	durationVal, err := strconv.Atoi(numStr)
 	if err != nil {
 		return 0, fmt.Errorf("invalid duration format: %w", err)
+	}
+
+	// Reject negative durations
+	if durationVal < 0 {
+		return 0, fmt.Errorf("duration must be positive, got: %d", durationVal)
 	}
 
 	return time.Duration(durationVal) * unit, nil

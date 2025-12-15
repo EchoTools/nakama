@@ -152,6 +152,32 @@ func TestParseDuration(t *testing.T) {
 			expectError:   true,
 			errorContains: "compound durations with",
 		},
+		// Negative durations should fail
+		{
+			name:          "negative minutes should fail",
+			input:         "-5m",
+			expectError:   true,
+			errorContains: "must be positive",
+		},
+		{
+			name:          "negative hours should fail",
+			input:         "-2h",
+			expectError:   true,
+			errorContains: "must be positive",
+		},
+		// Valid single d/w units should work
+		{
+			name:        "single day unit",
+			input:       "3d",
+			expectedDur: 3 * 24 * time.Hour,
+			expectError: false,
+		},
+		{
+			name:        "single week unit",
+			input:       "2w",
+			expectedDur: 2 * 7 * 24 * time.Hour,
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {
