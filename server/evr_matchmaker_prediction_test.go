@@ -145,30 +145,33 @@ func generateMatchmakerCandidates(count int) [][]runtime.MatchmakerEntry {
 	return candidates
 }
 
+// BenchmarkPredictOutcomes benchmarks the prediction of match outcomes
 func BenchmarkPredictOutcomes(b *testing.B) {
+	const CandidateCount = 32
 
 	profile := false
 	if profile {
 		// Create CPU profile file
-		cpuProfile, _ := os.Create("/tmp/cpu.prof")
+		cpuProfile, _ := os.CreateTemp("", "cpu-*.prof")
 		defer cpuProfile.Close()
 		pprof.StartCPUProfile(cpuProfile)
 		defer pprof.StopCPUProfile()
 
 		// Create Memory profile file
-		memProfile, _ := os.Create("/tmp/mem.prof")
+		memProfile, _ := os.CreateTemp("", "mem-*.prof")
 		defer memProfile.Close()
 		defer pprof.WriteHeapProfile(memProfile)
 	}
+	config := defaultPredictionConfig()
 
 	// Create all combinations of 8 players from the entries
-	candidates := generateMatchmakerCandidates(24)
+	candidates := generateMatchmakerCandidates(CandidateCount)
 	b.Logf("candidate count: %d", len(candidates))
 
 	for b.Loop() {
 		b.ReportMetric(float64(len(candidates)), "candidates")
 		predictions := make([]PredictedMatch, 0, len(candidates))
-		for p := range predictCandidateOutcomes(candidates) {
+		for p := range predictCandidateOutcomesWithConfig(candidates, config) {
 			predictions = append(predictions, p)
 		}
 		b.ReportMetric(float64(len(predictions)), "predictions")
@@ -297,11 +300,11 @@ func TestCharacterizationMatchmaker(t *testing.T) {
 
 		c := MatchmakerEntries(match)
 		teams := make([]types.Team, 0, 2)
-		teams = append(teams, c[:4].Ratings())
-		teams = append(teams, c[4:].Ratings())
+		teams = append(teams, c[:4].Ratings(nil))
+		teams = append(teams, c[4:].Ratings(nil))
 
 		ordinals := make([]float64, 0, 8)
-		for _, r := range c.Ratings() {
+		for _, r := range c.Ratings(nil) {
 			ordinals = append(ordinals, rating.Ordinal(r))
 		}
 
@@ -312,12 +315,12 @@ func TestCharacterizationMatchmaker(t *testing.T) {
 		groupRatings := make([]types.Team, 0, 2)
 		groupOrdinals := make([]float64, 0, 8)
 		for _, entries := range groups {
-			groupRatings = append(groupRatings, entries.Ratings())
-			groupOrdinals = append(groupOrdinals, entries.TeamOrdinal())
+			groupRatings = append(groupRatings, entries.Ratings(nil))
+			groupOrdinals = append(groupOrdinals, entries.TeamOrdinal(nil))
 		}
 
-		teamRatingA := c[:4].TeamRating()
-		teamRatingB := c[4:].TeamRating()
+		teamRatingA := c[:4].TeamRating(nil)
+		teamRatingB := c[4:].TeamRating(nil)
 
 		ranks, probabilities := rating.PredictRank(groupRatings, nil)
 		teamOrdinalA := rating.TeamOrdinal(teamRatingA)
@@ -325,7 +328,7 @@ func TestCharacterizationMatchmaker(t *testing.T) {
 
 		playerMus := make([]int, 0, 8)
 		playerSigmas := make([]int, 0, 8)
-		for _, r := range c.Ratings() {
+		for _, r := range c.Ratings(nil) {
 			playerMus = append(playerMus, int(r.Mu))
 			playerSigmas = append(playerSigmas, int(r.Sigma*100))
 		}
@@ -451,5 +454,263 @@ func BenchmarkHashMatchmakerEntries(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		HashMatchmakerEntries(entries)
+	}
+}
+
+// BenchmarkPredictCandidateOutcomesWithConfig benchmarks the prediction function
+// with various configurations for performance regression testing.
+func BenchmarkPredictCandidateOutcomesWithConfig(b *testing.B) {
+	// Generate candidates of varying sizes for comprehensive benchmarking
+	smallCandidates := generateMatchmakerCandidates(12)  // ~495 candidates
+	mediumCandidates := generateMatchmakerCandidates(16) // ~12,870 candidates
+	largeCandidates := generateMatchmakerCandidates(20)  // ~125,970 candidates
+
+	configs := []struct {
+		name   string
+		config PredictionConfig
+	}{
+		{
+			name: "Sequential",
+			config: PredictionConfig{
+				PartyBoostPercent:      0.0,
+				EnableRosterVariants:   false,
+				UseSnakeDraftFormation: false,
+			},
+		},
+		{
+			name: "SnakeDraft",
+			config: PredictionConfig{
+				PartyBoostPercent:      0.0,
+				EnableRosterVariants:   false,
+				UseSnakeDraftFormation: true,
+			},
+		},
+		{
+			name: "BothVariants",
+			config: PredictionConfig{
+				PartyBoostPercent:      0.0,
+				EnableRosterVariants:   true,
+				UseSnakeDraftFormation: false,
+			},
+		},
+		{
+			name: "WithPartyBoost",
+			config: PredictionConfig{
+				PartyBoostPercent:      0.10,
+				EnableRosterVariants:   false,
+				UseSnakeDraftFormation: true,
+			},
+		},
+		{
+			name: "FullConfig",
+			config: PredictionConfig{
+				PartyBoostPercent:      0.10,
+				EnableRosterVariants:   true,
+				UseSnakeDraftFormation: true,
+			},
+		},
+	}
+
+	candidateSets := []struct {
+		name       string
+		candidates [][]runtime.MatchmakerEntry
+	}{
+		{"Small", smallCandidates},
+		{"Medium", mediumCandidates},
+		{"Large", largeCandidates},
+	}
+
+	for _, cs := range candidateSets {
+		for _, cfg := range configs {
+			b.Run(fmt.Sprintf("%s/%s", cs.name, cfg.name), func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+
+				for i := 0; i < b.N; i++ {
+					predictions := make([]PredictedMatch, 0, len(cs.candidates))
+					for p := range predictCandidateOutcomesWithConfig(cs.candidates, cfg.config) {
+						predictions = append(predictions, p)
+					}
+				}
+			})
+		}
+	}
+}
+
+// BenchmarkPredictCandidateOutcomesWithConfig_Throughput measures predictions per second
+func BenchmarkPredictCandidateOutcomesWithConfig_Throughput(b *testing.B) {
+	candidates := generateMatchmakerCandidates(16)
+	config := PredictionConfig{
+		PartyBoostPercent:      0.10,
+		EnableRosterVariants:   true,
+		UseSnakeDraftFormation: true,
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	totalPredictions := 0
+	for i := 0; i < b.N; i++ {
+		count := 0
+		for range predictCandidateOutcomesWithConfig(candidates, config) {
+			count++
+		}
+		totalPredictions += count
+	}
+
+	b.ReportMetric(float64(totalPredictions)/float64(b.N), "predictions/op")
+	b.ReportMetric(float64(len(candidates)), "candidates/op")
+}
+
+// BenchmarkPredictCandidateOutcomesWithConfig_WithParties benchmarks with party groupings
+func BenchmarkPredictCandidateOutcomesWithConfig_WithParties(b *testing.B) {
+	// Create entries with some parties (shared tickets)
+	entries := make([]*MatchmakerEntry, 0, 16)
+
+	// Add 4 parties of 2 players each (8 players)
+	for partyIdx := 0; partyIdx < 4; partyIdx++ {
+		ticket := uuid.NewV5(uuid.Nil, fmt.Sprintf("party-%d", partyIdx)).String()
+		for playerIdx := 0; playerIdx < 2; playerIdx++ {
+			sessionID := uuid.NewV5(uuid.Nil, fmt.Sprintf("party-%d-player-%d", partyIdx, playerIdx))
+			entries = append(entries, &MatchmakerEntry{
+				Ticket: ticket,
+				Presence: &MatchmakerPresence{
+					UserId:    sessionID.String(),
+					SessionId: sessionID.String(),
+					Username:  fmt.Sprintf("party%d_player%d", partyIdx, playerIdx),
+					SessionID: sessionID,
+				},
+				Properties: map[string]any{
+					"rating_mu":       float64(20 + rand.Intn(9)),
+					"rating_sigma":    float64(3 + rand.Intn(2)),
+					"submission_time": float64(time.Now().UTC().Add(-time.Duration(rand.Intn(10)) * time.Minute).Unix()),
+					"divisions":       "div1,div2",
+				},
+			})
+		}
+	}
+
+	// Add 8 solo players
+	for i := 0; i < 8; i++ {
+		sessionID := uuid.NewV5(uuid.Nil, fmt.Sprintf("solo-%d", i))
+		entries = append(entries, &MatchmakerEntry{
+			Ticket: uuid.NewV5(uuid.Nil, fmt.Sprintf("solo-ticket-%d", i)).String(),
+			Presence: &MatchmakerPresence{
+				UserId:    sessionID.String(),
+				SessionId: sessionID.String(),
+				Username:  fmt.Sprintf("solo_player%d", i),
+				SessionID: sessionID,
+			},
+			Properties: map[string]any{
+				"rating_mu":       float64(20 + rand.Intn(9)),
+				"rating_sigma":    float64(3 + rand.Intn(2)),
+				"submission_time": float64(time.Now().UTC().Add(-time.Duration(rand.Intn(10)) * time.Minute).Unix()),
+				"divisions":       "div1",
+			},
+		})
+	}
+
+	// Generate candidates from these entries
+	candidates := make([][]runtime.MatchmakerEntry, 0, 1000)
+	for i := 0; i < len(entries); i++ {
+		for j := i + 1; j < len(entries); j++ {
+			for k := j + 1; k < len(entries); k++ {
+				for l := k + 1; l < len(entries); l++ {
+					for m := l + 1; m < len(entries); m++ {
+						for n := m + 1; n < len(entries); n++ {
+							for o := n + 1; o < len(entries); o++ {
+								for p := o + 1; p < len(entries); p++ {
+									candidates = append(candidates, []runtime.MatchmakerEntry{
+										entries[i], entries[j], entries[k], entries[l],
+										entries[m], entries[n], entries[o], entries[p],
+									})
+									if len(candidates) >= 5000 {
+										goto done
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+done:
+
+	config := PredictionConfig{
+		PartyBoostPercent:      0.10,
+		EnableRosterVariants:   true,
+		UseSnakeDraftFormation: true,
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		predictions := make([]PredictedMatch, 0, len(candidates)*2)
+		for p := range predictCandidateOutcomesWithConfig(candidates, config) {
+			predictions = append(predictions, p)
+		}
+	}
+}
+
+// BenchmarkPredictCandidateOutcomesWithConfig_DuplicateFiltering benchmarks duplicate candidate filtering
+func BenchmarkPredictCandidateOutcomesWithConfig_DuplicateFiltering(b *testing.B) {
+	baseCandidates := generateMatchmakerCandidates(12)
+
+	// Create candidates with ~50% duplicates
+	candidatesWithDupes := make([][]runtime.MatchmakerEntry, 0, len(baseCandidates)*2)
+	candidatesWithDupes = append(candidatesWithDupes, baseCandidates...)
+	// Add shuffled duplicates
+	for i := len(baseCandidates) - 1; i >= 0; i-- {
+		candidatesWithDupes = append(candidatesWithDupes, baseCandidates[i])
+	}
+
+	config := PredictionConfig{
+		PartyBoostPercent:      0.0,
+		EnableRosterVariants:   false,
+		UseSnakeDraftFormation: true,
+	}
+
+	b.Run("WithDuplicates", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			predictions := make([]PredictedMatch, 0, len(baseCandidates))
+			for p := range predictCandidateOutcomesWithConfig(candidatesWithDupes, config) {
+				predictions = append(predictions, p)
+			}
+		}
+	})
+
+	b.Run("NoDuplicates", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			predictions := make([]PredictedMatch, 0, len(baseCandidates))
+			for p := range predictCandidateOutcomesWithConfig(baseCandidates, config) {
+				predictions = append(predictions, p)
+			}
+		}
+	})
+}
+
+func defaultPredictionConfig() PredictionConfig {
+	z := 3
+	mu := 10.0
+	sigma := 10.0 / 3.0
+	tau := 0.3
+	return PredictionConfig{
+		PartyBoostPercent:      0.10,
+		EnableRosterVariants:   true,
+		UseSnakeDraftFormation: true,
+		OpenSkillOptions: &types.OpenSkillOptions{
+			Z:     &z,
+			Mu:    &mu,
+			Sigma: &sigma,
+			Tau:   &tau,
+		},
 	}
 }

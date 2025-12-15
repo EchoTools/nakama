@@ -22,16 +22,16 @@ const (
 
 // PredictionConfig contains settings for match outcome prediction
 type PredictionConfig struct {
-	PartyBoostPercent      float64         // Boost party effective skill by this percentage
-	EnableRosterVariants   bool            // Generate multiple roster variants for better match selection
-	UseSnakeDraftFormation bool            // Use snake draft instead of sequential filling
-	Variants               []RosterVariant // Pre-computed list of variants to generate (if set, overrides other variant settings)
-	DefaultRating          types.Rating    // Default rating to use if none found
+	PartyBoostPercent      float64                 // Boost party effective skill by this percentage
+	EnableRosterVariants   bool                    // Generate multiple roster variants for better match selection
+	UseSnakeDraftFormation bool                    // Use snake draft instead of sequential filling
+	Variants               []RosterVariant         // Pre-computed list of variants to generate (if set, overrides other variant settings)
+	OpenSkillOptions       *types.OpenSkillOptions // Options for OpenSkill calculations
 }
 
 type PredictedMatch struct {
 	Candidate             []runtime.MatchmakerEntry `json:"match"`
-	Draw                  float32                   `json:"draw"`
+	DrawProb              float32                   `json:"draw"`
 	Size                  int8                      `json:"size"`
 	DivisionCount         int8                      `json:"division_count"`
 	OldestTicketTimestamp int64                     `json:"oldest_ticket"`
@@ -44,57 +44,70 @@ func (g MatchmakerEntries) Len() int {
 	return len(g)
 }
 
-func (g MatchmakerEntries) Ratings() []types.Rating {
+func (g MatchmakerEntries) Ratings(opts *types.OpenSkillOptions) []types.Rating {
 	ratings := make([]types.Rating, len(g))
 	for i, e := range g {
 		props := e.GetProperties()
 		mu, ok := props["rating_mu"].(float64)
 		if !ok {
-			mu = 10.0
+			mu = *opts.Mu
 		}
-		sigma := props["rating_sigma"].(float64)
+		sigma, ok := props["rating_sigma"].(float64)
 		if !ok {
-			sigma = 10.0 / 3.0
+			sigma = *opts.Sigma
 		}
-		ratings[i] = NewRating(0, mu, sigma)
+		ratings[i] = rating.NewWithOptions(&types.OpenSkillOptions{
+			Mu:    &mu,
+			Sigma: &sigma,
+			Z:     opts.Z,
+		})
 	}
 	return ratings
 }
 
-// Return the rating at a given index
-func (g MatchmakerEntries) RatingAt(index int) types.Rating {
-	e := g[index]
-	props := e.GetProperties()
-	mu, ok := props["rating_mu"].(float64)
-	if !ok {
-		return types.Rating{}
+// RatingsInto fills the provided ratings slice with no allocations
+func (g MatchmakerEntries) RatingsInto(ratings []types.Rating, opts *types.OpenSkillOptions) {
+	for i, e := range g {
+		props := e.GetProperties()
+		mu, ok := props["rating_mu"].(float64)
+		if !ok {
+			mu = *opts.Mu
+		}
+		sigma, ok := props["rating_sigma"].(float64)
+		if !ok {
+			sigma = *opts.Sigma
+		}
+		ratings[i] = rating.NewWithOptions(&types.OpenSkillOptions{
+			Mu:    &mu,
+			Sigma: &sigma,
+			Z:     opts.Z,
+		})
 	}
-	sigma, ok := props["rating_sigma"].(float64)
-	if !ok {
-		return types.Rating{}
-	}
-	return NewRating(0, mu, sigma)
 }
 
 // RatingsWithPartyBoost returns ratings with an optional boost for parties (groups with multiple members)
-func (g MatchmakerEntries) RatingsWithPartyBoost(boostPercent float64) []types.Rating {
+func (g MatchmakerEntries) RatingsWithPartyBoost(boostPercent float64, opts *types.OpenSkillOptions) []types.Rating {
 	ratings := make([]types.Rating, len(g))
 	isParty := len(g) > 1
 	for i, e := range g {
 		props := e.GetProperties()
 		mu, ok := props["rating_mu"].(float64)
 		if !ok {
-			mu = 10.0
+			mu = *opts.Mu
 		}
 		sigma, ok := props["rating_sigma"].(float64)
 		if !ok {
-			sigma = 10.0 / 3.0
+			sigma = *opts.Sigma
 		}
 		// Apply party boost to Mu for rank prediction purposes
 		if isParty && boostPercent > 0 {
 			mu = mu * (1 + boostPercent)
 		}
-		ratings[i] = NewRating(0, mu, sigma)
+		ratings[i] = rating.NewWithOptions(&types.OpenSkillOptions{
+			Mu:    &mu,
+			Sigma: &sigma,
+			Z:     opts.Z,
+		})
 	}
 	return ratings
 }
@@ -117,12 +130,12 @@ func (g MatchmakerEntries) DivisionSet() map[string]struct{} {
 	}
 	return divisionSet
 }
-func (g MatchmakerEntries) TeamRating() types.TeamRating {
-	return types.TeamRating{Team: g.Ratings()}
+func (g MatchmakerEntries) TeamRating(opts *types.OpenSkillOptions) types.TeamRating {
+	return types.TeamRating{Team: g.Ratings(opts)}
 }
 
-func (g MatchmakerEntries) TeamOrdinal() float64 {
-	return rating.TeamOrdinal(g.TeamRating())
+func (g MatchmakerEntries) TeamOrdinal(opts *types.OpenSkillOptions) float64 {
+	return rating.TeamOrdinal(g.TeamRating(opts))
 }
 
 func HashMatchmakerEntries[E runtime.MatchmakerEntry](entries []E) uint64 {
@@ -142,23 +155,6 @@ func HashMatchmakerEntries[E runtime.MatchmakerEntry](entries []E) uint64 {
 		}
 	}
 	return hash
-}
-
-func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) <-chan PredictedMatch {
-	// Get settings for party boost and roster variants
-	config := PredictionConfig{}
-	if settings := ServiceSettings(); settings != nil {
-		config.PartyBoostPercent = settings.Matchmaking.PartySkillBoostPercent
-		config.EnableRosterVariants = settings.Matchmaking.EnableRosterVariants
-		config.UseSnakeDraftFormation = settings.Matchmaking.UseSnakeDraftTeamFormation
-		config.DefaultRating = types.Rating{
-			Mu:    settings.SkillRating.Defaults.Mu,
-			Sigma: settings.SkillRating.Defaults.Sigma,
-			Z:     settings.SkillRating.Defaults.Z,
-		}
-	}
-
-	return predictCandidateOutcomesWithConfig(candidates, config)
 }
 
 // predictCandidateOutcomesWithConfig allows testing with specific settings
@@ -193,21 +189,32 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 			}
 		}
 
+		// Predefine constants for maximum sizes
+		const (
+			MaxTeamSize              = 5
+			MaxPlayersPerMatch       = MaxTeamSize * 2
+			MaxGroupsPerMatch        = MaxPlayersPerMatch // Worst case: all single-player groups
+			InitialTicketCacheSize   = 40
+			InitialDivisionCacheSize = 10
+		)
+
+		// Pre-allocate all reusable data structures
 		var (
 			seen          = make(map[uint64]struct{}, validCount)
-			groupRatings  = make([]types.Team, 0, 10)
-			ticketGroups  = make(map[string]MatchmakerEntries, 10)
-			groups        = make([]MatchmakerEntries, 0, 10)
-			blueTeam      = make(MatchmakerEntries, 0, 10)
-			orangeTeam    = make(MatchmakerEntries, 0, 10)
-			blueRatings   = make([]types.Rating, 0, 5)
-			orangeRatings = make([]types.Rating, 0, 5)
-			blueActual    = make([]types.Rating, 0, 5)
-			orangeActual  = make([]types.Rating, 0, 5)
-			ticketRatings = make(map[string]types.Team, 40)
-			ticketDivs    = make(map[string]map[string]struct{}, 40)
-			ticketAge     = make(map[string]float64, 40)
-			divs          = make(map[string]struct{}, 10)
+			groupRatings  = make([]types.Team, 0, MaxGroupsPerMatch)
+			ticketGroups  = make(map[string]MatchmakerEntries, MaxGroupsPerMatch)
+			groups        = make([]MatchmakerEntries, 0, MaxGroupsPerMatch)
+			blueTeam      = make(MatchmakerEntries, 0, MaxTeamSize)
+			orangeTeam    = make(MatchmakerEntries, 0, MaxTeamSize)
+			blueRatings   = make([]types.Rating, 0, MaxTeamSize)
+			orangeRatings = make([]types.Rating, 0, MaxTeamSize)
+			blueActual    = make([]types.Rating, 0, MaxTeamSize)
+			orangeActual  = make([]types.Rating, 0, MaxTeamSize)
+			ticketRatings = make(map[string]types.Team, InitialTicketCacheSize)
+			ticketDivs    = make(map[string]map[string]struct{}, InitialTicketCacheSize)
+			ticketAge     = make(map[string]float64, InitialTicketCacheSize)
+			divs          = make(map[string]struct{}, InitialDivisionCacheSize)
+			drawProb      float64
 		)
 
 		for _, candidate := range candidates {
@@ -242,7 +249,7 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 				// Check cache to avoid recomputing identical tickets
 				if _, ok := ticketRatings[ticket]; !ok {
 					// Use boosted ratings for parties when calculating ranks
-					ticketRatings[ticket] = entries.RatingsWithPartyBoost(cfg.PartyBoostPercent)
+					ticketRatings[ticket] = entries.RatingsWithPartyBoost(cfg.PartyBoostPercent, cfg.OpenSkillOptions)
 					ticketDivs[ticket] = entries.DivisionSet()
 				}
 				oldest := float64(time.Now().UTC().Unix())
@@ -357,37 +364,17 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 				copy(match[len(blueTeam):], orangeTeam)
 
 				// Get actual (non-boosted) ratings for draw probability calculation - reuse slices
-				blueActual = blueActual[:0]
-				orangeActual = orangeActual[:0]
+				// Set capacity to the length of the teams
+				blueActual = blueActual[:len(blueTeam)]
+				orangeActual = orangeActual[:len(orangeTeam)]
 
-				for _, entry := range blueTeam {
-					props := entry.GetProperties()
-					mu, ok := props["rating_mu"].(float64)
-					if !ok {
-						mu = cfg.DefaultRating.Mu
-					}
-					sigma, ok := props["rating_sigma"].(float64)
-					if !ok {
-						sigma = cfg.DefaultRating.Sigma
-					}
-					blueActual = append(blueActual, NewRating(0, mu, sigma))
-				}
-				for _, entry := range orangeTeam {
-					props := entry.GetProperties()
-					mu, ok := props["rating_mu"].(float64)
-					if !ok {
-						mu = cfg.DefaultRating.Mu
-					}
-					sigma, ok := props["rating_sigma"].(float64)
-					if !ok {
-						sigma = cfg.DefaultRating.Sigma
-					}
-					orangeActual = append(orangeActual, NewRating(0, mu, sigma))
-				}
+				blueTeam.RatingsInto(blueActual, cfg.OpenSkillOptions)
+				orangeTeam.RatingsInto(orangeActual, cfg.OpenSkillOptions)
+				drawProb = rating.PredictDraw([]types.Team{blueActual, orangeActual}, cfg.OpenSkillOptions)
 
 				out <- PredictedMatch{
 					Candidate:             match,
-					Draw:                  float32(rating.PredictDraw([]types.Team{blueActual, orangeActual}, nil)),
+					DrawProb:              float32(drawProb),
 					Size:                  int8(len(match)),
 					DivisionCount:         int8(len(divs)),
 					OldestTicketTimestamp: int64(ticketAge[match[0].GetTicket()]),
