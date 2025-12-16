@@ -404,10 +404,13 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 		fmt.Sprintf("+label.mode:%s", p.Mode.String()),
 		fmt.Sprintf("+label.group_id:%s", Query.QuoteStringValue(p.GroupID.String())),
 		//fmt.Sprintf("label.version_lock:%s", p.VersionLock.String()),
-		fmt.Sprintf(`+label.start_time:<="%s"`, minStartTime),
 		p.BackfillQueryAddon,
 	}
 
+	// Do not wait to join social lobbies
+	if p.Mode != evr.ModeSocialPublic {
+		qparts = append(qparts, fmt.Sprintf(`+label.start_time:>="%s"`, minStartTime))
+	}
 	// For arena public matches, exclude matches older than the configured max age
 	if p.Mode == evr.ModeArenaPublic {
 		maxAgeSecs := ServiceSettings().Matchmaking.ArenaBackfillMaxAgeSecs
