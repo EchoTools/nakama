@@ -394,12 +394,16 @@ func (p LobbySessionParameters) String() string {
 }
 
 func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMaxRTT bool) string {
+	const MinimumMatchAgeSecs = 30
+
+	minStartTime := time.Now().UTC().Add(-time.Duration(MinimumMatchAgeSecs) * time.Second).Format(time.RFC3339Nano)
+
 	qparts := []string{
 		"+label.open:T",
 		fmt.Sprintf("+label.mode:%s", p.Mode.String()),
 		fmt.Sprintf("+label.group_id:%s", Query.QuoteStringValue(p.GroupID.String())),
 		//fmt.Sprintf("label.version_lock:%s", p.VersionLock.String()),
-		fmt.Sprintf("-label.start_time:>=%d", time.Now().UTC().Add(-30*time.Second).Unix()),
+		fmt.Sprintf(`-label.start_time:>="%s"`, minStartTime),
 		p.BackfillQueryAddon,
 	}
 
@@ -408,7 +412,8 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 		maxAgeSecs := ServiceSettings().Matchmaking.ArenaBackfillMaxAgeSecs
 		if maxAgeSecs > 0 {
 			// Exclude matches that started more than maxAgeSecs ago
-			qparts = append(qparts, fmt.Sprintf("-label.start_time:<%d", time.Now().UTC().Add(-time.Duration(maxAgeSecs)*time.Second).Unix()))
+			startTime := time.Now().UTC().Add(-time.Duration(maxAgeSecs) * time.Second).Format(time.RFC3339Nano)
+			qparts = append(qparts, fmt.Sprintf(`-label.start_time:<"%s"`, startTime))
 		}
 	}
 
