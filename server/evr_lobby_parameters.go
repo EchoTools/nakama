@@ -394,9 +394,10 @@ func (p LobbySessionParameters) String() string {
 }
 
 func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMaxRTT bool) string {
-	const MatchRecencyThresholdSecs = 30
+	// Prevent joining matches that have just started (less than 30 seconds old).
+	const MatchStartTimeMinimumAgeSecs = 30
 
-	minStartTime := time.Now().UTC().Add(-time.Duration(MatchRecencyThresholdSecs) * time.Second).Format(time.RFC3339Nano)
+	minStartTime := time.Now().UTC().Add(-time.Duration(MatchStartTimeMinimumAgeSecs) * time.Second).Format(time.RFC3339Nano)
 
 	qparts := []string{
 		"+label.open:T",
