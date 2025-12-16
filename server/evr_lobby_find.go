@@ -194,9 +194,9 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	// Setup backfill parameters
 	includeMMR := false
 	includeMaxRTT := true
-	// If there are fewer players online, reduce the fallback delay
+	// Determine whether to include MMR filtering in backfill queries based on player count and mode
 	if lobbyParams.Mode == evr.ModeArenaPublic && count > ServiceSettings().Matchmaking.SBMMMinPlayerCount {
-		// If there are fewer than 16 players online, reduce the fallback delay
+		// If there are enough players online, enable MMR filtering for backfill
 		includeMMR = true
 	}
 
