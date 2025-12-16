@@ -96,7 +96,7 @@ func checkStorageObjectAuthorization(ctx context.Context, logger runtime.Logger)
 		return false, err
 	}
 
-	if vars != nil && (vars.Intents.StorageObjects || vars.Intents.IsGlobalOperator) {
+	if vars != nil && (vars.Intents.StorageObjects || vars.Intents.IsGlobalOperator || vars.Intents.IsGlobalDeveloper) {
 		return true, nil
 	}
 
