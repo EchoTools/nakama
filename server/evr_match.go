@@ -308,9 +308,8 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	for _, p := range meta.Presences() {
 
 		for _, e := range state.presenceMap {
-			// Only reject if it's a different session with the same EVR-ID (true duplicate)
-			// The same session check is now handled above, but keep this safety check
-			if e.EvrID.Equals(p.EvrID) && e.GetSessionId() != p.GetSessionId() {
+			// Reject any duplicate EVR-ID join attempt (regardless of session)
+			if e.EvrID.Equals(p.EvrID) {
 				logger.WithFields(map[string]interface{}{
 					"evrid":            p.EvrID,
 					"uid":              p.GetUserId(),
