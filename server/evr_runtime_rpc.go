@@ -757,6 +757,21 @@ func (h *RPCHandler) ServiceStatusRPC(ctx context.Context, logger runtime.Logger
 	return response, nil
 }
 
+func MatchmakingSettingsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Return the current GlobalMatchmakingSettings from ServiceSettings
+	settings := ServiceSettings()
+	if settings == nil {
+		return "", runtime.NewError("Service settings not loaded", StatusInternalError)
+	}
+
+	data, err := json.MarshalIndent(settings.Matchmaking, "", "  ")
+	if err != nil {
+		return "", runtime.NewError("Failed to marshal matchmaking settings", StatusInternalError)
+	}
+
+	return string(data), nil
+}
+
 type ImportLoadoutRpcRequest struct {
 	Loadouts []evr.CosmeticLoadout `json:"loadouts"`
 }

@@ -201,7 +201,7 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				logger.WithFields(map[string]any{
 					"error": err,
 					"msg":   msg,
-				}).Warn("Failed to process VOIP loudness")
+				}).Debug("Failed to process VOIP loudness")
 			}
 
 		case *evr.RemoteLogSessionStarted:
