@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -196,7 +195,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	includeMMR := false
 	includeMaxRTT := true
 	// If there are fewer players online, reduce the fallback delay
-	if lobbyParams.Mode == evr.ModeArenaPublic && count > ServiceSettings().Matchmaking.SBMMMinPlayerCount && !strings.Contains(p.node, "dev") {
+	if lobbyParams.Mode == evr.ModeArenaPublic && count > ServiceSettings().Matchmaking.SBMMMinPlayerCount {
 		// If there are fewer than 16 players online, reduce the fallback delay
 		includeMMR = true
 	}
