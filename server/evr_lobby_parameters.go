@@ -478,7 +478,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 			}
 		}
 		if len(validRTTs) > 0 {
-			qparts = append(qparts, fmt.Sprintf("+label.broadcaster.endpoint:%s", Query.CreateMatchPattern(validRTTs)))
+			qparts = append(qparts, fmt.Sprintf("+label.broadcaster.endpoint:%s", Query.CreateMatchPatternPartial(validRTTs)))
 		}
 	}
 	return strings.Join(qparts, " ")
