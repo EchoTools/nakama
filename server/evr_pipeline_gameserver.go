@@ -200,7 +200,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		// Send the message to the user
 		warning := "The -serverregion command line argument is deprecated. Please use the 'regions' URL parameter instead. Include 'default' to be in the public matchmaking pool."
 		go SendUserMessage(ctx, p.discordCache.dg, params.DiscordID(), warning)
-		logger.Warn(warning, zap.String("region_hash", regionHash.String()))
+		logger.Debug(warning, zap.String("region_hash", regionHash.String()))
 		params.serverRegions = append(params.serverRegions, "default")
 	}
 

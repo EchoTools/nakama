@@ -41,6 +41,12 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, lobbyParams *LobbyS
 	// Leave any existing lobby group stream.
 	s.tracker.UntrackLocalByModes(s.id, map[uint8]struct{}{StreamModeMatchmaking: {}}, stream)
 
+	// Remove all existing matchmaking tickets for this session before starting new matchmaking.
+	// This prevents ticket accumulation when players switch modes or re-queue.
+	if err := s.matchmaker.RemoveSessionAll(s.id.String()); err != nil {
+		logger.Warn("Failed to remove existing matchmaking tickets", zap.Error(err))
+	}
+
 	ctx := s.Context()
 
 	if success := s.tracker.Update(ctx, s.id, stream, s.userID, presenceMeta); !success {
