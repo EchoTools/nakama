@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -186,9 +185,50 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}()
 	}
 
-	// Attempt to backfill until the timeout.
+	stream := lobbyParams.GuildGroupStream()
+	count, err := p.nk.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
+	if err != nil {
+		logger.Error("Failed to get stream count", zap.Error(err))
+	}
+
+	// Setup backfill parameters
+	includeMMR := false
+	includeMaxRTT := true
+	// Determine whether to include MMR filtering in backfill queries based on player count and mode
+	if lobbyParams.Mode == evr.ModeArenaPublic && count > ServiceSettings().Matchmaking.SBMMMinPlayerCount {
+		// If there are enough players online, enable MMR filtering for backfill
+		includeMMR = true
+	}
+
+	interval := 3 * time.Second
+
+	if lobbyParams.Mode == evr.ModeSocialPublic {
+		interval = 1 * time.Second
+	}
+
+	// If the player has backfill disabled, set the backfill interval to an extreme number.
+	if lobbyParams.DisableArenaBackfill && lobbyParams.Mode == evr.ModeArenaPublic {
+		// Set a long backfill interval for arena matches.
+		interval = 15 * time.Minute
+	}
+
+	// If SBMM is enabled, and this is an arena match with only one entrant, wait the minimum time before backfilling.
+	if lobbyParams.EnableSBMM && lobbyParams.Mode == evr.ModeArenaPublic && len(entrants) == 1 {
+		if minTime := ServiceSettings().Matchmaking.BackfillMinTimeSecs; minTime > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(minTime) * time.Second):
+			}
+		}
+	}
+
+	backfillInterval := time.Duration(interval)
 	enableFailsafe := true
-	return p.lobbyBackfill(ctx, logger, session, lobbyParams, enableFailsafe, entrants...)
+
+	// Attempt to backfill until the timeout.
+
+	return p.lobbyBackfill(ctx, logger, session, lobbyParams, enableFailsafe, backfillInterval, includeMMR, includeMaxRTT, entrants...)
 
 }
 
@@ -340,53 +380,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 	return label, nil
 }
 
-func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, enableFailsafe bool, entrants ...*EvrMatchPresence) error {
-	interval := 3 * time.Second
-
-	if lobbyParams.Mode == evr.ModeSocialPublic {
-		interval = 1 * time.Second
-	}
-
-	// If the player has backfill disabled, set the backfill interval to an extreme number.
-	if lobbyParams.DisableArenaBackfill && lobbyParams.Mode == evr.ModeArenaPublic {
-		// Set a long backfill interval for arena matches.
-		interval = 15 * time.Minute
-	}
-
-	if lobbyParams.EnableSBMM && lobbyParams.Mode == evr.ModeArenaPublic && len(entrants) == 1 {
-		if minTime := ServiceSettings().Matchmaking.BackfillMinTimeSecs; minTime > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(time.Duration(minTime) * time.Second):
-			}
-		}
-	}
-
-	// Backfill search query
-	// Maximum RTT for a server to be considered for backfill
-
-	includeMMR := false
-	includeMaxRTT := false
-
-	// Only use rank percentile for arena matches.
-	if lobbyParams.Mode == evr.ModeArenaPublic {
-		includeMMR = true
-	}
-
-	stream := lobbyParams.GuildGroupStream()
-	count, err := p.nk.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
-	if err != nil {
-		logger.Error("Failed to get stream count", zap.Error(err))
-	}
-
-	// If there are fewer players online, reduce the fallback delay
-	if !strings.Contains(p.node, "dev") {
-		// If there are fewer than 16 players online, reduce the fallback delay
-		if count < ServiceSettings().Matchmaking.SBMMMinPlayerCount {
-			includeMMR = false
-		}
-	}
+func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, enableFailsafe bool, interval time.Duration, includeMMR, includeMaxRTT bool, entrants ...*EvrMatchPresence) error {
 
 	var (
 		query         = lobbyParams.BackfillSearchQuery(includeMMR, includeMaxRTT)
