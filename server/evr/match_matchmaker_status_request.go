@@ -27,9 +27,7 @@ func NewLobbyMatchmakerStatusRequest() *LobbyMatchmakerStatusRequest {
 
 // Stream streams the message data in/out based on the streaming mode set.
 func (m *LobbyMatchmakerStatusRequest) Stream(s *EasyStream) error {
-	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamByte(&m.Unk0) },
-	})
+	return s.StreamByte(&m.Unk0)
 }
 
 func (m *LobbyMatchmakerStatusRequest) String() string {

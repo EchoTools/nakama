@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
+	"unsafe"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/klauspost/compress/zstd"
@@ -69,6 +71,118 @@ func (s *EasyStream) StreamNumber(order binary.ByteOrder, value any) error {
 	default:
 		return errInvalidMode
 	}
+}
+
+// Typed Stream Helpers
+
+func (s *EasyStream) StreamUint64(value *uint64) error {
+	if s.Mode == DecodeMode {
+		var b [8]byte
+		if _, err := io.ReadFull(s.r, b[:]); err != nil {
+			return err
+		}
+		*value = binary.LittleEndian.Uint64(b[:])
+		return nil
+	}
+	var b [8]byte
+	binary.LittleEndian.PutUint64(b[:], *value)
+	_, err := s.w.Write(b[:])
+	return err
+}
+
+func (s *EasyStream) StreamUint32(value *uint32) error {
+	if s.Mode == DecodeMode {
+		var b [4]byte
+		if _, err := io.ReadFull(s.r, b[:]); err != nil {
+			return err
+		}
+		*value = binary.LittleEndian.Uint32(b[:])
+		return nil
+	}
+	var b [4]byte
+	binary.LittleEndian.PutUint32(b[:], *value)
+	_, err := s.w.Write(b[:])
+	return err
+}
+
+func (s *EasyStream) StreamUint16(value *uint16) error {
+	if s.Mode == DecodeMode {
+		var b [2]byte
+		if _, err := io.ReadFull(s.r, b[:]); err != nil {
+			return err
+		}
+		*value = binary.LittleEndian.Uint16(b[:])
+		return nil
+	}
+	var b [2]byte
+	binary.LittleEndian.PutUint16(b[:], *value)
+	_, err := s.w.Write(b[:])
+	return err
+}
+
+func (s *EasyStream) StreamUint8(value *uint8) error {
+	return s.StreamByte(value)
+}
+
+func (s *EasyStream) StreamInt64(value *int64) error {
+	return s.StreamUint64((*uint64)(unsafe.Pointer(value)))
+}
+
+func (s *EasyStream) StreamInt32(value *int32) error {
+	return s.StreamUint32((*uint32)(unsafe.Pointer(value)))
+}
+
+func (s *EasyStream) StreamInt16(value *int16) error {
+	return s.StreamUint16((*uint16)(unsafe.Pointer(value)))
+}
+
+func (s *EasyStream) StreamInt8(value *int8) error {
+	return s.StreamByte((*byte)(unsafe.Pointer(value)))
+}
+
+func (s *EasyStream) StreamFloat32(value *float32) error {
+	if s.Mode == DecodeMode {
+		var b [4]byte
+		if _, err := io.ReadFull(s.r, b[:]); err != nil {
+			return err
+		}
+		*value = math.Float32frombits(binary.LittleEndian.Uint32(b[:]))
+		return nil
+	}
+	var b [4]byte
+	binary.LittleEndian.PutUint32(b[:], math.Float32bits(*value))
+	_, err := s.w.Write(b[:])
+	return err
+}
+
+func (s *EasyStream) StreamUint16BE(value *uint16) error {
+	if s.Mode == DecodeMode {
+		var b [2]byte
+		if _, err := io.ReadFull(s.r, b[:]); err != nil {
+			return err
+		}
+		*value = binary.BigEndian.Uint16(b[:])
+		return nil
+	}
+	var b [2]byte
+	binary.BigEndian.PutUint16(b[:], *value)
+	_, err := s.w.Write(b[:])
+	return err
+}
+
+func (s *EasyStream) StreamUint64BE(value *uint64) error {
+	if s.Mode == DecodeMode {
+		var b [8]byte
+		if _, err := io.ReadFull(s.r, b[:]); err != nil {
+			return err
+		}
+		*value = binary.BigEndian.Uint64(b[:])
+		return nil
+	}
+	var b [8]byte
+	binary.BigEndian.PutUint64(b[:], *value)
+	_, err := s.w.Write(b[:])
+	return err
 }
 
 func (s *EasyStream) StreamBool(value *bool) error {

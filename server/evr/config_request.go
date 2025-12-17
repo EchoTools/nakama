@@ -14,8 +14,8 @@ func (m ConfigRequest) String() string {
 
 func (m *ConfigRequest) Stream(s *EasyStream) error {
 	pad := byte(0)
-	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamByte(&pad) },
-		func() error { return s.StreamJson(&m, true, NoCompression) },
-	})
+	if err := s.StreamByte(&pad); err != nil {
+		return err
+	}
+	return s.StreamJson(&m, true, NoCompression)
 }

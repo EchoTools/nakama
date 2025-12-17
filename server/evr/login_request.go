@@ -1,7 +1,6 @@
 package evr
 
 import (
-	"encoding/binary"
 	"fmt"
 
 	"github.com/gofrs/uuid/v5"
@@ -31,12 +30,19 @@ func (lr LoginRequest) String() string {
 }
 
 func (m *LoginRequest) Stream(s *EasyStream) error {
-	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamGUID(&m.PreviousSessionID) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.XPID.PlatformCode) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.XPID.AccountId) },
-		func() error { return s.StreamJson(&m.Payload, true, NoCompression) },
-	})
+	if err := s.StreamGUID(&m.PreviousSessionID); err != nil {
+		return err
+	}
+	platformCode := uint64(m.XPID.PlatformCode)
+	if err := s.StreamUint64(&platformCode); err != nil {
+		return err
+	}
+	m.XPID.PlatformCode = PlatformCode(platformCode)
+
+	if err := s.StreamUint64(&m.XPID.AccountId); err != nil {
+		return err
+	}
+	return s.StreamJson(&m.Payload, true, NoCompression)
 }
 
 func NewLoginRequest(session uuid.UUID, userId EvrId, loginData LoginProfile) (*LoginRequest, error) {
