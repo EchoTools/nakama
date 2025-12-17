@@ -960,7 +960,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					// Mark the player as having left when the match ended.
 					info.LeaveEvent(state)
 				}
-				info.LogEarlyQuitMetrics(nk, state)
+				info.LogEarlyQuitMetrics(ctx, logger, nk, state)
 			}
 		}
 	}

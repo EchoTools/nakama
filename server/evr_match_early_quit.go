@@ -67,6 +67,7 @@ func NewPlayerDisconnectInfo(ctx context.Context, logger runtime.Logger, db *sql
 		GameDurationAtJoin:   state.GameState.SessionScoreboard.Elapsed(),
 		ScoresAtJoin:         [2]int{state.GameState.BlueScore, state.GameState.OrangeScore},
 		DisadvantageAtJoin:   state.RoleCount(teamID) - state.RoleCount(otherTeamID),
+		TeamSizesAtJoin:      [2]int{state.RoleCount(0), state.RoleCount(1)},
 		DisconnectsAtJoin:    totalLeaves,
 	}
 }
@@ -151,54 +152,128 @@ func (p *PlayerDisconnectInfo) LeaveEvent(state *MatchLabel) {
 	p.TeamHazardEvents, p.TeamConsecutiveHazards = calculateHazardEvents(state, int(p.Team), minTime)
 }
 
-func (p *PlayerDisconnectInfo) LogEarlyQuitMetrics(nk runtime.NakamaModule, state *MatchLabel) {
-	if state == nil || state.GameState == nil || state.GameState.SessionScoreboard == nil {
+func (p *PlayerDisconnectInfo) LogEarlyQuitMetrics(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, state *MatchLabel) {
+	if state == nil {
 		return
 	}
 
-	/*
+	event := buildMatchDisconnectEvent(state)
+	if event == nil {
+		return
+	}
 
-		// XXX: This cardinality is too high, and causes the system to crash after a few days (memory usage).
-		//      Disabling for now.
+	if err := SendEvent(ctx, nk, event); err != nil {
+		logger.WithField("error", err).Error("failed to send match disconnect event")
+	}
 
-			// Check if the player left at the same time as another player on their team
-				wasLosingAtLeave := (p.Team == BlueTeam && p.ScoresAtLeave[0] < p.ScoresAtLeave[1])
-				scoreDeltaAtJoin := p.ScoresAtJoin[0] - p.ScoresAtJoin[1]
-				scoreDeltaAtLeave := p.ScoresAtLeave[0] - p.ScoresAtLeave[1]
-				teamDisadvantageAtJoin := p.TeamSizesAtJoin[0] - p.TeamSizesAtJoin[1]
-				teamDisadvantageAtLeave := p.TeamSizesAtLeave[0] - p.TeamSizesAtLeave[1]
-				if p.Team == OrangeTeam {
-					teamDisadvantageAtJoin = -teamDisadvantageAtJoin
-					teamDisadvantageAtLeave = -teamDisadvantageAtLeave
-					scoreDeltaAtJoin = -scoreDeltaAtJoin
-					scoreDeltaAtLeave = -scoreDeltaAtLeave
-				}
+}
 
-				// Log metrics
-				tags := map[string]string{
-					"is_abandon":                 fmt.Sprintf("%t", p.IsAbandoner),
-					"team":                       p.Team.String(),
-					"was_losing_at_leave":        fmt.Sprintf("%t", wasLosingAtLeave),
-					"is_team_wipe_member":        fmt.Sprintf("%t", p.IsTeamWipeMember),
-					"score_delta_at_join":        fmt.Sprintf("%d", scoreDeltaAtJoin),
-					"score_delta_at_leave":       fmt.Sprintf("%d", scoreDeltaAtLeave),
-					"team_disadvantage_at_join":  fmt.Sprintf("%d", teamDisadvantageAtJoin),
-					"team_disadvantage_at_leave": fmt.Sprintf("%d", teamDisadvantageAtLeave),
-					"total_hazard_events":        fmt.Sprintf("%d", p.TeamHazardEvents),
-					"consecutive_hazard_events":  fmt.Sprintf("%d", p.TeamConsecutiveHazards),
-					"party_size":                 fmt.Sprintf("%d", p.PartySize),
-					"ping_band":                  string(p.PingBand),
-					"disconnects_at_join":        fmt.Sprintf("%d", p.DisconnectsAtJoin),
-					"disconnects_at_leave":       fmt.Sprintf("%d", p.DisconnectsAtLeave),
-				}
+func (p *PlayerDisconnectInfo) toRecord(state *MatchLabel) PlayerDisconnectRecord {
+	if p == nil || p.PlayerInfo == nil {
+		return PlayerDisconnectRecord{}
+	}
 
-				nk.MetricsCounterAdd("match_abandon_total", tags, 1)
-				nk.MetricsTimerRecord("match_abandon_game_duration_at_join_seconds", tags, p.GameDurationAtJoin)
-				nk.MetricsTimerRecord("match_abandon_game_duration_at_leave_seconds", tags, p.GameDurationAtLeave)
-				nk.MetricsTimerRecord("match_abandon_session_duration_seconds", tags, p.LeaveTime.Sub(p.JoinTime))
-				nk.MetricsTimerRecord("match_abandon_integrity_duration_seconds", tags, p.IntegrityDuration)
-				nk.MetricsTimerRecord("match_abandon_disadvantage_duration_seconds", tags, p.DisadvantageDuration)
-	*/
+	scoreDeltaAtJoin := p.ScoresAtJoin[0] - p.ScoresAtJoin[1]
+	scoreDeltaAtLeave := p.ScoresAtLeave[0] - p.ScoresAtLeave[1]
+	teamDisadvantageAtJoin := p.TeamSizesAtJoin[0] - p.TeamSizesAtJoin[1]
+	teamDisadvantageAtLeave := p.TeamSizesAtLeave[0] - p.TeamSizesAtLeave[1]
+	wasLosingAtLeave := (p.Team == BlueTeam && p.ScoresAtLeave[0] < p.ScoresAtLeave[1]) || (p.Team == OrangeTeam && p.ScoresAtLeave[1] < p.ScoresAtLeave[0])
+
+	if p.Team == OrangeTeam {
+		scoreDeltaAtJoin = -scoreDeltaAtJoin
+		scoreDeltaAtLeave = -scoreDeltaAtLeave
+		teamDisadvantageAtJoin = -teamDisadvantageAtJoin
+		teamDisadvantageAtLeave = -teamDisadvantageAtLeave
+	}
+
+	return PlayerDisconnectRecord{
+		UserID:                  p.PlayerInfo.UserID,
+		Username:                p.PlayerInfo.Username,
+		DisplayName:             p.PlayerInfo.DisplayName,
+		Team:                    p.Team,
+		PartyID:                 p.PlayerInfo.PartyID,
+		PartySize:               p.PartySize,
+		PingBand:                p.PingBand,
+		PingMillis:              p.PlayerInfo.PingMillis,
+		JoinTime:                p.JoinTime.UTC(),
+		LeaveTime:               p.LeaveTime.UTC(),
+		IsAbandoner:             p.IsAbandoner,
+		ScoresAtJoin:            p.ScoresAtJoin,
+		ScoresAtLeave:           p.ScoresAtLeave,
+		TeamSizesAtJoin:         p.TeamSizesAtJoin,
+		TeamSizesAtLeave:        p.TeamSizesAtLeave,
+		ScoreDeltaAtJoin:        scoreDeltaAtJoin,
+		ScoreDeltaAtLeave:       scoreDeltaAtLeave,
+		TeamDisadvantageAtJoin:  teamDisadvantageAtJoin,
+		TeamDisadvantageAtLeave: teamDisadvantageAtLeave,
+		WasLosingAtLeave:        wasLosingAtLeave,
+		DisconnectsAtJoin:       p.DisconnectsAtJoin,
+		DisconnectsAtLeave:      p.DisconnectsAtLeave,
+		TeamHazardEvents:        p.TeamHazardEvents,
+		TeamConsecutiveHazards:  p.TeamConsecutiveHazards,
+		IsTeamWipeMember:        p.IsTeamWipeMember,
+		GameDurationAtJoin:      p.GameDurationAtJoin,
+		GameDurationAtLeave:     p.GameDurationAtLeave,
+		IntegrityDuration:       p.IntegrityDuration,
+		DisadvantageDuration:    p.DisadvantageDuration,
+		SessionID:               p.PlayerInfo.SessionID,
+	}
+}
+
+func buildMatchDisconnectEvent(state *MatchLabel) *EventMatchDisconnect {
+	if state == nil || len(state.disconnectInfos) == 0 {
+		return nil
+	}
+
+	disconnects := make([]PlayerDisconnectRecord, 0, len(state.disconnectInfos))
+	for _, info := range state.disconnectInfos {
+		if info == nil || info.PlayerInfo == nil {
+			continue
+		}
+		disconnects = append(disconnects, info.toRecord(state))
+	}
+
+	if len(disconnects) == 0 {
+		return nil
+	}
+
+	sort.Slice(disconnects, func(i, j int) bool {
+		return disconnects[i].LeaveTime.Before(disconnects[j].LeaveTime)
+	})
+
+	snapshot := MatchDisconnectSnapshot{
+		MatchID:     state.ID.String(),
+		Node:        state.ID.Node,
+		Mode:        state.Mode.String(),
+		Level:       state.Level.String(),
+		LobbyType:   state.LobbyType.String(),
+		GroupID:     state.GetGroupID().String(),
+		TeamSize:    state.TeamSize,
+		PlayerLimit: state.PlayerLimit,
+		MaxSize:     state.MaxSize,
+		PlayerCount: state.PlayerCount,
+		StartTime:   state.StartTime,
+		CreatedAt:   state.CreatedAt,
+		Players:     append([]PlayerInfo(nil), state.Players...),
+	}
+
+	if state.GameServer != nil {
+		snapshot.OperatorID = state.GameServer.OperatorID.String()
+	}
+
+	if gs := state.GameState; gs != nil {
+		snapshot.FinalScores = [2]int{gs.BlueScore, gs.OrangeScore}
+		snapshot.MatchOver = gs.MatchOver
+		if sb := gs.SessionScoreboard; sb != nil {
+			snapshot.Scoreboard = sb.LatestAsNewScoreboard()
+		}
+	}
+
+	return &EventMatchDisconnect{
+		Match:       snapshot,
+		Disconnects: disconnects,
+		CreatedAt:   time.Now().UTC(),
+	}
 }
 
 func calculateHazardEvents(state *MatchLabel, teamID int, minGameTime float64) (total int, consecutive int) {
