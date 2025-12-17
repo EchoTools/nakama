@@ -153,7 +153,7 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 		TeamAlignments:       make(map[string]int, SocialLobbyMaxSize),
 		joinTimestamps:       make(map[string]time.Time, SocialLobbyMaxSize),
 		joinTimeMilliseconds: make(map[string]int64, SocialLobbyMaxSize),
-		disconnectInfos:      make(map[string]*PlayerDisconnectInfo, SocialLobbyMaxSize),
+		participations:       make(map[string]*PlayerParticipation, SocialLobbyMaxSize),
 		emptyTicks:           0,
 		tickRate:             10,
 	}
@@ -482,13 +482,14 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			State:    state,
 		})
 
-		if info, ok := state.disconnectInfos[p.GetUserId()]; ok && info != nil {
-			// If the player has disconnect info, calculate the disconnect duration
-			info.LeaveTime = time.Time{}
+		if participation, ok := state.participations[p.GetUserId()]; ok && participation != nil {
+			// If the player has participation info, clear leave time (they rejoined)
+			participation.LeaveTime = time.Time{}
+			participation.WasPresentAtEnd = false
 		} else {
-			// If the player has no disconnect info, create it now
-			if info := NewPlayerDisconnectInfo(ctx, logger, db, nk, state, presences[0].GetUserId()); info != nil {
-				state.disconnectInfos[p.GetUserId()] = info
+			// If the player has no participation info, create it now
+			if participation := NewPlayerParticipation(ctx, logger, db, nk, state, presences[0].GetUserId()); participation != nil {
+				state.participations[p.GetUserId()] = participation
 			}
 		}
 	}
@@ -614,9 +615,9 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 				logger.Warn("Failed to record match time to leaderboard: %v", err)
 			}
 
-			if info, ok := state.disconnectInfos[p.GetUserId()]; ok {
-				// If the player has disconnect info, calculate the disconnect duration
-				info.LeaveEvent(state)
+			if participation, ok := state.participations[p.GetUserId()]; ok {
+				// Record the leave event for the participation
+				participation.RecordLeaveEvent(state)
 			}
 			// If the round is not over, then add an early quit count to the player.
 			if state.Mode == evr.ModeArenaPublic && time.Now().After(state.StartTime.Add(time.Second*60)) && state.GameState != nil && !state.GameState.MatchOver {
@@ -918,49 +919,16 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		updateLabel = true
 	}
 
-	// Every 2 seconds, update the disconnect info durations for players that are still connected to the game server.
+	// Every 2 seconds, update the participation durations for players that are still connected to the game server.
 	if state.Mode == evr.ModeArenaPublic && tick%(2*state.tickRate) == 0 {
 		delta := 2 * time.Second
-		// The amount of time the teams are full.
-		var integrityTime, disadvantageBlueTime, disadvantageOrangeTime time.Duration
+		UpdateParticipationDurations(state, delta)
 
-		if state.OpenPlayerSlots() == 0 {
-			integrityTime = delta
-		} else if state.RoleCount(evr.TeamBlue) < state.RoleCount(evr.TeamOrange) {
-			disadvantageBlueTime = delta
-		} else if state.RoleCount(evr.TeamOrange) < state.RoleCount(evr.TeamBlue) {
-			disadvantageOrangeTime = delta
-		}
-
-		for _, p := range state.disconnectInfos {
-			if p == nil {
-				continue
-			}
-			// If the player is still here, increase the counts.
-			if !p.LeaveTime.IsZero() {
-				continue
-			}
-			p.IntegrityDuration += integrityTime
-
-			if p.Team == BlueTeam {
-				p.DisadvantageDuration += disadvantageBlueTime
-			}
-			if p.Team == OrangeTeam {
-				p.DisadvantageDuration += disadvantageOrangeTime
-			}
-		}
-
-		// If the match is over, submit the early quit counts.
-		if state.GameState != nil && state.GameState.MatchOver {
-			for _, info := range state.disconnectInfos {
-				if info == nil {
-					continue
-				}
-				if info.LeaveTime.IsZero() {
-					// Mark the player as having left when the match ended.
-					info.LeaveEvent(state)
-				}
-				info.LogEarlyQuitMetrics(ctx, logger, nk, state)
+		// If the match is over, send the match summary once
+		if state.GameState != nil && state.GameState.MatchOver && !state.matchSummarySent {
+			state.matchSummarySent = true
+			if err := SendMatchSummary(ctx, logger, nk, state); err != nil {
+				logger.WithField("error", err).Error("failed to send match summary")
 			}
 		}
 	}
@@ -985,6 +953,15 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 	state.Open = false
 	logger.Debug("MatchTerminate called.")
 	nk.MetricsCounterAdd("match_terminate_count", state.MetricsTags(), 1)
+
+	// Send match summary if not already sent
+	if !state.matchSummarySent && len(state.participations) > 0 {
+		state.matchSummarySent = true
+		if err := SendMatchSummary(ctx, logger, nk, state); err != nil {
+			logger.WithField("error", err).Error("failed to send match summary on terminate")
+		}
+	}
+
 	if state.server != nil {
 		// Disconnect the players
 		for _, presence := range state.presenceMap {
