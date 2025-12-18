@@ -17,13 +17,12 @@ import (
 )
 
 const (
-	EventLobbySessionAuthorized   = "lobby_session_authorized"
-	EventSessionStart             = "session_start"
-	EventSessionEnd               = "session_end"
-	EventMatchData                = "match_data"
-	matchDataDatabaseName         = "nevr"
-	matchDataCollectionName       = "match_data"
-	matchDisconnectCollectionName = "match_disconnects_view"
+	EventLobbySessionAuthorized = "lobby_session_authorized"
+	EventSessionStart           = "session_start"
+	EventSessionEnd             = "session_end"
+	EventMatchData              = "match_data"
+	matchDataDatabaseName       = "nevr"
+	matchDataCollectionName     = "match_data"
 )
 
 type Event interface {

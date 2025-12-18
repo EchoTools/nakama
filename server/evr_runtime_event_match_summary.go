@@ -129,6 +129,14 @@ func (e *EventMatchSummary) Process(ctx context.Context, logger runtime.Logger, 
 	disconnects := GenerateDisconnectRecords(&e.Match)
 	if len(disconnects) > 0 {
 		disconnectCollection := db.Collection(matchDisconnectsCollectionName)
+
+		// Delete existing disconnect records for this match before inserting new ones
+		// This ensures we don't have duplicate key errors if the same match is processed multiple times
+		filter := bson.M{"match_id": e.Match.MatchID}
+		if _, err := disconnectCollection.DeleteMany(ctx, filter); err != nil {
+			logger.WithField("error", err).Warn("failed to delete existing disconnect records")
+		}
+
 		docs := make([]interface{}, len(disconnects))
 		for i, d := range disconnects {
 			docs[i] = d
