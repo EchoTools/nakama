@@ -81,6 +81,13 @@ func NewStatisticsQueue(logger runtime.Logger, db *sql.DB, nk runtime.NakamaModu
 					if !slices.Contains(ValidLeaderboardModes, e.BoardMeta.Mode) {
 						continue
 					}
+					var md map[string]any
+					if e.Metadata != nil {
+						md = make(map[string]any)
+						for k, v := range e.Metadata {
+							md[k] = v
+						}
+					}
 
 					// If the operator is increment or decrement, read the current value, decode it, add the delta, and write it back.
 					// This is because the leaderboard uses a float64 encoding that is not compatible with simple integer arithmetic.
