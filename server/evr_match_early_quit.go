@@ -137,8 +137,10 @@ func (p *PlayerParticipation) RecordLeaveEvent(state *MatchLabel) {
 		}
 	}
 
-	minTime := float64(time.Since(p.JoinTime.Add(-15*time.Second)) / time.Second)
-	p.TeamHazardEvents, p.TeamConsecutiveHazards = calculateHazardEvents(state, int(p.Team), minTime)
+	if state != nil {
+		minTime := float64(time.Since(p.JoinTime.Add(-15*time.Second)) / time.Second)
+		p.TeamHazardEvents, p.TeamConsecutiveHazards = calculateHazardEvents(state, int(p.Team), minTime)
+	}
 }
 
 // FinalizeParticipation marks a player as present at match end if they haven't left.
