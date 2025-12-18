@@ -134,7 +134,8 @@ func (e *EventMatchSummary) Process(ctx context.Context, logger runtime.Logger, 
 		// This ensures we don't have duplicate key errors if the same match is processed multiple times
 		filter := bson.M{"match_id": e.Match.MatchID}
 		if _, err := disconnectCollection.DeleteMany(ctx, filter); err != nil {
-			logger.WithField("error", err).Warn("failed to delete existing disconnect records")
+			// If deletion fails, we may get duplicate key errors, but we'll try the insert anyway
+			logger.WithField("error", err).Warn("failed to delete existing disconnect records; InsertMany may fail with duplicate key errors")
 		}
 
 		docs := make([]interface{}, len(disconnects))
