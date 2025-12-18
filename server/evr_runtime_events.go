@@ -23,7 +23,7 @@ const (
 	EventMatchData                = "match_data"
 	matchDataDatabaseName         = "nevr"
 	matchDataCollectionName       = "match_data"
-	matchDisconnectCollectionName = "match_disconnects"
+	matchDisconnectCollectionName = "match_disconnects_view"
 )
 
 type Event interface {
