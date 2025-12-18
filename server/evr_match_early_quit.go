@@ -137,7 +137,8 @@ func (p *PlayerParticipation) RecordLeaveEvent(state *MatchLabel) {
 		}
 	}
 	// Subtract 1 because the current player is already counted in totalLeaves
-	p.DisconnectsAtLeave = totalLeaves - p.DisconnectsAtJoin - 1
+	// Use max to prevent negative values in edge cases
+	p.DisconnectsAtLeave = max(0, totalLeaves-p.DisconnectsAtJoin-1)
 
 	// Check if this is part of a team wipe (multiple players leaving around the same time)
 	for _, info := range state.participations {
