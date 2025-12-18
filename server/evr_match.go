@@ -488,7 +488,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			participation.WasPresentAtEnd = false
 		} else {
 			// If the player has no participation info, create it now
-			if participation := NewPlayerParticipation(ctx, logger, db, nk, state, presences[0].GetUserId()); participation != nil {
+			if participation := NewPlayerParticipation(ctx, logger, db, nk, state, p.GetUserId()); participation != nil {
 				state.participations[p.GetUserId()] = participation
 			}
 		}
