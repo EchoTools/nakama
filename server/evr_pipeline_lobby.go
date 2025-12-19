@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/echotools/nevr-common/v3/rtapi"
-	"github.com/echotools/nevr-common/v4/gen/go/telemetry"
+	"github.com/echotools/nevr-common/v4/gen/go/telemetry/v1"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
