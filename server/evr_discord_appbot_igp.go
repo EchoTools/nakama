@@ -822,6 +822,16 @@ func (d *DiscordAppBot) handleModalSubmit(logger runtime.Logger, i *discordgo.In
 			},
 		})
 
+	case "enforcement_edit":
+		// Handle enforcement record edit modal submission
+		// value format: recordID:groupID:targetUserID
+		return d.handleEnforcementEditModalSubmit(logger, i, value)
+
+	case "enforcement_void":
+		// Handle enforcement record void modal submission
+		// value format: recordID:groupID:targetUserID
+		return d.handleEnforcementVoidModalSubmit(logger, i, value)
+
 	default:
 		return fmt.Errorf("unknown action: %s", action)
 	}
