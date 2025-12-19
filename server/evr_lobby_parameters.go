@@ -397,7 +397,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 	// Prevent joining matches that have just started (less than 30 seconds old).
 	const MatchStartTimeMinimumAgeSecs = 30
 
-	minStartTime := time.Now().UTC().Add(-time.Duration(MatchStartTimeMinimumAgeSecs) * time.Second).Format(time.RFC3339Nano)
+	minStartTime := p.MatchmakingTimestamp.UTC().Add(-time.Duration(MatchStartTimeMinimumAgeSecs) * time.Second).Format(time.RFC3339Nano)
 
 	qparts := []string{
 		"+label.open:T",
@@ -416,7 +416,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 		maxAgeSecs := ServiceSettings().Matchmaking.ArenaBackfillMaxAgeSecs
 		if maxAgeSecs > 0 {
 			// Exclude matches that started more than maxAgeSecs ago
-			startTime := time.Now().UTC().Add(-time.Duration(maxAgeSecs) * time.Second).Format(time.RFC3339Nano)
+			startTime := p.MatchmakingTimestamp.UTC().Add(-time.Duration(maxAgeSecs) * time.Second).Format(time.RFC3339Nano)
 			qparts = append(qparts, fmt.Sprintf(`-label.start_time:<"%s"`, startTime))
 		}
 	}
@@ -523,7 +523,7 @@ func (p *LobbySessionParameters) FromMatchmakerEntry(entry *MatchmakerEntry) {
 
 func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *MatchmakingTicketParameters) (string, map[string]string, map[string]float64) {
 
-	submissionTime := time.Now().UTC().Format(time.RFC3339)
+	submissionTime := p.MatchmakingTimestamp.UTC().Format(time.RFC3339)
 	stringProperties := map[string]string{
 		"game_mode":          p.Mode.String(),
 		"group_id":           p.GroupID.String(),
@@ -535,7 +535,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	}
 
 	numericProperties := map[string]float64{
-		"timestamp": float64(time.Now().UTC().Unix()),
+		"timestamp": float64(p.MatchmakingTimestamp.UTC().Unix()),
 		"max_rtt":   float64(p.MaxServerRTT),
 	}
 
