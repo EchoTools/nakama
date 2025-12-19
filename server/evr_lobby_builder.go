@@ -566,8 +566,8 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 		return nil, ErrMatchmakingNoAvailableServers
 	}
 
-	indexes := make([]labelIndex, len(availableServers))
-	for i, label := range availableServers {
+	indexes := make([]labelIndex, 0, len(availableServers))
+	for _, label := range availableServers {
 		extIP := label.GameServer.Endpoint.ExternalIP.String()
 		hostID := label.GameServer.Endpoint.GetHostID()
 
@@ -605,7 +605,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 			rtt += delta
 		}
 
-		indexes[i] = labelIndex{
+		indexes = append(indexes, labelIndex{
 			Label:             label,
 			RTT:               (rtt + 10) / 20 * 20,
 			IsReachable:       rttsByExternalIP[extIP] != 0,
@@ -614,7 +614,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 			ActiveCount:       activeCountByHostID[hostID],
 			IsRegionMatch:     regionMatch,
 			IsHighLatency:     rttsByExternalIP[extIP] > 100,
-		}
+		})
 	}
 
 	sortLabelIndexes(indexes)
