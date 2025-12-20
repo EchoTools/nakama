@@ -14,6 +14,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -82,13 +83,14 @@ func (c *DiscordIntegrator) Start() {
 	go func() {
 
 		var (
-			queueEmpty     bool
-			started        time.Time
-			maxQueueLength int
-			processed      int
-			cooldownTicker = time.NewTicker(time.Second * 3)
-			pruneTicker    = time.NewTicker(time.Second * 30) // Sets itself to 15 after the first run.
-			runtimeLogger  = NewRuntimeGoLogger(c.logger)
+			queueEmpty         bool
+			started            time.Time
+			maxQueueLength     int
+			processed          int
+			cooldownTicker     = time.NewTicker(time.Second * 3)
+			pruneTicker        = time.NewTicker(time.Second * 30) // Sets itself to 15 after the first run.
+			periodicSyncTicker = time.NewTicker(time.Hour)        // Periodic sync every hour
+			runtimeLogger      = NewRuntimeGoLogger(c.logger)
 		)
 
 		for {
@@ -174,6 +176,13 @@ func (c *DiscordIntegrator) Start() {
 				pruneSafetyThreshold := ServiceSettings().PruneSettings.SafetyLimit
 				if err := c.pruneGuildGroups(c.ctx, runtimeLogger, doLeaves, doDeletes, pruneSafetyThreshold); err != nil {
 					logger.Error("Error pruning guild groups", zap.Error(err), zap.Bool("do_leaves", doLeaves), zap.Bool("do_deletes", doDeletes), zap.Int("prune_safety_threshold", pruneSafetyThreshold))
+				}
+
+			case <-periodicSyncTicker.C:
+				// Periodic sync of all guild roles and members
+				logger.Info("Starting periodic Discord role and member sync")
+				if err := c.periodicRoleAndMemberSync(c.ctx, logger); err != nil {
+					logger.Error("Error during periodic role and member sync", zap.Error(err))
 				}
 			}
 		}
@@ -399,6 +408,11 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 	hasRole := profile.IsLinked() && !profile.IsDisabled()
 	if err := c.updateMemberRole(member, roleID, hasRole); err != nil {
 		logger.Warn("Error updating headset-linked role", zap.String("role", roleID), zap.Error(err))
+	}
+
+	// Update platform-based roles (Standalone/PCVR)
+	if err := c.updatePlatformRoles(ctx, logger, member, group, userID); err != nil {
+		logger.Warn("Error updating platform roles", zap.Error(err))
 	}
 
 	return nil
@@ -989,4 +1003,259 @@ func (d *DiscordIntegrator) GuildGroupName(groupID string) string {
 		return ""
 	}
 	return guild.Name
+}
+
+// updatePlatformRoles updates Standalone and PCVR roles based on the user's login history
+func (d *DiscordIntegrator) updatePlatformRoles(ctx context.Context, logger *zap.Logger, member *discordgo.Member, group *GuildGroup, userID string) error {
+	// Skip if neither role is configured
+	if group.RoleMap.Standalone == "" && group.RoleMap.PCVR == "" {
+		return nil
+	}
+
+	// Get the user's login history to determine their platform
+	objs, err := d.nk.StorageRead(ctx, []*runtime.StorageRead{
+		{
+			Collection: LoginStorageCollection,
+			Key:        LoginHistoryStorageKey,
+			UserID:     userID,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("error reading login history: %w", err)
+	}
+
+	// If no login history exists, remove both roles
+	if len(objs) == 0 {
+		if err := d.updateMemberRole(member, group.RoleMap.Standalone, false); err != nil {
+			return err
+		}
+		if err := d.updateMemberRole(member, group.RoleMap.PCVR, false); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// Parse login history
+	loginHistory := &LoginHistory{}
+	if err := json.Unmarshal([]byte(objs[0].Value), loginHistory); err != nil {
+		return fmt.Errorf("error unmarshalling login history: %w", err)
+	}
+
+	// Determine the most recent platform used
+	var mostRecentEntry *LoginHistoryEntry
+	var mostRecentTime time.Time
+
+	// Check active entries first
+	for _, entry := range loginHistory.Active {
+		if entry.UpdatedAt.After(mostRecentTime) {
+			mostRecentTime = entry.UpdatedAt
+			mostRecentEntry = entry
+		}
+	}
+
+	// If no active entries, check history
+	if mostRecentEntry == nil {
+		for _, entry := range loginHistory.History {
+			if entry.UpdatedAt.After(mostRecentTime) {
+				mostRecentTime = entry.UpdatedAt
+				mostRecentEntry = entry
+			}
+		}
+	}
+
+	// If still no entry found, remove both roles
+	if mostRecentEntry == nil {
+		if err := d.updateMemberRole(member, group.RoleMap.Standalone, false); err != nil {
+			return err
+		}
+		if err := d.updateMemberRole(member, group.RoleMap.PCVR, false); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// Determine if user is on PCVR or Standalone
+	isPCVR := mostRecentEntry.LoginData.BuildNumber != evr.StandaloneBuildNumber
+
+	// Update roles accordingly
+	if err := d.updateMemberRole(member, group.RoleMap.PCVR, isPCVR); err != nil {
+		return fmt.Errorf("error updating PCVR role: %w", err)
+	}
+	if err := d.updateMemberRole(member, group.RoleMap.Standalone, !isPCVR); err != nil {
+		return fmt.Errorf("error updating Standalone role: %w", err)
+	}
+
+	return nil
+}
+
+// periodicRoleAndMemberSync performs a full sync of all guild roles and members from Discord API
+// This ensures the discordgo State cache remains consistent with Discord's actual state
+func (d *DiscordIntegrator) periodicRoleAndMemberSync(ctx context.Context, logger *zap.Logger) error {
+	// Get all guilds that the bot is a member of
+	guilds := d.dg.State.Guilds
+	if len(guilds) == 0 {
+		logger.Warn("No guilds found in state for periodic sync")
+		return nil
+	}
+
+	logger.Info("Starting periodic sync for guilds", zap.Int("guild_count", len(guilds)))
+
+	for _, guild := range guilds {
+		guildLogger := logger.With(zap.String("guild_id", guild.ID), zap.String("guild_name", guild.Name))
+
+		// Fetch fresh guild data from Discord API
+		freshGuild, err := d.dg.Guild(guild.ID)
+		if err != nil {
+			guildLogger.Warn("Failed to fetch guild from Discord API", zap.Error(err))
+			continue
+		}
+
+		// Update guild in state
+		d.dg.State.GuildAdd(freshGuild)
+
+		// Fetch and update all roles for this guild
+		roles, err := d.dg.GuildRoles(guild.ID)
+		if err != nil {
+			guildLogger.Warn("Failed to fetch guild roles", zap.Error(err))
+		} else {
+			// Update roles in the state
+			stateGuild, err := d.dg.State.Guild(guild.ID)
+			if err == nil && stateGuild != nil {
+				stateGuild.Roles = roles
+			}
+			guildLogger.Debug("Updated guild roles in state", zap.Int("role_count", len(roles)))
+
+			// Check for managed role changes (Issue #134)
+			if err := d.checkManagedRoleChanges(ctx, guildLogger, guild.ID, roles); err != nil {
+				guildLogger.Warn("Failed to check managed role changes", zap.Error(err))
+			}
+		}
+
+		// Fetch all members for this guild
+		// Use GuildMembers API to get all members (paginated)
+		after := ""
+		totalMembers := 0
+		for {
+			members, err := d.dg.GuildMembers(guild.ID, after, 1000)
+			if err != nil {
+				guildLogger.Warn("Failed to fetch guild members", zap.Error(err), zap.String("after", after))
+				break
+			}
+
+			if len(members) == 0 {
+				break
+			}
+
+			// Update each member in the state
+			for _, member := range members {
+				d.dg.State.MemberAdd(member)
+			}
+
+			totalMembers += len(members)
+			after = members[len(members)-1].User.ID
+
+			// Break if we got fewer than requested (last page)
+			if len(members) < 1000 {
+				break
+			}
+		}
+
+		guildLogger.Info("Completed periodic sync for guild", zap.Int("members_synced", totalMembers))
+	}
+
+	logger.Info("Completed periodic sync for all guilds")
+	return nil
+}
+
+// checkManagedRoleChanges checks if any managed roles have been modified by non-bot users
+// and emits audit messages (implements Issue #134)
+func (d *DiscordIntegrator) checkManagedRoleChanges(ctx context.Context, logger *zap.Logger, guildID string, currentRoles []*discordgo.Role) error {
+	// Get the guild group to access managed roles
+	groupID := d.GuildIDToGroupID(guildID)
+	if groupID == "" {
+		return nil // Not a tracked guild
+	}
+
+	group := d.guildGroupRegistry.Get(groupID)
+	if group == nil {
+		return nil
+	}
+
+	// Get all managed role IDs from the RoleMap
+	managedRoleIDs := group.RoleMap.AsSlice()
+	if len(managedRoleIDs) == 0 {
+		return nil
+	}
+
+	// Fetch recent audit logs for role updates
+	auditLogs, err := d.dg.GuildAuditLog(guildID, "", "", int(discordgo.AuditLogActionRoleUpdate), 50)
+	if err != nil {
+		return fmt.Errorf("failed to fetch audit logs: %w", err)
+	}
+
+	botUserID := d.dg.State.User.ID
+
+	// Check each audit log entry for managed role modifications by non-bot users
+	for _, entry := range auditLogs.AuditLogEntries {
+		// Skip if the action was performed by the bot itself
+		if entry.UserID == botUserID {
+			continue
+		}
+
+		// Check if the target role is a managed role
+		roleID := entry.TargetID
+		isManagedRole := false
+		for _, managedID := range managedRoleIDs {
+			if managedID == roleID {
+				isManagedRole = true
+				break
+			}
+		}
+
+		if !isManagedRole {
+			continue
+		}
+
+		// Get the user who made the change
+		user, err := d.dg.User(entry.UserID)
+		if err != nil {
+			logger.Warn("Failed to fetch user for audit log", zap.String("user_id", entry.UserID), zap.Error(err))
+			continue
+		}
+
+		// Find the role name
+		var roleName string
+		for _, role := range currentRoles {
+			if role.ID == roleID {
+				roleName = role.Name
+				break
+			}
+		}
+
+		// Emit audit message
+		message := fmt.Sprintf("⚠️ Managed role modified by non-bot user\n"+
+			"Guild: `%s` (ID: %s)\n"+
+			"Role: `%s` (ID: %s)\n"+
+			"Modified by: <@%s> (%s)\n"+
+			"Reason: %s",
+			group.Name(), guildID,
+			roleName, roleID,
+			user.ID, user.Username,
+			entry.Reason,
+		)
+
+		if _, err := d.LogServiceAuditMessage(ctx, message, false); err != nil {
+			logger.Warn("Failed to log managed role change audit message", zap.Error(err))
+		}
+
+		logger.Info("Detected managed role modification by non-bot user",
+			zap.String("guild_id", guildID),
+			zap.String("role_id", roleID),
+			zap.String("role_name", roleName),
+			zap.String("modified_by_user_id", user.ID),
+			zap.String("modified_by_username", user.Username),
+		)
+	}
+
+	return nil
 }
