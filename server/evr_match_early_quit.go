@@ -56,6 +56,9 @@ func NewPlayerParticipation(ctx context.Context, logger runtime.Logger, db *sql.
 	// Count how many players have joined in total and left
 	totalLeaves := 0
 	for _, p := range state.participations {
+		if p == nil {
+			continue
+		}
 		if !p.LeaveTime.IsZero() {
 			totalLeaves++
 		}
@@ -114,17 +117,28 @@ func (p *PlayerParticipation) RecordLeaveEvent(state *MatchLabel) {
 
 	p.IsAbandoner = !matchOver
 	p.LeaveTime = time.Now()
+
+	// If state is nil, we cannot safely access team sizes, participations, or hazard events.
+	if state == nil {
+		return
+	}
+
 	p.TeamSizesAtLeave = [2]int{state.RoleCount(0), state.RoleCount(1)}
 	p.WasPresentAtEnd = matchOver
 
-	// Count disconnects since join
+	// Count disconnects since join (excluding the current player who just left)
 	totalLeaves := 0
 	for _, info := range state.participations {
+		if info == nil {
+			continue
+		}
 		if !info.LeaveTime.IsZero() {
 			totalLeaves++
 		}
 	}
-	p.DisconnectsAtLeave = totalLeaves - p.DisconnectsAtJoin
+	// Subtract 1 because the current player is already counted in totalLeaves
+	// Use max to prevent negative values in edge cases
+	p.DisconnectsAtLeave = max(0, totalLeaves-p.DisconnectsAtJoin-1)
 
 	// Check if this is part of a team wipe (multiple players leaving around the same time)
 	for _, info := range state.participations {
@@ -137,10 +151,8 @@ func (p *PlayerParticipation) RecordLeaveEvent(state *MatchLabel) {
 		}
 	}
 
-	if state != nil {
-		minTime := float64(time.Since(p.JoinTime.Add(-15*time.Second)) / time.Second)
-		p.TeamHazardEvents, p.TeamConsecutiveHazards = calculateHazardEvents(state, int(p.Team), minTime)
-	}
+	minTime := float64(time.Since(p.JoinTime.Add(-15*time.Second)) / time.Second)
+	p.TeamHazardEvents, p.TeamConsecutiveHazards = calculateHazardEvents(state, int(p.Team), minTime)
 }
 
 // FinalizeParticipation marks a player as present at match end if they haven't left.
