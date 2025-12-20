@@ -1,6 +1,7 @@
 package server
 
 import (
+	"net"
 	"testing"
 	"time"
 
@@ -80,7 +81,7 @@ func TestCalculateBackfillScore(t *testing.T) {
 					StartTime:   time.Now().Add(-1 * time.Minute),
 					GameServer: &GameServerPresence{
 						Endpoint: evr.Endpoint{
-							ExternalIP: [4]byte{192, 168, 1, 1},
+							ExternalIP: net.ParseIP("192.168.1.1"),
 						},
 					},
 				},

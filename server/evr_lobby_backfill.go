@@ -164,7 +164,10 @@ func (b *PostMatchmakerBackfill) GetBackfillMatches(ctx context.Context, groupID
 
 	// For arena matches, exclude matches that are too old
 	if mode == evr.ModeArenaPublic {
-		maxAgeSecs := ServiceSettings().Matchmaking.ArenaBackfillMaxAgeSecs
+		maxAgeSecs := 270 // Default 4.5 minutes
+		if ss := ServiceSettings(); ss != nil {
+			maxAgeSecs = ss.Matchmaking.ArenaBackfillMaxAgeSecs
+		}
 		if maxAgeSecs > 0 {
 			startTime := time.Now().UTC().Add(-time.Duration(maxAgeSecs) * time.Second).Format(time.RFC3339Nano)
 			qparts = append(qparts, fmt.Sprintf(`-label.start_time:<"%s"`, startTime))
@@ -219,7 +222,10 @@ func (b *PostMatchmakerBackfill) GetBackfillMatches(ctx context.Context, groupID
 // Higher scores indicate better matches
 // reducingPrecisionFactor is 0.0 (strict) to 1.0 (fully relaxed)
 func (b *PostMatchmakerBackfill) CalculateBackfillScore(candidate *BackfillCandidate, match *BackfillMatch, team int, reducingPrecisionFactor float64) float64 {
-	settings := ServiceSettings().Matchmaking
+	var settings GlobalMatchmakingSettings
+	if ss := ServiceSettings(); ss != nil {
+		settings = ss.Matchmaking
+	}
 	var score float64 = 100.0 // Start with a base score
 
 	// RTT scoring - lower RTT is better
