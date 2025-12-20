@@ -427,9 +427,13 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 
 	case "set_ign_override":
 		// Handle set_ign_override button interactions from lookup or IGP
-		// value format: targetDiscordID
-		targetDiscordID := value
-		targetGuildID := i.GuildID
+		// value format: targetDiscordID:targetGuildID
+		parts := strings.SplitN(value, ":", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid set_ign_override format: expected targetDiscordID:targetGuildID")
+		}
+		targetDiscordID := parts[0]
+		targetGuildID := parts[1]
 
 		targetUserID := d.cache.DiscordIDToUserID(targetDiscordID)
 		targetGroupID := d.cache.GuildIDToGroupID(targetGuildID)
