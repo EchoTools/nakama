@@ -198,7 +198,10 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 			if !userSettings.IsMatchLocked() {
 				userSettings.NextMatchDiscordID = ""
 			}
-			if err := StorableWrite(ctx, p.nk, userID, userSettings); err != nil {
+			// Use a background context with timeout so cleanup is not canceled with the parent request.
+			ctxCleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := StorableWrite(ctxCleanup, p.nk, userID, userSettings); err != nil {
 				logger.Warn("Failed to clear next match metadata", zap.Error(err))
 			}
 		}()
