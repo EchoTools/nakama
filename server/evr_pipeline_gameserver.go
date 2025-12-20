@@ -19,7 +19,7 @@ import (
 	"fmt"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/echotools/nevr-common/v3/rtapi"
+	"github.com/echotools/nevr-common/v4/gen/go/rtapi"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -82,7 +82,7 @@ func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, co
 //   - debug: Enable debug mode
 //   - verbose: Enable verbose logging
 func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) error {
-	request := in.GetGameServerRegistrationRequest()
+	request := in.GetGameServerRegistration()
 	var (
 		loginSessionID = uuid.FromStringOrNil(request.LoginSessionId)
 		serverID       = request.ServerId
