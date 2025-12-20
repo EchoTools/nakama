@@ -196,9 +196,9 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	}
 
 	// Warn the user that using regionHash is deprecated.
-	if regionHash != evr.DefaultRegion {
-		// Send the message to the user
-		warning := "The -serverregion command line argument is deprecated. Please use the 'regions' URL parameter instead. Include 'default' to be in the public matchmaking pool."
+	if slices.Contains([]evr.Symbol{evr.UnspecifiedRegion, evr.DefaultRegion}, regionHash) {
+		// Send the message to the userserverregion command line argument is deprecated
+		warning := "The -. Please use the 'regions' URL parameter instead. Include 'default' to be in the public matchmaking pool."
 		go SendUserMessage(ctx, p.discordCache.dg, params.DiscordID(), warning)
 		logger.Debug(warning, zap.String("region_hash", regionHash.String()))
 		params.serverRegions = append(params.serverRegions, "default")
@@ -399,7 +399,7 @@ func (p *EvrPipeline) buildRegionCodes(ctx context.Context, logger *zap.Logger, 
 
 		// Set default region from IPQS if not already set
 		if generatedRegion == "" {
-			generatedRegion = ipqsRegion
+			generatedRegion = ipqsRegionShort
 		}
 
 		regionCodes = append(regionCodes, ipqsRegion, ipqsRegionShort, ipqsCountry)
