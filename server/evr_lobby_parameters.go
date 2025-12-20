@@ -126,6 +126,18 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		return nil, fmt.Errorf("failed to load user matchmaking settings: %w", err)
 	}
 
+	// Check for match lock (moderation feature) - takes priority over regular NextMatchDiscordID
+	// Match lock is persistent and forces the player to follow the designated leader
+	if userSettings.IsMatchLocked() {
+		// Override NextMatchDiscordID with the locked leader
+		logger.Info("Match lock active - forcing player to follow leader",
+			zap.String("user_id", userID),
+			zap.String("leader_discord_id", userSettings.MatchLockLeaderDiscordID),
+			zap.String("operator_user_id", userSettings.MatchLockOperatorUserID),
+			zap.String("reason", userSettings.MatchLockReason))
+		userSettings.NextMatchDiscordID = userSettings.MatchLockLeaderDiscordID
+	}
+
 	if userSettings.NextMatchDiscordID != "" {
 		// Get the host's user ID
 		hostUserIDStr := p.discordCache.DiscordIDToUserID(userSettings.NextMatchDiscordID)
@@ -177,11 +189,15 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 
 		}
 
-		// Always clear the settings
+		// Clear the one-time next match settings, but NOT the match lock settings
+		// Match lock is persistent and only removed by explicit unlock
 		go func() {
 			userSettings.NextMatchID = MatchID{}
 			userSettings.NextMatchRole = ""
-			userSettings.NextMatchDiscordID = ""
+			// Only clear NextMatchDiscordID if not locked (lock uses its own field)
+			if !userSettings.IsMatchLocked() {
+				userSettings.NextMatchDiscordID = ""
+			}
 			if err := StorableWrite(ctx, p.nk, userID, userSettings); err != nil {
 				logger.Warn("Failed to clear next match metadata", zap.Error(err))
 			}
