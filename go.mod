@@ -11,7 +11,7 @@ require (
 	github.com/dgryski/dgoogauth v0.0.0-20190221195224-5a805980a5f3
 	github.com/dop251/goja v0.0.0-20251103141225-af2ceb9156d7
 	github.com/echotools/nevr-common/v3 v3.1.0
-	github.com/echotools/nevr-common/v4 v4.0.0
+	github.com/echotools/nevr-common/v4 v4.1.0
 	github.com/echotools/vrmlgo/v5 v5.0.1
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/go-restruct/restruct v1.2.0-alpha
@@ -39,13 +39,13 @@ require (
 	go.uber.org/atomic v1.11.0
 	go.uber.org/thriftrw v1.33.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/crypto v0.43.0
+	golang.org/x/crypto v0.44.0
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546
 	golang.org/x/oauth2 v0.32.0
 	golang.org/x/time v0.14.0
 	gonum.org/v1/gonum v0.16.0
-	google.golang.org/genproto/googleapis/api v0.0.0-20251103181224-f26f9409b101
-	google.golang.org/grpc v1.76.0
+	google.golang.org/genproto/googleapis/api v0.0.0-20251124214823-79d6a2a48846
+	google.golang.org/grpc v1.77.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
 	google.golang.org/protobuf v1.36.10
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
@@ -105,9 +105,9 @@ require (
 	github.com/prometheus/procfs v0.19.2 // indirect
 	github.com/twmb/murmur3 v1.1.8 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/net v0.46.0 // indirect
-	golang.org/x/sync v0.17.0 // indirect
-	golang.org/x/sys v0.37.0 // indirect
-	golang.org/x/text v0.30.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20251103181224-f26f9409b101 // indirect
+	golang.org/x/net v0.47.0 // indirect
+	golang.org/x/sync v0.18.0 // indirect
+	golang.org/x/sys v0.38.0 // indirect
+	golang.org/x/text v0.31.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20251124214823-79d6a2a48846 // indirect
 )

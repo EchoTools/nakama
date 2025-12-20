@@ -365,9 +365,9 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 			}
 			envelope = &rtapi.Envelope{
 				Message: &rtapi.Envelope_LobbySessionEvent{
-					LobbySessionEvent: &telemetry.LobbySessionEventMessage{
+					LobbySessionEvent: &rtapi.LobbySessionEventMessage{
 						LobbySessionId: matchID.UUID.String(),
-						Code:           int32(telemetry.LobbySessionEventMessage_LOCKED),
+						Code:           int32(rtapi.LobbySessionEventMessage_LOCKED),
 					},
 				},
 			}
@@ -379,9 +379,9 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 			}
 			envelope = &rtapi.Envelope{
 				Message: &rtapi.Envelope_LobbySessionEvent{
-					LobbySessionEvent: &telemetry.LobbySessionEventMessage{
+					LobbySessionEvent: &rtapi.LobbySessionEventMessage{
 						LobbySessionId: matchID.UUID.String(),
-						Code:           int32(telemetry.LobbySessionEventMessage_UNLOCKED),
+						Code:           int32(rtapi.LobbySessionEventMessage_UNLOCKED),
 					},
 				},
 			}
@@ -393,9 +393,9 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 			}
 			envelope = &rtapi.Envelope{
 				Message: &rtapi.Envelope_LobbySessionEvent{
-					LobbySessionEvent: &telemetry.LobbySessionEventMessage{
+					LobbySessionEvent: &rtapi.LobbySessionEventMessage{
 						LobbySessionId: matchID.UUID.String(),
-						Code:           int32(telemetry.LobbySessionEventMessage_ENDED),
+						Code:           int32(rtapi.LobbySessionEventMessage_ENDED),
 					},
 				},
 			}

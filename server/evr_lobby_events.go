@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	rtapiv4 "github.com/echotools/nevr-common/v4/gen/go/rtapi"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.mongodb.org/mongo-driver/bson"
@@ -25,9 +26,9 @@ type ctxMongoClientKey struct{}
 
 // SessionEvent represents a simple session event object
 type SessionEvent struct {
-	MatchID MatchID                           `bson:"match_id" json:"match_id"`
-	UserID  string                            `bson:"user_id,omitempty" json:"user_id,omitempty"`
-	Data    *telemetry.LobbySessionStateFrame `bson:"data,omitempty" json:"data,omitempty"`
+	MatchID MatchID                         `bson:"match_id" json:"match_id"`
+	UserID  string                          `bson:"user_id,omitempty" json:"user_id,omitempty"`
+	Data    *rtapiv4.LobbySessionStateFrame `bson:"data,omitempty" json:"data,omitempty"`
 }
 
 // StoreSessionEvent stores a session event to MongoDB
@@ -146,7 +147,7 @@ func GetSessionEventsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 func StoreSessionEventRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	// Parse the payload as SessionEvent
 
-	msg := &telemetry.LobbySessionStateFrame{}
+	msg := &rtapiv4.LobbySessionStateFrame{}
 
 	if err := protojson.Unmarshal([]byte(payload), msg); err != nil {
 		return "", fmt.Errorf("invalid request payload: %w", err)
