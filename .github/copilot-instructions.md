@@ -1,78 +1,78 @@
-# Nakama Development
+# Nakama Development (EchoVR Fork)
 
-**Constraint:** Reference this first. Act as AI agent. Never take on a human persona. Ignore code that is related to `satori`.
+**Constraint:** This is a fork of heroiclabs/nakama with EchoVR-specific extensions. Ignore satori-related code.
 
-### Build
-* **Timeout:** Max 5m. Expected: ~2m.
-* **Commands:**
-    ```arch
-    go mod vendor
-    make nakama
-    ./nakama --version
-    ```
-* **Issue:** `protoc` required for full build.
+## Architecture
 
-### DB Setup
-* **Timeout:** Max 3m. Expected: < 2m.
-* **CRITICAL:** Migrate before start.
-* **Commands:**
-    ```arch
-    docker compose up -d postgres
-    sleep 30
-    ./nakama migrate up --database.address postgres:localdb@127.0.0.1:5432/nakama
-    ```
-* **Issue:** Use PostgreSQL (5432). Avoid CockroachDB.
+This Nakama fork adds EchoVR game server functionality:
+- `server/evr/` - EVR binary protocol parsers (mirrors `nevr-common/serviceapi/`)
+- `server/evr_*.go` - EVR-specific server logic (pipeline, matchmaker, runtime)
+- Standard Nakama in `server/` - API, console, runtime, matchmaker
 
-### Server Run
-* **Pre-req:** Migrations complete.
-* **Command:**
-    ```arch
-    ./nakama --name nakama1 --database.address postgres:localdb@127.0.0.1:5432/nakama --logger.level INFO
-    ```
-* **Endpoints:** API: `http://127.0.0.1:7350`, Socket: `ws://127.0.0.1:7349`. Default key: `defaultkey`.
+**Cross-repo dependencies** (via go.work):
+- `nevr-common` → Shared protobuf definitions
+- `vrmlgo` → VRML league integration
 
-### Testing
-* **Constraint:** Cancel > 10m ops. **No benchmarks.**
-* **Scope:** Only EVR unit tests (`server/evr/*_test.go`, `server/evr_*_test.go`).
-* **Command (Expected ~2-3m):**
-    ```arch
-    go test -short -vet=off ./server/evr/...
-    go test -short -vet=off ./server -run ".*evr.*"
-    ```
+## Build & Run
 
-### Code Quality
-* **Tool:** `gofmt`
-* **Commands:**
-    ```arch
-    gofmt -l . | head -10 # Check
-    gofmt -w .            # Fix
-    ```
+```bash
+# Build (requires protoc for full build, ~2m expected)
+go mod vendor && make nakama
 
-### Validation Cycle (Full < 10m)
-1.  `go mod vendor` (if deps changed)
-2.  `make nakama`
-3.  `docker compose up -d postgres`
-4.  Run migrations.
-5.  Start server/Test endpoints.
-6.  Run EVR tests.
-7.  `gofmt -w .`
+# Database setup (PostgreSQL, NOT CockroachDB)
+docker compose up -d postgres
+sleep 30
+./nakama migrate up --database.address postgres:localdb@127.0.0.1:5432/nakama
 
-### Validation Scenarios
-* **API Test:**
-    ```arch
-    curl "127.0.0.1:7350/v2/account/authenticate/device?create=true" --user "defaultkey:" --data '{"id": "test-device-123"}'
-    ```
-* **DB Check:** Look for "Database information" in `DEBUG` log:
-    ```arch
-    ./nakama --database.address postgres:localdb@127.0.0.1:5432/nakama --logger.level DEBUG
-    ```
+# Run server
+./nakama --name nakama1 --database.address postgres:localdb@127.0.0.1:5432/nakama
+```
 
-### Troubleshooting Summary
-* **Server fails:** Check `docker compose ps`, migrations, ports (7349/7350).
-* **Build fails:** `rm -rf vendor && go mod vendor`, Go 1.24+, `protoc`.
-* **Test fails:** EVR scope only, check DB setup.
+Endpoints: API `http://127.0.0.1:7350`, Socket `ws://127.0.0.1:7349`, default key: `defaultkey`
 
-### Project Structure (Significant)
-* `/server/`: Core logic
-* `/data/`: Runtime data
-* **Files:** `main.go`, `Makefile`, `go.mod`, `docker-compose.yml` (PostgreSQL).
+## Testing
+
+**Only run EVR-specific tests** (full test suite is slow):
+```bash
+go test -short -vet=off ./server/evr/...
+go test -short -vet=off ./server -run ".*evr.*"
+```
+
+No benchmarks - they take too long. Cancel any test running >10 minutes.
+
+## Key EVR Components
+
+- `evr_pipeline.go` - Main EVR message processing pipeline
+- `evr_matchmaker.go` - Custom EVR matchmaking with skill ratings
+- `evr_runtime.go` - EVR-specific runtime hooks and RPCs
+- `evr_match.go` - EVR match handler implementation
+- `evr_discord_*.go` - Discord bot integration
+
+## Code Patterns
+
+### EVR Binary Protocol
+Messages in `server/evr/` use binary encoding with packet headers:
+```go
+// All EVR messages implement this pattern
+type MyMessage struct {
+    // Fields parsed from binary packet
+}
+func (m *MyMessage) Symbol() Symbol { return SymbolMyMessage }
+func (m *MyMessage) Stream(s *Stream) { /* binary encode/decode */ }
+```
+
+### Pipeline Handlers
+EVR pipeline in `server/evr_pipeline*.go` routes messages:
+```go
+func (p *EVRPipeline) handleMyMessage(ctx context.Context, msg *evr.MyMessage) error {
+    // Handle incoming EVR protocol message
+}
+```
+
+## Validation Cycle
+
+1. `make nakama` (build)
+2. Run migrations
+3. Start server, verify endpoints
+4. Run EVR tests
+5. `gofmt -w .` (format)
