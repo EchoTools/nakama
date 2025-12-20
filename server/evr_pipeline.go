@@ -137,7 +137,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	// Connect the lobby builder to the skill-based matchmaker for post-matchmaker backfill
 	// This is done after a delay to allow the runtime module to initialize first
 	go func() {
-		<-time.After(5 * time.Second)
+		<-time.After(SkillBasedMatchmakerInitDelay)
 		if sbmm := globalSkillBasedMatchmaker.Load(); sbmm != nil {
 			lobbyBuilder.SetSkillBasedMatchmaker(sbmm)
 			logger.Info("Post-matchmaker backfill enabled")

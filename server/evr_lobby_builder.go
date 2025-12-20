@@ -81,7 +81,7 @@ func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 
 // runPostMatchmakerBackfill runs the post-matchmaker backfill process
 func (b *LobbyBuilder) runPostMatchmakerBackfill() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), BackfillProcessTimeout)
 	defer cancel()
 
 	logger := b.logger.With(zap.String("operation", "post_matchmaker_backfill"))

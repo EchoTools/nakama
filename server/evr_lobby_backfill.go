@@ -14,6 +14,36 @@ import (
 	"go.uber.org/zap"
 )
 
+// Backfill scoring constants
+const (
+	// BackfillBaseScore is the starting score for backfill matching
+	BackfillBaseScore = 100.0
+	// BackfillRTTExceedsPenaltyMultiplier is applied when RTT exceeds max allowed
+	BackfillRTTExceedsPenaltyMultiplier = 0.5
+	// BackfillNoRTTPenalty is applied when no RTT data is available
+	BackfillNoRTTPenalty = 50.0
+	// BackfillMatchAgeThreshold is when match age starts affecting score
+	BackfillMatchAgeThreshold = 2 * time.Minute
+	// BackfillMatchAgePenaltyPerMinute is the penalty per minute of match age
+	BackfillMatchAgePenaltyPerMinute = 2.0
+	// BackfillMinAcceptableScore is the minimum score for a backfill to be accepted
+	BackfillMinAcceptableScore = 0.0
+	// BackfillProcessTimeout is the maximum time for processing backfill
+	BackfillProcessTimeout = 30 * time.Second
+	// BackfillTeamBalanceBonus is the bonus for assignments that improve team balance
+	BackfillTeamBalanceBonus = 10.0
+	// BackfillTeamImbalancePenalty is the penalty for assignments that worsen team balance
+	BackfillTeamImbalancePenalty = 5.0
+	// BackfillRatingScoreWeight is the weight for rating-based scoring
+	BackfillRatingScoreWeight = 30.0
+	// BackfillRTTScoreWeight is the weight for RTT-based scoring
+	BackfillRTTScoreWeight = 20.0
+	// BackfillPopulationBonus is the bonus per player in the match
+	BackfillPopulationBonus = 2.0
+	// SkillBasedMatchmakerInitDelay is the delay before linking the skill-based matchmaker
+	SkillBasedMatchmakerInitDelay = 5 * time.Second
+)
+
 // BackfillCandidate represents a ticket that needs to be backfilled into an existing match
 type BackfillCandidate struct {
 	Ticket         string
@@ -226,21 +256,21 @@ func (b *PostMatchmakerBackfill) CalculateBackfillScore(candidate *BackfillCandi
 	if ss := ServiceSettings(); ss != nil {
 		settings = ss.Matchmaking
 	}
-	var score float64 = 100.0 // Start with a base score
+	score := BackfillBaseScore
 
 	// RTT scoring - lower RTT is better
 	extIP := match.Label.GameServer.Endpoint.GetExternalIP()
 	rtt, hasRTT := candidate.RTTs[extIP]
 	if !hasRTT {
 		// No RTT data means we can't assess latency - penalize unless precision is relaxed
-		score -= 50.0 * (1.0 - reducingPrecisionFactor)
+		score -= BackfillNoRTTPenalty * (1.0 - reducingPrecisionFactor)
 	} else if rtt > candidate.MaxRTT {
 		// RTT exceeds max - penalize unless precision is relaxed
-		penalty := float64(rtt-candidate.MaxRTT) * 0.5 * (1.0 - reducingPrecisionFactor)
+		penalty := float64(rtt-candidate.MaxRTT) * BackfillRTTExceedsPenaltyMultiplier * (1.0 - reducingPrecisionFactor)
 		score -= penalty
 	} else {
 		// Good RTT - add points based on how low it is
-		score += (float64(candidate.MaxRTT-rtt) / float64(candidate.MaxRTT)) * 20.0
+		score += (float64(candidate.MaxRTT-rtt) / float64(candidate.MaxRTT)) * BackfillRTTScoreWeight
 	}
 
 	// Rating scoring - closer ratings are better for SBMM
@@ -253,19 +283,19 @@ func (b *PostMatchmakerBackfill) CalculateBackfillScore(candidate *BackfillCandi
 
 		if ratingDelta <= ratingRange || reducingPrecisionFactor >= 0.5 {
 			// Within rating range or precision is relaxed
-			ratingScore := (1.0 - ratingDelta/ratingRange) * 30.0
+			ratingScore := (1.0 - ratingDelta/ratingRange) * BackfillRatingScoreWeight
 			if ratingScore < 0 {
 				ratingScore = 0
 			}
 			score += ratingScore * (1.0 - reducingPrecisionFactor*0.5)
 		} else {
 			// Outside rating range - penalize
-			score -= 30.0 * (1.0 - reducingPrecisionFactor)
+			score -= BackfillRatingScoreWeight * (1.0 - reducingPrecisionFactor)
 		}
 	}
 
 	// Prefer matches with more players (more active/likely to be good)
-	populationBonus := float64(match.Label.PlayerCount) * 2.0
+	populationBonus := float64(match.Label.PlayerCount) * BackfillPopulationBonus
 	score += populationBonus
 
 	// Prefer matches where the team needs more players (balance)
@@ -276,19 +306,19 @@ func (b *PostMatchmakerBackfill) CalculateBackfillScore(candidate *BackfillCandi
 
 		// If this team assignment would help balance, add points
 		if team == evr.TeamBlue && blueCount < orangeCount {
-			score += 10.0
+			score += BackfillTeamBalanceBonus
 		} else if team == evr.TeamOrange && orangeCount < blueCount {
-			score += 10.0
+			score += BackfillTeamBalanceBonus
 		} else if teamImbalance > 1 {
 			// Would make imbalance worse - penalize
-			score -= 5.0 * (1.0 - reducingPrecisionFactor)
+			score -= BackfillTeamImbalancePenalty * (1.0 - reducingPrecisionFactor)
 		}
 	}
 
 	// Older matches get slight penalty to prefer fresher games
 	matchAge := time.Since(match.Label.StartTime)
-	if matchAge > 2*time.Minute {
-		agePenalty := float64(matchAge.Minutes()) * 2.0 * (1.0 - reducingPrecisionFactor)
+	if matchAge > BackfillMatchAgeThreshold {
+		agePenalty := float64(matchAge.Minutes()) * BackfillMatchAgePenaltyPerMinute * (1.0 - reducingPrecisionFactor)
 		score -= agePenalty
 	}
 
@@ -395,7 +425,7 @@ func (b *PostMatchmakerBackfill) ProcessBackfill(ctx context.Context, candidates
 				continue
 			}
 
-			if result != nil && result.Score > 0 {
+			if result != nil && result.Score > BackfillMinAcceptableScore {
 				results = append(results, result)
 
 				// Update match open slots to reflect this assignment
