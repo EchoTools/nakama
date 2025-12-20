@@ -4,8 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/echotools/nevr-common/v3/rtapi"
-	"github.com/echotools/nevr-common/v4/gen/go/telemetry/v1"
+	"github.com/echotools/nevr-common/v4/gen/go/rtapi"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -86,10 +85,10 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 	}
 	if len(rejectedIDs) == 0 {
 		envelope := &rtapi.Envelope{
-			Message: &rtapi.Envelope_LobbyEntrantsReject{
-				LobbyEntrantsReject: &rtapi.LobbyEntrantsRejectMessage{
+			Message: &rtapi.Envelope_LobbyEntrantReject{
+				LobbyEntrantReject: &rtapi.LobbyEntrantsRejectMessage{
 					EntrantIds: rejectedIDs,
-					Code:       int32(rtapi.LobbyEntrantsRejectMessage_BAD_REQUEST),
+					Code:       int32(rtapi.LobbyEntrantsRejectMessage_CODE_BAD_REQUEST),
 				},
 			},
 		}
@@ -151,14 +150,14 @@ func (p *EvrPipeline) lobbySessionEvent(logger *zap.Logger, session *sessionWS, 
 	message := in.GetLobbySessionEvent()
 	matchID, _ := NewMatchID(uuid.FromStringOrNil(message.LobbySessionId), p.node)
 	var opcode SignalOpCode
-	switch telemetry.LobbySessionEventMessage_Code(message.Code) {
-	case telemetry.LobbySessionEventMessage_LOCKED:
+	switch rtapi.LobbySessionEventMessage_Code(message.Code) {
+	case rtapi.LobbySessionEventMessage_CODE_LOCKED:
 		opcode = SignalLockSession
-	case telemetry.LobbySessionEventMessage_UNLOCKED:
+	case rtapi.LobbySessionEventMessage_CODE_UNLOCKED:
 		opcode = SignalUnlockSession
-	case telemetry.LobbySessionEventMessage_STARTED:
+	case rtapi.LobbySessionEventMessage_CODE_STARTED:
 		opcode = SignalStartedSession
-	case telemetry.LobbySessionEventMessage_ENDED:
+	case rtapi.LobbySessionEventMessage_CODE_ENDED:
 		opcode = SignalEndedSession
 	default:
 		return fmt.Errorf("unknown lobby session event code: %d", message.Code)
