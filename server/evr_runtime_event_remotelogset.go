@@ -481,8 +481,8 @@ func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logge
 				}
 			}
 
-			// Send Discord DM if tier changed
-			if tierChanged {
+			// Send Discord DM if tier changed (unless silent mode is enabled)
+			if tierChanged && !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
 				discordID, err := GetDiscordIDByUserID(ctx, db, userID)
 				if err != nil {
 					logger.WithField("error", err).Warn("Failed to get Discord ID for tier notification")
