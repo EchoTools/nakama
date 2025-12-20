@@ -930,6 +930,58 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			if err := SendMatchSummary(ctx, logger, nk, state); err != nil {
 				logger.WithField("error", err).Error("failed to send match summary")
 			}
+
+			// Increment completed matches for players who stayed until the end
+			_nk := nk.(*RuntimeGoNakamaModule)
+			serviceSettings := ServiceSettings()
+			for _, presence := range state.presenceMap {
+				// Skip non-players (spectators, moderators)
+				if presence.RoleAlignment == evr.TeamSpectator || presence.RoleAlignment == evr.TeamModerator {
+					continue
+				}
+
+				eqconfig := NewEarlyQuitConfig()
+				if err := StorableRead(ctx, nk, presence.GetUserId(), eqconfig, true); err != nil {
+					logger.WithField("error", err).Warn("Failed to load early quitter config for completed match")
+					continue
+				}
+
+				eqconfig.IncrementCompletedMatches()
+
+				// Check for tier change after completing match
+				oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
+
+				logger.WithFields(map[string]interface{}{
+					"user_id":      presence.GetUserId(),
+					"old_tier":     oldTier,
+					"new_tier":     newTier,
+					"tier_changed": tierChanged,
+					"eqconfig":     eqconfig,
+				}).Debug("Player completed match tier update.")
+
+				if err := StorableWrite(ctx, nk, presence.GetUserId(), eqconfig); err != nil {
+					logger.Warn("Failed to write early quitter config after completed match", zap.Error(err))
+				} else {
+					if s := _nk.sessionRegistry.Get(uuid.FromStringOrNil(presence.GetSessionId())); s != nil {
+						if params, ok := LoadParams(s.Context()); ok {
+							params.earlyQuitConfig.Store(eqconfig)
+						}
+					}
+
+					// Send Discord DM if tier changed (restored from penalty tier), unless silent mode is enabled
+					if tierChanged && newTier == MatchmakingTier1 && !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
+						discordID, err := GetDiscordIDByUserID(ctx, db, presence.GetUserId())
+						if err != nil {
+							logger.Warn("Failed to get Discord ID for tier notification", zap.Error(err))
+						} else if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
+							message := TierRestoredMessage
+							if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
+								logger.Warn("Failed to send tier restored Discord DM", zap.Error(err))
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 
