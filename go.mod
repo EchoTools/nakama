@@ -10,8 +10,7 @@ require (
 	github.com/blugelabs/query_string v0.3.0
 	github.com/dgryski/dgoogauth v0.0.0-20190221195224-5a805980a5f3
 	github.com/dop251/goja v0.0.0-20251103141225-af2ceb9156d7
-	github.com/echotools/nevr-common/v3 v3.1.0
-	github.com/echotools/nevr-common/v4 v4.0.0
+	github.com/echotools/nevr-common/v4 v4.1.0
 	github.com/echotools/vrmlgo/v5 v5.0.1
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/go-restruct/restruct v1.2.0-alpha
