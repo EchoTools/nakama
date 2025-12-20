@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -95,24 +96,10 @@ func TestMatchLockRPCResponse_String(t *testing.T) {
 	}
 
 	for _, field := range expectedFields {
-		if !containsString(jsonStr, field) {
+		if !strings.Contains(jsonStr, field) {
 			t.Errorf("MatchLockRPCResponse.String() missing expected field: %s", field)
 		}
 	}
-}
-
-// Helper function to check if a string contains a substring
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstring(s, substr))
-}
-
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func TestMatchLockRPCRequest_Validation(t *testing.T) {
