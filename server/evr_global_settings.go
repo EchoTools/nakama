@@ -107,6 +107,9 @@ type GlobalMatchmakingSettings struct {
 	PartySkillBoostPercent         float64                 `json:"party_skill_boost_percent"`           // Boost party effective skill by this percentage (e.g., 0.10 = 10%) to account for coordination advantage
 	EnableRosterVariants           bool                    `json:"enable_roster_variants"`              // Generate multiple roster variants (balanced/stacked) for better match selection
 	UseSnakeDraftTeamFormation     bool                    `json:"use_snake_draft_team_formation"`      // Use snake draft instead of sequential filling for team formation
+	EnablePostMatchmakerBackfill   bool                    `json:"enable_post_matchmaker_backfill"`     // Enable post-matchmaker backfill using matchmaker exports and match list
+	ReducingPrecisionIntervalSecs  int                     `json:"reducing_precision_interval_secs"`    // Interval in seconds after which constraints are relaxed for backfill (0 = disabled)
+	ReducingPrecisionMaxCycles     int                     `json:"reducing_precision_max_cycles"`       // Maximum number of precision reduction cycles before fully relaxing constraints
 }
 
 type QueryAddons struct {
@@ -297,6 +300,14 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 
 	if data.Matchmaking.ServerSelection.RTTDelta == nil {
 		data.Matchmaking.ServerSelection.RTTDelta = make(map[string]int)
+	}
+
+	// Set default reducing precision settings for post-matchmaker backfill
+	if data.Matchmaking.ReducingPrecisionIntervalSecs == 0 {
+		data.Matchmaking.ReducingPrecisionIntervalSecs = 30 // Relax constraints every 30 seconds
+	}
+	if data.Matchmaking.ReducingPrecisionMaxCycles == 0 {
+		data.Matchmaking.ReducingPrecisionMaxCycles = 5 // Maximum 5 cycles before fully relaxing
 	}
 
 	if data.RemoteLogFilters == nil {

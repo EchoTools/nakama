@@ -33,13 +33,15 @@ type LobbyBuilder struct {
 	tracker         Tracker
 	metrics         Metrics
 
-	mapQueue map[evr.Symbol][]evr.Symbol // map[mode][]level
+	mapQueue          map[evr.Symbol][]evr.Symbol // map[mode][]level
+	postMatchBackfill *PostMatchmakerBackfill
+	skillBasedMM      *SkillBasedMatchmaker
 }
 
 func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics) *LobbyBuilder {
 	logger = logger.With(zap.String("module", "lobby_builder"))
 
-	return &LobbyBuilder{
+	lb := &LobbyBuilder{
 		logger: logger,
 		nk:     nk,
 
@@ -50,6 +52,16 @@ func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistr
 
 		mapQueue: make(map[evr.Symbol][]evr.Symbol),
 	}
+
+	// Create the post-matchmaker backfill handler
+	lb.postMatchBackfill = NewPostMatchmakerBackfill(logger, nk, sessionRegistry, matchRegistry, tracker, metrics)
+
+	return lb
+}
+
+// SetSkillBasedMatchmaker sets the skill-based matchmaker reference for accessing matchmaker results
+func (b *LobbyBuilder) SetSkillBasedMatchmaker(sbmm *SkillBasedMatchmaker) {
+	b.skillBasedMM = sbmm
 }
 
 func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
@@ -59,6 +71,80 @@ func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 			b.logger.With(zap.Any("entries", entries)).Error("Failed to build match", zap.Error(err))
 			return
 		}
+	}
+
+	// After building matches, attempt post-matchmaker backfill if enabled
+	if ServiceSettings().Matchmaking.EnablePostMatchmakerBackfill && b.skillBasedMM != nil {
+		go b.runPostMatchmakerBackfill()
+	}
+}
+
+// runPostMatchmakerBackfill runs the post-matchmaker backfill process
+func (b *LobbyBuilder) runPostMatchmakerBackfill() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	logger := b.logger.With(zap.String("operation", "post_matchmaker_backfill"))
+
+	// Get the latest matchmaker results
+	candidates, madeMatches := b.skillBasedMM.GetLatestResult()
+	if len(candidates) == 0 {
+		return
+	}
+
+	// Extract unmatched candidates
+	unmatchedCandidates := b.postMatchBackfill.ExtractUnmatchedCandidates(candidates, madeMatches)
+	if len(unmatchedCandidates) == 0 {
+		logger.Debug("No unmatched candidates for post-matchmaker backfill")
+		return
+	}
+
+	logger.Info("Running post-matchmaker backfill",
+		zap.Int("unmatched_candidates", len(unmatchedCandidates)),
+		zap.Int("made_matches", len(madeMatches)))
+
+	// Calculate reducing precision factor based on oldest ticket
+	settings := ServiceSettings().Matchmaking
+	reducingPrecisionFactor := 0.0
+
+	if settings.ReducingPrecisionIntervalSecs > 0 {
+		oldestSubmission := time.Now()
+		for _, c := range unmatchedCandidates {
+			if c.SubmissionTime.Before(oldestSubmission) {
+				oldestSubmission = c.SubmissionTime
+			}
+		}
+
+		waitTime := time.Since(oldestSubmission)
+		interval := time.Duration(settings.ReducingPrecisionIntervalSecs) * time.Second
+		maxCycles := float64(settings.ReducingPrecisionMaxCycles)
+
+		if maxCycles > 0 && interval > 0 {
+			cycles := float64(waitTime) / float64(interval)
+			reducingPrecisionFactor = min(cycles/maxCycles, 1.0)
+		}
+	}
+
+	logger.Debug("Reducing precision factor calculated",
+		zap.Float64("factor", reducingPrecisionFactor))
+
+	// Process backfill
+	results, err := b.postMatchBackfill.ProcessBackfill(ctx, unmatchedCandidates, reducingPrecisionFactor)
+	if err != nil {
+		logger.Error("Failed to process post-matchmaker backfill", zap.Error(err))
+		return
+	}
+
+	if len(results) == 0 {
+		logger.Debug("No backfill matches found")
+		return
+	}
+
+	logger.Info("Found backfill matches", zap.Int("count", len(results)))
+
+	// Execute backfill
+	if err := b.postMatchBackfill.ExecuteBackfill(ctx, logger, results); err != nil {
+		logger.Error("Failed to execute post-matchmaker backfill", zap.Error(err))
 	}
 }
 
