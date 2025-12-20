@@ -89,7 +89,13 @@ func MatchLockRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 
 	// Get the target's Discord ID if not provided
 	if targetDiscordID == "" {
-		targetDiscordID, _ = GetDiscordIDByUserID(ctx, db, targetUserID)
+		targetDiscordID, err = GetDiscordIDByUserID(ctx, db, targetUserID)
+		if err != nil {
+			logger.WithFields(map[string]interface{}{
+				"target_user_id": targetUserID,
+				"error":          err.Error(),
+			}).Error("Failed to fetch Discord ID by user ID in match lock RPC")
+		}
 	}
 
 	// Load the target's matchmaking settings
