@@ -14,6 +14,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -399,6 +400,11 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 	hasRole := profile.IsLinked() && !profile.IsDisabled()
 	if err := c.updateMemberRole(member, roleID, hasRole); err != nil {
 		logger.Warn("Error updating headset-linked role", zap.String("role", roleID), zap.Error(err))
+	}
+
+	// Update platform-based roles (Standalone/PCVR)
+	if err := c.updatePlatformRoles(ctx, logger, member, group, userID); err != nil {
+		logger.Warn("Error updating platform roles", zap.Error(err))
 	}
 
 	return nil
@@ -989,4 +995,88 @@ func (d *DiscordIntegrator) GuildGroupName(groupID string) string {
 		return ""
 	}
 	return guild.Name
+}
+
+// updatePlatformRoles updates Standalone and PCVR roles based on the user's login history
+func (d *DiscordIntegrator) updatePlatformRoles(ctx context.Context, logger *zap.Logger, member *discordgo.Member, group *GuildGroup, userID string) error {
+	// Skip if neither role is configured
+	if group.RoleMap.Standalone == "" && group.RoleMap.PCVR == "" {
+		return nil
+	}
+
+	// Get the user's login history to determine their platform
+	objs, err := d.nk.StorageRead(ctx, []*runtime.StorageRead{
+		{
+			Collection: LoginStorageCollection,
+			Key:        LoginHistoryStorageKey,
+			UserID:     userID,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("error reading login history: %w", err)
+	}
+
+	// If no login history exists, remove both roles
+	if len(objs) == 0 {
+		if err := d.updateMemberRole(member, group.RoleMap.Standalone, false); err != nil {
+			return err
+		}
+		if err := d.updateMemberRole(member, group.RoleMap.PCVR, false); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// Parse login history
+	loginHistory := &LoginHistory{}
+	if err := json.Unmarshal([]byte(objs[0].Value), loginHistory); err != nil {
+		return fmt.Errorf("error unmarshalling login history: %w", err)
+	}
+
+	// Determine the most recent platform used
+	var mostRecentEntry *LoginHistoryEntry
+	var mostRecentTime time.Time
+
+	// Check active entries first
+	for _, entry := range loginHistory.Active {
+		if entry.UpdatedAt.After(mostRecentTime) {
+			mostRecentTime = entry.UpdatedAt
+			mostRecentEntry = entry
+		}
+	}
+
+	// If no active entries, check history
+	if mostRecentEntry == nil {
+		for _, entry := range loginHistory.History {
+			if entry.UpdatedAt.After(mostRecentTime) {
+				mostRecentTime = entry.UpdatedAt
+				mostRecentEntry = entry
+			}
+		}
+	}
+
+	// If still no entry found, remove both roles
+	if mostRecentEntry == nil {
+		if err := d.updateMemberRole(member, group.RoleMap.Standalone, false); err != nil {
+			return err
+		}
+		if err := d.updateMemberRole(member, group.RoleMap.PCVR, false); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// Determine if user is on PCVR or Standalone based on explicit BuildNumber check
+	// Only classify as PCVR if it's the known PCVR build, otherwise default to Standalone
+	isPCVR := mostRecentEntry.LoginData.BuildNumber == evr.PCVRBuild
+
+	// Update roles accordingly
+	if err := d.updateMemberRole(member, group.RoleMap.PCVR, isPCVR); err != nil {
+		return fmt.Errorf("error updating PCVR role: %w", err)
+	}
+	if err := d.updateMemberRole(member, group.RoleMap.Standalone, !isPCVR); err != nil {
+		return fmt.Errorf("error updating Standalone role: %w", err)
+	}
+
+	return nil
 }
