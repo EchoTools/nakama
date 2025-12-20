@@ -886,7 +886,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 					&discordgo.Button{
 						Label:    "Set IGN Override",
 						Style:    discordgo.PrimaryButton,
-						CustomID: fmt.Sprintf("set_ign_override:%s", target.ID),
+						CustomID: fmt.Sprintf("set_ign_override:%s:%s", target.ID, i.GuildID),
 					},
 				},
 			},
