@@ -626,21 +626,21 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 
 	//maxDelta := 60 // milliseconds
 	rttDeltas := ServiceSettings().Matchmaking.ServerSelection.RTTDelta
-	for k, v := range p.latencyHistory.Load().AverageRTTs(true) {
+	for ip, v := range p.latencyHistory.Load().AverageRTTs(true) {
 		rtt := v
-		if delta, ok := rttDeltas[k]; ok {
+		if delta, ok := rttDeltas[ip]; ok {
 			rtt += delta
 		}
-		numericProperties[RTTPropertyPrefix+k] = float64(rtt)
+		numericProperties[RTTPropertyPrefix+EncodeEndpointID(ip)] = float64(rtt)
 		//qparts = append(qparts, fmt.Sprintf("properties.%s:<=%d", k, v+maxDelta))
 	}
 
 	if ticketParams.IncludeRequireCommonServer {
-		// Create a string list of validRTTs
+		// Create a string list of validRTTs (using encoded endpoint IDs)
 		acceptableServers := make([]string, 0)
 		for ip, rtt := range p.latencyHistory.Load().LatestRTTs() {
 			if rtt <= p.MaxServerRTT {
-				acceptableServers = append(acceptableServers, ip)
+				acceptableServers = append(acceptableServers, EncodeEndpointID(ip))
 			}
 		}
 

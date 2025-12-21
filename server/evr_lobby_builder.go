@@ -246,6 +246,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	}
 
 	// Update the entrant ping to the game server
+	endpointID := EncodeEndpointID(label.GameServer.Endpoint.ExternalIP.String())
 	for _, p := range entrantPresences {
 		p.PingMillis = int(latenciesByPlayerByExtIP[label.GameServer.Endpoint.ExternalIP.String()][p.GetUserId()])
 	}
@@ -497,7 +498,7 @@ func LobbyGameServerList(ctx context.Context, nk runtime.NakamaModule, query str
 	return labels, nil
 }
 
-func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupIDs []string, rttsByExternalIP map[string]int, settings *MatchSettings, regions []string, requireDefaultRegion bool, requireRegion bool, queryAddon string) (*MatchLabel, error) {
+func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupIDs []string, rttsByEndpoint map[string]int, settings *MatchSettings, regions []string, requireDefaultRegion bool, requireRegion bool, queryAddon string) (*MatchLabel, error) {
 
 	if len(groupIDs) == 0 {
 		return nil, fmt.Errorf("no group IDs provided")
@@ -597,7 +598,13 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 			continue
 		}
 
-		rtt := rttsByExternalIP[extIP]
+		// Look up RTT using both raw IP and encoded endpoint ID for compatibility
+		// (matchmaking properties use encoded IDs, direct client data uses raw IPs)
+		endpointID := EncodeEndpointID(extIP)
+		rtt := rttsByEndpoint[endpointID]
+		if rtt == 0 {
+			rtt = rttsByEndpoint[extIP]
+		}
 		if delta, ok := globalSettings.ServerSelection.RTTDelta[label.GameServer.Username]; ok {
 			rtt += delta
 		}
@@ -605,15 +612,18 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 			rtt += delta
 		}
 
+		isReachable := rttsByEndpoint[endpointID] != 0 || rttsByEndpoint[extIP] != 0
+		isHighLatency := rtt > 100
+
 		indexes = append(indexes, labelIndex{
 			Label:             label,
 			RTT:               (rtt + 10) / 20 * 20,
-			IsReachable:       rttsByExternalIP[extIP] != 0,
+			IsReachable:       isReachable,
 			Rating:            rating,
 			IsPriorityForMode: slices.Contains(label.GameServer.DesignatedModes, settings.Mode),
 			ActiveCount:       activeCountByHostID[hostID],
 			IsRegionMatch:     regionMatch,
-			IsHighLatency:     rttsByExternalIP[extIP] > 100,
+			IsHighLatency:     isHighLatency,
 		})
 	}
 
