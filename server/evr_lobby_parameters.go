@@ -490,14 +490,15 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 	}
 
 	if includeMaxRTT {
-		validRTTs := make([]string, 0)
+		// Exclude servers that cannot be reached (either unreachable or RTT too high)
+		unreachableEndpointIDs := make([]string, 0)
 		for ip, rtt := range p.latencyHistory.Load().LatestRTTs() {
-			if rtt <= p.MaxServerRTT {
-				validRTTs = append(validRTTs, ip)
+			if rtt > p.MaxServerRTT {
+				unreachableEndpointIDs = append(unreachableEndpointIDs, EncodeEndpointID(ip))
 			}
 		}
-		if len(validRTTs) > 0 {
-			qparts = append(qparts, fmt.Sprintf("+label.broadcaster.endpoint:%s", Query.CreateMatchPatternPartial(validRTTs)))
+		if len(unreachableEndpointIDs) > 0 {
+			qparts = append(qparts, fmt.Sprintf("-label.broadcaster.endpoint_id:%s", Query.CreateMatchPattern(unreachableEndpointIDs)))
 		}
 	}
 	return strings.Join(qparts, " ")
@@ -633,24 +634,6 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		}
 		numericProperties[RTTPropertyPrefix+EncodeEndpointID(ip)] = float64(rtt)
 		//qparts = append(qparts, fmt.Sprintf("properties.%s:<=%d", k, v+maxDelta))
-	}
-
-	if ticketParams.IncludeRequireCommonServer {
-		// Create a string list of validRTTs (using encoded endpoint IDs)
-		acceptableServers := make([]string, 0)
-		for ip, rtt := range p.latencyHistory.Load().LatestRTTs() {
-			if rtt <= p.MaxServerRTT {
-				acceptableServers = append(acceptableServers, EncodeEndpointID(ip))
-			}
-		}
-
-		stringProperties["servers"] = strings.Join(acceptableServers, " ")
-
-		// Add the acceptable servers to the query
-		if len(acceptableServers) > 0 {
-			qparts = append(qparts, fmt.Sprintf("+properties.servers:%s", Query.CreateMatchPattern(acceptableServers)))
-		}
-
 	}
 
 	// Remove blanks from qparts
