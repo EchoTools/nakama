@@ -110,7 +110,7 @@ type EventMatchSummary struct {
 // Process persists the match summary and disconnect view into MongoDB.
 func (e *EventMatchSummary) Process(ctx context.Context, logger runtime.Logger, dispatcher *EventDispatcher) error {
 	if dispatcher.mongo == nil {
-		logger.Warn("mongodb client not configured; skipping match summary insert")
+		logger.Debug("mongodb client not configured; skipping match summary insert")
 		return nil
 	}
 

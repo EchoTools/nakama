@@ -54,9 +54,15 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 	isNew, allowed := loginHistory.Update(e.XPID, e.ClientIP, e.LoginPayload, e.IsWebSocketAuthenticated)
 
 	if allowed && isNew {
-		if err := SendIPAuthorizationNotification(dg, userID, e.ClientIP); err != nil {
-			// Log the error, but don't return it.
-			logger.WithField("error", err).Warn("Failed to send IP authorization notification")
+		// Get the account to retrieve the Discord ID
+		account, err := nk.AccountGetId(ctx, userID)
+		if err != nil {
+			logger.WithField("error", err).Warn("Failed to get account for IP authorization notification")
+		} else if discordID := account.CustomId; discordID != "" {
+			if err := SendIPAuthorizationNotification(dg, discordID, e.ClientIP); err != nil {
+				// Log the error, but don't return it.
+				logger.WithField("error", err).Warn("Failed to send IP authorization notification")
+			}
 		}
 	}
 
