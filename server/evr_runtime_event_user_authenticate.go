@@ -58,8 +58,8 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 		account, err := nk.AccountGetId(ctx, userID)
 		if err != nil {
 			logger.WithField("error", err).Warn("Failed to get account for IP authorization notification")
-		} else if account.CustomId != "" {
-			if err := SendIPAuthorizationNotification(dg, account.CustomId, e.ClientIP); err != nil {
+		} else if discordID := account.CustomId; discordID != "" {
+			if err := SendIPAuthorizationNotification(dg, discordID, e.ClientIP); err != nil {
 				// Log the error, but don't return it.
 				logger.WithField("error", err).Warn("Failed to send IP authorization notification")
 			}
