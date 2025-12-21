@@ -44,12 +44,11 @@ var (
 )
 
 type MatchmakingTicketParameters struct {
-	MinCount                   int
-	MaxCount                   int
-	CountMultiple              int
-	IncludeSBMMRanges          bool
-	IncludeEarlyQuitPenalty    bool
-	IncludeRequireCommonServer bool
+	MinCount                int
+	MaxCount                int
+	CountMultiple           int
+	IncludeSBMMRanges       bool
+	IncludeEarlyQuitPenalty bool
 }
 
 func (m *MatchmakingTicketParameters) MarshalText() ([]byte, error) {
@@ -337,7 +336,7 @@ func (e *LatencyMetric) ID() string {
 
 // The key used for matchmaking properties
 func (e *LatencyMetric) AsProperty() (string, float64) {
-	k := RTTPropertyPrefix + e.Endpoint.ExternalIP.String()
+	k := RTTPropertyPrefix + EncodeEndpointID(e.Endpoint.ExternalIP.String())
 	v := float64(e.RTT / time.Millisecond)
 	return k, v
 }

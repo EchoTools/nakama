@@ -2,7 +2,10 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base32"
+	"strings"
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -14,6 +17,15 @@ const (
 	MaximumRankDelta  = 0.10
 	RTTPropertyPrefix = "rtt_"
 )
+
+// EncodeEndpointID creates a short, obfuscated identifier from an IP address
+// This is used to avoid exposing raw IP addresses in matchmaking ticket properties
+func EncodeEndpointID(ip string) string {
+	hash := sha256.Sum256([]byte(ip))
+	// Use base32 encoding (alphanumeric, case-insensitive) and take first 8 chars
+	encoded := base32.StdEncoding.EncodeToString(hash[:])
+	return strings.ToLower(encoded[:8])
+}
 
 type SkillBasedMatchmaker struct {
 	latestCandidates *atomic.Value // [][]runtime.MatchmakerEntry
