@@ -266,7 +266,11 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	// Update the entrant ping to the game server
 	endpointID := EncodeEndpointID(label.GameServer.Endpoint.ExternalIP.String())
 	for _, p := range entrantPresences {
-		p.PingMillis = int(latenciesByPlayerByExtIP[endpointID][p.GetUserId()])
+		if endpointLatencies, ok := latenciesByPlayerByExtIP[endpointID]; ok && endpointLatencies != nil {
+			if latency, ok := endpointLatencies[p.GetUserId()]; ok {
+				p.PingMillis = int(latency)
+			}
+		}
 	}
 
 	serverSession := b.sessionRegistry.Get(label.GameServer.SessionID)
