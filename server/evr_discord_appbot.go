@@ -3154,6 +3154,20 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					})
 				}
 
+			case "set_ign_modal":
+				// Handle IGN override modal submission
+				data := i.ModalSubmitData()
+				if err := d.handleSetIGNModalSubmit(ctx, logger, s, i, &data, value); err != nil {
+					logger.Error("Failed to handle set IGN modal submit", zap.Error(err))
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "Failed to set IGN override: " + err.Error(),
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					})
+				}
+
 			default:
 				logger.WithField("custom_id", i.ModalSubmitData().CustomID).Info("Unhandled modal submit")
 			}
