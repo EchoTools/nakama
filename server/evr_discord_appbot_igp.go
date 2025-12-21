@@ -646,7 +646,7 @@ func (p *InGamePanel) HandleInteraction(i *discordgo.InteractionCreate, command 
 		}
 
 		// Get the selected user ID
-		modal := p.createSetIGNModal(userID, groupID, evrProfile.GetGroupIGN(groupID))
+		modal := p.createSetIGNModal(i.Member.User.ID, i.GuildID, evrProfile.GetGroupIGN(groupID))
 		return p.dg.InteractionRespond(i.Interaction, modal)
 
 	case "select_player":
@@ -763,7 +763,7 @@ func (d *DiscordAppBot) handleInGamePanel(ctx context.Context, logger runtime.Lo
 	return nil
 }
 
-func (d *DiscordAppBot) handleSetModalSubmit(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, data *discordgo.ModalSubmitInteractionData, value string) error {
+func (d *DiscordAppBot) handleSetIGNModalSubmit(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, data *discordgo.ModalSubmitInteractionData, value string) error {
 	// Handle IGN override modal submission from lookup command
 	// targetUserID:groupID
 	parts := strings.SplitN(value, ":", 2)
