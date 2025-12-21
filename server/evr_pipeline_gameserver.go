@@ -196,7 +196,10 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	}
 
 	// Warn the user that using regionHash is deprecated.
-	if !slices.Contains([]evr.Symbol{evr.UnspecifiedRegion, evr.DefaultRegion}, regionHash) {
+	// Allow unspecified or default region in the -serverregion argument
+	allowedRegions := []evr.Symbol{evr.UnspecifiedRegion, evr.DefaultRegion}
+
+	if !slices.Contains(allowedRegions, regionHash) {
 		// Send the message to the user that the serverregion command line argument is deprecated
 		warning := "The 'serverregion' command line argument is deprecated. Please use the 'regions' URL parameter instead. Include 'default' to be in the public matchmaking pool."
 		go SendUserMessage(ctx, p.discordCache.dg, params.DiscordID(), warning)
