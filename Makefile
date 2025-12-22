@@ -24,7 +24,7 @@ dev: $(SRC_FILES)
 build: $(SRC_FILES)
 		docker buildx build \
 			--build-arg VERSION=$(GIT_DESCRIBE) \
-			-t echotools/nakama:$(TAG) . -f build/Dockerfile.local
+			-t ghcr.io/echotools/nakama:$(TAG) . -f build/Dockerfile.local
 
 release: build
 	@if [ "$(TAG)" == "dev" ]; then \
@@ -33,7 +33,7 @@ release: build
 	else \
 		docker buildx build --push \
 			--build-arg VERSION=$(GIT_DESCRIBE) \
-			-t echotools/nakama:latest . -f build/Dockerfile.local; \
+			-t ghcr.io/echotools/nakama:latest . -f build/Dockerfile.local; \
 	fi
 
 # Benchmark targets
