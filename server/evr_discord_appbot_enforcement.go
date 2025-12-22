@@ -14,16 +14,35 @@ import (
 
 // handleEnforcementInteraction handles button interactions for enforcement records (edit, void)
 func (d *DiscordAppBot) handleEnforcementInteraction(ctx context.Context, _ runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, value string) error {
-	// value format: action:recordID:groupID:targetUserID
+	// value format: action:recordID:guildID:targetDiscordID (new: e:recordID:guildID:targetDiscordID or v:recordID:guildID:targetDiscordID)
 	parts := strings.SplitN(value, ":", 4)
 	if len(parts) != 4 {
 		return fmt.Errorf("invalid enforcement interaction format")
 	}
 
 	action := parts[0]
+	// Map short format to full format for compatibility
+	switch action {
+	case "e":
+		action = "edit"
+	case "v":
+		action = "void"
+	}
+
 	recordID := parts[1]
-	groupID := parts[2]
-	targetUserID := parts[3]
+	guildID := parts[2]
+	targetDiscordID := parts[3]
+
+	// Convert Discord IDs to internal IDs
+	groupID := d.cache.GuildIDToGroupID(guildID)
+	targetUserID := d.cache.DiscordIDToUserID(targetDiscordID)
+
+	if groupID == "" {
+		return fmt.Errorf("guild not found")
+	}
+	if targetUserID == "" {
+		return fmt.Errorf("target user not found")
+	}
 
 	user, _ := getScopedUserMember(i)
 	if user == nil {
@@ -85,12 +104,19 @@ func (d *DiscordAppBot) showEnforcementEditModal(s *discordgo.Session, i *discor
 	}
 	durationStr := FormatDuration(totalDuration)
 
+	// Get Discord IDs from internal IDs
+	targetDiscordID := d.cache.UserIDToDiscordID(targetUserID)
+	targetMention := targetUserID
+	if targetDiscordID != "" {
+		targetMention = fmt.Sprintf("<@%s>", targetDiscordID)
+	}
+
 	// Create the modal with pre-filled values
 	modal := &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
-			CustomID: fmt.Sprintf("enforcement_edit:%s:%s:%s", recordID, groupID, targetUserID),
-			Title:    "Edit Enforcement Record",
+			CustomID: fmt.Sprintf("enf_edit:%s:%s", targetDiscordID, recordID),
+			Title:    fmt.Sprintf("Edit Record for %s", targetMention),
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{
 					Components: []discordgo.MessageComponent{
@@ -172,14 +198,14 @@ func (d *DiscordAppBot) showEnforcementVoidModal(s *discordgo.Session, i *discor
 	modal := &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
-			CustomID: fmt.Sprintf("enforcement_void:%s:%s:%s", recordID, groupID, targetUserID),
-			Title:    "Void Enforcement Record",
+			CustomID: fmt.Sprintf("enf_void:%s:%s", targetDiscordID, recordID),
+			Title:    fmt.Sprintf("Void Record for %s", targetMention),
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
 							CustomID:    "void_reason_input",
-							Label:       fmt.Sprintf("Reason for voiding (target: %s)", targetMention),
+							Label:       "Reason for voiding",
 							Style:       discordgo.TextInputParagraph,
 							Placeholder: "Enter reason for voiding this suspension",
 							Required:    true,
@@ -199,14 +225,20 @@ func (d *DiscordAppBot) showEnforcementVoidModal(s *discordgo.Session, i *discor
 func (d *DiscordAppBot) handleEnforcementEditModalSubmit(logger runtime.Logger, i *discordgo.InteractionCreate, value string) error {
 	ctx := d.ctx
 
-	// Parse value: recordID:groupID:targetUserID
-	parts := strings.SplitN(value, ":", 3)
-	if len(parts) != 3 {
-		return fmt.Errorf("invalid enforcement edit modal value")
+	// Parse value: targetDiscordID:recordID
+	parts := strings.SplitN(value, ":", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid enforcement edit modal value: expected targetDiscordID:recordID, got %s", value)
 	}
-	recordID := parts[0]
-	groupID := parts[1]
-	targetUserID := parts[2]
+	targetDiscordID := parts[0]
+	recordID := parts[1]
+
+	// Convert Discord IDs to internal IDs
+	groupID := d.cache.GuildIDToGroupID(i.GuildID)
+	targetUserID := d.cache.DiscordIDToUserID(targetDiscordID)
+	if groupID == "" || targetUserID == "" {
+		return fmt.Errorf("failed to convert Discord IDs to internal IDs")
+	}
 
 	// Get caller info
 	callerID := d.cache.DiscordIDToUserID(i.Member.User.ID)
@@ -253,8 +285,11 @@ func (d *DiscordAppBot) handleEnforcementEditModalSubmit(logger runtime.Logger, 
 		return simpleInteractionResponse(d.dg, i, "This record has already been voided and cannot be edited.")
 	}
 
+	// Save old record values before editing
+	oldRecord := *record
+
 	// Create "before" embed for audit
-	beforeEmbed := createEnforcementRecordEmbed("Before Edit", *record, gg)
+	beforeEmbed := createEnforcementRecordEmbed("Before Edit", oldRecord, gg)
 
 	// Calculate new expiry: from original CreatedAt + new duration
 	newExpiry := record.CreatedAt.Add(newDuration)
@@ -277,7 +312,7 @@ func (d *DiscordAppBot) handleEnforcementEditModalSubmit(logger runtime.Logger, 
 	d.sendEnforcementEditAuditLog(logger, i.Member.User, groupID, gg, beforeEmbed, afterEmbed)
 
 	// Update the original message to reflect the changes
-	if err := d.updateEnforcementMessage(i, *updatedRecord, gg, false); err != nil {
+	if err := d.updateEnforcementMessage(i, oldRecord, *updatedRecord, gg, false, nil); err != nil {
 		logger.WithField("error", err).Warn("Failed to update enforcement message")
 	}
 
@@ -295,14 +330,20 @@ func (d *DiscordAppBot) handleEnforcementEditModalSubmit(logger runtime.Logger, 
 func (d *DiscordAppBot) handleEnforcementVoidModalSubmit(logger runtime.Logger, i *discordgo.InteractionCreate, value string) error {
 	ctx := d.ctx
 
-	// Parse value: recordID:groupID:targetUserID
-	parts := strings.SplitN(value, ":", 3)
-	if len(parts) != 3 {
-		return fmt.Errorf("invalid enforcement void modal value")
+	// Parse value: targetDiscordID:recordID
+	parts := strings.SplitN(value, ":", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid enforcement void modal value: expected targetDiscordID:recordID, got %s", value)
 	}
-	recordID := parts[0]
-	groupID := parts[1]
-	targetUserID := parts[2]
+	targetDiscordID := parts[0]
+	recordID := parts[1]
+
+	// Convert Discord IDs to internal IDs
+	groupID := d.cache.GuildIDToGroupID(i.GuildID)
+	targetUserID := d.cache.DiscordIDToUserID(targetDiscordID)
+	if groupID == "" || targetUserID == "" {
+		return fmt.Errorf("failed to convert Discord IDs to internal IDs")
+	}
 
 	// Get caller info
 	callerID := d.cache.DiscordIDToUserID(i.Member.User.ID)
@@ -361,7 +402,8 @@ func (d *DiscordAppBot) handleEnforcementVoidModalSubmit(logger runtime.Logger, 
 	d.sendEnforcementVoidAuditLog(logger, i.Member.User, groupID, gg, beforeEmbed, afterEmbed, voidReason)
 
 	// Update the original message to reflect the voided state
-	if err := d.updateEnforcementMessage(i, *record, gg, true); err != nil {
+	voids := journal.GroupVoids(groupID)
+	if err := d.updateEnforcementMessage(i, *record, *record, gg, true, voids); err != nil {
 		logger.WithField("error", err).Warn("Failed to update enforcement message")
 	}
 
@@ -498,103 +540,59 @@ func (d *DiscordAppBot) sendEnforcementVoidAuditLog(logger runtime.Logger, edito
 }
 
 // updateEnforcementMessage updates the original enforcement message with new record data
-func (d *DiscordAppBot) updateEnforcementMessage(i *discordgo.InteractionCreate, record GuildEnforcementRecord, gg *GuildGroup, isVoid bool) error {
+func (d *DiscordAppBot) updateEnforcementMessage(i *discordgo.InteractionCreate, oldRecord, newRecord GuildEnforcementRecord, gg *GuildGroup, isVoid bool, voids map[string]GuildEnforcementRecordVoid) error {
 	if i.Message == nil {
 		return fmt.Errorf("no message to update")
 	}
 
-	// Build updated embed
-	fields := []*discordgo.MessageEmbedField{}
-
-	// Find and preserve Target field from original embed
-	for _, embed := range i.Message.Embeds {
-		for _, field := range embed.Fields {
-			if field.Name == "Target" {
-				fields = append(fields, field)
-				break
-			}
-		}
+	if len(i.Message.Embeds) == 0 {
+		return fmt.Errorf("no embed to update")
 	}
 
-	// Add suspension field
-	if !record.Expiry.IsZero() {
-		suspensionText := fmt.Sprintf("%s (expires <t:%d:R>)", FormatDuration(record.Expiry.Sub(record.CreatedAt)), record.Expiry.Unix())
-		if isVoid {
-			suspensionText = fmt.Sprintf("~~%s~~ **VOIDED**", suspensionText)
-		}
-		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   "Suspension",
-			Value:  suspensionText,
-			Inline: true,
-		})
-	}
-
-	// Add user notice
-	if record.UserNoticeText != "" {
-		noticeText := fmt.Sprintf("*%s*", record.UserNoticeText)
-		if isVoid {
-			noticeText = fmt.Sprintf("~~%s~~", noticeText)
-		}
-		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   "User Notice",
-			Value:  noticeText,
-			Inline: true,
-		})
-	}
-
-	// Add auditor notes
-	if record.AuditorNotes != "" {
-		notesText := fmt.Sprintf("*%s*", record.AuditorNotes)
-		if isVoid {
-			notesText = fmt.Sprintf("~~%s~~", notesText)
-		}
-		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   "Auditor Notes",
-			Value:  notesText,
-			Inline: true,
-		})
-	}
-
-	// Determine embed color
-	embedColor := 0x9656ce // Purple for active
-	if isVoid {
-		embedColor = 0x808080 // Gray for voided
-	}
-
-	// Build the updated embed
-	var originalEmbed *discordgo.MessageEmbed
-	if len(i.Message.Embeds) > 0 {
-		originalEmbed = i.Message.Embeds[0]
-	} else {
-		originalEmbed = &discordgo.MessageEmbed{}
-	}
-
+	// Clone the original embed structure
+	originalEmbed := i.Message.Embeds[0]
 	updatedEmbed := &discordgo.MessageEmbed{
-		Author:      originalEmbed.Author,
-		Thumbnail:   originalEmbed.Thumbnail,
-		Title:       originalEmbed.Title,
-		Description: originalEmbed.Description,
-		Color:       embedColor,
-		Fields:      fields,
-		Timestamp:   record.UpdatedAt.Format(time.RFC3339),
+		Author:    originalEmbed.Author,
+		Thumbnail: originalEmbed.Thumbnail,
+		Title:     originalEmbed.Title,
+		Color:     originalEmbed.Color,
+		Footer:    originalEmbed.Footer,
+		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
+	// Update color and title if voided
 	if isVoid {
+		updatedEmbed.Color = 0x808080 // Gray for voided
 		updatedEmbed.Title = "Enforcement Entry (VOIDED)"
 	}
 
+	// Copy "Target User" field from original, regenerate suspension field
+	updatedEmbed.Fields = make([]*discordgo.MessageEmbedField, 0, len(originalEmbed.Fields))
+	for _, field := range originalEmbed.Fields {
+		if field.Name == "Target User" {
+			updatedEmbed.Fields = append(updatedEmbed.Fields, field)
+		}
+	}
+
+	// Regenerate the suspension details field using the same function as kickPlayer
+	suspensionField := createSuspensionDetailsEmbedField(gg.Name(), []GuildEnforcementRecord{newRecord}, voids, true, true, true, gg.Group.Id)
+	if suspensionField != nil {
+		updatedEmbed.Fields = append(updatedEmbed.Fields, suspensionField)
+	}
+
 	// Build updated buttons (disabled if voided)
+	targetDiscordID := d.cache.UserIDToDiscordID(newRecord.UserID)
 	buttons := []discordgo.MessageComponent{
 		&discordgo.Button{
 			Label:    "Edit",
 			Style:    discordgo.PrimaryButton,
-			CustomID: fmt.Sprintf("enforcement:edit:%s:%s:%s", record.ID, gg.Group.Id, record.UserID),
+			CustomID: fmt.Sprintf("enf:e:%s:%s:%s", newRecord.ID, i.GuildID, targetDiscordID),
 			Disabled: isVoid,
 		},
 		&discordgo.Button{
 			Label:    "Void",
 			Style:    discordgo.DangerButton,
-			CustomID: fmt.Sprintf("enforcement:void:%s:%s:%s", record.ID, gg.Group.Id, record.UserID),
+			CustomID: fmt.Sprintf("enf:v:%s:%s:%s", newRecord.ID, i.GuildID, targetDiscordID),
 			Disabled: isVoid,
 		},
 	}
@@ -605,11 +603,36 @@ func (d *DiscordAppBot) updateEnforcementMessage(i *discordgo.InteractionCreate,
 		},
 	}
 
+	// Build embeds list - updated embed plus changelog embed
+	embeds := []*discordgo.MessageEmbed{updatedEmbed}
+
+	// Create changelog embed showing previous values
+	var changelogDesc string
+	if isVoid {
+		voidInfo := voids[oldRecord.ID]
+		changelogDesc = fmt.Sprintf("<@%s> voided: *%s*\n**Was:** %s, `%s`",
+			i.Member.User.ID,
+			voidInfo.Notes,
+			FormatDuration(oldRecord.Expiry.Sub(oldRecord.CreatedAt)),
+			oldRecord.UserNoticeText)
+	} else {
+		changelogDesc = fmt.Sprintf("<@%s> edited\n**Was:** %s, `%s`",
+			i.Member.User.ID,
+			FormatDuration(oldRecord.Expiry.Sub(oldRecord.CreatedAt)),
+			oldRecord.UserNoticeText)
+	}
+	changelogEmbed := &discordgo.MessageEmbed{
+		Description: changelogDesc,
+		Color:       0x5865F2, // Discord blurple
+		Timestamp:   time.Now().Format(time.RFC3339),
+	}
+	embeds = append(embeds, changelogEmbed)
+
 	// Edit the message
 	_, err := d.dg.ChannelMessageEditComplex(&discordgo.MessageEdit{
 		Channel:    i.Message.ChannelID,
 		ID:         i.Message.ID,
-		Embeds:     &[]*discordgo.MessageEmbed{updatedEmbed},
+		Embeds:     &embeds,
 		Components: &components,
 	})
 

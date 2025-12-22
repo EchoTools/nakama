@@ -740,14 +740,14 @@ func (d *DiscordAppBot) handleModalSubmit(logger runtime.Logger, i *discordgo.In
 	case "set_ign_modal":
 		return d.handleSetIGNModalSubmit(d.ctx, logger, d.dg, i, &data, value)
 
-	case "enforcement_edit":
-		// Handle enforcement record edit modal submission
-		// value format: recordID:groupID:targetUserID
+	case "enf_edit":
+		// Handle enforcement record edit modal submission (short format)
+		// value format: recordID:guildID:targetDiscordID
 		return d.handleEnforcementEditModalSubmit(logger, i, value)
 
-	case "enforcement_void":
-		// Handle enforcement record void modal submission
-		// value format: recordID:groupID:targetUserID
+	case "enf_void":
+		// Handle enforcement record void modal submission (short format)
+		// value format: recordID:guildID:targetDiscordID
 		return d.handleEnforcementVoidModalSubmit(logger, i, value)
 
 	default:

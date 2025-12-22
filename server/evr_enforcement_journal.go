@@ -16,9 +16,9 @@ import (
 )
 
 const (
-	StorageCollectionEnforcementJournal                = "Enforcement"
-	StorageKeyEnforcementJournal                       = "journal"
-	StorageCollectionEnforcementJournalSuspensionIndex = "EnforcementJournalSuspensionsIndex"
+	StorageCollectionEnforcementJournal = "Enforcement"
+	StorageKeyEnforcementJournal        = "journal"
+	StorageIndexEnforcementJournal      = "StorageIndexEnforcementJournal"
 )
 
 type GuildEnforcementRecordVoid struct {
@@ -63,6 +63,20 @@ func (s *GuildEnforcementJournal) SetStorageMeta(meta StorableMetadata) {
 
 func (s GuildEnforcementJournal) GetStorageVersion() string {
 	return s.version
+}
+
+func (s *GuildEnforcementJournal) StorageIndexes() []StorableIndexMeta {
+	/*
+		return []StorableIndexMeta{{
+			Name:       StorageIndexEnforcementJournal,
+			Collection: StorageCollectionEnforcementJournal,
+			Key:        StorageKeyEnforcementJournal,
+			Fields:     []string{"user_id", "records"},
+			MaxEntries: 1000,
+			IndexOnly:  true,
+		}}
+	*/
+	return nil
 }
 
 func GuildEnforcementJournalFromStorageObject(obj *api.StorageObject) (*GuildEnforcementJournal, error) {
