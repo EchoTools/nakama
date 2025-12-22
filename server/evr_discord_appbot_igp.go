@@ -592,7 +592,11 @@ func (p *InGamePanel) createSuspendPlayerModal(targetDiscordID, displayName stri
 	}
 }
 
-func (p *InGamePanel) createSetIGNModal(userID, groupID, currentDisplayName string) *discordgo.InteractionResponse {
+func (p *InGamePanel) createSetIGNModal(userID, groupID, currentDisplayName string, isLocked bool) *discordgo.InteractionResponse {
+	lockValue := "false"
+	if isLocked {
+		lockValue = "true"
+	}
 	return &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
@@ -602,11 +606,24 @@ func (p *InGamePanel) createSetIGNModal(userID, groupID, currentDisplayName stri
 				discordgo.ActionsRow{
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
-							CustomID: "display_name_input",
-							Label:    "Display Name",
-							Value:    currentDisplayName,
-							Style:    discordgo.TextInputShort,
-							Required: true,
+							CustomID:    "display_name_input",
+							Label:       "Display Name",
+							Value:       currentDisplayName,
+							Style:       discordgo.TextInputShort,
+							Required:    true,
+							Placeholder: "Enter the desired IGN",
+						},
+					},
+				},
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "lock_input",
+							Label:       "Lock IGN (true/false)",
+							Value:       lockValue,
+							Style:       discordgo.TextInputShort,
+							Required:    true,
+							Placeholder: "true or false",
 						},
 					},
 				},
@@ -645,8 +662,9 @@ func (p *InGamePanel) HandleInteraction(i *discordgo.InteractionCreate, command 
 			return fmt.Errorf("failed to get account by ID: %w", err)
 		}
 
-		// Get the selected user ID
-		modal := p.createSetIGNModal(i.Member.User.ID, i.GuildID, evrProfile.GetGroupIGN(groupID))
+		// Get the IGN data including lock status
+		ignData := evrProfile.GetGroupIGNData(groupID)
+		modal := p.createSetIGNModal(i.Member.User.ID, i.GuildID, ignData.DisplayName, ignData.IsLocked)
 		return p.dg.InteractionRespond(i.Interaction, modal)
 
 	case "select_player":
@@ -763,15 +781,33 @@ func (d *DiscordAppBot) handleInGamePanel(ctx context.Context, logger runtime.Lo
 	return nil
 }
 
-func (d *DiscordAppBot) handleSetIGNModalSubmit(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, data *discordgo.ModalSubmitInteractionData, value string) error {
-	// Handle IGN override modal submission from lookup command
-	// targetUserID:groupID
+func (d *DiscordAppBot) handleSetModalSubmit(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, data *discordgo.ModalSubmitInteractionData, value string) error {
+	// Handle IGN override modal submission from lookup command or IGP
+	// value is encoded as targetDiscordID:targetGuildID (from lookup flow) or
+	// as targetUserID:groupID (from IGP flow which uses internal IDs).
+	// Support both by attempting conversion and falling back to the raw values.
 	parts := strings.SplitN(value, ":", 2)
 	if len(parts) != 2 {
 		return fmt.Errorf("invalid parameters for set_ign_modal")
 	}
-	targetUserID := d.cache.DiscordIDToUserID(parts[0])
-	groupID := d.cache.GuildIDToGroupID(parts[1])
+	rawUserID := parts[0]
+	rawGroupID := parts[1]
+
+	targetUserID := d.cache.DiscordIDToUserID(rawUserID)
+	if targetUserID == "" {
+		// Assume rawUserID is already an internal user ID.
+		targetUserID = rawUserID
+	}
+
+	groupID := d.cache.GuildIDToGroupID(rawGroupID)
+	if groupID == "" {
+		// Assume rawGroupID is already an internal group ID.
+		groupID = rawGroupID
+	}
+
+	if targetUserID == "" || groupID == "" {
+		return fmt.Errorf("target user or group not found")
+	}
 
 	// Get caller info
 	callerID := d.cache.DiscordIDToUserID(i.Member.User.ID)
@@ -797,10 +833,14 @@ func (d *DiscordAppBot) handleSetIGNModalSubmit(ctx context.Context, logger runt
 
 	// Get the submitted display name and lock status
 	displayName := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
-	lockInput := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 
-	lockInput = strings.ToLower(strings.TrimSpace(lockInput))
-	isLocked := lockInput == "true" || lockInput == "yes" || lockInput == "1"
+	// Some modals (e.g. IGP flow) may only provide a display name field
+	var isLocked bool
+	if len(data.Components) >= 2 {
+		lockInput := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		lockInput = strings.ToLower(strings.TrimSpace(lockInput))
+		isLocked = lockInput == "true" || lockInput == "yes" || lockInput == "1"
+	}
 
 	// Load target profile
 	targetProfile, err := EVRProfileLoad(d.ctx, d.nk, targetUserID)
