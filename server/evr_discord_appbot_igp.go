@@ -738,7 +738,7 @@ func (d *DiscordAppBot) handleModalSubmit(logger runtime.Logger, i *discordgo.In
 		return d.kickPlayer(logger, i, caller, target, duration, userNotice, notes, false, false)
 
 	case "set_ign_modal":
-		return d.handleSetModalSubmit(d.ctx, logger, d.dg, i, &data, value)
+		return d.handleSetIGNModalSubmit(d.ctx, logger, d.dg, i, &data, value)
 
 	case "enforcement_edit":
 		// Handle enforcement record edit modal submission
@@ -791,7 +791,7 @@ func (d *DiscordAppBot) handleInGamePanel(ctx context.Context, logger runtime.Lo
 	return nil
 }
 
-func (d *DiscordAppBot) handleSetModalSubmit(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, data *discordgo.ModalSubmitInteractionData, value string) error {
+func (d *DiscordAppBot) handleSetIGNModalSubmit(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, data *discordgo.ModalSubmitInteractionData, value string) error {
 	// Handle IGN override modal submission from lookup command or IGP
 	// value is encoded as targetDiscordID:targetGuildID (from lookup flow) or
 	// as targetUserID:groupID (from IGP flow which uses internal IDs).
