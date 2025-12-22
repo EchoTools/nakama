@@ -53,6 +53,7 @@ type BackfillCandidate struct {
 	RTTs           map[string]int // map[externalIP]rtt
 	MaxRTT         int
 	TeamAlignment  int // Team assignment from matchmaker ticket
+	Intervals      int
 }
 
 // BackfillMatch represents a match that can accept backfill candidates
@@ -203,7 +204,7 @@ func (b *PostMatchmakerBackfill) ExtractCandidatesFromMatchmaker(extracts []*Mat
 				NumericProperties: extract.NumericProperties,
 			}
 			// Build Properties map from string and numeric properties
-			me.Properties = make(map[string]interface{})
+			me.Properties = make(map[string]any)
 			for k, v := range extract.StringProperties {
 				me.Properties[k] = v
 			}
@@ -222,7 +223,7 @@ func (b *PostMatchmakerBackfill) ExtractCandidatesFromMatchmaker(extracts []*Mat
 
 		ratingMu := extract.NumericProperties["rating_mu"]
 		maxRTT := extract.NumericProperties["max_rtt"]
-
+		intervals := extract.Intervals
 		// Use CreatedAt from the extract (in milliseconds)
 		submissionTime := time.UnixMilli(extract.CreatedAt)
 
@@ -245,6 +246,7 @@ func (b *PostMatchmakerBackfill) ExtractCandidatesFromMatchmaker(extracts []*Mat
 			RTTs:           rtts,
 			MaxRTT:         int(maxRTT),
 			TeamAlignment:  evr.TeamUnassigned,
+			Intervals:      intervals,
 		}
 
 		allCandidates = append(allCandidates, candidate)

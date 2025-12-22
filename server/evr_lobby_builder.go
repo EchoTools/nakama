@@ -217,12 +217,10 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 	// This prevents backfill from "poaching" tickets before matchmaker has a chance to process them
 	if isPeriodicRun {
 		// Minimum age is 1 matchmaker interval
-		intervalSecs := max(matchmaker.config.GetMatchmaker().IntervalSec, 1)
-		minAge := time.Duration(intervalSecs) * time.Second
 
 		filteredCandidates := make([]*BackfillCandidate, 0, len(candidates))
 		for _, c := range candidates {
-			if time.Since(c.SubmissionTime) >= minAge {
+			if c.Intervals >= 1 {
 				filteredCandidates = append(filteredCandidates, c)
 			}
 		}
@@ -230,7 +228,7 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 		logger.Debug("Filtered candidates for periodic backfill",
 			zap.Int("original_count", len(candidates)),
 			zap.Int("filtered_count", len(filteredCandidates)),
-			zap.Duration("min_age", minAge))
+		)
 
 		candidates = filteredCandidates
 
