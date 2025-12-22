@@ -503,6 +503,9 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 	case "enforcement":
 		// Handle enforcement button interactions (edit, void)
 		return d.handleEnforcementInteraction(ctx, logger, s, i, value)
+	case "enf":
+		// Handle enforcement button interactions (edit, void) - short format
+		return d.handleEnforcementInteraction(ctx, logger, s, i, value)
 	}
 
 	return nil
@@ -658,6 +661,11 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		suspensionExpiry   time.Time
 		suspensionDuration time.Duration
 	)
+
+	// Do not allow bots to be suspended
+	if target.Bot {
+		return simpleInteractionResponse(d.dg, i, "Bots cannot be suspended.")
+	}
 
 	callerUserID := d.cache.DiscordIDToUserID(caller.User.ID)
 	if callerUserID == "" {
@@ -846,8 +854,38 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				field := createSuspensionDetailsEmbedField(gn, records, voids, true, true, true, gID)
 				embed.Fields = append(embed.Fields, field)
 			}
+
+			// Add enforcement buttons for suspension records
+			var components []discordgo.MessageComponent
+			if len(recordsByGroupID) > 0 && len(voids) == 0 {
+				// Only add buttons if there are active suspensions (not voids)
+				for _, records := range recordsByGroupID {
+					for _, record := range records {
+						// Create buttons for each record
+						buttons := []discordgo.MessageComponent{
+							&discordgo.Button{
+								Label:    "Edit",
+								Style:    discordgo.PrimaryButton,
+								CustomID: fmt.Sprintf("enf:e:%s:%s:%s", record.ID, i.GuildID, target.ID),
+							},
+							&discordgo.Button{
+								Label:    "Void",
+								Style:    discordgo.DangerButton,
+								CustomID: fmt.Sprintf("enf:v:%s:%s:%s", record.ID, i.GuildID, target.ID),
+							},
+						}
+						components = append(components, &discordgo.ActionsRow{
+							Components: buttons,
+						})
+						break // Only add buttons for the first record to avoid clutter
+					}
+					break // Only process first group
+				}
+			}
+
 			_, err = d.dg.ChannelMessageSendComplex(gg.EnforcementNoticeChannelID, &discordgo.MessageSend{
 				Embed:           embed,
+				Components:      components,
 				AllowedMentions: &discordgo.MessageAllowedMentions{},
 			})
 			if err != nil {
