@@ -520,36 +520,6 @@ func (v *VRMLScanQueue) playerSummary(vg *vrmlgo.Session, player *vrmlgo.Player)
 	}, nil
 }
 
-// Use a brute force search for the player ID, by searching for the player name in all seasons
-func (*VRMLScanQueue) searchPlayerBySeasons(vg *vrmlgo.Session, seasons []*vrmlgo.Season, vrmlID string) (*vrmlgo.Player, error) {
-
-	member, err := vg.Member(vrmlID, vrmlgo.WithUseCache(false))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get member data: %v", err)
-	}
-
-	for _, s := range seasons {
-
-		players, err := vg.GamePlayersSearch(s.GameURLShort, s.ID, member.User.UserName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to search for player: %v", err)
-		}
-
-		for _, p := range players {
-			player, err := vg.Player(p.ID)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get player: %v", err)
-			}
-
-			if player.User.UserID == member.User.ID {
-				return player, nil
-			}
-		}
-	}
-
-	return nil, ErrPlayerNotFound
-}
-
 func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 	// accountLinkCommandHandler handles the account link command from Discord
 
@@ -601,7 +571,7 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 			logger.Warn("Discord ID mismatch")
 			vrmlLink := fmt.Sprintf("[%s](https://vrmasterleague.com/EchoArena/Users/%s)", vrmlUser.UserName, vrmlUser.ID)
 			thisDiscordTag := fmt.Sprintf("%s#%s", user.Username, user.Discriminator)
-			return editResponseFn(fmt.Sprintf("VRML account %s is currently linked to %s. Please relink the VRML account to this Discord account (%s).", vrmlLink, vrmlUser.DiscordTag, thisDiscordTag))
+			return editResponseFn("VRML account %s is currently linked to %s. Please relink the VRML account to this Discord account (%s).", vrmlLink, vrmlUser.DiscordTag, thisDiscordTag)
 		}
 
 		// Queue the event to count matches and assign entitlements
@@ -630,7 +600,7 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 		}
 
 		// Send the link to the user
-		if err := editResponseFn(fmt.Sprintf("To assign your cosmetics, [Verify your VRML account](%s)", flow.url)); err != nil {
+		if err := editResponseFn("To assign your cosmetics, [Verify your VRML account](%s)", flow.url); err != nil {
 			logger.WithField("error", err).Error("Failed to edit response")
 		}
 
@@ -662,7 +632,7 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 			// VRML User is linked to a different Discord account
 			vrmlLink := fmt.Sprintf("[%s](https://vrmasterleague.com/EchoArena/Users/%s)", vrmlUser.UserName, vrmlUser.ID)
 			thisDiscordTag := fmt.Sprintf("%s#%s", user.Username, user.Discriminator)
-			if err := editResponseFn(fmt.Sprintf("VRML account %s is currently linked to %s. Please relink the VRML account to this Discord account (%s).", vrmlLink, vrmlUser.DiscordTag, thisDiscordTag)); err != nil {
+			if err := editResponseFn("VRML account %s is currently linked to %s. Please relink the VRML account to this Discord account (%s).", vrmlLink, vrmlUser.DiscordTag, thisDiscordTag); err != nil {
 				logger.WithField("error", err).Error("Failed to edit response")
 			}
 			return
@@ -685,7 +655,7 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 			return
 		}
 		logger.Info("Linked VRML account")
-		if err := editResponseFn(fmt.Sprintf("Your VRML account (`%s`) has been verified/linked. It will take a few minutes--up to a few hours--to update your entitlements.", vrmlUser.UserName)); err != nil {
+		if err := editResponseFn("Your VRML account (`%s`) has been verified/linked. It will take a few minutes--up to a few hours--to update your entitlements.", vrmlUser.UserName); err != nil {
 			logger.WithField("error", err).Error("Failed to edit response")
 			return
 		}
