@@ -708,8 +708,41 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		if addSuspension {
 			// Add a new record
 			actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
-			record := journal.AddRecord(groupID, callerUserID, caller.User.ID, userNotice, notes, requireCommunityValues, allowPrivateLobbies, suspensionDuration)
+			// Use AddRecordWithOptions to support new fields (RuleViolated, IsPubliclyVisible)
+			record := journal.AddRecordWithOptions(groupID, callerUserID, caller.User.ID, userNotice, notes, requireCommunityValues, allowPrivateLobbies, suspensionDuration, "", false)
 			recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
+
+			// Send DM notification to the user
+			guildName := ""
+			if gg != nil {
+				guildName = gg.Name()
+			}
+			sent, err := SendEnforcementNotification(ctx, d.dg, record, target.ID, guildName)
+			if err != nil {
+				// Note: DM failures are logged but don't block enforcement.
+				// Common failures: user has DMs disabled, blocked bot, or left shared servers.
+				// The enforcement action still applies, and users can check /whoami for details.
+				// Failed attempts are tracked in metrics and notification status for review.
+				logger.Warn("Failed to send enforcement notification DM", zap.Error(err), zap.String("user_id", target.ID))
+			}
+			// Update the record with notification status (tracks both success and failure)
+			if updateErr := journal.UpdateRecordNotificationStatus(groupID, record.ID, sent); updateErr != nil {
+				logger.Warn("Failed to update notification status", zap.Error(updateErr))
+			}
+			// Save the updated journal with notification status
+			if err := StorableWrite(ctx, nk, targetUserID, journal); err != nil {
+				logger.Warn("Failed to save journal after notification update", zap.Error(err))
+			}
+
+			// Record to public enforcement log if enabled
+			if err := RecordPublicEnforcement(ctx, nk, record, false, time.Time{}); err != nil {
+				logger.Warn("Failed to record public enforcement", zap.Error(err))
+			}
+
+			// Record metrics for this enforcement action
+			if err := RecordEnforcementMetrics(ctx, nk, record, sent); err != nil {
+				logger.Warn("Failed to record enforcement metrics", zap.Error(err))
+			}
 
 		} else if voidActiveSuspensions {
 
@@ -742,6 +775,16 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 					}
 					void := journal.VoidRecord(currentGroupID, record.ID, callerUserID, caller.User.ID, details)
 					voids[void.RecordID] = void
+
+					// Record voiding to public enforcement log if enabled
+					if err := RecordPublicEnforcement(ctx, nk, record, true, void.VoidedAt); err != nil {
+						logger.Warn("Failed to record voided enforcement to public log", zap.Error(err))
+					}
+
+					// Record voiding metrics
+					if err := RecordVoidingMetrics(ctx, nk, currentGroupID, targetUserID); err != nil {
+						logger.Warn("Failed to record voiding metrics", zap.Error(err))
+					}
 				}
 			}
 		}
