@@ -44,12 +44,11 @@ var (
 )
 
 type MatchmakingTicketParameters struct {
-	MinCount                   int
-	MaxCount                   int
-	CountMultiple              int
-	IncludeSBMMRanges          bool
-	IncludeEarlyQuitPenalty    bool
-	IncludeRequireCommonServer bool
+	MinCount                int
+	MaxCount                int
+	CountMultiple           int
+	IncludeSBMMRanges       bool
+	IncludeEarlyQuitPenalty bool
 }
 
 func (m *MatchmakingTicketParameters) MarshalText() ([]byte, error) {
@@ -268,6 +267,17 @@ type MatchmakingSettings struct {
 	StaticRatingSigma      *float64 `json:"static_rating_sigma"`       // The static rating sigma to use
 	Divisions              []string `json:"divisions"`                 // The division to use
 	ExcludedDivisions      []string `json:"excluded_divisions"`        // The division to use
+
+	// Match lock fields for moderation - forces player to follow a leader
+	MatchLockLeaderDiscordID string `json:"match_lock_leader_discord_id,omitempty"` // Discord ID of the leader to follow
+	MatchLockOperatorUserID  string `json:"match_lock_operator_user_id,omitempty"`  // User ID of the operator who set the lock
+	MatchLockReason          string `json:"match_lock_reason,omitempty"`            // Reason for the lock
+	MatchLockEnabledAt       int64  `json:"match_lock_enabled_at,omitempty"`        // Unix timestamp when lock was enabled
+}
+
+// IsMatchLocked returns true if the user has an active match lock
+func (m *MatchmakingSettings) IsMatchLocked() bool {
+	return m.MatchLockLeaderDiscordID != "" && m.MatchLockEnabledAt > 0
 }
 
 func (MatchmakingSettings) StorageMeta() StorableMetadata {
@@ -326,7 +336,7 @@ func (e *LatencyMetric) ID() string {
 
 // The key used for matchmaking properties
 func (e *LatencyMetric) AsProperty() (string, float64) {
-	k := RTTPropertyPrefix + e.Endpoint.ExternalIP.String()
+	k := RTTPropertyPrefix + EncodeEndpointID(e.Endpoint.ExternalIP.String())
 	v := float64(e.RTT / time.Millisecond)
 	return k, v
 }

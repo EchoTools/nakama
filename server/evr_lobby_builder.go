@@ -22,6 +22,24 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+const (
+	// LobbyBuilder constants
+	DefaultLatencyMapCapacity      = 100
+	DefaultTeamMapCapacity         = 8
+	MinEntrantsForMatch            = 2
+	ReservationLifetimeSeconds     = 20
+	ServerAllocationTimeoutSeconds = 60
+	ServerAllocationRetrySeconds   = 5
+	MatchListLimit                 = 200
+	MatchListMinSize               = 1
+	HighLatencyThresholdMs         = 100
+	RTTRoundingInterval            = 20
+	RTTRoundingOffset              = 10
+	RTTSignificantDifferenceMs     = 50
+	ServerRatingExcludeValue       = -999
+	MatchAllocateLimit             = 100
+)
+
 // Builds the match after the matchmaker has created it
 type LobbyBuilder struct {
 	sync.Mutex
@@ -149,8 +167,8 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill() {
 }
 
 func (b *LobbyBuilder) extractLatenciesFromEntrants(entrants []*MatchmakerEntry) (map[string][][]float64, map[string]map[string]float64) {
-	latenciesByTeamByExtIP := make(map[string][][]float64, 100)
-	latenciesByPlayerByExtIP := make(map[string]map[string]float64, 100)
+	latenciesByTeamByExtIP := make(map[string][][]float64, DefaultLatencyMapCapacity)
+	latenciesByPlayerByExtIP := make(map[string]map[string]float64, DefaultLatencyMapCapacity)
 
 	for _, e := range entrants {
 
@@ -160,7 +178,7 @@ func (b *LobbyBuilder) extractLatenciesFromEntrants(entrants []*MatchmakerEntry)
 				latenciesByTeamByExtIP[extIP] = append(latenciesByTeamByExtIP[extIP], []float64{v.(float64)})
 
 				if _, ok := latenciesByPlayerByExtIP[extIP]; !ok {
-					latenciesByPlayerByExtIP[extIP] = make(map[string]float64, 8)
+					latenciesByPlayerByExtIP[extIP] = make(map[string]float64, DefaultTeamMapCapacity)
 				}
 
 				latenciesByPlayerByExtIP[extIP][e.Presence.UserId] = v.(float64)
@@ -220,7 +238,7 @@ func (b *LobbyBuilder) rankEndpointsByServerScore(entrants []*MatchmakerEntry) [
 }
 
 func (b *LobbyBuilder) groupByTicket(entrants []*MatchmakerEntry) [][]*MatchmakerEntry {
-	partyMap := make(map[string][]*MatchmakerEntry, 8)
+	partyMap := make(map[string][]*MatchmakerEntry, DefaultTeamMapCapacity)
 	for _, e := range entrants {
 		t := e.GetTicket()
 		partyMap[t] = append(partyMap[t], e)
@@ -243,7 +261,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 	logger.Debug("Building match", zap.Any("entrants", entrants))
 
-	if len(entrants) < 2 {
+	if len(entrants) < MinEntrantsForMatch {
 		return nil, fmt.Errorf("not enough entrants to build a match")
 	}
 
@@ -307,12 +325,12 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		SpawnedBy:           SystemUserID,
 		GroupID:             groupID,
 		Reservations:        entrantPresences,
-		ReservationLifetime: 20 * time.Second,
+		ReservationLifetime: ReservationLifetimeSeconds * time.Second,
 		StartTime:           time.Now().UTC(),
 	}
 
 	var label *MatchLabel
-	timeout := time.After(60 * time.Second)
+	timeout := time.After(ServerAllocationTimeoutSeconds * time.Second)
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.LobbyBuilder
 	for {
 		select {
@@ -325,15 +343,20 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), b.nk, []string{groupID.String()}, meanRTTByExtIP, settings, nil, true, false, queryAddon)
 		if err != nil || label == nil {
 			logger.Error("Failed to allocate game server.", zap.Error(err))
-			<-time.After(5 * time.Second)
+			<-time.After(ServerAllocationRetrySeconds * time.Second)
 			continue
 		}
 		break
 	}
 
 	// Update the entrant ping to the game server
+	endpointID := EncodeEndpointID(label.GameServer.Endpoint.ExternalIP.String())
 	for _, p := range entrantPresences {
-		p.PingMillis = int(latenciesByPlayerByExtIP[label.GameServer.Endpoint.ExternalIP.String()][p.GetUserId()])
+		if endpointLatencies, ok := latenciesByPlayerByExtIP[endpointID]; ok && endpointLatencies != nil {
+			if latency, ok := endpointLatencies[p.GetUserId()]; ok {
+				p.PingMillis = int(latency)
+			}
+		}
 	}
 
 	serverSession := b.sessionRegistry.Get(label.GameServer.SessionID)
@@ -561,8 +584,8 @@ func LobbyList(ctx context.Context, nk runtime.NakamaModule, limit int, minSize 
 }
 
 func LobbyGameServerList(ctx context.Context, nk runtime.NakamaModule, query string) ([]*MatchLabel, error) {
-	limit := 200
-	minSize, maxSize := 1, MatchLobbyMaxSize // the game server counts as one.
+	limit := MatchListLimit
+	minSize, maxSize := MatchListMinSize, MatchLobbyMaxSize // the game server counts as one.
 	matches, err := LobbyList(ctx, nk, limit, minSize, maxSize, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list matches: %w", err)
@@ -583,7 +606,7 @@ func LobbyGameServerList(ctx context.Context, nk runtime.NakamaModule, query str
 	return labels, nil
 }
 
-func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupIDs []string, rttsByExternalIP map[string]int, settings *MatchSettings, regions []string, requireDefaultRegion bool, requireRegion bool, queryAddon string) (*MatchLabel, error) {
+func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupIDs []string, rttsByEndpoint map[string]int, settings *MatchSettings, regions []string, requireDefaultRegion bool, requireRegion bool, queryAddon string) (*MatchLabel, error) {
 
 	if len(groupIDs) == 0 {
 		return nil, fmt.Errorf("no group IDs provided")
@@ -618,7 +641,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	}
 
 	// Get the list of matches
-	matches, err := nk.MatchList(ctx, 100, true, "", nil, nil, query)
+	matches, err := nk.MatchList(ctx, MatchAllocateLimit, true, "", nil, nil, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find matches: %w", err)
 	}
@@ -678,12 +701,18 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 			}
 		}
 
-		// Skip servers with a rating of -999
-		if rating == -999 {
+		// Skip servers with a rating of ServerRatingExcludeValue
+		if rating == ServerRatingExcludeValue {
 			continue
 		}
 
-		rtt := rttsByExternalIP[extIP]
+		// Look up RTT using both raw IP and encoded endpoint ID for compatibility
+		// (matchmaking properties use encoded IDs, direct client data uses raw IPs)
+		endpointID := EncodeEndpointID(extIP)
+		rtt := rttsByEndpoint[endpointID]
+		if rtt == 0 {
+			rtt = rttsByEndpoint[extIP]
+		}
 		if delta, ok := globalSettings.ServerSelection.RTTDelta[label.GameServer.Username]; ok {
 			rtt += delta
 		}
@@ -691,15 +720,18 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 			rtt += delta
 		}
 
+		isReachable := rttsByEndpoint[endpointID] != 0 || rttsByEndpoint[extIP] != 0
+		isHighLatency := rtt > HighLatencyThresholdMs
+
 		indexes = append(indexes, labelIndex{
 			Label:             label,
-			RTT:               (rtt + 10) / 20 * 20,
-			IsReachable:       rttsByExternalIP[extIP] != 0,
+			RTT:               (rtt + RTTRoundingOffset) / RTTRoundingInterval * RTTRoundingInterval,
+			IsReachable:       isReachable,
 			Rating:            rating,
 			IsPriorityForMode: slices.Contains(label.GameServer.DesignatedModes, settings.Mode),
 			ActiveCount:       activeCountByHostID[hostID],
 			IsRegionMatch:     regionMatch,
-			IsHighLatency:     rttsByExternalIP[extIP] > 100,
+			IsHighLatency:     isHighLatency,
 		})
 	}
 
@@ -784,7 +816,7 @@ func sortLabelIndexes(labels []labelIndex) {
 		}
 
 		// If there is a large difference in RTT, sort by RTT
-		if math.Abs(float64(a.RTT-b.RTT)) > 50 {
+		if math.Abs(float64(a.RTT-b.RTT)) > RTTSignificantDifferenceMs {
 			if a.RTT < b.RTT {
 				return -1
 			}

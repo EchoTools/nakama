@@ -592,7 +592,11 @@ func (p *InGamePanel) createSuspendPlayerModal(targetDiscordID, displayName stri
 	}
 }
 
-func (p *InGamePanel) createSetIGNModal(userID, groupID, currentDisplayName string) *discordgo.InteractionResponse {
+func (p *InGamePanel) createSetIGNModal(userID, groupID, currentDisplayName string, isLocked bool) *discordgo.InteractionResponse {
+	lockValue := "false"
+	if isLocked {
+		lockValue = "true"
+	}
 	return &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
@@ -602,11 +606,24 @@ func (p *InGamePanel) createSetIGNModal(userID, groupID, currentDisplayName stri
 				discordgo.ActionsRow{
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
-							CustomID: "display_name_input",
-							Label:    "Display Name",
-							Value:    currentDisplayName,
-							Style:    discordgo.TextInputShort,
-							Required: true,
+							CustomID:    "display_name_input",
+							Label:       "Display Name",
+							Value:       currentDisplayName,
+							Style:       discordgo.TextInputShort,
+							Required:    true,
+							Placeholder: "Enter the desired IGN",
+						},
+					},
+				},
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "lock_input",
+							Label:       "Lock IGN (true/false)",
+							Value:       lockValue,
+							Style:       discordgo.TextInputShort,
+							Required:    true,
+							Placeholder: "true or false",
 						},
 					},
 				},
@@ -645,8 +662,9 @@ func (p *InGamePanel) HandleInteraction(i *discordgo.InteractionCreate, command 
 			return fmt.Errorf("failed to get account by ID: %w", err)
 		}
 
-		// Get the selected user ID
-		modal := p.createSetIGNModal(userID, groupID, evrProfile.GetGroupIGN(groupID))
+		// Get the IGN data including lock status
+		ignData := evrProfile.GetGroupIGNData(groupID)
+		modal := p.createSetIGNModal(i.Member.User.ID, i.GuildID, ignData.DisplayName, ignData.IsLocked)
 		return p.dg.InteractionRespond(i.Interaction, modal)
 
 	case "select_player":
@@ -720,107 +738,17 @@ func (d *DiscordAppBot) handleModalSubmit(logger runtime.Logger, i *discordgo.In
 		return d.kickPlayer(logger, i, caller, target, duration, userNotice, notes, false, false)
 
 	case "set_ign_modal":
-		// Handle IGN override modal submission from lookup command
-		// targetUserID:groupID
-		parts := strings.SplitN(value, ":", 2)
-		if len(parts) != 2 {
-			return fmt.Errorf("invalid parameters for set_ign_modal")
-		}
-		targetUserID := parts[0]
-		groupID := parts[1]
+		return d.handleSetModalSubmit(d.ctx, logger, d.dg, i, &data, value)
 
-		// Get caller info
-		callerID := d.cache.DiscordIDToUserID(i.Member.User.ID)
-		if callerID == "" {
-			return fmt.Errorf("caller not found")
-		}
+	case "enforcement_edit":
+		// Handle enforcement record edit modal submission
+		// value format: recordID:groupID:targetUserID
+		return d.handleEnforcementEditModalSubmit(logger, i, value)
 
-		callerGuildGroups, err := GuildUserGroupsList(d.ctx, d.nk, d.guildGroupRegistry, callerID)
-		if err != nil {
-			return fmt.Errorf("failed to get guild groups: %w", err)
-		}
-
-		isAuditorOrEnforcer := false
-		if gg, ok := callerGuildGroups[groupID]; ok && (gg.IsAuditor(callerID) || gg.IsEnforcer(callerID)) {
-			isAuditorOrEnforcer = true
-		}
-		isGlobalOperator, _ := CheckSystemGroupMembership(d.ctx, d.db, callerID, GroupGlobalOperators)
-		isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
-
-		if !isAuditorOrEnforcer {
-			return simpleInteractionResponse(d.dg, i, "You do not have permission to set IGN overrides.")
-		}
-
-		// Get the submitted display name and lock status
-		displayName := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
-		lockInput := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
-
-		lockInput = strings.ToLower(strings.TrimSpace(lockInput))
-		isLocked := lockInput == "true" || lockInput == "yes" || lockInput == "1"
-
-		// Load target profile
-		targetProfile, err := EVRProfileLoad(d.ctx, d.nk, targetUserID)
-		if err != nil {
-			return fmt.Errorf("failed to load target profile: %w", err)
-		}
-
-		// Get original display name for audit log
-		originalIGN := targetProfile.GetGroupIGNData(groupID)
-		originalDisplayName := originalIGN.DisplayName
-		if originalDisplayName == "" {
-			// Fallback to username
-			if a, err := d.nk.AccountGetId(d.ctx, targetUserID); err == nil {
-				originalDisplayName = a.User.Username
-			}
-		}
-
-		// Update the IGN with override and lock
-		sanitizedDisplayName := sanitizeDisplayName(displayName)
-		if sanitizedDisplayName == "" {
-			return fmt.Errorf("invalid display name: must contain at least one valid character")
-		}
-		if targetProfile.InGameNames == nil {
-			targetProfile.InGameNames = make(map[string]GroupInGameName)
-		}
-		targetProfile.InGameNames[groupID] = GroupInGameName{
-			GroupID:     groupID,
-			DisplayName: sanitizedDisplayName,
-			IsOverride:  true,
-			IsLocked:    isLocked,
-		}
-
-		// Save the profile
-		if err := EVRProfileUpdate(d.ctx, d.nk, targetUserID, targetProfile); err != nil {
-			return fmt.Errorf("failed to update target profile: %w", err)
-		}
-
-		// Get target Discord user for audit log
-		targetDiscordID := d.cache.UserIDToDiscordID(targetUserID)
-		var targetMention string
-		if targetDiscordID != "" {
-			targetMention = fmt.Sprintf("<@%s>", targetDiscordID)
-		} else {
-			targetMention = targetUserID
-		}
-
-		lockStatus := "unlocked"
-		if isLocked {
-			lockStatus = "locked"
-		}
-		auditMessage := fmt.Sprintf("<@%s> set IGN override for %s to **%s** (%s) (originally: **%s**)",
-			i.Member.User.ID, targetMention, displayName, lockStatus, originalDisplayName)
-
-		if _, err := d.LogAuditMessage(d.ctx, groupID, auditMessage, false); err != nil {
-			logger.WithField("error", err).Warn("Failed to send audit log message")
-		}
-
-		return d.dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Flags:   discordgo.MessageFlagsEphemeral,
-				Content: fmt.Sprintf("IGN override set successfully to **%s** (%s)", displayName, lockStatus),
-			},
-		})
+	case "enforcement_void":
+		// Handle enforcement record void modal submission
+		// value format: recordID:groupID:targetUserID
+		return d.handleEnforcementVoidModalSubmit(logger, i, value)
 
 	default:
 		return fmt.Errorf("unknown action: %s", action)
@@ -861,4 +789,130 @@ func (d *DiscordAppBot) handleInGamePanel(ctx context.Context, logger runtime.Lo
 	}
 
 	return nil
+}
+
+func (d *DiscordAppBot) handleSetModalSubmit(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, data *discordgo.ModalSubmitInteractionData, value string) error {
+	// Handle IGN override modal submission from lookup command or IGP
+	// value is encoded as targetDiscordID:targetGuildID (from lookup flow) or
+	// as targetUserID:groupID (from IGP flow which uses internal IDs).
+	// Support both by attempting conversion and falling back to the raw values.
+	parts := strings.SplitN(value, ":", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid parameters for set_ign_modal")
+	}
+	rawUserID := parts[0]
+	rawGroupID := parts[1]
+
+	targetUserID := d.cache.DiscordIDToUserID(rawUserID)
+	if targetUserID == "" {
+		// Assume rawUserID is already an internal user ID.
+		targetUserID = rawUserID
+	}
+
+	groupID := d.cache.GuildIDToGroupID(rawGroupID)
+	if groupID == "" {
+		// Assume rawGroupID is already an internal group ID.
+		groupID = rawGroupID
+	}
+
+	if targetUserID == "" || groupID == "" {
+		return fmt.Errorf("target user or group not found")
+	}
+
+	// Get caller info
+	callerID := d.cache.DiscordIDToUserID(i.Member.User.ID)
+	if callerID == "" {
+		return fmt.Errorf("caller not found")
+	}
+
+	callerGuildGroups, err := GuildUserGroupsList(d.ctx, d.nk, d.guildGroupRegistry, callerID)
+	if err != nil {
+		return fmt.Errorf("failed to get guild groups: %w", err)
+	}
+
+	isAuditorOrEnforcer := false
+	if gg, ok := callerGuildGroups[groupID]; ok && (gg.IsAuditor(callerID) || gg.IsEnforcer(callerID)) {
+		isAuditorOrEnforcer = true
+	}
+	isGlobalOperator, _ := CheckSystemGroupMembership(d.ctx, d.db, callerID, GroupGlobalOperators)
+	isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
+
+	if !isAuditorOrEnforcer {
+		return simpleInteractionResponse(d.dg, i, "You do not have permission to set IGN overrides.")
+	}
+
+	// Get the submitted display name and lock status
+	displayName := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+
+	// Some modals (e.g. IGP flow) may only provide a display name field
+	var isLocked bool
+	if len(data.Components) >= 2 {
+		lockInput := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		lockInput = strings.ToLower(strings.TrimSpace(lockInput))
+		isLocked = lockInput == "true" || lockInput == "yes" || lockInput == "1"
+	}
+
+	// Load target profile
+	targetProfile, err := EVRProfileLoad(d.ctx, d.nk, targetUserID)
+	if err != nil {
+		return fmt.Errorf("failed to load target profile: %w", err)
+	}
+
+	// Get original display name for audit log
+	originalIGN := targetProfile.GetGroupIGNData(groupID)
+	originalDisplayName := originalIGN.DisplayName
+	if originalDisplayName == "" {
+		// Fallback to username
+		if a, err := d.nk.AccountGetId(d.ctx, targetUserID); err == nil {
+			originalDisplayName = a.User.Username
+		}
+	}
+
+	// Update the IGN with override and lock
+	sanitizedDisplayName := sanitizeDisplayName(displayName)
+	if sanitizedDisplayName == "" {
+		return fmt.Errorf("invalid display name: must contain at least one valid character")
+	}
+	if targetProfile.InGameNames == nil {
+		targetProfile.InGameNames = make(map[string]GroupInGameName)
+	}
+	targetProfile.InGameNames[groupID] = GroupInGameName{
+		GroupID:     groupID,
+		DisplayName: sanitizedDisplayName,
+		IsOverride:  true,
+		IsLocked:    isLocked,
+	}
+
+	// Save the profile
+	if err := EVRProfileUpdate(d.ctx, d.nk, targetUserID, targetProfile); err != nil {
+		return fmt.Errorf("failed to update target profile: %w", err)
+	}
+
+	// Get target Discord user for audit log
+	targetDiscordID := d.cache.UserIDToDiscordID(targetUserID)
+	var targetMention string
+	if targetDiscordID != "" {
+		targetMention = fmt.Sprintf("<@%s>", targetDiscordID)
+	} else {
+		targetMention = targetUserID
+	}
+
+	lockStatus := "unlocked"
+	if isLocked {
+		lockStatus = "locked"
+	}
+	auditMessage := fmt.Sprintf("<@%s> set IGN override for %s to **%s** (%s) (originally: **%s**)",
+		i.Member.User.ID, targetMention, displayName, lockStatus, originalDisplayName)
+
+	if _, err := d.LogAuditMessage(d.ctx, groupID, auditMessage, false); err != nil {
+		logger.WithField("error", err).Warn("Failed to send audit log message")
+	}
+
+	return d.dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Flags:   discordgo.MessageFlagsEphemeral,
+			Content: fmt.Sprintf("IGN override set successfully to **%s** (%s)", displayName, lockStatus),
+		},
+	})
 }
