@@ -3642,7 +3642,7 @@ func (d *DiscordAppBot) createLookupSetIGNModal(currentDisplayName string, isLoc
 	return &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
-			CustomID: "lookup:set_ign_modal",
+			CustomID: "set_ign_modal", // CustomID is overwritten by caller with context
 			Title:    "Set IGN Override",
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{
