@@ -79,7 +79,7 @@ func (m MigrationSuspensions) MigrateSystem(ctx context.Context, logger runtime.
 	return nil
 }
 
-func convertLegacySuspensionToJournal(j *GuildEnforcementJournal, groupID, data string) error {
+func convertLegacySuspensionToJournal(j *GuildEnforcementJournal, _, data string) error {
 
 	type legacyFormat struct {
 		Records []struct {

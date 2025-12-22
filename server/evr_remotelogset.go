@@ -61,7 +61,7 @@ func filterRemoteLogs(logs []string) []string {
 	return filteredLogs
 }
 
-func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, request *evr.RemoteLogSet) error {
+func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, _ *zap.Logger, session *sessionWS, evrID evr.EvrId, request *evr.RemoteLogSet) error {
 	if !session.userID.IsNil() {
 		p.userRemoteLogJournalRegistry.Add(session.id, session.userID, filterRemoteLogs(request.Logs))
 	}

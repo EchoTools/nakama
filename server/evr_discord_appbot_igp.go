@@ -158,7 +158,7 @@ func (p *InGamePanel) retrieveCurrentMatchLabel(ctx context.Context, userID stri
 func (p *InGamePanel) NewInteraction(i *discordgo.InteractionCreate) (*discordgo.InteractionCreate, error) {
 	prevInteraction := p.interactionCreate.Swap(i)
 	// Send the initial interaction response saying "finding session"
-	return prevInteraction, dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	return prevInteraction, p.dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Flags:   discordgo.MessageFlagsEphemeral,
@@ -791,7 +791,7 @@ func (d *DiscordAppBot) handleInGamePanel(ctx context.Context, logger runtime.Lo
 	return nil
 }
 
-func (d *DiscordAppBot) handleSetIGNModalSubmit(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, data *discordgo.ModalSubmitInteractionData, value string) error {
+func (d *DiscordAppBot) handleSetIGNModalSubmit(_ context.Context, logger runtime.Logger, _ *discordgo.Session, i *discordgo.InteractionCreate, data *discordgo.ModalSubmitInteractionData, value string) error {
 	// Handle IGN override modal submission from lookup command or IGP
 	// value is encoded as targetDiscordID:targetGuildID (from lookup flow) or
 	// as targetUserID:groupID (from IGP flow which uses internal IDs).

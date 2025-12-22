@@ -541,6 +541,11 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		return nil, 0, status.Error(codes.PermissionDenied, "user does not have the allocator role in this guild.")
 	}
 
+	// If user is a global operator but has no allocator groups, use the current guild group
+	if isGlobalOperator {
+		allocatorGroupIDs = append(allocatorGroupIDs, groupID)
+	}
+
 	// Load the latency history for this user
 	latencyHistory := NewLatencyHistory()
 	if err := StorableRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
@@ -585,6 +590,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Error(codes.PermissionDenied, "user is not a member of the guild")
 	}
 
+	// Check if user is suspended from the guild
 	if group.IsSuspended(userID, nil) {
 		return nil, 0, status.Error(codes.PermissionDenied, "user is suspended from the guild")
 	}
@@ -593,6 +599,23 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Error(codes.PermissionDenied, "guild does not allow public match creation")
 	}
 
+	// Check if user is a moderator (enforcer) in the guild or a global operator
+	isGuildModerator := group.IsEnforcer(userID)
+	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+	isPrivileged := isGuildModerator || isGlobalOperator
+
+	// Check if this is a public match (echo_arena or echo_combat)
+	isPublicMatch := mode == evr.ModeArenaPublic || mode == evr.ModeCombatPublic
+
+	// Apply stricter rate limit (1 per 15 minutes) for public matches, unless user is privileged
+	if isPublicMatch && !isPrivileged {
+		publicLimiter := d.loadPublicMatchRateLimiter(userID, groupID)
+		if !publicLimiter.Allow() {
+			return nil, 0, status.Error(codes.ResourceExhausted, "rate limit exceeded for public matches (1 per 15 minutes)")
+		}
+	}
+
+	// Apply general rate limit for all matches
 	limiter := d.loadPrepareMatchRateLimiter(userID, groupID)
 	if !limiter.Allow() {
 		return nil, 0, status.Error(codes.ResourceExhausted, fmt.Sprintf("rate limit exceeded (%0.0f requests per minute)", limiter.Limit()*60))

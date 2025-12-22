@@ -5,15 +5,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/bwmarrin/discordgo"
 	"github.com/google/go-cmp/cmp"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 )
-
-func createTestDiscordGoSession(t *testing.T, logger *zap.Logger) *discordgo.Session {
-	return &discordgo.Session{}
-}
 
 func createTestProfileRegistry(t *testing.T, logger *zap.Logger) (*ProfileCache, error) {
 	runtimeLogger := NewRuntimeGoLogger(logger)

@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -18,8 +17,6 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 const (
@@ -51,13 +48,20 @@ type LobbyBuilder struct {
 	tracker         Tracker
 	metrics         Metrics
 
-	mapQueue map[evr.Symbol][]evr.Symbol // map[mode][]level
+	mapQueue          map[evr.Symbol][]evr.Symbol // map[mode][]level
+	postMatchBackfill *PostMatchmakerBackfill
+	skillBasedMM      *SkillBasedMatchmaker
+
+	// Backfill coordination
+	backfillStopCh  chan struct{} // Channel to stop periodic backfill
+	backfillResetCh chan struct{} // Channel to reset the periodic backfill timer
+	backfillMu      sync.Mutex
 }
 
 func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics) *LobbyBuilder {
 	logger = logger.With(zap.String("module", "lobby_builder"))
 
-	return &LobbyBuilder{
+	lb := &LobbyBuilder{
 		logger: logger,
 		nk:     nk,
 
@@ -68,6 +72,18 @@ func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistr
 
 		mapQueue: make(map[evr.Symbol][]evr.Symbol),
 	}
+
+	// Create the post-matchmaker backfill handler
+	lb.postMatchBackfill = NewPostMatchmakerBackfill(logger, nk, sessionRegistry, matchRegistry, tracker, metrics)
+
+	return lb
+}
+
+// SetSkillBasedMatchmaker sets the skill-based matchmaker reference for accessing matchmaker results
+func (b *LobbyBuilder) SetSkillBasedMatchmaker(sbmm *SkillBasedMatchmaker) {
+	b.skillBasedMM = sbmm
+	// Always start periodic backfill - it will check the setting on each run
+	b.startPeriodicBackfill()
 }
 
 func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
@@ -78,6 +94,199 @@ func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 			return
 		}
 	}
+
+	// After building matches, attempt post-matchmaker backfill if enabled
+	// This runs immediately after matchmaker completes in addition to periodic backfill
+	if ServiceSettings().Matchmaking.EnablePostMatchmakerBackfill && b.skillBasedMM != nil {
+		// Reset the periodic timer since matchmaker just ran and will trigger backfill
+		b.resetBackfillTimer()
+		// Run backfill immediately after matchmaker (not a periodic run)
+		go b.runPostMatchmakerBackfill(false)
+	}
+}
+
+// startPeriodicBackfill starts a goroutine that periodically runs backfill
+// This ensures backfill happens even when matchmaker doesn't have enough players to form matches
+func (b *LobbyBuilder) startPeriodicBackfill() {
+	// Check matchmaker first before creating channels to avoid leaking them
+	matchmaker := globalMatchmaker.Load()
+	if matchmaker == nil {
+		b.logger.Warn("Global matchmaker not initialized, periodic backfill not started")
+		return
+	}
+
+	b.backfillMu.Lock()
+	// Stop any existing periodic backfill
+	if b.backfillStopCh != nil {
+		close(b.backfillStopCh)
+	}
+	b.backfillStopCh = make(chan struct{})
+	b.backfillResetCh = make(chan struct{}, 1) // Buffered to avoid blocking
+	stopCh := b.backfillStopCh
+	resetCh := b.backfillResetCh
+	b.backfillMu.Unlock()
+	intervalSecs := matchmaker.config.GetMatchmaker().IntervalSec
+	interval := time.Duration(intervalSecs) * time.Second
+
+	b.logger.Info("Starting periodic backfill", zap.Duration("interval", interval))
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-stopCh:
+				b.logger.Info("Stopping periodic backfill")
+				return
+			case <-resetCh:
+				// Reset the ticker when backfill runs (from any trigger)
+				ticker.Reset(interval)
+			case <-ticker.C:
+				// Check if backfill is enabled (allows runtime config changes)
+				if !ServiceSettings().Matchmaking.EnablePostMatchmakerBackfill {
+					continue
+				}
+				// Reset timer at the start so it doesn't pile up
+				ticker.Reset(interval)
+				// Run periodic backfill (isPeriodicRun=true filters to older tickets)
+				b.runPostMatchmakerBackfill(true)
+			}
+		}
+	}()
+}
+
+// resetBackfillTimer resets the periodic backfill timer
+// Call this after backfill runs to avoid running again too soon
+func (b *LobbyBuilder) resetBackfillTimer() {
+	b.backfillMu.Lock()
+	defer b.backfillMu.Unlock()
+	if b.backfillResetCh != nil {
+		select {
+		case b.backfillResetCh <- struct{}{}:
+		default:
+			// Channel full, reset already pending
+		}
+	}
+}
+
+// runPostMatchmakerBackfill runs the post-matchmaker backfill process
+// isPeriodicRun indicates this is a periodic run (not triggered by matchmaker completion)
+// When isPeriodicRun is true, we filter to only process tickets that have been waiting
+// for at least BackfillMinTicketAgeSecs to avoid poaching fresh tickets before matchmaker runs
+func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), BackfillProcessTimeout)
+	defer cancel()
+
+	logger := b.logger.With(
+		zap.String("operation", "post_matchmaker_backfill"),
+		zap.Bool("is_periodic_run", isPeriodicRun),
+	)
+
+	logger.Debug("Backfill check starting")
+
+	// If matchmaker is currently processing, skip this backfill run to avoid poaching
+	if b.skillBasedMM != nil && b.skillBasedMM.IsProcessing() {
+		logger.Debug("Matchmaker is currently processing, skipping backfill")
+		return
+	}
+
+	// Get current tickets from the global matchmaker
+	matchmaker := globalMatchmaker.Load()
+	if matchmaker == nil {
+		logger.Debug("Global matchmaker not initialized")
+		return
+	}
+
+	extracts := matchmaker.Extract()
+	if len(extracts) == 0 {
+		logger.Debug("No tickets in matchmaker")
+		return
+	}
+
+	logger.Debug("Got matchmaker tickets", zap.Int("count", len(extracts)))
+
+	// Convert extracts to BackfillCandidates
+	candidates := b.postMatchBackfill.ExtractCandidatesFromMatchmaker(extracts)
+	if len(candidates) == 0 {
+		logger.Debug("No valid candidates from matchmaker tickets")
+		return
+	}
+
+	// For periodic runs, filter to only tickets that have been waiting at least 1 matchmaker interval
+	// This prevents backfill from "poaching" tickets before matchmaker has a chance to process them
+	if isPeriodicRun {
+		// Minimum age is 1 matchmaker interval
+
+		filteredCandidates := make([]*BackfillCandidate, 0, len(candidates))
+		for _, c := range candidates {
+			if c.Intervals >= 1 {
+				filteredCandidates = append(filteredCandidates, c)
+			}
+		}
+
+		logger.Debug("Filtered candidates for periodic backfill",
+			zap.Int("original_count", len(candidates)),
+			zap.Int("filtered_count", len(filteredCandidates)),
+		)
+
+		candidates = filteredCandidates
+
+		if len(candidates) == 0 {
+			logger.Debug("No candidates old enough for periodic backfill")
+			return
+		}
+	}
+
+	logger.Info("Running post-matchmaker backfill",
+		zap.Int("candidates", len(candidates)))
+
+	// Calculate reducing precision factor based on oldest ticket
+	settings := ServiceSettings().Matchmaking
+	reducingPrecisionFactor := 0.0
+
+	if settings.ReducingPrecisionIntervalSecs > 0 {
+		oldestSubmission := time.Now()
+		for _, c := range candidates {
+			if c.SubmissionTime.Before(oldestSubmission) {
+				oldestSubmission = c.SubmissionTime
+			}
+		}
+
+		waitTime := time.Since(oldestSubmission)
+		interval := time.Duration(settings.ReducingPrecisionIntervalSecs) * time.Second
+		maxCycles := float64(settings.ReducingPrecisionMaxCycles)
+
+		if maxCycles > 0 && interval > 0 {
+			cycles := float64(waitTime) / float64(interval)
+			reducingPrecisionFactor = min(cycles/maxCycles, 1.0)
+		}
+	}
+
+	logger.Debug("Reducing precision factor calculated",
+		zap.Float64("factor", reducingPrecisionFactor))
+
+	// Process and execute backfill (combined to ensure accurate slot tracking)
+	results, err := b.postMatchBackfill.ProcessAndExecuteBackfill(ctx, logger, candidates, reducingPrecisionFactor)
+	if err != nil {
+		if ctx.Err() != nil {
+			logger.Warn("Post-matchmaker backfill timed out or cancelled", zap.Error(err), zap.Int("partial_results", len(results)))
+		} else {
+			logger.Error("Failed to process post-matchmaker backfill", zap.Error(err))
+		}
+		// Still report partial results if any succeeded before timeout
+		if len(results) > 0 {
+			logger.Info("Partially backfilled players before timeout/error", zap.Int("count", len(results)))
+		}
+		return
+	}
+
+	if len(results) == 0 {
+		logger.Debug("No backfill matches found")
+		return
+	}
+
+	logger.Info("Successfully backfilled players", zap.Int("count", len(results)))
 }
 
 func (b *LobbyBuilder) extractLatenciesFromEntrants(entrants []*MatchmakerEntry) (map[string][][]float64, map[string]map[string]float64) {
@@ -348,59 +557,6 @@ func (b *LobbyBuilder) groupIDFromEntrants(entrants []*MatchmakerEntry) (uuid.UU
 	return uuid.FromStringOrNil(groupID), nil
 }
 
-func (b *LobbyBuilder) distributeParties(parties [][]*MatchmakerEntry) [][]*MatchmakerEntry {
-	// Distribute the players from each party on the two teams.
-	// Try to keep the parties together, but the teams must be balanced.
-	// The algorithm is greedy and may not always produce the best result.
-	// Each team must be 4 players or less
-	teams := [][]*MatchmakerEntry{{}, {}}
-
-	// Sort the parties by size, single players last
-	sort.SliceStable(parties, func(i, j int) bool {
-		if len(parties[i]) == 1 {
-			return false
-		}
-		return len(parties[i]) < len(parties[j])
-	})
-
-	// Distribute the parties to the teams
-	for _, party := range parties {
-		// Find the team with the least players
-		team := 0
-		for i, t := range teams {
-			if len(t) < len(teams[team]) {
-				team = i
-			}
-		}
-		teams[team] = append(teams[team], party...)
-	}
-	// sort the teams by size
-	sort.SliceStable(teams, func(i, j int) bool {
-		return len(teams[i]) > len(teams[j])
-	})
-
-	for i, player := range teams[0] {
-		// If the team is more than two players larger than the other team, distribute the players evenly
-		if len(teams[0]) > len(teams[1])+1 {
-			// Move a player from teams[0] to teams[1]
-			teams[1] = append(teams[1], player)
-			teams[0] = append(teams[0][:i], teams[0][i+1:]...)
-		}
-	}
-
-	return teams
-}
-
-// Count the number of active matches by external IP
-func countByExtIP(labels []*MatchLabel) map[string]int {
-	countByExtIP := make(map[string]int, len(labels))
-	for _, label := range labels {
-		k := label.GameServer.Endpoint.ExternalIP.String()
-		countByExtIP[k]++
-	}
-	return countByExtIP
-}
-
 func (b *LobbyBuilder) selectNextMap(mode evr.Symbol) evr.Symbol {
 	queue := b.mapQueue[mode]
 
@@ -450,46 +606,6 @@ func CompactedFrequencySort[T comparable](s []T, desc bool) []T {
 		slices.Reverse(s)
 	}
 	return slices.Compact(s)
-}
-
-func rttByPlayerByExtIP(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, groupID string) (map[string]map[string]int, error) {
-	qparts := []string{
-		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.QuoteStringValue(groupID)),
-	}
-
-	query := strings.Join(qparts, " ")
-
-	pubLabels, err := LobbyGameServerList(ctx, nk, query)
-	if err != nil {
-		return nil, err
-	}
-
-	rttByPlayerByExtIP := make(map[string]map[string]int)
-
-	totalPlayers := 0
-	for _, label := range pubLabels {
-		for _, p := range label.Players {
-			history := NewLatencyHistory()
-			if err := StorableRead(ctx, nk, p.UserID, history, true); err != nil && status.Code(err) != codes.NotFound {
-				logger.Warn("Failed to load latency history", zap.Error(err))
-				continue
-			}
-
-			rtts := history.LatestRTTs()
-			if len(rtts) > 0 {
-				totalPlayers++
-			}
-
-			for extIP, rtt := range rtts {
-				if _, ok := rttByPlayerByExtIP[p.UserID]; !ok {
-					rttByPlayerByExtIP[p.UserID] = make(map[string]int)
-				}
-				rttByPlayerByExtIP[p.UserID][extIP] = rtt
-			}
-		}
-	}
-
-	return rttByPlayerByExtIP, nil
 }
 
 // Wrapper for the matchRegistry.ListMatches function.

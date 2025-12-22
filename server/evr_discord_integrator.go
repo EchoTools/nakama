@@ -582,7 +582,7 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 	return nil
 }
 
-func (d *DiscordIntegrator) handleGuildCreate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildCreate) error {
+func (d *DiscordIntegrator) handleGuildCreate(logger *zap.Logger, _ *discordgo.Session, e *discordgo.GuildCreate) error {
 	logger.Info("Guild Create", zap.Any("guild", e.Guild.ID))
 	if err := d.guildSync(d.ctx, logger, e.Guild); err != nil {
 		return fmt.Errorf("error during guild sync: %w", err)
@@ -590,7 +590,7 @@ func (d *DiscordIntegrator) handleGuildCreate(logger *zap.Logger, s *discordgo.S
 	return nil
 }
 
-func (d *DiscordIntegrator) handleGuildUpdate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildUpdate) error {
+func (d *DiscordIntegrator) handleGuildUpdate(logger *zap.Logger, _ *discordgo.Session, e *discordgo.GuildUpdate) error {
 	logger.Info("Guild Update", zap.Any("guild", e.Guild.ID))
 	if err := d.guildSync(d.ctx, logger, e.Guild); err != nil {
 		return fmt.Errorf("error during guild sync: %w", err)
@@ -598,7 +598,7 @@ func (d *DiscordIntegrator) handleGuildUpdate(logger *zap.Logger, s *discordgo.S
 	return nil
 }
 
-func (d *DiscordIntegrator) handleGuildDelete(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildDelete) error {
+func (d *DiscordIntegrator) handleGuildDelete(logger *zap.Logger, _ *discordgo.Session, e *discordgo.GuildDelete) error {
 
 	d.LogServiceAuditMessage(d.ctx, fmt.Sprintf("Deleted guild `%s` (ID: %s), owned by <@%s>", e.Guild.ID, e.Guild.ID, e.Guild.OwnerID), false)
 	logger.Info("Guild Delete", zap.Any("guild", e.Guild.ID))
@@ -618,7 +618,7 @@ func (d *DiscordIntegrator) handleGuildDelete(logger *zap.Logger, s *discordgo.S
 	return nil
 }
 
-func (d *DiscordIntegrator) handleMemberAdd(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildMemberAdd) error {
+func (d *DiscordIntegrator) handleMemberAdd(_ *zap.Logger, _ *discordgo.Session, _ *discordgo.GuildMemberAdd) error {
 	/*
 		logger.Info("Member Add", zap.Any("member", e))
 		if err := d.SyncGuildGroupMember(ctx, d.DiscordIDToUserID(e.Member.User.ID), d.GuildIDToGroupID(e.GuildID)); err != nil {
@@ -998,7 +998,7 @@ func (d *DiscordIntegrator) GuildGroupName(groupID string) string {
 }
 
 // updatePlatformRoles updates Standalone and PCVR roles based on the user's login history
-func (d *DiscordIntegrator) updatePlatformRoles(ctx context.Context, logger *zap.Logger, member *discordgo.Member, group *GuildGroup, userID string) error {
+func (d *DiscordIntegrator) updatePlatformRoles(ctx context.Context, _ *zap.Logger, member *discordgo.Member, group *GuildGroup, userID string) error {
 	// Skip if neither role is configured
 	if group.RoleMap.Standalone == "" && group.RoleMap.PCVR == "" {
 		return nil

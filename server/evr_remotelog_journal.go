@@ -55,7 +55,8 @@ func NewUserRemoteLogJournalRegistry(ctx context.Context, logger *zap.Logger, nk
 			select {
 			case <-ctx.Done():
 				// Write all remaining entries
-				ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
 
 				if err := registry.storageWrite(ctx, logger, journals); err != nil {
 					registry.logger.Warn("Failed to write user journals", zap.Error(err))
@@ -152,7 +153,7 @@ func (r *UserLogJouralRegistry) storageRead(ctx context.Context, userID uuid.UUI
 	return journal, nil
 }
 
-func (r *UserLogJouralRegistry) storageWrite(ctx context.Context, logger *zap.Logger, journals map[JournalPresence]map[time.Time][]string) error {
+func (r *UserLogJouralRegistry) storageWrite(ctx context.Context, _ *zap.Logger, journals map[JournalPresence]map[time.Time][]string) error {
 
 	now := time.Now().UTC()
 	var data []byte

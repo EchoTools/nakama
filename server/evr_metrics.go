@@ -13,6 +13,10 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
+const (
+	MaxMatchListResults = 100
+)
+
 type MatchLabelMeta struct {
 	TickRate  int
 	Presences []*rtapi.UserPresence
@@ -135,7 +139,7 @@ func ListMatchStates(ctx context.Context, nk runtime.NakamaModule, query string)
 	minSize := 1
 	maxSize := MatchLobbyMaxSize
 
-	matches, err := nk.MatchList(ctx, 1000, true, "", &minSize, &maxSize, query)
+	matches, err := nk.MatchList(ctx, MaxMatchListResults, true, "", &minSize, &maxSize, query)
 	if err != nil {
 		return nil, err
 	}

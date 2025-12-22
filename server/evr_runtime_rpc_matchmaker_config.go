@@ -157,7 +157,7 @@ type MatchmakerConfigWithSchema struct {
 // =============================================================================
 
 // extractSchema uses reflection to build a schema from struct tags
-func extractSchema(t reflect.Type, prefix string) map[string]FieldSchema {
+func extractSchema(t reflect.Type, _ string) map[string]FieldSchema {
 	schema := make(map[string]FieldSchema)
 
 	if t.Kind() == reflect.Ptr {

@@ -225,9 +225,7 @@ func MoveLeaderboard(ctx context.Context, db *sql.DB, src, dst string) (int, err
 	}
 	count += int(c)
 
-	if _, err := db.ExecContext(ctx, "UPDATE leaderboard_record SET leaderboard_id = $1 WHERE leaderboard_id = $2", dst, src); err != nil {
-		return count, err
-	}
+	_, err = db.ExecContext(ctx, "UPDATE leaderboard_record SET leaderboard_id = $1 WHERE leaderboard_id = $2", dst, src)
 	if err != nil {
 		return count, err
 	}

@@ -195,44 +195,6 @@ type CandidateData struct {
 	Matches    [][]*MatchmakerEntry `json:"matches"`
 }
 
-func (c CandidateData) mm() [][]runtime.MatchmakerEntry {
-	var candidates [][]runtime.MatchmakerEntry
-	for _, entry := range c.Candidates {
-		var matchmakerEntries []runtime.MatchmakerEntry
-		for _, e := range entry {
-			matchmakerEntries = append(matchmakerEntries, e)
-		}
-		candidates = append(candidates, matchmakerEntries)
-	}
-	return candidates
-}
-
-func getTeamTickets(team RatedEntryTeam) []string {
-	tickets := make([]string, len(team))
-	for i, entry := range team {
-		tickets[i] = entry.Entry.Ticket
-	}
-	return tickets
-}
-
-func writeAsJSONFile(data interface{}, filename string) {
-	file, err := os.Create(filename)
-	if err != nil {
-		logger.Error("Error opening file", zap.Error(err), zap.String("filename", filename))
-		return
-	}
-	defer file.Close()
-
-	// Write the data
-	output, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		logger.Error("Error marshalling data", zap.Error(err))
-		return
-	}
-
-	file.Write(output)
-}
-
 func TestCharacterizationMatchmaker1v1(t *testing.T) {
 
 	EvrRuntimeModuleFns = nil
