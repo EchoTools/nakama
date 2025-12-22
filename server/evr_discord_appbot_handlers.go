@@ -499,6 +499,10 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		default:
 			return fmt.Errorf("unknown issue type: %s", issueType)
 		}
+
+	case "enforcement":
+		// Handle enforcement button interactions (edit, void)
+		return d.handleEnforcementInteraction(ctx, logger, s, i, value)
 	}
 
 	return nil

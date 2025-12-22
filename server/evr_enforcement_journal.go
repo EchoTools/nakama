@@ -221,6 +221,60 @@ func (s *GuildEnforcementJournal) VoidRecord(groupID, recordID, authorUserID, au
 	}
 	return s.VoidsByRecordIDByGroupID[groupID][recordID]
 }
+
+// GetRecord returns a pointer to a record by its ID, or nil if not found.
+// The pointer can be used to modify the record directly.
+func (s *GuildEnforcementJournal) GetRecord(groupID, recordID string) *GuildEnforcementRecord {
+	if s.RecordsByGroupID == nil {
+		return nil
+	}
+	records, ok := s.RecordsByGroupID[groupID]
+	if !ok {
+		return nil
+	}
+	for i := range records {
+		if records[i].ID == recordID {
+			return &s.RecordsByGroupID[groupID][i]
+		}
+	}
+	return nil
+}
+
+// EditRecord updates a record and logs the edit. Returns the updated record or nil if not found.
+func (s *GuildEnforcementJournal) EditRecord(groupID, recordID, editorUserID, editorDiscordID string, newExpiry time.Time, newUserNotice, newAuditorNotes string) *GuildEnforcementRecord {
+	record := s.GetRecord(groupID, recordID)
+	if record == nil {
+		return nil
+	}
+
+	// Create edit log entry with previous values
+	editEntry := GuildEnforcementEditEntry{
+		EditorUserID:           editorUserID,
+		EditorDiscordID:        editorDiscordID,
+		EditedAt:               time.Now().UTC(),
+		PreviousExpiry:         record.Expiry,
+		PreviousUserNoticeText: record.UserNoticeText,
+		PreviousAuditorNotes:   record.AuditorNotes,
+		NewExpiry:              newExpiry,
+		NewUserNoticeText:      newUserNotice,
+		NewAuditorNotes:        newAuditorNotes,
+	}
+
+	// Update the record
+	record.Expiry = newExpiry
+	record.UserNoticeText = newUserNotice
+	record.AuditorNotes = newAuditorNotes
+	record.UpdatedAt = time.Now().UTC()
+
+	// Append to edit log
+	if record.EditLog == nil {
+		record.EditLog = make([]GuildEnforcementEditEntry, 0, 1)
+	}
+	record.EditLog = append(record.EditLog, editEntry)
+
+	return record
+}
+
 func (s *GuildEnforcementJournal) GroupVoids(groupID ...string) map[string]GuildEnforcementRecordVoid {
 	voids := make(map[string]GuildEnforcementRecordVoid)
 	for _, g := range groupID {
@@ -510,18 +564,27 @@ func createEnforcementActionComponents(record GuildEnforcementRecord, profile *E
 			Timestamp:   record.UpdatedAt.UTC().Format(time.RFC3339),
 		},
 	}
+
+	// Build button components - Edit (blue) and Void (red)
+	// CustomID format: enforcement:{action}:{recordID}:{groupID}:{targetUserID}
+	buttons := []discordgo.MessageComponent{
+		&discordgo.Button{
+			Label:    "Edit",
+			Style:    discordgo.PrimaryButton,
+			CustomID: fmt.Sprintf("enforcement:edit:%s:%s:%s", record.ID, gg.Group.Id, record.UserID),
+			Disabled: isVoid,
+		},
+		&discordgo.Button{
+			Label:    "Void",
+			Style:    discordgo.DangerButton,
+			CustomID: fmt.Sprintf("enforcement:void:%s:%s:%s", record.ID, gg.Group.Id, record.UserID),
+			Disabled: isVoid,
+		},
+	}
+
 	components := []discordgo.MessageComponent{
 		&discordgo.ActionsRow{
-			Components: []discordgo.MessageComponent{
-				&discordgo.Button{
-					Label: "Void Record",
-					Style: discordgo.SecondaryButton,
-					Emoji: &discordgo.ComponentEmoji{
-						Name: "heavy_multiplication_x",
-					},
-					CustomID: fmt.Sprintf("void_record:%s", record.ID),
-				},
-			},
+			Components: buttons,
 		},
 	}
 
