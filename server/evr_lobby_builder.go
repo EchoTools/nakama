@@ -250,10 +250,18 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isFallback bool) {
 	logger.Debug("Reducing precision factor calculated",
 		zap.Float64("factor", reducingPrecisionFactor))
 
-	// Process backfill
-	results, err := b.postMatchBackfill.ProcessBackfill(ctx, unmatchedCandidates, reducingPrecisionFactor)
+	// Process and execute backfill (combined to ensure accurate slot tracking)
+	results, err := b.postMatchBackfill.ProcessAndExecuteBackfill(ctx, logger, unmatchedCandidates, reducingPrecisionFactor)
 	if err != nil {
-		logger.Error("Failed to process post-matchmaker backfill", zap.Error(err))
+		if ctx.Err() != nil {
+			logger.Warn("Post-matchmaker backfill timed out or cancelled", zap.Error(err), zap.Int("partial_results", len(results)))
+		} else {
+			logger.Error("Failed to process post-matchmaker backfill", zap.Error(err))
+		}
+		// Still report partial results if any succeeded before timeout
+		if len(results) > 0 {
+			logger.Info("Partially backfilled players before timeout/error", zap.Int("count", len(results)))
+		}
 		return
 	}
 
@@ -262,12 +270,7 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isFallback bool) {
 		return
 	}
 
-	logger.Info("Found backfill matches", zap.Int("count", len(results)))
-
-	// Execute backfill
-	if err := b.postMatchBackfill.ExecuteBackfill(ctx, logger, results); err != nil {
-		logger.Error("Failed to execute post-matchmaker backfill", zap.Error(err))
-	}
+	logger.Info("Successfully backfilled players", zap.Int("count", len(results)))
 }
 
 func (b *LobbyBuilder) extractLatenciesFromEntrants(entrants []*MatchmakerEntry) (map[string][][]float64, map[string]map[string]float64) {

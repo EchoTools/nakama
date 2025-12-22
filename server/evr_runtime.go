@@ -197,8 +197,13 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register matchmaker override: %w", err)
 	}
 
-	// Store the skill-based matchmaker globally for post-matchmaker backfill
-	globalSkillBasedMatchmaker.Store(sbmm)
+	// Connect the skill-based matchmaker to the lobby builder for post-matchmaker backfill
+	if lb := globalLobbyBuilder.Load(); lb != nil {
+		lb.SetSkillBasedMatchmaker(sbmm)
+		logger.Info("Post-matchmaker backfill enabled")
+	} else {
+		logger.Warn("LobbyBuilder not initialized, post-matchmaker backfill disabled")
+	}
 
 	// Migrate any system level data
 	go MigrateSystem(ctx, logger, db, nk)
