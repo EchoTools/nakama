@@ -113,6 +113,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"matchmaker/stream":             MatchmakerStreamRPC,
 		"matchmaker/state":              MatchmakerStateRPC,
 		"matchmaker/candidates":         MatchmakerCandidatesRPCFactory(sbmm),
+		"matchmaker/config":             MatchmakerConfigRPC,
 		"stream/join":                   StreamJoinRPC,
 		"server/score":                  ServerScoreRPC,
 		"server/scores":                 ServerScoresRPC,
