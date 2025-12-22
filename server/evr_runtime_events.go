@@ -21,7 +21,7 @@ const (
 	EventSessionStart           = "session_start"
 	EventSessionEnd             = "session_end"
 	EventMatchData              = "match_data"
-	matchDataDatabaseName       = "nevr"
+	matchDataDatabaseName       = "nevr_telemetry"
 	matchDataCollectionName     = "match_data"
 )
 
