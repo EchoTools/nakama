@@ -286,7 +286,7 @@ func connectMongo(ctx context.Context, mongoURI string) (*mongo.Client, error) {
 	return client, nil
 }
 
-func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
+func createCoreGroups(ctx context.Context, logger runtime.Logger, _ *sql.DB, nk runtime.NakamaModule, _ runtime.Initializer) error {
 	// Create user for use by the discord bot (and core group ownership)
 	userId, _, _, err := nk.AuthenticateDevice(ctx, SystemUserID, "discordbot", true)
 	if err != nil {

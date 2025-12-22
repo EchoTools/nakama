@@ -838,7 +838,7 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 	return entries, nil
 }
 
-func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, statisticsQueue *StatisticsQueue, msg *evr.RemoteLogVOIPLoudness) error {
+func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, _ runtime.Logger, _ *sql.DB, nk runtime.NakamaModule, _ *StatisticsQueue, msg *evr.RemoteLogVOIPLoudness) error {
 	// Get the match ID
 	matchID, err := NewMatchID(msg.SessionUUID(), s.Node)
 	if err != nil {

@@ -13,7 +13,7 @@ import (
 )
 
 // handleEnforcementInteraction handles button interactions for enforcement records (edit, void)
-func (d *DiscordAppBot) handleEnforcementInteraction(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, value string) error {
+func (d *DiscordAppBot) handleEnforcementInteraction(ctx context.Context, _ runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, value string) error {
 	// value format: action:recordID:groupID:targetUserID
 	parts := strings.SplitN(value, ":", 4)
 	if len(parts) != 4 {
@@ -420,7 +420,7 @@ func createEnforcementRecordEmbed(title string, record GuildEnforcementRecord, g
 }
 
 // sendEnforcementEditAuditLog sends audit log embeds for an edit operation
-func (d *DiscordAppBot) sendEnforcementEditAuditLog(logger runtime.Logger, editor *discordgo.User, groupID string, gg *GuildGroup, beforeEmbed, afterEmbed *discordgo.MessageEmbed) {
+func (d *DiscordAppBot) sendEnforcementEditAuditLog(logger runtime.Logger, editor *discordgo.User, _ string, gg *GuildGroup, beforeEmbed, afterEmbed *discordgo.MessageEmbed) {
 	// Add editor info to embeds
 	beforeEmbed.Footer = &discordgo.MessageEmbedFooter{
 		Text:    fmt.Sprintf("Edited by %s", editor.String()),
@@ -459,7 +459,7 @@ func (d *DiscordAppBot) sendEnforcementEditAuditLog(logger runtime.Logger, edito
 }
 
 // sendEnforcementVoidAuditLog sends audit log embeds for a void operation
-func (d *DiscordAppBot) sendEnforcementVoidAuditLog(logger runtime.Logger, editor *discordgo.User, groupID string, gg *GuildGroup, beforeEmbed, afterEmbed *discordgo.MessageEmbed, reason string) {
+func (d *DiscordAppBot) sendEnforcementVoidAuditLog(logger runtime.Logger, editor *discordgo.User, _ string, gg *GuildGroup, beforeEmbed, afterEmbed *discordgo.MessageEmbed, reason string) {
 	// Add editor info to embeds
 	beforeEmbed.Footer = &discordgo.MessageEmbedFooter{
 		Text:    fmt.Sprintf("Voided by %s", editor.String()),

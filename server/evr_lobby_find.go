@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -380,7 +379,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 	return label, nil
 }
 
-func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, enableFailsafe bool, interval time.Duration, includeMMR, includeMaxRTT bool, entrants ...*EvrMatchPresence) error {
+func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, _ Session, lobbyParams *LobbySessionParameters, enableFailsafe bool, interval time.Duration, includeMMR, includeMaxRTT bool, entrants ...*EvrMatchPresence) error {
 
 	var (
 		query         = lobbyParams.BackfillSearchQuery(includeMMR, includeMaxRTT)
@@ -739,46 +738,4 @@ func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, sessi
 		return NewLobbyError(ServerIsLocked, "party leader is in a match")
 	}
 
-}
-
-func filterByPlayerAvailability(rttByPlayerByExtIP map[string]map[string]int) []string {
-
-	maxPlayerCount := 0
-	extIPsByAverageRTT := make(map[string]int)
-	extIPsByPlayerCount := make(map[string]int)
-	for extIP, players := range rttByPlayerByExtIP {
-		extIPsByPlayerCount[extIP] += len(players)
-		if len(players) > maxPlayerCount {
-			maxPlayerCount = len(players)
-		}
-
-		averageRTT := 0
-		for _, rtt := range players {
-			averageRTT += rtt
-		}
-		averageRTT /= len(players)
-	}
-
-	// Sort by greatest player availability
-	extIPs := make([]string, 0, len(extIPsByPlayerCount))
-	for extIP := range extIPsByPlayerCount {
-		extIPs = append(extIPs, extIP)
-	}
-
-	sort.SliceStable(extIPs, func(i, j int) bool {
-		// Sort by player count first
-		if extIPsByPlayerCount[extIPs[i]] > extIPsByPlayerCount[extIPs[j]] {
-			return true
-		} else if extIPsByPlayerCount[extIPs[i]] < extIPsByPlayerCount[extIPs[j]] {
-			return false
-		}
-
-		// If the player count is the same, sort by RTT
-		if extIPsByAverageRTT[extIPs[i]] < extIPsByAverageRTT[extIPs[j]] {
-			return true
-		}
-		return false
-	})
-
-	return extIPs
 }

@@ -2,10 +2,8 @@ package server
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"math"
-	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -114,7 +112,7 @@ func (p *EvrPipeline) matchmakingTicketTimeout() time.Duration {
 	return time.Duration(maxIntervals*intervalSecs) * time.Second
 }
 
-func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup, entrants ...*EvrMatchPresence) (err error) {
+func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup, _ ...*EvrMatchPresence) (err error) {
 
 	stream := lobbyParams.GuildGroupStream()
 	count, err := p.nk.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
@@ -311,11 +309,6 @@ func LoadMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userI
 func StoreMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userID string, settings MatchmakingSettings) error {
 	err := StorableWrite(ctx, nk, userID, settings)
 	return err
-}
-
-func keyToIP(key string) net.IP {
-	b, _ := hex.DecodeString(key[3:])
-	return net.IPv4(b[0], b[1], b[2], b[3])
 }
 
 type LatencyMetric struct {

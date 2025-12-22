@@ -274,8 +274,8 @@ func TestMatchLabel_CalculateRatingWeights(t *testing.T) {
 				goals: []*evr.MatchGoal{},
 			},
 			want: map[evr.EvrId]int{
-				evr.EvrId{PlatformCode: evr.DMO, AccountId: 1}: 4,
-				evr.EvrId{PlatformCode: evr.DMO, AccountId: 2}: 0,
+				{PlatformCode: evr.DMO, AccountId: 1}: 4,
+				{PlatformCode: evr.DMO, AccountId: 2}: 0,
 			},
 		},
 		{
