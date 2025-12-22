@@ -664,7 +664,7 @@ func (p *InGamePanel) HandleInteraction(i *discordgo.InteractionCreate, command 
 
 		// Get the IGN data including lock status
 		ignData := evrProfile.GetGroupIGNData(groupID)
-		modal := p.createSetIGNModal(userID, groupID, ignData.DisplayName, ignData.IsLocked)
+		modal := p.createSetIGNModal(i.Member.User.ID, i.GuildID, ignData.DisplayName, ignData.IsLocked)
 		return p.dg.InteractionRespond(i.Interaction, modal)
 
 	case "select_player":

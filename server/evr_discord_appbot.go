@@ -3157,7 +3157,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			case "set_ign_modal":
 				// Handle IGN override modal submission
 				data := i.ModalSubmitData()
-				if err := d.handleSetModalSubmit(ctx, logger, s, i, &data, value); err != nil {
+				if err := d.handleSetIGNModalSubmit(ctx, logger, s, i, &data, value); err != nil {
 					logger.Error("Failed to handle set IGN modal submit", zap.Error(err))
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
