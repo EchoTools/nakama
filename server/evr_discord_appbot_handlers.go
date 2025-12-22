@@ -541,6 +541,11 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		return nil, 0, status.Error(codes.PermissionDenied, "user does not have the allocator role in this guild.")
 	}
 
+	// If user is a global operator but has no allocator groups, use the current guild group
+	if isGlobalOperator {
+		allocatorGroupIDs = append(allocatorGroupIDs, groupID)
+	}
+
 	// Load the latency history for this user
 	latencyHistory := NewLatencyHistory()
 	if err := StorableRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {

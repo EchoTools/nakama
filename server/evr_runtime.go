@@ -56,6 +56,9 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		sbmm = NewSkillBasedMatchmaker()
 	)
 
+	// Store skill-based matchmaker globally so it can be connected to the lobby builder
+	globalSkillBasedMatchmaker.Store(sbmm)
+
 	// Register hooks
 	//if err = initializer.RegisterBeforeReadStorageObjects(BeforeReadStorageObjectsHook); err != nil {
 	//		return fmt.Errorf("unable to register AfterReadStorageObjects hook: %w", err)
@@ -196,9 +199,6 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	if err := initializer.RegisterMatchmakerOverride(sbmm.EvrMatchmakerFn); err != nil {
 		return fmt.Errorf("unable to register matchmaker override: %w", err)
 	}
-
-	// Store the skill-based matchmaker globally for post-matchmaker backfill
-	globalSkillBasedMatchmaker.Store(sbmm)
 
 	// Migrate any system level data
 	go MigrateSystem(ctx, logger, db, nk)

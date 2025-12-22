@@ -51,6 +51,11 @@ type LobbyBuilder struct {
 	mapQueue          map[evr.Symbol][]evr.Symbol // map[mode][]level
 	postMatchBackfill *PostMatchmakerBackfill
 	skillBasedMM      *SkillBasedMatchmaker
+
+	// Backfill coordination
+	backfillStopCh  chan struct{} // Channel to stop periodic backfill
+	backfillResetCh chan struct{} // Channel to reset the periodic backfill timer
+	backfillMu      sync.Mutex
 }
 
 func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics) *LobbyBuilder {
@@ -77,6 +82,8 @@ func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistr
 // SetSkillBasedMatchmaker sets the skill-based matchmaker reference for accessing matchmaker results
 func (b *LobbyBuilder) SetSkillBasedMatchmaker(sbmm *SkillBasedMatchmaker) {
 	b.skillBasedMM = sbmm
+	// Always start periodic backfill - it will check the setting on each run
+	b.startPeriodicBackfill()
 }
 
 func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
@@ -89,34 +96,150 @@ func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 	}
 
 	// After building matches, attempt post-matchmaker backfill if enabled
+	// This runs immediately after matchmaker completes in addition to periodic backfill
 	if ServiceSettings().Matchmaking.EnablePostMatchmakerBackfill && b.skillBasedMM != nil {
-		go b.runPostMatchmakerBackfill()
+		// Reset the periodic timer since matchmaker just ran and will trigger backfill
+		b.resetBackfillTimer()
+		// Run backfill immediately after matchmaker (not a periodic run)
+		go b.runPostMatchmakerBackfill(false)
+	}
+}
+
+// startPeriodicBackfill starts a goroutine that periodically runs backfill
+// This ensures backfill happens even when matchmaker doesn't have enough players to form matches
+func (b *LobbyBuilder) startPeriodicBackfill() {
+	b.backfillMu.Lock()
+	// Stop any existing periodic backfill
+	if b.backfillStopCh != nil {
+		close(b.backfillStopCh)
+	}
+	b.backfillStopCh = make(chan struct{})
+	b.backfillResetCh = make(chan struct{}, 1) // Buffered to avoid blocking
+	stopCh := b.backfillStopCh
+	resetCh := b.backfillResetCh
+	b.backfillMu.Unlock()
+
+	// Use the same interval as the matchmaker
+	matchmaker := globalMatchmaker.Load()
+	if matchmaker == nil {
+		b.logger.Warn("Global matchmaker not initialized, using default backfill interval")
+		return
+	}
+	intervalSecs := matchmaker.config.GetMatchmaker().IntervalSec
+	interval := time.Duration(intervalSecs) * time.Second
+
+	b.logger.Info("Starting periodic backfill", zap.Duration("interval", interval))
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-stopCh:
+				b.logger.Info("Stopping periodic backfill")
+				return
+			case <-resetCh:
+				// Reset the ticker when backfill runs (from any trigger)
+				ticker.Reset(interval)
+			case <-ticker.C:
+				// Check if backfill is enabled (allows runtime config changes)
+				if !ServiceSettings().Matchmaking.EnablePostMatchmakerBackfill {
+					continue
+				}
+				// Reset timer at the start so it doesn't pile up
+				ticker.Reset(interval)
+				// Run periodic backfill (isPeriodicRun=true filters to older tickets)
+				b.runPostMatchmakerBackfill(true)
+			}
+		}
+	}()
+}
+
+// resetBackfillTimer resets the periodic backfill timer
+// Call this after backfill runs to avoid running again too soon
+func (b *LobbyBuilder) resetBackfillTimer() {
+	b.backfillMu.Lock()
+	defer b.backfillMu.Unlock()
+	if b.backfillResetCh != nil {
+		select {
+		case b.backfillResetCh <- struct{}{}:
+		default:
+			// Channel full, reset already pending
+		}
 	}
 }
 
 // runPostMatchmakerBackfill runs the post-matchmaker backfill process
-func (b *LobbyBuilder) runPostMatchmakerBackfill() {
+// isPeriodicRun indicates this is a periodic run (not triggered by matchmaker completion)
+// When isPeriodicRun is true, we filter to only process tickets that have been waiting
+// for at least BackfillMinTicketAgeSecs to avoid poaching fresh tickets before matchmaker runs
+func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), BackfillProcessTimeout)
 	defer cancel()
 
-	logger := b.logger.With(zap.String("operation", "post_matchmaker_backfill"))
+	logger := b.logger.With(
+		zap.String("operation", "post_matchmaker_backfill"),
+		zap.Bool("is_periodic_run", isPeriodicRun),
+	)
 
-	// Get the latest matchmaker results
-	candidates, madeMatches := b.skillBasedMM.GetLatestResult()
-	if len(candidates) == 0 {
+	logger.Debug("Backfill check starting")
+
+	// If matchmaker is currently processing, skip this backfill run to avoid poaching
+	if b.skillBasedMM != nil && b.skillBasedMM.IsProcessing() {
+		logger.Debug("Matchmaker is currently processing, skipping backfill")
 		return
 	}
 
-	// Extract unmatched candidates
-	unmatchedCandidates := b.postMatchBackfill.ExtractUnmatchedCandidates(candidates, madeMatches)
-	if len(unmatchedCandidates) == 0 {
-		logger.Debug("No unmatched candidates for post-matchmaker backfill")
+	// Get current tickets from the global matchmaker
+	matchmaker := globalMatchmaker.Load()
+	if matchmaker == nil {
+		logger.Debug("Global matchmaker not initialized")
 		return
+	}
+
+	extracts := matchmaker.Extract()
+	if len(extracts) == 0 {
+		logger.Debug("No tickets in matchmaker")
+		return
+	}
+
+	logger.Debug("Got matchmaker tickets", zap.Int("count", len(extracts)))
+
+	// Convert extracts to BackfillCandidates
+	candidates := b.postMatchBackfill.ExtractCandidatesFromMatchmaker(extracts)
+	if len(candidates) == 0 {
+		logger.Debug("No valid candidates from matchmaker tickets")
+		return
+	}
+
+	// For periodic runs, filter to only tickets that have been waiting at least 1 matchmaker interval
+	// This prevents backfill from "poaching" tickets before matchmaker has a chance to process them
+	if isPeriodicRun {
+		// Minimum age is 1 matchmaker interval
+
+		filteredCandidates := make([]*BackfillCandidate, 0, len(candidates))
+		for _, c := range candidates {
+			if c.Intervals >= 1 {
+				filteredCandidates = append(filteredCandidates, c)
+			}
+		}
+
+		logger.Debug("Filtered candidates for periodic backfill",
+			zap.Int("original_count", len(candidates)),
+			zap.Int("filtered_count", len(filteredCandidates)),
+		)
+
+		candidates = filteredCandidates
+
+		if len(candidates) == 0 {
+			logger.Debug("No candidates old enough for periodic backfill")
+			return
+		}
 	}
 
 	logger.Info("Running post-matchmaker backfill",
-		zap.Int("unmatched_candidates", len(unmatchedCandidates)),
-		zap.Int("made_matches", len(madeMatches)))
+		zap.Int("candidates", len(candidates)))
 
 	// Calculate reducing precision factor based on oldest ticket
 	settings := ServiceSettings().Matchmaking
@@ -124,7 +247,7 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill() {
 
 	if settings.ReducingPrecisionIntervalSecs > 0 {
 		oldestSubmission := time.Now()
-		for _, c := range unmatchedCandidates {
+		for _, c := range candidates {
 			if c.SubmissionTime.Before(oldestSubmission) {
 				oldestSubmission = c.SubmissionTime
 			}
@@ -143,10 +266,18 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill() {
 	logger.Debug("Reducing precision factor calculated",
 		zap.Float64("factor", reducingPrecisionFactor))
 
-	// Process backfill
-	results, err := b.postMatchBackfill.ProcessBackfill(ctx, unmatchedCandidates, reducingPrecisionFactor)
+	// Process and execute backfill (combined to ensure accurate slot tracking)
+	results, err := b.postMatchBackfill.ProcessAndExecuteBackfill(ctx, logger, candidates, reducingPrecisionFactor)
 	if err != nil {
-		logger.Error("Failed to process post-matchmaker backfill", zap.Error(err))
+		if ctx.Err() != nil {
+			logger.Warn("Post-matchmaker backfill timed out or cancelled", zap.Error(err), zap.Int("partial_results", len(results)))
+		} else {
+			logger.Error("Failed to process post-matchmaker backfill", zap.Error(err))
+		}
+		// Still report partial results if any succeeded before timeout
+		if len(results) > 0 {
+			logger.Info("Partially backfilled players before timeout/error", zap.Int("count", len(results)))
+		}
 		return
 	}
 
@@ -155,12 +286,7 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill() {
 		return
 	}
 
-	logger.Info("Found backfill matches", zap.Int("count", len(results)))
-
-	// Execute backfill
-	if err := b.postMatchBackfill.ExecuteBackfill(ctx, logger, results); err != nil {
-		logger.Error("Failed to execute post-matchmaker backfill", zap.Error(err))
-	}
+	logger.Info("Successfully backfilled players", zap.Int("count", len(results)))
 }
 
 func (b *LobbyBuilder) extractLatenciesFromEntrants(entrants []*MatchmakerEntry) (map[string][][]float64, map[string]map[string]float64) {
