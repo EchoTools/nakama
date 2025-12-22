@@ -441,7 +441,7 @@ var (
 		},
 		{
 			Name:        "igp",
-			Description: "Enable the gold nametag for your current session as a moderator.",
+			Description: "Open the In-Game Panel for match moderation and player management.",
 		},
 		{
 			Name:        "party-status",
