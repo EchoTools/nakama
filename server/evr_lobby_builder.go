@@ -108,6 +108,13 @@ func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 // startPeriodicBackfill starts a goroutine that periodically runs backfill
 // This ensures backfill happens even when matchmaker doesn't have enough players to form matches
 func (b *LobbyBuilder) startPeriodicBackfill() {
+	// Check matchmaker first before creating channels to avoid leaking them
+	matchmaker := globalMatchmaker.Load()
+	if matchmaker == nil {
+		b.logger.Warn("Global matchmaker not initialized, periodic backfill not started")
+		return
+	}
+
 	b.backfillMu.Lock()
 	// Stop any existing periodic backfill
 	if b.backfillStopCh != nil {
@@ -118,13 +125,6 @@ func (b *LobbyBuilder) startPeriodicBackfill() {
 	stopCh := b.backfillStopCh
 	resetCh := b.backfillResetCh
 	b.backfillMu.Unlock()
-
-	// Use the same interval as the matchmaker
-	matchmaker := globalMatchmaker.Load()
-	if matchmaker == nil {
-		b.logger.Warn("Global matchmaker not initialized, using default backfill interval")
-		return
-	}
 	intervalSecs := matchmaker.config.GetMatchmaker().IntervalSec
 	interval := time.Duration(intervalSecs) * time.Second
 
