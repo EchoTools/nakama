@@ -632,12 +632,11 @@ func newMatchmakingEntryFromExisting(entry *MatchmakerEntry, minCount, maxCount,
 	params.FromMatchmakerEntry(entry)
 
 	ticketParams := MatchmakingTicketParameters{
-		MinCount:                   minCount,
-		MaxCount:                   maxCount,
-		CountMultiple:              countMultiple,
-		IncludeSBMMRanges:          true,
-		IncludeEarlyQuitPenalty:    true,
-		IncludeRequireCommonServer: true,
+		MinCount:                minCount,
+		MaxCount:                maxCount,
+		CountMultiple:           countMultiple,
+		IncludeSBMMRanges:       true,
+		IncludeEarlyQuitPenalty: true,
 	}
 
 	_, stringProps, numericProps := params.MatchmakingParameters(&ticketParams)
