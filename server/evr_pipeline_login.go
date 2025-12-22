@@ -1127,12 +1127,6 @@ func (p *EvrPipeline) genericMessage(ctx context.Context, logger *zap.Logger, se
 	return nil
 }
 
-func mostRecentThursday() time.Time {
-	now := time.Now()
-	offset := (int(now.Weekday()) - int(time.Thursday) + 7) % 7
-	return now.AddDate(0, 0, -offset).UTC()
-}
-
 // A profile update request is sent from the game server's login connection.
 // It is sent 45 seconds before the sessionend is sent, right after the match ends.
 func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
@@ -1195,15 +1189,10 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 	}
 	logger = logger.With(zap.String("player_uid", playerInfo.UserID), zap.String("player_sid", playerInfo.SessionID), zap.String("player_xpid", playerInfo.EvrID.String()))
 
-	var profile *EVRProfile
-
-	var err error
-	if profile == nil {
-		// If the player isn't a member of the group, do not update the stats
-		profile, err = EVRProfileLoad(ctx, p.nk, playerInfo.UserID)
-		if err != nil {
-			return fmt.Errorf("failed to get account profile: %w", err)
-		}
+	// If the player isn't a member of the group, do not update the stats
+	profile, err := EVRProfileLoad(ctx, p.nk, playerInfo.UserID)
+	if err != nil {
+		return fmt.Errorf("failed to get account profile: %w", err)
 	}
 	groupIDStr := label.GetGroupID().String()
 

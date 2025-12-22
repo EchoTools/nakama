@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -18,8 +17,6 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 const (
@@ -51,13 +48,15 @@ type LobbyBuilder struct {
 	tracker         Tracker
 	metrics         Metrics
 
-	mapQueue map[evr.Symbol][]evr.Symbol // map[mode][]level
+	mapQueue          map[evr.Symbol][]evr.Symbol // map[mode][]level
+	postMatchBackfill *PostMatchmakerBackfill
+	skillBasedMM      *SkillBasedMatchmaker
 }
 
 func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics) *LobbyBuilder {
 	logger = logger.With(zap.String("module", "lobby_builder"))
 
-	return &LobbyBuilder{
+	lb := &LobbyBuilder{
 		logger: logger,
 		nk:     nk,
 
@@ -68,6 +67,16 @@ func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistr
 
 		mapQueue: make(map[evr.Symbol][]evr.Symbol),
 	}
+
+	// Create the post-matchmaker backfill handler
+	lb.postMatchBackfill = NewPostMatchmakerBackfill(logger, nk, sessionRegistry, matchRegistry, tracker, metrics)
+
+	return lb
+}
+
+// SetSkillBasedMatchmaker sets the skill-based matchmaker reference for accessing matchmaker results
+func (b *LobbyBuilder) SetSkillBasedMatchmaker(sbmm *SkillBasedMatchmaker) {
+	b.skillBasedMM = sbmm
 }
 
 func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
@@ -77,6 +86,80 @@ func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 			b.logger.With(zap.Any("entries", entries)).Error("Failed to build match", zap.Error(err))
 			return
 		}
+	}
+
+	// After building matches, attempt post-matchmaker backfill if enabled
+	if ServiceSettings().Matchmaking.EnablePostMatchmakerBackfill && b.skillBasedMM != nil {
+		go b.runPostMatchmakerBackfill()
+	}
+}
+
+// runPostMatchmakerBackfill runs the post-matchmaker backfill process
+func (b *LobbyBuilder) runPostMatchmakerBackfill() {
+	ctx, cancel := context.WithTimeout(context.Background(), BackfillProcessTimeout)
+	defer cancel()
+
+	logger := b.logger.With(zap.String("operation", "post_matchmaker_backfill"))
+
+	// Get the latest matchmaker results
+	candidates, madeMatches := b.skillBasedMM.GetLatestResult()
+	if len(candidates) == 0 {
+		return
+	}
+
+	// Extract unmatched candidates
+	unmatchedCandidates := b.postMatchBackfill.ExtractUnmatchedCandidates(candidates, madeMatches)
+	if len(unmatchedCandidates) == 0 {
+		logger.Debug("No unmatched candidates for post-matchmaker backfill")
+		return
+	}
+
+	logger.Info("Running post-matchmaker backfill",
+		zap.Int("unmatched_candidates", len(unmatchedCandidates)),
+		zap.Int("made_matches", len(madeMatches)))
+
+	// Calculate reducing precision factor based on oldest ticket
+	settings := ServiceSettings().Matchmaking
+	reducingPrecisionFactor := 0.0
+
+	if settings.ReducingPrecisionIntervalSecs > 0 {
+		oldestSubmission := time.Now()
+		for _, c := range unmatchedCandidates {
+			if c.SubmissionTime.Before(oldestSubmission) {
+				oldestSubmission = c.SubmissionTime
+			}
+		}
+
+		waitTime := time.Since(oldestSubmission)
+		interval := time.Duration(settings.ReducingPrecisionIntervalSecs) * time.Second
+		maxCycles := float64(settings.ReducingPrecisionMaxCycles)
+
+		if maxCycles > 0 && interval > 0 {
+			cycles := float64(waitTime) / float64(interval)
+			reducingPrecisionFactor = min(cycles/maxCycles, 1.0)
+		}
+	}
+
+	logger.Debug("Reducing precision factor calculated",
+		zap.Float64("factor", reducingPrecisionFactor))
+
+	// Process backfill
+	results, err := b.postMatchBackfill.ProcessBackfill(ctx, unmatchedCandidates, reducingPrecisionFactor)
+	if err != nil {
+		logger.Error("Failed to process post-matchmaker backfill", zap.Error(err))
+		return
+	}
+
+	if len(results) == 0 {
+		logger.Debug("No backfill matches found")
+		return
+	}
+
+	logger.Info("Found backfill matches", zap.Int("count", len(results)))
+
+	// Execute backfill
+	if err := b.postMatchBackfill.ExecuteBackfill(ctx, logger, results); err != nil {
+		logger.Error("Failed to execute post-matchmaker backfill", zap.Error(err))
 	}
 }
 
@@ -348,59 +431,6 @@ func (b *LobbyBuilder) groupIDFromEntrants(entrants []*MatchmakerEntry) (uuid.UU
 	return uuid.FromStringOrNil(groupID), nil
 }
 
-func (b *LobbyBuilder) distributeParties(parties [][]*MatchmakerEntry) [][]*MatchmakerEntry {
-	// Distribute the players from each party on the two teams.
-	// Try to keep the parties together, but the teams must be balanced.
-	// The algorithm is greedy and may not always produce the best result.
-	// Each team must be 4 players or less
-	teams := [][]*MatchmakerEntry{{}, {}}
-
-	// Sort the parties by size, single players last
-	sort.SliceStable(parties, func(i, j int) bool {
-		if len(parties[i]) == 1 {
-			return false
-		}
-		return len(parties[i]) < len(parties[j])
-	})
-
-	// Distribute the parties to the teams
-	for _, party := range parties {
-		// Find the team with the least players
-		team := 0
-		for i, t := range teams {
-			if len(t) < len(teams[team]) {
-				team = i
-			}
-		}
-		teams[team] = append(teams[team], party...)
-	}
-	// sort the teams by size
-	sort.SliceStable(teams, func(i, j int) bool {
-		return len(teams[i]) > len(teams[j])
-	})
-
-	for i, player := range teams[0] {
-		// If the team is more than two players larger than the other team, distribute the players evenly
-		if len(teams[0]) > len(teams[1])+1 {
-			// Move a player from teams[0] to teams[1]
-			teams[1] = append(teams[1], player)
-			teams[0] = append(teams[0][:i], teams[0][i+1:]...)
-		}
-	}
-
-	return teams
-}
-
-// Count the number of active matches by external IP
-func countByExtIP(labels []*MatchLabel) map[string]int {
-	countByExtIP := make(map[string]int, len(labels))
-	for _, label := range labels {
-		k := label.GameServer.Endpoint.ExternalIP.String()
-		countByExtIP[k]++
-	}
-	return countByExtIP
-}
-
 func (b *LobbyBuilder) selectNextMap(mode evr.Symbol) evr.Symbol {
 	queue := b.mapQueue[mode]
 
@@ -450,46 +480,6 @@ func CompactedFrequencySort[T comparable](s []T, desc bool) []T {
 		slices.Reverse(s)
 	}
 	return slices.Compact(s)
-}
-
-func rttByPlayerByExtIP(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, groupID string) (map[string]map[string]int, error) {
-	qparts := []string{
-		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.QuoteStringValue(groupID)),
-	}
-
-	query := strings.Join(qparts, " ")
-
-	pubLabels, err := LobbyGameServerList(ctx, nk, query)
-	if err != nil {
-		return nil, err
-	}
-
-	rttByPlayerByExtIP := make(map[string]map[string]int)
-
-	totalPlayers := 0
-	for _, label := range pubLabels {
-		for _, p := range label.Players {
-			history := NewLatencyHistory()
-			if err := StorableRead(ctx, nk, p.UserID, history, true); err != nil && status.Code(err) != codes.NotFound {
-				logger.Warn("Failed to load latency history", zap.Error(err))
-				continue
-			}
-
-			rtts := history.LatestRTTs()
-			if len(rtts) > 0 {
-				totalPlayers++
-			}
-
-			for extIP, rtt := range rtts {
-				if _, ok := rttByPlayerByExtIP[p.UserID]; !ok {
-					rttByPlayerByExtIP[p.UserID] = make(map[string]int)
-				}
-				rttByPlayerByExtIP[p.UserID][extIP] = rtt
-			}
-		}
-	}
-
-	return rttByPlayerByExtIP, nil
 }
 
 // Wrapper for the matchRegistry.ListMatches function.
