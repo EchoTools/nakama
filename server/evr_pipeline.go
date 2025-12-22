@@ -38,6 +38,7 @@ var unrequireMessage = evr.NewSTcpConnectionUnrequireEvent()
 var globalMatchmaker = atomic.NewPointer[LocalMatchmaker](nil)
 var globalAppBot = atomic.NewPointer[DiscordAppBot](nil)
 var globalLobbyBuilder = atomic.NewPointer[LobbyBuilder](nil)
+var globalSkillBasedMatchmaker = atomic.NewPointer[SkillBasedMatchmaker](nil)
 
 type EvrPipeline struct {
 	sync.RWMutex
@@ -134,8 +135,16 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	lobbyBuilder := NewLobbyBuilder(logger, nk, sessionRegistry, matchRegistry, tracker, metrics)
 	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
 
-	// Store the lobby builder globally so the runtime module can connect the skill-based matchmaker
+	// Store the lobby builder globally
 	globalLobbyBuilder.Store(lobbyBuilder)
+
+	// Connect skill-based matchmaker to lobby builder for post-matchmaker backfill
+	if sbmm := globalSkillBasedMatchmaker.Load(); sbmm != nil {
+		lobbyBuilder.SetSkillBasedMatchmaker(sbmm)
+		logger.Info("SkillBasedMatchmaker connected to LobbyBuilder")
+	} else {
+		logger.Warn("SkillBasedMatchmaker not initialized, post-matchmaker backfill disabled")
+	}
 
 	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(ctx, logger, nk, sessionRegistry)
 

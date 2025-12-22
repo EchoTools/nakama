@@ -181,6 +181,76 @@ func (b *PostMatchmakerBackfill) ExtractUnmatchedCandidates(candidates [][]runti
 	return result
 }
 
+// ExtractCandidatesFromMatchmaker extracts BackfillCandidates directly from matchmaker extracts
+func (b *PostMatchmakerBackfill) ExtractCandidatesFromMatchmaker(extracts []*MatchmakerExtract) []*BackfillCandidate {
+	result := make([]*BackfillCandidate, 0, len(extracts))
+
+	for _, extract := range extracts {
+		if len(extract.Presences) == 0 {
+			continue
+		}
+
+		// Build MatchmakerEntry list from presences
+		entries := make([]*MatchmakerEntry, 0, len(extract.Presences))
+		for _, presence := range extract.Presences {
+			me := &MatchmakerEntry{
+				Ticket:            extract.Ticket,
+				Presence:          presence,
+				PartyId:           extract.PartyId,
+				StringProperties:  extract.StringProperties,
+				NumericProperties: extract.NumericProperties,
+			}
+			// Build Properties map from string and numeric properties
+			me.Properties = make(map[string]interface{})
+			for k, v := range extract.StringProperties {
+				me.Properties[k] = v
+			}
+			for k, v := range extract.NumericProperties {
+				me.Properties[k] = v
+			}
+			entries = append(entries, me)
+		}
+
+		// Extract candidate properties
+		groupIDStr := extract.StringProperties["group_id"]
+		groupID := uuid.FromStringOrNil(groupIDStr)
+
+		modeStr := extract.StringProperties["game_mode"]
+		mode := evr.ToSymbol(modeStr)
+
+		ratingMu := extract.NumericProperties["rating_mu"]
+		maxRTT := extract.NumericProperties["max_rtt"]
+
+		// Use CreatedAt from the extract (in milliseconds)
+		submissionTime := time.UnixMilli(extract.CreatedAt)
+
+		// Extract RTTs from numeric properties
+		rtts := make(map[string]int)
+		for k, v := range extract.NumericProperties {
+			if strings.HasPrefix(k, RTTPropertyPrefix) {
+				ip := strings.TrimPrefix(k, RTTPropertyPrefix)
+				rtts[ip] = int(v)
+			}
+		}
+
+		candidate := &BackfillCandidate{
+			Ticket:         extract.Ticket,
+			Entries:        entries,
+			GroupID:        groupID,
+			Mode:           mode,
+			Rating:         ratingMu,
+			SubmissionTime: submissionTime,
+			RTTs:           rtts,
+			MaxRTT:         int(maxRTT),
+			TeamAlignment:  evr.TeamUnassigned,
+		}
+
+		result = append(result, candidate)
+	}
+
+	return result
+}
+
 // GetBackfillMatches retrieves matches that can accept backfill candidates
 func (b *PostMatchmakerBackfill) GetBackfillMatches(ctx context.Context, groupID uuid.UUID, mode evr.Symbol) ([]*BackfillMatch, error) {
 	// Build query for open matches in the same group with the same mode
@@ -393,6 +463,10 @@ func (b *PostMatchmakerBackfill) ProcessAndExecuteBackfill(ctx context.Context, 
 	if len(candidates) == 0 {
 		return nil, nil
 	}
+
+	logger.Info("Processing backfill candidates",
+		zap.Int("candidate_count", len(candidates)),
+		zap.Float64("reducing_precision_factor", reducingPrecisionFactor))
 
 	// Sort candidates by submission time (oldest first - they've waited longest)
 	sort.SliceStable(candidates, func(i, j int) bool {
