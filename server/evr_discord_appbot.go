@@ -3184,6 +3184,32 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					})
 				}
 
+			case "enf_edit":
+				// Handle enforcement record edit modal submission
+				if err := d.handleEnforcementEditModalSubmit(logger, i, value); err != nil {
+					logger.Error("Failed to handle enforcement edit modal submit", zap.Error(err))
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "Failed to edit enforcement record: " + err.Error(),
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					})
+				}
+
+			case "enf_void":
+				// Handle enforcement record void modal submission
+				if err := d.handleEnforcementVoidModalSubmit(logger, i, value); err != nil {
+					logger.Error("Failed to handle enforcement void modal submit", zap.Error(err))
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "Failed to void enforcement record: " + err.Error(),
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					})
+				}
+
 			default:
 				logger.WithField("custom_id", i.ModalSubmitData().CustomID).Info("Unhandled modal submit")
 			}
