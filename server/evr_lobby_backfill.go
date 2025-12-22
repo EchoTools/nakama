@@ -182,8 +182,10 @@ func (b *PostMatchmakerBackfill) ExtractUnmatchedCandidates(candidates [][]runti
 }
 
 // ExtractCandidatesFromMatchmaker extracts BackfillCandidates directly from matchmaker extracts
+// Only the oldest ticket per player/party is kept to avoid duplicate processing
 func (b *PostMatchmakerBackfill) ExtractCandidatesFromMatchmaker(extracts []*MatchmakerExtract) []*BackfillCandidate {
-	result := make([]*BackfillCandidate, 0, len(extracts))
+	// First pass: build all candidates
+	allCandidates := make([]*BackfillCandidate, 0, len(extracts))
 
 	for _, extract := range extracts {
 		if len(extract.Presences) == 0 {
@@ -245,6 +247,35 @@ func (b *PostMatchmakerBackfill) ExtractCandidatesFromMatchmaker(extracts []*Mat
 			TeamAlignment:  evr.TeamUnassigned,
 		}
 
+		allCandidates = append(allCandidates, candidate)
+	}
+
+	// Second pass: deduplicate by keeping only the oldest ticket per player/party
+	// Use session ID as the key for solo players, party ID for parties
+	oldestByKey := make(map[string]*BackfillCandidate)
+
+	for _, candidate := range allCandidates {
+		// Determine the deduplication key
+		var key string
+		if len(candidate.Entries) > 0 && candidate.Entries[0].PartyId != "" {
+			// Party ticket - use party ID as key
+			key = "party:" + candidate.Entries[0].PartyId
+		} else if len(candidate.Entries) > 0 {
+			// Solo player - use session ID as key
+			key = "session:" + candidate.Entries[0].Presence.SessionId
+		} else {
+			continue
+		}
+
+		// Keep only the oldest ticket for this player/party
+		if existing, ok := oldestByKey[key]; !ok || candidate.SubmissionTime.Before(existing.SubmissionTime) {
+			oldestByKey[key] = candidate
+		}
+	}
+
+	// Convert map back to slice
+	result := make([]*BackfillCandidate, 0, len(oldestByKey))
+	for _, candidate := range oldestByKey {
 		result = append(result, candidate)
 	}
 

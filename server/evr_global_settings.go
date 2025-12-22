@@ -109,7 +109,6 @@ type GlobalMatchmakingSettings struct {
 	EnableRosterVariants           bool                    `json:"enable_roster_variants"`              // Generate multiple roster variants (balanced/stacked) for better match selection
 	UseSnakeDraftTeamFormation     bool                    `json:"use_snake_draft_team_formation"`      // Use snake draft instead of sequential filling for team formation
 	EnablePostMatchmakerBackfill   bool                    `json:"enable_post_matchmaker_backfill"`     // Enable post-matchmaker backfill using matchmaker exports and match list
-	BackfillIntervalSecs           int                     `json:"backfill_interval_secs"`              // Interval in seconds for periodic backfill checks (0 = only after matchmaker, default 10)
 	ReducingPrecisionIntervalSecs  int                     `json:"reducing_precision_interval_secs"`    // Interval in seconds after which constraints are relaxed for backfill (0 = disabled)
 	ReducingPrecisionMaxCycles     int                     `json:"reducing_precision_max_cycles"`       // Maximum number of precision reduction cycles before fully relaxing constraints
 }

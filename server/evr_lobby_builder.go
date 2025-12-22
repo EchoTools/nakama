@@ -35,13 +35,6 @@ const (
 	RTTSignificantDifferenceMs     = 50
 	ServerRatingExcludeValue       = -999
 	MatchAllocateLimit             = 100
-
-	// Backfill constants
-	// DefaultBackfillIntervalSecs is the default interval for periodic backfill checks
-	DefaultBackfillIntervalSecs = 10
-	// BackfillMinTicketAgeSecs is minimum ticket age for backfill consideration
-	// This prevents backfill from "poaching" very new tickets before matchmaker can process them
-	BackfillMinTicketAgeSecs = 5
 )
 
 // Builds the match after the matchmaker has created it
@@ -105,7 +98,9 @@ func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 	// After building matches, attempt post-matchmaker backfill if enabled
 	// This runs immediately after matchmaker completes in addition to periodic backfill
 	if ServiceSettings().Matchmaking.EnablePostMatchmakerBackfill && b.skillBasedMM != nil {
-		// Run backfill immediately after matchmaker (not a fallback/periodic run)
+		// Reset the periodic timer since matchmaker just ran and will trigger backfill
+		b.resetBackfillTimer()
+		// Run backfill immediately after matchmaker (not a periodic run)
 		go b.runPostMatchmakerBackfill(false)
 	}
 }
@@ -124,10 +119,13 @@ func (b *LobbyBuilder) startPeriodicBackfill() {
 	resetCh := b.backfillResetCh
 	b.backfillMu.Unlock()
 
-	intervalSecs := ServiceSettings().Matchmaking.BackfillIntervalSecs
-	if intervalSecs <= 0 {
-		intervalSecs = DefaultBackfillIntervalSecs
+	// Use the same interval as the matchmaker
+	matchmaker := globalMatchmaker.Load()
+	if matchmaker == nil {
+		b.logger.Warn("Global matchmaker not initialized, using default backfill interval")
+		return
 	}
+	intervalSecs := matchmaker.config.GetMatchmaker().IntervalSec
 	interval := time.Duration(intervalSecs) * time.Second
 
 	b.logger.Info("Starting periodic backfill", zap.Duration("interval", interval))
@@ -149,6 +147,8 @@ func (b *LobbyBuilder) startPeriodicBackfill() {
 				if !ServiceSettings().Matchmaking.EnablePostMatchmakerBackfill {
 					continue
 				}
+				// Reset timer at the start so it doesn't pile up
+				ticker.Reset(interval)
 				// Run periodic backfill (isPeriodicRun=true filters to older tickets)
 				b.runPostMatchmakerBackfill(true)
 			}
@@ -213,10 +213,12 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 		return
 	}
 
-	// For periodic runs, filter to only tickets that have been waiting long enough
+	// For periodic runs, filter to only tickets that have been waiting at least 1 matchmaker interval
 	// This prevents backfill from "poaching" tickets before matchmaker has a chance to process them
 	if isPeriodicRun {
-		minAge := time.Duration(BackfillMinTicketAgeSecs) * time.Second
+		// Minimum age is 1 matchmaker interval
+		intervalSecs := max(matchmaker.config.GetMatchmaker().IntervalSec, 1)
+		minAge := time.Duration(intervalSecs) * time.Second
 
 		filteredCandidates := make([]*BackfillCandidate, 0, len(candidates))
 		for _, c := range candidates {
@@ -287,9 +289,6 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 	}
 
 	logger.Info("Successfully backfilled players", zap.Int("count", len(results)))
-
-	// Reset the periodic timer since we just ran backfill
-	b.resetBackfillTimer()
 }
 
 func (b *LobbyBuilder) extractLatenciesFromEntrants(entrants []*MatchmakerEntry) (map[string][][]float64, map[string]map[string]float64) {
