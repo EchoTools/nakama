@@ -35,6 +35,16 @@ const (
 	RTTSignificantDifferenceMs     = 50
 	ServerRatingExcludeValue       = -999
 	MatchAllocateLimit             = 100
+
+	// Backfill coordination constants
+	// BackfillDelayMultiplier is the factor applied to matchmaker interval for fallback timing
+	// If matchmaker hasn't completed in interval * multiplier, backfill can run with filtering
+	BackfillDelayMultiplier = 2.0
+	// BackfillMinTicketAgeCycles is the minimum number of matchmaker cycles a ticket must wait
+	// before backfill will consider it when running in fallback mode
+	BackfillMinTicketAgeCycles = 2
+	// BackfillFallbackCheckInterval is how often to check if fallback backfill should run
+	BackfillFallbackCheckInterval = 5 * time.Second
 )
 
 // Builds the match after the matchmaker has created it
@@ -51,6 +61,10 @@ type LobbyBuilder struct {
 	mapQueue          map[evr.Symbol][]evr.Symbol // map[mode][]level
 	postMatchBackfill *PostMatchmakerBackfill
 	skillBasedMM      *SkillBasedMatchmaker
+
+	// Backfill coordination
+	backfillFallbackCancel context.CancelFunc
+	backfillMu             sync.Mutex
 }
 
 func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics) *LobbyBuilder {
@@ -89,17 +103,82 @@ func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 	}
 
 	// After building matches, attempt post-matchmaker backfill if enabled
+	// This runs immediately after matchmaker completes - the matchmaker has just finished
 	if ServiceSettings().Matchmaking.EnablePostMatchmakerBackfill && b.skillBasedMM != nil {
-		go b.runPostMatchmakerBackfill()
+		// Cancel any pending fallback backfill since matchmaker just completed
+		b.cancelFallbackBackfill()
+		// Run backfill immediately after matchmaker
+		go b.runPostMatchmakerBackfill(false)
+		// Start the fallback timer for the next cycle
+		go b.startFallbackBackfillTimer()
+	}
+}
+
+// cancelFallbackBackfill cancels any pending fallback backfill timer
+func (b *LobbyBuilder) cancelFallbackBackfill() {
+	b.backfillMu.Lock()
+	defer b.backfillMu.Unlock()
+	if b.backfillFallbackCancel != nil {
+		b.backfillFallbackCancel()
+		b.backfillFallbackCancel = nil
+	}
+}
+
+// startFallbackBackfillTimer starts a timer that triggers backfill if matchmaker doesn't run
+// within the expected time window (2x matchmaker interval)
+func (b *LobbyBuilder) startFallbackBackfillTimer() {
+	if !ServiceSettings().Matchmaking.EnablePostMatchmakerBackfill || b.skillBasedMM == nil {
+		return
+	}
+
+	// Get matchmaker interval from global matchmaker config
+	mm := globalMatchmaker.Load()
+	if mm == nil {
+		return
+	}
+
+	// Calculate fallback timeout: 2x matchmaker interval
+	intervalSec := mm.config.GetMatchmaker().IntervalSec
+	fallbackTimeout := time.Duration(float64(intervalSec)*BackfillDelayMultiplier) * time.Second
+
+	b.backfillMu.Lock()
+	// Cancel any existing fallback timer
+	if b.backfillFallbackCancel != nil {
+		b.backfillFallbackCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	b.backfillFallbackCancel = cancel
+	b.backfillMu.Unlock()
+
+	// Wait for the fallback timeout
+	select {
+	case <-ctx.Done():
+		// Matchmaker ran before timeout, no fallback needed
+		return
+	case <-time.After(fallbackTimeout):
+		// Matchmaker hasn't completed in time, run fallback backfill
+		b.logger.Info("Matchmaker hasn't run within expected window, running fallback backfill",
+			zap.Duration("fallback_timeout", fallbackTimeout))
+		go b.runPostMatchmakerBackfill(true)
 	}
 }
 
 // runPostMatchmakerBackfill runs the post-matchmaker backfill process
-func (b *LobbyBuilder) runPostMatchmakerBackfill() {
+// isFallback indicates this is a fallback run because matchmaker hasn't completed in time
+func (b *LobbyBuilder) runPostMatchmakerBackfill(isFallback bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), BackfillProcessTimeout)
 	defer cancel()
 
-	logger := b.logger.With(zap.String("operation", "post_matchmaker_backfill"))
+	logger := b.logger.With(
+		zap.String("operation", "post_matchmaker_backfill"),
+		zap.Bool("is_fallback", isFallback),
+	)
+
+	// If matchmaker is currently processing, skip this backfill run to avoid poaching
+	if b.skillBasedMM.IsProcessing() {
+		logger.Debug("Matchmaker is currently processing, skipping backfill")
+		return
+	}
 
 	// Get the latest matchmaker results
 	candidates, madeMatches := b.skillBasedMM.GetLatestResult()
@@ -112,6 +191,34 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill() {
 	if len(unmatchedCandidates) == 0 {
 		logger.Debug("No unmatched candidates for post-matchmaker backfill")
 		return
+	}
+
+	// If this is a fallback run, filter candidates to only those waiting for multiple cycles
+	if isFallback {
+		mm := globalMatchmaker.Load()
+		if mm != nil {
+			intervalSec := mm.config.GetMatchmaker().IntervalSec
+			minAge := time.Duration(intervalSec*BackfillMinTicketAgeCycles) * time.Second
+
+			filteredCandidates := make([]*BackfillCandidate, 0, len(unmatchedCandidates))
+			for _, c := range unmatchedCandidates {
+				if time.Since(c.SubmissionTime) >= minAge {
+					filteredCandidates = append(filteredCandidates, c)
+				}
+			}
+
+			logger.Debug("Filtered candidates for fallback backfill",
+				zap.Int("original_count", len(unmatchedCandidates)),
+				zap.Int("filtered_count", len(filteredCandidates)),
+				zap.Duration("min_age", minAge))
+
+			unmatchedCandidates = filteredCandidates
+		}
+
+		if len(unmatchedCandidates) == 0 {
+			logger.Debug("No candidates old enough for fallback backfill")
+			return
+		}
 	}
 
 	logger.Info("Running post-matchmaker backfill",
