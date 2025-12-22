@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto"
 	"fmt"
 	"time"
 
@@ -143,32 +142,6 @@ func (stc *ApplicationTokenClaims) GetAudience() (jwt.ClaimStrings, error) {
 		return nil, jwt.ErrTokenInvalidAudience
 	}
 	return stc.Audience, nil
-}
-
-func parseApplicationToken(hmacSecretByte []byte, tokenString string) (applicationID uuid.UUID, userID uuid.UUID, username string, vars map[string]string, exp int64, tokenID string, issuedAt int64, ok bool) {
-	jwtToken, err := jwt.ParseWithClaims(tokenString, &ApplicationTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
-		if s, ok := token.Method.(*jwt.SigningMethodHMAC); !ok || s.Hash != crypto.SHA256 {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return hmacSecretByte, nil
-	})
-	if err != nil {
-		return
-	}
-	claims, ok := jwtToken.Claims.(*ApplicationTokenClaims)
-	if !ok || !jwtToken.Valid {
-		return
-	}
-	applicationID, err = uuid.FromString(claims.ApplicationID)
-	if err != nil {
-		return
-	}
-
-	userID, err = uuid.FromString(claims.UserID)
-	if err != nil {
-		return
-	}
-	return applicationID, userID, claims.Username, claims.Vars, claims.ExpiresAt, claims.TokenID, claims.IssuedAt, true
 }
 
 func generateDeveloperTokenWithExpiry(signingKey, applicationID string, tokenID string, tokenIssuedAt int64, userID, username string, vars map[string]string, expiry time.Time) (string, int64) {

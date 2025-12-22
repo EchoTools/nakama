@@ -13,7 +13,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (d *DiscordAppBot) handlePartyStatus(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+func (d *DiscordAppBot) handlePartyStatus(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, _ *discordgo.User, _ *discordgo.Member, userID string, _ string) error {
 
 	nk := d.nk
 	// Check if this user is online and currently in a party.
