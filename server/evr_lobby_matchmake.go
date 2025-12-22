@@ -137,8 +137,8 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	}
 
 	if !strings.Contains(p.node, "dev") {
-		// If there are fewer than 16 players online, reduce the fallback delay
-		if count < 24 {
+		// If there are fewer than SBMMMinPlayerCount players online, reduce the fallback delay
+		if count < ServiceSettings().Matchmaking.SBMMMinPlayerCount {
 			ticketConfig.IncludeSBMMRanges = false
 			ticketConfig.IncludeEarlyQuitPenalty = false
 		}
