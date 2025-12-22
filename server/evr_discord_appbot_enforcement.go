@@ -78,12 +78,12 @@ func (d *DiscordAppBot) showEnforcementEditModal(s *discordgo.Session, i *discor
 		return simpleInteractionResponse(s, i, "This record has already been voided and cannot be edited.")
 	}
 
-	// Calculate remaining duration as human-readable format
-	remainingDuration := time.Until(record.Expiry)
-	if remainingDuration < 0 {
-		remainingDuration = 0
+	// Calculate original total duration (from CreatedAt to Expiry) as human-readable format
+	totalDuration := record.Expiry.Sub(record.CreatedAt)
+	if totalDuration < 0 {
+		totalDuration = 0
 	}
-	durationStr := FormatDuration(remainingDuration)
+	durationStr := FormatDuration(totalDuration)
 
 	// Create the modal with pre-filled values
 	modal := &discordgo.InteractionResponse{
