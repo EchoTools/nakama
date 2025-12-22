@@ -71,6 +71,11 @@ type DiscordAppBot struct {
 	prepareMatchRatePerSecond rate.Limit
 	prepareMatchBurst         int
 	prepareMatchRateLimiters  *MapOf[string, *rate.Limiter]
+
+	// Rate limiter for public matches (echo_arena, echo_combat) - 1 per 15 minutes
+	publicMatchRatePerSecond rate.Limit
+	publicMatchBurst         int
+	publicMatchRateLimiters  *MapOf[string, *rate.Limiter]
 }
 
 func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordIntegrator, profileRegistry *ProfileCache, statusRegistry StatusRegistry, dg *discordgo.Session, ipInfoCache *IPInfoCache, guildGroupRegistry *GuildGroupRegistry) (*DiscordAppBot, error) {
@@ -100,8 +105,12 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		prepareMatchRatePerSecond: 1.0 / 60,
 		prepareMatchBurst:         1,
 		prepareMatchRateLimiters:  &MapOf[string, *rate.Limiter]{},
-		partyStatusChs:            &MapOf[string, chan error]{},
-		debugChannels:             make(map[string]string),
+		// Rate limiter for public matches: 1 per 15 minutes (900 seconds)
+		publicMatchRatePerSecond: 1.0 / 900,
+		publicMatchBurst:         1,
+		publicMatchRateLimiters:  &MapOf[string, *rate.Limiter]{},
+		partyStatusChs:           &MapOf[string, chan error]{},
+		debugChannels:            make(map[string]string),
 	}
 
 	discordgo.Logger = appbot.discordGoLogger
@@ -234,6 +243,13 @@ func (e *DiscordAppBot) discordGoLogger(msgL int, caller int, format string, a .
 func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string) *rate.Limiter {
 	key := strings.Join([]string{userID, groupID}, ":")
 	limiter, _ := e.prepareMatchRateLimiters.LoadOrStore(key, rate.NewLimiter(e.prepareMatchRatePerSecond, e.prepareMatchBurst))
+	return limiter
+}
+
+// loadPublicMatchRateLimiter returns the rate limiter for public match creation (1 per 15 minutes)
+func (e *DiscordAppBot) loadPublicMatchRateLimiter(userID, groupID string) *rate.Limiter {
+	key := strings.Join([]string{userID, groupID, "public"}, ":")
+	limiter, _ := e.publicMatchRateLimiters.LoadOrStore(key, rate.NewLimiter(e.publicMatchRatePerSecond, e.publicMatchBurst))
 	return limiter
 }
 
