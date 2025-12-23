@@ -333,7 +333,11 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	}
 
 	latencyHistory := sessionParams.latencyHistory.Load()
-
+	if latencyHistory == nil {
+		latencyHistory = NewLatencyHistory()
+	}
+	sessionParams.latencyHistory.Store(latencyHistory)
+	
 	// Set the maxRTT to at least the average of the player's latency history
 	if averages := latencyHistory.AverageRTTs(false); len(averages) > 0 {
 		averageRTT := 0
