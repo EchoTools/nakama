@@ -850,16 +850,6 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		}
 	}
 
-	if state.server == nil {
-		state.emptyTicks++
-		if state.emptyTicks > 60*state.tickRate {
-			logger.Warn("Match has been empty for too long. Shutting down.")
-			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
-		}
-	} else if state.emptyTicks > 0 {
-		state.emptyTicks = 0
-	}
-
 	// If the match is terminating, terminate on the tick.
 	if state.terminateTick != 0 {
 		if tick >= state.terminateTick {
@@ -867,6 +857,14 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			return m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
 		}
 		return state
+	} else if state.server == nil {
+		state.emptyTicks++
+		if state.emptyTicks > 10*state.tickRate {
+			logger.Warn("Match has been empty for too long. Shutting down.")
+			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
+		}
+	} else if state.emptyTicks > 0 {
+		state.emptyTicks = 0
 	}
 
 	if state.LobbyType == UnassignedLobby {
