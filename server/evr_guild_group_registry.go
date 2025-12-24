@@ -93,6 +93,10 @@ func (r *GuildGroupRegistry) rebuildGuildGroups() {
 		}
 
 		for _, group := range groups {
+			// Skip inactive groups
+			if isGuildGroupInactive(group) {
+				continue
+			}
 			// Load the state
 			state, err := GuildGroupStateLoad(ctx, nk, ServiceSettings().DiscordBotUserID, group.Id)
 			if err != nil {
