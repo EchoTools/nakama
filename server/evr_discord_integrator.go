@@ -228,6 +228,12 @@ func (c *DiscordIntegrator) Start() {
 			logger.Error("Error handling guild ban add", zap.Any("guildBanAdd", m), zap.Error(err))
 		}
 	})
+
+	dg.AddHandler(func(s *discordgo.Session, m *discordgo.GuildRoleUpdate) {
+		if err := c.handleGuildRoleUpdate(c.ctx, logger, s, m); err != nil {
+			logger.Error("Error handling guild role update", zap.Any("guildRoleUpdate", m), zap.Error(err))
+		}
+	})
 	c.logger.Info("Starting Discord cache")
 }
 
@@ -908,6 +914,105 @@ func (d *DiscordIntegrator) handleGuildBanAdd(ctx context.Context, logger *zap.L
 	}
 
 	logger.Info("User was banned from guild", zap.String("event", "GuildBanAdd"))
+	return nil
+}
+
+func (d *DiscordIntegrator) handleGuildRoleUpdate(ctx context.Context, logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildRoleUpdate) error {
+	// Get the guild group for this guild
+	groupID := d.GuildIDToGroupID(e.GuildID)
+	if groupID == "" {
+		// Not a tracked guild, ignore
+		return nil
+	}
+
+	guildGroup := d.guildGroupRegistry.Get(groupID)
+	if guildGroup == nil {
+		return nil
+	}
+
+	// Check if the updated role is a managed role
+	managedRoleSet := guildGroup.RoleMap.AsSet()
+	if _, isManagedRole := managedRoleSet[e.Role.ID]; !isManagedRole {
+		// Not a managed role we care about, ignore
+		return nil
+	}
+
+	// Determine which managed role this is for better logging
+	roleType := guildGroup.RoleMap.GetRoleType(e.Role.ID)
+
+	logger = logger.With(
+		zap.String("event", "GuildRoleUpdate"),
+		zap.String("guild_id", e.GuildID),
+		zap.String("role_id", e.Role.ID),
+		zap.String("role_name", e.Role.Name),
+		zap.String("role_type", roleType),
+		zap.String("group_id", groupID),
+	)
+
+	// Fetch the audit log to determine who made the change
+	// Note: We fetch only the most recent entry (limit=1) for the role update action.
+	// In the case of rapid concurrent updates to different roles, the entry is verified
+	// against the target role ID to ensure we're processing the correct event.
+	auditLogs, err := s.GuildAuditLog(e.GuildID, "", "", int(discordgo.AuditLogActionRoleUpdate), 1)
+	if err != nil {
+		return fmt.Errorf("error fetching audit log: %w", err)
+	}
+
+	// Check if we have audit log entries
+	if len(auditLogs.AuditLogEntries) == 0 {
+		logger.Warn("No audit log entries found for role update")
+		return nil
+	}
+
+	latestUpdate := auditLogs.AuditLogEntries[0]
+
+	// Verify this audit log entry is for the role we're tracking
+	if latestUpdate.TargetID != e.Role.ID {
+		logger.Info("Latest audit log entry does not match the role ID - possible race condition with multiple role updates",
+			zap.String("target_id", latestUpdate.TargetID),
+			zap.String("expected_role_id", e.Role.ID))
+		return nil
+	}
+
+	// Check if the change was made by the bot itself
+	if latestUpdate.UserID == s.State.User.ID {
+		logger.Debug("Role update was made by the bot itself, skipping audit message")
+		return nil
+	}
+
+	// Build the audit message
+	// Note: We use the UserID from the audit log directly to avoid an extra API call
+	// The audit log already contains the necessary user identification
+	issuerMention := fmt.Sprintf("<@%s>", latestUpdate.UserID)
+
+	// Extract changes from audit log if available
+	var changeDetails string
+	if len(latestUpdate.Changes) > 0 {
+		changeDetails = " Changes:"
+		for _, change := range latestUpdate.Changes {
+			changeDetails += fmt.Sprintf("\n  • %s: `%v` → `%v`", change.Key, change.OldValue, change.NewValue)
+		}
+	}
+
+	auditMessage := fmt.Sprintf(
+		"⚠️ Managed role `%s` (%s) was modified by %s%s",
+		e.Role.Name,
+		roleType,
+		issuerMention,
+		changeDetails,
+	)
+
+	if latestUpdate.Reason != "" {
+		auditMessage += fmt.Sprintf("\n**Reason:** %s", latestUpdate.Reason)
+	}
+
+	// Send the audit message to the guild's audit channel
+	if _, err := AuditLogSendGuild(s, guildGroup, auditMessage); err != nil {
+		logger.Error("Failed to send audit message for role update", zap.Error(err))
+		return fmt.Errorf("failed to send audit message: %w", err)
+	}
+
+	logger.Info("Sent audit message for managed role modification", zap.String("issuer_id", latestUpdate.UserID))
 	return nil
 }
 
