@@ -115,6 +115,10 @@ func EntrantPresenceFromSession(session Session, partyID uuid.UUID, roleAlignmen
 		return nil, errors.New("failed to get session parameters")
 	}
 
+	if params.loginSession == nil {
+		return nil, errors.New("failed to get login session parameters")
+	}
+
 	return &EvrMatchPresence{
 		Node:              params.node,
 		UserID:            session.UserID(),
