@@ -183,8 +183,6 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 		zap.Bool("is_periodic_run", isPeriodicRun),
 	)
 
-	logger.Debug("Backfill check starting")
-
 	// If matchmaker is currently processing, skip this backfill run to avoid poaching
 	if b.skillBasedMM != nil && b.skillBasedMM.IsProcessing() {
 		logger.Debug("Matchmaker is currently processing, skipping backfill")
@@ -200,7 +198,6 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 
 	extracts := matchmaker.Extract()
 	if len(extracts) == 0 {
-		logger.Debug("No tickets in matchmaker")
 		return
 	}
 
