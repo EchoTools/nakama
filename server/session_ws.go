@@ -59,7 +59,7 @@ var (
 	featurePattern     = regexp.MustCompile(`^[a-z0-9_]+$`)
 	discordIDPattern   = regexp.MustCompile(`^[0-9]+$`)
 	regionPattern      = regexp.MustCompile(`^[-A-Za-z0-9_]+$`)
-	guildPattern       = regexp.MustCompile(`^[0-9]+$`)
+	guildPattern       = regexp.MustCompile(`^([0-9]+|any)$`)
 	tagsPattern        = regexp.MustCompile(`^[-.A-Za-z0-9_:]+$`)
 )
 

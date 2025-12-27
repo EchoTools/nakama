@@ -55,7 +55,7 @@ Game servers connect to Nakama using WebSocket connections with various URL para
 #### `guilds`
 - **Type**: Comma-delimited string list
 - **Max Length**: 32 characters per guild ID
-- **Pattern**: `^[0-9]+$` per guild ID (numeric only)
+- **Pattern**: `^([0-9]+|any)$` per guild ID (numeric or "any")
 - **Description**: List of Discord guild IDs that this server should host for
 - **Usage**: Restricts server to specific guilds unless "any" is specified
 - **Example**: `wss://example.com/ws?guilds=123456789012345678,987654321098765432`
