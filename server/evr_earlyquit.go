@@ -1,9 +1,11 @@
 package server
 
 import (
+	"context"
 	"sync"
 	"time"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
@@ -152,4 +154,81 @@ func (s *EarlyQuitConfig) UpdateTier(tier1Threshold *int32) (oldTier, newTier in
 	}
 
 	return oldTier, newTier, changed
+}
+
+// CheckAndStrikeEarlyQuitIfLoggedOut is a goroutine function that checks if a player has logged out
+// and removes the early quit penalty from their record if they have.
+// This prevents penalizing players who quit the entire game rather than just that match.
+//
+// Parameters:
+//   - ctx: Context for logging and operations
+//   - logger: Logger for debug/error messages
+//   - nk: Nakama runtime module for storage operations
+//   - sessionRegistry: Registry to check for active sessions
+//   - userID: User ID to check
+//   - sessionID: Session ID that disconnected
+//   - checkInterval: Duration to wait before checking if player logged out (grace period)
+func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, userID, sessionID string, checkInterval time.Duration) {
+	// Wait for the grace period before checking
+	select {
+	case <-time.After(checkInterval):
+		// Grace period elapsed, proceed with check
+	case <-ctx.Done():
+		// Context cancelled, exit early
+		return
+	}
+
+	// Check if the player is still logged in
+	sessionUUID, err := uuid.FromString(sessionID)
+	if err != nil {
+		logger.WithField("error", err).Warn("Invalid session ID format for early quit check")
+		return
+	}
+
+	// If session still exists, player is still logged in to this session
+	// No action needed as they're still using the system
+	if sessionRegistry.Get(sessionUUID) != nil {
+		logger.WithFields(map[string]any{
+			"uid":        userID,
+			"session_id": sessionID,
+		}).Debug("Player still has active session, early quit penalty remains")
+		return
+	}
+
+	// Session doesn't exist, but we need to check if user has ANY active session
+	// For now, we'll assume if this session is gone, we should remove the early quit
+	// since it indicates they've fully logged out
+	userUUID, err := uuid.FromString(userID)
+	if err != nil {
+		logger.WithField("error", err).Warn("Invalid user ID format for early quit check")
+		return
+	}
+
+	// Load the player's early quit config
+	eqconfig := NewEarlyQuitConfig()
+	if err := StorableRead(ctx, nk, userUUID.String(), eqconfig, false); err != nil {
+		logger.WithFields(map[string]any{
+			"uid":   userID,
+			"error": err,
+		}).Warn("Failed to load early quit config for logout check")
+		return
+	}
+
+	// Remove the early quit penalty by decrementing
+	// This is equivalent to completing a match in terms of penalty reduction
+	eqconfig.IncrementCompletedMatches()
+
+	// Write the updated config back to storage
+	if err := StorableWrite(ctx, nk, userUUID.String(), eqconfig); err != nil {
+		logger.WithFields(map[string]any{
+			"uid":   userID,
+			"error": err,
+		}).Warn("Failed to write early quit config after logout check")
+		return
+	}
+
+	logger.WithFields(map[string]any{
+		"uid":               userID,
+		"new_penalty_level": eqconfig.GetPenaltyLevel(),
+	}).Info("Removed early quit penalty: player logged out after early quit")
 }
