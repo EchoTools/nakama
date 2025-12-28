@@ -63,7 +63,6 @@ func NewGuildGroupRegistry(ctx context.Context, logger runtime.Logger, nk runtim
 					}
 				}
 			}
-			logger.Debug("Guild group registry updated")
 		}
 	}()
 
