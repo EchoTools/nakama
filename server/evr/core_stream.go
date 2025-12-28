@@ -227,12 +227,17 @@ func (s *EasyStream) StreamGUID(guid *uuid.UUID) error {
 	return nil
 }
 
+const MaxStringTableEntries = 1024
+
 func (s *EasyStream) StreamStringTable(entries *[]string) error {
 	var err error
 	var strings []string
 	logCount := uint64(len(*entries))
 	if err = s.StreamNumber(binary.LittleEndian, &logCount); err != nil {
 		return err
+	}
+	if logCount > MaxStringTableEntries {
+		return fmt.Errorf("string table entry count %d exceeds maximum %d", logCount, MaxStringTableEntries)
 	}
 	switch s.Mode {
 	case DecodeMode:

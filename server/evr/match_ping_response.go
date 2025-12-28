@@ -36,11 +36,18 @@ func NewLobbyPingResponse() *LobbyPingResponse {
 		Results: []EndpointPingResult{},
 	}
 }
+const MaxPingResults = 256
+
 func (m *LobbyPingResponse) Stream(s *EasyStream) error {
 	rLength := uint64(len(m.Results))
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamNumber(binary.LittleEndian, &rLength) },
 		func() error {
+			if s.Mode == DecodeMode {
+				if rLength > MaxPingResults {
+					return fmt.Errorf("ping result count %d exceeds maximum %d", rLength, MaxPingResults)
+				}
+			}
 			m.Results = make([]EndpointPingResult, rLength)
 			for i := 0; i < len(m.Results); i++ {
 				err := s.StreamStruct(&m.Results[i])

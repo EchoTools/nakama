@@ -54,6 +54,8 @@ func (m LobbyFindSessionRequest) String() string {
 
 }
 
+const MaxFindSessionEntrants = 16
+
 func (m *LobbyFindSessionRequest) Stream(s *EasyStream) error {
 	flags := uint32(0)
 	return RunErrorFunctions([]func() error{
@@ -68,6 +70,9 @@ func (m *LobbyFindSessionRequest) Stream(s *EasyStream) error {
 				return err
 			}
 			if s.Mode == DecodeMode {
+				if int(c) > MaxFindSessionEntrants {
+					return fmt.Errorf("entrant count %d exceeds maximum %d", c, MaxFindSessionEntrants)
+				}
 				m.Entrants = make([]Entrant, c)
 			}
 			return nil
