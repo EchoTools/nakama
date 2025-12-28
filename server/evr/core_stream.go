@@ -112,6 +112,9 @@ func (s *EasyStream) StreamByte(value *byte) error {
 	}
 }
 
+const MaxStreamBytesSize = 10 * 1024 * 1024 // 10MB max for generic byte streams
+const MaxStreamStringLength = 64 * 1024     // 64KB max for strings
+
 // StreamBytes reads or writes bytes to the stream based on the mode of the EasyStream.
 // If the mode is ReadMode, it reads bytes from the stream and stores them in the provided data slice.
 // If the length parameter is -1, it reads all available bytes from the stream.
@@ -127,6 +130,9 @@ func (s *EasyStream) StreamBytes(dst *[]byte, l int) error {
 		if l == -1 {
 			l = s.r.Len()
 		}
+		if l > MaxStreamBytesSize {
+			return fmt.Errorf("byte stream size %d exceeds maximum %d", l, MaxStreamBytesSize)
+		}
 		*dst = make([]byte, l)
 		_, err = s.r.Read(*dst)
 	case EncodeMode:
@@ -140,6 +146,9 @@ func (s *EasyStream) StreamBytes(dst *[]byte, l int) error {
 func (s *EasyStream) StreamString(value *string, length int) error {
 	var err error
 
+	if length > MaxStreamStringLength {
+		return fmt.Errorf("string length %d exceeds maximum %d", length, MaxStreamStringLength)
+	}
 	b := make([]byte, length)
 	switch s.Mode {
 	case DecodeMode:

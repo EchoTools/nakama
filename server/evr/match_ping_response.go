@@ -36,6 +36,7 @@ func NewLobbyPingResponse() *LobbyPingResponse {
 		Results: []EndpointPingResult{},
 	}
 }
+
 const MaxPingResults = 256
 
 func (m *LobbyPingResponse) Stream(s *EasyStream) error {
