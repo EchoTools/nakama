@@ -169,11 +169,6 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		}
 	}
 
-	if isPrivateIP(externalIP) {
-		externalIP = p.externalIP
-		logger.Warn("Game server is on a private IP, using this systems external IP", zap.String("private_ip", internalIP.String()), zap.String("external_ip", externalIP.String()), zap.String("port", fmt.Sprintf("%d", externalPort)))
-	}
-
 	// Include all guilds by default, or if "any" is in the list
 	includeAll := false
 	if len(params.serverGuilds) == 0 || slices.Contains(params.serverGuilds, "any") {
