@@ -19,8 +19,9 @@ type LobbySessionSuccess struct {
 	GroupID            uuid.UUID // V5 only
 	Endpoint           Endpoint
 	TeamIndex          int16
-	Unk1               uint32
-	HeadsetType        int
+	UserSlot           uint16
+	Flags32            uint16
+	SessionFlags       uint8
 	ServerEncoderFlags uint64
 	ClientEncoderFlags uint64
 	ServerSequenceId   uint64
@@ -62,7 +63,6 @@ func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, ch
 		GroupID:            channelUUID,
 		Endpoint:           endpoint,
 		TeamIndex:          role,
-		Unk1:               0,
 		ServerEncoderFlags: serverSettings.ToFlags(),
 		ClientEncoderFlags: clientSettings.ToFlags(),
 		ServerSequenceId:   binary.LittleEndian.Uint64(GetRandomBytes(0x08)),
@@ -116,7 +116,9 @@ func (m *LobbySessionSuccessv4) Stream(s *EasyStream) error {
 		func() error { return s.StreamGUID(&m.LobbyID) },
 		func() error { return s.StreamStruct(&m.Endpoint) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.TeamIndex) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk1) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.UserSlot) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Flags32) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.SessionFlags) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.ServerEncoderFlags) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.ClientEncoderFlags) },
 		func() error { se = PacketEncoderSettingsFromFlags(m.ServerEncoderFlags); return nil },
@@ -162,7 +164,9 @@ func (m *LobbySessionSuccessv5) Stream(s *EasyStream) error {
 		func() error { return s.StreamGUID(&m.GroupID) },
 		func() error { return s.StreamStruct(&m.Endpoint) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.TeamIndex) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk1) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.UserSlot) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Flags32) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.SessionFlags) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.ServerEncoderFlags) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.ClientEncoderFlags) },
 		func() error { se = PacketEncoderSettingsFromFlags(m.ServerEncoderFlags); return nil },
