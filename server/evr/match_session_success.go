@@ -35,10 +35,9 @@ type LobbySessionSuccess struct {
 }
 
 // NewLobbySessionSuccessv5 initializes a new LobbySessionSuccessv5 message.
-func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, channelUUID uuid.UUID, endpoint Endpoint, role int16, isPCVR bool, disableEncryption bool, disableMAC bool) *LobbySessionSuccess {
+func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, channelUUID uuid.UUID, endpoint Endpoint, role int16, disableEncryption bool, disableMAC bool) *LobbySessionSuccess {
 
 	clientSettings := &PacketEncoderSettings{
-		isPCVR:                  isPCVR,
 		EncryptionEnabled:       !disableEncryption,
 		MACEnabled:              !disableMAC,
 		MACDigestSize:           0x20,
@@ -48,7 +47,6 @@ func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, ch
 		RandomKeySize:           0x20,
 	}
 	serverSettings := &PacketEncoderSettings{
-		isPCVR:                  isPCVR,
 		EncryptionEnabled:       !disableEncryption,
 		MACEnabled:              !disableMAC,
 		MACDigestSize:           0x20,
@@ -207,7 +205,6 @@ func DefaultServerEncoderSettings() *PacketEncoderSettings {
 
 // PacketEncoderSettings describes packet encoding settings for one party in a game server <-> client connection.
 type PacketEncoderSettings struct {
-	isPCVR                  bool // The headset type of the client. (0: PCVR, 1: Standalone)
 	EncryptionEnabled       bool // Indicates whether encryption should be used for each packet.
 	MACEnabled              bool // Indicates whether MACs should be attached to each packet.
 	MACDigestSize           int  // The byte size (<= 512bit) of the MAC output packets should use. (cut from the front of the HMAC-SHA512)
