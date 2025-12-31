@@ -488,9 +488,15 @@ func (v *VRMLScanQueue) playerSummary(vg *vrmlgo.Session, player *vrmlgo.Player)
 					return nil, fmt.Errorf("failed to get match details: %v", err)
 				}
 
-				// Skip forfeits
+				// Skip forfeits where the player's team got 0 points
 				if matchDetails.Match.IsForfeit {
-					continue
+					// If the player's team got 0 points in this match, skip it
+					if tID == matchDetails.Match.HomeTeam.TeamID && matchDetails.Match.HomeScore == 0 {
+						continue
+					}
+					if tID == matchDetails.Match.AwayTeam.TeamID && matchDetails.Match.AwayScore == 0 {
+						continue
+					}
 				}
 
 				// Count the number of matches the player is in
