@@ -214,9 +214,9 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 		return
 	}
 
-	// Remove the early quit penalty by decrementing
-	// This is equivalent to completing a match in terms of penalty reduction
-	eqconfig.IncrementCompletedMatches()
+	// NOTE: We do not treat logout after an early quit as a completed match.
+	// Avoid calling IncrementCompletedMatches() here to prevent inflating
+	// TotalCompletedMatches and related reliability statistics.
 
 	// Write the updated config back to storage
 	if err := StorableWrite(ctx, nk, userUUID.String(), eqconfig); err != nil {
