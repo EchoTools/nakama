@@ -640,6 +640,7 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		// Apply backfill player loss exemption logic
 		// Backfill players should not get a loss if the team loses, unless they early quit.
 		// Wins are still counted for backfill players.
+		// Note: ArenaLosses is used for both Arena and Combat modes (no separate CombatLosses field exists)
 		if playerInfo.IsBackfill() {
 			// Check if this player early quit by examining participation records
 			isEarlyQuitter := false
