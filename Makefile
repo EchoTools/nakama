@@ -13,13 +13,11 @@ RELEASE_FLAGS=-trimpath -mod=vendor -gcflags "-trimpath $(PWD)" -asmflags "-trim
 
 all: nakama
 
-nakama: dev
-
-dev: $(SRC_FILES)
+nakama: $(SRC_FILES)
 	GOWORK=off CGO_ENABLED=1 CGO_CFLAGS="-O0 -g" go build \
 		$(DEBUG_FLAGS) \
 		-ldflags "-X main.version=$(GIT_DESCRIBE) -X main.commitID=$(COMMIT)" \
-		-o nakama-debug
+		-o nakama
 
 build: $(SRC_FILES)
 		docker buildx build \
