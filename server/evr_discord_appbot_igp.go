@@ -837,9 +837,9 @@ func (d *DiscordAppBot) handleSetIGNModalSubmit(_ context.Context, logger runtim
 	isGlobalOperator, _ := CheckSystemGroupMembership(d.ctx, d.db, callerID, GroupGlobalOperators)
 	isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
 
-		if !isAuditorOrEnforcer {
-			return simpleInteractionResponse(d.dg, i, "You do not have permission to set IGN overrides.")
-		}
+	if !isAuditorOrEnforcer {
+		return simpleInteractionResponse(d.dg, i, "You do not have permission to set IGN overrides.")
+	}
 
 	// Get the submitted display name and lock status
 	displayName := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
@@ -897,12 +897,12 @@ func (d *DiscordAppBot) handleSetIGNModalSubmit(_ context.Context, logger runtim
 		targetMention = targetUserID
 	}
 
-		lockStatus := "unlocked"
-		if isLocked {
-			lockStatus = "locked"
-		}
-		auditMessage := fmt.Sprintf("<@%s> set IGN override for %s to **%s** (%s) (originally: **%s**)",
-			i.Member.User.ID, targetMention, displayName, lockStatus, originalDisplayName)
+	lockStatus := "unlocked"
+	if isLocked {
+		lockStatus = "locked"
+	}
+	auditMessage := fmt.Sprintf("<@%s> set IGN override for %s to **%s** (%s) (originally: **%s**)",
+		i.Member.User.ID, targetMention, displayName, lockStatus, originalDisplayName)
 
 	if _, err := d.LogAuditMessage(d.ctx, groupID, auditMessage, false); err != nil {
 		logger.WithField("error", err).Warn("Failed to send audit log message")

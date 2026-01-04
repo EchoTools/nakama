@@ -451,9 +451,9 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
 		isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
 
-			if !isAuditorOrEnforcer {
-				return simpleInteractionResponse(s, i, "You do not have permission to set IGN overrides.")
-			}
+		if !isAuditorOrEnforcer {
+			return simpleInteractionResponse(s, i, "You do not have permission to set IGN overrides.")
+		}
 
 		// Load target profile
 		targetProfile, err := EVRProfileLoad(ctx, nk, targetUserID)
