@@ -1,14 +1,167 @@
+# Early Quit Penalty System
+
+## Overview
+
+The early quit penalty system discourages mid-match abandonment through two mechanisms:
+
+1. **Matchmaking Tier System** — Affects queue priority
+2. **Profile Statistics Penalty** — Optionally counts early quits as losses
+
+---
+
+## Matchmaking Tier System
+
+### Tiers
+
+| Tier | Constant | Description |
+|------|----------|-------------|
+| `MatchmakingTier1` | 1 | Good standing — normal queue priority |
+| `MatchmakingTier2` | 2 | Penalty queue — Tier 1 players matched first |
+
+### EarlyQuitPenaltyLevel
+
+Tracks recent early quit behavior. Stored in `EarlyQuitConfig`.
+
+| Property | Value |
+|----------|-------|
+| `MinEarlyQuitPenaltyLevel` | -1 |
+| `MaxEarlyQuitPenaltyLevel` | 3 |
+| Starting value | 0 |
+
+| Action | Effect |
+|--------|--------|
+| `IncrementEarlyQuit()` | +1 (capped at max) |
+| `IncrementCompletedMatches()` | -1 (floored at min) |
+
+### Tier Determination
+
+```
+if EarlyQuitPenaltyLevel <= EarlyQuitTier1Threshold:
+    MatchmakingTier = MatchmakingTier1
+else:
+    MatchmakingTier = MatchmakingTier2
+```
+
+Default `EarlyQuitTier1Threshold` = 0
+
+### Configuration
+
+| Setting | Type | Description |
+|---------|------|-------------|
+| `enable_early_quit_penalty` | bool | Enable/disable the tier system |
+| `silent_early_quit_system` | bool | Disable Discord DM notifications |
+| `early_quit_tier1_threshold` | *int32 | Penalty level threshold for Tier 1 (default: 0) |
+| `early_quit_tier2_threshold` | *int32 | Reserved for future Tier 3+ |
+
+### Discord Notifications
+
+When tier changes (unless `SilentEarlyQuitSystem` is true):
+
+**Degraded (Tier 1 → Tier 2):**
+> Matchmaking Status Update: Account flagged for early quitting.
+> You have been moved to the Tier 2 priority queue...
+
+**Restored (Tier 2 → Tier 1):**
+> Matchmaking Priority Restored: You have returned to Tier 1 status...
+
+---
+
+## Profile Statistics Penalty (EarlyQuitLossThreshold)
+
+Optionally counts `EarlyQuits` as `ArenaLosses` when displaying profile stats.
+
+### Configuration
+
+| Setting | Type | Description |
+|---------|------|-------------|
+| `early_quit_loss_threshold` | float64 | Ratio threshold (0.0–1.0). 0.0 = disabled |
+
+### Calculation
+
+```
+earlyQuitRatio = EarlyQuits / (ArenaWins + ArenaLosses)
+
+if earlyQuitRatio >= EarlyQuitLossThreshold:
+    countEarlyQuitsAsLosses = true
+    ArenaLosses += EarlyQuits  // For display only
+```
+
+### Example (threshold = 0.70)
+
+| Player | Wins | Losses | EarlyQuits | Ratio | Penalty Applied? |
+|--------|------|--------|------------|-------|------------------|
+| Alice | 10 | 5 | 3 | 3/15 = 20% | No |
+| Bob | 10 | 5 | 12 | 12/15 = 80% | **Yes** |
+
+Bob's displayed stats: 10 wins, 17 losses (5 + 12) → 37% win rate
+
+---
+
+## Player Examples
+
+### Example 1: First Early Quit
+
+```
+Initial: EarlyQuitPenaltyLevel=0, MatchmakingTier=1
+
+[Early quit] → EarlyQuitPenaltyLevel=1, MatchmakingTier=2
+[Complete match] → EarlyQuitPenaltyLevel=0, MatchmakingTier=1
+```
+
+### Example 2: Building Buffer
+
+```
+Initial: EarlyQuitPenaltyLevel=0, MatchmakingTier=1
+
+[Complete match] → EarlyQuitPenaltyLevel=-1
+[Complete match] → EarlyQuitPenaltyLevel=-1 (stays at min)
+
+Buffer: Can early quit once and remain in Tier 1
+[Early quit] → EarlyQuitPenaltyLevel=0, MatchmakingTier=1 (still good)
+```
+
+### Example 3: Recovery from Max Penalty
+
+```
+Initial: EarlyQuitPenaltyLevel=0, MatchmakingTier=1
+
+[Quit] → Level=1, Tier=2
+[Quit] → Level=2, Tier=2
+[Quit] → Level=3 (max), Tier=2
+
+Recovery:
+[Complete] → Level=2, Tier=2
+[Complete] → Level=1, Tier=2
+[Complete] → Level=0, Tier=1 ✓
+```
+
+---
+
+## PlayerReliabilityRating
+
+Additional metric calculated as:
+
+```
+PlayerReliabilityRating = TotalCompletedMatches / (TotalEarlyQuits + TotalCompletedMatches)
+```
+
+Default: 1.0 (no matches played)
+
+---
+
+## Key Points
+
+- 1:1 ratio: one completed match offsets one early quit
+- Penalty level range: -1 to 3
+- Disconnections count as early quits (intent cannot be determined)
+- Profile stats penalty only affects display, not underlying data
+- System requires `EnableEarlyQuitPenalty = true`
+
+---
+
 # Competitive Match Telemetry and KPI Specification
 
-Purpose
-- Define the KPIs used to monitor and reduce disruptive mid‑match departures.
-- Specify the exact telemetry events, fields, and metric values required to compute each KPI.
-- Standardize units, naming, and dimensions to enable consistent aggregation.
-
-Status
-- Version: 1.0
-- Owner: Game Services / Matchmaking
-- Scope: Public competitive modes with backfill
+The following sections define KPIs for monitoring mid-match departures.
 
 ---
 
