@@ -1,6 +1,6 @@
 package evr
 
-func generateHashLookupArray() [256]uint64 {
+func generateHashPreCache() [256]uint64 {
 	var seed [256]uint64
 	s := uint64(0x95ac9329ac4bc9b5)
 	for i := 0; i < 256; i++ {
@@ -27,7 +27,7 @@ func generateHashLookupArray() [256]uint64 {
 	return seed
 }
 
-var hashLookupArray [0x100]uint64 = generateHashLookupArray()
+var hashLookupArray [0x100]uint64 = generateHashPreCache()
 
 var SymbolCache = map[Symbol]SymbolToken{
 	0xc8c33e482f601dbe: "uscn",
