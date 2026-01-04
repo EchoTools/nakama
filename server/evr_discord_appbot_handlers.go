@@ -527,12 +527,6 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	if !ok {
 		return nil, 0, status.Error(codes.PermissionDenied, "user is not a member of the guild")
 	}
-	allocatorGroupIDs := make([]string, 0, len(guildGroups))
-	for gid, g := range guildGroups {
-		if g.IsAllocator(userID) {
-			allocatorGroupIDs = append(allocatorGroupIDs, gid)
-		}
-	}
 
 	isGlobalOperator := false
 	isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
@@ -540,13 +534,24 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		return nil, 0, status.Errorf(codes.Internal, "error checking global operator status: %v", err)
 	}
 
-	if !gg.IsAllocator(userID) && !isGlobalOperator {
-		return nil, 0, status.Error(codes.PermissionDenied, "user does not have the allocator role in this guild.")
+	// Build list of groups user can allocate from
+	allocatorGroupIDs := make([]string, 0, len(guildGroups))
+	if isGlobalOperator {
+		// Global operators can allocate from any guild they're a member of
+		for gid := range guildGroups {
+			allocatorGroupIDs = append(allocatorGroupIDs, gid)
+		}
+	} else {
+		// Regular users can only allocate from guilds where they have the allocator role
+		for gid, g := range guildGroups {
+			if g.IsAllocator(userID) {
+				allocatorGroupIDs = append(allocatorGroupIDs, gid)
+			}
+		}
 	}
 
-	// If user is a global operator but has no allocator groups, use the current guild group
-	if isGlobalOperator {
-		allocatorGroupIDs = append(allocatorGroupIDs, groupID)
+	if !gg.IsAllocator(userID) && !isGlobalOperator {
+		return nil, 0, status.Error(codes.PermissionDenied, "user does not have the allocator role in this guild.")
 	}
 
 	// Load the latency history for this user
