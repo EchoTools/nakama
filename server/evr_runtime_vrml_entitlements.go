@@ -83,14 +83,18 @@ var vrmlSeasonDescriptionMap = map[VRMLSeasonID]string{
 	VRMLSeason7:   "Season 7",
 }
 
-// formatVRMLSeasonName converts a season ID to a short, user-friendly display name
-// (e.g., "Season 5" becomes "S5", unknown seasons use their ID)
+// formatVRMLSeasonName converts a season ID to a short, user-friendly display name.
+// Examples:
+//   - VRMLSeason5 ("Season 5") → "S5"
+//   - VRMLSeason7 ("Season 7") → "S7"
+//   - VRMLPreSeason ("Pre-Season") → "Pre-Season"
+//   - Unknown season ID → returns the raw season ID string
 func formatVRMLSeasonName(seasonID VRMLSeasonID) string {
 	seasonName, ok := vrmlSeasonDescriptionMap[seasonID]
 	if !ok {
 		return string(seasonID)
 	}
-	// Convert "Season N" to "SN"
+	// Convert "Season N" to "SN" format
 	if sNumber, found := strings.CutPrefix(seasonName, "Season "); found {
 		return "S" + sNumber
 	}

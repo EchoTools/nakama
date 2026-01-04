@@ -527,7 +527,10 @@ func (v *VRMLScanQueue) playerSummary(vg *vrmlgo.Session, player *vrmlgo.Player)
 	}, nil
 }
 
-// createVRMLVerifyEmbed creates an enhanced embed for displaying VRML player stats
+// createVRMLVerifyEmbed creates an enhanced Discord embed for displaying VRML player stats.
+// This provides a clean, visually appealing summary of a player's VRML account status,
+// including their profile link, total matches, team participation, season breakdown, and
+// cosmetic eligibility. Returns nil if the summary or user data is unavailable.
 func createVRMLVerifyEmbed(summary *VRMLPlayerSummary) *discordgo.MessageEmbed {
 	if summary == nil || summary.User == nil {
 		return nil
@@ -659,12 +662,14 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 		"uid":        userID,
 	})
 
+	// editResponseFn is a helper to edit the interaction response with formatted text content
 	editResponseFn := func(format string, a ...any) error {
 		content := fmt.Sprintf(format, a...)
 		_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &content})
 		return err
 	}
 
+	// editEmbedResponseFn is a helper to edit the interaction response with an embed
 	editEmbedResponseFn := func(embed *discordgo.MessageEmbed) error {
 		_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 			Embeds: &[]*discordgo.MessageEmbed{embed},
