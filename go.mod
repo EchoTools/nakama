@@ -54,6 +54,7 @@ require (
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.3.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
+	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/jackc/pgio v1.0.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/kamstrup/intmap v0.5.1 // indirect
