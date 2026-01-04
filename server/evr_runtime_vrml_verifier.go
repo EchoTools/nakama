@@ -583,9 +583,13 @@ func createVRMLVerifyEmbed(summary *VRMLPlayerSummary) *discordgo.MessageEmbed {
 
 	// Team Information
 	if len(summary.Teams) > 0 {
+		teamText := "team"
+		if len(summary.Teams) != 1 {
+			teamText = "teams"
+		}
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:   "🏆 Teams",
-			Value:  fmt.Sprintf("**%d** team%s", len(summary.Teams), map[bool]string{true: "s", false: ""}[len(summary.Teams) != 1]),
+			Value:  fmt.Sprintf("**%d** %s", len(summary.Teams), teamText),
 			Inline: true,
 		})
 	}
@@ -631,9 +635,13 @@ func createVRMLVerifyEmbed(summary *VRMLPlayerSummary) *discordgo.MessageEmbed {
 			}
 		}
 		if eligibleSeasons > 0 {
+			rewardText := "reward"
+			if eligibleSeasons != 1 {
+				rewardText = "rewards"
+			}
 			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 				Name:   "🎁 Cosmetic Eligibility",
-				Value:  fmt.Sprintf("Eligible for **%d** season reward%s (✓ = 10+ matches)", eligibleSeasons, map[bool]string{true: "s", false: ""}[eligibleSeasons != 1]),
+				Value:  fmt.Sprintf("Eligible for **%d** season %s (✓ = 10+ matches)", eligibleSeasons, rewardText),
 				Inline: false,
 			})
 		}
