@@ -89,12 +89,13 @@ func (g *GuildGroup) RoleCacheUpdate(account *EVRProfile, roles []string) bool {
 
 	roleSet := g.RoleMap.AsSet()
 	// Ignore irrelevant roles
-	for i := 0; i < len(roles); i++ {
-		if _, ok := roleSet[roles[i]]; !ok {
-			roles = slices.Delete(roles, i, i+1)
-			i--
+	validRoles := make([]string, 0, len(roles))
+	for _, role := range roles {
+		if _, ok := roleSet[role]; ok {
+			validRoles = append(validRoles, role)
 		}
 	}
+	roles = validRoles
 
 	// Add the user to the roles
 	updatedRoles := make(map[string]struct{}, len(roleSet))
