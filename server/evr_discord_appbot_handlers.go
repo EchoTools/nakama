@@ -407,7 +407,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 			return fmt.Errorf("failed to unlink device ID: %w", err)
 		}
 
-		if err := d.cache.updateLinkStatus(ctx, i.Member.User.ID); err != nil {
+		if err := d.cache.updateLinkStatus(ctx, user.ID); err != nil {
 			return fmt.Errorf("failed to update link status: %w", err)
 		}
 
