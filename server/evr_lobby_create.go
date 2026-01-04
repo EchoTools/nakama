@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 )
 
@@ -35,7 +36,7 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 				// This private match originated from a social lobby
 				originID := params.CurrentMatchID.UUID
 				settings.OriginSocialID = &originID
-				logger.Info("Private match originated from social lobby", 
+				logger.Info("Private match originated from social lobby",
 					zap.String("origin_social_id", originID.String()),
 					zap.String("new_mode", params.Mode.String()))
 			}

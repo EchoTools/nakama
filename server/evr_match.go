@@ -1353,7 +1353,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		// Set the origin social lobby ID if this match originated from one
 		if settings.OriginSocialID != nil {
 			state.OriginSocialID = settings.OriginSocialID
-			logger.Info("Match prepared with origin social lobby", 
+			logger.Info("Match prepared with origin social lobby",
 				zap.String("origin_social_id", settings.OriginSocialID.String()),
 				zap.String("mode", state.Mode.String()))
 		}
@@ -1561,22 +1561,25 @@ func createSocialLobbyRejoin(ctx context.Context, logger runtime.Logger, nk runt
 		return nil
 	}
 
-	// Get the group ID from the first participant (they should all be in the same group)
+	// Get the group ID
 	groupID := state.GetGroupID()
+	if groupID == uuid.Nil {
+		return fmt.Errorf("group ID is nil")
+	}
 
 	// Create settings for the new social lobby
 	settings := &MatchSettings{
 		Mode:                evr.ModeSocialPublic,
 		Level:               evr.LevelSocial,
 		SpawnedBy:           participants[0].UserID.String(),
-		GroupID:             *groupID,
+		GroupID:             groupID,
 		StartTime:           time.Now().UTC(),
 		Reservations:        participants,
 		ReservationLifetime: 1 * time.Minute, // 1-minute reservations as requested
 	}
 
 	// Create the social lobby
-	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), nk, []string{groupID.String()}, nil, settings, []string{}, true, false, nil)
+	label, err := LobbyGameServerAllocate(ctx, logger, nk, []string{groupID.String()}, nil, settings, []string{}, true, false, "")
 	if err != nil {
 		return fmt.Errorf("failed to allocate social lobby for rejoin: %w", err)
 	}
