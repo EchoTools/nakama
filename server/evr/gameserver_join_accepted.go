@@ -7,6 +7,8 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
+const MaxJoinAllowedEntrants = 16
+
 // Gmae Service -> Game Server: sessions to be accepted.
 type GameServerJoinAllowed struct {
 	EntrantIDs []uuid.UUID
@@ -21,7 +23,11 @@ func (m *GameServerJoinAllowed) Stream(s *EasyStream) error {
 		func() error { return s.Skip(1) },
 		func() error {
 			if s.Mode == DecodeMode {
-				m.EntrantIDs = make([]uuid.UUID, s.Len()/16)
+				count := s.Len() / 16
+				if count > MaxJoinAllowedEntrants {
+					return fmt.Errorf("entrant count %d exceeds maximum %d", count, MaxJoinAllowedEntrants)
+				}
+				m.EntrantIDs = make([]uuid.UUID, count)
 			}
 			return s.StreamGUIDs(&m.EntrantIDs)
 		},

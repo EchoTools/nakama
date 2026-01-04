@@ -245,6 +245,8 @@ func RandomBotEntrantDescriptor() EntrantDescriptor {
 	}
 }
 
+const MaxSessionStartEntrants = 16
+
 func (m *GameServerSessionStart) Stream(s *EasyStream) error {
 	finalStructCount := byte(len(m.Entrants))
 	pad1 := byte(0)
@@ -258,6 +260,9 @@ func (m *GameServerSessionStart) Stream(s *EasyStream) error {
 		func() error { return s.StreamJson(&m.Settings, true, NoCompression) },
 		func() error {
 			if s.Mode == DecodeMode {
+				if int(finalStructCount) > MaxSessionStartEntrants {
+					return fmt.Errorf("entrant count %d exceeds maximum %d", finalStructCount, MaxSessionStartEntrants)
+				}
 				m.Entrants = make([]EntrantDescriptor, finalStructCount)
 			}
 			for _, entrant := range m.Entrants {
