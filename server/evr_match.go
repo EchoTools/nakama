@@ -99,6 +99,7 @@ type MatchSettings struct {
 	TeamAlignments      map[string]int
 	Reservations        []*EvrMatchPresence
 	ReservationLifetime time.Duration
+	OriginSocialID      *uuid.UUID // The social lobby ID this match originated from (for auto-rejoin)
 }
 
 // This is the match handler for all matches.
@@ -725,6 +726,17 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		// Lock the match
 		state.Open = false
 		logger.Debug("Match is empty. Closing it.")
+
+		// When a private match empties out, trigger auto-rejoin to social lobby if it originated from one
+		if state.OriginSocialID != nil {
+			leavingUserIDs := make([]string, 0, len(presences))
+			for _, p := range presences {
+				leavingUserIDs = append(leavingUserIDs, p.GetUserId())
+			}
+			if err := createSocialLobbyRejoin(ctx, logger, nk, state, leavingUserIDs); err != nil {
+				logger.WithField("error", err).Warn("Failed to create social lobby for auto-rejoin")
+			}
+		}
 	}
 
 	// Update the label that includes the new player list.
@@ -1017,6 +1029,17 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 		state.matchSummarySent = true
 		if err := SendMatchSummary(ctx, logger, nk, state); err != nil {
 			logger.WithField("error", err).Error("failed to send match summary on terminate")
+		}
+	}
+
+	// Auto-rejoin to social lobby if this private match originated from one
+	if state.OriginSocialID != nil && len(state.presenceMap) > 0 {
+		leavingUserIDs := make([]string, 0, len(state.presenceMap))
+		for _, presence := range state.presenceMap {
+			leavingUserIDs = append(leavingUserIDs, presence.GetUserId())
+		}
+		if err := createSocialLobbyRejoin(ctx, logger, nk, state, leavingUserIDs); err != nil {
+			logger.WithField("error", err).Warn("Failed to create social lobby for auto-rejoin on terminate")
 		}
 	}
 
@@ -1327,6 +1350,14 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			}
 		}
 
+		// Set the origin social lobby ID if this match originated from one
+		if settings.OriginSocialID != nil {
+			state.OriginSocialID = settings.OriginSocialID
+			logger.Info("Match prepared with origin social lobby", 
+				zap.String("origin_social_id", settings.OriginSocialID.String()),
+				zap.String("mode", state.Mode.String()))
+		}
+
 	case SignalStartSession:
 
 		if !state.Started() {
@@ -1496,5 +1527,64 @@ func (m *EvrMatch) sendEntrantReject(ctx context.Context, logger runtime.Logger,
 	if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{server}, nil); err != nil {
 		return fmt.Errorf("failed to dispatch message: %w", err)
 	}
+	return nil
+}
+
+// createSocialLobbyRejoin creates a new social lobby for players exiting a private match that originated from a social lobby
+func createSocialLobbyRejoin(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, state *MatchLabel, leavingUserIDs []string) error {
+	// Only handle private Arena and Combat matches
+	if !state.IsPrivateMatch() || !state.IsMatch() {
+		return nil
+	}
+
+	// Check if this match originated from a social lobby
+	if state.OriginSocialID == nil {
+		return nil
+	}
+
+	logger.WithFields(map[string]any{
+		"origin_social_id": state.OriginSocialID.String(),
+		"leaving_users":    leavingUserIDs,
+	}).Info("Creating auto-rejoin social lobby for players")
+
+	// Gather all participants from this match that need to rejoin
+	participants := make([]*EvrMatchPresence, 0)
+	for _, presence := range state.presenceMap {
+		// Only include active participants
+		if presence.IsPlayer() {
+			participants = append(participants, presence)
+		}
+	}
+
+	// If no participants, nothing to do
+	if len(participants) == 0 {
+		return nil
+	}
+
+	// Get the group ID from the first participant (they should all be in the same group)
+	groupID := state.GetGroupID()
+
+	// Create settings for the new social lobby
+	settings := &MatchSettings{
+		Mode:                evr.ModeSocialPublic,
+		Level:               evr.LevelSocial,
+		SpawnedBy:           participants[0].UserID.String(),
+		GroupID:             *groupID,
+		StartTime:           time.Now().UTC(),
+		Reservations:        participants,
+		ReservationLifetime: 1 * time.Minute, // 1-minute reservations as requested
+	}
+
+	// Create the social lobby
+	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), nk, []string{groupID.String()}, nil, settings, []string{}, true, false, nil)
+	if err != nil {
+		return fmt.Errorf("failed to allocate social lobby for rejoin: %w", err)
+	}
+
+	logger.WithFields(map[string]any{
+		"social_lobby_id": label.ID.UUID.String(),
+		"participants":    len(participants),
+	}).Info("Successfully created auto-rejoin social lobby with reservations")
+
 	return nil
 }

@@ -27,6 +27,21 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 		TeamAlignments:   map[string]int{session.UserID().String(): params.Role},
 	}
 
+	// If this is a private match being created from a social lobby, track the origin
+	if (params.Mode == evr.ModeArenaPrivate || params.Mode == evr.ModeCombatPrivate) && !params.CurrentMatchID.IsNil() {
+		// Check if the current match is a social lobby
+		if currentLabel, err := MatchLabelByID(ctx, nk, params.CurrentMatchID); err == nil {
+			if currentLabel.Mode == evr.ModeSocialPublic || currentLabel.Mode == evr.ModeSocialPrivate {
+				// This private match originated from a social lobby
+				originID := params.CurrentMatchID.UUID
+				settings.OriginSocialID = &originID
+				logger.Info("Private match originated from social lobby", 
+					zap.String("origin_social_id", originID.String()),
+					zap.String("new_mode", params.Mode.String()))
+			}
+		}
+	}
+
 	latestRTTs := params.latencyHistory.Load().LatestRTTs()
 
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
