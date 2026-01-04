@@ -2129,7 +2129,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			isGuildAuditor = isGuildAuditor || isGlobalOperator
-			isGuildEnforcer = isGuildEnforcer || isGuildAuditor || isGlobalOperator
+			isGuildEnforcer = isGuildEnforcer || isGuildAuditor
 
 			loginsSince := time.Now().Add(-30 * 24 * time.Hour)
 			if !isGlobalOperator {
