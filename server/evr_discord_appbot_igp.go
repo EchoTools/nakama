@@ -838,7 +838,7 @@ func (d *DiscordAppBot) handleSetIGNModalSubmit(_ context.Context, logger runtim
 	isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
 
 		if !isAuditorOrEnforcer {
-			return simpleInteractionResponse(d.dg, i, "You do not have permission to override in-game names.")
+			return simpleInteractionResponse(d.dg, i, "You do not have permission to set IGN overrides.")
 		}
 
 	// Get the submitted display name and lock status
@@ -901,7 +901,7 @@ func (d *DiscordAppBot) handleSetIGNModalSubmit(_ context.Context, logger runtim
 		if isLocked {
 			lockStatus = "locked"
 		}
-		auditMessage := fmt.Sprintf("<@%s> Override in-game name for %s to **%s** (%s) (originally: **%s**)",
+		auditMessage := fmt.Sprintf("<@%s> set IGN override for %s to **%s** (%s) (originally: **%s**)",
 			i.Member.User.ID, targetMention, displayName, lockStatus, originalDisplayName)
 
 	if _, err := d.LogAuditMessage(d.ctx, groupID, auditMessage, false); err != nil {
