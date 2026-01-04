@@ -616,6 +616,9 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		playerRatings = CalculateNewIndividualRatings(playersWithPlayerRatings, statsForRating, blueWins)
 	}
 
+	// Note: typeStats is a copy from the range loop, not a reference to the map value.
+	// Modifications to typeStats only affect the local copy, which is then passed to
+	// typeStatsToScoreMap() below. The original statsByPlayer map remains unchanged.
 	for xpid, typeStats := range statsByPlayer {
 		// Get the match label
 
@@ -636,6 +639,26 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 			"player_sid":  playerInfo.SessionID,
 			"player_xpid": playerInfo.EvrID.String(),
 		})
+
+		// Apply backfill player loss exemption logic
+		// Backfill players should not get a loss if the team loses, unless they early quit.
+		// Wins are still counted for backfill players.
+		// Note: ArenaLosses is used for both Arena and Combat modes (no separate CombatLosses field exists)
+		if playerInfo.IsBackfill() {
+			// Check if this player early quit by examining participation records
+			isEarlyQuitter := false
+			if participation := label.participations[playerInfo.UserID]; participation != nil {
+				isEarlyQuitter = participation.IsAbandoner
+			}
+
+			// If backfill player lost but did not early quit, exempt them from the loss
+			if typeStats.ArenaLosses > 0 && !isEarlyQuitter {
+				logger.Debug("Backfill player loss exemption applied (stayed until end)")
+				typeStats.ArenaLosses = 0
+			} else if isEarlyQuitter {
+				logger.Debug("Backfill player early quit - loss counted")
+			}
+		}
 
 		// Increment the completed matches for the player
 		if err := s.incrementCompletedMatches(ctx, logger, nk, db, sessionRegistry, playerInfo.UserID, playerInfo.SessionID); err != nil {
