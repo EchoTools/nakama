@@ -538,7 +538,7 @@ func createVRMLVerifyEmbed(summary *VRMLPlayerSummary) *discordgo.MessageEmbed {
 
 	embed := &discordgo.MessageEmbed{
 		Title:       "✅ VRML Account Verified",
-		Description: fmt.Sprintf("Your VRML account is successfully linked and verified!"),
+		Description: "Your VRML account is successfully linked and verified!",
 		Color:       0x00CC00, // Green
 		Fields:      make([]*discordgo.MessageEmbedField, 0, 6),
 		Footer: &discordgo.MessageEmbedFooter{
@@ -596,14 +596,20 @@ func createVRMLVerifyEmbed(summary *VRMLPlayerSummary) *discordgo.MessageEmbed {
 
 	// Season Participation
 	if len(matchCountsBySeason) > 0 {
-		// Sort seasons
+		// Collect and sort seasons in reverse order to show most recent first
 		seasons := make([]string, 0, len(matchCountsBySeason))
 		for season := range matchCountsBySeason {
 			seasons = append(seasons, season)
 		}
-		// Sort in reverse order to show most recent first
-		slices.Sort(seasons)
-		slices.Reverse(seasons)
+		slices.SortFunc(seasons, func(a, b string) int {
+			// Reverse sort: b comes before a
+			if a < b {
+				return 1
+			} else if a > b {
+				return -1
+			}
+			return 0
+		})
 
 		// Create formatted season list
 		seasonLines := make([]string, 0, len(seasons))
