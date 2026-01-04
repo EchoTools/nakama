@@ -245,9 +245,9 @@ func GuildGroupsLoad(ctx context.Context, nk runtime.NakamaModule, groupIDs []st
 		return nil, fmt.Errorf("group not found")
 	}
 
-	// Trim any groups that do not have a langTag of "guild"
+	// Trim any groups that do not have a langTag of "guild" or are inactive
 	for i := 0; i < len(groups); i++ {
-		if groups[i].LangTag != GuildGroupLangTag {
+		if groups[i].LangTag != GuildGroupLangTag || isGuildGroupInactive(groups[i]) {
 			groups = slices.Delete(groups, i, i+1)
 			i--
 		}
@@ -286,6 +286,11 @@ func GuildGroupLoad(ctx context.Context, nk runtime.NakamaModule, groupID string
 	}
 	if len(groups) == 0 {
 		return nil, fmt.Errorf("group not found")
+	}
+
+	// Check if the group is inactive
+	if isGuildGroupInactive(groups[0]) {
+		return nil, fmt.Errorf("group is inactive")
 	}
 
 	state, err := GuildGroupStateLoad(ctx, nk, ServiceSettings().DiscordBotUserID, groupID)
@@ -332,7 +337,7 @@ func GuildUserGroupsList(ctx context.Context, nk runtime.NakamaModule, guildGrou
 		}
 
 		for _, ug := range result {
-			if ug.Group.LangTag != GuildGroupLangTag || ug.State.Value > int32(api.UserGroupList_UserGroup_MEMBER) {
+			if ug.Group.LangTag != GuildGroupLangTag || ug.State.Value > int32(api.UserGroupList_UserGroup_MEMBER) || isGuildGroupInactive(ug.Group) {
 				continue
 			}
 			groups[ug.Group.Id] = ug.Group
@@ -369,4 +374,69 @@ func GuildUserGroupsList(ctx context.Context, nk runtime.NakamaModule, guildGrou
 	}
 
 	return guildGroups, nil
+}
+
+// MarkGuildGroupInactive marks a guild group as inactive instead of deleting it.
+// It updates the group name with an inactive prefix and sets the inactive flag in metadata.
+func MarkGuildGroupInactive(ctx context.Context, nk runtime.NakamaModule, groupID string, reason string) error {
+	// Load the group directly to check if it exists and get its metadata
+	groups, err := nk.GroupsGetId(ctx, []string{groupID})
+	if err != nil {
+		return fmt.Errorf("failed to get group: %w", err)
+	}
+	if len(groups) == 0 {
+		return fmt.Errorf("group not found")
+	}
+
+	// Check if already inactive
+	if isGuildGroupInactive(groups[0]) {
+		return nil // Already inactive, nothing to do
+	}
+
+	// Load the metadata
+	md := &GroupMetadata{}
+	if err := json.Unmarshal([]byte(groups[0].Metadata), md); err != nil {
+		return fmt.Errorf("failed to unmarshal group metadata: %w", err)
+	}
+
+	// Update the metadata to mark as inactive
+	md.Inactive = true
+	md.InactiveReason = reason
+
+	// Prefix the group name to indicate inactive status
+	newName := InactiveGroupNamePrefix + groups[0].Name
+
+	// Update the group with the new name and metadata
+	_nk, ok := nk.(*RuntimeGoNakamaModule)
+	if !ok {
+		return fmt.Errorf("failed to cast nakama module")
+	}
+
+	// Save the metadata
+	if err := GroupMetadataSave(ctx, _nk.db, groupID, md); err != nil {
+		return fmt.Errorf("failed to save guild group metadata: %w", err)
+	}
+
+	// Update the group name
+	if err := nk.GroupUpdate(ctx, groupID, SystemUserID, newName, "", GuildGroupLangTag, "", "", false, nil, 0); err != nil {
+		return fmt.Errorf("failed to update guild group name: %w", err)
+	}
+
+	return nil
+}
+
+// isGuildGroupInactive checks if a group is marked as inactive based on metadata or name prefix.
+func isGuildGroupInactive(group *api.Group) bool {
+	// Check if the name has the inactive prefix
+	if len(group.Name) >= len(InactiveGroupNamePrefix) && group.Name[:len(InactiveGroupNamePrefix)] == InactiveGroupNamePrefix {
+		return true
+	}
+
+	// Also check metadata
+	md := &GroupMetadata{}
+	if err := json.Unmarshal([]byte(group.Metadata), md); err == nil {
+		return md.Inactive
+	}
+
+	return false
 }
