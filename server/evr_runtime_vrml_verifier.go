@@ -566,14 +566,7 @@ func createVRMLVerifyEmbed(summary *VRMLPlayerSummary) *discordgo.MessageEmbed {
 	for sID, teams := range summary.MatchCountsBySeasonByTeam {
 		for _, count := range teams {
 			totalMatches += count
-			seasonName, ok := vrmlSeasonDescriptionMap[sID]
-			if !ok {
-				seasonName = string(sID)
-			} else {
-				// Convert "Season 10" to "S10"
-				sNumber, _ := strings.CutPrefix(seasonName, "Season ")
-				seasonName = "S" + sNumber
-			}
+			seasonName := formatVRMLSeasonName(sID)
 			matchCountsBySeason[seasonName] += count
 		}
 	}
