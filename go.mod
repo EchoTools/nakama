@@ -39,7 +39,6 @@ require (
 	go.uber.org/thriftrw v1.33.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.46.0
-	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546
 	golang.org/x/oauth2 v0.32.0
 	golang.org/x/time v0.14.0
 	gonum.org/v1/gonum v0.16.0
