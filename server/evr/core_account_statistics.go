@@ -316,7 +316,7 @@ func (s *ArenaStatistics) CalculateFieldsWithOptions(countEarlyQuitsAsLosses boo
 				Count: 1,
 			}
 		} else {
-			s.ArenaLosses.Value += earlyQuitValue
+			s.ArenaLosses.SetValue(s.ArenaLosses.GetValue() + earlyQuitValue)
 		}
 	}
 
