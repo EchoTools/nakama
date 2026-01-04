@@ -213,11 +213,16 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 	// For periodic runs, filter to only tickets that have been waiting at least 1 matchmaker interval
 	// This prevents backfill from "poaching" tickets before matchmaker has a chance to process them
 	if isPeriodicRun {
-		// Minimum age is 1 matchmaker interval
+		// Minimum age is 1 matchmaker interval (use time-based fallback if matchmaker hasn't run yet)
+		minAge := time.Duration(matchmaker.config.GetMatchmaker().IntervalSec) * time.Second
 
 		filteredCandidates := make([]*BackfillCandidate, 0, len(candidates))
 		for _, c := range candidates {
-			if c.Intervals >= 1 {
+			// Accept candidate if either:
+			// 1. Matchmaker has seen it at least once (Intervals >= 1), OR
+			// 2. It's been waiting long enough (time-based fallback for when matchmaker never completes)
+			ticketAge := time.Since(c.SubmissionTime)
+			if c.Intervals >= 1 || ticketAge >= minAge {
 				filteredCandidates = append(filteredCandidates, c)
 			}
 		}
@@ -225,6 +230,7 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 		logger.Debug("Filtered candidates for periodic backfill",
 			zap.Int("original_count", len(candidates)),
 			zap.Int("filtered_count", len(filteredCandidates)),
+			zap.Duration("min_age", minAge),
 		)
 
 		candidates = filteredCandidates
