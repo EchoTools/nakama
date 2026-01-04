@@ -133,6 +133,8 @@ func Secondary(s *sessionWS, loginSession *sessionWS, isLobby bool, isServer boo
 	if isServer {
 		params.serverSession = s
 		// Preserve server-specific URL parameters from the current session
+		// If currentOk is false (no existing params), server-specific fields will inherit
+		// from the login session values, which is acceptable fallback behavior for new server connections.
 		if currentOk {
 			params.serverTags = currentParams.serverTags
 			params.serverGuilds = currentParams.serverGuilds

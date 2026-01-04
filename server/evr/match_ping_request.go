@@ -11,6 +11,8 @@ import (
 	"github.com/samber/lo"
 )
 
+const MaxPingEndpoints = 256
+
 // LobbyPingRequest is a message from server to client, requesting the client ping a set of endpoints to determine
 // the optimal game server to connect to.
 type LobbyPingRequest struct {
@@ -44,6 +46,9 @@ func (m *LobbyPingRequest) Stream(s *EasyStream) error {
 			// Each endpoint is 10 bytes + 2 bytes of padding
 			if s.Mode == DecodeMode {
 				endpointCount := s.r.Len() / 12 // 10 byte struct + 2 byte padding
+				if endpointCount > MaxPingEndpoints {
+					return fmt.Errorf("endpoint count %d exceeds maximum %d", endpointCount, MaxPingEndpoints)
+				}
 				m.Endpoints = make([]Endpoint, endpointCount)
 			}
 			for i := range m.Endpoints {

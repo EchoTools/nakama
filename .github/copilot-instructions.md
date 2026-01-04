@@ -50,6 +50,10 @@ No benchmarks - they take too long. Cancel any test running >10 minutes.
 
 ## Code Patterns
 
+### Go Type Conventions
+- Use `any` instead of `interface{}` (Go 1.18+)
+- Prefer typed parameters over empty interfaces
+
 ### EVR Binary Protocol
 Messages in `server/evr/` use binary encoding with packet headers:
 ```go
