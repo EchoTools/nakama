@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"sync"
 	"time"
 
@@ -103,6 +104,21 @@ func (s *EarlyQuitConfig) IncrementCompletedMatches() {
 	s.PlayerReliabilityRating = CalculatePlayerReliabilityRating(s.TotalEarlyQuits, s.TotalCompletedMatches)
 }
 
+// DecrementPenaltyOnly reduces the early quit penalty level by 1 without affecting match statistics.
+// This should be used when forgiving an early quit for reasons other than completing a match
+// (e.g., player fully logged out after early quit).
+func (s *EarlyQuitConfig) DecrementPenaltyOnly() {
+	s.Lock()
+	defer s.Unlock()
+	s.LastEarlyQuitTime = time.Time{}
+	s.EarlyQuitPenaltyLevel--
+	if s.EarlyQuitPenaltyLevel < MinEarlyQuitPenaltyLevel {
+		s.EarlyQuitPenaltyLevel = MinEarlyQuitPenaltyLevel
+	}
+	// Note: We do NOT increment TotalCompletedMatches or recalculate PlayerReliabilityRating
+	// because this is a forgiveness mechanism, not a completed match.
+}
+
 func (s *EarlyQuitConfig) GetPenaltyLevel() int {
 	s.Lock()
 	defer s.Unlock()
@@ -161,14 +177,15 @@ func (s *EarlyQuitConfig) UpdateTier(tier1Threshold *int32) (oldTier, newTier in
 // This prevents penalizing players who quit the entire game rather than just that match.
 //
 // Parameters:
-//   - ctx: Context for logging and operations
+//   - ctx: Context for logging and operations (should be a background context, not match context)
 //   - logger: Logger for debug/error messages
 //   - nk: Nakama runtime module for storage operations
+//   - db: Database connection for Discord ID lookup
 //   - sessionRegistry: Registry to check for active sessions
 //   - userID: User ID to check
 //   - sessionID: Session ID that disconnected
 //   - checkInterval: Duration to wait before checking if player logged out (grace period)
-func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, userID, sessionID string, checkInterval time.Duration) {
+func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, sessionRegistry SessionRegistry, userID, sessionID string, checkInterval time.Duration) {
 	// Wait for the grace period before checking
 	select {
 	case <-time.After(checkInterval):
@@ -214,9 +231,14 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 		return
 	}
 
-	// NOTE: We do not treat logout after an early quit as a completed match.
-	// Avoid calling IncrementCompletedMatches() here to prevent inflating
-	// TotalCompletedMatches and related reliability statistics.
+	// Reduce early quit penalty by one level without inflating match completion statistics.
+	// This forgives the early quit since the player logged out entirely rather than
+	// just leaving the match to join another.
+	eqconfig.DecrementPenaltyOnly()
+
+	// Check if tier should be updated after penalty reduction
+	serviceSettings := ServiceSettings()
+	oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
 
 	// Write the updated config back to storage
 	if err := StorableWrite(ctx, nk, userUUID.String(), eqconfig); err != nil {
@@ -229,6 +251,37 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 
 	logger.WithFields(map[string]any{
 		"uid":               userID,
+		"old_penalty_level": eqconfig.GetPenaltyLevel() + 1, // +1 because we just decremented it
 		"new_penalty_level": eqconfig.GetPenaltyLevel(),
-	}).Info("Removed early quit penalty: player logged out after early quit")
+		"old_tier":          oldTier,
+		"new_tier":          newTier,
+		"tier_changed":      tierChanged,
+	}).Info("Reduced early quit penalty: player logged out after early quit")
+
+	// Send Discord notification if tier changed
+	if tierChanged {
+		discordID, err := GetDiscordIDByUserID(ctx, db, userID)
+		if err != nil {
+			logger.WithFields(map[string]any{
+				"uid":   userID,
+				"error": err,
+			}).Warn("Failed to get Discord ID for tier notification after logout")
+		} else if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
+			var message string
+			if newTier < oldTier {
+				// Recovered to Tier 1
+				message = TierRestoredMessage
+			} else {
+				// This shouldn't happen when decrementing penalty, but handle it
+				message = TierDegradedMessage
+			}
+			if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
+				logger.WithFields(map[string]any{
+					"uid":        userID,
+					"discord_id": discordID,
+					"error":      err,
+				}).Warn("Failed to send tier change notification after logout")
+			}
+		}
+	}
 }
