@@ -9,24 +9,19 @@ jobs:
     name: Build nakama binary
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Required for git describe tags
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: stable
+          cache: true  # Built-in caching for Go modules and build cache
 
-      - name: Cache Go modules
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+
+      - name: Vendor dependencies
+        run: go mod vendor
 
       - name: Build binary
-        run: |
-          go mod vendor
-          make nakama
+        run: make nakama
