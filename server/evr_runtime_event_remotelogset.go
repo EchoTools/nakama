@@ -616,6 +616,9 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		playerRatings = CalculateNewIndividualRatings(playersWithPlayerRatings, statsForRating, blueWins)
 	}
 
+	// Note: typeStats is a copy from the range loop, not a reference to the map value.
+	// Modifications to typeStats only affect the local copy, which is then passed to
+	// typeStatsToScoreMap() below. The original statsByPlayer map remains unchanged.
 	for xpid, typeStats := range statsByPlayer {
 		// Get the match label
 
