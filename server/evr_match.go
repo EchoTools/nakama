@@ -1532,8 +1532,13 @@ func (m *EvrMatch) sendEntrantReject(ctx context.Context, logger runtime.Logger,
 
 // createSocialLobbyRejoin creates a new social lobby for players exiting a private match that originated from a social lobby
 func createSocialLobbyRejoin(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, state *MatchLabel, leavingUserIDs []string) error {
-	// Only handle private Arena and Combat matches
-	if !state.IsPrivateMatch() || !state.IsMatch() {
+	// Only handle private Arena and Combat matches (not social lobbies)
+	if !state.IsPrivateMatch() {
+		return nil
+	}
+	
+	// Exclude social lobbies - only handle Arena and Combat
+	if state.Mode == evr.ModeSocialPrivate || state.Mode == evr.ModeSocialPublic {
 		return nil
 	}
 
@@ -1548,6 +1553,7 @@ func createSocialLobbyRejoin(ctx context.Context, logger runtime.Logger, nk runt
 	}).Info("Creating auto-rejoin social lobby for players")
 
 	// Gather all participants from this match that need to rejoin
+	// We include all participants, not just those leaving, to ensure the whole group rejoins together
 	participants := make([]*EvrMatchPresence, 0)
 	for _, presence := range state.presenceMap {
 		// Only include active participants
