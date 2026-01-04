@@ -2,6 +2,7 @@ package evr
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 	"time"
 
@@ -186,6 +187,151 @@ func TestArenaStatistics_MarshalJSON_IncludesOp(t *testing.T) {
 	if val, ok := wins["val"].(float64); !ok || val != 10 {
 		t.Errorf("Expected val=10, got %v", wins["val"])
 	}
+}
+
+func TestArenaStatistics_EarlyQuitsFoldIntoLosses(t *testing.T) {
+	// Test with countEarlyQuitsAsLosses = true
+	t.Run("WithEarlyQuitsAsLosses", func(t *testing.T) {
+		stats := &ArenaStatistics{
+			ArenaWins:   &StatisticValue{Count: 1, Value: 10},
+			ArenaLosses: &StatisticValue{Count: 1, Value: 5},
+			EarlyQuits:  &StatisticValue{Count: 1, Value: 2},
+		}
+
+		stats.CalculateFieldsWithOptions(true)
+
+		if stats.ArenaLosses == nil {
+			t.Fatalf("expected ArenaLosses to be set")
+		}
+
+		// ArenaLosses should include early quits: 5 + 2 = 7
+		if got := stats.ArenaLosses.GetValue(); got != 7 {
+			t.Fatalf("expected ArenaLosses to include early quits, got %v", got)
+		}
+
+		if stats.GamesPlayed == nil {
+			t.Fatalf("expected GamesPlayed to be calculated")
+		}
+
+		// GamesPlayed = ArenaWins + ArenaLosses (which includes early quits) = 10 + 7 = 17
+		if got := stats.GamesPlayed.GetValue(); got != 17 {
+			t.Fatalf("expected GamesPlayed to include early quits as losses, got %v", got)
+		}
+
+		const tolerance = 1e-6
+		expectedWinPct := 10.0 / 17.0 * 100
+		if stats.ArenaWinPercentage == nil {
+			t.Fatalf("expected ArenaWinPercentage to be calculated")
+		}
+
+		if diff := math.Abs(stats.ArenaWinPercentage.GetValue() - expectedWinPct); diff > tolerance {
+			t.Fatalf("unexpected ArenaWinPercentage: got %v, want %v", stats.ArenaWinPercentage.GetValue(), expectedWinPct)
+		}
+
+		expectedEarlyQuitPct := 2.0 / 17.0 * 100
+		if stats.EarlyQuitPercentage == nil {
+			t.Fatalf("expected EarlyQuitPercentage to be calculated")
+		}
+
+		if diff := math.Abs(stats.EarlyQuitPercentage.GetValue() - expectedEarlyQuitPct); diff > tolerance {
+			t.Fatalf("unexpected EarlyQuitPercentage: got %v, want %v", stats.EarlyQuitPercentage.GetValue(), expectedEarlyQuitPct)
+		}
+
+		if stats.ArenaTies == nil || stats.ArenaTies.GetValue() != 2 {
+			t.Fatalf("expected ArenaTies to reflect EarlyQuits value (2), got %v", stats.ArenaTies)
+		}
+	})
+
+	// Test with countEarlyQuitsAsLosses = false (default behavior)
+	t.Run("WithoutEarlyQuitsAsLosses", func(t *testing.T) {
+		stats := &ArenaStatistics{
+			ArenaWins:   &StatisticValue{Count: 1, Value: 10},
+			ArenaLosses: &StatisticValue{Count: 1, Value: 5},
+			EarlyQuits:  &StatisticValue{Count: 1, Value: 2},
+		}
+
+		stats.CalculateFields() // Same as CalculateFieldsWithOptions(false)
+
+		if stats.ArenaLosses == nil {
+			t.Fatalf("expected ArenaLosses to be set")
+		}
+
+		// ArenaLosses should NOT include early quits: still 5
+		if got := stats.ArenaLosses.GetValue(); got != 5 {
+			t.Fatalf("expected ArenaLosses to remain unchanged (5), got %v", got)
+		}
+
+		if stats.GamesPlayed == nil {
+			t.Fatalf("expected GamesPlayed to be calculated")
+		}
+
+		// GamesPlayed = ArenaWins + ArenaLosses = 10 + 5 = 15
+		if got := stats.GamesPlayed.GetValue(); got != 15 {
+			t.Fatalf("expected GamesPlayed = 15, got %v", got)
+		}
+
+		const tolerance = 1e-6
+		expectedWinPct := 10.0 / 15.0 * 100
+		if stats.ArenaWinPercentage == nil {
+			t.Fatalf("expected ArenaWinPercentage to be calculated")
+		}
+
+		if diff := math.Abs(stats.ArenaWinPercentage.GetValue() - expectedWinPct); diff > tolerance {
+			t.Fatalf("unexpected ArenaWinPercentage: got %v, want %v", stats.ArenaWinPercentage.GetValue(), expectedWinPct)
+		}
+
+		// ArenaTies should still sync with EarlyQuits
+		if stats.ArenaTies == nil || stats.ArenaTies.GetValue() != 2 {
+			t.Fatalf("expected ArenaTies to reflect EarlyQuits value (2), got %v", stats.ArenaTies)
+		}
+
+		// EarlyQuitPercentage should be calculated based on original gamesPlayed (15)
+		expectedEarlyQuitPct := 2.0 / 15.0 * 100
+		if stats.EarlyQuitPercentage == nil {
+			t.Fatalf("expected EarlyQuitPercentage to be calculated")
+		}
+
+		if diff := math.Abs(stats.EarlyQuitPercentage.GetValue() - expectedEarlyQuitPct); diff > tolerance {
+			t.Fatalf("unexpected EarlyQuitPercentage: got %v, want %v", stats.EarlyQuitPercentage.GetValue(), expectedEarlyQuitPct)
+		}
+	})
+
+	// Test with EarlyQuits initially nil to verify initialization logic
+	t.Run("WithNilEarlyQuits", func(t *testing.T) {
+		stats := &ArenaStatistics{
+			ArenaWins:   &StatisticValue{Count: 1, Value: 10},
+			ArenaLosses: &StatisticValue{Count: 1, Value: 5},
+			// EarlyQuits is nil
+		}
+
+		stats.CalculateFields()
+
+		// EarlyQuits should be initialized to 0
+		if stats.EarlyQuits == nil {
+			t.Fatalf("expected EarlyQuits to be initialized")
+		}
+		if stats.EarlyQuits.GetValue() != 0 {
+			t.Fatalf("expected EarlyQuits to be 0, got %v", stats.EarlyQuits.GetValue())
+		}
+
+		// ArenaTies should also be initialized to 0 (synced with EarlyQuits)
+		if stats.ArenaTies == nil {
+			t.Fatalf("expected ArenaTies to be initialized")
+		}
+		if stats.ArenaTies.GetValue() != 0 {
+			t.Fatalf("expected ArenaTies to be 0, got %v", stats.ArenaTies.GetValue())
+		}
+
+		// GamesPlayed should be 15 (no early quits added)
+		if stats.GamesPlayed == nil || stats.GamesPlayed.GetValue() != 15 {
+			t.Fatalf("expected GamesPlayed = 15, got %v", stats.GamesPlayed)
+		}
+
+		// ArenaLosses should remain unchanged
+		if stats.ArenaLosses.GetValue() != 5 {
+			t.Fatalf("expected ArenaLosses to remain 5, got %v", stats.ArenaLosses.GetValue())
+		}
+	})
 }
 
 var preshutdownProfileStatistics = []byte(`

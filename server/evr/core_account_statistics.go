@@ -112,15 +112,37 @@ func (g *StatisticsGroup) UnmarshalText(data []byte) error {
 type PlayerStatistics map[StatisticsGroup]Statistics
 
 func (s PlayerStatistics) MarshalJSON() (b []byte, err error) {
+	return s.MarshalJSONWithThreshold(0.0)
+}
+
+// MarshalJSONWithThreshold marshals player statistics with an optional early quit penalty threshold.
+// The threshold is a percentage (e.g., 0.70 for 70%) representing the ratio of
+// EarlyQuits / (ArenaWins + ArenaLosses) — i.e., early quits divided by the number of
+// completed games (wins + losses, excluding early quits) — above which early quits will be
+// counted as losses for derived stat calculations. A threshold of 0.0 disables this feature
+// (early quits are never counted as losses).
+func (s PlayerStatistics) MarshalJSONWithThreshold(earlyQuitLossThreshold float64) (b []byte, err error) {
 	top := make(map[string]any)
 	for g, stats := range s {
 
 		switch g.Mode {
 		case ModeArenaPublic:
+			arenaStats := stats.(*ArenaStatistics)
 
-			stats.(*ArenaStatistics).CalculateFields()
-			if s := stats.(*ArenaStatistics); s.Level == nil || s.Level.Value == 0 || s.Level.Count == 0 {
-				s.Level = &StatisticValue{
+			// Determine if early quits should be counted as losses based on threshold
+			countEarlyQuitsAsLosses := false
+			if earlyQuitLossThreshold > 0.0 {
+				// Calculate preliminary games played (wins + losses, before adding early quits)
+				prelimGamesPlayed := arenaStats.ArenaWins.GetValue() + arenaStats.ArenaLosses.GetValue()
+				if prelimGamesPlayed > 0 && arenaStats.EarlyQuits != nil {
+					earlyQuitRatio := arenaStats.EarlyQuits.GetValue() / prelimGamesPlayed
+					countEarlyQuitsAsLosses = earlyQuitRatio >= earlyQuitLossThreshold
+				}
+			}
+
+			arenaStats.CalculateFieldsWithOptions(countEarlyQuitsAsLosses)
+			if arenaStats.Level == nil || arenaStats.Level.Value == 0 || arenaStats.Level.Count == 0 {
+				arenaStats.Level = &StatisticValue{
 					Count: 1,
 					Value: 1,
 				}
@@ -257,23 +279,45 @@ func (s *ArenaStatistics) MarshalJSON() ([]byte, error) {
 	return marshalStatisticsStruct(s)
 }
 
+// CalculateFields calculates derived statistics without counting early quits as losses.
+// This is the default behavior for backward compatibility.
 func (s *ArenaStatistics) CalculateFields() {
+	s.CalculateFieldsWithOptions(false)
+}
+
+// CalculateFieldsWithOptions calculates derived statistics with optional early quit penalty.
+// If countEarlyQuitsAsLosses is true, EarlyQuits are added to ArenaLosses before calculating
+// any derived statistics like SavesPerGame, ArenaWinPercentage, etc.
+func (s *ArenaStatistics) CalculateFieldsWithOptions(countEarlyQuitsAsLosses bool) {
 	if s == nil {
 		return
 	}
 
+	// Initialize EarlyQuits and ArenaTies if nil
 	if s.EarlyQuits == nil {
-		s.ArenaTies = &StatisticValue{
-			Value: 0,
-			Count: 1,
-		}
-
 		s.EarlyQuits = &StatisticValue{
-
 			Value: 0,
 			Count: 1,
 		}
+	}
 
+	// Sync ArenaTies to match EarlyQuits
+	s.ArenaTies = &StatisticValue{
+		Value: s.EarlyQuits.GetValue(),
+		Count: 1,
+	}
+
+	// If counting early quits as losses, add them to ArenaLosses BEFORE calculating gamesPlayed
+	if countEarlyQuitsAsLosses && s.EarlyQuits.GetValue() > 0 {
+		earlyQuitValue := s.EarlyQuits.GetValue()
+		if s.ArenaLosses == nil {
+			s.ArenaLosses = &StatisticValue{
+				Value: earlyQuitValue,
+				Count: 1,
+			}
+		} else {
+			s.ArenaLosses.SetValue(s.ArenaLosses.GetValue() + earlyQuitValue)
+		}
 	}
 
 	gamesPlayed := 0.0
@@ -289,21 +333,13 @@ func (s *ArenaStatistics) CalculateFields() {
 		Count: 1,
 	}
 
-	// ArenaWinPercentage
+	// ArenaWinPercentage and other derived stats
 	if gamesPlayed > 0 {
-
 		if s.EarlyQuits != nil {
-
-			s.ArenaTies = &StatisticValue{
-				Value: s.EarlyQuits.Value,
-				Count: 1,
-			}
-
 			s.EarlyQuitPercentage = &StatisticValue{
 				Value: s.EarlyQuits.GetValue() / gamesPlayed * 100,
 				Count: 1,
 			}
-
 		}
 
 		if s.ArenaWins != nil {
@@ -490,6 +526,10 @@ func (s *CombatStatistics) MarshalJSON() ([]byte, error) {
 }
 
 func (s *CombatStatistics) CalculateFields() {
+	s.CalculateFieldsWithOptions(false)
+}
+
+func (s *CombatStatistics) CalculateFieldsWithOptions(_ bool) {
 	gamesPlayed := 0
 	if s.CombatWins != nil {
 		gamesPlayed += int(s.CombatWins.GetValue())
@@ -574,6 +614,8 @@ func (s *GenericStats) MarshalJSON() ([]byte, error) {
 
 func (GenericStats) CalculateFields() {}
 
+func (GenericStats) CalculateFieldsWithOptions(_ bool) {}
+
 func statisticMarshalJSON[T int64 | float64 | float32](op string, cnt int64, val T) ([]byte, error) {
 	return fmt.Appendf(nil, "{\"cnt\":%d,\"op\":\"%s\",\"val\":%v}", cnt, op, val), nil
 }
@@ -611,6 +653,7 @@ func marshalStatisticsStruct(stats any) ([]byte, error) {
 
 type Statistics interface {
 	CalculateFields()
+	CalculateFieldsWithOptions(countEarlyQuitsAsLosses bool)
 }
 
 type StatisticValue struct {
