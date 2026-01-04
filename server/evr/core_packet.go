@@ -181,7 +181,7 @@ func ToSymbol(v any) Symbol {
 				return Symbol(s)
 			}
 		}
-		return Symbol(CalculateSymbolValue(str, -1, hashLookupArray, 0))
+		return Symbol(CalculateSymbolValue(str, 0xFFFFFFFFFFFFFFFF, hashLookupArray, 0))
 	default:
 		panic(fmt.Errorf("invalid type: %T", v))
 	}

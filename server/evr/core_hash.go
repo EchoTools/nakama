@@ -5,10 +5,10 @@ package evr
 // Parameters:
 //
 //	str: The string to hash
-//	base: Initial hash value
+//	base: Initial hash value (use 0xFFFFFFFFFFFFFFFF for default)
 //	precache: Lookup table for hash calculation
 //	maxlen: Maximum number of characters to process (0 = no limit)
-func CalculateSymbolValue(str string, base int64, precache [0x100]uint64, maxlen uint64) int64 {
+func CalculateSymbolValue(str string, base uint64, precache [0x100]uint64, maxlen uint64) uint64 {
 	// If string is empty, return the base value unchanged
 	if len(str) == 0 {
 		return base
@@ -34,7 +34,7 @@ func CalculateSymbolValue(str string, base int64, precache [0x100]uint64, maxlen
 		ch := str[i]
 
 		// XOR the shifted hash with the precache value indexed by high byte
-		shifted := (uint64(hash) << 8) ^ precache[highByte]
+		shifted := (hash << 8) ^ precache[highByte]
 
 		// Convert uppercase letters (A-Z, ASCII 65-90) to lowercase
 		// Check if character is in range [65, 90] (A-Z)
@@ -43,7 +43,7 @@ func CalculateSymbolValue(str string, base int64, precache [0x100]uint64, maxlen
 		}
 
 		// XOR the character with the shifted/precached value
-		hash = int64(ch) ^ int64(shifted)
+		hash = uint64(ch) ^ shifted
 
 		// Update high byte for next iteration
 		highByte = uint8((hash >> 56) & 0xFF)
