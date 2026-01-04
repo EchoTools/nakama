@@ -17,7 +17,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/echotools/nevr-common/v3/rtapi"
+	"github.com/echotools/nevr-common/v4/gen/go/rtapi"
 	"github.com/go-redis/redis"
 	"github.com/gofrs/uuid/v5"
 
@@ -37,6 +37,8 @@ var unrequireMessage = evr.NewSTcpConnectionUnrequireEvent()
 
 var globalMatchmaker = atomic.NewPointer[LocalMatchmaker](nil)
 var globalAppBot = atomic.NewPointer[DiscordAppBot](nil)
+var globalLobbyBuilder = atomic.NewPointer[LobbyBuilder](nil)
+var globalSkillBasedMatchmaker = atomic.NewPointer[SkillBasedMatchmaker](nil)
 
 type EvrPipeline struct {
 	sync.RWMutex
@@ -132,6 +134,18 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, metrics, sessionRegistry)
 	lobbyBuilder := NewLobbyBuilder(logger, nk, sessionRegistry, matchRegistry, tracker, metrics)
 	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
+
+	// Store the lobby builder globally
+	globalLobbyBuilder.Store(lobbyBuilder)
+
+	// Connect skill-based matchmaker to lobby builder for post-matchmaker backfill
+	if sbmm := globalSkillBasedMatchmaker.Load(); sbmm != nil {
+		lobbyBuilder.SetSkillBasedMatchmaker(sbmm)
+		logger.Info("SkillBasedMatchmaker connected to LobbyBuilder")
+	} else {
+		logger.Warn("SkillBasedMatchmaker not initialized, post-matchmaker backfill disabled")
+	}
+
 	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(ctx, logger, nk, sessionRegistry)
 
 	// Connect to the redis server
@@ -315,8 +329,8 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		switch msg := in.(type) {
 		case *evr.BroadcasterRegistrationRequest: // Legacy message
 			envelope = &rtapi.Envelope{
-				Message: &rtapi.Envelope_GameServerRegistrationRequest{
-					GameServerRegistrationRequest: &rtapi.GameServerRegistrationMessage{
+				Message: &rtapi.Envelope_GameServerRegistration{
+					GameServerRegistration: &rtapi.GameServerRegistrationMessage{
 						ServerId:          msg.ServerID,
 						InternalIpAddress: msg.InternalIP.String(),
 						Port:              uint32(msg.Port),
@@ -367,7 +381,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 				Message: &rtapi.Envelope_LobbySessionEvent{
 					LobbySessionEvent: &rtapi.LobbySessionEventMessage{
 						LobbySessionId: matchID.UUID.String(),
-						Code:           int32(rtapi.LobbySessionEventMessage_LOCKED),
+						Code:           int32(rtapi.LobbySessionEventMessage_CODE_LOCKED),
 					},
 				},
 			}
@@ -381,7 +395,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 				Message: &rtapi.Envelope_LobbySessionEvent{
 					LobbySessionEvent: &rtapi.LobbySessionEventMessage{
 						LobbySessionId: matchID.UUID.String(),
-						Code:           int32(rtapi.LobbySessionEventMessage_UNLOCKED),
+						Code:           int32(rtapi.LobbySessionEventMessage_CODE_UNLOCKED),
 					},
 				},
 			}
@@ -395,7 +409,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 				Message: &rtapi.Envelope_LobbySessionEvent{
 					LobbySessionEvent: &rtapi.LobbySessionEventMessage{
 						LobbySessionId: matchID.UUID.String(),
-						Code:           int32(rtapi.LobbySessionEventMessage_ENDED),
+						Code:           int32(rtapi.LobbySessionEventMessage_CODE_ENDED),
 					},
 				},
 			}
@@ -747,7 +761,7 @@ func (p *EvrPipeline) ProcessProtobufRequest(logger *zap.Logger, session Session
 
 	// Process the request based on its type
 	switch in.Message.(type) {
-	case *rtapi.Envelope_GameServerRegistrationRequest:
+	case *rtapi.Envelope_GameServerRegistration:
 		pipelineFn = p.gameserverRegistrationRequest
 	case *rtapi.Envelope_LobbyEntrantConnected:
 		pipelineFn = p.lobbyEntrantConnected

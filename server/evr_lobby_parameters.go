@@ -126,6 +126,18 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		return nil, fmt.Errorf("failed to load user matchmaking settings: %w", err)
 	}
 
+	// Check for match lock (moderation feature) - takes priority over regular NextMatchDiscordID
+	// Match lock is persistent and forces the player to follow the designated leader
+	if userSettings.IsMatchLocked() {
+		// Override NextMatchDiscordID with the locked leader
+		logger.Info("Match lock active - forcing player to follow leader",
+			zap.String("user_id", userID),
+			zap.String("leader_discord_id", userSettings.MatchLockLeaderDiscordID),
+			zap.String("operator_user_id", userSettings.MatchLockOperatorUserID),
+			zap.String("reason", userSettings.MatchLockReason))
+		userSettings.NextMatchDiscordID = userSettings.MatchLockLeaderDiscordID
+	}
+
 	if userSettings.NextMatchDiscordID != "" {
 		// Get the host's user ID
 		hostUserIDStr := p.discordCache.DiscordIDToUserID(userSettings.NextMatchDiscordID)
@@ -177,12 +189,19 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 
 		}
 
-		// Always clear the settings
+		// Clear the one-time next match settings, but NOT the match lock settings
+		// Match lock is persistent and only removed by explicit unlock
 		go func() {
 			userSettings.NextMatchID = MatchID{}
 			userSettings.NextMatchRole = ""
-			userSettings.NextMatchDiscordID = ""
-			if err := StorableWrite(ctx, p.nk, userID, userSettings); err != nil {
+			// Only clear NextMatchDiscordID if not locked (lock uses its own field)
+			if !userSettings.IsMatchLocked() {
+				userSettings.NextMatchDiscordID = ""
+			}
+			// Use a background context with timeout so cleanup is not canceled with the parent request.
+			ctxCleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := StorableWrite(ctxCleanup, p.nk, userID, userSettings); err != nil {
 				logger.Warn("Failed to clear next match metadata", zap.Error(err))
 			}
 		}()
@@ -193,7 +212,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		// Set mode based on the match to join.
 		label, err := MatchLabelByID(ctx, nk, nextMatchID)
 		if err != nil {
-			logger.Warn("Failed to load next match", zap.Any("mid", nextMatchID), zap.Error(err))
+			logger.Debug("Failed to load next match", zap.Any("mid", nextMatchID), zap.Error(err))
 		} else {
 			mode = label.Mode
 		}
@@ -314,7 +333,11 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	}
 
 	latencyHistory := sessionParams.latencyHistory.Load()
-
+	if latencyHistory == nil {
+		latencyHistory = NewLatencyHistory()
+	}
+	sessionParams.latencyHistory.Store(latencyHistory)
+	
 	// Set the maxRTT to at least the average of the player's latency history
 	if averages := latencyHistory.AverageRTTs(false); len(averages) > 0 {
 		averageRTT := 0
@@ -471,14 +494,15 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 	}
 
 	if includeMaxRTT {
-		validRTTs := make([]string, 0)
+		// Exclude servers that cannot be reached (either unreachable or RTT too high)
+		unreachableEndpointIDs := make([]string, 0)
 		for ip, rtt := range p.latencyHistory.Load().LatestRTTs() {
-			if rtt <= p.MaxServerRTT {
-				validRTTs = append(validRTTs, ip)
+			if rtt > p.MaxServerRTT {
+				unreachableEndpointIDs = append(unreachableEndpointIDs, EncodeEndpointID(ip))
 			}
 		}
-		if len(validRTTs) > 0 {
-			qparts = append(qparts, fmt.Sprintf("+label.broadcaster.endpoint:%s", Query.CreateMatchPatternPartial(validRTTs)))
+		if len(unreachableEndpointIDs) > 0 {
+			qparts = append(qparts, fmt.Sprintf("-label.broadcaster.endpoint_id:%s", Query.CreateMatchPattern(unreachableEndpointIDs)))
 		}
 	}
 	return strings.Join(qparts, " ")
@@ -607,31 +631,13 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 
 	//maxDelta := 60 // milliseconds
 	rttDeltas := ServiceSettings().Matchmaking.ServerSelection.RTTDelta
-	for k, v := range p.latencyHistory.Load().AverageRTTs(true) {
+	for ip, v := range p.latencyHistory.Load().AverageRTTs(true) {
 		rtt := v
-		if delta, ok := rttDeltas[k]; ok {
+		if delta, ok := rttDeltas[ip]; ok {
 			rtt += delta
 		}
-		numericProperties[RTTPropertyPrefix+k] = float64(rtt)
+		numericProperties[RTTPropertyPrefix+EncodeEndpointID(ip)] = float64(rtt)
 		//qparts = append(qparts, fmt.Sprintf("properties.%s:<=%d", k, v+maxDelta))
-	}
-
-	if ticketParams.IncludeRequireCommonServer {
-		// Create a string list of validRTTs
-		acceptableServers := make([]string, 0)
-		for ip, rtt := range p.latencyHistory.Load().LatestRTTs() {
-			if rtt <= p.MaxServerRTT {
-				acceptableServers = append(acceptableServers, ip)
-			}
-		}
-
-		stringProperties["servers"] = strings.Join(acceptableServers, " ")
-
-		// Add the acceptable servers to the query
-		if len(acceptableServers) > 0 {
-			qparts = append(qparts, fmt.Sprintf("+properties.servers:%s", Query.CreateMatchPattern(acceptableServers)))
-		}
-
 	}
 
 	// Remove blanks from qparts

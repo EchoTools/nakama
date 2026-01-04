@@ -71,6 +71,11 @@ type DiscordAppBot struct {
 	prepareMatchRatePerSecond rate.Limit
 	prepareMatchBurst         int
 	prepareMatchRateLimiters  *MapOf[string, *rate.Limiter]
+
+	// Rate limiter for public matches (echo_arena, echo_combat) - 1 per 15 minutes
+	publicMatchRatePerSecond rate.Limit
+	publicMatchBurst         int
+	publicMatchRateLimiters  *MapOf[string, *rate.Limiter]
 }
 
 func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordIntegrator, profileRegistry *ProfileCache, statusRegistry StatusRegistry, dg *discordgo.Session, ipInfoCache *IPInfoCache, guildGroupRegistry *GuildGroupRegistry) (*DiscordAppBot, error) {
@@ -100,8 +105,12 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		prepareMatchRatePerSecond: 1.0 / 60,
 		prepareMatchBurst:         1,
 		prepareMatchRateLimiters:  &MapOf[string, *rate.Limiter]{},
-		partyStatusChs:            &MapOf[string, chan error]{},
-		debugChannels:             make(map[string]string),
+		// Rate limiter for public matches: 1 per 15 minutes (900 seconds)
+		publicMatchRatePerSecond: 1.0 / 900,
+		publicMatchBurst:         1,
+		publicMatchRateLimiters:  &MapOf[string, *rate.Limiter]{},
+		partyStatusChs:           &MapOf[string, chan error]{},
+		debugChannels:            make(map[string]string),
 	}
 
 	discordgo.Logger = appbot.discordGoLogger
@@ -234,6 +243,13 @@ func (e *DiscordAppBot) discordGoLogger(msgL int, caller int, format string, a .
 func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string) *rate.Limiter {
 	key := strings.Join([]string{userID, groupID}, ":")
 	limiter, _ := e.prepareMatchRateLimiters.LoadOrStore(key, rate.NewLimiter(e.prepareMatchRatePerSecond, e.prepareMatchBurst))
+	return limiter
+}
+
+// loadPublicMatchRateLimiter returns the rate limiter for public match creation (1 per 15 minutes)
+func (e *DiscordAppBot) loadPublicMatchRateLimiter(userID, groupID string) *rate.Limiter {
+	key := strings.Join([]string{userID, groupID, "public"}, ":")
+	limiter, _ := e.publicMatchRateLimiters.LoadOrStore(key, rate.NewLimiter(e.publicMatchRatePerSecond, e.publicMatchBurst))
 	return limiter
 }
 
@@ -441,7 +457,7 @@ var (
 		},
 		{
 			Name:        "igp",
-			Description: "Enable the gold nametag for your current session as a moderator.",
+			Description: "Open the In-Game Panel for match moderation and player management.",
 		},
 		{
 			Name:        "party-status",
@@ -3154,6 +3170,46 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					})
 				}
 
+			case "set_ign_modal":
+				// Handle IGN override modal submission
+				data := i.ModalSubmitData()
+				if err := d.handleSetIGNModalSubmit(ctx, logger, s, i, &data, value); err != nil {
+					logger.Error("Failed to handle set IGN modal submit", zap.Error(err))
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "Failed to set IGN override: " + err.Error(),
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					})
+				}
+
+			case "enf_edit":
+				// Handle enforcement record edit modal submission
+				if err := d.handleEnforcementEditModalSubmit(logger, i, value); err != nil {
+					logger.Error("Failed to handle enforcement edit modal submit", zap.Error(err))
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "Failed to edit enforcement record: " + err.Error(),
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					})
+				}
+
+			case "enf_void":
+				// Handle enforcement record void modal submission
+				if err := d.handleEnforcementVoidModalSubmit(logger, i, value); err != nil {
+					logger.Error("Failed to handle enforcement void modal submit", zap.Error(err))
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "Failed to void enforcement record: " + err.Error(),
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					})
+				}
+
 			default:
 				logger.WithField("custom_id", i.ModalSubmitData().CustomID).Info("Unhandled modal submit")
 			}
@@ -3628,7 +3684,7 @@ func (d *DiscordAppBot) createLookupSetIGNModal(currentDisplayName string, isLoc
 	return &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
-			CustomID: "lookup:set_ign_modal",
+			CustomID: "set_ign_modal", // CustomID is overwritten by caller with context
 			Title:    "Set IGN Override",
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{

@@ -119,6 +119,9 @@ func BroadcasterSession(s *sessionWS, userID uuid.UUID, username string, serverI
 func Secondary(s *sessionWS, loginSession *sessionWS, isLobby bool, isServer bool) error {
 	// This is a secondary session, so it should inherit the login session's context.
 
+	// First, load the current session's params to preserve server-specific URL parameters
+	currentParams, currentOk := LoadParams(s.Context())
+
 	params, ok := LoadParams(loginSession.Context())
 	if !ok {
 		return fmt.Errorf("login session parameters not found: %v", loginSession.ID())
@@ -129,6 +132,17 @@ func Secondary(s *sessionWS, loginSession *sessionWS, isLobby bool, isServer boo
 	}
 	if isServer {
 		params.serverSession = s
+		// Preserve server-specific URL parameters from the current session
+		if currentOk {
+			params.serverTags = currentParams.serverTags
+			params.serverGuilds = currentParams.serverGuilds
+			params.serverRegions = currentParams.serverRegions
+			params.defaultRegion = currentParams.defaultRegion
+			params.externalServerAddr = currentParams.externalServerAddr
+			params.supportedFeatures = currentParams.supportedFeatures
+			params.requiredFeatures = currentParams.requiredFeatures
+			params.geoHashPrecision = currentParams.geoHashPrecision
+		}
 	}
 
 	StoreParams(s.Context(), &params)

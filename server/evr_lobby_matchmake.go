@@ -2,10 +2,8 @@ package server
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"math"
-	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -44,12 +42,11 @@ var (
 )
 
 type MatchmakingTicketParameters struct {
-	MinCount                   int
-	MaxCount                   int
-	CountMultiple              int
-	IncludeSBMMRanges          bool
-	IncludeEarlyQuitPenalty    bool
-	IncludeRequireCommonServer bool
+	MinCount                int
+	MaxCount                int
+	CountMultiple           int
+	IncludeSBMMRanges       bool
+	IncludeEarlyQuitPenalty bool
 }
 
 func (m *MatchmakingTicketParameters) MarshalText() ([]byte, error) {
@@ -115,7 +112,7 @@ func (p *EvrPipeline) matchmakingTicketTimeout() time.Duration {
 	return time.Duration(maxIntervals*intervalSecs) * time.Second
 }
 
-func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup, entrants ...*EvrMatchPresence) (err error) {
+func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup, _ ...*EvrMatchPresence) (err error) {
 
 	stream := lobbyParams.GuildGroupStream()
 	count, err := p.nk.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
@@ -140,8 +137,8 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	}
 
 	if !strings.Contains(p.node, "dev") {
-		// If there are fewer than 16 players online, reduce the fallback delay
-		if count < 24 {
+		// If there are fewer than SBMMMinPlayerCount players online, reduce the fallback delay
+		if count < ServiceSettings().Matchmaking.SBMMMinPlayerCount {
 			ticketConfig.IncludeSBMMRanges = false
 			ticketConfig.IncludeEarlyQuitPenalty = false
 		}
@@ -268,6 +265,17 @@ type MatchmakingSettings struct {
 	StaticRatingSigma      *float64 `json:"static_rating_sigma"`       // The static rating sigma to use
 	Divisions              []string `json:"divisions"`                 // The division to use
 	ExcludedDivisions      []string `json:"excluded_divisions"`        // The division to use
+
+	// Match lock fields for moderation - forces player to follow a leader
+	MatchLockLeaderDiscordID string `json:"match_lock_leader_discord_id,omitempty"` // Discord ID of the leader to follow
+	MatchLockOperatorUserID  string `json:"match_lock_operator_user_id,omitempty"`  // User ID of the operator who set the lock
+	MatchLockReason          string `json:"match_lock_reason,omitempty"`            // Reason for the lock
+	MatchLockEnabledAt       int64  `json:"match_lock_enabled_at,omitempty"`        // Unix timestamp when lock was enabled
+}
+
+// IsMatchLocked returns true if the user has an active match lock
+func (m *MatchmakingSettings) IsMatchLocked() bool {
+	return m.MatchLockLeaderDiscordID != "" && m.MatchLockEnabledAt > 0
 }
 
 func (MatchmakingSettings) StorageMeta() StorableMetadata {
@@ -303,11 +311,6 @@ func StoreMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, user
 	return err
 }
 
-func keyToIP(key string) net.IP {
-	b, _ := hex.DecodeString(key[3:])
-	return net.IPv4(b[0], b[1], b[2], b[3])
-}
-
 type LatencyMetric struct {
 	Endpoint  evr.Endpoint
 	RTT       time.Duration
@@ -326,7 +329,7 @@ func (e *LatencyMetric) ID() string {
 
 // The key used for matchmaking properties
 func (e *LatencyMetric) AsProperty() (string, float64) {
-	k := RTTPropertyPrefix + e.Endpoint.ExternalIP.String()
+	k := RTTPropertyPrefix + EncodeEndpointID(e.Endpoint.ExternalIP.String())
 	v := float64(e.RTT / time.Millisecond)
 	return k, v
 }

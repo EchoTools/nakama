@@ -85,6 +85,8 @@ func (s *EarlyQuitConfig) IncrementEarlyQuit() {
 	if s.EarlyQuitPenaltyLevel > MaxEarlyQuitPenaltyLevel {
 		s.EarlyQuitPenaltyLevel = MaxEarlyQuitPenaltyLevel // Max penalty level
 	}
+	s.TotalEarlyQuits++
+	s.PlayerReliabilityRating = CalculatePlayerReliabilityRating(s.TotalEarlyQuits, s.TotalCompletedMatches)
 }
 
 func (s *EarlyQuitConfig) IncrementCompletedMatches() {
@@ -95,6 +97,8 @@ func (s *EarlyQuitConfig) IncrementCompletedMatches() {
 	if s.EarlyQuitPenaltyLevel < MinEarlyQuitPenaltyLevel {
 		s.EarlyQuitPenaltyLevel = MinEarlyQuitPenaltyLevel // Reset penalty level
 	}
+	s.TotalCompletedMatches++
+	s.PlayerReliabilityRating = CalculatePlayerReliabilityRating(s.TotalEarlyQuits, s.TotalCompletedMatches)
 }
 
 func (s *EarlyQuitConfig) GetPenaltyLevel() int {

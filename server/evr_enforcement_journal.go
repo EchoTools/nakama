@@ -16,9 +16,9 @@ import (
 )
 
 const (
-	StorageCollectionEnforcementJournal                = "Enforcement"
-	StorageKeyEnforcementJournal                       = "journal"
-	StorageCollectionEnforcementJournalSuspensionIndex = "EnforcementJournalSuspensionsIndex"
+	StorageCollectionEnforcementJournal = "Enforcement"
+	StorageKeyEnforcementJournal        = "journal"
+	StorageIndexEnforcementJournal      = "StorageIndexEnforcementJournal"
 )
 
 type GuildEnforcementRecordVoid struct {
@@ -63,6 +63,20 @@ func (s *GuildEnforcementJournal) SetStorageMeta(meta StorableMetadata) {
 
 func (s GuildEnforcementJournal) GetStorageVersion() string {
 	return s.version
+}
+
+func (s *GuildEnforcementJournal) StorageIndexes() []StorableIndexMeta {
+	/*
+		return []StorableIndexMeta{{
+			Name:       StorageIndexEnforcementJournal,
+			Collection: StorageCollectionEnforcementJournal,
+			Key:        StorageKeyEnforcementJournal,
+			Fields:     []string{"user_id", "records"},
+			MaxEntries: 1000,
+			IndexOnly:  true,
+		}}
+	*/
+	return nil
 }
 
 func GuildEnforcementJournalFromStorageObject(obj *api.StorageObject) (*GuildEnforcementJournal, error) {
@@ -221,6 +235,60 @@ func (s *GuildEnforcementJournal) VoidRecord(groupID, recordID, authorUserID, au
 	}
 	return s.VoidsByRecordIDByGroupID[groupID][recordID]
 }
+
+// GetRecord returns a pointer to a record by its ID, or nil if not found.
+// The pointer can be used to modify the record directly.
+func (s *GuildEnforcementJournal) GetRecord(groupID, recordID string) *GuildEnforcementRecord {
+	if s.RecordsByGroupID == nil {
+		return nil
+	}
+	records, ok := s.RecordsByGroupID[groupID]
+	if !ok {
+		return nil
+	}
+	for i := range records {
+		if records[i].ID == recordID {
+			return &s.RecordsByGroupID[groupID][i]
+		}
+	}
+	return nil
+}
+
+// EditRecord updates a record and logs the edit. Returns the updated record or nil if not found.
+func (s *GuildEnforcementJournal) EditRecord(groupID, recordID, editorUserID, editorDiscordID string, newExpiry time.Time, newUserNotice, newAuditorNotes string) *GuildEnforcementRecord {
+	record := s.GetRecord(groupID, recordID)
+	if record == nil {
+		return nil
+	}
+
+	// Create edit log entry with previous values
+	editEntry := GuildEnforcementEditEntry{
+		EditorUserID:           editorUserID,
+		EditorDiscordID:        editorDiscordID,
+		EditedAt:               time.Now().UTC(),
+		PreviousExpiry:         record.Expiry,
+		PreviousUserNoticeText: record.UserNoticeText,
+		PreviousAuditorNotes:   record.AuditorNotes,
+		NewExpiry:              newExpiry,
+		NewUserNoticeText:      newUserNotice,
+		NewAuditorNotes:        newAuditorNotes,
+	}
+
+	// Update the record
+	record.Expiry = newExpiry
+	record.UserNoticeText = newUserNotice
+	record.AuditorNotes = newAuditorNotes
+	record.UpdatedAt = time.Now().UTC()
+
+	// Append to edit log
+	if record.EditLog == nil {
+		record.EditLog = make([]GuildEnforcementEditEntry, 0, 1)
+	}
+	record.EditLog = append(record.EditLog, editEntry)
+
+	return record
+}
+
 func (s *GuildEnforcementJournal) GroupVoids(groupID ...string) map[string]GuildEnforcementRecordVoid {
 	voids := make(map[string]GuildEnforcementRecordVoid)
 	for _, g := range groupID {
@@ -434,102 +502,4 @@ func createSuspensionDetailsEmbedField(guildName string, records []GuildEnforcem
 		Inline: false,
 	}
 	return field
-}
-
-func createEnforcementActionComponents(record GuildEnforcementRecord, profile *EVRProfile, gg *GuildGroup, guild *discordgo.Guild, enforcer, target *discordgo.Member, isVoid bool) *discordgo.MessageSend {
-	// Is just a kick
-
-	displayName := profile.GetGroupIGN(gg.Group.Id)
-	displayName = EscapeDiscordMarkdown(displayName)
-
-	fields := []*discordgo.MessageEmbedField{
-		{
-			Name:   "Target",
-			Value:  fmt.Sprintf("%s (%s)", target.User.String(), target.User.ID),
-			Inline: true,
-		},
-	}
-	if !record.Expiry.IsZero() {
-
-		suspensionText := fmt.Sprintf("%s (expires <t:%d:R>)", FormatDuration(record.Expiry.Sub(record.CreatedAt)), record.Expiry.UTC().Unix())
-
-		if isVoid {
-			suspensionText = fmt.Sprintf("~~%s~~", suspensionText)
-		}
-		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   "Suspension",
-			Value:  suspensionText,
-			Inline: true,
-		})
-	}
-
-	fields = append(fields, &discordgo.MessageEmbedField{
-		Name:   "Notes",
-		Value:  fmt.Sprintf("*%s*", record.AuditorNotes),
-		Inline: true,
-	})
-
-	if record.CommunityValuesRequired {
-		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   "Community Values Required",
-			Value:  fmt.Sprintf("%t", record.CommunityValuesRequired),
-			Inline: true,
-		})
-	}
-
-	if record.UserNoticeText != "" {
-		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   "User Notice",
-			Value:  fmt.Sprintf("*%s*", record.UserNoticeText),
-			Inline: true,
-		})
-	}
-	if record.AuditorNotes != "" {
-		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   "Auditor Notes",
-			Value:  fmt.Sprintf("*%s*", record.AuditorNotes),
-			Inline: true,
-		})
-	}
-
-	embeds := []*discordgo.MessageEmbed{
-		{
-			Author: &discordgo.MessageEmbedAuthor{
-				Name:    enforcer.User.String(),
-				IconURL: enforcer.User.AvatarURL(""),
-			},
-			Thumbnail: &discordgo.MessageEmbedThumbnail{
-				URL:    target.User.AvatarURL("128"),
-				Width:  128,
-				Height: 128,
-			},
-			Title:       "Enforcement Entry",
-			Description: fmt.Sprintf("Enforcement notice for %s (%s)", displayName, target.Mention()),
-			Color:       0x9656ce,
-			Fields:      fields,
-			Timestamp:   record.UpdatedAt.UTC().Format(time.RFC3339),
-		},
-	}
-	components := []discordgo.MessageComponent{
-		&discordgo.ActionsRow{
-			Components: []discordgo.MessageComponent{
-				&discordgo.Button{
-					Label: "Void Record",
-					Style: discordgo.SecondaryButton,
-					Emoji: &discordgo.ComponentEmoji{
-						Name: "heavy_multiplication_x",
-					},
-					CustomID: fmt.Sprintf("void_record:%s", record.ID),
-				},
-			},
-		},
-	}
-
-	return &discordgo.MessageSend{
-		Embeds:     embeds,
-		Components: components,
-		AllowedMentions: &discordgo.MessageAllowedMentions{
-			Parse: []discordgo.AllowedMentionType{},
-		},
-	}
 }

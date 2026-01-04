@@ -19,7 +19,7 @@ import (
 	"fmt"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/echotools/nevr-common/v3/rtapi"
+	"github.com/echotools/nevr-common/v4/gen/go/rtapi"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -82,7 +82,7 @@ func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, co
 //   - debug: Enable debug mode
 //   - verbose: Enable verbose logging
 func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) error {
-	request := in.GetGameServerRegistrationRequest()
+	request := in.GetGameServerRegistration()
 	var (
 		loginSessionID = uuid.FromStringOrNil(request.LoginSessionId)
 		serverID       = request.ServerId
@@ -169,11 +169,6 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		}
 	}
 
-	if isPrivateIP(externalIP) {
-		externalIP = p.externalIP
-		logger.Warn("Game server is on a private IP, using this systems external IP", zap.String("private_ip", internalIP.String()), zap.String("external_ip", externalIP.String()), zap.String("port", fmt.Sprintf("%d", externalPort)))
-	}
-
 	// Include all guilds by default, or if "any" is in the list
 	includeAll := false
 	if len(params.serverGuilds) == 0 || slices.Contains(params.serverGuilds, "any") {
@@ -196,9 +191,12 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	}
 
 	// Warn the user that using regionHash is deprecated.
-	if regionHash != evr.DefaultRegion {
-		// Send the message to the user
-		warning := "The -serverregion command line argument is deprecated. Please use the 'regions' URL parameter instead. Include 'default' to be in the public matchmaking pool."
+	// Allow unspecified or default region in the -serverregion argument
+	allowedRegions := []evr.Symbol{evr.UnspecifiedRegion, evr.DefaultRegion}
+
+	if !slices.Contains(allowedRegions, regionHash) {
+		// Send the message to the user that the serverregion command line argument is deprecated
+		warning := "The 'serverregion' command line argument is deprecated. Please use the 'regions' URL parameter instead. Include 'default' to be in the public matchmaking pool."
 		go SendUserMessage(ctx, p.discordCache.dg, params.DiscordID(), warning)
 		logger.Debug(warning, zap.String("region_hash", regionHash.String()))
 		params.serverRegions = append(params.serverRegions, "default")
@@ -399,7 +397,7 @@ func (p *EvrPipeline) buildRegionCodes(ctx context.Context, logger *zap.Logger, 
 
 		// Set default region from IPQS if not already set
 		if generatedRegion == "" {
-			generatedRegion = ipqsRegion
+			generatedRegion = ipqsRegionShort
 		}
 
 		regionCodes = append(regionCodes, ipqsRegion, ipqsRegionShort, ipqsCountry)

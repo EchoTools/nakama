@@ -37,7 +37,7 @@ type WhereAmIData struct {
 }
 
 // getWhereAmIData retrieves the current match information for a user
-func (d *DiscordAppBot) getWhereAmIData(ctx context.Context, logger runtime.Logger, userID, groupID string) (*WhereAmIData, error) {
+func (d *DiscordAppBot) getWhereAmIData(ctx context.Context, _ runtime.Logger, userID, _ string) (*WhereAmIData, error) {
 	// Get the user's current match presence
 	presences, err := d.nk.StreamUserList(StreamModeService, userID, "", StreamLabelMatchService, false, true)
 	if err != nil {
@@ -458,7 +458,7 @@ func (d *DiscordAppBot) handleReportServerIssueLag(ctx context.Context, logger r
 }
 
 // handleReportServerIssueOther handles the "Report Other Issue" button click by showing a modal
-func (d *DiscordAppBot) handleReportServerIssueOther(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, serverContext string) error {
+func (d *DiscordAppBot) handleReportServerIssueOther(_ context.Context, _ runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, serverContext string) error {
 	// Show a modal for the user to describe the issue
 	modal := &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
@@ -487,7 +487,7 @@ func (d *DiscordAppBot) handleReportServerIssueOther(ctx context.Context, logger
 }
 
 // postServerIssueReport posts the issue report to the appropriate channels
-func (d *DiscordAppBot) postServerIssueReport(ctx context.Context, logger runtime.Logger, s *discordgo.Session, groupID string, data *WhereAmIData, embed *discordgo.MessageEmbed) {
+func (d *DiscordAppBot) postServerIssueReport(_ context.Context, logger runtime.Logger, s *discordgo.Session, groupID string, data *WhereAmIData, embed *discordgo.MessageEmbed) {
 	gg := d.guildGroupRegistry.Get(groupID)
 	if gg == nil {
 		return
@@ -518,7 +518,7 @@ func (d *DiscordAppBot) postServerIssueReport(ctx context.Context, logger runtim
 }
 
 // handleServerIssueTypeSelection handles the select menu for issue type selection
-func (d *DiscordAppBot) handleServerIssueTypeSelection(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, matchID string) error {
+func (d *DiscordAppBot) handleServerIssueTypeSelection(_ context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, matchID string) error {
 	// Get the selected issue type
 	data := i.MessageComponentData()
 	if len(data.Values) == 0 {
@@ -655,15 +655,17 @@ func (d *DiscordAppBot) handleServerIssueModalSubmit(ctx context.Context, logger
 		}
 	}
 
-	// Get server statistics (active/idle servers by host)
-	serverStats := d.getServerStatsByHost(ctx, logger)
-	if serverStats != "" {
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   "Server Statistics",
-			Value:  serverStats,
-			Inline: false,
-		})
-	}
+	/*
+		// Get server statistics (active/idle servers by host)
+		serverStats := d.getServerStatsByHost(ctx, logger)
+		if serverStats != "" {
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+				Name:   "Server Statistics",
+				Value:  serverStats,
+				Inline: false,
+			})
+		}
+	*/
 
 	// Post to audit/reports channels
 	d.postServerIssueReport(ctx, logger, s, groupID, data, embed)

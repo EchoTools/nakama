@@ -407,7 +407,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 			return fmt.Errorf("failed to unlink device ID: %w", err)
 		}
 
-		if err := d.cache.updateLinkStatus(ctx, i.Member.User.ID); err != nil {
+		if err := d.cache.updateLinkStatus(ctx, user.ID); err != nil {
 			return fmt.Errorf("failed to update link status: %w", err)
 		}
 
@@ -425,61 +425,58 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 
 		return d.handleInGamePanelInteraction(i, value)
 
-	case "lookup":
-		// Handle lookup button interactions (e.g., "set_ign_override")
-		action, params, _ := strings.Cut(value, ":")
-		switch action {
-		case "set_ign_override":
-			// Parse targetUserID:groupID
-			parts := strings.SplitN(params, ":", 2)
-			if len(parts) != 2 {
-				return fmt.Errorf("invalid parameters for set_ign_override")
-			}
-			targetUserID := parts[0]
-			targetGroupID := parts[1]
-
-			// Verify caller has permissions
-			callerGuildGroups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userID)
-			if err != nil {
-				return fmt.Errorf("failed to get guild groups: %w", err)
-			}
-
-			isAuditorOrEnforcer := false
-			if gg, ok := callerGuildGroups[targetGroupID]; ok && (gg.IsAuditor(userID) || gg.IsEnforcer(userID)) {
-				isAuditorOrEnforcer = true
-			}
-			isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
-			isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
-
-			if !isAuditorOrEnforcer {
-				return simpleInteractionResponse(s, i, "You do not have permission to set IGN overrides.")
-			}
-
-			// Load target profile
-			targetProfile, err := EVRProfileLoad(ctx, nk, targetUserID)
-			if err != nil {
-				return fmt.Errorf("failed to load target profile: %w", err)
-			}
-
-			// Get current IGN data
-			groupIGN := targetProfile.GetGroupIGNData(targetGroupID)
-			currentDisplayName := groupIGN.DisplayName
-			if currentDisplayName == "" {
-				// Fallback to username
-				if a, err := nk.AccountGetId(ctx, targetUserID); err == nil {
-					currentDisplayName = a.User.Username
-				}
-			}
-
-			// Show modal with prepopulated data
-			modal := d.createLookupSetIGNModal(currentDisplayName, groupIGN.IsLocked)
-			// Store context in customID for modal submission
-			modal.Data.CustomID = fmt.Sprintf("lookup:set_ign_modal:%s:%s", targetUserID, targetGroupID)
-			return s.InteractionRespond(i.Interaction, modal)
-
-		default:
-			return fmt.Errorf("unknown lookup action: %s", action)
+	case "set_ign_override":
+		// Handle set_ign_override button interactions from lookup or IGP
+		// value format: targetDiscordID:targetGuildID
+		parts := strings.SplitN(value, ":", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid set_ign_override format: expected targetDiscordID:targetGuildID")
 		}
+		targetDiscordID := parts[0]
+		targetGuildID := parts[1]
+
+		targetUserID := d.cache.DiscordIDToUserID(targetDiscordID)
+		targetGroupID := d.cache.GuildIDToGroupID(targetGuildID)
+
+		// Verify caller has permissions
+		callerGuildGroups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userID)
+		if err != nil {
+			return fmt.Errorf("failed to get guild groups: %w", err)
+		}
+
+		isAuditorOrEnforcer := false
+		if gg, ok := callerGuildGroups[targetGroupID]; ok && (gg.IsAuditor(userID) || gg.IsEnforcer(userID)) {
+			isAuditorOrEnforcer = true
+		}
+		isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+		isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
+
+		if !isAuditorOrEnforcer {
+			return simpleInteractionResponse(s, i, "You do not have permission to set IGN overrides.")
+		}
+
+		// Load target profile
+		targetProfile, err := EVRProfileLoad(ctx, nk, targetUserID)
+		if err != nil {
+			return fmt.Errorf("failed to load target profile: %w", err)
+		}
+
+		// Get current IGN data
+		groupIGN := targetProfile.GetGroupIGNData(targetGroupID)
+		currentDisplayName := groupIGN.DisplayName
+		if currentDisplayName == "" {
+			// Fallback to username
+			if a, err := nk.AccountGetId(ctx, targetUserID); err == nil {
+				currentDisplayName = a.User.Username
+			}
+		}
+
+		// Show modal with prepopulated data
+		modal := d.createLookupSetIGNModal(currentDisplayName, groupIGN.IsLocked)
+		// Store context in customID for modal submission
+		modal.Data.CustomID = fmt.Sprintf("set_ign_modal:%s:%s", targetDiscordID, targetGuildID)
+		return s.InteractionRespond(i.Interaction, modal)
+
 	case "server_issue_type":
 		// Handle server issue type selection
 		return d.handleServerIssueTypeSelection(ctx, logger, s, i, value)
@@ -502,6 +499,13 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		default:
 			return fmt.Errorf("unknown issue type: %s", issueType)
 		}
+
+	case "enforcement":
+		// Handle enforcement button interactions (edit, void)
+		return d.handleEnforcementInteraction(ctx, logger, s, i, value)
+	case "enf":
+		// Handle enforcement button interactions (edit, void) - short format
+		return d.handleEnforcementInteraction(ctx, logger, s, i, value)
 	}
 
 	return nil
@@ -538,6 +542,11 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 
 	if !gg.IsAllocator(userID) && !isGlobalOperator {
 		return nil, 0, status.Error(codes.PermissionDenied, "user does not have the allocator role in this guild.")
+	}
+
+	// If user is a global operator but has no allocator groups, use the current guild group
+	if isGlobalOperator {
+		allocatorGroupIDs = append(allocatorGroupIDs, groupID)
 	}
 
 	// Load the latency history for this user
@@ -584,6 +593,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Error(codes.PermissionDenied, "user is not a member of the guild")
 	}
 
+	// Check if user is suspended from the guild
 	if group.IsSuspended(userID, nil) {
 		return nil, 0, status.Error(codes.PermissionDenied, "user is suspended from the guild")
 	}
@@ -592,6 +602,23 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Error(codes.PermissionDenied, "guild does not allow public match creation")
 	}
 
+	// Check if user is a moderator (enforcer) in the guild or a global operator
+	isGuildModerator := group.IsEnforcer(userID)
+	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+	isPrivileged := isGuildModerator || isGlobalOperator
+
+	// Check if this is a public match (echo_arena or echo_combat)
+	isPublicMatch := mode == evr.ModeArenaPublic || mode == evr.ModeCombatPublic
+
+	// Apply stricter rate limit (1 per 15 minutes) for public matches, unless user is privileged
+	if isPublicMatch && !isPrivileged {
+		publicLimiter := d.loadPublicMatchRateLimiter(userID, groupID)
+		if !publicLimiter.Allow() {
+			return nil, 0, status.Error(codes.ResourceExhausted, "rate limit exceeded for public matches (1 per 15 minutes)")
+		}
+	}
+
+	// Apply general rate limit for all matches
 	limiter := d.loadPrepareMatchRateLimiter(userID, groupID)
 	if !limiter.Allow() {
 		return nil, 0, status.Error(codes.ResourceExhausted, fmt.Sprintf("rate limit exceeded (%0.0f requests per minute)", limiter.Limit()*60))
@@ -634,6 +661,11 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		suspensionExpiry   time.Time
 		suspensionDuration time.Duration
 	)
+
+	// Do not allow bots to be suspended
+	if target.Bot {
+		return simpleInteractionResponse(d.dg, i, "Bots cannot be suspended.")
+	}
 
 	callerUserID := d.cache.DiscordIDToUserID(caller.User.ID)
 	if callerUserID == "" {
@@ -822,8 +854,38 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				field := createSuspensionDetailsEmbedField(gn, records, voids, true, true, true, gID)
 				embed.Fields = append(embed.Fields, field)
 			}
+
+			// Add enforcement buttons for suspension records
+			var components []discordgo.MessageComponent
+			if len(recordsByGroupID) > 0 && len(voids) == 0 {
+				// Only add buttons if there are active suspensions (not voids)
+				for _, records := range recordsByGroupID {
+					for _, record := range records {
+						// Create buttons for each record
+						buttons := []discordgo.MessageComponent{
+							&discordgo.Button{
+								Label:    "Edit",
+								Style:    discordgo.PrimaryButton,
+								CustomID: fmt.Sprintf("enf:e:%s:%s:%s", record.ID, i.GuildID, target.ID),
+							},
+							&discordgo.Button{
+								Label:    "Void",
+								Style:    discordgo.DangerButton,
+								CustomID: fmt.Sprintf("enf:v:%s:%s:%s", record.ID, i.GuildID, target.ID),
+							},
+						}
+						components = append(components, &discordgo.ActionsRow{
+							Components: buttons,
+						})
+						break // Only add buttons for the first record to avoid clutter
+					}
+					break // Only process first group
+				}
+			}
+
 			_, err = d.dg.ChannelMessageSendComplex(gg.EnforcementNoticeChannelID, &discordgo.MessageSend{
 				Embed:           embed,
+				Components:      components,
 				AllowedMentions: &discordgo.MessageAllowedMentions{},
 			})
 			if err != nil {

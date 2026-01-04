@@ -3,13 +3,10 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 	"sort"
 
 	"strings"
 	"time"
-
-	"golang.org/x/exp/constraints"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -55,13 +52,14 @@ type MatchLabel struct {
 	reservationMap  map[string]*slotReservation     // map[sessionID]slotReservation
 	presenceByEvrID map[evr.EvrId]*EvrMatchPresence // map[evrID]EvrMatchPresence
 
-	joinTimestamps       map[string]time.Time             // The timestamps of when players joined the match. map[sessionId]time.Time
-	joinTimeMilliseconds map[string]int64                 // The round clock time of when players joined the match. map[sessionId]time.Time
-	disconnectInfos      map[string]*PlayerDisconnectInfo // map[userID]*PlayerDisconnectInfo
-	tickRate             int64                            // The number of ticks per second.
-	emptyTicks           int64                            // The number of ticks the match has been empty.
-	terminateTick        int64                            // The tick count at which the match will be shut down.
-	goals                []*evr.MatchGoal                 // The goals scored in the match.
+	joinTimestamps       map[string]time.Time            // The timestamps of when players joined the match. map[sessionId]time.Time
+	joinTimeMilliseconds map[string]int64                // The round clock time of when players joined the match. map[sessionId]time.Time
+	participations       map[string]*PlayerParticipation // map[userID]*PlayerParticipation - tracks all players who ever joined
+	tickRate             int64                           // The number of ticks per second.
+	emptyTicks           int64                           // The number of ticks the match has been empty.
+	terminateTick        int64                           // The tick count at which the match will be shut down.
+	goals                []*evr.MatchGoal                // The goals scored in the match.
+	matchSummarySent     bool                            // Whether the match summary has been sent.
 }
 
 func (s *MatchLabel) LoadAndDeleteReservation(sessionID string) (*EvrMatchPresence, bool) {
@@ -244,7 +242,7 @@ func (s *MatchLabel) GetEndpoint() evr.Endpoint {
 }
 
 func (s *MatchLabel) GetEntrantConnectMessage(role int, isPCVR bool, disableEncryption bool, disableMAC bool) *evr.LobbySessionSuccessv5 {
-	return evr.NewLobbySessionSuccess(s.Mode, s.ID.UUID, s.GetGroupID(), s.GameServer.Endpoint, int16(role), isPCVR, disableEncryption, disableMAC).Version5()
+	return evr.NewLobbySessionSuccess(s.Mode, s.ID.UUID, s.GetGroupID(), s.GameServer.Endpoint, int16(role), disableEncryption, disableMAC).Version5()
 }
 
 func (s *MatchLabel) MetricsTags() map[string]string {
@@ -558,27 +556,4 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 
 	}
 	return v
-}
-
-type Number interface {
-	constraints.Float | constraints.Integer
-}
-
-func median[T Number](data []T) float64 {
-	dataCopy := make([]T, len(data))
-	copy(dataCopy, data)
-
-	slices.Sort(dataCopy)
-
-	var median float64
-	l := len(dataCopy)
-	if l == 0 {
-		return 0
-	} else if l%2 == 0 {
-		median = float64((dataCopy[l/2-1] + dataCopy[l/2]) / 2.0)
-	} else {
-		median = float64(dataCopy[l/2])
-	}
-
-	return median
 }

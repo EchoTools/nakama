@@ -2,7 +2,11 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base32"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -15,9 +19,24 @@ const (
 	RTTPropertyPrefix = "rtt_"
 )
 
+// EncodeEndpointID creates a short, obfuscated identifier from an IP address
+// This is used to avoid exposing raw IP addresses in matchmaking ticket properties
+func EncodeEndpointID(ip string) string {
+	hash := sha256.Sum256([]byte(ip))
+	// Use base32 encoding (alphanumeric, case-insensitive) and take first 8 chars
+	encoded := base32.StdEncoding.EncodeToString(hash[:])
+	return strings.ToLower(encoded[:8])
+}
+
 type SkillBasedMatchmaker struct {
 	latestCandidates *atomic.Value // [][]runtime.MatchmakerEntry
 	latestMatches    *atomic.Value // [][]runtime.MatchmakerEntry
+
+	// Timing tracking for backfill coordination
+	lastProcessStart *atomic.Int64 // Unix nanoseconds when matchmaker started processing
+	lastProcessEnd   *atomic.Int64 // Unix nanoseconds when matchmaker finished processing
+	isProcessing     *atomic.Bool  // Whether matchmaker is currently processing
+	processMu        sync.RWMutex  // Protects timing state reads during backfill coordination
 }
 
 func (s *SkillBasedMatchmaker) StoreLatestResult(candidates, madeMatches [][]runtime.MatchmakerEntry) {
@@ -40,10 +59,57 @@ func (s *SkillBasedMatchmaker) GetLatestResult() (candidates, madeMatches [][]ru
 	return
 }
 
+// IsProcessing returns whether the matchmaker is currently processing
+func (s *SkillBasedMatchmaker) IsProcessing() bool {
+	return s.isProcessing.Load()
+}
+
+// GetLastProcessEnd returns the time when the matchmaker last finished processing
+func (s *SkillBasedMatchmaker) GetLastProcessEnd() time.Time {
+	nanos := s.lastProcessEnd.Load()
+	if nanos == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nanos)
+}
+
+// GetLastProcessStart returns the time when the matchmaker last started processing
+func (s *SkillBasedMatchmaker) GetLastProcessStart() time.Time {
+	nanos := s.lastProcessStart.Load()
+	if nanos == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nanos)
+}
+
+// TimeSinceLastProcess returns the duration since the matchmaker last completed processing
+func (s *SkillBasedMatchmaker) TimeSinceLastProcess() time.Duration {
+	lastEnd := s.GetLastProcessEnd()
+	if lastEnd.IsZero() {
+		return time.Duration(0)
+	}
+	return time.Since(lastEnd)
+}
+
+// markProcessStart records the start of matchmaker processing
+func (s *SkillBasedMatchmaker) markProcessStart() {
+	s.lastProcessStart.Store(time.Now().UnixNano())
+	s.isProcessing.Store(true)
+}
+
+// markProcessEnd records the end of matchmaker processing
+func (s *SkillBasedMatchmaker) markProcessEnd() {
+	s.lastProcessEnd.Store(time.Now().UnixNano())
+	s.isProcessing.Store(false)
+}
+
 func NewSkillBasedMatchmaker() *SkillBasedMatchmaker {
 	sbmm := SkillBasedMatchmaker{
 		latestCandidates: &atomic.Value{},
 		latestMatches:    &atomic.Value{},
+		lastProcessStart: atomic.NewInt64(0),
+		lastProcessEnd:   atomic.NewInt64(0),
+		isProcessing:     atomic.NewBool(false),
 	}
 
 	sbmm.latestCandidates.Store([][]runtime.MatchmakerEntry{})
@@ -53,6 +119,10 @@ func NewSkillBasedMatchmaker() *SkillBasedMatchmaker {
 
 // Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
 func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
+	// Mark processing start for backfill coordination
+	m.markProcessStart()
+	defer m.markProcessEnd()
+
 	if len(candidates) == 0 || len(candidates[0]) == 0 {
 		logger.Error("No candidates found. Matchmaker cannot run.")
 		return nil

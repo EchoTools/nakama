@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"time"
 
 	"github.com/heroiclabs/nakama-common/api"
@@ -100,36 +99,5 @@ func (m *MigrationRebuildLoginHistory) MigrateSystem(ctx context.Context, logger
 		"num_errors":    numErrors,
 	}).Info("Completed migration check for alternate patterns")
 
-	return nil
-}
-
-func validateAlternatePatterns(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID string, h *LoginHistory) error {
-
-	for _, item := range h.SearchPatterns() {
-		// Search each item individually.
-		matches, _, err := LoginAlternatePatternSearch(ctx, nk, h, []string{item}, false)
-		if err != nil {
-			return fmt.Errorf("error searching for alternate logins: %w", err)
-		}
-		if matches == nil && err == nil {
-			return nil
-		}
-		userIDs := make([]string, 0, len(matches))
-
-		found := false
-		for _, m := range matches {
-			if m.OtherUserID == userID {
-				found = true
-			}
-		}
-
-		if !found {
-			logger.WithFields(map[string]interface{}{
-				"item":    item,
-				"matches": userIDs,
-			}).Warn("Found pattern that does not match self.")
-			continue
-		}
-	}
 	return nil
 }

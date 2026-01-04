@@ -274,7 +274,7 @@ func (w *WhoAmI) createRecentLoginsFieldValue() string {
 	return strings.Join(lines, "\n")
 }
 
-func (WhoAmI) createMatchmakingEmbed(account *EVRProfile, guildGroups map[string]*GuildGroup, matchmakingSettings *MatchmakingSettings, labels []*MatchLabel, lastMatchmakingError error) *discordgo.MessageEmbed {
+func (WhoAmI) createMatchmakingEmbed(_ *EVRProfile, guildGroups map[string]*GuildGroup, matchmakingSettings *MatchmakingSettings, labels []*MatchLabel, lastMatchmakingError error) *discordgo.MessageEmbed {
 	if matchmakingSettings == nil {
 		return nil
 	}
@@ -624,37 +624,6 @@ func (w *WhoAmI) createAlternatesEmbed() *discordgo.MessageEmbed {
 	return alternatesEmbed
 }
 
-func (w *WhoAmI) collectedBlockedFriends(ctx context.Context, nk runtime.NakamaModule) ([]*api.User, error) {
-
-	var (
-		err             error
-		blockedUsers    = make([]*api.User, 0)
-		blockedState    = int(api.Friend_BLOCKED)
-		blockedStatePtr = &blockedState
-		cursor          = ""
-		friends         []*api.Friend
-	)
-	// Get the friends list
-	for {
-		friends, cursor, err = nk.FriendsList(ctx, w.profile.ID(), 100, blockedStatePtr, cursor)
-		if err != nil {
-			return nil, err
-		}
-		users := make([]*api.User, 0, len(friends))
-		for _, f := range friends {
-			if f.GetState().Value == int32(blockedState) {
-				blockedUsers = append(users, f.GetUser())
-			}
-		}
-
-		if len(friends) == 0 || cursor == "" {
-			break
-		}
-	}
-
-	return blockedUsers, nil
-}
-
 func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, target *discordgo.User, opts UserProfileRequestOptions) error {
 
 	var (
@@ -886,7 +855,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 					&discordgo.Button{
 						Label:    "Set IGN Override",
 						Style:    discordgo.PrimaryButton,
-						CustomID: fmt.Sprintf("lookup:set_ign_override:%s:%s", targetID, groupID),
+						CustomID: fmt.Sprintf("set_ign_override:%s:%s", target.ID, i.GuildID),
 					},
 				},
 			},

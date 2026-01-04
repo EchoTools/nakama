@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"reflect"
 	"slices"
 	"strings"
@@ -521,27 +520,6 @@ func (r *ProfileCache) ValidateArenaUnlockByName(i interface{}, itemName string)
 	}
 
 	return false, fmt.Errorf("unknown unlock field name: %s", fieldName)
-}
-
-func (r *ProfileCache) retrieveStarterLoadout(ctx context.Context) (evr.CosmeticLoadout, error) {
-	defaultLoadout := evr.DefaultCosmeticLoadout()
-	// Retrieve a random starter loadout from storage
-	objs, _, err := r.nk.StorageList(ctx, uuid.Nil.String(), uuid.Nil.String(), CosmeticLoadoutCollection, 100, "")
-	if err != nil {
-		return defaultLoadout, fmt.Errorf("failed to list objects: %w", err)
-	}
-	if len(objs) == 0 {
-		return defaultLoadout, nil
-	}
-
-	var loadouts []StoredCosmeticLoadout
-	if err = json.Unmarshal([]byte(objs[0].Value), &loadouts); err != nil {
-		return defaultLoadout, fmt.Errorf("error unmarshalling client profile: %w", err)
-	}
-
-	// Pick a random id
-	loadout := loadouts[rand.Intn(len(loadouts))]
-	return loadout.Loadout, nil
 }
 
 type StoredCosmeticLoadout struct {

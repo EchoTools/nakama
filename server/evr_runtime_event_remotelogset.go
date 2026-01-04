@@ -481,8 +481,8 @@ func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logge
 				}
 			}
 
-			// Send Discord DM if tier changed
-			if tierChanged {
+			// Send Discord DM if tier changed (unless silent mode is enabled)
+			if tierChanged && !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
 				discordID, err := GetDiscordIDByUserID(ctx, db, userID)
 				if err != nil {
 					logger.WithField("error", err).Warn("Failed to get Discord ID for tier notification")
@@ -531,8 +531,8 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 	if err != nil || label == nil {
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
-	if label.Mode != evr.ModeArenaPublic {
-		return nil // Only process type stats for arena mode
+	if label.Mode != evr.ModeArenaPublic && label.Mode != evr.ModeCombatPublic {
+		return nil // Only process type stats for arena and combat modes
 	}
 
 	groupIDStr := label.GetGroupID().String()
@@ -601,11 +601,19 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 	var teamRatings map[string]types.Rating
 	var playerRatings map[string]types.Rating
 	if serviceSettings.UseSkillBasedMatchmaking() {
+		// For combat mode, use win/loss only (no individual stats) for rating calculation
+		// For arena mode, use full stats-based rating calculation
+		statsForRating := statsByPlayer
+		if label.Mode == evr.ModeCombatPublic {
+			// Empty stats map means ratings are based purely on winning team status
+			statsForRating = make(map[evr.EvrId]evr.MatchTypeStats)
+		}
+
 		// Calculate new team-based ratings using individual player ratings loaded from leaderboards
-		teamRatings = CalculateNewTeamRatings(playersWithTeamRatings, statsByPlayer, blueWins)
+		teamRatings = CalculateNewTeamRatings(playersWithTeamRatings, statsForRating, blueWins)
 
 		// Calculate new individual player ratings using individual player ratings loaded from leaderboards
-		playerRatings = CalculateNewIndividualRatings(playersWithPlayerRatings, statsByPlayer, blueWins)
+		playerRatings = CalculateNewIndividualRatings(playersWithPlayerRatings, statsForRating, blueWins)
 	}
 
 	for xpid, typeStats := range statsByPlayer {
@@ -830,7 +838,7 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 	return entries, nil
 }
 
-func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, statisticsQueue *StatisticsQueue, msg *evr.RemoteLogVOIPLoudness) error {
+func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, _ runtime.Logger, _ *sql.DB, nk runtime.NakamaModule, _ *StatisticsQueue, msg *evr.RemoteLogVOIPLoudness) error {
 	// Get the match ID
 	matchID, err := NewMatchID(msg.SessionUUID(), s.Node)
 	if err != nil {

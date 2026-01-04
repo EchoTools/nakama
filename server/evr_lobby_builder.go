@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -18,8 +17,24 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+)
+
+const (
+	// LobbyBuilder constants
+	DefaultLatencyMapCapacity      = 100
+	DefaultTeamMapCapacity         = 8
+	MinEntrantsForMatch            = 2
+	ReservationLifetimeSeconds     = 20
+	ServerAllocationTimeoutSeconds = 60
+	ServerAllocationRetrySeconds   = 5
+	MatchListLimit                 = 200
+	MatchListMinSize               = 1
+	HighLatencyThresholdMs         = 100
+	RTTRoundingInterval            = 20
+	RTTRoundingOffset              = 10
+	RTTSignificantDifferenceMs     = 50
+	ServerRatingExcludeValue       = -999
+	MatchAllocateLimit             = 100
 )
 
 // Builds the match after the matchmaker has created it
@@ -33,13 +48,20 @@ type LobbyBuilder struct {
 	tracker         Tracker
 	metrics         Metrics
 
-	mapQueue map[evr.Symbol][]evr.Symbol // map[mode][]level
+	mapQueue          map[evr.Symbol][]evr.Symbol // map[mode][]level
+	postMatchBackfill *PostMatchmakerBackfill
+	skillBasedMM      *SkillBasedMatchmaker
+
+	// Backfill coordination
+	backfillStopCh  chan struct{} // Channel to stop periodic backfill
+	backfillResetCh chan struct{} // Channel to reset the periodic backfill timer
+	backfillMu      sync.Mutex
 }
 
 func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics) *LobbyBuilder {
 	logger = logger.With(zap.String("module", "lobby_builder"))
 
-	return &LobbyBuilder{
+	lb := &LobbyBuilder{
 		logger: logger,
 		nk:     nk,
 
@@ -50,6 +72,18 @@ func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistr
 
 		mapQueue: make(map[evr.Symbol][]evr.Symbol),
 	}
+
+	// Create the post-matchmaker backfill handler
+	lb.postMatchBackfill = NewPostMatchmakerBackfill(logger, nk, sessionRegistry, matchRegistry, tracker, metrics)
+
+	return lb
+}
+
+// SetSkillBasedMatchmaker sets the skill-based matchmaker reference for accessing matchmaker results
+func (b *LobbyBuilder) SetSkillBasedMatchmaker(sbmm *SkillBasedMatchmaker) {
+	b.skillBasedMM = sbmm
+	// Always start periodic backfill - it will check the setting on each run
+	b.startPeriodicBackfill()
 }
 
 func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
@@ -60,11 +94,207 @@ func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 			return
 		}
 	}
+
+	// After building matches, attempt post-matchmaker backfill if enabled
+	// This runs immediately after matchmaker completes in addition to periodic backfill
+	if ServiceSettings().Matchmaking.EnablePostMatchmakerBackfill && b.skillBasedMM != nil {
+		// Reset the periodic timer since matchmaker just ran and will trigger backfill
+		b.resetBackfillTimer()
+		// Run backfill immediately after matchmaker (not a periodic run)
+		go b.runPostMatchmakerBackfill(false)
+	}
+}
+
+// startPeriodicBackfill starts a goroutine that periodically runs backfill
+// This ensures backfill happens even when matchmaker doesn't have enough players to form matches
+func (b *LobbyBuilder) startPeriodicBackfill() {
+	// Check matchmaker first before creating channels to avoid leaking them
+	matchmaker := globalMatchmaker.Load()
+	if matchmaker == nil {
+		b.logger.Warn("Global matchmaker not initialized, periodic backfill not started")
+		return
+	}
+
+	b.backfillMu.Lock()
+	// Stop any existing periodic backfill
+	if b.backfillStopCh != nil {
+		close(b.backfillStopCh)
+	}
+	b.backfillStopCh = make(chan struct{})
+	b.backfillResetCh = make(chan struct{}, 1) // Buffered to avoid blocking
+	stopCh := b.backfillStopCh
+	resetCh := b.backfillResetCh
+	b.backfillMu.Unlock()
+	intervalSecs := matchmaker.config.GetMatchmaker().IntervalSec
+	interval := time.Duration(intervalSecs) * time.Second
+
+	b.logger.Info("Starting periodic backfill", zap.Duration("interval", interval))
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-stopCh:
+				b.logger.Info("Stopping periodic backfill")
+				return
+			case <-resetCh:
+				// Reset the ticker when backfill runs (from any trigger)
+				ticker.Reset(interval)
+			case <-ticker.C:
+				// Check if backfill is enabled (allows runtime config changes)
+				if !ServiceSettings().Matchmaking.EnablePostMatchmakerBackfill {
+					continue
+				}
+				// Reset timer at the start so it doesn't pile up
+				ticker.Reset(interval)
+				// Run periodic backfill (isPeriodicRun=true filters to older tickets)
+				b.runPostMatchmakerBackfill(true)
+			}
+		}
+	}()
+}
+
+// resetBackfillTimer resets the periodic backfill timer
+// Call this after backfill runs to avoid running again too soon
+func (b *LobbyBuilder) resetBackfillTimer() {
+	b.backfillMu.Lock()
+	defer b.backfillMu.Unlock()
+	if b.backfillResetCh != nil {
+		select {
+		case b.backfillResetCh <- struct{}{}:
+		default:
+			// Channel full, reset already pending
+		}
+	}
+}
+
+// runPostMatchmakerBackfill runs the post-matchmaker backfill process
+// isPeriodicRun indicates this is a periodic run (not triggered by matchmaker completion)
+// When isPeriodicRun is true, we filter to only process tickets that have been waiting
+// for at least BackfillMinTicketAgeSecs to avoid poaching fresh tickets before matchmaker runs
+func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), BackfillProcessTimeout)
+	defer cancel()
+
+	logger := b.logger.With(
+		zap.String("operation", "post_matchmaker_backfill"),
+		zap.Bool("is_periodic_run", isPeriodicRun),
+	)
+
+	// If matchmaker is currently processing, skip this backfill run to avoid poaching
+	if b.skillBasedMM != nil && b.skillBasedMM.IsProcessing() {
+		logger.Debug("Matchmaker is currently processing, skipping backfill")
+		return
+	}
+
+	// Get current tickets from the global matchmaker
+	matchmaker := globalMatchmaker.Load()
+	if matchmaker == nil {
+		logger.Debug("Global matchmaker not initialized")
+		return
+	}
+
+	extracts := matchmaker.Extract()
+	if len(extracts) == 0 {
+		return
+	}
+
+	logger.Debug("Got matchmaker tickets", zap.Int("count", len(extracts)))
+
+	// Convert extracts to BackfillCandidates
+	candidates := b.postMatchBackfill.ExtractCandidatesFromMatchmaker(extracts)
+	if len(candidates) == 0 {
+		logger.Debug("No valid candidates from matchmaker tickets")
+		return
+	}
+
+	// For periodic runs, filter to only tickets that have been waiting at least 1 matchmaker interval
+	// This prevents backfill from "poaching" tickets before matchmaker has a chance to process them
+	if isPeriodicRun {
+		// Minimum age is 1 matchmaker interval (use time-based fallback if matchmaker hasn't run yet)
+		minAge := time.Duration(matchmaker.config.GetMatchmaker().IntervalSec) * time.Second
+
+		filteredCandidates := make([]*BackfillCandidate, 0, len(candidates))
+		for _, c := range candidates {
+			// Accept candidate if either:
+			// 1. Matchmaker has seen it at least once (Intervals >= 1), OR
+			// 2. It's been waiting long enough (time-based fallback for when matchmaker never completes)
+			ticketAge := time.Since(c.SubmissionTime)
+			if c.Intervals >= 1 || ticketAge >= minAge {
+				filteredCandidates = append(filteredCandidates, c)
+			}
+		}
+
+		logger.Debug("Filtered candidates for periodic backfill",
+			zap.Int("original_count", len(candidates)),
+			zap.Int("filtered_count", len(filteredCandidates)),
+			zap.Duration("min_age", minAge),
+		)
+
+		candidates = filteredCandidates
+
+		if len(candidates) == 0 {
+			logger.Debug("No candidates old enough for periodic backfill")
+			return
+		}
+	}
+
+	logger.Info("Running post-matchmaker backfill",
+		zap.Int("candidates", len(candidates)))
+
+	// Calculate reducing precision factor based on oldest ticket
+	settings := ServiceSettings().Matchmaking
+	reducingPrecisionFactor := 0.0
+
+	if settings.ReducingPrecisionIntervalSecs > 0 {
+		oldestSubmission := time.Now()
+		for _, c := range candidates {
+			if c.SubmissionTime.Before(oldestSubmission) {
+				oldestSubmission = c.SubmissionTime
+			}
+		}
+
+		waitTime := time.Since(oldestSubmission)
+		interval := time.Duration(settings.ReducingPrecisionIntervalSecs) * time.Second
+		maxCycles := float64(settings.ReducingPrecisionMaxCycles)
+
+		if maxCycles > 0 && interval > 0 {
+			cycles := float64(waitTime) / float64(interval)
+			reducingPrecisionFactor = min(cycles/maxCycles, 1.0)
+		}
+	}
+
+	logger.Debug("Reducing precision factor calculated",
+		zap.Float64("factor", reducingPrecisionFactor))
+
+	// Process and execute backfill (combined to ensure accurate slot tracking)
+	results, err := b.postMatchBackfill.ProcessAndExecuteBackfill(ctx, logger, candidates, reducingPrecisionFactor)
+	if err != nil {
+		if ctx.Err() != nil {
+			logger.Warn("Post-matchmaker backfill timed out or cancelled", zap.Error(err), zap.Int("partial_results", len(results)))
+		} else {
+			logger.Error("Failed to process post-matchmaker backfill", zap.Error(err))
+		}
+		// Still report partial results if any succeeded before timeout
+		if len(results) > 0 {
+			logger.Info("Partially backfilled players before timeout/error", zap.Int("count", len(results)))
+		}
+		return
+	}
+
+	if len(results) == 0 {
+		logger.Debug("No backfill matches found")
+		return
+	}
+
+	logger.Info("Successfully backfilled players", zap.Int("count", len(results)))
 }
 
 func (b *LobbyBuilder) extractLatenciesFromEntrants(entrants []*MatchmakerEntry) (map[string][][]float64, map[string]map[string]float64) {
-	latenciesByTeamByExtIP := make(map[string][][]float64, 100)
-	latenciesByPlayerByExtIP := make(map[string]map[string]float64, 100)
+	latenciesByTeamByExtIP := make(map[string][][]float64, DefaultLatencyMapCapacity)
+	latenciesByPlayerByExtIP := make(map[string]map[string]float64, DefaultLatencyMapCapacity)
 
 	for _, e := range entrants {
 
@@ -74,7 +304,7 @@ func (b *LobbyBuilder) extractLatenciesFromEntrants(entrants []*MatchmakerEntry)
 				latenciesByTeamByExtIP[extIP] = append(latenciesByTeamByExtIP[extIP], []float64{v.(float64)})
 
 				if _, ok := latenciesByPlayerByExtIP[extIP]; !ok {
-					latenciesByPlayerByExtIP[extIP] = make(map[string]float64, 8)
+					latenciesByPlayerByExtIP[extIP] = make(map[string]float64, DefaultTeamMapCapacity)
 				}
 
 				latenciesByPlayerByExtIP[extIP][e.Presence.UserId] = v.(float64)
@@ -134,7 +364,7 @@ func (b *LobbyBuilder) rankEndpointsByServerScore(entrants []*MatchmakerEntry) [
 }
 
 func (b *LobbyBuilder) groupByTicket(entrants []*MatchmakerEntry) [][]*MatchmakerEntry {
-	partyMap := make(map[string][]*MatchmakerEntry, 8)
+	partyMap := make(map[string][]*MatchmakerEntry, DefaultTeamMapCapacity)
 	for _, e := range entrants {
 		t := e.GetTicket()
 		partyMap[t] = append(partyMap[t], e)
@@ -157,7 +387,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 	logger.Debug("Building match", zap.Any("entrants", entrants))
 
-	if len(entrants) < 2 {
+	if len(entrants) < MinEntrantsForMatch {
 		return nil, fmt.Errorf("not enough entrants to build a match")
 	}
 
@@ -221,12 +451,12 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		SpawnedBy:           SystemUserID,
 		GroupID:             groupID,
 		Reservations:        entrantPresences,
-		ReservationLifetime: 20 * time.Second,
+		ReservationLifetime: ReservationLifetimeSeconds * time.Second,
 		StartTime:           time.Now().UTC(),
 	}
 
 	var label *MatchLabel
-	timeout := time.After(60 * time.Second)
+	timeout := time.After(ServerAllocationTimeoutSeconds * time.Second)
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.LobbyBuilder
 	for {
 		select {
@@ -239,15 +469,20 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), b.nk, []string{groupID.String()}, meanRTTByExtIP, settings, nil, true, false, queryAddon)
 		if err != nil || label == nil {
 			logger.Error("Failed to allocate game server.", zap.Error(err))
-			<-time.After(5 * time.Second)
+			<-time.After(ServerAllocationRetrySeconds * time.Second)
 			continue
 		}
 		break
 	}
 
 	// Update the entrant ping to the game server
+	endpointID := EncodeEndpointID(label.GameServer.Endpoint.ExternalIP.String())
 	for _, p := range entrantPresences {
-		p.PingMillis = int(latenciesByPlayerByExtIP[label.GameServer.Endpoint.ExternalIP.String()][p.GetUserId()])
+		if endpointLatencies, ok := latenciesByPlayerByExtIP[endpointID]; ok && endpointLatencies != nil {
+			if latency, ok := endpointLatencies[p.GetUserId()]; ok {
+				p.PingMillis = int(latency)
+			}
+		}
 	}
 
 	serverSession := b.sessionRegistry.Get(label.GameServer.SessionID)
@@ -325,59 +560,6 @@ func (b *LobbyBuilder) groupIDFromEntrants(entrants []*MatchmakerEntry) (uuid.UU
 	return uuid.FromStringOrNil(groupID), nil
 }
 
-func (b *LobbyBuilder) distributeParties(parties [][]*MatchmakerEntry) [][]*MatchmakerEntry {
-	// Distribute the players from each party on the two teams.
-	// Try to keep the parties together, but the teams must be balanced.
-	// The algorithm is greedy and may not always produce the best result.
-	// Each team must be 4 players or less
-	teams := [][]*MatchmakerEntry{{}, {}}
-
-	// Sort the parties by size, single players last
-	sort.SliceStable(parties, func(i, j int) bool {
-		if len(parties[i]) == 1 {
-			return false
-		}
-		return len(parties[i]) < len(parties[j])
-	})
-
-	// Distribute the parties to the teams
-	for _, party := range parties {
-		// Find the team with the least players
-		team := 0
-		for i, t := range teams {
-			if len(t) < len(teams[team]) {
-				team = i
-			}
-		}
-		teams[team] = append(teams[team], party...)
-	}
-	// sort the teams by size
-	sort.SliceStable(teams, func(i, j int) bool {
-		return len(teams[i]) > len(teams[j])
-	})
-
-	for i, player := range teams[0] {
-		// If the team is more than two players larger than the other team, distribute the players evenly
-		if len(teams[0]) > len(teams[1])+1 {
-			// Move a player from teams[0] to teams[1]
-			teams[1] = append(teams[1], player)
-			teams[0] = append(teams[0][:i], teams[0][i+1:]...)
-		}
-	}
-
-	return teams
-}
-
-// Count the number of active matches by external IP
-func countByExtIP(labels []*MatchLabel) map[string]int {
-	countByExtIP := make(map[string]int, len(labels))
-	for _, label := range labels {
-		k := label.GameServer.Endpoint.ExternalIP.String()
-		countByExtIP[k]++
-	}
-	return countByExtIP
-}
-
 func (b *LobbyBuilder) selectNextMap(mode evr.Symbol) evr.Symbol {
 	queue := b.mapQueue[mode]
 
@@ -429,54 +611,14 @@ func CompactedFrequencySort[T comparable](s []T, desc bool) []T {
 	return slices.Compact(s)
 }
 
-func rttByPlayerByExtIP(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, groupID string) (map[string]map[string]int, error) {
-	qparts := []string{
-		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.QuoteStringValue(groupID)),
-	}
-
-	query := strings.Join(qparts, " ")
-
-	pubLabels, err := LobbyGameServerList(ctx, nk, query)
-	if err != nil {
-		return nil, err
-	}
-
-	rttByPlayerByExtIP := make(map[string]map[string]int)
-
-	totalPlayers := 0
-	for _, label := range pubLabels {
-		for _, p := range label.Players {
-			history := NewLatencyHistory()
-			if err := StorableRead(ctx, nk, p.UserID, history, true); err != nil && status.Code(err) != codes.NotFound {
-				logger.Warn("Failed to load latency history", zap.Error(err))
-				continue
-			}
-
-			rtts := history.LatestRTTs()
-			if len(rtts) > 0 {
-				totalPlayers++
-			}
-
-			for extIP, rtt := range rtts {
-				if _, ok := rttByPlayerByExtIP[p.UserID]; !ok {
-					rttByPlayerByExtIP[p.UserID] = make(map[string]int)
-				}
-				rttByPlayerByExtIP[p.UserID][extIP] = rtt
-			}
-		}
-	}
-
-	return rttByPlayerByExtIP, nil
-}
-
 // Wrapper for the matchRegistry.ListMatches function.
 func LobbyList(ctx context.Context, nk runtime.NakamaModule, limit int, minSize int, maxSize int, query string) ([]*api.Match, error) {
 	return nk.MatchList(ctx, limit, true, "", &minSize, &maxSize, query)
 }
 
 func LobbyGameServerList(ctx context.Context, nk runtime.NakamaModule, query string) ([]*MatchLabel, error) {
-	limit := 200
-	minSize, maxSize := 1, MatchLobbyMaxSize // the game server counts as one.
+	limit := MatchListLimit
+	minSize, maxSize := MatchListMinSize, MatchLobbyMaxSize // the game server counts as one.
 	matches, err := LobbyList(ctx, nk, limit, minSize, maxSize, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list matches: %w", err)
@@ -497,7 +639,7 @@ func LobbyGameServerList(ctx context.Context, nk runtime.NakamaModule, query str
 	return labels, nil
 }
 
-func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupIDs []string, rttsByExternalIP map[string]int, settings *MatchSettings, regions []string, requireDefaultRegion bool, requireRegion bool, queryAddon string) (*MatchLabel, error) {
+func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupIDs []string, rttsByEndpoint map[string]int, settings *MatchSettings, regions []string, requireDefaultRegion bool, requireRegion bool, queryAddon string) (*MatchLabel, error) {
 
 	if len(groupIDs) == 0 {
 		return nil, fmt.Errorf("no group IDs provided")
@@ -532,7 +674,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	}
 
 	// Get the list of matches
-	matches, err := nk.MatchList(ctx, 100, true, "", nil, nil, query)
+	matches, err := nk.MatchList(ctx, MatchAllocateLimit, true, "", nil, nil, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find matches: %w", err)
 	}
@@ -566,8 +708,8 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 		return nil, ErrMatchmakingNoAvailableServers
 	}
 
-	indexes := make([]labelIndex, len(availableServers))
-	for i, label := range availableServers {
+	indexes := make([]labelIndex, 0, len(availableServers))
+	for _, label := range availableServers {
 		extIP := label.GameServer.Endpoint.ExternalIP.String()
 		hostID := label.GameServer.Endpoint.GetHostID()
 
@@ -592,12 +734,18 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 			}
 		}
 
-		// Skip servers with a rating of -999
-		if rating == -999 {
+		// Skip servers with a rating of ServerRatingExcludeValue
+		if rating == ServerRatingExcludeValue {
 			continue
 		}
 
-		rtt := rttsByExternalIP[extIP]
+		// Look up RTT using both raw IP and encoded endpoint ID for compatibility
+		// (matchmaking properties use encoded IDs, direct client data uses raw IPs)
+		endpointID := EncodeEndpointID(extIP)
+		rtt := rttsByEndpoint[endpointID]
+		if rtt == 0 {
+			rtt = rttsByEndpoint[extIP]
+		}
 		if delta, ok := globalSettings.ServerSelection.RTTDelta[label.GameServer.Username]; ok {
 			rtt += delta
 		}
@@ -605,16 +753,19 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 			rtt += delta
 		}
 
-		indexes[i] = labelIndex{
+		isReachable := rttsByEndpoint[endpointID] != 0 || rttsByEndpoint[extIP] != 0
+		isHighLatency := rtt > HighLatencyThresholdMs
+
+		indexes = append(indexes, labelIndex{
 			Label:             label,
-			RTT:               (rtt + 10) / 20 * 20,
-			IsReachable:       rttsByExternalIP[extIP] != 0,
+			RTT:               (rtt + RTTRoundingOffset) / RTTRoundingInterval * RTTRoundingInterval,
+			IsReachable:       isReachable,
 			Rating:            rating,
 			IsPriorityForMode: slices.Contains(label.GameServer.DesignatedModes, settings.Mode),
 			ActiveCount:       activeCountByHostID[hostID],
 			IsRegionMatch:     regionMatch,
-			IsHighLatency:     rttsByExternalIP[extIP] > 100,
-		}
+			IsHighLatency:     isHighLatency,
+		})
 	}
 
 	sortLabelIndexes(indexes)
@@ -698,7 +849,7 @@ func sortLabelIndexes(labels []labelIndex) {
 		}
 
 		// If there is a large difference in RTT, sort by RTT
-		if math.Abs(float64(a.RTT-b.RTT)) > 50 {
+		if math.Abs(float64(a.RTT-b.RTT)) > RTTSignificantDifferenceMs {
 			if a.RTT < b.RTT {
 				return -1
 			}

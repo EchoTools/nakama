@@ -884,9 +884,6 @@ type matchmakingStatusRequest struct {
 		return string(jsonData), nil
 	}
 */
-type setMatchmakingStatusRequest struct {
-	Enabled bool `json:"enabled"`
-}
 
 type BanUserPayload struct {
 	UserId string `json:"userId"`
