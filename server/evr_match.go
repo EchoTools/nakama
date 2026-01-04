@@ -671,7 +671,11 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 								// Launch goroutine to check if player logs out and remove early quit if they do
 								// Use a 5-minute grace period before checking logout status
-								go CheckAndStrikeEarlyQuitIfLoggedOut(ctx, logger, nk, _nk.sessionRegistry, mp.GetUserId(), mp.GetSessionId(), 5*time.Minute)
+								// Use background context to ensure goroutine isn't cancelled when match ends
+								go func(userID, sessionID string) {
+									bgCtx := context.Background()
+									CheckAndStrikeEarlyQuitIfLoggedOut(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, 5*time.Minute)
+								}(mp.GetUserId(), mp.GetSessionId())
 
 								// Send Discord DM if tier changed
 								if tierChanged {
