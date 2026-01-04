@@ -655,18 +655,6 @@ func (d *DiscordAppBot) handleServerIssueModalSubmit(ctx context.Context, logger
 		}
 	}
 
-	/*
-		// Get server statistics (active/idle servers by host)
-		serverStats := d.getServerStatsByHost(ctx, logger)
-		if serverStats != "" {
-			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-				Name:   "Server Statistics",
-				Value:  serverStats,
-				Inline: false,
-			})
-		}
-	*/
-
 	// Post to audit/reports channels
 	d.postServerIssueReport(ctx, logger, s, groupID, data, embed)
 

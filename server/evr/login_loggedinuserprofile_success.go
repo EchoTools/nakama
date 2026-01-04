@@ -40,6 +40,7 @@ func NewLoggedInUserProfileSuccess(xpid EvrId, client *ClientProfile, server *Se
 }
 
 type UserProfiles struct {
-	Client *ClientProfile `json:"client"`
-	Server *ServerProfile `json:"server"`
+	Client *ClientProfile          `json:"client"`
+	Server *ServerProfile          `json:"server"`
+	Config *EarlyQuitServiceConfig `json:"config,omitempty"`
 }

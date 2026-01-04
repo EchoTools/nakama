@@ -27,6 +27,8 @@ const (
 	Flags_Flag16
 )
 
+const MaxJoinSessionEntrants = 16
+
 var _ = LoginIdentifier(&LobbyJoinSessionRequest{})
 var _ = LobbySessionRequest(&LobbyJoinSessionRequest{})
 
@@ -69,7 +71,11 @@ func (m *LobbyJoinSessionRequest) Stream(s *EasyStream) error {
 
 				m.CrossPlayEnabled = flags&SessionFlag_EnableCrossPlay != 0
 
-				m.Entrants = make([]Entrant, flags&0xFF)
+				entrantCount := int(flags & 0xFF)
+				if entrantCount > MaxJoinSessionEntrants {
+					return fmt.Errorf("entrant count %d exceeds maximum %d", entrantCount, MaxJoinSessionEntrants)
+				}
+				m.Entrants = make([]Entrant, entrantCount)
 
 				// Set all of the Roles to -1 (unspecified) by default
 				for i := range m.Entrants {
