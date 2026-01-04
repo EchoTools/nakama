@@ -312,13 +312,15 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 				return
 			case <-time.After(5 * time.Second):
 				// Check if the game server is still alive
-				rtts, err := BroadcasterRTTcheck(p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 5, 500*time.Millisecond)
-				if err != nil || len(rtts) == 0 {
-					logger.Warn("Game server is not responding", zap.Error(err), zap.String("endpoint", config.Endpoint.String()))
-					// Send the discord error
-					errorMessage := fmt.Sprintf("Game server (Endpoint ID: %s, Server ID: %d) is not responding. Error: %v", config.Endpoint.String(), config.ServerID, err)
-					go sendDiscordError(errors.New(errorMessage), params.DiscordID(), logger, p.discordCache.dg)
-				}
+				/*
+					rtts, err := BroadcasterRTTcheck(p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 5, 500*time.Millisecond)
+					if err != nil || len(rtts) == 0 {
+						logger.Warn("Game server is not responding", zap.Error(err), zap.String("endpoint", config.Endpoint.String()))
+						// Send the discord error
+						errorMessage := fmt.Sprintf("Game server (Endpoint ID: %s, Server ID: %d) is not responding. Error: %v", config.Endpoint.String(), config.ServerID, err)
+						go sendDiscordError(errors.New(errorMessage), params.DiscordID(), logger, p.discordCache.dg)
+					}
+				*/
 			}
 			// If the game server is alive, check if it is still in a match
 			if matchID, _, err := GameServerBySessionID(p.nk, session.ID()); err != nil {
