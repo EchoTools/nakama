@@ -13,6 +13,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/thriftrw/ptr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -500,6 +501,11 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 			return fmt.Errorf("unknown issue type: %s", issueType)
 		}
 
+	case "region_fallback":
+		// Handle region fallback button click
+		// Format: region_fallback:<action>:<original_region>:<mode>:<level>:<startTime>:<command_type>
+		return d.handleRegionFallbackInteraction(ctx, logger, s, i, value)
+
 	case "enforcement":
 		// Handle enforcement button interactions (edit, void)
 		return d.handleEnforcementInteraction(ctx, logger, s, i, value)
@@ -568,6 +574,13 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Allocate
 	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, allocatorGroupIDs, latestRTTs, settings, []string{regionCode}, false, true, queryAddon)
 	if err != nil {
+		// Check if this is a region fallback error
+		var regionErr ErrMatchmakingNoServersInRegion
+		if errors.As(err, &regionErr) && regionErr.FallbackInfo != nil {
+			// Return the fallback info so the caller can handle the user prompt
+			return nil, 0, regionErr
+		}
+
 		if strings.Contains("bad request:", err.Error()) {
 			err = NewLobbyErrorf(BadRequest, "required features not supported")
 		}
@@ -641,6 +654,12 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
 	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, extIPs, settings, []string{region}, true, false, queryAddon)
 	if err != nil {
+		// Check if this is a region fallback error
+		var regionErr ErrMatchmakingNoServersInRegion
+		if errors.As(err, &regionErr) && regionErr.FallbackInfo != nil {
+			// Return the fallback info so the caller can handle the user prompt
+			return nil, 0, regionErr
+		}
 		return nil, 0, fmt.Errorf("failed to allocate game server: %w", err)
 	}
 
@@ -977,4 +996,360 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		return simpleInteractionResponse(d.dg, i, fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(actions, "\n")))
 	}
 	return nil
+}
+
+// presentRegionFallbackOptions presents the user with options when no servers are available in the requested region
+func (d *DiscordAppBot) presentRegionFallbackOptions(s *discordgo.Session, i *discordgo.InteractionCreate, fallbackInfo *RegionFallbackInfo, commandType, originalRegion string, mode, level evr.Symbol, startTime time.Time) error {
+	// Encode parameters into button CustomID
+	// Format: region_fallback:<action>:<original_region>:<mode>:<level>:<startTime>:<command_type>
+	startTimeStr := fmt.Sprintf("%d", startTime.Unix())
+	baseParams := fmt.Sprintf("%s:%s:%s:%s:%s", originalRegion, mode.String(), level.String(), startTimeStr, commandType)
+
+	embed := &discordgo.MessageEmbed{
+		Title: "No Servers Available in Selected Region",
+		Description: fmt.Sprintf("No servers are available in region(s) **%v**.\n\nHowever, a server is available in **%s** with **%dms** latency.\n\nWould you like to use this server instead?",
+			fallbackInfo.RequestedRegions, fallbackInfo.ClosestRegion, fallbackInfo.ClosestLatencyMs),
+		Color: 0xFFA500, // Orange color for warning
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:   "Requested Region(s)",
+				Value:  fmt.Sprintf("%v", fallbackInfo.RequestedRegions),
+				Inline: true,
+			},
+			{
+				Name:   "Closest Available",
+				Value:  fmt.Sprintf("%s (%dms)", fallbackInfo.ClosestRegion, fallbackInfo.ClosestLatencyMs),
+				Inline: true,
+			},
+		},
+	}
+
+	components := []discordgo.MessageComponent{
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				&discordgo.Button{
+					Label:    "Use Closest Server",
+					Style:    discordgo.SuccessButton,
+					CustomID: fmt.Sprintf("region_fallback:use_closest:%s", baseParams),
+				},
+				&discordgo.Button{
+					Label:    "Cancel",
+					Style:    discordgo.DangerButton,
+					CustomID: fmt.Sprintf("region_fallback:cancel:%s", baseParams),
+				},
+			},
+		},
+	}
+
+	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds:     []*discordgo.MessageEmbed{embed},
+			Components: components,
+			Flags:      discordgo.MessageFlagsEphemeral,
+		},
+	})
+}
+
+// handleRegionFallbackInteraction handles user's choice for region fallback
+func (d *DiscordAppBot) handleRegionFallbackInteraction(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, value string) error {
+	// Parse value: <action>:<original_region>:<mode>:<level>:<startTime>:<command_type>
+	parts := strings.Split(value, ":")
+	if len(parts) != 6 {
+		return fmt.Errorf("invalid region_fallback value format: expected 6 parts, got %d", len(parts))
+	}
+
+	action := parts[0]
+	originalRegion := parts[1]
+	modeStr := parts[2]
+	levelStr := parts[3]
+	startTimeStr := parts[4]
+	commandType := parts[5]
+
+	mode := evr.ToSymbol(modeStr)
+	level := evr.ToSymbol(levelStr)
+	startTimeUnix, err := strconv.ParseInt(startTimeStr, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid start time: %w", err)
+	}
+	startTime := time.Unix(startTimeUnix, 0)
+
+	user, _ := getScopedUserMember(i)
+	if user == nil {
+		return fmt.Errorf("user is nil")
+	}
+	userID := d.cache.DiscordIDToUserID(user.ID)
+
+	if action == "cancel" {
+		// User chose to cancel
+		logger.WithFields(map[string]any{
+			"userID":           userID,
+			"requested_region": originalRegion,
+			"action":           "cancel",
+		}).Info("User canceled region fallback")
+
+		return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseUpdateMessage,
+			Data: &discordgo.InteractionResponseData{
+				Content:    "❌ Server allocation cancelled. No servers available in the requested region.",
+				Embeds:     []*discordgo.MessageEmbed{},
+				Components: []discordgo.MessageComponent{},
+			},
+		})
+	}
+
+	if action == "use_closest" {
+		// User chose to use the closest server
+		// Defer the response so we have time to allocate the server
+		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseDeferredMessageUpdate,
+		}); err != nil {
+			return fmt.Errorf("failed to defer interaction: %w", err)
+		}
+
+		// Now allocate without the region requirement (pass empty region)
+		var label *MatchLabel
+		var rttMs int
+		if commandType == "create-match" {
+			// Use handleCreateMatch but without region requirement (pass empty region)
+			label, rttMs, err = d.handleCreateMatch(ctx, logger, userID, i.GuildID, "", mode, level, startTime)
+		} else if commandType == "allocate-match" {
+			var rtt float64
+			label, rtt, err = d.handleAllocateMatch(ctx, logger, userID, i.GuildID, "", mode, level, startTime)
+			rttMs = int(rtt)
+		} else {
+			return fmt.Errorf("unknown command type: %s", commandType)
+		}
+
+		if err != nil {
+			// Log the fallback failure
+			logger.WithFields(map[string]any{
+				"userID":           userID,
+				"requested_region": originalRegion,
+				"action":           "use_closest",
+				"error":            err.Error(),
+			}).Error("Failed to allocate closest server after user accepted fallback")
+
+			_, updateErr := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+				Content:    ptr.String(fmt.Sprintf("❌ Failed to allocate server: %v", err)),
+				Embeds:     &[]*discordgo.MessageEmbed{},
+				Components: &[]discordgo.MessageComponent{},
+			})
+			if updateErr != nil {
+				return fmt.Errorf("failed to update interaction: %w", updateErr)
+			}
+			return err
+		}
+
+		selectedRegion := label.GameServer.LocationRegionCode(true, true)
+
+		// Log the successful fallback
+		logger.WithFields(map[string]any{
+			"userID":           userID,
+			"requested_region": originalRegion,
+			"selected_region":  selectedRegion,
+			"server":           label.GameServer.Endpoint.ExternalIP.String(),
+			"latency_ms":       rttMs,
+			"action":           "use_closest",
+		}).Info("User accepted region fallback to closest server")
+
+		// For create-match, also set the next match ID
+		if commandType == "create-match" {
+			if err := SetNextMatchID(ctx, d.nk, userID, label.ID, AnyTeam, ""); err != nil {
+				logger.Error("Failed to set next match ID", zap.Error(err))
+				// Don't fail the whole operation, just log it
+			}
+		}
+
+		// Update the message with success
+		successMessage := fmt.Sprintf("✅ Server allocated in **%s** (%dms latency)\n\nMatch ID: `%s`\nhttps://echo.taxi/spark://c/%s",
+			selectedRegion, rttMs, label.ID.UUID.String(), strings.ToUpper(label.ID.UUID.String()))
+
+		_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+			Content:    ptr.String(successMessage),
+			Embeds:     &[]*discordgo.MessageEmbed{},
+			Components: &[]discordgo.MessageComponent{},
+		})
+		return err
+	}
+
+	return fmt.Errorf("unknown action: %s", action)
+}
+
+// presentRegionFallbackOptions presents the user with options when no servers are available in the requested region
+func (d *DiscordAppBot) presentRegionFallbackOptions(s *discordgo.Session, i *discordgo.InteractionCreate, fallbackInfo *RegionFallbackInfo, commandType, originalRegion string, mode, level evr.Symbol, startTime time.Time) error {
+	// Encode parameters into button CustomID
+	// Format: region_fallback:<action>:<original_region>:<mode>:<level>:<startTime>:<command_type>
+	startTimeStr := fmt.Sprintf("%d", startTime.Unix())
+	baseParams := fmt.Sprintf("%s:%s:%s:%s:%s", originalRegion, mode.String(), level.String(), startTimeStr, commandType)
+
+	embed := &discordgo.MessageEmbed{
+		Title: "No Servers Available in Selected Region",
+		Description: fmt.Sprintf("No servers are available in region(s) **%v**.\n\nHowever, a server is available in **%s** with **%dms** latency.\n\nWould you like to use this server instead?",
+			fallbackInfo.RequestedRegions, fallbackInfo.ClosestRegion, fallbackInfo.ClosestLatencyMs),
+		Color: 0xFFA500, // Orange color for warning
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:   "Requested Region(s)",
+				Value:  fmt.Sprintf("%v", fallbackInfo.RequestedRegions),
+				Inline: true,
+			},
+			{
+				Name:   "Closest Available",
+				Value:  fmt.Sprintf("%s (%dms)", fallbackInfo.ClosestRegion, fallbackInfo.ClosestLatencyMs),
+				Inline: true,
+			},
+		},
+	}
+
+	components := []discordgo.MessageComponent{
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				&discordgo.Button{
+					Label:    "Use Closest Server",
+					Style:    discordgo.SuccessButton,
+					CustomID: fmt.Sprintf("region_fallback:use_closest:%s", baseParams),
+				},
+				&discordgo.Button{
+					Label:    "Cancel",
+					Style:    discordgo.DangerButton,
+					CustomID: fmt.Sprintf("region_fallback:cancel:%s", baseParams),
+				},
+			},
+		},
+	}
+
+	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds:     []*discordgo.MessageEmbed{embed},
+			Components: components,
+			Flags:      discordgo.MessageFlagsEphemeral,
+		},
+	})
+}
+
+// handleRegionFallbackInteraction handles user's choice for region fallback
+func (d *DiscordAppBot) handleRegionFallbackInteraction(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, value string) error {
+	// Parse value: <action>:<original_region>:<mode>:<level>:<startTime>:<command_type>
+	parts := strings.Split(value, ":")
+	if len(parts) != 6 {
+		return fmt.Errorf("invalid region_fallback value format: expected 6 parts, got %d", len(parts))
+	}
+
+	action := parts[0]
+	originalRegion := parts[1]
+	modeStr := parts[2]
+	levelStr := parts[3]
+	startTimeStr := parts[4]
+	commandType := parts[5]
+
+	mode := evr.ToSymbol(modeStr)
+	level := evr.ToSymbol(levelStr)
+	startTimeUnix, err := strconv.ParseInt(startTimeStr, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid start time: %w", err)
+	}
+	startTime := time.Unix(startTimeUnix, 0)
+
+	user, _ := getScopedUserMember(i)
+	if user == nil {
+		return fmt.Errorf("user is nil")
+	}
+	userID := d.cache.DiscordIDToUserID(user.ID)
+
+	if action == "cancel" {
+		// User chose to cancel
+		logger.WithFields(map[string]any{
+			"userID":           userID,
+			"requested_region": originalRegion,
+			"action":           "cancel",
+		}).Info("User canceled region fallback")
+
+		return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseUpdateMessage,
+			Data: &discordgo.InteractionResponseData{
+				Content:    "❌ Server allocation cancelled. No servers available in the requested region.",
+				Embeds:     []*discordgo.MessageEmbed{},
+				Components: []discordgo.MessageComponent{},
+			},
+		})
+	}
+
+	if action == "use_closest" {
+		// User chose to use the closest server
+		// Defer the response so we have time to allocate the server
+		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseDeferredMessageUpdate,
+		}); err != nil {
+			return fmt.Errorf("failed to defer interaction: %w", err)
+		}
+
+		// Now allocate without the region requirement (pass empty region)
+		var label *MatchLabel
+		var rttMs int
+		if commandType == "create-match" {
+			// Use handleCreateMatch but without region requirement (pass empty region)
+			label, rttMs, err = d.handleCreateMatch(ctx, logger, userID, i.GuildID, "", mode, level, startTime)
+		} else if commandType == "allocate-match" {
+			var rtt float64
+			label, rtt, err = d.handleAllocateMatch(ctx, logger, userID, i.GuildID, "", mode, level, startTime)
+			rttMs = int(rtt)
+		} else {
+			return fmt.Errorf("unknown command type: %s", commandType)
+		}
+
+		if err != nil {
+			// Log the fallback failure
+			logger.WithFields(map[string]any{
+				"userID":           userID,
+				"requested_region": originalRegion,
+				"action":           "use_closest",
+				"error":            err.Error(),
+			}).Error("Failed to allocate closest server after user accepted fallback")
+
+			_, updateErr := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+				Content:    ptr.String(fmt.Sprintf("❌ Failed to allocate server: %v", err)),
+				Embeds:     &[]*discordgo.MessageEmbed{},
+				Components: &[]discordgo.MessageComponent{},
+			})
+			if updateErr != nil {
+				return fmt.Errorf("failed to update interaction: %w", updateErr)
+			}
+			return err
+		}
+
+		selectedRegion := label.GameServer.LocationRegionCode(true, true)
+
+		// Log the successful fallback
+		logger.WithFields(map[string]any{
+			"userID":           userID,
+			"requested_region": originalRegion,
+			"selected_region":  selectedRegion,
+			"server":           label.GameServer.Endpoint.ExternalIP.String(),
+			"latency_ms":       rttMs,
+			"action":           "use_closest",
+		}).Info("User accepted region fallback to closest server")
+
+		// For create-match, also set the next match ID
+		if commandType == "create-match" {
+			if err := SetNextMatchID(ctx, d.nk, userID, label.ID, AnyTeam, ""); err != nil {
+				logger.Error("Failed to set next match ID", zap.Error(err))
+				// Don't fail the whole operation, just log it
+			}
+		}
+
+		// Update the message with success
+		successMessage := fmt.Sprintf("✅ Server allocated in **%s** (%dms latency)\n\nMatch ID: `%s`\nhttps://echo.taxi/spark://c/%s",
+			selectedRegion, rttMs, label.ID.UUID.String(), strings.ToUpper(label.ID.UUID.String()))
+
+		_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+			Content:    ptr.String(successMessage),
+			Embeds:     &[]*discordgo.MessageEmbed{},
+			Components: &[]discordgo.MessageComponent{},
+		})
+		return err
+	}
+
+	return fmt.Errorf("unknown action: %s", action)
 }

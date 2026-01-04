@@ -770,6 +770,44 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 
 	sortLabelIndexes(indexes)
 
+	// Check if we have any servers in the requested region
+	hasRegionMatch := false
+	for _, index := range indexes {
+		if index.IsRegionMatch {
+			hasRegionMatch = true
+			break
+		}
+	}
+
+	// If requireRegion is true, no region matches found, but we have other servers available,
+	// return a special error with fallback information
+	if requireRegion && len(regions) > 0 && !hasRegionMatch && len(indexes) > 0 {
+		// Find the closest available server (first in sorted list)
+		for _, index := range indexes {
+			if index.Label.LobbyType == UnassignedLobby && index.IsReachable {
+				// Get the region of the closest server
+				closestRegion := "unknown"
+				if len(index.Label.GameServer.RegionCodes) > 0 {
+					for _, r := range index.Label.GameServer.RegionCodes {
+						if r != RegionDefault {
+							closestRegion = r
+							break
+						}
+					}
+				}
+
+				return nil, ErrMatchmakingNoServersInRegion{
+					FallbackInfo: &RegionFallbackInfo{
+						RequestedRegions: regions,
+						ClosestServer:    index.Label,
+						ClosestRegion:    closestRegion,
+						ClosestLatencyMs: index.RTT,
+					},
+				}
+			}
+		}
+	}
+
 	// Find the first available game server
 	var label *MatchLabel
 	for _, index := range indexes {
