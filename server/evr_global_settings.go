@@ -97,6 +97,7 @@ type GlobalMatchmakingSettings struct {
 	SilentEarlyQuitSystem          bool                    `json:"silent_early_quit_system"`            // Disable Discord DM notifications for tier changes
 	EarlyQuitTier1Threshold        *int32                  `json:"early_quit_tier1_threshold"`          // Penalty level threshold for Tier 1 (good standing). Players with penalty <= threshold stay in Tier 1. Nil means not configured.
 	EarlyQuitTier2Threshold        *int32                  `json:"early_quit_tier2_threshold"`          // Penalty level threshold for Tier 2 (reserved for future Tier 3+ implementation). Nil means not configured.
+	EarlyQuitLossThreshold         float64                 `json:"early_quit_loss_threshold"`           // Threshold (0.0-1.0) for EarlyQuits/(Wins+Losses) ratio above which early quits count as losses in profile stats. 0.0 = disabled.
 	ServerSelection                ServerSelectionSettings `json:"server_selection"`                    // The server selection settings
 	EnableOrdinalRange             bool                    `json:"enable_ordinal_range"`                // Enable ordinal range
 	RatingRange                    float64                 `json:"rating_range"`                        // The rating range
