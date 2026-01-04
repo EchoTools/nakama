@@ -242,7 +242,7 @@ func (s *MatchLabel) GetEndpoint() evr.Endpoint {
 }
 
 func (s *MatchLabel) GetEntrantConnectMessage(role int, isPCVR bool, disableEncryption bool, disableMAC bool) *evr.LobbySessionSuccessv5 {
-	return evr.NewLobbySessionSuccess(s.Mode, s.ID.UUID, s.GetGroupID(), s.GameServer.Endpoint, int16(role), isPCVR, disableEncryption, disableMAC).Version5()
+	return evr.NewLobbySessionSuccess(s.Mode, s.ID.UUID, s.GetGroupID(), s.GameServer.Endpoint, int16(role), disableEncryption, disableMAC).Version5()
 }
 
 func (s *MatchLabel) MetricsTags() map[string]string {
