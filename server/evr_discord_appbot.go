@@ -3718,7 +3718,7 @@ func (d *DiscordAppBot) createLookupSetIGNModal(currentDisplayName string, isLoc
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
 							CustomID:    "lock_input",
-							Label:       "Allow player to change in-game display name? (true/false)",
+							Label:       "Lock IGN (true/false)",
 							Value:       fmt.Sprintf("%t", allowPlayerToChangeIGN),
 							Style:       discordgo.TextInputShort,
 							Required:    true,
