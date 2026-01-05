@@ -10,16 +10,16 @@ import (
 // TestFindBestBackfillMatch_TeamBalancing tests the team selection logic in backfill
 func TestFindBestBackfillMatch_TeamBalancing(t *testing.T) {
 	tests := []struct {
-		name               string
-		blueCount          int
-		orangeCount        int
-		blueOpenSlots      int
-		orangeOpenSlots    int
-		partySize          int
-		expectedTeamsCount int // How many teams should be in possibleTeams
-		shouldIncludeBlue  bool
+		name                string
+		blueCount           int
+		orangeCount         int
+		blueOpenSlots       int
+		orangeOpenSlots     int
+		partySize           int
+		expectedTeamsCount  int // How many teams should be in possibleTeams
+		shouldIncludeBlue   bool
 		shouldIncludeOrange bool
-		description        string
+		description         string
 	}{
 		{
 			name:                "Prefer smaller team - Blue smaller",
@@ -185,7 +185,7 @@ func TestFindBestBackfillMatch_TeamBalancing(t *testing.T) {
 func TestBackfill_PreventUnbalancedAssignment(t *testing.T) {
 	// Scenario: Match has Blue=4, Orange=1, both teams have open slots
 	// We want to ensure backfill strongly prefers Orange to maintain balance
-	
+
 	blueCount := 4
 	orangeCount := 1
 	openSlots := map[int]int{
@@ -234,7 +234,7 @@ func TestBackfill_PreventUnbalancedAssignment(t *testing.T) {
 func TestBackfill_FallbackWhenPreferredFull(t *testing.T) {
 	// Scenario: Orange is smaller (should be preferred) but full
 	// Should fall back to blue
-	
+
 	blueCount := 4
 	orangeCount := 2
 	openSlots := map[int]int{
@@ -282,7 +282,7 @@ func TestBackfill_FallbackWhenPreferredFull(t *testing.T) {
 func TestBackfill_EqualTeamsConsiderBoth(t *testing.T) {
 	// This is important for match quality - when teams are balanced,
 	// the scoring function should decide which team gives better balance
-	
+
 	blueCount := 3
 	orangeCount := 3
 	openSlots := map[int]int{

@@ -402,10 +402,10 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	if teamSize*2 != len(entrants) {
 		return nil, fmt.Errorf("entrants count must be even for team splitting, got %d", len(entrants))
 	}
-	
+
 	teams := [2][]*MatchmakerEntry{
-		entrants[:teamSize],  // Blue team (first half)
-		entrants[teamSize:],  // Orange team (second half)
+		entrants[:teamSize], // Blue team (first half)
+		entrants[teamSize:], // Orange team (second half)
 	}
 
 	entrantPresences := make([]*EvrMatchPresence, 0, len(entrants))

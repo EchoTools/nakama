@@ -12,7 +12,7 @@ import (
 func TestBuildMatch_TeamAssignment(t *testing.T) {
 	// Test the team assignment logic in isolation (unit test style)
 	// This tests the actual splitting logic used in buildMatch
-	
+
 	tests := []struct {
 		name          string
 		entrantCount  int
@@ -78,7 +78,7 @@ func TestBuildMatch_TeamAssignment(t *testing.T) {
 
 			// Simulate the team splitting logic from buildMatch
 			teamSize := len(entrants) / 2
-			
+
 			// Check for even split validation
 			if teamSize*2 != len(entrants) {
 				if !tt.wantErr {
@@ -86,7 +86,7 @@ func TestBuildMatch_TeamAssignment(t *testing.T) {
 				}
 				return
 			}
-			
+
 			if tt.wantErr {
 				t.Errorf("Expected error but got success for %d entrants", len(entrants))
 				return
@@ -94,8 +94,8 @@ func TestBuildMatch_TeamAssignment(t *testing.T) {
 
 			// Split using the fixed logic: array slicing
 			teams := [2][]*MatchmakerEntry{
-				entrants[:teamSize],  // Blue team (first half)
-				entrants[teamSize:],  // Orange team (second half)
+				entrants[:teamSize], // Blue team (first half)
+				entrants[teamSize:], // Orange team (second half)
 			}
 
 			// Verify team sizes
@@ -158,8 +158,8 @@ func TestBuildMatch_PreservesMatchmakerOrdering(t *testing.T) {
 	require.Equal(t, 5, teamSize, "Team size should be 5")
 
 	teams := [2][]*MatchmakerEntry{
-		entrants[:teamSize],  // Blue team (first half)
-		entrants[teamSize:],  // Orange team (second half)
+		entrants[:teamSize], // Blue team (first half)
+		entrants[teamSize:], // Orange team (second half)
 	}
 
 	// Verify team 0 has the first 5 entrants
@@ -186,7 +186,7 @@ func TestBuildMatch_PartiesStayTogether(t *testing.T) {
 	party2Ticket := uuid.Must(uuid.NewV4()).String()
 
 	entrants := make([]*MatchmakerEntry, 8)
-	
+
 	// Team 0: Party1 (2 players) + 2 solos
 	for i := 0; i < 2; i++ {
 		sessionID := uuid.Must(uuid.NewV4())
@@ -207,7 +207,7 @@ func TestBuildMatch_PartiesStayTogether(t *testing.T) {
 			PartyId: party1Ticket,
 		}
 	}
-	
+
 	// Add 2 solo players to team 0
 	for i := 2; i < 4; i++ {
 		sessionID := uuid.Must(uuid.NewV4())
@@ -248,7 +248,7 @@ func TestBuildMatch_PartiesStayTogether(t *testing.T) {
 			PartyId: party2Ticket,
 		}
 	}
-	
+
 	// Add 2 more solo players to team 1
 	for i := 6; i < 8; i++ {
 		sessionID := uuid.Must(uuid.NewV4())
@@ -272,8 +272,8 @@ func TestBuildMatch_PartiesStayTogether(t *testing.T) {
 	// Split teams using the fixed logic
 	teamSize := len(entrants) / 2
 	teams := [2][]*MatchmakerEntry{
-		entrants[:teamSize],  // Blue team (first half)
-		entrants[teamSize:],  // Orange team (second half)
+		entrants[:teamSize], // Blue team (first half)
+		entrants[teamSize:], // Orange team (second half)
 	}
 
 	// Verify team 0 has party1 together
@@ -316,7 +316,7 @@ func TestBuildMatch_NoTeamReassignment(t *testing.T) {
 	// This test ensures we're using array slicing, not i/teamSize
 	// The bug was: teams[i/teamSize] which would put indices 0-4 in team 0 and 5-9 in team 1
 	// But if the array was reordered, this could create 5v5 with wrong balance
-	
+
 	// Create 10 entrants
 	entrants := make([]*MatchmakerEntry, 10)
 	for i := 0; i < 10; i++ {
@@ -362,13 +362,13 @@ func TestBuildMatch_NoTeamReassignment(t *testing.T) {
 	assert.Equal(t, originalID, teamsCorrect[0][0].Presence.GetSessionId(), "Slicing should reference original slice")
 }
 
-// TestMatchmakerEntry_TeamIndexAssignment tests that EntrantPresenceFromSession 
+// TestMatchmakerEntry_TeamIndexAssignment tests that EntrantPresenceFromSession
 // correctly receives and uses the team index from the split
 func TestMatchmakerEntry_TeamIndexAssignment(t *testing.T) {
 	// This is a characterization test to document expected behavior
 	// The team index (0 or 1) should be passed to EntrantPresenceFromSession
 	// which uses it to assign players to the correct team
-	
+
 	entrants := make([]*MatchmakerEntry, 4)
 	for i := 0; i < 4; i++ {
 		sessionID := uuid.Must(uuid.NewV4())
@@ -403,7 +403,7 @@ func TestMatchmakerEntry_TeamIndexAssignment(t *testing.T) {
 			// This is what buildMatch does in the actual code
 			assert.NotNil(t, entry, "Entry should not be nil")
 			assert.Contains(t, []int{0, 1}, teamIndex, "Team index should be 0 or 1")
-			
+
 			// Team 0 should have indices 0-1, team 1 should have indices 2-3
 			if teamIndex == 0 {
 				// First team gets first half of entrants
