@@ -225,6 +225,10 @@ func (d *DiscordAppBot) showEnforcementVoidModal(s *discordgo.Session, i *discor
 func (d *DiscordAppBot) handleEnforcementEditModalSubmit(logger runtime.Logger, i *discordgo.InteractionCreate, value string) error {
 	ctx := d.ctx
 
+	if i.Member == nil || i.Member.User == nil {
+		return fmt.Errorf("member information not available")
+	}
+
 	// Parse value: targetDiscordID:recordID
 	parts := strings.SplitN(value, ":", 2)
 	if len(parts) != 2 {
@@ -329,6 +333,10 @@ func (d *DiscordAppBot) handleEnforcementEditModalSubmit(logger runtime.Logger, 
 // handleEnforcementVoidModalSubmit handles the void confirmation modal submission
 func (d *DiscordAppBot) handleEnforcementVoidModalSubmit(logger runtime.Logger, i *discordgo.InteractionCreate, value string) error {
 	ctx := d.ctx
+
+	if i.Member == nil || i.Member.User == nil {
+		return fmt.Errorf("member information not available")
+	}
 
 	// Parse value: targetDiscordID:recordID
 	parts := strings.SplitN(value, ":", 2)
@@ -541,6 +549,9 @@ func (d *DiscordAppBot) sendEnforcementVoidAuditLog(logger runtime.Logger, edito
 
 // updateEnforcementMessage updates the original enforcement message with new record data
 func (d *DiscordAppBot) updateEnforcementMessage(i *discordgo.InteractionCreate, oldRecord, newRecord GuildEnforcementRecord, gg *GuildGroup, isVoid bool, voids map[string]GuildEnforcementRecordVoid) error {
+	if i.Member == nil || i.Member.User == nil {
+		return fmt.Errorf("member information not available")
+	}
 	if i.Message == nil {
 		return fmt.Errorf("no message to update")
 	}
