@@ -416,25 +416,6 @@ func TestMatchmakerEntry_TeamIndexAssignment(t *testing.T) {
 	}
 }
 
-// Helper function to create test matchmaker entries
-func createTestMatchmakerEntry(userID, sessionID, ticket, username string, mu, sigma float64) *MatchmakerEntry {
-	return &MatchmakerEntry{
-		Ticket: ticket,
-		Presence: &MatchmakerPresence{
-			UserId:    userID,
-			SessionId: sessionID,
-			Username:  username,
-		},
-		StringProperties: map[string]string{
-			"game_mode": "arena",
-		},
-		NumericProperties: map[string]float64{
-			"rating_mu":    mu,
-			"rating_sigma": sigma,
-		},
-	}
-}
-
 // Benchmark to verify the fixed approach isn't slower than the buggy one
 func BenchmarkTeamSplitting_SlicingApproach(b *testing.B) {
 	// Create 1000 entrants
