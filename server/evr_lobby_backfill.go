@@ -453,13 +453,28 @@ func (b *PostMatchmakerBackfill) FindBestBackfillMatch(candidate *BackfillCandid
 				blueCount := match.Label.RoleCount(evr.TeamBlue)
 				orangeCount := match.Label.RoleCount(evr.TeamOrange)
 
-				if blueCount <= orangeCount && match.OpenSlots[evr.TeamBlue] >= partySize {
-					possibleTeams = append(possibleTeams, evr.TeamBlue)
+				// Determine which team(s) to consider based on current balance
+				if blueCount < orangeCount {
+					// Blue team is smaller, prioritize it
+					if match.OpenSlots[evr.TeamBlue] >= partySize {
+						possibleTeams = append(possibleTeams, evr.TeamBlue)
+					}
+				} else if orangeCount < blueCount {
+					// Orange team is smaller, prioritize it
+					if match.OpenSlots[evr.TeamOrange] >= partySize {
+						possibleTeams = append(possibleTeams, evr.TeamOrange)
+					}
+				} else {
+					// Teams are equal - consider both teams for better match quality
+					if match.OpenSlots[evr.TeamBlue] >= partySize {
+						possibleTeams = append(possibleTeams, evr.TeamBlue)
+					}
+					if match.OpenSlots[evr.TeamOrange] >= partySize {
+						possibleTeams = append(possibleTeams, evr.TeamOrange)
+					}
 				}
-				if orangeCount < blueCount && match.OpenSlots[evr.TeamOrange] >= partySize {
-					possibleTeams = append(possibleTeams, evr.TeamOrange)
-				}
-				// If neither team is smaller or both can fit, try both
+
+				// If no team was added (smaller team is full), try the other team
 				if len(possibleTeams) == 0 {
 					if match.OpenSlots[evr.TeamBlue] >= partySize {
 						possibleTeams = append(possibleTeams, evr.TeamBlue)
