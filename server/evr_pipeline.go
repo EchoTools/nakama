@@ -413,6 +413,15 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 					},
 				},
 			}
+		case *evr.GameServerSaveLoadoutRequest: // Custom - loadout update from game server
+			logger.Info("Received save loadout request from game server",
+				zap.String("evr_id", msg.EvrID.String()),
+				zap.Int32("loadout_number", msg.LoadoutNumber))
+			// Process the loadout update directly without converting to protobuf
+			if err := p.gameServerSaveLoadoutRequest(session.Context(), logger, session.(*sessionWS), msg); err != nil {
+				logger.Error("Failed to process save loadout request", zap.Error(err))
+			}
+			return true
 		}
 	}
 	if envelope != nil {

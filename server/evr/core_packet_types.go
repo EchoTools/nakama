@@ -131,6 +131,8 @@ func NewMessageFromHash(hash uint64) Message {
 		return &GameServerJoinRejected{}
 	case 0x7777777777770800:
 		return &GameServerPlayerRemoved{}
+	case 0x7777777777770B00:
+		return &GameServerSaveLoadoutRequest{} // Custom - loadout update from game server
 	case 0x7777777777777777:
 		return &BroadcasterRegistrationRequest{}
 	case 0x82869f0b37eb4378:
