@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -183,11 +184,26 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		}
 		label, err = LobbyGameServerAllocate(ctx, logger, nk, []string{request.GroupId}, latencyHistory.LatestRTTs(), settings, []string{request.Region}, false, true, ServiceSettings().Matchmaking.QueryAddons.RPCAllocate)
 		if err != nil || label == nil {
-			if strings.Contains(err.Error(), "bad request:") {
-				err = runtime.NewError("required features not supported", StatusInvalidArgument)
+			// Check if this is a region fallback error - for RPC, auto-select closest
+			var regionErr ErrMatchmakingNoServersInRegion
+			if errors.As(err, &regionErr) && regionErr.FallbackInfo != nil {
+				logger.WithFields(map[string]any{
+					"requested_region": request.Region,
+					"selected_region":  regionErr.FallbackInfo.ClosestRegion,
+					"latency_ms":       regionErr.FallbackInfo.ClosestLatencyMs,
+				}).Info("Auto-selecting closest server for RPC allocation (no servers in requested region)")
+
+				// Allocate without region requirement to get the closest server
+				label, err = LobbyGameServerAllocate(ctx, logger, nk, []string{request.GroupId}, latencyHistory.LatestRTTs(), settings, nil, false, false, ServiceSettings().Matchmaking.QueryAddons.RPCAllocate)
 			}
-			logger.WithField("error", err).Error("Failed to allocate game server")
-			return "", runtime.NewError(err.Error(), StatusInvalidArgument)
+
+			if err != nil || label == nil {
+				if strings.Contains(err.Error(), "bad request:") {
+					err = runtime.NewError("required features not supported", StatusInvalidArgument)
+				}
+				logger.WithField("error", err).Error("Failed to allocate game server")
+				return "", runtime.NewError(err.Error(), StatusInvalidArgument)
+			}
 		}
 	}
 

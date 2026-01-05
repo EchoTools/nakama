@@ -313,8 +313,22 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 
 	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, []string{lobbyParams.RegionCode}, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
 	if err != nil {
-		logger.Warn("Failed to allocate game server", zap.Error(err), zap.Any("settings", settings))
-		return nil, err
+		// Check if this is a region fallback error - for pipeline, auto-select closest
+		var regionErr ErrMatchmakingNoServersInRegion
+		if errors.As(err, &regionErr) && regionErr.FallbackInfo != nil {
+			logger.Info("Auto-selecting closest server for lobby creation (no servers in requested region)",
+				zap.String("requested_region", lobbyParams.RegionCode),
+				zap.String("selected_region", regionErr.FallbackInfo.ClosestRegion),
+				zap.Int("latency_ms", regionErr.FallbackInfo.ClosestLatencyMs))
+
+			// Allocate without region requirement to get the closest server
+			label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, nil, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
+		}
+
+		if err != nil {
+			logger.Warn("Failed to allocate game server", zap.Error(err), zap.Any("settings", settings))
+			return nil, err
+		}
 	}
 
 	return label, nil

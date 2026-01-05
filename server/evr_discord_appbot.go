@@ -2216,6 +2216,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			label, rttMs, err := d.handleCreateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime)
 			if err != nil {
+				// Check if this is a region fallback error
+				var regionErr ErrMatchmakingNoServersInRegion
+				if errors.As(err, &regionErr) && regionErr.FallbackInfo != nil {
+					// Present user with fallback options
+					return d.presentRegionFallbackOptions(s, i, regionErr.FallbackInfo, "create-match", region, mode, level, startTime)
+				}
 				return err
 			}
 
@@ -2390,6 +2396,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			label, _, err := d.handleAllocateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime)
 			if err != nil {
+				// Check if this is a region fallback error
+				var regionErr ErrMatchmakingNoServersInRegion
+				if errors.As(err, &regionErr) && regionErr.FallbackInfo != nil {
+					// Present user with fallback options
+					return d.presentRegionFallbackOptions(s, i, regionErr.FallbackInfo, "allocate-match", region, mode, level, startTime)
+				}
 				return err
 			}
 

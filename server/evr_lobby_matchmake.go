@@ -41,6 +41,28 @@ var (
 	MatchmakingConfigStorageKey      = "config"
 )
 
+// RegionFallbackInfo contains information about alternative servers when requested region has none
+type RegionFallbackInfo struct {
+	RequestedRegions []string
+	ClosestServer    *MatchLabel
+	ClosestRegion    string
+	ClosestLatencyMs int
+}
+
+// ErrMatchmakingNoServersInRegion is returned when no servers are available in the requested region,
+// but servers are available in other regions
+type ErrMatchmakingNoServersInRegion struct {
+	FallbackInfo *RegionFallbackInfo
+}
+
+func (e ErrMatchmakingNoServersInRegion) Error() string {
+	if e.FallbackInfo != nil {
+		return fmt.Sprintf("server find failed: No servers available in region(s) %v, but servers found in %s (%dms)",
+			e.FallbackInfo.RequestedRegions, e.FallbackInfo.ClosestRegion, e.FallbackInfo.ClosestLatencyMs)
+	}
+	return "server find failed: No servers available in requested region"
+}
+
 type MatchmakingTicketParameters struct {
 	MinCount                int
 	MaxCount                int
