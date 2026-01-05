@@ -1753,7 +1753,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				// Assign the badge to the user
-				if err := AssignEntitlements(ctx, logger, nk, userID, i.Member.User.Username, targetUserID, "", entitlements); err != nil {
+				if err := AssignEntitlements(ctx, logger, nk, userID, user.Username, targetUserID, "", entitlements); err != nil {
 					return status.Error(codes.Internal, "failed to assign badge")
 				}
 
@@ -3111,6 +3111,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			switch group {
 			case "linkcode_modal":
+				if i.Member == nil || i.Member.User == nil {
+					logger.Error("Member information not available")
+					return
+				}
 				data := i.ModalSubmitData()
 				member, err := d.dg.GuildMember(i.GuildID, i.Member.User.ID)
 				if err != nil {
@@ -3597,6 +3601,10 @@ func (d *DiscordAppBot) interactionToSignature(prefix string, options []*discord
 func (d *DiscordAppBot) LogInteractionToChannel(i *discordgo.InteractionCreate, channelID string) error {
 	if channelID == "" {
 		return nil
+	}
+
+	if i.Member == nil || i.Member.User == nil {
+		return fmt.Errorf("member information not available")
 	}
 
 	data := i.ApplicationCommandData()
