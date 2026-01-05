@@ -311,57 +311,6 @@ func TestBuildMatch_PartiesStayTogether(t *testing.T) {
 	assert.Equal(t, 0, party1InTeam1, "Party1 should not be split to team 1")
 }
 
-// TestBuildMatch_NoTeamReassignment verifies that we're not using the buggy i/teamSize approach
-func TestBuildMatch_NoTeamReassignment(t *testing.T) {
-	// This test ensures we're using array slicing, not i/teamSize
-	// The bug was: teams[i/teamSize] which would put indices 0-4 in team 0 and 5-9 in team 1
-	// But if the array was reordered, this could create 5v5 with wrong balance
-
-	// Create 10 entrants
-	entrants := make([]*MatchmakerEntry, 10)
-	for i := 0; i < 10; i++ {
-		sessionID := uuid.Must(uuid.NewV4())
-		entrants[i] = &MatchmakerEntry{
-			Ticket: "ticket-" + sessionID.String(),
-			Presence: &MatchmakerPresence{
-				UserId:    sessionID.String(),
-				SessionId: sessionID.String(),
-				Username:  "player" + sessionID.String()[:8],
-			},
-			StringProperties: map[string]string{
-				"game_mode": "arena",
-			},
-			NumericProperties: map[string]float64{
-				"rating_mu":    float64(20 + i), // Increasing skill
-				"rating_sigma": 8.333,
-			},
-		}
-	}
-
-	// Using the fixed slicing approach
-	teamSize := len(entrants) / 2
-	teamsCorrect := [2][]*MatchmakerEntry{
-		entrants[:teamSize],
-		entrants[teamSize:],
-	}
-
-	// Simulate the old buggy approach for comparison
-	teamsBuggy := [2][]*MatchmakerEntry{}
-	for i, e := range entrants {
-		teamsBuggy[i/teamSize] = append(teamsBuggy[i/teamSize], e)
-	}
-
-	// In this case (ordered array), both approaches give the same result
-	// But we verify the correct approach is being used
-	assert.Equal(t, len(teamsCorrect[0]), len(teamsBuggy[0]), "Both should have same team 0 size")
-	assert.Equal(t, len(teamsCorrect[1]), len(teamsBuggy[1]), "Both should have same team 1 size")
-
-	// Verify the correct approach uses slicing (teams are references to original slice)
-	// This is a subtle check: with slicing, modifying the original entrants would affect teams
-	originalID := entrants[0].Presence.GetSessionId()
-	assert.Equal(t, originalID, teamsCorrect[0][0].Presence.GetSessionId(), "Slicing should reference original slice")
-}
-
 // TestMatchmakerEntry_TeamIndexAssignment tests that EntrantPresenceFromSession
 // correctly receives and uses the team index from the split
 func TestMatchmakerEntry_TeamIndexAssignment(t *testing.T) {
