@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -48,11 +49,25 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
 	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), nk, []string{params.GroupID.String()}, latestRTTs, settings, []string{params.RegionCode}, false, false, queryAddon)
 	if err != nil {
-		if strings.Contains("bad request:", err.Error()) {
-			err = NewLobbyErrorf(BadRequest, "required features not supported")
+		// Check if this is a region fallback error - for lobby create, auto-select closest
+		var regionErr ErrMatchmakingNoServersInRegion
+		if errors.As(err, &regionErr) && regionErr.FallbackInfo != nil {
+			logger.Info("Auto-selecting closest server for lobby creation (no servers in requested region)",
+				zap.String("requested_region", params.RegionCode),
+				zap.String("selected_region", regionErr.FallbackInfo.ClosestRegion),
+				zap.Int("latency_ms", regionErr.FallbackInfo.ClosestLatencyMs))
+
+			// Allocate without region requirement to get the closest server
+			label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), nk, []string{params.GroupID.String()}, latestRTTs, settings, nil, false, false, queryAddon)
 		}
-		logger.Warn("Failed to allocate game server", zap.Error(err), zap.Any("settings", settings))
-		return MatchID{}, err
+
+		if err != nil {
+			if strings.Contains("bad request:", err.Error()) {
+				err = NewLobbyErrorf(BadRequest, "required features not supported")
+			}
+			logger.Warn("Failed to allocate game server", zap.Error(err), zap.Any("settings", settings))
+			return MatchID{}, err
+		}
 	}
 
 	// Return the prepared session
