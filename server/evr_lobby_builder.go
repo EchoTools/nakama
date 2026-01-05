@@ -392,6 +392,9 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	}
 
 	groupID, err := b.groupIDFromEntrants(entrants)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine group ID from entrants: %w", err)
+	}
 
 	// Divide the entrants into two equal-sized teams
 	// The matchmaker returns balanced teams in the candidate array:
