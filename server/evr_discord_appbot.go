@@ -897,6 +897,14 @@ var (
 	}
 )
 
+func init() {
+	// Only allow slash commands in guild context - they require guild/member data
+	guildOnly := []discordgo.InteractionContextType{discordgo.InteractionContextGuild}
+	for _, cmd := range mainSlashCommands {
+		cmd.Contexts = &guildOnly
+	}
+}
+
 func (d *DiscordAppBot) UnregisterCommandsAll(ctx context.Context, logger runtime.Logger, dg *discordgo.Session) {
 	guilds, err := dg.UserGuilds(100, "", "", false)
 	if err != nil {
