@@ -671,8 +671,8 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 	)
 
 	logger = logger.WithFields(map[string]any{
-		"discord_id": i.Member.User.ID,
-		"username":   i.Member.User.Username,
+		"discord_id": user.ID,
+		"username":   user.Username,
 		"uid":        userID,
 	})
 
@@ -717,7 +717,7 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 		}
 		vrmlUser := m.User
 
-		if vrmlUser.GetDiscordID() != i.Member.User.ID {
+		if vrmlUser.GetDiscordID() != user.ID {
 			// VRML User is linked to a different Discord account
 			logger.Warn("Discord ID mismatch")
 			vrmlLink := fmt.Sprintf("[%s](https://vrmasterleague.com/EchoArena/Users/%s)", vrmlUser.UserName, vrmlUser.ID)
@@ -793,7 +793,7 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 			"vrml_discord_id": vrmlUser.GetDiscordID(),
 		})
 
-		if vrmlUser.GetDiscordID() != i.Member.User.ID {
+		if vrmlUser.GetDiscordID() != user.ID {
 			logger.Warn("Discord ID mismatch")
 			// VRML User is linked to a different Discord account
 			vrmlLink := fmt.Sprintf("[%s](https://vrmasterleague.com/EchoArena/Users/%s)", vrmlUser.UserName, vrmlUser.ID)

@@ -897,6 +897,14 @@ var (
 	}
 )
 
+func init() {
+	// Only allow slash commands in guild context - they require guild/member data
+	guildOnly := []discordgo.InteractionContextType{discordgo.InteractionContextGuild}
+	for _, cmd := range mainSlashCommands {
+		cmd.Contexts = &guildOnly
+	}
+}
+
 func (d *DiscordAppBot) UnregisterCommandsAll(ctx context.Context, logger runtime.Logger, dg *discordgo.Session) {
 	guilds, err := dg.UserGuilds(100, "", "", false)
 	if err != nil {
@@ -1753,7 +1761,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				// Assign the badge to the user
-				if err := AssignEntitlements(ctx, logger, nk, userID, i.Member.User.Username, targetUserID, "", entitlements); err != nil {
+				if err := AssignEntitlements(ctx, logger, nk, userID, user.Username, targetUserID, "", entitlements); err != nil {
 					return status.Error(codes.Internal, "failed to assign badge")
 				}
 
@@ -2208,6 +2216,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			label, rttMs, err := d.handleCreateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime)
 			if err != nil {
+				// Check if this is a region fallback error
+				var regionErr ErrMatchmakingNoServersInRegion
+				if errors.As(err, &regionErr) && regionErr.FallbackInfo != nil {
+					// Present user with fallback options
+					return d.presentRegionFallbackOptions(s, i, regionErr.FallbackInfo, "create-match", region, mode, level, startTime)
+				}
 				return err
 			}
 
@@ -2382,6 +2396,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			label, _, err := d.handleAllocateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime)
 			if err != nil {
+				// Check if this is a region fallback error
+				var regionErr ErrMatchmakingNoServersInRegion
+				if errors.As(err, &regionErr) && regionErr.FallbackInfo != nil {
+					// Present user with fallback options
+					return d.presentRegionFallbackOptions(s, i, regionErr.FallbackInfo, "allocate-match", region, mode, level, startTime)
+				}
 				return err
 			}
 
@@ -3111,6 +3131,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			switch group {
 			case "linkcode_modal":
+				if i.Member == nil || i.Member.User == nil {
+					logger.Error("Member information not available")
+					return
+				}
 				data := i.ModalSubmitData()
 				member, err := d.dg.GuildMember(i.GuildID, i.Member.User.ID)
 				if err != nil {
@@ -3599,6 +3623,10 @@ func (d *DiscordAppBot) LogInteractionToChannel(i *discordgo.InteractionCreate, 
 		return nil
 	}
 
+	if i.Member == nil || i.Member.User == nil {
+		return fmt.Errorf("member information not available")
+	}
+
 	data := i.ApplicationCommandData()
 	signature := d.interactionToSignature(data.Name, data.Options)
 
@@ -3702,7 +3730,7 @@ func (d *DiscordAppBot) createLookupSetIGNModal(currentDisplayName string, isLoc
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
 							CustomID:    "lock_input",
-							Label:       "Allow player to change in-game display name? (true/false)",
+							Label:       "Lock IGN (true/false)",
 							Value:       fmt.Sprintf("%t", allowPlayerToChangeIGN),
 							Style:       discordgo.TextInputShort,
 							Required:    true,

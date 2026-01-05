@@ -637,6 +637,10 @@ func (p *InGamePanel) HandleInteraction(i *discordgo.InteractionCreate, command 
 		return fmt.Errorf("panel is stopped")
 	}
 
+	if i.Member == nil || i.Member.User == nil {
+		return fmt.Errorf("member information not available")
+	}
+
 	action, value, _ := strings.Cut(command, ":")
 
 	data := i.Interaction.MessageComponentData()
@@ -792,6 +796,10 @@ func (d *DiscordAppBot) handleInGamePanel(ctx context.Context, logger runtime.Lo
 }
 
 func (d *DiscordAppBot) handleSetIGNModalSubmit(_ context.Context, logger runtime.Logger, _ *discordgo.Session, i *discordgo.InteractionCreate, data *discordgo.ModalSubmitInteractionData, value string) error {
+	if i.Member == nil || i.Member.User == nil {
+		return fmt.Errorf("member information not available")
+	}
+
 	// Handle IGN override modal submission from lookup command or IGP
 	// value is encoded as targetDiscordID:targetGuildID (from lookup flow) or
 	// as targetUserID:groupID (from IGP flow which uses internal IDs).

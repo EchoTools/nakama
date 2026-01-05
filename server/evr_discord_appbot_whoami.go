@@ -618,6 +618,9 @@ func (w *WhoAmI) createAlternatesEmbed() *discordgo.MessageEmbed {
 }
 
 func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, target *discordgo.User, opts UserProfileRequestOptions) error {
+	if i.Member == nil || i.Member.User == nil {
+		return fmt.Errorf("member information not available")
+	}
 
 	var (
 		err error
