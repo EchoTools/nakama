@@ -510,14 +510,7 @@ func (*WhoAmI) createVRMLHistoryEmbed(s *VRMLPlayerSummary) *discordgo.MessageEm
 
 		for sID, teams := range s.MatchCountsBySeasonByTeam {
 			for _, n := range teams {
-				seasonName, ok := vrmlSeasonDescriptionMap[sID]
-				if !ok {
-					seasonName = string(sID)
-				} else {
-					sNumber, _ := strings.CutPrefix(seasonName, "Season ")
-					seasonName = "S" + sNumber
-				}
-
+				seasonName := formatVRMLSeasonName(sID)
 				matchCountsBySeason[seasonName] += n
 			}
 		}
