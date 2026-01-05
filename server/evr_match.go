@@ -620,80 +620,75 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 				participation.RecordLeaveEvent(state)
 			}
 			// If the round is not over, then add an early quit count to the player.
-			if state.Mode == evr.ModeArenaPublic && time.Now().After(state.StartTime.Add(time.Second*60)) && state.GameState != nil && !state.GameState.MatchOver {
-				for _, p := range presences {
-					if mp, ok := state.presenceMap[p.GetSessionId()]; ok {
-						// Only players
-						if !mp.IsPlayer() {
-							continue
-						}
+			// Count all quits before match completion (both pre-game and early quits)
+			if state.Mode == evr.ModeArenaPublic && state.GameState != nil && !state.GameState.MatchOver {
+				// Only players
+				if mp.IsPlayer() {
+					nk.MetricsCounterAdd("match_entrant_early_quit", tags, 1)
 
-						nk.MetricsCounterAdd("match_entrant_early_quit", tags, 1)
+					logger.WithFields(map[string]interface{}{
+						"uid":          mp.GetUserId(),
+						"username":     mp.Username,
+						"evrid":        mp.EvrID,
+						"display_name": mp.DisplayName,
+					}).Debug("Incrementing early quit for player.")
+
+					if err := AccumulateLeaderboardStat(ctx, nk, mp.GetUserId(), mp.DisplayName, state.GetGroupID().String(), state.Mode, EarlyQuitStatisticID, 1); err != nil {
+						logger.Warn("Failed to record early quit to leaderboard: %v", err)
+					}
+
+					eqconfig := NewEarlyQuitConfig()
+					_nk := nk.(*RuntimeGoNakamaModule)
+					if err := StorableRead(ctx, nk, mp.GetUserId(), eqconfig, true); err != nil {
+						logger.WithField("error", err).Warn("Failed to load early quitter config")
+					} else {
+
+						eqconfig.IncrementEarlyQuit()
+
+						// Check for tier change after early quit
+						serviceSettings := ServiceSettings()
+						oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
 
 						logger.WithFields(map[string]interface{}{
-							"uid":          mp.GetUserId(),
-							"username":     mp.Username,
-							"evrid":        mp.EvrID,
-							"display_name": mp.DisplayName,
-						}).Debug("Incrementing early quit for player.")
+							"old_tier":     oldTier,
+							"new_tier":     newTier,
+							"tier_changed": tierChanged,
+							"eqconfig":     eqconfig,
+						}).Debug("Early quitter tier update.")
 
-						if err := AccumulateLeaderboardStat(ctx, nk, mp.GetUserId(), mp.DisplayName, state.GetGroupID().String(), state.Mode, EarlyQuitStatisticID, 1); err != nil {
-							logger.Warn("Failed to record early quit to leaderboard: %v", err)
-						}
-
-						eqconfig := NewEarlyQuitConfig()
-						_nk := nk.(*RuntimeGoNakamaModule)
-						if err := StorableRead(ctx, nk, mp.GetUserId(), eqconfig, true); err != nil {
-							logger.WithField("error", err).Warn("Failed to load early quitter config")
+						if err := StorableWrite(ctx, nk, mp.GetUserId(), eqconfig); err != nil {
+							logger.Warn("Failed to write early quitter config", zap.Error(err))
 						} else {
-
-							eqconfig.IncrementEarlyQuit()
-
-							// Check for tier change after early quit
-							serviceSettings := ServiceSettings()
-							oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
-
-							logger.WithFields(map[string]interface{}{
-								"old_tier":     oldTier,
-								"new_tier":     newTier,
-								"tier_changed": tierChanged,
-								"eqconfig":     eqconfig,
-							}).Debug("Early quitter tier update.")
-
-							if err := StorableWrite(ctx, nk, mp.GetUserId(), eqconfig); err != nil {
-								logger.Warn("Failed to write early quitter config", zap.Error(err))
-							} else {
-								if s := _nk.sessionRegistry.Get(uuid.FromStringOrNil(mp.GetSessionId())); s != nil {
-									if params, ok := LoadParams(s.Context()); ok {
-										params.earlyQuitConfig.Store(eqconfig)
-									}
+							if s := _nk.sessionRegistry.Get(uuid.FromStringOrNil(mp.GetSessionId())); s != nil {
+								if params, ok := LoadParams(s.Context()); ok {
+									params.earlyQuitConfig.Store(eqconfig)
 								}
+							}
 
-								// Launch goroutine to check if player logs out and remove early quit if they do
-								// Use a 5-minute grace period before checking logout status
-								// Use background context to ensure goroutine isn't cancelled when match ends
-								go func(userID, sessionID string) {
-									bgCtx := context.Background()
-									CheckAndStrikeEarlyQuitIfLoggedOut(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, 5*time.Minute)
-								}(mp.GetUserId(), mp.GetSessionId())
+							// Launch goroutine to check if player logs out and remove early quit if they do
+							// Use a 5-minute grace period before checking logout status
+							// Use background context to ensure goroutine isn't cancelled when match ends
+							go func(userID, sessionID string) {
+								bgCtx := context.Background()
+								CheckAndStrikeEarlyQuitIfLoggedOut(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, 5*time.Minute)
+							}(mp.GetUserId(), mp.GetSessionId())
 
-								// Send Discord DM if tier changed
-								if tierChanged {
-									discordID, err := GetDiscordIDByUserID(ctx, db, mp.GetUserId())
-									if err != nil {
-										logger.Warn("Failed to get Discord ID for tier notification", zap.Error(err))
-									} else if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
-										var message string
-										if oldTier > newTier {
-											// Degraded to Tier 2+
-											message = TierDegradedMessage
-										} else {
-											// Recovered to Tier 1
-											message = TierRestoredMessage
-										}
-										if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
-											logger.Warn("Failed to send tier change DM", zap.Error(err))
-										}
+							// Send Discord DM if tier changed
+							if tierChanged {
+								discordID, err := GetDiscordIDByUserID(ctx, db, mp.GetUserId())
+								if err != nil {
+									logger.Warn("Failed to get Discord ID for tier notification", zap.Error(err))
+								} else if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
+									var message string
+									if oldTier > newTier {
+										// Degraded to Tier 2+
+										message = TierDegradedMessage
+									} else {
+										// Recovered to Tier 1
+										message = TierRestoredMessage
+									}
+									if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
+										logger.Warn("Failed to send tier change DM", zap.Error(err))
 									}
 								}
 							}
