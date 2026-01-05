@@ -392,15 +392,24 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	}
 
 	groupID, err := b.groupIDFromEntrants(entrants)
-
-	// Divide the entrants into two equal-sized teams
-	teamSize := len(entrants) / 2
-	teams := [2][]*MatchmakerEntry{}
-	for i, e := range entrants {
-		teams[i/teamSize] = append(teams[i/teamSize], e)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine group ID from entrants: %w", err)
 	}
 
-	// Split the entrants into teams, half and half
+	// Divide the entrants into two equal-sized teams
+	// The matchmaker returns balanced teams in the candidate array:
+	// - First half (indices 0 : len(entrants)/2) = Team 0 (Blue)
+	// - Second half (indices len(entrants)/2 : len(entrants)) = Team 1 (Orange)
+	// We must preserve this assignment, not re-split arbitrarily.
+	teamSize := len(entrants) / 2
+	if teamSize*2 != len(entrants) {
+		return nil, fmt.Errorf("entrants count must be even for team splitting, got %d", len(entrants))
+	}
+
+	teams := [2][]*MatchmakerEntry{
+		entrants[:teamSize], // Blue team (first half)
+		entrants[teamSize:], // Orange team (second half)
+	}
 
 	entrantPresences := make([]*EvrMatchPresence, 0, len(entrants))
 	sessions := make([]Session, 0, len(entrants))
