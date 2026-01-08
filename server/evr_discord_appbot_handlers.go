@@ -734,6 +734,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		addSuspension         = !suspensionExpiry.IsZero() && time.Now().Before(suspensionExpiry)
 		recordsByGroupID      = make(map[string][]GuildEnforcementRecord, 1)
 		voids                 = make(map[string]GuildEnforcementRecordVoid, 0)
+		sentEmbedResponse     = false
 	)
 
 	gg, err := GuildGroupLoad(ctx, nk, groupID)
@@ -913,6 +914,25 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				}).Error("Failed to send enforcement notice")
 			}
 
+			// Send the same embed to the moderator as an ephemeral response
+			if i != nil {
+				err = d.dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:      discordgo.MessageFlagsEphemeral,
+						Embeds:     []*discordgo.MessageEmbed{embed},
+						Components: components,
+					},
+				})
+				if err != nil {
+					logger.WithFields(map[string]interface{}{
+						"error": err,
+					}).Error("Failed to send ephemeral response to moderator")
+				} else {
+					sentEmbedResponse = true
+				}
+			}
+
 		}
 	}
 
@@ -992,7 +1012,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 
 	_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s's `kick-player` actions summary for %s (%s):\n %s", caller.Mention(), target.Mention(), target.Username, strings.Join(actions, ";\n ")), false)
 
-	if i != nil {
+	if i != nil && !sentEmbedResponse {
 		return simpleInteractionResponse(d.dg, i, fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(actions, "\n")))
 	}
 	return nil
