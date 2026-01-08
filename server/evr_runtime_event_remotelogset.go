@@ -233,6 +233,13 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				continue
 			}
 
+			// NEVR (non-legacy) servers already persist loadout equips themselves.
+			if matchID, _, err := GetMatchIDBySessionID(nk, uuid.FromStringOrNil(s.SessionID)); err == nil && !matchID.IsNil() {
+				if label, err := MatchLabelByID(ctx, nk, matchID); err == nil && label != nil && label.GameServer != nil && label.GameServer.NativeSupport {
+					continue
+				}
+			}
+
 			category, name, err := msg.GetEquippedCustomization()
 			if err != nil {
 				logger.WithField("error", err).Warn("Failed to get equipped customization")
