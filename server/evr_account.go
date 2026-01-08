@@ -395,6 +395,11 @@ func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID strin
 		return fmt.Errorf("failed to write profile storage: %w", err)
 	}
 
+	// Invalidate any cached ServerProfile so it will be regenerated with the updated EVRProfile data.
+	if err := ServerProfileInvalidate(ctx, nk, userID); err != nil {
+		// Log the error but do not change the existing success/failure semantics of this function.
+		nk.Logger(ctx).Error("Failed to invalidate ServerProfile after EVRProfile update", "user_id", userID, "error", err)
+	}
 	// Also update the account metadata to keep it in sync
 	return nk.AccountUpdateId(ctx, userID, "", md.MarshalMap(), "", "", "", "", "")
 }
