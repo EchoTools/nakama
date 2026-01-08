@@ -59,7 +59,6 @@ type EvrPipeline struct {
 	nk              *RuntimeGoNakamaModule
 	runtimeLogger   runtime.Logger
 
-	profileCache *ProfileCache
 	discordCache *DiscordIntegrator
 	appBot       *DiscordAppBot
 
@@ -131,7 +130,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	runtimeLogger := NewRuntimeGoLogger(logger)
 	guildGroupRegistry := NewGuildGroupRegistry(ctx, runtimeLogger, nk, db)
 
-	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, metrics, sessionRegistry)
 	lobbyBuilder := NewLobbyBuilder(logger, nk, sessionRegistry, matchRegistry, tracker, metrics)
 	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
 
@@ -183,7 +181,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	discordIntegrator := NewDiscordIntegrator(ctx, logger, config, metrics, nk, db, dg, guildGroupRegistry)
 	discordIntegrator.Start()
 
-	appBot, err = NewDiscordAppBot(ctx, runtimeLogger, nk, db, metrics, pipeline, config, discordIntegrator, profileRegistry, statusRegistry, dg, ipInfoCache, guildGroupRegistry)
+	appBot, err = NewDiscordAppBot(ctx, runtimeLogger, nk, db, metrics, pipeline, config, discordIntegrator, statusRegistry, dg, ipInfoCache, guildGroupRegistry)
 	if err != nil {
 		logger.Error("Failed to create app bot", zap.Error(err))
 
@@ -231,7 +229,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		internalIP:   internalIP,
 		externalIP:   externalIP,
 
-		profileCache:                 profileRegistry,
 		userRemoteLogJournalRegistry: userRemoteLogJournalRegistry,
 		guildGroupRegistry:           guildGroupRegistry,
 		ipInfoCache:                  ipInfoCache,
@@ -778,6 +775,8 @@ func (p *EvrPipeline) ProcessProtobufRequest(logger *zap.Logger, session Session
 		pipelineFn = p.lobbySessionEvent
 	case *rtapi.Envelope_LobbyEntrantRemoved:
 		pipelineFn = p.lobbyEntrantRemoved
+	case *rtapi.Envelope_GameServerSaveLoadout:
+		pipelineFn = p.gameServerSaveLoadoutProtobuf
 	default:
 		// For all other messages, use the generic protobuf handler
 		return fmt.Errorf("unhandled protobuf message type: %T", in.Message)

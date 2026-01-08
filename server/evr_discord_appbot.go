@@ -55,7 +55,6 @@ type DiscordAppBot struct {
 	config             Config
 	metrics            Metrics
 	pipeline           *Pipeline
-	profileRegistry    *ProfileCache
 	statusRegistry     StatusRegistry
 	guildGroupRegistry *GuildGroupRegistry
 
@@ -78,7 +77,7 @@ type DiscordAppBot struct {
 	publicMatchRateLimiters  *MapOf[string, *rate.Limiter]
 }
 
-func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordIntegrator, profileRegistry *ProfileCache, statusRegistry StatusRegistry, dg *discordgo.Session, ipInfoCache *IPInfoCache, guildGroupRegistry *GuildGroupRegistry) (*DiscordAppBot, error) {
+func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordIntegrator, statusRegistry StatusRegistry, dg *discordgo.Session, ipInfoCache *IPInfoCache, guildGroupRegistry *GuildGroupRegistry) (*DiscordAppBot, error) {
 
 	logger = logger.WithField("system", "discordAppBot")
 
@@ -92,8 +91,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		metrics:  metrics,
 		config:   config,
 
-		profileRegistry: profileRegistry,
-		statusRegistry:  statusRegistry,
+		statusRegistry: statusRegistry,
 
 		dg:                 dg,
 		guildGroupRegistry: guildGroupRegistry,

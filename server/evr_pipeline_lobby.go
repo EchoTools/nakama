@@ -68,7 +68,9 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 		acceptedIDs = append(acceptedIDs, entrantID)
 	}
 
-	messages := make([]evr.Message, 0, 2)
+	messages := make([]evr.Message, 0, 4)
+
+	// Send protobuf messages first
 	if len(acceptedIDs) > 0 {
 		envelope := &rtapi.Envelope{
 			Message: &rtapi.Envelope_LobbyEntrantsAccept{
@@ -83,7 +85,7 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 		}
 		messages = append(messages, message)
 	}
-	if len(rejectedIDs) == 0 {
+	if len(rejectedIDs) > 0 {
 		envelope := &rtapi.Envelope{
 			Message: &rtapi.Envelope_LobbyEntrantReject{
 				LobbyEntrantReject: &rtapi.LobbyEntrantsRejectMessage{
@@ -100,7 +102,7 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 		messages = append(messages, message)
 	}
 
-	// Legacy support
+	// Legacy support - send after protobuf messages
 	if len(acceptedIDs) > 0 {
 		uuids := make([]uuid.UUID, 0, len(acceptedIDs))
 		for _, id := range acceptedIDs {
@@ -112,8 +114,8 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 		)
 	}
 	if len(rejectedIDs) > 0 {
-		uuids := make([]uuid.UUID, 0, len(acceptedIDs))
-		for _, id := range acceptedIDs {
+		uuids := make([]uuid.UUID, 0, len(rejectedIDs))
+		for _, id := range rejectedIDs {
 			uuids = append(uuids, uuid.FromStringOrNil(id))
 		}
 		messages = append(messages,

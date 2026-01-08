@@ -66,7 +66,7 @@ func sendDiscordError(e error, discordId string, logger *zap.Logger, bot *discor
 }
 
 // sendDiscordServerError sends a formatted error message about a specific game server to the user on discord
-func sendDiscordServerError(endpointID string, serverID uint64, errMsg string, discordId string, logger *zap.Logger, bot *discordgo.Session) {
+func sendDiscordServerError(internalIP net.IP, externalIP net.IP, port uint16, serverID uint64, errMsg string, discordId string, logger *zap.Logger, bot *discordgo.Session) {
 	if bot != nil && discordId != "" {
 		channel, err := bot.UserChannelCreate(discordId)
 		if err != nil {
@@ -80,9 +80,14 @@ func sendDiscordServerError(endpointID string, serverID uint64, errMsg string, d
 			Color:       0xFF0000, // Red color
 			Fields: []*discordgo.MessageEmbedField{
 				{
-					Name:   "Endpoint ID",
-					Value:  fmt.Sprintf("`%s`", endpointID),
-					Inline: false,
+					Name:   "Internal IP",
+					Value:  fmt.Sprintf("`%s:%d`", internalIP.String(), port),
+					Inline: true,
+				},
+				{
+					Name:   "External IP",
+					Value:  fmt.Sprintf("`%s:%d`", externalIP.String(), port),
+					Inline: true,
 				},
 				{
 					Name:   "Server ID",
@@ -262,7 +267,6 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 
 	logger = logger.With(zap.Any("group_ids", hostingGroupIDs), zap.Strings("tags", params.serverTags), zap.Strings("regions", regionCodes))
 
-
 	// Create the broadcaster config
 	config := NewGameServerPresence(session.UserID(), session.id, serverID, internalIP, externalIP, externalPort, hostingGroupIDs, defaultRegion, regionCodes, versionLock, params.serverTags, params.supportedFeatures, request.TimeStepUsecs, ipInfo, params.geoHashPrecision, isNative, request.Version)
 
@@ -301,7 +305,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 			// If the broadcaster is not available, send an error message to the user on discord
 			logger.Error("Broadcaster could not be reached", zap.Error(err))
 			errorMessage := fmt.Sprintf("Broadcaster (Endpoint ID: %s, Server ID: %d) could not be reached. Error: %v", config.Endpoint.String(), config.ServerID, err)
-			go sendDiscordServerError(config.Endpoint.String(), config.ServerID, err.Error(), params.DiscordID(), logger, p.discordCache.dg)
+			go sendDiscordServerError(config.Endpoint.InternalIP, config.Endpoint.ExternalIP, config.Endpoint.Port, config.ServerID, err.Error(), params.DiscordID(), logger, p.discordCache.dg)
 			return errFailedRegistration(session, logger, errors.New(errorMessage), evr.BroadcasterRegistration_Failure)
 		}
 	} else {
@@ -376,7 +380,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 					if err != nil {
 						errMsg = err.Error()
 					}
-					go sendDiscordServerError(config.Endpoint.String(), config.ServerID, errMsg, params.DiscordID(), logger, p.discordCache.dg)
+					go sendDiscordServerError(config.Endpoint.InternalIP, config.Endpoint.ExternalIP, config.Endpoint.Port, config.ServerID, errMsg, params.DiscordID(), logger, p.discordCache.dg)
 				}
 			}
 			// If the game server is alive, check if it is still in a match
@@ -411,8 +415,28 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		go HealthCheckStart(ctx, logger, p.nk, session, p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
 	}
 
-	// Send the registration success message
-	return session.SendEvrUnrequire(evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP))
+	// Build protobuf registration success message
+	envelope := &rtapi.Envelope{
+		Message: &rtapi.Envelope_GameServerRegistrationSuccess{
+			GameServerRegistrationSuccess: &rtapi.GameServerRegistrationSuccessMessage{
+				ServerId:          config.ServerID,
+				ExternalIpAddress: config.Endpoint.ExternalIP.String(),
+			},
+		},
+	}
+
+	protobufMsg, err := evr.NewNEVRProtobufMessageV1(envelope)
+	if err != nil {
+		logger.Warn("Failed to create protobuf registration success message", zap.Error(err))
+		// Fall back to legacy only
+		return session.SendEvrUnrequire(evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP))
+	}
+
+	// Send both protobuf and legacy messages for backwards compatibility
+	return session.SendEvrUnrequire(
+		protobufMsg,
+		evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP),
+	)
 }
 
 // buildRegionCodes constructs the region codes list and determines the default region.

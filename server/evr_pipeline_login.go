@@ -890,7 +890,10 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		return fmt.Errorf("failed to get server profile: %w", err)
 	}
 
-	p.profileCache.Store(session.id, *serverProfile)
+	// Store the server profile for later retrieval by other players
+	if err := ServerProfileStore(ctx, p.nk, userID, serverProfile); err != nil {
+		logger.Warn("Failed to store server profile", zap.Error(err))
+	}
 
 	clientProfile := NewClientProfile(ctx, params.profile, serverProfile)
 
@@ -1230,11 +1233,16 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 		p.nk.metrics.CustomTimer("profile_request_latency", tags, time.Since(startTime))
 	}()
 
-	var ok bool
-	var data json.RawMessage
-
-	if data, ok = p.profileCache.Load(request.EvrId); !ok {
-		logger.Error("Profile does not exist in cache.", zap.String("evrId", request.EvrId.String()))
+	// Load the server profile by XPID from storage (returns raw JSON)
+	data, _, err := ServerProfileLoadByXPID(ctx, p.nk, request.EvrId)
+	if err != nil {
+		tags["error"] = "failed_load_profile"
+		logger.Error("Failed to load profile from storage", zap.Error(err), zap.String("evrId", request.EvrId.String()))
+		return nil
+	}
+	if data == nil {
+		tags["error"] = "profile_not_found"
+		logger.Error("Profile does not exist in storage.", zap.String("evrId", request.EvrId.String()))
 		return nil
 	}
 	/*
