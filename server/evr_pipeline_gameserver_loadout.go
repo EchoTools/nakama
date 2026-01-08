@@ -74,12 +74,12 @@ func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *
 		for slotHex, equippedHex := range instance.Items {
 			slotSymbol := evr.ToSymbol(slotHex)
 			if slotSymbol == 0 {
-				logger.Warn("Failed to parse slot hash", zap.String("slot", slotHex), zap.Error(err))
+				logger.Warn("Failed to parse slot hash", zap.String("slot", slotHex))
 				continue
 			}
 			equippedSymbol := evr.ToSymbol(equippedHex)
 			if equippedSymbol == 0 {
-				logger.Warn("Failed to parse equipped hash", zap.String("equipped", equippedHex), zap.Error(err))
+				logger.Warn("Failed to parse equipped hash", zap.String("equipped", equippedHex))
 				continue
 			}
 
