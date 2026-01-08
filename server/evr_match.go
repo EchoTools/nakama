@@ -704,16 +704,34 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 	if len(rejects) > 0 {
 		code := evr.PlayerRejectionReasonDisconnected
-		msgs := []evr.Message{
-			evr.NewGameServerEntrantRejected(code, rejects...),
-		}
-		logger.WithFields(map[string]interface{}{
-			"rejects": rejects,
-			"code":    code,
-		}).Debug("Sending reject message to game server.")
 
-		if err := m.dispatchMessages(ctx, logger, dispatcher, msgs, []runtime.Presence{state.server}, nil); err != nil {
-			logger.Warn("Failed to dispatch message: %v", err)
+		// Convert UUIDs to strings for protobuf
+		rejectIDs := make([]string, 0, len(rejects))
+		for _, id := range rejects {
+			rejectIDs = append(rejectIDs, id.String())
+		}
+
+		envelope := &rtapi.Envelope{
+			Message: &rtapi.Envelope_LobbyEntrantReject{
+				LobbyEntrantReject: &rtapi.LobbyEntrantsRejectMessage{
+					EntrantIds: rejectIDs,
+					Code:       int32(code),
+				},
+			},
+		}
+
+		msg, err := evr.NewNEVRProtobufMessageV1(envelope)
+		if err != nil {
+			logger.Warn("Failed to create protobuf message", zap.Error(err))
+		} else {
+			logger.WithFields(map[string]interface{}{
+				"rejects": rejects,
+				"code":    code,
+			}).Debug("Sending reject message to game server.")
+
+			if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{state.server}, nil); err != nil {
+				logger.Warn("Failed to dispatch message: %v", err)
+			}
 		}
 	}
 	if len(state.presenceMap) == 0 {
@@ -1432,9 +1450,20 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 		return nil, fmt.Errorf("failed to create protobuf message: %w", err)
 	}
 
+	entrants := make([]evr.EvrId, 0, len(state.presenceByEvrID))
+	for evrID := range state.presenceByEvrID {
+		entrants = append(entrants, evrID)
+	}
+
+	appID := ""
+	if state.GameServer != nil {
+		appID = state.GameServer.AppID
+	}
+
 	messages := []evr.Message{
 		message,
-		evr.NewGameServerSessionStart(state.ID.UUID, groupID, uint8(state.MaxSize), uint8(state.LobbyType), state.GameServer.AppID, state.Mode, state.Level, state.RequiredFeatures, []evr.EvrId{}), // Legacy Message for the game server.
+		// Legacy message for backwards compatibility with legacy game servers.
+		evr.NewGameServerSessionStart(state.ID.UUID, groupID, uint8(state.MaxSize), uint8(state.LobbyType), appID, state.Mode, state.Level, state.RequiredFeatures, entrants),
 	}
 
 	nk.MetricsCounterAdd("match_start_count", state.MetricsTags(), 1)
@@ -1487,8 +1516,33 @@ func (m *EvrMatch) kickEntrants(ctx context.Context, logger runtime.Logger, disp
 }
 
 func (m *EvrMatch) sendEntrantReject(ctx context.Context, logger runtime.Logger, dispatcher runtime.MatchDispatcher, server runtime.Presence, reason evr.PlayerRejectionReason, entrantIDs ...uuid.UUID) error {
-	msg := evr.NewGameServerEntrantRejected(reason, entrantIDs...)
-	if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{server}, nil); err != nil {
+	// Convert UUIDs to strings for protobuf
+	rejectIDs := make([]string, 0, len(entrantIDs))
+	for _, id := range entrantIDs {
+		rejectIDs = append(rejectIDs, id.String())
+	}
+
+	envelope := &rtapi.Envelope{
+		Message: &rtapi.Envelope_LobbyEntrantReject{
+			LobbyEntrantReject: &rtapi.LobbyEntrantsRejectMessage{
+				EntrantIds: rejectIDs,
+				Code:       int32(reason),
+			},
+		},
+	}
+
+	msg, err := evr.NewNEVRProtobufMessageV1(envelope)
+	if err != nil {
+		return fmt.Errorf("failed to create protobuf message: %w", err)
+	}
+
+	msgs := []evr.Message{
+		msg,
+		// Legacy message for backwards compatibility with legacy game servers.
+		evr.NewGameServerEntrantRejected(reason, entrantIDs...),
+	}
+
+	if err := m.dispatchMessages(ctx, logger, dispatcher, msgs, []runtime.Presence{server}, nil); err != nil {
 		return fmt.Errorf("failed to dispatch message: %w", err)
 	}
 	return nil
