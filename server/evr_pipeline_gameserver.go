@@ -415,8 +415,28 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		go HealthCheckStart(ctx, logger, p.nk, session, p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
 	}
 
-	// Send the registration success message
-	return session.SendEvrUnrequire(evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP))
+	// Build protobuf registration success message
+	envelope := &rtapi.Envelope{
+		Message: &rtapi.Envelope_GameServerRegistrationSuccess{
+			GameServerRegistrationSuccess: &rtapi.GameServerRegistrationSuccessMessage{
+				ServerId:          config.ServerID,
+				ExternalIpAddress: config.Endpoint.ExternalIP.String(),
+			},
+		},
+	}
+
+	protobufMsg, err := evr.NewNEVRProtobufMessageV1(envelope)
+	if err != nil {
+		logger.Warn("Failed to create protobuf registration success message", zap.Error(err))
+		// Fall back to legacy only
+		return session.SendEvrUnrequire(evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP))
+	}
+
+	// Send both protobuf and legacy messages for backwards compatibility
+	return session.SendEvrUnrequire(
+		protobufMsg,
+		evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP),
+	)
 }
 
 // buildRegionCodes constructs the region codes list and determines the default region.

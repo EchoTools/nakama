@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/echotools/nevr-common/v4/gen/go/rtapi"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -179,12 +180,45 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	// Leave any other lobby group stream.
 	tracker.UntrackLocalByModes(session.ID(), map[uint8]struct{}{StreamModeMatchmaking: {}, StreamModeGuildGroup: {}}, guildGroupStream)
 
-	connectionSettings := label.GetEntrantConnectMessage(e.RoleAlignment, e.IsPCVR, e.DisableEncryption, e.DisableMAC)
+	connectionSettings := label.GetEntrantConnectMessage(e.RoleAlignment, e.DisableEncryption, e.DisableMAC)
 
-	// Send the lobby session success message to the game server.
-	if err := SendEVRMessages(serverSession, false, connectionSettings); err != nil {
-		logger.Error("failed to send lobby session success to game server", zap.Error(err))
-		return errors.New("failed to send lobby session success to game server")
+	// Create the protobuf envelope for the lobby session success message.
+	successEnvelope := &rtapi.Envelope{
+		Message: &rtapi.Envelope_LobbySessionSuccessV5{
+			LobbySessionSuccessV5: &rtapi.SNSLobbySessionSuccessV5Message{
+				GameMode:           uint64(connectionSettings.GameMode),
+				LobbyId:            connectionSettings.LobbyID.String(),
+				GroupId:            connectionSettings.GroupID.String(),
+				Endpoint:           connectionSettings.Endpoint.String(),
+				TeamIndex:          int32(connectionSettings.TeamIndex),
+				UserSlot:           uint32(connectionSettings.UserSlot),
+				Flags32:            uint32(connectionSettings.Flags32),
+				SessionFlags:       uint32(connectionSettings.SessionFlags),
+				ServerEncoderFlags: connectionSettings.ServerEncoderFlags,
+				ClientEncoderFlags: connectionSettings.ClientEncoderFlags,
+				ServerSequenceId:   connectionSettings.ServerSequenceId,
+				ServerMacKey:       connectionSettings.ServerMacKey,
+				ServerEncKey:       connectionSettings.ServerEncKey,
+				ServerRandomKey:    connectionSettings.ServerRandomKey,
+				ClientSequenceId:   connectionSettings.ClientSequenceId,
+				ClientMacKey:       connectionSettings.ClientMacKey,
+				ClientEncKey:       connectionSettings.ClientEncKey,
+				ClientRandomKey:    connectionSettings.ClientRandomKey,
+			},
+		},
+	}
+
+	// Create the protobuf message wrapper.
+	protobufMsg, err := evr.NewNEVRProtobufMessageV1(successEnvelope)
+	if err != nil {
+		logger.Error("failed to create protobuf message", zap.Error(err))
+		return errors.New("failed to create protobuf message")
+	}
+
+	// Send the protobuf lobby session success message to the game server first.
+	if err := SendEVRMessages(serverSession, false, protobufMsg, connectionSettings); err != nil {
+		logger.Error("failed to send protobuf lobby session success to game server", zap.Error(err))
+		return errors.New("failed to send protobuf lobby session success to game server")
 	}
 
 	if ServiceSettings().PingServerBeforeJoin {
