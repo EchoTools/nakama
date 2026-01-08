@@ -302,11 +302,10 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				}
 			}
 
-			/*
-				if _, err := p.profileCache.Store(session.ID(), *serverProfile); err != nil {
-					return fmt.Errorf("failed to cache profile: %w", err)
-				}
-			*/
+			// Store the updated server profile
+			if err := ServerProfileStore(ctx, nk, session.UserID().String(), serverProfile); err != nil {
+				logger.WithField("error", err).Warn("Failed to store server profile")
+			}
 
 		case *evr.RemoteLogRepairMatrix:
 

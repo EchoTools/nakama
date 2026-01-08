@@ -512,8 +512,9 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		profile.DeveloperFeatures = &evr.DeveloperFeatures{}
 	}
 
-	if _, err := p.profileCache.Store(session.ID(), *profile); err != nil {
-		return fmt.Errorf("failed to cache profile: %w", err)
+	// Store the server profile for later retrieval by other players
+	if err := ServerProfileStore(ctx, p.nk, userID, profile); err != nil {
+		return fmt.Errorf("failed to store profile: %w", err)
 	}
 
 	session.Logger().Info("Authorized access to lobby session", zap.String("gid", groupID), zap.String("display_name", displayName))

@@ -339,6 +339,7 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 		&VRMLPlayerSummary{},
 		&LoginHistory{},
 		&GuildEnforcementJournal{},
+		&ServerProfileStorage{},
 	}
 	for _, s := range storables {
 		for _, idx := range s.StorageIndexes() {
