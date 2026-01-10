@@ -218,18 +218,20 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		}
 	}
 
+	// Mode-based query addons
+	modeAddons := serviceSettings.QueryAddonsForMode(mode)
 	matchmakingQueryAddons := []string{
-		globalSettings.QueryAddons.Matchmaking,
+		modeAddons.Matchmaking,
 		userSettings.LobbyBuilderQueryAddon,
 	}
 
 	backfillQueryAddons := []string{
-		globalSettings.QueryAddons.Backfill,
+		modeAddons.Backfill,
 		userSettings.BackfillQueryAddon,
 	}
 
 	createQueryAddons := []string{
-		globalSettings.QueryAddons.Create,
+		modeAddons.Create,
 		userSettings.CreateQueryAddon,
 	}
 
@@ -301,7 +303,8 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	if mode == evr.ModeSocialPublic || mode == evr.ModeArenaPublicAI {
 		mmMode = evr.ModeArenaPublic
 	}
-	if (mode == evr.ModeArenaPublic || mode == evr.ModeCombatPublic) && globalSettings.EnableSBMM && groupID != uuid.Nil {
+	// Only load SBMM rating data for arena when SBMM is enabled for the mode
+	if mode == evr.ModeArenaPublic && serviceSettings.SBMMEnabledForMode(mode) && groupID != uuid.Nil {
 
 		if userSettings.StaticRatingMu != nil && userSettings.StaticRatingSigma != nil {
 			matchmakingRating = types.Rating{Mu: *userSettings.StaticRatingMu, Sigma: *userSettings.StaticRatingSigma}
@@ -337,7 +340,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		latencyHistory = NewLatencyHistory()
 	}
 	sessionParams.latencyHistory.Store(latencyHistory)
-	
+
 	// Set the maxRTT to at least the average of the player's latency history
 	if averages := latencyHistory.AverageRTTs(false); len(averages) > 0 {
 		averageRTT := 0
@@ -365,31 +368,32 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	params, _ := LoadParams(ctx)
 
 	return &LobbySessionParameters{
-		Node:                         node,
-		UserID:                       session.userID,
-		SessionID:                    session.id,
-		DiscordID:                    sessionParams.DiscordID(),
-		CurrentMatchID:               currentMatchID,
-		VersionLock:                  versionLock,
-		AppID:                        appID,
-		GroupID:                      groupID,
-		RegionCode:                   region,
-		Mode:                         mode,
-		Level:                        level,
-		SupportedFeatures:            supportedFeatures,
-		RequiredFeatures:             requiredFeatures,
-		Role:                         entrantRole,
-		DisableArenaBackfill:         globalSettings.DisableArenaBackfill || userSettings.DisableArenaBackfill,
-		BackfillQueryAddon:           strings.Join(backfillQueryAddons, " "),
-		MatchmakingQueryAddon:        strings.Join(matchmakingQueryAddons, " "),
-		CreateQueryAddon:             strings.Join(createQueryAddons, " "),
-		PartyGroupName:               lobbyGroupName,
-		PartyID:                      partyID,
-		PartySize:                    atomic.NewInt64(1),
-		NextMatchID:                  nextMatchID,
-		latencyHistory:               params.latencyHistory,
-		BlockedIDs:                   blockedIDs,
-		EnableSBMM:                   globalSettings.EnableSBMM,
+		Node:                  node,
+		UserID:                session.userID,
+		SessionID:             session.id,
+		DiscordID:             sessionParams.DiscordID(),
+		CurrentMatchID:        currentMatchID,
+		VersionLock:           versionLock,
+		AppID:                 appID,
+		GroupID:               groupID,
+		RegionCode:            region,
+		Mode:                  mode,
+		Level:                 level,
+		SupportedFeatures:     supportedFeatures,
+		RequiredFeatures:      requiredFeatures,
+		Role:                  entrantRole,
+		DisableArenaBackfill:  globalSettings.DisableArenaBackfill || userSettings.DisableArenaBackfill,
+		BackfillQueryAddon:    strings.Join(backfillQueryAddons, " "),
+		MatchmakingQueryAddon: strings.Join(matchmakingQueryAddons, " "),
+		CreateQueryAddon:      strings.Join(createQueryAddons, " "),
+		PartyGroupName:        lobbyGroupName,
+		PartyID:               partyID,
+		PartySize:             atomic.NewInt64(1),
+		NextMatchID:           nextMatchID,
+		latencyHistory:        params.latencyHistory,
+		BlockedIDs:            blockedIDs,
+		// SBMM is mode-based; ensure combat disables SBMM features
+		EnableSBMM:                   serviceSettings.SBMMEnabledForMode(mode),
 		EnableDivisions:              globalSettings.EnableDivisions,
 		EnableOrdinalRange:           globalSettings.EnableOrdinalRange,
 		MatchmakingRating:            atomic.NewPointer(&matchmakingRating),
@@ -559,8 +563,9 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	}
 
 	numericProperties := map[string]float64{
-		"timestamp": float64(p.MatchmakingTimestamp.UTC().Unix()),
-		"max_rtt":   float64(p.MaxServerRTT),
+		"timestamp":        float64(p.MatchmakingTimestamp.UTC().Unix()),
+		"max_rtt":          float64(p.MaxServerRTT),
+		"early_quit_level": float64(p.EarlyQuitPenaltyLevel),
 	}
 
 	qparts := []string{
@@ -569,6 +574,12 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		fmt.Sprintf(`-properties.blocked_ids:/.*%s.*/`, Query.QuoteStringValue(p.UserID.String())),
 		//"+properties.version_lock:" + p.VersionLock.String(),
 		p.MatchmakingQueryAddon,
+	}
+
+	// Keep green-division (newer) players away from early quitters
+	isGreenDivision := slices.Contains(p.MatchmakingDivisions, "green")
+	if isGreenDivision {
+		qparts = append(qparts, "-properties.early_quit_level:>0")
 	}
 
 	if len(p.MatchmakingDivisions) > 0 {

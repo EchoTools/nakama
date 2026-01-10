@@ -311,7 +311,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 		ReservationLifetime: 30 * time.Second,
 	}
 
-	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, []string{lobbyParams.RegionCode}, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
+	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, []string{lobbyParams.RegionCode}, true, false, ServiceSettings().QueryAddonsForMode(lobbyParams.Mode).Create)
 	if err != nil {
 		// Check if this is a region fallback error - for pipeline, auto-select closest
 		var regionErr ErrMatchmakingNoServersInRegion
@@ -322,7 +322,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 				zap.Int("latency_ms", regionErr.FallbackInfo.ClosestLatencyMs))
 
 			// Allocate without region requirement to get the closest server
-			label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, nil, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
+			label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, nil, true, false, ServiceSettings().QueryAddonsForMode(lobbyParams.Mode).Create)
 		}
 
 		if err != nil {

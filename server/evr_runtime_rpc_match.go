@@ -182,7 +182,8 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		if request.Region == "" {
 			request.Region = "default"
 		}
-		label, err = LobbyGameServerAllocate(ctx, logger, nk, []string{request.GroupId}, latencyHistory.LatestRTTs(), settings, []string{request.Region}, false, true, ServiceSettings().Matchmaking.QueryAddons.RPCAllocate)
+		// Use mode-based query addons for RPC allocate
+		label, err = LobbyGameServerAllocate(ctx, logger, nk, []string{request.GroupId}, latencyHistory.LatestRTTs(), settings, []string{request.Region}, false, true, ServiceSettings().QueryAddonsForMode(settings.Mode).RPCAllocate)
 		if err != nil || label == nil {
 			// Check if this is a region fallback error - for RPC, auto-select closest
 			var regionErr ErrMatchmakingNoServersInRegion
@@ -194,7 +195,7 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 				}).Info("Auto-selecting closest server for RPC allocation (no servers in requested region)")
 
 				// Allocate without region requirement to get the closest server
-				label, err = LobbyGameServerAllocate(ctx, logger, nk, []string{request.GroupId}, latencyHistory.LatestRTTs(), settings, nil, false, false, ServiceSettings().Matchmaking.QueryAddons.RPCAllocate)
+				label, err = LobbyGameServerAllocate(ctx, logger, nk, []string{request.GroupId}, latencyHistory.LatestRTTs(), settings, nil, false, false, ServiceSettings().QueryAddonsForMode(settings.Mode).RPCAllocate)
 			}
 
 			if err != nil || label == nil {

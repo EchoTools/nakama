@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/atomic"
 )
 
@@ -112,6 +113,13 @@ type GlobalMatchmakingSettings struct {
 	EnablePostMatchmakerBackfill   bool                    `json:"enable_post_matchmaker_backfill"`     // Enable post-matchmaker backfill using matchmaker exports and match list
 	ReducingPrecisionIntervalSecs  int                     `json:"reducing_precision_interval_secs"`    // Interval in seconds after which constraints are relaxed for backfill (0 = disabled)
 	ReducingPrecisionMaxCycles     int                     `json:"reducing_precision_max_cycles"`       // Maximum number of precision reduction cycles before fully relaxing constraints
+
+	// Mode-based overrides (optional). When unset/zeroed, global settings apply.
+	// If set, arena/combat can diverge for SBMM and query addons without impacting other modes.
+	ArenaEnableSBMM   *bool       `json:"arena_enable_skill_based_mm,omitempty"`
+	CombatEnableSBMM  *bool       `json:"combat_enable_skill_based_mm,omitempty"`
+	ArenaQueryAddons  QueryAddons `json:"arena_query_addons,omitempty"`
+	CombatQueryAddons QueryAddons `json:"combat_query_addons,omitempty"`
 }
 
 type QueryAddons struct {
@@ -136,6 +144,48 @@ func (g *ServiceSettingsData) String() string {
 
 func (g ServiceSettingsData) UseSkillBasedMatchmaking() bool {
 	return g.Matchmaking.EnableSBMM
+}
+
+// SBMMEnabledForMode returns whether SBMM features should be enabled for the given mode,
+// respecting per-mode overrides when provided. Defaults to global EnableSBMM.
+func (g ServiceSettingsData) SBMMEnabledForMode(mode evr.Symbol) bool {
+	mm := g.Matchmaking
+	switch mode {
+	case evr.ModeArenaPublic, evr.ModeSocialPublic, evr.ModeArenaPublicAI:
+		if mm.ArenaEnableSBMM != nil {
+			return *mm.ArenaEnableSBMM
+		}
+		return mm.EnableSBMM
+	case evr.ModeCombatPublic, evr.ModeCombatPrivate:
+		if mm.CombatEnableSBMM != nil {
+			return *mm.CombatEnableSBMM
+		}
+		// Explicitly default combat to off if not configured
+		return false
+	default:
+		return mm.EnableSBMM
+	}
+}
+
+// QueryAddonsForMode returns the query addons to use for the given mode,
+// falling back to global QueryAddons when no per-mode override exists.
+func (g ServiceSettingsData) QueryAddonsForMode(mode evr.Symbol) QueryAddons {
+	mm := g.Matchmaking
+	switch mode {
+	case evr.ModeArenaPublic, evr.ModeSocialPublic, evr.ModeArenaPublicAI:
+		// If any arena override field is set (non-empty), use the arena set
+		if mm.ArenaQueryAddons != (QueryAddons{}) {
+			return mm.ArenaQueryAddons
+		}
+		return mm.QueryAddons
+	case evr.ModeCombatPublic, evr.ModeCombatPrivate:
+		if mm.CombatQueryAddons != (QueryAddons{}) {
+			return mm.CombatQueryAddons
+		}
+		return mm.QueryAddons
+	default:
+		return mm.QueryAddons
+	}
 }
 
 func ServiceSettingsLoad(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) (*ServiceSettingsData, error) {

@@ -466,7 +466,8 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 	var label *MatchLabel
 	timeout := time.After(ServerAllocationTimeoutSeconds * time.Second)
-	queryAddon := ServiceSettings().Matchmaking.QueryAddons.LobbyBuilder
+	// Use mode-based query addons for server allocation
+	queryAddon := ServiceSettings().QueryAddonsForMode(mode).LobbyBuilder
 	for {
 		select {
 		case <-ctx.Done():

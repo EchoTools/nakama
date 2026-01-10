@@ -571,7 +571,8 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		StartTime: startTime.UTC().Add(10 * time.Minute),
 		SpawnedBy: userID,
 	}
-	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Allocate
+	// Use mode-based query addons for allocation
+	queryAddon := ServiceSettings().QueryAddonsForMode(mode).Allocate
 	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, allocatorGroupIDs, latestRTTs, settings, []string{regionCode}, false, true, queryAddon)
 	if err != nil {
 		// Check if this is a region fallback error
@@ -620,8 +621,8 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
 	isPrivileged := isGuildModerator || isGlobalOperator
 
-	// Check if this is a public match (echo_arena or echo_combat)
-	isPublicMatch := mode == evr.ModeArenaPublic || mode == evr.ModeCombatPublic
+	// Check if this is a public match (echo_arena only, echo_combat and echo_combat_private are excluded from rate limit)
+	isPublicMatch := mode == evr.ModeArenaPublic
 
 	// Apply stricter rate limit (1 per 15 minutes) for public matches, unless user is privileged
 	if isPublicMatch && !isPrivileged {
@@ -651,7 +652,8 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		SpawnedBy: userID,
 	}
 
-	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
+	// Use mode-based query addons for create
+	queryAddon := ServiceSettings().QueryAddonsForMode(mode).Create
 	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, extIPs, settings, []string{region}, true, false, queryAddon)
 	if err != nil {
 		// Check if this is a region fallback error
