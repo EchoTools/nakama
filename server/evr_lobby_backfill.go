@@ -58,9 +58,10 @@ type BackfillCandidate struct {
 
 // BackfillMatch represents a match that can accept backfill candidates
 type BackfillMatch struct {
-	Label     *MatchLabel
-	OpenSlots map[int]int // map[teamIndex]openSlots
-	RTTs      map[string]int
+	Label      *MatchLabel
+	OpenSlots  map[int]int // map[teamIndex]openSlots
+	TeamCounts map[int]int // map[teamIndex]playerCount - tracks pending backfills
+	RTTs       map[string]int
 }
 
 // BackfillResult represents the result of a backfill attempt
@@ -319,13 +320,17 @@ func (b *PostMatchmakerBackfill) GetBackfillMatches(ctx context.Context, groupID
 		}
 
 		openSlots := make(map[int]int)
+		teamCounts := make(map[int]int)
 		if mode == evr.ModeSocialPublic {
 			openSlots[evr.TeamSocial] = m.State.OpenPlayerSlots()
+			teamCounts[evr.TeamSocial] = m.State.RoleCount(evr.TeamSocial)
 		} else {
 			blueOpen, _ := m.State.OpenSlotsByRole(evr.TeamBlue)
 			orangeOpen, _ := m.State.OpenSlotsByRole(evr.TeamOrange)
 			openSlots[evr.TeamBlue] = blueOpen
 			openSlots[evr.TeamOrange] = orangeOpen
+			teamCounts[evr.TeamBlue] = m.State.RoleCount(evr.TeamBlue)
+			teamCounts[evr.TeamOrange] = m.State.RoleCount(evr.TeamOrange)
 		}
 
 		// Skip matches with no open slots
@@ -341,8 +346,9 @@ func (b *PostMatchmakerBackfill) GetBackfillMatches(ctx context.Context, groupID
 		}
 
 		result = append(result, &BackfillMatch{
-			Label:     m.State,
-			OpenSlots: openSlots,
+			Label:      m.State,
+			OpenSlots:  openSlots,
+			TeamCounts: teamCounts,
 		})
 	}
 
@@ -403,9 +409,10 @@ func (b *PostMatchmakerBackfill) CalculateBackfillScore(candidate *BackfillCandi
 	score += populationBonus
 
 	// Prefer matches where the team needs more players (balance)
+	// Use tracked team counts to account for pending backfills
 	if team != evr.TeamSocial {
-		blueCount := match.Label.RoleCount(evr.TeamBlue)
-		orangeCount := match.Label.RoleCount(evr.TeamOrange)
+		blueCount := match.TeamCounts[evr.TeamBlue]
+		orangeCount := match.TeamCounts[evr.TeamOrange]
 		teamImbalance := math.Abs(float64(blueCount - orangeCount))
 
 		// If this team assignment would help balance, add points
@@ -450,8 +457,9 @@ func (b *PostMatchmakerBackfill) FindBestBackfillMatch(candidate *BackfillCandid
 				}
 			} else {
 				// No team preference - try both teams, prefer the smaller one for balance
-				blueCount := match.Label.RoleCount(evr.TeamBlue)
-				orangeCount := match.Label.RoleCount(evr.TeamOrange)
+				// Use tracked team counts to account for pending backfills
+				blueCount := match.TeamCounts[evr.TeamBlue]
+				orangeCount := match.TeamCounts[evr.TeamOrange]
 
 				// Determine which team(s) to consider based on current balance
 				if blueCount < orangeCount {
@@ -570,12 +578,13 @@ func (b *PostMatchmakerBackfill) ProcessAndExecuteBackfill(ctx context.Context, 
 				continue
 			}
 
-			// Execute backfill immediately - only update slots on success
+			// Execute backfill immediately - only update slots and counts on success
 			successCount := b.executeBackfillResult(ctx, logger, result)
 			if successCount > 0 {
 				results = append(results, result)
-				// Only decrement slots for successfully joined entrants
+				// Update tracked slots and team counts for successfully joined entrants
 				result.Match.OpenSlots[result.Team] -= successCount
+				result.Match.TeamCounts[result.Team] += successCount
 			}
 		}
 	}

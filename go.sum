@@ -83,8 +83,8 @@ github.com/dlclark/regexp2 v1.11.5 h1:Q/sSnsKerHeCkc/jSTNq1oCm7KiVgUMZRDUoRu0JQZ
 github.com/dlclark/regexp2 v1.11.5/go.mod h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=
 github.com/dop251/goja v0.0.0-20251103141225-af2ceb9156d7 h1:jxmXU5V9tXxJnydU5v/m9SG8TRUa/Z7IXODBpMs/P+U=
 github.com/dop251/goja v0.0.0-20251103141225-af2ceb9156d7/go.mod h1:MxLav0peU43GgvwVgNbLAj1s/bSGboKkhuULvq/7hx4=
-github.com/echotools/nevr-common/v4 v4.2.0 h1:7XzQXa6yM2hPQ0gNwxrSP1cpdEUN23p08b4HyZgJd0M=
-github.com/echotools/nevr-common/v4 v4.2.0/go.mod h1:QuUV/AUT/7TklWqY6e+9cL1YzKuR5YyZqD/5R5nFLrM=
+github.com/echotools/nevr-common/v4 v4.3.0 h1:l88FixZZh9MTNHPNz+GtdsWpW9FK5ZLPRy2Tdac0pck=
+github.com/echotools/nevr-common/v4 v4.3.0/go.mod h1:QuUV/AUT/7TklWqY6e+9cL1YzKuR5YyZqD/5R5nFLrM=
 github.com/echotools/vrmlgo/v5 v5.0.1 h1:xdG88swr3ZsdDaYXvn/yCRNiH1U+bJAGZe6X2hJ0eaw=
 github.com/echotools/vrmlgo/v5 v5.0.1/go.mod h1:G6cajh/3UYgy1eRkez8qnvAwBWsO/dc7yGKJVmPbXNc=
 github.com/felixge/httpsnoop v1.0.4 h1:NFTV2Zj1bL4mc9sqWACXbQFVBBg2W3GPvqp8/ESS2Wg=
