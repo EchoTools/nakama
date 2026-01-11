@@ -212,7 +212,15 @@ func (p *EvrPipeline) gameServerSaveLoadoutProtobuf(logger *zap.Logger, session 
 		for _, item := range instance.Items {
 			// Convert fixed64 symbol IDs to evr.Symbol
 			slotSymbol := evr.Symbol(item.SlotType)
+			if slotSymbol == 0 {
+				logger.Warn("Skipping loadout item with zero slot type")
+				continue
+			}
 			equippedSymbol := evr.Symbol(item.EquippedItem)
+			if equippedSymbol == 0 {
+				logger.Debug("Skipping loadout item with zero equipped item", zap.Uint64("slot_type", item.SlotType))
+				continue
+			}
 
 			// Convert symbols to their string names
 			slotName := slotSymbol.String()
