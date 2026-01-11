@@ -1233,16 +1233,26 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 		p.nk.metrics.CustomTimer("profile_request_latency", tags, time.Since(startTime))
 	}()
 
-	// Load the server profile by XPID from storage (returns raw JSON)
-	data, _, err := ServerProfileLoadByXPID(ctx, p.nk, request.EvrId)
+	params, ok := LoadParams(ctx)
+	if !ok {
+		tags["error"] = "session_params_not_found"
+		logger.Warn("Session parameters not found")
+		return nil
+	}
+
+	groupID := params.profile.GetActiveGroupID().String()
+	modes := []evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}
+	dailyWeeklyMode := evr.ModeArenaPublic
+
+	// Load the server profile by XPID from storage (returns raw JSON), generating if not found
+	data, _, err := ServerProfileLoadByXPID(ctx, logger, p.db, p.nk, request.EvrId, groupID, modes, dailyWeeklyMode)
 	if err != nil {
 		tags["error"] = "failed_load_profile"
 		logger.Error("Failed to load profile from storage", zap.Error(err), zap.String("evrId", request.EvrId.String()))
 		return nil
-	}
-	if data == nil {
+	} else if data == nil {
 		tags["error"] = "profile_not_found"
-		logger.Error("Profile does not exist in storage.", zap.String("evrId", request.EvrId.String()))
+		logger.Warn("Profile does not exist in storage.", zap.String("evrId", request.EvrId.String()))
 		return nil
 	}
 	/*
