@@ -53,9 +53,10 @@ type LobbyBuilder struct {
 	skillBasedMM      *SkillBasedMatchmaker
 
 	// Backfill coordination
-	backfillStopCh  chan struct{} // Channel to stop periodic backfill
-	backfillResetCh chan struct{} // Channel to reset the periodic backfill timer
-	backfillMu      sync.Mutex
+	backfillStopCh    chan struct{} // Channel to stop periodic backfill
+	backfillResetCh   chan struct{} // Channel to reset the periodic backfill timer
+	backfillMu        sync.Mutex    // Protects backfillStopCh and backfillResetCh
+	backfillRunningMu sync.Mutex    // Prevents concurrent backfill runs
 }
 
 func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics) *LobbyBuilder {
@@ -175,6 +176,14 @@ func (b *LobbyBuilder) resetBackfillTimer() {
 // When isPeriodicRun is true, we filter to only process tickets that have been waiting
 // for at least BackfillMinTicketAgeSecs to avoid poaching fresh tickets before matchmaker runs
 func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
+	// Prevent concurrent backfill runs to avoid race conditions in team assignment
+	// Multiple concurrent backfill runs could read the same match state and assign
+	// multiple players to the same team, causing team imbalance (e.g., 5v5 in a 4v4 game)
+	if !b.backfillRunningMu.TryLock() {
+		return // Another backfill is already running
+	}
+	defer b.backfillRunningMu.Unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), BackfillProcessTimeout)
 	defer cancel()
 
