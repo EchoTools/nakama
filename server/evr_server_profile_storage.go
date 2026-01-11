@@ -39,7 +39,7 @@ func (s *ServerProfileStorage) StorageMeta() StorableMetadata {
 	return StorableMetadata{
 		Collection:      StorageCollectionServerProfile,
 		Key:             StorageKeyServerProfile,
-		PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
+		PermissionRead:  runtime.STORAGE_PERMISSION_PUBLIC_READ,
 		PermissionWrite: runtime.STORAGE_PERMISSION_NO_WRITE,
 		UserID:          s.userID,
 		Version:         s.version,
@@ -126,9 +126,10 @@ func ServerProfileStore(ctx context.Context, nk runtime.NakamaModule, userID str
 }
 
 // ServerProfileLoadByXPID searches for a ServerProfile by XPID using the storage index.
+// If not found, it generates the profile from EVRProfile and caches it.
 // Returns the raw JSON profile data to avoid unnecessary marshal/unmarshal when
 // the profile will be sent as json.RawMessage to other users.
-func ServerProfileLoadByXPID(ctx context.Context, nk runtime.NakamaModule, xpID evr.EvrId) (json.RawMessage, string, error) {
+func ServerProfileLoadByXPID(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (json.RawMessage, string, error) {
 	// Search the storage index for the XPID
 	query := fmt.Sprintf("+xplatformid:%s", xpID.String())
 
@@ -137,17 +138,51 @@ func ServerProfileLoadByXPID(ctx context.Context, nk runtime.NakamaModule, xpID 
 		return nil, "", fmt.Errorf("failed to search server profile index: %w", err)
 	}
 
-	if len(objects.Objects) == 0 {
-		return nil, "", nil // Not found
+	if len(objects.Objects) > 0 {
+		obj := objects.Objects[0]
+		storage := &ServerProfileStorage{}
+		if err := json.Unmarshal([]byte(obj.Value), storage); err != nil {
+			logger.Warn("Failed to unmarshal cached server profile, regenerating", zap.Error(err))
+		} else {
+			return storage.Profile, obj.UserId, nil
+		}
 	}
 
-	obj := objects.Objects[0]
-	storage := &ServerProfileStorage{}
-	if err := json.Unmarshal([]byte(obj.Value), storage); err != nil {
-		return nil, "", fmt.Errorf("failed to unmarshal server profile storage: %w", err)
+	// Not found in cache, look up user by device ID and generate
+	userID, err := GetUserIDByDeviceID(ctx, db, xpID.String())
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get user ID by XPID: %w", err)
+	}
+	if userID == "" {
+		return nil, "", nil // User not found
 	}
 
-	return storage.Profile, obj.UserId, nil
+	// Load EVRProfile and generate ServerProfile
+	evrProfile, err := EVRProfileLoad(ctx, nk, userID)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to load EVR profile: %w", err)
+	}
+
+	displayName := evrProfile.GetGroupIGN(groupID)
+
+	// Generate the server profile
+	serverProfile, err := NewUserServerProfile(ctx, logger, db, nk, evrProfile, xpID, groupID, modes, dailyWeeklyMode, displayName)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to generate server profile: %w", err)
+	}
+
+	// Store the generated profile
+	if err := ServerProfileStore(ctx, nk, userID, serverProfile); err != nil {
+		logger.Warn("Failed to store generated server profile", zap.Error(err))
+	}
+
+	// Marshal the profile to return as raw JSON
+	profileJSON, err := json.Marshal(serverProfile)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to marshal server profile: %w", err)
+	}
+
+	return profileJSON, userID, nil
 }
 
 // ServerProfileDelete removes a ServerProfile from storage
