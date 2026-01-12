@@ -45,48 +45,25 @@ type EVRProfile struct {
 	CustomizationPOIs      *evr.Customization         `json:"customization_pois"`        // The customization POIs
 	MatchmakingDivision    string                     `json:"matchmaking_division"`      // The matchmaking division (e.g. bronze, silver, gold, etc.)
 	LevelOverride          *int                       `json:"level_override,omitempty"`  // Override the player's level in the ServerProfile
-	account                *api.Account
-}
 
-// EVRProfileStorage is the authoritative storage object for EVR profile data.
-// It is versioned and stored separately from account metadata to prevent staleness.
-// The account metadata is generated from this storage object.
-type EVRProfileStorage struct {
-	EnableAllRemoteLogs    bool                       `json:"enable_all_remote_logs"`
-	InGameNames            map[string]GroupInGameName `json:"group_igns"`
-	ActiveGroupID          string                     `json:"active_group_id"`
-	DiscordDebugMessages   bool                       `json:"discord_debug_messages"`
-	RelayMessagesToDiscord bool                       `json:"relay_messages_to_discord"`
-	TeamName               string                     `json:"team_name"`
-	Options                ProfileOptions             `json:"options"`
-	LoadoutCosmetics       AccountCosmetics           `json:"cosmetic_loadout"`
-	CombatLoadout          CombatLoadout              `json:"combat_loadout"`
-	MutedPlayers           []evr.EvrId                `json:"muted_players"`
-	GhostedPlayers         []evr.EvrId                `json:"ghosted_players"`
-	NewUnlocks             []int64                    `json:"new_unlocks"`
-	GamePauseSettings      *evr.GamePauseSettings     `json:"game_pause_settings"`
-	LegalConsents          evr.LegalConsents          `json:"legal_consents"`
-	CustomizationPOIs      *evr.Customization         `json:"customization_pois"`
-	MatchmakingDivision    string                     `json:"matchmaking_division"`
-	LevelOverride          *int                       `json:"level_override,omitempty"`
-
-	version string // Storage version for optimistic concurrency control
+	account *api.Account // Account data (not stored)
+	version string       // Storage version for optimistic concurrency control (not serialized to JSON)
 }
 
 // StorageMeta implements the StorableAdapter interface
-func (s *EVRProfileStorage) StorageMeta() StorableMetadata {
+func (e *EVRProfile) StorageMeta() StorableMetadata {
 	return StorableMetadata{
 		Collection:      StorageCollectionEVRProfile,
 		Key:             StorageKeyEVRProfile,
 		PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
 		PermissionWrite: runtime.STORAGE_PERMISSION_NO_WRITE,
-		Version:         s.version,
+		Version:         e.version,
 	}
 }
 
 // SetStorageMeta implements the StorableAdapter interface
-func (s *EVRProfileStorage) SetStorageMeta(meta StorableMetadata) {
-	s.version = meta.Version
+func (e *EVRProfile) SetStorageMeta(meta StorableMetadata) {
+	e.version = meta.Version
 }
 
 func (e EVRProfile) UserID() string {
@@ -368,11 +345,12 @@ func EVRProfileLoad(ctx context.Context, nk runtime.NakamaModule, userID string)
 		return nil, err
 	}
 
-	// Try to load from the new storage system first
-	profileStorage := &EVRProfileStorage{}
-	if err := StorableRead(ctx, nk, userID, profileStorage, false); err == nil {
-		// Successfully loaded from storage, build EVRProfile from it
-		return BuildEVRProfileFromStorage(account, profileStorage), nil
+	// Try to load from the storage system first
+	profile := &EVRProfile{}
+	if err := StorableRead(ctx, nk, userID, profile, false); err == nil {
+		// Successfully loaded from storage, attach account
+		profile.account = account
+		return profile, nil
 	}
 
 	// Fall back to loading from account metadata for backward compatibility
@@ -387,11 +365,8 @@ func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID strin
 		return fmt.Errorf("metadata cannot be nil")
 	}
 
-	// Convert EVRProfile to EVRProfileStorage
-	profileStorage := md.ToStorage()
-
-	// Write to the new storage system
-	if err := StorableWrite(ctx, nk, userID, profileStorage); err != nil {
+	// Write to the storage system
+	if err := StorableWrite(ctx, nk, userID, md); err != nil {
 		return fmt.Errorf("failed to write profile storage: %w", err)
 	}
 
@@ -400,54 +375,6 @@ func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID strin
 
 	// Also update the account metadata to keep it in sync
 	return nk.AccountUpdateId(ctx, userID, "", md.MarshalMap(), "", "", "", "", "")
-}
-
-// BuildEVRProfileFromStorage creates an EVRProfile from account and storage data
-func BuildEVRProfileFromStorage(account *api.Account, storage *EVRProfileStorage) *EVRProfile {
-	profile := &EVRProfile{
-		EnableAllRemoteLogs:    storage.EnableAllRemoteLogs,
-		InGameNames:            storage.InGameNames,
-		ActiveGroupID:          storage.ActiveGroupID,
-		DiscordDebugMessages:   storage.DiscordDebugMessages,
-		RelayMessagesToDiscord: storage.RelayMessagesToDiscord,
-		TeamName:               storage.TeamName,
-		Options:                storage.Options,
-		LoadoutCosmetics:       storage.LoadoutCosmetics,
-		CombatLoadout:          storage.CombatLoadout,
-		MutedPlayers:           storage.MutedPlayers,
-		GhostedPlayers:         storage.GhostedPlayers,
-		NewUnlocks:             storage.NewUnlocks,
-		GamePauseSettings:      storage.GamePauseSettings,
-		LegalConsents:          storage.LegalConsents,
-		CustomizationPOIs:      storage.CustomizationPOIs,
-		MatchmakingDivision:    storage.MatchmakingDivision,
-		LevelOverride:          storage.LevelOverride,
-		account:                account,
-	}
-	return profile
-}
-
-// ToStorage converts an EVRProfile to EVRProfileStorage
-func (e *EVRProfile) ToStorage() *EVRProfileStorage {
-	return &EVRProfileStorage{
-		EnableAllRemoteLogs:    e.EnableAllRemoteLogs,
-		InGameNames:            e.InGameNames,
-		ActiveGroupID:          e.ActiveGroupID,
-		DiscordDebugMessages:   e.DiscordDebugMessages,
-		RelayMessagesToDiscord: e.RelayMessagesToDiscord,
-		TeamName:               e.TeamName,
-		Options:                e.Options,
-		LoadoutCosmetics:       e.LoadoutCosmetics,
-		CombatLoadout:          e.CombatLoadout,
-		MutedPlayers:           e.MutedPlayers,
-		GhostedPlayers:         e.GhostedPlayers,
-		NewUnlocks:             e.NewUnlocks,
-		GamePauseSettings:      e.GamePauseSettings,
-		LegalConsents:          e.LegalConsents,
-		CustomizationPOIs:      e.CustomizationPOIs,
-		MatchmakingDivision:    e.MatchmakingDivision,
-		LevelOverride:          e.LevelOverride,
-	}
 }
 
 func BuildEVRProfileFromAccount(account *api.Account) (*EVRProfile, error) {
