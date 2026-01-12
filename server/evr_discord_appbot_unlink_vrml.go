@@ -206,9 +206,9 @@ func (d *DiscordAppBot) handleUnlinkVRML(ctx context.Context, logger runtime.Log
 		})
 	}
 
-	// Add link creation date
+	// Add link creation date (Discord account creation time)
 	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-		Name:   "Account Created",
+		Name:   "Discord Account Created",
 		Value:  fmt.Sprintf("<t:%d:F>", linkDate.Seconds),
 		Inline: false,
 	})
