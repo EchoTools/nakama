@@ -384,6 +384,18 @@ var (
 			Description: "Link your VRML account.",
 		},
 		{
+			Name:        "unlink-vrml",
+			Description: "Admin command to unlink a VRML account from a user.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "identifier",
+					Description: "VRML user ID, player ID, Discord ID, or Discord username",
+					Required:    true,
+				},
+			},
+		},
+		{
 			Name:        "set-lobby",
 			Description: "Set your default lobby to this Discord server/guild.",
 		},
@@ -2941,6 +2953,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			return discordgo.ErrNilState
 		},
 		"vrml-verify": d.handleVRMLVerify,
+		"unlink-vrml": d.handleUnlinkVRML,
 	}
 
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {

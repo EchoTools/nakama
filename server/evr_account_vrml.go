@@ -61,3 +61,12 @@ func LinkVRMLAccount(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, u
 	}
 	return nil
 }
+
+// UnlinkVRMLAccount removes the link between a user and their VRML account
+func UnlinkVRMLAccount(ctx context.Context, nk runtime.NakamaModule, userID string, vrmlUserID string) error {
+	// Unlink the VRML device from the user
+	if err := nk.UnlinkDevice(ctx, userID, VRMLDeviceID(vrmlUserID)); err != nil {
+		return fmt.Errorf("failed to unlink VRML account: %w", err)
+	}
+	return nil
+}

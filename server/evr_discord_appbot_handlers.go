@@ -246,6 +246,23 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 		if !isGlobalOperator && !gg.IsAuditor(userID) {
 			return simpleInteractionResponse(s, i, "You must be a guild auditor to use this command.")
 		}
+
+	case "unlink-vrml":
+		// Check for VRML badge admin role
+		isMember, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalBadgeAdmins)
+		if err != nil {
+			return fmt.Errorf("failed to check group membership: %w", err)
+		}
+		if !isMember {
+			return simpleInteractionResponse(s, i, "You must be a VRML badge admin to use this command.")
+		}
+
+		gg := d.guildGroupRegistry.Get(groupID)
+		if gg != nil {
+			if err := d.LogInteractionToChannel(i, gg.AuditChannelID); err != nil {
+				logger.Warn("Failed to log interaction to channel")
+			}
+		}
 	}
 	return commandFn(ctx, logger, s, i, user, member, userID, groupID)
 }
@@ -425,6 +442,115 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 	case "igp":
 
 		return d.handleInGamePanelInteraction(i, value)
+
+	case "unlink-vrml-confirm":
+		// Handle VRML unlink confirmation
+		// value format: targetUserID:vrmlUserID
+		parts := strings.SplitN(value, ":", 2)
+		if len(parts) != 2 {
+			return simpleInteractionResponse(s, i, "Invalid button data.")
+		}
+
+		targetUserID := parts[0]
+		vrmlUserID := parts[1]
+
+		// Check that the user clicking the button is a badge admin
+		isMember, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalBadgeAdmins)
+		if err != nil {
+			return fmt.Errorf("failed to check group membership: %w", err)
+		}
+		if !isMember {
+			return simpleInteractionResponse(s, i, "You must be a VRML badge admin to perform this action.")
+		}
+
+		// Get the target user's Discord ID for logging
+		targetDiscordID, err := GetDiscordIDByUserID(ctx, d.db, targetUserID)
+		if err != nil {
+			logger.WithField("error", err).Warn("Failed to get target Discord ID")
+			targetDiscordID = "unknown"
+		}
+
+		// Perform the unlink
+		if err := UnlinkVRMLAccount(ctx, nk, targetUserID, vrmlUserID); err != nil {
+			logger.WithFields(map[string]any{
+				"error":            err,
+				"target_user_id":   targetUserID,
+				"vrml_user_id":     vrmlUserID,
+				"admin_discord_id": user.ID,
+			}).Error("Failed to unlink VRML account")
+			return simpleInteractionResponse(s, i, fmt.Sprintf("Failed to unlink VRML account: %v", err))
+		}
+
+		// Log to audit channel
+		auditMessage := fmt.Sprintf("🔓 VRML Account Unlinked\n"+
+			"**Admin:** <@%s> (`%s`)\n"+
+			"**Target:** <@%s> (`%s`)\n"+
+			"**VRML User ID:** `%s`\n"+
+			"**VRML Profile:** https://vrmasterleague.com/Users/%s\n"+
+			"**Time:** <t:%d:F>",
+			user.ID, user.Username,
+			targetDiscordID, targetUserID,
+			vrmlUserID,
+			vrmlUserID,
+			time.Now().Unix(),
+		)
+
+		if err := AuditLogSend(s, ServiceSettings().ServiceAuditChannelID, auditMessage); err != nil {
+			logger.WithField("error", err).Warn("Failed to send audit log")
+		}
+
+		// Send to guild audit channel if available
+		if groupID != "" {
+			gg := d.guildGroupRegistry.Get(groupID)
+			if gg != nil && gg.AuditChannelID != "" {
+				if err := AuditLogSend(s, gg.AuditChannelID, auditMessage); err != nil {
+					logger.WithField("error", err).Warn("Failed to send guild audit log")
+				}
+			}
+		}
+
+		logger.WithFields(map[string]any{
+			"target_user_id":   targetUserID,
+			"vrml_user_id":     vrmlUserID,
+			"admin_discord_id": user.ID,
+			"admin_username":   user.Username,
+		}).Info("VRML account unlinked by admin")
+
+		// Respond to the interaction
+		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Flags:   discordgo.MessageFlagsEphemeral,
+				Content: fmt.Sprintf("✅ Successfully unlinked VRML account `%s` from <@%s>", vrmlUserID, targetDiscordID),
+			},
+		}); err != nil {
+			return fmt.Errorf("failed to respond to interaction: %w", err)
+		}
+
+		// Disable the button in the original message
+		if i.Message != nil {
+			if _, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+				Channel: i.Message.ChannelID,
+				ID:      i.Message.ID,
+				Components: &[]discordgo.MessageComponent{
+					discordgo.ActionsRow{
+						Components: []discordgo.MessageComponent{
+							discordgo.Button{
+								Label:    "Unlinked",
+								Style:    discordgo.SuccessButton,
+								CustomID: "nil",
+								Disabled: true,
+								Emoji:    &discordgo.ComponentEmoji{Name: "✅"},
+							},
+						},
+					},
+				},
+			}); err != nil {
+				logger.WithField("error", err).Warn("Failed to edit message")
+			}
+		}
+
+		return nil
 
 	case "set_ign_override":
 		// Handle set_ign_override button interactions from lookup or IGP
