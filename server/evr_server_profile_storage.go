@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -17,6 +19,21 @@ const (
 	ServerProfileIndexName         = "Index_ServerProfile"
 	ServerProfileMaxEntries        = 1000 // Keep at least 1000 profiles indexed in memory
 )
+
+// Singleflight groups to prevent thundering herd on concurrent profile requests.
+// When multiple clients request the same profile simultaneously (e.g., 8 players
+// in a lobby all requesting each other's profiles), only one goroutine does the
+// actual work while others wait for and share the result.
+var (
+	profileLoadByXPIDGroup singleflight.Group
+	profileLoadByUserGroup singleflight.Group
+)
+
+// profileLoadResult holds the result of a singleflight profile load operation
+type profileLoadResult struct {
+	profile json.RawMessage
+	userID  string
+}
 
 // ServerProfileStorage stores the generated ServerProfile for quick retrieval.
 // It implements StorableIndexer to maintain an in-memory index of profiles.
@@ -79,7 +96,19 @@ func NewServerProfileStorage(userID string, profile *evr.ServerProfile) (*Server
 	}, nil
 }
 
-// ServerProfileLoad loads a ServerProfile, checking storage first, then generating from EVRProfile
+// NewServerProfileStorageFromJSON creates a new ServerProfileStorage from pre-marshalled JSON.
+// This avoids a redundant marshal when the JSON is already available.
+func NewServerProfileStorageFromJSON(userID string, xpID evr.EvrId, profileJSON json.RawMessage) *ServerProfileStorage {
+	return &ServerProfileStorage{
+		XPlatformID: xpID.String(),
+		Profile:     profileJSON,
+		userID:      userID,
+		version:     "", // Will be set on write
+	}
+}
+
+// ServerProfileLoad loads a ServerProfile, checking storage first, then generating from EVRProfile.
+// Uses singleflight to prevent concurrent generation for the same user.
 func ServerProfileLoad(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, userID string, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (*evr.ServerProfile, error) {
 	// First, try to load from storage (which uses the index if available)
 	storage := &ServerProfileStorage{}
@@ -93,30 +122,51 @@ func ServerProfileLoad(ctx context.Context, logger *zap.Logger, db *sql.DB, nk r
 		}
 	}
 
-	// Not in storage, generate from EVRProfile
-	evrProfile, err := EVRProfileLoad(ctx, nk, userID)
+	// Not in storage - use singleflight to prevent concurrent generation
+	result, err, _ := profileLoadByUserGroup.Do(userID, func() (interface{}, error) {
+		// Double-check storage inside singleflight (another goroutine may have just written it)
+		storage := &ServerProfileStorage{}
+		if err := StorableRead(ctx, nk, userID, storage, false); err == nil && len(storage.Profile) > 0 {
+			profile := &evr.ServerProfile{}
+			if err := json.Unmarshal(storage.Profile, profile); err == nil {
+				return profile, nil
+			}
+		}
+
+		// Generate from EVRProfile
+		evrProfile, err := EVRProfileLoad(ctx, nk, userID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load EVR profile: %w", err)
+		}
+
+		displayName := evrProfile.GetGroupIGN(groupID)
+
+		// Generate the server profile
+		serverProfile, err := NewUserServerProfile(ctx, logger, db, nk, evrProfile, xpID, groupID, modes, dailyWeeklyMode, displayName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate server profile: %w", err)
+		}
+
+		// Store the generated profile (ignore version conflicts from concurrent writes)
+		if err := ServerProfileStore(ctx, nk, userID, serverProfile); err != nil {
+			if !isVersionConflictError(err) {
+				logger.Warn("Failed to store generated server profile", zap.Error(err))
+			}
+		}
+
+		return serverProfile, nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to load EVR profile: %w", err)
+		return nil, err
 	}
 
-	displayName := evrProfile.GetGroupIGN(groupID)
-
-	// Generate the server profile
-	serverProfile, err := NewUserServerProfile(ctx, logger, db, nk, evrProfile, xpID, groupID, modes, dailyWeeklyMode, displayName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate server profile: %w", err)
-	}
-
-	// Store the generated profile
-	if err := ServerProfileStore(ctx, nk, userID, serverProfile); err != nil {
-		// Log but don't fail - we have the profile even if we can't cache it
-		logger.Warn("Failed to store generated server profile", zap.Error(err))
-	}
-
-	return serverProfile, nil
+	return result.(*evr.ServerProfile), nil
 }
 
-// ServerProfileStore stores a ServerProfile to storage
+// ServerProfileStore stores a ServerProfile to storage.
+// Version conflicts are expected when concurrent requests generate the same profile
+// and should be handled gracefully by the caller.
 func ServerProfileStore(ctx context.Context, nk runtime.NakamaModule, userID string, profile *evr.ServerProfile) error {
 	storage, err := NewServerProfileStorage(userID, profile)
 	if err != nil {
@@ -125,10 +175,20 @@ func ServerProfileStore(ctx context.Context, nk runtime.NakamaModule, userID str
 	return StorableWrite(ctx, nk, userID, storage)
 }
 
+// ServerProfileStoreJSON stores a pre-marshalled ServerProfile JSON to storage.
+// This is more efficient when the JSON is already available (e.g., from generation).
+func ServerProfileStoreJSON(ctx context.Context, nk runtime.NakamaModule, userID string, xpID evr.EvrId, profileJSON json.RawMessage) error {
+	storage := NewServerProfileStorageFromJSON(userID, xpID, profileJSON)
+	return StorableWrite(ctx, nk, userID, storage)
+}
+
 // ServerProfileLoadByXPID searches for a ServerProfile by XPID using the storage index.
 // If not found, it generates the profile from EVRProfile and caches it.
 // Returns the raw JSON profile data to avoid unnecessary marshal/unmarshal when
 // the profile will be sent as json.RawMessage to other users.
+//
+// Uses singleflight to deduplicate concurrent requests for the same XPID, preventing
+// thundering herd when multiple players request the same user's profile simultaneously.
 func ServerProfileLoadByXPID(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (json.RawMessage, string, error) {
 	// Search the storage index for the XPID
 	query := fmt.Sprintf("+xplatformid:%s", xpID.String())
@@ -148,41 +208,75 @@ func ServerProfileLoadByXPID(ctx context.Context, logger *zap.Logger, db *sql.DB
 		}
 	}
 
-	// Not found in cache, look up user by device ID and generate
-	userID, err := GetUserIDByDeviceID(ctx, db, xpID.String())
+	// Not found in cache - use singleflight to prevent concurrent generation
+	key := xpID.String()
+	result, err, _ := profileLoadByXPIDGroup.Do(key, func() (interface{}, error) {
+		// Double-check the index inside singleflight (another goroutine may have just written it)
+		objects, _, err := nk.StorageIndexList(ctx, SystemUserID, ServerProfileIndexName, query, 1, nil, "")
+		if err == nil && len(objects.Objects) > 0 {
+			obj := objects.Objects[0]
+			storage := &ServerProfileStorage{}
+			if err := json.Unmarshal([]byte(obj.Value), storage); err == nil {
+				return &profileLoadResult{profile: storage.Profile, userID: obj.UserId}, nil
+			}
+		}
+
+		// Look up user by device ID
+		userID, err := GetUserIDByDeviceID(ctx, db, xpID.String())
+		if err != nil {
+			return nil, fmt.Errorf("failed to get user ID by XPID: %w", err)
+		}
+		if userID == "" {
+			return &profileLoadResult{}, nil // User not found
+		}
+
+		// Load EVRProfile and generate ServerProfile
+		evrProfile, err := EVRProfileLoad(ctx, nk, userID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load EVR profile: %w", err)
+		}
+
+		displayName := evrProfile.GetGroupIGN(groupID)
+
+		// Generate the server profile
+		serverProfile, err := NewUserServerProfile(ctx, logger, db, nk, evrProfile, xpID, groupID, modes, dailyWeeklyMode, displayName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate server profile: %w", err)
+		}
+
+		// Marshal the profile to return as raw JSON
+		profileJSON, err := json.Marshal(serverProfile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal server profile: %w", err)
+		}
+
+		// Store the generated profile using pre-marshalled JSON (avoid double marshal)
+		// Ignore version conflicts - they just mean another request already stored it
+		if err := ServerProfileStoreJSON(ctx, nk, userID, xpID, profileJSON); err != nil {
+			if !isVersionConflictError(err) {
+				logger.Warn("Failed to store generated server profile", zap.Error(err))
+			}
+		}
+
+		return &profileLoadResult{profile: profileJSON, userID: userID}, nil
+	})
+
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to get user ID by XPID: %w", err)
-	}
-	if userID == "" {
-		return nil, "", nil // User not found
+		return nil, "", err
 	}
 
-	// Load EVRProfile and generate ServerProfile
-	evrProfile, err := EVRProfileLoad(ctx, nk, userID)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to load EVR profile: %w", err)
+	r := result.(*profileLoadResult)
+	return r.profile, r.userID, nil
+}
+
+// isVersionConflictError checks if an error is a storage version conflict.
+// These are expected during concurrent profile writes and should be ignored
+// since the profiles being written are identical.
+func isVersionConflictError(err error) bool {
+	if err == nil {
+		return false
 	}
-
-	displayName := evrProfile.GetGroupIGN(groupID)
-
-	// Generate the server profile
-	serverProfile, err := NewUserServerProfile(ctx, logger, db, nk, evrProfile, xpID, groupID, modes, dailyWeeklyMode, displayName)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to generate server profile: %w", err)
-	}
-
-	// Store the generated profile
-	if err := ServerProfileStore(ctx, nk, userID, serverProfile); err != nil {
-		logger.Warn("Failed to store generated server profile", zap.Error(err))
-	}
-
-	// Marshal the profile to return as raw JSON
-	profileJSON, err := json.Marshal(serverProfile)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to marshal server profile: %w", err)
-	}
-
-	return profileJSON, userID, nil
+	return strings.Contains(err.Error(), "version check failed")
 }
 
 // ServerProfileDelete removes a ServerProfile from storage
