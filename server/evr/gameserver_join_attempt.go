@@ -7,6 +7,8 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
+const MaxJoinAttemptEntrants = 16
+
 // Game Server -> Nakama: player sessions that the server intends to accept.
 
 type GameServerJoinAttempt struct {
@@ -23,7 +25,11 @@ func (m *GameServerJoinAttempt) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error {
 			if s.Mode == DecodeMode {
-				m.EntrantIDs = make([]uuid.UUID, s.Len()/16)
+				count := s.Len() / 16
+				if count > MaxJoinAttemptEntrants {
+					return fmt.Errorf("entrant count %d exceeds maximum %d", count, MaxJoinAttemptEntrants)
+				}
+				m.EntrantIDs = make([]uuid.UUID, count)
 			}
 			return s.StreamGUIDs(&m.EntrantIDs)
 		},

@@ -3,10 +3,12 @@ package evr
 import (
 	"fmt"
 
-	"github.com/echotools/nevr-common/v3/rtapi"
+	"github.com/echotools/nevr-common/v4/gen/go/rtapi"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
+
+const MaxProtobufPayloadSize = 1024 * 1024 // 1MB max payload
 
 type NEVRProtobufJSONMessageV1 struct {
 	Payload []byte
@@ -18,6 +20,9 @@ func (NEVRProtobufJSONMessageV1) String() string {
 
 func (m *NEVRProtobufJSONMessageV1) Stream(s *EasyStream) error {
 	if s.Mode == DecodeMode {
+		if s.Len() > MaxProtobufPayloadSize {
+			return fmt.Errorf("payload size %d exceeds maximum %d", s.Len(), MaxProtobufPayloadSize)
+		}
 		m.Payload = make([]byte, s.Len())
 	}
 	return RunErrorFunctions([]func() error{
@@ -45,6 +50,9 @@ func (NEVRProtobufMessageV1) String() string {
 
 func (m *NEVRProtobufMessageV1) Stream(s *EasyStream) error {
 	if s.Mode == DecodeMode {
+		if s.Len() > MaxProtobufPayloadSize {
+			return fmt.Errorf("payload size %d exceeds maximum %d", s.Len(), MaxProtobufPayloadSize)
+		}
 		m.Payload = make([]byte, s.Len())
 	}
 	return RunErrorFunctions([]func() error{
@@ -123,6 +131,8 @@ func NewMessageFromHash(hash uint64) Message {
 		return &GameServerJoinRejected{}
 	case 0x7777777777770800:
 		return &GameServerPlayerRemoved{}
+	case 0x7777777777770B00:
+		return &GameServerSaveLoadoutRequest{} // Custom - loadout update from game server
 	case 0x7777777777777777:
 		return &BroadcasterRegistrationRequest{}
 	case 0x82869f0b37eb4378:

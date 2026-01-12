@@ -1,0 +1,11 @@
+goos: linux
+goarch: amd64
+pkg: github.com/heroiclabs/nakama/v3/server
+cpu: AMD Ryzen 9 5950X 16-Core Processor            
+BenchmarkPredictOutcomes-32    	       1	6567758386 ns/op	    735471 candidates	   1470942 predictions	2156336856 B/op	28685526 allocs/op
+BenchmarkPredictOutcomes-32    	       1	6448382986 ns/op	    735471 candidates	   1470942 predictions	2156330936 B/op	28685518 allocs/op
+BenchmarkPredictOutcomes-32    	       1	6483013616 ns/op	    735471 candidates	   1470942 predictions	2156331256 B/op	28685519 allocs/op
+BenchmarkPredictOutcomes-32    	       1	6383245779 ns/op	    735471 candidates	   1470942 predictions	2156330216 B/op	28685509 allocs/op
+BenchmarkPredictOutcomes-32    	       1	6438625639 ns/op	    735471 candidates	   1470942 predictions	2156330040 B/op	28685510 allocs/op
+PASS
+ok  	github.com/heroiclabs/nakama/v3/server	32.766s

@@ -109,11 +109,3 @@ func NewAppAPIAcceptor(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 		handlerFn(ctx, w, r)
 	}
 }
-
-// func(http.ResponseWriter, *http.Request) handler
-func (api *AppAPI) handlerFn(ctx context.Context, w http.ResponseWriter, req *http.Request) {
-
-	// Respond to the request
-	w.Write([]byte("Hello, World!"))
-
-}

@@ -274,7 +274,7 @@ func (w *WhoAmI) createRecentLoginsFieldValue() string {
 	return strings.Join(lines, "\n")
 }
 
-func (WhoAmI) createMatchmakingEmbed(account *EVRProfile, guildGroups map[string]*GuildGroup, matchmakingSettings *MatchmakingSettings, labels []*MatchLabel, lastMatchmakingError error) *discordgo.MessageEmbed {
+func (WhoAmI) createMatchmakingEmbed(_ *EVRProfile, guildGroups map[string]*GuildGroup, matchmakingSettings *MatchmakingSettings, labels []*MatchLabel, lastMatchmakingError error) *discordgo.MessageEmbed {
 	if matchmakingSettings == nil {
 		return nil
 	}
@@ -536,14 +536,7 @@ func (*WhoAmI) createVRMLHistoryEmbed(s *VRMLPlayerSummary) *discordgo.MessageEm
 
 		for sID, teams := range s.MatchCountsBySeasonByTeam {
 			for _, n := range teams {
-				seasonName, ok := vrmlSeasonDescriptionMap[sID]
-				if !ok {
-					seasonName = string(sID)
-				} else {
-					sNumber, _ := strings.CutPrefix(seasonName, "Season ")
-					seasonName = "S" + sNumber
-				}
-
+				seasonName := formatVRMLSeasonName(sID)
 				matchCountsBySeason[seasonName] += n
 			}
 		}
@@ -650,38 +643,10 @@ func (w *WhoAmI) createAlternatesEmbed() *discordgo.MessageEmbed {
 	return alternatesEmbed
 }
 
-func (w *WhoAmI) collectedBlockedFriends(ctx context.Context, nk runtime.NakamaModule) ([]*api.User, error) {
-
-	var (
-		err             error
-		blockedUsers    = make([]*api.User, 0)
-		blockedState    = int(api.Friend_BLOCKED)
-		blockedStatePtr = &blockedState
-		cursor          = ""
-		friends         []*api.Friend
-	)
-	// Get the friends list
-	for {
-		friends, cursor, err = nk.FriendsList(ctx, w.profile.ID(), 100, blockedStatePtr, cursor)
-		if err != nil {
-			return nil, err
-		}
-		users := make([]*api.User, 0, len(friends))
-		for _, f := range friends {
-			if f.GetState().Value == int32(blockedState) {
-				blockedUsers = append(users, f.GetUser())
-			}
-		}
-
-		if len(friends) == 0 || cursor == "" {
-			break
-		}
-	}
-
-	return blockedUsers, nil
-}
-
 func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, target *discordgo.User, opts UserProfileRequestOptions) error {
+	if i.Member == nil || i.Member.User == nil {
+		return fmt.Errorf("member information not available")
+	}
 
 	var (
 		err error
@@ -833,7 +798,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 				}
 				label, err := MatchLabelByID(ctx, nk, mid)
 				if err != nil {
-					logger.Warn("failed to get match label", "error", err)
+					logger.WithField("mid", mid).Warn("failed to get match label", "error", err)
 					continue
 				}
 
@@ -895,28 +860,32 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	const MaxFieldsPerEmbed = 25
 	embeds = PaginateEmbeds(embeds, MaxFieldsPerEmbed, FieldMaxLen)
 
-	// Add "Set IGN Override" button for enforcers
-	components := []discordgo.MessageComponent{}
-	callerGuildGroups, _ := GuildUserGroupsList(ctx, nk, d.guildGroupRegistry, callerID)
-	isAuditorOrEnforcer := false
-	if gg, ok := callerGuildGroups[groupID]; ok && (gg.IsAuditor(callerID) || gg.IsEnforcer(callerID)) {
-		isAuditorOrEnforcer = true
-	}
-	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, callerID, GroupGlobalOperators)
-	isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
+	// Add "Override In-Game Name" button for enforcers
+	components := make([]discordgo.MessageComponent, 0)
 
-	if isAuditorOrEnforcer {
-		components = []discordgo.MessageComponent{
+	callerGuildGroups, _ := GuildUserGroupsList(ctx, nk, d.guildGroupRegistry, callerID)
+
+	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, callerID, GroupGlobalOperators)
+
+	allowIGNOverride := false
+	if gg, ok := callerGuildGroups[groupID]; ok && (gg.IsAuditor(callerID) || gg.IsEnforcer(callerID)) {
+		allowIGNOverride = true
+	}
+
+	// Allow global operators as well
+	allowIGNOverride = allowIGNOverride || isGlobalOperator
+
+	if allowIGNOverride {
+		components = append(components,
 			discordgo.ActionsRow{
 				Components: []discordgo.MessageComponent{
 					&discordgo.Button{
-						Label:    "Set IGN Override",
+						Label:    "Override In-Game Name",
 						Style:    discordgo.PrimaryButton,
-						CustomID: fmt.Sprintf("lookup:set_ign_override:%s:%s", targetID, groupID),
+						CustomID: fmt.Sprintf("set_ign_override:%s:%s", target.ID, i.GuildID),
 					},
 				},
-			},
-		}
+			})
 	}
 
 	// Send the response
@@ -936,33 +905,39 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 				return fmt.Errorf("failed to marshal embeds: %w", err)
 			}
 
-			url := d.config.GetRuntime().Environment["STATIC_HTTP_BASE_URL"] + "/player-lookup/" + targetID
+			responseData := &discordgo.InteractionResponseData{
+				Content: "The profile is too large to display in an embed. Here is the raw data.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+				Files: []*discordgo.File{
+					{
+						Name:        targetID + "_lookup.json",
+						ContentType: "application/json",
+						Reader:      strings.NewReader(string(embedData)),
+					},
+				},
+			}
 
-			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Content: "The profile is too large to display in an embed. Here is the raw data.",
-					Flags:   discordgo.MessageFlagsEphemeral,
-					Components: []discordgo.MessageComponent{
-						discordgo.ActionsRow{
-							Components: []discordgo.MessageComponent{
-								&discordgo.Button{
-									Label:    "View on Website",
-									Style:    discordgo.LinkButton,
-									URL:      url,
-									Disabled: false,
-								},
+			// Only add the button if STATIC_HTTP_BASE_URL is configured with a valid scheme
+			baseURL := d.config.GetRuntime().Environment["STATIC_HTTP_BASE_URL"]
+			if baseURL != "" && (strings.HasPrefix(baseURL, "http://") || strings.HasPrefix(baseURL, "https://")) {
+				url := baseURL + "/player-lookup/" + targetID
+				responseData.Components = []discordgo.MessageComponent{
+					discordgo.ActionsRow{
+						Components: []discordgo.MessageComponent{
+							&discordgo.Button{
+								Label:    "View on Website",
+								Style:    discordgo.LinkButton,
+								URL:      url,
+								Disabled: false,
 							},
 						},
 					},
-					Files: []*discordgo.File{
-						{
-							Name:        targetID + "_lookup.json",
-							ContentType: "application/json",
-							Reader:      strings.NewReader(string(embedData)),
-						},
-					},
-				},
+				}
+			}
+
+			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: responseData,
 			}); err != nil {
 				return fmt.Errorf("failed to send message with embeds: %w", err)
 			}

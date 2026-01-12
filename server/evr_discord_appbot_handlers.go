@@ -13,10 +13,99 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/thriftrw/ptr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+const errCompoundDurationWithDW = "compound durations with 'd' (days) or 'w' (weeks) are not supported; use simple format like '2d' or convert to hours (e.g., '48h' instead of '2d')"
+
+// parseSuspensionDuration parses a duration string for suspension/ban durations.
+// Supports formats like: "15m", "2h", "7d", "1w", "2h30m", "1h30m45s"
+// If no unit is specified (e.g., "15"), defaults to minutes.
+// Returns the parsed duration or an error if the format is invalid.
+func parseSuspensionDuration(inputDuration string) (time.Duration, error) {
+	duration := strings.TrimSpace(inputDuration)
+
+	if duration == "" {
+		return 0, nil
+	}
+
+	if duration == "0" {
+		// Zero duration means void existing suspension
+		return 0, nil
+	}
+
+	// Check for compound durations with unsupported units (d or w)
+	// Count occurrences of unit letters and check if d/w appears with other units
+	hasD := strings.Contains(duration, "d")
+	hasW := strings.Contains(duration, "w")
+	hasOtherUnits := strings.ContainsAny(duration, "mhs")
+
+	// Check if both d and w are present (e.g., "1w2d")
+	if hasD && hasW {
+		return 0, fmt.Errorf(errCompoundDurationWithDW)
+	}
+
+	// Check if d or w appears with other standard units
+	if (hasD || hasW) && hasOtherUnits {
+		return 0, fmt.Errorf(errCompoundDurationWithDW)
+	}
+
+	// Try parsing with Go's time.ParseDuration first for compound durations (e.g., "2h25m")
+	// Note: time.ParseDuration supports ns, us, ms, s, m, h but not d (days) or w (weeks)
+	if parsedDuration, err := time.ParseDuration(duration); err == nil {
+		// Successfully parsed compound duration like "2h25m" or "1h30m45s"
+		// Reject negative durations
+		if parsedDuration < 0 {
+			return 0, fmt.Errorf("duration must be positive, got: %v", parsedDuration)
+		}
+		return parsedDuration, nil
+	}
+
+	// Fallback to custom parsing for simple durations with d/w units
+	// Additional safety check to prevent panic
+	if len(duration) == 0 {
+		return 0, fmt.Errorf("invalid duration format: empty string")
+	}
+
+	var unit time.Duration
+	var numStr string
+	lastChar := duration[len(duration)-1]
+
+	switch lastChar {
+	case 'm':
+		unit = time.Minute
+		numStr = duration[:len(duration)-1]
+	case 'h':
+		unit = time.Hour
+		numStr = duration[:len(duration)-1]
+	case 'd':
+		unit = 24 * time.Hour
+		numStr = duration[:len(duration)-1]
+	case 'w':
+		unit = 7 * 24 * time.Hour
+		numStr = duration[:len(duration)-1]
+	default:
+		// No unit specified, default to minutes
+		unit = time.Minute
+		numStr = duration // Use the entire string as the numeric part
+	}
+
+	// Parse the numeric part
+	durationVal, err := strconv.Atoi(numStr)
+	if err != nil {
+		return 0, fmt.Errorf("invalid duration format: %w", err)
+	}
+
+	// Reject negative durations
+	if durationVal < 0 {
+		return 0, fmt.Errorf("duration must be positive, got: %d", durationVal)
+	}
+
+	return time.Duration(durationVal) * unit, nil
+}
 
 func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, commandName string, commandFn DiscordCommandHandlerFn) error {
 	user, member := getScopedUserMember(i)
@@ -319,7 +408,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 			return fmt.Errorf("failed to unlink device ID: %w", err)
 		}
 
-		if err := d.cache.updateLinkStatus(ctx, i.Member.User.ID); err != nil {
+		if err := d.cache.updateLinkStatus(ctx, user.ID); err != nil {
 			return fmt.Errorf("failed to update link status: %w", err)
 		}
 
@@ -337,61 +426,173 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 
 		return d.handleInGamePanelInteraction(i, value)
 
-	case "lookup":
-		// Handle lookup button interactions (e.g., "set_ign_override")
-		action, params, _ := strings.Cut(value, ":")
-		switch action {
-		case "set_ign_override":
-			// Parse targetUserID:groupID
-			parts := strings.SplitN(params, ":", 2)
-			if len(parts) != 2 {
-				return fmt.Errorf("invalid parameters for set_ign_override")
-			}
-			targetUserID := parts[0]
-			targetGroupID := parts[1]
+	case "unlink-vrml-confirm":
+		// Handle VRML unlink confirmation
+		// value format: targetUserID:vrmlUserID
+		parts := strings.SplitN(value, ":", 2)
+		if len(parts) != 2 {
+			return simpleInteractionResponse(s, i, "Invalid button data.")
+		}
 
-			// Verify caller has permissions
-			callerGuildGroups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userID)
-			if err != nil {
-				return fmt.Errorf("failed to get guild groups: %w", err)
-			}
+		targetUserID := parts[0]
+		vrmlUserID := parts[1]
 
-			isAuditorOrEnforcer := false
-			if gg, ok := callerGuildGroups[targetGroupID]; ok && (gg.IsAuditor(userID) || gg.IsEnforcer(userID)) {
-				isAuditorOrEnforcer = true
-			}
-			isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
-			isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
+		// Check that the user clicking the button is a badge admin
+		isMember, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalBadgeAdmins)
+		if err != nil {
+			return fmt.Errorf("failed to check group membership: %w", err)
+		}
+		if !isMember {
+			return simpleInteractionResponse(s, i, "You must be a VRML badge admin to perform this action.")
+		}
 
-			if !isAuditorOrEnforcer {
-				return simpleInteractionResponse(s, i, "You do not have permission to set IGN overrides.")
-			}
+		// Get the target user's Discord ID for logging
+		targetDiscordID, err := GetDiscordIDByUserID(ctx, d.db, targetUserID)
+		if err != nil {
+			logger.WithField("error", err).Warn("Failed to get target Discord ID")
+			targetDiscordID = "unknown"
+		}
 
-			// Load target profile
-			targetProfile, err := EVRProfileLoad(ctx, nk, targetUserID)
-			if err != nil {
-				return fmt.Errorf("failed to load target profile: %w", err)
-			}
+		// Perform the unlink
+		if err := UnlinkVRMLAccount(ctx, nk, targetUserID, vrmlUserID); err != nil {
+			logger.WithFields(map[string]any{
+				"error":            err,
+				"target_user_id":   targetUserID,
+				"vrml_user_id":     vrmlUserID,
+				"admin_discord_id": user.ID,
+			}).Error("Failed to unlink VRML account")
+			return simpleInteractionResponse(s, i, fmt.Sprintf("Failed to unlink VRML account: %v", err))
+		}
 
-			// Get current IGN data
-			groupIGN := targetProfile.GetGroupIGNData(targetGroupID)
-			currentDisplayName := groupIGN.DisplayName
-			if currentDisplayName == "" {
-				// Fallback to username
-				if a, err := nk.AccountGetId(ctx, targetUserID); err == nil {
-					currentDisplayName = a.User.Username
+		// Log to audit channel
+		auditMessage := fmt.Sprintf("🔓 VRML Account Unlinked\n"+
+			"**Admin:** <@%s> (`%s`)\n"+
+			"**Target:** <@%s> (`%s`)\n"+
+			"**VRML User ID:** `%s`\n"+
+			"**VRML Profile:** https://vrmasterleague.com/Users/%s\n"+
+			"**Time:** <t:%d:F>",
+			user.ID, user.Username,
+			targetDiscordID, targetUserID,
+			vrmlUserID,
+			vrmlUserID,
+			time.Now().Unix(),
+		)
+
+		if err := AuditLogSend(s, ServiceSettings().ServiceAuditChannelID, auditMessage); err != nil {
+			logger.WithField("error", err).Warn("Failed to send audit log")
+		}
+
+		// Send to guild audit channel if available
+		if groupID != "" {
+			gg := d.guildGroupRegistry.Get(groupID)
+			if gg != nil && gg.AuditChannelID != "" {
+				if err := AuditLogSend(s, gg.AuditChannelID, auditMessage); err != nil {
+					logger.WithField("error", err).Warn("Failed to send guild audit log")
 				}
 			}
-
-			// Show modal with prepopulated data
-			modal := d.createLookupSetIGNModal(currentDisplayName, groupIGN.IsLocked)
-			// Store context in customID for modal submission
-			modal.Data.CustomID = fmt.Sprintf("lookup:set_ign_modal:%s:%s", targetUserID, targetGroupID)
-			return s.InteractionRespond(i.Interaction, modal)
-
-		default:
-			return fmt.Errorf("unknown lookup action: %s", action)
 		}
+
+		logger.WithFields(map[string]any{
+			"target_user_id":   targetUserID,
+			"vrml_user_id":     vrmlUserID,
+			"admin_discord_id": user.ID,
+			"admin_username":   user.Username,
+		}).Info("VRML account unlinked by admin")
+
+		// Respond to the interaction
+		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Flags:   discordgo.MessageFlagsEphemeral,
+				Content: fmt.Sprintf("✅ Successfully unlinked VRML account `%s` from <@%s>", vrmlUserID, targetDiscordID),
+			},
+		}); err != nil {
+			return fmt.Errorf("failed to respond to interaction: %w", err)
+		}
+
+		// Disable the button in the original message
+		if i.Message != nil {
+			if _, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+				Channel: i.Message.ChannelID,
+				ID:      i.Message.ID,
+				Components: &[]discordgo.MessageComponent{
+					discordgo.ActionsRow{
+						Components: []discordgo.MessageComponent{
+							discordgo.Button{
+								Label:    "Unlinked",
+								Style:    discordgo.SuccessButton,
+								CustomID: "nil",
+								Disabled: true,
+								Emoji:    &discordgo.ComponentEmoji{Name: "✅"},
+							},
+						},
+					},
+				},
+			}); err != nil {
+				logger.
+					WithField("error", err).
+					WithField("interaction_id", i.ID).
+					WithField("interaction_channel_id", i.ChannelID).
+					WithField("message_channel_id", i.Message.ChannelID).
+					WithField("message_id", i.Message.ID).
+					Warn("Failed to edit message to disable unlink-vrml-confirm button after successful unlink; UI button state may be stale")
+			}
+		}
+
+		return nil
+
+	case "set_ign_override":
+		// Handle set_ign_override button interactions from lookup or IGP
+		// value format: targetDiscordID:targetGuildID
+		parts := strings.SplitN(value, ":", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid set_ign_override format: expected targetDiscordID:targetGuildID")
+		}
+		targetDiscordID := parts[0]
+		targetGuildID := parts[1]
+
+		targetUserID := d.cache.DiscordIDToUserID(targetDiscordID)
+		targetGroupID := d.cache.GuildIDToGroupID(targetGuildID)
+
+		// Verify caller has permissions
+		callerGuildGroups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userID)
+		if err != nil {
+			return fmt.Errorf("failed to get guild groups: %w", err)
+		}
+
+		isAuditorOrEnforcer := false
+		if gg, ok := callerGuildGroups[targetGroupID]; ok && (gg.IsAuditor(userID) || gg.IsEnforcer(userID)) {
+			isAuditorOrEnforcer = true
+		}
+		isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+		isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
+
+		if !isAuditorOrEnforcer {
+			return simpleInteractionResponse(s, i, "You do not have permission to set IGN overrides.")
+		}
+
+		// Load target profile
+		targetProfile, err := EVRProfileLoad(ctx, nk, targetUserID)
+		if err != nil {
+			return fmt.Errorf("failed to load target profile: %w", err)
+		}
+
+		// Get current IGN data
+		groupIGN := targetProfile.GetGroupIGNData(targetGroupID)
+		currentDisplayName := groupIGN.DisplayName
+		if currentDisplayName == "" {
+			// Fallback to username
+			if a, err := nk.AccountGetId(ctx, targetUserID); err == nil {
+				currentDisplayName = a.User.Username
+			}
+		}
+
+		// Show modal with prepopulated data
+		modal := d.createLookupSetIGNModal(currentDisplayName, groupIGN.IsLocked)
+		// Store context in customID for modal submission
+		modal.Data.CustomID = fmt.Sprintf("set_ign_modal:%s:%s", targetDiscordID, targetGuildID)
+		return s.InteractionRespond(i.Interaction, modal)
+
 	case "server_issue_type":
 		// Handle server issue type selection
 		return d.handleServerIssueTypeSelection(ctx, logger, s, i, value)
@@ -414,6 +615,18 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		default:
 			return fmt.Errorf("unknown issue type: %s", issueType)
 		}
+
+	case "region_fallback":
+		// Handle region fallback button click
+		// Format: region_fallback:<action>:<original_region>:<mode>:<level>:<startTime>:<command_type>
+		return d.handleRegionFallbackInteraction(ctx, logger, s, i, value)
+
+	case "enforcement":
+		// Handle enforcement button interactions (edit, void)
+		return d.handleEnforcementInteraction(ctx, logger, s, i, value)
+	case "enf":
+		// Handle enforcement button interactions (edit, void) - short format
+		return d.handleEnforcementInteraction(ctx, logger, s, i, value)
 	}
 
 	return nil
@@ -452,6 +665,11 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		return nil, 0, status.Error(codes.PermissionDenied, "user does not have the allocator role in this guild.")
 	}
 
+	// If user is a global operator but has no allocator groups, use the current guild group
+	if isGlobalOperator {
+		allocatorGroupIDs = append(allocatorGroupIDs, groupID)
+	}
+
 	// Load the latency history for this user
 	latencyHistory := NewLatencyHistory()
 	if err := StorableRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
@@ -471,6 +689,13 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Allocate
 	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, allocatorGroupIDs, latestRTTs, settings, []string{regionCode}, false, true, queryAddon)
 	if err != nil {
+		// Check if this is a region fallback error
+		var regionErr ErrMatchmakingNoServersInRegion
+		if errors.As(err, &regionErr) && regionErr.FallbackInfo != nil {
+			// Return the fallback info so the caller can handle the user prompt
+			return nil, 0, regionErr
+		}
+
 		if strings.Contains("bad request:", err.Error()) {
 			err = NewLobbyErrorf(BadRequest, "required features not supported")
 		}
@@ -496,6 +721,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Error(codes.PermissionDenied, "user is not a member of the guild")
 	}
 
+	// Check if user is suspended from the guild
 	if group.IsSuspended(userID, nil) {
 		return nil, 0, status.Error(codes.PermissionDenied, "user is suspended from the guild")
 	}
@@ -504,6 +730,23 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Error(codes.PermissionDenied, "guild does not allow public match creation")
 	}
 
+	// Check if user is a moderator (enforcer) in the guild or a global operator
+	isGuildModerator := group.IsEnforcer(userID)
+	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+	isPrivileged := isGuildModerator || isGlobalOperator
+
+	// Check if this is a public match (echo_arena or echo_combat)
+	isPublicMatch := mode == evr.ModeArenaPublic || mode == evr.ModeCombatPublic
+
+	// Apply stricter rate limit (1 per 15 minutes) for public matches, unless user is privileged
+	if isPublicMatch && !isPrivileged {
+		publicLimiter := d.loadPublicMatchRateLimiter(userID, groupID)
+		if !publicLimiter.Allow() {
+			return nil, 0, status.Error(codes.ResourceExhausted, "rate limit exceeded for public matches (1 per 15 minutes)")
+		}
+	}
+
+	// Apply general rate limit for all matches
 	limiter := d.loadPrepareMatchRateLimiter(userID, groupID)
 	if !limiter.Allow() {
 		return nil, 0, status.Error(codes.ResourceExhausted, fmt.Sprintf("rate limit exceeded (%0.0f requests per minute)", limiter.Limit()*60))
@@ -526,6 +769,12 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
 	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, extIPs, settings, []string{region}, true, false, queryAddon)
 	if err != nil {
+		// Check if this is a region fallback error
+		var regionErr ErrMatchmakingNoServersInRegion
+		if errors.As(err, &regionErr) && regionErr.FallbackInfo != nil {
+			// Return the fallback info so the caller can handle the user prompt
+			return nil, 0, regionErr
+		}
 		return nil, 0, fmt.Errorf("failed to allocate game server: %w", err)
 	}
 
@@ -547,6 +796,11 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		suspensionDuration time.Duration
 	)
 
+	// Do not allow bots to be suspended
+	if target.Bot {
+		return simpleInteractionResponse(d.dg, i, "Bots cannot be suspended.")
+	}
+
 	callerUserID := d.cache.DiscordIDToUserID(caller.User.ID)
 	if callerUserID == "" {
 		return errors.New("failed to get target user ID")
@@ -560,35 +814,23 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		return errors.New("failed to get group ID")
 	}
 
-	// Parse minutes, hours, days, and weeks (m, h, d, w)
+	// Parse duration using shared helper function
 	if duration != "" {
-		var unit time.Duration
-		if duration == "0" {
+		var err error
+		suspensionDuration, err = parseSuspensionDuration(duration)
+		if err != nil {
+			helpMessage := fmt.Sprintf("Duration parse error: %s\n\n**Use a number followed by m, h, d, or w (e.g., 30m, 1h, 2d, 1w) or compound durations (e.g., 2h30m)**", err.Error())
+			if i != nil {
+				return simpleInteractionResponse(d.dg, i, helpMessage)
+			}
+			return errors.New(helpMessage)
+		}
+
+		if suspensionDuration == 0 {
+			// Zero duration means void existing suspension
 			suspensionExpiry = time.Now()
 		} else {
-			switch duration[len(duration)-1] {
-			case 'm':
-				unit = time.Minute
-			case 'h':
-				unit = time.Hour
-			case 'd':
-				unit = 24 * time.Hour
-			case 'w':
-				unit = 7 * 24 * time.Hour
-			default:
-				duration += "m"
-				unit = time.Minute
-			}
-			if duration, err := strconv.Atoi(duration[:len(duration)-1]); err == nil {
-				suspensionDuration = time.Duration(duration) * unit
-				suspensionExpiry = time.Now().Add(time.Duration(duration) * unit)
-			} else {
-				helpMessage := fmt.Sprintf("Duration parse error (`%s`).\n\n**Use a number followed by m, h, d, or w (e.g., 30m, 1h, 2d, 1w)**", err.Error())
-				if i != nil {
-					return simpleInteractionResponse(d.dg, i, helpMessage)
-				}
-				return errors.New(helpMessage) // Return an error if the duration is invalid
-			}
+			suspensionExpiry = time.Now().Add(suspensionDuration)
 		}
 	}
 	presences, err := d.nk.StreamUserList(StreamModeService, targetUserID, "", StreamLabelMatchService, false, true)
@@ -607,6 +849,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		addSuspension         = !suspensionExpiry.IsZero() && time.Now().Before(suspensionExpiry)
 		recordsByGroupID      = make(map[string][]GuildEnforcementRecord, 1)
 		voids                 = make(map[string]GuildEnforcementRecordVoid, 0)
+		sentEmbedResponse     = false
 	)
 
 	gg, err := GuildGroupLoad(ctx, nk, groupID)
@@ -789,14 +1032,63 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				field := createSuspensionDetailsEmbedField(gn, records, voids, true, true, true, gID)
 				embed.Fields = append(embed.Fields, field)
 			}
+
+			// Add enforcement buttons for suspension records
+			var components []discordgo.MessageComponent
+			if len(recordsByGroupID) > 0 && len(voids) == 0 {
+				// Only add buttons if there are active suspensions (not voids)
+				for _, records := range recordsByGroupID {
+					for _, record := range records {
+						// Create buttons for each record
+						buttons := []discordgo.MessageComponent{
+							&discordgo.Button{
+								Label:    "Edit",
+								Style:    discordgo.PrimaryButton,
+								CustomID: fmt.Sprintf("enf:e:%s:%s:%s", record.ID, i.GuildID, target.ID),
+							},
+							&discordgo.Button{
+								Label:    "Void",
+								Style:    discordgo.DangerButton,
+								CustomID: fmt.Sprintf("enf:v:%s:%s:%s", record.ID, i.GuildID, target.ID),
+							},
+						}
+						components = append(components, &discordgo.ActionsRow{
+							Components: buttons,
+						})
+						break // Only add buttons for the first record to avoid clutter
+					}
+					break // Only process first group
+				}
+			}
+
 			_, err = d.dg.ChannelMessageSendComplex(gg.EnforcementNoticeChannelID, &discordgo.MessageSend{
 				Embed:           embed,
+				Components:      components,
 				AllowedMentions: &discordgo.MessageAllowedMentions{},
 			})
 			if err != nil {
 				logger.WithFields(map[string]interface{}{
 					"error": err,
 				}).Error("Failed to send enforcement notice")
+			}
+
+			// Send the same embed to the moderator as an ephemeral response
+			if i != nil {
+				err = d.dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:      discordgo.MessageFlagsEphemeral,
+						Embeds:     []*discordgo.MessageEmbed{embed},
+						Components: components,
+					},
+				})
+				if err != nil {
+					logger.WithFields(map[string]interface{}{
+						"error": err,
+					}).Error("Failed to send ephemeral response to moderator")
+				} else {
+					sentEmbedResponse = true
+				}
 			}
 
 		}
@@ -878,8 +1170,186 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 
 	_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s's `kick-player` actions summary for %s (%s):\n %s", caller.Mention(), target.Mention(), target.Username, strings.Join(actions, ";\n ")), false)
 
-	if i != nil {
+	if i != nil && !sentEmbedResponse {
 		return simpleInteractionResponse(d.dg, i, fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(actions, "\n")))
 	}
 	return nil
+}
+
+// presentRegionFallbackOptions presents the user with options when no servers are available in the requested region
+func (d *DiscordAppBot) presentRegionFallbackOptions(s *discordgo.Session, i *discordgo.InteractionCreate, fallbackInfo *RegionFallbackInfo, commandType, originalRegion string, mode, level evr.Symbol, startTime time.Time) error {
+	// Encode parameters into button CustomID
+	// Format: region_fallback:<action>:<original_region>:<mode>:<level>:<startTime>:<command_type>
+	startTimeStr := fmt.Sprintf("%d", startTime.Unix())
+	baseParams := fmt.Sprintf("%s:%s:%s:%s:%s", originalRegion, mode.String(), level.String(), startTimeStr, commandType)
+
+	embed := &discordgo.MessageEmbed{
+		Title: "No Servers Available in Selected Region",
+		Description: fmt.Sprintf("No servers are available in region(s) **%v**.\n\nHowever, a server is available in **%s** with **%dms** latency.\n\nWould you like to use this server instead?",
+			fallbackInfo.RequestedRegions, fallbackInfo.ClosestRegion, fallbackInfo.ClosestLatencyMs),
+		Color: 0xFFA500, // Orange color for warning
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:   "Requested Region(s)",
+				Value:  fmt.Sprintf("%v", fallbackInfo.RequestedRegions),
+				Inline: true,
+			},
+			{
+				Name:   "Closest Available",
+				Value:  fmt.Sprintf("%s (%dms)", fallbackInfo.ClosestRegion, fallbackInfo.ClosestLatencyMs),
+				Inline: true,
+			},
+		},
+	}
+
+	components := []discordgo.MessageComponent{
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				&discordgo.Button{
+					Label:    "Use Closest Server",
+					Style:    discordgo.SuccessButton,
+					CustomID: fmt.Sprintf("region_fallback:use_closest:%s", baseParams),
+				},
+				&discordgo.Button{
+					Label:    "Cancel",
+					Style:    discordgo.DangerButton,
+					CustomID: fmt.Sprintf("region_fallback:cancel:%s", baseParams),
+				},
+			},
+		},
+	}
+
+	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds:     []*discordgo.MessageEmbed{embed},
+			Components: components,
+			Flags:      discordgo.MessageFlagsEphemeral,
+		},
+	})
+}
+
+// handleRegionFallbackInteraction handles user's choice for region fallback
+func (d *DiscordAppBot) handleRegionFallbackInteraction(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, value string) error {
+	// Parse value: <action>:<original_region>:<mode>:<level>:<startTime>:<command_type>
+	parts := strings.Split(value, ":")
+	if len(parts) != 6 {
+		return fmt.Errorf("invalid region_fallback value format: expected 6 parts, got %d", len(parts))
+	}
+
+	action := parts[0]
+	originalRegion := parts[1]
+	modeStr := parts[2]
+	levelStr := parts[3]
+	startTimeStr := parts[4]
+	commandType := parts[5]
+
+	mode := evr.ToSymbol(modeStr)
+	level := evr.ToSymbol(levelStr)
+	startTimeUnix, err := strconv.ParseInt(startTimeStr, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid start time: %w", err)
+	}
+	startTime := time.Unix(startTimeUnix, 0)
+
+	user, _ := getScopedUserMember(i)
+	if user == nil {
+		return fmt.Errorf("user is nil")
+	}
+	userID := d.cache.DiscordIDToUserID(user.ID)
+
+	if action == "cancel" {
+		// User chose to cancel
+		logger.WithFields(map[string]any{
+			"userID":           userID,
+			"requested_region": originalRegion,
+			"action":           "cancel",
+		}).Info("User canceled region fallback")
+
+		return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseUpdateMessage,
+			Data: &discordgo.InteractionResponseData{
+				Content:    "❌ Server allocation cancelled. No servers available in the requested region.",
+				Embeds:     []*discordgo.MessageEmbed{},
+				Components: []discordgo.MessageComponent{},
+			},
+		})
+	}
+
+	if action == "use_closest" {
+		// User chose to use the closest server
+		// Defer the response so we have time to allocate the server
+		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseDeferredMessageUpdate,
+		}); err != nil {
+			return fmt.Errorf("failed to defer interaction: %w", err)
+		}
+
+		// Now allocate without the region requirement (pass empty region)
+		var label *MatchLabel
+		var rttMs int
+		if commandType == "create-match" {
+			// Use handleCreateMatch but without region requirement (pass empty region)
+			label, rttMs, err = d.handleCreateMatch(ctx, logger, userID, i.GuildID, "", mode, level, startTime)
+		} else if commandType == "allocate-match" {
+			var rtt float64
+			label, rtt, err = d.handleAllocateMatch(ctx, logger, userID, i.GuildID, "", mode, level, startTime)
+			rttMs = int(rtt)
+		} else {
+			return fmt.Errorf("unknown command type: %s", commandType)
+		}
+
+		if err != nil {
+			// Log the fallback failure
+			logger.WithFields(map[string]any{
+				"userID":           userID,
+				"requested_region": originalRegion,
+				"action":           "use_closest",
+				"error":            err.Error(),
+			}).Error("Failed to allocate closest server after user accepted fallback")
+
+			_, updateErr := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+				Content:    ptr.String(fmt.Sprintf("❌ Failed to allocate server: %v", err)),
+				Embeds:     &[]*discordgo.MessageEmbed{},
+				Components: &[]discordgo.MessageComponent{},
+			})
+			if updateErr != nil {
+				return fmt.Errorf("failed to update interaction: %w", updateErr)
+			}
+			return err
+		}
+
+		selectedRegion := label.GameServer.LocationRegionCode(true, true)
+
+		// Log the successful fallback
+		logger.WithFields(map[string]any{
+			"userID":           userID,
+			"requested_region": originalRegion,
+			"selected_region":  selectedRegion,
+			"server":           label.GameServer.Endpoint.ExternalIP.String(),
+			"latency_ms":       rttMs,
+			"action":           "use_closest",
+		}).Info("User accepted region fallback to closest server")
+
+		// For create-match, also set the next match ID
+		if commandType == "create-match" {
+			if err := SetNextMatchID(ctx, d.nk, userID, label.ID, AnyTeam, ""); err != nil {
+				logger.Error("Failed to set next match ID", zap.Error(err))
+				// Don't fail the whole operation, just log it
+			}
+		}
+
+		// Update the message with success
+		successMessage := fmt.Sprintf("✅ Server allocated in **%s** (%dms latency)\n\nMatch ID: `%s`\nhttps://echo.taxi/spark://c/%s",
+			selectedRegion, rttMs, label.ID.UUID.String(), strings.ToUpper(label.ID.UUID.String()))
+
+		_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+			Content:    ptr.String(successMessage),
+			Embeds:     &[]*discordgo.MessageEmbed{},
+			Components: &[]discordgo.MessageComponent{},
+		})
+		return err
+	}
+
+	return fmt.Errorf("unknown action: %s", action)
 }

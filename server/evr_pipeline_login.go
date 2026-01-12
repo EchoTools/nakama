@@ -168,6 +168,12 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		gameSettings.RemoteLogRichPresence = true
 		gameSettings.RemoteLogMetrics = true
 	}
+	metricsTags := params.MetricsTags()
+	go func(metricsTags map[string]string) {
+		<-session.Context().Done()
+		// Record the session duration
+		p.nk.metrics.CustomGauge("session_duration_seconds", metricsTags, time.Since(timer).Seconds())
+	}(metricsTags)
 
 	return session.SendEvr(
 		evr.NewLoginSuccess(session.id, request.XPID),
@@ -645,7 +651,9 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		if !groupIGN.IsOverride && !groupIGN.IsLocked {
 			// Update the in-game name for the guild.
 			if member, err := p.discordCache.GuildMember(gg.GuildID, params.profile.DiscordID()); err != nil {
-				logger.Warn("Failed to get guild member", zap.String("guild_id", gg.GuildID), zap.String("discord_id", params.profile.DiscordID()), zap.Error(err))
+				if !IsDiscordErrorCode(err, discordgo.ErrCodeUnknownMember) {
+					logger.Warn("Failed to get guild member", zap.String("guild_id", gg.GuildID), zap.String("discord_id", params.profile.DiscordID()), zap.Error(err))
+				}
 			} else if memberNick := InGameName(member); memberNick != "" {
 				// If the member is found, use it as their in-game name.
 				groupIGN.DisplayName = memberNick
@@ -882,7 +890,10 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		return fmt.Errorf("failed to get server profile: %w", err)
 	}
 
-	p.profileCache.Store(session.id, *serverProfile)
+	// Store the server profile for later retrieval by other players
+	if err := ServerProfileStore(ctx, p.nk, userID, serverProfile); err != nil {
+		logger.Warn("Failed to store server profile", zap.Error(err))
+	}
 
 	clientProfile := NewClientProfile(ctx, params.profile, serverProfile)
 
@@ -1119,12 +1130,6 @@ func (p *EvrPipeline) genericMessage(ctx context.Context, logger *zap.Logger, se
 	return nil
 }
 
-func mostRecentThursday() time.Time {
-	now := time.Now()
-	offset := (int(now.Weekday()) - int(time.Thursday) + 7) % 7
-	return now.AddDate(0, 0, -offset).UTC()
-}
-
 // A profile update request is sent from the game server's login connection.
 // It is sent 45 seconds before the sessionend is sent, right after the match ends.
 func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
@@ -1187,15 +1192,10 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 	}
 	logger = logger.With(zap.String("player_uid", playerInfo.UserID), zap.String("player_sid", playerInfo.SessionID), zap.String("player_xpid", playerInfo.EvrID.String()))
 
-	var profile *EVRProfile
-
-	var err error
-	if profile == nil {
-		// If the player isn't a member of the group, do not update the stats
-		profile, err = EVRProfileLoad(ctx, p.nk, playerInfo.UserID)
-		if err != nil {
-			return fmt.Errorf("failed to get account profile: %w", err)
-		}
+	// If the player isn't a member of the group, do not update the stats
+	profile, err := EVRProfileLoad(ctx, p.nk, playerInfo.UserID)
+	if err != nil {
+		return fmt.Errorf("failed to get account profile: %w", err)
 	}
 	groupIDStr := label.GetGroupID().String()
 
@@ -1233,11 +1233,16 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 		p.nk.metrics.CustomTimer("profile_request_latency", tags, time.Since(startTime))
 	}()
 
-	var ok bool
-	var data json.RawMessage
-
-	if data, ok = p.profileCache.Load(request.EvrId); !ok {
-		logger.Error("Profile does not exist in cache.", zap.String("evrId", request.EvrId.String()))
+	// Load the server profile by XPID from storage (returns raw JSON)
+	data, _, err := ServerProfileLoadByXPID(ctx, p.nk, request.EvrId)
+	if err != nil {
+		tags["error"] = "failed_load_profile"
+		logger.Error("Failed to load profile from storage", zap.Error(err), zap.String("evrId", request.EvrId.String()))
+		return nil
+	}
+	if data == nil {
+		tags["error"] = "profile_not_found"
+		logger.Error("Profile does not exist in storage.", zap.String("evrId", request.EvrId.String()))
 		return nil
 	}
 	/*

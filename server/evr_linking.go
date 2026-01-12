@@ -10,14 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	jwt "github.com/golang-jwt/jwt/v5"
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"go.uber.org/zap"
 	"golang.org/x/oauth2"
-	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // LinkTicket represents a ticket used for linking accounts to Discord.
@@ -153,62 +149,6 @@ func generateLinkCode() string {
 	}
 
 	return string(code)
-}
-
-func (p *EvrPipeline) evrStorageObjectDefault(session *sessionWS, collection string, key string, defaultFn func() evr.Document) interface{} {
-	ctx := session.Context()
-	logger := session.logger
-	var document evr.Document
-
-	// retrieve the document from storage
-	objs, err := StorageReadObjects(ctx, logger, session.pipeline.db, uuid.Nil, []*api.ReadStorageObjectId{
-		{
-			Collection: collection,
-			Key:        key,
-			UserId:     uuid.Nil.String(),
-		},
-	})
-	if err != nil {
-		logger.Error("SNSDocumentRequest: failed to read objects", zap.Error(err))
-		return false
-	}
-
-	if (len(objs.Objects)) == 0 {
-		// if the document doesn't exist, try to get the default document
-		document = defaultFn()
-		jsonBytes, err := json.Marshal(document)
-		if err != nil {
-			logger.Error("error marshalling document: %v", zap.Error(err))
-			return false
-		}
-		// write the document to storage
-		ops := StorageOpWrites{
-			{
-				OwnerID: uuid.Nil.String(),
-				Object: &api.WriteStorageObject{
-					Collection:      collection,
-					Key:             key,
-					Value:           string(jsonBytes),
-					PermissionRead:  &wrapperspb.Int32Value{Value: int32(0)},
-					PermissionWrite: &wrapperspb.Int32Value{Value: int32(0)},
-				},
-			},
-		}
-		if _, _, err = StorageWriteObjects(ctx, session.logger, session.pipeline.db, session.metrics, session.storageIndex, false, ops); err != nil {
-			logger.Error("failed to write objects", zap.Error(err))
-			return false
-		}
-
-		logger.Error("document not found", zap.String("collection", collection), zap.String("key", key))
-
-	} else {
-		// unmarshal the document
-		if err := json.Unmarshal([]byte(objs.Objects[0].Value), &document); err != nil {
-			logger.Error("error unmarshalling document: %v", zap.Error(err))
-			return false
-		}
-	}
-	return document
 }
 
 // ExchangeLinkCode exchanges a link code for an auth token.

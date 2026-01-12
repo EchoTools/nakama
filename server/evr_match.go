@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/echotools/nevr-common/v3/rtapi"
+	"github.com/echotools/nevr-common/v4/gen/go/rtapi"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -153,7 +153,7 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 		TeamAlignments:       make(map[string]int, SocialLobbyMaxSize),
 		joinTimestamps:       make(map[string]time.Time, SocialLobbyMaxSize),
 		joinTimeMilliseconds: make(map[string]int64, SocialLobbyMaxSize),
-		disconnectInfos:      make(map[string]*PlayerDisconnectInfo, SocialLobbyMaxSize),
+		participations:       make(map[string]*PlayerParticipation, SocialLobbyMaxSize),
 		emptyTicks:           0,
 		tickRate:             10,
 	}
@@ -268,6 +268,17 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
+	// Check if the main presence is already in the match (idempotent join or reconnection)
+	if existing, found := state.presenceMap[meta.Presence.GetSessionId()]; found {
+		// If the session is already in the match, treat this as a successful idempotent join
+		logger.WithFields(map[string]interface{}{
+			"evrid": existing.EvrID,
+			"uid":   existing.GetUserId(),
+			"sid":   existing.GetSessionId(),
+		}).Debug("Session already in match, allowing idempotent join.")
+		return state, true, ""
+	}
+
 	// Remove any reservations of existing players (i.e. party members already in the match)
 	for i := 0; i < len(meta.Reservations); i++ {
 		s := meta.Reservations[i].GetSessionId()
@@ -297,10 +308,13 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	for _, p := range meta.Presences() {
 
 		for _, e := range state.presenceMap {
+			// Reject any duplicate EVR-ID join attempt (regardless of session)
 			if e.EvrID.Equals(p.EvrID) {
 				logger.WithFields(map[string]interface{}{
-					"evrid": p.EvrID,
-					"uid":   p.GetUserId(),
+					"evrid":            p.EvrID,
+					"uid":              p.GetUserId(),
+					"existing_session": e.GetSessionId(),
+					"new_session":      p.GetSessionId(),
 				}).Error("Duplicate EVR-ID join attempt.")
 				return state, false, ErrJoinRejectDuplicateEvrID.Error()
 			}
@@ -468,13 +482,14 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			State:    state,
 		})
 
-		if info, ok := state.disconnectInfos[p.GetUserId()]; ok && info != nil {
-			// If the player has disconnect info, calculate the disconnect duration
-			info.LeaveTime = time.Time{}
+		if participation, ok := state.participations[p.GetUserId()]; ok && participation != nil {
+			// If the player has participation info, clear leave time (they rejoined)
+			participation.LeaveTime = time.Time{}
+			participation.WasPresentAtEnd = false
 		} else {
-			// If the player has no disconnect info, create it now
-			if info := NewPlayerDisconnectInfo(ctx, logger, db, nk, state, presences[0].GetUserId()); info != nil {
-				state.disconnectInfos[p.GetUserId()] = info
+			// If the player has no participation info, create it now
+			if participation := NewPlayerParticipation(ctx, logger, db, nk, state, p.GetUserId()); participation != nil {
+				state.participations[p.GetUserId()] = participation
 			}
 		}
 	}
@@ -600,31 +615,26 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 				logger.Warn("Failed to record match time to leaderboard: %v", err)
 			}
 
-			if info, ok := state.disconnectInfos[p.GetUserId()]; ok {
-				// If the player has disconnect info, calculate the disconnect duration
-				info.LeaveEvent(state)
+			if participation, ok := state.participations[p.GetUserId()]; ok {
+				// Record the leave event for the participation
+				participation.RecordLeaveEvent(state)
 			}
 			// If the round is not over, then add an early quit count to the player.
-			if state.Mode == evr.ModeArenaPublic && time.Now().After(state.StartTime.Add(time.Second*60)) && state.GameState != nil && !state.GameState.MatchOver {
-				for _, p := range presences {
-					if mp, ok := state.presenceMap[p.GetSessionId()]; ok {
-						// Only players
-						if !mp.IsPlayer() {
-							continue
-						}
+			// Count all quits before match completion (both pre-game and early quits)
+			if state.Mode == evr.ModeArenaPublic && state.GameState != nil && !state.GameState.MatchOver {
+				// Only players
+				if mp.IsPlayer() {
+					nk.MetricsCounterAdd("match_entrant_early_quit", tags, 1)
 
-						nk.MetricsCounterAdd("match_entrant_early_quit", tags, 1)
+					logger.WithFields(map[string]interface{}{
+						"uid":          mp.GetUserId(),
+						"username":     mp.Username,
+						"evrid":        mp.EvrID,
+						"display_name": mp.DisplayName,
+					}).Debug("Incrementing early quit for player.")
 
-						logger.WithFields(map[string]interface{}{
-							"uid":          mp.GetUserId(),
-							"username":     mp.Username,
-							"evrid":        mp.EvrID,
-							"display_name": mp.DisplayName,
-						}).Debug("Incrementing early quit for player.")
-
-						if err := AccumulateLeaderboardStat(ctx, nk, mp.GetUserId(), mp.DisplayName, state.GetGroupID().String(), state.Mode, EarlyQuitStatisticID, 1); err != nil {
-							logger.Warn("Failed to record early quit to leaderboard: %v", err)
-						}
+					if err := AccumulateLeaderboardStat(ctx, nk, mp.GetUserId(), mp.DisplayName, state.GetGroupID().String(), state.Mode, EarlyQuitStatisticID, 1); err != nil {
+						logger.Warn("Failed to record early quit to leaderboard: %v", err)
 					}
 
 					eqconfig := NewEarlyQuitConfig()
@@ -654,6 +664,14 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 									params.earlyQuitConfig.Store(eqconfig)
 								}
 							}
+
+							// Launch goroutine to check if player logs out and remove early quit if they do
+							// Use a 5-minute grace period before checking logout status
+							// Use background context to ensure goroutine isn't cancelled when match ends
+							go func(userID, sessionID string) {
+								bgCtx := context.Background()
+								CheckAndStrikeEarlyQuitIfLoggedOut(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, 5*time.Minute)
+							}(mp.GetUserId(), mp.GetSessionId())
 
 							// Send Discord DM if tier changed
 							if tierChanged {
@@ -686,16 +704,34 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 	if len(rejects) > 0 {
 		code := evr.PlayerRejectionReasonDisconnected
-		msgs := []evr.Message{
-			evr.NewGameServerEntrantRejected(code, rejects...),
-		}
-		logger.WithFields(map[string]interface{}{
-			"rejects": rejects,
-			"code":    code,
-		}).Debug("Sending reject message to game server.")
 
-		if err := m.dispatchMessages(ctx, logger, dispatcher, msgs, []runtime.Presence{state.server}, nil); err != nil {
-			logger.Warn("Failed to dispatch message: %v", err)
+		// Convert UUIDs to strings for protobuf
+		rejectIDs := make([]string, 0, len(rejects))
+		for _, id := range rejects {
+			rejectIDs = append(rejectIDs, id.String())
+		}
+
+		envelope := &rtapi.Envelope{
+			Message: &rtapi.Envelope_LobbyEntrantReject{
+				LobbyEntrantReject: &rtapi.LobbyEntrantsRejectMessage{
+					EntrantIds: rejectIDs,
+					Code:       int32(code),
+				},
+			},
+		}
+
+		msg, err := evr.NewNEVRProtobufMessageV1(envelope)
+		if err != nil {
+			logger.Warn("Failed to create protobuf message", zap.Error(err))
+		} else {
+			logger.WithFields(map[string]interface{}{
+				"rejects": rejects,
+				"code":    code,
+			}).Debug("Sending reject message to game server.")
+
+			if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{state.server}, nil); err != nil {
+				logger.Warn("Failed to dispatch message: %v", err)
+			}
 		}
 	}
 	if len(state.presenceMap) == 0 {
@@ -740,7 +776,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				// Close public matches on round over
 				if update.MatchOver && state.Open {
 					logger.Info("Received round over for public match, locking match.")
-					state.GameState.MatchOver = true
+
 					state.Open = false
 
 					if state.LockedAt == nil {
@@ -752,20 +788,21 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			}
 
 			if state.GameState != nil {
-				logger.WithField("update", update).Debug("Received match update message.")
-				gs := state.GameState
-				u := update
 
-				if len(u.Goals) > 0 {
-					state.goals = append(state.goals, u.Goals...)
+				logger.WithField("update", update).Debug("Received match update message.")
+
+				state.GameState.MatchOver = true
+
+				if len(update.Goals) > 0 {
+					state.goals = append(state.goals, update.Goals...)
 				}
 
 				if state.GameState.SessionScoreboard != nil {
-					if u.CurrentGameClock != 0 {
-						if u.PauseDuration != 0 {
-							gs.SessionScoreboard.UpdateWithPause(u.CurrentGameClock, u.PauseDuration)
+					if update.CurrentGameClock != 0 {
+						if update.PauseDuration != 0 {
+							state.GameState.SessionScoreboard.UpdateWithPause(update.CurrentGameClock, update.PauseDuration)
 						} else {
-							gs.SessionScoreboard.Update(u.CurrentGameClock)
+							state.GameState.SessionScoreboard.Update(update.CurrentGameClock)
 						}
 					}
 				}
@@ -834,16 +871,6 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		}
 	}
 
-	if state.server == nil {
-		state.emptyTicks++
-		if state.emptyTicks > 60*state.tickRate {
-			logger.Warn("Match has been empty for too long. Shutting down.")
-			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
-		}
-	} else if state.emptyTicks > 0 {
-		state.emptyTicks = 0
-	}
-
 	// If the match is terminating, terminate on the tick.
 	if state.terminateTick != 0 {
 		if tick >= state.terminateTick {
@@ -851,6 +878,14 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			return m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
 		}
 		return state
+	} else if state.server == nil {
+		state.emptyTicks++
+		if state.emptyTicks > 10*state.tickRate {
+			logger.Warn("Match has been empty for too long. Shutting down.")
+			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
+		}
+	} else if state.emptyTicks > 0 {
+		state.emptyTicks = 0
 	}
 
 	if state.LobbyType == UnassignedLobby {
@@ -866,7 +901,8 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	// If the match is prepared and the start time has been reached, start it.
-	if !state.levelLoaded && (len(state.presenceMap) != 0 || state.Started()) {
+	// Ensure the game server presence exists to avoid nil dispatch crashes.
+	if !state.levelLoaded && state.server != nil && (len(state.presenceMap) != 0 || state.Started()) {
 		if state, err = m.MatchStart(ctx, logger, nk, dispatcher, state); err != nil {
 			logger.Error("failed to start session: %v", err)
 			return nil
@@ -902,49 +938,68 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		updateLabel = true
 	}
 
-	// Every 2 seconds, update the disconnect info durations for players that are still connected to the game server.
+	// Every 2 seconds, update the participation durations for players that are still connected to the game server.
 	if state.Mode == evr.ModeArenaPublic && tick%(2*state.tickRate) == 0 {
 		delta := 2 * time.Second
-		// The amount of time the teams are full.
-		var integrityTime, disadvantageBlueTime, disadvantageOrangeTime time.Duration
+		UpdateParticipationDurations(state, delta)
 
-		if state.OpenPlayerSlots() == 0 {
-			integrityTime = delta
-		} else if state.RoleCount(evr.TeamBlue) < state.RoleCount(evr.TeamOrange) {
-			disadvantageBlueTime = delta
-		} else if state.RoleCount(evr.TeamOrange) < state.RoleCount(evr.TeamBlue) {
-			disadvantageOrangeTime = delta
-		}
+		// If the match is over, send the match summary once
+		if state.GameState != nil && state.GameState.MatchOver && !state.matchSummarySent {
+			state.matchSummarySent = true
+			if err := SendMatchSummary(ctx, logger, nk, state); err != nil {
+				logger.WithField("error", err).Error("failed to send match summary")
+			}
 
-		for _, p := range state.disconnectInfos {
-			if p == nil {
-				continue
-			}
-			// If the player is still here, increase the counts.
-			if !p.LeaveTime.IsZero() {
-				continue
-			}
-			p.IntegrityDuration += integrityTime
-
-			if p.Team == BlueTeam {
-				p.DisadvantageDuration += disadvantageBlueTime
-			}
-			if p.Team == OrangeTeam {
-				p.DisadvantageDuration += disadvantageOrangeTime
-			}
-		}
-
-		// If the match is over, submit the early quit counts.
-		if state.GameState != nil && state.GameState.MatchOver {
-			for _, info := range state.disconnectInfos {
-				if info == nil {
+			// Increment completed matches for players who stayed until the end
+			_nk := nk.(*RuntimeGoNakamaModule)
+			serviceSettings := ServiceSettings()
+			for _, presence := range state.presenceMap {
+				// Skip non-players (spectators, moderators)
+				if presence.RoleAlignment == evr.TeamSpectator || presence.RoleAlignment == evr.TeamModerator {
 					continue
 				}
-				if info.LeaveTime.IsZero() {
-					// Mark the player as having left when the match ended.
-					info.LeaveEvent(state)
+
+				eqconfig := NewEarlyQuitConfig()
+				if err := StorableRead(ctx, nk, presence.GetUserId(), eqconfig, true); err != nil {
+					logger.WithField("error", err).Warn("Failed to load early quitter config for completed match")
+					continue
 				}
-				info.LogEarlyQuitMetrics(nk, state)
+
+				eqconfig.IncrementCompletedMatches()
+
+				// Check for tier change after completing match
+				oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
+
+				logger.WithFields(map[string]interface{}{
+					"user_id":      presence.GetUserId(),
+					"old_tier":     oldTier,
+					"new_tier":     newTier,
+					"tier_changed": tierChanged,
+					"eqconfig":     eqconfig,
+				}).Debug("Player completed match tier update.")
+
+				if err := StorableWrite(ctx, nk, presence.GetUserId(), eqconfig); err != nil {
+					logger.Warn("Failed to write early quitter config after completed match", zap.Error(err))
+				} else {
+					if s := _nk.sessionRegistry.Get(uuid.FromStringOrNil(presence.GetSessionId())); s != nil {
+						if params, ok := LoadParams(s.Context()); ok {
+							params.earlyQuitConfig.Store(eqconfig)
+						}
+					}
+
+					// Send Discord DM if tier changed (restored from penalty tier), unless silent mode is enabled
+					if tierChanged && newTier == MatchmakingTier1 && !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
+						discordID, err := GetDiscordIDByUserID(ctx, db, presence.GetUserId())
+						if err != nil {
+							logger.Warn("Failed to get Discord ID for tier notification", zap.Error(err))
+						} else if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
+							message := TierRestoredMessage
+							if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
+								logger.Warn("Failed to send tier restored Discord DM", zap.Error(err))
+							}
+						}
+					}
+				}
 			}
 		}
 	}
@@ -969,6 +1024,15 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 	state.Open = false
 	logger.Debug("MatchTerminate called.")
 	nk.MetricsCounterAdd("match_terminate_count", state.MetricsTags(), 1)
+
+	// Send match summary if not already sent
+	if !state.matchSummarySent && len(state.participations) > 0 {
+		state.matchSummarySent = true
+		if err := SendMatchSummary(ctx, logger, nk, state); err != nil {
+			logger.WithField("error", err).Error("failed to send match summary on terminate")
+		}
+	}
+
 	if state.server != nil {
 		// Disconnect the players
 		for _, presence := range state.presenceMap {
@@ -1345,6 +1409,10 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 }
 
 func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *MatchLabel) (*MatchLabel, error) {
+	// Do not attempt to start without a game server presence; avoids nil dispatch.
+	if state.server == nil {
+		return state, fmt.Errorf("cannot start match: server presence is nil")
+	}
 	groupID := uuid.Nil
 	if state.GroupID != nil {
 		groupID = *state.GroupID
@@ -1382,9 +1450,20 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 		return nil, fmt.Errorf("failed to create protobuf message: %w", err)
 	}
 
+	entrants := make([]evr.EvrId, 0, len(state.presenceByEvrID))
+	for evrID := range state.presenceByEvrID {
+		entrants = append(entrants, evrID)
+	}
+
+	appID := ""
+	if state.GameServer != nil {
+		appID = state.GameServer.AppID
+	}
+
 	messages := []evr.Message{
 		message,
-		evr.NewGameServerSessionStart(state.ID.UUID, groupID, uint8(state.MaxSize), uint8(state.LobbyType), state.GameServer.AppID, state.Mode, state.Level, state.RequiredFeatures, []evr.EvrId{}), // Legacy Message for the game server.
+		// Legacy message for backwards compatibility with legacy game servers.
+		evr.NewGameServerSessionStart(state.ID.UUID, groupID, uint8(state.MaxSize), uint8(state.LobbyType), appID, state.Mode, state.Level, state.RequiredFeatures, entrants),
 	}
 
 	nk.MetricsCounterAdd("match_start_count", state.MetricsTags(), 1)
@@ -1437,8 +1516,33 @@ func (m *EvrMatch) kickEntrants(ctx context.Context, logger runtime.Logger, disp
 }
 
 func (m *EvrMatch) sendEntrantReject(ctx context.Context, logger runtime.Logger, dispatcher runtime.MatchDispatcher, server runtime.Presence, reason evr.PlayerRejectionReason, entrantIDs ...uuid.UUID) error {
-	msg := evr.NewGameServerEntrantRejected(reason, entrantIDs...)
-	if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{server}, nil); err != nil {
+	// Convert UUIDs to strings for protobuf
+	rejectIDs := make([]string, 0, len(entrantIDs))
+	for _, id := range entrantIDs {
+		rejectIDs = append(rejectIDs, id.String())
+	}
+
+	envelope := &rtapi.Envelope{
+		Message: &rtapi.Envelope_LobbyEntrantReject{
+			LobbyEntrantReject: &rtapi.LobbyEntrantsRejectMessage{
+				EntrantIds: rejectIDs,
+				Code:       int32(reason),
+			},
+		},
+	}
+
+	msg, err := evr.NewNEVRProtobufMessageV1(envelope)
+	if err != nil {
+		return fmt.Errorf("failed to create protobuf message: %w", err)
+	}
+
+	msgs := []evr.Message{
+		msg,
+		// Legacy message for backwards compatibility with legacy game servers.
+		evr.NewGameServerEntrantRejected(reason, entrantIDs...),
+	}
+
+	if err := m.dispatchMessages(ctx, logger, dispatcher, msgs, []runtime.Presence{server}, nil); err != nil {
 		return fmt.Errorf("failed to dispatch message: %w", err)
 	}
 	return nil

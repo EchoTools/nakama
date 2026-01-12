@@ -5,16 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"reflect"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"maps"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/samber/lo"
@@ -45,97 +42,6 @@ func init() {
 
 type StarterCosmeticLoadouts struct {
 	Loadouts []*StoredCosmeticLoadout `json:"loadouts"`
-}
-
-// ProfileCache is a registry of user evr profiles.
-type ProfileCache struct {
-	sync.RWMutex
-	ctx         context.Context
-	ctxCancelFn context.CancelFunc
-	logger      runtime.Logger
-	db          *sql.DB
-	nk          runtime.NakamaModule
-
-	metrics         Metrics
-	sessionRegistry SessionRegistry
-
-	profileByXPID    map[evr.EvrId]json.RawMessage
-	sessionIDsByXPID map[evr.EvrId]map[uuid.UUID]struct{}
-}
-
-func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logger, metrics Metrics, sessionRegistry SessionRegistry) *ProfileCache {
-
-	ctx, cancelFn := context.WithCancel(context.Background())
-
-	profileRegistry := &ProfileCache{
-		ctx:         ctx,
-		ctxCancelFn: cancelFn,
-		logger:      logger,
-		db:          db,
-		nk:          nk,
-
-		metrics:         metrics,
-		sessionRegistry: sessionRegistry,
-
-		profileByXPID:    make(map[evr.EvrId]json.RawMessage),
-		sessionIDsByXPID: make(map[evr.EvrId]map[uuid.UUID]struct{}),
-	}
-
-	go func() {
-		ticker := time.NewTicker(time.Minute)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-profileRegistry.ctx.Done():
-				return
-			case <-ticker.C:
-				profileRegistry.Lock()
-				for xpid, sessionIDs := range profileRegistry.sessionIDsByXPID {
-					for sessionID := range sessionIDs {
-						if profileRegistry.sessionRegistry.Get(sessionID) == nil {
-
-							delete(profileRegistry.sessionIDsByXPID[xpid], sessionID)
-
-							// If there are no more sessions for this xpid, delete the profile
-							if len(profileRegistry.sessionIDsByXPID[xpid]) == 0 {
-								delete(profileRegistry.profileByXPID, xpid)
-							}
-						}
-					}
-				}
-				profileRegistry.Unlock()
-			}
-		}
-	}()
-
-	return profileRegistry
-}
-
-func (r *ProfileCache) Load(xpid evr.EvrId) (json.RawMessage, bool) {
-	r.RLock()
-	defer r.RUnlock()
-	profiles, found := r.profileByXPID[xpid]
-	return profiles, found
-}
-
-func (r *ProfileCache) Store(sessionID uuid.UUID, p evr.ServerProfile) (json.RawMessage, error) {
-	r.Lock()
-	defer r.Unlock()
-
-	data, err := json.Marshal(p)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal profile: %w", err)
-	}
-
-	r.profileByXPID[p.EvrID] = data
-
-	if _, ok := r.sessionIDsByXPID[p.EvrID]; !ok {
-		r.sessionIDsByXPID[p.EvrID] = make(map[uuid.UUID]struct{})
-	}
-
-	r.sessionIDsByXPID[p.EvrID][sessionID] = struct{}{}
-
-	return data, nil
 }
 
 func walletToCosmetics(wallet map[string]int64, unlocks map[string]map[string]bool) map[string]map[string]bool {
@@ -206,6 +112,26 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 	statsBySchedule, _, err := PlayerStatisticsGetID(ctx, db, nk, evrProfile.ID(), groupID, modes, dailyWeeklyMode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user tablet statistics: %w", err)
+	}
+
+	// Apply level override from player metadata if set
+	if evrProfile.LevelOverride != nil {
+		levelValue := &evr.StatisticValue{
+			Count: 1,
+			Value: float64(*evrProfile.LevelOverride),
+		}
+		for g, stats := range statsBySchedule {
+			switch g.Mode {
+			case evr.ModeArenaPublic:
+				if arenaStats, ok := stats.(*evr.ArenaStatistics); ok {
+					arenaStats.Level = levelValue
+				}
+			case evr.ModeCombatPublic:
+				if combatStats, ok := stats.(*evr.CombatStatistics); ok {
+					combatStats.Level = levelValue
+				}
+			}
+		}
 	}
 
 	if evrProfile.Options.DisableAFKTimeout {
@@ -481,47 +407,6 @@ func cosmeticDefaults(enableAll bool) map[string]map[string]bool {
 		return allCosmetics
 	}
 	return defaultCosmetics
-}
-
-func (r *ProfileCache) ValidateArenaUnlockByName(i interface{}, itemName string) (bool, error) {
-	// Lookup the field name by it's item name (json key)
-	fieldName, found := unlocksByItemName[itemName]
-	if !found {
-		return false, fmt.Errorf("unknown item name: %s", itemName)
-	}
-
-	// Lookup the field value by it's field name
-	value := reflect.ValueOf(i)
-	typ := value.Type()
-	for i := 0; i < typ.NumField(); i++ {
-		field := typ.Field(i)
-		if field.Name == fieldName {
-			return value.FieldByName(fieldName).Bool(), nil
-		}
-	}
-
-	return false, fmt.Errorf("unknown unlock field name: %s", fieldName)
-}
-
-func (r *ProfileCache) retrieveStarterLoadout(ctx context.Context) (evr.CosmeticLoadout, error) {
-	defaultLoadout := evr.DefaultCosmeticLoadout()
-	// Retrieve a random starter loadout from storage
-	objs, _, err := r.nk.StorageList(ctx, uuid.Nil.String(), uuid.Nil.String(), CosmeticLoadoutCollection, 100, "")
-	if err != nil {
-		return defaultLoadout, fmt.Errorf("failed to list objects: %w", err)
-	}
-	if len(objs) == 0 {
-		return defaultLoadout, nil
-	}
-
-	var loadouts []StoredCosmeticLoadout
-	if err = json.Unmarshal([]byte(objs[0].Value), &loadouts); err != nil {
-		return defaultLoadout, fmt.Errorf("error unmarshalling client profile: %w", err)
-	}
-
-	// Pick a random id
-	loadout := loadouts[rand.Intn(len(loadouts))]
-	return loadout.Loadout, nil
 }
 
 type StoredCosmeticLoadout struct {

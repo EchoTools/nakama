@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -488,9 +489,15 @@ func (v *VRMLScanQueue) playerSummary(vg *vrmlgo.Session, player *vrmlgo.Player)
 					return nil, fmt.Errorf("failed to get match details: %v", err)
 				}
 
-				// Skip forfeits
+				// Skip forfeits where the player's team got 0 points
 				if matchDetails.Match.IsForfeit {
-					continue
+					// If the player's team got 0 points in this match, skip it
+					if tID == matchDetails.Match.HomeTeam.TeamID && matchDetails.Match.HomeScore == 0 {
+						continue
+					}
+					if tID == matchDetails.Match.AwayTeam.TeamID && matchDetails.Match.AwayScore == 0 {
+						continue
+					}
 				}
 
 				// Count the number of matches the player is in
@@ -520,34 +527,139 @@ func (v *VRMLScanQueue) playerSummary(vg *vrmlgo.Session, player *vrmlgo.Player)
 	}, nil
 }
 
-// Use a brute force search for the player ID, by searching for the player name in all seasons
-func (*VRMLScanQueue) searchPlayerBySeasons(vg *vrmlgo.Session, seasons []*vrmlgo.Season, vrmlID string) (*vrmlgo.Player, error) {
-
-	member, err := vg.Member(vrmlID, vrmlgo.WithUseCache(false))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get member data: %v", err)
+// createVRMLVerifyEmbed creates an enhanced Discord embed for displaying VRML player stats.
+// This provides a clean, visually appealing summary of a player's VRML account status,
+// including their profile link, total matches, team participation, season breakdown, and
+// cosmetic eligibility. Returns nil if the summary or user data is unavailable.
+func createVRMLVerifyEmbed(summary *VRMLPlayerSummary) *discordgo.MessageEmbed {
+	if summary == nil || summary.User == nil {
+		return nil
 	}
 
-	for _, s := range seasons {
+	embed := &discordgo.MessageEmbed{
+		Title:       "✅ VRML Account Verified",
+		Description: "Your VRML account is successfully linked and verified!",
+		Color:       0x00CC00, // Green
+		Fields:      make([]*discordgo.MessageEmbedField, 0, 6),
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "VR Master League Stats",
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
 
-		players, err := vg.GamePlayersSearch(s.GameURLShort, s.ID, member.User.UserName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to search for player: %v", err)
-		}
+	// Player Profile Link
+	if summary.Player != nil {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "🎮 Player Profile",
+			Value:  fmt.Sprintf("[%s](https://vrmasterleague.com/EchoArena/Players/%s)", summary.User.UserName, summary.Player.ThisGame.PlayerID),
+			Inline: false,
+		})
+	} else {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "👤 User Profile",
+			Value:  fmt.Sprintf("[%s](https://vrmasterleague.com/Users/%s)", summary.User.UserName, summary.User.ID),
+			Inline: false,
+		})
+	}
 
-		for _, p := range players {
-			player, err := vg.Player(p.ID)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get player: %v", err)
-			}
+	// Calculate total matches and organize by season
+	totalMatches := 0
+	matchCountsBySeason := make(map[string]int)
 
-			if player.User.UserID == member.User.ID {
-				return player, nil
-			}
+	for sID, teams := range summary.MatchCountsBySeasonByTeam {
+		for _, count := range teams {
+			totalMatches += count
+			seasonName := formatVRMLSeasonName(sID)
+			matchCountsBySeason[seasonName] += count
 		}
 	}
 
-	return nil, ErrPlayerNotFound
+	// Total Matches
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+		Name:   "📊 Total Matches Played",
+		Value:  fmt.Sprintf("**%d** matches", totalMatches),
+		Inline: true,
+	})
+
+	// Team Information
+	if len(summary.Teams) > 0 {
+		teamText := "team"
+		if len(summary.Teams) != 1 {
+			teamText = "teams"
+		}
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "🏆 Teams",
+			Value:  fmt.Sprintf("**%d** %s", len(summary.Teams), teamText),
+			Inline: true,
+		})
+	}
+
+	// Season Participation
+	if len(matchCountsBySeason) > 0 {
+		// Collect and sort seasons in reverse order to show most recent first
+		seasons := make([]string, 0, len(matchCountsBySeason))
+		for season := range matchCountsBySeason {
+			seasons = append(seasons, season)
+		}
+		slices.SortFunc(seasons, func(a, b string) int {
+			// Reverse sort: b comes before a
+			if a < b {
+				return 1
+			} else if a > b {
+				return -1
+			}
+			return 0
+		})
+
+		// Create formatted season list
+		seasonLines := make([]string, 0, len(seasons))
+		for i, season := range seasons {
+			if i >= 8 { // Limit to 8 seasons to keep embed clean
+				seasonLines = append(seasonLines, fmt.Sprintf("*...and %d more*", len(seasons)-8))
+				break
+			}
+			count := matchCountsBySeason[season]
+			// Add checkmark for seasons with 10+ matches (eligible for rewards)
+			if count >= 10 {
+				seasonLines = append(seasonLines, fmt.Sprintf("✓ **%s**: %d matches", season, count))
+			} else {
+				seasonLines = append(seasonLines, fmt.Sprintf("   %s: %d matches", season, count))
+			}
+		}
+
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "📅 Season Participation",
+			Value:  strings.Join(seasonLines, "\n"),
+			Inline: false,
+		})
+
+		// Eligibility note
+		eligibleSeasons := 0
+		for _, count := range matchCountsBySeason {
+			if count >= 10 {
+				eligibleSeasons++
+			}
+		}
+		if eligibleSeasons > 0 {
+			rewardText := "reward"
+			if eligibleSeasons != 1 {
+				rewardText = "rewards"
+			}
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+				Name:   "🎁 Cosmetic Eligibility",
+				Value:  fmt.Sprintf("Eligible for **%d** season %s (✓ = 10+ matches)", eligibleSeasons, rewardText),
+				Inline: false,
+			})
+		}
+	} else if summary.Player != nil {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "📅 Season Participation",
+			Value:  "No competitive matches found",
+			Inline: false,
+		})
+	}
+
+	return embed
 }
 
 func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
@@ -559,14 +671,23 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 	)
 
 	logger = logger.WithFields(map[string]any{
-		"discord_id": i.Member.User.ID,
-		"username":   i.Member.User.Username,
+		"discord_id": user.ID,
+		"username":   user.Username,
 		"uid":        userID,
 	})
 
+	// editResponseFn is a helper to edit the interaction response with formatted text content
 	editResponseFn := func(format string, a ...any) error {
 		content := fmt.Sprintf(format, a...)
 		_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &content})
+		return err
+	}
+
+	// editEmbedResponseFn is a helper to edit the interaction response with an embed
+	editEmbedResponseFn := func(embed *discordgo.MessageEmbed) error {
+		_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+			Embeds: &[]*discordgo.MessageEmbed{embed},
+		})
 		return err
 	}
 
@@ -596,12 +717,12 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 		}
 		vrmlUser := m.User
 
-		if vrmlUser.GetDiscordID() != i.Member.User.ID {
+		if vrmlUser.GetDiscordID() != user.ID {
 			// VRML User is linked to a different Discord account
 			logger.Warn("Discord ID mismatch")
 			vrmlLink := fmt.Sprintf("[%s](https://vrmasterleague.com/EchoArena/Users/%s)", vrmlUser.UserName, vrmlUser.ID)
 			thisDiscordTag := fmt.Sprintf("%s#%s", user.Username, user.Discriminator)
-			return editResponseFn(fmt.Sprintf("VRML account %s is currently linked to %s. Please relink the VRML account to this Discord account (%s).", vrmlLink, vrmlUser.DiscordTag, thisDiscordTag))
+			return editResponseFn("VRML account %s is currently linked to %s. Please relink the VRML account to this Discord account (%s).", vrmlLink, vrmlUser.DiscordTag, thisDiscordTag)
 		}
 
 		// Queue the event to count matches and assign entitlements
@@ -612,7 +733,22 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 			return fmt.Errorf("failed to queue VRML account linked event: %w", err)
 		}
 
-		return editResponseFn("Your [VRML account](%s) is already linked. Reverifying your entitlements...", "https://vrmasterleague.com/Users/"+profile.VRMLUserID())
+		// Load VRML player summary to display stats
+		vrmlSummary := &VRMLPlayerSummary{}
+		if err := StorableRead(ctx, nk, userID, vrmlSummary, false); err != nil {
+			// If summary not available, show simple message
+			logger.WithField("error", err).Warn("Failed to load VRML summary")
+			return editResponseFn("Your [VRML account](%s) is already linked. Reverifying your entitlements...", "https://vrmasterleague.com/Users/"+profile.VRMLUserID())
+		}
+
+		// Display enhanced stats embed
+		embed := createVRMLVerifyEmbed(vrmlSummary)
+		if embed == nil {
+			// Fallback to simple message if embed creation fails
+			return editResponseFn("Your [VRML account](%s) is already linked. Reverifying your entitlements...", "https://vrmasterleague.com/Users/"+profile.VRMLUserID())
+		}
+
+		return editEmbedResponseFn(embed)
 	}
 
 	// User is not linked
@@ -630,7 +766,7 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 		}
 
 		// Send the link to the user
-		if err := editResponseFn(fmt.Sprintf("To assign your cosmetics, [Verify your VRML account](%s)", flow.url)); err != nil {
+		if err := editResponseFn("To assign your cosmetics, [Verify your VRML account](%s)", flow.url); err != nil {
 			logger.WithField("error", err).Error("Failed to edit response")
 		}
 
@@ -657,12 +793,12 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 			"vrml_discord_id": vrmlUser.GetDiscordID(),
 		})
 
-		if vrmlUser.GetDiscordID() != i.Member.User.ID {
+		if vrmlUser.GetDiscordID() != user.ID {
 			logger.Warn("Discord ID mismatch")
 			// VRML User is linked to a different Discord account
 			vrmlLink := fmt.Sprintf("[%s](https://vrmasterleague.com/EchoArena/Users/%s)", vrmlUser.UserName, vrmlUser.ID)
 			thisDiscordTag := fmt.Sprintf("%s#%s", user.Username, user.Discriminator)
-			if err := editResponseFn(fmt.Sprintf("VRML account %s is currently linked to %s. Please relink the VRML account to this Discord account (%s).", vrmlLink, vrmlUser.DiscordTag, thisDiscordTag)); err != nil {
+			if err := editResponseFn("VRML account %s is currently linked to %s. Please relink the VRML account to this Discord account (%s).", vrmlLink, vrmlUser.DiscordTag, thisDiscordTag); err != nil {
 				logger.WithField("error", err).Error("Failed to edit response")
 			}
 			return
@@ -685,7 +821,7 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 			return
 		}
 		logger.Info("Linked VRML account")
-		if err := editResponseFn(fmt.Sprintf("Your VRML account (`%s`) has been verified/linked. It will take a few minutes--up to a few hours--to update your entitlements.", vrmlUser.UserName)); err != nil {
+		if err := editResponseFn("Your VRML account (`%s`) has been verified/linked. It will take a few minutes--up to a few hours--to update your entitlements.", vrmlUser.UserName); err != nil {
 			logger.WithField("error", err).Error("Failed to edit response")
 			return
 		}

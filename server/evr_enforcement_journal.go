@@ -16,9 +16,9 @@ import (
 )
 
 const (
-	StorageCollectionEnforcementJournal                = "Enforcement"
-	StorageKeyEnforcementJournal                       = "journal"
-	StorageCollectionEnforcementJournalSuspensionIndex = "EnforcementJournalSuspensionsIndex"
+	StorageCollectionEnforcementJournal = "Enforcement"
+	StorageKeyEnforcementJournal        = "journal"
+	StorageIndexEnforcementJournal      = "StorageIndexEnforcementJournal"
 )
 
 type GuildEnforcementRecordVoid struct {
@@ -63,6 +63,20 @@ func (s *GuildEnforcementJournal) SetStorageMeta(meta StorableMetadata) {
 
 func (s GuildEnforcementJournal) GetStorageVersion() string {
 	return s.version
+}
+
+func (s *GuildEnforcementJournal) StorageIndexes() []StorableIndexMeta {
+	/*
+		return []StorableIndexMeta{{
+			Name:       StorageIndexEnforcementJournal,
+			Collection: StorageCollectionEnforcementJournal,
+			Key:        StorageKeyEnforcementJournal,
+			Fields:     []string{"user_id", "records"},
+			MaxEntries: 1000,
+			IndexOnly:  true,
+		}}
+	*/
+	return nil
 }
 
 func GuildEnforcementJournalFromStorageObject(obj *api.StorageObject) (*GuildEnforcementJournal, error) {
@@ -229,6 +243,60 @@ func (s *GuildEnforcementJournal) VoidRecord(groupID, recordID, authorUserID, au
 	}
 	return s.VoidsByRecordIDByGroupID[groupID][recordID]
 }
+
+// GetRecord returns a pointer to a record by its ID, or nil if not found.
+// The pointer can be used to modify the record directly.
+func (s *GuildEnforcementJournal) GetRecord(groupID, recordID string) *GuildEnforcementRecord {
+	if s.RecordsByGroupID == nil {
+		return nil
+	}
+	records, ok := s.RecordsByGroupID[groupID]
+	if !ok {
+		return nil
+	}
+	for i := range records {
+		if records[i].ID == recordID {
+			return &s.RecordsByGroupID[groupID][i]
+		}
+	}
+	return nil
+}
+
+// EditRecord updates a record and logs the edit. Returns the updated record or nil if not found.
+func (s *GuildEnforcementJournal) EditRecord(groupID, recordID, editorUserID, editorDiscordID string, newExpiry time.Time, newUserNotice, newAuditorNotes string) *GuildEnforcementRecord {
+	record := s.GetRecord(groupID, recordID)
+	if record == nil {
+		return nil
+	}
+
+	// Create edit log entry with previous values
+	editEntry := GuildEnforcementEditEntry{
+		EditorUserID:           editorUserID,
+		EditorDiscordID:        editorDiscordID,
+		EditedAt:               time.Now().UTC(),
+		PreviousExpiry:         record.Expiry,
+		PreviousUserNoticeText: record.UserNoticeText,
+		PreviousAuditorNotes:   record.AuditorNotes,
+		NewExpiry:              newExpiry,
+		NewUserNoticeText:      newUserNotice,
+		NewAuditorNotes:        newAuditorNotes,
+	}
+
+	// Update the record
+	record.Expiry = newExpiry
+	record.UserNoticeText = newUserNotice
+	record.AuditorNotes = newAuditorNotes
+	record.UpdatedAt = time.Now().UTC()
+
+	// Append to edit log
+	if record.EditLog == nil {
+		record.EditLog = make([]GuildEnforcementEditEntry, 0, 1)
+	}
+	record.EditLog = append(record.EditLog, editEntry)
+
+	return record
+}
+
 func (s *GuildEnforcementJournal) GroupVoids(groupID ...string) map[string]GuildEnforcementRecordVoid {
 	voids := make(map[string]GuildEnforcementRecordVoid)
 	for _, g := range groupID {

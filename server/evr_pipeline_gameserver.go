@@ -19,7 +19,7 @@ import (
 	"fmt"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/echotools/nevr-common/v3/rtapi"
+	"github.com/echotools/nevr-common/v4/gen/go/rtapi"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -28,6 +28,9 @@ import (
 
 const MINIMUM_NATIVE_SERVER_VERSION = "2.0.0"
 const NoValidationTag = "novalidation"
+const RegionDefault = "default"
+const RegionCodesMaxCount = 10
+const RegionCodeMaxLength = 32
 
 var (
 	ErrGameServerPresenceNotFound = errors.New("game server presence not found")
@@ -43,7 +46,67 @@ func sendDiscordError(e error, discordId string, logger *zap.Logger, bot *discor
 			logger.Warn("Failed to create user channel", zap.Error(err))
 			return
 		}
-		_, err = bot.ChannelMessageSend(channel.ID, fmt.Sprintf("Failed to register game server: %v", e))
+
+		embed := &discordgo.MessageEmbed{
+			Title:       "❌ Game Server Registration Failed",
+			Description: e.Error(),
+			Color:       0xFF0000, // Red color
+			Timestamp:   time.Now().Format(time.RFC3339),
+			Footer: &discordgo.MessageEmbedFooter{
+				Text: "Server Registration System",
+			},
+		}
+
+		_, err = bot.ChannelMessageSendEmbed(channel.ID, embed)
+		if err != nil {
+			logger.Warn("Failed to send message to user", zap.Error(err))
+			return
+		}
+	}
+}
+
+// sendDiscordServerError sends a formatted error message about a specific game server to the user on discord
+func sendDiscordServerError(internalIP net.IP, externalIP net.IP, port uint16, serverID uint64, errMsg string, discordId string, logger *zap.Logger, bot *discordgo.Session) {
+	if bot != nil && discordId != "" {
+		channel, err := bot.UserChannelCreate(discordId)
+		if err != nil {
+			logger.Warn("Failed to create user channel", zap.Error(err))
+			return
+		}
+
+		embed := &discordgo.MessageEmbed{
+			Title:       "❌ Game Server Registration Failed",
+			Description: "The broadcaster could not be reached during validation.",
+			Color:       0xFF0000, // Red color
+			Fields: []*discordgo.MessageEmbedField{
+				{
+					Name:   "Internal IP",
+					Value:  fmt.Sprintf("`%s:%d`", internalIP.String(), port),
+					Inline: true,
+				},
+				{
+					Name:   "External IP",
+					Value:  fmt.Sprintf("`%s:%d`", externalIP.String(), port),
+					Inline: true,
+				},
+				{
+					Name:   "Server ID",
+					Value:  fmt.Sprintf("`%d`", serverID),
+					Inline: false,
+				},
+				{
+					Name:   "Error Details",
+					Value:  fmt.Sprintf("```\n%s\n```", errMsg),
+					Inline: false,
+				},
+			},
+			Timestamp: time.Now().Format(time.RFC3339),
+			Footer: &discordgo.MessageEmbedFooter{
+				Text: "Ensure your server is reachable and ports are forwarded correctly",
+			},
+		}
+
+		_, err = bot.ChannelMessageSendEmbed(channel.ID, embed)
 		if err != nil {
 			logger.Warn("Failed to send message to user", zap.Error(err))
 			return
@@ -79,7 +142,7 @@ func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, co
 //   - debug: Enable debug mode
 //   - verbose: Enable verbose logging
 func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) error {
-	request := in.GetGameServerRegistrationRequest()
+	request := in.GetGameServerRegistration()
 	var (
 		loginSessionID = uuid.FromStringOrNil(request.LoginSessionId)
 		serverID       = request.ServerId
@@ -166,11 +229,6 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		}
 	}
 
-	if isPrivateIP(externalIP) {
-		externalIP = p.externalIP
-		logger.Warn("Game server is on a private IP, using this systems external IP", zap.String("private_ip", internalIP.String()), zap.String("external_ip", externalIP.String()), zap.String("port", fmt.Sprintf("%d", externalPort)))
-	}
-
 	// Include all guilds by default, or if "any" is in the list
 	includeAll := false
 	if len(params.serverGuilds) == 0 || slices.Contains(params.serverGuilds, "any") {
@@ -192,81 +250,22 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		}
 	}
 
-	// Configure the region codes to use for finding the game server
-	regionCodes := make([]string, 0, len(params.serverRegions))
+	// Warn the user that using regionHash is deprecated.
+	// Allow unspecified or default region in the -serverregion argument
+	allowedRegions := []evr.Symbol{evr.UnspecifiedRegion, evr.DefaultRegion}
 
-	// Get the default region from urlparam if specified
-	defaultRegion := params.defaultRegion
-
-	// Validate region codes: no spaces, all lowercase
-	for _, r := range params.serverRegions {
-		validated := strings.ToLower(strings.ReplaceAll(r, " ", ""))
-		if validated != "" {
-			regionCodes = append(regionCodes, validated)
-		}
+	if !slices.Contains(allowedRegions, regionHash) {
+		// Send the message to the user that the serverregion command line argument is deprecated
+		warning := "The 'serverregion' command line argument is deprecated. Please use the 'regions' URL parameter instead. Include 'default' to be in the public matchmaking pool."
+		go SendUserMessage(ctx, p.discordCache.dg, params.DiscordID(), warning)
+		logger.Debug(warning, zap.String("region_hash", regionHash.String()))
+		params.serverRegions = append(params.serverRegions, "default")
 	}
 
-	if len(regionCodes) == 0 {
-		regionCodes = append(regionCodes, "default")
-	}
-
-	switch regionHash {
-
-	// If the region is unspecified, use the default region, otherwise use the region hash passed on the command line
-	case evr.UnspecifiedRegion, 0:
-		regionCodes = append(regionCodes, "default")
-
-	default:
-		regionCodes = append(regionCodes, regionHash.String())
-	}
-
-	// Limit to first 10 regions
-	if len(regionCodes) > 10 {
-		regionCodes = regionCodes[:10]
-	}
-
-	// Truncate all region codes to 16 characters
-	for i, r := range regionCodes {
-		if len(r) > 32 {
-			regionCodes[i] = r[:32]
-		}
-	}
+	// Build region codes and default region using a helper
+	regionCodes, defaultRegion, ipInfo := p.buildRegionCodes(ctx, logger, params.serverRegions, params.defaultRegion, externalIP, serverID)
 
 	logger = logger.With(zap.Any("group_ids", hostingGroupIDs), zap.Strings("tags", params.serverTags), zap.Strings("regions", regionCodes))
-
-	// Add the server id, as displayed by the game server once registered (i.e. "0x5A700FE2D34D5B6D")
-	regionCodes = append(regionCodes, fmt.Sprintf("0x%x", serverID))
-
-	var ipInfo IPInfo
-
-	ipInfo, err = p.ipInfoCache.Get(ctx, externalIP.String())
-	if err != nil {
-		logger.Warn("Failed to get IPQS data", zap.Error(err))
-	} else if ipInfo != nil {
-		ipqsRegion := LocationToRegionCode(ipInfo.CountryCode(), ipInfo.Region(), ipInfo.City())
-		ipqsRegionShort := LocationToRegionCode(ipInfo.CountryCode(), ipInfo.Region(), "")
-		ipqsCountry := LocationToRegionCode(ipInfo.CountryCode(), "", "")
-
-		// If default region is not set via urlparam, use IPQS region
-		if defaultRegion == "" {
-			defaultRegion = ipqsRegion
-		}
-
-		// Ensure IPQS-derived region codes are first in the list (after removing duplicates)
-		if slices.Contains(regionCodes, "default") {
-			// Build new region codes list with IPQS regions first
-			newRegionCodes := []string{ipqsRegion, ipqsRegionShort, ipqsCountry}
-			for _, r := range regionCodes {
-				if r != "default" && !slices.Contains(newRegionCodes, r) {
-					newRegionCodes = append(newRegionCodes, r)
-				}
-			}
-			regionCodes = newRegionCodes
-		}
-	}
-
-	// Validate default region (no spaces, lowercase)
-	defaultRegion = strings.ToLower(strings.ReplaceAll(defaultRegion, " ", ""))
 
 	// Create the broadcaster config
 	config := NewGameServerPresence(session.UserID(), session.id, serverID, internalIP, externalIP, externalPort, hostingGroupIDs, defaultRegion, regionCodes, versionLock, params.serverTags, params.supportedFeatures, request.TimeStepUsecs, ipInfo, params.geoHashPrecision, isNative, request.Version)
@@ -306,7 +305,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 			// If the broadcaster is not available, send an error message to the user on discord
 			logger.Error("Broadcaster could not be reached", zap.Error(err))
 			errorMessage := fmt.Sprintf("Broadcaster (Endpoint ID: %s, Server ID: %d) could not be reached. Error: %v", config.Endpoint.String(), config.ServerID, err)
-			go sendDiscordError(errors.New(errorMessage), params.DiscordID(), logger, p.discordCache.dg)
+			go sendDiscordServerError(config.Endpoint.InternalIP, config.Endpoint.ExternalIP, config.Endpoint.Port, config.ServerID, err.Error(), params.DiscordID(), logger, p.discordCache.dg)
 			return errFailedRegistration(session, logger, errors.New(errorMessage), evr.BroadcasterRegistration_Failure)
 		}
 	} else {
@@ -377,8 +376,11 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 				if err != nil || len(rtts) == 0 {
 					logger.Warn("Game server is not responding", zap.Error(err), zap.String("endpoint", config.Endpoint.String()))
 					// Send the discord error
-					errorMessage := fmt.Sprintf("Game server (Endpoint ID: %s, Server ID: %d) is not responding. Error: %v", config.Endpoint.String(), config.ServerID, err)
-					go sendDiscordError(errors.New(errorMessage), params.DiscordID(), logger, p.discordCache.dg)
+					errMsg := "Server not responding"
+					if err != nil {
+						errMsg = err.Error()
+					}
+					go sendDiscordServerError(config.Endpoint.InternalIP, config.Endpoint.ExternalIP, config.Endpoint.Port, config.ServerID, errMsg, params.DiscordID(), logger, p.discordCache.dg)
 				}
 			}
 			// If the game server is alive, check if it is still in a match
@@ -413,8 +415,103 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		go HealthCheckStart(ctx, logger, p.nk, session, p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
 	}
 
-	// Send the registration success message
-	return session.SendEvrUnrequire(evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP))
+	// Build protobuf registration success message
+	envelope := &rtapi.Envelope{
+		Message: &rtapi.Envelope_GameServerRegistrationSuccess{
+			GameServerRegistrationSuccess: &rtapi.GameServerRegistrationSuccessMessage{
+				ServerId:          config.ServerID,
+				ExternalIpAddress: config.Endpoint.ExternalIP.String(),
+			},
+		},
+	}
+
+	protobufMsg, err := evr.NewNEVRProtobufMessageV1(envelope)
+	if err != nil {
+		logger.Warn("Failed to create protobuf registration success message", zap.Error(err))
+		// Fall back to legacy only
+		return session.SendEvrUnrequire(evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP))
+	}
+
+	// Send both protobuf and legacy messages for backwards compatibility
+	return session.SendEvrUnrequire(
+		protobufMsg,
+		evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP),
+	)
+}
+
+// buildRegionCodes constructs the region codes list and determines the default region.
+// It respects URL-provided regions, preserves "default" if present, adds command-line region
+// hash, prioritizes IP-derived regions when available, and enforces limits/truncation.
+func (p *EvrPipeline) buildRegionCodes(ctx context.Context, logger *zap.Logger, serverRegions []string, generatedRegion string, externalIP net.IP, serverID uint64) ([]string, string, IPInfo) {
+	// Start with URL params regions
+	regionCodes := make([]string, 0, len(serverRegions))
+
+	if len(serverRegions) == 0 {
+		regionCodes = append(regionCodes, RegionDefault)
+	} else {
+		// Append the user provided regions first
+		regionCodes = append(regionCodes, serverRegions...)
+	}
+
+	// Limit early to RegionCodesMaxCount to keep processing light
+	if len(regionCodes) > RegionCodesMaxCount {
+		regionCodes = regionCodes[:RegionCodesMaxCount]
+	}
+
+	// Truncate to RegionCodeMaxLength characters
+	for i, r := range regionCodes {
+		if len(r) > RegionCodeMaxLength {
+			regionCodes[i] = r[:RegionCodeMaxLength]
+		}
+	}
+
+	// Append server ID marker (as used by client UI)
+	regionCodes = append(regionCodes, fmt.Sprintf("0x%x", serverID))
+
+	// Pull IP intelligence and prioritize IPQS-derived regions
+	var ipInfo IPInfo
+	if info, err := p.ipInfoCache.Get(ctx, externalIP.String()); err != nil {
+		logger.Warn("Failed to get IPQS data", zap.Error(err))
+	} else if info != nil {
+		ipInfo = info
+		ipqsRegion := LocationToRegionCode(info.CountryCode(), info.Region(), info.City())
+		ipqsRegionShort := LocationToRegionCode(info.CountryCode(), info.Region(), "")
+		ipqsCountry := LocationToRegionCode(info.CountryCode(), "", "")
+
+		// Set default region from IPQS if not already set
+		if generatedRegion == "" {
+			generatedRegion = ipqsRegionShort
+		}
+
+		regionCodes = append(regionCodes, ipqsRegion, ipqsRegionShort, ipqsCountry)
+	}
+
+	// Normalize defaultRegion
+	generatedRegion = strings.ToLower(strings.ReplaceAll(generatedRegion, " ", ""))
+
+	// Validate and normalize all region codes
+	for _, r := range serverRegions {
+		validated := strings.ToLower(strings.ReplaceAll(r, " ", "-"))
+		if validated != "" {
+			regionCodes = append(regionCodes, validated)
+		}
+	}
+	slices.Sort(regionCodes)
+
+	if !slices.Contains(regionCodes, generatedRegion) {
+		regionCodes = append(regionCodes, generatedRegion)
+	} else {
+		// Move generatedRegion to the beginning to prioritize it
+		for i, r := range regionCodes {
+			if r == generatedRegion {
+				copy(regionCodes[1:i+1], regionCodes[0:i])
+				regionCodes[0] = generatedRegion
+				break
+			}
+		}
+	}
+
+	return regionCodes, generatedRegion, ipInfo
 }
 
 func newGameServerParkingMatch(logger runtime.Logger, nk runtime.NakamaModule, p runtime.Presence) (*MatchID, error) {

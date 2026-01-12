@@ -4,18 +4,43 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
-	nevrapi "github.com/echotools/nevr-common/v3/api"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+// PrepareMatchRequest is a local type for the match preparation RPC request.
+// This was previously defined in nevr-common/v3/api, but has been removed in v4.
+type PrepareMatchRequest struct {
+	GroupId          string                 `json:"group_id,omitempty"`
+	OwnerId          string                 `json:"owner_id,omitempty"`
+	Mode             string                 `json:"mode,omitempty"`
+	Level            string                 `json:"level,omitempty"`
+	TeamSize         *Int32Wrapper          `json:"team_size,omitempty"`
+	Region           string                 `json:"region,omitempty"`
+	RequiredFeatures []string               `json:"required_features,omitempty"`
+	TeamAlignments   map[string]string      `json:"team_alignments,omitempty"`
+	ExpiryTime       *timestamppb.Timestamp `json:"expiry_time,omitempty"`
+}
+
+// Int32Wrapper is a simple wrapper for int32 values (mimics protobuf wrapper)
+type Int32Wrapper struct {
+	Value int32 `json:"value,omitempty"`
+}
+
+func (w *Int32Wrapper) GetValue() int32 {
+	if w == nil {
+		return 0
+	}
+	return w.Value
+}
 
 // AllocateMatchRPC is an RPC handler that allocates a match for a group/guild.
 func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
@@ -32,8 +57,8 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	}
 
 	// Unmarshal the request payload into a PrepareMatchRequest
-	request := &nevrapi.PrepareMatchRequest{}
-	if err := protojson.Unmarshal([]byte(payload), request); err != nil {
+	request := &PrepareMatchRequest{}
+	if err := json.Unmarshal([]byte(payload), request); err != nil {
 		return "", runtime.NewError("failed to unmarshal request: "+err.Error(), StatusInvalidArgument)
 	}
 	if request.GroupId == "" {
@@ -159,11 +184,26 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		}
 		label, err = LobbyGameServerAllocate(ctx, logger, nk, []string{request.GroupId}, latencyHistory.LatestRTTs(), settings, []string{request.Region}, false, true, ServiceSettings().Matchmaking.QueryAddons.RPCAllocate)
 		if err != nil || label == nil {
-			if strings.Contains(err.Error(), "bad request:") {
-				err = runtime.NewError("required features not supported", StatusInvalidArgument)
+			// Check if this is a region fallback error - for RPC, auto-select closest
+			var regionErr ErrMatchmakingNoServersInRegion
+			if errors.As(err, &regionErr) && regionErr.FallbackInfo != nil {
+				logger.WithFields(map[string]any{
+					"requested_region": request.Region,
+					"selected_region":  regionErr.FallbackInfo.ClosestRegion,
+					"latency_ms":       regionErr.FallbackInfo.ClosestLatencyMs,
+				}).Info("Auto-selecting closest server for RPC allocation (no servers in requested region)")
+
+				// Allocate without region requirement to get the closest server
+				label, err = LobbyGameServerAllocate(ctx, logger, nk, []string{request.GroupId}, latencyHistory.LatestRTTs(), settings, nil, false, false, ServiceSettings().Matchmaking.QueryAddons.RPCAllocate)
 			}
-			logger.WithField("error", err).Error("Failed to allocate game server")
-			return "", runtime.NewError(err.Error(), StatusInvalidArgument)
+
+			if err != nil || label == nil {
+				if strings.Contains(err.Error(), "bad request:") {
+					err = runtime.NewError("required features not supported", StatusInvalidArgument)
+				}
+				logger.WithField("error", err).Error("Failed to allocate game server")
+				return "", runtime.NewError(err.Error(), StatusInvalidArgument)
+			}
 		}
 	}
 

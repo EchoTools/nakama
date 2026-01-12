@@ -34,7 +34,16 @@ func SetNextMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	if err := json.Unmarshal([]byte(payload), &request); err != nil {
 		return "", runtime.NewError(fmt.Sprintf("Error unmarshalling request: %s", err.Error()), StatusInvalidArgument)
 	}
-	callerUserID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+
+	// Safely extract caller user ID from context
+	callerUserID := ""
+	if uid := ctx.Value(runtime.RUNTIME_CTX_USER_ID); uid != nil {
+		callerUserID, _ = uid.(string)
+	}
+
+	if callerUserID == "" {
+		return "", runtime.NewError("Authentication required", StatusUnauthenticated)
+	}
 
 	if request.TargetDiscordID != "" {
 		request.TargetUserID, _ = GetUserIDByDiscordID(ctx, db, request.TargetDiscordID)

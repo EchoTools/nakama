@@ -15,6 +15,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/intinig/go-openskill/types"
 )
 
 var _ = Event(&EventRemoteLogSet{})
@@ -200,7 +201,7 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				logger.WithFields(map[string]any{
 					"error": err,
 					"msg":   msg,
-				}).Warn("Failed to process VOIP loudness")
+				}).Debug("Failed to process VOIP loudness")
 			}
 
 		case *evr.RemoteLogSessionStarted:
@@ -230,6 +231,13 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 
 			if msg.EventType != "item_equipped" {
 				continue
+			}
+
+			// NEVR (non-legacy) servers already persist loadout equips themselves.
+			if matchID, _, err := GetMatchIDBySessionID(nk, uuid.FromStringOrNil(s.SessionID)); err == nil && !matchID.IsNil() {
+				if label, err := MatchLabelByID(ctx, nk, matchID); err == nil && label != nil && label.GameServer != nil && label.GameServer.NativeSupport {
+					continue
+				}
 			}
 
 			category, name, err := msg.GetEquippedCustomization()
@@ -294,11 +302,10 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				}
 			}
 
-			/*
-				if _, err := p.profileCache.Store(session.ID(), *serverProfile); err != nil {
-					return fmt.Errorf("failed to cache profile: %w", err)
-				}
-			*/
+			// Store the updated server profile
+			if err := ServerProfileStore(ctx, nk, session.UserID().String(), serverProfile); err != nil {
+				logger.WithField("error", err).Warn("Failed to store server profile")
+			}
 
 		case *evr.RemoteLogRepairMatrix:
 
@@ -480,8 +487,8 @@ func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logge
 				}
 			}
 
-			// Send Discord DM if tier changed
-			if tierChanged {
+			// Send Discord DM if tier changed (unless silent mode is enabled)
+			if tierChanged && !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
 				discordID, err := GetDiscordIDByUserID(ctx, db, userID)
 				if err != nil {
 					logger.WithField("error", err).Warn("Failed to get Discord ID for tier notification")
@@ -530,8 +537,8 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 	if err != nil || label == nil {
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
-	if label.Mode != evr.ModeArenaPublic {
-		return nil // Only process type stats for arena mode
+	if label.Mode != evr.ModeArenaPublic && label.Mode != evr.ModeCombatPublic {
+		return nil // Only process type stats for arena and combat modes
 	}
 
 	groupIDStr := label.GetGroupID().String()
@@ -542,6 +549,82 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 
 	allStatEntries := make([]*StatisticsQueueEntry, 0)
 
+	// Load individual player ratings from leaderboards for MMR calculation
+	// This is necessary because label.Players contains matchmaking ratings (aggregate for parties)
+	// rather than individual player ratings
+	playersWithTeamRatings := make([]PlayerInfo, len(label.Players))
+	playersWithPlayerRatings := make([]PlayerInfo, len(label.Players))
+	copy(playersWithTeamRatings, label.Players)
+	copy(playersWithPlayerRatings, label.Players)
+
+	serviceSettings := ServiceSettings()
+	if serviceSettings.UseSkillBasedMatchmaking() {
+		for i, p := range playersWithTeamRatings {
+			// Only load ratings for competitors (blue/orange team)
+			if !p.IsCompetitor() {
+				continue
+			}
+
+			// Load the player's individual team-based rating from leaderboards
+			teamRating, err := MatchmakingRatingLoad(ctx, nk, p.UserID, groupIDStr, label.Mode)
+			if err != nil {
+				logger.WithFields(map[string]any{
+					"error":   err,
+					"user_id": p.UserID,
+				}).Warn("Failed to load team rating, using default")
+				teamRating = NewDefaultRating()
+			}
+			playersWithTeamRatings[i].RatingMu = teamRating.Mu
+			playersWithTeamRatings[i].RatingSigma = teamRating.Sigma
+
+			// Load the player's individual player-based rating from leaderboards
+			playerRating, err := MatchmakingPlayerRatingLoad(ctx, nk, p.UserID, groupIDStr, label.Mode)
+			if err != nil {
+				logger.WithFields(map[string]any{
+					"error":   err,
+					"user_id": p.UserID,
+				}).Warn("Failed to load player rating, using default")
+				playerRating = NewDefaultRating()
+			}
+			playersWithPlayerRatings[i].RatingMu = playerRating.Mu
+			playersWithPlayerRatings[i].RatingSigma = playerRating.Sigma
+		}
+	}
+
+	// Determine winning team once for the entire match
+	// Check the first player's stats to determine which team won
+	var blueWins bool
+	for _, playerInfo := range label.Players {
+		if playerInfo.Team == BlueTeam || playerInfo.Team == OrangeTeam {
+			if stats, ok := statsByPlayer[playerInfo.EvrID]; ok {
+				blueWins = (playerInfo.Team == BlueTeam && stats.ArenaWins > 0) || (playerInfo.Team == OrangeTeam && stats.ArenaLosses > 0)
+				break
+			}
+		}
+	}
+
+	// Calculate new ratings once for all players (before the loop to avoid O(n²) complexity)
+	var teamRatings map[string]types.Rating
+	var playerRatings map[string]types.Rating
+	if serviceSettings.UseSkillBasedMatchmaking() {
+		// For combat mode, use win/loss only (no individual stats) for rating calculation
+		// For arena mode, use full stats-based rating calculation
+		statsForRating := statsByPlayer
+		if label.Mode == evr.ModeCombatPublic {
+			// Empty stats map means ratings are based purely on winning team status
+			statsForRating = make(map[evr.EvrId]evr.MatchTypeStats)
+		}
+
+		// Calculate new team-based ratings using individual player ratings loaded from leaderboards
+		teamRatings = CalculateNewTeamRatings(playersWithTeamRatings, statsForRating, blueWins)
+
+		// Calculate new individual player ratings using individual player ratings loaded from leaderboards
+		playerRatings = CalculateNewIndividualRatings(playersWithPlayerRatings, statsForRating, blueWins)
+	}
+
+	// Note: typeStats is a copy from the range loop, not a reference to the map value.
+	// Modifications to typeStats only affect the local copy, which is then passed to
+	// typeStatsToScoreMap() below. The original statsByPlayer map remains unchanged.
 	for xpid, typeStats := range statsByPlayer {
 		// Get the match label
 
@@ -563,19 +646,34 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 			"player_xpid": playerInfo.EvrID.String(),
 		})
 
+		// Apply backfill player loss exemption logic
+		// Backfill players should not get a loss if the team loses, unless they early quit.
+		// Wins are still counted for backfill players.
+		// Note: ArenaLosses is used for both Arena and Combat modes (no separate CombatLosses field exists)
+		if playerInfo.IsBackfill() {
+			// Check if this player early quit by examining participation records
+			isEarlyQuitter := false
+			if participation := label.participations[playerInfo.UserID]; participation != nil {
+				isEarlyQuitter = participation.IsAbandoner
+			}
+
+			// If backfill player lost but did not early quit, exempt them from the loss
+			if typeStats.ArenaLosses > 0 && !isEarlyQuitter {
+				logger.Debug("Backfill player loss exemption applied (stayed until end)")
+				typeStats.ArenaLosses = 0
+			} else if isEarlyQuitter {
+				logger.Debug("Backfill player early quit - loss counted")
+			}
+		}
+
 		// Increment the completed matches for the player
 		if err := s.incrementCompletedMatches(ctx, logger, nk, db, sessionRegistry, playerInfo.UserID, playerInfo.SessionID); err != nil {
 			logger.WithField("error", err).Warn("Failed to increment completed matches")
 		}
 
-		serviceSettings := ServiceSettings()
 		if serviceSettings.UseSkillBasedMatchmaking() {
 
-			// Determine winning team
-			blueWins := (playerInfo.Team == BlueTeam && typeStats.ArenaWins > 0) || (playerInfo.Team == OrangeTeam && typeStats.ArenaLosses > 0)
-
-			// Calculate new team-based ratings
-			teamRatings := CalculateNewTeamRatings(label.Players, statsByPlayer, blueWins)
+			// Use the pre-calculated team ratings for this player
 			if rating, ok := teamRatings[playerInfo.SessionID]; ok {
 				// Add team skill rating entries to the statistics queue
 				muScore, muSubscore, err := Float64ToScore(rating.Mu)
@@ -623,8 +721,7 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 				logger.WithField("target_sid", playerInfo.SessionID).Warn("No team rating found for player in matchmaking ratings")
 			}
 
-			// Calculate new individual player ratings
-			playerRatings := CalculateNewIndividualRatings(label.Players, statsByPlayer, blueWins)
+			// Use the pre-calculated individual player ratings for this player
 			if rating, ok := playerRatings[playerInfo.SessionID]; ok {
 				// Add player skill rating entries to the statistics queue
 				muScore, muSubscore, err := Float64ToScore(rating.Mu)
@@ -770,7 +867,7 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 	return entries, nil
 }
 
-func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, statisticsQueue *StatisticsQueue, msg *evr.RemoteLogVOIPLoudness) error {
+func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, _ runtime.Logger, _ *sql.DB, nk runtime.NakamaModule, _ *StatisticsQueue, msg *evr.RemoteLogVOIPLoudness) error {
 	// Get the match ID
 	matchID, err := NewMatchID(msg.SessionUUID(), s.Node)
 	if err != nil {

@@ -19,6 +19,8 @@ type GuildGroupRoles struct {
 	VPNBypass        string `json:"vpn_bypass"`
 	AccountLinked    string `json:"headset_linked"`
 	UsernameOnly     string `json:"username_only"`
+	Standalone       string `json:"standalone"`
+	PCVR             string `json:"pcvr"`
 }
 
 // Roles returns a slice of role IDs

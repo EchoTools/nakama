@@ -1,6 +1,6 @@
 package evr
 
-func generateHashLookupArray() [256]uint64 {
+func generateHashPreCache() [256]uint64 {
 	var seed [256]uint64
 	s := uint64(0x95ac9329ac4bc9b5)
 	for i := 0; i < 256; i++ {
@@ -27,7 +27,7 @@ func generateHashLookupArray() [256]uint64 {
 	return seed
 }
 
-var hashLookupArray [0x100]uint64 = generateHashLookupArray()
+var hashLookupArray [0x100]uint64 = generateHashPreCache()
 
 var SymbolCache = map[Symbol]SymbolToken{
 	0xc8c33e482f601dbe: "uscn",
@@ -57,6 +57,7 @@ var SymbolCache = map[Symbol]SymbolToken{
 	0x7777777777770800: "ERGameServerPlayerRemove",           // Custom
 	0x7777777777770900: "ERGameServerChallengeRequest",       // Custom
 	0x7777777777770A00: "ERGameServerChallengeRequest",       // Custom
+	0x7777777777770B00: "ERGameServerSaveLoadoutRequest",     // Custom - loadout update from game server
 	0x7777777777777777: "ERGameServerRegistrationRequest",    // Custom
 	0xe32dc7dcd09741b4: "Fixed",
 	0x07939453e9eeb898: "R15RadiationEnabledExpression",

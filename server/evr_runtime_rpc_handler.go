@@ -28,16 +28,6 @@ func NewRPCHandler(ctx context.Context, db *sql.DB, dg *discordgo.Session) *RPCH
 	}
 }
 
-// Purge removes both the reference and the reverse from the cache.
-func (h *RPCHandler) cacheDelete(id string) bool {
-	value, loaded := h.idcache.LoadAndDelete(id)
-	if !loaded {
-		return false
-	}
-	h.idcache.Delete(value)
-	return true
-}
-
 // Discord ID to Nakama UserID, with a lookup cache
 func (d *RPCHandler) DiscordIDToUserID(discordID string) string {
 	userID, ok := d.idcache.Load(discordID)

@@ -34,6 +34,8 @@ type LobbyCreateSessionRequest struct {
 	Entrants         []Entrant
 }
 
+const MaxCreateSessionEntrants = 16
+
 func (m *LobbyCreateSessionRequest) Stream(s *EasyStream) error {
 	flags := uint32(0)
 
@@ -50,7 +52,10 @@ func (m *LobbyCreateSessionRequest) Stream(s *EasyStream) error {
 				return err
 			}
 			if s.Mode == DecodeMode {
-				m.Entrants = make([]Entrant, c) // Limit to 16
+				if c < 0 || int(c) > MaxCreateSessionEntrants {
+					return fmt.Errorf("entrant count %d exceeds maximum %d", c, MaxCreateSessionEntrants)
+				}
+				m.Entrants = make([]Entrant, c)
 			}
 			return s.Skip(7) // Alignment
 		},

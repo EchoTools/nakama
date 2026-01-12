@@ -92,6 +92,7 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		&EventVRMLAccountLink{},
 		&EventRemoteLogSet{},
 		&EventServerProfileUpdate{},
+		&EventMatchSummary{},
 	})
 
 	go func() {

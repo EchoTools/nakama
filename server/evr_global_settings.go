@@ -94,8 +94,10 @@ type GlobalMatchmakingSettings struct {
 	EnableDivisions                bool                    `json:"enable_divisions"`                    // Enable divisions
 	GreenDivisionMaxAccountAgeDays int                     `json:"green_division_max_account_age_days"` // The maximum account age to be in the green division
 	EnableEarlyQuitPenalty         bool                    `json:"enable_early_quit_penalty"`           // Disable early quit penalty
+	SilentEarlyQuitSystem          bool                    `json:"silent_early_quit_system"`            // Disable Discord DM notifications for tier changes
 	EarlyQuitTier1Threshold        *int32                  `json:"early_quit_tier1_threshold"`          // Penalty level threshold for Tier 1 (good standing). Players with penalty <= threshold stay in Tier 1. Nil means not configured.
 	EarlyQuitTier2Threshold        *int32                  `json:"early_quit_tier2_threshold"`          // Penalty level threshold for Tier 2 (reserved for future Tier 3+ implementation). Nil means not configured.
+	EarlyQuitLossThreshold         float64                 `json:"early_quit_loss_threshold"`           // Threshold (0.0-1.0) for EarlyQuits/(Wins+Losses) ratio above which early quits count as losses in profile stats. 0.0 = disabled.
 	ServerSelection                ServerSelectionSettings `json:"server_selection"`                    // The server selection settings
 	EnableOrdinalRange             bool                    `json:"enable_ordinal_range"`                // Enable ordinal range
 	RatingRange                    float64                 `json:"rating_range"`                        // The rating range
@@ -104,6 +106,12 @@ type GlobalMatchmakingSettings struct {
 	MatchmakerUseMu                bool                    `json:"sbmm_matchmaker_use_mu"`              // Use Mu instead of Ordinal for matchmaker player MMR values
 	BackfillMinTimeSecs            int                     `json:"backfill_min_time_secs"`              // Minimum time in seconds before backfilling a player to a match
 	SBMMMinPlayerCount             int                     `json:"sbmm_min_player_count"`               // Minimum player count to enable skill-based matchmaking
+	PartySkillBoostPercent         float64                 `json:"party_skill_boost_percent"`           // Boost party effective skill by this percentage (e.g., 0.10 = 10%) to account for coordination advantage
+	EnableRosterVariants           bool                    `json:"enable_roster_variants"`              // Generate multiple roster variants (balanced/stacked) for better match selection
+	UseSnakeDraftTeamFormation     bool                    `json:"use_snake_draft_team_formation"`      // Use snake draft instead of sequential filling for team formation
+	EnablePostMatchmakerBackfill   bool                    `json:"enable_post_matchmaker_backfill"`     // Enable post-matchmaker backfill using matchmaker exports and match list
+	ReducingPrecisionIntervalSecs  int                     `json:"reducing_precision_interval_secs"`    // Interval in seconds after which constraints are relaxed for backfill (0 = disabled)
+	ReducingPrecisionMaxCycles     int                     `json:"reducing_precision_max_cycles"`       // Maximum number of precision reduction cycles before fully relaxing constraints
 }
 
 type QueryAddons struct {
@@ -274,6 +282,12 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 		data.Matchmaking.SBMMMinPlayerCount = 24
 	}
 
+	// Set default party skill boost (10% = 0.10)
+	// This accounts for coordination advantage of parties
+	if data.Matchmaking.PartySkillBoostPercent == 0 {
+		data.Matchmaking.PartySkillBoostPercent = 0.10
+	}
+
 	// Set default tier thresholds if not configured
 	// Tier 1 threshold default: 0 (players with penalty 0 or less are in good standing)
 	// Tier 2 threshold default: 1 (reserved for future Tier 3+ implementation)
@@ -288,6 +302,14 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 
 	if data.Matchmaking.ServerSelection.RTTDelta == nil {
 		data.Matchmaking.ServerSelection.RTTDelta = make(map[string]int)
+	}
+
+	// Set default reducing precision settings for post-matchmaker backfill
+	if data.Matchmaking.ReducingPrecisionIntervalSecs == 0 {
+		data.Matchmaking.ReducingPrecisionIntervalSecs = 30 // Relax constraints every 30 seconds
+	}
+	if data.Matchmaking.ReducingPrecisionMaxCycles == 0 {
+		data.Matchmaking.ReducingPrecisionMaxCycles = 5 // Maximum 5 cycles before fully relaxing
 	}
 
 	if data.RemoteLogFilters == nil {

@@ -24,6 +24,17 @@ var Query query = func() query {
 	}
 }()
 
+func (query) CreateMatchPatternPartial(elems []string) string {
+	if len(elems) == 0 {
+		return ""
+	}
+	strs := make([]string, len(elems))
+	for i, elem := range elems {
+		strs[i] = Query.QuoteStringValue(elem)
+	}
+	return fmt.Sprintf("/.*(%s).*/", strings.Join(strs, "|"))
+}
+
 // CreateMatchPattern returns a regex pattern that matches any of the provided elements.
 func (query) CreateMatchPattern(elems []string) string {
 	if len(elems) == 0 {

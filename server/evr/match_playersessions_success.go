@@ -48,6 +48,8 @@ func (m LobbyEntrant) Version3() *LobbyEntrantsV3 {
 	return &s
 }
 
+const MaxLobbyEntrants = 16
+
 type LobbyEntrantsV0 LobbyEntrant
 
 func (m *LobbyEntrantsV0) Stream(s *EasyStream) error {
@@ -58,6 +60,9 @@ func (m *LobbyEntrantsV0) Stream(s *EasyStream) error {
 		func() error { return s.StreamGUID(&m.LobbyID) },
 		func() error {
 			if s.Mode == DecodeMode {
+				if count > MaxLobbyEntrants {
+					return fmt.Errorf("entrant count %d exceeds maximum %d", count, MaxLobbyEntrants)
+				}
 				m.EntrantIDs = make([]uuid.UUID, count)
 			}
 			return s.StreamGUIDs(&m.EntrantIDs)

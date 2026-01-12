@@ -55,7 +55,6 @@ type DiscordAppBot struct {
 	config             Config
 	metrics            Metrics
 	pipeline           *Pipeline
-	profileRegistry    *ProfileCache
 	statusRegistry     StatusRegistry
 	guildGroupRegistry *GuildGroupRegistry
 
@@ -71,9 +70,14 @@ type DiscordAppBot struct {
 	prepareMatchRatePerSecond rate.Limit
 	prepareMatchBurst         int
 	prepareMatchRateLimiters  *MapOf[string, *rate.Limiter]
+
+	// Rate limiter for public matches (echo_arena, echo_combat) - 1 per 15 minutes
+	publicMatchRatePerSecond rate.Limit
+	publicMatchBurst         int
+	publicMatchRateLimiters  *MapOf[string, *rate.Limiter]
 }
 
-func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordIntegrator, profileRegistry *ProfileCache, statusRegistry StatusRegistry, dg *discordgo.Session, ipInfoCache *IPInfoCache, guildGroupRegistry *GuildGroupRegistry) (*DiscordAppBot, error) {
+func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordIntegrator, statusRegistry StatusRegistry, dg *discordgo.Session, ipInfoCache *IPInfoCache, guildGroupRegistry *GuildGroupRegistry) (*DiscordAppBot, error) {
 
 	logger = logger.WithField("system", "discordAppBot")
 
@@ -87,8 +91,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		metrics:  metrics,
 		config:   config,
 
-		profileRegistry: profileRegistry,
-		statusRegistry:  statusRegistry,
+		statusRegistry: statusRegistry,
 
 		dg:                 dg,
 		guildGroupRegistry: guildGroupRegistry,
@@ -100,8 +103,12 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		prepareMatchRatePerSecond: 1.0 / 60,
 		prepareMatchBurst:         1,
 		prepareMatchRateLimiters:  &MapOf[string, *rate.Limiter]{},
-		partyStatusChs:            &MapOf[string, chan error]{},
-		debugChannels:             make(map[string]string),
+		// Rate limiter for public matches: 1 per 15 minutes (900 seconds)
+		publicMatchRatePerSecond: 1.0 / 900,
+		publicMatchBurst:         1,
+		publicMatchRateLimiters:  &MapOf[string, *rate.Limiter]{},
+		partyStatusChs:           &MapOf[string, chan error]{},
+		debugChannels:            make(map[string]string),
 	}
 
 	discordgo.Logger = appbot.discordGoLogger
@@ -234,6 +241,13 @@ func (e *DiscordAppBot) discordGoLogger(msgL int, caller int, format string, a .
 func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string) *rate.Limiter {
 	key := strings.Join([]string{userID, groupID}, ":")
 	limiter, _ := e.prepareMatchRateLimiters.LoadOrStore(key, rate.NewLimiter(e.prepareMatchRatePerSecond, e.prepareMatchBurst))
+	return limiter
+}
+
+// loadPublicMatchRateLimiter returns the rate limiter for public match creation (1 per 15 minutes)
+func (e *DiscordAppBot) loadPublicMatchRateLimiter(userID, groupID string) *rate.Limiter {
+	key := strings.Join([]string{userID, groupID, "public"}, ":")
+	limiter, _ := e.publicMatchRateLimiters.LoadOrStore(key, rate.NewLimiter(e.publicMatchRatePerSecond, e.publicMatchBurst))
 	return limiter
 }
 
@@ -441,7 +455,7 @@ var (
 		},
 		{
 			Name:        "igp",
-			Description: "Enable the gold nametag for your current session as a moderator.",
+			Description: "Open the In-Game Panel for match moderation and player management.",
 		},
 		{
 			Name:        "party-status",
@@ -558,6 +572,19 @@ var (
 							Name:        "force",
 							Description: "force the link even if the discord ID doesn't match",
 							Required:    false,
+						},
+					},
+				},
+				{
+					Name:        "unlink-player",
+					Description: "unlink a VRML account from a user",
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:        discordgo.ApplicationCommandOptionString,
+							Name:        "identifier",
+							Description: "VRML user ID, player ID, Discord ID, or Discord username",
+							Required:    true,
 						},
 					},
 				},
@@ -708,6 +735,10 @@ var (
 						{
 							Name:  "Social Private",
 							Value: "social_2.0_private",
+						},
+						{
+							Name:  "Social Public",
+							Value: "social_2.0",
 						},
 					},
 				},
@@ -876,6 +907,14 @@ var (
 		},
 	}
 )
+
+func init() {
+	// Only allow slash commands in guild context - they require guild/member data
+	guildOnly := []discordgo.InteractionContextType{discordgo.InteractionContextGuild}
+	for _, cmd := range mainSlashCommands {
+		cmd.Contexts = &guildOnly
+	}
+}
 
 func (d *DiscordAppBot) UnregisterCommandsAll(ctx context.Context, logger runtime.Logger, dg *discordgo.Session) {
 	guilds, err := dg.UserGuilds(100, "", "", false)
@@ -1733,7 +1772,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				// Assign the badge to the user
-				if err := AssignEntitlements(ctx, logger, nk, userID, i.Member.User.Username, targetUserID, "", entitlements); err != nil {
+				if err := AssignEntitlements(ctx, logger, nk, userID, user.Username, targetUserID, "", entitlements); err != nil {
 					return status.Error(codes.Internal, "failed to assign badge")
 				}
 
@@ -1842,6 +1881,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 				}
 
+			case "unlink-player":
+				// Unlink a VRML account from a user
+				return d.handleUnlinkVRML(ctx, logger, s, i, user, member, userID, groupID)
 			}
 			return nil
 		},
@@ -2109,7 +2151,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			isGuildAuditor = isGuildAuditor || isGlobalOperator
-			isGuildEnforcer = isGuildEnforcer || isGuildAuditor || isGlobalOperator
+			isGuildEnforcer = isGuildEnforcer || isGuildAuditor
 
 			loginsSince := time.Now().Add(-30 * 24 * time.Hour)
 			if !isGlobalOperator {
@@ -2188,6 +2230,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			label, rttMs, err := d.handleCreateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime)
 			if err != nil {
+				// Check if this is a region fallback error
+				var regionErr ErrMatchmakingNoServersInRegion
+				if errors.As(err, &regionErr) && regionErr.FallbackInfo != nil {
+					// Present user with fallback options
+					return d.presentRegionFallbackOptions(s, i, regionErr.FallbackInfo, "create-match", region, mode, level, startTime)
+				}
 				return err
 			}
 
@@ -2362,6 +2410,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			label, _, err := d.handleAllocateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime)
 			if err != nil {
+				// Check if this is a region fallback error
+				var regionErr ErrMatchmakingNoServersInRegion
+				if errors.As(err, &regionErr) && regionErr.FallbackInfo != nil {
+					// Present user with fallback options
+					return d.presentRegionFallbackOptions(s, i, regionErr.FallbackInfo, "allocate-match", region, mode, level, startTime)
+				}
 				return err
 			}
 
@@ -3091,6 +3145,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			switch group {
 			case "linkcode_modal":
+				if i.Member == nil || i.Member.User == nil {
+					logger.Error("Member information not available")
+					return
+				}
 				data := i.ModalSubmitData()
 				member, err := d.dg.GuildMember(i.GuildID, i.Member.User.ID)
 				if err != nil {
@@ -3145,6 +3203,46 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
 							Content: "Failed to submit server issue report: " + err.Error(),
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					})
+				}
+
+			case "set_ign_modal":
+				// Handle IGN override modal submission
+				data := i.ModalSubmitData()
+				if err := d.handleSetIGNModalSubmit(ctx, logger, s, i, &data, value); err != nil {
+					logger.Error("Failed to handle set IGN modal submit", zap.Error(err))
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "Failed to set IGN override: " + err.Error(),
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					})
+				}
+
+			case "enf_edit":
+				// Handle enforcement record edit modal submission
+				if err := d.handleEnforcementEditModalSubmit(logger, i, value); err != nil {
+					logger.Error("Failed to handle enforcement edit modal submit", zap.Error(err))
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "Failed to edit enforcement record: " + err.Error(),
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					})
+				}
+
+			case "enf_void":
+				// Handle enforcement record void modal submission
+				if err := d.handleEnforcementVoidModalSubmit(logger, i, value); err != nil {
+					logger.Error("Failed to handle enforcement void modal submit", zap.Error(err))
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "Failed to void enforcement record: " + err.Error(),
 							Flags:   discordgo.MessageFlagsEphemeral,
 						},
 					})
@@ -3539,6 +3637,10 @@ func (d *DiscordAppBot) LogInteractionToChannel(i *discordgo.InteractionCreate, 
 		return nil
 	}
 
+	if i.Member == nil || i.Member.User == nil {
+		return fmt.Errorf("member information not available")
+	}
+
 	data := i.ApplicationCommandData()
 	signature := d.interactionToSignature(data.Name, data.Options)
 
@@ -3617,34 +3719,33 @@ func (d *DiscordAppBot) LogUserErrorMessage(ctx context.Context, groupID string,
 }
 
 func (d *DiscordAppBot) createLookupSetIGNModal(currentDisplayName string, isLocked bool) *discordgo.InteractionResponse {
-	lockValue := "false"
-	if isLocked {
-		lockValue = "true"
-	}
+	allowPlayerToChangeIGN := !isLocked
+
 	return &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
 			CustomID: "lookup:set_ign_modal",
-			Title:    "Set IGN Override",
+			Title:    "Override In-Game Name",
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
 							CustomID:    "display_name_input",
-							Label:       "Display Name",
+							Label:       "In-Game Display Name",
 							Value:       currentDisplayName,
 							Style:       discordgo.TextInputShort,
 							Required:    true,
-							Placeholder: "Enter the desired IGN",
+							Placeholder: "Enter the desired In-Game Display Name",
 						},
 					},
 				},
+				// TODO this should be a true/false toggle or select menu, or set to "yes/no"
 				discordgo.ActionsRow{
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
 							CustomID:    "lock_input",
 							Label:       "Lock IGN (true/false)",
-							Value:       lockValue,
+							Value:       fmt.Sprintf("%t", allowPlayerToChangeIGN),
 							Style:       discordgo.TextInputShort,
 							Required:    true,
 							Placeholder: "true or false",

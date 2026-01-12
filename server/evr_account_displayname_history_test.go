@@ -1,7 +1,6 @@
 package server
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -174,13 +173,4 @@ func TestDisplayNameHistory_Update(t *testing.T) {
 			}
 		})
 	}
-}
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if strings.ToLower(s) == item {
-			return true
-		}
-	}
-	return false
 }

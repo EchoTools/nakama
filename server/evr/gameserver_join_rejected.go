@@ -7,6 +7,8 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
+const MaxJoinRejectedEntrants = 16
+
 // Nakama -> Game Server: player sessions that are to be kicked/rejected.
 type GameServerJoinRejected struct {
 	ErrorCode  PlayerRejectionReason
@@ -50,7 +52,11 @@ func (m *GameServerJoinRejected) Stream(s *EasyStream) error {
 		},
 		func() error {
 			if s.Mode == DecodeMode {
-				m.EntrantIDs = make([]uuid.UUID, (s.r.Len()-s.Position())/16)
+				count := s.Len() / 16
+				if count > MaxJoinRejectedEntrants {
+					return fmt.Errorf("entrant count %d exceeds maximum %d", count, MaxJoinRejectedEntrants)
+				}
+				m.EntrantIDs = make([]uuid.UUID, count)
 			}
 			return s.StreamGUIDs(&m.EntrantIDs)
 		},

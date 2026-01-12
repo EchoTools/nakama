@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -127,9 +125,9 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		// Sometimes the client doesn't respond to the ping request, so delay for a few seconds.
 		<-time.After(3 * time.Second)
 	}
-
+	serviceSettings := ServiceSettings()
 	// Only Apply the early quit penalty if it's a public arena match.
-	if lobbyParams.Mode == evr.ModeArenaPublic && lobbyParams.EarlyQuitPenaltyLevel > 0 && ServiceSettings().Matchmaking.EnableEarlyQuitPenalty {
+	if lobbyParams.Mode == evr.ModeArenaPublic && lobbyParams.EarlyQuitPenaltyLevel > 0 && serviceSettings.Matchmaking.EnableEarlyQuitPenalty {
 
 		// Default backfill interval
 		interval := 1 * time.Second
@@ -144,19 +142,20 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			interval = 240 * time.Second
 		}
 
-		// Notify the user that they are an early quitter.
-		message := fmt.Sprintf("Your early quit penalty is active (level %d), your matchmaking has been delayed by %d seconds.", lobbyParams.EarlyQuitPenaltyLevel, int(interval.Seconds()))
-		if _, err := SendUserMessage(ctx, p.appBot.dg, lobbyParams.DiscordID, message); err != nil {
-			logger.Warn("Failed to send message to user", zap.Error(err))
-		}
-		if guildGroup := p.guildGroupRegistry.Get(lobbyParams.GroupID.String()); guildGroup != nil {
-			// Send an audit log message to the guild group.
-			content := fmt.Sprintf("notified early quitter <@!%s> (%s): %s ", lobbyParams.DiscordID, session.Username(), message)
-			if _, err = AuditLogSendGuild(p.appBot.dg, guildGroup, content); err != nil {
-				logger.Warn("Failed to send audit log message", zap.Error(err))
+		if !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
+			// Notify the user that they are an early quitter.
+			message := fmt.Sprintf("Your early quit penalty is active (level %d), your matchmaking has been delayed by %d seconds.", lobbyParams.EarlyQuitPenaltyLevel, int(interval.Seconds()))
+			if _, err := SendUserMessage(ctx, p.appBot.dg, lobbyParams.DiscordID, message); err != nil {
+				logger.Warn("Failed to send message to user", zap.Error(err))
+			}
+			if guildGroup := p.guildGroupRegistry.Get(lobbyParams.GroupID.String()); guildGroup != nil {
+				// Send an audit log message to the guild group.
+				content := fmt.Sprintf("notified early quitter <@!%s> (%s): %s ", lobbyParams.DiscordID, session.Username(), message)
+				if _, err = AuditLogSendGuild(p.appBot.dg, guildGroup, content); err != nil {
+					logger.Warn("Failed to send audit log message", zap.Error(err))
+				}
 			}
 		}
-
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -164,32 +163,13 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 	}
 
-	switch lobbyParams.Mode {
-	case evr.ModeSocialPublic:
-		// Social lobbies do not use matchmaking.
-		break
-	case evr.ModeArenaPublic:
-		// Only allow Tier 1 players to use the matchmaker. Tier 2+ players are forced into backfill-only mode.
-		if lobbyParams.EarlyQuitMatchmakingTier != MatchmakingTier1 {
-			logger.Debug("Player in Tier 2+ (backfill-only mode)", zap.Int32("tier", lobbyParams.EarlyQuitMatchmakingTier))
-			break
-		}
-		fallthrough
-	case evr.ModeCombatPublic:
-		// Combat does not have tiers, so always allow matchmaking.
-		fallthrough
-	default:
-		go func() {
-			if err := p.lobbyMatchMakeWithFallback(ctx, logger, session, lobbyParams, lobbyGroup, entrants...); err != nil {
-				logger.Warn("Failed to matchmake", zap.Error(err))
-			}
-		}()
+	// Social lobbies use a simple find-or-create approach
+	if lobbyParams.Mode == evr.ModeSocialPublic {
+		return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, entrants...)
 	}
 
-	// Attempt to backfill until the timeout.
-	enableFailsafe := true
-	return p.lobbyBackfill(ctx, logger, session, lobbyParams, enableFailsafe, entrants...)
-
+	// Arena and Combat lobbies use the matchmaker (backfill is handled by the matchmaker process)
+	return p.lobbyMatchMakeWithFallback(ctx, logger, session, lobbyParams, lobbyGroup, entrants...)
 }
 
 func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters) (*LobbyGroup, []uuid.UUID, bool, error) {
@@ -231,7 +211,7 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 			if err != nil {
 				return nil, nil, false, fmt.Errorf("failed to get party stream: %w", err)
 			} else if meta == nil {
-				logger.Warn("Party member is not following the leader", zap.String("uid", member.Presence.GetUserId()), zap.String("sid", member.Presence.GetSessionId()), zap.String("leader_sid", session.id.String()))
+				logger.Debug("Party member is not following the leader", zap.String("uid", member.Presence.GetUserId()), zap.String("sid", member.Presence.GetSessionId()), zap.String("leader_sid", session.id.String()))
 				if err := p.nk.StreamUserKick(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, member.Presence); err != nil {
 					return nil, nil, false, fmt.Errorf("failed to kick party member: %w", err)
 				}
@@ -333,130 +313,44 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 
 	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, []string{lobbyParams.RegionCode}, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
 	if err != nil {
-		logger.Warn("Failed to allocate game server", zap.Error(err), zap.Any("settings", settings))
-		return nil, err
+		// Check if this is a region fallback error - for pipeline, auto-select closest
+		var regionErr ErrMatchmakingNoServersInRegion
+		if errors.As(err, &regionErr) && regionErr.FallbackInfo != nil {
+			logger.Info("Auto-selecting closest server for lobby creation (no servers in requested region)",
+				zap.String("requested_region", lobbyParams.RegionCode),
+				zap.String("selected_region", regionErr.FallbackInfo.ClosestRegion),
+				zap.Int("latency_ms", regionErr.FallbackInfo.ClosestLatencyMs))
+
+			// Allocate without region requirement to get the closest server
+			label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, nil, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
+		}
+
+		if err != nil {
+			logger.Warn("Failed to allocate game server", zap.Error(err), zap.Any("settings", settings))
+			return nil, err
+		}
 	}
 
 	return label, nil
 }
 
-func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, enableFailsafe bool, entrants ...*EvrMatchPresence) error {
-	interval := 3 * time.Second
+func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.Logger, _ Session, lobbyParams *LobbySessionParameters, entrants ...*EvrMatchPresence) error {
+	interval := 1 * time.Second
 
-	if lobbyParams.Mode == evr.ModeSocialPublic {
-		interval = 1 * time.Second
-	}
-
-	// If the player has backfill disabled, set the backfill interval to an extreme number.
-	if lobbyParams.DisableArenaBackfill && lobbyParams.Mode == evr.ModeArenaPublic {
-		// Set a long backfill interval for arena matches.
-		interval = 15 * time.Minute
-	}
-
-	if lobbyParams.EnableSBMM && lobbyParams.Mode == evr.ModeArenaPublic && len(entrants) == 1 {
-		if minTime := ServiceSettings().Matchmaking.BackfillMinTimeSecs; minTime > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(time.Duration(minTime) * time.Second):
-			}
-		}
-	}
-
-	// Backfill search query
-	// Maximum RTT for a server to be considered for backfill
-
-	includeMMR := false
-	includeMaxRTT := false
-
-	// Only use rank percentile for arena matches.
-	if lobbyParams.Mode == evr.ModeArenaPublic {
-		includeMMR = true
-	}
-
-	stream := lobbyParams.GuildGroupStream()
-	count, err := p.nk.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
-	if err != nil {
-		logger.Error("Failed to get stream count", zap.Error(err))
-	}
-
-	// If there are fewer players online, reduce the fallback delay
-	if !strings.Contains(p.node, "dev") {
-		// If there are fewer than 16 players online, reduce the fallback delay
-		if count < ServiceSettings().Matchmaking.SBMMMinPlayerCount {
-			includeMMR = false
-		}
-	}
-
-	var (
-		query         = lobbyParams.BackfillSearchQuery(includeMMR, includeMaxRTT)
-		fallbackTimer = time.NewTimer(lobbyParams.FallbackTimeout)
-		failsafeTimer = time.NewTimer(lobbyParams.FailsafeTimeout)
-		cycleCount    = 0
-	)
 	for {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("context canceled: %w", ctx.Err())
-
-		case <-fallbackTimer.C:
-
-			// The fallback timer has expired. Reduce the search query.
-			query = lobbyParams.BackfillSearchQuery(false, false)
-
-		case <-failsafeTimer.C:
-			if enableFailsafe {
-				// The failsafe timer has expired. Create a match.
-				query = lobbyParams.BackfillSearchQuery(false, false)
-
-				// The failsafe timer has expired.
-				// Create a match.
-				logger.Warn("Failsafe timer expired. Creating a new match.")
-				label, err := p.newLobby(ctx, logger, lobbyParams)
-				if err != nil {
-					// If the error is a lock error, just try again.
-					if err == ErrFailedToAcquireLock {
-						// Wait until after the "avoidance time" to give time for the server to be created.
-						<-time.After(5 * time.Second)
-						continue
-					}
-
-					// This should't happen unless there's no servers available.
-					return NewLobbyErrorf(ServerFindFailed, "failed to create new lobby failsafe: %w", err)
-				} else {
-					<-time.After(1 * time.Second)
-					// Player members will detect the join.
-					if err := p.LobbyJoinEntrants(logger, label, entrants...); err != nil {
-						// Send the error to the client
-						// If it's full just try again.
-						if LobbyErrorCode(err) == ServerIsFull {
-							logger.Warn("Server is full, ignoring.")
-							continue
-						}
-						return fmt.Errorf("failed to join failsafe-generated match: %w", err)
-					}
-					return nil
-				}
-			}
 		case <-time.After(interval):
-
 		}
 
-		// List all matches that are open and have available slots.
+		// List all social matches that are open and have available slots.
+		query := lobbyParams.BackfillSearchQuery(false, false)
 		matches, err := ListMatchStates(ctx, p.nk, query)
 		if err != nil {
 			return fmt.Errorf("failed to list matches: %w", err)
 		}
 
-		cycleCount++
-		if len(matches) > 0 {
-			logger.Debug("Found matches", zap.Int("count", len(matches)), zap.Any("query", query), zap.Int("cycle", cycleCount))
-		} else {
-			if cycleCount%10 == 0 {
-				logger.Debug("No matches found", zap.Any("query", query), zap.Int("cycle", cycleCount))
-				continue
-			}
-		}
 		partySize := lobbyParams.GetPartySize()
 		if partySize == 0 {
 			logger.Warn("party size is 0")
@@ -464,10 +358,13 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, ses
 			partySize = 1
 		}
 
-		matches = p.sortBackfillOptions(matches, lobbyParams)
+		// Set the team for social lobbies
+		team := evr.TeamSocial
+		for _, e := range entrants {
+			e.RoleAlignment = team
+		}
 
-		team := evr.TeamBlue
-
+		// Try to join an existing social lobby
 		for _, labelMeta := range matches {
 			select {
 			case <-ctx.Done():
@@ -477,17 +374,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, ses
 
 			l := labelMeta.State
 
-			// Social lobbies can only have one team
-			if lobbyParams.Mode == evr.ModeSocialPublic {
-				team = evr.TeamSocial
-			} else {
-
-				// Determine which team has the least players
-				team = evr.TeamBlue
-				if l.RoleCount(evr.TeamOrange) < l.RoleCount(evr.TeamBlue) {
-					team = evr.TeamOrange
-				}
-			}
 			if n, err := l.OpenSlotsByRole(team); err != nil {
 				logger.Warn("Failed to get open slots by role", zap.Error(err))
 				continue
@@ -495,57 +381,41 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, ses
 				continue
 			}
 
-			// Set the role alignment for each entrant in the party
-			for _, e := range entrants {
-				e.RoleAlignment = team
-			}
-
 			logger := logger.With(zap.String("mid", l.ID.UUID.String()))
-
-			logger.Debug("Joining backfill match.")
+			logger.Debug("Joining social lobby.")
 			p.nk.metrics.CustomCounter("lobby_join_backfill", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
 
 			if err := p.LobbyJoinEntrants(logger, l, entrants...); err != nil {
-				// Send the error to the client
-				// If it's full just try again.
 				if LobbyErrorCode(err) == ServerIsFull {
 					logger.Warn("Server is full, ignoring.")
 					continue
 				}
-				return fmt.Errorf("failed to backfill existing match: %w", err)
+				return fmt.Errorf("failed to join existing social lobby: %w", err)
 			}
 			return nil
 		}
 
-		// If the lobby is social, create a new social lobby.
-		if lobbyParams.Mode == evr.ModeSocialPublic {
-			// Create a new social lobby
-			label, err := p.newLobby(ctx, logger, lobbyParams, entrants...)
-			if err != nil {
-				// If the error is a lock error, just try again.
-				if err == ErrFailedToAcquireLock {
-					// Wait a few seconds to give time for the server to be created.
-					<-time.After(2 * time.Second)
-					continue
-				}
-
-				// This should't happen unless there's no servers available.
-				return NewLobbyErrorf(ServerFindFailed, "failed to create social lobby: %w", err)
-			} else {
-				<-time.After(1 * time.Second)
-				// Player members will detect the join.
-				if err := p.LobbyJoinEntrants(logger, label, entrants...); err != nil {
-					// Send the error to the client
-					// If it's full just try again.
-					if LobbyErrorCode(err) == ServerIsFull {
-						logger.Warn("Server is full, ignoring.")
-						continue
-					}
-					return fmt.Errorf("failed to join auto-created lobby: %w", err)
-				}
-				return nil
+		// No suitable social lobby found, create a new one
+		label, err := p.newLobby(ctx, logger, lobbyParams, entrants...)
+		if err != nil {
+			// If the error is a lock error, just try again.
+			if err == ErrFailedToAcquireLock {
+				<-time.After(2 * time.Second)
+				continue
 			}
+
+			return NewLobbyErrorf(ServerFindFailed, "failed to create social lobby: %w", err)
 		}
+
+		<-time.After(1 * time.Second)
+		if err := p.LobbyJoinEntrants(logger, label, entrants...); err != nil {
+			if LobbyErrorCode(err) == ServerIsFull {
+				logger.Warn("Server is full, ignoring.")
+				continue
+			}
+			return fmt.Errorf("failed to join auto-created social lobby: %w", err)
+		}
+		return nil
 	}
 }
 
@@ -745,46 +615,4 @@ func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, sessi
 		return NewLobbyError(ServerIsLocked, "party leader is in a match")
 	}
 
-}
-
-func filterByPlayerAvailability(rttByPlayerByExtIP map[string]map[string]int) []string {
-
-	maxPlayerCount := 0
-	extIPsByAverageRTT := make(map[string]int)
-	extIPsByPlayerCount := make(map[string]int)
-	for extIP, players := range rttByPlayerByExtIP {
-		extIPsByPlayerCount[extIP] += len(players)
-		if len(players) > maxPlayerCount {
-			maxPlayerCount = len(players)
-		}
-
-		averageRTT := 0
-		for _, rtt := range players {
-			averageRTT += rtt
-		}
-		averageRTT /= len(players)
-	}
-
-	// Sort by greatest player availability
-	extIPs := make([]string, 0, len(extIPsByPlayerCount))
-	for extIP := range extIPsByPlayerCount {
-		extIPs = append(extIPs, extIP)
-	}
-
-	sort.SliceStable(extIPs, func(i, j int) bool {
-		// Sort by player count first
-		if extIPsByPlayerCount[extIPs[i]] > extIPsByPlayerCount[extIPs[j]] {
-			return true
-		} else if extIPsByPlayerCount[extIPs[i]] < extIPsByPlayerCount[extIPs[j]] {
-			return false
-		}
-
-		// If the player count is the same, sort by RTT
-		if extIPsByAverageRTT[extIPs[i]] < extIPsByAverageRTT[extIPs[j]] {
-			return true
-		}
-		return false
-	})
-
-	return extIPs
 }

@@ -56,6 +56,9 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		sbmm = NewSkillBasedMatchmaker()
 	)
 
+	// Store skill-based matchmaker globally so it can be connected to the lobby builder
+	globalSkillBasedMatchmaker.Store(sbmm)
+
 	// Register hooks
 	//if err = initializer.RegisterBeforeReadStorageObjects(BeforeReadStorageObjectsHook); err != nil {
 	//		return fmt.Errorf("unable to register AfterReadStorageObjects hook: %w", err)
@@ -104,12 +107,16 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"player/statistics":             PlayerStatisticsRPC,
 		"player/kick":                   KickPlayerRPC,
 		"player/profile":                UserServerProfileRPC,
+		"player/matchlock":              MatchLockRPC,
+		"player/matchlock/status":       GetMatchLockStatusRPC,
 		"link":                          LinkingAppRpc,
 		"evr/servicestatus":             rpcHandler.ServiceStatusRPC,
+		"matchmaking/settings":          MatchmakingSettingsRPC,
 		"importloadouts":                ImportLoadoutsRpc,
 		"matchmaker/stream":             MatchmakerStreamRPC,
 		"matchmaker/state":              MatchmakerStateRPC,
 		"matchmaker/candidates":         MatchmakerCandidatesRPCFactory(sbmm),
+		"matchmaker/config":             MatchmakerConfigRPC,
 		"stream/join":                   StreamJoinRPC,
 		"server/score":                  ServerScoreRPC,
 		"server/scores":                 ServerScoresRPC,
@@ -279,7 +286,7 @@ func connectMongo(ctx context.Context, mongoURI string) (*mongo.Client, error) {
 	return client, nil
 }
 
-func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
+func createCoreGroups(ctx context.Context, logger runtime.Logger, _ *sql.DB, nk runtime.NakamaModule, _ runtime.Initializer) error {
 	// Create user for use by the discord bot (and core group ownership)
 	userId, _, _, err := nk.AuthenticateDevice(ctx, SystemUserID, "discordbot", true)
 	if err != nil {
@@ -331,6 +338,8 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 		&MatchmakingSettings{},
 		&VRMLPlayerSummary{},
 		&LoginHistory{},
+		&GuildEnforcementJournal{},
+		&ServerProfileStorage{},
 	}
 	for _, s := range storables {
 		for _, idx := range s.StorageIndexes() {

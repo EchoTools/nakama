@@ -26,6 +26,8 @@ func (m LobbyPlayerSessionsRequest) Symbol() Symbol {
 	return SymbolOf(&m)
 }
 
+const MaxPlayerSessionsCount = 16
+
 func (m *LobbyPlayerSessionsRequest) Stream(s *EasyStream) error {
 	playerCount := uint64(len(m.PlayerEvrIDs))
 	return RunErrorFunctions([]func() error{
@@ -37,6 +39,9 @@ func (m *LobbyPlayerSessionsRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &playerCount) },
 		func() error {
 			if s.Mode == DecodeMode {
+				if playerCount > MaxPlayerSessionsCount {
+					return fmt.Errorf("player count %d exceeds maximum %d", playerCount, MaxPlayerSessionsCount)
+				}
 				m.PlayerEvrIDs = make([]EvrId, playerCount)
 			}
 			for i := range m.PlayerEvrIDs {

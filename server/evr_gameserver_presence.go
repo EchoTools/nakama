@@ -21,7 +21,8 @@ type GameServerPresence struct {
 	SessionID       uuid.UUID    `json:"sid,omitempty"`              // The server's Session ID
 	OperatorID      uuid.UUID    `json:"oper,omitempty"`             // The user id of the server.
 	GroupIDs        []uuid.UUID  `json:"group_ids,omitempty"`        // The channels this server will host matches for.
-	Endpoint        evr.Endpoint `json:"endpoint,omitempty"`         // The endpoint data used for connections.
+	Endpoint        evr.Endpoint `json:"endpoint"`                   // The endpoint data used for connections.
+	EndpointID      string       `json:"endpoint_id,omitempty"`      // The encoded external IP of the server.
 	VersionLock     evr.Symbol   `json:"version_lock,omitempty"`     // The game build version. (EVR)
 	AppID           string       `json:"app_id,omitempty"`           // The game app id. (EVR)
 	DefaultRegion   string       `json:"default_region,omitempty"`   // The default region code for the server.
@@ -127,6 +128,7 @@ func NewGameServerPresence(userId, sessionId uuid.UUID, serverId uint64, interna
 			ExternalIP: externalIP,
 			Port:       port,
 		},
+		EndpointID:    EncodeEndpointID(externalIP.String()),
 		DefaultRegion: defaultRegion,
 		RegionCodes:   regionCodes,
 		VersionLock:   versionLock,

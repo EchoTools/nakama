@@ -1,8 +1,10 @@
 package server
 
 import (
+	"errors"
 	"testing"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/assert"
 )
@@ -44,4 +46,15 @@ func TestGenerateLinkTicketWithExistingToken(t *testing.T) {
 	assert.Equal(t, loginData, ticket.LoginProfile, "Expected LoginRequest to match")
 	assert.Contains(t, linkTickets, ticket.Code, "Expected linkTickets to contain the generated code")
 	assert.NotEqual(t, "existing-code", ticket.Code, "Expected a new code to be generated")
+}
+
+type mockSession struct {
+	guildMemberFunc func(guildID, userID string) (*discordgo.Member, error)
+}
+
+func (m *mockSession) GuildMember(guildID, userID string) (*discordgo.Member, error) {
+	if m.guildMemberFunc != nil {
+		return m.guildMemberFunc(guildID, userID)
+	}
+	return nil, errors.New("not implemented")
 }
