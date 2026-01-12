@@ -267,7 +267,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 
 	if userSettings.LobbyGroupName != "" {
 		lobbyGroupName = userSettings.LobbyGroupName
-		partyID = uuid.NewV5(EntrantIDSalt, lobbyGroupName)
+		partyID = uuid.NewV5(PartyIDSalt, lobbyGroupName)
 	}
 
 	node := session.pipeline.node
@@ -337,7 +337,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		latencyHistory = NewLatencyHistory()
 	}
 	sessionParams.latencyHistory.Store(latencyHistory)
-	
+
 	// Set the maxRTT to at least the average of the player's latency history
 	if averages := latencyHistory.AverageRTTs(false); len(averages) > 0 {
 		averageRTT := 0

@@ -548,6 +548,21 @@ func PresenceByEntrantID(nk runtime.NakamaModule, matchID MatchID, entrantID uui
 	return mp, nil
 }
 
+// GetMatchPresences returns the match presences for a given match.
+func GetMatchPresences(ctx context.Context, nk runtime.NakamaModule, matchID MatchID) (map[string]*EvrMatchPresence, error) {
+	payload, err := SignalMatch(ctx, nk, matchID, SignalGetPresences, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get match presences: %w", err)
+	}
+
+	presenceMap := make(map[string]*EvrMatchPresence)
+	if err := json.Unmarshal([]byte(payload), &presenceMap); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal presences: %w", err)
+	}
+
+	return presenceMap, nil
+}
+
 func GetMatchIDBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID MatchID, presence runtime.Presence, err error) {
 
 	presences, err := nk.StreamUserList(StreamModeService, sessionID.String(), "", StreamLabelMatchService, false, true)
@@ -588,7 +603,7 @@ func GetLobbyGroupID(ctx context.Context, db *sql.DB, userID string) (string, uu
 	if dbPartyGroupName == "" {
 		return "", uuid.Nil, nil
 	}
-	return dbPartyGroupName, uuid.NewV5(EntrantIDSalt, dbPartyGroupName), nil
+	return dbPartyGroupName, uuid.NewV5(PartyIDSalt, dbPartyGroupName), nil
 }
 
 // returns map[guildID]groupID

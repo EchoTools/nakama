@@ -401,6 +401,10 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 	// Add the player
 	sessionID := meta.Presence.GetSessionId()
+
+	// Generate a new random entrant ID for this connection attempt
+	meta.Presence.EntrantID = NewEntrantID()
+
 	state.presenceMap[sessionID] = meta.Presence
 	state.presenceByEvrID[meta.Presence.EvrID] = meta.Presence
 	state.joinTimestamps[sessionID] = time.Now()
@@ -579,15 +583,15 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			}
 
 			// The entrant stream presence is only present when the player has not disconnect from the server yet.
-			if userPresences, err := nk.StreamUserList(StreamModeEntrant, mp.EntrantID(state.ID).String(), "", node, false, true); err != nil {
+			if userPresences, err := nk.StreamUserList(StreamModeEntrant, mp.EntrantID.String(), "", node, false, true); err != nil {
 				logger.Error("Failed to list user streams: %v", err)
 
 			} else if len(userPresences) > 0 || p.GetReason() == runtime.PresenceReasonDisconnect {
 				tags["reject_sent"] = "true"
 
-				rejects = append(rejects, mp.EntrantID(state.ID))
+				rejects = append(rejects, mp.EntrantID)
 
-				if err := nk.StreamUserLeave(StreamModeEntrant, mp.EntrantID(state.ID).String(), "", node, mp.GetUserId(), mp.GetSessionId()); err != nil {
+				if err := nk.StreamUserLeave(StreamModeEntrant, mp.EntrantID.String(), "", node, mp.GetUserId(), mp.GetSessionId()); err != nil {
 					logger.Warn("Failed to leave user stream: %v", err)
 				}
 
@@ -1040,7 +1044,7 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 				"uid": presence.GetUserId(),
 				"sid": presence.GetSessionId(),
 			}).Warn("Match terminating, disconnecting player.")
-			nk.SessionDisconnect(ctx, presence.EntrantID(state.ID).String(), runtime.PresenceReasonDisconnect)
+			nk.SessionDisconnect(ctx, presence.EntrantID.String(), runtime.PresenceReasonDisconnect)
 		}
 		// Disconnect the broadcasters session
 		logger.WithFields(map[string]any{
@@ -1100,7 +1104,7 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 			logger.Warn("Match shutting down, disconnecting player.")
 			for _, p := range state.presenceMap {
 				if mp.EvrID.Equals(p.EvrID) {
-					entrantIDs = append(entrantIDs, p.EntrantID(state.ID))
+					entrantIDs = append(entrantIDs, p.EntrantID)
 				}
 			}
 		}
@@ -1144,7 +1148,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		for _, e := range data.UserIDs {
 			for _, p := range state.presenceMap {
 				if p.UserID == e {
-					entrantIDs = append(entrantIDs, p.EntrantID(state.ID))
+					entrantIDs = append(entrantIDs, p.EntrantID)
 				}
 			}
 		}
@@ -1184,7 +1188,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 				})
 
 				for _, p := range state.presenceMap {
-					entrantIDs = append(entrantIDs, p.EntrantID(state.ID))
+					entrantIDs = append(entrantIDs, p.EntrantID)
 				}
 
 				if len(entrantIDs) > 0 {

@@ -175,7 +175,7 @@ func (p *EvrPipeline) lobbyPendingSessionCancel(ctx context.Context, logger *zap
 }
 
 // lobbyPlayerSessionsRequest is called when a client requests the player sessions for a list of XP IDs.
-// Player Sessions are UUIDv5 of the MatchID and EVR-ID
+// Player Sessions are random UUIDs generated when each player joins the match.
 func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	message := in.(*evr.LobbyPlayerSessionsRequest)
 
@@ -183,19 +183,38 @@ func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *za
 	if err != nil {
 		return fmt.Errorf("failed to create match ID: %w", err)
 	}
-	entrantID := NewEntrantID(matchID, message.EvrId)
 
-	presence, err := PresenceByEntrantID(p.nk, matchID, entrantID)
+	// Get all presences in the match
+	presenceMap, err := GetMatchPresences(ctx, p.nk, matchID)
 	if err != nil {
-		return fmt.Errorf("failed to get lobby presence for entrant `%s`: %w", entrantID.String(), err)
+		return fmt.Errorf("failed to get match presences: %w", err)
 	}
 
+	// Find the requesting player's presence by their EvrID
+	var presence *EvrMatchPresence
+	for _, mp := range presenceMap {
+		if mp.EvrID.Equals(message.EvrId) {
+			presence = mp
+			break
+		}
+	}
+	if presence == nil {
+		return fmt.Errorf("requesting player not found in match: %s", message.EvrId.String())
+	}
+
+	// Look up entrant IDs for the requested player EvrIDs
 	entrantIDs := make([]uuid.UUID, len(message.PlayerEvrIDs))
-	for i, e := range message.PlayerEvrIDs {
-		entrantIDs[i] = NewEntrantID(matchID, e)
+	for i, evrID := range message.PlayerEvrIDs {
+		for _, mp := range presenceMap {
+			if mp.EvrID.Equals(evrID) {
+				entrantIDs[i] = mp.EntrantID
+				break
+			}
+		}
+		// If not found, leave as nil UUID
 	}
 
-	entrant := evr.NewLobbyEntrant(message.EvrId, message.LobbyID, entrantID, entrantIDs, int16(presence.RoleAlignment))
+	entrant := evr.NewLobbyEntrant(message.EvrId, message.LobbyID, presence.EntrantID, entrantIDs, int16(presence.RoleAlignment))
 
 	return session.SendEvr(entrant.Version3())
 }
