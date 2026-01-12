@@ -172,9 +172,13 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	cycle := 0
 	for {
 
-		if ticket, err := p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); err != nil {
-			return fmt.Errorf("failed to add ticket: %w", err)
-		} else {
+		if ticket, addErr := p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); addErr != nil {
+			// If ticket limit reached, just skip adding for this interval and wait
+			if addErr != ErrMatchmakingTicketLimitReached {
+				return fmt.Errorf("failed to add ticket: %w", addErr)
+			}
+			// Ticket limit reached - continue waiting for next interval
+		} else if ticket != "" {
 			tickets = append(tickets, ticket)
 		}
 
@@ -194,9 +198,12 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 			ticketConfig.IncludeEarlyQuitPenalty = false
 			ticketConfig.MinCount = 2
 			ticketConfig.MaxCount = 8
-			if ticket, err := p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); err != nil {
-				return fmt.Errorf("failed to add ticket: %w", err)
-			} else {
+			if ticket, addErr := p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); addErr != nil {
+				// If ticket limit reached, just skip adding for this interval
+				if addErr != ErrMatchmakingTicketLimitReached {
+					return fmt.Errorf("failed to add ticket: %w", addErr)
+				}
+			} else if ticket != "" {
 				tickets = append(tickets, ticket)
 			}
 		}
@@ -204,8 +211,28 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	}
 }
 
+// ErrMatchmakingTicketLimitReached is returned when the matchmaking ticket limit for the interval is reached
+var ErrMatchmakingTicketLimitReached = NewLobbyErrorf(BadRequest, "matchmaking ticket limit reached for this interval")
+
 func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup, ticketConfig MatchmakingTicketParameters) (string, error) {
 	var err error
+
+	// Check if we've exceeded the maximum matchmaking tickets for this interval
+	maxTickets := ServiceSettings().Matchmaking.MaxMatchmakingTickets
+	if maxTickets <= 0 {
+		maxTickets = 24 // default
+	}
+
+	stream := lobbyParams.MatchmakingStream()
+	streamCount, err := p.nk.StreamCount(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label)
+	if err != nil {
+		logger.Warn("Failed to get matchmaking stream count", zap.Error(err))
+	} else if streamCount >= maxTickets {
+		logger.Debug("Matchmaking ticket limit reached, skipping ticket creation",
+			zap.Int("current_count", streamCount),
+			zap.Int("max_tickets", maxTickets))
+		return "", ErrMatchmakingTicketLimitReached
+	}
 
 	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(&ticketConfig)
 
