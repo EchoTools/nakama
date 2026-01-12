@@ -18,17 +18,18 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/flags"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"gopkg.in/yaml.v3"
-	"net/url"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
 )
 
 // Config interface is the Nakama core configuration.
@@ -53,6 +54,7 @@ type Config interface {
 	GetSatori() *SatoriConfig
 	GetStorage() *StorageConfig
 	GetMFA() *MFAConfig
+	GetCluster() *ClusterConfig
 	GetLimit() int
 
 	Clone() (Config, error)
@@ -479,6 +481,7 @@ type config struct {
 	Satori           *SatoriConfig      `yaml:"satori" json:"satori" usage:"Satori integration settings."`
 	Storage          *StorageConfig     `yaml:"storage" json:"storage" usage:"Storage settings."`
 	MFA              *MFAConfig         `yaml:"mfa" json:"mfa" usage:"MFA settings."`
+	Cluster          *ClusterConfig     `yaml:"cluster" json:"cluster" usage:"Cluster/distributed mode settings."`
 	Limit            int                `json:"-"` // Only used for migrate command.
 }
 
@@ -509,6 +512,7 @@ func NewConfig(logger *zap.Logger) *config {
 		Satori:           NewSatoriConfig(),
 		Storage:          NewStorageConfig(),
 		MFA:              NewMFAConfig(),
+		Cluster:          NewClusterConfig(),
 		Limit:            -1,
 	}
 }
@@ -540,6 +544,7 @@ func (c *config) Clone() (Config, error) {
 		GoogleAuth:       c.GoogleAuth.Clone(),
 		Storage:          c.Storage.Clone(),
 		MFA:              c.MFA.Clone(),
+		Cluster:          c.Cluster.Clone(),
 		Limit:            c.Limit,
 	}
 
@@ -624,6 +629,10 @@ func (c *config) GetStorage() *StorageConfig {
 
 func (c *config) GetMFA() *MFAConfig {
 	return c.MFA
+}
+
+func (c *config) GetCluster() *ClusterConfig {
+	return c.Cluster
 }
 
 func (c *config) GetRuntimeConfig() (runtime.Config, error) {
