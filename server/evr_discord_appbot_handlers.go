@@ -738,18 +738,24 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	// Check if this is a public match (echo_arena or echo_combat)
 	isPublicMatch := mode == evr.ModeArenaPublic || mode == evr.ModeCombatPublic
 
-	// Apply stricter rate limit (1 per 15 minutes) for public matches, unless user is privileged
-	if isPublicMatch && !isPrivileged {
-		publicLimiter := d.loadPublicMatchRateLimiter(userID, groupID)
-		if !publicLimiter.Allow() {
-			return nil, 0, status.Error(codes.ResourceExhausted, "rate limit exceeded for public matches (1 per 15 minutes)")
+	// Apply rate limits only if user is not privileged
+	if !isPrivileged {
+		// Apply stricter rate limit (1 per 15 minutes) for public matches
+		if isPublicMatch {
+			publicLimiter := d.loadPublicMatchRateLimiter(userID, groupID)
+			if !publicLimiter.Allow() {
+				return nil, 0, status.Error(codes.ResourceExhausted, "rate limit exceeded for public matches (1 per 15 minutes)")
+			}
 		}
-	}
 
-	// Apply general rate limit for all matches
-	limiter := d.loadPrepareMatchRateLimiter(userID, groupID)
-	if !limiter.Allow() {
-		return nil, 0, status.Error(codes.ResourceExhausted, fmt.Sprintf("rate limit exceeded (%0.0f requests per minute)", limiter.Limit()*60))
+		// Apply general rate limit for all matches using guild group setting
+		// Default is 1 per minute, but can be customized per guild
+		if group.CreateCommandRateLimitPerMinute != 0 { // 0 means disabled
+			limiter := d.loadPrepareMatchRateLimiter(userID, groupID, group)
+			if !limiter.Allow() {
+				return nil, 0, status.Error(codes.ResourceExhausted, "rate limit exceeded (1 per minute)")
+			}
+		}
 	}
 
 	latencyHistory := NewLatencyHistory()
@@ -1142,13 +1148,13 @@ func (d *DiscordAppBot) presentRegionFallbackOptions(s *discordgo.Session, i *di
 
 	embed := &discordgo.MessageEmbed{
 		Title: "No Servers Available in Selected Region",
-		Description: fmt.Sprintf("No servers are available in region(s) **%v**.\n\nHowever, a server is available in **%s** with **%dms** latency.\n\nWould you like to use this server instead?",
-			fallbackInfo.RequestedRegions, fallbackInfo.ClosestRegion, fallbackInfo.ClosestLatencyMs),
+		Description: fmt.Sprintf("There are **%d** servers in region code **%s**.\n\nHowever, a server is available in **%s** with **%dms** latency.\n\nWould you like to use this server instead?",
+			fallbackInfo.ServerCount, fallbackInfo.RequestedRegionCode, fallbackInfo.ClosestRegion, fallbackInfo.ClosestLatencyMs),
 		Color: 0xFFA500, // Orange color for warning
 		Fields: []*discordgo.MessageEmbedField{
 			{
 				Name:   "Requested Region(s)",
-				Value:  fmt.Sprintf("%v", fallbackInfo.RequestedRegions),
+				Value:  fmt.Sprintf("[%s]", fallbackInfo.RequestedRegionCode),
 				Inline: true,
 			},
 			{

@@ -43,10 +43,12 @@ var (
 
 // RegionFallbackInfo contains information about alternative servers when requested region has none
 type RegionFallbackInfo struct {
-	RequestedRegions []string
-	ClosestServer    *MatchLabel
-	ClosestRegion    string
-	ClosestLatencyMs int
+	RequestedRegions    []string
+	RequestedRegionCode string // The primary requested region code for display
+	ServerCount         int     // Number of servers in the requested region
+	ClosestServer       *MatchLabel
+	ClosestRegion       string
+	ClosestLatencyMs    int
 }
 
 // ErrMatchmakingNoServersInRegion is returned when no servers are available in the requested region,
@@ -57,8 +59,8 @@ type ErrMatchmakingNoServersInRegion struct {
 
 func (e ErrMatchmakingNoServersInRegion) Error() string {
 	if e.FallbackInfo != nil {
-		return fmt.Sprintf("server find failed: No servers available in region(s) %v, but servers found in %s (%dms)",
-			e.FallbackInfo.RequestedRegions, e.FallbackInfo.ClosestRegion, e.FallbackInfo.ClosestLatencyMs)
+		return fmt.Sprintf("server find failed: There are %d servers in region code %s",
+			e.FallbackInfo.ServerCount, e.FallbackInfo.RequestedRegionCode)
 	}
 	return "server find failed: No servers available in requested region"
 }
