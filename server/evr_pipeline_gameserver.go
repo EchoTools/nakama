@@ -779,6 +779,11 @@ func BroadcasterPortScan(lIP net.IP, rIP net.IP, startPort, endPort int, timeout
 }
 
 func BroadcasterRTTcheck(lIP net.IP, rIP net.IP, port, count int, timeout time.Duration) (rtts []time.Duration, err error) {
+	// Guard against zero or negative count
+	if count <= 0 {
+		return []time.Duration{}, nil
+	}
+
 	// Create a slice to store round trip times (rtts)
 	rtts = make([]time.Duration, count)
 	// Set a timeout duration
@@ -789,7 +794,7 @@ func BroadcasterRTTcheck(lIP net.IP, rIP net.IP, port, count int, timeout time.D
 	go func() {
 		// Ensure the task is marked done on return
 		defer close(doneCh)
-		// Loop 5 times
+		// Loop count times
 		for i := range count {
 			// Perform a health check on the broadcaster
 			rtt, err := BroadcasterHealthcheck(lIP, rIP, port, timeout)
@@ -800,8 +805,8 @@ func BroadcasterRTTcheck(lIP net.IP, rIP net.IP, port, count int, timeout time.D
 			}
 			// Record the rtt
 			rtts[i] = rtt
-			// Sleep for the duration of the latency before the next iteration
-			<-time.After(min(500, rtt))
+			// Sleep for the duration of the latency before the next iteration (max 500ms)
+			<-time.After(min(500*time.Millisecond, rtt))
 		}
 	}()
 	// Wait for the goroutine to finish
