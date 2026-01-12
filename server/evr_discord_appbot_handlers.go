@@ -529,7 +529,13 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 					},
 				},
 			}); err != nil {
-				logger.WithField("error", err).Warn("Failed to edit message")
+				logger.
+					WithField("error", err).
+					WithField("interaction_id", i.ID).
+					WithField("interaction_channel_id", i.ChannelID).
+					WithField("message_channel_id", i.Message.ChannelID).
+					WithField("message_id", i.Message.ID).
+					Warn("Failed to edit message to disable unlink-vrml-confirm button after successful unlink; UI button state may be stale")
 			}
 		}
 
