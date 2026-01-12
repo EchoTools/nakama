@@ -879,33 +879,39 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 				return fmt.Errorf("failed to marshal embeds: %w", err)
 			}
 
-			url := d.config.GetRuntime().Environment["STATIC_HTTP_BASE_URL"] + "/player-lookup/" + targetID
+			responseData := &discordgo.InteractionResponseData{
+				Content: "The profile is too large to display in an embed. Here is the raw data.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+				Files: []*discordgo.File{
+					{
+						Name:        targetID + "_lookup.json",
+						ContentType: "application/json",
+						Reader:      strings.NewReader(string(embedData)),
+					},
+				},
+			}
 
-			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Content: "The profile is too large to display in an embed. Here is the raw data.",
-					Flags:   discordgo.MessageFlagsEphemeral,
-					Components: []discordgo.MessageComponent{
-						discordgo.ActionsRow{
-							Components: []discordgo.MessageComponent{
-								&discordgo.Button{
-									Label:    "View on Website",
-									Style:    discordgo.LinkButton,
-									URL:      url,
-									Disabled: false,
-								},
+			// Only add the button if STATIC_HTTP_BASE_URL is configured with a valid scheme
+			baseURL := d.config.GetRuntime().Environment["STATIC_HTTP_BASE_URL"]
+			if baseURL != "" && (strings.HasPrefix(baseURL, "http://") || strings.HasPrefix(baseURL, "https://")) {
+				url := baseURL + "/player-lookup/" + targetID
+				responseData.Components = []discordgo.MessageComponent{
+					discordgo.ActionsRow{
+						Components: []discordgo.MessageComponent{
+							&discordgo.Button{
+								Label:    "View on Website",
+								Style:    discordgo.LinkButton,
+								URL:      url,
+								Disabled: false,
 							},
 						},
 					},
-					Files: []*discordgo.File{
-						{
-							Name:        targetID + "_lookup.json",
-							ContentType: "application/json",
-							Reader:      strings.NewReader(string(embedData)),
-						},
-					},
-				},
+				}
+			}
+
+			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: responseData,
 			}); err != nil {
 				return fmt.Errorf("failed to send message with embeds: %w", err)
 			}

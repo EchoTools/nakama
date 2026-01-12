@@ -7,29 +7,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"go.uber.org/zap"
 )
-
-func createTestProfileRegistry(t *testing.T, logger *zap.Logger) (*ProfileCache, error) {
-	runtimeLogger := NewRuntimeGoLogger(logger)
-
-	db := NewDB(t)
-	nk := NewRuntimeGoNakamaModule(logger, db, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-
-	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, metrics, nil)
-
-	return profileRegistry, nil
-}
-
-func TestProfileRegistry(t *testing.T) {
-	consoleLogger := loggerForTest(t)
-
-	profileRegistry, err := createTestProfileRegistry(t, consoleLogger)
-	if err != nil {
-		t.Fatalf("error creating test match registry: %v", err)
-	}
-	_ = profileRegistry
-}
 
 func TestConvertWalletToCosmetics(t *testing.T) {
 	tests := []struct {
