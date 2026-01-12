@@ -240,13 +240,13 @@ func (e *DiscordAppBot) discordGoLogger(msgL int, caller int, format string, a .
 
 func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string, group *GuildGroup) *rate.Limiter {
 	key := strings.Join([]string{userID, groupID}, ":")
-	
+
 	// Use guild group setting if available, otherwise use default
 	ratePerSecond := e.prepareMatchRatePerSecond
 	if group != nil && group.CreateCommandRateLimitPerMinute > 0 {
 		ratePerSecond = rate.Limit(group.CreateCommandRateLimitPerMinute / 60.0) // Convert from per-minute to per-second
 	}
-	
+
 	limiter, _ := e.prepareMatchRateLimiters.LoadOrStore(key, rate.NewLimiter(ratePerSecond, e.prepareMatchBurst))
 	return limiter
 }

@@ -45,7 +45,7 @@ var (
 type RegionFallbackInfo struct {
 	RequestedRegions    []string
 	RequestedRegionCode string // The primary requested region code for display
-	ServerCount         int     // Number of servers in the requested region
+	ServerCount         int    // Number of servers in the requested region
 	ClosestServer       *MatchLabel
 	ClosestRegion       string
 	ClosestLatencyMs    int
