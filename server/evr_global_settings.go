@@ -86,6 +86,7 @@ type GlobalMatchmakingSettings struct {
 	MatchmakingTimeoutSecs         int                     `json:"matchmaking_timeout_secs"`            // The matchmaking timeout
 	FailsafeTimeoutSecs            int                     `json:"failsafe_timeout_secs"`               // The failsafe timeout
 	FallbackTimeoutSecs            int                     `json:"fallback_timeout_secs"`               // The fallback timeout
+	MaxMatchmakingTickets          int                     `json:"max_matchmaking_tickets"`             // Maximum number of matchmaking tickets allowed per interval (default 24)
 	DisableArenaBackfill           bool                    `json:"disable_arena_backfill"`              // Disable backfilling for arena matches
 	ArenaBackfillMaxAgeSecs        int                     `json:"arena_backfill_max_age_secs"`         // Maximum age of arena matches to backfill (default 270s)
 	QueryAddons                    QueryAddons             `json:"query_addons"`                        // Additional queries to add to matchmaking queries
