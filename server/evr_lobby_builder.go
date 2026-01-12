@@ -801,7 +801,6 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	// If requireRegion is true, no region matches found, but we have other servers available,
 	// return a special error with fallback information
 	if requireRegion && len(regions) > 0 && !hasRegionMatch && len(indexes) > 0 {
-
 		// Find the closest available server (first in sorted list)
 		for _, index := range indexes {
 			if index.Label.LobbyType == UnassignedLobby && index.IsReachable {
