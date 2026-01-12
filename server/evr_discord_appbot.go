@@ -575,6 +575,19 @@ var (
 						},
 					},
 				},
+				{
+					Name:        "unlink-player",
+					Description: "unlink a VRML account from a user",
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:        discordgo.ApplicationCommandOptionString,
+							Name:        "identifier",
+							Description: "VRML user ID, player ID, Discord ID, or Discord username",
+							Required:    true,
+						},
+					},
+				},
 			},
 		},
 		{
@@ -1868,6 +1881,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 				}
 
+			case "unlink-player":
+				// Unlink a VRML account from a user
+				return d.handleUnlinkVRML(ctx, logger, s, i, user, member, userID, groupID)
 			}
 			return nil
 		},
