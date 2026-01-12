@@ -246,23 +246,6 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 		if !isGlobalOperator && !gg.IsAuditor(userID) {
 			return simpleInteractionResponse(s, i, "You must be a guild auditor to use this command.")
 		}
-
-	case "unlink-vrml":
-		// Check for VRML badge admin role
-		isMember, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalBadgeAdmins)
-		if err != nil {
-			return fmt.Errorf("failed to check group membership: %w", err)
-		}
-		if !isMember {
-			return simpleInteractionResponse(s, i, "You must be a VRML badge admin to use this command.")
-		}
-
-		gg := d.guildGroupRegistry.Get(groupID)
-		if gg != nil {
-			if err := d.LogInteractionToChannel(i, gg.AuditChannelID); err != nil {
-				logger.Warn("Failed to log interaction to channel")
-			}
-		}
 	}
 	return commandFn(ctx, logger, s, i, user, member, userID, groupID)
 }
