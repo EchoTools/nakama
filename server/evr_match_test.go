@@ -642,6 +642,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 			RoleAlignment:  evr.TeamBlue,
 			Query:          "testquery",
 			SessionExpiry:  1234567890,
+			EntrantID:      uuid.NewV5(uuid.Nil, fmt.Sprintf("entrant-%d", i)), // Generate a stable entrant ID for tests
 		}
 		presences = append(presences, presence)
 	}
@@ -701,7 +702,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 					state.presenceMap = func() map[string]*EvrMatchPresence {
 						m := make(map[string]*EvrMatchPresence)
 						for _, p := range presences[1:3] {
-							m[p.EntrantID(state.ID).String()] = p
+							m[p.GetSessionId()] = p
 						}
 						return m
 					}()
@@ -730,7 +731,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				state.presenceMap = func() map[string]*EvrMatchPresence {
 					m := make(map[string]*EvrMatchPresence)
 					for _, p := range presences[1:3] {
-						m[p.EntrantID(state.ID).String()] = p
+						m[p.GetSessionId()] = p
 					}
 					return m
 				}()
@@ -759,7 +760,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 					state.presenceMap = func() map[string]*EvrMatchPresence {
 						m := make(map[string]*EvrMatchPresence)
 						for _, p := range presences[1:3] {
-							m[p.EntrantID(state.ID).String()] = p
+							m[p.GetSessionId()] = p
 						}
 						return m
 					}()
@@ -782,11 +783,11 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				state.presenceMap = func() map[string]*EvrMatchPresence {
 					m := make(map[string]*EvrMatchPresence)
 					for _, p := range presences[1:3] {
-						m[p.EntrantID(state.ID).String()] = p
+						m[p.GetSessionId()] = p
 					}
 					return m
 				}()
-				state.presenceMap[presences[0].EntrantID(state.ID).String()] = presences[0]
+				state.presenceMap[presences[0].GetSessionId()] = presences[0]
 				state.rebuildCache()
 				return state
 			}(),
@@ -809,7 +810,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 					state.presenceMap = func() map[string]*EvrMatchPresence {
 						m := make(map[string]*EvrMatchPresence)
 						for _, p := range presences[1:3] {
-							m[p.EntrantID(state.ID).String()] = p
+							m[p.GetSessionId()] = p
 						}
 						return m
 					}()
@@ -828,7 +829,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				state.presenceMap = func() map[string]*EvrMatchPresence {
 					m := make(map[string]*EvrMatchPresence)
 					for _, p := range presences[1:3] {
-						m[p.EntrantID(state.ID).String()] = p
+						m[p.GetSessionId()] = p
 					}
 					return m
 				}()
@@ -852,7 +853,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 					state.presenceMap = func() map[string]*EvrMatchPresence {
 						m := make(map[string]*EvrMatchPresence)
 						for _, p := range presences[1:3] {
-							m[p.EntrantID(state.ID).String()] = p
+							m[p.GetSessionId()] = p
 						}
 						return m
 					}()
@@ -871,7 +872,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				state.presenceMap = func() map[string]*EvrMatchPresence {
 					m := make(map[string]*EvrMatchPresence)
 					for _, p := range presences[1:3] {
-						m[p.EntrantID(state.ID).String()] = p
+						m[p.GetSessionId()] = p
 					}
 					return m
 				}()
@@ -1006,7 +1007,7 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 							if i >= 4 {
 								p.RoleAlignment = evr.TeamOrange
 							}
-							m[p.EntrantID(state.ID).String()] = p
+							m[p.GetSessionId()] = p
 						}
 						return m
 					}()
@@ -1041,7 +1042,7 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 							if i >= 4 {
 								p.RoleAlignment = evr.TeamOrange
 							}
-							m[p.EntrantID(state.ID).String()] = p
+							m[p.GetSessionId()] = p
 						}
 						return m
 					}()
