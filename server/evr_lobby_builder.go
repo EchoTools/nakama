@@ -790,29 +790,17 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 
 	// Check if we have any servers in the requested region
 	hasRegionMatch := false
+	serverCount := 0 // Count servers in requested region(s)
 	for _, index := range indexes {
 		if index.IsRegionMatch {
 			hasRegionMatch = true
-			break
+			serverCount++
 		}
 	}
 
 	// If requireRegion is true, no region matches found, but we have other servers available,
 	// return a special error with fallback information
 	if requireRegion && len(regions) > 0 && !hasRegionMatch && len(indexes) > 0 {
-		// Count the number of servers in the requested region(s)
-		serverCount := 0
-		for _, label := range availableServers {
-			for _, region := range label.GameServer.RegionCodes {
-				if region == RegionDefault {
-					continue
-				}
-				if _, ok := regionSet[region]; ok {
-					serverCount++
-					break
-				}
-			}
-		}
 
 		// Find the closest available server (first in sorted list)
 		for _, index := range indexes {

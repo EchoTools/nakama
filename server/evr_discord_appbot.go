@@ -247,7 +247,18 @@ func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string, grou
 		ratePerSecond = rate.Limit(group.CreateCommandRateLimitPerMinute / 60.0) // Convert from per-minute to per-second
 	}
 
-	limiter, _ := e.prepareMatchRateLimiters.LoadOrStore(key, rate.NewLimiter(ratePerSecond, e.prepareMatchBurst))
+	// Try to load existing limiter
+	if limiter, ok := e.prepareMatchRateLimiters.Load(key); ok {
+		// Check if the rate has changed, if so, update it
+		if limiter.Limit() != ratePerSecond {
+			limiter.SetLimit(ratePerSecond)
+		}
+		return limiter
+	}
+
+	// Create a new limiter if none exists
+	limiter := rate.NewLimiter(ratePerSecond, e.prepareMatchBurst)
+	e.prepareMatchRateLimiters.Store(key, limiter)
 	return limiter
 }
 
