@@ -759,7 +759,22 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 }
 
 func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logger, profile *EVRProfile, member *discordgo.Member, guildGroup *GuildGroup) error {
+	groupID := guildGroup.IDStr()
 	displayName := InGameName(member)
+
+	// Check if the current IGN data is locked or an override - if so, don't update from Discord
+	currentIGN := profile.GetGroupIGNData(groupID)
+	if currentIGN.IsLocked || currentIGN.IsOverride {
+		// Don't update locked or overridden display names from Discord
+		return nil
+	}
+
+	// Check if display name actually changed
+	if currentIGN.DisplayName == displayName {
+		// No change needed
+		return nil
+	}
+
 	ownerMap, err := DisplayNameOwnerSearch(ctx, d.nk, []string{displayName})
 	if err != nil {
 		// If it errors, set the display name to their username
@@ -780,16 +795,32 @@ func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logg
 	}
 
 	// This user may use this display name.
+	// Update the EVRProfile's InGameNames map
+	profile.SetGroupDisplayName(groupID, displayName)
+
+	// Persist the updated profile (this also invalidates the ServerProfile cache)
+	if err := EVRProfileUpdate(ctx, d.nk, profile.ID(), profile); err != nil {
+		logger.Error("Error updating EVR profile with new display name", zap.String("display_name", displayName), zap.Error(err))
+		return fmt.Errorf("error updating EVR profile: %w", err)
+	}
+
+	// Update the display name history as well
 	history, err := DisplayNameHistoryLoad(ctx, d.nk, profile.ID())
 	if err != nil {
 		return fmt.Errorf("error loading display name history: %w", err)
 	}
 	// Update and store the display name history.
-	history.Update(guildGroup.IDStr(), displayName, member.User.Username, false)
+	history.Update(groupID, displayName, member.User.Username, false)
 	err = DisplayNameHistoryStore(ctx, d.nk, profile.ID(), history)
 	if err != nil {
 		return fmt.Errorf("error storing display name history: %w", err)
 	}
+
+	logger.Info("Updated display name from Discord",
+		zap.String("user_id", profile.ID()),
+		zap.String("group_id", groupID),
+		zap.String("old_display_name", currentIGN.DisplayName),
+		zap.String("new_display_name", displayName))
 
 	return nil
 }
@@ -854,8 +885,8 @@ func (d *DiscordIntegrator) GuildGroupMemberRemove(ctx context.Context, guildID,
 		md.SetActiveGroupID(uuid.Nil)
 	}
 
-	// Store the account metadata
-	if err := d.nk.AccountUpdateId(ctx, userID, "", md.MarshalMap(), md.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
+	// Store the account metadata and invalidate the ServerProfile cache
+	if err := EVRProfileUpdate(ctx, d.nk, userID, md); err != nil {
 		return fmt.Errorf("failed to update account: %w", err)
 	}
 	return nil
