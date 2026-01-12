@@ -8,7 +8,6 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"go.uber.org/thriftrw/ptr"
 )
 
 // WhereAmIData holds the information about a player's current match
@@ -247,6 +246,15 @@ const (
 	MinActiveMatchSize = 2
 	// MaxMatchListSize is the maximum number of matches to retrieve for server statistics
 	MaxMatchListSize = 100
+)
+
+// Thread management constants
+const (
+	// MaxArchivedThreadsToSearch is the maximum number of archived threads to search
+	// when looking for an existing host thread
+	MaxArchivedThreadsToSearch = 100
+	// ThreadAutoArchiveDuration is the auto-archive duration for host threads in minutes
+	ThreadAutoArchiveDuration = 1440 // 24 hours
 )
 
 // handleReportServerIssue handles the /report-server-issue slash command
@@ -862,7 +870,7 @@ func (d *DiscordAppBot) getOrCreateHostThread(ctx context.Context, logger runtim
 	}
 
 	// Also check archived threads
-	archivedThreads, err := s.ThreadsArchived(channelID, nil, 100)
+	archivedThreads, err := s.ThreadsArchived(channelID, nil, MaxArchivedThreadsToSearch)
 	if err != nil {
 		logger.WithField("error", err).Warn("Failed to list archived threads, continuing with active threads only")
 	} else {
@@ -870,8 +878,9 @@ func (d *DiscordAppBot) getOrCreateHostThread(ctx context.Context, logger runtim
 			if thread.Name == threadName {
 				// Unarchive the thread if it's archived
 				if thread.ThreadMetadata != nil && thread.ThreadMetadata.Archived {
+					archived := false
 					_, err := s.ChannelEditComplex(thread.ID, &discordgo.ChannelEdit{
-						Archived: ptr.Bool(false),
+						Archived: &archived,
 					})
 					if err != nil {
 						logger.WithFields(map[string]any{
@@ -897,7 +906,7 @@ func (d *DiscordAppBot) getOrCreateHostThread(ctx context.Context, logger runtim
 	// Create a thread from the message
 	thread, err := s.MessageThreadStartComplex(channelID, msg.ID, &discordgo.ThreadStart{
 		Name:                threadName,
-		AutoArchiveDuration: 1440, // 24 hours
+		AutoArchiveDuration: ThreadAutoArchiveDuration,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create thread: %w", err)
