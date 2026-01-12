@@ -110,7 +110,18 @@ func (w *WhoAmI) createUserAccountDetailsEmbed() *discordgo.MessageEmbed {
 			guildName := EscapeDiscordMarkdown(gg.Name())
 			// Replace `'s with `\'s`
 			dn = strings.ReplaceAll(dn, "`", "\\`")
-			activeDisplayNames = append(activeDisplayNames, fmt.Sprintf("%s: `%s`", guildName, dn))
+
+			// Add status indicators for override and locked
+			status := ""
+			if ign, exists := w.profile.InGameNames[gid]; exists {
+				if ign.IsLocked {
+					status = " (locked)"
+				} else if ign.IsOverride {
+					status = " (forced)"
+				}
+			}
+
+			activeDisplayNames = append(activeDisplayNames, fmt.Sprintf("%s: `%s`%s", guildName, dn, status))
 
 		}
 	}
