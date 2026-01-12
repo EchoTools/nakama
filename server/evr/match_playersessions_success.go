@@ -16,8 +16,8 @@ type LobbyEntrant struct {
 	EvrID     EvrId     // V2, V3
 	EntrantID uuid.UUID // V2, V3
 	TeamIndex int16     // V3
-	Unk1      uint16    // V3
-	Unk2      uint32    // V3
+	GenIndex  uint16    // V3 - Generation index for entrant state versioning/validation
+	Reserved  uint32    // V3 - Reserved/padding (always 0)
 }
 
 func NewLobbyEntrant(evrId EvrId, matchingSession uuid.UUID, playerSession uuid.UUID, playerSessions []uuid.UUID, teamIndex int16) *LobbyEntrant {
@@ -28,8 +28,8 @@ func NewLobbyEntrant(evrId EvrId, matchingSession uuid.UUID, playerSession uuid.
 		EvrID:      evrId,
 		EntrantID:  playerSession,
 		TeamIndex:  teamIndex,
-		Unk1:       0,
-		Unk2:       0,
+		GenIndex:   0,
+		Reserved:   0,
 	}
 }
 
@@ -86,15 +86,14 @@ func (m *LobbyEntrantsV3) Stream(s *EasyStream) error {
 		func() error { return s.StreamStruct(&m.EvrID) },
 		func() error { return s.StreamGUID(&m.EntrantID) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.TeamIndex) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk1) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk2) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.GenIndex) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Reserved) },
 	})
-
 }
 
 func (m *LobbyEntrantsV3) String() string {
-	return fmt.Sprintf("%T(unk0=%d, evr_id=%v, entrant_id=%s, team_index=%d, unk1=%d, unk2=%d)",
-		m, m.Unk0, m.EvrID, m.EntrantID, m.TeamIndex, m.Unk1, m.Unk2)
+	return fmt.Sprintf("%T(unk0=%d, evr_id=%v, entrant_id=%s, team_index=%d, gen_index=%d, reserved=%d)",
+		m, m.Unk0, m.EvrID, m.EntrantID, m.TeamIndex, m.GenIndex, m.Reserved)
 }
 
 type LobbyEntrantsV2 LobbyEntrant

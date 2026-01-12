@@ -11,12 +11,11 @@ import (
 	"github.com/intinig/go-openskill/types"
 )
 
-var EntrantIDSalt uuid.UUID
-var EntrantIDSaltStr string
+// PartyIDSalt is used as a namespace for generating deterministic party IDs from group names
+var PartyIDSalt uuid.UUID
 
 func init() {
-	EntrantIDSalt = uuid.Must(uuid.NewV4())
-	EntrantIDSaltStr = EntrantIDSalt.String()
+	PartyIDSalt = uuid.Must(uuid.NewV4())
 }
 
 var _ runtime.Presence = &EvrMatchPresence{}
@@ -45,10 +44,11 @@ type EvrMatchPresence struct {
 	Rating            types.Rating `json:"rating,omitempty"`
 	PingMillis        int          `json:"ping_ms,omitempty"`
 	MatchmakingAt     *time.Time   `json:"matchmaking_at,omitempty"` // Whether the player is matchmaking
+	EntrantID         uuid.UUID    `json:"entrant_id,omitempty"`     // Single-use entrant ID for this connection attempt
 }
 
-func (p EvrMatchPresence) EntrantID(matchID MatchID) uuid.UUID {
-	return NewEntrantID(matchID, p.EvrID)
+func (p EvrMatchPresence) GetEntrantID() uuid.UUID {
+	return p.EntrantID
 }
 
 func (p EvrMatchPresence) GetUserId() string {
@@ -104,8 +104,9 @@ func (p EvrMatchPresence) String() string {
 	return string(data)
 }
 
-func NewEntrantID(matchID MatchID, evrID evr.EvrId) uuid.UUID {
-	return uuid.NewV5(matchID.UUID, EntrantIDSaltStr+evrID.String())
+// NewEntrantID generates a new random single-use entrant ID for each connection attempt
+func NewEntrantID() uuid.UUID {
+	return uuid.Must(uuid.NewV4())
 }
 
 func EntrantPresenceFromSession(session Session, partyID uuid.UUID, roleAlignment int, rating types.Rating, groupID string, ping int, query string) (*EvrMatchPresence, error) {
