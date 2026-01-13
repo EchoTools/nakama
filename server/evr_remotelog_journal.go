@@ -29,7 +29,9 @@ func NewUserRemoteLogJournalRegistry(ctx context.Context, logger *zap.Logger, fi
 		queueCh: make(chan map[JournalPresence][]string, 200),
 	}
 
-	// Background goroutine to write logs to disk
+	// Background goroutine to batch logs in memory and write to disk
+	// Logs are collected per session and written when the session ends
+	// or periodically during cleanup cycles
 	go func() {
 		journals := make(map[JournalPresence][]string, 200)
 		writeCh := make(chan JournalPresence, 200)

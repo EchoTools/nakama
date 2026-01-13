@@ -113,8 +113,9 @@ func TestRemoteLogFileWriter_Cleanup(t *testing.T) {
 	require.NoError(t, err)
 	oldFile.Close()
 
-	// Set the file's modification time to be old
-	oldTime := time.Now().Add(-RemoteLogRetentionDays * 24 * time.Hour * 2)
+	// Set the file's modification time to be older than retention period
+	const retentionMultiplier = 2 // Make file twice as old as retention period
+	oldTime := time.Now().Add(-RemoteLogRetentionDays * 24 * time.Hour * retentionMultiplier)
 	err = os.Chtimes(oldFilePath, oldTime, oldTime)
 	require.NoError(t, err)
 

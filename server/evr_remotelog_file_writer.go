@@ -22,6 +22,8 @@ const (
 	RemoteLogRetentionDays = 7
 	// RemoteLogFlushInterval is how often to flush logs to disk
 	RemoteLogFlushInterval = 10 * time.Second
+	// RemoteLogEntryOverheadBytes is the estimated overhead per log entry (JSON structure + metadata)
+	RemoteLogEntryOverheadBytes = 100
 )
 
 // RemoteLogFileEntry represents a single log entry written to disk
@@ -101,8 +103,8 @@ func (w *RemoteLogFileWriter) Write(userID, sessionID uuid.UUID, logs []string) 
 			return fmt.Errorf("failed to write log entry: %w", err)
 		}
 
-		// Track approximate size (each line is approximately len(json) + 1 for newline)
-		w.currentSize += int64(len(entry.Message) + 100) // rough estimate
+		// Track approximate size (JSON overhead + message length)
+		w.currentSize += int64(len(entry.Message) + RemoteLogEntryOverheadBytes)
 	}
 
 	return nil
@@ -125,8 +127,8 @@ func (w *RemoteLogFileWriter) rotate() error {
 	filename := fmt.Sprintf("remotelog-%s.jsonl", timestamp)
 	w.currentPath = filepath.Join(w.baseDir, filename)
 
-	// Open new file
-	file, err := os.OpenFile(w.currentPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// Open new file with restrictive permissions (owner read/write only)
+	file, err := os.OpenFile(w.currentPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
