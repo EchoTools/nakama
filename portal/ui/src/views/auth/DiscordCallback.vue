@@ -90,6 +90,10 @@ const userAvatar = computed(() => {
 async function authenticateWithDiscord(code) {
   try {
     status.value = 'Exchanging authorization code...';
+
+    // Get the redirect URI from environment
+    const DISCORD_REDIRECT_URI = import.meta.env.VITE_DISCORD_REDIRECT_URI;
+
     // Exchange code for tokens with Nakama
     const response = await fetch(`${API_BASE}/account/authenticate/custom?unwrap`, {
       method: 'POST',
@@ -97,7 +101,12 @@ async function authenticateWithDiscord(code) {
         'Content-Type': 'application/json',
         Authorization: `Basic ${btoa(`${NAKAMA_SERVER_KEY}:`)}`,
       },
-      body: JSON.stringify({ id: 'discord:' + code }),
+      body: JSON.stringify({
+        id: 'discord:' + code,
+        vars: {
+          redirect_uri: DISCORD_REDIRECT_URI,
+        },
+      }),
     });
 
     const data = await response.json();
@@ -123,7 +132,8 @@ async function authenticateWithDiscord(code) {
       if (userResponse.ok) {
         const userData = await userResponse.json();
         userState.profile = {
-          id: userData.custom_id || userData.user.id,
+          id: userData.user.id, // Nakama user ID for API calls
+          discordId: userData.custom_id, // Discord ID for display
           username: userData.user.username,
           avatar: userData.user.avatar_url ? extractDiscordAvatarHash(userData.user.avatar_url) : null,
           discriminator: userData.user.display_name,

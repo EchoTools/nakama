@@ -60,20 +60,21 @@ async function fetchUserProfile() {
     if (response.ok) {
       const userData = await response.json();
       user.value = {
-        id: userData.custom_id || userData.user.id,
+        id: userData.user.id, // Nakama user ID for API calls
+        discordId: userData.custom_id, // Discord ID for display
         username: userData.user.username,
         avatarUrl: userData.user.avatar_url || getDefaultAvatar(userData.user.username),
         displayName: userData.user.display_name || userData.user.username,
       };
-      
+
       // Update global userState for header component
       userState.profile = user.value;
       userState.token = token.value;
       userState.refreshToken = refreshToken.value;
-      
+
       // Fetch user's group memberships to check permissions
       await fetchUserGroups(userData.user.id);
-      
+
       sessionStorage.removeItem('authRedirectInProgress');
       status.value = '';
       return;
@@ -101,20 +102,21 @@ async function fetchUserProfile() {
         if (response.ok) {
           const userData = await response.json();
           user.value = {
-            id: userData.custom_id || userData.user.id,
+            id: userData.user.id, // Nakama user ID for API calls
+            discordId: userData.custom_id, // Discord ID for display
             username: userData.user.username,
             avatarUrl: userData.user.avatar_url || getDefaultAvatar(userData.user.username),
             displayName: userData.user.display_name || userData.user.username,
           };
-          
+
           // Update global userState for header component
           userState.profile = user.value;
           userState.token = token.value;
           userState.refreshToken = refreshToken.value;
-          
+
           // Fetch user's group memberships to check permissions
           await fetchUserGroups(userData.user.id);
-          
+
           sessionStorage.removeItem('authRedirectInProgress');
           status.value = '';
           return;
@@ -142,13 +144,13 @@ async function fetchUserGroups(userId) {
         Authorization: `Bearer ${token.value}`,
       },
     });
-    
+
     if (response.ok) {
       const data = await response.json();
       // Filter for system groups (lang_tag = 'system') and member/admin states
       const systemGroups = (data.user_groups || [])
-        .filter(g => g.group?.lang_tag === 'system' && g.state <= 2)
-        .map(g => g.group.name);
+        .filter((g) => g.group?.lang_tag === 'system' && g.state <= 2)
+        .map((g) => g.group.name);
       userState.userGroups = systemGroups;
     }
   } catch (error) {
@@ -157,7 +159,7 @@ async function fetchUserGroups(userId) {
   }
 }
 
-function handleUserLogin(event) {
+async function handleUserLogin(event) {
   console.log('User logged in:', event.detail);
   const { token: newToken, refreshToken: newRefreshToken, user: userData } = event.detail;
   token.value = newToken;
@@ -167,6 +169,10 @@ function handleUserLogin(event) {
   userState.profile = userData;
   userState.token = newToken;
   userState.refreshToken = newRefreshToken;
+
+  // Fetch user's group memberships to check permissions
+  await fetchUserGroups(userData.id);
+
   sessionStorage.removeItem('authRedirectInProgress');
   status.value = '';
 }

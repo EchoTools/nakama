@@ -1,7 +1,7 @@
 <template>
   <div class="max-w-5xl mx-auto mt-10 p-6 bg-gray-900 rounded-lg shadow-lg text-gray-100">
     <h2 class="text-2xl font-bold mb-4">Player Lookup</h2>
-    <form @submit.prevent="lookupPlayer" class="mb-6">
+    <form v-if="!hasResults" @submit.prevent="lookupPlayer" class="mb-6">
       <div class="relative">
         <input
           v-model="userId"
@@ -23,17 +23,22 @@
         >
           <button
             v-for="(result, index) in autocompleteResults"
-            :key="result.user_id"
+            :key="result.user_id + result.display_name"
             type="button"
             :class="[
               'w-full px-3 py-2 text-left hover:bg-gray-700 flex items-center justify-between transition',
-              index === selectedAutocompleteIndex ? 'bg-gray-700' : ''
+              index === selectedAutocompleteIndex ? 'bg-gray-700' : '',
             ]"
             @mousedown.prevent="selectResult(result)"
             @mouseenter="selectedAutocompleteIndex = index"
           >
-            <span class="font-medium">{{ result.display_name }}</span>
-            <span class="text-xs text-gray-500 font-mono">{{ result.user_id }}</span>
+            <div class="flex items-center gap-2">
+              <span class="font-medium">{{ result.display_name }}</span>
+              <span v-if="result.username && result.username !== result.display_name" class="text-xs text-gray-400">
+                ({{ result.username }})
+              </span>
+            </div>
+            <span class="text-xs text-gray-500 font-mono">{{ result.user_id.slice(0, 8) }}…</span>
           </button>
         </div>
       </div>
@@ -135,9 +140,12 @@
             <ul class="list-disc list-inside text-sm space-y-1 mb-3">
               <li v-for="item in alt.items" :key="item">`{{ item }}`</li>
             </ul>
-            
+
             <!-- Enforcement History for this alternate -->
-            <div v-if="canViewEnforcement && alt.enforcement && getAltSuspensions(alt.enforcement).length" class="mt-3 pt-3 border-t border-gray-700">
+            <div
+              v-if="canViewEnforcement && alt.enforcement && getAltSuspensions(alt.enforcement).length"
+              class="mt-3 pt-3 border-t border-gray-700"
+            >
               <div class="text-xs font-semibold text-gray-400 mb-2">Enforcement History:</div>
               <div class="space-y-3">
                 <div
@@ -147,20 +155,20 @@
                 >
                   <div class="text-xs font-medium text-gray-400 mb-2">{{ groupName(grp.groupId) }}</div>
                   <div class="space-y-2">
-                    <div 
-                      v-for="rec in grp.records" 
-                      :key="rec.id" 
+                    <div
+                      v-for="rec in grp.records"
+                      :key="rec.id"
                       :class="[
                         'border-l-2 pl-2 py-1 text-xs',
-                        rec.isVoid ? 'border-gray-600 opacity-60' : getSuspensionBorderColor(rec)
+                        rec.isVoid ? 'border-gray-600 opacity-60' : getSuspensionBorderColor(rec),
                       ]"
                     >
                       <!-- Status -->
                       <div class="flex items-center gap-1 mb-1">
-                        <span 
+                        <span
                           :class="[
                             'px-1.5 py-0.5 text-[10px] font-semibold rounded',
-                            rec.isVoid ? 'bg-gray-700 text-gray-400' : getSuspensionStatusClass(rec)
+                            rec.isVoid ? 'bg-gray-700 text-gray-400' : getSuspensionStatusClass(rec),
                           ]"
                         >
                           {{ rec.isVoid ? 'VOIDED' : getSuspensionStatus(rec) }}
@@ -168,9 +176,7 @@
                         <span v-if="rec.expiry && !rec.isVoid" class="text-xs font-medium text-gray-400">
                           {{ formatDuration(rec.expiry, rec.created_at) }}
                         </span>
-                        <span v-else-if="!rec.isVoid" class="text-xs font-medium text-red-400">
-                          Permanent
-                        </span>
+                        <span v-else-if="!rec.isVoid" class="text-xs font-medium text-red-400">Permanent</span>
                       </div>
 
                       <!-- Suspension Notice -->
@@ -204,20 +210,20 @@
               <div class="font-semibold text-lg">{{ groupName(grp.groupId) }}</div>
             </div>
             <div class="p-4 space-y-4">
-              <div 
-                v-for="rec in grp.records" 
-                :key="rec.id" 
+              <div
+                v-for="rec in grp.records"
+                :key="rec.id"
                 :class="[
                   'border-l-4 pl-4 py-2',
-                  rec.isVoid ? 'border-gray-600 opacity-60' : getSuspensionBorderColor(rec)
+                  rec.isVoid ? 'border-gray-600 opacity-60' : getSuspensionBorderColor(rec),
                 ]"
               >
                 <!-- Status and Duration -->
                 <div class="flex items-center gap-2 mb-2">
-                  <span 
+                  <span
                     :class="[
                       'px-2 py-0.5 text-xs font-semibold rounded',
-                      rec.isVoid ? 'bg-gray-700 text-gray-400' : getSuspensionStatusClass(rec)
+                      rec.isVoid ? 'bg-gray-700 text-gray-400' : getSuspensionStatusClass(rec),
                     ]"
                   >
                     {{ rec.isVoid ? 'VOIDED' : getSuspensionStatus(rec) }}
@@ -225,9 +231,7 @@
                   <span v-if="rec.expiry && !rec.isVoid" class="text-sm font-medium text-gray-300">
                     {{ formatDuration(rec.expiry, rec.created_at) }} suspension
                   </span>
-                  <span v-else-if="!rec.isVoid" class="text-sm font-medium text-red-400">
-                    Permanent
-                  </span>
+                  <span v-else-if="!rec.isVoid" class="text-sm font-medium text-red-400">Permanent</span>
                 </div>
 
                 <!-- Suspension Notice -->
@@ -289,19 +293,37 @@
       </div>
 
       <!-- Past Display Names Card -->
-      <div v-if="pastDisplayNames.length" class="bg-gray-800 rounded-lg p-5">
-        <h3 class="text-xl font-semibold mb-2">Past Display Names</h3>
-        <div class="text-sm space-y-1">
-          <div v-for="name in pastDisplayNames" :key="name" class="flex items-center gap-2">
-            <span class="font-mono">`{{ name }}`</span>
-            <button
-              @click="copyToClipboard(name)"
-              type="button"
-              class="px-2 py-0.5 text-xs rounded bg-gray-700 hover:bg-gray-600 border border-gray-600"
-            >
-              Copy
-            </button>
-            <span v-if="copiedName === name" class="text-green-400 text-xs">Copied</span>
+      <div v-if="pastDisplayNamesByGuild.length" class="bg-gray-800 rounded-lg p-5">
+        <h3 class="text-xl font-semibold mb-4">Past Display Names</h3>
+        <div class="space-y-4">
+          <div
+            v-for="group in pastDisplayNamesByGuild"
+            :key="group.groupId"
+            class="border border-gray-700 rounded-lg bg-gray-900"
+          >
+            <div class="bg-gray-850 px-4 py-2 border-b border-gray-700 rounded-t-lg">
+              <div class="font-semibold">{{ groupName(group.groupId) }}</div>
+            </div>
+            <div class="p-3 space-y-2">
+              <div
+                v-for="entry in group.names"
+                :key="entry.name"
+                class="flex items-center justify-between gap-2 text-sm"
+              >
+                <div class="flex items-center gap-2">
+                  <span class="font-mono text-gray-200">`{{ entry.name }}`</span>
+                  <button
+                    @click="copyToClipboard(entry.name)"
+                    type="button"
+                    class="px-2 py-0.5 text-xs rounded bg-gray-700 hover:bg-gray-600 border border-gray-600"
+                  >
+                    Copy
+                  </button>
+                  <span v-if="copiedName === entry.name" class="text-green-400 text-xs">Copied</span>
+                </div>
+                <span class="text-xs text-gray-500">{{ formatRelative(entry.timestamp) }}</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -361,22 +383,25 @@ onUnmounted(() => {
 });
 
 // Watch for route changes (when navigating between different player lookups)
-watch(() => route.params.identifier, (newIdentifier) => {
-  if (newIdentifier && newIdentifier !== ':identifier' && newIdentifier !== userId.value) {
-    userId.value = decodeURIComponent(newIdentifier);
-    lookupPlayer();
-  } else if (!newIdentifier || newIdentifier === ':identifier') {
-    // Clear the input when navigating to player lookup without an identifier
-    userId.value = '';
-    user.value = null;
-    loginHistory.value = null;
-    journal.value = null;
-    displayNameHistory.value = null;
-    guildGroups.value = null;
-    error.value = '';
-    document.title = originalTitle;
+watch(
+  () => route.params.identifier,
+  (newIdentifier) => {
+    if (newIdentifier && newIdentifier !== ':identifier' && newIdentifier !== userId.value) {
+      userId.value = decodeURIComponent(newIdentifier);
+      lookupPlayer();
+    } else if (!newIdentifier || newIdentifier === ':identifier') {
+      // Clear the input when navigating to player lookup without an identifier
+      userId.value = '';
+      user.value = null;
+      loginHistory.value = null;
+      journal.value = null;
+      displayNameHistory.value = null;
+      guildGroups.value = null;
+      error.value = '';
+      document.title = originalTitle;
+    }
   }
-});
+);
 
 // Autocomplete functions
 async function searchDisplayNames(pattern) {
@@ -389,8 +414,9 @@ async function searchDisplayNames(pattern) {
     const res = await apiGet(`/rpc/account/search?display_name=${encodeURIComponent(pattern.toLowerCase())}&limit=10`);
     if (res.ok) {
       const data = await res.json();
-      autocompleteResults.value = (data.display_name_matches || []).map(item => ({
+      autocompleteResults.value = (data.display_name_matches || []).map((item) => ({
         display_name: item.display_name,
+        username: item.username,
         user_id: item.user_id,
       }));
     }
@@ -432,10 +458,10 @@ function hideAutocompleteDelayed() {
 
 function navigateAutocomplete(direction) {
   if (autocompleteResults.value.length === 0) return;
-  
+
   const maxIndex = autocompleteResults.value.length - 1;
   selectedAutocompleteIndex.value += direction;
-  
+
   if (selectedAutocompleteIndex.value > maxIndex) {
     selectedAutocompleteIndex.value = 0;
   } else if (selectedAutocompleteIndex.value < 0) {
@@ -454,31 +480,31 @@ function selectAutocompleteItem() {
 // Detect the type of identifier and return appropriate query parameter
 // Supports:
 // - UUIDs (8-4-4-4-12 format): user_id
-// - Discord IDs (19-20 digit numbers): discord_id  
+// - Discord IDs (19-20 digit numbers): discord_id
 // - XPIDs (formats like OVR-ORG-123, STM-123, etc.): xp_id
 // - Default: username
 function detectIdentifierType(identifier) {
   const trimmed = identifier.trim();
-  
+
   // UUID pattern (user_id) - 8-4-4-4-12 hexadecimal format
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (uuidPattern.test(trimmed)) {
     return { user_id: trimmed };
   }
-  
+
   // Discord ID pattern (19-20 digits)
   const discordIdPattern = /^[0-9]{19,20}$/;
   if (discordIdPattern.test(trimmed)) {
     return { discord_id: trimmed };
   }
-  
+
   // XPID pattern (e.g., OVR-ORG-123412341234, STM-12345, DMO-12345)
   // Matches alphanumeric segments separated by hyphens
   const xpidPattern = /^[A-Z0-9]+-[A-Z0-9-]+$/i;
   if (xpidPattern.test(trimmed) && trimmed.includes('-')) {
     return { xp_id: trimmed };
   }
-  
+
   // Default to username for anything else
   return { username: trimmed };
 }
@@ -499,33 +525,31 @@ async function lookupPlayer() {
     const identifierParam = detectIdentifierType(input);
     const paramKey = Object.keys(identifierParam)[0];
     const paramValue = identifierParam[paramKey];
-    
+
     const lookupRes = await apiGet(`/rpc/account/lookup?${paramKey}=${encodeURIComponent(paramValue)}`);
     if (!lookupRes.ok) {
       const errorData = await lookupRes.json().catch(() => ({}));
       throw new Error(errorData.message || 'User not found.');
     }
-    
+
     const lookupData = await lookupRes.json();
     const uid = lookupData.id;
-    
+
     if (!uid) throw new Error('User not found.');
-    
+
     // Update URL with the user ID (canonical identifier)
     if (route.params.identifier !== uid) {
       router.push({ name: 'PlayerLookup', params: { identifier: encodeURIComponent(uid) } });
     }
 
     // Build storage object IDs based on permissions
-    const storageObjectIds = [
-      { collection: 'DisplayName', key: 'history', userId: uid },
-    ];
-    
+    const storageObjectIds = [{ collection: 'DisplayName', key: 'history', userId: uid }];
+
     // Only fetch Login/history if user is a Global Operator
     if (canViewLoginHistory.value) {
       storageObjectIds.push({ collection: 'Login', key: 'history', userId: uid });
     }
-    
+
     // Only fetch Enforcement/journal if user is a Global Operator
     if (canViewEnforcement.value) {
       storageObjectIds.push({ collection: 'Enforcement', key: 'journal', userId: uid });
@@ -551,7 +575,7 @@ async function lookupPlayer() {
     const u = (usersJson && usersJson.users && usersJson.users[0]) || null;
     if (!u) throw new Error('User not found.');
     user.value = u;
-    
+
     // Update page title with username
     document.title = `${u.username || u.displayName || uid} - Player Lookup`;
 
@@ -579,13 +603,13 @@ async function lookupPlayer() {
     loginHistory.value = parseStorageValue(byKey.get('Login/history'));
     journal.value = parseStorageValue(byKey.get('Enforcement/journal'));
     displayNameHistory.value = parseStorageValue(byKey.get('DisplayName/history'));
-    
+
     // Resolve alternate account usernames
     await resolveAlternateUsernames();
-    
+
     // Resolve enforcer usernames
     await resolveEnforcerUsernames();
-    
+
     // Fetch enforcement data for alternate accounts
     await fetchAlternateEnforcement();
   } catch (e) {
@@ -599,12 +623,12 @@ async function lookupPlayer() {
 async function resolveAlternateUsernames() {
   const hist = loginHistory.value;
   if (!hist || !hist.alternate_accounts) return;
-  
+
   const userIds = Object.keys(hist.alternate_accounts);
   if (userIds.length === 0) return;
-  
+
   const usernameMap = new Map();
-  
+
   // Fetch usernames in parallel
   await Promise.all(
     userIds.map(async (userId) => {
@@ -622,7 +646,7 @@ async function resolveAlternateUsernames() {
       }
     })
   );
-  
+
   alternateUsernames.value = usernameMap;
 }
 
@@ -630,9 +654,9 @@ async function resolveAlternateUsernames() {
 async function resolveEnforcerUsernames() {
   const j = journal.value;
   if (!j || !j.records) return;
-  
+
   const enforcerIds = new Set();
-  
+
   // Collect all unique enforcer user IDs
   for (const records of Object.values(j.records)) {
     for (const rec of records || []) {
@@ -641,7 +665,7 @@ async function resolveEnforcerUsernames() {
       }
     }
   }
-  
+
   // Also collect void author IDs
   const voidsByGroup = j.voids || j.voidsByRecordIDByGroupID || j.voids_by_record_id_by_group_id || {};
   for (const groupVoids of Object.values(voidsByGroup)) {
@@ -652,11 +676,11 @@ async function resolveEnforcerUsernames() {
       }
     }
   }
-  
+
   if (enforcerIds.size === 0) return;
-  
+
   const usernameMap = new Map();
-  
+
   // Fetch usernames in parallel
   await Promise.all(
     Array.from(enforcerIds).map(async (userId) => {
@@ -674,7 +698,7 @@ async function resolveEnforcerUsernames() {
       }
     })
   );
-  
+
   enforcerUsernames.value = usernameMap;
 }
 
@@ -682,24 +706,22 @@ async function resolveEnforcerUsernames() {
 async function fetchAlternateEnforcement() {
   const hist = loginHistory.value;
   if (!hist || !hist.alternate_accounts) return;
-  
+
   const userIds = Object.keys(hist.alternate_accounts);
   if (userIds.length === 0) return;
-  
+
   const enforcementMap = new Map();
-  
+
   // Fetch enforcement data for each alternate account
   await Promise.all(
     userIds.map(async (altUserId) => {
       try {
         if (!canViewEnforcement.value) return;
-        
+
         const res = await apiPost(`/storage`, {
-          objectIds: [
-            { collection: 'Enforcement', key: 'journal', userId: altUserId },
-          ],
+          objectIds: [{ collection: 'Enforcement', key: 'journal', userId: altUserId }],
         });
-        
+
         if (res.ok) {
           const data = await res.json();
           const objects = (data && data.objects) || [];
@@ -720,7 +742,7 @@ async function fetchAlternateEnforcement() {
       }
     })
   );
-  
+
   alternateEnforcement.value = enforcementMap;
 }
 
@@ -904,7 +926,8 @@ const suspensionsByGroup = computed(() => {
 // Helper function to process enforcement journal for alternate accounts
 function getAltSuspensions(journal) {
   if (!journal || !journal.records) return [];
-  const voidsByGroup = journal.voids || journal.voidsByRecordIDByGroupID || journal.voids_by_record_id_by_group_id || {};
+  const voidsByGroup =
+    journal.voids || journal.voidsByRecordIDByGroupID || journal.voids_by_record_id_by_group_id || {};
   const out = [];
   for (const [groupId, records] of Object.entries(journal.records)) {
     const groupVoids = voidsByGroup[groupId] || {};
@@ -1015,22 +1038,38 @@ function lookupAlternateAccount(identifier) {
   router.push({ name: 'PlayerLookup', params: { identifier: encodeURIComponent(identifier) } });
 }
 
-// Past display names (top ~10 unique, most recent)
-const pastDisplayNames = computed(() => {
+// Past display names grouped by guild
+const pastDisplayNamesByGuild = computed(() => {
   const h = displayNameHistory.value;
   if (!h) return [];
-  const names = new Map(); // name -> latest time
   const histories = h.history || {};
+  const result = [];
+
   for (const [groupId, nameMap] of Object.entries(histories)) {
-    for (const [name, ts] of Object.entries(nameMap || {})) {
-      const prev = names.get(name);
-      if (!prev || new Date(ts) > new Date(prev)) names.set(name, ts);
+    if (!nameMap || Object.keys(nameMap).length === 0) continue;
+
+    // Sort names by timestamp, most recent first
+    const names = Object.entries(nameMap)
+      .map(([name, ts]) => ({ name, timestamp: ts }))
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      .slice(0, 10); // Limit to 10 per guild
+
+    if (names.length > 0) {
+      result.push({
+        groupId,
+        names,
+      });
     }
   }
-  const arr = Array.from(names.entries())
-    .sort((a, b) => new Date(b[1]) - new Date(a[1]))
-    .map(([name]) => name);
-  return arr.slice(0, 10);
+
+  // Sort guilds by the most recent name usage
+  result.sort((a, b) => {
+    const aLatest = a.names[0]?.timestamp || '';
+    const bLatest = b.names[0]?.timestamp || '';
+    return new Date(bLatest) - new Date(aLatest);
+  });
+
+  return result;
 });
 
 // Clipboard helpers
