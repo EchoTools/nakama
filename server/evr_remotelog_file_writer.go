@@ -269,26 +269,30 @@ func (w *RemoteLogFileWriter) Read(userID uuid.UUID, since time.Time) ([]RemoteL
 		}
 
 		path := filepath.Join(w.baseDir, entry.Name())
-		file, err := os.Open(path)
-		if err != nil {
-			w.logger.Warn("Failed to open log file for reading", zap.String("path", path), zap.Error(err))
-			continue
-		}
-		defer file.Close()
-
-		decoder := json.NewDecoder(file)
-		for decoder.More() {
-			var logEntry RemoteLogFileEntry
-			if err := decoder.Decode(&logEntry); err != nil {
-				w.logger.Warn("Failed to decode log entry", zap.Error(err))
-				continue
+		
+		// Read and process this file
+		func() {
+			file, err := os.Open(path)
+			if err != nil {
+				w.logger.Warn("Failed to open log file for reading", zap.String("path", path), zap.Error(err))
+				return
 			}
+			defer file.Close()
 
-			// Filter by user ID and timestamp
-			if logEntry.UserID == userIDStr && logEntry.Timestamp.After(since) {
-				results = append(results, logEntry)
+			decoder := json.NewDecoder(file)
+			for decoder.More() {
+				var logEntry RemoteLogFileEntry
+				if err := decoder.Decode(&logEntry); err != nil {
+					w.logger.Warn("Failed to decode log entry", zap.Error(err))
+					continue
+				}
+
+				// Filter by user ID and timestamp
+				if logEntry.UserID == userIDStr && logEntry.Timestamp.After(since) {
+					results = append(results, logEntry)
+				}
 			}
-		}
+		}()
 	}
 
 	return results, nil
