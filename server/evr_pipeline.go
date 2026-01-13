@@ -144,7 +144,13 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		logger.Warn("SkillBasedMatchmaker not initialized, post-matchmaker backfill disabled")
 	}
 
-	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(ctx, logger, nk, sessionRegistry)
+	// Create file-based remote log writer
+	remoteLogFileWriter, err := NewRemoteLogFileWriter(ctx, logger, config.GetDataDir())
+	if err != nil {
+		logger.Fatal("Failed to create remote log file writer", zap.Error(err))
+	}
+
+	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(ctx, logger, remoteLogFileWriter, sessionRegistry)
 
 	// Connect to the redis server
 	var redisClient *redis.Client
