@@ -101,18 +101,25 @@ func (w *RemoteLogFileWriter) Write(userID, sessionID uuid.UUID, logs []string) 
 			Message:   msg,
 		}
 
+		// Encode to get actual size
+		entryJSON, err := json.Marshal(entry)
+		if err != nil {
+			return fmt.Errorf("failed to marshal log entry: %w", err)
+		}
+
 		if err := encoder.Encode(entry); err != nil {
 			return fmt.Errorf("failed to write log entry: %w", err)
 		}
 
-		// Track approximate size (JSON overhead + message length)
-		w.currentSize += int64(len(entry.Message) + RemoteLogEntryOverheadBytes)
+		// Track actual size including newline
+		w.currentSize += int64(len(entryJSON) + 1)
 	}
 
 	return nil
 }
 
 // rotate closes the current file and opens a new one
+// Must be called with w.mu held (write lock)
 func (w *RemoteLogFileWriter) rotate() error {
 	// Close current file if open
 	if w.currentFile != nil {
@@ -196,6 +203,10 @@ func (w *RemoteLogFileWriter) cleanupRoutine(ctx context.Context) {
 
 // cleanup removes log files older than the retention period
 func (w *RemoteLogFileWriter) cleanup() {
+	w.mu.RLock()
+	currentPath := w.currentPath
+	w.mu.RUnlock()
+
 	entries, err := os.ReadDir(w.baseDir)
 	if err != nil {
 		w.logger.Warn("Failed to read remote log directory", zap.Error(err))
@@ -215,6 +226,13 @@ func (w *RemoteLogFileWriter) cleanup() {
 			continue
 		}
 
+		path := filepath.Join(w.baseDir, entry.Name())
+
+		// Never remove the current log file
+		if path == currentPath {
+			continue
+		}
+
 		info, err := entry.Info()
 		if err != nil {
 			w.logger.Warn("Failed to get file info", zap.String("file", entry.Name()), zap.Error(err))
@@ -223,7 +241,6 @@ func (w *RemoteLogFileWriter) cleanup() {
 
 		// Remove files older than retention period
 		if info.ModTime().Before(cutoff) {
-			path := filepath.Join(w.baseDir, entry.Name())
 			if err := os.Remove(path); err != nil {
 				w.logger.Warn("Failed to remove old log file", zap.String("path", path), zap.Error(err))
 			} else {
