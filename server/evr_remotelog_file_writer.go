@@ -274,6 +274,7 @@ func (w *RemoteLogFileWriter) Read(userID uuid.UUID, since time.Time) ([]RemoteL
 			w.logger.Warn("Failed to open log file for reading", zap.String("path", path), zap.Error(err))
 			continue
 		}
+		defer file.Close()
 
 		decoder := json.NewDecoder(file)
 		for decoder.More() {
@@ -287,10 +288,6 @@ func (w *RemoteLogFileWriter) Read(userID uuid.UUID, since time.Time) ([]RemoteL
 			if logEntry.UserID == userIDStr && logEntry.Timestamp.After(since) {
 				results = append(results, logEntry)
 			}
-		}
-
-		if err := file.Close(); err != nil {
-			w.logger.Warn("Failed to close log file after reading", zap.String("path", path), zap.Error(err))
 		}
 	}
 

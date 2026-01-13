@@ -45,7 +45,7 @@ Main component responsible for writing logs to disk:
 - Provides read access for debugging
 - Thread-safe operations with mutex protection
 
-#### Updated `UserLogJouralRegistry` (`evr_remotelog_journal.go`)
+#### Updated `UserLogJournalRegistry` (`evr_remotelog_journal.go`)
 Updated to use file-based storage instead of database storage:
 - Removed dependency on `runtime.NakamaModule` for storage operations
 - Uses `RemoteLogFileWriter` for disk operations
@@ -115,7 +115,7 @@ Logs are stored in JSON Lines format (one JSON object per line):
 - Monitor disk space in `<data_dir>/remotelogs/` directory
 
 ### Debugging Access
-Remote logs can be accessed programmatically via the `UserLogJouralRegistry.Read()` method for debugging purposes.
+Remote logs can be accessed programmatically via the `UserLogJournalRegistry.Read()` method for debugging purposes.
 
 ## Testing
 
