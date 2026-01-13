@@ -804,7 +804,8 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 		// Find the closest available server (first in sorted list)
 		for _, index := range indexes {
 			if index.Label.LobbyType == UnassignedLobby && index.IsReachable {
-				// Get the region of the closest server (prefer non-default regions)
+				// Get the region of the closest server
+				// Prefer non-default regions, but fallback to "default" if none exist
 				closestRegion := "default"
 				if len(index.Label.GameServer.RegionCodes) > 0 {
 					for _, r := range index.Label.GameServer.RegionCodes {
