@@ -5,6 +5,7 @@ import { ref, onMounted, computed } from 'vue';
 import { useRouter } from 'vue-router'; // Import useRouter
 import { useAvatar } from './composables/useAvatar.js';
 import { useDiscordOAuth } from './composables/useDiscordOAuth.js';
+import { userState } from './composables/useUserState.js';
 
 const API_BASE = import.meta.env.VITE_NAKAMA_API_BASE;
 const NAKAMA_SERVER_KEY = import.meta.env.VITE_NAKAMA_SERVER_KEY;
@@ -64,6 +65,15 @@ async function fetchUserProfile() {
         avatarUrl: userData.user.avatar_url || getDefaultAvatar(userData.user.username),
         displayName: userData.user.display_name || userData.user.username,
       };
+      
+      // Update global userState for header component
+      userState.profile = user.value;
+      userState.token = token.value;
+      userState.refreshToken = refreshToken.value;
+      
+      // Fetch user's group memberships to check permissions
+      await fetchUserGroups(userData.user.id);
+      
       sessionStorage.removeItem('authRedirectInProgress');
       status.value = '';
       return;
@@ -96,6 +106,15 @@ async function fetchUserProfile() {
             avatarUrl: userData.user.avatar_url || getDefaultAvatar(userData.user.username),
             displayName: userData.user.display_name || userData.user.username,
           };
+          
+          // Update global userState for header component
+          userState.profile = user.value;
+          userState.token = token.value;
+          userState.refreshToken = refreshToken.value;
+          
+          // Fetch user's group memberships to check permissions
+          await fetchUserGroups(userData.user.id);
+          
           sessionStorage.removeItem('authRedirectInProgress');
           status.value = '';
           return;
@@ -115,12 +134,39 @@ async function fetchUserProfile() {
   }
 }
 
+async function fetchUserGroups(userId) {
+  try {
+    const response = await fetch(`${API_BASE}/user/${userId}/group?limit=100`, {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token.value}`,
+      },
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      // Filter for system groups (lang_tag = 'system') and member/admin states
+      const systemGroups = (data.user_groups || [])
+        .filter(g => g.group?.lang_tag === 'system' && g.state <= 2)
+        .map(g => g.group.name);
+      userState.userGroups = systemGroups;
+    }
+  } catch (error) {
+    console.error('Failed to fetch user groups:', error);
+    userState.userGroups = [];
+  }
+}
+
 function handleUserLogin(event) {
   console.log('User logged in:', event.detail);
   const { token: newToken, refreshToken: newRefreshToken, user: userData } = event.detail;
   token.value = newToken;
   refreshToken.value = newRefreshToken;
   user.value = userData;
+  // Update global userState for header component
+  userState.profile = userData;
+  userState.token = newToken;
+  userState.refreshToken = newRefreshToken;
   sessionStorage.removeItem('authRedirectInProgress');
   status.value = '';
 }
@@ -136,6 +182,7 @@ function logout() {
   token.value = null;
   refreshToken.value = null;
   user.value = null;
+  userState.userGroups = [];
   sessionStorage.removeItem('authRedirectInProgress');
   status.value = 'You have been successfully logged out.';
 }

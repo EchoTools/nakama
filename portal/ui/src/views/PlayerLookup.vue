@@ -2,13 +2,41 @@
   <div class="max-w-5xl mx-auto mt-10 p-6 bg-gray-900 rounded-lg shadow-lg text-gray-100">
     <h2 class="text-2xl font-bold mb-4">Player Lookup</h2>
     <form @submit.prevent="lookupPlayer" class="mb-6">
-      <input
-        v-model="userId"
-        type="text"
-        placeholder="Username, XPID, User ID, or Discord ID"
-        class="w-full px-3 py-2 rounded bg-gray-800 text-white border border-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500 mb-4"
-        required
-      />
+      <div class="relative">
+        <input
+          v-model="userId"
+          type="text"
+          placeholder="Username, XPID, User ID, or Discord ID"
+          class="w-full px-3 py-2 rounded bg-gray-800 text-white border border-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500 mb-4"
+          required
+          @input="onSearchInput"
+          @focus="showAutocomplete = true"
+          @blur="hideAutocompleteDelayed"
+          @keydown.down.prevent="navigateAutocomplete(1)"
+          @keydown.up.prevent="navigateAutocomplete(-1)"
+          @keydown.enter.prevent="selectAutocompleteItem"
+        />
+        <!-- Autocomplete Dropdown -->
+        <div
+          v-if="showAutocomplete && autocompleteResults.length > 0"
+          class="absolute z-10 w-full bg-gray-800 border border-gray-700 rounded-lg mt-[-12px] max-h-64 overflow-y-auto shadow-xl"
+        >
+          <button
+            v-for="(result, index) in autocompleteResults"
+            :key="result.user_id"
+            type="button"
+            :class="[
+              'w-full px-3 py-2 text-left hover:bg-gray-700 flex items-center justify-between transition',
+              index === selectedAutocompleteIndex ? 'bg-gray-700' : ''
+            ]"
+            @mousedown.prevent="selectResult(result)"
+            @mouseenter="selectedAutocompleteIndex = index"
+          >
+            <span class="font-medium">{{ result.display_name }}</span>
+            <span class="text-xs text-gray-500 font-mono">{{ result.user_id }}</span>
+          </button>
+        </div>
+      </div>
       <button
         type="submit"
         class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition font-semibold"
@@ -39,6 +67,10 @@
             <div class="text-base">{{ user?.username || '—' }}</div>
           </div>
           <div>
+            <div class="text-sm text-gray-400">Discord ID</div>
+            <div class="text-base font-mono">{{ user?.customId || '—' }}</div>
+          </div>
+          <div>
             <div class="text-sm text-gray-400">Created</div>
             <div class="text-base">{{ formatDate(user?.createTime) }}</div>
           </div>
@@ -50,9 +82,12 @@
 
         <div class="mt-4">
           <div class="text-sm text-gray-400 mb-1">Recent Logins</div>
+          <div v-if="!canViewLoginHistory" class="text-gray-500 text-sm italic">
+            Access restricted - Global Operator role required
+          </div>
           <div
+            v-else-if="recentLoginsText"
             class="whitespace-pre-wrap font-mono text-sm bg-gray-900 rounded p-3 border border-gray-700"
-            v-if="recentLoginsText"
           >
             {{ recentLoginsText }}
           </div>
@@ -80,7 +115,7 @@
       </div>
 
       <!-- Alternates Card -->
-      <div v-if="alternateAccounts.length" class="bg-gray-800 rounded-lg p-5">
+      <div v-if="canViewLoginHistory && alternateAccounts.length" class="bg-gray-800 rounded-lg p-5">
         <h3 class="text-xl font-semibold mb-2">Suspected Alternate Accounts</h3>
         <div class="space-y-4">
           <div
@@ -88,49 +123,167 @@
             :key="alt.userId"
             class="border border-gray-700 rounded p-3 bg-gray-900"
           >
-            <div class="font-mono text-sm mb-2">{{ alt.userId }}</div>
-            <ul class="list-disc list-inside text-sm space-y-1">
+            <div class="text-sm mb-2">
+              <button
+                @click="lookupAlternateAccount(alt.username || alt.userId)"
+                class="text-blue-400 hover:text-blue-300 underline font-medium"
+              >
+                {{ alt.username || alt.userId }}
+              </button>
+              <span v-if="alt.username" class="text-gray-500 font-mono text-xs ml-2">({{ alt.userId }})</span>
+            </div>
+            <ul class="list-disc list-inside text-sm space-y-1 mb-3">
               <li v-for="item in alt.items" :key="item">`{{ item }}`</li>
             </ul>
+            
+            <!-- Enforcement History for this alternate -->
+            <div v-if="canViewEnforcement && alt.enforcement && getAltSuspensions(alt.enforcement).length" class="mt-3 pt-3 border-t border-gray-700">
+              <div class="text-xs font-semibold text-gray-400 mb-2">Enforcement History:</div>
+              <div class="space-y-3">
+                <div
+                  v-for="grp in getAltSuspensions(alt.enforcement)"
+                  :key="grp.groupId"
+                  class="bg-gray-850 rounded px-3 py-2"
+                >
+                  <div class="text-xs font-medium text-gray-400 mb-2">{{ groupName(grp.groupId) }}</div>
+                  <div class="space-y-2">
+                    <div 
+                      v-for="rec in grp.records" 
+                      :key="rec.id" 
+                      :class="[
+                        'border-l-2 pl-2 py-1 text-xs',
+                        rec.isVoid ? 'border-gray-600 opacity-60' : getSuspensionBorderColor(rec)
+                      ]"
+                    >
+                      <!-- Status -->
+                      <div class="flex items-center gap-1 mb-1">
+                        <span 
+                          :class="[
+                            'px-1.5 py-0.5 text-[10px] font-semibold rounded',
+                            rec.isVoid ? 'bg-gray-700 text-gray-400' : getSuspensionStatusClass(rec)
+                          ]"
+                        >
+                          {{ rec.isVoid ? 'VOIDED' : getSuspensionStatus(rec) }}
+                        </span>
+                        <span v-if="rec.expiry && !rec.isVoid" class="text-xs font-medium text-gray-400">
+                          {{ formatDuration(rec.expiry, rec.created_at) }}
+                        </span>
+                        <span v-else-if="!rec.isVoid" class="text-xs font-medium text-red-400">
+                          Permanent
+                        </span>
+                      </div>
+
+                      <!-- Suspension Notice -->
+                      <div v-if="rec.suspension_notice" class="mb-1">
+                        <div class="text-gray-300 text-xs">{{ rec.suspension_notice }}</div>
+                      </div>
+
+                      <!-- Date -->
+                      <div class="text-[10px] text-gray-500">
+                        {{ formatDate(rec.created_at) }} by {{ getEnforcerName(rec) }}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- Suspensions Card -->
-      <div v-if="suspensionsByGroup.length" class="bg-gray-800 rounded-lg p-5">
-        <h3 class="text-xl font-semibold mb-2">Suspensions</h3>
+      <div v-if="canViewEnforcement && suspensionsByGroup.length" class="bg-gray-800 rounded-lg p-5">
+        <h3 class="text-xl font-semibold mb-4">Enforcement History</h3>
         <div class="space-y-4">
           <div
             v-for="grp in suspensionsByGroup"
             :key="grp.groupId"
-            class="border border-gray-700 rounded p-3 bg-gray-900"
+            class="border border-gray-700 rounded-lg bg-gray-900"
           >
-            <div class="font-semibold mb-2">{{ groupName(grp.groupId) }}</div>
-            <ul class="space-y-3">
-              <li v-for="rec in grp.records" :key="rec.id" class="text-sm">
-                <div :class="['text-gray-300', rec.isVoid ? 'line-through' : '']">
-                  {{ formatRelative(rec.created_at) }} by
-                  <span class="font-mono">
-                    {{ rec.enforcer_discord_id ? '@' + rec.enforcer_discord_id : rec.enforcer_user_id }}
+            <div class="bg-gray-850 px-4 py-2 border-b border-gray-700 rounded-t-lg">
+              <div class="font-semibold text-lg">{{ groupName(grp.groupId) }}</div>
+            </div>
+            <div class="p-4 space-y-4">
+              <div 
+                v-for="rec in grp.records" 
+                :key="rec.id" 
+                :class="[
+                  'border-l-4 pl-4 py-2',
+                  rec.isVoid ? 'border-gray-600 opacity-60' : getSuspensionBorderColor(rec)
+                ]"
+              >
+                <!-- Status and Duration -->
+                <div class="flex items-center gap-2 mb-2">
+                  <span 
+                    :class="[
+                      'px-2 py-0.5 text-xs font-semibold rounded',
+                      rec.isVoid ? 'bg-gray-700 text-gray-400' : getSuspensionStatusClass(rec)
+                    ]"
+                  >
+                    {{ rec.isVoid ? 'VOIDED' : getSuspensionStatus(rec) }}
                   </span>
-                  <span v-if="rec.expiry">
-                    for
-                    <strong>{{ formatDuration(rec.expiry, rec.created_at) }}</strong>
-                    ({{ expiryText(rec.expiry) }})
+                  <span v-if="rec.expiry && !rec.isVoid" class="text-sm font-medium text-gray-300">
+                    {{ formatDuration(rec.expiry, rec.created_at) }} suspension
+                  </span>
+                  <span v-else-if="!rec.isVoid" class="text-sm font-medium text-red-400">
+                    Permanent
                   </span>
                 </div>
-                <div v-if="rec.suspension_notice" class="font-mono">- `{{ rec.suspension_notice }}`</div>
-                <div v-if="rec.notes" class="suspensionitalic text-gray-400">- *{{ rec.notes }}*</div>
-                <div v-if="rec.isVoid" class="text-gray-400">
-                  - voided by
-                  <span class="font-mono">
-                    {{ rec.void.discord_id ? '@' + rec.void.discord_id : rec.void.user_id }}
-                  </span>
-                  {{ formatRelative(rec.void.voided_at) }}
-                  <span v-if="rec.void.notes" class="italic">*{{ rec.void.notes }}*</span>
+
+                <!-- Suspension Notice -->
+                <div v-if="rec.suspension_notice" class="mb-2">
+                  <div class="text-sm font-medium text-gray-400 mb-1">Reason:</div>
+                  <div class="text-base text-gray-200 bg-gray-800 rounded px-3 py-2 border border-gray-700">
+                    {{ rec.suspension_notice }}
+                  </div>
                 </div>
-              </li>
-            </ul>
+
+                <!-- Metadata -->
+                <div class="text-sm text-gray-400 space-y-1">
+                  <div class="flex items-center gap-2">
+                    <span class="text-gray-500">Issued:</span>
+                    <span>{{ formatDate(rec.created_at) }}</span>
+                    <span class="text-gray-500">({{ formatRelative(rec.created_at) }})</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-gray-500">By:</span>
+                    <span class="font-mono text-blue-400">
+                      {{ getEnforcerName(rec) }}
+                    </span>
+                  </div>
+                  <div v-if="rec.expiry" class="flex items-center gap-2">
+                    <span class="text-gray-500">{{ isExpired(rec.expiry) ? 'Expired' : 'Expires' }}:</span>
+                    <span>{{ formatDate(rec.expiry) }}</span>
+                    <span :class="[isExpired(rec.expiry) ? 'text-gray-500' : 'text-yellow-400']">
+                      ({{ expiryText(rec.expiry) }})
+                    </span>
+                  </div>
+                </div>
+
+                <!-- Moderator Notes -->
+                <div v-if="rec.notes" class="mt-2 text-sm">
+                  <span class="text-gray-500">Notes:</span>
+                  <span class="text-gray-400 italic ml-2">{{ rec.notes }}</span>
+                </div>
+
+                <!-- Void Information -->
+                <div v-if="rec.isVoid" class="mt-3 pt-3 border-t border-gray-700">
+                  <div class="text-sm text-gray-400">
+                    <div class="flex items-center gap-2 mb-1">
+                      <span class="text-gray-500 font-medium">Voided by:</span>
+                      <span class="font-mono text-gray-400">
+                        {{ getVoidAuthorName(rec.void) }}
+                      </span>
+                      <span class="text-gray-600">•</span>
+                      <span>{{ formatRelative(rec.void.voided_at) }}</span>
+                    </div>
+                    <div v-if="rec.void.notes" class="text-gray-500 italic ml-2">
+                      {{ rec.void.notes }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -157,8 +310,13 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue';
-import { get as apiGet, post as apiPost, callRpc } from '../lib/apiClient.js';
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { get as apiGet, post as apiPost } from '../lib/apiClient.js';
+import { userState } from '../composables/useUserState.js';
+
+const route = useRoute();
+const router = useRouter();
 
 const userId = ref('');
 const loading = ref(false);
@@ -168,8 +326,162 @@ const loginHistory = ref(null);
 const journal = ref(null);
 const displayNameHistory = ref(null);
 const guildGroups = ref(null);
+const alternateUsernames = ref(new Map()); // Map of userId -> username
+const enforcerUsernames = ref(new Map()); // Map of userId -> username for enforcers
+const alternateEnforcement = ref(new Map()); // Map of userId -> enforcement journal
+const autocompleteResults = ref([]);
+const showAutocomplete = ref(false);
+const selectedAutocompleteIndex = ref(-1);
+let autocompleteTimeout = null;
 
 const API_BASE = import.meta.env.VITE_NAKAMA_API_BASE;
+
+// Permission checks
+const isGlobalOperator = computed(() => {
+  return userState.userGroups.includes('Global Operators');
+});
+
+const canViewLoginHistory = computed(() => isGlobalOperator.value);
+const canViewEnforcement = computed(() => isGlobalOperator.value);
+
+// Store original title to restore on unmount
+const originalTitle = document.title;
+
+// Load identifier from route on mount
+onMounted(() => {
+  if (route.params.identifier && route.params.identifier !== ':identifier') {
+    userId.value = decodeURIComponent(route.params.identifier);
+    lookupPlayer();
+  }
+});
+
+// Restore original title on unmount
+onUnmounted(() => {
+  document.title = originalTitle;
+});
+
+// Watch for route changes (when navigating between different player lookups)
+watch(() => route.params.identifier, (newIdentifier) => {
+  if (newIdentifier && newIdentifier !== ':identifier' && newIdentifier !== userId.value) {
+    userId.value = decodeURIComponent(newIdentifier);
+    lookupPlayer();
+  } else if (!newIdentifier || newIdentifier === ':identifier') {
+    // Clear the input when navigating to player lookup without an identifier
+    userId.value = '';
+    user.value = null;
+    loginHistory.value = null;
+    journal.value = null;
+    displayNameHistory.value = null;
+    guildGroups.value = null;
+    error.value = '';
+    document.title = originalTitle;
+  }
+});
+
+// Autocomplete functions
+async function searchDisplayNames(pattern) {
+  if (!pattern || pattern.length < 2) {
+    autocompleteResults.value = [];
+    return;
+  }
+
+  try {
+    const res = await apiGet(`/rpc/account/search?display_name=${encodeURIComponent(pattern.toLowerCase())}&limit=10`);
+    if (res.ok) {
+      const data = await res.json();
+      autocompleteResults.value = (data.display_name_matches || []).map(item => ({
+        display_name: item.display_name,
+        user_id: item.user_id,
+      }));
+    }
+  } catch (e) {
+    console.warn('Autocomplete search failed:', e);
+    autocompleteResults.value = [];
+  }
+}
+
+function onSearchInput() {
+  // Clear existing timeout
+  if (autocompleteTimeout) {
+    clearTimeout(autocompleteTimeout);
+  }
+
+  // Reset selection
+  selectedAutocompleteIndex.value = -1;
+
+  // Debounce the search
+  autocompleteTimeout = setTimeout(() => {
+    searchDisplayNames(userId.value);
+  }, 300);
+}
+
+function selectResult(result) {
+  userId.value = result.display_name;
+  showAutocomplete.value = false;
+  autocompleteResults.value = [];
+  selectedAutocompleteIndex.value = -1;
+  lookupPlayer();
+}
+
+function hideAutocompleteDelayed() {
+  // Delay hiding to allow click events to fire
+  setTimeout(() => {
+    showAutocomplete.value = false;
+  }, 200);
+}
+
+function navigateAutocomplete(direction) {
+  if (autocompleteResults.value.length === 0) return;
+  
+  const maxIndex = autocompleteResults.value.length - 1;
+  selectedAutocompleteIndex.value += direction;
+  
+  if (selectedAutocompleteIndex.value > maxIndex) {
+    selectedAutocompleteIndex.value = 0;
+  } else if (selectedAutocompleteIndex.value < 0) {
+    selectedAutocompleteIndex.value = maxIndex;
+  }
+}
+
+function selectAutocompleteItem() {
+  if (selectedAutocompleteIndex.value >= 0 && selectedAutocompleteIndex.value < autocompleteResults.value.length) {
+    selectResult(autocompleteResults.value[selectedAutocompleteIndex.value]);
+  } else {
+    lookupPlayer();
+  }
+}
+
+// Detect the type of identifier and return appropriate query parameter
+// Supports:
+// - UUIDs (8-4-4-4-12 format): user_id
+// - Discord IDs (19-20 digit numbers): discord_id  
+// - XPIDs (formats like OVR-ORG-123, STM-123, etc.): xp_id
+// - Default: username
+function detectIdentifierType(identifier) {
+  const trimmed = identifier.trim();
+  
+  // UUID pattern (user_id) - 8-4-4-4-12 hexadecimal format
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (uuidPattern.test(trimmed)) {
+    return { user_id: trimmed };
+  }
+  
+  // Discord ID pattern (19-20 digits)
+  const discordIdPattern = /^[0-9]{19,20}$/;
+  if (discordIdPattern.test(trimmed)) {
+    return { discord_id: trimmed };
+  }
+  
+  // XPID pattern (e.g., OVR-ORG-123412341234, STM-12345, DMO-12345)
+  // Matches alphanumeric segments separated by hyphens
+  const xpidPattern = /^[A-Z0-9]+-[A-Z0-9-]+$/i;
+  if (xpidPattern.test(trimmed) && trimmed.includes('-')) {
+    return { xp_id: trimmed };
+  }
+  
+  // Default to username for anything else
+  return { username: trimmed };
+}
 
 async function lookupPlayer() {
   error.value = '';
@@ -177,20 +489,54 @@ async function lookupPlayer() {
   loginHistory.value = null;
   journal.value = null;
   displayNameHistory.value = null;
+  document.title = 'Player Lookup'; // Reset title during lookup
   loading.value = true;
   try {
-    const uid = userId.value.trim();
-    if (!uid) throw new Error('Please enter a user ID.');
+    const input = userId.value.trim();
+    if (!input) throw new Error('Please enter a username, XPID, User ID, or Discord ID.');
 
+    // First, use the account/lookup RPC to resolve the identifier to a user ID
+    const identifierParam = detectIdentifierType(input);
+    const paramKey = Object.keys(identifierParam)[0];
+    const paramValue = identifierParam[paramKey];
+    
+    const lookupRes = await apiGet(`/rpc/account/lookup?${paramKey}=${encodeURIComponent(paramValue)}`);
+    if (!lookupRes.ok) {
+      const errorData = await lookupRes.json().catch(() => ({}));
+      throw new Error(errorData.message || 'User not found.');
+    }
+    
+    const lookupData = await lookupRes.json();
+    const uid = lookupData.id;
+    
+    if (!uid) throw new Error('User not found.');
+    
+    // Update URL with the user ID (canonical identifier)
+    if (route.params.identifier !== uid) {
+      router.push({ name: 'PlayerLookup', params: { identifier: encodeURIComponent(uid) } });
+    }
+
+    // Build storage object IDs based on permissions
+    const storageObjectIds = [
+      { collection: 'DisplayName', key: 'history', userId: uid },
+    ];
+    
+    // Only fetch Login/history if user is a Global Operator
+    if (canViewLoginHistory.value) {
+      storageObjectIds.push({ collection: 'Login', key: 'history', userId: uid });
+    }
+    
+    // Only fetch Enforcement/journal if user is a Global Operator
+    if (canViewEnforcement.value) {
+      storageObjectIds.push({ collection: 'Enforcement', key: 'journal', userId: uid });
+    }
+
+    // Now fetch user details, groups, and storage using the resolved user ID
     const [userRes, groupsRes, storageRes] = await Promise.all([
       apiGet(`/user?ids=${encodeURIComponent(uid)}`),
       apiGet(`/user/${encodeURIComponent(uid)}/group?limit=100`),
       apiPost(`/storage`, {
-        objectIds: [
-          { collection: 'Login', key: 'history', userId: uid },
-          { collection: 'Enforcement', key: 'journal', userId: uid },
-          { collection: 'DisplayName', key: 'history', userId: uid },
-        ],
+        objectIds: storageObjectIds,
       }),
     ]);
 
@@ -205,6 +551,9 @@ async function lookupPlayer() {
     const u = (usersJson && usersJson.users && usersJson.users[0]) || null;
     if (!u) throw new Error('User not found.');
     user.value = u;
+    
+    // Update page title with username
+    document.title = `${u.username || u.displayName || uid} - Player Lookup`;
 
     const memberGroupIds = (groupsJson['user_groups'] || []).filter((g) => g.state <= 2).map((g) => g.group.id);
     if (memberGroupIds.length === 0) {
@@ -230,11 +579,149 @@ async function lookupPlayer() {
     loginHistory.value = parseStorageValue(byKey.get('Login/history'));
     journal.value = parseStorageValue(byKey.get('Enforcement/journal'));
     displayNameHistory.value = parseStorageValue(byKey.get('DisplayName/history'));
+    
+    // Resolve alternate account usernames
+    await resolveAlternateUsernames();
+    
+    // Resolve enforcer usernames
+    await resolveEnforcerUsernames();
+    
+    // Fetch enforcement data for alternate accounts
+    await fetchAlternateEnforcement();
   } catch (e) {
     error.value = e?.message || 'Lookup failed.';
   } finally {
     loading.value = false;
   }
+}
+
+// Resolve usernames for alternate accounts
+async function resolveAlternateUsernames() {
+  const hist = loginHistory.value;
+  if (!hist || !hist.alternate_accounts) return;
+  
+  const userIds = Object.keys(hist.alternate_accounts);
+  if (userIds.length === 0) return;
+  
+  const usernameMap = new Map();
+  
+  // Fetch usernames in parallel
+  await Promise.all(
+    userIds.map(async (userId) => {
+      try {
+        const res = await apiGet(`/rpc/account/lookup?user_id=${encodeURIComponent(userId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.username) {
+            usernameMap.set(userId, data.username);
+          }
+        }
+      } catch (e) {
+        // Silently fail for individual lookups
+        console.warn(`Failed to resolve username for ${userId}:`, e);
+      }
+    })
+  );
+  
+  alternateUsernames.value = usernameMap;
+}
+
+// Resolve usernames for enforcers in suspension records
+async function resolveEnforcerUsernames() {
+  const j = journal.value;
+  if (!j || !j.records) return;
+  
+  const enforcerIds = new Set();
+  
+  // Collect all unique enforcer user IDs
+  for (const records of Object.values(j.records)) {
+    for (const rec of records || []) {
+      if (rec.enforcer_user_id) {
+        enforcerIds.add(rec.enforcer_user_id);
+      }
+    }
+  }
+  
+  // Also collect void author IDs
+  const voidsByGroup = j.voids || j.voidsByRecordIDByGroupID || j.voids_by_record_id_by_group_id || {};
+  for (const groupVoids of Object.values(voidsByGroup)) {
+    for (const voidRecord of Object.values(groupVoids || {})) {
+      const userId = voidRecord.user_id || voidRecord.author_id;
+      if (userId) {
+        enforcerIds.add(userId);
+      }
+    }
+  }
+  
+  if (enforcerIds.size === 0) return;
+  
+  const usernameMap = new Map();
+  
+  // Fetch usernames in parallel
+  await Promise.all(
+    Array.from(enforcerIds).map(async (userId) => {
+      try {
+        const res = await apiGet(`/rpc/account/lookup?user_id=${encodeURIComponent(userId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.username) {
+            usernameMap.set(userId, data.username);
+          }
+        }
+      } catch (e) {
+        // Silently fail for individual lookups
+        console.warn(`Failed to resolve username for enforcer ${userId}:`, e);
+      }
+    })
+  );
+  
+  enforcerUsernames.value = usernameMap;
+}
+
+// Fetch enforcement journal for alternate accounts
+async function fetchAlternateEnforcement() {
+  const hist = loginHistory.value;
+  if (!hist || !hist.alternate_accounts) return;
+  
+  const userIds = Object.keys(hist.alternate_accounts);
+  if (userIds.length === 0) return;
+  
+  const enforcementMap = new Map();
+  
+  // Fetch enforcement data for each alternate account
+  await Promise.all(
+    userIds.map(async (altUserId) => {
+      try {
+        if (!canViewEnforcement.value) return;
+        
+        const res = await apiPost(`/storage`, {
+          objectIds: [
+            { collection: 'Enforcement', key: 'journal', userId: altUserId },
+          ],
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          const objects = (data && data.objects) || [];
+          if (objects.length > 0) {
+            const obj = objects[0];
+            if (obj.value) {
+              try {
+                const journal = JSON.parse(obj.value);
+                enforcementMap.set(altUserId, journal);
+              } catch (e) {
+                console.warn(`Failed to parse enforcement for ${altUserId}:`, e);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn(`Failed to fetch enforcement for alternate ${altUserId}:`, e);
+      }
+    })
+  );
+  
+  alternateEnforcement.value = enforcementMap;
 }
 
 function parseStorageValue(obj) {
@@ -353,6 +840,24 @@ function groupName(id) {
   return groupNameMap.value.get(id) || id;
 }
 
+// Get enforcer display name (username or fallback to ID)
+function getEnforcerName(rec) {
+  if (rec.enforcer_discord_id) {
+    return `@${rec.enforcer_discord_id}`;
+  }
+  const username = enforcerUsernames.value.get(rec.enforcer_user_id);
+  return username || rec.enforcer_user_id;
+}
+
+// Get void author display name
+function getVoidAuthorName(voidRec) {
+  if (voidRec.discord_id) {
+    return `@${voidRec.discord_id}`;
+  }
+  const username = enforcerUsernames.value.get(voidRec.user_id);
+  return username || voidRec.user_id;
+}
+
 // Suspensions: gather all records per group
 const suspensionsByGroup = computed(() => {
   const j = journal.value;
@@ -396,11 +901,72 @@ const suspensionsByGroup = computed(() => {
   return out;
 });
 
+// Helper function to process enforcement journal for alternate accounts
+function getAltSuspensions(journal) {
+  if (!journal || !journal.records) return [];
+  const voidsByGroup = journal.voids || journal.voidsByRecordIDByGroupID || journal.voids_by_record_id_by_group_id || {};
+  const out = [];
+  for (const [groupId, records] of Object.entries(journal.records)) {
+    const groupVoids = voidsByGroup[groupId] || {};
+    const recs = (records || []).map((r) => {
+      const rid = r.id;
+      const v = groupVoids[rid];
+      return {
+        id: rid,
+        user_id: r.user_id,
+        group_id: r.group_id || groupId,
+        enforcer_user_id: r.enforcer_user_id,
+        enforcer_discord_id: r.enforcer_discord_id,
+        created_at: r.created_at || r.createdAt,
+        updated_at: r.updated_at || r.updatedAt,
+        suspension_notice: r.suspension_notice,
+        expiry: r.suspension_expiry || r.expiry,
+        notes: r.notes,
+        isVoid: !!(v && (v.voided_at || v.voidedAt)),
+        void: v
+          ? {
+              group_id: v.group_id || groupId,
+              record_id: v.record_id || rid,
+              user_id: v.user_id || v.author_id,
+              discord_id: v.discord_id || v.author_discord_id,
+              voided_at: v.voided_at || v.voidedAt,
+              notes: v.notes,
+            }
+          : null,
+      };
+    });
+    out.push({ groupId, records: recs });
+  }
+  // Sort groups by name for stable UI
+  out.sort((a, b) => groupName(a.groupId).localeCompare(groupName(b.groupId)));
+  return out;
+}
+
+function isExpired(iso) {
+  if (!iso) return false;
+  return new Date(iso) <= new Date();
+}
+
 function expiryText(iso) {
   if (!iso) return '';
   const exp = new Date(iso);
   const now = new Date();
   return exp > now ? `expires ${formatRelative(iso)}` : `expired ${formatRelative(iso)}`;
+}
+
+function getSuspensionStatus(rec) {
+  if (!rec.expiry) return 'PERMANENT';
+  return isExpired(rec.expiry) ? 'EXPIRED' : 'ACTIVE';
+}
+
+function getSuspensionStatusClass(rec) {
+  if (!rec.expiry) return 'bg-red-900 text-red-200';
+  return isExpired(rec.expiry) ? 'bg-gray-700 text-gray-300' : 'bg-orange-900 text-orange-200';
+}
+
+function getSuspensionBorderColor(rec) {
+  if (!rec.expiry) return 'border-red-500';
+  return isExpired(rec.expiry) ? 'border-gray-500' : 'border-orange-500';
 }
 
 function formatDuration(expiryIso, createdIso) {
@@ -434,10 +1000,20 @@ const alternateAccounts = computed(() => {
         if (m[k]) items.add(m[k]);
       });
     });
-    out.push({ userId: altUserId, items: Array.from(items) });
+    out.push({
+      userId: altUserId,
+      username: alternateUsernames.value.get(altUserId) || null,
+      items: Array.from(items),
+      enforcement: alternateEnforcement.value.get(altUserId) || null,
+    });
   }
   return out;
 });
+
+// Look up an alternate account
+function lookupAlternateAccount(identifier) {
+  router.push({ name: 'PlayerLookup', params: { identifier: encodeURIComponent(identifier) } });
+}
 
 // Past display names (top ~10 unique, most recent)
 const pastDisplayNames = computed(() => {
