@@ -24,6 +24,8 @@ const (
 	RemoteLogFlushInterval = 10 * time.Second
 	// RemoteLogEntryOverheadBytes is the estimated overhead per log entry (JSON structure + metadata)
 	RemoteLogEntryOverheadBytes = 100
+	// RemoteLogRotationInterval is how often to rotate log files by time
+	RemoteLogRotationInterval = 24 * time.Hour
 )
 
 // RemoteLogFileEntry represents a single log entry written to disk
@@ -83,7 +85,7 @@ func (w *RemoteLogFileWriter) Write(userID, sessionID uuid.UUID, logs []string) 
 	now := time.Now().UTC()
 
 	// Check if we need to rotate the file
-	if w.currentSize >= RemoteLogMaxFileSize || time.Since(w.lastRotate) >= 24*time.Hour {
+	if w.currentSize >= RemoteLogMaxFileSize || time.Since(w.lastRotate) >= RemoteLogRotationInterval {
 		if err := w.rotate(); err != nil {
 			return fmt.Errorf("failed to rotate log file: %w", err)
 		}
@@ -269,30 +271,30 @@ func (w *RemoteLogFileWriter) Read(userID uuid.UUID, since time.Time) ([]RemoteL
 		}
 
 		path := filepath.Join(w.baseDir, entry.Name())
-		
-		// Read and process this file
-		func() {
-			file, err := os.Open(path)
-			if err != nil {
-				w.logger.Warn("Failed to open log file for reading", zap.String("path", path), zap.Error(err))
-				return
-			}
-			defer file.Close()
+		file, err := os.Open(path)
+		if err != nil {
+			w.logger.Warn("Failed to open log file for reading", zap.String("path", path), zap.Error(err))
+			continue
+		}
 
-			decoder := json.NewDecoder(file)
-			for decoder.More() {
-				var logEntry RemoteLogFileEntry
-				if err := decoder.Decode(&logEntry); err != nil {
-					w.logger.Warn("Failed to decode log entry", zap.Error(err))
-					continue
-				}
-
-				// Filter by user ID and timestamp
-				if logEntry.UserID == userIDStr && logEntry.Timestamp.After(since) {
-					results = append(results, logEntry)
-				}
+		decoder := json.NewDecoder(file)
+		for decoder.More() {
+			var logEntry RemoteLogFileEntry
+			if err := decoder.Decode(&logEntry); err != nil {
+				w.logger.Warn("Failed to decode log entry", zap.Error(err))
+				continue
 			}
-		}()
+
+			// Filter by user ID and timestamp
+			if logEntry.UserID == userIDStr && logEntry.Timestamp.After(since) {
+				results = append(results, logEntry)
+			}
+		}
+
+		// Close file immediately after processing to avoid resource leak
+		if err := file.Close(); err != nil {
+			w.logger.Warn("Failed to close log file after reading", zap.String("path", path), zap.Error(err))
+		}
 	}
 
 	return results, nil
