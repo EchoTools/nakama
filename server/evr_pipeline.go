@@ -62,7 +62,7 @@ type EvrPipeline struct {
 	discordCache *DiscordIntegrator
 	appBot       *DiscordAppBot
 
-	userRemoteLogJournalRegistry *UserLogJouralRegistry
+	userRemoteLogJournalRegistry *UserLogJournalRegistry
 	guildGroupRegistry           *GuildGroupRegistry
 	ipInfoCache                  *IPInfoCache
 

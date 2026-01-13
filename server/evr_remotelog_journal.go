@@ -13,16 +13,16 @@ type JournalPresence struct {
 	SessionID uuid.UUID
 }
 
-type UserLogJouralRegistry struct {
+type UserLogJournalRegistry struct {
 	logger     *zap.Logger
 	fileWriter *RemoteLogFileWriter
 
 	queueCh chan map[JournalPresence][]string
 }
 
-func NewUserRemoteLogJournalRegistry(ctx context.Context, logger *zap.Logger, fileWriter *RemoteLogFileWriter, sessionRegistry SessionRegistry) *UserLogJouralRegistry {
+func NewUserRemoteLogJournalRegistry(ctx context.Context, logger *zap.Logger, fileWriter *RemoteLogFileWriter, sessionRegistry SessionRegistry) *UserLogJournalRegistry {
 
-	registry := &UserLogJouralRegistry{
+	registry := &UserLogJournalRegistry{
 		logger:     logger,
 		fileWriter: fileWriter,
 
@@ -97,7 +97,7 @@ func NewUserRemoteLogJournalRegistry(ctx context.Context, logger *zap.Logger, fi
 }
 
 // Add queues log entries for writing
-func (r *UserLogJouralRegistry) Add(sessionID, userID uuid.UUID, e []string) {
+func (r *UserLogJournalRegistry) Add(sessionID, userID uuid.UUID, e []string) {
 	select {
 	case r.queueCh <- map[JournalPresence][]string{
 		{
@@ -111,6 +111,6 @@ func (r *UserLogJouralRegistry) Add(sessionID, userID uuid.UUID, e []string) {
 }
 
 // Read retrieves remote log entries for a user (for debugging)
-func (r *UserLogJouralRegistry) Read(userID uuid.UUID, since time.Time) ([]RemoteLogFileEntry, error) {
+func (r *UserLogJournalRegistry) Read(userID uuid.UUID, since time.Time) ([]RemoteLogFileEntry, error) {
 	return r.fileWriter.Read(userID, since)
 }

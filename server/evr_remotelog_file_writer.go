@@ -289,7 +289,9 @@ func (w *RemoteLogFileWriter) Read(userID uuid.UUID, since time.Time) ([]RemoteL
 			}
 		}
 
-		file.Close()
+		if err := file.Close(); err != nil {
+			w.logger.Warn("Failed to close log file after reading", zap.String("path", path), zap.Error(err))
+		}
 	}
 
 	return results, nil

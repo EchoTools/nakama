@@ -17,7 +17,7 @@ import (
 func TestRemoteLogFileWriter_WriteAndRead(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
-	
+
 	logger := zap.NewNop()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -61,7 +61,7 @@ func TestRemoteLogFileWriter_WriteAndRead(t *testing.T) {
 func TestRemoteLogFileWriter_Rotation(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
-	
+
 	logger := zap.NewNop()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -84,7 +84,7 @@ func TestRemoteLogFileWriter_Rotation(t *testing.T) {
 
 	// Verify new file was created
 	assert.NotEqual(t, initialPath, writer.currentPath)
-	
+
 	// Verify both files exist
 	_, err = os.Stat(initialPath)
 	assert.NoError(t, err)
@@ -95,7 +95,7 @@ func TestRemoteLogFileWriter_Rotation(t *testing.T) {
 func TestRemoteLogFileWriter_Cleanup(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
-	
+
 	logger := zap.NewNop()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -134,7 +134,7 @@ func TestRemoteLogFileWriter_Cleanup(t *testing.T) {
 func TestRemoteLogFileWriter_JSONLinesFormat(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
-	
+
 	logger := zap.NewNop()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -155,7 +155,7 @@ func TestRemoteLogFileWriter_JSONLinesFormat(t *testing.T) {
 
 	err = writer.Write(userID, sessionID, testLogs)
 	require.NoError(t, err)
-	
+
 	// Force flush
 	err = writer.flush()
 	require.NoError(t, err)
@@ -182,7 +182,7 @@ func TestRemoteLogFileWriter_JSONLinesFormat(t *testing.T) {
 func TestRemoteLogFileWriter_DirectoryCreation(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
-	
+
 	// Remove the directory to test creation
 	os.RemoveAll(tempDir)
 
@@ -206,7 +206,7 @@ func TestRemoteLogFileWriter_DirectoryCreation(t *testing.T) {
 func TestRemoteLogFileWriter_FilterByTimestamp(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
-	
+
 	logger := zap.NewNop()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -224,7 +224,7 @@ func TestRemoteLogFileWriter_FilterByTimestamp(t *testing.T) {
 
 	err = writer.Write(userID, sessionID, testLogs)
 	require.NoError(t, err)
-	
+
 	// Force flush
 	err = writer.flush()
 	require.NoError(t, err)
