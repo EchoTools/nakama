@@ -1146,10 +1146,16 @@ func (d *DiscordAppBot) presentRegionFallbackOptions(s *discordgo.Session, i *di
 	startTimeStr := fmt.Sprintf("%d", startTime.Unix())
 	baseParams := fmt.Sprintf("%s:%s:%s:%s:%s", originalRegion, mode.String(), level.String(), startTimeStr, commandType)
 
+	// Create message based on server count
+	serverMsg := fmt.Sprintf("There are **%d** servers in region code **%s**", fallbackInfo.ServerCount, fallbackInfo.RequestedRegionCode)
+	if fallbackInfo.ServerCount == 0 {
+		serverMsg = fmt.Sprintf("No servers are available in region code **%s**", fallbackInfo.RequestedRegionCode)
+	}
+
 	embed := &discordgo.MessageEmbed{
 		Title: "No Servers Available in Selected Region",
-		Description: fmt.Sprintf("There are **%d** servers in region code **%s**.\n\nHowever, a server is available in **%s** with **%dms** latency.\n\nWould you like to use this server instead?",
-			fallbackInfo.ServerCount, fallbackInfo.RequestedRegionCode, fallbackInfo.ClosestRegion, fallbackInfo.ClosestLatencyMs),
+		Description: fmt.Sprintf("%s.\n\nHowever, a server is available in **%s** with **%dms** latency.\n\nWould you like to use this server instead?",
+			serverMsg, fallbackInfo.ClosestRegion, fallbackInfo.ClosestLatencyMs),
 		Color: 0xFFA500, // Orange color for warning
 		Fields: []*discordgo.MessageEmbedField{
 			{

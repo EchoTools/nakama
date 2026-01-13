@@ -59,8 +59,12 @@ type ErrMatchmakingNoServersInRegion struct {
 
 func (e ErrMatchmakingNoServersInRegion) Error() string {
 	if e.FallbackInfo != nil {
-		return fmt.Sprintf("server find failed: There are %d servers in region code %s, but a server is available in %s (%dms)",
-			e.FallbackInfo.ServerCount, e.FallbackInfo.RequestedRegionCode, e.FallbackInfo.ClosestRegion, e.FallbackInfo.ClosestLatencyMs)
+		serverMsg := fmt.Sprintf("There are %d servers", e.FallbackInfo.ServerCount)
+		if e.FallbackInfo.ServerCount == 0 {
+			serverMsg = "No servers are available"
+		}
+		return fmt.Sprintf("server find failed: %s in region code %s, but a server is available in %s (%dms)",
+			serverMsg, e.FallbackInfo.RequestedRegionCode, e.FallbackInfo.ClosestRegion, e.FallbackInfo.ClosestLatencyMs)
 	}
 	return "server find failed: No servers available in requested region"
 }
