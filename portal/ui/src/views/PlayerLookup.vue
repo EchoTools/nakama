@@ -2,11 +2,10 @@
   <div class="max-w-5xl mx-auto mt-10 p-6 bg-gray-900 rounded-lg shadow-lg text-gray-100">
     <h2 class="text-2xl font-bold mb-4">Player Lookup</h2>
     <form @submit.prevent="lookupPlayer" class="mb-6">
-      <label class="block text-gray-300 mb-2">User ID</label>
       <input
         v-model="userId"
         type="text"
-        placeholder="Enter User ID"
+        placeholder="Username, XPID, User ID, or Discord ID"
         class="w-full px-3 py-2 rounded bg-gray-800 text-white border border-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500 mb-4"
         required
       />
