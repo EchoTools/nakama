@@ -23,7 +23,7 @@ const isCallbackRoute = computed(() => {
   return name === 'DiscordCallback';
 });
 
-const { getDefaultAvatar } = useAvatar();
+const { getDefaultAvatar, extractDiscordAvatarHash } = useAvatar();
 
 // Validate environment variables
 const envValid = computed(() => {
@@ -60,9 +60,10 @@ async function fetchUserProfile() {
     if (response.ok) {
       const userData = await response.json();
       user.value = {
-        id: userData.user.id, // Nakama user ID for API calls
-        discordId: userData.custom_id, // Discord ID for display
+        nakamaId: userData.user.id, // Nakama user ID for API calls
+        id: userData.custom_id, // Discord ID (used by getDiscordAvatar)
         username: userData.user.username,
+        avatar: extractDiscordAvatarHash(userData.user.avatar_url), // Avatar hash for Discord CDN
         avatarUrl: userData.user.avatar_url || getDefaultAvatar(userData.user.username),
         displayName: userData.user.display_name || userData.user.username,
       };
@@ -73,7 +74,7 @@ async function fetchUserProfile() {
       userState.refreshToken = refreshToken.value;
 
       // Fetch user's group memberships to check permissions
-      await fetchUserGroups(userData.user.id);
+      await fetchUserGroups(user.value.nakamaId);
 
       sessionStorage.removeItem('authRedirectInProgress');
       status.value = '';
@@ -102,9 +103,10 @@ async function fetchUserProfile() {
         if (response.ok) {
           const userData = await response.json();
           user.value = {
-            id: userData.user.id, // Nakama user ID for API calls
-            discordId: userData.custom_id, // Discord ID for display
+            nakamaId: userData.user.id, // Nakama user ID for API calls
+            id: userData.custom_id, // Discord ID (used by getDiscordAvatar)
             username: userData.user.username,
+            avatar: extractDiscordAvatarHash(userData.user.avatar_url), // Avatar hash for Discord CDN
             avatarUrl: userData.user.avatar_url || getDefaultAvatar(userData.user.username),
             displayName: userData.user.display_name || userData.user.username,
           };
@@ -115,7 +117,7 @@ async function fetchUserProfile() {
           userState.refreshToken = refreshToken.value;
 
           // Fetch user's group memberships to check permissions
-          await fetchUserGroups(userData.user.id);
+          await fetchUserGroups(user.value.nakamaId);
 
           sessionStorage.removeItem('authRedirectInProgress');
           status.value = '';
@@ -171,7 +173,7 @@ async function handleUserLogin(event) {
   userState.refreshToken = newRefreshToken;
 
   // Fetch user's group memberships to check permissions
-  await fetchUserGroups(userData.id);
+  await fetchUserGroups(userData.nakamaId);
 
   sessionStorage.removeItem('authRedirectInProgress');
   status.value = '';

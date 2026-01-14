@@ -132,11 +132,12 @@ async function authenticateWithDiscord(code) {
       if (userResponse.ok) {
         const userData = await userResponse.json();
         userState.profile = {
-          id: userData.user.id, // Nakama user ID for API calls
-          discordId: userData.custom_id, // Discord ID for display
+          nakamaId: userData.user.id, // Nakama user ID for API calls
+          id: userData.custom_id, // Discord ID (used by getDiscordAvatar)
           username: userData.user.username,
           avatar: userData.user.avatar_url ? extractDiscordAvatarHash(userData.user.avatar_url) : null,
-          discriminator: userData.user.display_name,
+          avatarUrl: userData.user.avatar_url,
+          displayName: userData.user.display_name || userData.user.username,
         };
       }
 

@@ -327,6 +327,93 @@
           </div>
         </div>
       </div>
+
+      <!-- Game Servers Card -->
+      <div v-if="gameServers.length" class="bg-gray-800 rounded-lg p-5">
+        <h3 class="text-xl font-semibold mb-4">Active Game Servers</h3>
+        <div class="space-y-3">
+          <div
+            v-for="server in gameServers"
+            :key="server.match_id"
+            class="border border-gray-700 rounded-lg bg-gray-900 p-4"
+          >
+            <!-- Server Header -->
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <span :class="['px-2 py-0.5 text-xs font-semibold rounded', getModeClass(server.label?.mode)]">
+                  {{ formatMode(server.label?.mode) }}
+                </span>
+                <span
+                  :class="[
+                    'px-2 py-0.5 text-xs font-semibold rounded',
+                    server.label?.open ? 'bg-green-900 text-green-200' : 'bg-red-900 text-red-200',
+                  ]"
+                >
+                  {{ server.label?.open ? 'OPEN' : 'CLOSED' }}
+                </span>
+              </div>
+              <span class="text-xs text-gray-500 font-mono">{{ server.match_id?.slice(0, 8) }}…</span>
+            </div>
+
+            <!-- Server Info Grid -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div>
+                <div class="text-xs text-gray-400">Players</div>
+                <div class="font-medium">
+                  {{ server.label?.player_count || 0 }} / {{ server.label?.player_limit || server.label?.limit || '?' }}
+                </div>
+              </div>
+              <div>
+                <div class="text-xs text-gray-400">Level</div>
+                <div class="font-medium">{{ formatLevel(server.label?.level) }}</div>
+              </div>
+              <div>
+                <div class="text-xs text-gray-400">Guild</div>
+                <div class="font-medium">{{ groupName(server.label?.group_id) || '—' }}</div>
+              </div>
+              <div>
+                <div class="text-xs text-gray-400">Location</div>
+                <div class="font-medium">{{ getServerLocation(server.label) }}</div>
+              </div>
+            </div>
+
+            <!-- Server Endpoint (Global Operators only) -->
+            <div
+              v-if="canViewServerIPs && server.label?.broadcaster?.endpoint"
+              class="mt-3 pt-3 border-t border-gray-700"
+            >
+              <div class="text-xs text-gray-400 mb-1">Endpoint</div>
+              <div class="font-mono text-xs text-gray-300 bg-gray-800 rounded px-2 py-1">
+                {{ formatEndpoint(server.label?.broadcaster?.endpoint) }}
+              </div>
+            </div>
+
+            <!-- Players List (if available) -->
+            <div v-if="server.label?.players?.length" class="mt-3 pt-3 border-t border-gray-700">
+              <div class="text-xs text-gray-400 mb-2">Players</div>
+              <div class="flex flex-wrap gap-2">
+                <span
+                  v-for="player in server.label.players"
+                  :key="player.user_id || player.display_name"
+                  class="px-2 py-0.5 text-xs rounded bg-gray-800 border border-gray-700"
+                >
+                  {{ player.display_name || player.username || '?' }}
+                </span>
+              </div>
+            </div>
+
+            <!-- Match Timestamps -->
+            <div class="mt-3 pt-3 border-t border-gray-700 flex items-center gap-4 text-xs text-gray-500">
+              <span v-if="server.label?.created_at">Created: {{ formatRelative(server.label.created_at) }}</span>
+              <span v-if="server.label?.start_time">Started: {{ formatRelative(server.label.start_time) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div v-else-if="loadingServers" class="bg-gray-800 rounded-lg p-5">
+        <h3 class="text-xl font-semibold mb-2">Active Game Servers</h3>
+        <div class="text-gray-400">Loading game servers...</div>
+      </div>
     </div>
   </div>
 </template>
@@ -354,6 +441,8 @@ const alternateEnforcement = ref(new Map()); // Map of userId -> enforcement jou
 const autocompleteResults = ref([]);
 const showAutocomplete = ref(false);
 const selectedAutocompleteIndex = ref(-1);
+const gameServers = ref([]); // Active game servers owned by this player
+const loadingServers = ref(false);
 let autocompleteTimeout = null;
 
 const API_BASE = import.meta.env.VITE_NAKAMA_API_BASE;
@@ -365,6 +454,7 @@ const isGlobalOperator = computed(() => {
 
 const canViewLoginHistory = computed(() => isGlobalOperator.value);
 const canViewEnforcement = computed(() => isGlobalOperator.value);
+const canViewServerIPs = computed(() => isGlobalOperator.value);
 
 // Store original title to restore on unmount
 const originalTitle = document.title;
@@ -397,6 +487,7 @@ watch(
       journal.value = null;
       displayNameHistory.value = null;
       guildGroups.value = null;
+      gameServers.value = [];
       error.value = '';
       document.title = originalTitle;
     }
@@ -515,6 +606,7 @@ async function lookupPlayer() {
   loginHistory.value = null;
   journal.value = null;
   displayNameHistory.value = null;
+  gameServers.value = [];
   document.title = 'Player Lookup'; // Reset title during lookup
   loading.value = true;
   try {
@@ -612,6 +704,9 @@ async function lookupPlayer() {
 
     // Fetch enforcement data for alternate accounts
     await fetchAlternateEnforcement();
+
+    // Fetch game servers owned by this player
+    await fetchGameServers(uid);
   } catch (e) {
     error.value = e?.message || 'Lookup failed.';
   } finally {
@@ -744,6 +839,50 @@ async function fetchAlternateEnforcement() {
   );
 
   alternateEnforcement.value = enforcementMap;
+}
+
+// Fetch active game servers owned by the user
+async function fetchGameServers(targetUserId) {
+  loadingServers.value = true;
+  gameServers.value = [];
+
+  try {
+    // Fetch all matches - the backend AfterListMatches hook will filter based on permissions
+    const res = await apiGet('/match?limit=100&authoritative=true');
+    if (!res.ok) {
+      console.warn('Failed to fetch matches');
+      return;
+    }
+
+    const data = await res.json();
+    const matches = data.matches || [];
+
+    // Filter to only matches where this user is the operator
+    const userServers = [];
+    for (const match of matches) {
+      try {
+        const label = match.label?.value ? JSON.parse(match.label.value) : match.label;
+        if (!label) continue;
+
+        // Check if this user owns the server
+        const operatorId = label.broadcaster?.oper || label.broadcaster?.operator_id;
+        if (operatorId === targetUserId) {
+          userServers.push({
+            match_id: match.match_id,
+            label,
+          });
+        }
+      } catch (e) {
+        console.warn('Failed to parse match label:', e);
+      }
+    }
+
+    gameServers.value = userServers;
+  } catch (e) {
+    console.warn('Failed to fetch game servers:', e);
+  } finally {
+    loadingServers.value = false;
+  }
 }
 
 function parseStorageValue(obj) {
@@ -1084,6 +1223,65 @@ async function copyToClipboard(text) {
   } catch (e) {
     // no-op; could surface an error toast
   }
+}
+
+// Game server helper functions
+function formatMode(mode) {
+  if (!mode) return 'Unknown';
+  // Handle symbol string or raw mode string
+  const modeStr = String(mode).toLowerCase();
+  if (modeStr.includes('arena')) return 'Arena';
+  if (modeStr.includes('combat')) return 'Combat';
+  if (modeStr.includes('social')) return 'Social';
+  return mode;
+}
+
+function getModeClass(mode) {
+  if (!mode) return 'bg-gray-700 text-gray-300';
+  const modeStr = String(mode).toLowerCase();
+  if (modeStr.includes('arena')) return 'bg-blue-900 text-blue-200';
+  if (modeStr.includes('combat')) return 'bg-red-900 text-red-200';
+  if (modeStr.includes('social')) return 'bg-green-900 text-green-200';
+  return 'bg-gray-700 text-gray-300';
+}
+
+function formatLevel(level) {
+  if (!level) return '—';
+  // Handle symbol string or raw level string
+  const levelStr = String(level);
+  // Extract the level name from the symbol (e.g., "mpl_arena_a" -> "Arena A")
+  return levelStr
+    .replace(/^mpl_/, '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function getServerLocation(label) {
+  if (!label) return '—';
+  const parts = [];
+  if (label.server_city || label.broadcaster?.city) {
+    parts.push(label.server_city || label.broadcaster?.city);
+  }
+  if (label.server_country || label.broadcaster?.country_code) {
+    parts.push(label.server_country || label.broadcaster?.country_code);
+  }
+  if (label.server_region || label.broadcaster?.default_region) {
+    parts.push(label.server_region || label.broadcaster?.default_region);
+  }
+  return parts.length > 0 ? parts.join(', ') : '—';
+}
+
+function formatEndpoint(endpoint) {
+  if (!endpoint) return '—';
+  // Endpoint may have internal_ip, external_ip, port
+  const parts = [];
+  if (endpoint.external_ip) {
+    parts.push(`External: ${endpoint.external_ip}:${endpoint.port || '?'}`);
+  }
+  if (endpoint.internal_ip && endpoint.internal_ip !== endpoint.external_ip) {
+    parts.push(`Internal: ${endpoint.internal_ip}:${endpoint.port || '?'}`);
+  }
+  return parts.length > 0 ? parts.join(' | ') : JSON.stringify(endpoint);
 }
 </script>
 
