@@ -641,6 +641,24 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 						logger.Warn("Failed to record early quit to leaderboard: %v", err)
 					}
 
+					// Save detailed quit record to history
+					if participation, ok := state.participations[mp.GetUserId()]; ok {
+						history := NewEarlyQuitHistory(mp.GetUserId())
+						if err := StorableRead(ctx, nk, mp.GetUserId(), history, false); err != nil {
+							logger.WithField("error", err).Debug("Creating new early quit history")
+						}
+
+						quitRecord := CreateQuitRecordFromParticipation(state, participation)
+						history.AddQuitRecord(quitRecord)
+
+						// Prune old records (keep last 90 days)
+						history.PruneOldRecords(90 * 24 * time.Hour)
+
+						if err := StorableWrite(ctx, nk, mp.GetUserId(), history); err != nil {
+							logger.Warn("Failed to write early quit history", zap.Error(err))
+						}
+					}
+
 					eqconfig := NewEarlyQuitConfig()
 					_nk := nk.(*RuntimeGoNakamaModule)
 					if err := StorableRead(ctx, nk, mp.GetUserId(), eqconfig, true); err != nil {
@@ -648,6 +666,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 					} else {
 
 						eqconfig.IncrementEarlyQuit()
+						eqconfig.LastEarlyQuitMatchID = state.ID
 
 						// Check for tier change after early quit
 						serviceSettings := ServiceSettings()
