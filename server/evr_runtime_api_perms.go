@@ -340,7 +340,7 @@ func AfterListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.DB
 		return err
 	}
 
-	isGlobalOperator := vars != nil && vars.Intents.IsGlobalOperator
+	isGlobalOperatorIntent := vars != nil && vars.Intents.IsGlobalOperator
 
 	// Fetch user's guild memberships and roles
 	userGroups, _, err := nk.UserGroupsList(ctx, userID, 100, nil, "")
@@ -351,11 +351,17 @@ func AfterListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.DB
 
 	// Build a map of group IDs the user is a member of
 	memberGroupIDs := make(map[string]bool)
+	isGlobalOperatorMember := false
 	for _, ug := range userGroups {
 		if ug.State != nil && ug.State.Value <= 2 { // Member, Admin, or Superadmin
 			memberGroupIDs[ug.Group.Id] = true
+			if ug.Group != nil && ug.Group.Name == GroupGlobalOperators {
+				isGlobalOperatorMember = true
+			}
 		}
 	}
+
+	isGlobalOperator := isGlobalOperatorIntent || isGlobalOperatorMember
 
 	// Fetch guild groups for role checking
 	groupIDs := make([]string, 0, len(memberGroupIDs))
@@ -409,7 +415,7 @@ func filterMatchesForAnonymous(out *api.MatchList) error {
 		}
 
 		// Create a sanitized public label
-		publicLabel := createPublicMatchLabel(label)
+		publicLabel := label.PublicView()
 		labelJSON, _ := json.Marshal(publicLabel)
 
 		filteredMatches = append(filteredMatches, &api.Match{
