@@ -467,9 +467,13 @@ onMounted(() => {
   }
 });
 
-// Restore original title on unmount
+// Restore original title on unmount and cleanup timeouts
 onUnmounted(() => {
   document.title = originalTitle;
+  if (autocompleteTimeout) {
+    clearTimeout(autocompleteTimeout);
+    autocompleteTimeout = null;
+  }
 });
 
 // Watch for route changes (when navigating between different player lookups)
