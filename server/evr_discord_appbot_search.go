@@ -164,8 +164,14 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 			}).Error("Failed to search display name history")
 			return fmt.Errorf("failed to search display name history: %w", err)
 		}
-		for userID, byGroup := range displayNameMatches {
 
+		// Group matches by userID
+		matchesByUser := make(map[string][]DisplayNameSearchResult)
+		for _, match := range displayNameMatches {
+			matchesByUser[match.UserID] = append(matchesByUser[match.UserID], match)
+		}
+
+		for userID, userMatches := range matchesByUser {
 			account, err := nk.AccountGetId(ctx, userID)
 			if err != nil {
 				logger.WithFields(map[string]interface{}{}).Warn("Failed to get account")
@@ -174,34 +180,31 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 
 			result := result{
 				account: account,
-				matches: make(map[string]time.Time, len(byGroup)),
+				matches: make(map[string]time.Time, len(userMatches)),
 			}
 
-			for _, names := range byGroup {
-				for dn, ts := range names {
+			for _, match := range userMatches {
+				dn := strings.ToLower(match.DisplayName)
+				include := false
+				if useWildcardPrefix && useWildcardSuffix {
+					include = strings.Contains(dn, partial)
+				} else if useWildcardPrefix {
+					include = strings.HasSuffix(dn, partial)
+				} else if useWildcardSuffix {
+					include = strings.HasPrefix(dn, partial)
+				} else {
+					include = dn == partial
+				}
 
-					dn = strings.ToLower(dn)
-					include := false
-					if useWildcardPrefix && useWildcardSuffix {
-						include = strings.Contains(dn, partial)
-					} else if useWildcardPrefix {
-						include = strings.HasSuffix(dn, partial)
-					} else if useWildcardSuffix {
-						include = strings.HasPrefix(dn, partial)
-					} else {
-						include = dn == partial
-					}
+				if !include {
+					continue
+				}
 
-					if !include {
-						continue
-					}
+				if match.UpdatedAt.After(result.matches[dn]) {
+					result.matches[dn] = match.UpdatedAt
 
-					if ts.After(result.matches[dn]) {
-						result.matches[dn] = ts
-
-						if ts.After(result.updated) {
-							result.updated = ts
-						}
+					if match.UpdatedAt.After(result.updated) {
+						result.updated = match.UpdatedAt
 					}
 				}
 			}

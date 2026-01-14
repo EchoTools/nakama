@@ -5,6 +5,7 @@ import { ref, onMounted, computed } from 'vue';
 import { useRouter } from 'vue-router'; // Import useRouter
 import { useAvatar } from './composables/useAvatar.js';
 import { useDiscordOAuth } from './composables/useDiscordOAuth.js';
+import { userState } from './composables/useUserState.js';
 
 const API_BASE = import.meta.env.VITE_NAKAMA_API_BASE;
 const NAKAMA_SERVER_KEY = import.meta.env.VITE_NAKAMA_SERVER_KEY;
@@ -22,7 +23,7 @@ const isCallbackRoute = computed(() => {
   return name === 'DiscordCallback';
 });
 
-const { getDefaultAvatar } = useAvatar();
+const { getDefaultAvatar, extractDiscordAvatarHash } = useAvatar();
 
 // Validate environment variables
 const envValid = computed(() => {
@@ -59,11 +60,22 @@ async function fetchUserProfile() {
     if (response.ok) {
       const userData = await response.json();
       user.value = {
-        id: userData.custom_id || userData.user.id,
+        nakamaId: userData.user.id, // Nakama user ID for API calls
+        id: userData.custom_id, // Discord ID (used by getDiscordAvatar)
         username: userData.user.username,
+        avatar: extractDiscordAvatarHash(userData.user.avatar_url), // Avatar hash for Discord CDN
         avatarUrl: userData.user.avatar_url || getDefaultAvatar(userData.user.username),
         displayName: userData.user.display_name || userData.user.username,
       };
+
+      // Update global userState for header component
+      userState.profile = user.value;
+      userState.token = token.value;
+      userState.refreshToken = refreshToken.value;
+
+      // Fetch user's group memberships to check permissions
+      await fetchUserGroups(user.value.nakamaId);
+
       sessionStorage.removeItem('authRedirectInProgress');
       status.value = '';
       return;
@@ -91,11 +103,22 @@ async function fetchUserProfile() {
         if (response.ok) {
           const userData = await response.json();
           user.value = {
-            id: userData.custom_id || userData.user.id,
+            nakamaId: userData.user.id, // Nakama user ID for API calls
+            id: userData.custom_id, // Discord ID (used by getDiscordAvatar)
             username: userData.user.username,
+            avatar: extractDiscordAvatarHash(userData.user.avatar_url), // Avatar hash for Discord CDN
             avatarUrl: userData.user.avatar_url || getDefaultAvatar(userData.user.username),
             displayName: userData.user.display_name || userData.user.username,
           };
+
+          // Update global userState for header component
+          userState.profile = user.value;
+          userState.token = token.value;
+          userState.refreshToken = refreshToken.value;
+
+          // Fetch user's group memberships to check permissions
+          await fetchUserGroups(user.value.nakamaId);
+
           sessionStorage.removeItem('authRedirectInProgress');
           status.value = '';
           return;
@@ -115,12 +138,43 @@ async function fetchUserProfile() {
   }
 }
 
-function handleUserLogin(event) {
+async function fetchUserGroups(userId) {
+  try {
+    const response = await fetch(`${API_BASE}/user/${userId}/group?limit=100`, {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token.value}`,
+      },
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      // Filter for system groups (lang_tag = 'system') and member/admin states
+      const systemGroups = (data.user_groups || [])
+        .filter((g) => g.group?.lang_tag === 'system' && g.state <= 2)
+        .map((g) => g.group.name);
+      userState.userGroups = systemGroups;
+    }
+  } catch (error) {
+    console.error('Failed to fetch user groups:', error);
+    userState.userGroups = [];
+  }
+}
+
+async function handleUserLogin(event) {
   console.log('User logged in:', event.detail);
   const { token: newToken, refreshToken: newRefreshToken, user: userData } = event.detail;
   token.value = newToken;
   refreshToken.value = newRefreshToken;
   user.value = userData;
+  // Update global userState for header component
+  userState.profile = userData;
+  userState.token = newToken;
+  userState.refreshToken = newRefreshToken;
+
+  // Fetch user's group memberships to check permissions
+  await fetchUserGroups(userData.nakamaId);
+
   sessionStorage.removeItem('authRedirectInProgress');
   status.value = '';
 }
@@ -136,6 +190,7 @@ function logout() {
   token.value = null;
   refreshToken.value = null;
   user.value = null;
+  userState.userGroups = [];
   sessionStorage.removeItem('authRedirectInProgress');
   status.value = 'You have been successfully logged out.';
 }

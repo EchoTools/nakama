@@ -5,4 +5,5 @@ export const userState = reactive({
   profile: null, // { id, username, avatar, discriminator }
   token: null,
   refreshToken: null,
+  userGroups: [], // Array of group names the user belongs to
 });

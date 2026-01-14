@@ -10,8 +10,6 @@ import (
 
 	"slices"
 
-	"maps"
-
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/zap"
@@ -295,16 +293,17 @@ func DisplayNameHistoryUpdate(ctx context.Context, nk runtime.NakamaModule, user
 	return nil
 }
 
-func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, pattern string, limit int) (map[string]map[string]map[string]time.Time, error) {
+func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, pattern string, limit int) ([]DisplayNameSearchResult, error) {
 	query := fmt.Sprintf(`+value.cache:/%s/`, pattern)
 
 	// Perform the storage list operation
-
 	var err error
-	histories := make(map[string]*DisplayNameHistory, 10)
 	var result *api.StorageObjects
-
 	cursor := ""
+
+	results := make([]DisplayNameSearchResult, 0, limit)
+	seen := make(map[string]struct{}) // Track userID+displayName combinations to avoid duplicates
+
 	for {
 		result, cursor, err = nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 100, nil, cursor)
 		if err != nil {
@@ -316,7 +315,58 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, p
 			if err := json.Unmarshal([]byte(obj.Value), history); err != nil {
 				return nil, fmt.Errorf("error unmarshalling display name history: %w", err)
 			}
-			histories[obj.UserId] = history
+
+			userID := obj.UserId
+			username := history.Username
+
+			// Check for username exact match
+			if strings.ToLower(username) == pattern {
+				key := userID + ":" + username
+				if _, exists := seen[key]; !exists {
+					seen[key] = struct{}{}
+					results = append(results, DisplayNameSearchResult{
+						UserID:      userID,
+						Username:    username,
+						DisplayName: username,
+						GroupID:     "",
+						UpdatedAt:   time.Time{}, // Zero time indicates reserved/exact match
+					})
+				}
+			}
+
+			// Check reserved names for exact matches
+			for _, name := range history.Reserved {
+				if strings.ToLower(name) == pattern {
+					key := userID + ":" + name
+					if _, exists := seen[key]; !exists {
+						seen[key] = struct{}{}
+						results = append(results, DisplayNameSearchResult{
+							UserID:      userID,
+							Username:    username,
+							DisplayName: name,
+							GroupID:     "",
+							UpdatedAt:   time.Time{},
+						})
+					}
+				}
+			}
+
+			// Add historical display names
+			for groupID, entries := range history.Histories {
+				for displayName, updatedAt := range entries {
+					key := userID + ":" + displayName
+					if _, exists := seen[key]; !exists {
+						seen[key] = struct{}{}
+						results = append(results, DisplayNameSearchResult{
+							UserID:      userID,
+							Username:    username,
+							DisplayName: displayName,
+							GroupID:     groupID,
+							UpdatedAt:   updatedAt,
+						})
+					}
+				}
+			}
 		}
 
 		if cursor == "" {
@@ -324,102 +374,33 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, p
 		}
 	}
 
-	matches := make(map[string]map[string]map[string]time.Time, len(histories)) // map[userID]map[groupID]map[displayName]lastUsedTime
-
-	const globalGroupID = ""
-
-	for userID, history := range histories {
-		matches[userID] = make(map[string]map[string]time.Time)
-		matches[userID][globalGroupID] = make(map[string]time.Time)
-
-		for groupID, e := range history.Histories {
-			matches[userID][groupID] = make(map[string]time.Time)
-
-			maps.Copy(matches[userID][groupID], e)
+	// Sort results: reserved/exact matches first (zero time), then by most recent
+	sort.Slice(results, func(i, j int) bool {
+		// Zero time (reserved) comes first
+		if results[i].UpdatedAt.IsZero() && !results[j].UpdatedAt.IsZero() {
+			return true
 		}
-
-		// Add exact matches for usernames
-		if strings.ToLower(history.Username) == pattern {
-			matches[userID][globalGroupID][history.Username] = time.Time{}
+		if !results[i].UpdatedAt.IsZero() && results[j].UpdatedAt.IsZero() {
+			return false
 		}
+		return results[i].UpdatedAt.After(results[j].UpdatedAt)
+	})
 
-		// Add exact matches for reserved names
-		for _, name := range history.Reserved {
-			if strings.ToLower(name) == pattern {
-				matches[userID][globalGroupID][name] = time.Time{}
-			}
-		}
+	// Limit results
+	if len(results) > limit {
+		results = results[:limit]
 	}
 
-	// Remove any empty matches
-	for userID, groupMatches := range matches {
+	return results, nil
+}
 
-		for groupID, names := range groupMatches {
-			if len(names) == 0 {
-				delete(groupMatches, groupID)
-			}
-		}
-
-		if len(groupMatches) == 0 {
-			delete(matches, userID)
-		}
-	}
-
-	if len(matches) > limit {
-		// Keep the most recent matches by userID
-
-		type match struct {
-			userID   string
-			lastUsed time.Time
-			names    map[string]map[string]time.Time
-		}
-		sorted := make([]match, 0, len(matches))
-		for userID, namesByGroupID := range matches {
-			match := match{userID: userID, names: namesByGroupID}
-
-			// reduce to the most recent, plus reserved
-			for _, names := range namesByGroupID {
-				for _, lastUsed := range names {
-
-					// Find the most recent last used time; if it's zero, it's a reserved name
-					if lastUsed.IsZero() || lastUsed.After(match.lastUsed) {
-						match.lastUsed = lastUsed
-					}
-				}
-			}
-			sorted = append(sorted, match)
-		}
-
-		// Sort the matches by last used time
-		sort.Slice(sorted, func(i, j int) bool {
-			if sorted[i].lastUsed.IsZero() {
-				return true
-			} else if sorted[i].lastUsed.IsZero() {
-				return false
-			}
-
-			return sorted[i].lastUsed.After(sorted[j].lastUsed)
-		})
-
-		matches = make(map[string]map[string]map[string]time.Time, limit)
-
-		// Include all reserved names
-		for i := 0; i < len(matches); i++ {
-			if sorted[i].lastUsed.IsZero() {
-				matches[sorted[i].userID] = sorted[i].names
-			}
-			sorted = slices.Delete(sorted, i, i+1)
-			i--
-		}
-
-		limit := min(limit, len(sorted))
-		// Add the most recent matches, up to the limit
-		for _, m := range sorted[:limit] {
-			matches[m.userID] = m.names
-		}
-	}
-
-	return matches, nil
+// DisplayNameSearchResult represents a single display name search match
+type DisplayNameSearchResult struct {
+	UserID      string    `json:"user_id"`
+	Username    string    `json:"username"`
+	DisplayName string    `json:"display_name"`
+	GroupID     string    `json:"group_id"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 func DisplayNameOwnerSearch(ctx context.Context, nk runtime.NakamaModule, displayNames []string) (map[string][]string, error) {
