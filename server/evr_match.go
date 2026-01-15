@@ -994,7 +994,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				eqconfig.IncrementCompletedMatches()
 
 				// Track completion in detailed history
-				if err := TrackMatchCompletion(ctx, logger, nk, presence.GetUserId(), state.ID); err != nil {
+				if err := TrackMatchCompletion(ctx, logger, nk, presence.GetUserId(), state.ID, time.Now().UTC()); err != nil {
 					logger.WithField("error", err).Debug("Failed to track match completion in history")
 				}
 

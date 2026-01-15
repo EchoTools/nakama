@@ -474,7 +474,7 @@ func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logge
 		eqconfig.IncrementCompletedMatches()
 
 		// Track completion in detailed history
-		if err := TrackMatchCompletion(ctx, logger, nk, userID, matchID); err != nil {
+		if err := TrackMatchCompletion(ctx, logger, nk, userID, matchID, time.Now().UTC()); err != nil {
 			logger.WithField("error", err).Debug("Failed to track match completion in history")
 		}
 
