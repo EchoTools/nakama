@@ -757,13 +757,11 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 			}
 		}
 
-		// Apply general rate limit for all matches using guild group setting
-		// Default is 1 per minute, but can be customized per guild
-		if group.CreateCommandRateLimitPerMinute != 0 { // 0 means disabled
-			limiter := d.loadPrepareMatchRateLimiter(userID, groupID, group)
-			if !limiter.Allow() {
-				return nil, 0, status.Error(codes.ResourceExhausted, "rate limit exceeded (1 per minute)")
-			}
+		// Apply general rate limit for all matches using guild group setting.
+		// Default is 1 per minute, but can be customized per guild. A value of 0 uses the default limit.
+		limiter := d.loadPrepareMatchRateLimiter(userID, groupID, group)
+		if !limiter.Allow() {
+			return nil, 0, status.Error(codes.ResourceExhausted, "rate limit exceeded for match creation")
 		}
 	}
 

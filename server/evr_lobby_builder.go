@@ -794,6 +794,8 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	sortLabelIndexes(indexes)
 
 	// Check if we have any servers in the requested region
+	// Note: We iterate through all indexes (no early break) to count ALL matching servers
+	// for accurate server count reporting in the fallback message
 	hasRegionMatch := false
 	serverCount := 0 // Count servers in requested region(s)
 	for _, index := range indexes {
