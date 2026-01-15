@@ -7,7 +7,7 @@ import DiscordCallback from './views/auth/DiscordCallback.vue';
 
 const routes = [
   {
-    path: '/player-lookup',
+    path: '/player-lookup/:identifier?',
     name: 'PlayerLookup',
     component: () => import('./views/PlayerLookup.vue'),
     meta: { title: 'Player Lookup' },

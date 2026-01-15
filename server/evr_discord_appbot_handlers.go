@@ -665,9 +665,18 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		return nil, 0, status.Error(codes.PermissionDenied, "user does not have the allocator role in this guild.")
 	}
 
-	// If user is a global operator but has no allocator groups, use the current guild group
+	// If user is a global operator, ensure the current guild group is included (avoid duplicates)
 	if isGlobalOperator {
-		allocatorGroupIDs = append(allocatorGroupIDs, groupID)
+		found := false
+		for _, gid := range allocatorGroupIDs {
+			if gid == groupID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			allocatorGroupIDs = append(allocatorGroupIDs, groupID)
+		}
 	}
 
 	// Load the latency history for this user
@@ -786,6 +795,23 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 
 	if label == nil {
 		return nil, 0, fmt.Errorf("failed to allocate game server: label is nil")
+	}
+
+	// Apply rate limits only after successful allocation and only if user is not privileged
+	if !isPrivileged {
+		// Apply stricter rate limit (1 per 15 minutes) for public matches
+		if isPublicMatch {
+			publicLimiter := d.loadPublicMatchRateLimiter(userID, groupID)
+			if !publicLimiter.Allow() {
+				return nil, 0, status.Error(codes.ResourceExhausted, "rate limit exceeded for public matches (1 per 15 minutes)")
+			}
+		}
+
+		// Apply general rate limit for all matches
+		limiter := d.loadPrepareMatchRateLimiter(userID, groupID)
+		if !limiter.Allow() {
+			return nil, 0, status.Error(codes.ResourceExhausted, fmt.Sprintf("rate limit exceeded (%.0f requests per minute)", limiter.Limit()*60))
+		}
 	}
 
 	latencyMillis = latencyHistory.AverageRTT(label.GameServer.Endpoint.ExternalIP.String(), true)

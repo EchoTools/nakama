@@ -72,6 +72,9 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	if err = initializer.RegisterBeforeDeleteStorageObjects(BeforeDeleteStorageObjectsHook); err != nil {
 		return fmt.Errorf("unable to register BeforeDeleteStorageObjects hook: %w", err)
 	}
+	if err = initializer.RegisterAfterListMatches(AfterListMatchesHook); err != nil {
+		return fmt.Errorf("unable to register AfterListMatches hook: %w", err)
+	}
 
 	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_ENV, vars) // ignore lint
 	// Initialize the discord bot if the token is set
@@ -122,6 +125,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"server/scores":                 ServerScoresRPC,
 		"forcecheck":                    CheckForceUserRPC,
 		"guildgroup":                    GuildGroupGetRPC,
+		"enforcement/kick":              EnforcementKickRPC,
 		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
 	}
 	for name, rpc := range rpcs {

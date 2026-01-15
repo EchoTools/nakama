@@ -3,11 +3,13 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/internal/intents"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
@@ -312,4 +314,257 @@ func registerAPIGuards(initializer runtime.Initializer) error {
 	}
 
 	return nil
+}
+
+// AfterListMatchesHook filters match data based on user permissions.
+// - Complete match data is shown only for guilds where user has audit role OR is the server host
+// - Global operators can see client IPs
+// - Public match label data is available for any guild the user is a member of
+// - Suspended users see no match data except for servers they run
+func AfterListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, out *api.MatchList, in *api.ListMatchesRequest) error {
+	if out == nil || len(out.Matches) == 0 {
+		return nil
+	}
+
+	// Get user ID from context
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || userID == "" {
+		// No user context - return minimal data
+		return filterMatchesForAnonymous(out)
+	}
+
+	// Get session vars for permission checks
+	vars, err := intents.SessionVarsFromRuntimeContext(ctx)
+	if err != nil {
+		logger.Error("Failed to parse session variables", zap.Error(err))
+		return err
+	}
+
+	isGlobalOperatorIntent := vars != nil && vars.Intents.IsGlobalOperator
+
+	// Fetch user's guild memberships and roles
+	userGroups, _, err := nk.UserGroupsList(ctx, userID, 100, nil, "")
+	if err != nil {
+		logger.Error("Failed to fetch user groups", zap.Error(err))
+		return err
+	}
+
+	// Build a map of group IDs the user is a member of
+	memberGroupIDs := make(map[string]bool)
+	isGlobalOperatorMember := false
+	for _, ug := range userGroups {
+		if ug.State != nil && ug.State.Value <= 2 { // Member, Admin, or Superadmin
+			memberGroupIDs[ug.Group.Id] = true
+			if ug.Group != nil && ug.Group.Name == GroupGlobalOperators {
+				isGlobalOperatorMember = true
+			}
+		}
+	}
+
+	isGlobalOperator := isGlobalOperatorIntent || isGlobalOperatorMember
+
+	// Fetch guild groups for role checking
+	groupIDs := make([]string, 0, len(memberGroupIDs))
+	for gid := range memberGroupIDs {
+		groupIDs = append(groupIDs, gid)
+	}
+
+	guildGroups := make(map[string]*GuildGroup)
+	suspendedGroupIDs := make(map[string]bool)
+
+	if len(groupIDs) > 0 {
+		ggs, err := GuildGroupsLoad(ctx, nk, groupIDs)
+		if err != nil {
+			logger.Warn("Failed to load guild groups", zap.Error(err))
+		} else {
+			for _, gg := range ggs {
+				guildGroups[gg.ID().String()] = gg
+				if gg.IsSuspended(userID, nil) {
+					suspendedGroupIDs[gg.ID().String()] = true
+				}
+			}
+		}
+	}
+
+	// Filter each match based on permissions
+	filteredMatches := make([]*api.Match, 0, len(out.Matches))
+	for _, match := range out.Matches {
+		filteredMatch := filterMatchForUser(match, userID, isGlobalOperator, guildGroups, suspendedGroupIDs, memberGroupIDs)
+		if filteredMatch != nil {
+			filteredMatches = append(filteredMatches, filteredMatch)
+		}
+	}
+
+	out.Matches = filteredMatches
+	return nil
+}
+
+func filterMatchesForAnonymous(out *api.MatchList) error {
+	// For anonymous users, only show public match data with minimal info
+	filteredMatches := make([]*api.Match, 0, len(out.Matches))
+	for _, match := range out.Matches {
+		// Parse the label
+		label := &MatchLabel{}
+		if err := json.Unmarshal([]byte(match.Label.Value), label); err != nil {
+			continue
+		}
+
+		// Only show public matches
+		if !label.IsPublic() {
+			continue
+		}
+
+		// Create a sanitized public label
+		publicLabel := label.PublicView()
+		labelJSON, _ := json.Marshal(publicLabel)
+
+		filteredMatches = append(filteredMatches, &api.Match{
+			MatchId:       match.MatchId,
+			Authoritative: match.Authoritative,
+			Label:         &wrapperspb.StringValue{Value: string(labelJSON)},
+			Size:          match.Size,
+			TickRate:      match.TickRate,
+			HandlerName:   match.HandlerName,
+		})
+	}
+	out.Matches = filteredMatches
+	return nil
+}
+
+func filterMatchForUser(match *api.Match, userID string, isGlobalOperator bool, guildGroups map[string]*GuildGroup, suspendedGroupIDs, memberGroupIDs map[string]bool) *api.Match {
+	// Parse the label
+	label := &MatchLabel{}
+	if err := json.Unmarshal([]byte(match.Label.Value), label); err != nil {
+		return nil
+	}
+
+	// Check if user is the server host
+	isServerHost := label.GameServer != nil && label.GameServer.OperatorID.String() == userID
+
+	// Get the guild ID for this match
+	var matchGroupID string
+	if label.GroupID != nil {
+		matchGroupID = label.GroupID.String()
+	}
+
+	// Check if user is suspended from this guild
+	isSuspended := suspendedGroupIDs[matchGroupID]
+
+	// If suspended and not the server host, hide the match
+	if isSuspended && !isServerHost {
+		return nil
+	}
+
+	// Check if user is a member of this guild
+	isMember := memberGroupIDs[matchGroupID]
+
+	// Check if user has audit role in this guild
+	isAuditor := false
+	if gg, ok := guildGroups[matchGroupID]; ok {
+		isAuditor = gg.IsAuditor(userID) || gg.IsEnforcer(userID)
+	}
+
+	// Global operators can see all match data
+	canSeeFullData := isGlobalOperator || isServerHost || isAuditor
+
+	// Can see client IPs only if global operator
+	canSeeClientIPs := isGlobalOperator
+
+	// Create filtered label based on permissions
+	var labelJSON []byte
+	var err error
+	if canSeeFullData {
+		filteredLabel := createFullMatchLabel(label, canSeeClientIPs)
+		labelJSON, err = json.Marshal(filteredLabel)
+	} else if isMember || label.IsPublic() {
+		publicLabel := createPublicMatchLabel(label)
+		labelJSON, err = json.Marshal(publicLabel)
+	} else {
+		// User can't see this match at all
+		return nil
+	}
+
+	if err != nil {
+		return nil
+	}
+
+	return &api.Match{
+		MatchId:       match.MatchId,
+		Authoritative: match.Authoritative,
+		Label:         &wrapperspb.StringValue{Value: string(labelJSON)},
+		Size:          match.Size,
+		TickRate:      match.TickRate,
+		HandlerName:   match.HandlerName,
+	}
+}
+
+// PublicMatchLabel contains only publicly visible match information
+type PublicMatchLabel struct {
+	ID          MatchID   `json:"id"`
+	Open        bool      `json:"open"`
+	LobbyType   LobbyType `json:"lobby_type"`
+	Mode        string    `json:"mode,omitempty"`
+	Level       string    `json:"level,omitempty"`
+	Size        int       `json:"size"`
+	PlayerCount int       `json:"player_count"`
+	TeamSize    int       `json:"team_size,omitempty"`
+	MaxSize     int       `json:"limit,omitempty"`
+	PlayerLimit int       `json:"player_limit,omitempty"`
+	GroupID     string    `json:"group_id,omitempty"`
+	StartTime   string    `json:"start_time,omitempty"`
+	CreatedAt   string    `json:"created_at,omitempty"`
+	RatingMu    float64   `json:"rating_mu,omitempty"`
+	// Server location info (no IPs)
+	ServerRegion  string `json:"server_region,omitempty"`
+	ServerCity    string `json:"server_city,omitempty"`
+	ServerCountry string `json:"server_country,omitempty"`
+}
+
+func createPublicMatchLabel(label *MatchLabel) *PublicMatchLabel {
+	public := &PublicMatchLabel{
+		ID:          label.ID,
+		Open:        label.Open,
+		LobbyType:   label.LobbyType,
+		Mode:        label.Mode.String(),
+		Level:       label.Level.String(),
+		Size:        label.Size,
+		PlayerCount: label.PlayerCount,
+		TeamSize:    label.TeamSize,
+		MaxSize:     label.MaxSize,
+		PlayerLimit: label.PlayerLimit,
+		RatingMu:    label.RatingMu,
+	}
+
+	if label.GroupID != nil {
+		public.GroupID = label.GroupID.String()
+	}
+
+	if !label.StartTime.IsZero() {
+		public.StartTime = label.StartTime.Format("2006-01-02T15:04:05Z07:00")
+	}
+	if !label.CreatedAt.IsZero() {
+		public.CreatedAt = label.CreatedAt.Format("2006-01-02T15:04:05Z07:00")
+	}
+
+	// Add server location but not IP
+	if label.GameServer != nil {
+		public.ServerRegion = label.GameServer.DefaultRegion
+		public.ServerCity = label.GameServer.City
+		public.ServerCountry = label.GameServer.CountryCode
+	}
+
+	return public
+}
+
+func createFullMatchLabel(label *MatchLabel, includeClientIPs bool) *MatchLabel {
+	// Return the full label, but potentially redact IPs if not authorized
+	if !includeClientIPs && label.GameServer != nil {
+		// Create a copy with redacted endpoint
+		labelCopy := *label
+		serverCopy := *label.GameServer
+		serverCopy.Endpoint = evr.Endpoint{} // Redact the endpoint (contains IPs)
+		labelCopy.GameServer = &serverCopy
+		return &labelCopy
+	}
+	return label
 }
