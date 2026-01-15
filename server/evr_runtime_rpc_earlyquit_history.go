@@ -29,8 +29,8 @@ type QuitSummary struct {
 	TotalQuits          int     `json:"total_quits"`
 	UnforgivenQuits     int     `json:"unforgiven_quits"`
 	ForgivenQuits       int     `json:"forgiven_quits"`
-	EarlyQuits          int     `json:"early_quits"`
-	PregameQuits        int     `json:"pregame_quits"`
+	EarlyQuits          int     `json:"early_quits"`   // Total early quits (including forgiven)
+	PregameQuits        int     `json:"pregame_quits"` // Total pregame quits (including forgiven)
 	CurrentPenaltyLevel int32   `json:"current_penalty_level"`
 	CompletedMatches    int32   `json:"completed_matches"`
 	QuitRate            float64 `json:"quit_rate"`
@@ -128,14 +128,8 @@ func EarlyQuitHistoryRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		}
 	}
 
-	// Estimate recent completions (this is approximate since we don't track completion timestamps)
-	recentCompletions := int32(0)
-	if eqconfig.TotalCompletedMatches > 0 {
-		// Rough estimate: assume completions are distributed evenly over time
-		totalDays := 90.0 // We keep 90 days of history
-		recentDays := 7.0
-		recentCompletions = int32(float64(eqconfig.TotalCompletedMatches) * (recentDays / totalDays))
-	}
+	// Get actual recent completions from history
+	recentCompletions := int32(len(history.GetRecentCompletions(7 * 24 * time.Hour)))
 
 	recentTotal := recentQuitCount + int(recentCompletions)
 	recentQuitRate := 0.0

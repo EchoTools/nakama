@@ -19,6 +19,12 @@ const (
 	QuitTypePregame QuitType = "pregame" // Left before game started
 )
 
+// CompletionRecord represents a completed match (no early quit)
+type CompletionRecord struct {
+	MatchID        MatchID   `json:"match_id"`
+	CompletionTime time.Time `json:"completion_time"`
+}
+
 // QuitRecord represents a single early quit event with full context
 type QuitRecord struct {
 	// Event info
@@ -68,16 +74,18 @@ type QuitRecord struct {
 
 // EarlyQuitHistory tracks detailed quit history for a player
 type EarlyQuitHistory struct {
-	UserID  string       `json:"user_id"`
-	Records []QuitRecord `json:"records"`
+	UserID      string             `json:"user_id"`
+	Records     []QuitRecord       `json:"records"`
+	Completions []CompletionRecord `json:"completions"` // Track completed matches with timestamps
 
 	version string
 }
 
 func NewEarlyQuitHistory(userID string) *EarlyQuitHistory {
 	return &EarlyQuitHistory{
-		UserID:  userID,
-		Records: make([]QuitRecord, 0),
+		UserID:      userID,
+		Records:     make([]QuitRecord, 0),
+		Completions: make([]CompletionRecord, 0),
 	}
 }
 
@@ -102,6 +110,14 @@ func (h *EarlyQuitHistory) GetStorageVersion() string {
 // AddQuitRecord adds a new quit record
 func (h *EarlyQuitHistory) AddQuitRecord(record QuitRecord) {
 	h.Records = append(h.Records, record)
+}
+
+// AddCompletion adds a new completion record
+func (h *EarlyQuitHistory) AddCompletion(matchID MatchID, completionTime time.Time) {
+	h.Completions = append(h.Completions, CompletionRecord{
+		MatchID:        matchID,
+		CompletionTime: completionTime,
+	})
 }
 
 // ForgiveQuit marks a quit as forgiven (player logged out completely)
@@ -138,6 +154,18 @@ func (h *EarlyQuitHistory) GetRecentQuits(duration time.Duration) []QuitRecord {
 		}
 	}
 	return quits
+}
+
+// GetRecentCompletions returns completions within the given duration
+func (h *EarlyQuitHistory) GetRecentCompletions(duration time.Duration) []CompletionRecord {
+	since := time.Now().Add(-duration)
+	var completions []CompletionRecord
+	for _, record := range h.Completions {
+		if record.CompletionTime.After(since) {
+			completions = append(completions, record)
+		}
+	}
+	return completions
 }
 
 // CountUnforgivenQuits returns the count of unforgiven quits
@@ -179,21 +207,31 @@ func (h *EarlyQuitHistory) GetQuitRate(completedMatches int32) float64 {
 }
 
 // PruneOldRecords removes records older than the given duration
-// Returns the number of records removed
-func (h *EarlyQuitHistory) PruneOldRecords(maxAge time.Duration) int {
+// Returns the number of records removed (quits, completions)
+func (h *EarlyQuitHistory) PruneOldRecords(maxAge time.Duration) (int, int) {
 	cutoff := time.Now().Add(-maxAge)
-	originalLen := len(h.Records)
+	originalQuitLen := len(h.Records)
+	originalCompletionLen := len(h.Completions)
 
-	// Keep only records newer than cutoff
-	kept := make([]QuitRecord, 0, originalLen)
+	// Keep only quit records newer than cutoff
+	keptQuits := make([]QuitRecord, 0, originalQuitLen)
 	for _, record := range h.Records {
 		if record.QuitTime.After(cutoff) {
-			kept = append(kept, record)
+			keptQuits = append(keptQuits, record)
 		}
 	}
 
-	h.Records = kept
-	return originalLen - len(kept)
+	// Keep only completion records newer than cutoff
+	keptCompletions := make([]CompletionRecord, 0, originalCompletionLen)
+	for _, record := range h.Completions {
+		if record.CompletionTime.After(cutoff) {
+			keptCompletions = append(keptCompletions, record)
+		}
+	}
+
+	h.Records = keptQuits
+	h.Completions = keptCompletions
+	return originalQuitLen - len(keptQuits), originalCompletionLen - len(keptCompletions)
 }
 
 // CreateQuitRecordFromParticipation creates a QuitRecord from PlayerParticipation and match state

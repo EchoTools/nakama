@@ -240,7 +240,7 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 		}).Debug("Failed to load early quit history for forgiveness")
 	} else {
 		// Forgive the most recent quit for the last match they quit from
-		if eqconfig.LastEarlyQuitMatchID.IsNil() || history.ForgiveQuit(eqconfig.LastEarlyQuitMatchID) {
+		if !eqconfig.LastEarlyQuitMatchID.IsNil() && history.ForgiveQuit(eqconfig.LastEarlyQuitMatchID) {
 			if err := StorableWrite(ctx, nk, userID, history); err != nil {
 				logger.WithFields(map[string]any{
 					"uid":   userID,
