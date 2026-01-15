@@ -1461,19 +1461,20 @@ type AccountSearchRequest struct {
 }
 
 type AccountSearchResponse struct {
-	Cursor               *string                `json:"cursor,omitempty"`
+	Cursor               string                 `json:"cursor,omitempty"`
 	DisplayNameMatchList []DisplayNameMatchItem `json:"display_name_matches"`
 }
 
 type DisplayNameMatchItem struct {
 	DisplayName string    `json:"display_name"`
+	Username    string    `json:"username"`
 	UserID      string    `json:"user_id"`
 	GroupID     string    `json:"group_id"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 func AccountSearchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	request := &AccountSearchRequest{}
+	request := AccountSearchRequest{}
 	if payload != "" {
 		if err := json.Unmarshal([]byte(payload), &request); err != nil {
 			return "", err
@@ -1507,42 +1508,34 @@ func AccountSearchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		return "", runtime.NewError("Search pattern name is empty", StatusInvalidArgument)
 	}
 
-	limit := min(request.Limit, 1000)
+	limit := min(request.Limit, 100)
 
 	matches, err := DisplayNameCacheRegexSearch(ctx, nk, request.DisplayNamePattern, limit)
 	if err != nil {
 		return "", runtime.NewError(err.Error(), StatusInternalError)
 	}
 
+	// Filter results to only include display names that contain the search pattern
 	results := make([]DisplayNameMatchItem, 0, len(matches))
-	for matchUserID, byGroup := range matches {
-
-		for groupID, entries := range byGroup {
-			for n, t := range entries {
-				displayNameL := strings.ToLower(n)
-				if strings.Contains(displayNameL, request.DisplayNamePattern) {
-					results = append(results, DisplayNameMatchItem{
-						DisplayName: n,
-						UserID:      matchUserID,
-						GroupID:     groupID,
-						UpdatedAt:   t,
-					})
-				}
-			}
+	for _, match := range matches {
+		displayNameL := strings.ToLower(match.DisplayName)
+		if strings.Contains(displayNameL, request.DisplayNamePattern) {
+			results = append(results, DisplayNameMatchItem{
+				DisplayName: match.DisplayName,
+				Username:    match.Username,
+				UserID:      match.UserID,
+				GroupID:     match.GroupID,
+				UpdatedAt:   match.UpdatedAt,
+			})
 		}
 	}
 
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].UpdatedAt.After(results[j].UpdatedAt)
-	})
-
+	// Already sorted by DisplayNameCacheRegexSearch, just limit
 	if len(results) > limit {
-		// Sort by updated at
-
 		results = results[:limit]
 	}
 
-	responseData, err := json.Marshal(&AccountSearchResponse{
+	responseData, err := json.Marshal(AccountSearchResponse{
 		DisplayNameMatchList: results,
 	})
 	if err != nil {
