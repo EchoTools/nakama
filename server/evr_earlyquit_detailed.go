@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -18,6 +19,12 @@ const (
 	QuitTypeEarly   QuitType = "early"   // Left during active gameplay
 	QuitTypePregame QuitType = "pregame" // Left before game started
 )
+
+// CompletionRecord represents a completed match (no early quit)
+type CompletionRecord struct {
+	MatchID        MatchID   `json:"match_id"`
+	CompletionTime time.Time `json:"completion_time"`
+}
 
 // QuitRecord represents a single early quit event with full context
 type QuitRecord struct {
@@ -68,16 +75,18 @@ type QuitRecord struct {
 
 // EarlyQuitHistory tracks detailed quit history for a player
 type EarlyQuitHistory struct {
-	UserID  string       `json:"user_id"`
-	Records []QuitRecord `json:"records"`
+	UserID      string             `json:"user_id"`
+	Records     []QuitRecord       `json:"records"`
+	Completions []CompletionRecord `json:"completions"` // Track completed matches with timestamps
 
 	version string
 }
 
 func NewEarlyQuitHistory(userID string) *EarlyQuitHistory {
 	return &EarlyQuitHistory{
-		UserID:  userID,
-		Records: make([]QuitRecord, 0),
+		UserID:      userID,
+		Records:     make([]QuitRecord, 0),
+		Completions: make([]CompletionRecord, 0),
 	}
 }
 
@@ -102,6 +111,14 @@ func (h *EarlyQuitHistory) GetStorageVersion() string {
 // AddQuitRecord adds a new quit record
 func (h *EarlyQuitHistory) AddQuitRecord(record QuitRecord) {
 	h.Records = append(h.Records, record)
+}
+
+// AddCompletion adds a new completion record
+func (h *EarlyQuitHistory) AddCompletion(matchID MatchID, completionTime time.Time) {
+	h.Completions = append(h.Completions, CompletionRecord{
+		MatchID:        matchID,
+		CompletionTime: completionTime,
+	})
 }
 
 // ForgiveQuit marks a quit as forgiven (player logged out completely)
@@ -138,6 +155,18 @@ func (h *EarlyQuitHistory) GetRecentQuits(duration time.Duration) []QuitRecord {
 		}
 	}
 	return quits
+}
+
+// GetRecentCompletions returns completions within the given duration
+func (h *EarlyQuitHistory) GetRecentCompletions(duration time.Duration) []CompletionRecord {
+	since := time.Now().Add(-duration)
+	var completions []CompletionRecord
+	for _, record := range h.Completions {
+		if record.CompletionTime.After(since) {
+			completions = append(completions, record)
+		}
+	}
+	return completions
 }
 
 // CountUnforgivenQuits returns the count of unforgiven quits
@@ -179,21 +208,31 @@ func (h *EarlyQuitHistory) GetQuitRate(completedMatches int32) float64 {
 }
 
 // PruneOldRecords removes records older than the given duration
-// Returns the number of records removed
-func (h *EarlyQuitHistory) PruneOldRecords(maxAge time.Duration) int {
+// Returns the number of records removed (quits, completions)
+func (h *EarlyQuitHistory) PruneOldRecords(maxAge time.Duration) (int, int) {
 	cutoff := time.Now().Add(-maxAge)
-	originalLen := len(h.Records)
+	originalQuitLen := len(h.Records)
+	originalCompletionLen := len(h.Completions)
 
-	// Keep only records newer than cutoff
-	kept := make([]QuitRecord, 0, originalLen)
+	// Keep only quit records newer than cutoff
+	keptQuits := make([]QuitRecord, 0, originalQuitLen)
 	for _, record := range h.Records {
 		if record.QuitTime.After(cutoff) {
-			kept = append(kept, record)
+			keptQuits = append(keptQuits, record)
 		}
 	}
 
-	h.Records = kept
-	return originalLen - len(kept)
+	// Keep only completion records newer than cutoff
+	keptCompletions := make([]CompletionRecord, 0, originalCompletionLen)
+	for _, record := range h.Completions {
+		if record.CompletionTime.After(cutoff) {
+			keptCompletions = append(keptCompletions, record)
+		}
+	}
+
+	h.Records = keptQuits
+	h.Completions = keptCompletions
+	return originalQuitLen - len(keptQuits), originalCompletionLen - len(keptCompletions)
 }
 
 // CreateQuitRecordFromParticipation creates a QuitRecord from PlayerParticipation and match state
@@ -253,4 +292,22 @@ func CreateQuitRecordFromParticipation(state *MatchLabel, participation *PlayerP
 		TeamConsecutiveHazards: participation.TeamConsecutiveHazards,
 		IsTeamWipeMember:       participation.IsTeamWipeMember,
 	}
+}
+
+// TrackMatchCompletion tracks a match completion in the player's early quit history
+// This is a helper function to reduce code duplication
+func TrackMatchCompletion(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID string, matchID MatchID, completionTime time.Time) error {
+	history := NewEarlyQuitHistory(userID)
+	if err := StorableRead(ctx, nk, userID, history, false); err != nil {
+		// Align behavior with quit tracking: log but proceed with a new history so completions are still tracked.
+		logger.WithField("error", err).Warn("Failed to load early quit history for completion tracking, proceeding with new history")
+	}
+
+	history.AddCompletion(matchID, completionTime)
+	if err := StorableWrite(ctx, nk, userID, history); err != nil {
+		logger.WithField("error", err).Warn("Failed to write completion to early quit history")
+		return err
+	}
+
+	return nil
 }
