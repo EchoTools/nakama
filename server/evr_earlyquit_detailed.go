@@ -297,8 +297,7 @@ func CreateQuitRecordFromParticipation(state *MatchLabel, participation *PlayerP
 // TrackMatchCompletion tracks a match completion in the player's early quit history
 // This is a helper function to reduce code duplication
 func TrackMatchCompletion(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID string, matchID MatchID, completionTime time.Time) error {
-	var history *EarlyQuitHistory
-	history = NewEarlyQuitHistory(userID)
+	history := NewEarlyQuitHistory(userID)
 	if err := StorableRead(ctx, nk, userID, history, false); err != nil {
 		logger.WithField("error", err).Debug("Failed to load early quit history for completion tracking")
 		return err
