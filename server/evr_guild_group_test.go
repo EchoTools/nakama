@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/bits-and-blooms/bitset"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -178,6 +179,62 @@ func TestGuildGroupMembership_asBitSet(t *testing.T) {
 			if result.Difference(tt.expected).Any() {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
 			}
+		})
+	}
+}
+
+func TestIsGuildGroupInactive(t *testing.T) {
+	tests := []struct {
+		name     string
+		group    *api.Group
+		expected bool
+	}{
+		{
+			name: "Active group with normal name",
+			group: &api.Group{
+				Name:     "Test Guild",
+				Metadata: `{"guild_id":"123","inactive":false}`,
+			},
+			expected: false,
+		},
+		{
+			name: "Inactive group with prefix",
+			group: &api.Group{
+				Name:     InactiveGroupNamePrefix + "Test Guild",
+				Metadata: `{"guild_id":"123","inactive":true}`,
+			},
+			expected: true,
+		},
+		{
+			name: "Inactive group by metadata only",
+			group: &api.Group{
+				Name:     "Test Guild",
+				Metadata: `{"guild_id":"123","inactive":true}`,
+			},
+			expected: true,
+		},
+		{
+			name: "Inactive group by prefix only",
+			group: &api.Group{
+				Name:     InactiveGroupNamePrefix + "Test Guild",
+				Metadata: `{"guild_id":"123"}`,
+			},
+			expected: true,
+		},
+		{
+			name: "Group with prefix-like name but not exact",
+			group: &api.Group{
+				Name:     "[INACT] Test Guild",
+				Metadata: `{"guild_id":"123"}`,
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isGuildGroupInactive(tt.group)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
