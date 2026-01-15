@@ -193,9 +193,16 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 	)
 
 	// If matchmaker is currently processing, skip this backfill run to avoid poaching
+	// However, if it's been processing for too long (overloaded), run backfill anyway
+	const maxMatchmakerProcessingTime = 30 * time.Second
 	if b.skillBasedMM != nil && b.skillBasedMM.IsProcessing() {
-		logger.Debug("Matchmaker is currently processing, skipping backfill")
-		return
+		processingDuration := time.Since(b.skillBasedMM.GetLastProcessStart())
+		if processingDuration < maxMatchmakerProcessingTime {
+			logger.Debug("Matchmaker is currently processing, skipping backfill")
+			return
+		}
+		logger.Warn("Matchmaker has been processing too long, running backfill anyway",
+			zap.Duration("processing_duration", processingDuration))
 	}
 
 	// Get current tickets from the global matchmaker
@@ -250,9 +257,6 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 		}
 	}
 
-	logger.Info("Running post-matchmaker backfill",
-		zap.Int("candidates", len(candidates)))
-
 	// Calculate reducing precision factor based on oldest ticket
 	settings := ServiceSettings().Matchmaking
 	reducingPrecisionFactor := 0.0
@@ -275,8 +279,9 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 		}
 	}
 
-	logger.Debug("Reducing precision factor calculated",
-		zap.Float64("factor", reducingPrecisionFactor))
+	logger.Info("Starting backfill process",
+		zap.Int("candidates", len(candidates)),
+		zap.Float64("reducing_precision_factor", reducingPrecisionFactor))
 
 	// Process and execute backfill (combined to ensure accurate slot tracking)
 	results, err := b.postMatchBackfill.ProcessAndExecuteBackfill(ctx, logger, candidates, reducingPrecisionFactor)
@@ -294,11 +299,11 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 	}
 
 	if len(results) == 0 {
-		logger.Debug("No backfill matches found")
+		logger.Info("Backfill completed with no matches found")
 		return
 	}
 
-	logger.Info("Successfully backfilled players", zap.Int("count", len(results)))
+	logger.Info("Backfill completed successfully", zap.Int("players_backfilled", len(results)))
 }
 
 func (b *LobbyBuilder) extractLatenciesFromEntrants(entrants []*MatchmakerEntry) (map[string][][]float64, map[string]map[string]float64) {
