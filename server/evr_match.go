@@ -994,14 +994,8 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				eqconfig.IncrementCompletedMatches()
 
 				// Track completion in detailed history
-				history := NewEarlyQuitHistory(presence.GetUserId())
-				if err := StorableRead(ctx, nk, presence.GetUserId(), history, false); err != nil {
-					logger.WithField("error", err).Debug("Failed to load early quit history for completion tracking")
-				} else {
-					history.AddCompletion(state.ID, time.Now().UTC())
-					if err := StorableWrite(ctx, nk, presence.GetUserId(), history); err != nil {
-						logger.WithField("error", err).Warn("Failed to write completion to early quit history")
-					}
+				if err := TrackMatchCompletion(ctx, logger, nk, presence.GetUserId(), state.ID); err != nil {
+					logger.WithField("error", err).Debug("Failed to track match completion in history")
 				}
 
 				// Check for tier change after completing match

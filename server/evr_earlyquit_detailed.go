@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -291,4 +292,22 @@ func CreateQuitRecordFromParticipation(state *MatchLabel, participation *PlayerP
 		TeamConsecutiveHazards: participation.TeamConsecutiveHazards,
 		IsTeamWipeMember:       participation.IsTeamWipeMember,
 	}
+}
+
+// TrackMatchCompletion tracks a match completion in the player's early quit history
+// This is a helper function to reduce code duplication
+func TrackMatchCompletion(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID string, matchID MatchID) error {
+	history := NewEarlyQuitHistory(userID)
+	if err := StorableRead(ctx, nk, userID, history, false); err != nil {
+		logger.WithField("error", err).Debug("Failed to load early quit history for completion tracking")
+		return err
+	}
+
+	history.AddCompletion(matchID, time.Now().UTC())
+	if err := StorableWrite(ctx, nk, userID, history); err != nil {
+		logger.WithField("error", err).Warn("Failed to write completion to early quit history")
+		return err
+	}
+
+	return nil
 }

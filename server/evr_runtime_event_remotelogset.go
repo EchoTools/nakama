@@ -474,14 +474,8 @@ func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logge
 		eqconfig.IncrementCompletedMatches()
 
 		// Track completion in detailed history
-		history := NewEarlyQuitHistory(userID)
-		if err := StorableRead(ctx, nk, userID, history, false); err != nil {
-			logger.WithField("error", err).Debug("Failed to load early quit history for completion tracking")
-		} else {
-			history.AddCompletion(matchID, time.Now().UTC())
-			if err := StorableWrite(ctx, nk, userID, history); err != nil {
-				logger.WithField("error", err).Warn("Failed to write completion to early quit history")
-			}
+		if err := TrackMatchCompletion(ctx, logger, nk, userID, matchID); err != nil {
+			logger.WithField("error", err).Debug("Failed to track match completion in history")
 		}
 
 		// Check for tier change after completing match
