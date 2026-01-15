@@ -231,6 +231,30 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 		return
 	}
 
+	// Load and update the detailed quit history to mark the last quit as forgiven
+	history := NewEarlyQuitHistory(userID)
+	if err := StorableRead(ctx, nk, userID, history, false); err != nil {
+		logger.WithFields(map[string]any{
+			"uid":   userID,
+			"error": err,
+		}).Debug("Failed to load early quit history for forgiveness")
+	} else {
+		// Forgive the most recent quit for the last match they quit from
+		if !eqconfig.LastEarlyQuitMatchID.IsNil() && history.ForgiveQuit(eqconfig.LastEarlyQuitMatchID) {
+			if err := StorableWrite(ctx, nk, userID, history); err != nil {
+				logger.WithFields(map[string]any{
+					"uid":   userID,
+					"error": err,
+				}).Warn("Failed to write forgiven early quit history")
+			} else {
+				logger.WithFields(map[string]any{
+					"uid":      userID,
+					"match_id": eqconfig.LastEarlyQuitMatchID.String(),
+				}).Debug("Marked early quit as forgiven in detailed history")
+			}
+		}
+	}
+
 	// Reduce early quit penalty by one level without inflating match completion statistics.
 	// This forgives the early quit since the player logged out entirely rather than
 	// just leaving the match to join another.
