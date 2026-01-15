@@ -797,23 +797,6 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, fmt.Errorf("failed to allocate game server: label is nil")
 	}
 
-	// Apply rate limits only after successful allocation and only if user is not privileged
-	if !isPrivileged {
-		// Apply stricter rate limit (1 per 15 minutes) for public matches
-		if isPublicMatch {
-			publicLimiter := d.loadPublicMatchRateLimiter(userID, groupID)
-			if !publicLimiter.Allow() {
-				return nil, 0, status.Error(codes.ResourceExhausted, "rate limit exceeded for public matches (1 per 15 minutes)")
-			}
-		}
-
-		// Apply general rate limit for all matches
-		limiter := d.loadPrepareMatchRateLimiter(userID, groupID)
-		if !limiter.Allow() {
-			return nil, 0, status.Error(codes.ResourceExhausted, fmt.Sprintf("rate limit exceeded (%.0f requests per minute)", limiter.Limit()*60))
-		}
-	}
-
 	latencyMillis = latencyHistory.AverageRTT(label.GameServer.Endpoint.ExternalIP.String(), true)
 
 	return label, latencyMillis, nil
