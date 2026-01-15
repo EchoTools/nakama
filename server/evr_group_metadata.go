@@ -37,6 +37,7 @@ type GroupMetadata struct {
 	DisplayNameForceNickToIGN            bool              `json:"force_nick_to_ign"`                        // Force nicknames to be the same as the in-game name
 	DisplayNameInUseNotifications        bool              `json:"display_name_in_use_notifications"`        // Display name in use notification on nick change
 	EnableGlobalPingForServers           bool              `json:"enable_global_ping_for_servers"`           // Enable global ping for servers (they will be in all pools for ping checks)
+	CreateCommandRateLimitPerMinute      float64           `json:"create_command_rate_limit_per_minute"`     // Rate limit for /create command (max creates per minute), 0 = disabled
 }
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {

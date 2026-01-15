@@ -794,11 +794,14 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	sortLabelIndexes(indexes)
 
 	// Check if we have any servers in the requested region
+	// Note: We iterate through all indexes (no early break) to count ALL matching servers
+	// for accurate server count reporting in the fallback message
 	hasRegionMatch := false
+	serverCount := 0 // Count servers in requested region(s)
 	for _, index := range indexes {
 		if index.IsRegionMatch {
 			hasRegionMatch = true
-			break
+			serverCount++
 		}
 	}
 
@@ -809,7 +812,8 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 		for _, index := range indexes {
 			if index.Label.LobbyType == UnassignedLobby && index.IsReachable {
 				// Get the region of the closest server
-				closestRegion := "unknown"
+				// Prefer non-default regions, but fallback to "default" if none exist
+				closestRegion := "default"
 				if len(index.Label.GameServer.RegionCodes) > 0 {
 					for _, r := range index.Label.GameServer.RegionCodes {
 						if r != RegionDefault {
@@ -819,12 +823,20 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 					}
 				}
 
+				// Get the primary requested region code for display
+				requestedRegionCode := "default"
+				if len(regions) > 0 {
+					requestedRegionCode = regions[0]
+				}
+
 				return nil, ErrMatchmakingNoServersInRegion{
 					FallbackInfo: &RegionFallbackInfo{
-						RequestedRegions: regions,
-						ClosestServer:    index.Label,
-						ClosestRegion:    closestRegion,
-						ClosestLatencyMs: index.RTT,
+						RequestedRegions:    regions,
+						RequestedRegionCode: requestedRegionCode,
+						ServerCount:         serverCount,
+						ClosestServer:       index.Label,
+						ClosestRegion:       closestRegion,
+						ClosestLatencyMs:    index.RTT,
 					},
 				}
 			}
