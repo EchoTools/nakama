@@ -641,6 +641,27 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 						logger.Warn("Failed to record early quit to leaderboard: %v", err)
 					}
 
+					// Save detailed quit record to history
+					if participation, ok := state.participations[mp.GetUserId()]; ok {
+						history := NewEarlyQuitHistory(mp.GetUserId())
+						if err := StorableRead(ctx, nk, mp.GetUserId(), history, false); err != nil {
+							logger.WithField("error", err).Debug("Creating new early quit history")
+						}
+
+						quitRecord := CreateQuitRecordFromParticipation(state, participation)
+						history.AddQuitRecord(quitRecord)
+
+						// Prune old records (keep last 90 days)
+						prunedQuits, prunedCompletions := history.PruneOldRecords(90 * 24 * time.Hour)
+						if prunedQuits > 0 || prunedCompletions > 0 {
+							logger.Debug("Pruned old early quit history records", zap.Int("quits", prunedQuits), zap.Int("completions", prunedCompletions))
+						}
+
+						if err := StorableWrite(ctx, nk, mp.GetUserId(), history); err != nil {
+							logger.Warn("Failed to write early quit history", zap.Error(err))
+						}
+					}
+
 					eqconfig := NewEarlyQuitConfig()
 					_nk := nk.(*RuntimeGoNakamaModule)
 					if err := StorableRead(ctx, nk, mp.GetUserId(), eqconfig, true); err != nil {
@@ -648,6 +669,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 					} else {
 
 						eqconfig.IncrementEarlyQuit()
+						eqconfig.LastEarlyQuitMatchID = state.ID
 
 						// Check for tier change after early quit
 						serviceSettings := ServiceSettings()
@@ -970,6 +992,11 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				}
 
 				eqconfig.IncrementCompletedMatches()
+
+				// Track completion in detailed history
+				if err := TrackMatchCompletion(ctx, logger, nk, presence.GetUserId(), state.ID, time.Now().UTC()); err != nil {
+					logger.WithField("error", err).Debug("Failed to track match completion in history")
+				}
 
 				// Check for tier change after completing match
 				oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
