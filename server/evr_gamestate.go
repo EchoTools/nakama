@@ -6,6 +6,30 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
+func oppositeArenaTeamID(teamID int64) int64 {
+	// EchoVR arena teams are conventionally 0 (blue) and 1 (orange).
+	// For other team IDs (spectator/social/etc), keep as-is.
+	switch teamID {
+	case 0:
+		return 1
+	case 1:
+		return 0
+	default:
+		return teamID
+	}
+}
+
+func scoringTeamIDForGoal(goal *evr.MatchGoal) int64 {
+	if goal == nil {
+		return 0
+	}
+	// A "SELF GOAL" should credit points to the opposing team, not the shooter's team.
+	if goal.GoalType == "SELF GOAL" {
+		return oppositeArenaTeamID(goal.TeamID)
+	}
+	return goal.TeamID
+}
+
 type TeamMetadata struct {
 	Strength   float64 `json:"strength,omitempty"`
 	PredictWin float64 `json:"predict_win,omitempty"`
@@ -43,7 +67,8 @@ func (g *GameState) Update(goals []*evr.MatchGoal) {
 			continue
 		}
 
-		if goal.TeamID == 0 {
+		teamID := scoringTeamIDForGoal(goal)
+		if teamID == 0 {
 			g.BlueScore += points
 		} else {
 			g.OrangeScore += points

@@ -111,15 +111,33 @@
               class="w-full flex items-center justify-between gap-3 px-3 py-2 rounded bg-slate-900/70 hover:bg-slate-700/60 border border-slate-700/60 text-sm transition text-left"
               @click="lookupOnlinePlayer(p)"
             >
-              <div class="min-w-0">
-                <div class="text-slate-100 truncate">
-                  {{ displayNameForPlayer(p) || discordUsernameForPlayer(p) || '?' }}
+              <div class="flex items-center gap-3 min-w-0">
+                <div
+                  class="h-9 w-9 rounded-full bg-slate-900/60 border border-slate-700/60 overflow-hidden flex items-center justify-center shrink-0"
+                  :title="onlineAvatarTitleForPlayer(p)"
+                >
+                  <img
+                    v-if="onlineAvatarUrlForPlayer(p)"
+                    :src="onlineAvatarUrlForPlayer(p)"
+                    :alt="onlineAvatarAltForPlayer(p)"
+                    class="h-full w-full object-cover"
+                    loading="lazy"
+                    referrerpolicy="no-referrer"
+                    @error="markOnlineAvatarError(p)"
+                  />
+                  <span v-else class="text-slate-200 font-semibold text-sm select-none">{{ onlineAvatarFallbackForPlayer(p) }}</span>
                 </div>
-                <div v-if="discordUsernameForPlayer(p)" class="text-[11px] text-slate-400 font-mono truncate leading-tight">
-                  {{ discordUsernameForPlayer(p) }}
-                </div>
-                <div class="text-[11px] text-slate-500 font-mono truncate">
-                  {{ (p.user_id || p.discord_id || p.evr_id || '').toString() }}
+
+                <div class="min-w-0">
+                  <div class="text-slate-100 truncate">
+                    {{ displayNameForPlayer(p) || discordUsernameForPlayer(p) || '?' }}
+                  </div>
+                  <div v-if="discordUsernameForPlayer(p)" class="text-[11px] text-slate-400 font-mono truncate leading-tight">
+                    {{ discordUsernameForPlayer(p) }}
+                  </div>
+                  <div class="text-[11px] text-slate-500 font-mono truncate">
+                    {{ (p.user_id || p.discord_id || p.evr_id || '').toString() }}
+                  </div>
                 </div>
               </div>
               <div class="shrink-0 text-[11px] text-slate-400">
@@ -163,12 +181,37 @@
         class="bg-slate-800 border border-slate-600/50 rounded-xl p-5 shadow-sm shadow-black/30"
       >
         <div class="flex items-center justify-between">
-          <div>
-            <h3 class="text-xl font-semibold">EchoVRCE Account</h3>
-            <p class="text-sm text-gray-400">
-              Nakama ID:
-              <span class="font-mono text-xs text-gray-300">{{ user?.id }}</span>
-            </p>
+          <div class="flex items-center gap-4 min-w-0">
+            <div
+              class="h-14 w-14 rounded-full bg-slate-900/60 border border-slate-700/60 overflow-hidden flex items-center justify-center shrink-0"
+              :title="playerAvatarTitle"
+            >
+              <img
+                v-if="playerAvatarUrl"
+                :src="playerAvatarUrl"
+                :alt="playerAvatarAlt"
+                class="h-full w-full object-cover"
+                loading="lazy"
+                referrerpolicy="no-referrer"
+                @error="avatarLoadError = true"
+              />
+              <span v-else class="text-slate-200 font-semibold text-lg select-none">{{ playerAvatarFallback }}</span>
+            </div>
+
+            <div v-if="debugAvatars" class="text-xs text-slate-400 break-all max-w-[520px]">
+              <div>raw: {{ user?.avatar_url || user?.avatarUrl || user?.avatarURL || user?.metadata?.avatar_url || user?.metadata?.avatarUrl || '—' }}</div>
+              <div>discord/custom id: {{ discordIdFromObj(user) || '—' }}</div>
+              <div>candidate: {{ playerAvatarUrlCandidate || '—' }}</div>
+              <div>effective: {{ playerAvatarUrl || '—' }} (error={{ avatarLoadError }})</div>
+            </div>
+
+            <div class="min-w-0">
+              <h3 class="text-xl font-semibold">EchoVRCE Account</h3>
+              <p class="text-sm text-gray-400">
+                Nakama ID:
+                <span class="font-mono text-xs text-gray-300">{{ user?.id }}</span>
+              </p>
+            </div>
           </div>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
@@ -765,6 +808,14 @@ const loadingOnlinePlayers = ref(false);
 const onlinePlayersError = ref('');
 const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
 
+// Avatar
+const avatarLoadError = ref(false);
+
+// Online players avatar cache (by Nakama user_id)
+const onlineAvatarsByUserId = ref(new Map());
+const onlineAvatarErrorUserIds = ref(new Set());
+const onlineDiscordIdsByUserId = ref(new Map());
+
 // Per-card local filters
 const onlinePlayersFilter = ref('');
 const activeServersFilter = ref('');
@@ -936,6 +987,232 @@ watch(
   }
 );
 
+watch(
+  () => user.value?.id,
+  () => {
+    // Reset avatar error state whenever the loaded user changes.
+    avatarLoadError.value = false;
+  }
+);
+
+function isSafeAvatarUrl(url) {
+  const s = String(url || '').trim();
+  if (!s) return false;
+  if (s.startsWith('data:image/')) return true;
+  try {
+    const u = new URL(s);
+    return u.protocol === 'https:' || u.protocol === 'http:';
+  } catch (_) {
+    return false;
+  }
+}
+
+function metadataObjectFromAny(obj) {
+  if (!obj || typeof obj !== 'object') return null;
+  const m = obj.metadata;
+  if (!m) return null;
+  if (typeof m === 'object') return m;
+  if (typeof m === 'string') {
+    try {
+      const parsed = JSON.parse(m);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch (_) {
+      return null;
+    }
+  }
+  return null;
+}
+
+function normalizeAvatarUrlCandidate(url) {
+  const s = String(url || '').trim();
+  if (!s) return '';
+
+  // Protocol-relative URLs: treat as https.
+  if (s.startsWith('//')) return `https:${s}`;
+
+  // Host-only forms (rare, but seen in some stored values).
+  if (s.startsWith('cdn.discordapp.com/')) return `https://${s}`;
+  if (s.startsWith('media.discordapp.net/')) return `https://${s}`;
+
+  return s;
+}
+
+function discordIdFromObj(obj) {
+  if (!obj || typeof obj !== 'object') return '';
+  const m = metadataObjectFromAny(obj);
+  const raw =
+    obj.discord_id ??
+    obj.discordId ??
+    obj.custom_id ??
+    obj.customId ??
+    obj.customID ??
+    m?.discord_id ??
+    m?.discordId ??
+    m?.custom_id ??
+    m?.customId ??
+    m?.customID ??
+    '';
+  return String(raw || '').trim();
+}
+
+function looksLikeDiscordAvatarHash(s) {
+  const v = String(s || '').trim();
+  if (!v) return false;
+  // Discord avatar hashes look like hex-ish strings, sometimes with "a_" prefix for animated.
+  if (v.startsWith('a_')) return /^[a-z0-9_]+$/i.test(v) && v.length >= 5;
+  return /^[a-z0-9]+$/i.test(v) && v.length >= 10;
+}
+
+function discordAvatarCdnUrl(discordId, avatarHash, size = 128) {
+  const did = String(discordId || '').trim();
+  const hash = String(avatarHash || '').trim();
+  if (!did || !hash) return '';
+  const ext = hash.startsWith('a_') ? 'gif' : 'png';
+  const qs = `size=${encodeURIComponent(String(size))}`;
+  return `https://cdn.discordapp.com/avatars/${encodeURIComponent(did)}/${encodeURIComponent(hash)}.${ext}?${qs}`;
+}
+
+function avatarUrlFromUser(u, fallbackDiscordId) {
+  if (!u || typeof u !== 'object') return '';
+  const m = metadataObjectFromAny(u);
+  const raw =
+    u.avatar_url ??
+    u.avatarUrl ??
+    u.avatarURL ??
+    m?.avatar_url ??
+    m?.avatarUrl ??
+    m?.avatarURL ??
+    '';
+  const s = normalizeAvatarUrlCandidate(raw);
+
+  // Normal case: full URL already stored.
+  if (isSafeAvatarUrl(s)) return s;
+
+  // EchoVR/Discord integration sometimes stores the Discord avatar hash in the avatar_url field.
+  // If so, expand it to a CDN URL using discord/custom id.
+  const did = discordIdFromObj(u) || String(fallbackDiscordId || '').trim();
+  if (did && looksLikeDiscordAvatarHash(s)) {
+    return discordAvatarCdnUrl(did, s, 128);
+  }
+
+  return '';
+}
+
+function normalizeUserId(value) {
+  const s = String(value || '').trim();
+  return s ? s.toLowerCase() : '';
+}
+
+function chunkArray(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+async function prefetchAvatarsForUserIds(userIds, targetMapRef, discordIdByUserId) {
+  const ids = Array.from(new Set(userIds.map((x) => String(x || '').trim()).filter(Boolean)));
+  if (ids.length === 0) return;
+
+  // Be conservative with URL length; fetch in batches.
+  const batches = chunkArray(ids, 50);
+  for (const batch of batches) {
+    try {
+      const qs = batch.map((id) => `ids=${encodeURIComponent(id)}`).join('&');
+      const res = await apiGet(`/user?${qs}`);
+      if (!res.ok) continue;
+      const data = await res.json().catch(() => ({}));
+      const users = Array.isArray(data?.users) ? data.users : [];
+      if (users.length === 0) continue;
+
+      const next = new Map(targetMapRef.value);
+      for (const u of users) {
+        const uid = String(u?.id || '').trim();
+        if (!uid) continue;
+        const k = normalizeUserId(uid);
+        const fallbackDid = discordIdByUserId && typeof discordIdByUserId.get === 'function' ? discordIdByUserId.get(k) : '';
+        const url = avatarUrlFromUser(u, fallbackDid);
+        if (!url) continue;
+        next.set(k, url);
+      }
+      targetMapRef.value = next;
+    } catch (_) {
+      // Non-fatal.
+    }
+  }
+}
+
+function onlineAvatarUrlForPlayer(player) {
+  if (!player || typeof player !== 'object') return '';
+
+  // Prefer avatar URL if present directly in match label player object.
+  const direct = avatarUrlFromUser(player);
+  if (direct) return direct;
+
+  const uidRaw = player.user_id || player.userId;
+  const uid = normalizeUserId(uidRaw);
+  if (!uid || uid === ZERO_UUID) return '';
+  if (onlineAvatarErrorUserIds.value.has(uid)) return '';
+  return onlineAvatarsByUserId.value.get(uid) || '';
+}
+
+function onlineAvatarFallbackForPlayer(player) {
+  const name = displayNameForPlayer(player) || discordUsernameForPlayer(player) || '';
+  return avatarFallbackText({ username: name });
+}
+
+function onlineAvatarAltForPlayer(player) {
+  const name = displayNameForPlayer(player) || discordUsernameForPlayer(player) || 'Player';
+  return `${name} avatar`;
+}
+
+function onlineAvatarTitleForPlayer(player) {
+  const name = displayNameForPlayer(player) || discordUsernameForPlayer(player) || '';
+  return name ? name : 'Player';
+}
+
+function markOnlineAvatarError(player) {
+  const uid = normalizeUserId(player?.user_id || player?.userId);
+  if (!uid || uid === ZERO_UUID) return;
+  const next = new Set(onlineAvatarErrorUserIds.value);
+  next.add(uid);
+  onlineAvatarErrorUserIds.value = next;
+}
+
+function avatarFallbackText(u) {
+  const primary = String(u?.displayName || u?.display_name || u?.username || '').trim();
+  if (!primary) return '?';
+  const parts = primary.split(/\s+/).filter(Boolean);
+  const first = parts[0] || '';
+  const second = parts.length > 1 ? parts[1] : '';
+  const a = first.slice(0, 1);
+  const b = second.slice(0, 1);
+  const out = (a + b).toUpperCase();
+  return out || primary.slice(0, 1).toUpperCase() || '?';
+}
+
+const playerAvatarUrlCandidate = computed(() => avatarUrlFromUser(user.value, resolvedDiscordId.value));
+
+const playerAvatarUrl = computed(() => {
+  if (avatarLoadError.value) return '';
+  return playerAvatarUrlCandidate.value;
+});
+
+const playerAvatarAlt = computed(() => {
+  const u = user.value;
+  const name = String(u?.displayName || u?.display_name || u?.username || 'Player').trim();
+  return `${name} avatar`;
+});
+
+const playerAvatarFallback = computed(() => avatarFallbackText(user.value));
+
+const playerAvatarTitle = computed(() => {
+  const u = user.value;
+  const name = String(u?.displayName || u?.display_name || u?.username || '').trim();
+  return name ? name : 'Player';
+});
+
+const debugAvatars = computed(() => String(route.query?.debugAvatars || '').trim() === '1');
+
 function normalizedFilterText(s) {
   return String(s || '').trim().toLowerCase();
 }
@@ -1059,6 +1336,7 @@ async function fetchOnlinePlayers() {
     const matches = data.matches || [];
 
     const byUserId = new Map();
+    const didByUid = new Map();
     const withoutUserId = [];
 
     for (const match of matches) {
@@ -1077,10 +1355,12 @@ async function fetchOnlinePlayers() {
       for (const p of players) {
         if (!p || typeof p !== 'object') continue;
         const uid = String(p.user_id || p.userId || '').trim();
+        const did = String(p.discord_id || p.discordId || '').trim();
         const enriched = { ...p, _mode: mode };
         // The all-zero UUID is used by some sessions and should not be treated as a real unique ID.
         if (uid && uid !== ZERO_UUID) {
           byUserId.set(uid, enriched);
+          if (did) didByUid.set(uid.toLowerCase(), did);
         } else {
           withoutUserId.push(enriched);
         }
@@ -1088,6 +1368,16 @@ async function fetchOnlinePlayers() {
     }
 
     onlinePlayers.value = [...Array.from(byUserId.values()), ...withoutUserId];
+    onlineDiscordIdsByUserId.value = didByUid;
+
+    // Best-effort: prefetch avatars for users that have a real Nakama user_id.
+    const ids = Array.from(byUserId.keys()).filter((uid) => uid && uid.toLowerCase() !== ZERO_UUID);
+    // Only fetch IDs we don't already have cached.
+    const missing = ids.filter((uid) => {
+      const k = uid.toLowerCase();
+      return !onlineAvatarsByUserId.value.has(k) && !onlineAvatarErrorUserIds.value.has(k);
+    });
+    void prefetchAvatarsForUserIds(missing, onlineAvatarsByUserId, onlineDiscordIdsByUserId.value);
   } catch (e) {
     onlinePlayersError.value = e?.message || 'Failed to load online players.';
     onlinePlayers.value = [];
@@ -1205,6 +1495,29 @@ function similarityScore(input, candidate) {
   const b = normalizeForMatch(candidate);
   if (!a || !b) return 0;
   if (a === b) return 1;
+
+  // Fast-path: substring and token containment should count as a match.
+  // This helps short queries (e.g. partial names) and cases where the candidate has extra suffix/prefix.
+  if (b.includes(a)) {
+    // Prefer earlier matches and closer length ratio.
+    const ratio = Math.min(1, a.length / Math.max(1, b.length));
+    return 0.75 + 0.25 * ratio;
+  }
+  if (a.includes(b) && b.length >= 3) {
+    const ratio = Math.min(1, b.length / Math.max(1, a.length));
+    return 0.65 + 0.2 * ratio;
+  }
+
+  // Token overlap: if all query tokens appear somewhere in candidate tokens, treat as a match.
+  const aTokens = a.split(/\s+/).filter(Boolean);
+  const bTokens = b.split(/\s+/).filter(Boolean);
+  if (aTokens.length > 1 && bTokens.length > 0) {
+    const hit = aTokens.filter((t) => t.length >= 2 && bTokens.some((bt) => bt.includes(t) || t.includes(bt)));
+    if (hit.length === aTokens.length) {
+      const ratio = Math.min(1, a.length / Math.max(1, b.length));
+      return 0.7 + 0.2 * ratio;
+    }
+  }
 
   const maxLen = Math.max(a.length, b.length);
   // For performance, cap early-exit distance at ~40% of max length.

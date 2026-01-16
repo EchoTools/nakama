@@ -467,8 +467,8 @@ func (l *MatchLabel) CalculateRatingWeights() map[evr.EvrId]int {
 	byPlayer := make(map[evr.EvrId]int)
 	byTeam := make(map[TeamIndex]int)
 	for _, g := range l.goals {
-		byPlayer[g.XPID] += g.PointsValue            // Shooter gets the points
-		byTeam[TeamIndex(g.TeamID)] += g.PointsValue // Team gets the points
+		byPlayer[g.XPID] += g.PointsValue                           // Shooter gets the points
+		byTeam[TeamIndex(scoringTeamIDForGoal(g))] += g.PointsValue // Team gets the points
 		if !g.PrevPlayerXPID.IsNil() && g.PrevPlayerXPID != g.XPID {
 			byPlayer[g.PrevPlayerXPID] += g.PointsValue - 1 // Assist gets the points - 1
 		}

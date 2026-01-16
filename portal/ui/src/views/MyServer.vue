@@ -135,9 +135,9 @@
                 <div v-if="serverScoreParts(server)" class="flex items-baseline gap-2">
                   <span class="text-xs text-slate-400">Score</span>
                   <span class="text-base font-semibold font-mono leading-none">
-                    <span class="text-blue-300">{{ serverScoreParts(server).blue }}</span>
+                    <span class="text-blue-300">BLUE {{ serverScoreParts(server).blue }}</span>
                     <span class="text-slate-500 mx-1">-</span>
-                    <span class="text-orange-300">{{ serverScoreParts(server).orange }}</span>
+                    <span class="text-orange-300">ORANGE {{ serverScoreParts(server).orange }}</span>
                   </span>
                 </div>
               </div>
@@ -167,6 +167,23 @@
                       <span :class="['shrink-0 px-2 py-0.5 text-[11px] font-semibold rounded', teamBadgeClass(p)]">
                         {{ teamLabel(p) }}
                       </span>
+
+                      <div
+                        class="h-8 w-8 rounded-full bg-slate-900/60 border border-slate-700/60 overflow-hidden flex items-center justify-center shrink-0"
+                        :title="playerAvatarTitle(p)"
+                      >
+                        <img
+                          v-if="playerAvatarUrl(p)"
+                          :src="playerAvatarUrl(p)"
+                          :alt="playerAvatarAlt(p)"
+                          class="h-full w-full object-cover"
+                          loading="lazy"
+                          referrerpolicy="no-referrer"
+                          @error="markPlayerAvatarError(p)"
+                        />
+                        <span v-else class="text-slate-200 font-semibold text-xs select-none">{{ playerAvatarFallback(p) }}</span>
+                      </div>
+
                       <div class="min-w-0">
                         <div class="font-medium text-slate-100 truncate leading-tight">
                           {{ playerPrimaryName(p) }}
@@ -495,6 +512,8 @@ import { computed, onMounted, ref } from 'vue';
 import { get as apiGet, callRpc } from '../lib/apiClient.js';
 import { userState } from '../composables/useUserState.js';
 
+const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
+
 const apiBaseRaw = import.meta.env.VITE_NAKAMA_API_BASE;
 const apiBaseDisplay = computed(() => {
   try {
@@ -508,6 +527,11 @@ const apiBaseDisplay = computed(() => {
 const servers = ref([]);
 const loading = ref(false);
 const error = ref('');
+
+// Avatar cache (by Nakama user_id)
+const avatarsByUserId = ref(new Map());
+const avatarErrorUserIds = ref(new Set());
+const discordIdsByUserId = ref(new Map());
 
 const viewMode = ref('current'); // 'current' | 'owned'
 
@@ -658,6 +682,187 @@ function parseMatchLabel(match) {
   } catch (_) {
     return null;
   }
+}
+
+function isSafeAvatarUrl(url) {
+  const s = String(url || '').trim();
+  if (!s) return false;
+  if (s.startsWith('data:image/')) return true;
+  try {
+    const u = new URL(s);
+    return u.protocol === 'https:' || u.protocol === 'http:';
+  } catch (_) {
+    return false;
+  }
+}
+
+function metadataObjectFromAny(obj) {
+  if (!obj || typeof obj !== 'object') return null;
+  const m = obj.metadata;
+  if (!m) return null;
+  if (typeof m === 'object') return m;
+  if (typeof m === 'string') {
+    try {
+      const parsed = JSON.parse(m);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch (_) {
+      return null;
+    }
+  }
+  return null;
+}
+
+function normalizeAvatarUrlCandidate(url) {
+  const s = String(url || '').trim();
+  if (!s) return '';
+  if (s.startsWith('//')) return `https:${s}`;
+  if (s.startsWith('cdn.discordapp.com/')) return `https://${s}`;
+  if (s.startsWith('media.discordapp.net/')) return `https://${s}`;
+  return s;
+}
+
+function discordIdFromObj(obj) {
+  if (!obj || typeof obj !== 'object') return '';
+  const m = metadataObjectFromAny(obj);
+  const raw =
+    obj.discord_id ??
+    obj.discordId ??
+    obj.custom_id ??
+    obj.customId ??
+    obj.customID ??
+    m?.discord_id ??
+    m?.discordId ??
+    m?.custom_id ??
+    m?.customId ??
+    m?.customID ??
+    '';
+  return String(raw || '').trim();
+}
+
+function looksLikeDiscordAvatarHash(s) {
+  const v = String(s || '').trim();
+  if (!v) return false;
+  if (v.startsWith('a_')) return /^[a-z0-9_]+$/i.test(v) && v.length >= 5;
+  return /^[a-z0-9]+$/i.test(v) && v.length >= 10;
+}
+
+function discordAvatarCdnUrl(discordId, avatarHash, size = 128) {
+  const did = String(discordId || '').trim();
+  const hash = String(avatarHash || '').trim();
+  if (!did || !hash) return '';
+  const ext = hash.startsWith('a_') ? 'gif' : 'png';
+  const qs = `size=${encodeURIComponent(String(size))}`;
+  return `https://cdn.discordapp.com/avatars/${encodeURIComponent(did)}/${encodeURIComponent(hash)}.${ext}?${qs}`;
+}
+
+function avatarUrlFromAny(obj, fallbackDiscordId) {
+  if (!obj || typeof obj !== 'object') return '';
+  const m = metadataObjectFromAny(obj);
+  const raw =
+    obj.avatar_url ??
+    obj.avatarUrl ??
+    obj.avatarURL ??
+    m?.avatar_url ??
+    m?.avatarUrl ??
+    m?.avatarURL ??
+    '';
+  const s = normalizeAvatarUrlCandidate(raw);
+
+  if (isSafeAvatarUrl(s)) return s;
+
+  const did = discordIdFromObj(obj) || String(fallbackDiscordId || '').trim();
+  if (did && looksLikeDiscordAvatarHash(s)) {
+    return discordAvatarCdnUrl(did, s, 128);
+  }
+
+  return '';
+}
+
+function avatarFallbackFromName(name) {
+  const primary = String(name || '').trim();
+  if (!primary) return '?';
+  const parts = primary.split(/\s+/).filter(Boolean);
+  const first = parts[0] || '';
+  const second = parts.length > 1 ? parts[1] : '';
+  const out = (first.slice(0, 1) + second.slice(0, 1)).toUpperCase();
+  return out || primary.slice(0, 1).toUpperCase() || '?';
+}
+
+function normalizeUserId(value) {
+  const s = String(value || '').trim();
+  return s ? s.toLowerCase() : '';
+}
+
+function chunkArray(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+async function prefetchAvatarsForUserIds(userIds, discordIdByUserId) {
+  const ids = Array.from(new Set(userIds.map((x) => String(x || '').trim()).filter(Boolean)));
+  if (ids.length === 0) return;
+
+  const batches = chunkArray(ids, 50);
+  for (const batch of batches) {
+    try {
+      const qs = batch.map((id) => `ids=${encodeURIComponent(id)}`).join('&');
+      const res = await apiGet(`/user?${qs}`);
+      if (!res.ok) continue;
+      const data = await res.json().catch(() => ({}));
+      const users = Array.isArray(data?.users) ? data.users : [];
+      if (!users.length) continue;
+
+      const next = new Map(avatarsByUserId.value);
+      for (const u of users) {
+        const uid = String(u?.id || '').trim();
+        if (!uid) continue;
+        const k = normalizeUserId(uid);
+        const fallbackDid = discordIdByUserId && typeof discordIdByUserId.get === 'function' ? discordIdByUserId.get(k) : '';
+        const url = avatarUrlFromAny(u, fallbackDid);
+        if (!url) continue;
+        next.set(k, url);
+      }
+      avatarsByUserId.value = next;
+    } catch (_) {
+      // Non-fatal.
+    }
+  }
+}
+
+function playerAvatarUrl(player) {
+  if (!player || typeof player !== 'object') return '';
+
+  // Prefer any avatar in the match label itself.
+  const direct = avatarUrlFromAny(player);
+  if (direct) return direct;
+
+  const uid = normalizeUserId(player.user_id || player.userId);
+  if (!uid || uid === ZERO_UUID) return '';
+  if (avatarErrorUserIds.value.has(uid)) return '';
+  return avatarsByUserId.value.get(uid) || '';
+}
+
+function playerAvatarFallback(player) {
+  return avatarFallbackFromName(playerPrimaryName(player) || playerSecondaryName(player) || '');
+}
+
+function playerAvatarAlt(player) {
+  const name = playerPrimaryName(player) || playerSecondaryName(player) || 'Player';
+  return `${name} avatar`;
+}
+
+function playerAvatarTitle(player) {
+  const name = playerPrimaryName(player) || playerSecondaryName(player) || '';
+  return name ? name : 'Player';
+}
+
+function markPlayerAvatarError(player) {
+  const uid = normalizeUserId(player?.user_id || player?.userId);
+  if (!uid || uid === ZERO_UUID) return;
+  const next = new Set(avatarErrorUserIds.value);
+  next.add(uid);
+  avatarErrorUserIds.value = next;
 }
 
 function cloneJson(value) {
@@ -833,6 +1038,26 @@ async function fetchMyServers() {
     }
 
     servers.value = out;
+
+    // Best-effort: prefetch avatars for all visible players.
+    const ids = [];
+    const didByUid = new Map(discordIdsByUserId.value);
+    for (const s of out) {
+      const players = Array.isArray(s?.label?.players) ? s.label.players : [];
+      for (const p of players) {
+        const uidRaw = p?.user_id || p?.userId;
+        const uid = String(uidRaw || '').trim();
+        if (!uid) continue;
+        if (uid.toLowerCase() === ZERO_UUID) continue;
+        const k = uid.toLowerCase();
+        const did = String(p?.discord_id || p?.discordId || '').trim();
+        if (did) didByUid.set(k, did);
+        if (avatarsByUserId.value.has(k) || avatarErrorUserIds.value.has(k)) continue;
+        ids.push(uid);
+      }
+    }
+    discordIdsByUserId.value = didByUid;
+    void prefetchAvatarsForUserIds(ids, discordIdsByUserId.value);
 
     lastLabelSnapshotByMatchId.clear();
     for (const [k, v] of nextSnapshot.entries()) lastLabelSnapshotByMatchId.set(k, v);
