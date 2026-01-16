@@ -1,11 +1,11 @@
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: Whitney, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+  color-scheme: dark;
+  color: #dcddde;
+  background-color: #2c2f33;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -13,13 +13,27 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: #2c2f33;
+  color: #dcddde;
+}
+
 a {
   font-weight: 500;
-  color: #646cff;
+  color: #8ea1e1;
   text-decoration: inherit;
 }
+
 a:hover {
-  color: #535bf2;
+  color: #a5b4fc;
 }
 
 
@@ -28,18 +42,4 @@ h1 {
   line-height: 1.1;
 }
 
-
-
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
-}
+/* Keep dark theme regardless of OS theme. */

@@ -1,6 +1,15 @@
 <template>
-  <header class="flex justify-between items-center px-6 py-3 bg-gray-800 text-white shadow-md border-b border-gray-700">
+  <header class="flex justify-between items-center px-6 py-3 bg-[#2c2f33] text-white border-b border-[#444]">
     <div class="flex items-center space-x-3">
+      <button
+        v-if="userState.profile"
+        type="button"
+        class="md:hidden inline-flex items-center justify-center w-9 h-9 rounded hover:bg-[#23272a] transition"
+        aria-label="Toggle sidebar"
+        @click="emit('toggleSidebar')"
+      >
+        <span class="text-xl leading-none">☰</span>
+      </button>
       <img src="https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/1f47e.svg" alt="Logo" class="w-8 h-8" />
       <span class="font-bold text-xl flex items-center">
         <span class="text-purple-500 text-2xl mr-1">.</span>
@@ -75,6 +84,8 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { userState } from '../composables/useUserState.js';
 import { useAvatar } from '../composables/useAvatar.js';
+
+const emit = defineEmits(['toggleSidebar']);
 
 const DISCORD_CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID;
 const DISCORD_REDIRECT_URI = import.meta.env.VITE_DISCORD_REDIRECT_URI;

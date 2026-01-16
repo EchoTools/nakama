@@ -7,12 +7,6 @@ import DiscordCallback from './views/auth/DiscordCallback.vue';
 
 const routes = [
   {
-    path: '/player-lookup/:identifier?',
-    name: 'PlayerLookup',
-    component: () => import('./views/PlayerLookup.vue'),
-    meta: { title: 'Player Lookup' },
-  },
-  {
     path: '/',
     name: 'Welcome',
     component: Welcome,
@@ -23,6 +17,18 @@ const routes = [
     name: 'Applications',
     component: Applications,
     meta: { title: 'Applications' },
+  },
+  {
+    path: '/player-lookup/:identifier?',
+    name: 'PlayerLookup',
+    component: () => import('./views/PlayerLookup.vue'),
+    meta: { title: 'Player Lookup' },
+  },
+  {
+    path: '/my-server',
+    name: 'MyServer',
+    component: () => import('./views/MyServer.vue'),
+    meta: { title: 'My Server' },
   },
   // OAuth callback routes
   {

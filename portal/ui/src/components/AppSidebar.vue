@@ -1,13 +1,26 @@
 <template>
-  <aside class="w-80 min-h-full bg-transparent pt-6 px-4">
+  <aside :class="asideClass">
+    <div v-if="mobile" class="flex items-center justify-between px-3 pb-3">
+      <div class="text-sm font-semibold text-[#b9bbbe]">Menu</div>
+      <button
+        type="button"
+        class="md:hidden inline-flex items-center justify-center w-9 h-9 rounded hover:bg-[#2f3136] text-[#b9bbbe] hover:text-white transition"
+        aria-label="Close sidebar"
+        @click="emit('close')"
+      >
+        ✕
+      </button>
+    </div>
     <nav class="flex flex-col gap-2">
       <button
         v-for="route in sidebarRoutes"
         :key="route.path"
         @click="navigateTo(route.path)"
         :class="[
-          'text-left px-5 py-3 rounded-sm text-white font-medium focus:outline-none',
-          router.currentRoute.value.path === route.path ? 'bg-[#393c4b]' : 'hover:bg-[#393c4b]',
+          'text-left w-full px-3 py-2 rounded text-[#b9bbbe] focus:outline-none',
+          router.currentRoute.value.path === route.path
+            ? 'bg-[#5865f2] text-white font-bold'
+            : 'hover:bg-[#2f3136] hover:text-white',
         ]"
       >
         {{ route.meta?.title || route.name || route.path }}
@@ -19,6 +32,11 @@
 <script setup>
 import { useRouter } from 'vue-router';
 import { computed } from 'vue';
+
+const props = defineProps({
+  mobile: { type: Boolean, default: false },
+});
+const emit = defineEmits(['navigate', 'close']);
 
 const router = useRouter();
 // Only show routes that have meta.sidebar !== false
@@ -37,5 +55,12 @@ const sidebarRoutes = computed(() => {
 
 const navigateTo = (path) => {
   router.push(path);
+  emit('navigate');
 };
+
+const asideClass = computed(() => {
+  return props.mobile
+    ? 'w-full min-h-full bg-[#202225] pt-5 px-0'
+    : 'w-[220px] min-h-full bg-[#202225] pt-5 px-3';
+});
 </script>

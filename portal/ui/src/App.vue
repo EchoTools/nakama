@@ -1,7 +1,7 @@
 <script setup>
 import AppHeader from './components/AppHeader.vue';
 import AppSidebar from './components/AppSidebar.vue';
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useRouter } from 'vue-router'; // Import useRouter
 import { useAvatar } from './composables/useAvatar.js';
 import { useDiscordOAuth } from './composables/useDiscordOAuth.js';
@@ -21,6 +21,103 @@ const router = useRouter(); // Get the router instance
 const isCallbackRoute = computed(() => {
   const name = router.currentRoute.value?.name;
   return name === 'DiscordCallback';
+});
+
+const sidebarOpen = ref(false);
+const showSidebar = computed(() => isLoggedIn.value && !!user.value);
+
+const isMobile = ref(false);
+function updateIsMobile() {
+  try {
+    isMobile.value = window.matchMedia('(max-width: 767px)').matches;
+  } catch (_) {
+    // Fallback: assume not mobile.
+    isMobile.value = false;
+  }
+}
+
+// Swipe gesture state.
+let touchActive = false;
+let touchStartX = 0;
+let touchStartY = 0;
+let touchCanOpen = false;
+let touchCanClose = false;
+
+const DRAWER_WIDTH_PX = 260;
+const SWIPE_TRIGGER_PX = 60;
+const VERTICAL_TOLERANCE_PX = 60;
+
+function shouldIgnoreTouchTarget(target) {
+  if (!(target instanceof Element)) return false;
+  return !!target.closest('input, textarea, select, button, a');
+}
+
+function onTouchStart(e) {
+  if (!isMobile.value) return;
+  if (!e.touches || e.touches.length !== 1) return;
+  if (shouldIgnoreTouchTarget(e.target)) return;
+
+  const t = e.touches[0];
+  touchActive = true;
+  touchStartX = t.clientX;
+  touchStartY = t.clientY;
+  // User requested: allow swipe open from anywhere on screen.
+  // Close should also work from anywhere when the drawer is open.
+  touchCanOpen = !sidebarOpen.value;
+  touchCanClose = sidebarOpen.value;
+}
+
+function onTouchMove(e) {
+  if (!touchActive || !isMobile.value) return;
+  if (!e.touches || e.touches.length !== 1) return;
+
+  const t = e.touches[0];
+  const dx = t.clientX - touchStartX;
+  const dy = t.clientY - touchStartY;
+
+  // Ignore mostly-vertical moves (scrolling).
+  if (Math.abs(dy) > VERTICAL_TOLERANCE_PX) return;
+
+  // Open: swipe right from left edge.
+  if (touchCanOpen && dx >= SWIPE_TRIGGER_PX && Math.abs(dx) > Math.abs(dy) * 1.5) {
+    sidebarOpen.value = true;
+    touchActive = false;
+    return;
+  }
+
+  // Close: swipe left starting inside the drawer.
+  if (touchCanClose && dx <= -SWIPE_TRIGGER_PX && Math.abs(dx) > Math.abs(dy) * 1.5) {
+    sidebarOpen.value = false;
+    touchActive = false;
+  }
+}
+
+function onTouchEnd() {
+  touchActive = false;
+  touchCanOpen = false;
+  touchCanClose = false;
+}
+
+onMounted(() => {
+  updateIsMobile();
+  window.addEventListener('resize', updateIsMobile);
+  window.addEventListener('touchstart', onTouchStart, { passive: true });
+  window.addEventListener('touchmove', onTouchMove, { passive: true });
+  window.addEventListener('touchend', onTouchEnd, { passive: true });
+  window.addEventListener('touchcancel', onTouchEnd, { passive: true });
+});
+
+onUnmounted(() => {
+  window.removeEventListener('resize', updateIsMobile);
+  window.removeEventListener('touchstart', onTouchStart);
+  window.removeEventListener('touchmove', onTouchMove);
+  window.removeEventListener('touchend', onTouchEnd);
+  window.removeEventListener('touchcancel', onTouchEnd);
+});
+
+router.afterEach(() => {
+  // Always close the mobile drawer after navigation.
+  sidebarOpen.value = false;
 });
 
 const { getDefaultAvatar, extractDiscordAvatarHash } = useAvatar();
@@ -198,14 +295,28 @@ function logout() {
 
 <template>
   <!-- Applications Header Row -->
-  <AppHeader :user="user" :onLogin="login" :onLogout="logout" />
-  <div class="flex min-h-[calc(100vh-60px)]">
+  <AppHeader :user="user" :onLogin="login" :onLogout="logout" @toggle-sidebar="sidebarOpen = !sidebarOpen" />
+  <div class="flex min-h-[calc(100vh-60px)] bg-[#2c2f33]">
     <!-- Sidebar (hidden when logged out) -->
-    <template v-if="isLoggedIn && user">
-      <AppSidebar :router="router" />
+    <template v-if="showSidebar">
+      <!-- Desktop sidebar -->
+      <div class="hidden md:block">
+        <AppSidebar :router="router" />
+      </div>
+
+      <!-- Mobile overlay + drawer -->
+      <div class="md:hidden">
+        <div v-if="sidebarOpen" class="fixed inset-0 bg-black/60 z-40" @click="sidebarOpen = false"></div>
+        <div
+          class="fixed inset-y-0 left-0 z-50 w-[260px] transform transition-transform duration-200 ease-out"
+          :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
+        >
+          <AppSidebar mobile :router="router" @close="sidebarOpen = false" @navigate="sidebarOpen = false" />
+        </div>
+      </div>
     </template>
     <!-- Main content area -->
-    <main class="flex-1 flex items-start justify-center">
+    <main class="flex-1 p-5">
       <template v-if="(isLoggedIn && user) || isCallbackRoute">
         <router-view />
       </template>

@@ -86,7 +86,19 @@ export async function callRpc(id, body, opts = {}) {
 }
 
 export async function get(path, opts = {}) {
-  return apiFetch(path, { method: 'GET', ...(opts || {}) }, opts);
+  const fetchOpts = opts || {};
+  const headers = { ...(fetchOpts.headers || {}) };
+
+  return apiFetch(
+    path,
+    {
+      method: 'GET',
+      cache: fetchOpts.cache ?? 'no-store',
+      ...fetchOpts,
+      headers,
+    },
+    opts
+  );
 }
 
 export async function post(path, body, opts = {}) {
