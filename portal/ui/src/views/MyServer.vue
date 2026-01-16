@@ -891,22 +891,56 @@ function labelHasPlayer(label, { userId, discordId }) {
 function kickSubjectForPlayer(player) {
   if (!player || typeof player !== 'object') return '';
 
-  // Prefer session identifiers so we kick the in-game session
-  // instead of potentially disconnecting unrelated sessions.
-  const sessionId = player.session_id || player.sessionId;
-  if (sessionId) return String(sessionId);
-
-  const loginSessionId = player.login_session_id || player.loginSessionId;
-  if (loginSessionId) return String(loginSessionId);
-
-  // Fallbacks.
-  const userId = player.user_id || player.userId;
+  // The backend RPC `player/kick` expects a Nakama user_id (not a session_id).
+  const userId = player.user_id || player.userId || player.nakama_id || player.nakamaId || player.id;
   if (userId) return String(userId);
 
   const evrId = player.evr_id || player.evrId || player.xp_id || player.xpId;
   if (evrId) return String(evrId);
 
   return '';
+}
+
+function enforcementDurationFromForm() {
+  const value = Number(kickForm.value.suspension_value || 0);
+  if (!Number.isFinite(value) || value <= 0) return '';
+
+  switch (kickForm.value.suspension_unit) {
+    case 'minutes':
+      return `${value}m`;
+    case 'hours':
+      return `${value}h`;
+    case 'days':
+      return `${value}d`;
+    case 'weeks':
+      return `${value}w`;
+    default:
+      return '';
+  }
+}
+
+function enforcementUserNotice() {
+  // `enforcement/kick` requires a short notice shown to the user (<= 48 chars).
+  const reason = String(kickForm.value.reason || '');
+  const noticeMap = {
+    hacks: 'Kicked: cheats/exploits',
+    disrespect: 'Kicked: disrespectful behavior',
+    prejudice: 'Kicked: prejudiced remarks',
+    explicit: 'Kicked: explicit comments',
+    discrimination: 'Kicked: discriminatory language',
+    disruptive: 'Kicked: disruptive behavior',
+    sensitive: 'Kicked: sensitive topics',
+    harassment: 'Kicked: harassment/threats',
+    exploits: 'Kicked: exploits',
+    unsportsmanlike: 'Kicked: unsportsmanlike conduct',
+    trolling: 'Kicked: trolling',
+    violence: 'Kicked: illegal/violent content',
+    callout: 'Kicked: public callouts',
+    doxxing: 'Kicked: personal info sharing',
+  };
+
+  const notice = noticeMap[reason] || 'Kicked by moderator';
+  return notice.length > 48 ? notice.slice(0, 48) : notice;
 }
 
 async function verifyKickEffect({ matchId, targetUserId, targetDiscordId }) {
@@ -940,52 +974,91 @@ async function submitKick() {
     return;
   }
 
-  if (kickForm.value.action === 'suspend') {
-    kickStatusKind.value = 'error';
-    kickStatus.value = 'Suspend is not implemented in portal yet.';
-    return;
-  }
-
   kickSubmitting.value = true;
   try {
-    // Use the most specific identifier available for this player.
-    // In EVR, session IDs are the most reliable way to kick someone from the game.
-    let kickSubject = kickSubjectForPlayer(selectedPlayer.value);
+    // The backend kick RPC expects a Nakama user_id. If the match label doesn't include it,
+    // resolve it via account/lookup.
+    let targetUserId = kickSubjectForPlayer(selectedPlayer.value);
 
     // Resolve user id only as a last resort.
-    if (!kickSubject) {
+    if (!targetUserId) {
       kickStatusKind.value = 'success';
       kickStatus.value = 'Resolving player identifier…';
       const resolvedUserId = await resolvePlayerUserId(selectedPlayer.value);
       if (!resolvedUserId) {
         throw new Error('Unable to resolve player identifier from match label (no session_id/user_id/discord_id/xp_id).');
       }
-      kickSubject = String(resolvedUserId);
+      targetUserId = String(resolvedUserId);
     }
 
     const matchId = selectedServer.value?.match_id;
     const targetDiscordId = selectedPlayer.value?.discord_id || selectedPlayer.value?.discordId;
-    const targetUserId = selectedPlayer.value?.user_id || selectedPlayer.value?.userId;
+    const labelUserId = selectedPlayer.value?.user_id || selectedPlayer.value?.userId;
 
     lastKickAttempt.value = {
       matchId,
-      kickSubject: String(kickSubject),
-      targetUserId: targetUserId ? String(targetUserId) : '',
+      kickSubject: String(targetUserId),
+      targetUserId: labelUserId ? String(labelUserId) : String(targetUserId),
       targetDiscordId: targetDiscordId ? String(targetDiscordId) : '',
     };
 
-    const res = await callRpc('player/kick', { user_id: String(kickSubject) });
-    const data = await readResponsePayload(res);
-    if (!res.ok) {
-      throw new Error(`${formatRpcFailure('player/kick', res, data)}\nuser_id: ${String(kickSubject)}`);
+    // Prefer the newer enforcement RPC when doing suspension (and optionally when escalating),
+    // but fall back to player/kick to preserve compatibility.
+    let res;
+    let data;
+
+    if (kickForm.value.action === 'suspend') {
+      const duration = enforcementDurationFromForm();
+      if (!duration) throw new Error('Suspension duration is invalid.');
+
+      res = await callRpc('enforcement/kick', {
+        user_id: String(targetUserId),
+        user_notice: enforcementUserNotice(),
+        suspension_duration: duration,
+        moderator_notes: String(kickForm.value.comments || ''),
+        allow_private_lobbies: !!kickForm.value.allow_privates,
+        require_community_values: !!kickForm.value.escalate,
+      });
+      data = await readResponsePayload(res);
+      if (!res.ok) {
+        throw new Error(`${formatRpcFailure('enforcement/kick', res, data)}\nuser_id: ${String(targetUserId)}`);
+      }
+    } else {
+      // Regular kick.
+      // First attempt enforcement/kick only if user toggled escalate.
+      if (kickForm.value.escalate) {
+        res = await callRpc('enforcement/kick', {
+          user_id: String(targetUserId),
+          user_notice: enforcementUserNotice(),
+          moderator_notes: String(kickForm.value.comments || ''),
+          allow_private_lobbies: !!kickForm.value.allow_privates,
+          require_community_values: true,
+        });
+        data = await readResponsePayload(res);
+      }
+
+      if (!res || !res.ok) {
+        res = await callRpc('player/kick', { user_id: String(targetUserId) });
+        data = await readResponsePayload(res);
+        if (!res.ok) {
+          throw new Error(`${formatRpcFailure('player/kick', res, data)}\nuser_id: ${String(targetUserId)}`);
+        }
+      }
     }
 
     rememberKickAttempt(matchId, selectedPlayer.value);
 
     const kickedSessionIds = Array.isArray(data?.session_ids) ? data.session_ids : [];
-    kickStatus.value = kickedSessionIds.length
-      ? `Kick sent.\nDisconnected sessions: ${kickedSessionIds.join(', ')}\n\nRefreshing server state…`
-      : 'Kick sent.\n\nRefreshing server state…';
+    const sessionsKicked = typeof data?.sessions_kicked === 'number' ? data.sessions_kicked : null;
+    const actionWord = kickForm.value.action === 'suspend' ? 'Enforcement sent' : 'Kick sent';
+
+    if (kickedSessionIds.length) {
+      kickStatus.value = `${actionWord}.\nDisconnected sessions: ${kickedSessionIds.join(', ')}\n\nRefreshing server state…`;
+    } else if (sessionsKicked !== null) {
+      kickStatus.value = `${actionWord}.\nSessions kicked: ${sessionsKicked}\n\nRefreshing server state…`;
+    } else {
+      kickStatus.value = `${actionWord}.\n\nRefreshing server state…`;
+    }
 
     // Do not optimistically remove from UI.
     // Only the authoritative match label refresh should change player lists.
