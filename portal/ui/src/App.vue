@@ -306,9 +306,9 @@ function logout() {
 
       <!-- Mobile overlay + drawer -->
       <div class="md:hidden">
-        <div v-if="sidebarOpen" class="fixed inset-0 bg-black/60 z-40" @click="sidebarOpen = false"></div>
+        <div v-if="sidebarOpen" class="fixed inset-x-0 top-[60px] bottom-0 bg-black/60 z-40" @click="sidebarOpen = false"></div>
         <div
-          class="fixed inset-y-0 left-0 z-50 w-[260px] transform transition-transform duration-200 ease-out"
+          class="fixed left-0 top-[60px] bottom-0 z-50 w-[260px] transform transition-transform duration-200 ease-out"
           :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
         >
           <AppSidebar mobile :router="router" @close="sidebarOpen = false" @navigate="sidebarOpen = false" />

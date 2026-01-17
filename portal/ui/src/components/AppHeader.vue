@@ -1,5 +1,5 @@
 <template>
-  <header class="flex justify-between items-center px-6 py-3 bg-[#2c2f33] text-white border-b border-[#444]">
+  <header class="sticky top-0 z-30 h-[60px] flex justify-between items-center px-6 py-3 bg-[#2c2f33] text-white border-b border-[#444]">
     <div class="flex items-center space-x-3">
       <button
         v-if="userState.profile"

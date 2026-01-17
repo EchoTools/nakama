@@ -576,6 +576,12 @@
                       {{ formatMode(server.label?.mode) }}
                     </span>
                     <span
+                      v-if="lobbyTypeBadge(server.label)"
+                      :class="['px-2 py-0.5 text-xs font-semibold rounded', lobbyTypeBadgeClass(server.label)]"
+                    >
+                      {{ lobbyTypeBadge(server.label) }}
+                    </span>
+                    <span
                       :class="[
                         'px-2 py-0.5 text-xs font-semibold rounded',
                         server.label?.open ? 'bg-green-900 text-green-200' : 'bg-red-900 text-red-200',
@@ -676,6 +682,12 @@
                   <div class="flex items-center gap-2">
                     <span :class="['px-2 py-0.5 text-xs font-semibold rounded', getModeClass(server.label?.mode)]">
                       {{ formatMode(server.label?.mode) }}
+                    </span>
+                    <span
+                      v-if="lobbyTypeBadge(server.label)"
+                      :class="['px-2 py-0.5 text-xs font-semibold rounded', lobbyTypeBadgeClass(server.label)]"
+                    >
+                      {{ lobbyTypeBadge(server.label) }}
                     </span>
                     <span
                       :class="[
@@ -2679,6 +2691,44 @@ function getModeClass(mode) {
   if (modeStr.includes('combat')) return 'bg-red-900 text-red-200';
   if (modeStr.includes('social')) return 'bg-green-900 text-green-200';
   return 'bg-gray-700 text-gray-300';
+}
+
+function normalizeLobbyType(label) {
+  if (!label || typeof label !== 'object') return '';
+
+  const raw = label.lobby_type ?? label.lobbyType ?? label.lobbytype ?? null;
+  if (typeof raw === 'string') {
+    const s = raw.trim().toLowerCase();
+    if (s === 'public' || s === 'private' || s === 'unassigned') return s;
+    if (s === 'unk' || s === 'unknown') return '';
+  }
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    if (raw === 0) return 'public';
+    if (raw === 1) return 'private';
+    if (raw === 2) return 'unassigned';
+  }
+
+  // Fallback: infer from mode if lobby_type is missing.
+  const mode = String(label.mode || '').toLowerCase();
+  if (mode.includes('private') || mode.includes('_private')) return 'private';
+  if (mode) return 'public';
+  return '';
+}
+
+function lobbyTypeBadge(label) {
+  const t = normalizeLobbyType(label);
+  if (t === 'public') return 'PUBLIC';
+  if (t === 'private') return 'PRIVATE';
+  if (t === 'unassigned') return 'UNASSIGNED';
+  return '';
+}
+
+function lobbyTypeBadgeClass(label) {
+  const t = normalizeLobbyType(label);
+  if (t === 'public') return 'bg-sky-900 text-sky-200 border border-sky-700/30';
+  if (t === 'private') return 'bg-purple-900 text-purple-200 border border-purple-700/30';
+  if (t === 'unassigned') return 'bg-slate-700 text-slate-200 border border-slate-600/40';
+  return 'bg-slate-700 text-slate-200 border border-slate-600/40';
 }
 
 function formatLevel(level) {

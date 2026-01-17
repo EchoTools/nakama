@@ -60,7 +60,7 @@ const navigateTo = (path) => {
 
 const asideClass = computed(() => {
   return props.mobile
-    ? 'w-full min-h-full bg-[#202225] pt-5 px-0'
-    : 'w-[220px] min-h-full bg-[#202225] pt-5 px-3';
+    ? 'w-full h-full bg-[#202225] pt-5 px-0 overflow-y-auto'
+    : 'w-[220px] h-[calc(100vh-60px)] sticky top-[60px] self-start bg-[#202225] pt-5 px-3 overflow-y-auto';
 });
 </script>
