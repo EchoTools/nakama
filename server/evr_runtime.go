@@ -125,6 +125,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"server/scores":                 ServerScoresRPC,
 		"forcecheck":                    CheckForceUserRPC,
 		"guildgroup":                    GuildGroupGetRPC,
+		"service/metadata":              ServiceMetadataRPC,
 		"enforcement/kick":              EnforcementKickRPC,
 		"earlyquit/history":             EarlyQuitHistoryRPC,
 		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,

@@ -66,3 +66,43 @@ func UserGuildGroupListRPC(ctx context.Context, logger runtime.Logger, db *sql.D
 	}
 	return string(b), nil
 }
+
+// ServiceMetadataResponse contains public service metadata including the service guild info.
+type ServiceMetadataResponse struct {
+	ServiceGuildID   string `json:"service_guild_id,omitempty"`
+	ServiceGuildName string `json:"service_guild_name,omitempty"`
+	ServiceAvatarURL string `json:"service_avatar_url,omitempty"`
+	ReportURL        string `json:"report_url,omitempty"`
+}
+
+// ServiceMetadataRPC returns public service metadata including the service guild avatar URL.
+// This RPC does not require authentication.
+func ServiceMetadataRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	settings := ServiceSettings()
+	if settings == nil {
+		return "", runtime.NewError("service settings not loaded", 13) // Internal
+	}
+
+	resp := ServiceMetadataResponse{
+		ServiceGuildID: settings.ServiceGuildID,
+		ReportURL:      settings.ReportURL,
+	}
+
+	// If we have a service guild ID, try to load its group info to get the avatar URL
+	if settings.ServiceGuildID != "" {
+		// The service guild ID is a Discord guild ID, we need to find the corresponding Nakama group
+		// Groups are linked by the guild_id in their metadata
+		groups, _, err := nk.GroupsList(ctx, settings.ServiceGuildID, GuildGroupLangTag, nil, nil, 1, "")
+		if err == nil && len(groups) > 0 {
+			group := groups[0]
+			resp.ServiceGuildName = group.Name
+			resp.ServiceAvatarURL = group.AvatarUrl
+		}
+	}
+
+	b, err := json.Marshal(resp)
+	if err != nil {
+		return "", runtime.NewError("failed to marshal response", 13)
+	}
+	return string(b), nil
+}
