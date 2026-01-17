@@ -90,13 +90,23 @@ func ServiceMetadataRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 
 	// If we have a service guild ID, try to load its group info to get the avatar URL
 	if settings.ServiceGuildID != "" {
-		// The service guild ID is a Discord guild ID, we need to find the corresponding Nakama group
-		// Groups are linked by the guild_id in their metadata
-		groups, _, err := nk.GroupsList(ctx, settings.ServiceGuildID, GuildGroupLangTag, nil, nil, 1, "")
-		if err == nil && len(groups) > 0 {
-			group := groups[0]
-			resp.ServiceGuildName = group.Name
-			resp.ServiceAvatarURL = group.AvatarUrl
+		// The service guild ID is a Discord guild ID; we expect a Nakama group whose name matches this ID
+		// Note: While the guild_id may also be present in group metadata, this lookup is performed by group name.
+		var groupName, avatarURL sql.NullString
+		err := db.QueryRowContext(
+			ctx,
+			`SELECT name, avatar_url FROM groups WHERE metadata->>'guild_id' = $1 LIMIT 1`,
+			settings.ServiceGuildID,
+		).Scan(&groupName, &avatarURL)
+		if err == nil {
+			if groupName.Valid {
+				resp.ServiceGuildName = groupName.String
+			}
+			if avatarURL.Valid {
+				resp.ServiceAvatarURL = avatarURL.String
+			}
+		} else if err != sql.ErrNoRows {
+			logger.Warn("Failed to load service guild group from database", "error", err.Error())
 		}
 	}
 
