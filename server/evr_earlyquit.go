@@ -282,6 +282,13 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 		"tier_changed":      tierChanged,
 	}).Info("Reduced early quit penalty: player logged out after early quit")
 
+	// Send tier change notification via SNS message if applicable
+	if tierChanged {
+		if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
+			messageTrigger.SendTierChangeNotification(ctx, userID, oldTier, newTier, oldTier > newTier)
+		}
+	}
+
 	// Send Discord notification if tier changed
 	if tierChanged {
 		discordID, err := GetDiscordIDByUserID(ctx, db, userID)

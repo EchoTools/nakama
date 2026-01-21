@@ -914,14 +914,6 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	}
 
 	clientProfile := NewClientProfile(ctx, params.profile, serverProfile)
-	clientProfile.EarlyQuitFeatures = evr.EarlyQuitFeatures{
-		PenaltyTimestamp:    time.Now().Add(10 * time.Minute).Unix(),
-		NumEarlyQuits:       25,
-		NumSteadyMatches:    10,
-		NumSteadyEarlyQuits: 12,
-		PenaltyLevel:        3,
-		SteadyPlayerLevel:   5,
-	}
 
 	// Check if the user is required to go through community values
 	journal := NewGuildEnforcementJournal(userID)
@@ -930,13 +922,6 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	} else if journal.CommunityValuesCompletedAt.IsZero() {
 		clientProfile.Social.CommunityValuesVersion = 0
 	}
-
-	go func() {
-		<-time.After(10 * time.Second)
-		var penaltyLevel int32 = 3
-		var durationSeconds int32 = 300
-		session.SendEvr(evr.NewLockoutActiveNotification(penaltyLevel, durationSeconds))
-	}()
 
 	return session.SendEvr(evr.NewLoggedInUserProfileSuccess(request.EvrID, clientProfile, serverProfile))
 }

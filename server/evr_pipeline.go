@@ -39,6 +39,7 @@ var globalMatchmaker = atomic.NewPointer[LocalMatchmaker](nil)
 var globalAppBot = atomic.NewPointer[DiscordAppBot](nil)
 var globalLobbyBuilder = atomic.NewPointer[LobbyBuilder](nil)
 var globalSkillBasedMatchmaker = atomic.NewPointer[SkillBasedMatchmaker](nil)
+var globalEarlyQuitMessageTrigger = atomic.NewPointer[SNSEarlyQuitMessageTrigger](nil)
 
 type EvrPipeline struct {
 	sync.RWMutex
@@ -238,6 +239,13 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 		messageCache: &MapOf[string, evr.Message]{},
 	}
+
+	// Create and store the early quit message trigger for sending SNS messages to players
+	earlyQuitMessageTrigger := NewSNSEarlyQuitMessageTrigger(evrPipeline, logger, nk, db)
+	globalEarlyQuitMessageTrigger.Store(earlyQuitMessageTrigger)
+
+	// Start the penalty expiry scheduler to monitor and send penalty expiry notifications
+	earlyQuitMessageTrigger.StartLockoutExpiryScheduler(context.Background())
 
 	return evrPipeline
 }
