@@ -4,6 +4,14 @@ import (
 	"time"
 )
 
+// LifetimeSuspensionDuration is the duration used for "lifetime" bans
+// Set to 100 years to effectively be permanent while allowing calculation
+const LifetimeSuspensionDuration = time.Hour * 24 * 365 * 100
+
+// LifetimeDurationThreshold is the minimum duration considered "lifetime"
+// Any suspension with duration > 3 years is treated as lifetime
+const LifetimeDurationThreshold = time.Hour * 24 * 365 * 3
+
 // GuildEnforcementEditEntry represents a single edit to an enforcement record.
 // This is used for internal audit tracking and is not displayed to users.
 type GuildEnforcementEditEntry struct {
@@ -53,4 +61,13 @@ func (r GuildEnforcementRecord) IsExpired() bool {
 
 func (r GuildEnforcementRecord) RequiresCommunityValues() bool {
 	return r.CommunityValuesRequired
+}
+
+// IsLifetime checks if the suspension is effectively lifetime (>3 years)
+func (r GuildEnforcementRecord) IsLifetime() bool {
+	if r.Expiry.IsZero() {
+		return true // No expiry = permanent
+	}
+	duration := r.Expiry.Sub(r.CreatedAt)
+	return duration >= LifetimeDurationThreshold
 }

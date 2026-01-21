@@ -929,7 +929,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			}
 		}
 
-		if err := StorableWrite(ctx, nk, targetUserID, journal); err != nil {
+		if err := SyncJournalAndProfile(ctx, nk, targetUserID, journal); err != nil {
 			return fmt.Errorf("failed to write storage: %w", err)
 		}
 
@@ -966,7 +966,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 					},
 				},
 				Footer: &discordgo.MessageEmbedFooter{
-					Text: "Confidential. Do not share.",
+					Text: fmt.Sprintf("Confidential. Do not share. | Edit on portal: check suspension details"),
 				},
 			}
 			if len(recordsByGroupID) == 0 {

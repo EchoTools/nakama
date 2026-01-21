@@ -1169,13 +1169,31 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 	return string(response), nil
 }
 
+// SuspensionInfo represents a single suspension record for lookup output
+type SuspensionInfo struct {
+	ID                string    `json:"id"`
+	GroupID           string    `json:"group_id"`
+	UserNotice        string    `json:"user_notice"`
+	AuditorNotes      string    `json:"auditor_notes"`
+	CreatedAt         time.Time `json:"created_at"`
+	ExpiryAt          time.Time `json:"expiry_at"`
+	IsLifetime        bool      `json:"is_lifetime"`
+	DurationDisplay   string    `json:"duration_display"`
+	EnforcerUserID    string    `json:"enforcer_user_id"`
+	EnforcerDiscordID string    `json:"enforcer_discord_id"`
+	// Edit information
+	LastEditedBy string    `json:"last_edited_by,omitempty"`
+	LastEditedAt time.Time `json:"last_edited_at,omitempty"`
+}
+
 type AccountLookupRPCResponse struct {
-	ID          uuid.UUID     `json:"id"`
-	DiscordID   string        `json:"discord_id"`
-	Username    string        `json:"username"`
-	DisplayName string        `json:"display_name"`
-	AvatarURL   string        `json:"avatar_url"`
-	IPQSData    *IPQSResponse `json:"ipqs_data,omitempty"`
+	ID          uuid.UUID        `json:"id"`
+	DiscordID   string           `json:"discord_id"`
+	Username    string           `json:"username"`
+	DisplayName string           `json:"display_name"`
+	AvatarURL   string           `json:"avatar_url"`
+	IPQSData    *IPQSResponse    `json:"ipqs_data,omitempty"`
+	Suspensions []SuspensionInfo `json:"suspensions,omitempty"` // Add suspension records
 }
 
 type AccountLookupRequest struct {
@@ -1329,6 +1347,33 @@ func (h *RPCHandler) AccountLookupRPC(ctx context.Context, logger runtime.Logger
 		DiscordID:   account.CustomId,
 		DisplayName: account.User.DisplayName,
 		AvatarURL:   account.User.AvatarUrl,
+	}
+
+	// Fetch suspension records if caller has private data access
+	if includePrivate {
+		profile := NewSuspensionProfile(userID)
+		if err := StorableRead(ctx, nk, userID, profile, false); err == nil {
+			// Collect all active suspension records from the profile
+			suspensions := make([]SuspensionInfo, 0, len(profile.Suspensions))
+			for _, profileRec := range profile.Suspensions {
+				suspInfo := SuspensionInfo{
+					ID:                profileRec.ID,
+					GroupID:           profileRec.GroupID,
+					UserNotice:        profileRec.UserNotice,
+					AuditorNotes:      profileRec.AuditorNotes,
+					CreatedAt:         profileRec.CreatedAt,
+					ExpiryAt:          profileRec.ExpiryAt,
+					IsLifetime:        profileRec.IsLifetime,
+					DurationDisplay:   profileRec.Duration,
+					EnforcerUserID:    profileRec.EnforcerUserID,
+					EnforcerDiscordID: profileRec.EnforcerDiscordID,
+					LastEditedBy:      profileRec.LastEditedBy,
+					LastEditedAt:      profileRec.LastEditedAt,
+				}
+				suspensions = append(suspensions, suspInfo)
+			}
+			response.Suspensions = suspensions
+		}
 	}
 
 	// Convert the account data to a json object.

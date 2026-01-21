@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -113,7 +114,13 @@ func (d *DiscordAppBot) showEnforcementEditModal(s *discordgo.Session, i *discor
 
 	// Check if moderator notes exceed Discord modal limit
 	if len(record.AuditorNotes) > 200 {
-		return simpleInteractionResponse(s, i, "Moderator notes for this record exceed 200 characters and cannot be edited through Discord. Please use the nevr-portal web interface to edit this record.")
+		portalBaseURL := os.Getenv("NEVR_PORTAL_BASE_URL")
+		if portalBaseURL == "" {
+			portalBaseURL = "https://echovrce.com/portal/"
+		}
+		// Construct portal link to edit page
+		portalLink := fmt.Sprintf("%ssuspensions?edit=%s&record=%s&guild=%s", portalBaseURL, targetUserID, recordID, groupID)
+		return simpleInteractionResponse(s, i, fmt.Sprintf("Moderator notes for this record exceed 200 characters and cannot be edited through Discord.\n\nEdit this record on the portal: %s", portalLink))
 	}
 
 	// Create the modal with pre-filled values
@@ -309,9 +316,9 @@ func (d *DiscordAppBot) handleEnforcementEditModalSubmit(logger runtime.Logger, 
 		return simpleInteractionResponse(d.dg, i, "Failed to edit enforcement record.")
 	}
 
-	// Save the journal
-	if err := StorableWrite(ctx, d.nk, targetUserID, journal); err != nil {
-		return fmt.Errorf("failed to save enforcement journal: %w", err)
+	// Save the journal and sync to profile
+	if err := SyncJournalAndProfile(ctx, d.nk, targetUserID, journal); err != nil {
+		return fmt.Errorf("failed to save enforcement data: %w", err)
 	}
 
 	// Create "after" embed for audit
@@ -401,9 +408,9 @@ func (d *DiscordAppBot) handleEnforcementVoidModalSubmit(logger runtime.Logger, 
 	// Void the record
 	journal.VoidRecord(groupID, recordID, callerID, i.Member.User.ID, voidReason)
 
-	// Save the journal
-	if err := StorableWrite(ctx, d.nk, targetUserID, journal); err != nil {
-		return fmt.Errorf("failed to save enforcement journal: %w", err)
+	// Save the journal and sync to profile
+	if err := SyncJournalAndProfile(ctx, d.nk, targetUserID, journal); err != nil {
+		return fmt.Errorf("failed to save enforcement data: %w", err)
 	}
 
 	// Create "after" embed for audit (show as voided)
