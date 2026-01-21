@@ -1169,13 +1169,31 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 	return string(response), nil
 }
 
+// SuspensionInfo represents a single suspension record for lookup output
+type SuspensionInfo struct {
+	ID                string    `json:"id"`
+	GroupID           string    `json:"group_id"`
+	UserNotice        string    `json:"user_notice"`
+	AuditorNotes      string    `json:"auditor_notes"`
+	CreatedAt         time.Time `json:"created_at"`
+	ExpiryAt          time.Time `json:"expiry_at"`
+	IsLifetime        bool      `json:"is_lifetime"`
+	DurationDisplay   string    `json:"duration_display"`
+	EnforcerUserID    string    `json:"enforcer_user_id"`
+	EnforcerDiscordID string    `json:"enforcer_discord_id"`
+	// Edit information
+	LastEditedBy string    `json:"last_edited_by,omitempty"`
+	LastEditedAt time.Time `json:"last_edited_at,omitempty"`
+}
+
 type AccountLookupRPCResponse struct {
-	ID          uuid.UUID     `json:"id"`
-	DiscordID   string        `json:"discord_id"`
-	Username    string        `json:"username"`
-	DisplayName string        `json:"display_name"`
-	AvatarURL   string        `json:"avatar_url"`
-	IPQSData    *IPQSResponse `json:"ipqs_data,omitempty"`
+	ID          uuid.UUID        `json:"id"`
+	DiscordID   string           `json:"discord_id"`
+	Username    string           `json:"username"`
+	DisplayName string           `json:"display_name"`
+	AvatarURL   string           `json:"avatar_url"`
+	IPQSData    *IPQSResponse    `json:"ipqs_data,omitempty"`
+	Suspensions []SuspensionInfo `json:"suspensions,omitempty"` // Add suspension records
 }
 
 type AccountLookupRequest struct {
@@ -1329,6 +1347,47 @@ func (h *RPCHandler) AccountLookupRPC(ctx context.Context, logger runtime.Logger
 		DiscordID:   account.CustomId,
 		DisplayName: account.User.DisplayName,
 		AvatarURL:   account.User.AvatarUrl,
+	}
+
+	// Fetch suspension records if caller has private data access
+	if includePrivate {
+		journal := NewGuildEnforcementJournal(userID)
+		if err := StorableRead(ctx, nk, userID, journal, false); err == nil {
+			// Collect all active suspension records
+			suspensions := make([]SuspensionInfo, 0)
+			for groupID, records := range journal.RecordsByGroupID {
+				for _, record := range records {
+					// Skip voided records
+					if journal.IsVoid(groupID, record.ID) {
+						continue
+					}
+
+					duration := record.Expiry.Sub(record.CreatedAt)
+					suspInfo := SuspensionInfo{
+						ID:                record.ID,
+						GroupID:           groupID,
+						UserNotice:        record.UserNoticeText,
+						AuditorNotes:      record.AuditorNotes,
+						CreatedAt:         record.CreatedAt,
+						ExpiryAt:          record.Expiry,
+						IsLifetime:        record.IsLifetime(),
+						DurationDisplay:   FormatDuration(duration),
+						EnforcerUserID:    record.EnforcerUserID,
+						EnforcerDiscordID: record.EnforcerDiscordID,
+					}
+
+					// Add last editor info if there are edit entries
+					if len(record.EditLog) > 0 {
+						lastEdit := record.EditLog[len(record.EditLog)-1]
+						suspInfo.LastEditedBy = lastEdit.EditorUserID
+						suspInfo.LastEditedAt = lastEdit.EditedAt
+					}
+
+					suspensions = append(suspensions, suspInfo)
+				}
+			}
+			response.Suspensions = suspensions
+		}
 	}
 
 	// Convert the account data to a json object.

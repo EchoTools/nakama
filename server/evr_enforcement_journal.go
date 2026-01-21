@@ -35,6 +35,7 @@ type GuildEnforcementJournal struct {
 	RecordsByGroupID           map[string][]GuildEnforcementRecord              `json:"records"`
 	VoidsByRecordIDByGroupID   map[string]map[string]GuildEnforcementRecordVoid `json:"voids"`
 	UserID                     string                                           `json:"user_id"`
+	GuildIDs                   []string                                         `json:"guild_ids"`
 	version                    string
 }
 
@@ -66,17 +67,14 @@ func (s GuildEnforcementJournal) GetStorageVersion() string {
 }
 
 func (s *GuildEnforcementJournal) StorageIndexes() []StorableIndexMeta {
-	/*
-		return []StorableIndexMeta{{
-			Name:       StorageIndexEnforcementJournal,
-			Collection: StorageCollectionEnforcementJournal,
-			Key:        StorageKeyEnforcementJournal,
-			Fields:     []string{"user_id", "records"},
-			MaxEntries: 1000,
-			IndexOnly:  true,
-		}}
-	*/
-	return nil
+	return []StorableIndexMeta{{
+		Name:       StorageIndexEnforcementJournal,
+		Collection: StorageCollectionEnforcementJournal,
+		Key:        StorageKeyEnforcementJournal,
+		Fields:     []string{"guild_ids"},
+		MaxEntries: 10000,
+		IndexOnly:  true,
+	}}
 }
 
 func GuildEnforcementJournalFromStorageObject(obj *api.StorageObject) (*GuildEnforcementJournal, error) {
@@ -105,8 +103,10 @@ func (s *GuildEnforcementJournal) updateFields() {
 	// Update the top level fields
 
 	activeByGroupID := make(map[string]time.Time, len(s.RecordsByGroupID))
+	s.GuildIDs = make([]string, 0, len(s.RecordsByGroupID))
 
 	for groupID, records := range s.RecordsByGroupID {
+		s.GuildIDs = append(s.GuildIDs, groupID)
 		for _, r := range records {
 
 			if s.IsVoid(groupID, r.ID) {
@@ -409,6 +409,11 @@ func CheckEnforcementSuspensions(journals GuildEnforcementJournalList, inheritan
 }
 
 func FormatDuration(d time.Duration) string {
+
+	// Check if this is a "lifetime" duration (>3 years)
+	if d >= LifetimeDurationThreshold {
+		return "lifetime"
+	}
 
 	if d == 0 {
 		return "0s"
