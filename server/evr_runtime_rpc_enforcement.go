@@ -507,8 +507,11 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 
 	// Get Discord ID for audit log (optional)
 	callerDiscordID := ""
-	if discordID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string); ok {
-		callerDiscordID = discordID
+	account, err := nk.AccountGetId(ctx, userID)
+	if err != nil {
+		logger.Error("Failed to load caller account for Discord ID", zap.Error(err), zap.String("user_id", userID))
+	} else if account != nil && account.CustomId != "" {
+		callerDiscordID = account.CustomId
 	}
 
 	// Edit the record (this creates the edit log entry)
