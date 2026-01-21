@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/internal/intents"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -16,7 +16,9 @@ import (
 
 // EnforcementKickRequest represents the request payload for the kick/enforcement RPC
 type EnforcementKickRequest struct {
-	UserID                 string `json:"user_id,omitempty"`                  // Target user ID (only allowed for global operators)
+	GroupID                string `json:"group_id"`                           // Guild group ID to add the enforcement to (required)
+	TargetUserID           string `json:"target_user_id"`                     // Target user ID to kick/enforce (required)
+	EnforcerID             string `json:"enforcer_id,omitempty"`              // Enforcer user ID (only allowed for global operators, defaults to caller)
 	UserNotice             string `json:"user_notice"`                        // Reason for the kick (displayed to the user; 48 character max)
 	SuspensionDuration     string `json:"suspension_duration,omitempty"`      // Suspension duration (e.g. 1m, 2h, 3d, 4w)
 	ModeratorNotes         string `json:"moderator_notes,omitempty"`          // Notes for the audit log (other moderators)
@@ -46,6 +48,20 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError("User ID not found in context", StatusUnauthenticated)
 	}
 
+	// Validate required fields
+	if request.GroupID == "" {
+		return "", runtime.NewError("group_id is required", StatusInvalidArgument)
+	}
+
+	if request.TargetUserID == "" {
+		return "", runtime.NewError("target_user_id is required", StatusInvalidArgument)
+	}
+
+	// Disallow self-kick
+	if request.TargetUserID == userID {
+		return "", runtime.NewError("You cannot kick yourself", StatusInvalidArgument)
+	}
+
 	// Validate user notice
 	if request.UserNotice == "" {
 		return "", runtime.NewError("user_notice is required", StatusInvalidArgument)
@@ -54,17 +70,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError("user_notice must be less than 48 characters", StatusInvalidArgument)
 	}
 
-	// Get the caller's group ID from session vars
-	vars, err := intents.SessionVarsFromRuntimeContext(ctx)
-	if err != nil {
-		logger.Error("Failed to get session vars", zap.Error(err))
-		return "", runtime.NewError("Failed to get session context", StatusInternalError)
-	}
-
-	groupID := vars.GuildID
-	if groupID == "" {
-		return "", runtime.NewError("Group ID not found in session", StatusPermissionDenied)
-	}
+	groupID := request.GroupID
 
 	// Check if the caller is a global operator
 	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
@@ -73,15 +79,17 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError("Failed to check permissions", StatusInternalError)
 	}
 
-	// Determine target user ID
-	targetUserID := request.UserID
-	if targetUserID == "" {
-		// If no user ID is provided, use the caller's own ID
-		targetUserID = userID
-	} else if targetUserID != userID && !isGlobalOperator {
-		// Only global operators can specify a different user ID
-		return "", runtime.NewError("Only global operators can specify a user_id", StatusPermissionDenied)
+	// Determine enforcer user ID
+	enforcerUserID := userID
+	if request.EnforcerID != "" {
+		if !isGlobalOperator {
+			return "", runtime.NewError("Only global operators can specify an enforcer_id", StatusPermissionDenied)
+		}
+		enforcerUserID = request.EnforcerID
 	}
+
+	// Target user ID is always from the request
+	targetUserID := request.TargetUserID
 
 	// Load guild group to check permissions
 	gg, err := GuildGroupLoad(ctx, nk, groupID)
@@ -146,7 +154,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	if addSuspension {
 		// Add a new suspension record
 		actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
-		record := journal.AddRecord(groupID, userID, "", request.UserNotice, request.ModeratorNotes, request.RequireCommunityValues, request.AllowPrivateLobbies, suspensionDuration)
+		record := journal.AddRecord(groupID, enforcerUserID, "", request.UserNotice, request.ModeratorNotes, request.RequireCommunityValues, request.AllowPrivateLobbies, suspensionDuration)
 		recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
 	} else if voidActiveSuspensions {
 		// Void active suspensions
@@ -177,7 +185,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 				if request.ModeratorNotes != "" {
 					details += "\n" + request.ModeratorNotes
 				}
-				void := journal.VoidRecord(currentGroupID, record.ID, userID, "", details)
+				void := journal.VoidRecord(currentGroupID, record.ID, enforcerUserID, "", details)
 				voids[void.RecordID] = void
 			}
 		}
@@ -270,6 +278,267 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 
 	if !suspensionExpiry.IsZero() && time.Now().Before(suspensionExpiry) {
 		response.SuspensionExpiry = suspensionExpiry.Unix()
+	}
+
+	responseData, err := json.Marshal(response)
+	if err != nil {
+		logger.Error("Failed to marshal response", zap.Error(err))
+		return "", runtime.NewError("Failed to create response", StatusInternalError)
+	}
+
+	return string(responseData), nil
+}
+
+type EnforcementJournalListRequest struct {
+	GroupID string `json:"group_id"`
+}
+
+type EnforcementJournalListResponse struct {
+	Journals []GuildEnforcementJournal `json:"journals"`
+}
+
+func EnforcementJournalListRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	var request EnforcementJournalListRequest
+	if err := json.Unmarshal([]byte(payload), &request); err != nil {
+		return "", runtime.NewError("Invalid request payload", StatusInvalidArgument)
+	}
+
+	if request.GroupID == "" {
+		return "", runtime.NewError("group_id is required", StatusInvalidArgument)
+	}
+
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || userID == "" {
+		return "", runtime.NewError("User ID not found in context", StatusUnauthenticated)
+	}
+
+	// Check if the caller is a global operator
+	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
+	if err != nil {
+		logger.Error("Failed to check global operator status", zap.Error(err))
+		return "", runtime.NewError("Failed to check permissions", StatusInternalError)
+	}
+
+	if !isGlobalOperator {
+		// Check if the caller is the guild owner
+		isOwner, err := checkGroupOwner(ctx, db, userID, request.GroupID)
+		if err != nil {
+			logger.Error("Failed to check guild ownership", zap.Error(err))
+			return "", runtime.NewError("Failed to check permissions", StatusInternalError)
+		}
+		if !isOwner {
+			return "", runtime.NewError("Permission denied: not a guild owner", StatusPermissionDenied)
+		}
+	}
+
+	// List all journals containing this group_id
+	query := fmt.Sprintf("+value.guild_ids:%s", request.GroupID)
+
+	journals := make([]GuildEnforcementJournal, 0)
+	cursor := ""
+	for {
+		// SystemUserID is used as the caller for storage index list to bypass permissions,
+		// as we are manually checking permissions above.
+		objs, nextCursor, err := nk.StorageIndexList(ctx, SystemUserID, StorageIndexEnforcementJournal, query, 100, nil, cursor)
+		if err != nil {
+			logger.Error("Failed to list enforcement journals", zap.Error(err))
+			return "", runtime.NewError("Failed to list enforcement journals", StatusInternalError)
+		}
+
+		for _, obj := range objs.Objects {
+			journal, err := GuildEnforcementJournalFromStorageObject(obj)
+			if err != nil {
+				logger.Warn("Failed to unmarshal enforcement journal", zap.Error(err), zap.String("user_id", obj.GetUserId()))
+				continue
+			}
+
+			// Filter the journal to only include records for the requested group
+			filteredJournal := *journal // Shallow copy
+			filteredJournal.RecordsByGroupID = make(map[string][]GuildEnforcementRecord)
+			filteredJournal.VoidsByRecordIDByGroupID = make(map[string]map[string]GuildEnforcementRecordVoid)
+			filteredJournal.GuildIDs = []string{request.GroupID}
+
+			hasRecords := false
+			if records, ok := journal.RecordsByGroupID[request.GroupID]; ok && len(records) > 0 {
+				filteredJournal.RecordsByGroupID[request.GroupID] = records
+				hasRecords = true
+			}
+			if voids, ok := journal.VoidsByRecordIDByGroupID[request.GroupID]; ok && len(voids) > 0 {
+				filteredJournal.VoidsByRecordIDByGroupID[request.GroupID] = voids
+				hasRecords = true
+			}
+
+			if hasRecords {
+				journals = append(journals, filteredJournal)
+			}
+		}
+
+		if nextCursor == "" {
+			break
+		}
+		cursor = nextCursor
+	}
+
+	response := EnforcementJournalListResponse{
+		Journals: journals,
+	}
+
+	responseData, err := json.Marshal(response)
+	if err != nil {
+		logger.Error("Failed to marshal response", zap.Error(err))
+		return "", runtime.NewError("Failed to create response", StatusInternalError)
+	}
+
+	return string(responseData), nil
+}
+
+func checkGroupOwner(ctx context.Context, db *sql.DB, userID, groupID string) (bool, error) {
+	// Check if the user is a superadmin (owner) of the group
+	query := `
+		SELECT count(1) FROM group_edge 
+		WHERE source_id = $1 AND destination_id = $2 AND state = $3
+	`
+	var count int
+	if err := db.QueryRowContext(ctx, query, userID, groupID, int(api.UserGroupList_UserGroup_SUPERADMIN)).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// EnforcementRecordEditRequest represents the request to edit an enforcement record
+type EnforcementRecordEditRequest struct {
+	GroupID      string `json:"group_id"`       // Guild group ID (required)
+	TargetUserID string `json:"target_user_id"` // Target user ID with the enforcement record (required)
+	RecordID     string `json:"record_id"`      // Record ID to edit (required)
+	Expiry       int64  `json:"expiry"`         // New expiry timestamp (optional, if provided overrides duration)
+	UserNotice   string `json:"user_notice"`    // User-facing notice message (optional)
+	AuditorNotes string `json:"auditor_notes"`  // Internal moderator notes (optional, can exceed 200 chars)
+}
+
+// EnforcementRecordEditResponse represents the response from editing an enforcement record
+type EnforcementRecordEditResponse struct {
+	Success bool                    `json:"success"`
+	Message string                  `json:"message"`
+	Record  *GuildEnforcementRecord `json:"record"`
+}
+
+// EnforcementRecordEditRPC handles editing of enforcement records via portal interface
+// Permissions: Global operators or guild enforcers (same as Discord edit modal)
+func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	var request EnforcementRecordEditRequest
+	if err := json.Unmarshal([]byte(payload), &request); err != nil {
+		return "", runtime.NewError("Invalid request payload", StatusInvalidArgument)
+	}
+
+	// Validate required fields
+	if request.GroupID == "" {
+		return "", runtime.NewError("group_id is required", StatusInvalidArgument)
+	}
+	if request.TargetUserID == "" {
+		return "", runtime.NewError("target_user_id is required", StatusInvalidArgument)
+	}
+	if request.RecordID == "" {
+		return "", runtime.NewError("record_id is required", StatusInvalidArgument)
+	}
+
+	// Get the caller's user ID from context
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || userID == "" {
+		return "", runtime.NewError("User ID not found in context", StatusUnauthenticated)
+	}
+
+	// Check if the caller is a global operator
+	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
+	if err != nil {
+		logger.Error("Failed to check global operator status", zap.Error(err))
+		return "", runtime.NewError("Failed to check permissions", StatusInternalError)
+	}
+
+	// Load the guild group to check if caller is an enforcer
+	gg, err := GuildGroupLoad(ctx, nk, request.GroupID)
+	if err != nil {
+		logger.Error("Failed to load guild group", zap.Error(err))
+		return "", runtime.NewError("Failed to load guild group", StatusInternalError)
+	}
+
+	// Check if the caller is an enforcer
+	isEnforcer := gg.IsEnforcer(userID)
+	if !isEnforcer && !isGlobalOperator {
+		return "", runtime.NewError("You must be a guild enforcer or global operator to edit enforcement records", StatusPermissionDenied)
+	}
+
+	// Load the enforcement journal
+	journal := NewGuildEnforcementJournal(request.TargetUserID)
+	if err := StorableRead(ctx, nk, request.TargetUserID, journal, false); err != nil && status.Code(err) != codes.NotFound {
+		logger.Error("Failed to read enforcement journal", zap.Error(err))
+		return "", runtime.NewError("Failed to read enforcement journal", StatusInternalError)
+	}
+
+	// Get the specific record
+	record := journal.GetRecord(request.GroupID, request.RecordID)
+	if record == nil {
+		return "", runtime.NewError("Enforcement record not found", StatusNotFound)
+	}
+
+	// Check if already voided
+	if journal.IsVoid(request.GroupID, request.RecordID) {
+		return "", runtime.NewError("This record has already been voided and cannot be edited", StatusInvalidArgument)
+	}
+
+	// Prepare new values (use existing values if not provided)
+	newExpiry := record.Expiry
+	if request.Expiry > 0 {
+		newExpiry = time.Unix(request.Expiry, 0).UTC()
+	}
+
+	newUserNotice := record.UserNoticeText
+	if request.UserNotice != "" {
+		// Validate user notice length (Discord limit)
+		if len(request.UserNotice) > 48 {
+			return "", runtime.NewError("user_notice must be less than 48 characters", StatusInvalidArgument)
+		}
+		newUserNotice = request.UserNotice
+	}
+
+	newAuditorNotes := record.AuditorNotes
+	if request.AuditorNotes != "" {
+		newAuditorNotes = request.AuditorNotes
+	}
+
+	// Get Discord ID for audit log (optional)
+	callerDiscordID := ""
+	if discordID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string); ok {
+		callerDiscordID = discordID
+	}
+
+	// Edit the record (this creates the edit log entry)
+	updatedRecord := journal.EditRecord(request.GroupID, request.RecordID, userID, callerDiscordID, newExpiry, newUserNotice, newAuditorNotes)
+	if updatedRecord == nil {
+		return "", runtime.NewError("Failed to edit enforcement record", StatusInternalError)
+	}
+
+	// Save the journal
+	if err := StorableWrite(ctx, nk, request.TargetUserID, journal); err != nil {
+		logger.Error("Failed to write enforcement journal", zap.Error(err))
+		return "", runtime.NewError("Failed to save enforcement record", StatusInternalError)
+	}
+
+	// Log the edit
+	logger.Info("Enforcement record edited via portal",
+		zap.String("group_id", request.GroupID),
+		zap.String("target_user_id", request.TargetUserID),
+		zap.String("record_id", request.RecordID),
+		zap.String("editor_user_id", userID),
+		zap.String("previous_notice", record.UserNoticeText),
+		zap.String("new_notice", newUserNotice),
+		zap.Time("previous_expiry", record.Expiry),
+		zap.Time("new_expiry", newExpiry),
+	)
+
+	response := EnforcementRecordEditResponse{
+		Success: true,
+		Message: "Enforcement record updated successfully",
+		Record:  updatedRecord,
 	}
 
 	responseData, err := json.Marshal(response)
