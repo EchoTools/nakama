@@ -1,7 +1,0 @@
-{
-	"printWidth": 120,
-	"singleQuote": true,
-	"semi": true,
-	"htmlWhitespaceSensitivity": "ignore",
-	"vueMaxAttributesPerLine": 5
-}
