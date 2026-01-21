@@ -691,16 +691,32 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 								}
 							}
 
-							// Launch goroutine to check if player logs out and remove early quit if they do
-							// Use a 5-minute grace period before checking logout status
-							// Use background context to ensure goroutine isn't cancelled when match ends
-							go func(userID, sessionID string) {
-								bgCtx := context.Background()
-								CheckAndStrikeEarlyQuitIfLoggedOut(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, 5*time.Minute)
-							}(mp.GetUserId(), mp.GetSessionId())
+							// Send early quit penalty notification to player
+							if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
+								penaltyLevel := int32(eqconfig.EarlyQuitPenaltyLevel)
+								// Clamp to max penalty level (typically 3)
+								if penaltyLevel > MaxEarlyQuitPenaltyLevel {
+									penaltyLevel = int32(MaxEarlyQuitPenaltyLevel)
+								}
 
-							// Send Discord DM if tier changed
+								// Default lockout durations in seconds (5min, 15min, 30min, 60min)
+								lockoutDurations := []int{0, 300, 900, 1800}
+								lockoutDuration := int32(0)
+								if int(penaltyLevel) < len(lockoutDurations) {
+									lockoutDuration = int32(lockoutDurations[penaltyLevel])
+								}
+
+								reason := fmt.Sprintf("Early quit detected in match %s", state.ID.String())
+								messageTrigger.SendPenaltyAppliedNotification(ctx, mp.GetUserId(), penaltyLevel, lockoutDuration, reason)
+							}
+
+							// Send tier change notification if applicable
 							if tierChanged {
+								if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
+									messageTrigger.SendTierChangeNotification(ctx, mp.GetUserId(), oldTier, newTier, oldTier > newTier)
+								}
+
+								// Send Discord DM if tier changed
 								discordID, err := GetDiscordIDByUserID(ctx, db, mp.GetUserId())
 								if err != nil {
 									logger.Warn("Failed to get Discord ID for tier notification", zap.Error(err))
@@ -718,6 +734,14 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 									}
 								}
 							}
+
+							// Launch goroutine to check if player logs out and remove early quit if they do
+							// Use a 5-minute grace period before checking logout status
+							// Use background context to ensure goroutine isn't cancelled when match ends
+							go func(userID, sessionID string) {
+								bgCtx := context.Background()
+								CheckAndStrikeEarlyQuitIfLoggedOut(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, 5*time.Minute)
+							}(mp.GetUserId(), mp.GetSessionId())
 						}
 					}
 				}
