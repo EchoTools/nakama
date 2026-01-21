@@ -505,6 +505,12 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 		newAuditorNotes = request.AuditorNotes
 	}
 
+	// Ensure at least one field is actually changing
+	if newExpiry.Equal(record.Expiry) &&
+		newUserNotice == record.UserNoticeText &&
+		newAuditorNotes == record.AuditorNotes {
+		return "", runtime.NewError("No changes specified for enforcement record", StatusInvalidArgument)
+	}
 	// Get Discord ID for audit log (optional)
 	callerDiscordID := ""
 	account, err := nk.AccountGetId(ctx, userID)
