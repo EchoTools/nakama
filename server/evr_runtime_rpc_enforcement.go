@@ -17,7 +17,7 @@ import (
 // EnforcementKickRequest represents the request payload for the kick/enforcement RPC
 type EnforcementKickRequest struct {
 	GroupID                string `json:"group_id"`                           // Guild group ID to add the enforcement to (required)
-	TargetUserID           string `json:"target_user_id"`                     // Target user ID to kick/enforce (required)
+	TargetUserID           string `json:"target_user_id"`                     // User ID of the player being kicked or suspended (required)
 	EnforcerID             string `json:"enforcer_id,omitempty"`              // Enforcer user ID (only allowed for global operators, defaults to caller)
 	UserNotice             string `json:"user_notice"`                        // Reason for the kick (displayed to the user; 48 character max)
 	SuspensionDuration     string `json:"suspension_duration,omitempty"`      // Suspension duration (e.g. 1m, 2h, 3d, 4w)
