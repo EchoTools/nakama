@@ -1351,40 +1351,26 @@ func (h *RPCHandler) AccountLookupRPC(ctx context.Context, logger runtime.Logger
 
 	// Fetch suspension records if caller has private data access
 	if includePrivate {
-		journal := NewGuildEnforcementJournal(userID)
-		if err := StorableRead(ctx, nk, userID, journal, false); err == nil {
-			// Collect all active suspension records
-			suspensions := make([]SuspensionInfo, 0)
-			for groupID, records := range journal.RecordsByGroupID {
-				for _, record := range records {
-					// Skip voided records
-					if journal.IsVoid(groupID, record.ID) {
-						continue
-					}
-
-					duration := record.Expiry.Sub(record.CreatedAt)
-					suspInfo := SuspensionInfo{
-						ID:                record.ID,
-						GroupID:           groupID,
-						UserNotice:        record.UserNoticeText,
-						AuditorNotes:      record.AuditorNotes,
-						CreatedAt:         record.CreatedAt,
-						ExpiryAt:          record.Expiry,
-						IsLifetime:        record.IsLifetime(),
-						DurationDisplay:   FormatDuration(duration),
-						EnforcerUserID:    record.EnforcerUserID,
-						EnforcerDiscordID: record.EnforcerDiscordID,
-					}
-
-					// Add last editor info if there are edit entries
-					if len(record.EditLog) > 0 {
-						lastEdit := record.EditLog[len(record.EditLog)-1]
-						suspInfo.LastEditedBy = lastEdit.EditorUserID
-						suspInfo.LastEditedAt = lastEdit.EditedAt
-					}
-
-					suspensions = append(suspensions, suspInfo)
+		profile := NewSuspensionProfile(userID)
+		if err := StorableRead(ctx, nk, userID, profile, false); err == nil {
+			// Collect all active suspension records from the profile
+			suspensions := make([]SuspensionInfo, 0, len(profile.Suspensions))
+			for _, profileRec := range profile.Suspensions {
+				suspInfo := SuspensionInfo{
+					ID:                profileRec.ID,
+					GroupID:           profileRec.GroupID,
+					UserNotice:        profileRec.UserNotice,
+					AuditorNotes:      profileRec.AuditorNotes,
+					CreatedAt:         profileRec.CreatedAt,
+					ExpiryAt:          profileRec.ExpiryAt,
+					IsLifetime:        profileRec.IsLifetime,
+					DurationDisplay:   profileRec.Duration,
+					EnforcerUserID:    profileRec.EnforcerUserID,
+					EnforcerDiscordID: profileRec.EnforcerDiscordID,
+					LastEditedBy:      profileRec.LastEditedBy,
+					LastEditedAt:      profileRec.LastEditedAt,
 				}
+				suspensions = append(suspensions, suspInfo)
 			}
 			response.Suspensions = suspensions
 		}

@@ -183,10 +183,10 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		}
 	}
 
-	// Save the enforcement journal
-	if err := StorableWrite(ctx, nk, targetUserID, journal); err != nil {
-		logger.Error("Failed to write enforcement journal", zap.Error(err))
-		return "", runtime.NewError("Failed to save enforcement journal", StatusInternalError)
+	// Save the enforcement journal and sync to profile
+	if err := SyncJournalAndProfile(ctx, nk, targetUserID, journal); err != nil {
+		logger.Error("Failed to write enforcement data", zap.Error(err))
+		return "", runtime.NewError("Failed to save enforcement data", StatusInternalError)
 	}
 
 	// Kick the player from active sessions

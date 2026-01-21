@@ -316,9 +316,9 @@ func (d *DiscordAppBot) handleEnforcementEditModalSubmit(logger runtime.Logger, 
 		return simpleInteractionResponse(d.dg, i, "Failed to edit enforcement record.")
 	}
 
-	// Save the journal
-	if err := StorableWrite(ctx, d.nk, targetUserID, journal); err != nil {
-		return fmt.Errorf("failed to save enforcement journal: %w", err)
+	// Save the journal and sync to profile
+	if err := SyncJournalAndProfile(ctx, d.nk, targetUserID, journal); err != nil {
+		return fmt.Errorf("failed to save enforcement data: %w", err)
 	}
 
 	// Create "after" embed for audit
@@ -408,9 +408,9 @@ func (d *DiscordAppBot) handleEnforcementVoidModalSubmit(logger runtime.Logger, 
 	// Void the record
 	journal.VoidRecord(groupID, recordID, callerID, i.Member.User.ID, voidReason)
 
-	// Save the journal
-	if err := StorableWrite(ctx, d.nk, targetUserID, journal); err != nil {
-		return fmt.Errorf("failed to save enforcement journal: %w", err)
+	// Save the journal and sync to profile
+	if err := SyncJournalAndProfile(ctx, d.nk, targetUserID, journal); err != nil {
+		return fmt.Errorf("failed to save enforcement data: %w", err)
 	}
 
 	// Create "after" embed for audit (show as voided)
