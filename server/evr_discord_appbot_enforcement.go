@@ -111,6 +111,11 @@ func (d *DiscordAppBot) showEnforcementEditModal(s *discordgo.Session, i *discor
 		targetMention = fmt.Sprintf("<@%s>", targetDiscordID)
 	}
 
+	// Check if moderator notes exceed Discord modal limit
+	if len(record.AuditorNotes) > 200 {
+		return simpleInteractionResponse(s, i, "Moderator notes for this record exceed 200 characters and cannot be edited through Discord. Please use the nevr-portal web interface to edit this record.")
+	}
+
 	// Create the modal with pre-filled values
 	modal := &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
