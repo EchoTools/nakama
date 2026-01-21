@@ -175,11 +175,22 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		p.nk.metrics.CustomGauge("session_duration_seconds", metricsTags, time.Since(timer).Seconds())
 	}(metricsTags)
 
-	return session.SendEvr(
+	// Prepare messages to send on login
+	messagesToSend := []evr.Message{
 		evr.NewLoginSuccess(session.id, request.XPID),
 		unrequireMessage,
 		gameSettings,
-	)
+	}
+
+	// Send early quit config and feature flags
+	eqConfig := evr.DefaultEarlyQuitServiceConfig()
+	eqConfigMsg := evr.NewSNSEarlyQuitConfig(eqConfig)
+	messagesToSend = append(messagesToSend, eqConfigMsg)
+
+	eqFlags := evr.DefaultEarlyQuitFeatureFlags()
+	messagesToSend = append(messagesToSend, eqFlags)
+
+	return session.SendEvr(messagesToSend...)
 }
 
 // normalizes all the meta headset types to a common format
@@ -903,6 +914,14 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	}
 
 	clientProfile := NewClientProfile(ctx, params.profile, serverProfile)
+	clientProfile.EarlyQuitFeatures = evr.EarlyQuitFeatures{
+		PenaltyTimestamp:    time.Now().Add(10 * time.Minute).Unix(),
+		NumEarlyQuits:       25,
+		NumSteadyMatches:    10,
+		NumSteadyEarlyQuits: 12,
+		PenaltyLevel:        3,
+		SteadyPlayerLevel:   5,
+	}
 
 	// Check if the user is required to go through community values
 	journal := NewGuildEnforcementJournal(userID)
@@ -911,6 +930,13 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	} else if journal.CommunityValuesCompletedAt.IsZero() {
 		clientProfile.Social.CommunityValuesVersion = 0
 	}
+
+	go func() {
+		<-time.After(10 * time.Second)
+		var penaltyLevel int32 = 3
+		var durationSeconds int32 = 300
+		session.SendEvr(evr.NewLockoutActiveNotification(penaltyLevel, durationSeconds))
+	}()
 
 	return session.SendEvr(evr.NewLoggedInUserProfileSuccess(request.EvrID, clientProfile, serverProfile))
 }
@@ -954,7 +980,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 
 			journal.CommunityValuesCompletedAt = time.Now().UTC()
 
-			if err := StorableWrite(ctx, p.nk, userID, journal); err != nil {
+			if err := SyncJournalAndProfile(ctx, p.nk, userID, journal); err != nil {
 				logger.Warn("Failed to write community values", zap.Error(err))
 			}
 
