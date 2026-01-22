@@ -460,6 +460,33 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 		val := p.GetRating().Mu
 		rng := p.MatchmakingRatingRange
 
+		// Apply dynamic rating range expansion based on wait time
+		if !p.MatchmakingTimestamp.IsZero() {
+			waitTime := time.Since(p.MatchmakingTimestamp)
+			waitMinutes := waitTime.Minutes()
+
+			// Get expansion settings
+			expansionPerMinute := 0.5 // Default: expand by 0.5 per minute
+			maxExpansion := 5.0       // Default: cap at +5.0 expansion
+			if settings := ServiceSettings(); settings != nil {
+				if settings.Matchmaking.RatingRangeExpansionPerMinute > 0 {
+					expansionPerMinute = settings.Matchmaking.RatingRangeExpansionPerMinute
+				}
+				if settings.Matchmaking.MaxRatingRangeExpansion > 0 {
+					maxExpansion = settings.Matchmaking.MaxRatingRangeExpansion
+				}
+			}
+
+			// Calculate expansion (linear growth with cap)
+			expansion := waitMinutes * expansionPerMinute
+			if expansion > maxExpansion {
+				expansion = maxExpansion
+			}
+
+			// Apply expansion to range
+			rng += expansion
+		}
+
 		qparts = append(qparts,
 			// Exclusion
 			fmt.Sprintf("-label.%s:<%f", key, val-rng),
@@ -598,6 +625,33 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 			key := "rating_mu"
 			val := rating.Mu
 			rng := p.MatchmakingRatingRange
+
+			// Apply dynamic rating range expansion based on wait time
+			if !p.MatchmakingTimestamp.IsZero() {
+				waitTime := time.Since(p.MatchmakingTimestamp)
+				waitMinutes := waitTime.Minutes()
+
+				// Get expansion settings
+				expansionPerMinute := 0.5 // Default: expand by 0.5 per minute
+				maxExpansion := 5.0       // Default: cap at +5.0 expansion
+				if settings := ServiceSettings(); settings != nil {
+					if settings.Matchmaking.RatingRangeExpansionPerMinute > 0 {
+						expansionPerMinute = settings.Matchmaking.RatingRangeExpansionPerMinute
+					}
+					if settings.Matchmaking.MaxRatingRangeExpansion > 0 {
+						maxExpansion = settings.Matchmaking.MaxRatingRangeExpansion
+					}
+				}
+
+				// Calculate expansion (linear growth with cap)
+				expansion := waitMinutes * expansionPerMinute
+				if expansion > maxExpansion {
+					expansion = maxExpansion
+				}
+
+				// Apply expansion to range
+				rng += expansion
+			}
 
 			if val != 0.0 {
 				lower := val - rng

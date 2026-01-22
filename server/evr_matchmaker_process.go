@@ -44,16 +44,38 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 		}
 	}
 
-	sort.SliceStable(predictions, func(i, j int) bool {
-		// First priority: Match size (larger matches preferred)
-		if predictions[i].Size != predictions[j].Size {
-			return predictions[i].Size > predictions[j].Size
-		}
+	// Determine if wait time should override size priority
+	now := time.Now().UTC().Unix()
+	oldestWaitTimeSecs := now - oldestTicketTimestamp
+	waitTimeThreshold := int64(120) // Default: 120 seconds (2 minutes)
+	if settings := ServiceSettings(); settings != nil && settings.Matchmaking.WaitTimePriorityThresholdSecs > 0 {
+		waitTimeThreshold = int64(settings.Matchmaking.WaitTimePriorityThresholdSecs)
+	}
+	prioritizeWaitTime := oldestWaitTimeSecs >= waitTimeThreshold
 
-		// Second priority: Oldest ticket gets priority
-		// Sort by oldest ticket timestamp (smaller timestamp = older = higher priority)
-		if predictions[i].OldestTicketTimestamp != predictions[j].OldestTicketTimestamp {
-			return predictions[i].OldestTicketTimestamp < predictions[j].OldestTicketTimestamp
+	sort.SliceStable(predictions, func(i, j int) bool {
+		if prioritizeWaitTime {
+			// When wait time threshold exceeded, prioritize wait time over size
+			// First priority: Oldest ticket gets priority
+			if predictions[i].OldestTicketTimestamp != predictions[j].OldestTicketTimestamp {
+				return predictions[i].OldestTicketTimestamp < predictions[j].OldestTicketTimestamp
+			}
+
+			// Second priority: Match size (larger matches preferred)
+			if predictions[i].Size != predictions[j].Size {
+				return predictions[i].Size > predictions[j].Size
+			}
+		} else {
+			// Normal priority: size first, then wait time
+			// First priority: Match size (larger matches preferred)
+			if predictions[i].Size != predictions[j].Size {
+				return predictions[i].Size > predictions[j].Size
+			}
+
+			// Second priority: Oldest ticket gets priority
+			if predictions[i].OldestTicketTimestamp != predictions[j].OldestTicketTimestamp {
+				return predictions[i].OldestTicketTimestamp < predictions[j].OldestTicketTimestamp
+			}
 		}
 
 		// Third priority: Division diversity (fewer divisions preferred for more balanced matches)
