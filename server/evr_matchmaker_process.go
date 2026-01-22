@@ -10,7 +10,7 @@ import (
 )
 
 // Process potential matches from candidates, applying filters and predictions
-func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int) {
+func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int, []PredictedMatch) {
 
 	filterCounts := make(map[string]int)
 
@@ -67,7 +67,7 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 
 	madeMatches := m.assembleUniqueMatches(predictions)
 
-	return candidates, madeMatches, filterCounts
+	return candidates, madeMatches, filterCounts, predictions
 }
 
 // Filter out candidates where players do not have a common server within the max RTT
