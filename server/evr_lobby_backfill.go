@@ -67,10 +67,11 @@ type BackfillMatch struct {
 
 // BackfillResult represents the result of a backfill attempt
 type BackfillResult struct {
-	Candidate *BackfillCandidate
-	Match     *BackfillMatch
-	Team      int
-	Score     float64
+	Candidate     *BackfillCandidate
+	Match         *BackfillMatch
+	Team          int
+	Score         float64
+	PlayerUserIDs []string // Track user IDs of players successfully backfilled
 }
 
 // backfillContext holds pre-computed values for a backfill processing cycle
@@ -334,6 +335,7 @@ func (b *PostMatchmakerBackfill) executeBackfillResultOptimized(
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	successCount := 0
+	successfulUserIDs := make([]string, 0, len(entrantsToJoin))
 
 	for _, data := range entrantsToJoin {
 		wg.Add(1)
@@ -347,6 +349,7 @@ func (b *PostMatchmakerBackfill) executeBackfillResultOptimized(
 			} else {
 				mu.Lock()
 				successCount++
+				successfulUserIDs = append(successfulUserIDs, ent.GetUserId())
 				mu.Unlock()
 				b.metrics.CustomCounter("lobby_join_post_matchmaker_backfill", result.Match.Label.MetricsTags(), 1)
 				logger.Info("Successfully backfilled player",
@@ -359,6 +362,9 @@ func (b *PostMatchmakerBackfill) executeBackfillResultOptimized(
 	}
 
 	wg.Wait()
+
+	// Store the successful user IDs in the result for summary logging
+	result.PlayerUserIDs = successfulUserIDs
 
 	return successCount
 }
@@ -899,11 +905,42 @@ func (b *PostMatchmakerBackfill) ProcessAndExecuteBackfill(ctx context.Context, 
 				// Update tracked slots and team counts for successfully joined entrants
 				result.Match.OpenSlots[result.Team] -= successCount
 				result.Match.TeamCounts[result.Team] += successCount
+
+				// Log structured summary after each backfill operation
+				b.logBackfillSummary(logger, result)
 			}
 		}
 	}
 
 	return results, nil
+}
+
+// logBackfillSummary logs a structured summary of a completed backfill operation
+func (b *PostMatchmakerBackfill) logBackfillSummary(logger *zap.Logger, result *BackfillResult) {
+	if result == nil {
+		return
+	}
+
+	// Build structured summary of the backfill operation
+	fields := []zap.Field{
+		zap.String("match_id", result.Match.Label.ID.String()),
+		zap.Int("team", result.Team),
+		zap.Float64("score", result.Score),
+		zap.Int("player_count", len(result.PlayerUserIDs)),
+		zap.Strings("player_user_ids", result.PlayerUserIDs),
+		zap.String("mode", result.Match.Label.Mode.String()),
+		zap.String("group_id", result.Match.Label.GroupID.String()),
+	}
+
+	// Add rating info if available
+	if result.Match.Label.RatingMu > 0 {
+		fields = append(fields, zap.Float64("match_rating", result.Match.Label.RatingMu))
+	}
+	if result.Candidate.Rating > 0 {
+		fields = append(fields, zap.Float64("candidate_rating", result.Candidate.Rating))
+	}
+
+	logger.Info("Backfill operation completed", fields...)
 }
 
 // executeBackfillResult executes a single backfill result and returns the number of successfully joined entrants
@@ -953,6 +990,7 @@ func (b *PostMatchmakerBackfill) executeBackfillResult(ctx context.Context, logg
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	successCount := 0
+	successfulUserIDs := make([]string, 0, len(entrants))
 
 	for i, entrant := range entrants {
 		wg.Add(1)
@@ -963,6 +1001,7 @@ func (b *PostMatchmakerBackfill) executeBackfillResult(ctx context.Context, logg
 			} else {
 				mu.Lock()
 				successCount++
+				successfulUserIDs = append(successfulUserIDs, ent.GetUserId())
 				mu.Unlock()
 				b.metrics.CustomCounter("lobby_join_post_matchmaker_backfill", result.Match.Label.MetricsTags(), 1)
 				logger.Info("Successfully backfilled player",
@@ -975,6 +1014,9 @@ func (b *PostMatchmakerBackfill) executeBackfillResult(ctx context.Context, logg
 	}
 
 	wg.Wait()
+
+	// Store the successful user IDs in the result for summary logging
+	result.PlayerUserIDs = successfulUserIDs
 
 	return successCount
 }
