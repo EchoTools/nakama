@@ -929,7 +929,7 @@ func (b *PostMatchmakerBackfill) logBackfillSummary(logger *zap.Logger, result *
 		zap.Int("player_count", len(result.PlayerUserIDs)),
 		zap.Strings("player_user_ids", result.PlayerUserIDs),
 		zap.String("mode", result.Match.Label.Mode.String()),
-		zap.String("group_id", result.Match.Label.GroupID.String()),
+		zap.String("group_id", result.Match.Label.GetGroupID().String()),
 	}
 
 	// Add rating info if available
