@@ -46,6 +46,7 @@ const (
 	SuspendedFromLobbyGroup
 	KickedFromLobbyGroup
 	NotALobbyGroupMod
+	SecondaryConnectionRestricted
 )
 
 var LobbyErrorMessages = map[LobbyErrorCodeValue]string{
@@ -63,6 +64,7 @@ var LobbyErrorMessages = map[LobbyErrorCodeValue]string{
 	SuspendedFromLobbyGroup: "suspended_from_lobby_group",
 	KickedFromLobbyGroup:    "kicked_from_lobby_group",
 	NotALobbyGroupMod:       "not_a_lobby_group_mod",
+	SecondaryConnectionRestricted: "secondary_connection_restricted",
 }
 
 // LobbyError struct that implements the error interface.
