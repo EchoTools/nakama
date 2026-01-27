@@ -45,6 +45,7 @@ type MatchLabel struct {
 	GameServer      *GameServerPresence       `json:"broadcaster,omitempty"`      // The broadcaster's data
 	SessionSettings *evr.LobbySessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
 	TeamAlignments  map[string]int            `json:"team_alignments,omitempty"`  // map[userID]TeamIndex
+	OriginSocialID  *uuid.UUID                `json:"origin_social_id,omitempty"` // The social lobby ID this match originated from (for auto-rejoin)
 
 	server          runtime.Presence                // The broadcaster's presence
 	levelLoaded     bool                            // Whether the server has been sent the start instruction.
