@@ -129,17 +129,26 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	// Only Apply the early quit penalty if it's a public arena match.
 	if lobbyParams.Mode == evr.ModeArenaPublic && lobbyParams.EarlyQuitPenaltyLevel > 0 && serviceSettings.Matchmaking.EnableEarlyQuitPenalty {
 
-		// Default backfill interval
-		interval := 1 * time.Second
+		interval := GetLockoutDuration(lobbyParams.EarlyQuitPenaltyLevel)
 
-		// Early quitters have a shorter backfill interval.
-		switch lobbyParams.EarlyQuitPenaltyLevel {
-		case 1:
-			interval = 60 * time.Second
-		case 2:
-			interval = 120 * time.Second
-		case 3:
-			interval = 240 * time.Second
+		// Check if QueueBlocking is enabled (default is true)
+		featureFlags := evr.DefaultEarlyQuitFeatureFlags()
+		if featureFlags.EnableQueueBlocking {
+			eqConfig := NewEarlyQuitConfig()
+			if err := StorableRead(ctx, p.nk, lobbyParams.UserID.String(), eqConfig, true); err != nil {
+				logger.Warn("Failed to load early quit config for QueueBlocking check", zap.Error(err))
+			} else {
+				timeSinceLastQuit := time.Since(eqConfig.LastEarlyQuitTime)
+				lockoutDuration := GetLockoutDuration(lobbyParams.EarlyQuitPenaltyLevel)
+
+				if timeSinceLastQuit < lockoutDuration {
+					remainingTime := lockoutDuration - timeSinceLastQuit
+					message := fmt.Sprintf("Matchmaking blocked due to early quit penalty. %s remaining.", remainingTime)
+					return NewLobbyError(ServerIsLocked, message)
+				}
+				// Past lockout window, allow matchmaking
+				interval = 1 * time.Second
+			}
 		}
 
 		if !serviceSettings.Matchmaking.SilentEarlyQuitSystem {

@@ -317,14 +317,6 @@ func (t *SNSEarlyQuitMessageTrigger) Stop() {
 // checkAndNotifyExpiredPenalties checks all connected players' penalties and sends expiry notifications
 // Only notifies players who are currently connected
 func (t *SNSEarlyQuitMessageTrigger) checkAndNotifyExpiredPenalties(ctx context.Context) {
-	// Define lockout durations per tier (in seconds)
-	lockoutDurations := map[int32]int32{
-		1: 0,    // Tier 1: No lockout
-		2: 300,  // Tier 2: 5 minutes
-		3: 900,  // Tier 3: 15 minutes
-		4: 1800, // Tier 4: 30 minutes
-	}
-
 	// Check all connected EVR sessions
 	t.pipeline.sessionRegistry.Range(func(session Session) bool {
 		if session.Format() != SessionFormatEVR {
@@ -352,14 +344,11 @@ func (t *SNSEarlyQuitMessageTrigger) checkAndNotifyExpiredPenalties(ctx context.
 			return true // No penalty
 		}
 
-		// Get lockout duration for current tier
-		lockoutDuration, ok := lockoutDurations[eqConfig.MatchmakingTier]
-		if !ok {
-			lockoutDuration = 0 // Unknown tier, no lockout
-		}
+		// Get lockout duration for current penalty level
+		lockoutDuration := GetLockoutDurationSeconds(int(penaltyLevel))
 
 		if lockoutDuration == 0 {
-			return true // No lockout for this tier
+			return true // No lockout for penalty level 0
 		}
 
 		// Calculate time since last early quit
