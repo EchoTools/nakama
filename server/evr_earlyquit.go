@@ -28,6 +28,14 @@ const (
 	TierRestoredMessage = "Matchmaking Priority Restored: You have returned to Tier 1 status. Complete full matches to maintain your standing."
 )
 
+// EarlyQuitLockoutDurations maps penalty levels to their lockout durations
+var EarlyQuitLockoutDurations = map[int]time.Duration{
+	0: 0 * time.Second,   // No lockout
+	1: 120 * time.Second, // 2 minutes
+	2: 300 * time.Second, // 5 minutes
+	3: 900 * time.Second, // 15 minutes
+}
+
 type EarlyQuitConfig struct {
 	sync.Mutex
 	EarlyQuitPenaltyLevel   int32     `json:"early_quit_penalty_level"`
@@ -48,6 +56,20 @@ func CalculatePlayerReliabilityRating(earlyQuits, completedMatches int32) float6
 		return 1.0 // Default reliability rating when no matches played
 	}
 	return float64(completedMatches) / float64(totalMatches)
+}
+
+// GetLockoutDuration returns the lockout duration for a given penalty level
+func GetLockoutDuration(penaltyLevel int) time.Duration {
+	duration, ok := EarlyQuitLockoutDurations[penaltyLevel]
+	if !ok {
+		return 0 // Default to no lockout for invalid levels
+	}
+	return duration
+}
+
+// GetLockoutDurationSeconds returns the lockout duration in seconds for a given penalty level
+func GetLockoutDurationSeconds(penaltyLevel int) int32 {
+	return int32(GetLockoutDuration(penaltyLevel).Seconds())
 }
 
 func NewEarlyQuitConfig() *EarlyQuitConfig {
