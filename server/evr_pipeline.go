@@ -70,7 +70,8 @@ type EvrPipeline struct {
 	placeholderEmail string
 	linkDeviceURL    string
 
-	messageCache *MapOf[string, evr.Message]
+	messageCache            *MapOf[string, evr.Message]
+	earlyQuitMessageTrigger *SNSEarlyQuitMessageTrigger
 }
 
 type ctxDiscordBotTokenKey struct{}
@@ -242,6 +243,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 	// Create and store the early quit message trigger for sending SNS messages to players
 	earlyQuitMessageTrigger := NewSNSEarlyQuitMessageTrigger(evrPipeline, logger, nk, db)
+	evrPipeline.earlyQuitMessageTrigger = earlyQuitMessageTrigger
 	globalEarlyQuitMessageTrigger.Store(earlyQuitMessageTrigger)
 
 	// Start the penalty expiry scheduler to monitor and send penalty expiry notifications
@@ -286,7 +288,11 @@ func DetermineServiceIPs(ctx context.Context) (intIP net.IP, extIP net.IP, err e
 	return intIP, extIP, nil
 }
 
-func (p *EvrPipeline) Stop() {}
+func (p *EvrPipeline) Stop() {
+	if p.earlyQuitMessageTrigger != nil {
+		p.earlyQuitMessageTrigger.Stop()
+	}
+}
 
 func (p *EvrPipeline) MessageCacheStore(key string, message evr.Message, ttl time.Duration) {
 	p.messageCache.Store(key, message)
