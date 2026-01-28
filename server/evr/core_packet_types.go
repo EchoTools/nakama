@@ -191,6 +191,12 @@ func NewMessageFromHash(hash uint64) Message {
 		return &DocumentRequest{}
 	case 0xff71856af7e0fbd9:
 		return &LobbyEntrantsV0{}
+	case 0x080495a43a6b7251:
+		return &EarlyQuitServiceConfig{}
+	case 0x1f81b54c35788eaa:
+		return &SNSEarlyQuitUpdateNotification{}
+	case 0xd9a955895caccac3:
+		return &SNSEarlyQuitFeatureFlags{}
 	case 0x9ee5107d9e29fd63:
 		return &NEVRProtobufMessageV1{}
 	case 0xc6b3710cd9c4ef47:
