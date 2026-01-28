@@ -256,7 +256,12 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 	// Check SpawnLock enforcement (early quit penalty)
 	featureFlags := evr.DefaultEarlyQuitFeatureFlags()
-	if featureFlags != nil && featureFlags.EnableSpawnLock && !meta.Presence.IsSpectator() {
+	serviceSettings := ServiceSettings()
+	enableEarlyQuitPenalty := true
+	if serviceSettings != nil {
+		enableEarlyQuitPenalty = serviceSettings.Matchmaking.EnableEarlyQuitPenalty
+	}
+	if featureFlags != nil && featureFlags.EnableSpawnLock && enableEarlyQuitPenalty && !meta.Presence.IsSpectator() {
 		eqConfig := NewEarlyQuitConfig()
 		if err := StorableRead(ctx, nk, joinPresence.GetUserId(), eqConfig, true); err != nil {
 			logger.Warn("Failed to load early quit config for SpawnLock check", zap.Error(err))
