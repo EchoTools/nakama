@@ -915,6 +915,19 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 
 	clientProfile := NewClientProfile(ctx, params.profile, serverProfile)
 
+	if params.earlyQuitConfig != nil {
+		if cfg := params.earlyQuitConfig.Load(); cfg != nil {
+			level := cfg.EarlyQuitPenaltyLevel
+			lockoutDuration := GetLockoutDuration(int(level))
+			penaltyEndTime := cfg.LastEarlyQuitTime.Add(lockoutDuration)
+
+			if time.Now().Before(penaltyEndTime) {
+				clientProfile.EarlyQuitFeatures.PenaltyLevel = int(level)
+				clientProfile.EarlyQuitFeatures.PenaltyTimestamp = penaltyEndTime.Unix()
+			}
+		}
+	}
+
 	// Check if the user is required to go through community values
 	journal := NewGuildEnforcementJournal(userID)
 	if err := StorableRead(ctx, p.nk, userID, journal, true); err != nil {
