@@ -83,8 +83,9 @@ var (
 		0xfb772a4221fc8d70: (*LoggedInUserProfileRequest)(nil),
 		0xfcced6f169822bb8: (*DocumentRequest)(nil),
 		0xff71856af7e0fbd9: (*LobbyEntrantsV0)(nil),
-		//0x080495a43a6b7251: (*EarlyQuitConfig)(nil),
-
+		0x080495a43a6b7251: (*EarlyQuitServiceConfig)(nil),
+		0x1f81b54c35788eaa: (*SNSEarlyQuitUpdateNotification)(nil),
+		0xd9a955895caccac3: (*SNSEarlyQuitFeatureFlags)(nil),
 		// Custom messages
 		0x9ee5107d9e29fd63: (*NEVRProtobufMessageV1)(nil),
 		0xc6b3710cd9c4ef47: (*NEVRProtobufJSONMessageV1)(nil),
