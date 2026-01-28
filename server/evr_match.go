@@ -413,13 +413,31 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		logger.Error("Failed to update label: %v", err)
 	}
 
-	// Check team sizes
+	// Enforce team size limits for public arena matches
 	if state.Mode == evr.ModeArenaPublic {
-		if state.RoleCount(evr.TeamBlue) > state.TeamSize || state.RoleCount(evr.TeamOrange) > state.TeamSize {
+		blueCount := state.RoleCount(evr.TeamBlue)
+		orangeCount := state.RoleCount(evr.TeamOrange)
+		maxTeamSize := DefaultPublicArenaTeamSize // Always 4 for public arena
+
+		if blueCount > maxTeamSize || orangeCount > maxTeamSize {
 			logger.WithFields(map[string]interface{}{
-				"blue":   state.RoleCount(evr.TeamBlue),
-				"orange": state.RoleCount(evr.TeamOrange),
-			}).Error("Oversized team.")
+				"blue":          blueCount,
+				"orange":        orangeCount,
+				"max_team_size": maxTeamSize,
+				"team_size":     state.TeamSize,
+			}).Error("Rejecting join: team size limit exceeded for public arena match.")
+
+			// Remove the player that was just added
+			delete(state.presenceMap, sessionID)
+			delete(state.presenceByEvrID, meta.Presence.EvrID)
+			delete(state.joinTimestamps, sessionID)
+
+			// Rebuild cache to reflect the removal
+			if err := m.updateLabel(logger, dispatcher, state); err != nil {
+				logger.Error("Failed to update label after rejecting oversized team: %v", err)
+			}
+
+			return state, false, ErrJoinRejectReasonLobbyFull.Error()
 		}
 	}
 
