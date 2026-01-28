@@ -771,6 +771,32 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	}
 	extIPs := latencyHistory.AverageRTTs(true)
 
+	// Filter servers to only those with RTT <= 90ms
+	// Note: 90ms is stricter than the 100ms HighLatencyThresholdMs used in matchmaking
+	// because /create is a manual server selection that should prioritize low latency
+	const maxLatencyMs = 90
+	filteredIPs := make(map[string]int)
+	minLatencyMs := 0
+	hasLatencyData := false
+
+	for ip, latency := range extIPs {
+		if !hasLatencyData || latency < minLatencyMs {
+			minLatencyMs = latency
+			hasLatencyData = true
+		}
+		if latency <= maxLatencyMs {
+			filteredIPs[ip] = latency
+		}
+	}
+
+	// If no servers within 90ms, return appropriate error
+	if len(filteredIPs) == 0 {
+		if !hasLatencyData {
+			return nil, 0, fmt.Errorf("no latency history exists for your account; play some matches first to establish server latency data")
+		}
+		return nil, 0, fmt.Errorf("no servers within 90ms of your location. Your best server has %dms latency", minLatencyMs)
+	}
+
 	settings := &MatchSettings{
 		Mode:      mode,
 		Level:     level,
@@ -780,7 +806,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	}
 
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
-	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, extIPs, settings, []string{region}, true, false, queryAddon)
+	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, filteredIPs, settings, []string{region}, true, false, queryAddon)
 	if err != nil {
 		// Check if this is a region fallback error
 		var regionErr ErrMatchmakingNoServersInRegion
