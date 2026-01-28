@@ -139,7 +139,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				logger.Warn("Failed to load early quit config for QueueBlocking check", zap.Error(err))
 			} else {
 				timeSinceLastQuit := time.Since(eqConfig.LastEarlyQuitTime)
-				lockoutDuration := GetLockoutDuration(lobbyParams.EarlyQuitPenaltyLevel)
+				lockoutDuration := interval
 
 				if timeSinceLastQuit < lockoutDuration {
 					remainingTime := lockoutDuration - timeSinceLastQuit
