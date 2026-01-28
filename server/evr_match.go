@@ -727,7 +727,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 									penaltyLevel = int32(MaxEarlyQuitPenaltyLevel)
 								}
 
-								// Default lockout durations in seconds (5min, 15min, 30min, 60min)
+								// Get lockout duration for current penalty level (0s, 2m, 5m, 15m)
 								lockoutDuration := GetLockoutDurationSeconds(int(penaltyLevel))
 
 								reason := fmt.Sprintf("Early quit detected in match %s", state.ID.String())
