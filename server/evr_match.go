@@ -406,6 +406,27 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, false, ErrJoinRejectReasonLobbyFull.Error()
 	}
 
+	// Enforce team size limits for public arena matches BEFORE adding player to state
+	// This prevents broadcasting an invalid state that exceeds the team capacity
+	if state.Mode == evr.ModeArenaPublic {
+		maxTeamSize := DefaultPublicArenaTeamSize // Always 4 for public arena
+		targetTeam := meta.Presence.RoleAlignment
+		currentCount := state.RoleCount(targetTeam)
+
+		// Check if adding this player would exceed the limit
+		if currentCount >= maxTeamSize {
+			logger.WithFields(map[string]interface{}{
+				"blue":          state.RoleCount(evr.TeamBlue),
+				"orange":        state.RoleCount(evr.TeamOrange),
+				"target_team":   targetTeam,
+				"max_team_size": maxTeamSize,
+				"team_size":     state.TeamSize,
+			}).Warn("Rejecting join: team size limit would be exceeded for public arena match.")
+
+			return state, false, ErrJoinRejectReasonLobbyFull.Error()
+		}
+	}
+
 	// Add reservations to the reservation map
 	for _, p := range meta.Reservations {
 
@@ -439,16 +460,6 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 	if err := m.updateLabel(logger, dispatcher, state); err != nil {
 		logger.Error("Failed to update label: %v", err)
-	}
-
-	// Check team sizes
-	if state.Mode == evr.ModeArenaPublic {
-		if state.RoleCount(evr.TeamBlue) > state.TeamSize || state.RoleCount(evr.TeamOrange) > state.TeamSize {
-			logger.WithFields(map[string]interface{}{
-				"blue":   state.RoleCount(evr.TeamBlue),
-				"orange": state.RoleCount(evr.TeamOrange),
-			}).Error("Oversized team.")
-		}
 	}
 
 	return state, true, meta.Presence.String()
