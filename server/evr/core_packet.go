@@ -55,6 +55,7 @@ var (
 		0x7777777777770700: (*GameServerJoinRejected)(nil),            // Legacy message
 		0x7777777777770800: (*GameServerPlayerRemoved)(nil),           // Legacy message
 		0x7777777777777777: (*BroadcasterRegistrationRequest)(nil),    // Legacy message
+		0xa0687d9799640878: (*SNSLobbySetSpawnBotOnServer)(nil),       // Bot spawn command
 		0x82869f0b37eb4378: (*ConfigRequest)(nil),
 		0xb9cdaf586f7bd012: (*ConfigSuccess)(nil),
 		0x9e687a63dddd3870: (*ConfigFailure)(nil),
@@ -83,8 +84,9 @@ var (
 		0xfb772a4221fc8d70: (*LoggedInUserProfileRequest)(nil),
 		0xfcced6f169822bb8: (*DocumentRequest)(nil),
 		0xff71856af7e0fbd9: (*LobbyEntrantsV0)(nil),
-		//0x080495a43a6b7251: (*EarlyQuitConfig)(nil),
-
+		0x080495a43a6b7251: (*EarlyQuitServiceConfig)(nil),
+		0x1f81b54c35788eaa: (*SNSEarlyQuitUpdateNotification)(nil),
+		0xd9a955895caccac3: (*SNSEarlyQuitFeatureFlags)(nil),
 		// Custom messages
 		0x9ee5107d9e29fd63: (*NEVRProtobufMessageV1)(nil),
 		0xc6b3710cd9c4ef47: (*NEVRProtobufJSONMessageV1)(nil),
