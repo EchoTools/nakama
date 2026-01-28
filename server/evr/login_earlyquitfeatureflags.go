@@ -5,14 +5,14 @@ import (
 )
 
 // SNSEarlyQuitFeatureFlags represents the feature flags message for early quit system
-// Server → Client: Controls which early quit features are enabled/disabled
+// Server → Client: Informs client which early quit features it should implement client-side
 type SNSEarlyQuitFeatureFlags struct {
 	Enabled             bool     `json:"enabled"`                        // Master enable/disable
-	EnableMMLockout     bool     `json:"enable_mm_lockout"`              // Matchmaking lockout active
-	EnableSpawnLock     bool     `json:"enable_spawn_lock"`              // Spawn lock penalties active
-	EnableAutoReport    bool     `json:"enable_auto_report"`             // Automatic reporting active
-	EnableUICountdown   bool     `json:"enable_ui_countdown"`            // Show countdown timer in UI
-	EnableQueueBlocking bool     `json:"enable_queue_blocking"`          // Block queue during penalty
+	EnableMMLockout     bool     `json:"enable_mm_lockout"`              // Client should enforce matchmaking tier separation
+	EnableSpawnLock     bool     `json:"enable_spawn_lock"`              // Client should prevent spawn requests during penalty
+	EnableAutoReport    bool     `json:"enable_auto_report"`             // Server auto-flags players at max penalty level
+	EnableUICountdown   bool     `json:"enable_ui_countdown"`            // Client should show countdown timer in UI
+	EnableQueueBlocking bool     `json:"enable_queue_blocking"`          // Client should disable queue button during penalty
 	SupportedRegions    []string `json:"supported_regions"`              // Regions where system applies
 	SupportedGameModes  []string `json:"supported_game_modes"`           // Game modes where system applies
 	MaxPenaltyLevel     int32    `json:"max_penalty_level"`              // Max penalty tier
