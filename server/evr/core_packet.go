@@ -55,6 +55,7 @@ var (
 		0x7777777777770700: (*GameServerJoinRejected)(nil),            // Legacy message
 		0x7777777777770800: (*GameServerPlayerRemoved)(nil),           // Legacy message
 		0x7777777777777777: (*BroadcasterRegistrationRequest)(nil),    // Legacy message
+		0xa0687d9799640878: (*SNSLobbySetSpawnBotOnServer)(nil),       // Bot spawn command
 		0x82869f0b37eb4378: (*ConfigRequest)(nil),
 		0xb9cdaf586f7bd012: (*ConfigSuccess)(nil),
 		0x9e687a63dddd3870: (*ConfigFailure)(nil),

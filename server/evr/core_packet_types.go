@@ -201,6 +201,8 @@ func NewMessageFromHash(hash uint64) Message {
 		return &NEVRProtobufMessageV1{}
 	case 0xc6b3710cd9c4ef47:
 		return &NEVRProtobufJSONMessageV1{}
+	case 0xa0687d9799640878:
+		return &SNSLobbySetSpawnBotOnServer{}
 	default:
 		return nil
 	}

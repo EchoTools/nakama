@@ -40,8 +40,17 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 				lobbyParams.Mode = evr.ModeCombatPublic
 				lobbyParams.Level = evr.LevelUnspecified
 			} else {
-				// Otherwise, respond with a bad request
-				return NewLobbyErrorf(BadRequest, "mode `%s` not supported", lobbyParams.Mode.String())
+				// Check if user is in Global Developers group
+				isGlobalDeveloper, err := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalDevelopers)
+				if err != nil {
+					logger.Warn("Failed to check Global Developers group membership", zap.Error(err))
+					return NewLobbyErrorf(BadRequest, "mode `%s` not supported", lobbyParams.Mode.String())
+				}
+				if !isGlobalDeveloper {
+					// Otherwise, respond with a bad request
+					return NewLobbyErrorf(BadRequest, "mode `%s` not supported", lobbyParams.Mode.String())
+				}
+				// Allow Global Developers to use this mode
 			}
 		}
 
