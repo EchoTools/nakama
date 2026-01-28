@@ -772,21 +772,28 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	extIPs := latencyHistory.AverageRTTs(true)
 
 	// Filter servers to only those with RTT <= 90ms
+	// Note: 90ms is stricter than the 100ms HighLatencyThresholdMs used in matchmaking
+	// because /create is a manual server selection that should prioritize low latency
 	const maxLatencyMs = 90
 	filteredIPs := make(map[string]int)
-	minLatencyMs := -1
+	minLatencyMs := 0
+	hasLatencyData := false
 
 	for ip, latency := range extIPs {
-		if minLatencyMs == -1 || latency < minLatencyMs {
+		if !hasLatencyData || latency < minLatencyMs {
 			minLatencyMs = latency
+			hasLatencyData = true
 		}
 		if latency <= maxLatencyMs {
 			filteredIPs[ip] = latency
 		}
 	}
 
-	// If no servers within 90ms, return error with best available latency
-	if len(filteredIPs) == 0 && minLatencyMs > maxLatencyMs {
+	// If no servers within 90ms, return appropriate error
+	if len(filteredIPs) == 0 {
+		if !hasLatencyData {
+			return nil, 0, fmt.Errorf("no latency history exists for your account; play some matches first to establish server latency data")
+		}
 		return nil, 0, fmt.Errorf("no servers within 90ms of your location. Your best server has %dms latency", minLatencyMs)
 	}
 
