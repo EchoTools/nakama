@@ -113,6 +113,11 @@ type GlobalMatchmakingSettings struct {
 	EnablePostMatchmakerBackfill   bool                    `json:"enable_post_matchmaker_backfill"`     // Enable post-matchmaker backfill using matchmaker exports and match list
 	ReducingPrecisionIntervalSecs  int                     `json:"reducing_precision_interval_secs"`    // Interval in seconds after which constraints are relaxed for backfill (0 = disabled)
 	ReducingPrecisionMaxCycles     int                     `json:"reducing_precision_max_cycles"`       // Maximum number of precision reduction cycles before fully relaxing constraints
+	EnableMatchmakerStateCapture   bool                    `json:"enable_matchmaker_state_capture"`     // Enable capturing matchmaker state to files for debugging and replay (default false)
+	MatchmakerStateCaptureDir      string                  `json:"matchmaker_state_capture_dir"`        // Directory to save matchmaker state files (default "/tmp/matchmaker_replay")
+	WaitTimePriorityThresholdSecs  int                     `json:"wait_time_priority_threshold_secs"`   // Wait time threshold in seconds when wait time priority overrides match size priority (default 120)
+	RatingRangeExpansionPerMinute  float64                 `json:"rating_range_expansion_per_minute"`   // How much to expand rating range per minute of wait time (default 0.5)
+	MaxRatingRangeExpansion        float64                 `json:"max_rating_range_expansion"`          // Maximum total rating range expansion allowed (default 5.0)
 }
 
 type QueryAddons struct {
