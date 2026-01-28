@@ -307,7 +307,7 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 	// Send tier change notification via SNS message if applicable
 	if tierChanged {
 		if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
-			messageTrigger.SendTierChangeNotification(ctx, userID, oldTier, newTier, oldTier > newTier)
+			messageTrigger.SendTierChangeNotification(ctx, userID, oldTier, newTier, newTier > oldTier)
 		}
 	}
 

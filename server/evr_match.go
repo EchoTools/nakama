@@ -740,7 +740,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 							// Send tier change notification if applicable
 							if tierChanged {
 								if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
-									messageTrigger.SendTierChangeNotification(ctx, mp.GetUserId(), oldTier, newTier, oldTier > newTier)
+									messageTrigger.SendTierChangeNotification(ctx, mp.GetUserId(), oldTier, newTier, newTier > oldTier)
 								}
 
 								// Send Discord DM if tier changed
