@@ -406,6 +406,27 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, false, ErrJoinRejectReasonLobbyFull.Error()
 	}
 
+	// Enforce team size limits for public arena matches BEFORE adding player to state
+	// This prevents broadcasting an invalid state that exceeds the team capacity
+	if state.Mode == evr.ModeArenaPublic {
+		maxTeamSize := DefaultPublicArenaTeamSize // Always 4 for public arena
+		targetTeam := meta.Presence.RoleAlignment
+		currentCount := state.RoleCount(targetTeam)
+
+		// Check if adding this player would exceed the limit
+		if currentCount >= maxTeamSize {
+			logger.WithFields(map[string]interface{}{
+				"blue":          state.RoleCount(evr.TeamBlue),
+				"orange":        state.RoleCount(evr.TeamOrange),
+				"target_team":   targetTeam,
+				"max_team_size": maxTeamSize,
+				"team_size":     state.TeamSize,
+			}).Warn("Rejecting join: team size limit would be exceeded for public arena match.")
+
+			return state, false, ErrJoinRejectReasonLobbyFull.Error()
+		}
+	}
+
 	// Add reservations to the reservation map
 	for _, p := range meta.Reservations {
 
@@ -439,34 +460,6 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 	if err := m.updateLabel(logger, dispatcher, state); err != nil {
 		logger.Error("Failed to update label: %v", err)
-	}
-
-	// Enforce team size limits for public arena matches
-	if state.Mode == evr.ModeArenaPublic {
-		blueCount := state.RoleCount(evr.TeamBlue)
-		orangeCount := state.RoleCount(evr.TeamOrange)
-		maxTeamSize := DefaultPublicArenaTeamSize // Always 4 for public arena
-
-		if blueCount > maxTeamSize || orangeCount > maxTeamSize {
-			logger.WithFields(map[string]interface{}{
-				"blue":          blueCount,
-				"orange":        orangeCount,
-				"max_team_size": maxTeamSize,
-				"team_size":     state.TeamSize,
-			}).Error("Rejecting join: team size limit exceeded for public arena match.")
-
-			// Remove the player that was just added
-			delete(state.presenceMap, sessionID)
-			delete(state.presenceByEvrID, meta.Presence.EvrID)
-			delete(state.joinTimestamps, sessionID)
-
-			// Rebuild cache to reflect the removal
-			if err := m.updateLabel(logger, dispatcher, state); err != nil {
-				logger.Error("Failed to update label after rejecting oversized team: %v", err)
-			}
-
-			return state, false, ErrJoinRejectReasonLobbyFull.Error()
-		}
 	}
 
 	return state, true, meta.Presence.String()
