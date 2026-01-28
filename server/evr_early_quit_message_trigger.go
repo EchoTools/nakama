@@ -355,12 +355,25 @@ func (t *SNSEarlyQuitMessageTrigger) checkAndNotifyExpiredPenalties(ctx context.
 		now := time.Now()
 		timeSinceLastQuit := now.Sub(eqConfig.LastEarlyQuitTime).Seconds()
 
-		// If enough time has passed, send expiry notification
+		// If enough time has passed, check if we already notified
 		if timeSinceLastQuit >= float64(lockoutDuration) {
+			// Skip if we already sent notification for this penalty
+			if !eqConfig.LastExpiryNotificationSent.IsZero() && eqConfig.LastExpiryNotificationSent.After(eqConfig.LastEarlyQuitTime) {
+				return true // Already notified for this penalty
+			}
+
+			// Send expiry notification
 			if err := t.SendPenaltyExpiredNotification(ctx, userID); err != nil {
 				t.logger.Warn("Failed to send penalty expired notification",
 					zap.String("user_id", userID),
 					zap.Error(err))
+			} else {
+				eqConfig.LastExpiryNotificationSent = now
+				if err := StorableWrite(ctx, t.nk, userID, eqConfig); err != nil {
+					t.logger.Warn("Failed to save expiry notification timestamp",
+						zap.String("user_id", userID),
+						zap.Error(err))
+				}
 			}
 		}
 

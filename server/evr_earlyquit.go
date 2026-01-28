@@ -38,14 +38,15 @@ var EarlyQuitLockoutDurations = map[int]time.Duration{
 
 type EarlyQuitConfig struct {
 	sync.Mutex
-	EarlyQuitPenaltyLevel   int32     `json:"early_quit_penalty_level"`
-	LastEarlyQuitTime       time.Time `json:"last_early_quit_time"`
-	LastEarlyQuitMatchID    MatchID   `json:"last_early_quit_match_id"`
-	TotalEarlyQuits         int32     `json:"total_early_quits"`
-	TotalCompletedMatches   int32     `json:"total_completed_matches"`
-	PlayerReliabilityRating float64   `json:"player_reliability_rating"`
-	MatchmakingTier         int32     `json:"matchmaking_tier"`
-	LastTierChange          time.Time `json:"last_tier_change"`
+	EarlyQuitPenaltyLevel      int32     `json:"early_quit_penalty_level"`
+	LastEarlyQuitTime          time.Time `json:"last_early_quit_time"`
+	LastEarlyQuitMatchID       MatchID   `json:"last_early_quit_match_id"`
+	TotalEarlyQuits            int32     `json:"total_early_quits"`
+	TotalCompletedMatches      int32     `json:"total_completed_matches"`
+	PlayerReliabilityRating    float64   `json:"player_reliability_rating"`
+	MatchmakingTier            int32     `json:"matchmaking_tier"`
+	LastTierChange             time.Time `json:"last_tier_change"`
+	LastExpiryNotificationSent time.Time `json:"last_expiry_notification_sent"`
 
 	version string
 }
