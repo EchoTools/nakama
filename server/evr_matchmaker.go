@@ -193,7 +193,7 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	// Calculate wait time statistics for logging
 	now := time.Now().UTC().Unix()
 	var maxWaitTime, totalWaitTime float64
-	var highSkillWaiters []map[string]interface{}
+	var highSkillWaiters []map[string]any
 	waitTimeCount := 0
 
 	for _, candidate := range candidates {
@@ -215,14 +215,15 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 
 			// Track high-skill players with long wait times
 			mu, hasMu := props["rating_mu"].(float64)
+			_, matched := matchedPlayerSet[entry.GetPresence().GetUserId()]
 			if hasMu && mu >= 25.0 && waitTime > 120 { // Players with mu >= 25 waiting > 2 minutes
-				highSkillWaiters = append(highSkillWaiters, map[string]interface{}{
+				highSkillWaiters = append(highSkillWaiters, map[string]any{
 					"user_id":        entry.GetPresence().GetUserId(),
 					"username":       entry.GetPresence().GetUsername(),
 					"rating_mu":      mu,
 					"wait_time_secs": waitTime,
 					"ticket":         entry.GetTicket(),
-					"matched":        matchedPlayerSet[entry.GetPresence().GetUserId()] != struct{}{},
+					"matched":        matched,
 				})
 			}
 		}
@@ -233,7 +234,7 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		avgWaitTime = totalWaitTime / float64(waitTimeCount)
 	}
 
-	logFields := map[string]interface{}{
+	logFields := map[string]any{
 		"mode":                 modestr,
 		"num_player_total":     len(playerSet),
 		"num_tickets":          len(ticketSet),
