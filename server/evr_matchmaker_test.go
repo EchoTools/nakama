@@ -125,7 +125,7 @@ func testEvrMatchmakerOverrideFn(ctx context.Context, candidateMatches [][]*Matc
 
 	globalSettings := &ServiceSettingsData{}
 	FixDefaultServiceSettings(nil, globalSettings)
-	filteredCandidates, returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations)
+	filteredCandidates, returnedEntries, _, _ := sbmm.processPotentialMatches(runtimeCombinations)
 	log.Printf("Processing %d candidate matches in %s", len(runtimeCombinations), time.Since(startTime))
 	_ = filteredCandidates
 	combinations := make([][]*MatchmakerEntry, len(returnedEntries))

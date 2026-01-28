@@ -137,7 +137,7 @@ func TestOverrideFn(t *testing.T) {
 	startTime := time.Now()
 	globalSettings := &ServiceSettingsData{}
 	FixDefaultServiceSettings(nil, globalSettings)
-	_, returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations)
+	_, returnedEntries, _, _ := sbmm.processPotentialMatches(runtimeCombinations)
 	t.Logf("Matched %d candidate matches in %s", len(returnedEntries), time.Since(startTime))
 
 	t.Errorf("autofail")
