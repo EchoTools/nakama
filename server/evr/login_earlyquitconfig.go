@@ -1,6 +1,9 @@
 package evr
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // EarlyQuitConfig is the player's current early quit penalty state (sent in profile)
 type EarlyQuitConfig struct {
@@ -12,6 +15,14 @@ type EarlyQuitConfig struct {
 
 func (c EarlyQuitConfig) PenaltyTimestampAsTime() time.Time {
 	return time.Unix(c.PenaltyTimestamp, 0)
+}
+
+func (m EarlyQuitConfig) Token() string {
+	return "SNSEarlyQuitConfig"
+}
+
+func (m *EarlyQuitConfig) Symbol() Symbol {
+	return ToSymbol(m.Token())
 }
 
 // EarlyQuitPenaltyLevelConfig defines a single penalty tier configuration
@@ -38,6 +49,31 @@ type EarlyQuitServiceConfig struct {
 	SteadyPlayerLevels []EarlyQuitSteadyPlayerLevelConfig `json:"steady_player_levels"`
 }
 
+func (m EarlyQuitServiceConfig) Token() string {
+	return "SNSEarlyQuitConfig"
+}
+
+func (m *EarlyQuitServiceConfig) Symbol() Symbol {
+	return ToSymbol(m.Token())
+}
+
+func (m *EarlyQuitServiceConfig) String() string {
+	return fmt.Sprintf("%s(penalty_levels=%d, steady_levels=%d)",
+		m.Token(), len(m.PenaltyLevels), len(m.SteadyPlayerLevels))
+}
+
+func (m *EarlyQuitServiceConfig) Stream(s *EasyStream) error {
+	return s.StreamJson(m, false, ZlibCompression)
+}
+
+// NewSNSEarlyQuitConfig creates a new SNS message for early quit config
+func NewSNSEarlyQuitConfig(config *EarlyQuitServiceConfig) *EarlyQuitServiceConfig {
+	if config == nil {
+		config = DefaultEarlyQuitServiceConfig()
+	}
+	return config
+}
+
 // DefaultEarlyQuitServiceConfig returns the default early quit config with max penalty active
 func DefaultEarlyQuitServiceConfig() *EarlyQuitServiceConfig {
 	return &EarlyQuitServiceConfig{
@@ -55,7 +91,7 @@ func DefaultEarlyQuitServiceConfig() *EarlyQuitServiceConfig {
 				PenaltyLevel:     1,
 				MinEarlyQuits:    3,
 				MaxEarlyQuits:    5,
-				MMLockoutSec:     300,
+				MMLockoutSec:     120,
 				SpawnLock:        0,
 				AutoReport:       0,
 				CNVPEReactivated: 0,
@@ -64,7 +100,7 @@ func DefaultEarlyQuitServiceConfig() *EarlyQuitServiceConfig {
 				PenaltyLevel:     2,
 				MinEarlyQuits:    6,
 				MaxEarlyQuits:    10,
-				MMLockoutSec:     900,
+				MMLockoutSec:     300,
 				SpawnLock:        1,
 				AutoReport:       0,
 				CNVPEReactivated: 0,
@@ -73,7 +109,7 @@ func DefaultEarlyQuitServiceConfig() *EarlyQuitServiceConfig {
 				PenaltyLevel:     3,
 				MinEarlyQuits:    11,
 				MaxEarlyQuits:    999,
-				MMLockoutSec:     1800,
+				MMLockoutSec:     900,
 				SpawnLock:        1,
 				AutoReport:       1,
 				CNVPEReactivated: 1,

@@ -254,6 +254,34 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, false, fmt.Sprintf("failed to unmarshal metadata: %v", err)
 	}
 
+	// Check SpawnLock enforcement (early quit penalty)
+	featureFlags := evr.DefaultEarlyQuitFeatureFlags()
+	serviceSettings := ServiceSettings()
+	enableEarlyQuitPenalty := true
+	if serviceSettings != nil {
+		enableEarlyQuitPenalty = serviceSettings.Matchmaking.EnableEarlyQuitPenalty
+	}
+	if featureFlags != nil && featureFlags.EnableSpawnLock && enableEarlyQuitPenalty && !meta.Presence.IsSpectator() {
+		eqConfig := NewEarlyQuitConfig()
+		if err := StorableRead(ctx, nk, joinPresence.GetUserId(), eqConfig, true); err != nil {
+			logger.Warn("Failed to load early quit config for SpawnLock check", zap.Error(err))
+		} else if eqConfig.EarlyQuitPenaltyLevel > 0 {
+			// Check if within lockout window
+			timeSinceLastQuit := time.Since(eqConfig.LastEarlyQuitTime)
+			lockoutDuration := GetLockoutDuration(int(eqConfig.EarlyQuitPenaltyLevel))
+
+			if timeSinceLastQuit < lockoutDuration {
+				remainingTime := lockoutDuration - timeSinceLastQuit
+				reason := fmt.Sprintf("Spawn locked due to early quit penalty. %s remaining.", remainingTime)
+				logger.Info("SpawnLock rejected join attempt",
+					zap.String("user_id", joinPresence.GetUserId()),
+					zap.Int32("penalty_level", eqConfig.EarlyQuitPenaltyLevel),
+					zap.Duration("remaining", remainingTime))
+				return state, false, reason
+			}
+		}
+	}
+
 	// Check if the match is locked.
 	if !state.Open {
 
@@ -691,16 +719,36 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 								}
 							}
 
-							// Launch goroutine to check if player logs out and remove early quit if they do
-							// Use a 5-minute grace period before checking logout status
-							// Use background context to ensure goroutine isn't cancelled when match ends
-							go func(userID, sessionID string) {
-								bgCtx := context.Background()
-								CheckAndStrikeEarlyQuitIfLoggedOut(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, 5*time.Minute)
-							}(mp.GetUserId(), mp.GetSessionId())
+							// Send early quit penalty notification to player
+							if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
+								penaltyLevel := int32(eqconfig.EarlyQuitPenaltyLevel)
+								// Clamp to max penalty level (typically 3)
+								if penaltyLevel > MaxEarlyQuitPenaltyLevel {
+									penaltyLevel = int32(MaxEarlyQuitPenaltyLevel)
+								}
 
-							// Send Discord DM if tier changed
+								// Get lockout duration for current penalty level (0s, 2m, 5m, 15m)
+								lockoutDuration := GetLockoutDurationSeconds(int(penaltyLevel))
+
+								reason := fmt.Sprintf("Early quit detected in match %s", state.ID.String())
+								messageTrigger.SendPenaltyAppliedNotification(ctx, mp.GetUserId(), penaltyLevel, lockoutDuration, reason)
+
+								// Trigger auto-report at penalty level 3
+								if penaltyLevel >= 3 {
+									featureFlags := evr.DefaultEarlyQuitFeatureFlags()
+									if featureFlags != nil && featureFlags.EnableAutoReport {
+										TriggerAutoReport(ctx, logger, mp.GetUserId(), penaltyLevel)
+									}
+								}
+							}
+
+							// Send tier change notification if applicable
 							if tierChanged {
+								if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
+									messageTrigger.SendTierChangeNotification(ctx, mp.GetUserId(), oldTier, newTier, newTier > oldTier)
+								}
+
+								// Send Discord DM if tier changed
 								discordID, err := GetDiscordIDByUserID(ctx, db, mp.GetUserId())
 								if err != nil {
 									logger.Warn("Failed to get Discord ID for tier notification", zap.Error(err))
@@ -718,6 +766,14 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 									}
 								}
 							}
+
+							// Launch goroutine to check if player logs out and remove early quit if they do
+							// Use a 5-minute grace period before checking logout status
+							// Use background context to ensure goroutine isn't cancelled when match ends
+							go func(userID, sessionID string) {
+								bgCtx := context.Background()
+								CheckAndStrikeEarlyQuitIfLoggedOut(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, 5*time.Minute)
+							}(mp.GetUserId(), mp.GetSessionId())
 						}
 					}
 				}
@@ -1577,4 +1633,11 @@ func (m *EvrMatch) sendEntrantReject(ctx context.Context, logger runtime.Logger,
 		return fmt.Errorf("failed to dispatch message: %w", err)
 	}
 	return nil
+}
+
+// TriggerAutoReport logs an auto-report event for players at max early quit penalty level
+func TriggerAutoReport(ctx context.Context, logger runtime.Logger, userID string, penaltyLevel int32) {
+	logger.Info("Auto-report triggered for player with max early quit penalty",
+		zap.String("user_id", userID),
+		zap.Int32("penalty_level", penaltyLevel))
 }
