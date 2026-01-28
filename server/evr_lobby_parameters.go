@@ -416,6 +416,33 @@ func (p LobbySessionParameters) String() string {
 	return string(data)
 }
 
+func calculateExpandedRatingRange(baseRange float64, matchmakingTimestamp time.Time) float64 {
+	if matchmakingTimestamp.IsZero() {
+		return baseRange
+	}
+
+	waitTime := time.Since(matchmakingTimestamp)
+	waitMinutes := waitTime.Minutes()
+
+	expansionPerMinute := 0.5
+	maxExpansion := 5.0
+	if settings := ServiceSettings(); settings != nil {
+		if settings.Matchmaking.RatingRangeExpansionPerMinute > 0 {
+			expansionPerMinute = settings.Matchmaking.RatingRangeExpansionPerMinute
+		}
+		if settings.Matchmaking.MaxRatingRangeExpansion > 0 {
+			maxExpansion = settings.Matchmaking.MaxRatingRangeExpansion
+		}
+	}
+
+	expansion := waitMinutes * expansionPerMinute
+	if expansion > maxExpansion {
+		expansion = maxExpansion
+	}
+
+	return baseRange + expansion
+}
+
 func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMaxRTT bool) string {
 	// Prevent joining matches that have just started (less than 30 seconds old).
 	const MatchStartTimeMinimumAgeSecs = 30
@@ -458,34 +485,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 	if includeMMR {
 		key := "rating_mu"
 		val := p.GetRating().Mu
-		rng := p.MatchmakingRatingRange
-
-		// Apply dynamic rating range expansion based on wait time
-		if !p.MatchmakingTimestamp.IsZero() {
-			waitTime := time.Since(p.MatchmakingTimestamp)
-			waitMinutes := waitTime.Minutes()
-
-			// Get expansion settings
-			expansionPerMinute := 0.5 // Default: expand by 0.5 per minute
-			maxExpansion := 5.0       // Default: cap at +5.0 expansion
-			if settings := ServiceSettings(); settings != nil {
-				if settings.Matchmaking.RatingRangeExpansionPerMinute > 0 {
-					expansionPerMinute = settings.Matchmaking.RatingRangeExpansionPerMinute
-				}
-				if settings.Matchmaking.MaxRatingRangeExpansion > 0 {
-					maxExpansion = settings.Matchmaking.MaxRatingRangeExpansion
-				}
-			}
-
-			// Calculate expansion (linear growth with cap)
-			expansion := waitMinutes * expansionPerMinute
-			if expansion > maxExpansion {
-				expansion = maxExpansion
-			}
-
-			// Apply expansion to range
-			rng += expansion
-		}
+		rng := calculateExpandedRatingRange(p.MatchmakingRatingRange, p.MatchmakingTimestamp)
 
 		qparts = append(qparts,
 			// Exclusion
@@ -624,34 +624,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		if p.EnableOrdinalRange && ticketParams.IncludeSBMMRanges {
 			key := "rating_mu"
 			val := rating.Mu
-			rng := p.MatchmakingRatingRange
-
-			// Apply dynamic rating range expansion based on wait time
-			if !p.MatchmakingTimestamp.IsZero() {
-				waitTime := time.Since(p.MatchmakingTimestamp)
-				waitMinutes := waitTime.Minutes()
-
-				// Get expansion settings
-				expansionPerMinute := 0.5 // Default: expand by 0.5 per minute
-				maxExpansion := 5.0       // Default: cap at +5.0 expansion
-				if settings := ServiceSettings(); settings != nil {
-					if settings.Matchmaking.RatingRangeExpansionPerMinute > 0 {
-						expansionPerMinute = settings.Matchmaking.RatingRangeExpansionPerMinute
-					}
-					if settings.Matchmaking.MaxRatingRangeExpansion > 0 {
-						maxExpansion = settings.Matchmaking.MaxRatingRangeExpansion
-					}
-				}
-
-				// Calculate expansion (linear growth with cap)
-				expansion := waitMinutes * expansionPerMinute
-				if expansion > maxExpansion {
-					expansion = maxExpansion
-				}
-
-				// Apply expansion to range
-				rng += expansion
-			}
+			rng := calculateExpandedRatingRange(p.MatchmakingRatingRange, p.MatchmakingTimestamp)
 
 			if val != 0.0 {
 				lower := val - rng
