@@ -362,6 +362,8 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 				stats = &evr.GenericStats{}
 			case evr.ModeSocialPrivate:
 				stats = &evr.GenericStats{}
+			case evr.ModeArenaPublicAI:
+				stats = &evr.ArenaStatistics{}
 			default:
 				return nil, nil, fmt.Errorf("invalid mode: %s", m)
 			}

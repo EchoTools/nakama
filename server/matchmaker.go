@@ -281,6 +281,10 @@ func NewLocalMatchmaker(logger, startupLogger *zap.Logger, config Config, router
 		startupLogger.Fatal("Failed to create matchmaker index", zap.Error(err))
 	}
 
+	if config.GetMatchmaker().MaxSearchHits < 10 {
+		startupLogger.Fatal("matchmaker config: MaxSearchHits must be >= 10", zap.Int("value", config.GetMatchmaker().MaxSearchHits))
+	}
+
 	ctx, ctxCancelFn := context.WithCancel(context.Background())
 
 	m := &LocalMatchmaker{
