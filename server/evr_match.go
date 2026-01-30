@@ -254,30 +254,26 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, false, fmt.Sprintf("failed to unmarshal metadata: %v", err)
 	}
 
-	// Check SpawnLock enforcement (early quit penalty)
-	featureFlags := evr.DefaultEarlyQuitFeatureFlags()
+	// Log early quit penalty status for metrics (client enforces spawn restrictions)
 	serviceSettings := ServiceSettings()
 	enableEarlyQuitPenalty := true
 	if serviceSettings != nil {
 		enableEarlyQuitPenalty = serviceSettings.Matchmaking.EnableEarlyQuitPenalty
 	}
-	if featureFlags != nil && featureFlags.EnableSpawnLock && enableEarlyQuitPenalty && !meta.Presence.IsSpectator() {
+	if enableEarlyQuitPenalty && !meta.Presence.IsSpectator() {
 		eqConfig := NewEarlyQuitConfig()
 		if err := StorableRead(ctx, nk, joinPresence.GetUserId(), eqConfig, true); err != nil {
-			logger.Warn("Failed to load early quit config for SpawnLock check", zap.Error(err))
+			logger.Debug("Failed to load early quit config for logging", zap.Error(err))
 		} else if eqConfig.EarlyQuitPenaltyLevel > 0 {
-			// Check if within lockout window
 			timeSinceLastQuit := time.Since(eqConfig.LastEarlyQuitTime)
 			lockoutDuration := GetLockoutDuration(int(eqConfig.EarlyQuitPenaltyLevel))
 
 			if timeSinceLastQuit < lockoutDuration {
 				remainingTime := lockoutDuration - timeSinceLastQuit
-				reason := fmt.Sprintf("Spawn locked due to early quit penalty. %s remaining.", remainingTime)
-				logger.Info("SpawnLock rejected join attempt",
+				logger.Info("Player joining with active early quit penalty (client-side enforcement expected)",
 					zap.String("user_id", joinPresence.GetUserId()),
 					zap.Int32("penalty_level", eqConfig.EarlyQuitPenaltyLevel),
 					zap.Duration("remaining", remainingTime))
-				return state, false, reason
 			}
 		}
 	}
