@@ -796,6 +796,15 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	if len(rejects) > 0 {
+
+		messages := make([]evr.Message, 0, len(rejects))
+
+		// Send legacy messages to the game server to notify the sever to disconnect the players
+		for _, id := range rejects {
+			msg := evr.NewBroadcasterRemovePlayer(id)
+			messages = append(messages, msg)
+		}
+
 		code := evr.PlayerRejectionReasonDisconnected
 
 		// Convert UUIDs to strings for protobuf
@@ -821,10 +830,11 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 				"rejects": rejects,
 				"code":    code,
 			}).Debug("Sending reject message to game server.")
+			messages = append(messages, msg)
+		}
 
-			if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{state.server}, nil); err != nil {
-				logger.Warn("Failed to dispatch message: %v", err)
-			}
+		if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.server}, nil); err != nil {
+			logger.Warn("Failed to dispatch message: %v", err)
 		}
 	}
 	if len(state.presenceMap) == 0 {
