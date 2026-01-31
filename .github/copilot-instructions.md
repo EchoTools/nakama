@@ -73,6 +73,69 @@ func (p *EVRPipeline) handleMyMessage(ctx context.Context, msg *evr.MyMessage) e
 }
 ```
 
+## Git Commit Convention
+
+**MANDATORY**: All commits MUST follow [Conventional Commits v1.0.0](https://www.conventionalcommits.org/en/v1.0.0/).
+
+### Format
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+### Types
+
+| Type | Usage | SemVer |
+|------|-------|--------|
+| `feat` | New feature | MINOR |
+| `fix` | Bug fix | PATCH |
+| `docs` | Documentation only | - |
+| `style` | Code style/formatting | - |
+| `refactor` | Code restructuring | - |
+| `perf` | Performance improvements | - |
+| `test` | Adding or updating tests | - |
+| `build` | Build system or dependencies | - |
+| `ci` | CI/CD configuration | - |
+| `chore` | Maintenance tasks | - |
+| `revert` | Reverting commits | - |
+
+### Scopes (Optional)
+
+`evr`, `pipeline`, `matchmaker`, `runtime`, `discord`, `api`, `storage`, `auth`
+
+### Breaking Changes
+
+**CRITICAL**: Indicate with `!` or `BREAKING CHANGE:` footer:
+- `feat(api)!: remove deprecated endpoint`
+- `BREAKING CHANGE: description` (in footer)
+
+### Examples
+
+```
+feat(discord): add channel notification for match completion
+
+fix(matchmaker): prevent duplicate match assignments
+
+Fixes: #123
+
+refactor(evr): simplify message handler registration
+
+Extract handler map initialization to separate function
+for improved readability. No behavior changes.
+```
+
+### Rules
+
+1. Type is REQUIRED
+2. Use imperative mood: "add" not "added"
+3. First line ≤ 72 characters
+4. Body after blank line
+5. Footer after blank line
+
 ## Validation Cycle
 
 1. `make nakama` (build)
@@ -80,3 +143,4 @@ func (p *EVRPipeline) handleMyMessage(ctx context.Context, msg *evr.MyMessage) e
 3. Start server, verify endpoints
 4. Run EVR tests
 5. `gofmt -w .` (format)
+6. **Commit with conventional format**
