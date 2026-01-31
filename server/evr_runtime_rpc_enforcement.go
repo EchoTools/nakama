@@ -79,11 +79,18 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError("Failed to check permissions", StatusInternalError)
 	}
 
+	// Check if the caller is a global bot
+	isGlobalBot, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalBots)
+	if err != nil {
+		logger.Error("Failed to check global bot status", zap.Error(err))
+		return "", runtime.NewError("Failed to check permissions", StatusInternalError)
+	}
+
 	// Determine enforcer user ID
 	enforcerUserID := userID
 	if request.EnforcerID != "" {
-		if !isGlobalOperator {
-			return "", runtime.NewError("Only global operators can specify an enforcer_id", StatusPermissionDenied)
+		if !isGlobalOperator && !isGlobalBot {
+			return "", runtime.NewError("Only global operators or global bots can specify an enforcer_id", StatusPermissionDenied)
 		}
 		enforcerUserID = request.EnforcerID
 	}
@@ -152,9 +159,18 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 
 	// Add suspension record or void existing suspensions
 	if addSuspension {
+		// Get enforcer's Discord ID for audit log
+		enforcerDiscordID := ""
+		account, err := nk.AccountGetId(ctx, enforcerUserID)
+		if err != nil {
+			logger.Error("Failed to load enforcer account for Discord ID", zap.Error(err), zap.String("enforcer_user_id", enforcerUserID))
+		} else if account != nil && account.CustomId != "" {
+			enforcerDiscordID = account.CustomId
+		}
+
 		// Add a new suspension record
 		actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
-		record := journal.AddRecord(groupID, enforcerUserID, "", request.UserNotice, request.ModeratorNotes, request.RequireCommunityValues, request.AllowPrivateLobbies, suspensionDuration)
+		record := journal.AddRecord(groupID, enforcerUserID, enforcerDiscordID, request.UserNotice, request.ModeratorNotes, request.RequireCommunityValues, request.AllowPrivateLobbies, suspensionDuration)
 		recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
 	} else if voidActiveSuspensions {
 		// Void active suspensions
@@ -191,8 +207,8 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		}
 	}
 
-	// Save the enforcement journal and sync to profile
-	if err := SyncJournalAndProfile(ctx, nk, targetUserID, journal); err != nil {
+	// Save the enforcement journal and sync to profile with retry logic for concurrent writes
+	if err := SyncJournalAndProfileWithRetry(ctx, nk, targetUserID, journal); err != nil {
 		logger.Error("Failed to write enforcement data", zap.Error(err))
 		return "", runtime.NewError("Failed to save enforcement data", StatusInternalError)
 	}
@@ -526,10 +542,10 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 		return "", runtime.NewError("Failed to edit enforcement record", StatusInternalError)
 	}
 
-	// Save the journal
-	if err := StorableWrite(ctx, nk, request.TargetUserID, journal); err != nil {
-		logger.Error("Failed to write enforcement journal", zap.Error(err))
-		return "", runtime.NewError("Failed to save enforcement record", StatusInternalError)
+	// Save the journal and sync to profile with retry logic for concurrent writes
+	if err := SyncJournalAndProfileWithRetry(ctx, nk, request.TargetUserID, journal); err != nil {
+		logger.Error("Failed to write enforcement data", zap.Error(err))
+		return "", runtime.NewError("Failed to save enforcement data", StatusInternalError)
 	}
 
 	// Log the edit

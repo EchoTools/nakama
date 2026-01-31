@@ -166,11 +166,12 @@ func (s *SuspensionProfile) SyncFromJournal(journal *GuildEnforcementJournal) {
 // SyncJournalAndProfile updates both the enforcement journal and suspension profile in storage
 // This ensures they stay in sync whenever enforcement data changes
 func SyncJournalAndProfile(ctx context.Context, nk runtime.NakamaModule, userID string, journal *GuildEnforcementJournal) error {
-	// Create profile from journal
 	profile := NewSuspensionProfile(userID)
+	if err := StorableRead(ctx, nk, userID, profile, true); err != nil {
+		return err
+	}
 	profile.SyncFromJournal(journal)
 
-	// Write both to storage
 	if err := StorableWrite(ctx, nk, userID, journal); err != nil {
 		return err
 	}
@@ -180,4 +181,79 @@ func SyncJournalAndProfile(ctx context.Context, nk runtime.NakamaModule, userID 
 	}
 
 	return nil
+}
+
+// SyncJournalAndProfileWithRetry syncs journal and profile with retry logic for concurrent writes.
+// This handles version conflicts by retrying with exponential backoff.
+// On each retry, it re-reads both journal and profile from storage to get the latest versions.
+func SyncJournalAndProfileWithRetry(ctx context.Context, nk runtime.NakamaModule, userID string, journal *GuildEnforcementJournal) error {
+	const maxRetries = 3
+	var lastErr error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// On retry, re-read the journal from storage to get the latest version
+		// This ensures we have the correct storage version for the write
+		if attempt > 0 {
+			freshJournal := NewGuildEnforcementJournal(userID)
+			if err := StorableRead(ctx, nk, userID, freshJournal, true); err != nil {
+				lastErr = err
+				// On read failure, continue with the existing journal
+			} else {
+				// Update the journal's storage version to the latest from storage
+				meta := journal.StorageMeta()
+				meta.Version = freshJournal.GetStorageVersion()
+				journal.SetStorageMeta(meta)
+			}
+		}
+
+		// Load existing profile from storage to get the current version, or create if it doesn't exist
+		profile := NewSuspensionProfile(userID)
+		if err := StorableRead(ctx, nk, userID, profile, true); err != nil {
+			// If we can't read (and create) the profile, try to just create a new one
+			lastErr = err
+			profile = NewSuspensionProfile(userID)
+		}
+		// Update profile with latest journal data
+		profile.SyncFromJournal(journal)
+
+		// Try to write both to storage
+		if err := StorableWrite(ctx, nk, userID, journal); err != nil {
+			lastErr = err
+			// Only retry on version conflicts, fail fast on other errors
+			if isVersionConflictError(err) && attempt < maxRetries-1 {
+				// Exponential backoff: 10ms, 20ms, 40ms
+				backoff := time.Duration(10*(1<<uint(attempt))) * time.Millisecond
+				// Context-aware sleep to respect cancellation
+				select {
+				case <-time.After(backoff):
+					continue
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			return err
+		}
+
+		if err := StorableWrite(ctx, nk, userID, profile); err != nil {
+			lastErr = err
+			// Only retry on version conflicts, fail fast on other errors
+			if isVersionConflictError(err) && attempt < maxRetries-1 {
+				// Exponential backoff: 10ms, 20ms, 40ms
+				backoff := time.Duration(10*(1<<uint(attempt))) * time.Millisecond
+				// Context-aware sleep to respect cancellation
+				select {
+				case <-time.After(backoff):
+					continue
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			return err
+		}
+
+		// Success
+		return nil
+	}
+
+	return lastErr
 }

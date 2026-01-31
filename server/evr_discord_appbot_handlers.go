@@ -15,6 +15,7 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/thriftrw/ptr"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -739,29 +740,49 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Error(codes.PermissionDenied, "guild does not allow public match creation")
 	}
 
-	// Check if user is a moderator (enforcer) in the guild or a global operator
-	isGuildModerator := group.IsEnforcer(userID)
+	isGuildModerator := group.IsEnforcer(userID) || group.IsAuditor(userID)
 	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
 	isPrivileged := isGuildModerator || isGlobalOperator
 
-	// Check if this is a public match (echo_arena or echo_combat)
-	isPublicMatch := mode == evr.ModeArenaPublic || mode == evr.ModeCombatPublic
-
-	// Apply rate limits only if user is not privileged
 	if !isPrivileged {
-		// Apply stricter rate limit (1 per 15 minutes) for public matches
-		if isPublicMatch {
-			publicLimiter := d.loadPublicMatchRateLimiter(userID, groupID)
-			if !publicLimiter.Allow() {
-				return nil, 0, status.Error(codes.ResourceExhausted, "rate limit exceeded for public matches (1 per 15 minutes)")
+		// Check if guild has custom rate limit configured
+		var rateLimitSeconds int
+		var rateLimitMessage string
+
+		if group.CreateCommandRateLimitPerMinute > 0 {
+			// Use guild-configured rate limit (converts from per-minute to seconds)
+			rateLimitSeconds = int(60.0 / group.CreateCommandRateLimitPerMinute)
+			rateLimitMessage = fmt.Sprintf("rate limit exceeded for match creation (%.1f per minute)", group.CreateCommandRateLimitPerMinute)
+		} else {
+			// Use default rate limits per mode
+			rateLimitConfig := map[evr.Symbol]struct {
+				seconds int
+				message string
+			}{
+				evr.ModeCombatPublic:  {300, "rate limit exceeded for public combat matches (1 per 5 minutes)"},
+				evr.ModeArenaPublic:   {900, "rate limit exceeded for public arena matches (1 per 15 minutes)"},
+				evr.ModeCombatPrivate: {60, "rate limit exceeded for private combat matches (1 per minute)"},
+				evr.ModeArenaPrivate:  {60, "rate limit exceeded for private arena matches (1 per minute)"},
+				evr.ModeSocialPublic:  {60, "rate limit exceeded for public social lobbies (1 per minute)"},
+				evr.ModeSocialPrivate: {60, "rate limit exceeded for private social lobbies (1 per minute)"},
 			}
+
+			config, exists := rateLimitConfig[mode]
+			if !exists {
+				config = struct {
+					seconds int
+					message string
+				}{60, "rate limit exceeded for match creation (1 per minute)"}
+			}
+			rateLimitSeconds = config.seconds
+			rateLimitMessage = config.message
 		}
 
-		// Apply general rate limit for all matches using guild group setting.
-		// Default is 1 per minute, but can be customized per guild. A value of 0 uses the default limit.
-		limiter := d.loadPrepareMatchRateLimiter(userID, groupID, group)
+		key := fmt.Sprintf("%s:%s:%s", userID, groupID, mode.String())
+		limiter, _ := d.matchCreateRateLimiters.LoadOrStore(key, rate.NewLimiter(rate.Limit(1.0/float64(rateLimitSeconds)), 1))
+
 		if !limiter.Allow() {
-			return nil, 0, status.Error(codes.ResourceExhausted, "rate limit exceeded for match creation")
+			return nil, 0, status.Error(codes.ResourceExhausted, rateLimitMessage)
 		}
 	}
 
