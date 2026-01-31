@@ -2,7 +2,13 @@ package evr
 
 import (
 	"fmt"
+	"sort"
 	"time"
+)
+
+const (
+	StorageCollectionEarlyQuitConfig = "EarlyQuit"
+	StorageKeyEarlyQuitConfig        = "config"
 )
 
 // EarlyQuitConfig is the player's current early quit penalty state (sent in profile)
@@ -47,6 +53,13 @@ type EarlyQuitSteadyPlayerLevelConfig struct {
 type EarlyQuitServiceConfig struct {
 	PenaltyLevels      []EarlyQuitPenaltyLevelConfig      `json:"penalty_levels"`
 	SteadyPlayerLevels []EarlyQuitSteadyPlayerLevelConfig `json:"steady_player_levels"`
+	version            string
+}
+
+func NewEarlyQuitServiceConfig() *EarlyQuitServiceConfig {
+	config := DefaultEarlyQuitServiceConfig()
+	config.version = "*"
+	return config
 }
 
 func (m EarlyQuitServiceConfig) Token() string {
@@ -66,12 +79,165 @@ func (m *EarlyQuitServiceConfig) Stream(s *EasyStream) error {
 	return s.StreamJson(m, false, ZlibCompression)
 }
 
+// StorageVersion returns the storage version
+func (m EarlyQuitServiceConfig) StorageVersion() string {
+	return m.version
+}
+
+// SetStorageVersion updates the storage version
+func (m *EarlyQuitServiceConfig) SetStorageVersion(version string) {
+	m.version = version
+}
+
 // NewSNSEarlyQuitConfig creates a new SNS message for early quit config
 func NewSNSEarlyQuitConfig(config *EarlyQuitServiceConfig) *EarlyQuitServiceConfig {
 	if config == nil {
 		config = DefaultEarlyQuitServiceConfig()
 	}
+	config.Validate()
 	return config
+}
+
+// Validate ensures the config is sequentially valid and fixes any invalid values.
+// It:
+// - Sorts penalty levels by penalty level
+// - Ensures min/max early quits are compatible and non-overlapping
+// - Ensures steady player levels are sorted
+// - Ensures steady player ratios are non-decreasing
+func (m *EarlyQuitServiceConfig) Validate() {
+	if m == nil {
+		return
+	}
+
+	// Validate and sort penalty levels
+	m.validatePenaltyLevels()
+
+	// Validate and sort steady player levels
+	m.validateSteadyPlayerLevels()
+}
+
+// validatePenaltyLevels ensures penalty levels are properly sequenced
+func (m *EarlyQuitServiceConfig) validatePenaltyLevels() {
+	if len(m.PenaltyLevels) == 0 {
+		m.PenaltyLevels = DefaultEarlyQuitServiceConfig().PenaltyLevels
+		return
+	}
+
+	// Sort by penalty level
+	sort.Slice(m.PenaltyLevels, func(i, j int) bool {
+		return m.PenaltyLevels[i].PenaltyLevel < m.PenaltyLevels[j].PenaltyLevel
+	})
+
+	// Validate and fix each level
+	for i := range m.PenaltyLevels {
+		level := &m.PenaltyLevels[i]
+
+		// Ensure min <= max
+		if level.MinEarlyQuits > level.MaxEarlyQuits {
+			level.MinEarlyQuits, level.MaxEarlyQuits = level.MaxEarlyQuits, level.MinEarlyQuits
+		}
+
+		// Ensure non-negative values
+		if level.MinEarlyQuits < 0 {
+			level.MinEarlyQuits = 0
+		}
+		if level.MaxEarlyQuits < 0 {
+			level.MaxEarlyQuits = 0
+		}
+		if level.MMLockoutSec < 0 {
+			level.MMLockoutSec = 0
+		}
+		if level.SpawnLock < 0 {
+			level.SpawnLock = 0
+		}
+		if level.AutoReport < 0 {
+			level.AutoReport = 0
+		}
+		if level.CNVPEReactivated < 0 {
+			level.CNVPEReactivated = 0
+		}
+
+		// Ensure no overlap with previous level
+		if i > 0 {
+			prevLevel := &m.PenaltyLevels[i-1]
+			// Current level's min should be at least previous level's max + 1
+			if level.MinEarlyQuits <= prevLevel.MaxEarlyQuits {
+				level.MinEarlyQuits = prevLevel.MaxEarlyQuits + 1
+			}
+			// Ensure max is still >= min after adjustment
+			if level.MaxEarlyQuits < level.MinEarlyQuits {
+				// Try to use the default config max for this penalty level
+				defaultCfg := DefaultEarlyQuitServiceConfig()
+				foundDefault := false
+				for j := range defaultCfg.PenaltyLevels {
+					defLevel := &defaultCfg.PenaltyLevels[j]
+					if defLevel.PenaltyLevel == level.PenaltyLevel {
+						if defLevel.MaxEarlyQuits >= level.MinEarlyQuits {
+							level.MaxEarlyQuits = defLevel.MaxEarlyQuits
+						} else {
+							level.MaxEarlyQuits = level.MinEarlyQuits
+						}
+						foundDefault = true
+						break
+					}
+				}
+				if !foundDefault {
+					level.MaxEarlyQuits = level.MinEarlyQuits
+				}
+			}
+		}
+	}
+
+	// Regenerate penalty levels if they're invalid
+	if len(m.PenaltyLevels) == 0 {
+		m.PenaltyLevels = DefaultEarlyQuitServiceConfig().PenaltyLevels
+	}
+}
+
+// validateSteadyPlayerLevels ensures steady player levels are properly sequenced
+func (m *EarlyQuitServiceConfig) validateSteadyPlayerLevels() {
+	if len(m.SteadyPlayerLevels) == 0 {
+		m.SteadyPlayerLevels = DefaultEarlyQuitServiceConfig().SteadyPlayerLevels
+		return
+	}
+
+	// Sort by steady player level
+	sort.Slice(m.SteadyPlayerLevels, func(i, j int) bool {
+		return m.SteadyPlayerLevels[i].SteadyPlayerLevel < m.SteadyPlayerLevels[j].SteadyPlayerLevel
+	})
+
+	// Validate and fix each level
+	for i := range m.SteadyPlayerLevels {
+		level := &m.SteadyPlayerLevels[i]
+
+		// Ensure non-negative values
+		if level.MinNumMatches < 0 {
+			level.MinNumMatches = 0
+		}
+		if level.MinSteadyRatio < 0 {
+			level.MinSteadyRatio = 0
+		}
+		if level.MinSteadyRatio > 1.0 {
+			level.MinSteadyRatio = 1.0
+		}
+
+		// Ensure each level requires more matches than the previous
+		if i > 0 {
+			prevLevel := &m.SteadyPlayerLevels[i-1]
+			if level.MinNumMatches <= prevLevel.MinNumMatches {
+				level.MinNumMatches = prevLevel.MinNumMatches + 1
+			}
+			// Optionally ensure ratio is non-decreasing
+			if level.MinSteadyRatio < prevLevel.MinSteadyRatio {
+				level.MinSteadyRatio = prevLevel.MinSteadyRatio
+			}
+		}
+	}
+
+	// Regenerate steady player levels if they're invalid
+	if len(m.SteadyPlayerLevels) == 0 {
+		m.SteadyPlayerLevels = DefaultEarlyQuitServiceConfig().SteadyPlayerLevels
+	}
 }
 
 // DefaultEarlyQuitServiceConfig returns the default early quit config with max penalty active

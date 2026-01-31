@@ -59,6 +59,7 @@ type Metrics interface {
 	GaugeStorageIndexEntries(indexName string, value float64)
 
 	Matchmaker(tickets, activeTickets float64, processTime time.Duration)
+	MatchmakerSearchCapped(delta int64)
 
 	PresenceEvent(dequeueElapsed, processElapsed time.Duration)
 
@@ -433,6 +434,11 @@ func (m *LocalMetrics) Matchmaker(tickets, activeTickets float64, processTime ti
 	m.PrometheusScope.Gauge("matchmaker_tickets").Update(tickets)
 	m.PrometheusScope.Gauge("matchmaker_active_tickets").Update(activeTickets)
 	m.PrometheusScope.Timer("matchmaker_process_time").Record(processTime)
+}
+
+// Count matchmaker search capped events.
+func (m *LocalMetrics) MatchmakerSearchCapped(delta int64) {
+	m.PrometheusScope.Counter("matchmaker_search_capped").Inc(delta)
 }
 
 // Count presence events and time their processing.

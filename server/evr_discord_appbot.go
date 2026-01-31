@@ -74,7 +74,8 @@ type DiscordAppBot struct {
 	// Rate limiter for public matches (echo_arena, echo_combat) - 1 per 15 minutes
 	publicMatchRatePerSecond rate.Limit
 	publicMatchBurst         int
-	publicMatchRateLimiters  *MapOf[string, *rate.Limiter]
+	// Rate limiters for all match creation modes (public, private, social)
+	matchCreateRateLimiters *MapOf[string, *rate.Limiter]
 }
 
 func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordIntegrator, statusRegistry StatusRegistry, dg *discordgo.Session, ipInfoCache *IPInfoCache, guildGroupRegistry *GuildGroupRegistry) (*DiscordAppBot, error) {
@@ -106,7 +107,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		// Rate limiter for public matches: 1 per 15 minutes (900 seconds)
 		publicMatchRatePerSecond: 1.0 / 900,
 		publicMatchBurst:         1,
-		publicMatchRateLimiters:  &MapOf[string, *rate.Limiter]{},
+		matchCreateRateLimiters:  &MapOf[string, *rate.Limiter]{},
 		partyStatusChs:           &MapOf[string, chan error]{},
 		debugChannels:            make(map[string]string),
 	}
@@ -265,7 +266,7 @@ func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string, grou
 // loadPublicMatchRateLimiter returns the rate limiter for public match creation (1 per 15 minutes)
 func (e *DiscordAppBot) loadPublicMatchRateLimiter(userID, groupID string) *rate.Limiter {
 	key := strings.Join([]string{userID, groupID, "public"}, ":")
-	limiter, _ := e.publicMatchRateLimiters.LoadOrStore(key, rate.NewLimiter(e.publicMatchRatePerSecond, e.publicMatchBurst))
+	limiter, _ := e.matchCreateRateLimiters.LoadOrStore(key, rate.NewLimiter(e.publicMatchRatePerSecond, e.publicMatchBurst))
 	return limiter
 }
 
