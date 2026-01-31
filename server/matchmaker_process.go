@@ -25,6 +25,20 @@ import (
 	"go.uber.org/zap"
 )
 
+// capIndexCount caps the index count to the configured maximum search hits and emits metrics/logs if capping occurs.
+func (m *LocalMatchmaker) capIndexCount(indexCount int, ticket string) int {
+	maxSearchHits := m.config.GetMatchmaker().MaxSearchHits
+	if indexCount > maxSearchHits {
+		m.metrics.MatchmakerSearchCapped(1)
+		m.logger.Warn("matchmaker search capped",
+			zap.String("ticket", ticket),
+			zap.Int("cap", maxSearchHits),
+			zap.Int("total_indexes", indexCount))
+		return maxSearchHits
+	}
+	return indexCount
+}
+
 func (m *LocalMatchmaker) processDefault(activeIndexCount int, activeIndexesCopy map[string]*MatchmakerIndex, indexCount int, indexesCopy map[string]*MatchmakerIndex) ([][]*MatchmakerEntry, []string) {
 	matchedEntries := make([][]*MatchmakerEntry, 0, 5)
 	expiredActiveIndexes := make([]string, 0, 10)
@@ -85,7 +99,8 @@ func (m *LocalMatchmaker) processDefault(activeIndexCount int, activeIndexesCopy
 			indexQuery.AddMustNot(partyIdQuery)
 		}
 
-		searchRequest := bluge.NewTopNSearch(indexCount, indexQuery)
+		cappedIndexCount := m.capIndexCount(indexCount, activeIndex.Ticket)
+		searchRequest := bluge.NewTopNSearch(cappedIndexCount, indexQuery)
 		// Sort results to try and select the best match, or if the
 		// matches are equivalent, the longest waiting tickets first.
 		searchRequest.SortBy([]string{"-_score", "created_at"})
@@ -395,7 +410,8 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 			indexQuery.AddMustNot(partyIdQuery)
 		}
 
-		searchRequest := bluge.NewTopNSearch(indexCount, indexQuery)
+		cappedIndexCount := m.capIndexCount(indexCount, ticket)
+		searchRequest := bluge.NewTopNSearch(cappedIndexCount, indexQuery)
 		// Sort results to try and select the best match, or if the
 		// matches are equivalent, the longest waiting tickets first.
 		searchRequest.SortBy([]string{"-_score", "created_at"})

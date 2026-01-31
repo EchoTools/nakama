@@ -1305,11 +1305,12 @@ func NewLeaderboardConfig() *LeaderboardConfig {
 }
 
 type MatchmakerConfig struct {
-	MaxTickets   int  `yaml:"max_tickets" json:"max_tickets" usage:"Maximum number of concurrent matchmaking tickets allowed per session or party. Default 3."`
-	IntervalSec  int  `yaml:"interval_sec" json:"interval_sec" usage:"How quickly the matchmaker attempts to form matches, in seconds. Default 15."`
-	MaxIntervals int  `yaml:"max_intervals" json:"max_intervals" usage:"How many intervals the matchmaker attempts to find matches at the max player count, before allowing min count. Default 2."`
-	RevPrecision bool `yaml:"rev_precision" json:"rev_precision" usage:"Reverse matching precision. Default false."`
-	RevThreshold int  `yaml:"rev_threshold" json:"rev_threshold" usage:"Reverse matching threshold. Default 1."`
+	MaxTickets    int  `yaml:"max_tickets" json:"max_tickets" usage:"Maximum number of concurrent matchmaking tickets allowed per session or party. Default 3."`
+	IntervalSec   int  `yaml:"interval_sec" json:"interval_sec" usage:"How quickly the matchmaker attempts to form matches, in seconds. Default 15."`
+	MaxIntervals  int  `yaml:"max_intervals" json:"max_intervals" usage:"How many intervals the matchmaker attempts to find matches at the max player count, before allowing min count. Default 2."`
+	RevPrecision  bool `yaml:"rev_precision" json:"rev_precision" usage:"Reverse matching precision. Default false."`
+	RevThreshold  int  `yaml:"rev_threshold" json:"rev_threshold" usage:"Reverse matching threshold. Default 1."`
+	MaxSearchHits int  `yaml:"max_search_hits" json:"max_search_hits" usage:"Maximum number of search hits per ticket in matchmaker. Default 1000."`
 }
 
 func (cfg *MatchmakerConfig) Clone() *MatchmakerConfig {
@@ -1323,11 +1324,12 @@ func (cfg *MatchmakerConfig) Clone() *MatchmakerConfig {
 
 func NewMatchmakerConfig() *MatchmakerConfig {
 	return &MatchmakerConfig{
-		MaxTickets:   3,
-		IntervalSec:  15,
-		MaxIntervals: 2,
-		RevPrecision: false,
-		RevThreshold: 1,
+		MaxTickets:    3,
+		IntervalSec:   15,
+		MaxIntervals:  2,
+		RevPrecision:  false,
+		RevThreshold:  1,
+		MaxSearchHits: 1000,
 	}
 }
 
