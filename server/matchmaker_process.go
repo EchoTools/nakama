@@ -30,10 +30,19 @@ func (m *LocalMatchmaker) capIndexCount(indexCount int, ticket string) int {
 	maxSearchHits := m.config.GetMatchmaker().MaxSearchHits
 	if indexCount > maxSearchHits {
 		m.metrics.MatchmakerSearchCapped(1)
-		m.logger.Warn("matchmaker search capped",
-			zap.String("ticket", ticket),
-			zap.Int("cap", maxSearchHits),
-			zap.Int("total_indexes", indexCount))
+
+		// Rate-limit log warnings to once per minute to avoid log spam in high-ticket scenarios
+		now := time.Now().Unix()
+		lastWarning := m.lastCapWarningTime.Load()
+		if now-lastWarning >= 60 {
+			if m.lastCapWarningTime.CompareAndSwap(lastWarning, now) {
+				m.logger.Warn("matchmaker search capped (future warnings rate-limited to 1/min)",
+					zap.String("ticket", ticket),
+					zap.Int("cap", maxSearchHits),
+					zap.Int("total_indexes", indexCount))
+			}
+		}
+
 		return maxSearchHits
 	}
 	return indexCount

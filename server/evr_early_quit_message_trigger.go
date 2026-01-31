@@ -3,8 +3,6 @@ package server
 import (
 	"context"
 	"database/sql"
-	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -76,8 +74,8 @@ func LoadEarlyQuitServiceConfig(ctx context.Context, nk runtime.NakamaModule, lo
 			return config
 		}
 
-		// Some other error occurred
-		if !errors.Is(err, context.Canceled) {
+		// Some other error occurred; suppress logs if the context was canceled.
+		if ctx.Err() == nil {
 			if logger != nil {
 				logger.Warn("Failed to load early quit config from storage, using defaults",
 					zap.Error(err))
@@ -114,12 +112,27 @@ func LoadEarlyQuitServiceConfig(ctx context.Context, nk runtime.NakamaModule, lo
 
 	// Validate and fix any invalid values
 	// Track if config was mutated to determine if we need to write it back
-	configBeforeValidation := fmt.Sprintf("%+v", config)
+	// We use a simple heuristic: if validation changes the slice lengths or values, write back
+	originalPenaltyCount := len(config.PenaltyLevels)
+	originalSteadyCount := len(config.SteadyPlayerLevels)
+
+	// Create a snapshot of first penalty level if exists (to detect mutations)
+	var firstPenaltySnapshot *evr.EarlyQuitPenaltyLevelConfig
+	if len(config.PenaltyLevels) > 0 {
+		snapshot := config.PenaltyLevels[0]
+		firstPenaltySnapshot = &snapshot
+	}
+
 	config.Validate()
-	configAfterValidation := fmt.Sprintf("%+v", config)
+
+	// Check if validation mutated the config
+	configMutated := originalPenaltyCount != len(config.PenaltyLevels) ||
+		originalSteadyCount != len(config.SteadyPlayerLevels) ||
+		(firstPenaltySnapshot != nil && len(config.PenaltyLevels) > 0 &&
+			config.PenaltyLevels[0] != *firstPenaltySnapshot)
 
 	// Write back to storage if validation mutated the config
-	if configBeforeValidation != configAfterValidation {
+	if configMutated {
 		config.SetStorageVersion("*")
 		configStorable.EarlyQuitServiceConfig = config
 		if writeErr := StorableWrite(ctx, nk, SystemUserID, configStorable); writeErr != nil {

@@ -766,7 +766,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		}
 
 		key := fmt.Sprintf("%s:%s:%s", userID, groupID, mode.String())
-		limiter, _ := d.publicMatchRateLimiters.LoadOrStore(key, rate.NewLimiter(rate.Limit(1.0/float64(config.seconds)), 1))
+		limiter, _ := d.matchCreateRateLimiters.LoadOrStore(key, rate.NewLimiter(rate.Limit(1.0/float64(config.seconds)), 1))
 
 		if !limiter.Allow() {
 			return nil, 0, status.Error(codes.ResourceExhausted, config.message)

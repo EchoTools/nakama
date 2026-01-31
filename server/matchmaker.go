@@ -270,6 +270,8 @@ type LocalMatchmaker struct {
 	// Reverse lookup cache for mutual matching.
 	revCache       *MapOf[string, map[string]bool]
 	revThresholdFn func() *time.Timer
+	// Last time we logged a search cap warning (to rate-limit log spam)
+	lastCapWarningTime *atomic.Int64
 }
 
 var matchmakerProcessMu = &sync.Mutex{}
@@ -300,14 +302,15 @@ func NewLocalMatchmaker(logger, startupLogger *zap.Logger, config Config, router
 		ctx:         ctx,
 		ctxCancelFn: ctxCancelFn,
 
-		indexWriter:      indexWriter,
-		statsCompletions: NewBuffer(10), // Only keep 10 samples in memory.
-		statsSnapshot:    atomic.NewPointer[api.MatchmakerStats](&api.MatchmakerStats{}),
-		sessionTickets:   make(map[string]map[string]struct{}),
-		partyTickets:     make(map[string]map[string]struct{}),
-		indexes:          make(map[string]*MatchmakerIndex),
-		activeIndexes:    make(map[string]*MatchmakerIndex),
-		revCache:         &MapOf[string, map[string]bool]{},
+		indexWriter:        indexWriter,
+		statsCompletions:   NewBuffer(10), // Only keep 10 samples in memory.
+		statsSnapshot:      atomic.NewPointer[api.MatchmakerStats](&api.MatchmakerStats{}),
+		sessionTickets:     make(map[string]map[string]struct{}),
+		partyTickets:       make(map[string]map[string]struct{}),
+		indexes:            make(map[string]*MatchmakerIndex),
+		activeIndexes:      make(map[string]*MatchmakerIndex),
+		revCache:           &MapOf[string, map[string]bool]{},
+		lastCapWarningTime: atomic.NewInt64(0),
 	}
 
 	if revThreshold := m.config.GetMatchmaker().RevThreshold; revThreshold > 0 && m.config.GetMatchmaker().RevPrecision {

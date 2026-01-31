@@ -191,18 +191,20 @@ func SyncJournalAndProfileWithRetry(ctx context.Context, nk runtime.NakamaModule
 	var lastErr error
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		// Re-read the journal from storage on each attempt to get the latest version
-		// This ensures we don't retry with stale data after a concurrent update
-		currentJournal := NewGuildEnforcementJournal(userID)
-		if err := StorableRead(ctx, nk, userID, currentJournal, true); err != nil {
-			lastErr = err
-			// On read failure, use the provided journal as fallback
-			currentJournal = journal
+		// On retry, re-read the journal from storage to get the latest version
+		// This ensures we have the correct storage version for the write
+		if attempt > 0 {
+			freshJournal := NewGuildEnforcementJournal(userID)
+			if err := StorableRead(ctx, nk, userID, freshJournal, true); err != nil {
+				lastErr = err
+				// On read failure, continue with the existing journal
+			} else {
+				// Update the journal's storage version to the latest from storage
+				meta := journal.StorageMeta()
+				meta.Version = freshJournal.GetStorageVersion()
+				journal.SetStorageMeta(meta)
+			}
 		}
-
-		// Merge the new journal entries into the current journal
-		// (In this case, since we're syncing the passed journal, we use it directly)
-		currentJournal = journal
 
 		// Load existing profile from storage to get the current version, or create if it doesn't exist
 		profile := NewSuspensionProfile(userID)
@@ -212,10 +214,10 @@ func SyncJournalAndProfileWithRetry(ctx context.Context, nk runtime.NakamaModule
 			profile = NewSuspensionProfile(userID)
 		}
 		// Update profile with latest journal data
-		profile.SyncFromJournal(currentJournal)
+		profile.SyncFromJournal(journal)
 
 		// Try to write both to storage
-		if err := StorableWrite(ctx, nk, userID, currentJournal); err != nil {
+		if err := StorableWrite(ctx, nk, userID, journal); err != nil {
 			lastErr = err
 			// Only retry on version conflicts, fail fast on other errors
 			if isVersionConflictError(err) && attempt < maxRetries-1 {
