@@ -207,8 +207,8 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		}
 	}
 
-	// Save the enforcement journal and sync to profile
-	if err := SyncJournalAndProfile(ctx, nk, targetUserID, journal); err != nil {
+	// Save the enforcement journal and sync to profile with retry logic for concurrent writes
+	if err := SyncJournalAndProfileWithRetry(ctx, nk, targetUserID, journal); err != nil {
 		logger.Error("Failed to write enforcement data", zap.Error(err))
 		return "", runtime.NewError("Failed to save enforcement data", StatusInternalError)
 	}
@@ -542,10 +542,10 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 		return "", runtime.NewError("Failed to edit enforcement record", StatusInternalError)
 	}
 
-	// Save the journal
-	if err := StorableWrite(ctx, nk, request.TargetUserID, journal); err != nil {
-		logger.Error("Failed to write enforcement journal", zap.Error(err))
-		return "", runtime.NewError("Failed to save enforcement record", StatusInternalError)
+	// Save the journal and sync to profile with retry logic for concurrent writes
+	if err := SyncJournalAndProfileWithRetry(ctx, nk, request.TargetUserID, journal); err != nil {
+		logger.Error("Failed to write enforcement data", zap.Error(err))
+		return "", runtime.NewError("Failed to save enforcement data", StatusInternalError)
 	}
 
 	// Log the edit
