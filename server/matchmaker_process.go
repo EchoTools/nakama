@@ -85,7 +85,17 @@ func (m *LocalMatchmaker) processDefault(activeIndexCount int, activeIndexesCopy
 			indexQuery.AddMustNot(partyIdQuery)
 		}
 
-		searchRequest := bluge.NewTopNSearch(indexCount, indexQuery)
+		maxSearchHits := m.config.GetMatchmaker().MaxSearchHits
+		cappedIndexCount := indexCount
+		if indexCount > maxSearchHits {
+			cappedIndexCount = maxSearchHits
+			m.metrics.MatchmakerSearchCapped(1)
+			m.logger.Warn("matchmaker search capped",
+				zap.String("ticket", activeIndex.Ticket),
+				zap.Int("cap", maxSearchHits),
+				zap.Int("total_indexes", indexCount))
+		}
+		searchRequest := bluge.NewTopNSearch(cappedIndexCount, indexQuery)
 		// Sort results to try and select the best match, or if the
 		// matches are equivalent, the longest waiting tickets first.
 		searchRequest.SortBy([]string{"-_score", "created_at"})
@@ -395,7 +405,17 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 			indexQuery.AddMustNot(partyIdQuery)
 		}
 
-		searchRequest := bluge.NewTopNSearch(indexCount, indexQuery)
+		maxSearchHits := m.config.GetMatchmaker().MaxSearchHits
+		cappedIndexCount := indexCount
+		if indexCount > maxSearchHits {
+			cappedIndexCount = maxSearchHits
+			m.metrics.MatchmakerSearchCapped(1)
+			m.logger.Warn("matchmaker search capped",
+				zap.String("ticket", activeIndex.Ticket),
+				zap.Int("cap", maxSearchHits),
+				zap.Int("total_indexes", indexCount))
+		}
+		searchRequest := bluge.NewTopNSearch(cappedIndexCount, indexQuery)
 		// Sort results to try and select the best match, or if the
 		// matches are equivalent, the longest waiting tickets first.
 		searchRequest.SortBy([]string{"-_score", "created_at"})
