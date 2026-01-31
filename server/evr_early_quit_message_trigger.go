@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"sync"
 	"time"
 
@@ -10,6 +11,8 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // SNSEarlyQuitMessageTrigger manages sending early quit SNS messages to connected players
@@ -21,6 +24,97 @@ type SNSEarlyQuitMessageTrigger struct {
 	db       *sql.DB
 	stopCh   chan struct{}
 	stopped  bool
+}
+
+// EarlyQuitServiceConfigStorable wraps the config for storage operations
+type EarlyQuitServiceConfigStorable struct {
+	*evr.EarlyQuitServiceConfig
+	meta StorableMetadata
+}
+
+func (c *EarlyQuitServiceConfigStorable) StorageMeta() StorableMetadata {
+	return StorableMetadata{
+		Collection:      evr.StorageCollectionEarlyQuitConfig,
+		Key:             evr.StorageKeyEarlyQuitConfig,
+		PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
+		PermissionWrite: runtime.STORAGE_PERMISSION_NO_WRITE,
+		Version:         c.EarlyQuitServiceConfig.StorageVersion(),
+		UserID:          c.meta.UserID,
+	}
+}
+
+func (c *EarlyQuitServiceConfigStorable) SetStorageMeta(meta StorableMetadata) {
+	c.meta = meta
+	c.EarlyQuitServiceConfig.SetStorageVersion(meta.Version)
+}
+
+// LoadEarlyQuitServiceConfig loads the early quit service config from storage,
+// or creates it with defaults if not found or blank. The config is validated and fixed if invalid.
+func LoadEarlyQuitServiceConfig(ctx context.Context, nk runtime.NakamaModule, logger *zap.Logger) *evr.EarlyQuitServiceConfig {
+	configStorable := &EarlyQuitServiceConfigStorable{
+		EarlyQuitServiceConfig: evr.NewEarlyQuitServiceConfig(),
+	}
+
+	// Try to load from storage
+	err := StorableRead(ctx, nk, SystemUserID, configStorable, true)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			// Config doesn't exist, create it with defaults
+			config := evr.DefaultEarlyQuitServiceConfig()
+			config.SetStorageVersion("*")
+
+			// Validate and write to storage
+			config.Validate()
+			configStorable.EarlyQuitServiceConfig = config
+			if writeErr := StorableWrite(ctx, nk, SystemUserID, configStorable); writeErr != nil {
+				if logger != nil {
+					logger.Warn("Failed to write early quit config to storage",
+						zap.Error(writeErr))
+				}
+			}
+			return config
+		}
+
+		// Some other error occurred
+		if !errors.Is(err, context.Canceled) {
+			if logger != nil {
+				logger.Warn("Failed to load early quit config from storage, using defaults",
+					zap.Error(err))
+			}
+		}
+		// Use defaults but don't write
+		config := evr.DefaultEarlyQuitServiceConfig()
+		config.SetStorageVersion("*")
+		return config
+	}
+
+	config := configStorable.EarlyQuitServiceConfig
+
+	// Check if the loaded config is blank and populate with defaults if needed
+	if len(config.PenaltyLevels) == 0 || len(config.SteadyPlayerLevels) == 0 {
+		defaults := evr.DefaultEarlyQuitServiceConfig()
+		if len(config.PenaltyLevels) == 0 {
+			config.PenaltyLevels = defaults.PenaltyLevels
+		}
+		if len(config.SteadyPlayerLevels) == 0 {
+			config.SteadyPlayerLevels = defaults.SteadyPlayerLevels
+		}
+
+		// Write the populated config back to storage
+		config.SetStorageVersion("*")
+		configStorable.EarlyQuitServiceConfig = config
+		if writeErr := StorableWrite(ctx, nk, SystemUserID, configStorable); writeErr != nil {
+			if logger != nil {
+				logger.Warn("Failed to write populated early quit config to storage",
+					zap.Error(writeErr))
+			}
+		}
+	}
+
+	// Validate and fix any invalid values
+	config.Validate()
+
+	return config
 }
 
 // NewSNSEarlyQuitMessageTrigger creates a new message trigger
@@ -82,8 +176,8 @@ func (t *SNSEarlyQuitMessageTrigger) SendEarlyQuitConfigOnLogin(ctx context.Cont
 		return nil
 	}
 
-	// Get the default configuration from service settings
-	config := evr.DefaultEarlyQuitServiceConfig()
+	// Load the configuration from storage (or defaults)
+	config := LoadEarlyQuitServiceConfig(ctx, t.nk, t.logger)
 
 	// Create the SNS message wrapper
 	message := evr.NewSNSEarlyQuitConfig(config)
