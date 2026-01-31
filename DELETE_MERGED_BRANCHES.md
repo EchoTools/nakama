@@ -19,7 +19,26 @@ The following branches have been identified as merged or from closed PRs and sho
 
 ## How to Delete
 
-### Option 1: Using GitHub CLI (gh)
+### Option 1: Using the helper script (Recommended)
+
+The easiest way is to use the provided helper script:
+
+```bash
+# Make sure GitHub CLI is authenticated
+gh auth login
+
+# Run the helper script
+bash scripts/delete-merged-branches.sh
+```
+
+### Option 2: Using GitHub Actions Workflow
+
+1. Go to https://github.com/EchoTools/nakama/actions/workflows/delete-merged-branches.yaml
+2. Click "Run workflow"
+3. Choose "false" for dry_run to actually delete branches (or "true" to see what would be deleted)
+4. Click "Run workflow" button
+
+### Option 3: Using GitHub CLI (gh)
 
 ```bash
 # Authenticate with GitHub
@@ -38,7 +57,7 @@ gh api -X DELETE /repos/EchoTools/nakama/git/refs/heads/fix/matchmaker-memory-ex
 gh api -X DELETE /repos/EchoTools/nakama/git/refs/heads/refactor/earlyquit-client-side-enforcement
 ```
 
-### Option 2: Using git with credentials
+### Option 4: Using git with credentials
 
 ```bash
 # Make sure you have push access to the repository
@@ -54,7 +73,7 @@ git push origin --delete fix/matchmaker-memory-explosion
 git push origin --delete refactor/earlyquit-client-side-enforcement
 ```
 
-### Option 3: Using the GitHub Web UI
+### Option 5: Using the GitHub Web UI
 
 1. Go to https://github.com/EchoTools/nakama/branches
 2. Find each branch in the list above
