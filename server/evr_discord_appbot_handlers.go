@@ -217,6 +217,20 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 			logger.Warn("Failed to log interaction to channel")
 		}
 
+	case "lockout":
+		gg := d.guildGroupRegistry.Get(groupID)
+		if gg == nil {
+			return simpleInteractionResponse(s, i, "This guild is not registered.")
+		}
+
+		if err := d.LogInteractionToChannel(i, gg.AuditChannelID); err != nil {
+			logger.Warn("Failed to log interaction to channel")
+		}
+
+		if !isGlobalOperator && !gg.IsEnforcer(userID) {
+			return simpleInteractionResponse(s, i, "You must be a guild enforcer to use this command.")
+		}
+
 	case "join-player", "igp", "ign", "shutdown-match":
 
 		gg := d.guildGroupRegistry.Get(groupID)

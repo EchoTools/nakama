@@ -534,6 +534,48 @@ var (
 			},
 		},
 		{
+			Name:        "lockout",
+			Description: "Set early quit penalty values for a player (moderator/testing).",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Name:        "user",
+					Description: "Target user",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "penalty_level",
+					Description: "Early quit penalty level (-1 to 3)",
+					Required:    false,
+					MinValue:    ptr.Float64(-1),
+					MaxValue:    3,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "total_early_quits",
+					Description: "Total early quits count (0+)",
+					Required:    false,
+					MinValue:    ptr.Float64(0),
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "total_completed_matches",
+					Description: "Total completed matches count (0+)",
+					Required:    false,
+					MinValue:    ptr.Float64(0),
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "matchmaking_tier",
+					Description: "Matchmaking tier (1=good standing, 2=penalty tier)",
+					Required:    false,
+					MinValue:    ptr.Float64(1),
+					MaxValue:    2,
+				},
+			},
+		},
+		{
 			Name:        "jersey-number",
 			Description: "Set your in-game jersey number.",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -2482,6 +2524,160 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			return d.kickPlayer(logger, i, callerMember, target, duration, userNotice, notes, requireCommunityValues, allowPrivateLobbies)
+		},
+		"lockout": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, callerMember *discordgo.Member, userID string, groupID string) error {
+
+			if user == nil {
+				return nil
+			}
+
+			var (
+				target                *discordgo.User
+				targetUserID          string
+				penaltyLevel          *int64
+				totalEarlyQuits       *int64
+				totalCompletedMatches *int64
+				matchmakingTier       *int64
+				hasAnyUpdate          bool
+			)
+
+			for _, o := range i.ApplicationCommandData().Options {
+				switch o.Name {
+				case "user":
+					target = o.UserValue(s)
+					targetUserID = d.cache.DiscordIDToUserID(target.ID)
+					if targetUserID == "" {
+						return errors.New("failed to get target user ID")
+					}
+				case "penalty_level":
+					penaltyLevel = ptr.Int64(o.IntValue())
+					hasAnyUpdate = true
+				case "total_early_quits":
+					totalEarlyQuits = ptr.Int64(o.IntValue())
+					hasAnyUpdate = true
+				case "total_completed_matches":
+					totalCompletedMatches = ptr.Int64(o.IntValue())
+					hasAnyUpdate = true
+				case "matchmaking_tier":
+					matchmakingTier = ptr.Int64(o.IntValue())
+					hasAnyUpdate = true
+				}
+			}
+
+			if target == nil {
+				return errors.New("target user is required")
+			}
+
+			if target.Bot {
+				return simpleInteractionResponse(s, i, "Bots cannot have early quit penalties.")
+			}
+
+			if !hasAnyUpdate {
+				return simpleInteractionResponse(s, i, "You must specify at least one value to update.")
+			}
+
+			eqConfig := NewEarlyQuitConfig()
+			if err := StorableRead(ctx, nk, targetUserID, eqConfig, false); err != nil && status.Code(err) != codes.NotFound {
+				return fmt.Errorf("failed to load early quit config: %w", err)
+			}
+
+			oldPenaltyLevel := eqConfig.EarlyQuitPenaltyLevel
+			oldTotalEarlyQuits := eqConfig.TotalEarlyQuits
+			oldTotalCompletedMatches := eqConfig.TotalCompletedMatches
+			oldMatchmakingTier := eqConfig.MatchmakingTier
+
+			var validationErrors []string
+
+			if penaltyLevel != nil {
+				val := int32(*penaltyLevel)
+				if val < MinEarlyQuitPenaltyLevel || val > MaxEarlyQuitPenaltyLevel {
+					validationErrors = append(validationErrors, fmt.Sprintf("❌ penalty_level must be between %d and %d (got %d)", MinEarlyQuitPenaltyLevel, MaxEarlyQuitPenaltyLevel, val))
+				} else {
+					eqConfig.EarlyQuitPenaltyLevel = val
+				}
+			}
+
+			if totalEarlyQuits != nil {
+				val := int32(*totalEarlyQuits)
+				if val < 0 {
+					validationErrors = append(validationErrors, fmt.Sprintf("❌ total_early_quits must be >= 0 (got %d)", val))
+				} else {
+					eqConfig.TotalEarlyQuits = val
+				}
+			}
+
+			if totalCompletedMatches != nil {
+				val := int32(*totalCompletedMatches)
+				if val < 0 {
+					validationErrors = append(validationErrors, fmt.Sprintf("❌ total_completed_matches must be >= 0 (got %d)", val))
+				} else {
+					eqConfig.TotalCompletedMatches = val
+				}
+			}
+
+			if matchmakingTier != nil {
+				val := int32(*matchmakingTier)
+				if val != MatchmakingTier1 && val != MatchmakingTier2 {
+					validationErrors = append(validationErrors, fmt.Sprintf("❌ matchmaking_tier must be %d (good standing) or %d (penalty) (got %d)", MatchmakingTier1, MatchmakingTier2, val))
+				} else {
+					eqConfig.MatchmakingTier = val
+					eqConfig.LastTierChange = time.Now().UTC()
+				}
+			}
+
+			if len(validationErrors) > 0 {
+				return simpleInteractionResponse(s, i, strings.Join(validationErrors, "\n"))
+			}
+
+			eqConfig.PlayerReliabilityRating = CalculatePlayerReliabilityRating(eqConfig.TotalEarlyQuits, eqConfig.TotalCompletedMatches)
+
+			if err := StorableWrite(ctx, nk, targetUserID, eqConfig); err != nil {
+				return fmt.Errorf("failed to save early quit config: %w", err)
+			}
+
+			var changes []string
+			if penaltyLevel != nil && oldPenaltyLevel != eqConfig.EarlyQuitPenaltyLevel {
+				changes = append(changes, fmt.Sprintf("Penalty Level: %d → %d", oldPenaltyLevel, eqConfig.EarlyQuitPenaltyLevel))
+			}
+			if totalEarlyQuits != nil && oldTotalEarlyQuits != eqConfig.TotalEarlyQuits {
+				changes = append(changes, fmt.Sprintf("Total Early Quits: %d → %d", oldTotalEarlyQuits, eqConfig.TotalEarlyQuits))
+			}
+			if totalCompletedMatches != nil && oldTotalCompletedMatches != eqConfig.TotalCompletedMatches {
+				changes = append(changes, fmt.Sprintf("Completed Matches: %d → %d", oldTotalCompletedMatches, eqConfig.TotalCompletedMatches))
+			}
+			if matchmakingTier != nil && oldMatchmakingTier != eqConfig.MatchmakingTier {
+				changes = append(changes, fmt.Sprintf("Matchmaking Tier: %d → %d", oldMatchmakingTier, eqConfig.MatchmakingTier))
+			}
+
+			if len(changes) == 0 {
+				return simpleInteractionResponse(s, i, "✅ No changes made (values unchanged).")
+			}
+
+			responseMsg := fmt.Sprintf("✅ Updated early quit data for <@%s>:\n\n%s\n\nReliability Rating: %.2f%%",
+				target.ID,
+				strings.Join(changes, "\n"),
+				eqConfig.PlayerReliabilityRating*100,
+			)
+
+			auditMsg := fmt.Sprintf("🔧 Early Quit Data Modified\n"+
+				"**Moderator:** <@%s> (`%s`)\n"+
+				"**Target:** <@%s> (`%s`)\n"+
+				"**Changes:**\n%s\n"+
+				"**Time:** <t:%d:F>",
+				user.ID, user.Username,
+				target.ID, target.Username,
+				strings.Join(changes, "\n"),
+				time.Now().Unix(),
+			)
+
+			gg := d.guildGroupRegistry.Get(groupID)
+			if gg != nil && gg.AuditChannelID != "" {
+				if err := AuditLogSend(s, gg.AuditChannelID, auditMsg); err != nil {
+					logger.WithField("error", err).Warn("Failed to send audit log")
+				}
+			}
+
+			return simpleInteractionResponse(s, i, responseMsg)
 		},
 		"join-player": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
