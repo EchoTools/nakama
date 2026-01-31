@@ -189,8 +189,14 @@ func SyncJournalAndProfileWithRetry(ctx context.Context, nk runtime.NakamaModule
 	var lastErr error
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		// Create a fresh profile from the journal
+		// Load existing profile from storage to get the current version, or create if it doesn't exist
 		profile := NewSuspensionProfile(userID)
+		if err := StorableRead(ctx, nk, userID, profile, true); err != nil {
+			// If we can't read (and create) the profile, try to just create a new one
+			lastErr = err
+			profile = NewSuspensionProfile(userID)
+		}
+		// Update profile with latest journal data
 		profile.SyncFromJournal(journal)
 
 		// Try to write both to storage
