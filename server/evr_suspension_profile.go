@@ -166,11 +166,12 @@ func (s *SuspensionProfile) SyncFromJournal(journal *GuildEnforcementJournal) {
 // SyncJournalAndProfile updates both the enforcement journal and suspension profile in storage
 // This ensures they stay in sync whenever enforcement data changes
 func SyncJournalAndProfile(ctx context.Context, nk runtime.NakamaModule, userID string, journal *GuildEnforcementJournal) error {
-	// Create profile from journal
 	profile := NewSuspensionProfile(userID)
+	if err := StorableRead(ctx, nk, userID, profile, true); err != nil {
+		return err
+	}
 	profile.SyncFromJournal(journal)
 
-	// Write both to storage
 	if err := StorableWrite(ctx, nk, userID, journal); err != nil {
 		return err
 	}
