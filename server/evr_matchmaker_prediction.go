@@ -208,25 +208,18 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 
 	go func() {
 		defer close(out)
-		// Predefine constants for maximum sizes
 		const (
 			MaxTeamSize              = 5
 			MaxPlayersPerMatch       = MaxTeamSize * 2
-			MaxGroupsPerMatch        = MaxPlayersPerMatch // Worst case: all single-player groups
+			MaxGroupsPerMatch        = MaxPlayersPerMatch
 			InitialTicketCacheSize   = 40
 			InitialDivisionCacheSize = 10
-			MaxSeenMapSize           = 100000
+			MaxUniqueCandidates      = 50000
 		)
 
-		// Cap seen map size to prevent memory explosion from combinatorial candidate generation
-		seenMapCap := len(candidates)
-		if seenMapCap > MaxSeenMapSize {
-			seenMapCap = MaxSeenMapSize
-		}
-
-		// Pre-allocate all reusable data structures
 		var (
-			seen          = make(map[uint64]struct{}, seenMapCap)
+			seen          = make(map[uint64]struct{}, min(len(candidates), MaxUniqueCandidates))
+			uniqueCount   = 0
 			groupRatings  = make([]types.Team, 0, MaxGroupsPerMatch)
 			ticketGroups  = make(map[string]MatchmakerEntries, MaxGroupsPerMatch)
 			groups        = make([]MatchmakerEntries, 0, MaxGroupsPerMatch)
@@ -248,14 +241,17 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 				continue
 			}
 
-			// Skip duplicate candidates
+			if uniqueCount >= MaxUniqueCandidates {
+				break
+			}
+
 			h := HashMatchmakerEntries(candidate)
 			if _, ok := seen[h]; ok {
 				continue
 			}
 			seen[h] = struct{}{}
+			uniqueCount++
 
-			// Clear ticketGroups map
 			for k := range ticketGroups {
 				delete(ticketGroups, k)
 			}
