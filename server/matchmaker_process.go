@@ -411,7 +411,7 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 			cappedIndexCount = maxSearchHits
 			m.metrics.MatchmakerSearchCapped(1)
 			m.logger.Warn("matchmaker search capped",
-				zap.String("ticket", activeIndex.Ticket),
+				zap.String("ticket", ticket),
 				zap.Int("cap", maxSearchHits),
 				zap.Int("total_indexes", indexCount))
 		}
