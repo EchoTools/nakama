@@ -81,7 +81,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 
 	// Determine enforcer user ID
 	enforcerUserID := userID
-	if request.EnforcerID != "" {
+	if request.EnforcerID != "" && request.EnforcerID != userID {
 		if !isGlobalOperator {
 			return "", runtime.NewError("Only global operators can specify an enforcer_id", StatusPermissionDenied)
 		}
@@ -129,19 +129,14 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	}
 
 	var (
-		cnt                   = 0
-		actions               = make([]string, 0)
-		voidActiveSuspensions = !suspensionExpiry.IsZero() && time.Now().After(suspensionExpiry)
-		addSuspension         = !suspensionExpiry.IsZero() && time.Now().Before(suspensionExpiry)
-		recordsByGroupID      = make(map[string][]GuildEnforcementRecord, 1)
-		voids                 = make(map[string]GuildEnforcementRecordVoid, 0)
-		kickPlayer            = false
+		cnt              = 0
+		actions          = make([]string, 0)
+		addSuspension    = !suspensionExpiry.IsZero() && time.Now().Before(suspensionExpiry)
+		recordsByGroupID = make(map[string][]GuildEnforcementRecord, 1)
 	)
 
-	// Determine if we should kick the player
-	if !voidActiveSuspensions {
-		kickPlayer = true
-	}
+	// Kick the player
+	kickPlayer := true
 
 	// Load or create enforcement journal
 	journal := NewGuildEnforcementJournal(targetUserID)
@@ -150,45 +145,21 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError("Failed to read enforcement journal", StatusInternalError)
 	}
 
-	// Add suspension record or void existing suspensions
+	// Add suspension record if suspension duration was provided
 	if addSuspension {
+		// Get enforcer's Discord ID for audit log
+		enforcerDiscordID := ""
+		account, err := nk.AccountGetId(ctx, enforcerUserID)
+		if err != nil {
+			logger.Error("Failed to load enforcer account for Discord ID", zap.Error(err), zap.String("enforcer_user_id", enforcerUserID))
+		} else if account != nil && account.CustomId != "" {
+			enforcerDiscordID = account.CustomId
+		}
+
 		// Add a new suspension record
 		actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
-		record := journal.AddRecord(groupID, enforcerUserID, "", request.UserNotice, request.ModeratorNotes, request.RequireCommunityValues, request.AllowPrivateLobbies, suspensionDuration)
+		record := journal.AddRecord(groupID, enforcerUserID, enforcerDiscordID, request.UserNotice, request.ModeratorNotes, request.RequireCommunityValues, request.AllowPrivateLobbies, suspensionDuration)
 		recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
-	} else if voidActiveSuspensions {
-		// Void active suspensions
-		currentGroupID := groupID
-		groupIDs := []string{currentGroupID}
-
-		// Add inherited groups
-		if gg.SuspensionInheritanceGroupIDs != nil {
-			groupIDs = append(groupIDs, gg.SuspensionInheritanceGroupIDs...)
-		}
-
-		// Void any active suspensions for this group and any inherited groups
-		for _, gID := range groupIDs {
-			if recordsByGroupID[gID] == nil {
-				recordsByGroupID[gID] = make([]GuildEnforcementRecord, 0)
-			}
-
-			for _, record := range journal.GroupRecords(gID) {
-				// Ignore expired or already-voided records
-				if record.IsExpired() || journal.IsVoid(gID, record.ID) || journal.IsVoid(currentGroupID, record.ID) {
-					continue
-				}
-				actions = append(actions, fmt.Sprintf("suspension voided: <t:%d:R> (expires <t:%d:R>): %s", record.CreatedAt.Unix(), record.Expiry.Unix(), record.UserNoticeText))
-
-				recordsByGroupID[currentGroupID] = append(recordsByGroupID[currentGroupID], record)
-
-				details := request.UserNotice
-				if request.ModeratorNotes != "" {
-					details += "\n" + request.ModeratorNotes
-				}
-				void := journal.VoidRecord(currentGroupID, record.ID, enforcerUserID, "", details)
-				voids[void.RecordID] = void
-			}
-		}
 	}
 
 	// Save the enforcement journal and sync to profile
@@ -278,6 +249,142 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 
 	if !suspensionExpiry.IsZero() && time.Now().Before(suspensionExpiry) {
 		response.SuspensionExpiry = suspensionExpiry.Unix()
+	}
+
+	responseData, err := json.Marshal(response)
+	if err != nil {
+		logger.Error("Failed to marshal response", zap.Error(err))
+		return "", runtime.NewError("Failed to create response", StatusInternalError)
+	}
+
+	return string(responseData), nil
+}
+
+// EnforcementSuspensionVoidRequest represents the request to void active suspensions
+type EnforcementSuspensionVoidRequest struct {
+	GroupID        string `json:"group_id"`                  // Guild group ID (required)
+	TargetUserID   string `json:"target_user_id"`            // User ID of the player with active suspensions (required)
+	EnforcerID     string `json:"enforcer_id,omitempty"`     // Enforcer user ID (only allowed for global operators, defaults to caller)
+	ModeratorNotes string `json:"moderator_notes,omitempty"` // Notes for the audit log (other moderators)
+}
+
+// EnforcementSuspensionVoidResponse represents the response from voiding suspensions
+type EnforcementSuspensionVoidResponse struct {
+	Success bool     `json:"success"`
+	Message string   `json:"message"`
+	Actions []string `json:"actions"`
+}
+
+// EnforcementSuspensionVoidRPC is the RPC handler for voiding active suspensions
+func EnforcementSuspensionVoidRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	var request EnforcementSuspensionVoidRequest
+	if err := json.Unmarshal([]byte(payload), &request); err != nil {
+		return "", runtime.NewError("Invalid request payload", StatusInvalidArgument)
+	}
+
+	// Validate required fields
+	if request.GroupID == "" {
+		return "", runtime.NewError("group_id is required", StatusInvalidArgument)
+	}
+	if request.TargetUserID == "" {
+		return "", runtime.NewError("target_user_id is required", StatusInvalidArgument)
+	}
+
+	// Get the caller's user ID from context
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || userID == "" {
+		return "", runtime.NewError("User ID not found in context", StatusUnauthenticated)
+	}
+
+	// Check if the caller is a global operator
+	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
+	if err != nil {
+		logger.Error("Failed to check global operator status", zap.Error(err))
+		return "", runtime.NewError("Failed to check permissions", StatusInternalError)
+	}
+
+	// Determine enforcer user ID
+	enforcerUserID := userID
+	if request.EnforcerID != "" && request.EnforcerID != userID {
+		if !isGlobalOperator {
+			return "", runtime.NewError("Only global operators can specify an enforcer_id", StatusPermissionDenied)
+		}
+		enforcerUserID = request.EnforcerID
+	}
+
+	// Load guild group to check permissions
+	gg, err := GuildGroupLoad(ctx, nk, request.GroupID)
+	if err != nil {
+		logger.Error("Failed to load guild group", zap.Error(err))
+		return "", runtime.NewError("Failed to load guild group", StatusInternalError)
+	}
+
+	// Check if the caller is an enforcer
+	isEnforcer := gg.IsEnforcer(userID)
+	if !isEnforcer && !isGlobalOperator {
+		return "", runtime.NewError("You must be a guild enforcer or global operator to void suspensions", StatusPermissionDenied)
+	}
+
+	// Load the enforcement journal
+	journal := NewGuildEnforcementJournal(request.TargetUserID)
+	if err := StorableRead(ctx, nk, request.TargetUserID, journal, false); err != nil && status.Code(err) != codes.NotFound {
+		logger.Error("Failed to read enforcement journal", zap.Error(err))
+		return "", runtime.NewError("Failed to read enforcement journal", StatusInternalError)
+	}
+
+	var actions = make([]string, 0)
+	var voids = make(map[string]GuildEnforcementRecordVoid, 0)
+	var recordsByGroupID = make(map[string][]GuildEnforcementRecord, 1)
+
+	// Void active suspensions
+	currentGroupID := request.GroupID
+	groupIDs := []string{currentGroupID}
+
+	// Add inherited groups
+	if gg.SuspensionInheritanceGroupIDs != nil {
+		groupIDs = append(groupIDs, gg.SuspensionInheritanceGroupIDs...)
+	}
+
+	// Void any active suspensions for this group and any inherited groups
+	for _, gID := range groupIDs {
+		if recordsByGroupID[gID] == nil {
+			recordsByGroupID[gID] = make([]GuildEnforcementRecord, 0)
+		}
+
+		for _, record := range journal.GroupRecords(gID) {
+			// Ignore expired or already-voided records
+			if record.IsExpired() || journal.IsVoid(gID, record.ID) || journal.IsVoid(currentGroupID, record.ID) {
+				continue
+			}
+			actions = append(actions, fmt.Sprintf("suspension voided: <t:%d:R> (expires <t:%d:R>): %s", record.CreatedAt.Unix(), record.Expiry.Unix(), record.UserNoticeText))
+
+			recordsByGroupID[currentGroupID] = append(recordsByGroupID[currentGroupID], record)
+
+			details := ""
+			if request.ModeratorNotes != "" {
+				details = request.ModeratorNotes
+			}
+			void := journal.VoidRecord(currentGroupID, record.ID, enforcerUserID, "", details)
+			voids[void.RecordID] = void
+		}
+	}
+
+	// If no suspensions were voided, return a message
+	if len(voids) == 0 {
+		actions = append(actions, "no active suspensions to void")
+	}
+
+	// Save the enforcement journal
+	if err := StorableWrite(ctx, nk, request.TargetUserID, journal); err != nil {
+		logger.Error("Failed to write enforcement journal", zap.Error(err))
+		return "", runtime.NewError("Failed to save enforcement journal", StatusInternalError)
+	}
+
+	// Prepare response
+	response := EnforcementSuspensionVoidResponse{
+		Success: true,
+		Message: fmt.Sprintf("Suspension void completed. %d records voided.", len(voids)),
+		Actions: actions,
 	}
 
 	responseData, err := json.Marshal(response)
