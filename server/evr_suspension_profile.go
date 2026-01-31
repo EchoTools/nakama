@@ -181,3 +181,46 @@ func SyncJournalAndProfile(ctx context.Context, nk runtime.NakamaModule, userID 
 
 	return nil
 }
+
+// SyncJournalAndProfileWithRetry syncs journal and profile with retry logic for concurrent writes.
+// This handles version conflicts by retrying with exponential backoff.
+func SyncJournalAndProfileWithRetry(ctx context.Context, nk runtime.NakamaModule, userID string, journal *GuildEnforcementJournal) error {
+	const maxRetries = 3
+	var lastErr error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Create a fresh profile from the journal
+		profile := NewSuspensionProfile(userID)
+		profile.SyncFromJournal(journal)
+
+		// Try to write both to storage
+		if err := StorableWrite(ctx, nk, userID, journal); err != nil {
+			lastErr = err
+			// Check if this is a version conflict
+			if attempt < maxRetries-1 {
+				// Exponential backoff: 10ms, 20ms, 40ms
+				backoff := time.Duration(10*(1<<uint(attempt))) * time.Millisecond
+				time.Sleep(backoff)
+				continue
+			}
+			return err
+		}
+
+		if err := StorableWrite(ctx, nk, userID, profile); err != nil {
+			lastErr = err
+			// Check if this is a version conflict
+			if attempt < maxRetries-1 {
+				// Exponential backoff: 10ms, 20ms, 40ms
+				backoff := time.Duration(10*(1<<uint(attempt))) * time.Millisecond
+				time.Sleep(backoff)
+				continue
+			}
+			return err
+		}
+
+		// Success
+		return nil
+	}
+
+	return lastErr
+}
