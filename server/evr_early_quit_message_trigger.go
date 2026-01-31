@@ -55,15 +55,15 @@ func LoadEarlyQuitServiceConfig(ctx context.Context, nk runtime.NakamaModule, lo
 		EarlyQuitServiceConfig: evr.NewEarlyQuitServiceConfig(),
 	}
 
-	// Try to load from storage
-	err := StorableRead(ctx, nk, SystemUserID, configStorable, true)
+	// Try to load from storage (create=false to handle NotFound explicitly)
+	err := StorableRead(ctx, nk, SystemUserID, configStorable, false)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			// Config doesn't exist, create it with defaults
 			config := evr.DefaultEarlyQuitServiceConfig()
 			config.SetStorageVersion("*")
 
-			// Validate and write to storage
+			// Validate before writing to ensure defaults are correct
 			config.Validate()
 			configStorable.EarlyQuitServiceConfig = config
 			if writeErr := StorableWrite(ctx, nk, SystemUserID, configStorable); writeErr != nil {
@@ -112,7 +112,22 @@ func LoadEarlyQuitServiceConfig(ctx context.Context, nk runtime.NakamaModule, lo
 	}
 
 	// Validate and fix any invalid values
+	// Track if config was mutated to determine if we need to write it back
+	configBeforeValidation := fmt.Sprintf("%+v", config)
 	config.Validate()
+	configAfterValidation := fmt.Sprintf("%+v", config)
+
+	// Write back to storage if validation mutated the config
+	if configBeforeValidation != configAfterValidation {
+		config.SetStorageVersion("*")
+		configStorable.EarlyQuitServiceConfig = config
+		if writeErr := StorableWrite(ctx, nk, SystemUserID, configStorable); writeErr != nil {
+			if logger != nil {
+				logger.Warn("Failed to write validated early quit config to storage",
+					zap.Error(writeErr))
+			}
+		}
+	}
 
 	return config
 }

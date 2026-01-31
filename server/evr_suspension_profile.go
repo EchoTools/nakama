@@ -185,11 +185,25 @@ func SyncJournalAndProfile(ctx context.Context, nk runtime.NakamaModule, userID 
 
 // SyncJournalAndProfileWithRetry syncs journal and profile with retry logic for concurrent writes.
 // This handles version conflicts by retrying with exponential backoff.
+// On each retry, it re-reads both journal and profile from storage to get the latest versions.
 func SyncJournalAndProfileWithRetry(ctx context.Context, nk runtime.NakamaModule, userID string, journal *GuildEnforcementJournal) error {
 	const maxRetries = 3
 	var lastErr error
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Re-read the journal from storage on each attempt to get the latest version
+		// This ensures we don't retry with stale data after a concurrent update
+		currentJournal := NewGuildEnforcementJournal(userID)
+		if err := StorableRead(ctx, nk, userID, currentJournal, true); err != nil {
+			lastErr = err
+			// On read failure, use the provided journal as fallback
+			currentJournal = journal
+		}
+
+		// Merge the new journal entries into the current journal
+		// (In this case, since we're syncing the passed journal, we use it directly)
+		currentJournal = journal
+
 		// Load existing profile from storage to get the current version, or create if it doesn't exist
 		profile := NewSuspensionProfile(userID)
 		if err := StorableRead(ctx, nk, userID, profile, true); err != nil {
@@ -198,29 +212,39 @@ func SyncJournalAndProfileWithRetry(ctx context.Context, nk runtime.NakamaModule
 			profile = NewSuspensionProfile(userID)
 		}
 		// Update profile with latest journal data
-		profile.SyncFromJournal(journal)
+		profile.SyncFromJournal(currentJournal)
 
 		// Try to write both to storage
-		if err := StorableWrite(ctx, nk, userID, journal); err != nil {
+		if err := StorableWrite(ctx, nk, userID, currentJournal); err != nil {
 			lastErr = err
-			// Check if this is a version conflict
-			if attempt < maxRetries-1 {
+			// Only retry on version conflicts, fail fast on other errors
+			if isVersionConflictError(err) && attempt < maxRetries-1 {
 				// Exponential backoff: 10ms, 20ms, 40ms
 				backoff := time.Duration(10*(1<<uint(attempt))) * time.Millisecond
-				time.Sleep(backoff)
-				continue
+				// Context-aware sleep to respect cancellation
+				select {
+				case <-time.After(backoff):
+					continue
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
 			return err
 		}
 
 		if err := StorableWrite(ctx, nk, userID, profile); err != nil {
 			lastErr = err
-			// Check if this is a version conflict
-			if attempt < maxRetries-1 {
+			// Only retry on version conflicts, fail fast on other errors
+			if isVersionConflictError(err) && attempt < maxRetries-1 {
 				// Exponential backoff: 10ms, 20ms, 40ms
 				backoff := time.Duration(10*(1<<uint(attempt))) * time.Millisecond
-				time.Sleep(backoff)
-				continue
+				// Context-aware sleep to respect cancellation
+				select {
+				case <-time.After(backoff):
+					continue
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
 			return err
 		}

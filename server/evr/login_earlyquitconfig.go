@@ -54,7 +54,6 @@ type EarlyQuitServiceConfig struct {
 	PenaltyLevels      []EarlyQuitPenaltyLevelConfig      `json:"penalty_levels"`
 	SteadyPlayerLevels []EarlyQuitSteadyPlayerLevelConfig `json:"steady_player_levels"`
 	version            string
-	userID             string
 }
 
 func NewEarlyQuitServiceConfig() *EarlyQuitServiceConfig {
@@ -167,7 +166,24 @@ func (m *EarlyQuitServiceConfig) validatePenaltyLevels() {
 			}
 			// Ensure max is still >= min after adjustment
 			if level.MaxEarlyQuits < level.MinEarlyQuits {
-				level.MaxEarlyQuits = level.MinEarlyQuits + 10 // Give some reasonable range
+				// Try to use the default config max for this penalty level
+				defaultCfg := DefaultEarlyQuitServiceConfig()
+				foundDefault := false
+				for j := range defaultCfg.PenaltyLevels {
+					defLevel := &defaultCfg.PenaltyLevels[j]
+					if defLevel.PenaltyLevel == level.PenaltyLevel {
+						if defLevel.MaxEarlyQuits >= level.MinEarlyQuits {
+							level.MaxEarlyQuits = defLevel.MaxEarlyQuits
+						} else {
+							level.MaxEarlyQuits = level.MinEarlyQuits
+						}
+						foundDefault = true
+						break
+					}
+				}
+				if !foundDefault {
+					level.MaxEarlyQuits = level.MinEarlyQuits
+				}
 			}
 		}
 	}
