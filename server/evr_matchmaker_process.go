@@ -35,7 +35,13 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	// predict the outcome of the matches
 	oldestTicket := ""
 	oldestTicketTimestamp := time.Now().UTC().Unix()
-	predictions := make([]PredictedMatch, 0, len(candidates))
+	// Use a reasonable initial capacity to avoid massive pre-allocation when candidates is huge
+	// (can happen with combinatorial explosion from upstream matchmaker)
+	initialCap := len(candidates)
+	if initialCap > 10000 {
+		initialCap = 10000
+	}
+	predictions := make([]PredictedMatch, 0, initialCap)
 	for c := range predictCandidateOutcomesWithConfig(candidates, config) {
 		predictions = append(predictions, c)
 		if oldestTicket == "" || c.OldestTicketTimestamp < oldestTicketTimestamp {
