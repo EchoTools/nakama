@@ -1,5 +1,48 @@
 # AGENTS.md - AI Agent Development Guidelines
 
+## CRITICAL: TEST-FIRST DEVELOPMENT (NON-NEGOTIABLE)
+
+**YOU CAUSED A PRODUCTION OUTAGE BY SKIPPING TESTS. THIS WILL NOT HAPPEN AGAIN.**
+
+### Enforcement Rules
+
+1. **NEVER MAKE CODE CHANGES WITHOUT TESTS FIRST**
+   - Write failing test that proves the bug exists
+   - OR write test that proves new feature works
+   - THEN and ONLY THEN make the code change
+
+2. **NO EXCEPTIONS**
+   - "It's a small change" - WRITE A TEST
+   - "It's just refactoring" - WRITE A TEST
+   - "I'm just fixing a typo" - If it affects behavior, WRITE A TEST
+
+3. **Test Verification Process**
+   ```bash
+   # Step 1: Write test that FAILS (proves bug exists)
+   go test -v -vet=off ./server -run TestYourNewTest
+   # Test MUST fail before fix
+   
+   # Step 2: Make the code change
+   
+   # Step 3: Test MUST pass after fix
+   go test -v -vet=off ./server -run TestYourNewTest
+   ```
+
+4. **You Are Not Human**
+   - Humans can make judgment calls about testing
+   - You CANNOT
+   - You MUST verify with either:
+     - Automated tests (preferred)
+     - Build verification (minimum)
+   - Your assertions mean NOTHING without verification
+
+### Production Safety
+
+- This is a PRODUCTION system serving REAL USERS
+- Your untested code WILL cause outages
+- Outages harm real people and real businesses
+- TEST FIRST. NO EXCEPTIONS.
+
 ## Project Overview
 
 Nakama game server (heroiclabs/nakama fork) with EchoVR-specific extensions.
@@ -154,10 +197,25 @@ fix(matchmaker): prevent duplicate match assignments
 
 ## Validation Checklist
 
-1. `make nakama` - Build passes
-2. `go test -short -vet=off ./server/evr/...` - Tests pass
-3. `gofmt -w .` - Formatted
-4. Commit with conventional format
+**MANDATORY - DO NOT SKIP ANY STEP**
+
+1. **WRITE TEST FIRST** - Failing test proves bug/feature need
+2. `go test -v -vet=off ./server -run TestYourTest` - Verify test FAILS
+3. Make code changes
+4. `go test -v -vet=off ./server -run TestYourTest` - Verify test PASSES
+5. `go test -short -vet=off ./server/evr/...` - All EVR tests pass
+6. `make nakama` - Build passes
+7. `gofmt -w .` - Formatted
+8. Commit with conventional format
+
+**IF YOU SKIP STEP 1-2, YOU ARE VIOLATING PROTOCOL**
+
+## Communication Style
+
+- **NO SYCOPHANCY**: Never say "You're absolutely right", "Great point", etc.
+- **BE DIRECT**: State what you're doing, not how you feel about feedback
+- **NO FLATTERY**: Skip pleasantries, get to work
+- **ACKNOWLEDGE ERRORS**: State the mistake and the fix, nothing more
 
 ## Notes
 
