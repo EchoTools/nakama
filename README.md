@@ -27,6 +27,7 @@ Build scalable games and apps with a production ready server used by ambitious g
 ## Documentation
 
 * **[Game Server URL Parameters](docs/game-server-url-parameters.md)** - Complete reference for URL parameters used in game server registration.
+* **[In-Game Panel (IGP) Discord Command](docs/igp.md)** - Interactive Discord command for real-time match moderation and player management.
 
 ## Getting Started
 
