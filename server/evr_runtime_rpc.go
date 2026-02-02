@@ -1998,3 +1998,454 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 
 	return string(data), nil
 }
+
+// AdminDeviceUnlinkRPC unlinks a device from a user account (admin only)
+// Requires Global Operator permission
+type AdminDeviceUnlinkRequest struct {
+	UserID   string `json:"user_id"`   // User UUID
+	DeviceID string `json:"device_id"` // Device ID (format: ORG-12341234)
+}
+
+type AdminDeviceUnlinkResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+func AdminDeviceUnlinkRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Check for Global Operator permission
+	vars, err := intents.SessionVarsFromRuntimeContext(ctx)
+	if err != nil {
+		logger.WithField("err", err).Error("Failed to parse session variables from context")
+		return "", runtime.NewError("Failed to parse session variables", StatusInternalError)
+	}
+
+	if vars == nil || !vars.Intents.IsGlobalOperator {
+		return "", runtime.NewError("Global Operator permission required", StatusPermissionDenied)
+	}
+
+	// Parse the request
+	var request AdminDeviceUnlinkRequest
+	if err := json.Unmarshal([]byte(payload), &request); err != nil {
+		logger.WithField("err", err).WithField("payload", payload).Error("Unable to unmarshal payload")
+		return "", runtime.NewError("Unable to unmarshal payload", StatusInvalidArgument)
+	}
+
+	// Validate required fields
+	if request.UserID == "" {
+		return "", runtime.NewError("user_id is required", StatusInvalidArgument)
+	}
+	if request.DeviceID == "" {
+		return "", runtime.NewError("device_id is required", StatusInvalidArgument)
+	}
+
+	// Validate user ID format
+	userUUID, err := uuid.FromString(request.UserID)
+	if err != nil {
+		return "", runtime.NewError("Invalid user_id format", StatusInvalidArgument)
+	}
+
+	// Get the user account to verify device is linked
+	account, err := nk.AccountGetId(ctx, request.UserID)
+	if err != nil {
+		logger.WithField("err", err).WithField("user_id", request.UserID).Error("Failed to get account")
+		return "", runtime.NewError("User not found", StatusNotFound)
+	}
+
+	// Verify the device is linked to this user
+	deviceFound := false
+	for _, device := range account.Devices {
+		if device.Id == request.DeviceID {
+			deviceFound = true
+			break
+		}
+	}
+
+	if !deviceFound {
+		return "", runtime.NewError("Device not linked to this user", StatusNotFound)
+	}
+
+	// Unlink the device
+	if err := nk.UnlinkDevice(ctx, request.UserID, request.DeviceID); err != nil {
+		logger.WithField("err", err).WithField("user_id", request.UserID).WithField("device_id", request.DeviceID).Error("Failed to unlink device")
+		return "", runtime.NewError("Failed to unlink device", StatusInternalError)
+	}
+
+	// Log the action for audit trail
+	operatorID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	logger.WithField("operator_id", operatorID).WithField("user_id", request.UserID).WithField("device_id", request.DeviceID).Info("Device unlinked by admin")
+
+	response := AdminDeviceUnlinkResponse{
+		Success: true,
+		Message: fmt.Sprintf("Device %s successfully unlinked from user %s", request.DeviceID, userUUID.String()),
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		return "", runtime.NewError("Failed to marshal response", StatusInternalError)
+	}
+
+	return string(data), nil
+}
+
+// PlayerPartyMembersRPC returns party/group member information
+type PlayerPartyMembersRequest struct {
+	UserID string `json:"user_id,omitempty"` // Optional, defaults to authenticated user
+}
+
+type PlayerPartyMemberInfo struct {
+	UserID       string  `json:"user_id"`
+	Username     string  `json:"username"`
+	DisplayName  string  `json:"display_name"`
+	Online       bool    `json:"online"`
+	LastSeen     *string `json:"last_seen"`     // ISO 8601 timestamp
+	CurrentMatch *string `json:"current_match"` // Match ID or null
+}
+
+type PlayerPartyMembersResponse struct {
+	Members []PlayerPartyMemberInfo `json:"members"`
+}
+
+func PlayerPartyMembersRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Parse the request
+	var request PlayerPartyMembersRequest
+	if payload != "" {
+		if err := json.Unmarshal([]byte(payload), &request); err != nil {
+			logger.WithField("err", err).WithField("payload", payload).Error("Unable to unmarshal payload")
+			return "", runtime.NewError("Unable to unmarshal payload", StatusInvalidArgument)
+		}
+	}
+
+	// Get user ID from request or context
+	userID := request.UserID
+	if userID == "" {
+		if uid, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string); ok {
+			userID = uid
+		} else {
+			return "", runtime.NewError("user_id is required", StatusInvalidArgument)
+		}
+	}
+
+	// Validate user ID format
+	if _, err := uuid.FromString(userID); err != nil {
+		return "", runtime.NewError("Invalid user_id format", StatusInvalidArgument)
+	}
+
+	// Get user's group memberships (party/guild groups)
+	userGroups, _, err := nk.UserGroupsList(ctx, userID, 100, nil, "")
+	if err != nil {
+		logger.WithField("err", err).WithField("user_id", userID).Error("Failed to get user groups")
+		return "", runtime.NewError("Failed to get user groups", StatusInternalError)
+	}
+
+	// Collect all unique member IDs from all groups
+	memberMap := make(map[string]bool)
+	for _, userGroup := range userGroups {
+		// Get group members
+		groupUsers, _, err := nk.GroupUsersList(ctx, userGroup.Group.Id, 100, nil, "")
+		if err != nil {
+			logger.WithField("err", err).WithField("group_id", userGroup.Group.Id).Warn("Failed to get group members")
+			continue
+		}
+
+		for _, groupUser := range groupUsers {
+			if groupUser.User != nil {
+				memberMap[groupUser.User.Id] = true
+			}
+		}
+	}
+
+	// Build member info list
+	members := make([]PlayerPartyMemberInfo, 0, len(memberMap))
+	for memberID := range memberMap {
+		// Get account info
+		account, err := nk.AccountGetId(ctx, memberID)
+		if err != nil {
+			logger.WithField("err", err).WithField("member_id", memberID).Warn("Failed to get account")
+			continue
+		}
+
+		memberInfo := PlayerPartyMemberInfo{
+			UserID:      memberID,
+			Username:    account.User.Username,
+			DisplayName: account.User.DisplayName,
+			Online:      account.User.Online,
+		}
+
+		// Check presence for current match
+		presences, err := nk.StreamUserList(StreamModeService, memberID, "", StreamLabelMatchService, false, true)
+		if err == nil && len(presences) > 0 {
+			for _, presence := range presences {
+				matchID := MatchIDFromStringOrNil(presence.GetStatus())
+				if matchID != nil {
+					matchIDStr := matchID.String()
+					memberInfo.CurrentMatch = &matchIDStr
+					break
+				}
+			}
+		}
+
+		members = append(members, memberInfo)
+	}
+
+	response := PlayerPartyMembersResponse{
+		Members: members,
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		return "", runtime.NewError("Failed to marshal response", StatusInternalError)
+	}
+
+	return string(data), nil
+}
+
+// PlayerSettingsDefaultGuildRPC sets the default guild for a player
+type PlayerSettingsDefaultGuildRequest struct {
+	GroupID string `json:"group_id"` // Group UUID
+}
+
+type PlayerSettingsDefaultGuildResponse struct {
+	Success bool   `json:"success"`
+	GroupID string `json:"group_id"`
+}
+
+func PlayerSettingsDefaultGuildRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Get authenticated user ID
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok {
+		return "", runtime.NewError("Authentication required", StatusUnauthenticated)
+	}
+
+	// Parse the request
+	var request PlayerSettingsDefaultGuildRequest
+	if err := json.Unmarshal([]byte(payload), &request); err != nil {
+		logger.WithField("err", err).WithField("payload", payload).Error("Unable to unmarshal payload")
+		return "", runtime.NewError("Unable to unmarshal payload", StatusInvalidArgument)
+	}
+
+	// Validate group_id
+	if request.GroupID == "" {
+		return "", runtime.NewError("group_id is required", StatusInvalidArgument)
+	}
+
+	groupUUID, err := uuid.FromString(request.GroupID)
+	if err != nil {
+		return "", runtime.NewError("Invalid group_id format", StatusInvalidArgument)
+	}
+
+	// Verify group exists
+	groups, err := nk.GroupsGetId(ctx, []string{request.GroupID})
+	if err != nil || len(groups) == 0 {
+		logger.WithField("err", err).WithField("group_id", request.GroupID).Error("Group not found")
+		return "", runtime.NewError("Group not found", StatusNotFound)
+	}
+
+	// Verify user is a member of the group
+	userGroups, _, err := nk.UserGroupsList(ctx, userID, 100, nil, "")
+	if err != nil {
+		logger.WithField("err", err).WithField("user_id", userID).Error("Failed to get user groups")
+		return "", runtime.NewError("Failed to verify group membership", StatusInternalError)
+	}
+
+	isMember := false
+	for _, userGroup := range userGroups {
+		if userGroup.Group.Id == request.GroupID {
+			isMember = true
+			break
+		}
+	}
+
+	if !isMember {
+		return "", runtime.NewError("User is not a member of this group", StatusPermissionDenied)
+	}
+
+	// Store the default guild in user metadata
+	metadata := map[string]any{
+		"default_guild": request.GroupID,
+		"updated_at":    time.Now().UTC().Format(time.RFC3339),
+	}
+
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return "", runtime.NewError("Failed to marshal metadata", StatusInternalError)
+	}
+
+	// Write to storage
+	writes := []*runtime.StorageWrite{
+		{
+			Collection:      "settings",
+			Key:             "default_guild",
+			UserID:          userID,
+			Value:           string(metadataJSON),
+			PermissionRead:  1, // Owner read
+			PermissionWrite: 1, // Owner write
+		},
+	}
+
+	if _, err := nk.StorageWrite(ctx, writes); err != nil {
+		logger.WithField("err", err).WithField("user_id", userID).Error("Failed to write default guild setting")
+		return "", runtime.NewError("Failed to save setting", StatusInternalError)
+	}
+
+	logger.WithField("user_id", userID).WithField("group_id", request.GroupID).Info("Default guild set")
+
+	response := PlayerSettingsDefaultGuildResponse{
+		Success: true,
+		GroupID: groupUUID.String(),
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		return "", runtime.NewError("Failed to marshal response", StatusInternalError)
+	}
+
+	return string(data), nil
+}
+
+// PlayerLocationVerifyRPC verifies a user's location with a verification code
+type PlayerLocationVerifyRequest struct {
+	Code string `json:"code"` // 6-character verification code
+}
+
+type PlayerLocationInfo struct {
+	Country string `json:"country"`
+	City    string `json:"city"`
+	Region  string `json:"region"`
+}
+
+type PlayerLocationVerifyResponse struct {
+	Success  bool                `json:"success"`
+	Verified bool                `json:"verified"`
+	Location *PlayerLocationInfo `json:"location,omitempty"`
+}
+
+func PlayerLocationVerifyRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Get authenticated user ID
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok {
+		return "", runtime.NewError("Authentication required", StatusUnauthenticated)
+	}
+
+	// Parse the request
+	var request PlayerLocationVerifyRequest
+	if err := json.Unmarshal([]byte(payload), &request); err != nil {
+		logger.WithField("err", err).WithField("payload", payload).Error("Unable to unmarshal payload")
+		return "", runtime.NewError("Unable to unmarshal payload", StatusInvalidArgument)
+	}
+
+	// Validate code
+	if request.Code == "" {
+		return "", runtime.NewError("code is required", StatusInvalidArgument)
+	}
+
+	if len(request.Code) != 6 {
+		return "", runtime.NewError("code must be 6 characters", StatusInvalidArgument)
+	}
+
+	// Read verification request from storage
+	objectIds := []*runtime.StorageRead{
+		{
+			Collection: "location_verification",
+			Key:        "pending",
+			UserID:     userID,
+		},
+	}
+
+	objects, err := nk.StorageRead(ctx, objectIds)
+	if err != nil || len(objects) == 0 {
+		logger.WithField("err", err).WithField("user_id", userID).Warn("No pending verification found")
+		return "", runtime.NewError("No pending verification request", StatusNotFound)
+	}
+
+	// Parse the stored verification data
+	var verificationData struct {
+		Code      string    `json:"code"`
+		Country   string    `json:"country"`
+		City      string    `json:"city"`
+		Region    string    `json:"region"`
+		CreatedAt time.Time `json:"created_at"`
+		ExpiresAt time.Time `json:"expires_at"`
+	}
+
+	if err := json.Unmarshal([]byte(objects[0].Value), &verificationData); err != nil {
+		logger.WithField("err", err).Error("Failed to parse verification data")
+		return "", runtime.NewError("Invalid verification data", StatusInternalError)
+	}
+
+	// Check if code has expired
+	if time.Now().UTC().After(verificationData.ExpiresAt) {
+		// Delete expired verification
+		nk.StorageDelete(ctx, []*runtime.StorageDelete{
+			{
+				Collection: "location_verification",
+				Key:        "pending",
+				UserID:     userID,
+			},
+		})
+		return "", runtime.NewError("Verification code expired", StatusFailedPrecondition)
+	}
+
+	// Verify the code
+	verified := verificationData.Code == request.Code
+
+	response := PlayerLocationVerifyResponse{
+		Success:  true,
+		Verified: verified,
+	}
+
+	if verified {
+		// Store verified location
+		locationData := map[string]any{
+			"country":     verificationData.Country,
+			"city":        verificationData.City,
+			"region":      verificationData.Region,
+			"verified_at": time.Now().UTC().Format(time.RFC3339),
+		}
+
+		locationJSON, err := json.Marshal(locationData)
+		if err != nil {
+			return "", runtime.NewError("Failed to marshal location data", StatusInternalError)
+		}
+
+		writes := []*runtime.StorageWrite{
+			{
+				Collection:      "location_verification",
+				Key:             "verified",
+				UserID:          userID,
+				Value:           string(locationJSON),
+				PermissionRead:  1,
+				PermissionWrite: 1,
+			},
+		}
+
+		if _, err := nk.StorageWrite(ctx, writes); err != nil {
+			logger.WithField("err", err).Error("Failed to store verified location")
+		}
+
+		// Delete pending verification
+		nk.StorageDelete(ctx, []*runtime.StorageDelete{
+			{
+				Collection: "location_verification",
+				Key:        "pending",
+				UserID:     userID,
+			},
+		})
+
+		response.Location = &PlayerLocationInfo{
+			Country: verificationData.Country,
+			City:    verificationData.City,
+			Region:  verificationData.Region,
+		}
+
+		logger.WithField("user_id", userID).WithField("country", verificationData.Country).Info("Location verified")
+	} else {
+		logger.WithField("user_id", userID).Warn("Invalid verification code")
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		return "", runtime.NewError("Failed to marshal response", StatusInternalError)
+	}
+
+	return string(data), nil
+}

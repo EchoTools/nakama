@@ -129,6 +129,10 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"enforcement/journals":          EnforcementJournalListRPC,
 		"enforcement/record/edit":       EnforcementRecordEditRPC,
 		"earlyquit/history":             EarlyQuitHistoryRPC,
+		"admin/device/unlink":           AdminDeviceUnlinkRPC,
+		"player/party/members":          PlayerPartyMembersRPC,
+		"player/settings/default_guild": PlayerSettingsDefaultGuildRPC,
+		"player/location/verify":        PlayerLocationVerifyRPC,
 		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
 	}
 	for name, rpc := range rpcs {
