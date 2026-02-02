@@ -2176,7 +2176,7 @@ func PlayerPartyMembersRPC(ctx context.Context, logger runtime.Logger, db *sql.D
 		if err == nil && len(presences) > 0 {
 			for _, presence := range presences {
 				matchID := MatchIDFromStringOrNil(presence.GetStatus())
-				if matchID != nil {
+				if !matchID.IsNil() {
 					matchIDStr := matchID.String()
 					memberInfo.CurrentMatch = &matchIDStr
 					break
