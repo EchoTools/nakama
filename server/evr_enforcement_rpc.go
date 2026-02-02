@@ -166,7 +166,10 @@ func PlayerReportRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 // checkReportRateLimit checks if the user has exceeded the rate limit of 5 reports per hour
 func checkReportRateLimit(ctx context.Context, nk runtime.NakamaModule, userID string) error {
-	// List all reports by this user
+	// List reports by this user (limited to 100 most recent)
+	// Note: This assumes users don't have more than 100 reports in their storage.
+	// In production, consider using time-based key patterns or multiple queries with cursors
+	// to handle users with very large numbers of reports.
 	objects, _, err := nk.StorageList(ctx, SystemUserID, userID, StorageCollectionPlayerReports, 100, "")
 	if err != nil {
 		// If there's an error reading storage, allow the report (fail open for rate limiting)

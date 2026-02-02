@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -215,7 +216,7 @@ func TestPlayerReportRPC_RateLimit(t *testing.T) {
 			ReportedUserID: reportedUserID,
 			GroupID:        groupID,
 			Reason:         "cheating",
-			Description:    "test report " + string(rune(i)),
+			Description:    fmt.Sprintf("test report %d", i),
 		}
 
 		payload, _ := json.Marshal(request)
