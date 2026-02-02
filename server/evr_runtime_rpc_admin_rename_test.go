@@ -134,7 +134,7 @@ func TestAdminPlayerRenameRequest_JSON(t *testing.T) {
 	}
 }
 
-func TestSanitizeDisplayName_AdminRename(t *testing.T) {
+func TestSanitizeDisplayName(t *testing.T) {
 	// Test display name sanitization patterns used by the admin rename RPC
 	tests := []struct {
 		name     string
