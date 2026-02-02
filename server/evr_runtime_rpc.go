@@ -2001,19 +2001,19 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 
 // Outfit management constants and types
 const (
-	OutfitCollection   = "player_outfits"
-	MaxOutfitsPerUser  = 10 // Configurable limit
+	OutfitCollection  = "player_outfits"
+	MaxOutfitsPerUser = 10 // Configurable limit
 )
 
 // Outfit represents a player's outfit configuration
 type Outfit struct {
-	ID       string      `json:"id"`
-	Name     string      `json:"name"`
-	Chassis  string      `json:"chassis"`
-	Bracer   string      `json:"bracer"`
-	Booster  string      `json:"booster"`
-	Decal    string      `json:"decal"`
-	SavedAt  TimeRFC3339 `json:"saved_at"`
+	ID      string      `json:"id"`
+	Name    string      `json:"name"`
+	Chassis string      `json:"chassis"`
+	Bracer  string      `json:"bracer"`
+	Booster string      `json:"booster"`
+	Decal   string      `json:"decal"`
+	SavedAt TimeRFC3339 `json:"saved_at"`
 }
 
 // SaveOutfitRequest represents the request to save an outfit
@@ -2078,7 +2078,8 @@ func PlayerOutfitSaveRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	}
 
 	// Check current number of outfits for this user
-	objects, _, err := nk.StorageList(ctx, uuid.Nil.String(), userID, OutfitCollection, MaxOutfitsPerUser+1, "")
+	// We only need to check if the limit is reached, so we request MaxOutfitsPerUser items
+	objects, _, err := nk.StorageList(ctx, uuid.Nil.String(), userID, OutfitCollection, MaxOutfitsPerUser, "")
 	if err != nil {
 		logger.Error("Failed to list outfits: %v", err)
 		return "", runtime.NewError("failed to check outfit limit", StatusInternalError)
@@ -2148,7 +2149,8 @@ func PlayerOutfitListRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	}
 
 	// List all outfits for this user
-	objects, _, err := nk.StorageList(ctx, uuid.Nil.String(), userID, OutfitCollection, 100, "")
+	// Set limit higher than MaxOutfitsPerUser for safety, though users can only have MaxOutfitsPerUser outfits
+	objects, _, err := nk.StorageList(ctx, uuid.Nil.String(), userID, OutfitCollection, MaxOutfitsPerUser*2, "")
 	if err != nil {
 		logger.Error("Failed to list outfits: %v", err)
 		return "", runtime.NewError("failed to list outfits", StatusInternalError)
