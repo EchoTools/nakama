@@ -2039,8 +2039,7 @@ func AdminDeviceUnlinkRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 	}
 
 	// Validate user ID format
-	userUUID, err := uuid.FromString(request.UserID)
-	if err != nil {
+	if _, err := uuid.FromString(request.UserID); err != nil {
 		return "", runtime.NewError("Invalid user_id format", StatusInvalidArgument)
 	}
 
@@ -2076,7 +2075,7 @@ func AdminDeviceUnlinkRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 
 	response := AdminDeviceUnlinkResponse{
 		Success: true,
-		Message: fmt.Sprintf("Device %s successfully unlinked from user %s", request.DeviceID, userUUID.String()),
+		Message: fmt.Sprintf("Device %s successfully unlinked from user %s", request.DeviceID, request.UserID),
 	}
 
 	data, err := json.Marshal(response)
@@ -2097,8 +2096,8 @@ type PlayerPartyMemberInfo struct {
 	Username     string  `json:"username"`
 	DisplayName  string  `json:"display_name"`
 	Online       bool    `json:"online"`
-	LastSeen     *string `json:"last_seen"`     // ISO 8601 timestamp
-	CurrentMatch *string `json:"current_match"` // Match ID or null
+	LastSeen     *string `json:"last_seen,omitempty"` // ISO 8601 timestamp - currently not populated
+	CurrentMatch *string `json:"current_match"`       // Match ID or null
 }
 
 type PlayerPartyMembersResponse struct {
@@ -2228,8 +2227,7 @@ func PlayerSettingsDefaultGuildRPC(ctx context.Context, logger runtime.Logger, d
 		return "", runtime.NewError("group_id is required", StatusInvalidArgument)
 	}
 
-	groupUUID, err := uuid.FromString(request.GroupID)
-	if err != nil {
+	if _, err := uuid.FromString(request.GroupID); err != nil {
 		return "", runtime.NewError("Invalid group_id format", StatusInvalidArgument)
 	}
 
@@ -2291,7 +2289,7 @@ func PlayerSettingsDefaultGuildRPC(ctx context.Context, logger runtime.Logger, d
 
 	response := PlayerSettingsDefaultGuildResponse{
 		Success: true,
-		GroupID: groupUUID.String(),
+		GroupID: request.GroupID,
 	}
 
 	data, err := json.Marshal(response)
