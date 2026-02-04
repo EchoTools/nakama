@@ -795,13 +795,9 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 		messages := make([]evr.Message, 0, len(rejects))
 
-		// Send legacy messages to the game server to notify the sever to disconnect the players
-		for _, id := range rejects {
-			msg := evr.NewBroadcasterRemovePlayer(id)
-			messages = append(messages, msg)
-		}
-
 		code := evr.PlayerRejectionReasonDisconnected
+		// Send legacy messages to the game server to notify the server to disconnect the players
+		messages = append(messages, evr.NewGameServerEntrantRejected(code, rejects...))
 
 		// Convert UUIDs to strings for protobuf
 		rejectIDs := make([]string, 0, len(rejects))
