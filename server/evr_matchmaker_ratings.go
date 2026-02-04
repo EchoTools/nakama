@@ -122,9 +122,9 @@ func GetRatingDefaults(config *SkillRatingSettings) RatingDefaults {
 
 // NewDefaultRating creates a rating with default values from service settings.
 func NewDefaultRating() types.Rating {
-	settings := ServiceSettings()
-	if settings != nil {
-		defaults := GetRatingDefaults(&settings.SkillRating)
+	if config := EVRMatchmakerConfigGet(); config != nil {
+		skillRating := SkillRatingSettings(config.SkillRating)
+		defaults := GetRatingDefaults(&skillRating)
 		return types.Rating{
 			Z:     defaults.Z,
 			Mu:    defaults.Mu,
@@ -201,8 +201,9 @@ func CalculateNewTeamRatings(playerInfos []PlayerInfo, playerStats map[evr.EvrId
 func CalculateNewTeamRatingsWithConfig(playerInfos []PlayerInfo, playerStats map[evr.EvrId]evr.MatchTypeStats, blueWins bool, config *SkillRatingSettings) map[string]types.Rating {
 	// Get config from service settings if not provided
 	if config == nil {
-		if settings := ServiceSettings(); settings != nil {
-			config = &settings.SkillRating
+		if matchmaker := EVRMatchmakerConfigGet(); matchmaker != nil {
+			skillRating := SkillRatingSettings(matchmaker.SkillRating)
+			config = &skillRating
 		}
 	}
 
@@ -323,8 +324,9 @@ func CalculateNewIndividualRatings(playerInfos []PlayerInfo, playerStats map[evr
 func CalculateNewIndividualRatingsWithConfig(playerInfos []PlayerInfo, playerStats map[evr.EvrId]evr.MatchTypeStats, blueWins bool, config *SkillRatingSettings) map[string]types.Rating {
 	// Get config from service settings if not provided
 	if config == nil {
-		if settings := ServiceSettings(); settings != nil {
-			config = &settings.SkillRating
+		if matchmaker := EVRMatchmakerConfigGet(); matchmaker != nil {
+			skillRating := SkillRatingSettings(matchmaker.SkillRating)
+			config = &skillRating
 		}
 	}
 

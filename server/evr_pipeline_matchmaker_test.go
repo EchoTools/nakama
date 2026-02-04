@@ -11,6 +11,9 @@ import (
 )
 
 func TestNewSessionParametersFromLobbySessionRequest(t *testing.T) {
+	previousConfig := EVRMatchmakerConfigGet()
+	EVRMatchmakerConfigSet(NewEVRMatchmakerConfig())
+	defer EVRMatchmakerConfigSet(previousConfig)
 
 	matchID := MatchID{UUID: uuid.FromStringOrNil("c252375b-5401-4980-be60-e2fb5996b11f"), Node: "default"}
 

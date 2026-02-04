@@ -140,10 +140,6 @@ func (g *ServiceSettingsData) String() string {
 	return string(data)
 }
 
-func (g ServiceSettingsData) UseSkillBasedMatchmaking() bool {
-	return g.Matchmaking.EnableSBMM
-}
-
 func ServiceSettingsLoad(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) (*ServiceSettingsData, error) {
 
 	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
@@ -187,6 +183,12 @@ func ServiceSettingsLoad(ctx context.Context, logger runtime.Logger, nk runtime.
 
 	serviceSettings.Store(&data)
 
+	evrConfig, err := LoadEVRMatchmakerConfig(ctx, nk, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load EVR matchmaker config: %w", err)
+	}
+	EVRMatchmakerConfigSet(evrConfig)
+
 	return &data, nil
 }
 
@@ -200,6 +202,10 @@ var ValidTeamStatFields = map[string]bool{
 }
 
 func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData) {
+
+	// DEPRECATED: The SkillRating and Matchmaking fields are maintained here for backward
+	// compatibility with existing stored ServiceSettingsData JSON. New code should use
+	// EVRMatchmakerConfigGet() to access matchmaker configuration instead.
 
 	// Initialize skill rating defaults
 	if data.SkillRating.Defaults.Z == 0 {
@@ -260,63 +266,7 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 		data.SkillRating.WinningTeamBonus = 4.0
 	}
 
-	if data.Matchmaking.ServerSelection.Ratings == nil {
-		data.Matchmaking.ServerSelection.Ratings = make(map[string]float64)
-	}
-
-	if data.Matchmaking.MatchmakingTimeoutSecs == 0 {
-		data.Matchmaking.MatchmakingTimeoutSecs = 360
-	}
-
-	if data.Matchmaking.FailsafeTimeoutSecs == 0 {
-		data.Matchmaking.FailsafeTimeoutSecs = data.Matchmaking.MatchmakingTimeoutSecs - 60
-	}
-
-	if data.Matchmaking.FallbackTimeoutSecs == 0 {
-		data.Matchmaking.FallbackTimeoutSecs = data.Matchmaking.FailsafeTimeoutSecs / 2
-	}
-
-	if data.Matchmaking.MaxServerRTT == 0 {
-		data.Matchmaking.MaxServerRTT = 180
-	}
-
-	if data.Matchmaking.ArenaBackfillMaxAgeSecs == 0 {
-		data.Matchmaking.ArenaBackfillMaxAgeSecs = 270 // Default to 270 seconds (4.5 minutes)
-	}
-
-	if data.Matchmaking.SBMMMinPlayerCount == 0 {
-		data.Matchmaking.SBMMMinPlayerCount = 24
-	}
-
-	// Set default party skill boost (10% = 0.10)
-	// This accounts for coordination advantage of parties
-	if data.Matchmaking.PartySkillBoostPercent == 0 {
-		data.Matchmaking.PartySkillBoostPercent = 0.10
-	}
-
-	// Set default tier thresholds if not configured
-	// Tier 1 threshold default: 0 (players with penalty 0 or less are in good standing)
-	// Tier 2 threshold default: 1 (reserved for future Tier 3+ implementation)
-	if data.Matchmaking.EarlyQuitTier1Threshold == nil {
-		tier1Threshold := int32(0)
-		data.Matchmaking.EarlyQuitTier1Threshold = &tier1Threshold
-	}
-	if data.Matchmaking.EarlyQuitTier2Threshold == nil {
-		tier2Threshold := int32(1)
-		data.Matchmaking.EarlyQuitTier2Threshold = &tier2Threshold
-	}
-
-	if data.Matchmaking.ServerSelection.RTTDelta == nil {
-		data.Matchmaking.ServerSelection.RTTDelta = make(map[string]int)
-	}
-
-	// Set default reducing precision settings for post-matchmaker backfill
-	if data.Matchmaking.ReducingPrecisionIntervalSecs == 0 {
-		data.Matchmaking.ReducingPrecisionIntervalSecs = 30 // Relax constraints every 30 seconds
-	}
-	if data.Matchmaking.ReducingPrecisionMaxCycles == 0 {
-		data.Matchmaking.ReducingPrecisionMaxCycles = 5 // Maximum 5 cycles before fully relaxing
-	}
+	_ = data.Matchmaking
 
 	if data.RemoteLogFilters == nil {
 		data.RemoteLogFilters = map[string][]string{

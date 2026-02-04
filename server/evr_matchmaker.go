@@ -260,9 +260,9 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	}
 
 	// Capture matchmaker state if enabled
-	if settings := ServiceSettings(); settings != nil && settings.Matchmaking.EnableMatchmakerStateCapture {
+	if config := EVRMatchmakerConfigGet(); config != nil && config.Debugging.EnableMatchmakerStateCapture {
 		state := m.CaptureMatchmakerState(ctx, modestr, groupID, candidates, matches, filterCounts, time.Since(startTime), predictions)
-		captureDir := settings.Matchmaking.MatchmakerStateCaptureDir
+		captureDir := config.Debugging.MatchmakerStateCaptureDir
 		if captureDir == "" {
 			captureDir = "/tmp/matchmaker_replay"
 		}

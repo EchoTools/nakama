@@ -737,7 +737,11 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	} else {
 		updated := false
 		// If the player account is less than 7 days old, then assign the "green" division to the player.
-		if time.Since(params.profile.account.User.CreateTime.AsTime()) < time.Duration(serviceSettings.Matchmaking.GreenDivisionMaxAccountAgeDays)*24*time.Hour {
+		maxAccountAgeDays := 0
+		if config := EVRMatchmakerConfigGet(); config != nil {
+			maxAccountAgeDays = config.Division.GreenDivisionMaxAccountAgeDays
+		}
+		if time.Since(params.profile.account.User.CreateTime.AsTime()) < time.Duration(maxAccountAgeDays)*24*time.Hour {
 			if !slices.Contains(settings.Divisions, "green") {
 				settings.Divisions = append(settings.Divisions, "green")
 				updated = true

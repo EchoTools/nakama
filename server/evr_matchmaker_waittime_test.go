@@ -7,13 +7,17 @@ import (
 )
 
 func TestDynamicWaitTimePriority(t *testing.T) {
-	settings := &ServiceSettingsData{
-		Matchmaking: GlobalMatchmakingSettings{
-			WaitTimePriorityThresholdSecs: 120,
-		},
-	}
-	ServiceSettingsUpdate(settings)
-	defer ServiceSettingsUpdate(nil)
+	previousSettings := ServiceSettings()
+	previousConfig := EVRMatchmakerConfigGet()
+
+	ServiceSettingsUpdate(&ServiceSettingsData{})
+	config := NewEVRMatchmakerConfig()
+	config.Priority.WaitTimePriorityThresholdSecs = 120
+	EVRMatchmakerConfigSet(config)
+	defer func() {
+		ServiceSettingsUpdate(previousSettings)
+		EVRMatchmakerConfigSet(previousConfig)
+	}()
 
 	now := time.Now().UTC().Unix()
 	waitTimeThreshold := int64(120)

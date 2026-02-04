@@ -479,8 +479,12 @@ func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logge
 		}
 
 		// Check for tier change after completing match
-		serviceSettings := ServiceSettings()
-		oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
+		matchmaker := EVRMatchmakerConfigGet()
+		if matchmaker == nil {
+			logger.WithField("error", "matchmaker config not loaded").Warn("Skipping early quit tier update")
+			return nil
+		}
+		oldTier, newTier, tierChanged := eqconfig.UpdateTier(matchmaker.EarlyQuit.EarlyQuitTier1Threshold)
 
 		if err := StorableWrite(ctx, nk, userID, eqconfig); err != nil {
 			logger.WithField("error", err).Warn("Failed to store early quitter config")
@@ -493,7 +497,7 @@ func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logge
 			}
 
 			// Send Discord DM if tier changed (unless silent mode is enabled)
-			if tierChanged && !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
+			if tierChanged && !matchmaker.EarlyQuit.SilentEarlyQuitSystem {
 				discordID, err := GetDiscordIDByUserID(ctx, db, userID)
 				if err != nil {
 					logger.WithField("error", err).Warn("Failed to get Discord ID for tier notification")
@@ -562,8 +566,8 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 	copy(playersWithTeamRatings, label.Players)
 	copy(playersWithPlayerRatings, label.Players)
 
-	serviceSettings := ServiceSettings()
-	if serviceSettings.UseSkillBasedMatchmaking() {
+	matchmaker := EVRMatchmakerConfigGet()
+	if matchmaker != nil && matchmaker.SBMM.EnableSBMM {
 		for i, p := range playersWithTeamRatings {
 			// Only load ratings for competitors (blue/orange team)
 			if !p.IsCompetitor() {
@@ -611,7 +615,7 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 	// Calculate new ratings once for all players (before the loop to avoid O(n²) complexity)
 	var teamRatings map[string]types.Rating
 	var playerRatings map[string]types.Rating
-	if serviceSettings.UseSkillBasedMatchmaking() {
+	if matchmaker != nil && matchmaker.SBMM.EnableSBMM {
 		// For combat mode, use win/loss only (no individual stats) for rating calculation
 		// For arena mode, use full stats-based rating calculation
 		statsForRating := statsByPlayer
@@ -676,7 +680,7 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 			logger.WithField("error", err).Warn("Failed to increment completed matches")
 		}
 
-		if serviceSettings.UseSkillBasedMatchmaking() {
+		if matchmaker != nil && matchmaker.SBMM.EnableSBMM {
 
 			// Use the pre-calculated team ratings for this player
 			if rating, ok := teamRatings[playerInfo.SessionID]; ok {
@@ -774,7 +778,7 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		}
 
 		// Update the player's statistics, if the service settings allow it
-		if !serviceSettings.DisableStatisticsUpdates {
+		if settings := ServiceSettings(); settings == nil || !settings.DisableStatisticsUpdates {
 			statEntries, err := typeStatsToScoreMap(playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, typeStats)
 			if err != nil {
 				return fmt.Errorf("failed to convert type stats to score map: %w", err)

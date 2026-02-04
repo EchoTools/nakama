@@ -758,13 +758,55 @@ func (h *RPCHandler) ServiceStatusRPC(ctx context.Context, logger runtime.Logger
 }
 
 func MatchmakingSettingsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	// Return the current GlobalMatchmakingSettings from ServiceSettings
-	settings := ServiceSettings()
-	if settings == nil {
-		return "", runtime.NewError("Service settings not loaded", StatusInternalError)
+	// Return the current GlobalMatchmakingSettings shape populated from matchmaker config
+	config := EVRMatchmakerConfigGet()
+	if config == nil {
+		return "", runtime.NewError("Matchmaker config not loaded", StatusInternalError)
 	}
 
-	data, err := json.MarshalIndent(settings.Matchmaking, "", "  ")
+	mm := GlobalMatchmakingSettings{
+		MatchmakingTimeoutSecs:         config.Timeout.MatchmakingTimeoutSecs,
+		FailsafeTimeoutSecs:            config.Timeout.FailsafeTimeoutSecs,
+		FallbackTimeoutSecs:            config.Timeout.FallbackTimeoutSecs,
+		MaxMatchmakingTickets:          config.Priority.MaxMatchmakingTickets,
+		DisableArenaBackfill:           config.Backfill.DisableArenaBackfill,
+		ArenaBackfillMaxAgeSecs:        config.Backfill.ArenaBackfillMaxAgeSecs,
+		QueryAddons:                    QueryAddons(config.QueryAddons),
+		MaxServerRTT:                   config.ServerSelection.MaxServerRTT,
+		EnableSBMM:                     config.SBMM.EnableSBMM,
+		EnableDivisions:                config.Division.EnableDivisions,
+		GreenDivisionMaxAccountAgeDays: config.Division.GreenDivisionMaxAccountAgeDays,
+		EnableEarlyQuitPenalty:         config.EarlyQuit.EnableEarlyQuitPenalty,
+		SilentEarlyQuitSystem:          config.EarlyQuit.SilentEarlyQuitSystem,
+		EarlyQuitTier1Threshold:        config.EarlyQuit.EarlyQuitTier1Threshold,
+		EarlyQuitTier2Threshold:        config.EarlyQuit.EarlyQuitTier2Threshold,
+		EarlyQuitLossThreshold:         config.EarlyQuit.EarlyQuitLossThreshold,
+		ServerSelection: ServerSelectionSettings{
+			Ratings:     config.ServerSelection.Ratings,
+			ExcludeList: config.ServerSelection.ExcludeList,
+			RTTDelta:    config.ServerSelection.RTTDelta,
+		},
+		EnableOrdinalRange:            config.SBMM.EnableOrdinalRange,
+		RatingRange:                   config.SBMM.RatingRange,
+		MatchmakingTicketsUseMu:       config.SBMM.MatchmakingTicketsUseMu,
+		BackfillQueriesUseMu:          config.SBMM.BackfillQueriesUseMu,
+		MatchmakerUseMu:               config.SBMM.MatchmakerUseMu,
+		BackfillMinTimeSecs:           config.Backfill.BackfillMinTimeSecs,
+		SBMMMinPlayerCount:            config.SBMM.MinPlayerCount,
+		PartySkillBoostPercent:        config.SBMM.PartySkillBoostPercent,
+		EnableRosterVariants:          config.SBMM.EnableRosterVariants,
+		UseSnakeDraftTeamFormation:    config.SBMM.UseSnakeDraftTeamFormation,
+		EnablePostMatchmakerBackfill:  config.Backfill.EnablePostMatchmakerBackfill,
+		ReducingPrecisionIntervalSecs: config.ReducingPrecision.IntervalSecs,
+		ReducingPrecisionMaxCycles:    config.ReducingPrecision.MaxCycles,
+		EnableMatchmakerStateCapture:  config.Debugging.EnableMatchmakerStateCapture,
+		MatchmakerStateCaptureDir:     config.Debugging.MatchmakerStateCaptureDir,
+		WaitTimePriorityThresholdSecs: config.Priority.WaitTimePriorityThresholdSecs,
+		RatingRangeExpansionPerMinute: config.SBMM.RatingRangeExpansionPerMinute,
+		MaxRatingRangeExpansion:       config.SBMM.MaxRatingRangeExpansion,
+	}
+
+	data, err := json.MarshalIndent(mm, "", "  ")
 	if err != nil {
 		return "", runtime.NewError("Failed to marshal matchmaking settings", StatusInternalError)
 	}

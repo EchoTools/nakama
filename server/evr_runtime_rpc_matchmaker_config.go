@@ -236,13 +236,13 @@ func getTypeName(t reflect.Type) string {
 
 // MatchmakerConfigRPC returns the current matchmaker configuration with schema
 func MatchmakerConfigRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	settings := ServiceSettings()
-	if settings == nil {
-		return "", runtime.NewError("Service settings not initialized", StatusInternalError)
+	matchmaker := EVRMatchmakerConfigGet()
+	if matchmaker == nil {
+		return "", runtime.NewError("Matchmaker config not initialized", StatusInternalError)
 	}
 
-	mm := settings.Matchmaking
-	sr := settings.SkillRating
+	mm := matchmaker
+	sr := matchmaker.SkillRating
 
 	config := MatchmakerConfigResponse{
 		QueryAddons: MatchmakerConfigQueryAddons{
@@ -254,41 +254,41 @@ func MatchmakerConfigRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 			LobbyBuilder: mm.QueryAddons.LobbyBuilder,
 		},
 		Timeouts: MatchmakerConfigTimeouts{
-			MatchmakingTimeoutSecs: mm.MatchmakingTimeoutSecs,
-			FailsafeTimeoutSecs:    mm.FailsafeTimeoutSecs,
-			FallbackTimeoutSecs:    mm.FallbackTimeoutSecs,
+			MatchmakingTimeoutSecs: mm.Timeout.MatchmakingTimeoutSecs,
+			FailsafeTimeoutSecs:    mm.Timeout.FailsafeTimeoutSecs,
+			FallbackTimeoutSecs:    mm.Timeout.FallbackTimeoutSecs,
 		},
 		Backfill: MatchmakerConfigBackfill{
-			DisableArenaBackfill:    mm.DisableArenaBackfill,
-			BackfillMinTimeSecs:     mm.BackfillMinTimeSecs,
-			ArenaBackfillMaxAgeSecs: mm.ArenaBackfillMaxAgeSecs,
+			DisableArenaBackfill:    mm.Backfill.DisableArenaBackfill,
+			BackfillMinTimeSecs:     mm.Backfill.BackfillMinTimeSecs,
+			ArenaBackfillMaxAgeSecs: mm.Backfill.ArenaBackfillMaxAgeSecs,
 		},
 		EarlyQuit: MatchmakerConfigEarlyQuit{
-			EnableEarlyQuitPenalty:  mm.EnableEarlyQuitPenalty,
-			SilentEarlyQuitSystem:   mm.SilentEarlyQuitSystem,
-			EarlyQuitTier1Threshold: mm.EarlyQuitTier1Threshold,
-			EarlyQuitTier2Threshold: mm.EarlyQuitTier2Threshold,
+			EnableEarlyQuitPenalty:  mm.EarlyQuit.EnableEarlyQuitPenalty,
+			SilentEarlyQuitSystem:   mm.EarlyQuit.SilentEarlyQuitSystem,
+			EarlyQuitTier1Threshold: mm.EarlyQuit.EarlyQuitTier1Threshold,
+			EarlyQuitTier2Threshold: mm.EarlyQuit.EarlyQuitTier2Threshold,
 		},
 		SBMM: MatchmakerConfigSBMM{
-			EnableSkillBasedMatchmaking: mm.EnableSBMM,
-			SBMMMinPlayerCount:          mm.SBMMMinPlayerCount,
-			SBMMMatchmakerUseMu:         mm.MatchmakerUseMu,
-			SBMMBackfillQueriesUseMu:    mm.BackfillQueriesUseMu,
-			SBMMMatchmakingTicketsUseMu: mm.MatchmakingTicketsUseMu,
-			RatingRange:                 mm.RatingRange,
-			EnableOrdinalRange:          mm.EnableOrdinalRange,
-			PartySkillBoostPercent:      mm.PartySkillBoostPercent,
+			EnableSkillBasedMatchmaking: mm.SBMM.EnableSBMM,
+			SBMMMinPlayerCount:          mm.SBMM.MinPlayerCount,
+			SBMMMatchmakerUseMu:         mm.SBMM.MatchmakerUseMu,
+			SBMMBackfillQueriesUseMu:    mm.SBMM.BackfillQueriesUseMu,
+			SBMMMatchmakingTicketsUseMu: mm.SBMM.MatchmakingTicketsUseMu,
+			RatingRange:                 mm.SBMM.RatingRange,
+			EnableOrdinalRange:          mm.SBMM.EnableOrdinalRange,
+			PartySkillBoostPercent:      mm.SBMM.PartySkillBoostPercent,
 		},
 		Divisions: MatchmakerConfigDivisions{
-			EnableDivisions:                mm.EnableDivisions,
-			GreenDivisionMaxAccountAgeDays: mm.GreenDivisionMaxAccountAgeDays,
+			EnableDivisions:                mm.Division.EnableDivisions,
+			GreenDivisionMaxAccountAgeDays: mm.Division.GreenDivisionMaxAccountAgeDays,
 		},
 		TeamFormation: MatchmakerConfigTeamFormation{
-			EnableRosterVariants:       mm.EnableRosterVariants,
-			UseSnakeDraftTeamFormation: mm.UseSnakeDraftTeamFormation,
+			EnableRosterVariants:       mm.SBMM.EnableRosterVariants,
+			UseSnakeDraftTeamFormation: mm.SBMM.UseSnakeDraftTeamFormation,
 		},
 		ServerSelection: MatchmakerConfigServerSelection{
-			MaxServerRTT: mm.MaxServerRTT,
+			MaxServerRTT: mm.ServerSelection.MaxServerRTT,
 		},
 		SkillRating: MatchmakerConfigSkillRating{
 			Defaults: MatchmakerConfigRatingDefaults{

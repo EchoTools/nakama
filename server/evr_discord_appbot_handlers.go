@@ -696,7 +696,10 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		StartTime: startTime.UTC().Add(10 * time.Minute),
 		SpawnedBy: userID,
 	}
-	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Allocate
+	queryAddon := ""
+	if config := EVRMatchmakerConfigGet(); config != nil {
+		queryAddon = config.QueryAddons.Allocate
+	}
 	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, allocatorGroupIDs, latestRTTs, settings, []string{regionCode}, false, true, queryAddon)
 	if err != nil {
 		// Check if this is a region fallback error
@@ -826,7 +829,10 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		SpawnedBy: userID,
 	}
 
-	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
+	queryAddon := ""
+	if config := EVRMatchmakerConfigGet(); config != nil {
+		queryAddon = config.QueryAddons.Create
+	}
 	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, filteredIPs, settings, []string{region}, true, false, queryAddon)
 	if err != nil {
 		// Check if this is a region fallback error

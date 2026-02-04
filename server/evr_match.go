@@ -255,10 +255,9 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	}
 
 	// Log early quit penalty status for metrics (client enforces spawn restrictions)
-	serviceSettings := ServiceSettings()
 	enableEarlyQuitPenalty := true
-	if serviceSettings != nil {
-		enableEarlyQuitPenalty = serviceSettings.Matchmaking.EnableEarlyQuitPenalty
+	if config := EVRMatchmakerConfigGet(); config != nil {
+		enableEarlyQuitPenalty = config.EarlyQuit.EnableEarlyQuitPenalty
 	}
 	if enableEarlyQuitPenalty && !meta.Presence.IsSpectator() {
 		eqConfig := NewEarlyQuitConfig()
@@ -707,80 +706,84 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 						eqconfig.LastEarlyQuitMatchID = state.ID
 
 						// Check for tier change after early quit
-						serviceSettings := ServiceSettings()
-						oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
-
-						logger.WithFields(map[string]interface{}{
-							"old_tier":     oldTier,
-							"new_tier":     newTier,
-							"tier_changed": tierChanged,
-							"eqconfig":     eqconfig,
-						}).Debug("Early quitter tier update.")
-
-						if err := StorableWrite(ctx, nk, mp.GetUserId(), eqconfig); err != nil {
-							logger.Warn("Failed to write early quitter config", zap.Error(err))
+						matchmaker := EVRMatchmakerConfigGet()
+						if matchmaker == nil {
+							logger.WithField("error", "matchmaker config not loaded").Warn("Skipping early quit tier update")
 						} else {
-							if s := _nk.sessionRegistry.Get(uuid.FromStringOrNil(mp.GetSessionId())); s != nil {
-								if params, ok := LoadParams(s.Context()); ok {
-									params.earlyQuitConfig.Store(eqconfig)
-								}
-							}
+							oldTier, newTier, tierChanged := eqconfig.UpdateTier(matchmaker.EarlyQuit.EarlyQuitTier1Threshold)
 
-							// Send early quit penalty notification to player
-							if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
-								penaltyLevel := int32(eqconfig.EarlyQuitPenaltyLevel)
-								// Clamp to max penalty level (typically 3)
-								if penaltyLevel > MaxEarlyQuitPenaltyLevel {
-									penaltyLevel = int32(MaxEarlyQuitPenaltyLevel)
-								}
+							logger.WithFields(map[string]interface{}{
+								"old_tier":     oldTier,
+								"new_tier":     newTier,
+								"tier_changed": tierChanged,
+								"eqconfig":     eqconfig,
+							}).Debug("Early quitter tier update.")
 
-								// Get lockout duration for current penalty level (0s, 2m, 5m, 15m)
-								lockoutDuration := GetLockoutDurationSeconds(int(penaltyLevel))
-
-								reason := fmt.Sprintf("Early quit detected in match %s", state.ID.String())
-								messageTrigger.SendPenaltyAppliedNotification(ctx, mp.GetUserId(), penaltyLevel, lockoutDuration, reason)
-
-								// Trigger auto-report at penalty level 3
-								if penaltyLevel >= 3 {
-									featureFlags := evr.DefaultEarlyQuitFeatureFlags()
-									if featureFlags != nil && featureFlags.EnableAutoReport {
-										TriggerAutoReport(ctx, logger, mp.GetUserId(), penaltyLevel)
+							if err := StorableWrite(ctx, nk, mp.GetUserId(), eqconfig); err != nil {
+								logger.Warn("Failed to write early quitter config", zap.Error(err))
+							} else {
+								if s := _nk.sessionRegistry.Get(uuid.FromStringOrNil(mp.GetSessionId())); s != nil {
+									if params, ok := LoadParams(s.Context()); ok {
+										params.earlyQuitConfig.Store(eqconfig)
 									}
 								}
-							}
 
-							// Send tier change notification if applicable
-							if tierChanged {
+								// Send early quit penalty notification to player
 								if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
-									messageTrigger.SendTierChangeNotification(ctx, mp.GetUserId(), oldTier, newTier, newTier > oldTier)
+									penaltyLevel := int32(eqconfig.EarlyQuitPenaltyLevel)
+									// Clamp to max penalty level (typically 3)
+									if penaltyLevel > MaxEarlyQuitPenaltyLevel {
+										penaltyLevel = int32(MaxEarlyQuitPenaltyLevel)
+									}
+
+									// Get lockout duration for current penalty level (0s, 2m, 5m, 15m)
+									lockoutDuration := GetLockoutDurationSeconds(int(penaltyLevel))
+
+									reason := fmt.Sprintf("Early quit detected in match %s", state.ID.String())
+									messageTrigger.SendPenaltyAppliedNotification(ctx, mp.GetUserId(), penaltyLevel, lockoutDuration, reason)
+
+									// Trigger auto-report at penalty level 3
+									if penaltyLevel >= 3 {
+										featureFlags := evr.DefaultEarlyQuitFeatureFlags()
+										if featureFlags != nil && featureFlags.EnableAutoReport {
+											TriggerAutoReport(ctx, logger, mp.GetUserId(), penaltyLevel)
+										}
+									}
 								}
 
-								// Send Discord DM if tier changed
-								discordID, err := GetDiscordIDByUserID(ctx, db, mp.GetUserId())
-								if err != nil {
-									logger.Warn("Failed to get Discord ID for tier notification", zap.Error(err))
-								} else if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
-									var message string
-									if oldTier > newTier {
-										// Degraded to Tier 2+
-										message = TierDegradedMessage
-									} else {
-										// Recovered to Tier 1
-										message = TierRestoredMessage
+								// Send tier change notification if applicable
+								if tierChanged {
+									if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
+										messageTrigger.SendTierChangeNotification(ctx, mp.GetUserId(), oldTier, newTier, newTier > oldTier)
 									}
-									if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
-										logger.Warn("Failed to send tier change DM", zap.Error(err))
+
+									// Send Discord DM if tier changed
+									discordID, err := GetDiscordIDByUserID(ctx, db, mp.GetUserId())
+									if err != nil {
+										logger.Warn("Failed to get Discord ID for tier notification", zap.Error(err))
+									} else if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
+										var message string
+										if oldTier > newTier {
+											// Degraded to Tier 2+
+											message = TierDegradedMessage
+										} else {
+											// Recovered to Tier 1
+											message = TierRestoredMessage
+										}
+										if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
+											logger.Warn("Failed to send tier change DM", zap.Error(err))
+										}
 									}
 								}
+
+								// Launch goroutine to check if player logs out and remove early quit if they do
+								// Use a 5-minute grace period before checking logout status
+								// Use background context to ensure goroutine isn't cancelled when match ends
+								go func(userID, sessionID string) {
+									bgCtx := context.Background()
+									CheckAndStrikeEarlyQuitIfLoggedOut(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, 5*time.Minute)
+								}(mp.GetUserId(), mp.GetSessionId())
 							}
-
-							// Launch goroutine to check if player logs out and remove early quit if they do
-							// Use a 5-minute grace period before checking logout status
-							// Use background context to ensure goroutine isn't cancelled when match ends
-							go func(userID, sessionID string) {
-								bgCtx := context.Background()
-								CheckAndStrikeEarlyQuitIfLoggedOut(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, 5*time.Minute)
-							}(mp.GetUserId(), mp.GetSessionId())
 						}
 					}
 				}
@@ -1051,7 +1054,6 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 			// Increment completed matches for players who stayed until the end
 			_nk := nk.(*RuntimeGoNakamaModule)
-			serviceSettings := ServiceSettings()
 			for _, presence := range state.presenceMap {
 				// Skip non-players (spectators, moderators)
 				if presence.RoleAlignment == evr.TeamSpectator || presence.RoleAlignment == evr.TeamModerator {
@@ -1072,7 +1074,12 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				}
 
 				// Check for tier change after completing match
-				oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
+				matchmaker := EVRMatchmakerConfigGet()
+				if matchmaker == nil {
+					logger.WithField("error", "matchmaker config not loaded").Warn("Skipping early quit tier update")
+					continue
+				}
+				oldTier, newTier, tierChanged := eqconfig.UpdateTier(matchmaker.EarlyQuit.EarlyQuitTier1Threshold)
 
 				logger.WithFields(map[string]interface{}{
 					"user_id":      presence.GetUserId(),
@@ -1092,7 +1099,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					}
 
 					// Send Discord DM if tier changed (restored from penalty tier), unless silent mode is enabled
-					if tierChanged && newTier == MatchmakingTier1 && !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
+					if tierChanged && newTier == MatchmakingTier1 && !matchmaker.EarlyQuit.SilentEarlyQuitSystem {
 						discordID, err := GetDiscordIDByUserID(ctx, db, presence.GetUserId())
 						if err != nil {
 							logger.Warn("Failed to get Discord ID for tier notification", zap.Error(err))

@@ -18,13 +18,13 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	filterCounts["max_rtt"] = m.filterWithinMaxRTT(candidates)
 
 	config := PredictionConfig{}
-	if settings := ServiceSettings(); settings != nil {
-		mu := settings.SkillRating.Defaults.Mu
-		sigma := settings.SkillRating.Defaults.Sigma
-		z := settings.SkillRating.Defaults.Z
-		config.PartyBoostPercent = settings.Matchmaking.PartySkillBoostPercent
-		config.EnableRosterVariants = settings.Matchmaking.EnableRosterVariants
-		config.UseSnakeDraftFormation = settings.Matchmaking.UseSnakeDraftTeamFormation
+	if matchmaker := EVRMatchmakerConfigGet(); matchmaker != nil {
+		mu := matchmaker.SkillRating.Defaults.Mu
+		sigma := matchmaker.SkillRating.Defaults.Sigma
+		z := matchmaker.SkillRating.Defaults.Z
+		config.PartyBoostPercent = matchmaker.SBMM.PartySkillBoostPercent
+		config.EnableRosterVariants = matchmaker.SBMM.EnableRosterVariants
+		config.UseSnakeDraftFormation = matchmaker.SBMM.UseSnakeDraftTeamFormation
 		config.OpenSkillOptions = &types.OpenSkillOptions{
 			Mu:    &mu,
 			Sigma: &sigma,
@@ -48,8 +48,8 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	now := time.Now().UTC().Unix()
 	oldestWaitTimeSecs := now - oldestTicketTimestamp
 	waitTimeThreshold := int64(120) // Default: 120 seconds (2 minutes)
-	if settings := ServiceSettings(); settings != nil && settings.Matchmaking.WaitTimePriorityThresholdSecs > 0 {
-		waitTimeThreshold = int64(settings.Matchmaking.WaitTimePriorityThresholdSecs)
+	if matchmaker := EVRMatchmakerConfigGet(); matchmaker != nil && matchmaker.Priority.WaitTimePriorityThresholdSecs > 0 {
+		waitTimeThreshold = int64(matchmaker.Priority.WaitTimePriorityThresholdSecs)
 	}
 	prioritizeWaitTime := oldestWaitTimeSecs >= waitTimeThreshold
 

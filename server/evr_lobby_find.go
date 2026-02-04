@@ -125,21 +125,22 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		// Sometimes the client doesn't respond to the ping request, so delay for a few seconds.
 		<-time.After(3 * time.Second)
 	}
-	serviceSettings := ServiceSettings()
-	if lobbyParams.Mode == evr.ModeArenaPublic && lobbyParams.EarlyQuitPenaltyLevel > 0 && serviceSettings.Matchmaking.EnableEarlyQuitPenalty {
-		eqConfig := NewEarlyQuitConfig()
-		if err := StorableRead(ctx, p.nk, lobbyParams.UserID.String(), eqConfig, true); err != nil {
-			logger.Debug("Failed to load early quit config for logging", zap.Error(err))
-		} else {
-			timeSinceLastQuit := time.Since(eqConfig.LastEarlyQuitTime)
-			lockoutDuration := GetLockoutDuration(lobbyParams.EarlyQuitPenaltyLevel)
+	if lobbyParams.Mode == evr.ModeArenaPublic && lobbyParams.EarlyQuitPenaltyLevel > 0 {
+		if config := EVRMatchmakerConfigGet(); config != nil && config.EarlyQuit.EnableEarlyQuitPenalty {
+			eqConfig := NewEarlyQuitConfig()
+			if err := StorableRead(ctx, p.nk, lobbyParams.UserID.String(), eqConfig, true); err != nil {
+				logger.Debug("Failed to load early quit config for logging", zap.Error(err))
+			} else {
+				timeSinceLastQuit := time.Since(eqConfig.LastEarlyQuitTime)
+				lockoutDuration := GetLockoutDuration(lobbyParams.EarlyQuitPenaltyLevel)
 
-			if timeSinceLastQuit < lockoutDuration {
-				remainingTime := lockoutDuration - timeSinceLastQuit
-				logger.Info("Player queueing with active early quit penalty (client-side enforcement expected)",
-					zap.String("user_id", lobbyParams.UserID.String()),
-					zap.Int("penalty_level", lobbyParams.EarlyQuitPenaltyLevel),
-					zap.Duration("remaining", remainingTime))
+				if timeSinceLastQuit < lockoutDuration {
+					remainingTime := lockoutDuration - timeSinceLastQuit
+					logger.Info("Player queueing with active early quit penalty (client-side enforcement expected)",
+						zap.String("user_id", lobbyParams.UserID.String()),
+						zap.Int("penalty_level", lobbyParams.EarlyQuitPenaltyLevel),
+						zap.Duration("remaining", remainingTime))
+				}
 			}
 		}
 	}
@@ -292,7 +293,11 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 		ReservationLifetime: 30 * time.Second,
 	}
 
-	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, []string{lobbyParams.RegionCode}, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
+	queryAddon := ""
+	if config := EVRMatchmakerConfigGet(); config != nil {
+		queryAddon = config.QueryAddons.Create
+	}
+	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, []string{lobbyParams.RegionCode}, true, false, queryAddon)
 	if err != nil {
 		// Check if this is a region fallback error - for pipeline, auto-select closest
 		var regionErr ErrMatchmakingNoServersInRegion
@@ -303,7 +308,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 				zap.Int("latency_ms", regionErr.FallbackInfo.ClosestLatencyMs))
 
 			// Allocate without region requirement to get the closest server
-			label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, nil, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
+			label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, nil, true, false, queryAddon)
 		}
 
 		if err != nil {

@@ -30,7 +30,10 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 
 	latestRTTs := params.latencyHistory.Load().LatestRTTs()
 
-	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
+	queryAddon := ""
+	if config := EVRMatchmakerConfigGet(); config != nil {
+		queryAddon = config.QueryAddons.Create
+	}
 	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), nk, []string{params.GroupID.String()}, latestRTTs, settings, []string{params.RegionCode}, false, false, queryAddon)
 	if err != nil {
 		// Check if this is a region fallback error - for lobby create, auto-select closest

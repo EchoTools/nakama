@@ -98,7 +98,7 @@ func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 
 	// After building matches, attempt post-matchmaker backfill if enabled
 	// This runs immediately after matchmaker completes in addition to periodic backfill
-	if ServiceSettings().Matchmaking.EnablePostMatchmakerBackfill && b.skillBasedMM != nil {
+	if config := EVRMatchmakerConfigGet(); config != nil && config.Backfill.EnablePostMatchmakerBackfill && b.skillBasedMM != nil {
 		// Reset the periodic timer since matchmaker just ran and will trigger backfill
 		b.resetBackfillTimer()
 		// Run backfill immediately after matchmaker (not a periodic run)
@@ -145,7 +145,8 @@ func (b *LobbyBuilder) startPeriodicBackfill() {
 				ticker.Reset(interval)
 			case <-ticker.C:
 				// Check if backfill is enabled (allows runtime config changes)
-				if !ServiceSettings().Matchmaking.EnablePostMatchmakerBackfill {
+				config := EVRMatchmakerConfigGet()
+				if config == nil || !config.Backfill.EnablePostMatchmakerBackfill {
 					continue
 				}
 				// Reset timer at the start so it doesn't pile up
@@ -258,10 +259,14 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 	}
 
 	// Calculate reducing precision factor based on oldest ticket
-	settings := ServiceSettings().Matchmaking
+	config := EVRMatchmakerConfigGet()
+	reducingPrecision := ReducingPrecisionConfig{}
+	if config != nil {
+		reducingPrecision = config.ReducingPrecision
+	}
 	reducingPrecisionFactor := 0.0
 
-	if settings.ReducingPrecisionIntervalSecs > 0 {
+	if reducingPrecision.IntervalSecs > 0 {
 		oldestSubmission := time.Now()
 		for _, c := range candidates {
 			if c.SubmissionTime.Before(oldestSubmission) {
@@ -270,8 +275,8 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 		}
 
 		waitTime := time.Since(oldestSubmission)
-		interval := time.Duration(settings.ReducingPrecisionIntervalSecs) * time.Second
-		maxCycles := float64(settings.ReducingPrecisionMaxCycles)
+		interval := time.Duration(reducingPrecision.IntervalSecs) * time.Second
+		maxCycles := float64(reducingPrecision.MaxCycles)
 
 		if maxCycles > 0 && interval > 0 {
 			cycles := float64(waitTime) / float64(interval)
@@ -480,7 +485,10 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 	var label *MatchLabel
 	timeout := time.After(ServerAllocationTimeoutSeconds * time.Second)
-	queryAddon := ServiceSettings().Matchmaking.QueryAddons.LobbyBuilder
+	queryAddon := ""
+	if config := EVRMatchmakerConfigGet(); config != nil {
+		queryAddon = config.QueryAddons.LobbyBuilder
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -668,7 +676,11 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 		return nil, fmt.Errorf("no group IDs provided")
 	}
 	// Load the server ratings storage object
-	globalSettings := ServiceSettings().Matchmaking
+	config := EVRMatchmakerConfigGet()
+	globalSettings := MatchmakingServerConfig{}
+	if config != nil {
+		globalSettings = config.ServerSelection
+	}
 
 	qparts := []string{
 		fmt.Sprintf("+label.broadcaster.group_ids:%s", Query.CreateMatchPattern(groupIDs)),
@@ -736,7 +748,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 		extIP := label.GameServer.Endpoint.ExternalIP.String()
 		hostID := label.GameServer.Endpoint.GetHostID()
 
-		if slices.Contains(globalSettings.ServerSelection.ExcludeList, label.GameServer.Username) || slices.Contains(globalSettings.ServerSelection.ExcludeList, extIP) {
+		if slices.Contains(globalSettings.ExcludeList, label.GameServer.Username) || slices.Contains(globalSettings.ExcludeList, extIP) {
 			continue
 		}
 
@@ -750,9 +762,9 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 			}
 		}
 
-		rating, ok := globalSettings.ServerSelection.Ratings[extIP]
+		rating, ok := globalSettings.Ratings[extIP]
 		if !ok {
-			if rating, ok = globalSettings.ServerSelection.Ratings[label.GameServer.Username]; !ok {
+			if rating, ok = globalSettings.Ratings[label.GameServer.Username]; !ok {
 				rating = 0
 			}
 		}
@@ -769,10 +781,10 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 		if rtt == 0 {
 			rtt = rttsByEndpoint[extIP]
 		}
-		if delta, ok := globalSettings.ServerSelection.RTTDelta[label.GameServer.Username]; ok {
+		if delta, ok := globalSettings.RTTDelta[label.GameServer.Username]; ok {
 			rtt += delta
 		}
-		if delta, ok := globalSettings.ServerSelection.RTTDelta[extIP]; ok {
+		if delta, ok := globalSettings.RTTDelta[extIP]; ok {
 			rtt += delta
 		}
 
