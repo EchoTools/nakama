@@ -292,15 +292,15 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
-	// Check if the main presence is already in the match (idempotent join or reconnection)
+	// Check if the main presence is already in the match with the same session ID
+	// Explicitly reject as duplicate; callers should treat as no-op
 	if existing, found := state.presenceMap[meta.Presence.GetSessionId()]; found {
-		// If the session is already in the match, treat this as a successful idempotent join
 		logger.WithFields(map[string]interface{}{
 			"evrid": existing.EvrID,
 			"uid":   existing.GetUserId(),
 			"sid":   existing.GetSessionId(),
-		}).Debug("Session already in match, allowing idempotent join.")
-		return state, true, ""
+		}).Warn("Duplicate join attempt for existing session; rejecting.")
+		return state, false, ErrJoinRejectReasonDuplicateJoin.Error()
 	}
 
 	// Remove any reservations of existing players (i.e. party members already in the match)
@@ -795,13 +795,9 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 		messages := make([]evr.Message, 0, len(rejects))
 
-		// Send legacy messages to the game server to notify the sever to disconnect the players
-		for _, id := range rejects {
-			msg := evr.NewBroadcasterRemovePlayer(id)
-			messages = append(messages, msg)
-		}
-
 		code := evr.PlayerRejectionReasonDisconnected
+		// Send legacy messages to the game server to notify the server to disconnect the players
+		messages = append(messages, evr.NewGameServerEntrantRejected(code, rejects...))
 
 		// Convert UUIDs to strings for protobuf
 		rejectIDs := make([]string, 0, len(rejects))
