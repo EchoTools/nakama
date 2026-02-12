@@ -95,6 +95,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"account/search":                AccountSearchRPC,
 		"account/lookup":                rpcHandler.AccountLookupRPC,
 		"account/authenticate/password": AuthenticatePasswordRPC,
+		"admin/player/rename":           AdminPlayerRenameRPC,
 		"leaderboard/haystack":          rpcHandler.LeaderboardHaystackRPC,
 		"leaderboard/records":           rpcHandler.LeaderboardRecordsListRPC,
 		"link/device":                   LinkDeviceRpc,
@@ -128,7 +129,12 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"enforcement/kick":              EnforcementKickRPC,
 		"enforcement/journals":          EnforcementJournalListRPC,
 		"enforcement/record/edit":       EnforcementRecordEditRPC,
+		"player/report":                 PlayerReportRPC,
 		"earlyquit/history":             EarlyQuitHistoryRPC,
+		"player/outfit/save":            PlayerOutfitSaveRPC,
+		"player/outfit/list":            PlayerOutfitListRPC,
+		"player/outfit/load":            PlayerOutfitLoadRPC,
+		"player/outfit/delete":          PlayerOutfitDeleteRPC,
 		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
 	}
 	for name, rpc := range rpcs {
