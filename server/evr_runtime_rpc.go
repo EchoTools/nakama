@@ -21,6 +21,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/internal/intents"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/zap"
 )
 
 const (
@@ -1999,520 +2000,455 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 	return string(data), nil
 }
 
-// AdminDeviceUnlinkRPC unlinks a device from a user account (admin only)
-// Requires Global Operator permission
-type AdminDeviceUnlinkRequest struct {
-	UserID   string `json:"user_id"`   // User UUID
-	DeviceID string `json:"device_id"` // Device ID (format: ORG-12341234)
+// Outfit management constants and types
+const (
+	OutfitCollection  = "player_outfits"
+	MaxOutfitsPerUser = 10
+)
+
+// Outfit represents a player's outfit configuration
+type Outfit struct {
+	ID      string      `json:"id"`
+	Name    string      `json:"name"`
+	Chassis string      `json:"chassis"`
+	Bracer  string      `json:"bracer"`
+	Booster string      `json:"booster"`
+	Decal   string      `json:"decal"`
+	SavedAt TimeRFC3339 `json:"saved_at"`
 }
 
-type AdminDeviceUnlinkResponse struct {
+// SaveOutfitRequest represents the request to save an outfit
+type SaveOutfitRequest struct {
+	Name    string `json:"name"`
+	Chassis string `json:"chassis"`
+	Bracer  string `json:"bracer"`
+	Booster string `json:"booster"`
+	Decal   string `json:"decal"`
+}
+
+// SaveOutfitResponse represents the response from saving an outfit
+type SaveOutfitResponse struct {
 	Success bool   `json:"success"`
-	Message string `json:"message"`
+	Outfit  Outfit `json:"outfit"`
+	ID      string `json:"id"`
 }
 
-func AdminDeviceUnlinkRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	// Check for Global Operator permission
-	vars, err := intents.SessionVarsFromRuntimeContext(ctx)
-	if err != nil {
-		logger.WithField("err", err).Error("Failed to parse session variables from context")
-		return "", runtime.NewError("Failed to parse session variables", StatusInternalError)
-	}
-
-	if vars == nil || !vars.Intents.IsGlobalOperator {
-		return "", runtime.NewError("Global Operator permission required", StatusPermissionDenied)
-	}
-
-	// Parse the request
-	var request AdminDeviceUnlinkRequest
-	if err := json.Unmarshal([]byte(payload), &request); err != nil {
-		logger.WithField("err", err).WithField("payload", payload).Error("Unable to unmarshal payload")
-		return "", runtime.NewError("Unable to unmarshal payload", StatusInvalidArgument)
-	}
-
-	// Validate required fields
-	if request.UserID == "" {
-		return "", runtime.NewError("user_id is required", StatusInvalidArgument)
-	}
-	if request.DeviceID == "" {
-		return "", runtime.NewError("device_id is required", StatusInvalidArgument)
-	}
-
-	// Validate user ID format
-	if _, err := uuid.FromString(request.UserID); err != nil {
-		return "", runtime.NewError("Invalid user_id format", StatusInvalidArgument)
-	}
-
-	// Validate device ID format
-	if _, err := evr.ParseEvrId(request.DeviceID); err != nil {
-		return "", runtime.NewError("Invalid device_id format", StatusInvalidArgument)
-	}
-
-	// Get the user account to verify device is linked
-	account, err := nk.AccountGetId(ctx, request.UserID)
-	if err != nil {
-		logger.WithField("err", err).WithField("user_id", request.UserID).Error("Failed to get account")
-		return "", runtime.NewError("User not found", StatusNotFound)
-	}
-
-	// Verify the device is linked to this user
-	deviceFound := false
-	for _, device := range account.Devices {
-		if device.Id == request.DeviceID {
-			deviceFound = true
-			break
-		}
-	}
-
-	if !deviceFound {
-		return "", runtime.NewError("Device not linked to this user", StatusNotFound)
-	}
-
-	// Unlink the device
-	if err := nk.UnlinkDevice(ctx, request.UserID, request.DeviceID); err != nil {
-		logger.WithField("err", err).WithField("user_id", request.UserID).WithField("device_id", request.DeviceID).Error("Failed to unlink device")
-		return "", runtime.NewError("Failed to unlink device", StatusInternalError)
-	}
-
-	// Log the action for audit trail
-	operatorID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
-	logger.WithField("operator_id", operatorID).WithField("user_id", request.UserID).WithField("device_id", request.DeviceID).Info("Device unlinked by admin")
-
-	response := AdminDeviceUnlinkResponse{
-		Success: true,
-		Message: fmt.Sprintf("Device %s successfully unlinked from user %s", request.DeviceID, request.UserID),
-	}
-
-	data, err := json.Marshal(response)
-	if err != nil {
-		return "", runtime.NewError("Failed to marshal response", StatusInternalError)
-	}
-
-	return string(data), nil
+// ListOutfitsResponse represents the response from listing outfits
+type ListOutfitsResponse struct {
+	Outfits []Outfit `json:"outfits"`
 }
 
-// PlayerPartyMembersRPC returns party/group member information
-type PlayerPartyMembersRequest struct {
-	UserID string `json:"user_id,omitempty"` // Optional, defaults to authenticated user
+// LoadOutfitRequest represents the request to load an outfit
+type LoadOutfitRequest struct {
+	OutfitID string `json:"outfit_id"`
 }
 
-type PlayerPartyMemberInfo struct {
-	UserID       string  `json:"user_id"`
-	Username     string  `json:"username"`
-	DisplayName  string  `json:"display_name"`
-	Online       bool    `json:"online"`
-	LastSeen     *string `json:"last_seen,omitempty"` // ISO 8601 timestamp - currently not populated
-	CurrentMatch *string `json:"current_match"`       // Match ID or null
+// LoadOutfitResponse represents the response from loading an outfit
+type LoadOutfitResponse struct {
+	Success bool   `json:"success"`
+	Outfit  Outfit `json:"outfit"`
 }
 
-type PlayerPartyMembersResponse struct {
-	Members []PlayerPartyMemberInfo `json:"members"`
+// DeleteOutfitRequest represents the request to delete an outfit
+type DeleteOutfitRequest struct {
+	OutfitID string `json:"outfit_id"`
 }
 
-func PlayerPartyMembersRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	// Parse the request
-	var request PlayerPartyMembersRequest
-	if payload != "" {
-		if err := json.Unmarshal([]byte(payload), &request); err != nil {
-			logger.WithField("err", err).WithField("payload", payload).Error("Unable to unmarshal payload")
-			return "", runtime.NewError("Unable to unmarshal payload", StatusInvalidArgument)
-		}
-	}
+// DeleteOutfitResponse represents the response from deleting an outfit
+type DeleteOutfitResponse struct {
+	Success bool `json:"success"`
+}
 
-	// Get user ID from request or context
-	authUserID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
-	if !ok || authUserID == "" {
+// PlayerOutfitSaveRPC saves a player outfit to storage
+func PlayerOutfitSaveRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Get user ID from context
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || userID == "" {
 		return "", runtime.NewError("authentication required", StatusUnauthenticated)
 	}
 
-	userID := request.UserID
-	if userID == "" {
-		userID = authUserID
-	} else if userID != authUserID {
-		// Only allow querying other users if the caller is a global operator
-		if isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, authUserID, GroupGlobalOperators); err != nil {
-			logger.Error("Failed to check global operator status", zap.Error(err))
-			return "", runtime.NewError("Failed to check permissions", StatusInternalError)
-		} else if !isGlobalOperator {
-			return "", runtime.NewError("Permission denied to query other user's party members", StatusPermissionDenied)
-		}
+	// Parse request
+	request := &SaveOutfitRequest{}
+	if err := json.Unmarshal([]byte(payload), request); err != nil {
+		return "", runtime.NewError("invalid request payload", StatusInvalidArgument)
 	}
 
-	// Validate user ID format
-	if _, err := uuid.FromString(userID); err != nil {
-		return "", runtime.NewError("Invalid user_id format", StatusInvalidArgument)
+	// Validate request
+	if request.Name == "" {
+		return "", runtime.NewError("outfit name is required", StatusInvalidArgument)
 	}
 
-	// Get user's guild group memberships (party/guild groups), with pagination and filtering.
-	var userGroups []*api.UserGroupList_UserGroup
-	userGroupsCursor := ""
-	for {
-		page, nextCursor, err := nk.UserGroupsList(ctx, userID, 100, nil, userGroupsCursor)
-		if err != nil {
-			logger.WithField("err", err).WithField("user_id", userID).Error("Failed to get user groups")
-			return "", runtime.NewError("Failed to get user groups", StatusInternalError)
-		}
-
-		for _, ug := range page {
-			// Only consider guild/party groups with active membership states.
-			if ug.Group == nil {
-				continue
-			}
-			if ug.Group.LangTag != GuildGroupLangTag {
-				continue
-			}
-			// Nakama group membership states: values > 2 represent join/invite/banned-like states.
-			if ug.State.Value > int32(api.UserGroupList_UserGroup_MEMBER) {
-				continue
-			}
-			userGroups = append(userGroups, ug)
-		}
-
-		if nextCursor == "" {
-			break
-		}
-		userGroupsCursor = nextCursor
-	}
-
-	// Collect all unique member IDs from all guild groups
-	memberMap := make(map[string]bool)
-	for _, userGroup := range userGroups {
-		if userGroup.Group == nil {
-			continue
-		}
-
-		groupUsersCursor := ""
-		for {
-			// Get group members with pagination.
-			groupUsers, nextCursor, err := nk.GroupUsersList(ctx, userGroup.Group.Id, 100, nil, groupUsersCursor)
-			if err != nil {
-				logger.WithField("err", err).WithField("group_id", userGroup.Group.Id).Warn("Failed to get group members")
-				break
-			}
-
-			for _, groupUser := range groupUsers {
-				if groupUser.User == nil {
-					continue
-				}
-				// Exclude non-active membership states (e.g., join requests, banned).
-				if groupUser.State.Value > int32(api.GroupUserList_GroupUser_MEMBER) {
-					continue
-				}
-				memberMap[groupUser.User.Id] = true
-			}
-
-			if nextCursor == "" {
-				break
-			}
-			groupUsersCursor = nextCursor
-		}
-	}
-
-	// Build member info list
-	members := make([]PlayerPartyMemberInfo, 0, len(memberMap))
-	for memberID := range memberMap {
-		// Get account info
-		account, err := nk.AccountGetId(ctx, memberID)
-		if err != nil {
-			logger.WithField("err", err).WithField("member_id", memberID).Warn("Failed to get account")
-			continue
-		}
-
-		memberInfo := PlayerPartyMemberInfo{
-			UserID:      memberID,
-			Username:    account.User.Username,
-			DisplayName: account.User.DisplayName,
-			Online:      account.User.Online,
-		}
-
-		// Check presence for current match
-		presences, err := nk.StreamUserList(StreamModeService, memberID, "", StreamLabelMatchService, false, true)
-		if err == nil && len(presences) > 0 {
-			for _, presence := range presences {
-				matchID := MatchIDFromStringOrNil(presence.GetStatus())
-				if !matchID.IsNil() {
-					matchIDStr := matchID.String()
-					memberInfo.CurrentMatch = &matchIDStr
-					break
-				}
-			}
-		}
-
-		members = append(members, memberInfo)
-	}
-
-	response := PlayerPartyMembersResponse{
-		Members: members,
-	}
-
-	data, err := json.Marshal(response)
+	// Check current number of outfits for this user
+	// We only need to check if the limit is reached, so we request MaxOutfitsPerUser items
+	objects, _, err := nk.StorageList(ctx, userID, userID, OutfitCollection, MaxOutfitsPerUser, "")
 	if err != nil {
-		return "", runtime.NewError("Failed to marshal response", StatusInternalError)
+		logger.Error("Failed to list outfits: %v", err)
+		return "", runtime.NewError("failed to check outfit limit", StatusInternalError)
 	}
 
-	return string(data), nil
-}
-
-// PlayerSettingsDefaultGuildRPC sets the default guild for a player
-type PlayerSettingsDefaultGuildRequest struct {
-	GroupID string `json:"group_id"` // Group UUID
-}
-
-type PlayerSettingsDefaultGuildResponse struct {
-	Success bool   `json:"success"`
-	GroupID string `json:"group_id"`
-}
-
-func PlayerSettingsDefaultGuildRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	// Get authenticated user ID
-	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
-	if !ok {
-		return "", runtime.NewError("Authentication required", StatusUnauthenticated)
+	if len(objects) >= MaxOutfitsPerUser {
+		return "", runtime.NewError("outfit limit reached", StatusResourceExhausted)
 	}
 
-	// Parse the request
-	var request PlayerSettingsDefaultGuildRequest
-	if err := json.Unmarshal([]byte(payload), &request); err != nil {
-		logger.WithField("err", err).WithField("payload", payload).Error("Unable to unmarshal payload")
-		return "", runtime.NewError("Unable to unmarshal payload", StatusInvalidArgument)
-	}
-
-	// Validate group_id
-	if request.GroupID == "" {
-		return "", runtime.NewError("group_id is required", StatusInvalidArgument)
-	}
-
-	if _, err := uuid.FromString(request.GroupID); err != nil {
-		return "", runtime.NewError("Invalid group_id format", StatusInvalidArgument)
-	}
-
-	// Verify group exists
-	groups, err := nk.GroupsGetId(ctx, []string{request.GroupID})
-	if err != nil || len(groups) == 0 {
-		logger.WithField("err", err).WithField("group_id", request.GroupID).Error("Group not found")
-		return "", runtime.NewError("Group not found", StatusNotFound)
-	}
-
-	// Verify user is a member of the group
-	userGroups, _, err := nk.UserGroupsList(ctx, userID, 100, nil, "")
+	// Generate new UUID for outfit
+	outfitUUID, err := uuid.NewV4()
 	if err != nil {
-		logger.WithField("err", err).WithField("user_id", userID).Error("Failed to get user groups")
-		return "", runtime.NewError("Failed to verify group membership", StatusInternalError)
+		logger.Error("Failed to generate outfit ID: %v", err)
+		return "", runtime.NewError("failed to generate outfit ID", StatusInternalError)
+	}
+	outfitID := outfitUUID.String()
+
+	// Create outfit
+	outfit := Outfit{
+		ID:      outfitID,
+		Name:    request.Name,
+		Chassis: request.Chassis,
+		Bracer:  request.Bracer,
+		Booster: request.Booster,
+		Decal:   request.Decal,
+		SavedAt: TimeRFC3339(time.Now().UTC()),
 	}
 
-	isMember := false
-	for _, userGroup := range userGroups {
-		if userGroup.Group.Id == request.GroupID {
-			if userGroup.State.Value <= int32(api.UserGroupList_UserGroup_MEMBER) {
-				isMember = true
-			}
-			break
-		}
-	}
-
-	if !isMember {
-		return "", runtime.NewError("User is not a member of this group", StatusPermissionDenied)
-	}
-
-	// Store the default guild in storage object
-	metadata := map[string]any{
-		"default_guild": request.GroupID,
-		"updated_at":    time.Now().UTC().Format(time.RFC3339),
-	}
-
-	metadataJSON, err := json.Marshal(metadata)
+	// Marshal outfit to JSON
+	value, err := json.Marshal(outfit)
 	if err != nil {
-		return "", runtime.NewError("Failed to marshal metadata", StatusInternalError)
+		logger.Error("Failed to marshal outfit: %v", err)
+		return "", runtime.NewError("failed to save outfit", StatusInternalError)
 	}
 
-	// Write to storage
-	writes := []*runtime.StorageWrite{
-		{
-			Collection:      "settings",
-			Key:             "default_guild",
-			UserID:          userID,
-			Value:           string(metadataJSON),
-			PermissionRead:  1, // Owner read
-			PermissionWrite: 1, // Owner write
-		},
+	// Write to storage (user-scoped)
+	_, err = nk.StorageWrite(ctx, []*runtime.StorageWrite{{
+		Collection:      OutfitCollection,
+		Key:             outfitID,
+		UserID:          userID,
+		Value:           string(value),
+		PermissionRead:  1, // Owner can read
+		PermissionWrite: 1, // Owner can write
+	}})
+	if err != nil {
+		logger.Error("Failed to write outfit to storage: %v", err)
+		return "", runtime.NewError("failed to save outfit", StatusInternalError)
 	}
 
-	if _, err := nk.StorageWrite(ctx, writes); err != nil {
-		logger.WithField("err", err).WithField("user_id", userID).Error("Failed to write default guild setting")
-		return "", runtime.NewError("Failed to save setting", StatusInternalError)
-	}
-
-	logger.WithField("user_id", userID).WithField("group_id", request.GroupID).Info("Default guild set")
-
-	response := PlayerSettingsDefaultGuildResponse{
+	// Prepare response
+	response := SaveOutfitResponse{
 		Success: true,
-		GroupID: request.GroupID,
+		Outfit:  outfit,
+		ID:      outfitID,
 	}
 
 	data, err := json.Marshal(response)
 	if err != nil {
-		return "", runtime.NewError("Failed to marshal response", StatusInternalError)
+		logger.Error("Failed to marshal response: %v", err)
+		return "", runtime.NewError("failed to create response", StatusInternalError)
 	}
 
 	return string(data), nil
 }
 
-// PlayerLocationVerifyRPC verifies a user's location with a verification code
-type PlayerLocationVerifyRequest struct {
-	Code string `json:"code"` // 6-character verification code
+// AdminPlayerRenameRequest represents the request payload for the admin/player/rename RPC
+type AdminPlayerRenameRequest struct {
+	TargetUserID   string `json:"target_user_id"`   // User ID of the player to rename (required)
+	NewDisplayName string `json:"new_display_name"` // New display name for the player (required)
+	ModeratorNotes string `json:"moderator_notes"`  // Optional notes for the audit log
 }
 
-type PlayerLocationInfo struct {
-	Country string `json:"country"`
-	City    string `json:"city"`
-	Region  string `json:"region"`
+// AdminPlayerRenameResponse represents the response from the admin/player/rename RPC
+type AdminPlayerRenameResponse struct {
+	Success bool   `json:"success"`
+	OldName string `json:"old_name"`
+	NewName string `json:"new_name"`
 }
 
-type PlayerLocationVerifyResponse struct {
-	Success  bool                `json:"success"`
-	Verified bool                `json:"verified"`
-	Location *PlayerLocationInfo `json:"location,omitempty"`
-}
-
-func PlayerLocationVerifyRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	// Get authenticated user ID
-	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
-	if !ok {
-		return "", runtime.NewError("Authentication required", StatusUnauthenticated)
-	}
-
-	// Parse the request
-	var request PlayerLocationVerifyRequest
+// AdminPlayerRenameRPC is the RPC handler for renaming players (Moderator+ permission required)
+func AdminPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	var request AdminPlayerRenameRequest
 	if err := json.Unmarshal([]byte(payload), &request); err != nil {
-		logger.WithField("err", err).WithField("payload", payload).Error("Unable to unmarshal payload")
-		return "", runtime.NewError("Unable to unmarshal payload", StatusInvalidArgument)
+		return "", runtime.NewError("Invalid request payload", StatusInvalidArgument)
 	}
 
-	// Validate code
-	if request.Code == "" {
-		return "", runtime.NewError("code is required", StatusInvalidArgument)
+	// Get the caller's user ID from context
+	callerID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || callerID == "" {
+		return "", runtime.NewError("User ID not found in context", StatusUnauthenticated)
 	}
 
-	if len(request.Code) != 6 {
-		return "", runtime.NewError("code must be 6 characters", StatusInvalidArgument)
-	}
-
-	// Read verification request from storage
-	objectIds := []*runtime.StorageRead{
-		{
-			Collection: "location_verification",
-			Key:        "pending",
-			UserID:     userID,
-		},
-	}
-
-	objects, err := nk.StorageRead(ctx, objectIds)
+	// Check if the caller is a global operator (Moderator+)
+	isModerator, err := CheckSystemGroupMembership(ctx, db, callerID, GroupGlobalOperators)
 	if err != nil {
-		logger.WithField("err", err).WithField("user_id", userID).Error("Failed to read pending verification")
-		return "", runtime.NewError("Internal error", StatusInternalError)
-	}
-	if len(objects) == 0 {
-		logger.WithField("user_id", userID).Warn("No pending verification found")
-		return "", runtime.NewError("No pending verification request", StatusNotFound)
+		logger.Error("Failed to check moderator status", zap.Error(err))
+		return "", runtime.NewError("Failed to check permissions", StatusInternalError)
 	}
 
-	// Parse the stored verification data
-	var verificationData struct {
-		Code      string    `json:"code"`
-		Country   string    `json:"country"`
-		City      string    `json:"city"`
-		Region    string    `json:"region"`
-		CreatedAt time.Time `json:"created_at"`
-		ExpiresAt time.Time `json:"expires_at"`
+	if !isModerator {
+		return "", runtime.NewError("Moderator or higher permission required", StatusPermissionDenied)
 	}
 
-	if err := json.Unmarshal([]byte(objects[0].Value), &verificationData); err != nil {
-		logger.WithField("err", err).Error("Failed to parse verification data")
-		return "", runtime.NewError("Invalid verification data", StatusInternalError)
+	// Validate required fields
+	if request.TargetUserID == "" {
+		return "", runtime.NewError("target_user_id is required", StatusInvalidArgument)
 	}
 
-	// Check if code has expired
-	if time.Now().UTC().After(verificationData.ExpiresAt) {
-		// Delete expired verification
-		if err := nk.StorageDelete(ctx, []*runtime.StorageDelete{
-			{
-				Collection: "location_verification",
-				Key:        "pending",
-				UserID:     userID,
-			},
-		}); err != nil {
-			logger.WithField("err", err).WithField("user_id", userID).Error("Failed to delete expired pending verification")
-			// Return internal error since the system is in an inconsistent state?
-			// Or just log and return the user error? Returning Internal to be safe/noisy about DB issues.
-			return "", runtime.NewError("Failed to cleanup expired verification", StatusInternalError)
-		}
-		return "", runtime.NewError("Verification code expired", StatusFailedPrecondition)
+	if request.NewDisplayName == "" {
+		return "", runtime.NewError("new_display_name is required", StatusInvalidArgument)
 	}
 
-	// Verify the code
-	verified := verificationData.Code == request.Code
+	// Validate target user ID format
+	targetUUID, err := uuid.FromString(request.TargetUserID)
+	if err != nil {
+		return "", runtime.NewError("Invalid target_user_id format", StatusInvalidArgument)
+	}
+	targetUserID := targetUUID.String()
 
-	response := PlayerLocationVerifyResponse{
-		Success:  true,
-		Verified: verified,
+	// Sanitize and validate the new display name
+	sanitizedName := sanitizeDisplayName(request.NewDisplayName)
+	if sanitizedName == "" {
+		return "", runtime.NewError("Invalid display name: must contain at least one letter and be between 1-24 characters", StatusInvalidArgument)
 	}
 
-	if verified {
-		// Store verified location
-		locationData := map[string]any{
-			"country":     verificationData.Country,
-			"city":        verificationData.City,
-			"region":      verificationData.Region,
-			"verified_at": time.Now().UTC().Format(time.RFC3339),
-		}
+	// Get the current account to retrieve the old display name
+	account, err := nk.AccountGetId(ctx, targetUserID)
+	if err != nil {
+		logger.Error("Failed to get account", zap.Error(err))
+		return "", runtime.NewError("Failed to get target user account", StatusNotFound)
+	}
 
-		locationJSON, err := json.Marshal(locationData)
-		if err != nil {
-			return "", runtime.NewError("Failed to marshal location data", StatusInternalError)
-		}
+	oldDisplayName := account.User.DisplayName
 
-		writes := []*runtime.StorageWrite{
-			{
-				Collection:      "location_verification",
-				Key:             "verified",
-				UserID:          userID,
-				Value:           string(locationJSON),
-				PermissionRead:  1,
-				PermissionWrite: 1,
-			},
-		}
+	// Update the display name
+	if err := nk.AccountUpdateId(ctx, targetUserID, "", nil, sanitizedName, "", "", "", ""); err != nil {
+		logger.Error("Failed to update display name", zap.Error(err))
+		return "", runtime.NewError("Failed to update display name", StatusInternalError)
+	}
 
-		if _, err := nk.StorageWrite(ctx, writes); err != nil {
-			logger.WithField("err", err).Error("Failed to store verified location")
-			return "", runtime.NewError("Failed to store verified location", StatusInternalError)
-		}
+	// Also update the EVRProfile active group's in-game name so the change is durable and
+	// not overwritten by Discord/member syncs.
+	if evrProfile, err := EVRProfileLoad(ctx, nk, targetUserID); err != nil {
+		logger.Error("Failed to load EVR profile for admin rename", zap.Error(err), zap.String("user_id", targetUserID))
+	} else if evrProfile != nil {
+		activeGroupID := evrProfile.GetActiveGroupID()
+		if activeGroupID == uuid.Nil {
+			logger.Warn("EVR profile has no active group for admin rename", zap.String("user_id", targetUserID))
+		} else {
+			// Ensure GroupInGameName exists and update it.
+			ignData := evrProfile.GetGroupIGNData(activeGroupID.String())
+			ignData.DisplayName = sanitizedName
+			// Mark as an explicit override so Discord/member sync will not clobber it.
+			ignData.IsOverride = true
+			evrProfile.SetGroupIGNData(activeGroupID.String(), ignData)
 
-		// Delete pending verification
-		if err := nk.StorageDelete(ctx, []*runtime.StorageDelete{
-			{
-				Collection: "location_verification",
-				Key:        "pending",
-				UserID:     userID,
-			},
-		}); err != nil {
-			logger.WithField("err", err).Error("Failed to delete pending location verification")
-			return "", runtime.NewError("Failed to delete pending location verification", StatusInternalError)
+			if err := EVRProfileUpdate(ctx, nk, targetUserID, evrProfile); err != nil {
+				logger.Error("Failed to persist EVR profile rename", zap.Error(err), zap.String("user_id", targetUserID))
+			} else {
+				// Record the change in display name history for auditability.
+				if err := DisplayNameHistoryUpdate(ctx, nk, targetUserID, activeGroupID.String(), sanitizedName, account.User.Username, false); err != nil {
+					logger.Error("Failed to update display name history for admin rename", zap.Error(err), zap.String("user_id", targetUserID))
+				}
+			}
 		}
+	}
 
-		response.Location = &PlayerLocationInfo{
-			Country: verificationData.Country,
-			City:    verificationData.City,
-			Region:  verificationData.Region,
-		}
+	// Get the caller's account for audit log
+	callerAccount, err := nk.AccountGetId(ctx, callerID)
+	if err != nil {
+		logger.Warn("Failed to get caller account for audit log", zap.Error(err))
+	}
+	callerDiscordID := callerID
+	if callerAccount != nil && callerAccount.CustomId != "" {
+		callerDiscordID = callerAccount.CustomId
+	}
 
-		logger.WithField("user_id", userID).WithField("country", verificationData.Country).Info("Location verified")
-	} else {
-		logger.WithField("user_id", userID).Warn("Invalid verification code")
+	targetDiscordID := targetUserID
+	if account.CustomId != "" {
+		targetDiscordID = account.CustomId
+	}
+
+	// Log the change for audit trail
+	auditMsg := fmt.Sprintf("Admin player rename: <@%s> renamed user <@%s> from `%s` to `%s`",
+		callerDiscordID, targetDiscordID, oldDisplayName, sanitizedName)
+	if request.ModeratorNotes != "" {
+		auditMsg += fmt.Sprintf(" | Notes: %s", request.ModeratorNotes)
+	}
+
+	// Log to Discord audit channel
+	if err := AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, auditMsg); err != nil {
+		logger.Warn("Failed to log audit message", zap.Error(err))
+	}
+
+	logger.Info("Admin player rename completed",
+		zap.String("caller_id", callerID),
+		zap.String("target_user_id", targetUserID),
+		zap.String("old_name", oldDisplayName),
+		zap.String("new_name", sanitizedName),
+		zap.String("moderator_notes", request.ModeratorNotes),
+	)
+
+	// Prepare response
+	response := AdminPlayerRenameResponse{
+		Success: true,
+		OldName: oldDisplayName,
+		NewName: sanitizedName,
 	}
 
 	data, err := json.Marshal(response)
 	if err != nil {
-		return "", runtime.NewError("Failed to marshal response", StatusInternalError)
+		return "", runtime.NewError("failed to marshal response", StatusInternalError)
+	}
+
+	return string(data), nil
+}
+
+// PlayerOutfitListRPC lists all outfits for a player
+func PlayerOutfitListRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Get user ID from context
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || userID == "" {
+		return "", runtime.NewError("authentication required", StatusUnauthenticated)
+	}
+
+	// List all outfits for this user
+	// Set limit higher than MaxOutfitsPerUser for safety, though users can only have MaxOutfitsPerUser outfits
+	objects, _, err := nk.StorageList(ctx, userID, userID, OutfitCollection, MaxOutfitsPerUser*2, "")
+	if err != nil {
+		logger.Error("Failed to list outfits: %v", err)
+		return "", runtime.NewError("failed to list outfits", StatusInternalError)
+	}
+
+	// Parse outfits
+	outfits := make([]Outfit, 0, len(objects))
+	for _, obj := range objects {
+		var outfit Outfit
+		if err := json.Unmarshal([]byte(obj.Value), &outfit); err != nil {
+			logger.Warn("Failed to unmarshal outfit %s: %v", obj.Key, err)
+			continue
+		}
+		outfits = append(outfits, outfit)
+	}
+
+	// Prepare response
+	response := ListOutfitsResponse{
+		Outfits: outfits,
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		logger.Error("Failed to marshal response: %v", err)
+		return "", runtime.NewError("failed to create response", StatusInternalError)
+	}
+
+	return string(data), nil
+}
+
+// PlayerOutfitLoadRPC loads a specific outfit by ID
+func PlayerOutfitLoadRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Get user ID from context
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || userID == "" {
+		return "", runtime.NewError("authentication required", StatusUnauthenticated)
+	}
+
+	// Parse request
+	request := &LoadOutfitRequest{}
+	if err := json.Unmarshal([]byte(payload), request); err != nil {
+		return "", runtime.NewError("invalid request payload", StatusInvalidArgument)
+	}
+
+	// Validate request
+	if request.OutfitID == "" {
+		return "", runtime.NewError("outfit_id is required", StatusInvalidArgument)
+	}
+
+	// Read outfit from storage
+	objects, err := nk.StorageRead(ctx, []*runtime.StorageRead{{
+		Collection: OutfitCollection,
+		Key:        request.OutfitID,
+		UserID:     userID,
+	}})
+	if err != nil {
+		logger.Error("Failed to read outfit: %v", err)
+		return "", runtime.NewError("failed to load outfit", StatusInternalError)
+	}
+
+	if len(objects) == 0 {
+		return "", runtime.NewError("outfit not found", StatusNotFound)
+	}
+
+	// Parse outfit
+	var outfit Outfit
+	if err := json.Unmarshal([]byte(objects[0].Value), &outfit); err != nil {
+		logger.Error("Failed to unmarshal outfit: %v", err)
+		return "", runtime.NewError("failed to load outfit", StatusInternalError)
+	}
+
+	// Prepare response
+	response := LoadOutfitResponse{
+		Success: true,
+		Outfit:  outfit,
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		logger.Error("Failed to marshal response: %v", err)
+		return "", runtime.NewError("failed to create response", StatusInternalError)
+	}
+
+	return string(data), nil
+}
+
+// PlayerOutfitDeleteRPC deletes a specific outfit by ID
+func PlayerOutfitDeleteRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Get user ID from context
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || userID == "" {
+		return "", runtime.NewError("authentication required", StatusUnauthenticated)
+	}
+
+	// Parse request
+	request := &DeleteOutfitRequest{}
+	if err := json.Unmarshal([]byte(payload), request); err != nil {
+		return "", runtime.NewError("invalid request payload", StatusInvalidArgument)
+	}
+
+	// Validate request
+	if request.OutfitID == "" {
+		return "", runtime.NewError("outfit_id is required", StatusInvalidArgument)
+	}
+
+	// Verify ownership before delete by trying to read it first
+	objects, err := nk.StorageRead(ctx, []*runtime.StorageRead{{
+		Collection: OutfitCollection,
+		Key:        request.OutfitID,
+		UserID:     userID,
+	}})
+	if err != nil {
+		logger.Error("Failed to verify outfit ownership: %v", err)
+		return "", runtime.NewError("failed to delete outfit", StatusInternalError)
+	}
+
+	if len(objects) == 0 {
+		return "", runtime.NewError("outfit not found", StatusNotFound)
+	}
+
+	// Delete outfit from storage
+	err = nk.StorageDelete(ctx, []*runtime.StorageDelete{{
+		Collection: OutfitCollection,
+		Key:        request.OutfitID,
+		UserID:     userID,
+	}})
+	if err != nil {
+		logger.Error("Failed to delete outfit: %v", err)
+		return "", runtime.NewError("failed to delete outfit", StatusInternalError)
+	}
+
+	// Prepare response
+	response := DeleteOutfitResponse{
+		Success: true,
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		logger.Error("Failed to marshal response: %v", err)
+		return "", runtime.NewError("failed to create response", StatusInternalError)
 	}
 
 	return string(data), nil
