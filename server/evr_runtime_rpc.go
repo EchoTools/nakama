@@ -2000,7 +2000,6 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 	return string(data), nil
 }
 
-<<<<<<< HEAD
 // Outfit management constants and types
 const (
 	OutfitCollection  = "player_outfits"
@@ -2136,7 +2135,17 @@ func PlayerOutfitSaveRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		Success: true,
 		Outfit:  outfit,
 		ID:      outfitID,
-=======
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		logger.Error("Failed to marshal response: %v", err)
+		return "", runtime.NewError("failed to create response", StatusInternalError)
+	}
+
+	return string(data), nil
+}
+
 // AdminPlayerRenameRequest represents the request payload for the admin/player/rename RPC
 type AdminPlayerRenameRequest struct {
 	TargetUserID   string `json:"target_user_id"`   // User ID of the player to rename (required)
@@ -2279,14 +2288,11 @@ func AdminPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		Success: true,
 		OldName: oldDisplayName,
 		NewName: sanitizedName,
->>>>>>> 4baed0761 (Implement admin/player/rename RPC endpoint with moderator permission checking)
 	}
 
 	data, err := json.Marshal(response)
 	if err != nil {
-<<<<<<< HEAD
-		logger.Error("Failed to marshal response: %v", err)
-		return "", runtime.NewError("failed to create response", StatusInternalError)
+		return "", runtime.NewError("failed to marshal response", StatusInternalError)
 	}
 
 	return string(data), nil
@@ -2443,9 +2449,6 @@ func PlayerOutfitDeleteRPC(ctx context.Context, logger runtime.Logger, db *sql.D
 	if err != nil {
 		logger.Error("Failed to marshal response: %v", err)
 		return "", runtime.NewError("failed to create response", StatusInternalError)
-=======
-		return "", runtime.NewError("Failed to marshal response", StatusInternalError)
->>>>>>> 4baed0761 (Implement admin/player/rename RPC endpoint with moderator permission checking)
 	}
 
 	return string(data), nil
