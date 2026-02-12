@@ -95,6 +95,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"account/search":                AccountSearchRPC,
 		"account/lookup":                rpcHandler.AccountLookupRPC,
 		"account/authenticate/password": AuthenticatePasswordRPC,
+		"admin/player/rename":           AdminPlayerRenameRPC,
 		"leaderboard/haystack":          rpcHandler.LeaderboardHaystackRPC,
 		"leaderboard/records":           rpcHandler.LeaderboardRecordsListRPC,
 		"link/device":                   LinkDeviceRpc,
