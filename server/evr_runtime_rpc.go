@@ -21,6 +21,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/internal/intents"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/zap"
 )
 
 const (
@@ -1999,6 +2000,7 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 	return string(data), nil
 }
 
+<<<<<<< HEAD
 // Outfit management constants and types
 const (
 	OutfitCollection  = "player_outfits"
@@ -2134,10 +2136,155 @@ func PlayerOutfitSaveRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		Success: true,
 		Outfit:  outfit,
 		ID:      outfitID,
+=======
+// AdminPlayerRenameRequest represents the request payload for the admin/player/rename RPC
+type AdminPlayerRenameRequest struct {
+	TargetUserID   string `json:"target_user_id"`   // User ID of the player to rename (required)
+	NewDisplayName string `json:"new_display_name"` // New display name for the player (required)
+	ModeratorNotes string `json:"moderator_notes"`  // Optional notes for the audit log
+}
+
+// AdminPlayerRenameResponse represents the response from the admin/player/rename RPC
+type AdminPlayerRenameResponse struct {
+	Success bool   `json:"success"`
+	OldName string `json:"old_name"`
+	NewName string `json:"new_name"`
+}
+
+// AdminPlayerRenameRPC is the RPC handler for renaming players (Moderator+ permission required)
+func AdminPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	var request AdminPlayerRenameRequest
+	if err := json.Unmarshal([]byte(payload), &request); err != nil {
+		return "", runtime.NewError("Invalid request payload", StatusInvalidArgument)
+	}
+
+	// Get the caller's user ID from context
+	callerID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || callerID == "" {
+		return "", runtime.NewError("User ID not found in context", StatusUnauthenticated)
+	}
+
+	// Check if the caller is a global operator (Moderator+)
+	isModerator, err := CheckSystemGroupMembership(ctx, db, callerID, GroupGlobalOperators)
+	if err != nil {
+		logger.Error("Failed to check moderator status", zap.Error(err))
+		return "", runtime.NewError("Failed to check permissions", StatusInternalError)
+	}
+
+	if !isModerator {
+		return "", runtime.NewError("Moderator or higher permission required", StatusPermissionDenied)
+	}
+
+	// Validate required fields
+	if request.TargetUserID == "" {
+		return "", runtime.NewError("target_user_id is required", StatusInvalidArgument)
+	}
+
+	if request.NewDisplayName == "" {
+		return "", runtime.NewError("new_display_name is required", StatusInvalidArgument)
+	}
+
+	// Validate target user ID format
+	targetUUID, err := uuid.FromString(request.TargetUserID)
+	if err != nil {
+		return "", runtime.NewError("Invalid target_user_id format", StatusInvalidArgument)
+	}
+	targetUserID := targetUUID.String()
+
+	// Sanitize and validate the new display name
+	sanitizedName := sanitizeDisplayName(request.NewDisplayName)
+	if sanitizedName == "" {
+		return "", runtime.NewError("Invalid display name: must contain at least one letter and be between 1-24 characters", StatusInvalidArgument)
+	}
+
+	// Get the current account to retrieve the old display name
+	account, err := nk.AccountGetId(ctx, targetUserID)
+	if err != nil {
+		logger.Error("Failed to get account", zap.Error(err))
+		return "", runtime.NewError("Failed to get target user account", StatusNotFound)
+	}
+
+	oldDisplayName := account.User.DisplayName
+
+	// Update the display name
+	if err := nk.AccountUpdateId(ctx, targetUserID, "", nil, sanitizedName, "", "", "", ""); err != nil {
+		logger.Error("Failed to update display name", zap.Error(err))
+		return "", runtime.NewError("Failed to update display name", StatusInternalError)
+	}
+
+	// Also update the EVRProfile active group's in-game name so the change is durable and
+	// not overwritten by Discord/member syncs.
+	if evrProfile, err := EVRProfileLoad(ctx, nk, targetUserID); err != nil {
+		logger.Error("Failed to load EVR profile for admin rename", zap.Error(err), zap.String("user_id", targetUserID))
+	} else if evrProfile != nil {
+		activeGroupID := evrProfile.GetActiveGroupID()
+		if activeGroupID == uuid.Nil {
+			logger.Warn("EVR profile has no active group for admin rename", zap.String("user_id", targetUserID))
+		} else {
+			// Ensure GroupInGameName exists and update it.
+			ignData := evrProfile.GetGroupIGNData(activeGroupID.String())
+			ignData.DisplayName = sanitizedName
+			// Mark as an explicit override so Discord/member sync will not clobber it.
+			ignData.IsOverride = true
+			evrProfile.SetGroupIGNData(activeGroupID.String(), ignData)
+
+			if err := EVRProfileUpdate(ctx, nk, targetUserID, evrProfile); err != nil {
+				logger.Error("Failed to persist EVR profile rename", zap.Error(err), zap.String("user_id", targetUserID))
+			} else {
+				// Record the change in display name history for auditability.
+				if err := DisplayNameHistoryUpdate(ctx, nk, targetUserID, activeGroupID.String(), sanitizedName, account.User.Username, false); err != nil {
+					logger.Error("Failed to update display name history for admin rename", zap.Error(err), zap.String("user_id", targetUserID))
+				}
+			}
+		}
+	}
+
+	// Get the caller's account for audit log
+	callerAccount, err := nk.AccountGetId(ctx, callerID)
+	if err != nil {
+		logger.Warn("Failed to get caller account for audit log", zap.Error(err))
+	}
+	callerDiscordID := callerID
+	if callerAccount != nil && callerAccount.CustomId != "" {
+		callerDiscordID = callerAccount.CustomId
+	}
+
+	targetDiscordID := targetUserID
+	if account.CustomId != "" {
+		targetDiscordID = account.CustomId
+	}
+
+	// Log the change for audit trail
+	auditMsg := fmt.Sprintf("Admin player rename: <@%s> renamed user <@%s> from `%s` to `%s`",
+		callerDiscordID, targetDiscordID, oldDisplayName, sanitizedName)
+	if request.ModeratorNotes != "" {
+		auditMsg += fmt.Sprintf(" | Notes: %s", request.ModeratorNotes)
+	}
+
+	// Log to Discord audit channel
+	if err := AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, auditMsg); err != nil {
+		logger.Warn("Failed to log audit message", zap.Error(err))
+	}
+
+	logger.Info("Admin player rename completed",
+		zap.String("caller_id", callerID),
+		zap.String("target_user_id", targetUserID),
+		zap.String("old_name", oldDisplayName),
+		zap.String("new_name", sanitizedName),
+		zap.String("moderator_notes", request.ModeratorNotes),
+	)
+
+	// Prepare response
+	response := AdminPlayerRenameResponse{
+		Success: true,
+		OldName: oldDisplayName,
+		NewName: sanitizedName,
+>>>>>>> 4baed0761 (Implement admin/player/rename RPC endpoint with moderator permission checking)
 	}
 
 	data, err := json.Marshal(response)
 	if err != nil {
+<<<<<<< HEAD
 		logger.Error("Failed to marshal response: %v", err)
 		return "", runtime.NewError("failed to create response", StatusInternalError)
 	}
@@ -2296,6 +2443,9 @@ func PlayerOutfitDeleteRPC(ctx context.Context, logger runtime.Logger, db *sql.D
 	if err != nil {
 		logger.Error("Failed to marshal response: %v", err)
 		return "", runtime.NewError("failed to create response", StatusInternalError)
+=======
+		return "", runtime.NewError("Failed to marshal response", StatusInternalError)
+>>>>>>> 4baed0761 (Implement admin/player/rename RPC endpoint with moderator permission checking)
 	}
 
 	return string(data), nil
