@@ -1408,7 +1408,7 @@ func (d *DiscordAppBot) canShutdownMatch(ctx context.Context, userID string, lab
 		return true, nil
 	}
 
-	if label.GameServer.OperatorID.String() == userID {
+	if label.GameServer != nil && label.GameServer.OperatorID.String() == userID {
 		return true, nil
 	}
 
@@ -1430,10 +1430,15 @@ func (d *DiscordAppBot) handleConfirmShutdown(ctx context.Context, logger runtim
 	}
 
 	matchIDStr := parts[0]
+
+	if parts[1] != "0" && parts[1] != "1" {
+		return simpleInteractionResponse(s, i, "Invalid shutdown confirmation data.")
+	}
 	disconnectServer := parts[1] == "1"
+
 	graceSeconds, err := strconv.Atoi(parts[2])
-	if err != nil {
-		return fmt.Errorf("invalid grace seconds: %w", err)
+	if err != nil || graceSeconds < 0 || graceSeconds > 3600 {
+		return simpleInteractionResponse(s, i, "Invalid grace period.")
 	}
 
 	matchID, err := MatchIDFromString(matchIDStr)
@@ -1467,11 +1472,24 @@ func (d *DiscordAppBot) handleConfirmShutdown(ctx context.Context, logger runtim
 		return simpleInteractionResponse(s, i, fmt.Sprintf("Failed to shut down match: %s", err.Error()))
 	}
 
+	// Update the original message to disable the button and show confirmation
 	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Type: discordgo.InteractionResponseUpdateMessage,
 		Data: &discordgo.InteractionResponseData{
-			Flags:   discordgo.MessageFlagsEphemeral,
 			Content: "The match has been shut down.",
+			Embeds:  []*discordgo.MessageEmbed{},
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.Button{
+							Label:    "Match Shut Down",
+							Style:    discordgo.SecondaryButton,
+							CustomID: "nil",
+							Disabled: true,
+						},
+					},
+				},
+			},
 		},
 	})
 }

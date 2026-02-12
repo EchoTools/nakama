@@ -1560,7 +1560,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 				case "disconnect-game-server":
 					disconnectServer = option.BoolValue()
-				case "graceful":
+				case "grace-seconds":
 					graceSeconds = int(option.IntValue())
 				case "reason":
 					reason = option.StringValue()
