@@ -2212,9 +2212,51 @@ func AdminPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		return "", runtime.NewError("Failed to update display name", StatusInternalError)
 	}
 
+	// Also update the EVRProfile active group's in-game name so the change is durable and
+	// not overwritten by Discord/member syncs.
+	if evrProfile, err := EVRProfileLoad(ctx, nk, targetUserID); err != nil {
+		logger.Error("Failed to load EVR profile for admin rename", zap.Error(err), zap.String("user_id", targetUserID))
+	} else if evrProfile != nil {
+		activeGroupID := evrProfile.GetActiveGroupID()
+		if activeGroupID == uuid.Nil {
+			logger.Warn("EVR profile has no active group for admin rename", zap.String("user_id", targetUserID))
+		} else {
+			// Ensure GroupInGameName exists and update it.
+			ignData := evrProfile.GetGroupIGNData(activeGroupID.String())
+			ignData.DisplayName = sanitizedName
+			// Mark as an explicit override so Discord/member sync will not clobber it.
+			ignData.IsOverride = true
+			evrProfile.SetGroupIGNData(activeGroupID.String(), ignData)
+
+			if err := EVRProfileUpdate(ctx, nk, targetUserID, evrProfile); err != nil {
+				logger.Error("Failed to persist EVR profile rename", zap.Error(err), zap.String("user_id", targetUserID))
+			} else {
+				// Record the change in display name history for auditability.
+				if err := DisplayNameHistoryUpdate(ctx, nk, targetUserID, activeGroupID.String(), sanitizedName, account.User.Username, false); err != nil {
+					logger.Error("Failed to update display name history for admin rename", zap.Error(err), zap.String("user_id", targetUserID))
+				}
+			}
+		}
+	}
+
+	// Get the caller's account for audit log
+	callerAccount, err := nk.AccountGetId(ctx, callerID)
+	if err != nil {
+		logger.Warn("Failed to get caller account for audit log", zap.Error(err))
+	}
+	callerDiscordID := callerID
+	if callerAccount != nil && callerAccount.CustomId != "" {
+		callerDiscordID = callerAccount.CustomId
+	}
+
+	targetDiscordID := targetUserID
+	if account.CustomId != "" {
+		targetDiscordID = account.CustomId
+	}
+
 	// Log the change for audit trail
 	auditMsg := fmt.Sprintf("Admin player rename: <@%s> renamed user <@%s> from `%s` to `%s`",
-		callerID, targetUserID, oldDisplayName, sanitizedName)
+		callerDiscordID, targetDiscordID, oldDisplayName, sanitizedName)
 	if request.ModeratorNotes != "" {
 		auditMsg += fmt.Sprintf(" | Notes: %s", request.ModeratorNotes)
 	}
