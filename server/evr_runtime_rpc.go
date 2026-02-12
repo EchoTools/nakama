@@ -2043,6 +2043,11 @@ func AdminDeviceUnlinkRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		return "", runtime.NewError("Invalid user_id format", StatusInvalidArgument)
 	}
 
+	// Validate device ID format
+	if _, err := evr.ParseEvrId(request.DeviceID); err != nil {
+		return "", runtime.NewError("Invalid device_id format", StatusInvalidArgument)
+	}
+
 	// Get the user account to verify device is linked
 	account, err := nk.AccountGetId(ctx, request.UserID)
 	if err != nil {
@@ -2115,12 +2120,21 @@ func PlayerPartyMembersRPC(ctx context.Context, logger runtime.Logger, db *sql.D
 	}
 
 	// Get user ID from request or context
+	authUserID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || authUserID == "" {
+		return "", runtime.NewError("authentication required", StatusUnauthenticated)
+	}
+
 	userID := request.UserID
 	if userID == "" {
-		if uid, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string); ok {
-			userID = uid
-		} else {
-			return "", runtime.NewError("user_id is required", StatusInvalidArgument)
+		userID = authUserID
+	} else if userID != authUserID {
+		// Only allow querying other users if the caller is a global operator
+		if isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, authUserID, GroupGlobalOperators); err != nil {
+			logger.Error("Failed to check global operator status", zap.Error(err))
+			return "", runtime.NewError("Failed to check permissions", StatusInternalError)
+		} else if !isGlobalOperator {
+			return "", runtime.NewError("Permission denied to query other user's party members", StatusPermissionDenied)
 		}
 	}
 
@@ -2129,27 +2143,68 @@ func PlayerPartyMembersRPC(ctx context.Context, logger runtime.Logger, db *sql.D
 		return "", runtime.NewError("Invalid user_id format", StatusInvalidArgument)
 	}
 
-	// Get user's group memberships (party/guild groups)
-	userGroups, _, err := nk.UserGroupsList(ctx, userID, 100, nil, "")
-	if err != nil {
-		logger.WithField("err", err).WithField("user_id", userID).Error("Failed to get user groups")
-		return "", runtime.NewError("Failed to get user groups", StatusInternalError)
+	// Get user's guild group memberships (party/guild groups), with pagination and filtering.
+	var userGroups []*api.UserGroupList_UserGroup
+	userGroupsCursor := ""
+	for {
+		page, nextCursor, err := nk.UserGroupsList(ctx, userID, 100, nil, userGroupsCursor)
+		if err != nil {
+			logger.WithField("err", err).WithField("user_id", userID).Error("Failed to get user groups")
+			return "", runtime.NewError("Failed to get user groups", StatusInternalError)
+		}
+
+		for _, ug := range page {
+			// Only consider guild/party groups with active membership states.
+			if ug.Group == nil {
+				continue
+			}
+			if ug.Group.LangTag != GuildGroupLangTag {
+				continue
+			}
+			// Nakama group membership states: values > 2 represent join/invite/banned-like states.
+			if ug.State.Value > int32(api.UserGroupList_UserGroup_MEMBER) {
+				continue
+			}
+			userGroups = append(userGroups, ug)
+		}
+
+		if nextCursor == "" {
+			break
+		}
+		userGroupsCursor = nextCursor
 	}
 
-	// Collect all unique member IDs from all groups
+	// Collect all unique member IDs from all guild groups
 	memberMap := make(map[string]bool)
 	for _, userGroup := range userGroups {
-		// Get group members
-		groupUsers, _, err := nk.GroupUsersList(ctx, userGroup.Group.Id, 100, nil, "")
-		if err != nil {
-			logger.WithField("err", err).WithField("group_id", userGroup.Group.Id).Warn("Failed to get group members")
+		if userGroup.Group == nil {
 			continue
 		}
 
-		for _, groupUser := range groupUsers {
-			if groupUser.User != nil {
+		groupUsersCursor := ""
+		for {
+			// Get group members with pagination.
+			groupUsers, nextCursor, err := nk.GroupUsersList(ctx, userGroup.Group.Id, 100, nil, groupUsersCursor)
+			if err != nil {
+				logger.WithField("err", err).WithField("group_id", userGroup.Group.Id).Warn("Failed to get group members")
+				break
+			}
+
+			for _, groupUser := range groupUsers {
+				if groupUser.User == nil {
+					continue
+				}
+				// Exclude non-active membership states (e.g., join requests, banned).
+				if groupUser.State.Value > int32(api.GroupUserList_GroupUser_MEMBER) {
+					continue
+				}
 				memberMap[groupUser.User.Id] = true
 			}
+
+			if nextCursor == "" {
+				break
+			}
+			groupUsersCursor = nextCursor
 		}
 	}
 
@@ -2248,7 +2303,9 @@ func PlayerSettingsDefaultGuildRPC(ctx context.Context, logger runtime.Logger, d
 	isMember := false
 	for _, userGroup := range userGroups {
 		if userGroup.Group.Id == request.GroupID {
-			isMember = true
+			if userGroup.State.Value <= int32(api.UserGroupList_UserGroup_MEMBER) {
+				isMember = true
+			}
 			break
 		}
 	}
@@ -2257,7 +2314,7 @@ func PlayerSettingsDefaultGuildRPC(ctx context.Context, logger runtime.Logger, d
 		return "", runtime.NewError("User is not a member of this group", StatusPermissionDenied)
 	}
 
-	// Store the default guild in user metadata
+	// Store the default guild in storage object
 	metadata := map[string]any{
 		"default_guild": request.GroupID,
 		"updated_at":    time.Now().UTC().Format(time.RFC3339),
@@ -2350,8 +2407,12 @@ func PlayerLocationVerifyRPC(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	objects, err := nk.StorageRead(ctx, objectIds)
-	if err != nil || len(objects) == 0 {
-		logger.WithField("err", err).WithField("user_id", userID).Warn("No pending verification found")
+	if err != nil {
+		logger.WithField("err", err).WithField("user_id", userID).Error("Failed to read pending verification")
+		return "", runtime.NewError("Internal error", StatusInternalError)
+	}
+	if len(objects) == 0 {
+		logger.WithField("user_id", userID).Warn("No pending verification found")
 		return "", runtime.NewError("No pending verification request", StatusNotFound)
 	}
 
@@ -2373,13 +2434,18 @@ func PlayerLocationVerifyRPC(ctx context.Context, logger runtime.Logger, db *sql
 	// Check if code has expired
 	if time.Now().UTC().After(verificationData.ExpiresAt) {
 		// Delete expired verification
-		nk.StorageDelete(ctx, []*runtime.StorageDelete{
+		if err := nk.StorageDelete(ctx, []*runtime.StorageDelete{
 			{
 				Collection: "location_verification",
 				Key:        "pending",
 				UserID:     userID,
 			},
-		})
+		}); err != nil {
+			logger.WithField("err", err).WithField("user_id", userID).Error("Failed to delete expired pending verification")
+			// Return internal error since the system is in an inconsistent state?
+			// Or just log and return the user error? Returning Internal to be safe/noisy about DB issues.
+			return "", runtime.NewError("Failed to cleanup expired verification", StatusInternalError)
+		}
 		return "", runtime.NewError("Verification code expired", StatusFailedPrecondition)
 	}
 
@@ -2418,16 +2484,20 @@ func PlayerLocationVerifyRPC(ctx context.Context, logger runtime.Logger, db *sql
 
 		if _, err := nk.StorageWrite(ctx, writes); err != nil {
 			logger.WithField("err", err).Error("Failed to store verified location")
+			return "", runtime.NewError("Failed to store verified location", StatusInternalError)
 		}
 
 		// Delete pending verification
-		nk.StorageDelete(ctx, []*runtime.StorageDelete{
+		if err := nk.StorageDelete(ctx, []*runtime.StorageDelete{
 			{
 				Collection: "location_verification",
 				Key:        "pending",
 				UserID:     userID,
 			},
-		})
+		}); err != nil {
+			logger.WithField("err", err).Error("Failed to delete pending location verification")
+			return "", runtime.NewError("Failed to delete pending location verification", StatusInternalError)
+		}
 
 		response.Location = &PlayerLocationInfo{
 			Country: verificationData.Country,
