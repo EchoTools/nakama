@@ -384,12 +384,14 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	}
 
 	// Ensure the player has a role alignment
+	isBackfill := time.Now().After(state.StartTime.Add(PublicMatchWaitTime))
 	metricsTags := map[string]string{
 		"mode":     state.Mode.String(),
 		"level":    state.Level.String(),
 		"type":     state.LobbyType.String(),
 		"role":     fmt.Sprintf("%d", meta.Presence.RoleAlignment),
 		"group_id": state.GetGroupID().String(),
+		"backfill": strconv.FormatBool(isBackfill),
 	}
 	if nk != nil { // for testing
 		nk.MetricsCounterAdd("match_entrant_join_count", metricsTags, 1)
