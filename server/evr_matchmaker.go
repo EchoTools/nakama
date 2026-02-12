@@ -37,6 +37,15 @@ type SkillBasedMatchmaker struct {
 	lastProcessEnd   *atomic.Int64 // Unix nanoseconds when matchmaker finished processing
 	isProcessing     *atomic.Bool  // Whether matchmaker is currently processing
 	processMu        sync.RWMutex  // Protects timing state reads during backfill coordination
+
+	// Reservation state (persists across cycles, in-memory only)
+	reservationMu   sync.Mutex
+	starvingTickets map[string]*StarvingTicket // ticket ID -> state
+}
+
+type StarvingTicket struct {
+	Ticket         string
+	FirstStarvedAt time.Time // When this ticket first became starving
 }
 
 func (s *SkillBasedMatchmaker) StoreLatestResult(candidates, madeMatches [][]runtime.MatchmakerEntry) {
@@ -110,6 +119,7 @@ func NewSkillBasedMatchmaker() *SkillBasedMatchmaker {
 		lastProcessStart: atomic.NewInt64(0),
 		lastProcessEnd:   atomic.NewInt64(0),
 		isProcessing:     atomic.NewBool(false),
+		starvingTickets:  make(map[string]*StarvingTicket),
 	}
 
 	sbmm.latestCandidates.Store([][]runtime.MatchmakerEntry{})
@@ -247,6 +257,11 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		"duration":             time.Since(startTime),
 		"max_wait_time_secs":   maxWaitTime,
 		"avg_wait_time_secs":   avgWaitTime,
+	}
+
+	if fc, ok := filterCounts["starving_tickets"]; ok && fc > 0 {
+		logFields["starving_tickets"] = fc
+		logFields["reserved_players"] = filterCounts["reserved_players"]
 	}
 
 	if len(highSkillWaiters) > 0 {
