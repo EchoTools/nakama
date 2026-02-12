@@ -43,7 +43,9 @@ func (m *mockNakamaModule) GroupsGetId(ctx context.Context, groupIDs []string) (
 	for _, id := range groupIDs {
 		if _, err := uuid.FromString(id); err == nil {
 			groups = append(groups, &api.Group{
-				Id: id,
+				Id:       id,
+				LangTag:  "guild",
+				Metadata: "{}",
 			})
 		}
 	}
@@ -80,15 +82,57 @@ func (m *mockNakamaModule) StorageList(ctx context.Context, callerID, userID, co
 			}
 		}
 	}
+	// Basic mock implementation of limit/cursor
+	// This is not efficient or perfectly accurate but sufficient for unit tests
+
+	if cursor != "" {
+		// simplistic cursor implementation: skip until we find one we haven't seen?
+		// or just ignore cursor for now since our tests don't strictly rely on it yet
+		// except for the new loop logic we'll add
+	}
+
+	if limit > 0 && len(objects) > limit {
+		// simplistic pagination
+		return objects[:limit], "next_cursor", nil
+	}
+
 	return objects, "", nil
 }
 
+func (m *mockNakamaModule) StorageRead(ctx context.Context, reads []*runtime.StorageRead) ([]*api.StorageObject, error) {
+	objects := make([]*api.StorageObject, 0)
+	for _, read := range reads {
+		key := read.UserID + ":" + read.Collection + ":" + read.Key
+		if objs, ok := m.storageObjects[key]; ok {
+			objects = append(objects, objs...)
+		}
+	}
+	return objects, nil
+}
+
 func TestPlayerReportRPC_Success(t *testing.T) {
+	// Initialize ServiceSettings to avoid panic
+	ServiceSettingsUpdate(&ServiceSettingsData{
+		DiscordBotUserID: "discord-bot-user-id",
+	})
+
 	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_USER_ID, "reporter-user-id")
 	nk := newMockNakamaModule()
 
 	reportedUserID := uuid.Must(uuid.NewV4()).String()
 	groupID := uuid.Must(uuid.NewV4()).String()
+
+	// Setup GuildGroupState in storage
+	state := GuildGroupState{
+		GroupID: groupID,
+	}
+	stateJSON, _ := json.Marshal(state)
+	nk.storageObjects["discord-bot-user-id:"+StorageCollectionState+":"+groupID] = []*api.StorageObject{{
+		Collection: StorageCollectionState,
+		Key:        groupID,
+		UserId:     "discord-bot-user-id",
+		Value:      string(stateJSON),
+	}}
 
 	request := PlayerReportRequest{
 		ReportedUserID: reportedUserID,
@@ -179,6 +223,8 @@ func TestPlayerReportRPC_MissingFields(t *testing.T) {
 			_, err := PlayerReportRPC(ctx, nil, nil, nk, string(payload))
 			if err == nil {
 				t.Error("Expected an error, got nil")
+			} else if tt.errMsg != "" && err.Error() != tt.errMsg {
+				t.Errorf("Expected error message %q, got %q", tt.errMsg, err.Error())
 			}
 		})
 	}
@@ -204,11 +250,28 @@ func TestPlayerReportRPC_SelfReport(t *testing.T) {
 }
 
 func TestPlayerReportRPC_RateLimit(t *testing.T) {
+	// Initialize ServiceSettings to avoid panic
+	ServiceSettingsUpdate(&ServiceSettingsData{
+		DiscordBotUserID: "discord-bot-user-id",
+	})
+
 	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_USER_ID, "reporter-user-id")
 	nk := newMockNakamaModule()
 
 	reportedUserID := uuid.Must(uuid.NewV4()).String()
 	groupID := uuid.Must(uuid.NewV4()).String()
+
+	// Setup GuildGroupState in storage
+	state := GuildGroupState{
+		GroupID: groupID,
+	}
+	stateJSON, _ := json.Marshal(state)
+	nk.storageObjects["discord-bot-user-id:"+StorageCollectionState+":"+groupID] = []*api.StorageObject{{
+		Collection: StorageCollectionState,
+		Key:        groupID,
+		UserId:     "discord-bot-user-id",
+		Value:      string(stateJSON),
+	}}
 
 	// Submit 5 reports (the limit)
 	for i := 0; i < 5; i++ {
@@ -291,7 +354,7 @@ func TestCheckReportRateLimit(t *testing.T) {
 		t.Errorf("Expected no error with no reports, got: %v", err)
 	}
 
-	// Add 4 recent reports
+	// Add 4 recent reports (should pass)
 	now := time.Now().UTC()
 	for i := 0; i < 4; i++ {
 		report := PlayerReport{
@@ -317,38 +380,10 @@ func TestCheckReportRateLimit(t *testing.T) {
 		_, _ = nk.StorageWrite(ctx, writes)
 	}
 
-	// Still under limit - should pass
+	// Still under limit (4) - should pass
 	err = checkReportRateLimit(ctx, nk, userID)
 	if err != nil {
 		t.Errorf("Expected no error with 4 reports, got: %v", err)
-	}
-
-	// Add 5th report
-	report := PlayerReport{
-		ID:             uuid.Must(uuid.NewV4()).String(),
-		ReporterUserID: userID,
-		ReportedUserID: uuid.Must(uuid.NewV4()).String(),
-		GroupID:        uuid.Must(uuid.NewV4()).String(),
-		Reason:         "test",
-		Description:    "test",
-		CreatedAt:      now,
-		Status:         "pending",
-	}
-	reportJSON, _ := json.Marshal(report)
-	writes := []*runtime.StorageWrite{
-		{
-			Collection: StorageCollectionPlayerReports,
-			Key:        StorageKeyReportPrefix + report.ID,
-			UserID:     userID,
-			Value:      string(reportJSON),
-		},
-	}
-	_, _ = nk.StorageWrite(ctx, writes)
-
-	// Now at limit (5) - should be rate limited
-	err = checkReportRateLimit(ctx, nk, userID)
-	if err == nil {
-		t.Error("Expected rate limit error with 5 reports, got nil")
 	}
 
 	// Add an old report (2 hours ago) - should not count towards limit
@@ -363,7 +398,7 @@ func TestCheckReportRateLimit(t *testing.T) {
 		Status:         "pending",
 	}
 	oldReportJSON, _ := json.Marshal(oldReport)
-	writes = []*runtime.StorageWrite{
+	writes := []*runtime.StorageWrite{
 		{
 			Collection: StorageCollectionPlayerReports,
 			Key:        StorageKeyReportPrefix + oldReport.ID,
@@ -373,9 +408,37 @@ func TestCheckReportRateLimit(t *testing.T) {
 	}
 	_, _ = nk.StorageWrite(ctx, writes)
 
-	// Still at limit with recent reports - should still be rate limited
+	// Still should pass (4 recent + 1 old = 5 total, but only 4 recent)
+	err = checkReportRateLimit(ctx, nk, userID)
+	if err != nil {
+		t.Errorf("Expected no error with 4 recent + 1 old reports, got: %v", err)
+	}
+
+	// Add 5th recent report (now total 5 recent + 1 old)
+	report := PlayerReport{
+		ID:             uuid.Must(uuid.NewV4()).String(),
+		ReporterUserID: userID,
+		ReportedUserID: uuid.Must(uuid.NewV4()).String(),
+		GroupID:        uuid.Must(uuid.NewV4()).String(),
+		Reason:         "test",
+		Description:    "test",
+		CreatedAt:      now,
+		Status:         "pending",
+	}
+	reportJSON, _ := json.Marshal(report)
+	writes = []*runtime.StorageWrite{
+		{
+			Collection: StorageCollectionPlayerReports,
+			Key:        StorageKeyReportPrefix + report.ID,
+			UserID:     userID,
+			Value:      string(reportJSON),
+		},
+	}
+	_, _ = nk.StorageWrite(ctx, writes)
+
+	// Now at limit (5 recent) - should be rate limited
 	err = checkReportRateLimit(ctx, nk, userID)
 	if err == nil {
-		t.Error("Expected rate limit error with 5 recent reports (ignoring old), got nil")
+		t.Error("Expected rate limit error with 5 recent reports, got nil")
 	}
 }

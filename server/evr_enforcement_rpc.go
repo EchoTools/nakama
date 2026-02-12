@@ -104,13 +104,10 @@ func PlayerReportRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		return "", runtime.NewError("Reported user not found", StatusNotFound)
 	}
 
-	// Verify the group exists
-	groups, err := nk.GroupsGetId(ctx, []string{request.GroupID})
-	if err != nil {
-		return "", runtime.NewError("Failed to verify group", StatusInternalError)
-	}
-	if len(groups) == 0 {
-		return "", runtime.NewError("Group not found", StatusNotFound)
+	// Verify the group exists and is a guild group
+	if _, err := GuildGroupLoad(ctx, nk, request.GroupID); err != nil {
+		// Do not leak internal details about why the load failed; present a generic not-found error.
+		return "", runtime.NewError("Group not found or not a guild group", StatusNotFound)
 	}
 
 	// Create the report
@@ -166,30 +163,37 @@ func PlayerReportRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 // checkReportRateLimit checks if the user has exceeded the rate limit of 5 reports per hour
 func checkReportRateLimit(ctx context.Context, nk runtime.NakamaModule, userID string) error {
-	// List reports by this user (limited to 100 most recent)
-	// Note: This assumes users don't have more than 100 reports in their storage.
-	// In production, consider using time-based key patterns or multiple queries with cursors
-	// to handle users with very large numbers of reports.
-	objects, _, err := nk.StorageList(ctx, SystemUserID, userID, StorageCollectionPlayerReports, 100, "")
-	if err != nil {
-		// If there's an error reading storage, allow the report (fail open for rate limiting)
-		return nil
-	}
+	// List all reports by this user, paging through storage with a cursor.
+	// This avoids relying on StorageList ordering, which is not guaranteed to be time-based.
 
-	// Count reports in the last hour
 	oneHourAgo := time.Now().UTC().Add(-1 * time.Hour)
 	recentReportCount := 0
+	cursor := ""
 
-	for _, obj := range objects {
-		var report PlayerReport
-		if err := json.Unmarshal([]byte(obj.Value), &report); err != nil {
-			// Skip invalid reports
-			continue
+	for {
+		objects, newCursor, err := nk.StorageList(ctx, SystemUserID, userID, StorageCollectionPlayerReports, 100, cursor)
+		if err != nil {
+			// If there's an error reading storage, allow the report (fail open for rate limiting)
+			return nil
 		}
 
-		if report.CreatedAt.After(oneHourAgo) {
-			recentReportCount++
+		for _, obj := range objects {
+			var report PlayerReport
+			if err := json.Unmarshal([]byte(obj.Value), &report); err != nil {
+				// Skip invalid reports
+				continue
+			}
+
+			if report.CreatedAt.After(oneHourAgo) {
+				recentReportCount++
+			}
 		}
+
+		if newCursor == "" {
+			break
+		}
+
+		cursor = newCursor
 	}
 
 	if recentReportCount >= MaxReportsPerHour {
