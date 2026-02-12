@@ -17,8 +17,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-
-
 type sessionNEVR struct {
 	sync.Mutex
 	logger     *zap.Logger

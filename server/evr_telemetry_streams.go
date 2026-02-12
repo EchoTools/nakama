@@ -122,12 +122,19 @@ func LeaveTelemetryStreamRPC(ctx context.Context, logger runtime.Logger, db *sql
 }
 
 func RegisterTelemetryStreamRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
-	if err := initializer.RegisterRpc("/telemetry/stream/join", JoinTelemetryStreamRPC); err != nil {
-		return err
+	// Define telemetry stream RPCs with default permissions (Global Operators only)
+	rpcs := []RPCRegistration{
+		{ID: "/telemetry/stream/join", Handler: JoinTelemetryStreamRPC},
+		{ID: "/telemetry/stream/leave", Handler: LeaveTelemetryStreamRPC},
 	}
 
-	if err := initializer.RegisterRpc("/telemetry/stream/leave", LeaveTelemetryStreamRPC); err != nil {
-		return err
+	// Register with authorization middleware
+	for _, rpc := range rpcs {
+		perm := DefaultRPCPermission()
+		wrappedRPC := WithRPCAuthorization(rpc.ID, perm, rpc.Handler)
+		if err := initializer.RegisterRpc(rpc.ID, wrappedRPC); err != nil {
+			return err
+		}
 	}
 
 	return nil
