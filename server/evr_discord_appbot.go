@@ -3738,11 +3738,9 @@ func (d *DiscordAppBot) LogUserErrorMessage(ctx context.Context, groupID string,
 }
 
 func (d *DiscordAppBot) createLookupSetIGNModal(currentDisplayName string, isLocked bool) *discordgo.InteractionResponse {
-	allowPlayerToChangeIGN := !isLocked
-
 	// Determine the current lock status text
 	lockStatusText := "no"
-	if !allowPlayerToChangeIGN {
+	if isLocked {
 		lockStatusText = "yes"
 	}
 
