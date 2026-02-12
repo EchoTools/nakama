@@ -59,6 +59,16 @@ func (c *RPCPermissionConfig) GetPermission(rpcID string) RPCPermission {
 	return DefaultRPCPermission()
 }
 
+// RPCRegistration defines an RPC endpoint with its handler and permissions
+type RPCRegistration struct {
+	// ID is the RPC endpoint path (e.g., "match/terminate")
+	ID string
+	// Handler is the RPC function implementation
+	Handler func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error)
+	// Permission defines authorization requirements (optional, defaults to Global Operators)
+	Permission *RPCPermission
+}
+
 // WithRPCAuthorization wraps an RPC function with authorization checks
 func WithRPCAuthorization(
 	rpcID string,

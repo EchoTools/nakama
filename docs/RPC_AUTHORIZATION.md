@@ -10,48 +10,71 @@ All RPC endpoints are now protected by default with a middleware that enforces:
 
 This provides a secure-by-default approach where new RPCs automatically inherit proper authorization.
 
-## Default Behavior
+## RPC Registration
 
-When you register an RPC without any special configuration:
+All RPCs are registered using a declarative struct approach in `server/evr_runtime.go`. This ensures endpoint IDs are defined only once and all RPCs go through the authorization middleware.
+
+### Basic Registration
 
 ```go
-rpcs := map[string]func(...) (...){
-    "my/new/rpc": MyNewRPC,
+rpcs := []RPCRegistration{
+    // Default permissions (Auth + Global Operators)
+    {ID: "my/new/rpc", Handler: MyNewRPC},
+    
+    // Custom permissions inline
+    {
+        ID:      "my/custom/rpc",
+        Handler: MyCustomRPC,
+        Permission: &RPCPermission{
+            RequireAuth:   true,
+            AllowedGroups: []string{GroupGlobalOperators, GroupGlobalDevelopers},
+        },
+    },
 }
 ```
 
 The middleware automatically:
 1. Checks that the user is authenticated (has a valid session)
-2. Verifies the user is a member of the "Global Operators" system group
+2. Verifies the user is a member of the allowed system groups
 3. Rejects the request with appropriate error codes if either check fails
 
 ## Customizing Permissions
 
-### Option 1: Custom Authorization in `configureRPCPermissions()`
+### Option 1: Inline Permission Declaration
 
-To override the default for specific RPCs, modify `configureRPCPermissions()` in `server/evr_runtime.go`:
+Add RPCs with custom permissions directly in the registration list in `server/evr_runtime.go`:
 
 ```go
-func configureRPCPermissions() *RPCPermissionConfig {
-    config := NewRPCPermissionConfig()
-    
-    // Allow multiple groups
-    config.SetPermission("my/privileged/rpc", RPCPermission{
-        RequireAuth:   true,
-        AllowedGroups: []string{GroupGlobalOperators, GroupGlobalDevelopers},
-    })
-    
+rpcs := []RPCRegistration{
     // Public RPC (no authentication)
-    config.SetPermission("public/status", PublicRPCPermission())
+    {
+        ID:      "public/status",
+        Handler: PublicStatusRPC,
+        Permission: &RPCPermission{
+            RequireAuth:   false,
+            AllowedGroups: []string{},
+        },
+    },
     
-    // Custom authorization logic
-    config.SetPermission("my/custom/rpc", RPCPermission{
-        RequireAuth:   true,
-        AllowedGroups: []string{}, // Empty = skip group check
-        // Will rely on custom checks in the RPC itself
-    })
+    // Multiple groups allowed
+    {
+        ID:      "admin/action",
+        Handler: AdminActionRPC,
+        Permission: &RPCPermission{
+            RequireAuth:   true,
+            AllowedGroups: []string{GroupGlobalOperators, GroupGlobalDevelopers},
+        },
+    },
     
-    return config
+    // Custom authorization logic in RPC
+    {
+        ID:      "user/profile",
+        Handler: UserProfileRPC,
+        Permission: &RPCPermission{
+            RequireAuth:   true,
+            AllowedGroups: []string{}, // Empty = skip group check, use custom logic in RPC
+        },
+    },
 }
 ```
 
@@ -88,16 +111,19 @@ func MyRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.Na
 }
 ```
 
-Then configure it to skip group checks:
+Then register it with empty AllowedGroups to skip the automatic group check:
 
 ```go
-config.SetPermission("my/custom/rpc", RPCPermission{
-    RequireAuth:   true,
-    AllowedGroups: []string{}, // Skip group check, use custom logic
-})
+{
+    ID:      "user/profile",
+    Handler: UserProfileRPC,
+    Permission: &RPCPermission{
+        RequireAuth:   true,
+        AllowedGroups: []string{}, // Custom authorization in RPC
+    },
+}
 ```
 
-### Option 3: Using CustomCheck Function
 
 For reusable authorization logic:
 
@@ -143,10 +169,19 @@ The middleware returns these error codes:
 ### Example 1: Public Leaderboard RPC
 
 ```go
-// In configureRPCPermissions()
-config.SetPermission("leaderboard/public", PublicRPCPermission())
+// In the RPC registration list
+rpcs := []RPCRegistration{
+    {
+        ID:      "leaderboard/public",
+        Handler: PublicLeaderboardRPC,
+        Permission: &RPCPermission{
+            RequireAuth:   false,
+            AllowedGroups: []string{},
+        },
+    },
+}
 
-// The RPC
+// The RPC implementation
 func PublicLeaderboardRPC(ctx context.Context, ...) (string, error) {
     // No authentication required
     // Anyone can call this
@@ -157,8 +192,12 @@ func PublicLeaderboardRPC(ctx context.Context, ...) (string, error) {
 ### Example 2: Admin-Only Match Control
 
 ```go
-// No configuration needed - uses default (Global Operators only)
+// In the RPC registration list (no Permission = uses default)
+rpcs := []RPCRegistration{
+    {ID: "match/terminate", Handler: TerminateMatchRPC},
+}
 
+// The RPC implementation
 func TerminateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
     // Middleware has verified:
     // 1. User is authenticated
@@ -179,13 +218,19 @@ func TerminateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 ### Example 3: User or Operator Access
 
 ```go
-// In configureRPCPermissions()
-config.SetPermission("profile/get", RPCPermission{
-    RequireAuth:   true,
-    AllowedGroups: []string{}, // Custom auth logic
-})
+// In the RPC registration list
+rpcs := []RPCRegistration{
+    {
+        ID:      "profile/get",
+        Handler: GetProfileRPC,
+        Permission: &RPCPermission{
+            RequireAuth:   true,
+            AllowedGroups: []string{}, // Custom auth logic in RPC
+        },
+    },
+}
 
-// The RPC
+// The RPC implementation
 func GetProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
     callerID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
     
@@ -233,9 +278,24 @@ func TestMyRPC(t *testing.T) {
 
 ## Migration Guide
 
+### Adding a New RPC
+
+Simply add it to the registration list in `server/evr_runtime.go`:
+
+```go
+rpcs := []RPCRegistration{
+    // ... other RPCs ...
+    
+    // Default permissions (Auth + Global Operators)
+    {ID: "my/new/rpc", Handler: MyNewRPC},
+}
+```
+
+### Converting Existing RPCs
+
 If you have existing RPCs with manual authorization checks:
 
-### Before
+**Before:**
 ```go
 func MyRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
     userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
@@ -256,8 +316,14 @@ func MyRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.Na
 }
 ```
 
-### After
+**After:**
 ```go
+// Register with default permissions
+rpcs := []RPCRegistration{
+    {ID: "my/rpc", Handler: MyRPC},
+}
+
+// RPC implementation - simplified
 func MyRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
     // Middleware handles auth + operator check
     // Safe to use without checking

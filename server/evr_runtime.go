@@ -92,60 +92,119 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	// Register RPC's for device linking
 	rpcHandler := NewRPCHandler(ctx, db, dg)
 
-	// Configure RPC permissions
-	rpcPermissions := configureRPCPermissions()
+	// Define all RPC registrations with their permissions in one place
+	// This declarative approach ensures endpoint IDs are defined only once
+	rpcs := []RPCRegistration{
+		// Account management
+		{ID: "account/search", Handler: AccountSearchRPC},
+		{ID: "account/lookup", Handler: rpcHandler.AccountLookupRPC},
+		{ID: "account/authenticate/password", Handler: AuthenticatePasswordRPC},
 
-	rpcs := map[string]func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error){
-		"account/search":                AccountSearchRPC,
-		"account/lookup":                rpcHandler.AccountLookupRPC,
-		"account/authenticate/password": AuthenticatePasswordRPC,
-		"leaderboard/haystack":          rpcHandler.LeaderboardHaystackRPC,
-		"leaderboard/records":           rpcHandler.LeaderboardRecordsListRPC,
-		"link/device":                   LinkDeviceRpc,
-		"link/usernamedevice":           LinkUserIdDeviceRpc,
-		"signin/discord":                DiscordSignInRpc,
-		"match/public":                  rpcHandler.MatchListPublicRPC,
-		"match":                         MatchRPC,
-		"match/prepare":                 PrepareMatchRPC,
-		"match/allocate":                AllocateMatchRPC,
-		"match/terminate":               shutdownMatchRpc,
-		"match/build":                   BuildMatchRPC,
-		"player/setnextmatch":           SetNextMatchRPC,
-		"player/statistics":             PlayerStatisticsRPC,
-		"player/kick":                   KickPlayerRPC,
-		"player/profile":                UserServerProfileRPC,
-		"player/matchlock":              MatchLockRPC,
-		"player/matchlock/status":       GetMatchLockStatusRPC,
-		"link":                          LinkingAppRpc,
-		"evr/servicestatus":             rpcHandler.ServiceStatusRPC,
-		"matchmaking/settings":          MatchmakingSettingsRPC,
-		"importloadouts":                ImportLoadoutsRpc,
-		"matchmaker/stream":             MatchmakerStreamRPC,
-		"matchmaker/state":              MatchmakerStateRPC,
-		"matchmaker/candidates":         MatchmakerCandidatesRPCFactory(sbmm),
-		"matchmaker/config":             MatchmakerConfigRPC,
-		"stream/join":                   StreamJoinRPC,
-		"server/score":                  ServerScoreRPC,
-		"server/scores":                 ServerScoresRPC,
-		"forcecheck":                    CheckForceUserRPC,
-		"guildgroup":                    GuildGroupGetRPC,
-		"enforcement/kick":              EnforcementKickRPC,
-		"enforcement/journals":          EnforcementJournalListRPC,
-		"enforcement/record/edit":       EnforcementRecordEditRPC,
-		"earlyquit/history":             EarlyQuitHistoryRPC,
-		"player/outfit/save":            PlayerOutfitSaveRPC,
-		"player/outfit/list":            PlayerOutfitListRPC,
-		"player/outfit/load":            PlayerOutfitLoadRPC,
-		"player/outfit/delete":          PlayerOutfitDeleteRPC,
-		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
+		// Leaderboards
+		{ID: "leaderboard/haystack", Handler: rpcHandler.LeaderboardHaystackRPC},
+		{ID: "leaderboard/records", Handler: rpcHandler.LeaderboardRecordsListRPC},
+
+		// Device linking
+		{ID: "link/device", Handler: LinkDeviceRpc},
+		{ID: "link/usernamedevice", Handler: LinkUserIdDeviceRpc},
+		{ID: "link", Handler: LinkingAppRpc},
+		{ID: "signin/discord", Handler: DiscordSignInRpc},
+
+		// Match management
+		{ID: "match/public", Handler: rpcHandler.MatchListPublicRPC},
+		{ID: "match", Handler: MatchRPC},
+		{ID: "match/prepare", Handler: PrepareMatchRPC},
+		{ID: "match/allocate", Handler: AllocateMatchRPC},
+		{ID: "match/terminate", Handler: shutdownMatchRpc},
+		{ID: "match/build", Handler: BuildMatchRPC},
+
+		// Player management
+		{ID: "player/setnextmatch", Handler: SetNextMatchRPC},
+		{ID: "player/statistics", Handler: PlayerStatisticsRPC},
+		{ID: "player/kick", Handler: KickPlayerRPC},
+		{ID: "player/profile", Handler: UserServerProfileRPC},
+		{ID: "player/matchlock", Handler: MatchLockRPC},
+		{ID: "player/matchlock/status", Handler: GetMatchLockStatusRPC},
+
+		// Player outfits
+		{ID: "player/outfit/save", Handler: PlayerOutfitSaveRPC},
+		{ID: "player/outfit/list", Handler: PlayerOutfitListRPC},
+		{ID: "player/outfit/load", Handler: PlayerOutfitLoadRPC},
+		{ID: "player/outfit/delete", Handler: PlayerOutfitDeleteRPC},
+
+		// EVR service status
+		{ID: "evr/servicestatus", Handler: rpcHandler.ServiceStatusRPC},
+
+		// Matchmaking
+		{ID: "matchmaking/settings", Handler: MatchmakingSettingsRPC},
+		{ID: "matchmaker/stream", Handler: MatchmakerStreamRPC},
+		{ID: "matchmaker/state", Handler: MatchmakerStateRPC},
+		{ID: "matchmaker/candidates", Handler: MatchmakerCandidatesRPCFactory(sbmm)},
+		{ID: "matchmaker/config", Handler: MatchmakerConfigRPC},
+
+		// Stream management
+		{ID: "stream/join", Handler: StreamJoinRPC},
+
+		// Server management
+		{ID: "server/score", Handler: ServerScoreRPC},
+		{ID: "server/scores", Handler: ServerScoresRPC},
+
+		// Guild management
+		{ID: "guildgroup", Handler: GuildGroupGetRPC},
+
+		// Enforcement - Custom permissions: Global Operators or guild enforcers
+		{
+			ID:      "enforcement/kick",
+			Handler: EnforcementKickRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{}, // Custom authorization in RPC (operators or guild enforcers)
+			},
+		},
+		{
+			ID:      "enforcement/journals",
+			Handler: EnforcementJournalListRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{}, // Custom authorization in RPC (operators or guild owners)
+			},
+		},
+		{
+			ID:      "enforcement/record/edit",
+			Handler: EnforcementRecordEditRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{}, // Custom authorization in RPC (operators or guild enforcers)
+			},
+		},
+
+		// Early quit - Custom permissions: Users can view their own, operators can view any
+		{
+			ID:      "earlyquit/history",
+			Handler: EarlyQuitHistoryRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{}, // Custom authorization in RPC (user or operator)
+			},
+		},
+
+		// Legacy/misc
+		{ID: "importloadouts", Handler: ImportLoadoutsRpc},
+		{ID: "forcecheck", Handler: CheckForceUserRPC},
 	}
 
 	// Register RPCs with authorization middleware
-	for name, rpc := range rpcs {
-		perm := rpcPermissions.GetPermission(name)
-		wrappedRPC := WithRPCAuthorization(name, perm, rpc)
-		if err = initializer.RegisterRpc(name, wrappedRPC); err != nil {
-			return fmt.Errorf("unable to register %s: %w", name, err)
+	for _, rpc := range rpcs {
+		var perm RPCPermission
+		if rpc.Permission != nil {
+			perm = *rpc.Permission
+		} else {
+			perm = DefaultRPCPermission() // Default: Auth + Global Operators
+		}
+
+		wrappedRPC := WithRPCAuthorization(rpc.ID, perm, rpc.Handler)
+		if err = initializer.RegisterRpc(rpc.ID, wrappedRPC); err != nil {
+			return fmt.Errorf("unable to register %s: %w", rpc.ID, err)
 		}
 	}
 
@@ -266,44 +325,6 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	logger.Info("Initialized runtime module.")
 	return nil
-}
-
-// configureRPCPermissions defines authorization rules for each RPC endpoint
-// By default, all RPCs require authentication and Global Operators membership
-func configureRPCPermissions() *RPCPermissionConfig {
-	config := NewRPCPermissionConfig()
-
-	// RPCs with custom authorization logic (handled inline)
-	// These require authentication but have custom permission checks beyond group membership
-
-	// earlyquit/history: Users can view their own history, or Global Operators can view anyone's
-	config.SetPermission("earlyquit/history", RPCPermission{
-		RequireAuth:   true,
-		AllowedGroups: []string{}, // Custom authorization logic in the RPC itself
-	})
-
-	// enforcement/kick: Global Operators or guild enforcers can use
-	config.SetPermission("enforcement/kick", RPCPermission{
-		RequireAuth:   true,
-		AllowedGroups: []string{}, // Custom authorization logic in the RPC itself
-	})
-
-	// enforcement/journals: Global Operators or guild owners can view
-	config.SetPermission("enforcement/journals", RPCPermission{
-		RequireAuth:   true,
-		AllowedGroups: []string{}, // Custom authorization logic in the RPC itself
-	})
-
-	// enforcement/record/edit: Global Operators or guild enforcers can edit
-	config.SetPermission("enforcement/record/edit", RPCPermission{
-		RequireAuth:   true,
-		AllowedGroups: []string{}, // Custom authorization logic in the RPC itself
-	})
-
-	// All other RPCs will use the default permission (Global Operators only)
-	// This is enforced automatically by GetPermission() returning DefaultRPCPermission()
-
-	return config
 }
 
 // connectRedis connects to the Redis server using the provided URL and returns a redis.Client.
