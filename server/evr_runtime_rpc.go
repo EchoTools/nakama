@@ -1998,3 +1998,305 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 
 	return string(data), nil
 }
+
+// Outfit management constants and types
+const (
+	OutfitCollection  = "player_outfits"
+	MaxOutfitsPerUser = 10
+)
+
+// Outfit represents a player's outfit configuration
+type Outfit struct {
+	ID      string      `json:"id"`
+	Name    string      `json:"name"`
+	Chassis string      `json:"chassis"`
+	Bracer  string      `json:"bracer"`
+	Booster string      `json:"booster"`
+	Decal   string      `json:"decal"`
+	SavedAt TimeRFC3339 `json:"saved_at"`
+}
+
+// SaveOutfitRequest represents the request to save an outfit
+type SaveOutfitRequest struct {
+	Name    string `json:"name"`
+	Chassis string `json:"chassis"`
+	Bracer  string `json:"bracer"`
+	Booster string `json:"booster"`
+	Decal   string `json:"decal"`
+}
+
+// SaveOutfitResponse represents the response from saving an outfit
+type SaveOutfitResponse struct {
+	Success bool   `json:"success"`
+	Outfit  Outfit `json:"outfit"`
+	ID      string `json:"id"`
+}
+
+// ListOutfitsResponse represents the response from listing outfits
+type ListOutfitsResponse struct {
+	Outfits []Outfit `json:"outfits"`
+}
+
+// LoadOutfitRequest represents the request to load an outfit
+type LoadOutfitRequest struct {
+	OutfitID string `json:"outfit_id"`
+}
+
+// LoadOutfitResponse represents the response from loading an outfit
+type LoadOutfitResponse struct {
+	Success bool   `json:"success"`
+	Outfit  Outfit `json:"outfit"`
+}
+
+// DeleteOutfitRequest represents the request to delete an outfit
+type DeleteOutfitRequest struct {
+	OutfitID string `json:"outfit_id"`
+}
+
+// DeleteOutfitResponse represents the response from deleting an outfit
+type DeleteOutfitResponse struct {
+	Success bool `json:"success"`
+}
+
+// PlayerOutfitSaveRPC saves a player outfit to storage
+func PlayerOutfitSaveRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Get user ID from context
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || userID == "" {
+		return "", runtime.NewError("authentication required", StatusUnauthenticated)
+	}
+
+	// Parse request
+	request := &SaveOutfitRequest{}
+	if err := json.Unmarshal([]byte(payload), request); err != nil {
+		return "", runtime.NewError("invalid request payload", StatusInvalidArgument)
+	}
+
+	// Validate request
+	if request.Name == "" {
+		return "", runtime.NewError("outfit name is required", StatusInvalidArgument)
+	}
+
+	// Check current number of outfits for this user
+	// We only need to check if the limit is reached, so we request MaxOutfitsPerUser items
+	objects, _, err := nk.StorageList(ctx, userID, userID, OutfitCollection, MaxOutfitsPerUser, "")
+	if err != nil {
+		logger.Error("Failed to list outfits: %v", err)
+		return "", runtime.NewError("failed to check outfit limit", StatusInternalError)
+	}
+
+	if len(objects) >= MaxOutfitsPerUser {
+		return "", runtime.NewError("outfit limit reached", StatusResourceExhausted)
+	}
+
+	// Generate new UUID for outfit
+	outfitUUID, err := uuid.NewV4()
+	if err != nil {
+		logger.Error("Failed to generate outfit ID: %v", err)
+		return "", runtime.NewError("failed to generate outfit ID", StatusInternalError)
+	}
+	outfitID := outfitUUID.String()
+
+	// Create outfit
+	outfit := Outfit{
+		ID:      outfitID,
+		Name:    request.Name,
+		Chassis: request.Chassis,
+		Bracer:  request.Bracer,
+		Booster: request.Booster,
+		Decal:   request.Decal,
+		SavedAt: TimeRFC3339(time.Now().UTC()),
+	}
+
+	// Marshal outfit to JSON
+	value, err := json.Marshal(outfit)
+	if err != nil {
+		logger.Error("Failed to marshal outfit: %v", err)
+		return "", runtime.NewError("failed to save outfit", StatusInternalError)
+	}
+
+	// Write to storage (user-scoped)
+	_, err = nk.StorageWrite(ctx, []*runtime.StorageWrite{{
+		Collection:      OutfitCollection,
+		Key:             outfitID,
+		UserID:          userID,
+		Value:           string(value),
+		PermissionRead:  1, // Owner can read
+		PermissionWrite: 1, // Owner can write
+	}})
+	if err != nil {
+		logger.Error("Failed to write outfit to storage: %v", err)
+		return "", runtime.NewError("failed to save outfit", StatusInternalError)
+	}
+
+	// Prepare response
+	response := SaveOutfitResponse{
+		Success: true,
+		Outfit:  outfit,
+		ID:      outfitID,
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		logger.Error("Failed to marshal response: %v", err)
+		return "", runtime.NewError("failed to create response", StatusInternalError)
+	}
+
+	return string(data), nil
+}
+
+// PlayerOutfitListRPC lists all outfits for a player
+func PlayerOutfitListRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Get user ID from context
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || userID == "" {
+		return "", runtime.NewError("authentication required", StatusUnauthenticated)
+	}
+
+	// List all outfits for this user
+	// Set limit higher than MaxOutfitsPerUser for safety, though users can only have MaxOutfitsPerUser outfits
+	objects, _, err := nk.StorageList(ctx, userID, userID, OutfitCollection, MaxOutfitsPerUser*2, "")
+	if err != nil {
+		logger.Error("Failed to list outfits: %v", err)
+		return "", runtime.NewError("failed to list outfits", StatusInternalError)
+	}
+
+	// Parse outfits
+	outfits := make([]Outfit, 0, len(objects))
+	for _, obj := range objects {
+		var outfit Outfit
+		if err := json.Unmarshal([]byte(obj.Value), &outfit); err != nil {
+			logger.Warn("Failed to unmarshal outfit %s: %v", obj.Key, err)
+			continue
+		}
+		outfits = append(outfits, outfit)
+	}
+
+	// Prepare response
+	response := ListOutfitsResponse{
+		Outfits: outfits,
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		logger.Error("Failed to marshal response: %v", err)
+		return "", runtime.NewError("failed to create response", StatusInternalError)
+	}
+
+	return string(data), nil
+}
+
+// PlayerOutfitLoadRPC loads a specific outfit by ID
+func PlayerOutfitLoadRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Get user ID from context
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || userID == "" {
+		return "", runtime.NewError("authentication required", StatusUnauthenticated)
+	}
+
+	// Parse request
+	request := &LoadOutfitRequest{}
+	if err := json.Unmarshal([]byte(payload), request); err != nil {
+		return "", runtime.NewError("invalid request payload", StatusInvalidArgument)
+	}
+
+	// Validate request
+	if request.OutfitID == "" {
+		return "", runtime.NewError("outfit_id is required", StatusInvalidArgument)
+	}
+
+	// Read outfit from storage
+	objects, err := nk.StorageRead(ctx, []*runtime.StorageRead{{
+		Collection: OutfitCollection,
+		Key:        request.OutfitID,
+		UserID:     userID,
+	}})
+	if err != nil {
+		logger.Error("Failed to read outfit: %v", err)
+		return "", runtime.NewError("failed to load outfit", StatusInternalError)
+	}
+
+	if len(objects) == 0 {
+		return "", runtime.NewError("outfit not found", StatusNotFound)
+	}
+
+	// Parse outfit
+	var outfit Outfit
+	if err := json.Unmarshal([]byte(objects[0].Value), &outfit); err != nil {
+		logger.Error("Failed to unmarshal outfit: %v", err)
+		return "", runtime.NewError("failed to load outfit", StatusInternalError)
+	}
+
+	// Prepare response
+	response := LoadOutfitResponse{
+		Success: true,
+		Outfit:  outfit,
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		logger.Error("Failed to marshal response: %v", err)
+		return "", runtime.NewError("failed to create response", StatusInternalError)
+	}
+
+	return string(data), nil
+}
+
+// PlayerOutfitDeleteRPC deletes a specific outfit by ID
+func PlayerOutfitDeleteRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Get user ID from context
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || userID == "" {
+		return "", runtime.NewError("authentication required", StatusUnauthenticated)
+	}
+
+	// Parse request
+	request := &DeleteOutfitRequest{}
+	if err := json.Unmarshal([]byte(payload), request); err != nil {
+		return "", runtime.NewError("invalid request payload", StatusInvalidArgument)
+	}
+
+	// Validate request
+	if request.OutfitID == "" {
+		return "", runtime.NewError("outfit_id is required", StatusInvalidArgument)
+	}
+
+	// Verify ownership before delete by trying to read it first
+	objects, err := nk.StorageRead(ctx, []*runtime.StorageRead{{
+		Collection: OutfitCollection,
+		Key:        request.OutfitID,
+		UserID:     userID,
+	}})
+	if err != nil {
+		logger.Error("Failed to verify outfit ownership: %v", err)
+		return "", runtime.NewError("failed to delete outfit", StatusInternalError)
+	}
+
+	if len(objects) == 0 {
+		return "", runtime.NewError("outfit not found", StatusNotFound)
+	}
+
+	// Delete outfit from storage
+	err = nk.StorageDelete(ctx, []*runtime.StorageDelete{{
+		Collection: OutfitCollection,
+		Key:        request.OutfitID,
+		UserID:     userID,
+	}})
+	if err != nil {
+		logger.Error("Failed to delete outfit: %v", err)
+		return "", runtime.NewError("failed to delete outfit", StatusInternalError)
+	}
+
+	// Prepare response
+	response := DeleteOutfitResponse{
+		Success: true,
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		logger.Error("Failed to marshal response: %v", err)
+		return "", runtime.NewError("failed to create response", StatusInternalError)
+	}
+
+	return string(data), nil
+}
