@@ -118,6 +118,10 @@ type GlobalMatchmakingSettings struct {
 	WaitTimePriorityThresholdSecs  int                     `json:"wait_time_priority_threshold_secs"`   // Wait time threshold in seconds when wait time priority overrides match size priority (default 120)
 	RatingRangeExpansionPerMinute  float64                 `json:"rating_range_expansion_per_minute"`   // How much to expand rating range per minute of wait time (default 0.5)
 	MaxRatingRangeExpansion        float64                 `json:"max_rating_range_expansion"`          // Maximum total rating range expansion allowed (default 5.0)
+	ReservationThresholdSecs       int                     `json:"reservation_threshold_secs"`          // Wait time before a ticket becomes "starving" and gets hard reservations (default 90)
+	MaxReservationRatio            float64                 `json:"max_reservation_ratio"`               // Max fraction of pool that can be reserved (0.0-1.0, default 0.4)
+	ReservationSafetyValveSecs     int                     `json:"reservation_safety_valve_secs"`       // After this many seconds, release reservations and let the system flow (default 300)
+	EnableTicketReservation        bool                    `json:"enable_ticket_reservation"`           // Enable the ticket reservation system (default false)
 }
 
 type QueryAddons struct {
