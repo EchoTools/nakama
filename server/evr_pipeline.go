@@ -17,7 +17,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/echotools/nevr-common/v4/gen/go/rtapi"
+	rtapi "github.com/echotools/nevr-common/v4/gen/go/rtapi/v1"
 	"github.com/go-redis/redis"
 	"github.com/gofrs/uuid/v5"
 
