@@ -91,6 +91,10 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	// Register RPC's for device linking
 	rpcHandler := NewRPCHandler(ctx, db, dg)
+
+	// Configure RPC permissions
+	rpcPermissions := configureRPCPermissions()
+
 	rpcs := map[string]func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error){
 		"account/search":                AccountSearchRPC,
 		"account/lookup":                rpcHandler.AccountLookupRPC,
@@ -131,8 +135,12 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"earlyquit/history":             EarlyQuitHistoryRPC,
 		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
 	}
+
+	// Register RPCs with authorization middleware
 	for name, rpc := range rpcs {
-		if err = initializer.RegisterRpc(name, rpc); err != nil {
+		perm := rpcPermissions.GetPermission(name)
+		wrappedRPC := WithRPCAuthorization(name, perm, rpc)
+		if err = initializer.RegisterRpc(name, wrappedRPC); err != nil {
 			return fmt.Errorf("unable to register %s: %w", name, err)
 		}
 	}
@@ -254,6 +262,44 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	logger.Info("Initialized runtime module.")
 	return nil
+}
+
+// configureRPCPermissions defines authorization rules for each RPC endpoint
+// By default, all RPCs require authentication and Global Operators membership
+func configureRPCPermissions() *RPCPermissionConfig {
+	config := NewRPCPermissionConfig()
+
+	// RPCs with custom authorization logic (handled inline)
+	// These require authentication but have custom permission checks beyond group membership
+
+	// earlyquit/history: Users can view their own history, or Global Operators can view anyone's
+	config.SetPermission("earlyquit/history", RPCPermission{
+		RequireAuth:   true,
+		AllowedGroups: []string{}, // Custom authorization logic in the RPC itself
+	})
+
+	// enforcement/kick: Global Operators or guild enforcers can use
+	config.SetPermission("enforcement/kick", RPCPermission{
+		RequireAuth:   true,
+		AllowedGroups: []string{}, // Custom authorization logic in the RPC itself
+	})
+
+	// enforcement/journals: Global Operators or guild owners can view
+	config.SetPermission("enforcement/journals", RPCPermission{
+		RequireAuth:   true,
+		AllowedGroups: []string{}, // Custom authorization logic in the RPC itself
+	})
+
+	// enforcement/record/edit: Global Operators or guild enforcers can edit
+	config.SetPermission("enforcement/record/edit", RPCPermission{
+		RequireAuth:   true,
+		AllowedGroups: []string{}, // Custom authorization logic in the RPC itself
+	})
+
+	// All other RPCs will use the default permission (Global Operators only)
+	// This is enforced automatically by GetPermission() returning DefaultRPCPermission()
+
+	return config
 }
 
 // connectRedis connects to the Redis server using the provided URL and returns a redis.Client.
