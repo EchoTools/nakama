@@ -15,6 +15,7 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/thriftrw/ptr"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -665,9 +666,18 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		return nil, 0, status.Error(codes.PermissionDenied, "user does not have the allocator role in this guild.")
 	}
 
-	// If user is a global operator but has no allocator groups, use the current guild group
+	// If user is a global operator, ensure the current guild group is included (avoid duplicates)
 	if isGlobalOperator {
-		allocatorGroupIDs = append(allocatorGroupIDs, groupID)
+		found := false
+		for _, gid := range allocatorGroupIDs {
+			if gid == groupID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			allocatorGroupIDs = append(allocatorGroupIDs, groupID)
+		}
 	}
 
 	// Load the latency history for this user
@@ -730,26 +740,50 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Error(codes.PermissionDenied, "guild does not allow public match creation")
 	}
 
-	// Check if user is a moderator (enforcer) in the guild or a global operator
-	isGuildModerator := group.IsEnforcer(userID)
+	isGuildModerator := group.IsEnforcer(userID) || group.IsAuditor(userID)
 	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
 	isPrivileged := isGuildModerator || isGlobalOperator
 
-	// Check if this is a public match (echo_arena or echo_combat)
-	isPublicMatch := mode == evr.ModeArenaPublic || mode == evr.ModeCombatPublic
+	if !isPrivileged {
+		// Check if guild has custom rate limit configured
+		var rateLimitSeconds int
+		var rateLimitMessage string
 
-	// Apply stricter rate limit (1 per 15 minutes) for public matches, unless user is privileged
-	if isPublicMatch && !isPrivileged {
-		publicLimiter := d.loadPublicMatchRateLimiter(userID, groupID)
-		if !publicLimiter.Allow() {
-			return nil, 0, status.Error(codes.ResourceExhausted, "rate limit exceeded for public matches (1 per 15 minutes)")
+		if group.CreateCommandRateLimitPerMinute > 0 {
+			// Use guild-configured rate limit (converts from per-minute to seconds)
+			rateLimitSeconds = int(60.0 / group.CreateCommandRateLimitPerMinute)
+			rateLimitMessage = fmt.Sprintf("rate limit exceeded for match creation (%.1f per minute)", group.CreateCommandRateLimitPerMinute)
+		} else {
+			// Use default rate limits per mode
+			rateLimitConfig := map[evr.Symbol]struct {
+				seconds int
+				message string
+			}{
+				evr.ModeCombatPublic:  {300, "rate limit exceeded for public combat matches (1 per 5 minutes)"},
+				evr.ModeArenaPublic:   {900, "rate limit exceeded for public arena matches (1 per 15 minutes)"},
+				evr.ModeCombatPrivate: {60, "rate limit exceeded for private combat matches (1 per minute)"},
+				evr.ModeArenaPrivate:  {60, "rate limit exceeded for private arena matches (1 per minute)"},
+				evr.ModeSocialPublic:  {60, "rate limit exceeded for public social lobbies (1 per minute)"},
+				evr.ModeSocialPrivate: {60, "rate limit exceeded for private social lobbies (1 per minute)"},
+			}
+
+			config, exists := rateLimitConfig[mode]
+			if !exists {
+				config = struct {
+					seconds int
+					message string
+				}{60, "rate limit exceeded for match creation (1 per minute)"}
+			}
+			rateLimitSeconds = config.seconds
+			rateLimitMessage = config.message
 		}
-	}
 
-	// Apply general rate limit for all matches
-	limiter := d.loadPrepareMatchRateLimiter(userID, groupID)
-	if !limiter.Allow() {
-		return nil, 0, status.Error(codes.ResourceExhausted, fmt.Sprintf("rate limit exceeded (%0.0f requests per minute)", limiter.Limit()*60))
+		key := fmt.Sprintf("%s:%s:%s", userID, groupID, mode.String())
+		limiter, _ := d.matchCreateRateLimiters.LoadOrStore(key, rate.NewLimiter(rate.Limit(1.0/float64(rateLimitSeconds)), 1))
+
+		if !limiter.Allow() {
+			return nil, 0, status.Error(codes.ResourceExhausted, rateLimitMessage)
+		}
 	}
 
 	latencyHistory := NewLatencyHistory()
@@ -757,6 +791,32 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Errorf(codes.Internal, "failed to read latency history: %v", err)
 	}
 	extIPs := latencyHistory.AverageRTTs(true)
+
+	// Filter servers to only those with RTT <= 90ms
+	// Note: 90ms is stricter than the 100ms HighLatencyThresholdMs used in matchmaking
+	// because /create is a manual server selection that should prioritize low latency
+	const maxLatencyMs = 90
+	filteredIPs := make(map[string]int)
+	minLatencyMs := 0
+	hasLatencyData := false
+
+	for ip, latency := range extIPs {
+		if !hasLatencyData || latency < minLatencyMs {
+			minLatencyMs = latency
+			hasLatencyData = true
+		}
+		if latency <= maxLatencyMs {
+			filteredIPs[ip] = latency
+		}
+	}
+
+	// If no servers within 90ms, return appropriate error
+	if len(filteredIPs) == 0 {
+		if !hasLatencyData {
+			return nil, 0, fmt.Errorf("no latency history exists for your account; play some matches first to establish server latency data")
+		}
+		return nil, 0, fmt.Errorf("no servers within 90ms of your location. Your best server has %dms latency", minLatencyMs)
+	}
 
 	settings := &MatchSettings{
 		Mode:      mode,
@@ -767,7 +827,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	}
 
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
-	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, extIPs, settings, []string{region}, true, false, queryAddon)
+	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, filteredIPs, settings, []string{region}, true, false, queryAddon)
 	if err != nil {
 		// Check if this is a region fallback error
 		var regionErr ErrMatchmakingNoServersInRegion
@@ -916,7 +976,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			}
 		}
 
-		if err := StorableWrite(ctx, nk, targetUserID, journal); err != nil {
+		if err := SyncJournalAndProfile(ctx, nk, targetUserID, journal); err != nil {
 			return fmt.Errorf("failed to write storage: %w", err)
 		}
 
@@ -953,7 +1013,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 					},
 				},
 				Footer: &discordgo.MessageEmbedFooter{
-					Text: "Confidential. Do not share.",
+					Text: fmt.Sprintf("Confidential. Do not share. | Edit on portal: check suspension details"),
 				},
 			}
 			if len(recordsByGroupID) == 0 {
@@ -1140,15 +1200,21 @@ func (d *DiscordAppBot) presentRegionFallbackOptions(s *discordgo.Session, i *di
 	startTimeStr := fmt.Sprintf("%d", startTime.Unix())
 	baseParams := fmt.Sprintf("%s:%s:%s:%s:%s", originalRegion, mode.String(), level.String(), startTimeStr, commandType)
 
+	// Create message based on server count
+	serverMsg := fmt.Sprintf("There are **%d** servers in region code **%s**", fallbackInfo.ServerCount, fallbackInfo.RequestedRegionCode)
+	if fallbackInfo.ServerCount == 0 {
+		serverMsg = fmt.Sprintf("No servers are available in region code **%s**", fallbackInfo.RequestedRegionCode)
+	}
+
 	embed := &discordgo.MessageEmbed{
 		Title: "No Servers Available in Selected Region",
-		Description: fmt.Sprintf("No servers are available in region(s) **%v**.\n\nHowever, a server is available in **%s** with **%dms** latency.\n\nWould you like to use this server instead?",
-			fallbackInfo.RequestedRegions, fallbackInfo.ClosestRegion, fallbackInfo.ClosestLatencyMs),
+		Description: fmt.Sprintf("%s.\n\nHowever, a server is available in **%s** with **%dms** latency.\n\nWould you like to use this server instead?",
+			serverMsg, fallbackInfo.ClosestRegion, fallbackInfo.ClosestLatencyMs),
 		Color: 0xFFA500, // Orange color for warning
 		Fields: []*discordgo.MessageEmbedField{
 			{
 				Name:   "Requested Region(s)",
-				Value:  fmt.Sprintf("%v", fallbackInfo.RequestedRegions),
+				Value:  fmt.Sprintf("[%s]", fallbackInfo.RequestedRegionCode),
 				Inline: true,
 			},
 			{

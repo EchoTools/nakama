@@ -266,3 +266,92 @@ func TestReducingPrecisionFactor(t *testing.T) {
 		})
 	}
 }
+
+func TestBackfillResultStructure(t *testing.T) {
+	// Test that BackfillResult properly tracks player user IDs
+	groupID := uuid.Must(uuid.NewV4())
+	matchUUID := uuid.Must(uuid.NewV4())
+
+	candidate := &BackfillCandidate{
+		Ticket:  "test-ticket",
+		GroupID: groupID,
+		Mode:    evr.ModeArenaPublic,
+		Rating:  15.0,
+		MaxRTT:  180,
+		RTTs:    make(map[string]int),
+	}
+
+	match := &BackfillMatch{
+		Label: &MatchLabel{
+			ID:       MatchID{UUID: matchUUID, Node: "testnode"},
+			GroupID:  &groupID,
+			Mode:     evr.ModeArenaPublic,
+			RatingMu: 15.5,
+		},
+		OpenSlots:  map[int]int{evr.TeamBlue: 4, evr.TeamOrange: 4},
+		TeamCounts: map[int]int{evr.TeamBlue: 0, evr.TeamOrange: 0},
+		RTTs:       make(map[string]int),
+	}
+
+	result := &BackfillResult{
+		Candidate:     candidate,
+		Match:         match,
+		Team:          evr.TeamBlue,
+		Score:         120.5,
+		PlayerUserIDs: []string{"user1", "user2"},
+	}
+
+	// Verify all fields are properly set
+	if result.Candidate.Ticket != "test-ticket" {
+		t.Errorf("Expected candidate ticket 'test-ticket', got '%s'", result.Candidate.Ticket)
+	}
+
+	if result.Match.Label.ID.UUID != matchUUID {
+		t.Errorf("Expected match ID %s, got %s", matchUUID.String(), result.Match.Label.ID.UUID.String())
+	}
+
+	if result.Team != evr.TeamBlue {
+		t.Errorf("Expected team %d, got %d", evr.TeamBlue, result.Team)
+	}
+
+	if result.Score != 120.5 {
+		t.Errorf("Expected score 120.5, got %f", result.Score)
+	}
+
+	if len(result.PlayerUserIDs) != 2 {
+		t.Errorf("Expected 2 player user IDs, got %d", len(result.PlayerUserIDs))
+	}
+
+	if result.PlayerUserIDs[0] != "user1" || result.PlayerUserIDs[1] != "user2" {
+		t.Errorf("Expected player user IDs [user1, user2], got %v", result.PlayerUserIDs)
+	}
+}
+
+func TestBackfillMinAcceptableScore(t *testing.T) {
+	// Test that BackfillMinAcceptableScore threshold works as expected
+	if BackfillMinAcceptableScore != 0.0 {
+		t.Errorf("Expected BackfillMinAcceptableScore to be 0.0, got %f", BackfillMinAcceptableScore)
+	}
+
+	// Test scores above and below threshold
+	testCases := []struct {
+		score        float64
+		shouldAccept bool
+		description  string
+	}{
+		{-10.0, false, "negative score should be rejected"},
+		{0.0, false, "score equal to threshold should be rejected (uses > comparison)"},
+		{0.1, true, "score slightly above threshold should be accepted"},
+		{50.0, true, "positive score should be accepted"},
+		{120.0, true, "high score should be accepted"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			accepted := tc.score > BackfillMinAcceptableScore
+			if accepted != tc.shouldAccept {
+				t.Errorf("Score %f: expected accept=%v, got accept=%v", tc.score, tc.shouldAccept, accepted)
+			}
+		})
+	}
+}

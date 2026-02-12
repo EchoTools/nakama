@@ -17,7 +17,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/echotools/nevr-common/v4/gen/go/rtapi"
+	rtapi "github.com/echotools/nevr-common/v4/gen/go/rtapi/v1"
 	"github.com/go-redis/redis"
 	"github.com/gofrs/uuid/v5"
 
@@ -39,6 +39,7 @@ var globalMatchmaker = atomic.NewPointer[LocalMatchmaker](nil)
 var globalAppBot = atomic.NewPointer[DiscordAppBot](nil)
 var globalLobbyBuilder = atomic.NewPointer[LobbyBuilder](nil)
 var globalSkillBasedMatchmaker = atomic.NewPointer[SkillBasedMatchmaker](nil)
+var globalEarlyQuitMessageTrigger = atomic.NewPointer[SNSEarlyQuitMessageTrigger](nil)
 
 type EvrPipeline struct {
 	sync.RWMutex
@@ -69,7 +70,8 @@ type EvrPipeline struct {
 	placeholderEmail string
 	linkDeviceURL    string
 
-	messageCache *MapOf[string, evr.Message]
+	messageCache            *MapOf[string, evr.Message]
+	earlyQuitMessageTrigger *SNSEarlyQuitMessageTrigger
 }
 
 type ctxDiscordBotTokenKey struct{}
@@ -245,6 +247,14 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		messageCache: &MapOf[string, evr.Message]{},
 	}
 
+	// Create and store the early quit message trigger for sending SNS messages to players
+	earlyQuitMessageTrigger := NewSNSEarlyQuitMessageTrigger(evrPipeline, logger, nk, db)
+	evrPipeline.earlyQuitMessageTrigger = earlyQuitMessageTrigger
+	globalEarlyQuitMessageTrigger.Store(earlyQuitMessageTrigger)
+
+	// Start the penalty expiry scheduler to monitor and send penalty expiry notifications
+	earlyQuitMessageTrigger.StartLockoutExpiryScheduler(context.Background())
+
 	return evrPipeline
 }
 
@@ -284,7 +294,11 @@ func DetermineServiceIPs(ctx context.Context) (intIP net.IP, extIP net.IP, err e
 	return intIP, extIP, nil
 }
 
-func (p *EvrPipeline) Stop() {}
+func (p *EvrPipeline) Stop() {
+	if p.earlyQuitMessageTrigger != nil {
+		p.earlyQuitMessageTrigger.Stop()
+	}
+}
 
 func (p *EvrPipeline) MessageCacheStore(key string, message evr.Message, ttl time.Duration) {
 	p.messageCache.Store(key, message)

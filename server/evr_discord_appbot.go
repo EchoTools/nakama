@@ -74,7 +74,8 @@ type DiscordAppBot struct {
 	// Rate limiter for public matches (echo_arena, echo_combat) - 1 per 15 minutes
 	publicMatchRatePerSecond rate.Limit
 	publicMatchBurst         int
-	publicMatchRateLimiters  *MapOf[string, *rate.Limiter]
+	// Rate limiters for all match creation modes (public, private, social)
+	matchCreateRateLimiters *MapOf[string, *rate.Limiter]
 }
 
 func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordIntegrator, statusRegistry StatusRegistry, dg *discordgo.Session, ipInfoCache *IPInfoCache, guildGroupRegistry *GuildGroupRegistry) (*DiscordAppBot, error) {
@@ -106,7 +107,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		// Rate limiter for public matches: 1 per 15 minutes (900 seconds)
 		publicMatchRatePerSecond: 1.0 / 900,
 		publicMatchBurst:         1,
-		publicMatchRateLimiters:  &MapOf[string, *rate.Limiter]{},
+		matchCreateRateLimiters:  &MapOf[string, *rate.Limiter]{},
 		partyStatusChs:           &MapOf[string, chan error]{},
 		debugChannels:            make(map[string]string),
 	}
@@ -238,16 +239,34 @@ func (e *DiscordAppBot) discordGoLogger(msgL int, caller int, format string, a .
 	}
 }
 
-func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string) *rate.Limiter {
+func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string, group *GuildGroup) *rate.Limiter {
 	key := strings.Join([]string{userID, groupID}, ":")
-	limiter, _ := e.prepareMatchRateLimiters.LoadOrStore(key, rate.NewLimiter(e.prepareMatchRatePerSecond, e.prepareMatchBurst))
+
+	// Use guild group setting if available, otherwise use default
+	ratePerSecond := e.prepareMatchRatePerSecond
+	if group != nil && group.CreateCommandRateLimitPerMinute > 0 {
+		ratePerSecond = rate.Limit(group.CreateCommandRateLimitPerMinute / 60.0) // Convert from per-minute to per-second
+	}
+
+	// Try to load existing limiter
+	if limiter, ok := e.prepareMatchRateLimiters.Load(key); ok {
+		// Check if the rate has changed, if so, update it
+		if limiter.Limit() != ratePerSecond {
+			limiter.SetLimit(ratePerSecond)
+		}
+		return limiter
+	}
+
+	// Create a new limiter if none exists
+	limiter := rate.NewLimiter(ratePerSecond, e.prepareMatchBurst)
+	e.prepareMatchRateLimiters.Store(key, limiter)
 	return limiter
 }
 
 // loadPublicMatchRateLimiter returns the rate limiter for public match creation (1 per 15 minutes)
 func (e *DiscordAppBot) loadPublicMatchRateLimiter(userID, groupID string) *rate.Limiter {
 	key := strings.Join([]string{userID, groupID, "public"}, ":")
-	limiter, _ := e.publicMatchRateLimiters.LoadOrStore(key, rate.NewLimiter(e.publicMatchRatePerSecond, e.publicMatchBurst))
+	limiter, _ := e.matchCreateRateLimiters.LoadOrStore(key, rate.NewLimiter(e.publicMatchRatePerSecond, e.publicMatchBurst))
 	return limiter
 }
 

@@ -23,9 +23,10 @@ func (m *MigrationEnforcementJournals) MigrateSystem(ctx context.Context, logger
 	count := 0
 	for _, journal := range journals {
 		// adapter := journal.CreateStorableAdapter()
-		if err := StorableWrite(ctx, nk, journal.UserID, journal); err != nil {
+		if err := SyncJournalAndProfile(ctx, nk, journal.UserID, journal); err != nil {
 			return err
 		}
+		count++
 	}
 
 	logger.WithFields(map[string]interface{}{

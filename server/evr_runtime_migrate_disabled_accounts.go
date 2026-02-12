@@ -44,12 +44,12 @@ func (m MigrationSuspensions) MigrateSystem(ctx context.Context, logger runtime.
 				logger.Warn("Failed to convert legacy suspension to journal", err)
 				continue
 			}
-			if err := StorableWrite(ctx, nk, userID, journal); err != nil {
+			if err := SyncJournalAndProfile(ctx, nk, userID, journal); err != nil {
 				logger.WithFields(map[string]any{
 					"error":    err,
 					"user_id":  userID,
 					"group_id": groupID,
-				}).Error("Failed to write enforcement journal")
+				}).Error("Failed to write enforcement data")
 				continue
 			}
 			count++

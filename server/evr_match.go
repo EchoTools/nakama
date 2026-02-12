@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/echotools/nevr-common/v4/gen/go/rtapi"
+	rtapi "github.com/echotools/nevr-common/v4/gen/go/rtapi/v1"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -254,6 +254,30 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, false, fmt.Sprintf("failed to unmarshal metadata: %v", err)
 	}
 
+	// Log early quit penalty status for metrics (client enforces spawn restrictions)
+	serviceSettings := ServiceSettings()
+	enableEarlyQuitPenalty := true
+	if serviceSettings != nil {
+		enableEarlyQuitPenalty = serviceSettings.Matchmaking.EnableEarlyQuitPenalty
+	}
+	if enableEarlyQuitPenalty && !meta.Presence.IsSpectator() {
+		eqConfig := NewEarlyQuitConfig()
+		if err := StorableRead(ctx, nk, joinPresence.GetUserId(), eqConfig, true); err != nil {
+			logger.Debug("Failed to load early quit config for logging", zap.Error(err))
+		} else if eqConfig.EarlyQuitPenaltyLevel > 0 {
+			timeSinceLastQuit := time.Since(eqConfig.LastEarlyQuitTime)
+			lockoutDuration := GetLockoutDuration(int(eqConfig.EarlyQuitPenaltyLevel))
+
+			if timeSinceLastQuit < lockoutDuration {
+				remainingTime := lockoutDuration - timeSinceLastQuit
+				logger.Info("Player joining with active early quit penalty (client-side enforcement expected)",
+					zap.String("user_id", joinPresence.GetUserId()),
+					zap.Int32("penalty_level", eqConfig.EarlyQuitPenaltyLevel),
+					zap.Duration("remaining", remainingTime))
+			}
+		}
+	}
+
 	// Check if the match is locked.
 	if !state.Open {
 
@@ -268,15 +292,15 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
-	// Check if the main presence is already in the match (idempotent join or reconnection)
+	// Check if the main presence is already in the match with the same session ID
+	// Explicitly reject as duplicate; callers should treat as no-op
 	if existing, found := state.presenceMap[meta.Presence.GetSessionId()]; found {
-		// If the session is already in the match, treat this as a successful idempotent join
 		logger.WithFields(map[string]interface{}{
 			"evrid": existing.EvrID,
 			"uid":   existing.GetUserId(),
 			"sid":   existing.GetSessionId(),
-		}).Debug("Session already in match, allowing idempotent join.")
-		return state, true, ""
+		}).Warn("Duplicate join attempt for existing session; rejecting.")
+		return state, false, ErrJoinRejectReasonDuplicateJoin.Error()
 	}
 
 	// Remove any reservations of existing players (i.e. party members already in the match)
@@ -360,12 +384,14 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	}
 
 	// Ensure the player has a role alignment
+	isBackfill := time.Now().After(state.StartTime.Add(PublicMatchWaitTime))
 	metricsTags := map[string]string{
 		"mode":     state.Mode.String(),
 		"level":    state.Level.String(),
 		"type":     state.LobbyType.String(),
 		"role":     fmt.Sprintf("%d", meta.Presence.RoleAlignment),
 		"group_id": state.GetGroupID().String(),
+		"backfill": strconv.FormatBool(isBackfill),
 	}
 	if nk != nil { // for testing
 		nk.MetricsCounterAdd("match_entrant_join_count", metricsTags, 1)
@@ -376,6 +402,27 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, false, ErrJoinRejectReasonFailedToAssignTeam.Error()
 	} else if slots < len(meta.Presences()) {
 		return state, false, ErrJoinRejectReasonLobbyFull.Error()
+	}
+
+	// Enforce team size limits for public arena matches BEFORE adding player to state
+	// This prevents broadcasting an invalid state that exceeds the team capacity
+	if state.Mode == evr.ModeArenaPublic {
+		maxTeamSize := DefaultPublicArenaTeamSize // Always 4 for public arena
+		targetTeam := meta.Presence.RoleAlignment
+		currentCount := state.RoleCount(targetTeam)
+
+		// Check if adding this player would exceed the limit
+		if currentCount >= maxTeamSize {
+			logger.WithFields(map[string]interface{}{
+				"blue":          state.RoleCount(evr.TeamBlue),
+				"orange":        state.RoleCount(evr.TeamOrange),
+				"target_team":   targetTeam,
+				"max_team_size": maxTeamSize,
+				"team_size":     state.TeamSize,
+			}).Warn("Rejecting join: team size limit would be exceeded for public arena match.")
+
+			return state, false, ErrJoinRejectReasonLobbyFull.Error()
+		}
 	}
 
 	// Add reservations to the reservation map
@@ -411,16 +458,6 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 	if err := m.updateLabel(logger, dispatcher, state); err != nil {
 		logger.Error("Failed to update label: %v", err)
-	}
-
-	// Check team sizes
-	if state.Mode == evr.ModeArenaPublic {
-		if state.RoleCount(evr.TeamBlue) > state.TeamSize || state.RoleCount(evr.TeamOrange) > state.TeamSize {
-			logger.WithFields(map[string]interface{}{
-				"blue":   state.RoleCount(evr.TeamBlue),
-				"orange": state.RoleCount(evr.TeamOrange),
-			}).Error("Oversized team.")
-		}
 	}
 
 	return state, true, meta.Presence.String()
@@ -641,6 +678,27 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 						logger.Warn("Failed to record early quit to leaderboard: %v", err)
 					}
 
+					// Save detailed quit record to history
+					if participation, ok := state.participations[mp.GetUserId()]; ok {
+						history := NewEarlyQuitHistory(mp.GetUserId())
+						if err := StorableRead(ctx, nk, mp.GetUserId(), history, false); err != nil {
+							logger.WithField("error", err).Debug("Creating new early quit history")
+						}
+
+						quitRecord := CreateQuitRecordFromParticipation(state, participation)
+						history.AddQuitRecord(quitRecord)
+
+						// Prune old records (keep last 90 days)
+						prunedQuits, prunedCompletions := history.PruneOldRecords(90 * 24 * time.Hour)
+						if prunedQuits > 0 || prunedCompletions > 0 {
+							logger.Debug("Pruned old early quit history records", zap.Int("quits", prunedQuits), zap.Int("completions", prunedCompletions))
+						}
+
+						if err := StorableWrite(ctx, nk, mp.GetUserId(), history); err != nil {
+							logger.Warn("Failed to write early quit history", zap.Error(err))
+						}
+					}
+
 					eqconfig := NewEarlyQuitConfig()
 					_nk := nk.(*RuntimeGoNakamaModule)
 					if err := StorableRead(ctx, nk, mp.GetUserId(), eqconfig, true); err != nil {
@@ -648,6 +706,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 					} else {
 
 						eqconfig.IncrementEarlyQuit()
+						eqconfig.LastEarlyQuitMatchID = state.ID
 
 						// Check for tier change after early quit
 						serviceSettings := ServiceSettings()
@@ -669,16 +728,36 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 								}
 							}
 
-							// Launch goroutine to check if player logs out and remove early quit if they do
-							// Use a 5-minute grace period before checking logout status
-							// Use background context to ensure goroutine isn't cancelled when match ends
-							go func(userID, sessionID string) {
-								bgCtx := context.Background()
-								CheckAndStrikeEarlyQuitIfLoggedOut(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, 5*time.Minute)
-							}(mp.GetUserId(), mp.GetSessionId())
+							// Send early quit penalty notification to player
+							if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
+								penaltyLevel := int32(eqconfig.EarlyQuitPenaltyLevel)
+								// Clamp to max penalty level (typically 3)
+								if penaltyLevel > MaxEarlyQuitPenaltyLevel {
+									penaltyLevel = int32(MaxEarlyQuitPenaltyLevel)
+								}
 
-							// Send Discord DM if tier changed
+								// Get lockout duration for current penalty level (0s, 2m, 5m, 15m)
+								lockoutDuration := GetLockoutDurationSeconds(int(penaltyLevel))
+
+								reason := fmt.Sprintf("Early quit detected in match %s", state.ID.String())
+								messageTrigger.SendPenaltyAppliedNotification(ctx, mp.GetUserId(), penaltyLevel, lockoutDuration, reason)
+
+								// Trigger auto-report at penalty level 3
+								if penaltyLevel >= 3 {
+									featureFlags := evr.DefaultEarlyQuitFeatureFlags()
+									if featureFlags != nil && featureFlags.EnableAutoReport {
+										TriggerAutoReport(ctx, logger, mp.GetUserId(), penaltyLevel)
+									}
+								}
+							}
+
+							// Send tier change notification if applicable
 							if tierChanged {
+								if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
+									messageTrigger.SendTierChangeNotification(ctx, mp.GetUserId(), oldTier, newTier, newTier > oldTier)
+								}
+
+								// Send Discord DM if tier changed
 								discordID, err := GetDiscordIDByUserID(ctx, db, mp.GetUserId())
 								if err != nil {
 									logger.Warn("Failed to get Discord ID for tier notification", zap.Error(err))
@@ -696,6 +775,14 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 									}
 								}
 							}
+
+							// Launch goroutine to check if player logs out and remove early quit if they do
+							// Use a 5-minute grace period before checking logout status
+							// Use background context to ensure goroutine isn't cancelled when match ends
+							go func(userID, sessionID string) {
+								bgCtx := context.Background()
+								CheckAndStrikeEarlyQuitIfLoggedOut(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, 5*time.Minute)
+							}(mp.GetUserId(), mp.GetSessionId())
 						}
 					}
 				}
@@ -707,7 +794,12 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	if len(rejects) > 0 {
+
+		messages := make([]evr.Message, 0, len(rejects))
+
 		code := evr.PlayerRejectionReasonDisconnected
+		// Send legacy messages to the game server to notify the server to disconnect the players
+		messages = append(messages, evr.NewGameServerEntrantRejected(code, rejects...))
 
 		// Convert UUIDs to strings for protobuf
 		rejectIDs := make([]string, 0, len(rejects))
@@ -732,10 +824,11 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 				"rejects": rejects,
 				"code":    code,
 			}).Debug("Sending reject message to game server.")
+			messages = append(messages, msg)
+		}
 
-			if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{state.server}, nil); err != nil {
-				logger.Warn("Failed to dispatch message: %v", err)
-			}
+		if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.server}, nil); err != nil {
+			logger.Warn("Failed to dispatch message: %v", err)
 		}
 	}
 	if len(state.presenceMap) == 0 {
@@ -970,6 +1063,11 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				}
 
 				eqconfig.IncrementCompletedMatches()
+
+				// Track completion in detailed history
+				if err := TrackMatchCompletion(ctx, logger, nk, presence.GetUserId(), state.ID, time.Now().UTC()); err != nil {
+					logger.WithField("error", err).Debug("Failed to track match completion in history")
+				}
 
 				// Check for tier change after completing match
 				oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
@@ -1550,4 +1648,11 @@ func (m *EvrMatch) sendEntrantReject(ctx context.Context, logger runtime.Logger,
 		return fmt.Errorf("failed to dispatch message: %w", err)
 	}
 	return nil
+}
+
+// TriggerAutoReport logs an auto-report event for players at max early quit penalty level
+func TriggerAutoReport(ctx context.Context, logger runtime.Logger, userID string, penaltyLevel int32) {
+	logger.Info("Auto-report triggered for player with max early quit penalty",
+		zap.String("user_id", userID),
+		zap.Int32("penalty_level", penaltyLevel))
 }

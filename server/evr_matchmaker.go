@@ -37,6 +37,15 @@ type SkillBasedMatchmaker struct {
 	lastProcessEnd   *atomic.Int64 // Unix nanoseconds when matchmaker finished processing
 	isProcessing     *atomic.Bool  // Whether matchmaker is currently processing
 	processMu        sync.RWMutex  // Protects timing state reads during backfill coordination
+
+	// Reservation state (persists across cycles, in-memory only)
+	reservationMu   sync.Mutex
+	starvingTickets map[string]*StarvingTicket // ticket ID -> state
+}
+
+type StarvingTicket struct {
+	Ticket         string
+	FirstStarvedAt time.Time // When this ticket first became starving
 }
 
 func (s *SkillBasedMatchmaker) StoreLatestResult(candidates, madeMatches [][]runtime.MatchmakerEntry) {
@@ -110,6 +119,7 @@ func NewSkillBasedMatchmaker() *SkillBasedMatchmaker {
 		lastProcessStart: atomic.NewInt64(0),
 		lastProcessEnd:   atomic.NewInt64(0),
 		isProcessing:     atomic.NewBool(false),
+		starvingTickets:  make(map[string]*StarvingTicket),
 	}
 
 	sbmm.latestCandidates.Store([][]runtime.MatchmakerEntry{})
@@ -152,10 +162,11 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	var (
 		matches       [][]runtime.MatchmakerEntry
 		filterCounts  map[string]int
+		predictions   []PredictedMatch
 		originalCount = len(candidates)
 	)
 
-	candidates, matches, filterCounts = m.processPotentialMatches(candidates)
+	candidates, matches, filterCounts, predictions = m.processPotentialMatches(candidates)
 
 	// Extract all players from the candidates
 	playerSet := make(map[string]struct{}, 0)
@@ -189,7 +200,51 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	nk.MetricsCounterAdd("matchmaker_unmatched_player_count", nil, int64(len(unmatchedPlayers)))
 	nk.MetricsCounterAdd("matchmaker_matched_player_count", nil, int64(len(matchedPlayers)))
 
-	logger.WithFields(map[string]interface{}{
+	// Calculate wait time statistics for logging
+	now := time.Now().UTC().Unix()
+	var maxWaitTime, totalWaitTime float64
+	var highSkillWaiters []map[string]any
+	waitTimeCount := 0
+
+	for _, candidate := range candidates {
+		if candidate == nil {
+			continue
+		}
+		for _, entry := range candidate {
+			props := entry.GetProperties()
+			submissionTime, ok := props["submission_time"].(float64)
+			if !ok || submissionTime <= 0 {
+				continue
+			}
+			waitTime := float64(now) - submissionTime
+			totalWaitTime += waitTime
+			waitTimeCount++
+			if waitTime > maxWaitTime {
+				maxWaitTime = waitTime
+			}
+
+			// Track high-skill players with long wait times
+			mu, hasMu := props["rating_mu"].(float64)
+			_, matched := matchedPlayerSet[entry.GetPresence().GetUserId()]
+			if hasMu && mu >= 25.0 && waitTime > 120 { // Players with mu >= 25 waiting > 2 minutes
+				highSkillWaiters = append(highSkillWaiters, map[string]any{
+					"user_id":        entry.GetPresence().GetUserId(),
+					"username":       entry.GetPresence().GetUsername(),
+					"rating_mu":      mu,
+					"wait_time_secs": waitTime,
+					"ticket":         entry.GetTicket(),
+					"matched":        matched,
+				})
+			}
+		}
+	}
+
+	avgWaitTime := float64(0)
+	if waitTimeCount > 0 {
+		avgWaitTime = totalWaitTime / float64(waitTimeCount)
+	}
+
+	logFields := map[string]any{
 		"mode":                 modestr,
 		"num_player_total":     len(playerSet),
 		"num_tickets":          len(ticketSet),
@@ -200,10 +255,37 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		"matched_players":      matchedPlayerSet,
 		"unmatched_players":    unmatchedPlayers,
 		"duration":             time.Since(startTime),
-	}).Info("Skill-based matchmaker completed.")
+		"max_wait_time_secs":   maxWaitTime,
+		"avg_wait_time_secs":   avgWaitTime,
+	}
+
+	if fc, ok := filterCounts["starving_tickets"]; ok && fc > 0 {
+		logFields["starving_tickets"] = fc
+		logFields["reserved_players"] = filterCounts["reserved_players"]
+	}
+
+	if len(highSkillWaiters) > 0 {
+		logFields["high_skill_waiters"] = highSkillWaiters
+	}
+
+	logger.WithFields(logFields).Info("Skill-based matchmaker completed.")
 
 	if candidates != nil && matches != nil && len(candidates) > 0 {
 		m.StoreLatestResult(candidates, matches)
+	}
+
+	// Capture matchmaker state if enabled
+	if settings := ServiceSettings(); settings != nil && settings.Matchmaking.EnableMatchmakerStateCapture {
+		state := m.CaptureMatchmakerState(ctx, modestr, groupID, candidates, matches, filterCounts, time.Since(startTime), predictions)
+		captureDir := settings.Matchmaking.MatchmakerStateCaptureDir
+		if captureDir == "" {
+			captureDir = "/tmp/matchmaker_replay"
+		}
+		if filepath, err := SaveMatchmakerState(state, captureDir); err != nil {
+			logger.WithField("error", err).Error("Failed to save matchmaker state")
+		} else {
+			logger.WithField("filepath", filepath).Debug("Matchmaker state saved")
+		}
 	}
 
 	return matches

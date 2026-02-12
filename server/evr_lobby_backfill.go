@@ -6,6 +6,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -66,10 +67,306 @@ type BackfillMatch struct {
 
 // BackfillResult represents the result of a backfill attempt
 type BackfillResult struct {
-	Candidate *BackfillCandidate
-	Match     *BackfillMatch
-	Team      int
-	Score     float64
+	Candidate     *BackfillCandidate
+	Match         *BackfillMatch
+	Team          int
+	Score         float64
+	PlayerUserIDs []string // Track user IDs of players successfully backfilled
+}
+
+// backfillContext holds pre-computed values for a backfill processing cycle
+// This avoids repeatedly calling ServiceSettings() and other expensive lookups
+type backfillContext struct {
+	settings                GlobalMatchmakingSettings
+	now                     time.Time
+	reducingPrecisionFactor float64
+}
+
+// preparedBackfillMatch holds pre-computed match metadata for scoring
+type preparedBackfillMatch struct {
+	*BackfillMatch
+	externalIP string
+	matchAge   time.Duration
+}
+
+// preparedBackfillCandidate holds pre-computed candidate data including resolved sessions
+type preparedBackfillCandidate struct {
+	*BackfillCandidate
+	sessions  []Session
+	partySize int
+}
+
+// prepareMatches pre-computes match metadata that doesn't change during processing
+func (b *PostMatchmakerBackfill) prepareMatches(matches []*BackfillMatch, bctx *backfillContext) []*preparedBackfillMatch {
+	prepared := make([]*preparedBackfillMatch, len(matches))
+	for i, m := range matches {
+		prepared[i] = &preparedBackfillMatch{
+			BackfillMatch: m,
+			externalIP:    m.Label.GameServer.Endpoint.GetExternalIP(),
+			matchAge:      bctx.now.Sub(m.Label.StartTime),
+		}
+	}
+	return prepared
+}
+
+// prepareCandidates pre-resolves sessions for all candidates upfront
+func (b *PostMatchmakerBackfill) prepareCandidates(candidates []*BackfillCandidate) []*preparedBackfillCandidate {
+	prepared := make([]*preparedBackfillCandidate, 0, len(candidates))
+	for _, c := range candidates {
+		sessions := make([]Session, 0, len(c.Entries))
+		for _, entry := range c.Entries {
+			sessionID := uuid.FromStringOrNil(entry.Presence.GetSessionId())
+			if session := b.sessionRegistry.Get(sessionID); session != nil {
+				sessions = append(sessions, session)
+			}
+		}
+		// Skip candidates with no valid sessions
+		if len(sessions) == 0 {
+			continue
+		}
+		prepared = append(prepared, &preparedBackfillCandidate{
+			BackfillCandidate: c,
+			sessions:          sessions,
+			partySize:         len(c.Entries),
+		})
+	}
+	return prepared
+}
+
+// calculateBackfillScoreOptimized calculates score using pre-computed values
+func (b *PostMatchmakerBackfill) calculateBackfillScoreOptimized(
+	candidate *preparedBackfillCandidate,
+	match *preparedBackfillMatch,
+	team int,
+	bctx *backfillContext,
+) float64 {
+	score := BackfillBaseScore
+	rpf := bctx.reducingPrecisionFactor
+
+	// RTT scoring using pre-computed external IP
+	rtt, hasRTT := candidate.RTTs[match.externalIP]
+	if !hasRTT {
+		score -= BackfillNoRTTPenalty * (1.0 - rpf)
+	} else if rtt > candidate.MaxRTT {
+		penalty := float64(rtt-candidate.MaxRTT) * BackfillRTTExceedsPenaltyMultiplier * (1.0 - rpf)
+		score -= penalty
+	} else if candidate.MaxRTT > 0 {
+		score += (float64(candidate.MaxRTT-rtt) / float64(candidate.MaxRTT)) * BackfillRTTScoreWeight
+	}
+
+	// Rating scoring using pre-loaded settings
+	if bctx.settings.EnableSBMM && candidate.Mode == evr.ModeArenaPublic {
+		ratingDelta := math.Abs(match.Label.RatingMu - candidate.Rating)
+		ratingRange := bctx.settings.RatingRange
+		if ratingRange == 0 {
+			ratingRange = 2.0
+		}
+
+		const reducingPrecisionRatingWeightScale = 0.5
+		if ratingDelta <= ratingRange || rpf >= reducingPrecisionRatingWeightScale {
+			ratingScore := (1.0 - ratingDelta/ratingRange) * BackfillRatingScoreWeight
+			if ratingScore < 0 {
+				ratingScore = 0
+			}
+			score += ratingScore * (1.0 - rpf*reducingPrecisionRatingWeightScale)
+		} else {
+			score -= BackfillRatingScoreWeight * (1.0 - rpf)
+		}
+	}
+
+	// Population bonus
+	score += float64(match.Label.PlayerCount) * BackfillPopulationBonus
+
+	// Team balance scoring
+	if team != evr.TeamSocial {
+		blueCount := match.TeamCounts[evr.TeamBlue]
+		orangeCount := match.TeamCounts[evr.TeamOrange]
+		teamImbalance := math.Abs(float64(blueCount - orangeCount))
+
+		if team == evr.TeamBlue && blueCount < orangeCount {
+			score += BackfillTeamBalanceBonus
+		} else if team == evr.TeamOrange && orangeCount < blueCount {
+			score += BackfillTeamBalanceBonus
+		} else if teamImbalance > 1 {
+			score -= BackfillTeamImbalancePenalty * (1.0 - rpf)
+		}
+	}
+
+	// Match age penalty using pre-computed age
+	if match.matchAge > BackfillMatchAgeThreshold {
+		agePenalty := match.matchAge.Minutes() * BackfillMatchAgePenaltyPerMinute * (1.0 - rpf)
+		score -= agePenalty
+	}
+
+	return score
+}
+
+// findBestBackfillMatchOptimized finds best match using pre-computed data
+func (b *PostMatchmakerBackfill) findBestBackfillMatchOptimized(
+	candidate *preparedBackfillCandidate,
+	matches []*preparedBackfillMatch,
+	bctx *backfillContext,
+) *BackfillResult {
+	var bestResult *BackfillResult
+	partySize := candidate.partySize
+
+	for _, match := range matches {
+		possibleTeams := b.getPossibleTeams(candidate.BackfillCandidate, match.BackfillMatch, partySize)
+		if len(possibleTeams) == 0 {
+			continue
+		}
+
+		for _, team := range possibleTeams {
+			score := b.calculateBackfillScoreOptimized(candidate, match, team, bctx)
+			if bestResult == nil || score > bestResult.Score {
+				bestResult = &BackfillResult{
+					Candidate: candidate.BackfillCandidate,
+					Match:     match.BackfillMatch,
+					Team:      team,
+					Score:     score,
+				}
+			}
+		}
+	}
+
+	return bestResult
+}
+
+// getPossibleTeams determines which teams can accept a candidate
+func (b *PostMatchmakerBackfill) getPossibleTeams(candidate *BackfillCandidate, match *BackfillMatch, partySize int) []int {
+	if candidate.Mode == evr.ModeSocialPublic {
+		if match.OpenSlots[evr.TeamSocial] >= partySize {
+			return []int{evr.TeamSocial}
+		}
+		return nil
+	}
+
+	// For competitive modes
+	if candidate.TeamAlignment != evr.TeamUnassigned {
+		if match.OpenSlots[candidate.TeamAlignment] >= partySize {
+			return []int{candidate.TeamAlignment}
+		}
+		return nil
+	}
+
+	// No team preference - prioritize smaller team for balance
+	blueCount := match.TeamCounts[evr.TeamBlue]
+	orangeCount := match.TeamCounts[evr.TeamOrange]
+	blueOpen := match.OpenSlots[evr.TeamBlue] >= partySize
+	orangeOpen := match.OpenSlots[evr.TeamOrange] >= partySize
+
+	var teams []int
+	if blueCount < orangeCount && blueOpen {
+		teams = append(teams, evr.TeamBlue)
+	} else if orangeCount < blueCount && orangeOpen {
+		teams = append(teams, evr.TeamOrange)
+	} else {
+		// Equal or preferred team full - add both available
+		if blueOpen {
+			teams = append(teams, evr.TeamBlue)
+		}
+		if orangeOpen {
+			teams = append(teams, evr.TeamOrange)
+		}
+	}
+
+	return teams
+}
+
+// executeBackfillResultOptimized executes backfill using pre-resolved sessions
+func (b *PostMatchmakerBackfill) executeBackfillResultOptimized(
+	ctx context.Context,
+	logger *zap.Logger,
+	result *BackfillResult,
+	sessions []Session,
+	groupID string,
+) int {
+	if result == nil || result.Match == nil || len(sessions) == 0 {
+		return 0
+	}
+
+	// Get the server session
+	serverSession := b.sessionRegistry.Get(result.Match.Label.GameServer.SessionID)
+	if serverSession == nil {
+		logger.Warn("Server session not found for backfill", zap.String("match_id", result.Match.Label.ID.String()))
+		return 0
+	}
+
+	// Create entrant presences and join them concurrently
+	type entrantData struct {
+		session Session
+		entrant *EvrMatchPresence
+	}
+	entrantsToJoin := make([]entrantData, 0, len(sessions))
+
+	for i, session := range sessions {
+		if i >= len(result.Candidate.Entries) {
+			break
+		}
+		entry := result.Candidate.Entries[i]
+
+		mu := entry.NumericProperties["rating_mu"]
+		sigma := entry.NumericProperties["rating_sigma"]
+		rating := NewRating(0, mu, sigma)
+
+		entrant, err := EntrantPresenceFromSession(
+			session,
+			uuid.FromStringOrNil(entry.PartyId),
+			result.Team,
+			rating,
+			groupID,
+			0,
+			"",
+		)
+		if err != nil {
+			logger.Warn("Failed to create entrant presence for backfill",
+				zap.Error(err),
+				zap.String("session_id", session.ID().String()))
+			continue
+		}
+
+		entrantsToJoin = append(entrantsToJoin, entrantData{session: session, entrant: entrant})
+	}
+
+	if len(entrantsToJoin) == 0 {
+		return 0
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	successCount := 0
+	successfulUserIDs := make([]string, 0, len(entrantsToJoin))
+
+	for _, data := range entrantsToJoin {
+		wg.Add(1)
+		go func(sess Session, ent *EvrMatchPresence) {
+			defer wg.Done()
+			if err := LobbyJoinEntrants(logger, b.matchRegistry, b.tracker, sess, serverSession, result.Match.Label, ent); err != nil {
+				logger.Warn("Failed to join entrant to backfill match",
+					zap.Error(err),
+					zap.String("match_id", result.Match.Label.ID.String()),
+					zap.String("user_id", ent.GetUserId()))
+			} else {
+				mu.Lock()
+				successCount++
+				successfulUserIDs = append(successfulUserIDs, ent.GetUserId())
+				mu.Unlock()
+				b.metrics.CustomCounter("lobby_join_post_matchmaker_backfill", result.Match.Label.MetricsTags(), 1)
+				logger.Info("Successfully backfilled player",
+					zap.String("match_id", result.Match.Label.ID.String()),
+					zap.String("user_id", ent.GetUserId()),
+					zap.Int("team", result.Team),
+					zap.Float64("score", result.Score))
+			}
+		}(data.session, data.entrant)
+	}
+
+	wg.Wait()
+
+	// Store the successful user IDs in the result for summary logging
+	result.PlayerUserIDs = successfulUserIDs
+
+	return successCount
 }
 
 // PostMatchmakerBackfill handles backfilling players into existing matches after the matchmaker runs
@@ -515,6 +812,9 @@ func (b *PostMatchmakerBackfill) FindBestBackfillMatch(candidate *BackfillCandid
 // ProcessAndExecuteBackfill processes all unmatched candidates and attempts to backfill them,
 // executing each backfill immediately after finding a match. This ensures slot tracking remains
 // accurate by only decrementing slots when joins actually succeed.
+//
+// Optimized to pre-compute settings, match metadata, and resolve sessions upfront to avoid
+// redundant lookups in inner loops.
 func (b *PostMatchmakerBackfill) ProcessAndExecuteBackfill(ctx context.Context, logger *zap.Logger, candidates []*BackfillCandidate, reducingPrecisionFactor float64) ([]*BackfillResult, error) {
 	if len(candidates) == 0 {
 		return nil, nil
@@ -524,18 +824,34 @@ func (b *PostMatchmakerBackfill) ProcessAndExecuteBackfill(ctx context.Context, 
 		zap.Int("candidate_count", len(candidates)),
 		zap.Float64("reducing_precision_factor", reducingPrecisionFactor))
 
+	// Pre-compute context once for all scoring calculations
+	bctx := &backfillContext{
+		now:                     time.Now(),
+		reducingPrecisionFactor: reducingPrecisionFactor,
+	}
+	if ss := ServiceSettings(); ss != nil {
+		bctx.settings = ss.Matchmaking
+	}
+
 	// Sort candidates by submission time (oldest first - they've waited longest)
 	sort.SliceStable(candidates, func(i, j int) bool {
 		return candidates[i].SubmissionTime.Before(candidates[j].SubmissionTime)
 	})
+
+	// Pre-resolve sessions for all candidates upfront (batch operation)
+	preparedCandidates := b.prepareCandidates(candidates)
+	if len(preparedCandidates) == 0 {
+		logger.Debug("No valid candidates after session resolution")
+		return nil, nil
+	}
 
 	// Group candidates by groupID and mode
 	type groupKey struct {
 		GroupID uuid.UUID
 		Mode    evr.Symbol
 	}
-	candidatesByGroup := make(map[groupKey][]*BackfillCandidate)
-	for _, c := range candidates {
+	candidatesByGroup := make(map[groupKey][]*preparedBackfillCandidate)
+	for _, c := range preparedCandidates {
 		key := groupKey{GroupID: c.GroupID, Mode: c.Mode}
 		candidatesByGroup[key] = append(candidatesByGroup[key], c)
 	}
@@ -552,11 +868,19 @@ func (b *PostMatchmakerBackfill) ProcessAndExecuteBackfill(ctx context.Context, 
 		}
 
 		// Get available matches for this group/mode
-		matches, err := b.GetBackfillMatches(ctx, key.GroupID, key.Mode)
+		rawMatches, err := b.GetBackfillMatches(ctx, key.GroupID, key.Mode)
 		if err != nil {
 			b.logger.Warn("Failed to get backfill matches", zap.Error(err), zap.String("group_id", key.GroupID.String()), zap.String("mode", key.Mode.String()))
 			continue
 		}
+
+		if len(rawMatches) == 0 {
+			continue
+		}
+
+		// Pre-compute match metadata (external IPs, ages) once per group
+		preparedMatches := b.prepareMatches(rawMatches, bctx)
+		groupIDStr := key.GroupID.String()
 
 		// Process and execute each candidate immediately
 		for _, candidate := range groupCandidates {
@@ -568,28 +892,55 @@ func (b *PostMatchmakerBackfill) ProcessAndExecuteBackfill(ctx context.Context, 
 			default:
 			}
 
-			result, err := b.FindBestBackfillMatch(candidate, matches, reducingPrecisionFactor)
-			if err != nil {
-				b.logger.Warn("Failed to find backfill match", zap.Error(err), zap.String("ticket", candidate.Ticket))
-				continue
-			}
-
+			// Find best match using pre-computed data
+			result := b.findBestBackfillMatchOptimized(candidate, preparedMatches, bctx)
 			if result == nil || result.Score <= BackfillMinAcceptableScore {
 				continue
 			}
 
-			// Execute backfill immediately - only update slots and counts on success
-			successCount := b.executeBackfillResult(ctx, logger, result)
+			// Execute backfill immediately using pre-resolved sessions
+			successCount := b.executeBackfillResultOptimized(ctx, logger, result, candidate.sessions, groupIDStr)
 			if successCount > 0 {
 				results = append(results, result)
 				// Update tracked slots and team counts for successfully joined entrants
 				result.Match.OpenSlots[result.Team] -= successCount
 				result.Match.TeamCounts[result.Team] += successCount
+
+				// Log structured summary after each backfill operation
+				b.logBackfillSummary(logger, result)
 			}
 		}
 	}
 
 	return results, nil
+}
+
+// logBackfillSummary logs a structured summary of a completed backfill operation
+func (b *PostMatchmakerBackfill) logBackfillSummary(logger *zap.Logger, result *BackfillResult) {
+	if result == nil {
+		return
+	}
+
+	// Build structured summary of the backfill operation
+	fields := []zap.Field{
+		zap.String("match_id", result.Match.Label.ID.String()),
+		zap.Int("team", result.Team),
+		zap.Float64("score", result.Score),
+		zap.Int("player_count", len(result.PlayerUserIDs)),
+		zap.Strings("player_user_ids", result.PlayerUserIDs),
+		zap.String("mode", result.Match.Label.Mode.String()),
+		zap.String("group_id", result.Match.Label.GetGroupID().String()),
+	}
+
+	// Add rating info if available
+	if result.Match.Label.RatingMu > 0 {
+		fields = append(fields, zap.Float64("match_rating", result.Match.Label.RatingMu))
+	}
+	if result.Candidate.Rating > 0 {
+		fields = append(fields, zap.Float64("candidate_rating", result.Candidate.Rating))
+	}
+
+	logger.Info("Backfill operation completed", fields...)
 }
 
 // executeBackfillResult executes a single backfill result and returns the number of successfully joined entrants
@@ -635,21 +986,37 @@ func (b *PostMatchmakerBackfill) executeBackfillResult(ctx context.Context, logg
 		return 0
 	}
 
-	// Join entrants to the match
+	// Join entrants to the match concurrently
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 	successCount := 0
+	successfulUserIDs := make([]string, 0, len(entrants))
+
 	for i, entrant := range entrants {
-		if err := LobbyJoinEntrants(logger, b.matchRegistry, b.tracker, sessions[i], serverSession, result.Match.Label, entrant); err != nil {
-			logger.Warn("Failed to join entrant to backfill match", zap.Error(err), zap.String("match_id", result.Match.Label.ID.String()), zap.String("user_id", entrant.GetUserId()))
-		} else {
-			successCount++
-			b.metrics.CustomCounter("lobby_join_post_matchmaker_backfill", result.Match.Label.MetricsTags(), 1)
-			logger.Info("Successfully backfilled player",
-				zap.String("match_id", result.Match.Label.ID.String()),
-				zap.String("user_id", entrant.GetUserId()),
-				zap.Int("team", result.Team),
-				zap.Float64("score", result.Score))
-		}
+		wg.Add(1)
+		go func(idx int, ent *EvrMatchPresence) {
+			defer wg.Done()
+			if err := LobbyJoinEntrants(logger, b.matchRegistry, b.tracker, sessions[idx], serverSession, result.Match.Label, ent); err != nil {
+				logger.Warn("Failed to join entrant to backfill match", zap.Error(err), zap.String("match_id", result.Match.Label.ID.String()), zap.String("user_id", ent.GetUserId()))
+			} else {
+				mu.Lock()
+				successCount++
+				successfulUserIDs = append(successfulUserIDs, ent.GetUserId())
+				mu.Unlock()
+				b.metrics.CustomCounter("lobby_join_post_matchmaker_backfill", result.Match.Label.MetricsTags(), 1)
+				logger.Info("Successfully backfilled player",
+					zap.String("match_id", result.Match.Label.ID.String()),
+					zap.String("user_id", ent.GetUserId()),
+					zap.Int("team", result.Team),
+					zap.Float64("score", result.Score))
+			}
+		}(i, entrant)
 	}
+
+	wg.Wait()
+
+	// Store the successful user IDs in the result for summary logging
+	result.PlayerUserIDs = successfulUserIDs
 
 	return successCount
 }
