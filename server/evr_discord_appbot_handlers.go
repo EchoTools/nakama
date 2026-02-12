@@ -827,8 +827,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	}
 
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
-	// Use requireRegion=true to prevent silent fallback to different regions
-	// If the selected region has no available servers, present fallback options to the user
+	// Use requireRegion=true to prevent silent fallback; if no servers available, present fallback options to user
 	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, filteredIPs, settings, []string{region}, true, true, queryAddon)
 	if err != nil {
 		// Check if this is a region fallback error
