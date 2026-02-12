@@ -31,21 +31,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-var (
-	// Buffer pools for reducing allocations in hot paths
-	nevrReadBufferPool = sync.Pool{
-		New: func() any {
-			b := make([]byte, 0, 4096)
-			return &b
-		},
-	}
-	nevrWriteBufferPool = sync.Pool{
-		New: func() any {
-			b := make([]byte, 0, 4096)
-			return &b
-		},
-	}
-)
+
 
 type sessionNEVR struct {
 	sync.Mutex
@@ -249,7 +235,16 @@ IncomingLoop:
 		request := &rtapi.Envelope{}
 		if err := proto.Unmarshal(data, request); err != nil {
 			// If the payload is malformed the client is incompatible or misbehaving, either way disconnect it now.
-			s.logger.Warn("Received malformed payload", zap.Binary("data", data), zap.Error(err))
+			dataSize := len(data)
+			dataPrefixLen := dataSize
+			if dataPrefixLen > 256 {
+				dataPrefixLen = 256
+			}
+			if dataPrefixLen > 0 {
+				s.logger.Warn("Received malformed payload", zap.Int("data_size", dataSize), zap.Binary("data_prefix", data[:dataPrefixLen]), zap.Error(err))
+			} else {
+				s.logger.Warn("Received malformed payload", zap.Int("data_size", dataSize), zap.Error(err))
+			}
 			reason = "received malformed payload"
 			break
 		}
@@ -270,7 +265,7 @@ IncomingLoop:
 
 		// Update incoming message metrics.
 		s.metrics.Message(int64(len(data)), false)
-		s.metrics.CustomTimer("socket_incoming_message_processing_time", nil, time.Since(start)/time.Millisecond)
+		s.metrics.CustomTimer("socket_incoming_message_processing_time", nil, time.Since(start))
 	}
 
 	if reason != "" {
@@ -483,15 +478,16 @@ func (s *sessionNEVR) Close(msg string, reason runtime.PresenceReason, envelopes
 		s.Unlock()
 	}
 
-	// Send close message.
+	// Send close message and close WebSocket under the session lock to serialize writes.
+	s.Lock()
 	if err := s.conn.WriteControl(websocket.CloseMessage, []byte{}, time.Now().Add(s.writeWaitDuration)); err != nil {
 		// This may not be possible if the socket was already fully closed by an error.
 		s.logger.Debug("Could not send close message", zap.Error(err))
 	}
-	// Close WebSocket.
 	if err := s.conn.Close(); err != nil {
 		s.logger.Debug("Could not close", zap.Error(err))
 	}
+	s.Unlock()
 
 	s.logger.Info("Closed client connection")
 

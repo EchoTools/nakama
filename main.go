@@ -224,17 +224,6 @@ func main() {
 
 	evrPipeline := server.NewEvrPipeline(logger, startupLogger, db, jsonpbMarshaler, jsonpbUnmarshaler, config, version, socialClient, storageIndex, leaderboardScheduler, leaderboardCache, leaderboardRankCache, sessionRegistry, sessionCache, statusRegistry, matchRegistry, matchmaker, tracker, router, streamManager, metrics, pipeline, runtime)
 	apiServer := server.StartApiServer(logger, startupLogger, db, jsonpbMarshaler, jsonpbUnmarshaler, config, version, socialClient, storageIndex, leaderboardCache, leaderboardRankCache, sessionRegistry, sessionCache, statusRegistry, matchRegistry, matchmaker, tracker, router, streamManager, metrics, pipeline, runtime, evrPipeline)
-
-	// Register NEVR WebSocket endpoint
-	apiServer.Router().HandleFunc("/ws/nevr",
-		server.NewNEVRSocketWsAcceptor(
-			logger, config, sessionRegistry, sessionCache,
-			statusRegistry, matchmaker, tracker, metrics,
-			runtime, jsonpbMarshaler, jsonpbUnmarshaler,
-			pipeline, storageIndex,
-		),
-	).Methods("GET")
-
 	consoleServer := server.StartConsoleServer(logger, startupLogger, db, config, tracker, router, streamManager, metrics, sessionRegistry, sessionCache, consoleSessionCache, loginAttemptCache, statusRegistry, statusHandler, runtimeInfo, matchRegistry, configWarnings, semver, leaderboardCache, leaderboardRankCache, leaderboardScheduler, storageIndex, apiServer, runtime, cookie)
 
 	if telemetryEnabled {
