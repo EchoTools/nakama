@@ -8,7 +8,7 @@ import (
 )
 
 // RegisterEVRRPCs registers all EVR RPC endpoints with authorization middleware
-func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, rpcHandler *RuntimeRPCHandler, sbmm *SkillBasedMatchmaker) error {
+func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, rpcHandler *RPCHandler, sbmm *SkillBasedMatchmaker) error {
 	// Define all RPC registrations with their permissions in one place
 	// This declarative approach ensures endpoint IDs are defined only once
 	rpcs := []RPCRegistration{

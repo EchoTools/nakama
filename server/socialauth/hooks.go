@@ -74,10 +74,8 @@ func InitializeSocialAuth(ctx context.Context, logger runtime.Logger, initialize
 		return fmt.Errorf("failed to register BeforeUnlinkDevice hook: %w", err)
 	}
 
-	// Register github_status RPC with authorization middleware (default: Global Operators only)
-	perm := server.DefaultRPCPermission()
-	wrappedRPC := server.WithRPCAuthorization("github_status", perm, RpcGetGitHubStatus)
-	if err := initializer.RegisterRpc("github_status", wrappedRPC); err != nil {
+	// Note: Authorization middleware must be applied at the server package level to avoid import cycles
+	if err := initializer.RegisterRpc("github_status", RpcGetGitHubStatus); err != nil {
 		return err
 	}
 
