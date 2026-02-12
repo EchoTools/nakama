@@ -148,7 +148,6 @@ func StartApiServer(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		matchmaker:           matchmaker,
 		runtime:              runtime,
 		grpcServer:           grpcServer,
-		grpcGatewayRouter:    nil, // Will be assigned after creation
 	}
 
 	// Register and start GRPC server.

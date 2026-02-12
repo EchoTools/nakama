@@ -270,7 +270,7 @@ IncomingLoop:
 
 		// Update incoming message metrics.
 		s.metrics.Message(int64(len(data)), false)
-		s.metrics.CustomTimer("socket_incoming_message_processing_time", nil, time.Millisecond*time.Since(start))
+		s.metrics.CustomTimer("socket_incoming_message_processing_time", nil, time.Since(start)/time.Millisecond)
 	}
 
 	if reason != "" {
