@@ -6,6 +6,23 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
+// Ticket Reservation System
+//
+// This system addresses the "starving ticket" problem where long-waiting players
+// lose viable opponents to greedy matching. It implements a two-pass assembly approach:
+//
+// Pass 1: Starving tickets (wait >= ReservationThresholdSecs) get unrestricted access
+// Pass 2: Remaining matches skip reserved players (hard reservation)
+//
+// Key Features:
+// - Tracks starving state across matchmaker cycles (in-memory)
+// - Reserves up to MaxReservationRatio of pool for starving players
+// - Safety valve at ReservationSafetyValveSecs releases reservations to prevent deadlock
+// - Feature flag EnableTicketReservation (default: false)
+//
+// Example: Player waiting 3 minutes (starving) gets 3-4 opponents reserved.
+// Fresh tickets can't consume those players, protecting them for the starving player.
+
 // buildReservations scans candidates and builds reservation sets for starving tickets
 // Returns (starvingSessionIDs, reservedSessionIDs) both as map[string]struct{}
 func (m *SkillBasedMatchmaker) buildReservations(candidates [][]runtime.MatchmakerEntry, predictions []PredictedMatch, settings *GlobalMatchmakingSettings) (map[string]struct{}, map[string]struct{}) {

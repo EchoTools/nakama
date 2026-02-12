@@ -63,8 +63,8 @@ func TestBuildReservations_StarvingIdentification(t *testing.T) {
 			}
 
 			settings := &GlobalMatchmakingSettings{
-				ReservationThresholdSecs: tt.reservationThresh,
-				MaxReservationRatio:      0.4,
+				ReservationThresholdSecs:   tt.reservationThresh,
+				MaxReservationRatio:        0.4,
 				ReservationSafetyValveSecs: 300,
 			}
 
@@ -112,7 +112,7 @@ func TestBuildReservations_SafetyValve(t *testing.T) {
 	}
 
 	settings := &GlobalMatchmakingSettings{
-		ReservationThresholdSecs:   90,  // 1.5 minutes
+		ReservationThresholdSecs:   90, // 1.5 minutes
 		MaxReservationRatio:        0.4,
 		ReservationSafetyValveSecs: 300, // 5 minutes
 	}
