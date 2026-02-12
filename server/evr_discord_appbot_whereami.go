@@ -199,6 +199,57 @@ func (d *DiscordAppBot) createWhereAmIEmbed(data *WhereAmIData) *discordgo.Messa
 	return embed
 }
 
+// createShutdownMatchEmbed creates a Discord embed showing match status for shutdown confirmation
+func (d *DiscordAppBot) createShutdownMatchEmbed(label *MatchLabel) *discordgo.MessageEmbed {
+	embed := &discordgo.MessageEmbed{
+		Title:       "⚠️ Confirm Match Shutdown",
+		Description: "This match has active players. Are you sure you want to shut it down?",
+		Color:       EmbedColorOrange,
+		Fields:      []*discordgo.MessageEmbedField{},
+	}
+
+	if label.GameServer != nil {
+		if regionCode := label.GameServer.LocationRegionCode(true, true); regionCode != "" {
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+				Name:   "Region",
+				Value:  regionCode,
+				Inline: true,
+			})
+		}
+	}
+
+	if gg := d.guildGroupRegistry.Get(label.GetGroupID().String()); gg != nil {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "Guild",
+			Value:  EscapeDiscordMarkdown(gg.Name()),
+			Inline: true,
+		})
+	}
+
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+		Name:   "Mode",
+		Value:  label.Mode.String(),
+		Inline: true,
+	})
+
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+		Name:   "Spark Link",
+		Value:  fmt.Sprintf("[Join Match](https://echo.taxi/spark://c/%s)", strings.ToUpper(label.ID.UUID.String())),
+		Inline: true,
+	})
+
+	if len(label.Players) > 0 {
+		playerList := formatPlayerList(label.Players)
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   fmt.Sprintf("Players (%d)", len(label.Players)),
+			Value:  strings.Join(playerList, ", "),
+			Inline: false,
+		})
+	}
+
+	return embed
+}
+
 // handleWhereAmI handles the /whereami slash command
 func (d *DiscordAppBot) handleWhereAmI(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 	if user == nil {
