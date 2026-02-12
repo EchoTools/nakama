@@ -139,29 +139,3 @@ func TestRegionAutocompleteFiltersUnavailable(t *testing.T) {
 		})
 	}
 }
-
-// TestRequireRegionBehavior documents the expected behavior when requireRegion is set to true.
-// This test verifies that the /create command now uses requireRegion=true to prevent silent
-// fallback to a different region when the selected region has no available servers.
-func TestRequireRegionBehavior(t *testing.T) {
-	// This is a documentation test that describes the expected behavior
-	// when requireRegion=true is used in LobbyGameServerAllocate.
-	//
-	// Expected behavior:
-	// 1. If servers are available in the requested region, one is allocated
-	// 2. If no servers are available in the requested region, but servers exist elsewhere:
-	//    - Returns ErrMatchmakingNoServersInRegion with FallbackInfo
-	//    - FallbackInfo contains the closest available server
-	//    - Caller can present fallback options to the user
-	// 3. If no servers are available anywhere:
-	//    - Returns ErrMatchmakingNoAvailableServers
-	//
-	// The /create command handler checks for ErrMatchmakingNoServersInRegion and
-	// calls presentRegionFallbackOptions() to show an interactive prompt to the user.
-	//
-	// This prevents the silent region swap that was causing confusion.
-
-	t.Log("requireRegion=true prevents silent fallback to different regions")
-	t.Log("When no servers are available in the requested region, user is prompted with fallback options")
-	t.Log("See: handleCreateMatch and presentRegionFallbackOptions in evr_discord_appbot_handlers.go")
-}
