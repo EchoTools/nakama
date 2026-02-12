@@ -441,17 +441,19 @@ func TestRegionFallbackServerCount(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Replicate the counting logic from LobbyGameServerAllocate
-			hasRegionMatch := false
-			serverCount := 0
+			hasRegionMatch, serverCount := func() (bool, int) {
+				var hasRegion bool
+				var count int
 
-			for _, index := range tt.indexes {
-				if index.IsRegionMatch && index.Label.LobbyType == UnassignedLobby {
-					hasRegionMatch = true
-					serverCount++
+				for _, index := range tt.indexes {
+					if index.IsRegionMatch && index.Label.LobbyType == UnassignedLobby {
+						hasRegion = true
+						count++
+					}
 				}
-			}
 
+				return hasRegion, count
+			}()
 			// Verify the counts
 			if serverCount != tt.expectedServerCount {
 				t.Errorf("serverCount = %d, want %d", serverCount, tt.expectedServerCount)
