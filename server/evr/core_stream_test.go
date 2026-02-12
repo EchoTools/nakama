@@ -275,6 +275,60 @@ func TestEasyStream_StreamJSONRawMessage(t *testing.T) {
 	if !bytes.Equal(got, want) {
 		t.Errorf("StreamJSONRawMessage(&) = %s, want %s", got, want)
 	}
+
+	// Test ZstdCompression
+	buf.Reset()
+	stream = &EasyStream{
+		Mode: EncodeMode,
+		w:    buf,
+	}
+
+	if err := stream.StreamJSONRawMessage(&data, false, ZstdCompression); err != nil {
+		t.Fatalf("failed to stream zstd compressed bytes: %v", err)
+	}
+	encoded = buf.Bytes()
+
+	buf.Reset()
+
+	stream = &EasyStream{
+		Mode: DecodeMode,
+		r:    bytes.NewReader(encoded),
+	}
+
+	got = []byte{}
+	if err := stream.StreamJSONRawMessage(&got, false, ZstdCompression); err != nil {
+		t.Fatalf("failed to stream zstd compressed bytes: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("StreamJSONRawMessage(&) ZstdCompression = %s, want %s", got, want)
+	}
+
+	// Test ZstdCompression with null termination
+	buf.Reset()
+	stream = &EasyStream{
+		Mode: EncodeMode,
+		w:    buf,
+	}
+
+	if err := stream.StreamJSONRawMessage(&data, true, ZstdCompression); err != nil {
+		t.Fatalf("failed to stream zstd compressed bytes with null termination: %v", err)
+	}
+	encoded = buf.Bytes()
+
+	buf.Reset()
+
+	stream = &EasyStream{
+		Mode: DecodeMode,
+		r:    bytes.NewReader(encoded),
+	}
+
+	got = []byte{}
+	if err := stream.StreamJSONRawMessage(&got, true, ZstdCompression); err != nil {
+		t.Fatalf("failed to stream zstd compressed bytes with null termination: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("StreamJSONRawMessage(&) ZstdCompression with null = %s, want %s", got, want)
+	}
 }
 func TestEasyStream_StreamIpAddress(t *testing.T) {
 	// Test data
@@ -350,5 +404,80 @@ func TestEasyStream_StreamString(t *testing.T) {
 	// Compare the original string with the decoded string
 	if value != decodedValue {
 		t.Errorf("StreamString() = %s, want %s", decodedValue, value)
+	}
+}
+
+func TestEasyStream_StreamJson_ZstdCompression(t *testing.T) {
+	// Test with a struct similar to EULADocument
+	type TestDoc struct {
+		Type string `json:"type"`
+		Lang string `json:"lang"`
+		Text string `json:"text"`
+	}
+
+	// Test data
+	original := TestDoc{
+		Type: "eula",
+		Lang: "en",
+		Text: "This is a test EULA document with some content.",
+	}
+
+	// Test with null termination
+	buf := new(bytes.Buffer)
+	stream := &EasyStream{
+		Mode: EncodeMode,
+		w:    buf,
+	}
+
+	if err := stream.StreamJson(original, true, ZstdCompression); err != nil {
+		t.Fatalf("failed to encode with ZstdCompression: %v", err)
+	}
+
+	encoded := buf.Bytes()
+	if len(encoded) == 0 {
+		t.Fatal("encoded data is empty")
+	}
+
+	// Decode and verify
+	stream = &EasyStream{
+		Mode: DecodeMode,
+		r:    bytes.NewReader(encoded),
+	}
+
+	var decoded TestDoc
+	if err := stream.StreamJson(&decoded, true, ZstdCompression); err != nil {
+		t.Fatalf("failed to decode with ZstdCompression: %v", err)
+	}
+
+	// Compare
+	if decoded.Type != original.Type || decoded.Lang != original.Lang || decoded.Text != original.Text {
+		t.Errorf("StreamJson ZstdCompression roundtrip failed: got %+v, want %+v", decoded, original)
+	}
+
+	// Test without null termination
+	buf.Reset()
+	stream = &EasyStream{
+		Mode: EncodeMode,
+		w:    buf,
+	}
+
+	if err := stream.StreamJson(original, false, ZstdCompression); err != nil {
+		t.Fatalf("failed to encode without null termination: %v", err)
+	}
+
+	encoded = buf.Bytes()
+
+	stream = &EasyStream{
+		Mode: DecodeMode,
+		r:    bytes.NewReader(encoded),
+	}
+
+	decoded = TestDoc{}
+	if err := stream.StreamJson(&decoded, false, ZstdCompression); err != nil {
+		t.Fatalf("failed to decode without null termination: %v", err)
+	}
+
+	if decoded.Type != original.Type || decoded.Lang != original.Lang || decoded.Text != original.Text {
+		t.Errorf("StreamJson ZstdCompression (no null) roundtrip failed: got %+v, want %+v", decoded, original)
 	}
 }
