@@ -2002,7 +2002,7 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 // Outfit management constants and types
 const (
 	OutfitCollection  = "player_outfits"
-	MaxOutfitsPerUser = 10 // Configurable limit
+	MaxOutfitsPerUser = 10
 )
 
 // Outfit represents a player's outfit configuration
@@ -2079,7 +2079,7 @@ func PlayerOutfitSaveRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 
 	// Check current number of outfits for this user
 	// We only need to check if the limit is reached, so we request MaxOutfitsPerUser items
-	objects, _, err := nk.StorageList(ctx, uuid.Nil.String(), userID, OutfitCollection, MaxOutfitsPerUser, "")
+	objects, _, err := nk.StorageList(ctx, userID, userID, OutfitCollection, MaxOutfitsPerUser, "")
 	if err != nil {
 		logger.Error("Failed to list outfits: %v", err)
 		return "", runtime.NewError("failed to check outfit limit", StatusInternalError)
@@ -2090,7 +2090,12 @@ func PlayerOutfitSaveRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	}
 
 	// Generate new UUID for outfit
-	outfitID := uuid.Must(uuid.NewV4()).String()
+	outfitUUID, err := uuid.NewV4()
+	if err != nil {
+		logger.Error("Failed to generate outfit ID: %v", err)
+		return "", runtime.NewError("failed to generate outfit ID", StatusInternalError)
+	}
+	outfitID := outfitUUID.String()
 
 	// Create outfit
 	outfit := Outfit{
@@ -2100,7 +2105,7 @@ func PlayerOutfitSaveRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		Bracer:  request.Bracer,
 		Booster: request.Booster,
 		Decal:   request.Decal,
-		SavedAt: TimeRFC3339(time.Now()),
+		SavedAt: TimeRFC3339(time.Now().UTC()),
 	}
 
 	// Marshal outfit to JSON
@@ -2150,7 +2155,7 @@ func PlayerOutfitListRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 
 	// List all outfits for this user
 	// Set limit higher than MaxOutfitsPerUser for safety, though users can only have MaxOutfitsPerUser outfits
-	objects, _, err := nk.StorageList(ctx, uuid.Nil.String(), userID, OutfitCollection, MaxOutfitsPerUser*2, "")
+	objects, _, err := nk.StorageList(ctx, userID, userID, OutfitCollection, MaxOutfitsPerUser*2, "")
 	if err != nil {
 		logger.Error("Failed to list outfits: %v", err)
 		return "", runtime.NewError("failed to list outfits", StatusInternalError)
