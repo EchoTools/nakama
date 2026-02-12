@@ -87,7 +87,19 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 		return predictions[i].DrawProb > predictions[j].DrawProb
 	})
 
-	madeMatches := m.assembleUniqueMatches(predictions)
+	var madeMatches [][]runtime.MatchmakerEntry
+
+	settings := ServiceSettings()
+	useReservations := settings != nil && settings.Matchmaking.EnableTicketReservation
+
+	if useReservations {
+		starving, reserved := m.buildReservations(candidates, predictions, &settings.Matchmaking)
+		madeMatches = m.assembleMatchesWithReservations(predictions, starving, reserved)
+		filterCounts["reserved_players"] = len(reserved)
+		filterCounts["starving_tickets"] = len(starving)
+	} else {
+		madeMatches = m.assembleUniqueMatches(predictions)
+	}
 
 	return candidates, madeMatches, filterCounts, predictions
 }
