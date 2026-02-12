@@ -127,6 +127,12 @@ func (d *DiscordAppBot) autocompleteRegions(ctx context.Context, logger runtime.
 	})
 
 	for _, data := range datas {
+		// Filter out regions with no available servers to prevent users from selecting
+		// regions where all servers are fully allocated (fixes issue where selecting
+		// an unavailable region would silently fallback to a different region)
+		if data.Available == 0 {
+			continue
+		}
 		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
 			Name:  data.Description(),
 			Value: data.RegionCode,
