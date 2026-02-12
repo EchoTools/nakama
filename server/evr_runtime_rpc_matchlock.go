@@ -41,7 +41,7 @@ func (r MatchLockRPCResponse) String() string {
 }
 
 // MatchLockRPC handles enabling/disabling player match lock.
-// This RPC is restricted to Global Operators only.
+// This RPC is restricted to Global Operators only (enforced by middleware).
 func MatchLockRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	// Parse the request
 	request := MatchLockRPCRequest{}
@@ -49,34 +49,15 @@ func MatchLockRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 		return "", runtime.NewError(fmt.Sprintf("Error unmarshalling request: %s", err.Error()), StatusInvalidArgument)
 	}
 
-	// Get the caller's user ID from context
-	callerUserID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
-	if !ok || callerUserID == "" {
-		return "", runtime.NewError("Unauthorized: missing user context", StatusUnauthenticated)
-	}
-
-	// Check if the caller is a Global Operator
-	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, callerUserID, GroupGlobalOperators)
-	if err != nil {
-		logger.WithFields(map[string]interface{}{
-			"error":   err,
-			"user_id": callerUserID,
-		}).Error("Failed to check global operator membership")
-		return "", runtime.NewError("Failed to verify permissions", StatusInternalError)
-	}
-
-	if !isGlobalOperator {
-		logger.WithFields(map[string]interface{}{
-			"caller_user_id": callerUserID,
-		}).Warn("Non-operator attempted to use match lock RPC")
-		return "", runtime.NewError("Permission denied: Global Operator access required", StatusPermissionDenied)
-	}
+	// Get the caller's user ID from context (guaranteed to exist by middleware)
+	callerUserID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 
 	// Resolve the target user ID
 	targetUserID := request.TargetUserID
 	targetDiscordID := request.TargetDiscordID
 
 	if targetDiscordID != "" && targetUserID == "" {
+		var err error
 		targetUserID, err = GetUserIDByDiscordID(ctx, db, targetDiscordID)
 		if err != nil {
 			return "", runtime.NewError(fmt.Sprintf("Failed to find user by Discord ID: %s", err.Error()), StatusNotFound)
@@ -89,6 +70,7 @@ func MatchLockRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 
 	// Get the target's Discord ID if not provided
 	if targetDiscordID == "" {
+		var err error
 		targetDiscordID, err = GetDiscordIDByUserID(ctx, db, targetUserID)
 		if err != nil {
 			logger.WithFields(map[string]interface{}{
@@ -171,7 +153,7 @@ func MatchLockRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 }
 
 // GetMatchLockStatusRPC returns the current match lock status for a player.
-// This RPC is restricted to Global Operators only.
+// This RPC is restricted to Global Operators only (enforced by middleware).
 func GetMatchLockStatusRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	// Parse the request - same structure for simplicity
 	request := MatchLockRPCRequest{}
@@ -179,27 +161,12 @@ func GetMatchLockStatusRPC(ctx context.Context, logger runtime.Logger, db *sql.D
 		return "", runtime.NewError(fmt.Sprintf("Error unmarshalling request: %s", err.Error()), StatusInvalidArgument)
 	}
 
-	// Get the caller's user ID from context
-	callerUserID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
-	if !ok || callerUserID == "" {
-		return "", runtime.NewError("Unauthorized: missing user context", StatusUnauthenticated)
-	}
-
-	// Check if the caller is a Global Operator
-	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, callerUserID, GroupGlobalOperators)
-	if err != nil {
-		return "", runtime.NewError("Failed to verify permissions", StatusInternalError)
-	}
-
-	if !isGlobalOperator {
-		return "", runtime.NewError("Permission denied: Global Operator access required", StatusPermissionDenied)
-	}
-
 	// Resolve the target user ID
 	targetUserID := request.TargetUserID
 	targetDiscordID := request.TargetDiscordID
 
 	if targetDiscordID != "" && targetUserID == "" {
+		var err error
 		targetUserID, err = GetUserIDByDiscordID(ctx, db, targetDiscordID)
 		if err != nil {
 			return "", runtime.NewError(fmt.Sprintf("Failed to find user by Discord ID: %s", err.Error()), StatusNotFound)

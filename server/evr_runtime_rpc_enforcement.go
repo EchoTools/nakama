@@ -42,11 +42,8 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError("Invalid request payload", StatusInvalidArgument)
 	}
 
-	// Get the caller's user ID from context
-	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
-	if !ok || userID == "" {
-		return "", runtime.NewError("User ID not found in context", StatusUnauthenticated)
-	}
+	// Get the caller's user ID from context (guaranteed to exist by middleware)
+	userID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 
 	// Validate required fields
 	if request.GroupID == "" {
@@ -323,10 +320,7 @@ func EnforcementJournalListRPC(ctx context.Context, logger runtime.Logger, db *s
 		return "", runtime.NewError("group_id is required", StatusInvalidArgument)
 	}
 
-	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
-	if !ok || userID == "" {
-		return "", runtime.NewError("User ID not found in context", StatusUnauthenticated)
-	}
+	userID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 
 	// Check if the caller is a global operator
 	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
@@ -458,10 +452,7 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	// Get the caller's user ID from context
-	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
-	if !ok || userID == "" {
-		return "", runtime.NewError("User ID not found in context", StatusUnauthenticated)
-	}
+	userID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 
 	// Check if the caller is a global operator
 	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
