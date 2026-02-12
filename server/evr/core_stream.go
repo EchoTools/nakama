@@ -432,7 +432,7 @@ func (s *EasyStream) StreamJson(data interface{}, isNullTerminated bool, compres
 			if err := binary.Write(s.w, binary.LittleEndian, uint32(len(b))); err != nil {
 				return fmt.Errorf("write error: %w", err)
 			}
-			w, err := zstd.NewWriter(s.w)
+			w, err := zstd.NewWriter(s.w, zstd.WithEncoderLevel(1))
 			if err != nil {
 				return err
 			}
