@@ -163,10 +163,10 @@ func TestLoginHistoryEntrySelection(t *testing.T) {
 // TestRoleAssignmentLogic tests that roles are assigned correctly based on platform
 func TestRoleAssignmentLogic(t *testing.T) {
 	tests := []struct {
-		name                  string
-		buildNumber           evr.BuildNumber
-		expectPCVRRole        bool
-		expectStandaloneRole  bool
+		name                 string
+		buildNumber          evr.BuildNumber
+		expectPCVRRole       bool
+		expectStandaloneRole bool
 	}{
 		{
 			name:                 "PCVR build gets PCVR role only",
