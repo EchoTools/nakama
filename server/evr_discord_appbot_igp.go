@@ -905,22 +905,35 @@ func (d *DiscordAppBot) handleSetIGNModalSubmit(_ context.Context, logger runtim
 		targetMention = targetUserID
 	}
 
-	lockStatus := "unlocked"
+	// Create user-friendly lock status message
+	lockStatusEmoji := "🔓"
+	lockStatusText := "unlocked"
+	lockExplanation := "The player can change their display name."
 	if isLocked {
-		lockStatus = "locked"
+		lockStatusEmoji = "🔒"
+		lockStatusText = "locked"
+		lockExplanation = "The player cannot change their display name."
 	}
+
 	auditMessage := fmt.Sprintf("<@%s> set IGN override for %s to **%s** (%s) (originally: **%s**)",
-		i.Member.User.ID, targetMention, displayName, lockStatus, originalDisplayName)
+		i.Member.User.ID, targetMention, displayName, lockStatusText, originalDisplayName)
 
 	if _, err := d.LogAuditMessage(d.ctx, groupID, auditMessage, false); err != nil {
 		logger.WithField("error", err).Warn("Failed to send audit log message")
 	}
 
+	// Create detailed success message with clear lock status
+	successMessage := fmt.Sprintf("✅ **IGN Override Set Successfully**\n\n"+
+		"**Display Name:** %s\n"+
+		"**Lock Status:** %s %s\n"+
+		"_%s_",
+		displayName, lockStatusEmoji, lockStatusText, lockExplanation)
+
 	return d.dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Flags:   discordgo.MessageFlagsEphemeral,
-			Content: fmt.Sprintf("IGN override set successfully to **%s** (%s)", displayName, lockStatus),
+			Content: successMessage,
 		},
 	})
 }
