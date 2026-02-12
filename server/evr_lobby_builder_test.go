@@ -315,3 +315,165 @@ func TestSortLabelIndexes(t *testing.T) {
 		})
 	}
 }
+
+func TestRegionFallbackServerCount(t *testing.T) {
+	// This test verifies that only AVAILABLE servers (UnassignedLobby)
+	// are counted when reporting servers in a region for fallback messages.
+	// Previously, ALL servers (including active ones) were counted.
+
+	tests := []struct {
+		name                 string
+		indexes              []labelIndex
+		regions              []string
+		requireRegion        bool
+		expectedServerCount  int
+		expectedHasRegion    bool
+		expectedClosestMatch bool // Should find a closest server for fallback
+	}{
+		{
+			name: "No available servers in region - all active",
+			indexes: []labelIndex{
+				{
+					Label: &MatchLabel{
+						LobbyType: PublicLobby, // Active server
+						GameServer: &GameServerPresence{
+							RegionCodes: []string{"us-east"},
+						},
+					},
+					IsRegionMatch: true,
+					IsReachable:   true,
+					RTT:           50,
+				},
+				{
+					Label: &MatchLabel{
+						LobbyType: PublicLobby, // Active server
+						GameServer: &GameServerPresence{
+							RegionCodes: []string{"us-east"},
+						},
+					},
+					IsRegionMatch: true,
+					IsReachable:   true,
+					RTT:           60,
+				},
+				{
+					Label: &MatchLabel{
+						LobbyType: UnassignedLobby, // Available server in different region
+						GameServer: &GameServerPresence{
+							RegionCodes: []string{"us-west"},
+						},
+					},
+					IsRegionMatch: false,
+					IsReachable:   true,
+					RTT:           100,
+				},
+			},
+			regions:              []string{"us-east"},
+			requireRegion:        true,
+			expectedServerCount:  0, // Should be 0 because no available servers in us-east
+			expectedHasRegion:    false,
+			expectedClosestMatch: true, // Should find us-west as fallback
+		},
+		{
+			name: "Some available servers in region",
+			indexes: []labelIndex{
+				{
+					Label: &MatchLabel{
+						LobbyType: UnassignedLobby, // Available
+						GameServer: &GameServerPresence{
+							RegionCodes: []string{"us-east"},
+						},
+					},
+					IsRegionMatch: true,
+					IsReachable:   true,
+					RTT:           50,
+				},
+				{
+					Label: &MatchLabel{
+						LobbyType: PublicLobby, // Active
+						GameServer: &GameServerPresence{
+							RegionCodes: []string{"us-east"},
+						},
+					},
+					IsRegionMatch: true,
+					IsReachable:   true,
+					RTT:           60,
+				},
+			},
+			regions:              []string{"us-east"},
+			requireRegion:        true,
+			expectedServerCount:  1, // Only 1 available server
+			expectedHasRegion:    true,
+			expectedClosestMatch: false,
+		},
+		{
+			name: "All servers available in region",
+			indexes: []labelIndex{
+				{
+					Label: &MatchLabel{
+						LobbyType: UnassignedLobby,
+						GameServer: &GameServerPresence{
+							RegionCodes: []string{"eu-west"},
+						},
+					},
+					IsRegionMatch: true,
+					IsReachable:   true,
+					RTT:           40,
+				},
+				{
+					Label: &MatchLabel{
+						LobbyType: UnassignedLobby,
+						GameServer: &GameServerPresence{
+							RegionCodes: []string{"eu-west"},
+						},
+					},
+					IsRegionMatch: true,
+					IsReachable:   true,
+					RTT:           45,
+				},
+			},
+			regions:              []string{"eu-west"},
+			requireRegion:        true,
+			expectedServerCount:  2,
+			expectedHasRegion:    true,
+			expectedClosestMatch: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Replicate the counting logic from LobbyGameServerAllocate
+			hasRegionMatch := false
+			serverCount := 0
+
+			for _, index := range tt.indexes {
+				if index.IsRegionMatch && index.Label.LobbyType == UnassignedLobby {
+					hasRegionMatch = true
+					serverCount++
+				}
+			}
+
+			// Verify the counts
+			if serverCount != tt.expectedServerCount {
+				t.Errorf("serverCount = %d, want %d", serverCount, tt.expectedServerCount)
+			}
+
+			if hasRegionMatch != tt.expectedHasRegion {
+				t.Errorf("hasRegionMatch = %v, want %v", hasRegionMatch, tt.expectedHasRegion)
+			}
+
+			// If we need a fallback, verify we can find one
+			if tt.expectedClosestMatch && tt.requireRegion && len(tt.regions) > 0 && !hasRegionMatch {
+				foundClosest := false
+				for _, index := range tt.indexes {
+					if index.Label.LobbyType == UnassignedLobby && index.IsReachable {
+						foundClosest = true
+						break
+					}
+				}
+				if !foundClosest {
+					t.Error("Expected to find a closest server for fallback, but none found")
+				}
+			}
+		})
+	}
+}

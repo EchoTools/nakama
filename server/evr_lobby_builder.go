@@ -797,9 +797,10 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	// Note: We iterate through all indexes (no early break) to count ALL matching servers
 	// for accurate server count reporting in the fallback message
 	hasRegionMatch := false
-	serverCount := 0 // Count servers in requested region(s)
+	serverCount := 0 // Count AVAILABLE servers in requested region(s)
 	for _, index := range indexes {
-		if index.IsRegionMatch {
+		// Only count available servers (UnassignedLobby) in the region
+		if index.IsRegionMatch && index.Label.LobbyType == UnassignedLobby {
 			hasRegionMatch = true
 			serverCount++
 		}
