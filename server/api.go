@@ -90,6 +90,7 @@ type ApiServer struct {
 	matchmaker           Matchmaker
 	runtime              *Runtime
 	grpcServer           *grpc.Server
+	grpcGatewayRouter    *mux.Router
 	grpcGatewayServer    *http.Server
 }
 
@@ -147,6 +148,7 @@ func StartApiServer(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		matchmaker:           matchmaker,
 		runtime:              runtime,
 		grpcServer:           grpcServer,
+		grpcGatewayRouter:    nil, // Will be assigned after creation
 	}
 
 	// Register and start GRPC server.
@@ -227,6 +229,7 @@ func StartApiServer(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	//}
 
 	grpcGatewayRouter := mux.NewRouter()
+	s.grpcGatewayRouter = grpcGatewayRouter // Store reference for external access
 	// Special case routes. Do NOT enable compression on WebSocket route, it results in "http: response.Write on hijacked connection" errors.
 	grpcGatewayRouter.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }).Methods(http.MethodGet)
 	grpcGatewayRouter.HandleFunc("/ws", NewSocketWsAcceptor(logger, config, sessionRegistry, sessionCache, statusRegistry, matchmaker, tracker, metrics, runtime, protojsonMarshaler, protojsonUnmarshaler, pipeline, evrPipeline, storageIndex)).Methods(http.MethodGet)
@@ -340,6 +343,10 @@ func (s *ApiServer) Stop() {
 	}
 	// 2. Stop GRPC server. This also closes the underlying listener.
 	s.grpcServer.GracefulStop()
+}
+
+func (s *ApiServer) Router() *mux.Router {
+	return s.grpcGatewayRouter
 }
 
 func (s *ApiServer) Healthcheck(ctx context.Context, in *emptypb.Empty) (*emptypb.Empty, error) {
