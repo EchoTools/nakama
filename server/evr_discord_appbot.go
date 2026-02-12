@@ -1544,11 +1544,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				graceSeconds     int
 			)
 
-			isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
-			if err != nil {
-				return fmt.Errorf("error checking global operator status: %w", err)
-			}
-
 			for _, option := range options {
 				switch option.Name {
 				case "match-id":
@@ -1585,12 +1580,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				// Permission check: global operator, server owner, or guild enforcer
 				// of the session running on the server
-				if !isGlobalOperator && label.GameServer.OperatorID.String() != userID {
-					matchGroupID := label.GetGroupID().String()
-					gg := d.guildGroupRegistry.Get(matchGroupID)
-					if gg == nil || !gg.IsEnforcer(userID) {
-						return errors.New("you do not have permission to shut down this match")
-					}
+				allowed, err := d.canShutdownMatch(ctx, userID, label)
+				if err != nil {
+					return fmt.Errorf("error checking shutdown permission: %w", err)
+				}
+				if !allowed {
+					return errors.New("you do not have permission to shut down this match")
 				}
 
 				// If there are players in the match, show confirmation with match status

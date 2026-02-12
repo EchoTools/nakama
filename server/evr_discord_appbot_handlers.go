@@ -1395,6 +1395,32 @@ func (d *DiscordAppBot) handleRegionFallbackInteraction(ctx context.Context, log
 	return fmt.Errorf("unknown action: %s", action)
 }
 
+// canShutdownMatch checks whether a user has permission to shut down a match.
+// Returns true if the user is a global operator, the server owner (OperatorID),
+// or a guild enforcer of the session running on the server.
+func (d *DiscordAppBot) canShutdownMatch(ctx context.Context, userID string, label *MatchLabel) (bool, error) {
+	isGlobalOperator, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+	if err != nil {
+		return false, fmt.Errorf("error checking global operator status: %w", err)
+	}
+
+	if isGlobalOperator {
+		return true, nil
+	}
+
+	if label.GameServer.OperatorID.String() == userID {
+		return true, nil
+	}
+
+	matchGroupID := label.GetGroupID().String()
+	gg := d.guildGroupRegistry.Get(matchGroupID)
+	if gg != nil && gg.IsEnforcer(userID) {
+		return true, nil
+	}
+
+	return false, nil
+}
+
 // handleConfirmShutdown handles the confirm shutdown button click.
 // value format: <matchID>:<disconnectServer>:<graceSeconds>
 func (d *DiscordAppBot) handleConfirmShutdown(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, value string) error {
@@ -1415,23 +1441,18 @@ func (d *DiscordAppBot) handleConfirmShutdown(ctx context.Context, logger runtim
 		return simpleInteractionResponse(s, i, "Invalid match ID.")
 	}
 
-	// Re-verify permissions
-	isGlobalOperator, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
-	if err != nil {
-		return fmt.Errorf("error checking global operator status: %w", err)
-	}
-
 	label, err := MatchLabelByID(ctx, nk, matchID)
 	if err != nil {
 		return simpleInteractionResponse(s, i, "Match not found or already ended.")
 	}
 
-	if !isGlobalOperator && label.GameServer.OperatorID.String() != userID {
-		matchGroupID := label.GetGroupID().String()
-		gg := d.guildGroupRegistry.Get(matchGroupID)
-		if gg == nil || !gg.IsEnforcer(userID) {
-			return simpleInteractionResponse(s, i, "You do not have permission to shut down this match.")
-		}
+	// Re-verify permissions
+	allowed, err := d.canShutdownMatch(ctx, userID, label)
+	if err != nil {
+		return fmt.Errorf("error checking shutdown permission: %w", err)
+	}
+	if !allowed {
+		return simpleInteractionResponse(s, i, "You do not have permission to shut down this match.")
 	}
 
 	signal := SignalShutdownPayload{

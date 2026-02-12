@@ -199,7 +199,8 @@ func (d *DiscordAppBot) createWhereAmIEmbed(data *WhereAmIData) *discordgo.Messa
 	return embed
 }
 
-// createShutdownMatchEmbed creates a Discord embed showing match status for shutdown confirmation
+// createShutdownMatchEmbed creates a Discord embed showing match status for shutdown confirmation.
+// It displays region, guild, mode, spark link, and current player list from the match label.
 func (d *DiscordAppBot) createShutdownMatchEmbed(label *MatchLabel) *discordgo.MessageEmbed {
 	embed := &discordgo.MessageEmbed{
 		Title:       "⚠️ Confirm Match Shutdown",
