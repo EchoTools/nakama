@@ -168,6 +168,11 @@ func (m *SkillBasedMatchmaker) assembleMatchesWithReservations(predictions []Pre
 			continue
 		}
 
+		// Check moderator limit: no more than 2 moderators per match
+		if countModerators(pred.Candidate) > 2 {
+			continue
+		}
+
 		// Mark all players as matched
 		markMatched(pred.Candidate, matchedPlayers)
 		matches = append(matches, pred.Candidate)
@@ -192,6 +197,11 @@ func (m *SkillBasedMatchmaker) assembleMatchesWithReservations(predictions []Pre
 
 		// Hard reservation check: skip if this would consume any reserved player
 		if consumesReservedPlayer(pred.Candidate, reservedSessionIDs, matchedPlayers) {
+			continue
+		}
+
+		// Check moderator limit: no more than 2 moderators per match
+		if countModerators(pred.Candidate) > 2 {
 			continue
 		}
 
@@ -227,6 +237,18 @@ func consumesReservedPlayer(candidate []runtime.MatchmakerEntry, reserved, alrea
 		}
 	}
 	return false
+}
+
+// countModerators counts the number of moderators in a candidate match
+func countModerators(candidate []runtime.MatchmakerEntry) int {
+	count := 0
+	for _, entry := range candidate {
+		props := entry.GetProperties()
+		if isMod, ok := props["is_moderator"].(string); ok && isMod == "true" {
+			count++
+		}
+	}
+	return count
 }
 
 // hasMatchedPlayer checks if any player in the candidate has already been matched
