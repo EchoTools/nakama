@@ -2167,11 +2167,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			// Resolve caller's guild access with cascade (global ops → auditor → enforcer)
 			access := ResolveCallerGuildAccess(ctx, db, callerUserID, groupID, callerGuildGroups)
 
-			// Queue sync for auditors
-			if access.IsAuditor {
-				if gg, ok := callerGuildGroups[groupID]; ok && gg.IsAuditor(callerUserID) {
-					d.cache.QueueSyncMember(i.GuildID, target.ID, true)
-				}
+			// Queue sync for guild auditors (not global operators who don't have guild membership)
+			if gg, ok := callerGuildGroups[groupID]; ok && gg.IsAuditor(callerUserID) {
+				d.cache.QueueSyncMember(i.GuildID, target.ID, true)
 			}
 
 			loginsSince := time.Now().Add(-30 * 24 * time.Hour)
