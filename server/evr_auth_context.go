@@ -9,13 +9,13 @@ import (
 // UserPermissions caches system group memberships resolved in a single SQL query.
 // Attach to context at authentication/session creation time to eliminate redundant DB queries.
 type UserPermissions struct {
-	IsGlobalOperator         bool
-	IsGlobalDeveloper        bool
-	IsGlobalBot              bool
-	IsGlobalTester           bool
-	IsGlobalBadgeAdmin       bool
+	IsGlobalOperator          bool
+	IsGlobalDeveloper         bool
+	IsGlobalBot               bool
+	IsGlobalTester            bool
+	IsGlobalBadgeAdmin        bool
 	IsGlobalPrivateDataAccess bool
-	IsGlobalRequire2FA       bool
+	IsGlobalRequire2FA        bool
 }
 
 type contextKeyUserPermissions struct{}

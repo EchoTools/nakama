@@ -11,13 +11,13 @@ import (
 func TestUserPermissions_ContextStorage(t *testing.T) {
 	// Test storing and retrieving permissions from context
 	perms := &UserPermissions{
-		IsGlobalOperator:         true,
-		IsGlobalDeveloper:        true,
-		IsGlobalBot:              false,
-		IsGlobalTester:           false,
-		IsGlobalBadgeAdmin:       false,
+		IsGlobalOperator:          true,
+		IsGlobalDeveloper:         true,
+		IsGlobalBot:               false,
+		IsGlobalTester:            false,
+		IsGlobalBadgeAdmin:        false,
 		IsGlobalPrivateDataAccess: false,
-		IsGlobalRequire2FA:       false,
+		IsGlobalRequire2FA:        false,
 	}
 
 	ctx := context.Background()

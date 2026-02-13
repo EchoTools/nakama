@@ -100,7 +100,7 @@ func WithRPCAuthorization(
 		// If authentication is required, check group membership
 		if perm.RequireAuth && len(perm.AllowedGroups) > 0 {
 			authorized := false
-			
+
 			// Try to use cached permissions first
 			if userPerms := PermissionsFromContext(ctx); userPerms != nil {
 				for _, groupName := range perm.AllowedGroups {
