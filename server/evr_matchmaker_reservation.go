@@ -244,7 +244,8 @@ func countModerators(candidate []runtime.MatchmakerEntry) int {
 	count := 0
 	for _, entry := range candidate {
 		props := entry.GetProperties()
-		if isMod, ok := props["is_moderator"].(string); ok && isMod == "true" {
+		// is_moderator is stored as a string in matchmaking properties
+		if isModStr, ok := props["is_moderator"].(string); ok && isModStr == "true" {
 			count++
 		}
 	}

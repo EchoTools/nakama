@@ -2626,20 +2626,20 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			// Parse the divisions
 			divisionList := strings.Split(divisions, ",")
-			validDivisions := []string{"green", "bronze", "silver", "gold", "platinum", "diamond", "master"}
+			validDivisions := AllDivisionNames()
 
 			// Validate and trim divisions
-			for i := range divisionList {
-				divisionList[i] = strings.ToLower(strings.TrimSpace(divisionList[i]))
+			for idx := range divisionList {
+				divisionList[idx] = strings.ToLower(strings.TrimSpace(divisionList[idx]))
 				valid := false
 				for _, v := range validDivisions {
-					if divisionList[i] == v {
+					if divisionList[idx] == v {
 						valid = true
 						break
 					}
 				}
 				if !valid {
-					return fmt.Errorf("invalid division: %s", divisionList[i])
+					return fmt.Errorf("invalid division: %s", divisionList[idx])
 				}
 			}
 
@@ -2660,25 +2660,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 					// Remove from excluded if present
 					if slices.Contains(settings.ExcludedDivisions, div) {
-						for j := 0; j < len(settings.ExcludedDivisions); j++ {
-							if settings.ExcludedDivisions[j] == div {
-								settings.ExcludedDivisions = slices.Delete(settings.ExcludedDivisions, j, j+1)
-								j--
-								updated = true
-							}
-						}
+						settings.ExcludedDivisions, _ = RemoveFromStringSlice(settings.ExcludedDivisions, div)
+						updated = true
 					}
 				}
 			case "remove":
 				for _, div := range divisionList {
 					if slices.Contains(settings.Divisions, div) {
-						for j := 0; j < len(settings.Divisions); j++ {
-							if settings.Divisions[j] == div {
-								settings.Divisions = slices.Delete(settings.Divisions, j, j+1)
-								j--
-								updated = true
-							}
-						}
+						settings.Divisions, _ = RemoveFromStringSlice(settings.Divisions, div)
+						updated = true
 					}
 				}
 			}
@@ -3355,7 +3345,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				// All valid divisions
-				allDivisions := []string{"green", "bronze", "silver", "gold", "platinum", "diamond", "master"}
+				allDivisions := AllDivisionNames()
 
 				// Parse existing input to support comma-separated values
 				parts := strings.Split(focused, ",")

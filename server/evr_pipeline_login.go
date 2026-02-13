@@ -766,13 +766,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 			if hasGreenInExcluded {
 				updated = true
 				// Remove the "green" division from the excluded divisions.
-				for i := 0; i < len(settings.ExcludedDivisions); i++ {
-					if settings.ExcludedDivisions[i] == "green" {
-						settings.ExcludedDivisions = slices.Delete(settings.ExcludedDivisions, i, i+1)
-						i--
-					}
-				}
-
+				settings.ExcludedDivisions, _ = RemoveFromStringSlice(settings.ExcludedDivisions, "green")
 			}
 
 		} else {
@@ -780,17 +774,13 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 			if hasGreenInDivisions && !isProtectedModerator {
 				// Remove the "green" division from the divisions.
 				updated = true
-				for i := 0; i < len(settings.Divisions); i++ {
-					if settings.Divisions[i] == "green" {
-						settings.Divisions = slices.Delete(settings.Divisions, i, i+1)
-						i--
-					}
-				}
+				settings.Divisions, _ = RemoveFromStringSlice(settings.Divisions, "green")
 			}
 			// Only add to excluded if:
 			// - Not already in excluded
 			// - Not a moderator (moderators manage their own divisions)
 			// - Green is not in divisions (was removed or never had it)
+			// Check after potential removal
 			if !hasGreenInExcluded && !isModerator && !slices.Contains(settings.Divisions, "green") {
 				updated = true
 				// Add the "green" division to the excluded divisions.
