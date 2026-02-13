@@ -1107,6 +1107,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	// Handle private match completion - allocate social lobby for seamless transition
+	// Check every 2 seconds to avoid redundant allocations during the same tick cycle
 	if state.Mode == evr.ModeArenaPrivate && tick%(2*state.tickRate) == 0 {
 		// If the match is over, allocate a social lobby for post-match transition
 		if state.GameState != nil && state.GameState.MatchOver && !state.matchSummarySent {
@@ -1704,7 +1705,11 @@ func allocatePostMatchSocialLobby(ctx context.Context, logger runtime.Logger, nk
 
 	// Try to allocate a social lobby using the same group
 	// Use empty RTT map and no region requirement for flexibility
-	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
+	serviceSettings := ServiceSettings()
+	if serviceSettings == nil || serviceSettings.Matchmaking.QueryAddons.Create == "" {
+		return fmt.Errorf("service settings not initialized or query addon not configured")
+	}
+	queryAddon := serviceSettings.Matchmaking.QueryAddons.Create
 	label, err := LobbyGameServerAllocate(
 		ctx,
 		logger,

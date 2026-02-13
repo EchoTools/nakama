@@ -116,7 +116,11 @@ func TestPrivateMatchCompletion_StateCheck(t *testing.T) {
 }
 
 // TestAllocatePostMatchSocialLobby_ParticipantFiltering verifies that
-// spectators and moderators are excluded from the social lobby allocation
+// spectators and moderators are excluded from the social lobby allocation.
+// Note: This test validates the filtering logic directly rather than using a full
+// mock NakamaModule because the actual allocation requires complex dependencies
+// (match registry, server allocation, etc.). The core logic being tested is the
+// participant filtering, which is the critical part for correctness.
 func TestAllocatePostMatchSocialLobby_ParticipantFiltering(t *testing.T) {
 	logger := NewRuntimeGoLogger(NewJSONLogger(os.Stdout, zapcore.InfoLevel, JSONFormat))
 
