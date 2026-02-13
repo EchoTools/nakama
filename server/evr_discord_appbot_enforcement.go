@@ -55,16 +55,10 @@ func (d *DiscordAppBot) handleEnforcementInteraction(ctx context.Context, _ runt
 		return simpleInteractionResponse(s, i, "You must have a linked account to use this feature.")
 	}
 
-	// Check permissions - any moderator (enforcer) can edit/void
-	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, callerID, GroupGlobalOperators)
-
-	gg, err := GuildGroupLoad(ctx, d.nk, groupID)
+	// Check permissions - global operator or guild enforcer
+	_, _, _, err := RequireEnforcerOrOperator(ctx, d.db, d.nk, callerID, groupID)
 	if err != nil {
-		return fmt.Errorf("failed to load guild group: %w", err)
-	}
-
-	if !isGlobalOperator && !gg.IsEnforcer(callerID) {
-		return simpleInteractionResponse(s, i, "You must be a guild enforcer to modify enforcement records.")
+		return simpleInteractionResponse(s, i, "You must be a guild enforcer or global operator to modify enforcement records.")
 	}
 
 	switch action {
@@ -262,14 +256,10 @@ func (d *DiscordAppBot) handleEnforcementEditModalSubmit(logger runtime.Logger, 
 		return fmt.Errorf("caller not found")
 	}
 
-	// Verify permissions again
-	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, callerID, GroupGlobalOperators)
-	gg, err := GuildGroupLoad(ctx, d.nk, groupID)
+	// Verify permissions - global operator or guild enforcer
+	_, _, gg, err := RequireEnforcerOrOperator(ctx, d.db, d.nk, callerID, groupID)
 	if err != nil {
-		return fmt.Errorf("failed to load guild group: %w", err)
-	}
-	if !isGlobalOperator && !gg.IsEnforcer(callerID) {
-		return simpleInteractionResponse(d.dg, i, "You must be a guild enforcer to edit enforcement records.")
+		return simpleInteractionResponse(d.dg, i, "You must be a guild enforcer or global operator to edit enforcement records.")
 	}
 
 	// Get form data
@@ -372,13 +362,10 @@ func (d *DiscordAppBot) handleEnforcementVoidModalSubmit(logger runtime.Logger, 
 	}
 
 	// Verify permissions again
-	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, callerID, GroupGlobalOperators)
-	gg, err := GuildGroupLoad(ctx, d.nk, groupID)
+	// Verify permissions - global operator or guild enforcer
+	_, _, gg, err := RequireEnforcerOrOperator(ctx, d.db, d.nk, callerID, groupID)
 	if err != nil {
-		return fmt.Errorf("failed to load guild group: %w", err)
-	}
-	if !isGlobalOperator && !gg.IsEnforcer(callerID) {
-		return simpleInteractionResponse(d.dg, i, "You must be a guild enforcer to void enforcement records.")
+		return simpleInteractionResponse(d.dg, i, "You must be a guild enforcer or global operator to void enforcement records.")
 	}
 
 	// Get form data

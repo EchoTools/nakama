@@ -1544,9 +1544,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				graceSeconds     int
 			)
 
-			isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
-			if err != nil {
-				return fmt.Errorf("error checking global operator status: %w", err)
+			perms := PermissionsFromContext(ctx)
+			var isGlobalOperator bool
+			if perms != nil {
+				isGlobalOperator = perms.IsGlobalOperator
+			} else {
+				isGlobalOperator, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
+				if err != nil {
+					return fmt.Errorf("error checking global operator status: %w", err)
+				}
 			}
 
 			for _, option := range options {
@@ -1705,9 +1711,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			var isMember bool
-			isMember, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalBadgeAdmins)
-			if err != nil {
-				return status.Error(codes.Internal, "failed to check group membership")
+			perms := PermissionsFromContext(ctx)
+			if perms != nil {
+				isMember = perms.IsGlobalBadgeAdmin
+			} else {
+				isMember, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalBadgeAdmins)
+				if err != nil {
+					return status.Error(codes.Internal, "failed to check group membership")
+				}
 			}
 			if !isMember {
 				return status.Error(codes.PermissionDenied, "you do not have permission to use this command")
@@ -2153,53 +2164,42 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("failed to get guild groups: %w", err)
 			}
 
-			isGuildAuditor := false
+			// Resolve caller's guild access with cascade (global ops → auditor → enforcer)
+			access := ResolveCallerGuildAccess(ctx, db, callerUserID, groupID, callerGuildGroups)
+
+			// Queue sync for guild auditors (not global operators who don't have guild membership)
 			if gg, ok := callerGuildGroups[groupID]; ok && gg.IsAuditor(callerUserID) {
-				isGuildAuditor = true
 				d.cache.QueueSyncMember(i.GuildID, target.ID, true)
 			}
 
-			isGuildEnforcer := false
-			if gg, ok := callerGuildGroups[groupID]; ok && gg.IsEnforcer(callerUserID) {
-				isGuildEnforcer = true
-			}
-
-			isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userIDStr, GroupGlobalOperators)
-			if err != nil {
-				return fmt.Errorf("error checking global operator status: %w", err)
-			}
-
-			isGuildAuditor = isGuildAuditor || isGlobalOperator
-			isGuildEnforcer = isGuildEnforcer || isGuildAuditor
-
 			loginsSince := time.Now().Add(-30 * 24 * time.Hour)
-			if !isGlobalOperator {
+			if !access.IsGlobalOperator {
 				loginsSince = time.Time{}
 			}
 
 			opts := UserProfileRequestOptions{
-				IncludeSuspensionsEmbed:      isGuildEnforcer,
-				IncludePastSuspensions:       isGuildEnforcer,
-				IncludeCurrentMatchesEmbed:   isGuildEnforcer,
-				IncludeVRMLHistoryEmbed:      isGlobalOperator,
+				IncludeSuspensionsEmbed:      access.IsEnforcer,
+				IncludePastSuspensions:       access.IsEnforcer,
+				IncludeCurrentMatchesEmbed:   access.IsEnforcer,
+				IncludeVRMLHistoryEmbed:      access.IsGlobalOperator,
 				IncludePastDisplayNamesEmbed: true,
-				IncludeAlternatesEmbed:       isGlobalOperator,
+				IncludeAlternatesEmbed:       access.IsGlobalOperator,
 
-				IncludeDiscordDisplayName:      isGuildEnforcer,
-				IncludeSuspensionAuditorNotes:  isGuildEnforcer,
-				IncludeInactiveSuspensions:     isGuildEnforcer,
-				ErrorIfAccountDisabled:         !isGuildEnforcer,
-				IncludePartyGroupName:          isGuildAuditor,
-				IncludeDefaultMatchmakingGuild: isGuildAuditor,
-				IncludeLinkedDevices:           isGuildAuditor,
-				StripIPAddresses:               !isGlobalOperator,
-				IncludeRecentLogins:            isGuildAuditor,
-				IncludePasswordSetState:        isGuildAuditor,
-				IncludeGuildRoles:              isGuildAuditor,
-				IncludeAllGuilds:               isGlobalOperator,
-				IncludeMatchmakingTier:         isGuildAuditor,
+				IncludeDiscordDisplayName:      access.IsEnforcer,
+				IncludeSuspensionAuditorNotes:  access.IsEnforcer,
+				IncludeInactiveSuspensions:     access.IsEnforcer,
+				ErrorIfAccountDisabled:         !access.IsEnforcer,
+				IncludePartyGroupName:          access.IsAuditor,
+				IncludeDefaultMatchmakingGuild: access.IsAuditor,
+				IncludeLinkedDevices:           access.IsAuditor,
+				StripIPAddresses:               !access.IsGlobalOperator,
+				IncludeRecentLogins:            access.IsAuditor,
+				IncludePasswordSetState:        access.IsAuditor,
+				IncludeGuildRoles:              access.IsAuditor,
+				IncludeAllGuilds:               access.IsGlobalOperator,
+				IncludeMatchmakingTier:         access.IsAuditor,
 				ShowLoginsSince:                loginsSince,
-				SendFileOnError:                isGlobalOperator,
+				SendFileOnError:                access.IsGlobalOperator,
 			}
 
 			return d.handleProfileRequest(ctx, logger, nk, s, i, target, opts)
@@ -2541,9 +2541,17 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			if guild.OwnerID != user.ID {
 				// Check if the user is a global developer
-				if ok, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalDevelopers); err != nil {
-					return errors.New("failed to check group membership")
-				} else if !ok {
+				perms := PermissionsFromContext(ctx)
+				var ok bool
+				if perms != nil {
+					ok = perms.IsGlobalDeveloper
+				} else {
+					ok, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalDevelopers)
+					if err != nil {
+						return errors.New("failed to check group membership")
+					}
+				}
+				if !ok {
 					return errors.New("you do not have permission to use this command")
 				}
 			}
@@ -2613,7 +2621,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			// Limit access to global developers
-			if ok, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalDevelopers); err != nil {
+			perms := PermissionsFromContext(ctx)
+			var ok bool
+			var err error
+			if perms != nil {
+				ok = perms.IsGlobalDeveloper
+			} else {
+				ok, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalDevelopers)
+			}
+			if err != nil {
 				return errors.New("failed to check group membership")
 			} else if !ok {
 				return errors.New("you do not have permission to use this command")

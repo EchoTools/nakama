@@ -838,14 +838,9 @@ func (d *DiscordAppBot) handleSetIGNModalSubmit(_ context.Context, logger runtim
 		return fmt.Errorf("failed to get guild groups: %w", err)
 	}
 
-	isAuditorOrEnforcer := false
-	if gg, ok := callerGuildGroups[groupID]; ok && (gg.IsAuditor(callerID) || gg.IsEnforcer(callerID)) {
-		isAuditorOrEnforcer = true
-	}
-	isGlobalOperator, _ := CheckSystemGroupMembership(d.ctx, d.db, callerID, GroupGlobalOperators)
-	isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
-
-	if !isAuditorOrEnforcer {
+	// Resolve caller's guild access with cascade (global ops → auditor → enforcer)
+	access := ResolveCallerGuildAccess(d.ctx, d.db, callerID, groupID, callerGuildGroups)
+	if !access.IsEnforcer {
 		return simpleInteractionResponse(d.dg, i, "You do not have permission to set IGN overrides.")
 	}
 

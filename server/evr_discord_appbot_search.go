@@ -96,14 +96,9 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 		return fmt.Errorf("failed to get guild groups: %w", err)
 	}
 
-	isGuildAuditor := false
-	if isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userIDStr, GroupGlobalOperators); err != nil {
-		return fmt.Errorf("error checking global operator status: %w", err)
-	} else if isGlobalOperator {
-		isGuildAuditor = true
-	} else if gg, ok := callerGuildGroups[groupID]; ok && gg.IsAuditor(userIDStr) {
-		isGuildAuditor = true
-	}
+	// Resolve caller's guild access with cascade (global ops → auditor → enforcer)
+	access := ResolveCallerGuildAccess(ctx, db, userIDStr, groupID, callerGuildGroups)
+	isGuildAuditor := access.IsAuditor
 
 	if err := parseCommandOption(s, i, "pattern", &partial); err != nil {
 		return err
