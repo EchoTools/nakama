@@ -1544,7 +1544,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				graceSeconds     int
 			)
 
-
 			for _, option := range options {
 				switch option.Name {
 				case "match-id":
@@ -3813,7 +3812,7 @@ func (d *DiscordAppBot) createLookupSetIGNModal(currentDisplayName string, isLoc
 							Value:       lockStatusText,
 							Style:       discordgo.TextInputShort,
 							Required:    true,
-							Placeholder: "yes or no (currently: " + lockStatusText + ")",
+							Placeholder: fmt.Sprintf("yes or no (currently: %s)", lockStatusText),
 						},
 					},
 				},

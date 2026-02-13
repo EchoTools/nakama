@@ -593,10 +593,12 @@ func (p *InGamePanel) createSuspendPlayerModal(targetDiscordID, displayName stri
 }
 
 func (p *InGamePanel) createSetIGNModal(userID, groupID, currentDisplayName string, isLocked bool) *discordgo.InteractionResponse {
-	lockValue := "false"
+	// Determine the current lock status text
+	lockStatusText := "no"
 	if isLocked {
-		lockValue = "true"
+		lockStatusText = "yes"
 	}
+
 	return &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
@@ -619,11 +621,11 @@ func (p *InGamePanel) createSetIGNModal(userID, groupID, currentDisplayName stri
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
 							CustomID:    "lock_input",
-							Label:       "Lock IGN (true/false)",
-							Value:       lockValue,
+							Label:       "🔒 Prevent player from changing this name?",
+							Value:       lockStatusText,
 							Style:       discordgo.TextInputShort,
 							Required:    true,
-							Placeholder: "true or false",
+							Placeholder: fmt.Sprintf("yes or no (currently: %s)", lockStatusText),
 						},
 					},
 				},
