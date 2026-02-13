@@ -1544,16 +1544,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				graceSeconds     int
 			)
 
-			perms := PermissionsFromContext(ctx)
-			var isGlobalOperator bool
-			if perms != nil {
-				isGlobalOperator = perms.IsGlobalOperator
-			} else {
-				isGlobalOperator, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
-				if err != nil {
-					return fmt.Errorf("error checking global operator status: %w", err)
-				}
-			}
 
 			for _, option := range options {
 				switch option.Name {
@@ -1571,7 +1561,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 				case "disconnect-game-server":
 					disconnectServer = option.BoolValue()
-				case "graceful":
+				case "grace-seconds":
 					graceSeconds = int(option.IntValue())
 				case "reason":
 					reason = option.StringValue()
@@ -1584,14 +1574,51 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					return errors.New("no match ID provided")
 				}
 
-				// Verify that the match is owned by the user, or is a guild enforcer
 				label, err := MatchLabelByID(ctx, nk, matchID)
 				if err != nil {
 					return fmt.Errorf("failed to get match label: %w", err)
 				}
 
-				if !isGlobalOperator && label.GetGroupID().String() != groupID && label.GameServer.OperatorID.String() != userID {
+				// Permission check: global operator, server owner, or guild enforcer
+				// of the session running on the server
+				allowed, err := d.canShutdownMatch(ctx, userID, label)
+				if err != nil {
+					return fmt.Errorf("error checking shutdown permission: %w", err)
+				}
+				if !allowed {
 					return errors.New("you do not have permission to shut down this match")
+				}
+
+				// If there are players in the match, show confirmation with match status
+				if len(label.Players) > 0 {
+					embed := d.createShutdownMatchEmbed(label)
+
+					// Encode shutdown parameters in the button custom ID
+					disconnectStr := "0"
+					if disconnectServer {
+						disconnectStr = "1"
+					}
+					customID := fmt.Sprintf("confirm_shutdown:%s:%s:%d", matchID.String(), disconnectStr, graceSeconds)
+
+					return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Flags:  discordgo.MessageFlagsEphemeral,
+							Embeds: []*discordgo.MessageEmbed{embed},
+							Components: []discordgo.MessageComponent{
+								discordgo.ActionsRow{
+									Components: []discordgo.MessageComponent{
+										discordgo.Button{
+											Label:    "Confirm Shutdown",
+											Style:    discordgo.DangerButton,
+											CustomID: customID,
+											Emoji:    &discordgo.ComponentEmoji{Name: "⚠️"},
+										},
+									},
+								},
+							},
+						},
+					})
 				}
 
 				signal := SignalShutdownPayload{
@@ -1602,7 +1629,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				data := NewSignalEnvelope(userID, SignalShutdown, signal).String()
 
-				// Signal the match to lock the session
+				// Signal the match to shut down
 				if _, err := nk.MatchSignal(ctx, matchID.String(), data); err != nil {
 					return fmt.Errorf("failed to signal match: %w", err)
 				}
@@ -1617,7 +1644,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				})
 			}
 
-			// Send the response
+			// Send the response (only reached when no players are in the match)
 			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
