@@ -1544,16 +1544,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				graceSeconds     int
 			)
 
-			perms := PermissionsFromContext(ctx)
-			var isGlobalOperator bool
-			if perms != nil {
-				isGlobalOperator = perms.IsGlobalOperator
-			} else {
-				isGlobalOperator, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
-				if err != nil {
-					return fmt.Errorf("error checking global operator status: %w", err)
-				}
-			}
 
 			for _, option := range options {
 				switch option.Name {
