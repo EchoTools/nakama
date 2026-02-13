@@ -2,6 +2,7 @@ package server
 
 import (
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -147,7 +148,7 @@ func TestAllocatePostMatchSocialLobby_ParticipantFiltering(t *testing.T) {
 			SessionID:     sessionID,
 			UserID:        userID,
 			RoleAlignment: p.roleAlignment,
-			Username:      "Player" + string(rune('0'+i)),
+			Username:      "Player" + strconv.Itoa(i),
 		}
 	}
 

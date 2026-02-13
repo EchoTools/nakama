@@ -1704,7 +1704,19 @@ func allocatePostMatchSocialLobby(ctx context.Context, logger runtime.Logger, nk
 
 	// Try to allocate a social lobby using the same group
 	// Use empty RTT map and no region requirement for flexibility
-	label, err := LobbyGameServerAllocate(ctx, logger, nk, []string{groupID.String()}, map[string]int{}, settings, nil, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
+	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
+	label, err := LobbyGameServerAllocate(
+		ctx,
+		logger,
+		nk,
+		[]string{groupID.String()},
+		map[string]int{},
+		settings,
+		nil,
+		true,
+		false,
+		queryAddon,
+	)
 	if err != nil {
 		return fmt.Errorf("failed to allocate social lobby for post-match transition: %w", err)
 	}
