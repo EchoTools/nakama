@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/echotools/nevr-common/v4/gen/go/rtapi"
+	rtapi "github.com/echotools/nevr-common/v4/gen/go/rtapi/v1"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -291,15 +291,15 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
-	// Check if the main presence is already in the match (idempotent join or reconnection)
+	// Check if the main presence is already in the match with the same session ID
+	// Explicitly reject as duplicate; callers should treat as no-op
 	if existing, found := state.presenceMap[meta.Presence.GetSessionId()]; found {
-		// If the session is already in the match, treat this as a successful idempotent join
 		logger.WithFields(map[string]interface{}{
 			"evrid": existing.EvrID,
 			"uid":   existing.GetUserId(),
 			"sid":   existing.GetSessionId(),
-		}).Debug("Session already in match, allowing idempotent join.")
-		return state, true, ""
+		}).Warn("Duplicate join attempt for existing session; rejecting.")
+		return state, false, ErrJoinRejectReasonDuplicateJoin.Error()
 	}
 
 	// Remove any reservations of existing players (i.e. party members already in the match)
@@ -383,12 +383,14 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	}
 
 	// Ensure the player has a role alignment
+	isBackfill := time.Now().After(state.StartTime.Add(PublicMatchWaitTime))
 	metricsTags := map[string]string{
 		"mode":     state.Mode.String(),
 		"level":    state.Level.String(),
 		"type":     state.LobbyType.String(),
 		"role":     fmt.Sprintf("%d", meta.Presence.RoleAlignment),
 		"group_id": state.GetGroupID().String(),
+		"backfill": strconv.FormatBool(isBackfill),
 	}
 	if nk != nil { // for testing
 		nk.MetricsCounterAdd("match_entrant_join_count", metricsTags, 1)
@@ -798,13 +800,9 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 		messages := make([]evr.Message, 0, len(rejects))
 
-		// Send legacy messages to the game server to notify the sever to disconnect the players
-		for _, id := range rejects {
-			msg := evr.NewBroadcasterRemovePlayer(id)
-			messages = append(messages, msg)
-		}
-
 		code := evr.PlayerRejectionReasonDisconnected
+		// Send legacy messages to the game server to notify the server to disconnect the players
+		messages = append(messages, evr.NewGameServerEntrantRejected(code, rejects...))
 
 		// Convert UUIDs to strings for protobuf
 		rejectIDs := make([]string, 0, len(rejects))

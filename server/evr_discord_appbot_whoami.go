@@ -850,15 +850,9 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	callerGuildGroups, _ := GuildUserGroupsList(ctx, nk, d.guildGroupRegistry, callerID)
 
-	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, callerID, GroupGlobalOperators)
-
-	allowIGNOverride := false
-	if gg, ok := callerGuildGroups[groupID]; ok && (gg.IsAuditor(callerID) || gg.IsEnforcer(callerID)) {
-		allowIGNOverride = true
-	}
-
-	// Allow global operators as well
-	allowIGNOverride = allowIGNOverride || isGlobalOperator
+	// Resolve caller's guild access with cascade (global ops → auditor → enforcer)
+	access := ResolveCallerGuildAccess(ctx, d.db, callerID, groupID, callerGuildGroups)
+	allowIGNOverride := access.IsEnforcer
 
 	if allowIGNOverride {
 		components = append(components,

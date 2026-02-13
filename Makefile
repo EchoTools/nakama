@@ -7,15 +7,15 @@ SRC_FILES=$(shell find . -type f -name '*.go')
 SRC_DIRS=$(shell find . -type d -name '*.go' | sed 's/\/[^/]*$$//')
 PWD=$(shell pwd)
 
-DEBUG_FLAGS=-trimpath -mod=vendor -gcflags "-trimpath $(PWD)" -gcflags="all=-N -l" -asmflags "-trimpath $(PWD)"
-RELEASE_FLAGS=-trimpath -mod=vendor -gcflags "-trimpath $(PWD)" -asmflags "-trimpath $(PWD)"
+DEBUG_FLAGS=-trimpath -gcflags "-trimpath $(PWD)" -gcflags="all=-N -l" -asmflags "-trimpath $(PWD)"
+RELEASE_FLAGS=-trimpath -gcflags "-trimpath $(PWD)" -asmflags "-trimpath $(PWD)"
 .PHONY: all dev release push bench-baseline bench-compare bench-check \
 	act act-build act-tests act-list act-lint
 
 all: nakama
 
 nakama: $(SRC_FILES)
-	GOWORK=off CGO_ENABLED=1 CGO_CFLAGS="-O0 -g" go build \
+	CGO_ENABLED=1 CGO_CFLAGS="-O0 -g" go build \
 		$(DEBUG_FLAGS) \
 		-ldflags "-X main.version=$(GIT_DESCRIBE) -X main.commitID=$(COMMIT)" \
 		-o nakama

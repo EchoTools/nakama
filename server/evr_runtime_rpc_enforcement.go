@@ -42,11 +42,8 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError("Invalid request payload", StatusInvalidArgument)
 	}
 
-	// Get the caller's user ID from context
-	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
-	if !ok || userID == "" {
-		return "", runtime.NewError("User ID not found in context", StatusUnauthenticated)
-	}
+	// Get the caller's user ID from context (guaranteed to exist by middleware)
+	userID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 
 	// Validate required fields
 	if request.GroupID == "" {
@@ -72,18 +69,11 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 
 	groupID := request.GroupID
 
-	// Check if the caller is a global operator
-	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
+	// Check permissions (global operator, global bot, or guild enforcer)
+	isGlobalOperator, isGlobalBot, isEnforcer, gg, err := RequireEnforcerOperatorOrBot(ctx, db, nk, userID, groupID)
 	if err != nil {
-		logger.Error("Failed to check global operator status", zap.Error(err))
-		return "", runtime.NewError("Failed to check permissions", StatusInternalError)
-	}
-
-	// Check if the caller is a global bot
-	isGlobalBot, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalBots)
-	if err != nil {
-		logger.Error("Failed to check global bot status", zap.Error(err))
-		return "", runtime.NewError("Failed to check permissions", StatusInternalError)
+		logger.Error("Permission check failed", zap.Error(err))
+		return "", err
 	}
 
 	// Determine enforcer user ID
@@ -97,19 +87,6 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 
 	// Target user ID is always from the request
 	targetUserID := request.TargetUserID
-
-	// Load guild group to check permissions
-	gg, err := GuildGroupLoad(ctx, nk, groupID)
-	if err != nil {
-		logger.Error("Failed to load guild group", zap.Error(err))
-		return "", runtime.NewError("Failed to load guild group", StatusInternalError)
-	}
-
-	// Check if the caller is an enforcer
-	isEnforcer := gg.IsEnforcer(userID)
-	if !isEnforcer && !isGlobalOperator {
-		return "", runtime.NewError("You must be a guild enforcer or global operator to use this command", StatusPermissionDenied)
-	}
 
 	// Parse suspension duration if provided
 	var suspensionDuration time.Duration
@@ -323,10 +300,7 @@ func EnforcementJournalListRPC(ctx context.Context, logger runtime.Logger, db *s
 		return "", runtime.NewError("group_id is required", StatusInvalidArgument)
 	}
 
-	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
-	if !ok || userID == "" {
-		return "", runtime.NewError("User ID not found in context", StatusUnauthenticated)
-	}
+	userID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 
 	// Check if the caller is a global operator
 	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
@@ -458,29 +432,13 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	// Get the caller's user ID from context
-	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
-	if !ok || userID == "" {
-		return "", runtime.NewError("User ID not found in context", StatusUnauthenticated)
-	}
+	userID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 
-	// Check if the caller is a global operator
-	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
+	// Check permissions (global operator or guild enforcer)
+	_, _, _, err := RequireEnforcerOrOperator(ctx, db, nk, userID, request.GroupID)
 	if err != nil {
-		logger.Error("Failed to check global operator status", zap.Error(err))
-		return "", runtime.NewError("Failed to check permissions", StatusInternalError)
-	}
-
-	// Load the guild group to check if caller is an enforcer
-	gg, err := GuildGroupLoad(ctx, nk, request.GroupID)
-	if err != nil {
-		logger.Error("Failed to load guild group", zap.Error(err))
-		return "", runtime.NewError("Failed to load guild group", StatusInternalError)
-	}
-
-	// Check if the caller is an enforcer
-	isEnforcer := gg.IsEnforcer(userID)
-	if !isEnforcer && !isGlobalOperator {
-		return "", runtime.NewError("You must be a guild enforcer or global operator to edit enforcement records", StatusPermissionDenied)
+		logger.Error("Permission check failed", zap.Error(err))
+		return "", err
 	}
 
 	// Load the enforcement journal

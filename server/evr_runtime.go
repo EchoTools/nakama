@@ -91,50 +91,10 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	// Register RPC's for device linking
 	rpcHandler := NewRPCHandler(ctx, db, dg)
-	rpcs := map[string]func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error){
-		"account/search":                AccountSearchRPC,
-		"account/lookup":                rpcHandler.AccountLookupRPC,
-		"account/authenticate/password": AuthenticatePasswordRPC,
-		"leaderboard/haystack":          rpcHandler.LeaderboardHaystackRPC,
-		"leaderboard/records":           rpcHandler.LeaderboardRecordsListRPC,
-		"link/device":                   LinkDeviceRpc,
-		"link/usernamedevice":           LinkUserIdDeviceRpc,
-		"signin/discord":                DiscordSignInRpc,
-		"match/public":                  rpcHandler.MatchListPublicRPC,
-		"match":                         MatchRPC,
-		"match/prepare":                 PrepareMatchRPC,
-		"match/allocate":                AllocateMatchRPC,
-		"match/terminate":               shutdownMatchRpc,
-		"match/build":                   BuildMatchRPC,
-		"player/setnextmatch":           SetNextMatchRPC,
-		"player/statistics":             PlayerStatisticsRPC,
-		"player/kick":                   KickPlayerRPC,
-		"player/profile":                UserServerProfileRPC,
-		"player/matchlock":              MatchLockRPC,
-		"player/matchlock/status":       GetMatchLockStatusRPC,
-		"link":                          LinkingAppRpc,
-		"evr/servicestatus":             rpcHandler.ServiceStatusRPC,
-		"matchmaking/settings":          MatchmakingSettingsRPC,
-		"importloadouts":                ImportLoadoutsRpc,
-		"matchmaker/stream":             MatchmakerStreamRPC,
-		"matchmaker/state":              MatchmakerStateRPC,
-		"matchmaker/candidates":         MatchmakerCandidatesRPCFactory(sbmm),
-		"matchmaker/config":             MatchmakerConfigRPC,
-		"stream/join":                   StreamJoinRPC,
-		"server/score":                  ServerScoreRPC,
-		"server/scores":                 ServerScoresRPC,
-		"forcecheck":                    CheckForceUserRPC,
-		"guildgroup":                    GuildGroupGetRPC,
-		"enforcement/kick":              EnforcementKickRPC,
-		"enforcement/journals":          EnforcementJournalListRPC,
-		"enforcement/record/edit":       EnforcementRecordEditRPC,
-		"earlyquit/history":             EarlyQuitHistoryRPC,
-		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
-	}
-	for name, rpc := range rpcs {
-		if err = initializer.RegisterRpc(name, rpc); err != nil {
-			return fmt.Errorf("unable to register %s: %w", name, err)
-		}
+
+	// Register all EVR RPCs with authorization middleware
+	if err = RegisterEVRRPCs(ctx, logger, db, nk, initializer, rpcHandler, sbmm); err != nil {
+		return fmt.Errorf("unable to register EVR RPCs: %w", err)
 	}
 
 	if db != nil && nk != nil { // Avoid panic's during some automated tests

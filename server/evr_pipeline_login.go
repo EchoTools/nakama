@@ -602,19 +602,23 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		metadataUpdated = true
 	}
 
-	if ismember, err := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalDevelopers); err != nil {
+	// Resolve all system group memberships in a single query
+	userPerms, err := ResolveUserPermissions(ctx, p.db, session.userID.String())
+	if err != nil {
 		metricsTags["error"] = "group_check_failed"
-		return fmt.Errorf("failed to check system group membership: %w", err)
-	} else if ismember {
+		return fmt.Errorf("failed to resolve user permissions: %w", err)
+	}
+
+	// Set flags based on cached permissions
+	if userPerms.IsGlobalDeveloper {
 		params.isGlobalDeveloper = true
 		params.isGlobalOperator = true
-
-	} else if ismember, err := CheckSystemGroupMembership(ctx, p.db, params.profile.UserID(), GroupGlobalOperators); err != nil {
-		metricsTags["error"] = "group_check_failed"
-		return fmt.Errorf("failed to check system group membership: %w", err)
-	} else if ismember {
+	} else if userPerms.IsGlobalOperator {
 		params.isGlobalOperator = true
 	}
+
+	// Cache permissions in context for downstream use
+	ctx = WithUserPermissions(ctx, userPerms)
 
 	// Update in-memory account metadata for guilds that the user has
 	// the force username role.

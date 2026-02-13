@@ -121,9 +121,15 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 	isGlobalOperator := false
 	var err error
 	if userID != "" {
-		isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
-		if err != nil {
-			return fmt.Errorf("error checking global operator status: %w", err)
+		// Try cached permissions first, fallback to DB query
+		perms := PermissionsFromContext(ctx)
+		if perms != nil {
+			isGlobalOperator = perms.IsGlobalOperator
+		} else {
+			isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+			if err != nil {
+				return fmt.Errorf("error checking global operator status: %w", err)
+			}
 		}
 	}
 	// Log the interaction
@@ -218,7 +224,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 			logger.Warn("Failed to log interaction to channel")
 		}
 
-	case "join-player", "igp", "ign", "shutdown-match":
+	case "join-player", "igp", "ign":
 
 		gg := d.guildGroupRegistry.Get(groupID)
 		if gg == nil {
@@ -231,6 +237,19 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 
 		if !isGlobalOperator && !gg.IsEnforcer(userID) {
 			return simpleInteractionResponse(s, i, "You must be a guild enforcer to use this command.")
+		}
+
+	case "shutdown-match":
+		// Permission check is deferred to the handler because it depends on the match's guild,
+		// not the calling guild. The handler checks: global operator, server owner, or guild
+		// enforcer of the session running on the server.
+		gg := d.guildGroupRegistry.Get(groupID)
+		if gg == nil {
+			return simpleInteractionResponse(s, i, "This guild is not registered.")
+		}
+
+		if err := d.LogInteractionToChannel(i, gg.AuditChannelID); err != nil {
+			logger.Warn("Failed to log interaction to channel")
 		}
 
 	case "set-command-channel", "generate-button":
@@ -439,9 +458,16 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		vrmlUserID := parts[1]
 
 		// Check that the user clicking the button is a badge admin
-		isMember, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalBadgeAdmins)
-		if err != nil {
-			return fmt.Errorf("failed to check group membership: %w", err)
+		perms := PermissionsFromContext(ctx)
+		var isMember bool
+		var err error
+		if perms != nil {
+			isMember = perms.IsGlobalBadgeAdmin
+		} else {
+			isMember, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalBadgeAdmins)
+			if err != nil {
+				return fmt.Errorf("failed to check group membership: %w", err)
+			}
 		}
 		if !isMember {
 			return simpleInteractionResponse(s, i, "You must be a VRML badge admin to perform this action.")
@@ -561,14 +587,9 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 			return fmt.Errorf("failed to get guild groups: %w", err)
 		}
 
-		isAuditorOrEnforcer := false
-		if gg, ok := callerGuildGroups[targetGroupID]; ok && (gg.IsAuditor(userID) || gg.IsEnforcer(userID)) {
-			isAuditorOrEnforcer = true
-		}
-		isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
-		isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
-
-		if !isAuditorOrEnforcer {
+		// Resolve caller's guild access with cascade (global ops → auditor → enforcer)
+		access := ResolveCallerGuildAccess(ctx, d.db, userID, targetGroupID, callerGuildGroups)
+		if !access.IsEnforcer {
 			return simpleInteractionResponse(s, i, "You do not have permission to set IGN overrides.")
 		}
 
@@ -628,6 +649,11 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 	case "enf":
 		// Handle enforcement button interactions (edit, void) - short format
 		return d.handleEnforcementInteraction(ctx, logger, s, i, value)
+
+	case "confirm_shutdown":
+		// Handle shutdown confirmation button click
+		// Format: confirm_shutdown:<matchID>:<disconnectServer>:<graceSeconds>
+		return d.handleConfirmShutdown(ctx, logger, nk, s, i, userID, value)
 	}
 
 	return nil
@@ -656,10 +682,16 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		}
 	}
 
-	isGlobalOperator := false
-	isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
-	if err != nil {
-		return nil, 0, status.Errorf(codes.Internal, "error checking global operator status: %v", err)
+	// Try cached permissions first, fallback to DB query
+	perms := PermissionsFromContext(ctx)
+	var isGlobalOperator bool
+	if perms != nil {
+		isGlobalOperator = perms.IsGlobalOperator
+	} else {
+		isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+		if err != nil {
+			return nil, 0, status.Errorf(codes.Internal, "error checking global operator status: %v", err)
+		}
 	}
 
 	if !gg.IsAllocator(userID) && !isGlobalOperator {
@@ -918,16 +950,10 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		sentEmbedResponse     = false
 	)
 
-	gg, err := GuildGroupLoad(ctx, nk, groupID)
+	// Check permissions (global operator or guild enforcer)
+	isGlobalOperator, isEnforcer, gg, err := RequireEnforcerOrOperator(ctx, db, nk, callerUserID, groupID)
 	if err != nil {
-		return errors.New("failed to load guild group")
-	} else if gg.IsEnforcer(callerUserID) {
-		isEnforcer = true
-	}
-
-	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, callerUserID, GroupGlobalOperators)
-	if err != nil {
-		return fmt.Errorf("error checking global operator status: %w", err)
+		return errors.New("You must be a guild enforcer or global operator to use this command")
 	}
 
 	if isEnforcer || isGlobalOperator {
@@ -1381,4 +1407,110 @@ func (d *DiscordAppBot) handleRegionFallbackInteraction(ctx context.Context, log
 	}
 
 	return fmt.Errorf("unknown action: %s", action)
+}
+
+// canShutdownMatch checks whether a user has permission to shut down a match.
+// Returns true if the user is a global operator, the server owner (OperatorID),
+// or a guild enforcer of the session running on the server.
+func (d *DiscordAppBot) canShutdownMatch(ctx context.Context, userID string, label *MatchLabel) (bool, error) {
+	var err error
+	perms := PermissionsFromContext(ctx)
+	var isGlobalOperator bool
+	if perms != nil {
+		isGlobalOperator = perms.IsGlobalOperator
+	} else {
+		isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+		if err != nil {
+			return false, fmt.Errorf("error checking global operator status: %w", err)
+		}
+	}
+
+	if isGlobalOperator {
+		return true, nil
+	}
+
+	if label.GameServer != nil && label.GameServer.OperatorID.String() == userID {
+		return true, nil
+	}
+
+	matchGroupID := label.GetGroupID().String()
+	gg := d.guildGroupRegistry.Get(matchGroupID)
+	if gg != nil && gg.IsEnforcer(userID) {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+// handleConfirmShutdown handles the confirm shutdown button click.
+// value format: <matchID>:<disconnectServer>:<graceSeconds>
+func (d *DiscordAppBot) handleConfirmShutdown(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, value string) error {
+	parts := strings.SplitN(value, ":", 3)
+	if len(parts) != 3 {
+		return simpleInteractionResponse(s, i, "Invalid shutdown confirmation data.")
+	}
+
+	matchIDStr := parts[0]
+
+	if parts[1] != "0" && parts[1] != "1" {
+		return simpleInteractionResponse(s, i, "Invalid shutdown confirmation data.")
+	}
+	disconnectServer := parts[1] == "1"
+
+	graceSeconds, err := strconv.Atoi(parts[2])
+	if err != nil || graceSeconds < 0 || graceSeconds > 3600 {
+		return simpleInteractionResponse(s, i, "Invalid grace period.")
+	}
+
+	matchID, err := MatchIDFromString(matchIDStr)
+	if err != nil {
+		return simpleInteractionResponse(s, i, "Invalid match ID.")
+	}
+
+	label, err := MatchLabelByID(ctx, nk, matchID)
+	if err != nil {
+		return simpleInteractionResponse(s, i, "Match not found or already ended.")
+	}
+
+	// Re-verify permissions
+	allowed, err := d.canShutdownMatch(ctx, userID, label)
+	if err != nil {
+		return fmt.Errorf("error checking shutdown permission: %w", err)
+	}
+	if !allowed {
+		return simpleInteractionResponse(s, i, "You do not have permission to shut down this match.")
+	}
+
+	signal := SignalShutdownPayload{
+		GraceSeconds:         graceSeconds,
+		DisconnectGameServer: disconnectServer,
+		DisconnectUsers:      false,
+	}
+
+	data := NewSignalEnvelope(userID, SignalShutdown, signal).String()
+
+	if _, err := nk.MatchSignal(ctx, matchID.String(), data); err != nil {
+		return simpleInteractionResponse(s, i, fmt.Sprintf("Failed to shut down match: %s", err.Error()))
+	}
+
+	// Update the original message to disable the button and show confirmation
+	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseUpdateMessage,
+		Data: &discordgo.InteractionResponseData{
+			Content: "The match has been shut down.",
+			Embeds:  []*discordgo.MessageEmbed{},
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.Button{
+							Label:    "Match Shut Down",
+							Style:    discordgo.SecondaryButton,
+							CustomID: "nil",
+							Disabled: true,
+						},
+					},
+				},
+			},
+		},
+	})
 }

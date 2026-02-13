@@ -73,9 +73,12 @@ func InitializeSocialAuth(ctx context.Context, logger runtime.Logger, initialize
 	if err := initializer.RegisterBeforeUnlinkDevice(BeforeUnlinkDevice); err != nil {
 		return fmt.Errorf("failed to register BeforeUnlinkDevice hook: %w", err)
 	}
+
+	// Note: Authorization middleware must be applied at the server package level to avoid import cycles
 	if err := initializer.RegisterRpc("github_status", RpcGetGitHubStatus); err != nil {
 		return err
 	}
+
 	return nil
 }
 
