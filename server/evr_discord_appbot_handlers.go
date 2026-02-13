@@ -1407,15 +1407,15 @@ func (d *DiscordAppBot) handleRegionFallbackInteraction(ctx context.Context, log
 // Returns true if the user is a global operator, the server owner (OperatorID),
 // or a guild enforcer of the session running on the server.
 func (d *DiscordAppBot) canShutdownMatch(ctx context.Context, userID string, label *MatchLabel) (bool, error) {
-
+	var err error
 	perms := PermissionsFromContext(ctx)
 	var isGlobalOperator bool
 	if perms != nil {
 		isGlobalOperator = perms.IsGlobalOperator
 	} else {
-		isGlobalOperator, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
+		isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
 		if err != nil {
-			return fmt.Errorf("error checking global operator status: %w", err)
+			return false, fmt.Errorf("error checking global operator status: %w", err)
 		}
 	}
 
