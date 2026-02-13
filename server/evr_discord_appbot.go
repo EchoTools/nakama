@@ -2153,53 +2153,44 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("failed to get guild groups: %w", err)
 			}
 
-			isGuildAuditor := false
-			if gg, ok := callerGuildGroups[groupID]; ok && gg.IsAuditor(callerUserID) {
-				isGuildAuditor = true
-				d.cache.QueueSyncMember(i.GuildID, target.ID, true)
+			// Resolve caller's guild access with cascade (global ops → auditor → enforcer)
+			access := ResolveCallerGuildAccess(ctx, db, callerUserID, groupID, callerGuildGroups)
+			
+			// Queue sync for auditors
+			if access.IsAuditor {
+				if gg, ok := callerGuildGroups[groupID]; ok && gg.IsAuditor(callerUserID) {
+					d.cache.QueueSyncMember(i.GuildID, target.ID, true)
+				}
 			}
-
-			isGuildEnforcer := false
-			if gg, ok := callerGuildGroups[groupID]; ok && gg.IsEnforcer(callerUserID) {
-				isGuildEnforcer = true
-			}
-
-			isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userIDStr, GroupGlobalOperators)
-			if err != nil {
-				return fmt.Errorf("error checking global operator status: %w", err)
-			}
-
-			isGuildAuditor = isGuildAuditor || isGlobalOperator
-			isGuildEnforcer = isGuildEnforcer || isGuildAuditor
 
 			loginsSince := time.Now().Add(-30 * 24 * time.Hour)
-			if !isGlobalOperator {
+			if !access.IsGlobalOperator {
 				loginsSince = time.Time{}
 			}
 
 			opts := UserProfileRequestOptions{
-				IncludeSuspensionsEmbed:      isGuildEnforcer,
-				IncludePastSuspensions:       isGuildEnforcer,
-				IncludeCurrentMatchesEmbed:   isGuildEnforcer,
-				IncludeVRMLHistoryEmbed:      isGlobalOperator,
+				IncludeSuspensionsEmbed:      access.IsEnforcer,
+				IncludePastSuspensions:       access.IsEnforcer,
+				IncludeCurrentMatchesEmbed:   access.IsEnforcer,
+				IncludeVRMLHistoryEmbed:      access.IsGlobalOperator,
 				IncludePastDisplayNamesEmbed: true,
-				IncludeAlternatesEmbed:       isGlobalOperator,
+				IncludeAlternatesEmbed:       access.IsGlobalOperator,
 
-				IncludeDiscordDisplayName:      isGuildEnforcer,
-				IncludeSuspensionAuditorNotes:  isGuildEnforcer,
-				IncludeInactiveSuspensions:     isGuildEnforcer,
-				ErrorIfAccountDisabled:         !isGuildEnforcer,
-				IncludePartyGroupName:          isGuildAuditor,
-				IncludeDefaultMatchmakingGuild: isGuildAuditor,
-				IncludeLinkedDevices:           isGuildAuditor,
-				StripIPAddresses:               !isGlobalOperator,
-				IncludeRecentLogins:            isGuildAuditor,
-				IncludePasswordSetState:        isGuildAuditor,
-				IncludeGuildRoles:              isGuildAuditor,
-				IncludeAllGuilds:               isGlobalOperator,
-				IncludeMatchmakingTier:         isGuildAuditor,
+				IncludeDiscordDisplayName:      access.IsEnforcer,
+				IncludeSuspensionAuditorNotes:  access.IsEnforcer,
+				IncludeInactiveSuspensions:     access.IsEnforcer,
+				ErrorIfAccountDisabled:         !access.IsEnforcer,
+				IncludePartyGroupName:          access.IsAuditor,
+				IncludeDefaultMatchmakingGuild: access.IsAuditor,
+				IncludeLinkedDevices:           access.IsAuditor,
+				StripIPAddresses:               !access.IsGlobalOperator,
+				IncludeRecentLogins:            access.IsAuditor,
+				IncludePasswordSetState:        access.IsAuditor,
+				IncludeGuildRoles:              access.IsAuditor,
+				IncludeAllGuilds:               access.IsGlobalOperator,
+				IncludeMatchmakingTier:         access.IsAuditor,
 				ShowLoginsSince:                loginsSince,
-				SendFileOnError:                isGlobalOperator,
+				SendFileOnError:                access.IsGlobalOperator,
 			}
 
 			return d.handleProfileRequest(ctx, logger, nk, s, i, target, opts)

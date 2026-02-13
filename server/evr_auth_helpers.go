@@ -49,6 +49,50 @@ func RequireEnforcerOrOperator(
 	return isOperator, isEnforcer, gg, nil
 }
 
+// RequireEnforcerOperatorOrBot checks if a user is a global operator, global bot, or guild enforcer.
+// Similar to RequireEnforcerOrOperator but also allows global bots to pass the check.
+func RequireEnforcerOperatorOrBot(
+	ctx context.Context,
+	db *sql.DB,
+	nk runtime.NakamaModule,
+	userID, groupID string,
+) (isOperator, isBot, isEnforcer bool, gg *GuildGroup, err error) {
+	// Try cached permissions first
+	perms := PermissionsFromContext(ctx)
+	if perms != nil {
+		isOperator = perms.IsGlobalOperator
+		isBot = perms.IsGlobalBot
+	} else {
+		// Fallback to DB query for backward compatibility
+		isOperator, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
+		if err != nil {
+			return false, false, false, nil, fmt.Errorf("failed to check operator status: %w", err)
+		}
+		isBot, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalBots)
+		if err != nil {
+			return false, false, false, nil, fmt.Errorf("failed to check bot status: %w", err)
+		}
+	}
+
+	// Load guild group to check enforcer status
+	gg, err = GuildGroupLoad(ctx, nk, groupID)
+	if err != nil {
+		return false, false, false, nil, fmt.Errorf("failed to load guild group: %w", err)
+	}
+
+	isEnforcer = gg.IsEnforcer(userID)
+
+	// Deny if neither operator nor bot nor enforcer
+	if !isOperator && !isBot && !isEnforcer {
+		return false, false, false, gg, runtime.NewError(
+			"You must be a guild enforcer, global operator, or global bot",
+			StatusPermissionDenied,
+		)
+	}
+
+	return isOperator, isBot, isEnforcer, gg, nil
+}
+
 // CallerGuildAccess represents a user's access level within a guild,
 // with cascading permissions (global ops → auditor → enforcer).
 type CallerGuildAccess struct {
