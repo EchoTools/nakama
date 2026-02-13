@@ -740,13 +740,30 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		return fmt.Errorf("failed to load matchmaking settings: %w", err)
 	} else {
 		updated := false
+		
+		// Check if user is a moderator (enforcer or operator) with green division
+		hasGreenInDivisions := slices.Contains(settings.Divisions, "green")
+		hasGreenInExcluded := slices.Contains(settings.ExcludedDivisions, "green")
+		
+		// Determine if user is a moderator - use cached permissions
+		isModerator := userPerms.IsGlobalOperator
+		if !isModerator && params.profile.ActiveGroupID != "" {
+			// Check if user is an enforcer in their active guild
+			if gg, ok := params.guildGroups[params.profile.ActiveGroupID]; ok {
+				isModerator = gg.IsEnforcer(session.userID.String())
+			}
+		}
+		
+		// Moderators with green in their divisions are protected from automatic removal
+		isProtectedModerator := isModerator && hasGreenInDivisions
+		
 		// If the player account is less than 7 days old, then assign the "green" division to the player.
 		if time.Since(params.profile.account.User.CreateTime.AsTime()) < time.Duration(serviceSettings.Matchmaking.GreenDivisionMaxAccountAgeDays)*24*time.Hour {
-			if !slices.Contains(settings.Divisions, "green") {
+			if !hasGreenInDivisions {
 				settings.Divisions = append(settings.Divisions, "green")
 				updated = true
 			}
-			if slices.Contains(settings.ExcludedDivisions, "green") {
+			if hasGreenInExcluded {
 				updated = true
 				// Remove the "green" division from the excluded divisions.
 				for i := 0; i < len(settings.ExcludedDivisions); i++ {
@@ -759,18 +776,22 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 			}
 
 		} else {
-			if slices.Contains(settings.Divisions, "green") {
+			// Old accounts lose green UNLESS they're protected moderators
+			if hasGreenInDivisions && !isProtectedModerator {
 				// Remove the "green" division from the divisions.
 				updated = true
 				for i := 0; i < len(settings.Divisions); i++ {
-					// Remove the "green" division from the divisions.
 					if settings.Divisions[i] == "green" {
 						settings.Divisions = slices.Delete(settings.Divisions, i, i+1)
 						i--
 					}
 				}
 			}
-			if !slices.Contains(settings.ExcludedDivisions, "green") {
+			// Only add to excluded if:
+			// - Not already in excluded
+			// - Not a moderator (moderators manage their own divisions)
+			// - Green is not in divisions (was removed or never had it)
+			if !hasGreenInExcluded && !isModerator && !slices.Contains(settings.Divisions, "green") {
 				updated = true
 				// Add the "green" division to the excluded divisions.
 				settings.ExcludedDivisions = append(settings.ExcludedDivisions, "green")
