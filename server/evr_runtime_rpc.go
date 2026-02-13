@@ -2292,7 +2292,8 @@ func AdminPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 
 	data, err := json.Marshal(response)
 	if err != nil {
-		return "", runtime.NewError("failed to marshal response", StatusInternalError)
+		logger.Error("Failed to marshal response: %v", err)
+		return "", runtime.NewError("failed to create response", StatusInternalError)
 	}
 
 	return string(data), nil

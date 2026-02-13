@@ -1544,7 +1544,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				graceSeconds     int
 			)
 
-
 			for _, option := range options {
 				switch option.Name {
 				case "match-id":
@@ -3781,7 +3780,11 @@ func (d *DiscordAppBot) LogUserErrorMessage(ctx context.Context, groupID string,
 }
 
 func (d *DiscordAppBot) createLookupSetIGNModal(currentDisplayName string, isLocked bool) *discordgo.InteractionResponse {
-	allowPlayerToChangeIGN := !isLocked
+	// Determine the current lock status text
+	lockStatusText := "no"
+	if isLocked {
+		lockStatusText = "yes"
+	}
 
 	return &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
@@ -3801,16 +3804,15 @@ func (d *DiscordAppBot) createLookupSetIGNModal(currentDisplayName string, isLoc
 						},
 					},
 				},
-				// TODO this should be a true/false toggle or select menu, or set to "yes/no"
 				discordgo.ActionsRow{
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
 							CustomID:    "lock_input",
-							Label:       "Lock IGN (true/false)",
-							Value:       fmt.Sprintf("%t", allowPlayerToChangeIGN),
+							Label:       "🔒 Prevent player from changing this name?",
+							Value:       lockStatusText,
 							Style:       discordgo.TextInputShort,
 							Required:    true,
-							Placeholder: "true or false",
+							Placeholder: fmt.Sprintf("yes or no (currently: %s)", lockStatusText),
 						},
 					},
 				},
