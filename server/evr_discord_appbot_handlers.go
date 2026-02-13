@@ -859,7 +859,19 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	}
 
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
-	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, filteredIPs, settings, []string{region}, true, false, queryAddon)
+
+	// Determine requested regions and whether to require them.
+	// Treat "no region selected" (empty or RegionDefault) as unrestricted so allocation can pick the best server.
+	var regions []string
+	requireRegion := false
+	if region != "" && region != RegionDefault {
+		// User explicitly selected a region: enforce it and use fallback UI if no servers are available there.
+		regions = []string{region}
+		requireRegion = true
+	}
+	// Otherwise: no explicit region selected (empty or RegionDefault), pass empty regions slice to allow allocator to choose best region without triggering fallback UI.
+
+	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, filteredIPs, settings, regions, true, requireRegion, queryAddon)
 	if err != nil {
 		// Check if this is a region fallback error
 		var regionErr ErrMatchmakingNoServersInRegion
