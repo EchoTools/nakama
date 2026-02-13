@@ -44,74 +44,74 @@ func TestNormalizeHeadsetType(t *testing.T) {
 
 func TestModeratorGreenDivisionProtection(t *testing.T) {
 	tests := []struct {
-		name                  string
-		accountAgeDays        int
-		initialDivisions      []string
-		initialExcluded       []string
-		isModerator           bool
-		expectedDivisions     []string
-		expectedExcluded      []string
-		expectedUpdate        bool
+		name              string
+		accountAgeDays    int
+		initialDivisions  []string
+		initialExcluded   []string
+		isModerator       bool
+		expectedDivisions []string
+		expectedExcluded  []string
+		expectedUpdate    bool
 	}{
 		{
-			name:                  "new player gets green",
-			accountAgeDays:        3,
-			initialDivisions:      []string{},
-			initialExcluded:       []string{},
-			isModerator:           false,
-			expectedDivisions:     []string{"green"},
-			expectedExcluded:      []string{},
-			expectedUpdate:        true,
+			name:              "new player gets green",
+			accountAgeDays:    3,
+			initialDivisions:  []string{},
+			initialExcluded:   []string{},
+			isModerator:       false,
+			expectedDivisions: []string{"green"},
+			expectedExcluded:  []string{},
+			expectedUpdate:    true,
 		},
 		{
-			name:                  "old player loses green",
-			accountAgeDays:        10,
-			initialDivisions:      []string{"green"},
-			initialExcluded:       []string{},
-			isModerator:           false,
-			expectedDivisions:     []string{},
-			expectedExcluded:      []string{"green"},
-			expectedUpdate:        true,
+			name:              "old player loses green",
+			accountAgeDays:    10,
+			initialDivisions:  []string{"green"},
+			initialExcluded:   []string{},
+			isModerator:       false,
+			expectedDivisions: []string{},
+			expectedExcluded:  []string{"green"},
+			expectedUpdate:    true,
 		},
 		{
-			name:                  "moderator keeps green despite age",
-			accountAgeDays:        10,
-			initialDivisions:      []string{"green", "bronze"},
-			initialExcluded:       []string{},
-			isModerator:           true,
-			expectedDivisions:     []string{"green", "bronze"},
-			expectedExcluded:      []string{},
-			expectedUpdate:        false,
+			name:              "moderator keeps green despite age",
+			accountAgeDays:    10,
+			initialDivisions:  []string{"green", "bronze"},
+			initialExcluded:   []string{},
+			isModerator:       true,
+			expectedDivisions: []string{"green", "bronze"},
+			expectedExcluded:  []string{},
+			expectedUpdate:    false,
 		},
 		{
-			name:                  "moderator without green not affected",
-			accountAgeDays:        10,
-			initialDivisions:      []string{"bronze"},
-			initialExcluded:       []string{},
-			isModerator:           true,
-			expectedDivisions:     []string{"bronze"},
-			expectedExcluded:      []string{},
-			expectedUpdate:        false,
+			name:              "moderator without green not affected",
+			accountAgeDays:    10,
+			initialDivisions:  []string{"bronze"},
+			initialExcluded:   []string{},
+			isModerator:       true,
+			expectedDivisions: []string{"bronze"},
+			expectedExcluded:  []string{},
+			expectedUpdate:    false,
 		},
 		{
-			name:                  "moderator with green gets it removed from excluded",
-			accountAgeDays:        3,
-			initialDivisions:      []string{"green"},
-			initialExcluded:       []string{"green"},
-			isModerator:           true,
-			expectedDivisions:     []string{"green"},
-			expectedExcluded:      []string{},
-			expectedUpdate:        true,
+			name:              "moderator with green gets it removed from excluded",
+			accountAgeDays:    3,
+			initialDivisions:  []string{"green"},
+			initialExcluded:   []string{"green"},
+			isModerator:       true,
+			expectedDivisions: []string{"green"},
+			expectedExcluded:  []string{},
+			expectedUpdate:    true,
 		},
 		{
-			name:                  "young moderator keeps green",
-			accountAgeDays:        3,
-			initialDivisions:      []string{"green"},
-			initialExcluded:       []string{},
-			isModerator:           true,
-			expectedDivisions:     []string{"green"},
-			expectedExcluded:      []string{},
-			expectedUpdate:        false,
+			name:              "young moderator keeps green",
+			accountAgeDays:    3,
+			initialDivisions:  []string{"green"},
+			initialExcluded:   []string{},
+			isModerator:       true,
+			expectedDivisions: []string{"green"},
+			expectedExcluded:  []string{},
+			expectedUpdate:    false,
 		},
 	}
 

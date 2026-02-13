@@ -740,11 +740,11 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		return fmt.Errorf("failed to load matchmaking settings: %w", err)
 	} else {
 		updated := false
-		
+
 		// Check if user is a moderator (enforcer or operator) with green division
 		hasGreenInDivisions := slices.Contains(settings.Divisions, "green")
 		hasGreenInExcluded := slices.Contains(settings.ExcludedDivisions, "green")
-		
+
 		// Determine if user is a moderator - use cached permissions
 		isModerator := userPerms.IsGlobalOperator
 		if !isModerator && params.profile.ActiveGroupID != "" {
@@ -753,10 +753,10 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 				isModerator = gg.IsEnforcer(session.userID.String())
 			}
 		}
-		
+
 		// Moderators with green in their divisions are protected from automatic removal
 		isProtectedModerator := isModerator && hasGreenInDivisions
-		
+
 		// If the player account is less than 7 days old, then assign the "green" division to the player.
 		if time.Since(params.profile.account.User.CreateTime.AsTime()) < time.Duration(serviceSettings.Matchmaking.GreenDivisionMaxAccountAgeDays)*24*time.Hour {
 			if !hasGreenInDivisions {

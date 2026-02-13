@@ -2627,7 +2627,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			// Parse the divisions
 			divisionList := strings.Split(divisions, ",")
 			validDivisions := []string{"green", "bronze", "silver", "gold", "platinum", "diamond", "master"}
-			
+
 			// Validate and trim divisions
 			for i := range divisionList {
 				divisionList[i] = strings.ToLower(strings.TrimSpace(divisionList[i]))
@@ -3353,10 +3353,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						break
 					}
 				}
-				
+
 				// All valid divisions
 				allDivisions := []string{"green", "bronze", "silver", "gold", "platinum", "diamond", "master"}
-				
+
 				// Parse existing input to support comma-separated values
 				parts := strings.Split(focused, ",")
 				lastPart := strings.ToLower(strings.TrimSpace(parts[len(parts)-1]))
@@ -3364,7 +3364,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if len(parts) > 1 {
 					prefix = strings.Join(parts[:len(parts)-1], ",") + ","
 				}
-				
+
 				choices := make([]*discordgo.ApplicationCommandOptionChoice, 0)
 				for _, div := range allDivisions {
 					if lastPart == "" || strings.HasPrefix(div, lastPart) {
@@ -3378,7 +3378,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						})
 					}
 				}
-				
+
 				if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionApplicationCommandAutocompleteResult,
 					Data: &discordgo.InteractionResponseData{
