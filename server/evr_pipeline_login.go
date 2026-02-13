@@ -175,11 +175,22 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		p.nk.metrics.CustomGauge("session_duration_seconds", metricsTags, time.Since(timer).Seconds())
 	}(metricsTags)
 
-	return session.SendEvr(
+	// Prepare messages to send on login
+	messagesToSend := []evr.Message{
 		evr.NewLoginSuccess(session.id, request.XPID),
 		unrequireMessage,
 		gameSettings,
-	)
+	}
+
+	// Send early quit config and feature flags
+	eqConfig := LoadEarlyQuitServiceConfig(ctx, p.nk, logger)
+	eqConfigMsg := evr.NewSNSEarlyQuitConfig(eqConfig)
+	messagesToSend = append(messagesToSend, eqConfigMsg)
+
+	eqFlags := evr.DefaultEarlyQuitFeatureFlags()
+	messagesToSend = append(messagesToSend, eqFlags)
+
+	return session.SendEvr(messagesToSend...)
 }
 
 // normalizes all the meta headset types to a common format
@@ -591,19 +602,23 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		metadataUpdated = true
 	}
 
-	if ismember, err := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalDevelopers); err != nil {
+	// Resolve all system group memberships in a single query
+	userPerms, err := ResolveUserPermissions(ctx, p.db, session.userID.String())
+	if err != nil {
 		metricsTags["error"] = "group_check_failed"
-		return fmt.Errorf("failed to check system group membership: %w", err)
-	} else if ismember {
+		return fmt.Errorf("failed to resolve user permissions: %w", err)
+	}
+
+	// Set flags based on cached permissions
+	if userPerms.IsGlobalDeveloper {
 		params.isGlobalDeveloper = true
 		params.isGlobalOperator = true
-
-	} else if ismember, err := CheckSystemGroupMembership(ctx, p.db, params.profile.UserID(), GroupGlobalOperators); err != nil {
-		metricsTags["error"] = "group_check_failed"
-		return fmt.Errorf("failed to check system group membership: %w", err)
-	} else if ismember {
+	} else if userPerms.IsGlobalOperator {
 		params.isGlobalOperator = true
 	}
+
+	// Cache permissions in context for downstream use
+	ctx = WithUserPermissions(ctx, userPerms)
 
 	// Update in-memory account metadata for guilds that the user has
 	// the force username role.
@@ -688,7 +703,9 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 							ownerDiscordID := p.discordCache.UserIDToDiscordID(ownerIDs[0])
 							go func() {
 								if err := p.discordCache.SendDisplayNameInUseNotification(ctx, params.profile.DiscordID(), ownerDiscordID, dn, params.profile.Username()); err != nil {
-									logger.Warn("Failed to send display name in use notification", zap.Error(err))
+									if IsDiscordErrorCode(err, discordgo.ErrCodeCannotSendMessagesToThisUser) {
+										logger.Warn("Failed to send display name in use notification", zap.Error(err))
+									}
 								}
 							}()
 						}
@@ -707,7 +724,11 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 
 	// Update the display name history for the active group, marking this name as an in-game-name.
 	// Use the current display name from the profile instead of querying the potentially stale history
-	activeGroupDisplayName := params.profile.GetGroupIGN(params.profile.ActiveGroupID)
+	activeGroupDisplayName, found := params.profile.GetGroupDisplayName(params.profile.ActiveGroupID)
+	if !found || activeGroupDisplayName == "" {
+		// Fallback to username if no display name is set
+		activeGroupDisplayName = params.profile.Username()
+	}
 	displayNameHistory.Update(params.profile.ActiveGroupID, activeGroupDisplayName, params.profile.Username(), true)
 
 	if err := DisplayNameHistoryStore(ctx, p.nk, session.userID.String(), displayNameHistory); err != nil {
@@ -780,7 +801,8 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	}
 
 	if metadataUpdated {
-		if err := p.nk.AccountUpdateId(ctx, params.profile.ID(), "", params.profile.MarshalMap(), params.profile.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
+		// Use EVRProfileUpdate to persist changes AND invalidate the ServerProfile cache
+		if err := EVRProfileUpdate(ctx, p.nk, params.profile.ID(), params.profile); err != nil {
 			metricsTags["error"] = "failed_update_profile"
 			return fmt.Errorf("failed to update user profile: %w", err)
 		}
@@ -897,6 +919,19 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 
 	clientProfile := NewClientProfile(ctx, params.profile, serverProfile)
 
+	if params.earlyQuitConfig != nil {
+		if cfg := params.earlyQuitConfig.Load(); cfg != nil {
+			level := cfg.EarlyQuitPenaltyLevel
+			lockoutDuration := GetLockoutDuration(int(level))
+			penaltyEndTime := cfg.LastEarlyQuitTime.Add(lockoutDuration)
+
+			if time.Now().Before(penaltyEndTime) {
+				clientProfile.EarlyQuitFeatures.PenaltyLevel = int(level)
+				clientProfile.EarlyQuitFeatures.PenaltyTimestamp = penaltyEndTime.Unix()
+			}
+		}
+	}
+
 	// Check if the user is required to go through community values
 	journal := NewGuildEnforcementJournal(userID)
 	if err := StorableRead(ctx, p.nk, userID, journal, true); err != nil {
@@ -947,7 +982,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 
 			journal.CommunityValuesCompletedAt = time.Now().UTC()
 
-			if err := StorableWrite(ctx, p.nk, userID, journal); err != nil {
+			if err := SyncJournalAndProfile(ctx, p.nk, userID, journal); err != nil {
 				logger.Warn("Failed to write community values", zap.Error(err))
 			}
 
@@ -1233,16 +1268,26 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 		p.nk.metrics.CustomTimer("profile_request_latency", tags, time.Since(startTime))
 	}()
 
-	// Load the server profile by XPID from storage (returns raw JSON)
-	data, _, err := ServerProfileLoadByXPID(ctx, p.nk, request.EvrId)
+	params, ok := LoadParams(ctx)
+	if !ok {
+		tags["error"] = "session_params_not_found"
+		logger.Warn("Session parameters not found")
+		return nil
+	}
+
+	groupID := params.profile.GetActiveGroupID().String()
+	modes := []evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}
+	dailyWeeklyMode := evr.ModeArenaPublic
+
+	// Load the server profile by XPID from storage (returns raw JSON), generating if not found
+	data, _, err := ServerProfileLoadByXPID(ctx, logger, p.db, p.nk, request.EvrId, groupID, modes, dailyWeeklyMode)
 	if err != nil {
 		tags["error"] = "failed_load_profile"
 		logger.Error("Failed to load profile from storage", zap.Error(err), zap.String("evrId", request.EvrId.String()))
 		return nil
-	}
-	if data == nil {
+	} else if data == nil {
 		tags["error"] = "profile_not_found"
-		logger.Error("Profile does not exist in storage.", zap.String("evrId", request.EvrId.String()))
+		logger.Warn("Profile does not exist in storage.", zap.String("evrId", request.EvrId.String()))
 		return nil
 	}
 	/*

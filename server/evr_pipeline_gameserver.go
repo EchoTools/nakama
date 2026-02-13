@@ -19,7 +19,7 @@ import (
 	"fmt"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/echotools/nevr-common/v4/gen/go/rtapi"
+	rtapi "github.com/echotools/nevr-common/v4/gen/go/rtapi/v1"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -779,38 +779,33 @@ func BroadcasterPortScan(lIP net.IP, rIP net.IP, startPort, endPort int, timeout
 }
 
 func BroadcasterRTTcheck(lIP net.IP, rIP net.IP, port, count int, timeout time.Duration) (rtts []time.Duration, err error) {
+	// Guard against zero or negative count
+	if count <= 0 {
+		return []time.Duration{}, nil
+	}
+
 	// Create a slice to store round trip times (rtts)
 	rtts = make([]time.Duration, count)
-	// Set a timeout duration
+	// Set an overall timeout duration for the full check
+	deadline := time.Now().Add(10 * time.Second)
 
-	doneCh := make(chan struct{})
-
-	// Start a goroutine
-	go func() {
-		// Ensure the task is marked done on return
-		defer close(doneCh)
-		// Loop 5 times
-		for i := range count {
-			// Perform a health check on the broadcaster
-			rtt, err := BroadcasterHealthcheck(lIP, rIP, port, timeout)
-			if err != nil {
-				// If there's an error, set the rtt to -1
-				rtts[i] = -1
-				continue
-			}
-			// Record the rtt
-			rtts[i] = rtt
-			// Sleep for the duration of the latency before the next iteration
-			<-time.After(min(500, rtt))
+	// Loop count times
+	for i := 0; i < count; i++ {
+		if time.Now().After(deadline) {
+			// Timeout occurred, return an error
+			return nil, fmt.Errorf("broadcaster RTT check timed out after %v", timeout)
 		}
-	}()
-	// Wait for the goroutine to finish
-	select {
-	case <-doneCh:
-		// Goroutine finished successfully
-	case <-time.After(10 * time.Second):
-		// Timeout occurred, return an error
-		return nil, fmt.Errorf("broadcaster RTT check timed out after %v", timeout)
+		// Perform a health check on the broadcaster
+		rtt, err := BroadcasterHealthcheck(lIP, rIP, port, timeout)
+		if err != nil {
+			// If there's an error, set the rtt to -1
+			rtts[i] = -1
+			continue
+		}
+		// Record the rtt
+		rtts[i] = rtt
+		// Sleep for the duration of the latency before the next iteration (max 500ms)
+		<-time.After(min(500*time.Millisecond, rtt))
 	}
 	return rtts, nil
 }

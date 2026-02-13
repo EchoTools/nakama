@@ -34,6 +34,8 @@ type WhereAmIData struct {
 	OperatorDiscord string
 	// Players is the list of players currently in the match
 	Players []PlayerInfo
+	// ServerVersion is the version of the game server (empty if unavailable)
+	ServerVersion string
 }
 
 // getWhereAmIData retrieves the current match information for a user
@@ -79,6 +81,7 @@ func (d *DiscordAppBot) getWhereAmIData(ctx context.Context, _ runtime.Logger, u
 	if label.GameServer != nil {
 		data.ServerHostIP = label.GameServer.Endpoint.ExternalIP.String()
 		data.RegionCode = label.GameServer.LocationRegionCode(true, true)
+		data.ServerVersion = label.GameServer.NativeVersion
 
 		// Get operator information
 		if !label.GameServer.OperatorID.IsNil() {
@@ -196,6 +199,58 @@ func (d *DiscordAppBot) createWhereAmIEmbed(data *WhereAmIData) *discordgo.Messa
 	return embed
 }
 
+// createShutdownMatchEmbed creates a Discord embed showing match status for shutdown confirmation.
+// It displays region, guild, mode, spark link, and current player list from the match label.
+func (d *DiscordAppBot) createShutdownMatchEmbed(label *MatchLabel) *discordgo.MessageEmbed {
+	embed := &discordgo.MessageEmbed{
+		Title:       "⚠️ Confirm Match Shutdown",
+		Description: "This match has active players. Are you sure you want to shut it down?",
+		Color:       EmbedColorOrange,
+		Fields:      []*discordgo.MessageEmbedField{},
+	}
+
+	if label.GameServer != nil {
+		if regionCode := label.GameServer.LocationRegionCode(true, true); regionCode != "" {
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+				Name:   "Region",
+				Value:  regionCode,
+				Inline: true,
+			})
+		}
+	}
+
+	if gg := d.guildGroupRegistry.Get(label.GetGroupID().String()); gg != nil {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "Guild",
+			Value:  EscapeDiscordMarkdown(gg.Name()),
+			Inline: true,
+		})
+	}
+
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+		Name:   "Mode",
+		Value:  label.Mode.String(),
+		Inline: true,
+	})
+
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+		Name:   "Spark Link",
+		Value:  fmt.Sprintf("[Join Match](https://echo.taxi/spark://c/%s)", strings.ToUpper(label.ID.UUID.String())),
+		Inline: true,
+	})
+
+	if len(label.Players) > 0 {
+		playerList := formatPlayerList(label.Players)
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   fmt.Sprintf("Players (%d)", len(label.Players)),
+			Value:  strings.Join(playerList, ", "),
+			Inline: false,
+		})
+	}
+
+	return embed
+}
+
 // handleWhereAmI handles the /whereami slash command
 func (d *DiscordAppBot) handleWhereAmI(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 	if user == nil {
@@ -243,6 +298,15 @@ const (
 	MinActiveMatchSize = 2
 	// MaxMatchListSize is the maximum number of matches to retrieve for server statistics
 	MaxMatchListSize = 100
+)
+
+// Thread management constants
+const (
+	// MaxArchivedThreadsToSearch is the maximum number of archived threads to search
+	// when looking for an existing host thread
+	MaxArchivedThreadsToSearch = 100
+	// ThreadAutoArchiveDuration is the auto-archive duration for host threads in minutes
+	ThreadAutoArchiveDuration = 1440 // 24 hours
 )
 
 // handleReportServerIssue handles the /report-server-issue slash command
@@ -487,7 +551,8 @@ func (d *DiscordAppBot) handleReportServerIssueOther(_ context.Context, _ runtim
 }
 
 // postServerIssueReport posts the issue report to the appropriate channels
-func (d *DiscordAppBot) postServerIssueReport(_ context.Context, logger runtime.Logger, s *discordgo.Session, groupID string, data *WhereAmIData, embed *discordgo.MessageEmbed) {
+// For the server reports channel, it creates a thread per host IP
+func (d *DiscordAppBot) postServerIssueReport(ctx context.Context, logger runtime.Logger, s *discordgo.Session, groupID string, data *WhereAmIData, embed *discordgo.MessageEmbed) {
 	gg := d.guildGroupRegistry.Get(groupID)
 	if gg == nil {
 		return
@@ -500,19 +565,44 @@ func (d *DiscordAppBot) postServerIssueReport(_ context.Context, logger runtime.
 		}
 	}
 
-	// Post to server reports channel
-	if gg.ServerReportsChannelID != "" {
-		// Mention operator if available
-		content := ""
-		if data != nil && data.OperatorDiscord != "" {
-			content = fmt.Sprintf("<@%s>", data.OperatorDiscord)
+	// Post to server reports channel using threads per host
+	if gg.ServerReportsChannelID != "" && data != nil && data.ServerHostIP != "" {
+		// Get server version, default to "legacy" if empty
+		serverVersion := data.ServerVersion
+		if serverVersion == "" {
+			serverVersion = "legacy"
 		}
 
-		if _, err := s.ChannelMessageSendComplex(gg.ServerReportsChannelID, &discordgo.MessageSend{
-			Content: content,
-			Embed:   embed,
-		}); err != nil {
-			logger.WithField("error", err).Warn("Failed to send server issue report to server reports channel")
+		// Try to get or create a thread for this host
+		threadID, err := d.getOrCreateHostThread(ctx, logger, s, gg.ServerReportsChannelID, data.ServerHostIP, serverVersion)
+		if err != nil {
+			logger.WithFields(map[string]any{
+				"error":     err,
+				"host":      data.ServerHostIP,
+				"channelID": gg.ServerReportsChannelID,
+			}).Warn("Failed to get or create thread for host, falling back to channel message")
+
+			// Fallback: post to channel directly if thread creation fails
+			content := ""
+			if data.OperatorDiscord != "" {
+				content = fmt.Sprintf("<@%s>", data.OperatorDiscord)
+			}
+			if _, err := s.ChannelMessageSendComplex(gg.ServerReportsChannelID, &discordgo.MessageSend{
+				Content: content,
+				Embed:   embed,
+			}); err != nil {
+				logger.WithField("error", err).Warn("Failed to send server issue report to server reports channel")
+			}
+			return
+		}
+
+		// Post the report to the thread
+		if _, err := s.ChannelMessageSendEmbed(threadID, embed); err != nil {
+			logger.WithFields(map[string]any{
+				"error":    err,
+				"threadID": threadID,
+				"host":     data.ServerHostIP,
+			}).Warn("Failed to send server issue report to thread")
 		}
 	}
 }
@@ -812,4 +902,73 @@ func (d *DiscordAppBot) getServerStatsByHost(ctx context.Context, logger runtime
 	}
 
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+// getOrCreateHostThread gets or creates a thread for a specific host in the report channel
+// Returns the thread ID
+func (d *DiscordAppBot) getOrCreateHostThread(ctx context.Context, logger runtime.Logger, s *discordgo.Session, channelID, hostIP, serverVersion string) (string, error) {
+	// List active threads in the channel
+	threads, err := s.ThreadsActive(channelID)
+	if err != nil {
+		return "", fmt.Errorf("failed to list active threads: %w", err)
+	}
+
+	// Search for an existing thread for this host
+	threadName := fmt.Sprintf("Server Issues: %s", hostIP)
+	for _, thread := range threads.Threads {
+		if thread.Name == threadName {
+			return thread.ID, nil
+		}
+	}
+
+	// Also check archived threads
+	archivedThreads, err := s.ThreadsArchived(channelID, nil, MaxArchivedThreadsToSearch)
+	if err != nil {
+		logger.WithField("error", err).Warn("Failed to list archived threads, continuing with active threads only")
+	} else {
+		for _, thread := range archivedThreads.Threads {
+			if thread.Name == threadName {
+				// Unarchive the thread if it's archived
+				if thread.ThreadMetadata != nil && thread.ThreadMetadata.Archived {
+					archived := false
+					_, err := s.ChannelEditComplex(thread.ID, &discordgo.ChannelEdit{
+						Archived: &archived,
+					})
+					if err != nil {
+						logger.WithFields(map[string]any{
+							"error":    err,
+							"threadID": thread.ID,
+							"host":     hostIP,
+						}).Warn("Failed to unarchive thread")
+					}
+				}
+				return thread.ID, nil
+			}
+		}
+	}
+
+	// Create a new thread for this host
+	// First, create an initial message in the channel
+	initialMessage := fmt.Sprintf("Server issue reports for **%s** (Version: %s)", hostIP, serverVersion)
+	msg, err := s.ChannelMessageSend(channelID, initialMessage)
+	if err != nil {
+		return "", fmt.Errorf("failed to create initial message: %w", err)
+	}
+
+	// Create a thread from the message
+	thread, err := s.MessageThreadStartComplex(channelID, msg.ID, &discordgo.ThreadStart{
+		Name:                threadName,
+		AutoArchiveDuration: ThreadAutoArchiveDuration,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create thread: %w", err)
+	}
+
+	logger.WithFields(map[string]any{
+		"threadID": thread.ID,
+		"host":     hostIP,
+		"version":  serverVersion,
+	}).Info("Created new server issue thread")
+
+	return thread.ID, nil
 }

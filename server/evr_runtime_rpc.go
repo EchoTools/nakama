@@ -21,6 +21,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/internal/intents"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/zap"
 )
 
 const (
@@ -1169,13 +1170,31 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 	return string(response), nil
 }
 
+// SuspensionInfo represents a single suspension record for lookup output
+type SuspensionInfo struct {
+	ID                string    `json:"id"`
+	GroupID           string    `json:"group_id"`
+	UserNotice        string    `json:"user_notice"`
+	AuditorNotes      string    `json:"auditor_notes"`
+	CreatedAt         time.Time `json:"created_at"`
+	ExpiryAt          time.Time `json:"expiry_at"`
+	IsLifetime        bool      `json:"is_lifetime"`
+	DurationDisplay   string    `json:"duration_display"`
+	EnforcerUserID    string    `json:"enforcer_user_id"`
+	EnforcerDiscordID string    `json:"enforcer_discord_id"`
+	// Edit information
+	LastEditedBy string    `json:"last_edited_by,omitempty"`
+	LastEditedAt time.Time `json:"last_edited_at,omitempty"`
+}
+
 type AccountLookupRPCResponse struct {
-	ID          uuid.UUID     `json:"id"`
-	DiscordID   string        `json:"discord_id"`
-	Username    string        `json:"username"`
-	DisplayName string        `json:"display_name"`
-	AvatarURL   string        `json:"avatar_url"`
-	IPQSData    *IPQSResponse `json:"ipqs_data,omitempty"`
+	ID          uuid.UUID        `json:"id"`
+	DiscordID   string           `json:"discord_id"`
+	Username    string           `json:"username"`
+	DisplayName string           `json:"display_name"`
+	AvatarURL   string           `json:"avatar_url"`
+	IPQSData    *IPQSResponse    `json:"ipqs_data,omitempty"`
+	Suspensions []SuspensionInfo `json:"suspensions,omitempty"` // Add suspension records
 }
 
 type AccountLookupRequest struct {
@@ -1331,6 +1350,33 @@ func (h *RPCHandler) AccountLookupRPC(ctx context.Context, logger runtime.Logger
 		AvatarURL:   account.User.AvatarUrl,
 	}
 
+	// Fetch suspension records if caller has private data access
+	if includePrivate {
+		profile := NewSuspensionProfile(userID)
+		if err := StorableRead(ctx, nk, userID, profile, false); err == nil {
+			// Collect all active suspension records from the profile
+			suspensions := make([]SuspensionInfo, 0, len(profile.Suspensions))
+			for _, profileRec := range profile.Suspensions {
+				suspInfo := SuspensionInfo{
+					ID:                profileRec.ID,
+					GroupID:           profileRec.GroupID,
+					UserNotice:        profileRec.UserNotice,
+					AuditorNotes:      profileRec.AuditorNotes,
+					CreatedAt:         profileRec.CreatedAt,
+					ExpiryAt:          profileRec.ExpiryAt,
+					IsLifetime:        profileRec.IsLifetime,
+					DurationDisplay:   profileRec.Duration,
+					EnforcerUserID:    profileRec.EnforcerUserID,
+					EnforcerDiscordID: profileRec.EnforcerDiscordID,
+					LastEditedBy:      profileRec.LastEditedBy,
+					LastEditedAt:      profileRec.LastEditedAt,
+				}
+				suspensions = append(suspensions, suspInfo)
+			}
+			response.Suspensions = suspensions
+		}
+	}
+
 	// Convert the account data to a json object.
 	jsonResponse, err := json.Marshal(response)
 	if err != nil {
@@ -1461,19 +1507,20 @@ type AccountSearchRequest struct {
 }
 
 type AccountSearchResponse struct {
-	Cursor               *string                `json:"cursor,omitempty"`
+	Cursor               string                 `json:"cursor,omitempty"`
 	DisplayNameMatchList []DisplayNameMatchItem `json:"display_name_matches"`
 }
 
 type DisplayNameMatchItem struct {
 	DisplayName string    `json:"display_name"`
+	Username    string    `json:"username"`
 	UserID      string    `json:"user_id"`
 	GroupID     string    `json:"group_id"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 func AccountSearchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	request := &AccountSearchRequest{}
+	request := AccountSearchRequest{}
 	if payload != "" {
 		if err := json.Unmarshal([]byte(payload), &request); err != nil {
 			return "", err
@@ -1507,42 +1554,34 @@ func AccountSearchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		return "", runtime.NewError("Search pattern name is empty", StatusInvalidArgument)
 	}
 
-	limit := min(request.Limit, 1000)
+	limit := min(request.Limit, 100)
 
 	matches, err := DisplayNameCacheRegexSearch(ctx, nk, request.DisplayNamePattern, limit)
 	if err != nil {
 		return "", runtime.NewError(err.Error(), StatusInternalError)
 	}
 
+	// Filter results to only include display names that contain the search pattern
 	results := make([]DisplayNameMatchItem, 0, len(matches))
-	for matchUserID, byGroup := range matches {
-
-		for groupID, entries := range byGroup {
-			for n, t := range entries {
-				displayNameL := strings.ToLower(n)
-				if strings.Contains(displayNameL, request.DisplayNamePattern) {
-					results = append(results, DisplayNameMatchItem{
-						DisplayName: n,
-						UserID:      matchUserID,
-						GroupID:     groupID,
-						UpdatedAt:   t,
-					})
-				}
-			}
+	for _, match := range matches {
+		displayNameL := strings.ToLower(match.DisplayName)
+		if strings.Contains(displayNameL, request.DisplayNamePattern) {
+			results = append(results, DisplayNameMatchItem{
+				DisplayName: match.DisplayName,
+				Username:    match.Username,
+				UserID:      match.UserID,
+				GroupID:     match.GroupID,
+				UpdatedAt:   match.UpdatedAt,
+			})
 		}
 	}
 
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].UpdatedAt.After(results[j].UpdatedAt)
-	})
-
+	// Already sorted by DisplayNameCacheRegexSearch, just limit
 	if len(results) > limit {
-		// Sort by updated at
-
 		results = results[:limit]
 	}
 
-	responseData, err := json.Marshal(&AccountSearchResponse{
+	responseData, err := json.Marshal(AccountSearchResponse{
 		DisplayNameMatchList: results,
 	})
 	if err != nil {
@@ -1956,6 +1995,461 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 	data, err := json.MarshalIndent(serverProfile, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal server profile: %w", err)
+	}
+
+	return string(data), nil
+}
+
+// Outfit management constants and types
+const (
+	OutfitCollection  = "player_outfits"
+	MaxOutfitsPerUser = 10
+)
+
+// Outfit represents a player's outfit configuration
+type Outfit struct {
+	ID      string      `json:"id"`
+	Name    string      `json:"name"`
+	Chassis string      `json:"chassis"`
+	Bracer  string      `json:"bracer"`
+	Booster string      `json:"booster"`
+	Decal   string      `json:"decal"`
+	SavedAt TimeRFC3339 `json:"saved_at"`
+}
+
+// SaveOutfitRequest represents the request to save an outfit
+type SaveOutfitRequest struct {
+	Name    string `json:"name"`
+	Chassis string `json:"chassis"`
+	Bracer  string `json:"bracer"`
+	Booster string `json:"booster"`
+	Decal   string `json:"decal"`
+}
+
+// SaveOutfitResponse represents the response from saving an outfit
+type SaveOutfitResponse struct {
+	Success bool   `json:"success"`
+	Outfit  Outfit `json:"outfit"`
+	ID      string `json:"id"`
+}
+
+// ListOutfitsResponse represents the response from listing outfits
+type ListOutfitsResponse struct {
+	Outfits []Outfit `json:"outfits"`
+}
+
+// LoadOutfitRequest represents the request to load an outfit
+type LoadOutfitRequest struct {
+	OutfitID string `json:"outfit_id"`
+}
+
+// LoadOutfitResponse represents the response from loading an outfit
+type LoadOutfitResponse struct {
+	Success bool   `json:"success"`
+	Outfit  Outfit `json:"outfit"`
+}
+
+// DeleteOutfitRequest represents the request to delete an outfit
+type DeleteOutfitRequest struct {
+	OutfitID string `json:"outfit_id"`
+}
+
+// DeleteOutfitResponse represents the response from deleting an outfit
+type DeleteOutfitResponse struct {
+	Success bool `json:"success"`
+}
+
+// PlayerOutfitSaveRPC saves a player outfit to storage
+func PlayerOutfitSaveRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Get user ID from context
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || userID == "" {
+		return "", runtime.NewError("authentication required", StatusUnauthenticated)
+	}
+
+	// Parse request
+	request := &SaveOutfitRequest{}
+	if err := json.Unmarshal([]byte(payload), request); err != nil {
+		return "", runtime.NewError("invalid request payload", StatusInvalidArgument)
+	}
+
+	// Validate request
+	if request.Name == "" {
+		return "", runtime.NewError("outfit name is required", StatusInvalidArgument)
+	}
+
+	// Check current number of outfits for this user
+	// We only need to check if the limit is reached, so we request MaxOutfitsPerUser items
+	objects, _, err := nk.StorageList(ctx, userID, userID, OutfitCollection, MaxOutfitsPerUser, "")
+	if err != nil {
+		logger.Error("Failed to list outfits: %v", err)
+		return "", runtime.NewError("failed to check outfit limit", StatusInternalError)
+	}
+
+	if len(objects) >= MaxOutfitsPerUser {
+		return "", runtime.NewError("outfit limit reached", StatusResourceExhausted)
+	}
+
+	// Generate new UUID for outfit
+	outfitUUID, err := uuid.NewV4()
+	if err != nil {
+		logger.Error("Failed to generate outfit ID: %v", err)
+		return "", runtime.NewError("failed to generate outfit ID", StatusInternalError)
+	}
+	outfitID := outfitUUID.String()
+
+	// Create outfit
+	outfit := Outfit{
+		ID:      outfitID,
+		Name:    request.Name,
+		Chassis: request.Chassis,
+		Bracer:  request.Bracer,
+		Booster: request.Booster,
+		Decal:   request.Decal,
+		SavedAt: TimeRFC3339(time.Now().UTC()),
+	}
+
+	// Marshal outfit to JSON
+	value, err := json.Marshal(outfit)
+	if err != nil {
+		logger.Error("Failed to marshal outfit: %v", err)
+		return "", runtime.NewError("failed to save outfit", StatusInternalError)
+	}
+
+	// Write to storage (user-scoped)
+	_, err = nk.StorageWrite(ctx, []*runtime.StorageWrite{{
+		Collection:      OutfitCollection,
+		Key:             outfitID,
+		UserID:          userID,
+		Value:           string(value),
+		PermissionRead:  1, // Owner can read
+		PermissionWrite: 1, // Owner can write
+	}})
+	if err != nil {
+		logger.Error("Failed to write outfit to storage: %v", err)
+		return "", runtime.NewError("failed to save outfit", StatusInternalError)
+	}
+
+	// Prepare response
+	response := SaveOutfitResponse{
+		Success: true,
+		Outfit:  outfit,
+		ID:      outfitID,
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		logger.Error("Failed to marshal response: %v", err)
+		return "", runtime.NewError("failed to create response", StatusInternalError)
+	}
+
+	return string(data), nil
+}
+
+// AdminPlayerRenameRequest represents the request payload for the admin/player/rename RPC
+type AdminPlayerRenameRequest struct {
+	TargetUserID   string `json:"target_user_id"`   // User ID of the player to rename (required)
+	NewDisplayName string `json:"new_display_name"` // New display name for the player (required)
+	ModeratorNotes string `json:"moderator_notes"`  // Optional notes for the audit log
+}
+
+// AdminPlayerRenameResponse represents the response from the admin/player/rename RPC
+type AdminPlayerRenameResponse struct {
+	Success bool   `json:"success"`
+	OldName string `json:"old_name"`
+	NewName string `json:"new_name"`
+}
+
+// AdminPlayerRenameRPC is the RPC handler for renaming players (Moderator+ permission required)
+func AdminPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	var request AdminPlayerRenameRequest
+	if err := json.Unmarshal([]byte(payload), &request); err != nil {
+		return "", runtime.NewError("Invalid request payload", StatusInvalidArgument)
+	}
+
+	// Get the caller's user ID from context
+	callerID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || callerID == "" {
+		return "", runtime.NewError("User ID not found in context", StatusUnauthenticated)
+	}
+
+	// Check if the caller is a global operator (Moderator+)
+	isModerator, err := CheckSystemGroupMembership(ctx, db, callerID, GroupGlobalOperators)
+	if err != nil {
+		logger.Error("Failed to check moderator status", zap.Error(err))
+		return "", runtime.NewError("Failed to check permissions", StatusInternalError)
+	}
+
+	if !isModerator {
+		return "", runtime.NewError("Moderator or higher permission required", StatusPermissionDenied)
+	}
+
+	// Validate required fields
+	if request.TargetUserID == "" {
+		return "", runtime.NewError("target_user_id is required", StatusInvalidArgument)
+	}
+
+	if request.NewDisplayName == "" {
+		return "", runtime.NewError("new_display_name is required", StatusInvalidArgument)
+	}
+
+	// Validate target user ID format
+	targetUUID, err := uuid.FromString(request.TargetUserID)
+	if err != nil {
+		return "", runtime.NewError("Invalid target_user_id format", StatusInvalidArgument)
+	}
+	targetUserID := targetUUID.String()
+
+	// Sanitize and validate the new display name
+	sanitizedName := sanitizeDisplayName(request.NewDisplayName)
+	if sanitizedName == "" {
+		return "", runtime.NewError("Invalid display name: must contain at least one letter and be between 1-24 characters", StatusInvalidArgument)
+	}
+
+	// Get the current account to retrieve the old display name
+	account, err := nk.AccountGetId(ctx, targetUserID)
+	if err != nil {
+		logger.Error("Failed to get account", zap.Error(err))
+		return "", runtime.NewError("Failed to get target user account", StatusNotFound)
+	}
+
+	oldDisplayName := account.User.DisplayName
+
+	// Update the display name
+	if err := nk.AccountUpdateId(ctx, targetUserID, "", nil, sanitizedName, "", "", "", ""); err != nil {
+		logger.Error("Failed to update display name", zap.Error(err))
+		return "", runtime.NewError("Failed to update display name", StatusInternalError)
+	}
+
+	// Also update the EVRProfile active group's in-game name so the change is durable and
+	// not overwritten by Discord/member syncs.
+	if evrProfile, err := EVRProfileLoad(ctx, nk, targetUserID); err != nil {
+		logger.Error("Failed to load EVR profile for admin rename", zap.Error(err), zap.String("user_id", targetUserID))
+	} else if evrProfile != nil {
+		activeGroupID := evrProfile.GetActiveGroupID()
+		if activeGroupID == uuid.Nil {
+			logger.Warn("EVR profile has no active group for admin rename", zap.String("user_id", targetUserID))
+		} else {
+			// Ensure GroupInGameName exists and update it.
+			ignData := evrProfile.GetGroupIGNData(activeGroupID.String())
+			ignData.DisplayName = sanitizedName
+			// Mark as an explicit override so Discord/member sync will not clobber it.
+			ignData.IsOverride = true
+			evrProfile.SetGroupIGNData(activeGroupID.String(), ignData)
+
+			if err := EVRProfileUpdate(ctx, nk, targetUserID, evrProfile); err != nil {
+				logger.Error("Failed to persist EVR profile rename", zap.Error(err), zap.String("user_id", targetUserID))
+			} else {
+				// Record the change in display name history for auditability.
+				if err := DisplayNameHistoryUpdate(ctx, nk, targetUserID, activeGroupID.String(), sanitizedName, account.User.Username, false); err != nil {
+					logger.Error("Failed to update display name history for admin rename", zap.Error(err), zap.String("user_id", targetUserID))
+				}
+			}
+		}
+	}
+
+	// Get the caller's account for audit log
+	callerAccount, err := nk.AccountGetId(ctx, callerID)
+	if err != nil {
+		logger.Warn("Failed to get caller account for audit log", zap.Error(err))
+	}
+	callerDiscordID := callerID
+	if callerAccount != nil && callerAccount.CustomId != "" {
+		callerDiscordID = callerAccount.CustomId
+	}
+
+	targetDiscordID := targetUserID
+	if account.CustomId != "" {
+		targetDiscordID = account.CustomId
+	}
+
+	// Log the change for audit trail
+	auditMsg := fmt.Sprintf("Admin player rename: <@%s> renamed user <@%s> from `%s` to `%s`",
+		callerDiscordID, targetDiscordID, oldDisplayName, sanitizedName)
+	if request.ModeratorNotes != "" {
+		auditMsg += fmt.Sprintf(" | Notes: %s", request.ModeratorNotes)
+	}
+
+	// Log to Discord audit channel
+	if err := AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, auditMsg); err != nil {
+		logger.Warn("Failed to log audit message", zap.Error(err))
+	}
+
+	logger.Info("Admin player rename completed",
+		zap.String("caller_id", callerID),
+		zap.String("target_user_id", targetUserID),
+		zap.String("old_name", oldDisplayName),
+		zap.String("new_name", sanitizedName),
+		zap.String("moderator_notes", request.ModeratorNotes),
+	)
+
+	// Prepare response
+	response := AdminPlayerRenameResponse{
+		Success: true,
+		OldName: oldDisplayName,
+		NewName: sanitizedName,
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		logger.Error("Failed to marshal response: %v", err)
+		return "", runtime.NewError("failed to create response", StatusInternalError)
+	}
+
+	return string(data), nil
+}
+
+// PlayerOutfitListRPC lists all outfits for a player
+func PlayerOutfitListRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Get user ID from context
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || userID == "" {
+		return "", runtime.NewError("authentication required", StatusUnauthenticated)
+	}
+
+	// List all outfits for this user
+	// Set limit higher than MaxOutfitsPerUser for safety, though users can only have MaxOutfitsPerUser outfits
+	objects, _, err := nk.StorageList(ctx, userID, userID, OutfitCollection, MaxOutfitsPerUser*2, "")
+	if err != nil {
+		logger.Error("Failed to list outfits: %v", err)
+		return "", runtime.NewError("failed to list outfits", StatusInternalError)
+	}
+
+	// Parse outfits
+	outfits := make([]Outfit, 0, len(objects))
+	for _, obj := range objects {
+		var outfit Outfit
+		if err := json.Unmarshal([]byte(obj.Value), &outfit); err != nil {
+			logger.Warn("Failed to unmarshal outfit %s: %v", obj.Key, err)
+			continue
+		}
+		outfits = append(outfits, outfit)
+	}
+
+	// Prepare response
+	response := ListOutfitsResponse{
+		Outfits: outfits,
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		logger.Error("Failed to marshal response: %v", err)
+		return "", runtime.NewError("failed to create response", StatusInternalError)
+	}
+
+	return string(data), nil
+}
+
+// PlayerOutfitLoadRPC loads a specific outfit by ID
+func PlayerOutfitLoadRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Get user ID from context
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || userID == "" {
+		return "", runtime.NewError("authentication required", StatusUnauthenticated)
+	}
+
+	// Parse request
+	request := &LoadOutfitRequest{}
+	if err := json.Unmarshal([]byte(payload), request); err != nil {
+		return "", runtime.NewError("invalid request payload", StatusInvalidArgument)
+	}
+
+	// Validate request
+	if request.OutfitID == "" {
+		return "", runtime.NewError("outfit_id is required", StatusInvalidArgument)
+	}
+
+	// Read outfit from storage
+	objects, err := nk.StorageRead(ctx, []*runtime.StorageRead{{
+		Collection: OutfitCollection,
+		Key:        request.OutfitID,
+		UserID:     userID,
+	}})
+	if err != nil {
+		logger.Error("Failed to read outfit: %v", err)
+		return "", runtime.NewError("failed to load outfit", StatusInternalError)
+	}
+
+	if len(objects) == 0 {
+		return "", runtime.NewError("outfit not found", StatusNotFound)
+	}
+
+	// Parse outfit
+	var outfit Outfit
+	if err := json.Unmarshal([]byte(objects[0].Value), &outfit); err != nil {
+		logger.Error("Failed to unmarshal outfit: %v", err)
+		return "", runtime.NewError("failed to load outfit", StatusInternalError)
+	}
+
+	// Prepare response
+	response := LoadOutfitResponse{
+		Success: true,
+		Outfit:  outfit,
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		logger.Error("Failed to marshal response: %v", err)
+		return "", runtime.NewError("failed to create response", StatusInternalError)
+	}
+
+	return string(data), nil
+}
+
+// PlayerOutfitDeleteRPC deletes a specific outfit by ID
+func PlayerOutfitDeleteRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Get user ID from context
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || userID == "" {
+		return "", runtime.NewError("authentication required", StatusUnauthenticated)
+	}
+
+	// Parse request
+	request := &DeleteOutfitRequest{}
+	if err := json.Unmarshal([]byte(payload), request); err != nil {
+		return "", runtime.NewError("invalid request payload", StatusInvalidArgument)
+	}
+
+	// Validate request
+	if request.OutfitID == "" {
+		return "", runtime.NewError("outfit_id is required", StatusInvalidArgument)
+	}
+
+	// Verify ownership before delete by trying to read it first
+	objects, err := nk.StorageRead(ctx, []*runtime.StorageRead{{
+		Collection: OutfitCollection,
+		Key:        request.OutfitID,
+		UserID:     userID,
+	}})
+	if err != nil {
+		logger.Error("Failed to verify outfit ownership: %v", err)
+		return "", runtime.NewError("failed to delete outfit", StatusInternalError)
+	}
+
+	if len(objects) == 0 {
+		return "", runtime.NewError("outfit not found", StatusNotFound)
+	}
+
+	// Delete outfit from storage
+	err = nk.StorageDelete(ctx, []*runtime.StorageDelete{{
+		Collection: OutfitCollection,
+		Key:        request.OutfitID,
+		UserID:     userID,
+	}})
+	if err != nil {
+		logger.Error("Failed to delete outfit: %v", err)
+		return "", runtime.NewError("failed to delete outfit", StatusInternalError)
+	}
+
+	// Prepare response
+	response := DeleteOutfitResponse{
+		Success: true,
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		logger.Error("Failed to marshal response: %v", err)
+		return "", runtime.NewError("failed to create response", StatusInternalError)
 	}
 
 	return string(data), nil

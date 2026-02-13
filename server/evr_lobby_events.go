@@ -212,12 +212,19 @@ func RegisterSessionEventRPCs(ctx context.Context, logger runtime.Logger, db *sq
 		return StoreSessionEventRPC(ctx, logger, db, nk, payload)
 	}
 
-	if err := initializer.RegisterRpc("session_events/get", getSessionEventsWrapper); err != nil {
-		return fmt.Errorf("failed to register session_events/get RPC: %w", err)
+	// Define session event RPCs with default permissions (Global Operators only)
+	rpcs := []RPCRegistration{
+		{ID: "session_events/get", Handler: getSessionEventsWrapper},
+		{ID: "session_events/store", Handler: storeSessionEventWrapper},
 	}
 
-	if err := initializer.RegisterRpc("session_events/store", storeSessionEventWrapper); err != nil {
-		return fmt.Errorf("failed to register session_events/store RPC: %w", err)
+	// Register with authorization middleware
+	for _, rpc := range rpcs {
+		perm := DefaultRPCPermission()
+		wrappedRPC := WithRPCAuthorization(rpc.ID, perm, rpc.Handler)
+		if err := initializer.RegisterRpc(rpc.ID, wrappedRPC); err != nil {
+			return fmt.Errorf("failed to register %s RPC: %w", rpc.ID, err)
+		}
 	}
 
 	logger.Info("Registered session event RPC endpoints")

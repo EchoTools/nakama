@@ -593,10 +593,12 @@ func (p *InGamePanel) createSuspendPlayerModal(targetDiscordID, displayName stri
 }
 
 func (p *InGamePanel) createSetIGNModal(userID, groupID, currentDisplayName string, isLocked bool) *discordgo.InteractionResponse {
-	lockValue := "false"
+	// Determine the current lock status text
+	lockStatusText := "no"
 	if isLocked {
-		lockValue = "true"
+		lockStatusText = "yes"
 	}
+
 	return &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
@@ -619,11 +621,11 @@ func (p *InGamePanel) createSetIGNModal(userID, groupID, currentDisplayName stri
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
 							CustomID:    "lock_input",
-							Label:       "Lock IGN (true/false)",
-							Value:       lockValue,
+							Label:       "🔒 Prevent player from changing this name?",
+							Value:       lockStatusText,
 							Style:       discordgo.TextInputShort,
 							Required:    true,
-							Placeholder: "true or false",
+							Placeholder: fmt.Sprintf("yes or no (currently: %s)", lockStatusText),
 						},
 					},
 				},
@@ -838,14 +840,9 @@ func (d *DiscordAppBot) handleSetIGNModalSubmit(_ context.Context, logger runtim
 		return fmt.Errorf("failed to get guild groups: %w", err)
 	}
 
-	isAuditorOrEnforcer := false
-	if gg, ok := callerGuildGroups[groupID]; ok && (gg.IsAuditor(callerID) || gg.IsEnforcer(callerID)) {
-		isAuditorOrEnforcer = true
-	}
-	isGlobalOperator, _ := CheckSystemGroupMembership(d.ctx, d.db, callerID, GroupGlobalOperators)
-	isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
-
-	if !isAuditorOrEnforcer {
+	// Resolve caller's guild access with cascade (global ops → auditor → enforcer)
+	access := ResolveCallerGuildAccess(d.ctx, d.db, callerID, groupID, callerGuildGroups)
+	if !access.IsEnforcer {
 		return simpleInteractionResponse(d.dg, i, "You do not have permission to set IGN overrides.")
 	}
 
@@ -905,22 +902,35 @@ func (d *DiscordAppBot) handleSetIGNModalSubmit(_ context.Context, logger runtim
 		targetMention = targetUserID
 	}
 
-	lockStatus := "unlocked"
+	// Create user-friendly lock status message
+	lockStatusEmoji := "🔓"
+	lockStatusText := "unlocked"
+	lockExplanation := "The player can change their display name."
 	if isLocked {
-		lockStatus = "locked"
+		lockStatusEmoji = "🔒"
+		lockStatusText = "locked"
+		lockExplanation = "The player cannot change their display name."
 	}
+
 	auditMessage := fmt.Sprintf("<@%s> set IGN override for %s to **%s** (%s) (originally: **%s**)",
-		i.Member.User.ID, targetMention, displayName, lockStatus, originalDisplayName)
+		i.Member.User.ID, targetMention, displayName, lockStatusText, originalDisplayName)
 
 	if _, err := d.LogAuditMessage(d.ctx, groupID, auditMessage, false); err != nil {
 		logger.WithField("error", err).Warn("Failed to send audit log message")
 	}
 
+	// Create detailed success message with clear lock status
+	successMessage := fmt.Sprintf("✅ **IGN Override Set Successfully**\n\n"+
+		"**Display Name:** %s\n"+
+		"**Lock Status:** %s %s\n"+
+		"_%s_",
+		displayName, lockStatusEmoji, lockStatusText, lockExplanation)
+
 	return d.dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Flags:   discordgo.MessageFlagsEphemeral,
-			Content: fmt.Sprintf("IGN override set successfully to **%s** (%s)", displayName, lockStatus),
+			Content: successMessage,
 		},
 	})
 }

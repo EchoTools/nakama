@@ -74,7 +74,8 @@ type DiscordAppBot struct {
 	// Rate limiter for public matches (echo_arena, echo_combat) - 1 per 15 minutes
 	publicMatchRatePerSecond rate.Limit
 	publicMatchBurst         int
-	publicMatchRateLimiters  *MapOf[string, *rate.Limiter]
+	// Rate limiters for all match creation modes (public, private, social)
+	matchCreateRateLimiters *MapOf[string, *rate.Limiter]
 }
 
 func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordIntegrator, statusRegistry StatusRegistry, dg *discordgo.Session, ipInfoCache *IPInfoCache, guildGroupRegistry *GuildGroupRegistry) (*DiscordAppBot, error) {
@@ -106,7 +107,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		// Rate limiter for public matches: 1 per 15 minutes (900 seconds)
 		publicMatchRatePerSecond: 1.0 / 900,
 		publicMatchBurst:         1,
-		publicMatchRateLimiters:  &MapOf[string, *rate.Limiter]{},
+		matchCreateRateLimiters:  &MapOf[string, *rate.Limiter]{},
 		partyStatusChs:           &MapOf[string, chan error]{},
 		debugChannels:            make(map[string]string),
 	}
@@ -238,16 +239,34 @@ func (e *DiscordAppBot) discordGoLogger(msgL int, caller int, format string, a .
 	}
 }
 
-func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string) *rate.Limiter {
+func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string, group *GuildGroup) *rate.Limiter {
 	key := strings.Join([]string{userID, groupID}, ":")
-	limiter, _ := e.prepareMatchRateLimiters.LoadOrStore(key, rate.NewLimiter(e.prepareMatchRatePerSecond, e.prepareMatchBurst))
+
+	// Use guild group setting if available, otherwise use default
+	ratePerSecond := e.prepareMatchRatePerSecond
+	if group != nil && group.CreateCommandRateLimitPerMinute > 0 {
+		ratePerSecond = rate.Limit(group.CreateCommandRateLimitPerMinute / 60.0) // Convert from per-minute to per-second
+	}
+
+	// Try to load existing limiter
+	if limiter, ok := e.prepareMatchRateLimiters.Load(key); ok {
+		// Check if the rate has changed, if so, update it
+		if limiter.Limit() != ratePerSecond {
+			limiter.SetLimit(ratePerSecond)
+		}
+		return limiter
+	}
+
+	// Create a new limiter if none exists
+	limiter := rate.NewLimiter(ratePerSecond, e.prepareMatchBurst)
+	e.prepareMatchRateLimiters.Store(key, limiter)
 	return limiter
 }
 
 // loadPublicMatchRateLimiter returns the rate limiter for public match creation (1 per 15 minutes)
 func (e *DiscordAppBot) loadPublicMatchRateLimiter(userID, groupID string) *rate.Limiter {
 	key := strings.Join([]string{userID, groupID, "public"}, ":")
-	limiter, _ := e.publicMatchRateLimiters.LoadOrStore(key, rate.NewLimiter(e.publicMatchRatePerSecond, e.publicMatchBurst))
+	limiter, _ := e.matchCreateRateLimiters.LoadOrStore(key, rate.NewLimiter(e.publicMatchRatePerSecond, e.publicMatchBurst))
 	return limiter
 }
 
@@ -572,6 +591,19 @@ var (
 							Name:        "force",
 							Description: "force the link even if the discord ID doesn't match",
 							Required:    false,
+						},
+					},
+				},
+				{
+					Name:        "unlink-player",
+					Description: "unlink a VRML account from a user",
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:        discordgo.ApplicationCommandOptionString,
+							Name:        "identifier",
+							Description: "VRML user ID, player ID, Discord ID, or Discord username",
+							Required:    true,
 						},
 					},
 				},
@@ -1512,11 +1544,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				graceSeconds     int
 			)
 
-			isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
-			if err != nil {
-				return fmt.Errorf("error checking global operator status: %w", err)
-			}
-
 			for _, option := range options {
 				switch option.Name {
 				case "match-id":
@@ -1533,7 +1560,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 				case "disconnect-game-server":
 					disconnectServer = option.BoolValue()
-				case "graceful":
+				case "grace-seconds":
 					graceSeconds = int(option.IntValue())
 				case "reason":
 					reason = option.StringValue()
@@ -1546,14 +1573,51 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					return errors.New("no match ID provided")
 				}
 
-				// Verify that the match is owned by the user, or is a guild enforcer
 				label, err := MatchLabelByID(ctx, nk, matchID)
 				if err != nil {
 					return fmt.Errorf("failed to get match label: %w", err)
 				}
 
-				if !isGlobalOperator && label.GetGroupID().String() != groupID && label.GameServer.OperatorID.String() != userID {
+				// Permission check: global operator, server owner, or guild enforcer
+				// of the session running on the server
+				allowed, err := d.canShutdownMatch(ctx, userID, label)
+				if err != nil {
+					return fmt.Errorf("error checking shutdown permission: %w", err)
+				}
+				if !allowed {
 					return errors.New("you do not have permission to shut down this match")
+				}
+
+				// If there are players in the match, show confirmation with match status
+				if len(label.Players) > 0 {
+					embed := d.createShutdownMatchEmbed(label)
+
+					// Encode shutdown parameters in the button custom ID
+					disconnectStr := "0"
+					if disconnectServer {
+						disconnectStr = "1"
+					}
+					customID := fmt.Sprintf("confirm_shutdown:%s:%s:%d", matchID.String(), disconnectStr, graceSeconds)
+
+					return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Flags:  discordgo.MessageFlagsEphemeral,
+							Embeds: []*discordgo.MessageEmbed{embed},
+							Components: []discordgo.MessageComponent{
+								discordgo.ActionsRow{
+									Components: []discordgo.MessageComponent{
+										discordgo.Button{
+											Label:    "Confirm Shutdown",
+											Style:    discordgo.DangerButton,
+											CustomID: customID,
+											Emoji:    &discordgo.ComponentEmoji{Name: "⚠️"},
+										},
+									},
+								},
+							},
+						},
+					})
 				}
 
 				signal := SignalShutdownPayload{
@@ -1564,7 +1628,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				data := NewSignalEnvelope(userID, SignalShutdown, signal).String()
 
-				// Signal the match to lock the session
+				// Signal the match to shut down
 				if _, err := nk.MatchSignal(ctx, matchID.String(), data); err != nil {
 					return fmt.Errorf("failed to signal match: %w", err)
 				}
@@ -1579,7 +1643,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				})
 			}
 
-			// Send the response
+			// Send the response (only reached when no players are in the match)
 			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
@@ -1673,9 +1737,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			var isMember bool
-			isMember, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalBadgeAdmins)
-			if err != nil {
-				return status.Error(codes.Internal, "failed to check group membership")
+			perms := PermissionsFromContext(ctx)
+			if perms != nil {
+				isMember = perms.IsGlobalBadgeAdmin
+			} else {
+				isMember, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalBadgeAdmins)
+				if err != nil {
+					return status.Error(codes.Internal, "failed to check group membership")
+				}
 			}
 			if !isMember {
 				return status.Error(codes.PermissionDenied, "you do not have permission to use this command")
@@ -1868,6 +1937,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 				}
 
+			case "unlink-player":
+				// Unlink a VRML account from a user
+				return d.handleUnlinkVRML(ctx, logger, s, i, user, member, userID, groupID)
 			}
 			return nil
 		},
@@ -2118,53 +2190,42 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("failed to get guild groups: %w", err)
 			}
 
-			isGuildAuditor := false
+			// Resolve caller's guild access with cascade (global ops → auditor → enforcer)
+			access := ResolveCallerGuildAccess(ctx, db, callerUserID, groupID, callerGuildGroups)
+
+			// Queue sync for guild auditors (not global operators who don't have guild membership)
 			if gg, ok := callerGuildGroups[groupID]; ok && gg.IsAuditor(callerUserID) {
-				isGuildAuditor = true
 				d.cache.QueueSyncMember(i.GuildID, target.ID, true)
 			}
 
-			isGuildEnforcer := false
-			if gg, ok := callerGuildGroups[groupID]; ok && gg.IsEnforcer(callerUserID) {
-				isGuildEnforcer = true
-			}
-
-			isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userIDStr, GroupGlobalOperators)
-			if err != nil {
-				return fmt.Errorf("error checking global operator status: %w", err)
-			}
-
-			isGuildAuditor = isGuildAuditor || isGlobalOperator
-			isGuildEnforcer = isGuildEnforcer || isGuildAuditor
-
 			loginsSince := time.Now().Add(-30 * 24 * time.Hour)
-			if !isGlobalOperator {
+			if !access.IsGlobalOperator {
 				loginsSince = time.Time{}
 			}
 
 			opts := UserProfileRequestOptions{
-				IncludeSuspensionsEmbed:      isGuildEnforcer,
-				IncludePastSuspensions:       isGuildEnforcer,
-				IncludeCurrentMatchesEmbed:   isGuildEnforcer,
-				IncludeVRMLHistoryEmbed:      isGlobalOperator,
+				IncludeSuspensionsEmbed:      access.IsEnforcer,
+				IncludePastSuspensions:       access.IsEnforcer,
+				IncludeCurrentMatchesEmbed:   access.IsEnforcer,
+				IncludeVRMLHistoryEmbed:      access.IsGlobalOperator,
 				IncludePastDisplayNamesEmbed: true,
-				IncludeAlternatesEmbed:       isGlobalOperator,
+				IncludeAlternatesEmbed:       access.IsGlobalOperator,
 
-				IncludeDiscordDisplayName:      isGuildEnforcer,
-				IncludeSuspensionAuditorNotes:  isGuildEnforcer,
-				IncludeInactiveSuspensions:     isGuildEnforcer,
-				ErrorIfAccountDisabled:         !isGuildEnforcer,
-				IncludePartyGroupName:          isGuildAuditor,
-				IncludeDefaultMatchmakingGuild: isGuildAuditor,
-				IncludeLinkedDevices:           isGuildAuditor,
-				StripIPAddresses:               !isGlobalOperator,
-				IncludeRecentLogins:            isGuildAuditor,
-				IncludePasswordSetState:        isGuildAuditor,
-				IncludeGuildRoles:              isGuildAuditor,
-				IncludeAllGuilds:               isGlobalOperator,
-				IncludeMatchmakingTier:         isGuildAuditor,
+				IncludeDiscordDisplayName:      access.IsEnforcer,
+				IncludeSuspensionAuditorNotes:  access.IsEnforcer,
+				IncludeInactiveSuspensions:     access.IsEnforcer,
+				ErrorIfAccountDisabled:         !access.IsEnforcer,
+				IncludePartyGroupName:          access.IsAuditor,
+				IncludeDefaultMatchmakingGuild: access.IsAuditor,
+				IncludeLinkedDevices:           access.IsAuditor,
+				StripIPAddresses:               !access.IsGlobalOperator,
+				IncludeRecentLogins:            access.IsAuditor,
+				IncludePasswordSetState:        access.IsAuditor,
+				IncludeGuildRoles:              access.IsAuditor,
+				IncludeAllGuilds:               access.IsGlobalOperator,
+				IncludeMatchmakingTier:         access.IsAuditor,
 				ShowLoginsSince:                loginsSince,
-				SendFileOnError:                isGlobalOperator,
+				SendFileOnError:                access.IsGlobalOperator,
 			}
 
 			return d.handleProfileRequest(ctx, logger, nk, s, i, target, opts)
@@ -2506,9 +2567,17 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			if guild.OwnerID != user.ID {
 				// Check if the user is a global developer
-				if ok, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalDevelopers); err != nil {
-					return errors.New("failed to check group membership")
-				} else if !ok {
+				perms := PermissionsFromContext(ctx)
+				var ok bool
+				if perms != nil {
+					ok = perms.IsGlobalDeveloper
+				} else {
+					ok, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalDevelopers)
+					if err != nil {
+						return errors.New("failed to check group membership")
+					}
+				}
+				if !ok {
 					return errors.New("you do not have permission to use this command")
 				}
 			}
@@ -2578,7 +2647,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			// Limit access to global developers
-			if ok, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalDevelopers); err != nil {
+			perms := PermissionsFromContext(ctx)
+			var ok bool
+			var err error
+			if perms != nil {
+				ok = perms.IsGlobalDeveloper
+			} else {
+				ok, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalDevelopers)
+			}
+			if err != nil {
 				return errors.New("failed to check group membership")
 			} else if !ok {
 				return errors.New("you do not have permission to use this command")
@@ -3703,7 +3780,11 @@ func (d *DiscordAppBot) LogUserErrorMessage(ctx context.Context, groupID string,
 }
 
 func (d *DiscordAppBot) createLookupSetIGNModal(currentDisplayName string, isLocked bool) *discordgo.InteractionResponse {
-	allowPlayerToChangeIGN := !isLocked
+	// Determine the current lock status text
+	lockStatusText := "no"
+	if isLocked {
+		lockStatusText = "yes"
+	}
 
 	return &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
@@ -3723,16 +3804,15 @@ func (d *DiscordAppBot) createLookupSetIGNModal(currentDisplayName string, isLoc
 						},
 					},
 				},
-				// TODO this should be a true/false toggle or select menu, or set to "yes/no"
 				discordgo.ActionsRow{
 					Components: []discordgo.MessageComponent{
 						discordgo.TextInput{
 							CustomID:    "lock_input",
-							Label:       "Lock IGN (true/false)",
-							Value:       fmt.Sprintf("%t", allowPlayerToChangeIGN),
+							Label:       "🔒 Prevent player from changing this name?",
+							Value:       lockStatusText,
 							Style:       discordgo.TextInputShort,
 							Required:    true,
-							Placeholder: "true or false",
+							Placeholder: fmt.Sprintf("yes or no (currently: %s)", lockStatusText),
 						},
 					},
 				},

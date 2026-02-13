@@ -126,40 +126,21 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		<-time.After(3 * time.Second)
 	}
 	serviceSettings := ServiceSettings()
-	// Only Apply the early quit penalty if it's a public arena match.
 	if lobbyParams.Mode == evr.ModeArenaPublic && lobbyParams.EarlyQuitPenaltyLevel > 0 && serviceSettings.Matchmaking.EnableEarlyQuitPenalty {
+		eqConfig := NewEarlyQuitConfig()
+		if err := StorableRead(ctx, p.nk, lobbyParams.UserID.String(), eqConfig, true); err != nil {
+			logger.Debug("Failed to load early quit config for logging", zap.Error(err))
+		} else {
+			timeSinceLastQuit := time.Since(eqConfig.LastEarlyQuitTime)
+			lockoutDuration := GetLockoutDuration(lobbyParams.EarlyQuitPenaltyLevel)
 
-		// Default backfill interval
-		interval := 1 * time.Second
-
-		// Early quitters have a shorter backfill interval.
-		switch lobbyParams.EarlyQuitPenaltyLevel {
-		case 1:
-			interval = 60 * time.Second
-		case 2:
-			interval = 120 * time.Second
-		case 3:
-			interval = 240 * time.Second
-		}
-
-		if !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
-			// Notify the user that they are an early quitter.
-			message := fmt.Sprintf("Your early quit penalty is active (level %d), your matchmaking has been delayed by %d seconds.", lobbyParams.EarlyQuitPenaltyLevel, int(interval.Seconds()))
-			if _, err := SendUserMessage(ctx, p.appBot.dg, lobbyParams.DiscordID, message); err != nil {
-				logger.Warn("Failed to send message to user", zap.Error(err))
+			if timeSinceLastQuit < lockoutDuration {
+				remainingTime := lockoutDuration - timeSinceLastQuit
+				logger.Info("Player queueing with active early quit penalty (client-side enforcement expected)",
+					zap.String("user_id", lobbyParams.UserID.String()),
+					zap.Int("penalty_level", lobbyParams.EarlyQuitPenaltyLevel),
+					zap.Duration("remaining", remainingTime))
 			}
-			if guildGroup := p.guildGroupRegistry.Get(lobbyParams.GroupID.String()); guildGroup != nil {
-				// Send an audit log message to the guild group.
-				content := fmt.Sprintf("notified early quitter <@!%s> (%s): %s ", lobbyParams.DiscordID, session.Username(), message)
-				if _, err = AuditLogSendGuild(p.appBot.dg, guildGroup, content); err != nil {
-					logger.Warn("Failed to send audit log message", zap.Error(err))
-				}
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(interval):
 		}
 	}
 
