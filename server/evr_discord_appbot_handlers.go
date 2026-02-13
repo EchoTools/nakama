@@ -869,7 +869,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		regions = []string{region}
 		requireRegion = true
 	}
-	// Otherwise: no explicit region selected, allow allocator to choose best region without triggering fallback UI.
+	// Otherwise: no explicit region selected (empty or RegionDefault), pass empty regions slice to allow allocator to choose best region without triggering fallback UI.
 
 	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, filteredIPs, settings, regions, true, requireRegion, queryAddon)
 	if err != nil {
