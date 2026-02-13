@@ -83,23 +83,78 @@ func WithRPCAuthorization(
 			return "", runtime.NewError("Authentication required", StatusUnauthenticated)
 		}
 
+		// Resolve and cache user permissions if authenticated and not already cached
+		if perm.RequireAuth && PermissionsFromContext(ctx) == nil && db != nil {
+			userPerms, err := ResolveUserPermissions(ctx, db, userID)
+			if err != nil {
+				logger.WithFields(map[string]interface{}{
+					"rpc_id":  rpcID,
+					"user_id": userID,
+					"error":   err,
+				}).Error("Failed to resolve user permissions")
+				return "", runtime.NewError("Failed to verify permissions", StatusInternalError)
+			}
+			ctx = WithUserPermissions(ctx, userPerms)
+		}
+
 		// If authentication is required, check group membership
 		if perm.RequireAuth && len(perm.AllowedGroups) > 0 {
 			authorized := false
-			for _, groupName := range perm.AllowedGroups {
-				isMember, err := CheckSystemGroupMembership(ctx, db, userID, groupName)
-				if err != nil {
-					logger.WithFields(map[string]interface{}{
-						"rpc_id":     rpcID,
-						"user_id":    userID,
-						"group_name": groupName,
-						"error":      err,
-					}).Error("Failed to check group membership")
-					return "", runtime.NewError("Failed to verify permissions", StatusInternalError)
+
+			// Try to use cached permissions first
+			if userPerms := PermissionsFromContext(ctx); userPerms != nil {
+				for _, groupName := range perm.AllowedGroups {
+					switch groupName {
+					case GroupGlobalOperators:
+						if userPerms.IsGlobalOperator {
+							authorized = true
+						}
+					case GroupGlobalDevelopers:
+						if userPerms.IsGlobalDeveloper {
+							authorized = true
+						}
+					case GroupGlobalBots:
+						if userPerms.IsGlobalBot {
+							authorized = true
+						}
+					case GroupGlobalTesters:
+						if userPerms.IsGlobalTester {
+							authorized = true
+						}
+					case GroupGlobalBadgeAdmins:
+						if userPerms.IsGlobalBadgeAdmin {
+							authorized = true
+						}
+					case GroupGlobalPrivateDataAccess:
+						if userPerms.IsGlobalPrivateDataAccess {
+							authorized = true
+						}
+					case GroupGlobalRequire2FA:
+						if userPerms.IsGlobalRequire2FA {
+							authorized = true
+						}
+					}
+					if authorized {
+						break
+					}
 				}
-				if isMember {
-					authorized = true
-					break
+			} else {
+				// Fallback to DB query if no cached permissions (backward compatibility)
+				for _, groupName := range perm.AllowedGroups {
+					isMember, err := CheckSystemGroupMembership(ctx, db, userID, groupName)
+					if err != nil {
+						logger.WithFields(map[string]interface{}{
+							"rpc_id":     rpcID,
+							"user_id":    userID,
+							"group_name": groupName,
+							"error":      err,
+						}).Error("Failed to check group membership")
+						return "", runtime.NewError("Failed to verify permissions", StatusInternalError)
+					}
+					if isMember {
+						authorized = true
+						break
+					}
 				}
 			}
 
