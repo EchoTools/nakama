@@ -785,6 +785,12 @@ var (
 						return choices
 					}(),
 				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "description",
+					Description: "Optional description for the match (visible in /show command)",
+					Required:    false,
+				},
 			},
 		},
 		{
