@@ -1106,6 +1106,17 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		}
 	}
 
+	// Handle private match completion - allocate social lobby for seamless transition
+	if state.Mode == evr.ModeArenaPrivate && tick%(2*state.tickRate) == 0 {
+		// If the match is over, allocate a social lobby for post-match transition
+		if state.GameState != nil && state.GameState.MatchOver && !state.matchSummarySent {
+			state.matchSummarySent = true
+			if err := allocatePostMatchSocialLobby(ctx, logger, nk, state); err != nil {
+				logger.Error("Failed to allocate post-match social lobby", zap.Error(err))
+			}
+		}
+	}
+
 	if updateLabel {
 		if err := m.updateLabel(logger, dispatcher, state); err != nil {
 			logger.Error("failed to update label: %v", err)
@@ -1655,4 +1666,68 @@ func TriggerAutoReport(ctx context.Context, logger runtime.Logger, userID string
 	logger.Info("Auto-report triggered for player with max early quit penalty",
 		zap.String("user_id", userID),
 		zap.Int32("penalty_level", penaltyLevel))
+}
+
+// allocatePostMatchSocialLobby allocates a new social lobby for players to transition to after a private match
+// It reserves spots for all participants and sets their next_match_id to the new lobby
+func allocatePostMatchSocialLobby(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, state *MatchLabel) error {
+	// Get all current participants (excluding spectators and moderators)
+	participants := make([]*EvrMatchPresence, 0, len(state.presenceMap))
+	for _, presence := range state.presenceMap {
+		if presence.RoleAlignment == evr.TeamSpectator || presence.RoleAlignment == evr.TeamModerator {
+			continue
+		}
+		participants = append(participants, presence)
+	}
+
+	if len(participants) == 0 {
+		logger.Debug("No participants to transition to social lobby")
+		return nil
+	}
+
+	// Get the group ID from state (handle nil case)
+	groupID := uuid.Nil
+	if state.GroupID != nil {
+		groupID = *state.GroupID
+	}
+
+	// Create settings for a new social lobby
+	settings := &MatchSettings{
+		Mode:                evr.ModeSocialPublic,
+		Level:               evr.LevelSocial,
+		SpawnedBy:           "post-match-transition",
+		GroupID:             groupID,
+		StartTime:           time.Now().UTC(),
+		Reservations:        participants,
+		ReservationLifetime: 5 * time.Minute,
+	}
+
+	// Try to allocate a social lobby using the same group
+	// Use empty RTT map and no region requirement for flexibility
+	label, err := LobbyGameServerAllocate(ctx, logger, nk, []string{groupID.String()}, map[string]int{}, settings, nil, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
+	if err != nil {
+		return fmt.Errorf("failed to allocate social lobby for post-match transition: %w", err)
+	}
+
+	logger.Info("Allocated social lobby for post-match transition",
+		zap.String("new_lobby_id", label.ID.String()),
+		zap.Int("participant_count", len(participants)))
+
+	// Set next_match_id for all participants
+	for _, presence := range participants {
+		userID := presence.GetUserId()
+		if err := SetNextMatchID(ctx, nk, userID, label.ID, AnyTeam, ""); err != nil {
+			logger.Warn("Failed to set next_match_id for participant",
+				zap.String("user_id", userID),
+				zap.String("next_match_id", label.ID.String()),
+				zap.Error(err))
+			// Continue setting for other participants even if one fails
+			continue
+		}
+		logger.Debug("Set next_match_id for participant",
+			zap.String("user_id", userID),
+			zap.String("next_match_id", label.ID.String()))
+	}
+
+	return nil
 }
