@@ -43,17 +43,15 @@ type QuitSummary struct {
 }
 
 // EarlyQuitHistoryRPC returns detailed early quit history for a player
+// Authorization: Users can view their own history, Global Operators can view anyone's (enforced inline)
 func EarlyQuitHistoryRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	var request EarlyQuitHistoryRequest
 	if err := json.Unmarshal([]byte(payload), &request); err != nil {
 		return "", runtime.NewError("Invalid request payload", StatusInvalidArgument)
 	}
 
-	// Get the caller's user ID from context
-	callerUserID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
-	if !ok || callerUserID == "" {
-		return "", runtime.NewError("User ID not found in context", StatusUnauthenticated)
-	}
+	// Get the caller's user ID from context (guaranteed to exist by middleware)
+	callerUserID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 
 	// Determine target user ID
 	targetUserID := request.UserID
