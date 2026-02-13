@@ -93,21 +93,15 @@ func (d *DiscordAppBot) autocompleteRegions(ctx context.Context, logger runtime.
 
 	datas := make([]*RegionAutocompleteData, 0, len(regionDatas))
 
+	// Filter out regions with no available servers before sorting
 	for _, data := range regionDatas {
-		datas = append(datas, data)
+		if data.Available > 0 {
+			datas = append(datas, data)
+		}
 	}
 
-	// Sort the data by min ping
+	// Sort by latency (min ping first, then max ping as tiebreaker)
 	slices.SortFunc(datas, func(a, b *RegionAutocompleteData) int {
-		// Sort by if there are any available servers
-		if a.Available == 0 && b.Available > 0 {
-			return 1
-		}
-		if a.Available > 0 && b.Available == 0 {
-			return -1
-		}
-
-		// Sort by min ping
 		if a.MinPing < b.MinPing {
 			return -1
 		}
@@ -115,7 +109,7 @@ func (d *DiscordAppBot) autocompleteRegions(ctx context.Context, logger runtime.
 			return 1
 		}
 
-		// Sort by max ping
+		// Tiebreaker: sort by max ping
 		if a.MaxPing < b.MaxPing {
 			return -1
 		}
@@ -127,12 +121,6 @@ func (d *DiscordAppBot) autocompleteRegions(ctx context.Context, logger runtime.
 	})
 
 	for _, data := range datas {
-		// Filter out regions with no available servers to prevent users from selecting
-		// regions where all servers are fully allocated (fixes issue where selecting
-		// an unavailable region would silently fallback to a different region)
-		if data.Available == 0 {
-			continue
-		}
 		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
 			Name:  data.Description(),
 			Value: data.RegionCode,
