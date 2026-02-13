@@ -89,6 +89,13 @@ func (d *DiscordAppBot) autocompleteRegions(ctx context.Context, logger runtime.
 
 	}
 
+	choices := filterAndSortRegionChoices(regionDatas)
+	return choices, nil
+}
+
+// filterAndSortRegionChoices filters out unavailable regions and sorts by latency.
+// Exported for testing.
+func filterAndSortRegionChoices(regionDatas map[string]*RegionAutocompleteData) []*discordgo.ApplicationCommandOptionChoice {
 	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(regionDatas))
 
 	datas := make([]*RegionAutocompleteData, 0, len(regionDatas))
@@ -127,5 +134,5 @@ func (d *DiscordAppBot) autocompleteRegions(ctx context.Context, logger runtime.
 		})
 	}
 
-	return choices, nil
+	return choices
 }
