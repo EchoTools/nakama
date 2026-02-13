@@ -166,7 +166,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 
 	if !strings.Contains(p.node, "dev") {
 		// If there are fewer than SBMMMinPlayerCount players online, reduce the fallback delay
-		if count < ServiceSettings().Matchmaking.SBMMMinPlayerCount {
+		if config := EVRMatchmakerConfigGet(); config != nil && count < config.SBMM.MinPlayerCount {
 			ticketConfig.IncludeSBMMRanges = false
 			ticketConfig.IncludeEarlyQuitPenalty = false
 		}
@@ -245,9 +245,9 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 	var err error
 
 	// Check if we've exceeded the maximum matchmaking tickets for this interval
-	maxTickets := ServiceSettings().Matchmaking.MaxMatchmakingTickets
-	if maxTickets <= 0 {
-		maxTickets = 24 // default
+	maxTickets := 24
+	if config := EVRMatchmakerConfigGet(); config != nil && config.Priority.MaxMatchmakingTickets > 0 {
+		maxTickets = config.Priority.MaxMatchmakingTickets
 	}
 
 	stream := lobbyParams.MatchmakingStream()

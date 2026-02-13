@@ -77,7 +77,7 @@ type BackfillResult struct {
 // backfillContext holds pre-computed values for a backfill processing cycle
 // This avoids repeatedly calling ServiceSettings() and other expensive lookups
 type backfillContext struct {
-	settings                GlobalMatchmakingSettings
+	settings                SkillBasedMatchmakingConfig
 	now                     time.Time
 	reducingPrecisionFactor float64
 }
@@ -594,8 +594,8 @@ func (b *PostMatchmakerBackfill) GetBackfillMatches(ctx context.Context, groupID
 	// For arena matches, exclude matches that are too old
 	if mode == evr.ModeArenaPublic {
 		maxAgeSecs := 270 // Default 4.5 minutes
-		if ss := ServiceSettings(); ss != nil {
-			maxAgeSecs = ss.Matchmaking.ArenaBackfillMaxAgeSecs
+		if config := EVRMatchmakerConfigGet(); config != nil {
+			maxAgeSecs = config.Backfill.ArenaBackfillMaxAgeSecs
 		}
 		if maxAgeSecs > 0 {
 			startTime := time.Now().UTC().Add(-time.Duration(maxAgeSecs) * time.Second).Format(time.RFC3339Nano)
@@ -656,9 +656,9 @@ func (b *PostMatchmakerBackfill) GetBackfillMatches(ctx context.Context, groupID
 // Higher scores indicate better matches
 // reducingPrecisionFactor is 0.0 (strict) to 1.0 (fully relaxed)
 func (b *PostMatchmakerBackfill) CalculateBackfillScore(candidate *BackfillCandidate, match *BackfillMatch, team int, reducingPrecisionFactor float64) float64 {
-	var settings GlobalMatchmakingSettings
-	if ss := ServiceSettings(); ss != nil {
-		settings = ss.Matchmaking
+	var settings SkillBasedMatchmakingConfig
+	if config := EVRMatchmakerConfigGet(); config != nil {
+		settings = config.SBMM
 	}
 	score := BackfillBaseScore
 
@@ -829,8 +829,8 @@ func (b *PostMatchmakerBackfill) ProcessAndExecuteBackfill(ctx context.Context, 
 		now:                     time.Now(),
 		reducingPrecisionFactor: reducingPrecisionFactor,
 	}
-	if ss := ServiceSettings(); ss != nil {
-		bctx.settings = ss.Matchmaking
+	if config := EVRMatchmakerConfigGet(); config != nil {
+		bctx.settings = config.SBMM
 	}
 
 	// Sort candidates by submission time (oldest first - they've waited longest)

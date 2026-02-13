@@ -102,15 +102,17 @@ func (s LobbySessionParameters) MetricsTags() map[string]string {
 func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, session *sessionWS, request evr.LobbySessionRequest) (*LobbySessionParameters, error) {
 
 	var (
-		p               = session.evrPipeline
-		userID          = session.userID.String()
-		mode            = request.GetMode()
-		level           = request.GetLevel()
-		versionLock     = request.GetVersionLock()
-		appID           = request.GetAppID()
-		serviceSettings = ServiceSettings()
-		globalSettings  = serviceSettings.Matchmaking
+		p           = session.evrPipeline
+		userID      = session.userID.String()
+		mode        = request.GetMode()
+		level       = request.GetLevel()
+		versionLock = request.GetVersionLock()
+		appID       = request.GetAppID()
+		matchmaker  = EVRMatchmakerConfigGet()
 	)
+	if matchmaker == nil {
+		return nil, fmt.Errorf("matchmaker config not loaded")
+	}
 	sessionParams, ok := LoadParams(ctx)
 	if !ok {
 		return nil, fmt.Errorf("failed to load session parameters")
@@ -219,17 +221,17 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	}
 
 	matchmakingQueryAddons := []string{
-		globalSettings.QueryAddons.Matchmaking,
+		matchmaker.QueryAddons.Matchmaking,
 		userSettings.LobbyBuilderQueryAddon,
 	}
 
 	backfillQueryAddons := []string{
-		globalSettings.QueryAddons.Backfill,
+		matchmaker.QueryAddons.Backfill,
 		userSettings.BackfillQueryAddon,
 	}
 
 	createQueryAddons := []string{
-		globalSettings.QueryAddons.Create,
+		matchmaker.QueryAddons.Create,
 		userSettings.CreateQueryAddon,
 	}
 
@@ -301,7 +303,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	if mode == evr.ModeSocialPublic || mode == evr.ModeArenaPublicAI {
 		mmMode = evr.ModeArenaPublic
 	}
-	if (mode == evr.ModeArenaPublic || mode == evr.ModeCombatPublic) && globalSettings.EnableSBMM && groupID != uuid.Nil {
+	if (mode == evr.ModeArenaPublic || mode == evr.ModeCombatPublic) && matchmaker.SBMM.EnableSBMM && groupID != uuid.Nil {
 
 		if userSettings.StaticRatingMu != nil && userSettings.StaticRatingSigma != nil {
 			matchmakingRating = types.Rating{Mu: *userSettings.StaticRatingMu, Sigma: *userSettings.StaticRatingSigma}
@@ -314,16 +316,16 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		}
 	}
 
-	maxServerRTT := globalSettings.MaxServerRTT
+	maxServerRTT := matchmaker.ServerSelection.MaxServerRTT
 
-	if globalSettings.MaxServerRTT <= 60 {
+	if matchmaker.ServerSelection.MaxServerRTT <= 60 {
 		maxServerRTT = 180
 	}
 
 	matchmakingDivisions := make([]string, 0)
 	matchmakingExcludedDivisions := make([]string, 0)
 
-	if globalSettings.EnableDivisions && userSettings.Divisions != nil {
+	if matchmaker.Division.EnableDivisions && userSettings.Divisions != nil {
 		matchmakingDivisions = userSettings.Divisions
 	}
 
@@ -352,15 +354,15 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 
 	earlyQuitPenaltyLevel := 0
 	earlyQuitMatchmakingTier := int32(MatchmakingTier1)
-	if serviceSettings.Matchmaking.EnableEarlyQuitPenalty {
+	if matchmaker.EarlyQuit.EnableEarlyQuitPenalty {
 		if config := sessionParams.earlyQuitConfig.Load(); config != nil {
 			earlyQuitPenaltyLevel = config.GetPenaltyLevel()
 			earlyQuitMatchmakingTier = config.GetTier()
 		}
 	}
 
-	maximumFailsafeSecs := globalSettings.MatchmakingTimeoutSecs - p.config.GetMatchmaker().IntervalSec*2
-	failsafeTimeoutSecs := min(maximumFailsafeSecs, globalSettings.FailsafeTimeoutSecs)
+	maximumFailsafeSecs := matchmaker.Timeout.MatchmakingTimeoutSecs - p.config.GetMatchmaker().IntervalSec*2
+	failsafeTimeoutSecs := min(maximumFailsafeSecs, matchmaker.Timeout.FailsafeTimeoutSecs)
 
 	params, _ := LoadParams(ctx)
 
@@ -379,7 +381,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		SupportedFeatures:            supportedFeatures,
 		RequiredFeatures:             requiredFeatures,
 		Role:                         entrantRole,
-		DisableArenaBackfill:         globalSettings.DisableArenaBackfill || userSettings.DisableArenaBackfill,
+		DisableArenaBackfill:         matchmaker.Backfill.DisableArenaBackfill || userSettings.DisableArenaBackfill,
 		BackfillQueryAddon:           strings.Join(backfillQueryAddons, " "),
 		MatchmakingQueryAddon:        strings.Join(matchmakingQueryAddons, " "),
 		CreateQueryAddon:             strings.Join(createQueryAddons, " "),
@@ -389,11 +391,11 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		NextMatchID:                  nextMatchID,
 		latencyHistory:               params.latencyHistory,
 		BlockedIDs:                   blockedIDs,
-		EnableSBMM:                   globalSettings.EnableSBMM,
-		EnableDivisions:              globalSettings.EnableDivisions,
-		EnableOrdinalRange:           globalSettings.EnableOrdinalRange,
+		EnableSBMM:                   matchmaker.SBMM.EnableSBMM,
+		EnableDivisions:              matchmaker.Division.EnableDivisions,
+		EnableOrdinalRange:           matchmaker.SBMM.EnableOrdinalRange,
 		MatchmakingRating:            atomic.NewPointer(&matchmakingRating),
-		MatchmakingRatingRange:       globalSettings.RatingRange,
+		MatchmakingRatingRange:       matchmaker.SBMM.RatingRange,
 		Verbose:                      sessionParams.profile.DiscordDebugMessages,
 		EarlyQuitPenaltyLevel:        earlyQuitPenaltyLevel,
 		EarlyQuitMatchmakingTier:     earlyQuitMatchmakingTier,
@@ -401,9 +403,9 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		MatchmakingExcludedDivisions: matchmakingExcludedDivisions,
 		MaxServerRTT:                 maxServerRTT,
 		MatchmakingTimestamp:         time.Now().UTC(),
-		MatchmakingTimeout:           time.Duration(globalSettings.MatchmakingTimeoutSecs) * time.Second,
+		MatchmakingTimeout:           time.Duration(matchmaker.Timeout.MatchmakingTimeoutSecs) * time.Second,
 		FailsafeTimeout:              time.Duration(failsafeTimeoutSecs) * time.Second,
-		FallbackTimeout:              time.Duration(globalSettings.FallbackTimeoutSecs) * time.Second,
+		FallbackTimeout:              time.Duration(matchmaker.Timeout.FallbackTimeoutSecs) * time.Second,
 		DisplayName:                  sessionParams.profile.GetGroupIGN(groupIDStr),
 	}, nil
 }
@@ -426,12 +428,12 @@ func calculateExpandedRatingRange(baseRange float64, matchmakingTimestamp time.T
 
 	expansionPerMinute := 0.5
 	maxExpansion := 5.0
-	if settings := ServiceSettings(); settings != nil {
-		if settings.Matchmaking.RatingRangeExpansionPerMinute > 0 {
-			expansionPerMinute = settings.Matchmaking.RatingRangeExpansionPerMinute
+	if config := EVRMatchmakerConfigGet(); config != nil {
+		if config.SBMM.RatingRangeExpansionPerMinute > 0 {
+			expansionPerMinute = config.SBMM.RatingRangeExpansionPerMinute
 		}
-		if settings.Matchmaking.MaxRatingRangeExpansion > 0 {
-			maxExpansion = settings.Matchmaking.MaxRatingRangeExpansion
+		if config.SBMM.MaxRatingRangeExpansion > 0 {
+			maxExpansion = config.SBMM.MaxRatingRangeExpansion
 		}
 	}
 
@@ -463,7 +465,10 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 	}
 	// For arena public matches, exclude matches older than the configured max age
 	if p.Mode == evr.ModeArenaPublic {
-		maxAgeSecs := ServiceSettings().Matchmaking.ArenaBackfillMaxAgeSecs
+		maxAgeSecs := 0
+		if config := EVRMatchmakerConfigGet(); config != nil {
+			maxAgeSecs = config.Backfill.ArenaBackfillMaxAgeSecs
+		}
 		if maxAgeSecs > 0 {
 			// Exclude matches that started more than maxAgeSecs ago
 			startTime := p.MatchmakingTimestamp.UTC().Add(-time.Duration(maxAgeSecs) * time.Second).Format(time.RFC3339Nano)
@@ -657,7 +662,10 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	//maxDelta := 60 // milliseconds
 
 	//maxDelta := 60 // milliseconds
-	rttDeltas := ServiceSettings().Matchmaking.ServerSelection.RTTDelta
+	rttDeltas := map[string]int{}
+	if config := EVRMatchmakerConfigGet(); config != nil {
+		rttDeltas = config.ServerSelection.RTTDelta
+	}
 	for ip, v := range p.latencyHistory.Load().AverageRTTs(true) {
 		rtt := v
 		if delta, ok := rttDeltas[ip]; ok {

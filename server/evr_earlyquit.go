@@ -284,8 +284,15 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 	eqconfig.DecrementPenaltyOnly()
 
 	// Check if tier should be updated after penalty reduction
-	serviceSettings := ServiceSettings()
-	oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
+	matchmaker := EVRMatchmakerConfigGet()
+	if matchmaker == nil {
+		logger.WithFields(map[string]any{
+			"uid":   userID,
+			"error": "matchmaker config not loaded",
+		}).Warn("Skipping early quit tier update")
+		return
+	}
+	oldTier, newTier, tierChanged := eqconfig.UpdateTier(matchmaker.EarlyQuit.EarlyQuitTier1Threshold)
 
 	// Write the updated config back to storage
 	if err := StorableWrite(ctx, nk, userUUID.String(), eqconfig); err != nil {
