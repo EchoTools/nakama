@@ -72,8 +72,10 @@ func NewVRMLScanQueue(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		oauthClientID:    oauthCLientID,
 	}
 
-	// Register the RPC function
-	if err := initializer.RegisterRpc("oauth/vrml_redirect", verifier.RedirectRPC); err != nil {
+	// Register the RPC function with authorization middleware (default: Global Operators only)
+	perm := DefaultRPCPermission()
+	wrappedRPC := WithRPCAuthorization("oauth/vrml_redirect", perm, verifier.RedirectRPC)
+	if err := initializer.RegisterRpc("oauth/vrml_redirect", wrappedRPC); err != nil {
 		return nil, fmt.Errorf("failed to register VRML redirect RPC: %v", err)
 	}
 
