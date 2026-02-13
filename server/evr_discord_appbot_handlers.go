@@ -121,9 +121,15 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 	isGlobalOperator := false
 	var err error
 	if userID != "" {
-		isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
-		if err != nil {
-			return fmt.Errorf("error checking global operator status: %w", err)
+		// Try cached permissions first, fallback to DB query
+		perms := PermissionsFromContext(ctx)
+		if perms != nil {
+			isGlobalOperator = perms.IsGlobalOperator
+		} else {
+			isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+			if err != nil {
+				return fmt.Errorf("error checking global operator status: %w", err)
+			}
 		}
 	}
 	// Log the interaction
@@ -439,9 +445,16 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		vrmlUserID := parts[1]
 
 		// Check that the user clicking the button is a badge admin
-		isMember, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalBadgeAdmins)
-		if err != nil {
-			return fmt.Errorf("failed to check group membership: %w", err)
+		perms := PermissionsFromContext(ctx)
+		var isMember bool
+		var err error
+		if perms != nil {
+			isMember = perms.IsGlobalBadgeAdmin
+		} else {
+			isMember, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalBadgeAdmins)
+			if err != nil {
+				return fmt.Errorf("failed to check group membership: %w", err)
+			}
 		}
 		if !isMember {
 			return simpleInteractionResponse(s, i, "You must be a VRML badge admin to perform this action.")
@@ -561,14 +574,9 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 			return fmt.Errorf("failed to get guild groups: %w", err)
 		}
 
-		isAuditorOrEnforcer := false
-		if gg, ok := callerGuildGroups[targetGroupID]; ok && (gg.IsAuditor(userID) || gg.IsEnforcer(userID)) {
-			isAuditorOrEnforcer = true
-		}
-		isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
-		isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
-
-		if !isAuditorOrEnforcer {
+		// Resolve caller's guild access with cascade (global ops → auditor → enforcer)
+		access := ResolveCallerGuildAccess(ctx, d.db, userID, targetGroupID, callerGuildGroups)
+		if !access.IsEnforcer {
 			return simpleInteractionResponse(s, i, "You do not have permission to set IGN overrides.")
 		}
 
@@ -656,10 +664,16 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		}
 	}
 
-	isGlobalOperator := false
-	isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
-	if err != nil {
-		return nil, 0, status.Errorf(codes.Internal, "error checking global operator status: %v", err)
+	// Try cached permissions first, fallback to DB query
+	perms := PermissionsFromContext(ctx)
+	var isGlobalOperator bool
+	if perms != nil {
+		isGlobalOperator = perms.IsGlobalOperator
+	} else {
+		isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+		if err != nil {
+			return nil, 0, status.Errorf(codes.Internal, "error checking global operator status: %v", err)
+		}
 	}
 
 	if !gg.IsAllocator(userID) && !isGlobalOperator {
@@ -912,16 +926,10 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		sentEmbedResponse     = false
 	)
 
-	gg, err := GuildGroupLoad(ctx, nk, groupID)
+	// Check permissions (global operator or guild enforcer)
+	isGlobalOperator, isEnforcer, gg, err := RequireEnforcerOrOperator(ctx, db, nk, callerUserID, groupID)
 	if err != nil {
-		return errors.New("failed to load guild group")
-	} else if gg.IsEnforcer(callerUserID) {
-		isEnforcer = true
-	}
-
-	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, callerUserID, GroupGlobalOperators)
-	if err != nil {
-		return fmt.Errorf("error checking global operator status: %w", err)
+		return errors.New("You must be a guild enforcer or global operator to use this command")
 	}
 
 	if isEnforcer || isGlobalOperator {

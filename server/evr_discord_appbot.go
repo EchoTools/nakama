@@ -1544,9 +1544,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				graceSeconds     int
 			)
 
-			isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
-			if err != nil {
-				return fmt.Errorf("error checking global operator status: %w", err)
+			perms := PermissionsFromContext(ctx)
+			var isGlobalOperator bool
+			if perms != nil {
+				isGlobalOperator = perms.IsGlobalOperator
+			} else {
+				isGlobalOperator, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
+				if err != nil {
+					return fmt.Errorf("error checking global operator status: %w", err)
+				}
 			}
 
 			for _, option := range options {
@@ -1705,9 +1711,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			var isMember bool
-			isMember, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalBadgeAdmins)
-			if err != nil {
-				return status.Error(codes.Internal, "failed to check group membership")
+			perms := PermissionsFromContext(ctx)
+			if perms != nil {
+				isMember = perms.IsGlobalBadgeAdmin
+			} else {
+				isMember, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalBadgeAdmins)
+				if err != nil {
+					return status.Error(codes.Internal, "failed to check group membership")
+				}
 			}
 			if !isMember {
 				return status.Error(codes.PermissionDenied, "you do not have permission to use this command")
@@ -2532,9 +2543,17 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			if guild.OwnerID != user.ID {
 				// Check if the user is a global developer
-				if ok, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalDevelopers); err != nil {
-					return errors.New("failed to check group membership")
-				} else if !ok {
+				perms := PermissionsFromContext(ctx)
+				var ok bool
+				if perms != nil {
+					ok = perms.IsGlobalDeveloper
+				} else {
+					ok, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalDevelopers)
+					if err != nil {
+						return errors.New("failed to check group membership")
+					}
+				}
+				if !ok {
 					return errors.New("you do not have permission to use this command")
 				}
 			}
@@ -2604,7 +2623,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			// Limit access to global developers
-			if ok, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalDevelopers); err != nil {
+			perms := PermissionsFromContext(ctx)
+			var ok bool
+			var err error
+			if perms != nil {
+				ok = perms.IsGlobalDeveloper
+			} else {
+				ok, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalDevelopers)
+			}
+			if err != nil {
 				return errors.New("failed to check group membership")
 			} else if !ok {
 				return errors.New("you do not have permission to use this command")
