@@ -28,14 +28,13 @@ func ResolveUserPermissions(ctx context.Context, db *sql.DB, userID string) (*Us
 	}
 
 	// Single query to get ALL system group memberships
-	// States 0-2 represent: 0=Superadmin, 1=Admin, 2=Member (active memberships)
 	query := `
 		SELECT g.name 
 		FROM groups g
 		JOIN group_edge ge ON g.id = ge.destination_id
 		WHERE ge.source_id = $1
 		  AND g.lang_tag = $2
-		  AND ge.state >= 0 AND ge.state <= 2
+		  AND ge.state >= 0 AND ge.state <= 2  -- States: 0=Superadmin, 1=Admin, 2=Member
 	`
 
 	rows, err := db.QueryContext(ctx, query, userID, SystemGroupLangTag)
