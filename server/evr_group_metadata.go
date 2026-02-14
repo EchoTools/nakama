@@ -38,6 +38,7 @@ type GroupMetadata struct {
 	DisplayNameInUseNotifications        bool              `json:"display_name_in_use_notifications"`        // Display name in use notification on nick change
 	EnableGlobalPingForServers           bool              `json:"enable_global_ping_for_servers"`           // Enable global ping for servers (they will be in all pools for ping checks)
 	CreateCommandRateLimitPerMinute      float64           `json:"create_command_rate_limit_per_minute"`     // Rate limit for /create command (max creates per minute), 0 = disabled
+	EnableServerEmbedsCommand            bool              `json:"enable_server_embeds_command"`             // Enable /show command for allocators to see server status embeds
 }
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {

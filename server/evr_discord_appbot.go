@@ -851,6 +851,18 @@ var (
 			},
 		},
 		{
+			Name:        "show",
+			Description: "Show server status embeds for matches in a specific region (allocators only)",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "region",
+					Description: "Region code to show matches for",
+					Required:    true,
+				},
+			},
+		},
+		{
 			Name:        "region-status",
 			Description: "Get the status of game servers in a specific region",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -2475,6 +2487,29 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			logger.WithField("label", label).Info("Match prepared")
 			return simpleInteractionResponse(s, i, fmt.Sprintf("Match prepared with label ```json\n%s\n```\nhttps://echo.taxi/spark://c/%s", label.GetLabelIndented(), strings.ToUpper(label.ID.UUID.String())))
+		},
+		"show": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+			options := i.ApplicationCommandData().Options
+
+			if member == nil {
+				return simpleInteractionResponse(s, i, "this command must be used from a guild")
+			}
+
+			if len(options) == 0 {
+				return simpleInteractionResponse(s, i, "no options provided")
+			}
+
+			region := options[0].StringValue()
+
+			// Acknowledge the interaction first with a deferred response
+			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+			}); err != nil {
+				return fmt.Errorf("failed to defer interaction: %w", err)
+			}
+
+			// Call the handler to create/update embeds
+			return d.handleShowServerEmbeds(ctx, logger, s, i, userID, groupID, region)
 		},
 		"kick-player": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, callerMember *discordgo.Member, userID string, groupID string) error {
 

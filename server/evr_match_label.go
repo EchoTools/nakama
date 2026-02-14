@@ -558,3 +558,12 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 	}
 	return v
 }
+
+// MatchLabelFromString parses a MatchLabel from a JSON string
+func MatchLabelFromString(labelJSON string) (*MatchLabel, error) {
+	label := &MatchLabel{}
+	if err := json.Unmarshal([]byte(labelJSON), label); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal match label: %w", err)
+	}
+	return label, nil
+}
