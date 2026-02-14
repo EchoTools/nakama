@@ -879,7 +879,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			// Add a new record
 			actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
 			// Use AddRecordWithOptions to support new fields (RuleViolated, IsPubliclyVisible)
-			record := journal.AddRecordWithOptions(groupID, callerUserID, caller.User.ID, userNotice, notes, requireCommunityValues, allowPrivateLobbies, suspensionDuration, "", false)
+			record := journal.AddRecordWithOptions(groupID, callerUserID, caller.User.ID, userNotice, notes, "", requireCommunityValues, allowPrivateLobbies, false, suspensionDuration)
 			recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
 
 			// Send DM notification to the user
@@ -902,11 +902,6 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			// Save the updated journal with notification status
 			if err := StorableWrite(ctx, nk, targetUserID, journal); err != nil {
 				logger.Warn("Failed to save journal after notification update", zap.Error(err))
-			}
-
-			// Record to public enforcement log if enabled
-			if err := RecordPublicEnforcement(ctx, nk, record, false, time.Time{}); err != nil {
-				logger.Warn("Failed to record public enforcement", zap.Error(err))
 			}
 
 			// Record metrics for this enforcement action
@@ -947,10 +942,6 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 					voids[void.RecordID] = void
 
 					// Record voiding to public enforcement log if enabled
-					if err := RecordPublicEnforcement(ctx, nk, record, true, void.VoidedAt); err != nil {
-						logger.Warn("Failed to record voided enforcement to public log", zap.Error(err))
-					}
-
 					// Record voiding metrics
 					if err := RecordVoidingMetrics(ctx, nk, currentGroupID, targetUserID); err != nil {
 						logger.Warn("Failed to record voiding metrics", zap.Error(err))

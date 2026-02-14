@@ -829,13 +829,14 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	accountDetailsEmbed := w.createUserAccountDetailsEmbed()
 
 	// Combine the embeds into a message
+	// Note: Enforcement/suspensions embed moved to the bottom per user feedback
 	embeds = append(embeds,
 		accountDetailsEmbed,
 		alternatesEmbed,
-		suspensionsEmbed,
 		pastDisplayNameEmbed,
 		vrmlEmbed,
 		matchmakingEmbed,
+		suspensionsEmbed,
 	)
 
 	// Remove any nil or blank embeds/fields
