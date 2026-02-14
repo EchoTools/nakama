@@ -2431,6 +2431,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			mode := evr.ModeArenaPrivate
 			region := "default"
 			level := evr.LevelUnspecified
+			description := ""
 			for _, o := range options {
 				switch o.Name {
 				case "region":
@@ -2439,6 +2440,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					mode = evr.ToSymbol(o.StringValue())
 				case "level":
 					level = evr.ToSymbol(o.StringValue())
+				case "description":
+					description = o.StringValue()
 				}
 			}
 
@@ -2459,7 +2462,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				"startTime": startTime,
 			})
 
-			label, _, err := d.handleAllocateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime)
+			label, _, err := d.handleAllocateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime, description)
 			if err != nil {
 				// Check if this is a region fallback error
 				var regionErr ErrMatchmakingNoServersInRegion
