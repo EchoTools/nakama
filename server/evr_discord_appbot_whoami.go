@@ -110,7 +110,18 @@ func (w *WhoAmI) createUserAccountDetailsEmbed() *discordgo.MessageEmbed {
 			guildName := EscapeDiscordMarkdown(gg.Name())
 			// Replace `'s with `\'s`
 			dn = strings.ReplaceAll(dn, "`", "\\`")
-			activeDisplayNames = append(activeDisplayNames, fmt.Sprintf("%s: `%s`", guildName, dn))
+
+			// Add status indicators for override and locked
+			status := ""
+			if ign, exists := w.profile.InGameNames[gid]; exists {
+				if ign.IsLocked {
+					status = " (locked)"
+				} else if ign.IsOverride {
+					status = " (forced)"
+				}
+			}
+
+			activeDisplayNames = append(activeDisplayNames, fmt.Sprintf("%s: `%s`%s", guildName, dn, status))
 
 		}
 	}
@@ -866,15 +877,9 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	callerGuildGroups, _ := GuildUserGroupsList(ctx, nk, d.guildGroupRegistry, callerID)
 
-	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, callerID, GroupGlobalOperators)
-
-	allowIGNOverride := false
-	if gg, ok := callerGuildGroups[groupID]; ok && (gg.IsAuditor(callerID) || gg.IsEnforcer(callerID)) {
-		allowIGNOverride = true
-	}
-
-	// Allow global operators as well
-	allowIGNOverride = allowIGNOverride || isGlobalOperator
+	// Resolve caller's guild access with cascade (global ops → auditor → enforcer)
+	access := ResolveCallerGuildAccess(ctx, d.db, callerID, groupID, callerGuildGroups)
+	allowIGNOverride := access.IsEnforcer
 
 	if allowIGNOverride {
 		components = append(components,

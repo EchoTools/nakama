@@ -86,6 +86,7 @@ type GlobalMatchmakingSettings struct {
 	MatchmakingTimeoutSecs         int                     `json:"matchmaking_timeout_secs"`            // The matchmaking timeout
 	FailsafeTimeoutSecs            int                     `json:"failsafe_timeout_secs"`               // The failsafe timeout
 	FallbackTimeoutSecs            int                     `json:"fallback_timeout_secs"`               // The fallback timeout
+	MaxMatchmakingTickets          int                     `json:"max_matchmaking_tickets"`             // Maximum number of matchmaking tickets allowed per interval (default 24)
 	DisableArenaBackfill           bool                    `json:"disable_arena_backfill"`              // Disable backfilling for arena matches
 	ArenaBackfillMaxAgeSecs        int                     `json:"arena_backfill_max_age_secs"`         // Maximum age of arena matches to backfill (default 270s)
 	QueryAddons                    QueryAddons             `json:"query_addons"`                        // Additional queries to add to matchmaking queries
@@ -112,6 +113,15 @@ type GlobalMatchmakingSettings struct {
 	EnablePostMatchmakerBackfill   bool                    `json:"enable_post_matchmaker_backfill"`     // Enable post-matchmaker backfill using matchmaker exports and match list
 	ReducingPrecisionIntervalSecs  int                     `json:"reducing_precision_interval_secs"`    // Interval in seconds after which constraints are relaxed for backfill (0 = disabled)
 	ReducingPrecisionMaxCycles     int                     `json:"reducing_precision_max_cycles"`       // Maximum number of precision reduction cycles before fully relaxing constraints
+	EnableMatchmakerStateCapture   bool                    `json:"enable_matchmaker_state_capture"`     // Enable capturing matchmaker state to files for debugging and replay (default false)
+	MatchmakerStateCaptureDir      string                  `json:"matchmaker_state_capture_dir"`        // Directory to save matchmaker state files (default "/tmp/matchmaker_replay")
+	WaitTimePriorityThresholdSecs  int                     `json:"wait_time_priority_threshold_secs"`   // Wait time threshold in seconds when wait time priority overrides match size priority (default 120)
+	RatingRangeExpansionPerMinute  float64                 `json:"rating_range_expansion_per_minute"`   // How much to expand rating range per minute of wait time (default 0.5)
+	MaxRatingRangeExpansion        float64                 `json:"max_rating_range_expansion"`          // Maximum total rating range expansion allowed (default 5.0)
+	ReservationThresholdSecs       int                     `json:"reservation_threshold_secs"`          // Wait time before a ticket becomes "starving" and gets hard reservations (default 90)
+	MaxReservationRatio            float64                 `json:"max_reservation_ratio"`               // Max fraction of pool that can be reserved (0.0-1.0, default 0.4)
+	ReservationSafetyValveSecs     int                     `json:"reservation_safety_valve_secs"`       // After this many seconds, release reservations and let the system flow (default 300)
+	EnableTicketReservation        bool                    `json:"enable_ticket_reservation"`           // Enable the ticket reservation system (default false)
 }
 
 type QueryAddons struct {

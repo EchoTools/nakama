@@ -43,10 +43,12 @@ var (
 
 // RegionFallbackInfo contains information about alternative servers when requested region has none
 type RegionFallbackInfo struct {
-	RequestedRegions []string
-	ClosestServer    *MatchLabel
-	ClosestRegion    string
-	ClosestLatencyMs int
+	RequestedRegions    []string
+	RequestedRegionCode string // The primary requested region code for display
+	ServerCount         int    // Number of servers in the requested region
+	ClosestServer       *MatchLabel
+	ClosestRegion       string
+	ClosestLatencyMs    int
 }
 
 // ErrMatchmakingNoServersInRegion is returned when no servers are available in the requested region,
@@ -57,8 +59,12 @@ type ErrMatchmakingNoServersInRegion struct {
 
 func (e ErrMatchmakingNoServersInRegion) Error() string {
 	if e.FallbackInfo != nil {
-		return fmt.Sprintf("server find failed: No servers available in region(s) %v, but servers found in %s (%dms)",
-			e.FallbackInfo.RequestedRegions, e.FallbackInfo.ClosestRegion, e.FallbackInfo.ClosestLatencyMs)
+		serverMsg := fmt.Sprintf("There are %d servers", e.FallbackInfo.ServerCount)
+		if e.FallbackInfo.ServerCount == 0 {
+			serverMsg = "No servers are available"
+		}
+		return fmt.Sprintf("server find failed: %s in region code %s, but a server is available in %s (%dms)",
+			serverMsg, e.FallbackInfo.RequestedRegionCode, e.FallbackInfo.ClosestRegion, e.FallbackInfo.ClosestLatencyMs)
 	}
 	return "server find failed: No servers available in requested region"
 }
@@ -150,7 +156,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		timeoutTimer             = time.NewTimer(lobbyParams.MatchmakingTimeout)
 		fallbackTimer            = time.NewTimer(min(lobbyParams.FallbackTimeout, matchmakingTicketTimeout-mmInterval))
 		ticketTicker             = time.NewTicker(matchmakingTicketTimeout)
-		tickets                  = make([]string, 0, 2)
+		currentTicket            string // Only allow one ticket at a time
 	)
 
 	ticketConfig, ok := DefaultMatchmakerTicketConfigs[lobbyParams.Mode]
@@ -166,16 +172,41 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		}
 	}
 	defer func() {
-		session.matchmaker.Remove(tickets)
+		// Clean up the current ticket on exit
+		if currentTicket != "" {
+			session.matchmaker.Remove([]string{currentTicket})
+		}
 	}()
+
+	// Helper to replace the current ticket with a new one
+	replaceTicket := func(newTicketConfig MatchmakingTicketParameters) error {
+		// Remove the existing ticket first to ensure only one ticket at a time
+		if currentTicket != "" {
+			session.matchmaker.Remove([]string{currentTicket})
+			currentTicket = ""
+		}
+
+		ticket, addErr := p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, newTicketConfig)
+		if addErr != nil {
+			if addErr != ErrMatchmakingTicketLimitReached {
+				return fmt.Errorf("failed to add ticket: %w", addErr)
+			}
+			// Ticket limit reached - continue waiting
+			return nil
+		}
+		if ticket != "" {
+			currentTicket = ticket
+		}
+		return nil
+	}
 
 	cycle := 0
 	for {
-
-		if ticket, err := p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); err != nil {
-			return fmt.Errorf("failed to add ticket: %w", err)
-		} else {
-			tickets = append(tickets, ticket)
+		// Add initial ticket on first cycle
+		if cycle == 0 {
+			if err := replaceTicket(ticketConfig); err != nil {
+				return err
+			}
 		}
 
 		select {
@@ -185,27 +216,50 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 			logger.Debug("Matchmaking timeout")
 			return ErrMatchmakingTimeout
 		case <-ticketTicker.C:
-			logger.Debug("Matchmaking ticket timeout", zap.Int("cycle", cycle))
+			logger.Debug("Matchmaking ticket timeout, refreshing ticket", zap.Int("cycle", cycle))
+			// Refresh the ticket with the same config
+			if err := replaceTicket(ticketConfig); err != nil {
+				return err
+			}
 		case <-fallbackTimer.C:
-			logger.Debug("Matchmaking fallback")
+			logger.Debug("Matchmaking fallback, switching to relaxed criteria")
 
-			// add a ticket with a smaller count, and no rank range
-			//ticketConfig.IncludeSBMMRanges = false
+			// Update ticket config with relaxed criteria
 			ticketConfig.IncludeEarlyQuitPenalty = false
 			ticketConfig.MinCount = 2
 			ticketConfig.MaxCount = 8
-			if ticket, err := p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); err != nil {
-				return fmt.Errorf("failed to add ticket: %w", err)
-			} else {
-				tickets = append(tickets, ticket)
+
+			// Replace the current ticket with the new fallback config
+			if err := replaceTicket(ticketConfig); err != nil {
+				return err
 			}
 		}
 		cycle++
 	}
 }
 
+// ErrMatchmakingTicketLimitReached is returned when the matchmaking ticket limit for the interval is reached
+var ErrMatchmakingTicketLimitReached = NewLobbyErrorf(BadRequest, "matchmaking ticket limit reached for this interval")
+
 func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup, ticketConfig MatchmakingTicketParameters) (string, error) {
 	var err error
+
+	// Check if we've exceeded the maximum matchmaking tickets for this interval
+	maxTickets := ServiceSettings().Matchmaking.MaxMatchmakingTickets
+	if maxTickets <= 0 {
+		maxTickets = 24 // default
+	}
+
+	stream := lobbyParams.MatchmakingStream()
+	streamCount, err := p.nk.StreamCount(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label)
+	if err != nil {
+		logger.Warn("Failed to get matchmaking stream count", zap.Error(err))
+	} else if streamCount >= maxTickets {
+		logger.Debug("Matchmaking ticket limit reached, skipping ticket creation",
+			zap.Int("current_count", streamCount),
+			zap.Int("max_tickets", maxTickets))
+		return "", ErrMatchmakingTicketLimitReached
+	}
 
 	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(&ticketConfig)
 

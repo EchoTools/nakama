@@ -73,9 +73,12 @@ func InitializeSocialAuth(ctx context.Context, logger runtime.Logger, initialize
 	if err := initializer.RegisterBeforeUnlinkDevice(BeforeUnlinkDevice); err != nil {
 		return fmt.Errorf("failed to register BeforeUnlinkDevice hook: %w", err)
 	}
+
+	// Note: Authorization middleware must be applied at the server package level to avoid import cycles
 	if err := initializer.RegisterRpc("github_status", RpcGetGitHubStatus); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -84,11 +87,15 @@ func BeforeAuthenticateCustom(ctx context.Context, logger runtime.Logger, db *sq
 	env := ctx.Value(runtime.RUNTIME_CTX_ENV).(map[string]string)
 	discordClientID := env["DISCORD_CLIENT_ID"]
 	discordClientSecret := env["DISCORD_CLIENT_SECRET"]
-	discordRedirectURL := env["DISCORD_REDIRECT_URI"]
+
+	// Get redirect_uri from request vars before clearing
+	discordRedirectURL := in.Account.Vars["redirect_uri"]
+	if discordRedirectURL == "" {
+		discordRedirectURL = env["DISCORD_REDIRECT_URI"]
+	}
 
 	// clear the user provided vars
 	in.Account.Vars = map[string]string{}
-
 	code := in.Account.Id
 	// Require a prefix for device IDs to avoid conflicts
 	switch {

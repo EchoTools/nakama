@@ -465,13 +465,18 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 	return nil
 }
 
-func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, sessionRegistry SessionRegistry, userID, sessionID string) error {
+func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, sessionRegistry SessionRegistry, userID, sessionID string, matchID MatchID) error {
 	// Decrease the early quitter count for the player
 	eqconfig := NewEarlyQuitConfig()
 	if err := StorableRead(ctx, nk, userID, eqconfig, true); err != nil {
 		logger.WithField("error", err).Warn("Failed to load early quitter config")
 	} else {
 		eqconfig.IncrementCompletedMatches()
+
+		// Track completion in detailed history
+		if err := TrackMatchCompletion(ctx, logger, nk, userID, matchID, time.Now().UTC()); err != nil {
+			logger.WithField("error", err).Debug("Failed to track match completion in history")
+		}
 
 		// Check for tier change after completing match
 		serviceSettings := ServiceSettings()
@@ -667,7 +672,7 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		}
 
 		// Increment the completed matches for the player
-		if err := s.incrementCompletedMatches(ctx, logger, nk, db, sessionRegistry, playerInfo.UserID, playerInfo.SessionID); err != nil {
+		if err := s.incrementCompletedMatches(ctx, logger, nk, db, sessionRegistry, playerInfo.UserID, playerInfo.SessionID, matchID); err != nil {
 			logger.WithField("error", err).Warn("Failed to increment completed matches")
 		}
 

@@ -15,6 +15,7 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/thriftrw/ptr"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -120,9 +121,15 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 	isGlobalOperator := false
 	var err error
 	if userID != "" {
-		isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
-		if err != nil {
-			return fmt.Errorf("error checking global operator status: %w", err)
+		// Try cached permissions first, fallback to DB query
+		perms := PermissionsFromContext(ctx)
+		if perms != nil {
+			isGlobalOperator = perms.IsGlobalOperator
+		} else {
+			isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+			if err != nil {
+				return fmt.Errorf("error checking global operator status: %w", err)
+			}
 		}
 	}
 	// Log the interaction
@@ -217,7 +224,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 			logger.Warn("Failed to log interaction to channel")
 		}
 
-	case "join-player", "igp", "ign", "shutdown-match":
+	case "join-player", "igp", "ign":
 
 		gg := d.guildGroupRegistry.Get(groupID)
 		if gg == nil {
@@ -230,6 +237,19 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 
 		if !isGlobalOperator && !gg.IsEnforcer(userID) {
 			return simpleInteractionResponse(s, i, "You must be a guild enforcer to use this command.")
+		}
+
+	case "shutdown-match":
+		// Permission check is deferred to the handler because it depends on the match's guild,
+		// not the calling guild. The handler checks: global operator, server owner, or guild
+		// enforcer of the session running on the server.
+		gg := d.guildGroupRegistry.Get(groupID)
+		if gg == nil {
+			return simpleInteractionResponse(s, i, "This guild is not registered.")
+		}
+
+		if err := d.LogInteractionToChannel(i, gg.AuditChannelID); err != nil {
+			logger.Warn("Failed to log interaction to channel")
 		}
 
 	case "set-command-channel", "generate-button":
@@ -438,9 +458,16 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		vrmlUserID := parts[1]
 
 		// Check that the user clicking the button is a badge admin
-		isMember, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalBadgeAdmins)
-		if err != nil {
-			return fmt.Errorf("failed to check group membership: %w", err)
+		perms := PermissionsFromContext(ctx)
+		var isMember bool
+		var err error
+		if perms != nil {
+			isMember = perms.IsGlobalBadgeAdmin
+		} else {
+			isMember, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalBadgeAdmins)
+			if err != nil {
+				return fmt.Errorf("failed to check group membership: %w", err)
+			}
 		}
 		if !isMember {
 			return simpleInteractionResponse(s, i, "You must be a VRML badge admin to perform this action.")
@@ -560,14 +587,9 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 			return fmt.Errorf("failed to get guild groups: %w", err)
 		}
 
-		isAuditorOrEnforcer := false
-		if gg, ok := callerGuildGroups[targetGroupID]; ok && (gg.IsAuditor(userID) || gg.IsEnforcer(userID)) {
-			isAuditorOrEnforcer = true
-		}
-		isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
-		isAuditorOrEnforcer = isAuditorOrEnforcer || isGlobalOperator
-
-		if !isAuditorOrEnforcer {
+		// Resolve caller's guild access with cascade (global ops → auditor → enforcer)
+		access := ResolveCallerGuildAccess(ctx, d.db, userID, targetGroupID, callerGuildGroups)
+		if !access.IsEnforcer {
 			return simpleInteractionResponse(s, i, "You do not have permission to set IGN overrides.")
 		}
 
@@ -627,6 +649,11 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 	case "enf":
 		// Handle enforcement button interactions (edit, void) - short format
 		return d.handleEnforcementInteraction(ctx, logger, s, i, value)
+
+	case "confirm_shutdown":
+		// Handle shutdown confirmation button click
+		// Format: confirm_shutdown:<matchID>:<disconnectServer>:<graceSeconds>
+		return d.handleConfirmShutdown(ctx, logger, nk, s, i, userID, value)
 	}
 
 	return nil
@@ -655,19 +682,34 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		}
 	}
 
-	isGlobalOperator := false
-	isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
-	if err != nil {
-		return nil, 0, status.Errorf(codes.Internal, "error checking global operator status: %v", err)
+	// Try cached permissions first, fallback to DB query
+	perms := PermissionsFromContext(ctx)
+	var isGlobalOperator bool
+	if perms != nil {
+		isGlobalOperator = perms.IsGlobalOperator
+	} else {
+		isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+		if err != nil {
+			return nil, 0, status.Errorf(codes.Internal, "error checking global operator status: %v", err)
+		}
 	}
 
 	if !gg.IsAllocator(userID) && !isGlobalOperator {
 		return nil, 0, status.Error(codes.PermissionDenied, "user does not have the allocator role in this guild.")
 	}
 
-	// If user is a global operator but has no allocator groups, use the current guild group
+	// If user is a global operator, ensure the current guild group is included (avoid duplicates)
 	if isGlobalOperator {
-		allocatorGroupIDs = append(allocatorGroupIDs, groupID)
+		found := false
+		for _, gid := range allocatorGroupIDs {
+			if gid == groupID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			allocatorGroupIDs = append(allocatorGroupIDs, groupID)
+		}
 	}
 
 	// Load the latency history for this user
@@ -730,26 +772,50 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Error(codes.PermissionDenied, "guild does not allow public match creation")
 	}
 
-	// Check if user is a moderator (enforcer) in the guild or a global operator
-	isGuildModerator := group.IsEnforcer(userID)
+	isGuildModerator := group.IsEnforcer(userID) || group.IsAuditor(userID)
 	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
 	isPrivileged := isGuildModerator || isGlobalOperator
 
-	// Check if this is a public match (echo_arena or echo_combat)
-	isPublicMatch := mode == evr.ModeArenaPublic || mode == evr.ModeCombatPublic
+	if !isPrivileged {
+		// Check if guild has custom rate limit configured
+		var rateLimitSeconds int
+		var rateLimitMessage string
 
-	// Apply stricter rate limit (1 per 15 minutes) for public matches, unless user is privileged
-	if isPublicMatch && !isPrivileged {
-		publicLimiter := d.loadPublicMatchRateLimiter(userID, groupID)
-		if !publicLimiter.Allow() {
-			return nil, 0, status.Error(codes.ResourceExhausted, "rate limit exceeded for public matches (1 per 15 minutes)")
+		if group.CreateCommandRateLimitPerMinute > 0 {
+			// Use guild-configured rate limit (converts from per-minute to seconds)
+			rateLimitSeconds = int(60.0 / group.CreateCommandRateLimitPerMinute)
+			rateLimitMessage = fmt.Sprintf("rate limit exceeded for match creation (%.1f per minute)", group.CreateCommandRateLimitPerMinute)
+		} else {
+			// Use default rate limits per mode
+			rateLimitConfig := map[evr.Symbol]struct {
+				seconds int
+				message string
+			}{
+				evr.ModeCombatPublic:  {300, "rate limit exceeded for public combat matches (1 per 5 minutes)"},
+				evr.ModeArenaPublic:   {900, "rate limit exceeded for public arena matches (1 per 15 minutes)"},
+				evr.ModeCombatPrivate: {60, "rate limit exceeded for private combat matches (1 per minute)"},
+				evr.ModeArenaPrivate:  {60, "rate limit exceeded for private arena matches (1 per minute)"},
+				evr.ModeSocialPublic:  {60, "rate limit exceeded for public social lobbies (1 per minute)"},
+				evr.ModeSocialPrivate: {60, "rate limit exceeded for private social lobbies (1 per minute)"},
+			}
+
+			config, exists := rateLimitConfig[mode]
+			if !exists {
+				config = struct {
+					seconds int
+					message string
+				}{60, "rate limit exceeded for match creation (1 per minute)"}
+			}
+			rateLimitSeconds = config.seconds
+			rateLimitMessage = config.message
 		}
-	}
 
-	// Apply general rate limit for all matches
-	limiter := d.loadPrepareMatchRateLimiter(userID, groupID)
-	if !limiter.Allow() {
-		return nil, 0, status.Error(codes.ResourceExhausted, fmt.Sprintf("rate limit exceeded (%0.0f requests per minute)", limiter.Limit()*60))
+		key := fmt.Sprintf("%s:%s:%s", userID, groupID, mode.String())
+		limiter, _ := d.matchCreateRateLimiters.LoadOrStore(key, rate.NewLimiter(rate.Limit(1.0/float64(rateLimitSeconds)), 1))
+
+		if !limiter.Allow() {
+			return nil, 0, status.Error(codes.ResourceExhausted, rateLimitMessage)
+		}
 	}
 
 	latencyHistory := NewLatencyHistory()
@@ -757,6 +823,32 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Errorf(codes.Internal, "failed to read latency history: %v", err)
 	}
 	extIPs := latencyHistory.AverageRTTs(true)
+
+	// Filter servers to only those with RTT <= 90ms
+	// Note: 90ms is stricter than the 100ms HighLatencyThresholdMs used in matchmaking
+	// because /create is a manual server selection that should prioritize low latency
+	const maxLatencyMs = 90
+	filteredIPs := make(map[string]int)
+	minLatencyMs := 0
+	hasLatencyData := false
+
+	for ip, latency := range extIPs {
+		if !hasLatencyData || latency < minLatencyMs {
+			minLatencyMs = latency
+			hasLatencyData = true
+		}
+		if latency <= maxLatencyMs {
+			filteredIPs[ip] = latency
+		}
+	}
+
+	// If no servers within 90ms, return appropriate error
+	if len(filteredIPs) == 0 {
+		if !hasLatencyData {
+			return nil, 0, fmt.Errorf("no latency history exists for your account; play some matches first to establish server latency data")
+		}
+		return nil, 0, fmt.Errorf("no servers within 90ms of your location. Your best server has %dms latency", minLatencyMs)
+	}
 
 	settings := &MatchSettings{
 		Mode:      mode,
@@ -767,7 +859,19 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	}
 
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
-	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, extIPs, settings, []string{region}, true, false, queryAddon)
+
+	// Determine requested regions and whether to require them.
+	// Treat "no region selected" (empty or RegionDefault) as unrestricted so allocation can pick the best server.
+	var regions []string
+	requireRegion := false
+	if region != "" && region != RegionDefault {
+		// User explicitly selected a region: enforce it and use fallback UI if no servers are available there.
+		regions = []string{region}
+		requireRegion = true
+	}
+	// Otherwise: no explicit region selected (empty or RegionDefault), pass empty regions slice to allow allocator to choose best region without triggering fallback UI.
+
+	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, filteredIPs, settings, regions, true, requireRegion, queryAddon)
 	if err != nil {
 		// Check if this is a region fallback error
 		var regionErr ErrMatchmakingNoServersInRegion
@@ -852,16 +956,10 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		sentEmbedResponse     = false
 	)
 
-	gg, err := GuildGroupLoad(ctx, nk, groupID)
+	// Check permissions (global operator or guild enforcer)
+	isGlobalOperator, isEnforcer, gg, err := RequireEnforcerOrOperator(ctx, db, nk, callerUserID, groupID)
 	if err != nil {
-		return errors.New("failed to load guild group")
-	} else if gg.IsEnforcer(callerUserID) {
-		isEnforcer = true
-	}
-
-	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, callerUserID, GroupGlobalOperators)
-	if err != nil {
-		return fmt.Errorf("error checking global operator status: %w", err)
+		return errors.New("You must be a guild enforcer or global operator to use this command")
 	}
 
 	if isEnforcer || isGlobalOperator {
@@ -950,7 +1048,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			}
 		}
 
-		if err := StorableWrite(ctx, nk, targetUserID, journal); err != nil {
+		if err := SyncJournalAndProfile(ctx, nk, targetUserID, journal); err != nil {
 			return fmt.Errorf("failed to write storage: %w", err)
 		}
 
@@ -987,7 +1085,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 					},
 				},
 				Footer: &discordgo.MessageEmbedFooter{
-					Text: "Confidential. Do not share.",
+					Text: fmt.Sprintf("Confidential. Do not share. | Edit on portal: check suspension details"),
 				},
 			}
 			if len(recordsByGroupID) == 0 {
@@ -1174,15 +1272,21 @@ func (d *DiscordAppBot) presentRegionFallbackOptions(s *discordgo.Session, i *di
 	startTimeStr := fmt.Sprintf("%d", startTime.Unix())
 	baseParams := fmt.Sprintf("%s:%s:%s:%s:%s", originalRegion, mode.String(), level.String(), startTimeStr, commandType)
 
+	// Create message based on server count
+	serverMsg := fmt.Sprintf("There are **%d** servers in region code **%s**", fallbackInfo.ServerCount, fallbackInfo.RequestedRegionCode)
+	if fallbackInfo.ServerCount == 0 {
+		serverMsg = fmt.Sprintf("No servers are available in region code **%s**", fallbackInfo.RequestedRegionCode)
+	}
+
 	embed := &discordgo.MessageEmbed{
 		Title: "No Servers Available in Selected Region",
-		Description: fmt.Sprintf("No servers are available in region(s) **%v**.\n\nHowever, a server is available in **%s** with **%dms** latency.\n\nWould you like to use this server instead?",
-			fallbackInfo.RequestedRegions, fallbackInfo.ClosestRegion, fallbackInfo.ClosestLatencyMs),
+		Description: fmt.Sprintf("%s.\n\nHowever, a server is available in **%s** with **%dms** latency.\n\nWould you like to use this server instead?",
+			serverMsg, fallbackInfo.ClosestRegion, fallbackInfo.ClosestLatencyMs),
 		Color: 0xFFA500, // Orange color for warning
 		Fields: []*discordgo.MessageEmbedField{
 			{
 				Name:   "Requested Region(s)",
-				Value:  fmt.Sprintf("%v", fallbackInfo.RequestedRegions),
+				Value:  fmt.Sprintf("[%s]", fallbackInfo.RequestedRegionCode),
 				Inline: true,
 			},
 			{
@@ -1343,4 +1447,110 @@ func (d *DiscordAppBot) handleRegionFallbackInteraction(ctx context.Context, log
 	}
 
 	return fmt.Errorf("unknown action: %s", action)
+}
+
+// canShutdownMatch checks whether a user has permission to shut down a match.
+// Returns true if the user is a global operator, the server owner (OperatorID),
+// or a guild enforcer of the session running on the server.
+func (d *DiscordAppBot) canShutdownMatch(ctx context.Context, userID string, label *MatchLabel) (bool, error) {
+	var err error
+	perms := PermissionsFromContext(ctx)
+	var isGlobalOperator bool
+	if perms != nil {
+		isGlobalOperator = perms.IsGlobalOperator
+	} else {
+		isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+		if err != nil {
+			return false, fmt.Errorf("error checking global operator status: %w", err)
+		}
+	}
+
+	if isGlobalOperator {
+		return true, nil
+	}
+
+	if label.GameServer != nil && label.GameServer.OperatorID.String() == userID {
+		return true, nil
+	}
+
+	matchGroupID := label.GetGroupID().String()
+	gg := d.guildGroupRegistry.Get(matchGroupID)
+	if gg != nil && gg.IsEnforcer(userID) {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+// handleConfirmShutdown handles the confirm shutdown button click.
+// value format: <matchID>:<disconnectServer>:<graceSeconds>
+func (d *DiscordAppBot) handleConfirmShutdown(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, value string) error {
+	parts := strings.SplitN(value, ":", 3)
+	if len(parts) != 3 {
+		return simpleInteractionResponse(s, i, "Invalid shutdown confirmation data.")
+	}
+
+	matchIDStr := parts[0]
+
+	if parts[1] != "0" && parts[1] != "1" {
+		return simpleInteractionResponse(s, i, "Invalid shutdown confirmation data.")
+	}
+	disconnectServer := parts[1] == "1"
+
+	graceSeconds, err := strconv.Atoi(parts[2])
+	if err != nil || graceSeconds < 0 || graceSeconds > 3600 {
+		return simpleInteractionResponse(s, i, "Invalid grace period.")
+	}
+
+	matchID, err := MatchIDFromString(matchIDStr)
+	if err != nil {
+		return simpleInteractionResponse(s, i, "Invalid match ID.")
+	}
+
+	label, err := MatchLabelByID(ctx, nk, matchID)
+	if err != nil {
+		return simpleInteractionResponse(s, i, "Match not found or already ended.")
+	}
+
+	// Re-verify permissions
+	allowed, err := d.canShutdownMatch(ctx, userID, label)
+	if err != nil {
+		return fmt.Errorf("error checking shutdown permission: %w", err)
+	}
+	if !allowed {
+		return simpleInteractionResponse(s, i, "You do not have permission to shut down this match.")
+	}
+
+	signal := SignalShutdownPayload{
+		GraceSeconds:         graceSeconds,
+		DisconnectGameServer: disconnectServer,
+		DisconnectUsers:      false,
+	}
+
+	data := NewSignalEnvelope(userID, SignalShutdown, signal).String()
+
+	if _, err := nk.MatchSignal(ctx, matchID.String(), data); err != nil {
+		return simpleInteractionResponse(s, i, fmt.Sprintf("Failed to shut down match: %s", err.Error()))
+	}
+
+	// Update the original message to disable the button and show confirmation
+	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseUpdateMessage,
+		Data: &discordgo.InteractionResponseData{
+			Content: "The match has been shut down.",
+			Embeds:  []*discordgo.MessageEmbed{},
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.Button{
+							Label:    "Match Shut Down",
+							Style:    discordgo.SecondaryButton,
+							CustomID: "nil",
+							Disabled: true,
+						},
+					},
+				},
+			},
+		},
+	})
 }

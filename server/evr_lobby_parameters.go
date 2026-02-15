@@ -49,6 +49,7 @@ type LobbySessionParameters struct {
 	CreateQueryAddon             string                        `json:"create_query_addon"`
 	Verbose                      bool                          `json:"verbose"`
 	BlockedIDs                   []string                      `json:"blocked_ids"`
+	IsModerator                  bool                          `json:"is_moderator"` // True if user is a moderator (enforcer or operator), regardless of division
 	MatchmakingRating            *atomic.Pointer[types.Rating] `json:"matchmaking_rating"`
 	EarlyQuitPenaltyLevel        int                           `json:"early_quit_penalty_level"`
 	EarlyQuitMatchmakingTier     int32                         `json:"early_quit_matchmaking_tier"`
@@ -267,7 +268,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 
 	if userSettings.LobbyGroupName != "" {
 		lobbyGroupName = userSettings.LobbyGroupName
-		partyID = uuid.NewV5(EntrantIDSalt, lobbyGroupName)
+		partyID = uuid.NewV5(PartyIDSalt, lobbyGroupName)
 	}
 
 	node := session.pipeline.node
@@ -332,12 +333,21 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		matchmakingExcludedDivisions = []string{}
 	}
 
+	// Determine if user is a moderator (enforcer or operator), independent of division
+	isModerator := sessionParams.isGlobalOperator
+	// If not a global operator, check if they're an enforcer in their active group
+	if !isModerator && groupID != uuid.Nil {
+		if gg, ok := sessionParams.guildGroups[groupID.String()]; ok {
+			isModerator = gg.IsEnforcer(userID)
+		}
+	}
+
 	latencyHistory := sessionParams.latencyHistory.Load()
 	if latencyHistory == nil {
 		latencyHistory = NewLatencyHistory()
 	}
 	sessionParams.latencyHistory.Store(latencyHistory)
-	
+
 	// Set the maxRTT to at least the average of the player's latency history
 	if averages := latencyHistory.AverageRTTs(false); len(averages) > 0 {
 		averageRTT := 0
@@ -387,6 +397,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		PartyID:                      partyID,
 		PartySize:                    atomic.NewInt64(1),
 		NextMatchID:                  nextMatchID,
+		IsModerator:                  isModerator,
 		latencyHistory:               params.latencyHistory,
 		BlockedIDs:                   blockedIDs,
 		EnableSBMM:                   globalSettings.EnableSBMM,
@@ -414,6 +425,33 @@ func (p LobbySessionParameters) String() string {
 		return ""
 	}
 	return string(data)
+}
+
+func calculateExpandedRatingRange(baseRange float64, matchmakingTimestamp time.Time) float64 {
+	if matchmakingTimestamp.IsZero() {
+		return baseRange
+	}
+
+	waitTime := time.Since(matchmakingTimestamp)
+	waitMinutes := waitTime.Minutes()
+
+	expansionPerMinute := 0.5
+	maxExpansion := 5.0
+	if settings := ServiceSettings(); settings != nil {
+		if settings.Matchmaking.RatingRangeExpansionPerMinute > 0 {
+			expansionPerMinute = settings.Matchmaking.RatingRangeExpansionPerMinute
+		}
+		if settings.Matchmaking.MaxRatingRangeExpansion > 0 {
+			maxExpansion = settings.Matchmaking.MaxRatingRangeExpansion
+		}
+	}
+
+	expansion := waitMinutes * expansionPerMinute
+	if expansion > maxExpansion {
+		expansion = maxExpansion
+	}
+
+	return baseRange + expansion
 }
 
 func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMaxRTT bool) string {
@@ -458,7 +496,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 	if includeMMR {
 		key := "rating_mu"
 		val := p.GetRating().Mu
-		rng := p.MatchmakingRatingRange
+		rng := calculateExpandedRatingRange(p.MatchmakingRatingRange, p.MatchmakingTimestamp)
 
 		qparts = append(qparts,
 			// Exclusion
@@ -556,6 +594,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		"submission_time":    submissionTime,
 		"divisions":          strings.Join(p.MatchmakingDivisions, ","),
 		"excluded_divisions": strings.Join(p.MatchmakingExcludedDivisions, ","),
+		"is_moderator":       strconv.FormatBool(p.IsModerator),
 	}
 
 	numericProperties := map[string]float64{
@@ -597,7 +636,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		if p.EnableOrdinalRange && ticketParams.IncludeSBMMRanges {
 			key := "rating_mu"
 			val := rating.Mu
-			rng := p.MatchmakingRatingRange
+			rng := calculateExpandedRatingRange(p.MatchmakingRatingRange, p.MatchmakingTimestamp)
 
 			if val != 0.0 {
 				lower := val - rng

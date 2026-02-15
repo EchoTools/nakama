@@ -53,9 +53,10 @@ type LobbyBuilder struct {
 	skillBasedMM      *SkillBasedMatchmaker
 
 	// Backfill coordination
-	backfillStopCh  chan struct{} // Channel to stop periodic backfill
-	backfillResetCh chan struct{} // Channel to reset the periodic backfill timer
-	backfillMu      sync.Mutex
+	backfillStopCh    chan struct{} // Channel to stop periodic backfill
+	backfillResetCh   chan struct{} // Channel to reset the periodic backfill timer
+	backfillMu        sync.Mutex    // Protects backfillStopCh and backfillResetCh
+	backfillRunningMu sync.Mutex    // Prevents concurrent backfill runs
 }
 
 func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics) *LobbyBuilder {
@@ -175,6 +176,14 @@ func (b *LobbyBuilder) resetBackfillTimer() {
 // When isPeriodicRun is true, we filter to only process tickets that have been waiting
 // for at least BackfillMinTicketAgeSecs to avoid poaching fresh tickets before matchmaker runs
 func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
+	// Prevent concurrent backfill runs to avoid race conditions in team assignment
+	// Multiple concurrent backfill runs could read the same match state and assign
+	// multiple players to the same team, causing team imbalance (e.g., 5v5 in a 4v4 game)
+	if !b.backfillRunningMu.TryLock() {
+		return // Another backfill is already running
+	}
+	defer b.backfillRunningMu.Unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), BackfillProcessTimeout)
 	defer cancel()
 
@@ -184,9 +193,16 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 	)
 
 	// If matchmaker is currently processing, skip this backfill run to avoid poaching
+	// However, if it's been processing for too long (overloaded), run backfill anyway
+	const maxMatchmakerProcessingTime = 30 * time.Second
 	if b.skillBasedMM != nil && b.skillBasedMM.IsProcessing() {
-		logger.Debug("Matchmaker is currently processing, skipping backfill")
-		return
+		processingDuration := time.Since(b.skillBasedMM.GetLastProcessStart())
+		if processingDuration < maxMatchmakerProcessingTime {
+			logger.Debug("Matchmaker is currently processing, skipping backfill")
+			return
+		}
+		logger.Warn("Matchmaker has been processing too long, running backfill anyway",
+			zap.Duration("processing_duration", processingDuration))
 	}
 
 	// Get current tickets from the global matchmaker
@@ -241,9 +257,6 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 		}
 	}
 
-	logger.Info("Running post-matchmaker backfill",
-		zap.Int("candidates", len(candidates)))
-
 	// Calculate reducing precision factor based on oldest ticket
 	settings := ServiceSettings().Matchmaking
 	reducingPrecisionFactor := 0.0
@@ -266,8 +279,9 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 		}
 	}
 
-	logger.Debug("Reducing precision factor calculated",
-		zap.Float64("factor", reducingPrecisionFactor))
+	logger.Info("Starting backfill process",
+		zap.Int("candidates", len(candidates)),
+		zap.Float64("reducing_precision_factor", reducingPrecisionFactor))
 
 	// Process and execute backfill (combined to ensure accurate slot tracking)
 	results, err := b.postMatchBackfill.ProcessAndExecuteBackfill(ctx, logger, candidates, reducingPrecisionFactor)
@@ -285,11 +299,11 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 	}
 
 	if len(results) == 0 {
-		logger.Debug("No backfill matches found")
+		logger.Info("Backfill completed with no matches found")
 		return
 	}
 
-	logger.Info("Successfully backfilled players", zap.Int("count", len(results)))
+	logger.Info("Backfill completed successfully", zap.Int("players_backfilled", len(results)))
 }
 
 func (b *LobbyBuilder) extractLatenciesFromEntrants(entrants []*MatchmakerEntry) (map[string][][]float64, map[string]map[string]float64) {
@@ -780,11 +794,14 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	sortLabelIndexes(indexes)
 
 	// Check if we have any servers in the requested region
+	// Note: We iterate through all indexes (no early break) to count ALL matching servers
+	// for accurate server count reporting in the fallback message
 	hasRegionMatch := false
+	serverCount := 0 // Count servers in requested region(s)
 	for _, index := range indexes {
 		if index.IsRegionMatch {
 			hasRegionMatch = true
-			break
+			serverCount++
 		}
 	}
 
@@ -795,7 +812,8 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 		for _, index := range indexes {
 			if index.Label.LobbyType == UnassignedLobby && index.IsReachable {
 				// Get the region of the closest server
-				closestRegion := "unknown"
+				// Prefer non-default regions, but fallback to "default" if none exist
+				closestRegion := "default"
 				if len(index.Label.GameServer.RegionCodes) > 0 {
 					for _, r := range index.Label.GameServer.RegionCodes {
 						if r != RegionDefault {
@@ -805,12 +823,20 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 					}
 				}
 
+				// Get the primary requested region code for display
+				requestedRegionCode := "default"
+				if len(regions) > 0 {
+					requestedRegionCode = regions[0]
+				}
+
 				return nil, ErrMatchmakingNoServersInRegion{
 					FallbackInfo: &RegionFallbackInfo{
-						RequestedRegions: regions,
-						ClosestServer:    index.Label,
-						ClosestRegion:    closestRegion,
-						ClosestLatencyMs: index.RTT,
+						RequestedRegions:    regions,
+						RequestedRegionCode: requestedRegionCode,
+						ServerCount:         serverCount,
+						ClosestServer:       index.Label,
+						ClosestRegion:       closestRegion,
+						ClosestLatencyMs:    index.RTT,
 					},
 				}
 			}
