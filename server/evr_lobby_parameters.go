@@ -49,7 +49,7 @@ type LobbySessionParameters struct {
 	CreateQueryAddon             string                        `json:"create_query_addon"`
 	Verbose                      bool                          `json:"verbose"`
 	BlockedIDs                   []string                      `json:"blocked_ids"`
-	IsModerator                  bool                          `json:"is_moderator"` // True if user is enforcer/operator with green division
+	IsModerator                  bool                          `json:"is_moderator"` // True if user is a moderator (enforcer or operator), regardless of division
 	MatchmakingRating            *atomic.Pointer[types.Rating] `json:"matchmaking_rating"`
 	EarlyQuitPenaltyLevel        int                           `json:"early_quit_penalty_level"`
 	EarlyQuitMatchmakingTier     int32                         `json:"early_quit_matchmaking_tier"`
