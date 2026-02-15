@@ -173,15 +173,44 @@ func main() {
 	// Access to social provider integrations.
 	socialClient := social.NewClient(logger, 5*time.Second, config.GetGoogleAuth().OAuthConfig)
 
+	// Validate cluster configuration if enabled
+	server.ValidateClusterConfig(logger, config)
+
 	// Start up server components.
 	metrics := server.NewLocalMetrics(logger, startupLogger, db, config)
-	sessionRegistry := server.NewLocalSessionRegistry(metrics)
+
+	// Initialize session registry, status registry, tracker, and router
+	// Use cluster implementations if cluster mode is enabled
+	var sessionRegistry server.SessionRegistry
+	var statusRegistry server.StatusRegistry
+	var tracker server.Tracker
+	var router server.MessageRouter
+	var clusterComponents *server.ClusterComponents
+
+	clusterComponents, err = server.NewClusterComponents(ctx, logger, startupLogger, config, metrics, jsonpbMarshaler)
+	if err != nil {
+		logger.Fatal("Failed to initialize cluster components", zap.Error(err))
+	}
+
+	if clusterComponents != nil {
+		// Use cluster implementations
+		sessionRegistry = clusterComponents.SessionRegistry
+		statusRegistry = clusterComponents.StatusRegistry
+		tracker = clusterComponents.Tracker
+		router = clusterComponents.MessageRouter
+		startupLogger.Info("Using cluster mode for distributed state")
+	} else {
+		// Use local implementations
+		sessionRegistry = server.NewLocalSessionRegistry(metrics)
+		statusRegistry = server.NewLocalStatusRegistry(logger, config, sessionRegistry, jsonpbMarshaler)
+		tracker = server.StartLocalTracker(logger, config, sessionRegistry, statusRegistry, metrics, jsonpbMarshaler)
+		router = server.NewLocalMessageRouter(sessionRegistry, tracker, jsonpbMarshaler)
+		startupLogger.Info("Using local mode for state management")
+	}
+
 	sessionCache := server.NewLocalSessionCache(config.GetSession().TokenExpirySec, config.GetSession().RefreshTokenExpirySec)
 	consoleSessionCache := server.NewLocalSessionCache(config.GetConsole().TokenExpirySec, 0)
 	loginAttemptCache := server.NewLocalLoginAttemptCache()
-	statusRegistry := server.NewLocalStatusRegistry(logger, config, sessionRegistry, jsonpbMarshaler)
-	tracker := server.StartLocalTracker(logger, config, sessionRegistry, statusRegistry, metrics, jsonpbMarshaler)
-	router := server.NewLocalMessageRouter(sessionRegistry, tracker, jsonpbMarshaler)
 	leaderboardCache := server.NewLocalLeaderboardCache(ctx, logger, startupLogger, db)
 	leaderboardRankCache := server.NewLocalLeaderboardRankCache(ctx, startupLogger, db, config.GetLeaderboard(), leaderboardCache)
 	leaderboardScheduler := server.NewLocalLeaderboardScheduler(logger, db, config, leaderboardCache, leaderboardRankCache)
@@ -261,6 +290,11 @@ func main() {
 	sessionRegistry.Stop()
 	metrics.Stop(logger)
 	loginAttemptCache.Stop()
+
+	// Stop cluster components if enabled
+	if clusterComponents != nil {
+		clusterComponents.Stop()
+	}
 
 	startupLogger.Info("Shutdown complete")
 }
