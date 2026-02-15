@@ -333,17 +333,12 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		matchmakingExcludedDivisions = []string{}
 	}
 
-	// Determine if user is a moderator (enforcer or operator) with green division
-	isModerator := false
-	hasGreenDivision := slices.Contains(matchmakingDivisions, "green")
-	if hasGreenDivision {
-		// Check if user is a global operator
-		isModerator = sessionParams.isGlobalOperator
-		// If not a global operator, check if they're an enforcer in their active group
-		if !isModerator && groupID != uuid.Nil {
-			if gg, ok := sessionParams.guildGroups[groupID.String()]; ok {
-				isModerator = gg.IsEnforcer(userID)
-			}
+	// Determine if user is a moderator (enforcer or operator), independent of division
+	isModerator := sessionParams.isGlobalOperator
+	// If not a global operator, check if they're an enforcer in their active group
+	if !isModerator && groupID != uuid.Nil {
+		if gg, ok := sessionParams.guildGroups[groupID.String()]; ok {
+			isModerator = gg.IsEnforcer(userID)
 		}
 	}
 

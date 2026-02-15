@@ -143,9 +143,15 @@ func TestModeratorGreenDivisionProtection(t *testing.T) {
 				}
 				if hasGreenInExcluded {
 					updated = true
-					for i := 0; i < len(settings.ExcludedDivisions); i++ {
-						if settings.ExcludedDivisions[i] == "green" {
-							settings.ExcludedDivisions = slices.Delete(settings.ExcludedDivisions, i, i+1)
+					settings.ExcludedDivisions, _ = RemoveFromStringSlice(settings.ExcludedDivisions, "green")
+				}
+			} else {
+				// Old accounts lose green UNLESS they're protected moderators
+				if hasGreenInDivisions && !isProtectedModerator {
+					updated = true
+					for i := 0; i < len(settings.Divisions); i++ {
+						if settings.Divisions[i] == "green" {
+							settings.Divisions = slices.Delete(settings.Divisions, i, i+1)
 							i--
 						}
 					}
