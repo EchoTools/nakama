@@ -40,6 +40,7 @@ type MatchLabel struct {
 
 	GroupID         *uuid.UUID                `json:"group_id,omitempty"`         // The channel id of the broadcaster. (EVR)
 	SpawnedBy       string                    `json:"spawned_by,omitempty"`       // The userId of the player that spawned this match.
+	Description     string                    `json:"description,omitempty"`      // Optional description for the match (set via allocate command)
 	StartTime       time.Time                 `json:"start_time,omitempty"`       // The time the match was, or will be started.
 	CreatedAt       time.Time                 `json:"created_at,omitempty"`       // The time the match was created.
 	GameServer      *GameServerPresence       `json:"broadcaster,omitempty"`      // The broadcaster's data
@@ -556,4 +557,13 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 
 	}
 	return v
+}
+
+// MatchLabelFromString parses a MatchLabel from a JSON string
+func MatchLabelFromString(labelJSON string) (*MatchLabel, error) {
+	label := &MatchLabel{}
+	if err := json.Unmarshal([]byte(labelJSON), label); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal match label: %w", err)
+	}
+	return label, nil
 }
