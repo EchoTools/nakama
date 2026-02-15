@@ -535,6 +535,41 @@ var (
 			},
 		},
 		{
+			Name:        "set-division",
+			Description: "Set or remove divisions from another player's matchmaking settings.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Name:        "user",
+					Description: "Target user",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "action",
+					Description: "Add or remove divisions",
+					Required:    true,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{
+							Name:  "add",
+							Value: "add",
+						},
+						{
+							Name:  "remove",
+							Value: "remove",
+						},
+					},
+				},
+				{
+					Type:         discordgo.ApplicationCommandOptionString,
+					Name:         "divisions",
+					Description:  "Comma-separated divisions (e.g., green,bronze,silver)",
+					Required:     true,
+					Autocomplete: true,
+				},
+			},
+		},
+		{
 			Name:        "jersey-number",
 			Description: "Set your in-game jersey number.",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -2552,6 +2587,107 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			return simpleInteractionResponse(s, i, "No match found.")
 		},
+		"set-division": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, callerMember *discordgo.Member, userID string, groupID string) error {
+			if user == nil {
+				return nil
+			}
+
+			// Check permissions - must be enforcer or operator
+			_, _, _, err := RequireEnforcerOrOperator(ctx, db, d.nk, userID, groupID)
+			if err != nil {
+				return err
+			}
+
+			var (
+				target    *discordgo.User
+				action    string
+				divisions string
+			)
+
+			for _, o := range i.ApplicationCommandData().Options {
+				switch o.Name {
+				case "user":
+					target = o.UserValue(s)
+				case "action":
+					action = o.StringValue()
+				case "divisions":
+					divisions = o.StringValue()
+				}
+			}
+
+			if target == nil {
+				return errors.New("no target user provided")
+			}
+
+			targetUserID := d.cache.DiscordIDToUserID(target.ID)
+			if targetUserID == "" {
+				return errors.New("target user is not linked")
+			}
+
+			// Parse the divisions
+			divisionList := strings.Split(divisions, ",")
+			validDivisions := AllDivisionNames()
+
+			// Validate and trim divisions
+			for idx := range divisionList {
+				divisionList[idx] = strings.ToLower(strings.TrimSpace(divisionList[idx]))
+				valid := false
+				for _, v := range validDivisions {
+					if divisionList[idx] == v {
+						valid = true
+						break
+					}
+				}
+				if !valid {
+					return fmt.Errorf("invalid division: %s", divisionList[idx])
+				}
+			}
+
+			// Load the target's matchmaking settings
+			settings, err := LoadMatchmakingSettings(ctx, d.nk, targetUserID)
+			if err != nil {
+				return fmt.Errorf("failed to load matchmaking settings: %w", err)
+			}
+
+			// Apply the action
+			updated := false
+			switch action {
+			case "add":
+				for _, div := range divisionList {
+					if !slices.Contains(settings.Divisions, div) {
+						settings.Divisions = append(settings.Divisions, div)
+						updated = true
+					}
+					// Remove from excluded if present
+					if slices.Contains(settings.ExcludedDivisions, div) {
+						settings.ExcludedDivisions, _ = RemoveFromStringSlice(settings.ExcludedDivisions, div)
+						updated = true
+					}
+				}
+			case "remove":
+				for _, div := range divisionList {
+					if slices.Contains(settings.Divisions, div) {
+						settings.Divisions, _ = RemoveFromStringSlice(settings.Divisions, div)
+						updated = true
+					}
+				}
+			}
+
+			if updated {
+				if err := StoreMatchmakingSettings(ctx, d.nk, targetUserID, settings); err != nil {
+					return fmt.Errorf("failed to store matchmaking settings: %w", err)
+				}
+			}
+
+			// Log to audit
+			actionVerb := "added"
+			if action == "remove" {
+				actionVerb = "removed"
+			}
+			_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> %s divisions `%s` for <@%s>", user.ID, actionVerb, divisions, target.ID), false)
+
+			return simpleInteractionResponse(s, i, fmt.Sprintf("Successfully %s divisions `%s` for %s", actionVerb, divisions, target.Mention()))
+		},
 		"set-roles": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 
@@ -3194,6 +3330,50 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					Data: &discordgo.InteractionResponseData{
 						Flags:   discordgo.MessageFlagsEphemeral,
 						Choices: choices, // This is basically the whole purpose of autocomplete interaction - return custom options to the user.
+					},
+				}); err != nil {
+					logger.Error("Failed to respond to interaction", zap.Error(err))
+				}
+			case "set-division":
+				// Provide division autocomplete
+				var focused string
+				for _, o := range data.Options {
+					if o.Name == "divisions" && o.Focused {
+						focused = o.StringValue()
+						break
+					}
+				}
+
+				// All valid divisions
+				allDivisions := AllDivisionNames()
+
+				// Parse existing input to support comma-separated values
+				parts := strings.Split(focused, ",")
+				lastPart := strings.ToLower(strings.TrimSpace(parts[len(parts)-1]))
+				prefix := ""
+				if len(parts) > 1 {
+					prefix = strings.Join(parts[:len(parts)-1], ",") + ","
+				}
+
+				choices := make([]*discordgo.ApplicationCommandOptionChoice, 0)
+				for _, div := range allDivisions {
+					if lastPart == "" || strings.HasPrefix(div, lastPart) {
+						value := prefix + div
+						if prefix != "" {
+							value = strings.TrimPrefix(value, " ")
+						}
+						choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
+							Name:  div,
+							Value: value,
+						})
+					}
+				}
+
+				if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionApplicationCommandAutocompleteResult,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Choices: choices,
 					},
 				}); err != nil {
 					logger.Error("Failed to respond to interaction", zap.Error(err))

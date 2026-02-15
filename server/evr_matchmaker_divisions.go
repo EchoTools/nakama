@@ -1,5 +1,7 @@
 package server
 
+import "slices"
+
 type Division int
 
 const (
@@ -44,4 +46,23 @@ func DivisionFromName(name string) Division {
 	default:
 		return DivisionGreen
 	}
+}
+
+// AllDivisionNames returns a list of all valid division names
+func AllDivisionNames() []string {
+	return []string{"green", "bronze", "silver", "gold", "platinum", "diamond", "master"}
+}
+
+// RemoveFromStringSlice removes all occurrences of a value from a string slice
+// Returns the modified slice and a boolean indicating if any removals occurred
+func RemoveFromStringSlice(slice []string, value string) ([]string, bool) {
+	removed := false
+	for i := 0; i < len(slice); i++ {
+		if slice[i] == value {
+			slice = slices.Delete(slice, i, i+1)
+			i--
+			removed = true
+		}
+	}
+	return slice, removed
 }

@@ -2,8 +2,6 @@ package server
 
 import (
 	"testing"
-
-	"github.com/bwmarrin/discordgo"
 )
 
 // TestFilterAndSortRegionChoices verifies that regions with no available servers

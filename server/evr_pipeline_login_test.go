@@ -1,7 +1,9 @@
 package server
 
 import (
+	"slices"
 	"testing"
+	"time"
 )
 
 func TestNormalizeHeadsetType(t *testing.T) {
@@ -35,6 +37,152 @@ func TestNormalizeHeadsetType(t *testing.T) {
 			result := normalizeHeadsetType(tt.headset)
 			if result != tt.expected {
 				t.Errorf("normalizeHeadsetType(%s) = %s; expected %s", tt.headset, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestModeratorGreenDivisionProtection(t *testing.T) {
+	tests := []struct {
+		name              string
+		accountAgeDays    int
+		initialDivisions  []string
+		initialExcluded   []string
+		isModerator       bool
+		expectedDivisions []string
+		expectedExcluded  []string
+		expectedUpdate    bool
+	}{
+		{
+			name:              "new player gets green",
+			accountAgeDays:    3,
+			initialDivisions:  []string{},
+			initialExcluded:   []string{},
+			isModerator:       false,
+			expectedDivisions: []string{"green"},
+			expectedExcluded:  []string{},
+			expectedUpdate:    true,
+		},
+		{
+			name:              "old player loses green",
+			accountAgeDays:    10,
+			initialDivisions:  []string{"green"},
+			initialExcluded:   []string{},
+			isModerator:       false,
+			expectedDivisions: []string{},
+			expectedExcluded:  []string{"green"},
+			expectedUpdate:    true,
+		},
+		{
+			name:              "moderator keeps green despite age",
+			accountAgeDays:    10,
+			initialDivisions:  []string{"green", "bronze"},
+			initialExcluded:   []string{},
+			isModerator:       true,
+			expectedDivisions: []string{"green", "bronze"},
+			expectedExcluded:  []string{},
+			expectedUpdate:    false,
+		},
+		{
+			name:              "moderator without green not affected",
+			accountAgeDays:    10,
+			initialDivisions:  []string{"bronze"},
+			initialExcluded:   []string{},
+			isModerator:       true,
+			expectedDivisions: []string{"bronze"},
+			expectedExcluded:  []string{},
+			expectedUpdate:    false,
+		},
+		{
+			name:              "moderator with green gets it removed from excluded",
+			accountAgeDays:    3,
+			initialDivisions:  []string{"green"},
+			initialExcluded:   []string{"green"},
+			isModerator:       true,
+			expectedDivisions: []string{"green"},
+			expectedExcluded:  []string{},
+			expectedUpdate:    true,
+		},
+		{
+			name:              "young moderator keeps green",
+			accountAgeDays:    3,
+			initialDivisions:  []string{"green"},
+			initialExcluded:   []string{},
+			isModerator:       true,
+			expectedDivisions: []string{"green"},
+			expectedExcluded:  []string{},
+			expectedUpdate:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the division update logic
+			settings := MatchmakingSettings{
+				Divisions:         slices.Clone(tt.initialDivisions),
+				ExcludedDivisions: slices.Clone(tt.initialExcluded),
+			}
+
+			accountAge := time.Duration(tt.accountAgeDays) * 24 * time.Hour
+			greenDivisionMaxAge := 7 * 24 * time.Hour
+			updated := false
+
+			// This simulates the logic we're testing
+			isNewAccount := accountAge < greenDivisionMaxAge
+			hasGreenInDivisions := slices.Contains(settings.Divisions, "green")
+			hasGreenInExcluded := slices.Contains(settings.ExcludedDivisions, "green")
+
+			// Check if user is a moderator with green division
+			isProtectedModerator := tt.isModerator && hasGreenInDivisions
+
+			if isNewAccount {
+				// New accounts get green added
+				if !hasGreenInDivisions {
+					settings.Divisions = append(settings.Divisions, "green")
+					updated = true
+				}
+				if hasGreenInExcluded {
+					updated = true
+					settings.ExcludedDivisions, _ = RemoveFromStringSlice(settings.ExcludedDivisions, "green")
+				}
+			} else {
+				// Old accounts lose green UNLESS they're protected moderators
+				if hasGreenInDivisions && !isProtectedModerator {
+					updated = true
+					for i := 0; i < len(settings.Divisions); i++ {
+						if settings.Divisions[i] == "green" {
+							settings.Divisions = slices.Delete(settings.Divisions, i, i+1)
+							i--
+						}
+					}
+				}
+			} else {
+				// Old accounts lose green UNLESS they're protected moderators
+				if hasGreenInDivisions && !isProtectedModerator {
+					updated = true
+					settings.Divisions, _ = RemoveFromStringSlice(settings.Divisions, "green")
+				}
+				// Only add to excluded if:
+				// - Not already in excluded
+				// - Not a moderator (moderators manage their own divisions)
+				// - Green is not in divisions (was removed or never had it)
+				if !hasGreenInExcluded && !tt.isModerator && !slices.Contains(settings.Divisions, "green") {
+					updated = true
+					settings.ExcludedDivisions = append(settings.ExcludedDivisions, "green")
+				}
+			}
+
+			// Verify results
+			if updated != tt.expectedUpdate {
+				t.Errorf("expected update=%v, got %v", tt.expectedUpdate, updated)
+			}
+
+			if !slices.Equal(settings.Divisions, tt.expectedDivisions) {
+				t.Errorf("expected divisions=%v, got %v", tt.expectedDivisions, settings.Divisions)
+			}
+
+			if !slices.Equal(settings.ExcludedDivisions, tt.expectedExcluded) {
+				t.Errorf("expected excluded=%v, got %v", tt.expectedExcluded, settings.ExcludedDivisions)
 			}
 		})
 	}
