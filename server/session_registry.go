@@ -71,6 +71,7 @@ type SessionRegistry interface {
 	Disconnect(ctx context.Context, sessionID uuid.UUID, ban bool, reason ...runtime.PresenceReason) error
 	SingleSession(ctx context.Context, tracker Tracker, userID, sessionID uuid.UUID)
 	Range(fn func(session Session) bool)
+	CountSessionsForUser(userID uuid.UUID) int
 }
 
 type LocalSessionRegistry struct {
@@ -182,4 +183,15 @@ func (r *LocalSessionRegistry) Range(fn func(Session) bool) {
 	r.sessions.Range(func(id uuid.UUID, session Session) bool {
 		return fn(session)
 	})
+}
+
+func (r *LocalSessionRegistry) CountSessionsForUser(userID uuid.UUID) int {
+	count := 0
+	r.sessions.Range(func(id uuid.UUID, session Session) bool {
+		if session.UserID() == userID {
+			count++
+		}
+		return true
+	})
+	return count
 }

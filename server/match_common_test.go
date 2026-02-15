@@ -317,3 +317,7 @@ func (s *testSessionRegistry) SingleSession(ctx context.Context, tracker Tracker
 
 func (s *testSessionRegistry) Range(fn func(session Session) bool) {
 }
+
+func (s *testSessionRegistry) CountSessionsForUser(userID uuid.UUID) int {
+	return 0
+}
