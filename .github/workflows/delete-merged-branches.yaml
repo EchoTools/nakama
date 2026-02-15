@@ -1,0 +1,76 @@
+name: Delete Merged Branches
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (do not actually delete branches)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  delete-branches:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Delete merged branches
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          # List of branches to delete
+          branches=(
+            "copilot/refactor-server-issue-reports"
+            "copilot/remove-obsolete-portal-directory"
+            "copilot/search-matchmaker-bug-fixes"
+            "feat/bot-testing-global-developers"
+            "feat/early-quit-lockout-system"
+            "feat/early-quit-notifications"
+            "feat/early-quit-unified"
+            "feat/matchmaker-candidate-guard"
+            "fix/matchmaker-memory-explosion"
+            "refactor/earlyquit-client-side-enforcement"
+          )
+          
+          echo "Starting branch deletion process..."
+          echo "Dry run: $DRY_RUN"
+          echo ""
+          
+          for branch in "${branches[@]}"; do
+            echo "Processing branch: $branch"
+            
+            # Check if branch exists on remote
+            if git ls-remote --heads origin "$branch" | grep -q "$branch"; then
+              echo "  ✓ Branch exists on remote"
+              
+              if [ "$DRY_RUN" = "true" ]; then
+                echo "  [DRY RUN] Would delete: $branch"
+              else
+                echo "  Deleting: $branch"
+                if git push origin --delete "$branch" 2>&1; then
+                  echo "  ✓ Successfully deleted"
+                else
+                  echo "  ✗ Failed to delete (may require different permissions)"
+                fi
+              fi
+            else
+              echo "  ⊘ Branch does not exist (already deleted or never existed)"
+            fi
+            echo ""
+          done
+          
+          echo "Branch deletion process complete!"
+          echo ""
+          echo "Remaining branches:"
+          git ls-remote --heads origin | awk '{print "  - " $2}' | sed 's|refs/heads/||' | sort
