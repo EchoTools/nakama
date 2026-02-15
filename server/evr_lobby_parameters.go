@@ -49,6 +49,7 @@ type LobbySessionParameters struct {
 	CreateQueryAddon             string                        `json:"create_query_addon"`
 	Verbose                      bool                          `json:"verbose"`
 	BlockedIDs                   []string                      `json:"blocked_ids"`
+	IsModerator                  bool                          `json:"is_moderator"` // True if user is a moderator (enforcer or operator), regardless of division
 	MatchmakingRating            *atomic.Pointer[types.Rating] `json:"matchmaking_rating"`
 	EarlyQuitPenaltyLevel        int                           `json:"early_quit_penalty_level"`
 	EarlyQuitMatchmakingTier     int32                         `json:"early_quit_matchmaking_tier"`
@@ -332,6 +333,15 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		matchmakingExcludedDivisions = []string{}
 	}
 
+	// Determine if user is a moderator (enforcer or operator), independent of division
+	isModerator := sessionParams.isGlobalOperator
+	// If not a global operator, check if they're an enforcer in their active group
+	if !isModerator && groupID != uuid.Nil {
+		if gg, ok := sessionParams.guildGroups[groupID.String()]; ok {
+			isModerator = gg.IsEnforcer(userID)
+		}
+	}
+
 	latencyHistory := sessionParams.latencyHistory.Load()
 	if latencyHistory == nil {
 		latencyHistory = NewLatencyHistory()
@@ -387,6 +397,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		PartyID:                      partyID,
 		PartySize:                    atomic.NewInt64(1),
 		NextMatchID:                  nextMatchID,
+		IsModerator:                  isModerator,
 		latencyHistory:               params.latencyHistory,
 		BlockedIDs:                   blockedIDs,
 		EnableSBMM:                   globalSettings.EnableSBMM,
@@ -583,6 +594,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		"submission_time":    submissionTime,
 		"divisions":          strings.Join(p.MatchmakingDivisions, ","),
 		"excluded_divisions": strings.Join(p.MatchmakingExcludedDivisions, ","),
+		"is_moderator":       strconv.FormatBool(p.IsModerator),
 	}
 
 	numericProperties := map[string]float64{

@@ -192,6 +192,11 @@ func (s *GuildEnforcementJournal) IsVoid(groupID, recordID string) bool {
 }
 
 func (s *GuildEnforcementJournal) AddRecord(groupID, enforcerUserID, enforcerDiscordID, suspensionNotice, notes string, requireCommunityValues, allowPrivateLobbies bool, suspensionDuration time.Duration) GuildEnforcementRecord {
+	return s.AddRecordWithOptions(groupID, enforcerUserID, enforcerDiscordID, suspensionNotice, notes, "", requireCommunityValues, allowPrivateLobbies, false, suspensionDuration)
+}
+
+// AddRecordWithOptions creates a new enforcement record with additional options
+func (s *GuildEnforcementJournal) AddRecordWithOptions(groupID, enforcerUserID, enforcerDiscordID, suspensionNotice, notes, ruleViolated string, requireCommunityValues, allowPrivateLobbies, isPubliclyVisible bool, suspensionDuration time.Duration) GuildEnforcementRecord {
 	if s.RecordsByGroupID == nil {
 		s.RecordsByGroupID = make(map[string][]GuildEnforcementRecord)
 	}
@@ -212,6 +217,9 @@ func (s *GuildEnforcementJournal) AddRecord(groupID, enforcerUserID, enforcerDis
 		AuditorNotes:            notes,
 		CommunityValuesRequired: requireCommunityValues,
 		AllowPrivateLobbies:     allowPrivateLobbies,
+		RuleViolated:            ruleViolated,
+		IsPubliclyVisible:       isPubliclyVisible,
+		DMNotificationSent:      false,
 	}
 	s.RecordsByGroupID[groupID] = append(s.RecordsByGroupID[groupID], record)
 
@@ -507,4 +515,146 @@ func createSuspensionDetailsEmbedField(guildName string, records []GuildEnforcem
 		Inline: false,
 	}
 	return field
+}
+
+func createEnforcementActionComponents(record GuildEnforcementRecord, profile *EVRProfile, gg *GuildGroup, guild *discordgo.Guild, enforcer, target *discordgo.Member, isVoid bool) *discordgo.MessageSend {
+	// Is just a kick
+
+	displayName := profile.GetGroupIGN(gg.Group.Id)
+	displayName = EscapeDiscordMarkdown(displayName)
+
+	fields := []*discordgo.MessageEmbedField{
+		{
+			Name:   "Target",
+			Value:  fmt.Sprintf("%s (%s)", target.User.String(), target.User.ID),
+			Inline: true,
+		},
+	}
+	if !record.Expiry.IsZero() {
+
+		suspensionText := fmt.Sprintf("%s (expires <t:%d:R>)", FormatDuration(record.Expiry.Sub(record.CreatedAt)), record.Expiry.UTC().Unix())
+
+		if isVoid {
+			suspensionText = fmt.Sprintf("~~%s~~", suspensionText)
+		}
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:   "Suspension",
+			Value:  suspensionText,
+			Inline: true,
+		})
+	}
+
+	fields = append(fields, &discordgo.MessageEmbedField{
+		Name:   "Notes",
+		Value:  fmt.Sprintf("*%s*", record.AuditorNotes),
+		Inline: true,
+	})
+
+	if record.CommunityValuesRequired {
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:   "Community Values Required",
+			Value:  fmt.Sprintf("%t", record.CommunityValuesRequired),
+			Inline: true,
+		})
+	}
+
+	if record.UserNoticeText != "" {
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:   "User Notice",
+			Value:  fmt.Sprintf("*%s*", record.UserNoticeText),
+			Inline: true,
+		})
+	}
+	if record.AuditorNotes != "" {
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:   "Auditor Notes",
+			Value:  fmt.Sprintf("*%s*", record.AuditorNotes),
+			Inline: true,
+		})
+	}
+
+	embeds := []*discordgo.MessageEmbed{
+		{
+			Author: &discordgo.MessageEmbedAuthor{
+				Name:    enforcer.User.String(),
+				IconURL: enforcer.User.AvatarURL(""),
+			},
+			Thumbnail: &discordgo.MessageEmbedThumbnail{
+				URL:    target.User.AvatarURL("128"),
+				Width:  128,
+				Height: 128,
+			},
+			Title:       "Enforcement Entry",
+			Description: fmt.Sprintf("Enforcement notice for %s (%s)", displayName, target.Mention()),
+			Color:       0x9656ce,
+			Fields:      fields,
+			Timestamp:   record.UpdatedAt.UTC().Format(time.RFC3339),
+		},
+	}
+	components := []discordgo.MessageComponent{
+		&discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				&discordgo.Button{
+					Label: "Void Record",
+					Style: discordgo.SecondaryButton,
+					Emoji: &discordgo.ComponentEmoji{
+						Name: "heavy_multiplication_x",
+					},
+					CustomID: fmt.Sprintf("void_record:%s", record.ID),
+				},
+			},
+		},
+	}
+
+	return &discordgo.MessageSend{
+		Embeds:     embeds,
+		Components: components,
+		AllowedMentions: &discordgo.MessageAllowedMentions{
+			Parse: []discordgo.AllowedMentionType{},
+		},
+	}
+}
+
+// SendEnforcementNotification sends a DM to the user about their enforcement action
+// Returns whether the notification was sent successfully
+func SendEnforcementNotification(ctx context.Context, dg *discordgo.Session, record GuildEnforcementRecord, targetDiscordID, guildName string) (bool, error) {
+	if dg == nil {
+		return false, fmt.Errorf("discord session is nil")
+	}
+	if targetDiscordID == "" {
+		return false, fmt.Errorf("target Discord ID is empty")
+	}
+
+	// Get the formatted notification message
+	message := record.GetNotificationMessage(guildName)
+
+	// Attempt to send the DM
+	_, err := SendUserMessage(ctx, dg, targetDiscordID, message)
+	if err != nil {
+		// Log but don't fail the enforcement action if DM fails
+		// Common reasons: user has DMs disabled, user blocked the bot, user is not in a shared server
+		return false, fmt.Errorf("failed to send DM to user %s: %w", targetDiscordID, err)
+	}
+
+	return true, nil
+}
+
+// UpdateRecordNotificationStatus updates a record to mark that a DM notification was attempted/sent
+func (s *GuildEnforcementJournal) UpdateRecordNotificationStatus(groupID, recordID string, sent bool) error {
+	records, ok := s.RecordsByGroupID[groupID]
+	if !ok {
+		return fmt.Errorf("group ID not found: %s", groupID)
+	}
+
+	for i := range records {
+		if records[i].ID == recordID {
+			records[i].DMNotificationSent = sent
+			records[i].DMNotificationAttempted = time.Now().UTC()
+			records[i].UpdatedAt = time.Now().UTC()
+			s.RecordsByGroupID[groupID][i] = records[i]
+			return nil
+		}
+	}
+
+	return fmt.Errorf("record ID not found: %s", recordID)
 }
