@@ -214,6 +214,23 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 		if !isGlobalOperator && !gg.IsAllocator(userID) {
 			return simpleInteractionResponse(s, i, "You must be a guild allocator to use this command.")
 		}
+	case "show":
+		gg := d.guildGroupRegistry.Get(groupID)
+		if gg == nil {
+			return simpleInteractionResponse(s, i, "This guild is not registered.")
+		}
+
+		if err := d.LogInteractionToChannel(i, gg.AuditChannelID); err != nil {
+			logger.Warn("Failed to log interaction to channel")
+		}
+
+		if !gg.EnableServerEmbedsCommand {
+			return simpleInteractionResponse(s, i, "The /show command is not enabled for this guild.")
+		}
+
+		if !isGlobalOperator && !gg.IsAllocator(userID) {
+			return simpleInteractionResponse(s, i, "You must be a guild allocator to use this command.")
+		}
 	case "kick-player":
 		gg := d.guildGroupRegistry.Get(groupID)
 		if gg == nil {
@@ -659,7 +676,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 	return nil
 }
 
-func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.Logger, userID, guildID string, regionCode string, mode, level evr.Symbol, startTime time.Time) (l *MatchLabel, rtt float64, err error) {
+func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.Logger, userID, guildID string, regionCode string, mode, level evr.Symbol, startTime time.Time, description string) (l *MatchLabel, rtt float64, err error) {
 
 	// Find a parking match to prepare
 
@@ -722,11 +739,12 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 
 	// Prepare the session for the match.
 	settings := &MatchSettings{
-		Mode:      mode,
-		Level:     level,
-		GroupID:   uuid.FromStringOrNil(groupID),
-		StartTime: startTime.UTC().Add(10 * time.Minute),
-		SpawnedBy: userID,
+		Mode:        mode,
+		Level:       level,
+		GroupID:     uuid.FromStringOrNil(groupID),
+		StartTime:   startTime.UTC().Add(10 * time.Minute),
+		SpawnedBy:   userID,
+		Description: description,
 	}
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Allocate
 	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, allocatorGroupIDs, latestRTTs, settings, []string{regionCode}, false, true, queryAddon)
@@ -1388,7 +1406,7 @@ func (d *DiscordAppBot) handleRegionFallbackInteraction(ctx context.Context, log
 			label, rttMs, err = d.handleCreateMatch(ctx, logger, userID, i.GuildID, "", mode, level, startTime)
 		} else if commandType == "allocate-match" {
 			var rtt float64
-			label, rtt, err = d.handleAllocateMatch(ctx, logger, userID, i.GuildID, "", mode, level, startTime)
+			label, rtt, err = d.handleAllocateMatch(ctx, logger, userID, i.GuildID, "", mode, level, startTime, "")
 			rttMs = int(rtt)
 		} else {
 			return fmt.Errorf("unknown command type: %s", commandType)

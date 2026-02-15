@@ -69,6 +69,15 @@ func (r GuildEnforcementRecord) RequiresCommunityValues() bool {
 	return r.CommunityValuesRequired
 }
 
+func (r GuildEnforcementRecord) IsLifetime() bool {
+	// A suspension is considered lifetime if it has an expiry far in the future
+	// (e.g., more than 100 years from creation)
+	if r.Expiry.IsZero() {
+		return false
+	}
+	return r.Expiry.Sub(r.CreatedAt) > 100*365*24*time.Hour
+}
+
 // GetStandardEnforcementRules returns the list of standard rule violation categories
 // Returns a copy to prevent runtime modification
 var standardEnforcementRules = []string{

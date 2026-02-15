@@ -95,6 +95,7 @@ type MatchSettings struct {
 	StartTime           time.Time
 	SpawnedBy           string
 	GroupID             uuid.UUID
+	Description         string
 	RequiredFeatures    []string
 	TeamAlignments      map[string]int
 	Reservations        []*EvrMatchPresence
@@ -1397,6 +1398,10 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			state.SpawnedBy = settings.SpawnedBy
 		} else {
 			state.SpawnedBy = signal.UserID
+		}
+
+		if settings.Description != "" {
+			state.Description = settings.Description
 		}
 
 		// Set the lobby and team sizes
