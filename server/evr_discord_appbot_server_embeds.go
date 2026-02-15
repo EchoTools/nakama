@@ -13,11 +13,12 @@ import (
 )
 
 const (
-	EmbedColorIdling  = 0x808080 // Gray for idling
-	EmbedColorActive  = 0x00FF00 // Green for active match
-	EmbedColorOver    = 0xFF0000 // Red for match over
-	EmbedUpdatePeriod = 15 * time.Second
-	EmbedCleanupDelay = 1 * time.Hour
+	EmbedColorIdling              = 0x808080 // Gray for idling
+	EmbedColorActive              = 0x00FF00 // Green for active match
+	EmbedColorOver                = 0xFF0000 // Red for match over
+	EmbedUpdatePeriod             = 15 * time.Second
+	EmbedCleanupDelay             = 1 * time.Hour
+	MaxDescriptionFieldLength     = 1024 // Discord embed field value limit
 )
 
 // ServerEmbedTracker tracks active server embed messages for auto-updates
@@ -41,10 +42,10 @@ var globalEmbedTracker = &ServerEmbedTracker{
 }
 
 func (d *DiscordAppBot) handleShowServerEmbeds(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID, groupID, region string) error {
-	// List all matches
-	matches, err := d.nk.MatchList(ctx, 1000, true, "", nil, nil, "*")
+	// List all matches (reduced limit for performance)
+	matches, err := d.nk.MatchList(ctx, MatchListLimit, true, "", nil, nil, "*")
 	if err != nil {
-		return d.followUpError(s, i, fmt.Sprintf("Failed to list matches: %v", err))
+		return d.editDeferredResponse(s, i, fmt.Sprintf("❌ Failed to list matches: %v", err))
 	}
 
 	// Filter matches by region
@@ -60,8 +61,8 @@ func (d *DiscordAppBot) handleShowServerEmbeds(ctx context.Context, logger runti
 			continue
 		}
 
-		// Check if match belongs to this guild
-		if label.GroupID != nil && label.GroupID.String() != groupID {
+		// Check if match belongs to this guild (require non-nil GroupID)
+		if label.GroupID == nil || label.GroupID.String() != groupID {
 			continue
 		}
 
@@ -75,17 +76,32 @@ func (d *DiscordAppBot) handleShowServerEmbeds(ctx context.Context, logger runti
 	}
 
 	if len(regionMatches) == 0 {
-		return d.followUpMessage(s, i, fmt.Sprintf("No matches found in region `%s`", region))
+		return d.editDeferredResponse(s, i, fmt.Sprintf("No matches found in region `%s`", region))
 	}
 
-	// Stop any existing embed tracker for this channel
+	// Stop any existing embed tracker for this channel and delete old embeds
 	channelID := i.ChannelID
+	var prevMessageIDs []string
 	globalEmbedTracker.Lock()
 	if existing, ok := globalEmbedTracker.embeds[channelID]; ok {
+		for _, msgID := range existing.MessageIDs {
+			prevMessageIDs = append(prevMessageIDs, msgID)
+		}
 		close(existing.StopChan)
 		delete(globalEmbedTracker.embeds, channelID)
 	}
 	globalEmbedTracker.Unlock()
+
+	// Delete any previous embeds for this channel to avoid stale status messages
+	for _, msgID := range prevMessageIDs {
+		if err := s.ChannelMessageDelete(channelID, msgID); err != nil {
+			logger.Warn("Failed to delete previous server status embed",
+				zap.Error(err),
+				zap.String("channelID", channelID),
+				zap.String("messageID", msgID),
+			)
+		}
+	}
 
 	// Create new tracker
 	embedInfo := &ServerEmbedInfo{
@@ -116,8 +132,8 @@ func (d *DiscordAppBot) handleShowServerEmbeds(ctx context.Context, logger runti
 	// Start background updater
 	go d.updateServerEmbedsLoop(ctx, logger, s, embedInfo, groupID)
 
-	// Send confirmation
-	return d.followUpMessage(s, i, fmt.Sprintf("Showing %d server(s) in region `%s`. Updates every %d seconds.", len(regionMatches), region, int(EmbedUpdatePeriod.Seconds())))
+	// Edit the deferred response to confirm
+	return d.editDeferredResponse(s, i, fmt.Sprintf("Showing %d server(s) in region `%s`. Updates every %d seconds.", len(regionMatches), region, int(EmbedUpdatePeriod.Seconds())))
 }
 
 func (d *DiscordAppBot) updateServerEmbedsLoop(ctx context.Context, logger runtime.Logger, s *discordgo.Session, embedInfo *ServerEmbedInfo, groupID string) {
@@ -137,15 +153,17 @@ func (d *DiscordAppBot) updateServerEmbedsLoop(ctx context.Context, logger runti
 }
 
 func (d *DiscordAppBot) updateServerEmbeds(ctx context.Context, logger runtime.Logger, s *discordgo.Session, embedInfo *ServerEmbedInfo, groupID string) {
-	embedInfo.Lock()
-	defer embedInfo.Unlock()
-
-	// List current matches
-	matches, err := d.nk.MatchList(ctx, 1000, true, "", nil, nil, "*")
+	// List current matches without holding the embedInfo lock to avoid
+	// blocking other operations on this tracker during potentially slow I/O.
+	matches, err := d.nk.MatchList(ctx, MatchListLimit, true, "", nil, nil, "*")
 	if err != nil {
 		logger.Warn("Failed to list matches for embed update", zap.Error(err))
 		return
 	}
+
+	// Now lock embedInfo while we work with its shared state.
+	embedInfo.Lock()
+	defer embedInfo.Unlock()
 
 	// Track which matches we found
 	foundMatches := make(map[string]*MatchLabel)
@@ -161,8 +179,8 @@ func (d *DiscordAppBot) updateServerEmbeds(ctx context.Context, logger runtime.L
 			continue
 		}
 
-		// Filter by guild and region
-		if label.GroupID != nil && label.GroupID.String() != groupID {
+		// Filter by guild and region: require a non-nil GroupID that matches this guild
+		if label.GroupID == nil || label.GroupID.String() != groupID {
 			continue
 		}
 
@@ -241,7 +259,7 @@ func (d *DiscordAppBot) createServerEmbed(label *MatchLabel) *discordgo.MessageE
 		Fields: []*discordgo.MessageEmbedField{
 			{
 				Name:   "Match ID",
-				Value:  fmt.Sprintf("`%s`", label.ID.UUID.String()),
+				Value:  fmt.Sprintf("[`%s`](https://echo.taxi/spark://c/%s)", label.ID.UUID.String(), strings.ToUpper(label.ID.UUID.String())),
 				Inline: false,
 			},
 		},
@@ -336,9 +354,25 @@ func (d *DiscordAppBot) createServerEmbed(label *MatchLabel) *discordgo.MessageE
 
 	// Description
 	if label.Description != "" {
+		desc := label.Description
+		// Truncate description to avoid exceeding Discord's embed field value limit.
+		if len([]rune(desc)) > MaxDescriptionFieldLength {
+			var b strings.Builder
+			b.Grow(MaxDescriptionFieldLength)
+			count := 0
+			for _, r := range desc {
+				if count >= MaxDescriptionFieldLength-1 {
+					break
+				}
+				b.WriteRune(r)
+				count++
+			}
+			desc = b.String() + "…"
+		}
+
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:   "Description",
-			Value:  label.Description,
+			Value:  desc,
 			Inline: false,
 		})
 	}
@@ -365,16 +399,11 @@ func (d *DiscordAppBot) createServerEmbed(label *MatchLabel) *discordgo.MessageE
 	return embed
 }
 
-func (d *DiscordAppBot) followUpMessage(s *discordgo.Session, i *discordgo.InteractionCreate, content string) error {
-	_, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
-		Content: content,
-	})
-	return err
-}
-
-func (d *DiscordAppBot) followUpError(s *discordgo.Session, i *discordgo.InteractionCreate, content string) error {
-	_, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
-		Content: "❌ " + content,
+// editDeferredResponse edits the deferred interaction response with the given content.
+// This resolves the "thinking..." message and makes the output visible in-channel.
+func (d *DiscordAppBot) editDeferredResponse(s *discordgo.Session, i *discordgo.InteractionCreate, content string) error {
+	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Content: &content,
 	})
 	return err
 }

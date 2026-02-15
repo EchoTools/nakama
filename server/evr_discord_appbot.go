@@ -2488,8 +2488,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				case "level":
 					level = evr.ToSymbol(o.StringValue())
 				case "description":
-					description = o.StringValue()
+					description = strings.TrimSpace(o.StringValue())
 				}
+			}
+
+			// Validate description length to prevent match label overflow and Discord embed issues
+			const maxDescriptionLength = 500
+			if len(description) > maxDescriptionLength {
+				return simpleInteractionResponse(s, i, fmt.Sprintf("Description is too long (max %d characters)", maxDescriptionLength))
 			}
 
 			if levels, ok := evr.LevelsByMode[mode]; !ok {
