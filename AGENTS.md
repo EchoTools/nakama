@@ -1,224 +1,132 @@
-# AGENTS.md - AI Agent Development Guidelines
+# NAKAMA PROJECT KNOWLEDGE BASE
 
-## CRITICAL: TEST-FIRST DEVELOPMENT (NON-NEGOTIABLE)
+**Generated:** 2026-02-10  
+**Commit:** 8bedbab  
+**Branch:** copilot/init-deep-hierarchical-files
 
-**YOU CAUSED A PRODUCTION OUTAGE BY SKIPPING TESTS. THIS WILL NOT HAPPEN AGAIN.**
+## OVERVIEW
 
-### Enforcement Rules
+EchoVR game server (Nakama fork) with custom binary protocol, matchmaking, Discord integration, and VRML league support. Go 1.25+, PostgreSQL backend.
 
-1. **NEVER MAKE CODE CHANGES WITHOUT TESTS FIRST**
-   - Write failing test that proves the bug exists
-   - OR write test that proves new feature works
-   - THEN and ONLY THEN make the code change
+## STRUCTURE
 
-2. **NO EXCEPTIONS**
-   - "It's a small change" - WRITE A TEST
-   - "It's just refactoring" - WRITE A TEST
-   - "I'm just fixing a typo" - If it affects behavior, WRITE A TEST
-
-3. **Test Verification Process**
-   ```bash
-   # Step 1: Write test that FAILS (proves bug exists)
-   go test -v -vet=off ./server -run TestYourNewTest
-   # Test MUST fail before fix
-   
-   # Step 2: Make the code change
-   
-   # Step 3: Test MUST pass after fix
-   go test -v -vet=off ./server -run TestYourNewTest
-   ```
-
-4. **You Are Not Human**
-   - Humans can make judgment calls about testing
-   - You CANNOT
-   - You MUST verify with either:
-     - Automated tests (preferred)
-     - Build verification (minimum)
-   - Your assertions mean NOTHING without verification
-
-### Production Safety
-
-- This is a PRODUCTION system serving REAL USERS
-- Your untested code WILL cause outages
-- Outages harm real people and real businesses
-- TEST FIRST. NO EXCEPTIONS.
-
-## Project Overview
-
-Nakama game server (heroiclabs/nakama fork) with EchoVR-specific extensions.
-- **Language**: Go 1.25+ | **Database**: PostgreSQL (NOT CockroachDB)
-- `server/evr/` - EVR binary protocol message parsers
-- `server/evr_*.go` - EVR-specific server logic (pipeline, matchmaker, runtime)
-- `server/` - Standard Nakama (API, console, runtime)
-
-**Cross-repo deps** (go.work): `nevr-common` (protobufs), `vrmlgo` (VRML league)
-
-## Build Commands
-
-```bash
-make nakama                    # Standard debug build (~2m)
-go mod vendor && make nakama   # With dependency refresh
+```
+nakama/
+├── main.go               # Server entry point
+├── server/               # 339 Go files - core + EVR logic (see server/AGENTS.md)
+│   ├── evr/              # 99 files - EVR binary protocol parsers (see server/evr/AGENTS.md)
+│   ├── evr_*.go          # 150+ files - EVR extensions (pipeline, matchmaker, discord, runtime)
+│   ├── api_*.go          # REST/gRPC API handlers
+│   ├── runtime_*.go      # Lua/JS/Go runtime support
+│   └── pipeline_*.go     # Request processing chains
+├── apigrpc/              # Generated protobuf gRPC code
+├── console/              # Admin dashboard (Angular UI)
+├── internal/             # Shared utilities
+│   ├── gopher-lua/       # Embedded Lua VM (see internal/gopher-lua/AGENTS.md)
+│   ├── cronexpr/         # Cron parsing
+│   ├── ctxkeys/          # Context key definitions
+│   ├── intents/          # Permission system
+│   └── skiplist/         # Ordered data structure
+├── migrate/sql/          # Database migrations
+├── data/modules/         # Runtime module examples
+└── build/                # Docker/build configs
 ```
 
-## Test Commands
+## WHERE TO LOOK
 
-**Only run EVR-specific tests** - full suite is slow.
+| Task | Location | Notes |
+|------|----------|-------|
+| **EVR protocol messages** | `server/evr/` | Binary codec, 90+ message types |
+| **EVR game server logic** | `server/evr_*.go` | Pipeline, matchmaker, Discord, VRML |
+| **Matchmaking** | `server/evr_matchmaker.go`, `server/evr_lobby_*.go` | Skill ratings, backfill, team balance |
+| **Discord integration** | `server/evr_discord_*.go` | Slash commands, guild management |
+| **API handlers** | `server/api_*.go` | REST endpoints for accounts, storage, etc. |
+| **Runtime hooks** | `server/runtime*.go` | Lua/JS/Go extension points |
+| **Database schema** | `migrate/sql/` | PostgreSQL migrations |
+| **Build/test** | `Makefile`, `.github/workflows/` | CI/CD, Docker builds |
+
+## CRITICAL: TEST-FIRST (NON-NEGOTIABLE)
+
+**PRODUCTION OUTAGE PREVENTION**
+
+1. Write failing test (proves bug/feature) → 2. Verify fails → 3. Fix → 4. Verify passes
+- **NO EXCEPTIONS**: "Small change", "refactoring", "typo" - ALL need tests if behavior changes
+- **You Are Not Human**: Your assertions mean NOTHING without verification
 
 ```bash
-# EVR protocol tests (fast, recommended)
-go test -short -vet=off ./server/evr/...
-
-# EVR server tests
-go test -short -vet=off ./server -run ".*evr.*"
-
-# Single test by exact name
-go test -v -vet=off ./server -run "TestEarlyQuitConfig_UpdateTier"
-
-# With race detection
-go test -race -vet=off ./server/evr/...
+# Step 1: Write test that FAILS
+go test -v -vet=off ./server -run TestYourNewTest  # MUST fail
+# Step 2: Make code change
+# Step 3: Test MUST pass
+go test -v -vet=off ./server -run TestYourNewTest  # MUST pass
 ```
 
-**Cancel any test >10 minutes.** Avoid benchmarks.
+## CONVENTIONS
 
-## Database & Run
+- **Monolithic `/server`**: 339 files, one package, file prefixes (`evr_`, `api_`, `core_`) not subpackages
+- **Root `main.go`**: Non-standard (should be `/cmd/nakama/main.go`)
+- **Table-driven tests**: `[]struct{name, input, want}` with `t.Run()`, no testify
+- **Error wrapping**: `fmt.Errorf("context: %w", err)` + sentinel errors
+- **Context propagation**: `ctxkeys` package for UserID, Username, etc.
+
+## ANTI-PATTERNS
+
+- ❌ **`interface{}`**: Use `any` (Go 1.18+)
+- ❌ **Skipping tests**: See TEST-FIRST above
+- ❌ **Tests >10 min**: Cancel immediately
+- ❌ **CockroachDB**: PostgreSQL ONLY
+- ❌ **Removing tests**: Hides bugs
+- ⚠️ **Full test suite**: Run EVR only: `go test -short -vet=off ./server/evr/...`
+- ⚠️ **Benchmarks**: Too slow (>10 min)
+- ⚠️ **Satori code**: Ignore (not used)
+
+## UNIQUE PATTERNS
+
+**EVR Protocol**: Symbol-based routing (64-bit hash), custom binary codec, `Message` interface with `Symbol()` + `Stream()`
+
+**Pipelines**: Atomic globals, per-domain handlers, `func (p *EvrPipeline) handleXxx(ctx, session, msg) error`
+
+**Registries**: `XxxRegistry` interface + `LocalXxx` struct, thread-safe (RWMutex + atomics)
+
+**Caches**: `LocalXxxCache` with TTL + mutex
+
+## COMMANDS
 
 ```bash
+# Build (~2m)
+make nakama
+go mod vendor && make nakama  # With dep refresh
+
+# Test (EVR only - full suite is slow)
+go test -short -vet=off ./server/evr/...       # Protocol (fast)
+go test -short -vet=off ./server -run ".*evr.*" # Server EVR
+go test -v -vet=off ./server -run TestName      # Single test
+go test -race -vet=off ./server/evr/...         # Race detection
+
+# Database
 docker compose up -d postgres && sleep 30
 ./nakama migrate up --database.address postgres:localdb@127.0.0.1:5432/nakama
 ./nakama --name nakama1 --database.address postgres:localdb@127.0.0.1:5432/nakama
+# API: http://127.0.0.1:7350, Socket: ws://127.0.0.1:7349, Key: defaultkey
+
+# Format
+gofmt -w .
 ```
 
-Endpoints: API `http://127.0.0.1:7350`, Socket `ws://127.0.0.1:7349`, Key: `defaultkey`
+## GIT COMMITS
 
-## Code Style
+**Format**: `<type>[scope]: <description>` (Conventional Commits v1.0.0)  
+**Types**: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`  
+**Scopes**: `evr`, `pipeline`, `matchmaker`, `runtime`, `discord`, `api`  
+**Breaking**: Use `!` or `BREAKING CHANGE:` footer
 
-### Formatting
-- `gofmt -w .` (enforced) | Tabs for Go, spaces for others | LF line endings
+## VALIDATION CHECKLIST
 
-### Imports (standard Go grouping)
-```go
-import (
-    "context"
-    "fmt"
+1. Write failing test → 2. Verify fails → 3. Fix code → 4. Verify passes → 5. EVR tests → 6. Build → 7. Format → 8. Commit
 
-    "github.com/gofrs/uuid/v5"
-    "go.uber.org/zap"
+## NOTES
 
-    "github.com/heroiclabs/nakama/v3/server/evr"
-)
-```
-
-### Types & Naming
-- Use `any` not `interface{}` (Go 1.18+)
-- Files: `evr_<component>.go` | Types: PascalCase | Vars: camelCase
-
-### Error Handling
-```go
-return fmt.Errorf("failed to load match: %w", err)  // Wrap with context
-var ErrLobbyFull = errors.New("lobby full")          // Sentinel errors
-```
-
-### EVR Binary Protocol (`server/evr/`)
-```go
-type MyMessage struct { Field1 uint64 }
-func (m *MyMessage) Symbol() Symbol { return SymbolMyMessage }
-func (m *MyMessage) Stream(s *Stream) error { return s.Stream(&m.Field1) }
-```
-
-### Pipeline Handlers (`server/evr_pipeline*.go`)
-```go
-func (p *EvrPipeline) handleMyMessage(ctx context.Context, session *sessionWS, msg *evr.MyMessage) error {
-    return nil
-}
-```
-
-### Tests (table-driven)
-```go
-func TestMyFunction(t *testing.T) {
-    tests := []struct {
-        name     string
-        input    int
-        expected int
-    }{
-        {"basic case", 1, 2},
-    }
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            if got := MyFunction(tt.input); got != tt.expected {
-                t.Errorf("MyFunction(%d) = %d, want %d", tt.input, got, tt.expected)
-            }
-        })
-    }
-}
-```
-
-## Git Commits (Conventional Commits v1.0.0)
-
-### Format
-```
-<type>[scope]: <description>
-
-[body]
-[footer]
-```
-
-### Types
-| Type | Usage |
-|------|-------|
-| `feat` | New feature |
-| `fix` | Bug fix |
-| `docs` | Documentation |
-| `refactor` | Restructuring |
-| `test` | Tests |
-| `chore` | Maintenance |
-
-### Scopes
-`evr`, `pipeline`, `matchmaker`, `runtime`, `discord`, `api`, `storage`, `auth`
-
-### Examples
-```
-feat(discord): add channel notification for match completion
-fix(matchmaker): prevent duplicate match assignments
-```
-
-### Rules
-- Type REQUIRED, imperative mood ("add" not "added"), <=72 chars first line
-- Breaking changes: `feat(api)!:` or `BREAKING CHANGE:` footer
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `evr_pipeline.go` | EVR message processing |
-| `evr_matchmaker.go` | Skill-based matchmaking |
-| `evr_match.go` | Match handler |
-| `evr_discord_*.go` | Discord integration |
-| `evr/core_packet.go` | Binary protocol codec |
-
-## Validation Checklist
-
-**MANDATORY - DO NOT SKIP ANY STEP**
-
-1. **WRITE TEST FIRST** - Failing test proves bug/feature need
-2. `go test -v -vet=off ./server -run TestYourTest` - Verify test FAILS
-3. Make code changes
-4. `go test -v -vet=off ./server -run TestYourTest` - Verify test PASSES
-5. `go test -short -vet=off ./server/evr/...` - All EVR tests pass
-6. `make nakama` - Build passes
-7. `gofmt -w .` - Formatted
-8. Commit with conventional format
-
-**IF YOU SKIP STEP 1-2, YOU ARE VIOLATING PROTOCOL**
-
-## Communication Style
-
-- **NO SYCOPHANCY**: Never say "You're absolutely right", "Great point", etc.
-- **BE DIRECT**: State what you're doing, not how you feel about feedback
-- **NO FLATTERY**: Skip pleasantries, get to work
-- **ACKNOWLEDGE ERRORS**: State the mistake and the fix, nothing more
-
-## Notes
-
-- **Ignore satori code** - Not used in this fork
-- **PostgreSQL only** - Not CockroachDB
-- **Binary protocol** - EVR uses custom binary encoding, not JSON/protobuf
+- **Cross-repo deps**: `nevr-common` (protobufs), `vrmlgo` (VRML league)
+- **Large files**: `runtime.go` (~2800), `evr_runtime_rpc.go` (~2000), 111 files >500 lines
+- **PostgreSQL only**: NOT CockroachDB
+- **No `/cmd`**: Non-standard layout
