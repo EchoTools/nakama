@@ -171,6 +171,37 @@ func (rm *ReservationManager) DeleteReservation(ctx context.Context, reservation
 	}})
 }
 
+const noShowThreshold = 20 * time.Minute
+
+// CheckNoShowReservations checks for reserved-but-not-activated reservations past the 20-minute threshold
+// and marks them as expired (no-show). Preserves classification during state transition.
+func (rm *ReservationManager) CheckNoShowReservations(ctx context.Context) error {
+	objects, _, err := rm.nk.StorageList(ctx, SystemUserID, SystemUserID, ReservationStorageCollection, 1000, "")
+	if err != nil {
+		return fmt.Errorf("failed to list reservations for no-show check: %w", err)
+	}
+
+	now := time.Now()
+
+	for _, obj := range objects {
+		var reservation MatchReservation
+		if err := json.Unmarshal([]byte(obj.Value), &reservation); err != nil {
+			rm.logger.Warn("failed to unmarshal reservation %s during no-show check: %v", obj.Key, err)
+			continue
+		}
+
+		if reservation.State == ReservationStateReserved && now.After(reservation.StartTime.Add(noShowThreshold)) {
+			if err := rm.UpdateReservationState(ctx, reservation.ID, ReservationStateExpired, "no-show: not activated within 20 minutes"); err != nil {
+				rm.logger.Error("failed to expire no-show reservation %s: %v", reservation.ID, err)
+				continue
+			}
+			rm.logger.Info("marked reservation %s as no-show expired (classification: %s)", reservation.ID, reservation.Classification.String())
+		}
+	}
+
+	return nil
+}
+
 // checkReservationConflicts checks for scheduling conflicts
 func (rm *ReservationManager) checkReservationConflicts(ctx context.Context, groupID uuid.UUID, startTime, endTime time.Time, excludeReservationID string) ([]*ReservationConflict, error) {
 	// Get all reservations that might conflict
