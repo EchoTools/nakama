@@ -412,15 +412,15 @@ func GetReserveCommandDefinition() *discordgo.ApplicationCommand {
 					},
 					{
 						Type:        discordgo.ApplicationCommandOptionString,
-						Name:        "classification",
-						Description: "Match classification/priority",
-						Required:    true,
+						Name:        "class",
+						Description: "Match classification (competitive priority)",
+						Required:    false,
 						Choices: []*discordgo.ApplicationCommandOptionChoice{
-							{Name: "League (Highest Priority)", Value: "league"},
+							{Name: "League", Value: "league"},
 							{Name: "Scrimmage", Value: "scrimmage"},
 							{Name: "Mixed", Value: "mixed"},
 							{Name: "Pickup", Value: "pickup"},
-							{Name: "None (Lowest Priority)", Value: "none"},
+							{Name: "None", Value: "none"},
 						},
 					},
 					{

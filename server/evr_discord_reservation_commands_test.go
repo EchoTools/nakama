@@ -2,7 +2,70 @@ package server
 
 import (
 	"testing"
+
+	"github.com/bwmarrin/discordgo"
 )
+
+// TestReserveAdd_ClassOptionIsOptional verifies --class parameter exists, is optional, and has correct choices
+func TestReserveAdd_ClassOptionIsOptional(t *testing.T) {
+	cmd := GetReserveCommandDefinition()
+	if cmd == nil {
+		t.Fatal("GetReserveCommandDefinition returned nil")
+	}
+
+	// Find the "add" subcommand
+	var addSubcommand *discordgo.ApplicationCommandOption
+	for _, opt := range cmd.Options {
+		if opt.Type == discordgo.ApplicationCommandOptionSubCommand && opt.Name == "add" {
+			addSubcommand = opt
+			break
+		}
+	}
+
+	if addSubcommand == nil {
+		t.Fatal("add subcommand not found")
+	}
+
+	// Find the "class" option within "add" subcommand
+	var classOption *discordgo.ApplicationCommandOption
+	for _, opt := range addSubcommand.Options {
+		if opt.Name == "class" {
+			classOption = opt
+			break
+		}
+	}
+
+	if classOption == nil {
+		t.Error("class option not found in /reserve add command")
+		return
+	}
+
+	if classOption.Required {
+		t.Error("class option should be optional (Required: false)")
+	}
+
+	if classOption.Type != 3 {
+		t.Errorf("class option type should be String (3), got %d", classOption.Type)
+	}
+
+	if len(classOption.Choices) != 5 {
+		t.Errorf("class option should have 5 choices, got %d", len(classOption.Choices))
+	}
+
+	expectedChoices := map[string]string{
+		"League":    "league",
+		"Scrimmage": "scrimmage",
+		"Mixed":     "mixed",
+		"Pickup":    "pickup",
+		"None":      "none",
+	}
+
+	for _, choice := range classOption.Choices {
+		if expectedChoices[choice.Name] != choice.Value {
+			t.Errorf("unexpected choice: Name=%s, Value=%s", choice.Name, choice.Value)
+		}
+	}
+}
 
 func TestReserveCommand_WithClass(t *testing.T) {
 	tests := []struct {
