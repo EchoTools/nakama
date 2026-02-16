@@ -16,9 +16,9 @@ type EnhancedAllocateMatchRequest struct {
 	OwnerID          string                `json:"owner_id"`
 	Classification   SessionClassification `json:"classification"`
 	StartTime        string                `json:"start_time,omitempty"`
-	Duration         int                   `json:"duration,omitempty"` // Duration in minutes
-	AllowPurging     bool                  `json:"allow_purging"`      // Allow purging existing matches if no servers available
-	Force            bool                  `json:"force"`              // Force allocation even with conflicts
+	Duration         int                   `json:"duration,omitempty"`       // Duration in minutes
+	AllowPurging     bool                  `json:"allow_purging"`            // Allow purging existing matches if no servers available
+	Force            bool                  `json:"force"`                    // Force allocation even with conflicts
 	ReservationID    string                `json:"reservation_id,omitempty"` // Use existing reservation
 	Mode             string                `json:"mode,omitempty"`
 	Level            string                `json:"level,omitempty"`
@@ -30,12 +30,12 @@ type EnhancedAllocateMatchRequest struct {
 
 // EnhancedAllocateMatchResponse represents the enhanced allocation response
 type EnhancedAllocateMatchResponse struct {
-	Success          bool                   `json:"success"`
-	MatchLabel       *MatchLabel            `json:"match_label,omitempty"`
-	ReservationID    string                 `json:"reservation_id,omitempty"`
-	PreemptedMatches []string               `json:"preempted_matches,omitempty"`
-	Message          string                 `json:"message,omitempty"`
-	Error            string                 `json:"error,omitempty"`
+	Success          bool        `json:"success"`
+	MatchLabel       *MatchLabel `json:"match_label,omitempty"`
+	ReservationID    string      `json:"reservation_id,omitempty"`
+	PreemptedMatches []string    `json:"preempted_matches,omitempty"`
+	Message          string      `json:"message,omitempty"`
+	Error            string      `json:"error,omitempty"`
 }
 
 // EnhancedAllocateMatchRPC is an enhanced match allocation RPC that supports reservation management and purging
@@ -180,7 +180,7 @@ func processNormalAllocation(ctx context.Context, logger runtime.Logger, db *sql
 	// For now, return success
 	response.Success = true
 	response.Message = "Match allocated normally"
-	
+
 	return marshalResponse(response)
 }
 
@@ -209,9 +209,9 @@ func marshalResponse(response *EnhancedAllocateMatchResponse) (string, error) {
 // ExtendMatchRPC allows extending the duration of an active match
 func ExtendMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	type ExtendMatchRequest struct {
-		MatchID        string `json:"match_id"`
+		MatchID          string `json:"match_id"`
 		ExtensionMinutes int    `json:"extension_minutes"`
-		Reason         string `json:"reason"`
+		Reason           string `json:"reason"`
 	}
 
 	type ExtendMatchResponse struct {
@@ -258,7 +258,7 @@ func ExtendMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	}
 
 	// Check if user has permission to extend (owner or spawner)
-	if label.Owner != userID && label.SpawnedBy != userID {
+	if label.Owner.String() != userID && label.SpawnedBy != userID {
 		// Check if user is guild enforcer
 		if label.GroupID != nil {
 			if gg, err := GuildGroupLoad(ctx, nk, label.GroupID.String()); err == nil {
@@ -277,7 +277,7 @@ func ExtendMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 
 	// Check if extension would cause conflicts (this would need more implementation)
 	// For now, just allow the extension
-	
+
 	response.Success = true
 	response.Message = fmt.Sprintf("Match extended by %d minutes. Reason: %s", request.ExtensionMinutes, request.Reason)
 
@@ -286,7 +286,7 @@ func ExtendMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 		return "", runtime.NewError("failed to marshal response: "+err.Error(), StatusInternalError)
 	}
 
-	logger.Info("Match %s extended by %d minutes by user %s. Reason: %s", 
+	logger.Info("Match %s extended by %d minutes by user %s. Reason: %s",
 		request.MatchID, request.ExtensionMinutes, userID, request.Reason)
 
 	return string(responseBytes), nil

@@ -40,7 +40,7 @@ type MatchLabel struct {
 
 	GroupID         *uuid.UUID                `json:"group_id,omitempty"`         // The channel id of the broadcaster. (EVR)
 	SpawnedBy       string                    `json:"spawned_by,omitempty"`       // The userId of the player that spawned this match.
-	Owner           string                    `json:"owner,omitempty"`            // The userId of the match owner (has same permissions as SpawnedBy)
+	Owner           uuid.UUID                 `json:"owner,omitempty"`            // The userId of the match owner (has same permissions as SpawnedBy)
 	Classification  SessionClassification     `json:"classification,omitempty"`   // Priority classification for purging logic
 	StartTime       time.Time                 `json:"start_time,omitempty"`       // The time the match was, or will be started.
 	CreatedAt       time.Time                 `json:"created_at,omitempty"`       // The time the match was created.

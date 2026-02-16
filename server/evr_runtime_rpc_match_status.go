@@ -68,7 +68,7 @@ func MatchStatusRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 
 			if userID != "" {
 				// User has full access if they are the spawner, owner, or a guild enforcer
-				if matchLabel.SpawnedBy == userID || matchLabel.Owner == userID {
+				if matchLabel.SpawnedBy == userID || matchLabel.Owner.String() == userID {
 					hasFullAccess = true
 				} else if matchLabel.GroupID != nil {
 					// Check if user is an enforcer in the guild group
