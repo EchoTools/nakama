@@ -909,7 +909,7 @@ var (
 		},
 		{
 			Name:        "region-status",
-			Description: "Get the status of game servers in a specific region",
+			Description: "[DEPRECATED] Use /show for persistent status embeds. This command provides one-shot ephemeral status.",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
