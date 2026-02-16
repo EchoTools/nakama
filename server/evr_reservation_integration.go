@@ -88,11 +88,87 @@ func (ri *ReservationIntegration) startReservationCleanup(ctx context.Context) {
 	}
 }
 
+// DiscordMessenger interface for sending messages (allows testing without full discordgo.Session)
+type DiscordMessenger interface {
+	ChannelMessageSendComplex(channelID string, data *discordgo.MessageSend) (*discordgo.Message, error)
+}
+
 // cleanupExpiredReservations removes expired reservations and updates states
 func (ri *ReservationIntegration) cleanupExpiredReservations(ctx context.Context) {
-	// This would need to be implemented to query all reservations and clean up expired ones
-	// For now, we'll just log that the cleanup is running
-	ri.logger.Debug("Running reservation cleanup task")
+	ri.logger.Debug("Running reservation cleanup task - no Discord session available")
+}
+
+// cleanupExpiredReservationsWithDiscord removes expired reservations, deletes from storage, and posts audit messages
+func (ri *ReservationIntegration) cleanupExpiredReservationsWithDiscord(ctx context.Context, dg DiscordMessenger) error {
+	objects, _, err := ri.nk.StorageList(ctx, SystemUserID, SystemUserID, ReservationStorageCollection, 1000, "")
+	if err != nil {
+		ri.logger.Error("Failed to list reservations for cleanup: %v", err)
+		return fmt.Errorf("failed to list reservations: %w", err)
+	}
+
+	now := time.Now()
+	for _, obj := range objects {
+		var reservation MatchReservation
+		if err := json.Unmarshal([]byte(obj.Value), &reservation); err != nil {
+			ri.logger.Warn("Failed to unmarshal reservation %s during cleanup: %v", obj.Key, err)
+			continue
+		}
+
+		shouldRemove := false
+		reason := ""
+
+		if reservation.State == ReservationStateExpired {
+			shouldRemove = true
+			reason = "explicitly expired state"
+		} else if reservation.State == ReservationStateReserved && reservation.StartTime.Add(time.Duration(ReservationExpiryMinutes)*time.Minute).Before(now) {
+			shouldRemove = true
+			reason = fmt.Sprintf("expired: start time %v exceeded %d minute grace period", reservation.StartTime, ReservationExpiryMinutes)
+		} else if reservation.State == ReservationStateEnded {
+			shouldRemove = true
+			reason = "match ended"
+		}
+
+		if shouldRemove {
+			guildID, err := GetGuildIDByGroupIDNK(ctx, ri.nk, reservation.GroupID.String())
+			if err != nil {
+				ri.logger.Warn("Failed to get guild ID for reservation %s cleanup: %v", reservation.ID, err)
+			} else {
+				auditChannelID, err := GetGuildAuditChannelID(ctx, ri.nk, guildID)
+				if err != nil {
+					ri.logger.Warn("Failed to get audit channel for reservation %s cleanup: %v", reservation.ID, err)
+				} else {
+					message := fmt.Sprintf("🗑️ **Reservation Cleanup**\n"+
+						"Reservation ID: `%s`\n"+
+						"Owner: <@%s>\n"+
+						"Classification: %s\n"+
+						"Start Time: %s\n"+
+						"State: %s\n"+
+						"Reason: %s",
+						reservation.ID,
+						reservation.Owner,
+						reservation.Classification.String(),
+						reservation.StartTime.Format(time.RFC3339),
+						reservation.State,
+						reason,
+					)
+
+					if _, err := dg.ChannelMessageSendComplex(auditChannelID, &discordgo.MessageSend{
+						Content: message,
+					}); err != nil {
+						ri.logger.Error("Failed to send audit message for reservation %s cleanup: %v", reservation.ID, err)
+					}
+				}
+			}
+
+			if err := ri.reservationMgr.DeleteReservation(ctx, reservation.ID); err != nil {
+				ri.logger.Error("Failed to delete expired reservation %s: %v", reservation.ID, err)
+			} else {
+				ri.logger.Info("Cleaned up reservation %s: %s", reservation.ID, reason)
+			}
+		}
+	}
+
+	return nil
 }
 
 // ServerUtilizationMonitor monitors server usage and sends notifications

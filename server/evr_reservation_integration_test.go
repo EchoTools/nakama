@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/bwmarrin/discordgo"
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
@@ -175,4 +178,250 @@ func TestGetGuildAuditChannelID_GuildNotFound(t *testing.T) {
 	if auditChannelID != "" {
 		t.Errorf("Expected empty audit channel ID, got: %s", auditChannelID)
 	}
+}
+
+// TestCleanupExpiredReservations_RemovesExpired tests that expired reservations are removed
+func TestCleanupExpiredReservations_RemovesExpired(t *testing.T) {
+	ctx := context.Background()
+
+	testGroupID := uuid.Must(uuid.NewV4())
+
+	// Create mock with test reservations
+	mockNK := &mockCleanupNakamaModule{
+		storage: make(map[string]*api.StorageObject),
+		groups: map[string]*api.Group{
+			testGroupID.String(): {
+				Id:       testGroupID.String(),
+				Name:     "Test Guild",
+				Metadata: `{"guild_id":"987654321","audit_channel_id":"audit-channel-123"}`,
+				LangTag:  GuildGroupLangTag,
+			},
+		},
+	}
+
+	mockDG := &mockDiscordSession{
+		sentMessages: make([]string, 0),
+	}
+
+	// Create expired reservation (start time 10 minutes ago, state=reserved)
+	expiredRes := &MatchReservation{
+		ID:             "expired-res-1",
+		GroupID:        testGroupID,
+		Owner:          "user-123",
+		Requester:      "user-123",
+		StartTime:      time.Now().Add(-10 * time.Minute),
+		EndTime:        time.Now().Add(20 * time.Minute),
+		Classification: ClassificationPickup,
+		State:          ReservationStateReserved,
+		CreatedAt:      time.Now().Add(-15 * time.Minute),
+	}
+	mockNK.addReservation(expiredRes)
+
+	// Create active reservation (should not be removed)
+	activeRes := &MatchReservation{
+		ID:             "active-res-1",
+		GroupID:        testGroupID,
+		Owner:          "user-456",
+		Requester:      "user-456",
+		StartTime:      time.Now().Add(10 * time.Minute),
+		EndTime:        time.Now().Add(40 * time.Minute),
+		Classification: ClassificationScrimmage,
+		State:          ReservationStateReserved,
+		CreatedAt:      time.Now(),
+	}
+	mockNK.addReservation(activeRes)
+
+	// Create reservation integration and run cleanup
+	ri := NewReservationIntegration(mockNK, &testLogger{t: t})
+	ri.cleanupExpiredReservationsWithDiscord(ctx, mockDG)
+
+	// Verify expired reservation was deleted
+	if mockNK.storage["expired-res-1"] != nil {
+		t.Error("Expected expired reservation to be removed, but it still exists")
+	}
+
+	// Verify active reservation was NOT deleted
+	if mockNK.storage["active-res-1"] == nil {
+		t.Error("Expected active reservation to remain, but it was removed")
+	}
+
+	// Verify audit message was sent
+	if len(mockDG.sentMessages) == 0 {
+		t.Error("Expected audit message to be sent, but none were sent")
+	}
+}
+
+// TestCleanupExpiredReservations_KeepsActive tests that active reservations are preserved
+func TestCleanupExpiredReservations_KeepsActive(t *testing.T) {
+	ctx := context.Background()
+
+	testGroupID := uuid.Must(uuid.NewV4())
+
+	mockNK := &mockCleanupNakamaModule{
+		storage: make(map[string]*api.StorageObject),
+		groups: map[string]*api.Group{
+			testGroupID.String(): {
+				Id:       testGroupID.String(),
+				Name:     "Test Guild 2",
+				Metadata: `{"guild_id":"111222333","audit_channel_id":"audit-channel-456"}`,
+				LangTag:  GuildGroupLangTag,
+			},
+		},
+	}
+
+	mockDG := &mockDiscordSession{
+		sentMessages: make([]string, 0),
+	}
+
+	// Create multiple active reservations (future start times)
+	for i := 0; i < 3; i++ {
+		res := &MatchReservation{
+			ID:             uuid.Must(uuid.NewV4()).String(),
+			GroupID:        testGroupID,
+			Owner:          "user-789",
+			Requester:      "user-789",
+			StartTime:      time.Now().Add(time.Duration(10+i*5) * time.Minute),
+			EndTime:        time.Now().Add(time.Duration(40+i*5) * time.Minute),
+			Classification: ClassificationMixed,
+			State:          ReservationStateReserved,
+			CreatedAt:      time.Now(),
+		}
+		mockNK.addReservation(res)
+	}
+
+	initialCount := len(mockNK.storage)
+
+	// Run cleanup
+	ri := NewReservationIntegration(mockNK, &testLogger{t: t})
+	ri.cleanupExpiredReservationsWithDiscord(ctx, mockDG)
+
+	// Verify no reservations were removed
+	if len(mockNK.storage) != initialCount {
+		t.Errorf("Expected %d reservations to remain, got %d", initialCount, len(mockNK.storage))
+	}
+
+	// Verify no audit messages were sent
+	if len(mockDG.sentMessages) > 0 {
+		t.Errorf("Expected no audit messages, but got %d", len(mockDG.sentMessages))
+	}
+}
+
+// TestCleanupExpiredReservations_HandlesExplicitExpiredState tests cleanup of explicitly expired reservations
+func TestCleanupExpiredReservations_HandlesExplicitExpiredState(t *testing.T) {
+	ctx := context.Background()
+
+	testGroupID := uuid.Must(uuid.NewV4())
+
+	mockNK := &mockCleanupNakamaModule{
+		storage: make(map[string]*api.StorageObject),
+		groups: map[string]*api.Group{
+			testGroupID.String(): {
+				Id:       testGroupID.String(),
+				Name:     "Test Guild 3",
+				Metadata: `{"guild_id":"444555666","audit_channel_id":"audit-channel-789"}`,
+				LangTag:  GuildGroupLangTag,
+			},
+		},
+	}
+
+	mockDG := &mockDiscordSession{
+		sentMessages: make([]string, 0),
+	}
+
+	// Create reservation with explicit expired state
+	expiredRes := &MatchReservation{
+		ID:             "expired-state-res",
+		GroupID:        testGroupID,
+		Owner:          "user-999",
+		Requester:      "user-999",
+		StartTime:      time.Now().Add(-20 * time.Minute),
+		EndTime:        time.Now().Add(-5 * time.Minute),
+		Classification: ClassificationPickup,
+		State:          ReservationStateExpired,
+		CreatedAt:      time.Now().Add(-30 * time.Minute),
+	}
+	mockNK.addReservation(expiredRes)
+
+	// Run cleanup
+	ri := NewReservationIntegration(mockNK, &testLogger{t: t})
+	ri.cleanupExpiredReservationsWithDiscord(ctx, mockDG)
+
+	// Verify reservation was removed
+	if mockNK.storage["expired-state-res"] != nil {
+		t.Error("Expected explicitly expired reservation to be removed")
+	}
+
+	// Verify audit message was sent
+	if len(mockDG.sentMessages) == 0 {
+		t.Error("Expected audit message for explicitly expired reservation")
+	}
+}
+
+// mockCleanupNakamaModule extends mockReservationNakamaModule with storage operations
+type mockCleanupNakamaModule struct {
+	runtime.NakamaModule
+	groups  map[string]*api.Group
+	storage map[string]*api.StorageObject
+}
+
+func (m *mockCleanupNakamaModule) GroupsGetId(ctx context.Context, groupIDs []string) ([]*api.Group, error) {
+	var result []*api.Group
+	for _, id := range groupIDs {
+		if g, ok := m.groups[id]; ok {
+			result = append(result, g)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockCleanupNakamaModule) GroupsList(ctx context.Context, name, langTag string, members *int, open *bool, limit int, cursor string) ([]*api.Group, string, error) {
+	var result []*api.Group
+	for _, g := range m.groups {
+		if langTag != "" && g.LangTag != langTag {
+			continue
+		}
+		result = append(result, g)
+	}
+	return result, "", nil
+}
+
+func (m *mockCleanupNakamaModule) addReservation(res *MatchReservation) {
+	data, _ := json.Marshal(res)
+	m.storage[res.ID] = &api.StorageObject{
+		Collection: ReservationStorageCollection,
+		Key:        res.ID,
+		UserId:     SystemUserID,
+		Value:      string(data),
+	}
+}
+
+func (m *mockCleanupNakamaModule) StorageList(ctx context.Context, callerID, ownerID, collection string, limit int, cursor string) ([]*api.StorageObject, string, error) {
+	var result []*api.StorageObject
+	if collection == ReservationStorageCollection {
+		for _, obj := range m.storage {
+			result = append(result, obj)
+		}
+	}
+	return result, "", nil
+}
+
+func (m *mockCleanupNakamaModule) StorageDelete(ctx context.Context, deletes []*runtime.StorageDelete) error {
+	for _, del := range deletes {
+		delete(m.storage, del.Key)
+	}
+	return nil
+}
+
+// mockDiscordSession tracks sent messages
+type mockDiscordSession struct {
+	sentMessages []string
+}
+
+func (m *mockDiscordSession) ChannelMessageSendComplex(channelID string, data *discordgo.MessageSend) (*discordgo.Message, error) {
+	m.sentMessages = append(m.sentMessages, data.Content)
+	return &discordgo.Message{
+		ID:        "msg-" + uuid.Must(uuid.NewV4()).String(),
+		ChannelID: channelID,
+		Content:   data.Content,
+	}, nil
 }
