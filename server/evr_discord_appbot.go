@@ -369,6 +369,24 @@ var (
 			},
 		},
 		{
+			Name:        "vacate",
+			Description: "Release your allocated server (60s grace, 20s with --override)",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "match-id",
+					Description: "Match ID to vacate",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionBoolean,
+					Name:        "override",
+					Description: "Override to 20s grace period",
+					Required:    false,
+				},
+			},
+		},
+		{
 			Name:        "reset-password",
 			Description: "Clear your echo password.",
 		},
@@ -1546,6 +1564,45 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				})
 
 			}
+		},
+		"vacate": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+			if user == nil {
+				return nil
+			}
+
+			handler := NewVacateCommandHandler(nk, logger)
+			err := handler.HandleVacateCommand(ctx, s, i, userID)
+
+			if err != nil {
+				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: fmt.Sprintf("Error: %s", err.Error()),
+					},
+				})
+			}
+
+			options := i.ApplicationCommandData().Options
+			var override bool
+			for _, option := range options {
+				if option.Name == "override" {
+					override = option.BoolValue()
+				}
+			}
+
+			graceSeconds := 60
+			if override {
+				graceSeconds = 20
+			}
+
+			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Flags:   discordgo.MessageFlagsEphemeral,
+					Content: fmt.Sprintf("Server vacated. Grace period: %ds", graceSeconds),
+				},
+			})
 		},
 		"shutdown-match": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			if user == nil {
