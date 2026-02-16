@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
@@ -44,7 +43,7 @@ func NewReservationIntegration(nk runtime.NakamaModule, logger runtime.Logger) *
 // RegisterDiscordCommands registers the reservation slash commands
 func (ri *ReservationIntegration) RegisterDiscordCommands(dg *discordgo.Session) error {
 	command := GetReserveCommandDefinition()
-	
+
 	_, err := dg.ApplicationCommandCreate(dg.State.User.ID, "", command)
 	if err != nil {
 		return fmt.Errorf("failed to register /reserve command: %w", err)
@@ -66,10 +65,10 @@ func (ri *ReservationIntegration) HandleSlashCommand(ctx context.Context, dg *di
 func (ri *ReservationIntegration) StartMonitoring(ctx context.Context, dg *discordgo.Session) {
 	// Start server utilization monitoring
 	go ri.utilizationMonitor.StartMonitoring(ctx, dg)
-	
+
 	// Start reservation cleanup task
 	go ri.startReservationCleanup(ctx)
-	
+
 	ri.logger.Info("Started reservation system monitoring")
 }
 
@@ -135,7 +134,7 @@ func (sum *ServerUtilizationMonitor) checkUtilization(ctx context.Context, dg *d
 	}
 
 	now := time.Now()
-	
+
 	for _, match := range matches {
 		var label MatchLabel
 		if err := json.Unmarshal([]byte(match.Label.Value), &label); err != nil {
@@ -176,7 +175,7 @@ func (sum *ServerUtilizationMonitor) sendLowUtilizationAlert(ctx context.Context
 	}
 
 	// Get guild ID from group ID
-	guildID, err := GetGuildIDByGroupID(ctx, sum.nk, label.GroupID.String())
+	guildID, err := GetGuildIDByGroupIDNK(ctx, sum.nk, label.GroupID.String())
 	if err != nil {
 		return fmt.Errorf("failed to get guild ID: %w", err)
 	}
@@ -188,7 +187,7 @@ func (sum *ServerUtilizationMonitor) sendLowUtilizationAlert(ctx context.Context
 	}
 
 	duration := time.Since(label.StartTime)
-	
+
 	embed := &discordgo.MessageEmbed{
 		Title:       "⚠️ Low Server Utilization Alert",
 		Description: fmt.Sprintf("Match `%s` has low player activity", matchID[:8]),
@@ -217,8 +216,8 @@ func (sum *ServerUtilizationMonitor) sendLowUtilizationAlert(ctx context.Context
 
 // Helper functions that would need to be implemented based on existing guild/group system
 
-// GetGuildIDByGroupID converts a group ID to guild ID
-func GetGuildIDByGroupID(ctx context.Context, nk runtime.NakamaModule, groupID string) (string, error) {
+// GetGuildIDByGroupIDNK converts a group ID to guild ID
+func GetGuildIDByGroupIDNK(ctx context.Context, nk runtime.NakamaModule, groupID string) (string, error) {
 	// This would need to be implemented based on the existing guild group system
 	// For now, return a placeholder
 	return "placeholder_guild_id", nil
@@ -231,15 +230,15 @@ func GetGuildAuditChannelID(ctx context.Context, nk runtime.NakamaModule, guildI
 	return "placeholder_audit_channel_id", nil
 }
 
-// GetGroupIDByGuildID converts a guild ID to group ID
-func GetGroupIDByGuildID(ctx context.Context, nk runtime.NakamaModule, guildID string) (string, error) {
+// GetGroupIDByGuildIDNK converts a guild ID to group ID
+func GetGroupIDByGuildIDNK(ctx context.Context, nk runtime.NakamaModule, guildID string) (string, error) {
 	// This would need to be implemented based on the existing guild group system
 	// For now, return a placeholder
 	return "placeholder_group_id", nil
 }
 
-// GetUserIDByDiscordID converts a Discord user ID to Nakama user ID
-func GetUserIDByDiscordID(ctx context.Context, nk runtime.NakamaModule, discordID string) (string, error) {
+// GetUserIDByDiscordIDNK converts a Discord user ID to Nakama user ID
+func GetUserIDByDiscordIDNK(ctx context.Context, nk runtime.NakamaModule, discordID string) (string, error) {
 	// This would need to be implemented based on the existing user linking system
 	// For now, return a placeholder
 	return fmt.Sprintf("user_%s", discordID), nil

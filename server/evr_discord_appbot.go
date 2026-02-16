@@ -58,10 +58,10 @@ type DiscordAppBot struct {
 	statusRegistry     StatusRegistry
 	guildGroupRegistry *GuildGroupRegistry
 
-	cache          *DiscordIntegrator
-	ipInfoCache    *IPInfoCache
-	choiceCache    *MapOf[string, []*discordgo.ApplicationCommandOptionChoice]
-	igpRegistry    *MapOf[string, *InGamePanel]
+	cache           *DiscordIntegrator
+	ipInfoCache     *IPInfoCache
+	choiceCache     *MapOf[string, []*discordgo.ApplicationCommandOptionChoice]
+	igpRegistry     *MapOf[string, *InGamePanel]
 	sessionsManager *SessionsChannelManager
 
 	debugChannels  map[string]string // map[groupID]channelID
@@ -4036,6 +4036,39 @@ func SendIPAuthorizationNotification(dg *discordgo.Session, discordID string, ip
 	}
 
 	return nil
+}
+
+// canShutdownMatch checks if the user has permission to shut down a match
+func (d *DiscordAppBot) canShutdownMatch(ctx context.Context, userID string, label *MatchLabel) (bool, error) {
+	// Stub implementation: conservative approach, deny all shutdowns for now
+	return false, nil
+}
+
+// presentRegionFallbackOptions presents the user with fallback region options when matchmaking fails
+func (d *DiscordAppBot) presentRegionFallbackOptions(s *discordgo.Session, i *discordgo.InteractionCreate, fallbackInfo *RegionFallbackInfo, action string, region string, mode evr.Symbol, level evr.Symbol, startTime time.Time) error {
+	if fallbackInfo == nil {
+		return errors.New("no fallback info provided")
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "No Servers Available",
+		Description: fmt.Sprintf("No servers are available in the **%s** region.", region),
+		Color:       0xFF0000,
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:   "Available Regions",
+				Value:  fmt.Sprintf("Servers are available in other regions. Please try a different region."),
+				Inline: false,
+			},
+		},
+	}
+
+	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+		},
+	})
 }
 
 func IsDiscordErrorCode(err error, code int) bool {

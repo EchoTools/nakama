@@ -29,13 +29,13 @@ func NewReservationDashboardManager(nk runtime.NakamaModule, logger runtime.Logg
 
 // DashboardData represents the current server and reservation status
 type DashboardData struct {
-	GuildID                string                  `json:"guild_id"`
-	LastUpdated           time.Time               `json:"last_updated"`
-	ServerCapacity        ServerCapacityInfo      `json:"server_capacity"`
+	GuildID                string                 `json:"guild_id"`
+	LastUpdated            time.Time              `json:"last_updated"`
+	ServerCapacity         ServerCapacityInfo     `json:"server_capacity"`
 	ReservationUtilization ReservationUtilization `json:"reservation_utilization"`
-	ActiveMatches         []ActiveMatchInfo       `json:"active_matches"`
-	UpcomingReservations  []UpcomingReservation   `json:"upcoming_reservations"`
-	LowUtilizationAlerts  []UtilizationAlert      `json:"low_utilization_alerts"`
+	ActiveMatches          []ActiveMatchInfo      `json:"active_matches"`
+	UpcomingReservations   []UpcomingReservation  `json:"upcoming_reservations"`
+	LowUtilizationAlerts   []UtilizationAlert     `json:"low_utilization_alerts"`
 }
 
 // ServerCapacityInfo represents current server capacity
@@ -95,7 +95,7 @@ func (dm *ReservationDashboardManager) GenerateDashboard(ctx context.Context, dg
 // collectDashboardData gathers all the information needed for the dashboard
 func (dm *ReservationDashboardManager) collectDashboardData(ctx context.Context, guildID string) (*DashboardData, error) {
 	// Get guild group ID
-	groupID, err := GetGroupIDByGuildID(ctx, dm.nk, guildID)
+	groupID, err := GetGroupIDByGuildIDNK(ctx, dm.nk, guildID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get guild group: %w", err)
 	}
@@ -160,7 +160,7 @@ func (dm *ReservationDashboardManager) collectServerCapacity(ctx context.Context
 // collectReservationUtilization gathers reservation usage statistics
 func (dm *ReservationDashboardManager) collectReservationUtilization(ctx context.Context, groupID uuid.UUID, data *DashboardData) error {
 	now := time.Now()
-	
+
 	// Get reservations for the next 24 hours
 	reservations, err := dm.reservationMgr.ListReservations(ctx, groupID, now, now.Add(24*time.Hour))
 	if err != nil {
@@ -168,10 +168,10 @@ func (dm *ReservationDashboardManager) collectReservationUtilization(ctx context
 	}
 
 	utilization := ReservationUtilization{}
-	
+
 	for _, res := range reservations {
 		utilization.Next24Hours++
-		
+
 		if res.IsActive() {
 			utilization.CurrentlyActive++
 		}
@@ -205,7 +205,7 @@ func (dm *ReservationDashboardManager) collectActiveMatches(ctx context.Context,
 		}
 
 		duration := time.Since(label.StartTime)
-		lowActivity := label.PlayerCount < LowPlayerCountThreshold && 
+		lowActivity := label.PlayerCount < LowPlayerCountThreshold &&
 			duration > time.Duration(LowPlayerDurationMinutes)*time.Minute
 
 		activeMatch := ActiveMatchInfo{

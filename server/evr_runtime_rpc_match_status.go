@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 )
@@ -16,11 +15,11 @@ type MatchStatusRequest struct {
 
 // MatchStatusResponse represents the response with match status information
 type MatchStatusResponse struct {
-	MatchID     string     `json:"match_id"`
-	Found       bool       `json:"found"`
+	MatchID     string      `json:"match_id"`
+	Found       bool        `json:"found"`
 	MatchLabel  *MatchLabel `json:"match_label,omitempty"`
 	PublicLabel *MatchLabel `json:"public_label,omitempty"` // Public view without sensitive data
-	Error       string     `json:"error,omitempty"`
+	Error       string      `json:"error,omitempty"`
 }
 
 // MatchStatusRPC retrieves the current status and metadata for a match by ID
