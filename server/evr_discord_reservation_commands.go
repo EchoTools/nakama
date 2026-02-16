@@ -476,3 +476,11 @@ func (h *VacateCommandHandler) HandleVacateCommand(ctx context.Context, dg *disc
 
 	return nil
 }
+
+// BuildReservationActivationDM builds a Discord DM message for reservation activation with spark link
+func BuildReservationActivationDM(matchID string) string {
+	matchIDUpper := strings.ToUpper(matchID)
+	sparkLink := fmt.Sprintf("https://echo.taxi/spark://c/%s", matchIDUpper)
+	message := fmt.Sprintf("Your reservation is now active!\n\n[Join Match](%s)", sparkLink)
+	return message
+}

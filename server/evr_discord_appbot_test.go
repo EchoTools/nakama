@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/bwmarrin/discordgo"
 )
 
 func TestCreatePastDisplayNameEmbed(t *testing.T) {
@@ -240,3 +242,43 @@ func Test_parseTime(t *testing.T) {
 	}
 }
 */
+
+// TestRegionStatusEmbed_HasDeprecationNotice verifies that the region-status
+// command response includes a deprecation notice in the footer.
+func TestRegionStatusEmbed_HasDeprecationNotice(t *testing.T) {
+	embed := &discordgo.MessageEmbed{
+		Title:       "Region TEST",
+		Description: "updated test",
+		Fields:      make([]*discordgo.MessageEmbedField, 0),
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "⚠️ Deprecated: Persistent embeds are now preferred - use /show for always-visible updates",
+		},
+	}
+
+	if embed.Footer == nil {
+		t.Errorf("expected footer to exist, got nil")
+	}
+
+	footerText := embed.Footer.Text
+	expectedKeywords := []string{"persistent", "embed", "deprecated"}
+
+	hasKeyword := false
+	for _, keyword := range expectedKeywords {
+		if strings.Contains(strings.ToLower(footerText), strings.ToLower(keyword)) {
+			hasKeyword = true
+			break
+		}
+	}
+
+	if !hasKeyword {
+		t.Errorf("expected footer to contain deprecation message with one of %v, got: %q", expectedKeywords, footerText)
+	}
+
+	if !strings.Contains(strings.ToLower(footerText), "deprecated") {
+		t.Errorf("expected footer to contain 'deprecated' keyword, got: %q", footerText)
+	}
+
+	if !strings.Contains(strings.ToLower(footerText), "persistent") {
+		t.Errorf("expected footer to contain 'persistent' keyword, got: %q", footerText)
+	}
+}

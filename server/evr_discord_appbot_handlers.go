@@ -494,7 +494,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 	return nil
 }
 
-func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.Logger, userID, guildID string, regionCode string, mode, level evr.Symbol, startTime time.Time, description string) (l *MatchLabel, rtt float64, err error) {
+func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.Logger, userID, guildID string, regionCode string, mode, level evr.Symbol, startTime time.Time, description string, classification SessionClassification) (l *MatchLabel, rtt float64, err error) {
 
 	// Find a parking match to prepare
 
@@ -557,12 +557,13 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 
 	// Prepare the session for the match.
 	settings := &MatchSettings{
-		Mode:        mode,
-		Level:       level,
-		GroupID:     uuid.FromStringOrNil(groupID),
-		StartTime:   startTime.UTC().Add(10 * time.Minute),
-		SpawnedBy:   userID,
-		Description: description,
+		Mode:           mode,
+		Level:          level,
+		GroupID:        uuid.FromStringOrNil(groupID),
+		StartTime:      startTime.UTC().Add(10 * time.Minute),
+		SpawnedBy:      userID,
+		Description:    description,
+		Classification: classification,
 	}
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Allocate
 	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, allocatorGroupIDs, latestRTTs, settings, []string{regionCode}, false, true, queryAddon)
