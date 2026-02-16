@@ -241,16 +241,49 @@ func GetGuildIDByGroupIDNK(ctx context.Context, nk runtime.NakamaModule, groupID
 
 // GetGuildAuditChannelID gets the audit channel ID for a guild
 func GetGuildAuditChannelID(ctx context.Context, nk runtime.NakamaModule, guildID string) (string, error) {
-	// This would need to be implemented based on the existing guild configuration system
-	// For now, return a placeholder
-	return "placeholder_audit_channel_id", nil
+	groupID, err := GetGroupIDByGuildIDNK(ctx, nk, guildID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get group ID for guild: %w", err)
+	}
+
+	groups, err := nk.GroupsGetId(ctx, []string{groupID})
+	if err != nil {
+		return "", fmt.Errorf("failed to get group: %w", err)
+	}
+	if len(groups) == 0 {
+		return "", fmt.Errorf("group not found: %s", groupID)
+	}
+
+	var metadata GroupMetadata
+	if err := json.Unmarshal([]byte(groups[0].Metadata), &metadata); err != nil {
+		return "", fmt.Errorf("failed to unmarshal group metadata: %w", err)
+	}
+
+	if metadata.AuditChannelID == "" {
+		return "", fmt.Errorf("audit_channel_id not configured for guild: %s", guildID)
+	}
+
+	return metadata.AuditChannelID, nil
 }
 
 // GetGroupIDByGuildIDNK converts a guild ID to group ID
 func GetGroupIDByGuildIDNK(ctx context.Context, nk runtime.NakamaModule, guildID string) (string, error) {
-	// This would need to be implemented based on the existing guild group system
-	// For now, return a placeholder
-	return "placeholder_group_id", nil
+	groups, _, err := nk.GroupsList(ctx, "", "guild", nil, nil, 100, "")
+	if err != nil {
+		return "", fmt.Errorf("failed to list guild groups: %w", err)
+	}
+
+	for _, group := range groups {
+		var metadata GroupMetadata
+		if err := json.Unmarshal([]byte(group.Metadata), &metadata); err != nil {
+			continue
+		}
+		if metadata.GuildID == guildID {
+			return group.Id, nil
+		}
+	}
+
+	return "", fmt.Errorf("group not found for guild_id: %s", guildID)
 }
 
 // GetUserIDByDiscordIDNK converts a Discord user ID to Nakama user ID
