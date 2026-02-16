@@ -32,6 +32,15 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			},
 		},
 		{ID: "account/authenticate/password", Handler: AuthenticatePasswordRPC},
+		// account/break_alternates - Global operators only
+		{
+			ID:      "account/break_alternates",
+			Handler: BreakAlternatesRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalOperators},
+			},
+		},
 
 		// Leaderboards - Any authenticated user can view
 		{
