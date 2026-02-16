@@ -2359,6 +2359,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}).Info("Match created.")
 
 			// Update content to reflect party size if applicable
+			var content string
 			if len(partyUserIDs) > 1 {
 				content = fmt.Sprintf("Reservation will timeout <t:%d:R>. \n\n**%d party members** will automatically join this match when you click play or start matchmaking.", startTime.Unix(), len(partyUserIDs))
 			} else {

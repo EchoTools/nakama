@@ -11,13 +11,13 @@ import (
 // TestGetPartyMembersForUser tests the helper function that retrieves party members
 func TestGetPartyMembersForUser(t *testing.T) {
 	tests := []struct {
-		name               string
-		userID             string
-		partyGroupID       string
-		partyMembers       []string
-		expectedUserIDs    []string
-		expectError        bool
-		expectPartyLookup  bool
+		name              string
+		userID            string
+		partyGroupID      string
+		partyMembers      []string
+		expectedUserIDs   []string
+		expectError       bool
+		expectPartyLookup bool
 	}{
 		{
 			name:              "user not in party returns only self",
@@ -51,7 +51,7 @@ func TestGetPartyMembersForUser(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			
+
 			// Create mock NakamaModule
 			nk := &mockNakamaModuleForParty{
 				partyGroupID: tt.partyGroupID,
@@ -93,9 +93,9 @@ func TestGetPartyMembersForUser(t *testing.T) {
 // mockNakamaModuleForParty is a minimal mock for testing party functionality
 type mockNakamaModuleForParty struct {
 	runtime.NakamaModule
-	partyGroupID       string
-	partyMembers       []string
-	partyLookupCalled  bool
+	partyGroupID      string
+	partyMembers      []string
+	partyLookupCalled bool
 }
 
 func (m *mockNakamaModuleForParty) StorageRead(ctx context.Context, reads []*runtime.StorageRead) ([]*api.StorageObject, error) {
@@ -115,7 +115,7 @@ func (m *mockNakamaModuleForParty) StorageRead(ctx context.Context, reads []*run
 
 func (m *mockNakamaModuleForParty) StorageIndexList(ctx context.Context, callerID, indexName, query string, limit int, order []string, callerId string) (*api.StorageObjects, string, error) {
 	m.partyLookupCalled = true
-	
+
 	// Mock implementation for GetPartyGroupUserIDs
 	objects := make([]*api.StorageObject, 0, len(m.partyMembers))
 	for _, userID := range m.partyMembers {
@@ -123,7 +123,7 @@ func (m *mockNakamaModuleForParty) StorageIndexList(ctx context.Context, callerI
 			UserId: userID,
 		})
 	}
-	
+
 	return &api.StorageObjects{
 		Objects: objects,
 	}, "", nil
