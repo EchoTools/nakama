@@ -7,6 +7,18 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
+func TestClassification_ZeroValue(t *testing.T) {
+	var classification SessionClassification
+	if classification != ClassificationNone {
+		t.Errorf("Zero value of SessionClassification should be None, got %v", classification)
+	}
+
+	label := &MatchLabel{}
+	if label.Classification != ClassificationNone {
+		t.Errorf("Uninitialized MatchLabel.Classification should be None, got %v", label.Classification)
+	}
+}
+
 func TestSessionClassification_String(t *testing.T) {
 	tests := []struct {
 		classification SessionClassification
@@ -52,11 +64,11 @@ func TestParseSessionClassification(t *testing.T) {
 
 func TestSessionClassification_CanPreempt(t *testing.T) {
 	tests := []struct {
-		name                      string
-		requesting                SessionClassification
-		target                    SessionClassification
-		targetReservationExpired  bool
-		expected                  bool
+		name                     string
+		requesting               SessionClassification
+		target                   SessionClassification
+		targetReservationExpired bool
+		expected                 bool
 	}{
 		{
 			name:                     "League cannot be preempted",
@@ -121,7 +133,7 @@ func TestSessionClassification_CanPreempt(t *testing.T) {
 
 func TestMatchReservation_IsExpired(t *testing.T) {
 	now := time.Now()
-	
+
 	tests := []struct {
 		name        string
 		reservation *MatchReservation
@@ -180,20 +192,20 @@ func TestMatchReservation_IsExpired(t *testing.T) {
 
 func TestMatchReservation_CanBePreempted(t *testing.T) {
 	now := time.Now()
-	
+
 	tests := []struct {
-		name                      string
-		reservation               *MatchReservation
-		preemptingClassification  SessionClassification
-		expected                  bool
+		name                     string
+		reservation              *MatchReservation
+		preemptingClassification SessionClassification
+		expected                 bool
 	}{
 		{
 			name: "League reservation cannot be preempted",
 			reservation: &MatchReservation{
 				Classification: ClassificationLeague,
-				State:         ReservationStateActivated,
-				StartTime:     now.Add(-30 * time.Minute),
-				EndTime:       now.Add(30 * time.Minute),
+				State:          ReservationStateActivated,
+				StartTime:      now.Add(-30 * time.Minute),
+				EndTime:        now.Add(30 * time.Minute),
 			},
 			preemptingClassification: ClassificationLeague,
 			expected:                 false,
@@ -202,9 +214,9 @@ func TestMatchReservation_CanBePreempted(t *testing.T) {
 			name: "Scrimmage can preempt mixed",
 			reservation: &MatchReservation{
 				Classification: ClassificationMixed,
-				State:         ReservationStateActivated,
-				StartTime:     now.Add(-30 * time.Minute),
-				EndTime:       now.Add(30 * time.Minute),
+				State:          ReservationStateActivated,
+				StartTime:      now.Add(-30 * time.Minute),
+				EndTime:        now.Add(30 * time.Minute),
 			},
 			preemptingClassification: ClassificationScrimmage,
 			expected:                 true,
@@ -213,9 +225,9 @@ func TestMatchReservation_CanBePreempted(t *testing.T) {
 			name: "Same classification with expired end time",
 			reservation: &MatchReservation{
 				Classification: ClassificationPickup,
-				State:         ReservationStateActivated,
-				StartTime:     now.Add(-90 * time.Minute),
-				EndTime:       now.Add(-10 * time.Minute), // Ended 10 minutes ago
+				State:          ReservationStateActivated,
+				StartTime:      now.Add(-90 * time.Minute),
+				EndTime:        now.Add(-10 * time.Minute), // Ended 10 minutes ago
 			},
 			preemptingClassification: ClassificationPickup,
 			expected:                 true,
@@ -224,9 +236,9 @@ func TestMatchReservation_CanBePreempted(t *testing.T) {
 			name: "Expired reservation",
 			reservation: &MatchReservation{
 				Classification: ClassificationPickup,
-				State:         ReservationStateReserved,
-				StartTime:     now.Add(-10 * time.Minute), // Started 10 minutes ago but never activated
-				EndTime:       now.Add(50 * time.Minute),
+				State:          ReservationStateReserved,
+				StartTime:      now.Add(-10 * time.Minute), // Started 10 minutes ago but never activated
+				EndTime:        now.Add(50 * time.Minute),
 			},
 			preemptingClassification: ClassificationPickup,
 			expected:                 true,
@@ -276,7 +288,7 @@ func TestMatchReservation_UpdateState(t *testing.T) {
 func TestReservationConflictDetection(t *testing.T) {
 	groupID := uuid.Must(uuid.NewV4())
 	baseTime := time.Now().Truncate(time.Minute)
-	
+
 	existing := &MatchReservation{
 		ID:        "existing",
 		GroupID:   groupID,
@@ -286,49 +298,49 @@ func TestReservationConflictDetection(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		requestStart  time.Time
-		requestEnd    time.Time
+		name           string
+		requestStart   time.Time
+		requestEnd     time.Time
 		shouldConflict bool
 		conflictType   string
 	}{
 		{
-			name:          "No conflict - before existing",
-			requestStart:  baseTime,
-			requestEnd:    baseTime.Add(30 * time.Minute),
+			name:           "No conflict - before existing",
+			requestStart:   baseTime,
+			requestEnd:     baseTime.Add(30 * time.Minute),
 			shouldConflict: false,
 		},
 		{
-			name:          "No conflict - after existing",
-			requestStart:  baseTime.Add(150 * time.Minute),
-			requestEnd:    baseTime.Add(180 * time.Minute),
+			name:           "No conflict - after existing",
+			requestStart:   baseTime.Add(150 * time.Minute),
+			requestEnd:     baseTime.Add(180 * time.Minute),
 			shouldConflict: false,
 		},
 		{
-			name:          "Overlap conflict - starts during existing",
-			requestStart:  baseTime.Add(90 * time.Minute),
-			requestEnd:    baseTime.Add(150 * time.Minute),
+			name:           "Overlap conflict - starts during existing",
+			requestStart:   baseTime.Add(90 * time.Minute),
+			requestEnd:     baseTime.Add(150 * time.Minute),
 			shouldConflict: true,
 			conflictType:   "overlap",
 		},
 		{
-			name:          "Overlap conflict - ends during existing",
-			requestStart:  baseTime.Add(30 * time.Minute),
-			requestEnd:    baseTime.Add(90 * time.Minute),
+			name:           "Overlap conflict - ends during existing",
+			requestStart:   baseTime.Add(30 * time.Minute),
+			requestEnd:     baseTime.Add(90 * time.Minute),
 			shouldConflict: true,
 			conflictType:   "overlap",
 		},
 		{
-			name:          "Complete overlap - encompasses existing",
-			requestStart:  baseTime.Add(30 * time.Minute),
-			requestEnd:    baseTime.Add(150 * time.Minute),
+			name:           "Complete overlap - encompasses existing",
+			requestStart:   baseTime.Add(30 * time.Minute),
+			requestEnd:     baseTime.Add(150 * time.Minute),
 			shouldConflict: true,
 			conflictType:   "overlap",
 		},
 		{
-			name:          "Adjacent - ends when existing starts",
-			requestStart:  baseTime.Add(30 * time.Minute),
-			requestEnd:    baseTime.Add(60 * time.Minute),
+			name:           "Adjacent - ends when existing starts",
+			requestStart:   baseTime.Add(30 * time.Minute),
+			requestEnd:     baseTime.Add(60 * time.Minute),
 			shouldConflict: true,
 			conflictType:   "adjacent",
 		},
@@ -338,7 +350,7 @@ func TestReservationConflictDetection(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			// Simulate conflict detection logic
 			hasConflict := test.requestStart.Before(existing.EndTime) && test.requestEnd.After(existing.StartTime)
-			
+
 			if hasConflict != test.shouldConflict {
 				t.Errorf("Expected conflict: %v, got: %v", test.shouldConflict, hasConflict)
 			}

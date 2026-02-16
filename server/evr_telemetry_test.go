@@ -9,42 +9,42 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
-// Simple logger implementation for testing
-type testLogger struct {
+// telemetryTestLogger is a simple logger for testing
+type telemetryTestLogger struct {
 	messages []string
 }
 
-func (l *testLogger) Debug(format string, v ...interface{}) {
+func (l *telemetryTestLogger) Debug(format string, v ...interface{}) {
 	l.messages = append(l.messages, "DEBUG")
 }
 
-func (l *testLogger) Info(format string, v ...interface{}) {
+func (l *telemetryTestLogger) Info(format string, v ...interface{}) {
 	l.messages = append(l.messages, "INFO")
 }
 
-func (l *testLogger) Warn(format string, v ...interface{}) {
+func (l *telemetryTestLogger) Warn(format string, v ...interface{}) {
 	l.messages = append(l.messages, "WARN")
 }
 
-func (l *testLogger) Error(format string, v ...interface{}) {
+func (l *telemetryTestLogger) Error(format string, v ...interface{}) {
 	l.messages = append(l.messages, "ERROR")
 }
 
-func (l *testLogger) Fields() map[string]interface{} {
+func (l *telemetryTestLogger) Fields() map[string]interface{} {
 	return make(map[string]interface{})
 }
 
-func (l *testLogger) WithField(key string, value interface{}) runtime.Logger {
+func (l *telemetryTestLogger) WithField(key string, value interface{}) runtime.Logger {
 	return l
 }
 
-func (l *testLogger) WithFields(map[string]interface{}) runtime.Logger {
+func (l *telemetryTestLogger) WithFields(map[string]interface{}) runtime.Logger {
 	return l
 }
 
 func TestEventJournal_Journal(t *testing.T) {
 	// Test that event journaling works without Redis (graceful degradation)
-	logger := &testLogger{}
+	logger := &telemetryTestLogger{}
 
 	eventJournal := NewEventJournal(nil, logger)
 
