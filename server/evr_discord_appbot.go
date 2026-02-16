@@ -2337,18 +2337,33 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return err
 			}
 
-			// set the player's next match
-			if err := SetNextMatchID(ctx, nk, userID, label.ID, AnyTeam, ""); err != nil {
-				logger.Error("Failed to set next match ID", zap.Error(err))
-				return fmt.Errorf("failed to set next match ID: %w", err)
+			// Get all party members (including the creator)
+			partyUserIDs, err := getPartyMembersForUser(ctx, nk, userID)
+			if err != nil {
+				logger.Error("Failed to get party members", zap.Error(err))
+				return fmt.Errorf("failed to get party members: %w", err)
+			}
+
+			// Set next_match_id for all party members so they join together
+			for _, memberUserID := range partyUserIDs {
+				if err := SetNextMatchID(ctx, nk, memberUserID, label.ID, AnyTeam, ""); err != nil {
+					logger.Error("Failed to set next match ID for party member", zap.String("memberUserID", memberUserID), zap.Error(err))
+					// Log error but continue - partial success is better than total failure
+				}
 			}
 
 			logger.WithFields(map[string]any{
-				"match_id": label.ID.String(),
-				"rtt_ms":   rttMs,
+				"match_id":      label.ID.String(),
+				"rtt_ms":        rttMs,
+				"party_members": len(partyUserIDs),
 			}).Info("Match created.")
 
-			content := fmt.Sprintf("Reservation will timeout <t:%d:R>. \n\nClick play or start matchmaking to automatically join your match.", startTime.Unix())
+			// Update content to reflect party size if applicable
+			if len(partyUserIDs) > 1 {
+				content = fmt.Sprintf("Reservation will timeout <t:%d:R>. \n\n**%d party members** will automatically join this match when you click play or start matchmaking.", startTime.Unix(), len(partyUserIDs))
+			} else {
+				content = fmt.Sprintf("Reservation will timeout <t:%d:R>. \n\nClick play or start matchmaking to automatically join your match.", startTime.Unix())
+			}
 
 			niceNameMap := map[evr.Symbol]string{
 				evr.ModeArenaPrivate:  "Private Arena Match",
