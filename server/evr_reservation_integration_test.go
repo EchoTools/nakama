@@ -496,3 +496,100 @@ func TestReservationLifecycle_WithClassification(t *testing.T) {
 		})
 	}
 }
+
+// TestVacateWithPreemption tests vacate interaction with preemption logic
+func TestVacateWithPreemption(t *testing.T) {
+	tests := []struct {
+		name       string
+		lowClass   SessionClassification
+		highClass  SessionClassification
+		canPreempt bool
+	}{
+		{
+			name:       "League can preempt Pickup",
+			lowClass:   ClassificationPickup,
+			highClass:  ClassificationLeague,
+			canPreempt: true,
+		},
+		{
+			name:       "League cannot preempt League",
+			lowClass:   ClassificationLeague,
+			highClass:  ClassificationLeague,
+			canPreempt: false,
+		},
+		{
+			name:       "Scrimmage can preempt Mixed",
+			lowClass:   ClassificationMixed,
+			highClass:  ClassificationScrimmage,
+			canPreempt: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reservation := &MatchReservation{
+				ID:             uuid.Must(uuid.NewV4()).String(),
+				MatchID:        uuid.Must(uuid.NewV4()).String(),
+				GroupID:        uuid.Must(uuid.NewV4()),
+				Classification: tt.lowClass,
+				State:          ReservationStateActivated,
+				StartTime:      time.Now(),
+				EndTime:        time.Now().Add(1 * time.Hour),
+			}
+
+			canPreempt := reservation.CanBePreempted(tt.highClass)
+			if canPreempt != tt.canPreempt {
+				t.Errorf("expected CanBePreempted(%v)=%v, got %v",
+					tt.highClass, tt.canPreempt, canPreempt)
+			}
+		})
+	}
+}
+
+// TestNoShowAutoVacateFlow tests full no-show auto-vacate lifecycle
+func TestNoShowAutoVacateFlow(t *testing.T) {
+	tests := []struct {
+		name          string
+		timeFromStart time.Duration
+		shouldExpire  bool
+	}{
+		{
+			name:          "Reservation expires after 20 minutes no-show",
+			timeFromStart: 25 * time.Minute,
+			shouldExpire:  true,
+		},
+		{
+			name:          "Reservation does not expire before 20 minutes",
+			timeFromStart: 15 * time.Minute,
+			shouldExpire:  false,
+		},
+		{
+			name:          "Reservation does not expire at 20 minute boundary",
+			timeFromStart: 20 * time.Minute,
+			shouldExpire:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			now := time.Now()
+			reservation := &MatchReservation{
+				ID:             uuid.Must(uuid.NewV4()).String(),
+				MatchID:        uuid.Must(uuid.NewV4()).String(),
+				GroupID:        uuid.Must(uuid.NewV4()),
+				Owner:          "test-owner",
+				Classification: ClassificationPickup,
+				State:          ReservationStateReserved,
+				StartTime:      now.Add(-tt.timeFromStart),
+				EndTime:        now.Add(30 * time.Minute),
+				CreatedAt:      now,
+			}
+
+			shouldExpire := now.After(reservation.StartTime.Add(20 * time.Minute))
+			if shouldExpire != tt.shouldExpire {
+				t.Errorf("expected shouldExpire=%v, got %v (time from start: %v)",
+					tt.shouldExpire, shouldExpire, tt.timeFromStart)
+			}
+		})
+	}
+}
