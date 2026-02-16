@@ -219,9 +219,24 @@ func (sum *ServerUtilizationMonitor) sendLowUtilizationAlert(ctx context.Context
 
 // GetGuildIDByGroupIDNK converts a group ID to guild ID
 func GetGuildIDByGroupIDNK(ctx context.Context, nk runtime.NakamaModule, groupID string) (string, error) {
-	// This would need to be implemented based on the existing guild group system
-	// For now, return a placeholder
-	return "placeholder_guild_id", nil
+	groups, err := nk.GroupsGetId(ctx, []string{groupID})
+	if err != nil {
+		return "", fmt.Errorf("failed to get group: %w", err)
+	}
+	if len(groups) == 0 {
+		return "", fmt.Errorf("group not found: %s", groupID)
+	}
+
+	var metadata GroupMetadata
+	if err := json.Unmarshal([]byte(groups[0].Metadata), &metadata); err != nil {
+		return "", fmt.Errorf("failed to unmarshal group metadata: %w", err)
+	}
+
+	if metadata.GuildID == "" {
+		return "", fmt.Errorf("guild_id not set in group metadata for group: %s", groupID)
+	}
+
+	return metadata.GuildID, nil
 }
 
 // GetGuildAuditChannelID gets the audit channel ID for a guild
