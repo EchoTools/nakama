@@ -740,6 +740,12 @@ func RuntimeLoggerToZapLogger(logger runtime.Logger) *zap.Logger {
 
 // getPartyMembersForUser retrieves all party members for a user, including the user themselves.
 // If the user is not in a party, it returns only the user's ID.
+//
+// Note: This helper currently never returns a non-nil error. Any failure to load
+// matchmaking settings or party membership information results in a fallback
+// of returning just []string{userID}. The error return value is kept for
+// future extensibility but callers should not rely on receiving a non-nil
+// error under normal circumstances.
 func getPartyMembersForUser(ctx context.Context, nk runtime.NakamaModule, userID string) ([]string, error) {
 	// Load the user's matchmaking settings to get their party group
 	settings, err := LoadMatchmakingSettings(ctx, nk, userID)
