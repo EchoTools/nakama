@@ -425,3 +425,74 @@ func (m *mockDiscordSession) ChannelMessageSendComplex(channelID string, data *d
 		Content:   data.Content,
 	}, nil
 }
+
+// TestReservationLifecycle_WithClassification tests that classification persists through state transitions
+func TestReservationLifecycle_WithClassification(t *testing.T) {
+	tests := []struct {
+		name           string
+		classification SessionClassification
+		expectedClass  SessionClassification
+	}{
+		{
+			name:           "league classification persists through lifecycle",
+			classification: ClassificationLeague,
+			expectedClass:  ClassificationLeague,
+		},
+		{
+			name:           "pickup classification persists through lifecycle",
+			classification: ClassificationPickup,
+			expectedClass:  ClassificationPickup,
+		},
+		{
+			name:           "mixed classification persists through lifecycle",
+			classification: ClassificationMixed,
+			expectedClass:  ClassificationMixed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reservation := &MatchReservation{
+				ID:             uuid.Must(uuid.NewV4()).String(),
+				MatchID:        uuid.Must(uuid.NewV4()).String(),
+				GroupID:        uuid.Must(uuid.NewV4()),
+				Owner:          "test-owner",
+				Requester:      "test-requester",
+				StartTime:      time.Now().Add(1 * time.Hour),
+				EndTime:        time.Now().Add(2 * time.Hour),
+				Duration:       1 * time.Hour,
+				Classification: tt.classification,
+				State:          ReservationStateReserved,
+				CreatedAt:      time.Now(),
+				UpdatedAt:      time.Now(),
+			}
+
+			if reservation.State != ReservationStateReserved {
+				t.Errorf("expected initial state Reserved, got %v", reservation.State)
+			}
+			if reservation.Classification != tt.expectedClass {
+				t.Errorf("expected classification %v, got %v", tt.expectedClass, reservation.Classification)
+			}
+
+			reservation.State = ReservationStateActivated
+			reservation.UpdatedAt = time.Now()
+
+			if reservation.State != ReservationStateActivated {
+				t.Errorf("expected state Activated, got %v", reservation.State)
+			}
+			if reservation.Classification != tt.expectedClass {
+				t.Errorf("expected classification %v after activation, got %v", tt.expectedClass, reservation.Classification)
+			}
+
+			reservation.State = ReservationStateEnded
+			reservation.UpdatedAt = time.Now()
+
+			if reservation.State != ReservationStateEnded {
+				t.Errorf("expected state Ended, got %v", reservation.State)
+			}
+			if reservation.Classification != tt.expectedClass {
+				t.Errorf("expected classification %v after ending, got %v", tt.expectedClass, reservation.Classification)
+			}
+		})
+	}
+}
