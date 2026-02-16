@@ -83,6 +83,9 @@ func (ri *ReservationIntegration) startReservationCleanup(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if err := ri.reservationMgr.CheckNoShowReservations(ctx); err != nil {
+				ri.logger.Error("Failed to check no-show reservations: %v", err)
+			}
 			ri.cleanupExpiredReservations(ctx)
 		}
 	}
