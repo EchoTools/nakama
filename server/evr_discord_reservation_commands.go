@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -399,4 +401,78 @@ func (h *ReservationSlashCommandHandler) handleReservationStatus(ctx context.Con
 func (h *ReservationSlashCommandHandler) handleDashboard(ctx context.Context, dg *discordgo.Session, i *discordgo.InteractionCreate, userID, guildID string, options []*discordgo.ApplicationCommandInteractionDataOption) error {
 	// TODO: Implement dashboard
 	return h.respondError(dg, i, "Dashboard not yet implemented")
+}
+
+type VacateCommandHandler struct {
+	nk     runtime.NakamaModule
+	logger runtime.Logger
+}
+
+func NewVacateCommandHandler(nk runtime.NakamaModule, logger runtime.Logger) *VacateCommandHandler {
+	return &VacateCommandHandler{
+		nk:     nk,
+		logger: logger,
+	}
+}
+
+func (h *VacateCommandHandler) HandleVacateCommand(ctx context.Context, dg *discordgo.Session, i *discordgo.InteractionCreate, userID string) error {
+	options := i.ApplicationCommandData().Options
+	if len(options) == 0 {
+		return errors.New("match-id required")
+	}
+
+	var matchIDStr string
+	var override bool
+
+	for _, opt := range options {
+		switch opt.Name {
+		case "match-id":
+			matchIDStr = opt.StringValue()
+		case "override":
+			override = opt.BoolValue()
+		}
+	}
+
+	matchIDStr = strings.TrimSpace(matchIDStr)
+	if matchIDStr == "" {
+		return errors.New("no match ID provided")
+	}
+
+	matchID := MatchIDFromStringOrNil(matchIDStr)
+	if matchID.IsNil() {
+		return fmt.Errorf("invalid match ID: %s", matchIDStr)
+	}
+
+	label, err := MatchLabelByID(ctx, h.nk, matchID)
+	if err != nil {
+		return fmt.Errorf("failed to get match label: %w", err)
+	}
+
+	callerUUID, err := uuid.FromString(userID)
+	if err != nil {
+		return fmt.Errorf("invalid user ID: %w", err)
+	}
+
+	if label.Owner != callerUUID {
+		return errors.New("only the reservation owner can vacate this server")
+	}
+
+	graceSeconds := 60
+	if override {
+		graceSeconds = 20
+	}
+
+	signal := SignalShutdownPayload{
+		GraceSeconds:         graceSeconds,
+		DisconnectGameServer: false,
+		DisconnectUsers:      false,
+	}
+
+	data := NewSignalEnvelope(userID, SignalShutdown, signal).String()
+
+	if _, err := h.nk.MatchSignal(ctx, matchID.String(), data); err != nil {
+		return fmt.Errorf("failed to signal match: %w", err)
+	}
+
+	return nil
 }
