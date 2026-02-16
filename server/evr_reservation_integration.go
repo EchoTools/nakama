@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
@@ -200,9 +201,9 @@ func (sum *ServerUtilizationMonitor) sendLowUtilizationAlert(ctx context.Context
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
-	if label.Owner != "" {
+	if label.Owner != uuid.Nil {
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name: "Owner", Value: fmt.Sprintf("<@%s>", label.Owner), Inline: true,
+			Name: "Owner", Value: fmt.Sprintf("<@%s>", label.Owner.String()), Inline: true,
 		})
 	}
 

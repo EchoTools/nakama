@@ -213,7 +213,7 @@ func (dm *ReservationDashboardManager) collectActiveMatches(ctx context.Context,
 			Classification: label.Classification,
 			PlayerCount:    label.PlayerCount,
 			Duration:       duration,
-			Owner:          label.Owner,
+			Owner:          label.Owner.String(),
 			LowActivity:    lowActivity,
 		}
 

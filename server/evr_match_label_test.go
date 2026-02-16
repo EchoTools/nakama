@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -337,4 +338,49 @@ func equalMaps(a, b map[evr.EvrId]int) bool {
 		}
 	}
 	return true
+}
+
+func TestMatchLabel_BackwardCompatJSON(t *testing.T) {
+	oldJSON := `{"id":"11111111-1111-1111-1111-111111111111.nakama1"}`
+
+	var label MatchLabel
+	err := json.Unmarshal([]byte(oldJSON), &label)
+	if err != nil {
+		t.Fatalf("old JSON should unmarshal without error, got: %v", err)
+	}
+
+	if label.Classification != ClassificationNone {
+		t.Errorf("expected Classification=None (0), got %v", label.Classification)
+	}
+
+	if label.Owner != uuid.Nil {
+		t.Errorf("expected Owner=zero-UUID, got %v", label.Owner)
+	}
+}
+
+func TestMatchLabel_ClassificationRoundtrip(t *testing.T) {
+	testUUID := uuid.Must(uuid.NewV4())
+	label := &MatchLabel{
+		ID:             MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "nakama1"},
+		Classification: ClassificationLeague,
+		Owner:          testUUID,
+	}
+
+	jsonBytes, err := json.Marshal(label)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+
+	var decoded MatchLabel
+	err = json.Unmarshal(jsonBytes, &decoded)
+	if err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+
+	if decoded.Classification != ClassificationLeague {
+		t.Errorf("expected Classification=League, got %v", decoded.Classification)
+	}
+	if decoded.Owner != testUUID {
+		t.Errorf("expected Owner=%v, got %v", testUUID, decoded.Owner)
+	}
 }
