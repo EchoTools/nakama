@@ -2326,7 +2326,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				"startTime": startTime,
 			})
 
-			label, rttMs, err := d.handleCreateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime)
+			// Get all party members (including the creator) before creating the match
+			// so we can set up team alignments and reservations
+			partyUserIDs, err := getPartyMembersForUser(ctx, nk, userID)
+			if err != nil {
+				logger.Error("Failed to get party members", zap.Error(err))
+				return fmt.Errorf("failed to get party members: %w", err)
+			}
+
+			label, rttMs, err := d.handleCreateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime, partyUserIDs)
 			if err != nil {
 				// Check if this is a region fallback error
 				var regionErr ErrMatchmakingNoServersInRegion
@@ -2335,13 +2343,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					return d.presentRegionFallbackOptions(s, i, regionErr.FallbackInfo, "create-match", region, mode, level, startTime)
 				}
 				return err
-			}
-
-			// Get all party members (including the creator)
-			partyUserIDs, err := getPartyMembersForUser(ctx, nk, userID)
-			if err != nil {
-				logger.Error("Failed to get party members", zap.Error(err))
-				return fmt.Errorf("failed to get party members: %w", err)
 			}
 
 			// Set next_match_id for all party members so they join together
