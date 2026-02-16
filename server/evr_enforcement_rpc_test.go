@@ -12,19 +12,19 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
-// mockNakamaModule is a minimal mock for testing the PlayerReportRPC
-type mockNakamaModule struct {
+// mockEnforcementNakamaModule is a minimal mock for testing the PlayerReportRPC
+type mockEnforcementNakamaModule struct {
 	runtime.NakamaModule
 	storageObjects map[string][]*api.StorageObject
 }
 
-func newMockNakamaModule() *mockNakamaModule {
-	return &mockNakamaModule{
+func newMockEnforcementNakamaModule() *mockEnforcementNakamaModule {
+	return &mockEnforcementNakamaModule{
 		storageObjects: make(map[string][]*api.StorageObject),
 	}
 }
 
-func (m *mockNakamaModule) UsersGetId(ctx context.Context, userIDs []string, facebookIDs []string) ([]*api.User, error) {
+func (m *mockEnforcementNakamaModule) UsersGetId(ctx context.Context, userIDs []string, facebookIDs []string) ([]*api.User, error) {
 	// Return mock users for any valid UUID
 	users := make([]*api.User, 0)
 	for _, id := range userIDs {
@@ -37,7 +37,7 @@ func (m *mockNakamaModule) UsersGetId(ctx context.Context, userIDs []string, fac
 	return users, nil
 }
 
-func (m *mockNakamaModule) GroupsGetId(ctx context.Context, groupIDs []string) ([]*api.Group, error) {
+func (m *mockEnforcementNakamaModule) GroupsGetId(ctx context.Context, groupIDs []string) ([]*api.Group, error) {
 	// Return mock groups for any valid UUID
 	groups := make([]*api.Group, 0)
 	for _, id := range groupIDs {
@@ -52,7 +52,7 @@ func (m *mockNakamaModule) GroupsGetId(ctx context.Context, groupIDs []string) (
 	return groups, nil
 }
 
-func (m *mockNakamaModule) StorageWrite(ctx context.Context, writes []*runtime.StorageWrite) ([]*api.StorageObjectAck, error) {
+func (m *mockEnforcementNakamaModule) StorageWrite(ctx context.Context, writes []*runtime.StorageWrite) ([]*api.StorageObjectAck, error) {
 	acks := make([]*api.StorageObjectAck, len(writes))
 	for i, write := range writes {
 		key := write.UserID + ":" + write.Collection + ":" + write.Key
@@ -73,7 +73,7 @@ func (m *mockNakamaModule) StorageWrite(ctx context.Context, writes []*runtime.S
 	return acks, nil
 }
 
-func (m *mockNakamaModule) StorageList(ctx context.Context, callerID, userID, collection string, limit int, cursor string) ([]*api.StorageObject, string, error) {
+func (m *mockEnforcementNakamaModule) StorageList(ctx context.Context, callerID, userID, collection string, limit int, cursor string) ([]*api.StorageObject, string, error) {
 	objects := make([]*api.StorageObject, 0)
 	for _, objs := range m.storageObjects {
 		for i := range objs {
@@ -99,7 +99,7 @@ func (m *mockNakamaModule) StorageList(ctx context.Context, callerID, userID, co
 	return objects, "", nil
 }
 
-func (m *mockNakamaModule) StorageRead(ctx context.Context, reads []*runtime.StorageRead) ([]*api.StorageObject, error) {
+func (m *mockEnforcementNakamaModule) StorageRead(ctx context.Context, reads []*runtime.StorageRead) ([]*api.StorageObject, error) {
 	objects := make([]*api.StorageObject, 0)
 	for _, read := range reads {
 		key := read.UserID + ":" + read.Collection + ":" + read.Key
@@ -117,7 +117,7 @@ func TestPlayerReportRPC_Success(t *testing.T) {
 	})
 
 	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_USER_ID, "reporter-user-id")
-	nk := newMockNakamaModule()
+	nk := newMockEnforcementNakamaModule()
 
 	reportedUserID := uuid.Must(uuid.NewV4()).String()
 	groupID := uuid.Must(uuid.NewV4()).String()
@@ -172,7 +172,7 @@ func TestPlayerReportRPC_Success(t *testing.T) {
 
 func TestPlayerReportRPC_MissingFields(t *testing.T) {
 	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_USER_ID, "reporter-user-id")
-	nk := newMockNakamaModule()
+	nk := newMockEnforcementNakamaModule()
 
 	tests := []struct {
 		name    string
@@ -233,7 +233,7 @@ func TestPlayerReportRPC_MissingFields(t *testing.T) {
 func TestPlayerReportRPC_SelfReport(t *testing.T) {
 	userID := uuid.Must(uuid.NewV4()).String()
 	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_USER_ID, userID)
-	nk := newMockNakamaModule()
+	nk := newMockEnforcementNakamaModule()
 
 	request := PlayerReportRequest{
 		ReportedUserID: userID, // Same as reporter
@@ -256,7 +256,7 @@ func TestPlayerReportRPC_RateLimit(t *testing.T) {
 	})
 
 	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_USER_ID, "reporter-user-id")
-	nk := newMockNakamaModule()
+	nk := newMockEnforcementNakamaModule()
 
 	reportedUserID := uuid.Must(uuid.NewV4()).String()
 	groupID := uuid.Must(uuid.NewV4()).String()
@@ -306,7 +306,7 @@ func TestPlayerReportRPC_RateLimit(t *testing.T) {
 
 func TestPlayerReportRPC_InvalidUUID(t *testing.T) {
 	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_USER_ID, "reporter-user-id")
-	nk := newMockNakamaModule()
+	nk := newMockEnforcementNakamaModule()
 
 	tests := []struct {
 		name           string
@@ -345,7 +345,7 @@ func TestPlayerReportRPC_InvalidUUID(t *testing.T) {
 
 func TestCheckReportRateLimit(t *testing.T) {
 	ctx := context.Background()
-	nk := newMockNakamaModule()
+	nk := newMockEnforcementNakamaModule()
 	userID := "test-user"
 
 	// No reports yet - should pass
