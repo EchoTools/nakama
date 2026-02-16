@@ -2,10 +2,7 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -15,10 +12,10 @@ import (
 
 // ReservationSlashCommandHandler handles all /reserve slash command interactions
 type ReservationSlashCommandHandler struct {
-	nk              runtime.NakamaModule
-	logger          runtime.Logger
-	reservationMgr  *ReservationManager
-	preemptionMgr   *MatchPreemptionManager
+	nk             runtime.NakamaModule
+	logger         runtime.Logger
+	reservationMgr *ReservationManager
+	preemptionMgr  *MatchPreemptionManager
 }
 
 // NewReservationSlashCommandHandler creates a new reservation command handler
@@ -39,7 +36,7 @@ func (h *ReservationSlashCommandHandler) HandleReserveCommand(ctx context.Contex
 	}
 
 	subcommand := options[0]
-	
+
 	// Get the user's information
 	userID, guildID, err := h.getUserInfo(ctx, i)
 	if err != nil {
@@ -100,7 +97,7 @@ func (h *ReservationSlashCommandHandler) handleAddReservation(ctx context.Contex
 	classification := ParseSessionClassification(classificationStr)
 
 	// Get guild group ID
-	groupID, err := GetGroupIDByGuildID(ctx, h.nk, guildID)
+	groupID, err := GetGroupIDByGuildIDNK(ctx, h.nk, guildID)
 	if err != nil {
 		return h.respondError(dg, i, "Failed to get guild group information")
 	}
@@ -154,7 +151,7 @@ func (h *ReservationSlashCommandHandler) handleCheckReservation(ctx context.Cont
 	}
 
 	reservationID := options[0].StringValue()
-	
+
 	reservation, err := h.reservationMgr.GetReservation(ctx, reservationID)
 	if err != nil {
 		return h.respondError(dg, i, "Reservation not found")
@@ -162,7 +159,7 @@ func (h *ReservationSlashCommandHandler) handleCheckReservation(ctx context.Cont
 
 	// Build status embed
 	embed := h.buildReservationEmbed(reservation)
-	
+
 	return dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
@@ -187,7 +184,7 @@ func (h *ReservationSlashCommandHandler) handleListReservations(ctx context.Cont
 	}
 
 	// Get guild group ID
-	groupID, err := GetGroupIDByGuildID(ctx, h.nk, guildID)
+	groupID, err := GetGroupIDByGuildIDNK(ctx, h.nk, guildID)
 	if err != nil {
 		return h.respondError(dg, i, "Failed to get guild group information")
 	}
@@ -220,7 +217,7 @@ func (h *ReservationSlashCommandHandler) handleListReservations(ctx context.Cont
 			statusIcon := h.getStateIcon(res.State)
 			timeStr := fmt.Sprintf("<t:%d:t>", res.StartTime.Unix())
 			durationStr := fmt.Sprintf("(%dm)", int(res.Duration.Minutes()))
-			
+
 			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 				Name:   fmt.Sprintf("%s %s %s", statusIcon, res.Classification.String(), timeStr),
 				Value:  fmt.Sprintf("ID: `%s` %s\nOwner: <@%s>", res.ID[:8], durationStr, res.Owner),
@@ -245,7 +242,7 @@ func (h *ReservationSlashCommandHandler) getUserInfo(ctx context.Context, i *dis
 	guildID = i.GuildID
 
 	// Convert Discord ID to Nakama user ID
-	userID, err = GetUserIDByDiscordID(ctx, h.nk, discordUserID)
+	userID, err = GetUserIDByDiscordIDNK(ctx, h.nk, discordUserID)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to get user ID: %w", err)
 	}
@@ -272,11 +269,11 @@ func (h *ReservationSlashCommandHandler) respondError(dg *discordgo.Session, i *
 
 func (h *ReservationSlashCommandHandler) buildReservationEmbed(reservation *MatchReservation) *discordgo.MessageEmbed {
 	statusIcon := h.getStateIcon(reservation.State)
-	
+
 	embed := &discordgo.MessageEmbed{
-		Title:       fmt.Sprintf("%s Reservation %s", statusIcon, reservation.ID[:8]),
-		Color:       h.getStateColor(reservation.State),
-		Timestamp:   reservation.UpdatedAt.Format(time.RFC3339),
+		Title:     fmt.Sprintf("%s Reservation %s", statusIcon, reservation.ID[:8]),
+		Color:     h.getStateColor(reservation.State),
+		Timestamp: reservation.UpdatedAt.Format(time.RFC3339),
 	}
 
 	// Basic info

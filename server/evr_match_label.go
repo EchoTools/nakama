@@ -44,6 +44,7 @@ type MatchLabel struct {
 	Classification  SessionClassification     `json:"classification,omitempty"`   // Priority classification for purging logic
 	StartTime       time.Time                 `json:"start_time,omitempty"`       // The time the match was, or will be started.
 	CreatedAt       time.Time                 `json:"created_at,omitempty"`       // The time the match was created.
+	Description     string                    `json:"description,omitempty"`      // The description of the match.
 	GameServer      *GameServerPresence       `json:"broadcaster,omitempty"`      // The broadcaster's data
 	SessionSettings *evr.LobbySessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
 	TeamAlignments  map[string]int            `json:"team_alignments,omitempty"`  // map[userID]TeamIndex

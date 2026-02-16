@@ -166,6 +166,12 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		logger.Info("MongoDB URI not configured, match summarization will not be available")
 	}
 
+	if mongoClient != nil {
+		if err := RegisterSessionEventRPCs(ctx, logger, db, nk, initializer, mongoClient); err != nil {
+			return fmt.Errorf("unable to register session event RPCs: %w", err)
+		}
+	}
+
 	// Initialize event journaling system
 	var eventJournal *EventJournal
 	var telemetryManager *LobbyTelemetryManager
@@ -207,7 +213,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	// Register the event dispatch
 
-	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, mongoClient, dg, statisticsQueue, vrmlScanQueue)
+	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, mongoClient, journalRedisClient, dg, statisticsQueue, vrmlScanQueue)
 	if err != nil {
 		return fmt.Errorf("unable to create event dispatch: %w", err)
 	}
@@ -247,24 +253,6 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	// Add telemetry stream RPCs
 	if err := RegisterTelemetryStreamRPCs(ctx, logger, db, nk, initializer); err != nil {
 		return fmt.Errorf("unable to register telemetry stream RPCs: %w", err)
-	}
-
-	// Initialize MongoDB client if configured
-	var mongoClient *mongo.Client
-	if mongoURI, ok := vars["MONGO_URI"]; ok && mongoURI != "" {
-		mongoClient, err = connectMongo(ctx, mongoURI)
-		if err != nil {
-			logger.Warn("Failed to connect to MongoDB, session events will not be available.", zap.Error(err))
-		} else {
-			logger.Info("Connected to MongoDB for session events")
-
-			// Register session event RPCs
-			if err := RegisterSessionEventRPCs(ctx, logger, db, nk, initializer, mongoClient); err != nil {
-				return fmt.Errorf("unable to register session event RPCs: %w", err)
-			}
-		}
-	} else {
-		logger.Warn("MONGO_URI is not set, session event RPCs will not be available.")
 	}
 
 	logger.Info("Initialized runtime module.")

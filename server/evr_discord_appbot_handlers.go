@@ -13,7 +13,6 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"go.uber.org/thriftrw/ptr"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc/codes"
@@ -470,7 +469,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		// Handle taxi button - create a spark link for the session
 		sessionUUID := strings.ToLower(value)
 		sparkURL := fmt.Sprintf("https://echo.taxi/spark://j/%s", sessionUUID)
-		
+
 		return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
@@ -482,7 +481,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		// Handle join button - create a direct spark link
 		sessionUUID := strings.ToLower(value)
 		sparkLink := fmt.Sprintf("spark://j/%s", sessionUUID)
-		
+
 		return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{

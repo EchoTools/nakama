@@ -43,22 +43,22 @@ func (rm *ReservationManager) CreateReservation(ctx context.Context, req *Create
 
 	// Create the reservation
 	reservation := &MatchReservation{
-		ID:             uuid.Must(uuid.NewV4()).String(),
-		GroupID:        req.GroupID,
-		Owner:          req.Owner,
-		Requester:      req.Requester,
-		StartTime:      req.StartTime,
-		EndTime:        req.EndTime,
-		Duration:       req.EndTime.Sub(req.StartTime),
-		Classification: req.Classification,
-		State:          ReservationStateReserved,
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
-		Mode:           req.Mode,
-		Level:          req.Level,
-		TeamSize:       req.TeamSize,
+		ID:               uuid.Must(uuid.NewV4()).String(),
+		GroupID:          req.GroupID,
+		Owner:            req.Owner,
+		Requester:        req.Requester,
+		StartTime:        req.StartTime,
+		EndTime:          req.EndTime,
+		Duration:         req.EndTime.Sub(req.StartTime),
+		Classification:   req.Classification,
+		State:            ReservationStateReserved,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+		Mode:             req.Mode,
+		Level:            req.Level,
+		TeamSize:         req.TeamSize,
 		RequiredFeatures: req.RequiredFeatures,
-		TeamAlignments: req.TeamAlignments,
+		TeamAlignments:   req.TeamAlignments,
 		StateHistory: []ReservationStateTransition{{
 			FromState: "",
 			ToState:   ReservationStateReserved,
@@ -72,7 +72,7 @@ func (rm *ReservationManager) CreateReservation(ctx context.Context, req *Create
 		return nil, fmt.Errorf("failed to store reservation: %w", err)
 	}
 
-	rm.logger.Info("Created reservation %s for group %s from %v to %v", 
+	rm.logger.Info("Created reservation %s for group %s from %v to %v",
 		reservation.ID, reservation.GroupID.String(), reservation.StartTime, reservation.EndTime)
 
 	return reservation, nil
@@ -127,7 +127,7 @@ func (rm *ReservationManager) ListReservations(ctx context.Context, groupID uuid
 	// Query storage for reservations
 	// Note: In a production system, you'd want to use an index for efficient querying
 	// For now, we'll list all reservations and filter
-	objects, _, err := rm.nk.StorageList(ctx, SystemUserID, ReservationStorageCollection, 100, "")
+	objects, _, err := rm.nk.StorageList(ctx, SystemUserID, SystemUserID, ReservationStorageCollection, 100, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list reservations: %w", err)
 	}
@@ -194,7 +194,7 @@ func (rm *ReservationManager) checkReservationConflicts(ctx context.Context, gro
 		// Check for overlap
 		if startTime.Before(existing.EndTime) && endTime.After(existing.StartTime) {
 			conflictType := "overlap"
-			
+
 			// Check if it's just adjacent (within 5 minutes)
 			if startTime.Equal(existing.EndTime) || endTime.Equal(existing.StartTime) {
 				conflictType = "adjacent"

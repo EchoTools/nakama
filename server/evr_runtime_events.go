@@ -18,13 +18,19 @@ import (
 )
 
 const (
-	EventLobbySessionAuthorized = "lobby_session_authorized"
-	EventSessionStart           = "session_start"
-	EventSessionEnd             = "session_end"
-	EventMatchData              = "match_data"
-	matchDataDatabaseName       = "nevr"
-	matchDataCollectionName     = "match_data"
+	EventLobbySessionAuthorized    = "lobby_session_authorized"
+	EventSessionStart              = "session_start"
+	EventSessionEnd                = "session_end"
+	EventMatchData                 = "match_data"
+	matchDataDatabaseName          = "nevr"
+	matchDataCollectionName        = "match_data"
+	redisMatchDataJournalQueueKey  = "match_data_journal_queue"
+	matchDataJournalEventThreshold = 100
+	redisQueueBatchSize            = 10
 )
+
+const eventDispatchTimeout = 5 * time.Second
+const matchDataJournalMaxAge = 1 * time.Minute
 
 type Event interface {
 	Process(ctx context.Context, logger runtime.Logger, dispatcher *EventDispatcher) error
@@ -511,8 +517,8 @@ func (h *EventDispatcher) processRedisQueue(ctx context.Context, logger runtime.
 		return
 	}
 
-	queueKey := "match_data_journal_queue"
-	
+	queueKey := redisMatchDataJournalQueueKey
+
 	// Process up to 10 items per batch
 	for i := 0; i < redisQueueBatchSize; i++ {
 		result, err := h.redis.BRPop(1*time.Second, queueKey).Result()

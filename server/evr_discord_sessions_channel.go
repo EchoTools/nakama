@@ -27,29 +27,29 @@ const (
 
 // SessionMessageTracker tracks active session messages for updates
 type SessionMessageTracker struct {
-	SessionID    string    `json:"session_id"`
-	MessageID    string    `json:"message_id"`
-	ChannelID    string    `json:"channel_id"`
-	GuildID      string    `json:"guild_id"`
-	LastUpdated  time.Time `json:"last_updated"`
-	CreatedAt    time.Time `json:"created_at"`
+	SessionID   string    `json:"session_id"`
+	MessageID   string    `json:"message_id"`
+	ChannelID   string    `json:"channel_id"`
+	GuildID     string    `json:"guild_id"`
+	LastUpdated time.Time `json:"last_updated"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // SessionsChannelManager manages Discord session messages
 type SessionsChannelManager struct {
 	sync.RWMutex
-	
+
 	ctx    context.Context
 	logger runtime.Logger
 	nk     runtime.NakamaModule
 	dg     *discordgo.Session
-	
+
 	// Track active session messages in memory for quick access
 	activeMessages map[string]*SessionMessageTracker
-	
+
 	// Channel for stopping the update goroutine
 	stopCh chan struct{}
-	
+
 	// Wait group for graceful shutdown
 	wg sync.WaitGroup
 }
@@ -64,14 +64,14 @@ func NewSessionsChannelManager(ctx context.Context, logger runtime.Logger, nk ru
 		activeMessages: make(map[string]*SessionMessageTracker),
 		stopCh:         make(chan struct{}),
 	}
-	
+
 	// Load existing tracked messages from Redis
 	manager.loadTrackedMessages()
-	
+
 	// Start the update goroutine
 	manager.wg.Add(1)
 	go manager.updateLoop()
-	
+
 	return manager
 }
 
@@ -93,21 +93,21 @@ func (sm *SessionsChannelManager) loadTrackedMessages() {
 		sm.logger.Error("Failed to load session message trackers from storage", zap.Error(err))
 		return
 	}
-	
+
 	if len(storageObjects) == 0 {
 		return
 	}
-	
+
 	var trackers map[string]*SessionMessageTracker
 	if err := json.Unmarshal([]byte(storageObjects[0].Value), &trackers); err != nil {
 		sm.logger.Error("Failed to unmarshal session message trackers", zap.Error(err))
 		return
 	}
-	
+
 	sm.Lock()
 	defer sm.Unlock()
 	sm.activeMessages = trackers
-	
+
 	sm.logger.Info("Loaded session message trackers", zap.Int("count", len(trackers)))
 }
 
@@ -119,13 +119,13 @@ func (sm *SessionsChannelManager) saveTrackedMessages() {
 		trackers[k] = v
 	}
 	sm.RUnlock()
-	
+
 	data, err := json.Marshal(trackers)
 	if err != nil {
 		sm.logger.Error("Failed to marshal session message trackers", zap.Error(err))
 		return
 	}
-	
+
 	_, err = sm.nk.StorageWrite(sm.ctx, []*runtime.StorageWrite{
 		{
 			Collection:      "discord",
@@ -144,9 +144,9 @@ func (sm *SessionsChannelManager) saveTrackedMessages() {
 func (sm *SessionsChannelManager) PostSessionMessage(label *MatchLabel, guildGroup *GuildGroup) error {
 	// Create the embed and components
 	embed, components := sm.createSessionEmbed(label, guildGroup)
-	
+
 	var postedMessages []string
-	
+
 	// Post to guild sessions channel if configured
 	if guildGroup.SessionsChannelID != "" {
 		message, err := sm.dg.ChannelMessageSendComplex(guildGroup.SessionsChannelID, &discordgo.MessageSend{
@@ -154,7 +154,7 @@ func (sm *SessionsChannelManager) PostSessionMessage(label *MatchLabel, guildGro
 			Components: components,
 		})
 		if err != nil {
-			sm.logger.Error("Failed to send session message to guild channel", 
+			sm.logger.Error("Failed to send session message to guild channel",
 				zap.String("channel_id", guildGroup.SessionsChannelID),
 				zap.Error(err))
 		} else {
@@ -167,15 +167,15 @@ func (sm *SessionsChannelManager) PostSessionMessage(label *MatchLabel, guildGro
 				LastUpdated: time.Now(),
 				CreatedAt:   time.Now(),
 			}
-			
+
 			sm.Lock()
 			sm.activeMessages[label.ID.String()] = tracker
 			sm.Unlock()
-			
+
 			postedMessages = append(postedMessages, fmt.Sprintf("guild:%s", message.ID))
 		}
 	}
-	
+
 	// Post to service sessions channel if configured
 	if serviceChannelID := ServiceSettings().ServiceSessionsChannelID; serviceChannelID != "" {
 		message, err := sm.dg.ChannelMessageSendComplex(serviceChannelID, &discordgo.MessageSend{
@@ -183,7 +183,7 @@ func (sm *SessionsChannelManager) PostSessionMessage(label *MatchLabel, guildGro
 			Components: components,
 		})
 		if err != nil {
-			sm.logger.Error("Failed to send session message to service channel", 
+			sm.logger.Error("Failed to send session message to service channel",
 				zap.String("channel_id", serviceChannelID),
 				zap.Error(err))
 		} else {
@@ -196,59 +196,59 @@ func (sm *SessionsChannelManager) PostSessionMessage(label *MatchLabel, guildGro
 				LastUpdated: time.Now(),
 				CreatedAt:   time.Now(),
 			}
-			
+
 			sm.Lock()
 			sm.activeMessages[label.ID.String()+"_service"] = tracker
 			sm.Unlock()
-			
+
 			postedMessages = append(postedMessages, fmt.Sprintf("service:%s", message.ID))
 		}
 	}
-	
+
 	if len(postedMessages) == 0 {
 		// No sessions channels configured
 		return nil
 	}
-	
+
 	// Save to storage
 	sm.saveTrackedMessages()
-	
-	sm.logger.Info("Posted session messages", 
+
+	sm.logger.Info("Posted session messages",
 		zap.String("session_id", label.ID.String()),
 		zap.Strings("messages", postedMessages))
-	
+
 	return nil
 }
 
 // createSessionEmbed creates the Discord embed and components for a session
 func (sm *SessionsChannelManager) createSessionEmbed(label *MatchLabel, guildGroup *GuildGroup) ([]*discordgo.MessageEmbed, []discordgo.MessageComponent) {
 	sessionUUID := strings.ToUpper(label.ID.UUID.String())
-	
+
 	// Calculate duration (this will be updated in the loop)
 	duration := time.Since(label.StartTime)
 	durationStr := fmt.Sprintf("%.0f minutes", duration.Minutes())
-	
+
 	// Get player count
 	playerCount := len(label.Players)
 	maxPlayers := 8 // Default for most game modes
 	if label.Mode == evr.ModeArenaPublic || label.Mode == evr.ModeCombatPublic {
 		maxPlayers = MaxPlayersArenaCombatPublic
 	}
-	
+
 	// Determine server location (approximate)
 	serverLocation := "Unknown"
 	if label.GameServer != nil {
 		// Use the endpoint string for server location
 		serverLocation = label.GameServer.Endpoint.String()
 	}
-	
+
 	// Get operator information
 	operatedBy := "Unknown"
 	if label.SpawnedBy != "" {
 		// Try to get Discord ID for the spawned by user
 		operatedBy = label.SpawnedBy
 	}
-	
+
 	// Create the main embed
 	mainEmbed := &discordgo.MessageEmbed{
 		Title: fmt.Sprintf("%s Session", label.Mode.String()),
@@ -266,7 +266,7 @@ func (sm *SessionsChannelManager) createSessionEmbed(label *MatchLabel, guildGro
 			{Name: "Operated By", Value: operatedBy, Inline: true},
 		},
 	}
-	
+
 	// Add endpoint if available
 	if label.GameServer != nil {
 		endpoint := fmt.Sprintf("`%s`", label.GameServer.Endpoint.String())
@@ -276,15 +276,15 @@ func (sm *SessionsChannelManager) createSessionEmbed(label *MatchLabel, guildGro
 			Inline: true,
 		})
 	}
-	
+
 	embeds := []*discordgo.MessageEmbed{mainEmbed}
-	
+
 	// Create match details embed if there are players
 	if len(label.Players) > 0 {
 		matchEmbed := sm.createMatchDetailsEmbed(label)
 		embeds = append(embeds, matchEmbed)
 	}
-	
+
 	// Create interactive components
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
@@ -308,7 +308,7 @@ func (sm *SessionsChannelManager) createSessionEmbed(label *MatchLabel, guildGro
 			},
 		},
 	}
-	
+
 	return embeds, components
 }
 
@@ -317,7 +317,7 @@ func (sm *SessionsChannelManager) createMatchDetailsEmbed(label *MatchLabel) *di
 	embed := &discordgo.MessageEmbed{
 		Fields: make([]*discordgo.MessageEmbedField, 0),
 	}
-	
+
 	// Add match status/scores if available
 	if label.LobbyType != UnassignedLobby {
 		if label.GameState != nil {
@@ -327,23 +327,23 @@ func (sm *SessionsChannelManager) createMatchDetailsEmbed(label *MatchLabel) *di
 				remainingTime := label.GameState.RoundClock.Duration - label.GameState.RoundClock.Elapsed
 				if remainingTime > 0 {
 					roundLabel := "Current Round"
-					description += fmt.Sprintf("\n%s (~%dm%02ds remaining)", 
-						roundLabel, 
-						int(remainingTime.Minutes()), 
+					description += fmt.Sprintf("\n%s (~%dm%02ds remaining)",
+						roundLabel,
+						int(remainingTime.Minutes()),
 						int(remainingTime.Seconds())%60)
 				}
 			}
 			embed.Description = description
 		}
-		
+
 		// Group players by team
 		blueTeam := make([]string, 0)
 		orangeTeam := make([]string, 0)
 		spectators := make([]string, 0)
-		
+
 		for _, player := range label.Players {
 			playerStr := fmt.Sprintf("`%3d ms` %s", player.PingMillis, player.DisplayName)
-			
+
 			switch player.Team {
 			case BlueTeam:
 				blueTeam = append(blueTeam, playerStr)
@@ -353,7 +353,7 @@ func (sm *SessionsChannelManager) createMatchDetailsEmbed(label *MatchLabel) *di
 				spectators = append(spectators, player.DisplayName)
 			}
 		}
-		
+
 		// Add team fields
 		if len(blueTeam) > 0 {
 			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
@@ -362,7 +362,7 @@ func (sm *SessionsChannelManager) createMatchDetailsEmbed(label *MatchLabel) *di
 				Inline: true,
 			})
 		}
-		
+
 		if len(orangeTeam) > 0 {
 			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 				Name:   "Orange",
@@ -370,7 +370,7 @@ func (sm *SessionsChannelManager) createMatchDetailsEmbed(label *MatchLabel) *di
 				Inline: true,
 			})
 		}
-		
+
 		if len(spectators) > 0 {
 			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 				Name:   "Spectators",
@@ -379,17 +379,17 @@ func (sm *SessionsChannelManager) createMatchDetailsEmbed(label *MatchLabel) *di
 			})
 		}
 	}
-	
+
 	return embed
 }
 
 // updateLoop runs the periodic update of session messages
 func (sm *SessionsChannelManager) updateLoop() {
 	defer sm.wg.Done()
-	
+
 	ticker := time.NewTicker(SessionUpdateInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-sm.stopCh:
@@ -408,7 +408,7 @@ func (sm *SessionsChannelManager) updateSessionMessages() {
 		trackers = append(trackers, tracker)
 	}
 	sm.RUnlock()
-	
+
 	for _, tracker := range trackers {
 		if err := sm.updateSessionMessage(tracker); err != nil {
 			sm.logger.Error("Failed to update session message",
@@ -426,7 +426,7 @@ func (sm *SessionsChannelManager) updateSessionMessage(tracker *SessionMessageTr
 	if err != nil {
 		return fmt.Errorf("failed to find match: %w", err)
 	}
-	
+
 	if len(matches) == 0 {
 		// Match no longer exists, remove from tracking
 		sm.Lock()
@@ -435,22 +435,22 @@ func (sm *SessionsChannelManager) updateSessionMessage(tracker *SessionMessageTr
 		sm.saveTrackedMessages()
 		return nil
 	}
-	
+
 	// Parse the match label
 	label := &MatchLabel{}
 	if err := json.Unmarshal([]byte(matches[0].GetLabel().GetValue()), label); err != nil {
 		return fmt.Errorf("failed to unmarshal match label: %w", err)
 	}
-	
+
 	// Get guild group for the match
 	guildGroup, err := sm.getGuildGroupForMatch(label)
 	if err != nil {
 		return fmt.Errorf("failed to get guild group: %w", err)
 	}
-	
+
 	// Create updated embed and components
 	embeds, components := sm.createSessionEmbed(label, guildGroup)
-	
+
 	// Update the Discord message
 	_, err = sm.dg.ChannelMessageEditComplex(&discordgo.MessageEdit{
 		Channel:    tracker.ChannelID,
@@ -467,10 +467,10 @@ func (sm *SessionsChannelManager) updateSessionMessage(tracker *SessionMessageTr
 		sm.saveTrackedMessages()
 		return fmt.Errorf("failed to edit message (removing from tracking): %w", err)
 	}
-	
+
 	// Update tracker
 	tracker.LastUpdated = time.Now()
-	
+
 	return nil
 }
 
@@ -482,7 +482,7 @@ func (sm *SessionsChannelManager) getGuildGroupForMatch(label *MatchLabel) (*Gui
 			return guildGroup, nil
 		}
 	}
-	
+
 	// Fallback - return an error if we can't find the guild group
 	return nil, fmt.Errorf("guild group not found for group ID: %s", label.GroupID.String())
 }
@@ -491,25 +491,25 @@ func (sm *SessionsChannelManager) getGuildGroupForMatch(label *MatchLabel) (*Gui
 func (sm *SessionsChannelManager) RemoveSessionMessage(sessionID string) {
 	sm.Lock()
 	defer sm.Unlock()
-	
+
 	var removedTrackers []string
-	
+
 	// Remove the primary guild message
 	if tracker, exists := sm.activeMessages[sessionID]; exists {
 		delete(sm.activeMessages, sessionID)
 		removedTrackers = append(removedTrackers, fmt.Sprintf("guild:%s", tracker.MessageID))
 	}
-	
+
 	// Remove the service message if it exists
 	serviceKey := sessionID + "_service"
 	if tracker, exists := sm.activeMessages[serviceKey]; exists {
 		delete(sm.activeMessages, serviceKey)
 		removedTrackers = append(removedTrackers, fmt.Sprintf("service:%s", tracker.MessageID))
 	}
-	
+
 	if len(removedTrackers) > 0 {
 		sm.saveTrackedMessages()
-		
+
 		sm.logger.Info("Removed session messages from tracking",
 			zap.String("session_id", sessionID),
 			zap.Strings("removed", removedTrackers))
