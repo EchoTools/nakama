@@ -120,6 +120,32 @@ func processReservationAllocation(ctx context.Context, logger runtime.Logger, nk
 		logger.Warn("Failed to update reservation state: %v", err)
 	}
 
+	// Send activation DM to the owner if discord session is available
+	if dg != nil {
+		matchID := reservation.MatchID
+		if matchID == "" {
+			matchID = reservation.ID
+		}
+		dmContent := BuildReservationActivationDM(matchID)
+
+		ownerID := reservation.Owner
+		if dmUser, err := dg.User(ownerID); err == nil && dmUser != nil {
+			dmChannel, err := dg.UserChannelCreate(dmUser.ID)
+			if err != nil {
+				logger.Warn("Failed to create DM channel for user %s: %v", ownerID, err)
+			} else if dmChannel != nil {
+				_, err = dg.ChannelMessageSend(dmChannel.ID, dmContent)
+				if err != nil {
+					logger.Warn("Failed to send activation DM to user %s: %v", ownerID, err)
+				} else {
+					logger.Info("Sent reservation activation DM to user %s for reservation %s", ownerID, reservation.ID)
+				}
+			}
+		} else if err != nil {
+			logger.Warn("Failed to get Discord user %s: %v", ownerID, err)
+		}
+	}
+
 	// TODO: Implement actual match allocation logic here
 	// For now, return success
 	response.Success = true
