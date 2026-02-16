@@ -808,6 +808,34 @@ var (
 					Description: "Optional description for the match (visible in /show command)",
 					Required:    false,
 				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "class",
+					Description: "Match classification (none, pickup, mixed, scrimmage, league)",
+					Required:    false,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{
+							Name:  "None",
+							Value: "none",
+						},
+						{
+							Name:  "Pickup",
+							Value: "pickup",
+						},
+						{
+							Name:  "Mixed",
+							Value: "mixed",
+						},
+						{
+							Name:  "Scrimmage",
+							Value: "scrimmage",
+						},
+						{
+							Name:  "League",
+							Value: "league",
+						},
+					},
+				},
 			},
 		},
 		{
@@ -2500,6 +2528,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			region := "default"
 			level := evr.LevelUnspecified
 			description := ""
+			classification := ClassificationNone
 			for _, o := range options {
 				switch o.Name {
 				case "region":
@@ -2510,6 +2539,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					level = evr.ToSymbol(o.StringValue())
 				case "description":
 					description = strings.TrimSpace(o.StringValue())
+				case "class":
+					classification = ParseSessionClassification(o.StringValue())
 				}
 			}
 
@@ -2536,7 +2567,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				"startTime": startTime,
 			})
 
-			label, _, err := d.handleAllocateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime, description)
+			label, _, err := d.handleAllocateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime, description, classification)
 			if err != nil {
 				// Check if this is a region fallback error
 				var regionErr ErrMatchmakingNoServersInRegion
@@ -3707,7 +3738,7 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 		}
 
 		embed.Footer = &discordgo.MessageEmbedFooter{
-			Text: fmt.Sprintf("Expires %s", t.Format(time.RFC1123)),
+			Text: fmt.Sprintf("Expires %s • ⚠️ Deprecated: use persistent embeds (see /show)", t.Format(time.RFC1123)),
 		}
 		// Update the message for the given region
 		_, err = d.dg.ChannelMessageEditEmbed(channelID, existingMessage.ID, embed)
@@ -3718,6 +3749,9 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 		return nil
 	} else {
 		// Create the message and update it regularly
+		embed.Footer = &discordgo.MessageEmbedFooter{
+			Text: "⚠️ Deprecated: Persistent embeds are now preferred - use /show for always-visible updates",
+		}
 		msg, err := d.dg.ChannelMessageSendEmbed(channelID, embed)
 		if err != nil {
 			return err
