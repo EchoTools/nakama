@@ -26,8 +26,25 @@ type BreakAlternatesRPCResponse struct {
 }
 
 func (r BreakAlternatesRPCResponse) String() string {
-	data, _ := json.Marshal(r)
+	data, err := json.Marshal(r)
+	if err != nil {
+		// Should never happen with well-formed struct, but handle gracefully
+		return `{"success":false,"message":"Internal error: failed to marshal response"}`
+	}
 	return string(data)
+}
+
+// removeFromSecondDegreeAlternates removes a user ID from the SecondDegreeAlternates slice.
+func removeFromSecondDegreeAlternates(history *LoginHistory, userIDToRemove string) {
+	for i := 0; i < len(history.SecondDegreeAlternates); i++ {
+		if history.SecondDegreeAlternates[i] == userIDToRemove {
+			history.SecondDegreeAlternates = append(
+				history.SecondDegreeAlternates[:i],
+				history.SecondDegreeAlternates[i+1:]...,
+			)
+			i--
+		}
+	}
 }
 
 // BreakAlternatesRPC handles breaking alternate account associations between two users.
@@ -115,24 +132,8 @@ func BreakAlternatesRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	delete(otherHistory.AlternateMatches, primaryUserID)
 
 	// Remove from second degree alternates if present
-	for i := 0; i < len(primaryHistory.SecondDegreeAlternates); i++ {
-		if primaryHistory.SecondDegreeAlternates[i] == otherUserID {
-			primaryHistory.SecondDegreeAlternates = append(
-				primaryHistory.SecondDegreeAlternates[:i],
-				primaryHistory.SecondDegreeAlternates[i+1:]...,
-			)
-			i--
-		}
-	}
-	for i := 0; i < len(otherHistory.SecondDegreeAlternates); i++ {
-		if otherHistory.SecondDegreeAlternates[i] == primaryUserID {
-			otherHistory.SecondDegreeAlternates = append(
-				otherHistory.SecondDegreeAlternates[:i],
-				otherHistory.SecondDegreeAlternates[i+1:]...,
-			)
-			i--
-		}
-	}
+	removeFromSecondDegreeAlternates(primaryHistory, otherUserID)
+	removeFromSecondDegreeAlternates(otherHistory, primaryUserID)
 
 	// Save both login histories
 	if err := StorableWrite(ctx, nk, primaryUserID, primaryHistory); err != nil {
