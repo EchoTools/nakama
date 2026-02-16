@@ -2345,23 +2345,33 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			// Set next_match_id for all party members so they join together
+			failedMembers := make([]string, 0)
 			for _, memberUserID := range partyUserIDs {
 				if err := SetNextMatchID(ctx, nk, memberUserID, label.ID, AnyTeam, ""); err != nil {
 					logger.Error("Failed to set next match ID for party member", zap.String("memberUserID", memberUserID), zap.Error(err))
-					// Log error but continue - partial success is better than total failure
+					failedMembers = append(failedMembers, memberUserID)
 				}
+			}
+
+			// If some party members failed, log but continue with partial success
+			successfulMembers := len(partyUserIDs) - len(failedMembers)
+			if len(failedMembers) > 0 {
+				logger.Warn("Some party members failed to get next_match_id set",
+					zap.Int("successful", successfulMembers),
+					zap.Int("failed", len(failedMembers)),
+					zap.Strings("failedUserIDs", failedMembers))
 			}
 
 			logger.WithFields(map[string]any{
 				"match_id":      label.ID.String(),
 				"rtt_ms":        rttMs,
-				"party_members": len(partyUserIDs),
+				"party_members": successfulMembers,
 			}).Info("Match created.")
 
 			// Update content to reflect party size if applicable
 			var content string
-			if len(partyUserIDs) > 1 {
-				content = fmt.Sprintf("Reservation will timeout <t:%d:R>. \n\n**%d party members** will automatically join this match when you click play or start matchmaking.", startTime.Unix(), len(partyUserIDs))
+			if successfulMembers > 1 {
+				content = fmt.Sprintf("Reservation will timeout <t:%d:R>. \n\n**%d party members** will automatically join this match when you click play or start matchmaking.", startTime.Unix(), successfulMembers)
 			} else {
 				content = fmt.Sprintf("Reservation will timeout <t:%d:R>. \n\nClick play or start matchmaking to automatically join your match.", startTime.Unix())
 			}

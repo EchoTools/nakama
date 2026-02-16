@@ -113,7 +113,7 @@ func (m *mockNakamaModuleForParty) StorageRead(ctx context.Context, reads []*run
 	return nil, nil
 }
 
-func (m *mockNakamaModuleForParty) StorageIndexList(ctx context.Context, callerID, indexName, query string, limit int, order []string, callerId string) (*api.StorageObjects, string, error) {
+func (m *mockNakamaModuleForParty) StorageIndexList(ctx context.Context, callerID, indexName, query string, limit int, order []string, callerID2 string) (*api.StorageObjects, string, error) {
 	m.partyLookupCalled = true
 
 	// Mock implementation for GetPartyGroupUserIDs
