@@ -2326,7 +2326,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				"startTime": startTime,
 			})
 
-			label, rttMs, err := d.handleCreateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime)
+			// Get all party members (including the creator) before creating the match
+			// so we can set up team alignments and reservations
+			partyUserIDs := getPartyMembersForUser(ctx, nk, userID)
+
+			label, rttMs, err := d.handleCreateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime, partyUserIDs)
 			if err != nil {
 				// Check if this is a region fallback error
 				var regionErr ErrMatchmakingNoServersInRegion
@@ -2337,18 +2341,37 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return err
 			}
 
-			// set the player's next match
-			if err := SetNextMatchID(ctx, nk, userID, label.ID, AnyTeam, ""); err != nil {
-				logger.Error("Failed to set next match ID", zap.Error(err))
-				return fmt.Errorf("failed to set next match ID: %w", err)
+			// Set next_match_id for all party members so they join together
+			failedMembers := make([]string, 0)
+			for _, memberUserID := range partyUserIDs {
+				if err := SetNextMatchID(ctx, nk, memberUserID, label.ID, AnyTeam, ""); err != nil {
+					logger.Error("Failed to set next match ID for party member", zap.String("memberUserID", memberUserID), zap.Error(err))
+					failedMembers = append(failedMembers, memberUserID)
+				}
+			}
+
+			// If some party members failed, log but continue with partial success
+			successfulMembers := len(partyUserIDs) - len(failedMembers)
+			if len(failedMembers) > 0 {
+				logger.Warn("Some party members failed to get next_match_id set",
+					zap.Int("successful", successfulMembers),
+					zap.Int("failed", len(failedMembers)),
+					zap.Strings("failedUserIDs", failedMembers))
 			}
 
 			logger.WithFields(map[string]any{
-				"match_id": label.ID.String(),
-				"rtt_ms":   rttMs,
+				"match_id":      label.ID.String(),
+				"rtt_ms":        rttMs,
+				"party_members": successfulMembers,
 			}).Info("Match created.")
 
-			content := fmt.Sprintf("Reservation will timeout <t:%d:R>. \n\nClick play or start matchmaking to automatically join your match.", startTime.Unix())
+			// Update content to reflect party size if applicable
+			var content string
+			if successfulMembers > 1 {
+				content = fmt.Sprintf("Reservation will timeout <t:%d:R>. \n\n**%d party members** will automatically join this match when you click play or start matchmaking.", startTime.Unix(), successfulMembers)
+			} else {
+				content = fmt.Sprintf("Reservation will timeout <t:%d:R>. \n\nClick play or start matchmaking to automatically join your match.", startTime.Unix())
+			}
 
 			niceNameMap := map[evr.Symbol]string{
 				evr.ModeArenaPrivate:  "Private Arena Match",

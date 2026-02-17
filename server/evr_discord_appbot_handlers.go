@@ -766,7 +766,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	return label, rtt, nil
 }
 
-func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Logger, userID, guildID, region string, mode, level evr.Symbol, startTime time.Time) (l *MatchLabel, latencyMillis int, err error) {
+func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Logger, userID, guildID, region string, mode, level evr.Symbol, startTime time.Time, partyUserIDs []string) (l *MatchLabel, latencyMillis int, err error) {
 
 	// Find a parking match to prepare
 	groupID := d.cache.GuildIDToGroupID(guildID)
@@ -868,12 +868,27 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, fmt.Errorf("no servers within 90ms of your location. Your best server has %dms latency", minLatencyMs)
 	}
 
+	// Create team alignments for party members to ensure they join the same team
+	// For social modes, use TeamUnassigned; for competitive modes, use TeamBlue
+	teamAlignment := evr.TeamUnassigned
+	if mode == evr.ModeArenaPrivate || mode == evr.ModeArenaPublic ||
+		mode == evr.ModeCombatPrivate || mode == evr.ModeCombatPublic {
+		teamAlignment = evr.TeamBlue
+	}
+
+	teamAlignments := make(map[string]int, len(partyUserIDs))
+	for _, memberUserID := range partyUserIDs {
+		teamAlignments[memberUserID] = teamAlignment
+	}
+
 	settings := &MatchSettings{
-		Mode:      mode,
-		Level:     level,
-		GroupID:   uuid.FromStringOrNil(groupID),
-		StartTime: startTime.UTC().Add(1 * time.Minute),
-		SpawnedBy: userID,
+		Mode:                mode,
+		Level:               level,
+		GroupID:             uuid.FromStringOrNil(groupID),
+		StartTime:           startTime.UTC().Add(1 * time.Minute),
+		SpawnedBy:           userID,
+		TeamAlignments:      teamAlignments,
+		ReservationLifetime: 45 * time.Second,
 	}
 
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
@@ -1407,9 +1422,13 @@ func (d *DiscordAppBot) handleRegionFallbackInteraction(ctx context.Context, log
 		// Now allocate without the region requirement (pass empty region)
 		var label *MatchLabel
 		var rttMs int
+
+		// Get party members for the user
+		partyUserIDs := getPartyMembersForUser(ctx, d.nk, userID)
+
 		if commandType == "create-match" {
 			// Use handleCreateMatch but without region requirement (pass empty region)
-			label, rttMs, err = d.handleCreateMatch(ctx, logger, userID, i.GuildID, "", mode, level, startTime)
+			label, rttMs, err = d.handleCreateMatch(ctx, logger, userID, i.GuildID, "", mode, level, startTime, partyUserIDs)
 		} else if commandType == "allocate-match" {
 			var rtt float64
 			label, rtt, err = d.handleAllocateMatch(ctx, logger, userID, i.GuildID, "", mode, level, startTime, "")
