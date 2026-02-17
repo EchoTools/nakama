@@ -1424,11 +1424,7 @@ func (d *DiscordAppBot) handleRegionFallbackInteraction(ctx context.Context, log
 		var rttMs int
 
 		// Get party members for the user
-		partyUserIDs, err := getPartyMembersForUser(ctx, d.nk, userID)
-		if err != nil {
-			logger.Error("Failed to get party members", zap.Error(err))
-			return fmt.Errorf("failed to get party members: %w", err)
-		}
+		partyUserIDs := getPartyMembersForUser(ctx, d.nk, userID)
 
 		if commandType == "create-match" {
 			// Use handleCreateMatch but without region requirement (pass empty region)

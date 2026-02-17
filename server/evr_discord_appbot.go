@@ -2328,11 +2328,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			// Get all party members (including the creator) before creating the match
 			// so we can set up team alignments and reservations
-			partyUserIDs, err := getPartyMembersForUser(ctx, nk, userID)
-			if err != nil {
-				logger.Error("Failed to get party members", zap.Error(err))
-				return fmt.Errorf("failed to get party members: %w", err)
-			}
+			partyUserIDs := getPartyMembersForUser(ctx, nk, userID)
 
 			label, rttMs, err := d.handleCreateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime, partyUserIDs)
 			if err != nil {

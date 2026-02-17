@@ -740,33 +740,28 @@ func RuntimeLoggerToZapLogger(logger runtime.Logger) *zap.Logger {
 
 // getPartyMembersForUser retrieves all party members for a user, including the user themselves.
 // If the user is not in a party, it returns only the user's ID.
-//
-// Note: This helper currently never returns a non-nil error. Any failure to load
-// matchmaking settings or party membership information results in a fallback
-// of returning just []string{userID}. The error return value is kept for
-// future extensibility but callers should not rely on receiving a non-nil
-// error under normal circumstances.
-func getPartyMembersForUser(ctx context.Context, nk runtime.NakamaModule, userID string) ([]string, error) {
+// This function never returns an error - all failure cases result in returning just the user's ID.
+func getPartyMembersForUser(ctx context.Context, nk runtime.NakamaModule, userID string) []string {
 	// Load the user's matchmaking settings to get their party group
 	settings, err := LoadMatchmakingSettings(ctx, nk, userID)
 	if err != nil {
 		// If settings don't exist, user is not in a party
-		return []string{userID}, nil
+		return []string{userID}
 	}
 
 	// If user is not in a party, return only their ID
 	if settings.LobbyGroupName == "" {
-		return []string{userID}, nil
+		return []string{userID}
 	}
 
 	// Get all party members
 	partyUserIDs, err := GetPartyGroupUserIDs(ctx, nk, settings.LobbyGroupName)
 	if err != nil {
 		// If party lookup fails (e.g., party no longer exists), return only user
-		return []string{userID}, nil
+		return []string{userID}
 	}
 
-	return partyUserIDs, nil
+	return partyUserIDs
 }
 
 func SetNextMatchID(ctx context.Context, nk runtime.NakamaModule, userID string, matchID MatchID, role TeamIndex, hostDiscordID string) error {

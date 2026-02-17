@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/heroiclabs/nakama-common/api"
@@ -15,8 +16,8 @@ func TestGetPartyMembersForUser(t *testing.T) {
 		userID            string
 		partyGroupID      string
 		partyMembers      []string
+		storageReadError  bool
 		expectedUserIDs   []string
-		expectError       bool
 		expectPartyLookup bool
 	}{
 		{
@@ -24,8 +25,8 @@ func TestGetPartyMembersForUser(t *testing.T) {
 			userID:            "user1",
 			partyGroupID:      "",
 			partyMembers:      nil,
+			storageReadError:  false,
 			expectedUserIDs:   []string{"user1"},
-			expectError:       false,
 			expectPartyLookup: false,
 		},
 		{
@@ -33,8 +34,8 @@ func TestGetPartyMembersForUser(t *testing.T) {
 			userID:            "user1",
 			partyGroupID:      "party123",
 			partyMembers:      []string{"user1", "user2", "user3"},
+			storageReadError:  false,
 			expectedUserIDs:   []string{"user1", "user2", "user3"},
-			expectError:       false,
 			expectPartyLookup: true,
 		},
 		{
@@ -42,9 +43,18 @@ func TestGetPartyMembersForUser(t *testing.T) {
 			userID:            "user1",
 			partyGroupID:      "party456",
 			partyMembers:      []string{"user1"},
+			storageReadError:  false,
 			expectedUserIDs:   []string{"user1"},
-			expectError:       false,
 			expectPartyLookup: true,
+		},
+		{
+			name:              "storage read error returns only self",
+			userID:            "user1",
+			partyGroupID:      "",
+			partyMembers:      nil,
+			storageReadError:  true,
+			expectedUserIDs:   []string{"user1"},
+			expectPartyLookup: false,
 		},
 	}
 
@@ -54,23 +64,12 @@ func TestGetPartyMembersForUser(t *testing.T) {
 
 			// Create mock NakamaModule
 			nk := &mockNakamaModuleForParty{
-				partyGroupID: tt.partyGroupID,
-				partyMembers: tt.partyMembers,
+				partyGroupID:     tt.partyGroupID,
+				partyMembers:     tt.partyMembers,
+				storageReadError: tt.storageReadError,
 			}
 
-			userIDs, err := getPartyMembersForUser(ctx, nk, tt.userID)
-
-			if tt.expectError {
-				if err == nil {
-					t.Errorf("Expected error but got none")
-				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
-				return
-			}
+			userIDs := getPartyMembersForUser(ctx, nk, tt.userID)
 
 			if len(userIDs) != len(tt.expectedUserIDs) {
 				t.Errorf("Expected %d user IDs, got %d", len(tt.expectedUserIDs), len(userIDs))
@@ -96,9 +95,15 @@ type mockNakamaModuleForParty struct {
 	partyGroupID      string
 	partyMembers      []string
 	partyLookupCalled bool
+	storageReadError  bool
 }
 
 func (m *mockNakamaModuleForParty) StorageRead(ctx context.Context, reads []*runtime.StorageRead) ([]*api.StorageObject, error) {
+	// Simulate storage read error if requested
+	if m.storageReadError {
+		return nil, fmt.Errorf("simulated storage read error")
+	}
+
 	// Mock implementation for LoadMatchmakingSettings
 	for _, read := range reads {
 		if read.Collection == MatchmakerStorageCollection && read.Key == MatchmakingConfigStorageKey {
