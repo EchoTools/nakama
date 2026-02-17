@@ -1219,6 +1219,12 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				continue
 			}
 
+			// If allowPrivateLobbies is true, don't kick from private matches
+			if allowPrivateLobbies && label.IsPrivateMatch() {
+				actions = append(actions, fmt.Sprintf("skipped kick from private [%s](https://echo.taxi/spark://c/%s) (allow_private_lobbies=true)", label.Mode.String(), strings.ToUpper(label.ID.UUID.String())))
+				continue
+			}
+
 			permissions := make([]string, 0)
 
 			// Check if the user is the match owner of a private match
