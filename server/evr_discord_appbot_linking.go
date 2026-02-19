@@ -137,13 +137,7 @@ func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.
 			return err
 		}
 		if len(account.Devices) == 0 {
-			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Flags:   discordgo.MessageFlagsEphemeral,
-					Content: "No headsets are linked to this account.",
-				},
-			})
+			return editInteractionResponse(s, i, "No headsets are linked to this account.")
 		}
 
 		loginHistory := NewLoginHistory(userID)
@@ -186,46 +180,41 @@ func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.
 			})
 		}
 
-		response := &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Flags:   discordgo.MessageFlagsEphemeral,
-				Content: "Select a device to unlink",
+		components := []discordgo.MessageComponent{
+			discordgo.ActionsRow{
 				Components: []discordgo.MessageComponent{
-					discordgo.ActionsRow{
-						Components: []discordgo.MessageComponent{
-							discordgo.SelectMenu{
-								// Select menu, as other components, must have a customID, so we set it to this value.
-								CustomID:    "unlink-headset",
-								Placeholder: "<select a device to unlink>",
-								Options:     options,
-							},
-						},
+					discordgo.SelectMenu{
+						CustomID:    "unlink-headset",
+						Placeholder: "<select a device to unlink>",
+						Options:     options,
 					},
 				},
 			},
 		}
-		return s.InteractionRespond(i.Interaction, response)
+		content := "Select a device to unlink"
+		_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+			Content:    &content,
+			Components: &components,
+		})
+		return err
 	}
 	xpid := options[0].StringValue()
-	// Validate the link code as a 4 character string
 
 	if user == nil {
 		return nil
 	}
 
-	if err := func() error {
+	// Only allow unlinking OVR-ORG- and DMO- headset devices.
+	// Reject anything else (e.g. vrml: device links) — those must go through the dedicated VRML unlink flow.
+	if _, err := evr.ParseEvrId(xpid); err != nil {
+		logger.Warn("Attempted to unlink non-headset device via unlink-headset", zap.String("userID", userID), zap.String("discordID", user.ID), zap.String("deviceID", xpid))
+		return editInteractionResponse(s, i, "Invalid device ID.")
+	}
 
-		return nk.UnlinkDevice(ctx, userID, xpid)
+	logger.Info("Unlinking headset device", zap.String("userID", userID), zap.String("discordID", user.ID), zap.String("deviceID", xpid))
 
-	}(); err != nil {
-		return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Flags:   discordgo.MessageFlagsEphemeral,
-				Content: err.Error(),
-			},
-		})
+	if err := nk.UnlinkDevice(ctx, userID, xpid); err != nil {
+		return editInteractionResponse(s, i, err.Error())
 	}
 	d.metrics.CustomCounter("unlink_headset", nil, 1)
 	content := "Your headset has been unlinked. Restart your game."
@@ -235,11 +224,5 @@ func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.
 		return fmt.Errorf("failed to update link status: %w", err)
 	}
 
-	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Flags:   discordgo.MessageFlagsEphemeral,
-			Content: content,
-		},
-	})
+	return editInteractionResponse(s, i, content)
 }

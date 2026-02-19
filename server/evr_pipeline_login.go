@@ -951,7 +951,22 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		clientProfile.Social.CommunityValuesVersion = 0
 	}
 
-	return session.SendEvr(evr.NewLoggedInUserProfileSuccess(request.EvrID, clientProfile, serverProfile))
+	// Send the profile response
+	if err := session.SendEvr(evr.NewLoggedInUserProfileSuccess(request.EvrID, clientProfile, serverProfile)); err != nil {
+		return err
+	}
+
+	// Send early quit config and feature flags on login
+	if p.earlyQuitMessageTrigger != nil {
+		if err := p.earlyQuitMessageTrigger.SendEarlyQuitConfigOnLogin(ctx, session); err != nil {
+			logger.Warn("Failed to send early quit config on login", zap.Error(err))
+		}
+		if err := p.earlyQuitMessageTrigger.SendFeatureFlagsOnLogin(ctx, session); err != nil {
+			logger.Warn("Failed to send early quit feature flags on login", zap.Error(err))
+		}
+	}
+
+	return nil
 }
 
 func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
@@ -1025,6 +1040,40 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	profile.NewUnlocks = update.NewUnlocks
 	profile.CustomizationPOIs = update.Customization
 
+	if len(update.GhostedPlayers.Players) > 0 && params.isGlobalOperator {
+		newlyGhosted := findNewlyAddedPlayers(profile.GhostedPlayers, update.GhostedPlayers.Players)
+
+		for _, targetEvrID := range newlyGhosted {
+			shouldKick, kickReason := p.ghostSpamTracker.TrackGhostAction(ctx, userID, targetEvrID, params.isGlobalOperator)
+
+			if shouldKick {
+				targetUserID, err := p.ghostSpamTracker.FindUserIDByEvrID(ctx, targetEvrID)
+				if err != nil {
+					logger.Warn("Failed to find user ID for ghost spam kick",
+						zap.String("operator_id", userID),
+						zap.String("target_evr_id", targetEvrID.String()),
+						zap.Error(err))
+					continue
+				}
+
+				go func(uid string, reason string) {
+					if err := p.ghostSpamTracker.KickPlayer(ctx, uid, reason); err != nil {
+						logger.Error("Failed to kick player for ghost spam",
+							zap.String("operator_id", userID),
+							zap.String("target_user_id", uid),
+							zap.Error(err))
+					} else {
+						if _, err := p.appBot.LogAuditMessage(ctx, groupID,
+							fmt.Sprintf("🚫 **Auto-kick**: Global operator <@%s> ghosted player `%s` (%s) %d times in %v - player automatically kicked.",
+								params.DiscordID(), targetEvrID.String(), uid, GhostSpamThreshold, GhostSpamWindow), false); err != nil {
+							logger.Warn("Failed to log ghost spam kick audit", zap.Error(err))
+						}
+					}
+				}(targetUserID, kickReason)
+			}
+		}
+	}
+
 	if err := EVRProfileUpdate(ctx, p.nk, userID, profile); err != nil {
 		return fmt.Errorf("failed to update account profile: %w", err)
 	}
@@ -1032,6 +1081,21 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	params.profile = profile
 	StoreParams(ctx, &params)
 	return nil
+}
+
+func findNewlyAddedPlayers(oldList, newList []evr.EvrId) []evr.EvrId {
+	oldSet := make(map[string]bool)
+	for _, id := range oldList {
+		oldSet[id.String()] = true
+	}
+
+	newlyAdded := make([]evr.EvrId, 0)
+	for _, id := range newList {
+		if !oldSet[id.String()] {
+			newlyAdded = append(newlyAdded, id)
+		}
+	}
+	return newlyAdded
 }
 
 func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {

@@ -344,6 +344,8 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 		&LoginHistory{},
 		&GuildEnforcementJournal{},
 		&ServerProfileStorage{},
+		&SuspensionProfile{},
+		&JoinDirective{},
 	}
 	for _, s := range storables {
 		for _, idx := range s.StorageIndexes() {
@@ -775,19 +777,40 @@ func RuntimeLoggerToZapLogger(logger runtime.Logger) *zap.Logger {
 	return logger.(*RuntimeGoLogger).logger
 }
 
-func SetNextMatchID(ctx context.Context, nk runtime.NakamaModule, userID string, matchID MatchID, role TeamIndex, hostDiscordID string) error {
+// getPartyMembersForUser retrieves all party members for a user, including the user themselves.
+// If the user is not in a party, it returns only the user's ID.
+// This function never returns an error - all failure cases result in returning just the user's ID.
+func getPartyMembersForUser(ctx context.Context, nk runtime.NakamaModule, userID string) []string {
+	// Load the user's matchmaking settings to get their party group
 	settings, err := LoadMatchmakingSettings(ctx, nk, userID)
 	if err != nil {
-		return fmt.Errorf("Error loading matchmaking settings: %w", err)
+		// If settings don't exist, user is not in a party
+		return []string{userID}
 	}
 
-	settings.NextMatchID = matchID
-	settings.NextMatchRole = role.String()
-	settings.NextMatchDiscordID = hostDiscordID
-
-	if err = StoreMatchmakingSettings(ctx, nk, userID, settings); err != nil {
-		return fmt.Errorf("Error storing matchmaking settings: %w", err)
+	// If user is not in a party, return only their ID
+	if settings.LobbyGroupName == "" {
+		return []string{userID}
 	}
 
+	// Get all party members
+	partyUserIDs, err := GetPartyGroupUserIDs(ctx, nk, settings.LobbyGroupName)
+	if err != nil {
+		// If party lookup fails (e.g., party no longer exists), return only user
+		return []string{userID}
+	}
+
+	return partyUserIDs
+}
+
+func SetNextMatchID(ctx context.Context, nk runtime.NakamaModule, userID string, matchID MatchID, role TeamIndex, hostDiscordID string) error {
+	directive := &JoinDirective{
+		MatchID:       matchID,
+		Role:          role.String(),
+		HostDiscordID: hostDiscordID,
+	}
+	if err := StoreJoinDirective(ctx, nk, userID, directive); err != nil {
+		return fmt.Errorf("Error storing join directive: %w", err)
+	}
 	return nil
 }

@@ -84,7 +84,22 @@ func StorableRead(ctx context.Context, nk runtime.NakamaModule, userID string, d
 	case 1:
 		// One object found, proceed to unmarshal.
 		if err = json.Unmarshal([]byte(objs[0].Value), dst); err != nil {
-			return storableErrorf(meta, codes.Internal, "failed to unmarshal: %v", err)
+			if !create {
+				return storableErrorf(meta, codes.Internal, "failed to unmarshal: %v", err)
+			}
+			// Record is corrupted. Delete it and recreate with defaults so the caller recovers.
+			meta.Version = objs[0].GetVersion()
+			if err := nk.StorageDelete(ctx, []*runtime.StorageDelete{{
+				Collection: meta.Collection,
+				Key:        meta.Key,
+				UserID:     meta.UserID,
+				Version:    meta.Version,
+			}}); err != nil {
+				// Intentionally not returning here; the write below will fail with a version conflict if needed.
+				_ = err
+			}
+			meta.Version = "*" // Disallow overwriting any concurrently-recreated object.
+			return StorableWrite(ctx, nk, userID, dst)
 		}
 		meta.Version = objs[0].GetVersion()
 		meta.PermissionRead = int(objs[0].GetPermissionRead())

@@ -38,8 +38,8 @@ type EnhancedAllocateMatchResponse struct {
 	Error            string      `json:"error,omitempty"`
 }
 
-// EnhancedAllocateMatchRPC is an enhanced match allocation RPC that supports reservation management and purging
-func EnhancedAllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+// ReserveMatchRPC is an enhanced match allocation RPC that supports reservation management and purging
+func ReserveMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	// Ensure the request is authenticated
 	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 	if !ok {
