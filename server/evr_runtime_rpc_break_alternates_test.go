@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/gofrs/uuid/v5"
 )
 
 func TestBreakAlternatesRPCRequest_JSONMarshaling(t *testing.T) {
@@ -111,6 +113,30 @@ func TestBreakAlternatesRPCRequest_Validation(t *testing.T) {
 			},
 			valid: false,
 		},
+		{
+			name: "invalid UUID format in user_id_1",
+			request: BreakAlternatesRPCRequest{
+				UserID1: "not-a-valid-uuid",
+				UserID2: "550e8400-e29b-41d4-a716-446655440001",
+			},
+			valid: false,
+		},
+		{
+			name: "invalid UUID format in user_id_2",
+			request: BreakAlternatesRPCRequest{
+				UserID1: "550e8400-e29b-41d4-a716-446655440000",
+				UserID2: "invalid-uuid-format",
+			},
+			valid: false,
+		},
+		{
+			name: "both UUIDs invalid",
+			request: BreakAlternatesRPCRequest{
+				UserID1: "bad-uuid-1",
+				UserID2: "bad-uuid-2",
+			},
+			valid: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -120,13 +146,19 @@ func TestBreakAlternatesRPCRequest_Validation(t *testing.T) {
 			isEmpty2 := tt.request.UserID2 == ""
 			areSame := tt.request.UserID1 == tt.request.UserID2
 
+			// Validate UUID format
+			_, err1 := uuid.FromString(tt.request.UserID1)
+			_, err2 := uuid.FromString(tt.request.UserID2)
+			validUUID1 := err1 == nil
+			validUUID2 := err2 == nil
+
 			if tt.valid {
-				if isEmpty1 || isEmpty2 || areSame {
-					t.Error("Expected valid request to have different non-empty user IDs")
+				if isEmpty1 || isEmpty2 || areSame || !validUUID1 || !validUUID2 {
+					t.Error("Expected valid request to have different non-empty valid UUIDs")
 				}
 			} else {
-				if !isEmpty1 && !isEmpty2 && !areSame {
-					t.Error("Expected invalid request to have missing or same user IDs")
+				if !isEmpty1 && !isEmpty2 && !areSame && validUUID1 && validUUID2 {
+					t.Error("Expected invalid request to have missing, same, or invalid UUIDs")
 				}
 			}
 		})

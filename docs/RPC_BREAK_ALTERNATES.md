@@ -183,5 +183,5 @@ go test -v -vet=off ./server -run TestBreakAlternates
 
 Tests cover:
 - JSON marshaling and unmarshaling
-- Request validation (missing fields, invalid UUIDs, same UUIDs)
+- Request validation (missing fields, same UUIDs, invalid UUID formats)
 - Response structure
