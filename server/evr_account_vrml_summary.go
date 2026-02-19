@@ -20,6 +20,7 @@ var (
 )
 
 type VRMLPlayerSummary struct {
+	UserID                    string                          `json:"userID"` // VRML user ID (indexed for cross-account deduplication)
 	User                      *vrmlgo.User                    `json:"user"`
 	Player                    *vrmlgo.Player                  `json:"player"`
 	Teams                     map[string]*vrmlgo.Team         `json:"teams"`        // map[teamID]team
