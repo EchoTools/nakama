@@ -28,7 +28,7 @@ func main() {
 	result := make(map[string]int64, len(cosmetics))
 	for _, s := range cosmetics {
 		sym := evr.ToSymbol(s)
-		result[s] = int64(sym)
+		result[s] = int64(sym) //nolint:gosec -- Symbol is a CRC hash; signed truncation is intentional and expected
 	}
 
 	// Write JSON.

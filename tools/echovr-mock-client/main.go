@@ -286,7 +286,7 @@ func runLobbyPhase(conn *websocket.Conn, action string, evrID evr.EvrId, loginSe
 		lobbyID := mustParseUUID(*flagLobbyID)
 		msg = &evr.LobbyJoinSessionRequest{
 			LobbyID:          lobbyID,
-			VersionLock:      build,
+			VersionLock:      int64(versionLock),
 			Platform:         platform,
 			LoginSessionID:   loginSessionID,
 			CrossPlayEnabled: true,
