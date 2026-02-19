@@ -540,7 +540,10 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 
 	label, err := MatchLabelByID(ctx, nk, matchID)
 	if err != nil || label == nil {
-		return fmt.Errorf("failed to get match label: %w", err)
+		label, err = LoadStoredMatchLabel(ctx, nk, matchID)
+		if err != nil || label == nil {
+			return fmt.Errorf("failed to get match label: %w", err)
+		}
 	}
 	if label.Mode != evr.ModeArenaPublic && label.Mode != evr.ModeCombatPublic {
 		return nil // Only process type stats for arena and combat modes
@@ -784,7 +787,13 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 	}
 
 	if len(allStatEntries) > 0 {
-		return statisticsQueue.Add(allStatEntries)
+		if err := statisticsQueue.Add(allStatEntries); err != nil {
+			return err
+		}
+	}
+
+	if err := DeleteStoredMatchLabel(ctx, nk, matchID); err != nil && !errors.Is(err, ErrMatchNotFound) {
+		logger.WithField("error", err).Warn("failed to delete stored match label after post-match processing")
 	}
 
 	return nil
