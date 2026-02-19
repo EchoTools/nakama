@@ -18,6 +18,8 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type (
@@ -127,31 +129,34 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		return nil, fmt.Errorf("failed to load user matchmaking settings: %w", err)
 	}
 
-	// Check for match lock (moderation feature) - takes priority over regular NextMatchDiscordID
-	// Match lock is persistent and forces the player to follow the designated leader
 	if userSettings.IsMatchLocked() {
-		// Override NextMatchDiscordID with the locked leader
 		logger.Info("Match lock active - forcing player to follow leader",
 			zap.String("user_id", userID),
 			zap.String("leader_discord_id", userSettings.MatchLockLeaderDiscordID),
 			zap.String("operator_user_id", userSettings.MatchLockOperatorUserID),
 			zap.String("reason", userSettings.MatchLockReason))
-		userSettings.NextMatchDiscordID = userSettings.MatchLockLeaderDiscordID
 	}
 
-	if userSettings.NextMatchDiscordID != "" {
-		// Get the host's user ID
-		hostUserIDStr := p.discordCache.DiscordIDToUserID(userSettings.NextMatchDiscordID)
+	joinDirective, err := LoadJoinDirective(ctx, p.nk, userID)
+	if err != nil && status.Code(err) != codes.NotFound {
+		return nil, fmt.Errorf("failed to load join directive: %w", err)
+	}
 
-		// If the host userID exists, and is in a match, set the next match ID to the host's match ID
+	if userSettings.IsMatchLocked() {
+		if joinDirective == nil {
+			joinDirective = &JoinDirective{}
+		}
+		joinDirective.HostDiscordID = userSettings.MatchLockLeaderDiscordID
+	}
+
+	if joinDirective != nil && joinDirective.HostDiscordID != "" {
+		hostUserIDStr := p.discordCache.DiscordIDToUserID(joinDirective.HostDiscordID)
 		if hostUserID := uuid.FromStringOrNil(hostUserIDStr); !hostUserID.IsNil() {
-
-			// Get the MatchIDs for the user from it's presence
 			presences, _ := p.nk.StreamUserList(StreamModeService, hostUserID.String(), "", StreamLabelMatchService, false, true)
 			for _, presence := range presences {
 				matchID := MatchIDFromStringOrNil(presence.GetStatus())
 				if !matchID.IsNil() {
-					userSettings.NextMatchID = matchID
+					joinDirective.MatchID = matchID
 				}
 			}
 		}
@@ -161,51 +166,38 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 
 	nextMatchID := MatchID{}
 
-	if !userSettings.NextMatchID.IsNil() {
+	if joinDirective != nil && !joinDirective.MatchID.IsNil() {
 
-		if label, err := MatchLabelByID(ctx, nk, userSettings.NextMatchID); err != nil {
-			logger.Warn("Next match not found", zap.String("mid", userSettings.NextMatchID.String()))
+		if label, err := MatchLabelByID(ctx, nk, joinDirective.MatchID); err != nil {
+			logger.Warn("Next match not found", zap.String("mid", joinDirective.MatchID.String()))
 		} else {
 			mode = label.Mode
 
-			// Match exists, set the next match ID and role
-			nextMatchID = userSettings.NextMatchID
+			nextMatchID = joinDirective.MatchID
 
-			if userSettings.NextMatchRole != "" {
-				switch userSettings.NextMatchRole {
-				case "orange":
-					entrantRole = evr.TeamOrange
-				case "blue":
-					entrantRole = evr.TeamBlue
-				case "spectator":
-					entrantRole = evr.TeamSpectator
-				case "moderator":
-					entrantRole = evr.TeamModerator
-				case "any":
-					entrantRole = evr.TeamUnassigned
-				}
+			switch joinDirective.Role {
+			case "orange":
+				entrantRole = evr.TeamOrange
+			case "blue":
+				entrantRole = evr.TeamBlue
+			case "spectator":
+				entrantRole = evr.TeamSpectator
+			case "moderator":
+				entrantRole = evr.TeamModerator
+			case "any", "":
+				entrantRole = evr.TeamUnassigned
 			}
-
-			userSettings.NextMatchRole = ""
-
 		}
 
-		// Clear the one-time next match settings, but NOT the match lock settings
-		// Match lock is persistent and only removed by explicit unlock
-		go func() {
-			userSettings.NextMatchID = MatchID{}
-			userSettings.NextMatchRole = ""
-			// Only clear NextMatchDiscordID if not locked (lock uses its own field)
-			if !userSettings.IsMatchLocked() {
-				userSettings.NextMatchDiscordID = ""
-			}
-			// Use a background context with timeout so cleanup is not canceled with the parent request.
-			ctxCleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := StorableWrite(ctxCleanup, p.nk, userID, userSettings); err != nil {
-				logger.Warn("Failed to clear next match metadata", zap.Error(err))
-			}
-		}()
+		if !userSettings.IsMatchLocked() {
+			go func() {
+				ctxCleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := DeleteJoinDirective(ctxCleanup, p.nk, userID); err != nil {
+					logger.Warn("Failed to delete join directive", zap.Error(err))
+				}
+			}()
+		}
 	}
 
 	if _, isJoinRequest := request.(*evr.LobbyJoinSessionRequest); isJoinRequest {
