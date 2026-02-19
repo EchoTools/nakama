@@ -24,6 +24,7 @@ type GroupMetadata struct {
 	EnforcementNoticeChannelID           string            `json:"enforcement_notice_channel_id"` // The enforcement notice channel
 	AuditChannelID                       string            `json:"audit_channel_id"`              // The audit channel
 	ErrorChannelID                       string            `json:"error_channel_id"`              // The error channel
+	SessionsChannelID                    string            `json:"sessions_channel_id"`           // The sessions channel
 	CommandChannelID                     string            `json:"command_channel_id"`            // The command channel
 	ServerReportsChannelID               string            `json:"server_reports_channel_id"`     // The server reports channel for issue reporting
 	BlockVPNUsers                        bool              `json:"block_vpn_users"`               // Block VPN users
@@ -39,6 +40,8 @@ type GroupMetadata struct {
 	EnableGlobalPingForServers           bool              `json:"enable_global_ping_for_servers"`           // Enable global ping for servers (they will be in all pools for ping checks)
 	CreateCommandRateLimitPerMinute      float64           `json:"create_command_rate_limit_per_minute"`     // Rate limit for /create command (max creates per minute), 0 = disabled
 	EnableServerEmbedsCommand            bool              `json:"enable_server_embeds_command"`             // Enable /show command for allocators to see server status embeds
+	DefaultBlockMinutes                  int               `json:"default_block_minutes,omitempty"`          // Default match block duration in minutes (default: 50)
+	MaintenanceMinutes                   int               `json:"maintenance_minutes,omitempty"`            // Maintenance window duration in minutes (default: 10)
 }
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {
@@ -52,6 +55,20 @@ func NewGuildGroupMetadata(guildID string) *GroupMetadata {
 // IsPrivate returns true if the group is private, meaning it has members-only matchmaking enabled.
 func (g *GroupMetadata) IsPrivate() bool {
 	return g.EnableMembersOnlyMatchmaking
+}
+
+func (g *GroupMetadata) GetDefaultBlockMinutes() int {
+	if g.DefaultBlockMinutes <= 0 {
+		return 50
+	}
+	return g.DefaultBlockMinutes
+}
+
+func (g *GroupMetadata) GetMaintenanceMinutes() int {
+	if g.MaintenanceMinutes <= 0 {
+		return 10
+	}
+	return g.MaintenanceMinutes
 }
 
 func (g *GroupMetadata) MarshalMap() map[string]any {

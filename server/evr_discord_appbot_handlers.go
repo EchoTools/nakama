@@ -13,7 +13,6 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"go.uber.org/thriftrw/ptr"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc/codes"
@@ -485,224 +484,43 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		}); err != nil {
 			return fmt.Errorf("failed to respond to interaction: %w", err)
 		}
+	case "configure_roles":
+		return d.handleConfigureRoles(ctx, logger, s, i, userID, groupID)
+	case "role_select":
+		return d.handleRoleSelect(ctx, logger, s, i, userID, groupID, value)
 	case "igp":
 
 		return d.handleInGamePanelInteraction(i, value)
+	case "taxi":
+		// Handle taxi button - create a spark link for the session
+		sessionUUID := strings.ToLower(value)
+		sparkURL := fmt.Sprintf("https://echo.taxi/spark://j/%s", sessionUUID)
 
-	case "unlink-vrml-confirm":
-		// Handle VRML unlink confirmation
-		// value format: targetUserID:vrmlUserID
-		parts := strings.SplitN(value, ":", 2)
-		if len(parts) != 2 {
-			return simpleInteractionResponse(s, i, "Invalid button data.")
-		}
-
-		targetUserID := parts[0]
-		vrmlUserID := parts[1]
-
-		// Check that the user clicking the button is a badge admin
-		perms := PermissionsFromContext(ctx)
-		var isMember bool
-		var err error
-		if perms != nil {
-			isMember = perms.IsGlobalBadgeAdmin
-		} else {
-			isMember, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalBadgeAdmins)
-			if err != nil {
-				return fmt.Errorf("failed to check group membership: %w", err)
-			}
-		}
-		if !isMember {
-			return simpleInteractionResponse(s, i, "You must be a VRML badge admin to perform this action.")
-		}
-
-		// Get the target user's Discord ID for logging
-		targetDiscordID, err := GetDiscordIDByUserID(ctx, d.db, targetUserID)
-		if err != nil {
-			logger.WithField("error", err).Warn("Failed to get target Discord ID")
-			targetDiscordID = "unknown"
-		}
-
-		// Perform the unlink
-		if err := UnlinkVRMLAccount(ctx, nk, targetUserID, vrmlUserID); err != nil {
-			logger.WithFields(map[string]any{
-				"error":            err,
-				"target_user_id":   targetUserID,
-				"vrml_user_id":     vrmlUserID,
-				"admin_discord_id": user.ID,
-			}).Error("Failed to unlink VRML account")
-			return simpleInteractionResponse(s, i, fmt.Sprintf("Failed to unlink VRML account: %v", err))
-		}
-
-		// Log to audit channel
-		auditMessage := fmt.Sprintf("🔓 VRML Account Unlinked\n"+
-			"**Admin:** <@%s> (`%s`)\n"+
-			"**Target:** <@%s> (`%s`)\n"+
-			"**VRML User ID:** `%s`\n"+
-			"**VRML Profile:** https://vrmasterleague.com/Users/%s\n"+
-			"**Time:** <t:%d:F>",
-			user.ID, user.Username,
-			targetDiscordID, targetUserID,
-			vrmlUserID,
-			vrmlUserID,
-			time.Now().Unix(),
-		)
-
-		if err := AuditLogSend(s, ServiceSettings().ServiceAuditChannelID, auditMessage); err != nil {
-			logger.WithField("error", err).Warn("Failed to send audit log")
-		}
-
-		// Send to guild audit channel if available
-		if groupID != "" {
-			gg := d.guildGroupRegistry.Get(groupID)
-			if gg != nil && gg.AuditChannelID != "" {
-				if err := AuditLogSend(s, gg.AuditChannelID, auditMessage); err != nil {
-					logger.WithField("error", err).Warn("Failed to send guild audit log")
-				}
-			}
-		}
-
-		logger.WithFields(map[string]any{
-			"target_user_id":   targetUserID,
-			"vrml_user_id":     vrmlUserID,
-			"admin_discord_id": user.ID,
-			"admin_username":   user.Username,
-		}).Info("VRML account unlinked by admin")
-
-		// Respond to the interaction
-		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
 				Flags:   discordgo.MessageFlagsEphemeral,
-				Content: fmt.Sprintf("✅ Successfully unlinked VRML account `%s` from <@%s>", vrmlUserID, targetDiscordID),
+				Content: fmt.Sprintf("🚕 **Taxi Link**\n%s", sparkURL),
 			},
-		}); err != nil {
-			return fmt.Errorf("failed to respond to interaction: %w", err)
-		}
+		})
+	case "join":
+		// Handle join button - create a direct spark link
+		sessionUUID := strings.ToLower(value)
+		sparkLink := fmt.Sprintf("spark://j/%s", sessionUUID)
 
-		// Disable the button in the original message
-		if i.Message != nil {
-			if _, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
-				Channel: i.Message.ChannelID,
-				ID:      i.Message.ID,
-				Components: &[]discordgo.MessageComponent{
-					discordgo.ActionsRow{
-						Components: []discordgo.MessageComponent{
-							discordgo.Button{
-								Label:    "Unlinked",
-								Style:    discordgo.SuccessButton,
-								CustomID: "nil",
-								Disabled: true,
-								Emoji:    &discordgo.ComponentEmoji{Name: "✅"},
-							},
-						},
-					},
-				},
-			}); err != nil {
-				logger.
-					WithField("error", err).
-					WithField("interaction_id", i.ID).
-					WithField("interaction_channel_id", i.ChannelID).
-					WithField("message_channel_id", i.Message.ChannelID).
-					WithField("message_id", i.Message.ID).
-					Warn("Failed to edit message to disable unlink-vrml-confirm button after successful unlink; UI button state may be stale")
-			}
-		}
-
-		return nil
-
-	case "set_ign_override":
-		// Handle set_ign_override button interactions from lookup or IGP
-		// value format: targetDiscordID:targetGuildID
-		parts := strings.SplitN(value, ":", 2)
-		if len(parts) != 2 {
-			return fmt.Errorf("invalid set_ign_override format: expected targetDiscordID:targetGuildID")
-		}
-		targetDiscordID := parts[0]
-		targetGuildID := parts[1]
-
-		targetUserID := d.cache.DiscordIDToUserID(targetDiscordID)
-		targetGroupID := d.cache.GuildIDToGroupID(targetGuildID)
-
-		// Verify caller has permissions
-		callerGuildGroups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userID)
-		if err != nil {
-			return fmt.Errorf("failed to get guild groups: %w", err)
-		}
-
-		// Resolve caller's guild access with cascade (global ops → auditor → enforcer)
-		access := ResolveCallerGuildAccess(ctx, d.db, userID, targetGroupID, callerGuildGroups)
-		if !access.IsEnforcer {
-			return simpleInteractionResponse(s, i, "You do not have permission to set IGN overrides.")
-		}
-
-		// Load target profile
-		targetProfile, err := EVRProfileLoad(ctx, nk, targetUserID)
-		if err != nil {
-			return fmt.Errorf("failed to load target profile: %w", err)
-		}
-
-		// Get current IGN data
-		groupIGN := targetProfile.GetGroupIGNData(targetGroupID)
-		currentDisplayName := groupIGN.DisplayName
-		if currentDisplayName == "" {
-			// Fallback to username
-			if a, err := nk.AccountGetId(ctx, targetUserID); err == nil {
-				currentDisplayName = a.User.Username
-			}
-		}
-
-		// Show modal with prepopulated data
-		modal := d.createLookupSetIGNModal(currentDisplayName, groupIGN.IsLocked)
-		// Store context in customID for modal submission
-		modal.Data.CustomID = fmt.Sprintf("set_ign_modal:%s:%s", targetDiscordID, targetGuildID)
-		return s.InteractionRespond(i.Interaction, modal)
-
-	case "server_issue_type":
-		// Handle server issue type selection
-		return d.handleServerIssueTypeSelection(ctx, logger, s, i, value)
-
-	case "report_server_issue":
-		// Handle report server issue button clicks
-		// value format: <issue_type>:<matchID>:<serverIP>:<regionCode>
-		parts := strings.SplitN(value, ":", 2)
-		if len(parts) < 2 {
-			return fmt.Errorf("invalid report_server_issue format")
-		}
-		issueType := parts[0]
-		serverContext := parts[1]
-
-		switch issueType {
-		case "lag":
-			return d.handleReportServerIssueLag(ctx, logger, s, i, serverContext)
-		case "other":
-			return d.handleReportServerIssueOther(ctx, logger, s, i, serverContext)
-		default:
-			return fmt.Errorf("unknown issue type: %s", issueType)
-		}
-
-	case "region_fallback":
-		// Handle region fallback button click
-		// Format: region_fallback:<action>:<original_region>:<mode>:<level>:<startTime>:<command_type>
-		return d.handleRegionFallbackInteraction(ctx, logger, s, i, value)
-
-	case "enforcement":
-		// Handle enforcement button interactions (edit, void)
-		return d.handleEnforcementInteraction(ctx, logger, s, i, value)
-	case "enf":
-		// Handle enforcement button interactions (edit, void) - short format
-		return d.handleEnforcementInteraction(ctx, logger, s, i, value)
-
-	case "confirm_shutdown":
-		// Handle shutdown confirmation button click
-		// Format: confirm_shutdown:<matchID>:<disconnectServer>:<graceSeconds>
-		return d.handleConfirmShutdown(ctx, logger, nk, s, i, userID, value)
+		return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Flags:   discordgo.MessageFlagsEphemeral,
+				Content: fmt.Sprintf("🔗 **Direct Join Link**\n`%s`\n\n*Copy this link and paste it in your browser or EchoVR to join directly*", sparkLink),
+			},
+		})
 	}
 
 	return nil
 }
 
-func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.Logger, userID, guildID string, regionCode string, mode, level evr.Symbol, startTime time.Time, description string) (l *MatchLabel, rtt float64, err error) {
+func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.Logger, userID, guildID string, regionCode string, mode, level evr.Symbol, startTime time.Time, description string, classification SessionClassification) (l *MatchLabel, rtt float64, err error) {
 
 	// Find a parking match to prepare
 
@@ -765,12 +583,13 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 
 	// Prepare the session for the match.
 	settings := &MatchSettings{
-		Mode:        mode,
-		Level:       level,
-		GroupID:     uuid.FromStringOrNil(groupID),
-		StartTime:   startTime.UTC().Add(10 * time.Minute),
-		SpawnedBy:   userID,
-		Description: description,
+		Mode:           mode,
+		Level:          level,
+		GroupID:        uuid.FromStringOrNil(groupID),
+		StartTime:      startTime.UTC().Add(10 * time.Minute),
+		SpawnedBy:      userID,
+		Description:    description,
+		Classification: classification,
 	}
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Allocate
 	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, allocatorGroupIDs, latestRTTs, settings, []string{regionCode}, false, true, queryAddon)
@@ -1357,293 +1176,192 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 	return nil
 }
 
-// presentRegionFallbackOptions presents the user with options when no servers are available in the requested region
-func (d *DiscordAppBot) presentRegionFallbackOptions(s *discordgo.Session, i *discordgo.InteractionCreate, fallbackInfo *RegionFallbackInfo, commandType, originalRegion string, mode, level evr.Symbol, startTime time.Time) error {
-	// Encode parameters into button CustomID
-	// Format: region_fallback:<action>:<original_region>:<mode>:<level>:<startTime>:<command_type>
-	startTimeStr := fmt.Sprintf("%d", startTime.Unix())
-	baseParams := fmt.Sprintf("%s:%s:%s:%s:%s", originalRegion, mode.String(), level.String(), startTimeStr, commandType)
-
-	// Create message based on server count
-	serverMsg := fmt.Sprintf("There are **%d** servers in region code **%s**", fallbackInfo.ServerCount, fallbackInfo.RequestedRegionCode)
-	if fallbackInfo.ServerCount == 0 {
-		serverMsg = fmt.Sprintf("No servers are available in region code **%s**", fallbackInfo.RequestedRegionCode)
+func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) error {
+	// Get the current guild roles
+	metadata, err := GroupMetadataLoad(ctx, d.db, groupID)
+	if err != nil {
+		return fmt.Errorf("failed to get guild group metadata: %w", err)
 	}
 
-	embed := &discordgo.MessageEmbed{
-		Title: "No Servers Available in Selected Region",
-		Description: fmt.Sprintf("%s.\n\nHowever, a server is available in **%s** with **%dms** latency.\n\nWould you like to use this server instead?",
-			serverMsg, fallbackInfo.ClosestRegion, fallbackInfo.ClosestLatencyMs),
-		Color: 0xFFA500, // Orange color for warning
-		Fields: []*discordgo.MessageEmbedField{
-			{
-				Name:   "Requested Region(s)",
-				Value:  fmt.Sprintf("[%s]", fallbackInfo.RequestedRegionCode),
-				Inline: true,
-			},
-			{
-				Name:   "Closest Available",
-				Value:  fmt.Sprintf("%s (%dms)", fallbackInfo.ClosestRegion, fallbackInfo.ClosestLatencyMs),
-				Inline: true,
-			},
+	// Get all roles in the guild
+	guild, err := s.Guild(i.GuildID)
+	if err != nil {
+		return fmt.Errorf("failed to get guild: %w", err)
+	}
+
+	// Create select menu options for roles
+	roleOptions := []discordgo.SelectMenuOption{
+		{
+			Label:       "None",
+			Value:       "none",
+			Description: "No role assigned",
 		},
 	}
 
+	// Add all guild roles as options
+	for _, role := range guild.Roles {
+		// Skip @everyone role
+		if role.ID == guild.ID {
+			continue
+		}
+		roleOptions = append(roleOptions, discordgo.SelectMenuOption{
+			Label:       role.Name,
+			Value:       role.ID,
+			Description: fmt.Sprintf("Role: %s", role.Name),
+		})
+	}
+
+	// Pre-select current roles
+	roles := metadata.RoleMap
+	d.preselectRoleInOptions(roleOptions, roles.Member)
+	d.preselectRoleInOptions(roleOptions, roles.Enforcer)
+	d.preselectRoleInOptions(roleOptions, roles.ServerHost)
+	d.preselectRoleInOptions(roleOptions, roles.Suspended)
+	d.preselectRoleInOptions(roleOptions, roles.Allocator)
+
+	// Helper to clone options and set default
+	cloneAndPreselect := func(options []discordgo.SelectMenuOption, roleID string) []discordgo.SelectMenuOption {
+		cloned := make([]discordgo.SelectMenuOption, len(options))
+		for i, opt := range options {
+			cloned[i] = opt
+			cloned[i].Default = (opt.Value == roleID)
+		}
+		return cloned
+	}
+
+	memberOptions := cloneAndPreselect(roleOptions, roles.Member)
+	enforcerOptions := cloneAndPreselect(roleOptions, roles.Enforcer)
+	serverHostOptions := cloneAndPreselect(roleOptions, roles.ServerHost)
+	suspendedOptions := cloneAndPreselect(roleOptions, roles.Suspended)
+	allocatorOptions := cloneAndPreselect(roleOptions, roles.Allocator)
+	// Build the configuration interface with select menus for each role type
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
-				&discordgo.Button{
-					Label:    "Use Closest Server",
-					Style:    discordgo.SuccessButton,
-					CustomID: fmt.Sprintf("region_fallback:use_closest:%s", baseParams),
+				discordgo.SelectMenu{
+					CustomID:    "role_select:member",
+					Placeholder: "Select Member Role",
+					Options:     memberOptions,
+					MaxValues:   1,
 				},
-				&discordgo.Button{
-					Label:    "Cancel",
-					Style:    discordgo.DangerButton,
-					CustomID: fmt.Sprintf("region_fallback:cancel:%s", baseParams),
+			},
+		},
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.SelectMenu{
+					CustomID:    "role_select:moderator",
+					Placeholder: "Select Moderator Role",
+					Options:     enforcerOptions,
+					MaxValues:   1,
+				},
+			},
+		},
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.SelectMenu{
+					CustomID:    "role_select:serverhost",
+					Placeholder: "Select Server Host Role",
+					Options:     serverHostOptions,
+					MaxValues:   1,
+				},
+			},
+		},
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.SelectMenu{
+					CustomID:    "role_select:suspension",
+					Placeholder: "Select Suspension Role",
+					Options:     suspendedOptions,
+					MaxValues:   1,
+				},
+			},
+		},
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.SelectMenu{
+					CustomID:    "role_select:allocator",
+					Placeholder: "Select Allocator Role",
+					Options:     allocatorOptions,
+					MaxValues:   1,
 				},
 			},
 		},
 	}
 
-	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-		Embeds:     &[]*discordgo.MessageEmbed{embed},
+	_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 		Components: &components,
 	})
 	return err
 }
 
-// handleRegionFallbackInteraction handles user's choice for region fallback
-func (d *DiscordAppBot) handleRegionFallbackInteraction(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, value string) error {
-	// Parse value: <action>:<original_region>:<mode>:<level>:<startTime>:<command_type>
-	parts := strings.Split(value, ":")
-	if len(parts) != 6 {
-		return fmt.Errorf("invalid region_fallback value format: expected 6 parts, got %d", len(parts))
+func (d *DiscordAppBot) handleRoleSelect(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string, roleType string) error {
+	nk := d.nk
+
+	data := i.Interaction.MessageComponentData()
+	if len(data.Values) == 0 {
+		return simpleInteractionResponse(s, i, "No role selected.")
 	}
 
-	action := parts[0]
-	originalRegion := parts[1]
-	modeStr := parts[2]
-	levelStr := parts[3]
-	startTimeStr := parts[4]
-	commandType := parts[5]
+	selectedValue := data.Values[0]
+	var selectedRoleID string
+	if selectedValue != "none" {
+		selectedRoleID = selectedValue
+	}
 
-	mode := evr.ToSymbol(modeStr)
-	level := evr.ToSymbol(levelStr)
-	startTimeUnix, err := strconv.ParseInt(startTimeStr, 10, 64)
+	// Get the current metadata
+	metadata, err := GroupMetadataLoad(ctx, d.db, groupID)
 	if err != nil {
-		return fmt.Errorf("invalid start time: %w", err)
-	}
-	startTime := time.Unix(startTimeUnix, 0)
-
-	user, _ := getScopedUserMember(i)
-	if user == nil {
-		return fmt.Errorf("user is nil")
-	}
-	userID := d.cache.DiscordIDToUserID(user.ID)
-
-	if action == "cancel" {
-		// User chose to cancel
-		logger.WithFields(map[string]any{
-			"userID":           userID,
-			"requested_region": originalRegion,
-			"action":           "cancel",
-		}).Info("User canceled region fallback")
-
-		return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseUpdateMessage,
-			Data: &discordgo.InteractionResponseData{
-				Content:    "❌ Server allocation cancelled. No servers available in the requested region.",
-				Embeds:     []*discordgo.MessageEmbed{},
-				Components: []discordgo.MessageComponent{},
-			},
-		})
+		return fmt.Errorf("failed to get guild group metadata: %w", err)
 	}
 
-	if action == "use_closest" {
-		// User chose to use the closest server
-		// Defer the response so we have time to allocate the server
-		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseDeferredMessageUpdate,
-		}); err != nil {
-			return fmt.Errorf("failed to defer interaction: %w", err)
-		}
-
-		// Now allocate without the region requirement (pass empty region)
-		var label *MatchLabel
-		var rttMs int
-
-		// Get party members for the user
-		partyUserIDs := getPartyMembersForUser(ctx, d.nk, userID)
-
-		if commandType == "create-match" {
-			// Use handleCreateMatch but without region requirement (pass empty region)
-			label, rttMs, err = d.handleCreateMatch(ctx, logger, userID, i.GuildID, "", mode, level, startTime, partyUserIDs)
-		} else if commandType == "allocate-match" {
-			var rtt float64
-			label, rtt, err = d.handleAllocateMatch(ctx, logger, userID, i.GuildID, "", mode, level, startTime, "")
-			rttMs = int(rtt)
-		} else {
-			return fmt.Errorf("unknown command type: %s", commandType)
-		}
-
-		if err != nil {
-			// Log the fallback failure
-			logger.WithFields(map[string]any{
-				"userID":           userID,
-				"requested_region": originalRegion,
-				"action":           "use_closest",
-				"error":            err.Error(),
-			}).Error("Failed to allocate closest server after user accepted fallback")
-
-			_, updateErr := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-				Content:    ptr.String(fmt.Sprintf("❌ Failed to allocate server: %v", err)),
-				Embeds:     &[]*discordgo.MessageEmbed{},
-				Components: &[]discordgo.MessageComponent{},
-			})
-			if updateErr != nil {
-				return fmt.Errorf("failed to update interaction: %w", updateErr)
-			}
-			return err
-		}
-
-		selectedRegion := label.GameServer.LocationRegionCode(true, true)
-
-		// Log the successful fallback
-		logger.WithFields(map[string]any{
-			"userID":           userID,
-			"requested_region": originalRegion,
-			"selected_region":  selectedRegion,
-			"server":           label.GameServer.Endpoint.ExternalIP.String(),
-			"latency_ms":       rttMs,
-			"action":           "use_closest",
-		}).Info("User accepted region fallback to closest server")
-
-		// For create-match, also set the next match ID
-		if commandType == "create-match" {
-			if err := SetNextMatchID(ctx, d.nk, userID, label.ID, AnyTeam, ""); err != nil {
-				logger.Error("Failed to set next match ID", zap.Error(err))
-				// Don't fail the whole operation, just log it
-			}
-		}
-
-		// Update the message with success
-		successMessage := fmt.Sprintf("✅ Server allocated in **%s** (%dms latency)\n\nMatch ID: `%s`\nhttps://echo.taxi/spark://c/%s",
-			selectedRegion, rttMs, label.ID.UUID.String(), strings.ToUpper(label.ID.UUID.String()))
-
-		_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Content:    ptr.String(successMessage),
-			Embeds:     &[]*discordgo.MessageEmbed{},
-			Components: &[]discordgo.MessageComponent{},
-		})
-		return err
+	// Update the specific role
+	roles := metadata.RoleMap
+	switch roleType {
+	case "member":
+		roles.Member = selectedRoleID
+	case "moderator":
+		roles.Enforcer = selectedRoleID
+	case "serverhost":
+		roles.ServerHost = selectedRoleID
+	case "suspension":
+		roles.Suspended = selectedRoleID
+	case "allocator":
+		roles.Allocator = selectedRoleID
+	default:
+		return simpleInteractionResponse(s, i, "Invalid role type.")
 	}
 
-	return fmt.Errorf("unknown action: %s", action)
+	// Save the updated metadata
+	groupData, err := metadata.MarshalToMap()
+	if err != nil {
+		return fmt.Errorf("error marshalling group data: %w", err)
+	}
+
+	if err := nk.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, groupData, 1000000); err != nil {
+		return fmt.Errorf("error updating group: %w", err)
+	}
+
+	// Update the registry
+	gg, err := GuildGroupLoad(ctx, nk, groupID)
+	if err != nil {
+		return fmt.Errorf("failed to load guild group: %w", err)
+	}
+	d.guildGroupRegistry.Add(gg)
+
+	// Update the interface to show the change
+	return d.handleConfigureRoles(ctx, logger, s, i, userID, groupID)
 }
 
-// canShutdownMatch checks whether a user has permission to shut down a match.
-// Returns true if the user is a global operator, the server owner (OperatorID),
-// or a guild enforcer of the session running on the server.
-func (d *DiscordAppBot) canShutdownMatch(ctx context.Context, userID string, label *MatchLabel) (bool, error) {
-	var err error
-	perms := PermissionsFromContext(ctx)
-	var isGlobalOperator bool
-	if perms != nil {
-		isGlobalOperator = perms.IsGlobalOperator
-	} else {
-		isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
-		if err != nil {
-			return false, fmt.Errorf("error checking global operator status: %w", err)
+func (d *DiscordAppBot) preselectRoleInOptions(options []discordgo.SelectMenuOption, roleID string) {
+	// Reset all options to not be default
+	for i := range options {
+		options[i].Default = false
+	}
+	// Set the matching option as default
+	for i := range options {
+		if options[i].Value == roleID || (roleID == "" && options[i].Value == "none") {
+			options[i].Default = true
+			break
 		}
 	}
-
-	if isGlobalOperator {
-		return true, nil
-	}
-
-	if label.GameServer != nil && label.GameServer.OperatorID.String() == userID {
-		return true, nil
-	}
-
-	matchGroupID := label.GetGroupID().String()
-	gg := d.guildGroupRegistry.Get(matchGroupID)
-	if gg != nil && gg.IsEnforcer(userID) {
-		return true, nil
-	}
-
-	return false, nil
-}
-
-// handleConfirmShutdown handles the confirm shutdown button click.
-// value format: <matchID>:<disconnectServer>:<graceSeconds>
-func (d *DiscordAppBot) handleConfirmShutdown(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, value string) error {
-	parts := strings.SplitN(value, ":", 3)
-	if len(parts) != 3 {
-		return simpleInteractionResponse(s, i, "Invalid shutdown confirmation data.")
-	}
-
-	matchIDStr := parts[0]
-
-	if parts[1] != "0" && parts[1] != "1" {
-		return simpleInteractionResponse(s, i, "Invalid shutdown confirmation data.")
-	}
-	disconnectServer := parts[1] == "1"
-
-	graceSeconds, err := strconv.Atoi(parts[2])
-	if err != nil || graceSeconds < 0 || graceSeconds > 3600 {
-		return simpleInteractionResponse(s, i, "Invalid grace period.")
-	}
-
-	matchID, err := MatchIDFromString(matchIDStr)
-	if err != nil {
-		return simpleInteractionResponse(s, i, "Invalid match ID.")
-	}
-
-	label, err := MatchLabelByID(ctx, nk, matchID)
-	if err != nil {
-		return simpleInteractionResponse(s, i, "Match not found or already ended.")
-	}
-
-	// Re-verify permissions
-	allowed, err := d.canShutdownMatch(ctx, userID, label)
-	if err != nil {
-		return fmt.Errorf("error checking shutdown permission: %w", err)
-	}
-	if !allowed {
-		return simpleInteractionResponse(s, i, "You do not have permission to shut down this match.")
-	}
-
-	signal := SignalShutdownPayload{
-		GraceSeconds:         graceSeconds,
-		DisconnectGameServer: disconnectServer,
-		DisconnectUsers:      false,
-	}
-
-	data := NewSignalEnvelope(userID, SignalShutdown, signal).String()
-
-	if _, err := nk.MatchSignal(ctx, matchID.String(), data); err != nil {
-		return simpleInteractionResponse(s, i, fmt.Sprintf("Failed to shut down match: %s", err.Error()))
-	}
-
-	// Update the original message to disable the button and show confirmation
-	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseUpdateMessage,
-		Data: &discordgo.InteractionResponseData{
-			Content: "The match has been shut down.",
-			Embeds:  []*discordgo.MessageEmbed{},
-			Components: []discordgo.MessageComponent{
-				discordgo.ActionsRow{
-					Components: []discordgo.MessageComponent{
-						discordgo.Button{
-							Label:    "Match Shut Down",
-							Style:    discordgo.SecondaryButton,
-							CustomID: "nil",
-							Disabled: true,
-						},
-					},
-				},
-			},
-		},
-	})
 }

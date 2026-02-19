@@ -1,0 +1,606 @@
+syntax = "proto3";
+
+package evr;
+
+option go_package = "github.com/heroiclabs/nakama/v3/apigrpc";
+option java_package = "com.heroiclabs.evr.api";
+option java_multiple_files = true;
+option java_outer_classname = "EvrApi";
+option csharp_namespace = "Evr.API";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+import "google/protobuf/any.proto";
+
+// Evr service definition
+service Evr {
+    rpc AccountSearch(AccountSearchRequest) returns (AccountSearchResponse);
+    rpc AccountLookup(AccountLookupRequest) returns (AccountLookupResponse);
+    rpc AuthenticatePassword(AuthenticatePasswordRequest) returns (Session);
+    rpc LeaderboardHaystack(LeaderboardHaystackRequest) returns (LeaderboardHaystackResponse);
+    rpc LeaderboardRecordsList(LeaderboardRecordsListRequest) returns (LeaderboardRecordsListResponse);
+    rpc LinkDevice(LinkDeviceRequest) returns (LinkDeviceResponse);
+    rpc LinkUserIdDevice(LinkUserIdDeviceRequest) returns (LinkUserIdDeviceResponse);
+    rpc DiscordSignIn(DiscordSignInRequest) returns (DiscordSignInResponse);
+    rpc MatchListPublic(MatchListPublicRequest) returns (MatchListPublicResponse);
+    rpc GetMatch(MatchRequest) returns (MatchResponse);
+    rpc PrepareMatch(PrepareMatchRequest) returns (PrepareMatchResponse);
+    rpc AllocateMatch(AllocateMatchRequest) returns (AllocateMatchResponse);
+    rpc ShutdownMatch(ShutdownMatchRequest) returns (ShutdownMatchResponse);
+    rpc BuildMatch(BuildMatchRequest) returns (BuildMatchResponse);
+    rpc SetNextMatch(SetNextMatchRequest) returns (SetNextMatchResponse);
+    rpc GetPlayerStatistics(PlayerStatisticsRequest) returns (PlayerStatisticsResponse);
+    rpc KickPlayer(KickPlayerRequest) returns (KickPlayerResponse);
+    rpc GetUserServerProfile(UserServerProfileRequest) returns (UserServerProfileResponse);
+    rpc LinkingApp(LinkingAppRequest) returns (LinkingAppResponse);
+    rpc GetStatus(ServiceStatusRequest) returns (ServiceStatusResponse);
+    rpc ImportLoadouts(ImportLoadoutsRequest) returns (ImportLoadoutsResponse);
+    rpc MatchmakerStream(MatchmakerStreamRequest) returns (MatchmakerStreamResponse);
+    rpc MatchmakerState(MatchmakerStateRequest) returns (MatchmakerStateResponse);
+    rpc MatchmakerCandidates(MatchmakerCandidatesRequest) returns (MatchmakerCandidatesResponse);
+    rpc StreamJoin(StreamJoinRequest) returns (StreamJoinResponse);
+    rpc GetServerScore(ServerScoreRequest) returns (ServerScoreResponse);
+    rpc GetServerScores(ServerScoresRequest) returns (ServerScoresResponse);
+    rpc CheckForceUser(CheckForceUserRequest) returns (CheckForceUserResponse);
+}
+
+// General purpose messages
+message Symbol {
+    uint64 value = 1;
+}
+
+message EvrId {
+    string value = 1;
+}
+
+enum TeamIndex {
+    UNASSIGNED = 0;
+    BLUE = 1;
+    ORANGE = 2;
+    SPECTATOR = 3;
+    MODERATOR = 4;
+    SOCIAL = 5;
+}
+
+// Message definitions, in alphabetical order.
+
+message AccountCosmetics {
+    int64 number = 1;
+    CosmeticLoadout cosmetic_loadout = 2;
+}
+
+message AccountLookupRequest {
+    string username = 1;
+    string user_id = 2;
+    string discord_id = 3;
+    string xpid = 4;
+    string display_name = 5;
+}
+
+message AccountLookupResponse {
+    string id = 1;
+    string discord_id = 2;
+    string username = 3;
+    string display_name = 4;
+    string avatar_url = 5;
+    google.protobuf.Any ipqs_data = 6;
+}
+
+message AccountSearchRequest {
+    string display_name_pattern = 1;
+    int32 limit = 2;
+}
+
+message AccountSearchResponse {
+    string cursor = 1;
+    repeated DisplayNameMatchItem display_name_matches = 2;
+}
+
+message AllocateMatchRequest {
+    string group_id = 1;
+    string owner_id = 2;
+    google.protobuf.Timestamp expiry_time = 3;
+    map<string, string> team_alignments = 4;
+    string mode = 5;
+    string level = 6;
+    google.protobuf.Int32Value team_size = 7;
+    repeated string required_features = 8;
+    string region = 9;
+}
+
+message AllocateMatchResponse {
+    MatchLabel label = 1;
+}
+
+message AuthenticatePasswordRequest {
+    string user_id = 1;
+    string discord_id = 2;
+    string username = 3;
+    string password = 4;
+    string refresh_token = 5;
+    string intents = 6;
+}
+
+message BuildMatchRequest {
+    repeated MatchmakerEntry entries = 1;
+}
+
+message BuildMatchResponse {
+    bytes label = 1;
+}
+
+message CheckForceUserRequest {
+    string login_session_id = 1;
+}
+
+message CheckForceUserResponse {
+    string result = 1;
+}
+
+message CombatLoadout {
+    string combat_weapon = 1;
+    string combat_grenade = 2;
+    uint32 combat_dominant_hand = 3;
+    string combat_ability = 4;
+}
+
+message CosmeticLoadout {
+    string banner = 1;
+    string booster = 2;
+    string bracer = 3;
+    string chassis = 4;
+    string decal = 5;
+    string decal_body = 6;
+    string emissive = 7;
+    string emote = 8;
+    string goal_fx = 9;
+    string medal = 10;
+    string pattern = 11;
+    string pattern_body = 12;
+    string pip = 13;
+    string second_emote = 14;
+    string tag = 15;
+    string tint = 16;
+    string tint_alignment_a = 17;
+    string tint_alignment_b = 18;
+    string tint_body = 19;
+    string title = 20;
+}
+
+message DiscordSignInRequest {
+    string code = 1;
+    string oauth_redirect_url = 2;
+}
+
+message DiscordSignInResponse {
+    string session_token = 1;
+    string discord_username = 2;
+}
+
+message DisplayNameMatchItem {
+    string display_name = 1;
+    string user_id = 2;
+    string group_id = 3;
+    google.protobuf.Timestamp updated_at = 4;
+}
+
+message Endpoint {
+    string external_ip = 1;
+    int32 port = 2;
+}
+
+message EvrMatchPresence {
+    string user_id = 1;
+    string session_id = 2;
+    string username = 3;
+    string display_name = 4;
+    EvrId evr_id = 5;
+    int32 team_index = 6;
+    int32 role_alignment = 7;
+    string party_id = 8;
+    repeated string supported_features = 9;
+    google.protobuf.Timestamp matchmaking_at = 10;
+    string client_ip = 11;
+    int32 ping_millis = 12;
+}
+
+message GameServerPresence {
+    string user_id = 1;
+    string session_id = 2;
+    string username = 3;
+    string operator_id = 4;
+    repeated string group_ids = 5;
+    string region = 6;
+    string endpoint_json = 7;
+    Endpoint endpoint = 8;
+    repeated string features = 9;
+    uint64 app_id = 10;
+    string server_id = 11;
+    float latitude = 12;
+    float longitude = 13;
+}
+
+message GameState {
+    RoundClock round_clock = 1;
+    bool match_over = 2;
+}
+
+message ImportLoadoutsRequest {
+    repeated CosmeticLoadout loadouts = 1;
+}
+
+message ImportLoadoutsResponse {
+    repeated string loadout_ids = 1;
+}
+
+message KickPlayerRequest {
+    string user_id = 1;
+}
+
+message KickPlayerResponse {
+    repeated string session_ids = 1;
+}
+
+message LeaderboardHaystackRequest {
+    string owner_id = 1;
+    string owner_discord_id = 2;
+    string leaderboard_id = 3;
+    string guild_id = 4;
+    string group_id = 5;
+    Symbol game_mode = 6;
+    string reset_schedule = 7;
+    string stat_name = 8;
+    int32 limit = 9;
+    string cursor = 10;
+}
+
+message LeaderboardHaystackResponse {
+    string prev_cursor = 1;
+    string next_cursor = 2;
+    int64 rank_count = 3;
+    repeated LeaderboardHaystackRecord owner_records = 4;
+    repeated LeaderboardHaystackRecord records = 5;
+}
+
+message LeaderboardHaystackRecord {
+    string display_name = 1;
+    string owner_id = 2;
+    int64 rank = 3;
+    int64 score = 4;
+    int64 subscore = 5;
+    int32 num_score = 6;
+    int64 create_time = 7;
+    int64 update_time = 8;
+    int64 expiry_time = 9;
+    bytes metadata = 10;
+}
+
+message LeaderboardRecordsListRequest {
+    string leaderboard_id = 1;
+    string guild_id = 2;
+    string group_id = 3;
+    Symbol mode = 4;
+    string stat_name = 5;
+    string reset_schedule = 6;
+    int64 from_rank = 7;
+    int32 limit = 8;
+    string cursor = 9;
+}
+
+message LeaderboardRecordsListResponse {
+    string leaderboard_id = 1;
+    string next_cursor = 2;
+    string prev_cursor = 3;
+    repeated LeaderboardRecordsListItem records = 4;
+}
+
+message LeaderboardRecordsListItem {
+    string owner_id = 1;
+    string username = 2;
+    int64 rank = 3;
+    int64 score = 4;
+    int64 subscore = 5;
+    int32 num_score = 6;
+    google.protobuf.Timestamp create_time = 7;
+    google.protobuf.Timestamp update_time = 8;
+    google.protobuf.Timestamp expiry_time = 9;
+    bytes metadata = 10;
+}
+
+message LinkDeviceRequest {
+    string session_token = 1;
+    string link_code = 2;
+}
+
+message LinkDeviceResponse {
+    bool success = 1;
+}
+
+message LinkUserIdDeviceRequest {
+    string user_id = 1;
+    string link_code = 2;
+}
+
+message LinkUserIdDeviceResponse {
+    bool success = 1;
+}
+
+message LinkingAppRequest {}
+
+message LinkingAppResponse {
+    string message = 1;
+}
+
+message LobbySessionParameters {
+    Symbol mode = 1;
+    Symbol level = 2;
+    string session_id = 3;
+    string party_id = 4;
+    int32 party_size = 5;
+    int32 team_index = 6;
+    int64 version_lock = 7;
+    repeated string required_features = 8;
+}
+
+message MatchGoal {
+    int32 team_index = 1;
+    float point_amount = 2;
+    string disc_speed = 3;
+    string assist_evr_id = 4;
+    string person_scored = 5;
+    string distance_thrown = 6;
+}
+
+message MatchLabel {
+    string id = 1;
+    google.protobuf.Timestamp created_at = 2;
+    google.protobuf.Timestamp start_time = 3;
+    google.protobuf.Timestamp locked_at = 4;
+    GameServerPresence game_server = 5;
+    bool open = 6;
+    string lobby_type = 7;
+    Symbol mode = 8;
+    Symbol level = 9;
+    int32 max_size = 10;
+    int32 team_size = 11;
+    int32 player_limit = 12;
+    repeated string required_features = 13;
+    repeated PlayerInfo players = 14;
+    GameState game_state = 15;
+    SessionSettings session_settings = 16;
+    string group_id = 17;
+    string spawned_by = 18;
+    map<string, int32> team_alignments = 19;
+    bool level_loaded = 20;
+    int64 terminate_tick = 21;
+    double rank_percentile = 22;
+}
+
+message MatchListPublicRequest {}
+
+message MatchListPublicResponse {
+    int64 uptime_mins = 1;
+    google.protobuf.Timestamp update_time = 2;
+    int32 lobby_session_count = 3;
+    int32 gameserver_count = 4;
+    int32 player_count = 5;
+    map<string, MatchmakingTickets> active_matchmaking_counts = 6;
+    repeated MatchLabel labels = 7;
+    repeated GameServerPresence gameservers = 8;
+}
+
+message MatchmakingTickets {
+    map<string, int32> tickets = 1;
+}
+
+message MatchRequest {
+    repeated string match_ids = 1;
+    string query = 2;
+}
+
+message MatchResponse {
+    string system_start_time = 1;
+    string timestamp = 2;
+    repeated bytes labels = 3;
+}
+
+message MatchmakerCandidatesRequest {}
+
+message MatchmakerCandidatesResponse {
+    map<string, MatchmakerEntryList> candidates = 1;
+    map<string, MatchmakerEntryList> matches = 2;
+}
+
+message MatchmakerEntryList {
+    repeated MatchmakerEntry entries = 1;
+}
+
+message MatchmakerEntry {
+    string user_id = 1;
+    string session_id = 2;
+    string username = 3;
+    LobbySessionParameters parameters = 4;
+}
+
+message MatchmakerExtract {
+    // This is a complex structure, using Any for now.
+    google.protobuf.Any data = 1;
+}
+
+message MatchmakerStateRequest {}
+
+message MatchmakerStateResponse {
+    google.protobuf.Any stats = 1;
+    repeated MatchmakerExtract index = 2;
+}
+
+message MatchmakerStreamRequest {
+    string group_id = 1;
+}
+
+message MatchmakerStreamResponse {
+    bool success = 1;
+    repeated MatchmakingPresence presences = 2;
+}
+
+message MatchmakingPresence {
+    string user_id = 1;
+    string session_id = 2;
+    string username = 3;
+    LobbySessionParameters parameters = 4;
+}
+
+message PlayerInfo {
+    string user_id = 1;
+    string display_name = 2;
+    int32 team_index = 3;
+    string client_ip = 4;
+}
+
+message PlayerStatistics {
+    // This is a complex structure, using Any for now.
+    google.protobuf.Any data = 1;
+}
+
+message PlayerStatisticsRequest {
+    string user_id = 1;
+    string group_id = 2;
+    string guild_id = 3;
+    string discord_id = 4;
+    Symbol mode = 5;
+}
+
+message PlayerStatisticsResponse {
+    PlayerStatistics stats = 1;
+}
+
+message PrepareMatchRequest {
+    string id = 1;
+    Symbol mode = 2;
+    Symbol level = 3;
+    repeated string required_features = 4;
+    int32 team_size = 5;
+    map<string, TeamIndex> role_alignments = 6;
+    string guild_id = 7;
+    google.protobuf.Timestamp start_time = 8;
+    string spawned_by = 9;
+    MatchLabel label = 10;
+}
+
+message PrepareMatchResponse {
+    MatchLabel label = 1;
+}
+
+message RoundClock {
+    google.protobuf.Timestamp start_time = 1;
+    google.protobuf.Timestamp end_time = 2;
+    int64 duration_millis = 3;
+}
+
+message ServerScoreRequest {
+    repeated double rtts = 1;
+    int32 min_rtt = 2;
+    int32 max_rtt = 3;
+    int32 threshold_rtt = 4;
+}
+
+message ServerScoreResponse {
+    double score = 1;
+}
+
+message ServerScoresRequest {
+    repeated string discord_ids = 1;
+    int32 min_rtt = 2;
+    int32 max_rtt = 3;
+    int32 threshold_rtt = 4;
+}
+
+message ServerScoresResponse {
+    map<string, double> scores = 1;
+}
+
+message ServiceStatus {
+    string serviceid = 1;
+    bool available = 2;
+    string message = 3;
+}
+
+message ServiceStatusData {
+    bool is_active = 1;
+    repeated ServiceStatus statuses = 2;
+}
+
+message ServiceStatusRequest {}
+
+message ServiceStatusResponse {
+    ServiceStatusData data = 1;
+}
+
+message Session {
+    string token = 1;
+    string refresh_token = 2;
+}
+
+message SessionSettings {
+    string app_id = 1;
+    Symbol mode = 2;
+    Symbol level = 3;
+    repeated string required_features = 4;
+}
+
+message SetNextMatchRequest {
+    string discord_id = 1;
+    string user_id = 2;
+    string match_id = 3;
+    string host_discord_id = 4;
+    string role = 5;
+}
+
+message SetNextMatchResponse {
+    string user_id = 1;
+    string match_id = 2;
+}
+
+message ShutdownMatchRequest {
+    string match_id = 1;
+    int32 grace_seconds = 2;
+}
+
+message ShutdownMatchResponse {
+    bool success = 1;
+    string response = 2;
+}
+
+message StreamJoinRequest {
+    uint32 mode = 1;
+    string subject = 2;
+    string subcontext = 3;
+    string user_id = 4;
+    string session_id = 5;
+    string label = 6;
+    bool hidden = 7;
+    bool persistence = 8;
+    string status = 9;
+}
+
+message StreamJoinResponse {
+    bool success = 1;
+    repeated EvrMatchPresence presences = 2;
+}
+
+message UserServerProfile {
+    // This is a complex structure, using Any for now.
+    google.protobuf.Any data = 1;
+}
+
+message UserServerProfileRequest {
+    string user_id = 1;
+    EvrId xpid = 2;
+    string discord_id = 3;
+    string guild_id = 4;
+    string group_id = 5;
+}
+
+message UserServerProfileResponse {
+    UserServerProfile profile = 1;
+}

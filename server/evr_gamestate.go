@@ -2,9 +2,15 @@ package server
 
 import (
 	"log"
+	"time"
 
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
+
+type Clock struct {
+	Duration time.Duration `json:"duration,omitempty"`
+	Elapsed  time.Duration `json:"elapsed,omitempty"`
+}
 
 type TeamMetadata struct {
 	Strength   float64 `json:"strength,omitempty"`
@@ -18,6 +24,7 @@ type GameState struct {
 	MatchOver              bool                       `json:"match_over,omitempty"`              // Whether the round is over
 	EquilibriumCoefficient float64                    `json:"equilibrium_coefficient,omitempty"` // The equilibrium coefficient for the game (how much the game is balanced)
 	Teams                  map[TeamIndex]TeamMetadata `json:"teams,omitempty"`                   // Metadata for each team
+	RoundClock             *Clock                     `json:"round_clock,omitempty"`             // The round clock information
 }
 
 func (g *GameState) GetSessionScoreboard() *SessionScoreboard {

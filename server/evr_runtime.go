@@ -131,6 +131,11 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register /evr/api service: %w", err)
 	}
 
+	// Register HTTP Handler for Discord Linked Roles
+	if err := RegisterDiscordLinkedRolesHandler(ctx, logger, db, nk, initializer); err != nil {
+		return fmt.Errorf("unable to register Discord Linked Roles handler: %w", err)
+	}
+
 	// The statistics queue handles inserting match statistics into the leaderboard records
 	statisticsQueue := NewStatisticsQueue(logger, db, nk)
 
@@ -151,8 +156,64 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		}
 	}
 
+	// Initialize MongoDB client for match summarization
+	var mongoClient *mongo.Client
+	if mongoURI := vars["MONGODB_URI"]; mongoURI != "" {
+		if mongoClient, err = connectMongoDB(ctx, mongoURI); err != nil {
+			logger.Warn("Failed to connect to MongoDB, match summarization will not be available", zap.Error(err))
+		}
+	} else {
+		logger.Info("MongoDB URI not configured, match summarization will not be available")
+	}
+
+	if mongoClient != nil {
+		if err := RegisterSessionEventRPCs(ctx, logger, db, nk, initializer, mongoClient); err != nil {
+			return fmt.Errorf("unable to register session event RPCs: %w", err)
+		}
+	}
+
+	// Initialize event journaling system
+	var eventJournal *EventJournal
+	var telemetryManager *LobbyTelemetryManager
+	var telemetryAPI *TelemetryAPI
+	var matchSummaryStore *MatchSummaryStore
+
+	// Use existing Redis client if available, otherwise try to create a new one
+	var journalRedisClient *redis.Client
+	if vars["JOURNAL_REDIS_URI"] != "" {
+		if journalRedisClient, err = connectRedis(ctx, vars["JOURNAL_REDIS_URI"]); err != nil {
+			logger.Warn("Failed to connect to Redis for event journaling", zap.Error(err))
+		}
+	} else if vars["VRML_REDIS_URI"] != "" {
+		// Reuse VRML Redis connection for journaling if no dedicated URI is provided
+		if journalRedisClient, err = connectRedis(ctx, vars["VRML_REDIS_URI"]); err != nil {
+			logger.Warn("Failed to connect to Redis for event journaling", zap.Error(err))
+		}
+	}
+
+	if journalRedisClient != nil {
+		eventJournal = NewEventJournal(journalRedisClient, logger)
+		telemetryManager = NewLobbyTelemetryManager(nk, logger, eventJournal)
+
+		if mongoClient != nil {
+			matchSummaryStore = NewMatchSummaryStore(mongoClient, "nakama", "match_summaries")
+		}
+
+		telemetryAPI = NewTelemetryAPI(logger, db, nk, telemetryManager, eventJournal, matchSummaryStore)
+
+		// Register telemetry API endpoints
+		if err := telemetryAPI.RegisterTelemetryEndpoints(initializer); err != nil {
+			logger.Warn("Failed to register telemetry API endpoints: %v", err)
+		}
+
+		logger.Info("Event journaling and telemetry systems initialized")
+	} else {
+		logger.Info("Redis not available, event journaling and telemetry systems disabled")
+	}
+
 	// Register the event dispatch
-	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, nil, dg, statisticsQueue, vrmlScanQueue)
+
+	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, mongoClient, journalRedisClient, dg, statisticsQueue, vrmlScanQueue)
 	if err != nil {
 		return fmt.Errorf("unable to create event dispatch: %w", err)
 	}
@@ -194,24 +255,6 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register telemetry stream RPCs: %w", err)
 	}
 
-	// Initialize MongoDB client if configured
-	var mongoClient *mongo.Client
-	if mongoURI, ok := vars["MONGO_URI"]; ok && mongoURI != "" {
-		mongoClient, err = connectMongo(ctx, mongoURI)
-		if err != nil {
-			logger.Warn("Failed to connect to MongoDB, session events will not be available.", zap.Error(err))
-		} else {
-			logger.Info("Connected to MongoDB for session events")
-
-			// Register session event RPCs
-			if err := RegisterSessionEventRPCs(ctx, logger, db, nk, initializer, mongoClient); err != nil {
-				return fmt.Errorf("unable to register session event RPCs: %w", err)
-			}
-		}
-	} else {
-		logger.Warn("MONGO_URI is not set, session event RPCs will not be available.")
-	}
-
 	logger.Info("Initialized runtime module.")
 	return nil
 }
@@ -231,29 +274,23 @@ func connectRedis(ctx context.Context, redisURL string) (*redis.Client, error) {
 	return redisClient, nil
 }
 
-// connectMongo connects to MongoDB using the provided URI and returns a mongo.Client.
-func connectMongo(ctx context.Context, mongoURI string) (*mongo.Client, error) {
-	clientOptions := options.Client().ApplyURI(mongoURI)
-
-	// Set a timeout for the connection
-	connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	client, err := mongo.Connect(connectCtx, clientOptions)
+// connectMongoDB connects to the MongoDB server using the provided URL and returns a mongo.Client.
+func connectMongoDB(ctx context.Context, mongoURI string) (*mongo.Client, error) {
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to MongoDB: %w", err)
+		return nil, fmt.Errorf("failed to connect to MongoDB: %v", err)
 	}
 
-	// Verify the connection
-	if err := client.Ping(connectCtx, nil); err != nil {
+	// Ping the database to verify connection
+	if err := client.Ping(ctx, nil); err != nil {
 		client.Disconnect(ctx)
-		return nil, fmt.Errorf("failed to ping MongoDB: %w", err)
+		return nil, fmt.Errorf("failed to ping MongoDB: %v", err)
 	}
 
 	return client, nil
 }
 
-func createCoreGroups(ctx context.Context, logger runtime.Logger, _ *sql.DB, nk runtime.NakamaModule, _ runtime.Initializer) error {
+func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
 	// Create user for use by the discord bot (and core group ownership)
 	userId, _, _, err := nk.AuthenticateDevice(ctx, SystemUserID, "discordbot", true)
 	if err != nil {
