@@ -157,6 +157,11 @@ func (e Endpoint) GetExternalIP() string {
 	return e.ExternalIP.String()
 }
 
+// IsValid returns true if the endpoint has all required fields set.
+func (e Endpoint) IsValid() bool {
+	return e.InternalIP != nil && e.ExternalIP != nil && e.Port != 0
+}
+
 // String returns a string of "internalIP:externalIP:port"
 func (e Endpoint) String() string {
 	return fmt.Sprintf("%s:%s:%d", e.InternalIP.String(), e.ExternalIP.String(), e.Port)
