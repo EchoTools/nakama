@@ -242,7 +242,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 		messageCache: &MapOf[string, evr.Message]{},
 
-		ghostSpamTracker: NewGhostSpamTracker(logger, nk),
+		ghostSpamTracker: NewGhostSpamTracker(ctx, logger, nk),
 	}
 
 	// Create and store the early quit message trigger for sending SNS messages to players

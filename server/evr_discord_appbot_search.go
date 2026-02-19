@@ -96,9 +96,15 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 		return fmt.Errorf("failed to get guild groups: %w", err)
 	}
 
-	// Resolve caller's guild access with cascade (global ops → auditor → enforcer)
 	access := ResolveCallerGuildAccess(ctx, db, userIDStr, groupID, callerGuildGroups)
-	isGuildAuditor := access.IsAuditor
+
+	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userIDStr, GroupGlobalOperators)
+	if err != nil {
+		logger.WithField("error", err).Warn("Failed to check global operator status")
+	}
+
+	canUseWildcards := isGlobalOperator || access.IsAuditor || access.IsEnforcer
+	canSearchIPs := isGlobalOperator
 
 	if err := parseCommandOption(s, i, "pattern", &partial); err != nil {
 		return err
@@ -122,8 +128,6 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 		useWildcardSuffix bool
 	)
 
-	// Check if the display name has a wildcard prefix or suffix
-	// Remove it from the search string
 	if strings.HasPrefix(partial, "*") {
 		partial = partial[1:]
 		useWildcardPrefix = true
@@ -133,8 +137,11 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 		useWildcardSuffix = true
 	}
 
-	// Sanitize the display name
-	if displayName := strings.ToLower(sanitizeDisplayName(partial)); displayName == "" && !isGuildAuditor {
+	if (useWildcardPrefix || useWildcardSuffix) && !canUseWildcards {
+		return editInteractionResponse(s, i, "You do not have permission to use wildcards in searches")
+	}
+
+	if displayName := strings.ToLower(sanitizeDisplayName(partial)); displayName == "" && !canUseWildcards {
 		return editInteractionResponse(s, i, "Invalid search pattern")
 	} else if len(partial) < 3 && (useWildcardPrefix || useWildcardSuffix) {
 		return fmt.Errorf("search string is too short for wildcards")
@@ -212,7 +219,13 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 		}
 	}
 
-	if isGuildAuditor {
+	userIDSet := make(map[string]bool)
+
+	for _, r := range results {
+		userIDSet[r.account.User.Id] = true
+	}
+
+	if canUseWildcards {
 		var pattern string
 
 		if len(partial) > 2 && partial[0] == '/' && partial[len(partial)-1] == '/' {
@@ -226,19 +239,21 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 				pattern = fmt.Sprintf("%s.*", pattern)
 			}
 		}
-		// Search for Login data
-		loginHistoryResults, err := LoginHistoryRegexSearch(ctx, nk, pattern, 5)
+
+		loginHistoryResults, err := LoginHistoryRegexSearch(ctx, nk, pattern, 10)
 		if err != nil {
 			logger.WithField("error", err).Error("Failed to search login history")
 			return fmt.Errorf("failed to search login history: %w", err)
 		}
 
 		if len(loginHistoryResults) > 0 {
-			pattern := strings.ToLower(partial)
+			searchPattern := strings.ToLower(partial)
 			for _, userID := range loginHistoryResults {
+				if userIDSet[userID] {
+					continue
+				}
 				account, err := nk.AccountGetId(ctx, userID)
 				if err != nil {
-					logger.WithFields(map[string]any{}).Warn("Failed to get account")
 					continue
 				}
 				r := result{
@@ -249,22 +264,186 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 
 				loginHistory := NewLoginHistory(userID)
 				if err := StorableRead(ctx, nk, userID, loginHistory, false); err != nil {
-					logger.WithField("error", err).Error("Failed to read login history")
+					continue
 				}
+
 				for _, e := range loginHistory.History {
-					for _, item := range e.Items() {
-						if strings.Contains(item, pattern) {
+					items := e.Items()
+					if !canSearchIPs {
+						filtered := make([]string, 0, len(items))
+						for _, item := range items {
+							parts := strings.Split(item, ".")
+							if len(parts) == 4 {
+								isIP := true
+								for _, part := range parts {
+									if len(part) == 0 || len(part) > 3 {
+										isIP = false
+										break
+									}
+									for _, c := range part {
+										if c < '0' || c > '9' {
+											isIP = false
+											break
+										}
+									}
+									if !isIP {
+										break
+									}
+								}
+								if isIP {
+									continue
+								}
+							}
+							filtered = append(filtered, item)
+						}
+						items = filtered
+					}
+
+					for _, item := range items {
+						itemLower := strings.ToLower(item)
+						if strings.Contains(itemLower, searchPattern) {
 							r.matches[item] = e.UpdatedAt
 						}
 					}
 				}
 
-				if len(r.matches) == 0 {
-					continue
+				if len(r.matches) > 0 {
+					userIDSet[userID] = true
+					results = append(results, r)
 				}
+			}
+		}
+	}
 
-				results = append(results, r)
+	query := "SELECT user_id FROM user_device WHERE LOWER(id) LIKE $1 LIMIT 10"
+	rows, err := db.QueryContext(ctx, query, "%"+partial+"%")
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var userID string
+			if err := rows.Scan(&userID); err != nil {
+				continue
+			}
+			if userIDSet[userID] {
+				continue
+			}
+			account, err := nk.AccountGetId(ctx, userID)
+			if err != nil {
+				continue
+			}
 
+			deviceMatches := make(map[string]time.Time)
+			for _, dev := range account.Devices {
+				if strings.Contains(strings.ToLower(dev.Id), partial) {
+					deviceMatches["device: "+dev.Id] = time.Time{}
+				}
+			}
+
+			if len(deviceMatches) > 0 {
+				userIDSet[userID] = true
+				results = append(results, result{
+					account: account,
+					updated: account.User.UpdateTime.AsTime(),
+					matches: deviceMatches,
+				})
+			}
+		}
+	}
+
+	query = "SELECT id, username, display_name, avatar_url, update_time FROM users WHERE LOWER(username) LIKE $1 LIMIT 10"
+	rows, err = db.QueryContext(ctx, query, "%"+partial+"%")
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var userID, username, displayName, avatarURL string
+			var updateTime time.Time
+			if err := rows.Scan(&userID, &username, &displayName, &avatarURL, &updateTime); err != nil {
+				continue
+			}
+			if userIDSet[userID] {
+				continue
+			}
+			account, err := nk.AccountGetId(ctx, userID)
+			if err != nil {
+				continue
+			}
+
+			userIDSet[userID] = true
+			results = append(results, result{
+				account: account,
+				updated: updateTime,
+				matches: map[string]time.Time{
+					"username: " + username: time.Time{},
+				},
+			})
+		}
+	}
+
+	if isGlobalOperator {
+		groups, _, err := nk.GroupsList(ctx, "", GuildGroupLangTag, nil, nil, 100, "")
+		if err == nil {
+			for _, group := range groups {
+				if strings.Contains(strings.ToLower(group.Name), partial) {
+					results = append(results, result{
+						account: &api.Account{
+							User: &api.User{
+								Id:          group.Id,
+								DisplayName: group.Name,
+								AvatarUrl:   group.AvatarUrl,
+							},
+							CustomId: group.Id,
+						},
+						updated: group.UpdateTime.AsTime(),
+						matches: map[string]time.Time{
+							"guild: " + group.Name: group.UpdateTime.AsTime(),
+						},
+					})
+				}
+			}
+		}
+	} else {
+		for groupID := range callerGuildGroups {
+			groups, err := nk.GroupsGetId(ctx, []string{groupID})
+			if err != nil || len(groups) == 0 {
+				continue
+			}
+			group := groups[0]
+			if strings.Contains(strings.ToLower(group.Name), partial) {
+				results = append(results, result{
+					account: &api.Account{
+						User: &api.User{
+							Id:          group.Id,
+							DisplayName: group.Name,
+							AvatarUrl:   group.AvatarUrl,
+						},
+						CustomId: group.Id,
+					},
+					updated: group.UpdateTime.AsTime(),
+					matches: map[string]time.Time{
+						"guild: " + group.Name: group.UpdateTime.AsTime(),
+					},
+				})
+			}
+		}
+	}
+
+	matchList, err := nk.MatchList(ctx, 50, true, "", nil, nil, "*")
+	if err == nil {
+		for _, match := range matchList {
+			if strings.Contains(strings.ToLower(match.MatchId), partial) {
+				results = append(results, result{
+					account: &api.Account{
+						User: &api.User{
+							Id:          match.MatchId,
+							DisplayName: "Match",
+						},
+						CustomId: match.MatchId,
+					},
+					updated: time.Now(),
+					matches: map[string]time.Time{
+						"match: " + match.MatchId: time.Now(),
+					},
+				})
 			}
 		}
 	}

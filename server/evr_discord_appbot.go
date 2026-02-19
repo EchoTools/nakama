@@ -173,7 +173,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 				// Get all the matches
 				minSize := 2
 				maxSize := MatchLobbyMaxSize + 1
-				matches, err := nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, "*")
+				matches, err := nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, "*") // Limit to 100 for performance; only used for status display.
 				if err != nil {
 					logger.WithField("err", err).Warn("Error fetching matches.")
 					continue
@@ -1154,7 +1154,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						},
 						{
 							Name:   "int64",
-							Value:  strconv.FormatInt(int64(symbol), 10),
+							Value:  strconv.FormatInt(int64(symbol), 10), //nolint:gosec -- Symbol is a hash; signed representation is intentional
 							Inline: false,
 						},
 						{

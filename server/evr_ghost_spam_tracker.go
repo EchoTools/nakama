@@ -27,13 +27,15 @@ type GhostSpamTracker struct {
 	actions map[string][]ghostAction
 	logger  *zap.Logger
 	nk      runtime.NakamaModule
+	done    chan struct{}
 }
 
-func NewGhostSpamTracker(logger *zap.Logger, nk runtime.NakamaModule) *GhostSpamTracker {
+func NewGhostSpamTracker(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule) *GhostSpamTracker {
 	tracker := &GhostSpamTracker{
 		actions: make(map[string][]ghostAction),
 		logger:  logger,
 		nk:      nk,
+		done:    make(chan struct{}),
 	}
 
 	go tracker.cleanupLoop()
@@ -41,12 +43,21 @@ func NewGhostSpamTracker(logger *zap.Logger, nk runtime.NakamaModule) *GhostSpam
 	return tracker
 }
 
+func (t *GhostSpamTracker) Stop() {
+	close(t.done)
+}
+
 func (t *GhostSpamTracker) cleanupLoop() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		t.cleanup()
+	for {
+		select {
+		case <-ticker.C:
+			t.cleanup()
+		case <-t.done:
+			return
+		}
 	}
 }
 
