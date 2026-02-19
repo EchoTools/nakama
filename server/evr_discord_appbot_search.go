@@ -106,7 +106,7 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 
 	partial = strings.ToLower(partial)
 	if partial == "" {
-		return simpleInteractionResponse(s, i, "Please provide a search pattern")
+		return editInteractionResponse(s, i, "Please provide a search pattern")
 	}
 
 	type result struct {
@@ -135,7 +135,7 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 
 	// Sanitize the display name
 	if displayName := strings.ToLower(sanitizeDisplayName(partial)); displayName == "" && !isGuildAuditor {
-		return simpleInteractionResponse(s, i, "Invalid search pattern")
+		return editInteractionResponse(s, i, "Invalid search pattern")
 	} else if len(partial) < 3 && (useWildcardPrefix || useWildcardSuffix) {
 		return fmt.Errorf("search string is too short for wildcards")
 	} else {
@@ -270,7 +270,7 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 	}
 
 	if len(results) == 0 {
-		return simpleInteractionResponse(s, i, "No results found")
+		return editInteractionResponse(s, i, "No results found")
 	}
 
 	// Sort the results by last updated
@@ -359,15 +359,11 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 	}
 
 	if len(embeds) == 0 {
-		return simpleInteractionResponse(s, i, "No results found")
+		return editInteractionResponse(s, i, "No results found")
 	}
 
-	// Send the response
-	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Flags:  discordgo.MessageFlagsEphemeral,
-			Embeds: embeds,
-		},
+	_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Embeds: &embeds,
 	})
+	return err
 }
