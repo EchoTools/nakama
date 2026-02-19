@@ -2598,7 +2598,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					// Send penalty applied notification (if penalty level > 0)
 					if penaltyLevel > 0 {
-						reason := fmt.Sprintf("Manual lockout set by operator")
+						reason := "Manual lockout set by operator"
 						if err := trigger.SendPenaltyAppliedNotification(ctx, targetUserID, int32(penaltyLevel), durationSeconds, reason); err != nil {
 							logger.Warn("Failed to send penalty applied notification",
 								zap.String("user_id", targetUserID),
