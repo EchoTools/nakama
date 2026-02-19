@@ -92,28 +92,24 @@ func SetNextMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		}
 	}
 
-	settings, err := LoadMatchmakingSettings(ctx, nk, request.TargetUserID)
-	if err != nil {
-		return "", runtime.NewError(fmt.Sprintf("Error loading matchmaking settings: %s", err.Error()), StatusInternalError)
+	directive := &JoinDirective{
+		MatchID:       request.MatchID,
+		Role:          request.Role,
+		HostDiscordID: request.HostDiscordID,
 	}
-
-	settings.NextMatchID = request.MatchID
-	settings.NextMatchRole = request.Role
-	settings.NextMatchDiscordID = request.HostDiscordID
-
-	if err = StoreMatchmakingSettings(ctx, nk, request.TargetUserID, settings); err != nil {
-		return "", runtime.NewError(fmt.Sprintf("Error saving matchmaking settings: %s", err.Error()), StatusInternalError)
+	if err := StoreJoinDirective(ctx, nk, request.TargetUserID, directive); err != nil {
+		return "", runtime.NewError(fmt.Sprintf("Error saving join directive: %s", err.Error()), StatusInternalError)
 	}
 
 	logger.WithFields(map[string]interface{}{
 		"caller_user_id": callerUserID,
 		"target_user_id": request.TargetUserID,
-		"match_id":       settings.NextMatchID.String(),
+		"match_id":       request.MatchID.String(),
 	}).Info("Set next match")
 
 	response := SetNextMatchRPCResponse{
 		UserID:  request.TargetUserID,
-		MatchID: settings.NextMatchID,
+		MatchID: request.MatchID,
 	}
 
 	return response.String(), nil
