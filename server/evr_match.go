@@ -1148,6 +1148,11 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 		}
 	}
 
+	// Persist the label so post-match remote log processing can look it up after the match ends.
+	if err := StoreMatchLabel(ctx, nk, state); err != nil {
+		logger.WithField("error", err).Warn("failed to store match label on terminate")
+	}
+
 	if state.server != nil {
 		// Disconnect the players
 		for _, presence := range state.presenceMap {
@@ -1190,6 +1195,10 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 	if err := m.updateLabel(logger, dispatcher, state); err != nil {
 		logger.Error("failed to update label: %v", err)
 		return nil
+	}
+
+	if err := StoreMatchLabel(ctx, nk, state); err != nil {
+		logger.WithField("error", err).Warn("failed to store match label on shutdown")
 	}
 
 	if state.server != nil {

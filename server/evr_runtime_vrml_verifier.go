@@ -152,7 +152,15 @@ func (v *VRMLScanQueue) Start() error {
 				continue
 			}
 
-			// Store the VRML user data in the database (effectively linking the account)
+			// Reject if this VRML account is already linked to a different Nakama user.
+			if existingOwnerID, err := GetVRMLAccountOwner(v.ctx, v.nk, player.User.UserID); err != nil {
+				logger.WithField("error", err).Warn("Failed to check VRML account ownership")
+				continue
+			} else if existingOwnerID != "" && existingOwnerID != entry.UserID {
+				logger.WithField("existing_owner", existingOwnerID).Warn("VRML account already linked to another user")
+				continue
+			}
+
 			if _, err := v.nk.StorageWrite(v.ctx, []*runtime.StorageWrite{
 				{
 					Collection:      StorageCollectionVRML,
@@ -522,6 +530,7 @@ func (v *VRMLScanQueue) playerSummary(vg *vrmlgo.Session, player *vrmlgo.Player)
 	}
 
 	return &VRMLPlayerSummary{
+		UserID:                    player.User.UserID,
 		User:                      member.User,
 		Player:                    player,
 		Teams:                     teams,

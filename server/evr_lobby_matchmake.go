@@ -155,7 +155,6 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		matchmakingTicketTimeout = time.Duration(p.config.GetMatchmaker().MaxIntervals) * mmInterval
 		timeoutTimer             = time.NewTimer(lobbyParams.MatchmakingTimeout)
 		fallbackTimer            = time.NewTimer(min(lobbyParams.FallbackTimeout, matchmakingTicketTimeout-mmInterval))
-		ticketTicker             = time.NewTicker(matchmakingTicketTimeout)
 		currentTicket            string // Only allow one ticket at a time
 	)
 
@@ -200,27 +199,18 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		return nil
 	}
 
-	cycle := 0
-	for {
-		// Add initial ticket on first cycle
-		if cycle == 0 {
-			if err := replaceTicket(ticketConfig); err != nil {
-				return err
-			}
-		}
+	// Add initial ticket
+	if err := replaceTicket(ticketConfig); err != nil {
+		return err
+	}
 
+	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-timeoutTimer.C:
 			logger.Debug("Matchmaking timeout")
 			return ErrMatchmakingTimeout
-		case <-ticketTicker.C:
-			logger.Debug("Matchmaking ticket timeout, refreshing ticket", zap.Int("cycle", cycle))
-			// Refresh the ticket with the same config
-			if err := replaceTicket(ticketConfig); err != nil {
-				return err
-			}
 		case <-fallbackTimer.C:
 			logger.Debug("Matchmaking fallback, switching to relaxed criteria")
 
@@ -234,7 +224,6 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 				return err
 			}
 		}
-		cycle++
 	}
 }
 
@@ -334,9 +323,6 @@ type MatchmakingSettings struct {
 	CreateQueryAddon       string   `json:"create_query_addon"`        // Additional query to add to the matchmaking query
 	MatchmakerQueryAddon   string   `json:"matchmaker_query_addon"`    // Additional query to add to the matchmaking query
 	LobbyGroupName         string   `json:"group_id"`                  // Group ID to matchmake with
-	NextMatchID            MatchID  `json:"next_match_id"`             // Try to join this match immediately when finding a match
-	NextMatchRole          string   `json:"next_match_role"`           // The role to join the next match as
-	NextMatchDiscordID     string   `json:"next_match_discord_id"`     // The discord ID to join the next match as
 	StaticRatingMu         *float64 `json:"static_rating_mu"`          // The static rating mu to use
 	StaticRatingSigma      *float64 `json:"static_rating_sigma"`       // The static rating sigma to use
 	Divisions              []string `json:"divisions"`                 // The division to use
@@ -385,6 +371,58 @@ func LoadMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userI
 func StoreMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userID string, settings MatchmakingSettings) error {
 	err := StorableWrite(ctx, nk, userID, settings)
 	return err
+}
+
+const JoinDirectiveStorageKey = "join"
+const JoinDirectiveMatchIDIndex = "Index_JoinDirective_MatchID"
+
+type JoinDirective struct {
+	MatchID       MatchID `json:"match_id"`
+	Role          string  `json:"role,omitempty"`
+	HostDiscordID string  `json:"host_discord_id,omitempty"`
+	meta          StorableMetadata
+}
+
+func (JoinDirective) StorageMeta() StorableMetadata {
+	return StorableMetadata{
+		Collection: MatchmakerStorageCollection,
+		Key:        JoinDirectiveStorageKey,
+	}
+}
+
+func (j *JoinDirective) SetStorageMeta(meta StorableMetadata) {
+	j.meta = meta
+}
+
+func (JoinDirective) StorageIndexes() []StorableIndexMeta {
+	return []StorableIndexMeta{{
+		Name:       JoinDirectiveMatchIDIndex,
+		Collection: MatchmakerStorageCollection,
+		Key:        JoinDirectiveStorageKey,
+		Fields:     []string{"match_id"},
+		MaxEntries: 100000,
+	}}
+}
+
+func LoadJoinDirective(ctx context.Context, nk runtime.NakamaModule, userID string) (*JoinDirective, error) {
+	directive := &JoinDirective{}
+	if err := StorableRead(ctx, nk, userID, directive, false); err != nil {
+		return nil, err
+	}
+	return directive, nil
+}
+
+func StoreJoinDirective(ctx context.Context, nk runtime.NakamaModule, userID string, directive *JoinDirective) error {
+	return StorableWrite(ctx, nk, userID, directive)
+}
+
+func DeleteJoinDirective(ctx context.Context, nk runtime.NakamaModule, userID string) error {
+	meta := JoinDirective{}.StorageMeta()
+	return nk.StorageDelete(ctx, []*runtime.StorageDelete{{
+		Collection: meta.Collection,
+		Key:        meta.Key,
+		UserID:     userID,
+	}})
 }
 
 type LatencyMetric struct {

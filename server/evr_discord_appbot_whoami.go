@@ -894,14 +894,11 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			})
 	}
 
-	// Send the response
-	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Flags:      discordgo.MessageFlagsEphemeral,
-			Embeds:     embeds,
-			Components: components,
-		}}); err != nil {
+	_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Embeds:     &embeds,
+		Components: &components,
+	})
+	if err != nil {
 		if opts.SendFileOnError {
 			// If the error is due to the message being too long, try and send a file with the embeds instead
 			// Try and send a message with a file attachment of the embeds if the interaction response fails
@@ -941,10 +938,12 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 				}
 			}
 
-			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: responseData,
-			}); err != nil {
+			_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+				Content:    &responseData.Content,
+				Components: &responseData.Components,
+				Files:      responseData.Files,
+			})
+			if err != nil {
 				return fmt.Errorf("failed to send message with embeds: %w", err)
 			}
 		}

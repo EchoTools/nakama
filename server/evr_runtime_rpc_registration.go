@@ -206,14 +206,60 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			},
 		},
 
-		// Guild management - Guild owner and global operators
 		{
 			ID:      "guildgroup",
 			Handler: GuildGroupGetRPC,
 			Permission: &RPCPermission{
 				RequireAuth:   true,
-				AllowedGroups: []string{GroupGlobalOperators},
-				// TODO: Add guild owner check in middleware
+				AllowedGroups: []string{},
+			},
+		},
+		{
+			ID:      "guild/group/update",
+			Handler: GuildGroupUpdateRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{},
+			},
+		},
+		{
+			ID:      "guild/group/roles/update",
+			Handler: GuildGroupRolesUpdateRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{},
+			},
+		},
+		{
+			ID:      "guild/group/transfer",
+			Handler: GuildGroupTransferOwnershipRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{},
+			},
+		},
+		{
+			ID:      "guild/group/leave",
+			Handler: GuildGroupLeaveRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{},
+			},
+		},
+		{
+			ID:      "guild/group/delete",
+			Handler: GuildGroupDeleteRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{},
+			},
+		},
+		{
+			ID:      "guild/discord/roles",
+			Handler: rpcHandler.GuildDiscordRolesRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{},
 			},
 		},
 
