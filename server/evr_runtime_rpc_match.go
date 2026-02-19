@@ -143,7 +143,9 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		Level:            evr.ToSymbol(request.Level),
 		TeamSize:         int(request.TeamSize.GetValue()),
 		StartTime:        request.ExpiryTime.AsTime().UTC(),
-		SpawnedBy:        request.OwnerId,
+		SpawnedBy:        userID,  // The actual user making the request
+		Owner:            request.OwnerId,  // The designated owner (can be different from spawner)
+		Classification:   ClassificationNone,  // Default classification, can be overridden
 		GroupID:          uuid.FromStringOrNil(request.GroupId),
 		RequiredFeatures: request.RequiredFeatures,
 		TeamAlignments:   teamAlignments,

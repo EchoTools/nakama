@@ -1013,6 +1013,8 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			RequiredFeatures: label.RequiredFeatures,
 			StartTime:        label.StartTime.UTC(),
 			SpawnedBy:        label.SpawnedBy,
+			Owner:            label.Owner.String(), // Preserve existing owner if set
+			Classification:   label.Classification, // Preserve existing classification
 			GroupID:          uuid.FromStringOrNil(groupID),
 			TeamAlignments:   label.TeamAlignments,
 		}
@@ -1025,6 +1027,8 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			RequiredFeatures: request.RequiredFeatures,
 			StartTime:        request.StartTime.UTC(),
 			SpawnedBy:        request.SpawnedBy,
+			Owner:            request.SpawnedBy,  // Default owner to spawner
+			Classification:   ClassificationNone, // Default classification
 			GroupID:          uuid.FromStringOrNil(groupID),
 			TeamAlignments:   make(map[string]int, len(request.Alignments)),
 		}

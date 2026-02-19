@@ -94,6 +94,8 @@ type MatchSettings struct {
 	TeamSize            int
 	StartTime           time.Time
 	SpawnedBy           string
+	Owner               string                // User ID of the match owner (has same permissions as SpawnedBy)
+	Classification      SessionClassification // Priority classification for purging logic
 	GroupID             uuid.UUID
 	Description         string
 	RequiredFeatures    []string
@@ -1169,6 +1171,11 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 		}).Warn("Match terminating, disconnecting broadcaster.")
 
 		nk.SessionDisconnect(ctx, state.server.GetSessionId(), runtime.PresenceReasonDisconnect)
+	}
+
+	// Cleanup Discord session message if it exists
+	if appBot := globalAppBot.Load(); appBot != nil && appBot.sessionsManager != nil {
+		appBot.sessionsManager.RemoveSessionMessage(state.ID.String())
 	}
 
 	return nil

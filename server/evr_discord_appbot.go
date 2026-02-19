@@ -58,10 +58,11 @@ type DiscordAppBot struct {
 	statusRegistry     StatusRegistry
 	guildGroupRegistry *GuildGroupRegistry
 
-	cache       *DiscordIntegrator
-	ipInfoCache *IPInfoCache
-	choiceCache *MapOf[string, []*discordgo.ApplicationCommandOptionChoice]
-	igpRegistry *MapOf[string, *InGamePanel]
+	cache           *DiscordIntegrator
+	ipInfoCache     *IPInfoCache
+	choiceCache     *MapOf[string, []*discordgo.ApplicationCommandOptionChoice]
+	igpRegistry     *MapOf[string, *InGamePanel]
+	sessionsManager *SessionsChannelManager
 
 	debugChannels  map[string]string // map[groupID]channelID
 	userID         string            // Nakama UserID of the bot
@@ -101,6 +102,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		choiceCache:        &MapOf[string, []*discordgo.ApplicationCommandOptionChoice]{},
 
 		igpRegistry:               &MapOf[string, *InGamePanel]{},
+		sessionsManager:           NewSessionsChannelManager(ctx, logger, nk, dg),
 		prepareMatchRatePerSecond: 1.0 / 60,
 		prepareMatchBurst:         1,
 		prepareMatchRateLimiters:  &MapOf[string, *rate.Limiter]{},
@@ -362,6 +364,24 @@ var (
 					Type:        discordgo.ApplicationCommandOptionInteger,
 					Name:        "grace-seconds",
 					Description: "Seconds to wait before forcing the shutdown.",
+					Required:    false,
+				},
+			},
+		},
+		{
+			Name:        "vacate",
+			Description: "Release your allocated server (60s grace, 20s with --override)",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "match-id",
+					Description: "Match ID to vacate",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionBoolean,
+					Name:        "override",
+					Description: "Override to 20s grace period",
 					Required:    false,
 				},
 			},
@@ -748,45 +768,7 @@ var (
 		},
 		{
 			Name:        "set-roles",
-			Description: "link roles to EchoVRCE features. Non-members can only join private matches.",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "member",
-					Description: "If defined, this role allows joining social lobbies, matchmaking, or creating private matches.",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "moderator",
-					Description: "Allowed access to more detailed `/lookup`information and moderation tools.",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "serverhost",
-					Description: "Allowed to host a game server for the guild.",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "suspension",
-					Description: "Disallowed from joining any guild matches.",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "allocator",
-					Description: "Allowed to reserve game servers.",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "is-linked",
-					Description: "Assigned/Removed by Nakama denoting if an account is linked to a headset.",
-					Required:    true,
-				},
-			},
+			Description: "Configure guild roles for EchoVRCE features. Non-members can only join private matches.",
 		},
 		{
 			Name:        "allocate",
@@ -853,6 +835,34 @@ var (
 					Name:        "description",
 					Description: "Optional description for the match (visible in /show command)",
 					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "class",
+					Description: "Match classification (none, pickup, mixed, scrimmage, league)",
+					Required:    false,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{
+							Name:  "None",
+							Value: "none",
+						},
+						{
+							Name:  "Pickup",
+							Value: "pickup",
+						},
+						{
+							Name:  "Mixed",
+							Value: "mixed",
+						},
+						{
+							Name:  "Scrimmage",
+							Value: "scrimmage",
+						},
+						{
+							Name:  "League",
+							Value: "league",
+						},
+					},
 				},
 			},
 		},
@@ -927,7 +937,7 @@ var (
 		},
 		{
 			Name:        "region-status",
-			Description: "Get the status of game servers in a specific region",
+			Description: "[DEPRECATED] Use /show for persistent status embeds. This command provides one-shot ephemeral status.",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
@@ -1564,6 +1574,45 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return editInteractionResponse(s, i, fmt.Sprintf("```%s```", b.String()))
 
 			}
+		},
+		"vacate": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+			if user == nil {
+				return nil
+			}
+
+			handler := NewVacateCommandHandler(nk, logger)
+			err := handler.HandleVacateCommand(ctx, s, i, userID)
+
+			if err != nil {
+				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: fmt.Sprintf("Error: %s", err.Error()),
+					},
+				})
+			}
+
+			options := i.ApplicationCommandData().Options
+			var override bool
+			for _, option := range options {
+				if option.Name == "override" {
+					override = option.BoolValue()
+				}
+			}
+
+			graceSeconds := 60
+			if override {
+				graceSeconds = 20
+			}
+
+			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Flags:   discordgo.MessageFlagsEphemeral,
+					Content: fmt.Sprintf("Server vacated. Grace period: %ds", graceSeconds),
+				},
+			})
 		},
 		"shutdown-match": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			if user == nil {
@@ -2442,6 +2491,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			region := "default"
 			level := evr.LevelUnspecified
 			description := ""
+			classification := ClassificationNone
 			for _, o := range options {
 				switch o.Name {
 				case "region":
@@ -2452,6 +2502,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					level = evr.ToSymbol(o.StringValue())
 				case "description":
 					description = strings.TrimSpace(o.StringValue())
+				case "class":
+					classification = ParseSessionClassification(o.StringValue())
 				}
 			}
 
@@ -2478,7 +2530,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				"startTime": startTime,
 			})
 
-			label, _, err := d.handleAllocateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime, description)
+			label, _, err := d.handleAllocateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime, description, classification)
 			if err != nil {
 				// Check if this is a region fallback error
 				var regionErr ErrMatchmakingNoServersInRegion
@@ -3780,7 +3832,7 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 		}
 
 		embed.Footer = &discordgo.MessageEmbedFooter{
-			Text: fmt.Sprintf("Expires %s", t.Format(time.RFC1123)),
+			Text: fmt.Sprintf("Expires %s • ⚠️ Deprecated: use persistent embeds (see /show)", t.Format(time.RFC1123)),
 		}
 		// Update the message for the given region
 		_, err = d.dg.ChannelMessageEditEmbed(channelID, existingMessage.ID, embed)
@@ -3791,6 +3843,9 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 		return nil
 	} else {
 		// Create the message and update it regularly
+		embed.Footer = &discordgo.MessageEmbedFooter{
+			Text: "⚠️ Deprecated: Persistent embeds are now preferred - use /show for always-visible updates",
+		}
 		msg, err := d.dg.ChannelMessageSendEmbed(channelID, embed)
 		if err != nil {
 			return err
@@ -4166,6 +4221,39 @@ func SendIPAuthorizationNotification(dg *discordgo.Session, discordID string, ip
 	}
 
 	return nil
+}
+
+// canShutdownMatch checks if the user has permission to shut down a match
+func (d *DiscordAppBot) canShutdownMatch(ctx context.Context, userID string, label *MatchLabel) (bool, error) {
+	// Stub implementation: conservative approach, deny all shutdowns for now
+	return false, nil
+}
+
+// presentRegionFallbackOptions presents the user with fallback region options when matchmaking fails
+func (d *DiscordAppBot) presentRegionFallbackOptions(s *discordgo.Session, i *discordgo.InteractionCreate, fallbackInfo *RegionFallbackInfo, action string, region string, mode evr.Symbol, level evr.Symbol, startTime time.Time) error {
+	if fallbackInfo == nil {
+		return errors.New("no fallback info provided")
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "No Servers Available",
+		Description: fmt.Sprintf("No servers are available in the **%s** region.", region),
+		Color:       0xFF0000,
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:   "Available Regions",
+				Value:  fmt.Sprintf("Servers are available in other regions. Please try a different region."),
+				Inline: false,
+			},
+		},
+	}
+
+	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+		},
+	})
 }
 
 func IsDiscordErrorCode(err error, code int) bool {

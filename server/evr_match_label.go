@@ -43,9 +43,11 @@ type MatchLabel struct {
 
 	GroupID         *uuid.UUID                `json:"group_id,omitempty"`         // The channel id of the broadcaster. (EVR)
 	SpawnedBy       string                    `json:"spawned_by,omitempty"`       // The userId of the player that spawned this match.
-	Description     string                    `json:"description,omitempty"`      // Optional description for the match (set via allocate command)
+	Owner           uuid.UUID                 `json:"owner,omitempty"`            // The userId of the match owner (has same permissions as SpawnedBy)
+	Classification  SessionClassification     `json:"classification,omitempty"`   // Priority classification for purging logic
 	StartTime       time.Time                 `json:"start_time,omitempty"`       // The time the match was, or will be started.
 	CreatedAt       time.Time                 `json:"created_at,omitempty"`       // The time the match was created.
+	Description     string                    `json:"description,omitempty"`      // The description of the match.
 	GameServer      *GameServerPresence       `json:"broadcaster,omitempty"`      // The broadcaster's data
 	SessionSettings *evr.LobbySessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
 	TeamAlignments  map[string]int            `json:"team_alignments,omitempty"`  // map[userID]TeamIndex
@@ -515,6 +517,8 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 		CreatedAt:        l.CreatedAt,
 		GroupID:          l.GroupID,
 		SpawnedBy:        l.SpawnedBy,
+		Owner:            l.Owner,
+		Classification:   l.Classification,
 		Mode:             l.Mode,
 		Level:            l.Level,
 		RequiredFeatures: l.RequiredFeatures,

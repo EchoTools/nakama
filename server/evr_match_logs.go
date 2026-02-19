@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -37,24 +38,15 @@ func (m *EventEnvelopeMatchData) MarshalEvent() (*api.Event, error) {
 }
 
 func MatchDataEvent(ctx context.Context, nk runtime.NakamaModule, matchID MatchID, data any) error {
+	// Create a new match data journal entry
+	entry := &MatchDataJournalEntry{
+		CreatedAt: time.Now().UTC(),
+		Data:      data,
+	}
 
-	/*
-		// FIXME: This generates too much data, disabled for now.
-
-			entry, err := NewEventEnvelopeMatchData(matchID, data)
-			if err != nil {
-				return fmt.Errorf("failed to create match data event: %w", err)
-			}
-
-			evt, err := entry.MarshalEvent()
-			if err != nil {
-				return fmt.Errorf("failed to marshal match data event: %w", err)
-			}
-
-			if err := nk.Event(ctx, evt); err != nil {
-				return fmt.Errorf("failed to add match data event: %w", err)
-			}
-	*/
-
-	return nil
+	// Create the event
+	event := NewEventMatchDataJournal(matchID.String(), entry)
+	
+	// Send the event
+	return SendEvent(ctx, nk, event)
 }

@@ -1,0 +1,371 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/bwmarrin/discordgo"
+	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/runtime"
+)
+
+// ReservationIntegration handles all reservation-related functionality
+type ReservationIntegration struct {
+	nk                 runtime.NakamaModule
+	logger             runtime.Logger
+	reservationMgr     *ReservationManager
+	preemptionMgr      *MatchPreemptionManager
+	dashboardMgr       *ReservationDashboardManager
+	commandHandler     *ReservationSlashCommandHandler
+	utilizationMonitor *ServerUtilizationMonitor
+}
+
+// NewReservationIntegration creates a new reservation integration
+func NewReservationIntegration(nk runtime.NakamaModule, logger runtime.Logger) *ReservationIntegration {
+	reservationMgr := NewReservationManager(nk, logger)
+	preemptionMgr := NewMatchPreemptionManager(nk, logger, reservationMgr)
+	dashboardMgr := NewReservationDashboardManager(nk, logger, reservationMgr)
+	commandHandler := NewReservationSlashCommandHandler(nk, logger, reservationMgr, preemptionMgr)
+	utilizationMonitor := NewServerUtilizationMonitor(nk, logger)
+
+	return &ReservationIntegration{
+		nk:                 nk,
+		logger:             logger,
+		reservationMgr:     reservationMgr,
+		preemptionMgr:      preemptionMgr,
+		dashboardMgr:       dashboardMgr,
+		commandHandler:     commandHandler,
+		utilizationMonitor: utilizationMonitor,
+	}
+}
+
+// RegisterDiscordCommands registers the reservation slash commands
+func (ri *ReservationIntegration) RegisterDiscordCommands(dg *discordgo.Session) error {
+	command := GetReserveCommandDefinition()
+
+	_, err := dg.ApplicationCommandCreate(dg.State.User.ID, "", command)
+	if err != nil {
+		return fmt.Errorf("failed to register /reserve command: %w", err)
+	}
+
+	ri.logger.Info("Registered /reserve slash command")
+	return nil
+}
+
+// HandleSlashCommand handles incoming slash command interactions
+func (ri *ReservationIntegration) HandleSlashCommand(ctx context.Context, dg *discordgo.Session, i *discordgo.InteractionCreate) error {
+	if i.ApplicationCommandData().Name == "reserve" {
+		return ri.commandHandler.HandleReserveCommand(ctx, dg, i)
+	}
+	return nil
+}
+
+// StartMonitoring starts background monitoring tasks
+func (ri *ReservationIntegration) StartMonitoring(ctx context.Context, dg *discordgo.Session) {
+	// Start server utilization monitoring
+	go ri.utilizationMonitor.StartMonitoring(ctx, dg)
+
+	// Start reservation cleanup task
+	go ri.startReservationCleanup(ctx)
+
+	ri.logger.Info("Started reservation system monitoring")
+}
+
+// startReservationCleanup periodically cleans up expired reservations
+func (ri *ReservationIntegration) startReservationCleanup(ctx context.Context) {
+	ticker := time.NewTicker(time.Duration(UtilizationCheckIntervalMinutes) * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := ri.reservationMgr.CheckNoShowReservations(ctx); err != nil {
+				ri.logger.Error("Failed to check no-show reservations: %v", err)
+			}
+			ri.cleanupExpiredReservations(ctx)
+		}
+	}
+}
+
+// DiscordMessenger interface for sending messages (allows testing without full discordgo.Session)
+type DiscordMessenger interface {
+	ChannelMessageSendComplex(channelID string, data *discordgo.MessageSend) (*discordgo.Message, error)
+}
+
+// cleanupExpiredReservations removes expired reservations and updates states
+func (ri *ReservationIntegration) cleanupExpiredReservations(ctx context.Context) {
+	ri.logger.Debug("Running reservation cleanup task - no Discord session available")
+}
+
+// cleanupExpiredReservationsWithDiscord removes expired reservations, deletes from storage, and posts audit messages
+func (ri *ReservationIntegration) cleanupExpiredReservationsWithDiscord(ctx context.Context, dg DiscordMessenger) error {
+	objects, _, err := ri.nk.StorageList(ctx, SystemUserID, SystemUserID, ReservationStorageCollection, 1000, "")
+	if err != nil {
+		ri.logger.Error("Failed to list reservations for cleanup: %v", err)
+		return fmt.Errorf("failed to list reservations: %w", err)
+	}
+
+	now := time.Now()
+	for _, obj := range objects {
+		var reservation MatchReservation
+		if err := json.Unmarshal([]byte(obj.Value), &reservation); err != nil {
+			ri.logger.Warn("Failed to unmarshal reservation %s during cleanup: %v", obj.Key, err)
+			continue
+		}
+
+		shouldRemove := false
+		reason := ""
+
+		if reservation.State == ReservationStateExpired {
+			shouldRemove = true
+			reason = "explicitly expired state"
+		} else if reservation.State == ReservationStateReserved && reservation.StartTime.Add(time.Duration(ReservationExpiryMinutes)*time.Minute).Before(now) {
+			shouldRemove = true
+			reason = fmt.Sprintf("expired: start time %v exceeded %d minute grace period", reservation.StartTime, ReservationExpiryMinutes)
+		} else if reservation.State == ReservationStateEnded {
+			shouldRemove = true
+			reason = "match ended"
+		}
+
+		if shouldRemove {
+			guildID, err := GetGuildIDByGroupIDNK(ctx, ri.nk, reservation.GroupID.String())
+			if err != nil {
+				ri.logger.Warn("Failed to get guild ID for reservation %s cleanup: %v", reservation.ID, err)
+			} else {
+				auditChannelID, err := GetGuildAuditChannelID(ctx, ri.nk, guildID)
+				if err != nil {
+					ri.logger.Warn("Failed to get audit channel for reservation %s cleanup: %v", reservation.ID, err)
+				} else {
+					message := fmt.Sprintf("🗑️ **Reservation Cleanup**\n"+
+						"Reservation ID: `%s`\n"+
+						"Owner: <@%s>\n"+
+						"Classification: %s\n"+
+						"Start Time: %s\n"+
+						"State: %s\n"+
+						"Reason: %s",
+						reservation.ID,
+						reservation.Owner,
+						reservation.Classification.String(),
+						reservation.StartTime.Format(time.RFC3339),
+						reservation.State,
+						reason,
+					)
+
+					if _, err := dg.ChannelMessageSendComplex(auditChannelID, &discordgo.MessageSend{
+						Content: message,
+					}); err != nil {
+						ri.logger.Error("Failed to send audit message for reservation %s cleanup: %v", reservation.ID, err)
+					}
+				}
+			}
+
+			if err := ri.reservationMgr.DeleteReservation(ctx, reservation.ID); err != nil {
+				ri.logger.Error("Failed to delete expired reservation %s: %v", reservation.ID, err)
+			} else {
+				ri.logger.Info("Cleaned up reservation %s: %s", reservation.ID, reason)
+			}
+		}
+	}
+
+	return nil
+}
+
+// ServerUtilizationMonitor monitors server usage and sends notifications
+type ServerUtilizationMonitor struct {
+	nk           runtime.NakamaModule
+	logger       runtime.Logger
+	alertTracker map[string]time.Time // Track when alerts were last sent for matches
+}
+
+// NewServerUtilizationMonitor creates a new utilization monitor
+func NewServerUtilizationMonitor(nk runtime.NakamaModule, logger runtime.Logger) *ServerUtilizationMonitor {
+	return &ServerUtilizationMonitor{
+		nk:           nk,
+		logger:       logger,
+		alertTracker: make(map[string]time.Time),
+	}
+}
+
+// StartMonitoring starts the utilization monitoring loop
+func (sum *ServerUtilizationMonitor) StartMonitoring(ctx context.Context, dg *discordgo.Session) {
+	ticker := time.NewTicker(time.Duration(UtilizationCheckIntervalMinutes) * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sum.checkUtilization(ctx, dg)
+		}
+	}
+}
+
+// checkUtilization checks all matches for low utilization and sends notifications
+func (sum *ServerUtilizationMonitor) checkUtilization(ctx context.Context, dg *discordgo.Session) {
+	matches, err := sum.nk.MatchList(ctx, 1000, true, "", nil, nil, "*")
+	if err != nil {
+		sum.logger.Error("Failed to list matches for utilization monitoring: %v", err)
+		return
+	}
+
+	now := time.Now()
+
+	for _, match := range matches {
+		var label MatchLabel
+		if err := json.Unmarshal([]byte(match.Label.Value), &label); err != nil {
+			continue
+		}
+
+		// Skip if not enough time has passed since match start
+		if label.StartTime.IsZero() || now.Sub(label.StartTime) < time.Duration(LowPlayerDurationMinutes)*time.Minute {
+			continue
+		}
+
+		// Check if player count is below threshold
+		if label.PlayerCount >= LowPlayerCountThreshold {
+			// Remove from alert tracker if player count is now adequate
+			delete(sum.alertTracker, match.MatchId)
+			continue
+		}
+
+		// Check if we've already sent an alert recently
+		lastAlert, exists := sum.alertTracker[match.MatchId]
+		if exists && now.Sub(lastAlert) < time.Duration(UtilizationCheckIntervalMinutes)*time.Minute {
+			continue
+		}
+
+		// Send low utilization notification
+		if err := sum.sendLowUtilizationAlert(ctx, dg, &label, match.MatchId); err != nil {
+			sum.logger.Error("Failed to send low utilization alert for match %s: %v", match.MatchId, err)
+		} else {
+			sum.alertTracker[match.MatchId] = now
+		}
+	}
+}
+
+// sendLowUtilizationAlert sends a notification about low server utilization
+func (sum *ServerUtilizationMonitor) sendLowUtilizationAlert(ctx context.Context, dg *discordgo.Session, label *MatchLabel, matchID string) error {
+	if label.GroupID == nil {
+		return nil // Skip matches without guild associations
+	}
+
+	// Get guild ID from group ID
+	guildID, err := GetGuildIDByGroupIDNK(ctx, sum.nk, label.GroupID.String())
+	if err != nil {
+		return fmt.Errorf("failed to get guild ID: %w", err)
+	}
+
+	// Get guild audit channel
+	auditChannelID, err := GetGuildAuditChannelID(ctx, sum.nk, guildID)
+	if err != nil || auditChannelID == "" {
+		return nil // No audit channel configured
+	}
+
+	duration := time.Since(label.StartTime)
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "⚠️ Low Server Utilization Alert",
+		Description: fmt.Sprintf("Match `%s` has low player activity", matchID[:8]),
+		Color:       0xff6600,
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "Player Count", Value: fmt.Sprintf("%d (threshold: %d)", label.PlayerCount, LowPlayerCountThreshold), Inline: true},
+			{Name: "Duration", Value: fmt.Sprintf("%.0f minutes", duration.Minutes()), Inline: true},
+			{Name: "Classification", Value: label.Classification.String(), Inline: true},
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	if label.Owner != uuid.Nil {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name: "Owner", Value: fmt.Sprintf("<@%s>", label.Owner.String()), Inline: true,
+		})
+	}
+
+	embed.Footer = &discordgo.MessageEmbedFooter{
+		Text: "Notifications repeat every 5 minutes until activity increases",
+	}
+
+	_, err = dg.ChannelMessageSendEmbed(auditChannelID, embed)
+	return err
+}
+
+// Helper functions that would need to be implemented based on existing guild/group system
+
+// GetGuildIDByGroupIDNK converts a group ID to guild ID
+func GetGuildIDByGroupIDNK(ctx context.Context, nk runtime.NakamaModule, groupID string) (string, error) {
+	groups, err := nk.GroupsGetId(ctx, []string{groupID})
+	if err != nil {
+		return "", fmt.Errorf("failed to get group: %w", err)
+	}
+	if len(groups) == 0 {
+		return "", fmt.Errorf("group not found: %s", groupID)
+	}
+
+	var metadata GroupMetadata
+	if err := json.Unmarshal([]byte(groups[0].Metadata), &metadata); err != nil {
+		return "", fmt.Errorf("failed to unmarshal group metadata: %w", err)
+	}
+
+	if metadata.GuildID == "" {
+		return "", fmt.Errorf("guild_id not set in group metadata for group: %s", groupID)
+	}
+
+	return metadata.GuildID, nil
+}
+
+// GetGuildAuditChannelID gets the audit channel ID for a guild
+func GetGuildAuditChannelID(ctx context.Context, nk runtime.NakamaModule, guildID string) (string, error) {
+	groupID, err := GetGroupIDByGuildIDNK(ctx, nk, guildID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get group ID for guild: %w", err)
+	}
+
+	groups, err := nk.GroupsGetId(ctx, []string{groupID})
+	if err != nil {
+		return "", fmt.Errorf("failed to get group: %w", err)
+	}
+	if len(groups) == 0 {
+		return "", fmt.Errorf("group not found: %s", groupID)
+	}
+
+	var metadata GroupMetadata
+	if err := json.Unmarshal([]byte(groups[0].Metadata), &metadata); err != nil {
+		return "", fmt.Errorf("failed to unmarshal group metadata: %w", err)
+	}
+
+	if metadata.AuditChannelID == "" {
+		return "", fmt.Errorf("audit_channel_id not configured for guild: %s", guildID)
+	}
+
+	return metadata.AuditChannelID, nil
+}
+
+// GetGroupIDByGuildIDNK converts a guild ID to group ID
+func GetGroupIDByGuildIDNK(ctx context.Context, nk runtime.NakamaModule, guildID string) (string, error) {
+	groups, _, err := nk.GroupsList(ctx, "", "guild", nil, nil, 100, "")
+	if err != nil {
+		return "", fmt.Errorf("failed to list guild groups: %w", err)
+	}
+
+	for _, group := range groups {
+		var metadata GroupMetadata
+		if err := json.Unmarshal([]byte(group.Metadata), &metadata); err != nil {
+			continue
+		}
+		if metadata.GuildID == guildID {
+			return group.Id, nil
+		}
+	}
+
+	return "", fmt.Errorf("group not found for guild_id: %s", guildID)
+}
+
+// GetUserIDByDiscordIDNK converts a Discord user ID to Nakama user ID
+func GetUserIDByDiscordIDNK(ctx context.Context, nk runtime.NakamaModule, discordID string) (string, error) {
+	return "", fmt.Errorf("GetUserIDByDiscordIDNK not implemented: use GetUserIDByDiscordID with db instead")
+}
