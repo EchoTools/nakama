@@ -89,12 +89,15 @@ func StorableRead(ctx context.Context, nk runtime.NakamaModule, userID string, d
 			}
 			// Record is corrupted. Delete it and recreate with defaults so the caller recovers.
 			meta.Version = objs[0].GetVersion()
-			_ = nk.StorageDelete(ctx, []*runtime.StorageDelete{{
+			if err := nk.StorageDelete(ctx, []*runtime.StorageDelete{{
 				Collection: meta.Collection,
 				Key:        meta.Key,
 				UserID:     meta.UserID,
 				Version:    meta.Version,
-			}})
+			}}); err != nil {
+				// Intentionally not returning here; the write below will fail with a version conflict if needed.
+				_ = err
+			}
 			meta.Version = "*" // Disallow overwriting any concurrently-recreated object.
 			return StorableWrite(ctx, nk, userID, dst)
 		}
