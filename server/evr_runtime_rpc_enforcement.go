@@ -208,6 +208,12 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 				continue
 			}
 
+			// If AllowPrivateLobbies is true, don't kick from private matches
+			if request.AllowPrivateLobbies && label.IsPrivateMatch() {
+				actions = append(actions, fmt.Sprintf("skipped kick from private [%s] (allow_private_lobbies=true)", label.Mode.String()))
+				continue
+			}
+
 			permissions := make([]string, 0)
 
 			// Check if the user is the match owner of a private match

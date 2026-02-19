@@ -72,6 +72,8 @@ type EvrPipeline struct {
 
 	messageCache            *MapOf[string, evr.Message]
 	earlyQuitMessageTrigger *SNSEarlyQuitMessageTrigger
+
+	ghostSpamTracker *GhostSpamTracker
 }
 
 type ctxDiscordBotTokenKey struct{}
@@ -239,6 +241,8 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		linkDeviceURL:    config.GetRuntime().Environment["LINK_DEVICE_URL"],
 
 		messageCache: &MapOf[string, evr.Message]{},
+
+		ghostSpamTracker: NewGhostSpamTracker(logger, nk),
 	}
 
 	// Create and store the early quit message trigger for sending SNS messages to players
