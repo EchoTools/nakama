@@ -34,19 +34,6 @@ func (r BreakAlternatesRPCResponse) String() string {
 	return string(data)
 }
 
-// removeFromSecondDegreeAlternates removes a user ID from the SecondDegreeAlternates slice.
-func removeFromSecondDegreeAlternates(history *LoginHistory, userIDToRemove string) {
-	for i := 0; i < len(history.SecondDegreeAlternates); i++ {
-		if history.SecondDegreeAlternates[i] == userIDToRemove {
-			history.SecondDegreeAlternates = append(
-				history.SecondDegreeAlternates[:i],
-				history.SecondDegreeAlternates[i+1:]...,
-			)
-			i--
-		}
-	}
-}
-
 // BreakAlternatesRPC handles breaking alternate account associations between two users.
 // This RPC is restricted to Global Operators only (enforced by middleware).
 func BreakAlternatesRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
@@ -116,7 +103,7 @@ func BreakAlternatesRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 			"operator_user_id": callerUserID,
 			"user_id_1":        request.UserID1,
 			"user_id_2":        request.UserID2,
-		}).Warn("No alternate association found between users")
+		}).Info("No alternate association found between users")
 
 		return BreakAlternatesRPCResponse{
 			Success:        true,
@@ -132,16 +119,55 @@ func BreakAlternatesRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	delete(otherHistory.AlternateMatches, primaryUserID)
 
 	// Remove from second degree alternates if present
-	removeFromSecondDegreeAlternates(primaryHistory, otherUserID)
-	removeFromSecondDegreeAlternates(otherHistory, primaryUserID)
+	primaryHistory.SecondDegreeAlternates, _ = RemoveFromStringSlice(primaryHistory.SecondDegreeAlternates, otherUserID)
+	otherHistory.SecondDegreeAlternates, _ = RemoveFromStringSlice(otherHistory.SecondDegreeAlternates, primaryUserID)
 
-	// Save both login histories
-	if err := StorableWrite(ctx, nk, primaryUserID, primaryHistory); err != nil {
-		return "", runtime.NewError(fmt.Sprintf("Failed to save login history for primary user: %s", err.Error()), StatusInternalError)
+	// Save both login histories atomically using batch storage write
+	primaryMeta := primaryHistory.StorageMeta()
+	primaryMeta.UserID = primaryUserID
+	primaryData, err := json.Marshal(primaryHistory)
+	if err != nil {
+		return "", runtime.NewError(fmt.Sprintf("Failed to marshal primary user history: %s", err.Error()), StatusInternalError)
 	}
 
-	if err := StorableWrite(ctx, nk, otherUserID, otherHistory); err != nil {
-		return "", runtime.NewError(fmt.Sprintf("Failed to save login history for other user: %s", err.Error()), StatusInternalError)
+	otherMeta := otherHistory.StorageMeta()
+	otherMeta.UserID = otherUserID
+	otherData, err := json.Marshal(otherHistory)
+	if err != nil {
+		return "", runtime.NewError(fmt.Sprintf("Failed to marshal other user history: %s", err.Error()), StatusInternalError)
+	}
+
+	// Perform atomic batch write of both histories
+	acks, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
+		{
+			Collection:      primaryMeta.Collection,
+			Key:             primaryMeta.Key,
+			UserID:          primaryMeta.UserID,
+			Value:           string(primaryData),
+			Version:         primaryMeta.Version,
+			PermissionRead:  primaryMeta.PermissionRead,
+			PermissionWrite: primaryMeta.PermissionWrite,
+		},
+		{
+			Collection:      otherMeta.Collection,
+			Key:             otherMeta.Key,
+			UserID:          otherMeta.UserID,
+			Value:           string(otherData),
+			Version:         otherMeta.Version,
+			PermissionRead:  otherMeta.PermissionRead,
+			PermissionWrite: otherMeta.PermissionWrite,
+		},
+	})
+	if err != nil {
+		return "", runtime.NewError(fmt.Sprintf("Failed to save login histories: %s", err.Error()), StatusInternalError)
+	}
+
+	// Update the versions from the acknowledgments
+	if len(acks) >= 2 {
+		primaryMeta.Version = acks[0].GetVersion()
+		primaryHistory.SetStorageMeta(primaryMeta)
+		otherMeta.Version = acks[1].GetVersion()
+		otherHistory.SetStorageMeta(otherMeta)
 	}
 
 	logger.WithFields(map[string]interface{}{
