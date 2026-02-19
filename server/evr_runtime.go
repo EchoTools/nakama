@@ -307,6 +307,8 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 		&LoginHistory{},
 		&GuildEnforcementJournal{},
 		&ServerProfileStorage{},
+		&SuspensionProfile{},
+		&JoinDirective{},
 	}
 	for _, s := range storables {
 		for _, idx := range s.StorageIndexes() {
@@ -765,18 +767,13 @@ func getPartyMembersForUser(ctx context.Context, nk runtime.NakamaModule, userID
 }
 
 func SetNextMatchID(ctx context.Context, nk runtime.NakamaModule, userID string, matchID MatchID, role TeamIndex, hostDiscordID string) error {
-	settings, err := LoadMatchmakingSettings(ctx, nk, userID)
-	if err != nil {
-		return fmt.Errorf("Error loading matchmaking settings: %w", err)
+	directive := &JoinDirective{
+		MatchID:       matchID,
+		Role:          role.String(),
+		HostDiscordID: hostDiscordID,
 	}
-
-	settings.NextMatchID = matchID
-	settings.NextMatchRole = role.String()
-	settings.NextMatchDiscordID = hostDiscordID
-
-	if err = StoreMatchmakingSettings(ctx, nk, userID, settings); err != nil {
-		return fmt.Errorf("Error storing matchmaking settings: %w", err)
+	if err := StoreJoinDirective(ctx, nk, userID, directive); err != nil {
+		return fmt.Errorf("Error storing join directive: %w", err)
 	}
-
 	return nil
 }

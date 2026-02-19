@@ -231,6 +231,11 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 		if !isGlobalOperator && !gg.IsAllocator(userID) {
 			return simpleInteractionResponse(s, i, "You must be a guild allocator to use this command.")
 		}
+	case "lockout":
+		if !isGlobalOperator {
+			return simpleInteractionResponse(s, i, "You must be a global operator to use this command.")
+		}
+
 	case "kick-player":
 		gg := d.guildGroupRegistry.Get(groupID)
 		if gg == nil {
@@ -284,6 +289,27 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 			return simpleInteractionResponse(s, i, "You must be a guild auditor to use this command.")
 		}
 	}
+
+	skipDeferredACKCommands := map[string]bool{
+		"link":         true,
+		"link-headset": true,
+		"igp":          true,
+		"party-status": true,
+		"show":         true,
+		"badges":       true,
+	}
+
+	if !skipDeferredACKCommands[commandName] {
+		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Flags: discordgo.MessageFlagsEphemeral,
+			},
+		}); err != nil {
+			return fmt.Errorf("failed to send deferred ACK: %w", err)
+		}
+	}
+
 	return commandFn(ctx, logger, s, i, user, member, userID, groupID)
 }
 
@@ -933,9 +959,41 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		suspensionDuration time.Duration
 	)
 
+	respondContent := func(content string) error {
+		if i == nil {
+			return errors.New(content)
+		}
+		if i.Type == discordgo.InteractionApplicationCommand {
+			return editInteractionResponse(d.dg, i, content)
+		}
+		return simpleInteractionResponse(d.dg, i, content)
+	}
+
+	respondEmbed := func(embeds []*discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
+		if i == nil {
+			return nil
+		}
+		if i.Type == discordgo.InteractionApplicationCommand {
+			_, err := d.dg.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+				Embeds:     &embeds,
+				Components: &components,
+			})
+			return err
+		}
+
+		return d.dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Flags:      discordgo.MessageFlagsEphemeral,
+				Embeds:     embeds,
+				Components: components,
+			},
+		})
+	}
+
 	// Do not allow bots to be suspended
 	if target.Bot {
-		return simpleInteractionResponse(d.dg, i, "Bots cannot be suspended.")
+		return respondContent("Bots cannot be suspended.")
 	}
 
 	callerUserID := d.cache.DiscordIDToUserID(caller.User.ID)
@@ -958,7 +1016,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		if err != nil {
 			helpMessage := fmt.Sprintf("Duration parse error: %s\n\n**Use a number followed by m, h, d, or w (e.g., 30m, 1h, 2d, 1w) or compound durations (e.g., 2h30m)**", err.Error())
 			if i != nil {
-				return simpleInteractionResponse(d.dg, i, helpMessage)
+				return respondContent(helpMessage)
 			}
 			return errors.New(helpMessage)
 		}
@@ -1103,22 +1161,24 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			if callerDN == "" {
 				callerDN = caller.User.Username
 			}
+			descParts := []string{fmt.Sprintf("%s (<@!%s>)", targetDN, target.ID)}
+			if allowPrivateLobbies {
+				descParts = append(descParts, "✅ **Private lobbies: allowed**")
+			} else {
+				descParts = append(descParts, "🚫 **Private lobbies: not allowed**")
+			}
+
 			embed := &discordgo.MessageEmbed{
 				Author: &discordgo.MessageEmbedAuthor{
 					Name:    fmt.Sprintf("%s (%s)", callerDN, caller.User.Username),
 					IconURL: caller.AvatarURL(""),
 				},
-				Title: title,
-				Color: 0x9656ce,
-				Fields: []*discordgo.MessageEmbedField{
-					{
-						Name:   "Target User",
-						Value:  fmt.Sprintf("%s (<@!%s>)", targetDN, target.ID),
-						Inline: false,
-					},
-				},
+				Title:       title,
+				Description: strings.Join(descParts, "\n"),
+				Color:       0x9656ce,
+				Fields:      []*discordgo.MessageEmbedField{},
 				Footer: &discordgo.MessageEmbedFooter{
-					Text: fmt.Sprintf("Confidential. Do not share. | Edit on portal: check suspension details"),
+					Text: "Confidential. Do not share.",
 				},
 			}
 			if len(recordsByGroupID) == 0 {
@@ -1196,14 +1256,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 
 			// Send the same embed to the moderator as an ephemeral response
 			if i != nil {
-				err = d.dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:      discordgo.MessageFlagsEphemeral,
-						Embeds:     []*discordgo.MessageEmbed{embed},
-						Components: components,
-					},
-				})
+				err = respondEmbed([]*discordgo.MessageEmbed{embed}, components)
 				if err != nil {
 					logger.WithFields(map[string]interface{}{
 						"error": err,
@@ -1299,7 +1352,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 	_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s's `kick-player` actions summary for %s (%s):\n %s", caller.Mention(), target.Mention(), target.Username, strings.Join(actions, ";\n ")), false)
 
 	if i != nil && !sentEmbedResponse {
-		return simpleInteractionResponse(d.dg, i, fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(actions, "\n")))
+		return respondContent(fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(actions, "\n")))
 	}
 	return nil
 }
@@ -1353,14 +1406,11 @@ func (d *DiscordAppBot) presentRegionFallbackOptions(s *discordgo.Session, i *di
 		},
 	}
 
-	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds:     []*discordgo.MessageEmbed{embed},
-			Components: components,
-			Flags:      discordgo.MessageFlagsEphemeral,
-		},
+	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Embeds:     &[]*discordgo.MessageEmbed{embed},
+		Components: &components,
 	})
+	return err
 }
 
 // handleRegionFallbackInteraction handles user's choice for region fallback
