@@ -429,6 +429,10 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 			logger.Warn("Failed to unmarshal game server presence", zap.Error(err))
 			continue
 		}
+		if !gPresence.Endpoint.IsValid() {
+			logger.Warn("Game server has invalid endpoint, skipping", zap.String("presence", presence.GetStatus()))
+			continue
+		}
 		hostIPs = append(hostIPs, gPresence.Endpoint.GetExternalIP())
 		if _, ok := endpointMap[gPresence.Endpoint.GetExternalIP()]; ok {
 			continue
