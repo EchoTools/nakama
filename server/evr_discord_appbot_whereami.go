@@ -263,18 +263,15 @@ func (d *DiscordAppBot) handleWhereAmI(ctx context.Context, logger runtime.Logge
 	}
 
 	if data == nil {
-		return simpleInteractionResponse(s, i, "You are not currently in a match.")
+		return editInteractionResponse(s, i, "You are not currently in a match.")
 	}
 
 	embed := d.createWhereAmIEmbed(data)
 
-	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Flags:  discordgo.MessageFlagsEphemeral,
-			Embeds: []*discordgo.MessageEmbed{embed},
-		},
+	_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Embeds: &[]*discordgo.MessageEmbed{embed},
 	})
+	return err
 }
 
 // Server Issue Report Types
@@ -323,7 +320,7 @@ func (d *DiscordAppBot) handleReportServerIssue(ctx context.Context, logger runt
 	}
 
 	if data == nil {
-		return simpleInteractionResponse(s, i, "You are not currently in a match. You can only report server issues while in a match.")
+		return editInteractionResponse(s, i, "You are not currently in a match. You can only report server issues while in a match.")
 	}
 
 	// Create the server info embed
@@ -352,14 +349,11 @@ func (d *DiscordAppBot) handleReportServerIssue(ctx context.Context, logger runt
 		},
 	}
 
-	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Flags:      discordgo.MessageFlagsEphemeral,
-			Embeds:     []*discordgo.MessageEmbed{embed},
-			Components: components,
-		},
+	_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Embeds:     &[]*discordgo.MessageEmbed{embed},
+		Components: &components,
 	})
+	return err
 }
 
 // createServerInfoEmbed creates an embed showing current server information

@@ -73,11 +73,6 @@ func (pm *MatchPreemptionManager) FindPreemptionCandidates(ctx context.Context, 
 			continue
 		}
 
-		// Skip matches from the same group
-		if label.GroupID != nil && *label.GroupID == req.RequestingGroupID {
-			continue
-		}
-
 		// Check if this match can be preempted
 		reservationExpired := pm.isReservationExpired(&label)
 

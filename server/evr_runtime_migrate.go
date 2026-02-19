@@ -28,6 +28,7 @@ func MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 		//MigrationSuspensions{},
 		//&MigrationRebuildLoginHistory{},
 		//&MigrationCheckAltSuspensions{},
+		//&MigrationVRMLRelink{},
 	}
 
 	allUserMigrations := []UserMigrater{

@@ -285,7 +285,8 @@ type CreateReservationRequest struct {
 	TeamSize         int                   `json:"team_size,omitempty"`
 	RequiredFeatures []string              `json:"required_features,omitempty"`
 	TeamAlignments   map[string]int        `json:"team_alignments,omitempty"`
-	Force            bool                  `json:"force"` // Force creation even if conflicts exist
+	Region           string                `json:"region,omitempty"`
+	Force            bool                  `json:"force"`
 }
 
 // Custom errors

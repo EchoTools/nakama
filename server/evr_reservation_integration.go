@@ -367,7 +367,5 @@ func GetGroupIDByGuildIDNK(ctx context.Context, nk runtime.NakamaModule, guildID
 
 // GetUserIDByDiscordIDNK converts a Discord user ID to Nakama user ID
 func GetUserIDByDiscordIDNK(ctx context.Context, nk runtime.NakamaModule, discordID string) (string, error) {
-	// This would need to be implemented based on the existing user linking system
-	// For now, return a placeholder
-	return fmt.Sprintf("user_%s", discordID), nil
+	return "", fmt.Errorf("GetUserIDByDiscordIDNK not implemented: use GetUserIDByDiscordID with db instead")
 }

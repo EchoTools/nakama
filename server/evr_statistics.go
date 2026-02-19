@@ -242,6 +242,9 @@ func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, userID,
 
 		_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 1, "", 0)
 		if err != nil {
+			if errors.Is(err, ErrLeaderboardNotFound) || errors.Is(err, runtime.ErrLeaderboardNotFound) {
+				return NewDefaultRating(), nil
+			}
 			return NewDefaultRating(), err
 		}
 
@@ -273,6 +276,9 @@ func MatchmakingPlayerRatingLoad(ctx context.Context, nk runtime.NakamaModule, u
 
 		_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 1, "", 0)
 		if err != nil {
+			if errors.Is(err, ErrLeaderboardNotFound) || errors.Is(err, runtime.ErrLeaderboardNotFound) {
+				return NewDefaultRating(), nil
+			}
 			return NewDefaultRating(), err
 		}
 

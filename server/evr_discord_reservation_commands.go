@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -65,18 +67,15 @@ func (h *ReservationSlashCommandHandler) HandleReserveCommand(ctx context.Contex
 
 // handleAddReservation handles the /reserve add command
 func (h *ReservationSlashCommandHandler) handleAddReservation(ctx context.Context, dg *discordgo.Session, i *discordgo.InteractionCreate, userID, guildID string, options []*discordgo.ApplicationCommandInteractionDataOption) error {
-	// Parse options
 	params := make(map[string]*discordgo.ApplicationCommandInteractionDataOption)
 	for _, opt := range options {
 		params[opt.Name] = opt
 	}
 
-	// Get required parameters
 	startTimeStr := params["start_time"].StringValue()
 	durationMinutes := int(params["duration"].IntValue())
 	classificationStr := params["classification"].StringValue()
 
-	// Optional parameters
 	var ownerID string
 	if owner, exists := params["owner"]; exists {
 		ownerID = owner.StringValue()
@@ -89,22 +88,24 @@ func (h *ReservationSlashCommandHandler) handleAddReservation(ctx context.Contex
 		force = forceOpt.BoolValue()
 	}
 
-	// Parse start time (expecting format like "2023-12-25T15:30")
-	startTime, err := time.Parse("2006-01-02T15:04", startTimeStr)
+	var region string
+	if regionOpt, exists := params["region"]; exists {
+		region = regionOpt.StringValue()
+	}
+
+	startTime, err := parseHumanTime(startTimeStr, time.Now())
 	if err != nil {
-		return h.respondError(dg, i, "Invalid start time format. Use YYYY-MM-DDTHH:MM (e.g., 2023-12-25T15:30)")
+		return h.respondError(dg, i, fmt.Sprintf("Invalid start time %q. Try formats like: \"2025-01-15T15:30\", \"tomorrow at 3pm\", \"friday 2pm\", \"in 2 hours\".", startTimeStr))
 	}
 
 	endTime := startTime.Add(time.Duration(durationMinutes) * time.Minute)
 	classification := ParseSessionClassification(classificationStr)
 
-	// Get guild group ID
 	groupID, err := GetGroupIDByGuildIDNK(ctx, h.nk, guildID)
 	if err != nil {
 		return h.respondError(dg, i, "Failed to get guild group information")
 	}
 
-	// Create reservation request
 	req := &CreateReservationRequest{
 		GroupID:        uuid.FromStringOrNil(groupID),
 		Owner:          ownerID,
@@ -112,6 +113,7 @@ func (h *ReservationSlashCommandHandler) handleAddReservation(ctx context.Contex
 		StartTime:      startTime,
 		EndTime:        endTime,
 		Classification: classification,
+		Region:         region,
 		Force:          force,
 	}
 
@@ -401,6 +403,121 @@ func (h *ReservationSlashCommandHandler) handleReservationStatus(ctx context.Con
 func (h *ReservationSlashCommandHandler) handleDashboard(ctx context.Context, dg *discordgo.Session, i *discordgo.InteractionCreate, userID, guildID string, options []*discordgo.ApplicationCommandInteractionDataOption) error {
 	// TODO: Implement dashboard
 	return h.respondError(dg, i, "Dashboard not yet implemented")
+}
+
+var (
+	reRelative = regexp.MustCompile(`(?i)^in\s+(\d+)\s+(minute|hour|day|week)s?$`)
+	reTimeOnly = regexp.MustCompile(`(?i)^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$`)
+	reNamedDay = regexp.MustCompile(`(?i)^(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?$`)
+)
+
+var fixedFormats = []string{
+	"2006-01-02T15:04",
+	"2006-01-02 15:04",
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04:05",
+	"01/02/2006 15:04",
+	"01/02/2006 3:04pm",
+	"January 2 2006 3pm",
+	"January 2 2006 3:04pm",
+	"Jan 2 2006 3pm",
+	"Jan 2 2006 15:04",
+}
+
+func parseHumanTime(s string, now time.Time) (time.Time, error) {
+	s = strings.TrimSpace(s)
+
+	for _, layout := range fixedFormats {
+		if t, err := time.ParseInLocation(layout, s, now.Location()); err == nil {
+			return t, nil
+		}
+	}
+
+	if m := reRelative.FindStringSubmatch(s); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		switch strings.ToLower(m[2]) {
+		case "minute":
+			return now.Add(time.Duration(n) * time.Minute), nil
+		case "hour":
+			return now.Add(time.Duration(n) * time.Hour), nil
+		case "day":
+			return now.AddDate(0, 0, n), nil
+		case "week":
+			return now.AddDate(0, 0, n*7), nil
+		}
+	}
+
+	if m := reNamedDay.FindStringSubmatch(s); m != nil {
+		base := now
+		switch strings.ToLower(m[1]) {
+		case "today":
+		case "tomorrow":
+			base = now.AddDate(0, 0, 1)
+		default:
+			target := parseDayOfWeek(m[1])
+			diff := int(target) - int(now.Weekday())
+			if diff <= 0 {
+				diff += 7
+			}
+			base = now.AddDate(0, 0, diff)
+		}
+		base = time.Date(base.Year(), base.Month(), base.Day(), 9, 0, 0, 0, now.Location())
+		if m[2] != "" {
+			hour, _ := strconv.Atoi(m[2])
+			min := 0
+			if m[3] != "" {
+				min, _ = strconv.Atoi(m[3])
+			}
+			ampm := strings.ToLower(m[4])
+			if ampm == "pm" && hour < 12 {
+				hour += 12
+			} else if ampm == "am" && hour == 12 {
+				hour = 0
+			}
+			base = time.Date(base.Year(), base.Month(), base.Day(), hour, min, 0, 0, now.Location())
+		}
+		return base, nil
+	}
+
+	if m := reTimeOnly.FindStringSubmatch(s); m != nil {
+		hour, _ := strconv.Atoi(m[1])
+		min := 0
+		if m[2] != "" {
+			min, _ = strconv.Atoi(m[2])
+		}
+		ampm := strings.ToLower(m[3])
+		if ampm == "pm" && hour < 12 {
+			hour += 12
+		} else if ampm == "am" && hour == 12 {
+			hour = 0
+		}
+		t := time.Date(now.Year(), now.Month(), now.Day(), hour, min, 0, 0, now.Location())
+		if t.Before(now) {
+			t = t.AddDate(0, 0, 1)
+		}
+		return t, nil
+	}
+
+	return time.Time{}, fmt.Errorf("unrecognized time format: %q", s)
+}
+
+func parseDayOfWeek(s string) time.Weekday {
+	switch strings.ToLower(s) {
+	case "sunday":
+		return time.Sunday
+	case "monday":
+		return time.Monday
+	case "tuesday":
+		return time.Tuesday
+	case "wednesday":
+		return time.Wednesday
+	case "thursday":
+		return time.Thursday
+	case "friday":
+		return time.Friday
+	default:
+		return time.Saturday
+	}
 }
 
 type VacateCommandHandler struct {

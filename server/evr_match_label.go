@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -14,6 +15,8 @@ import (
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
 )
+
+const MatchHistoryStorageCollection = "MatchHistory"
 
 type slotReservation struct {
 	Presence *EvrMatchPresence
@@ -570,4 +573,52 @@ func MatchLabelFromString(labelJSON string) (*MatchLabel, error) {
 		return nil, fmt.Errorf("failed to unmarshal match label: %w", err)
 	}
 	return label, nil
+}
+
+func StoreMatchLabel(ctx context.Context, nk runtime.NakamaModule, label *MatchLabel) error {
+	data, err := json.Marshal(label)
+	if err != nil {
+		return fmt.Errorf("failed to marshal match label: %w", err)
+	}
+	if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
+		Collection:      MatchHistoryStorageCollection,
+		Key:             label.ID.UUID.String(),
+		UserID:          uuid.Nil.String(),
+		Value:           string(data),
+		PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
+		PermissionWrite: runtime.STORAGE_PERMISSION_NO_WRITE,
+	}}); err != nil {
+		return fmt.Errorf("failed to write stored match label: %w", err)
+	}
+	return nil
+}
+
+func LoadStoredMatchLabel(ctx context.Context, nk runtime.NakamaModule, matchID MatchID) (*MatchLabel, error) {
+	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{{
+		Collection: MatchHistoryStorageCollection,
+		Key:        matchID.UUID.String(),
+		UserID:     uuid.Nil.String(),
+	}})
+	if err != nil {
+		return nil, fmt.Errorf("failed to read stored match label: %w", err)
+	}
+	if len(objs) == 0 {
+		return nil, ErrMatchNotFound
+	}
+	label := &MatchLabel{}
+	if err := json.Unmarshal([]byte(objs[0].Value), label); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal stored match label: %w", err)
+	}
+	return label, nil
+}
+
+func DeleteStoredMatchLabel(ctx context.Context, nk runtime.NakamaModule, matchID MatchID) error {
+	if err := nk.StorageDelete(ctx, []*runtime.StorageDelete{{
+		Collection: MatchHistoryStorageCollection,
+		Key:        matchID.UUID.String(),
+		UserID:     uuid.Nil.String(),
+	}}); err != nil {
+		return fmt.Errorf("failed to delete stored match label: %w", err)
+	}
+	return nil
 }

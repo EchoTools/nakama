@@ -175,7 +175,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 				// Get all the matches
 				minSize := 2
 				maxSize := MatchLobbyMaxSize + 1
-				matches, err := nk.MatchList(ctx, 1000, true, "", &minSize, &maxSize, "*")
+				matches, err := nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, "*") // Limit to 100 for performance; only used for status display.
 				if err != nil {
 					logger.WithField("err", err).Warn("Error fetching matches.")
 					continue
@@ -509,6 +509,34 @@ var (
 					Name:        "display-name",
 					Description: "Your in-game name.",
 					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "lockout",
+			Description: "Set early quit lockout for a player (global operators only).",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "player",
+					Description: "Username or EVR ID",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "penalty-level",
+					Description: "Penalty level (0-3, where 3 = 15 min lockout)",
+					Required:    true,
+					MinValue:    ptr.Float64(0),
+					MaxValue:    3,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "duration-minutes",
+					Description: "Custom lockout duration in minutes (overrides default for penalty level)",
+					Required:    false,
+					MinValue:    ptr.Float64(0),
+					MaxValue:    1440, // 24 hours max
 				},
 			},
 		},
@@ -1072,15 +1100,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			}
 
-			// Respond to the interaction
-
-			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Flags:   discordgo.MessageFlagsEphemeral,
-					Content: "Command channel set to this channel.",
-				},
-			}); err != nil {
+			if err := editInteractionResponse(s, i, "Command channel set to this channel."); err != nil {
 				return fmt.Errorf("failed to respond to interaction: %w", err)
 			}
 
@@ -1102,13 +1122,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				},
 			}
 
-			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Flags:   discordgo.MessageFlagsEphemeral,
-					Content: "Added link button",
-				},
-			}); err != nil {
+			if err := editInteractionResponse(s, i, "Added link button"); err != nil {
 				return fmt.Errorf("failed to respond to interaction: %w", err)
 			}
 
@@ -1138,45 +1152,44 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			symbol := evr.ToSymbol(token)
 			bytes := binary.LittleEndian.AppendUint64([]byte{}, uint64(symbol))
 
-			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Flags: discordgo.MessageFlagsEphemeral,
-					Embeds: []*discordgo.MessageEmbed{
+			embeds := []*discordgo.MessageEmbed{
+				{
+					Title: token,
+					Color: 0xCCCCCC,
+					Fields: []*discordgo.MessageEmbedField{
 						{
-							Title: token,
-							Color: 0xCCCCCC,
-							Fields: []*discordgo.MessageEmbedField{
-								{
-									Name:   "uint64",
-									Value:  strconv.FormatUint(uint64(symbol), 10),
-									Inline: false,
-								},
-								{
-									Name:   "int64",
-									Value:  strconv.FormatInt(int64(symbol), 10),
-									Inline: false,
-								},
-								{
-									Name:   "hex",
-									Value:  symbol.HexString(),
-									Inline: false,
-								},
-								{
-									Name:   "cached?",
-									Value:  strconv.FormatBool(lo.Contains(lo.Keys(evr.SymbolCache), symbol)),
-									Inline: false,
-								},
-								{
-									Name:   "LE bytes",
-									Value:  fmt.Sprintf("%#v", bytes),
-									Inline: false,
-								},
-							},
+							Name:   "uint64",
+							Value:  strconv.FormatUint(uint64(symbol), 10),
+							Inline: false,
+						},
+						{
+							Name:   "int64",
+							Value:  strconv.FormatInt(int64(symbol), 10), //nolint:gosec -- Symbol is a hash; signed representation is intentional
+							Inline: false,
+						},
+						{
+							Name:   "hex",
+							Value:  symbol.HexString(),
+							Inline: false,
+						},
+						{
+							Name:   "cached?",
+							Value:  strconv.FormatBool(lo.Contains(lo.Keys(evr.SymbolCache), symbol)),
+							Inline: false,
+						},
+						{
+							Name:   "LE bytes",
+							Value:  fmt.Sprintf("%#v", bytes),
+							Inline: false,
 						},
 					},
 				},
+			}
+
+			_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+				Embeds: &embeds,
 			})
+			return err
 		},
 
 		"party-status": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
@@ -1389,25 +1402,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			// Check if the IGN is locked for this group
 			if groupIGN, exists := md.InGameNames[groupID]; exists && groupIGN.IsLocked {
-				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: "Your display name is locked and cannot be changed. Contact a moderator for assistance.",
-					},
-				})
+				return editInteractionResponse(s, i, "Your display name is locked and cannot be changed. Contact a moderator for assistance.")
 			}
 
 			if displayName == "" || displayName == "-" || displayName == user.Username {
 				// Prevent deletion if the IGN entry is locked
 				if groupIGN, exists := md.InGameNames[groupID]; exists && groupIGN.IsLocked {
-					return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: "Your display name is locked and cannot be changed. Contact a moderator for assistance.",
-						},
-					})
+					return editInteractionResponse(s, i, "Your display name is locked and cannot be changed. Contact a moderator for assistance.")
 				}
 				delete(md.InGameNames, groupID)
 			} else {
@@ -1426,13 +1427,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("failed to store account metadata: %w", err)
 			}
 
-			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Flags:   discordgo.MessageFlagsEphemeral,
-					Content: "Your display name has been updated.",
-				},
-			})
+			return editInteractionResponse(s, i, "Your display name has been updated.")
 		},
 
 		"igp":            d.handleInGamePanel,
@@ -1557,14 +1552,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				avgrtt := sum / time.Duration(count)
 
 				if avgrtt > 0 {
-					return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-
-						Data: &discordgo.InteractionResponseData{
-							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: fmt.Sprintf("game server %s:%d RTTs (AVG: %.0f): %s", remoteIP, startPort, avgrtt.Seconds()*1000, rttMessage),
-						},
-					})
+					return editInteractionResponse(s, i, fmt.Sprintf("game server %s:%d RTTs (AVG: %.0f): %s", remoteIP, startPort, avgrtt.Seconds()*1000, rttMessage))
 				} else {
 					return errors.New("no response from game server")
 
@@ -1583,13 +1571,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					b.WriteString(fmt.Sprintf("%s:%-5d %3.0fms\n", remoteIP, port, r.Seconds()*1000))
 				}
 
-				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: fmt.Sprintf("```%s```", b.String()),
-					},
-				})
+				return editInteractionResponse(s, i, fmt.Sprintf("```%s```", b.String()))
 
 			}
 		},
@@ -1701,25 +1683,23 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 					customID := fmt.Sprintf("confirm_shutdown:%s:%s:%d", matchID.String(), disconnectStr, graceSeconds)
 
-					return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Flags:  discordgo.MessageFlagsEphemeral,
-							Embeds: []*discordgo.MessageEmbed{embed},
+					components := []discordgo.MessageComponent{
+						discordgo.ActionsRow{
 							Components: []discordgo.MessageComponent{
-								discordgo.ActionsRow{
-									Components: []discordgo.MessageComponent{
-										discordgo.Button{
-											Label:    "Confirm Shutdown",
-											Style:    discordgo.DangerButton,
-											CustomID: customID,
-											Emoji:    &discordgo.ComponentEmoji{Name: "⚠️"},
-										},
-									},
+								discordgo.Button{
+									Label:    "Confirm Shutdown",
+									Style:    discordgo.DangerButton,
+									CustomID: customID,
+									Emoji:    &discordgo.ComponentEmoji{Name: "⚠️"},
 								},
 							},
 						},
+					}
+					_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+						Embeds:     &[]*discordgo.MessageEmbed{embed},
+						Components: &components,
 					})
+					return err
 				}
 
 				signal := SignalShutdownPayload{
@@ -1736,23 +1716,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 				return nil
 			}(); err != nil {
-				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: err.Error(),
-					},
-				})
+				return editInteractionResponse(s, i, err.Error())
 			}
 
 			// Send the response (only reached when no players are in the match)
-			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Flags:   discordgo.MessageFlagsEphemeral,
-					Content: "The match has been shut down.",
-				},
-			})
+			return editInteractionResponse(s, i, "The match has been shut down.")
 		},
 
 		"reset-password": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
@@ -1771,22 +1739,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return nk.UnlinkEmail(ctx, userID, account.GetEmail())
 
 			}(); err != nil {
-				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: err.Error(),
-					},
-				})
+				return editInteractionResponse(s, i, err.Error())
 			} else {
 				// Send the response
-				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: "Your password has been cleared.",
-					},
-				})
+				return editInteractionResponse(s, i, "Your password has been cleared.")
 			}
 		},
 
@@ -1820,14 +1776,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("failed to update account metadata: %w", err)
 			}
 
-			// Send the response
-			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Flags:   discordgo.MessageFlagsEphemeral,
-					Content: fmt.Sprintf("Your jersey number has been set to %d", number),
-				},
-			})
+			return editInteractionResponse(s, i, fmt.Sprintf("Your jersey number has been set to %d", number))
 		},
 
 		"badges": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
@@ -2122,7 +2071,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("failed to set next match ID: %w", err)
 			}
 
-			return simpleInteractionResponse(s, i, fmt.Sprintf("Next match set to `%s`", matchID))
+			return editInteractionResponse(s, i, fmt.Sprintf("Next match set to `%s`", matchID))
 		},
 		"throw-settings": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
 			metadata, err := EVRProfileLoad(ctx, nk, userIDStr)
@@ -2156,13 +2105,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				},
 			}
 
-			if err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Flags:  discordgo.MessageFlagsEphemeral,
-					Embeds: []*discordgo.MessageEmbed{embed},
-				},
-			}); err != nil {
+			_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+				Embeds: &[]*discordgo.MessageEmbed{embed},
+			})
+			if err != nil {
 				return fmt.Errorf("failed to send game settings message: %w", err)
 			}
 			return nil
@@ -2192,18 +2138,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return err
 			}
 
-			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Flags: discordgo.MessageFlagsEphemeral,
-					Content: strings.Join([]string{
-						fmt.Sprintf("EchoVRCE lobby changed to **%s**.", guild.Name),
-						"- Matchmaking will prioritize members",
-						"- Social lobbies will contain only members",
-						"- Private matches that you create will prioritize guild's game servers.",
-					}, "\n"),
-				},
-			})
+			return editInteractionResponse(s, i, strings.Join([]string{
+				fmt.Sprintf("EchoVRCE lobby changed to **%s**.", guild.Name),
+				"- Matchmaking will prioritize members",
+				"- Social lobbies will contain only members",
+				"- Private matches that you create will prioritize guild's game servers.",
+			}, "\n"))
 		},
 		"verify": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
 			if member == nil {
@@ -2216,7 +2156,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			if len(loginHistory.PendingAuthorizations) == 0 {
-				return simpleInteractionResponse(s, i, "No pending IP verifications")
+				return editInteractionResponse(s, i, "No pending IP verifications")
 			}
 
 			var request *LoginHistoryEntry
@@ -2232,21 +2172,18 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			if request == nil {
-				return simpleInteractionResponse(s, i, "No pending IP verifications")
+				return editInteractionResponse(s, i, "No pending IP verifications")
 			}
 
 			ipInfo, _ := d.ipInfoCache.Get(ctx, request.ClientIP)
 
 			embeds, components := IPVerificationEmbed(request, ipInfo)
 			// Send it as the interaction response
-			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Flags:      discordgo.MessageFlagsEphemeral,
-					Embeds:     embeds,
-					Components: components,
-				},
-			}); err != nil {
+			_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+				Embeds:     &embeds,
+				Components: &components,
+			})
+			if err != nil {
 				logger.Error("Failed to send IP verification message", zap.Error(err))
 				return err
 			}
@@ -2270,7 +2207,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			target := options[0].UserValue(s)
 
 			if target.Bot {
-				return simpleInteractionResponse(s, i, "Bots don't have accounts")
+				return editInteractionResponse(s, i, "Bots don't have accounts")
 			}
 
 			// Clear the cache of the caller and target
@@ -2337,11 +2274,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			options := i.ApplicationCommandData().Options
 
 			if member == nil {
-				return simpleInteractionResponse(s, i, "this command must be used from a guild")
+				return editInteractionResponse(s, i, "this command must be used from a guild")
 			}
 
 			if len(options) == 0 {
-				return simpleInteractionResponse(s, i, "no options provided")
+				return editInteractionResponse(s, i, "no options provided")
 			}
 
 			mode := evr.ModeArenaPrivate
@@ -2375,7 +2312,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				"startTime": startTime,
 			})
 
-			label, rttMs, err := d.handleCreateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime)
+			// Get all party members (including the creator) before creating the match
+			// so we can set up team alignments and reservations
+			partyUserIDs := getPartyMembersForUser(ctx, nk, userID)
+
+			label, rttMs, err := d.handleCreateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime, partyUserIDs)
 			if err != nil {
 				// Check if this is a region fallback error
 				var regionErr ErrMatchmakingNoServersInRegion
@@ -2386,18 +2327,37 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return err
 			}
 
-			// set the player's next match
-			if err := SetNextMatchID(ctx, nk, userID, label.ID, AnyTeam, ""); err != nil {
-				logger.Error("Failed to set next match ID", zap.Error(err))
-				return fmt.Errorf("failed to set next match ID: %w", err)
+			// Set next_match_id for all party members so they join together
+			failedMembers := make([]string, 0)
+			for _, memberUserID := range partyUserIDs {
+				if err := SetNextMatchID(ctx, nk, memberUserID, label.ID, AnyTeam, ""); err != nil {
+					logger.Error("Failed to set next match ID for party member", zap.String("memberUserID", memberUserID), zap.Error(err))
+					failedMembers = append(failedMembers, memberUserID)
+				}
+			}
+
+			// If some party members failed, log but continue with partial success
+			successfulMembers := len(partyUserIDs) - len(failedMembers)
+			if len(failedMembers) > 0 {
+				logger.Warn("Some party members failed to get next_match_id set",
+					zap.Int("successful", successfulMembers),
+					zap.Int("failed", len(failedMembers)),
+					zap.Strings("failedUserIDs", failedMembers))
 			}
 
 			logger.WithFields(map[string]any{
-				"match_id": label.ID.String(),
-				"rtt_ms":   rttMs,
+				"match_id":      label.ID.String(),
+				"rtt_ms":        rttMs,
+				"party_members": successfulMembers,
 			}).Info("Match created.")
 
-			content := fmt.Sprintf("Reservation will timeout <t:%d:R>. \n\nClick play or start matchmaking to automatically join your match.", startTime.Unix())
+			// Update content to reflect party size if applicable
+			var content string
+			if successfulMembers > 1 {
+				content = fmt.Sprintf("Reservation will timeout <t:%d:R>. \n\n**%d party members** will automatically join this match when you click play or start matchmaking.", startTime.Unix(), successfulMembers)
+			} else {
+				content = fmt.Sprintf("Reservation will timeout <t:%d:R>. \n\nClick play or start matchmaking to automatically join your match.", startTime.Unix())
+			}
 
 			niceNameMap := map[evr.Symbol]string{
 				evr.ModeArenaPrivate:  "Private Arena Match",
@@ -2515,13 +2475,16 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			}()
 
-			return s.InteractionRespond(i.Interaction, responseContent)
+			_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+				Embeds: &responseContent.Data.Embeds,
+			})
+			return err
 		},
 		"allocate": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 
 			if member == nil {
-				return simpleInteractionResponse(s, i, "this command must be used from a guild")
+				return editInteractionResponse(s, i, "this command must be used from a guild")
 
 			}
 			mode := evr.ModeArenaPrivate
@@ -2547,7 +2510,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			// Validate description length to prevent match label overflow and Discord embed issues
 			const maxDescriptionLength = 500
 			if len(description) > maxDescriptionLength {
-				return simpleInteractionResponse(s, i, fmt.Sprintf("Description is too long (max %d characters)", maxDescriptionLength))
+				return editInteractionResponse(s, i, fmt.Sprintf("Description is too long (max %d characters)", maxDescriptionLength))
 			}
 
 			if levels, ok := evr.LevelsByMode[mode]; !ok {
@@ -2579,7 +2542,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			logger.WithField("label", label).Info("Match prepared")
-			return simpleInteractionResponse(s, i, fmt.Sprintf("Match prepared with label ```json\n%s\n```\nhttps://echo.taxi/spark://c/%s", label.GetLabelIndented(), strings.ToUpper(label.ID.UUID.String())))
+			return editInteractionResponse(s, i, fmt.Sprintf("Match prepared with label ```json\n%s\n```\nhttps://echo.taxi/spark://c/%s", label.GetLabelIndented(), strings.ToUpper(label.ID.UUID.String())))
 		},
 		"show": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
@@ -2603,6 +2566,120 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			// Call the handler to create/update embeds
 			return d.handleShowServerEmbeds(ctx, logger, s, i, userID, groupID, region)
+		},
+		"lockout": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, callerMember *discordgo.Member, userID string, groupID string) error {
+			var (
+				playerIdentifier string
+				penaltyLevel     int64
+				durationMinutes  int64
+			)
+
+			for _, o := range i.ApplicationCommandData().Options {
+				switch o.Name {
+				case "player":
+					playerIdentifier = o.StringValue()
+				case "penalty-level":
+					penaltyLevel = o.IntValue()
+				case "duration-minutes":
+					durationMinutes = o.IntValue()
+				}
+			}
+
+			if penaltyLevel < 0 || penaltyLevel > 3 {
+				return editInteractionResponse(s, i, "Penalty level must be between 0 and 3.")
+			}
+
+			targetUserID := playerIdentifier
+			if _, err := uuid.FromString(playerIdentifier); err != nil {
+				users, err := nk.UsersGetUsername(ctx, []string{playerIdentifier})
+				if err != nil || len(users) == 0 {
+					return editInteractionResponse(s, i, fmt.Sprintf("Failed to find user with username: %s", playerIdentifier))
+				}
+				targetUserID = users[0].Id
+			}
+
+			account, err := nk.AccountGetId(ctx, targetUserID)
+			if err != nil {
+				return editInteractionResponse(s, i, fmt.Sprintf("Failed to get account: %v", err))
+			}
+
+			config := &EarlyQuitConfig{}
+			if err := StorableRead(ctx, nk, targetUserID, config, true); err != nil {
+				return editInteractionResponse(s, i, fmt.Sprintf("Failed to load early quit config: %v", err))
+			}
+
+			var lockoutDuration time.Duration
+			if durationMinutes > 0 {
+				lockoutDuration = time.Duration(durationMinutes) * time.Minute
+			} else {
+				lockoutDuration = GetLockoutDuration(int(penaltyLevel))
+			}
+
+			config.EarlyQuitPenaltyLevel = int32(penaltyLevel)
+			config.LastEarlyQuitTime = time.Now()
+
+			if err := StorableWrite(ctx, nk, targetUserID, config); err != nil {
+				return editInteractionResponse(s, i, fmt.Sprintf("Failed to save early quit config: %v", err))
+			}
+
+			if trigger := globalEarlyQuitMessageTrigger.Load(); trigger != nil {
+				durationSeconds := int32(lockoutDuration.Seconds())
+
+				// Get all active EVR sessions for the target player
+				sessions := trigger.getEvrSessions(targetUserID)
+
+				if len(sessions) > 0 {
+					// Player is online - send all early quit messages to each session
+					for _, session := range sessions {
+						// Send early quit config (penalty tier configuration)
+						if err := trigger.SendEarlyQuitConfigOnLogin(ctx, session); err != nil {
+							logger.Warn("Failed to send early quit config",
+								zap.String("user_id", targetUserID),
+								zap.String("session_id", session.ID().String()),
+								zap.Error(err))
+						}
+
+						// Send feature flags
+						if err := trigger.SendFeatureFlagsOnLogin(ctx, session); err != nil {
+							logger.Warn("Failed to send early quit feature flags",
+								zap.String("user_id", targetUserID),
+								zap.String("session_id", session.ID().String()),
+								zap.Error(err))
+						}
+					}
+
+					// Send penalty applied notification (if penalty level > 0)
+					if penaltyLevel > 0 {
+						reason := "Manual lockout set by operator"
+						if err := trigger.SendPenaltyAppliedNotification(ctx, targetUserID, int32(penaltyLevel), durationSeconds, reason); err != nil {
+							logger.Warn("Failed to send penalty applied notification",
+								zap.String("user_id", targetUserID),
+								zap.Error(err))
+						}
+					}
+
+					logger.Info("Sent all early quit messages to online player",
+						zap.String("user_id", targetUserID),
+						zap.Int("session_count", len(sessions)))
+				} else {
+					logger.Debug("Player not online - messages will be sent on next login",
+						zap.String("user_id", targetUserID))
+				}
+
+				// Send lockout notification (sent to all users, whether penalty is active or cleared)
+				if err := trigger.SendLockoutNotification(ctx, targetUserID, int32(penaltyLevel), durationSeconds, penaltyLevel > 0); err != nil {
+					logger.Warn("Failed to send lockout notification", zap.Error(err))
+				}
+			}
+
+			username := account.User.Username
+			if penaltyLevel == 0 {
+				_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> cleared lockout for player `%s` (%s)", user.ID, username, targetUserID), false)
+				return editInteractionResponse(s, i, fmt.Sprintf("Lockout cleared for %s.", username))
+			}
+
+			_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> set lockout for player `%s` (%s): level %d, duration %s", user.ID, username, targetUserID, penaltyLevel, lockoutDuration), false)
+			return editInteractionResponse(s, i, fmt.Sprintf("Set lockout for %s: penalty level %d, duration %s.", username, penaltyLevel, lockoutDuration))
 		},
 		"kick-player": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, callerMember *discordgo.Member, userID string, groupID string) error {
 
@@ -2670,7 +2747,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			if len(presences) == 0 {
-				return simpleInteractionResponse(s, i, "No sessions found.")
+				return editInteractionResponse(s, i, "No sessions found.")
 			}
 			presence := presences[0]
 			if label, _ := MatchLabelByID(ctx, d.nk, MatchIDFromStringOrNil(presence.GetStatus())); label != nil {
@@ -2685,9 +2762,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> join player <@%s> at [%s](https://echo.taxi/spark://c/%s) match.", user.ID, target.ID, label.Mode.String(), strings.ToUpper(label.ID.UUID.String())), false)
 				content := fmt.Sprintf("Joining %s [%s](https://echo.taxi/spark://c/%s) match next.", target.Mention(), label.Mode.String(), strings.ToUpper(label.ID.UUID.String()))
-				return simpleInteractionResponse(s, i, content)
+				return editInteractionResponse(s, i, content)
 			}
-			return simpleInteractionResponse(s, i, "No match found.")
+			return editInteractionResponse(s, i, "No match found.")
 		},
 		"set-division": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, callerMember *discordgo.Member, userID string, groupID string) error {
 			if user == nil {
@@ -2788,9 +2865,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> %s divisions `%s` for <@%s>", user.ID, actionVerb, divisions, target.ID), false)
 
-			return simpleInteractionResponse(s, i, fmt.Sprintf("Successfully %s divisions `%s` for %s", actionVerb, divisions, target.Mention()))
+			return editInteractionResponse(s, i, fmt.Sprintf("Successfully %s divisions `%s` for %s", actionVerb, divisions, target.Mention()))
 		},
 		"set-roles": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+			options := i.ApplicationCommandData().Options
+
 			// Ensure the user is the owner of the guild
 			if user == nil || i.Member == nil || i.Member.User.ID == "" || i.GuildID == "" {
 				return nil
@@ -2818,27 +2897,47 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			}
 
-			// Create a message with a "Configure Roles" button
-			response := &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Content: "Click the button below to configure guild roles for EchoVRCE features.",
-					Components: []discordgo.MessageComponent{
-						discordgo.ActionsRow{
-							Components: []discordgo.MessageComponent{
-								discordgo.Button{
-									Label:    "Configure Roles",
-									Style:    discordgo.PrimaryButton,
-									CustomID: "configure_roles",
-								},
-							},
-						},
-					},
-					Flags: discordgo.MessageFlagsEphemeral,
-				},
+			// Get the metadata
+			metadata, err := GroupMetadataLoad(ctx, d.db, groupID)
+			if err != nil {
+				return errors.New("failed to get guild group metadata")
 			}
 
-			return s.InteractionRespond(i.Interaction, response)
+			roles := metadata.RoleMap
+			for _, o := range options {
+				roleID := o.RoleValue(s, guild.ID).ID
+				switch o.Name {
+				case "moderator":
+					roles.Enforcer = roleID
+				case "serverhost":
+					roles.ServerHost = roleID
+				case "suspension":
+					roles.Suspended = roleID
+				case "member":
+					roles.Member = roleID
+				case "allocator":
+					roles.Allocator = roleID
+				case "is_linked":
+					roles.AccountLinked = roleID
+				}
+			}
+
+			data, err := metadata.MarshalToMap()
+			if err != nil {
+				return fmt.Errorf("error marshalling group data: %w", err)
+			}
+
+			if err := nk.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, data, 1000000); err != nil {
+				return fmt.Errorf("error updating group: %w", err)
+			}
+
+			gg, err := GuildGroupLoad(ctx, nk, groupID)
+			if err != nil {
+				return errors.New("failed to load guild group")
+			}
+			d.guildGroupRegistry.Add(gg)
+
+			return editInteractionResponse(s, i, "roles set!")
 		},
 
 		"region-status": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
@@ -2909,7 +3008,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if err != nil {
 				return errors.New("failed to create user channel")
 			}
-			if err := simpleInteractionResponse(s, i, "Sending stream list to your DMs"); err != nil {
+			if err := editInteractionResponse(s, i, "Sending stream list to your DMs"); err != nil {
 				return errors.New("failed to send interaction response")
 			}
 			if limit == 0 {
@@ -3064,14 +3163,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					content = b.String()
 				}
 
-				// Send the message to the user
-				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: content,
-					},
-				})
+				return editInteractionResponse(s, i, content)
 
 			case "group":
 
@@ -3127,14 +3219,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					return fmt.Errorf("failed to write matchmaking config: %w", err)
 				}
 
-				// Inform the user of the groupid
-				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: fmt.Sprintf("Your group ID has been set to `%s`. Everyone must matchmake at the same time (~15-30 seconds)", groupName),
-					},
-				})
+				return editInteractionResponse(s, i, fmt.Sprintf("Your group ID has been set to `%s`. Everyone must matchmake at the same time (~15-30 seconds)", groupName))
 			}
 			return discordgo.ErrNilState
 		},
@@ -3188,12 +3273,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						return fmt.Errorf("failed to write saved outfits: %w", err)
 					}
 
-					return simpleInteractionResponse(s, i, fmt.Sprintf("Saved current outfit as `%s`", outfitName))
+					return editInteractionResponse(s, i, fmt.Sprintf("Saved current outfit as `%s`", outfitName))
 
 				case "load":
 					outfit, ok := wardrobe.GetOutfit(outfitName)
 					if !ok || outfit == nil {
-						return simpleInteractionResponse(s, i, fmt.Sprintf("Outfit `%s` does not exist.", outfitName))
+						return editInteractionResponse(s, i, fmt.Sprintf("Outfit `%s` does not exist.", outfitName))
 					}
 
 					metadata.LoadoutCosmetics = *outfit
@@ -3202,11 +3287,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						return fmt.Errorf("failed to set account metadata: %w", err)
 					}
 
-					return simpleInteractionResponse(s, i, fmt.Sprintf("Applied outfit `%s`. If the changes do not take effect in your next match, Please re-open your game.", outfitName))
+					return editInteractionResponse(s, i, fmt.Sprintf("Applied outfit `%s`. If the changes do not take effect in your next match, Please re-open your game.", outfitName))
 
 				case "delete":
 					if deleted := wardrobe.DeleteOutfit(outfitName); !deleted {
-						simpleInteractionResponse(s, i, fmt.Sprintf("Outfit `%s` does not exist.", outfitName))
+						editInteractionResponse(s, i, fmt.Sprintf("Outfit `%s` does not exist.", outfitName))
 						return nil
 					}
 
@@ -3214,12 +3299,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						return fmt.Errorf("failed to write saved outfits: %w", err)
 					}
 
-					return simpleInteractionResponse(s, i, fmt.Sprintf("Deleted loadout profile `%s`", outfitName))
+					return editInteractionResponse(s, i, fmt.Sprintf("Deleted loadout profile `%s`", outfitName))
 				}
 
 			case "list":
 				if len(wardrobe.Outfits) == 0 {
-					return simpleInteractionResponse(s, i, "No saved outfits.")
+					return editInteractionResponse(s, i, "No saved outfits.")
 				}
 
 				responseString := "Available profiles: "
@@ -3228,7 +3313,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					responseString += fmt.Sprintf("`%s`, ", k)
 				}
 
-				return simpleInteractionResponse(s, i, responseString[:len(responseString)-2])
+				return editInteractionResponse(s, i, responseString[:len(responseString)-2])
 			}
 
 			return discordgo.ErrNilState
@@ -3269,8 +3354,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					if userID != "" && groupID != "" {
 						d.cache.QueueSyncMember(i.GuildID, user.ID, false)
 					}
-					if err := simpleInteractionResponse(s, i, err.Error()); err != nil {
-						return
+					if editErr := editInteractionResponse(s, i, err.Error()); editErr != nil {
+						if err := simpleInteractionResponse(s, i, err.Error()); err != nil {
+							return
+						}
 					}
 				}
 			} else {
@@ -3656,6 +3743,13 @@ func simpleInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCre
 			Content: content,
 		},
 	})
+}
+
+func editInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreate, content string) error {
+	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Content: &content,
+	})
+	return err
 }
 
 func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runtime.Logger, regionStr string, channelID string, existingMessage *discordgo.Message) error {
