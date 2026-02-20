@@ -525,7 +525,8 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 	params.ignoreDisabledAlternates = loginHistory.IgnoreDisabledAlternates
 	firstIDs, _ := loginHistory.AlternateIDs()
-	journals, err := EnforcementJournalsLoad(ctx, p.nk, append(firstIDs, params.profile.ID()))
+	params.enforcementUserIDs = append(firstIDs, params.profile.ID())
+	journals, err := EnforcementJournalsLoad(ctx, p.nk, params.enforcementUserIDs)
 	if err != nil {
 		return fmt.Errorf("failed to load enforcement journals: %w", err)
 	}

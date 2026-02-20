@@ -50,6 +50,7 @@ type SessionParameters struct {
 	latencyHistory               *atomic.Pointer[LatencyHistory]  // The latency history
 	isIGPOpen                    *atomic.Bool                     // The user has IGPU open
 	gameModeSuspensionsByGroupID ActiveGuildEnforcements          // The active suspension records
+	enforcementUserIDs           []string                         // User IDs (self + alts) used for enforcement journal queries
 	ignoreDisabledAlternates     bool                             // Ignore disabled
 }
 
