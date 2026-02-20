@@ -281,7 +281,6 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	if !ok {
 		return errors.New("failed to get session parameters")
 	}
-	var err error
 
 	gg := p.guildGroupRegistry.Get(groupID)
 	if gg == nil {
@@ -310,10 +309,22 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		return joinRejected("suspended_user", "You are suspended from this guild. (role-based)", "is suspended via role: <@&"+gg.RoleMap.Suspended+">")
 	}
 
+	// Re-read enforcement journals from storage to catch suspensions issued after login.
+	freshJournals, freshJournalErr := EnforcementJournalsLoad(ctx, p.nk, params.enforcementUserIDs)
+	if freshJournalErr != nil {
+		p.logger.Error("failed to re-read enforcement journals at join time; denying join", zap.String("user_id", userID), zap.Error(freshJournalErr))
+		return fmt.Errorf("failed to re-read enforcement journals: %w", freshJournalErr)
+	}
+	freshEnforcements, freshErr := CheckEnforcementSuspensions(freshJournals, p.guildGroupRegistry.InheritanceByParentGroupID())
+	if freshErr != nil {
+		p.logger.Error("failed to check fresh enforcement suspensions at join time; denying join", zap.String("user_id", userID), zap.Error(freshErr))
+		return fmt.Errorf("failed to check enforcement suspensions: %w", freshErr)
+	}
+
 	var (
 		suspensionRecord GuildEnforcementRecord
 	)
-	if recordsByGameMode := params.gameModeSuspensionsByGroupID[groupID]; len(recordsByGameMode) > 0 {
+	if recordsByGameMode := freshEnforcements[groupID]; len(recordsByGameMode) > 0 {
 		for gameMode, r := range recordsByGameMode {
 			if gameMode != lobbyParams.Mode {
 				// Skip records for other game modes.

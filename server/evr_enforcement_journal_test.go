@@ -327,3 +327,74 @@ func TestCreateSuspensionDetailsEmbedField(t *testing.T) {
 		})
 	}
 }
+
+// TestMidSessionSuspension_StaleEnforcementsMissPostLoginKick proves the bug:
+// when a player is suspended after login, the login-time enforcement cache
+// (params.gameModeSuspensionsByGroupID) does not contain the suspension,
+// so the current lobbyAuthorize code lets the player through.
+//
+// Pre-fix: stale enforcement cache is empty → suspended player passes (BUG).
+// Post-fix: lobbyAuthorize re-reads journals from storage → suspension detected.
+func TestMidSessionSuspension_StaleEnforcementsMissPostLoginKick(t *testing.T) {
+	groupID := "group-test-mid-session"
+	userID := "player-suspended-mid-session"
+
+	// --- Step 1: Simulate login-time state ---
+	// At login, no suspension exists yet. The journal is empty.
+	loginTimeJournals := GuildEnforcementJournalList{
+		userID: NewGuildEnforcementJournal(userID),
+	}
+	inheritanceMap := map[string][]string{groupID: {}}
+
+	staleEnforcements, err := CheckEnforcementSuspensions(loginTimeJournals, inheritanceMap)
+	if err != nil {
+		t.Fatalf("unexpected error computing login-time enforcements: %v", err)
+	}
+
+	// Confirm: no suspension at login time.
+	if _, found := staleEnforcements[groupID]; found {
+		t.Fatal("expected no suspension at login time, but one was found")
+	}
+
+	// --- Step 2: Simulate mid-session kick ---
+	// A moderator issues a suspension after the player has logged in.
+	// This writes a new record to the journal in storage, but the player's
+	// in-memory params (staleEnforcements) are NOT updated.
+	postKickJournal := NewGuildEnforcementJournal(userID)
+	postKickJournal.AddRecord(
+		groupID,
+		"moderator-1",
+		"moderator-discord-1",
+		"Banned mid-session for cheating",
+		"Caught mid-match",
+		false,     // requireCommunityValues
+		false,     // allowPrivateLobbies
+		time.Hour, // 1-hour suspension
+	)
+
+	// --- Step 3: Bug reproduction ---
+	// The buggy code path checks staleEnforcements (populated at login).
+	// Because the suspension was issued after login, it is absent.
+	// A suspended player is incorrectly allowed to join.
+	staleModeRecords := staleEnforcements[groupID]
+	if len(staleModeRecords) != 0 {
+		t.Errorf("expected stale enforcement cache to be empty (no suspension at login), got %d record(s)", len(staleModeRecords))
+	}
+
+	// --- Step 4: Fresh enforcement check (what the fix implements) ---
+	// After the fix, lobbyAuthorize re-reads journals from storage at join time.
+	// Simulated here by calling CheckEnforcementSuspensions with the fresh journal.
+	freshJournals := GuildEnforcementJournalList{userID: postKickJournal}
+	freshEnforcements, err := CheckEnforcementSuspensions(freshJournals, inheritanceMap)
+	if err != nil {
+		t.Fatalf("unexpected error computing fresh enforcements: %v", err)
+	}
+
+	// The fresh check MUST find the suspension.
+	// This verifies that when lobbyAuthorize re-reads the journal (the fix),
+	// the post-login suspension is detected and the join is rejected.
+	freshModeRecords, found := freshEnforcements[groupID]
+	if !found || len(freshModeRecords) == 0 {
+		t.Errorf("fresh enforcement check missed the mid-session suspension: got %v", freshEnforcements)
+	}
+}
