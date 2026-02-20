@@ -10,10 +10,6 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
-const (
-	StreamModeLobbyTelemetry = 32
-)
-
 type JoinMatchStreamRequest struct {
 	MatchUUID string `json:"match_id"`
 }
@@ -77,7 +73,7 @@ func JoinTelemetryStreamRPC(ctx context.Context, logger runtime.Logger, db *sql.
 	sessionID := ctx.Value(runtime.RUNTIME_CTX_SESSION_ID).(string)
 
 	// Join the match stream
-	if success, err := nk.StreamUserJoin(StreamModeLobbyTelemetry, req.MatchUUID, "", "", userID, sessionID, true, false, ""); err != nil {
+	if success, err := nk.StreamUserJoin(StreamModeLobbySessionTelemetry, req.MatchUUID, "", "", userID, sessionID, true, false, ""); err != nil {
 		return "", fmt.Errorf("failed to join match stream: %w", err)
 	} else if !success {
 		return "", fmt.Errorf("failed to join match stream: unknown error")
@@ -108,7 +104,7 @@ func LeaveTelemetryStreamRPC(ctx context.Context, logger runtime.Logger, db *sql
 		return "", fmt.Errorf("session not found")
 	}
 	// Leave the match stream
-	if err := nk.StreamUserLeave(StreamModeLobbyTelemetry, req.MatchUUID, "", "", userID, sessionID); err != nil {
+	if err := nk.StreamUserLeave(StreamModeLobbySessionTelemetry, req.MatchUUID, "", "", userID, sessionID); err != nil {
 		return "", fmt.Errorf("failed to leave match stream: %w", err)
 	}
 
