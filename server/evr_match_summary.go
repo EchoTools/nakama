@@ -6,6 +6,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // MatchSummary represents a summarized match journal for MongoDB
@@ -47,15 +48,22 @@ func NewMatchSummaryStore(client *mongo.Client, database, collection string) *Ma
 	}
 }
 
-// Store saves a match summary to MongoDB
+// Store saves a match summary to MongoDB, upserting if the match ID already exists.
 func (ms *MatchSummaryStore) Store(ctx context.Context, summary *MatchSummary) error {
 	collection := ms.client.Database(ms.database).Collection(ms.collection)
-	summary.UpdatedAt = time.Now()
+	now := time.Now()
+	summary.UpdatedAt = now
 	if summary.CreatedAt.IsZero() {
-		summary.CreatedAt = summary.UpdatedAt
+		summary.CreatedAt = now
 	}
 
-	_, err := collection.InsertOne(ctx, summary)
+	filter := bson.M{"match_id": summary.MatchID}
+	update := bson.M{
+		"$set":         summary,
+		"$setOnInsert": bson.M{"created_at": now},
+	}
+	opts := options.Update().SetUpsert(true)
+	_, err := collection.UpdateOne(ctx, filter, update, opts)
 	return err
 }
 

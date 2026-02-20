@@ -101,10 +101,10 @@ func TestMatchSummary_Creation(t *testing.T) {
 }
 
 func TestStreamModeLobbySessionTelemetry(t *testing.T) {
-	// Test that the new stream mode constant is properly defined
-	expectedValue := StreamModeLobbySessionTelemetry // Use the actual constant value as the expected value
+	// Test that the new stream mode constant is set to the expected value (0x16)
+	const expectedValue = 0x16
 	if StreamModeLobbySessionTelemetry != expectedValue {
-		t.Errorf("Expected StreamModeLobbySessionTelemetry to be %d, got %d", expectedValue, StreamModeLobbySessionTelemetry)
+		t.Errorf("Expected StreamModeLobbySessionTelemetry to be %d (0x16), got %d", expectedValue, StreamModeLobbySessionTelemetry)
 	}
 	if StreamModeLobbySessionTelemetry <= StreamModeMatchmaker {
 		t.Error("StreamModeLobbySessionTelemetry should be greater than StreamModeMatchmaker")
