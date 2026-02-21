@@ -367,6 +367,32 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		// Legacy/misc
 		{ID: "importloadouts", Handler: ImportLoadoutsRpc, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 		{ID: "forcecheck", Handler: CheckForceUserRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+
+		// MMR management - Global Operators only
+		{
+			ID:      "player/mmr/get",
+			Handler: GetMMRRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalOperators},
+			},
+		},
+		{
+			ID:      "player/mmr/update",
+			Handler: UpdateMMRRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalOperators},
+			},
+		},
+		{
+			ID:      "player/mmr/static",
+			Handler: SetStaticMMRRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalOperators},
+			},
+		},
 	}
 
 	// Register RPCs with authorization middleware
