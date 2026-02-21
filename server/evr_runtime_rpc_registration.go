@@ -31,7 +31,14 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 				AllowedGroups: []string{}, // Any authenticated user, validated via shared guild
 			},
 		},
-		{ID: "account/authenticate/password", Handler: AuthenticatePasswordRPC},
+		{
+			ID:      "account/authenticate/password",
+			Handler: AuthenticatePasswordRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   false,
+				AllowedGroups: []string{}, // Public - no authentication required
+			},
+		},
 		// account/break_alternates - Global operators only
 		{
 			ID:      "account/break_alternates",
@@ -67,8 +74,8 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		{ID: "signin/discord", Handler: DiscordSignInRpc},
 
 		// Match management
-		{ID: "match/public", Handler: rpcHandler.MatchListPublicRPC},
-		{ID: "match", Handler: MatchRPC},
+		{ID: "match/public", Handler: rpcHandler.MatchListPublicRPC, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
+		{ID: "match", Handler: MatchRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 		// match/prepare - Global ops and users with allocator role
 		{
 			ID:      "match/prepare",
@@ -79,7 +86,7 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 				// TODO: Add role-based check for allocator role
 			},
 		},
-		{ID: "match/allocate", Handler: AllocateMatchRPC},
+		{ID: "match/allocate", Handler: AllocateMatchRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{GroupGlobalOperators, GroupGlobalBots}}},
 		// match/terminate - Global ops, guild enforcers, match creator, server owner
 		{
 			ID:      "match/terminate",
@@ -90,7 +97,7 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 				// TODO: Add multi-role check (guild enforcers, match creator, server owner)
 			},
 		},
-		{ID: "match/build", Handler: BuildMatchRPC},
+		{ID: "match/build", Handler: BuildMatchRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 
 		// Player management
 		// player/setnextmatch - Players can set their own, auditors/enforcers can set others
@@ -99,11 +106,11 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			Handler: SetNextMatchRPC,
 			Permission: &RPCPermission{
 				RequireAuth:   true,
-				AllowedGroups: []string{}, // Any authenticated user
+				AllowedGroups: []string{GroupGlobalOperators}, // Any authenticated user
 				// TODO: Add role-based check for auditors/enforcers
 			},
 		},
-		{ID: "player/statistics", Handler: PlayerStatisticsRPC},
+		{ID: "player/statistics", Handler: PlayerStatisticsRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 		// player/kick - Global ops, guild enforcers, match creator, server owner
 		{
 			ID:      "player/kick",
@@ -114,7 +121,7 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 				// TODO: Add multi-role check (guild enforcers, match creator, server owner)
 			},
 		},
-		{ID: "player/profile", Handler: UserServerProfileRPC},
+		{ID: "player/profile", Handler: UserServerProfileRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 		// player/matchlock - Global ops and guild moderators
 		{
 			ID:      "player/matchlock",
@@ -174,11 +181,11 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		},
 
 		// EVR service status
-		{ID: "evr/servicestatus", Handler: rpcHandler.ServiceStatusRPC},
+		{ID: "evr/servicestatus", Handler: rpcHandler.ServiceStatusRPC, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
 
 		// Matchmaking
-		{ID: "matchmaking/settings", Handler: MatchmakingSettingsRPC},
-		{ID: "matchmaker/stream", Handler: MatchmakerStreamRPC},
+		{ID: "matchmaking/settings", Handler: MatchmakingSettingsRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+		{ID: "matchmaker/stream", Handler: MatchmakerStreamRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 		// matchmaker/state - Filter to guilds player is member of (in RPC)
 		{
 			ID:      "matchmaker/state",
@@ -188,14 +195,14 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 				AllowedGroups: []string{}, // Any authenticated user, filtered in RPC
 			},
 		},
-		{ID: "matchmaker/candidates", Handler: MatchmakerCandidatesRPCFactory(sbmm)},
-		{ID: "matchmaker/config", Handler: MatchmakerConfigRPC},
+		{ID: "matchmaker/candidates", Handler: MatchmakerCandidatesRPCFactory(sbmm), Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+		{ID: "matchmaker/config", Handler: MatchmakerConfigRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 
 		// Stream management - Global operators only
-		{ID: "stream/join", Handler: StreamJoinRPC},
+		{ID: "stream/join", Handler: StreamJoinRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{GroupGlobalOperators}}},
 
 		// Server management
-		{ID: "server/score", Handler: ServerScoreRPC},
+		{ID: "server/score", Handler: ServerScoreRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 		// server/scores - Any authenticated user
 		{
 			ID:      "server/scores",
@@ -303,9 +310,89 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			},
 		},
 
+		// Client role — any authenticated user
+		{
+			ID:      "get_client_role",
+			Handler: GetClientRoleRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{},
+			},
+		},
+
+		// TOT test upload — Global Testers admin only (enforced inside handler)
+		{
+			ID:      "tot/tests/upload",
+			Handler: TotTestsUploadRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalTesters},
+			},
+		},
+		// TOT test list — any Global Tester
+		{
+			ID:      "tot/tests/list",
+			Handler: TotTestsListRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalTesters},
+			},
+		},
+		// TOT test create/update/delete — Global Tester admin only (enforced inside handler)
+		{
+			ID:      "tot/tests/create",
+			Handler: TotTestsCreateRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalTesters},
+			},
+		},
+		{
+			ID:      "tot/tests/update",
+			Handler: TotTestsUpdateRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalTesters},
+			},
+		},
+		{
+			ID:      "tot/tests/delete",
+			Handler: TotTestsDeleteRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalTesters},
+			},
+		},
+
 		// Legacy/misc
-		{ID: "importloadouts", Handler: ImportLoadoutsRpc},
-		{ID: "forcecheck", Handler: CheckForceUserRPC},
+		{ID: "importloadouts", Handler: ImportLoadoutsRpc, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+		{ID: "forcecheck", Handler: CheckForceUserRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+
+		// MMR management - Global Operators only
+		{
+			ID:      "player/mmr/get",
+			Handler: GetMMRRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalOperators},
+			},
+		},
+		{
+			ID:      "player/mmr/update",
+			Handler: UpdateMMRRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalOperators},
+			},
+		},
+		{
+			ID:      "player/mmr/static",
+			Handler: SetStaticMMRRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalOperators},
+			},
+		},
 	}
 
 	// Register RPCs with authorization middleware
