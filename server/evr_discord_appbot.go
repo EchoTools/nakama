@@ -769,6 +769,44 @@ var (
 		{
 			Name:        "set-roles",
 			Description: "Configure guild roles for EchoVRCE features. Non-members can only join private matches.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "member",
+					Description: "If defined, this role allows joining social lobbies, matchmaking, or creating private matches.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "moderator",
+					Description: "Allowed access to more detailed `/lookup`information and moderation tools.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "serverhost",
+					Description: "Allowed to host a game server for the guild.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "suspension",
+					Description: "Disallowed from joining any guild matches.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "allocator",
+					Description: "Allowed to reserve game servers.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "is-linked",
+					Description: "Assigned/Removed by Nakama denoting if an account is linked to a headset.",
+					Required:    true,
+				},
+			},
 		},
 		{
 			Name:        "allocate",
@@ -2935,7 +2973,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			return editInteractionResponse(s, i, "roles set!")
 		},
-
 		"region-status": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 
