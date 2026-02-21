@@ -99,7 +99,7 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			Handler: SetNextMatchRPC,
 			Permission: &RPCPermission{
 				RequireAuth:   true,
-				AllowedGroups: []string{}, // Any authenticated user
+				AllowedGroups: []string{GroupGlobalOperators}, // Any authenticated user
 				// TODO: Add role-based check for auditors/enforcers
 			},
 		},
@@ -300,6 +300,60 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 				RequireAuth:   true,
 				AllowedGroups: []string{}, // Custom authorization in RPC (user or operator)
 				// TODO: Move to middleware with user-or-operator pattern
+			},
+		},
+
+		// Client role — any authenticated user
+		{
+			ID:      "get_client_role",
+			Handler: GetClientRoleRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{},
+			},
+		},
+
+		// TOT test upload — Global Testers admin only (enforced inside handler)
+		{
+			ID:      "tot/tests/upload",
+			Handler: TotTestsUploadRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalTesters},
+			},
+		},
+		// TOT test list — any Global Tester
+		{
+			ID:      "tot/tests/list",
+			Handler: TotTestsListRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalTesters},
+			},
+		},
+		// TOT test create/update/delete — Global Tester admin only (enforced inside handler)
+		{
+			ID:      "tot/tests/create",
+			Handler: TotTestsCreateRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalTesters},
+			},
+		},
+		{
+			ID:      "tot/tests/update",
+			Handler: TotTestsUpdateRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalTesters},
+			},
+		},
+		{
+			ID:      "tot/tests/delete",
+			Handler: TotTestsDeleteRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalTesters},
 			},
 		},
 
