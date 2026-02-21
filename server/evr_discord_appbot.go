@@ -2074,13 +2074,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			return editInteractionResponse(s, i, fmt.Sprintf("Next match set to `%s`", matchID))
 		},
 		"throw-settings": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
-			metadata, err := EVRProfileLoad(ctx, nk, userIDStr)
+			settings, err := GamePauseSettingsLoad(ctx, nk, userIDStr)
 			if err != nil {
-				return fmt.Errorf("failed to get account metadata: %w", err)
-			}
-
-			if metadata.GamePauseSettings == nil {
-				return fmt.Errorf("GamePauseSettings is nil")
+				return fmt.Errorf("failed to get game pause settings: %w", err)
 			}
 
 			embed := &discordgo.MessageEmbed{
@@ -2089,17 +2085,17 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				Fields: []*discordgo.MessageEmbedField{
 					{
 						Name:   "Grab Deadzone",
-						Value:  strconv.FormatFloat(metadata.GamePauseSettings.GrabDeadZone, 'f', -1, 64),
+						Value:  strconv.FormatFloat(settings.GrabDeadZone, 'f', -1, 64),
 						Inline: true,
 					},
 					{
 						Name:   "Release Distance",
-						Value:  strconv.FormatFloat(metadata.GamePauseSettings.ReleaseDistance, 'f', -1, 64),
+						Value:  strconv.FormatFloat(settings.ReleaseDistance, 'f', -1, 64),
 						Inline: true,
 					},
 					{
 						Name:   "Wrist Angle Offset",
-						Value:  strconv.FormatFloat(metadata.GamePauseSettings.WristAngleOffset, 'f', -1, 64),
+						Value:  strconv.FormatFloat(settings.WristAngleOffset, 'f', -1, 64),
 						Inline: true,
 					},
 				},

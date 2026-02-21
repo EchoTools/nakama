@@ -216,15 +216,10 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				logger.WithField("error", err).Debug("Failed to get user ID by evr ID")
 				continue
 			}
-			metadata, err := EVRProfileLoad(ctx, nk, userID)
-			if err != nil {
-				logger.WithField("error", err).Warn("Failed to load account metadata")
-				continue
-			}
 
-			metadata.GamePauseSettings = &msg.Settings
-			if err := EVRProfileUpdate(ctx, nk, userID, metadata); err != nil {
-				logger.WithField("error", err).Warn("Failed to set account metadata")
+			settings := &GamePauseSettingsStorage{GamePauseSettings: msg.Settings}
+			if err := GamePauseSettingsStore(ctx, nk, userID, settings); err != nil {
+				logger.WithField("error", err).Warn("Failed to store game pause settings")
 			}
 
 		case *evr.RemoteLogCustomizationMetricsPayload:
