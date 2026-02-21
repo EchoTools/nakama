@@ -107,6 +107,7 @@ func checkStorageObjectAuthorization(ctx context.Context, logger runtime.Logger)
 
 // BeforeWriteStorageObjectsHook is a hook that runs before writing storage objects.
 // It checks if the intent includes storage objects access and blocks the request if not authorized.
+// It also validates that matchmaking config writes include a version to prevent overwriting with stale data.
 func BeforeWriteStorageObjectsHook(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, in *api.WriteStorageObjectsRequest) (*api.WriteStorageObjectsRequest, error) {
 	if in == nil {
 		return nil, nil
@@ -120,6 +121,19 @@ func BeforeWriteStorageObjectsHook(ctx context.Context, logger runtime.Logger, d
 	if !isAuthorized {
 		// Block the request by returning nil
 		return nil, nil
+	}
+
+	// Validate matchmaking config writes require a version field
+	for _, obj := range in.Objects {
+		if obj.Collection == MatchmakerStorageCollection && obj.Key == MatchmakingConfigStorageKey {
+			if obj.Version == "" {
+				logger.WithFields(map[string]interface{}{
+					"collection": obj.Collection,
+					"key":        obj.Key,
+				}).Warn("Matchmaking config write rejected: version is required to prevent overwriting with stale data")
+				return nil, runtime.NewError("Matchmaking config write requires a version. Read the current object first and include the version to prevent overwriting with stale data.", StatusFailedPrecondition)
+			}
+		}
 	}
 
 	return in, nil
