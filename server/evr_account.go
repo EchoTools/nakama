@@ -43,7 +43,6 @@ type EVRProfile struct {
 	MutedPlayers           []evr.EvrId                `json:"muted_players"`             // The muted players
 	GhostedPlayers         []evr.EvrId                `json:"ghosted_players"`           // The ghosted players
 	NewUnlocks             []int64                    `json:"new_unlocks"`               // The new unlocks
-	GamePauseSettings      *evr.GamePauseSettings     `json:"game_pause_settings"`       // The game settings
 	LegalConsents          evr.LegalConsents          `json:"legal_consents"`            // The legal consents
 	CustomizationPOIs      *evr.Customization         `json:"customization_pois"`        // The customization POIs
 	MatchmakingDivision    string                     `json:"matchmaking_division"`      // The matchmaking division (e.g. bronze, silver, gold, etc.)
