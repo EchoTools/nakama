@@ -110,7 +110,7 @@ func (d *DiscordAppBot) showEnforcementEditModal(s *discordgo.Session, i *discor
 	if len(record.AuditorNotes) > 200 {
 		portalBaseURL := os.Getenv("NEVR_PORTAL_BASE_URL")
 		if portalBaseURL == "" {
-			portalBaseURL = "https://echovrce.com/portal/"
+			portalBaseURL = "https://echovrce.com/"
 		}
 		// Construct portal link to edit page
 		portalLink := fmt.Sprintf("%ssuspensions?edit=%s&record=%s&guild=%s", portalBaseURL, targetUserID, recordID, groupID)
