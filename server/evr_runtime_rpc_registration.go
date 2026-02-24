@@ -182,6 +182,7 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 		// EVR service status
 		{ID: "evr/servicestatus", Handler: rpcHandler.ServiceStatusRPC, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
+		{ID: "healthcheck", Handler: HealthCheckRPC, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
 
 		// Matchmaking
 		{ID: "matchmaking/settings", Handler: MatchmakingSettingsRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
