@@ -252,46 +252,42 @@ type shutdownMatchResponse struct {
 }
 
 func shutdownMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-
 	r := NewRuntimeContext(ctx)
-
 	request := &shutdownMatchRequest{}
 	if err := json.Unmarshal([]byte(payload), request); err != nil {
-		return "", err
+		return "", runtime.NewError("invalid request payload: "+err.Error(), StatusInvalidArgument)
 	}
 
-	label, err := MatchLabelByID(ctx, nk, request.MatchID)
-	if err != nil {
-		return "", err
+	if !request.MatchID.IsValid() {
+		return "", runtime.NewError("match_id is required", StatusInvalidArgument)
 	}
 
-	if label.LobbyType == UnassignedLobby {
-		return "", fmt.Errorf("match %s is not in a lobby", request.MatchID)
+	// Verify the match exists. Global operators may terminate any match regardless of lobby type.
+	if _, err := MatchLabelByID(ctx, nk, request.MatchID); err != nil {
+		return "", err
 	}
 	if request.GraceSeconds <= 0 {
 		request.GraceSeconds = 10
 	}
-
 	env := NewSignalEnvelope(r.UserID, SignalShutdown, SignalShutdownPayload{
 		GraceSeconds:         request.GraceSeconds,
 		DisconnectGameServer: false,
 		DisconnectUsers:      false,
 	})
-
+	if env == nil {
+		return "", runtime.NewError("failed to create shutdown signal", StatusInternalError)
+	}
 	signalResponse, err := nk.MatchSignal(ctx, request.MatchID.String(), env.String())
 	if err != nil {
 		return "", err
 	}
-
 	response := &shutdownMatchResponse{
 		Success:  true,
 		Response: signalResponse,
 	}
-
 	jsonData, err := json.Marshal(response)
 	if err != nil {
 		return "", err
 	}
-
 	return string(jsonData), nil
 }
