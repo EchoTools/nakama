@@ -200,20 +200,20 @@ func (pm *MatchPreemptionManager) sendPreemptionNotification(ctx context.Context
 	return pm.nk.NotificationSend(ctx, userID, "Match Preempted", content, NotificationCodeMatchPreempted, "", true)
 }
 
-// shutdownMatch shuts down a match
+// shutdownMatch shuts down a match using the proper SignalMatch envelope.
 func (pm *MatchPreemptionManager) shutdownMatch(ctx context.Context, matchID, reason string) error {
-	// Send shutdown signal to the match
-	data := map[string]interface{}{
-		"action": "shutdown",
-		"reason": reason,
+	mID := MatchIDFromStringOrNil(matchID)
+	if mID.IsNil() {
+		return fmt.Errorf("invalid match ID: %s", matchID)
 	}
 
-	dataBytes, err := json.Marshal(data)
-	if err != nil {
-		return fmt.Errorf("failed to marshal shutdown data: %w", err)
+	payload := SignalShutdownPayload{
+		GraceSeconds:         30,
+		DisconnectGameServer: false,
+		DisconnectUsers:      true,
 	}
 
-	_, err = pm.nk.MatchSignal(ctx, matchID, string(dataBytes))
+	_, err := SignalMatch(ctx, pm.nk, mID, SignalShutdown, payload)
 	return err
 }
 
