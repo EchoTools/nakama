@@ -989,14 +989,6 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	if state.LobbyType == UnassignedLobby {
-		// Parking matches with a server that are never allocated should time out.
-		if state.server != nil {
-			state.emptyTicks++
-			if state.emptyTicks > 120*state.tickRate { // 2 minutes
-				logger.Warn("Unassigned parking match with server has not been allocated. Shutting down.")
-				return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 5)
-			}
-		}
 		return state
 	}
 
