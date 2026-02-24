@@ -989,6 +989,14 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	if state.LobbyType == UnassignedLobby {
+		// Parking matches with a server that are never allocated should time out.
+		if state.server != nil {
+			state.emptyTicks++
+			if state.emptyTicks > 120*state.tickRate { // 2 minutes
+				logger.Warn("Unassigned parking match with server has not been allocated. Shutting down.")
+				return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 5)
+			}
+		}
 		return state
 	}
 
@@ -1200,8 +1208,11 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 	state.terminateTick = tick + int64(graceSeconds)*state.tickRate
 
 	if err := m.updateLabel(logger, dispatcher, state); err != nil {
-		logger.Error("failed to update label: %v", err)
-		return nil
+		logger.Error("failed to update label during shutdown (continuing): %v", err)
+		// Do NOT return nil here. Returning nil kills the match immediately without
+		// going through MatchTerminate, which means the game server session is never
+		// disconnected. This leaves the monitoring goroutine alive, which then creates
+		// a new parking match in an infinite loop, causing match accumulation.
 	}
 
 	if err := StoreMatchLabel(ctx, nk, state); err != nil {
