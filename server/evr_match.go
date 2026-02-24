@@ -797,12 +797,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	if len(rejects) > 0 {
-
-		messages := make([]evr.Message, 0, len(rejects))
-
 		code := evr.PlayerRejectionReasonDisconnected
-		// Send legacy messages to the game server to notify the server to disconnect the players
-		messages = append(messages, evr.NewGameServerEntrantRejected(code, rejects...))
 
 		// Convert UUIDs to strings for protobuf
 		rejectIDs := make([]string, 0, len(rejects))
@@ -819,6 +814,11 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			},
 		}
 
+		msgs := []evr.Message{
+			// Legacy message for backwards compatibility with legacy game servers.
+			evr.NewGameServerEntrantRejected(code, rejects...),
+		}
+
 		msg, err := evr.NewNEVRProtobufMessageV1(envelope)
 		if err != nil {
 			logger.Warn("Failed to create protobuf message", zap.Error(err))
@@ -827,10 +827,10 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 				"rejects": rejects,
 				"code":    code,
 			}).Debug("Sending reject message to game server.")
-			messages = append(messages, msg)
+			msgs = append(msgs, msg)
 		}
 
-		if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.server}, nil); err != nil {
+		if err := m.dispatchMessages(ctx, logger, dispatcher, msgs, []runtime.Presence{state.server}, nil); err != nil {
 			logger.Warn("Failed to dispatch message: %v", err)
 		}
 	}
@@ -1588,6 +1588,7 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 		return nil, fmt.Errorf("failed to create protobuf message: %w", err)
 	}
 
+
 	entrants := make([]evr.EvrId, 0, len(state.presenceByEvrID))
 	for evrID := range state.presenceByEvrID {
 		entrants = append(entrants, evrID)
@@ -1618,18 +1619,15 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 }
 
 func (m *EvrMatch) dispatchMessages(_ context.Context, logger runtime.Logger, dispatcher runtime.MatchDispatcher, messages []evr.Message, presences []runtime.Presence, sender runtime.Presence) error {
-	bytes := []byte{}
 	for _, message := range messages {
-
 		logger.Debug("Sending message from match: %v", message)
 		payload, err := evr.Marshal(message)
 		if err != nil {
 			return fmt.Errorf("could not marshal message: %w", err)
 		}
-		bytes = append(bytes, payload...)
-	}
-	if err := dispatcher.BroadcastMessageDeferred(OpCodeEVRPacketData, bytes, presences, sender, true); err != nil {
-		return fmt.Errorf("could not broadcast message: %w", err)
+		if err := dispatcher.BroadcastMessageDeferred(OpCodeEVRPacketData, payload, presences, sender, true); err != nil {
+			return fmt.Errorf("could not broadcast message: %w", err)
+		}
 	}
 	return nil
 }
@@ -1679,7 +1677,6 @@ func (m *EvrMatch) sendEntrantReject(ctx context.Context, logger runtime.Logger,
 		// Legacy message for backwards compatibility with legacy game servers.
 		evr.NewGameServerEntrantRejected(reason, entrantIDs...),
 	}
-
 	if err := m.dispatchMessages(ctx, logger, dispatcher, msgs, []runtime.Presence{server}, nil); err != nil {
 		return fmt.Errorf("failed to dispatch message: %w", err)
 	}
