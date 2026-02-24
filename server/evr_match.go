@@ -1160,7 +1160,9 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 	}
 
 	// Persist the label so post-match remote log processing can look it up after the match ends.
-	if err := StoreMatchLabel(ctx, nk, state); err != nil {
+	termCtx, termCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer termCancel()
+	if err := StoreMatchLabel(termCtx, nk, state); err != nil {
 		logger.WithField("error", err).Warn("failed to store match label on terminate")
 	}
 
@@ -1200,14 +1202,15 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 	nk.MetricsCounterAdd("match_shutdown_count", state.MetricsTags(), 1)
 
 	nk.MetricsTimerRecord("lobby_session_duration", state.MetricsTags(), time.Since(state.StartTime))
+	dbCtx, dbCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer dbCancel()
 	if state.server != nil && slices.Contains(ValidLeaderboardModes, state.Mode) {
-		if err := AccumulateLeaderboardStat(ctx, nk, state.server.GetUserId(), state.server.GetUsername(), state.GetGroupID().String(), state.Mode, GameServerTimeStatisticsID, time.Since(state.StartTime).Seconds()); err != nil {
+		if err := AccumulateLeaderboardStat(dbCtx, nk, state.server.GetUserId(), state.server.GetUsername(), state.GetGroupID().String(), state.Mode, GameServerTimeStatisticsID, time.Since(state.StartTime).Seconds()); err != nil {
 			logger.Warn("Failed to record game server time to leaderboard: %v", err)
 		}
 	}
 	state.Open = false
 	state.terminateTick = tick + int64(graceSeconds)*state.tickRate
-
 	if err := m.updateLabel(logger, dispatcher, state); err != nil {
 		logger.Error("failed to update label during shutdown (continuing): %v", err)
 		// Do NOT return nil here. Returning nil kills the match immediately without
@@ -1216,7 +1219,7 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 		// a new parking match in an infinite loop, causing match accumulation.
 	}
 
-	if err := StoreMatchLabel(ctx, nk, state); err != nil {
+	if err := StoreMatchLabel(dbCtx, nk, state); err != nil {
 		logger.WithField("error", err).Warn("failed to store match label on shutdown")
 	}
 
