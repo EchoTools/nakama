@@ -1114,9 +1114,10 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	if state.Mode == evr.ModeArenaPrivate && tick%(2*state.tickRate) == 0 {
 		// If the match is over, allocate a social lobby for post-match transition
 		if state.GameState != nil && state.GameState.MatchOver && !state.matchSummarySent {
-			state.matchSummarySent = true
 			if err := allocatePostMatchSocialLobby(ctx, logger, nk, state); err != nil {
 				logger.Error("Failed to allocate post-match social lobby", zap.Error(err))
+			} else {
+				state.matchSummarySent = true
 			}
 		}
 	}
