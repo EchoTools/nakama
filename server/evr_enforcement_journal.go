@@ -73,7 +73,7 @@ func (s *GuildEnforcementJournal) StorageIndexes() []StorableIndexMeta {
 		Key:        StorageKeyEnforcementJournal,
 		Fields:     []string{"guild_ids"},
 		MaxEntries: 10000,
-		IndexOnly:  true,
+		IndexOnly:  false,
 	}}
 }
 
