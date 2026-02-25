@@ -527,6 +527,49 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		default:
 			return fmt.Errorf("unknown report server issue type: %s", issueType)
 		}
+	case "enf":
+		// Route enforcement button interactions (edit/void enforcement records)
+		// value format: "e:<recordID>:<guildID>:<targetDiscordID>" or "v:..."
+		return d.handleEnforcementInteraction(ctx, logger, s, i, value)
+	case "set_ign_override":
+		// value format: "<targetDiscordID>:<guildID>"
+		targetDiscordID, guildID, _ := strings.Cut(value, ":")
+		if targetDiscordID == "" || guildID == "" {
+			return fmt.Errorf("invalid set_ign_override parameters")
+		}
+		targetUserID := d.cache.DiscordIDToUserID(targetDiscordID)
+		if targetUserID == "" {
+			return fmt.Errorf("target user not found")
+		}
+		groupID := d.cache.GuildIDToGroupID(guildID)
+		if groupID == "" {
+			return fmt.Errorf("guild not found")
+		}
+		var evrProfile *EVRProfile
+		if a, err := d.nk.AccountGetId(ctx, targetUserID); err != nil {
+			return fmt.Errorf("failed to get account: %w", err)
+		} else if evrProfile, err = BuildEVRProfileFromAccount(a); err != nil {
+			return fmt.Errorf("failed to build EVR profile: %w", err)
+		}
+		ignData := evrProfile.GetGroupIGNData(groupID)
+		modal := d.createLookupSetIGNModal(targetDiscordID, guildID, ignData.DisplayName, ignData.IsLocked)
+		return s.InteractionRespond(i.Interaction, modal)
+	case "void_record":
+		// value format: "<recordID>:<guildID>:<targetDiscordID>"
+		parts := strings.SplitN(value, ":", 3)
+		if len(parts) != 3 {
+			return fmt.Errorf("invalid void_record parameters")
+		}
+		recordID, guildID, targetDiscordID := parts[0], parts[1], parts[2]
+		groupID := d.cache.GuildIDToGroupID(guildID)
+		if groupID == "" {
+			return fmt.Errorf("guild not found")
+		}
+		targetUserID := d.cache.DiscordIDToUserID(targetDiscordID)
+		if targetUserID == "" {
+			return fmt.Errorf("target user not found")
+		}
+		return d.showEnforcementVoidModal(s, i, recordID, groupID, targetUserID)
 	}
 
 	return nil

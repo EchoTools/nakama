@@ -292,7 +292,7 @@ func (sm *SessionsChannelManager) createSessionEmbed(label *MatchLabel, guildGro
 				discordgo.Button{
 					Label:    "Taxi...",
 					Style:    discordgo.SecondaryButton,
-					CustomID: fmt.Sprintf("taxi_%s", sessionUUID),
+					CustomID: fmt.Sprintf("taxi:%s", sessionUUID),
 					Emoji: &discordgo.ComponentEmoji{
 						Name: "🚕",
 					},
@@ -300,7 +300,7 @@ func (sm *SessionsChannelManager) createSessionEmbed(label *MatchLabel, guildGro
 				discordgo.Button{
 					Label:    "Join...",
 					Style:    discordgo.SecondaryButton,
-					CustomID: fmt.Sprintf("join_%s", sessionUUID),
+					CustomID: fmt.Sprintf("join:%s", sessionUUID),
 					Emoji: &discordgo.ComponentEmoji{
 						Name: "🔗",
 					},
