@@ -515,6 +515,18 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 				Content: fmt.Sprintf("🔗 **Direct Join Link**\n`%s`\n\n*Copy this link and paste it in your browser or EchoVR to join directly*", sparkLink),
 			},
 		})
+
+	case "report_server_issue":
+		// Parse value format: "<issueType>:<matchID>:<serverIP>:<regionCode>"
+		issueType, serverContext, _ := strings.Cut(value, ":")
+		switch issueType {
+		case "lag":
+			return d.handleReportServerIssueLag(ctx, logger, s, i, serverContext)
+		case "other":
+			return d.handleReportServerIssueOther(ctx, logger, s, i, serverContext)
+		default:
+			return fmt.Errorf("unknown report server issue type: %s", issueType)
+		}
 	}
 
 	return nil
