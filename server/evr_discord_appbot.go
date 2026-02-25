@@ -4132,7 +4132,7 @@ func (d *DiscordAppBot) LogUserErrorMessage(ctx context.Context, groupID string,
 	return nil, nil
 }
 
-func (d *DiscordAppBot) createLookupSetIGNModal(currentDisplayName string, isLocked bool) *discordgo.InteractionResponse {
+func (d *DiscordAppBot) createLookupSetIGNModal(targetDiscordID, guildID, currentDisplayName string, isLocked bool) *discordgo.InteractionResponse {
 	// Determine the current lock status text
 	lockStatusText := "no"
 	if isLocked {
@@ -4142,7 +4142,7 @@ func (d *DiscordAppBot) createLookupSetIGNModal(currentDisplayName string, isLoc
 	return &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
-			CustomID: "lookup:set_ign_modal",
+			CustomID: fmt.Sprintf("set_ign_modal:%s:%s", targetDiscordID, guildID),
 			Title:    "Override In-Game Name",
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{
