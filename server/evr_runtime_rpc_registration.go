@@ -39,6 +39,14 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 				AllowedGroups: []string{}, // Public - no authentication required
 			},
 		},
+		{
+			ID:      "security/manifest",
+			Handler: SecurityManifestRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   false,
+				AllowedGroups: []string{}, // Public - no authentication required
+			},
+		},
 		// account/break_alternates - Global operators only
 		{
 			ID:      "account/break_alternates",
