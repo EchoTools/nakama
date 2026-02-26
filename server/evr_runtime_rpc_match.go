@@ -274,9 +274,6 @@ func shutdownMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		DisconnectGameServer: false,
 		DisconnectUsers:      false,
 	})
-	if env == nil {
-		return "", runtime.NewError("failed to create shutdown signal", StatusInternalError)
-	}
 	signalResponse, err := nk.MatchSignal(ctx, request.MatchID.String(), env.String())
 	if err != nil {
 		return "", err
