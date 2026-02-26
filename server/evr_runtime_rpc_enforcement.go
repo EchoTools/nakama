@@ -4,10 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -308,22 +308,12 @@ func EnforcementJournalListRPC(ctx context.Context, logger runtime.Logger, db *s
 
 	userID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 
-	// Check if the caller is a global operator
-	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
+	_, _, gg, err := RequireEnforcerOrOperator(ctx, db, nk, userID, request.GroupID)
 	if err != nil {
-		logger.Error("Failed to check global operator status", zap.Error(err))
-		return "", runtime.NewError("Failed to check permissions", StatusInternalError)
-	}
-
-	if !isGlobalOperator {
-		// Check if the caller is the guild owner
-		isOwner, err := checkGroupOwner(ctx, db, userID, request.GroupID)
-		if err != nil {
-			logger.Error("Failed to check guild ownership", zap.Error(err))
-			return "", runtime.NewError("Failed to check permissions", StatusInternalError)
-		}
-		if !isOwner {
-			return "", runtime.NewError("Permission denied: not a guild owner", StatusPermissionDenied)
+		var runtimeErr *runtime.Error
+		if !errors.As(err, &runtimeErr) || runtimeErr.Code != StatusPermissionDenied || gg == nil || !gg.IsOwner(userID) {
+			logger.Error("Permission check failed", zap.Error(err))
+			return "", err
 		}
 	}
 
@@ -386,19 +376,6 @@ func EnforcementJournalListRPC(ctx context.Context, logger runtime.Logger, db *s
 	}
 
 	return string(responseData), nil
-}
-
-func checkGroupOwner(ctx context.Context, db *sql.DB, userID, groupID string) (bool, error) {
-	// Check if the user is a superadmin (owner) of the group
-	query := `
-		SELECT count(1) FROM group_edge 
-		WHERE source_id = $1 AND destination_id = $2 AND state = $3
-	`
-	var count int
-	if err := db.QueryRowContext(ctx, query, userID, groupID, int(api.UserGroupList_UserGroup_SUPERADMIN)).Scan(&count); err != nil {
-		return false, err
-	}
-	return count > 0, nil
 }
 
 // EnforcementRecordEditRequest represents the request to edit an enforcement record
