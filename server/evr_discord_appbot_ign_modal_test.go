@@ -36,7 +36,7 @@ func TestCreateLookupSetIGNModal(t *testing.T) {
 			// Create an empty DiscordAppBot instance for testing
 			d := &DiscordAppBot{}
 
-			response := d.createLookupSetIGNModal(tt.currentDisplayName, tt.isLocked)
+			response := d.createLookupSetIGNModal("123456789", "987654321", tt.currentDisplayName, tt.isLocked)
 
 			if response.Type != discordgo.InteractionResponseModal {
 				t.Errorf("Expected InteractionResponseModal, got %v", response.Type)
@@ -46,8 +46,8 @@ func TestCreateLookupSetIGNModal(t *testing.T) {
 				t.Errorf("Expected title 'Override In-Game Name', got %s", response.Data.Title)
 			}
 
-			if response.Data.CustomID != "lookup:set_ign_modal" {
-				t.Errorf("Expected CustomID 'lookup:set_ign_modal', got %s", response.Data.CustomID)
+			if response.Data.CustomID != "set_ign_modal:123456789:987654321" {
+				t.Errorf("Expected CustomID 'set_ign_modal:123456789:987654321', got %s", response.Data.CustomID)
 			}
 
 			if len(response.Data.Components) != 2 {

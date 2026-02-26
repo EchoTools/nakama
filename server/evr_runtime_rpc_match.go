@@ -91,8 +91,23 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		return "", runtime.NewError(err.Error(), StatusInternalError)
 	}
 
-	// Validate that the user has permissions to allocate to the target guild
-	if !gg.HasRole(userID, gg.RoleMap.Allocator) {
+	isGlobalOperator := false
+	isGlobalBot := false
+	if perms := PermissionsFromContext(ctx); perms != nil {
+		isGlobalOperator = perms.IsGlobalOperator
+		isGlobalBot = perms.IsGlobalBot
+	} else {
+		isGlobalOperator, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
+		if err != nil {
+			return "", runtime.NewError("failed to check operator permissions", StatusInternalError)
+		}
+		isGlobalBot, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalBots)
+		if err != nil {
+			return "", runtime.NewError("failed to check bot permissions", StatusInternalError)
+		}
+	}
+
+	if !isGlobalOperator && !isGlobalBot && !gg.IsAllocator(userID) {
 		return "", runtime.NewError("user must have the `allocator` in the guild.", StatusPermissionDenied)
 	}
 
@@ -143,9 +158,9 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		Level:            evr.ToSymbol(request.Level),
 		TeamSize:         int(request.TeamSize.GetValue()),
 		StartTime:        request.ExpiryTime.AsTime().UTC(),
-		SpawnedBy:        userID,  // The actual user making the request
-		Owner:            request.OwnerId,  // The designated owner (can be different from spawner)
-		Classification:   ClassificationNone,  // Default classification, can be overridden
+		SpawnedBy:        userID,             // The actual user making the request
+		Owner:            request.OwnerId,    // The designated owner (can be different from spawner)
+		Classification:   ClassificationNone, // Default classification, can be overridden
 		GroupID:          uuid.FromStringOrNil(request.GroupId),
 		RequiredFeatures: request.RequiredFeatures,
 		TeamAlignments:   teamAlignments,
@@ -262,10 +277,30 @@ func shutdownMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		return "", runtime.NewError("match_id is required", StatusInvalidArgument)
 	}
 
-	// Verify the match exists. Global operators may terminate any match regardless of lobby type.
-	if _, err := MatchLabelByID(ctx, nk, request.MatchID); err != nil {
+	label, err := MatchLabelByID(ctx, nk, request.MatchID)
+	if err != nil {
 		return "", err
 	}
+
+	isGlobalOperator := false
+	if perms := PermissionsFromContext(ctx); perms != nil {
+		isGlobalOperator = perms.IsGlobalOperator
+	} else {
+		isGlobalOperator, err = CheckSystemGroupMembership(ctx, db, r.UserID, GroupGlobalOperators)
+		if err != nil {
+			return "", runtime.NewError("failed to check operator permissions", StatusInternalError)
+		}
+	}
+
+	if !isGlobalOperator {
+		if label.GetGroupID().IsNil() {
+			return "", runtime.NewError("permission denied", StatusPermissionDenied)
+		}
+		if _, _, _, err := RequireEnforcerOrOperator(ctx, db, nk, r.UserID, label.GetGroupID().String()); err != nil {
+			return "", err
+		}
+	}
+
 	if request.GraceSeconds <= 0 {
 		request.GraceSeconds = 10
 	}

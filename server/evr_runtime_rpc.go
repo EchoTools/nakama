@@ -71,7 +71,7 @@ func (h *RPCHandler) MatchListPublicRPC(ctx context.Context, logger runtime.Logg
 
 	minSize := 1
 	query := "*"
-	matches, err := nk.MatchList(ctx, 1000, true, "", &minSize, nil, query)
+	matches, err := nk.MatchList(ctx, 100, true, "", &minSize, nil, query)
 	if err != nil {
 		return "", runtime.NewError("Failed to list matches", StatusInternalError)
 	}
@@ -274,7 +274,7 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 	} else {
 
 		// Get all the matches
-		matches, err = nk.MatchList(ctx, 1000, true, "", nil, nil, request.Query)
+		matches, err = nk.MatchList(ctx, 100, true, "", nil, nil, request.Query)
 		if err != nil {
 			return "", fmt.Errorf("failed to list matches: %s", err.Error())
 		}
@@ -347,22 +347,16 @@ func KickPlayerRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 	if !ok {
 		return "", runtime.NewError("authentication required", StatusUnauthenticated)
 	}
+	var err error
 
-	guildGroups, err := GuildUserGroupsList(ctx, nk, nil, callerID)
-	if err != nil {
-		return "", err
-	}
-
-	// Get a slice of groupIDs that this user is a moderator for
-	var groupIDs []string
-	for groupID, g := range guildGroups {
-		if g.IsEnforcer(callerID) {
-			groupIDs = append(groupIDs, groupID)
+	isGlobalOperator := false
+	if perms := PermissionsFromContext(ctx); perms != nil {
+		isGlobalOperator = perms.IsGlobalOperator
+	} else {
+		isGlobalOperator, err = CheckSystemGroupMembership(ctx, db, callerID, GroupGlobalOperators)
+		if err != nil {
+			return "", runtime.NewError("failed to check operator permissions", StatusInternalError)
 		}
-	}
-
-	if len(groupIDs) == 0 {
-		return "", runtime.NewError("unauthorized: not a moderator for any guilds.", StatusPermissionDenied)
 	}
 
 	// Get the match of the user
@@ -385,13 +379,22 @@ func KickPlayerRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 		if err != nil {
 			return "", err
 		}
-		if slices.Contains(groupIDs, label.GetGroupID().String()) {
+		authorized := isGlobalOperator
+		if !authorized {
+			if label.GetGroupID().IsNil() {
+				continue
+			}
+			_, _, _, authErr := RequireEnforcerOrOperator(ctx, db, nk, callerID, label.GetGroupID().String())
+			authorized = authErr == nil
+		}
+
+		if authorized {
 			sessionIDs = append(sessionIDs, p.GetSessionId())
 		}
 	}
 
 	if len(sessionIDs) == 0 {
-		return "", fmt.Errorf("user not in a match that the caller is a moderator for")
+		return "", runtime.NewError("user not in a match that the caller can moderate", StatusPermissionDenied)
 	}
 
 	for _, sessionID := range sessionIDs {
@@ -974,8 +977,17 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		return "", runtime.NewError(err.Error(), StatusInternalError)
 	}
 
-	// Validate that the user has permissions to allocate for the guild
-	if !gg.HasRole(userID, gg.RoleMap.Allocator) {
+	isGlobalOperator := false
+	if perms := PermissionsFromContext(ctx); perms != nil {
+		isGlobalOperator = perms.IsGlobalOperator
+	} else {
+		isGlobalOperator, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
+		if err != nil {
+			return "", runtime.NewError("failed to check operator permissions", StatusInternalError)
+		}
+	}
+
+	if !isGlobalOperator && !gg.IsAllocator(userID) {
 		return "", runtime.NewError("user must have the `allocator` in the guild.", StatusPermissionDenied)
 	}
 

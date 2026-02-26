@@ -1584,13 +1584,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			err := handler.HandleVacateCommand(ctx, s, i, userID)
 
 			if err != nil {
-				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: fmt.Sprintf("Error: %s", err.Error()),
-					},
-				})
+				return editInteractionResponse(s, i, fmt.Sprintf("Error: %s", err.Error()))
 			}
 
 			options := i.ApplicationCommandData().Options
@@ -1606,13 +1600,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				graceSeconds = 20
 			}
 
-			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Flags:   discordgo.MessageFlagsEphemeral,
-					Content: fmt.Sprintf("Server vacated. Grace period: %ds", graceSeconds),
-				},
-			})
+			return editInteractionResponse(s, i, fmt.Sprintf("Server vacated. Grace period: %ds", graceSeconds))
 		},
 		"shutdown-match": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			if user == nil {
@@ -4132,7 +4120,7 @@ func (d *DiscordAppBot) LogUserErrorMessage(ctx context.Context, groupID string,
 	return nil, nil
 }
 
-func (d *DiscordAppBot) createLookupSetIGNModal(currentDisplayName string, isLocked bool) *discordgo.InteractionResponse {
+func (d *DiscordAppBot) createLookupSetIGNModal(targetDiscordID, guildID, currentDisplayName string, isLocked bool) *discordgo.InteractionResponse {
 	// Determine the current lock status text
 	lockStatusText := "no"
 	if isLocked {
@@ -4142,7 +4130,7 @@ func (d *DiscordAppBot) createLookupSetIGNModal(currentDisplayName string, isLoc
 	return &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
-			CustomID: "lookup:set_ign_modal",
+			CustomID: fmt.Sprintf("set_ign_modal:%s:%s", targetDiscordID, guildID),
 			Title:    "Override In-Game Name",
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{

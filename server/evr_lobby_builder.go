@@ -27,7 +27,7 @@ const (
 	ReservationLifetimeSeconds     = 20
 	ServerAllocationTimeoutSeconds = 60
 	ServerAllocationRetrySeconds   = 5
-	MatchListLimit                 = 200
+	MatchListLimit                 = 100
 	MatchListMinSize               = 1
 	HighLatencyThresholdMs         = 100
 	RTTRoundingInterval            = 20

@@ -117,10 +117,24 @@ func sendDiscordServerError(internalIP net.IP, externalIP net.IP, port uint16, s
 // errFailedRegistration sends a failure message to the broadcaster and closes the session
 func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, code evr.BroadcasterRegistrationFailureCode) error {
 	logger.Warn("Failed to register game server", zap.Error(err))
-	if err := session.SendEvrUnrequire(evr.NewBroadcasterRegistrationFailure(code)); err != nil {
-		return fmt.Errorf("failed to send lobby registration failure: %w", err)
+	envelope := &rtapi.Envelope{
+		Message: &rtapi.Envelope_Error{
+			Error: &rtapi.Error{
+				Code:    int32(rtapi.Error_CODE_REGISTRATION_FAILED),
+				Message: err.Error(),
+			},
+		},
 	}
-
+	msg, msgErr := evr.NewNEVRProtobufMessageV1(envelope)
+	if msgErr != nil {
+		if sendErr := session.SendEvrUnrequire(evr.NewBroadcasterRegistrationFailure(code)); sendErr != nil {
+			logger.Warn("Failed to send legacy registration failure message", zap.Error(sendErr))
+		}
+	} else {
+		if sendErr := session.SendEvrUnrequire(msg, evr.NewBroadcasterRegistrationFailure(code)); sendErr != nil {
+			logger.Warn("Failed to send registration failure message", zap.Error(sendErr))
+		}
+	}
 	session.Close(err.Error(), runtime.PresenceReasonDisconnect)
 	return fmt.Errorf("failed to register game server: %w", err)
 }
@@ -432,11 +446,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		return session.SendEvrUnrequire(evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP))
 	}
 
-	// Send both protobuf and legacy messages for backwards compatibility
-	return session.SendEvrUnrequire(
-		protobufMsg,
-		evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP),
-	)
+	return session.SendEvrUnrequire(protobufMsg, evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP))
 }
 
 // buildRegionCodes constructs the region codes list and determines the default region.

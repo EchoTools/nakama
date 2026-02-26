@@ -53,11 +53,19 @@ func SetNextMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		request.TargetUserID = callerUserID
 	}
 
-	if request.TargetUserID != callerUserID || request.HostDiscordID != "" {
-		// require them to be a global bot or global developer
-		isGlobalDeveloper, _ := CheckSystemGroupMembership(ctx, db, callerUserID, GroupGlobalDevelopers)
-		isGlobalBot, _ := CheckSystemGroupMembership(ctx, db, callerUserID, GroupGlobalBots)
-		if !isGlobalDeveloper && !isGlobalBot {
+	if request.TargetUserID != callerUserID {
+		isGlobalOperator := false
+		if perms := PermissionsFromContext(ctx); perms != nil {
+			isGlobalOperator = perms.IsGlobalOperator
+		} else {
+			var err error
+			isGlobalOperator, err = CheckSystemGroupMembership(ctx, db, callerUserID, GroupGlobalOperators)
+			if err != nil {
+				return "", runtime.NewError("Failed to check operator permissions", StatusInternalError)
+			}
+		}
+
+		if !isGlobalOperator {
 			return "", runtime.NewError("You do not have permission to set the next match for another user", StatusPermissionDenied)
 		}
 	}

@@ -90,8 +90,7 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			Handler: PrepareMatchRPC,
 			Permission: &RPCPermission{
 				RequireAuth:   true,
-				AllowedGroups: []string{GroupGlobalOperators},
-				// TODO: Add role-based check for allocator role
+				AllowedGroups: []string{},
 			},
 		},
 		{ID: "match/allocate", Handler: AllocateMatchRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{GroupGlobalOperators, GroupGlobalBots}}},
@@ -101,8 +100,7 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			Handler: shutdownMatchRpc,
 			Permission: &RPCPermission{
 				RequireAuth:   true,
-				AllowedGroups: []string{GroupGlobalOperators},
-				// TODO: Add multi-role check (guild enforcers, match creator, server owner)
+				AllowedGroups: []string{},
 			},
 		},
 		{ID: "match/build", Handler: BuildMatchRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
@@ -114,8 +112,7 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			Handler: SetNextMatchRPC,
 			Permission: &RPCPermission{
 				RequireAuth:   true,
-				AllowedGroups: []string{GroupGlobalOperators}, // Any authenticated user
-				// TODO: Add role-based check for auditors/enforcers
+				AllowedGroups: []string{},
 			},
 		},
 		{ID: "player/statistics", Handler: PlayerStatisticsRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
@@ -125,8 +122,7 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			Handler: KickPlayerRPC,
 			Permission: &RPCPermission{
 				RequireAuth:   true,
-				AllowedGroups: []string{GroupGlobalOperators},
-				// TODO: Add multi-role check (guild enforcers, match creator, server owner)
+				AllowedGroups: []string{},
 			},
 		},
 		{ID: "player/profile", Handler: UserServerProfileRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
@@ -190,6 +186,7 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 		// EVR service status
 		{ID: "evr/servicestatus", Handler: rpcHandler.ServiceStatusRPC, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
+		{ID: "healthcheck", Handler: HealthCheckRPC, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
 
 		// Matchmaking
 		{ID: "matchmaking/settings", Handler: MatchmakingSettingsRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
@@ -284,8 +281,7 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			Handler: EnforcementKickRPC,
 			Permission: &RPCPermission{
 				RequireAuth:   true,
-				AllowedGroups: []string{GroupGlobalOperators},
-				// TODO: Add guild enforcer check in middleware
+				AllowedGroups: []string{},
 			},
 		},
 		{
@@ -293,8 +289,7 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			Handler: EnforcementJournalListRPC,
 			Permission: &RPCPermission{
 				RequireAuth:   true,
-				AllowedGroups: []string{GroupGlobalOperators},
-				// TODO: Add guild owner check in middleware
+				AllowedGroups: []string{},
 			},
 		},
 		{
@@ -302,8 +297,7 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			Handler: EnforcementRecordEditRPC,
 			Permission: &RPCPermission{
 				RequireAuth:   true,
-				AllowedGroups: []string{GroupGlobalOperators},
-				// TODO: Add guild enforcer check in middleware
+				AllowedGroups: []string{},
 			},
 		},
 
@@ -375,6 +369,32 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		// Legacy/misc
 		{ID: "importloadouts", Handler: ImportLoadoutsRpc, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 		{ID: "forcecheck", Handler: CheckForceUserRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+
+		// MMR management - Global Operators only
+		{
+			ID:      "player/mmr/get",
+			Handler: GetMMRRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalOperators},
+			},
+		},
+		{
+			ID:      "player/mmr/update",
+			Handler: UpdateMMRRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalOperators},
+			},
+		},
+		{
+			ID:      "player/mmr/static",
+			Handler: SetStaticMMRRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalOperators},
+			},
+		},
 	}
 
 	// Register RPCs with authorization middleware
