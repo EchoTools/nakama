@@ -288,7 +288,7 @@ func TestAllocatePostMatchSocialLobby_ErrMatchBusy(t *testing.T) {
 // TestAllocatePostMatchSocialLobby_FailedAllocationPreventsRetry confirms the
 // matchSummarySent-before-allocation bug.
 //
-// Current (buggy) code path:
+// Previous (buggy) code path:
 //   line 1117: state.matchSummarySent = true      ← set BEFORE allocation
 //   line 1118: allocatePostMatchSocialLobby(...)   ← returns error (ErrMatchBusy)
 //   line 1119: logger.Error(...)                  ← error logged, flag already set
