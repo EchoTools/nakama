@@ -101,29 +101,21 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 		}
 		messages = append(messages, message)
 	}
-
-	// Legacy support - send after protobuf messages
+	// Legacy support - send alongside protobuf messages for backwards compatibility.
 	if len(acceptedIDs) > 0 {
 		uuids := make([]uuid.UUID, 0, len(acceptedIDs))
 		for _, id := range acceptedIDs {
 			uuids = append(uuids, uuid.FromStringOrNil(id))
 		}
-
-		messages = append(messages,
-			evr.NewGameServerJoinAllowed(uuids...), // Legacy message for backwards compatibility.
-		)
+		messages = append(messages, evr.NewGameServerJoinAllowed(uuids...))
 	}
 	if len(rejectedIDs) > 0 {
 		uuids := make([]uuid.UUID, 0, len(rejectedIDs))
 		for _, id := range rejectedIDs {
 			uuids = append(uuids, uuid.FromStringOrNil(id))
 		}
-		messages = append(messages,
-			evr.NewGameServerEntrantRejected(evr.PlayerRejectionReasonBadRequest, uuids...), // Legacy message for backwards compatibility.
-		)
+		messages = append(messages, evr.NewGameServerEntrantRejected(evr.PlayerRejectionReasonBadRequest, uuids...))
 	}
-	// End Legacy Support
-
 	return session.SendEvr(messages...)
 }
 

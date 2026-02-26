@@ -600,7 +600,7 @@ func createEnforcementActionComponents(record GuildEnforcementRecord, profile *E
 					Emoji: &discordgo.ComponentEmoji{
 						Name: "heavy_multiplication_x",
 					},
-					CustomID: fmt.Sprintf("void_record:%s", record.ID),
+					CustomID: fmt.Sprintf("void_record:%s:%s:%s", record.ID, guild.ID, target.User.ID),
 				},
 			},
 		},
