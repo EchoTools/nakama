@@ -937,7 +937,7 @@ var (
 		},
 		{
 			Name:        "region-status",
-			Description: "[DEPRECATED] Use /show for persistent status embeds. This command provides one-shot ephemeral status.",
+			Description: "[DEPRECATED] Use /show for persistent status. Provides one-shot ephemeral region status.",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,

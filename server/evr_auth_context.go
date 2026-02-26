@@ -13,6 +13,7 @@ type UserPermissions struct {
 	IsGlobalDeveloper         bool
 	IsGlobalBot               bool
 	IsGlobalTester            bool
+	IsGlobalTesterAdmin       bool // superadmin (state=0) or admin (state=1) in Global Testers
 	IsGlobalBadgeAdmin        bool
 	IsGlobalPrivateDataAccess bool
 	IsGlobalRequire2FA        bool
@@ -27,14 +28,13 @@ func ResolveUserPermissions(ctx context.Context, db *sql.DB, userID string) (*Us
 		return &UserPermissions{}, nil
 	}
 
-	// Single query to get ALL system group memberships
 	query := `
-		SELECT g.name 
+		SELECT g.name, ge.state
 		FROM groups g
 		JOIN group_edge ge ON g.id = ge.destination_id
 		WHERE ge.source_id = $1
 		  AND g.lang_tag = $2
-		  AND ge.state >= 0 AND ge.state <= 2  -- States: 0=Superadmin, 1=Admin, 2=Member
+		  AND ge.state >= 0 AND ge.state <= 2
 	`
 
 	rows, err := db.QueryContext(ctx, query, userID, SystemGroupLangTag)
@@ -46,11 +46,11 @@ func ResolveUserPermissions(ctx context.Context, db *sql.DB, userID string) (*Us
 	perms := &UserPermissions{}
 	for rows.Next() {
 		var groupName string
-		if err := rows.Scan(&groupName); err != nil {
-			return nil, fmt.Errorf("failed to scan group name: %w", err)
+		var edgeState int
+		if err := rows.Scan(&groupName, &edgeState); err != nil {
+			return nil, fmt.Errorf("failed to scan group membership: %w", err)
 		}
 
-		// Map group name to permission flags
 		switch groupName {
 		case GroupGlobalOperators:
 			perms.IsGlobalOperator = true
@@ -60,6 +60,9 @@ func ResolveUserPermissions(ctx context.Context, db *sql.DB, userID string) (*Us
 			perms.IsGlobalBot = true
 		case GroupGlobalTesters:
 			perms.IsGlobalTester = true
+			if edgeState <= 1 {
+				perms.IsGlobalTesterAdmin = true
+			}
 		case GroupGlobalBadgeAdmins:
 			perms.IsGlobalBadgeAdmin = true
 		case GroupGlobalPrivateDataAccess:
