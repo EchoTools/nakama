@@ -71,7 +71,7 @@ func (h *RPCHandler) MatchListPublicRPC(ctx context.Context, logger runtime.Logg
 
 	minSize := 1
 	query := "*"
-	matches, err := nk.MatchList(ctx, 1000, true, "", &minSize, nil, query)
+	matches, err := nk.MatchList(ctx, 100, true, "", &minSize, nil, query)
 	if err != nil {
 		return "", runtime.NewError("Failed to list matches", StatusInternalError)
 	}
@@ -274,7 +274,7 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 	} else {
 
 		// Get all the matches
-		matches, err = nk.MatchList(ctx, 1000, true, "", nil, nil, request.Query)
+		matches, err = nk.MatchList(ctx, 100, true, "", nil, nil, request.Query)
 		if err != nil {
 			return "", fmt.Errorf("failed to list matches: %s", err.Error())
 		}

@@ -131,7 +131,7 @@ func (dm *ReservationDashboardManager) collectDashboardData(ctx context.Context,
 // collectServerCapacity gathers server capacity information
 func (dm *ReservationDashboardManager) collectServerCapacity(ctx context.Context, data *DashboardData) error {
 	// Get all active matches to calculate server usage
-	matches, err := dm.nk.MatchList(ctx, 1000, true, "", nil, nil, "*")
+	matches, err := dm.nk.MatchList(ctx, 100, true, "", nil, nil, "*")
 	if err != nil {
 		return err
 	}
