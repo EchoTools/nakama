@@ -85,6 +85,13 @@ func SecurityManifestRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	}
 
 	selectedGuildID := req.GuildID
+	if selectedGuildID != "" {
+		// Validate that the requested guild exists in the user's guild memberships.
+		// If not a member, fall through to automatic selection.
+		if _, ok := guildGroupMap[selectedGuildID]; !ok {
+			selectedGuildID = ""
+		}
+	}
 	if selectedGuildID == "" {
 		groupIDs := make([]string, 0, len(guildGroupMap))
 		for groupID := range guildGroupMap {
@@ -136,6 +143,12 @@ func SecurityManifestRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	}
 	if isAllocator {
 		resp.Roles = append(resp.Roles, "allocator")
+	}
+	if isBot {
+		resp.Roles = append(resp.Roles, "bot")
+	}
+	if isTester {
+		resp.Roles = append(resp.Roles, "tester")
 	}
 
 	resp.Capabilities["match.list"] = true
