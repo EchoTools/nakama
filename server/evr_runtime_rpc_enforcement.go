@@ -310,8 +310,13 @@ func EnforcementJournalListRPC(ctx context.Context, logger runtime.Logger, db *s
 
 	_, _, gg, err := RequireEnforcerOrOperator(ctx, db, nk, userID, request.GroupID)
 	if err != nil {
+		// Allow guild owners to view journals even if they are not enforcers/operators.
 		var runtimeErr *runtime.Error
-		if !errors.As(err, &runtimeErr) || runtimeErr.Code != StatusPermissionDenied || gg == nil || !gg.IsOwner(userID) {
+		isPermissionDenied := errors.As(err, &runtimeErr) && runtimeErr.Code == StatusPermissionDenied
+		isOwner := gg != nil && gg.IsOwner(userID)
+		if isPermissionDenied && isOwner {
+			// Owner bypass: guild owner can view enforcement journals even without enforcer role
+		} else {
 			logger.Error("Permission check failed", zap.Error(err))
 			return "", err
 		}

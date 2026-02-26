@@ -31,7 +31,7 @@ func HealthCheckRPC(ctx context.Context, logger nakamaRuntime.Logger, db *sql.DB
 	matches, err := nk.MatchList(ctx, 100, true, "", nil, nil, "")
 	activeMatches := 0
 	if err != nil {
-		logger.Warn("healthcheck: failed to list matches: %v", err)
+		logger.Warn("healthcheck: failed to list matches", "error", err.Error())
 	} else {
 		activeMatches = len(matches)
 	}
