@@ -127,11 +127,13 @@ func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, co
 	}
 	msg, msgErr := evr.NewNEVRProtobufMessageV1(envelope)
 	if msgErr != nil {
-		logger.Warn("Failed to create protobuf registration failure message", zap.Error(msgErr))
-		// Fall back to legacy message
-		_ = session.SendEvrUnrequire(evr.NewBroadcasterRegistrationFailure(code))
+		if sendErr := session.SendEvrUnrequire(evr.NewBroadcasterRegistrationFailure(code)); sendErr != nil {
+			logger.Warn("Failed to send legacy registration failure message", zap.Error(sendErr))
+		}
 	} else {
-		_ = session.SendEvrUnrequire(msg, evr.NewBroadcasterRegistrationFailure(code))
+		if sendErr := session.SendEvrUnrequire(msg, evr.NewBroadcasterRegistrationFailure(code)); sendErr != nil {
+			logger.Warn("Failed to send registration failure message", zap.Error(sendErr))
+		}
 	}
 	session.Close(err.Error(), runtime.PresenceReasonDisconnect)
 	return fmt.Errorf("failed to register game server: %w", err)
