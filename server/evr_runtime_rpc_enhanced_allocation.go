@@ -213,7 +213,7 @@ func processNormalAllocation(ctx context.Context, logger runtime.Logger, db *sql
 // checkServerAvailability checks if there are available servers
 func checkServerAvailability(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger) (bool, error) {
 	// Get current match count
-	matches, err := nk.MatchList(ctx, 1000, true, "", nil, nil, "*")
+	matches, err := nk.MatchList(ctx, 100, true, "", nil, nil, "*")
 	if err != nil {
 		return false, err
 	}

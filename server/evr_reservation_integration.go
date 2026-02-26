@@ -207,7 +207,7 @@ func (sum *ServerUtilizationMonitor) StartMonitoring(ctx context.Context, dg *di
 
 // checkUtilization checks all matches for low utilization and sends notifications
 func (sum *ServerUtilizationMonitor) checkUtilization(ctx context.Context, dg *discordgo.Session) {
-	matches, err := sum.nk.MatchList(ctx, 1000, true, "", nil, nil, "*")
+	matches, err := sum.nk.MatchList(ctx, 100, true, "", nil, nil, "*")
 	if err != nil {
 		sum.logger.Error("Failed to list matches for utilization monitoring: %v", err)
 		return
