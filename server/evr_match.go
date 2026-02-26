@@ -814,14 +814,13 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			},
 		}
 
-		msgs := []evr.Message{
-			// Legacy message for backwards compatibility with legacy game servers.
-			evr.NewGameServerEntrantRejected(code, rejects...),
-		}
-
+		// Build protobuf message first (preferred by newer game servers), falling back to
+		// legacy-only if protobuf creation fails. Unlike sendEntrantReject, MatchLeave
+		// continues regardless — not being able to notify the server is non-fatal here.
+		var msgs []evr.Message
 		msg, err := evr.NewNEVRProtobufMessageV1(envelope)
 		if err != nil {
-			logger.Warn("Failed to create protobuf message", zap.Error(err))
+			logger.Warn("Failed to create protobuf reject message, falling back to legacy: %v", err)
 		} else {
 			logger.WithFields(map[string]interface{}{
 				"rejects": rejects,
@@ -829,6 +828,8 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			}).Debug("Sending reject message to game server.")
 			msgs = append(msgs, msg)
 		}
+		// Legacy message for backwards compatibility with legacy game servers.
+		msgs = append(msgs, evr.NewGameServerEntrantRejected(code, rejects...))
 
 		if err := m.dispatchMessages(ctx, logger, dispatcher, msgs, []runtime.Presence{state.server}, nil); err != nil {
 			logger.Warn("Failed to dispatch message: %v", err)
