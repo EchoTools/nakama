@@ -62,7 +62,7 @@ func operatorCtx() context.Context {
 	ctx := context.Background()
 	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_USER_ID, uuid.Must(uuid.NewV4()).String())
 	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_NODE, "testnode")
-	return ctx
+	return WithUserPermissions(ctx, &UserPermissions{IsGlobalOperator: true})
 }
 
 func TestShutdownMatchRpc_InvalidPayload(t *testing.T) {
