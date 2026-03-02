@@ -46,7 +46,7 @@ func MatchDataEvent(ctx context.Context, nk runtime.NakamaModule, matchID MatchI
 
 	// Create the event
 	event := NewEventMatchDataJournal(matchID.String(), entry)
-	
+
 	// Send the event
 	return SendEvent(ctx, nk, event)
 }

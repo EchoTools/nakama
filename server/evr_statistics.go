@@ -91,7 +91,7 @@ func ScoreToFloat64Legacy(score int64) float64 {
 // All score and subscore values are non-negative to comply with Nakama's leaderboard requirements.
 //
 // Supported range: -999999999999999 to +1e15 with ~1e-9 fractional precision.
-// 
+//
 // Examples:
 //
 //	Float64ToScore(-2.5)  -> (999999999999997, 499999999, nil)  // Negative values

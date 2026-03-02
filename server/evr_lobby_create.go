@@ -56,7 +56,7 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 
 	// Return the prepared session
 	matchID := label.ID
-	
+
 	// Post to Discord sessions channel if available
 	if appBot := globalAppBot.Load(); appBot != nil && appBot.sessionsManager != nil {
 		// Get the guild group for this session
@@ -66,6 +66,6 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 			}
 		}
 	}
-	
+
 	return matchID, nil
 }

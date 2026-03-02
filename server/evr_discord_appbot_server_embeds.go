@@ -13,12 +13,12 @@ import (
 )
 
 const (
-	EmbedColorIdling              = 0x808080 // Gray for idling
-	EmbedColorActive              = 0x00FF00 // Green for active match
-	EmbedColorOver                = 0xFF0000 // Red for match over
-	EmbedUpdatePeriod             = 15 * time.Second
-	EmbedCleanupDelay             = 1 * time.Hour
-	MaxDescriptionFieldLength     = 1024 // Discord embed field value limit
+	EmbedColorIdling          = 0x808080 // Gray for idling
+	EmbedColorActive          = 0x00FF00 // Green for active match
+	EmbedColorOver            = 0xFF0000 // Red for match over
+	EmbedUpdatePeriod         = 15 * time.Second
+	EmbedCleanupDelay         = 1 * time.Hour
+	MaxDescriptionFieldLength = 1024 // Discord embed field value limit
 )
 
 // ServerEmbedTracker tracks active server embed messages for auto-updates
@@ -29,12 +29,12 @@ type ServerEmbedTracker struct {
 
 type ServerEmbedInfo struct {
 	sync.RWMutex
-	ChannelID     string
-	Region        string
-	MessageIDs    map[string]string // matchID -> messageID
-	LastUpdate    time.Time
-	StopChan      chan struct{}
-	CompletedAt   map[string]time.Time // matchID -> completion time for cleanup
+	ChannelID   string
+	Region      string
+	MessageIDs  map[string]string // matchID -> messageID
+	LastUpdate  time.Time
+	StopChan    chan struct{}
+	CompletedAt map[string]time.Time // matchID -> completion time for cleanup
 }
 
 var globalEmbedTracker = &ServerEmbedTracker{
@@ -195,7 +195,7 @@ func (d *DiscordAppBot) updateServerEmbeds(ctx context.Context, logger runtime.L
 	// Update or create embeds for found matches
 	for matchID, label := range foundMatches {
 		embed := d.createServerEmbed(label)
-		
+
 		if messageID, exists := embedInfo.MessageIDs[matchID]; exists {
 			// Update existing embed
 			_, err := s.ChannelMessageEditEmbed(embedInfo.ChannelID, messageID, embed)
@@ -220,7 +220,7 @@ func (d *DiscordAppBot) updateServerEmbeds(ctx context.Context, logger runtime.L
 			// Match no longer exists - mark as over if not already
 			if _, alreadyCompleted := embedInfo.CompletedAt[matchID]; !alreadyCompleted {
 				embedInfo.CompletedAt[matchID] = now
-				
+
 				// Update embed to show "OVER" status
 				overEmbed := &discordgo.MessageEmbed{
 					Title:       "Match Over",
