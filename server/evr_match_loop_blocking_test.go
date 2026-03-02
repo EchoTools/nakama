@@ -1,4 +1,5 @@
 package server
+
 // Regression tests for the social-lobby allocation bug introduced after v3.27.2-evr.245.
 //
 // Root cause:
@@ -80,7 +81,6 @@ func (m *blockingMatchSignalNK) StorageRead(_ context.Context, _ []*runtime.Stor
 }
 
 type noopDispatcher struct{}
-
 
 func (d *noopDispatcher) BroadcastMessage(_ int64, _ []byte, _ []runtime.Presence, _ runtime.Presence, _ bool) error {
 	return nil
@@ -284,14 +284,14 @@ func TestAllocatePostMatchSocialLobby_ErrMatchBusy(t *testing.T) {
 	}
 }
 
-
 // TestAllocatePostMatchSocialLobby_FailedAllocationPreventsRetry confirms the
 // matchSummarySent-before-allocation bug.
 //
 // Previous (buggy) code path:
-//   line 1117: state.matchSummarySent = true      ← set BEFORE allocation
-//   line 1118: allocatePostMatchSocialLobby(...)   ← returns error (ErrMatchBusy)
-//   line 1119: logger.Error(...)                  ← error logged, flag already set
+//
+//	line 1117: state.matchSummarySent = true      ← set BEFORE allocation
+//	line 1118: allocatePostMatchSocialLobby(...)   ← returns error (ErrMatchBusy)
+//	line 1119: logger.Error(...)                  ← error logged, flag already set
 //
 // Because the flag is set before the call, a second tick (tick=40) finds
 // state.matchSummarySent==true and skips the block entirely — MatchSignal is

@@ -51,6 +51,13 @@ func (s *GuildGroupState) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func (s *GuildGroupState) MarshalJSON() ([]byte, error) {
+	s.RLock()
+	defer s.RUnlock()
+	type Alias GuildGroupState
+	return json.Marshal((*Alias)(s))
+}
+
 func (s *GuildGroupState) hasRole(userID, role string) bool {
 	if s.RoleCache == nil {
 		return false

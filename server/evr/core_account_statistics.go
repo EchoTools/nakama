@@ -428,8 +428,8 @@ func (s *ArenaStatistics) CalculateFieldsWithOptions(countEarlyQuitsAsLosses boo
 			savesValue := s.Saves.GetValue()
 			shotsAgainstValue := s.ShotsOnGoalAgainst.GetValue()
 			// Validate values to prevent corrupted statistics
-			if savesValue >= 0 && savesValue <= shotsAgainstValue && 
-			   savesValue <= 1e6 && shotsAgainstValue > 0 && shotsAgainstValue <= 1e6 {
+			if savesValue >= 0 && savesValue <= shotsAgainstValue &&
+				savesValue <= 1e6 && shotsAgainstValue > 0 && shotsAgainstValue <= 1e6 {
 				s.GoalSavePercentage = &StatisticValue{
 					Value: savesValue / shotsAgainstValue * 100,
 					Count: 1,
@@ -441,8 +441,8 @@ func (s *ArenaStatistics) CalculateFieldsWithOptions(countEarlyQuitsAsLosses boo
 			goalsValue := s.Goals.GetValue()
 			shotsValue := s.ShotsOnGoal.GetValue()
 			// Validate values to prevent corrupted statistics
-			if goalsValue >= 0 && goalsValue <= shotsValue && 
-			   goalsValue <= 1e6 && shotsValue > 0 && shotsValue <= 1e6 {
+			if goalsValue >= 0 && goalsValue <= shotsValue &&
+				goalsValue <= 1e6 && shotsValue > 0 && shotsValue <= 1e6 {
 				s.GoalScorePercentage = &StatisticValue{
 					Value: goalsValue / shotsValue * 100,
 					Count: 1,
@@ -525,7 +525,7 @@ func (s *ArenaStatistics) CalculateFieldsWithOptions(countEarlyQuitsAsLosses boo
 				mu = 25.0
 				sigma = 8.333
 			}
-			
+
 			r := types.Rating{
 				Sigma: sigma,
 				Mu:    mu,
@@ -669,7 +669,7 @@ func (s *CombatStatistics) CalculateFieldsWithOptions(_ bool) {
 		payloadWinsValue := s.CombatPayloadWins.GetValue()
 		payloadGamesValue := s.CombatPayloadGamesPlayed.GetValue()
 		if payloadWinsValue < 0 || payloadWinsValue > payloadGamesValue || payloadWinsValue > 1e6 ||
-		   payloadGamesValue < 0 || payloadGamesValue > 1e6 {
+			payloadGamesValue < 0 || payloadGamesValue > 1e6 {
 			payloadWinsValue = 0
 		}
 		s.CombatPayloadWinPercentage.Value = payloadWinsValue / payloadGamesValue * 100
@@ -680,7 +680,7 @@ func (s *CombatStatistics) CalculateFieldsWithOptions(_ bool) {
 		captureWinsValue := s.CombatPointCaptureWins.GetValue()
 		captureGamesValue := s.CombatPointCaptureGamesPlayed.GetValue()
 		if captureWinsValue < 0 || captureWinsValue > captureGamesValue || captureWinsValue > 1e6 ||
-		   captureGamesValue < 0 || captureGamesValue > 1e6 {
+			captureGamesValue < 0 || captureGamesValue > 1e6 {
 			captureWinsValue = 0
 		}
 		s.CombatPointCaptureWinPercentage.Value = captureWinsValue / captureGamesValue * 100
@@ -696,7 +696,7 @@ func (s *CombatStatistics) CalculateFieldsWithOptions(_ bool) {
 			mu = 25.0
 			sigma = 8.333
 		}
-		
+
 		r := types.Rating{
 			Sigma: sigma,
 			Mu:    mu,

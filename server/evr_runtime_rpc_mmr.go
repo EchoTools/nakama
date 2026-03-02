@@ -14,20 +14,20 @@ import (
 type UpdateMMRRequest struct {
 	UserID  string  `json:"user_id"`
 	GroupID string  `json:"group_id"`
-	Mode    string  `json:"mode"`    // e.g. "echo_arena", "echo_combat"
-	Mu      float64 `json:"mu"`      // New Mu value
-	Sigma   float64 `json:"sigma"`   // New Sigma value
+	Mode    string  `json:"mode"`  // e.g. "echo_arena", "echo_combat"
+	Mu      float64 `json:"mu"`    // New Mu value
+	Sigma   float64 `json:"sigma"` // New Sigma value
 }
 
 // UpdateMMRResponse is the response payload for the player/mmr/update RPC.
 type UpdateMMRResponse struct {
-	Success  bool    `json:"success"`
-	UserID   string  `json:"user_id"`
-	GroupID  string  `json:"group_id"`
-	Mode     string  `json:"mode"`
-	Mu       float64 `json:"mu"`
-	Sigma    float64 `json:"sigma"`
-	Ordinal  float64 `json:"ordinal"`
+	Success bool    `json:"success"`
+	UserID  string  `json:"user_id"`
+	GroupID string  `json:"group_id"`
+	Mode    string  `json:"mode"`
+	Mu      float64 `json:"mu"`
+	Sigma   float64 `json:"sigma"`
+	Ordinal float64 `json:"ordinal"`
 }
 
 // GetMMRRequest is the request payload for the player/mmr/get RPC.
@@ -39,23 +39,23 @@ type GetMMRRequest struct {
 
 // GetMMRResponse is the response payload for the player/mmr/get RPC.
 type GetMMRResponse struct {
-	UserID       string   `json:"user_id"`
-	GroupID      string   `json:"group_id"`
-	Mode         string   `json:"mode"`
-	Mu           float64  `json:"mu"`
-	Sigma        float64  `json:"sigma"`
-	Ordinal      float64  `json:"ordinal"`
-	StaticMu     *float64 `json:"static_mu"`
-	StaticSigma  *float64 `json:"static_sigma"`
-	IsStatic     bool     `json:"is_static"`
+	UserID      string   `json:"user_id"`
+	GroupID     string   `json:"group_id"`
+	Mode        string   `json:"mode"`
+	Mu          float64  `json:"mu"`
+	Sigma       float64  `json:"sigma"`
+	Ordinal     float64  `json:"ordinal"`
+	StaticMu    *float64 `json:"static_mu"`
+	StaticSigma *float64 `json:"static_sigma"`
+	IsStatic    bool     `json:"is_static"`
 }
 
 // SetStaticMMRRequest is the request payload for the player/mmr/static RPC.
 type SetStaticMMRRequest struct {
-	UserID  string   `json:"user_id"`
-	Enable  bool     `json:"enable"`
-	Mu      *float64 `json:"mu,omitempty"`    // Required when Enable=true
-	Sigma   *float64 `json:"sigma,omitempty"` // Required when Enable=true
+	UserID string   `json:"user_id"`
+	Enable bool     `json:"enable"`
+	Mu     *float64 `json:"mu,omitempty"`    // Required when Enable=true
+	Sigma  *float64 `json:"sigma,omitempty"` // Required when Enable=true
 }
 
 // SetStaticMMRResponse is the response payload for the player/mmr/static RPC.

@@ -1601,7 +1601,6 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 		return nil, fmt.Errorf("failed to create protobuf message: %w", err)
 	}
 
-
 	entrants := make([]evr.EvrId, 0, len(state.presenceByEvrID))
 	for evrID := range state.presenceByEvrID {
 		entrants = append(entrants, evrID)
