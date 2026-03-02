@@ -177,7 +177,13 @@ func (v *VRMLScanQueue) Start() error {
 			// Count the number of matches played by season
 			entitlements := summary.Entitlements()
 
-			// Assign the cosmetics to the user
+			// Revoke any VRML cosmetics the user is no longer entitled to (e.g. from a previously linked account).
+			if err := RevokeNonEntitledVRMLCosmetics(v.ctx, logger, v.nk, SystemUserID, "", entry.UserID, player.User.UserID, entitlements); err != nil {
+				logger.WithField("error", err).Error("Failed to revoke non-entitled cosmetics")
+				continue
+			}
+
+			// Assign the cosmetics the user is entitled to.
 			if err := AssignEntitlements(v.ctx, logger, v.nk, SystemUserID, "", entry.UserID, player.User.UserID, entitlements); err != nil {
 				logger.WithField("error", err).Error("Failed to assign entitlements")
 				continue

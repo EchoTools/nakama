@@ -184,6 +184,91 @@ func (e VRMLEntitlement) Cosmetics() []string {
 	return append(vrmlCosmeticMap[e.SeasonID][e.Prestige], []string{"decal_vrml_a", "emote_vrml_a"}...)
 }
 
+// AllVRMLCosmetics returns the wallet key for every possible VRML cosmetic across all seasons and prestige levels.
+// Used to compute the revocation set when re-assigning entitlements on link.
+func AllVRMLCosmetics() []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, prestigeMap := range vrmlCosmeticMap {
+		for _, ids := range prestigeMap {
+			for _, id := range ids {
+				key := "cosmetic:arena:" + id
+				if _, ok := seen[key]; !ok {
+					seen[key] = struct{}{}
+					out = append(out, key)
+				}
+			}
+		}
+	}
+	// universal VRML cosmetics
+	for _, id := range []string{"decal_vrml_a", "emote_vrml_a"} {
+		key := "cosmetic:arena:" + id
+		if _, ok := seen[key]; !ok {
+			out = append(out, key)
+		}
+	}
+	return out
+}
+
+// RevokeNonEntitledVRMLCosmetics zeros out any VRML cosmetic wallet entries that are not covered by
+// the provided entitlement set. Call this before AssignEntitlements when re-linking an account so that
+// previously granted cosmetics from a different (or fraudulent) VRML account are cleared.
+func RevokeNonEntitledVRMLCosmetics(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, assignerID, assignerUsername, userID, vrmlUserID string, entitlements []*VRMLEntitlement) error {
+	// Build the set of wallet keys the user is legitimately entitled to.
+	entitled := make(map[string]struct{})
+	for _, e := range entitlements {
+		for _, id := range e.Cosmetics() {
+			entitled["cosmetic:arena:"+id] = struct{}{}
+		}
+	}
+
+	// Load the user's wallet.
+	account, err := nk.AccountGetId(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get account for %s: %v", userID, err)
+	}
+
+	wallet := make(map[string]int64)
+	if err := json.Unmarshal([]byte(account.Wallet), &wallet); err != nil {
+		return status.Error(codes.Internal, "failed to unmarshal wallet")
+	}
+
+	// Zero out every known VRML cosmetic that isn't in the entitled set and is currently non-zero.
+	changeset := make(map[string]int64)
+	for _, key := range AllVRMLCosmetics() {
+		if _, ok := entitled[key]; ok {
+			continue // legitimately entitled, leave it
+		}
+		if v := wallet[key]; v != 0 {
+			changeset[key] = -v // zero it out
+		}
+	}
+
+	if len(changeset) == 0 {
+		return nil // nothing to revoke
+	}
+
+	metadata := map[string]any{
+		"assigner_username": assignerUsername,
+		"assigner_id":       assignerID,
+		"vrml_user_id":      vrmlUserID,
+		"action":            "revoke_non_entitled",
+	}
+
+	if _, _, err := nk.WalletUpdate(ctx, userID, changeset, metadata, true); err != nil {
+		return fmt.Errorf("failed to revoke cosmetics for %s: %v", userID, err)
+	}
+
+	logger.WithFields(map[string]any{
+		"assigner_id":      assignerID,
+		"user_id":          userID,
+		"vrml_user_id":     vrmlUserID,
+		"cosmetic_changes": changeset,
+	}).Info("revoked non-entitled VRML cosmetics")
+
+	return nil
+}
+
 func AssignEntitlements(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, assignerID, assignerUsername, userID, vrmlUserID string, entitlements []*VRMLEntitlement) error {
 
 	// Load the user's wallet
