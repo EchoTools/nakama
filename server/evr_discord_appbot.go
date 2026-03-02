@@ -4209,8 +4209,54 @@ func SendIPAuthorizationNotification(dg *discordgo.Session, discordID string, ip
 
 // canShutdownMatch checks if the user has permission to shut down a match
 func (d *DiscordAppBot) canShutdownMatch(ctx context.Context, userID string, label *MatchLabel) (bool, error) {
-	// Stub implementation: conservative approach, deny all shutdowns for now
-	return false, nil
+	if label == nil {
+		return false, errors.New("match label is required")
+	}
+
+	isGlobalOperator := false
+	if perms := PermissionsFromContext(ctx); perms != nil {
+		isGlobalOperator = perms.IsGlobalOperator
+	} else if d.db != nil {
+		isOperator, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+		if err != nil {
+			return false, fmt.Errorf("failed to check operator permissions: %w", err)
+		}
+		isGlobalOperator = isOperator
+	}
+	if isGlobalOperator {
+		return true, nil
+	}
+
+	// Allow the operator that owns the game server to shutdown matches hosted by that server.
+	if label.GameServer != nil && label.GameServer.OperatorID.String() == userID {
+		return true, nil
+	}
+
+	groupID := label.GetGroupID()
+	if groupID.IsNil() {
+		return false, nil
+	}
+
+	// First try the in-memory registry for speed. If it doesn't contain the group,
+	// fall back to loading the guild group from storage via GuildGroupLoad. This may
+	// incur a storage read but ensures up-to-date role membership in case the
+	// registry is out-of-date.
+	if d.guildGroupRegistry != nil {
+		if gg := d.guildGroupRegistry.Get(groupID.String()); gg != nil {
+			return gg.IsEnforcer(userID), nil
+		}
+	}
+
+	if d.nk == nil {
+		return false, nil
+	}
+
+	gg, err := GuildGroupLoad(ctx, d.nk, groupID.String())
+	if err != nil {
+		return false, fmt.Errorf("failed to load guild group: %w", err)
+	}
+
+	return gg.IsEnforcer(userID), nil
 }
 
 // presentRegionFallbackOptions presents the user with fallback region options when matchmaking fails
