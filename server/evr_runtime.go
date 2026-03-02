@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	fleetmanager "github.com/echotools/nevr-fleetmanager/server"
 	"github.com/go-redis/redis"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
@@ -22,6 +23,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	_ "google.golang.org/protobuf/proto"
+
 )
 
 var (
@@ -253,6 +255,13 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	// Add telemetry stream RPCs
 	if err := RegisterTelemetryStreamRPCs(ctx, logger, db, nk, initializer); err != nil {
 		return fmt.Errorf("unable to register telemetry stream RPCs: %w", err)
+	}
+
+	// Register the fleet manager
+	zapLogger := RuntimeLoggerToZapLogger(logger)
+	fm := fleetmanager.NewFleetManager(zapLogger)
+	if err := initializer.RegisterFleetManager(fm); err != nil {
+		return fmt.Errorf("unable to register fleet manager: %w", err)
 	}
 
 	logger.Info("Initialized runtime module.")

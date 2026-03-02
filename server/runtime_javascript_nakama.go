@@ -9130,7 +9130,7 @@ func (n *RuntimeJavascriptNakamaModule) satoriExperimentsList(r *goja.Runtime) f
 			}
 		}
 
-		experimentList, err := n.satori.ExperimentsList(n.ctx, identifier, nameFiltersArray...)
+	experimentList, err := n.satori.ExperimentsList(n.ctx, identifier, nameFiltersArray, nil)
 		if err != nil {
 			panic(r.NewGoError(fmt.Errorf("failed to list satori experiments: %s", err.Error())))
 		}
@@ -9169,7 +9169,7 @@ func (n *RuntimeJavascriptNakamaModule) satoriFlagsList(r *goja.Runtime) func(go
 			}
 		}
 
-		flagsList, err := n.satori.FlagsList(n.ctx, identifier, nameFiltersArray...)
+		flagsList, err := n.satori.FlagsList(n.ctx, identifier, nameFiltersArray, nil)
 		if err != nil {
 			panic(r.NewGoError(fmt.Errorf("failed to list satori flags: %s", err.Error())))
 		}
@@ -9209,7 +9209,7 @@ func (n *RuntimeJavascriptNakamaModule) satoriFlagsOverridesList(r *goja.Runtime
 			}
 		}
 
-		flagsList, err := n.satori.FlagsOverridesList(n.ctx, identifier, nameFiltersArray...)
+		flagsList, err := n.satori.FlagsOverridesList(n.ctx, identifier, nameFiltersArray, nil)
 		if err != nil {
 			panic(r.NewGoError(fmt.Errorf("failed to list satori flags overrides: %s", err.Error())))
 		}
@@ -9259,7 +9259,7 @@ func (n *RuntimeJavascriptNakamaModule) satoriLiveEventsList(r *goja.Runtime) fu
 			}
 		}
 
-		liveEventsList, err := n.satori.LiveEventsList(n.ctx, identifier, nameFiltersArray...)
+		liveEventsList, err := n.satori.LiveEventsList(n.ctx, identifier, nameFiltersArray, nil, 0, 0, 0, 0)
 		if err != nil {
 			panic(r.NewGoError(fmt.Errorf("failed to list satori live-events %s:", err.Error())))
 		}
@@ -9313,7 +9313,7 @@ func (n *RuntimeJavascriptNakamaModule) satoriMessagesList(r *goja.Runtime) func
 			cursor = getJsString(r, f.Argument(3))
 		}
 
-		messagesList, err := n.satori.MessagesList(n.ctx, identifier, int(limit), forward, cursor)
+		messagesList, err := n.satori.MessagesList(n.ctx, identifier, int(limit), forward, cursor, nil)
 		if err != nil {
 			panic(r.NewGoError(fmt.Errorf("failed to list satori messages %s:", err.Error())))
 		}

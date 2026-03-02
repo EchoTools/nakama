@@ -1,6 +1,6 @@
 module github.com/heroiclabs/nakama/v3
 
-go 1.25.0
+go 1.25.5
 
 require (
 	github.com/anyascii/go v0.3.3
@@ -11,6 +11,7 @@ require (
 	github.com/dgryski/dgoogauth v0.0.0-20190221195224-5a805980a5f3
 	github.com/dop251/goja v0.0.0-20250309171923-bcd7cc6bf64c
 	github.com/echotools/nevr-common/v4 v4.4.0
+	github.com/echotools/nevr-fleetmanager v0.0.0-20260223083915-263af0e9236e
 	github.com/echotools/vrmlgo/v5 v5.0.1
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/go-restruct/restruct v1.2.0-alpha
@@ -21,7 +22,7 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.3
-	github.com/heroiclabs/nakama-common v1.37.0
+	github.com/heroiclabs/nakama-common v1.44.1
 	github.com/heroiclabs/sql-migrate v0.0.0-20241125131053-95a7949783b0
 	github.com/intinig/go-openskill v0.0.0-20250324193118-8ce0c35c4815
 	github.com/jackc/pgerrcode v0.0.0-20250907135507-afb5586c32a6
@@ -37,7 +38,7 @@ require (
 	go.mongodb.org/mongo-driver v1.17.6
 	go.uber.org/atomic v1.11.0
 	go.uber.org/thriftrw v1.33.0
-	go.uber.org/zap v1.27.0
+	go.uber.org/zap v1.27.1
 	golang.org/x/crypto v0.46.0
 	golang.org/x/oauth2 v0.32.0
 	golang.org/x/time v0.14.0
