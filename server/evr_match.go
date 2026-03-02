@@ -1125,9 +1125,8 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		if state.GameState != nil && state.GameState.MatchOver && !state.matchSummarySent {
 			if err := allocatePostMatchSocialLobby(ctx, logger, nk, state); err != nil {
 				logger.Error("Failed to allocate post-match social lobby", zap.Error(err))
-			} else {
-				state.matchSummarySent = true
 			}
+			state.matchSummarySent = true
 		}
 	}
 
@@ -1740,7 +1739,8 @@ func allocatePostMatchSocialLobby(ctx context.Context, logger runtime.Logger, nk
 	// Use empty RTT map and no region requirement for flexibility
 	serviceSettings := ServiceSettings()
 	if serviceSettings == nil || serviceSettings.Matchmaking.QueryAddons.Create == "" {
-		return fmt.Errorf("service settings not initialized or query addon not configured")
+		logger.Debug("Skipping post-match social lobby allocation: service settings not initialized or query addon not configured")
+		return nil
 	}
 	queryAddon := serviceSettings.Matchmaking.QueryAddons.Create
 	label, err := LobbyGameServerAllocate(
