@@ -544,7 +544,7 @@ func (s *SatoriClient) EventsPublish(ctx context.Context, id string, events []*r
 // @param names(type=[]string, optional=true, default=[]) Optional list of experiment names to filter.
 // @return experiments(*runtime.ExperimentList) The experiment list.
 // @return error(error) An optional error value if an error occurred.
-func (s *SatoriClient) ExperimentsList(ctx context.Context, id string, names ...string) (*runtime.ExperimentList, error) {
+func (s *SatoriClient) ExperimentsList(ctx context.Context, id string, names, labels []string) (*runtime.ExperimentList, error) {
 	if s.invalidConfig {
 		return nil, runtime.ErrSatoriConfigurationInvalid
 	}
@@ -567,10 +567,13 @@ func (s *SatoriClient) ExperimentsList(ctx context.Context, id string, names ...
 		}
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", sessionToken))
 
-		if len(names) > 0 {
+		if len(names) > 0 || len(labels) > 0 {
 			q := req.URL.Query()
 			for _, n := range names {
-				q.Set("names", n)
+				q.Add("names", n)
+			}
+			for _, l := range labels {
+				q.Add("labels", l)
 			}
 			req.URL.RawQuery = q.Encode()
 		}
@@ -628,7 +631,7 @@ type flagOverridesCacheEntry struct {
 // @param names(type=[]string, optional=true, default=[]) Optional list of flag names to filter.
 // @return flags(*runtime.FlagList) The flag list.
 // @return error(error) An optional error value if an error occurred.
-func (s *SatoriClient) FlagsList(ctx context.Context, id string, names ...string) (*runtime.FlagList, error) {
+func (s *SatoriClient) FlagsList(ctx context.Context, id string, names, labels []string) (*runtime.FlagList, error) {
 	if s.invalidConfig {
 		return nil, runtime.ErrSatoriConfigurationInvalid
 	}
@@ -655,10 +658,13 @@ func (s *SatoriClient) FlagsList(ctx context.Context, id string, names ...string
 			req.SetBasicAuth(s.apiKey, "")
 		}
 
-		if len(names) > 0 {
+		if len(names) > 0 || len(labels) > 0 {
 			q := req.URL.Query()
 			for _, n := range names {
 				q.Add("names", n)
+			}
+			for _, l := range labels {
+				q.Add("labels", l)
 			}
 			req.URL.RawQuery = q.Encode()
 		}
@@ -723,7 +729,7 @@ func (s *SatoriClient) FlagsList(ctx context.Context, id string, names ...string
 // @param names(type=[]string, optional=true, default=[]) Optional list of flag names to filter.
 // @return flagsOverrides(*runtime.FlagOverridesList) The flag list.
 // @return error(error) An optional error value if an error occurred.
-func (s *SatoriClient) FlagsOverridesList(ctx context.Context, id string, names ...string) (*runtime.FlagOverridesList, error) {
+func (s *SatoriClient) FlagsOverridesList(ctx context.Context, id string, names, labels []string) (*runtime.FlagOverridesList, error) {
 	if s.invalidConfig {
 		return nil, runtime.ErrSatoriConfigurationInvalid
 	}
@@ -750,10 +756,13 @@ func (s *SatoriClient) FlagsOverridesList(ctx context.Context, id string, names 
 			req.SetBasicAuth(s.apiKey, "")
 		}
 
-		if len(names) > 0 {
+		if len(names) > 0 || len(labels) > 0 {
 			q := req.URL.Query()
 			for _, n := range names {
 				q.Add("names", n)
+			}
+			for _, l := range labels {
+				q.Add("labels", l)
 			}
 			req.URL.RawQuery = q.Encode()
 		}
@@ -833,7 +842,7 @@ func (s *SatoriClient) FlagsOverridesList(ctx context.Context, id string, names 
 // @param names(type=[]string, optional=true, default=[]) Optional list of live event names to filter.
 // @return liveEvents(*runtime.LiveEventsList) The live event list.
 // @return error(error) An optional error value if an error occurred.
-func (s *SatoriClient) LiveEventsList(ctx context.Context, id string, names ...string) (*runtime.LiveEventList, error) {
+func (s *SatoriClient) LiveEventsList(ctx context.Context, id string, names, labels []string, pastRunCount, futureRunCount int32, startTimeSec, endTimeSec int64) (*runtime.LiveEventList, error) {
 	if s.invalidConfig {
 		return nil, runtime.ErrSatoriConfigurationInvalid
 	}
@@ -856,10 +865,25 @@ func (s *SatoriClient) LiveEventsList(ctx context.Context, id string, names ...s
 		}
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", sessionToken))
 
-		if len(names) > 0 {
+		if len(names) > 0 || len(labels) > 0 || pastRunCount != 0 || futureRunCount != 0 || startTimeSec != 0 || endTimeSec != 0 {
 			q := req.URL.Query()
 			for _, n := range names {
 				q.Add("names", n)
+			}
+			for _, l := range labels {
+				q.Add("labels", l)
+			}
+			if pastRunCount != 0 {
+				q.Set("past_run_count", strconv.Itoa(int(pastRunCount)))
+			}
+			if futureRunCount != 0 {
+				q.Set("future_run_count", strconv.Itoa(int(futureRunCount)))
+			}
+			if startTimeSec != 0 {
+				q.Set("start_time", strconv.FormatInt(startTimeSec, 10))
+			}
+			if endTimeSec != 0 {
+				q.Set("end_time", strconv.FormatInt(endTimeSec, 10))
 			}
 			req.URL.RawQuery = q.Encode()
 		}
@@ -907,7 +931,7 @@ func (s *SatoriClient) LiveEventsList(ctx context.Context, id string, names ...s
 // @param cursor(type=string) A pagination cursor, if any.
 // @return messages(*runtime.MessageList) The messages list.
 // @return error(error) An optional error value if an error occurred.
-func (s *SatoriClient) MessagesList(ctx context.Context, id string, limit int, forward bool, cursor string) (*runtime.MessageList, error) {
+func (s *SatoriClient) MessagesList(ctx context.Context, id string, limit int, forward bool, cursor string, messageIDs []string) (*runtime.MessageList, error) {
 	if s.invalidConfig {
 		return nil, runtime.ErrSatoriConfigurationInvalid
 	}
@@ -933,6 +957,9 @@ func (s *SatoriClient) MessagesList(ctx context.Context, id string, limit int, f
 	q.Set("forward", strconv.FormatBool(forward))
 	if cursor != "" {
 		q.Set("cursor", cursor)
+		for _, id := range messageIDs {
+			q.Add("ids", id)
+		}
 	}
 	req.URL.RawQuery = q.Encode()
 
@@ -1062,4 +1089,45 @@ func (s *SatoriClient) MessageDelete(ctx context.Context, id, messageId string) 
 		}
 		return fmt.Errorf("%d status code", res.StatusCode)
 	}
+}
+
+func (s *SatoriClient) LiveEventJoin(ctx context.Context, id, liveEventId string) error {
+	if s.invalidConfig {
+		return runtime.ErrSatoriConfigurationInvalid
+	}
+
+	url := s.url.String() + fmt.Sprintf("/v1/live-event/%s/join", liveEventId)
+
+	sessionToken, err := s.generateToken(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", sessionToken))
+
+	res, err := s.httpc.Do(req)
+	if err != nil {
+		return err
+	}
+
+	defer res.Body.Close()
+
+	switch res.StatusCode {
+	case 200:
+		return nil
+	default:
+		errBody, err := io.ReadAll(res.Body)
+		if err == nil && len(errBody) > 0 {
+			return fmt.Errorf("%d status code: %s", res.StatusCode, string(errBody))
+		}
+		return fmt.Errorf("%d status code", res.StatusCode)
+	}
+}
+
+func (s *SatoriClient) ConsoleDirectMessageSend(ctx context.Context, templateId string, recipientIDs []string, integrations []runtime.SatoriMessageIntegration, persist bool, channels map[runtime.SatoriMessageIntegration]*runtime.SatoriMessageIntegrationChannels, templateOverride *runtime.SatoriMessageTemplateOverride) (*runtime.SatoriMessageSendResults, error) {
+	return nil, runtime.ErrSatoriConfigurationInvalid
 }

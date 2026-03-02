@@ -214,10 +214,13 @@ type (
 	RuntimeBeforeGetSubscriptionFunction                   func(ctx context.Context, logger *zap.Logger, userID, username string, vars map[string]string, expiry int64, clientIP, clientPort string, in *api.GetSubscriptionRequest) (*api.GetSubscriptionRequest, error, codes.Code)
 	RuntimeAfterGetSubscriptionFunction                    func(ctx context.Context, logger *zap.Logger, userID, username string, vars map[string]string, expiry int64, clientIP, clientPort string, out *api.ValidatedSubscription, in *api.GetSubscriptionRequest) error
 	RuntimeBeforeGetMatchmakerStatsFunction                func(ctx context.Context, logger *zap.Logger, userID, username string, vars map[string]string, expiry int64, clientIP, clientPort string) (error, codes.Code)
+	RuntimeBeforeListPartiesFunction                       func(ctx context.Context, logger *zap.Logger, userID, username string, vars map[string]string, expiry int64, clientIP, clientPort string, in *api.ListPartiesRequest) (*api.ListPartiesRequest, error, codes.Code)
 	RuntimeAfterGetMatchmakerStatsFunction                 func(ctx context.Context, logger *zap.Logger, userID, username string, vars map[string]string, expiry int64, clientIP, clientPort string, out *api.MatchmakerStats) error
+	RuntimeAfterListPartiesFunction                        func(ctx context.Context, logger *zap.Logger, userID, username string, vars map[string]string, expiry int64, clientIP, clientPort string, out *api.PartyList, in *api.ListPartiesRequest) error
 
 	RuntimeMatchmakerMatchedFunction  func(ctx context.Context, entries []*MatchmakerEntry) (string, bool, error)
 	RuntimeMatchmakerOverrideFunction func(ctx context.Context, candidateMatches [][]*MatchmakerEntry) (matches [][]*MatchmakerEntry)
+	RuntimeMatchmakerProcessorFunction func(ctx context.Context, entries []*MatchmakerEntry) (matches [][]*MatchmakerEntry)
 
 	RuntimeMatchCreateFunction       func(ctx context.Context, logger *zap.Logger, id uuid.UUID, node string, stopped *atomic.Bool, name string) (RuntimeMatchCore, error)
 	RuntimeMatchDeferMessageFunction func(msg *DeferredMessage) error
@@ -433,6 +436,7 @@ type RuntimeBeforeReqFunctions struct {
 	beforeListSubscriptionsFunction                 RuntimeBeforeListSubscriptionsFunction
 	beforeGetSubscriptionFunction                   RuntimeBeforeGetSubscriptionFunction
 	beforeGetMatchmakerStatsFunction                RuntimeBeforeGetMatchmakerStatsFunction
+	beforeListPartiesFunction                       RuntimeBeforeListPartiesFunction
 }
 
 type RuntimeAfterReqFunctions struct {
@@ -517,6 +521,7 @@ type RuntimeAfterReqFunctions struct {
 	afterListSubscriptionsFunction                 RuntimeAfterListSubscriptionsFunction
 	afterGetSubscriptionFunction                   RuntimeAfterGetSubscriptionFunction
 	afterGetMatchmakerStatsFunction                RuntimeAfterGetMatchmakerStatsFunction
+	afterListPartiesFunction                       RuntimeAfterListPartiesFunction
 }
 
 type Runtime struct {
@@ -532,6 +537,7 @@ type Runtime struct {
 
 	matchmakerMatchedFunction  RuntimeMatchmakerMatchedFunction
 	matchmakerOverrideFunction RuntimeMatchmakerOverrideFunction
+	matchmakerProcessorFunction RuntimeMatchmakerProcessorFunction
 
 	tournamentEndFunction                  RuntimeTournamentEndFunction
 	tournamentResetFunction                RuntimeTournamentResetFunction
@@ -542,7 +548,8 @@ type Runtime struct {
 
 	storageIndexFilterFunctions map[string]RuntimeStorageIndexFilterFunction
 
-	httpHandlers []*RuntimeHttpHandler
+	httpHandlers        []*RuntimeHttpHandler
+	consoleHttpHandlers []*RuntimeHttpHandler
 
 	leaderboardResetFunction RuntimeLeaderboardResetFunction
 
@@ -678,7 +685,7 @@ func NewRuntime(ctx context.Context, logger, startupLogger *zap.Logger, db *sql.
 
 	matchProvider := NewMatchProvider()
 
-	goModules, goRPCFns, goBeforeRtFns, goAfterRtFns, goBeforeReqFns, goAfterReqFns, goMatchmakerMatchedFn, goMatchmakerCustomMatchingFn, goTournamentEndFn, goTournamentResetFn, goLeaderboardResetFn, goShutdownFn, goPurchaseNotificationAppleFn, goSubscriptionNotificationAppleFn, goPurchaseNotificationGoogleFn, goSubscriptionNotificationGoogleFn, goIndexFilterFns, fleetManager, httpHandlers, allEventFns, goMatchNamesListFn, nk, err := NewRuntimeProviderGo(ctx, logger, startupLogger, db, protojsonMarshaler, config, version, socialClient, leaderboardCache, leaderboardRankCache, leaderboardScheduler, sessionRegistry, sessionCache, statusRegistry, matchRegistry, tracker, metrics, streamManager, router, storageIndex, satoriClient, runtimeConfig.Path, paths, eventQueue, matchProvider, fmCallbackHandler)
+	goModules, goRPCFns, goBeforeRtFns, goAfterRtFns, goBeforeReqFns, goAfterReqFns, goMatchmakerMatchedFn, goMatchmakerCustomMatchingFn, goTournamentEndFn, goTournamentResetFn, goLeaderboardResetFn, goShutdownFn, goPurchaseNotificationAppleFn, goSubscriptionNotificationAppleFn, goPurchaseNotificationGoogleFn, goSubscriptionNotificationGoogleFn, goIndexFilterFns, fleetManager, httpHandlers, consoleHttpHandlers, allEventFns, goMatchNamesListFn, nk, err := NewRuntimeProviderGo(ctx, logger, startupLogger, db, protojsonMarshaler, config, version, socialClient, leaderboardCache, leaderboardRankCache, leaderboardScheduler, sessionRegistry, sessionCache, statusRegistry, matchRegistry, tracker, metrics, streamManager, router, storageIndex, satoriClient, runtimeConfig.Path, paths, eventQueue, matchProvider, fmCallbackHandler)
 	if err != nil {
 		startupLogger.Error("Error initialising Go runtime provider", zap.Error(err))
 		return nil, nil, err
@@ -2712,7 +2719,8 @@ func NewRuntime(ctx context.Context, logger, startupLogger *zap.Logger, db *sql.
 		subscriptionNotificationGoogleFunction: allSubscriptionNotificationGoogleFunction,
 		storageIndexFilterFunctions:            allStorageIndexFilterFunctions,
 
-		httpHandlers: httpHandlers,
+		httpHandlers:        httpHandlers,
+		consoleHttpHandlers: consoleHttpHandlers,
 
 		shutdownFunction: allShutdownFunction,
 
@@ -2819,6 +2827,20 @@ func (r *Runtime) BeforeGetMatchmakerStats() RuntimeBeforeGetMatchmakerStatsFunc
 
 func (r *Runtime) AfterGetMatchmakerStats() RuntimeAfterGetMatchmakerStatsFunction {
 	return r.afterReqFunctions.afterGetMatchmakerStatsFunction
+}
+
+func (r *Runtime) AfterListParties() RuntimeAfterListPartiesFunction {
+	return r.afterReqFunctions.afterListPartiesFunction
+}
+
+func (r *Runtime) BeforeListParties() RuntimeBeforeListPartiesFunction {
+	return r.beforeReqFunctions.beforeListPartiesFunction
+}
+
+func (r *Runtime) SetPartyRegistry(pr PartyRegistry) {
+	if nk, ok := r.nk.(*RuntimeGoNakamaModule); ok {
+		nk.SetPartyRegistry(pr)
+	}
 }
 
 func (r *Runtime) BeforeUpdateAccount() RuntimeBeforeUpdateAccountFunction {

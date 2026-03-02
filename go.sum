@@ -83,6 +83,8 @@ github.com/dop251/goja v0.0.0-20250309171923-bcd7cc6bf64c h1:mxWGS0YyquJ/ikZOjSr
 github.com/dop251/goja v0.0.0-20250309171923-bcd7cc6bf64c/go.mod h1:MxLav0peU43GgvwVgNbLAj1s/bSGboKkhuULvq/7hx4=
 github.com/echotools/nevr-common/v4 v4.4.0 h1:q0+JS1ADta9YUTKlKuipAr5DSnj9O8KgRaZtHfZ4tqE=
 github.com/echotools/nevr-common/v4 v4.4.0/go.mod h1:dwbf20MYt5P+Jd9csPrGvzU1LjNFIkCJefPgPyuxkVg=
+github.com/echotools/nevr-fleetmanager v0.0.0-20260223083915-263af0e9236e h1:oUlxKnAoi4NclXUzXCeOZrHfttGciILg/YgPqydmj/A=
+github.com/echotools/nevr-fleetmanager v0.0.0-20260223083915-263af0e9236e/go.mod h1:NrmOmVONyxlN2HrQRxz3bRGvenwqYUV+UQUUe7Y5qS4=
 github.com/echotools/vrmlgo/v5 v5.0.1 h1:xdG88swr3ZsdDaYXvn/yCRNiH1U+bJAGZe6X2hJ0eaw=
 github.com/echotools/vrmlgo/v5 v5.0.1/go.mod h1:G6cajh/3UYgy1eRkez8qnvAwBWsO/dc7yGKJVmPbXNc=
 github.com/felixge/httpsnoop v1.0.4 h1:NFTV2Zj1bL4mc9sqWACXbQFVBBg2W3GPvqp8/ESS2Wg=
@@ -146,8 +148,8 @@ github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/ad
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.3 h1:NmZ1PKzSTQbuGHw9DGPFomqkkLWMC+vZCkfs+FHv1Vg=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.3/go.mod h1:zQrxl1YP88HQlA6i9c63DSVPFklWpGX4OWAc9bFuaH4=
 github.com/hashicorp/hcl v1.0.0/go.mod h1:E5yfLk+7swimpb2L/Alb/PJmXilQ/rhwaUYs4T20WEQ=
-github.com/heroiclabs/nakama-common v1.37.0 h1:RceEGzvb+d+kPZY7ONbfozjaVyX3wIqNA/zZyp+M+mw=
-github.com/heroiclabs/nakama-common v1.37.0/go.mod h1:gpGzr0tineLtVeNuBNfN4lObWfalcXClXdH/LHV9IX0=
+github.com/heroiclabs/nakama-common v1.44.1 h1:+2kc87K57lMltVNyxG4JzQdlq0XHe3NVby2ww5E09vg=
+github.com/heroiclabs/nakama-common v1.44.1/go.mod h1:/KLxEy4+JdasHJLPt+tAXJJ8eXywWr/J+Q+KY+/vg7E=
 github.com/heroiclabs/sql-migrate v0.0.0-20241125131053-95a7949783b0 h1:hHJcYOP6L2/wZIEnYjjkJM+rOk/bK0uaYkDAejYpLhI=
 github.com/heroiclabs/sql-migrate v0.0.0-20241125131053-95a7949783b0/go.mod h1:uwcmopkVQIfb/JQqul5zmGI9ounclRC08j9S9lLcpRQ=
 github.com/hpcloud/tail v1.0.0/go.mod h1:ab1qPbhIpdTxEkNHXyeSf5vhxWSCs/tWer42PpOxQnU=
@@ -376,8 +378,8 @@ go.uber.org/tools v0.0.0-20190618225709-2cfd321de3ee/go.mod h1:vJERXedbb3MVM5f9E
 go.uber.org/zap v1.9.1/go.mod h1:vwi/ZaCAaUcBkycHslxD9B2zi4UTXhF60s6SWpuDF0Q=
 go.uber.org/zap v1.10.0/go.mod h1:vwi/ZaCAaUcBkycHslxD9B2zi4UTXhF60s6SWpuDF0Q=
 go.uber.org/zap v1.13.0/go.mod h1:zwrFLgMcdUuIBviXEYEH1YKNaOBnKXsx2IPda5bBwHM=
-go.uber.org/zap v1.27.0 h1:aJMhYGrd5QSmlpLMr2MftRKl7t8J8PTZPA732ud/XR8=
-go.uber.org/zap v1.27.0/go.mod h1:GB2qFLM7cTU87MWRP2mPIjqfIDnGu+VIO4V/SdhGo2E=
+go.uber.org/zap v1.27.1 h1:08RqriUEv8+ArZRYSTXy1LeBScaMpVSTBhCeaZYfMYc=
+go.uber.org/zap v1.27.1/go.mod h1:GB2qFLM7cTU87MWRP2mPIjqfIDnGu+VIO4V/SdhGo2E=
 go.yaml.in/yaml/v2 v2.4.3 h1:6gvOSjQoTB3vt1l+CU+tSyi/HOjfOjRLJ4YwYZGwRO0=
 go.yaml.in/yaml/v2 v2.4.3/go.mod h1:zSxWcmIDjOzPXpjlTTbAsKokqkDNAVtZO0WOMiT90s8=
 go.yaml.in/yaml/v3 v3.0.4 h1:tfq32ie2Jv2UxXFdLJdh3jXuOzWiL1fo0bu/FbuKpbc=
