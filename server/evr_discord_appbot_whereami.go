@@ -14,6 +14,8 @@ import (
 type WhereAmIData struct {
 	// ServerHostIP is the external IP address of the game server
 	ServerHostIP string
+	// ServerHostPort is the UDP port the game server is listening on
+	ServerHostPort uint16
 	// RegionCode is the auto-generated region code for the server location
 	RegionCode string
 	// GuildName is the name of the Discord guild/server hosting the match
@@ -80,6 +82,7 @@ func (d *DiscordAppBot) getWhereAmIData(ctx context.Context, _ runtime.Logger, u
 	// Get server information
 	if label.GameServer != nil {
 		data.ServerHostIP = label.GameServer.Endpoint.ExternalIP.String()
+		data.ServerHostPort = label.GameServer.Endpoint.Port
 		data.RegionCode = label.GameServer.LocationRegionCode(true, true)
 		data.ServerVersion = label.GameServer.NativeVersion
 
@@ -129,9 +132,13 @@ func (d *DiscordAppBot) createWhereAmIEmbed(data *WhereAmIData) *discordgo.Messa
 	}
 
 	if data.ServerHostIP != "" {
+		hostValue := data.ServerHostIP
+		if data.ServerHostPort != 0 {
+			hostValue = fmt.Sprintf("%s:%d", data.ServerHostIP, data.ServerHostPort)
+		}
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:   "Server Host",
-			Value:  data.ServerHostIP,
+			Value:  hostValue,
 			Inline: true,
 		})
 	}
@@ -327,8 +334,8 @@ func (d *DiscordAppBot) handleReportServerIssue(ctx context.Context, logger runt
 	embed := d.createServerInfoEmbed(data)
 
 	// Create buttons with match context encoded in CustomID
-	// Format: report_server_issue:<issue_type>:<matchID>:<serverIP>:<regionCode>
-	serverContext := fmt.Sprintf("%s:%s:%s", data.MatchID, data.ServerHostIP, data.RegionCode)
+	// Format: report_server_issue:<issue_type>:<matchID>:<serverIP>:<serverPort>:<regionCode>
+	serverContext := fmt.Sprintf("%s:%s:%d:%s", data.MatchID, data.ServerHostIP, data.ServerHostPort, data.RegionCode)
 
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
@@ -366,9 +373,13 @@ func (d *DiscordAppBot) createServerInfoEmbed(data *WhereAmIData) *discordgo.Mes
 	}
 
 	if data.ServerHostIP != "" {
+		hostValue := data.ServerHostIP
+		if data.ServerHostPort != 0 {
+			hostValue = fmt.Sprintf("%s:%d", data.ServerHostIP, data.ServerHostPort)
+		}
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:   "Server Host",
-			Value:  data.ServerHostIP,
+			Value:  hostValue,
 			Inline: true,
 		})
 	}
@@ -427,14 +438,25 @@ func (d *DiscordAppBot) handleReportServerIssueLag(ctx context.Context, logger r
 	userID := d.cache.DiscordIDToUserID(user.ID)
 	groupID := d.cache.GuildIDToGroupID(i.GuildID)
 
-	// Parse server context: matchID:serverIP:regionCode
-	parts := strings.SplitN(serverContext, ":", 3)
+	// Parse server context: matchID:serverIP:serverPort:regionCode (4-part)
+	// or legacy: matchID:serverIP:regionCode (3-part)
+	parts := strings.SplitN(serverContext, ":", 4)
 	if len(parts) < 3 {
 		return fmt.Errorf("invalid server context")
 	}
 	matchID := parts[0]
 	serverIP := parts[1]
-	regionCode := parts[2]
+	var serverPort, regionCode string
+	if len(parts) == 4 {
+		serverPort = parts[2]
+		regionCode = parts[3]
+	} else {
+		regionCode = parts[2]
+	}
+	reportedServer := serverIP
+	if serverPort != "0" && serverPort != "" {
+		reportedServer = fmt.Sprintf("%s:%s", serverIP, serverPort)
+	}
 
 	// Get current match data for additional context
 	data, _ := d.getWhereAmIData(ctx, logger, userID, groupID)
@@ -452,7 +474,7 @@ func (d *DiscordAppBot) handleReportServerIssueLag(ctx context.Context, logger r
 			},
 			&discordgo.MessageEmbedField{
 				Name:   "Reported Server",
-				Value:  serverIP,
+				Value:  reportedServer,
 				Inline: true,
 			},
 			&discordgo.MessageEmbedField{
@@ -648,17 +670,23 @@ func (d *DiscordAppBot) handleServerIssueModalSubmit(ctx context.Context, logger
 	userID := d.cache.DiscordIDToUserID(user.ID)
 	groupID := d.cache.GuildIDToGroupID(i.GuildID)
 
-	// Parse server context: matchID:serverIP:regionCode
-	var reportedMatchID, reportedServerIP, reportedRegionCode string
-	contextParts := strings.SplitN(serverContext, ":", 3)
+	// Parse server context: matchID:serverIP:serverPort:regionCode
+	var reportedMatchID, reportedServer, reportedRegionCode string
+	contextParts := strings.SplitN(serverContext, ":", 4)
 	if len(contextParts) >= 1 {
 		reportedMatchID = contextParts[0]
 	}
 	if len(contextParts) >= 2 {
-		reportedServerIP = contextParts[1]
+		reportedServer = contextParts[1]
 	}
 	if len(contextParts) >= 3 {
-		reportedRegionCode = contextParts[2]
+		serverPort := contextParts[2]
+		if serverPort != "0" && serverPort != "" {
+			reportedServer = fmt.Sprintf("%s:%s", reportedServer, serverPort)
+		}
+	}
+	if len(contextParts) >= 4 {
+		reportedRegionCode = contextParts[3]
 	}
 
 	// Get modal data
@@ -715,7 +743,7 @@ func (d *DiscordAppBot) handleServerIssueModalSubmit(ctx context.Context, logger
 	embed := d.createServerIssueReportEmbed(user, issueType, issueDetails, data)
 
 	// If we don't have current match data but have server context from the button, add it
-	if data == nil && (reportedServerIP != "" || reportedRegionCode != "") {
+	if data == nil && (reportedServer != "" || reportedRegionCode != "") {
 		if reportedMatchID != "" {
 			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 				Name:   "Reported Match ID",
@@ -723,10 +751,10 @@ func (d *DiscordAppBot) handleServerIssueModalSubmit(ctx context.Context, logger
 				Inline: true,
 			})
 		}
-		if reportedServerIP != "" {
+		if reportedServer != "" {
 			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 				Name:   "Reported Server",
-				Value:  reportedServerIP,
+				Value:  reportedServer,
 				Inline: true,
 			})
 		}
@@ -784,9 +812,13 @@ func (d *DiscordAppBot) createServerIssueReportEmbed(user *discordgo.User, issue
 	// Add match information if available
 	if data != nil {
 		if data.ServerHostIP != "" {
+			hostValue := data.ServerHostIP
+			if data.ServerHostPort != 0 {
+				hostValue = fmt.Sprintf("%s:%d", data.ServerHostIP, data.ServerHostPort)
+			}
 			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 				Name:   "Server Host",
-				Value:  data.ServerHostIP,
+				Value:  hostValue,
 				Inline: true,
 			})
 		}
