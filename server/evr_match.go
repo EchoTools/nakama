@@ -1001,6 +1001,12 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		return state
 	}
 
+	// Enforce 5-minute lifetime for post-match social lobbies.
+	if state.SpawnedBy == "post-match-transition" && !state.CreatedAt.IsZero() && time.Since(state.CreatedAt) > 5*time.Minute {
+		logger.Info("Post-match social lobby has reached its 5-minute lifetime. Shutting down.")
+		return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 5)
+	}
+
 	// Expire any slot reservations
 	for id, r := range state.reservationMap {
 		if time.Now().After(r.Expiry) {
@@ -1123,9 +1129,11 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	if state.Mode == evr.ModeArenaPrivate && tick%(2*state.tickRate) == 0 {
 		// If the match is over, allocate a social lobby for post-match transition
 		if state.GameState != nil && state.GameState.MatchOver && !state.matchSummarySent {
+			if ServiceSettings().Matchmaking.EnablePostMatchSocialLobby {
 			if err := allocatePostMatchSocialLobby(ctx, logger, nk, state); err != nil {
 				logger.Error("Failed to allocate post-match social lobby", zap.Error(err))
 			}
+		}
 			state.matchSummarySent = true
 		}
 	}
