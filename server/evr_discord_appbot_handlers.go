@@ -484,6 +484,19 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		}); err != nil {
 			return fmt.Errorf("failed to respond to interaction: %w", err)
 		}
+		return nil
+
+	case "unlink-vrml-confirm":
+		// customID format: "unlink-vrml-confirm:{targetUserID}:{vrmlUserID}"
+		parts := strings.SplitN(value, ":", 2)
+		if len(parts) != 2 {
+			return simpleInteractionResponse(s, i, "Invalid unlink payload.")
+		}
+		targetUserID, vrmlUserID := parts[0], parts[1]
+		if err := UnlinkVRMLAccount(ctx, logger, nk, userID, user.Username, targetUserID, vrmlUserID); err != nil {
+			return fmt.Errorf("failed to unlink VRML account: %w", err)
+		}
+		return simpleInteractionResponse(s, i, fmt.Sprintf("VRML account `%s` has been unlinked.", vrmlUserID))
 	case "configure_roles":
 		return d.handleConfigureRoles(ctx, logger, s, i, userID, groupID)
 	case "role_select":
