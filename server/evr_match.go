@@ -552,7 +552,11 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		return nil
 	}
 
-	node := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
+	node, ok := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
+	if !ok {
+		logger.Error("node not set in context")
+		return state
+	}
 
 	for _, p := range presences {
 		class := "Player"

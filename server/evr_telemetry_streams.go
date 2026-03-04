@@ -38,7 +38,10 @@ func JoinTelemetryStreamRPC(ctx context.Context, logger runtime.Logger, db *sql.
 		return "", fmt.Errorf("user not authenticated")
 	}
 
-	node := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
+	node, ok := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
+	if !ok {
+		return "", fmt.Errorf("node not set in context")
+	}
 
 	// get the label of the match
 	matchID := MatchID{
@@ -74,7 +77,10 @@ func JoinTelemetryStreamRPC(ctx context.Context, logger runtime.Logger, db *sql.
 		return "", fmt.Errorf("user does not have API role in guild %s", groupID)
 	}
 
-	sessionID := ctx.Value(runtime.RUNTIME_CTX_SESSION_ID).(string)
+	sessionID, ok := ctx.Value(runtime.RUNTIME_CTX_SESSION_ID).(string)
+	if !ok {
+		return "", fmt.Errorf("session_id not set in context")
+	}
 
 	// Join the match stream
 	if success, err := nk.StreamUserJoin(StreamModeLobbyTelemetry, req.MatchUUID, "", "", userID, sessionID, true, false, ""); err != nil {

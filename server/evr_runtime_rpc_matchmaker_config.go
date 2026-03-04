@@ -238,7 +238,12 @@ func getTypeName(t reflect.Type) string {
 func MatchmakerConfigRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	settings := ServiceSettings()
 	if settings == nil {
-		return "", runtime.NewError("Service settings not initialized", StatusInternalError)
+		// Try to load settings on-demand if not yet initialized
+		var err error
+		settings, err = ServiceSettingsLoad(ctx, logger, nk)
+		if err != nil || settings == nil {
+			return "", runtime.NewError("Service settings not initialized - please retry", StatusInternalError)
+		}
 	}
 
 	mm := settings.Matchmaking
