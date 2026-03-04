@@ -3338,10 +3338,24 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					if userID != "" && groupID != "" {
 						d.cache.QueueSyncMember(i.GuildID, user.ID, false)
 					}
-					if editErr := editInteractionResponse(s, i, err.Error()); editErr != nil {
+					// Determine if we sent a deferred response for this command
+					skipDeferredACKCommands := d.getSkipDeferredACKCommands()
+					
+					// If command is in skipDeferredACKCommands, the handler was responsible for sending the response
+					// If not in skipDeferredACKCommands, we already sent a deferred response and should edit it
+					if skipDeferredACKCommands[appCommandName] {
+						// Handler was responsible for response, try simple response (not edit)
 						if err := simpleInteractionResponse(s, i, err.Error()); err != nil {
-							return
+							logger.WithField("err", err).Error("Failed to send error response")
 						}
+					} else {
+						// We sent a deferred response, try to edit it
+						if editErr := editInteractionResponse(s, i, err.Error()); editErr != nil {
+							logger.WithField("err", editErr).Error("Failed to edit deferred response, attempting simple response")
+							if respErr := simpleInteractionResponse(s, i, err.Error()); respErr != nil {
+								logger.WithField("err", respErr).Error("Failed to send error response")
+							}
+					}
 					}
 				}
 			} else {
@@ -4285,6 +4299,20 @@ func (d *DiscordAppBot) presentRegionFallbackOptions(s *discordgo.Session, i *di
 		},
 	})
 }
+
+// getSkipDeferredACKCommands returns a map of command names that should skip sending a deferred response.
+// Handlers listed here are responsible for sending their own response.
+func (d *DiscordAppBot) getSkipDeferredACKCommands() map[string]bool {
+	return map[string]bool{
+		"link":         true,
+		"link-headset": true,
+		"igp":          true,
+		"party-status": true,
+		"show":         true,
+		"badges":       true,
+	}
+}
+
 
 func IsDiscordErrorCode(err error, code int) bool {
 	var restError *discordgo.RESTError
