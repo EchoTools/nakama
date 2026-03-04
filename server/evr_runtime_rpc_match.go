@@ -267,6 +267,14 @@ type shutdownMatchResponse struct {
 }
 
 func shutdownMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Authorization semantics for shutdownMatchRpc:
+	// - Global operators may shutdown any match.
+	// - The server host operator (the operator who owns the game server running the match)
+	//   is allowed to shutdown the match for servers they operate.
+	// - Guild enforcers (enforcer role in the guild the match runs in) are allowed to
+	//   shutdown matches for their guild via RequireEnforcerOrOperator.
+	// These rules mirror the Discord /shutdown-match command semantics implemented
+	// in the Discord app-bot helper so behavior is consistent across entry points.
 	r := NewRuntimeContext(ctx)
 	request := &shutdownMatchRequest{}
 	if err := json.Unmarshal([]byte(payload), request); err != nil {
@@ -285,14 +293,16 @@ func shutdownMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	isGlobalOperator := false
 	if perms := PermissionsFromContext(ctx); perms != nil {
 		isGlobalOperator = perms.IsGlobalOperator
-	} else {
+	} else if db != nil {
 		isGlobalOperator, err = CheckSystemGroupMembership(ctx, db, r.UserID, GroupGlobalOperators)
 		if err != nil {
 			return "", runtime.NewError("failed to check operator permissions", StatusInternalError)
 		}
 	}
 
-	if !isGlobalOperator {
+	isServerHostOperator := label.GameServer != nil && label.GameServer.OperatorID.String() == r.UserID
+
+	if !isGlobalOperator && !isServerHostOperator {
 		if label.GetGroupID().IsNil() {
 			return "", runtime.NewError("permission denied", StatusPermissionDenied)
 		}
