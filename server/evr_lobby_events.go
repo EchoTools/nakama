@@ -101,7 +101,10 @@ func GetSessionEventsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		return "", fmt.Errorf("invalid request payload: %w", err)
 	}
 
-	node := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
+	node, ok := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
+	if !ok {
+		return "", fmt.Errorf("node not set in context")
+	}
 
 	matchID := MatchID{
 		UUID: uuid.FromStringOrNil(request.MatchUUID),
@@ -153,7 +156,10 @@ func StoreSessionEventRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		return "", fmt.Errorf("invalid request payload: %w", err)
 	}
 
-	node := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
+	node, ok := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
+	if !ok {
+		return "", fmt.Errorf("node not set in context")
+	}
 
 	matchID := MatchID{
 		UUID: uuid.FromStringOrNil(msg.GetSession().GetSessionId()),
@@ -163,7 +169,10 @@ func StoreSessionEventRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		return "", fmt.Errorf("match_id is required in request payload")
 	}
 
-	userID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok {
+		return "", fmt.Errorf("user_id not set in context")
+	}
 	event := &SessionEvent{
 		MatchID: matchID,
 		UserID:  userID,
