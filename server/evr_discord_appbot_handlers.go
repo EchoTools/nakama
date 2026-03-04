@@ -289,14 +289,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 		}
 	}
 
-	skipDeferredACKCommands := map[string]bool{
-		"link":         true,
-		"link-headset": true,
-		"igp":          true,
-		"party-status": true,
-		"show":         true,
-		"badges":       true,
-	}
+	skipDeferredACKCommands := d.getSkipDeferredACKCommands()
 
 	if !skipDeferredACKCommands[commandName] {
 		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
