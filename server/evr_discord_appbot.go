@@ -2668,43 +2668,98 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		"kick-player": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, callerMember *discordgo.Member, userID string, groupID string) error {
 
 			if user == nil {
+
 				return nil
+
 			}
 
+
+
 			var (
+
 				target                 *discordgo.User
+
 				targetUserID           string
+
 				userNotice             string
+
 				notes                  string
+
 				requireCommunityValues bool
+
 				duration               string
+
 				allowPrivateLobbies    bool
+
+				allowPrivateLobbiesSet bool
+
 			)
 
+
+
 			for _, o := range i.ApplicationCommandData().Options {
+
 				switch o.Name {
+
 				case "user":
+
 					target = o.UserValue(s)
+
 					targetUserID = d.cache.DiscordIDToUserID(target.ID)
+
 					if targetUserID == "" {
+
 						return errors.New("failed to get target user ID")
+
 					}
+
 				case "user_notice":
+
 					userNotice = o.StringValue()
+
 					if len(userNotice) > 48 {
+
 						return errors.New("user notice must be less than 48 characters")
+
 					}
 
 				case "moderator_notes":
+
 					notes = o.StringValue()
+
 				case "require_community_values":
+
 					requireCommunityValues = o.BoolValue()
+
 				case "suspension_duration":
+
 					duration = o.StringValue()
+
 				case "allow_private_lobbies":
+
 					allowPrivateLobbies = o.BoolValue()
+
+					allowPrivateLobbiesSet = true
+
 				}
+
 			}
+
+
+
+			// If allow_private_lobbies was not explicitly set, use the guild group default
+
+			if !allowPrivateLobbiesSet {
+
+				if gg, err := GuildGroupLoad(ctx, d.nk, groupID); err == nil {
+
+					allowPrivateLobbies = gg.KickPlayerAllowPrivates
+
+				}
+
+			}
+
+
 
 			return d.kickPlayer(logger, i, callerMember, target, duration, userNotice, notes, requireCommunityValues, allowPrivateLobbies)
 		},
