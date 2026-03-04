@@ -22,11 +22,11 @@ func (d *DiscordAppBot) handleUnlinkVRML(ctx context.Context, logger runtime.Log
 		"admin_uid":        userID,
 	})
 
-	// Get the identifier from the command options
-	options := i.ApplicationCommandData().Options
-	if len(options) == 0 {
+	// Get the identifier from the command options (drill past the subcommand node)
+	if len(i.ApplicationCommandData().Options) == 0 || len(i.ApplicationCommandData().Options[0].Options) == 0 {
 		return simpleInteractionResponse(s, i, "No identifier provided.")
 	}
+	options := i.ApplicationCommandData().Options[0].Options
 	identifier := strings.TrimSpace(options[0].StringValue())
 
 	// Defer the initial response
