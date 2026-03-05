@@ -955,11 +955,11 @@ func (s *SatoriClient) MessagesList(ctx context.Context, id string, limit int, f
 	q := req.URL.Query()
 	q.Set("limit", strconv.Itoa(limit))
 	q.Set("forward", strconv.FormatBool(forward))
-	if cursor != "" {
+if cursor != "" {
 		q.Set("cursor", cursor)
-		for _, id := range messageIDs {
-			q.Add("ids", id)
-		}
+	}
+	for _, id := range messageIDs {
+		q.Add("ids", id)
 	}
 	req.URL.RawQuery = q.Encode()
 
