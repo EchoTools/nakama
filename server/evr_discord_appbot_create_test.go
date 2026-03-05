@@ -7,6 +7,7 @@ import (
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 // TestGetPartyMembersForUser tests the helper function that retrieves party members
@@ -141,4 +142,53 @@ func settingsToStorageObject(userID string, settings MatchmakingSettings) (*api.
 		UserId:     userID,
 		Value:      `{"group_id":"` + settings.LobbyGroupName + `"}`,
 	}, nil
+}
+
+func TestIsCreateModeExcluded(t *testing.T) {
+	tests := []struct {
+		name          string
+		mode          evr.Symbol
+		excludedModes []string
+		expected      bool
+	}{
+		{
+			name:          "no exclusions",
+			mode:          evr.ModeArenaPrivate,
+			excludedModes: nil,
+			expected:      false,
+		},
+		{
+			name:          "exact mode token match",
+			mode:          evr.ModeArenaPrivate,
+			excludedModes: []string{"echo_arena_private"},
+			expected:      true,
+		},
+		{
+			name:          "symbol alias match",
+			mode:          evr.ModeArenaPrivate,
+			excludedModes: []string{"arena_private"},
+			expected:      true,
+		},
+		{
+			name:          "case and whitespace tolerant",
+			mode:          evr.ModeCombatPublic,
+			excludedModes: []string{"  ECHO_COMBAT  "},
+			expected:      true,
+		},
+		{
+			name:          "different mode not excluded",
+			mode:          evr.ModeSocialPrivate,
+			excludedModes: []string{"echo_combat", "echo_arena"},
+			expected:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := isCreateModeExcluded(tt.mode, tt.excludedModes)
+			if actual != tt.expected {
+				t.Fatalf("expected %v, got %v", tt.expected, actual)
+			}
+		})
+	}
 }
