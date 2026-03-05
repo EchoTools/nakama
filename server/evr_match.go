@@ -1402,16 +1402,13 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		if ok, err := CheckSystemGroupMembership(ctx, db, settings.SpawnedBy, GroupGlobalDevelopers); err != nil {
 			return state, SignalResponse{Message: fmt.Sprintf("failed to check group membership: %v", err)}.String()
 		} else if !ok {
-
 			// Validate the mode
 			if levels, ok := evr.LevelsByMode[settings.Mode]; !ok {
 				return state, SignalResponse{Message: fmt.Sprintf("bad request: invalid mode: %v", settings.Mode)}.String()
-
 			} else {
 				// Set the level to a random level if it is not set.
 				if settings.Level == 0xffffffffffffffff || settings.Level == 0 {
 					settings.Level = levels[rand.Intn(len(levels))]
-
 					// Validate the level, if provided.
 				} else if !slices.Contains(levels, settings.Level) {
 					return state, SignalResponse{Message: fmt.Sprintf("bad request: invalid level `%v` for mode `%v`", settings.Level, settings.Mode)}.String()
