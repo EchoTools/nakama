@@ -696,6 +696,10 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Error(codes.PermissionDenied, "guild does not allow public match creation")
 	}
 
+	if isCreateModeExcluded(mode, group.CreateCommandExcludedModes) {
+		return nil, 0, status.Errorf(codes.PermissionDenied, "guild does not allow /create for mode '%s'", mode.String())
+	}
+
 	isGuildModerator := group.IsEnforcer(userID) || group.IsAuditor(userID)
 	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
 	isPrivileged := isGuildModerator || isGlobalOperator
@@ -828,6 +832,25 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	latencyMillis = latencyHistory.AverageRTT(label.GameServer.Endpoint.ExternalIP.String(), true)
 
 	return label, latencyMillis, nil
+}
+
+func isCreateModeExcluded(mode evr.Symbol, excludedModes []string) bool {
+	if len(excludedModes) == 0 {
+		return false
+	}
+
+	modeToken := mode.String()
+	for _, raw := range excludedModes {
+		excluded := strings.TrimSpace(raw)
+		if excluded == "" {
+			continue
+		}
+		if strings.EqualFold(excluded, modeToken) || evr.ToSymbol(excluded) == mode {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.InteractionCreate, caller *discordgo.Member, target *discordgo.User, duration, userNotice, notes string, requireCommunityValues bool, allowPrivateLobbies bool) error {
