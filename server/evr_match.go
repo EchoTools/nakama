@@ -1134,11 +1134,14 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		// If the match is over, allocate a social lobby for post-match transition
 		if state.GameState != nil && state.GameState.MatchOver && !state.matchSummarySent {
 			if ServiceSettings().Matchmaking.EnablePostMatchSocialLobby {
-			if err := allocatePostMatchSocialLobby(ctx, logger, nk, state); err != nil {
-				logger.Error("Failed to allocate post-match social lobby", zap.Error(err))
+				if err := allocatePostMatchSocialLobby(ctx, logger, nk, state); err != nil {
+					logger.Error("Failed to allocate post-match social lobby", zap.Error(err))
+				} else {
+					state.matchSummarySent = true
+				}
+			} else {
+				state.matchSummarySent = true
 			}
-		}
-			state.matchSummarySent = true
 		}
 	}
 
