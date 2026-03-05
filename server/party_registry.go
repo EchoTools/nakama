@@ -19,6 +19,7 @@ import (
 	"errors"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"go.uber.org/zap"
 )
@@ -41,6 +42,7 @@ type PartyRegistry interface {
 	PartyMatchmakerAdd(ctx context.Context, id uuid.UUID, node, sessionID, fromNode, query string, minCount, maxCount, countMultiple int, stringProperties map[string]string, numericProperties map[string]float64) (string, []*PresenceID, error)
 	PartyMatchmakerRemove(ctx context.Context, id uuid.UUID, node, sessionID, fromNode, ticket string) error
 	PartyDataSend(ctx context.Context, id uuid.UUID, node, sessionID, fromNode string, opCode int64, data []byte) error
+	PartyList(ctx context.Context, limit int, open *bool, showHidden bool, query, cursor string) ([]*api.Party, string, error)
 }
 
 type LocalPartyRegistry struct {
@@ -213,4 +215,20 @@ func (p *LocalPartyRegistry) PartyDataSend(ctx context.Context, id uuid.UUID, no
 	}
 
 	return ph.DataSend(sessionID, fromNode, opCode, data)
+}
+
+func (p *LocalPartyRegistry) PartyList(_ context.Context, limit int, open *bool, showHidden bool, _ string, _ string) ([]*api.Party, string, error) {
+	results := make([]*api.Party, 0, limit)
+	p.parties.Range(func(id uuid.UUID, ph *PartyHandler) bool {
+		if open != nil && ph.Open != *open {
+			return true
+		}
+		results = append(results, &api.Party{
+			PartyId: ph.IDStr,
+			Open:    ph.Open,
+			MaxSize: int32(ph.MaxSize),
+		})
+		return len(results) < limit
+	})
+	return results, "", nil
 }

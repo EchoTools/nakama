@@ -10872,8 +10872,6 @@ func (n *RuntimeLuaNakamaModule) getConfig(l *lua.LState) int {
 	iapGoogleCfg.RawSetString("client_email", lua.LString(rnc.GetIAP().GetGoogle().GetClientEmail()))
 	iapGoogleCfg.RawSetString("private_key", lua.LString(rnc.GetIAP().GetGoogle().GetPrivateKey()))
 	iapGoogleCfg.RawSetString("notifications_endpoint_id", lua.LString(rnc.GetIAP().GetGoogle().GetNotificationsEndpointId()))
-	iapGoogleCfg.RawSetString("refund_check_period_min", lua.LNumber(rnc.GetIAP().GetGoogle().GetRefundCheckPeriodMin()))
-	iapGoogleCfg.RawSetString("package_name", lua.LString(rnc.GetIAP().GetGoogle().GetPackageName()))
 
 	iapHuaweiCfg := l.CreateTable(0, 3)
 	iapHuaweiCfg.RawSetString("public_key", lua.LString(rnc.GetIAP().GetHuawei().GetPublicKey()))
@@ -11206,7 +11204,7 @@ func (n *RuntimeLuaNakamaModule) satoriExperimentsList(l *lua.LState) int {
 		}
 	}
 
-	experiments, err := n.satori.ExperimentsList(l.Context(), identifier, namesArray...)
+	experiments, err := n.satori.ExperimentsList(l.Context(), identifier, namesArray, nil)
 	if err != nil {
 		l.RaiseError("failed to satori list experiments: %v", err.Error())
 		return 0
@@ -11256,7 +11254,7 @@ func (n *RuntimeLuaNakamaModule) satoriFlagsList(l *lua.LState) int {
 		}
 	}
 
-	flags, err := n.satori.FlagsList(l.Context(), identifier, namesArray...)
+	flags, err := n.satori.FlagsList(l.Context(), identifier, namesArray, nil)
 	if err != nil {
 		l.RaiseError("failed to satori list flags: %v", err.Error())
 		return 0
@@ -11307,7 +11305,7 @@ func (n *RuntimeLuaNakamaModule) satoriFlagsOverridesList(l *lua.LState) int {
 		}
 	}
 
-	flagsList, err := n.satori.FlagsOverridesList(l.Context(), identifier, namesArray...)
+	flagsList, err := n.satori.FlagsOverridesList(l.Context(), identifier, namesArray, nil)
 	if err != nil {
 		l.RaiseError("failed to satori list flags: %v", err.Error())
 		return 0
@@ -11367,7 +11365,7 @@ func (n *RuntimeLuaNakamaModule) satoriLiveEventsList(l *lua.LState) int {
 		}
 	}
 
-	liveEvents, err := n.satori.LiveEventsList(l.Context(), identifier, namesArray...)
+	liveEvents, err := n.satori.LiveEventsList(l.Context(), identifier, namesArray, nil, 0, 0, 0, 0)
 	if err != nil {
 		l.RaiseError("failed to satori list live-events: %v", err.Error())
 		return 0
@@ -11411,7 +11409,7 @@ func (n *RuntimeLuaNakamaModule) satoriMessagesList(l *lua.LState) int {
 
 	cursor := l.OptString(4, "")
 
-	messages, err := n.satori.MessagesList(l.Context(), identifier, limit, forward, cursor)
+	messages, err := n.satori.MessagesList(l.Context(), identifier, limit, forward, cursor, nil)
 	if err != nil {
 		l.RaiseError("failed to list satori messages: %v", err.Error())
 		return 0

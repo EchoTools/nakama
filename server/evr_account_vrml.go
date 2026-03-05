@@ -62,11 +62,53 @@ func LinkVRMLAccount(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, u
 	return nil
 }
 
-// UnlinkVRMLAccount removes the link between a user and their VRML account
-func UnlinkVRMLAccount(ctx context.Context, nk runtime.NakamaModule, userID string, vrmlUserID string) error {
-	// Unlink the VRML device from the user
-	if err := nk.UnlinkDevice(ctx, userID, VRMLDeviceID(vrmlUserID)); err != nil {
-		return fmt.Errorf("failed to unlink VRML account: %w", err)
+// UnlinkVRMLAccount removes the VRML device link and all associated data:
+// wallet cosmetics are zeroed, the VRML player summary is deleted, the user's
+// entry is removed from the system EntitlementLedger, and the vrml: device ID
+// is unlinked.
+func UnlinkVRMLAccount(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, assignerID, assignerUsername, userID, vrmlUserID string) error {
+	// 1. Zero all VRML wallet cosmetics.
+	if err := RevokeNonEntitledVRMLCosmetics(ctx, logger, nk, assignerID, assignerUsername, userID, vrmlUserID, nil); err != nil {
+		return fmt.Errorf("failed to revoke VRML cosmetics: %w", err)
 	}
+
+	// 2. Delete the VRML player summary.
+	if err := nk.StorageDelete(ctx, []*runtime.StorageDelete{
+		{Collection: StorageCollectionVRML, Key: StorageKeyVRMLSummary, UserID: userID},
+		{Collection: "Social", Key: "VRMLUser", UserID: userID},
+	}); err != nil {
+		logger.WithField("error", err).Warn("failed to delete VRML storage objects on unlink")
+	}
+
+	// 3. Remove the user's entry from the system EntitlementLedger.
+	ledger, err := VRMLEntitlementLedgerLoad(ctx, nk)
+	if err != nil {
+		return fmt.Errorf("failed to load entitlement ledger: %w", err)
+	}
+	filteredEntries := ledger.Entries[:0]
+	for _, e := range ledger.Entries {
+		if e.UserID != userID {
+			filteredEntries = append(filteredEntries, e)
+		}
+	}
+	if len(filteredEntries) != len(ledger.Entries) {
+		ledger.Entries = filteredEntries
+		if err := VRMLEntitlementLedgerStore(ctx, nk, ledger); err != nil {
+			return fmt.Errorf("failed to store entitlement ledger: %w", err)
+		}
+	}
+
+	// 4. Remove the vrml: device link.
+	if err := nk.UnlinkDevice(ctx, userID, VRMLDeviceID(vrmlUserID)); err != nil {
+		return fmt.Errorf("failed to unlink VRML device: %w", err)
+	}
+
+	logger.WithFields(map[string]any{
+		"assigner_id":       assignerID,
+		"assigner_username": assignerUsername,
+		"user_id":           userID,
+		"vrml_user_id":      vrmlUserID,
+	}).Info("unlinked VRML account")
+
 	return nil
 }

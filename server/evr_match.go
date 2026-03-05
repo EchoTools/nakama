@@ -552,7 +552,11 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		return nil
 	}
 
-	node := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
+	node, ok := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
+	if !ok {
+		logger.Error("node not set in context")
+		return state
+	}
 
 	for _, p := range presences {
 		class := "Player"
@@ -1001,6 +1005,12 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		return state
 	}
 
+	// Enforce 5-minute lifetime for post-match social lobbies.
+	if state.SpawnedBy == "post-match-transition" && !state.CreatedAt.IsZero() && time.Since(state.CreatedAt) > 5*time.Minute {
+		logger.Info("Post-match social lobby has reached its 5-minute lifetime. Shutting down.")
+		return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 5)
+	}
+
 	// Expire any slot reservations
 	for id, r := range state.reservationMap {
 		if time.Now().After(r.Expiry) {
@@ -1123,8 +1133,12 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	if state.Mode == evr.ModeArenaPrivate && tick%(2*state.tickRate) == 0 {
 		// If the match is over, allocate a social lobby for post-match transition
 		if state.GameState != nil && state.GameState.MatchOver && !state.matchSummarySent {
-			if err := allocatePostMatchSocialLobby(ctx, logger, nk, state); err != nil {
-				logger.Error("Failed to allocate post-match social lobby", zap.Error(err))
+			if ServiceSettings().Matchmaking.EnablePostMatchSocialLobby {
+				if err := allocatePostMatchSocialLobby(ctx, logger, nk, state); err != nil {
+					logger.Error("Failed to allocate post-match social lobby", zap.Error(err))
+				} else {
+					state.matchSummarySent = true
+				}
 			} else {
 				state.matchSummarySent = true
 			}
@@ -1391,16 +1405,13 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		if ok, err := CheckSystemGroupMembership(ctx, db, settings.SpawnedBy, GroupGlobalDevelopers); err != nil {
 			return state, SignalResponse{Message: fmt.Sprintf("failed to check group membership: %v", err)}.String()
 		} else if !ok {
-
 			// Validate the mode
 			if levels, ok := evr.LevelsByMode[settings.Mode]; !ok {
 				return state, SignalResponse{Message: fmt.Sprintf("bad request: invalid mode: %v", settings.Mode)}.String()
-
 			} else {
 				// Set the level to a random level if it is not set.
 				if settings.Level == 0xffffffffffffffff || settings.Level == 0 {
 					settings.Level = levels[rand.Intn(len(levels))]
-
 					// Validate the level, if provided.
 				} else if !slices.Contains(levels, settings.Level) {
 					return state, SignalResponse{Message: fmt.Sprintf("bad request: invalid level `%v` for mode `%v`", settings.Level, settings.Mode)}.String()
@@ -1740,7 +1751,8 @@ func allocatePostMatchSocialLobby(ctx context.Context, logger runtime.Logger, nk
 	// Use empty RTT map and no region requirement for flexibility
 	serviceSettings := ServiceSettings()
 	if serviceSettings == nil || serviceSettings.Matchmaking.QueryAddons.Create == "" {
-		return fmt.Errorf("service settings not initialized or query addon not configured")
+		logger.Debug("Skipping post-match social lobby allocation: service settings not initialized or query addon not configured")
+		return nil
 	}
 	queryAddon := serviceSettings.Matchmaking.QueryAddons.Create
 	label, err := LobbyGameServerAllocate(

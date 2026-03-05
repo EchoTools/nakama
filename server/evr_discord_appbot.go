@@ -3393,10 +3393,24 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					if userID != "" && groupID != "" {
 						d.cache.QueueSyncMember(i.GuildID, user.ID, false)
 					}
-					if editErr := editInteractionResponse(s, i, err.Error()); editErr != nil {
+					// Determine if we sent a deferred response for this command
+					skipDeferredACKCommands := d.getSkipDeferredACKCommands()
+					
+					// If command is in skipDeferredACKCommands, the handler was responsible for sending the response
+					// If not in skipDeferredACKCommands, we already sent a deferred response and should edit it
+					if skipDeferredACKCommands[appCommandName] {
+						// Handler was responsible for response, try simple response (not edit)
 						if err := simpleInteractionResponse(s, i, err.Error()); err != nil {
-							return
+							logger.WithField("err", err).Error("Failed to send error response")
 						}
+					} else {
+						// We sent a deferred response, try to edit it
+						if editErr := editInteractionResponse(s, i, err.Error()); editErr != nil {
+							logger.WithField("err", editErr).Error("Failed to edit deferred response, attempting simple response")
+							if respErr := simpleInteractionResponse(s, i, err.Error()); respErr != nil {
+								logger.WithField("err", respErr).Error("Failed to send error response")
+							}
+					}
 					}
 				}
 			} else {
@@ -4264,8 +4278,54 @@ func SendIPAuthorizationNotification(dg *discordgo.Session, discordID string, ip
 
 // canShutdownMatch checks if the user has permission to shut down a match
 func (d *DiscordAppBot) canShutdownMatch(ctx context.Context, userID string, label *MatchLabel) (bool, error) {
-	// Stub implementation: conservative approach, deny all shutdowns for now
-	return false, nil
+	if label == nil {
+		return false, errors.New("match label is required")
+	}
+
+	isGlobalOperator := false
+	if perms := PermissionsFromContext(ctx); perms != nil {
+		isGlobalOperator = perms.IsGlobalOperator
+	} else if d.db != nil {
+		isOperator, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+		if err != nil {
+			return false, fmt.Errorf("failed to check operator permissions: %w", err)
+		}
+		isGlobalOperator = isOperator
+	}
+	if isGlobalOperator {
+		return true, nil
+	}
+
+	// Allow the operator that owns the game server to shutdown matches hosted by that server.
+	if label.GameServer != nil && label.GameServer.OperatorID.String() == userID {
+		return true, nil
+	}
+
+	groupID := label.GetGroupID()
+	if groupID.IsNil() {
+		return false, nil
+	}
+
+	// First try the in-memory registry for speed. If it doesn't contain the group,
+	// fall back to loading the guild group from storage via GuildGroupLoad. This may
+	// incur a storage read but ensures up-to-date role membership in case the
+	// registry is out-of-date.
+	if d.guildGroupRegistry != nil {
+		if gg := d.guildGroupRegistry.Get(groupID.String()); gg != nil {
+			return gg.IsEnforcer(userID), nil
+		}
+	}
+
+	if d.nk == nil {
+		return false, nil
+	}
+
+	gg, err := GuildGroupLoad(ctx, d.nk, groupID.String())
+	if err != nil {
+		return false, fmt.Errorf("failed to load guild group: %w", err)
+	}
+
+	return gg.IsEnforcer(userID), nil
 }
 
 // presentRegionFallbackOptions presents the user with fallback region options when matchmaking fails
@@ -4294,6 +4354,20 @@ func (d *DiscordAppBot) presentRegionFallbackOptions(s *discordgo.Session, i *di
 		},
 	})
 }
+
+// getSkipDeferredACKCommands returns a map of command names that should skip sending a deferred response.
+// Handlers listed here are responsible for sending their own response.
+func (d *DiscordAppBot) getSkipDeferredACKCommands() map[string]bool {
+	return map[string]bool{
+		"link":         true,
+		"link-headset": true,
+		"igp":          true,
+		"party-status": true,
+		"show":         true,
+		"badges":       true,
+	}
+}
+
 
 func IsDiscordErrorCode(err error, code int) bool {
 	var restError *discordgo.RESTError
