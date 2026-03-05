@@ -204,6 +204,7 @@ func main() {
 	partyRegistry := server.NewLocalPartyRegistry(logger, config, matchmaker, tracker, streamManager, router, config.GetName())
 	tracker.SetPartyJoinListener(partyRegistry.Join)
 	tracker.SetPartyLeaveListener(partyRegistry.Leave)
+	runtime.SetPartyRegistry(partyRegistry)
 
 	storageIndex.RegisterFilters(runtime)
 	go func() {

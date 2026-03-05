@@ -283,6 +283,11 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 		zap.Int("candidates", len(candidates)),
 		zap.Float64("reducing_precision_factor", reducingPrecisionFactor))
 
+	// Proactively create new matches when >30 echo_arena players are waiting.
+	if !ServiceSettings().Matchmaking.DisableArenaBackfill {
+		b.createOverflowArenaMatches(logger, candidates)
+	}
+
 	// Process and execute backfill (combined to ensure accurate slot tracking)
 	results, err := b.postMatchBackfill.ProcessAndExecuteBackfill(ctx, logger, candidates, reducingPrecisionFactor)
 	if err != nil {
@@ -304,6 +309,61 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 	}
 
 	logger.Info("Backfill completed successfully", zap.Int("players_backfilled", len(results)))
+}
+
+// createOverflowArenaMatches proactively creates new echo_arena matches when more than
+// 30 players are queued in the matchmaker. It creates floor(n/8) matches, batching
+// exactly 8 entrants per match, grouped by guild (buildMatch requires a single group).
+// Only ModeArenaPublic candidates are considered.
+func (b *LobbyBuilder) createOverflowArenaMatches(logger *zap.Logger, candidates []*BackfillCandidate) {
+	// Count total echo_arena entrants across all groups.
+	total := 0
+	for _, c := range candidates {
+		if c.Mode == evr.ModeArenaPublic {
+			total += len(c.Entries)
+		}
+	}
+	if total <= 30 {
+		return
+	}
+
+	numMatches := total / 8 // floor(n/8)
+	logger.Info("Overflow arena match creation triggered",
+		zap.Int("total_arena_players", total),
+		zap.Int("matches_to_create", numMatches),
+	)
+
+	// Group entries by GroupID — buildMatch requires all entrants to share a group.
+	entriesByGroup := make(map[uuid.UUID][]*MatchmakerEntry)
+	for _, c := range candidates {
+		if c.Mode != evr.ModeArenaPublic {
+			continue
+		}
+		entriesByGroup[c.GroupID] = append(entriesByGroup[c.GroupID], c.Entries...)
+	}
+
+	created := 0
+	for groupID, entries := range entriesByGroup {
+		for len(entries) >= 8 && created < numMatches {
+			batch := entries[:8]
+			entries = entries[8:]
+			if _, err := b.buildMatch(logger, batch); err != nil {
+				logger.Error("Failed to create overflow arena match",
+					zap.String("group_id", groupID.String()),
+					zap.Error(err))
+				continue
+			}
+			created++
+		}
+		if created >= numMatches {
+			break
+		}
+	}
+
+	logger.Info("Overflow arena match creation complete",
+		zap.Int("matches_created", created),
+		zap.Int("target", numMatches),
+	)
 }
 
 func (b *LobbyBuilder) extractLatenciesFromEntrants(entrants []*MatchmakerEntry) (map[string][][]float64, map[string]map[string]float64) {

@@ -289,14 +289,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 		}
 	}
 
-	skipDeferredACKCommands := map[string]bool{
-		"link":         true,
-		"link-headset": true,
-		"igp":          true,
-		"party-status": true,
-		"show":         true,
-		"badges":       true,
-	}
+	skipDeferredACKCommands := d.getSkipDeferredACKCommands()
 
 	if !skipDeferredACKCommands[commandName] {
 		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -484,6 +477,19 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		}); err != nil {
 			return fmt.Errorf("failed to respond to interaction: %w", err)
 		}
+		return nil
+
+	case "unlink-vrml-confirm":
+		// customID format: "unlink-vrml-confirm:{targetUserID}:{vrmlUserID}"
+		parts := strings.SplitN(value, ":", 2)
+		if len(parts) != 2 {
+			return simpleInteractionResponse(s, i, "Invalid unlink payload.")
+		}
+		targetUserID, vrmlUserID := parts[0], parts[1]
+		if err := UnlinkVRMLAccount(ctx, logger, nk, userID, user.Username, targetUserID, vrmlUserID); err != nil {
+			return fmt.Errorf("failed to unlink VRML account: %w", err)
+		}
+		return simpleInteractionResponse(s, i, fmt.Sprintf("VRML account `%s` has been unlinked.", vrmlUserID))
 	case "configure_roles":
 		return d.handleConfigureRoles(ctx, logger, s, i, userID, groupID)
 	case "role_select":
@@ -690,6 +696,10 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Error(codes.PermissionDenied, "guild does not allow public match creation")
 	}
 
+	if isCreateModeExcluded(mode, group.CreateCommandExcludedModes) {
+		return nil, 0, status.Errorf(codes.PermissionDenied, "guild does not allow /create for mode '%s'", mode.String())
+	}
+
 	isGuildModerator := group.IsEnforcer(userID) || group.IsAuditor(userID)
 	isGlobalOperator, _ := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
 	isPrivileged := isGuildModerator || isGlobalOperator
@@ -822,6 +832,25 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	latencyMillis = latencyHistory.AverageRTT(label.GameServer.Endpoint.ExternalIP.String(), true)
 
 	return label, latencyMillis, nil
+}
+
+func isCreateModeExcluded(mode evr.Symbol, excludedModes []string) bool {
+	if len(excludedModes) == 0 {
+		return false
+	}
+
+	modeToken := mode.String()
+	for _, raw := range excludedModes {
+		excluded := strings.TrimSpace(raw)
+		if excluded == "" {
+			continue
+		}
+		if strings.EqualFold(excluded, modeToken) || evr.ToSymbol(excluded) == mode {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.InteractionCreate, caller *discordgo.Member, target *discordgo.User, duration, userNotice, notes string, requireCommunityValues bool, allowPrivateLobbies bool) error {

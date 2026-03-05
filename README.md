@@ -22,6 +22,16 @@ For complete feature documentation, see the [upstream Nakama documentation](http
 
 * **[Game Server URL Parameters](docs/game-server-url-parameters.md)** - Complete reference for URL parameters used in game server registration.
 
+## Admin: /shutdown-match authorization
+
+Authorization rules for the /shutdown-match command and the corresponding RPC are:
+
+- Global operators may shutdown any match.
+- The server host operator (the operator who owns the game server running the match) may shutdown matches hosted by that server.
+- Guild enforcers (the enforcer role for the guild the match runs in) may shutdown matches that run for their guild.
+
+These rules are enforced both in the Discord app-bot helper and in the runtime RPC handler to ensure consistent behavior across UI and RPC entry points.
+
 ## Prerequisites
 
 Before setting up EchoTools Nakama, ensure you have the following:

@@ -86,6 +86,7 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 	cosmetics = walletToCosmetics(wallet, cosmetics)
 
 	cosmeticLoadout := evrProfile.LoadoutCosmetics.Loadout
+	cosmeticLoadout = sanitizeLoadout(cosmeticLoadout, cosmetics)
 
 	// If the player has "kissy lips" emote equipped, set their emote to default.
 	if cosmeticLoadout.Emote == "emote_kissy_lips_a" {
@@ -144,6 +145,32 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 		},
 		DeveloperFeatures: developerFeatures,
 	}, nil
+}
+
+// sanitizeLoadout replaces any equipped cosmetic the player does not own
+// (per the wallet-derived cosmetics map) with the safe default for that slot.
+// Empty fields are left untouched.
+func sanitizeLoadout(loadout evr.CosmeticLoadout, cosmetics map[string]map[string]bool) evr.CosmeticLoadout {
+	defaults := evr.DefaultCosmeticLoadout()
+	defaultMap := defaults.ToMap() // json_key → default item ID
+	arenaUnlocks := cosmetics["arena"]
+
+	result := loadout
+	v := reflect.ValueOf(&result).Elem()
+	t := v.Type()
+	for i := 0; i < v.NumField(); i++ {
+		jsonTag := strings.SplitN(t.Field(i).Tag.Get("json"), ",", 2)[0]
+		itemID := v.Field(i).String()
+		if itemID == "" {
+			continue // omitempty slot, leave it
+		}
+		if !arenaUnlocks[itemID] {
+			if def, ok := defaultMap[jsonTag]; ok {
+				v.Field(i).SetString(def)
+			}
+		}
+	}
+	return result
 }
 
 func NewClientProfile(ctx context.Context, evrProfile *EVRProfile, serverProfile *evr.ServerProfile) *evr.ClientProfile {

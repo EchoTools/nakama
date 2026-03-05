@@ -63,6 +63,7 @@ type RuntimeGoNakamaModule struct {
 	matchCreateFn        RuntimeMatchCreateFunction
 	satori               runtime.Satori
 	fleetManager         runtime.FleetManager
+	partyRegistry        PartyRegistry
 	storageIndex         StorageIndex
 }
 
@@ -4466,4 +4467,18 @@ func (n *RuntimeGoNakamaModule) GetSatori() runtime.Satori {
 // @return fleetManager(runtime.FleetManager) The Fleet Manager client.
 func (n *RuntimeGoNakamaModule) GetFleetManager() runtime.FleetManager {
 	return n.fleetManager
+}
+
+func (n *RuntimeGoNakamaModule) PartyList(ctx context.Context, limit int, open *bool, showHidden bool, query, cursor string) ([]*api.Party, string, error) {
+	if limit < 1 || limit > 100 {
+		return nil, "", errors.New("limit must be 1-100")
+	}
+	if n.partyRegistry == nil {
+		return nil, "", errors.New("party registry not available")
+	}
+	return n.partyRegistry.PartyList(ctx, limit, open, showHidden, query, cursor)
+}
+
+func (n *RuntimeGoNakamaModule) SetPartyRegistry(pr PartyRegistry) {
+	n.partyRegistry = pr
 }
