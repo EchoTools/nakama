@@ -1016,6 +1016,10 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 	label = request.MatchLabel
 
+	if request.SpawnedBy == "" {
+		request.SpawnedBy = userID
+	}
+
 	var settings *MatchSettings
 	if label != nil {
 		settings = &MatchSettings{
