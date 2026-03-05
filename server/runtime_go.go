@@ -2743,10 +2743,15 @@ func (ri *RuntimeGoInitializer) RegisterMatchmakerProcessor(fn func(ctx context.
 		result := make([][]*MatchmakerEntry, len(returnedMatches))
 		for i, group := range returnedMatches {
 			g := make([]*MatchmakerEntry, len(group))
-			for j, e := range group {
-				g[j], _ = e.(*MatchmakerEntry)
+		for j, e := range group {
+			entry, ok := e.(*MatchmakerEntry)
+			if !ok {
+				ri.logger.Warn("RegisterMatchmakerProcessor: returned entry is not a *MatchmakerEntry, skipping")
+				continue
 			}
-			result[i] = g
+			g[j] = entry
+		}
+		result[i] = g
 		}
 		return result
 	}
