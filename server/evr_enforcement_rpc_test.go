@@ -126,7 +126,13 @@ func TestPlayerReportRPC_Success(t *testing.T) {
 	state := GuildGroupState{
 		GroupID: groupID,
 	}
-	stateJSON, _ := json.Marshal(state)
+	stateData := map[string]interface{}{
+		"group_id":          state.GroupID,
+		"role_cache":        state.RoleCache,
+		"suspended_devices": state.SuspendedXPIDs,
+		"rules_text":        state.RulesText,
+	}
+	stateJSON, _ := json.Marshal(stateData)
 	nk.storageObjects["discord-bot-user-id:"+StorageCollectionState+":"+groupID] = []*api.StorageObject{{
 		Collection: StorageCollectionState,
 		Key:        groupID,
@@ -265,7 +271,13 @@ func TestPlayerReportRPC_RateLimit(t *testing.T) {
 	state := GuildGroupState{
 		GroupID: groupID,
 	}
-	stateJSON, _ := json.Marshal(state)
+	stateData := map[string]interface{}{
+		"group_id":          state.GroupID,
+		"role_cache":        state.RoleCache,
+		"suspended_devices": state.SuspendedXPIDs,
+		"rules_text":        state.RulesText,
+	}
+	stateJSON, _ := json.Marshal(stateData)
 	nk.storageObjects["discord-bot-user-id:"+StorageCollectionState+":"+groupID] = []*api.StorageObject{{
 		Collection: StorageCollectionState,
 		Key:        groupID,
