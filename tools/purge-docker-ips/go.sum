@@ -83,6 +83,8 @@ github.com/dop251/goja v0.0.0-20260106131823-651366fbe6e3 h1:bVp3yUzvSAJzu9GqID+
 github.com/dop251/goja v0.0.0-20260106131823-651366fbe6e3/go.mod h1:MxLav0peU43GgvwVgNbLAj1s/bSGboKkhuULvq/7hx4=
 github.com/echotools/nevr-common/v4 v4.4.0 h1:q0+JS1ADta9YUTKlKuipAr5DSnj9O8KgRaZtHfZ4tqE=
 github.com/echotools/nevr-common/v4 v4.4.0/go.mod h1:dwbf20MYt5P+Jd9csPrGvzU1LjNFIkCJefPgPyuxkVg=
+github.com/echotools/nevr-fleetmanager v0.0.0-20260223083915-263af0e9236e h1:oUlxKnAoi4NclXUzXCeOZrHfttGciILg/YgPqydmj/A=
+github.com/echotools/nevr-fleetmanager v0.0.0-20260223083915-263af0e9236e/go.mod h1:NrmOmVONyxlN2HrQRxz3bRGvenwqYUV+UQUUe7Y5qS4=
 github.com/echotools/vrmlgo/v5 v5.0.1 h1:xdG88swr3ZsdDaYXvn/yCRNiH1U+bJAGZe6X2hJ0eaw=
 github.com/echotools/vrmlgo/v5 v5.0.1/go.mod h1:G6cajh/3UYgy1eRkez8qnvAwBWsO/dc7yGKJVmPbXNc=
 github.com/felixge/httpsnoop v1.0.4 h1:NFTV2Zj1bL4mc9sqWACXbQFVBBg2W3GPvqp8/ESS2Wg=
@@ -137,6 +139,7 @@ github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.4/go.mod h1:6Nz966r3vQYCqIzWsuEl
 github.com/hashicorp/hcl v1.0.0/go.mod h1:E5yfLk+7swimpb2L/Alb/PJmXilQ/rhwaUYs4T20WEQ=
 github.com/heroiclabs/nakama-common v1.37.0 h1:RceEGzvb+d+kPZY7ONbfozjaVyX3wIqNA/zZyp+M+mw=
 github.com/heroiclabs/nakama-common v1.37.0/go.mod h1:gpGzr0tineLtVeNuBNfN4lObWfalcXClXdH/LHV9IX0=
+github.com/heroiclabs/nakama-common v1.44.1/go.mod h1:/KLxEy4+JdasHJLPt+tAXJJ8eXywWr/J+Q+KY+/vg7E=
 github.com/heroiclabs/nakama-common v1.44.2 h1:aynrv/lFSI/1N54JxQ81FD80Iw7OL1yLrySwUemOOBU=
 github.com/heroiclabs/nakama-common v1.44.2/go.mod h1:/KLxEy4+JdasHJLPt+tAXJJ8eXywWr/J+Q+KY+/vg7E=
 github.com/inconshreveable/mousetrap v1.0.0/go.mod h1:PxqpIevigyE2G7u3NXJIT2ANytuPF1OarO4DADm73n8=
