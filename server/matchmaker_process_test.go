@@ -6,17 +6,17 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/blugelabs/bluge"
 	"github.com/gofrs/uuid/v5"
 	"github.com/google/go-cmp/cmp"
+	"go.uber.org/atomic"
+	"go.uber.org/zap"
 )
 
 func TestProcessWithProcessor(t *testing.T) {
 	t.Run("empty_entries", func(t *testing.T) {
 		logger := loggerForTest(t)
-		matchmaker, cleanup, err := createTestMatchmaker(t, logger, false, nil)
-		if err != nil {
-			t.Fatalf("create test matchmaker: %v", err)
-		}
+		matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
 		defer cleanup()
 
 		var called int
@@ -42,10 +42,7 @@ func TestProcessWithProcessor(t *testing.T) {
 
 	t.Run("single_match", func(t *testing.T) {
 		logger := loggerForTest(t)
-		matchmaker, cleanup, err := createTestMatchmaker(t, logger, false, nil)
-		if err != nil {
-			t.Fatalf("create test matchmaker: %v", err)
-		}
+		matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
 		defer cleanup()
 
 		ticketA := addProcessorTestTicket(t, matchmaker, "a")
@@ -71,10 +68,7 @@ func TestProcessWithProcessor(t *testing.T) {
 
 	t.Run("multiple_matches", func(t *testing.T) {
 		logger := loggerForTest(t)
-		matchmaker, cleanup, err := createTestMatchmaker(t, logger, false, nil)
-		if err != nil {
-			t.Fatalf("create test matchmaker: %v", err)
-		}
+		matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
 		defer cleanup()
 
 		tickets := []string{
@@ -105,10 +99,7 @@ func TestProcessWithProcessor(t *testing.T) {
 
 	t.Run("interval_expiry", func(t *testing.T) {
 		logger := loggerForTest(t)
-		matchmaker, cleanup, err := createTestMatchmaker(t, logger, false, nil)
-		if err != nil {
-			t.Fatalf("create test matchmaker: %v", err)
-		}
+		matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
 		defer cleanup()
 
 		ticket := addProcessorTestTicket(t, matchmaker, "a")
@@ -133,10 +124,7 @@ func TestProcessWithProcessor(t *testing.T) {
 
 	t.Run("span_multiple_indexes", func(t *testing.T) {
 		logger := loggerForTest(t)
-		matchmaker, cleanup, err := createTestMatchmaker(t, logger, false, nil)
-		if err != nil {
-			t.Fatalf("create test matchmaker: %v", err)
-		}
+		matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
 		defer cleanup()
 
 		tickets := []string{
@@ -167,10 +155,7 @@ func TestProcessWithProcessor(t *testing.T) {
 
 	t.Run("selected_tickets_excluded", func(t *testing.T) {
 		logger := loggerForTest(t)
-		matchmaker, cleanup, err := createTestMatchmaker(t, logger, false, nil)
-		if err != nil {
-			t.Fatalf("create test matchmaker: %v", err)
-		}
+		matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
 		defer cleanup()
 
 		tickets := []string{
@@ -243,6 +228,43 @@ func addProcessorTestTicket(t *testing.T, matchmaker *LocalMatchmaker, sessionID
 	}
 
 	return ticket
+}
+
+func createProcessorTestMatchmaker(t *testing.T, logger *zap.Logger) (*LocalMatchmaker, func()) {
+	t.Helper()
+
+	cfg := NewConfig(logger)
+	cfg.Matchmaker.MaxIntervals = 5
+
+	indexWriter, err := bluge.OpenWriter(BlugeInMemoryConfig())
+	if err != nil {
+		t.Fatalf("open index writer: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	matchmaker := &LocalMatchmaker{
+		logger: logger,
+		node:   cfg.GetName(),
+		config: cfg,
+		runtime: &Runtime{
+			matchmakerProcessorFunction: nil,
+		},
+		active:         atomic.NewUint32(1),
+		stopped:        atomic.NewBool(false),
+		ctx:            ctx,
+		ctxCancelFn:    cancel,
+		indexWriter:    indexWriter,
+		sessionTickets: make(map[string]map[string]struct{}),
+		partyTickets:   make(map[string]map[string]struct{}),
+		indexes:        make(map[string]*MatchmakerIndex),
+		activeIndexes:  make(map[string]*MatchmakerIndex),
+		revCache:       &MapOf[string, map[string]bool]{},
+	}
+
+	return matchmaker, func() {
+		cancel()
+		_ = indexWriter.Close()
+	}
 }
 
 func copyIndexesForProcessorTest(matchmaker *LocalMatchmaker) (int, map[string]*MatchmakerIndex, int, map[string]*MatchmakerIndex) {
