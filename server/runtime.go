@@ -685,7 +685,7 @@ func NewRuntime(ctx context.Context, logger, startupLogger *zap.Logger, db *sql.
 
 	matchProvider := NewMatchProvider()
 
-	goModules, goRPCFns, goBeforeRtFns, goAfterRtFns, goBeforeReqFns, goAfterReqFns, goMatchmakerMatchedFn, goMatchmakerCustomMatchingFn, goTournamentEndFn, goTournamentResetFn, goLeaderboardResetFn, goShutdownFn, goPurchaseNotificationAppleFn, goSubscriptionNotificationAppleFn, goPurchaseNotificationGoogleFn, goSubscriptionNotificationGoogleFn, goIndexFilterFns, fleetManager, httpHandlers, consoleHttpHandlers, allEventFns, goMatchNamesListFn, nk, err := NewRuntimeProviderGo(ctx, logger, startupLogger, db, protojsonMarshaler, config, version, socialClient, leaderboardCache, leaderboardRankCache, leaderboardScheduler, sessionRegistry, sessionCache, statusRegistry, matchRegistry, tracker, metrics, streamManager, router, storageIndex, satoriClient, runtimeConfig.Path, paths, eventQueue, matchProvider, fmCallbackHandler)
+	goModules, goRPCFns, goBeforeRtFns, goAfterRtFns, goBeforeReqFns, goAfterReqFns, goMatchmakerMatchedFn, goMatchmakerCustomMatchingFn, goMatchmakerProcessorFn, goTournamentEndFn, goTournamentResetFn, goLeaderboardResetFn, goShutdownFn, goPurchaseNotificationAppleFn, goSubscriptionNotificationAppleFn, goPurchaseNotificationGoogleFn, goSubscriptionNotificationGoogleFn, goIndexFilterFns, fleetManager, httpHandlers, consoleHttpHandlers, allEventFns, goMatchNamesListFn, nk, err := NewRuntimeProviderGo(ctx, logger, startupLogger, db, protojsonMarshaler, config, version, socialClient, leaderboardCache, leaderboardRankCache, leaderboardScheduler, sessionRegistry, sessionCache, statusRegistry, matchRegistry, tracker, metrics, streamManager, router, storageIndex, satoriClient, runtimeConfig.Path, paths, eventQueue, matchProvider, fmCallbackHandler)
 	if err != nil {
 		startupLogger.Error("Error initialising Go runtime provider", zap.Error(err))
 		return nil, nil, err
@@ -2563,6 +2563,13 @@ func NewRuntime(ctx context.Context, logger, startupLogger *zap.Logger, db *sql.
 		startupLogger.Info("Registered Go runtime Matchmaker Override function invocation")
 	}
 
+var allMatchmakerProcessorFunction RuntimeMatchmakerProcessorFunction
+switch {
+case goMatchmakerProcessorFn != nil:
+	allMatchmakerProcessorFunction = goMatchmakerProcessorFn
+	startupLogger.Info("Registered Go runtime Matchmaker Processor function invocation")
+}
+
 	var allTournamentEndFunction RuntimeTournamentEndFunction
 	switch {
 	case goTournamentEndFn != nil:
@@ -2710,6 +2717,7 @@ func NewRuntime(ctx context.Context, logger, startupLogger *zap.Logger, db *sql.
 		afterReqFunctions:                      allAfterReqFunctions,
 		matchmakerMatchedFunction:              allMatchmakerMatchedFunction,
 		matchmakerOverrideFunction:             allMatchmakerOverrideFunction,
+		matchmakerProcessorFunction:            allMatchmakerProcessorFunction,
 		tournamentEndFunction:                  allTournamentEndFunction,
 		tournamentResetFunction:                allTournamentResetFunction,
 		leaderboardResetFunction:               allLeaderboardResetFunction,

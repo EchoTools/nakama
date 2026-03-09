@@ -413,7 +413,9 @@ func (m *LocalMatchmaker) Process() {
 	// Run the custom matching function if one is registered in the runtime, otherwise use the default process function.
 	var matchedEntries [][]*MatchmakerEntry
 	var expiredActiveIndexes []string
-	if m.runtime.matchmakerOverrideFunction != nil {
+	if m.runtime.matchmakerProcessorFunction != nil {
+		matchedEntries, expiredActiveIndexes = m.processWithProcessor(activeIndexCount, activeIndexesCopy, indexCount, indexesCopy)
+	} else if m.runtime.matchmakerOverrideFunction != nil {
 		matchedEntries, expiredActiveIndexes = m.processCustom(activeIndexesCopy, indexCount, indexesCopy)
 	} else {
 		matchedEntries, expiredActiveIndexes = m.processDefault(activeIndexCount, activeIndexesCopy, indexCount, indexesCopy)
