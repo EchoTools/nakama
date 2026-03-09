@@ -382,7 +382,7 @@ func TestProcessPotentialMatches_FeatureFlagDisabled(t *testing.T) {
 	}
 
 	// When feature is disabled (default), should not populate starving/reserved counts
-	_, _, filterCounts, _ := m.processPotentialMatches(candidates)
+	_, _, filterCounts, _ := m.processPotentialMatches(candidates[0])
 
 	// Should not have reservation-related filter counts
 	if _, exists := filterCounts["starving_tickets"]; exists {

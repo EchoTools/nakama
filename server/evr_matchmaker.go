@@ -128,12 +128,12 @@ func NewSkillBasedMatchmaker() *SkillBasedMatchmaker {
 }
 
 // Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
-func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
+func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, entries []runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
 	// Mark processing start for backfill coordination
 	m.markProcessStart()
 	defer m.markProcessEnd()
 
-	if len(candidates) == 0 || len(candidates[0]) == 0 {
+	if len(entries) == 0 {
 		logger.Error("No candidates found. Matchmaker cannot run.")
 		return nil
 	}
@@ -143,39 +143,36 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 			return
 		}
 		nk.MetricsTimerRecord("matchmaker_process_duration", nil, time.Since(startTime))
-		// Divide the time by the number of candidates
-		nk.MetricsTimerRecord("matchmaker_per_candidate_duration", nil, time.Since(startTime)/time.Duration(len(candidates)))
+		nk.MetricsTimerRecord("matchmaker_per_candidate_duration", nil, time.Since(startTime)/time.Duration(len(entries)))
 	}()
 
-	groupID, ok := candidates[0][0].GetProperties()["group_id"].(string)
+	groupID, ok := entries[0].GetProperties()["group_id"].(string)
 	if !ok || groupID == "" {
 		logger.Error("Group ID not found in entry properties.")
 		return nil
 	}
 
-	modestr, ok := candidates[0][0].GetProperties()["game_mode"].(string)
+	modestr, ok := entries[0].GetProperties()["game_mode"].(string)
 	if !ok || modestr == "" {
 		logger.Error("Mode not found in entry properties. Matchmaker cannot run.")
 		return nil
 	}
 
 	var (
-		matches       [][]runtime.MatchmakerEntry
-		filterCounts  map[string]int
-		predictions   []PredictedMatch
-		originalCount = len(candidates)
+		candidates   [][]runtime.MatchmakerEntry
+		matches      [][]runtime.MatchmakerEntry
+		filterCounts map[string]int
+		predictions  []PredictedMatch
 	)
 
-	candidates, matches, filterCounts, predictions = m.processPotentialMatches(candidates)
+	candidates, matches, filterCounts, predictions = m.processPotentialMatches(entries)
 
 	// Extract all players from the candidates
 	playerSet := make(map[string]struct{}, 0)
-	ticketSet := make(map[string]struct{}, len(candidates))
-	for _, c := range candidates {
-		for _, e := range c {
-			ticketSet[e.GetTicket()] = struct{}{}
-			playerSet[e.GetPresence().GetUserId()] = struct{}{}
-		}
+	ticketSet := make(map[string]struct{}, len(entries))
+	for _, e := range entries {
+		ticketSet[e.GetTicket()] = struct{}{}
+		playerSet[e.GetPresence().GetUserId()] = struct{}{}
 	}
 
 	// Extract all players from the matches
@@ -194,11 +191,13 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		return p, !ok
 	})
 
-	nk.MetricsCounterAdd("matchmaker_candidate_count", nil, int64(len(candidates)))
-	nk.MetricsCounterAdd("matchmaker_match_count", nil, int64(len(matches)))
-	nk.MetricsCounterAdd("matchmaker_ticket_count", nil, int64(len(ticketSet)))
-	nk.MetricsCounterAdd("matchmaker_unmatched_player_count", nil, int64(len(unmatchedPlayers)))
-	nk.MetricsCounterAdd("matchmaker_matched_player_count", nil, int64(len(matchedPlayers)))
+	if nk != nil {
+		nk.MetricsCounterAdd("matchmaker_candidate_count", nil, int64(len(candidates)))
+		nk.MetricsCounterAdd("matchmaker_match_count", nil, int64(len(matches)))
+		nk.MetricsCounterAdd("matchmaker_ticket_count", nil, int64(len(ticketSet)))
+		nk.MetricsCounterAdd("matchmaker_unmatched_player_count", nil, int64(len(unmatchedPlayers)))
+		nk.MetricsCounterAdd("matchmaker_matched_player_count", nil, int64(len(matchedPlayers)))
+	}
 
 	// Calculate wait time statistics for logging
 	now := time.Now().UTC().Unix()
@@ -206,36 +205,33 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	var highSkillWaiters []map[string]any
 	waitTimeCount := 0
 
-	for _, candidate := range candidates {
-		if candidate == nil {
+	for _, entry := range entries {
+		if entry == nil {
 			continue
 		}
-		for _, entry := range candidate {
-			props := entry.GetProperties()
-			submissionTime, ok := props["submission_time"].(float64)
-			if !ok || submissionTime <= 0 {
-				continue
-			}
-			waitTime := float64(now) - submissionTime
-			totalWaitTime += waitTime
-			waitTimeCount++
-			if waitTime > maxWaitTime {
-				maxWaitTime = waitTime
-			}
+		props := entry.GetProperties()
+		submissionTime, ok := props["submission_time"].(float64)
+		if !ok || submissionTime <= 0 {
+			continue
+		}
+		waitTime := float64(now) - submissionTime
+		totalWaitTime += waitTime
+		waitTimeCount++
+		if waitTime > maxWaitTime {
+			maxWaitTime = waitTime
+		}
 
-			// Track high-skill players with long wait times
-			mu, hasMu := props["rating_mu"].(float64)
-			_, matched := matchedPlayerSet[entry.GetPresence().GetUserId()]
-			if hasMu && mu >= 25.0 && waitTime > 120 { // Players with mu >= 25 waiting > 2 minutes
-				highSkillWaiters = append(highSkillWaiters, map[string]any{
-					"user_id":        entry.GetPresence().GetUserId(),
-					"username":       entry.GetPresence().GetUsername(),
-					"rating_mu":      mu,
-					"wait_time_secs": waitTime,
-					"ticket":         entry.GetTicket(),
-					"matched":        matched,
-				})
-			}
+		mu, hasMu := props["rating_mu"].(float64)
+		_, matched := matchedPlayerSet[entry.GetPresence().GetUserId()]
+		if hasMu && mu >= 25.0 && waitTime > 120 {
+			highSkillWaiters = append(highSkillWaiters, map[string]any{
+				"user_id":        entry.GetPresence().GetUserId(),
+				"username":       entry.GetPresence().GetUsername(),
+				"rating_mu":      mu,
+				"wait_time_secs": waitTime,
+				"ticket":         entry.GetTicket(),
+				"matched":        matched,
+			})
 		}
 	}
 
@@ -249,7 +245,8 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		"num_player_total":     len(playerSet),
 		"num_tickets":          len(ticketSet),
 		"num_players_matched":  len(matchedPlayers),
-		"num_match_candidates": originalCount,
+		"num_entries":          len(entries),
+		"num_match_candidates": len(candidates),
 		"num_matches_made":     len(matches),
 		"filter_counts":        filterCounts,
 		"matched_players":      matchedPlayerSet,

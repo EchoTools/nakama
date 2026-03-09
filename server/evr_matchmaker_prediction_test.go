@@ -284,7 +284,7 @@ func TestCharacterizationMatchmaker(t *testing.T) {
 	t.Logf("Players: %v", strings.Join(playerIDs, ", "))
 	t.Logf("Candidate count: %d", len(candidates))
 
-	matches := sbmm.EvrMatchmakerFn(context.Background(), logger, nil, nil, candidates)
+	matches := sbmm.EvrMatchmakerFn(context.Background(), logger, nil, nil, entries)
 
 	for _, match := range matches {
 

@@ -224,8 +224,24 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return err
 	}
 
-	// Register the matchmaking override
-	if err := initializer.RegisterMatchmakerOverride(sbmm.EvrMatchmakerFn); err != nil {
+	if err := initializer.RegisterMatchmakerOverride(func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidateMatches [][]runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
+		if len(candidateMatches) == 0 {
+			return sbmm.EvrMatchmakerFn(ctx, logger, db, nk, nil)
+		}
+		seen := make(map[string]struct{}, len(candidateMatches))
+		entries := make([]runtime.MatchmakerEntry, 0, len(candidateMatches))
+		for _, candidate := range candidateMatches {
+			for _, entry := range candidate {
+				key := entry.GetTicket() + ":" + entry.GetPresence().GetSessionId()
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				entries = append(entries, entry)
+			}
+		}
+		return sbmm.EvrMatchmakerFn(ctx, logger, db, nk, entries)
+	}); err != nil {
 		return fmt.Errorf("unable to register matchmaker override: %w", err)
 	}
 
