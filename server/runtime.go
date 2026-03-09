@@ -218,8 +218,8 @@ type (
 	RuntimeAfterGetMatchmakerStatsFunction                 func(ctx context.Context, logger *zap.Logger, userID, username string, vars map[string]string, expiry int64, clientIP, clientPort string, out *api.MatchmakerStats) error
 	RuntimeAfterListPartiesFunction                        func(ctx context.Context, logger *zap.Logger, userID, username string, vars map[string]string, expiry int64, clientIP, clientPort string, out *api.PartyList, in *api.ListPartiesRequest) error
 
-	RuntimeMatchmakerMatchedFunction  func(ctx context.Context, entries []*MatchmakerEntry) (string, bool, error)
-	RuntimeMatchmakerOverrideFunction func(ctx context.Context, candidateMatches [][]*MatchmakerEntry) (matches [][]*MatchmakerEntry)
+	RuntimeMatchmakerMatchedFunction   func(ctx context.Context, entries []*MatchmakerEntry) (string, bool, error)
+	RuntimeMatchmakerOverrideFunction  func(ctx context.Context, candidateMatches [][]*MatchmakerEntry) (matches [][]*MatchmakerEntry)
 	RuntimeMatchmakerProcessorFunction func(ctx context.Context, entries []*MatchmakerEntry) (matches [][]*MatchmakerEntry)
 
 	RuntimeMatchCreateFunction       func(ctx context.Context, logger *zap.Logger, id uuid.UUID, node string, stopped *atomic.Bool, name string) (RuntimeMatchCore, error)
@@ -535,8 +535,8 @@ type Runtime struct {
 	beforeReqFunctions *RuntimeBeforeReqFunctions
 	afterReqFunctions  *RuntimeAfterReqFunctions
 
-	matchmakerMatchedFunction  RuntimeMatchmakerMatchedFunction
-	matchmakerOverrideFunction RuntimeMatchmakerOverrideFunction
+	matchmakerMatchedFunction   RuntimeMatchmakerMatchedFunction
+	matchmakerOverrideFunction  RuntimeMatchmakerOverrideFunction
 	matchmakerProcessorFunction RuntimeMatchmakerProcessorFunction
 
 	tournamentEndFunction                  RuntimeTournamentEndFunction
@@ -2563,12 +2563,12 @@ func NewRuntime(ctx context.Context, logger, startupLogger *zap.Logger, db *sql.
 		startupLogger.Info("Registered Go runtime Matchmaker Override function invocation")
 	}
 
-var allMatchmakerProcessorFunction RuntimeMatchmakerProcessorFunction
-switch {
-case goMatchmakerProcessorFn != nil:
-	allMatchmakerProcessorFunction = goMatchmakerProcessorFn
-	startupLogger.Info("Registered Go runtime Matchmaker Processor function invocation")
-}
+	var allMatchmakerProcessorFunction RuntimeMatchmakerProcessorFunction
+	switch {
+	case goMatchmakerProcessorFn != nil:
+		allMatchmakerProcessorFunction = goMatchmakerProcessorFn
+		startupLogger.Info("Registered Go runtime Matchmaker Processor function invocation")
+	}
 
 	var allTournamentEndFunction RuntimeTournamentEndFunction
 	switch {

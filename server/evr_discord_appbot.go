@@ -2673,29 +2673,23 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			}
 
-
-
 			var (
+				target *discordgo.User
 
-				target                 *discordgo.User
+				targetUserID string
 
-				targetUserID           string
+				userNotice string
 
-				userNotice             string
-
-				notes                  string
+				notes string
 
 				requireCommunityValues bool
 
-				duration               string
+				duration string
 
-				allowPrivateLobbies    bool
+				allowPrivateLobbies bool
 
 				allowPrivateLobbiesSet bool
-
 			)
-
-
 
 			for _, o := range i.ApplicationCommandData().Options {
 
@@ -2745,8 +2739,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			}
 
-
-
 			// If allow_private_lobbies was not explicitly set, use the guild group default
 
 			if !allowPrivateLobbiesSet {
@@ -2758,8 +2750,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 			}
-
-
 
 			return d.kickPlayer(logger, i, callerMember, target, duration, userNotice, notes, requireCommunityValues, allowPrivateLobbies)
 		},
@@ -3395,7 +3385,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 					// Determine if we sent a deferred response for this command
 					skipDeferredACKCommands := d.getSkipDeferredACKCommands()
-					
+
 					// If command is in skipDeferredACKCommands, the handler was responsible for sending the response
 					// If not in skipDeferredACKCommands, we already sent a deferred response and should edit it
 					if skipDeferredACKCommands[appCommandName] {
@@ -3410,7 +3400,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 							if respErr := simpleInteractionResponse(s, i, err.Error()); respErr != nil {
 								logger.WithField("err", respErr).Error("Failed to send error response")
 							}
-					}
+						}
 					}
 				}
 			} else {
@@ -4367,7 +4357,6 @@ func (d *DiscordAppBot) getSkipDeferredACKCommands() map[string]bool {
 		"badges":       true,
 	}
 }
-
 
 func IsDiscordErrorCode(err error, code int) bool {
 	var restError *discordgo.RESTError

@@ -43,9 +43,9 @@ type GroupMetadata struct {
 	EnableServerEmbedsCommand            bool              `json:"enable_server_embeds_command"`             // Enable /show command for allocators to see server status embeds
 	DefaultBlockMinutes                  int               `json:"default_block_minutes,omitempty"`          // Default match block duration in minutes (default: 50)
 
-	MaintenanceMinutes                   int               `json:"maintenance_minutes,omitempty"`            // Maintenance window duration in minutes (default: 10)
+	MaintenanceMinutes int `json:"maintenance_minutes,omitempty"` // Maintenance window duration in minutes (default: 10)
 
-	KickPlayerAllowPrivates              bool              `json:"kick_player_allow_privates,omitempty"`     // Default allow_privates for /kick-player suspensions (default: false)
+	KickPlayerAllowPrivates bool `json:"kick_player_allow_privates,omitempty"` // Default allow_privates for /kick-player suspensions (default: false)
 }
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {

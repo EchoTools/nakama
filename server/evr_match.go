@@ -989,7 +989,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			logger.Warn("Match has been empty for too long. Shutting down.")
 			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
 		}
-	} else if state.emptyTicks > 0 {
+	} else if state.emptyTicks > 0 && !(state.Started() && len(state.presenceMap) == 0) {
 		state.emptyTicks = 0
 	}
 
@@ -1227,11 +1227,8 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 	state.Open = false
 	state.terminateTick = tick + int64(graceSeconds)*state.tickRate
 	if err := m.updateLabel(logger, dispatcher, state); err != nil {
-		logger.Error("failed to update label during shutdown (continuing): %v", err)
-		// Do NOT return nil here. Returning nil kills the match immediately without
-		// going through MatchTerminate, which means the game server session is never
-		// disconnected. This leaves the monitoring goroutine alive, which then creates
-		// a new parking match in an infinite loop, causing match accumulation.
+		logger.Error("failed to update label: %v", err)
+		return nil
 	}
 
 	if err := StoreMatchLabel(dbCtx, nk, state); err != nil {
