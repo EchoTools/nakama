@@ -9,8 +9,8 @@ import (
 	"github.com/intinig/go-openskill/types"
 )
 
-// Process potential matches from candidates, applying filters and predictions
-func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int, []PredictedMatch) {
+func (m *SkillBasedMatchmaker) processPotentialMatches(entries []runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int, []PredictedMatch) {
+	candidates := groupEntriesSequentially(entries)
 
 	filterCounts := make(map[string]int)
 
@@ -102,6 +102,51 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	}
 
 	return candidates, madeMatches, filterCounts, predictions
+}
+
+func groupEntriesSequentially(entries []runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	maxCount := 8
+	countMultiple := 2
+
+	if v, ok := entries[0].GetProperties()["max_count"].(float64); ok && int(v) > 0 {
+		maxCount = int(v)
+	}
+	if v, ok := entries[0].GetProperties()["count_multiple"].(float64); ok && int(v) > 0 {
+		countMultiple = int(v)
+	}
+
+	if maxCount <= 0 {
+		maxCount = 8
+	}
+	if countMultiple <= 0 {
+		countMultiple = 2
+	}
+
+	candidates := make([][]runtime.MatchmakerEntry, 0, (len(entries)+maxCount-1)/maxCount)
+	for i := 0; i < len(entries); {
+		remaining := len(entries) - i
+		groupSize := maxCount
+		if remaining < groupSize {
+			groupSize = remaining
+		}
+
+		if rem := groupSize % countMultiple; rem != 0 {
+			groupSize -= rem
+		}
+
+		if groupSize <= 0 {
+			break
+		}
+
+		candidates = append(candidates, entries[i:i+groupSize])
+		i += groupSize
+	}
+
+	return candidates
 }
 
 // Filter out candidates where players do not have a common server within the max RTT
