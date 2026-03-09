@@ -127,7 +127,7 @@ func NewSkillBasedMatchmaker() *SkillBasedMatchmaker {
 	return &sbmm
 }
 
-// Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
+// Function to be used as a matchmaker processor in Nakama (RegisterMatchmakerProcessor)
 func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, entries []runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
 	// Mark processing start for backfill coordination
 	m.markProcessStart()

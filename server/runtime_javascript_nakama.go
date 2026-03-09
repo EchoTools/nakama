@@ -9130,7 +9130,7 @@ func (n *RuntimeJavascriptNakamaModule) satoriExperimentsList(r *goja.Runtime) f
 			}
 		}
 
-	experimentList, err := n.satori.ExperimentsList(n.ctx, identifier, nameFiltersArray, nil)
+		experimentList, err := n.satori.ExperimentsList(n.ctx, identifier, nameFiltersArray, nil)
 		if err != nil {
 			panic(r.NewGoError(fmt.Errorf("failed to list satori experiments: %s", err.Error())))
 		}

@@ -66,7 +66,7 @@ type RuntimeGoInitializer struct {
 	matchmakerProcessor            RuntimeMatchmakerProcessorFunction
 	storageIndexFunctions          map[string]RuntimeStorageIndexFilterFunction
 	httpHandlers                   []*RuntimeHttpHandler
-	consoleHttpHandlers             []*RuntimeHttpHandler
+	consoleHttpHandlers            []*RuntimeHttpHandler
 
 	fleetManager runtime.FleetManager
 
@@ -2743,15 +2743,15 @@ func (ri *RuntimeGoInitializer) RegisterMatchmakerProcessor(fn func(ctx context.
 		result := make([][]*MatchmakerEntry, len(returnedMatches))
 		for i, group := range returnedMatches {
 			g := make([]*MatchmakerEntry, len(group))
-		for j, e := range group {
-			entry, ok := e.(*MatchmakerEntry)
-			if !ok {
-				ri.logger.Warn("RegisterMatchmakerProcessor: returned entry is not a *MatchmakerEntry, skipping")
-				continue
+			for j, e := range group {
+				entry, ok := e.(*MatchmakerEntry)
+				if !ok {
+					ri.logger.Warn("RegisterMatchmakerProcessor: returned entry is not a *MatchmakerEntry, skipping")
+					continue
+				}
+				g[j] = entry
 			}
-			g[j] = entry
-		}
-		result[i] = g
+			result[i] = g
 		}
 		return result
 	}
@@ -2949,7 +2949,7 @@ func NewRuntimeProviderGo(ctx context.Context, logger, startupLogger *zap.Logger
 		storageIndexFunctions: make(map[string]RuntimeStorageIndexFilterFunction),
 		storageIndex:          storageIndex,
 
-		httpHandlers: make([]*RuntimeHttpHandler, 0),
+		httpHandlers:        make([]*RuntimeHttpHandler, 0),
 		consoleHttpHandlers: make([]*RuntimeHttpHandler, 0),
 
 		eventFunctions:        make([]RuntimeEventFunction, 0),

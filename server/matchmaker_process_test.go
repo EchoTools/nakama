@@ -50,7 +50,9 @@ func TestProcessWithProcessor(t *testing.T) {
 		activeCount, activeCopy, indexCount, indexesCopy := copyIndexesForProcessorTest(matchmaker)
 
 		matchmaker.runtime.matchmakerProcessorFunction = func(_ context.Context, entries []*MatchmakerEntry) [][]*MatchmakerEntry {
-			if diff := cmp.Diff([]string{ticketA, ticketB}, sortedTickets(entries)); diff != "" {
+			wantTickets := []string{ticketA, ticketB}
+			sort.Strings(wantTickets)
+			if diff := cmp.Diff(wantTickets, sortedTickets(entries)); diff != "" {
 				t.Fatalf("processor entries mismatch (-want +got):\n%s", diff)
 			}
 			return [][]*MatchmakerEntry{entries}
@@ -61,7 +63,9 @@ func TestProcessWithProcessor(t *testing.T) {
 			t.Fatalf("expected no expired entries, got %d", len(expired))
 		}
 
-		if diff := cmp.Diff([][]string{{ticketA, ticketB}}, normalizeMatchedTickets(matched)); diff != "" {
+		wantGroup := []string{ticketA, ticketB}
+		sort.Strings(wantGroup)
+		if diff := cmp.Diff([][]string{wantGroup}, normalizeMatchedTickets(matched)); diff != "" {
 			t.Fatalf("matched entries mismatch (-want +got):\n%s", diff)
 		}
 	})
