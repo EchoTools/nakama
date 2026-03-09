@@ -636,15 +636,6 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 				numericProperties[key+"_min"] = lower
 				numericProperties[key+"_max"] = upper
 
-				qparts = append(qparts,
-					// Exclusion
-					fmt.Sprintf("-properties.%s:<%f", key, lower),
-					fmt.Sprintf("-properties.%s:>%f", key, upper),
-
-					// Reverse
-					fmt.Sprintf("-properties.%s_min:>%f", key, val),
-					fmt.Sprintf("-properties.%s_max:<%f", key, val),
-				)
 			}
 		}
 

@@ -119,15 +119,15 @@ func (m *MatchmakingTicketParameters) UnmarshalText(text []byte) error {
 
 var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakingTicketParameters{
 	evr.ModeArenaPublic: {
-		MinCount:                8,
-		MaxCount:                8,
+		MinCount:                2,
+		MaxCount:                100,
 		CountMultiple:           2,
-		IncludeSBMMRanges:       true,
-		IncludeEarlyQuitPenalty: true,
+		IncludeSBMMRanges:       false,
+		IncludeEarlyQuitPenalty: false,
 	},
 	evr.ModeCombatPublic: {
-		MinCount:                8,
-		MaxCount:                10,
+		MinCount:                2,
+		MaxCount:                100,
 		CountMultiple:           2,
 		IncludeSBMMRanges:       false,
 		IncludeEarlyQuitPenalty: false,

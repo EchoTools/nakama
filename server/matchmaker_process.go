@@ -334,6 +334,142 @@ func (m *LocalMatchmaker) processDefault(activeIndexCount int, activeIndexesCopy
 	return matchedEntries, expiredActiveIndexes
 }
 
+func (m *LocalMatchmaker) processWithProcessor(activeIndexCount int, activeIndexesCopy map[string]*MatchmakerIndex, indexCount int, indexesCopy map[string]*MatchmakerIndex) ([][]*MatchmakerEntry, []string) {
+	expiredActiveIndexes := make([]string, 0, 10)
+	allCompatibleEntries := make([]*MatchmakerEntry, 0, indexCount)
+	seenEntries := make(map[string]struct{}, activeIndexCount*2)
+
+	selectedTickets := make(map[string]struct{}, activeIndexCount*2)
+	for ticket, activeIndex := range activeIndexesCopy {
+		// This ticket may already have found a match in a previous iteration.
+		if _, found := selectedTickets[activeIndex.Ticket]; found {
+			continue
+		}
+
+		activeIndex.Intervals++
+		lastInterval := activeIndex.Intervals >= m.config.GetMatchmaker().MaxIntervals || activeIndex.MinCount == activeIndex.MaxCount
+		if lastInterval {
+			// Drop from active indexes if it has reached its max intervals, or if its min/max counts are equal. In the
+			// latter case keeping it active would have the same result as leaving it in the pool, so this saves work.
+			expiredActiveIndexes = append(expiredActiveIndexes, ticket)
+		}
+
+		if m.active.Load() != 1 {
+			continue
+		}
+
+		indexQuery := bluge.NewBooleanQuery()
+
+		// Results must match the query string.
+		indexQuery.AddMust(activeIndex.ParsedQuery)
+
+		// Results must also have compatible min/max ranges, for example 2-4 must not match with 6-8.
+		minCountRange := bluge.NewNumericRangeInclusiveQuery(
+			float64(activeIndex.MinCount), math.Inf(1), true, true).
+			SetField("min_count")
+		indexQuery.AddMust(minCountRange)
+		maxCountRange := bluge.NewNumericRangeInclusiveQuery(
+			math.Inf(-1), float64(activeIndex.MaxCount), true, true).
+			SetField("max_count")
+		indexQuery.AddMust(maxCountRange)
+
+		// Results must not include the current party, if any.
+		if activeIndex.PartyId != "" {
+			partyIdQuery := bluge.NewTermQuery(activeIndex.PartyId)
+			partyIdQuery.SetField("party_id")
+			indexQuery.AddMustNot(partyIdQuery)
+		}
+
+		searchRequest := bluge.NewTopNSearch(indexCount, indexQuery)
+		// Sort results to try and select the best match, or if the
+		// matches are equivalent, the longest waiting tickets first.
+		searchRequest.SortBy([]string{"-_score", "created_at"})
+
+		indexReader, err := m.indexWriter.Reader()
+		if err != nil {
+			m.logger.Error("error accessing index reader", zap.Error(err))
+			continue
+		}
+
+		result, err := indexReader.Search(m.ctx, searchRequest)
+		if err != nil {
+			_ = indexReader.Close()
+			m.logger.Error("error searching index", zap.Error(err))
+			continue
+		}
+
+		blugeMatches, err := IterateBlugeMatches(result, map[string]struct{}{}, m.logger)
+		if err != nil {
+			_ = indexReader.Close()
+			m.logger.Error("error iterating search results", zap.Error(err))
+			continue
+		}
+
+		for i := 0; i < len(blugeMatches.Hits); i++ {
+			hitTicket := blugeMatches.Hits[i].ID
+			if hitTicket == ticket {
+				// Remove the current ticket.
+				blugeMatches.Hits = append(blugeMatches.Hits[:i], blugeMatches.Hits[i+1:]...)
+				i--
+			} else if _, found := selectedTickets[hitTicket]; found {
+				// Ticket has already been selected for another match during this process iteration.
+				blugeMatches.Hits = append(blugeMatches.Hits[:i], blugeMatches.Hits[i+1:]...)
+				i--
+			}
+		}
+
+		for _, hit := range blugeMatches.Hits {
+			hitIndex, ok := indexesCopy[hit.ID]
+			if !ok {
+				// Ticket did not exist, should not happen.
+				m.logger.Warn("matchmaker process missing index", zap.String("ticket", hit.ID))
+				continue
+			}
+
+			for _, entry := range hitIndex.Entries {
+				entryKey := entry.Ticket + "|" + entry.Presence.SessionId + "|" + entry.Presence.Node
+				if _, found := seenEntries[entryKey]; found {
+					continue
+				}
+				seenEntries[entryKey] = struct{}{}
+				allCompatibleEntries = append(allCompatibleEntries, entry)
+			}
+		}
+
+		err = indexReader.Close()
+		if err != nil {
+			m.logger.Error("error closing index reader", zap.Error(err))
+			continue
+		}
+	}
+
+	var matchedEntries [][]*MatchmakerEntry
+	if m.runtime.matchmakerProcessorFunction != nil {
+		matchedEntries = m.runtime.matchmakerProcessorFunction(m.ctx, allCompatibleEntries)
+	}
+
+	var batchSize int
+	batch := bluge.NewBatch()
+	// Mark tickets as unavailable for further use in this process iteration.
+	for _, matchedEntry := range matchedEntries {
+		for _, currentMatchedEntry := range matchedEntry {
+			if _, found := selectedTickets[currentMatchedEntry.Ticket]; found {
+				continue
+			}
+			selectedTickets[currentMatchedEntry.Ticket] = struct{}{}
+			batchSize++
+			batch.Delete(bluge.Identifier(currentMatchedEntry.Ticket))
+		}
+	}
+	if batchSize > 0 {
+		if err := m.indexWriter.Batch(batch); err != nil {
+			m.logger.Error("error deleting matchmaker process entries batch", zap.Error(err))
+		}
+	}
+
+	return matchedEntries, expiredActiveIndexes
+}
+
 func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*MatchmakerIndex, indexCount int, indexesCopy map[string]*MatchmakerIndex) ([][]*MatchmakerEntry, []string) {
 	matchedEntries := make([][]*MatchmakerEntry, 0, 5)
 	expiredActiveIndexes := make([]string, 0, 10)
