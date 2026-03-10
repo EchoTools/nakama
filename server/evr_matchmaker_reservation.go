@@ -167,6 +167,9 @@ func (m *SkillBasedMatchmaker) assembleMatchesWithReservations(predictions []Pre
 		if !containsStarvingPlayer(pred.Candidate, starvingSessionIDs) {
 			continue
 		}
+		if isUndersizedMatch(pred.Candidate) {
+			continue
+		}
 
 		// Check moderator limit: no more than 2 moderators per match
 		if countModerators(pred.Candidate) > 2 {
@@ -197,6 +200,9 @@ func (m *SkillBasedMatchmaker) assembleMatchesWithReservations(predictions []Pre
 
 		// Hard reservation check: skip if this would consume any reserved player
 		if consumesReservedPlayer(pred.Candidate, reservedSessionIDs, matchedPlayers) {
+			continue
+		}
+		if isUndersizedMatch(pred.Candidate) {
 			continue
 		}
 

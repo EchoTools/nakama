@@ -210,6 +210,132 @@ func TestProcessWithProcessor(t *testing.T) {
 		activeCount, activeCopy, indexCount, indexesCopy = copyIndexesForProcessorTest(matchmaker)
 		matchmaker.processWithProcessor(activeCount, activeCopy, indexCount, indexesCopy)
 	})
+
+	t.Run("multi_mode_partition", func(t *testing.T) {
+		logger := loggerForTest(t)
+		matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
+		defer cleanup()
+
+		// Add two tickets with game_mode=arena_public
+		arena1UID, err := uuid.NewV4()
+		if err != nil {
+			t.Fatalf("new uuid: %v", err)
+		}
+		arenaTicket1, _, err := matchmaker.Add(context.Background(), []*MatchmakerPresence{{
+			UserId:    "arena-1",
+			SessionId: "arena-1",
+			Username:  "arena-1",
+			Node:      "arena-1",
+			SessionID: arena1UID,
+		}}, "arena-1", "", "*", 2, 4, 1,
+			map[string]string{"role": "arena-1", "game_mode": "arena_public"},
+			map[string]float64{})
+		if err != nil {
+			t.Fatalf("add arena ticket 1: %v", err)
+		}
+
+		arena2UID, err := uuid.NewV4()
+		if err != nil {
+			t.Fatalf("new uuid: %v", err)
+		}
+		arenaTicket2, _, err := matchmaker.Add(context.Background(), []*MatchmakerPresence{{
+			UserId:    "arena-2",
+			SessionId: "arena-2",
+			Username:  "arena-2",
+			Node:      "arena-2",
+			SessionID: arena2UID,
+		}}, "arena-2", "", "*", 2, 4, 1,
+			map[string]string{"role": "arena-2", "game_mode": "arena_public"},
+			map[string]float64{})
+		if err != nil {
+			t.Fatalf("add arena ticket 2: %v", err)
+		}
+
+		// Add two tickets with game_mode=combat_public
+		combat1UID, err := uuid.NewV4()
+		if err != nil {
+			t.Fatalf("new uuid: %v", err)
+		}
+		combatTicket1, _, err := matchmaker.Add(context.Background(), []*MatchmakerPresence{{
+			UserId:    "combat-1",
+			SessionId: "combat-1",
+			Username:  "combat-1",
+			Node:      "combat-1",
+			SessionID: combat1UID,
+		}}, "combat-1", "", "*", 2, 4, 1,
+			map[string]string{"role": "combat-1", "game_mode": "combat_public"},
+			map[string]float64{})
+		if err != nil {
+			t.Fatalf("add combat ticket 1: %v", err)
+		}
+
+		combat2UID, err := uuid.NewV4()
+		if err != nil {
+			t.Fatalf("new uuid: %v", err)
+		}
+		combatTicket2, _, err := matchmaker.Add(context.Background(), []*MatchmakerPresence{{
+			UserId:    "combat-2",
+			SessionId: "combat-2",
+			Username:  "combat-2",
+			Node:      "combat-2",
+			SessionID: combat2UID,
+		}}, "combat-2", "", "*", 2, 4, 1,
+			map[string]string{"role": "combat-2", "game_mode": "combat_public"},
+			map[string]float64{})
+		if err != nil {
+			t.Fatalf("add combat ticket 2: %v", err)
+		}
+
+		_ = arenaTicket1
+		_ = arenaTicket2
+		_ = combatTicket1
+		_ = combatTicket2
+
+		activeCount, activeCopy, indexCount, indexesCopy := copyIndexesForProcessorTest(matchmaker)
+
+		// Track which game_mode values appear in each processor call.
+		var callModes [][]string
+		matchmaker.runtime.matchmakerProcessorFunction = func(_ context.Context, entries []*MatchmakerEntry) [][]*MatchmakerEntry {
+			modesInCall := make(map[string]struct{})
+			for _, entry := range entries {
+				modesInCall[entry.StringProperties["game_mode"]] = struct{}{}
+			}
+			var modes []string
+			for m := range modesInCall {
+				modes = append(modes, m)
+			}
+			sort.Strings(modes)
+			callModes = append(callModes, modes)
+			return [][]*MatchmakerEntry{entries}
+		}
+
+		matched, expired := matchmaker.processWithProcessor(activeCount, activeCopy, indexCount, indexesCopy)
+		if len(expired) != 0 {
+			t.Fatalf("expected no expired entries, got %d", len(expired))
+		}
+
+		// Processor must have been called exactly once per distinct mode (2 calls).
+		if len(callModes) != 2 {
+			t.Fatalf("expected 2 partition calls, got %d", len(callModes))
+		}
+
+		// Each call must contain exactly one distinct mode (no cross-contamination).
+		for i, modes := range callModes {
+			if len(modes) != 1 {
+				t.Fatalf("call %d: expected 1 distinct game_mode, got %v", i, modes)
+			}
+		}
+
+		// The two calls must have seen different modes.
+		if callModes[0][0] == callModes[1][0] {
+			t.Fatalf("both calls received the same game_mode %q", callModes[0][0])
+		}
+
+		// matched must contain entries from both modes (non-empty).
+		if len(matched) == 0 {
+			t.Fatalf("expected matched entries from both modes, got none")
+		}
+	})
 }
 
 func addProcessorTestTicket(t *testing.T, matchmaker *LocalMatchmaker, sessionID string) string {

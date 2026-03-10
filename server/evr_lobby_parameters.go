@@ -588,10 +588,22 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		"excluded_divisions": strings.Join(p.MatchmakingExcludedDivisions, ","),
 		"is_moderator":       strconv.FormatBool(p.IsModerator),
 	}
+	var minTeamSize, maxTeamSize float64
+	switch p.Mode {
+	case evr.ModeCombatPublic:
+		minTeamSize = 3
+		maxTeamSize = 5
+	default:
+		minTeamSize = 4
+		maxTeamSize = 4
+	}
 
 	numericProperties := map[string]float64{
-		"timestamp": float64(p.MatchmakingTimestamp.UTC().Unix()),
-		"max_rtt":   float64(p.MaxServerRTT),
+		"timestamp":        float64(p.MatchmakingTimestamp.UTC().Unix()),
+		"max_rtt":          float64(p.MaxServerRTT),
+		"failsafe_timeout": p.FailsafeTimeout.Seconds(),
+		"min_team_size":    minTeamSize,
+		"max_team_size":    maxTeamSize,
 	}
 
 	qparts := []string{

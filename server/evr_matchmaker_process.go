@@ -213,6 +213,9 @@ OuterLoop:
 				continue OuterLoop
 			}
 		}
+		if isUndersizedMatch(r.Candidate) {
+			continue OuterLoop
+		}
 
 		for _, e := range r.Candidate {
 			matchedPlayers[e.GetPresence().GetSessionId()] = struct{}{}
@@ -222,4 +225,42 @@ OuterLoop:
 	}
 
 	return matches
+}
+
+func isUndersizedMatch(candidate []runtime.MatchmakerEntry) bool {
+	if len(candidate) == 0 {
+		return true
+	}
+
+	minTeamSize := 4.0
+	if v, ok := candidate[0].GetProperties()["min_team_size"].(float64); ok && v > 0 {
+		minTeamSize = v
+	}
+
+	minMatchSize := int(minTeamSize) * 2
+	if len(candidate) >= minMatchSize {
+		return false
+	}
+
+	failsafeTimeout := 0.0
+	if v, ok := candidate[0].GetProperties()["failsafe_timeout"].(float64); ok {
+		failsafeTimeout = v
+	}
+	if failsafeTimeout <= 0 {
+		return false
+	}
+
+	now := float64(time.Now().UTC().Unix())
+	oldestTimestamp := now
+	for _, entry := range candidate {
+		if ts, ok := entry.GetProperties()["timestamp"].(float64); ok && ts < oldestTimestamp {
+			oldestTimestamp = ts
+		}
+	}
+
+	if now-oldestTimestamp >= failsafeTimeout {
+		return false
+	}
+
+	return true
 }

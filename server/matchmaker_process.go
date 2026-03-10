@@ -443,9 +443,24 @@ func (m *LocalMatchmaker) processWithProcessor(activeIndexCount int, activeIndex
 		}
 	}
 
+	partitions := make(map[string][]*MatchmakerEntry)
+	for _, entry := range allCompatibleEntries {
+		mode := entry.StringProperties["game_mode"]
+		partitions[mode] = append(partitions[mode], entry)
+	}
+	if len(partitions) == 0 {
+		partitions[""] = nil
+	}
+
 	var matchedEntries [][]*MatchmakerEntry
 	if m.runtime.matchmakerProcessorFunction != nil {
-		matchedEntries = m.runtime.matchmakerProcessorFunction(m.ctx, allCompatibleEntries)
+		m.logger.Debug("matchmaker processing partitions", zap.Int("partitions", len(partitions)), zap.Int("total_entries", len(allCompatibleEntries)))
+		for _, partEntries := range partitions {
+			partMatches := m.runtime.matchmakerProcessorFunction(m.ctx, partEntries)
+			if partMatches != nil {
+				matchedEntries = append(matchedEntries, partMatches...)
+			}
+		}
 	}
 
 	var batchSize int
