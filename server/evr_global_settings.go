@@ -75,6 +75,7 @@ type ServiceSettingsData struct {
 	version                               string
 	serviceStatusMessage                  string
 	PingServerBeforeJoin                  bool `json:"ping_server_before_join"` // Ping the server before joining to measure latency
+	EnableVibinatorsGravity               bool `json:"enable_vibinators_gravity"`  // Novelty: redirect social-lobby echo_arena matchmakers toward vibinator's echo_combat
 }
 
 type PruneSettings struct {
