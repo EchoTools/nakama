@@ -216,3 +216,198 @@ func matchedGroupSizes(matched [][]*MatchmakerEntry) []int {
 	sort.Ints(sizes)
 	return sizes
 }
+
+func addIntegrationProcessorTicketWithProps(t *testing.T, matchmaker *LocalMatchmaker, sessionSuffix string, extraString map[string]string, extraNumeric map[string]float64) string {
+	t.Helper()
+	sessionID := "intprop-" + sessionSuffix
+	stringProps := map[string]string{
+		"game_mode": "echo_arena",
+		"group_id":  "integration-group",
+	}
+	for k, v := range extraString {
+		stringProps[k] = v
+	}
+	numericProps := map[string]float64{
+		"max_count":      8,
+		"count_multiple": 2,
+		"max_rtt":        250,
+		"rtt_test":       40,
+		"rating_mu":      25,
+		"rating_sigma":   8.33,
+		"timestamp":      float64(time.Now().UTC().Unix()),
+	}
+	for k, v := range extraNumeric {
+		numericProps[k] = v
+	}
+	ticket, _, err := matchmaker.Add(
+		context.Background(),
+		[]*MatchmakerPresence{{
+			UserId:    sessionID,
+			SessionId: sessionID,
+			Username:  sessionID,
+			Node:      "integration",
+		}},
+		sessionID, "", "*", 2, 100, 2,
+		stringProps, numericProps,
+	)
+	if err != nil {
+		t.Fatalf("add ticket: %v", err)
+	}
+	return ticket
+}
+
+func TestIntegrationProcessorCrossModeIsolation(t *testing.T) {
+	logger := loggerForTest(t)
+	matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
+	defer cleanup()
+
+	wireEvrProcessor(matchmaker, NewRuntimeGoLogger(logger))
+
+	for i := range 8 {
+		addIntegrationProcessorTicketWithProps(t, matchmaker, fmt.Sprintf("arena-%02d", i), map[string]string{"game_mode": "echo_arena"}, nil)
+	}
+	for i := range 8 {
+		addIntegrationProcessorTicketWithProps(t, matchmaker, fmt.Sprintf("combat-%02d", i), map[string]string{"game_mode": "echo_combat"}, map[string]float64{"max_count": 10})
+	}
+
+	matched, expired := runProcessorCycle(matchmaker)
+	if len(expired) != 0 {
+		t.Fatalf("expected no expired tickets, got %d", len(expired))
+	}
+	if len(matched) != 2 {
+		t.Fatalf("expected exactly 2 matches, got %d", len(matched))
+	}
+	for _, group := range matched {
+		modes := map[string]struct{}{}
+		for _, entry := range group {
+			if mode, ok := entry.StringProperties["game_mode"]; ok {
+				modes[mode] = struct{}{}
+			}
+		}
+		if len(modes) != 1 {
+			t.Fatalf("match contains entries from multiple game modes: %v", modes)
+		}
+	}
+}
+
+func TestIntegrationProcessorUndersizedRejection(t *testing.T) {
+	logger := loggerForTest(t)
+	matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
+	defer cleanup()
+
+	wireEvrProcessor(matchmaker, NewRuntimeGoLogger(logger))
+
+	for i := range 6 {
+		addIntegrationProcessorTicketWithProps(t, matchmaker, fmt.Sprintf("reject-%02d", i), nil, map[string]float64{
+			"failsafe_timeout": 300,
+			"min_team_size":    4,
+			"max_count":        8,
+			"count_multiple":   2,
+			"timestamp":        float64(time.Now().UTC().Unix()),
+		})
+	}
+
+	matched, _ := runProcessorCycle(matchmaker)
+	if len(matched) != 0 {
+		t.Fatalf("expected no matches (undersized, failsafe not expired), got %d", len(matched))
+	}
+}
+
+func TestIntegrationProcessorUndersizedWithFailsafe(t *testing.T) {
+	logger := loggerForTest(t)
+	matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
+	defer cleanup()
+
+	wireEvrProcessor(matchmaker, NewRuntimeGoLogger(logger))
+
+	for i := range 6 {
+		addIntegrationProcessorTicketWithProps(t, matchmaker, fmt.Sprintf("failsafe-%02d", i), nil, map[string]float64{
+			"failsafe_timeout": 60,
+			"min_team_size":    4,
+			"timestamp":        float64(time.Now().UTC().Unix()) - 120,
+		})
+	}
+
+	matched, _ := runProcessorCycle(matchmaker)
+	if len(matched) != 1 {
+		t.Fatalf("expected 1 match (failsafe expired), got %d", len(matched))
+	}
+	if len(matched[0]) != 6 {
+		t.Fatalf("expected match with 6 players, got %d", len(matched[0]))
+	}
+}
+
+func TestIntegrationProcessorUndersizedZeroFailsafe(t *testing.T) {
+	logger := loggerForTest(t)
+	matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
+	defer cleanup()
+
+	wireEvrProcessor(matchmaker, NewRuntimeGoLogger(logger))
+
+	for i := range 6 {
+		addIntegrationProcessorTicketWithProps(t, matchmaker, fmt.Sprintf("zerofail-%02d", i), nil, map[string]float64{
+			"failsafe_timeout": 0,
+			"min_team_size":    4,
+			"timestamp":        float64(time.Now().UTC().Unix()),
+		})
+	}
+
+	matched, _ := runProcessorCycle(matchmaker)
+	if len(matched) != 1 {
+		t.Fatalf("expected 1 match (zero failsafe = bypass), got %d", len(matched))
+	}
+	if len(matched[0]) != 6 {
+		t.Fatalf("expected match with 6 players, got %d", len(matched[0]))
+	}
+}
+
+func TestIntegrationProcessorCombatTeamSizes(t *testing.T) {
+	logger := loggerForTest(t)
+	matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
+	defer cleanup()
+
+	wireEvrProcessor(matchmaker, NewRuntimeGoLogger(logger))
+
+	for i := range 6 {
+		addIntegrationProcessorTicketWithProps(t, matchmaker, fmt.Sprintf("combat-exact-%02d", i), map[string]string{"game_mode": "echo_combat"}, map[string]float64{
+			"failsafe_timeout": 300,
+			"min_team_size":    3,
+			"max_team_size":    5,
+			"max_count":        10,
+			"count_multiple":   2,
+			"timestamp":        float64(time.Now().UTC().Unix()),
+		})
+	}
+
+	matched, _ := runProcessorCycle(matchmaker)
+	if len(matched) != 1 {
+		t.Fatalf("expected 1 match (6 >= 3x2=6, exact minimum met), got %d", len(matched))
+	}
+	if len(matched[0]) != 6 {
+		t.Fatalf("expected match with 6 players, got %d", len(matched[0]))
+	}
+}
+
+func TestIntegrationProcessorCombatUndersized(t *testing.T) {
+	logger := loggerForTest(t)
+	matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
+	defer cleanup()
+
+	wireEvrProcessor(matchmaker, NewRuntimeGoLogger(logger))
+
+	for i := range 4 {
+		addIntegrationProcessorTicketWithProps(t, matchmaker, fmt.Sprintf("combat-small-%02d", i), map[string]string{"game_mode": "echo_combat"}, map[string]float64{
+			"failsafe_timeout": 300,
+			"min_team_size":    3,
+			"max_team_size":    5,
+			"max_count":        10,
+			"count_multiple":   2,
+			"timestamp":        float64(time.Now().UTC().Unix()),
+		})
+	}
+
+	matched, _ := runProcessorCycle(matchmaker)
+	if len(matched) != 0 {
+		t.Fatalf("expected no matches (4 < 3x2=6, failsafe not expired), got %d", len(matched))
+	}
+}
