@@ -704,14 +704,14 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			enabled := crashWindow > 0
 
 			hasReconnectReservation := false
-			if p.GetReason() == runtime.PresenceReasonDisconnect && enabled && state.GameState != nil && !state.GameState.MatchOver {
+			if p.GetReason() == runtime.PresenceReasonDisconnect && enabled && !state.GameState.IsMatchOver() {
 				window := time.Duration(crashWindow) * time.Second
 				expiry := time.Now().Add(window)
 				state.reconnectReservations[mp.GetUserId()] = &reconnectReservation{
 					Presence:     mp,
 					Expiry:       expiry,
 					UserID:       mp.GetUserId(),
-					DeferPenalty: state.Mode == evr.ModeArenaPublic && state.GameState != nil && !state.GameState.MatchOver && mp.IsPlayer(),
+					DeferPenalty: state.Mode == evr.ModeArenaPublic && !state.GameState.IsMatchOver() && mp.IsPlayer(),
 				}
 				if err := SetNextMatchID(ctx, nk, mp.GetUserId(), state.ID, TeamIndex(mp.RoleAlignment), ""); err != nil {
 					logger.WithField("error", err).Warn("Failed to set next match ID for crashed player")
@@ -724,7 +724,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			}
 			// If the round is not over, then add an early quit count to the player.
 			// Count all quits before match completion (both pre-game and early quits)
-			if !hasReconnectReservation && state.Mode == evr.ModeArenaPublic && state.GameState != nil && !state.GameState.MatchOver {
+			if !hasReconnectReservation && state.Mode == evr.ModeArenaPublic && !state.GameState.IsMatchOver() {
 				// Only players
 				if mp.IsPlayer() {
 					nk.MetricsCounterAdd("match_entrant_early_quit", tags, 1)
@@ -951,7 +951,9 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 				logger.WithField("update", update).Debug("Received match update message.")
 
-				state.GameState.MatchOver = true
+				if update.MatchOver {
+					state.GameState.MatchOver = true
+				}
 
 				if len(update.Goals) > 0 {
 					state.goals = append(state.goals, update.Goals...)
