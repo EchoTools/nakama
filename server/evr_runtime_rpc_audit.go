@@ -61,7 +61,12 @@ func sendRPCAuditMessage(ctx context.Context, logger runtime.Logger, nk runtime.
 		}
 	}
 
-	if err := AuditLogSend(appBot.dg, ServiceSettings().ServiceAuditChannelID, content); err != nil {
+	svcSettings := ServiceSettings()
+	if svcSettings == nil || svcSettings.ServiceAuditChannelID == "" {
+		return
+	}
+
+	if err := AuditLogSend(appBot.dg, svcSettings.ServiceAuditChannelID, content); err != nil {
 		logger.Warn("Failed to send service RPC audit log for %s: %v", rpcID, err)
 	}
 }
