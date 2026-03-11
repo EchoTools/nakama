@@ -23,33 +23,41 @@ func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, ses
 		},
 	})
 
-	// Send an error if the object could not be retrieved.
+	var jsonResource string
 	if err != nil {
-		logger.Warn("failed to read objects", zap.Error(err))
-		session.SendEvrUnrequire(evr.NewConfigFailure(message.Type, message.ID))
-		return fmt.Errorf("failed to read objects: %w", err)
+		// DB error: log and fall back to the default below.
+		logger.Warn("failed to read config objects, falling back to default", zap.Error(err))
+	} else if len(objs.Objects) != 0 {
+		jsonCandidate := objs.Objects[0].Value
+		// Validate the stored JSON before using it.
+		var probe map[string]any
+		if jsonErr := json.Unmarshal([]byte(jsonCandidate), &probe); jsonErr != nil {
+			logger.Warn("stored config resource is invalid JSON, falling back to default",
+				zap.String("type", message.Type), zap.Error(jsonErr))
+		} else {
+			jsonResource = jsonCandidate
+		}
 	}
 
-	var jsonResource string
-	if len(objs.Objects) != 0 {
-		// Use the retrieved object.
-		jsonResource = objs.Objects[0].Value
-	} else {
-		// Attempt to pull a default config resource.
+	// Fall back to the built-in default if no valid DB entry was found.
+	if jsonResource == "" {
 		jsonResource = evr.GetDefaultConfigResource(message.Type, message.ID)
 	}
+
 	if jsonResource == "" {
-		logger.Warn("resource not found")
+		logger.Warn("config resource not found", zap.String("type", message.Type), zap.String("id", message.ID))
 		session.SendEvrUnrequire(evr.NewConfigFailure(message.Type, message.ID))
-		return fmt.Errorf("resource not found: %s", message.ID)
+		return fmt.Errorf("config resource not found: type=%s id=%s", message.Type, message.ID)
 	}
 
-	// Parse the JSON resource
-	resource := make(map[string]interface{})
+	// Parse the JSON resource into a generic map for re-serialization.
+	resource := make(map[string]any)
 	if err := json.Unmarshal([]byte(jsonResource), &resource); err != nil {
-
+		// This should not happen for defaults; log and report.
+		logger.Error("failed to parse config resource JSON",
+			zap.String("type", message.Type), zap.Error(err))
 		session.SendEvrUnrequire(evr.NewConfigFailure(message.Type, message.ID))
-		return fmt.Errorf("failed to parse %s json: %w", message.ID, err)
+		return fmt.Errorf("failed to parse config JSON: type=%s: %w", message.Type, err)
 	}
 
 	// Send the resource to the client.
