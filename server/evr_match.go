@@ -1070,6 +1070,33 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		}
 	}
 
+	for id, rr := range state.reconnectReservations {
+		if time.Now().After(rr.Expiry) {
+			delete(state.reconnectReservations, id)
+			updateLabel = true
+			logger.WithFields(map[string]any{
+				"uid": rr.UserID,
+			}).Info("Reconnect reservation expired.")
+
+			if err := DeleteJoinDirective(ctx, nk, rr.UserID); err != nil {
+				logger.WithField("error", err).Warn("Failed to delete expired join directive")
+			}
+
+			if rr.DeferPenalty {
+				eqconfig := NewEarlyQuitConfig()
+				if err := StorableRead(ctx, nk, rr.UserID, eqconfig, true); err != nil {
+					logger.WithField("error", err).Warn("Failed to load early quitter config for deferred penalty")
+				} else {
+					eqconfig.IncrementEarlyQuit()
+					eqconfig.LastEarlyQuitMatchID = state.ID
+					if err := StorableWrite(ctx, nk, rr.UserID, eqconfig); err != nil {
+						logger.WithField("error", err).Warn("Failed to write early quitter config for deferred penalty")
+					}
+				}
+			}
+		}
+	}
+
 	// If the match is prepared and the start time has been reached, start it.
 	// Ensure the game server presence exists to avoid nil dispatch crashes.
 	if !state.levelLoaded && state.server != nil && (len(state.presenceMap) != 0 || state.Started()) {
