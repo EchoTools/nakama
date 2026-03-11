@@ -74,8 +74,8 @@ type ServiceSettingsData struct {
 	EnableSessionDebug                    bool                      `json:"enable_session_debug"`
 	version                               string
 	serviceStatusMessage                  string
-	PingServerBeforeJoin                  bool `json:"ping_server_before_join"` // Ping the server before joining to measure latency
-	EnableVibinatorsGravity               bool `json:"enable_vibinators_gravity"`  // Novelty: redirect social-lobby echo_arena matchmakers toward vibinator's echo_combat
+	PingServerBeforeJoin                  bool `json:"ping_server_before_join"`   // Ping the server before joining to measure latency
+	EnableVibinatorsGravity               bool `json:"enable_vibinators_gravity"` // Novelty: redirect social-lobby echo_arena matchmakers toward vibinator's echo_combat
 }
 
 type PruneSettings struct {
@@ -125,6 +125,7 @@ type GlobalMatchmakingSettings struct {
 	MaxReservationRatio            float64                 `json:"max_reservation_ratio"`               // Max fraction of pool that can be reserved (0.0-1.0, default 0.4)
 	ReservationSafetyValveSecs     int                     `json:"reservation_safety_valve_secs"`       // After this many seconds, release reservations and let the system flow (default 300)
 	EnableTicketReservation        bool                    `json:"enable_ticket_reservation"`           // Enable the ticket reservation system (default false)
+	CrashRecoveryWindowSecs        int                     `json:"crash_recovery_window_secs"`          // Seconds to hold a disconnected player's spot (default 60, 0 = use default, <0 = disabled)
 }
 
 type QueryAddons struct {

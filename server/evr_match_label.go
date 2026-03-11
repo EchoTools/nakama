@@ -23,6 +23,13 @@ type slotReservation struct {
 	Expiry   time.Time
 }
 
+type reconnectReservation struct {
+	Presence     *EvrMatchPresence
+	Expiry       time.Time
+	UserID       string
+	DeferPenalty bool // Whether early quit penalty should be applied on expiry
+}
+
 type MatchLabel struct {
 	ID          MatchID      `json:"id"`                   // The Session Id used by EVR (the same as match id)
 	Open        bool         `json:"open"`                 // Whether the lobby is open to new players (Matching Only)
@@ -52,11 +59,12 @@ type MatchLabel struct {
 	SessionSettings *evr.LobbySessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
 	TeamAlignments  map[string]int            `json:"team_alignments,omitempty"`  // map[userID]TeamIndex
 
-	server          runtime.Presence                // The broadcaster's presence
-	levelLoaded     bool                            // Whether the server has been sent the start instruction.
-	presenceMap     map[string]*EvrMatchPresence    // [sessionId]EvrMatchPresence
-	reservationMap  map[string]*slotReservation     // map[sessionID]slotReservation
-	presenceByEvrID map[evr.EvrId]*EvrMatchPresence // map[evrID]EvrMatchPresence
+	server                runtime.Presence                 // The broadcaster's presence
+	levelLoaded           bool                             // Whether the server has been sent the start instruction.
+	presenceMap           map[string]*EvrMatchPresence     // [sessionId]EvrMatchPresence
+	reservationMap        map[string]*slotReservation      // map[sessionID]slotReservation
+	reconnectReservations map[string]*reconnectReservation // map[userID]reconnectReservation
+	presenceByEvrID       map[evr.EvrId]*EvrMatchPresence  // map[evrID]EvrMatchPresence
 
 	joinTimestamps       map[string]time.Time            // The timestamps of when players joined the match. map[sessionId]time.Time
 	joinTimeMilliseconds map[string]int64                // The round clock time of when players joined the match. map[sessionId]time.Time
@@ -300,6 +308,15 @@ func (s *MatchLabel) rebuildCache() {
 			continue
 		}
 		// Include the reservation in the cache.
+		presences = append(presences, r.Presence)
+	}
+
+	// Include reconnect reservations in the cache (holds slot for crashed players).
+	for id, r := range s.reconnectReservations {
+		if r.Expiry.Before(time.Now()) {
+			delete(s.reconnectReservations, id)
+			continue
+		}
 		presences = append(presences, r.Presence)
 	}
 
