@@ -668,9 +668,36 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 				// Record the leave event for the participation
 				participation.RecordLeaveEvent(state)
 			}
+
+			serviceSettings := ServiceSettings()
+			crashWindow := 60
+			if serviceSettings != nil && serviceSettings.Matchmaking.CrashRecoveryWindowSecs != 0 {
+				crashWindow = serviceSettings.Matchmaking.CrashRecoveryWindowSecs
+			}
+			enabled := crashWindow > 0
+
+			hasReconnectReservation := false
+			if p.GetReason() == runtime.PresenceReasonDisconnect && enabled && state.GameState != nil && !state.GameState.MatchOver {
+				window := time.Duration(crashWindow) * time.Second
+				expiry := time.Now().Add(window)
+				state.reconnectReservations[mp.GetUserId()] = &reconnectReservation{
+					Presence:     mp,
+					Expiry:       expiry,
+					UserID:       mp.GetUserId(),
+					DeferPenalty: state.Mode == evr.ModeArenaPublic && state.GameState != nil && !state.GameState.MatchOver && mp.IsPlayer(),
+				}
+				if err := SetNextMatchID(ctx, nk, mp.GetUserId(), state.ID, TeamIndex(mp.RoleAlignment), ""); err != nil {
+					logger.WithField("error", err).Warn("Failed to set next match ID for crashed player")
+				}
+				logger.WithFields(map[string]any{
+					"uid":    mp.GetUserId(),
+					"expiry": expiry,
+				}).Info("Created reconnect reservation for crashed player")
+				hasReconnectReservation = true
+			}
 			// If the round is not over, then add an early quit count to the player.
 			// Count all quits before match completion (both pre-game and early quits)
-			if state.Mode == evr.ModeArenaPublic && state.GameState != nil && !state.GameState.MatchOver {
+			if !hasReconnectReservation && state.Mode == evr.ModeArenaPublic && state.GameState != nil && !state.GameState.MatchOver {
 				// Only players
 				if mp.IsPlayer() {
 					nk.MetricsCounterAdd("match_entrant_early_quit", tags, 1)
