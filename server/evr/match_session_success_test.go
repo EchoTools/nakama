@@ -4,52 +4,52 @@ import (
 	"testing"
 )
 
-func TestPacketEncoderSettingsFromFlags(t *testing.T) {
+func TestPacketEncoderConfigFromFlags(t *testing.T) {
 	tests := []struct {
 		flags              uint64
 		expectedEncryption bool
 		expectedMac        bool
-		expectedDigestSize int
-		expectedIteration  int
-		expectedMacKeySize int
-		expectedKeySize    int
-		expectedRandomSize int
+		expectedDigestSize uint16
+		expectedIteration  uint16
+		expectedMacKeySize uint16
+		expectedKeySize    uint16
+		expectedRandomSize uint16
 	}{
-		{0, false, false, 0, 0, 0, 0, 0},                                // test with all flags disabled
-		{1, true, false, 0, 0, 0, 0, 0},                                 // test with encryption flag enabled
-		{2, false, true, 0, 0, 0, 0, 0},                                 // test with mac flag enabled
-		{3, true, true, 0, 0, 0, 0, 0},                                  // test with both encryption and mac flags enabled
-		{36037595259470083, true, true, 0x40, 0x00, 0x20, 0x20, 0x20},   // default client flags
-		{36037595259469955, true, true, 0x20, 0x00, 0x20, 0x20, 0x20},   // default server flags
-		{0x0080080080000102, false, true, 0x40, 0x00, 0x20, 0x20, 0x20}, // default client flags
-		{0x0080080080000083, true, true, 0x20, 0x00, 0x20, 0x20, 0x20},  // default server flags
+		{0, false, false, 0, 0, 0, 0, 0},
+		{1, true, false, 0, 0, 0, 0, 0},
+		{2, false, true, 0, 0, 0, 0, 0},
+		{3, true, true, 0, 0, 0, 0, 0},
+		{36037595259470083, true, true, 0x40, 0x00, 0x20, 0x20, 0x20},
+		{36037595259469955, true, true, 0x20, 0x00, 0x20, 0x20, 0x20},
+		{0x0080080080000102, false, true, 0x40, 0x00, 0x20, 0x20, 0x20},
+		{0x0080080080000083, true, true, 0x20, 0x00, 0x20, 0x20, 0x20},
 	}
 
 	for _, tt := range tests {
-		settings := PacketEncoderSettingsFromFlags(tt.flags)
-		if settings.ToFlags() != tt.flags {
-			t.Errorf("ToFlags() = %v, want %v", settings.ToFlags(), tt.flags)
+		config := PacketEncoderConfigFromFlags(tt.flags)
+		if config.ToFlags() != tt.flags {
+			t.Errorf("ToFlags() = %v, want %v", config.ToFlags(), tt.flags)
 		}
-		if settings.EncryptionEnabled != tt.expectedEncryption {
-			t.Errorf("EncryptionEnabled = %v, want %v", settings.EncryptionEnabled, tt.expectedEncryption)
+		if config.EncryptionEnabled != tt.expectedEncryption {
+			t.Errorf("EncryptionEnabled = %v, want %v", config.EncryptionEnabled, tt.expectedEncryption)
 		}
-		if settings.MACEnabled != tt.expectedMac {
-			t.Errorf("MacEnabled = %v, want %v", settings.MACEnabled, tt.expectedMac)
+		if config.MacEnabled != tt.expectedMac {
+			t.Errorf("MacEnabled = %v, want %v", config.MacEnabled, tt.expectedMac)
 		}
-		if settings.MACDigestSize != tt.expectedDigestSize {
-			t.Errorf("MacDigestSize = %v, want %v", settings.MACDigestSize, tt.expectedDigestSize)
+		if config.MacDigestSize != tt.expectedDigestSize {
+			t.Errorf("MacDigestSize = %v, want %v", config.MacDigestSize, tt.expectedDigestSize)
 		}
-		if settings.MACPBKDF2IterationCount != tt.expectedIteration {
-			t.Errorf("MacPBKDF2IterationCount = %v, want %v", settings.MACPBKDF2IterationCount, tt.expectedIteration)
+		if config.MacPbkdf2Iterations != tt.expectedIteration {
+			t.Errorf("MacPbkdf2Iterations = %v, want %v", config.MacPbkdf2Iterations, tt.expectedIteration)
 		}
-		if settings.MACKeySize != tt.expectedMacKeySize {
-			t.Errorf("MacKeySize = %v, want %v", settings.MACKeySize, tt.expectedMacKeySize)
+		if config.MacKeySize != tt.expectedMacKeySize {
+			t.Errorf("MacKeySize = %v, want %v", config.MacKeySize, tt.expectedMacKeySize)
 		}
-		if settings.EncryptionKeySize != tt.expectedKeySize {
-			t.Errorf("EncryptionKeySize = %v, want %v", settings.EncryptionKeySize, tt.expectedKeySize)
+		if config.EncryptionKeySize != tt.expectedKeySize {
+			t.Errorf("EncryptionKeySize = %v, want %v", config.EncryptionKeySize, tt.expectedKeySize)
 		}
-		if settings.RandomKeySize != tt.expectedRandomSize {
-			t.Errorf("RandomKeySize = %v, want %v", settings.RandomKeySize, tt.expectedRandomSize)
+		if config.RandomKeySize != tt.expectedRandomSize {
+			t.Errorf("RandomKeySize = %v, want %v", config.RandomKeySize, tt.expectedRandomSize)
 		}
 	}
 }
