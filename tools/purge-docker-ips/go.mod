@@ -1,6 +1,6 @@
 module purge-docker-ips
 
-go 1.25.5
+go 1.25.0
 
 replace github.com/heroiclabs/nakama/v3 => ../..
 
