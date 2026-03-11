@@ -134,7 +134,7 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	defer m.markProcessEnd()
 
 	if len(entries) == 0 {
-		logger.Error("No candidates found. Matchmaker cannot run.")
+		logger.Debug("No candidates found. Matchmaker cannot run.")
 		return nil
 	}
 	startTime := time.Now()
