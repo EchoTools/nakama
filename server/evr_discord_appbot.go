@@ -2747,6 +2747,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					allowPrivateLobbies = gg.KickPlayerAllowPrivates
 
+				} else {
+
+					logger.Warn("Failed to load guild group for kick-player allow_private_lobbies default",
+						"group_id", groupID,
+						"error", err.Error(),
+					)
+
 				}
 
 			}
