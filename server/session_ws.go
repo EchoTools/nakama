@@ -612,11 +612,13 @@ func (s *sessionWS) SendEvr(messages ...evr.Message) error {
 		if err != nil {
 			s.logger.Error("Could not marshal message", zap.Error(err))
 			s.Close("could not marshal message", runtime.PresenceReasonDisconnect)
+			return err
 		}
 		// Send the message.
 		if err := s.SendBytes(payload, true); err != nil {
 			s.logger.Error("Could not send message", zap.Error(err))
 			s.Close("could not send message", runtime.PresenceReasonDisconnect)
+			return err
 		}
 	}
 
