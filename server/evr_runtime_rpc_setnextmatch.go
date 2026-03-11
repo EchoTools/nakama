@@ -70,6 +70,8 @@ func SetNextMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		}
 	}
 
+	auditGroupID := ""
+
 	if !request.MatchID.IsNil() {
 		// Check if the match exists
 		label, err := MatchLabelByID(ctx, nk, request.MatchID)
@@ -98,6 +100,9 @@ func SetNextMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 				return "", runtime.NewError(fmt.Sprintf("Role may not be set for %s matches", label.Mode.String()), StatusInvalidArgument)
 			}
 		}
+		if gid := label.GetGroupID(); !gid.IsNil() {
+			auditGroupID = gid.String()
+		}
 	}
 
 	directive := &JoinDirective{
@@ -114,6 +119,16 @@ func SetNextMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		"target_user_id": request.TargetUserID,
 		"match_id":       request.MatchID.String(),
 	}).Info("Set next match")
+
+	sendRPCAuditMessage(
+		ctx,
+		logger,
+		nk,
+		"player/setnextmatch",
+		auditGroupID,
+		callerUserID,
+		fmt.Sprintf("target_user_id=%s match_id=%s role=%s host_discord_id=%s", request.TargetUserID, request.MatchID.String(), request.Role, request.HostDiscordID),
+	)
 
 	response := SetNextMatchRPCResponse{
 		UserID:  request.TargetUserID,
