@@ -323,6 +323,21 @@ func shutdownMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	if err != nil {
 		return "", err
 	}
+
+	groupID := ""
+	if gid := label.GetGroupID(); !gid.IsNil() {
+		groupID = gid.String()
+	}
+	sendRPCAuditMessage(
+		ctx,
+		logger,
+		nk,
+		"match/terminate",
+		groupID,
+		r.UserID,
+		fmt.Sprintf("match_id=%s mode=%s grace_seconds=%d", request.MatchID.String(), label.Mode.String(), request.GraceSeconds),
+	)
+
 	response := &shutdownMatchResponse{
 		Success:  true,
 		Response: signalResponse,

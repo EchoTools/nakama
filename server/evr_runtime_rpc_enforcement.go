@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -285,6 +286,16 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError("Failed to create response", StatusInternalError)
 	}
 
+	sendRPCAuditMessage(
+		ctx,
+		logger,
+		nk,
+		"enforcement/kick",
+		groupID,
+		userID,
+		fmt.Sprintf("target_user_id=%s sessions_kicked=%d user_notice=%q actions=%s", targetUserID, cnt, request.UserNotice, strings.Join(actions, "; ")),
+	)
+
 	return string(responseData), nil
 }
 
@@ -504,6 +515,16 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 		zap.String("new_notice", newUserNotice),
 		zap.Time("previous_expiry", record.Expiry),
 		zap.Time("new_expiry", newExpiry),
+	)
+
+	sendRPCAuditMessage(
+		ctx,
+		logger,
+		nk,
+		"enforcement/record/edit",
+		request.GroupID,
+		userID,
+		fmt.Sprintf("target_user_id=%s record_id=%s new_expiry=%d new_notice=%q", request.TargetUserID, request.RecordID, newExpiry.Unix(), newUserNotice),
 	)
 
 	response := EnforcementRecordEditResponse{

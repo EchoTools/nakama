@@ -150,6 +150,14 @@ func MatchLockRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 		return "", runtime.NewError(fmt.Sprintf("Failed to save matchmaking settings: %s", err.Error()), StatusInternalError)
 	}
 
+	auditDetails := fmt.Sprintf("target_user_id=%s target_discord_id=%s", targetUserID, targetDiscordID)
+	if response.Locked {
+		auditDetails = fmt.Sprintf("%s lock=true leader_discord_id=%s reason=%q", auditDetails, request.LeaderDiscordID, request.Reason)
+	} else {
+		auditDetails = fmt.Sprintf("%s lock=false previous_leader_id=%s", auditDetails, previousLeaderID)
+	}
+	sendRPCAuditMessage(ctx, logger, nk, "player/matchlock", "", callerUserID, auditDetails)
+
 	return response.String(), nil
 }
 

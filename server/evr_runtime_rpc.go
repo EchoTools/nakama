@@ -409,6 +409,16 @@ func KickPlayerRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 		SessionIDs: sessionIDs,
 	}
 
+	sendRPCAuditMessage(
+		ctx,
+		logger,
+		nk,
+		"player/kick",
+		"",
+		callerID,
+		fmt.Sprintf("target_user_id=%s disconnected_sessions=%d", request.UserID, len(sessionIDs)),
+	)
+
 	data, err := json.Marshal(response)
 	if err != nil {
 		return "", err
