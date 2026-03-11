@@ -427,7 +427,9 @@ func (s *EasyStream) StreamJson(data interface{}, isNullTerminated bool, compres
 			if _, err = w.Write(b); err != nil {
 				return err
 			}
-			w.Close()
+			if err := w.Close(); err != nil {
+				return fmt.Errorf("zlib close error: %w", err)
+			}
 		case ZstdCompression:
 			if err := binary.Write(s.w, binary.LittleEndian, uint32(len(b))); err != nil {
 				return fmt.Errorf("write error: %w", err)
@@ -439,7 +441,9 @@ func (s *EasyStream) StreamJson(data interface{}, isNullTerminated bool, compres
 			if _, err = w.Write(b); err != nil {
 				return err
 			}
-			w.Close()
+			if err := w.Close(); err != nil {
+				return fmt.Errorf("zstd close error: %w", err)
+			}
 		case NoCompression:
 			if _, err := s.w.Write(b); err != nil {
 				return err
@@ -516,7 +520,9 @@ func (s *EasyStream) StreamJSONRawMessage(data *json.RawMessage, isNullTerminate
 			if _, err = w.Write(b); err != nil {
 				return err
 			}
-			w.Close()
+			if err := w.Close(); err != nil {
+				return fmt.Errorf("zlib close error: %w", err)
+			}
 		case ZstdCompression:
 			l32 := uint32(len(b))
 			if err := binary.Write(s.w, binary.LittleEndian, l32); err != nil {
@@ -529,7 +535,9 @@ func (s *EasyStream) StreamJSONRawMessage(data *json.RawMessage, isNullTerminate
 			if _, err = w.Write(b); err != nil {
 				return err
 			}
-			w.Close()
+			if err := w.Close(); err != nil {
+				return fmt.Errorf("zstd close error: %w", err)
+			}
 		case NoCompression:
 			if _, err := s.w.Write(b); err != nil {
 				return err
