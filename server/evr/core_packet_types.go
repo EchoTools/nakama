@@ -109,8 +109,6 @@ func NewMessageFromHash(hash uint64) Message {
 		return &LobbyPingResponse{}
 	case 0x6c8f16cd9f8964c5:
 		return &ChannelInfoResponse{}
-	case 0x6d4de3650ee3110e:
-		return &LobbySessionSuccessv4{}
 	case 0x6d4de3650ee3110f:
 		return &LobbySessionSuccessv5{}
 	case 0x6d54a19a3ff24415:
