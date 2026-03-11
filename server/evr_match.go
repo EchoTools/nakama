@@ -289,10 +289,33 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		if state.Started() && state.terminateTick > 0 {
 			return state, false, ErrJoinRejectReasonMatchTerminating.Error()
 		}
-
-		// Only allow spectators to join closed/ending matches
-		if !meta.Presence.IsSpectator() {
+		// Allow reconnecting players (crash recovery) to bypass closed match check
+		_, hasReconnectReservation := state.reconnectReservations[meta.Presence.GetUserId()]
+		if !meta.Presence.IsSpectator() && !hasReconnectReservation {
 			return state, false, ErrJoinRejectReasonMatchClosed.Error()
+		}
+	}
+
+	if rr, ok := state.reconnectReservations[meta.Presence.GetUserId()]; ok {
+		meta.Presence.RoleAlignment = rr.Presence.RoleAlignment
+		delete(state.reconnectReservations, meta.Presence.GetUserId())
+		state.rebuildCache()
+		logger.WithFields(map[string]any{
+			"uid":            meta.Presence.GetUserId(),
+			"role_alignment": rr.Presence.RoleAlignment,
+		}).Info("Player reconnecting from crash. Restoring role alignment.")
+		history := NewEarlyQuitHistory(meta.Presence.GetUserId())
+		if err := StorableRead(ctx, nk, meta.Presence.GetUserId(), history, false); err != nil {
+			logger.WithField("error", err).Warn("Failed to load early quit history for forgiveness")
+		} else if history.ForgiveQuit(state.ID) {
+			if err := StorableWrite(ctx, nk, meta.Presence.GetUserId(), history); err != nil {
+				logger.Warn("Failed to write early quit history after forgiveness")
+			}
+			eqconfig := NewEarlyQuitConfig()
+			if err := StorableRead(ctx, nk, meta.Presence.GetUserId(), eqconfig, false); err == nil {
+				eqconfig.DecrementPenaltyOnly()
+				_ = StorableWrite(ctx, nk, meta.Presence.GetUserId(), eqconfig)
+			}
 		}
 	}
 
