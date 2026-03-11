@@ -1139,8 +1139,6 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				} else {
 					state.matchSummarySent = true
 				}
-			} else {
-				state.matchSummarySent = true
 			}
 		}
 	}
