@@ -21,19 +21,16 @@ nakama: $(SRC_FILES)
 		-o nakama
 
 build: $(SRC_FILES)
-		docker buildx build \
-			--build-arg VERSION=$(GIT_DESCRIBE) \
-			-t ghcr.io/echotools/nakama:$(TAG) . -f build/Dockerfile.local
+	docker buildx build \
+		--build-arg VERSION=$(GIT_DESCRIBE) \
+		-t ghcr.io/echotools/nakama:$(TAG) . -f build/Dockerfile.local
 
-release: build
-	@if [ "$(TAG)" == "dev" ]; then \
-		echo "Not on a tag, not building a release"; \
-		exit 1; \
-	else \
-		docker buildx build --push \
-			--build-arg VERSION=$(GIT_DESCRIBE) \
-			-t ghcr.io/echotools/nakama:latest . -f build/Dockerfile.local; \
-	fi
+release: $(SRC_FILES)
+	docker buildx build --push \
+		--build-arg VERSION=$(GIT_DESCRIBE) \
+		-t ghcr.io/echotools/nakama:$(TAG) \
+		-t ghcr.io/echotools/nakama:latest \
+		. -f build/Dockerfile.local \
 
 # Benchmark targets
 bench-baseline:
