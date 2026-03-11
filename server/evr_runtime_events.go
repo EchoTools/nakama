@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -102,6 +103,7 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		&EventRemoteLogSet{},
 		&EventServerProfileUpdate{},
 		&EventMatchDataJournal{},
+		&EventMatchSummary{},
 	})
 
 	go func() {
@@ -166,12 +168,20 @@ func (h *EventDispatcher) eventFn(ctx context.Context, logger runtime.Logger, ev
 }
 
 func (h *EventDispatcher) unmarshalEventFactory(events []Event) func(event *api.Event) (Event, error) {
-	eventMap := make(map[string]Event)
+	eventMap := make(map[string]reflect.Type)
 	for _, e := range events {
-		eventMap[fmt.Sprintf("%T", e)] = e
+		t := reflect.TypeOf(e)
+		if t.Kind() != reflect.Ptr {
+			continue
+		}
+		eventMap[fmt.Sprintf("%T", e)] = t.Elem()
 	}
 	return func(event *api.Event) (Event, error) {
-		if e, ok := eventMap[event.Name]; ok {
+		if t, ok := eventMap[event.Name]; ok {
+			e, ok := reflect.New(t).Interface().(Event)
+			if !ok {
+				return nil, fmt.Errorf("event type does not implement Event: %s", event.Name)
+			}
 			if err := json.Unmarshal([]byte(event.Properties["payload"]), e); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal event payload: %v", err)
 			}
