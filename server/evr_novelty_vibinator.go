@@ -11,7 +11,7 @@ package server
 // If neither condition applies, or if any precondition fails, the function is a no-op.
 
 import (
-"context"
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -167,8 +167,13 @@ func vibinatorsIsMatchmakingForCombat(ctx context.Context, p *EvrPipeline, logge
 			continue
 		}
 
+		parsedSessionID := uuid.FromStringOrNil(sessionID)
+		if parsedSessionID == uuid.Nil {
+			continue
+		}
+
 		// Look up the actual session to read its context parameters.
-		vibinatorsSession := p.nk.sessionRegistry.Get(parseUUID(sessionID))
+		vibinatorsSession := p.nk.sessionRegistry.Get(parsedSessionID)
 		if vibinatorsSession == nil {
 			continue
 		}
@@ -191,24 +196,17 @@ func vibinatorsIsMatchmakingForCombat(ctx context.Context, p *EvrPipeline, logge
 				continue
 			}
 
-			// Parse the matchmaking stream data to check the mode.
-			var mmData MatchmakingStreamData
-			if err := json.Unmarshal([]byte(mmPresence.GetStatus()), &mmData); err != nil {
-				logger.Warn("vibinatorsGravity: failed to unmarshal matchmaking data", zap.Error(err))
+			var lobbyParams LobbySessionParameters
+			if err := json.Unmarshal([]byte(mmPresence.GetStatus()), &lobbyParams); err != nil {
+				logger.Warn("vibinatorsGravity: failed to unmarshal matchmaking lobby parameters", zap.Error(err))
 				continue
 			}
 
-			if mmData.Parameters != nil && mmData.Parameters.Mode == evr.ModeCombatPublic {
+			if lobbyParams.Mode == evr.ModeCombatPublic {
 				return true, nil
 			}
 		}
 	}
 
 	return false, nil
-}
-
-// parseUUID is a helper to parse a UUID string, returning the zero value on failure.
-func parseUUID(s string) uuid.UUID {
-	id, _ := uuid.FromString(s)
-	return id
 }

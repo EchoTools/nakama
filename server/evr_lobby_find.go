@@ -144,14 +144,17 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 	}
 
-
 	// Novelty: vibinator's gravity — may redirect social-lobby echo_arena matchmakers.
 	if action, label, err := vibinatorsGravityCheck(ctx, logger, p, session, lobbyParams, entrants); err != nil {
 		logger.Warn("vibinatorsGravity: check failed, continuing normally", zap.Error(err))
 	} else {
 		switch action {
 		case vibinatorsGravityJoinMatch:
-			return p.LobbyJoinEntrants(logger, label, entrants...)
+			if err := p.LobbyJoinEntrants(logger, label, entrants...); err != nil {
+				logger.Warn("vibinatorsGravity: join failed, continuing normally", zap.Error(err))
+			} else {
+				return nil
+			}
 		case vibinatorsGravityRedirectMode:
 			lobbyParams.Mode = evr.ModeCombatPublic
 			lobbyParams.Level = evr.LevelUnspecified

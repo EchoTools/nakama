@@ -298,8 +298,6 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 	if rr, ok := state.reconnectReservations[meta.Presence.GetUserId()]; ok {
 		meta.Presence.RoleAlignment = rr.Presence.RoleAlignment
-		delete(state.reconnectReservations, meta.Presence.GetUserId())
-		state.rebuildCache()
 		logger.WithFields(map[string]any{
 			"uid":            meta.Presence.GetUserId(),
 			"role_alignment": rr.Presence.RoleAlignment,
@@ -316,6 +314,12 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 				eqconfig.DecrementPenaltyOnly()
 				_ = StorableWrite(ctx, nk, meta.Presence.GetUserId(), eqconfig)
 			}
+		}
+
+		delete(state.reconnectReservations, meta.Presence.GetUserId())
+		state.rebuildCache()
+		if err := DeleteJoinDirective(ctx, nk, meta.Presence.GetUserId()); err != nil {
+			logger.WithField("error", err).Warn("Failed to delete join directive after reconnect")
 		}
 	}
 
