@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	rtapi "github.com/echotools/nevr-common/v4/gen/go/rtapi/v1"
@@ -1233,49 +1234,31 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 	logger.Debug("MatchTerminate called.")
 	nk.MetricsCounterAdd("match_terminate_count", state.MetricsTags(), 1)
 
-	// Send match summary if not already sent
+	var summaryEvent *EventMatchSummary
 	if !state.matchSummarySent && len(state.participations) > 0 {
 		state.matchSummarySent = true
-		if err := SendMatchSummary(ctx, logger, nk, state); err != nil {
-			logger.WithField("error", err).Error("failed to send match summary on terminate")
-		}
+		summaryEvent = BuildMatchSummary(state)
 	}
 
-	// Private-match post transition is scheduled after termination begins to avoid
-	// blocking MatchLoop with synchronous allocation/signaling work.
-	if state.Mode == evr.ModeArenaPrivate && state.GameState.IsMatchOver() {
-		schedulePostMatchSocialLobbyAllocation(logger, nk, state)
+	playerSessionIDs := make([]string, 0, len(state.presenceMap))
+	for _, presence := range state.presenceMap {
+		playerSessionIDs = append(playerSessionIDs, presence.GetSessionId())
 	}
 
-	// Persist the label so post-match remote log processing can look it up after the match ends.
-	termCtx, termCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer termCancel()
-	if err := StoreMatchLabel(termCtx, nk, state); err != nil {
-		logger.WithField("error", err).Warn("failed to store match label on terminate")
-	}
-
+	serverSessionID := ""
 	if state.server != nil {
-		// Disconnect the players
-		for _, presence := range state.presenceMap {
-			logger.WithFields(map[string]any{
-				"uid": presence.GetUserId(),
-				"sid": presence.GetSessionId(),
-			}).Warn("Match terminating, disconnecting player.")
-			nk.SessionDisconnect(ctx, presence.EntrantID.String(), runtime.PresenceReasonDisconnect)
-		}
-		// Disconnect the broadcasters session
-		logger.WithFields(map[string]any{
-			"uid": state.server.GetUserId(),
-			"sid": state.server.GetSessionId(),
-		}).Warn("Match terminating, disconnecting broadcaster.")
-
-		nk.SessionDisconnect(ctx, state.server.GetSessionId(), runtime.PresenceReasonDisconnect)
+		serverSessionID = state.server.GetSessionId()
 	}
 
-	// Cleanup Discord session message if it exists
-	if appBot := globalAppBot.Load(); appBot != nil && appBot.sessionsManager != nil {
-		appBot.sessionsManager.RemoveSessionMessage(state.ID.String())
-	}
+	enqueueMatchTerminationTask(logger, matchTerminationTask{
+		nk:                           nk,
+		stateSnapshot:                cloneMatchLabelForTermination(logger, state),
+		summaryEvent:                 summaryEvent,
+		matchID:                      state.ID.String(),
+		playerSessionIDs:             playerSessionIDs,
+		serverSessionID:              serverSessionID,
+		schedulePostMatchSocialLobby: state.Mode == evr.ModeArenaPrivate && state.GameState.IsMatchOver(),
+	})
 
 	return nil
 }
@@ -1796,20 +1779,126 @@ func TriggerAutoReport(ctx context.Context, logger runtime.Logger, userID string
 		zap.Int32("penalty_level", penaltyLevel))
 }
 
-func schedulePostMatchSocialLobbyAllocation(logger runtime.Logger, nk runtime.NakamaModule, state *MatchLabel) {
-	serviceSettings := ServiceSettings()
-	if serviceSettings == nil || !serviceSettings.Matchmaking.EnablePostMatchSocialLobby {
+const (
+	matchTerminationWorkerCount = 4
+	matchTerminationQueueSize   = 1024
+)
+
+type matchTerminationTask struct {
+	logger                       runtime.Logger
+	nk                           runtime.NakamaModule
+	stateSnapshot                *MatchLabel
+	summaryEvent                 *EventMatchSummary
+	matchID                      string
+	playerSessionIDs             []string
+	serverSessionID              string
+	schedulePostMatchSocialLobby bool
+}
+
+type matchTerminationQueue struct {
+	ch chan matchTerminationTask
+}
+
+var (
+	matchTerminationQueueOnce sync.Once
+	globalMatchTerminationQ   *matchTerminationQueue
+)
+
+func getMatchTerminationQueue() *matchTerminationQueue {
+	matchTerminationQueueOnce.Do(func() {
+		q := &matchTerminationQueue{ch: make(chan matchTerminationTask, matchTerminationQueueSize)}
+		for i := 0; i < matchTerminationWorkerCount; i++ {
+			go func() {
+				for task := range q.ch {
+					processMatchTerminationTask(task)
+				}
+			}()
+		}
+		globalMatchTerminationQ = q
+	})
+	return globalMatchTerminationQ
+}
+
+func enqueueMatchTerminationTask(logger runtime.Logger, task matchTerminationTask) {
+	task.logger = logger
+	q := getMatchTerminationQueue()
+	select {
+	case q.ch <- task:
+	default:
+		logger.WithField("match_id", task.matchID).Warn("Match termination queue full; dropping async termination task")
+	}
+}
+
+func processMatchTerminationTask(task matchTerminationTask) {
+	logger := task.logger
+	if logger == nil {
 		return
 	}
 
-	go func() {
-		allocCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+	if task.nk == nil || task.stateSnapshot == nil {
+		return
+	}
 
-		if err := allocatePostMatchSocialLobby(allocCtx, logger, nk, state); err != nil {
-			logger.Error("Failed to allocate post-match social lobby", zap.Error(err))
+	if task.summaryEvent != nil {
+		summaryCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := SendEvent(summaryCtx, task.nk, task.summaryEvent); err != nil {
+			logger.WithFields(map[string]any{"match_id": task.matchID, "error": err}).Error("failed to send match summary on terminate")
 		}
-	}()
+		cancel()
+	}
+
+	if task.schedulePostMatchSocialLobby {
+		serviceSettings := ServiceSettings()
+		if serviceSettings != nil && serviceSettings.Matchmaking.EnablePostMatchSocialLobby {
+			allocCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := allocatePostMatchSocialLobby(allocCtx, logger, task.nk, task.stateSnapshot); err != nil {
+				logger.WithFields(map[string]any{"match_id": task.matchID, "error": err}).Error("Failed to allocate post-match social lobby")
+			}
+			cancel()
+		}
+	}
+
+	termCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := StoreMatchLabel(termCtx, task.nk, task.stateSnapshot); err != nil {
+		logger.WithFields(map[string]any{"match_id": task.matchID, "error": err}).Warn("failed to store match label on terminate")
+	}
+	cancel()
+
+	for _, sid := range task.playerSessionIDs {
+		if sid == "" {
+			continue
+		}
+		if err := task.nk.SessionDisconnect(context.Background(), sid, runtime.PresenceReasonDisconnect); err != nil {
+			logger.WithFields(map[string]any{"match_id": task.matchID, "sid": sid, "error": err}).Warn("Failed to disconnect player on terminate")
+		}
+	}
+
+	if task.serverSessionID != "" {
+		if err := task.nk.SessionDisconnect(context.Background(), task.serverSessionID, runtime.PresenceReasonDisconnect); err != nil {
+			logger.WithFields(map[string]any{"match_id": task.matchID, "sid": task.serverSessionID, "error": err}).Warn("Failed to disconnect broadcaster on terminate")
+		}
+	}
+
+	if appBot := globalAppBot.Load(); appBot != nil && appBot.sessionsManager != nil {
+		appBot.sessionsManager.RemoveSessionMessage(task.matchID)
+	}
+}
+
+func cloneMatchLabelForTermination(logger runtime.Logger, state *MatchLabel) *MatchLabel {
+	if state == nil {
+		return nil
+	}
+	b, err := json.Marshal(state)
+	if err != nil {
+		logger.WithField("error", err).Warn("Failed to snapshot match state for async terminate")
+		return state
+	}
+	clone := &MatchLabel{}
+	if err := json.Unmarshal(b, clone); err != nil {
+		logger.WithField("error", err).Warn("Failed to unmarshal match snapshot for async terminate")
+		return state
+	}
+	return clone
 }
 
 // allocatePostMatchSocialLobby allocates a new social lobby for players to transition to after a private match
