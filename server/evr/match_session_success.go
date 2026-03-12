@@ -32,7 +32,7 @@ type LobbySessionSuccess struct {
 }
 
 // NewLobbySessionSuccessv5 initializes a new LobbySessionSuccessv5 message.
-func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, channelUUID uuid.UUID, endpoint Endpoint, role int16, _ bool, _ bool) *LobbySessionSuccess {
+func NewLobbySessionSuccessv5(gameTypeSymbol Symbol, matchingSession uuid.UUID, channelUUID uuid.UUID, endpoint Endpoint, role int16, _ bool, _ bool) *LobbySessionSuccess {
 
 	clientConfig := DefaultClientPacketConfig()
 	serverConfig := DefaultServerPacketConfig()
