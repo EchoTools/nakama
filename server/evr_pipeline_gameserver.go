@@ -266,7 +266,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 
 	// Warn the user that using regionHash is deprecated.
 	// Allow unspecified or default region in the -serverregion argument
-	allowedRegions := []evr.Symbol{evr.UnspecifiedRegion, evr.DefaultRegion}
+	allowedRegions := []evr.Symbol{0, evr.UnspecifiedRegion, evr.DefaultRegion}
 
 	if !slices.Contains(allowedRegions, regionHash) {
 		// Send the message to the user that the serverregion command line argument is deprecated
@@ -507,6 +507,14 @@ func (p *EvrPipeline) buildRegionCodes(ctx context.Context, logger *zap.Logger, 
 		}
 	}
 	slices.Sort(regionCodes)
+
+	// remove duplicates while preserving order and prioritize generatedRegion if it exists in the list
+	for i := 1; i < len(regionCodes); i++ {
+		if c := regionCodes[i]; c == regionCodes[i-1] || c == "" {
+			regionCodes = append(regionCodes[:i], regionCodes[i+1:]...)
+			i--
+		}
+	}
 
 	if !slices.Contains(regionCodes, generatedRegion) {
 		regionCodes = append(regionCodes, generatedRegion)

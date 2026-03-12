@@ -43,7 +43,6 @@ var (
 		0xfabf5f8719bfebf3: (*LobbyPingRequest)(nil),
 		0x6047d0043033ae4f: (*LobbyPingResponse)(nil),
 		0x6c8f16cd9f8964c5: (*ChannelInfoResponse)(nil),
-		0x6d4de3650ee3110e: (*LobbySessionSuccessv4)(nil),
 		0x6d4de3650ee3110f: (*LobbySessionSuccessv5)(nil),
 		0x6d54a19a3ff24415: (*UpdateClientProfile)(nil),
 		0x7777777777770000: (*GameServerSessionStart)(nil),            // Legacy message

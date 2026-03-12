@@ -34,6 +34,10 @@ func (g *GameState) GetSessionScoreboard() *SessionScoreboard {
 	return g.SessionScoreboard
 }
 
+func (g *GameState) IsMatchOver() bool {
+	return g != nil && g.MatchOver
+}
+
 func NewGameState() *GameState {
 	return &GameState{}
 }

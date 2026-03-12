@@ -7,10 +7,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
-const (
-	HeadsetTypePCVR       = 0
-	HeadsetTypeStandalone = 1
-)
+const PacketKeySize = 0x20
 
 // LobbySessionSuccess represents a message from server to client indicating that a request to create/join/find a game server session succeeded.
 type LobbySessionSuccess struct {
@@ -22,8 +19,8 @@ type LobbySessionSuccess struct {
 	UserSlot           uint16
 	Flags32            uint16
 	SessionFlags       uint8
-	ServerEncoderFlags uint64
-	ClientEncoderFlags uint64
+	ServerEncoderFlags PacketEncoderConfig
+	ClientEncoderFlags PacketEncoderConfig
 	ServerSequenceId   uint64
 	ServerMacKey       []byte
 	ServerEncKey       []byte
@@ -35,101 +32,33 @@ type LobbySessionSuccess struct {
 }
 
 // NewLobbySessionSuccessv5 initializes a new LobbySessionSuccessv5 message.
-func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, channelUUID uuid.UUID, endpoint Endpoint, role int16, disableEncryption bool, disableMAC bool) *LobbySessionSuccess {
+func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, channelUUID uuid.UUID, endpoint Endpoint, role int16, _ bool, _ bool) *LobbySessionSuccess {
 
-	clientSettings := &PacketEncoderSettings{
-		EncryptionEnabled:       !disableEncryption,
-		MACEnabled:              !disableMAC,
-		MACDigestSize:           0x20,
-		MACPBKDF2IterationCount: 0x00,
-		MACKeySize:              0x20,
-		EncryptionKeySize:       0x20,
-		RandomKeySize:           0x20,
-	}
-	serverSettings := &PacketEncoderSettings{
-		EncryptionEnabled:       !disableEncryption,
-		MACEnabled:              !disableMAC,
-		MACDigestSize:           0x20,
-		MACPBKDF2IterationCount: 0x00,
-		MACKeySize:              0x20,
-		EncryptionKeySize:       0x20,
-		RandomKeySize:           0x20,
-	}
+	clientConfig := DefaultClientPacketConfig()
+	serverConfig := DefaultServerPacketConfig()
+	cryptoMaterial := NewLobbySessionCryptoMaterial(serverConfig, clientConfig)
 	return &LobbySessionSuccess{
 		GameMode:           gameTypeSymbol,
 		LobbyID:            matchingSession,
 		GroupID:            channelUUID,
 		Endpoint:           endpoint,
 		TeamIndex:          role,
-		ServerEncoderFlags: serverSettings.ToFlags(),
-		ClientEncoderFlags: clientSettings.ToFlags(),
-		ServerSequenceId:   binary.LittleEndian.Uint64(GetRandomBytes(0x08)),
-		ServerMacKey:       GetRandomBytes(serverSettings.MACKeySize),
-		ServerEncKey:       GetRandomBytes(serverSettings.EncryptionKeySize),
-		ServerRandomKey:    GetRandomBytes(serverSettings.RandomKeySize),
-		ClientSequenceId:   binary.LittleEndian.Uint64(GetRandomBytes(0x08)),
-		ClientMacKey:       GetRandomBytes(clientSettings.MACKeySize),
-		ClientEncKey:       GetRandomBytes(clientSettings.EncryptionKeySize),
-		ClientRandomKey:    GetRandomBytes(clientSettings.RandomKeySize),
+		ServerEncoderFlags: serverConfig,
+		ClientEncoderFlags: clientConfig,
+		ServerSequenceId:   cryptoMaterial.ServerSequenceId,
+		ServerMacKey:       cryptoMaterial.ServerMacKey,
+		ServerEncKey:       cryptoMaterial.ServerEncKey,
+		ServerRandomKey:    cryptoMaterial.ServerRandomKey,
+		ClientSequenceId:   cryptoMaterial.ClientSequenceId,
+		ClientMacKey:       cryptoMaterial.ClientMacKey,
+		ClientEncKey:       cryptoMaterial.ClientEncKey,
+		ClientRandomKey:    cryptoMaterial.ClientRandomKey,
 	}
-}
-
-func (m LobbySessionSuccess) Version4() *LobbySessionSuccessv4 {
-	s := LobbySessionSuccessv4(m)
-	return &s
 }
 
 func (m LobbySessionSuccess) Version5() *LobbySessionSuccessv5 {
 	s := LobbySessionSuccessv5(m)
 	return &s
-}
-
-type LobbySessionSuccessv4 LobbySessionSuccess // LobbSessionSuccessv4 is v5 without the channel UUID.
-
-func (m LobbySessionSuccessv4) Token() string {
-	return "SNSLobbySessionSuccessv4"
-}
-
-func (m *LobbySessionSuccessv4) Symbol() Symbol {
-	return SymbolOf(m)
-}
-
-// ToString returns a string representation of the LobbySessionSuccessv5 message.
-func (m *LobbySessionSuccessv4) String() string {
-	return fmt.Sprintf("%s(game_type=%d, matching_session=%s, endpoint=%v, team_index=%d)",
-		m.Token(),
-		m.GameMode,
-		m.LobbyID,
-		m.Endpoint,
-		m.TeamIndex,
-	)
-}
-
-func (m *LobbySessionSuccessv4) Stream(s *EasyStream) error {
-	var se *PacketEncoderSettings
-	var ce *PacketEncoderSettings
-
-	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.GameMode) },
-		func() error { return s.StreamGUID(&m.LobbyID) },
-		func() error { return s.StreamStruct(&m.Endpoint) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.TeamIndex) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.UserSlot) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.Flags32) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.SessionFlags) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.ServerEncoderFlags) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.ClientEncoderFlags) },
-		func() error { se = PacketEncoderSettingsFromFlags(m.ServerEncoderFlags); return nil },
-		func() error { ce = PacketEncoderSettingsFromFlags(m.ClientEncoderFlags); return nil },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.ServerSequenceId) },
-		func() error { return s.StreamBytes(&m.ServerMacKey, se.MACKeySize) },
-		func() error { return s.StreamBytes(&m.ServerEncKey, se.EncryptionKeySize) },
-		func() error { return s.StreamBytes(&m.ServerRandomKey, se.RandomKeySize) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.ClientSequenceId) },
-		func() error { return s.StreamBytes(&m.ClientMacKey, ce.MACKeySize) },
-		func() error { return s.StreamBytes(&m.ClientEncKey, ce.EncryptionKeySize) },
-		func() error { return s.StreamBytes(&m.ClientRandomKey, ce.RandomKeySize) },
-	})
 }
 
 type LobbySessionSuccessv5 LobbySessionSuccess
@@ -154,9 +83,10 @@ func (m *LobbySessionSuccessv5) String() string {
 	)
 }
 func (m *LobbySessionSuccessv5) Stream(s *EasyStream) error {
-	var se *PacketEncoderSettings
-	var ce *PacketEncoderSettings
-	return RunErrorFunctions([]func() error{
+	encoderConfig0 := m.ServerEncoderFlags.ToFlags()
+	encoderConfig1 := m.ClientEncoderFlags.ToFlags()
+
+	err := RunErrorFunctions([]func() error{
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.GameMode) },
 		func() error { return s.StreamGUID(&m.LobbyID) },
 		func() error { return s.StreamGUID(&m.GroupID) },
@@ -164,99 +94,134 @@ func (m *LobbySessionSuccessv5) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Flags32) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.SessionFlags) },
 		func() error { return s.Skip(3) }, // Padding
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.ServerEncoderFlags) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.ClientEncoderFlags) },
-		func() error { se = PacketEncoderSettingsFromFlags(m.ServerEncoderFlags); return nil },
-		func() error { ce = PacketEncoderSettingsFromFlags(m.ClientEncoderFlags); return nil },
+		func() error { return s.StreamNumber(binary.LittleEndian, &encoderConfig0) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &encoderConfig1) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.ServerSequenceId) },
-		func() error { return s.StreamBytes(&m.ServerMacKey, se.MACKeySize) },
-		func() error { return s.StreamBytes(&m.ServerEncKey, se.EncryptionKeySize) },
-		func() error { return s.StreamBytes(&m.ServerRandomKey, se.RandomKeySize) },
+		func() error { return s.StreamBytes(&m.ServerMacKey, int(m.ServerEncoderFlags.MacKeySize)) },
+		func() error { return s.StreamBytes(&m.ServerEncKey, int(m.ServerEncoderFlags.EncryptionKeySize)) },
+		func() error { return s.StreamBytes(&m.ServerRandomKey, int(m.ServerEncoderFlags.RandomKeySize)) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.ClientSequenceId) },
-		func() error { return s.StreamBytes(&m.ClientMacKey, ce.MACKeySize) },
-		func() error { return s.StreamBytes(&m.ClientEncKey, ce.EncryptionKeySize) },
-		func() error { return s.StreamBytes(&m.ClientRandomKey, ce.RandomKeySize) },
+		func() error { return s.StreamBytes(&m.ClientMacKey, int(m.ClientEncoderFlags.MacKeySize)) },
+		func() error { return s.StreamBytes(&m.ClientEncKey, int(m.ClientEncoderFlags.EncryptionKeySize)) },
+		func() error { return s.StreamBytes(&m.ClientRandomKey, int(m.ClientEncoderFlags.RandomKeySize)) },
 	})
-}
-
-func DefaultClientEncoderSettings() *PacketEncoderSettings {
-	return &PacketEncoderSettings{
-		EncryptionEnabled:       true,
-		MACEnabled:              true,
-		MACDigestSize:           0x40,
-		MACPBKDF2IterationCount: 0x00,
-		MACKeySize:              0x20,
-		EncryptionKeySize:       0x20,
-		RandomKeySize:           0x20,
+	if err != nil {
+		return err
 	}
-}
-func DefaultServerEncoderSettings() *PacketEncoderSettings {
-	return &PacketEncoderSettings{
-		EncryptionEnabled:       true,
-		MACEnabled:              true,
-		MACDigestSize:           0x20,
-		MACPBKDF2IterationCount: 0x00,
-		MACKeySize:              0x20,
-		EncryptionKeySize:       0x20,
-		RandomKeySize:           0x20,
-	}
+
+	m.ServerEncoderFlags = PacketEncoderConfigFromFlags(encoderConfig0)
+	m.ClientEncoderFlags = PacketEncoderConfigFromFlags(encoderConfig1)
+	return nil
 }
 
-// PacketEncoderSettings describes packet encoding settings for one party in a game server <-> client connection.
-type PacketEncoderSettings struct {
-	EncryptionEnabled       bool // Indicates whether encryption should be used for each packet.
-	MACEnabled              bool // Indicates whether MACs should be attached to each packet.
-	MACDigestSize           int  // The byte size (<= 512bit) of the MAC output packets should use. (cut from the front of the HMAC-SHA512)
-	MACPBKDF2IterationCount int  // The iteration count for PBKDF2 HMAC-SHA512.
-	MACKeySize              int  // The byte size of the HMAC-SHA512 key.
-	EncryptionKeySize       int  // The byte size of the AES-CBC key. (default: 32/AES-256-CBC)
-	RandomKeySize           int  // The byte size of the random key for the RNG.
+type PacketEncoderConfig struct {
+	EncryptionEnabled   bool
+	MacEnabled          bool
+	MacDigestSize       uint16
+	MacPbkdf2Iterations uint16
+	MacKeySize          uint16
+	EncryptionKeySize   uint16
+	RandomKeySize       uint16
 }
 
-// NOTE on Keysize:
-// RandomKeySize represents the byte size of the random key used by the RNG to seed itself in the packet encoding process.
-// The Keccak-F permutation (1600-bit) is used as a random number generator.
-// Both parties exchange their packet encoding settings.
-// Each packet is encrypted/decrypted using the party's encryption key.
-// The 16-byte initialization vector (IV) is generated by the RNG for each step in the sequence ID.
-
-// NewPacketEncoderSettings creates a new PacketEncoderSettings with the provided values.
-func NewPacketEncoderSettings(encryptionEnabled, macEnabled bool, macDigestSize, macPBKDF2IterationCount, macKeySize, encryptionKeySize, randomKeySize int) *PacketEncoderSettings {
-	return &PacketEncoderSettings{
-		EncryptionEnabled:       encryptionEnabled,
-		MACEnabled:              macEnabled,
-		MACDigestSize:           macDigestSize,
-		MACPBKDF2IterationCount: macPBKDF2IterationCount,
-		MACKeySize:              macKeySize,
-		EncryptionKeySize:       encryptionKeySize,
-		RandomKeySize:           randomKeySize,
+func DefaultClientPacketConfig() PacketEncoderConfig {
+	return PacketEncoderConfig{
+		EncryptionEnabled:   true,
+		MacEnabled:          true,
+		MacDigestSize:       0x40,
+		MacPbkdf2Iterations: 0x00,
+		MacKeySize:          0x20,
+		EncryptionKeySize:   0x20,
+		RandomKeySize:       0x20,
 	}
 }
 
-func PacketEncoderSettingsFromFlags(flags uint64) *PacketEncoderSettings {
-	return &PacketEncoderSettings{
-		EncryptionEnabled:       flags&1 != 0,
-		MACEnabled:              flags&2 != 0,
-		MACDigestSize:           int((flags >> 2) & 0xFFF),
-		MACPBKDF2IterationCount: int((flags >> 14) & 0xFFF),
-		MACKeySize:              int((flags >> 26) & 0xFFF),
-		EncryptionKeySize:       int((flags >> 38) & 0xFFF),
-		RandomKeySize:           int((flags >> 50) & 0xFFF),
+func DefaultServerPacketConfig() PacketEncoderConfig {
+	return PacketEncoderConfig{
+		EncryptionEnabled:   true,
+		MacEnabled:          true,
+		MacDigestSize:       0x20,
+		MacPbkdf2Iterations: 0x00,
+		MacKeySize:          0x20,
+		EncryptionKeySize:   0x20,
+		RandomKeySize:       0x20,
 	}
 }
 
-func (p *PacketEncoderSettings) ToFlags() uint64 {
+func PacketEncoderConfigFromFlags(flags uint64) PacketEncoderConfig {
+	return PacketEncoderConfig{
+		EncryptionEnabled:   flags&1 != 0,
+		MacEnabled:          (flags>>1)&1 != 0,
+		MacDigestSize:       uint16((flags >> 2) & 0x0fff),
+		MacPbkdf2Iterations: uint16((flags >> 14) & 0x0fff),
+		MacKeySize:          uint16((flags >> 26) & 0x0fff),
+		EncryptionKeySize:   uint16((flags >> 38) & 0x0fff),
+		RandomKeySize:       uint16((flags >> 50) & 0x0fff),
+	}
+}
+
+func (p PacketEncoderConfig) ToFlags() uint64 {
 	flags := uint64(0)
 	if p.EncryptionEnabled {
 		flags |= 1
 	}
-	if p.MACEnabled {
-		flags |= 2
+	if p.MacEnabled {
+		flags |= 1 << 1
 	}
-	flags |= uint64(p.MACDigestSize&0xFFF) << 2
-	flags |= uint64(p.MACPBKDF2IterationCount&0xFFF) << 14
-	flags |= uint64(p.MACKeySize&0xFFF) << 26
-	flags |= uint64(p.EncryptionKeySize&0xFFF) << 38
-	flags |= uint64(p.RandomKeySize&0xFFF) << 50
+	flags |= uint64(p.MacDigestSize&0x0fff) << 2
+	flags |= uint64(p.MacPbkdf2Iterations&0x0fff) << 14
+	flags |= uint64(p.MacKeySize&0x0fff) << 26
+	flags |= uint64(p.EncryptionKeySize&0x0fff) << 38
+	flags |= uint64(p.RandomKeySize&0x0fff) << 50
 	return flags
+}
+
+type LobbySessionCryptoMaterial struct {
+	ServerSequenceId uint64
+	ServerMacKey     []byte
+	ServerEncKey     []byte
+	ServerRandomKey  []byte
+	ClientSequenceId uint64
+	ClientMacKey     []byte
+	ClientEncKey     []byte
+	ClientRandomKey  []byte
+}
+
+func NewLobbySessionCryptoMaterial(serverConfig, clientConfig PacketEncoderConfig) LobbySessionCryptoMaterial {
+	serverMacKeySize := int(serverConfig.MacKeySize)
+	serverEncKeySize := int(serverConfig.EncryptionKeySize)
+	serverRandomKeySize := int(serverConfig.RandomKeySize)
+	clientMacKeySize := int(clientConfig.MacKeySize)
+	clientEncKeySize := int(clientConfig.EncryptionKeySize)
+	clientRandomKeySize := int(clientConfig.RandomKeySize)
+
+	if serverMacKeySize <= 0 {
+		serverMacKeySize = PacketKeySize
+	}
+	if serverEncKeySize <= 0 {
+		serverEncKeySize = PacketKeySize
+	}
+	if serverRandomKeySize <= 0 {
+		serverRandomKeySize = PacketKeySize
+	}
+	if clientMacKeySize <= 0 {
+		clientMacKeySize = PacketKeySize
+	}
+	if clientEncKeySize <= 0 {
+		clientEncKeySize = PacketKeySize
+	}
+	if clientRandomKeySize <= 0 {
+		clientRandomKeySize = PacketKeySize
+	}
+
+	return LobbySessionCryptoMaterial{
+		ServerSequenceId: binary.LittleEndian.Uint64(GetRandomBytes(0x08)),
+		ServerMacKey:     GetRandomBytes(serverMacKeySize),
+		ServerEncKey:     GetRandomBytes(serverEncKeySize),
+		ServerRandomKey:  GetRandomBytes(serverRandomKeySize),
+		ClientSequenceId: binary.LittleEndian.Uint64(GetRandomBytes(0x08)),
+		ClientMacKey:     GetRandomBytes(clientMacKeySize),
+		ClientEncKey:     GetRandomBytes(clientEncKeySize),
+		ClientRandomKey:  GetRandomBytes(clientRandomKeySize),
+	}
 }

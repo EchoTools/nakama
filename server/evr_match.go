@@ -704,14 +704,14 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			enabled := crashWindow > 0
 
 			hasReconnectReservation := false
-			if p.GetReason() == runtime.PresenceReasonDisconnect && enabled && state.GameState != nil && !state.GameState.MatchOver {
+			if p.GetReason() == runtime.PresenceReasonDisconnect && enabled && !state.GameState.IsMatchOver() {
 				window := time.Duration(crashWindow) * time.Second
 				expiry := time.Now().Add(window)
 				state.reconnectReservations[mp.GetUserId()] = &reconnectReservation{
 					Presence:     mp,
 					Expiry:       expiry,
 					UserID:       mp.GetUserId(),
-					DeferPenalty: state.Mode == evr.ModeArenaPublic && state.GameState != nil && !state.GameState.MatchOver && mp.IsPlayer(),
+					DeferPenalty: state.Mode == evr.ModeArenaPublic && !state.GameState.IsMatchOver() && mp.IsPlayer(),
 				}
 				if err := SetNextMatchID(ctx, nk, mp.GetUserId(), state.ID, TeamIndex(mp.RoleAlignment), ""); err != nil {
 					logger.WithField("error", err).Warn("Failed to set next match ID for crashed player")
@@ -724,7 +724,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			}
 			// If the round is not over, then add an early quit count to the player.
 			// Count all quits before match completion (both pre-game and early quits)
-			if !hasReconnectReservation && state.Mode == evr.ModeArenaPublic && state.GameState != nil && !state.GameState.MatchOver {
+			if !hasReconnectReservation && state.Mode == evr.ModeArenaPublic && !state.GameState.IsMatchOver() {
 				// Only players
 				if mp.IsPlayer() {
 					nk.MetricsCounterAdd("match_entrant_early_quit", tags, 1)
@@ -951,7 +951,9 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 				logger.WithField("update", update).Debug("Received match update message.")
 
-				state.GameState.MatchOver = true
+				if update.MatchOver {
+					state.GameState.MatchOver = true
+				}
 
 				if len(update.Goals) > 0 {
 					state.goals = append(state.goals, update.Goals...)
@@ -1210,21 +1212,6 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		}
 	}
 
-	// Handle private match completion - allocate social lobby for seamless transition
-	// Check every 2 seconds to avoid redundant allocations during the same tick cycle
-	if state.Mode == evr.ModeArenaPrivate && tick%(2*state.tickRate) == 0 {
-		// If the match is over, allocate a social lobby for post-match transition
-		if state.GameState != nil && state.GameState.MatchOver && !state.matchSummarySent {
-			if ServiceSettings().Matchmaking.EnablePostMatchSocialLobby {
-				if err := allocatePostMatchSocialLobby(ctx, logger, nk, state); err != nil {
-					logger.Error("Failed to allocate post-match social lobby", zap.Error(err))
-				} else {
-					state.matchSummarySent = true
-				}
-			}
-		}
-	}
-
 	if updateLabel {
 		if err := m.updateLabel(logger, dispatcher, state); err != nil {
 			logger.Error("failed to update label: %v", err)
@@ -1252,6 +1239,12 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 		if err := SendMatchSummary(ctx, logger, nk, state); err != nil {
 			logger.WithField("error", err).Error("failed to send match summary on terminate")
 		}
+	}
+
+	// Private-match post transition is scheduled after termination begins to avoid
+	// blocking MatchLoop with synchronous allocation/signaling work.
+	if state.Mode == evr.ModeArenaPrivate && state.GameState.IsMatchOver() {
+		schedulePostMatchSocialLobbyAllocation(logger, nk, state)
 	}
 
 	// Persist the label so post-match remote log processing can look it up after the match ends.
@@ -1356,6 +1349,16 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 	return state
 }
 
+// matchSignalBlockedNakamaModule wraps runtime.NakamaModule and blocks MatchSignal calls.
+// This prevents re-entrant signaling from inside a match signal handler, which can deadlock.
+type matchSignalBlockedNakamaModule struct {
+	runtime.NakamaModule
+}
+
+func (n matchSignalBlockedNakamaModule) MatchSignal(_ context.Context, _ string, _ string) (string, error) {
+	return "", fmt.Errorf("nested MatchSignal call blocked inside EvrMatch.MatchSignal")
+}
+
 // MatchSignal is called when a signal is sent into the match.
 func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, data string) (interface{}, string) {
 	state, ok := state_.(*MatchLabel)
@@ -1363,6 +1366,9 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		logger.Error("state not a valid lobby state object")
 		return nil, SignalResponse{Message: "invalid match state"}.String()
 	}
+
+	// Do not allow nested match signaling while inside this handler.
+	nk = matchSignalBlockedNakamaModule{NakamaModule: nk}
 
 	// TODO protobuf's would be nice here.
 	signal := &SignalEnvelope{}
@@ -1788,6 +1794,22 @@ func TriggerAutoReport(ctx context.Context, logger runtime.Logger, userID string
 	logger.Info("Auto-report triggered for player with max early quit penalty",
 		zap.String("user_id", userID),
 		zap.Int32("penalty_level", penaltyLevel))
+}
+
+func schedulePostMatchSocialLobbyAllocation(logger runtime.Logger, nk runtime.NakamaModule, state *MatchLabel) {
+	serviceSettings := ServiceSettings()
+	if serviceSettings == nil || !serviceSettings.Matchmaking.EnablePostMatchSocialLobby {
+		return
+	}
+
+	go func() {
+		allocCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := allocatePostMatchSocialLobby(allocCtx, logger, nk, state); err != nil {
+			logger.Error("Failed to allocate post-match social lobby", zap.Error(err))
+		}
+	}()
 }
 
 // allocatePostMatchSocialLobby allocates a new social lobby for players to transition to after a private match
