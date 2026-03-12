@@ -167,7 +167,6 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		// If there are fewer than SBMMMinPlayerCount players online, reduce the fallback delay
 		if count < ServiceSettings().Matchmaking.SBMMMinPlayerCount {
 			ticketConfig.IncludeSBMMRanges = false
-			ticketConfig.IncludeEarlyQuitPenalty = false
 		}
 	}
 	defer func() {
@@ -215,7 +214,6 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 			logger.Debug("Matchmaking fallback, switching to relaxed criteria")
 
 			// Update ticket config with relaxed criteria
-			ticketConfig.IncludeEarlyQuitPenalty = false
 			ticketConfig.MinCount = 2
 			ticketConfig.MaxCount = 8
 

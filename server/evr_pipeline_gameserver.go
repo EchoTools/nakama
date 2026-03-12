@@ -116,6 +116,8 @@ func sendDiscordServerError(internalIP net.IP, externalIP net.IP, port uint16, s
 
 // errFailedRegistration sends a failure message to the broadcaster and closes the session
 func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, code evr.BroadcasterRegistrationFailureCode) error {
+	// Skip this step in the stack of the logger
+	logger = logger.WithOptions(zap.AddCallerSkip(1))
 	logger.Warn("Failed to register game server", zap.Error(err))
 	envelope := &rtapi.Envelope{
 		Message: &rtapi.Envelope_Error{
@@ -529,6 +531,19 @@ func (p *EvrPipeline) buildRegionCodes(ctx context.Context, logger *zap.Logger, 
 		}
 	}
 
+	// Remove duplicates while preserving order
+	seen := make(map[string]struct{})
+	uniqueRegionCodes := make([]string, 0, len(regionCodes))
+	for _, r := range regionCodes {
+		if r == "" {
+			continue
+		}
+		if _, exists := seen[r]; !exists {
+			seen[r] = struct{}{}
+			uniqueRegionCodes = append(uniqueRegionCodes, r)
+		}
+	}
+	regionCodes = uniqueRegionCodes
 	return regionCodes, generatedRegion, ipInfo
 }
 
