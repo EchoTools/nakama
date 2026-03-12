@@ -928,10 +928,11 @@ var (
 			Description: "Show server status embeds for matches in a specific region (allocators only)",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "region",
-					Description: "Region code to show matches for",
-					Required:    true,
+					Type:         discordgo.ApplicationCommandOptionString,
+					Name:         "region",
+					Description:  "Region code to show matches for",
+					Required:     true,
+					Autocomplete: true,
 				},
 			},
 		},
@@ -2539,7 +2540,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return simpleInteractionResponse(s, i, "no options provided")
 			}
 
-			region := options[0].StringValue()
+			region := strings.ToLower(strings.TrimSpace(options[0].StringValue()))
+			if region == "" {
+				return simpleInteractionResponse(s, i, "region is required")
+			}
 
 			// Acknowledge the interaction first with a deferred response
 			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -3488,7 +3492,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					logger.Error("Failed to respond to interaction", zap.Error(err))
 				}
 
-			case "create":
+			case "create", "show":
 
 				partial := ""
 
@@ -4338,7 +4342,7 @@ func (d *DiscordAppBot) presentRegionFallbackOptions(s *discordgo.Session, i *di
 		Fields: []*discordgo.MessageEmbedField{
 			{
 				Name:   "Available Regions",
-				Value:  fmt.Sprintf("Servers are available in other regions. Please try a different region."),
+				Value:  "Servers are available in other regions. Please try a different region.",
 				Inline: false,
 			},
 		},

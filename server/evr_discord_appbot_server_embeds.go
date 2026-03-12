@@ -3,11 +3,13 @@ package server
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/zap"
 )
@@ -42,41 +44,28 @@ var globalEmbedTracker = &ServerEmbedTracker{
 }
 
 func (d *DiscordAppBot) handleShowServerEmbeds(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID, groupID, region string) error {
+	region = normalizeRegionCode(region)
+	if region == "" {
+		return d.editDeferredResponse(s, i, "Region is required.")
+	}
+
 	// List all matches (reduced limit for performance)
 	matches, err := d.nk.MatchList(ctx, MatchListLimit, true, "", nil, nil, "*")
 	if err != nil {
 		return d.editDeferredResponse(s, i, fmt.Sprintf("❌ Failed to list matches: %v", err))
 	}
 
-	// Filter matches by region
-	var regionMatches []*MatchLabel
-	for _, match := range matches {
-		labelStr := ""
-		if match.Label != nil {
-			labelStr = match.Label.Value
+	guildLabels := collectGuildLabels(logger, matches, groupID)
+	regionMatches, availableRegions, exists := selectRegionMatches(guildLabels, region)
+	if !exists {
+		if len(availableRegions) == 0 {
+			return d.editDeferredResponse(s, i, "No region-backed matches are available for this guild right now.")
 		}
-		label, err := MatchLabelFromString(labelStr)
-		if err != nil {
-			logger.Warn("Failed to parse match label", zap.Error(err))
-			continue
-		}
-
-		// Check if match belongs to this guild (require non-nil GroupID)
-		if label.GroupID == nil || label.GroupID.String() != groupID {
-			continue
-		}
-
-		// Check if match is in the requested region
-		if label.GameServer != nil {
-			matchRegion := label.GameServer.LocationRegionCode(false, false)
-			if matchRegion == region {
-				regionMatches = append(regionMatches, label)
-			}
-		}
+		return d.editDeferredResponse(s, i, fmt.Sprintf("Unknown region `%s`. Available regions: `%s`", region, strings.Join(availableRegions, "`, `")))
 	}
 
 	if len(regionMatches) == 0 {
-		return d.editDeferredResponse(s, i, fmt.Sprintf("No matches found in region `%s`", region))
+		return d.editDeferredResponse(s, i, fmt.Sprintf("No matches currently in region `%s`", region))
 	}
 
 	// Stop any existing embed tracker for this channel and delete old embeds
@@ -106,7 +95,7 @@ func (d *DiscordAppBot) handleShowServerEmbeds(ctx context.Context, logger runti
 	// Create new tracker
 	embedInfo := &ServerEmbedInfo{
 		ChannelID:   channelID,
-		Region:      region,
+		Region:      normalizeRegionCode(region),
 		MessageIDs:  make(map[string]string),
 		LastUpdate:  time.Now(),
 		StopChan:    make(chan struct{}),
@@ -185,7 +174,7 @@ func (d *DiscordAppBot) updateServerEmbeds(ctx context.Context, logger runtime.L
 		}
 
 		if label.GameServer != nil {
-			matchRegion := label.GameServer.LocationRegionCode(false, false)
+			matchRegion := normalizeRegionCode(label.GameServer.LocationRegionCode(false, false))
 			if matchRegion == embedInfo.Region {
 				foundMatches[label.ID.String()] = label
 			}
@@ -397,6 +386,58 @@ func (d *DiscordAppBot) createServerEmbed(label *MatchLabel) *discordgo.MessageE
 	}
 
 	return embed
+}
+
+func normalizeRegionCode(region string) string {
+	return strings.ToLower(strings.TrimSpace(region))
+}
+
+func collectGuildLabels(logger runtime.Logger, matches []*api.Match, groupID string) []*MatchLabel {
+	labels := make([]*MatchLabel, 0, len(matches))
+	for _, match := range matches {
+		if match == nil || match.Label == nil {
+			continue
+		}
+		label, err := MatchLabelFromString(match.Label.Value)
+		if err != nil {
+			logger.Warn("Failed to parse match label", zap.Error(err))
+			continue
+		}
+		if label.GroupID == nil || label.GroupID.String() != groupID {
+			continue
+		}
+		labels = append(labels, label)
+	}
+	return labels
+}
+
+func selectRegionMatches(labels []*MatchLabel, requestedRegion string) ([]*MatchLabel, []string, bool) {
+	requestedRegion = normalizeRegionCode(requestedRegion)
+	regions := make(map[string]struct{})
+	regionMatches := make([]*MatchLabel, 0)
+
+	for _, label := range labels {
+		if label == nil || label.GameServer == nil {
+			continue
+		}
+		matchRegion := normalizeRegionCode(label.GameServer.LocationRegionCode(false, false))
+		if matchRegion == "" {
+			continue
+		}
+		regions[matchRegion] = struct{}{}
+		if matchRegion == requestedRegion {
+			regionMatches = append(regionMatches, label)
+		}
+	}
+
+	availableRegions := make([]string, 0, len(regions))
+	for region := range regions {
+		availableRegions = append(availableRegions, region)
+	}
+	sort.Strings(availableRegions)
+
+	_, exists := regions[requestedRegion]
+	return regionMatches, availableRegions, exists
 }
 
 // editDeferredResponse edits the deferred interaction response with the given content.
