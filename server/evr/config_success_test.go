@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
@@ -19,34 +20,50 @@ import (
 func TestConfigSuccess_WireFormat(t *testing.T) {
 	tests := []struct {
 		name    string
+		typ     string
+		id      string
 		jsonStr string
 	}{
 		{
 			name:    "main_menu default",
+			typ:     "main_menu",
+			id:      "main_menu",
 			jsonStr: DefaultMainMenuConfigResource,
 		},
 		{
 			name:    "active_battle_pass_season default",
+			typ:     "active_battle_pass_season",
+			id:      "active_battle_pass_season",
 			jsonStr: DefaultActiveBattlePassSeasonConfigResource,
 		},
 		{
 			name:    "active_store_entry default",
+			typ:     "active_store_entry",
+			id:      "active_store_entry",
 			jsonStr: DefaultActiveStoreEntryConfigResource,
 		},
 		{
 			name:    "active_store_featured_entry default",
+			typ:     "active_store_featured_entry",
+			id:      "active_store_featured_entry",
 			jsonStr: DefaultActiveStoreFeaturedEntryConfigResource,
 		},
 		{
 			name:    "empty object",
+			typ:     "main_menu",
+			id:      "main_menu",
 			jsonStr: `{}`,
 		},
 		{
 			name:    "object with nulls",
+			typ:     "main_menu",
+			id:      "main_menu",
 			jsonStr: `{"a":null,"b":null,"c":0}`,
 		},
 		{
 			name:    "nested object",
+			typ:     "main_menu",
+			id:      "main_menu",
 			jsonStr: `{"outer":{"inner":"value"},"arr":[1,2,3]}`,
 		},
 	}
@@ -55,12 +72,12 @@ func TestConfigSuccess_WireFormat(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Simulate the pipeline handler: unmarshal JSON string into map,
 			// then pass to NewConfigSuccess (exactly what evr_pipeline_config.go does).
-			resource := make(map[string]interface{})
+			resource := make(map[string]any)
 			if err := json.Unmarshal([]byte(tt.jsonStr), &resource); err != nil {
 				t.Fatalf("json.Unmarshal failed: %v", err)
 			}
 
-			msg := NewConfigSuccess("main_menu", "main_menu", resource)
+			msg := NewConfigSuccess(tt.typ, tt.id, resource)
 
 			wire, err := Marshal(msg)
 			if err != nil {
@@ -145,6 +162,9 @@ func TestConfigSuccess_WireFormat(t *testing.T) {
 			if err := json.Unmarshal([]byte(tt.jsonStr), &want); err != nil {
 				t.Fatalf("original jsonStr is not valid JSON: %v", err)
 			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("decompressed payload does not match input JSON\nwant=%v\ngot=%v", want, got)
+			}
 
 			t.Logf("wire size: %d bytes, l32: %d, zstd frame size: %d", len(wire), l32, len(wire)-44)
 		})
@@ -154,7 +174,7 @@ func TestConfigSuccess_WireFormat(t *testing.T) {
 // TestConfigSuccess_DirectResource tests passing a pre-built resource directly
 // (not round-tripped through json.Unmarshal), matching the default path.
 func TestConfigSuccess_DirectResource(t *testing.T) {
-	resource := map[string]interface{}{
+	resource := map[string]any{
 		"type": "main_menu",
 		"id":   "main_menu",
 		"_ts":  float64(0),
