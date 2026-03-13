@@ -1016,6 +1016,81 @@ var (
 				},
 			},
 		},
+		{
+			Name:        "loadout",
+			Description: "Manage and edit your cosmetic loadouts.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "get",
+					Description: "Apply a stored loadout.",
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:         discordgo.ApplicationCommandOptionString,
+							Name:         "name",
+							Description:  "Stored loadout name.",
+							Required:     true,
+							Autocomplete: true,
+						},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "store",
+					Description: "Store your currently equipped loadout.",
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:         discordgo.ApplicationCommandOptionString,
+							Name:         "name",
+							Description:  "Loadout name to store.",
+							Required:     true,
+							Autocomplete: true,
+						},
+						{
+							Type:        discordgo.ApplicationCommandOptionBoolean,
+							Name:        "overwrite",
+							Description: "Set true to overwrite an existing loadout name.",
+							Required:    false,
+						},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "set",
+					Description: "Set a specific cosmetic slot value.",
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:         discordgo.ApplicationCommandOptionString,
+							Name:         "slot",
+							Description:  "Loadout slot key.",
+							Required:     true,
+							Autocomplete: true,
+						},
+						{
+							Type:         discordgo.ApplicationCommandOptionString,
+							Name:         "value",
+							Description:  "Cosmetic item ID for the slot.",
+							Required:     true,
+							Autocomplete: true,
+						},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "remove",
+					Description: "Remove a stored loadout.",
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:         discordgo.ApplicationCommandOptionString,
+							Name:         "name",
+							Description:  "Stored loadout name.",
+							Required:     true,
+							Autocomplete: true,
+						},
+					},
+				},
+			},
+		},
 	}
 )
 
@@ -1916,9 +1991,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if targetUserID == "" {
 					return status.Error(codes.NotFound, "target user not found")
 				}
+				if VRMLOutageModeEnabled() {
+					return status.Error(codes.Unavailable, "VRML services are currently out of service. Manual link by player ID is temporarily unavailable.")
+				}
 				vg := vrmlgo.New("")
 
 				vrmlPlayer, err := vg.Player(playerID)
+				if IsVRMLOutageError(err) {
+					return status.Error(codes.Unavailable, "VRML services are currently out of service. Manual link by player ID is temporarily unavailable.")
+				}
 				if err != nil {
 					return fmt.Errorf("failed to get player: %w", err)
 				} else if vrmlPlayer == nil {
@@ -3358,6 +3439,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			return discordgo.ErrNilState
 		},
+		"loadout": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+			return d.handleLoadoutCommand(ctx, s, i, userID)
+		},
 		"vrml-verify": d.handleVRMLVerify,
 	}
 
@@ -3598,6 +3682,67 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					},
 				}); err != nil {
 					logger.Error("Failed to respond to interaction", zap.Error(err))
+				}
+			case "loadout":
+				if len(data.Options) == 0 {
+					return
+				}
+				subcommand := data.Options[0]
+				svc := d.loadoutAutocompleteService()
+
+				focusedName := ""
+				focusedValue := ""
+				slotValue := ""
+				for _, option := range subcommand.Options {
+					if option.Name == "slot" {
+						slotValue = option.StringValue()
+					}
+					if option.Focused {
+						focusedName = option.Name
+						focusedValue = option.StringValue()
+					}
+				}
+
+				userID := d.cache.DiscordIDToUserID(user.ID)
+				if userID == "" {
+					return
+				}
+
+				choices := []*discordgo.ApplicationCommandOptionChoice{}
+				var err error
+				switch subcommand.Name {
+				case "get", "remove":
+					if focusedName != "name" {
+						return
+					}
+					choices, err = svc.NameChoices(ctx, userID, focusedValue)
+				case "store":
+					if focusedName != "name" {
+						return
+					}
+					choices, err = svc.NameChoices(ctx, userID, focusedValue)
+				case "set":
+					if focusedName == "slot" {
+						choices = svc.SlotChoices(focusedValue)
+					} else if focusedName == "value" {
+						choices, err = svc.ValueChoices(ctx, userID, slotValue, focusedValue)
+					}
+				default:
+					return
+				}
+				if err != nil {
+					logger.Error("Failed to build loadout autocomplete choices", zap.Error(err))
+					return
+				}
+
+				if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionApplicationCommandAutocompleteResult,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Choices: choices,
+					},
+				}); err != nil {
+					logger.Error("Failed to respond to loadout autocomplete", zap.Error(err))
 				}
 			}
 

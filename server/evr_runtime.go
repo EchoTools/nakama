@@ -137,6 +137,13 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register Discord Linked Roles handler: %w", err)
 	}
 
+	// Register high-performance loadout autocomplete endpoint used by Discord loadout workflows.
+	loadoutAutocompleteService := NewLoadoutAutocompleteService(logger, nk)
+	SetGlobalLoadoutAutocompleteService(loadoutAutocompleteService)
+	if err := RegisterLoadoutAutocompleteHandler(initializer, loadoutAutocompleteService); err != nil {
+		return fmt.Errorf("unable to register loadout autocomplete handler: %w", err)
+	}
+
 	// The statistics queue handles inserting match statistics into the leaderboard records
 	statisticsQueue := NewStatisticsQueue(logger, db, nk)
 

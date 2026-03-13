@@ -287,6 +287,16 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 		if !isGlobalOperator && !gg.IsAuditor(userID) {
 			return simpleInteractionResponse(s, i, "You must be a guild auditor to use this command.")
 		}
+
+	case "loadout":
+		gg := d.guildGroupRegistry.Get(groupID)
+		if gg == nil {
+			return simpleInteractionResponse(s, i, "This guild is not registered.")
+		}
+
+		if !isGlobalOperator && !IsLoadoutUsernameAllowed(&gg.GroupMetadata, user.Username) {
+			return simpleInteractionResponse(s, i, "You are not allowed to use /loadout in this guild.")
+		}
 	}
 
 	skipDeferredACKCommands := d.getSkipDeferredACKCommands()

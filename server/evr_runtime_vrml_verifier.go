@@ -84,6 +84,10 @@ func NewVRMLScanQueue(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	return verifier, nil
 }
 func (v *VRMLScanQueue) Start() error {
+	if VRMLOutageModeEnabled() {
+		v.logger.Info("VRML outage mode enabled; skipping live VRML verifier worker startup")
+		return nil
+	}
 
 	ledger, err := VRMLEntitlementLedgerLoad(v.ctx, v.nk)
 	if err != nil {
@@ -102,6 +106,8 @@ func (v *VRMLScanQueue) Start() error {
 			v.logger.WithField("error", err).Error("Failed to cache player lists")
 			return
 		}
+
+		vg = v.newSession("")
 
 		for {
 			select {
@@ -137,7 +143,6 @@ func (v *VRMLScanQueue) Start() error {
 				continue
 			}
 
-			vg = v.newSession("") // Uses cache
 			// Get the player summary
 			summary, err := v.playerSummary(vg, player)
 			if err != nil {
@@ -530,7 +535,7 @@ func (v *VRMLScanQueue) playerSummary(vg *vrmlgo.Session, player *vrmlgo.Player)
 			}
 		}
 	}
-	member, err := vg.Member(player.User.UserID, vrmlgo.WithUseCache(false))
+	member, err := vg.Member(player.User.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get member data: %v", err)
 	}
@@ -722,14 +727,48 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 		logger.WithField("error", err).Error("Failed to send interaction response")
 	}
 
+	outageMode := VRMLOutageModeEnabled()
+	vrmlSummary := &VRMLPlayerSummary{}
+	hasCachedSummary := true
+	if err := StorableRead(ctx, nk, userID, vrmlSummary, false); err != nil {
+		hasCachedSummary = false
+		vrmlSummary = nil
+	}
+
 	if profile.VRMLUserID() != "" {
+		if outageMode {
+			if !hasCachedSummary {
+				return editResponseFn(vrmlOutageNoCacheMessage)
+			}
+
+			embed := createVRMLVerifyEmbed(vrmlSummary)
+			if embed == nil {
+				return editResponseFn("Your [VRML account](%s) is linked. VRML is currently out of service, so cached verification data is limited.", "https://vrmasterleague.com/Users/"+profile.VRMLUserID())
+			}
+
+			embed.Description = embed.Description + "\n\nShowing cached data while VRML is out of service."
+			return editEmbedResponseFn(embed)
+		}
+
 		// User is already linked
 		// Check if the User is valid.
 
 		// Retrieve the VRML user data
 		vg := vrmlgo.New("")
-		m, err := vg.Member(profile.VRMLUserID(), vrmlgo.WithUseCache(false))
+		m, err := vg.Member(profile.VRMLUserID())
 		if err != nil {
+			if IsVRMLOutageError(err) {
+				logger.WithField("error", err).Warn("VRML service unavailable; falling back to cached summary")
+				if hasCachedSummary {
+					embed := createVRMLVerifyEmbed(vrmlSummary)
+					if embed != nil {
+						embed.Description = embed.Description + "\n\nShowing cached data while VRML is out of service."
+						return editEmbedResponseFn(embed)
+					}
+					return editResponseFn("Your [VRML account](%s) is linked. VRML is currently out of service, so cached verification data is limited.", "https://vrmasterleague.com/Users/"+profile.VRMLUserID())
+				}
+				return editResponseFn(vrmlOutageNoCacheMessage)
+			}
 			return fmt.Errorf("failed to get member data: %w", err)
 		}
 		vrmlUser := m.User
@@ -751,10 +790,9 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 		}
 
 		// Load VRML player summary to display stats
-		vrmlSummary := &VRMLPlayerSummary{}
-		if err := StorableRead(ctx, nk, userID, vrmlSummary, false); err != nil {
+		if !hasCachedSummary {
 			// If summary not available, show simple message
-			logger.WithField("error", err).Warn("Failed to load VRML summary")
+			logger.Warn("Failed to load VRML summary")
 			return editResponseFn("Your [VRML account](%s) is already linked. Reverifying your entitlements...", "https://vrmasterleague.com/Users/"+profile.VRMLUserID())
 		}
 
@@ -766,6 +804,10 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 		}
 
 		return editEmbedResponseFn(embed)
+	}
+
+	if outageMode {
+		return editResponseFn("VRML services are currently out of service. New VRML verification is temporarily unavailable.")
 	}
 
 	// User is not linked
@@ -798,8 +840,12 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 		case token = <-flow.tokenCh:
 			// Token received
 			vg := vrmlgo.New(token)
-			vrmlUser, err = vg.Me(vrmlgo.WithUseCache(false))
+			vrmlUser, err = vg.Me()
 			if err != nil {
+				if IsVRMLOutageError(err) {
+					_ = editResponseFn("VRML services are currently out of service. New VRML verification is temporarily unavailable.")
+					return
+				}
 				logger.Error("Failed to get VRML user data")
 				return
 			}

@@ -69,6 +69,7 @@ type ServiceSettingsData struct {
 	DiscordBotUserID                      string                    `json:"discord_bot_user_id"`
 	KickPlayersWithDisabledAlternates     bool                      `json:"kick_players_with_disabled_alts"` // Kick players with disabled alts
 	VRMLEntitlementNotifyChannelID        string                    `json:"vrml_entitlement_notify_channel_id"`
+	VRMLOutageMode                        bool                      `json:"vrml_outage_mode"` // Disable live VRML API calls and rely on cached data only.
 	EnableContinuousGameserverHealthCheck bool                      `json:"enable_continuous_gameserver_health_check"`
 	DisplayNameInUseNotifications         bool                      `json:"display_name_in_use_notifications"` // Display name in use notifications
 	EnableSessionDebug                    bool                      `json:"enable_session_debug"`

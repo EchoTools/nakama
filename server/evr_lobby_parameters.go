@@ -169,7 +169,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	if joinDirective != nil && !joinDirective.MatchID.IsNil() {
 
 		if label, err := MatchLabelByID(ctx, nk, joinDirective.MatchID); err != nil {
-			logger.Warn("Next match not found", zap.String("mid", joinDirective.MatchID.String()))
+			logger.Debug("Next match not found", zap.String("mid", joinDirective.MatchID.String()))
 		} else {
 			mode = label.Mode
 
