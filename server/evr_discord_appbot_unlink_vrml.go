@@ -91,9 +91,16 @@ func (d *DiscordAppBot) handleUnlinkVRML(ctx context.Context, logger runtime.Log
 		if ownerID != "" {
 			targetUserID = ownerID
 		} else {
+			if VRMLOutageModeEnabled() {
+				return editResponseFn("VRML services are currently out of service. Player ID lookup is unavailable right now. Use Discord ID/@mention or a VRML user ID that is already linked.")
+			}
+
 			// Try as VRML player ID
 			vg := vrmlgo.New("")
 			vrmlPlayer, err := vg.Player(identifier)
+			if IsVRMLOutageError(err) {
+				return editResponseFn("VRML services are currently out of service. Player ID lookup is unavailable right now. Use Discord ID/@mention or a VRML user ID that is already linked.")
+			}
 			if err != nil || vrmlPlayer == nil || vrmlPlayer.User.UserID == "" {
 				return editResponseFn("Could not find user by identifier: %s\nTry using VRML user ID, VRML player ID, Discord ID, or Discord @mention", identifier)
 			}

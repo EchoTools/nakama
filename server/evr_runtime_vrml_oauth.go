@@ -58,6 +58,10 @@ func NewVRMLOAuthFlow(clientID, redirectURL string, timeout time.Duration) (*VRM
 
 // RedirectRPC is called by the client after they have authenticated with VRML
 func (v *VRMLScanQueue) RedirectRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	if VRMLOutageModeEnabled() {
+		return "", runtime.NewError("VRML services are currently out of service. OAuth verification is temporarily unavailable.", StatusUnavailable)
+	}
+
 	envVars, _ := ctx.Value(runtime.RUNTIME_CTX_ENV).(map[string]string)
 
 	if envVars == nil || envVars["VRML_OAUTH_CLIENT_ID"] == "" || envVars["VRML_OAUTH_REDIRECT_URL"] == "" {
