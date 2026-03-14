@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"google.golang.org/grpc/codes"
@@ -19,10 +20,11 @@ import (
 )
 
 const (
-	loadoutAutocompleteEndpoint = "/discord/loadout/autocomplete"
-	loadoutAutocompleteTTL      = 15 * time.Second
-	loadoutAutocompleteMax      = 25
-	maxLoadoutValueLength       = 128
+	loadoutAutocompleteEndpoint  = "/discord/loadout/autocomplete"
+	loadoutAutocompleteTTL       = 15 * time.Second
+	loadoutAutocompleteMax       = 25
+	loadoutAutocompleteCacheMax = 1000
+	maxLoadoutValueLength      = 128
 )
 
 var (
@@ -190,11 +192,29 @@ func (s *LoadoutAutocompleteService) getCachedChoices(key string) []*discordgo.A
 
 func (s *LoadoutAutocompleteService) setCachedChoices(key string, choices []*discordgo.ApplicationCommandOptionChoice) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Evict expired entries if cache is at capacity.
+	if len(s.cache) >= loadoutAutocompleteCacheMax {
+		now := time.Now()
+		for k, v := range s.cache {
+			if now.After(v.expiresAt) {
+				delete(s.cache, k)
+			}
+		}
+		// If still over capacity after purging expired, drop oldest entries.
+		for k := range s.cache {
+			if len(s.cache) < loadoutAutocompleteCacheMax {
+				break
+			}
+			delete(s.cache, k)
+		}
+	}
+
 	s.cache[key] = loadoutAutocompleteCacheEntry{
 		expiresAt: time.Now().Add(loadoutAutocompleteTTL),
 		choices:   cloneChoices(choices),
 	}
-	s.mu.Unlock()
 }
 
 func cloneChoices(in []*discordgo.ApplicationCommandOptionChoice) []*discordgo.ApplicationCommandOptionChoice {
@@ -220,10 +240,17 @@ func makeChoicesFromStrings(values []string) []*discordgo.ApplicationCommandOpti
 	return choices
 }
 
-func IsLoadoutUsernameAllowed(metadata *GroupMetadata, discordUsername string) bool {
+func IsLoadoutUserAllowed(metadata *GroupMetadata, discordUserID, discordUsername string) bool {
 	if metadata == nil {
 		return false
 	}
+	// Check by immutable Discord user ID first (preferred).
+	for _, id := range metadata.LoadoutCommandUserIDs {
+		if strings.TrimSpace(id) == discordUserID {
+			return true
+		}
+	}
+	// Fall back to username matching for backward compatibility.
 	if len(metadata.LoadoutCommandUsernames) == 0 {
 		return false
 	}
@@ -340,14 +367,21 @@ func (d *DiscordAppBot) handleLoadoutCommand(ctx context.Context, s *discordgo.S
 			return editInteractionResponse(s, i, "Missing loadout name.")
 		}
 		name := strings.TrimSpace(nameOpt.StringValue())
-		if err := validateLoadoutToken(name, MaximumOutfitNameLength, "loadout name"); err != nil {
-			return editInteractionResponse(s, i, err.Error())
-		}
 
 		_, exists := wardrobe.GetOutfit(name)
 		overwrite := false
 		if overwriteOpt := options["overwrite"]; overwriteOpt != nil {
 			overwrite = overwriteOpt.BoolValue()
+		}
+
+		// Only enforce strict token validation for new names; allow overwriting
+		// existing entries that may use the older (more permissive) naming rules.
+		if !exists {
+			if err := validateLoadoutToken(name, MaximumOutfitNameLength, "loadout name"); err != nil {
+				return editInteractionResponse(s, i, err.Error())
+			}
+		} else if len(name) > MaximumOutfitNameLength || name == "" {
+			return editInteractionResponse(s, i, "loadout name is invalid.")
 		}
 
 		if exists && !overwrite {
@@ -426,7 +460,6 @@ type loadoutAutocompleteHTTPHandler struct {
 }
 
 func (h *loadoutAutocompleteHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
@@ -443,6 +476,14 @@ func (h *loadoutAutocompleteHTTPHandler) ServeHTTP(w http.ResponseWriter, r *htt
 	userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
 	partial := strings.TrimSpace(r.URL.Query().Get("q"))
 	slot := strings.TrimSpace(r.URL.Query().Get("slot"))
+
+	// Validate user_id is a valid UUID when provided.
+	if userID != "" {
+		if _, err := uuid.FromString(userID); err != nil {
+			http.Error(w, "invalid user_id format", http.StatusBadRequest)
+			return
+		}
+	}
 
 	ctx := r.Context()
 	var (
@@ -475,7 +516,7 @@ func (h *loadoutAutocompleteHTTPHandler) ServeHTTP(w http.ResponseWriter, r *htt
 	}
 
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 

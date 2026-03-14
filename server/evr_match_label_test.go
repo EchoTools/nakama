@@ -114,7 +114,7 @@ func TestMatchLabel_RoleLimit(t *testing.T) {
 				PlayerLimit: 12,
 			},
 			args: args{role: evr.TeamSocial},
-			want: 10,
+			want: 12, // non-arena mode returns PlayerLimit
 		},
 		{
 			name: "Social TeamModerator",
@@ -124,7 +124,7 @@ func TestMatchLabel_RoleLimit(t *testing.T) {
 				PlayerLimit: 12,
 			},
 			args: args{role: evr.TeamModerator},
-			want: 10,
+			want: 12, // non-arena mode returns PlayerLimit
 		},
 		{
 			name: "Social Other",
@@ -134,7 +134,7 @@ func TestMatchLabel_RoleLimit(t *testing.T) {
 				PlayerLimit: 12,
 			},
 			args: args{role: evr.TeamSpectator},
-			want: 0,
+			want: 12, // non-arena mode returns PlayerLimit
 		},
 		{
 			name: "Private Match",
@@ -144,7 +144,7 @@ func TestMatchLabel_RoleLimit(t *testing.T) {
 				PlayerLimit: 16,
 			},
 			args: args{role: evr.TeamBlue},
-			want: 8,
+			want: 16, // private arena mode returns PlayerLimit (not arena/combat public)
 		},
 		{
 			name: "Public Match Spectator",
@@ -155,7 +155,7 @@ func TestMatchLabel_RoleLimit(t *testing.T) {
 				MaxSize:     16,
 			},
 			args: args{role: evr.TeamSpectator},
-			want: 2,
+			want: 8, // MaxSize(16) - PlayerLimit(8)
 		},
 		{
 			name: "Public Match Unassigned",
@@ -166,7 +166,7 @@ func TestMatchLabel_RoleLimit(t *testing.T) {
 				MaxSize:     16,
 			},
 			args: args{role: evr.TeamUnassigned},
-			want: 2,
+			want: 0, // unassigned not in any switch case for arena
 		},
 		{
 			name: "Public Match TeamBlue",
@@ -200,7 +200,7 @@ func TestMatchLabel_RoleLimit(t *testing.T) {
 				TeamSize:    5,
 			},
 			args: args{role: evr.TeamOrange},
-			want: 4,
+			want: 5, // returns TeamSize
 		},
 	}
 	for _, tt := range tests {

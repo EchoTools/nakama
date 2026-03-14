@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+if (( $# < 1 || $# > 2 )); then
     echo "Usage: $0 <from_version> [to_version]"
     echo "Example: $0 238 240"
     echo "If to_version omitted, assumes from_version+1"
@@ -20,26 +20,22 @@ FROMVER="v3.27.2-evr.$FROM"
 TOVER="v3.27.2-evr.$TO"
 
 HEADER="Changes FROM $FROMVER (exclusive) UP TO $TOVER (inclusive):"
-
 OUTPUT=""
+
 for ((i=FROM+1; i<=TO; i++)); do
     TAG="v3.27.2-evr.$i"
     PREV_TAG="v3.27.2-evr.$((i-1))"
-    
-    COMMITS=$(git log "$PREV_TAG..$TAG" --pretty=format:"---%nCommit: %h%nSubject: %s%nBody:%n%b" | \
-        grep -iv -e "Signed-off-by" -e "Co-Authored-by")
-    
-    if [ -n "$COMMITS" ]; then
-        OUTPUT+="
-## $TAG
 
-$COMMITS
-"
+    COMMITS=$(git log "$PREV_TAG..$TAG" \
+        --format="---%nCommit: %h%nMessage:%n%B" | \
+        grep -ivE "signed-off-by|co-authored-by" || true)
+
+    if [[ -n "$COMMITS" ]]; then
+        OUTPUT+=$'\n'"## $TAG"$'\n\n'"$COMMITS"$'\n'
     fi
 done
 
-FULL_OUTPUT="$HEADER
-$OUTPUT"
+FULL_OUTPUT="$HEADER$OUTPUT"
 
-echo "$FULL_OUTPUT" | wl-copy
-echo "$FULL_OUTPUT"
+printf "%s\n" "$FULL_OUTPUT" | wl-copy
+printf "%s\n" "$FULL_OUTPUT"

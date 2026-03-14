@@ -13,7 +13,7 @@ type GuildGroupUpdateRequest struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	AvatarURL   string         `json:"avatar_url"`
-	Open        bool           `json:"open"`
+	Open        *bool          `json:"open"`
 	Metadata    *GroupMetadata `json:"metadata"`
 }
 
@@ -75,8 +75,8 @@ func GuildGroupUpdateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		}
 	}
 
-	if req.Name != "" {
-		if err := nk.GroupUpdate(ctx, req.GroupID, userID, req.Name, "", GuildGroupLangTag, req.Description, req.AvatarURL, req.Open, nil, int(gg.Group.MaxCount)); err != nil {
+	if update := buildGroupUpdateInput(gg, &req); update != nil {
+		if err := nk.GroupUpdate(ctx, req.GroupID, SystemUserID, update.Name, "", update.LangTag, update.Description, update.AvatarURL, update.Open, nil, int(gg.Group.MaxCount)); err != nil {
 			return "", runtime.NewError("failed to update group", 13)
 		}
 	}
@@ -313,4 +313,48 @@ func isGlobalOperator(ctx context.Context, nk runtime.NakamaModule, userID strin
 		}
 	}
 	return false, nil
+}
+
+type groupUpdateInput struct {
+	Name        string
+	LangTag     string
+	Description string
+	AvatarURL   string
+	Open        bool
+}
+
+func buildGroupUpdateInput(gg *GuildGroup, req *GuildGroupUpdateRequest) *groupUpdateInput {
+	if gg == nil || gg.Group == nil || req == nil {
+		return nil
+	}
+
+	// Only pass fields that are explicitly provided in the request.
+	// GroupUpdate treats empty strings as "field not updated", so we leave
+	// unchanged fields empty to avoid overwriting concurrent modifications.
+	input := &groupUpdateInput{
+		Open: gg.Group.Open.GetValue(),
+	}
+
+	changed := false
+	if req.Name != "" {
+		input.Name = req.Name
+		changed = true
+	}
+	if req.Description != "" {
+		input.Description = req.Description
+		changed = true
+	}
+	if req.AvatarURL != "" {
+		input.AvatarURL = req.AvatarURL
+		changed = true
+	}
+	if req.Open != nil {
+		input.Open = *req.Open
+		changed = true
+	}
+
+	if !changed {
+		return nil
+	}
+	return input
 }
