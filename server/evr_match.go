@@ -297,30 +297,22 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
+	var reconnectReservation *reconnectReservation
 	if rr, ok := state.reconnectReservations[meta.Presence.GetUserId()]; ok {
+		reconnectReservation = rr
 		meta.Presence.RoleAlignment = rr.Presence.RoleAlignment
 		logger.WithFields(map[string]any{
 			"uid":            meta.Presence.GetUserId(),
 			"role_alignment": rr.Presence.RoleAlignment,
 		}).Info("Player reconnecting from crash. Restoring role alignment.")
-		history := NewEarlyQuitHistory(meta.Presence.GetUserId())
-		if err := StorableRead(ctx, nk, meta.Presence.GetUserId(), history, false); err != nil {
-			logger.WithField("error", err).Warn("Failed to load early quit history for forgiveness")
-		} else if history.ForgiveQuit(state.ID) {
-			if err := StorableWrite(ctx, nk, meta.Presence.GetUserId(), history); err != nil {
-				logger.Warn("Failed to write early quit history after forgiveness")
-			}
-			eqconfig := NewEarlyQuitConfig()
-			if err := StorableRead(ctx, nk, meta.Presence.GetUserId(), eqconfig, false); err == nil {
-				eqconfig.DecrementPenaltyOnly()
-				_ = StorableWrite(ctx, nk, meta.Presence.GetUserId(), eqconfig)
-			}
-		}
+	}
 
-		delete(state.reconnectReservations, meta.Presence.GetUserId())
-		state.rebuildCache()
-		if err := DeleteJoinDirective(ctx, nk, meta.Presence.GetUserId()); err != nil {
-			logger.WithField("error", err).Warn("Failed to delete join directive after reconnect")
+	consumeReconnectReservation := false
+	restoreReconnectReservation := func() {
+		if consumeReconnectReservation && reconnectReservation != nil {
+			state.reconnectReservations[meta.Presence.GetUserId()] = reconnectReservation
+			state.rebuildCache()
+			consumeReconnectReservation = false
 		}
 	}
 
@@ -377,9 +369,21 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
-	// Ensure the match has enough slots available
-	if state.OpenSlots() < len(meta.Presences()) {
+	// Ensure the match has enough slots available.
+	// Reconnecting users can reclaim their own reconnect reservation slot.
+	availableSlots := state.OpenSlots()
+	if reconnectReservation != nil {
+		availableSlots++
+	}
+	if availableSlots < len(meta.Presences()) {
+		restoreReconnectReservation()
 		return state, false, ErrJoinRejectReasonLobbyFull.Error()
+	}
+
+	if reconnectReservation != nil {
+		delete(state.reconnectReservations, meta.Presence.GetUserId())
+		state.rebuildCache()
+		consumeReconnectReservation = true
 	}
 
 	// If this is a reservation, load the reservation
@@ -431,8 +435,10 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 	// check the available slots
 	if slots, err := state.OpenSlotsByRole(meta.Presence.RoleAlignment); err != nil {
+		restoreReconnectReservation()
 		return state, false, ErrJoinRejectReasonFailedToAssignTeam.Error()
 	} else if slots < len(meta.Presences()) {
+		restoreReconnectReservation()
 		return state, false, ErrJoinRejectReasonLobbyFull.Error()
 	}
 
@@ -445,6 +451,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 		// Check if adding this player would exceed the limit
 		if currentCount >= maxTeamSize {
+			restoreReconnectReservation()
 			logger.WithFields(map[string]interface{}{
 				"blue":          state.RoleCount(evr.TeamBlue),
 				"orange":        state.RoleCount(evr.TeamOrange),
@@ -490,6 +497,26 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 	if err := m.updateLabel(logger, dispatcher, state); err != nil {
 		logger.Error("Failed to update label: %v", err)
+	}
+
+	if reconnectReservation != nil {
+		history := NewEarlyQuitHistory(meta.Presence.GetUserId())
+		if err := StorableRead(ctx, nk, meta.Presence.GetUserId(), history, false); err != nil {
+			logger.WithField("error", err).Warn("Failed to load early quit history for forgiveness")
+		} else if history.ForgiveQuit(state.ID) {
+			if err := StorableWrite(ctx, nk, meta.Presence.GetUserId(), history); err != nil {
+				logger.Warn("Failed to write early quit history after forgiveness")
+			}
+			eqconfig := NewEarlyQuitConfig()
+			if err := StorableRead(ctx, nk, meta.Presence.GetUserId(), eqconfig, false); err == nil {
+				eqconfig.DecrementPenaltyOnly()
+				_ = StorableWrite(ctx, nk, meta.Presence.GetUserId(), eqconfig)
+			}
+		}
+
+		if err := DeleteJoinDirective(ctx, nk, meta.Presence.GetUserId()); err != nil {
+			logger.WithField("error", err).Warn("Failed to delete join directive after reconnect")
+		}
 	}
 
 	return state, true, meta.Presence.String()
@@ -628,6 +655,8 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			"sid":      p.GetSessionId(),
 		})
 
+		disconnectedFromGameServer := p.GetReason() == runtime.PresenceReasonDisconnect
+
 		reason := ""
 		switch p.GetReason() {
 		case runtime.PresenceReasonUnknown:
@@ -670,6 +699,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 			} else {
 				tags["reject_sent"] = "false"
+				disconnectedFromGameServer = true
 				logger.Info("Player disconnected from game server. Removing from handler.")
 			}
 
@@ -705,7 +735,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			enabled := crashWindow > 0
 
 			hasReconnectReservation := false
-			if p.GetReason() == runtime.PresenceReasonDisconnect && enabled && !state.GameState.IsMatchOver() {
+			if disconnectedFromGameServer && enabled && !state.GameState.IsMatchOver() {
 				window := time.Duration(crashWindow) * time.Second
 				expiry := time.Now().Add(window)
 				state.reconnectReservations[mp.GetUserId()] = &reconnectReservation{

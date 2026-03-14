@@ -1230,10 +1230,11 @@ type reconnectTestNakamaModule struct {
 	storageWrites []*runtime.StorageWrite
 	storageReads  []*runtime.StorageRead
 	storageDelete []*runtime.StorageDelete
+	streamUsers   []runtime.Presence
 }
 
 func (m *reconnectTestNakamaModule) StreamUserList(mode uint8, subject, subcontext, label string, includeHidden, includeNotHidden bool) ([]runtime.Presence, error) {
-	return nil, nil
+	return m.streamUsers, nil
 }
 
 func (m *reconnectTestNakamaModule) StreamUserLeave(mode uint8, subject, subcontext, label, userID, sessionID string) error {
@@ -1415,17 +1416,60 @@ func TestReconnectReservation_CreatedOnDisconnect(t *testing.T) {
 	}
 }
 
-func TestReconnectReservation_NotCreatedOnLeave(t *testing.T) {
+func TestReconnectReservation_NotCreatedOnGracefulLeave(t *testing.T) {
 	tests := []struct {
 		name string
 	}{
-		{name: "does not create reservation for normal leave"},
+		{name: "does not create reservation when leave still has entrant stream"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			state := reconnectTestState(evr.ModeSocialPublic)
 			player := reconnectTestPlayer("leave", evr.TeamBlue)
+			state.presenceMap[player.GetSessionId()] = player
+			state.presenceByEvrID[player.EvrID] = player
+			state.joinTimestamps[player.GetSessionId()] = time.Now().Add(-time.Minute)
+			state.rebuildCache()
+
+			nk := &reconnectTestNakamaModule{
+				streamUsers: []runtime.Presence{reconnectTestPresence{EvrMatchPresence: player, reason: runtime.PresenceReasonUnknown}},
+			}
+			dispatcher := &reconnectTestDispatcher{}
+			ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
+			leavePresence := reconnectTestPresence{EvrMatchPresence: player, reason: runtime.PresenceReasonLeave}
+
+			m := &EvrMatch{}
+			got := m.MatchLeave(ctx, reconnectTestLogger(), nil, nk, dispatcher, 1, state, []runtime.Presence{leavePresence})
+			stateAfter := got.(*MatchLabel)
+
+			if diff := cmp.Diff(0, len(stateAfter.reconnectReservations)); diff != "" {
+				t.Fatalf("expected no reconnect reservations (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestReconnectReservation_CreatedOnCrashLikeLeave(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "creates reservation when leave has no entrant stream"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := ServiceSettings()
+			if settings == nil {
+				settings = &ServiceSettingsData{}
+			}
+			cloned := *settings
+			cloned.Matchmaking.CrashRecoveryWindowSecs = 60
+			ServiceSettingsUpdate(&cloned)
+			t.Cleanup(func() { ServiceSettingsUpdate(settings) })
+
+			state := reconnectTestState(evr.ModeSocialPublic)
+			player := reconnectTestPlayer("leave-disconnected", evr.TeamBlue)
 			state.presenceMap[player.GetSessionId()] = player
 			state.presenceByEvrID[player.EvrID] = player
 			state.joinTimestamps[player.GetSessionId()] = time.Now().Add(-time.Minute)
@@ -1440,8 +1484,12 @@ func TestReconnectReservation_NotCreatedOnLeave(t *testing.T) {
 			got := m.MatchLeave(ctx, reconnectTestLogger(), nil, nk, dispatcher, 1, state, []runtime.Presence{leavePresence})
 			stateAfter := got.(*MatchLabel)
 
-			if diff := cmp.Diff(0, len(stateAfter.reconnectReservations)); diff != "" {
-				t.Fatalf("expected no reconnect reservations (-want +got):\n%s", diff)
+			rr, ok := stateAfter.reconnectReservations[player.GetUserId()]
+			if !ok {
+				t.Fatalf("expected reconnect reservation for leave without entrant stream")
+			}
+			if diff := cmp.Diff(player.GetUserId(), rr.UserID); diff != "" {
+				t.Fatalf("reservation user id mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -1586,6 +1634,106 @@ func TestReconnectReservation_RejoinBypassesClosedMatch(t *testing.T) {
 				t.Fatalf("expected reservation path to bypass match-closed rejection (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+func TestReconnectReservation_DuplicateEvrIDDoesNotConsumeReservation(t *testing.T) {
+	state := reconnectTestState(evr.ModeArenaPublic)
+
+	userID := uuid.NewV5(uuid.Nil, "user-duplicate-reconnect")
+	oldPresence := reconnectTestPlayer("duplicate-old", evr.TeamBlue)
+	oldPresence.UserID = userID
+	oldPresence.EvrID = evr.EvrId{PlatformCode: 4, AccountId: 424242}
+	state.presenceMap[oldPresence.GetSessionId()] = oldPresence
+	state.presenceByEvrID[oldPresence.EvrID] = oldPresence
+	state.joinTimestamps[oldPresence.GetSessionId()] = time.Now().Add(-30 * time.Second)
+
+	state.reconnectReservations[userID.String()] = &reconnectReservation{
+		Presence:     oldPresence,
+		Expiry:       time.Now().Add(30 * time.Second),
+		UserID:       userID.String(),
+		DeferPenalty: true,
+	}
+	state.rebuildCache()
+
+	rejoined := reconnectTestPlayer("duplicate-new", evr.TeamBlue)
+	rejoined.UserID = userID
+	rejoined.EvrID = oldPresence.EvrID
+	rejoined.SessionID = uuid.NewV5(uuid.Nil, "session-duplicate-new")
+
+	nk := &reconnectTestNakamaModule{}
+	m := &EvrMatch{}
+	metadata := NewJoinMetadata(rejoined).ToMatchMetadata()
+
+	gotState, allowed, reason := m.MatchJoinAttempt(context.Background(), reconnectTestLogger(), nil, nk, nil, 1, state, rejoined, metadata)
+	if allowed {
+		t.Fatalf("expected duplicate EVR-ID reconnect join to be rejected")
+	}
+	if diff := cmp.Diff(ErrJoinRejectDuplicateEvrID.Error(), reason); diff != "" {
+		t.Fatalf("unexpected rejection reason (-want +got):\n%s", diff)
+	}
+
+	stateAfter := gotState.(*MatchLabel)
+	if _, ok := stateAfter.reconnectReservations[userID.String()]; !ok {
+		t.Fatalf("expected reconnect reservation to remain after duplicate EVR-ID rejection")
+	}
+	if diff := cmp.Diff(0, len(nk.storageDelete)); diff != "" {
+		t.Fatalf("expected no join directive delete on rejected reconnect (-want +got):\n%s", diff)
+	}
+}
+
+func TestReconnectReservation_RejoinCanReclaimOwnReservedSlotWhenLobbyFull(t *testing.T) {
+	state := reconnectTestState(evr.ModeArenaPublic)
+
+	blueOne := reconnectTestPlayer("full-blue-one", evr.TeamBlue)
+	blueTwo := reconnectTestPlayer("full-blue-two", evr.TeamBlue)
+	orangeOne := reconnectTestPlayer("full-orange-one", evr.TeamOrange)
+	orangeTwo := reconnectTestPlayer("full-orange-two", evr.TeamOrange)
+
+	for _, p := range []*EvrMatchPresence{blueOne, blueTwo, orangeOne, orangeTwo} {
+		state.presenceMap[p.GetSessionId()] = p
+		state.presenceByEvrID[p.EvrID] = p
+		state.joinTimestamps[p.GetSessionId()] = time.Now().Add(-1 * time.Minute)
+	}
+
+	userID := uuid.NewV5(uuid.Nil, "user-reclaim-slot")
+	reserved := reconnectTestPlayer("reserved-old", evr.TeamBlue)
+	reserved.UserID = userID
+	reserved.RoleAlignment = evr.TeamBlue
+	state.reconnectReservations[userID.String()] = &reconnectReservation{
+		Presence:     reserved,
+		Expiry:       time.Now().Add(30 * time.Second),
+		UserID:       userID.String(),
+		DeferPenalty: true,
+	}
+	state.rebuildCache()
+
+	rejoined := reconnectTestPlayer("reserved-new", evr.TeamOrange)
+	rejoined.UserID = userID
+	rejoined.RoleAlignment = evr.TeamUnassigned
+	rejoined.EvrID = reserved.EvrID
+	rejoined.SessionID = uuid.NewV5(uuid.Nil, "session-reclaim-slot")
+
+	metadata := NewJoinMetadata(rejoined).ToMatchMetadata()
+	m := &EvrMatch{}
+	nk := &reconnectTestNakamaModule{}
+
+	gotState, allowed, reason := m.MatchJoinAttempt(context.Background(), reconnectTestLogger(), nil, nk, nil, 1, state, rejoined, metadata)
+	if !allowed {
+		t.Fatalf("expected reconnect to reclaim own reserved slot, got rejection: %s", reason)
+	}
+
+	parsed := &EvrMatchPresence{}
+	if err := json.Unmarshal([]byte(reason), parsed); err != nil {
+		t.Fatalf("failed to parse reconnect metadata: %v", err)
+	}
+	if diff := cmp.Diff(evr.TeamBlue, parsed.RoleAlignment); diff != "" {
+		t.Fatalf("expected reconnect to restore reserved team role (-want +got):\n%s", diff)
+	}
+
+	stateAfter := gotState.(*MatchLabel)
+	if _, ok := stateAfter.reconnectReservations[userID.String()]; ok {
+		t.Fatalf("expected reconnect reservation to be consumed after successful reclaim")
 	}
 }
 
