@@ -731,8 +731,14 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 	vrmlSummary := &VRMLPlayerSummary{}
 	hasCachedSummary := true
 	if err := StorableRead(ctx, nk, userID, vrmlSummary, false); err != nil {
-		hasCachedSummary = false
-		vrmlSummary = nil
+		if isStorageNotFoundError(err) {
+			hasCachedSummary = false
+			vrmlSummary = nil
+		} else {
+			logger.WithField("error", err).Error("Failed to read cached VRML summary")
+			hasCachedSummary = false
+			vrmlSummary = nil
+		}
 	}
 
 	if profile.VRMLUserID() != "" {
