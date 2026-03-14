@@ -328,12 +328,11 @@ func buildGroupUpdateInput(gg *GuildGroup, req *GuildGroupUpdateRequest) *groupU
 		return nil
 	}
 
+	// Only pass fields that are explicitly provided in the request.
+	// GroupUpdate treats empty strings as "field not updated", so we leave
+	// unchanged fields empty to avoid overwriting concurrent modifications.
 	input := &groupUpdateInput{
-		Name:        gg.Group.Name,
-		LangTag:     gg.Group.LangTag,
-		Description: gg.Group.Description,
-		AvatarURL:   gg.Group.AvatarUrl,
-		Open:        gg.Group.Open.GetValue(),
+		Open: gg.Group.Open.GetValue(),
 	}
 
 	changed := false
@@ -352,10 +351,6 @@ func buildGroupUpdateInput(gg *GuildGroup, req *GuildGroupUpdateRequest) *groupU
 	if req.Open != nil {
 		input.Open = *req.Open
 		changed = true
-	}
-
-	if input.LangTag == "" {
-		input.LangTag = GuildGroupLangTag
 	}
 
 	if !changed {

@@ -294,7 +294,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 			return simpleInteractionResponse(s, i, "This guild is not registered.")
 		}
 
-		if !isGlobalOperator && !IsLoadoutUsernameAllowed(&gg.GroupMetadata, user.Username) {
+		if !isGlobalOperator && !IsLoadoutUserAllowed(&gg.GroupMetadata, user.ID, user.Username) {
 			return simpleInteractionResponse(s, i, "You are not allowed to use /loadout in this guild.")
 		}
 	}

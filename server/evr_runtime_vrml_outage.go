@@ -13,7 +13,10 @@ const (
 // VRMLOutageModeEnabled returns true when VRML integrations should avoid live API calls.
 // This is controlled by global service settings (Global/settings) via vrml_outage_mode.
 func VRMLOutageModeEnabled() bool {
-	return true
+	if s := ServiceSettings(); s != nil {
+		return s.VRMLOutageMode
+	}
+	return false
 }
 
 // IsVRMLOutageError identifies likely network/service outage failures from VRML calls.
