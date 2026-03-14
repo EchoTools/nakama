@@ -294,7 +294,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 			return simpleInteractionResponse(s, i, "This guild is not registered.")
 		}
 
-		if !isGlobalOperator && !IsLoadoutUsernameAllowed(&gg.GroupMetadata, user.Username) {
+		if !isGlobalOperator && !IsLoadoutUserAllowed(&gg.GroupMetadata, user.ID, user.Username) {
 			return simpleInteractionResponse(s, i, "You are not allowed to use /loadout in this guild.")
 		}
 	}
@@ -330,6 +330,57 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 	_ = groupID
 
 	switch commandName {
+	case "confirm_shutdown":
+		matchIDStr, disconnectServer, graceSeconds, err := parseConfirmShutdownValue(value)
+		if err != nil {
+			return simpleInteractionResponse(s, i, "Invalid shutdown confirmation payload.")
+		}
+
+		matchID := MatchIDFromStringOrNil(matchIDStr)
+		if matchID.IsNil() {
+			return simpleInteractionResponse(s, i, "Invalid match ID.")
+		}
+
+		label, err := MatchLabelByID(ctx, nk, matchID)
+		if err != nil {
+			return fmt.Errorf("failed to get match label: %w", err)
+		}
+
+		allowed, err := d.canShutdownMatch(ctx, userID, label)
+		if err != nil {
+			return fmt.Errorf("error checking shutdown permission: %w", err)
+		}
+		if !allowed {
+			return simpleInteractionResponse(s, i, "You do not have permission to shut down this match.")
+		}
+
+		signal := SignalShutdownPayload{
+			GraceSeconds:         graceSeconds,
+			DisconnectGameServer: disconnectServer,
+			DisconnectUsers:      false,
+		}
+
+		data := NewSignalEnvelope(userID, SignalShutdown, signal).String()
+		if _, err := nk.MatchSignal(ctx, matchID.String(), data); err != nil {
+			return fmt.Errorf("failed to signal match: %w", err)
+		}
+
+		responseData := &discordgo.InteractionResponseData{
+			Content:    "Shutdown confirmed. The match has been signaled to shut down.",
+			Components: []discordgo.MessageComponent{},
+		}
+		if i.Message != nil {
+			responseData.Embeds = i.Message.Embeds
+		}
+
+		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseUpdateMessage,
+			Data: responseData,
+		}); err != nil {
+			return fmt.Errorf("failed to update shutdown confirmation message: %w", err)
+		}
+
+		return nil
 	case "approve_ip":
 
 		history := &LoginHistory{}
@@ -589,6 +640,38 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 	}
 
 	return nil
+}
+
+func parseConfirmShutdownValue(value string) (string, bool, int, error) {
+	parts := strings.SplitN(value, ":", 3)
+	if len(parts) != 3 {
+		return "", false, 0, errors.New("invalid shutdown confirmation payload")
+	}
+
+	matchID := parts[0]
+	if matchID == "" {
+		return "", false, 0, errors.New("missing match id")
+	}
+
+	var disconnectServer bool
+	switch parts[1] {
+	case "0":
+		disconnectServer = false
+	case "1":
+		disconnectServer = true
+	default:
+		return "", false, 0, errors.New("invalid disconnect value")
+	}
+
+	graceSeconds, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return "", false, 0, fmt.Errorf("invalid grace seconds: %w", err)
+	}
+	if graceSeconds < 0 {
+		return "", false, 0, errors.New("grace seconds must be >= 0")
+	}
+
+	return matchID, disconnectServer, graceSeconds, nil
 }
 
 func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.Logger, userID, guildID string, regionCode string, mode, level evr.Symbol, startTime time.Time, description string, classification SessionClassification) (l *MatchLabel, rtt float64, err error) {

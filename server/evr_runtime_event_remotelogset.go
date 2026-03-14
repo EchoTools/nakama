@@ -541,6 +541,9 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		}
 	}
 	if label.Mode != evr.ModeArenaPublic && label.Mode != evr.ModeCombatPublic {
+		if err := DeleteStoredMatchLabel(ctx, nk, matchID); err != nil && !errors.Is(err, ErrMatchNotFound) {
+			logger.WithField("error", err).Warn("failed to delete stored match label for non-public mode")
+		}
 		return nil // Only process type stats for arena and combat modes
 	}
 

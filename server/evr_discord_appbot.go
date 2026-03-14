@@ -767,10 +767,6 @@ var (
 			},
 		},
 		{
-			Name:        "set-roles",
-			Description: "Configure guild roles for EchoVRCE features. Non-members can only join private matches.",
-		},
-		{
 			Name:        "allocate",
 			Description: "Allocate a session on a game server in a specific region",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -2988,79 +2984,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			return editInteractionResponse(s, i, fmt.Sprintf("Successfully %s divisions `%s` for %s", actionVerb, divisions, target.Mention()))
 		},
-		"set-roles": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
-			options := i.ApplicationCommandData().Options
-
-			// Ensure the user is the owner of the guild
-			if user == nil || i.Member == nil || i.Member.User.ID == "" || i.GuildID == "" {
-				return nil
-			}
-
-			guild, err := s.Guild(i.GuildID)
-			if err != nil || guild == nil {
-				return errors.New("failed to get guild")
-			}
-
-			if guild.OwnerID != user.ID {
-				// Check if the user is a global developer
-				perms := PermissionsFromContext(ctx)
-				var ok bool
-				if perms != nil {
-					ok = perms.IsGlobalDeveloper
-				} else {
-					ok, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalDevelopers)
-					if err != nil {
-						return errors.New("failed to check group membership")
-					}
-				}
-				if !ok {
-					return errors.New("you do not have permission to use this command")
-				}
-			}
-
-			// Get the metadata
-			metadata, err := GroupMetadataLoad(ctx, d.db, groupID)
-			if err != nil {
-				return errors.New("failed to get guild group metadata")
-			}
-
-			roles := metadata.RoleMap
-			for _, o := range options {
-				roleID := o.RoleValue(s, guild.ID).ID
-				switch o.Name {
-				case "moderator":
-					roles.Enforcer = roleID
-				case "serverhost":
-					roles.ServerHost = roleID
-				case "suspension":
-					roles.Suspended = roleID
-				case "member":
-					roles.Member = roleID
-				case "allocator":
-					roles.Allocator = roleID
-				case "is_linked":
-					roles.AccountLinked = roleID
-				}
-			}
-
-			data, err := metadata.MarshalToMap()
-			if err != nil {
-				return fmt.Errorf("error marshalling group data: %w", err)
-			}
-
-			if err := nk.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, data, 1000000); err != nil {
-				return fmt.Errorf("error updating group: %w", err)
-			}
-
-			gg, err := GuildGroupLoad(ctx, nk, groupID)
-			if err != nil {
-				return errors.New("failed to load guild group")
-			}
-			d.guildGroupRegistry.Add(gg)
-
-			return editInteractionResponse(s, i, "roles set!")
-		},
-
 		"region-status": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 

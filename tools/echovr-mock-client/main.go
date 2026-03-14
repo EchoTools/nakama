@@ -308,8 +308,6 @@ func runLobbyPhase(conn *websocket.Conn, action string, evrID evr.EvrId, loginSe
 	}
 	for _, m := range msgs {
 		switch v := m.(type) {
-		case *evr.LobbySessionSuccessv4:
-			logger.Printf("✓ LobbySessionSuccessv4 lobby=%s", v.LobbyID)
 		case *evr.LobbySessionSuccessv5:
 			logger.Printf("✓ LobbySessionSuccessv5 lobby=%s", v.LobbyID)
 		case *evr.LobbySessionFailurev1:
