@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// A ConfigRequestv2 response message to the client, indicating failure to retrieve the requested resource.
+// ConfigSuccess is the SNSConfigSuccessv2 response message to the client, indicating successful retrieval of the requested resource.
 type ConfigSuccess struct {
 	Type     Symbol
 	Id       Symbol

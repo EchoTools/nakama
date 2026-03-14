@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// DocumentFailure represents a message from server to client indicating a failed DocumentFailurev2.
+// DocumentFailure represents the SNSDocumentFailure message from server to client indicating a document retrieval failure.
 type DocumentFailure struct {
 	Unk0    uint64 // TODO: Figure this out
 	Unk1    uint64 // TODO: Figure this out
