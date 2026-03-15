@@ -275,6 +275,24 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			},
 		},
 
+		// Guild player rename - Global operators or guild enforcers
+		{
+			ID:      "guild/player/rename",
+			Handler: GuildPlayerRenameRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{}, // Permission checked in handler (global op or guild enforcer)
+			},
+		},
+		{
+			ID:      "guild/player/ign",
+			Handler: GuildPlayerIGNRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{}, // Permission checked in handler (global op or guild enforcer)
+			},
+		},
+
 		// Enforcement - Global Operators or guild enforcers
 		{
 			ID:      "enforcement/kick",
