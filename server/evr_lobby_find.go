@@ -385,7 +385,7 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 
 			if err := p.LobbyJoinEntrants(logger, l, entrants...); err != nil {
 				if LobbyErrorCode(err) == ServerIsFull {
-					logger.Warn("Server is full, ignoring.")
+					logger.Debug("Server is full, ignoring.")
 					continue
 				}
 				return fmt.Errorf("failed to join existing social lobby: %w", err)
@@ -408,7 +408,7 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 		<-time.After(1 * time.Second)
 		if err := p.LobbyJoinEntrants(logger, label, entrants...); err != nil {
 			if LobbyErrorCode(err) == ServerIsFull {
-				logger.Warn("Server is full, ignoring.")
+				logger.Debug("Server is full, ignoring.")
 				continue
 			}
 			return fmt.Errorf("failed to join auto-created social lobby: %w", err)

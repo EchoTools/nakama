@@ -68,7 +68,7 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 				logger.Debug("Lobby session request was canceled (context.Canceled)")
 				return
 			}
-			logger.Error("Failed to process lobby session request", zap.Error(err))
+			logger.Debug("Failed to process lobby session request", zap.Error(err))
 
 			params, ok := LoadParams(ctx)
 			if !ok {

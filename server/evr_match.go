@@ -17,6 +17,8 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -502,7 +504,11 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	if reconnectReservation != nil {
 		history := NewEarlyQuitHistory(meta.Presence.GetUserId())
 		if err := StorableRead(ctx, nk, meta.Presence.GetUserId(), history, false); err != nil {
-			logger.WithField("error", err).Warn("Failed to load early quit history for forgiveness")
+			if status.Code(err) == codes.NotFound {
+				logger.WithField("error", err).Debug("No early quit history found for forgiveness (first-time player)")
+			} else {
+				logger.WithField("error", err).Warn("Failed to load early quit history for forgiveness")
+			}
 		} else if history.ForgiveQuit(state.ID) {
 			if err := StorableWrite(ctx, nk, meta.Presence.GetUserId(), history); err != nil {
 				logger.Warn("Failed to write early quit history after forgiveness")
