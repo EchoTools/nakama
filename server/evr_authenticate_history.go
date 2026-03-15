@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -708,6 +709,9 @@ func (h *LoginHistory) MarshalJSON() ([]byte, error) {
 }
 
 func LoginHistoryRegexSearch(ctx context.Context, nk runtime.NakamaModule, pattern string, limit int) ([]string, error) {
+	if _, err := regexp.Compile(pattern); err != nil {
+		return nil, fmt.Errorf("invalid regex pattern: %w", err)
+	}
 
 	query := fmt.Sprintf("+value.cache:/%s/", pattern)
 	// Perform the storage list operation

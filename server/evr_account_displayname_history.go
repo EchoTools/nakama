@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -294,6 +295,9 @@ func DisplayNameHistoryUpdate(ctx context.Context, nk runtime.NakamaModule, user
 }
 
 func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, pattern string, limit int) ([]DisplayNameSearchResult, error) {
+	if _, err := regexp.Compile(pattern); err != nil {
+		return nil, fmt.Errorf("invalid regex pattern: %w", err)
+	}
 	query := fmt.Sprintf(`+value.cache:/%s/`, pattern)
 
 	// Perform the storage list operation

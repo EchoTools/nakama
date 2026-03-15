@@ -261,17 +261,20 @@ func (s *MatchLabel) GetEntrantConnectMessage(role int, disableEncryption bool, 
 
 func (s *MatchLabel) MetricsTags() map[string]string {
 
-	tags := map[string]string{
-		"mode":        s.Mode.String(),
-		"level":       s.Level.String(),
-		"type":        s.LobbyType.String(),
-		"group_id":    s.GetGroupID().String(),
-		"operator_id": s.GameServer.OperatorID.String(),
+	operatorUsername := ""
+	if s.server != nil {
+		operatorUsername = strings.TrimPrefix("broadcaster:", s.server.GetUsername())
 	}
 
-	if s.server != nil {
-		tags["operator_username"] = strings.TrimPrefix("broadcaster:", s.server.GetUsername())
+	tags := map[string]string{
+		"mode":              s.Mode.String(),
+		"level":             s.Level.String(),
+		"type":              s.LobbyType.String(),
+		"group_id":          s.GetGroupID().String(),
+		"operator_id":       s.GameServer.OperatorID.String(),
+		"operator_username": operatorUsername,
 	}
+
 	return tags
 }
 

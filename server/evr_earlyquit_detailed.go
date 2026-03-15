@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -299,8 +301,13 @@ func CreateQuitRecordFromParticipation(state *MatchLabel, participation *PlayerP
 func TrackMatchCompletion(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID string, matchID MatchID, completionTime time.Time) error {
 	history := NewEarlyQuitHistory(userID)
 	if err := StorableRead(ctx, nk, userID, history, false); err != nil {
-		// Align behavior with quit tracking: log but proceed with a new history so completions are still tracked.
-		logger.WithField("error", err).Warn("Failed to load early quit history for completion tracking, proceeding with new history")
+		if status.Code(err) == codes.NotFound {
+			// First-time player with no history yet; proceed with a new history so completions are still tracked.
+			logger.WithField("error", err).Debug("No early quit history found for completion tracking, starting new history")
+		} else {
+			// Align behavior with quit tracking: log but proceed with a new history so completions are still tracked.
+			logger.WithField("error", err).Warn("Failed to load early quit history for completion tracking, proceeding with new history")
+		}
 	}
 
 	history.AddCompletion(matchID, completionTime)
