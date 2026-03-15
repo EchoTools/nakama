@@ -3407,9 +3407,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					// If command is in skipDeferredACKCommands, the handler was responsible for sending the response
 					// If not in skipDeferredACKCommands, we already sent a deferred response and should edit it
 					if skipDeferredACKCommands[appCommandName] {
-						// Handler was responsible for response, try simple response (not edit)
-						if err := simpleInteractionResponse(s, i, err.Error()); err != nil {
-							logger.WithField("err", err).Error("Failed to send error response")
+						// Handler was responsible for response - it may or may not have acknowledged.
+						// Try editing first (in case it was deferred), fall back to simple response.
+						if editErr := editInteractionResponse(s, i, err.Error()); editErr != nil {
+							if respErr := simpleInteractionResponse(s, i, err.Error()); respErr != nil {
+								logger.WithField("err", respErr).Error("Failed to send error response")
+							}
 						}
 					} else {
 						// We sent a deferred response, try to edit it
