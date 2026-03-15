@@ -599,6 +599,25 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *nkrtapi.Envelop
 		if in.GetMatchData().GetOpCode() == OpCodeEVRPacketData {
 			return nil, session.SendBytes(in.GetMatchData().GetData(), true)
 		}
+
+	case *nkrtapi.Envelope_PartyData:
+		partyData := in.GetPartyData()
+		switch partyData.GetOpCode() {
+		case OpPartyMatchJoined:
+			matchID, err := MatchIDFromString(string(partyData.GetData()))
+			if err != nil || matchID.IsNil() {
+				logger.Warn("Received invalid match ID in party data")
+				return nil, nil
+			}
+			logger.Info("Party member received match join notification",
+				zap.String("match_id", matchID.String()),
+				zap.String("from", partyData.GetPresence().GetUsername()),
+			)
+			// The actual match join will be handled by the party follow system.
+			// This is a notification that the leader has joined a match.
+		}
+		// Suppress PartyData from reaching EVR client.
+		return nil, nil
 	}
 
 	params, ok := LoadParams(session.Context())

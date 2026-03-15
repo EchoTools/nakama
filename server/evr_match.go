@@ -70,6 +70,11 @@ const (
 	OpCodeGameServerLobbyStatus
 )
 
+// Party data opcodes for inter-member communication.
+const (
+	OpPartyMatchJoined int64 = 1
+)
+
 type MatchStatGroup string
 type MatchLevelSelection string
 
