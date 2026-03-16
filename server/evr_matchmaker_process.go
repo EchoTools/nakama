@@ -126,24 +126,62 @@ func groupEntriesSequentially(entries []runtime.MatchmakerEntry) [][]runtime.Mat
 		countMultiple = 2
 	}
 
+	// Group entries by ticket to keep parties atomic. Each ticket represents
+	// a party (or solo player) and must never be split across candidates.
+	type ticketGroup struct {
+		ticket  string
+		entries []runtime.MatchmakerEntry
+	}
+
+	ticketOrder := make([]string, 0)
+	ticketMap := make(map[string]*ticketGroup)
+	for _, entry := range entries {
+		ticket := entry.GetTicket()
+		if tg, ok := ticketMap[ticket]; ok {
+			tg.entries = append(tg.entries, entry)
+		} else {
+			ticketOrder = append(ticketOrder, ticket)
+			ticketMap[ticket] = &ticketGroup{ticket: ticket, entries: []runtime.MatchmakerEntry{entry}}
+		}
+	}
+
+	// Pack ticket groups into candidates, never splitting a ticket across candidates.
 	candidates := make([][]runtime.MatchmakerEntry, 0, (len(entries)+maxCount-1)/maxCount)
-	for i := 0; i < len(entries); {
-		remaining := len(entries) - i
-		groupSize := maxCount
-		if remaining < groupSize {
-			groupSize = remaining
+	current := make([]runtime.MatchmakerEntry, 0, maxCount)
+
+	for _, ticket := range ticketOrder {
+		tg := ticketMap[ticket]
+
+		// If this ticket alone exceeds maxCount, it can't fit in any candidate — skip it.
+		if len(tg.entries) > maxCount {
+			continue
 		}
 
-		if rem := groupSize % countMultiple; rem != 0 {
-			groupSize -= rem
+		// If adding this ticket would exceed maxCount, flush the current candidate.
+		if len(current)+len(tg.entries) > maxCount {
+			// Trim to count_multiple boundary before flushing.
+			if rem := len(current) % countMultiple; rem != 0 {
+				current = current[:len(current)-rem]
+			}
+			if len(current) > 0 {
+				candidate := make([]runtime.MatchmakerEntry, len(current))
+				copy(candidate, current)
+				candidates = append(candidates, candidate)
+			}
+			current = current[:0]
 		}
 
-		if groupSize <= 0 {
-			break
-		}
+		current = append(current, tg.entries...)
+	}
 
-		candidates = append(candidates, entries[i:i+groupSize])
-		i += groupSize
+	// Flush remaining entries.
+	if rem := len(current) % countMultiple; rem != 0 {
+		current = current[:len(current)-rem]
+	}
+	if len(current) > 0 {
+		candidate := make([]runtime.MatchmakerEntry, len(current))
+		copy(candidate, current)
+		candidates = append(candidates, candidate)
 	}
 
 	return candidates
