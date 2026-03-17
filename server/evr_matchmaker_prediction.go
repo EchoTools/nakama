@@ -391,9 +391,17 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 				copy(match[len(blueTeam):], orangeTeam)
 
 				// Get actual (non-boosted) ratings for draw probability calculation - reuse slices
-				// Set capacity to the length of the teams
-				blueActual = blueActual[:len(blueTeam)]
-				orangeActual = orangeActual[:len(orangeTeam)]
+				// Grow slices if team exceeds pre-allocated capacity
+				if len(blueTeam) > cap(blueActual) {
+					blueActual = make([]types.Rating, len(blueTeam))
+				} else {
+					blueActual = blueActual[:len(blueTeam)]
+				}
+				if len(orangeTeam) > cap(orangeActual) {
+					orangeActual = make([]types.Rating, len(orangeTeam))
+				} else {
+					orangeActual = orangeActual[:len(orangeTeam)]
+				}
 
 				blueTeam.RatingsInto(blueActual, cfg.OpenSkillOptions)
 				orangeTeam.RatingsInto(orangeActual, cfg.OpenSkillOptions)
