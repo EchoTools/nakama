@@ -112,8 +112,8 @@ func groupEntriesSequentially(entries []runtime.MatchmakerEntry) [][]runtime.Mat
 	maxCount := 8
 	countMultiple := 2
 
-	if v, ok := entries[0].GetProperties()["max_count"].(float64); ok && int(v) > 0 {
-		maxCount = int(v)
+	if v, ok := entries[0].GetProperties()["max_team_size"].(float64); ok && int(v) > 0 {
+		maxCount = int(v) * 2
 	}
 	if v, ok := entries[0].GetProperties()["count_multiple"].(float64); ok && int(v) > 0 {
 		countMultiple = int(v)
