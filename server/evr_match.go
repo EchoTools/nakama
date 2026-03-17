@@ -736,6 +736,15 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			if participation, ok := state.participations[p.GetUserId()]; ok {
 				// Record the leave event for the participation
 				participation.RecordLeaveEvent(state)
+
+				// Classify leave reason based on presence reason
+				if p.GetReason() == runtime.PresenceReasonLeave {
+					participation.LeaveReason = LeaveReasonVoluntary
+				} else if disconnectedFromGameServer {
+					participation.LeaveReason = LeaveReasonDisconnect
+				} else {
+					participation.LeaveReason = LeaveReasonUnknown
+				}
 			}
 
 			serviceSettings := ServiceSettings()
@@ -763,12 +772,23 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 					"expiry": expiry,
 				}).Info("Created reconnect reservation for crashed player")
 				hasReconnectReservation = true
+				// Update leave reason to reflect crash recovery
+				if participation, ok := state.participations[mp.GetUserId()]; ok {
+					participation.LeaveReason = LeaveReasonCrashRecovery
+				}
 			}
 			// If the round is not over, then add an early quit count to the player.
 			// Count all quits before match completion (both pre-game and early quits)
 			if !hasReconnectReservation && state.Mode == evr.ModeArenaPublic && !state.GameState.IsMatchOver() {
 				// Only players
 				if mp.IsPlayer() {
+					// Determine leave reason for penalty differentiation
+					var leaveReason LeaveReason
+					if participation, ok := state.participations[mp.GetUserId()]; ok {
+						leaveReason = participation.LeaveReason
+					}
+
+					tags["leave_reason"] = string(leaveReason)
 					nk.MetricsCounterAdd("match_entrant_early_quit", tags, 1)
 
 					logger.WithFields(map[string]interface{}{
@@ -776,6 +796,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 						"username":     mp.Username,
 						"evrid":        mp.EvrID,
 						"display_name": mp.DisplayName,
+						"leave_reason": leaveReason,
 					}).Debug("Incrementing early quit for player.")
 
 					if err := AccumulateLeaderboardStat(ctx, nk, mp.GetUserId(), mp.DisplayName, state.GetGroupID().String(), state.Mode, EarlyQuitStatisticID, 1); err != nil {
@@ -809,7 +830,19 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 						logger.WithField("error", err).Warn("Failed to load early quitter config")
 					} else {
 
-						eqconfig.IncrementEarlyQuit()
+						// Differential penalty: only apply immediate penalty for voluntary leaves.
+						// Disconnects get deferred — the logout forgiveness goroutine will
+						// auto-forgive if the player fully logged out (crash/network issue).
+						if leaveReason == LeaveReasonVoluntary || leaveReason == LeaveReasonUnknown || leaveReason == "" {
+							eqconfig.IncrementEarlyQuit()
+						} else {
+							// For disconnects: still record the quit but don't increment penalty.
+							// The logout forgiveness goroutine handles cleanup.
+							logger.WithFields(map[string]interface{}{
+								"uid":          mp.GetUserId(),
+								"leave_reason": leaveReason,
+							}).Info("Disconnect detected — deferring penalty to logout check")
+						}
 						eqconfig.LastEarlyQuitMatchID = state.ID
 
 						// Check for tier change after early quit
@@ -880,13 +913,23 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 								}
 							}
 
-							// Launch goroutine to check if player logs out and remove early quit if they do
-							// Use a 5-minute grace period before checking logout status
-							// Use background context to ensure goroutine isn't cancelled when match ends
-							go func(userID, sessionID string) {
-								bgCtx := context.Background()
-								CheckAndStrikeEarlyQuitIfLoggedOut(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, 5*time.Minute)
-							}(mp.GetUserId(), mp.GetSessionId())
+							// Launch goroutine for deferred penalty resolution.
+							// Use background context to ensure goroutine isn't cancelled when match ends.
+							if leaveReason == LeaveReasonVoluntary || leaveReason == LeaveReasonUnknown || leaveReason == "" {
+								// Voluntary leave: penalty applied immediately. If player logs out
+								// within 5 minutes, forgive the penalty (crash during quit flow).
+								go func(userID, sessionID string) {
+									bgCtx := context.Background()
+									CheckAndStrikeEarlyQuitIfLoggedOut(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, 5*time.Minute)
+								}(mp.GetUserId(), mp.GetSessionId())
+							} else {
+								// Disconnect: penalty deferred. If player is still online after
+								// 5 minutes, they force-closed intentionally — apply the penalty.
+								go func(userID, sessionID string, matchID MatchID) {
+									bgCtx := context.Background()
+									CheckAndApplyEarlyQuitIfStillOnline(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, matchID, 5*time.Minute)
+								}(mp.GetUserId(), mp.GetSessionId(), state.ID)
+							}
 						}
 					}
 				}
@@ -1131,6 +1174,11 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			}
 
 			if rr.DeferPenalty {
+				// Update participation leave reason to reflect reservation expiry
+				if participation, ok := state.participations[rr.UserID]; ok {
+					participation.LeaveReason = LeaveReasonReservationExp
+				}
+
 				eqconfig := NewEarlyQuitConfig()
 				if err := StorableRead(ctx, nk, rr.UserID, eqconfig, true); err != nil {
 					logger.WithField("error", err).Warn("Failed to load early quitter config for deferred penalty")

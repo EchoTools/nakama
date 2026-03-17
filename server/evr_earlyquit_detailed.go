@@ -22,6 +22,20 @@ const (
 	QuitTypePregame QuitType = "pregame" // Left before game started
 )
 
+// LeaveReason classifies why a player left a match.
+// Used for differential penalty logic: voluntary leaves get full penalties,
+// while disconnects/crashes get reduced or deferred penalties.
+type LeaveReason string
+
+const (
+	LeaveReasonVoluntary      LeaveReason = "voluntary"       // Clean leave packet received
+	LeaveReasonDisconnect     LeaveReason = "disconnect"      // TCP/WebSocket closed without leave packet
+	LeaveReasonTimeout        LeaveReason = "timeout"         // No heartbeat / connection timeout
+	LeaveReasonCrashRecovery  LeaveReason = "crash_recovery"  // Disconnect with reconnect reservation created
+	LeaveReasonReservationExp LeaveReason = "reservation_exp" // Reconnect reservation expired (deferred penalty)
+	LeaveReasonUnknown        LeaveReason = "unknown"
+)
+
 // CompletionRecord represents a completed match (no early quit)
 type CompletionRecord struct {
 	MatchID        MatchID   `json:"match_id"`
@@ -31,11 +45,12 @@ type CompletionRecord struct {
 // QuitRecord represents a single early quit event with full context
 type QuitRecord struct {
 	// Event info
-	MatchID    MatchID   `json:"match_id"`
-	QuitTime   time.Time `json:"quit_time"`
-	QuitType   QuitType  `json:"quit_type"`
-	Forgiven   bool      `json:"forgiven,omitempty"`    // True if quit was forgiven due to full logout
-	ForgivenAt time.Time `json:"forgiven_at,omitempty"` // When the quit was forgiven
+	MatchID     MatchID     `json:"match_id"`
+	QuitTime    time.Time   `json:"quit_time"`
+	QuitType    QuitType    `json:"quit_type"`
+	LeaveReason LeaveReason `json:"leave_reason,omitempty"` // Why the player left (voluntary, disconnect, crash, etc.)
+	Forgiven    bool        `json:"forgiven,omitempty"`     // True if quit was forgiven due to full logout
+	ForgivenAt  time.Time   `json:"forgiven_at,omitempty"`  // When the quit was forgiven
 
 	// Player info at time of quit
 	Username    string    `json:"username,omitempty"`
@@ -258,10 +273,11 @@ func CreateQuitRecordFromParticipation(state *MatchLabel, participation *PlayerP
 	}
 
 	return QuitRecord{
-		MatchID:  state.ID,
-		QuitTime: participation.LeaveTime,
-		QuitType: quitType,
-		Forgiven: false,
+		MatchID:     state.ID,
+		QuitTime:    participation.LeaveTime,
+		QuitType:    quitType,
+		LeaveReason: participation.LeaveReason,
+		Forgiven:    false,
 
 		Username:    participation.Username,
 		DisplayName: participation.DisplayName,
