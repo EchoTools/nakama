@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"reflect"
@@ -13,6 +14,8 @@ import (
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -104,5 +107,158 @@ func TestProcessOutgoingNotificationConnectionInfo(t *testing.T) {
 				t.Errorf("ProcessOutgoing() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestProcessOutgoing_PartyData_MatchJoined(t *testing.T) {
+	testLogger := NewConsoleLogger(os.Stdout, true)
+	matchID := MatchID{uuid.Must(uuid.NewV4()), "testnode"}
+
+	in := &rtapi.Envelope{
+		Message: &rtapi.Envelope_PartyData{
+			PartyData: &rtapi.PartyData{
+				PartyId: "test-party",
+				Presence: &rtapi.UserPresence{
+					UserId:   uuid.Must(uuid.NewV4()).String(),
+					Username: "leader",
+				},
+				OpCode: OpPartyMatchJoined,
+				Data:   []byte(matchID.String()),
+			},
+		},
+	}
+
+	got, err := ProcessOutgoing(testLogger, &sessionWS{}, in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil messages (suppressed), got %v", got)
+	}
+}
+
+func TestProcessOutgoing_PartyData_InvalidMatchID(t *testing.T) {
+	core, logs := observer.New(zapcore.WarnLevel)
+	testLogger := zap.New(core)
+
+	in := &rtapi.Envelope{
+		Message: &rtapi.Envelope_PartyData{
+			PartyData: &rtapi.PartyData{
+				PartyId: "test-party",
+				Presence: &rtapi.UserPresence{
+					UserId:   uuid.Must(uuid.NewV4()).String(),
+					Username: "leader",
+				},
+				OpCode: OpPartyMatchJoined,
+				Data:   []byte("not-a-valid-match-id"),
+			},
+		},
+	}
+
+	got, err := ProcessOutgoing(testLogger, &sessionWS{}, in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil messages (suppressed), got %v", got)
+	}
+
+	// Verify warning was logged with diagnostic fields.
+	if logs.Len() == 0 {
+		t.Fatal("expected a warning log entry for invalid match ID")
+	}
+	entry := logs.All()[0]
+	if entry.Message != "Received invalid match ID in party data" {
+		t.Fatalf("unexpected log message: %s", entry.Message)
+	}
+	// Check that diagnostic fields are present.
+	fieldNames := make(map[string]bool)
+	for _, f := range entry.Context {
+		fieldNames[f.Key] = true
+	}
+	for _, expected := range []string{"op_code", "from_user", "data_len"} {
+		if !fieldNames[expected] {
+			t.Errorf("expected log field %q not found in warning", expected)
+		}
+	}
+}
+
+func TestProcessOutgoing_PartyData_UnknownOpcode(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	testLogger := zap.New(core)
+
+	unknownOpCode := int64(999)
+	in := &rtapi.Envelope{
+		Message: &rtapi.Envelope_PartyData{
+			PartyData: &rtapi.PartyData{
+				PartyId: "test-party",
+				Presence: &rtapi.UserPresence{
+					UserId:   uuid.Must(uuid.NewV4()).String(),
+					Username: "someone",
+				},
+				OpCode: unknownOpCode,
+				Data:   []byte("whatever"),
+			},
+		},
+	}
+
+	got, err := ProcessOutgoing(testLogger, &sessionWS{}, in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil messages (suppressed), got %v", got)
+	}
+
+	// Verify debug log for unhandled opcode.
+	found := false
+	for _, entry := range logs.All() {
+		if entry.Message == "Suppressing unhandled PartyData opcode for EVR client" {
+			found = true
+			fieldMap := make(map[string]interface{})
+			for _, f := range entry.Context {
+				fieldMap[f.Key] = f.Integer
+			}
+			if fieldMap["op_code"] != unknownOpCode {
+				t.Errorf("expected op_code=%d, got %v", unknownOpCode, fieldMap["op_code"])
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected debug log for unhandled opcode")
+	}
+}
+
+func TestProcessOutgoing_PartyData_NilMatchID(t *testing.T) {
+	// A match ID string that parses but has a nil UUID should also be rejected.
+	core, logs := observer.New(zapcore.WarnLevel)
+	testLogger := zap.New(core)
+
+	nilMatchID := fmt.Sprintf("%s.testnode", uuid.Nil.String())
+	in := &rtapi.Envelope{
+		Message: &rtapi.Envelope_PartyData{
+			PartyData: &rtapi.PartyData{
+				PartyId: "test-party",
+				Presence: &rtapi.UserPresence{
+					UserId:   uuid.Must(uuid.NewV4()).String(),
+					Username: "leader",
+				},
+				OpCode: OpPartyMatchJoined,
+				Data:   []byte(nilMatchID),
+			},
+		},
+	}
+
+	got, err := ProcessOutgoing(testLogger, &sessionWS{}, in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil messages (suppressed), got %v", got)
+	}
+
+	if logs.Len() == 0 {
+		t.Fatal("expected a warning log for nil match ID")
 	}
 }
