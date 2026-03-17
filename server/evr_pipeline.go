@@ -606,7 +606,12 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *nkrtapi.Envelop
 		case OpPartyMatchJoined:
 			matchID, err := MatchIDFromString(string(partyData.GetData()))
 			if err != nil || matchID.IsNil() {
-				logger.Warn("Received invalid match ID in party data")
+				logger.Warn("Received invalid match ID in party data",
+					zap.Error(err),
+					zap.Int64("op_code", partyData.GetOpCode()),
+					zap.String("from_user", partyData.GetPresence().GetUsername()),
+					zap.Int("data_len", len(partyData.GetData())),
+				)
 				return nil, nil
 			}
 			logger.Info("Party member received match join notification",
@@ -615,6 +620,11 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *nkrtapi.Envelop
 			)
 			// The actual match join will be handled by the party follow system.
 			// This is a notification that the leader has joined a match.
+		default:
+			logger.Debug("Suppressing unhandled PartyData opcode for EVR client",
+				zap.Int64("op_code", partyData.GetOpCode()),
+				zap.String("from_user", partyData.GetPresence().GetUsername()),
+			)
 		}
 		// Suppress PartyData from reaching EVR client.
 		return nil, nil
