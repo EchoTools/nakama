@@ -544,6 +544,13 @@ func (p *EvrPipeline) buildRegionCodes(ctx context.Context, logger *zap.Logger, 
 		}
 	}
 	regionCodes = uniqueRegionCodes
+
+	// If no regions were explicitly provided, always ensure "default" is present
+	// so the server participates in the public matchmaking pool.
+	if len(serverRegions) == 0 && !slices.Contains(regionCodes, RegionDefault) {
+		regionCodes = append(regionCodes, RegionDefault)
+	}
+
 	return regionCodes, generatedRegion, ipInfo
 }
 

@@ -26,9 +26,12 @@ func TestQuery_JoinAsRegex(t *testing.T) {
 			expected: "/(test1|test2|test3)/",
 		},
 		{
-			name:     "elements with special characters",
-			elems:    []string{"test-1", "test[2", "test+3", "test*4", "test(5"},
-			expected: "/(test\\-1|test\\[2|test\\+3|test\\*4|test\\(5)/",
+			name:  "elements with special characters",
+			elems: []string{"test-1", "test[2", "test+3", "test*4", "test(5"},
+			// Bluge's query lexer strips single backslashes from its reserved chars
+			// (like +, [, *, ()), so those need double-backslash escaping to survive.
+			// '-' is not a regex metachar outside a character class, so no escaping.
+			expected: "/(test-1|test\\\\[2|test\\\\+3|test\\\\*4|test\\\\(5)/",
 		},
 	}
 

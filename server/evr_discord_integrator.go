@@ -32,6 +32,16 @@ type QueueEntry struct {
 	DoFullUpdate bool
 }
 
+type cachedMember struct {
+	member    *discordgo.Member
+	expiresAt time.Time
+}
+
+// memberCacheTTL is how long a guild member lookup is cached locally before
+// a fresh API call is made. This prevents repeated Discord API calls for the
+// same member across logins and sync operations.
+const memberCacheTTL = 5 * time.Minute
+
 // Responsible for caching and synchronizing data with Discord.
 type DiscordIntegrator struct {
 	ctx      context.Context
@@ -46,6 +56,7 @@ type DiscordIntegrator struct {
 	queueCh            chan QueueEntry
 	queueCooldowns     *MapOf[QueueEntry, time.Time]
 	idcache            *MapOf[string, string]
+	memberCache        *MapOf[string, cachedMember]
 }
 
 func NewDiscordIntegrator(ctx context.Context, logger *zap.Logger, config Config, metrics Metrics, nk runtime.NakamaModule, db *sql.DB, dg *discordgo.Session, guildGroupRegistry *GuildGroupRegistry) *DiscordIntegrator {
@@ -64,8 +75,9 @@ func NewDiscordIntegrator(ctx context.Context, logger *zap.Logger, config Config
 		dg: dg,
 
 		guildGroupRegistry: guildGroupRegistry,
-		queueCooldowns:     &MapOf[QueueEntry, time.Time]{},
-		idcache:            &MapOf[string, string]{},
+		queueCooldowns: &MapOf[QueueEntry, time.Time]{},
+		idcache:        &MapOf[string, string]{},
+		memberCache:    &MapOf[string, cachedMember]{},
 
 		queueCh: make(chan QueueEntry, 50),
 	}
@@ -462,10 +474,21 @@ func InGameName(m *discordgo.Member) string {
 
 // Loads/Adds a user to the cache.
 func (c *DiscordIntegrator) GuildMember(guildID, discordID string) (member *discordgo.Member, err error) {
-	// Check the cache first.
+	cacheKey := guildID + ":" + discordID
+
+	// Check local TTL cache first to avoid redundant Discord API calls.
+	if cached, ok := c.memberCache.Load(cacheKey); ok && time.Now().Before(cached.expiresAt) {
+		return cached.member, nil
+	}
+
+	// Check discordgo's state cache (populated by gateway events).
 	if member, err = c.dg.State.Member(guildID, discordID); err == nil && member != nil {
+		c.memberCache.Store(cacheKey, cachedMember{member: member, expiresAt: time.Now().Add(memberCacheTTL)})
 		return member, nil
-	} else if member, err = c.dg.GuildMember(guildID, discordID); err != nil {
+	}
+
+	// Fall back to the Discord API.
+	if member, err = c.dg.GuildMember(guildID, discordID); err != nil {
 		if IsDiscordErrorCode(err, discordgo.ErrCodeUnknownMember) {
 			return nil, ErrMemberNotFound
 		}
@@ -473,6 +496,7 @@ func (c *DiscordIntegrator) GuildMember(guildID, discordID string) (member *disc
 	}
 
 	c.dg.State.MemberAdd(member)
+	c.memberCache.Store(cacheKey, cachedMember{member: member, expiresAt: time.Now().Add(memberCacheTTL)})
 	return member, nil
 }
 
@@ -633,6 +657,10 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 	if e.Member == nil || e.Member.User == nil {
 		return nil
 	}
+
+	// Keep the local member cache fresh with data received from the gateway.
+	cacheKey := e.GuildID + ":" + e.Member.User.ID
+	d.memberCache.Store(cacheKey, cachedMember{member: e.Member, expiresAt: time.Now().Add(memberCacheTTL)})
 
 	// Ignore unknown guilds
 	groupID := d.GuildIDToGroupID(e.GuildID)
