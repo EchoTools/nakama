@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base32"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -197,6 +198,33 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		nk.MetricsCounterAdd("matchmaker_ticket_count", nil, int64(len(ticketSet)))
 		nk.MetricsCounterAdd("matchmaker_unmatched_player_count", nil, int64(len(unmatchedPlayers)))
 		nk.MetricsCounterAdd("matchmaker_matched_player_count", nil, int64(len(matchedPlayers)))
+	}
+
+	// Track unmatched party tickets (tickets with >1 player that failed to match).
+	// This helps diagnose party splitting issues and slot constraint failures.
+	unmatchedPartyTickets := make(map[string]int) // ticket -> party size
+	for _, entry := range entries {
+		ticket := entry.GetTicket()
+		unmatchedPartyTickets[ticket]++
+	}
+	// Remove matched tickets
+	for _, c := range matches {
+		for _, e := range c {
+			delete(unmatchedPartyTickets, e.GetTicket())
+		}
+	}
+	// Filter to only party tickets (size > 1) and log them
+	for ticket, size := range unmatchedPartyTickets {
+		if size <= 1 {
+			delete(unmatchedPartyTickets, ticket)
+		}
+	}
+	if nk != nil && len(unmatchedPartyTickets) > 0 {
+		for _, size := range unmatchedPartyTickets {
+			nk.MetricsCounterAdd("matchmaker_unmatched_party_tickets", map[string]string{
+				"party_size": fmt.Sprintf("%d", size),
+			}, 1)
+		}
 	}
 
 	// Calculate wait time statistics for logging
