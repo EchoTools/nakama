@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -24,13 +25,41 @@ var Query query = func() query {
 	}
 }()
 
+// blugeReservedChars are characters that Bluge's query string lexer treats as
+// escape-able: a backslash before any of these strips the backslash and keeps
+// the character literally. This means \+ becomes + in the token, which breaks
+// regex patterns (+ is a quantifier). Regex metacharacters that are also in
+// this set need double-backslash escaping so they survive the query parser.
+const blugeReservedChars = "+-=&|><!(){}[]^\"~*?:\\/ "
+
+// regexEscapeForBluge escapes a string for literal use inside a Bluge regex
+// query (e.g. /pattern/). Bluge's lexer strips single backslashes from its
+// reserved characters, so those need double-backslash escaping; all other
+// regex metacharacters only need the standard single backslash.
+func regexEscapeForBluge(s string) string {
+	var result strings.Builder
+	result.Grow(len(s) * 2)
+	for _, ch := range s {
+		q := regexp.QuoteMeta(string(ch))
+		if q != string(ch) {
+			// ch is a regex metacharacter escaped with a leading backslash.
+			// If Bluge's lexer would strip that backslash, add an extra one.
+			if strings.ContainsRune(blugeReservedChars, ch) {
+				result.WriteByte('\\')
+			}
+		}
+		result.WriteString(q)
+	}
+	return result.String()
+}
+
 func (query) CreateMatchPatternPartial(elems []string) string {
 	if len(elems) == 0 {
 		return ""
 	}
 	strs := make([]string, len(elems))
 	for i, elem := range elems {
-		strs[i] = Query.QuoteStringValue(elem)
+		strs[i] = regexEscapeForBluge(elem)
 	}
 	return fmt.Sprintf("/.*(%s).*/", strings.Join(strs, "|"))
 }
@@ -42,7 +71,7 @@ func (query) CreateMatchPattern(elems []string) string {
 	}
 	strs := make([]string, len(elems))
 	for i, elem := range elems {
-		strs[i] = Query.QuoteStringValue(elem)
+		strs[i] = regexEscapeForBluge(elem)
 	}
 	return fmt.Sprintf("/(%s)/", strings.Join(strs, "|"))
 }
