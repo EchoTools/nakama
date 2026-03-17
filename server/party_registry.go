@@ -28,6 +28,7 @@ var ErrPartyNotFound = errors.New("party not found")
 
 type PartyRegistry interface {
 	Create(open bool, maxSize int, leader *rtapi.UserPresence) *PartyHandler
+	GetOrCreate(id uuid.UUID, open bool, maxSize int, leader *rtapi.UserPresence) (*PartyHandler, bool, error)
 	Delete(id uuid.UUID)
 
 	Join(id uuid.UUID, presences []*Presence)
@@ -78,6 +79,28 @@ func (p *LocalPartyRegistry) Create(open bool, maxSize int, presence *rtapi.User
 	p.parties.Store(id, partyHandler)
 
 	return partyHandler
+}
+
+func (p *LocalPartyRegistry) GetOrCreate(id uuid.UUID, open bool, maxSize int, leader *rtapi.UserPresence) (*PartyHandler, bool, error) {
+	if id == uuid.Nil {
+		return nil, false, errors.New("party ID must not be nil")
+	}
+	if maxSize <= 0 {
+		return nil, false, errors.New("party maxSize must be greater than zero")
+	}
+
+	ph, found := p.parties.Load(id)
+	if found {
+		return ph, false, nil
+	}
+	ph = NewPartyHandler(p.logger, p, p.matchmaker, p.tracker, p.streamManager, p.router, id, p.node, open, maxSize, leader)
+	actual, loaded := p.parties.LoadOrStore(id, ph)
+	if loaded {
+		// Another goroutine created it first, clean up ours.
+		ph.ctxCancelFn()
+		return actual, false, nil
+	}
+	return ph, true, nil
 }
 
 func (p *LocalPartyRegistry) Delete(id uuid.UUID) {
