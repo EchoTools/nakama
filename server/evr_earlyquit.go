@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"sync"
 	"time"
 
@@ -335,6 +336,95 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 					"discord_id": discordID,
 					"error":      err,
 				}).Warn("Failed to send tier change notification after logout")
+			}
+		}
+	}
+}
+
+// CheckAndApplyEarlyQuitIfStillOnline is the inverse of CheckAndStrikeEarlyQuitIfLoggedOut.
+// For disconnects where penalty was deferred: if the player is still online after the grace
+// period, they likely force-closed intentionally, so apply the penalty. If they're offline,
+// they genuinely crashed/had a network issue, so forgive it.
+func CheckAndApplyEarlyQuitIfStillOnline(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, sessionRegistry SessionRegistry, userID, sessionID string, matchID MatchID, checkInterval time.Duration) {
+	select {
+	case <-time.After(checkInterval):
+	case <-ctx.Done():
+		return
+	}
+
+	sessionUUID, err := uuid.FromString(sessionID)
+	if err != nil {
+		logger.WithField("error", err).Warn("Invalid session ID for disconnect penalty check")
+		return
+	}
+
+	// If session is gone, player logged out — genuine crash/disconnect, no penalty.
+	if sessionRegistry.Get(sessionUUID) == nil {
+		logger.WithFields(map[string]any{
+			"uid":        userID,
+			"session_id": sessionID,
+		}).Info("Disconnect forgiven: player logged out (likely crash/network issue)")
+		return
+	}
+
+	// Player is still online — this was likely an intentional force-close. Apply penalty.
+	logger.WithFields(map[string]any{
+		"uid":        userID,
+		"session_id": sessionID,
+	}).Info("Applying deferred penalty: player still online after disconnect")
+
+	eqconfig := NewEarlyQuitConfig()
+	if err := StorableRead(ctx, nk, userID, eqconfig, true); err != nil {
+		logger.WithField("error", err).Warn("Failed to load early quit config for deferred penalty")
+		return
+	}
+
+	eqconfig.IncrementEarlyQuit()
+	eqconfig.LastEarlyQuitMatchID = matchID
+
+	serviceSettings := ServiceSettings()
+	oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
+
+	if err := StorableWrite(ctx, nk, userID, eqconfig); err != nil {
+		logger.WithField("error", err).Warn("Failed to write deferred early quit penalty")
+		return
+	}
+
+	// Update session cache
+	if s := sessionRegistry.Get(sessionUUID); s != nil {
+		if params, ok := LoadParams(s.Context()); ok {
+			params.earlyQuitConfig.Store(eqconfig)
+		}
+	}
+
+	// Send penalty notification
+	if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
+		penaltyLevel := int32(eqconfig.EarlyQuitPenaltyLevel)
+		if penaltyLevel > MaxEarlyQuitPenaltyLevel {
+			penaltyLevel = int32(MaxEarlyQuitPenaltyLevel)
+		}
+		lockoutDuration := GetLockoutDurationSeconds(int(penaltyLevel))
+		reason := fmt.Sprintf("Deferred penalty: disconnect from match %s (still online)", matchID.String())
+		messageTrigger.SendPenaltyAppliedNotification(ctx, userID, penaltyLevel, lockoutDuration, reason)
+	}
+
+	// Send tier change notifications
+	if tierChanged {
+		if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
+			messageTrigger.SendTierChangeNotification(ctx, userID, oldTier, newTier, newTier > oldTier)
+		}
+		discordID, err := GetDiscordIDByUserID(ctx, db, userID)
+		if err == nil {
+			if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
+				var message string
+				if newTier > oldTier {
+					message = TierDegradedMessage
+				} else {
+					message = TierRestoredMessage
+				}
+				if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
+					logger.WithField("error", err).Warn("Failed to send tier change DM for deferred penalty")
+				}
 			}
 		}
 	}

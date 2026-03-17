@@ -63,8 +63,9 @@ type PlayerParticipation struct {
 	IsTeamWipeMember       bool `json:"is_team_wipe_member,omitempty" bson:"is_team_wipe_member,omitempty"`
 
 	// Final status
-	WasPresentAtEnd bool `json:"was_present_at_end" bson:"was_present_at_end"`
-	IsAbandoner     bool `json:"is_abandoner,omitempty" bson:"is_abandoner,omitempty"`
+	WasPresentAtEnd bool        `json:"was_present_at_end" bson:"was_present_at_end"`
+	IsAbandoner     bool        `json:"is_abandoner,omitempty" bson:"is_abandoner,omitempty"`
+	LeaveReason     LeaveReason `json:"leave_reason,omitempty" bson:"leave_reason,omitempty"`
 }
 
 // MatchSummaryState captures the full final match state.
