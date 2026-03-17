@@ -858,6 +858,10 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 		return errors.New("session parameters not found")
 	}
 
+	if params.profile == nil {
+		return errors.New("player profile not loaded")
+	}
+
 	groupID := params.profile.GetActiveGroupID()
 
 	if groupID.IsNil() {
