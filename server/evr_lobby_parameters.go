@@ -604,6 +604,8 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		"failsafe_timeout": p.FailsafeTimeout.Seconds(),
 		"min_team_size":    minTeamSize,
 		"max_team_size":    maxTeamSize,
+		"count_multiple":   float64(ticketParams.CountMultiple),
+		"max_count":        float64(ticketParams.MaxCount),
 	}
 
 	qparts := []string{

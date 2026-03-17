@@ -277,6 +277,13 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 		data.Matchmaking.MatchmakingTimeoutSecs = 360
 	}
 
+	// Hard upper bound: never allow matchmaking to run longer than 10 minutes.
+	// Prevents indefinite hangs when clients silently re-queue expired tickets.
+	const maxMatchmakingTimeoutSecs = 600
+	if data.Matchmaking.MatchmakingTimeoutSecs > maxMatchmakingTimeoutSecs {
+		data.Matchmaking.MatchmakingTimeoutSecs = maxMatchmakingTimeoutSecs
+	}
+
 	if data.Matchmaking.FailsafeTimeoutSecs == 0 {
 		data.Matchmaking.FailsafeTimeoutSecs = data.Matchmaking.MatchmakingTimeoutSecs - 60
 	}
