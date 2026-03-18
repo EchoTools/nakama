@@ -16,8 +16,6 @@ type LobbySessionSuccess struct {
 	GroupID            uuid.UUID // V5 only
 	Endpoint           Endpoint
 	TeamIndex          int16
-	UserSlot           uint16
-	Flags32            uint16
 	SessionFlags       uint8
 	ServerEncoderFlags PacketEncoderConfig
 	ClientEncoderFlags PacketEncoderConfig
@@ -91,7 +89,7 @@ func (m *LobbySessionSuccessv5) Stream(s *EasyStream) error {
 		func() error { return s.StreamGUID(&m.LobbyID) },
 		func() error { return s.StreamGUID(&m.GroupID) },
 		func() error { return s.StreamStruct(&m.Endpoint) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.Flags32) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.TeamIndex) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.SessionFlags) },
 		func() error { return s.Skip(3) }, // Padding
 		func() error { return s.StreamNumber(binary.LittleEndian, &encoderConfig0) },

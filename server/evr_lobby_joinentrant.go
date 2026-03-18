@@ -198,8 +198,6 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 				GroupId:            connectionSettings.GroupID.String(),
 				Endpoint:           connectionSettings.Endpoint.String(),
 				TeamIndex:          int32(connectionSettings.TeamIndex),
-				UserSlot:           uint32(connectionSettings.UserSlot),
-				Flags32:            uint32(connectionSettings.Flags32),
 				SessionFlags:       uint32(connectionSettings.SessionFlags),
 				ServerEncoderFlags: connectionSettings.ServerEncoderFlags.ToFlags(),
 				ClientEncoderFlags: connectionSettings.ClientEncoderFlags.ToFlags(),
