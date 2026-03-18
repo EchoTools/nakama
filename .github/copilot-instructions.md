@@ -5,12 +5,12 @@
 ## Architecture
 
 This Nakama fork adds EchoVR game server functionality:
-- `server/evr/` - EVR binary protocol parsers (mirrors `nevr-common/serviceapi/`)
+- `server/evr/` - EVR binary protocol parsers (mirrors `nevr-proto/serviceapi/`)
 - `server/evr_*.go` - EVR-specific server logic (pipeline, matchmaker, runtime)
 - Standard Nakama in `server/` - API, console, runtime, matchmaker
 
 **Cross-repo dependencies** (via go.work):
-- `nevr-common` → Shared protobuf definitions
+- `nevr-proto` → Shared protobuf definitions
 - `vrmlgo` → VRML league integration
 
 ## Build & Run
