@@ -38,6 +38,7 @@ func DefaultEarlyQuitFeatureFlags() *SNSEarlyQuitFeatureFlags {
 		EnableUICountdown:   true,
 		EnableQueueBlocking: true,
 		SupportedRegions: []string{
+			"default",
 			"us-east",
 			"us-west",
 			"eu-west",
@@ -58,5 +59,5 @@ func (m *SNSEarlyQuitFeatureFlags) String() string {
 }
 
 func (m *SNSEarlyQuitFeatureFlags) Stream(s *EasyStream) error {
-	return s.StreamJson(m, false, ZlibCompression)
+	return s.StreamJson(m, false, ZstdCompression)
 }

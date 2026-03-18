@@ -181,13 +181,6 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		unrequireMessage,
 		gameSettings,
 	}
-
-	// Send early quit config and feature flags
-	eqConfig := LoadEarlyQuitServiceConfig(ctx, p.nk, logger)
-	eqConfigMsg := evr.NewSNSEarlyQuitConfig(eqConfig)
-	eqFlags := evr.DefaultEarlyQuitFeatureFlags()
-
-	messagesToSend = append(messagesToSend, eqConfigMsg, eqFlags)
 	return session.SendEvr(messagesToSend...)
 }
 
