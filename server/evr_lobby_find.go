@@ -186,12 +186,30 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 	// If this is the leader, then set the presence status to the current match ID.
 	if isLeader {
 		if !lobbyParams.CurrentMatchID.IsNil() && lobbyParams.Mode != evr.ModeSocialPublic {
-			// If there are more than one player in the party, wait for the other players to start matchmaking.
-			if lobbyGroup.Size() > 1 {
-				select {
-				case <-ctx.Done():
-					return nil, nil, false, ctx.Err()
-				case <-time.After(10 * time.Second):
+			// Query the match we're leaving to find how many party members should be joining us.
+			expectedCount := 0
+			if presences, err := GetMatchPresences(ctx, p.nk, lobbyParams.CurrentMatchID); err == nil {
+				for _, mp := range presences {
+					if mp.PartyID == lobbyParams.PartyID && mp.UserID != session.userID {
+						expectedCount++
+					}
+				}
+			}
+			if expectedCount > 0 {
+				logger.Debug("Waiting for party members to start matchmaking", zap.Int("expected", expectedCount), zap.Int("current", lobbyGroup.Size()-1))
+				deadline := time.After(30 * time.Second)
+				ticker := time.NewTicker(500 * time.Millisecond)
+				defer ticker.Stop()
+			waitLoop:
+				for lobbyGroup.Size()-1 < expectedCount {
+					select {
+					case <-ctx.Done():
+						return nil, nil, false, ctx.Err()
+					case <-deadline:
+						logger.Warn("Timed out waiting for party members", zap.Int("expected", expectedCount), zap.Int("current", lobbyGroup.Size()-1))
+						break waitLoop
+					case <-ticker.C:
+					}
 				}
 			}
 		}
