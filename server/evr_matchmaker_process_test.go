@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"go.uber.org/zap"
 )
 
 // Test filtering candidates based on max RTT to common servers
@@ -141,7 +142,7 @@ func TestOverrideFn(t *testing.T) {
 	for _, candidate := range runtimeCombinations {
 		flatEntries = append(flatEntries, candidate...)
 	}
-	_, returnedEntries, _, _ := sbmm.processPotentialMatches(flatEntries)
+	_, returnedEntries, _, _ := sbmm.processPotentialMatches(NewRuntimeGoLogger(zap.NewNop()), flatEntries)
 	t.Logf("Matched %d candidate matches in %s", len(returnedEntries), time.Since(startTime))
 
 	t.Errorf("autofail")
