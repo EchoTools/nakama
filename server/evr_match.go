@@ -710,8 +710,12 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 			} else {
 				tags["reject_sent"] = "false"
-				disconnectedFromGameServer = true
-				logger.Info("Player disconnected from game server. Removing from handler.")
+				if p.GetReason() != runtime.PresenceReasonLeave {
+					disconnectedFromGameServer = true
+					logger.Info("Player disconnected from game server. Removing from handler.")
+				} else {
+					logger.Info("Player voluntarily left. No crash reservation needed.")
+				}
 			}
 
 			nk.MetricsCounterAdd("match_entrant_leave_count", tags, 1)
