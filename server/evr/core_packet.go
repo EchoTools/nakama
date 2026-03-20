@@ -21,7 +21,6 @@ var (
 	SymbolTypes = map[uint64]Message{
 		// This is the complete list of implemented message types.
 		/*
-			(*SNSLobbySmiteEntrant)(nil),  // HOST_ONLY: relayed via game server, not direct client TCP
 			0x013e99cb47eb3669: (*GenericMessage)(nil),
 			0x35d810572a230837: (*GenericMessageNotify)(nil),
 		*/
