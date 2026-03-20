@@ -9,7 +9,7 @@ import (
 	"github.com/intinig/go-openskill/types"
 )
 
-func (m *SkillBasedMatchmaker) processPotentialMatches(entries []runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int, []PredictedMatch) {
+func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, entries []runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int, []PredictedMatch) {
 	candidates := groupEntriesSequentially(entries)
 
 	filterCounts := make(map[string]int)
@@ -93,8 +93,8 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(entries []runtime.Matchma
 	useReservations := settings != nil && settings.Matchmaking.EnableTicketReservation
 
 	if useReservations {
-		starving, reserved := m.buildReservations(candidates, predictions, &settings.Matchmaking)
-		madeMatches = m.assembleMatchesWithReservations(predictions, starving, reserved)
+		starving, reserved := m.buildReservations(logger, candidates, predictions, &settings.Matchmaking)
+		madeMatches = m.assembleMatchesWithReservations(logger, predictions, starving, reserved)
 		filterCounts["reserved_players"] = len(reserved)
 		filterCounts["starving_tickets"] = len(starving)
 	} else {

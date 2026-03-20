@@ -166,7 +166,7 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		predictions  []PredictedMatch
 	)
 
-	candidates, matches, filterCounts, predictions = m.processPotentialMatches(entries)
+	candidates, matches, filterCounts, predictions = m.processPotentialMatches(logger, entries)
 
 	// Extract all players from the candidates
 	playerSet := make(map[string]struct{}, 0)
@@ -238,11 +238,11 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 			continue
 		}
 		props := entry.GetProperties()
-		submissionTime, ok := props["submission_time"].(float64)
-		if !ok || submissionTime <= 0 {
+		timestamp, ok := props["timestamp"].(float64)
+		if !ok || timestamp <= 0 {
 			continue
 		}
-		waitTime := float64(now) - submissionTime
+		waitTime := float64(now) - timestamp
 		totalWaitTime += waitTime
 		waitTimeCount++
 		if waitTime > maxWaitTime {
