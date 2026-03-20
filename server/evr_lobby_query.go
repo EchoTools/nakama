@@ -47,6 +47,11 @@ func regexEscapeForBluge(s string) string {
 			if strings.ContainsRune(blugeReservedChars, ch) {
 				result.WriteByte('\\')
 			}
+		} else if strings.ContainsRune(blugeReservedChars, ch) {
+			// ch is NOT a regex metacharacter but IS a Bluge reserved char
+			// (e.g. `:`, space). Must escape it so Bluge's query parser
+			// doesn't treat it as syntax (field separator, etc.).
+			result.WriteByte('\\')
 		}
 		result.WriteString(q)
 	}
