@@ -98,11 +98,11 @@ func checkStorageObjectAuthorization(ctx context.Context, logger runtime.Logger)
 		return false, err
 	}
 
-	if vars != nil && (vars.Intents.StorageObjects || vars.Intents.IsGlobalOperator || vars.Intents.IsGlobalDeveloper) {
+	if vars != nil && (vars.Intents.StorageObjects || vars.Intents.IsGlobalOperator || vars.Intents.IsGlobalDeveloper || vars.Intents.IsGlobalBot) {
 		return true, nil
 	}
 
-	return false, nil
+	return false, runtime.NewError("storage object access denied: missing required intent", StatusPermissionDenied)
 }
 
 // BeforeWriteStorageObjectsHook is a hook that runs before writing storage objects.
