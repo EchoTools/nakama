@@ -3474,21 +3474,23 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					devices = append(devices, device.GetId())
 				}
 
-				if data.Options[0].StringValue() != "" {
+				if partial := data.Options[0].StringValue(); partial != "" {
 					// User is typing a custom device name
-					for i := 0; i < len(devices); i++ {
-						if !strings.Contains(strings.ToLower(devices[i]), strings.ToLower(data.Options[0].StringValue())) {
-							devices = slices.Delete(devices, i, i+1)
-							i--
+					partial = strings.ToLower(partial)
+					filtered := make([]string, 0, len(devices))
+					for _, dev := range devices {
+						if strings.Contains(strings.ToLower(dev), partial) {
+							filtered = append(filtered, dev)
 						}
 					}
+					devices = filtered
 				}
 
-				choices := make([]*discordgo.ApplicationCommandOptionChoice, len(account.Devices))
-				for i, device := range account.Devices {
+				choices := make([]*discordgo.ApplicationCommandOptionChoice, len(devices))
+				for i, dev := range devices {
 					choices[i] = &discordgo.ApplicationCommandOptionChoice{
-						Name:  device.GetId(),
-						Value: device.GetId(),
+						Name:  dev,
+						Value: dev,
 					}
 				}
 
@@ -3549,12 +3551,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				partial = strings.ToLower(partial)
 				partialCode := anyascii.Transliterate(partial)
-				for i := 0; i < len(choices); i++ {
-					if !strings.Contains(strings.ToLower(choices[i].Name), partial) && !strings.Contains(strings.ToLower(choices[i].Name), partialCode) {
-						choices = append(choices[:i], choices[i+1:]...)
-						i--
+				filtered := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(choices))
+				for _, c := range choices {
+					if strings.Contains(strings.ToLower(c.Name), partial) || strings.Contains(strings.ToLower(c.Name), partialCode) {
+						filtered = append(filtered, c)
 					}
 				}
+				choices = filtered
 
 				if err := d.dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionApplicationCommandAutocompleteResult,
