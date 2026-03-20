@@ -1847,3 +1847,38 @@ func TestReconnectReservation_DisabledWhenConfigNegative(t *testing.T) {
 		})
 	}
 }
+
+func TestReconnectReservation_NotCreatedForSpectator(t *testing.T) {
+	settings := ServiceSettings()
+	if settings == nil {
+		settings = &ServiceSettingsData{}
+	}
+	cloned := *settings
+	cloned.Matchmaking.CrashRecoveryWindowSecs = 60
+	ServiceSettingsUpdate(&cloned)
+	t.Cleanup(func() { ServiceSettingsUpdate(settings) })
+
+	state := reconnectTestState(evr.ModeArenaPublic)
+	spectator := reconnectTestPlayer("spectator", evr.TeamSpectator)
+	state.presenceMap[spectator.GetSessionId()] = spectator
+	state.presenceByEvrID[spectator.EvrID] = spectator
+	state.joinTimestamps[spectator.GetSessionId()] = time.Now().Add(-2 * time.Minute)
+	state.rebuildCache()
+
+	nk := &reconnectTestNakamaModule{}
+	dispatcher := &reconnectTestDispatcher{}
+	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
+	leavePresence := reconnectTestPresence{EvrMatchPresence: spectator, reason: runtime.PresenceReasonDisconnect}
+
+	m := &EvrMatch{}
+	got := m.MatchLeave(ctx, reconnectTestLogger(), nil, nk, dispatcher, 1, state, []runtime.Presence{leavePresence})
+	stateAfter := got.(*MatchLabel)
+
+	if len(stateAfter.reconnectReservations) != 0 {
+		t.Fatalf("expected no reconnect reservation for spectator, got %d", len(stateAfter.reconnectReservations))
+	}
+
+	if len(nk.storageWrites) != 0 {
+		t.Fatalf("expected no join directive written for spectator, got %d writes", len(nk.storageWrites))
+	}
+}
