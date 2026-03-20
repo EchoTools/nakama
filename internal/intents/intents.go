@@ -13,6 +13,7 @@ type Intent struct {
 	GuildMatches      bool `json:"guild_matches"`    // Access to all private guild matches.
 	Matches           bool `json:"matches"`          // Access to all matches.
 	StorageObjects    bool `json:"storage"`          // Access to read/write all storage objects.
+	IsGlobalBot       bool `json:"global_bot"`       // Is a global bot.
 	IsGlobalOperator  bool `json:"global_operator"`  // Is a global operator.
 	IsGlobalDeveloper bool `json:"global_developer"` // Is a global developer.
 }
