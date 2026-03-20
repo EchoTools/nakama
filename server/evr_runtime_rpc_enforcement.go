@@ -396,12 +396,13 @@ func EnforcementJournalListRPC(ctx context.Context, logger runtime.Logger, db *s
 
 // EnforcementRecordEditRequest represents the request to edit an enforcement record
 type EnforcementRecordEditRequest struct {
-	GroupID      string `json:"group_id"`       // Guild group ID (required)
-	TargetUserID string `json:"target_user_id"` // Target user ID with the enforcement record (required)
-	RecordID     string `json:"record_id"`      // Record ID to edit (required)
-	Expiry       int64  `json:"expiry"`         // New expiry timestamp (optional, if provided overrides duration)
-	UserNotice   string `json:"user_notice"`    // User-facing notice message (optional)
-	AuditorNotes string `json:"auditor_notes"`  // Internal moderator notes (optional, can exceed 200 chars)
+	GroupID             string `json:"group_id"`                        // Guild group ID (required)
+	TargetUserID        string `json:"target_user_id"`                  // Target user ID with the enforcement record (required)
+	RecordID            string `json:"record_id"`                       // Record ID to edit (required)
+	Expiry              int64  `json:"expiry"`                          // New expiry timestamp (optional, if provided overrides duration)
+	UserNotice          string `json:"user_notice"`                     // User-facing notice message (optional)
+	AuditorNotes        string `json:"auditor_notes"`                   // Internal moderator notes (optional, can exceed 200 chars)
+	AllowPrivateLobbies *bool  `json:"allow_private_lobbies,omitempty"` // Whether the user can join private lobbies (optional, nil means no change)
 }
 
 // EnforcementRecordEditResponse represents the response from editing an enforcement record
@@ -478,10 +479,16 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 		newAuditorNotes = request.AuditorNotes
 	}
 
+	newAllowPrivates := record.AllowPrivateLobbies
+	if request.AllowPrivateLobbies != nil {
+		newAllowPrivates = *request.AllowPrivateLobbies
+	}
+
 	// Ensure at least one field is actually changing
 	if newExpiry.Equal(record.Expiry) &&
 		newUserNotice == record.UserNoticeText &&
-		newAuditorNotes == record.AuditorNotes {
+		newAuditorNotes == record.AuditorNotes &&
+		newAllowPrivates == record.AllowPrivateLobbies {
 		return "", runtime.NewError("No changes specified for enforcement record", StatusInvalidArgument)
 	}
 	// Get Discord ID for audit log (optional)
@@ -494,7 +501,7 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	// Edit the record (this creates the edit log entry)
-	updatedRecord := journal.EditRecord(request.GroupID, request.RecordID, userID, callerDiscordID, newExpiry, newUserNotice, newAuditorNotes)
+	updatedRecord := journal.EditRecord(request.GroupID, request.RecordID, userID, callerDiscordID, newExpiry, newUserNotice, newAuditorNotes, newAllowPrivates)
 	if updatedRecord == nil {
 		return "", runtime.NewError("Failed to edit enforcement record", StatusInternalError)
 	}
