@@ -165,6 +165,20 @@ func (d *DiscordAppBot) showEnforcementEditModal(s *discordgo.Session, i *discor
 						},
 					},
 				},
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "allow_privates_input",
+							Label:       "Allow Private Lobbies (yes/no)",
+							Style:       discordgo.TextInputShort,
+							Placeholder: "yes or no",
+							Value:       formatYesNo(record.AllowPrivateLobbies),
+							Required:    true,
+							MinLength:   2,
+							MaxLength:   5,
+						},
+					},
+				},
 			},
 		},
 	}
@@ -267,6 +281,12 @@ func (d *DiscordAppBot) handleEnforcementEditModalSubmit(logger runtime.Logger, 
 	durationStr := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 	userNotice := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 	modNotes := data.Components[2].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+	allowPrivatesStr := data.Components[3].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+
+	allowPrivates, err := parseYesNo(allowPrivatesStr)
+	if err != nil {
+		return simpleInteractionResponse(d.dg, i, "Invalid value for Allow Private Lobbies. Use yes/no or true/false.")
+	}
 
 	// Parse the new duration
 	newDuration, err := parseSuspensionDuration(durationStr)
@@ -301,7 +321,7 @@ func (d *DiscordAppBot) handleEnforcementEditModalSubmit(logger runtime.Logger, 
 	newExpiry := record.CreatedAt.Add(newDuration)
 
 	// Edit the record (this creates the edit log entry)
-	updatedRecord := journal.EditRecord(groupID, recordID, callerID, i.Member.User.ID, newExpiry, userNotice, modNotes)
+	updatedRecord := journal.EditRecord(groupID, recordID, callerID, i.Member.User.ID, newExpiry, userNotice, modNotes, allowPrivates)
 	if updatedRecord == nil {
 		return simpleInteractionResponse(d.dg, i, "Failed to edit enforcement record.")
 	}
@@ -647,4 +667,24 @@ func (d *DiscordAppBot) updateEnforcementMessage(i *discordgo.InteractionCreate,
 	})
 
 	return err
+}
+
+// formatYesNo returns "yes" or "no" for a boolean value.
+func formatYesNo(v bool) string {
+	if v {
+		return "yes"
+	}
+	return "no"
+}
+
+// parseYesNo parses a yes/no or true/false string into a boolean.
+func parseYesNo(s string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "yes", "true":
+		return true, nil
+	case "no", "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid value: %q", s)
+	}
 }
