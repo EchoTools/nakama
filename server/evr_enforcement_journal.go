@@ -263,7 +263,7 @@ func (s *GuildEnforcementJournal) GetRecord(groupID, recordID string) *GuildEnfo
 }
 
 // EditRecord updates a record and logs the edit. Returns the updated record or nil if not found.
-func (s *GuildEnforcementJournal) EditRecord(groupID, recordID, editorUserID, editorDiscordID string, newExpiry time.Time, newUserNotice, newAuditorNotes string) *GuildEnforcementRecord {
+func (s *GuildEnforcementJournal) EditRecord(groupID, recordID, editorUserID, editorDiscordID string, newExpiry time.Time, newUserNotice, newAuditorNotes string, allowPrivateLobbies bool) *GuildEnforcementRecord {
 	record := s.GetRecord(groupID, recordID)
 	if record == nil {
 		return nil
@@ -280,12 +280,15 @@ func (s *GuildEnforcementJournal) EditRecord(groupID, recordID, editorUserID, ed
 		NewExpiry:              newExpiry,
 		NewUserNoticeText:      newUserNotice,
 		NewAuditorNotes:        newAuditorNotes,
+		PreviousAllowPrivates:  record.AllowPrivateLobbies,
+		NewAllowPrivates:       allowPrivateLobbies,
 	}
 
 	// Update the record
 	record.Expiry = newExpiry
 	record.UserNoticeText = newUserNotice
 	record.AuditorNotes = newAuditorNotes
+	record.AllowPrivateLobbies = allowPrivateLobbies
 	record.UpdatedAt = time.Now().UTC()
 
 	// Append to edit log
