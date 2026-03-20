@@ -267,6 +267,30 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			},
 		},
 		{
+			ID:      "guild/group/audit_log",
+			Handler: GuildGroupAuditLogRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{}, // Permission checked in handler (owner, enforcer, auditor, or global op)
+			},
+		},
+		{
+			ID:      "developer/guild/application/list",
+			Handler: GuildApplicationListRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{},
+			},
+		},
+		{
+			ID:      "developer/guild/application/revoke",
+			Handler: GuildApplicationRevokeRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{},
+			},
+		},
+		{
 			ID:      "guild/discord/roles",
 			Handler: rpcHandler.GuildDiscordRolesRPC,
 			Permission: &RPCPermission{

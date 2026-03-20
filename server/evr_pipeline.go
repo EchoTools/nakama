@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -36,6 +37,7 @@ var globalAppBot = atomic.NewPointer[DiscordAppBot](nil)
 var globalLobbyBuilder = atomic.NewPointer[LobbyBuilder](nil)
 var globalSkillBasedMatchmaker = atomic.NewPointer[SkillBasedMatchmaker](nil)
 var globalEarlyQuitMessageTrigger = atomic.NewPointer[SNSEarlyQuitMessageTrigger](nil)
+var globalMongoClient = atomic.NewPointer[mongo.Client](nil)
 
 type EvrPipeline struct {
 	sync.RWMutex

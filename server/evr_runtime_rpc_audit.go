@@ -41,6 +41,26 @@ func sendRPCAuditMessage(ctx context.Context, logger runtime.Logger, nk runtime.
 		return
 	}
 
+	// Persist the audit entry to MongoDB if this is a guild-scoped action.
+	if groupID != "" {
+		if mongoClient := globalMongoClient.Load(); mongoClient != nil {
+			actorUsername := ""
+			if account, err := nk.AccountGetId(ctx, callerUserID); err == nil && account != nil {
+				actorUsername = account.User.Username
+			}
+			entry := &GuildAuditEntry{
+				GroupID:      groupID,
+				ActorID:      callerUserID,
+				ActorUsername: actorUsername,
+				Action:       rpcID,
+				Details:      details,
+			}
+			if err := GuildAuditLogWrite(ctx, mongoClient, entry); err != nil {
+				logger.Warn("Failed to persist guild audit log entry for %s: %v", rpcID, err)
+			}
+		}
+	}
+
 	appBot := globalAppBot.Load()
 	if appBot == nil || appBot.dg == nil {
 		return
