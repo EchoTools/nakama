@@ -1,24 +1,27 @@
 package evr
 
 import (
+	"encoding/binary"
 	"fmt"
 )
 
-// SNSEarlyQuitFeatureFlags represents the feature flags message for early quit system
-// Server → Client: Informs client which early quit features it should implement client-side
+// SNSEarlyQuitFeatureFlags represents the feature flags for the early quit system.
+//
+// Wire layout (0x08 bytes):
+//   +0x00  uint32  Flags     (bitfield of feature flags)
+//   +0x04  uint32  Reserved
 type SNSEarlyQuitFeatureFlags struct {
-	Enabled             bool     `json:"enabled"`                        // Master enable/disable
-	EnableMMLockout     bool     `json:"enable_mm_lockout"`              // Client should enforce matchmaking tier separation
-	EnableSpawnLock     bool     `json:"enable_spawn_lock"`              // Client should prevent spawn requests during penalty
-	EnableAutoReport    bool     `json:"enable_auto_report"`             // Server auto-flags players at max penalty level
-	EnableUICountdown   bool     `json:"enable_ui_countdown"`            // Client should show countdown timer in UI
-	EnableQueueBlocking bool     `json:"enable_queue_blocking"`          // Client should disable queue button during penalty
-	SupportedRegions    []string `json:"supported_regions"`              // Regions where system applies
-	SupportedGameModes  []string `json:"supported_game_modes"`           // Game modes where system applies
-	MaxPenaltyLevel     int32    `json:"max_penalty_level"`              // Max penalty tier
-	PenaltyDecayDays    int32    `json:"penalty_decay_days"`             // Days before penalties reset
-	TierDownGracePeriod int32    `json:"tier_down_grace_period_seconds"` // Grace period for tier restoration
+	Flags    uint32
+	Reserved uint32
 }
+
+// Feature flag bit positions within Flags.
+const (
+	EarlyQuitFlagEnabled             uint32 = 1 << 0 // Early quit system on/off
+	EarlyQuitFlagSteadyPlayerTracking uint32 = 1 << 1 // Steady player tracking
+	EarlyQuitFlagPenaltyEnforcement  uint32 = 1 << 2 // Penalty enforcement
+	EarlyQuitFlagAutoReport          uint32 = 1 << 3 // Auto-report at max penalty
+)
 
 func (m SNSEarlyQuitFeatureFlags) Token() string {
 	return "SNSEarlyQuitFeatureFlags"
@@ -28,36 +31,43 @@ func (m *SNSEarlyQuitFeatureFlags) Symbol() Symbol {
 	return ToSymbol(m.Token())
 }
 
-// DefaultEarlyQuitFeatureFlags returns the default enabled feature flags
-func DefaultEarlyQuitFeatureFlags() *SNSEarlyQuitFeatureFlags {
-	return &SNSEarlyQuitFeatureFlags{
-		Enabled:             true,
-		EnableMMLockout:     true,
-		EnableSpawnLock:     true,
-		EnableAutoReport:    true,
-		EnableUICountdown:   true,
-		EnableQueueBlocking: true,
-		SupportedRegions: []string{
-			"default",
-			"us-east",
-			"us-west",
-			"eu-west",
-			"ap-southeast",
-		},
-		SupportedGameModes: []string{
-			"echo_arena",
-		},
-		MaxPenaltyLevel:     3,
-		PenaltyDecayDays:    30,
-		TierDownGracePeriod: 86400, // 1 day in seconds
-	}
-}
-
 func (m *SNSEarlyQuitFeatureFlags) String() string {
-	return fmt.Sprintf("%s(enabled=%v, regions=%v, modes=%v)",
-		m.Token(), m.Enabled, m.SupportedRegions, m.SupportedGameModes)
+	return fmt.Sprintf("%s(flags=0x%08x)", m.Token(), m.Flags)
 }
 
 func (m *SNSEarlyQuitFeatureFlags) Stream(s *EasyStream) error {
-	return s.StreamJson(m, false, ZstdCompression)
+	return RunErrorFunctions([]func() error{
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Flags) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Reserved) },
+	})
+}
+
+// DefaultEarlyQuitFeatureFlags returns the default enabled feature flags.
+func DefaultEarlyQuitFeatureFlags() *SNSEarlyQuitFeatureFlags {
+	return &SNSEarlyQuitFeatureFlags{
+		Flags: EarlyQuitFlagEnabled | EarlyQuitFlagSteadyPlayerTracking |
+			EarlyQuitFlagPenaltyEnforcement | EarlyQuitFlagAutoReport,
+	}
+}
+
+// Helper accessors for the bitfield.
+
+func (m *SNSEarlyQuitFeatureFlags) IsEnabled() bool {
+	return m.Flags&EarlyQuitFlagEnabled != 0
+}
+
+func (m *SNSEarlyQuitFeatureFlags) SetEnabled(v bool) {
+	if v {
+		m.Flags |= EarlyQuitFlagEnabled
+	} else {
+		m.Flags &^= EarlyQuitFlagEnabled
+	}
+}
+
+func (m *SNSEarlyQuitFeatureFlags) IsPenaltyEnforcementEnabled() bool {
+	return m.Flags&EarlyQuitFlagPenaltyEnforcement != 0
+}
+
+func (m *SNSEarlyQuitFeatureFlags) IsAutoReportEnabled() bool {
+	return m.Flags&EarlyQuitFlagAutoReport != 0
 }

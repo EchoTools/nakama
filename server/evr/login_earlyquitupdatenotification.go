@@ -1,40 +1,27 @@
 package evr
 
 import (
+	"encoding/binary"
 	"fmt"
 	"time"
 )
 
-// SNSEarlyQuitUpdateNotification represents penalty status update notifications
-// Server → Client: Sent when a penalty is applied, expires, or player tier changes
+// SNSEarlyQuitUpdateNotification is the on-wire notification of a player's
+// early quit state change.
+//
+// Wire layout (0x20 bytes):
+//   +0x00  uint64  PlayerID       (XUID / account ID)
+//   +0x08  int32   NumEarlyQuits  (current early quit count)
+//   +0x0C  int32   PenaltyLevel   (current penalty tier)
+//   +0x10  uint64  PenaltyExpiry  (unix timestamp when penalty expires)
+//   +0x18  uint64  Reserved
 type SNSEarlyQuitUpdateNotification struct {
-	EventType       UpdateNotificationType `json:"event_type"`         // Type of penalty event
-	PenaltyLevel    int32                  `json:"penalty_level"`      // Current penalty tier
-	DurationSeconds int32                  `json:"duration_seconds"`   // Lockout duration
-	ExpiresAt       int64                  `json:"expires_at"`         // Unix timestamp when penalty expires
-	Reason          string                 `json:"reason"`             // Human-readable reason
-	PreviousTier    int32                  `json:"previous_tier"`      // For tier changes
-	NewTier         int32                  `json:"new_tier"`           // For tier changes
-	MatchID         string                 `json:"match_id,omitempty"` // Match that triggered the penalty
+	PlayerID      uint64
+	NumEarlyQuits int32
+	PenaltyLevel  int32
+	PenaltyExpiry uint64
+	Reserved      uint64
 }
-
-// UpdateNotificationType indicates what type of penalty event occurred
-type UpdateNotificationType string
-
-const (
-	// UpdateNotificationPenaltyApplied: Player received a new penalty (early quit detected)
-	UpdateNotificationPenaltyApplied UpdateNotificationType = "penalty_applied"
-	// UpdateNotificationPenaltyExpired: Player's penalty has expired
-	UpdateNotificationPenaltyExpired UpdateNotificationType = "penalty_expired"
-	// UpdateNotificationTierDegraded: Player moved to worse tier
-	UpdateNotificationTierDegraded UpdateNotificationType = "tier_degraded"
-	// UpdateNotificationTierRestored: Player moved back to better tier
-	UpdateNotificationTierRestored UpdateNotificationType = "tier_restored"
-	// UpdateNotificationLockoutActive: Matchmaking lockout is active
-	UpdateNotificationLockoutActive UpdateNotificationType = "lockout_active"
-	// UpdateNotificationLockoutCleared: Matchmaking lockout has been cleared
-	UpdateNotificationLockoutCleared UpdateNotificationType = "lockout_cleared"
-)
 
 func (m SNSEarlyQuitUpdateNotification) Token() string {
 	return "SNSEarlyQuitUpdateNotification"
@@ -45,88 +32,40 @@ func (m *SNSEarlyQuitUpdateNotification) Symbol() Symbol {
 }
 
 func (m *SNSEarlyQuitUpdateNotification) String() string {
-	return fmt.Sprintf("%s(event=%s, penalty_level=%d, expires_in=%ds)",
-		m.Token(), m.EventType, m.PenaltyLevel, m.RemainingSeconds())
+	return fmt.Sprintf("%s(player=0x%x, quits=%d, penalty=%d, expires=%d)",
+		m.Token(), m.PlayerID, m.NumEarlyQuits, m.PenaltyLevel, m.PenaltyExpiry)
 }
 
 func (m *SNSEarlyQuitUpdateNotification) Stream(s *EasyStream) error {
-	return s.StreamJson(m, false, ZlibCompression)
+	return RunErrorFunctions([]func() error{
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.PlayerID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.NumEarlyQuits) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.PenaltyLevel) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.PenaltyExpiry) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Reserved) },
+	})
 }
 
-// NewPenaltyAppliedNotification creates a penalty applied notification
-func NewPenaltyAppliedNotification(penaltyLevel int32, durationSeconds int32, reason string) *SNSEarlyQuitUpdateNotification {
-	expiresAt := time.Now().Add(time.Duration(durationSeconds) * time.Second).Unix()
-	return &SNSEarlyQuitUpdateNotification{
-		EventType:       UpdateNotificationPenaltyApplied,
-		PenaltyLevel:    penaltyLevel,
-		DurationSeconds: durationSeconds,
-		ExpiresAt:       expiresAt,
-		Reason:          reason,
-	}
+// PenaltyExpiryTime returns the expiry time as a time.Time.
+func (m *SNSEarlyQuitUpdateNotification) PenaltyExpiryTime() time.Time {
+	return time.Unix(int64(m.PenaltyExpiry), 0)
 }
 
-// NewPenaltyExpiredNotification creates a penalty expired notification
-func NewPenaltyExpiredNotification() *SNSEarlyQuitUpdateNotification {
-	return &SNSEarlyQuitUpdateNotification{
-		EventType:       UpdateNotificationPenaltyExpired,
-		DurationSeconds: 0,
-		ExpiresAt:       time.Now().Unix(),
-		Reason:          "Penalty period has expired",
-	}
-}
-
-// NewTierDegradedNotification creates a tier degraded notification
-func NewTierDegradedNotification(oldTier, newTier int32, reason string) *SNSEarlyQuitUpdateNotification {
-	return &SNSEarlyQuitUpdateNotification{
-		EventType:    UpdateNotificationTierDegraded,
-		PreviousTier: oldTier,
-		NewTier:      newTier,
-		Reason:       reason,
-	}
-}
-
-// NewTierRestoredNotification creates a tier restored notification
-func NewTierRestoredNotification(oldTier, newTier int32, reason string) *SNSEarlyQuitUpdateNotification {
-	return &SNSEarlyQuitUpdateNotification{
-		EventType:    UpdateNotificationTierRestored,
-		PreviousTier: oldTier,
-		NewTier:      newTier,
-		Reason:       reason,
-	}
-}
-
-// NewLockoutActiveNotification creates a lockout active notification
-func NewLockoutActiveNotification(penaltyLevel int32, durationSeconds int32) *SNSEarlyQuitUpdateNotification {
-	expiresAt := time.Now().Add(time.Duration(durationSeconds) * time.Second).Unix()
-	return &SNSEarlyQuitUpdateNotification{
-		EventType:       UpdateNotificationLockoutActive,
-		PenaltyLevel:    penaltyLevel,
-		DurationSeconds: durationSeconds,
-		ExpiresAt:       expiresAt,
-		Reason:          "Matchmaking lockout is active",
-	}
-}
-
-// NewLockoutClearedNotification creates a lockout cleared notification
-func NewLockoutClearedNotification() *SNSEarlyQuitUpdateNotification {
-	return &SNSEarlyQuitUpdateNotification{
-		EventType:       UpdateNotificationLockoutCleared,
-		DurationSeconds: 0,
-		ExpiresAt:       time.Now().Unix(),
-		Reason:          "Matchmaking lockout has been cleared",
-	}
-}
-
-// ExpiresAtTime returns the expiry time as a time.Time object
-func (n *SNSEarlyQuitUpdateNotification) ExpiresAtTime() time.Time {
-	return time.Unix(n.ExpiresAt, 0)
-}
-
-// RemainingSeconds returns the seconds until the penalty expires (or 0 if already expired)
-func (n *SNSEarlyQuitUpdateNotification) RemainingSeconds() int32 {
-	remaining := time.Until(n.ExpiresAtTime()).Seconds()
+// RemainingSeconds returns seconds until penalty expires (0 if already expired).
+func (m *SNSEarlyQuitUpdateNotification) RemainingSeconds() int32 {
+	remaining := time.Until(m.PenaltyExpiryTime()).Seconds()
 	if remaining < 0 {
 		return 0
 	}
 	return int32(remaining)
+}
+
+// NewEarlyQuitUpdateNotification creates a notification with the given state.
+func NewEarlyQuitUpdateNotification(playerID uint64, numEarlyQuits int32, penaltyLevel int32, penaltyExpiry time.Time) *SNSEarlyQuitUpdateNotification {
+	return &SNSEarlyQuitUpdateNotification{
+		PlayerID:      playerID,
+		NumEarlyQuits: numEarlyQuits,
+		PenaltyLevel:  penaltyLevel,
+		PenaltyExpiry: uint64(penaltyExpiry.Unix()),
+	}
 }
