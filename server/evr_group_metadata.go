@@ -45,7 +45,7 @@ type GroupMetadata struct {
 
 	MaintenanceMinutes int `json:"maintenance_minutes,omitempty"` // Maintenance window duration in minutes (default: 10)
 
-	KickPlayerAllowPrivates bool     `json:"kick_player_allow_privates"` // Default allow_privates for /kick-player suspensions (default: false)
+	KickPlayerAllowPrivates *bool    `json:"kick_player_allow_privates"` // Default allow_privates for /kick-player suspensions (default: true)
 	LoadoutCommandUsernames []string `json:"loadout_command_usernames"`  // Discord usernames allowed to use /loadout (legacy, prefer IDs)
 	LoadoutCommandUserIDs   []string `json:"loadout_command_user_ids"`   // Discord user IDs allowed to use /loadout
 }
@@ -75,6 +75,13 @@ func (g *GroupMetadata) GetMaintenanceMinutes() int {
 		return 10
 	}
 	return g.MaintenanceMinutes
+}
+
+func (g *GroupMetadata) GetKickPlayerAllowPrivates() bool {
+	if g.KickPlayerAllowPrivates == nil {
+		return true
+	}
+	return *g.KickPlayerAllowPrivates
 }
 
 func (g *GroupMetadata) MarshalMap() map[string]any {
