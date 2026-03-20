@@ -27,7 +27,7 @@ type SNSEarlyQuitMessageTrigger struct {
 
 // EarlyQuitServiceConfigStorable wraps the config for storage operations
 type EarlyQuitServiceConfigStorable struct {
-	*evr.EarlyQuitServiceConfig
+	*evr.SNSEarlyQuitConfig
 	meta StorableMetadata
 }
 
@@ -37,21 +37,21 @@ func (c *EarlyQuitServiceConfigStorable) StorageMeta() StorableMetadata {
 		Key:             evr.StorageKeyEarlyQuitConfig,
 		PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
 		PermissionWrite: runtime.STORAGE_PERMISSION_NO_WRITE,
-		Version:         c.EarlyQuitServiceConfig.StorageVersion(),
+		Version:         c.SNSEarlyQuitConfig.StorageVersion(),
 		UserID:          c.meta.UserID,
 	}
 }
 
 func (c *EarlyQuitServiceConfigStorable) SetStorageMeta(meta StorableMetadata) {
 	c.meta = meta
-	c.EarlyQuitServiceConfig.SetStorageVersion(meta.Version)
+	c.SNSEarlyQuitConfig.SetStorageVersion(meta.Version)
 }
 
 // LoadEarlyQuitServiceConfig loads the early quit service config from storage,
 // or creates it with defaults if not found or blank. The config is validated and fixed if invalid.
-func LoadEarlyQuitServiceConfig(ctx context.Context, nk runtime.NakamaModule, logger *zap.Logger) *evr.EarlyQuitServiceConfig {
+func LoadEarlyQuitServiceConfig(ctx context.Context, nk runtime.NakamaModule, logger *zap.Logger) *evr.SNSEarlyQuitConfig {
 	configStorable := &EarlyQuitServiceConfigStorable{
-		EarlyQuitServiceConfig: evr.NewEarlyQuitServiceConfig(),
+		SNSEarlyQuitConfig: evr.NewDefaultSNSEarlyQuitConfig(),
 	}
 
 	// Try to load from storage (create=false to handle NotFound explicitly)
@@ -59,12 +59,10 @@ func LoadEarlyQuitServiceConfig(ctx context.Context, nk runtime.NakamaModule, lo
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			// Config doesn't exist, create it with defaults
-			config := evr.DefaultEarlyQuitServiceConfig()
+			config := evr.NewDefaultSNSEarlyQuitConfig()
 			config.SetStorageVersion("*")
-
-			// Validate before writing to ensure defaults are correct
 			config.Validate()
-			configStorable.EarlyQuitServiceConfig = config
+			configStorable.SNSEarlyQuitConfig = config
 			if writeErr := StorableWrite(ctx, nk, SystemUserID, configStorable); writeErr != nil {
 				if logger != nil {
 					logger.Warn("Failed to write early quit config to storage",
@@ -81,17 +79,16 @@ func LoadEarlyQuitServiceConfig(ctx context.Context, nk runtime.NakamaModule, lo
 					zap.Error(err))
 			}
 		}
-		// Use defaults but don't write
-		config := evr.DefaultEarlyQuitServiceConfig()
+		config := evr.NewDefaultSNSEarlyQuitConfig()
 		config.SetStorageVersion("*")
 		return config
 	}
 
-	config := configStorable.EarlyQuitServiceConfig
+	config := configStorable.SNSEarlyQuitConfig
 
 	// Check if the loaded config is blank and populate with defaults if needed
+	defaults := evr.DefaultEarlyQuitLevels()
 	if len(config.PenaltyLevels) == 0 || len(config.SteadyPlayerLevels) == 0 {
-		defaults := evr.DefaultEarlyQuitServiceConfig()
 		if len(config.PenaltyLevels) == 0 {
 			config.PenaltyLevels = defaults.PenaltyLevels
 		}
@@ -99,9 +96,8 @@ func LoadEarlyQuitServiceConfig(ctx context.Context, nk runtime.NakamaModule, lo
 			config.SteadyPlayerLevels = defaults.SteadyPlayerLevels
 		}
 
-		// Write the populated config back to storage
 		config.SetStorageVersion("*")
-		configStorable.EarlyQuitServiceConfig = config
+		configStorable.SNSEarlyQuitConfig = config
 		if writeErr := StorableWrite(ctx, nk, SystemUserID, configStorable); writeErr != nil {
 			if logger != nil {
 				logger.Warn("Failed to write populated early quit config to storage",
@@ -110,13 +106,10 @@ func LoadEarlyQuitServiceConfig(ctx context.Context, nk runtime.NakamaModule, lo
 		}
 	}
 
-	// Validate and fix any invalid values
-	// Track if config was mutated to determine if we need to write it back
-	// We use a simple heuristic: if validation changes the slice lengths or values, write back
+	// Track if config was mutated by validation
 	originalPenaltyCount := len(config.PenaltyLevels)
 	originalSteadyCount := len(config.SteadyPlayerLevels)
 
-	// Create a snapshot of first penalty level if exists (to detect mutations)
 	var firstPenaltySnapshot *evr.EarlyQuitPenaltyLevelConfig
 	if len(config.PenaltyLevels) > 0 {
 		snapshot := config.PenaltyLevels[0]
@@ -125,16 +118,14 @@ func LoadEarlyQuitServiceConfig(ctx context.Context, nk runtime.NakamaModule, lo
 
 	config.Validate()
 
-	// Check if validation mutated the config
 	configMutated := originalPenaltyCount != len(config.PenaltyLevels) ||
 		originalSteadyCount != len(config.SteadyPlayerLevels) ||
 		(firstPenaltySnapshot != nil && len(config.PenaltyLevels) > 0 &&
 			config.PenaltyLevels[0] != *firstPenaltySnapshot)
 
-	// Write back to storage if validation mutated the config
 	if configMutated {
 		config.SetStorageVersion("*")
-		configStorable.EarlyQuitServiceConfig = config
+		configStorable.SNSEarlyQuitConfig = config
 		if writeErr := StorableWrite(ctx, nk, SystemUserID, configStorable); writeErr != nil {
 			if logger != nil {
 				logger.Warn("Failed to write validated early quit config to storage",
@@ -208,11 +199,8 @@ func (t *SNSEarlyQuitMessageTrigger) SendEarlyQuitConfigOnLogin(ctx context.Cont
 	// Load the configuration from storage (or defaults)
 	config := LoadEarlyQuitServiceConfig(ctx, t.nk, t.logger)
 
-	// Create the SNS message wrapper
-	message := evr.NewSNSEarlyQuitConfig(config)
-
 	// Send to the player
-	if err := session.SendEvr(message); err != nil {
+	if err := session.SendEvr(config); err != nil {
 		t.logger.Warn("Failed to send early quit config on login",
 			zap.String("user_id", session.userID.String()),
 			zap.Error(err))
@@ -376,19 +364,17 @@ func (t *SNSEarlyQuitMessageTrigger) BroadcastFeatureFlagsUpdate(ctx context.Con
 
 // BroadcastConfigUpdate sends updated penalty configuration to all connected players
 // This is used when penalty tiers change server-side
-func (t *SNSEarlyQuitMessageTrigger) BroadcastConfigUpdate(ctx context.Context, config *evr.EarlyQuitServiceConfig) error {
+func (t *SNSEarlyQuitMessageTrigger) BroadcastConfigUpdate(ctx context.Context, config *evr.SNSEarlyQuitConfig) error {
 	if config == nil {
-		config = evr.DefaultEarlyQuitServiceConfig()
+		config = evr.NewDefaultSNSEarlyQuitConfig()
 	}
-
-	message := evr.NewSNSEarlyQuitConfig(config)
 
 	count := 0
 	// Broadcast to all connected EVR sessions
 	t.pipeline.sessionRegistry.Range(func(session Session) bool {
 		if session.Format() == SessionFormatEVR {
 			if evrSession, ok := session.(*sessionWS); ok {
-				if err := evrSession.SendEvr(message); err != nil {
+				if err := evrSession.SendEvr(config); err != nil {
 					t.logger.Warn("Failed to broadcast config update",
 						zap.String("user_id", session.UserID().String()),
 						zap.Error(err))
