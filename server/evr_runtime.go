@@ -804,20 +804,30 @@ func getPartyMembersForUser(ctx context.Context, nk runtime.NakamaModule, userID
 	// Load the user's matchmaking settings to get their party group
 	settings, err := LoadMatchmakingSettings(ctx, nk, userID)
 	if err != nil {
-		// If settings don't exist, user is not in a party
 		return []string{userID}
 	}
 
-	// If user is not in a party, return only their ID
 	if settings.LobbyGroupName == "" {
 		return []string{userID}
 	}
 
-	// Get all party members
-	partyUserIDs, err := GetPartyGroupUserIDs(ctx, nk, settings.LobbyGroupName)
-	if err != nil {
-		// If party lookup fails (e.g., party no longer exists), return only user
+	// Derive the party stream UUID from the group name
+	partyUUID := uuid.NewV5(PartyIDSalt, settings.LobbyGroupName)
+
+	node, ok := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
+	if !ok {
 		return []string{userID}
+	}
+
+	// Query the active party stream for current members
+	presences, err := nk.StreamUserList(StreamModeParty, partyUUID.String(), "", node, false, true)
+	if err != nil || len(presences) == 0 {
+		return []string{userID}
+	}
+
+	partyUserIDs := make([]string, 0, len(presences))
+	for _, p := range presences {
+		partyUserIDs = append(partyUserIDs, p.GetUserId())
 	}
 
 	return partyUserIDs
