@@ -755,7 +755,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			enabled := crashWindow > 0
 
 			hasReconnectReservation := false
-			if disconnectedFromGameServer && enabled && !state.GameState.IsMatchOver() {
+			if disconnectedFromGameServer && enabled && !state.GameState.IsMatchOver() && mp.IsPlayer() {
 				window := time.Duration(crashWindow) * time.Second
 				expiry := time.Now().Add(window)
 				state.reconnectReservations[mp.GetUserId()] = &reconnectReservation{
