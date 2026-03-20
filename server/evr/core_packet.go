@@ -21,7 +21,7 @@ var (
 	SymbolTypes = map[uint64]Message{
 		// This is the complete list of implemented message types.
 		/*
-			0x4c1fed6cb4d96c64: (*SNSLobbySmiteEntrant)(nil),
+			(*SNSLobbySmiteEntrant)(nil),  // HOST_ONLY: relayed via game server, not direct client TCP
 			0x013e99cb47eb3669: (*GenericMessage)(nil),
 			0x35d810572a230837: (*GenericMessageNotify)(nil),
 		*/
@@ -239,7 +239,6 @@ func SplitPacket(data []byte) [][]byte {
 }
 
 var ignoredSymbols = []uint64{
-	0x4c1fed6cb4d96c64,
 	0x013e99cb47eb3669,
 	0x35d810572a230837,
 	0x80119c19ac72d695,
