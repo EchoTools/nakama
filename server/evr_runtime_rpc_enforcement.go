@@ -82,7 +82,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	if request.AllowPrivateLobbies != nil {
 		allowPrivateLobbies = *request.AllowPrivateLobbies
 	} else if gg != nil {
-		allowPrivateLobbies = gg.KickPlayerAllowPrivates
+		allowPrivateLobbies = gg.GetKickPlayerAllowPrivates()
 	}
 
 	// Determine enforcer user ID

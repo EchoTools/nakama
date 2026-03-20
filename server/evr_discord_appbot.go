@@ -2819,7 +2819,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				if gg, err := GuildGroupLoad(ctx, d.nk, groupID); err == nil {
 
-					allowPrivateLobbies = gg.KickPlayerAllowPrivates
+					allowPrivateLobbies = gg.GetKickPlayerAllowPrivates()
 
 				} else {
 
