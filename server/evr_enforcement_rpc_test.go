@@ -458,36 +458,44 @@ func TestCheckReportRateLimit(t *testing.T) {
 // TestEnforcementKickRequest_AllowPrivateLobbies verifies that when AllowPrivateLobbies is true,
 // the player is not kicked from private matches
 func TestEnforcementKickRequest_AllowPrivateLobbies(t *testing.T) {
+	boolPtr := func(b bool) *bool { return &b }
+
 	tests := []struct {
 		name                  string
-		allowPrivateLobbies   bool
+		allowPrivateLobbies   *bool
 		isPrivateMatch        bool
 		expectSkipMessage     bool
 		expectSkipMessageText string
 	}{
 		{
 			name:                  "allow_private_lobbies=true with private match should skip kick",
-			allowPrivateLobbies:   true,
+			allowPrivateLobbies:   boolPtr(true),
 			isPrivateMatch:        true,
 			expectSkipMessage:     true,
 			expectSkipMessageText: "skipped kick from private",
 		},
 		{
 			name:                "allow_private_lobbies=true with public match should kick",
-			allowPrivateLobbies: true,
+			allowPrivateLobbies: boolPtr(true),
 			isPrivateMatch:      false,
 			expectSkipMessage:   false,
 		},
 		{
 			name:                "allow_private_lobbies=false with private match should kick",
-			allowPrivateLobbies: false,
+			allowPrivateLobbies: boolPtr(false),
 			isPrivateMatch:      true,
 			expectSkipMessage:   false,
 		},
 		{
 			name:                "allow_private_lobbies=false with public match should kick",
-			allowPrivateLobbies: false,
+			allowPrivateLobbies: boolPtr(false),
 			isPrivateMatch:      false,
+			expectSkipMessage:   false,
+		},
+		{
+			name:                "allow_private_lobbies=nil (unset) with private match should kick (default false)",
+			allowPrivateLobbies: nil,
+			isPrivateMatch:      true,
 			expectSkipMessage:   false,
 		},
 	}
@@ -499,9 +507,14 @@ func TestEnforcementKickRequest_AllowPrivateLobbies(t *testing.T) {
 				AllowPrivateLobbies: tt.allowPrivateLobbies,
 			}
 
-			// Verify the logic by simulating the check
-			// The actual implementation checks: request.AllowPrivateLobbies && label.IsPrivateMatch()
-			shouldSkip := request.AllowPrivateLobbies && tt.isPrivateMatch
+			// Resolve allow_private_lobbies the same way the RPC does:
+			// nil => guild group default (false in this test since no guild group)
+			allowPrivateLobbies := false
+			if request.AllowPrivateLobbies != nil {
+				allowPrivateLobbies = *request.AllowPrivateLobbies
+			}
+
+			shouldSkip := allowPrivateLobbies && tt.isPrivateMatch
 
 			if shouldSkip != tt.expectSkipMessage {
 				t.Errorf("Expected shouldSkip=%v, got shouldSkip=%v", tt.expectSkipMessage, shouldSkip)

@@ -23,7 +23,7 @@ type EnforcementKickRequest struct {
 	UserNotice             string `json:"user_notice"`                        // Reason for the kick (displayed to the user; 48 character max)
 	SuspensionDuration     string `json:"suspension_duration,omitempty"`      // Suspension duration (e.g. 1m, 2h, 3d, 4w)
 	ModeratorNotes         string `json:"moderator_notes,omitempty"`          // Notes for the audit log (other moderators)
-	AllowPrivateLobbies    bool   `json:"allow_private_lobbies,omitempty"`    // Limit the user to only joining private lobbies
+	AllowPrivateLobbies    *bool  `json:"allow_private_lobbies,omitempty"`    // Limit the user to only joining private lobbies (defaults to guild group setting)
 	RequireCommunityValues bool   `json:"require_community_values,omitempty"` // Require the user to accept the community values before they can rejoin
 }
 
@@ -75,6 +75,14 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	if err != nil {
 		logger.Error("Permission check failed", zap.Error(err))
 		return "", err
+	}
+
+	// Resolve allow_private_lobbies: use guild group default if not explicitly set
+	allowPrivateLobbies := false
+	if request.AllowPrivateLobbies != nil {
+		allowPrivateLobbies = *request.AllowPrivateLobbies
+	} else if gg != nil {
+		allowPrivateLobbies = gg.KickPlayerAllowPrivates
 	}
 
 	// Determine enforcer user ID
@@ -148,7 +156,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 
 		// Add a new suspension record
 		actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
-		record := journal.AddRecord(groupID, enforcerUserID, enforcerDiscordID, request.UserNotice, request.ModeratorNotes, request.RequireCommunityValues, request.AllowPrivateLobbies, suspensionDuration)
+		record := journal.AddRecord(groupID, enforcerUserID, enforcerDiscordID, request.UserNotice, request.ModeratorNotes, request.RequireCommunityValues, allowPrivateLobbies, suspensionDuration)
 		recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
 	} else if voidActiveSuspensions {
 		// Void active suspensions
@@ -210,7 +218,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 			}
 
 			// If AllowPrivateLobbies is true, don't kick from private matches
-			if request.AllowPrivateLobbies && label.IsPrivateMatch() {
+			if allowPrivateLobbies && label.IsPrivateMatch() {
 				actions = append(actions, fmt.Sprintf("skipped kick from private [%s] (allow_private_lobbies=true)", label.Mode.String()))
 				continue
 			}
