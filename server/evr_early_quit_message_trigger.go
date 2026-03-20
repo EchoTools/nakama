@@ -237,99 +237,20 @@ func (t *SNSEarlyQuitMessageTrigger) SendFeatureFlagsOnLogin(ctx context.Context
 	return nil
 }
 
-// SendPenaltyAppliedNotification sends a notification when a player receives a new penalty
-// This is triggered when an early quit is recorded
-func (t *SNSEarlyQuitMessageTrigger) SendPenaltyAppliedNotification(ctx context.Context, userID string, penaltyLevel int32, durationSeconds int32, reason string) error {
-	// Create the notification
-	notification := evr.NewPenaltyAppliedNotification(penaltyLevel, durationSeconds, reason)
+// SendEarlyQuitUpdateNotification sends the player's current early quit state.
+func (t *SNSEarlyQuitMessageTrigger) SendEarlyQuitUpdateNotification(ctx context.Context, userID string, playerID uint64, numEarlyQuits int32, penaltyLevel int32, penaltyExpiry time.Time) error {
+	notification := evr.NewEarlyQuitUpdateNotification(playerID, numEarlyQuits, penaltyLevel, penaltyExpiry)
 
-	// Send to all sessions for this user
 	if found := t.SendEvrMessage(userID, notification); !found {
-		t.logger.Debug("Player not connected for penalty notification",
+		t.logger.Debug("Player not connected for early quit update",
 			zap.String("user_id", userID))
 	}
 
-	t.logger.Debug("Sent penalty applied notification",
+	t.logger.Debug("Sent early quit update notification",
 		zap.String("user_id", userID),
-		zap.Int32("penalty_level", penaltyLevel),
-		zap.Int32("duration_seconds", durationSeconds))
-
-	return nil
-}
-
-// SendPenaltyExpiredNotification sends a notification when a player's penalty expires
-// This is triggered after the lockout duration has passed
-func (t *SNSEarlyQuitMessageTrigger) SendPenaltyExpiredNotification(ctx context.Context, userID string) error {
-	// Create the notification
-	notification := evr.NewPenaltyExpiredNotification()
-
-	// Send to all sessions for this user
-	if found := t.SendEvrMessage(userID, notification); !found {
-		t.logger.Debug("Player not connected for penalty expired notification",
-			zap.String("user_id", userID))
-	}
-
-	t.logger.Debug("Sent penalty expired notification",
-		zap.String("user_id", userID))
-
-	return nil
-}
-
-// SendTierChangeNotification sends a notification when a player's matchmaking tier changes
-// This is triggered when penalty causes tier degradation or completion causes tier restoration
-func (t *SNSEarlyQuitMessageTrigger) SendTierChangeNotification(ctx context.Context, userID string, oldTier, newTier int32, isDegradation bool) error {
-	var notification *evr.SNSEarlyQuitUpdateNotification
-	if isDegradation {
-		notification = evr.NewTierDegradedNotification(oldTier, newTier, "Your matchmaking tier has been downgraded due to early quitting.")
-	} else {
-		notification = evr.NewTierRestoredNotification(oldTier, newTier, "Your matchmaking tier has been restored.")
-	}
-
-	// Send to all sessions for this user
-	if found := t.SendEvrMessage(userID, notification); !found {
-		t.logger.Debug("Player not connected for tier change notification",
-			zap.String("user_id", userID))
-	}
-
-	eventType := "tier_degraded"
-	if !isDegradation {
-		eventType = "tier_restored"
-	}
-
-	t.logger.Debug("Sent tier change notification",
-		zap.String("user_id", userID),
-		zap.String("event_type", eventType),
-		zap.Int32("old_tier", oldTier),
-		zap.Int32("new_tier", newTier))
-
-	return nil
-}
-
-// SendLockoutNotification sends a notification when matchmaking lockout becomes active or clears
-func (t *SNSEarlyQuitMessageTrigger) SendLockoutNotification(ctx context.Context, userID string, penaltyLevel int32, durationSeconds int32, isActive bool) error {
-	var notification *evr.SNSEarlyQuitUpdateNotification
-	if isActive {
-		notification = evr.NewLockoutActiveNotification(penaltyLevel, durationSeconds)
-	} else {
-		notification = evr.NewLockoutClearedNotification()
-	}
-
-	// Send to all sessions for this user
-	if found := t.SendEvrMessage(userID, notification); !found {
-		t.logger.Debug("Player not connected for lockout notification",
-			zap.String("user_id", userID))
-	}
-
-	eventType := "lockout_active"
-	if !isActive {
-		eventType = "lockout_cleared"
-	}
-
-	t.logger.Debug("Sent lockout notification",
-		zap.String("user_id", userID),
-		zap.String("event_type", eventType),
-		zap.Int32("penalty_level", penaltyLevel),
-		zap.Int32("duration_seconds", durationSeconds))
+		zap.Uint64("player_id", playerID),
+		zap.Int32("num_early_quits", numEarlyQuits),
+		zap.Int32("penalty_level", penaltyLevel))
 
 	return nil
 }
@@ -471,8 +392,8 @@ func (t *SNSEarlyQuitMessageTrigger) checkAndNotifyExpiredPenalties(ctx context.
 				return true // Already notified for this penalty
 			}
 
-			// Send expiry notification
-			if err := t.SendPenaltyExpiredNotification(ctx, userID); err != nil {
+			// Send expiry notification (penalty level 0, no expiry = cleared)
+			if err := t.SendEarlyQuitUpdateNotification(ctx, userID, 0, 0, 0, time.Time{}); err != nil {
 				t.logger.Warn("Failed to send penalty expired notification",
 					zap.String("user_id", userID),
 					zap.Error(err))

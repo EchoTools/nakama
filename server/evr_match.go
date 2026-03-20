@@ -876,23 +876,20 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 								// Get lockout duration for current penalty level (0s, 2m, 5m, 15m)
 								lockoutDuration := GetLockoutDurationSeconds(int(penaltyLevel))
 
-								reason := fmt.Sprintf("Early quit detected in match %s", state.ID.String())
-								messageTrigger.SendPenaltyAppliedNotification(ctx, mp.GetUserId(), penaltyLevel, lockoutDuration, reason)
+								penaltyExpiry := time.Now().Add(time.Duration(lockoutDuration) * time.Second)
+								messageTrigger.SendEarlyQuitUpdateNotification(ctx, mp.GetUserId(), 0, int32(eqconfig.GetEarlyQuitCount()), penaltyLevel, penaltyExpiry)
 
 								// Trigger auto-report at penalty level 3
 								if penaltyLevel >= 3 {
 									featureFlags := evr.DefaultEarlyQuitFeatureFlags()
-									if featureFlags != nil && featureFlags.EnableAutoReport {
+									if featureFlags != nil && featureFlags.IsAutoReportEnabled() {
 										TriggerAutoReport(ctx, logger, mp.GetUserId(), penaltyLevel)
 									}
 								}
 							}
 
-							// Send tier change notification if applicable
+							// Send Discord DM if tier changed
 							if tierChanged {
-								if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
-									messageTrigger.SendTierChangeNotification(ctx, mp.GetUserId(), oldTier, newTier, newTier > oldTier)
-								}
 
 								// Send Discord DM if tier changed
 								discordID, err := GetDiscordIDByUserID(ctx, db, mp.GetUserId())

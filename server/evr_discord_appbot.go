@@ -2713,14 +2713,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						}
 					}
 
-					// Send penalty applied notification (if penalty level > 0)
-					if penaltyLevel > 0 {
-						reason := "Manual lockout set by operator"
-						if err := trigger.SendPenaltyAppliedNotification(ctx, targetUserID, int32(penaltyLevel), durationSeconds, reason); err != nil {
-							logger.Warn("Failed to send penalty applied notification",
-								zap.String("user_id", targetUserID),
-								zap.Error(err))
-						}
+					// Send early quit update notification
+					penaltyExpiry := time.Now().Add(time.Duration(durationSeconds) * time.Second)
+					if err := trigger.SendEarlyQuitUpdateNotification(ctx, targetUserID, 0, 0, int32(penaltyLevel), penaltyExpiry); err != nil {
+						logger.Warn("Failed to send early quit update notification",
+							zap.String("user_id", targetUserID),
+							zap.Error(err))
 					}
 
 					logger.Info("Sent all early quit messages to online player",
@@ -2729,11 +2727,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				} else {
 					logger.Debug("Player not online - messages will be sent on next login",
 						zap.String("user_id", targetUserID))
-				}
-
-				// Send lockout notification (sent to all users, whether penalty is active or cleared)
-				if err := trigger.SendLockoutNotification(ctx, targetUserID, int32(penaltyLevel), durationSeconds, penaltyLevel > 0); err != nil {
-					logger.Warn("Failed to send lockout notification", zap.Error(err))
 				}
 			}
 

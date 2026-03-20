@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"sync"
 	"time"
 
@@ -306,10 +305,10 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 		"tier_changed":      tierChanged,
 	}).Info("Reduced early quit penalty: player logged out after early quit")
 
-	// Send tier change notification via SNS message if applicable
+	// Send early quit update via SNS message if tier changed
 	if tierChanged {
 		if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
-			messageTrigger.SendTierChangeNotification(ctx, userID, oldTier, newTier, newTier > oldTier)
+			messageTrigger.SendEarlyQuitUpdateNotification(ctx, userID, 0, 0, newTier, time.Time{})
 		}
 	}
 
@@ -397,22 +396,19 @@ func CheckAndApplyEarlyQuitIfStillOnline(ctx context.Context, logger runtime.Log
 		}
 	}
 
-	// Send penalty notification
+	// Send early quit update notification
 	if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
 		penaltyLevel := int32(eqconfig.EarlyQuitPenaltyLevel)
 		if penaltyLevel > MaxEarlyQuitPenaltyLevel {
 			penaltyLevel = int32(MaxEarlyQuitPenaltyLevel)
 		}
 		lockoutDuration := GetLockoutDurationSeconds(int(penaltyLevel))
-		reason := fmt.Sprintf("Deferred penalty: disconnect from match %s (still online)", matchID.String())
-		messageTrigger.SendPenaltyAppliedNotification(ctx, userID, penaltyLevel, lockoutDuration, reason)
+		penaltyExpiry := time.Now().Add(time.Duration(lockoutDuration) * time.Second)
+		messageTrigger.SendEarlyQuitUpdateNotification(ctx, userID, 0, int32(eqconfig.GetEarlyQuitCount()), penaltyLevel, penaltyExpiry)
 	}
 
-	// Send tier change notifications
+	// Send Discord tier change notifications
 	if tierChanged {
-		if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
-			messageTrigger.SendTierChangeNotification(ctx, userID, oldTier, newTier, newTier > oldTier)
-		}
 		discordID, err := GetDiscordIDByUserID(ctx, db, userID)
 		if err == nil {
 			if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
