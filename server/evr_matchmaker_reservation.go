@@ -25,7 +25,7 @@ import (
 
 // buildReservations scans candidates and builds reservation sets for starving tickets
 // Returns (starvingSessionIDs, reservedSessionIDs) both as map[string]struct{}
-func (m *SkillBasedMatchmaker) buildReservations(candidates [][]runtime.MatchmakerEntry, predictions []PredictedMatch, settings *GlobalMatchmakingSettings) (map[string]struct{}, map[string]struct{}) {
+func (m *SkillBasedMatchmaker) buildReservations(logger runtime.Logger, candidates [][]runtime.MatchmakerEntry, predictions []PredictedMatch, settings *GlobalMatchmakingSettings) (map[string]struct{}, map[string]struct{}) {
 	m.reservationMu.Lock()
 	defer m.reservationMu.Unlock()
 
@@ -75,12 +75,12 @@ func (m *SkillBasedMatchmaker) buildReservations(candidates [][]runtime.Matchmak
 		}
 		for _, entry := range candidate {
 			props := entry.GetProperties()
-			submissionTime, ok := props["submission_time"].(float64)
-			if !ok || submissionTime <= 0 {
+			timestamp, ok := props["timestamp"].(float64)
+			if !ok || timestamp <= 0 {
 				continue
 			}
 
-			waitTime := nowUnix - int64(submissionTime)
+			waitTime := nowUnix - int64(timestamp)
 			ticket := entry.GetTicket()
 
 			// Check if already starving
@@ -89,6 +89,12 @@ func (m *SkillBasedMatchmaker) buildReservations(candidates [][]runtime.Matchmak
 				starvingDuration := now.Sub(st.FirstStarvedAt).Seconds()
 				if starvingDuration >= float64(safetyValveThreshold) {
 					// Safety valve fired - remove from starving map
+					logger.WithFields(map[string]interface{}{
+						"ticket":            ticket,
+						"session_id":        entry.GetPresence().GetSessionId(),
+						"starving_duration": starvingDuration,
+						"safety_valve_secs": safetyValveThreshold,
+					}).Debug("Safety valve fired for starving ticket, releasing reservation")
 					delete(m.starvingTickets, ticket)
 					continue
 				}
@@ -101,6 +107,12 @@ func (m *SkillBasedMatchmaker) buildReservations(candidates [][]runtime.Matchmak
 					FirstStarvedAt: now,
 				}
 				starvingSessionIDs[entry.GetPresence().GetSessionId()] = struct{}{}
+				logger.WithFields(map[string]interface{}{
+					"ticket":     ticket,
+					"session_id": entry.GetPresence().GetSessionId(),
+					"wait_secs":  waitTime,
+					"threshold":  reservationThreshold,
+				}).Debug("Ticket identified as starving")
 			}
 		}
 	}
@@ -142,6 +154,11 @@ func (m *SkillBasedMatchmaker) buildReservations(candidates [][]runtime.Matchmak
 				if _, isStarving := starvingSessionIDs[sessionID]; !isStarving {
 					if len(reservedSessionIDs) < maxReserved {
 						reservedSessionIDs[sessionID] = struct{}{}
+						logger.WithFields(map[string]interface{}{
+							"session_id":     sessionID,
+							"reserved_count": len(reservedSessionIDs),
+							"max_reserved":   maxReserved,
+						}).Debug("Player reserved for starving ticket match")
 					}
 				}
 			}
@@ -152,7 +169,7 @@ func (m *SkillBasedMatchmaker) buildReservations(candidates [][]runtime.Matchmak
 }
 
 // assembleMatchesWithReservations performs two-pass assembly with reservation awareness
-func (m *SkillBasedMatchmaker) assembleMatchesWithReservations(predictions []PredictedMatch, starvingSessionIDs, reservedSessionIDs map[string]struct{}) [][]runtime.MatchmakerEntry {
+func (m *SkillBasedMatchmaker) assembleMatchesWithReservations(logger runtime.Logger, predictions []PredictedMatch, starvingSessionIDs, reservedSessionIDs map[string]struct{}) [][]runtime.MatchmakerEntry {
 	matches := make([][]runtime.MatchmakerEntry, 0, len(predictions))
 	matchedPlayers := make(map[string]struct{})
 
@@ -200,6 +217,10 @@ func (m *SkillBasedMatchmaker) assembleMatchesWithReservations(predictions []Pre
 
 		// Hard reservation check: skip if this would consume any reserved player
 		if consumesReservedPlayer(pred.Candidate, reservedSessionIDs, matchedPlayers) {
+			logger.WithFields(map[string]interface{}{
+				"candidate_size": len(pred.Candidate),
+				"ticket":         pred.Candidate[0].GetTicket(),
+			}).Debug("Candidate skipped in Pass 2: consumes reserved player")
 			continue
 		}
 		if isUndersizedMatch(pred.Candidate) {
