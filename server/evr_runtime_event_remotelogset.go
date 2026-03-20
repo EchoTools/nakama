@@ -144,7 +144,7 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				"username": s.Username,
 				"evrid":    s.XPID.String(),
 				"msg":      msg,
-			}).Warn("Disconnected due to timeout")
+			}).Debug("Disconnected due to timeout")
 
 		case *evr.RemoteLogUserDisconnected:
 
@@ -537,6 +537,10 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 	if err != nil || label == nil {
 		label, err = LoadStoredMatchLabel(ctx, nk, matchID)
 		if err != nil || label == nil {
+			if errors.Is(err, ErrMatchNotFound) {
+				logger.WithField("mid", matchID.String()).Debug("Match not found for post-match processing, skipping")
+				return nil
+			}
 			return fmt.Errorf("failed to get match label: %w", err)
 		}
 	}
