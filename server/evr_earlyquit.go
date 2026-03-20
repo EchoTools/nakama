@@ -154,6 +154,12 @@ func (s *EarlyQuitConfig) GetTier() int32 {
 	return s.MatchmakingTier
 }
 
+func (s *EarlyQuitConfig) GetEarlyQuitCount() int32 {
+	s.Lock()
+	defer s.Unlock()
+	return s.TotalEarlyQuits
+}
+
 // UpdateTier updates the matchmaking tier based on the penalty level and tier threshold.
 // Returns (oldTier, newTier, changed) where changed indicates if the tier was modified.
 // If tier1Threshold is nil, defaults to 0 (players with penalty 0 or less are in good standing).
