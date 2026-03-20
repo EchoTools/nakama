@@ -49,6 +49,22 @@ type DiscordGuildRolesResponse struct {
 	Roles []*DiscordRoleInfo `json:"roles"`
 }
 
+// guildGroupResponse re-loads the guild group and returns it as a JSON response.
+func guildGroupResponse(ctx context.Context, nk runtime.NakamaModule, groupID string) (string, error) {
+	gg, err := GuildGroupLoad(ctx, nk, groupID)
+	if err != nil {
+		return "{}", nil // Non-fatal: the mutation succeeded, just can't return the updated state.
+	}
+	resp := struct {
+		GuildGroup *GuildGroup `json:"guild_group"`
+	}{GuildGroup: gg}
+	b, err := json.Marshal(resp)
+	if err != nil {
+		return "{}", nil
+	}
+	return string(b), nil
+}
+
 func GuildGroupUpdateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 	if !ok || userID == "" {
@@ -93,7 +109,7 @@ func GuildGroupUpdateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		}
 	}
 
-	return "{}", nil
+	return guildGroupResponse(ctx, nk, req.GroupID)
 }
 
 func GuildGroupRolesUpdateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
@@ -132,7 +148,7 @@ func GuildGroupRolesUpdateRPC(ctx context.Context, logger runtime.Logger, db *sq
 		return "", runtime.NewError("failed to save role map", 13)
 	}
 
-	return "{}", nil
+	return guildGroupResponse(ctx, nk, req.GroupID)
 }
 
 func GuildGroupTransferOwnershipRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
@@ -149,10 +165,16 @@ func GuildGroupTransferOwnershipRPC(ctx context.Context, logger runtime.Logger, 
 		return "", runtime.NewError("group_id and new_owner_id are required", 3)
 	}
 
+	if req.NewOwnerID == userID {
+		return "", runtime.NewError("cannot transfer ownership to yourself", 3)
+	}
+
 	gg, err := GuildGroupLoad(ctx, nk, req.GroupID)
 	if err != nil {
 		return "", runtime.NewError("guild group not found", 5)
 	}
+
+	oldOwnerID := gg.OwnerID
 
 	if !gg.IsOwner(userID) {
 		isGlobalOp, checkErr := isGlobalOperator(ctx, nk, userID)
@@ -161,10 +183,38 @@ func GuildGroupTransferOwnershipRPC(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
-	if err := nk.GroupUsersPromote(ctx, SystemUserID, req.GroupID, []string{req.NewOwnerID}); err != nil {
-		return "", runtime.NewError("failed to promote new owner", 13)
+	// Verify the new owner is a member of the group.
+	members, _, err := nk.GroupUsersList(ctx, req.GroupID, 100, nil, "")
+	if err != nil {
+		return "", runtime.NewError("failed to list group members", 13)
+	}
+	found := false
+	for _, m := range members {
+		if m.User.Id == req.NewOwnerID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return "", runtime.NewError("new owner must be a member of the group", 3)
 	}
 
+	// Promote the new owner to superadmin (state 0). Each call promotes by one
+	// level (member→admin→superadmin), so we may need up to two calls.
+	for i := 0; i < 2; i++ {
+		if err := nk.GroupUsersPromote(ctx, SystemUserID, req.GroupID, []string{req.NewOwnerID}); err != nil {
+			return "", runtime.NewError("failed to promote new owner", 13)
+		}
+	}
+
+	// Demote the old owner from superadmin to admin.
+	if oldOwnerID != "" && oldOwnerID != req.NewOwnerID {
+		if err := nk.GroupUsersDemote(ctx, SystemUserID, req.GroupID, []string{oldOwnerID}); err != nil {
+			logger.Warn("Failed to demote old owner %s in group %s: %v", oldOwnerID, req.GroupID, err)
+		}
+	}
+
+	// Update the owner in metadata.
 	gg.GroupMetadata.OwnerID = req.NewOwnerID
 	_nk, ok := nk.(*RuntimeGoNakamaModule)
 	if !ok {
@@ -174,7 +224,7 @@ func GuildGroupTransferOwnershipRPC(ctx context.Context, logger runtime.Logger, 
 		return "", runtime.NewError("failed to update owner in metadata", 13)
 	}
 
-	return "{}", nil
+	return guildGroupResponse(ctx, nk, req.GroupID)
 }
 
 func GuildGroupLeaveRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
