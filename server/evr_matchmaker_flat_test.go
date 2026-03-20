@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"go.uber.org/zap"
 )
 
 func testFlatMatchmakerEntry(i int, groupID string, overrides map[string]any) runtime.MatchmakerEntry {
@@ -210,7 +211,7 @@ func TestProcessPotentialMatches(t *testing.T) {
 			"count_multiple": 2.0,
 		})
 
-		candidates, matches, _, predictions := m.processPotentialMatches(entries)
+		candidates, matches, _, predictions := m.processPotentialMatches(NewRuntimeGoLogger(zap.NewNop()), entries)
 
 		sizes := make([]int, 0, len(candidates))
 		for _, candidate := range candidates {
@@ -239,7 +240,7 @@ func TestProcessPotentialMatches(t *testing.T) {
 		})
 
 		start := time.Now()
-		candidates, _, _, _ := m.processPotentialMatches(entries)
+		candidates, _, _, _ := m.processPotentialMatches(NewRuntimeGoLogger(zap.NewNop()), entries)
 		duration := time.Since(start)
 
 		if len(candidates) == 0 {
