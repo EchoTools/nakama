@@ -1451,48 +1451,73 @@ func TestReconnectReservation_NotCreatedOnGracefulLeave(t *testing.T) {
 }
 
 func TestReconnectReservation_CreatedOnCrashLikeLeave(t *testing.T) {
-	tests := []struct {
-		name string
-	}{
-		{name: "creates reservation when leave has no entrant stream"},
-	}
+	t.Run("creates reservation when disconnect has no entrant stream", func(t *testing.T) {
+		settings := ServiceSettings()
+		if settings == nil {
+			settings = &ServiceSettingsData{}
+		}
+		cloned := *settings
+		cloned.Matchmaking.CrashRecoveryWindowSecs = 60
+		ServiceSettingsUpdate(&cloned)
+		t.Cleanup(func() { ServiceSettingsUpdate(settings) })
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			settings := ServiceSettings()
-			if settings == nil {
-				settings = &ServiceSettingsData{}
-			}
-			cloned := *settings
-			cloned.Matchmaking.CrashRecoveryWindowSecs = 60
-			ServiceSettingsUpdate(&cloned)
-			t.Cleanup(func() { ServiceSettingsUpdate(settings) })
+		state := reconnectTestState(evr.ModeSocialPublic)
+		player := reconnectTestPlayer("leave-disconnected", evr.TeamBlue)
+		state.presenceMap[player.GetSessionId()] = player
+		state.presenceByEvrID[player.EvrID] = player
+		state.joinTimestamps[player.GetSessionId()] = time.Now().Add(-time.Minute)
+		state.rebuildCache()
 
-			state := reconnectTestState(evr.ModeSocialPublic)
-			player := reconnectTestPlayer("leave-disconnected", evr.TeamBlue)
-			state.presenceMap[player.GetSessionId()] = player
-			state.presenceByEvrID[player.EvrID] = player
-			state.joinTimestamps[player.GetSessionId()] = time.Now().Add(-time.Minute)
-			state.rebuildCache()
+		nk := &reconnectTestNakamaModule{}
+		dispatcher := &reconnectTestDispatcher{}
+		ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
+		// Use PresenceReasonDisconnect to simulate a crash (not a voluntary leave).
+		leavePresence := reconnectTestPresence{EvrMatchPresence: player, reason: runtime.PresenceReasonDisconnect}
 
-			nk := &reconnectTestNakamaModule{}
-			dispatcher := &reconnectTestDispatcher{}
-			ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
-			leavePresence := reconnectTestPresence{EvrMatchPresence: player, reason: runtime.PresenceReasonLeave}
+		m := &EvrMatch{}
+		got := m.MatchLeave(ctx, reconnectTestLogger(), nil, nk, dispatcher, 1, state, []runtime.Presence{leavePresence})
+		stateAfter := got.(*MatchLabel)
 
-			m := &EvrMatch{}
-			got := m.MatchLeave(ctx, reconnectTestLogger(), nil, nk, dispatcher, 1, state, []runtime.Presence{leavePresence})
-			stateAfter := got.(*MatchLabel)
+		rr, ok := stateAfter.reconnectReservations[player.GetUserId()]
+		if !ok {
+			t.Fatalf("expected reconnect reservation for disconnect without entrant stream")
+		}
+		if diff := cmp.Diff(player.GetUserId(), rr.UserID); diff != "" {
+			t.Fatalf("reservation user id mismatch (-want +got):\n%s", diff)
+		}
+	})
 
-			rr, ok := stateAfter.reconnectReservations[player.GetUserId()]
-			if !ok {
-				t.Fatalf("expected reconnect reservation for leave without entrant stream")
-			}
-			if diff := cmp.Diff(player.GetUserId(), rr.UserID); diff != "" {
-				t.Fatalf("reservation user id mismatch (-want +got):\n%s", diff)
-			}
-		})
-	}
+	t.Run("no reservation when voluntary leave has no entrant stream", func(t *testing.T) {
+		settings := ServiceSettings()
+		if settings == nil {
+			settings = &ServiceSettingsData{}
+		}
+		cloned := *settings
+		cloned.Matchmaking.CrashRecoveryWindowSecs = 60
+		ServiceSettingsUpdate(&cloned)
+		t.Cleanup(func() { ServiceSettingsUpdate(settings) })
+
+		state := reconnectTestState(evr.ModeSocialPublic)
+		player := reconnectTestPlayer("leave-voluntary", evr.TeamBlue)
+		state.presenceMap[player.GetSessionId()] = player
+		state.presenceByEvrID[player.EvrID] = player
+		state.joinTimestamps[player.GetSessionId()] = time.Now().Add(-time.Minute)
+		state.rebuildCache()
+
+		nk := &reconnectTestNakamaModule{}
+		dispatcher := &reconnectTestDispatcher{}
+		ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
+		// Use PresenceReasonLeave to simulate a voluntary leave.
+		leavePresence := reconnectTestPresence{EvrMatchPresence: player, reason: runtime.PresenceReasonLeave}
+
+		m := &EvrMatch{}
+		got := m.MatchLeave(ctx, reconnectTestLogger(), nil, nk, dispatcher, 1, state, []runtime.Presence{leavePresence})
+		stateAfter := got.(*MatchLabel)
+
+		if diff := cmp.Diff(0, len(stateAfter.reconnectReservations)); diff != "" {
+			t.Fatalf("expected no reconnect reservation for voluntary leave (-want +got):\n%s", diff)
+		}
+	})
 }
 
 func TestReconnectReservation_SlotCountPreserved(t *testing.T) {

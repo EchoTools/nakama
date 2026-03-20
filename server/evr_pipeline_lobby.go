@@ -128,13 +128,13 @@ func (p *EvrPipeline) lobbyEntrantsRemove(logger *zap.Logger, session *sessionWS
 			logger.Warn("Failed to get player session by ID", zap.Error(err))
 		}
 	} else if presence != nil {
-		// Leave the entrant stream first
-		if err := p.nk.StreamUserLeave(StreamModeEntrant, message.EntrantId, "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil {
-			logger.Warn("Failed to leave entrant session stream", zap.Error(err))
-		}
-		// Trigger MatchLeave.
+		// Leave the match stream first so MatchLeave fires while the entrant stream is still present.
 		if err := p.nk.StreamUserLeave(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil {
 			logger.Warn("Failed to leave match stream", zap.Error(err))
+		}
+		// Then leave the entrant stream.
+		if err := p.nk.StreamUserLeave(StreamModeEntrant, message.EntrantId, "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil {
+			logger.Warn("Failed to leave entrant session stream", zap.Error(err))
 		}
 	}
 	return nil
