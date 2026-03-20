@@ -99,7 +99,34 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	}
 
 	if err != nil {
-		logger.Warn("failed to join match", zap.Error(err))
+		entrantUserIDs := make([]string, len(entrants))
+		entrantSessionIDs := make([]string, len(entrants))
+		for i, ent := range entrants {
+			entrantUserIDs[i] = ent.UserID.String()
+			entrantSessionIDs[i] = ent.SessionID.String()
+		}
+
+		groupID := ""
+		if label.GroupID != nil {
+			groupID = label.GroupID.String()
+		}
+
+		logger.Warn("failed to join match",
+			zap.Error(err),
+			// Match info
+			zap.String("mid", label.ID.UUID.String()),
+			zap.String("mode", label.Mode.String()),
+			zap.String("group_id", groupID),
+			zap.Int("player_count", label.PlayerCount),
+			zap.Int("player_limit", label.PlayerLimit),
+			zap.Int("open_slots", label.OpenSlots()),
+			zap.Bool("is_open", label.Open),
+			// Request info
+			zap.Int("party_size", len(entrants)),
+			zap.Int("entrant_count", len(entrants)),
+			zap.Strings("entrant_uids", entrantUserIDs),
+			zap.Strings("entrant_sids", entrantSessionIDs),
+		)
 		return fmt.Errorf("failed to join match: %w", err)
 	}
 
