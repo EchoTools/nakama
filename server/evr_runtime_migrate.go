@@ -19,23 +19,18 @@ type UserMigrater interface {
 }
 
 func MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) {
-	// Combine the loadouts into one storage object
-	<-time.After(20 * time.Second)
-	systemMigrations := []SystemMigrator{
-		//&MigrationDisabledAccountsToSuspensions{},
-		//&MigrationEnforcementJournals{},
-		//&MigrationLeaderboardPrune{},
-		//MigrationSuspensions{},
-		//&MigrationRebuildLoginHistory{},
-		//&MigrationCheckAltSuspensions{},
-		//&MigrationVRMLRelink{},
-		&MigrationVRMLRelinkGroupA{},
-		&MigrationAuditEntitlementLedger{},
-	}
+	systemMigrations := []SystemMigrator{}
 
 	allUserMigrations := []UserMigrater{
 		//&MigrationLoadouts{},
 	}
+
+	if len(systemMigrations) == 0 && len(allUserMigrations) == 0 {
+		return
+	}
+
+	// Give the server time to fully initialize before running migrations.
+	<-time.After(20 * time.Second)
 
 	for _, m := range systemMigrations {
 		startTime := time.Now()
