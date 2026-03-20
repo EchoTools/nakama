@@ -263,11 +263,6 @@ func (p *EvrPipeline) processLoginRequest(ctx context.Context, logger *zap.Logge
 		return err
 	}
 
-	loginMigrations := []UserMigrater{}
-	if err = MigrateUser(ctx, logger, p.nk, p.db, session.userID.String(), loginMigrations); err != nil {
-		return fmt.Errorf("failed to migrate user: %w", err)
-	}
-
 	if params.profile, err = EVRProfileLoad(ctx, p.nk, params.profile.ID()); err != nil {
 		return fmt.Errorf("failed to get account: %w", err)
 	}
