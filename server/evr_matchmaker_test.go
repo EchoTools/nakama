@@ -129,7 +129,7 @@ func testEvrMatchmakerOverrideFn(ctx context.Context, candidateMatches [][]*Matc
 	for _, candidate := range runtimeCombinations {
 		flatEntries = append(flatEntries, candidate...)
 	}
-	filteredCandidates, returnedEntries, _, _ := sbmm.processPotentialMatches(flatEntries)
+	filteredCandidates, returnedEntries, _, _ := sbmm.processPotentialMatches(NewRuntimeGoLogger(zap.NewNop()), flatEntries)
 	log.Printf("Processing %d candidate matches in %s", len(runtimeCombinations), time.Since(startTime))
 	_ = filteredCandidates
 	combinations := make([][]*MatchmakerEntry, len(returnedEntries))

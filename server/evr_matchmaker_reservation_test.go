@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
+	"go.uber.org/zap"
 )
 
 // Test starving ticket identification based on wait time
@@ -56,7 +57,7 @@ func TestBuildReservations_StarvingIdentification(t *testing.T) {
 							Node:      "node1",
 						},
 						Properties: map[string]any{
-							"submission_time": float64(submissionTime),
+							"timestamp": float64(submissionTime),
 						},
 					},
 				},
@@ -68,7 +69,7 @@ func TestBuildReservations_StarvingIdentification(t *testing.T) {
 				ReservationSafetyValveSecs: 300,
 			}
 
-			starving, _ := m.buildReservations(candidates, []PredictedMatch{}, settings)
+			starving, _ := m.buildReservations(NewRuntimeGoLogger(zap.NewNop()), candidates, []PredictedMatch{}, settings)
 
 			if tt.expectStarving {
 				if len(starving) == 0 {
@@ -105,7 +106,7 @@ func TestBuildReservations_SafetyValve(t *testing.T) {
 					Node:      "node1",
 				},
 				Properties: map[string]any{
-					"submission_time": float64(submissionTime),
+					"timestamp": float64(submissionTime),
 				},
 			},
 		},
@@ -123,7 +124,7 @@ func TestBuildReservations_SafetyValve(t *testing.T) {
 		FirstStarvedAt: now.Add(-6 * time.Minute), // Started starving 6 minutes ago
 	}
 
-	starving, _ := m.buildReservations(candidates, []PredictedMatch{}, settings)
+	starving, _ := m.buildReservations(NewRuntimeGoLogger(zap.NewNop()), candidates, []PredictedMatch{}, settings)
 
 	// Safety valve should have fired - no longer starving
 	if len(starving) > 0 {
@@ -156,7 +157,7 @@ func TestBuildReservations_MaxRatioCapping(t *testing.T) {
 				Node:      "node1",
 			},
 			Properties: map[string]any{
-				"submission_time": float64(submissionTime),
+				"timestamp": float64(submissionTime),
 			},
 		},
 	}
@@ -174,7 +175,7 @@ func TestBuildReservations_MaxRatioCapping(t *testing.T) {
 					Node:      "node1",
 				},
 				Properties: map[string]any{
-					"submission_time": float64(nowUnix - 30), // Fresh tickets
+					"timestamp": float64(nowUnix - 30), // Fresh tickets
 				},
 			},
 		})
@@ -197,7 +198,7 @@ func TestBuildReservations_MaxRatioCapping(t *testing.T) {
 		ReservationSafetyValveSecs: 300,
 	}
 
-	_, reserved := m.buildReservations(candidates, predictions, settings)
+	_, reserved := m.buildReservations(NewRuntimeGoLogger(zap.NewNop()), candidates, predictions, settings)
 
 	// Should only reserve 4 players (40% of 10 total players)
 	if len(reserved) > 4 {
@@ -257,7 +258,7 @@ func TestAssembleMatchesWithReservations_HardBlocking(t *testing.T) {
 		"session_3": {},
 	}
 
-	matches := m.assembleMatchesWithReservations(predictions, starvingSessionIDs, reservedSessionIDs)
+	matches := m.assembleMatchesWithReservations(NewRuntimeGoLogger(zap.NewNop()), predictions, starvingSessionIDs, reservedSessionIDs)
 
 	// Should get 2 matches:
 	// - Match 1: pred1 (contains starving player, gets priority in Pass 1)
@@ -337,7 +338,7 @@ func TestAssembleMatchesWithReservations_CleanupMatched(t *testing.T) {
 	}
 	reservedSessionIDs := map[string]struct{}{}
 
-	m.assembleMatchesWithReservations([]PredictedMatch{pred}, starvingSessionIDs, reservedSessionIDs)
+	m.assembleMatchesWithReservations(NewRuntimeGoLogger(zap.NewNop()), []PredictedMatch{pred}, starvingSessionIDs, reservedSessionIDs)
 
 	// Both starving tickets should be removed after matching
 	if len(m.starvingTickets) != 0 {
@@ -361,7 +362,7 @@ func TestProcessPotentialMatches_FeatureFlagDisabled(t *testing.T) {
 					Node:      "node1",
 				},
 				Properties: map[string]any{
-					"submission_time": float64(time.Now().Unix() - 120),
+					"timestamp": float64(time.Now().Unix() - 120),
 					"max_rtt":         200.0,
 				},
 			},
@@ -374,7 +375,7 @@ func TestProcessPotentialMatches_FeatureFlagDisabled(t *testing.T) {
 					Node:      "node1",
 				},
 				Properties: map[string]any{
-					"submission_time": float64(time.Now().Unix() - 30),
+					"timestamp": float64(time.Now().Unix() - 30),
 					"max_rtt":         200.0,
 				},
 			},
@@ -382,7 +383,7 @@ func TestProcessPotentialMatches_FeatureFlagDisabled(t *testing.T) {
 	}
 
 	// When feature is disabled (default), should not populate starving/reserved counts
-	_, _, filterCounts, _ := m.processPotentialMatches(candidates[0])
+	_, _, filterCounts, _ := m.processPotentialMatches(NewRuntimeGoLogger(zap.NewNop()), candidates[0])
 
 	// Should not have reservation-related filter counts
 	if _, exists := filterCounts["starving_tickets"]; exists {
