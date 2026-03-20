@@ -27,9 +27,11 @@ type GuildEnforcementEditEntry struct {
 	PreviousAuditorNotes   string    `json:"previous_auditor_notes"`
 
 	// New values (after edit)
-	NewExpiry         time.Time `json:"new_expiry"`
-	NewUserNoticeText string    `json:"new_user_notice"`
-	NewAuditorNotes   string    `json:"new_auditor_notes"`
+	NewExpiry              time.Time `json:"new_expiry"`
+	NewUserNoticeText      string    `json:"new_user_notice"`
+	NewAuditorNotes        string    `json:"new_auditor_notes"`
+	PreviousAllowPrivates  bool      `json:"previous_allow_privates,omitempty"`
+	NewAllowPrivates       bool      `json:"new_allow_privates,omitempty"`
 }
 
 type GuildEnforcementRecord struct {
