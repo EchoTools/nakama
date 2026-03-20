@@ -190,7 +190,7 @@ func NewMessageFromHash(hash uint64) Message {
 	case 0xff71856af7e0fbd9:
 		return &LobbyEntrantsV0{}
 	case 0x080495a43a6b7251:
-		return &EarlyQuitServiceConfig{}
+		return &SNSEarlyQuitConfig{}
 	case 0x1f81b54c35788eaa:
 		return &SNSEarlyQuitUpdateNotification{}
 	case 0xd9a955895caccac3:

@@ -1,7 +1,9 @@
 package evr
 
 import (
+	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"sort"
 	"time"
 )
@@ -11,7 +13,98 @@ const (
 	StorageKeyEarlyQuitConfig        = "config"
 )
 
-// EarlyQuitConfig is the player's current early quit penalty state (sent in profile)
+// SNSEarlyQuitConfig is the on-wire message for early quit penalty configuration.
+//
+// Wire layout (0x40 fixed header + variable zlib payload):
+//   +0x00  uint32  ConfigVersion
+//   +0x04  uint32  NumPenaltyLevels
+//   +0x08  uint32  NumSteadyLevels
+//   +0x0C  uint32  Flags
+//   +0x10  uint64  Timestamp
+//   +0x18  uint64  DataOffset
+//   +0x20  uint32  DataLength
+//   +0x24  uint32  Checksum
+//   +0x28  [3]uint64 Reserved
+//   +0x58  []byte  zlib-compressed JSON (penalty_levels + steady_player_levels)
+type SNSEarlyQuitConfig struct {
+	ConfigVersion    uint32    `json:"-"`
+	NumPenaltyLevels uint32    `json:"-"`
+	NumSteadyLevels  uint32    `json:"-"`
+	Flags            uint32    `json:"-"`
+	Timestamp        uint64    `json:"-"`
+	DataOffset       uint64    `json:"-"`
+	DataLength       uint32    `json:"-"`
+	Checksum         uint32    `json:"-"`
+	Reserved         [3]uint64 `json:"-"`
+
+	PenaltyLevels      []EarlyQuitPenaltyLevelConfig      `json:"penalty_levels"`
+	SteadyPlayerLevels []EarlyQuitSteadyPlayerLevelConfig `json:"steady_player_levels"`
+
+	version string
+}
+
+func (m SNSEarlyQuitConfig) Token() string {
+	return "SNSEarlyQuitConfig"
+}
+
+func (m *SNSEarlyQuitConfig) Symbol() Symbol {
+	return ToSymbol(m.Token())
+}
+
+func (m *SNSEarlyQuitConfig) String() string {
+	return fmt.Sprintf("%s(v=%d, penalty_levels=%d, steady_levels=%d, flags=0x%x)",
+		m.Token(), m.ConfigVersion, m.NumPenaltyLevels, m.NumSteadyLevels, m.Flags)
+}
+
+func (m *SNSEarlyQuitConfig) Stream(s *EasyStream) error {
+	// Stream the 0x40-byte fixed header
+	if err := RunErrorFunctions([]func() error{
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.ConfigVersion) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.NumPenaltyLevels) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.NumSteadyLevels) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Flags) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Timestamp) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.DataOffset) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.DataLength) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Checksum) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Reserved) },
+	}); err != nil {
+		return fmt.Errorf("header: %w", err)
+	}
+
+	// Stream the zlib-compressed JSON payload
+	return s.StreamJson(m, false, ZlibCompression)
+}
+
+// StorageVersion returns the storage version.
+func (m SNSEarlyQuitConfig) StorageVersion() string {
+	return m.version
+}
+
+// SetStorageVersion updates the storage version.
+func (m *SNSEarlyQuitConfig) SetStorageVersion(version string) {
+	m.version = version
+}
+
+// EarlyQuitPenaltyLevelConfig defines a single penalty tier configuration.
+type EarlyQuitPenaltyLevelConfig struct {
+	PenaltyLevel     int `json:"penalty_level"`
+	MinEarlyQuits    int `json:"min_earlyquits"`
+	MaxEarlyQuits    int `json:"max_earlyquits"`
+	MMLockoutSec     int `json:"mm_lockout_sec"`
+	SpawnLock        int `json:"spawnlock"`
+	AutoReport       int `json:"autoreport"`
+	CNVPEReactivated int `json:"cnvpe_reactivated"`
+}
+
+// EarlyQuitSteadyPlayerLevelConfig defines a steady player tier configuration.
+type EarlyQuitSteadyPlayerLevelConfig struct {
+	SteadyPlayerLevel int     `json:"steady_player_level"`
+	MinNumMatches     int     `json:"min_num_matches"`
+	MinSteadyRatio    float64 `json:"min_steady_ratio"`
+}
+
+// EarlyQuitConfig is the player's current early quit penalty state (sent in profile).
 type EarlyQuitConfig struct {
 	SteadyPlayerLevel int32 `json:"steady_player_level,omitempty"`
 	NumSteadyMatches  int32 `json:"num_steady_matches,omitempty"`
@@ -23,121 +116,85 @@ func (c EarlyQuitConfig) PenaltyTimestampAsTime() time.Time {
 	return time.Unix(c.PenaltyTimestamp, 0)
 }
 
-func (m EarlyQuitConfig) Token() string {
-	return "SNSEarlyQuitConfig"
-}
-
-func (m *EarlyQuitConfig) Symbol() Symbol {
-	return ToSymbol(m.Token())
-}
-
-// EarlyQuitPenaltyLevelConfig defines a single penalty tier configuration
-type EarlyQuitPenaltyLevelConfig struct {
-	PenaltyLevel     int `json:"penalty_level"`
-	MinEarlyQuits    int `json:"min_earlyquits"`
-	MaxEarlyQuits    int `json:"max_earlyquits"`
-	MMLockoutSec     int `json:"mm_lockout_sec"`
-	SpawnLock        int `json:"spawnlock"`
-	AutoReport       int `json:"autoreport"`
-	CNVPEReactivated int `json:"cnvpe_reactivated"`
-}
-
-// EarlyQuitSteadyPlayerLevelConfig defines a steady player tier configuration
-type EarlyQuitSteadyPlayerLevelConfig struct {
-	SteadyPlayerLevel int     `json:"steady_player_level"`
-	MinNumMatches     int     `json:"min_num_matches"`
-	MinSteadyRatio    float64 `json:"min_steady_ratio"`
-}
-
-// EarlyQuitServiceConfig is the config service response structure
-type EarlyQuitServiceConfig struct {
-	PenaltyLevels      []EarlyQuitPenaltyLevelConfig      `json:"penalty_levels"`
-	SteadyPlayerLevels []EarlyQuitSteadyPlayerLevelConfig `json:"steady_player_levels"`
-	version            string
-}
-
-func NewEarlyQuitServiceConfig() *EarlyQuitServiceConfig {
-	config := DefaultEarlyQuitServiceConfig()
-	config.version = "*"
-	return config
-}
-
-func (m EarlyQuitServiceConfig) Token() string {
-	return "SNSEarlyQuitConfig"
-}
-
-func (m *EarlyQuitServiceConfig) Symbol() Symbol {
-	return ToSymbol(m.Token())
-}
-
-func (m *EarlyQuitServiceConfig) String() string {
-	return fmt.Sprintf("%s(penalty_levels=%d, steady_levels=%d)",
-		m.Token(), len(m.PenaltyLevels), len(m.SteadyPlayerLevels))
-}
-
-func (m *EarlyQuitServiceConfig) Stream(s *EasyStream) error {
-	return s.StreamJson(m, false, ZlibCompression)
-}
-
-// StorageVersion returns the storage version
-func (m EarlyQuitServiceConfig) StorageVersion() string {
-	return m.version
-}
-
-// SetStorageVersion updates the storage version
-func (m *EarlyQuitServiceConfig) SetStorageVersion(version string) {
-	m.version = version
-}
-
-// NewSNSEarlyQuitConfig creates a new SNS message for early quit config
-func NewSNSEarlyQuitConfig(config *EarlyQuitServiceConfig) *EarlyQuitServiceConfig {
-	if config == nil {
-		config = DefaultEarlyQuitServiceConfig()
+// NewSNSEarlyQuitConfig creates a new SNS message for early quit config.
+// It populates the fixed header fields from the payload data.
+func NewSNSEarlyQuitConfig(penaltyLevels []EarlyQuitPenaltyLevelConfig, steadyLevels []EarlyQuitSteadyPlayerLevelConfig) *SNSEarlyQuitConfig {
+	msg := &SNSEarlyQuitConfig{
+		ConfigVersion:      1,
+		NumPenaltyLevels:   uint32(len(penaltyLevels)),
+		NumSteadyLevels:    uint32(len(steadyLevels)),
+		Flags:              0,
+		Timestamp:          uint64(time.Now().Unix()),
+		PenaltyLevels:      penaltyLevels,
+		SteadyPlayerLevels: steadyLevels,
+		version:            "*",
 	}
-	config.Validate()
-	return config
+	msg.Validate()
+	return msg
+}
+
+// NewDefaultSNSEarlyQuitConfig creates a config with default penalty/steady levels.
+func NewDefaultSNSEarlyQuitConfig() *SNSEarlyQuitConfig {
+	d := DefaultEarlyQuitLevels()
+	return NewSNSEarlyQuitConfig(d.PenaltyLevels, d.SteadyPlayerLevels)
+}
+
+// defaultLevels holds the default penalty and steady player level configs.
+type defaultLevels struct {
+	PenaltyLevels      []EarlyQuitPenaltyLevelConfig
+	SteadyPlayerLevels []EarlyQuitSteadyPlayerLevelConfig
+}
+
+// DefaultEarlyQuitLevels returns the default penalty and steady player levels.
+func DefaultEarlyQuitLevels() defaultLevels {
+	return defaultLevels{
+		PenaltyLevels: []EarlyQuitPenaltyLevelConfig{
+			{PenaltyLevel: 0, MinEarlyQuits: 0, MaxEarlyQuits: 2, MMLockoutSec: 0, SpawnLock: 0, AutoReport: 0, CNVPEReactivated: 0},
+			{PenaltyLevel: 1, MinEarlyQuits: 3, MaxEarlyQuits: 5, MMLockoutSec: 120, SpawnLock: 0, AutoReport: 0, CNVPEReactivated: 0},
+			{PenaltyLevel: 2, MinEarlyQuits: 6, MaxEarlyQuits: 10, MMLockoutSec: 300, SpawnLock: 1, AutoReport: 0, CNVPEReactivated: 0},
+			{PenaltyLevel: 3, MinEarlyQuits: 11, MaxEarlyQuits: 999, MMLockoutSec: 900, SpawnLock: 1, AutoReport: 1, CNVPEReactivated: 1},
+		},
+		SteadyPlayerLevels: []EarlyQuitSteadyPlayerLevelConfig{
+			{SteadyPlayerLevel: 0, MinNumMatches: 0, MinSteadyRatio: 0.0},
+			{SteadyPlayerLevel: 1, MinNumMatches: 10, MinSteadyRatio: 0.9},
+			{SteadyPlayerLevel: 2, MinNumMatches: 25, MinSteadyRatio: 0.95},
+		},
+	}
+}
+
+// ComputeChecksum returns the CRC32 checksum of the JSON payload bytes.
+func ComputeChecksum(data []byte) uint32 {
+	return crc32.ChecksumIEEE(data)
 }
 
 // Validate ensures the config is sequentially valid and fixes any invalid values.
-// It:
-// - Sorts penalty levels by penalty level
-// - Ensures min/max early quits are compatible and non-overlapping
-// - Ensures steady player levels are sorted
-// - Ensures steady player ratios are non-decreasing
-func (m *EarlyQuitServiceConfig) Validate() {
+func (m *SNSEarlyQuitConfig) Validate() {
 	if m == nil {
 		return
 	}
-
-	// Validate and sort penalty levels
 	m.validatePenaltyLevels()
-
-	// Validate and sort steady player levels
 	m.validateSteadyPlayerLevels()
+	m.NumPenaltyLevels = uint32(len(m.PenaltyLevels))
+	m.NumSteadyLevels = uint32(len(m.SteadyPlayerLevels))
 }
 
-// validatePenaltyLevels ensures penalty levels are properly sequenced
-func (m *EarlyQuitServiceConfig) validatePenaltyLevels() {
+func (m *SNSEarlyQuitConfig) validatePenaltyLevels() {
+	defaults := DefaultEarlyQuitLevels()
 	if len(m.PenaltyLevels) == 0 {
-		m.PenaltyLevels = DefaultEarlyQuitServiceConfig().PenaltyLevels
+		m.PenaltyLevels = defaults.PenaltyLevels
 		return
 	}
 
-	// Sort by penalty level
 	sort.Slice(m.PenaltyLevels, func(i, j int) bool {
 		return m.PenaltyLevels[i].PenaltyLevel < m.PenaltyLevels[j].PenaltyLevel
 	})
 
-	// Validate and fix each level
 	for i := range m.PenaltyLevels {
 		level := &m.PenaltyLevels[i]
 
-		// Ensure min <= max
 		if level.MinEarlyQuits > level.MaxEarlyQuits {
 			level.MinEarlyQuits, level.MaxEarlyQuits = level.MaxEarlyQuits, level.MinEarlyQuits
 		}
-
-		// Ensure non-negative values
 		if level.MinEarlyQuits < 0 {
 			level.MinEarlyQuits = 0
 		}
@@ -157,60 +214,32 @@ func (m *EarlyQuitServiceConfig) validatePenaltyLevels() {
 			level.CNVPEReactivated = 0
 		}
 
-		// Ensure no overlap with previous level
 		if i > 0 {
-			prevLevel := &m.PenaltyLevels[i-1]
-			// Current level's min should be at least previous level's max + 1
-			if level.MinEarlyQuits <= prevLevel.MaxEarlyQuits {
-				level.MinEarlyQuits = prevLevel.MaxEarlyQuits + 1
+			prev := &m.PenaltyLevels[i-1]
+			if level.MinEarlyQuits <= prev.MaxEarlyQuits {
+				level.MinEarlyQuits = prev.MaxEarlyQuits + 1
 			}
-			// Ensure max is still >= min after adjustment
 			if level.MaxEarlyQuits < level.MinEarlyQuits {
-				// Try to use the default config max for this penalty level
-				defaultCfg := DefaultEarlyQuitServiceConfig()
-				foundDefault := false
-				for j := range defaultCfg.PenaltyLevels {
-					defLevel := &defaultCfg.PenaltyLevels[j]
-					if defLevel.PenaltyLevel == level.PenaltyLevel {
-						if defLevel.MaxEarlyQuits >= level.MinEarlyQuits {
-							level.MaxEarlyQuits = defLevel.MaxEarlyQuits
-						} else {
-							level.MaxEarlyQuits = level.MinEarlyQuits
-						}
-						foundDefault = true
-						break
-					}
-				}
-				if !foundDefault {
-					level.MaxEarlyQuits = level.MinEarlyQuits
-				}
+				level.MaxEarlyQuits = level.MinEarlyQuits
 			}
 		}
 	}
-
-	// Regenerate penalty levels if they're invalid
-	if len(m.PenaltyLevels) == 0 {
-		m.PenaltyLevels = DefaultEarlyQuitServiceConfig().PenaltyLevels
-	}
 }
 
-// validateSteadyPlayerLevels ensures steady player levels are properly sequenced
-func (m *EarlyQuitServiceConfig) validateSteadyPlayerLevels() {
+func (m *SNSEarlyQuitConfig) validateSteadyPlayerLevels() {
+	defaults := DefaultEarlyQuitLevels()
 	if len(m.SteadyPlayerLevels) == 0 {
-		m.SteadyPlayerLevels = DefaultEarlyQuitServiceConfig().SteadyPlayerLevels
+		m.SteadyPlayerLevels = defaults.SteadyPlayerLevels
 		return
 	}
 
-	// Sort by steady player level
 	sort.Slice(m.SteadyPlayerLevels, func(i, j int) bool {
 		return m.SteadyPlayerLevels[i].SteadyPlayerLevel < m.SteadyPlayerLevels[j].SteadyPlayerLevel
 	})
 
-	// Validate and fix each level
 	for i := range m.SteadyPlayerLevels {
 		level := &m.SteadyPlayerLevels[i]
 
-		// Ensure non-negative values
 		if level.MinNumMatches < 0 {
 			level.MinNumMatches = 0
 		}
@@ -221,82 +250,14 @@ func (m *EarlyQuitServiceConfig) validateSteadyPlayerLevels() {
 			level.MinSteadyRatio = 1.0
 		}
 
-		// Ensure each level requires more matches than the previous
 		if i > 0 {
-			prevLevel := &m.SteadyPlayerLevels[i-1]
-			if level.MinNumMatches <= prevLevel.MinNumMatches {
-				level.MinNumMatches = prevLevel.MinNumMatches + 1
+			prev := &m.SteadyPlayerLevels[i-1]
+			if level.MinNumMatches <= prev.MinNumMatches {
+				level.MinNumMatches = prev.MinNumMatches + 1
 			}
-			// Optionally ensure ratio is non-decreasing
-			if level.MinSteadyRatio < prevLevel.MinSteadyRatio {
-				level.MinSteadyRatio = prevLevel.MinSteadyRatio
+			if level.MinSteadyRatio < prev.MinSteadyRatio {
+				level.MinSteadyRatio = prev.MinSteadyRatio
 			}
 		}
-	}
-
-	// Regenerate steady player levels if they're invalid
-	if len(m.SteadyPlayerLevels) == 0 {
-		m.SteadyPlayerLevels = DefaultEarlyQuitServiceConfig().SteadyPlayerLevels
-	}
-}
-
-// DefaultEarlyQuitServiceConfig returns the default early quit config with max penalty active
-func DefaultEarlyQuitServiceConfig() *EarlyQuitServiceConfig {
-	return &EarlyQuitServiceConfig{
-		PenaltyLevels: []EarlyQuitPenaltyLevelConfig{
-			{
-				PenaltyLevel:     0,
-				MinEarlyQuits:    0,
-				MaxEarlyQuits:    2,
-				MMLockoutSec:     0,
-				SpawnLock:        0,
-				AutoReport:       0,
-				CNVPEReactivated: 0,
-			},
-			{
-				PenaltyLevel:     1,
-				MinEarlyQuits:    3,
-				MaxEarlyQuits:    5,
-				MMLockoutSec:     120,
-				SpawnLock:        0,
-				AutoReport:       0,
-				CNVPEReactivated: 0,
-			},
-			{
-				PenaltyLevel:     2,
-				MinEarlyQuits:    6,
-				MaxEarlyQuits:    10,
-				MMLockoutSec:     300,
-				SpawnLock:        1,
-				AutoReport:       0,
-				CNVPEReactivated: 0,
-			},
-			{
-				PenaltyLevel:     3,
-				MinEarlyQuits:    11,
-				MaxEarlyQuits:    999,
-				MMLockoutSec:     900,
-				SpawnLock:        1,
-				AutoReport:       1,
-				CNVPEReactivated: 1,
-			},
-		},
-		SteadyPlayerLevels: []EarlyQuitSteadyPlayerLevelConfig{
-			{
-				SteadyPlayerLevel: 0,
-				MinNumMatches:     0,
-				MinSteadyRatio:    0.0,
-			},
-			{
-				SteadyPlayerLevel: 1,
-				MinNumMatches:     10,
-				MinSteadyRatio:    0.9,
-			},
-			{
-				SteadyPlayerLevel: 2,
-				MinNumMatches:     25,
-				MinSteadyRatio:    0.95,
-			},
-		},
 	}
 }
