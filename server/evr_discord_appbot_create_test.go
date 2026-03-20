@@ -61,7 +61,7 @@ func TestGetPartyMembersForUser(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "testnode")
 
 			// Create mock NakamaModule
 			nk := &mockNakamaModuleForParty{
@@ -119,21 +119,29 @@ func (m *mockNakamaModuleForParty) StorageRead(ctx context.Context, reads []*run
 	return nil, nil
 }
 
-func (m *mockNakamaModuleForParty) StorageIndexList(ctx context.Context, callerID, indexName, query string, limit int, order []string, callerID2 string) (*api.StorageObjects, string, error) {
+func (m *mockNakamaModuleForParty) StreamUserList(mode uint8, subject, subcontext, label string, includeHidden, includeNotHidden bool) ([]runtime.Presence, error) {
 	m.partyLookupCalled = true
 
-	// Mock implementation for GetPartyGroupUserIDs
-	objects := make([]*api.StorageObject, 0, len(m.partyMembers))
+	presences := make([]runtime.Presence, 0, len(m.partyMembers))
 	for _, userID := range m.partyMembers {
-		objects = append(objects, &api.StorageObject{
-			UserId: userID,
-		})
+		presences = append(presences, &mockPresence{userID: userID})
 	}
 
-	return &api.StorageObjects{
-		Objects: objects,
-	}, "", nil
+	return presences, nil
 }
+
+type mockPresence struct {
+	userID string
+}
+
+func (p *mockPresence) GetUserId() string                { return p.userID }
+func (p *mockPresence) GetSessionId() string             { return "" }
+func (p *mockPresence) GetNodeId() string                { return "testnode" }
+func (p *mockPresence) GetHidden() bool                  { return false }
+func (p *mockPresence) GetPersistence() bool             { return false }
+func (p *mockPresence) GetUsername() string               { return "" }
+func (p *mockPresence) GetStatus() string                { return "" }
+func (p *mockPresence) GetReason() runtime.PresenceReason { return runtime.PresenceReasonUnknown }
 
 func settingsToStorageObject(userID string, settings MatchmakingSettings) (*api.StorageObject, error) {
 	return &api.StorageObject{
