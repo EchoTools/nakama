@@ -315,11 +315,13 @@ func (s *MatchLabel) rebuildCache() {
 	}
 
 	// Include reconnect reservations in the cache (holds slot for crashed players).
+	reconnectSessionIDs := make(map[string]bool, len(s.reconnectReservations))
 	for _, r := range s.reconnectReservations {
 		if r.Expiry.Before(time.Now()) {
 			continue
 		}
 		presences = append(presences, r.Presence)
+		reconnectSessionIDs[r.Presence.SessionID.String()] = true
 	}
 
 	// Rebuild the lookup tables.
@@ -361,7 +363,7 @@ func (s *MatchLabel) rebuildCache() {
 					RatingSigma:   p.Rating.Sigma,
 					JoinTime:      s.joinTimeMilliseconds[p.SessionID.String()],
 					SessionID:     p.SessionID.String(),
-					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
+					IsReservation: s.reservationMap[p.SessionID.String()] != nil || reconnectSessionIDs[p.SessionID.String()],
 					GeoHash:       p.GeoHash,
 					PingMillis:    p.PingMillis,
 				})
@@ -379,7 +381,7 @@ func (s *MatchLabel) rebuildCache() {
 					RatingMu:      p.Rating.Mu,
 					RatingSigma:   p.Rating.Sigma,
 					SessionID:     p.SessionID.String(),
-					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
+					IsReservation: s.reservationMap[p.SessionID.String()] != nil || reconnectSessionIDs[p.SessionID.String()],
 					GeoHash:       p.GeoHash,
 					PingMillis:    p.PingMillis,
 				})
@@ -395,7 +397,7 @@ func (s *MatchLabel) rebuildCache() {
 					DiscordID:     p.DiscordID,
 					PartyID:       p.PartyID.String(),
 					SessionID:     p.SessionID.String(),
-					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
+					IsReservation: s.reservationMap[p.SessionID.String()] != nil || reconnectSessionIDs[p.SessionID.String()],
 					GeoHash:       p.GeoHash,
 					PingMillis:    p.PingMillis,
 				})
@@ -410,7 +412,7 @@ func (s *MatchLabel) rebuildCache() {
 					DiscordID:     p.DiscordID,
 					PartyID:       p.PartyID.String(),
 					SessionID:     p.SessionID.String(),
-					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
+					IsReservation: s.reservationMap[p.SessionID.String()] != nil || reconnectSessionIDs[p.SessionID.String()],
 					GeoHash:       p.GeoHash,
 					PingMillis:    p.PingMillis,
 				})
@@ -425,7 +427,7 @@ func (s *MatchLabel) rebuildCache() {
 					DiscordID:     p.DiscordID,
 					PartyID:       p.PartyID.String(),
 					SessionID:     p.SessionID.String(),
-					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
+					IsReservation: s.reservationMap[p.SessionID.String()] != nil || reconnectSessionIDs[p.SessionID.String()],
 					GeoHash:       p.GeoHash,
 					PingMillis:    p.PingMillis,
 				})
