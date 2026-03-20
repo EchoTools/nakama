@@ -409,7 +409,7 @@ type DisplayNameSearchResult struct {
 
 func DisplayNameOwnerSearch(ctx context.Context, nk runtime.NakamaModule, displayNames []string) (map[string][]string, error) {
 	nameMap := make(map[string]string, len(displayNames))
-	sanitized := make([]string, len(displayNames))
+	sanitized := make([]string, 0, len(displayNames))
 	for _, dn := range displayNames {
 		s := sanitizeDisplayName(dn)
 		s = strings.ToLower(s)

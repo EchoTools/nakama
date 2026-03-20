@@ -30,8 +30,15 @@ func TestQuery_JoinAsRegex(t *testing.T) {
 			elems: []string{"test-1", "test[2", "test+3", "test*4", "test(5"},
 			// Bluge's query lexer strips single backslashes from its reserved chars
 			// (like +, [, *, ()), so those need double-backslash escaping to survive.
-			// '-' is not a regex metachar outside a character class, so no escaping.
-			expected: "/(test-1|test\\\\[2|test\\\\+3|test\\\\*4|test\\\\(5)/",
+			// '-' is a Bluge reserved char (not a regex metachar) so gets single-backslash.
+			expected: "/(test\\-1|test\\\\[2|test\\\\+3|test\\\\*4|test\\\\(5)/",
+		},
+		{
+			name:  "elements with colon (Bluge field separator)",
+			elems: []string{"deathman :3"},
+			// ':' and space are Bluge reserved chars but not regex metacharacters,
+			// so they get single-backslash escaping to prevent Bluge query parse errors.
+			expected: "/(deathman\\ \\:3)/",
 		},
 	}
 
