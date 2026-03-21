@@ -311,15 +311,12 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 		"tier_changed":      tierChanged,
 	}).Info("Reduced early quit penalty: player logged out after early quit")
 
-	// Send early quit update via SNS message if tier changed
-	if tierChanged {
+	// Send notifications if tier changed (unless silent mode is enabled)
+	if tierChanged && !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
 		if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
 			messageTrigger.SendEarlyQuitUpdateNotification(ctx, userID, 0, 0, newTier, time.Time{})
 		}
-	}
 
-	// Send Discord notification if tier changed
-	if tierChanged {
 		discordID, err := GetDiscordIDByUserID(ctx, db, userID)
 		if err != nil {
 			logger.WithFields(map[string]any{
@@ -402,30 +399,31 @@ func CheckAndApplyEarlyQuitIfStillOnline(ctx context.Context, logger runtime.Log
 		}
 	}
 
-	// Send early quit update notification
-	if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
-		penaltyLevel := int32(eqconfig.EarlyQuitPenaltyLevel)
-		if penaltyLevel > MaxEarlyQuitPenaltyLevel {
-			penaltyLevel = int32(MaxEarlyQuitPenaltyLevel)
+	// Send notifications (unless silent mode is enabled)
+	if !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
+		if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
+			penaltyLevel := int32(eqconfig.EarlyQuitPenaltyLevel)
+			if penaltyLevel > MaxEarlyQuitPenaltyLevel {
+				penaltyLevel = int32(MaxEarlyQuitPenaltyLevel)
+			}
+			lockoutDuration := GetLockoutDurationSeconds(int(penaltyLevel))
+			penaltyExpiry := time.Now().Add(time.Duration(lockoutDuration) * time.Second)
+			messageTrigger.SendEarlyQuitUpdateNotification(ctx, userID, 0, int32(eqconfig.GetEarlyQuitCount()), penaltyLevel, penaltyExpiry)
 		}
-		lockoutDuration := GetLockoutDurationSeconds(int(penaltyLevel))
-		penaltyExpiry := time.Now().Add(time.Duration(lockoutDuration) * time.Second)
-		messageTrigger.SendEarlyQuitUpdateNotification(ctx, userID, 0, int32(eqconfig.GetEarlyQuitCount()), penaltyLevel, penaltyExpiry)
-	}
 
-	// Send Discord tier change notifications
-	if tierChanged {
-		discordID, err := GetDiscordIDByUserID(ctx, db, userID)
-		if err == nil {
-			if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
-				var message string
-				if newTier > oldTier {
-					message = TierDegradedMessage
-				} else {
-					message = TierRestoredMessage
-				}
-				if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
-					logger.WithField("error", err).Warn("Failed to send tier change DM for deferred penalty")
+		if tierChanged {
+			discordID, err := GetDiscordIDByUserID(ctx, db, userID)
+			if err == nil {
+				if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
+					var message string
+					if newTier > oldTier {
+						message = TierDegradedMessage
+					} else {
+						message = TierRestoredMessage
+					}
+					if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
+						logger.WithField("error", err).Warn("Failed to send tier change DM for deferred penalty")
+					}
 				}
 			}
 		}

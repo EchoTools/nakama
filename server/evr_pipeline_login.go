@@ -947,8 +947,8 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		return err
 	}
 
-	// Send early quit config and feature flags on login
-	if p.earlyQuitMessageTrigger != nil {
+	// Send early quit config and feature flags on login (unless silent mode is enabled)
+	if p.earlyQuitMessageTrigger != nil && !ServiceSettings().Matchmaking.SilentEarlyQuitSystem {
 		if err := p.earlyQuitMessageTrigger.SendEarlyQuitConfigOnLogin(ctx, session); err != nil {
 			logger.Warn("Failed to send early quit config on login", zap.Error(err))
 		}

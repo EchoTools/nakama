@@ -676,9 +676,11 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 			}
 		}
 
-		// Increment the completed matches for the player
-		if err := s.incrementCompletedMatches(ctx, logger, nk, db, sessionRegistry, playerInfo.UserID, playerInfo.SessionID, matchID); err != nil {
-			logger.WithField("error", err).Warn("Failed to increment completed matches")
+		// Increment the completed matches for the player (arena only — early quit system doesn't apply to combat)
+		if label.Mode == evr.ModeArenaPublic {
+			if err := s.incrementCompletedMatches(ctx, logger, nk, db, sessionRegistry, playerInfo.UserID, playerInfo.SessionID, matchID); err != nil {
+				logger.WithField("error", err).Warn("Failed to increment completed matches")
+			}
 		}
 
 		if serviceSettings.UseSkillBasedMatchmaking() {
