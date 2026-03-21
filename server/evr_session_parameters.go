@@ -52,6 +52,7 @@ type SessionParameters struct {
 	gameModeSuspensionsByGroupID ActiveGuildEnforcements          // The active suspension records
 	enforcementUserIDs           []string                         // User IDs (self + alts) used for enforcement journal queries
 	ignoreDisabledAlternates     bool                             // Ignore disabled
+	suspended                    *atomic.Bool                     // Player has been suspended/kicked — all messages should be ignored
 }
 
 func (s SessionParameters) UserID() string {
