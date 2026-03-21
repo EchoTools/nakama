@@ -281,7 +281,7 @@ func (s *EasyStream) StreamStringTable(entries *[]string) error {
 		}
 		// write the strings
 		for _, str := range *entries {
-			if s.StreamNullTerminatedString(&str); err != nil {
+			if err = s.StreamNullTerminatedString(&str); err != nil {
 				return err
 			}
 		}

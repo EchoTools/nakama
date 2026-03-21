@@ -949,7 +949,7 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 
 	// Send early quit config and feature flags on login (unless penalty system is disabled or silent mode is enabled)
 	ss := ServiceSettings()
-	if p.earlyQuitMessageTrigger != nil && ss.Matchmaking.EnableEarlyQuitPenalty && !ss.Matchmaking.SilentEarlyQuitSystem {
+	if p.earlyQuitMessageTrigger != nil && ss != nil && ss.Matchmaking.EnableEarlyQuitPenalty && !ss.Matchmaking.SilentEarlyQuitSystem {
 		if err := p.earlyQuitMessageTrigger.SendEarlyQuitConfigOnLogin(ctx, session); err != nil {
 			logger.Warn("Failed to send early quit config on login", zap.Error(err))
 		}

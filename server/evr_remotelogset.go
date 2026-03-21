@@ -45,7 +45,7 @@ var remoteLogFilters = func() []string {
 }()
 
 func filterRemoteLogs(logs []string) []string {
-	filteredLogs := logs[:0]
+	filteredLogs := make([]string, 0, len(logs))
 	for _, log := range logs {
 		shouldFilter := false
 		for _, filter := range remoteLogFilters {

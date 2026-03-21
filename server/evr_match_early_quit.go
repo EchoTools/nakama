@@ -42,7 +42,7 @@ func NewPlayerParticipation(ctx context.Context, logger runtime.Logger, db *sql.
 		return nil
 	}
 
-	node := ctx.Value(runtime.RUNTIME_CTX_MATCH_NODE).(string)
+	node, _ := ctx.Value(runtime.RUNTIME_CTX_MATCH_NODE).(string)
 	// Count how many players are in the same party
 	partySize := 1
 	if player.PartyID != "" {

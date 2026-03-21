@@ -123,11 +123,11 @@ func LoginDeniedClientIPAddressSearch(ctx context.Context, nk runtime.NakamaModu
 }
 
 func loginHistoryCompare(a, b *LoginHistory) []*AlternateSearchMatch {
-	if a.userID == b.userID {
-		return nil // Skip self-comparison.
-	}
 	if a == nil || b == nil || len(a.History) == 0 || len(b.History) == 0 {
 		return nil // No history to compare.
+	}
+	if a.userID == b.userID {
+		return nil // Skip self-comparison.
 	}
 	matches := make([]*AlternateSearchMatch, 0)
 

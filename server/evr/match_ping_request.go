@@ -38,7 +38,7 @@ func (m LobbyPingRequest) String() string {
 
 // Stream streams the message data in/out based on the streaming mode set.
 func (m *LobbyPingRequest) Stream(s *EasyStream) error {
-	RunErrorFunctions([]func() error{
+	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamNumber(binary.BigEndian, &m.Unk0) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk1) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.RTTMax) },
@@ -64,7 +64,6 @@ func (m *LobbyPingRequest) Stream(s *EasyStream) error {
 			return nil
 		},
 	})
-	return nil
 }
 
 func NewLobbyPingRequest(rttMax int, endpoints []Endpoint) *LobbyPingRequest {

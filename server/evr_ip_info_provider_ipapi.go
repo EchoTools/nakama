@@ -217,7 +217,7 @@ func (s *ipapiClient) Get(ctx context.Context, ip string) (IPInfo, error) {
 	ctx, cancelFn := context.WithTimeout(ctx, time.Second*1)
 	defer cancelFn()
 
-	resultCh := make(chan *IPAPIResponse)
+	resultCh := make(chan *IPAPIResponse, 1)
 
 	go func() {
 		var err error

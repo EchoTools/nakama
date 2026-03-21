@@ -641,9 +641,7 @@ func (s *sessionWS) Send(envelope *rtapi.Envelope, reliable bool) error {
 	case SessionFormatJson:
 		fallthrough
 	default:
-		if buf, err := s.protojsonMarshaler.Marshal(envelope); err == nil {
-			payload = buf
-		}
+		payload, err = s.protojsonMarshaler.Marshal(envelope)
 	}
 	if err != nil {
 		s.logger.Warn("Could not marshal envelope", zap.Error(err))

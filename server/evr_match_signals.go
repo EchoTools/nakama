@@ -37,7 +37,12 @@ type SignalEnvelope struct {
 func NewSignalEnvelope(userID string, signal SignalOpCode, data any) *SignalEnvelope {
 	payload, err := json.Marshal(data)
 	if err != nil {
-		return nil
+		// Return an envelope with a nil payload rather than nil pointer,
+		// since all callers chain .String() without nil checks.
+		return &SignalEnvelope{
+			UserID: userID,
+			OpCode: signal,
+		}
 	}
 	return &SignalEnvelope{
 		UserID:  userID,

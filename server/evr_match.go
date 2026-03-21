@@ -851,6 +851,9 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 						// Check for tier change after early quit
 						serviceSettings := ServiceSettings()
+						if serviceSettings == nil {
+							serviceSettings = &ServiceSettingsData{}
+						}
 						oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
 
 						logger.WithFields(map[string]interface{}{

@@ -94,16 +94,10 @@ func (p *EvrPipeline) linkTicket(ctx context.Context, xpid evr.EvrId, clientIP s
 }
 
 func generateLinkTicket(linkTickets map[string]*LinkTicket, xpid evr.EvrId, clientIP string, loginData *evr.LoginProfile) *LinkTicket {
-	found := true
-	var ticket *LinkTicket
 	for _, ticket := range linkTickets {
 		if ticket.XPID == xpid {
-			found = true
-			break
+			return ticket
 		}
-	}
-	if !found {
-		return ticket
 	}
 
 	// Generate a unique link code
@@ -116,7 +110,7 @@ func generateLinkTicket(linkTickets map[string]*LinkTicket, xpid evr.EvrId, clie
 	}
 
 	// Create a new link ticket
-	ticket = &LinkTicket{
+	ticket := &LinkTicket{
 		Code:         code,
 		XPID:         xpid,
 		ClientIP:     clientIP,
@@ -231,10 +225,10 @@ func (t *DiscordAccessToken) Refresh(clientId string, clientSecret string) error
 	if err != nil {
 		return err
 	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("discord refresh failed: %s", err)
-	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("discord refresh failed with status %d", resp.StatusCode)
+	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&t); err != nil {
 		return err
@@ -265,7 +259,7 @@ func ExchangeCodeForAccessToken(logger runtime.Logger, code string, clientId str
 		AccessToken:  token.AccessToken,
 		RefreshToken: token.RefreshToken,
 		TokenType:    token.TokenType,
-		ExpiresIn:    token.Expiry.Second(),
+		ExpiresIn:    int(time.Until(token.Expiry).Seconds()),
 	}
 
 	return accessToken, nil
