@@ -311,8 +311,8 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 		"tier_changed":      tierChanged,
 	}).Info("Reduced early quit penalty: player logged out after early quit")
 
-	// Send notifications if tier changed (unless silent mode is enabled)
-	if tierChanged && !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
+	// Send notifications if tier changed (unless penalty system is disabled or silent mode is enabled)
+	if tierChanged && serviceSettings.Matchmaking.EnableEarlyQuitPenalty && !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
 		if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
 			messageTrigger.SendEarlyQuitUpdateNotification(ctx, userID, 0, 0, newTier, time.Time{})
 		}
@@ -399,8 +399,8 @@ func CheckAndApplyEarlyQuitIfStillOnline(ctx context.Context, logger runtime.Log
 		}
 	}
 
-	// Send notifications (unless silent mode is enabled)
-	if !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
+	// Send notifications (unless penalty system is disabled or silent mode is enabled)
+	if serviceSettings.Matchmaking.EnableEarlyQuitPenalty && !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
 		if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
 			penaltyLevel := int32(eqconfig.EarlyQuitPenaltyLevel)
 			if penaltyLevel > MaxEarlyQuitPenaltyLevel {
