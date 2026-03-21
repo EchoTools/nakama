@@ -71,7 +71,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	groupID := request.GroupID
 
 	// Check permissions (global operator, global bot, or guild enforcer)
-	isGlobalOperator, isGlobalBot, isEnforcer, gg, err := RequireEnforcerOperatorOrBot(ctx, db, nk, userID, groupID)
+	isGlobalOperator, isGlobalBot, _, gg, err := RequireEnforcerOperatorOrBot(ctx, db, nk, userID, groupID)
 	if err != nil {
 		logger.Error("Permission check failed", zap.Error(err))
 		return "", err
@@ -201,75 +201,12 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 
 	// Kick the player from active sessions
 	if kickPlayer {
-		for _, p := range presences {
-			// Match only the target user
-			if p.GetUserId() != targetUserID {
-				continue
-			}
-
-			label, _ := MatchLabelByID(ctx, nk, MatchIDFromStringOrNil(p.GetStatus()))
-			if label == nil {
-				continue
-			}
-
-			// Don't kick game servers
-			if label.GameServer.SessionID.String() == p.GetSessionId() {
-				continue
-			}
-
-			// If AllowPrivateLobbies is true, don't kick from private matches
-			if allowPrivateLobbies && label.IsPrivateMatch() {
-				actions = append(actions, fmt.Sprintf("skipped kick from private [%s] (allow_private_lobbies=true)", label.Mode.String()))
-				continue
-			}
-
-			permissions := make([]string, 0)
-
-			// Check if the user is the match owner of a private match
-			if label.SpawnedBy == userID && label.IsPrivate() {
-				permissions = append(permissions, "match owner")
-			}
-
-			// Check if the user is the game server operator
-			if label.GameServer.OperatorID.String() == userID {
-				permissions = append(permissions, "game server operator")
-			}
-
-			if isGlobalOperator {
-				permissions = append(permissions, "global operator")
-			}
-
-			if isEnforcer && label.GetGroupID().String() == groupID {
-				permissions = append(permissions, "enforcer")
-			}
-
-			if len(permissions) == 0 {
-				actions = append(actions, "user's match is not from this guild")
-				continue
-			}
-
-			// Kick the player from the match
-			if err := KickPlayerFromMatch(ctx, nk, label.ID, targetUserID); err != nil {
-				actions = append(actions, fmt.Sprintf("failed to kick player from [%s] (error: %s)", label.Mode.String(), err.Error()))
-				continue
-			}
-
-			actions = append(actions, fmt.Sprintf("kicked from [%s] session. (%s) [%s]", label.Mode.String(), request.UserNotice, fmt.Sprintf("%v", permissions)))
-			cnt++
-		}
-
-		// Disconnect the user if they are a global operator or enforcer
-		if isGlobalOperator || isEnforcer {
-			go func() {
-				time.Sleep(5 * time.Second)
-				// Just disconnect the user, wholesale
-				if count, err := DisconnectUserID(ctx, nk, targetUserID, true, true, false); err != nil {
-					logger.Warn("Failed to disconnect user", zap.Error(err))
-				} else if count > 0 {
-					logger.Info("Disconnected user from login/match service", zap.Int("sessions", count), zap.String("target_user_id", targetUserID))
-				}
-			}()
-		}
+		// Use the suspension enforcement system: marks sessions as suspended,
+		// sends unrequire, kicks from match, and disconnects after 60s.
+		_nk := nk.(*RuntimeGoNakamaModule)
+		SuspendConnectedUser(ctx, RuntimeLoggerToZapLogger(logger), nk, _nk.sessionRegistry, targetUserID)
+		actions = append(actions, "suspended all active sessions (delayed disconnect in 60s)")
+		cnt = len(presences)
 
 		if cnt == 0 {
 			actions = append(actions, "no active sessions found")
