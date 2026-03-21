@@ -589,28 +589,6 @@ func GetMatchPresences(ctx context.Context, nk runtime.NakamaModule, matchID Mat
 	return presenceMap, nil
 }
 
-func GetMatchIDBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID MatchID, presence runtime.Presence, err error) {
-
-	presences, err := nk.StreamUserList(StreamModeService, sessionID.String(), "", StreamLabelMatchService, false, true)
-	if err != nil {
-		return MatchID{}, nil, fmt.Errorf("failed to get stream presences: %w", err)
-	}
-	if len(presences) == 0 {
-		return MatchID{}, nil, ErrMatchNotFound
-	}
-	presence = presences[0]
-	matchID = MatchIDFromStringOrNil(presences[0].GetStatus())
-	if !matchID.IsNil() {
-		// Verify that the user is actually in the match
-		if meta, err := nk.StreamUserGet(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil || meta == nil {
-			return MatchID{}, nil, ErrMatchNotFound
-		}
-		return matchID, presence, nil
-	}
-
-	return MatchID{}, nil, ErrMatchNotFound
-}
-
 func GetLobbyGroupID(ctx context.Context, db *sql.DB, userID string) (string, uuid.UUID, error) {
 	query := "SELECT value->>'group_id' FROM storage WHERE collection = $1 AND key = $2 and user_id = $3"
 	var dbPartyGroupName string
@@ -660,89 +638,6 @@ func GetGuildGroupIDsByUser(ctx context.Context, db *sql.DB, userID string) (map
 	}
 	_ = rows.Close()
 	return groups, nil
-}
-
-func KickPlayerFromMatch(ctx context.Context, nk runtime.NakamaModule, matchID MatchID, userID string) error {
-	// Get the user's presences
-
-	label, err := MatchLabelByID(ctx, nk, matchID)
-	if err != nil {
-		return fmt.Errorf("failed to get match label: %w", err)
-	}
-
-	presences, err := nk.StreamUserList(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, false, true)
-	if err != nil {
-		return fmt.Errorf("failed to get stream presences: %w", err)
-	}
-
-	for _, presence := range presences {
-		if presence.GetUserId() != userID {
-			continue
-		}
-		if presence.GetSessionId() == label.GameServer.SessionID.String() {
-			// Do not kick the game server
-			continue
-		}
-
-		signal := SignalKickEntrantsPayload{
-			UserIDs: []uuid.UUID{uuid.FromStringOrNil(userID)},
-		}
-
-		data := NewSignalEnvelope(userID, SignalKickEntrants, signal).String()
-
-		// Signal the match to kick the entrants
-		if _, err := nk.MatchSignal(ctx, matchID.String(), data); err != nil {
-			return fmt.Errorf("failed to signal match: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func DisconnectUserID(ctx context.Context, nk runtime.NakamaModule, userID string, kickFirst bool, includeLogin bool, includeGameserver bool) (int, error) {
-
-	if kickFirst {
-		// Kick the user from any matches they are in
-		if matchID, _, err := GetMatchIDBySessionID(nk, uuid.FromStringOrNil(userID)); err == nil && !matchID.IsNil() {
-			if err := KickPlayerFromMatch(ctx, nk, matchID, userID); err != nil {
-				return 0, fmt.Errorf("failed to kick player from match: %w", err)
-			}
-		}
-	}
-
-	// Get the user's presences
-	labels := []string{StreamLabelMatchService}
-	if includeLogin {
-		labels = append(labels, StreamLabelLoginService)
-	} else if includeGameserver {
-		labels = append(labels, StreamLabelGameServerService)
-	}
-
-	cnt := 0
-	for _, l := range labels {
-
-		presences, err := nk.StreamUserList(StreamModeService, userID, "", l, false, true)
-		if err != nil {
-			return 0, fmt.Errorf("failed to get stream presences: %w", err)
-		}
-
-		for _, presence := range presences {
-
-			// Add a delay to allow the match to process the kick
-			go func() {
-				if kickFirst {
-					<-time.After(5 * time.Second)
-				}
-				if err := nk.SessionDisconnect(ctx, presence.GetSessionId(), runtime.PresenceReasonDisconnect); err != nil {
-					// Ignore the error
-					return
-				}
-			}()
-
-			cnt++
-		}
-	}
-	return cnt, nil
 }
 
 func GetUserIDByDeviceID(ctx context.Context, db *sql.DB, deviceID string) (string, error) {
