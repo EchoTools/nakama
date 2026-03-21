@@ -869,47 +869,47 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 								}
 							}
 
-							// Send early quit penalty notification to player
-							if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
-								penaltyLevel := int32(eqconfig.EarlyQuitPenaltyLevel)
-								// Clamp to max penalty level (typically 3)
-								if penaltyLevel > MaxEarlyQuitPenaltyLevel {
-									penaltyLevel = int32(MaxEarlyQuitPenaltyLevel)
-								}
+							// Send early quit penalty notification to player (unless silent mode)
+							if !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
+								if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
+									penaltyLevel := int32(eqconfig.EarlyQuitPenaltyLevel)
+									// Clamp to max penalty level (typically 3)
+									if penaltyLevel > MaxEarlyQuitPenaltyLevel {
+										penaltyLevel = int32(MaxEarlyQuitPenaltyLevel)
+									}
 
-								// Get lockout duration for current penalty level (0s, 2m, 5m, 15m)
-								lockoutDuration := GetLockoutDurationSeconds(int(penaltyLevel))
+									// Get lockout duration for current penalty level (0s, 2m, 5m, 15m)
+									lockoutDuration := GetLockoutDurationSeconds(int(penaltyLevel))
 
-								penaltyExpiry := time.Now().Add(time.Duration(lockoutDuration) * time.Second)
-								messageTrigger.SendEarlyQuitUpdateNotification(ctx, mp.GetUserId(), 0, int32(eqconfig.GetEarlyQuitCount()), penaltyLevel, penaltyExpiry)
+									penaltyExpiry := time.Now().Add(time.Duration(lockoutDuration) * time.Second)
+									messageTrigger.SendEarlyQuitUpdateNotification(ctx, mp.GetUserId(), 0, int32(eqconfig.GetEarlyQuitCount()), penaltyLevel, penaltyExpiry)
 
-								// Trigger auto-report at penalty level 3
-								if penaltyLevel >= 3 {
-									featureFlags := evr.DefaultEarlyQuitFeatureFlags()
-									if featureFlags != nil && featureFlags.IsAutoReportEnabled() {
-										TriggerAutoReport(ctx, logger, mp.GetUserId(), penaltyLevel)
+									// Trigger auto-report at penalty level 3
+									if penaltyLevel >= 3 {
+										featureFlags := evr.DefaultEarlyQuitFeatureFlags()
+										if featureFlags != nil && featureFlags.IsAutoReportEnabled() {
+											TriggerAutoReport(ctx, logger, mp.GetUserId(), penaltyLevel)
+										}
 									}
 								}
-							}
-
-							// Send Discord DM if tier changed
-							if tierChanged {
 
 								// Send Discord DM if tier changed
-								discordID, err := GetDiscordIDByUserID(ctx, db, mp.GetUserId())
-								if err != nil {
-									logger.Warn("Failed to get Discord ID for tier notification", zap.Error(err))
-								} else if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
-									var message string
-									if oldTier > newTier {
-										// Degraded to Tier 2+
-										message = TierDegradedMessage
-									} else {
-										// Recovered to Tier 1
-										message = TierRestoredMessage
-									}
-									if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
-										logger.Warn("Failed to send tier change DM", zap.Error(err))
+								if tierChanged {
+									discordID, err := GetDiscordIDByUserID(ctx, db, mp.GetUserId())
+									if err != nil {
+										logger.Warn("Failed to get Discord ID for tier notification", zap.Error(err))
+									} else if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
+										var message string
+										if oldTier > newTier {
+											// Degraded to Tier 2+
+											message = TierDegradedMessage
+										} else {
+											// Recovered to Tier 1
+											message = TierRestoredMessage
+										}
+										if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
+											logger.Warn("Failed to send tier change DM", zap.Error(err))
+										}
 									}
 								}
 							}
