@@ -264,6 +264,14 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 	sessionID := session.ID().String()
 	if lobbyGroup != nil && lobbyGroup.Size() > 1 {
 
+		// Only the party leader submits matchmaking tickets; non-leaders are
+		// included automatically via the leader's ticket.
+		leader := lobbyGroup.GetLeader()
+		if leader == nil || leader.SessionId != sessionID {
+			logger.Debug("Ignoring matchmaking request from non-leader party member")
+			return "", nil
+		}
+
 		// Matchmake with the lobby group via the party handler.
 		ticket, otherPresences, err = lobbyGroup.MatchmakerAdd(sessionID, session.pipeline.node, query, minCount, maxCount, countMultiple, stringProps, numericProps)
 		if err != nil {

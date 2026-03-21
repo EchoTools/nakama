@@ -133,9 +133,11 @@ func (p *PartyHandler) JoinRequest(presence *Presence) (bool, error) {
 		}
 	}
 	// Check if party already has this user.
-	if _, ok := p.members.presenceMap[presence.UserID]; ok {
-		p.Unlock()
-		return false, runtime.ErrPartyJoinRequestAlreadyMember
+	for _, member := range p.members.presences {
+		if member.Presence.UserID == presence.UserID {
+			p.Unlock()
+			return false, runtime.ErrPartyJoinRequestAlreadyMember
+		}
 	}
 
 	joinRequest := &PartyJoinRequest{
