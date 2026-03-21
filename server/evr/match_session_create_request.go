@@ -62,8 +62,9 @@ func (m *LobbyCreateSessionRequest) Stream(s *EasyStream) error {
 		func() error {
 			lt := uint8(m.LobbyType)
 			if err := s.StreamNumber(binary.LittleEndian, &lt); err != nil {
-				m.LobbyType = LobbyType(lt)
+				return err
 			}
+			m.LobbyType = LobbyType(lt)
 			return s.Skip(3) // Alignment
 		},
 		func() error {

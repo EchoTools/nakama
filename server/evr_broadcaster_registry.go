@@ -35,19 +35,26 @@ func (br *BroadcasterRegistry) RemoveBroadcaster(id string) {
 
 func (br *BroadcasterRegistry) HealthCheck() {
 	for {
+		var toRemove []string
+
 		br.mutex.RLock()
 		for id, b := range br.Broadcasters {
 			if time.Since(b.LastPing) > 10*time.Second {
 				if b.IsInMatch {
 					if time.Since(b.LastPing) > 30*time.Second {
-						br.RemoveBroadcaster(id)
+						toRemove = append(toRemove, id)
 					}
 				} else {
-					br.RemoveBroadcaster(id)
+					toRemove = append(toRemove, id)
 				}
 			}
 		}
 		br.mutex.RUnlock()
+
+		for _, id := range toRemove {
+			br.RemoveBroadcaster(id)
+		}
+
 		time.Sleep(10 * time.Second)
 	}
 }

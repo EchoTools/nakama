@@ -256,7 +256,7 @@ func (s *IPQSClient) Get(ctx context.Context, ip string) (IPInfo, error) {
 	ctx, cancelFn := context.WithTimeout(ctx, time.Second*1)
 	defer cancelFn()
 
-	resultCh := make(chan *IPQSResponse)
+	resultCh := make(chan *IPQSResponse, 1)
 
 	go func() {
 		var err error

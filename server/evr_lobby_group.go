@@ -32,6 +32,9 @@ func (g *LobbyGroup) IDStr() string {
 }
 
 func (g *LobbyGroup) GetLeader() *rtapi.UserPresence {
+	if g.ph == nil {
+		return nil
+	}
 	g.ph.RLock()
 	defer g.ph.RUnlock()
 	if g.ph.leader == nil {
@@ -55,6 +58,9 @@ func (g *LobbyGroup) Size() int {
 }
 
 func (g *LobbyGroup) MatchmakerAdd(sessionID, node, query string, minCount, maxCount, countMultiple int, stringProperties map[string]string, numericProperties map[string]float64) (string, []*PresenceID, error) {
+	if g.ph == nil {
+		return "", nil, errors.New("party handler is nil")
+	}
 	return g.ph.MatchmakerAdd(sessionID, node, query, minCount, maxCount, countMultiple, stringProperties, numericProperties)
 }
 

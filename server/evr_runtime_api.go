@@ -92,6 +92,7 @@ func NewAppAPIAcceptor(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 		appID, ok := vars[DEVAPP_CTX_APP_ID]
 		if !ok {
 			http.Error(w, authErrorBody, 401)
+			return
 		}
 		ctx := NewDeveloperAppContext(r.Context(), node, "", env, r.Header, r.URL.Query(), userID.String(), username, vars, clientIP, clientPort, appID)
 

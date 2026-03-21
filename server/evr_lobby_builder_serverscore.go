@@ -183,7 +183,7 @@ func VRMLServerScore(latencies [][]float64, minRTT, maxRTT, thresholdRTT float64
 	lobbySize := float64(teamSize) * 2
 
 	// High/low ping points
-	hilo := float64((blueSum + orangeSum) - (minRTT*lobbySize)/float64((thresholdRTT*lobbySize)-(minRTT*lobbySize)))
+	hilo := ((blueSum + orangeSum) - (minRTT * lobbySize)) / ((thresholdRTT * lobbySize) - (minRTT * lobbySize))
 	hiloPoints := (1 - hilo) * pointsDistro[3]
 
 	// Final score
