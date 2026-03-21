@@ -347,6 +347,11 @@ func (t *SNSEarlyQuitMessageTrigger) Stop() {
 // checkAndNotifyExpiredPenalties checks all connected players' penalties and sends expiry notifications
 // Only notifies players who are currently connected
 func (t *SNSEarlyQuitMessageTrigger) checkAndNotifyExpiredPenalties(ctx context.Context) {
+	// Skip if early quit penalty system is disabled
+	if ss := ServiceSettings(); ss == nil || !ss.Matchmaking.EnableEarlyQuitPenalty {
+		return
+	}
+
 	// Check all connected EVR sessions
 	t.pipeline.sessionRegistry.Range(func(session Session) bool {
 		if session.Format() != SessionFormatEVR {

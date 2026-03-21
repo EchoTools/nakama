@@ -21,7 +21,9 @@ type UserMigrater interface {
 func MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) {
 	systemMigrations := []SystemMigrator{}
 
-	allUserMigrations := []UserMigrater{}
+	allUserMigrations := []UserMigrater{
+		//&MigrationLoadouts{},
+	}
 
 	if len(systemMigrations) == 0 && len(allUserMigrations) == 0 {
 		return
