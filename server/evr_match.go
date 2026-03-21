@@ -869,8 +869,8 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 								}
 							}
 
-							// Send early quit penalty notification to player (unless silent mode)
-							if !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
+							// Send early quit penalty notification to player (unless penalty system is disabled or silent mode)
+							if serviceSettings.Matchmaking.EnableEarlyQuitPenalty && !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
 								if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
 									penaltyLevel := int32(eqconfig.EarlyQuitPenaltyLevel)
 									// Clamp to max penalty level (typically 3)
