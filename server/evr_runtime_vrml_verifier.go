@@ -95,24 +95,9 @@ func (v *VRMLScanQueue) Start() error {
 	}
 
 	go func() {
-		if VRMLOutageModeEnabled() {
-			v.logger.Info("VRML outage mode enabled at goroutine start; waiting for outage to clear")
-			for VRMLOutageModeEnabled() {
-				select {
-				case <-v.ctx.Done():
-					return
-				case <-time.After(30 * time.Second):
-				}
-			}
-		}
-
 		vg := vrmlgo.New("")
 		seasons, err := vg.GameSeasons(VRMLEchoArenaShortName)
 		if err != nil {
-			if IsVRMLOutageError(err) {
-				v.logger.WithField("error", err).Error("VRML service unavailable during seasons fetch; aborting worker startup")
-				return
-			}
 			v.logger.WithField("error", err).Error("Failed to get seasons")
 		}
 		v.seasons = seasons
@@ -129,10 +114,6 @@ func (v *VRMLScanQueue) Start() error {
 			case <-v.ctx.Done():
 				return
 			case <-time.After(1 * time.Second):
-			}
-
-			if VRMLOutageModeEnabled() {
-				continue
 			}
 
 			entry, err := v.dequeue()
@@ -554,14 +535,8 @@ func (v *VRMLScanQueue) playerSummary(vg *vrmlgo.Session, player *vrmlgo.Player)
 			}
 		}
 	}
-	if VRMLOutageModeEnabled() {
-		return nil, fmt.Errorf("VRML outage mode enabled; cannot fetch member data")
-	}
 	member, err := vg.Member(player.User.UserID)
 	if err != nil {
-		if IsVRMLOutageError(err) {
-			return nil, fmt.Errorf("VRML service unavailable during member lookup: %w", err)
-		}
 		return nil, fmt.Errorf("failed to get member data: %v", err)
 	}
 
