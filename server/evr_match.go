@@ -363,16 +363,33 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	for _, p := range meta.Presences() {
 
 		for _, e := range state.presenceMap {
-			// Reject any duplicate EVR-ID join attempt (regardless of session)
-			if e.EvrID.Equals(p.EvrID) {
+			if !e.EvrID.Equals(p.EvrID) {
+				continue
+			}
+
+			// Same user reconnecting with a new session: evict the stale/phantom presence
+			if e.GetUserId() == p.GetUserId() {
 				logger.WithFields(map[string]interface{}{
 					"evrid":            p.EvrID,
 					"uid":              p.GetUserId(),
 					"existing_session": e.GetSessionId(),
 					"new_session":      p.GetSessionId(),
-				}).Error("Duplicate EVR-ID join attempt.")
-				return state, false, ErrJoinRejectDuplicateEvrID.Error()
+				}).Warn("Evicting stale presence for same-user duplicate EVR-ID.")
+				delete(state.presenceMap, e.GetSessionId())
+				delete(state.presenceByEvrID, e.EvrID)
+				delete(state.joinTimestamps, e.GetSessionId())
+				state.rebuildCache()
+				break
 			}
+
+			// Different user with the same EVR-ID: reject
+			logger.WithFields(map[string]interface{}{
+				"evrid":            p.EvrID,
+				"uid":              p.GetUserId(),
+				"existing_session": e.GetSessionId(),
+				"new_session":      p.GetSessionId(),
+			}).Error("Duplicate EVR-ID join attempt.")
+			return state, false, ErrJoinRejectDuplicateEvrID.Error()
 		}
 	}
 
