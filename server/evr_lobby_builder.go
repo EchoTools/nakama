@@ -507,12 +507,11 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				query = ""
 			}
 
-			sessions = append(sessions, session)
-
 			if entrant, err := EntrantPresenceFromSession(session, MatchIDFromStringOrNil(entry.GetPartyId()).UUID, teamIndex, rating, groupID.String(), 0, query); err != nil {
 				logger.Error("Failed to create entrant presence", zap.String("sid", session.ID().String()), zap.Error(err))
 				continue
 			} else {
+				sessions = append(sessions, session)
 				entrantPresences = append(entrantPresences, entrant)
 			}
 		}

@@ -205,16 +205,16 @@ func sortPingCandidatesByLatencyHistory(hostIPs []string, latencyHistory *Latenc
 	}
 
 	index := make([]item, len(hostIPs))
-	for _, hostIP := range hostIPs {
+	for i, hostIP := range hostIPs {
 		// Get the latest timestamp and RTT for each host IP
-		item := item{
+		index[i] = item{
 			hostIP: hostIP,
 		}
 		if history, inCache := latencyHistory.Get(hostIP); inCache {
-			item.inCache = true
+			index[i].inCache = true
 			latest := history[len(history)-1]
-			item.latestTimestamp = latest.Timestamp
-			item.rtt = latest.RTT
+			index[i].latestTimestamp = latest.Timestamp
+			index[i].rtt = latest.RTT
 		}
 	}
 
@@ -245,4 +245,9 @@ func sortPingCandidatesByLatencyHistory(hostIPs []string, latencyHistory *Latenc
 
 		return 0
 	})
+
+	// Apply sorted order back to hostIPs
+	for i, item := range index {
+		hostIPs[i] = item.hostIP
+	}
 }

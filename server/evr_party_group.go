@@ -33,6 +33,9 @@ func (g *PartyGroup) IDStr() string {
 func (g *PartyGroup) GetLeader() *rtapi.UserPresence {
 	g.RLock()
 	defer g.RUnlock()
+	if g.ph == nil {
+		return nil
+	}
 	g.ph.RLock()
 	defer g.ph.RUnlock()
 	if g.ph.leader == nil {

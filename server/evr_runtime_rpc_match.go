@@ -134,21 +134,19 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		default:
 			return "", runtime.NewError("invalid team alignment role: "+roleName, StatusInvalidArgument)
 		}
-		teamAlignments[userID] = roleID
-
 		if uuid.FromStringOrNil(id) == uuid.Nil {
 			// Assume the id is a discord ID and convert it to a user ID
-			userID, err := GetUserIDByDiscordID(ctx, db, id)
+			resolvedID, err := GetUserIDByDiscordID(ctx, db, id)
 			if err != nil {
 				return "", runtime.NewError("Failed to get userID by discord ID: "+err.Error(), StatusNotFound)
 			}
-			if userID == "" {
+			if resolvedID == "" {
 				return "", runtime.NewError("discord user not found: "+id, StatusNotFound)
 			}
-			teamAlignments[userID] = roleID // Assuming roleName is an int32 representing the team index
+			teamAlignments[resolvedID] = roleID
+		} else {
+			teamAlignments[id] = roleID
 		}
-
-		teamAlignments[id] = roleID // Assuming id is a user ID
 
 	}
 
@@ -237,7 +235,7 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		} else {
 			guid := strings.ToUpper(label.ID.UUID.String())
 			auditMessage := fmt.Sprintf("<@%s> allocated https://echo.taxi/spark://j/%s via RPC:\n\n```json\n%s\n```", callerAccount.GetCustomId(), guid, string(settingsJSON))
-			if _, err := AuditLogSendGuild(globalAppBot.Load().dg, gg, auditMessage); err != nil {
+			if _, err := AuditLogSendGuild(appBot.dg, gg, auditMessage); err != nil {
 				logger.WithField("err", err).Error("Failed to send audit log message")
 			}
 		}

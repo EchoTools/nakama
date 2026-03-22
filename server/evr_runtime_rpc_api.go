@@ -15,7 +15,10 @@ type GuildGroupResponse struct {
 
 // GuildGroupGetRPC returns metadata and group info for a guild group by ID.
 func GuildGroupGetRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	params := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
+	params, ok := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
+	if !ok {
+		return "", runtime.NewError("missing query parameters", 3)
+	}
 	groupIDs := make([]string, 0)
 	// Parse multiple IDs from query params
 	if idsParam, exists := params["ids"]; exists {
@@ -48,7 +51,10 @@ type UserGuildGroupsResponse struct {
 }
 
 func UserGuildGroupListRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	userID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || userID == "" {
+		return "", runtime.NewError("authentication required", 16)
+	}
 	guildGroupMap, err := GuildUserGroupsList(ctx, nk, nil, userID)
 	if err != nil {
 		return "", runtime.NewError(err.Error(), 5) // NotFound or Internal

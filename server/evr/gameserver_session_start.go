@@ -265,11 +265,11 @@ func (m *GameServerSessionStart) Stream(s *EasyStream) error {
 				}
 				m.Entrants = make([]EntrantDescriptor, finalStructCount)
 			}
-			for _, entrant := range m.Entrants {
+			for i := range m.Entrants {
 				err := RunErrorFunctions([]func() error{
-					func() error { return s.StreamGUID(&entrant.Unk0) },
-					func() error { return s.StreamStruct(&entrant.EvrID) },
-					func() error { return s.StreamNumber(binary.LittleEndian, &entrant.Flags) },
+					func() error { return s.StreamGUID(&m.Entrants[i].Unk0) },
+					func() error { return s.StreamStruct(&m.Entrants[i].EvrID) },
+					func() error { return s.StreamNumber(binary.LittleEndian, &m.Entrants[i].Flags) },
 				})
 				if err != nil {
 					return err

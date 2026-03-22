@@ -51,8 +51,9 @@ func (e *EvrId) UnmarshalText(b []byte) error {
 	return nil
 }
 
+// Deprecated: Use IsValid() instead.
 func (xpi EvrId) Valid() bool {
-	return xpi.PlatformCode > STM && xpi.PlatformCode < TEN && xpi.AccountId > 0
+	return xpi.IsValid()
 }
 
 func (xpi EvrId) Nil() bool {

@@ -41,7 +41,7 @@ func NewIPInfoCache(logger *zap.Logger, metrics Metrics, clients ...IPInfoProvid
 func (s *IPInfoCache) Get(ctx context.Context, ip string) (IPInfo, error) {
 
 	// ignore reserved IPs
-	if ip := net.ParseIP(ip); ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsPrivate() {
+	if parsedIP := net.ParseIP(ip); parsedIP != nil && (parsedIP.IsLoopback() || parsedIP.IsLinkLocalUnicast() || parsedIP.IsLinkLocalMulticast() || parsedIP.IsMulticast() || parsedIP.IsPrivate()) {
 		return &StubIPInfo{}, nil
 	}
 
