@@ -69,7 +69,28 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			if p.TryFollowPartyLeader(ctx, logger, session, lobbyParams, lobbyGroup) {
 				return nil
 			}
-			// Leader not in a match or join failed; fall through to normal lobby find/create
+
+			// TryFollowPartyLeader returned false. Check if we became the leader
+			// during the follow attempt (e.g. original leader left the party).
+			leader := lobbyGroup.GetLeader()
+			if leader != nil && leader.SessionId == session.id.String() {
+				// We're now the leader — populate entrant list and fall through
+				// to matchmaking as the leader.
+				isLeader = true
+				for _, sid := range memberSessionIDs {
+					if sid == session.id {
+						continue
+					}
+					entrantSessionIDs = append(entrantSessionIDs, sid)
+				}
+			} else {
+				// Still a non-leader. Do NOT fall through to matchmaking —
+				// non-leaders cannot submit tickets and will get stuck.
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				return NewLobbyError(ServerIsLocked, "unable to follow party leader")
+			}
 		} else {
 
 			for _, memberSessionIDs := range memberSessionIDs {
