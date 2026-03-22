@@ -1267,6 +1267,9 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			// Increment completed matches for players who stayed until the end
 			_nk := nk.(*RuntimeGoNakamaModule)
 			serviceSettings := ServiceSettings()
+			if serviceSettings == nil {
+				serviceSettings = &ServiceSettingsData{}
+			}
 			for _, presence := range state.presenceMap {
 				// Skip non-players (spectators, moderators)
 				if presence.RoleAlignment == evr.TeamSpectator || presence.RoleAlignment == evr.TeamModerator {
