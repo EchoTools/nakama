@@ -1662,7 +1662,7 @@ func TestReconnectReservation_RejoinBypassesClosedMatch(t *testing.T) {
 	}
 }
 
-func TestReconnectReservation_DuplicateEvrIDDoesNotConsumeReservation(t *testing.T) {
+func TestReconnectReservation_DuplicateEvrIDSameUserEvictsPhantom(t *testing.T) {
 	state := reconnectTestState(evr.ModeArenaPublic)
 
 	userID := uuid.NewV5(uuid.Nil, "user-duplicate-reconnect")
@@ -1690,20 +1690,26 @@ func TestReconnectReservation_DuplicateEvrIDDoesNotConsumeReservation(t *testing
 	m := &EvrMatch{}
 	metadata := NewJoinMetadata(rejoined).ToMatchMetadata()
 
-	gotState, allowed, reason := m.MatchJoinAttempt(context.Background(), reconnectTestLogger(), nil, nk, nil, 1, state, rejoined, metadata)
-	if allowed {
-		t.Fatalf("expected duplicate EVR-ID reconnect join to be rejected")
-	}
-	if diff := cmp.Diff(ErrJoinRejectDuplicateEvrID.Error(), reason); diff != "" {
-		t.Fatalf("unexpected rejection reason (-want +got):\n%s", diff)
+	gotState, allowed, reason := m.MatchJoinAttempt(context.Background(), reconnectTestLogger(), nil, nk, &reconnectTestDispatcher{}, 1, state, rejoined, metadata)
+	if !allowed {
+		t.Fatalf("expected same-user duplicate EVR-ID to evict phantom and succeed, got rejected: %s", reason)
 	}
 
 	stateAfter := gotState.(*MatchLabel)
-	if _, ok := stateAfter.reconnectReservations[userID.String()]; !ok {
-		t.Fatalf("expected reconnect reservation to remain after duplicate EVR-ID rejection")
+
+	// Old phantom session should be evicted
+	if _, ok := stateAfter.presenceMap[oldPresence.GetSessionId()]; ok {
+		t.Fatalf("expected old phantom session to be evicted from presenceMap")
 	}
-	if diff := cmp.Diff(0, len(nk.storageDelete)); diff != "" {
-		t.Fatalf("expected no join directive delete on rejected reconnect (-want +got):\n%s", diff)
+
+	// New session should be present
+	if _, ok := stateAfter.presenceMap[rejoined.GetSessionId()]; !ok {
+		t.Fatalf("expected new session to be in presenceMap")
+	}
+
+	// Reconnect reservation should be consumed
+	if _, ok := stateAfter.reconnectReservations[userID.String()]; ok {
+		t.Fatalf("expected reconnect reservation to be consumed after successful rejoin")
 	}
 }
 
@@ -1905,5 +1911,162 @@ func TestReconnectReservation_NotCreatedForSpectator(t *testing.T) {
 
 	if len(nk.storageWrites) != 0 {
 		t.Fatalf("expected no join directive written for spectator, got %d writes", len(nk.storageWrites))
+	}
+}
+
+// Test: When a player's old session is a phantom (in presenceMap but never fully tracked),
+// and the same player tries to join again with a new session, the phantom should be evicted
+// and the new join should succeed.
+func TestMatchJoinAttempt_PhantomPresenceEvictedOnSameUserDuplicateEvrID(t *testing.T) {
+	state := reconnectTestState(evr.ModeArenaPublic)
+
+	// Add a phantom presence — the old session that never completed stream tracking
+	phantom := reconnectTestPlayer("phantom", evr.TeamBlue)
+	userID := uuid.NewV5(uuid.Nil, "user-phantom-evict")
+	phantom.UserID = userID
+	phantom.EvrID = evr.EvrId{PlatformCode: 4, AccountId: 777777}
+	state.presenceMap[phantom.GetSessionId()] = phantom
+	state.presenceByEvrID[phantom.EvrID] = phantom
+	state.joinTimestamps[phantom.GetSessionId()] = time.Now().Add(-5 * time.Second)
+	state.rebuildCache()
+
+	// New session for the SAME user with the SAME EVR-ID (no reconnect reservation)
+	newPresence := reconnectTestPlayer("phantom-new", evr.TeamBlue)
+	newPresence.UserID = userID
+	newPresence.EvrID = phantom.EvrID
+	newPresence.SessionID = uuid.NewV5(uuid.Nil, "session-phantom-new")
+
+	metadata := NewJoinMetadata(newPresence).ToMatchMetadata()
+	nk := &reconnectTestNakamaModule{}
+	m := &EvrMatch{}
+
+	gotState, allowed, reason := m.MatchJoinAttempt(
+		context.Background(), reconnectTestLogger(), nil, nk, &reconnectTestDispatcher{}, 1,
+		state, reconnectTestPresence{newPresence, runtime.PresenceReasonJoin}, metadata,
+	)
+	if !allowed {
+		t.Fatalf("expected join to succeed (phantom should be evicted), got rejected: %s", reason)
+	}
+
+	stateAfter := gotState.(*MatchLabel)
+
+	// Phantom's old session should be gone
+	if _, ok := stateAfter.presenceMap[phantom.GetSessionId()]; ok {
+		t.Fatalf("expected phantom session %s to be evicted from presenceMap", phantom.GetSessionId())
+	}
+
+	// New session should be present
+	if _, ok := stateAfter.presenceMap[newPresence.GetSessionId()]; !ok {
+		t.Fatalf("expected new session %s to be in presenceMap", newPresence.GetSessionId())
+	}
+
+	// EVR-ID should now point to the new session
+	if p, ok := stateAfter.presenceByEvrID[newPresence.EvrID]; !ok || p.GetSessionId() != newPresence.GetSessionId() {
+		t.Fatalf("expected presenceByEvrID to point to new session")
+	}
+}
+
+// Test: A different user with the same EVR-ID should still be rejected.
+// This ensures we only evict phantoms for the SAME user, not different users.
+func TestMatchJoinAttempt_DifferentUserDuplicateEvrIDStillRejected(t *testing.T) {
+	state := reconnectTestState(evr.ModeArenaPublic)
+
+	// Existing player in the match
+	existing := reconnectTestPlayer("existing", evr.TeamBlue)
+	existing.EvrID = evr.EvrId{PlatformCode: 4, AccountId: 888888}
+	state.presenceMap[existing.GetSessionId()] = existing
+	state.presenceByEvrID[existing.EvrID] = existing
+	state.joinTimestamps[existing.GetSessionId()] = time.Now().Add(-30 * time.Second)
+	state.rebuildCache()
+
+	// DIFFERENT user tries to join with the same EVR-ID (should not happen, but must be rejected)
+	imposter := reconnectTestPlayer("imposter", evr.TeamOrange)
+	imposter.UserID = uuid.NewV5(uuid.Nil, "user-imposter-different")
+	imposter.EvrID = existing.EvrID // Same EVR-ID, different user
+	imposter.SessionID = uuid.NewV5(uuid.Nil, "session-imposter")
+
+	metadata := NewJoinMetadata(imposter).ToMatchMetadata()
+	nk := &reconnectTestNakamaModule{}
+	m := &EvrMatch{}
+
+	_, allowed, reason := m.MatchJoinAttempt(
+		context.Background(), reconnectTestLogger(), nil, nk, nil, 1,
+		state, reconnectTestPresence{imposter, runtime.PresenceReasonJoin}, metadata,
+	)
+	if allowed {
+		t.Fatalf("expected different-user duplicate EVR-ID to be rejected")
+	}
+	if diff := cmp.Diff(ErrJoinRejectDuplicateEvrID.Error(), reason); diff != "" {
+		t.Fatalf("unexpected rejection reason (-want +got):\n%s", diff)
+	}
+
+	// Original player should still be in the match
+	if _, ok := state.presenceMap[existing.GetSessionId()]; !ok {
+		t.Fatalf("expected original player to remain in presenceMap")
+	}
+}
+
+// Test: Same-user phantom eviction should work correctly with a reconnect reservation.
+// The phantom is evicted, the reconnect reservation is consumed, and the join succeeds.
+func TestMatchJoinAttempt_ReconnectWithPhantomPresenceSucceeds(t *testing.T) {
+	state := reconnectTestState(evr.ModeArenaPublic)
+
+	userID := uuid.NewV5(uuid.Nil, "user-reconnect-phantom")
+	phantom := reconnectTestPlayer("reconnect-phantom-old", evr.TeamBlue)
+	phantom.UserID = userID
+	phantom.EvrID = evr.EvrId{PlatformCode: 4, AccountId: 999999}
+	state.presenceMap[phantom.GetSessionId()] = phantom
+	state.presenceByEvrID[phantom.EvrID] = phantom
+	state.joinTimestamps[phantom.GetSessionId()] = time.Now().Add(-10 * time.Second)
+
+	// Add a reconnect reservation for this user
+	state.reconnectReservations[userID.String()] = &reconnectReservation{
+		Presence:     phantom,
+		Expiry:       time.Now().Add(30 * time.Second),
+		UserID:       userID.String(),
+		DeferPenalty: true,
+	}
+	state.rebuildCache()
+
+	// Same user reconnects with a new session
+	rejoined := reconnectTestPlayer("reconnect-phantom-new", evr.TeamOrange)
+	rejoined.UserID = userID
+	rejoined.EvrID = phantom.EvrID
+	rejoined.RoleAlignment = evr.TeamUnassigned
+	rejoined.SessionID = uuid.NewV5(uuid.Nil, "session-reconnect-phantom-new")
+
+	metadata := NewJoinMetadata(rejoined).ToMatchMetadata()
+	nk := &reconnectTestNakamaModule{}
+	m := &EvrMatch{}
+
+	gotState, allowed, reason := m.MatchJoinAttempt(
+		context.Background(), reconnectTestLogger(), nil, nk, &reconnectTestDispatcher{}, 1,
+		state, reconnectTestPresence{rejoined, runtime.PresenceReasonJoin}, metadata,
+	)
+	if !allowed {
+		t.Fatalf("expected reconnect with phantom eviction to succeed, got rejected: %s", reason)
+	}
+
+	stateAfter := gotState.(*MatchLabel)
+
+	// Phantom should be evicted
+	if _, ok := stateAfter.presenceMap[phantom.GetSessionId()]; ok {
+		t.Fatalf("expected phantom session to be evicted")
+	}
+
+	// New session should be in the match
+	if _, ok := stateAfter.presenceMap[rejoined.GetSessionId()]; !ok {
+		t.Fatalf("expected new session to be in presenceMap")
+	}
+
+	// Reconnect reservation should be consumed
+	if _, ok := stateAfter.reconnectReservations[userID.String()]; ok {
+		t.Fatalf("expected reconnect reservation to be consumed")
+	}
+
+	// Team alignment should be restored from the reconnect reservation (TeamBlue, not TeamOrange)
+	p := stateAfter.presenceMap[rejoined.GetSessionId()]
+	if p.RoleAlignment != evr.TeamBlue {
+		t.Fatalf("expected role alignment to be restored to TeamBlue from reconnect reservation, got %d", p.RoleAlignment)
 	}
 }
