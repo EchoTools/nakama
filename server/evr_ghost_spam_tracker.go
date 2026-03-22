@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,27 +13,37 @@ import (
 )
 
 const (
-	GhostSpamThreshold = 3
-	GhostSpamWindow    = 30 * time.Second
+	SpamActionThreshold = 3
+	SpamActionWindow    = 30 * time.Second
+	GhostSuspendDuration = 1 * time.Hour
 )
 
-type ghostAction struct {
-	timestamp    time.Time
-	operatorID   string
-	targetPlayer evr.EvrId
+// SpamActionType distinguishes ghost vs mute spam.
+type SpamActionType string
+
+const (
+	SpamActionGhost SpamActionType = "ghost"
+	SpamActionMute  SpamActionType = "mute"
+)
+
+type spamAction struct {
+	timestamp  time.Time
+	actionType SpamActionType
 }
 
-type GhostSpamTracker struct {
-	sync.RWMutex
-	actions map[string][]ghostAction
+// SpamTracker detects when an enforcer repeatedly ghosts or mutes the same
+// player within a short window and takes automated action.
+type SpamTracker struct {
+	sync.Mutex
+	actions map[string][]spamAction // key: "actionType:operatorID:targetEvrID"
 	logger  *zap.Logger
 	nk      runtime.NakamaModule
 	done    chan struct{}
 }
 
-func NewGhostSpamTracker(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule) *GhostSpamTracker {
-	tracker := &GhostSpamTracker{
-		actions: make(map[string][]ghostAction),
+func NewSpamTracker(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule) *SpamTracker {
+	tracker := &SpamTracker{
+		actions: make(map[string][]spamAction),
 		logger:  logger,
 		nk:      nk,
 		done:    make(chan struct{}),
@@ -43,11 +54,11 @@ func NewGhostSpamTracker(ctx context.Context, logger *zap.Logger, nk runtime.Nak
 	return tracker
 }
 
-func (t *GhostSpamTracker) Stop() {
+func (t *SpamTracker) Stop() {
 	close(t.done)
 }
 
-func (t *GhostSpamTracker) cleanupLoop() {
+func (t *SpamTracker) cleanupLoop() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
@@ -61,16 +72,16 @@ func (t *GhostSpamTracker) cleanupLoop() {
 	}
 }
 
-func (t *GhostSpamTracker) cleanup() {
+func (t *SpamTracker) cleanup() {
 	t.Lock()
 	defer t.Unlock()
 
 	now := time.Now()
 	for key, actions := range t.actions {
-		filtered := make([]ghostAction, 0)
-		for _, action := range actions {
-			if now.Sub(action.timestamp) < GhostSpamWindow {
-				filtered = append(filtered, action)
+		filtered := actions[:0]
+		for _, a := range actions {
+			if now.Sub(a.timestamp) < SpamActionWindow {
+				filtered = append(filtered, a)
 			}
 		}
 		if len(filtered) == 0 {
@@ -81,65 +92,84 @@ func (t *GhostSpamTracker) cleanup() {
 	}
 }
 
-func (t *GhostSpamTracker) TrackGhostAction(ctx context.Context, operatorID string, targetPlayer evr.EvrId, isGlobalOperator bool) (shouldKick bool, kickReason string) {
-	if !isGlobalOperator {
-		return false, ""
-	}
-
+// TrackAction records a ghost or mute action and returns true if the
+// threshold has been reached for the given operator+target+actionType.
+func (t *SpamTracker) TrackAction(operatorID string, targetPlayer evr.EvrId, actionType SpamActionType) bool {
 	t.Lock()
 	defer t.Unlock()
 
-	key := fmt.Sprintf("%s:%s", operatorID, targetPlayer.String())
-
+	key := fmt.Sprintf("%s:%s:%s", actionType, operatorID, targetPlayer.String())
 	now := time.Now()
-	action := ghostAction{
-		timestamp:    now,
-		operatorID:   operatorID,
-		targetPlayer: targetPlayer,
-	}
 
-	t.actions[key] = append(t.actions[key], action)
+	t.actions[key] = append(t.actions[key], spamAction{
+		timestamp:  now,
+		actionType: actionType,
+	})
 
-	recent := make([]ghostAction, 0)
+	// Prune old entries for this key.
+	recent := t.actions[key][:0]
 	for _, a := range t.actions[key] {
-		if now.Sub(a.timestamp) < GhostSpamWindow {
+		if now.Sub(a.timestamp) < SpamActionWindow {
 			recent = append(recent, a)
 		}
 	}
 	t.actions[key] = recent
 
-	if len(recent) >= GhostSpamThreshold {
-		kickReason = fmt.Sprintf("Auto-kicked: Global operator ghosted player %d times in %v", GhostSpamThreshold, GhostSpamWindow)
-		t.logger.Info("Ghost spam threshold reached",
+	if len(recent) >= SpamActionThreshold {
+		t.logger.Info("Spam threshold reached",
+			zap.String("action_type", string(actionType)),
 			zap.String("operator_id", operatorID),
 			zap.String("target_player", targetPlayer.String()),
-			zap.Int("ghost_count", len(recent)))
-
+			zap.Int("count", len(recent)))
 		delete(t.actions, key)
-		return true, kickReason
+		return true
 	}
 
-	return false, ""
+	return false
 }
 
-func (t *GhostSpamTracker) KickPlayer(ctx context.Context, targetUserID string, reason string) error {
-	count, err := DisconnectUserID(ctx, t.nk, targetUserID, true, true, false)
-	if err != nil {
-		return fmt.Errorf("failed to disconnect user: %w", err)
-	}
-
-	t.logger.Info("Player kicked due to ghost spam",
-		zap.String("target_user_id", targetUserID),
-		zap.Int("sessions_disconnected", count),
-		zap.String("reason", reason))
-
-	return nil
-}
-
-func (t *GhostSpamTracker) FindUserIDByEvrID(ctx context.Context, evrID evr.EvrId) (string, error) {
+// FindUserIDByEvrID resolves an EvrId to a Nakama user ID via the Profiles storage index.
+func (t *SpamTracker) FindUserIDByEvrID(ctx context.Context, evrID evr.EvrId) (string, error) {
 	storageObjects, _, err := t.nk.StorageIndexList(ctx, "", "Profiles", fmt.Sprintf("+value.server.xplatformid:%s", evrID.String()), 1, nil, "")
 	if err != nil || storageObjects == nil || len(storageObjects.GetObjects()) == 0 {
 		return "", fmt.Errorf("failed to find user by EVR ID %s: %w", evrID.String(), err)
 	}
 	return storageObjects.GetObjects()[0].GetUserId(), nil
+}
+
+// BuildMatchContext gathers the operator's current match ID and the other
+// players in that match, for inclusion in enforcement notes.
+func (t *SpamTracker) BuildMatchContext(ctx context.Context, operatorEvrID evr.EvrId) (matchID string, otherPlayers []string) {
+	matchIDs, err := MatchIDsByEvrID(ctx, t.nk, operatorEvrID)
+	if err != nil || len(matchIDs) == 0 {
+		return "", nil
+	}
+
+	mid := matchIDs[0]
+	matchID = mid.String()
+
+	label, err := MatchLabelByID(ctx, t.nk, mid)
+	if err != nil || label == nil {
+		return matchID, nil
+	}
+
+	for _, player := range label.Players {
+		otherPlayers = append(otherPlayers, fmt.Sprintf("%s (%s)", player.DisplayName, player.EvrID.Token()))
+	}
+	return matchID, otherPlayers
+}
+
+// FormatNotes creates the enforcement/audit note with match context.
+func FormatSpamNote(actionType SpamActionType, targetEvrID evr.EvrId, matchID string, otherPlayers []string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Auto-%s spam: %s targeted %d times in %v",
+		actionType, targetEvrID.Token(), SpamActionThreshold, SpamActionWindow))
+
+	if matchID != "" {
+		sb.WriteString(fmt.Sprintf("\nMatch: %s", matchID))
+	}
+	if len(otherPlayers) > 0 {
+		sb.WriteString(fmt.Sprintf("\nOther players in match: %s", strings.Join(otherPlayers, ", ")))
+	}
+	return sb.String()
 }

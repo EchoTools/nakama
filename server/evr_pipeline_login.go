@@ -1027,44 +1027,26 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	}
 
 	profile.LegalConsents = update.LegalConsents
+
+	// Determine if this user is an enforcer (global operator or guild enforcer).
+	isEnforcer := params.isGlobalOperator
+	if !isEnforcer {
+		if gg, ok := params.guildGroups[groupID]; ok {
+			isEnforcer = gg.IsEnforcer(userID)
+		}
+	}
+
+	if isEnforcer {
+		p.trackSpamActions(ctx, logger, params, groupID, userID, SpamActionGhost,
+			profile.GhostedPlayers, update.GhostedPlayers.Players)
+		p.trackSpamActions(ctx, logger, params, groupID, userID, SpamActionMute,
+			profile.MutedPlayers, update.MutedPlayers.Players)
+	}
+
 	profile.GhostedPlayers = update.GhostedPlayers.Players
 	profile.MutedPlayers = update.MutedPlayers.Players
 	profile.NewUnlocks = update.NewUnlocks
 	profile.CustomizationPOIs = update.Customization
-
-	if len(update.GhostedPlayers.Players) > 0 && params.isGlobalOperator {
-		newlyGhosted := findNewlyAddedPlayers(profile.GhostedPlayers, update.GhostedPlayers.Players)
-
-		for _, targetEvrID := range newlyGhosted {
-			shouldKick, kickReason := p.ghostSpamTracker.TrackGhostAction(ctx, userID, targetEvrID, params.isGlobalOperator)
-
-			if shouldKick {
-				targetUserID, err := p.ghostSpamTracker.FindUserIDByEvrID(ctx, targetEvrID)
-				if err != nil {
-					logger.Warn("Failed to find user ID for ghost spam kick",
-						zap.String("operator_id", userID),
-						zap.String("target_evr_id", targetEvrID.String()),
-						zap.Error(err))
-					continue
-				}
-
-				go func(uid string, reason string) {
-					if err := p.ghostSpamTracker.KickPlayer(ctx, uid, reason); err != nil {
-						logger.Error("Failed to kick player for ghost spam",
-							zap.String("operator_id", userID),
-							zap.String("target_user_id", uid),
-							zap.Error(err))
-					} else {
-						if _, err := p.appBot.LogAuditMessage(ctx, groupID,
-							fmt.Sprintf("🚫 **Auto-kick**: Global operator <@%s> ghosted player `%s` (%s) %d times in %v - player automatically kicked.",
-								params.DiscordID(), targetEvrID.String(), uid, GhostSpamThreshold, GhostSpamWindow), false); err != nil {
-							logger.Warn("Failed to log ghost spam kick audit", zap.Error(err))
-						}
-					}
-				}(targetUserID, kickReason)
-			}
-		}
-	}
 
 	if err := EVRProfileUpdate(ctx, p.nk, userID, profile); err != nil {
 		return fmt.Errorf("failed to update account profile: %w", err)
@@ -1088,6 +1070,113 @@ func findNewlyAddedPlayers(oldList, newList []evr.EvrId) []evr.EvrId {
 		}
 	}
 	return newlyAdded
+}
+
+// trackSpamActions detects repeated ghost or mute actions by an enforcer
+// against the same target. Ghost spam → 1h suspension; mute spam → kick (no suspension).
+func (p *EvrPipeline) trackSpamActions(
+	ctx context.Context,
+	logger *zap.Logger,
+	params SessionParameters,
+	groupID string,
+	operatorUserID string,
+	actionType SpamActionType,
+	oldList, newList []evr.EvrId,
+) {
+	newlyAdded := findNewlyAddedPlayers(oldList, newList)
+	if len(newlyAdded) == 0 {
+		return
+	}
+
+	for _, targetEvrID := range newlyAdded {
+		if !p.spamTracker.TrackAction(operatorUserID, targetEvrID, actionType) {
+			continue
+		}
+
+		targetUserID, err := p.spamTracker.FindUserIDByEvrID(ctx, targetEvrID)
+		if err != nil {
+			logger.Warn("Failed to resolve target user for spam action",
+				zap.String("action_type", string(actionType)),
+				zap.String("operator_id", operatorUserID),
+				zap.String("target_evr_id", targetEvrID.String()),
+				zap.Error(err))
+			continue
+		}
+
+		matchID, otherPlayers := p.spamTracker.BuildMatchContext(ctx, params.xpID)
+		note := FormatSpamNote(actionType, targetEvrID, matchID, otherPlayers)
+
+		go func(targetUID string, note string) {
+			switch actionType {
+			case SpamActionGhost:
+				p.applyGhostSpamSuspension(ctx, logger, targetUID, operatorUserID, params.DiscordID(), groupID, note)
+			case SpamActionMute:
+				p.applyMuteSpamKick(ctx, logger, targetUID, operatorUserID, params.DiscordID(), groupID, note)
+			}
+		}(targetUserID, note)
+	}
+}
+
+// applyGhostSpamSuspension suspends the target for GhostSuspendDuration (1h)
+// and writes an enforcement journal record.
+func (p *EvrPipeline) applyGhostSpamSuspension(
+	ctx context.Context,
+	logger *zap.Logger,
+	targetUserID, operatorUserID, operatorDiscordID, groupID, note string,
+) {
+	journal := NewGuildEnforcementJournal(targetUserID)
+	if err := StorableRead(ctx, p.nk, targetUserID, journal, false); err != nil {
+		logger.Error("Failed to read enforcement journal for ghost spam suspension",
+			zap.String("target_user_id", targetUserID),
+			zap.Error(err))
+		// Continue with empty journal
+	}
+
+	journal.AddRecord(groupID, operatorUserID, operatorDiscordID,
+		"Automated suspension: repeated ghost spam", note,
+		false, false, GhostSuspendDuration)
+
+	if err := SyncJournalAndProfileWithRetry(ctx, p.nk, targetUserID, journal); err != nil {
+		logger.Error("Failed to save ghost spam suspension",
+			zap.String("target_user_id", targetUserID),
+			zap.Error(err))
+		return
+	}
+
+	SuspendConnectedUser(ctx, logger, p.nk, p.sessionRegistry, targetUserID)
+
+	if _, err := p.appBot.LogAuditMessage(ctx, groupID,
+		fmt.Sprintf("🚫 **Auto-suspend (1h)**: Enforcer <@%s> ghost-spammed player `%s` — %s",
+			operatorDiscordID, targetUserID, note), false); err != nil {
+		logger.Warn("Failed to log ghost spam suspension audit", zap.Error(err))
+	}
+}
+
+// applyMuteSpamKick kicks the target (no suspension) when mute spam is detected.
+func (p *EvrPipeline) applyMuteSpamKick(
+	ctx context.Context,
+	logger *zap.Logger,
+	targetUserID, operatorUserID, operatorDiscordID, groupID, note string,
+) {
+	count, err := DisconnectUserID(ctx, p.nk, targetUserID, true, true, false)
+	if err != nil {
+		logger.Error("Failed to kick player for mute spam",
+			zap.String("operator_id", operatorUserID),
+			zap.String("target_user_id", targetUserID),
+			zap.Error(err))
+		return
+	}
+
+	logger.Info("Player kicked due to mute spam",
+		zap.String("target_user_id", targetUserID),
+		zap.Int("sessions_disconnected", count),
+		zap.String("note", note))
+
+	if _, err := p.appBot.LogAuditMessage(ctx, groupID,
+		fmt.Sprintf("👢 **Auto-kick**: Enforcer <@%s> mute-spammed player `%s` — %s",
+			operatorDiscordID, targetUserID, note), false); err != nil {
+		logger.Warn("Failed to log mute spam kick audit", zap.Error(err))
+	}
 }
 
 func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
