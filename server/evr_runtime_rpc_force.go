@@ -10,10 +10,13 @@ import (
 )
 
 func CheckForceUserRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	queryParameters := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
+	queryParameters, ok := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
+	if !ok {
+		return "", runtime.NewError("missing query parameters", StatusInvalidArgument)
+	}
 
 	loginSessionID := ""
-	if v, ok := queryParameters["login_session_id"]; !ok {
+	if v, ok := queryParameters["login_session_id"]; !ok || len(v) == 0 {
 		return "", runtime.NewError("missing login session id", StatusInvalidArgument)
 	} else {
 		loginSessionID = strings.ToLower(v[0])

@@ -97,8 +97,7 @@ var (
 type Symbol uint64
 
 func (s Symbol) HexString() string {
-	str := strconv.FormatUint(uint64(s), 16)
-	return fmt.Sprintf("0x%016s", str)
+	return fmt.Sprintf("0x%016x", uint64(s))
 }
 
 // A symbol token is a symbol converted to a string.

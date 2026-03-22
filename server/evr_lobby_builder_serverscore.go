@@ -168,23 +168,38 @@ func VRMLServerScore(latencies [][]float64, minRTT, maxRTT, thresholdRTT float64
 	// Sum difference points
 	blueSum, orangeSum := floats.Sum(latencies[0]), floats.Sum(latencies[1])
 	sumDiff := math.Abs(blueSum - orangeSum)
-	sumPoints := (1 - (sumDiff / maxSumDiff)) * pointsDistro[0]
+	var sumPoints float64
+	if maxSumDiff > 0 {
+		sumPoints = (1 - (sumDiff / maxSumDiff)) * pointsDistro[0]
+	}
 
 	allRTTs := append(latencies[0], latencies[1]...)
 
 	// Team variance points
-	meanVar := floats.Sum(allRTTs) / float64(len(allRTTs))
+	var meanVar float64
+	if len(allRTTs) > 0 {
+		meanVar = floats.Sum(allRTTs) / float64(len(allRTTs))
+	}
 
-	teamPoints := (1 - (meanVar / maxTeamVariance)) * pointsDistro[1]
+	var teamPoints float64
+	if maxTeamVariance > 0 {
+		teamPoints = (1 - (meanVar / maxTeamVariance)) * pointsDistro[1]
+	}
 
 	serverVar := stat.Variance(allRTTs, nil)
-	serverPoints := (1 - (serverVar / maxServerVar)) * pointsDistro[2]
+	var serverPoints float64
+	if maxServerVar > 0 {
+		serverPoints = (1 - (serverVar / maxServerVar)) * pointsDistro[2]
+	}
 
 	lobbySize := float64(teamSize) * 2
 
 	// High/low ping points
-	hilo := ((blueSum + orangeSum) - (minRTT * lobbySize)) / ((thresholdRTT * lobbySize) - (minRTT * lobbySize))
-	hiloPoints := (1 - hilo) * pointsDistro[3]
+	var hiloPoints float64
+	if hiloDivisor := (thresholdRTT * lobbySize) - (minRTT * lobbySize); hiloDivisor > 0 {
+		hilo := ((blueSum + orangeSum) - (minRTT * lobbySize)) / hiloDivisor
+		hiloPoints = (1 - hilo) * pointsDistro[3]
+	}
 
 	// Final score
 	finalScore := floats.Sum([]float64{sumPoints, teamPoints, serverPoints, hiloPoints})

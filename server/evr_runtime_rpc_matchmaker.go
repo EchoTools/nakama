@@ -146,6 +146,9 @@ func BuildMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 	if err != nil {
 		return "", err
 	}
+	if match == nil {
+		return "", runtime.NewError("match not found", StatusNotFound)
+	}
 
 	response := BuildMatchResponse{
 		Label: []byte(match.GetLabel().GetValue()),

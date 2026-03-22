@@ -259,7 +259,7 @@ func (h *RPCHandler) LeaderboardHaystackRPC(ctx context.Context, logger runtime.
 			Subscore:    r.Subscore,
 			Rank:        r.Rank,
 			CreateTime:  r.CreateTime.GetSeconds(),
-			UpdateTime:  r.CreateTime.GetSeconds(),
+			UpdateTime:  r.UpdateTime.GetSeconds(),
 			ExpiryTime:  r.ExpiryTime.GetSeconds(),
 			Metadata:    json.RawMessage(r.Metadata),
 		}
@@ -278,7 +278,7 @@ func (h *RPCHandler) LeaderboardHaystackRPC(ctx context.Context, logger runtime.
 			Subscore:    r.Subscore,
 			Rank:        r.Rank,
 			CreateTime:  r.CreateTime.GetSeconds(),
-			UpdateTime:  r.CreateTime.GetSeconds(),
+			UpdateTime:  r.UpdateTime.GetSeconds(),
 			ExpiryTime:  r.ExpiryTime.GetSeconds(),
 			Metadata:    json.RawMessage(r.Metadata),
 		}
