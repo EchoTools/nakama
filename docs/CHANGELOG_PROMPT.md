@@ -71,7 +71,7 @@ All release notes use this structure. Group changes by TOPIC (e.g. "Matchmaking"
 All release notes EXCEPT the full changelog (Release Notes 7) must include this footer at the very end:
 
 ```
--# [Full Changelog](https://discord.com/channels/1179666360863817749/1485036740820472080) · [Invite](https://discord.gg/XU5pkvQUpc)
+-# [Full Changelog](https://discord.com/channels/1179666360863817749/1485036740820472080)
 ```
 
 #### Release Notes 1: Players (#release-notes)
@@ -91,7 +91,7 @@ Player-focused. Only `player` category items. This is the public-facing release 
 
 * **<Title>:** <Description>
 
--# [Full Changelog](https://discord.com/channels/1179666360863817749/1485036740820472080) · [Invite](https://discord.gg/XU5pkvQUpc)
+-# [Full Changelog](https://discord.com/channels/1179666360863817749/1485036740820472080)
 ```
 
 Keep it concise — players don't care about internal details. Group small fixes where appropriate.
@@ -113,7 +113,7 @@ ALL categories included. Full technical detail. This is the most comprehensive r
 
 * **<Title>:** <Technical description — can use code references, protocol details, architecture notes>
 
--# [Full Changelog](https://discord.com/channels/1179666360863817749/1485036740820472080) · [Invite](https://discord.gg/XU5pkvQUpc)
+-# [Full Changelog](https://discord.com/channels/1179666360863817749/1485036740820472080)
 ```
 
 The technical section CAN and SHOULD use technical language. Include refactors, protocol changes, migration changes, binary format changes, etc.
@@ -131,7 +131,7 @@ The technical section CAN and SHOULD use technical language. Include refactors, 
 
 * **<Title>:** <Description focused on what changed from an integration/API perspective>
 
--# [Full Changelog](https://discord.com/channels/1179666360863817749/1485036740820472080) · [Invite](https://discord.gg/XU5pkvQUpc)
+-# [Full Changelog](https://discord.com/channels/1179666360863817749/1485036740820472080)
 ```
 
 If there are no app-developer-specific changes, say so: "No app-developer-facing changes in this release."
@@ -149,7 +149,7 @@ Include `player`, `operator`, and `enforcer` categories. Focus on management too
 
 * **<Title>:** <Description focused on how this affects server management and moderation>
 
--# [Full Changelog](https://discord.com/channels/1179666360863817749/1485036740820472080) · [Invite](https://discord.gg/XU5pkvQUpc)
+-# [Full Changelog](https://discord.com/channels/1179666360863817749/1485036740820472080)
 ```
 
 #### Release Notes 5: Competitive Server Hosts / Allocators / Coordinators
@@ -165,7 +165,7 @@ Include `player`, `enforcer`, and `competitive` categories. Tailored for people 
 
 * **<Title>:** <Description focused on how this affects competitive hosting, match allocation, or coordination>
 
--# [Full Changelog](https://discord.com/channels/1179666360863817749/1485036740820472080) · [Invite](https://discord.gg/XU5pkvQUpc)
+-# [Full Changelog](https://discord.com/channels/1179666360863817749/1485036740820472080)
 ```
 
 If there are no competitive-relevant changes, say so: "No competitive hosting changes in this release."
@@ -180,7 +180,7 @@ If there are no competitive-relevant changes, say so: "No competitive hosting ch
 * <Short one-line description of enforcer-relevant change>
 * <Short one-line description>
 
--# [Full Changelog](https://discord.com/channels/1179666360863817749/1485036740820472080) · [Invite](https://discord.gg/XU5pkvQUpc)
+-# [Full Changelog](https://discord.com/channels/1179666360863817749/1485036740820472080)
 ```
 
 If there are no enforcer-specific changes, say so: "No enforcer-specific changes in this release."
