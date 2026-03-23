@@ -1481,6 +1481,7 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 		logger.Warn("Profile does not exist in storage.", zap.String("evrId", request.EvrId.String()))
 		return nil
 	}
+
 	/*
 		// If this user is an Enforcer let them see how many times that player has been reported in the past week
 		params, ok := LoadParams(ctx)
