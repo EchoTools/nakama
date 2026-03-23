@@ -197,6 +197,9 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			},
 		},
 
+		// Admin impersonation - Global developers only
+		{ID: "admin/impersonate", Handler: ImpersonateRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{GroupGlobalDevelopers}}},
+
 		// EVR service status
 		{ID: "evr/servicestatus", Handler: rpcHandler.ServiceStatusRPC, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
 		{ID: "healthcheck", Handler: HealthCheckRPC, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
