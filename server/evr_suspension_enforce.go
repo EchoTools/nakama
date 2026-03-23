@@ -9,6 +9,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 )
 
@@ -54,30 +55,56 @@ func EnforceGuildSuspension(
 		return
 	}
 
-	logger.Info("Enforcing guild suspension — kicking from match",
+	logger.Info("Enforcing guild suspension — kicking from all matches and servers",
 		zap.String("user_id", userID),
 		zap.Int("session_count", len(sessions)))
 
-	// Kick from match (if in one). Fire-and-forget goroutine.
+	// Send lobby status notification and kick from all matches. Fire-and-forget goroutine.
 	go func() {
+		kicked := make(map[string]bool)
 		for _, ws := range sessions {
 			matchID, _, err := GetMatchIDBySessionID(nk, ws.ID())
 			if err != nil || matchID.IsNil() {
 				continue
 			}
+			mid := matchID.String()
+			if kicked[mid] {
+				continue
+			}
+			kicked[mid] = true
+
+			// Send a LobbyStatusNotify so the player sees the kick reason.
+			SendLobbyStatusNotify(ws, matchID.UUID, "Suspended from guild", time.Time{}, evr.StatusUpdateKicked)
+
 			if err := KickPlayerFromMatch(ctx, nk, matchID, userID); err != nil {
 				logger.Warn("Failed to kick suspended user from match",
 					zap.String("user_id", userID),
-					zap.String("match_id", matchID.String()),
+					zap.String("match_id", mid),
 					zap.Error(err))
 			} else {
 				logger.Info("Kicked suspended user from match",
 					zap.String("user_id", userID),
-					zap.String("match_id", matchID.String()))
+					zap.String("match_id", mid))
 			}
-			break // Only need to kick from one match
 		}
 	}()
+}
+
+// SendLobbyStatusNotify sends a LobbyStatusNotifyv2 message to a player session.
+// The message is displayed in the game UI via the lobby status script expression.
+func SendLobbyStatusNotify(session *sessionWS, channel uuid.UUID, message string, expiry time.Time, reason evr.StatusUpdateReason) {
+	if session == nil {
+		return
+	}
+	if expiry.IsZero() {
+		expiry = time.Now().Add(24 * time.Hour)
+	}
+	msg := evr.NewLobbyStatusNotifyv2(channel, message, expiry, reason)
+	if err := session.SendEvr(msg); err != nil {
+		session.logger.Warn("Failed to send LobbyStatusNotify",
+			zap.String("channel", channel.String()),
+			zap.Error(err))
+	}
 }
 
 // GetMatchIDBySessionID looks up the current match for a session via the service stream.
