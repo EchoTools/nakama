@@ -28,6 +28,8 @@ func defaultSecurityCapabilities() map[string]bool {
 		"enforcement.kick":         false,
 		"enforcement.journals":     false,
 		"enforcement.edit":         false,
+		"earlyquit.view":           false,
+		"earlyquit.modify":         false,
 		"player.kick":              false,
 		"player.setnextmatch":      false,
 		"player.lookup":            false,
@@ -159,6 +161,8 @@ func SecurityManifestRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	resp.Capabilities["enforcement.kick"] = isOperator || isEnforcer
 	resp.Capabilities["enforcement.journals"] = isOperator || isOwner || isAuditor || isEnforcer
 	resp.Capabilities["enforcement.edit"] = isOperator || isEnforcer
+	resp.Capabilities["earlyquit.view"] = isOperator || isEnforcer
+	resp.Capabilities["earlyquit.modify"] = isOperator || isEnforcer
 
 	resp.Capabilities["player.kick"] = isOperator || isEnforcer
 	resp.Capabilities["player.setnextmatch"] = isOperator || isAuditor || isEnforcer

@@ -60,11 +60,11 @@ type WhoAmI struct {
 	journal             *GuildEnforcementJournal
 	activeSuspensions   ActiveGuildEnforcements
 	potentialAlternates map[string]*api.Account
-	earlyQuitConfig     *EarlyQuitConfig
+	earlyQuitConfig     *EarlyQuitPlayerState
 	opts                UserProfileRequestOptions
 }
 
-func NewWhoAmI(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, cache *DiscordIntegrator, profile *EVRProfile, loginHistory *LoginHistory, matchmakingSettings *MatchmakingSettings, guildGroups map[string]*GuildGroup, displayNameHistory *DisplayNameHistory, journal *GuildEnforcementJournal, potentialAlternates map[string]*api.Account, activeSuspensions ActiveGuildEnforcements, earlyQuitConfig *EarlyQuitConfig, opts UserProfileRequestOptions, groupID string) *WhoAmI {
+func NewWhoAmI(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, cache *DiscordIntegrator, profile *EVRProfile, loginHistory *LoginHistory, matchmakingSettings *MatchmakingSettings, guildGroups map[string]*GuildGroup, displayNameHistory *DisplayNameHistory, journal *GuildEnforcementJournal, potentialAlternates map[string]*api.Account, activeSuspensions ActiveGuildEnforcements, earlyQuitConfig *EarlyQuitPlayerState, opts UserProfileRequestOptions, groupID string) *WhoAmI {
 
 	return &WhoAmI{
 		GroupID: groupID,
@@ -739,7 +739,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	matchmakingSettings = &settings
 
 	// Load early quit config
-	earlyQuitConfig := NewEarlyQuitConfig()
+	earlyQuitConfig := NewEarlyQuitPlayerState()
 	if err := StorableRead(ctx, nk, targetID, earlyQuitConfig, true); err != nil {
 		if status.Code(err) != codes.NotFound {
 			logger.WithField("error", err).Warn("failed to load early quit config")

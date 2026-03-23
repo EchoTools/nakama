@@ -791,7 +791,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 			metadataUpdated = true
 		}
 	}
-	eqconfig := NewEarlyQuitConfig()
+	eqconfig := NewEarlyQuitPlayerState()
 	if err := StorableRead(ctx, p.nk, params.profile.ID(), eqconfig, true); err != nil {
 		logger.Warn("Failed to load early quitter config", zap.Error(err))
 	} else {
@@ -923,13 +923,14 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 
 	if params.earlyQuitConfig != nil {
 		if cfg := params.earlyQuitConfig.Load(); cfg != nil {
-			level := cfg.EarlyQuitPenaltyLevel
-			lockoutDuration := GetLockoutDuration(int(level))
-			penaltyEndTime := cfg.LastEarlyQuitTime.Add(lockoutDuration)
-
-			if time.Now().Before(penaltyEndTime) {
-				clientProfile.EarlyQuitFeatures.PenaltyLevel = int(level)
-				clientProfile.EarlyQuitFeatures.PenaltyTimestamp = penaltyEndTime.Unix()
+			// Populate all 6 binary profile fields
+			clientProfile.EarlyQuitFeatures = evr.EarlyQuitFeatures{
+				PenaltyTimestamp:    cfg.PenaltyTimestamp,
+				NumEarlyQuits:       int(cfg.NumEarlyQuits),
+				NumSteadyMatches:    int(cfg.NumSteadyMatches),
+				NumSteadyEarlyQuits: int(cfg.NumSteadyEarlyQuits),
+				PenaltyLevel:        int(cfg.PenaltyLevel),
+				SteadyPlayerLevel:   int(cfg.SteadyPlayerLevel),
 			}
 		}
 	}

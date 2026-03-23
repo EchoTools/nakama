@@ -11,7 +11,7 @@ import (
 // 3. Tier transitions trigger appropriate state changes
 func TestEarlyQuitTierIntegration(t *testing.T) {
 	t.Run("EarlyQuit triggers tier degradation", func(t *testing.T) {
-		config := NewEarlyQuitConfig()
+		config := NewEarlyQuitPlayerState()
 
 		// Start in Tier 1
 		oldTier, newTier, changed := config.UpdateTier(ptrInt32(0))
@@ -19,8 +19,9 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 			t.Fatalf("Expected initial tier to be Tier 1, got %d", newTier)
 		}
 
-		// Simulate early quit
+		// Simulate early quit (caller resolves penalty level)
 		config.IncrementEarlyQuit()
+		config.PenaltyLevel = 1
 
 		// Check tier change
 		oldTier, newTier, changed = config.UpdateTier(ptrInt32(0))
@@ -39,10 +40,10 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 	})
 
 	t.Run("CompletedMatch triggers tier recovery", func(t *testing.T) {
-		config := NewEarlyQuitConfig()
+		config := NewEarlyQuitPlayerState()
 
 		// Start in Tier 2 (penalty level 1)
-		config.EarlyQuitPenaltyLevel = 1
+		config.PenaltyLevel = 1
 		config.MatchmakingTier = MatchmakingTier2
 
 		// Verify starting tier
@@ -51,8 +52,9 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 			t.Fatalf("Expected starting tier to be Tier 2, got %d", tier)
 		}
 
-		// Simulate completed match
+		// Simulate completed match (caller resolves penalty level)
 		config.IncrementCompletedMatches()
+		config.PenaltyLevel = 0
 
 		// Check tier change
 		oldTier, newTier, changed := config.UpdateTier(ptrInt32(0))
@@ -71,14 +73,16 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 	})
 
 	t.Run("Multiple early quits keep player in Tier 2", func(t *testing.T) {
-		config := NewEarlyQuitConfig()
+		config := NewEarlyQuitPlayerState()
 
-		// First early quit
+		// First early quit (caller resolves penalty level)
 		config.IncrementEarlyQuit()
+		config.PenaltyLevel = 1
 		_, tier1, _ := config.UpdateTier(ptrInt32(0))
 
-		// Second early quit
+		// Second early quit (caller resolves penalty level)
 		config.IncrementEarlyQuit()
+		config.PenaltyLevel = 2
 		oldTier, tier2, changed := config.UpdateTier(ptrInt32(0))
 
 		if tier1 != MatchmakingTier2 || tier2 != MatchmakingTier2 {
@@ -93,10 +97,10 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 	})
 
 	t.Run("Custom tier threshold changes tier boundaries", func(t *testing.T) {
-		config := NewEarlyQuitConfig()
+		config := NewEarlyQuitPlayerState()
 
 		// With threshold 1, penalty level 1 should keep player in Tier 1
-		config.EarlyQuitPenaltyLevel = 1
+		config.PenaltyLevel = 1
 		_, tier, _ := config.UpdateTier(ptrInt32(1))
 		if tier != MatchmakingTier1 {
 			t.Errorf("With threshold 1, penalty 1 should be Tier 1, got tier %d", tier)
@@ -110,7 +114,7 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 	})
 
 	t.Run("Tier change updates LastTierChange timestamp", func(t *testing.T) {
-		config := NewEarlyQuitConfig()
+		config := NewEarlyQuitPlayerState()
 
 		// Initial tier setting
 		config.UpdateTier(ptrInt32(0))
@@ -118,8 +122,9 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 			t.Error("LastTierChange should be zero initially even after first UpdateTier call")
 		}
 
-		// Trigger tier change
+		// Trigger tier change (caller resolves penalty level)
 		config.IncrementEarlyQuit()
+		config.PenaltyLevel = 1
 		_, _, changed := config.UpdateTier(ptrInt32(0))
 
 		if !changed {
@@ -131,12 +136,13 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 	})
 
 	t.Run("Tier workflow with max penalty", func(t *testing.T) {
-		config := NewEarlyQuitConfig()
+		config := NewEarlyQuitPlayerState()
 
-		// Increment to max penalty
+		// Increment to max penalty (caller sets penalty level)
 		for i := 0; i <= int(MaxEarlyQuitPenaltyLevel); i++ {
 			config.IncrementEarlyQuit()
 		}
+		config.PenaltyLevel = MaxEarlyQuitPenaltyLevel
 
 		// Should be in Tier 2
 		_, tier, _ := config.UpdateTier(ptrInt32(0))
@@ -144,19 +150,19 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 			t.Errorf("Expected Tier 2 at max penalty, got tier %d", tier)
 		}
 
-		// Verify penalty is capped
-		if config.EarlyQuitPenaltyLevel != MaxEarlyQuitPenaltyLevel {
-			t.Errorf("Expected penalty to be capped at %d, got %d", MaxEarlyQuitPenaltyLevel, config.EarlyQuitPenaltyLevel)
+		// Verify penalty is at max
+		if config.PenaltyLevel != MaxEarlyQuitPenaltyLevel {
+			t.Errorf("Expected penalty to be at %d, got %d", MaxEarlyQuitPenaltyLevel, config.PenaltyLevel)
 		}
 	})
 
 	t.Run("Tier workflow with min penalty", func(t *testing.T) {
-		config := NewEarlyQuitConfig()
+		config := NewEarlyQuitPlayerState()
 
-		// Start with some penalty
-		config.EarlyQuitPenaltyLevel = 2
+		// Start with some penalty, then resolve to minimum (caller sets penalty level)
+		config.PenaltyLevel = MinEarlyQuitPenaltyLevel
 
-		// Complete matches to go below zero
+		// Complete matches
 		for i := 0; i < 5; i++ {
 			config.IncrementCompletedMatches()
 		}
@@ -168,8 +174,8 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 		}
 
 		// Verify penalty is floored
-		if config.EarlyQuitPenaltyLevel != MinEarlyQuitPenaltyLevel {
-			t.Errorf("Expected penalty to be floored at %d, got %d", MinEarlyQuitPenaltyLevel, config.EarlyQuitPenaltyLevel)
+		if config.PenaltyLevel != MinEarlyQuitPenaltyLevel {
+			t.Errorf("Expected penalty to be floored at %d, got %d", MinEarlyQuitPenaltyLevel, config.PenaltyLevel)
 		}
 	})
 }

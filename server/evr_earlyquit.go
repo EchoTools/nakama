@@ -3,11 +3,13 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"sync"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 const (
@@ -36,50 +38,142 @@ var EarlyQuitLockoutDurations = map[int]time.Duration{
 	3: 900 * time.Second, // 15 minutes
 }
 
-type EarlyQuitConfig struct {
-	sync.Mutex
-	EarlyQuitPenaltyLevel      int32     `json:"early_quit_penalty_level"`
-	LastEarlyQuitTime          time.Time `json:"last_early_quit_time"`
-	LastEarlyQuitMatchID       MatchID   `json:"last_early_quit_match_id"`
-	TotalEarlyQuits            int32     `json:"total_early_quits"`
+// EarlyQuitGuildOverride stores per-guild enforcer overrides for a player's
+// early quit behavior. These are set via the earlyquit/modify RPC.
+type EarlyQuitGuildOverride struct {
+	Exempt         bool   `json:"exempt"`                    // Exempt from early quit tracking in this guild
+	PenaltyLevel   *int32 `json:"penalty_level,omitempty"`   // Override penalty level (nil = use global)
+	ModeratorNotes string `json:"moderator_notes,omitempty"` // Internal enforcer notes
+}
+
+type EarlyQuitPlayerState struct {
+	sync.Mutex `json:"-"`
+
+	// Binary-aligned fields (match earlyquit| profile keys)
+	PenaltyTimestamp    int64 `json:"penalty_ts"`              // Absolute expiry timestamp (unix seconds), -1 = none
+	NumEarlyQuits       int32 `json:"num_early_quits"`         // Accumulating early quit count
+	NumSteadyMatches    int32 `json:"num_steady_matches"`      // Matches counted toward steady player status
+	NumSteadyEarlyQuits int32 `json:"num_steady_early_quits"`  // Quits counted toward steady player status
+	PenaltyLevel        int32 `json:"penalty_level"`           // Resolved from config (clamped uint8)
+	SteadyPlayerLevel   int32 `json:"steady_player_level"`     // Resolved from config (clamped uint8)
+
+	// Nakama extensions (kept for matchmaker/UI compat)
 	TotalCompletedMatches      int32     `json:"total_completed_matches"`
-	PlayerReliabilityRating    float64   `json:"player_reliability_rating"`
 	MatchmakingTier            int32     `json:"matchmaking_tier"`
+	LastEarlyQuitMatchID       MatchID   `json:"last_early_quit_match_id"`
 	LastTierChange             time.Time `json:"last_tier_change"`
 	LastExpiryNotificationSent time.Time `json:"last_expiry_notification_sent"`
+
+	// Guild-scoped overrides (per guild)
+	GuildOverrides map[string]*EarlyQuitGuildOverride `json:"guild_overrides,omitempty"`
 
 	version string
 }
 
-func CalculatePlayerReliabilityRating(earlyQuits, completedMatches int32) float64 {
-	totalMatches := earlyQuits + completedMatches
-	if totalMatches == 0 {
-		return 1.0 // Default reliability rating when no matches played
-	}
-	return float64(completedMatches) / float64(totalMatches)
+// earlyQuitPlayerStateLegacy is used to detect and migrate old storage format.
+type earlyQuitPlayerStateLegacy struct {
+	EarlyQuitPenaltyLevel int32     `json:"early_quit_penalty_level"`
+	LastEarlyQuitTime     time.Time `json:"last_early_quit_time"`
+	TotalEarlyQuits       int32     `json:"total_early_quits"`
 }
 
-// GetLockoutDuration returns the lockout duration for a given penalty level
+// UnmarshalJSON handles backward-compatible deserialization from old storage format.
+func (s *EarlyQuitPlayerState) UnmarshalJSON(data []byte) error {
+	// First try the new format (aliased struct to avoid recursion)
+	type Alias EarlyQuitPlayerState
+	aux := &struct {
+		*Alias
+
+		// Old field names for migration
+		OldPenaltyLevel int32     `json:"early_quit_penalty_level"`
+		OldLastQuitTime time.Time `json:"last_early_quit_time"`
+		OldTotalQuits   int32     `json:"total_early_quits"`
+		OldReliability  float64   `json:"player_reliability_rating"`
+	}{
+		Alias: (*Alias)(s),
+	}
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Migrate from old format if new fields are zero but old fields are present
+	if s.NumEarlyQuits == 0 && aux.OldTotalQuits > 0 {
+		s.NumEarlyQuits = aux.OldTotalQuits
+	}
+	if s.PenaltyLevel == 0 && aux.OldPenaltyLevel != 0 {
+		s.PenaltyLevel = aux.OldPenaltyLevel
+	}
+	if s.PenaltyTimestamp == 0 && !aux.OldLastQuitTime.IsZero() {
+		// Convert old relative lockout to absolute timestamp
+		lockout := GetLockoutDuration(int(s.PenaltyLevel))
+		s.PenaltyTimestamp = aux.OldLastQuitTime.Add(lockout).Unix()
+	}
+
+	return nil
+}
+
+// ResolvePenaltyLevel determines the penalty level and lockout duration from the
+// config's penalty_levels array, matching the binary's algorithm: find the first
+// level where numQuits >= min AND numQuits <= max.
+func ResolvePenaltyLevel(numQuits int32, cfg *evr.SNSEarlyQuitConfig) (level int32, lockoutSec int32) {
+	if cfg == nil {
+		return 0, 0
+	}
+	for _, pl := range cfg.PenaltyLevels {
+		if int(numQuits) >= pl.MinEarlyQuits && int(numQuits) <= pl.MaxEarlyQuits {
+			return int32(pl.PenaltyLevel), int32(pl.MMLockoutSec)
+		}
+	}
+	// If no level matches (quit count above all ranges), use the highest level
+	if len(cfg.PenaltyLevels) > 0 {
+		last := cfg.PenaltyLevels[len(cfg.PenaltyLevels)-1]
+		return int32(last.PenaltyLevel), int32(last.MMLockoutSec)
+	}
+	return 0, 0
+}
+
+// ResolveSteadyPlayerLevel determines the steady player level from the config.
+// Binary algorithm: ratio = (matches - quits) / matches; find level where
+// matches >= min_num_matches AND ratio >= min_steady_ratio.
+func ResolveSteadyPlayerLevel(steadyMatches, steadyEarlyQuits int32, cfg *evr.SNSEarlyQuitConfig) int32 {
+	if cfg == nil || steadyMatches <= 0 {
+		return 0
+	}
+	ratio := float64(steadyMatches-steadyEarlyQuits) / float64(steadyMatches)
+	var best int32
+	for _, sl := range cfg.SteadyPlayerLevels {
+		if int(steadyMatches) >= sl.MinNumMatches && ratio >= sl.MinSteadyRatio {
+			if int32(sl.SteadyPlayerLevel) > best {
+				best = int32(sl.SteadyPlayerLevel)
+			}
+		}
+	}
+	return best
+}
+
+// GetLockoutDuration returns the lockout duration for a given penalty level.
+// Uses the hardcoded fallback map (deprecated — callers should use ResolvePenaltyLevel with config).
 func GetLockoutDuration(penaltyLevel int) time.Duration {
 	duration, ok := EarlyQuitLockoutDurations[penaltyLevel]
 	if !ok {
-		return 0 // Default to no lockout for invalid levels
+		return 0
 	}
 	return duration
 }
 
-// GetLockoutDurationSeconds returns the lockout duration in seconds for a given penalty level
+// GetLockoutDurationSeconds returns the lockout duration in seconds for a given penalty level.
 func GetLockoutDurationSeconds(penaltyLevel int) int32 {
 	return int32(GetLockoutDuration(penaltyLevel).Seconds())
 }
 
-func NewEarlyQuitConfig() *EarlyQuitConfig {
-	return &EarlyQuitConfig{
+func NewEarlyQuitPlayerState() *EarlyQuitPlayerState {
+	return &EarlyQuitPlayerState{
 		MatchmakingTier: MatchmakingTier1,
 	}
 }
 
-func (s *EarlyQuitConfig) StorageMeta() StorableMetadata {
+func (s *EarlyQuitPlayerState) StorageMeta() StorableMetadata {
 	s.Lock()
 	defer s.Unlock()
 	return StorableMetadata{
@@ -91,107 +185,123 @@ func (s *EarlyQuitConfig) StorageMeta() StorableMetadata {
 	}
 }
 
-func (s *EarlyQuitConfig) SetStorageMeta(meta StorableMetadata) {
+func (s *EarlyQuitPlayerState) SetStorageMeta(meta StorableMetadata) {
 	s.Lock()
 	defer s.Unlock()
 	s.version = meta.Version
 }
 
-func (s *EarlyQuitConfig) GetStorageVersion() string {
+func (s *EarlyQuitPlayerState) GetStorageVersion() string {
 	s.Lock()
 	defer s.Unlock()
 	return s.version
 }
 
-func (s *EarlyQuitConfig) IncrementEarlyQuit() {
+// IncrementEarlyQuit records an early quit. Increments counters and re-resolves
+// penalty level from the config. The binary model only increments — no decrement.
+func (s *EarlyQuitPlayerState) IncrementEarlyQuit() {
 	s.Lock()
 	defer s.Unlock()
-	s.LastEarlyQuitTime = time.Now().UTC()
-	s.EarlyQuitPenaltyLevel++
-	if s.EarlyQuitPenaltyLevel > MaxEarlyQuitPenaltyLevel {
-		s.EarlyQuitPenaltyLevel = MaxEarlyQuitPenaltyLevel // Max penalty level
-	}
-	s.TotalEarlyQuits++
-	s.PlayerReliabilityRating = CalculatePlayerReliabilityRating(s.TotalEarlyQuits, s.TotalCompletedMatches)
+	s.NumEarlyQuits++
+	s.NumSteadyEarlyQuits++
+	// PenaltyLevel and PenaltyTimestamp are set by the caller after resolving from config.
 }
 
-func (s *EarlyQuitConfig) IncrementCompletedMatches() {
+// IncrementCompletedMatches records a completed match.
+// In the binary model, completed matches increment steady counters but do NOT
+// decrement the penalty level — penalty is always resolved from quit count.
+func (s *EarlyQuitPlayerState) IncrementCompletedMatches() {
 	s.Lock()
 	defer s.Unlock()
-	s.LastEarlyQuitTime = time.Time{}
-	s.EarlyQuitPenaltyLevel--
-	if s.EarlyQuitPenaltyLevel < MinEarlyQuitPenaltyLevel {
-		s.EarlyQuitPenaltyLevel = MinEarlyQuitPenaltyLevel // Reset penalty level
-	}
 	s.TotalCompletedMatches++
-	s.PlayerReliabilityRating = CalculatePlayerReliabilityRating(s.TotalEarlyQuits, s.TotalCompletedMatches)
+	s.NumSteadyMatches++
+	// PenaltyLevel is re-resolved by the caller from config.
 }
 
-// DecrementPenaltyOnly reduces the early quit penalty level by 1 without affecting match statistics.
-// This should be used when forgiving an early quit for reasons other than completing a match
-// (e.g., player fully logged out after early quit).
-func (s *EarlyQuitConfig) DecrementPenaltyOnly() {
+// ForgiveLastQuit decrements NumEarlyQuits (e.g., player logged out entirely).
+// The binary has no explicit forgiveness mechanism, but this is a nakama extension
+// to handle genuine crashes/network issues.
+func (s *EarlyQuitPlayerState) ForgiveLastQuit() {
 	s.Lock()
 	defer s.Unlock()
-	s.LastEarlyQuitTime = time.Time{}
-	s.EarlyQuitPenaltyLevel--
-	if s.EarlyQuitPenaltyLevel < MinEarlyQuitPenaltyLevel {
-		s.EarlyQuitPenaltyLevel = MinEarlyQuitPenaltyLevel
+	if s.NumEarlyQuits > 0 {
+		s.NumEarlyQuits--
 	}
-	// Note: We do NOT increment TotalCompletedMatches or recalculate PlayerReliabilityRating
-	// because this is a forgiveness mechanism, not a completed match.
+	if s.NumSteadyEarlyQuits > 0 {
+		s.NumSteadyEarlyQuits--
+	}
+	// PenaltyLevel and PenaltyTimestamp are re-resolved by the caller.
 }
 
-func (s *EarlyQuitConfig) GetPenaltyLevel() int {
+// IsPenaltyActive returns true if the penalty lockout has not yet expired.
+func (s *EarlyQuitPlayerState) IsPenaltyActive() bool {
 	s.Lock()
 	defer s.Unlock()
-	return int(s.EarlyQuitPenaltyLevel)
+	return s.PenaltyTimestamp > 0 && time.Now().Unix() < s.PenaltyTimestamp
 }
 
-func (s *EarlyQuitConfig) GetTier() int32 {
+func (s *EarlyQuitPlayerState) GetPenaltyLevel() int {
+	s.Lock()
+	defer s.Unlock()
+	return int(s.PenaltyLevel)
+}
+
+func (s *EarlyQuitPlayerState) GetTier() int32 {
 	s.Lock()
 	defer s.Unlock()
 	return s.MatchmakingTier
 }
 
-func (s *EarlyQuitConfig) GetEarlyQuitCount() int32 {
+func (s *EarlyQuitPlayerState) GetEarlyQuitCount() int32 {
 	s.Lock()
 	defer s.Unlock()
-	return s.TotalEarlyQuits
+	return s.NumEarlyQuits
+}
+
+// GetEffectivePenaltyLevel returns the penalty level for a specific guild,
+// checking guild overrides first, falling back to global.
+func (s *EarlyQuitPlayerState) GetEffectivePenaltyLevel(groupID string) int32 {
+	s.Lock()
+	defer s.Unlock()
+	if s.GuildOverrides != nil {
+		if override, ok := s.GuildOverrides[groupID]; ok && override.PenaltyLevel != nil {
+			return *override.PenaltyLevel
+		}
+	}
+	return s.PenaltyLevel
+}
+
+// IsExempt returns true if the player is exempt from early quit tracking in the given guild.
+func (s *EarlyQuitPlayerState) IsExempt(groupID string) bool {
+	s.Lock()
+	defer s.Unlock()
+	if s.GuildOverrides != nil {
+		if override, ok := s.GuildOverrides[groupID]; ok {
+			return override.Exempt
+		}
+	}
+	return false
 }
 
 // UpdateTier updates the matchmaking tier based on the penalty level and tier threshold.
 // Returns (oldTier, newTier, changed) where changed indicates if the tier was modified.
-// If tier1Threshold is nil, defaults to 0 (players with penalty 0 or less are in good standing).
-//
-// Current implementation (Tier 1 and Tier 2 only):
-//   - penalty <= tier1Threshold: Tier 1 (good standing)
-//   - penalty > tier1Threshold: Tier 2 (penalty tier)
-//
-// Future Tier 3+ implementation pattern:
-//   - penalty > tier2Threshold: Tier 3+
-//   - penalty > tier1Threshold: Tier 2
-//   - penalty <= tier1Threshold: Tier 1
-func (s *EarlyQuitConfig) UpdateTier(tier1Threshold *int32) (oldTier, newTier int32, changed bool) {
+func (s *EarlyQuitPlayerState) UpdateTier(tier1Threshold *int32) (oldTier, newTier int32, changed bool) {
 	s.Lock()
 	defer s.Unlock()
 
 	oldTier = s.MatchmakingTier
 
-	// Use default threshold if nil
 	threshold := int32(0)
 	if tier1Threshold != nil {
 		threshold = *tier1Threshold
 	}
 
-	// Determine new tier based on penalty level
-	if s.EarlyQuitPenaltyLevel <= threshold {
-		newTier = MatchmakingTier1 // Good standing
+	if s.PenaltyLevel <= threshold {
+		newTier = MatchmakingTier1
 	} else {
-		newTier = MatchmakingTier2 // Penalty tier
+		newTier = MatchmakingTier2
 	}
 
-	// Check if tier changed
 	if oldTier != newTier {
 		s.MatchmakingTier = newTier
 		s.LastTierChange = time.Now().UTC()
@@ -251,7 +361,7 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 	}
 
 	// Load the player's early quit config
-	eqconfig := NewEarlyQuitConfig()
+	eqconfig := NewEarlyQuitPlayerState()
 	if err := StorableRead(ctx, nk, userUUID.String(), eqconfig, false); err != nil {
 		logger.WithFields(map[string]any{
 			"uid":   userID,
@@ -287,7 +397,7 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 	// Reduce early quit penalty by one level without inflating match completion statistics.
 	// This forgives the early quit since the player logged out entirely rather than
 	// just leaving the match to join another.
-	eqconfig.DecrementPenaltyOnly()
+	eqconfig.ForgiveLastQuit()
 
 	// Check if tier should be updated after penalty reduction
 	serviceSettings := ServiceSettings()
@@ -314,7 +424,7 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 	// Send notifications if tier changed (unless penalty system is disabled or silent mode is enabled)
 	if tierChanged && serviceSettings.Matchmaking.EnableEarlyQuitPenalty && !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
 		if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
-			messageTrigger.SendEarlyQuitUpdateNotification(ctx, userID, 0, 0, newTier, time.Time{})
+			messageTrigger.SendEarlyQuitUpdateNotification(ctx, userID, eqconfig)
 		}
 
 		discordID, err := GetDiscordIDByUserID(ctx, db, userID)
@@ -375,7 +485,7 @@ func CheckAndApplyEarlyQuitIfStillOnline(ctx context.Context, logger runtime.Log
 		"session_id": sessionID,
 	}).Info("Applying deferred penalty: player still online after disconnect")
 
-	eqconfig := NewEarlyQuitConfig()
+	eqconfig := NewEarlyQuitPlayerState()
 	if err := StorableRead(ctx, nk, userID, eqconfig, true); err != nil {
 		logger.WithField("error", err).Warn("Failed to load early quit config for deferred penalty")
 		return
@@ -402,13 +512,7 @@ func CheckAndApplyEarlyQuitIfStillOnline(ctx context.Context, logger runtime.Log
 	// Send notifications (unless penalty system is disabled or silent mode is enabled)
 	if serviceSettings.Matchmaking.EnableEarlyQuitPenalty && !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
 		if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
-			penaltyLevel := int32(eqconfig.EarlyQuitPenaltyLevel)
-			if penaltyLevel > MaxEarlyQuitPenaltyLevel {
-				penaltyLevel = int32(MaxEarlyQuitPenaltyLevel)
-			}
-			lockoutDuration := GetLockoutDurationSeconds(int(penaltyLevel))
-			penaltyExpiry := time.Now().Add(time.Duration(lockoutDuration) * time.Second)
-			messageTrigger.SendEarlyQuitUpdateNotification(ctx, userID, 0, int32(eqconfig.GetEarlyQuitCount()), penaltyLevel, penaltyExpiry)
+			messageTrigger.SendEarlyQuitUpdateNotification(ctx, userID, eqconfig)
 		}
 
 		if tierChanged {

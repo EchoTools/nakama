@@ -73,7 +73,7 @@ func EarlyQuitHistoryRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	}
 
 	// Load early quit config for summary stats
-	eqconfig := NewEarlyQuitConfig()
+	eqconfig := NewEarlyQuitPlayerState()
 	if err := StorableRead(ctx, nk, targetUserID, eqconfig, false); err != nil {
 		logger.Debug("Failed to load early quit config, using defaults", zap.Error(err))
 	}
@@ -141,7 +141,7 @@ func EarlyQuitHistoryRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		ForgivenQuits:       forgivenQuits,
 		EarlyQuits:          earlyQuits,
 		PregameQuits:        pregameQuits,
-		CurrentPenaltyLevel: eqconfig.EarlyQuitPenaltyLevel,
+		CurrentPenaltyLevel: eqconfig.PenaltyLevel,
 		CompletedMatches:    eqconfig.TotalCompletedMatches,
 		QuitRate:            quitRate,
 		MatchmakingTier:     eqconfig.MatchmakingTier,

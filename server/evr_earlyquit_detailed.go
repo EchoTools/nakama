@@ -40,6 +40,7 @@ const (
 type CompletionRecord struct {
 	MatchID        MatchID   `json:"match_id"`
 	CompletionTime time.Time `json:"completion_time"`
+	GroupID        string    `json:"group_id,omitempty"`
 }
 
 // QuitRecord represents a single early quit event with full context
@@ -214,7 +215,7 @@ func (h *EarlyQuitHistory) CountQuitsByType(unforgivenOnly bool) (early, pregame
 }
 
 // GetQuitRate returns the quit rate based on unforgiven quits
-// Returns quits / (quits + completed matches from EarlyQuitConfig)
+// Returns quits / (quits + completed matches from EarlyQuitPlayerState)
 func (h *EarlyQuitHistory) GetQuitRate(completedMatches int32) float64 {
 	quits := h.CountUnforgivenQuits()
 	total := quits + int(completedMatches)
@@ -250,6 +251,32 @@ func (h *EarlyQuitHistory) PruneOldRecords(maxAge time.Duration) (int, int) {
 	h.Records = keptQuits
 	h.Completions = keptCompletions
 	return originalQuitLen - len(keptQuits), originalCompletionLen - len(keptCompletions)
+}
+
+// GetGuildQuitStats returns the unforgiven quit count and completion count for a specific guild.
+func (h *EarlyQuitHistory) GetGuildQuitStats(groupID string) (quits, completions int32) {
+	for _, record := range h.Records {
+		if record.GroupID == groupID && !record.Forgiven {
+			quits++
+		}
+	}
+	for _, record := range h.Completions {
+		if record.GroupID == groupID {
+			completions++
+		}
+	}
+	return
+}
+
+// GetGuildRecords returns quit records filtered to a specific guild.
+func (h *EarlyQuitHistory) GetGuildRecords(groupID string) []QuitRecord {
+	var records []QuitRecord
+	for _, record := range h.Records {
+		if record.GroupID == groupID {
+			records = append(records, record)
+		}
+	}
+	return records
 }
 
 // CreateQuitRecordFromParticipation creates a QuitRecord from PlayerParticipation and match state

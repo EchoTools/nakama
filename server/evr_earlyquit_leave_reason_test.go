@@ -93,7 +93,7 @@ func TestCreateQuitRecordFromParticipation_IncludesLeaveReason(t *testing.T) {
 
 func TestDifferentialPenalty_VoluntaryVsDisconnect(t *testing.T) {
 	t.Run("voluntary leave increments penalty immediately", func(t *testing.T) {
-		config := NewEarlyQuitConfig()
+		config := NewEarlyQuitPlayerState()
 		leaveReason := LeaveReasonVoluntary
 
 		// Mirrors the MatchLeave logic
@@ -101,16 +101,16 @@ func TestDifferentialPenalty_VoluntaryVsDisconnect(t *testing.T) {
 			config.IncrementEarlyQuit()
 		}
 
-		if config.TotalEarlyQuits != 1 {
-			t.Errorf("expected 1 early quit, got %d", config.TotalEarlyQuits)
+		if config.NumEarlyQuits != 1 {
+			t.Errorf("expected 1 early quit, got %d", config.NumEarlyQuits)
 		}
-		if config.EarlyQuitPenaltyLevel != 1 {
-			t.Errorf("expected penalty level 1, got %d", config.EarlyQuitPenaltyLevel)
+		if config.NumSteadyEarlyQuits != 1 {
+			t.Errorf("expected NumSteadyEarlyQuits 1, got %d", config.NumSteadyEarlyQuits)
 		}
 	})
 
 	t.Run("disconnect does not increment penalty immediately", func(t *testing.T) {
-		config := NewEarlyQuitConfig()
+		config := NewEarlyQuitPlayerState()
 		leaveReason := LeaveReasonDisconnect
 
 		// Mirrors the MatchLeave logic
@@ -118,24 +118,24 @@ func TestDifferentialPenalty_VoluntaryVsDisconnect(t *testing.T) {
 			config.IncrementEarlyQuit()
 		}
 
-		if config.TotalEarlyQuits != 0 {
-			t.Errorf("expected 0 early quits for disconnect, got %d", config.TotalEarlyQuits)
+		if config.NumEarlyQuits != 0 {
+			t.Errorf("expected 0 early quits for disconnect, got %d", config.NumEarlyQuits)
 		}
-		if config.EarlyQuitPenaltyLevel != 0 {
-			t.Errorf("expected penalty level 0 for disconnect, got %d", config.EarlyQuitPenaltyLevel)
+		if config.PenaltyLevel != 0 {
+			t.Errorf("expected penalty level 0 for disconnect, got %d", config.PenaltyLevel)
 		}
 	})
 
 	t.Run("crash recovery does not increment penalty immediately", func(t *testing.T) {
-		config := NewEarlyQuitConfig()
+		config := NewEarlyQuitPlayerState()
 		leaveReason := LeaveReasonCrashRecovery
 
 		if leaveReason == LeaveReasonVoluntary || leaveReason == LeaveReasonUnknown || leaveReason == "" {
 			config.IncrementEarlyQuit()
 		}
 
-		if config.TotalEarlyQuits != 0 {
-			t.Errorf("expected 0 early quits for crash recovery, got %d", config.TotalEarlyQuits)
+		if config.NumEarlyQuits != 0 {
+			t.Errorf("expected 0 early quits for crash recovery, got %d", config.NumEarlyQuits)
 		}
 	})
 }

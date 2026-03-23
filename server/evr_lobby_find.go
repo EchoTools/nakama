@@ -168,11 +168,12 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	}
 	serviceSettings := ServiceSettings()
 	if lobbyParams.Mode == evr.ModeArenaPublic && lobbyParams.EarlyQuitPenaltyLevel > 0 && serviceSettings.Matchmaking.EnableEarlyQuitPenalty {
-		eqConfig := NewEarlyQuitConfig()
+		eqConfig := NewEarlyQuitPlayerState()
 		if err := StorableRead(ctx, p.nk, lobbyParams.UserID.String(), eqConfig, true); err != nil {
 			logger.Debug("Failed to load early quit config for logging", zap.Error(err))
 		} else {
-			timeSinceLastQuit := time.Since(eqConfig.LastEarlyQuitTime)
+			penaltyTime := time.Unix(eqConfig.PenaltyTimestamp, 0)
+			timeSinceLastQuit := time.Since(penaltyTime)
 			lockoutDuration := GetLockoutDuration(lobbyParams.EarlyQuitPenaltyLevel)
 
 			if timeSinceLastQuit < lockoutDuration {

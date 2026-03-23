@@ -349,8 +349,24 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			Handler: EarlyQuitHistoryRPC,
 			Permission: &RPCPermission{
 				RequireAuth:   true,
-				AllowedGroups: []string{}, // Custom authorization in RPC (user or operator)
-				// TODO: Move to middleware with user-or-operator pattern
+				AllowedGroups: []string{},
+			},
+		},
+		// Early quit management - Enforcers/operators only
+		{
+			ID:      "earlyquit/view",
+			Handler: EarlyQuitViewRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{},
+			},
+		},
+		{
+			ID:      "earlyquit/modify",
+			Handler: EarlyQuitModifyRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{},
 			},
 		},
 
