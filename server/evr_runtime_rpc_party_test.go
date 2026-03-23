@@ -646,14 +646,6 @@ func TestPartyRPCs_EmptyPayload(t *testing.T) {
 	nk := newMockPartyNK()
 	logger := partyLogger()
 
-	rpcs := []struct {
-		name    string
-		handler func(context.Context, runtime.Logger, *interface{}, runtime.NakamaModule, string) (string, error)
-	}{
-		// Can't easily test with the exact signature, so test key behaviors
-	}
-	_ = rpcs
-
 	// Join with empty party_id
 	_, err := PartyJoinRPC(ctx, logger, nil, nk, `{"party_id":""}`)
 	if err == nil {
@@ -688,5 +680,132 @@ func TestPartyRPCs_BadJSON(t *testing.T) {
 	_, err = PartyKickRPC(ctx, logger, nil, nk, `{broken`)
 	if err == nil {
 		t.Error("PartyKickRPC should fail on invalid JSON")
+	}
+}
+
+// --- Additional tests from code review ---
+
+func TestPartyJoinRPC_ClosedParty(t *testing.T) {
+	ctx1 := partyCtxWithUser("user-1", "alice")
+	ctx2 := partyCtxWithUser("user-2", "bob")
+	nk := newMockPartyNK()
+	logger := partyLogger()
+
+	resp, _ := PartyCreateRPC(ctx1, logger, nil, nk, `{"max_size":4,"open":false}`)
+	var created struct{ PartyID string `json:"party_id"` }
+	json.Unmarshal([]byte(resp), &created)
+
+	_, err := PartyJoinRPC(ctx2, logger, nil, nk, `{"party_id":"`+created.PartyID+`"}`)
+	if err == nil {
+		t.Error("expected error when joining closed party")
+	}
+}
+
+func TestPartyKickRPC_SelfKick(t *testing.T) {
+	ctx1 := partyCtxWithUser("user-1", "alice")
+	nk := newMockPartyNK()
+	logger := partyLogger()
+
+	resp, _ := PartyCreateRPC(ctx1, logger, nil, nk, `{}`)
+	var created struct{ PartyID string `json:"party_id"` }
+	json.Unmarshal([]byte(resp), &created)
+
+	_, err := PartyKickRPC(ctx1, logger, nil, nk, `{"party_id":"`+created.PartyID+`","target_id":"user-1"}`)
+	if err == nil {
+		t.Error("expected error when kicking self")
+	}
+}
+
+func TestPartyKickRPC_NonMember(t *testing.T) {
+	ctx1 := partyCtxWithUser("user-1", "alice")
+	nk := newMockPartyNK()
+	logger := partyLogger()
+
+	resp, _ := PartyCreateRPC(ctx1, logger, nil, nk, `{}`)
+	var created struct{ PartyID string `json:"party_id"` }
+	json.Unmarshal([]byte(resp), &created)
+
+	_, err := PartyKickRPC(ctx1, logger, nil, nk, `{"party_id":"`+created.PartyID+`","target_id":"user-nonexistent"}`)
+	if err == nil {
+		t.Error("expected error when kicking non-member")
+	}
+}
+
+func TestPartyPromoteRPC_NonMember(t *testing.T) {
+	ctx1 := partyCtxWithUser("user-1", "alice")
+	nk := newMockPartyNK()
+	logger := partyLogger()
+
+	resp, _ := PartyCreateRPC(ctx1, logger, nil, nk, `{}`)
+	var created struct{ PartyID string `json:"party_id"` }
+	json.Unmarshal([]byte(resp), &created)
+
+	_, err := PartyPromoteRPC(ctx1, logger, nil, nk, `{"party_id":"`+created.PartyID+`","target_id":"user-ghost"}`)
+	if err == nil {
+		t.Error("expected error when promoting non-member")
+	}
+}
+
+func TestPartyCreateRPC_MaxSizeCapped(t *testing.T) {
+	ctx := partyCtxWithUser("user-1", "alice")
+	nk := newMockPartyNK()
+	logger := partyLogger()
+
+	resp, _ := PartyCreateRPC(ctx, logger, nil, nk, `{"max_size":999}`)
+	var created struct{ PartyID string `json:"party_id"` }
+	json.Unmarshal([]byte(resp), &created)
+
+	party, _ := loadParty(ctx, nk, created.PartyID)
+	if party.MaxSize > 16 {
+		t.Errorf("MaxSize should be capped at 16, got %d", party.MaxSize)
+	}
+}
+
+func TestPartyRPCs_EmptyStringPayload(t *testing.T) {
+	ctx := partyCtxWithUser("user-1", "alice")
+	nk := newMockPartyNK()
+	logger := partyLogger()
+
+	// Create with empty string — should use defaults
+	resp, err := PartyCreateRPC(ctx, logger, nil, nk, "")
+	if err != nil {
+		t.Fatalf("Create with empty payload should use defaults: %v", err)
+	}
+	var created struct{ PartyID string `json:"party_id"` }
+	json.Unmarshal([]byte(resp), &created)
+	if created.PartyID == "" {
+		t.Error("should still create a party")
+	}
+
+	// Join with empty string — should fail
+	_, err = PartyJoinRPC(ctx, logger, nil, nk, "")
+	if err == nil {
+		t.Error("Join with empty payload should fail")
+	}
+}
+
+func TestPartyJoinRPC_AlreadyMember_ReturnsError(t *testing.T) {
+	ctx1 := partyCtxWithUser("user-1", "alice")
+	nk := newMockPartyNK()
+	logger := partyLogger()
+
+	resp, _ := PartyCreateRPC(ctx1, logger, nil, nk, `{}`)
+	var created struct{ PartyID string `json:"party_id"` }
+	json.Unmarshal([]byte(resp), &created)
+
+	_, err := PartyJoinRPC(ctx1, logger, nil, nk, `{"party_id":"`+created.PartyID+`"}`)
+	if err == nil {
+		t.Error("expected error when joining party you're already in")
+	}
+}
+
+func TestPartyListMembersRPC_NoAuth(t *testing.T) {
+	ctx := partyCtxNoUser()
+	nk := newMockPartyNK()
+	logger := partyLogger()
+
+	_, err := PartyListMembersRPC(ctx, logger, nil, nk, `{"party_id":"test"}`)
+	if err == nil {
+		t.Error("expected error for unauthenticated list members")
 	}
 }
