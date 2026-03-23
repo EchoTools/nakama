@@ -117,6 +117,9 @@ func PartyCreateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	if req.MaxSize <= 0 {
 		req.MaxSize = PartyMaxDefaultSize
 	}
+	if req.MaxSize > 16 {
+		req.MaxSize = 16 // cap to prevent abuse
+	}
 	isOpen := true
 	if req.Open != nil {
 		isOpen = *req.Open
@@ -339,8 +342,8 @@ func PartyPromoteRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 // PartyListMembersRPC returns the party state including members and leader.
 func PartyListMembersRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	_, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
-	if !ok {
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || userID == "" {
 		return "", runtime.NewError("unauthenticated", StatusUnauthenticated)
 	}
 
