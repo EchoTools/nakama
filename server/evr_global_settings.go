@@ -74,8 +74,9 @@ type ServiceSettingsData struct {
 	EnableSessionDebug                    bool                      `json:"enable_session_debug"`
 	version                               string
 	serviceStatusMessage                  string
-	PingServerBeforeJoin                  bool `json:"ping_server_before_join"`   // Ping the server before joining to measure latency
-	EnableVibinatorsGravity               bool `json:"enable_vibinators_gravity"` // Novelty: redirect social-lobby echo_arena matchmakers toward vibinator's echo_combat
+	PingServerBeforeJoin                  bool `json:"ping_server_before_join"`      // Ping the server before joining to measure latency
+	EnableVibinatorsGravity               bool `json:"enable_vibinators_gravity"`    // Novelty: redirect social-lobby echo_arena matchmakers toward vibinator's echo_combat
+	UseQuestEncoderFlags                  bool `json:"use_quest_encoder_flags"`      // Send Quest-shifted encoder flag bit layout in LobbySessionSuccessv5 for standalone clients
 }
 
 type PruneSettings struct {
