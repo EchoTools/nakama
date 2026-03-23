@@ -86,6 +86,14 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		{ID: "device/auth/poll", Handler: DeviceAuthPollRpc, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
 		{ID: "device/auth/verify", Handler: DeviceAuthVerifyRpc, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 
+		// Party management (storage-backed)
+		{ID: "party/create", Handler: PartyCreateRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+		{ID: "party/join", Handler: PartyJoinRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+		{ID: "party/leave", Handler: PartyLeaveRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+		{ID: "party/kick", Handler: PartyKickRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+		{ID: "party/promote", Handler: PartyPromoteRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+		{ID: "party/members", Handler: PartyListMembersRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+
 		// Match management
 		{ID: "match/public", Handler: rpcHandler.MatchListPublicRPC, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
 		{ID: "match", Handler: MatchRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
