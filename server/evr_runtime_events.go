@@ -419,7 +419,7 @@ func AuditLogSend(dg *discordgo.Session, channelID, content string) error {
 	return nil
 }
 
-func ScheduleKick(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, dg *discordgo.Session, loginHistory *LoginHistory, userID string, guildGroup *GuildGroup, delay time.Duration) {
+func ScheduleDisabledAccountKick(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, dg *discordgo.Session, loginHistory *LoginHistory, userID string, guildGroup *GuildGroup, delay time.Duration) {
 	go func() {
 		// Set random time to disable and kick player
 		var (
@@ -490,11 +490,11 @@ func ScheduleKick(ctx context.Context, nk runtime.NakamaModule, logger runtime.L
 		}
 
 		actions := make([]string, 0, len(matchLabels))
-		doDisconnect := false
+
 		for _, label := range matchLabels {
 			// Kick the player from the match
 			if slices.Contains(suspendedGroupIDs, label.GetGroupID().String()) {
-				doDisconnect = true
+
 				actions = append(actions, fmt.Sprintf("kicked from [%s](https://echo.taxi/spark://c/%s) session.", label.Mode.String(), strings.ToUpper(label.ID.UUID.String())))
 				if err := KickPlayerFromMatch(ctx, nk, label.ID, userID); err != nil {
 					actions = append(actions, fmt.Sprintf("failed to kick player from [%s](https://echo.taxi/spark://c/%s) (error: %s)", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), err.Error()))
@@ -503,13 +503,11 @@ func ScheduleKick(ctx context.Context, nk runtime.NakamaModule, logger runtime.L
 			}
 		}
 
-		if doDisconnect {
-			// Disconnect the user from the session
-			if c, err := DisconnectUserID(ctx, nk, userID, true, true, false); err != nil {
-				logger.WithField("error", err).Error("failed to disconnect user")
-			} else {
-				logger.Info("user %s disconnected: %v sessions", userID, c)
-			}
+		// Disconnect sessions for disabled accounts.
+		if c, err := DisconnectUserID(ctx, nk, userID, true, true, false); err != nil {
+			logger.WithField("error", err).Error("failed to disconnect user")
+		} else {
+			logger.Info("user %s disconnected: %v sessions", userID, c)
 		}
 
 		// Send audit log message

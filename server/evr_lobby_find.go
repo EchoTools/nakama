@@ -84,12 +84,32 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 					entrantSessionIDs = append(entrantSessionIDs, sid)
 				}
 			} else {
-				// Still a non-leader. Do NOT fall through to matchmaking —
-				// non-leaders cannot submit tickets and will get stuck.
+				// Still a non-leader. Poll for the leader to settle into a
+				// match we can join. This covers followers at the main menu
+				// whose leader is in a closed/full match — they should wait
+				// rather than immediately erroring out.
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
-				return NewLobbyError(ServerIsLocked, "unable to follow party leader")
+				if p.pollFollowPartyLeader(ctx, logger, session, lobbyParams, lobbyGroup) {
+					return nil
+				}
+				// Re-check leadership one more time after polling.
+				leader = lobbyGroup.GetLeader()
+				if leader != nil && leader.SessionId == session.id.String() {
+					isLeader = true
+					for _, sid := range memberSessionIDs {
+						if sid == session.id {
+							continue
+						}
+						entrantSessionIDs = append(entrantSessionIDs, sid)
+					}
+				} else {
+					if ctx.Err() != nil {
+						return ctx.Err()
+					}
+					return NewLobbyError(ServerIsLocked, "unable to follow party leader")
+				}
 			}
 		} else {
 

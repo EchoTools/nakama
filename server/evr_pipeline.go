@@ -306,15 +306,6 @@ func (p *EvrPipeline) MessageCacheLoad(key string) evr.Message {
 
 func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in evr.Message) bool {
 
-	// If the session is suspended, ignore all messages and log an audit entry.
-	if params, ok := LoadParams(session.Context()); ok && params.suspended != nil && params.suspended.Load() {
-		logger.Warn("Suspended session sent a message — ignoring",
-			zap.String("uid", session.UserID().String()),
-			zap.String("sid", session.ID().String()),
-			zap.String("message_type", fmt.Sprintf("%T", in)))
-		return true // keep connection open so the delayed disconnect fires cleanly
-	}
-
 	// Handle legacy messages
 
 	var envelope *rtapi.Envelope

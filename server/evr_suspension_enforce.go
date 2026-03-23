@@ -13,24 +13,18 @@ import (
 )
 
 const (
-	// SuspensionDisconnectDelay is the delay before forcibly disconnecting
-	// a suspended player's sessions. This gives time for unrequire messages
-	// and match kick signals to be processed by the client.
-	SuspensionDisconnectDelay = 60 * time.Second
-
 	errCompoundDurationWithDW = "compound durations with 'd' (days) or 'w' (weeks) are not supported; use simple format like '2d' or convert to hours (e.g., '48h' instead of '2d')"
 )
 
-// SuspendConnectedUser enforces a suspension on a connected player.
-// It is non-blocking: all slow work (match kick, delayed disconnect) runs in goroutines.
+// EnforceGuildSuspension enforces a guild suspension on a connected player.
+// It is non-blocking: the match kick runs in a goroutine.
 //
-// Steps performed:
-//  1. Mark all of the user's sessions as suspended (atomic flag on SessionParameters).
-//     The pipeline will ignore all subsequent messages and log an audit entry.
-//  2. Send an unrequire message to every login and match session.
-//  3. Kick the player from their current match (sends a reject to the game server).
-//  4. After SuspensionDisconnectDelay, forcibly disconnect all login and match sessions.
-func SuspendConnectedUser(
+// Suspensions are scoped to guild match access:
+//   - The player is kicked from their current match (reject sent to game server).
+//   - Future match joins for the suspended guild are refused at authorization time.
+//   - Sessions are NOT disconnected — the player can still use the client.
+//   - Messages are NOT ignored — server connections continue to function.
+func EnforceGuildSuspension(
 	ctx context.Context,
 	logger *zap.Logger,
 	nk runtime.NakamaModule,
@@ -39,7 +33,7 @@ func SuspendConnectedUser(
 ) {
 	userUUID := uuid.FromStringOrNil(userID)
 	if userUUID.IsNil() {
-		logger.Warn("SuspendConnectedUser called with invalid user ID", zap.String("user_id", userID))
+		logger.Warn("EnforceGuildSuspension called with invalid user ID", zap.String("user_id", userID))
 		return
 	}
 
@@ -55,35 +49,16 @@ func SuspendConnectedUser(
 	})
 
 	if len(sessions) == 0 {
-		logger.Debug("SuspendConnectedUser: no active sessions found",
+		logger.Debug("EnforceGuildSuspension: no active sessions found",
 			zap.String("user_id", userID))
 		return
 	}
 
-	// Step 1: Mark every session as suspended so the pipeline ignores future messages.
-	for _, ws := range sessions {
-		if params, ok := LoadParams(ws.Context()); ok {
-			if params.suspended != nil {
-				params.suspended.Store(true)
-			}
-		}
-	}
-
-	logger.Info("Marked user sessions as suspended",
+	logger.Info("Enforcing guild suspension — kicking from match",
 		zap.String("user_id", userID),
 		zap.Int("session_count", len(sessions)))
 
-	// Step 2: Send unrequire to all sessions (non-blocking per session).
-	for _, ws := range sessions {
-		if err := ws.SendEvr(unrequireMessage); err != nil {
-			logger.Debug("Failed to send unrequire to suspended session",
-				zap.String("user_id", userID),
-				zap.String("session_id", ws.ID().String()),
-				zap.Error(err))
-		}
-	}
-
-	// Step 3: Kick from match (if in one). Fire-and-forget goroutine.
+	// Kick from match (if in one). Fire-and-forget goroutine.
 	go func() {
 		for _, ws := range sessions {
 			matchID, _, err := GetMatchIDBySessionID(nk, ws.ID())
@@ -102,23 +77,6 @@ func SuspendConnectedUser(
 			}
 			break // Only need to kick from one match
 		}
-	}()
-
-	// Step 4: Delayed disconnect of all sessions.
-	go func() {
-		time.Sleep(SuspensionDisconnectDelay)
-		for _, ws := range sessions {
-			sid := ws.ID()
-			if err := nk.SessionDisconnect(context.Background(), sid.String(), runtime.PresenceReasonDisconnect); err != nil {
-				logger.Debug("Failed to disconnect suspended session (may already be gone)",
-					zap.String("user_id", userID),
-					zap.String("session_id", sid.String()),
-					zap.Error(err))
-			}
-		}
-		logger.Info("Disconnected suspended user sessions",
-			zap.String("user_id", userID),
-			zap.Int("session_count", len(sessions)))
 	}()
 }
 
