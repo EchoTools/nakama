@@ -81,6 +81,11 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		{ID: "link", Handler: LinkingAppRpc},
 		{ID: "signin/discord", Handler: DiscordSignInRpc},
 
+		// Device code authentication (GitHub-style device flow)
+		{ID: "device/auth/request", Handler: DeviceAuthRequestRpc, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
+		{ID: "device/auth/poll", Handler: DeviceAuthPollRpc, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
+		{ID: "device/auth/verify", Handler: DeviceAuthVerifyRpc, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+
 		// Match management
 		{ID: "match/public", Handler: rpcHandler.MatchListPublicRPC, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
 		{ID: "match", Handler: MatchRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
