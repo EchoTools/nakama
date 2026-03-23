@@ -17,6 +17,7 @@ type LobbySessionSuccess struct {
 	Endpoint           Endpoint
 	TeamIndex          int16
 	SessionFlags       uint8
+	UseQuestFlags      bool // Use Quest (libr15.so) encoder flag bit layout
 	ServerEncoderFlags PacketEncoderConfig
 	ClientEncoderFlags PacketEncoderConfig
 	ServerSequenceId   uint64
@@ -81,8 +82,14 @@ func (m *LobbySessionSuccessv5) String() string {
 	)
 }
 func (m *LobbySessionSuccessv5) Stream(s *EasyStream) error {
-	encoderConfig0 := m.ServerEncoderFlags.ToFlags()
-	encoderConfig1 := m.ClientEncoderFlags.ToFlags()
+	var encoderConfig0, encoderConfig1 uint64
+	if m.UseQuestFlags {
+		encoderConfig0 = m.ServerEncoderFlags.ToQuestFlags()
+		encoderConfig1 = m.ClientEncoderFlags.ToQuestFlags()
+	} else {
+		encoderConfig0 = m.ServerEncoderFlags.ToFlags()
+		encoderConfig1 = m.ClientEncoderFlags.ToFlags()
+	}
 
 	err := RunErrorFunctions([]func() error{
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.GameMode) },
@@ -158,6 +165,7 @@ func PacketEncoderConfigFromFlags(flags uint64) PacketEncoderConfig {
 	}
 }
 
+// ToFlags encodes as PCVR bit layout (echovr.exe).
 func (p PacketEncoderConfig) ToFlags() uint64 {
 	flags := uint64(0)
 	if p.EncryptionEnabled {
@@ -171,6 +179,25 @@ func (p PacketEncoderConfig) ToFlags() uint64 {
 	flags |= uint64(p.MacKeySize&0x0fff) << 26
 	flags |= uint64(p.EncryptionKeySize&0x0fff) << 38
 	flags |= uint64(p.RandomKeySize&0x0fff) << 50
+	return flags
+}
+
+// ToQuestFlags encodes as Quest bit layout (libr15.so).
+// All fields are shifted left by 1 bit; bit 0 is the "initialized" flag (always set).
+// See echovr-reconstruction CPacketEncoder.h for the Quest flag layout.
+func (p PacketEncoderConfig) ToQuestFlags() uint64 {
+	flags := uint64(1) // bit 0: initialized
+	if p.EncryptionEnabled {
+		flags |= 1 << 1
+	}
+	if p.MacEnabled {
+		flags |= 1 << 2
+	}
+	flags |= uint64(p.MacDigestSize&0x0fff) << 3
+	flags |= uint64(p.MacPbkdf2Iterations&0x0fff) << 15
+	flags |= uint64(p.MacKeySize&0x0fff) << 27
+	flags |= uint64(p.EncryptionKeySize&0x0fff) << 39
+	flags |= uint64(p.RandomKeySize&0x0fff) << 51
 	return flags
 }
 
