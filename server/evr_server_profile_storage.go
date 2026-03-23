@@ -46,6 +46,10 @@ type ServerProfileStorage struct {
 	// The actual profile data stored as raw JSON to avoid marshal/unmarshal overhead
 	Profile json.RawMessage `json:"profile"`
 
+	// Pre-stripped profile without unlocks, served to other users via OtherUserProfileRequest.
+	// Computed at store time so the read path has zero processing overhead.
+	PublicProfile json.RawMessage `json:"public_profile,omitempty"`
+
 	// Private fields for storage metadata
 	userID  string
 	version string
@@ -82,6 +86,21 @@ func (s *ServerProfileStorage) StorageIndexes() []StorableIndexMeta {
 	}}
 }
 
+// stripUnlocksFromProfileJSON removes the "unlocks" key from profile JSON.
+// Uses shallow tokenization — nested values are never parsed.
+func stripUnlocksFromProfileJSON(data json.RawMessage) json.RawMessage {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(data, &m); err != nil {
+		return data
+	}
+	delete(m, "unlocks")
+	out, err := json.Marshal(m)
+	if err != nil {
+		return data
+	}
+	return out
+}
+
 // NewServerProfileStorage creates a new ServerProfileStorage from a ServerProfile
 func NewServerProfileStorage(userID string, profile *evr.ServerProfile) (*ServerProfileStorage, error) {
 	profileJSON, err := json.Marshal(profile)
@@ -89,10 +108,11 @@ func NewServerProfileStorage(userID string, profile *evr.ServerProfile) (*Server
 		return nil, fmt.Errorf("failed to marshal profile: %w", err)
 	}
 	return &ServerProfileStorage{
-		XPlatformID: profile.EvrID.String(),
-		Profile:     profileJSON,
-		userID:      userID,
-		version:     "", // Will be set on write
+		XPlatformID:   profile.EvrID.String(),
+		Profile:       profileJSON,
+		PublicProfile: stripUnlocksFromProfileJSON(profileJSON),
+		userID:        userID,
+		version:       "", // Will be set on write
 	}, nil
 }
 
@@ -100,10 +120,11 @@ func NewServerProfileStorage(userID string, profile *evr.ServerProfile) (*Server
 // This avoids a redundant marshal when the JSON is already available.
 func NewServerProfileStorageFromJSON(userID string, xpID evr.EvrId, profileJSON json.RawMessage) *ServerProfileStorage {
 	return &ServerProfileStorage{
-		XPlatformID: xpID.String(),
-		Profile:     profileJSON,
-		userID:      userID,
-		version:     "", // Will be set on write
+		XPlatformID:   xpID.String(),
+		Profile:       profileJSON,
+		PublicProfile: stripUnlocksFromProfileJSON(profileJSON),
+		userID:        userID,
+		version:       "", // Will be set on write
 	}
 }
 
@@ -204,7 +225,12 @@ func ServerProfileLoadByXPID(ctx context.Context, logger *zap.Logger, db *sql.DB
 		if err := json.Unmarshal([]byte(obj.Value), storage); err != nil {
 			logger.Warn("Failed to unmarshal cached server profile, regenerating", zap.Error(err))
 		} else {
-			return storage.Profile, obj.UserId, nil
+			profile := storage.PublicProfile
+			if len(profile) == 0 {
+				// Fallback for profiles stored before PublicProfile was added.
+				profile = stripUnlocksFromProfileJSON(storage.Profile)
+			}
+			return profile, obj.UserId, nil
 		}
 	}
 
@@ -217,7 +243,11 @@ func ServerProfileLoadByXPID(ctx context.Context, logger *zap.Logger, db *sql.DB
 			obj := objects.Objects[0]
 			storage := &ServerProfileStorage{}
 			if err := json.Unmarshal([]byte(obj.Value), storage); err == nil {
-				return &profileLoadResult{profile: storage.Profile, userID: obj.UserId}, nil
+				profile := storage.PublicProfile
+				if len(profile) == 0 {
+					profile = stripUnlocksFromProfileJSON(storage.Profile)
+				}
+				return &profileLoadResult{profile: profile, userID: obj.UserId}, nil
 			}
 		}
 
@@ -258,7 +288,7 @@ func ServerProfileLoadByXPID(ctx context.Context, logger *zap.Logger, db *sql.DB
 			}
 		}
 
-		return &profileLoadResult{profile: profileJSON, userID: userID}, nil
+		return &profileLoadResult{profile: stripUnlocksFromProfileJSON(profileJSON), userID: userID}, nil
 	})
 
 	if err != nil {
