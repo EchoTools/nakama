@@ -582,7 +582,6 @@ func (h *VacateCommandHandler) HandleVacateCommand(ctx context.Context, dg *disc
 	signal := SignalShutdownPayload{
 		GraceSeconds:         graceSeconds,
 		DisconnectGameServer: false,
-		DisconnectUsers:      false,
 	}
 
 	data := NewSignalEnvelope(userID, SignalShutdown, signal).String()
