@@ -92,7 +92,6 @@ func SignalResponseFromString(data string) SignalResponse {
 type SignalShutdownPayload struct {
 	GraceSeconds         int  `json:"grace_seconds"`
 	DisconnectGameServer bool `json:"disconnect_game_server"`
-	DisconnectUsers      bool `json:"disconnect_users"`
 }
 
 type SignalKickEntrantsPayload struct {

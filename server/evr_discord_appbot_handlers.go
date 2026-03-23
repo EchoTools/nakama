@@ -269,7 +269,6 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		signal := SignalShutdownPayload{
 			GraceSeconds:         graceSeconds,
 			DisconnectGameServer: disconnectServer,
-			DisconnectUsers:      false,
 		}
 
 		data := NewSignalEnvelope(userID, SignalShutdown, signal).String()

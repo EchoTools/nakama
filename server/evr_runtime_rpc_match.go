@@ -315,7 +315,6 @@ func shutdownMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	env := NewSignalEnvelope(r.UserID, SignalShutdown, SignalShutdownPayload{
 		GraceSeconds:         request.GraceSeconds,
 		DisconnectGameServer: false,
-		DisconnectUsers:      false,
 	})
 	signalResponse, err := nk.MatchSignal(ctx, request.MatchID.String(), env.String())
 	if err != nil {

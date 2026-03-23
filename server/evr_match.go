@@ -1501,28 +1501,6 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			}
 		}
 
-		if data.DisconnectUsers {
-			entrantIDs := make([]uuid.UUID, 0, len(state.presenceMap))
-			for _, mp := range state.presenceMap {
-				logger := logger.WithFields(map[string]any{
-					"uid": mp.GetUserId(),
-					"sid": mp.GetSessionId(),
-				})
-
-				for _, p := range state.presenceMap {
-					entrantIDs = append(entrantIDs, p.EntrantID)
-				}
-
-				if len(entrantIDs) > 0 {
-					if err := m.kickEntrants(ctx, logger, dispatcher, state, entrantIDs...); err != nil {
-						return state, SignalResponse{Message: fmt.Sprintf("failed to kick player: %v", err)}.String()
-					}
-				}
-
-				logger.Warn("Match shutting down, disconnecting players.")
-			}
-		}
-
 		return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, data.GraceSeconds), SignalResponse{Success: true}.String()
 
 	case SignalPruneUnderutilized:
