@@ -543,16 +543,47 @@ OutgoingLoop:
 				reason = err.Error()
 				break OutgoingLoop
 			}
-			if err := s.conn.WriteMessage(s.wsMessageType, payload); err != nil {
+
+			// Batch: open a single WebSocket writer and drain all pending messages into it.
+			w, err := s.conn.NextWriter(s.wsMessageType)
+			if err != nil {
+				s.Unlock()
+				s.logger.Warn("Could not get WebSocket writer", zap.Error(err))
+				reason = err.Error()
+				break OutgoingLoop
+			}
+			bytesSent := int64(len(payload))
+			if _, err = w.Write(payload); err != nil {
 				s.Unlock()
 				s.logger.Warn("Could not write message", zap.Error(err))
+				reason = err.Error()
+				break OutgoingLoop
+			}
+			// Drain any additional pending messages into the same write.
+			n := len(s.outgoingCh)
+			for i := 0; i < n; i++ {
+				additional := <-s.outgoingCh
+				bytesSent += int64(len(additional))
+				if _, err = w.Write(additional); err != nil {
+					break
+				}
+			}
+			if err != nil {
+				s.Unlock()
+				s.logger.Warn("Could not write batched message", zap.Error(err))
+				reason = err.Error()
+				break OutgoingLoop
+			}
+			if err = w.Close(); err != nil {
+				s.Unlock()
+				s.logger.Warn("Could not close WebSocket writer", zap.Error(err))
 				reason = err.Error()
 				break OutgoingLoop
 			}
 			s.Unlock()
 
 			// Update outgoing message metrics.
-			s.metrics.MessageBytesSent(int64(len(payload)))
+			s.metrics.MessageBytesSent(bytesSent)
 		}
 	}
 	s.Close(reason, runtime.PresenceReasonDisconnect)
@@ -593,33 +624,38 @@ func (s *sessionWS) SendEvrUnrequire(messages ...evr.Message) error {
 	return s.SendBytes(unrequireBytes, true)
 }
 
-// SendEvr sends a message to the client in the EchoVR format.
-// TODO Transition to using streamsend for all messages.
+// SendEvr sends messages to the client in the EchoVR format.
+// Multiple messages are marshaled into a single payload to reduce WebSocket writes.
 func (s *sessionWS) SendEvr(messages ...evr.Message) error {
-
 	isDebug := s.logger.Core().Enabled(zap.DebugLevel)
-	// Send the EVR messages one at a time.
-	var message evr.Message
-	for _, message = range messages {
+
+	// Filter nil messages and log in debug mode.
+	filtered := make([]evr.Message, 0, len(messages))
+	for _, message := range messages {
 		if message == nil {
 			continue
 		}
 		if isDebug {
 			s.logger.Debug(fmt.Sprintf("Sending %T message", message), zap.String("message", fmt.Sprintf("%s", message)))
 		}
-		// Marshal the message.
-		payload, err := evr.Marshal(message)
-		if err != nil {
-			s.logger.Error("Could not marshal message", zap.Error(err))
-			s.Close("could not marshal message", runtime.PresenceReasonDisconnect)
-			return err
-		}
-		// Send the message.
-		if err := s.SendBytes(payload, true); err != nil {
-			s.logger.Error("Could not send message", zap.Error(err))
-			s.Close("could not send message", runtime.PresenceReasonDisconnect)
-			return err
-		}
+		filtered = append(filtered, message)
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+
+	// Marshal all messages into a single payload.
+	payload, err := evr.Marshal(filtered...)
+	if err != nil {
+		s.logger.Error("Could not marshal messages", zap.Error(err))
+		s.Close("could not marshal message", runtime.PresenceReasonDisconnect)
+		return err
+	}
+
+	if err := s.SendBytes(payload, true); err != nil {
+		s.logger.Error("Could not send messages", zap.Error(err))
+		s.Close("could not send message", runtime.PresenceReasonDisconnect)
+		return err
 	}
 
 	return nil
