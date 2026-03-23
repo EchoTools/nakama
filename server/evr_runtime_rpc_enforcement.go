@@ -201,11 +201,11 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 
 	// Kick the player from active sessions
 	if kickPlayer {
-		// Use the suspension enforcement system: marks sessions as suspended,
-		// sends unrequire, kicks from match, and disconnects after 60s.
+		// Kick the player from their current match. Sessions stay connected;
+		// future match joins for this guild are refused at authorization time.
 		_nk := nk.(*RuntimeGoNakamaModule)
-		SuspendConnectedUser(ctx, RuntimeLoggerToZapLogger(logger), nk, _nk.sessionRegistry, targetUserID)
-		actions = append(actions, "suspended all active sessions (delayed disconnect in 60s)")
+		EnforceGuildSuspension(ctx, RuntimeLoggerToZapLogger(logger), nk, _nk.sessionRegistry, targetUserID)
+		actions = append(actions, "kicked from current match")
 		cnt = len(presences)
 
 		if cnt == 0 {

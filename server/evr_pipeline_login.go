@@ -1037,10 +1037,16 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	}
 
 	if isEnforcer {
-		p.trackSpamActions(ctx, logger, params, groupID, userID, SpamActionGhost,
+		ghostTriggered := p.trackSpamActions(ctx, logger, params, groupID, userID, SpamActionGhost,
 			profile.GhostedPlayers, update.GhostedPlayers.Players)
-		p.trackSpamActions(ctx, logger, params, groupID, userID, SpamActionMute,
+		muteTriggered := p.trackSpamActions(ctx, logger, params, groupID, userID, SpamActionMute,
 			profile.MutedPlayers, update.MutedPlayers.Players)
+
+		// Remove targets that triggered spam actions from the enforcer's lists.
+		// This prevents the enforcer from permanently ghosting/muting the target
+		// after the enforcement action has been taken.
+		update.GhostedPlayers.Players = removeTriggeredPlayers(update.GhostedPlayers.Players, ghostTriggered)
+		update.MutedPlayers.Players = removeTriggeredPlayers(update.MutedPlayers.Players, muteTriggered)
 	}
 
 	profile.GhostedPlayers = update.GhostedPlayers.Players
@@ -1055,6 +1061,20 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	params.profile = profile
 	StoreParams(ctx, &params)
 	return nil
+}
+
+// removeTriggeredPlayers filters out EvrIds that are in the triggered set.
+func removeTriggeredPlayers(list []evr.EvrId, triggered map[string]bool) []evr.EvrId {
+	if len(triggered) == 0 {
+		return list
+	}
+	filtered := make([]evr.EvrId, 0, len(list))
+	for _, id := range list {
+		if !triggered[id.String()] {
+			filtered = append(filtered, id)
+		}
+	}
+	return filtered
 }
 
 func findNewlyAddedPlayers(oldList, newList []evr.EvrId) []evr.EvrId {
@@ -1073,7 +1093,11 @@ func findNewlyAddedPlayers(oldList, newList []evr.EvrId) []evr.EvrId {
 }
 
 // trackSpamActions detects repeated ghost or mute actions by an enforcer
-// against the same target. Ghost spam → 1h suspension; mute spam → kick (no suspension).
+// against the same target. Ghost spam → 1h suspension + kick from match;
+// mute spam → kick from match (no suspension).
+//
+// Returns the set of target EvrIds that triggered a spam action so the caller
+// can remove them from the enforcer's ghost/mute list.
 func (p *EvrPipeline) trackSpamActions(
 	ctx context.Context,
 	logger *zap.Logger,
@@ -1082,16 +1106,20 @@ func (p *EvrPipeline) trackSpamActions(
 	operatorUserID string,
 	actionType SpamActionType,
 	oldList, newList []evr.EvrId,
-) {
+) map[string]bool {
 	newlyAdded := findNewlyAddedPlayers(oldList, newList)
 	if len(newlyAdded) == 0 {
-		return
+		return nil
 	}
+
+	triggered := make(map[string]bool)
 
 	for _, targetEvrID := range newlyAdded {
 		if !p.spamTracker.TrackAction(operatorUserID, targetEvrID, actionType) {
 			continue
 		}
+
+		triggered[targetEvrID.String()] = true
 
 		targetUserID, err := p.spamTracker.FindUserIDByEvrID(ctx, targetEvrID)
 		if err != nil {
@@ -1115,6 +1143,8 @@ func (p *EvrPipeline) trackSpamActions(
 			}
 		}(targetUserID, note)
 	}
+
+	return triggered
 }
 
 // applyGhostSpamSuspension suspends the target for GhostSuspendDuration (1h)
@@ -1143,7 +1173,7 @@ func (p *EvrPipeline) applyGhostSpamSuspension(
 		return
 	}
 
-	SuspendConnectedUser(ctx, logger, p.nk, p.sessionRegistry, targetUserID)
+	EnforceGuildSuspension(ctx, logger, p.nk, p.sessionRegistry, targetUserID)
 
 	if _, err := p.appBot.LogAuditMessage(ctx, groupID,
 		fmt.Sprintf("🚫 **Auto-suspend (1h)**: Enforcer <@%s> ghost-spammed player `%s` — %s",
@@ -1152,24 +1182,28 @@ func (p *EvrPipeline) applyGhostSpamSuspension(
 	}
 }
 
-// applyMuteSpamKick kicks the target (no suspension) when mute spam is detected.
+// applyMuteSpamKick kicks the target from their match (no suspension, no disconnect)
+// when mute spam is detected.
 func (p *EvrPipeline) applyMuteSpamKick(
 	ctx context.Context,
 	logger *zap.Logger,
 	targetUserID, operatorUserID, operatorDiscordID, groupID, note string,
 ) {
-	count, err := DisconnectUserID(ctx, p.nk, targetUserID, true, true, false)
-	if err != nil {
-		logger.Error("Failed to kick player for mute spam",
+	// Kick from match only — do not disconnect sessions.
+	matchID, _, err := GetMatchIDBySessionID(p.nk, uuid.FromStringOrNil(targetUserID))
+	if err != nil || matchID.IsNil() {
+		logger.Debug("Mute spam kick: player not in a match",
+			zap.String("target_user_id", targetUserID))
+	} else if err := KickPlayerFromMatch(ctx, p.nk, matchID, targetUserID); err != nil {
+		logger.Error("Failed to kick player from match for mute spam",
 			zap.String("operator_id", operatorUserID),
 			zap.String("target_user_id", targetUserID),
 			zap.Error(err))
 		return
 	}
 
-	logger.Info("Player kicked due to mute spam",
+	logger.Info("Player kicked from match due to mute spam",
 		zap.String("target_user_id", targetUserID),
-		zap.Int("sessions_disconnected", count),
 		zap.String("note", note))
 
 	if _, err := p.appBot.LogAuditMessage(ctx, groupID,
