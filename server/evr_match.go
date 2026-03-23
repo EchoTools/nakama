@@ -273,18 +273,19 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		enableEarlyQuitPenalty = serviceSettings.Matchmaking.EnableEarlyQuitPenalty
 	}
 	if enableEarlyQuitPenalty && !meta.Presence.IsSpectator() {
-		eqConfig := NewEarlyQuitConfig()
+		eqConfig := NewEarlyQuitPlayerState()
 		if err := StorableRead(ctx, nk, joinPresence.GetUserId(), eqConfig, true); err != nil {
 			logger.Debug("Failed to load early quit config for logging", zap.Error(err))
-		} else if eqConfig.EarlyQuitPenaltyLevel > 0 {
-			timeSinceLastQuit := time.Since(eqConfig.LastEarlyQuitTime)
-			lockoutDuration := GetLockoutDuration(int(eqConfig.EarlyQuitPenaltyLevel))
+		} else if eqConfig.PenaltyLevel > 0 {
+			lockoutDuration := GetLockoutDuration(int(eqConfig.PenaltyLevel))
+			penaltyTime := time.Unix(eqConfig.PenaltyTimestamp, 0)
+			timeSinceLastQuit := time.Since(penaltyTime)
 
 			if timeSinceLastQuit < lockoutDuration {
 				remainingTime := lockoutDuration - timeSinceLastQuit
 				logger.Info("Player joining with active early quit penalty (client-side enforcement expected)",
 					zap.String("user_id", joinPresence.GetUserId()),
-					zap.Int32("penalty_level", eqConfig.EarlyQuitPenaltyLevel),
+					zap.Int32("penalty_level", eqConfig.PenaltyLevel),
 					zap.Duration("remaining", remainingTime))
 			}
 		}
@@ -535,9 +536,9 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			if err := StorableWrite(ctx, nk, meta.Presence.GetUserId(), history); err != nil {
 				logger.Warn("Failed to write early quit history after forgiveness")
 			}
-			eqconfig := NewEarlyQuitConfig()
+			eqconfig := NewEarlyQuitPlayerState()
 			if err := StorableRead(ctx, nk, meta.Presence.GetUserId(), eqconfig, false); err == nil {
-				eqconfig.DecrementPenaltyOnly()
+				eqconfig.ForgiveLastQuit()
 				_ = StorableWrite(ctx, nk, meta.Presence.GetUserId(), eqconfig)
 			}
 		}
@@ -845,16 +846,21 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 						}
 					}
 
-					eqconfig := NewEarlyQuitConfig()
+					eqconfig := NewEarlyQuitPlayerState()
 					_nk := nk.(*RuntimeGoNakamaModule)
 					if err := StorableRead(ctx, nk, mp.GetUserId(), eqconfig, true); err != nil {
 						logger.WithField("error", err).Warn("Failed to load early quitter config")
 					} else {
 
-						// Differential penalty: only apply immediate penalty for voluntary leaves.
-						// Disconnects get deferred — the logout forgiveness goroutine will
-						// auto-forgive if the player fully logged out (crash/network issue).
-						if leaveReason == LeaveReasonVoluntary || leaveReason == LeaveReasonUnknown || leaveReason == "" {
+						// Skip penalty if player is exempt for this guild.
+						groupID := state.GetGroupID().String()
+						if eqconfig.IsExempt(groupID) {
+							logger.WithFields(map[string]interface{}{
+								"uid":      mp.GetUserId(),
+								"group_id": groupID,
+							}).Info("Player exempt from early quit penalty in this guild")
+						} else if leaveReason == LeaveReasonVoluntary || leaveReason == LeaveReasonUnknown || leaveReason == "" {
+							// Differential penalty: only apply immediate penalty for voluntary leaves.
 							eqconfig.IncrementEarlyQuit()
 						} else {
 							// For disconnects: still record the quit but don't increment penalty.
@@ -892,19 +898,13 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 							// Send early quit penalty notification to player (unless penalty system is disabled or silent mode)
 							if serviceSettings.Matchmaking.EnableEarlyQuitPenalty && !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
 								if messageTrigger := globalEarlyQuitMessageTrigger.Load(); messageTrigger != nil {
-									penaltyLevel := int32(eqconfig.EarlyQuitPenaltyLevel)
-									// Clamp to max penalty level (typically 3)
+									messageTrigger.SendEarlyQuitUpdateNotification(ctx, mp.GetUserId(), eqconfig)
+
+									// Trigger auto-report at penalty level 3
+									penaltyLevel := int32(eqconfig.PenaltyLevel)
 									if penaltyLevel > MaxEarlyQuitPenaltyLevel {
 										penaltyLevel = int32(MaxEarlyQuitPenaltyLevel)
 									}
-
-									// Get lockout duration for current penalty level (0s, 2m, 5m, 15m)
-									lockoutDuration := GetLockoutDurationSeconds(int(penaltyLevel))
-
-									penaltyExpiry := time.Now().Add(time.Duration(lockoutDuration) * time.Second)
-									messageTrigger.SendEarlyQuitUpdateNotification(ctx, mp.GetUserId(), 0, int32(eqconfig.GetEarlyQuitCount()), penaltyLevel, penaltyExpiry)
-
-									// Trigger auto-report at penalty level 3
 									if penaltyLevel >= 3 {
 										featureFlags := evr.DefaultEarlyQuitFeatureFlags()
 										if featureFlags != nil && featureFlags.IsAutoReportEnabled() {
@@ -1200,7 +1200,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					participation.LeaveReason = LeaveReasonReservationExp
 				}
 
-				eqconfig := NewEarlyQuitConfig()
+				eqconfig := NewEarlyQuitPlayerState()
 				if err := StorableRead(ctx, nk, rr.UserID, eqconfig, true); err != nil {
 					logger.WithField("error", err).Warn("Failed to load early quitter config for deferred penalty")
 				} else {
@@ -1276,7 +1276,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					continue
 				}
 
-				eqconfig := NewEarlyQuitConfig()
+				eqconfig := NewEarlyQuitPlayerState()
 				if err := StorableRead(ctx, nk, presence.GetUserId(), eqconfig, true); err != nil {
 					logger.WithField("error", err).Warn("Failed to load early quitter config for completed match")
 					continue

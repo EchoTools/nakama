@@ -3,6 +3,8 @@ package server
 import (
 	"sync"
 	"testing"
+
+	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 // Helper function to create int32 pointers
@@ -10,7 +12,7 @@ func ptrInt32(v int32) *int32 {
 	return &v
 }
 
-func TestEarlyQuitConfig_UpdateTier(t *testing.T) {
+func TestEarlyQuitPlayerState_UpdateTier(t *testing.T) {
 	tests := []struct {
 		name           string
 		penaltyLevel   int32
@@ -93,8 +95,8 @@ func TestEarlyQuitConfig_UpdateTier(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			config := NewEarlyQuitConfig()
-			config.EarlyQuitPenaltyLevel = tt.penaltyLevel
+			config := NewEarlyQuitPlayerState()
+			config.PenaltyLevel = tt.penaltyLevel
 
 			oldTier, newTier, changed := config.UpdateTier(tt.tier1Threshold)
 
@@ -119,9 +121,9 @@ func TestEarlyQuitConfig_UpdateTier(t *testing.T) {
 	}
 }
 
-func TestEarlyQuitConfig_UpdateTier_NoChange(t *testing.T) {
-	config := NewEarlyQuitConfig()
-	config.EarlyQuitPenaltyLevel = 1
+func TestEarlyQuitPlayerState_UpdateTier_NoChange(t *testing.T) {
+	config := NewEarlyQuitPlayerState()
+	config.PenaltyLevel = 1
 	config.MatchmakingTier = MatchmakingTier2
 
 	oldTier, newTier, changed := config.UpdateTier(ptrInt32(0))
@@ -139,13 +141,13 @@ func TestEarlyQuitConfig_UpdateTier_NoChange(t *testing.T) {
 	}
 }
 
-func TestEarlyQuitConfig_UpdateTier_TierChange(t *testing.T) {
-	config := NewEarlyQuitConfig()
-	config.EarlyQuitPenaltyLevel = 1
+func TestEarlyQuitPlayerState_UpdateTier_TierChange(t *testing.T) {
+	config := NewEarlyQuitPlayerState()
+	config.PenaltyLevel = 1
 	config.MatchmakingTier = MatchmakingTier2
 
 	// Reduce penalty to move back to Tier 1
-	config.EarlyQuitPenaltyLevel = 0
+	config.PenaltyLevel = 0
 
 	oldTier, newTier, changed := config.UpdateTier(ptrInt32(0))
 
@@ -166,60 +168,60 @@ func TestEarlyQuitConfig_UpdateTier_TierChange(t *testing.T) {
 	}
 }
 
-func TestEarlyQuitConfig_IncrementEarlyQuit(t *testing.T) {
-	config := NewEarlyQuitConfig()
-	initialLevel := config.EarlyQuitPenaltyLevel
+func TestEarlyQuitPlayerState_IncrementEarlyQuit(t *testing.T) {
+	config := NewEarlyQuitPlayerState()
+	initialQuits := config.NumEarlyQuits
 
 	config.IncrementEarlyQuit()
 
-	if config.EarlyQuitPenaltyLevel != initialLevel+1 {
-		t.Errorf("EarlyQuitPenaltyLevel = %v, want %v", config.EarlyQuitPenaltyLevel, initialLevel+1)
+	if config.NumEarlyQuits != initialQuits+1 {
+		t.Errorf("NumEarlyQuits = %v, want %v", config.NumEarlyQuits, initialQuits+1)
 	}
 
-	if config.LastEarlyQuitTime.IsZero() {
-		t.Error("LastEarlyQuitTime should be set after IncrementEarlyQuit")
+	if config.NumSteadyEarlyQuits != 1 {
+		t.Errorf("NumSteadyEarlyQuits = %v, want 1", config.NumSteadyEarlyQuits)
 	}
 }
 
-func TestEarlyQuitConfig_IncrementEarlyQuit_MaxPenalty(t *testing.T) {
-	config := NewEarlyQuitConfig()
-	config.EarlyQuitPenaltyLevel = MaxEarlyQuitPenaltyLevel
+func TestEarlyQuitPlayerState_IncrementEarlyQuit_CountsAccumulate(t *testing.T) {
+	config := NewEarlyQuitPlayerState()
 
 	config.IncrementEarlyQuit()
+	config.IncrementEarlyQuit()
+	config.IncrementEarlyQuit()
 
-	if config.EarlyQuitPenaltyLevel != MaxEarlyQuitPenaltyLevel {
-		t.Errorf("EarlyQuitPenaltyLevel = %v, want %v (max)", config.EarlyQuitPenaltyLevel, MaxEarlyQuitPenaltyLevel)
+	if config.NumEarlyQuits != 3 {
+		t.Errorf("NumEarlyQuits = %v, want 3", config.NumEarlyQuits)
 	}
 }
 
-func TestEarlyQuitConfig_IncrementCompletedMatches(t *testing.T) {
-	config := NewEarlyQuitConfig()
-	config.EarlyQuitPenaltyLevel = 2
+func TestEarlyQuitPlayerState_IncrementCompletedMatches(t *testing.T) {
+	config := NewEarlyQuitPlayerState()
 
 	config.IncrementCompletedMatches()
 
-	if config.EarlyQuitPenaltyLevel != 1 {
-		t.Errorf("EarlyQuitPenaltyLevel = %v, want 1", config.EarlyQuitPenaltyLevel)
+	if config.TotalCompletedMatches != 1 {
+		t.Errorf("TotalCompletedMatches = %v, want 1", config.TotalCompletedMatches)
 	}
 
-	if !config.LastEarlyQuitTime.IsZero() {
-		t.Error("LastEarlyQuitTime should be cleared after IncrementCompletedMatches")
+	if config.NumSteadyMatches != 1 {
+		t.Errorf("NumSteadyMatches = %v, want 1", config.NumSteadyMatches)
 	}
 }
 
-func TestEarlyQuitConfig_IncrementCompletedMatches_MinPenalty(t *testing.T) {
-	config := NewEarlyQuitConfig()
-	config.EarlyQuitPenaltyLevel = MinEarlyQuitPenaltyLevel
+func TestEarlyQuitPlayerState_IncrementCompletedMatches_Accumulates(t *testing.T) {
+	config := NewEarlyQuitPlayerState()
+	config.TotalCompletedMatches = 10
 
 	config.IncrementCompletedMatches()
 
-	if config.EarlyQuitPenaltyLevel != MinEarlyQuitPenaltyLevel {
-		t.Errorf("EarlyQuitPenaltyLevel = %v, want %v (min)", config.EarlyQuitPenaltyLevel, MinEarlyQuitPenaltyLevel)
+	if config.TotalCompletedMatches != 11 {
+		t.Errorf("TotalCompletedMatches = %v, want 11", config.TotalCompletedMatches)
 	}
 }
 
-func TestEarlyQuitConfig_GetTier(t *testing.T) {
-	config := NewEarlyQuitConfig()
+func TestEarlyQuitPlayerState_GetTier(t *testing.T) {
+	config := NewEarlyQuitPlayerState()
 	config.MatchmakingTier = MatchmakingTier2
 
 	tier := config.GetTier()
@@ -229,9 +231,9 @@ func TestEarlyQuitConfig_GetTier(t *testing.T) {
 	}
 }
 
-func TestEarlyQuitConfig_GetPenaltyLevel(t *testing.T) {
-	config := NewEarlyQuitConfig()
-	config.EarlyQuitPenaltyLevel = 2
+func TestEarlyQuitPlayerState_GetPenaltyLevel(t *testing.T) {
+	config := NewEarlyQuitPlayerState()
+	config.PenaltyLevel = 2
 
 	level := config.GetPenaltyLevel()
 
@@ -240,8 +242,8 @@ func TestEarlyQuitConfig_GetPenaltyLevel(t *testing.T) {
 	}
 }
 
-func TestEarlyQuitConfig_ConcurrentAccess(t *testing.T) {
-	config := NewEarlyQuitConfig()
+func TestEarlyQuitPlayerState_ConcurrentAccess(t *testing.T) {
+	config := NewEarlyQuitPlayerState()
 	var wg sync.WaitGroup
 
 	// Simulate concurrent early quits and completed matches
@@ -266,9 +268,9 @@ func TestEarlyQuitConfig_ConcurrentAccess(t *testing.T) {
 	}
 }
 
-func TestEarlyQuitConfig_ConcurrentUpdateTier(t *testing.T) {
-	config := NewEarlyQuitConfig()
-	config.EarlyQuitPenaltyLevel = 1
+func TestEarlyQuitPlayerState_ConcurrentUpdateTier(t *testing.T) {
+	config := NewEarlyQuitPlayerState()
+	config.PenaltyLevel = 1
 	var wg sync.WaitGroup
 
 	// Simulate concurrent tier updates
@@ -289,8 +291,8 @@ func TestEarlyQuitConfig_ConcurrentUpdateTier(t *testing.T) {
 	}
 }
 
-func TestEarlyQuitConfig_TierTransitionFlow(t *testing.T) {
-	config := NewEarlyQuitConfig()
+func TestEarlyQuitPlayerState_TierTransitionFlow(t *testing.T) {
+	config := NewEarlyQuitPlayerState()
 
 	// Start in Tier 1
 	_, tier, _ := config.UpdateTier(ptrInt32(0))
@@ -298,65 +300,90 @@ func TestEarlyQuitConfig_TierTransitionFlow(t *testing.T) {
 		t.Errorf("Initial tier = %v, want %v", tier, MatchmakingTier1)
 	}
 
-	// Early quit moves to Tier 2
+	// Early quit moves to Tier 2 (caller resolves penalty level from config)
 	config.IncrementEarlyQuit()
+	config.PenaltyLevel = 1 // Caller sets penalty level
 	oldTier, newTier, changed := config.UpdateTier(ptrInt32(0))
 	if oldTier != MatchmakingTier1 || newTier != MatchmakingTier2 || !changed {
 		t.Errorf("After early quit: oldTier=%v, newTier=%v, changed=%v, want Tier1→Tier2", oldTier, newTier, changed)
 	}
 
-	// Complete match returns to Tier 1
+	// Complete match returns to Tier 1 (caller resolves penalty level from config)
 	config.IncrementCompletedMatches()
+	config.PenaltyLevel = 0 // Caller re-resolves penalty level
 	oldTier, newTier, changed = config.UpdateTier(ptrInt32(0))
 	if oldTier != MatchmakingTier2 || newTier != MatchmakingTier1 || !changed {
 		t.Errorf("After completed match: oldTier=%v, newTier=%v, changed=%v, want Tier2→Tier1", oldTier, newTier, changed)
 	}
 }
 
-func TestCalculatePlayerReliabilityRating(t *testing.T) {
+func TestResolvePenaltyLevel(t *testing.T) {
+	cfg := evr.NewDefaultSNSEarlyQuitConfig()
+	// Default levels: 0(0-2,0s), 1(3-5,120s), 2(6-10,300s), 3(11-999,900s)
+
 	tests := []struct {
-		name             string
-		earlyQuits       int32
-		completedMatches int32
-		expectedRating   float64
+		name          string
+		numQuits      int32
+		expectLevel   int32
+		expectLockout int32
 	}{
-		{
-			name:             "No matches played",
-			earlyQuits:       0,
-			completedMatches: 0,
-			expectedRating:   1.0,
-		},
-		{
-			name:             "All matches completed",
-			earlyQuits:       0,
-			completedMatches: 10,
-			expectedRating:   1.0,
-		},
-		{
-			name:             "All matches early quit",
-			earlyQuits:       10,
-			completedMatches: 0,
-			expectedRating:   0.0,
-		},
-		{
-			name:             "Half early quit",
-			earlyQuits:       5,
-			completedMatches: 5,
-			expectedRating:   0.5,
-		},
-		{
-			name:             "75% completion rate",
-			earlyQuits:       25,
-			completedMatches: 75,
-			expectedRating:   0.75,
-		},
+		{"zero quits", 0, 0, 0},
+		{"2 quits (top of level 0)", 2, 0, 0},
+		{"3 quits (level 1 min)", 3, 1, 120},
+		{"5 quits (level 1 max)", 5, 1, 120},
+		{"6 quits (level 2 min)", 6, 2, 300},
+		{"10 quits (level 2 max)", 10, 2, 300},
+		{"11 quits (level 3 min)", 11, 3, 900},
+		{"999 quits (level 3 max)", 999, 3, 900},
+		{"1000 quits (above all ranges)", 1000, 3, 900},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rating := CalculatePlayerReliabilityRating(tt.earlyQuits, tt.completedMatches)
-			if rating != tt.expectedRating {
-				t.Errorf("CalculatePlayerReliabilityRating() = %v, want %v", rating, tt.expectedRating)
+			level, lockout := ResolvePenaltyLevel(tt.numQuits, cfg)
+			if level != tt.expectLevel {
+				t.Errorf("ResolvePenaltyLevel(%d) level = %d, want %d", tt.numQuits, level, tt.expectLevel)
+			}
+			if lockout != tt.expectLockout {
+				t.Errorf("ResolvePenaltyLevel(%d) lockout = %d, want %d", tt.numQuits, lockout, tt.expectLockout)
+			}
+		})
+	}
+}
+
+func TestResolvePenaltyLevel_NilConfig(t *testing.T) {
+	level, lockout := ResolvePenaltyLevel(5, nil)
+	if level != 0 || lockout != 0 {
+		t.Errorf("ResolvePenaltyLevel with nil config = (%d, %d), want (0, 0)", level, lockout)
+	}
+}
+
+func TestResolveSteadyPlayerLevel(t *testing.T) {
+	cfg := evr.NewDefaultSNSEarlyQuitConfig()
+	// Default steady levels: 0(0 matches, 0.0), 1(10 matches, 0.9), 2(25 matches, 0.95)
+
+	tests := []struct {
+		name          string
+		matches       int32
+		quits         int32
+		expectLevel   int32
+	}{
+		{"no matches", 0, 0, 0},
+		{"5 matches no quits", 5, 0, 0},          // below 10 min_matches for level 1
+		{"10 matches no quits", 10, 0, 1},         // 100% ratio >= 0.9, matches >= 10
+		{"10 matches 1 quit", 10, 1, 1},           // 90% ratio >= 0.9
+		{"10 matches 2 quits", 10, 2, 0},          // 80% ratio < 0.9
+		{"25 matches no quits", 25, 0, 2},         // 100% ratio >= 0.95, matches >= 25
+		{"25 matches 1 quit", 25, 1, 2},           // 96% ratio >= 0.95
+		{"25 matches 2 quits", 25, 2, 1},          // 92% ratio < 0.95 but >= 0.9, matches >= 10
+		{"100 matches 5 quits", 100, 5, 2},        // 95% ratio >= 0.95
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			level := ResolveSteadyPlayerLevel(tt.matches, tt.quits, cfg)
+			if level != tt.expectLevel {
+				t.Errorf("ResolveSteadyPlayerLevel(%d, %d) = %d, want %d", tt.matches, tt.quits, level, tt.expectLevel)
 			}
 		})
 	}

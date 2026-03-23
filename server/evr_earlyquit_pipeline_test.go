@@ -41,8 +41,8 @@ func TestEarlyQuitDetectionPipeline(t *testing.T) {
 
 		// Before leaving, record initial early quit count
 		// In a real scenario, we would read from storage
-		initialConfig := NewEarlyQuitConfig()
-		initialEarlyQuits := initialConfig.TotalEarlyQuits
+		initialConfig := NewEarlyQuitPlayerState()
+		initialEarlyQuits := initialConfig.NumEarlyQuits
 
 		// Simulate player leaving
 		// The early quit detection happens when:
@@ -72,20 +72,16 @@ func TestEarlyQuitDetectionPipeline(t *testing.T) {
 		// For now, we're validating the conditions that should trigger early quit detection
 
 		// Simulate the early quit increment
-		config := NewEarlyQuitConfig()
+		config := NewEarlyQuitPlayerState()
 		config.IncrementEarlyQuit()
 
-		if config.TotalEarlyQuits != initialEarlyQuits+1 {
+		if config.NumEarlyQuits != initialEarlyQuits+1 {
 			t.Errorf("Expected TotalEarlyQuits to increment from %d to %d, got %d",
-				initialEarlyQuits, initialEarlyQuits+1, config.TotalEarlyQuits)
+				initialEarlyQuits, initialEarlyQuits+1, config.NumEarlyQuits)
 		}
 
-		if config.EarlyQuitPenaltyLevel != 1 {
-			t.Errorf("Expected EarlyQuitPenaltyLevel to be 1, got %d", config.EarlyQuitPenaltyLevel)
-		}
-
-		if config.LastEarlyQuitTime.IsZero() {
-			t.Error("Expected LastEarlyQuitTime to be set")
+		if config.NumSteadyEarlyQuits != 1 {
+			t.Errorf("Expected NumSteadyEarlyQuits to be 1, got %d", config.NumSteadyEarlyQuits)
 		}
 	})
 
@@ -178,54 +174,32 @@ func TestEarlyQuitDetectionPipeline(t *testing.T) {
 	})
 
 	t.Run("Multiple early quits accumulate correctly", func(t *testing.T) {
-		config := NewEarlyQuitConfig()
+		config := NewEarlyQuitPlayerState()
 
 		// First early quit
 		config.IncrementEarlyQuit()
-		if config.TotalEarlyQuits != 1 {
-			t.Errorf("Expected 1 early quit, got %d", config.TotalEarlyQuits)
+		if config.NumEarlyQuits != 1 {
+			t.Errorf("Expected 1 early quit, got %d", config.NumEarlyQuits)
 		}
 
 		// Second early quit
 		config.IncrementEarlyQuit()
-		if config.TotalEarlyQuits != 2 {
-			t.Errorf("Expected 2 early quits, got %d", config.TotalEarlyQuits)
+		if config.NumEarlyQuits != 2 {
+			t.Errorf("Expected 2 early quits, got %d", config.NumEarlyQuits)
 		}
 
 		// Third early quit
 		config.IncrementEarlyQuit()
-		if config.TotalEarlyQuits != 3 {
-			t.Errorf("Expected 3 early quits, got %d", config.TotalEarlyQuits)
+		if config.NumEarlyQuits != 3 {
+			t.Errorf("Expected 3 early quits, got %d", config.NumEarlyQuits)
 		}
 
-		// Penalty level should also increase (capped at max)
-		if config.EarlyQuitPenaltyLevel != 3 {
-			t.Errorf("Expected penalty level 3, got %d", config.EarlyQuitPenaltyLevel)
-		}
-	})
-
-	t.Run("Early quit updates player reliability rating", func(t *testing.T) {
-		config := NewEarlyQuitConfig()
-
-		// Complete some matches first
-		config.TotalCompletedMatches = 10
-		initialRating := CalculatePlayerReliabilityRating(0, 10)
-		if initialRating != 1.0 {
-			t.Errorf("Expected initial rating 1.0, got %f", initialRating)
-		}
-
-		// Early quit should decrease rating
-		config.IncrementEarlyQuit()
-		expectedRating := CalculatePlayerReliabilityRating(1, 10)
-		if config.PlayerReliabilityRating != expectedRating {
-			t.Errorf("Expected rating %f, got %f", expectedRating, config.PlayerReliabilityRating)
-		}
-
-		// Verify the math: 10/(10+1) = 0.909...
-		if config.PlayerReliabilityRating < 0.90 || config.PlayerReliabilityRating > 0.92 {
-			t.Errorf("Expected rating around 0.91, got %f", config.PlayerReliabilityRating)
+		// NumSteadyEarlyQuits should also track
+		if config.NumSteadyEarlyQuits != 3 {
+			t.Errorf("Expected NumSteadyEarlyQuits 3, got %d", config.NumSteadyEarlyQuits)
 		}
 	})
+
 }
 
 // TestEarlyQuitConditions tests the specific conditions that must be met

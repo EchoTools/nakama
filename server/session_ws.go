@@ -201,7 +201,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		loginSession:         nil,
 		lobbySession:         nil,
 		serverSession:        nil,
-		earlyQuitConfig:      atomic.NewPointer[EarlyQuitConfig](nil),
+		earlyQuitConfig:      atomic.NewPointer[EarlyQuitPlayerState](nil),
 		isGoldNameTag:        atomic.NewBool(false),
 		latencyHistory:       atomic.NewPointer[LatencyHistory](nil),
 	}

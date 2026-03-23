@@ -44,7 +44,7 @@ type SessionParameters struct {
 	profile                      *EVRProfile                      // The account
 	matchmakingSettings          *MatchmakingSettings             // The matchmaking settings
 	guildGroups                  map[string]*GuildGroup           // map[string]*GuildGroup
-	earlyQuitConfig              *atomic.Pointer[EarlyQuitConfig] // The early quit config
+	earlyQuitConfig              *atomic.Pointer[EarlyQuitPlayerState] // The early quit config
 	isGoldNameTag                *atomic.Bool                     // If this user should have a gold name tag
 	lastMatchmakingError         *atomic.Error                    // The last matchmaking error
 	latencyHistory               *atomic.Pointer[LatencyHistory]  // The latency history

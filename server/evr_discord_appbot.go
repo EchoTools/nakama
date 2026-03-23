@@ -2668,7 +2668,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return editInteractionResponse(s, i, fmt.Sprintf("Failed to get account: %v", err))
 			}
 
-			config := &EarlyQuitConfig{}
+			config := &EarlyQuitPlayerState{}
 			if err := StorableRead(ctx, nk, targetUserID, config, true); err != nil {
 				return editInteractionResponse(s, i, fmt.Sprintf("Failed to load early quit config: %v", err))
 			}
@@ -2680,16 +2680,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				lockoutDuration = GetLockoutDuration(int(penaltyLevel))
 			}
 
-			config.EarlyQuitPenaltyLevel = int32(penaltyLevel)
-			config.LastEarlyQuitTime = time.Now()
+			config.PenaltyLevel = int32(penaltyLevel)
 
 			if err := StorableWrite(ctx, nk, targetUserID, config); err != nil {
 				return editInteractionResponse(s, i, fmt.Sprintf("Failed to save early quit config: %v", err))
 			}
 
 			if trigger := globalEarlyQuitMessageTrigger.Load(); trigger != nil {
-				durationSeconds := int32(lockoutDuration.Seconds())
-
 				// Get all active EVR sessions for the target player
 				sessions := trigger.getEvrSessions(targetUserID)
 
@@ -2714,8 +2711,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 
 					// Send early quit update notification
-					penaltyExpiry := time.Now().Add(time.Duration(durationSeconds) * time.Second)
-					if err := trigger.SendEarlyQuitUpdateNotification(ctx, targetUserID, 0, 0, int32(penaltyLevel), penaltyExpiry); err != nil {
+					if err := trigger.SendEarlyQuitUpdateNotification(ctx, targetUserID, config); err != nil {
 						logger.Warn("Failed to send early quit update notification",
 							zap.String("user_id", targetUserID),
 							zap.Error(err))
