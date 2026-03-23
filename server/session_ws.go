@@ -545,6 +545,8 @@ OutgoingLoop:
 			}
 
 			// Batch: open a single WebSocket writer and drain all pending messages into it.
+			// Only EVR sessions support concatenating multiple messages in one frame;
+			// JSON and protobuf formats require one message per WebSocket frame.
 			w, err := s.conn.NextWriter(s.wsMessageType)
 			if err != nil {
 				s.Unlock()
@@ -554,21 +556,26 @@ OutgoingLoop:
 			}
 			bytesSent := int64(len(payload))
 			if _, err = w.Write(payload); err != nil {
+				_ = w.Close()
 				s.Unlock()
 				s.logger.Warn("Could not write message", zap.Error(err))
 				reason = err.Error()
 				break OutgoingLoop
 			}
-			// Drain any additional pending messages into the same write.
-			n := len(s.outgoingCh)
-			for i := 0; i < n; i++ {
-				additional := <-s.outgoingCh
-				bytesSent += int64(len(additional))
-				if _, err = w.Write(additional); err != nil {
-					break
+			// Drain any additional pending messages into the same frame.
+			// Only safe for EVR binary protocol which supports concatenated packets.
+			if s.format == SessionFormatEVR {
+				n := len(s.outgoingCh)
+				for i := 0; i < n; i++ {
+					additional := <-s.outgoingCh
+					if _, err = w.Write(additional); err != nil {
+						break
+					}
+					bytesSent += int64(len(additional))
 				}
 			}
 			if err != nil {
+				_ = w.Close()
 				s.Unlock()
 				s.logger.Warn("Could not write batched message", zap.Error(err))
 				reason = err.Error()
