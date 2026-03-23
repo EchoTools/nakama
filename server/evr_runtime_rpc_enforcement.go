@@ -201,10 +201,14 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 
 	// Kick the player from active sessions
 	if kickPlayer {
-		// Kick the player from their current match. Sessions stay connected;
-		// future match joins for this guild are refused at authorization time.
+		// Kick the player from matches belonging to this guild. Sessions stay
+		// connected; future match joins are refused at authorization time.
+		suspendedGuildIDs := []string{groupID}
+		if gg != nil && gg.SuspensionInheritanceGroupIDs != nil {
+			suspendedGuildIDs = append(suspendedGuildIDs, gg.SuspensionInheritanceGroupIDs...)
+		}
 		_nk := nk.(*RuntimeGoNakamaModule)
-		EnforceGuildSuspension(ctx, RuntimeLoggerToZapLogger(logger), nk, _nk.sessionRegistry, targetUserID)
+		EnforceGuildSuspension(ctx, RuntimeLoggerToZapLogger(logger), nk, _nk.sessionRegistry, targetUserID, suspendedGuildIDs)
 		actions = append(actions, "kicked from current match")
 		cnt = len(presences)
 

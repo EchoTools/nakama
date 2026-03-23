@@ -20,22 +20,30 @@ const (
 // EnforceGuildSuspension enforces a guild suspension on a connected player.
 // It is non-blocking: the match kick runs in a goroutine.
 //
-// Suspensions are scoped to guild match access:
-//   - The player is kicked from their current match (reject sent to game server).
-//   - Future match joins for the suspended guild are refused at authorization time.
-//   - Sessions are NOT disconnected — the player can still use the client.
-//   - Messages are NOT ignored — server connections continue to function.
+// Only matches belonging to one of the specified guildGroupIDs are affected.
+// Sessions and server connections are never disconnected.
 func EnforceGuildSuspension(
 	ctx context.Context,
 	logger *zap.Logger,
 	nk runtime.NakamaModule,
 	sessionRegistry SessionRegistry,
 	userID string,
+	guildGroupIDs []string,
 ) {
 	userUUID := uuid.FromStringOrNil(userID)
 	if userUUID.IsNil() {
 		logger.Warn("EnforceGuildSuspension called with invalid user ID", zap.String("user_id", userID))
 		return
+	}
+
+	if len(guildGroupIDs) == 0 {
+		logger.Warn("EnforceGuildSuspension called with no guild group IDs", zap.String("user_id", userID))
+		return
+	}
+
+	guildSet := make(map[string]bool, len(guildGroupIDs))
+	for _, id := range guildGroupIDs {
+		guildSet[id] = true
 	}
 
 	// Collect all EVR sessions belonging to this user.
@@ -55,11 +63,12 @@ func EnforceGuildSuspension(
 		return
 	}
 
-	logger.Info("Enforcing guild suspension — kicking from all matches and servers",
+	logger.Info("Enforcing guild suspension — kicking from guild matches",
 		zap.String("user_id", userID),
+		zap.Strings("guild_group_ids", guildGroupIDs),
 		zap.Int("session_count", len(sessions)))
 
-	// Send lobby status notification and kick from all matches. Fire-and-forget goroutine.
+	// Kick from matches that belong to the suspended guild(s). Fire-and-forget goroutine.
 	go func() {
 		kicked := make(map[string]bool)
 		for _, ws := range sessions {
@@ -71,10 +80,17 @@ func EnforceGuildSuspension(
 			if kicked[mid] {
 				continue
 			}
-			kicked[mid] = true
 
-			// Send a LobbyStatusNotify so the player sees the kick reason.
-			SendLobbyStatusNotify(ws, matchID.UUID, "Suspended from guild", time.Time{}, evr.StatusUpdateKicked)
+			// Check if this match belongs to one of the suspended guilds.
+			label, err := MatchLabelByID(ctx, nk, matchID)
+			if err != nil || label == nil {
+				continue
+			}
+			if !guildSet[label.GetGroupID().String()] {
+				continue
+			}
+
+			kicked[mid] = true
 
 			if err := KickPlayerFromMatch(ctx, nk, matchID, userID); err != nil {
 				logger.Warn("Failed to kick suspended user from match",
@@ -82,9 +98,10 @@ func EnforceGuildSuspension(
 					zap.String("match_id", mid),
 					zap.Error(err))
 			} else {
-				logger.Info("Kicked suspended user from match",
+				logger.Info("Kicked suspended user from guild match",
 					zap.String("user_id", userID),
-					zap.String("match_id", mid))
+					zap.String("match_id", mid),
+					zap.String("match_group_id", label.GetGroupID().String()))
 			}
 		}
 	}()

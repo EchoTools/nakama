@@ -1174,7 +1174,7 @@ func (p *EvrPipeline) applyGhostSpamSuspension(
 		return
 	}
 
-	EnforceGuildSuspension(ctx, logger, p.nk, p.sessionRegistry, targetUserID)
+	EnforceGuildSuspension(ctx, logger, p.nk, p.sessionRegistry, targetUserID, []string{groupID})
 
 	if _, err := p.appBot.LogAuditMessage(ctx, groupID,
 		fmt.Sprintf("🚫 **Auto-suspend (1h)**: Enforcer <@%s> ghost-spammed player `%s` — %s",

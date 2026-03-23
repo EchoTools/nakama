@@ -425,7 +425,7 @@ func TestEnforceGuildSuspension_NoDisconnect(t *testing.T) {
 	nk := newSuspendTestNakamaModule()
 	logger := zap.NewNop()
 
-	EnforceGuildSuspension(context.Background(), logger, nk, &mockSessionRegistry{}, uuid.Must(uuid.NewV4()).String())
+	EnforceGuildSuspension(context.Background(), logger, nk, &mockSessionRegistry{}, uuid.Must(uuid.NewV4()).String(), []string{"group-1"})
 
 	// Wait for any goroutines
 	time.Sleep(100 * time.Millisecond)
@@ -438,8 +438,8 @@ func TestEnforceGuildSuspension_InvalidUserID(t *testing.T) {
 	logger := zap.NewNop()
 
 	// Should return early without panic
-	EnforceGuildSuspension(context.Background(), logger, nk, &mockSessionRegistry{}, "")
-	EnforceGuildSuspension(context.Background(), logger, nk, &mockSessionRegistry{}, "not-a-uuid")
+	EnforceGuildSuspension(context.Background(), logger, nk, &mockSessionRegistry{}, "", []string{"group-1"})
+	EnforceGuildSuspension(context.Background(), logger, nk, &mockSessionRegistry{}, "not-a-uuid", []string{"group-1"})
 }
 
 // --- DisconnectUserID tests ---
