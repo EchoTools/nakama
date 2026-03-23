@@ -217,8 +217,10 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	connectionSettings := label.GetEntrantConnectMessage(e.RoleAlignment, e.DisableEncryption, e.DisableMAC)
 
 	// Quest (standalone) clients use a different encoder flag bit layout (shifted by 1).
-	if params, ok := LoadParams(sessionCtx); ok && !params.IsPCVR() {
-		connectionSettings.UseQuestFlags = true
+	if ServiceSettings().UseQuestEncoderFlags {
+		if params, ok := LoadParams(sessionCtx); ok && !params.IsPCVR() {
+			connectionSettings.UseQuestFlags = true
+		}
 	}
 
 	// Create the protobuf envelope for the lobby session success message.
