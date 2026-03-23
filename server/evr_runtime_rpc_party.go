@@ -107,6 +107,21 @@ func PartyCreateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	}
 	username, _ := ctx.Value(runtime.RUNTIME_CTX_USERNAME).(string)
 
+	var req struct {
+		MaxSize int  `json:"max_size"`
+		Open    *bool `json:"open"`
+	}
+	if payload != "" {
+		json.Unmarshal([]byte(payload), &req) // ignore errors — use defaults
+	}
+	if req.MaxSize <= 0 {
+		req.MaxSize = PartyMaxDefaultSize
+	}
+	isOpen := true
+	if req.Open != nil {
+		isOpen = *req.Open
+	}
+
 	partyID := uuid.Must(uuid.NewV4()).String()
 
 	party := &StoredParty{
@@ -115,8 +130,8 @@ func PartyCreateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 		Members: []PartyMember{
 			{UserID: userID, Username: username},
 		},
-		MaxSize:   PartyMaxDefaultSize,
-		Open:      true,
+		MaxSize:   req.MaxSize,
+		Open:      isOpen,
 		CreatedAt: time.Now().UTC(),
 	}
 
