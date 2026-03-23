@@ -210,7 +210,7 @@ func (pm *MatchPreemptionManager) shutdownMatch(ctx context.Context, matchID, re
 	payload := SignalShutdownPayload{
 		GraceSeconds:         30,
 		DisconnectGameServer: false,
-		DisconnectUsers:      true,
+		DisconnectUsers:      false,
 	}
 
 	_, err := SignalMatch(ctx, pm.nk, mID, SignalShutdown, payload)

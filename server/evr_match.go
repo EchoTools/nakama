@@ -1405,40 +1405,26 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 	}
 
 	if state.server != nil {
-
-		/*
-			// Send return to lobby message.
-			if s := nk.(*RuntimeGoNakamaModule).sessionRegistry.Get(uuid.FromStringOrNil(state.GameServer.GetSessionId())); s != nil {
-				if err := SendEVRMessages(s, false, &evr.NEVRLobbyReturnToLobbyV1{}); err != nil {
-					logger.Warn("Failed to send return to lobby message: %v", err)
-				} else {
-					logger.Debug("Sent return to lobby message to game server.")
-				}
-			}
-		*/
-
-		entrantIDs := make([]uuid.UUID, 0, len(state.presenceMap))
-
-		for _, mp := range state.presenceMap {
-			logger := logger.WithFields(map[string]any{
-				"uid": mp.GetUserId(),
-				"sid": mp.GetSessionId(),
-			})
-			logger.Warn("Match shutting down, disconnecting player.")
-			for _, p := range state.presenceMap {
-				if mp.EvrID.Equals(p.EvrID) {
-					entrantIDs = append(entrantIDs, p.EntrantID)
-				}
-			}
+		// Ask the game server to return all players to lobby gracefully via CODE_ENDED.
+		// The game server calls NetGameScheduleReturnToLobby and clears its session state,
+		// giving players a smooth transition instead of a hard kick.
+		envelope := &rtapi.Envelope{
+			Message: &rtapi.Envelope_LobbySessionEvent{
+				LobbySessionEvent: &rtapi.LobbySessionEventMessage{
+					LobbySessionId: state.ID.UUID.String(),
+					Code:           int32(rtapi.LobbySessionEventMessage_CODE_ENDED),
+				},
+			},
 		}
-
-		if len(entrantIDs) > 0 {
-			go func(server runtime.Presence, entrantIDs []uuid.UUID) {
-				<-time.After(time.Second * 5) // Give the game server time to process the return to lobby message.
-				if err := m.sendEntrantReject(ctx, logger, dispatcher, server, evr.PlayerRejectionReasonLobbyEnding, entrantIDs...); err != nil {
-					logger.Error("Failed to send entrant reject: %v", err)
-				}
-			}(state.server, entrantIDs)
+		msg, err := evr.NewNEVRProtobufMessageV1(envelope)
+		if err != nil {
+			logger.Warn("Failed to create LobbySessionEvent CODE_ENDED message: %v", err)
+		} else {
+			if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{state.server}, nil); err != nil {
+				logger.Warn("Failed to send LobbySessionEvent CODE_ENDED to game server: %v", err)
+			} else {
+				logger.Info("Sent LobbySessionEvent CODE_ENDED to game server — players will return to lobby.")
+			}
 		}
 	}
 
