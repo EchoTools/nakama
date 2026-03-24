@@ -32,25 +32,24 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			return NewLobbyErrorf(MissingEntitlement, "required features not supported in matchmaking.")
 		}
 
-		// Rewrite mode 'echo_arena_public_ai' as 'echo_combat' for PCVR users
+		// Rewrite mode 'echo_arena_public_ai' as 'echo_combat' for PCVR users (unless Global Developer)
 		if lobbyParams.Mode == evr.ModeArenaPublicAI {
 
-			params, ok := LoadParams(ctx)
-			if ok && params.IsPCVR() {
-				lobbyParams.Mode = evr.ModeCombatPublic
-				lobbyParams.Level = evr.LevelUnspecified
+			isGlobalDeveloper, err := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalDevelopers)
+			if err != nil {
+				logger.Warn("Failed to check Global Developers group membership", zap.Error(err))
+			}
+
+			if isGlobalDeveloper {
+				// Allow Global Developers to use AI CO-OP mode directly
 			} else {
-				// Check if user is in Global Developers group
-				isGlobalDeveloper, err := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalDevelopers)
-				if err != nil {
-					logger.Warn("Failed to check Global Developers group membership", zap.Error(err))
+				params, ok := LoadParams(ctx)
+				if ok && params.IsPCVR() {
+					lobbyParams.Mode = evr.ModeCombatPublic
+					lobbyParams.Level = evr.LevelUnspecified
+				} else {
 					return NewLobbyErrorf(BadRequest, "mode `%s` not supported", lobbyParams.Mode.String())
 				}
-				if !isGlobalDeveloper {
-					// Otherwise, respond with a bad request
-					return NewLobbyErrorf(BadRequest, "mode `%s` not supported", lobbyParams.Mode.String())
-				}
-				// Allow Global Developers to use this mode
 			}
 		}
 
