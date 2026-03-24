@@ -594,6 +594,17 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 	leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
 	leaderUserID := uuid.FromStringOrNil(leader.UserId)
 
+	// If the leader is currently matchmaking, don't try to follow their
+	// old match — wait for matchmaking to complete. Without this check,
+	// the follower joins the leader's stale match (e.g. social lobby),
+	// which untracks their matchmaking stream and gets them kicked from
+	// the party ticket. This is the primary cause of the "rubber-banding"
+	// bug in parties of 3+.
+	if pr := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, params.MatchmakingStream(), leaderUserID); pr != nil {
+		logger.Debug("Leader is currently matchmaking, falling through")
+		return false
+	}
+
 	// Look up the leader's current match via tracker.
 	stream := PresenceStream{
 		Mode:    StreamModeService,
@@ -686,9 +697,58 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 
 	logger.Debug("Polling to follow party leader (follower is in a lobby)")
 
+	// isFollowerInLeaderMatch checks if the follower was placed into the
+	// leader's match (e.g., by the matchmaker). This is used as a final
+	// check before returning false due to context cancellation — the
+	// matchmaker may have successfully placed both players even though
+	// the matchmaking monitor canceled our context.
+	isFollowerInLeaderMatch := func() bool {
+		leader := lobbyGroup.GetLeader()
+		if leader == nil || leader.SessionId == session.id.String() {
+			return false
+		}
+		leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
+		leaderUserID := uuid.FromStringOrNil(leader.UserId)
+
+		leaderStream := PresenceStream{
+			Mode:    StreamModeService,
+			Subject: leaderSessionID,
+			Label:   StreamLabelMatchService,
+		}
+		leaderPresence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, leaderStream, leaderUserID)
+		if leaderPresence == nil {
+			return false
+		}
+		leaderMatchID := MatchIDFromStringOrNil(leaderPresence.GetStatus())
+		if leaderMatchID.IsNil() {
+			return false
+		}
+
+		memberStream := PresenceStream{
+			Mode:    StreamModeService,
+			Subject: session.id,
+			Label:   StreamLabelMatchService,
+		}
+		memberPresence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, memberStream, session.userID)
+		if memberPresence == nil {
+			return false
+		}
+		return MatchIDFromStringOrNil(memberPresence.GetStatus()) == leaderMatchID
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
+			// Before giving up, check if the matchmaker placed us into the
+			// leader's match. The matchmaking monitor may have canceled our
+			// context (by detecting our matchmaking stream was removed), but
+			// that removal happened precisely because we were placed into
+			// a match. Without this check, the follower returns false and
+			// the client retries, creating a persistent matchmaking loop.
+			if isFollowerInLeaderMatch() {
+				logger.Debug("Context canceled but follower is in leader's match (placed by matchmaker)")
+				return true
+			}
 			return false
 		case <-time.After(3 * time.Second):
 		}
@@ -733,6 +793,12 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		// Wait for the leader to settle, then check if we ended up in the same match.
 		select {
 		case <-ctx.Done():
+			// Same check as above — the matchmaker may have placed us during
+			// the settle wait.
+			if isFollowerInLeaderMatch() {
+				logger.Debug("Context canceled during settle but follower is in leader's match")
+				return true
+			}
 			return false
 		case <-time.After(3 * time.Second):
 		}
@@ -748,7 +814,8 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		}
 
 		if memberMatchID == leaderMatchID {
-			continue
+			logger.Debug("Already in leader's match during poll")
+			return true
 		}
 
 		label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
