@@ -82,6 +82,65 @@ func (s *ServerProfileStorage) StorageIndexes() []StorableIndexMeta {
 	}}
 }
 
+// filterUnlocksToEquipped removes non-equipped items from the "unlocks" field
+// of a ServerProfile JSON blob. The client needs equipped items present in
+// unlocks to validate and render cosmetics; stripping ALL unlocks causes the
+// "pink player" bug. This function keeps only the items that appear in the
+// loadout, hiding the rest of the player's collection from other users.
+func filterUnlocksToEquipped(data json.RawMessage) (json.RawMessage, error) {
+	var profile struct {
+		Unlocks map[string]map[string]bool `json:"unlocks"`
+		Loadout struct {
+			Instances struct {
+				Unified struct {
+					Slots map[string]string `json:"slots"`
+				} `json:"unified"`
+			} `json:"instances"`
+		} `json:"loadout"`
+	}
+	if err := json.Unmarshal(data, &profile); err != nil {
+		return nil, fmt.Errorf("failed to parse profile for unlock filtering: %w", err)
+	}
+
+	// Collect all item IDs from the equipped loadout.
+	equipped := make(map[string]struct{}, len(profile.Loadout.Instances.Unified.Slots))
+	for _, itemID := range profile.Loadout.Instances.Unified.Slots {
+		if itemID != "" {
+			equipped[itemID] = struct{}{}
+		}
+	}
+
+	// Filter each unlock group to only include equipped items.
+	filtered := make(map[string]map[string]bool, len(profile.Unlocks))
+	for group, items := range profile.Unlocks {
+		kept := make(map[string]bool)
+		for itemID, v := range items {
+			if _, ok := equipped[itemID]; ok && v {
+				kept[itemID] = true
+			}
+		}
+		if len(kept) > 0 {
+			filtered[group] = kept
+		}
+	}
+
+	// Replace the unlocks field in the raw JSON.
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("failed to parse profile envelope: %w", err)
+	}
+	filteredJSON, err := json.Marshal(filtered)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal filtered unlocks: %w", err)
+	}
+	m["unlocks"] = filteredJSON
+	out, err := json.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("failed to re-marshal filtered profile: %w", err)
+	}
+	return out, nil
+}
+
 // NewServerProfileStorage creates a new ServerProfileStorage from a ServerProfile
 func NewServerProfileStorage(userID string, profile *evr.ServerProfile) (*ServerProfileStorage, error) {
 	profileJSON, err := json.Marshal(profile)
@@ -204,10 +263,15 @@ func ServerProfileLoadByXPID(ctx context.Context, logger *zap.Logger, db *sql.DB
 		if err := json.Unmarshal([]byte(obj.Value), storage); err != nil {
 			logger.Warn("Failed to unmarshal cached server profile, regenerating", zap.Error(err))
 		} else {
-			// Return the full profile — the client needs unlocks to render
-			// equipped cosmetics. Stripping unlocks causes the "pink player" bug
-			// where everyone appears with default appearance.
-			return storage.Profile, obj.UserId, nil
+			// Filter unlocks to only include equipped items. The client needs
+			// equipped items in unlocks to render cosmetics, but we hide the
+			// rest of the player's collection from other users.
+			filtered, err := filterUnlocksToEquipped(storage.Profile)
+			if err != nil {
+				logger.Warn("Failed to filter unlocks, returning full profile", zap.Error(err))
+				return storage.Profile, obj.UserId, nil
+			}
+			return filtered, obj.UserId, nil
 		}
 	}
 
@@ -220,7 +284,11 @@ func ServerProfileLoadByXPID(ctx context.Context, logger *zap.Logger, db *sql.DB
 			obj := objects.Objects[0]
 			storage := &ServerProfileStorage{}
 			if err := json.Unmarshal([]byte(obj.Value), storage); err == nil {
-				return &profileLoadResult{profile: storage.Profile, userID: obj.UserId}, nil
+				filtered, ferr := filterUnlocksToEquipped(storage.Profile)
+				if ferr != nil {
+					filtered = storage.Profile
+				}
+				return &profileLoadResult{profile: filtered, userID: obj.UserId}, nil
 			}
 		}
 
@@ -261,7 +329,11 @@ func ServerProfileLoadByXPID(ctx context.Context, logger *zap.Logger, db *sql.DB
 			}
 		}
 
-		return &profileLoadResult{profile: profileJSON, userID: userID}, nil
+		filtered, ferr := filterUnlocksToEquipped(profileJSON)
+		if ferr != nil {
+			filtered = profileJSON
+		}
+		return &profileLoadResult{profile: filtered, userID: userID}, nil
 	})
 
 	if err != nil {
