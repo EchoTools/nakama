@@ -35,7 +35,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	// Restrict matchmaking to public lobbies only
 	switch lobbyParams.Mode {
-	case evr.ModeArenaPublic, evr.ModeSocialPublic, evr.ModeCombatPublic:
+	case evr.ModeArenaPublic, evr.ModeSocialPublic, evr.ModeCombatPublic, evr.ModeArenaPublicAI:
 	default:
 		return NewLobbyError(BadRequest, fmt.Sprintf("`%s` is an invalid mode for matchmaking.", lobbyParams.Mode.String()))
 	}
