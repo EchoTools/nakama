@@ -40,6 +40,7 @@ type GroupMetadata struct {
 	EnableGlobalPingForServers           bool              `json:"enable_global_ping_for_servers"`           // Enable global ping for servers (they will be in all pools for ping checks)
 	CreateCommandRateLimitPerMinute      float64           `json:"create_command_rate_limit_per_minute"`     // Rate limit for /create command (max creates per minute), 0 = disabled
 	CreateCommandExcludedModes           []string          `json:"create_command_excluded_modes"`            // Explicitly excluded /create modes for this guild group
+	CreateCommandMaxPlayersByMode        map[string]int    `json:"create_command_max_players_by_mode"`       // Max online players (per mode) before /create is disabled for non-privileged users (0 = no limit)
 	EnableServerEmbedsCommand            bool              `json:"enable_server_embeds_command"`             // Enable /show command for allocators to see server status embeds
 	DefaultBlockMinutes                  int               `json:"default_block_minutes"`                    // Default match block duration in minutes (default: 50)
 
@@ -55,6 +56,13 @@ func NewGuildGroupMetadata(guildID string) *GroupMetadata {
 		GuildID:               guildID,
 		MatchmakingChannelIDs: make(map[string]string),
 		AllowedFeatures:       make([]string, 0),
+		CreateCommandMaxPlayersByMode: map[string]int{
+			"echo_arena":         0,
+			"echo_combat":        0,
+			"echo_arena_private": 0,
+			"echo_combat_private": 0,
+			"social_2.0_private": 0,
+		},
 	}
 }
 

@@ -709,6 +709,18 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	isPrivileged := isGuildModerator || isGlobalOperator
 
 	if !isPrivileged {
+		// Check if the guild has a max player count for this mode
+		if maxPlayers, ok := group.CreateCommandMaxPlayersByMode[mode.String()]; ok && maxPlayers > 0 {
+			count, err := d.nk.StreamCount(StreamModeGuildGroup, groupID, "", mode.String())
+			if err != nil {
+				logger.Warn("Failed to get player count for mode", zap.String("mode", mode.String()), zap.Error(err))
+			} else if count >= maxPlayers {
+				return nil, 0, status.Errorf(codes.FailedPrecondition,
+					"there are already %d players in %s — the matchmaker will find you a game faster than /create. Use the queue instead!",
+					count, mode.String())
+			}
+		}
+
 		// Check if guild has custom rate limit configured
 		var rateLimitSeconds int
 		var rateLimitMessage string
@@ -756,10 +768,8 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	}
 	extIPs := latencyHistory.AverageRTTs(true)
 
-	// Filter servers to only those with RTT <= 90ms
-	// Note: 90ms is stricter than the 100ms HighLatencyThresholdMs used in matchmaking
-	// because /create is a manual server selection that should prioritize low latency
-	const maxLatencyMs = 90
+	// For public arena, filter servers to only those with RTT <= 90ms to prevent
+	// cross-region /create. Other modes allow any server with latency data.
 	filteredIPs := make(map[string]int)
 	minLatencyMs := 0
 	hasLatencyData := false
@@ -769,17 +779,17 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 			minLatencyMs = latency
 			hasLatencyData = true
 		}
-		if latency <= maxLatencyMs {
-			filteredIPs[ip] = latency
+		if mode == evr.ModeArenaPublic && !isPrivileged && latency > MaxRegionPingMs {
+			continue
 		}
+		filteredIPs[ip] = latency
 	}
 
-	// If no servers within 90ms, return appropriate error
 	if len(filteredIPs) == 0 {
 		if !hasLatencyData {
 			return nil, 0, fmt.Errorf("no latency history exists for your account; play some matches first to establish server latency data")
 		}
-		return nil, 0, fmt.Errorf("no servers within 90ms of your location. Your best server has %dms latency", minLatencyMs)
+		return nil, 0, fmt.Errorf("no servers within %dms of your location. Your best server has %dms latency", MaxRegionPingMs, minLatencyMs)
 	}
 
 	// Create team alignments for party members to ensure they join the same team

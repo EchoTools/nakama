@@ -3495,16 +3495,18 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			case "create", "show":
 
 				partial := ""
+				mode := evr.ModeArenaPrivate // default mode for /create
 
 				for _, o := range data.Options {
-					if o.Name == "region" {
-
-						// Only response if the region is focused
+					switch o.Name {
+					case "region":
+						// Only respond if the region is focused
 						if !o.Focused {
 							return
 						}
-
 						partial = o.StringValue()
+					case "mode":
+						mode = evr.ToSymbol(o.StringValue())
 					}
 				}
 
@@ -3512,7 +3514,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				var err error
 				var choices []*discordgo.ApplicationCommandOptionChoice
 
-				if choices, found = d.choiceCache.Load(user.ID); !found {
+				cacheKey := user.ID + ":" + mode.String()
+				if choices, found = d.choiceCache.Load(cacheKey); !found {
 
 					groupID := d.cache.GuildIDToGroupID(i.GuildID)
 					if groupID == "" {
@@ -3524,16 +3527,16 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						return
 					}
 
-					choices, err = d.autocompleteRegions(ctx, logger, userID, groupID)
+					choices, err = d.autocompleteRegions(ctx, logger, userID, groupID, mode)
 					if err != nil {
 						logger.Error("Failed to get regions", zap.Error(err))
 						return
 					}
-					d.choiceCache.Store(user.ID, choices)
+					d.choiceCache.Store(cacheKey, choices)
 
 					go func() {
 						<-time.After(20 * time.Second)
-						d.choiceCache.Delete(user.ID)
+						d.choiceCache.Delete(cacheKey)
 					}()
 				}
 
