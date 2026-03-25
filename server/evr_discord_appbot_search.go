@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 	"time"
@@ -452,6 +453,15 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 		return editInteractionResponse(s, i, "No results found")
 	}
 
+	var searchIPInfo IPInfo
+	if canSearchIPs {
+		if parsedIP := net.ParseIP(partial); parsedIP != nil {
+			if info, ipErr := d.ipInfoCache.Get(ctx, parsedIP.String()); ipErr == nil {
+				searchIPInfo = info
+			}
+		}
+	}
+
 	// Sort the results by last updated
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].updated.Before(results[j].updated)
@@ -486,6 +496,25 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 			Footer: &discordgo.MessageEmbedFooter{
 				Text: footer,
 			},
+		}
+
+		if searchIPInfo != nil {
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+				Name: "IP Info (Confidential)",
+				Value: fmt.Sprintf(
+					"Provider: %s\nISP: %s\nOrg: %s\nCity: %s, %s %s\nVPN: %t\nShared IP: %t\nFraud Score: %d",
+					searchIPInfo.DataProvider(),
+					searchIPInfo.ISP(),
+					searchIPInfo.Organization(),
+					searchIPInfo.City(),
+					searchIPInfo.Region(),
+					searchIPInfo.CountryCode(),
+					searchIPInfo.IsVPN(),
+					searchIPInfo.IsSharedIP(),
+					searchIPInfo.FraudScore(),
+				),
+				Inline: false,
+			})
 		}
 
 		embeds = append(embeds, embed)

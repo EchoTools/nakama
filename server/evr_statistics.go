@@ -47,9 +47,12 @@ const (
 )
 
 var (
+	ErrInvalidStatisticsMode = errors.New("invalid statistics mode")
+
 	ValidLeaderboardModes = []evr.Symbol{
 		evr.ModeCombatPublic,
 		evr.ModeArenaPublic,
+		evr.ModeArenaPublicAI,
 		evr.ModeCombatPrivate,
 		evr.ModeArenaPrivate,
 		evr.ModeSocialPublic,
@@ -322,6 +325,19 @@ func ResetScheduleToCron(resetSchedule evr.ResetSchedule) string {
 	}
 }
 
+func statisticsForMode(mode evr.Symbol) (evr.Statistics, error) {
+	switch mode {
+	case evr.ModeCombatPublic:
+		return &evr.CombatStatistics{}, nil
+	case evr.ModeArenaPublic, evr.ModeArenaPublicAI:
+		return &evr.ArenaStatistics{}, nil
+	case evr.ModeCombatPrivate, evr.ModeArenaPrivate, evr.ModeSocialPublic, evr.ModeSocialPrivate:
+		return &evr.GenericStats{}, nil
+	default:
+		return nil, fmt.Errorf("%w: %s", ErrInvalidStatisticsMode, mode)
+	}
+}
+
 func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, ownerID, groupID string, modes []evr.Symbol, dailyWeeklyStatMode evr.Symbol) (evr.PlayerStatistics, map[string]*evr.StatisticValue, error) {
 
 	startTime := time.Now()
@@ -357,22 +373,12 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 	// Map boardIDs to the playerStatistics struct fields
 	for m, resetSchedules := range statGroups {
 		for _, r := range resetSchedules {
-			var stats evr.Statistics
-			switch m {
-			case evr.ModeCombatPublic:
-				stats = &evr.CombatStatistics{}
-			case evr.ModeArenaPublic:
-				stats = &evr.ArenaStatistics{}
-			case evr.ModeCombatPrivate:
-				stats = &evr.GenericStats{}
-			case evr.ModeArenaPrivate:
-				stats = &evr.GenericStats{}
-			case evr.ModeSocialPublic:
-				stats = &evr.GenericStats{}
-			case evr.ModeSocialPrivate:
-				stats = &evr.GenericStats{}
-			default:
-				return nil, nil, fmt.Errorf("invalid mode: %s", m)
+			stats, err := statisticsForMode(m)
+			if err != nil {
+				if errors.Is(err, ErrInvalidStatisticsMode) {
+					continue
+				}
+				return nil, nil, fmt.Errorf("failed to resolve statistics type for mode %s: %w", m, err)
 			}
 
 			playerStatistics[evr.StatisticsGroup{

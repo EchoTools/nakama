@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -642,4 +643,14 @@ func DeleteStoredMatchLabel(ctx context.Context, nk runtime.NakamaModule, matchI
 		return fmt.Errorf("failed to delete stored match label: %w", err)
 	}
 	return nil
+}
+
+func runWithStoredMatchLabelCleanup(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, matchID MatchID, fn func() error) error {
+	defer func() {
+		if err := DeleteStoredMatchLabel(ctx, nk, matchID); err != nil && !errors.Is(err, ErrMatchNotFound) {
+			logger.WithField("error", err).Warn("failed to delete stored match label after post-match processing")
+		}
+	}()
+
+	return fn()
 }
