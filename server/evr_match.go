@@ -1605,7 +1605,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			state.TeamSize = SocialLobbyMaxSize
 			state.PlayerLimit = SocialLobbyMaxSize
 
-		case evr.ModeArenaPublic:
+		case evr.ModeArenaPublic, evr.ModeArenaPublicAI:
 			state.LobbyType = PublicLobby
 			state.MaxSize = MatchLobbyMaxSize
 			state.TeamSize = DefaultPublicArenaTeamSize
@@ -1724,7 +1724,7 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 	}
 
 	switch state.Mode {
-	case evr.ModeArenaPublic:
+	case evr.ModeArenaPublic, evr.ModeArenaPublicAI:
 		state.GameState = &GameState{
 			SessionScoreboard: NewSessionScoreboard(RoundDuration, time.Now().Add(PublicMatchWaitTime)),
 		}
@@ -1777,6 +1777,40 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 		return state, fmt.Errorf("failed to dispatch message: %w", err)
 	}
 	state.levelLoaded = true
+
+	// For AI CO-OP mode, send bot spawn messages to fill both teams to TeamSize.
+	// The game server handles bot entity creation internally after receiving these.
+	if state.Mode == evr.ModeArenaPublicAI {
+		botMessages := make([]evr.Message, 0, 2)
+		for _, team := range []struct {
+			id   uint32
+			role int
+		}{
+			{evr.BotTeamBlue, int(BlueTeam)},
+			{evr.BotTeamOrange, int(OrangeTeam)},
+		} {
+			humanCount := state.RoleCount(team.role)
+			botsNeeded := state.TeamSize - humanCount
+			if botsNeeded > 0 {
+				logger.Info("Spawning bots for AI CO-OP",
+					zap.Uint32("team", team.id),
+					zap.Int("humans", humanCount),
+					zap.Int("bots", botsNeeded),
+				)
+				botMessages = append(botMessages, evr.NewSNSLobbySetSpawnBotOnServer(
+					0, // MatchID (unused by game server per binary evidence)
+					team.id,
+					uint32(botsNeeded),
+					evr.BotDifficultyAdvanced,
+				))
+			}
+		}
+		if len(botMessages) > 0 {
+			if err := m.dispatchMessages(ctx, logger, dispatcher, botMessages, []runtime.Presence{state.server}, nil); err != nil {
+				logger.Warn("Failed to dispatch bot spawn messages", zap.Error(err))
+			}
+		}
+	}
 
 	MatchDataEvent(ctx, nk, state.ID, MatchDataStarted{
 		State: state,
