@@ -1792,11 +1792,7 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 			humanCount := state.RoleCount(team.role)
 			botsNeeded := state.TeamSize - humanCount
 			if botsNeeded > 0 {
-				logger.Info("Spawning bots for AI CO-OP",
-					zap.Uint32("team", team.id),
-					zap.Int("humans", humanCount),
-					zap.Int("bots", botsNeeded),
-				)
+				logger.Info("Spawning bots for AI CO-OP: team=%d humans=%d bots=%d", team.id, humanCount, botsNeeded)
 				botMessages = append(botMessages, evr.NewSNSLobbySetSpawnBotOnServer(
 					0, // MatchID (unused by game server per binary evidence)
 					team.id,

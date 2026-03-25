@@ -171,9 +171,8 @@ type IPQSClient struct {
 	apiKey     string
 	parameters string
 
-	mu                  sync.Mutex
-	consecutiveFailures int
-	lastFailureTime     time.Time
+	mu              sync.Mutex
+	lastFailureTime time.Time
 	backoffDuration     time.Duration
 	circuitOpen         bool
 }
@@ -378,7 +377,6 @@ func (s *IPQSClient) onFailure(err error) {
 	}
 
 	s.lastFailureTime = time.Now()
-	s.consecutiveFailures++
 	wasOpen := s.circuitOpen
 	s.circuitOpen = true
 
@@ -392,7 +390,6 @@ func (s *IPQSClient) onSuccess() {
 	defer s.mu.Unlock()
 
 	wasOpen := s.circuitOpen
-	s.consecutiveFailures = 0
 	s.lastFailureTime = time.Time{}
 	s.backoffDuration = 0
 	s.circuitOpen = false
