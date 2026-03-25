@@ -1,10 +1,59 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"testing"
+
+	"github.com/heroiclabs/nakama/v3/server/evr"
 )
+
+func TestStatisticsForMode(t *testing.T) {
+	testCases := []struct {
+		name      string
+		mode      evr.Symbol
+		wantType  any
+		wantError bool
+	}{
+		{name: "combat public", mode: evr.ModeCombatPublic, wantType: &evr.CombatStatistics{}},
+		{name: "arena public", mode: evr.ModeArenaPublic, wantType: &evr.ArenaStatistics{}},
+		{name: "arena public ai", mode: evr.ModeArenaPublicAI, wantType: &evr.ArenaStatistics{}},
+		{name: "combat private", mode: evr.ModeCombatPrivate, wantType: &evr.GenericStats{}},
+		{name: "social public", mode: evr.ModeSocialPublic, wantType: &evr.GenericStats{}},
+		{name: "invalid", mode: evr.ToSymbol("invalid_mode"), wantError: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := statisticsForMode(tc.mode)
+			if tc.wantError {
+				if err == nil {
+					t.Fatalf("expected error for mode %s", tc.mode.String())
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if fmt.Sprintf("%T", got) != fmt.Sprintf("%T", tc.wantType) {
+				t.Fatalf("unexpected statistics type: got %T, want %T", got, tc.wantType)
+			}
+		})
+	}
+}
+
+func TestStatisticsForMode_InvalidModeErrorType(t *testing.T) {
+	_, err := statisticsForMode(evr.ToSymbol("invalid_mode"))
+	if err == nil {
+		t.Fatal("expected invalid mode error")
+	}
+	if !errors.Is(err, ErrInvalidStatisticsMode) {
+		t.Fatalf("expected ErrInvalidStatisticsMode, got: %v", err)
+	}
+}
 
 func TestFloat64ToScoreLegacy(t *testing.T) {
 	testCases := []struct {

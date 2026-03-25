@@ -3,6 +3,7 @@ package server
 type IPInfo interface {
 	DataProvider() string // IPQS, MaxMind, etc
 	IsVPN() bool
+	IsSharedIP() bool
 	Latitude() float64
 	Longitude() float64
 	City() string
@@ -24,6 +25,10 @@ func (r StubIPInfo) DataProvider() string {
 }
 
 func (r StubIPInfo) IsVPN() bool {
+	return false
+}
+
+func (r StubIPInfo) IsSharedIP() bool {
 	return false
 }
 

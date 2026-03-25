@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -11,6 +12,8 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -353,6 +356,8 @@ func EVRProfileLoad(ctx context.Context, nk runtime.NakamaModule, userID string)
 		// Successfully loaded from storage, attach account
 		profile.account = account
 		return profile, nil
+	} else if status.Code(err) != codes.NotFound {
+		return nil, err
 	}
 
 	// Fall back to loading from account metadata for backward compatibility
@@ -360,6 +365,8 @@ func EVRProfileLoad(ctx context.Context, nk runtime.NakamaModule, userID string)
 }
 
 func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID string, md *EVRProfile) error {
+	const maxRetries = 3
+
 	if userID == SystemUserID {
 		return fmt.Errorf("cannot set metadata for system user")
 	}
@@ -367,22 +374,70 @@ func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID strin
 		return fmt.Errorf("metadata cannot be nil")
 	}
 
-	// Write to the storage system
-	if err := StorableWrite(ctx, nk, userID, md); err != nil {
-		return fmt.Errorf("failed to write profile storage: %w", err)
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			fresh, err := EVRProfileLoad(ctx, nk, userID)
+			if err != nil {
+				lastErr = err
+			} else {
+				meta := md.StorageMeta()
+				meta.Version = fresh.StorageMeta().Version
+				md.SetStorageMeta(meta)
+			}
+		}
+
+		if err := StorableWrite(ctx, nk, userID, md); err != nil {
+			lastErr = err
+			if isVersionConflictError(err) && attempt < maxRetries-1 {
+				backoff := time.Duration(10*(1<<uint(attempt))) * time.Millisecond
+				select {
+				case <-time.After(backoff):
+					continue
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			return fmt.Errorf("failed to write profile storage: %w", err)
+		}
+
+		// Invalidate any cached ServerProfile so it will be regenerated with the updated EVRProfile data.
+		_ = ServerProfileInvalidate(ctx, nk, userID)
+
+		// Also update the account metadata to keep it in sync
+		return nk.AccountUpdateId(ctx, userID, "", md.MarshalMap(), "", "", "", "", "")
 	}
 
-	// Invalidate any cached ServerProfile so it will be regenerated with the updated EVRProfile data.
-	_ = ServerProfileInvalidate(ctx, nk, userID)
-
-	// Also update the account metadata to keep it in sync
-	return nk.AccountUpdateId(ctx, userID, "", md.MarshalMap(), "", "", "", "", "")
+	return fmt.Errorf("failed to write profile storage: %w", lastErr)
 }
 
 func BuildEVRProfileFromAccount(account *api.Account) (*EVRProfile, error) {
+	if account == nil || account.User == nil {
+		return nil, fmt.Errorf("account is nil")
+	}
 	a := &EVRProfile{}
-	if err := json.Unmarshal([]byte(account.User.Metadata), &a); err != nil {
-		return nil, fmt.Errorf("error unmarshalling account metadata: %w", err)
+
+	metadata := strings.TrimSpace(account.User.Metadata)
+	if metadata != "" && metadata != "null" {
+		if err := json.Unmarshal([]byte(metadata), a); err != nil {
+			return nil, fmt.Errorf("error unmarshalling account metadata: %w", err)
+		}
+	}
+
+	if a.InGameNames == nil {
+		a.InGameNames = make(map[string]GroupInGameName)
+	}
+
+	if a.MutedPlayers == nil {
+		a.MutedPlayers = make([]evr.EvrId, 0)
+	}
+
+	if a.GhostedPlayers == nil {
+		a.GhostedPlayers = make([]evr.EvrId, 0)
+	}
+
+	if a.NewUnlocks == nil {
+		a.NewUnlocks = make([]int64, 0)
 	}
 	a.account = account
 	return a, nil

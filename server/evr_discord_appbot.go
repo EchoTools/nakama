@@ -921,13 +921,13 @@ var (
 		},
 		{
 			Name:        "show",
-			Description: "Show server status embeds for matches in a specific region (allocators only)",
+			Description: "Show server status embeds for one region or all regions (allocators only)",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:         discordgo.ApplicationCommandOptionString,
 					Name:         "region",
-					Description:  "Region code to show matches for",
-					Required:     true,
+					Description:  "Region code to show matches for (use 'all' for all regions)",
+					Required:     false,
 					Autocomplete: true,
 				},
 			},
@@ -2612,13 +2612,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return simpleInteractionResponse(s, i, "this command must be used from a guild")
 			}
 
-			if len(options) == 0 {
-				return simpleInteractionResponse(s, i, "no options provided")
-			}
-
-			region := strings.ToLower(strings.TrimSpace(options[0].StringValue()))
-			if region == "" {
-				return simpleInteractionResponse(s, i, "region is required")
+			region := "all"
+			if len(options) > 0 {
+				region = strings.ToLower(strings.TrimSpace(options[0].StringValue()))
+				if region == "" {
+					region = "all"
+				}
 			}
 
 			// Acknowledge the interaction first with a deferred response
@@ -3549,6 +3548,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 				}
 				choices = filtered
+
+				if data.Name == "show" {
+					allChoice := &discordgo.ApplicationCommandOptionChoice{Name: "all", Value: "all"}
+					if partial == "" || strings.Contains("all", partial) {
+						choices = append([]*discordgo.ApplicationCommandOptionChoice{allChoice}, choices...)
+					}
+				}
 
 				if err := d.dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionApplicationCommandAutocompleteResult,
