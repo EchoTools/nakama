@@ -46,7 +46,7 @@ var globalEmbedTracker = &ServerEmbedTracker{
 func (d *DiscordAppBot) handleShowServerEmbeds(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID, groupID, region string) error {
 	region = normalizeRegionCode(region)
 	if region == "" {
-		return d.editDeferredResponse(s, i, "Region is required.")
+		region = "all"
 	}
 
 	// List all matches (reduced limit for performance)
@@ -175,7 +175,7 @@ func (d *DiscordAppBot) updateServerEmbeds(ctx context.Context, logger runtime.L
 
 		if label.GameServer != nil {
 			matchRegion := normalizeRegionCode(label.GameServer.LocationRegionCode(false, false))
-			if matchRegion == embedInfo.Region {
+			if isAllRegionCode(embedInfo.Region) || matchRegion == embedInfo.Region {
 				foundMatches[label.ID.String()] = label
 			}
 		}
@@ -425,7 +425,7 @@ func selectRegionMatches(labels []*MatchLabel, requestedRegion string) ([]*Match
 			continue
 		}
 		regions[matchRegion] = struct{}{}
-		if matchRegion == requestedRegion {
+		if isAllRegionCode(requestedRegion) || matchRegion == requestedRegion {
 			regionMatches = append(regionMatches, label)
 		}
 	}
@@ -436,8 +436,17 @@ func selectRegionMatches(labels []*MatchLabel, requestedRegion string) ([]*Match
 	}
 	sort.Strings(availableRegions)
 
+	if isAllRegionCode(requestedRegion) {
+		return regionMatches, availableRegions, true
+	}
+
 	_, exists := regions[requestedRegion]
 	return regionMatches, availableRegions, exists
+}
+
+func isAllRegionCode(region string) bool {
+	region = normalizeRegionCode(region)
+	return region == "" || region == "all"
 }
 
 // editDeferredResponse edits the deferred interaction response with the given content.

@@ -360,6 +360,8 @@ func EVRProfileLoad(ctx context.Context, nk runtime.NakamaModule, userID string)
 }
 
 func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID string, md *EVRProfile) error {
+	const maxRetries = 3
+
 	if userID == SystemUserID {
 		return fmt.Errorf("cannot set metadata for system user")
 	}
@@ -367,16 +369,41 @@ func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID strin
 		return fmt.Errorf("metadata cannot be nil")
 	}
 
-	// Write to the storage system
-	if err := StorableWrite(ctx, nk, userID, md); err != nil {
-		return fmt.Errorf("failed to write profile storage: %w", err)
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			fresh, err := EVRProfileLoad(ctx, nk, userID)
+			if err != nil {
+				lastErr = err
+			} else {
+				meta := md.StorageMeta()
+				meta.Version = fresh.StorageMeta().Version
+				md.SetStorageMeta(meta)
+			}
+		}
+
+		if err := StorableWrite(ctx, nk, userID, md); err != nil {
+			lastErr = err
+			if isVersionConflictError(err) && attempt < maxRetries-1 {
+				backoff := time.Duration(10*(1<<uint(attempt))) * time.Millisecond
+				select {
+				case <-time.After(backoff):
+					continue
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			return fmt.Errorf("failed to write profile storage: %w", err)
+		}
+
+		// Invalidate any cached ServerProfile so it will be regenerated with the updated EVRProfile data.
+		_ = ServerProfileInvalidate(ctx, nk, userID)
+
+		// Also update the account metadata to keep it in sync
+		return nk.AccountUpdateId(ctx, userID, "", md.MarshalMap(), "", "", "", "", "")
 	}
 
-	// Invalidate any cached ServerProfile so it will be regenerated with the updated EVRProfile data.
-	_ = ServerProfileInvalidate(ctx, nk, userID)
-
-	// Also update the account metadata to keep it in sync
-	return nk.AccountUpdateId(ctx, userID, "", md.MarshalMap(), "", "", "", "", "")
+	return fmt.Errorf("failed to write profile storage: %w", lastErr)
 }
 
 func BuildEVRProfileFromAccount(account *api.Account) (*EVRProfile, error) {

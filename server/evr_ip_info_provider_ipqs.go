@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/go-redis/redis"
@@ -107,7 +108,14 @@ func (r *IPQSData) DataProvider() string {
 }
 
 func (r *IPQSData) IsVPN() bool {
+	if r.IsSharedIP() {
+		return false
+	}
 	return r.Response.VPN
+}
+
+func (r *IPQSData) IsSharedIP() bool {
+	return isKnownSharedIPProvider(r.Response.ISP, r.Response.Organization)
 }
 
 func (r *IPQSData) Latitude() float64 {
@@ -162,7 +170,18 @@ type IPQSClient struct {
 
 	apiKey     string
 	parameters string
+
+	mu                  sync.Mutex
+	consecutiveFailures int
+	lastFailureTime     time.Time
+	backoffDuration     time.Duration
+	circuitOpen         bool
 }
+
+const (
+	ipqsInitialBackoff = 5 * time.Second
+	ipqsMaxBackoff     = 5 * time.Minute
+)
 
 func NewIPQSClient(logger *zap.Logger, metrics Metrics, redisClient *redis.Client, apiKey string) (*IPQSClient, error) {
 	ctx, cancelFn := context.WithCancel(context.Background())
@@ -243,7 +262,7 @@ func (s *IPQSClient) Get(ctx context.Context, ip string) (IPInfo, error) {
 		return nil, nil
 	}
 	// ignore reserved IPs
-	if ip := net.ParseIP(ip); ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsPrivate() {
+	if parsedIP := net.ParseIP(ip); parsedIP != nil && (parsedIP.IsLoopback() || parsedIP.IsLinkLocalUnicast() || parsedIP.IsLinkLocalMulticast() || parsedIP.IsMulticast() || parsedIP.IsPrivate()) {
 		return &StubIPInfo{}, nil
 	}
 	startTime := time.Now()
@@ -253,68 +272,60 @@ func (s *IPQSClient) Get(ctx context.Context, ip string) (IPInfo, error) {
 		s.metrics.CustomTimer("ipqs_request_duration", metricsTags, time.Since(startTime))
 	}()
 
-	ctx, cancelFn := context.WithTimeout(ctx, time.Second*1)
-	defer cancelFn()
-
-	resultCh := make(chan *IPQSResponse, 1)
-
-	go func() {
-		var err error
-		var result *IPQSResponse
-
-		if result, err = s.load(ip); err != nil {
-			metricsTags["result"] = "cache_error"
-
-		} else if result != nil && result.Success {
-			metricsTags["result"] = "cache_hit"
-
-		} else {
-
-			if result, err = s.retrieve(ip); err != nil || !result.Success {
-
-				metricsTags["result"] = "request_error"
-				s.logger.Warn("Failed to get IPQS details, failing open.", zap.Error(err))
-
-			} else {
-
-				metricsTags["result"] = "cache_miss"
-
-				// cache the result
-				if err = s.store(ip, result); err != nil {
-					s.logger.Warn("Failed to store IPQS details in cache.", zap.Error(err))
-				}
-			}
-		}
-
-		resultCh <- result
-	}()
-
-	select {
-	case <-ctx.Done():
-		if ctx.Err() == context.DeadlineExceeded {
-			metricsTags["result"] = "request_timeout"
-			s.logger.Warn("IPQS request timed out, failing open.")
-		}
-		return nil, fmt.Errorf("IPQS request timed out")
-	case result := <-resultCh:
-
-		if result == nil {
-			metricsTags["result"] = "request_error"
-			return nil, nil
-		}
-		metricsTags["result"] = "cache_miss"
+	if result, err := s.load(ip); err != nil {
+		metricsTags["result"] = "cache_error"
+	} else if result != nil && result.Success {
+		metricsTags["result"] = "cache_hit"
 		return &IPQSData{Response: *result}, nil
 	}
 
+	if !s.allowRequest() {
+		metricsTags["result"] = "circuit_open"
+		s.metrics.CustomCounter("ipqs_circuit_breaker_open", nil, 1)
+		return nil, nil
+	}
+
+	reqCtx, cancelFn := context.WithTimeout(ctx, time.Second*1)
+	defer cancelFn()
+
+	result, err := s.retrieve(reqCtx, ip)
+	if err != nil {
+		metricsTags["result"] = "request_error"
+		s.onFailure(err)
+		return nil, nil
+	}
+	if result == nil || !result.Success {
+		metricsTags["result"] = "request_error"
+		s.onFailure(fmt.Errorf("ipqs response unsuccessful"))
+		return nil, nil
+	}
+
+	s.onSuccess()
+	metricsTags["result"] = "cache_miss"
+
+	if err = s.store(ip, result); err != nil {
+		s.logger.Warn("Failed to store IPQS details in cache.", zap.Error(err))
+	}
+
+	return &IPQSData{Response: *result}, nil
+
 }
 
-func (s *IPQSClient) retrieve(ip string) (*IPQSResponse, error) {
+func (s *IPQSClient) retrieve(ctx context.Context, ip string) (*IPQSResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.url(ip), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build request: %w", err)
+	}
 
-	resp, err := http.Get(s.url(ip))
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get response: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
 
 	var result IPQSResponse
 	err = json.NewDecoder(resp.Body).Decode(&result)
@@ -336,4 +347,57 @@ func (s *IPQSClient) IsVPN(ip string) bool {
 		return false
 	}
 	return result.IsVPN()
+}
+
+func (s *IPQSClient) allowRequest() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.circuitOpen {
+		return true
+	}
+
+	if time.Since(s.lastFailureTime) < s.backoffDuration {
+		return false
+	}
+
+	return true
+}
+
+func (s *IPQSClient) onFailure(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.backoffDuration == 0 {
+		s.backoffDuration = ipqsInitialBackoff
+	} else {
+		s.backoffDuration *= 2
+		if s.backoffDuration > ipqsMaxBackoff {
+			s.backoffDuration = ipqsMaxBackoff
+		}
+	}
+
+	s.lastFailureTime = time.Now()
+	s.consecutiveFailures++
+	wasOpen := s.circuitOpen
+	s.circuitOpen = true
+
+	if !wasOpen {
+		s.logger.Warn("IPQS circuit breaker opened, failing open with backoff", zap.Duration("backoff", s.backoffDuration), zap.Error(err))
+	}
+}
+
+func (s *IPQSClient) onSuccess() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	wasOpen := s.circuitOpen
+	s.consecutiveFailures = 0
+	s.lastFailureTime = time.Time{}
+	s.backoffDuration = 0
+	s.circuitOpen = false
+
+	if wasOpen {
+		s.logger.Info("IPQS circuit breaker closed after successful request")
+	}
 }

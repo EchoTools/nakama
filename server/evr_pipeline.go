@@ -39,6 +39,11 @@ var globalSkillBasedMatchmaker = atomic.NewPointer[SkillBasedMatchmaker](nil)
 var globalEarlyQuitMessageTrigger = atomic.NewPointer[SNSEarlyQuitMessageTrigger](nil)
 var globalMongoClient = atomic.NewPointer[mongo.Client](nil)
 
+const (
+	matchHistoryCleanupInterval = 1 * time.Hour
+	matchHistoryRetention       = 4 * time.Hour
+)
+
 type EvrPipeline struct {
 	sync.RWMutex
 	ctx context.Context
@@ -245,7 +250,64 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	// Start the penalty expiry scheduler to monitor and send penalty expiry notifications
 	earlyQuitMessageTrigger.StartLockoutExpiryScheduler(context.Background())
 
+	evrPipeline.startMatchHistoryCleanup(ctx)
+
 	return evrPipeline
+}
+
+func (p *EvrPipeline) startMatchHistoryCleanup(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(matchHistoryCleanupInterval)
+		defer ticker.Stop()
+
+		for {
+			if err := p.cleanupOrphanedMatchHistory(ctx); err != nil {
+				p.logger.Warn("failed to cleanup orphaned match history", zap.Error(err))
+			}
+
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
+func (p *EvrPipeline) cleanupOrphanedMatchHistory(ctx context.Context) error {
+	cutoff := time.Now().Add(-matchHistoryRetention)
+	cursor := ""
+
+	for {
+		objects, nextCursor, err := p.nk.StorageList(ctx, SystemUserID, uuid.Nil.String(), MatchHistoryStorageCollection, 100, cursor)
+		if err != nil {
+			return fmt.Errorf("failed to list match history objects: %w", err)
+		}
+
+		for _, obj := range objects {
+			if obj == nil || obj.CreateTime == nil {
+				continue
+			}
+			if obj.CreateTime.AsTime().After(cutoff) {
+				continue
+			}
+
+			if err := p.nk.StorageDelete(ctx, []*runtime.StorageDelete{{
+				Collection: MatchHistoryStorageCollection,
+				Key:        obj.Key,
+				UserID:     obj.UserId,
+			}}); err != nil {
+				p.logger.Warn("failed deleting orphaned match history object", zap.String("key", obj.Key), zap.Error(err))
+			}
+		}
+
+		if nextCursor == "" {
+			break
+		}
+		cursor = nextCursor
+	}
+
+	return nil
 }
 
 func DetermineServiceIPs(ctx context.Context) (intIP net.IP, extIP net.IP, err error) {

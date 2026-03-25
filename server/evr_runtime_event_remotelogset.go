@@ -305,6 +305,10 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 		case *evr.RemoteLogRepairMatrix:
 
 		case *evr.RemoteLogServerConnectionFailed:
+			if strings.EqualFold(strings.TrimSpace(msg.ServerAddress), "[INVALID PEER ID]") {
+				nk.MetricsCounterAdd("remotelog_invalid_peer_id_count", nil, 1)
+			}
+
 			session := sessionRegistry.Get(uuid.FromStringOrNil(s.SessionID))
 			if session == nil {
 				logger.Error("Failed to get session")
@@ -636,6 +640,10 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 	// Modifications to typeStats only affect the local copy, which is then passed to
 	// typeStatsToScoreMap() below. The original statsByPlayer map remains unchanged.
 	for xpid, typeStats := range statsByPlayer {
+		if IsBotEvrID(xpid) {
+			continue
+		}
+
 		// Get the match label
 
 		// Get the player's information

@@ -651,6 +651,12 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		}
 
 		if !groupIGN.IsOverride && !groupIGN.IsLocked {
+			shouldRefreshFromDiscord := groupID == params.profile.ActiveGroupID || groupIGN.DisplayName == ""
+			if !shouldRefreshFromDiscord {
+				params.profile.SetGroupIGNData(groupID, groupIGN)
+				continue
+			}
+
 			// Update the in-game name for the guild.
 			if member, err := p.discordCache.GuildMember(gg.GuildID, params.profile.DiscordID()); err != nil {
 				if !IsDiscordErrorCode(err, discordgo.ErrCodeUnknownMember) {
@@ -1474,7 +1480,7 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 	data, _, err := ServerProfileLoadByXPID(ctx, logger, p.db, p.nk, request.EvrId, groupID, modes, dailyWeeklyMode)
 	if err != nil {
 		tags["error"] = "failed_load_profile"
-		logger.Error("Failed to load profile from storage", zap.Error(err), zap.String("evrId", request.EvrId.String()))
+		logger.Debug("Profile not found for XPID", zap.Error(err), zap.String("evrId", request.EvrId.String()))
 		return nil
 	} else if data == nil {
 		tags["error"] = "profile_not_found"

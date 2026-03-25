@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-redis/redis"
@@ -58,7 +59,14 @@ func (r *ipapiData) DataProvider() string {
 }
 
 func (r *ipapiData) IsVPN() bool {
+	if r.IsSharedIP() {
+		return false
+	}
 	return r.Response.Proxy
+}
+
+func (r *ipapiData) IsSharedIP() bool {
+	return isKnownSharedIPProvider(r.Response.ISP, r.Response.Organization)
 }
 
 func (r *ipapiData) Latitude() float64 {
@@ -92,6 +100,9 @@ func (r *ipapiData) ASN() int {
 }
 
 func (r *ipapiData) FraudScore() int {
+	if r.IsSharedIP() {
+		return 0
+	}
 	if r.IsVPN() {
 		return 100
 	} else {
@@ -118,7 +129,18 @@ type ipapiClient struct {
 	db      *sql.DB
 
 	redisClient *redis.Client
+
+	mu                  sync.Mutex
+	consecutiveFailures int
+	lastFailureTime     time.Time
+	backoffDuration     time.Duration
+	circuitOpen         bool
 }
+
+const (
+	ipapiInitialBackoff = 5 * time.Second
+	ipapiMaxBackoff     = 5 * time.Minute
+)
 
 func NewIPAPIClient(logger *zap.Logger, metrics Metrics, redisClient *redis.Client) (*ipapiClient, error) {
 	ctx, cancelFn := context.WithCancel(context.Background())
@@ -182,13 +204,21 @@ func (s *ipapiClient) store(ip string, result *IPAPIResponse) error {
 	return nil
 }
 
-func (s *ipapiClient) retrieve(ip string) (*IPAPIResponse, error) {
+func (s *ipapiClient) retrieve(ctx context.Context, ip string) (*IPAPIResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.URL(ip), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build request: %w", err)
+	}
 
-	resp, err := http.Get(s.URL(ip))
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get response: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
 
 	var result IPAPIResponse
 	err = json.NewDecoder(resp.Body).Decode(&result)
@@ -204,7 +234,7 @@ func (s *ipapiClient) Get(ctx context.Context, ip string) (IPInfo, error) {
 		return nil, nil
 	}
 	// ignore reserved IPs
-	if ip := net.ParseIP(ip); ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsPrivate() {
+	if parsedIP := net.ParseIP(ip); parsedIP != nil && (parsedIP.IsLoopback() || parsedIP.IsLinkLocalUnicast() || parsedIP.IsLinkLocalMulticast() || parsedIP.IsMulticast() || parsedIP.IsPrivate()) {
 		return &StubIPInfo{}, nil
 	}
 	startTime := time.Now()
@@ -214,58 +244,42 @@ func (s *ipapiClient) Get(ctx context.Context, ip string) (IPInfo, error) {
 		s.metrics.CustomTimer("ipapi_request_duration", metricsTags, time.Since(startTime))
 	}()
 
-	ctx, cancelFn := context.WithTimeout(ctx, time.Second*1)
-	defer cancelFn()
-
-	resultCh := make(chan *IPAPIResponse, 1)
-
-	go func() {
-		var err error
-		var result *IPAPIResponse
-
-		if result, err = s.load(ip); err != nil {
-			metricsTags["result"] = "cache_error"
-
-		} else if result != nil {
-			metricsTags["result"] = "cache_hit"
-
-		} else {
-
-			if result, err = s.retrieve(ip); err != nil {
-
-				metricsTags["result"] = "request_error"
-				s.logger.Warn("Failed to get ipapi details, failing open.", zap.Error(err))
-
-			} else {
-
-				metricsTags["result"] = "cache_miss"
-
-				// cache the result
-				if err = s.store(ip, result); err != nil {
-					s.logger.Warn("Failed to store ipapi details in cache.", zap.Error(err))
-				}
-			}
-		}
-
-		resultCh <- result
-	}()
-
-	select {
-	case <-ctx.Done():
-		if ctx.Err() == context.DeadlineExceeded {
-			metricsTags["result"] = "request_timeout"
-			s.logger.Warn("ipapi request timed out, failing open.")
-		}
-		return nil, fmt.Errorf("ipapi request timed out")
-	case result := <-resultCh:
-
-		if result == nil {
-			metricsTags["result"] = "request_error"
-			return nil, nil
-		}
-		metricsTags["result"] = "cache_miss"
+	if result, err := s.load(ip); err != nil {
+		metricsTags["result"] = "cache_error"
+	} else if result != nil {
+		metricsTags["result"] = "cache_hit"
 		return &ipapiData{Response: *result}, nil
 	}
+
+	if !s.allowRequest() {
+		metricsTags["result"] = "circuit_open"
+		s.metrics.CustomCounter("ipapi_circuit_breaker_open", nil, 1)
+		return nil, nil
+	}
+
+	reqCtx, cancelFn := context.WithTimeout(ctx, time.Second*1)
+	defer cancelFn()
+
+	result, err := s.retrieve(reqCtx, ip)
+	if err != nil {
+		metricsTags["result"] = "request_error"
+		s.onFailure(err)
+		return nil, nil
+	}
+	if result == nil || !strings.EqualFold(result.Status, "success") {
+		metricsTags["result"] = "request_error"
+		s.onFailure(fmt.Errorf("ip-api response status: %s", result.Status))
+		return nil, nil
+	}
+
+	s.onSuccess()
+	metricsTags["result"] = "cache_miss"
+
+	if err = s.store(ip, result); err != nil {
+		s.logger.Warn("Failed to store ipapi details in cache.", zap.Error(err))
+	}
+
+	return &ipapiData{Response: *result}, nil
 
 }
 
@@ -280,4 +294,57 @@ func (s *ipapiClient) IsVPN(ip string) bool {
 		return false
 	}
 	return result.IsVPN()
+}
+
+func (s *ipapiClient) allowRequest() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.circuitOpen {
+		return true
+	}
+
+	if time.Since(s.lastFailureTime) < s.backoffDuration {
+		return false
+	}
+
+	return true
+}
+
+func (s *ipapiClient) onFailure(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.backoffDuration == 0 {
+		s.backoffDuration = ipapiInitialBackoff
+	} else {
+		s.backoffDuration *= 2
+		if s.backoffDuration > ipapiMaxBackoff {
+			s.backoffDuration = ipapiMaxBackoff
+		}
+	}
+
+	s.lastFailureTime = time.Now()
+	s.consecutiveFailures++
+	wasOpen := s.circuitOpen
+	s.circuitOpen = true
+
+	if !wasOpen {
+		s.logger.Warn("ip-api circuit breaker opened, failing open with backoff", zap.Duration("backoff", s.backoffDuration), zap.Error(err))
+	}
+}
+
+func (s *ipapiClient) onSuccess() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	wasOpen := s.circuitOpen
+	s.consecutiveFailures = 0
+	s.lastFailureTime = time.Time{}
+	s.backoffDuration = 0
+	s.circuitOpen = false
+
+	if wasOpen {
+		s.logger.Info("ip-api circuit breaker closed after successful request")
+	}
 }
