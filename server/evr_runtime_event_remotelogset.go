@@ -370,7 +370,9 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				logger.WithField("error", err).Warn("Failed to marshal message content")
 			}
 
-			globalAppBot.Load().LogUserErrorMessage(ctx, label.GetGroupID().String(), fmt.Sprintf("```json\n%s\n```", string(contentData)), false)
+			if appBot := globalAppBot.Load(); appBot != nil {
+				appBot.LogUserErrorMessage(ctx, label.GetGroupID().String(), fmt.Sprintf("```json\n%s\n```", string(contentData)), false)
+			}
 
 			logger.WithFields(map[string]any{
 				"username": session.Username(),

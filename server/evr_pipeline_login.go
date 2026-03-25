@@ -332,10 +332,14 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 
 				return fmt.Errorf("error creating link ticket: %s", err)
 			} else {
+				botUsername := "EchoTools"
+				if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil && p.appBot.dg.State.User.Username != "" {
+					botUsername = p.appBot.dg.State.User.Username
+				}
 
 				return DeviceNotLinkedError{
 					code:        linkTicket.Code,
-					botUsername: p.appBot.dg.State.User.Username,
+					botUsername: botUsername,
 				}
 			}
 		}
