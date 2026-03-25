@@ -557,260 +557,259 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		return nil // Only process type stats for arena and combat modes
 	}
 
-	groupIDStr := label.GetGroupID().String()
+	return runWithStoredMatchLabelCleanup(ctx, logger, nk, matchID, func() error {
+		groupIDStr := label.GetGroupID().String()
 
-	logger = logger.WithFields(map[string]any{
-		"mid": matchID.String(),
-	})
+		logger = logger.WithFields(map[string]any{
+			"mid": matchID.String(),
+		})
 
-	allStatEntries := make([]*StatisticsQueueEntry, 0)
+		allStatEntries := make([]*StatisticsQueueEntry, 0)
 
-	// Load individual player ratings from leaderboards for MMR calculation
-	// This is necessary because label.Players contains matchmaking ratings (aggregate for parties)
-	// rather than individual player ratings
-	playersWithTeamRatings := make([]PlayerInfo, len(label.Players))
-	playersWithPlayerRatings := make([]PlayerInfo, len(label.Players))
-	copy(playersWithTeamRatings, label.Players)
-	copy(playersWithPlayerRatings, label.Players)
+		// Load individual player ratings from leaderboards for MMR calculation
+		// This is necessary because label.Players contains matchmaking ratings (aggregate for parties)
+		// rather than individual player ratings
+		playersWithTeamRatings := make([]PlayerInfo, len(label.Players))
+		playersWithPlayerRatings := make([]PlayerInfo, len(label.Players))
+		copy(playersWithTeamRatings, label.Players)
+		copy(playersWithPlayerRatings, label.Players)
 
-	serviceSettings := ServiceSettings()
-	if serviceSettings.UseSkillBasedMatchmaking() {
-		for i, p := range playersWithTeamRatings {
-			// Only load ratings for competitors (blue/orange team)
-			if !p.IsCompetitor() {
+		serviceSettings := ServiceSettings()
+		if serviceSettings.UseSkillBasedMatchmaking() {
+			for i, p := range playersWithTeamRatings {
+				// Only load ratings for competitors (blue/orange team)
+				if !p.IsCompetitor() {
+					continue
+				}
+
+				// Load the player's individual team-based rating from leaderboards
+				teamRating, err := MatchmakingRatingLoad(ctx, nk, p.UserID, groupIDStr, label.Mode)
+				if err != nil {
+					logger.WithFields(map[string]any{
+						"error":   err,
+						"user_id": p.UserID,
+					}).Warn("Failed to load team rating, using default")
+					teamRating = NewDefaultRating()
+				}
+				playersWithTeamRatings[i].RatingMu = teamRating.Mu
+				playersWithTeamRatings[i].RatingSigma = teamRating.Sigma
+
+				// Load the player's individual player-based rating from leaderboards
+				playerRating, err := MatchmakingPlayerRatingLoad(ctx, nk, p.UserID, groupIDStr, label.Mode)
+				if err != nil {
+					logger.WithFields(map[string]any{
+						"error":   err,
+						"user_id": p.UserID,
+					}).Warn("Failed to load player rating, using default")
+					playerRating = NewDefaultRating()
+				}
+				playersWithPlayerRatings[i].RatingMu = playerRating.Mu
+				playersWithPlayerRatings[i].RatingSigma = playerRating.Sigma
+			}
+		}
+
+		// Determine winning team once for the entire match
+		// Check the first player's stats to determine which team won
+		var blueWins bool
+		for _, playerInfo := range label.Players {
+			if playerInfo.Team == BlueTeam || playerInfo.Team == OrangeTeam {
+				if stats, ok := statsByPlayer[playerInfo.EvrID]; ok {
+					blueWins = (playerInfo.Team == BlueTeam && stats.ArenaWins > 0) || (playerInfo.Team == OrangeTeam && stats.ArenaLosses > 0)
+					break
+				}
+			}
+		}
+
+		// Calculate new ratings once for all players (before the loop to avoid O(n²) complexity)
+		var teamRatings map[string]types.Rating
+		var playerRatings map[string]types.Rating
+		if serviceSettings.UseSkillBasedMatchmaking() {
+			// For combat mode, use win/loss only (no individual stats) for rating calculation
+			// For arena mode, use full stats-based rating calculation
+			statsForRating := statsByPlayer
+			if label.Mode == evr.ModeCombatPublic {
+				// Empty stats map means ratings are based purely on winning team status
+				statsForRating = make(map[evr.EvrId]evr.MatchTypeStats)
+			}
+
+			// Calculate new team-based ratings using individual player ratings loaded from leaderboards
+			teamRatings = CalculateNewTeamRatings(playersWithTeamRatings, statsForRating, blueWins)
+
+			// Calculate new individual player ratings using individual player ratings loaded from leaderboards
+			playerRatings = CalculateNewIndividualRatings(playersWithPlayerRatings, statsForRating, blueWins)
+		}
+
+		// Note: typeStats is a copy from the range loop, not a reference to the map value.
+		// Modifications to typeStats only affect the local copy, which is then passed to
+		// typeStatsToScoreMap() below. The original statsByPlayer map remains unchanged.
+		for xpid, typeStats := range statsByPlayer {
+			if IsBotEvrID(xpid) {
 				continue
 			}
 
-			// Load the player's individual team-based rating from leaderboards
-			teamRating, err := MatchmakingRatingLoad(ctx, nk, p.UserID, groupIDStr, label.Mode)
-			if err != nil {
-				logger.WithFields(map[string]any{
-					"error":   err,
-					"user_id": p.UserID,
-				}).Warn("Failed to load team rating, using default")
-				teamRating = NewDefaultRating()
-			}
-			playersWithTeamRatings[i].RatingMu = teamRating.Mu
-			playersWithTeamRatings[i].RatingSigma = teamRating.Sigma
+			// Get the match label
 
-			// Load the player's individual player-based rating from leaderboards
-			playerRating, err := MatchmakingPlayerRatingLoad(ctx, nk, p.UserID, groupIDStr, label.Mode)
-			if err != nil {
-				logger.WithFields(map[string]any{
-					"error":   err,
-					"user_id": p.UserID,
-				}).Warn("Failed to load player rating, using default")
-				playerRating = NewDefaultRating()
-			}
-			playersWithPlayerRatings[i].RatingMu = playerRating.Mu
-			playersWithPlayerRatings[i].RatingSigma = playerRating.Sigma
-		}
-	}
-
-	// Determine winning team once for the entire match
-	// Check the first player's stats to determine which team won
-	var blueWins bool
-	for _, playerInfo := range label.Players {
-		if playerInfo.Team == BlueTeam || playerInfo.Team == OrangeTeam {
-			if stats, ok := statsByPlayer[playerInfo.EvrID]; ok {
-				blueWins = (playerInfo.Team == BlueTeam && stats.ArenaWins > 0) || (playerInfo.Team == OrangeTeam && stats.ArenaLosses > 0)
-				break
-			}
-		}
-	}
-
-	// Calculate new ratings once for all players (before the loop to avoid O(n²) complexity)
-	var teamRatings map[string]types.Rating
-	var playerRatings map[string]types.Rating
-	if serviceSettings.UseSkillBasedMatchmaking() {
-		// For combat mode, use win/loss only (no individual stats) for rating calculation
-		// For arena mode, use full stats-based rating calculation
-		statsForRating := statsByPlayer
-		if label.Mode == evr.ModeCombatPublic {
-			// Empty stats map means ratings are based purely on winning team status
-			statsForRating = make(map[evr.EvrId]evr.MatchTypeStats)
-		}
-
-		// Calculate new team-based ratings using individual player ratings loaded from leaderboards
-		teamRatings = CalculateNewTeamRatings(playersWithTeamRatings, statsForRating, blueWins)
-
-		// Calculate new individual player ratings using individual player ratings loaded from leaderboards
-		playerRatings = CalculateNewIndividualRatings(playersWithPlayerRatings, statsForRating, blueWins)
-	}
-
-	// Note: typeStats is a copy from the range loop, not a reference to the map value.
-	// Modifications to typeStats only affect the local copy, which is then passed to
-	// typeStatsToScoreMap() below. The original statsByPlayer map remains unchanged.
-	for xpid, typeStats := range statsByPlayer {
-		if IsBotEvrID(xpid) {
-			continue
-		}
-
-		// Get the match label
-
-		// Get the player's information
-		playerInfo := label.GetPlayerByEvrID(xpid)
-		if playerInfo == nil {
-			// If the player isn't in the match, do not update the stats
-			return fmt.Errorf("player not in match: %s", xpid.String())
-		}
-
-		// If the player isn't in the match, or isn't a player, do not update the stats
-		if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
-			return fmt.Errorf("non-competitor player cannot have stats updated: %s", xpid.String())
-		}
-
-		logger = logger.WithFields(map[string]any{
-			"player_uid":  playerInfo.UserID,
-			"player_sid":  playerInfo.SessionID,
-			"player_xpid": playerInfo.EvrID.String(),
-		})
-
-		// Apply backfill player loss exemption logic
-		// Backfill players should not get a loss if the team loses, unless they early quit.
-		// Wins are still counted for backfill players.
-		// Note: ArenaLosses is used for both Arena and Combat modes (no separate CombatLosses field exists)
-		if playerInfo.IsBackfill() {
-			// Check if this player early quit by examining participation records
-			isEarlyQuitter := false
-			if participation := label.participations[playerInfo.UserID]; participation != nil {
-				isEarlyQuitter = participation.IsAbandoner
+			// Get the player's information
+			playerInfo := label.GetPlayerByEvrID(xpid)
+			if playerInfo == nil {
+				logger.WithField("player_xpid", xpid.String()).Warn("player not found in match label during post-match processing")
+				continue
 			}
 
-			// If backfill player lost but did not early quit, exempt them from the loss
-			if typeStats.ArenaLosses > 0 && !isEarlyQuitter {
-				logger.Debug("Backfill player loss exemption applied (stayed until end)")
-				typeStats.ArenaLosses = 0
-			} else if isEarlyQuitter {
-				logger.Debug("Backfill player early quit - loss counted")
+			// If the player isn't in the match, or isn't a player, do not update the stats
+			if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
+				logger.WithField("player_xpid", xpid.String()).Warn("non-competitor player stats ignored during post-match processing")
+				continue
 			}
-		}
 
-		// Increment the completed matches for the player (arena only — early quit system doesn't apply to combat)
-		if label.Mode == evr.ModeArenaPublic {
-			if err := s.incrementCompletedMatches(ctx, logger, nk, db, sessionRegistry, playerInfo.UserID, playerInfo.SessionID, matchID); err != nil {
-				logger.WithField("error", err).Warn("Failed to increment completed matches")
-			}
-		}
+			logger = logger.WithFields(map[string]any{
+				"player_uid":  playerInfo.UserID,
+				"player_sid":  playerInfo.SessionID,
+				"player_xpid": playerInfo.EvrID.String(),
+			})
 
-		if serviceSettings.UseSkillBasedMatchmaking() {
-
-			// Use the pre-calculated team ratings for this player
-			if rating, ok := teamRatings[playerInfo.SessionID]; ok {
-				// Add team skill rating entries to the statistics queue
-				muScore, muSubscore, err := Float64ToScore(rating.Mu)
-				if err != nil {
-					logger.WithField("error", err).Warn("Failed to convert Team Mu rating to score")
-				} else {
-					// Write to new TeamSkillRating stat
-					allStatEntries = append(allStatEntries, &StatisticsQueueEntry{
-						BoardMeta: LeaderboardMeta{
-							GroupID:       groupIDStr,
-							Mode:          label.Mode,
-							StatName:      TeamSkillRatingMuStatisticID,
-							Operator:      OperatorSet,
-							ResetSchedule: evr.ResetScheduleAllTime,
-						},
-						UserID:      playerInfo.UserID,
-						DisplayName: playerInfo.DisplayName,
-						Score:       muScore,
-						Subscore:    muSubscore,
-						Metadata:    map[string]string{"discord_id": playerInfo.DiscordID},
-					})
+			// Apply backfill player loss exemption logic
+			// Backfill players should not get a loss if the team loses, unless they early quit.
+			// Wins are still counted for backfill players.
+			// Note: ArenaLosses is used for both Arena and Combat modes (no separate CombatLosses field exists)
+			if playerInfo.IsBackfill() {
+				// Check if this player early quit by examining participation records
+				isEarlyQuitter := false
+				if participation := label.participations[playerInfo.UserID]; participation != nil {
+					isEarlyQuitter = participation.IsAbandoner
 				}
 
-				sigmaScore, sigmaSubscore, err := Float64ToScore(rating.Sigma)
-				if err != nil {
-					logger.WithField("error", err).Warn("Failed to convert Team Sigma rating to score")
-				} else {
-					// Write to new TeamSkillRating stat
-					allStatEntries = append(allStatEntries, &StatisticsQueueEntry{
-						BoardMeta: LeaderboardMeta{
-							GroupID:       groupIDStr,
-							Mode:          label.Mode,
-							StatName:      TeamSkillRatingSigmaStatisticID,
-							Operator:      OperatorSet,
-							ResetSchedule: evr.ResetScheduleAllTime,
-						},
-						UserID:      playerInfo.UserID,
-						DisplayName: playerInfo.DisplayName,
-						Score:       sigmaScore,
-						Subscore:    sigmaSubscore,
-						Metadata:    map[string]string{"discord_id": playerInfo.DiscordID},
-					})
+				// If backfill player lost but did not early quit, exempt them from the loss
+				if typeStats.ArenaLosses > 0 && !isEarlyQuitter {
+					logger.Debug("Backfill player loss exemption applied (stayed until end)")
+					typeStats.ArenaLosses = 0
+				} else if isEarlyQuitter {
+					logger.Debug("Backfill player early quit - loss counted")
 				}
-			} else {
-				logger.WithField("target_sid", playerInfo.SessionID).Warn("No team rating found for player in matchmaking ratings")
 			}
 
-			// Use the pre-calculated individual player ratings for this player
-			if rating, ok := playerRatings[playerInfo.SessionID]; ok {
-				// Add player skill rating entries to the statistics queue
-				muScore, muSubscore, err := Float64ToScore(rating.Mu)
-				if err != nil {
-					logger.WithField("error", err).Warn("Failed to convert Player Mu rating to score")
+			// Increment the completed matches for the player (arena only — early quit system doesn't apply to combat)
+			if label.Mode == evr.ModeArenaPublic {
+				if err := s.incrementCompletedMatches(ctx, logger, nk, db, sessionRegistry, playerInfo.UserID, playerInfo.SessionID, matchID); err != nil {
+					logger.WithField("error", err).Warn("Failed to increment completed matches")
+				}
+			}
+
+			if serviceSettings.UseSkillBasedMatchmaking() {
+
+				// Use the pre-calculated team ratings for this player
+				if rating, ok := teamRatings[playerInfo.SessionID]; ok {
+					// Add team skill rating entries to the statistics queue
+					muScore, muSubscore, err := Float64ToScore(rating.Mu)
+					if err != nil {
+						logger.WithField("error", err).Warn("Failed to convert Team Mu rating to score")
+					} else {
+						// Write to new TeamSkillRating stat
+						allStatEntries = append(allStatEntries, &StatisticsQueueEntry{
+							BoardMeta: LeaderboardMeta{
+								GroupID:       groupIDStr,
+								Mode:          label.Mode,
+								StatName:      TeamSkillRatingMuStatisticID,
+								Operator:      OperatorSet,
+								ResetSchedule: evr.ResetScheduleAllTime,
+							},
+							UserID:      playerInfo.UserID,
+							DisplayName: playerInfo.DisplayName,
+							Score:       muScore,
+							Subscore:    muSubscore,
+							Metadata:    map[string]string{"discord_id": playerInfo.DiscordID},
+						})
+					}
+
+					sigmaScore, sigmaSubscore, err := Float64ToScore(rating.Sigma)
+					if err != nil {
+						logger.WithField("error", err).Warn("Failed to convert Team Sigma rating to score")
+					} else {
+						// Write to new TeamSkillRating stat
+						allStatEntries = append(allStatEntries, &StatisticsQueueEntry{
+							BoardMeta: LeaderboardMeta{
+								GroupID:       groupIDStr,
+								Mode:          label.Mode,
+								StatName:      TeamSkillRatingSigmaStatisticID,
+								Operator:      OperatorSet,
+								ResetSchedule: evr.ResetScheduleAllTime,
+							},
+							UserID:      playerInfo.UserID,
+							DisplayName: playerInfo.DisplayName,
+							Score:       sigmaScore,
+							Subscore:    sigmaSubscore,
+							Metadata:    map[string]string{"discord_id": playerInfo.DiscordID},
+						})
+					}
 				} else {
-					allStatEntries = append(allStatEntries, &StatisticsQueueEntry{
-						BoardMeta: LeaderboardMeta{
-							GroupID:       groupIDStr,
-							Mode:          label.Mode,
-							StatName:      PlayerSkillRatingMuStatisticID,
-							Operator:      OperatorSet,
-							ResetSchedule: evr.ResetScheduleAllTime,
-						},
-						UserID:      playerInfo.UserID,
-						DisplayName: playerInfo.DisplayName,
-						Score:       muScore,
-						Subscore:    muSubscore,
-						Metadata:    map[string]string{"discord_id": playerInfo.DiscordID},
-					})
+					logger.WithField("target_sid", playerInfo.SessionID).Warn("No team rating found for player in matchmaking ratings")
 				}
 
-				sigmaScore, sigmaSubscore, err := Float64ToScore(rating.Sigma)
-				if err != nil {
-					logger.WithField("error", err).Warn("Failed to convert Player Sigma rating to score")
+				// Use the pre-calculated individual player ratings for this player
+				if rating, ok := playerRatings[playerInfo.SessionID]; ok {
+					// Add player skill rating entries to the statistics queue
+					muScore, muSubscore, err := Float64ToScore(rating.Mu)
+					if err != nil {
+						logger.WithField("error", err).Warn("Failed to convert Player Mu rating to score")
+					} else {
+						allStatEntries = append(allStatEntries, &StatisticsQueueEntry{
+							BoardMeta: LeaderboardMeta{
+								GroupID:       groupIDStr,
+								Mode:          label.Mode,
+								StatName:      PlayerSkillRatingMuStatisticID,
+								Operator:      OperatorSet,
+								ResetSchedule: evr.ResetScheduleAllTime,
+							},
+							UserID:      playerInfo.UserID,
+							DisplayName: playerInfo.DisplayName,
+							Score:       muScore,
+							Subscore:    muSubscore,
+							Metadata:    map[string]string{"discord_id": playerInfo.DiscordID},
+						})
+					}
+
+					sigmaScore, sigmaSubscore, err := Float64ToScore(rating.Sigma)
+					if err != nil {
+						logger.WithField("error", err).Warn("Failed to convert Player Sigma rating to score")
+					} else {
+						allStatEntries = append(allStatEntries, &StatisticsQueueEntry{
+							BoardMeta: LeaderboardMeta{
+								GroupID:       groupIDStr,
+								Mode:          label.Mode,
+								StatName:      PlayerSkillRatingSigmaStatisticID,
+								Operator:      OperatorSet,
+								ResetSchedule: evr.ResetScheduleAllTime,
+							},
+							UserID:      playerInfo.UserID,
+							DisplayName: playerInfo.DisplayName,
+							Score:       sigmaScore,
+							Subscore:    sigmaSubscore,
+							Metadata:    map[string]string{"discord_id": playerInfo.DiscordID},
+						})
+					}
 				} else {
-					allStatEntries = append(allStatEntries, &StatisticsQueueEntry{
-						BoardMeta: LeaderboardMeta{
-							GroupID:       groupIDStr,
-							Mode:          label.Mode,
-							StatName:      PlayerSkillRatingSigmaStatisticID,
-							Operator:      OperatorSet,
-							ResetSchedule: evr.ResetScheduleAllTime,
-						},
-						UserID:      playerInfo.UserID,
-						DisplayName: playerInfo.DisplayName,
-						Score:       sigmaScore,
-						Subscore:    sigmaSubscore,
-						Metadata:    map[string]string{"discord_id": playerInfo.DiscordID},
-					})
+					logger.WithField("target_sid", playerInfo.SessionID).Warn("No player rating found for player in matchmaking ratings")
 				}
-			} else {
-				logger.WithField("target_sid", playerInfo.SessionID).Warn("No player rating found for player in matchmaking ratings")
+			}
+
+			// Update the player's statistics, if the service settings allow it
+			if !serviceSettings.DisableStatisticsUpdates {
+				statEntries, err := typeStatsToScoreMap(playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, typeStats)
+				if err != nil {
+					return fmt.Errorf("failed to convert type stats to score map: %w", err)
+				}
+				allStatEntries = append(allStatEntries, statEntries...)
 			}
 		}
 
-		// Update the player's statistics, if the service settings allow it
-		if !serviceSettings.DisableStatisticsUpdates {
-			statEntries, err := typeStatsToScoreMap(playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, typeStats)
-			if err != nil {
-				return fmt.Errorf("failed to convert type stats to score map: %w", err)
+		if len(allStatEntries) > 0 {
+			if err := statisticsQueue.Add(allStatEntries); err != nil {
+				return err
 			}
-			allStatEntries = append(allStatEntries, statEntries...)
 		}
-	}
 
-	if len(allStatEntries) > 0 {
-		if err := statisticsQueue.Add(allStatEntries); err != nil {
-			return err
-		}
-	}
-
-	if err := DeleteStoredMatchLabel(ctx, nk, matchID); err != nil && !errors.Is(err, ErrMatchNotFound) {
-		logger.WithField("error", err).Warn("failed to delete stored match label after post-match processing")
-	}
-
-	return nil
+		return nil
+	})
 }
 
 func iterateMatchTypeStatsFields(stats evr.MatchTypeStats, fn func(statName string, op LeaderboardOperator, value float64)) {
