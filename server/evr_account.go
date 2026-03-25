@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -11,6 +12,8 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -353,6 +356,8 @@ func EVRProfileLoad(ctx context.Context, nk runtime.NakamaModule, userID string)
 		// Successfully loaded from storage, attach account
 		profile.account = account
 		return profile, nil
+	} else if status.Code(err) != codes.NotFound {
+		return nil, err
 	}
 
 	// Fall back to loading from account metadata for backward compatibility
@@ -407,9 +412,32 @@ func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID strin
 }
 
 func BuildEVRProfileFromAccount(account *api.Account) (*EVRProfile, error) {
+	if account == nil || account.User == nil {
+		return nil, fmt.Errorf("account is nil")
+	}
 	a := &EVRProfile{}
-	if err := json.Unmarshal([]byte(account.User.Metadata), &a); err != nil {
-		return nil, fmt.Errorf("error unmarshalling account metadata: %w", err)
+
+	metadata := strings.TrimSpace(account.User.Metadata)
+	if metadata != "" && metadata != "null" {
+		if err := json.Unmarshal([]byte(metadata), a); err != nil {
+			return nil, fmt.Errorf("error unmarshalling account metadata: %w", err)
+		}
+	}
+
+	if a.InGameNames == nil {
+		a.InGameNames = make(map[string]GroupInGameName)
+	}
+
+	if a.MutedPlayers == nil {
+		a.MutedPlayers = make([]evr.EvrId, 0)
+	}
+
+	if a.GhostedPlayers == nil {
+		a.GhostedPlayers = make([]evr.EvrId, 0)
+	}
+
+	if a.NewUnlocks == nil {
+		a.NewUnlocks = make([]int64, 0)
 	}
 	a.account = account
 	return a, nil
