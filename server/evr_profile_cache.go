@@ -153,8 +153,6 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 func sanitizeLoadout(loadout evr.CosmeticLoadout, cosmetics map[string]map[string]bool) evr.CosmeticLoadout {
 	defaults := evr.DefaultCosmeticLoadout()
 	defaultMap := defaults.ToMap() // json_key → default item ID
-	arenaUnlocks := cosmetics["arena"]
-
 	result := loadout
 	v := reflect.ValueOf(&result).Elem()
 	t := v.Type()
@@ -164,7 +162,14 @@ func sanitizeLoadout(loadout evr.CosmeticLoadout, cosmetics map[string]map[strin
 		if itemID == "" {
 			continue // omitempty slot, leave it
 		}
-		if !arenaUnlocks[itemID] {
+		unlocked := false
+		for _, modeUnlocks := range cosmetics {
+			if modeUnlocks[itemID] {
+				unlocked = true
+				break
+			}
+		}
+		if !unlocked {
 			if def, ok := defaultMap[jsonTag]; ok {
 				v.Field(i).SetString(def)
 			}

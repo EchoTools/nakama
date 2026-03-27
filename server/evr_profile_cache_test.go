@@ -82,6 +82,54 @@ func wantGotDiff(t *testing.T, want, got interface{}) {
 	}
 }
 
+func TestSanitizeLoadout_CombatChassis(t *testing.T) {
+	// Bug: sanitizeLoadout only checks cosmetics["arena"], so combat-only
+	// items (e.g. rwd_chassis_body_s10_a) get reverted to the default chassis
+	// even when the player owns them.
+
+	defaults := evr.DefaultCosmeticLoadout()
+
+	// Build a cosmetics map that includes the combat chassis as unlocked.
+	cosmetics := map[string]map[string]bool{
+		"arena":  {"rwd_chassis_body_s11_a": true},
+		"combat": {"rwd_chassis_body_s10_a": true},
+	}
+
+	loadout := defaults
+	loadout.Chassis = "rwd_chassis_body_s10_a" // equip combat chassis
+
+	result := sanitizeLoadout(loadout, cosmetics)
+
+	if result.Chassis != "rwd_chassis_body_s10_a" {
+		t.Errorf("combat chassis was sanitized away: got %q, want %q",
+			result.Chassis, "rwd_chassis_body_s10_a")
+	}
+}
+
+func TestSanitizeLoadout_AllCombatCosmetics(t *testing.T) {
+	// Verify that ALL combat-only cosmetics survive sanitization when unlocked.
+
+	defaults := evr.DefaultCosmeticLoadout()
+	cosmetics := cosmeticDefaults(false)
+
+	// Equip every combat cosmetic into the corresponding loadout slot.
+	combatItems := map[string]string{
+		"Chassis": "rwd_chassis_body_s10_a",
+		"Booster": "rwd_booster_s10",
+	}
+
+	for slot, item := range combatItems {
+		loadout := defaults
+		reflect.ValueOf(&loadout).Elem().FieldByName(slot).SetString(item)
+
+		result := sanitizeLoadout(loadout, cosmetics)
+		got := reflect.ValueOf(result).FieldByName(slot).String()
+		if got != item {
+			t.Errorf("combat %s %q was sanitized to %q", slot, item, got)
+		}
+	}
+}
+
 func TestServerProfileGeneration(t *testing.T) {
 
 	wantMap := map[string]any{}
