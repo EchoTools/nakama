@@ -9,8 +9,7 @@ require (
 	github.com/blugelabs/bluge_segment_api v0.2.0
 	github.com/blugelabs/query_string v0.3.0
 	github.com/dgryski/dgoogauth v0.0.0-20190221195224-5a805980a5f3
-	github.com/dop251/goja v0.0.0-20250309171923-bcd7cc6bf64c
-	github.com/echotools/nevr-common/v4 v4.4.0
+	github.com/dop251/goja v0.0.0-20260106131823-651366fbe6e3
 	github.com/echotools/nevr-fleetmanager v0.0.0-20260223083915-263af0e9236e
 	github.com/echotools/vrmlgo/v5 v5.0.1
 	github.com/go-redis/redis v6.15.9+incompatible
@@ -21,17 +20,17 @@ require (
 	github.com/gorilla/handlers v1.5.2
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
-	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.3
+	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.4
 	github.com/heroiclabs/nakama-common v1.44.1
 	github.com/heroiclabs/sql-migrate v0.0.0-20241125131053-95a7949783b0
 	github.com/intinig/go-openskill v0.0.0-20250324193118-8ce0c35c4815
 	github.com/jackc/pgerrcode v0.0.0-20250907135507-afb5586c32a6
 	github.com/jackc/pgtype v1.14.4
-	github.com/jackc/pgx/v5 v5.7.6
+	github.com/jackc/pgx/v5 v5.8.0
 	github.com/klauspost/compress v1.18.2
 	github.com/muesli/reflow v0.3.0
 	github.com/prometheus/client_golang v1.23.2
-	github.com/prometheus/common v0.67.2
+	github.com/prometheus/common v0.67.5
 	github.com/samber/lo v1.52.0
 	github.com/stretchr/testify v1.11.1
 	github.com/uber-go/tally/v4 v4.1.17
@@ -39,12 +38,12 @@ require (
 	go.uber.org/atomic v1.11.0
 	go.uber.org/thriftrw v1.33.0
 	go.uber.org/zap v1.27.1
-	golang.org/x/crypto v0.46.0
-	golang.org/x/oauth2 v0.32.0
+	golang.org/x/crypto v0.47.0
+	golang.org/x/oauth2 v0.34.0
 	golang.org/x/time v0.14.0
 	gonum.org/v1/gonum v0.16.0
-	google.golang.org/genproto/googleapis/api v0.0.0-20251213004720-97cd9d5aeac2
-	google.golang.org/grpc v1.77.0
+	google.golang.org/genproto/googleapis/api v0.0.0-20260112192933-99fd39fd28a9
+	google.golang.org/grpc v1.78.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
@@ -60,6 +59,7 @@ require (
 	github.com/kamstrup/intmap v0.5.1 // indirect
 	github.com/mattn/go-runewidth v0.0.19 // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
+	github.com/nxadm/tail v1.4.11 // indirect
 	github.com/onsi/ginkgo v1.16.5 // indirect
 	github.com/onsi/gomega v1.37.0 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
@@ -72,6 +72,7 @@ require (
 )
 
 require (
+	buf.build/gen/go/echotools/nevr-api/protocolbuffers/go v1.36.11-20260320084729-a3dfb29cd431.1
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/RoaringBitmap/roaring v1.9.4 // indirect
 	github.com/axiomhq/hyperloglog v0.2.5 // indirect
@@ -106,7 +107,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/sync v0.19.0
-	golang.org/x/sys v0.39.0 // indirect
-	golang.org/x/text v0.32.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20251213004720-97cd9d5aeac2 // indirect
+	golang.org/x/sys v0.40.0 // indirect
+	golang.org/x/text v0.33.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20251222181119-0a764e51fe1b // indirect
 )
