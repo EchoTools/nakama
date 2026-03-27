@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	telemetryv1 "github.com/echotools/nevr-common/v4/gen/go/telemetry/v1"
+	telemetryv1 "buf.build/gen/go/echotools/nevr-api/protocolbuffers/go/telemetry/v1"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.mongodb.org/mongo-driver/bson"

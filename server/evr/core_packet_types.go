@@ -3,7 +3,7 @@ package evr
 import (
 	"fmt"
 
-	rtapi "github.com/echotools/nevr-common/v4/gen/go/rtapi/v1"
+	rtapi "buf.build/gen/go/echotools/nevr-api/protocolbuffers/go/gameservice/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
