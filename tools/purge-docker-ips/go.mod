@@ -1,6 +1,6 @@
 module purge-docker-ips
 
-go 1.25.0
+go 1.25.5
 
 replace github.com/heroiclabs/nakama/v3 => ../..
 
@@ -12,6 +12,7 @@ require (
 require github.com/echotools/nevr-fleetmanager v0.0.0-20260223083915-263af0e9236e // indirect
 
 require (
+	buf.build/gen/go/echotools/nevr-api/protocolbuffers/go v1.36.11-20260320084729-a3dfb29cd431.1 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/RoaringBitmap/roaring v1.9.4 // indirect
 	github.com/anyascii/go v0.3.3 // indirect
@@ -36,7 +37,6 @@ require (
 	github.com/dgryski/go-metro v0.0.0-20250106013310-edb8663e5e33 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/dop251/goja v0.0.0-20260106131823-651366fbe6e3 // indirect
-	github.com/echotools/nevr-common/v4 v4.4.0 // indirect
 	github.com/echotools/vrmlgo/v5 v5.0.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-redis/redis v6.15.9+incompatible // indirect
@@ -51,7 +51,7 @@ require (
 	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.4 // indirect
-	github.com/heroiclabs/nakama-common v1.37.0 // indirect
+	github.com/heroiclabs/nakama-common v1.44.1 // indirect
 	github.com/intinig/go-openskill v0.0.0-20250324193118-8ce0c35c4815 // indirect
 	github.com/jackc/pgerrcode v0.0.0-20250907135507-afb5586c32a6 // indirect
 	github.com/jackc/pgio v1.0.0 // indirect
@@ -67,7 +67,6 @@ require (
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/nxadm/tail v1.4.11 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
@@ -99,5 +98,6 @@ require (
 	google.golang.org/grpc v1.78.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
+	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
