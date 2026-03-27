@@ -52,6 +52,7 @@ const (
 type WhoAmI struct {
 	GroupID string
 
+	takenDisplayNames   map[string]string // groupID -> the taken display name
 	loginHistory        *LoginHistory
 	profile             *EVRProfile
 	guildGroups         map[string]*GuildGroup
@@ -111,9 +112,13 @@ func (w *WhoAmI) createUserAccountDetailsEmbed() *discordgo.MessageEmbed {
 			// Replace `'s with `\'s`
 			dn = strings.ReplaceAll(dn, "`", "\\`")
 
-			// Add status indicators for override and locked
+			// Add status indicators for override, locked, or taken
 			status := ""
-			if ign, exists := w.profile.InGameNames[gid]; exists {
+			if takenName, isTaken := w.takenDisplayNames[gid]; isTaken {
+				escapedTaken := strings.ReplaceAll(takenName, "`", "\\`")
+				status = fmt.Sprintf(" (`%s` is taken)", escapedTaken)
+				dn = strings.ReplaceAll(w.profile.Username(), "`", "\\`")
+			} else if ign, exists := w.profile.InGameNames[gid]; exists {
 				if ign.IsLocked {
 					status = " (locked)"
 				} else if ign.IsOverride {
@@ -773,6 +778,24 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	w := NewWhoAmI(ctx, logger, nk, d.guildGroupRegistry, d.cache, profile, loginHistory, matchmakingSettings, guildGroups, displayNameHistory, journal, potentialAlternates, activeSuspensions, earlyQuitConfig, opts, groupID)
 
+	// Check which display names are taken by other players
+	displayNames := make([]string, 0)
+	for _, dn := range profile.DisplayNamesByGroupID() {
+		displayNames = append(displayNames, dn)
+	}
+	if len(displayNames) > 0 {
+		if ownerMap, err := DisplayNameOwnerSearch(ctx, nk, displayNames); err != nil {
+			logger.WithField("error", err).Warn("Failed to check display name owners for whoami")
+		} else {
+			w.takenDisplayNames = make(map[string]string)
+			for gid, dn := range profile.DisplayNamesByGroupID() {
+				if ownerIDs, ok := ownerMap[dn]; ok && !slices.Contains(ownerIDs, profile.ID()) {
+					w.takenDisplayNames[gid] = dn
+				}
+			}
+		}
+	}
+
 	if w.opts.IncludePastDisplayNamesEmbed {
 		pastDisplayNameEmbed = w.createPastDisplayNameEmbed(displayNameHistory, groupID)
 	}
@@ -870,7 +893,13 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	// Paginate the embeds based on their byte size
 	const FieldMaxLen = 800
 	const MaxFieldsPerEmbed = 25
+	const MaxEmbedsPerMessage = 10
 	embeds = PaginateEmbeds(embeds, MaxFieldsPerEmbed, FieldMaxLen)
+
+	// Discord allows a maximum of 10 embeds per message.
+	if len(embeds) > MaxEmbedsPerMessage {
+		embeds = embeds[:MaxEmbedsPerMessage]
+	}
 
 	// Add "Override In-Game Name" button for enforcers
 	components := make([]discordgo.MessageComponent, 0)
