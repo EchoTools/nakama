@@ -229,10 +229,20 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 	if isLeader {
 		if !lobbyParams.CurrentMatchID.IsNil() && lobbyParams.Mode != evr.ModeSocialPublic {
 			// Query the match we're leaving to find how many party members should be joining us.
+			// Use the leader's party ID from the match presence (set at join time), not
+			// lobbyParams.PartyID. The user may have changed their LobbyGroupName since
+			// joining the match (via /party group), which changes lobbyParams.PartyID but
+			// doesn't update the match presence. Comparing against the match presence
+			// party ID ensures we count everyone who was in the same party when they
+			// entered the match.
 			expectedCount := 0
 			if presences, err := GetMatchPresences(ctx, p.nk, lobbyParams.CurrentMatchID); err == nil {
+				matchPartyID := lobbyParams.PartyID
+				if leaderPresence, ok := presences[session.userID.String()]; ok && !leaderPresence.PartyID.IsNil() {
+					matchPartyID = leaderPresence.PartyID
+				}
 				for _, mp := range presences {
-					if mp.PartyID == lobbyParams.PartyID && mp.UserID != session.userID {
+					if mp.PartyID == matchPartyID && mp.UserID != session.userID {
 						expectedCount++
 					}
 				}
