@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	rtapi "github.com/echotools/nevr-common/v4/gen/go/rtapi/v1"
+	rtapi "buf.build/gen/go/echotools/nevr-api/protocolbuffers/go/gameservice/v1"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
