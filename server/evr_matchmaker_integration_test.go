@@ -256,6 +256,106 @@ func addIntegrationProcessorTicketWithProps(t *testing.T, matchmaker *LocalMatch
 	return ticket
 }
 
+// addIntegrationPartyTicket adds a party ticket with the given size and MaxCount.
+func addIntegrationPartyTicket(t *testing.T, matchmaker *LocalMatchmaker, partySize int, partyPrefix string, maxCount int) string {
+	t.Helper()
+
+	presences := make([]*MatchmakerPresence, partySize)
+	for i := range partySize {
+		presences[i] = &MatchmakerPresence{
+			UserId:    fmt.Sprintf("%s-member-%d", partyPrefix, i),
+			SessionId: fmt.Sprintf("%s-session-%d", partyPrefix, i),
+			Username:  fmt.Sprintf("%s-user-%d", partyPrefix, i),
+			Node:      "integration",
+		}
+	}
+	ticket, _, err := matchmaker.Add(
+		context.Background(),
+		presences,
+		"",
+		partyPrefix+".node",
+		"+properties.game_mode:echo_arena",
+		2,
+		maxCount,
+		2,
+		map[string]string{
+			"game_mode": "echo_arena",
+			"group_id":  "integration-group",
+		},
+		map[string]float64{
+			"max_count":      float64(maxCount),
+			"count_multiple": 2,
+			"max_rtt":        250,
+			"rtt_test":       40,
+			"max_team_size":  4,
+			"min_team_size":  4,
+			"rating_mu":      25,
+			"rating_sigma":   8.33,
+			"timestamp":      float64(time.Now().UTC().Unix()) - 180,
+		},
+	)
+	if err != nil {
+		t.Fatalf("add party ticket (%s, size=%d): %v", partyPrefix, partySize, err)
+	}
+	return ticket
+}
+
+// TestIntegrationProcessorPartyStarvedByOrdering reproduces the production bug
+// where a party of 4 (MaxCount=8) is starved because enough solo tickets were
+// created BEFORE the party's ticket. When the party's fallback timer fires and
+// replaces its ticket, the new ticket gets a fresh CreatedAt — making it
+// younger than solos already in the queue. groupEntriesSequentially packs
+// entries in CreatedAt order, so solos fill the first candidate, and the party
+// ends up in an undersized candidate (< 8 players) that gets rejected.
+func TestIntegrationProcessorPartyStarvedByOrdering(t *testing.T) {
+	logger := loggerForTest(t)
+	matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
+	defer cleanup()
+
+	wireEvrProcessor(matchmaker, NewRuntimeGoLogger(logger))
+
+	// Add 9 solos FIRST — these get older CreatedAt timestamps. With map
+	// iteration shifting one ticket to the end, 8 solos precede the party.
+	// Those 8 fill Candidate 1. The remaining entries are:
+	//   party(4) + 1 leftover solo + 1 newer solo + 1 shifted solo = 7
+	//   7 % 2 = 1 → trimmed to 6 → undersized (< 8)
+	for i := range 9 {
+		addIntegrationProcessorTicket(t, matchmaker, i, 40)
+	}
+
+	// Add the party of 4 with MaxCount=8. It gets a newer CreatedAt than the
+	// 9 solos above, simulating the fallback timer replacing the ticket.
+	partyTicket := addIntegrationPartyTicket(t, matchmaker, 4, "ordering-party", 8)
+
+	// Add only 1 solo AFTER the party. Total: 10 solos + party(4) = 14 entries.
+	// Enough for one 8-player match containing the party (4 solos needed).
+	// But groupEntriesSequentially's sequential packing starves the party.
+	addIntegrationProcessorTicket(t, matchmaker, 100, 40)
+
+	var partyMatched bool
+	for cycle := range 3 {
+		matched, _ := runProcessorCycle(matchmaker)
+		for _, group := range matched {
+			for _, entry := range group {
+				if entry.Ticket == partyTicket {
+					partyMatched = true
+					if len(group) != 8 {
+						t.Fatalf("cycle %d: party matched in group of %d, want 8", cycle, len(group))
+					}
+					break
+				}
+			}
+		}
+		if partyMatched {
+			break
+		}
+	}
+
+	if !partyMatched {
+		t.Fatalf("party of 4 (MaxCount=8) was never matched — groupEntriesSequentially placed it in an undersized candidate due to entry ordering (5 older solos packed first)")
+	}
+}
+
 func TestIntegrationProcessorCrossModeIsolation(t *testing.T) {
 	logger := loggerForTest(t)
 	matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
