@@ -164,12 +164,214 @@ func TestGroupEntriesPartyAtomicity(t *testing.T) {
 		}
 	})
 
-	t.Run("party larger than maxCount is skipped", func(t *testing.T) {
+	t.Run("parties packed before solos regardless of insertion order", func(t *testing.T) {
+		// Regression: groupEntriesSequentially used to pack in insertion order,
+		// so a party added after solos would be starved if solos filled the
+		// first candidate. The fix sorts largest tickets first.
+		now := float64(time.Now().UTC().Unix())
+		baseProps := map[string]any{
+			"group_id":        "group-1",
+			"game_mode":       "echo_arena",
+			"max_count":       8.0,
+			"count_multiple":  2.0,
+			"max_rtt":         250.0,
+			"rtt_test":        40.0,
+			"rating_mu":       25.0,
+			"rating_sigma":    8.33,
+			"submission_time": now,
+		}
+
+		entries := make([]runtime.MatchmakerEntry, 0, 12)
+
+		// Add 8 solos FIRST (older timestamps)
+		for i := 0; i < 8; i++ {
+			props := make(map[string]any)
+			for k, v := range baseProps {
+				props[k] = v
+			}
+			entries = append(entries, &MatchmakerEntry{
+				Ticket: fmt.Sprintf("solo-%d", i),
+				Presence: &MatchmakerPresence{
+					UserId:    fmt.Sprintf("user-solo-%d", i),
+					SessionId: fmt.Sprintf("session-solo-%d", i),
+					Username:  fmt.Sprintf("solo-%d", i),
+				},
+				Properties: props,
+			})
+		}
+
+		// Add party of 4 AFTER solos
+		for i := 0; i < 4; i++ {
+			props := make(map[string]any)
+			for k, v := range baseProps {
+				props[k] = v
+			}
+			entries = append(entries, &MatchmakerEntry{
+				Ticket: "late-party",
+				Presence: &MatchmakerPresence{
+					UserId:    fmt.Sprintf("user-party-%d", i),
+					SessionId: fmt.Sprintf("session-party-%d", i),
+					Username:  fmt.Sprintf("party-%d", i),
+				},
+				Properties: props,
+			})
+		}
+
+		candidates := groupEntriesSequentially(entries)
+
+		// The party (size 4) must appear in the first candidate, not be
+		// pushed to a leftover remainder by 8 solos filling it first.
+		if len(candidates) == 0 {
+			t.Fatal("expected at least one candidate")
+		}
+		partyInFirst := 0
+		for _, e := range candidates[0] {
+			if e.GetTicket() == "late-party" {
+				partyInFirst++
+			}
+		}
+		if partyInFirst != 4 {
+			t.Fatalf("expected all 4 party members in first candidate, got %d", partyInFirst)
+		}
+	})
+
+	t.Run("multiple parties sorted largest first", func(t *testing.T) {
+		now := float64(time.Now().UTC().Unix())
+		baseProps := map[string]any{
+			"group_id":        "group-1",
+			"game_mode":       "echo_arena",
+			"max_count":       8.0,
+			"count_multiple":  2.0,
+			"max_rtt":         250.0,
+			"rtt_test":        40.0,
+			"rating_mu":       25.0,
+			"rating_sigma":    8.33,
+			"submission_time": now,
+		}
+
+		entries := make([]runtime.MatchmakerEntry, 0, 10)
+
+		// Small party of 2
+		for i := 0; i < 2; i++ {
+			props := make(map[string]any)
+			for k, v := range baseProps {
+				props[k] = v
+			}
+			entries = append(entries, &MatchmakerEntry{
+				Ticket: "small-party",
+				Presence: &MatchmakerPresence{
+					UserId:    fmt.Sprintf("user-small-%d", i),
+					SessionId: fmt.Sprintf("session-small-%d", i),
+					Username:  fmt.Sprintf("small-%d", i),
+				},
+				Properties: props,
+			})
+		}
+
+		// 4 solos between the parties
+		for i := 0; i < 4; i++ {
+			props := make(map[string]any)
+			for k, v := range baseProps {
+				props[k] = v
+			}
+			entries = append(entries, &MatchmakerEntry{
+				Ticket: fmt.Sprintf("solo-%d", i),
+				Presence: &MatchmakerPresence{
+					UserId:    fmt.Sprintf("user-solo-%d", i),
+					SessionId: fmt.Sprintf("session-solo-%d", i),
+					Username:  fmt.Sprintf("solo-%d", i),
+				},
+				Properties: props,
+			})
+		}
+
+		// Large party of 4
+		for i := 0; i < 4; i++ {
+			props := make(map[string]any)
+			for k, v := range baseProps {
+				props[k] = v
+			}
+			entries = append(entries, &MatchmakerEntry{
+				Ticket: "large-party",
+				Presence: &MatchmakerPresence{
+					UserId:    fmt.Sprintf("user-large-%d", i),
+					SessionId: fmt.Sprintf("session-large-%d", i),
+					Username:  fmt.Sprintf("large-%d", i),
+				},
+				Properties: props,
+			})
+		}
+
+		candidates := groupEntriesSequentially(entries)
+
+		// First candidate should contain the large party (4) + small party (2) + 2 solos = 8
+		if len(candidates) == 0 {
+			t.Fatal("expected at least one candidate")
+		}
+		largeInFirst := 0
+		smallInFirst := 0
+		for _, e := range candidates[0] {
+			switch e.GetTicket() {
+			case "large-party":
+				largeInFirst++
+			case "small-party":
+				smallInFirst++
+			}
+		}
+		if largeInFirst != 4 {
+			t.Fatalf("expected 4 large-party members in first candidate, got %d", largeInFirst)
+		}
+		if smallInFirst != 2 {
+			t.Fatalf("expected 2 small-party members in first candidate, got %d", smallInFirst)
+		}
+	})
+
+	t.Run("party exactly fills candidate", func(t *testing.T) {
 		now := float64(time.Now().UTC().Unix())
 		baseProps := map[string]any{
 			"group_id":        "group-1",
 			"game_mode":       "echo_arena",
 			"max_count":       4.0,
+			"count_multiple":  2.0,
+			"max_rtt":         250.0,
+			"rtt_test":        40.0,
+			"rating_mu":       25.0,
+			"rating_sigma":    8.33,
+			"submission_time": now,
+		}
+
+		entries := make([]runtime.MatchmakerEntry, 0, 4)
+		for i := 0; i < 4; i++ {
+			props := make(map[string]any)
+			for k, v := range baseProps {
+				props[k] = v
+			}
+			entries = append(entries, &MatchmakerEntry{
+				Ticket: "exact-party",
+				Presence: &MatchmakerPresence{
+					UserId:    fmt.Sprintf("user-%d", i),
+					SessionId: fmt.Sprintf("session-%d", i),
+					Username:  fmt.Sprintf("player-%d", i),
+				},
+				Properties: props,
+			})
+		}
+
+		candidates := groupEntriesSequentially(entries)
+		if len(candidates) != 1 {
+			t.Fatalf("expected 1 candidate, got %d", len(candidates))
+		}
+		if len(candidates[0]) != 4 {
+			t.Fatalf("expected candidate size 4, got %d", len(candidates[0]))
+		}
+	})
+
+	t.Run("party larger than maxCount is skipped", func(t *testing.T) {
+		now := float64(time.Now().UTC().Unix())
+		baseProps := map[string]any{
+			"group_id":        "group-1",
+			"game_mode":       "echo_arena",
+			"max_team_size":   2.0, // maxCount = max_team_size * 2 = 4
 			"count_multiple":  2.0,
 			"max_rtt":         250.0,
 			"rtt_test":        40.0,

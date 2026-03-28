@@ -145,6 +145,15 @@ func groupEntriesSequentially(entries []runtime.MatchmakerEntry) [][]runtime.Mat
 		}
 	}
 
+	// Sort ticket groups largest-first so parties are placed before solos.
+	// Without this, sequential packing in CreatedAt order can starve parties
+	// whose tickets were replaced (and thus have newer timestamps) — older
+	// solos fill the first candidate, leaving the party in an undersized
+	// remainder that gets rejected.
+	sort.SliceStable(ticketOrder, func(i, j int) bool {
+		return len(ticketMap[ticketOrder[i]].entries) > len(ticketMap[ticketOrder[j]].entries)
+	})
+
 	// Pack ticket groups into candidates, never splitting a ticket across candidates.
 	candidates := make([][]runtime.MatchmakerEntry, 0, (len(entries)+maxCount-1)/maxCount)
 	current := make([]runtime.MatchmakerEntry, 0, maxCount)
