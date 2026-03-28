@@ -663,11 +663,22 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 		partySize = 1
 	}
 
-	if !label.Open || label.OpenPlayerSlots() < partySize {
+	// Count how many party members are already in the match.
+	// The required slots should only be for the members NOT in the match.
+	countInMatch := 0
+	for _, member := range lobbyGroup.List() {
+		if label.GetPlayerByUserID(member.Presence.GetUserId()) != nil {
+			countInMatch++
+		}
+	}
+	requiredSlots := partySize - countInMatch
+
+	if !label.Open || label.OpenPlayerSlots() < requiredSlots {
 		logger.Debug("Leader's match is full or closed",
 			zap.Bool("open", label.Open),
 			zap.Int("open_slots", label.OpenPlayerSlots()),
-			zap.Int("party_size", partySize))
+			zap.Int("party_size", partySize),
+			zap.Int("required_slots", requiredSlots))
 
 		if params.CurrentMatchID.IsNil() {
 			// Follower is at main menu; fall through to normal find.
@@ -731,6 +742,17 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		}
 		leaderMatchID := MatchIDFromStringOrNil(leaderPresence.GetStatus())
 		if leaderMatchID.IsNil() {
+			return false
+		}
+
+		// Guard against stale service streams: if the leader's match is the
+		// same match the follower was in when they started lobby find, this is
+		// not a new placement — it's leftover data from the previous lobby.
+		// Without this check, a matchmaking timeout produces a false positive
+		// (both players still point to the old social lobby), causing
+		// pollFollowPartyLeader to return true even though no new match was
+		// found. The followers get stuck in transition indefinitely.
+		if !params.CurrentMatchID.IsNil() && leaderMatchID == params.CurrentMatchID {
 			return false
 		}
 
@@ -842,7 +864,17 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 			partySize = 1
 		}
 
-		if !label.Open || label.OpenPlayerSlots() < partySize {
+		// Count how many party members are already in the match.
+		// The required slots should only be for the members NOT in the match.
+		countInMatch := 0
+		for _, member := range lobbyGroup.List() {
+			if label.GetPlayerByUserID(member.Presence.GetUserId()) != nil {
+				countInMatch++
+			}
+		}
+		requiredSlots := partySize - countInMatch
+
+		if !label.Open || label.OpenPlayerSlots() < requiredSlots {
 			continue
 		}
 
