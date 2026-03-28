@@ -21,7 +21,7 @@ jobs:
 
 
       - name: Vendor dependencies
-        run: go mod vendor
+        run: go mod tidy && go mod vendor
 
       - name: Build binary
         run: make nakama

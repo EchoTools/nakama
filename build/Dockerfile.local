@@ -35,6 +35,7 @@ RUN go build -o /go/build-out/nakama -trimpath -mod=vendor -gcflags "-trimpath $
 FROM debian:bookworm-slim
 
 LABEL org.opencontainers.image.authors="andrew@sprock.io"
+LABEL org.opencontainers.image.source="https://github.com/EchoTools/nakama"
 
 ARG version
 

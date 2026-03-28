@@ -5,6 +5,10 @@ on:
     types:
       - created
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
   nakama_build_publish:
     runs-on: ubuntu-latest
@@ -27,9 +31,18 @@ jobs:
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ github.event.release.tag_name }}
+            type=raw,value=latest
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -39,6 +52,5 @@ jobs:
           build-args: |
             VERSION=${{ env.ARG_VERSION }}
           push: true
-          tags: |
-            ghcr.io/echotools/nakama:${{ github.event.release.tag_name }}
-            ghcr.io/echotools/nakama:latest
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
