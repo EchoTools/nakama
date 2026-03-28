@@ -84,10 +84,10 @@ func GuildGroupUpdateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		return "", runtime.NewError("guild group not found", 5)
 	}
 
-	if !gg.IsOwner(userID) && !gg.IsEnforcer(userID) {
+	if !gg.IsOwner(userID) {
 		isGlobalOp, checkErr := isGlobalOperator(ctx, nk, userID)
 		if checkErr != nil || !isGlobalOp {
-			return "", runtime.NewError("permission denied", 7)
+			return "", runtime.NewError("permission denied: only guild owner can update the guild", 7)
 		}
 	}
 
@@ -319,10 +319,10 @@ func (h *RPCHandler) GuildDiscordRolesRPC(ctx context.Context, logger runtime.Lo
 		return "", runtime.NewError("guild group not found", 5)
 	}
 
-	if !gg.IsOwner(userID) && !gg.IsEnforcer(userID) {
+	if !gg.IsOwner(userID) {
 		isGlobalOp, checkErr := isGlobalOperator(ctx, nk, userID)
 		if checkErr != nil || !isGlobalOp {
-			return "", runtime.NewError("permission denied", 7)
+			return "", runtime.NewError("permission denied: only guild owner can fetch discord roles", 7)
 		}
 	}
 
