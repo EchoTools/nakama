@@ -1209,6 +1209,86 @@ func TestDuoDesync_TryFollow_LeaderStillMatchmaking_FallsToDesyncPoll(t *testing
 	cancel2()
 }
 
+// TestPoll_StaleMatchFalsePositive_ReturnsFalse reproduces the party-stuck-in-
+// transition bug: when the matchmaker times out without finding a match, the
+// leader and all followers still have service streams pointing to the OLD social
+// lobby they were in together. isFollowerInLeaderMatch() returns a false positive
+// because it only checks that leader and follower are in the "same" match — it
+// doesn't verify it's a NEW match vs the stale original match.
+//
+// Timeline from production logs:
+//   T=0:    All 4 party members in social lobby (matchA)
+//   T=0:    Leader starts LobbyFind → vibinatorsGravity redirects to combat
+//   T=0:    Followers enter pollFollowPartyLeader (leader is matchmaking)
+//   T=0-10m: Leader is in matchmaker. Followers poll every 3s, see "leader is
+//            matchmaking" → continue. No poll iteration reaches the join path.
+//   T=10m:  Context expires (MatchmakingTimeout). isFollowerInLeaderMatch()
+//            returns TRUE because both leader and followers still point to matchA.
+//   T=10m:  pollFollowPartyLeader returns true (false success).
+//   T=10m:  lobbyFind returns nil. No LobbySessionSuccess sent. Players stuck.
+func TestPoll_StaleMatchFalsePositive_ReturnsFalse(t *testing.T) {
+	env := newFollowTestEnv(t)
+
+	// All party members were in the same social lobby before lobby find.
+	matchA := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	env.setLeaderMatch(matchA)
+	env.setFollowerMatch(matchA)
+	env.setLeaderMatchmaking()
+
+	// Set CurrentMatchID so the code knows this is the original match.
+	env.params.CurrentMatchID = matchA
+
+	// Context expires after 2 seconds (simulates 10-minute matchmaking timeout).
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	result, timedOut := env.runPollWithTimeout(ctx, t, 5*time.Second)
+	if timedOut {
+		t.Fatal("pollFollowPartyLeader hung — should have returned when context expired")
+	}
+	if result {
+		t.Error("STALE MATCH BUG: pollFollowPartyLeader returned true because " +
+			"isFollowerInLeaderMatch() saw both players still pointing to the OLD " +
+			"social lobby (matchA). No new match was found — the matchmaker timed " +
+			"out. Players are now stuck in transition with no LobbySessionSuccess.")
+	}
+}
+
+// TestPoll_StaleMatchFalsePositive_ContextCancelWithNewMatch_ReturnsTrue verifies
+// that when the matchmaker DOES place the follower into a genuinely new match,
+// the stale-match guard doesn't block it. isFollowerInLeaderMatch should return
+// true when the leader's match is different from CurrentMatchID.
+func TestPoll_StaleMatchFalsePositive_ContextCancelWithNewMatch_ReturnsTrue(t *testing.T) {
+	env := newFollowTestEnv(t)
+
+	matchA := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	env.setLeaderMatch(matchA) // starts in old lobby
+	env.setFollowerMatch(matchA)
+	env.setLeaderMatchmaking()
+	env.params.CurrentMatchID = matchA
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// After 1 second, matchmaker places both into matchB.
+	go func() {
+		time.Sleep(1 * time.Second)
+		env.removeLeaderMatchmaking()
+		env.setLeaderMatch(matchB)
+		env.setFollowerMatch(matchB)
+	}()
+
+	result, timedOut := env.runPollWithTimeout(ctx, t, 12*time.Second)
+	if timedOut {
+		t.Fatal("pollFollowPartyLeader timed out waiting for new match detection")
+	}
+	if !result {
+		t.Error("Expected true when matchmaker placed both players into a genuinely " +
+			"new match (matchB), different from the stale original (matchA)")
+	}
+}
+
 // TestDuoDesync_PollFollow_ContextCanceledBeforeSettleCheck demonstrates the
 // specific timing issue within pollFollowPartyLeader: the function has TWO
 // 3-second waits per iteration. The context can be canceled during either wait.
