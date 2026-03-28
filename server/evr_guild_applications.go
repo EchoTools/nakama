@@ -54,6 +54,18 @@ func GuildApplicationListRPC(ctx context.Context, logger runtime.Logger, db *sql
 		return "", runtime.NewError("guild_id is required", 3)
 	}
 
+	gg, err := GuildGroupLoad(ctx, nk, req.GuildID)
+	if err != nil {
+		return "", runtime.NewError("guild group not found", 5)
+	}
+
+	if !gg.IsOwner(userID) {
+		isGlobalOp, checkErr := isGlobalOperator(ctx, nk, userID)
+		if checkErr != nil || !isGlobalOp {
+			return "", runtime.NewError("permission denied: only guild owner can list guild applications", 7)
+		}
+	}
+
 	// List all app installations for this guild from storage.
 	prefix := req.GuildID + ":"
 	objects, _, err := nk.StorageList(ctx, SystemUserID, StorageCollectionGuildAppInstalls, "", 100, "")
@@ -94,6 +106,18 @@ func GuildApplicationRevokeRPC(ctx context.Context, logger runtime.Logger, db *s
 	}
 	if req.GuildID == "" || req.AppID == "" {
 		return "", runtime.NewError("guild_id and app_id are required", 3)
+	}
+
+	gg, err := GuildGroupLoad(ctx, nk, req.GuildID)
+	if err != nil {
+		return "", runtime.NewError("guild group not found", 5)
+	}
+
+	if !gg.IsOwner(userID) {
+		isGlobalOp, checkErr := isGlobalOperator(ctx, nk, userID)
+		if checkErr != nil || !isGlobalOp {
+			return "", runtime.NewError("permission denied: only guild owner can revoke guild applications", 7)
+		}
 	}
 
 	// Delete the installation record from storage.

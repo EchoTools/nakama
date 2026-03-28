@@ -96,10 +96,10 @@ func GuildGroupAuditLogRPC(ctx context.Context, logger runtime.Logger, db *sql.D
 		return "", runtime.NewError("guild group not found", 5)
 	}
 
-	if !gg.IsOwner(userID) && !gg.IsEnforcer(userID) && !gg.IsAuditor(userID) {
+	if !gg.IsOwner(userID) {
 		isGlobalOp, checkErr := isGlobalOperator(ctx, nk, userID)
 		if checkErr != nil || !isGlobalOp {
-			return "", runtime.NewError("permission denied", 7)
+			return "", runtime.NewError("permission denied: only guild owner can view the guild's audit logs", 7)
 		}
 	}
 
