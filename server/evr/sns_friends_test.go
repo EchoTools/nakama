@@ -148,6 +148,7 @@ func buildFriendNotifyPayload(header, friendID uint64, statusCode uint8) []byte 
 	binary.Write(buf, binary.LittleEndian, header)
 	binary.Write(buf, binary.LittleEndian, friendID)
 	binary.Write(buf, binary.LittleEndian, statusCode)
+	binary.Write(buf, binary.LittleEndian, [7]byte{}) // reserved padding to 0x18
 	return buf.Bytes()
 }
 
