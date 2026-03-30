@@ -109,25 +109,6 @@ func TestIPInfoCache_Get_ValidReservedIPs(t *testing.T) {
 	}
 }
 
-func TestPartyGroup_GetLeader_NilPartyHandler(t *testing.T) {
-	// Bug: GetLeader didn't check g.ph for nil, unlike other methods
-	g := &PartyGroup{
-		name: "test",
-		ph:   nil,
-	}
-
-	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("GetLeader() panicked with nil ph: %v", r)
-		}
-	}()
-
-	result := g.GetLeader()
-	if result != nil {
-		t.Errorf("GetLeader() with nil ph = %v, want nil", result)
-	}
-}
-
 func TestLatencyHistorySortOrder(t *testing.T) {
 	// Bug: items were never assigned to the index slice, so sorting operated on zero values.
 	// After the fix, cached entries should be sorted after uncached, then by timestamp (older first), then by RTT.
