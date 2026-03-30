@@ -8,7 +8,6 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // resolveEvrIDToUserID looks up a Nakama user UUID from an EvrId AccountId.
@@ -186,81 +185,16 @@ func (p *EvrPipeline) snsFriendInviteRequest(ctx context.Context, logger *zap.Lo
 	return nil
 }
 
-// snsFriendAcceptRequest handles a client request to accept a pending friend invitation.
+// snsFriendAcceptRequest handles the SNSFriendAcceptRequest message (hash 0x1bbcb7e810af4620).
+//
+// Despite the token name, this is the wire message for remove_friend in the
+// original client (pnsrad). The client sends this with routing_id = 0xFFFFFFFFFFFFFFFF
+// to remove an established friend. The server determines the action by current state:
+//   - FriendStateFriends → remove friend, notify target with RemoveNotify
+//   - FriendInvitationSent → withdraw sent invite, notify target with WithdrawnNotify
+//   - No relationship → acknowledge silently
 func (p *EvrPipeline) snsFriendAcceptRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	msg := in.(*evr.SNSFriendAcceptRequest)
-
-	params, ok := LoadParams(ctx)
-	if !ok {
-		logger.Error("Failed to load session parameters")
-		return nil
-	}
-
-	userID := session.UserID()
-	targetUserID, err := p.resolveEvrIDToUserID(ctx, params.xpID.PlatformCode, msg.TargetUserID)
-	if err != nil || targetUserID == uuid.Nil {
-		logger.Info("Friend accept target not found",
-			zap.Uint64("target_account_id", msg.TargetUserID),
-			zap.Error(err))
-		return SendEVRMessages(session, false, &evr.SNSFriendAcceptFailure{
-			FriendID:   msg.TargetUserID,
-			StatusCode: evr.FriendAcceptErrorNotFound,
-		})
-	}
-
-	// Verify there's actually a pending incoming invite from this user.
-	friendsList, err := ListFriends(ctx, logger, p.db, p.nk.statusRegistry, userID, 1000, wrapperspb.Int32(FriendInvitationReceived), "")
-	if err != nil {
-		logger.Error("Failed to list friends", zap.Error(err))
-		return SendEVRMessages(session, false, &evr.SNSFriendAcceptFailure{
-			FriendID:   msg.TargetUserID,
-			StatusCode: evr.FriendAcceptErrorNotFound,
-		})
-	}
-
-	found := false
-	for _, f := range friendsList.Friends {
-		if f.User.Id == targetUserID.String() {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		return SendEVRMessages(session, false, &evr.SNSFriendAcceptFailure{
-			FriendID:   msg.TargetUserID,
-			StatusCode: evr.FriendAcceptErrorNotFound,
-		})
-	}
-
-	// AddFriends with an existing incoming invite promotes both edges to state=0 (friends).
-	err = AddFriends(ctx, logger, p.db, p.nk.tracker, p.nk.router, userID, session.Username(), []string{targetUserID.String()}, "{}")
-	if err != nil {
-		logger.Error("Failed to accept friend", zap.Error(err))
-		return SendEVRMessages(session, false, &evr.SNSFriendAcceptFailure{
-			FriendID:   msg.TargetUserID,
-			StatusCode: evr.FriendAcceptErrorNotFound,
-		})
-	}
-
-	if err := SendEVRMessages(session, false, &evr.SNSFriendAcceptSuccess{
-		FriendID: msg.TargetUserID,
-	}); err != nil {
-		return err
-	}
-
-	// Notify the original inviter that their request was accepted.
-	_ = p.sendEVRMessageByUserID(ctx, logger, targetUserID, &evr.SNSFriendAcceptNotify{
-		FriendID: params.xpID.AccountId,
-	})
-
-	return nil
-}
-
-// snsFriendRemoveRequest handles friend removal, rejection, and blocking.
-// The server differentiates the action by the current relationship state.
-func (p *EvrPipeline) snsFriendRemoveRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	msg := in.(*evr.SNSFriendRemoveRequest)
 
 	params, ok := LoadParams(ctx)
 	if !ok {
@@ -278,21 +212,16 @@ func (p *EvrPipeline) snsFriendRemoveRequest(ctx context.Context, logger *zap.Lo
 		})
 	}
 
-	// Determine current relationship state to decide action and notification type.
-	friendsList, err := ListFriends(ctx, logger, p.db, p.nk.statusRegistry, userID, 1000, nil, "")
-	if err != nil {
-		logger.Error("Failed to list friends", zap.Error(err))
+	// Determine current relationship state.
+	var currentState int32 = -1
+	err = p.db.QueryRowContext(ctx,
+		"SELECT state FROM user_edge WHERE source_id = $1 AND destination_id = $2",
+		userID, targetUserID).Scan(&currentState)
+	if err != nil && err != sql.ErrNoRows {
+		logger.Error("Failed to query friend state", zap.Error(err))
 		return SendEVRMessages(session, false, &evr.SNSFriendRemoveResponse{
 			FriendID: msg.TargetUserID,
 		})
-	}
-
-	var currentState int32 = -1
-	for _, f := range friendsList.Friends {
-		if f.User.Id == targetUserID.String() {
-			currentState = f.State.Value
-			break
-		}
 	}
 
 	targetIDStr := targetUserID.String()
@@ -311,7 +240,6 @@ func (p *EvrPipeline) snsFriendRemoveRequest(ctx context.Context, logger *zap.Lo
 		}); err != nil {
 			return err
 		}
-		// Notify the other user they were removed.
 		_ = p.sendEVRMessageByUserID(ctx, logger, targetUserID, &evr.SNSFriendRemoveNotify{
 			FriendID: params.xpID.AccountId,
 		})
@@ -329,13 +257,85 @@ func (p *EvrPipeline) snsFriendRemoveRequest(ctx context.Context, logger *zap.Lo
 		}); err != nil {
 			return err
 		}
-		// Notify the target that the invite was withdrawn.
 		_ = p.sendEVRMessageByUserID(ctx, logger, targetUserID, &evr.SNSFriendWithdrawnNotify{
 			FriendID: params.xpID.AccountId,
 		})
 
+	default:
+		return SendEVRMessages(session, false, &evr.SNSFriendRemoveResponse{
+			FriendID: msg.TargetUserID,
+		})
+	}
+
+	return nil
+}
+
+// snsFriendRemoveRequest handles the SNSFriendRemoveRequest message (hash 0x78908988b7fe6db4).
+//
+// Despite the token name, this is the wire message for accept_friend, reject_friend_request,
+// and block_user in the original client (pnsrad). All three share the same hash — the
+// server differentiates by the current relationship state:
+//   - FriendInvitationReceived → accept the pending invite (AddFriends promotes to friends)
+//   - FriendStateFriends → block the user (BlockFriends sets state=3)
+//   - FriendInvitationSent → reject/block (DeleteFriends + optional block)
+//   - No relationship → block the user
+func (p *EvrPipeline) snsFriendRemoveRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+	msg := in.(*evr.SNSFriendRemoveRequest)
+
+	params, ok := LoadParams(ctx)
+	if !ok {
+		logger.Error("Failed to load session parameters")
+		return nil
+	}
+
+	userID := session.UserID()
+	targetUserID, err := p.resolveEvrIDToUserID(ctx, params.xpID.PlatformCode, msg.TargetUserID)
+	if err != nil || targetUserID == uuid.Nil {
+		logger.Info("Friend action target not found",
+			zap.Uint64("target_account_id", msg.TargetUserID))
+		return SendEVRMessages(session, false, &evr.SNSFriendAcceptFailure{
+			FriendID:   msg.TargetUserID,
+			StatusCode: evr.FriendAcceptErrorNotFound,
+		})
+	}
+
+	// Determine current relationship state.
+	var currentState int32 = -1
+	err = p.db.QueryRowContext(ctx,
+		"SELECT state FROM user_edge WHERE source_id = $1 AND destination_id = $2",
+		userID, targetUserID).Scan(&currentState)
+	if err != nil && err != sql.ErrNoRows {
+		logger.Error("Failed to query friend state", zap.Error(err))
+		return SendEVRMessages(session, false, &evr.SNSFriendAcceptFailure{
+			FriendID:   msg.TargetUserID,
+			StatusCode: evr.FriendAcceptErrorNotFound,
+		})
+	}
+
+	targetIDStr := targetUserID.String()
+
+	switch currentState {
 	case FriendInvitationReceived:
-		// Reject an incoming invite.
+		// Accept a pending incoming invite.
+		err = AddFriends(ctx, logger, p.db, p.nk.tracker, p.nk.router, userID, session.Username(), []string{targetIDStr}, "{}")
+		if err != nil {
+			logger.Error("Failed to accept friend", zap.Error(err))
+			return SendEVRMessages(session, false, &evr.SNSFriendAcceptFailure{
+				FriendID:   msg.TargetUserID,
+				StatusCode: evr.FriendAcceptErrorNotFound,
+			})
+		}
+		if err := SendEVRMessages(session, false, &evr.SNSFriendAcceptSuccess{
+			FriendID: msg.TargetUserID,
+		}); err != nil {
+			return err
+		}
+		_ = p.sendEVRMessageByUserID(ctx, logger, targetUserID, &evr.SNSFriendAcceptNotify{
+			FriendID: params.xpID.AccountId,
+		})
+
+	case FriendInvitationSent:
+		// Reject: delete the pending invite, then notify the target.
 		if err := DeleteFriends(ctx, logger, p.db, userID, []string{targetIDStr}); err != nil {
 			logger.Error("Failed to reject invite", zap.Error(err))
 			return SendEVRMessages(session, false, &evr.SNSFriendRemoveResponse{
@@ -347,13 +347,32 @@ func (p *EvrPipeline) snsFriendRemoveRequest(ctx context.Context, logger *zap.Lo
 		}); err != nil {
 			return err
 		}
-		// Notify the inviter that their request was rejected.
 		_ = p.sendEVRMessageByUserID(ctx, logger, targetUserID, &evr.SNSFriendRejectNotify{
 			FriendID: params.xpID.AccountId,
 		})
 
+	case FriendStateFriends:
+		// Block an established friend.
+		if err := BlockFriends(ctx, logger, p.db, p.nk.tracker, userID, []string{targetIDStr}); err != nil {
+			logger.Error("Failed to block friend", zap.Error(err))
+			return SendEVRMessages(session, false, &evr.SNSFriendRemoveResponse{
+				FriendID: msg.TargetUserID,
+			})
+		}
+		if err := SendEVRMessages(session, false, &evr.SNSFriendRemoveResponse{
+			FriendID: msg.TargetUserID,
+		}); err != nil {
+			return err
+		}
+		_ = p.sendEVRMessageByUserID(ctx, logger, targetUserID, &evr.SNSFriendRemoveNotify{
+			FriendID: params.xpID.AccountId,
+		})
+
 	default:
-		// No relationship or already blocked — just acknowledge.
+		// No prior relationship — block the user.
+		if err := BlockFriends(ctx, logger, p.db, p.nk.tracker, userID, []string{targetIDStr}); err != nil {
+			logger.Error("Failed to block user", zap.Error(err))
+		}
 		return SendEVRMessages(session, false, &evr.SNSFriendRemoveResponse{
 			FriendID: msg.TargetUserID,
 		})
