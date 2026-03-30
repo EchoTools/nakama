@@ -131,7 +131,11 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 					"msg":   msg,
 				}).Warn("Failed to parse match ID")
 				continue
-			} else {
+			} else if msg.GameTime() > 0 {
+				// Only update the game clock when the value is non-zero.
+				// VOIP_LOUDNESS messages implement GameTimer but always
+				// report game_time=0, which would overwrite valid clock
+				// values set by GOAL or other gameplay messages.
 				update, _ = updates.LoadOrStore(matchID.UUID, &MatchGameStateUpdate{})
 				update.CurrentGameClock = time.Duration(msg.GameTime()) * time.Second
 			}
