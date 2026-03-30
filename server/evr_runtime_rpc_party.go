@@ -112,7 +112,9 @@ func PartyCreateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 		Open    *bool `json:"open"`
 	}
 	if payload != "" {
-		json.Unmarshal([]byte(payload), &req) // ignore errors — use defaults
+		if err := json.Unmarshal([]byte(payload), &req); err != nil {
+			return "", runtime.NewError("invalid JSON payload", StatusInvalidArgument)
+		}
 	}
 	if req.MaxSize <= 0 {
 		req.MaxSize = PartyMaxDefaultSize
