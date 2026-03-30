@@ -43,6 +43,7 @@ type MatchLabel struct {
 	Players     []PlayerInfo `json:"players,omitempty"`    // The displayNames of the players (by team name) in the match.
 	RatingMu    float64      `json:"rating_mu"`            // The average rating mu of the players in the match.
 	GameState   *GameState   `json:"game_state,omitempty"` // The game state for the match.
+	GameStatus  GameStatus   `json:"game_status"`          // The current phase of the match.
 
 	TeamSize         int      `json:"team_size,omitempty"`    // The size of each team in arena/combat (either 4 or 5)
 	MaxSize          int      `json:"limit,omitempty"`        // The total lobby size limit (players + specs)

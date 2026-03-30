@@ -94,15 +94,15 @@ func UnmarshalRemoteLog(log []byte) (RemoteLog, error) {
 	case "POST_MATCH_BATTLE_PASS_XP":
 		m = &RemoteLogPostMatchBattlePassXP{}
 	case "POST_MATCH_EARNED_AWARD":
-		m = &RemoteLogRepairMatrix{}
+		m = &RemoteLogPostMatchGeneric{}
 	case "POST_MATCH_MATCH_STATS":
 		m = &RemoteLogPostMatchMatchStats{}
 	case "POST_MATCH_MATCH_TYPE_STATS":
 		m = &RemoteLogPostMatchTypeStats{}
 	case "POST_MATCH_MATCH_TYPE_UNLOCKS":
-		m = &RemoteLogRepairMatrix{}
+		m = &RemoteLogPostMatchGeneric{}
 	case "POST_MATCH_MATCH_TYPE_XP":
-		m = &RemoteLogRepairMatrix{}
+		m = &RemoteLogPostMatchGeneric{}
 	case "POST_MATCH_MATCH_TYPE_XP_LEVEL":
 		m = &RemoteLogPostMatchMatchTypeXPLevel{}
 	case "LOAD_STATS":
@@ -414,6 +414,18 @@ type RemoteLogStoreMetricsPayload struct {
 }
 
 func (m RemoteLogStoreMetricsPayload) SessionUUID() uuid.UUID {
+	return UUIDFromRemoteLogString(m.SessionUUIDStr)
+}
+
+// RemoteLogPostMatchGeneric is used for post-match message types whose JSON
+// fields mirror RepairMatrix but always contain zeroed/empty values. These
+// messages must NOT implement GameTimer because their game_time is always 0.
+type RemoteLogPostMatchGeneric struct {
+	GenericRemoteLog
+	SessionUUIDStr string `json:"[session][uuid]"`
+}
+
+func (m RemoteLogPostMatchGeneric) SessionUUID() uuid.UUID {
 	return UUIDFromRemoteLogString(m.SessionUUIDStr)
 }
 

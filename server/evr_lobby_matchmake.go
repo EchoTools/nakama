@@ -154,8 +154,11 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		mmInterval               = time.Duration(p.config.GetMatchmaker().IntervalSec) * time.Second
 		matchmakingTicketTimeout = time.Duration(p.config.GetMatchmaker().MaxIntervals) * mmInterval
 		timeoutTimer             = time.NewTimer(lobbyParams.MatchmakingTimeout)
-		fallbackTimer            = time.NewTimer(min(lobbyParams.FallbackTimeout, matchmakingTicketTimeout-mmInterval))
+		fallbackInterval         = min(lobbyParams.FallbackTimeout, matchmakingTicketTimeout-mmInterval)
+		fallbackTimer            = time.NewTimer(fallbackInterval)
 		currentTicket            string // Only allow one ticket at a time
+		fallbackCount            int    // Number of times the fallback has fired
+		initialFailsafeTimeout   = lobbyParams.FailsafeTimeout
 	)
 
 	ticketConfig, ok := DefaultMatchmakerTicketConfigs[lobbyParams.Mode]
@@ -211,16 +214,39 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 			logger.Debug("Matchmaking timeout")
 			return ErrMatchmakingTimeout
 		case <-fallbackTimer.C:
-			logger.Debug("Matchmaking fallback, switching to relaxed criteria")
+			fallbackCount++
 
-			// Update ticket config with relaxed criteria
-			ticketConfig.MinCount = 2
-			ticketConfig.MaxCount = 8
+			// On first fallback: relax Nakama-level count constraints.
+			if fallbackCount == 1 {
+				ticketConfig.MinCount = 2
+				ticketConfig.MaxCount = 8
+			}
 
-			// Replace the current ticket with the new fallback config
+			// Progressively reduce the failsafe timeout so isUndersizedMatch
+			// allows smaller matches sooner. Each fallback cycle reduces the
+			// remaining failsafe proportionally. The failsafe_timeout is
+			// written into the ticket's numeric properties and read by the
+			// matchmaker processor's isUndersizedMatch check.
+			elapsed := time.Since(lobbyParams.MatchmakingTimestamp)
+			remaining := initialFailsafeTimeout - elapsed
+			if remaining < 0 {
+				remaining = 0
+			}
+			lobbyParams.FailsafeTimeout = remaining
+
+			logger.Debug("Matchmaking fallback, refreshing ticket with relaxed criteria",
+				zap.Int("fallback_count", fallbackCount),
+				zap.Duration("elapsed", elapsed),
+				zap.Duration("failsafe_remaining", remaining))
+
+			// Replace the ticket — this keeps it in activeIndexes and
+			// updates the failsafe_timeout property.
 			if err := replaceTicket(ticketConfig); err != nil {
 				return err
 			}
+
+			// Reset the fallback timer for the next cycle.
+			fallbackTimer.Reset(fallbackInterval)
 		}
 	}
 }
