@@ -80,6 +80,7 @@ type MatchGameStateUpdate struct {
 	PauseDuration    time.Duration    `json:"pause_duration,omitempty"`
 	Goals            []*evr.MatchGoal `json:"goals,omitempty"`
 	MatchOver        bool             `json:"match_over,omitempty"`
+	GameStatus       GameStatus       `json:"game_status,omitempty"`
 }
 
 func (u *MatchGameStateUpdate) String() string {
