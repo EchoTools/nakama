@@ -511,3 +511,59 @@ func TestIntegrationProcessorCombatUndersized(t *testing.T) {
 		t.Fatalf("expected no matches (4 < 3x2=6, failsafe not expired), got %d", len(matched))
 	}
 }
+
+// TestIntegrationProcessorUndersizedAfterFallbackReducesFailsafe verifies that
+// when a ticket's failsafe_timeout is reduced (as happens during periodic
+// fallback in lobbyMatchMakeWithFallback), an undersized match that was
+// previously blocked becomes allowed.
+func TestIntegrationProcessorUndersizedAfterFallbackReducesFailsafe(t *testing.T) {
+	logger := loggerForTest(t)
+	matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
+	defer cleanup()
+
+	wireEvrProcessor(matchmaker, NewRuntimeGoLogger(logger))
+
+	// Simulate 4 players who have been waiting 60 seconds. With
+	// failsafe_timeout=300, this should be blocked (60 < 300).
+	ticketTime := float64(time.Now().UTC().Unix()) - 60
+
+	for i := range 4 {
+		addIntegrationProcessorTicketWithProps(t, matchmaker, fmt.Sprintf("fallback-pre-%02d", i), nil, map[string]float64{
+			"failsafe_timeout": 300,
+			"min_team_size":    4,
+			"max_count":        8,
+			"count_multiple":   2,
+			"timestamp":        ticketTime,
+		})
+	}
+
+	matched, _ := runProcessorCycle(matchmaker)
+	if len(matched) != 0 {
+		t.Fatalf("pre-fallback: expected no matches (failsafe=300 > elapsed=60), got %d", len(matched))
+	}
+
+	// Now simulate what the fallback does: replace tickets with reduced
+	// failsafe_timeout. After 60s of waiting, the remaining failsafe should
+	// be 300-60=240. But if we set failsafe_timeout=30 (simulating a later
+	// fallback cycle where most of the failsafe has elapsed), the match
+	// should be allowed because 60 >= 30.
+	matchmaker2, cleanup2 := createProcessorTestMatchmaker(t, logger)
+	defer cleanup2()
+
+	wireEvrProcessor(matchmaker2, NewRuntimeGoLogger(logger))
+
+	for i := range 4 {
+		addIntegrationProcessorTicketWithProps(t, matchmaker2, fmt.Sprintf("fallback-post-%02d", i), nil, map[string]float64{
+			"failsafe_timeout": 30,
+			"min_team_size":    4,
+			"max_count":        8,
+			"count_multiple":   2,
+			"timestamp":        ticketTime,
+		})
+	}
+
+	matched2, _ := runProcessorCycle(matchmaker2)
+	if len(matched2) != 1 {
+		t.Fatalf("post-fallback: expected 1 match (failsafe=30 <= elapsed=60), got %d", len(matched2))
+	}
+}
