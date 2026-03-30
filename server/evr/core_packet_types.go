@@ -235,6 +235,56 @@ func NewMessageFromHash(hash uint64) Message {
 		return &SNSPartyLockNotify{}
 	case 0xd8cfd3795010481f:
 		return &SNSPartyUnlockNotify{}
+	// SNS Party messages — additional requests
+	case 0x0b7bd21332523994:
+		return &SNSPartyCreateRequest{}
+	case 0xdee761a021a5278a:
+		return &SNSPartyUpdateRequest{}
+	case 0x4edeeb8ddecc8736:
+		return &SNSPartyUpdateMemberRequest{}
+	case 0xd8cbc44959e25da8:
+		return &SNSPartyInviteListRefreshRequest{}
+	// SNS Party messages — additional responses/notifications
+	case 0x0b7ac20124523993:
+		return &SNSPartyCreateSuccess{}
+	case 0x0b6fd60b2b423885:
+		return &SNSPartyCreateFailure{}
+	case 0xcc38103e64879e53:
+		return &SNSPartyJoinNotify{}
+	case 0xb76f0fffb05a9ea7:
+		return &SNSPartyLeaveFailure{}
+	case 0xfaf46bf94f917d63:
+		return &SNSPartyKickSuccess{}
+	case 0xfae17ff340817c75:
+		return &SNSPartyKickFailure{}
+	case 0x518453df9e6a6941:
+		return &SNSPartyPassSuccess{}
+	case 0x519147d5917a6857:
+		return &SNSPartyPassFailure{}
+	case 0xc2469ab66ff3e16d:
+		return &SNSPartyLockSuccess{}
+	case 0xc2538ebc60e3e07b:
+		return &SNSPartyLockFailure{}
+	case 0x5a4f899239a3d703:
+		return &SNSPartyUnlockSuccess{}
+	case 0x5a5a9d9836b3d615:
+		return &SNSPartyUnlockFailure{}
+	case 0x218f721f09026dab:
+		return &SNSPartyInviteNotify{}
+	case 0x685a5fb8447b1155:
+		return &SNSPartyInviteListResponse{}
+	case 0xdee671b237a5278d:
+		return &SNSPartyUpdateSuccess{}
+	case 0xdef365b838b5269b:
+		return &SNSPartyUpdateFailure{}
+	case 0x23c834cb3bc6ecf5:
+		return &SNSPartyUpdateNotify{}
+	case 0x4edffb9fc8cc8731:
+		return &SNSPartyUpdateMemberSuccess{}
+	case 0x4ecaef95c7dc8627:
+		return &SNSPartyUpdateMemberFailure{}
+	case 0x451eb6ca40dde289:
+		return &SNSPartyUpdateMemberNotify{}
 	// SNS Friends messages — client requests
 	case 0x7f0d7a28de3c6f70:
 		return &SNSFriendInviteRequest{}
