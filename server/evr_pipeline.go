@@ -760,7 +760,7 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *nkrtapi.Envelop
 			var err error
 			for _, userID := range userIDs {
 				if partyGroupName == "" {
-					partyGroupName, _, err = GetLobbyGroupID(session.Context(), session.pipeline.db, userID)
+					partyGroupName, err = GetLobbyGroupID(session.Context(), session.pipeline.db, userID)
 					if err != nil {
 						logger.Warn("Failed to get party group ID", zap.Error(err))
 					}

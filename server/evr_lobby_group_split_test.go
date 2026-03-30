@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
@@ -35,25 +36,30 @@ func newTestSessionForParty(t *testing.T, username string, tracker Tracker, part
 // logic in configureParty uses the leader's party ID from the match presence
 // (set at join time) rather than lobbyParams.PartyID (which may have changed
 // since joining the match via /party group).
-//
-// Production incident (2026-03-27T03:51Z):
-//
-//	A 3-player party was in a social lobby with LobbyGroupName="monarch12".
-//	The leader changed to "divergent" via /party group. When they queued,
-//	expectedCount was 0 instead of 2 because lobbyParams.PartyID (from
-//	"divergent") didn't match any match presence party_id (from "monarch12").
-//	The leader proceeded without waiting.
-//
-// Fix: look up the leader's own party_id from the match presences, and use
-// that for the comparison. This correctly counts party members regardless of
-// whether the LobbyGroupName changed after joining the match.
 func TestExpectedCount_UsesMatchPresencePartyID(t *testing.T) {
+
+	logger := loggerForTest(t)
+	tracker := newMockMatchmakingTracker()
+	mm, mmCleanup := createLightMatchmaker(t, logger)
+	defer mmCleanup()
+
+	tsm := testStreamManager{}
+	dmr := &DummyMessageRouter{}
+	pr := NewLocalPartyRegistry(logger, cfg, mm, tracker, tsm, dmr, "testnode")
 
 	oldGroupName := "monarch12"
 	newGroupName := "divergent"
 
-	oldPartyID := uuid.NewV5(PartyIDSalt, oldGroupName)
-	newPartyID := uuid.NewV5(PartyIDSalt, newGroupName)
+	leader := makeTestUserPresence("leader")
+
+	// Create parties via the registry so IDs are random.
+	oldPH, _, err := pr.GetOrCreateByGroupName(oldGroupName, true, 4, leader)
+	require.NoError(t, err)
+	oldPartyID := oldPH.ID
+
+	newPH, _, err := pr.GetOrCreateByGroupName(newGroupName, true, 4, leader)
+	require.NoError(t, err)
+	newPartyID := newPH.ID
 
 	require.NotEqual(t, oldPartyID, newPartyID,
 		"sanity: different group names must produce different party IDs")
@@ -100,13 +106,22 @@ func TestExpectedCount_UsesMatchPresencePartyID(t *testing.T) {
 		"leader should count 2 party members using match presence party_id")
 }
 
+// makeTestUserPresence is a test helper that creates a minimal rtapi.UserPresence.
+func makeTestUserPresence(username string) *rtapi.UserPresence {
+	return &rtapi.UserPresence{
+		UserId:    uuid.Must(uuid.NewV4()).String(),
+		SessionId: uuid.Must(uuid.NewV4()).String(),
+		Username:  username,
+	}
+}
+
 // TestPartyGroupSplit_StaleGroupName demonstrates the downstream effect:
 // when a follower has a stale LobbyGroupName, they compute a different
 // partyID and JoinPartyGroup places them in a separate PartyHandler.
 //
-// This is a consequence of the party being formed at matchmaking time
-// (not persisted) — each user's LobbyGroupName is read independently
-// from storage, and different names produce different partyIDs.
+// With the registry-based approach, this still holds: different group names
+// produce different parties because GetOrCreateByGroupName maps each name
+// independently.
 func TestPartyGroupSplit_StaleGroupName(t *testing.T) {
 
 	logger := loggerForTest(t)
@@ -121,11 +136,6 @@ func TestPartyGroupSplit_StaleGroupName(t *testing.T) {
 	currentGroupName := "divergent"
 	staleGroupName := "monarch12"
 
-	currentPartyID := uuid.NewV5(PartyIDSalt, currentGroupName)
-	stalePartyID := uuid.NewV5(PartyIDSalt, staleGroupName)
-
-	require.NotEqual(t, currentPartyID, stalePartyID)
-
 	leaderSession := newTestSessionForParty(t, "leader", tracker, pr)
 	followerASession := newTestSessionForParty(t, "followerA", tracker, pr)
 	followerBSession := newTestSessionForParty(t, "followerB", tracker, pr)
@@ -133,17 +143,17 @@ func TestPartyGroupSplit_StaleGroupName(t *testing.T) {
 	currentMatchID := MatchID{}
 
 	// Leader and follower A both have the new group name.
-	leaderGroup, _, err := JoinPartyGroup(leaderSession, currentGroupName, currentPartyID, currentMatchID)
+	leaderGroup, _, err := JoinPartyGroup(leaderSession, currentGroupName, currentMatchID)
 	require.NoError(t, err)
 
-	followerAGroup, _, err := JoinPartyGroup(followerASession, currentGroupName, currentPartyID, currentMatchID)
+	followerAGroup, _, err := JoinPartyGroup(followerASession, currentGroupName, currentMatchID)
 	require.NoError(t, err)
 
 	assert.Equal(t, leaderGroup.ID(), followerAGroup.ID(),
 		"leader and followerA should be in the same party group")
 
-	// Follower B still has the stale group name → different partyID.
-	followerBGroup, followerBIsLeader, err := JoinPartyGroup(followerBSession, staleGroupName, stalePartyID, currentMatchID)
+	// Follower B still has the stale group name -> different party.
+	followerBGroup, followerBIsLeader, err := JoinPartyGroup(followerBSession, staleGroupName, currentMatchID)
 	require.NoError(t, err)
 
 	// BUG: followerB silently ends up in a completely separate party.
@@ -151,4 +161,43 @@ func TestPartyGroupSplit_StaleGroupName(t *testing.T) {
 		"BUG: stale follower becomes leader of a new, separate party")
 	assert.NotEqual(t, leaderGroup.ID(), followerBGroup.ID(),
 		"BUG: stale follower is in a different party group than the leader")
+}
+
+// TestLookupGroupPartyID verifies the registry lookup table works correctly.
+func TestLookupGroupPartyID(t *testing.T) {
+	logger := loggerForTest(t)
+	tracker := newMockMatchmakingTracker()
+	mm, mmCleanup := createLightMatchmaker(t, logger)
+	defer mmCleanup()
+
+	tsm := testStreamManager{}
+	dmr := &DummyMessageRouter{}
+	pr := NewLocalPartyRegistry(logger, cfg, mm, tracker, tsm, dmr, "testnode")
+
+	leader := makeTestUserPresence("leader")
+
+	// Before creating, lookup should fail.
+	_, found := pr.LookupGroupPartyID("mygroup")
+	assert.False(t, found)
+
+	// Create via group name.
+	ph, created, err := pr.GetOrCreateByGroupName("mygroup", true, 4, leader)
+	require.NoError(t, err)
+	assert.True(t, created)
+
+	// Lookup should now succeed and return the same ID.
+	id, found := pr.LookupGroupPartyID("mygroup")
+	assert.True(t, found)
+	assert.Equal(t, ph.ID, id)
+
+	// Second call should return the same party.
+	ph2, created2, err := pr.GetOrCreateByGroupName("mygroup", true, 4, leader)
+	require.NoError(t, err)
+	assert.False(t, created2)
+	assert.Equal(t, ph.ID, ph2.ID)
+
+	// Delete should clean up the mapping.
+	pr.Delete(ph.ID)
+	_, found = pr.LookupGroupPartyID("mygroup")
+	assert.False(t, found)
 }
