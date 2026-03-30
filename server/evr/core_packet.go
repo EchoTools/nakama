@@ -103,6 +103,23 @@ var (
 		0x9d946c88d5a8aca5: (*SNSPartyPassNotify)(nil),
 		0x93a6b1a6cd4ef8dd: (*SNSPartyLockNotify)(nil),
 		0xd8cfd3795010481f: (*SNSPartyUnlockNotify)(nil),
+		// SNS Friends messages — client requests
+		0x7f0d7a28de3c6f70: (*SNSFriendInviteRequest)(nil),
+		0x1bbcb7e810af4620: (*SNSFriendAcceptRequest)(nil),
+		0x78908988b7fe6db4: (*SNSFriendRemoveRequest)(nil),
+		// SNS Friends messages — server responses/notifications
+		0xa78aeb2a4e89b10b: (*SNSFriendListResponse)(nil),
+		0x26a19dc4d2d5579d: (*SNSFriendStatusNotify)(nil),
+		0x7f0c6a3ac83c6f77: (*SNSFriendInviteSuccess)(nil),
+		0x7f197e30c72c6e61: (*SNSFriendInviteFailure)(nil),
+		0xca09b0b36bd981b7: (*SNSFriendInviteNotify)(nil),
+		0x1bbda7fa06af4627: (*SNSFriendAcceptSuccess)(nil),
+		0x1ba8b3f009bf4731: (*SNSFriendAcceptFailure)(nil),
+		0xc237c84c31d3ae05: (*SNSFriendAcceptNotify)(nil),
+		0xc2bf83a08ea3a955: (*SNSFriendRemoveResponse)(nil),
+		0xe06972f49cd72265: (*SNSFriendRemoveNotify)(nil),
+		0x191aa30801ec6d03: (*SNSFriendWithdrawnNotify)(nil),
+		0xb9b86c0ce8e8d0c1: (*SNSFriendRejectNotify)(nil),
 		// Custom messages
 		0x9ee5107d9e29fd63: (*NEVRProtobufMessageV1)(nil),
 		0xc6b3710cd9c4ef47: (*NEVRProtobufJSONMessageV1)(nil),
