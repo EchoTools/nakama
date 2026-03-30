@@ -1215,6 +1215,12 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		}
 	}
 
+	// If the match has a server but never started and has been idle too long, shut it down.
+	if !state.levelLoaded && state.server != nil && !state.Started() && len(state.presenceMap) == 0 && !state.CreatedAt.IsZero() && time.Since(state.CreatedAt) > 15*time.Minute {
+		logger.Warn("Match did not start on time. Shutting down.")
+		return nil
+	}
+
 	// If the match is prepared and the start time has been reached, start it.
 	// Ensure the game server presence exists to avoid nil dispatch crashes.
 	if !state.levelLoaded && state.server != nil && (len(state.presenceMap) != 0 || state.Started()) {
