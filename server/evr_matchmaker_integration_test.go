@@ -511,3 +511,333 @@ func TestIntegrationProcessorCombatUndersized(t *testing.T) {
 		t.Fatalf("expected no matches (4 < 3x2=6, failsafe not expired), got %d", len(matched))
 	}
 }
+
+// =============================================================================
+// Matchmaking Wait Time: Acceptance & Regression Tests
+//
+// These tests document the bugs and intended behaviors for the matchmaking
+// failsafe timeout system. The key mechanism:
+//
+//   - isUndersizedMatch (evr_matchmaker_process.go) rejects match candidates
+//     with fewer players than min_team_size*2 UNLESS the oldest ticket has
+//     been waiting longer than failsafe_timeout seconds.
+//
+//   - lobbyMatchMakeWithFallback (evr_lobby_matchmake.go) periodically replaces
+//     the matchmaking ticket, reducing the failsafe_timeout property each cycle
+//     so that undersized matches are allowed progressively sooner.
+//
+// Production evidence (from /var/tmp/nakama.log):
+//   - User l0affer waited 551 seconds for echo_combat (sid 6b230492)
+//   - failsafe_timeout=540 was never reduced despite fallback at 300s
+//   - The fallback only changed MinCount/MaxCount, leaving failsafe_timeout
+//     at 540 — isUndersizedMatch blocked the match for the full duration
+// =============================================================================
+
+// --- Bug reproduction tests ---
+
+// TestUndersizedMatch_BlockedByHighFailsafe reproduces the core bug:
+// With failsafe_timeout=300 and only 60 seconds elapsed, an undersized match
+// (4 players for a min_team_size=4 game) is rejected by isUndersizedMatch.
+// This is the state BEFORE the fix — the failsafe was never reduced.
+func TestUndersizedMatch_BlockedByHighFailsafe(t *testing.T) {
+	logger := loggerForTest(t)
+	matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
+	defer cleanup()
+	wireEvrProcessor(matchmaker, NewRuntimeGoLogger(logger))
+
+	ticketTime := float64(time.Now().UTC().Unix()) - 60 // 60s ago
+
+	for i := range 4 {
+		addIntegrationProcessorTicketWithProps(t, matchmaker, fmt.Sprintf("blocked-%02d", i), nil, map[string]float64{
+			"failsafe_timeout": 300, // 300 >> 60 elapsed → blocked
+			"min_team_size":    4,
+			"max_count":        8,
+			"count_multiple":   2,
+			"timestamp":        ticketTime,
+		})
+	}
+
+	matched, _ := runProcessorCycle(matchmaker)
+	if len(matched) != 0 {
+		t.Fatalf("expected 0 matches (failsafe=300 > elapsed=60), got %d", len(matched))
+	}
+}
+
+// TestUndersizedMatch_AllowedWhenFailsafeReduced verifies the fix:
+// After the periodic fallback reduces failsafe_timeout below the elapsed wait
+// time, isUndersizedMatch allows the match. This simulates what happens when
+// lobbyMatchMakeWithFallback reduces FailsafeTimeout on each cycle.
+func TestUndersizedMatch_AllowedWhenFailsafeReduced(t *testing.T) {
+	logger := loggerForTest(t)
+	matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
+	defer cleanup()
+	wireEvrProcessor(matchmaker, NewRuntimeGoLogger(logger))
+
+	ticketTime := float64(time.Now().UTC().Unix()) - 60 // 60s ago
+
+	for i := range 4 {
+		addIntegrationProcessorTicketWithProps(t, matchmaker, fmt.Sprintf("allowed-%02d", i), nil, map[string]float64{
+			"failsafe_timeout": 30, // 30 < 60 elapsed → allowed
+			"min_team_size":    4,
+			"max_count":        8,
+			"count_multiple":   2,
+			"timestamp":        ticketTime,
+		})
+	}
+
+	matched, _ := runProcessorCycle(matchmaker)
+	if len(matched) != 1 {
+		t.Fatalf("expected 1 match (failsafe=30 <= elapsed=60), got %d", len(matched))
+	}
+	if len(matched[0]) != 4 {
+		t.Fatalf("expected 4 players in undersized match, got %d", len(matched[0]))
+	}
+}
+
+// TestUndersizedMatch_AllowedWhenFailsafeZero verifies that failsafe_timeout=0
+// (the end state of progressive reduction) bypasses the undersized check
+// entirely, regardless of elapsed time.
+func TestUndersizedMatch_AllowedWhenFailsafeZero(t *testing.T) {
+	logger := loggerForTest(t)
+	matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
+	defer cleanup()
+	wireEvrProcessor(matchmaker, NewRuntimeGoLogger(logger))
+
+	// Even with timestamp = now (0 seconds elapsed), failsafe_timeout=0
+	// should bypass the check entirely.
+	for i := range 4 {
+		addIntegrationProcessorTicketWithProps(t, matchmaker, fmt.Sprintf("zero-%02d", i), nil, map[string]float64{
+			"failsafe_timeout": 0,
+			"min_team_size":    4,
+			"max_count":        8,
+			"count_multiple":   2,
+			"timestamp":        float64(time.Now().UTC().Unix()),
+		})
+	}
+
+	matched, _ := runProcessorCycle(matchmaker)
+	if len(matched) != 1 {
+		t.Fatalf("expected 1 match (failsafe=0 bypasses check), got %d", len(matched))
+	}
+}
+
+// --- Acceptance tests for progressive failsafe reduction ---
+
+// TestUndersizedMatch_ProgressiveReduction simulates the full fallback sequence:
+// 1. At t=0: failsafe_timeout=300, undersized match blocked
+// 2. At t=120: failsafe reduced to 180 (300-120), still blocked
+// 3. At t=300: failsafe reduced to 0, undersized match allowed
+//
+// Each step creates a fresh matchmaker to simulate the ticket being replaced
+// with a new failsafe_timeout value (as lobbyMatchMakeWithFallback does).
+func TestUndersizedMatch_ProgressiveReduction(t *testing.T) {
+	logger := loggerForTest(t)
+
+	// Step 1: Fresh tickets, failsafe=300, elapsed=10s → blocked
+	t.Run("early (failsafe=300, elapsed=10s)", func(t *testing.T) {
+		mm, cleanup := createProcessorTestMatchmaker(t, logger)
+		defer cleanup()
+		wireEvrProcessor(mm, NewRuntimeGoLogger(logger))
+
+		ticketTime := float64(time.Now().UTC().Unix()) - 10
+		for i := range 6 {
+			addIntegrationProcessorTicketWithProps(t, mm, fmt.Sprintf("prog1-%02d", i), nil, map[string]float64{
+				"failsafe_timeout": 300,
+				"min_team_size":    4,
+				"max_count":        8,
+				"count_multiple":   2,
+				"timestamp":        ticketTime,
+			})
+		}
+		matched, _ := runProcessorCycle(mm)
+		if len(matched) != 0 {
+			t.Fatalf("expected 0 matches, got %d", len(matched))
+		}
+	})
+
+	// Step 2: After 120s, failsafe reduced to 180, elapsed=120s → still blocked
+	t.Run("mid (failsafe=180, elapsed=120s)", func(t *testing.T) {
+		mm, cleanup := createProcessorTestMatchmaker(t, logger)
+		defer cleanup()
+		wireEvrProcessor(mm, NewRuntimeGoLogger(logger))
+
+		ticketTime := float64(time.Now().UTC().Unix()) - 120
+		for i := range 6 {
+			addIntegrationProcessorTicketWithProps(t, mm, fmt.Sprintf("prog2-%02d", i), nil, map[string]float64{
+				"failsafe_timeout": 180, // 300 - 120 = 180 > 120 → blocked
+				"min_team_size":    4,
+				"max_count":        8,
+				"count_multiple":   2,
+				"timestamp":        ticketTime,
+			})
+		}
+		matched, _ := runProcessorCycle(mm)
+		if len(matched) != 0 {
+			t.Fatalf("expected 0 matches, got %d", len(matched))
+		}
+	})
+
+	// Step 3: After 300s, failsafe reduced to 0 → allowed
+	t.Run("late (failsafe=0, elapsed=300s)", func(t *testing.T) {
+		mm, cleanup := createProcessorTestMatchmaker(t, logger)
+		defer cleanup()
+		wireEvrProcessor(mm, NewRuntimeGoLogger(logger))
+
+		ticketTime := float64(time.Now().UTC().Unix()) - 300
+		for i := range 6 {
+			addIntegrationProcessorTicketWithProps(t, mm, fmt.Sprintf("prog3-%02d", i), nil, map[string]float64{
+				"failsafe_timeout": 0, // Fully reduced → allowed
+				"min_team_size":    4,
+				"max_count":        8,
+				"count_multiple":   2,
+				"timestamp":        ticketTime,
+			})
+		}
+		matched, _ := runProcessorCycle(mm)
+		if len(matched) != 1 {
+			t.Fatalf("expected 1 match (failsafe=0), got %d", len(matched))
+		}
+	})
+}
+
+// --- Regression tests ---
+
+// TestUndersizedMatch_FullSizeMatchNotAffected ensures that a full-size match
+// (>= min_team_size*2 players) is never blocked by failsafe_timeout, regardless
+// of its value. The failsafe only gates undersized matches.
+func TestUndersizedMatch_FullSizeMatchNotAffected(t *testing.T) {
+	logger := loggerForTest(t)
+	matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
+	defer cleanup()
+	wireEvrProcessor(matchmaker, NewRuntimeGoLogger(logger))
+
+	// 8 players = 4*2 = full match. failsafe_timeout=9999 should not matter.
+	for i := range 8 {
+		addIntegrationProcessorTicketWithProps(t, matchmaker, fmt.Sprintf("full-%02d", i), nil, map[string]float64{
+			"failsafe_timeout": 9999,
+			"min_team_size":    4,
+			"max_count":        8,
+			"count_multiple":   2,
+			"timestamp":        float64(time.Now().UTC().Unix()),
+		})
+	}
+
+	matched, _ := runProcessorCycle(matchmaker)
+	if len(matched) != 1 {
+		t.Fatalf("expected 1 match (full size, failsafe irrelevant), got %d", len(matched))
+	}
+	if len(matched[0]) != 8 {
+		t.Fatalf("expected 8 players, got %d", len(matched[0]))
+	}
+}
+
+// TestUndersizedMatch_CombatMinTeamSize3 verifies that combat mode
+// (min_team_size=3, so min match = 6) uses its own threshold, not arena's 8.
+// 4 players in combat should be undersized (4 < 3*2=6).
+func TestUndersizedMatch_CombatMinTeamSize3(t *testing.T) {
+	logger := loggerForTest(t)
+	matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
+	defer cleanup()
+	wireEvrProcessor(matchmaker, NewRuntimeGoLogger(logger))
+
+	for i := range 4 {
+		addIntegrationProcessorTicketWithProps(t, matchmaker, fmt.Sprintf("combat4-%02d", i),
+			map[string]string{"game_mode": "echo_combat"},
+			map[string]float64{
+				"failsafe_timeout": 300,
+				"min_team_size":    3,
+				"max_team_size":    5,
+				"max_count":        10,
+				"count_multiple":   2,
+				"timestamp":        float64(time.Now().UTC().Unix()),
+			})
+	}
+
+	matched, _ := runProcessorCycle(matchmaker)
+	if len(matched) != 0 {
+		t.Fatalf("expected 0 matches (4 < 3*2=6, failsafe not expired), got %d", len(matched))
+	}
+}
+
+// TestUndersizedMatch_CombatMinTeamSize3_AllowedAfterFailsafe verifies that
+// 4 combat players with an expired failsafe ARE matched.
+func TestUndersizedMatch_CombatMinTeamSize3_AllowedAfterFailsafe(t *testing.T) {
+	logger := loggerForTest(t)
+	matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
+	defer cleanup()
+	wireEvrProcessor(matchmaker, NewRuntimeGoLogger(logger))
+
+	for i := range 4 {
+		addIntegrationProcessorTicketWithProps(t, matchmaker, fmt.Sprintf("combat4ok-%02d", i),
+			map[string]string{"game_mode": "echo_combat"},
+			map[string]float64{
+				"failsafe_timeout": 0, // Expired/reduced → allowed
+				"min_team_size":    3,
+				"max_team_size":    5,
+				"max_count":        10,
+				"count_multiple":   2,
+				"timestamp":        float64(time.Now().UTC().Unix()) - 120,
+			})
+	}
+
+	matched, _ := runProcessorCycle(matchmaker)
+	if len(matched) != 1 {
+		t.Fatalf("expected 1 match (failsafe expired), got %d", len(matched))
+	}
+	if len(matched[0]) != 4 {
+		t.Fatalf("expected 4 players, got %d", len(matched[0]))
+	}
+}
+
+// TestUndersizedMatch_SinglePlayerNeverMatches ensures that a single player
+// (below the absolute minimum of 2 entries) is never matched regardless of
+// failsafe settings. The matchmaker's min_count=2 gate prevents this.
+func TestUndersizedMatch_SinglePlayerNeverMatches(t *testing.T) {
+	logger := loggerForTest(t)
+	matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
+	defer cleanup()
+	wireEvrProcessor(matchmaker, NewRuntimeGoLogger(logger))
+
+	addIntegrationProcessorTicketWithProps(t, matchmaker, "solo-00", nil, map[string]float64{
+		"failsafe_timeout": 0, // Even with failsafe bypassed
+		"min_team_size":    4,
+		"max_count":        8,
+		"count_multiple":   2,
+		"timestamp":        float64(time.Now().UTC().Unix()) - 600,
+	})
+
+	matched, _ := runProcessorCycle(matchmaker)
+	if len(matched) != 0 {
+		t.Fatalf("expected 0 matches (single player can never match), got %d", len(matched))
+	}
+}
+
+// TestUndersizedMatch_TwoPlayersWithExpiredFailsafe verifies the minimum
+// viable match: 2 players with failsafe expired should form a match even
+// though 2 < min_team_size*2 (8 for arena).
+func TestUndersizedMatch_TwoPlayersWithExpiredFailsafe(t *testing.T) {
+	logger := loggerForTest(t)
+	matchmaker, cleanup := createProcessorTestMatchmaker(t, logger)
+	defer cleanup()
+	wireEvrProcessor(matchmaker, NewRuntimeGoLogger(logger))
+
+	ticketTime := float64(time.Now().UTC().Unix()) - 120
+
+	for i := range 2 {
+		addIntegrationProcessorTicketWithProps(t, matchmaker, fmt.Sprintf("duo-%02d", i), nil, map[string]float64{
+			"failsafe_timeout": 0,
+			"min_team_size":    4,
+			"max_count":        8,
+			"count_multiple":   2,
+			"timestamp":        ticketTime,
+		})
+	}
+
+	matched, _ := runProcessorCycle(matchmaker)
+	if len(matched) != 1 {
+		t.Fatalf("expected 1 match (2 players, failsafe bypassed), got %d", len(matched))
+	}
+	if len(matched[0]) != 2 {
+		t.Fatalf("expected 2 players, got %d", len(matched[0]))
+	}
+}

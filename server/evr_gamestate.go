@@ -1,11 +1,69 @@
 package server
 
 import (
+	"fmt"
 	"log"
 	"time"
 
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
+
+// GameStatus represents the current phase of a match, mirroring the nevr-proto GameStatus enum.
+type GameStatus int
+
+const (
+	GameStatusUnspecified    GameStatus = 0
+	GameStatusPreMatch       GameStatus = 1
+	GameStatusRoundStart     GameStatus = 2
+	GameStatusPlaying        GameStatus = 3
+	GameStatusScore          GameStatus = 4
+	GameStatusRoundOver      GameStatus = 5
+	GameStatusPostMatch      GameStatus = 6
+	GameStatusPreSuddenDeath GameStatus = 7
+	GameStatusSuddenDeath    GameStatus = 8
+	GameStatusPostSuddenDeath GameStatus = 9
+)
+
+var gameStatusNames = map[GameStatus]string{
+	GameStatusUnspecified:     "unspecified",
+	GameStatusPreMatch:        "pre_match",
+	GameStatusRoundStart:      "round_start",
+	GameStatusPlaying:         "playing",
+	GameStatusScore:           "score",
+	GameStatusRoundOver:       "round_over",
+	GameStatusPostMatch:       "post_match",
+	GameStatusPreSuddenDeath:  "pre_sudden_death",
+	GameStatusSuddenDeath:     "sudden_death",
+	GameStatusPostSuddenDeath: "post_sudden_death",
+}
+
+var gameStatusValues = func() map[string]GameStatus {
+	m := make(map[string]GameStatus, len(gameStatusNames))
+	for k, v := range gameStatusNames {
+		m[v] = k
+	}
+	return m
+}()
+
+func (g GameStatus) String() string {
+	if name, ok := gameStatusNames[g]; ok {
+		return name
+	}
+	return fmt.Sprintf("unknown(%d)", int(g))
+}
+
+func (g GameStatus) MarshalText() ([]byte, error) {
+	return []byte(g.String()), nil
+}
+
+func (g *GameStatus) UnmarshalText(text []byte) error {
+	s := string(text)
+	if v, ok := gameStatusValues[s]; ok {
+		*g = v
+		return nil
+	}
+	return fmt.Errorf("unknown GameStatus: %q", s)
+}
 
 type Clock struct {
 	Duration time.Duration `json:"duration,omitempty"`

@@ -131,7 +131,11 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 					"msg":   msg,
 				}).Warn("Failed to parse match ID")
 				continue
-			} else {
+			} else if msg.GameTime() > 0 {
+				// Only update the game clock when the value is non-zero.
+				// VOIP_LOUDNESS messages implement GameTimer but always
+				// report game_time=0, which would overwrite valid clock
+				// values set by GOAL or other gameplay messages.
 				update, _ = updates.LoadOrStore(matchID.UUID, &MatchGameStateUpdate{})
 				update.CurrentGameClock = time.Duration(msg.GameTime()) * time.Second
 			}
@@ -205,6 +209,8 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			}
 
 		case *evr.RemoteLogSessionStarted:
+			update, _ = updates.LoadOrStore(msg.SessionUUID(), &MatchGameStateUpdate{})
+			update.GameStatus = GameStatusPreMatch
 
 		case *evr.RemoteLogPauseSettings:
 			if !s.XPID.IsValid() {
@@ -304,6 +310,8 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 
 		case *evr.RemoteLogRepairMatrix:
 
+		case *evr.RemoteLogPostMatchGeneric:
+
 		case *evr.RemoteLogServerConnectionFailed:
 			if strings.EqualFold(strings.TrimSpace(msg.ServerAddress), "[INVALID PEER ID]") {
 				nk.MetricsCounterAdd("remotelog_invalid_peer_id_count", nil, 1)
@@ -401,11 +409,13 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 		case *evr.RemoteLogPostMatchMatchStats:
 			update, _ = updates.LoadOrStore(msg.SessionUUID(), &MatchGameStateUpdate{})
 			update.MatchOver = true
+			update.GameStatus = GameStatusPostMatch
 			postMatchMessages[msg.SessionUUID()] = append(postMatchMessages[msg.SessionUUID()], msg)
 
 		case *evr.RemoteLogPostMatchTypeStats:
 			update, _ = updates.LoadOrStore(msg.SessionUUID(), &MatchGameStateUpdate{})
 			update.MatchOver = true
+			update.GameStatus = GameStatusPostMatch
 			postMatchMessages[msg.SessionUUID()] = append(postMatchMessages[msg.SessionUUID()], msg)
 
 		case *evr.RemoteLogPostMatchMatchTypeXPLevel:
