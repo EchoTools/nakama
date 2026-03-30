@@ -235,6 +235,38 @@ func NewMessageFromHash(hash uint64) Message {
 		return &SNSPartyLockNotify{}
 	case 0xd8cfd3795010481f:
 		return &SNSPartyUnlockNotify{}
+	// SNS Friends messages — client requests
+	case 0x7f0d7a28de3c6f70:
+		return &SNSFriendInviteRequest{}
+	case 0x1bbcb7e810af4620:
+		return &SNSFriendAcceptRequest{}
+	case 0x78908988b7fe6db4:
+		return &SNSFriendRemoveRequest{}
+	// SNS Friends messages — server responses/notifications
+	case 0xa78aeb2a4e89b10b:
+		return &SNSFriendListResponse{}
+	case 0x26a19dc4d2d5579d:
+		return &SNSFriendStatusNotify{}
+	case 0x7f0c6a3ac83c6f77:
+		return &SNSFriendInviteSuccess{}
+	case 0x7f197e30c72c6e61:
+		return &SNSFriendInviteFailure{}
+	case 0xca09b0b36bd981b7:
+		return &SNSFriendInviteNotify{}
+	case 0x1bbda7fa06af4627:
+		return &SNSFriendAcceptSuccess{}
+	case 0x1ba8b3f009bf4731:
+		return &SNSFriendAcceptFailure{}
+	case 0xc237c84c31d3ae05:
+		return &SNSFriendAcceptNotify{}
+	case 0xc2bf83a08ea3a955:
+		return &SNSFriendRemoveResponse{}
+	case 0xe06972f49cd72265:
+		return &SNSFriendRemoveNotify{}
+	case 0x191aa30801ec6d03:
+		return &SNSFriendWithdrawnNotify{}
+	case 0xb9b86c0ce8e8d0c1:
+		return &SNSFriendRejectNotify{}
 	default:
 		return nil
 	}
