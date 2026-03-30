@@ -48,7 +48,7 @@ func (g *LobbyGroup) List() []*PartyPresenceListItem {
 
 func (g *LobbyGroup) Size() int {
 	if g.ph == nil {
-		return 1
+		return 0
 	}
 	return g.ph.members.Size()
 }
@@ -60,7 +60,7 @@ func (g *LobbyGroup) MatchmakerAdd(sessionID, node, query string, minCount, maxC
 	return g.ph.MatchmakerAdd(sessionID, node, query, minCount, maxCount, countMultiple, stringProperties, numericProperties)
 }
 
-func JoinPartyGroup(session *sessionWS, groupName string, partyID uuid.UUID, currentMatchID MatchID) (*LobbyGroup, bool, error) {
+func JoinPartyGroup(session *sessionWS, groupName string, currentMatchID MatchID) (*LobbyGroup, bool, error) {
 
 	userPresence := &rtapi.UserPresence{
 		UserId:    session.UserID().String(),
@@ -87,7 +87,7 @@ func JoinPartyGroup(session *sessionWS, groupName string, partyID uuid.UUID, cur
 		Status:   currentMatchID.String(),
 	}
 
-	ph, created, err := session.pipeline.partyRegistry.GetOrCreate(partyID, true, 4, userPresence)
+	ph, created, err := session.pipeline.partyRegistry.GetOrCreateByGroupName(groupName, true, 4, userPresence)
 	if err != nil {
 		return nil, false, err
 	}

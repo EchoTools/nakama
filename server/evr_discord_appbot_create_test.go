@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -70,7 +71,9 @@ func TestGetPartyMembersForUser(t *testing.T) {
 				storageReadError: tt.storageReadError,
 			}
 
-			userIDs := getPartyMembersForUser(ctx, nk, tt.userID)
+			// Create a mock registry that returns a known UUID for any group name.
+			pr := &mockPartyRegistryForLookup{groupID: tt.partyGroupID}
+			userIDs := getPartyMembersForUser(ctx, nk, pr, tt.userID)
 
 			if len(userIDs) != len(tt.expectedUserIDs) {
 				t.Errorf("Expected %d user IDs, got %d", len(tt.expectedUserIDs), len(userIDs))
@@ -142,6 +145,19 @@ func (p *mockPresence) GetPersistence() bool             { return false }
 func (p *mockPresence) GetUsername() string               { return "" }
 func (p *mockPresence) GetStatus() string                { return "" }
 func (p *mockPresence) GetReason() runtime.PresenceReason { return runtime.PresenceReasonUnknown }
+
+// mockPartyRegistryForLookup implements just the LookupGroupPartyID method.
+type mockPartyRegistryForLookup struct {
+	PartyRegistry
+	groupID string
+}
+
+func (m *mockPartyRegistryForLookup) LookupGroupPartyID(groupName string) (uuid.UUID, bool) {
+	if m.groupID == "" {
+		return uuid.Nil, false
+	}
+	return uuid.Must(uuid.NewV4()), true
+}
 
 func settingsToStorageObject(userID string, settings MatchmakingSettings) (*api.StorageObject, error) {
 	return &api.StorageObject{

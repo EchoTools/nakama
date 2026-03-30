@@ -248,13 +248,15 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 
 	// Join the party if a player has a party group id set.
 	// The lobby group is the party that the user is currently in.
-	lobbyGroup, isLeader, err := JoinPartyGroup(session, lobbyParams.PartyGroupName, lobbyParams.PartyID, lobbyParams.CurrentMatchID)
+	lobbyGroup, isLeader, err := JoinPartyGroup(session, lobbyParams.PartyGroupName, lobbyParams.CurrentMatchID)
 	if err != nil {
 		if err == runtime.ErrPartyFull {
 			return nil, nil, false, NewLobbyError(ServerIsFull, "party is full")
 		}
 		return nil, nil, false, fmt.Errorf("failed to join party group: %w", err)
 	}
+	// Populate PartyID from the registry-assigned party (random UUID, not derived from group name).
+	lobbyParams.PartyID = lobbyGroup.ID()
 	logger.Debug("Joined party group", zap.String("partyID", lobbyGroup.IDStr()))
 
 	// If this is the leader, then set the presence status to the current match ID.
