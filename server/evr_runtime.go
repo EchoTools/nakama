@@ -589,7 +589,7 @@ func GetMatchPresences(ctx context.Context, nk runtime.NakamaModule, matchID Mat
 	return presenceMap, nil
 }
 
-func GetLobbyGroupID(ctx context.Context, db *sql.DB, userID string) (string, uuid.UUID, error) {
+func GetLobbyGroupID(ctx context.Context, db *sql.DB, userID string) (string, error) {
 	query := "SELECT value->>'group_id' FROM storage WHERE collection = $1 AND key = $2 and user_id = $3"
 	var dbPartyGroupName string
 	var found = true
@@ -598,16 +598,13 @@ func GetLobbyGroupID(ctx context.Context, db *sql.DB, userID string) (string, uu
 		if err == sql.ErrNoRows {
 			found = false
 		} else {
-			return "", uuid.Nil, fmt.Errorf("error finding lobby group id: %w", err)
+			return "", fmt.Errorf("error finding lobby group id: %w", err)
 		}
 	}
 	if !found {
-		return "", uuid.Nil, status.Error(codes.NotFound, "lobby group id not found")
+		return "", status.Error(codes.NotFound, "lobby group id not found")
 	}
-	if dbPartyGroupName == "" {
-		return "", uuid.Nil, nil
-	}
-	return dbPartyGroupName, uuid.NewV5(PartyIDSalt, dbPartyGroupName), nil
+	return dbPartyGroupName, nil
 }
 
 // returns map[guildID]groupID
@@ -695,7 +692,7 @@ func RuntimeLoggerToZapLogger(logger runtime.Logger) *zap.Logger {
 // getPartyMembersForUser retrieves all party members for a user, including the user themselves.
 // If the user is not in a party, it returns only the user's ID.
 // This function never returns an error - all failure cases result in returning just the user's ID.
-func getPartyMembersForUser(ctx context.Context, nk runtime.NakamaModule, userID string) []string {
+func getPartyMembersForUser(ctx context.Context, nk runtime.NakamaModule, partyRegistry PartyRegistry, userID string) []string {
 	// Load the user's matchmaking settings to get their party group
 	settings, err := LoadMatchmakingSettings(ctx, nk, userID)
 	if err != nil {
@@ -706,8 +703,11 @@ func getPartyMembersForUser(ctx context.Context, nk runtime.NakamaModule, userID
 		return []string{userID}
 	}
 
-	// Derive the party stream UUID from the group name
-	partyUUID := uuid.NewV5(PartyIDSalt, settings.LobbyGroupName)
+	// Look up the party UUID from the registry instead of deriving it deterministically.
+	partyUUID, ok := partyRegistry.LookupGroupPartyID(settings.LobbyGroupName)
+	if !ok {
+		return []string{userID}
+	}
 
 	node, ok := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
 	if !ok {

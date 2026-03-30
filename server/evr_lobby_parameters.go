@@ -256,11 +256,9 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	}
 
 	var lobbyGroupName string
-	var partyID uuid.UUID
 
 	if userSettings.LobbyGroupName != "" {
 		lobbyGroupName = userSettings.LobbyGroupName
-		partyID = uuid.NewV5(PartyIDSalt, lobbyGroupName)
 	}
 
 	node := session.pipeline.node
@@ -386,7 +384,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		MatchmakingQueryAddon:        strings.Join(matchmakingQueryAddons, " "),
 		CreateQueryAddon:             strings.Join(createQueryAddons, " "),
 		PartyGroupName:               lobbyGroupName,
-		PartyID:                      partyID,
 		PartySize:                    atomic.NewInt64(1),
 		NextMatchID:                  nextMatchID,
 		IsModerator:                  isModerator,
