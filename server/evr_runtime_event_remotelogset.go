@@ -310,6 +310,8 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 
 		case *evr.RemoteLogRepairMatrix:
 
+		case *evr.RemoteLogPostMatchGeneric:
+
 		case *evr.RemoteLogServerConnectionFailed:
 			if strings.EqualFold(strings.TrimSpace(msg.ServerAddress), "[INVALID PEER ID]") {
 				nk.MetricsCounterAdd("remotelog_invalid_peer_id_count", nil, 1)
