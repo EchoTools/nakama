@@ -90,7 +90,7 @@ func TestSNSFriendRemoveRequest_RoundTrip(t *testing.T) {
 // 0x20-byte inbound: SNSFriendListResponse
 // ---------------------------------------------------------------------------
 
-func buildFriendListResponse(header uint64, noffline, nbusy, nonline, nsent, nrecv uint32) []byte {
+func buildFriendListResponse(header uint64, noffline, nbusy, nonline, nsent, nrecv, reserved uint32) []byte {
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.LittleEndian, header)
 	binary.Write(buf, binary.LittleEndian, noffline)
@@ -98,11 +98,12 @@ func buildFriendListResponse(header uint64, noffline, nbusy, nonline, nsent, nre
 	binary.Write(buf, binary.LittleEndian, nonline)
 	binary.Write(buf, binary.LittleEndian, nsent)
 	binary.Write(buf, binary.LittleEndian, nrecv)
+	binary.Write(buf, binary.LittleEndian, reserved)
 	return buf.Bytes()
 }
 
 func TestSNSFriendListResponse_RoundTrip(t *testing.T) {
-	data := buildFriendListResponse(0xAA, 5, 3, 10, 2, 1)
+	data := buildFriendListResponse(0xAA, 5, 3, 10, 2, 1, 0)
 
 	m := &SNSFriendListResponse{}
 	s := NewEasyStream(DecodeMode, data)

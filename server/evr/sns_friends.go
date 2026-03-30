@@ -137,6 +137,7 @@ func (m SNSFriendRemoveRequest) String() string {
 // ---------------------------------------------------------------------------
 
 // SNSFriendListResponse is the server's response with friend list category counts.
+// Wire format: 0x20 bytes (Header + 5×uint32 counts + Reserved).
 type SNSFriendListResponse struct {
 	Header   uint64
 	NOffline uint32
@@ -144,6 +145,7 @@ type SNSFriendListResponse struct {
 	NOnline  uint32
 	NSent    uint32
 	NRecv    uint32
+	Reserved uint32
 }
 
 func (m SNSFriendListResponse) Token() string   { return "SNSFriendListResponse" }
@@ -157,6 +159,7 @@ func (m *SNSFriendListResponse) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.NOnline) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.NSent) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.NRecv) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Reserved) },
 	})
 }
 
