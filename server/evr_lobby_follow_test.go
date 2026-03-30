@@ -1417,7 +1417,7 @@ func TestPartyReservation_SoloPlayerCreatesNoReservations(t *testing.T) {
 	}
 }
 
-func TestPartyReservation_OfflinePartyMembersGetNoReservation(t *testing.T) {
+func TestPartyReservation_MissingEntrantGetsPlaceholder(t *testing.T) {
 	// Party of 3: leader + followerA (online) + followerB (disconnected).
 	// PrepareEntrantPresences would have created presences for leader and
 	// followerA but NOT followerB (session not found). The party handler

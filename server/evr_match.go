@@ -45,6 +45,7 @@ const (
 	RoundWaitDuration          = 59 * time.Second
 	PreMatchWaitTime           = 45 * time.Second
 	PublicMatchWaitTime        = PreMatchWaitTime + CatapultDuration + RoundCatapultDelayDuration
+	PreMatchToPlayingTimeout   = 60 * time.Second
 )
 
 var (
@@ -1245,8 +1246,8 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		updateLabel = true
 	}
 
-	// Transition from PRE_MATCH to PLAYING after 60 seconds
-	if state.GameStatus == GameStatusPreMatch && state.Started() && time.Since(state.StartTime) >= 60*time.Second {
+	// Transition from PRE_MATCH to PLAYING after the pre-match period.
+	if state.GameStatus == GameStatusPreMatch && state.Started() && time.Since(state.StartTime) >= PreMatchToPlayingTimeout {
 		state.GameStatus = GameStatusPlaying
 		updateLabel = true
 	}
