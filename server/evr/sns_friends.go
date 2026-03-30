@@ -173,10 +173,12 @@ func (m SNSFriendListResponse) String() string {
 // ---------------------------------------------------------------------------
 
 // SNSFriendStatusNotify is a friend online/offline/busy status change notification.
+// Wire format: 0x18 bytes (Header + FriendID + StatusCode + 7 bytes reserved).
 type SNSFriendStatusNotify struct {
 	Header     uint64
 	FriendID   uint64
 	StatusCode uint8
+	Reserved   [7]byte
 }
 
 func (m SNSFriendStatusNotify) Token() string   { return "SNSFriendStatusNotify" }
@@ -187,6 +189,7 @@ func (m *SNSFriendStatusNotify) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Header) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.FriendID) },
 		func() error { return s.StreamByte(&m.StatusCode) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Reserved) },
 	})
 }
 
@@ -196,10 +199,12 @@ func (m SNSFriendStatusNotify) String() string {
 
 // SNSFriendInviteFailure is sent when a friend invite fails.
 // StatusCode is a FriendInviteError value.
+// Wire format: 0x18 bytes (Header + FriendID + StatusCode + 7 bytes reserved).
 type SNSFriendInviteFailure struct {
 	Header     uint64
 	FriendID   uint64
 	StatusCode uint8
+	Reserved   [7]byte
 }
 
 func (m SNSFriendInviteFailure) Token() string   { return "SNSFriendInviteFailure" }
@@ -210,6 +215,7 @@ func (m *SNSFriendInviteFailure) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Header) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.FriendID) },
 		func() error { return s.StreamByte(&m.StatusCode) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Reserved) },
 	})
 }
 
@@ -218,10 +224,12 @@ func (m SNSFriendInviteFailure) String() string {
 }
 
 // SNSFriendAcceptSuccess is sent when a friend accept succeeds.
+// Wire format: 0x18 bytes (Header + FriendID + StatusCode + 7 bytes reserved).
 type SNSFriendAcceptSuccess struct {
 	Header     uint64
 	FriendID   uint64
 	StatusCode uint8
+	Reserved   [7]byte
 }
 
 func (m SNSFriendAcceptSuccess) Token() string   { return "SNSFriendAcceptSuccess" }
@@ -232,6 +240,7 @@ func (m *SNSFriendAcceptSuccess) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Header) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.FriendID) },
 		func() error { return s.StreamByte(&m.StatusCode) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Reserved) },
 	})
 }
 
@@ -241,10 +250,12 @@ func (m SNSFriendAcceptSuccess) String() string {
 
 // SNSFriendAcceptFailure is sent when a friend accept fails.
 // StatusCode is a FriendAcceptError value.
+// Wire format: 0x18 bytes (Header + FriendID + StatusCode + 7 bytes reserved).
 type SNSFriendAcceptFailure struct {
 	Header     uint64
 	FriendID   uint64
 	StatusCode uint8
+	Reserved   [7]byte
 }
 
 func (m SNSFriendAcceptFailure) Token() string   { return "SNSFriendAcceptFailure" }
@@ -255,6 +266,7 @@ func (m *SNSFriendAcceptFailure) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Header) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.FriendID) },
 		func() error { return s.StreamByte(&m.StatusCode) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Reserved) },
 	})
 }
 
@@ -263,10 +275,12 @@ func (m SNSFriendAcceptFailure) String() string {
 }
 
 // SNSFriendAcceptNotify is sent when another user accepts your friend request.
+// Wire format: 0x18 bytes (Header + FriendID + StatusCode + 7 bytes reserved).
 type SNSFriendAcceptNotify struct {
 	Header     uint64
 	FriendID   uint64
 	StatusCode uint8
+	Reserved   [7]byte
 }
 
 func (m SNSFriendAcceptNotify) Token() string   { return "SNSFriendAcceptNotify" }
@@ -277,6 +291,7 @@ func (m *SNSFriendAcceptNotify) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Header) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.FriendID) },
 		func() error { return s.StreamByte(&m.StatusCode) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Reserved) },
 	})
 }
 
