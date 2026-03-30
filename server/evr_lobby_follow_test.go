@@ -8,6 +8,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/rtapi"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 // ---------------------------------------------------------------------------
@@ -1380,5 +1381,124 @@ func TestDuoDesync_PollFollow_ContextCanceledBeforeSettleCheck(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		cancel()
 		t.Fatal("pollFollowPartyLeader did not return within 10 seconds")
+	}
+}
+
+// ===========================================================================
+// Party Reservation Placeholder Tests
+// ===========================================================================
+
+func TestPartyReservation_SoloPlayerCreatesNoReservations(t *testing.T) {
+	// A solo player (no party) joining a social lobby should NOT have any
+	// additional reservation placeholders appended.
+	logger := loggerForTest(t)
+
+	leaderSID := uuid.Must(uuid.NewV4())
+	leaderUID := uuid.Must(uuid.NewV4())
+
+	// Single entrant — the leader themselves.
+	entrants := []*EvrMatchPresence{
+		{
+			SessionID: leaderSID,
+			UserID:    leaderUID,
+			Username:  "solo-player",
+		},
+	}
+
+	params := &LobbySessionParameters{
+		Mode: evr.ModeSocialPublic,
+	}
+
+	// No lobby group (solo player).
+	result := appendPartyReservationPlaceholders(logger, entrants, nil, params, "testnode")
+
+	if len(result) != 1 {
+		t.Errorf("Expected 1 entrant for solo player, got %d", len(result))
+	}
+}
+
+func TestPartyReservation_OfflinePartyMembersGetNoReservation(t *testing.T) {
+	// Party of 3: leader + followerA (online) + followerB (disconnected).
+	// PrepareEntrantPresences would have created presences for leader and
+	// followerA but NOT followerB (session not found). The party handler
+	// still lists all 3 members (followerB hasn't been removed from the
+	// party yet). appendPartyReservationPlaceholders should add a
+	// placeholder for followerB since they're still in the party list.
+	//
+	// However, if the party handler has already removed followerB from its
+	// member list (because the session disconnected), no placeholder is
+	// created. This test validates that only members still in
+	// lobbyGroup.List() get placeholders — and members already in the
+	// entrants slice are skipped.
+
+	logger := loggerForTest(t)
+
+	leaderSID := uuid.Must(uuid.NewV4())
+	leaderUID := uuid.Must(uuid.NewV4())
+	followerASID := uuid.Must(uuid.NewV4())
+	followerAUID := uuid.Must(uuid.NewV4())
+	followerBSID := uuid.Must(uuid.NewV4())
+	followerBUID := uuid.Must(uuid.NewV4())
+	partyID := uuid.Must(uuid.NewV4())
+
+	// entrants only has leader and followerA (followerB was not in sessionRegistry).
+	entrants := []*EvrMatchPresence{
+		{
+			SessionID: leaderSID,
+			UserID:    leaderUID,
+			Username:  "leader",
+		},
+		{
+			SessionID: followerASID,
+			UserID:    followerAUID,
+			Username:  "followerA",
+		},
+	}
+
+	params := &LobbySessionParameters{
+		Mode:    evr.ModeSocialPublic,
+		PartyID: partyID,
+	}
+
+	// Build a lobby group with all 3 members (including disconnected followerB).
+	leaderUP := &rtapi.UserPresence{
+		UserId:    leaderUID.String(),
+		SessionId: leaderSID.String(),
+		Username:  "leader",
+	}
+	ph := &PartyHandler{}
+	ph.leader = &PartyLeader{
+		UserPresence: leaderUP,
+		PresenceID:   &PresenceID{SessionID: leaderSID, Node: "testnode"},
+	}
+	ph.members = NewPartyPresenceList(5)
+	// Add all three members to the party.
+	ph.members.Join([]*Presence{
+		newPresenceWithIDs("testnode", leaderSID, leaderUID),
+		newPresenceWithIDs("testnode", followerASID, followerAUID),
+		newPresenceWithIDs("testnode", followerBSID, followerBUID),
+	})
+	lobbyGroup := &LobbyGroup{ph: ph}
+
+	result := appendPartyReservationPlaceholders(logger, entrants, lobbyGroup, params, "testnode")
+
+	// Should have added 1 placeholder for followerB.
+	if len(result) != 3 {
+		t.Errorf("Expected 3 entrants (leader + followerA + followerB placeholder), got %d", len(result))
+	}
+
+	// Verify the placeholder is for followerB.
+	placeholder := result[2]
+	if placeholder.SessionID != followerBSID {
+		t.Errorf("Expected placeholder SessionID %s, got %s", followerBSID, placeholder.SessionID)
+	}
+	if placeholder.UserID != followerBUID {
+		t.Errorf("Expected placeholder UserID %s, got %s", followerBUID, placeholder.UserID)
+	}
+	if placeholder.RoleAlignment != evr.TeamSocial {
+		t.Errorf("Expected placeholder RoleAlignment %d (TeamSocial), got %d", evr.TeamSocial, placeholder.RoleAlignment)
+	}
+	if placeholder.PartyID != partyID {
+		t.Errorf("Expected placeholder PartyID %s, got %s", partyID, placeholder.PartyID)
 	}
 }

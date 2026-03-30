@@ -201,6 +201,40 @@ func NewMessageFromHash(hash uint64) Message {
 		return &NEVRProtobufJSONMessageV1{}
 	case 0xa0687d9799640878:
 		return &SNSLobbySetSpawnBotOnServer{}
+	// SNS Party messages — client requests
+	case 0xb57b22cc5352e00c:
+		return &SNSPartyJoinRequest{}
+	case 0xb77b0be7a94a9fb6:
+		return &SNSPartyLeaveRequest{}
+	case 0xcf13f934540b5f5e:
+		return &SNSPartySendInviteRequest{}
+	case 0xc2478aa479f3e16a:
+		return &SNSPartyLockRequest{}
+	case 0x5a4e99802fa3d704:
+		return &SNSPartyUnlockRequest{}
+	case 0xfaf57beb59917d64:
+		return &SNSPartyKickRequest{}
+	case 0x518543cd886a6946:
+		return &SNSPartyPassOwnershipRequest{}
+	case 0xe3654a09203555a3:
+		return &SNSPartyRespondToInviteRequest{}
+	// SNS Party messages — server responses/notifications
+	case 0xb57a32de4552e00b:
+		return &SNSPartyJoinSuccess{}
+	case 0xb56f26d44a42e11d:
+		return &SNSPartyJoinFailure{}
+	case 0xb77a1bf5bf4a9fb1:
+		return &SNSPartyLeaveSuccess{}
+	case 0x05315abefc8f804b:
+		return &SNSPartyLeaveNotify{}
+	case 0x28cb04891f93dc81:
+		return &SNSPartyKickNotify{}
+	case 0x9d946c88d5a8aca5:
+		return &SNSPartyPassNotify{}
+	case 0x93a6b1a6cd4ef8dd:
+		return &SNSPartyLockNotify{}
+	case 0xd8cfd3795010481f:
+		return &SNSPartyUnlockNotify{}
 	default:
 		return nil
 	}
