@@ -110,12 +110,7 @@ func (p *LocalPartyRegistry) GetOrCreate(id uuid.UUID, open bool, maxSize int, l
 func (p *LocalPartyRegistry) GetOrCreateByGroupName(groupName string, open bool, maxSize int, leader *rtapi.UserPresence) (*PartyHandler, bool, error) {
 	// Check if there's already a party for this group name.
 	if existingID, ok := p.groupParties.Load(groupName); ok {
-		ph, created, err := p.GetOrCreate(existingID, open, maxSize, leader)
-		if err == nil {
-			return ph, created, nil
-		}
-		// Party was deleted between lookup and GetOrCreate; fall through to create new.
-		p.groupParties.Delete(groupName)
+		return p.GetOrCreate(existingID, open, maxSize, leader)
 	}
 
 	newID := uuid.Must(uuid.NewV4())
@@ -125,11 +120,7 @@ func (p *LocalPartyRegistry) GetOrCreateByGroupName(groupName string, open bool,
 	if loaded {
 		newID = actualID
 	}
-	ph, created, err := p.GetOrCreate(newID, open, maxSize, leader)
-	if err != nil {
-		return nil, false, err
-	}
-	return ph, created, nil
+	return p.GetOrCreate(newID, open, maxSize, leader)
 }
 
 func (p *LocalPartyRegistry) LookupGroupPartyID(groupName string) (uuid.UUID, bool) {
