@@ -135,6 +135,12 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		return fmt.Errorf("failed to be party leader.: %w", err)
 	}
 
+	// For social lobbies with a party, create placeholder reservation presences
+	// for online party members whose sessions were not found by PrepareEntrantPresences.
+	// This ensures that when the leader joins a social lobby, slots are reserved
+	// for followers who haven't started their own lobby find yet.
+	entrants = appendPartyReservationPlaceholders(logger, entrants, lobbyGroup, lobbyParams, session.pipeline.node)
+
 	lobbyParams.SetPartySize(len(entrants))
 
 	defer func() {
@@ -205,6 +211,32 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	// Social lobbies use a simple find-or-create approach
 	if lobbyParams.Mode == evr.ModeSocialPublic {
+		// If the leader is already in a social lobby that can't fit the
+		// entire party (even accounting for reservations), abandon it and
+		// find/create a new lobby with room for everyone.
+		if !lobbyParams.CurrentMatchID.IsNil() && lobbyGroup != nil && lobbyGroup.Size() > 1 {
+			currentLabel, err := MatchLabelByID(ctx, p.nk, lobbyParams.CurrentMatchID)
+			if err == nil && currentLabel != nil && currentLabel.IsSocial() {
+				openSlots := currentLabel.OpenPlayerSlots()
+				// Count party members already in this match.
+				membersInMatch := 0
+				for _, member := range lobbyGroup.List() {
+					if currentLabel.GetPlayerByUserID(member.Presence.GetUserId()) != nil {
+						membersInMatch++
+					}
+				}
+				needed := lobbyGroup.Size() - membersInMatch
+				if openSlots < needed {
+					logger.Info("Current social lobby cannot fit party, relocating",
+						zap.String("current_mid", lobbyParams.CurrentMatchID.String()),
+						zap.Int("open_slots", openSlots),
+						zap.Int("party_size", lobbyGroup.Size()),
+						zap.Int("members_in_match", membersInMatch),
+						zap.Int("needed", needed))
+					lobbyParams.CurrentMatchID = MatchID{}
+				}
+			}
+		}
 		return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, entrants...)
 	}
 
@@ -581,6 +613,44 @@ func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, nk runtime
 	return entrantPresences, nil
 }
 
+// appendPartyReservationPlaceholders adds minimal EvrMatchPresence entries for
+// online party members who are not already in the entrants slice. This is used
+// for social lobbies so that LobbyJoinEntrants creates slot reservations for
+// party followers who haven't started their own lobby find yet.
+// Returns the (possibly extended) entrants slice unchanged if the conditions
+// are not met (non-social mode, no party, solo player).
+func appendPartyReservationPlaceholders(logger *zap.Logger, entrants []*EvrMatchPresence, lobbyGroup *LobbyGroup, lobbyParams *LobbySessionParameters, node string) []*EvrMatchPresence {
+	if lobbyParams.Mode != evr.ModeSocialPublic || lobbyGroup == nil || lobbyGroup.Size() <= 1 {
+		return entrants
+	}
+
+	entrantSet := make(map[uuid.UUID]struct{}, len(entrants))
+	for _, e := range entrants {
+		entrantSet[e.SessionID] = struct{}{}
+	}
+
+	for _, member := range lobbyGroup.List() {
+		memberSID := uuid.FromStringOrNil(member.Presence.GetSessionId())
+		if _, exists := entrantSet[memberSID]; exists {
+			continue
+		}
+		placeholder := &EvrMatchPresence{
+			SessionID:     memberSID,
+			UserID:        uuid.FromStringOrNil(member.Presence.GetUserId()),
+			Username:      member.Presence.GetUsername(),
+			PartyID:       lobbyParams.PartyID,
+			RoleAlignment: evr.TeamSocial,
+			Node:          node,
+		}
+		entrants = append(entrants, placeholder)
+		logger.Debug("Added party reservation placeholder",
+			zap.String("uid", member.Presence.GetUserId()),
+			zap.String("sid", member.Presence.GetSessionId()))
+	}
+
+	return entrants
+}
+
 // TryFollowPartyLeader attempts to join the party leader's current match.
 // Returns true if the follower successfully joined the leader's match.
 // Returns false if the leader is not in a match or the join failed and the
@@ -674,18 +744,29 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 	requiredSlots := partySize - countInMatch
 
 	if !label.Open || label.OpenPlayerSlots() < requiredSlots {
-		logger.Debug("Leader's match is full or closed",
-			zap.Bool("open", label.Open),
-			zap.Int("open_slots", label.OpenPlayerSlots()),
-			zap.Int("party_size", partySize),
-			zap.Int("required_slots", requiredSlots))
+		// For social lobbies, the leader may have created a reservation for
+		// this follower. Reservations are counted in the label's Size (making
+		// it appear full from outside) but the match handler will accept
+		// reserved players via LoadAndDeleteReservation. Attempt the join
+		// instead of immediately giving up.
+		if label.IsSocial() {
+			logger.Debug("Leader's social lobby appears full, but attempting join (may have reservation)",
+				zap.Int("open_slots", label.OpenPlayerSlots()),
+				zap.Int("required_slots", requiredSlots))
+		} else {
+			logger.Debug("Leader's match is full or closed",
+				zap.Bool("open", label.Open),
+				zap.Int("open_slots", label.OpenPlayerSlots()),
+				zap.Int("party_size", partySize),
+				zap.Int("required_slots", requiredSlots))
 
-		if params.CurrentMatchID.IsNil() {
-			// Follower is at main menu; fall through to normal find.
-			return false
+			if params.CurrentMatchID.IsNil() {
+				// Follower is at main menu; fall through to normal find.
+				return false
+			}
+			// Follower is in a lobby; poll and retry.
+			return p.pollFollowPartyLeader(ctx, logger, session, params, lobbyGroup)
 		}
-		// Follower is in a lobby; poll and retry.
-		return p.pollFollowPartyLeader(ctx, logger, session, params, lobbyGroup)
 	}
 
 	switch label.Mode {
