@@ -77,6 +77,13 @@ type EvrPipeline struct {
 	earlyQuitMessageTrigger *SNSEarlyQuitMessageTrigger
 
 	spamTracker *SpamTracker
+
+	// SNS Party system — ephemeral maps for protocol bridging
+	snsPartyIDToUUID  *MapOf[uint64, uuid.UUID]
+	snsPartyUUIDToID  *MapOf[uuid.UUID, uint64]
+	snsPartyIDCounter atomic.Uint64
+	evrUUIDToUserID   *MapOf[uuid.UUID, uuid.UUID] // EvrId.UUID() -> Nakama user UUID
+	snsPartyInvites   *MapOf[uuid.UUID, *snsPartyInviteList]
 }
 
 type ctxDiscordBotTokenKey struct{}
@@ -240,6 +247,11 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		messageCache: &MapOf[string, evr.Message]{},
 
 		spamTracker: NewSpamTracker(ctx, logger, nk),
+
+		snsPartyIDToUUID: &MapOf[uint64, uuid.UUID]{},
+		snsPartyUUIDToID: &MapOf[uuid.UUID, uint64]{},
+		evrUUIDToUserID:  &MapOf[uuid.UUID, uuid.UUID]{},
+		snsPartyInvites:  &MapOf[uuid.UUID, *snsPartyInviteList]{},
 	}
 
 	// Create and store the early quit message trigger for sending SNS messages to players
@@ -555,6 +567,32 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		pipelineFn = p.lobbyPlayerSessionsRequest
 	case *evr.LobbyPendingSessionCancel:
 		pipelineFn = p.lobbyPendingSessionCancel
+
+	// SNS Party service
+	case *evr.SNSPartyCreateRequest:
+		pipelineFn = p.snsPartyCreateRequest
+	case *evr.SNSPartyJoinRequest:
+		pipelineFn = p.snsPartyJoinRequest
+	case *evr.SNSPartyLeaveRequest:
+		pipelineFn = p.snsPartyLeaveRequest
+	case *evr.SNSPartySendInviteRequest:
+		pipelineFn = p.snsPartySendInviteRequest
+	case *evr.SNSPartyLockRequest:
+		pipelineFn = p.snsPartyLockRequest
+	case *evr.SNSPartyUnlockRequest:
+		pipelineFn = p.snsPartyUnlockRequest
+	case *evr.SNSPartyKickRequest:
+		pipelineFn = p.snsPartyKickRequest
+	case *evr.SNSPartyPassOwnershipRequest:
+		pipelineFn = p.snsPartyPassOwnershipRequest
+	case *evr.SNSPartyRespondToInviteRequest:
+		pipelineFn = p.snsPartyRespondToInviteRequest
+	case *evr.SNSPartyUpdateRequest:
+		pipelineFn = p.snsPartyUpdateRequest
+	case *evr.SNSPartyUpdateMemberRequest:
+		pipelineFn = p.snsPartyUpdateMemberRequest
+	case *evr.SNSPartyInviteListRefreshRequest:
+		pipelineFn = p.snsPartyInviteListRefreshRequest
 
 	// SNS Friends service
 	case *evr.SNSFriendInviteRequest:
