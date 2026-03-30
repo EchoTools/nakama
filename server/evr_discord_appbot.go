@@ -3147,9 +3147,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if err != nil {
 					return fmt.Errorf("failed to get party group ID: %w", err)
 				}
-				// Look for presences
-				partyUUID, _ := d.pipeline.partyRegistry.LookupGroupPartyID(groupName)
-				partyMembers, err := nk.StreamUserList(StreamModeParty, partyUUID.String(), "", d.pipeline.node, false, true)
+				// Look for presences in the active party stream.
+				var partyMembers []runtime.Presence
+				partyUUID, found := d.pipeline.partyRegistry.LookupGroupPartyID(groupName)
+				if found {
+					partyMembers, err = nk.StreamUserList(StreamModeParty, partyUUID.String(), "", d.pipeline.node, false, true)
+				}
 				if err != nil {
 					return fmt.Errorf("failed to list stream users: %w", err)
 				}
