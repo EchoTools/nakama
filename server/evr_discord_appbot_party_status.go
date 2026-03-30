@@ -17,7 +17,7 @@ func (d *DiscordAppBot) handlePartyStatus(ctx context.Context, logger runtime.Lo
 
 	nk := d.nk
 	// Check if this user is online and currently in a party.
-	groupName, partyUUID, err := GetLobbyGroupID(ctx, d.db, userID)
+	groupName, err := GetLobbyGroupID(ctx, d.db, userID)
 	if err != nil {
 		return fmt.Errorf("failed to get party group ID: %w", err)
 	}
@@ -28,6 +28,17 @@ func (d *DiscordAppBot) handlePartyStatus(ctx context.Context, logger runtime.Lo
 			Data: &discordgo.InteractionResponseData{
 				Flags:   discordgo.MessageFlagsEphemeral,
 				Content: "You do not have a party group set. use `/party group` to set one.",
+			},
+		})
+	}
+
+	partyUUID, found := d.pipeline.partyRegistry.LookupGroupPartyID(groupName)
+	if !found {
+		return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Flags:   discordgo.MessageFlagsEphemeral,
+				Content: "Your party is not currently active. A party member must be online first.",
 			},
 		})
 	}
@@ -55,11 +66,11 @@ func (d *DiscordAppBot) handlePartyStatus(ctx context.Context, logger runtime.Lo
 
 		partyStr := partyUUID.String()
 
-		var message *discordgo.Message
 		var err error
 		var members []runtime.Presence
 		var lastDiscordIDs []string
 		var memberCache = make(map[string]*discordgo.Member)
+		responded := false
 
 		updateInterval := 3 * time.Second
 		ticker := time.NewTicker(1 * time.Second)
@@ -174,7 +185,7 @@ func (d *DiscordAppBot) handlePartyStatus(ctx context.Context, logger runtime.Lo
 				}
 			}
 
-			if message == nil {
+			if !responded {
 
 				// Send the initial message
 				if err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -187,6 +198,9 @@ func (d *DiscordAppBot) handlePartyStatus(ctx context.Context, logger runtime.Lo
 					logger.Error("Failed to send interaction response", zap.Error(err))
 					return
 				}
+				responded = true
+				lastDiscordIDs = discordIDs
+				continue
 
 			} else if slices.Equal(discordIDs, lastDiscordIDs) {
 				// No changes, skip the update.
@@ -196,7 +210,7 @@ func (d *DiscordAppBot) handlePartyStatus(ctx context.Context, logger runtime.Lo
 			lastDiscordIDs = discordIDs
 
 			// Edit the message with the updated party members.
-			if message, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+			if _, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 				Content: ptr.String("Party Status"),
 				Embeds:  &embeds,
 			}); err != nil {

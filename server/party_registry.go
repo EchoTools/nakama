@@ -29,6 +29,8 @@ var ErrPartyNotFound = errors.New("party not found")
 type PartyRegistry interface {
 	Create(open bool, maxSize int, leader *rtapi.UserPresence) *PartyHandler
 	GetOrCreate(id uuid.UUID, open bool, maxSize int, leader *rtapi.UserPresence) (*PartyHandler, bool, error)
+	GetOrCreateByGroupName(groupName string, open bool, maxSize int, leader *rtapi.UserPresence) (*PartyHandler, bool, error)
+	LookupGroupPartyID(groupName string) (uuid.UUID, bool)
 	Delete(id uuid.UUID)
 
 	Join(id uuid.UUID, presences []*Presence)
@@ -55,7 +57,8 @@ type LocalPartyRegistry struct {
 	router        MessageRouter
 	node          string
 
-	parties *MapOf[uuid.UUID, *PartyHandler]
+	parties      *MapOf[uuid.UUID, *PartyHandler]
+	groupParties *MapOf[string, uuid.UUID]
 }
 
 func NewLocalPartyRegistry(logger *zap.Logger, config Config, matchmaker Matchmaker, tracker Tracker, streamManager StreamManager, router MessageRouter, node string) PartyRegistry {
@@ -68,7 +71,8 @@ func NewLocalPartyRegistry(logger *zap.Logger, config Config, matchmaker Matchma
 		router:        router,
 		node:          node,
 
-		parties: &MapOf[uuid.UUID, *PartyHandler]{},
+		parties:      &MapOf[uuid.UUID, *PartyHandler]{},
+		groupParties: &MapOf[string, uuid.UUID]{},
 	}
 }
 
@@ -103,7 +107,40 @@ func (p *LocalPartyRegistry) GetOrCreate(id uuid.UUID, open bool, maxSize int, l
 	return ph, true, nil
 }
 
+func (p *LocalPartyRegistry) GetOrCreateByGroupName(groupName string, open bool, maxSize int, leader *rtapi.UserPresence) (*PartyHandler, bool, error) {
+	// Check if there's already a party for this group name.
+	if existingID, ok := p.groupParties.Load(groupName); ok {
+		// Only return an existing party; do not recreate under a stale ID.
+		if ph, ok := p.parties.Load(existingID); ok {
+			return ph, false, nil
+		}
+		// Mapping points to a deleted party; remove it and fall through.
+		p.groupParties.Delete(groupName)
+	}
+
+	newID := uuid.Must(uuid.NewV4())
+	// Use LoadOrStore to avoid racing with another goroutine creating a party
+	// for the same group name. If we lose the race, use the winner's ID.
+	actualID, loaded := p.groupParties.LoadOrStore(groupName, newID)
+	if loaded {
+		newID = actualID
+	}
+	return p.GetOrCreate(newID, open, maxSize, leader)
+}
+
+func (p *LocalPartyRegistry) LookupGroupPartyID(groupName string) (uuid.UUID, bool) {
+	return p.groupParties.Load(groupName)
+}
+
 func (p *LocalPartyRegistry) Delete(id uuid.UUID) {
+	// Remove group name mappings first to prevent GetOrCreateByGroupName from
+	// recreating a handler under this ID during teardown.
+	p.groupParties.Range(func(name string, partyID uuid.UUID) bool {
+		if partyID == id {
+			p.groupParties.Delete(name)
+		}
+		return true
+	})
 	p.parties.Delete(id)
 }
 

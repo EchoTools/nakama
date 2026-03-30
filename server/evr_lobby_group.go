@@ -2,7 +2,6 @@ package server
 
 import (
 	"errors"
-	"sync"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/rtapi"
@@ -10,9 +9,6 @@ import (
 )
 
 type LobbyGroup struct {
-	sync.RWMutex
-	session *sessionWS
-
 	name string
 	ph   *PartyHandler
 }
@@ -52,7 +48,7 @@ func (g *LobbyGroup) List() []*PartyPresenceListItem {
 
 func (g *LobbyGroup) Size() int {
 	if g.ph == nil {
-		return 1
+		return 0
 	}
 	return g.ph.members.Size()
 }
@@ -64,16 +60,7 @@ func (g *LobbyGroup) MatchmakerAdd(sessionID, node, query string, minCount, maxC
 	return g.ph.MatchmakerAdd(sessionID, node, query, minCount, maxCount, countMultiple, stringProperties, numericProperties)
 }
 
-func (g *LobbyGroup) PartyStream() PresenceStream {
-	if g.ph == nil {
-		return PresenceStream{}
-	}
-	g.ph.RLock()
-	defer g.ph.RUnlock()
-	return g.ph.Stream
-}
-
-func JoinPartyGroup(session *sessionWS, groupName string, partyID uuid.UUID, currentMatchID MatchID) (*LobbyGroup, bool, error) {
+func JoinPartyGroup(session *sessionWS, groupName string, currentMatchID MatchID) (*LobbyGroup, bool, error) {
 
 	userPresence := &rtapi.UserPresence{
 		UserId:    session.UserID().String(),
@@ -100,23 +87,18 @@ func JoinPartyGroup(session *sessionWS, groupName string, partyID uuid.UUID, cur
 		Status:   currentMatchID.String(),
 	}
 
-	partyRegistry := session.pipeline.partyRegistry.(*LocalPartyRegistry)
+	ph, created, err := session.pipeline.partyRegistry.GetOrCreateByGroupName(groupName, true, 4, userPresence)
+	if err != nil {
+		return nil, false, err
+	}
 
-	// Check if the party already exists
-	ph, found := partyRegistry.parties.Load(partyID)
-	if !found {
-		maxSize := 4
-		open := true
-		// Create the party
-		ph = NewPartyHandler(partyRegistry.logger, partyRegistry, partyRegistry.matchmaker, partyRegistry.tracker, partyRegistry.streamManager, partyRegistry.router, partyID, partyRegistry.node, open, maxSize, userPresence)
-		partyRegistry.parties.Store(partyID, ph)
-
-	} else {
+	if !created {
 		isMember := false
 		// Check if the player is already a member of the party
 		for _, member := range ph.members.List() {
 			if member.Presence.GetUserId() == session.UserID().String() {
 				isMember = true
+				break
 			}
 		}
 
@@ -151,14 +133,10 @@ func JoinPartyGroup(session *sessionWS, groupName string, partyID uuid.UUID, cur
 		}}}
 		_ = session.Send(out, true)
 	}
-	if ph == nil {
-		return nil, false, errors.New("failed to get party handler")
-	}
 
 	lobbyGroup := &LobbyGroup{
-		session: session,
-		name:    groupName,
-		ph:      ph,
+		name: groupName,
+		ph:   ph,
 	}
 	// The player is a member of the party, they will follow the leader to lobbies.
 	isLeader := lobbyGroup.GetLeader().SessionId == session.id.String()

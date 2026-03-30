@@ -11,13 +11,6 @@ import (
 	"github.com/intinig/go-openskill/types"
 )
 
-// PartyIDSalt is used as a namespace for generating deterministic party IDs from group names
-var PartyIDSalt uuid.UUID
-
-func init() {
-	PartyIDSalt = uuid.Must(uuid.NewV4())
-}
-
 var _ runtime.Presence = &EvrMatchPresence{}
 
 // Represents identity information for a single match participant.

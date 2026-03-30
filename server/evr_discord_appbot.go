@@ -1267,7 +1267,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		"party-status": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			// Check if this user is online and currently in a party.
-			groupName, partyUUID, err := GetLobbyGroupID(ctx, d.db, userID)
+			groupName, err := GetLobbyGroupID(ctx, d.db, userID)
 			if err != nil {
 				return fmt.Errorf("failed to get party group ID: %w", err)
 			}
@@ -1278,6 +1278,17 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					Data: &discordgo.InteractionResponseData{
 						Flags:   discordgo.MessageFlagsEphemeral,
 						Content: "You do not have a party group set. use `/party group` to set one.",
+					},
+				})
+			}
+
+			partyUUID, found := d.pipeline.partyRegistry.LookupGroupPartyID(groupName)
+			if !found {
+				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: "Your party is not currently active. A party member must be online first.",
 					},
 				})
 			}
@@ -2375,7 +2386,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			// Get all party members (including the creator) before creating the match
 			// so we can set up team alignments and reservations
-			partyUserIDs := getPartyMembersForUser(ctx, nk, userID)
+			partyUserIDs := getPartyMembersForUser(ctx, nk, d.pipeline.partyRegistry, userID)
 
 			label, rttMs, err := d.handleCreateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime, partyUserIDs)
 			if err != nil {
@@ -3132,13 +3143,16 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				//logger = logger.WithField("group_id", matchmakingConfig.GroupID)
-				groupName, partyUUID, err := GetLobbyGroupID(ctx, d.db, userID)
+				groupName, err := GetLobbyGroupID(ctx, d.db, userID)
 				if err != nil {
 					return fmt.Errorf("failed to get party group ID: %w", err)
 				}
-				// Look for presences
-
-				partyMembers, err := nk.StreamUserList(StreamModeParty, partyUUID.String(), "", d.pipeline.node, false, true)
+				// Look for presences in the active party stream.
+				var partyMembers []runtime.Presence
+				partyUUID, found := d.pipeline.partyRegistry.LookupGroupPartyID(groupName)
+				if found {
+					partyMembers, err = nk.StreamUserList(StreamModeParty, partyUUID.String(), "", d.pipeline.node, false, true)
+				}
 				if err != nil {
 					return fmt.Errorf("failed to list stream users: %w", err)
 				}
