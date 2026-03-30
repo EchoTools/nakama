@@ -219,7 +219,7 @@ func (m *RemoteLogCustomizationMetricsPayload) GetCategory() string {
 	if m.ItemName == "loadout_number" {
 		return "decal"
 	}
-	if m.ItemName[:4] == "rwd_" {
+	if strings.HasPrefix(m.ItemName, "rwd_") {
 		// Reward Item.
 		s := strings.SplitN(m.ItemName, "_", 3)
 		if len(s) != 3 {

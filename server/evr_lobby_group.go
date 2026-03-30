@@ -139,7 +139,8 @@ func JoinPartyGroup(session *sessionWS, groupName string, currentMatchID MatchID
 		ph:   ph,
 	}
 	// The player is a member of the party, they will follow the leader to lobbies.
-	isLeader := lobbyGroup.GetLeader().SessionId == session.id.String()
+	leader := lobbyGroup.GetLeader()
+	isLeader := leader != nil && leader.SessionId == session.id.String()
 
 	return lobbyGroup, isLeader, nil
 }

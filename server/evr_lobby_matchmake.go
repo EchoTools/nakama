@@ -154,7 +154,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		mmInterval               = time.Duration(p.config.GetMatchmaker().IntervalSec) * time.Second
 		matchmakingTicketTimeout = time.Duration(p.config.GetMatchmaker().MaxIntervals) * mmInterval
 		timeoutTimer             = time.NewTimer(lobbyParams.MatchmakingTimeout)
-		fallbackInterval         = min(lobbyParams.FallbackTimeout, matchmakingTicketTimeout-mmInterval)
+		fallbackInterval         = max(mmInterval, min(lobbyParams.FallbackTimeout, matchmakingTicketTimeout-mmInterval))
 		fallbackTimer            = time.NewTimer(fallbackInterval)
 		currentTicket            string // Only allow one ticket at a time
 		fallbackCount            int    // Number of times the fallback has fired
