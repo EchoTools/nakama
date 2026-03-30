@@ -556,6 +556,14 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 	case *evr.LobbyPendingSessionCancel:
 		pipelineFn = p.lobbyPendingSessionCancel
 
+	// SNS Friends service
+	case *evr.SNSFriendInviteRequest:
+		pipelineFn = p.snsFriendInviteRequest
+	case *evr.SNSFriendAcceptRequest:
+		pipelineFn = p.snsFriendAcceptRequest
+	case *evr.SNSFriendRemoveRequest:
+		pipelineFn = p.snsFriendRemoveRequest
+
 	default:
 		pipelineFn = func(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 			logger.Warn("Received unhandled message", zap.Any("message", in))
