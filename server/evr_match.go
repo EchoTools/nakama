@@ -1038,19 +1038,19 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 			isPublicMatch := state.Mode == evr.ModeArenaPublic || state.Mode == evr.ModeCombatPublic
 
-			if isPublicMatch {
-				// Close public matches on round over
-				if update.MatchOver && state.Open {
-					logger.Info("Received round over for public match, locking match.")
-
-					state.Open = false
-
-					if state.LockedAt == nil {
-						now := time.Now().UTC()
-						state.LockedAt = &now
-						logger.Info("Locking public match on round over")
-					}
+			if isPublicMatch && update.GameStatus == GameStatusPostMatch && state.Open {
+				logger.Info("Received post-match for public match, locking match.")
+				state.Open = false
+				if state.LockedAt == nil {
+					now := time.Now().UTC()
+					state.LockedAt = &now
+					logger.Info("Locking public match on post-match")
 				}
+			}
+
+			if update.GameStatus != GameStatusUnspecified {
+				state.GameStatus = update.GameStatus
+				updateLabel = true
 			}
 
 			if state.GameState != nil {
@@ -1242,6 +1242,12 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	// Update the game clock every three seconds
 	if tick%(state.tickRate*3) == 0 && state.GameState != nil {
 		state.GameState.Update(state.goals)
+		updateLabel = true
+	}
+
+	// Transition from PRE_MATCH to PLAYING after 60 seconds
+	if state.GameStatus == GameStatusPreMatch && state.Started() && time.Since(state.StartTime) >= 60*time.Second {
+		state.GameStatus = GameStatusPlaying
 		updateLabel = true
 	}
 
