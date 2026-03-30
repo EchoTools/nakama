@@ -254,18 +254,26 @@ func (s *MatchLabel) GetGroupID() uuid.UUID {
 }
 
 func (s *MatchLabel) GetEndpoint() evr.Endpoint {
+	if s.GameServer == nil {
+		return evr.Endpoint{}
+	}
 	return s.GameServer.Endpoint
 }
 
 func (s *MatchLabel) GetEntrantConnectMessage(role int, disableEncryption bool, disableMAC bool) *evr.LobbySessionSuccessv5 {
-	return evr.NewLobbySessionSuccessv5(s.Mode, s.ID.UUID, s.GetGroupID(), s.GameServer.Endpoint, int16(role), disableEncryption, disableMAC).Version5()
+	return evr.NewLobbySessionSuccessv5(s.Mode, s.ID.UUID, s.GetGroupID(), s.GetEndpoint(), int16(role), disableEncryption, disableMAC).Version5()
 }
 
 func (s *MatchLabel) MetricsTags() map[string]string {
 
 	operatorUsername := ""
 	if s.server != nil {
-		operatorUsername = strings.TrimPrefix("broadcaster:", s.server.GetUsername())
+		operatorUsername = strings.TrimPrefix(s.server.GetUsername(), "broadcaster:")
+	}
+
+	operatorID := ""
+	if s.GameServer != nil {
+		operatorID = s.GameServer.OperatorID.String()
 	}
 
 	tags := map[string]string{
@@ -273,11 +281,27 @@ func (s *MatchLabel) MetricsTags() map[string]string {
 		"level":             s.Level.String(),
 		"type":              s.LobbyType.String(),
 		"group_id":          s.GetGroupID().String(),
-		"operator_id":       s.GameServer.OperatorID.String(),
+		"operator_id":       operatorID,
 		"operator_username": operatorUsername,
 	}
 
 	return tags
+}
+
+func (l *MatchLabel) publicGameServer() *GameServerPresence {
+	if l.GameServer == nil {
+		return &GameServerPresence{}
+	}
+	return &GameServerPresence{
+		OperatorID:    l.GameServer.OperatorID,
+		GroupIDs:      l.GameServer.GroupIDs,
+		VersionLock:   l.GameServer.VersionLock,
+		DefaultRegion: l.GameServer.DefaultRegion,
+		Tags:          l.GameServer.Tags,
+		Features:      l.GameServer.Features,
+		Region:        l.GameServer.Region,
+		CountryCode:   l.GameServer.CountryCode,
+	}
 }
 
 func (s *MatchLabel) ratingMu() float64 {
@@ -550,18 +574,10 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 		PlayerCount:      l.PlayerCount,
 		PlayerLimit:      l.PlayerLimit,
 		TeamSize:         l.TeamSize,
-		GameServer: &GameServerPresence{
-			OperatorID:    l.GameServer.OperatorID,
-			GroupIDs:      l.GameServer.GroupIDs,
-			VersionLock:   l.GameServer.VersionLock,
-			DefaultRegion: l.GameServer.DefaultRegion,
-			Tags:          l.GameServer.Tags,
-			Features:      l.GameServer.Features,
-			Region:        l.GameServer.Region,
-			CountryCode:   l.GameServer.CountryCode,
-		},
+		GameServer: l.publicGameServer(),
 		Players:  make([]PlayerInfo, 0),
-		RatingMu: l.RatingMu,
+		RatingMu:   l.RatingMu,
+		GameStatus: l.GameStatus,
 	}
 	if l.LobbyType == PrivateLobby || l.LobbyType == UnassignedLobby {
 		// Set the last bytes to FF to hide the ID
