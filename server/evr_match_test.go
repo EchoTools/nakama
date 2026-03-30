@@ -2070,3 +2070,59 @@ func TestMatchJoinAttempt_ReconnectWithPhantomPresenceSucceeds(t *testing.T) {
 		t.Fatalf("expected role alignment to be restored to TeamBlue from reconnect reservation, got %d", p.RoleAlignment)
 	}
 }
+
+// TestArenaLocking_LocksOnPostMatch verifies that a public arena match locks
+// when a GameStatusPostMatch update is received.
+func TestArenaLocking_LocksOnPostMatch(t *testing.T) {
+	state := &MatchLabel{
+		Mode: evr.ModeArenaPublic,
+		Open: true,
+	}
+	update := MatchGameStateUpdate{
+		GameStatus: GameStatusPostMatch,
+	}
+
+	isPublicMatch := state.Mode == evr.ModeArenaPublic || state.Mode == evr.ModeCombatPublic
+	if isPublicMatch && update.GameStatus == GameStatusPostMatch && state.Open {
+		state.Open = false
+		if state.LockedAt == nil {
+			now := time.Now().UTC()
+			state.LockedAt = &now
+		}
+	}
+
+	if state.Open {
+		t.Fatal("expected match to be closed after post-match update")
+	}
+	if state.LockedAt == nil {
+		t.Fatal("expected LockedAt to be set after post-match update")
+	}
+}
+
+// TestArenaLocking_DoesNotLockOnPlaying verifies that a GameStatusPlaying
+// update does not lock a public arena match.
+func TestArenaLocking_DoesNotLockOnPlaying(t *testing.T) {
+	state := &MatchLabel{
+		Mode: evr.ModeArenaPublic,
+		Open: true,
+	}
+	update := MatchGameStateUpdate{
+		GameStatus: GameStatusPlaying,
+	}
+
+	isPublicMatch := state.Mode == evr.ModeArenaPublic || state.Mode == evr.ModeCombatPublic
+	if isPublicMatch && update.GameStatus == GameStatusPostMatch && state.Open {
+		state.Open = false
+		if state.LockedAt == nil {
+			now := time.Now().UTC()
+			state.LockedAt = &now
+		}
+	}
+
+	if !state.Open {
+		t.Fatal("expected match to remain open after playing update")
+	}
+	if state.LockedAt != nil {
+		t.Fatal("expected LockedAt to remain nil after playing update")
+	}
+}

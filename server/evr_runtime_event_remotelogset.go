@@ -209,6 +209,8 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			}
 
 		case *evr.RemoteLogSessionStarted:
+			update, _ = updates.LoadOrStore(msg.SessionUUID(), &MatchGameStateUpdate{})
+			update.GameStatus = GameStatusPreMatch
 
 		case *evr.RemoteLogPauseSettings:
 			if !s.XPID.IsValid() {
@@ -405,11 +407,13 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 		case *evr.RemoteLogPostMatchMatchStats:
 			update, _ = updates.LoadOrStore(msg.SessionUUID(), &MatchGameStateUpdate{})
 			update.MatchOver = true
+			update.GameStatus = GameStatusPostMatch
 			postMatchMessages[msg.SessionUUID()] = append(postMatchMessages[msg.SessionUUID()], msg)
 
 		case *evr.RemoteLogPostMatchTypeStats:
 			update, _ = updates.LoadOrStore(msg.SessionUUID(), &MatchGameStateUpdate{})
 			update.MatchOver = true
+			update.GameStatus = GameStatusPostMatch
 			postMatchMessages[msg.SessionUUID()] = append(postMatchMessages[msg.SessionUUID()], msg)
 
 		case *evr.RemoteLogPostMatchMatchTypeXPLevel:
