@@ -12,22 +12,38 @@ import (
 )
 
 // resolveEvrIDToUserID looks up a Nakama user UUID from an EvrId AccountId.
-// It constructs the full EvrId using the caller's PlatformCode (from session params),
-// then queries the user_device table where the EvrId string is stored as a device ID.
+// It tries the caller's PlatformCode first, then falls back to all known platforms
+// to support cross-platform friend operations.
 func (p *EvrPipeline) resolveEvrIDToUserID(ctx context.Context, platformCode evr.PlatformCode, accountID uint64) (uuid.UUID, error) {
-	evrID := evr.EvrId{PlatformCode: platformCode, AccountId: accountID}
-	deviceID := evrID.String()
-
-	var dbUserID string
-	err := p.db.QueryRowContext(ctx, "SELECT user_id FROM user_device WHERE id = $1", deviceID).Scan(&dbUserID)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return uuid.Nil, fmt.Errorf("user not found for device %s", deviceID)
+	// Try the caller's platform first, then all others.
+	platforms := []evr.PlatformCode{platformCode}
+	for _, pc := range []evr.PlatformCode{evr.OVR, evr.OVR_ORG, evr.STM, evr.DMO, evr.PSN, evr.XBX, evr.BOT, evr.TEN} {
+		if pc != platformCode {
+			platforms = append(platforms, pc)
 		}
-		return uuid.Nil, fmt.Errorf("device lookup: %w", err)
 	}
 
-	return uuid.FromStringOrNil(dbUserID), nil
+	for _, pc := range platforms {
+		evrID := evr.EvrId{PlatformCode: pc, AccountId: accountID}
+		deviceID := evrID.String()
+
+		var dbUserID string
+		err := p.db.QueryRowContext(ctx, "SELECT user_id FROM user_device WHERE id = $1", deviceID).Scan(&dbUserID)
+		if err == sql.ErrNoRows {
+			continue
+		}
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("device lookup: %w", err)
+		}
+
+		uid, err := uuid.FromString(dbUserID)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("corrupt user_id in user_device for %s: %w", deviceID, err)
+		}
+		return uid, nil
+	}
+
+	return uuid.Nil, fmt.Errorf("user not found for account id %d", accountID)
 }
 
 // sendEVRMessageByUserID sends an EVR message to a user's login session if they're online.
@@ -136,24 +152,23 @@ func (p *EvrPipeline) snsFriendInviteRequest(ctx context.Context, logger *zap.Lo
 	}
 
 	// Check if AddFriends actually accepted an existing incoming invite (mutual add).
-	// Re-read the edge to see if state is now 0 (friends).
-	updatedFriends, err := ListFriends(ctx, logger, p.db, p.nk.statusRegistry, userID, 1, wrapperspb.Int32(FriendStateFriends), "")
-	if err == nil {
-		for _, f := range updatedFriends.Friends {
-			if f.User.Id == targetUserID.String() {
-				// Mutual add — both users are now friends.
-				if err := SendEVRMessages(session, false, &evr.SNSFriendAcceptSuccess{
-					FriendID: msg.TargetUserID,
-				}); err != nil {
-					logger.Warn("Failed to send accept success", zap.Error(err))
-				}
-				// Notify the other user.
-				_ = p.sendEVRMessageByUserID(ctx, logger, targetUserID, &evr.SNSFriendAcceptNotify{
-					FriendID: params.xpID.AccountId,
-				})
-				return nil
-			}
+	// Query the specific edge between these two users to see if state is now 0 (friends).
+	var edgeState int32
+	err = p.db.QueryRowContext(ctx,
+		"SELECT state FROM user_edge WHERE source_id = $1 AND destination_id = $2",
+		userID, targetUserID).Scan(&edgeState)
+	if err == nil && edgeState == FriendStateFriends {
+		// Mutual add — both users are now friends.
+		if err := SendEVRMessages(session, false, &evr.SNSFriendAcceptSuccess{
+			FriendID: msg.TargetUserID,
+		}); err != nil {
+			logger.Warn("Failed to send accept success", zap.Error(err))
 		}
+		// Notify the other user.
+		_ = p.sendEVRMessageByUserID(ctx, logger, targetUserID, &evr.SNSFriendAcceptNotify{
+			FriendID: params.xpID.AccountId,
+		})
+		return nil
 	}
 
 	// Normal invite sent.
@@ -267,7 +282,9 @@ func (p *EvrPipeline) snsFriendRemoveRequest(ctx context.Context, logger *zap.Lo
 	friendsList, err := ListFriends(ctx, logger, p.db, p.nk.statusRegistry, userID, 1000, nil, "")
 	if err != nil {
 		logger.Error("Failed to list friends", zap.Error(err))
-		return nil
+		return SendEVRMessages(session, false, &evr.SNSFriendRemoveResponse{
+			FriendID: msg.TargetUserID,
+		})
 	}
 
 	var currentState int32 = -1
@@ -285,6 +302,9 @@ func (p *EvrPipeline) snsFriendRemoveRequest(ctx context.Context, logger *zap.Lo
 		// Remove an established friend.
 		if err := DeleteFriends(ctx, logger, p.db, userID, []string{targetIDStr}); err != nil {
 			logger.Error("Failed to delete friend", zap.Error(err))
+			return SendEVRMessages(session, false, &evr.SNSFriendRemoveResponse{
+				FriendID: msg.TargetUserID,
+			})
 		}
 		if err := SendEVRMessages(session, false, &evr.SNSFriendRemoveResponse{
 			FriendID: msg.TargetUserID,
@@ -300,6 +320,9 @@ func (p *EvrPipeline) snsFriendRemoveRequest(ctx context.Context, logger *zap.Lo
 		// Withdraw a sent invite.
 		if err := DeleteFriends(ctx, logger, p.db, userID, []string{targetIDStr}); err != nil {
 			logger.Error("Failed to withdraw invite", zap.Error(err))
+			return SendEVRMessages(session, false, &evr.SNSFriendRemoveResponse{
+				FriendID: msg.TargetUserID,
+			})
 		}
 		if err := SendEVRMessages(session, false, &evr.SNSFriendRemoveResponse{
 			FriendID: msg.TargetUserID,
@@ -315,6 +338,9 @@ func (p *EvrPipeline) snsFriendRemoveRequest(ctx context.Context, logger *zap.Lo
 		// Reject an incoming invite.
 		if err := DeleteFriends(ctx, logger, p.db, userID, []string{targetIDStr}); err != nil {
 			logger.Error("Failed to reject invite", zap.Error(err))
+			return SendEVRMessages(session, false, &evr.SNSFriendRemoveResponse{
+				FriendID: msg.TargetUserID,
+			})
 		}
 		if err := SendEVRMessages(session, false, &evr.SNSFriendRemoveResponse{
 			FriendID: msg.TargetUserID,
