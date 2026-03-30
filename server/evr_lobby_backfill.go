@@ -997,7 +997,7 @@ func (b *PostMatchmakerBackfill) executeBackfillResult(ctx context.Context, logg
 		go func(idx int, ent *EvrMatchPresence) {
 			defer wg.Done()
 			if err := LobbyJoinEntrants(logger, b.matchRegistry, b.tracker, sessions[idx], serverSession, result.Match.Label, ent); err != nil {
-				logger.Warn("Failed to join entrant to backfill match", zap.Error(err), zap.String("match_id", result.Match.Label.ID.String()), zap.String("user_id", ent.GetUserId()))
+				logger.Info("Failed to join entrant to backfill match", zap.Error(err), zap.String("match_id", result.Match.Label.ID.String()), zap.String("user_id", ent.GetUserId()))
 			} else {
 				mu.Lock()
 				successCount++
