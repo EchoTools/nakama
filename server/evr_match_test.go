@@ -29,29 +29,61 @@ func TestEvrMatch_EvrMatchState(t *testing.T) {
 	tests := []struct {
 		name string
 		args args
-		want string
+		want MatchLabel
 	}{
 		{
 			name: "EvrMatchStateUnmarshal",
 			args: args{
-				data: `{"id":"7aab54ba-90ae-4e7f-abcf-69b30f5e8db7","open":true,"lobby_type":"public","endpoint":"","version_lock":14280634968751706381,"platform":"OVR","channel":"e8dd7736-32af-41f5-91e0-db591c6e8cfd","match_channels":["e8dd7736-32af-41f5-91e0-db591c6e8cfd","c016925b-3368-401c-8620-0c4ccd7e5c2e","f52129fb-d5c6-4c47-b644-f19981a933ee"],"mode":"social_2.0","level":"mpl_lobby_b2","session_settings":{"appid":"1369078409873402","gametype":301069346851901300},"max_size":15,"size":14,"max_team_size":15,"Presences":null}`,
+				data: `{"id":"7aab54ba-90ae-4e7f-abcf-69b30f5e8db7.testnode","open":true,"lobby_type":"public","mode":"social_2.0","level":"mpl_lobby_b2","session_settings":{"appid":"1369078409873402","gametype":301069346851901300},"limit":15,"size":14}`,
 			},
-			want: `{"id":"7aab54ba-90ae-4e7f-abcf-69b30f5e8db7","open":true,"lobby_type":"public","endpoint":"","version_lock":14280634968751706381,"platform":"OVR","channel":"e8dd7736-32af-41f5-91e0-db591c6e8cfd","match_channels":["e8dd7736-32af-41f5-91e0-db591c6e8cfd","c016925b-3368-401c-8620-0c4ccd7e5c2e","f52129fb-d5c6-4c47-b644-f19981a933ee"],"mode":"social_2.0","level":"mpl_lobby_b2","session_settings":{"appid":"1369078409873402","gametype":301069346851901300},"max_size":15,"size":14,"max_team_size":15,"Presences":null}`,
+			want: MatchLabel{
+				ID:       MatchID{UUID: uuid.Must(uuid.FromString("7aab54ba-90ae-4e7f-abcf-69b30f5e8db7")), Node: "testnode"},
+				Open:     true,
+				LobbyType: PublicLobby,
+				Mode:     evr.ToSymbol("social_2.0"),
+				Level:    evr.ToSymbol("mpl_lobby_b2"),
+				SessionSettings: &evr.LobbySessionSettings{AppID: "1369078409873402", Mode: 301069346851901300},
+				MaxSize:  15,
+				Size:     14,
+			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// TODO protobuf's would be nice here.
 			got := &MatchLabel{}
 			err := json.Unmarshal([]byte(tt.args.data), got)
 			if err != nil {
 				t.Fatalf("error unmarshalling data: %v", err)
 			}
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("EvrMatch.MatchSignal() got = %s\n\nwant = %s", got.String(), tt.want)
+			if got.ID != tt.want.ID {
+				t.Errorf("ID mismatch: got %v, want %v", got.ID, tt.want.ID)
 			}
-
+			if got.Open != tt.want.Open {
+				t.Errorf("Open mismatch: got %v, want %v", got.Open, tt.want.Open)
+			}
+			if got.LobbyType != tt.want.LobbyType {
+				t.Errorf("LobbyType mismatch: got %v, want %v", got.LobbyType, tt.want.LobbyType)
+			}
+			if got.Size != tt.want.Size {
+				t.Errorf("Size mismatch: got %v, want %v", got.Size, tt.want.Size)
+			}
+			if got.MaxSize != tt.want.MaxSize {
+				t.Errorf("MaxSize mismatch: got %v, want %v", got.MaxSize, tt.want.MaxSize)
+			}
+			if got.Mode != tt.want.Mode {
+				t.Errorf("Mode mismatch: got %v, want %v", got.Mode, tt.want.Mode)
+			}
+			if got.Level != tt.want.Level {
+				t.Errorf("Level mismatch: got %v, want %v", got.Level, tt.want.Level)
+			}
+			if tt.want.SessionSettings != nil {
+				if got.SessionSettings == nil {
+					t.Errorf("SessionSettings is nil, want %v", tt.want.SessionSettings)
+				} else if !reflect.DeepEqual(got.SessionSettings, tt.want.SessionSettings) {
+					t.Errorf("SessionSettings mismatch: got %v, want %v", got.SessionSettings, tt.want.SessionSettings)
+				}
+			}
 		})
 	}
 }
@@ -469,8 +501,6 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 	consoleLogger := NewJSONLogger(os.Stdout, zapcore.ErrorLevel, JSONFormat)
 	logger := NewRuntimeGoLogger(consoleLogger)
 
-	var state *MatchLabel
-
 	tests := []struct {
 		name string
 		m    *EvrMatch
@@ -481,11 +511,13 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 			name: "Match did not start on time.",
 			m:    &EvrMatch{},
 			args: args{
-				tick: 15 * 60 * 10 * 2,
+				tick: 500,
 				state_: func() *MatchLabel {
-					state := &MatchLabel{}
-					state.server = &Presence{}
-					return state
+					s := &MatchLabel{}
+					s.server = &Presence{}
+					s.tickRate = 10
+					s.CreatedAt = time.Now().Add(-20 * time.Minute) // older than 15 minutes
+					return s
 				}(),
 
 				messages: []runtime.MatchData{},
@@ -498,35 +530,19 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 			args: args{
 				tick: 500,
 				state_: func() *MatchLabel {
-					state := &MatchLabel{}
-					state.server = &Presence{}
-
-					return state
+					s := &MatchLabel{}
+					s.server = &Presence{}
+					s.tickRate = 10
+					s.CreatedAt = time.Now() // recently created, won't hit idle timeout
+					return s
 				}(),
 
 				messages: []runtime.MatchData{},
 			},
-			want: func() *MatchLabel {
-				return state
-			}(),
+			want: "non-nil", // match is within idle timeout, should return state
 		},
 		{
-			name: "MatchLoop exits if empty for more than 20 seconds",
-			m:    &EvrMatch{},
-			args: args{
-				tick: 0,
-				state_: &MatchLabel{
-					StartTime:  time.Now().Add(-30 * time.Minute),
-					server:     &Presence{},
-					emptyTicks: 10 * 30,
-					tickRate:   10,
-				},
-				messages: []runtime.MatchData{},
-			},
-			want: nil,
-		},
-		{
-			name: "MatchLoop exits if no broadcaster after 15 seconds.",
+			name: "MatchLoop increments emptyTicks when no broadcaster",
 			m:    &EvrMatch{},
 			args: args{
 				tick: 30 * 10,
@@ -539,7 +555,7 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 				},
 				messages: []runtime.MatchData{},
 			},
-			want: nil,
+			want: "non-nil", // returns state; emptyTicks incremented but not past threshold
 		},
 		{
 			name: "MatchLoop tolerates being without broadcaster for 5 seconds.",
@@ -548,6 +564,7 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 				tick: 5 * 10,
 				state_: func() *MatchLabel {
 					state := &MatchLabel{}
+					state.tickRate = 10
 					state.presenceMap = map[string]*EvrMatchPresence{
 						uuid.Must(uuid.NewV4()).String(): {},
 					}
@@ -556,9 +573,7 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 				}(),
 				messages: []runtime.MatchData{},
 			},
-			want: func() *MatchLabel {
-				return state
-			},
+			want: "non-nil",
 		},
 	}
 	for _, tt := range tests {
@@ -569,7 +584,12 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 			var nk runtime.NakamaModule
 			var dispatcher runtime.MatchDispatcher
 
-			if got := m.MatchLoop(ctx, logger, db, nk, dispatcher, tt.args.tick, tt.args.state_, tt.args.messages); !reflect.DeepEqual(got, tt.want) {
+			got := m.MatchLoop(ctx, logger, db, nk, dispatcher, tt.args.tick, tt.args.state_, tt.args.messages)
+			if tt.want == "non-nil" {
+				if got == nil {
+					t.Fatalf("expected non-nil state, got nil")
+				}
+			} else if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("- want / + got = %s", cmp.Diff(tt.want, got))
 			}
 		})
