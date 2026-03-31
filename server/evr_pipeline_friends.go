@@ -86,8 +86,11 @@ func (p *EvrPipeline) snsFriendInviteRequest(ctx context.Context, logger *zap.Lo
 
 	params, ok := LoadParams(ctx)
 	if !ok {
-		logger.Error("Failed to load session parameters")
-		return nil
+		_ = SendEVRMessages(session, false, &evr.SNSFriendInviteFailure{
+			FriendID:   msg.TargetUserID,
+			StatusCode: evr.FriendInviteErrorBadRequest,
+		})
+		return fmt.Errorf("failed to load session parameters")
 	}
 
 	userID := session.UserID()
@@ -197,8 +200,10 @@ func (p *EvrPipeline) snsFriendAcceptRequest(ctx context.Context, logger *zap.Lo
 
 	params, ok := LoadParams(ctx)
 	if !ok {
-		logger.Error("Failed to load session parameters")
-		return nil
+		_ = SendEVRMessages(session, false, &evr.SNSFriendRemoveResponse{
+			FriendID: msg.TargetUserID,
+		})
+		return fmt.Errorf("failed to load session parameters")
 	}
 
 	userID := session.UserID()
@@ -283,8 +288,11 @@ func (p *EvrPipeline) snsFriendRemoveRequest(ctx context.Context, logger *zap.Lo
 
 	params, ok := LoadParams(ctx)
 	if !ok {
-		logger.Error("Failed to load session parameters")
-		return nil
+		_ = SendEVRMessages(session, false, &evr.SNSFriendAcceptFailure{
+			FriendID:   msg.TargetUserID,
+			StatusCode: evr.FriendAcceptErrorNotFound,
+		})
+		return fmt.Errorf("failed to load session parameters")
 	}
 
 	userID := session.UserID()

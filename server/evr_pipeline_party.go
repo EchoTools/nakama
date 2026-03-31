@@ -274,11 +274,15 @@ func (p *EvrPipeline) snsPartyJoinRequest(ctx context.Context, logger *zap.Logge
 		return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: msg.PartyID, ErrorCode: 2})
 	}
 
-	if autoJoin {
-		if err := p.snsPartyTrackAndJoin(ctx, logger, session, partyUUID, msg.PartyID, params); err != nil {
-			logger.Error("Failed to track party join", zap.Error(err))
-			return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: msg.PartyID, ErrorCode: 1})
-		}
+	if !autoJoin {
+		// Join request is pending approval — do not send success or notify yet.
+		logger.Info("Party join request pending approval", zap.Uint64("party_id", msg.PartyID))
+		return nil
+	}
+
+	if err := p.snsPartyTrackAndJoin(ctx, logger, session, partyUUID, msg.PartyID, params); err != nil {
+		logger.Error("Failed to track party join", zap.Error(err))
+		return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: msg.PartyID, ErrorCode: 1})
 	}
 
 	ph, ok := p.nk.partyRegistry.Get(partyUUID)
@@ -554,10 +558,14 @@ func (p *EvrPipeline) snsPartyRespondToInviteRequest(ctx context.Context, logger
 		return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: snsPartyID, ErrorCode: 2})
 	}
 
-	if autoJoin {
-		if err := p.snsPartyTrackAndJoin(ctx, logger, session, partyUUID, snsPartyID, params); err != nil {
-			return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: snsPartyID, ErrorCode: 1})
-		}
+	if !autoJoin {
+		// Join request is pending approval — do not send success or notify yet.
+		logger.Info("Party join via invite pending approval", zap.Uint64("party_id", snsPartyID))
+		return nil
+	}
+
+	if err := p.snsPartyTrackAndJoin(ctx, logger, session, partyUUID, snsPartyID, params); err != nil {
+		return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: snsPartyID, ErrorCode: 1})
 	}
 
 	ph, ok := p.nk.partyRegistry.Get(partyUUID)
