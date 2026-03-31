@@ -56,7 +56,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	var lobbyGroup *LobbyGroup
 
-	if lobbyParams.PartyGroupName != "" {
+	if lobbyParams.PartyGroupName != "" && lobbyParams.PartyGroupName != "tablet" {
 		var err error
 		var isLeader bool
 		var memberSessionIDs []uuid.UUID

@@ -31,6 +31,7 @@ type PartyRegistry interface {
 	GetOrCreate(id uuid.UUID, open bool, maxSize int, leader *rtapi.UserPresence) (*PartyHandler, bool, error)
 	GetOrCreateByGroupName(groupName string, open bool, maxSize int, leader *rtapi.UserPresence) (*PartyHandler, bool, error)
 	LookupGroupPartyID(groupName string) (uuid.UUID, bool)
+	Get(id uuid.UUID) (*PartyHandler, bool)
 	Delete(id uuid.UUID)
 
 	Join(id uuid.UUID, presences []*Presence)
@@ -130,6 +131,10 @@ func (p *LocalPartyRegistry) GetOrCreateByGroupName(groupName string, open bool,
 
 func (p *LocalPartyRegistry) LookupGroupPartyID(groupName string) (uuid.UUID, bool) {
 	return p.groupParties.Load(groupName)
+}
+
+func (p *LocalPartyRegistry) Get(id uuid.UUID) (*PartyHandler, bool) {
+	return p.parties.Load(id)
 }
 
 func (p *LocalPartyRegistry) Delete(id uuid.UUID) {

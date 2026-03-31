@@ -290,7 +290,7 @@ func (s *MatchLabel) MetricsTags() map[string]string {
 
 func (l *MatchLabel) publicGameServer() *GameServerPresence {
 	if l.GameServer == nil {
-		return &GameServerPresence{}
+		return nil
 	}
 	return &GameServerPresence{
 		OperatorID:    l.GameServer.OperatorID,

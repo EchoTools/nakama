@@ -235,6 +235,88 @@ func NewMessageFromHash(hash uint64) Message {
 		return &SNSPartyLockNotify{}
 	case 0xd8cfd3795010481f:
 		return &SNSPartyUnlockNotify{}
+	// SNS Party messages — additional requests
+	case 0x0b7bd21332523994:
+		return &SNSPartyCreateRequest{}
+	case 0xdee761a021a5278a:
+		return &SNSPartyUpdateRequest{}
+	case 0x4edeeb8ddecc8736:
+		return &SNSPartyUpdateMemberRequest{}
+	case 0xd8cbc44959e25da8:
+		return &SNSPartyInviteListRefreshRequest{}
+	// SNS Party messages — additional responses/notifications
+	case 0x0b7ac20124523993:
+		return &SNSPartyCreateSuccess{}
+	case 0x0b6fd60b2b423885:
+		return &SNSPartyCreateFailure{}
+	case 0xcc38103e64879e53:
+		return &SNSPartyJoinNotify{}
+	case 0xb76f0fffb05a9ea7:
+		return &SNSPartyLeaveFailure{}
+	case 0xfaf46bf94f917d63:
+		return &SNSPartyKickSuccess{}
+	case 0xfae17ff340817c75:
+		return &SNSPartyKickFailure{}
+	case 0x518453df9e6a6941:
+		return &SNSPartyPassSuccess{}
+	case 0x519147d5917a6857:
+		return &SNSPartyPassFailure{}
+	case 0xc2469ab66ff3e16d:
+		return &SNSPartyLockSuccess{}
+	case 0xc2538ebc60e3e07b:
+		return &SNSPartyLockFailure{}
+	case 0x5a4f899239a3d703:
+		return &SNSPartyUnlockSuccess{}
+	case 0x5a5a9d9836b3d615:
+		return &SNSPartyUnlockFailure{}
+	case 0x218f721f09026dab:
+		return &SNSPartyInviteNotify{}
+	case 0x685a5fb8447b1155:
+		return &SNSPartyInviteListResponse{}
+	case 0xdee671b237a5278d:
+		return &SNSPartyUpdateSuccess{}
+	case 0xdef365b838b5269b:
+		return &SNSPartyUpdateFailure{}
+	case 0x23c834cb3bc6ecf5:
+		return &SNSPartyUpdateNotify{}
+	case 0x4edffb9fc8cc8731:
+		return &SNSPartyUpdateMemberSuccess{}
+	case 0x4ecaef95c7dc8627:
+		return &SNSPartyUpdateMemberFailure{}
+	case 0x451eb6ca40dde289:
+		return &SNSPartyUpdateMemberNotify{}
+	// SNS Friends messages — client requests
+	case 0x7f0d7a28de3c6f70:
+		return &SNSFriendInviteRequest{}
+	case 0x1bbcb7e810af4620:
+		return &SNSFriendAcceptRequest{}
+	case 0x78908988b7fe6db4:
+		return &SNSFriendRemoveRequest{}
+	// SNS Friends messages — server responses/notifications
+	case 0xa78aeb2a4e89b10b:
+		return &SNSFriendListResponse{}
+	case 0x26a19dc4d2d5579d:
+		return &SNSFriendStatusNotify{}
+	case 0x7f0c6a3ac83c6f77:
+		return &SNSFriendInviteSuccess{}
+	case 0x7f197e30c72c6e61:
+		return &SNSFriendInviteFailure{}
+	case 0xca09b0b36bd981b7:
+		return &SNSFriendInviteNotify{}
+	case 0x1bbda7fa06af4627:
+		return &SNSFriendAcceptSuccess{}
+	case 0x1ba8b3f009bf4731:
+		return &SNSFriendAcceptFailure{}
+	case 0xc237c84c31d3ae05:
+		return &SNSFriendAcceptNotify{}
+	case 0xc2bf83a08ea3a955:
+		return &SNSFriendRemoveResponse{}
+	case 0xe06972f49cd72265:
+		return &SNSFriendRemoveNotify{}
+	case 0x191aa30801ec6d03:
+		return &SNSFriendWithdrawnNotify{}
+	case 0xb9b86c0ce8e8d0c1:
+		return &SNSFriendRejectNotify{}
 	default:
 		return nil
 	}
