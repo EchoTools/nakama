@@ -10,7 +10,7 @@ import (
 // Three binary payload formats exist for outgoing (client → server):
 //
 //   0x28-byte "SNSFriendsActionPayload" (RoutingID + LocalUserUUID + SessionGUID + TargetUserID):
-//     - SNSFriendInviteRequest (may append a name string for add-by-name)
+//     - SNSFriendInviteRequest
 //     - SNSFriendAcceptRequest
 //     - SNSFriendRemoveRequest
 //
@@ -54,9 +54,7 @@ const (
 // 0x28-byte outgoing messages (client → server)
 // ---------------------------------------------------------------------------
 
-// SNSFriendInviteRequest is sent to invite a user as a friend (by ID or by name).
-// When adding by name, TargetUserID is 0 and the name string is appended after
-// the fixed payload.
+// SNSFriendInviteRequest is sent to invite a user as a friend by account ID.
 type SNSFriendInviteRequest struct {
 	RoutingID     uint64
 	LocalUserUUID [16]byte
