@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/atomic"
 )
@@ -52,6 +53,9 @@ type SessionParameters struct {
 	gameModeSuspensionsByGroupID ActiveGuildEnforcements          // The active suspension records
 	enforcementUserIDs           []string                         // User IDs (self + alts) used for enforcement journal queries
 	ignoreDisabledAlternates     bool                             // Ignore disabled
+
+	currentPartyID    uuid.UUID // Nakama party UUID the user is currently in (SNS party)
+	currentSNSPartyID uint64    // SNS wire party ID
 }
 
 func (s SessionParameters) UserID() string {
