@@ -395,6 +395,25 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
+	// Look up slot reservation BEFORE the capacity check.
+	// Reservations are counted in Size (via rebuildCache), so consuming one
+	// frees a slot. Without this ordering, a full lobby rejects the join
+	// at the OpenSlots gate before the reservation lookup is reached.
+	// First try by session ID (fast path). If that misses — e.g. the follower
+	// disconnected and reconnected with a new session — fall back to user ID.
+	var slotReservationPresence *EvrMatchPresence
+	if e, found := state.LoadAndDeleteReservation(meta.Presence.GetSessionId()); found {
+		slotReservationPresence = e
+	} else if e, found := state.LoadAndDeleteReservationByUserID(meta.Presence.GetUserId()); found {
+		slotReservationPresence = e
+	}
+	if slotReservationPresence != nil {
+		meta.Presence.PartyID = slotReservationPresence.PartyID
+		meta.Presence.RoleAlignment = slotReservationPresence.RoleAlignment
+		state.rebuildCache()
+		logger = logger.WithField("has_reservation", true)
+	}
+
 	// Ensure the match has enough slots available.
 	// Reconnecting users can reclaim their own reconnect reservation slot.
 	availableSlots := state.OpenSlots()
@@ -410,15 +429,6 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		delete(state.reconnectReservations, meta.Presence.GetUserId())
 		state.rebuildCache()
 		consumeReconnectReservation = true
-	}
-
-	// If this is a reservation, load the reservation
-	if e, found := state.LoadAndDeleteReservation(meta.Presence.GetSessionId()); found {
-		meta.Presence.PartyID = e.PartyID
-		meta.Presence.RoleAlignment = e.RoleAlignment
-
-		state.rebuildCache()
-		logger = logger.WithField("has_reservation", true)
 	}
 
 	// If this player has a team alignment, load it
