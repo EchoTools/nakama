@@ -2244,3 +2244,125 @@ func TestSlotReservation_ExpiredReservationNotReturnedByUserID(t *testing.T) {
 		t.Error("Expired reservation should have been cleaned up")
 	}
 }
+
+// TestMatchJoinAttempt_PartyFollowerReconnectFindsReservation exercises the full
+// MatchJoinAttempt flow: leader joins creating a reservation for a follower,
+// lobby fills to capacity, then the follower reconnects with a new session ID.
+// The join must succeed via user-ID reservation fallback.
+func TestMatchJoinAttempt_PartyFollowerReconnectFindsReservation(t *testing.T) {
+	state := newSocialTestMatchLabel()
+	state.Mode = evr.ModeSocialPublic
+	state.LobbyType = PublicLobby
+	state.MaxSize = SocialLobbyMaxSize
+	state.PlayerLimit = SocialLobbyMaxSize
+
+	leaderUserID := uuid.Must(uuid.NewV4())
+	leaderSessionID := uuid.Must(uuid.NewV4())
+	followerUserID := uuid.Must(uuid.NewV4())
+	followerOriginalSID := uuid.Must(uuid.NewV4())
+	followerNewSID := uuid.Must(uuid.NewV4())
+	partyID := uuid.Must(uuid.NewV4())
+
+	leader := &EvrMatchPresence{
+		Node:          "testnode",
+		SessionID:     leaderSessionID,
+		UserID:        leaderUserID,
+		EvrID:         evr.EvrId{PlatformCode: 4, AccountId: 1},
+		Username:      "leader",
+		PartyID:       partyID,
+		RoleAlignment: evr.TeamSocial,
+		SessionExpiry: 9999999999,
+		ClientIP:      "127.0.0.1",
+		ClientPort:    "1001",
+	}
+	followerReservation := &EvrMatchPresence{
+		Node:          "testnode",
+		SessionID:     followerOriginalSID,
+		UserID:        followerUserID,
+		EvrID:         evr.EvrId{PlatformCode: 4, AccountId: 2},
+		Username:      "follower",
+		PartyID:       partyID,
+		RoleAlignment: evr.TeamSocial,
+		SessionExpiry: 9999999999,
+		ClientIP:      "127.0.0.2",
+		ClientPort:    "1002",
+	}
+
+	leaderMeta := &EntrantMetadata{
+		Presence:     leader,
+		Reservations: []*EvrMatchPresence{followerReservation},
+	}
+
+	m := &EvrMatch{}
+	ctx := context.Background()
+	logger := NewRuntimeGoLogger(NewJSONLogger(os.Stdout, zapcore.ErrorLevel, JSONFormat))
+	nk := &reconnectTestNakamaModule{}
+	disp := &reconnectTestDispatcher{}
+
+	// Leader joins — creates reservation for follower
+	resultState, allowed, reason := m.MatchJoinAttempt(ctx, logger, nil, nk, disp, 0, state, leader, leaderMeta.ToMatchMetadata())
+	if !allowed {
+		t.Fatalf("Leader join should be allowed, got: %s", reason)
+	}
+	state = resultState.(*MatchLabel)
+
+	if _, exists := state.reservationMap[followerOriginalSID.String()]; !exists {
+		t.Fatal("Reservation should exist for follower's original session ID")
+	}
+
+	// Fill the lobby to capacity: leader=1, reservation=1, add 10 fillers = 12
+	for i := 0; i < 10; i++ {
+		filler := &EvrMatchPresence{
+			Node:          "testnode",
+			SessionID:     uuid.Must(uuid.NewV4()),
+			UserID:        uuid.Must(uuid.NewV4()),
+			EvrID:         evr.EvrId{PlatformCode: 4, AccountId: uint64(100 + i)},
+			Username:      fmt.Sprintf("filler%d", i),
+			RoleAlignment: evr.TeamSocial,
+			SessionExpiry: 9999999999,
+			ClientIP:      fmt.Sprintf("127.0.1.%d", i),
+			ClientPort:    fmt.Sprintf("200%d", i),
+		}
+		fillerMeta := NewJoinMetadata(filler)
+		resultState, allowed, reason = m.MatchJoinAttempt(ctx, logger, nil, nk, disp, 0, state, filler, fillerMeta.ToMatchMetadata())
+		if !allowed {
+			t.Fatalf("Filler %d join rejected: %s", i, reason)
+		}
+		state = resultState.(*MatchLabel)
+	}
+
+	// Lobby is at capacity (12/12)
+	if state.OpenSlots() != 0 {
+		t.Fatalf("Expected 0 open slots, got %d", state.OpenSlots())
+	}
+
+	// Follower reconnects with a NEW session ID
+	followerReconnected := &EvrMatchPresence{
+		Node:          "testnode",
+		SessionID:     followerNewSID,
+		UserID:        followerUserID,
+		EvrID:         evr.EvrId{PlatformCode: 4, AccountId: 2},
+		Username:      "follower",
+		PartyID:       partyID,
+		RoleAlignment: evr.TeamSocial,
+		SessionExpiry: 9999999999,
+		ClientIP:      "127.0.0.2",
+		ClientPort:    "1002",
+	}
+	followerMeta := NewJoinMetadata(followerReconnected)
+
+	// Without the fix: rejected with "lobby full" because OpenSlots()=0
+	// blocks the join before reservation lookup runs.
+	// With the fix: reservation is looked up BEFORE the slot check,
+	// consumed (freeing a slot), and the join succeeds.
+	resultState, allowed, reason = m.MatchJoinAttempt(ctx, logger, nil, nk, disp, 0, state, followerReconnected, followerMeta.ToMatchMetadata())
+	if !allowed {
+		t.Fatalf("Follower reconnect should succeed via reservation fallback, but rejected: %s", reason)
+	}
+	state = resultState.(*MatchLabel)
+
+	// Verify reservation was consumed
+	if _, exists := state.reservationMap[followerOriginalSID.String()]; exists {
+		t.Error("Original reservation should have been consumed")
+	}
+}
