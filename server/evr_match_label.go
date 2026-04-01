@@ -92,6 +92,26 @@ func (s *MatchLabel) LoadAndDeleteReservation(sessionID string) (*EvrMatchPresen
 	return r.Presence, true
 }
 
+// LoadAndDeleteReservationByUserID searches the reservation map for a reservation
+// matching the given user ID. This is a fallback for when the session ID has changed
+// (e.g., party follower disconnected and reconnected with a new session).
+// Expired reservations are cleaned up during the scan.
+func (s *MatchLabel) LoadAndDeleteReservationByUserID(userID string) (*EvrMatchPresence, bool) {
+	for sessionID, r := range s.reservationMap {
+		if r.Presence.GetUserId() != userID {
+			continue
+		}
+		if r.Expiry.Before(time.Now()) {
+			delete(s.reservationMap, sessionID)
+			continue
+		}
+		delete(s.reservationMap, sessionID)
+		s.rebuildCache()
+		return r.Presence, true
+	}
+	return nil, false
+}
+
 func (s *MatchLabel) IsPublic() bool {
 	return s.LobbyType == PublicLobby
 }
