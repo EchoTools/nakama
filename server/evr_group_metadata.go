@@ -30,6 +30,7 @@ type GroupMetadata struct {
 	BlockVPNUsers                        bool              `json:"block_vpn_users"`               // Block VPN users
 	FraudScoreThreshold                  int               `json:"fraud_score_threshold"`         // The fraud score threshold
 	AllowedFeatures                      []string          `json:"allowed_features"`              // Allowed features
+	ActiveFeatures                       []string          `json:"active_features,omitempty"`     // Active feature plugins sent to clients at login
 	AlternateAccountNotificationExpiry   time.Time         `json:"alt_notification_threshold"`    // Show alternate notifications newer than this time.
 	EnableEnforcementCountInNames        bool              `json:"enable_enforcement_count_in_names"`
 	NegatedEnforcerIDs                   []string          `json:"negated_enforcer_ids"`                     // Enforcers that are not allowed to enforce this group

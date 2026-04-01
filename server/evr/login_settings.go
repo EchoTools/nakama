@@ -18,6 +18,8 @@ type GameSettings struct {
 	Env         string     `json:"env"`          // Env represents the environment in which the game client is running.
 	IapUnlocked bool       `json:"iap_unlocked"` // IapUnlocked indicates whether in-app purchases are unlocked for the game client.
 
+	ActiveFeatures []string `json:"active_features,omitempty"` // per-guild active feature plugins
+
 	RemoteLogErrors       bool `json:"remote_log_errors"`        // send remote logs for errors
 	RemoteLogMetrics      bool `json:"remote_log_metrics"`       // send remote logs for metrics
 	RemoteLogRichPresence bool `json:"remote_log_rich_presence"` // send remote logs for rich presence
