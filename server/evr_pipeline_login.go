@@ -168,6 +168,10 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		gameSettings.RemoteLogRichPresence = true
 		gameSettings.RemoteLogMetrics = true
 	}
+	if gg, ok := params.guildGroups[params.profile.ActiveGroupID]; ok && len(gg.ActiveFeatures) > 0 {
+		gameSettings.ActiveFeatures = gg.ActiveFeatures
+	}
+
 	metricsTags := params.MetricsTags()
 	go func(metricsTags map[string]string) {
 		<-session.Context().Done()
