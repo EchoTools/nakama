@@ -364,7 +364,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 
 	params, _ := LoadParams(ctx)
 
-	return &LobbySessionParameters{
+	lobbyParams := &LobbySessionParameters{
 		Node:                         node,
 		UserID:                       session.userID,
 		SessionID:                    session.id,
@@ -405,7 +405,24 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		FailsafeTimeout:              time.Duration(failsafeTimeoutSecs) * time.Second,
 		FallbackTimeout:              time.Duration(globalSettings.FallbackTimeoutSecs) * time.Second,
 		DisplayName:                  sessionParams.profile.GetGroupIGN(groupIDStr),
-	}, nil
+	}
+
+	// Check for an existing matchmaking credit to preserve queue position
+	// across re-queues (crashes, cancels, party follower failures).
+	if isMatchmakingCreditMode(mode) {
+		userIDStr := session.UserID().String()
+		if credit := getMatchmakingCredit(userIDStr, mode); credit != nil {
+			lobbyParams.MatchmakingTimestamp = credit.Timestamp
+		} else {
+			setMatchmakingCredit(userIDStr, &matchmakingCredit{
+				Mode:      mode,
+				Timestamp: lobbyParams.MatchmakingTimestamp,
+				Expiry:    time.Now().UTC().Add(lobbyParams.MatchmakingTimeout + 2*time.Minute),
+			})
+		}
+	}
+
+	return lobbyParams, nil
 }
 
 func (p LobbySessionParameters) String() string {
