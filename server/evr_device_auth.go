@@ -253,18 +253,34 @@ func DeviceAuthVerifyRpc(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		return "", runtime.NewError("code already used", StatusInvalidArgument)
 	}
 
+	// Look up discord ID for token vars
+	discordID, err := GetDiscordIDByUserID(ctx, db, userID)
+	if err != nil {
+		logger.Warn("Could not look up discord ID for user %s: %v", userID, err)
+		discordID = ""
+	}
+
+	tokenVars := map[string]string{}
+	if discordID != "" {
+		tokenVars["did"] = discordID
+	}
+
 	// Generate a session token for the authenticated user
 	// Token expires in 1 hour
 	tokenExpiry := time.Now().Add(1 * time.Hour).Unix()
-	token, tokenExpiry2, err := nk.AuthenticateTokenGenerate(userID, username, tokenExpiry, nil)
+	token, tokenExpiry2, err := nk.AuthenticateTokenGenerate(userID, username, tokenExpiry, tokenVars)
 	if err != nil {
 		logger.Error("Failed to generate token for device auth: %v", err)
 		return "", runtime.NewError("failed to generate token", StatusInternalError)
 	}
 
 	// Generate refresh token (longer expiry — 30 days)
+	refreshVars := map[string]string{"refresh": "true"}
+	if discordID != "" {
+		refreshVars["did"] = discordID
+	}
 	refreshExpiry := time.Now().Add(30 * 24 * time.Hour).Unix()
-	refreshToken, _, err := nk.AuthenticateTokenGenerate(userID, username, refreshExpiry, map[string]string{"refresh": "true"})
+	refreshToken, _, err := nk.AuthenticateTokenGenerate(userID, username, refreshExpiry, refreshVars)
 	if err != nil {
 		logger.Error("Failed to generate refresh token: %v", err)
 		return "", runtime.NewError("failed to generate refresh token", StatusInternalError)
