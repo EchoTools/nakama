@@ -277,6 +277,12 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 		return errors.New("failed to send lobby session success to game client")
 	}
 
+	// Clear matchmaking credits for all entrants (primary + reservations).
+	// This ensures the next queue after a completed match starts fresh.
+	for _, ent := range entrants {
+		clearMatchmakingCredit(ent.UserID.String())
+	}
+
 	logger.Info("Joined entrant.", zap.String("mid", label.ID.UUID.String()), zap.String("uid", e.UserID.String()), zap.String("sid", e.SessionID.String()), zap.Int("role", e.RoleAlignment))
 	return nil
 }
