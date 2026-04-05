@@ -23,6 +23,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -220,8 +221,41 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		wsMessageType = websocket.BinaryMessage
 	}
 
-	// Authenticate the user if a Discord ID is provided.
-	if params.authDiscordID != "" {
+	// Authenticate via Bearer JWT token (device auth flow).
+	// The token contains uid (user ID) and optionally did (discord ID) in vars.
+	if auth := request.Header.Get("Authorization"); userID.IsNil() && strings.HasPrefix(auth, "Bearer ") {
+		tokenStr := auth[len("Bearer "):]
+		if tokenUserID, tokenUsername, tokenVars, tokenExp, tokenId, _, ok := parseToken([]byte(config.GetSession().EncryptionKey), tokenStr); ok {
+			if !tokenUserID.IsNil() && tokenExp > time.Now().UTC().Unix() {
+				// Check if this is a refresh token (not valid for session auth)
+				if tokenVars["refresh"] != "true" {
+					userID = tokenUserID
+					username = tokenUsername
+					vars = tokenVars
+					expiry = tokenExp
+					params.IsWebsocketAuthenticated = true
+					logger.Info("Authenticated via Bearer token", zap.String("uid", userID.String()), zap.String("username", username))
+
+					// Build profile from account
+					account, err := GetAccount(ctx, logger, pipeline.db, statusRegistry, userID)
+					if err == nil && account != nil {
+						username = account.User.Username
+						params.profile, _ = BuildEVRProfileFromAccount(account)
+					}
+
+					// Cache discord ID mapping if present in token vars
+					if did, ok := tokenVars["did"]; ok && did != "" {
+						params.authDiscordID = did
+					}
+
+					_ = tokenId // Session cache not available here; JWT signature is sufficient
+				}
+			}
+		}
+	}
+
+	// Authenticate the user if a Discord ID is provided (legacy query param auth).
+	if userID.IsNil() && params.authDiscordID != "" {
 
 		if userIDStr := evrPipeline.discordCache.DiscordIDToUserID(params.authDiscordID); userIDStr == "" {
 			logger.Warn("Failed to get user ID by Discord ID", zap.String("discord_id", params.authDiscordID))
