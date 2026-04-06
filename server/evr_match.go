@@ -1394,6 +1394,7 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 		playerSessionIDs:             playerSessionIDs,
 		serverSessionID:              serverSessionID,
 		schedulePostMatchSocialLobby: state.Mode == evr.ModeArenaPrivate && state.GameState.IsMatchOver(),
+		labelAlreadyStored:           state.terminateTick != 0, // MatchShutdown already stored the label
 	})
 
 	return nil
@@ -1923,6 +1924,7 @@ type matchTerminationTask struct {
 	playerSessionIDs             []string
 	serverSessionID              string
 	schedulePostMatchSocialLobby bool
+	labelAlreadyStored           bool
 }
 
 type matchTerminationQueue struct {
@@ -1988,11 +1990,13 @@ func processMatchTerminationTask(task matchTerminationTask) {
 		}
 	}
 
-	termCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	if err := StoreMatchLabel(termCtx, task.nk, task.stateSnapshot); err != nil {
-		logger.WithFields(map[string]any{"match_id": task.matchID, "error": err}).Warn("failed to store match label on terminate")
+	if !task.labelAlreadyStored {
+		termCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := StoreMatchLabel(termCtx, task.nk, task.stateSnapshot); err != nil {
+			logger.WithFields(map[string]any{"match_id": task.matchID, "error": err}).Warn("failed to store match label on terminate")
+		}
+		cancel()
 	}
-	cancel()
 
 	for _, sid := range task.playerSessionIDs {
 		if sid == "" {
