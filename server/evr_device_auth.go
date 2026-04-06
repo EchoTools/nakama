@@ -307,5 +307,76 @@ func DeviceAuthVerifyRpc(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	return string(response), nil
 }
 
+// DeviceAuthRefreshRpc validates a device-auth refresh token (by JWT signature,
+// NOT session cache) and issues a new token pair. This survives Nakama restarts
+// because it only checks the JWT itself, not the in-memory session cache.
+func DeviceAuthRefreshRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	if payload == "" {
+		return "", runtime.NewError("missing payload", StatusInvalidArgument)
+	}
+
+	var request struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal([]byte(payload), &request); err != nil || request.Token == "" {
+		return "", runtime.NewError("invalid payload: token required", StatusInvalidArgument)
+	}
+
+	// Validate the refresh token JWT directly (signature + expiry)
+	config := nk.(*RuntimeGoNakamaModule).config
+	encryptionKey := []byte(config.GetSession().EncryptionKey)
+
+	userID, username, tokenVars, exp, _, _, ok := parseToken(encryptionKey, request.Token)
+	if !ok {
+		return "", runtime.NewError("invalid or expired refresh token", StatusUnauthenticated)
+	}
+	if userID.IsNil() || exp <= time.Now().UTC().Unix() {
+		return "", runtime.NewError("refresh token expired", StatusUnauthenticated)
+	}
+	if tokenVars["refresh"] != "true" {
+		return "", runtime.NewError("not a refresh token", StatusInvalidArgument)
+	}
+
+	// Look up discord ID for new token vars
+	discordID, err := GetDiscordIDByUserID(ctx, db, userID.String())
+	if err != nil {
+		logger.Warn("Could not look up discord ID for refresh: %v", err)
+		discordID = ""
+	}
+
+	newVars := map[string]string{}
+	if discordID != "" {
+		newVars["did"] = discordID
+	}
+
+	// Generate new access token (1 hour)
+	tokenExpiry := time.Now().Add(1 * time.Hour).Unix()
+	newToken, _, err := nk.AuthenticateTokenGenerate(userID.String(), username, tokenExpiry, newVars)
+	if err != nil {
+		return "", runtime.NewError("failed to generate token", StatusInternalError)
+	}
+
+	// Generate new refresh token (30 days)
+	refreshVars := map[string]string{"refresh": "true"}
+	if discordID != "" {
+		refreshVars["did"] = discordID
+	}
+	refreshExpiry := time.Now().Add(30 * 24 * time.Hour).Unix()
+	newRefresh, _, err := nk.AuthenticateTokenGenerate(userID.String(), username, refreshExpiry, refreshVars)
+	if err != nil {
+		return "", runtime.NewError("failed to generate refresh token", StatusInternalError)
+	}
+
+	response, _ := json.Marshal(map[string]interface{}{
+		"token":         newToken,
+		"refresh_token": newRefresh,
+		"user_id":       userID.String(),
+		"username":      username,
+	})
+
+	logger.Info("Device auth token refreshed for user %s (%s)", username, userID.String())
+	return string(response), nil
+}
+
 // Status codes are defined in evr_runtime_rpc.go:
 // StatusInvalidArgument, StatusNotFound, StatusUnauthenticated, StatusInternalError
