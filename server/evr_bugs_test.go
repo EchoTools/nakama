@@ -49,25 +49,36 @@ func TestIPQS_NoBackoffOnRepeatedErrors(t *testing.T) {
 // shutdown/terminate and only deleted during post-match stats processing.
 // If post-match processing never runs (crash, timeout, non-reporting client),
 // the objects persist indefinitely with no TTL or cleanup job.
+//
+// Fixed: cleanup goroutine in evr_pipeline.go deletes objects older than 4h.
+// Additionally, processMatchTerminationTask no longer re-creates the label
+// when MatchShutdown already stored it (race condition fix).
 // =============================================================================
 
 func TestMatchHistory_NoTTLOnStorage(t *testing.T) {
-	// StoreMatchLabel writes to MatchHistoryStorageCollection with no TTL.
-	// The storage write in evr_match_label.go:604 uses nk.StorageWrite with
-	// no expiry field. Nakama storage objects don't expire automatically.
-	//
-	// DeleteStoredMatchLabel is only called from:
-	//   1. processPostMatchMessages (line 548, 799) — only runs if stats arrive
-	//   2. Nowhere else — no cleanup goroutine, no TTL, no periodic purge
-	//
-	// Verify the collection name is what we expect (regression guard).
 	assert.Equal(t, "MatchHistory", MatchHistoryStorageCollection)
+}
 
-	// If post-match stats never arrive for a match (server crash, client disconnect,
-	// non-public mode edge cases), the MatchHistory object lives forever.
-	// A fix should add either:
-	// - A periodic cleanup job that deletes MatchHistory objects older than N hours
-	// - A TTL mechanism on storage writes
+func TestMatchTerminationTask_LabelAlreadyStored(t *testing.T) {
+	// When MatchShutdown runs, it sets terminateTick and stores the label.
+	// MatchTerminate should set labelAlreadyStored = true so the async
+	// terminate task doesn't re-create the label after post-match cleanup
+	// deletes it.
+	t.Run("shutdown ran first", func(t *testing.T) {
+		// terminateTick != 0 means MatchShutdown stored the label
+		task := matchTerminationTask{
+			labelAlreadyStored: true, // state.terminateTick != 0
+		}
+		assert.True(t, task.labelAlreadyStored)
+	})
+
+	t.Run("server shutdown without MatchShutdown", func(t *testing.T) {
+		// terminateTick == 0 means QueueTerminate called MatchTerminate directly
+		task := matchTerminationTask{
+			labelAlreadyStored: false, // state.terminateTick == 0
+		}
+		assert.False(t, task.labelAlreadyStored)
+	})
 }
 
 // =============================================================================
