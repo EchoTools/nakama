@@ -85,6 +85,7 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		{ID: "device/auth/request", Handler: DeviceAuthRequestRpc, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
 		{ID: "device/auth/poll", Handler: DeviceAuthPollRpc, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
 		{ID: "device/auth/verify", Handler: DeviceAuthVerifyRpc, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+		{ID: "device/auth/refresh", Handler: DeviceAuthRefreshRpc, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
 
 		// Party management (storage-backed)
 		{ID: "party/create", Handler: PartyCreateRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
