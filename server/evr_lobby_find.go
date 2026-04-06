@@ -935,8 +935,11 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 
 		label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
 		if err != nil {
-			logger.Warn("Failed to get leader's match label during poll", zap.Error(err))
-			return false
+			// The leader's old match may have been terminated while they
+			// transition to a new lobby. Keep polling instead of giving up
+			// — the service stream will update once the leader settles.
+			logger.Debug("Leader's match label unavailable during poll, retrying", zap.Error(err))
+			continue
 		}
 		if label == nil {
 			continue
