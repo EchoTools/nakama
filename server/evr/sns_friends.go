@@ -420,3 +420,53 @@ func (m *SNSFriendRejectNotify) Stream(s *EasyStream) error {
 func (m SNSFriendRejectNotify) String() string {
 	return fmt.Sprintf("SNSFriendRejectNotify(friend=%016x)", m.FriendID)
 }
+
+// ---------------------------------------------------------------------------
+// 0x20-byte outgoing: friend list subscribe/refresh requests
+// ---------------------------------------------------------------------------
+
+// SNSFriendListSubscribeRequest starts receiving friend list updates.
+// Wire format: 0x20 bytes (RoutingID + LocalUserUUID + SessionGUID).
+type SNSFriendListSubscribeRequest struct {
+	RoutingID     uint64
+	LocalUserUUID [16]byte
+	SessionGUID   uint64
+}
+
+func (m SNSFriendListSubscribeRequest) Token() string   { return "SNSFriendListSubscribeRequest" }
+func (m *SNSFriendListSubscribeRequest) Symbol() Symbol  { return ToSymbol(m.Token()) }
+
+func (m *SNSFriendListSubscribeRequest) Stream(s *EasyStream) error {
+	return RunErrorFunctions([]func() error{
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.RoutingID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.LocalUserUUID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.SessionGUID) },
+	})
+}
+
+func (m SNSFriendListSubscribeRequest) String() string {
+	return fmt.Sprintf("SNSFriendListSubscribeRequest(routing=%016x, session=%016x)", m.RoutingID, m.SessionGUID)
+}
+
+// SNSFriendListRefreshRequest requests a fresh friend list.
+// Same wire format as Subscribe.
+type SNSFriendListRefreshRequest struct {
+	RoutingID     uint64
+	LocalUserUUID [16]byte
+	SessionGUID   uint64
+}
+
+func (m SNSFriendListRefreshRequest) Token() string   { return "SNSFriendListRefreshRequest" }
+func (m *SNSFriendListRefreshRequest) Symbol() Symbol  { return ToSymbol(m.Token()) }
+
+func (m *SNSFriendListRefreshRequest) Stream(s *EasyStream) error {
+	return RunErrorFunctions([]func() error{
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.RoutingID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.LocalUserUUID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.SessionGUID) },
+	})
+}
+
+func (m SNSFriendListRefreshRequest) String() string {
+	return fmt.Sprintf("SNSFriendListRefreshRequest(routing=%016x, session=%016x)", m.RoutingID, m.SessionGUID)
+}
