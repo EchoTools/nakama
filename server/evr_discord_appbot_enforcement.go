@@ -56,14 +56,14 @@ func (d *DiscordAppBot) handleEnforcementInteraction(ctx context.Context, _ runt
 	}
 
 	// Check permissions - global operator or guild enforcer
-	_, _, _, err := RequireEnforcerOrOperator(ctx, d.db, d.nk, callerID, groupID)
+	isOperator, _, gg, err := RequireEnforcerOrOperator(ctx, d.db, d.nk, callerID, groupID)
 	if err != nil {
 		return simpleInteractionResponse(s, i, "You must be a guild enforcer or global operator to modify enforcement records.")
 	}
 
 	switch action {
 	case "edit":
-		return d.showEnforcementEditModal(s, i, recordID, groupID, targetUserID)
+		return d.showEnforcementEditModal(s, i, recordID, groupID, targetUserID, callerID, isOperator, gg)
 	case "void":
 		return d.showEnforcementVoidModal(s, i, recordID, groupID, targetUserID)
 	default:
@@ -71,8 +71,10 @@ func (d *DiscordAppBot) handleEnforcementInteraction(ctx context.Context, _ runt
 	}
 }
 
-// showEnforcementEditModal displays the edit modal with pre-filled current values
-func (d *DiscordAppBot) showEnforcementEditModal(s *discordgo.Session, i *discordgo.InteractionCreate, recordID, groupID, targetUserID string) error {
+// showEnforcementEditModal displays the edit modal with pre-filled current values.
+// When RestrictEnforcerNoteVisibility is active and the caller is not the record creator
+// (and not an auditor/operator), the moderator notes field is omitted from the modal.
+func (d *DiscordAppBot) showEnforcementEditModal(s *discordgo.Session, i *discordgo.InteractionCreate, recordID, groupID, targetUserID, callerID string, isOperator bool, gg *GuildGroup) error {
 	ctx := d.ctx
 
 	// Load the enforcement journal for the target user
@@ -106,8 +108,14 @@ func (d *DiscordAppBot) showEnforcementEditModal(s *discordgo.Session, i *discor
 		targetMention = fmt.Sprintf("<@%s>", targetDiscordID)
 	}
 
-	// Check if moderator notes exceed Discord modal limit
-	if len(record.AuditorNotes) > 200 {
+	// Determine if the caller can see/edit moderator notes on this record
+	canSeeNotes := true
+	if gg.RestrictEnforcerNoteVisibility && !isOperator && !gg.IsAuditor(callerID) {
+		canSeeNotes = record.EnforcerUserID == callerID
+	}
+
+	// Check if moderator notes exceed Discord modal limit (only relevant if caller can see them)
+	if canSeeNotes && len(record.AuditorNotes) > 200 {
 		portalBaseURL := os.Getenv("NEVR_PORTAL_BASE_URL")
 		if portalBaseURL == "" {
 			portalBaseURL = "https://echovrce.com/"
@@ -117,69 +125,77 @@ func (d *DiscordAppBot) showEnforcementEditModal(s *discordgo.Session, i *discor
 		return simpleInteractionResponse(s, i, fmt.Sprintf("Moderator notes for this record exceed 200 characters and cannot be edited through Discord.\n\nEdit this record on the portal: %s", portalLink))
 	}
 
+	// Build modal components
+	components := []discordgo.MessageComponent{
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.TextInput{
+					CustomID:    "duration_input",
+					Label:       "Duration (e.g., 1d2h, 30m, 1w)",
+					Style:       discordgo.TextInputShort,
+					Placeholder: "Enter duration (e.g., 15m, 1h, 2d, 1w)",
+					Value:       durationStr,
+					Required:    true,
+					MinLength:   1,
+					MaxLength:   20,
+				},
+			},
+		},
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.TextInput{
+					CustomID:    "user_notice_input",
+					Label:       "User Notice (visible to user)",
+					Style:       discordgo.TextInputShort,
+					Placeholder: "Reason shown to the user",
+					Value:       record.UserNoticeText,
+					Required:    true,
+					MinLength:   1,
+					MaxLength:   45,
+				},
+			},
+		},
+	}
+
+	// Only include moderator notes field if the caller can see them
+	if canSeeNotes {
+		components = append(components, discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.TextInput{
+					CustomID:    "mod_notes_input",
+					Label:       "Moderator Notes (internal only)",
+					Style:       discordgo.TextInputParagraph,
+					Placeholder: "Internal notes for moderators",
+					Value:       record.AuditorNotes,
+					Required:    false,
+					MaxLength:   200,
+				},
+			},
+		})
+	}
+
+	components = append(components, discordgo.ActionsRow{
+		Components: []discordgo.MessageComponent{
+			discordgo.TextInput{
+				CustomID:    "allow_privates_input",
+				Label:       "Allow Private Lobbies (yes/no)",
+				Style:       discordgo.TextInputShort,
+				Placeholder: "yes or no",
+				Value:       formatYesNo(record.AllowPrivateLobbies),
+				Required:    true,
+				MinLength:   2,
+				MaxLength:   5,
+			},
+		},
+	})
+
 	// Create the modal with pre-filled values
 	modal := &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
-			CustomID: fmt.Sprintf("enf_edit:%s:%s", targetDiscordID, recordID),
-			Title:    fmt.Sprintf("Edit Record for %s", targetMention),
-			Components: []discordgo.MessageComponent{
-				discordgo.ActionsRow{
-					Components: []discordgo.MessageComponent{
-						discordgo.TextInput{
-							CustomID:    "duration_input",
-							Label:       "Duration (e.g., 1d2h, 30m, 1w)",
-							Style:       discordgo.TextInputShort,
-							Placeholder: "Enter duration (e.g., 15m, 1h, 2d, 1w)",
-							Value:       durationStr,
-							Required:    true,
-							MinLength:   1,
-							MaxLength:   20,
-						},
-					},
-				},
-				discordgo.ActionsRow{
-					Components: []discordgo.MessageComponent{
-						discordgo.TextInput{
-							CustomID:    "user_notice_input",
-							Label:       "User Notice (visible to user)",
-							Style:       discordgo.TextInputShort,
-							Placeholder: "Reason shown to the user",
-							Value:       record.UserNoticeText,
-							Required:    true,
-							MinLength:   1,
-							MaxLength:   45,
-						},
-					},
-				},
-				discordgo.ActionsRow{
-					Components: []discordgo.MessageComponent{
-						discordgo.TextInput{
-							CustomID:    "mod_notes_input",
-							Label:       "Moderator Notes (internal only)",
-							Style:       discordgo.TextInputParagraph,
-							Placeholder: "Internal notes for moderators",
-							Value:       record.AuditorNotes,
-							Required:    false,
-							MaxLength:   200,
-						},
-					},
-				},
-				discordgo.ActionsRow{
-					Components: []discordgo.MessageComponent{
-						discordgo.TextInput{
-							CustomID:    "allow_privates_input",
-							Label:       "Allow Private Lobbies (yes/no)",
-							Style:       discordgo.TextInputShort,
-							Placeholder: "yes or no",
-							Value:       formatYesNo(record.AllowPrivateLobbies),
-							Required:    true,
-							MinLength:   2,
-							MaxLength:   5,
-						},
-					},
-				},
-			},
+			CustomID:   fmt.Sprintf("enf_edit:%s:%s", targetDiscordID, recordID),
+			Title:      fmt.Sprintf("Edit Record for %s", targetMention),
+			Components: components,
 		},
 	}
 
@@ -271,17 +287,27 @@ func (d *DiscordAppBot) handleEnforcementEditModalSubmit(logger runtime.Logger, 
 	}
 
 	// Verify permissions - global operator or guild enforcer
-	_, _, gg, err := RequireEnforcerOrOperator(ctx, d.db, d.nk, callerID, groupID)
+	isOperator, _, gg, err := RequireEnforcerOrOperator(ctx, d.db, d.nk, callerID, groupID)
 	if err != nil {
 		return simpleInteractionResponse(d.dg, i, "You must be a guild enforcer or global operator to edit enforcement records.")
 	}
 
-	// Get form data
+	// Extract form data by custom ID (modal may have variable components when notes field is omitted)
 	data := i.Interaction.ModalSubmitData()
-	durationStr := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
-	userNotice := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
-	modNotes := data.Components[2].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
-	allowPrivatesStr := data.Components[3].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+	formValues := make(map[string]string, len(data.Components))
+	for _, row := range data.Components {
+		actionRow, ok := row.(*discordgo.ActionsRow)
+		if !ok || len(actionRow.Components) == 0 {
+			continue
+		}
+		if input, ok := actionRow.Components[0].(*discordgo.TextInput); ok {
+			formValues[input.CustomID] = input.Value
+		}
+	}
+	durationStr := formValues["duration_input"]
+	userNotice := formValues["user_notice_input"]
+	modNotes := formValues["mod_notes_input"] // Empty when notes field was omitted from modal
+	allowPrivatesStr := formValues["allow_privates_input"]
 
 	allowPrivates, err := parseYesNo(allowPrivatesStr)
 	if err != nil {
@@ -309,6 +335,11 @@ func (d *DiscordAppBot) handleEnforcementEditModalSubmit(logger runtime.Logger, 
 	// Check if already voided
 	if journal.IsVoid(groupID, recordID) {
 		return simpleInteractionResponse(d.dg, i, "This record has already been voided and cannot be edited.")
+	}
+
+	// Preserve existing notes when toggle restricts visibility and caller is not the record creator
+	if gg.RestrictEnforcerNoteVisibility && !isOperator && !gg.IsAuditor(callerID) && record.EnforcerUserID != callerID {
+		modNotes = record.AuditorNotes
 	}
 
 	// Save old record values before editing
@@ -604,8 +635,9 @@ func (d *DiscordAppBot) updateEnforcementMessage(i *discordgo.InteractionCreate,
 		}
 	}
 
-	// Regenerate the suspension details field using the same function as kickPlayer
-	suspensionField := createSuspensionDetailsEmbedField(gg.Name(), []GuildEnforcementRecord{newRecord}, voids, true, true, true, gg.Group.Id)
+	// Regenerate the suspension details field; hide notes in channel message when toggle is active
+	showNotes := !gg.RestrictEnforcerNoteVisibility
+	suspensionField := createSuspensionDetailsEmbedField(gg.Name(), []GuildEnforcementRecord{newRecord}, voids, true, showNotes, true, gg.Group.Id, "")
 	if suspensionField != nil {
 		updatedEmbed.Fields = append(updatedEmbed.Fields, suspensionField)
 	}

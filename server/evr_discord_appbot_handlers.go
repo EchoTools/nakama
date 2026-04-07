@@ -1104,7 +1104,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 					fmt.Sprintf("<t:%d:R> by <@!%s>:", time.Now().UTC().Unix(), caller.User.ID),
 					fmt.Sprintf("- `%s`", userNotice),
 				}
-				if notes != "" {
+				if notes != "" && !gg.RestrictEnforcerNoteVisibility {
 					parts = append(parts,
 						fmt.Sprintf("- *%s*", notes),
 					)
@@ -1127,8 +1127,9 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				}
 
 				// Create a field for each group
-				// Always show enforcer ID in enforcement notice channel (it's for moderators only)
-				field := createSuspensionDetailsEmbedField(gn, records, voids, true, true, true, gID)
+				// Show enforcer ID in enforcement notice channel; hide notes when toggle restricts visibility
+				showNotes := !gg.RestrictEnforcerNoteVisibility
+				field := createSuspensionDetailsEmbedField(gn, records, voids, true, showNotes, true, gID, "")
 				embed.Fields = append(embed.Fields, field)
 			}
 
