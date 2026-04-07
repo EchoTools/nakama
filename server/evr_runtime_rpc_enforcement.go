@@ -334,7 +334,28 @@ func EnforcementJournalListRPC(ctx context.Context, logger runtime.Logger, db *s
 				hasRecords = true
 			}
 			if voids, ok := journal.VoidsByRecordIDByGroupID[request.GroupID]; ok && len(voids) > 0 {
-				filteredJournal.VoidsByRecordIDByGroupID[request.GroupID] = voids
+				if redactOtherNotes {
+					// Redact void notes for records the caller didn't create
+					redactedVoids := make(map[string]GuildEnforcementRecordVoid, len(voids))
+					records := journal.RecordsByGroupID[request.GroupID]
+					for recordID, v := range voids {
+						// Find the original record to check ownership
+						isOwned := false
+						for _, r := range records {
+							if r.ID == recordID && r.EnforcerUserID == userID {
+								isOwned = true
+								break
+							}
+						}
+						if !isOwned {
+							v.Notes = ""
+						}
+						redactedVoids[recordID] = v
+					}
+					filteredJournal.VoidsByRecordIDByGroupID[request.GroupID] = redactedVoids
+				} else {
+					filteredJournal.VoidsByRecordIDByGroupID[request.GroupID] = voids
+				}
 				hasRecords = true
 			}
 
@@ -507,10 +528,19 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 		fmt.Sprintf("target_user_id=%s record_id=%s new_expiry=%d new_notice=%q", request.TargetUserID, request.RecordID, newExpiry.Unix(), newUserNotice),
 	)
 
+	// Redact sensitive fields in response when caller shouldn't see notes
+	responseRecord := updatedRecord
+	if gg.RestrictEnforcerNoteVisibility && !isOperator && !gg.IsAuditor(userID) && responseRecord.EnforcerUserID != userID {
+		redacted := *responseRecord
+		redacted.AuditorNotes = ""
+		redacted.EditLog = nil
+		responseRecord = &redacted
+	}
+
 	response := EnforcementRecordEditResponse{
 		Success: true,
 		Message: "Enforcement record updated successfully",
-		Record:  updatedRecord,
+		Record:  responseRecord,
 	}
 
 	responseData, err := json.Marshal(response)
