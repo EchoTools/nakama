@@ -2,13 +2,18 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
+	"go.uber.org/atomic"
 	"testing"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // ---------------------------------------------------------------------------
@@ -49,7 +54,9 @@ func newFollowTestEnv(t *testing.T) *followTestEnv {
 		Username:  "leader",
 	}
 
-	ph := &PartyHandler{}
+	ph := &PartyHandler{
+		members: NewPartyPresenceList(8),
+	}
 	ph.leader = &PartyLeader{
 		UserPresence: leaderUP,
 		PresenceID:   &PresenceID{SessionID: leaderSID, Node: "testnode"},
@@ -151,6 +158,78 @@ func (e *followTestEnv) runPollWithTimeout(ctx context.Context, logger interface
 	case <-time.After(timeout):
 		return false, true
 	}
+}
+
+// ---------------------------------------------------------------------------
+// mockFollowMatchRegistry is a minimal MatchRegistry for follow tests.
+// Only GetMatch is implemented; other methods panic if called.
+// ---------------------------------------------------------------------------
+
+type mockFollowMatchRegistry struct {
+	mu      sync.RWMutex
+	matches map[string]*MatchLabel // matchID string → label
+}
+
+func newMockFollowMatchRegistry() *mockFollowMatchRegistry {
+	return &mockFollowMatchRegistry{matches: make(map[string]*MatchLabel)}
+}
+
+func (r *mockFollowMatchRegistry) SetMatch(id MatchID, label *MatchLabel) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.matches[id.String()] = label
+}
+
+func (r *mockFollowMatchRegistry) GetMatch(_ context.Context, id string) (*api.Match, string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	label, ok := r.matches[id]
+	if !ok {
+		return nil, "", ErrMatchNotFound
+	}
+	labelJSON, _ := json.Marshal(label)
+	return &api.Match{
+		MatchId: id,
+		Label:   &wrapperspb.StringValue{Value: string(labelJSON)},
+	}, "", nil
+}
+
+// Unimplemented methods — panic if called (tests should not reach these).
+func (r *mockFollowMatchRegistry) CreateMatch(context.Context, RuntimeMatchCreateFunction, string, map[string]interface{}) (string, error) {
+	panic("unimplemented")
+}
+func (r *mockFollowMatchRegistry) NewMatch(*zap.Logger, uuid.UUID, RuntimeMatchCore, *atomic.Bool, map[string]interface{}) (*MatchHandler, error) {
+	panic("unimplemented")
+}
+func (r *mockFollowMatchRegistry) RemoveMatch(uuid.UUID, PresenceStream)                      { panic("unimplemented") }
+func (r *mockFollowMatchRegistry) UpdateMatchLabel(uuid.UUID, int, string, string, int64) error { panic("unimplemented") }
+func (r *mockFollowMatchRegistry) ListMatches(context.Context, int, *wrapperspb.BoolValue, *wrapperspb.StringValue, *wrapperspb.Int32Value, *wrapperspb.Int32Value, *wrapperspb.StringValue, *wrapperspb.StringValue) ([]*api.Match, []string, error) {
+	panic("unimplemented")
+}
+func (r *mockFollowMatchRegistry) Stop(int) chan struct{} { panic("unimplemented") }
+func (r *mockFollowMatchRegistry) Count() int             { panic("unimplemented") }
+func (r *mockFollowMatchRegistry) JoinAttempt(context.Context, uuid.UUID, string, uuid.UUID, uuid.UUID, string, int64, map[string]string, string, string, string, map[string]string) (bool, bool, bool, string, string, []*MatchPresence) {
+	panic("unimplemented")
+}
+func (r *mockFollowMatchRegistry) Join(uuid.UUID, []*MatchPresence)                                  { panic("unimplemented") }
+func (r *mockFollowMatchRegistry) Leave(uuid.UUID, []*MatchPresence)                                 { panic("unimplemented") }
+func (r *mockFollowMatchRegistry) Kick(PresenceStream, []*MatchPresence)                             { panic("unimplemented") }
+func (r *mockFollowMatchRegistry) SendData(uuid.UUID, string, uuid.UUID, uuid.UUID, string, string, int64, []byte, bool, int64) {
+	panic("unimplemented")
+}
+func (r *mockFollowMatchRegistry) Signal(context.Context, string, string) (string, error) {
+	panic("unimplemented")
+}
+func (r *mockFollowMatchRegistry) GetState(context.Context, uuid.UUID, string) ([]*rtapi.UserPresence, int64, string, error) {
+	panic("unimplemented")
+}
+
+// withMockNK configures the test environment with a RuntimeGoNakamaModule
+// backed by the given mock match registry. This allows tests to exercise
+// the MatchLabelByID code path in pollFollowPartyLeader.
+func (e *followTestEnv) withMockNK(registry *mockFollowMatchRegistry) *followTestEnv {
+	e.pipeline.nk = &RuntimeGoNakamaModule{matchRegistry: registry}
+	return e
 }
 
 // ---------------------------------------------------------------------------
@@ -1500,5 +1579,125 @@ func TestPartyReservation_MissingEntrantGetsPlaceholder(t *testing.T) {
 	}
 	if placeholder.PartyID != partyID {
 		t.Errorf("Expected placeholder PartyID %s, got %s", partyID, placeholder.PartyID)
+	}
+}
+
+// ===========================================================================
+// Bug: Infinite matchmaking when leader is in a closed/full non-social match
+// ===========================================================================
+//
+// Scenario: Party leader is in an active arena game (closed, full).
+// The follower initiates lobby find. TryFollowPartyLeader returns false
+// (match is full, follower is at main menu). pollFollowPartyLeader is called.
+//
+// In pollFollowPartyLeader, the leader's match is looked up via MatchLabelByID.
+// The match is closed/full, so line 963 hits `continue` — looping forever.
+// The poll only exits when the context times out (matchmaking timeout),
+// then returns false. lobbyFind returns ServerIsLocked, the client retries,
+// and the cycle repeats: infinite matchmaking.
+//
+// The follower should be sent to a social lobby, not left polling forever
+// for a match that will never open.
+
+func TestPoll_LeaderInClosedArenaMatch_ShouldNotLoopForever(t *testing.T) {
+	env := newFollowTestEnv(t)
+
+	arenaMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	// Leader is in an active arena game, not matchmaking.
+	env.setLeaderMatch(arenaMatchID)
+
+	// Follower is in a different match (social lobby) or no match.
+	socialLobbyID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	env.setFollowerMatch(socialLobbyID)
+	env.params.CurrentMatchID = socialLobbyID
+
+	// Mock the match registry to return a closed, full arena match.
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	// Populate Players so GetPlayerCount() returns 8 (OpenPlayerSlots uses
+	// GetPlayerCount, not the PlayerCount field).
+	fullPlayers := make([]PlayerInfo, 8)
+	for i := range fullPlayers {
+		fullPlayers[i] = PlayerInfo{UserID: uuid.Must(uuid.NewV4()).String(), Team: 0}
+	}
+	registry.SetMatch(arenaMatchID, &MatchLabel{
+		ID:          arenaMatchID,
+		Open:        false, // Match is closed (game in progress)
+		Mode:        evr.ModeArenaPublic,
+		PlayerLimit: 8,
+		Players:     fullPlayers,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+
+	// One poll cycle is ~6s (3s poll + 3s settle). After 1 cycle of seeing
+	// a non-joinable non-social match, pollFollowPartyLeader should give up.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	result, timedOut := env.runPollWithTimeout(ctx, t, 12*time.Second)
+	elapsed := time.Since(start)
+
+	if timedOut {
+		t.Fatalf("BUG: pollFollowPartyLeader hung for the entire timeout (%v). "+
+			"When the leader is in a closed/full arena match, the follower should "+
+			"be released to find a social lobby, not poll forever.", elapsed)
+	}
+
+	if result {
+		t.Error("Expected false (follower cannot join leader's closed match)")
+	}
+
+	if elapsed > 8*time.Second {
+		t.Errorf("pollFollowPartyLeader took %v — should return within ~6s (one poll cycle).", elapsed)
+	}
+}
+
+func TestPoll_LeaderInFullCombatMatch_ShouldNotLoopForever(t *testing.T) {
+	env := newFollowTestEnv(t)
+
+	combatMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	env.setLeaderMatch(combatMatchID)
+	// Follower at main menu (no current match).
+	env.params.CurrentMatchID = MatchID{} // nil/zero
+
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	fullPlayers := make([]PlayerInfo, 8)
+	for i := range fullPlayers {
+		fullPlayers[i] = PlayerInfo{UserID: uuid.Must(uuid.NewV4()).String(), Team: 0}
+	}
+	registry.SetMatch(combatMatchID, &MatchLabel{
+		ID:          combatMatchID,
+		Open:        true,         // Match is "open" but...
+		Mode:        evr.ModeCombatPublic,
+		PlayerLimit: 8,
+		Players:     fullPlayers, // ...no slots available
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	result, timedOut := env.runPollWithTimeout(ctx, t, 12*time.Second)
+	elapsed := time.Since(start)
+
+	if timedOut {
+		t.Fatalf("BUG: pollFollowPartyLeader hung for the entire timeout (%v). "+
+			"When the leader is in a full combat match, the follower should "+
+			"be released promptly, not poll forever.", elapsed)
+	}
+
+	if result {
+		t.Error("Expected false (follower cannot join leader's full match)")
+	}
+
+	if elapsed > 8*time.Second {
+		t.Errorf("pollFollowPartyLeader took %v — should return within ~6s (one poll cycle).", elapsed)
 	}
 }
