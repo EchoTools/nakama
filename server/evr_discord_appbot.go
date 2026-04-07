@@ -2337,6 +2337,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				IncludeMatchmakingTier:         access.IsAuditor,
 				ShowLoginsSince:                loginsSince,
 				SendFileOnError:                access.IsGlobalOperator,
+
+				CallerUserID:    callerUserID,
+				CallerIsAuditor: access.IsAuditor,
 			}
 
 			return d.handleProfileRequest(ctx, logger, nk, s, i, target, opts)
