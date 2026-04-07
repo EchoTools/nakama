@@ -83,9 +83,16 @@ func NewSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry Sess
 		)
 		switch format {
 		case SessionFormatEVR:
-			if token != config.GetSocket().ServerKey {
-				http.Error(w, "Missing or invalid token", 401)
-				return
+			if token == config.GetSocket().ServerKey {
+				// Server key auth — legacy EVR clients, no user identity
+				ok = true
+			} else {
+				// Try JWT auth (device auth flow via Bearer token)
+				userID, username, vars, expiry, _, _, ok = parseToken([]byte(config.GetSession().EncryptionKey), token)
+				if !ok || !sessionCache.IsValidSession(userID, expiry, token) {
+					http.Error(w, "Missing or invalid token", 401)
+					return
+				}
 			}
 		default:
 			userID, username, vars, expiry, _, _, ok = parseToken([]byte(config.GetSession().EncryptionKey), token)
