@@ -268,7 +268,7 @@ func EnforcementJournalListRPC(ctx context.Context, logger runtime.Logger, db *s
 
 	userID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 
-	_, _, gg, err := RequireEnforcerOrOperator(ctx, db, nk, userID, request.GroupID)
+	isOperator, _, gg, err := RequireEnforcerOrOperator(ctx, db, nk, userID, request.GroupID)
 	if err != nil {
 		// Allow guild owners to view journals even if they are not enforcers/operators.
 		var runtimeErr *runtime.Error
@@ -280,6 +280,12 @@ func EnforcementJournalListRPC(ctx context.Context, logger runtime.Logger, db *s
 			logger.Error("Permission check failed", zap.Error(err))
 			return "", err
 		}
+	}
+
+	// Determine if the caller's note visibility should be restricted
+	redactOtherNotes := gg != nil && gg.RestrictEnforcerNoteVisibility && !isOperator && !gg.IsAuditor(userID)
+	if isOwner := gg != nil && gg.IsOwner(userID); isOwner {
+		redactOtherNotes = false // owners get auditor-level access
 	}
 
 	// List all journals containing this group_id
@@ -311,11 +317,45 @@ func EnforcementJournalListRPC(ctx context.Context, logger runtime.Logger, db *s
 
 			hasRecords := false
 			if records, ok := journal.RecordsByGroupID[request.GroupID]; ok && len(records) > 0 {
-				filteredJournal.RecordsByGroupID[request.GroupID] = records
+				if redactOtherNotes {
+					// Copy records and redact notes on records the caller didn't create
+					redacted := make([]GuildEnforcementRecord, len(records))
+					copy(redacted, records)
+					for i := range redacted {
+						if redacted[i].EnforcerUserID != userID {
+							redacted[i].AuditorNotes = ""
+							redacted[i].EditLog = nil
+						}
+					}
+					filteredJournal.RecordsByGroupID[request.GroupID] = redacted
+				} else {
+					filteredJournal.RecordsByGroupID[request.GroupID] = records
+				}
 				hasRecords = true
 			}
 			if voids, ok := journal.VoidsByRecordIDByGroupID[request.GroupID]; ok && len(voids) > 0 {
-				filteredJournal.VoidsByRecordIDByGroupID[request.GroupID] = voids
+				if redactOtherNotes {
+					// Redact void notes for records the caller didn't create
+					redactedVoids := make(map[string]GuildEnforcementRecordVoid, len(voids))
+					records := journal.RecordsByGroupID[request.GroupID]
+					for recordID, v := range voids {
+						// Find the original record to check ownership
+						isOwned := false
+						for _, r := range records {
+							if r.ID == recordID && r.EnforcerUserID == userID {
+								isOwned = true
+								break
+							}
+						}
+						if !isOwned {
+							v.Notes = ""
+						}
+						redactedVoids[recordID] = v
+					}
+					filteredJournal.VoidsByRecordIDByGroupID[request.GroupID] = redactedVoids
+				} else {
+					filteredJournal.VoidsByRecordIDByGroupID[request.GroupID] = voids
+				}
 				hasRecords = true
 			}
 
@@ -384,7 +424,7 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 	userID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 
 	// Check permissions (global operator or guild enforcer)
-	_, _, _, err := RequireEnforcerOrOperator(ctx, db, nk, userID, request.GroupID)
+	isOperator, _, gg, err := RequireEnforcerOrOperator(ctx, db, nk, userID, request.GroupID)
 	if err != nil {
 		logger.Error("Permission check failed", zap.Error(err))
 		return "", err
@@ -426,6 +466,11 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 	newAuditorNotes := record.AuditorNotes
 	if request.AuditorNotes != "" {
 		newAuditorNotes = request.AuditorNotes
+	}
+
+	// Preserve existing notes when toggle restricts visibility and caller is not the record creator
+	if gg.RestrictEnforcerNoteVisibility && !isOperator && !gg.IsAuditor(userID) && record.EnforcerUserID != userID {
+		newAuditorNotes = record.AuditorNotes
 	}
 
 	newAllowPrivates := record.AllowPrivateLobbies
@@ -483,10 +528,19 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 		fmt.Sprintf("target_user_id=%s record_id=%s new_expiry=%d new_notice=%q", request.TargetUserID, request.RecordID, newExpiry.Unix(), newUserNotice),
 	)
 
+	// Redact sensitive fields in response when caller shouldn't see notes
+	responseRecord := updatedRecord
+	if gg.RestrictEnforcerNoteVisibility && !isOperator && !gg.IsAuditor(userID) && responseRecord.EnforcerUserID != userID {
+		redacted := *responseRecord
+		redacted.AuditorNotes = ""
+		redacted.EditLog = nil
+		responseRecord = &redacted
+	}
+
 	response := EnforcementRecordEditResponse{
 		Success: true,
 		Message: "Enforcement record updated successfully",
-		Record:  updatedRecord,
+		Record:  responseRecord,
 	}
 
 	responseData, err := json.Marshal(response)

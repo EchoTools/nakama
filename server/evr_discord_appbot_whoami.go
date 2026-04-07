@@ -41,6 +41,9 @@ type UserProfileRequestOptions struct {
 	IncludeMatchmakingTier         bool
 	ShowLoginsSince                time.Time
 	SendFileOnError                bool // If true, send a file with the error message instead of an ephemeral message
+
+	CallerUserID    string // Nakama user ID of the caller (for per-record note filtering)
+	CallerIsAuditor bool   // Auditors bypass per-record note restriction
 }
 
 const (
@@ -482,7 +485,16 @@ func (w *WhoAmI) createSuspensionsEmbed() *discordgo.MessageEmbed {
 			if gg, ok := w.guildGroups[groupID]; ok {
 				gName = EscapeDiscordMarkdown(gg.Name())
 			}
-			if field := createSuspensionDetailsEmbedField(gName, records, voids, w.opts.IncludeInactiveSuspensions, w.opts.IncludeSuspensionAuditorNotes, w.opts.IncludeSuspensionAuditorNotes, w.GroupID); field != nil {
+
+			// Per-record note filtering: restrict enforcers to their own records' notes when toggle is active
+			callerForFilter := ""
+			if w.opts.IncludeSuspensionAuditorNotes {
+				if gg, ok := w.guildGroups[groupID]; ok && gg.RestrictEnforcerNoteVisibility && !w.opts.CallerIsAuditor {
+					callerForFilter = w.opts.CallerUserID
+				}
+			}
+
+			if field := createSuspensionDetailsEmbedField(gName, records, voids, w.opts.IncludeInactiveSuspensions, w.opts.IncludeSuspensionAuditorNotes, w.opts.IncludeSuspensionAuditorNotes, w.GroupID, callerForFilter); field != nil {
 				if field.Value != "" {
 					fields = append(fields, field)
 				}

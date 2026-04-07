@@ -466,7 +466,10 @@ func FormatDuration(d time.Duration) string {
 	return "0s"
 }
 
-func createSuspensionDetailsEmbedField(guildName string, records []GuildEnforcementRecord, voids map[string]GuildEnforcementRecordVoid, includeInactive, includeAuditorNotes, showEnforcerID bool, currentGuildID string) *discordgo.MessageEmbedField {
+// createSuspensionDetailsEmbedField builds a Discord embed field summarizing enforcement records.
+// callerUserID restricts note visibility per-record: empty string means show all notes (auditor/operator),
+// non-empty means only show notes on records where EnforcerUserID matches the caller.
+func createSuspensionDetailsEmbedField(guildName string, records []GuildEnforcementRecord, voids map[string]GuildEnforcementRecordVoid, includeInactive, includeAuditorNotes, showEnforcerID bool, currentGuildID string, callerUserID string) *discordgo.MessageEmbedField {
 	if len(records) == 0 {
 		return nil
 	}
@@ -498,12 +501,14 @@ func createSuspensionDetailsEmbedField(guildName string, records []GuildEnforcem
 		)
 
 		if includeAuditorNotes {
-			if r.AuditorNotes != "" {
+			// When callerUserID is set, only show notes on records the caller created
+			canSeeNotes := callerUserID == "" || r.EnforcerUserID == callerUserID
+			if canSeeNotes && r.AuditorNotes != "" {
 				parts = append(parts,
 					fmt.Sprintf("- *%s*", r.AuditorNotes),
 				)
 			}
-			if voids != nil {
+			if canSeeNotes && voids != nil {
 				if v, ok := voids[r.ID]; ok {
 					parts = append(parts,
 						fmt.Sprintf("- voided by <@!%s> <t:%d:R> *%s*", v.AuthorDiscordID, v.VoidedAt.UTC().Unix(), v.Notes),
