@@ -307,6 +307,7 @@ func TestCreateSuspensionDetailsEmbedField(t *testing.T) {
 				tc.includeAuditorNotes,
 				tc.showEnforcerID,
 				tc.currentGuildID,
+				"", // callerUserID: empty = no per-record restriction
 			)
 
 			if field == nil {
@@ -326,6 +327,125 @@ func TestCreateSuspensionDetailsEmbedField(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCreateSuspensionDetailsEmbedField_CallerFiltering(t *testing.T) {
+	groupA := "group-a"
+	enforcerA := "enforcer-a"
+	enforcerB := "enforcer-b"
+
+	records := []GuildEnforcementRecord{
+		{
+			ID:                "record-by-a",
+			UserID:            "target-user",
+			GroupID:           groupA,
+			EnforcerUserID:    enforcerA,
+			EnforcerDiscordID: "discord-a",
+			CreatedAt:         time.Now().Add(-1 * time.Hour),
+			UpdatedAt:         time.Now().Add(-1 * time.Hour),
+			UserNoticeText:    "Notice from A",
+			Expiry:            time.Now().Add(1 * time.Hour),
+			AuditorNotes:      "Secret notes by A",
+		},
+		{
+			ID:                "record-by-b",
+			UserID:            "target-user",
+			GroupID:           groupA,
+			EnforcerUserID:    enforcerB,
+			EnforcerDiscordID: "discord-b",
+			CreatedAt:         time.Now().Add(-30 * time.Minute),
+			UpdatedAt:         time.Now().Add(-30 * time.Minute),
+			UserNoticeText:    "Notice from B",
+			Expiry:            time.Now().Add(2 * time.Hour),
+			AuditorNotes:      "Secret notes by B",
+		},
+	}
+
+	t.Run("Empty callerUserID shows all notes (auditor/operator path)", func(t *testing.T) {
+		field := createSuspensionDetailsEmbedField("Guild A", records, nil, false, true, true, groupA, "")
+		if field == nil {
+			t.Fatal("expected field to be non-nil")
+		}
+		if !strings.Contains(field.Value, "Secret notes by A") {
+			t.Error("expected A's notes to be visible")
+		}
+		if !strings.Contains(field.Value, "Secret notes by B") {
+			t.Error("expected B's notes to be visible")
+		}
+	})
+
+	t.Run("CallerUserID=enforcerA sees only own notes", func(t *testing.T) {
+		field := createSuspensionDetailsEmbedField("Guild A", records, nil, false, true, true, groupA, enforcerA)
+		if field == nil {
+			t.Fatal("expected field to be non-nil")
+		}
+		if !strings.Contains(field.Value, "Secret notes by A") {
+			t.Error("expected A's notes to be visible to A")
+		}
+		if strings.Contains(field.Value, "Secret notes by B") {
+			t.Error("expected B's notes to be hidden from A")
+		}
+	})
+
+	t.Run("CallerUserID=enforcerB sees only own notes", func(t *testing.T) {
+		field := createSuspensionDetailsEmbedField("Guild A", records, nil, false, true, true, groupA, enforcerB)
+		if field == nil {
+			t.Fatal("expected field to be non-nil")
+		}
+		if strings.Contains(field.Value, "Secret notes by A") {
+			t.Error("expected A's notes to be hidden from B")
+		}
+		if !strings.Contains(field.Value, "Secret notes by B") {
+			t.Error("expected B's notes to be visible to B")
+		}
+	})
+
+	t.Run("CallerUserID=unrelated sees no notes", func(t *testing.T) {
+		field := createSuspensionDetailsEmbedField("Guild A", records, nil, false, true, true, groupA, "unrelated-enforcer")
+		if field == nil {
+			t.Fatal("expected field to be non-nil")
+		}
+		if strings.Contains(field.Value, "Secret notes by A") {
+			t.Error("expected A's notes to be hidden from unrelated enforcer")
+		}
+		if strings.Contains(field.Value, "Secret notes by B") {
+			t.Error("expected B's notes to be hidden from unrelated enforcer")
+		}
+		// User notices should still be visible
+		if !strings.Contains(field.Value, "Notice from A") {
+			t.Error("expected A's user notice to still be visible")
+		}
+	})
+
+	t.Run("Void notes filtered for non-creator", func(t *testing.T) {
+		voids := map[string]GuildEnforcementRecordVoid{
+			"record-by-a": {
+				GroupID:         groupA,
+				RecordID:        "record-by-a",
+				AuthorID:        "voider",
+				AuthorDiscordID: "voider-discord",
+				VoidedAt:        time.Now(),
+				Notes:           "Void reason for A",
+			},
+		}
+		// enforcerB should not see void notes on A's record
+		field := createSuspensionDetailsEmbedField("Guild A", records, voids, true, true, true, groupA, enforcerB)
+		if field == nil {
+			t.Fatal("expected field to be non-nil")
+		}
+		if strings.Contains(field.Value, "Void reason for A") {
+			t.Error("expected void notes on A's record to be hidden from B")
+		}
+
+		// enforcerA should see void notes on their own record
+		field = createSuspensionDetailsEmbedField("Guild A", records, voids, true, true, true, groupA, enforcerA)
+		if field == nil {
+			t.Fatal("expected field to be non-nil")
+		}
+		if !strings.Contains(field.Value, "Void reason for A") {
+			t.Error("expected void notes on A's record to be visible to A")
+		}
+	})
 }
 
 // TestMidSessionSuspension_StaleEnforcementsMissPostLoginKick proves the bug:
