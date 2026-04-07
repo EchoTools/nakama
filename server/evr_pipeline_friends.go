@@ -392,6 +392,16 @@ func (p *EvrPipeline) snsFriendRemoveRequest(ctx context.Context, logger *zap.Lo
 }
 
 // snsFriendListResponse builds and sends the friend list counts to the client.
+func (p *EvrPipeline) snsFriendListSubscribeRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+	logger.Info("Friend list subscribe request received")
+	return p.sendFriendListResponse(ctx, logger, session)
+}
+
+func (p *EvrPipeline) snsFriendListRefreshRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+	logger.Info("Friend list refresh request received")
+	return p.sendFriendListResponse(ctx, logger, session)
+}
+
 func (p *EvrPipeline) sendFriendListResponse(ctx context.Context, logger *zap.Logger, session *sessionWS) error {
 	userID := session.UserID()
 

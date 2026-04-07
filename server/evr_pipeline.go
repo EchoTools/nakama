@@ -595,6 +595,10 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		pipelineFn = p.snsPartyInviteListRefreshRequest
 
 	// SNS Friends service
+	case *evr.SNSFriendListSubscribeRequest:
+		pipelineFn = p.snsFriendListSubscribeRequest
+	case *evr.SNSFriendListRefreshRequest:
+		pipelineFn = p.snsFriendListRefreshRequest
 	case *evr.SNSFriendInviteRequest:
 		pipelineFn = p.snsFriendInviteRequest
 	case *evr.SNSFriendAcceptRequest:
