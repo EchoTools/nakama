@@ -108,7 +108,13 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					return NewLobbyError(ServerIsLocked, "unable to follow party leader")
+					// The follower could not follow the leader (e.g. leader
+					// is in an active arena/combat game). Send them to a
+					// social lobby so they aren't stuck at a loading screen.
+					logger.Info("Follower cannot join leader's match, redirecting to social lobby")
+					lobbyParams.Mode = evr.ModeSocialPublic
+					lobbyParams.Level = evr.LevelUnspecified
+					return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams)
 				}
 			}
 		} else {
@@ -851,6 +857,13 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		return MatchIDFromStringOrNil(memberPresence.GetStatus()) == leaderMatchID
 	}
 
+	// Track consecutive cycles where the leader's match is non-joinable.
+	// Non-social matches (arena/combat) don't open up mid-game, so polling
+	// forever is pointless. After a few cycles, give up so the follower can
+	// be redirected to a social lobby.
+	const maxNonJoinableCycles = 1
+	nonJoinableCycles := 0
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -961,6 +974,22 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		requiredSlots := partySize - countInMatch
 
 		if !label.Open || label.OpenPlayerSlots() < requiredSlots {
+			// Social lobbies may open up as players leave, so keep polling.
+			// Non-social matches (arena/combat) don't open mid-game — stop
+			// polling after a few cycles so the follower can be sent to a
+			// social lobby instead of waiting forever.
+			if !label.IsSocial() {
+				nonJoinableCycles++
+				if nonJoinableCycles >= maxNonJoinableCycles {
+					logger.Debug("Leader's non-social match is persistently non-joinable, releasing follower",
+						zap.String("mid", leaderMatchID.String()),
+						zap.String("mode", label.Mode.String()),
+						zap.Bool("open", label.Open),
+						zap.Int("open_slots", label.OpenPlayerSlots()),
+						zap.Int("required_slots", requiredSlots))
+					return false
+				}
+			}
 			continue
 		}
 
