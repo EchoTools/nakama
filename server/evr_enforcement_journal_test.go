@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/bwmarrin/discordgo"
+	"github.com/heroiclabs/nakama-common/api"
 )
 
 func TestFormatDuration(t *testing.T) {
@@ -446,6 +449,128 @@ func TestCreateSuspensionDetailsEmbedField_CallerFiltering(t *testing.T) {
 			t.Error("expected void notes on A's record to be visible to A")
 		}
 	})
+}
+
+// TestWhoAmI_EnforcerNoteVisibility verifies that the WhoAmI.createSuspensionsEmbed
+// method always restricts enforcers to seeing only their own records' notes,
+// regardless of the RestrictEnforcerNoteVisibility guild setting.
+// Auditors must always see all notes.
+func TestWhoAmI_EnforcerNoteVisibility(t *testing.T) {
+	groupID := "group-1"
+	enforcerA := "enforcer-a"
+	enforcerB := "enforcer-b"
+
+	makeGuildGroup := func(restrictToggle bool) *GuildGroup {
+		return &GuildGroup{
+			GroupMetadata: GroupMetadata{
+				RestrictEnforcerNoteVisibility: restrictToggle,
+			},
+			Group: &api.Group{
+				Id:   groupID,
+				Name: "Test Guild",
+			},
+		}
+	}
+
+	journal := &GuildEnforcementJournal{
+		RecordsByGroupID: map[string][]GuildEnforcementRecord{
+			groupID: {
+				{
+					ID:             "rec-a",
+					UserID:         "target",
+					GroupID:        groupID,
+					EnforcerUserID: enforcerA,
+					CreatedAt:      time.Now().Add(-1 * time.Hour),
+					UpdatedAt:      time.Now().Add(-1 * time.Hour),
+					UserNoticeText: "Notice A",
+					Expiry:         time.Now().Add(1 * time.Hour),
+					AuditorNotes:   "Secret notes by A",
+				},
+				{
+					ID:             "rec-b",
+					UserID:         "target",
+					GroupID:        groupID,
+					EnforcerUserID: enforcerB,
+					CreatedAt:      time.Now().Add(-30 * time.Minute),
+					UpdatedAt:      time.Now().Add(-30 * time.Minute),
+					UserNoticeText: "Notice B",
+					Expiry:         time.Now().Add(2 * time.Hour),
+					AuditorNotes:   "Secret notes by B",
+				},
+			},
+		},
+	}
+
+	for _, restrictToggle := range []bool{false, true} {
+		label := "toggle_off"
+		if restrictToggle {
+			label = "toggle_on"
+		}
+
+		t.Run(label+"/enforcer_sees_only_own_notes", func(t *testing.T) {
+			w := &WhoAmI{
+				GroupID:     groupID,
+				guildGroups: map[string]*GuildGroup{groupID: makeGuildGroup(restrictToggle)},
+				journal:     journal,
+				opts: UserProfileRequestOptions{
+					IncludeSuspensionsEmbed:       true,
+					IncludeSuspensionAuditorNotes: true,
+					IncludeInactiveSuspensions:    true,
+					CallerUserID:                  enforcerA,
+					CallerIsAuditor:               false,
+				},
+			}
+
+			embed := w.createSuspensionsEmbed()
+			if embed == nil {
+				t.Fatal("expected embed to be non-nil")
+			}
+			content := embedFieldsToString(embed.Fields)
+			if !strings.Contains(content, "Secret notes by A") {
+				t.Error("enforcer A should see their own notes")
+			}
+			if strings.Contains(content, "Secret notes by B") {
+				t.Error("enforcer A should NOT see enforcer B's notes")
+			}
+		})
+
+		t.Run(label+"/auditor_sees_all_notes", func(t *testing.T) {
+			w := &WhoAmI{
+				GroupID:     groupID,
+				guildGroups: map[string]*GuildGroup{groupID: makeGuildGroup(restrictToggle)},
+				journal:     journal,
+				opts: UserProfileRequestOptions{
+					IncludeSuspensionsEmbed:       true,
+					IncludeSuspensionAuditorNotes: true,
+					IncludeInactiveSuspensions:    true,
+					CallerUserID:                  "auditor-user",
+					CallerIsAuditor:               true,
+				},
+			}
+
+			embed := w.createSuspensionsEmbed()
+			if embed == nil {
+				t.Fatal("expected embed to be non-nil")
+			}
+			content := embedFieldsToString(embed.Fields)
+			if !strings.Contains(content, "Secret notes by A") {
+				t.Error("auditor should see A's notes")
+			}
+			if !strings.Contains(content, "Secret notes by B") {
+				t.Error("auditor should see B's notes")
+			}
+		})
+	}
+}
+
+// embedFieldsToString concatenates all embed field values for substring searching.
+func embedFieldsToString(fields []*discordgo.MessageEmbedField) string {
+	var sb strings.Builder
+	for _, f := range fields {
+		sb.WriteString(f.Value)
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }
 
 // TestMidSessionSuspension_StaleEnforcementsMissPostLoginKick proves the bug:
