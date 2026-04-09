@@ -114,7 +114,12 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 					logger.Info("Follower cannot join leader's match, redirecting to social lobby")
 					lobbyParams.Mode = evr.ModeSocialPublic
 					lobbyParams.Level = evr.LevelUnspecified
-					return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams)
+					lobbyParams.SetPartySize(1)
+					followerEntrants, err := PrepareEntrantPresences(ctx, logger, p.nk, p.nk.sessionRegistry, lobbyParams, session.id)
+					if err != nil {
+						return fmt.Errorf("failed to prepare follower entrant: %w", err)
+					}
+					return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, followerEntrants...)
 				}
 			}
 		} else {
