@@ -486,12 +486,10 @@ func (w *WhoAmI) createSuspensionsEmbed() *discordgo.MessageEmbed {
 				gName = EscapeDiscordMarkdown(gg.Name())
 			}
 
-			// Per-record note filtering: restrict enforcers to their own records' notes when toggle is active
+			// Per-record note filtering: enforcers only see notes on their own records; auditors see all
 			callerForFilter := ""
-			if w.opts.IncludeSuspensionAuditorNotes {
-				if gg, ok := w.guildGroups[groupID]; ok && gg.RestrictEnforcerNoteVisibility && !w.opts.CallerIsAuditor {
-					callerForFilter = w.opts.CallerUserID
-				}
+			if w.opts.IncludeSuspensionAuditorNotes && !w.opts.CallerIsAuditor {
+				callerForFilter = w.opts.CallerUserID
 			}
 
 			if field := createSuspensionDetailsEmbedField(gName, records, voids, w.opts.IncludeInactiveSuspensions, w.opts.IncludeSuspensionAuditorNotes, w.opts.IncludeSuspensionAuditorNotes, w.GroupID, callerForFilter); field != nil {
