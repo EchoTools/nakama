@@ -39,6 +39,35 @@ var (
 		return slots
 	}()
 
+	// slotCosmeticPrefixes maps each loadout slot to the item name prefixes
+	// that belong to it. Derived from the json tags on ArenaUnlocks and
+	// CombatUnlocks in server/evr/core_account.go.
+	slotCosmeticPrefixes = map[string][]string{
+		"banner":          {"rwd_banner_"},
+		"booster":         {"rwd_booster_"},
+		"bracer":          {"rwd_bracer_"},
+		"chassis":         {"rwd_chassis_"},
+		"decal":           {"decal_", "rwd_decal_"},
+		"decal_body":      {"decal_", "rwd_decal_"},
+		"decalborder":     {"rwd_decalborder_"},
+		"decalback":       {"rwd_decalback_"},
+		"emissive":        {"emissive_", "rwd_emissive_"},
+		"emote":           {"emote_", "rwd_emote_"},
+		"secondemote":     {"emote_", "rwd_emote_"},
+		"goal_fx":         {"rwd_goal_fx_"},
+		"medal":           {"rwd_medal_"},
+		"pattern":         {"pattern_", "rwd_pattern_"},
+		"pattern_body":    {"pattern_", "rwd_pattern_"},
+		// The pip slot uses decalback items (default: rwd_decalback_default).
+		"pip":             {"rwd_pip_", "rwd_decalback_"},
+		"tag":             {"rwd_tag_"},
+		"tint":            {"tint_", "rwd_tint_"},
+		"tint_body":       {"tint_", "rwd_tint_"},
+		"tint_alignment_a": {"tint_", "rwd_tint_"},
+		"tint_alignment_b": {"tint_", "rwd_tint_"},
+		"title":           {"rwd_title_"},
+	}
+
 	globalLoadoutAutocompleteService struct {
 		sync.RWMutex
 		svc *LoadoutAutocompleteService
@@ -137,9 +166,14 @@ func (s *LoadoutAutocompleteService) ValueChoices(ctx context.Context, userID, s
 		return nil, err
 	}
 
+	prefixes := slotCosmeticPrefixes[slot]
+
 	query := strings.ToLower(strings.TrimSpace(partial))
 	items := make([]string, 0, len(unlocked))
 	for item := range unlocked {
+		if !itemMatchesSlot(item, prefixes) {
+			continue
+		}
 		if query == "" || strings.Contains(strings.ToLower(item), query) {
 			items = append(items, item)
 		}
@@ -148,6 +182,20 @@ func (s *LoadoutAutocompleteService) ValueChoices(ctx context.Context, userID, s
 	choices := makeChoicesFromStrings(items)
 	s.setCachedChoices(key, choices)
 	return cloneChoices(choices), nil
+}
+
+// itemMatchesSlot returns true if the item name starts with any of the given
+// prefixes, or if prefixes is empty (no filtering configured for the slot).
+func itemMatchesSlot(item string, prefixes []string) bool {
+	if len(prefixes) == 0 {
+		return true
+	}
+	for _, p := range prefixes {
+		if strings.HasPrefix(item, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *LoadoutAutocompleteService) UserUnlockedCosmetics(ctx context.Context, userID string) (map[string]bool, error) {

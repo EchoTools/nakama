@@ -294,6 +294,46 @@ func TestIsStorageNotFoundError(t *testing.T) {
 	}
 }
 
+func TestItemMatchesSlot(t *testing.T) {
+	tests := []struct {
+		name     string
+		item     string
+		prefixes []string
+		want     bool
+	}{
+		{"chassis matches rwd_chassis_", "rwd_chassis_body_s11_a", []string{"rwd_chassis_"}, true},
+		{"booster matches rwd_booster_", "rwd_booster_default", []string{"rwd_booster_"}, true},
+		{"decal matches decal_ prefix", "decal_default", []string{"decal_", "rwd_decal_"}, true},
+		{"decal matches rwd_decal_ prefix", "rwd_decal_0001", []string{"decal_", "rwd_decal_"}, true},
+		{"emote matches emote_ prefix", "emote_blink_smiley_a", []string{"emote_", "rwd_emote_"}, true},
+		{"emote matches rwd_emote_ prefix", "rwd_emote_0001", []string{"emote_", "rwd_emote_"}, true},
+		{"chassis rejects decal item", "decal_default", []string{"rwd_chassis_"}, false},
+		{"banner rejects booster item", "rwd_booster_default", []string{"rwd_banner_"}, false},
+		{"empty prefixes matches everything", "anything", nil, true},
+		{"empty prefixes matches everything (empty slice)", "anything", []string{}, true},
+		{"tint matches tint_ prefix", "tint_neutral_a_default", []string{"tint_", "rwd_tint_"}, true},
+		{"tint matches rwd_tint_ prefix", "rwd_tint_0001", []string{"tint_", "rwd_tint_"}, true},
+		{"tag rejects tint item", "tint_neutral_a_default", []string{"rwd_tag_"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := itemMatchesSlot(tt.item, tt.prefixes)
+			if got != tt.want {
+				t.Errorf("itemMatchesSlot(%q, %v) = %v, want %v", tt.item, tt.prefixes, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSlotCosmeticPrefixes_CoverAllSlots(t *testing.T) {
+	// Every settable slot should have a corresponding prefix mapping.
+	for slot := range loadoutSettableSlots {
+		if _, ok := slotCosmeticPrefixes[slot]; !ok {
+			t.Errorf("slot %q has no entry in slotCosmeticPrefixes", slot)
+		}
+	}
+}
+
 type testError struct {
 	msg string
 }
