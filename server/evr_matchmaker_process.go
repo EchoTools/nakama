@@ -10,9 +10,23 @@ import (
 )
 
 func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, entries []runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int, []PredictedMatch) {
-	candidates := groupEntriesSequentially(entries)
-
 	filterCounts := make(map[string]int)
+
+	// Accumulate reserved players for starving tickets before candidate formation
+	var accumulatedCandidates [][]runtime.MatchmakerEntry
+	remainingEntries := entries
+	if settings := ServiceSettings(); settings != nil {
+		accumulatedCandidates, remainingEntries = m.accumulateForStarving(logger, entries, &settings.Matchmaking)
+		filterCounts["accumulation_pools"] = len(m.accumulationPools)
+		filterCounts["accumulated_players"] = countAccumulatedPlayers(m)
+	}
+
+	candidates := groupEntriesSequentially(remainingEntries)
+
+	// Prepend accumulated candidates
+	if len(accumulatedCandidates) > 0 {
+		candidates = append(accumulatedCandidates, candidates...)
+	}
 
 	// Filter out players who are too far away from each other
 	filterCounts["max_rtt"] = m.filterWithinMaxRTT(candidates)
@@ -87,19 +101,7 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 		return predictions[i].DrawProb > predictions[j].DrawProb
 	})
 
-	var madeMatches [][]runtime.MatchmakerEntry
-
-	settings := ServiceSettings()
-	useReservations := settings != nil && settings.Matchmaking.EnableTicketReservation
-
-	if useReservations {
-		starving, reserved := m.buildReservations(logger, candidates, predictions, &settings.Matchmaking)
-		madeMatches = m.assembleMatchesWithReservations(logger, predictions, starving, reserved)
-		filterCounts["reserved_players"] = len(reserved)
-		filterCounts["starving_tickets"] = len(starving)
-	} else {
-		madeMatches = m.assembleUniqueMatches(predictions)
-	}
+	madeMatches := m.assembleUniqueMatches(predictions)
 
 	return candidates, madeMatches, filterCounts, predictions
 }
@@ -263,6 +265,9 @@ OuterLoop:
 		if isUndersizedMatch(r.Candidate) {
 			continue OuterLoop
 		}
+		if countModeratorsInCandidate(r.Candidate) > 2 {
+			continue OuterLoop
+		}
 
 		for _, e := range r.Candidate {
 			matchedPlayers[e.GetPresence().GetSessionId()] = struct{}{}
@@ -310,4 +315,15 @@ func isUndersizedMatch(candidate []runtime.MatchmakerEntry) bool {
 	}
 
 	return true
+}
+
+// countModeratorsInCandidate counts moderators in a candidate match.
+func countModeratorsInCandidate(candidate []runtime.MatchmakerEntry) int {
+	count := 0
+	for _, entry := range candidate {
+		if isModStr, ok := entry.GetProperties()["is_moderator"].(string); ok && isModStr == "true" {
+			count++
+		}
+	}
+	return count
 }

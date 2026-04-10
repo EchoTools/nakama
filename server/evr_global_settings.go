@@ -139,10 +139,12 @@ type GlobalMatchmakingSettings struct {
 	WaitTimePriorityThresholdSecs  int                     `json:"wait_time_priority_threshold_secs"`   // Wait time threshold in seconds when wait time priority overrides match size priority (default 120)
 	RatingRangeExpansionPerMinute  float64                 `json:"rating_range_expansion_per_minute"`   // How much to expand rating range per minute of wait time (default 0.5)
 	MaxRatingRangeExpansion        float64                 `json:"max_rating_range_expansion"`          // Maximum total rating range expansion allowed (default 5.0)
-	ReservationThresholdSecs       int                     `json:"reservation_threshold_secs"`          // Wait time before a ticket becomes "starving" and gets hard reservations (default 90)
-	MaxReservationRatio            float64                 `json:"max_reservation_ratio"`               // Max fraction of pool that can be reserved (0.0-1.0, default 0.4)
-	ReservationSafetyValveSecs     int                     `json:"reservation_safety_valve_secs"`       // After this many seconds, release reservations and let the system flow (default 300)
-	EnableTicketReservation        bool                    `json:"enable_ticket_reservation"`           // Enable the ticket reservation system (default false)
+	EnableAccumulation                 bool    `json:"enable_accumulation"`                    // Enable pre-formation accumulation pools for starving tickets (default true)
+	AccumulationThresholdSecs          int     `json:"accumulation_threshold_secs"`             // Wait time before a ticket enters accumulation (default 90)
+	AccumulationMaxAgeSecs             int     `json:"accumulation_max_age_secs"`               // Safety valve: release reservations after this many seconds (default 300)
+	AccumulationInitialRadius          float64 `json:"accumulation_initial_radius"`             // Initial skill range around starving ticket's mu (default 5.0)
+	AccumulationRadiusExpansionPerCycle float64 `json:"accumulation_radius_expansion_per_cycle"` // Skill radius widens by this much each cycle (default 1.0)
+	AccumulationMaxRadius              float64 `json:"accumulation_max_radius"`                 // Maximum skill radius (default 40.0)
 	CrashRecoveryWindowSecs        int                     `json:"crash_recovery_window_secs"`          // Seconds to hold a disconnected player's spot (default 60, 0 = use default, <0 = disabled)
 }
 
@@ -284,6 +286,23 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 	// Initialize default winning team bonus
 	if data.SkillRating.WinningTeamBonus == 0 {
 		data.SkillRating.WinningTeamBonus = 4.0
+	}
+
+	// Initialize accumulation defaults
+	if data.Matchmaking.AccumulationThresholdSecs == 0 {
+		data.Matchmaking.AccumulationThresholdSecs = 90
+	}
+	if data.Matchmaking.AccumulationMaxAgeSecs == 0 {
+		data.Matchmaking.AccumulationMaxAgeSecs = 300
+	}
+	if data.Matchmaking.AccumulationInitialRadius == 0 {
+		data.Matchmaking.AccumulationInitialRadius = 5.0
+	}
+	if data.Matchmaking.AccumulationRadiusExpansionPerCycle == 0 {
+		data.Matchmaking.AccumulationRadiusExpansionPerCycle = 1.0
+	}
+	if data.Matchmaking.AccumulationMaxRadius == 0 {
+		data.Matchmaking.AccumulationMaxRadius = 40.0
 	}
 
 	if data.Matchmaking.ServerSelection.Ratings == nil {
