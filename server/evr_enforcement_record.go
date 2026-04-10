@@ -101,8 +101,9 @@ func GetStandardEnforcementRules() []string {
 	return rulesCopy
 }
 
-// GetNotificationMessage returns a formatted message for DM notification to the user
-func (r GuildEnforcementRecord) GetNotificationMessage(guildName string) string {
+// GetNotificationMessage returns a formatted message for DM notification to the user.
+// If customFooter is non-empty, it replaces the default footer text.
+func (r GuildEnforcementRecord) GetNotificationMessage(guildName, customFooter string) string {
 	var parts []string
 
 	// Header
@@ -157,8 +158,12 @@ func (r GuildEnforcementRecord) GetNotificationMessage(guildName string) string 
 
 	// Footer with instructions
 	parts = append(parts, "")
-	parts = append(parts, "ℹ️ For more details, use the `/whoami` command in Discord or in-game.")
-	parts = append(parts, "If you believe this action was made in error, please contact a guild administrator.")
+	if customFooter != "" {
+		parts = append(parts, customFooter)
+	} else {
+		parts = append(parts, "ℹ️ For more details, use the `/whoami` command in Discord or in-game.")
+		parts = append(parts, "If you believe this action was made in error, please contact a guild administrator.")
+	}
 
 	return strings.Join(parts, "\n")
 }

@@ -990,10 +990,12 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 
 			// Send DM notification to the user
 			guildName := ""
+			customFooter := ""
 			if gg != nil {
 				guildName = gg.Name()
+				customFooter = gg.SuspensionDMFooter
 			}
-			sent, err := SendEnforcementNotification(ctx, d.dg, record, target.ID, guildName)
+			sent, err := SendEnforcementNotification(ctx, d.dg, record, target.ID, guildName, customFooter)
 			if err != nil {
 				// Note: DM failures are logged but don't block enforcement.
 				// Common failures: user has DMs disabled, blocked bot, or left shared servers.

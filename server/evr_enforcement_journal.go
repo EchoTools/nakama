@@ -623,9 +623,10 @@ func createEnforcementActionComponents(record GuildEnforcementRecord, profile *E
 	}
 }
 
-// SendEnforcementNotification sends a DM to the user about their enforcement action
-// Returns whether the notification was sent successfully
-func SendEnforcementNotification(ctx context.Context, dg *discordgo.Session, record GuildEnforcementRecord, targetDiscordID, guildName string) (bool, error) {
+// SendEnforcementNotification sends a DM to the user about their enforcement action.
+// If customFooter is non-empty, it replaces the default footer in the notification message.
+// Returns whether the notification was sent successfully.
+func SendEnforcementNotification(ctx context.Context, dg *discordgo.Session, record GuildEnforcementRecord, targetDiscordID, guildName, customFooter string) (bool, error) {
 	if dg == nil {
 		return false, fmt.Errorf("discord session is nil")
 	}
@@ -634,7 +635,7 @@ func SendEnforcementNotification(ctx context.Context, dg *discordgo.Session, rec
 	}
 
 	// Get the formatted notification message
-	message := record.GetNotificationMessage(guildName)
+	message := record.GetNotificationMessage(guildName, customFooter)
 
 	// Attempt to send the DM
 	_, err := SendUserMessage(ctx, dg, targetDiscordID, message)
