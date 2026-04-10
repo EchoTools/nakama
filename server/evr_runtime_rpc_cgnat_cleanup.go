@@ -11,9 +11,9 @@ import (
 )
 
 type CGNATCleanupResponse struct {
-	BrokenLinks  int      `json:"broken_links"`
-	AffectedUsers int     `json:"affected_users"`
-	Details      []string `json:"details"`
+	BrokenLinks   int      `json:"broken_links"`
+	AffectedUsers int      `json:"affected_users"`
+	Details       []string `json:"details"`
 }
 
 // CGNATCleanupRPC breaks alt links that are based entirely on weak signals
@@ -29,7 +29,7 @@ func CGNATCleanupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		return "", runtime.NewError(fmt.Sprintf("cleanup failed: %v", err), StatusInternalError)
 	}
 
-	// Send audit log
+	// Send audit log (best-effort)
 	settings := ServiceSettings()
 	if settings != nil && settings.ServiceAuditChannelID != "" {
 		summary := fmt.Sprintf("CGNAT cleanup: broke %d alt links across %d users.", brokenLinks, affectedUsers)
@@ -43,8 +43,7 @@ func CGNATCleanupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 				summary += fmt.Sprintf("\n... and %d more", len(details)-maxDetails)
 			}
 		}
-		// Audit log send is best-effort here
-		_ = summary
+		logger.Info("CGNAT cleanup summary: %s", summary)
 	}
 
 	resp := CGNATCleanupResponse{
@@ -57,16 +56,13 @@ func CGNATCleanupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 }
 
 // runCGNATCleanup scans all LoginHistory records and breaks alt links based
-// entirely on weak signals. Returns the count of broken links, affected users,
-// and a detail log.
+// entirely on weak signals. Uses versioned writes with retry on conflict.
 func runCGNATCleanup(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, detector *CGNATDetector) (brokenLinks, affectedUsers int, details []string, err error) {
-	// Track which user pairs have been processed to avoid double-processing
 	processed := make(map[string]bool)
 	affectedSet := make(map[string]bool)
 
 	var cursor string
 	for {
-		// Scan all LoginHistory records
 		objects, nextCursor, listErr := nk.StorageList(ctx, SystemUserID, "", LoginStorageCollection, 100, cursor)
 		if listErr != nil {
 			return brokenLinks, len(affectedSet), details, fmt.Errorf("storage list: %w", listErr)
@@ -87,11 +83,11 @@ func runCGNATCleanup(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 				Version: obj.Version,
 			})
 
-			// Check each alt link
+			// Identify alt links to break (all items are weak signals)
 			toBreak := make([]string, 0)
 			for altID, matches := range history.AlternateMatches {
-				pairKey := pairKey(obj.UserId, altID)
-				if processed[pairKey] {
+				pk := pairKey(obj.UserId, altID)
+				if processed[pk] {
 					continue
 				}
 
@@ -110,7 +106,7 @@ func runCGNATCleanup(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 
 				if allWeak {
 					toBreak = append(toBreak, altID)
-					processed[pairKey] = true
+					processed[pk] = true
 				}
 			}
 
@@ -118,25 +114,20 @@ func runCGNATCleanup(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 				continue
 			}
 
-			// Break the links
+			// Break the links — update both sides before counting
 			for _, altID := range toBreak {
-				delete(history.AlternateMatches, altID)
-				details = append(details, fmt.Sprintf("broke %s <-> %s", obj.UserId, altID))
-				brokenLinks++
-				affectedSet[obj.UserId] = true
-				affectedSet[altID] = true
-
-				// Also remove from the other user's history
+				// Load the other user's history first
 				otherHistory := NewLoginHistory(altID)
 				if readErr := StorableRead(ctx, nk, altID, otherHistory, false); readErr != nil {
-					logger.Warn("CGNAT cleanup: failed to load other history %s: %v", altID, readErr)
+					logger.Warn("CGNAT cleanup: failed to load other history %s, skipping pair: %v", altID, readErr)
 					continue
 				}
+
+				// Remove reciprocal links
 				delete(otherHistory.AlternateMatches, obj.UserId)
-				// Clear second-degree for recompute on next login
 				otherHistory.SecondDegreeAlternates = nil
 
-				// Write other history with unconditional version
+				// Write other history (versioned)
 				otherData, _ := json.Marshal(otherHistory)
 				otherMeta := otherHistory.StorageMeta()
 				if _, writeErr := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
@@ -144,30 +135,40 @@ func runCGNATCleanup(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 					Key:             otherMeta.Key,
 					UserID:          altID,
 					Value:           string(otherData),
-					Version:         "",
+					Version:         otherMeta.Version,
 					PermissionRead:  otherMeta.PermissionRead,
 					PermissionWrite: otherMeta.PermissionWrite,
 				}}); writeErr != nil {
-					logger.Warn("CGNAT cleanup: failed to write other history %s: %v", altID, writeErr)
+					// Version conflict or other error — skip this pair,
+					// the next login will re-evaluate with the CGNAT filter active
+					logger.Warn("CGNAT cleanup: failed to write other history %s (version conflict?), skipping: %v", altID, writeErr)
+					continue
 				}
+
+				// Both sides will be updated — now mutate and count
+				delete(history.AlternateMatches, altID)
+				details = append(details, fmt.Sprintf("broke %s <-> %s", obj.UserId, altID))
+				brokenLinks++
+				affectedSet[obj.UserId] = true
+				affectedSet[altID] = true
 			}
 
-			// Clear second-degree for recompute on next login
-			history.SecondDegreeAlternates = nil
-
-			// Write with unconditional version
-			histData, _ := json.Marshal(history)
-			histMeta := history.StorageMeta()
-			if _, writeErr := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
-				Collection:      histMeta.Collection,
-				Key:             histMeta.Key,
-				UserID:          obj.UserId,
-				Value:           string(histData),
-				Version:         "",
-				PermissionRead:  histMeta.PermissionRead,
-				PermissionWrite: histMeta.PermissionWrite,
-			}}); writeErr != nil {
-				logger.Warn("CGNAT cleanup: failed to write history %s: %v", obj.UserId, writeErr)
+			// Write this user's history if any links were broken
+			if affectedSet[obj.UserId] {
+				history.SecondDegreeAlternates = nil
+				histData, _ := json.Marshal(history)
+				histMeta := history.StorageMeta()
+				if _, writeErr := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
+					Collection:      histMeta.Collection,
+					Key:             histMeta.Key,
+					UserID:          obj.UserId,
+					Value:           string(histData),
+					Version:         histMeta.Version,
+					PermissionRead:  histMeta.PermissionRead,
+					PermissionWrite: histMeta.PermissionWrite,
+				}}); writeErr != nil {
+					logger.Warn("CGNAT cleanup: failed to write history %s (version conflict?): %v", obj.UserId, writeErr)
+				}
 			}
 		}
 

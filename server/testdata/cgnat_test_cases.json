@@ -1,14 +1,14 @@
 {
-  "_description": "Real production alt-link cases extracted 2026-04-09 for CGNAT false-positive testing",
-  "_note": "User IDs are real production IDs. Do NOT use for writes — read-only test fixtures.",
-  "_affected_users_total": 3203,
+  "_description": "Synthetic test cases modeled on production patterns observed 2026-04-09",
+  "_note": "All IDs and IPs are synthetic. Relationships and signal patterns match real production cases.",
+  "_affected_users_total_observed": 3203,
 
   "false_positives": [
     {
       "case": "tmobile_cgnat",
-      "description": "T-Mobile CGNAT (AS21928). Two unrelated users linked by shared T-Mobile IP + commodity Quest 2 profile + unknown HMD serial. 2520 match entries.",
-      "user_a": "d0ac5390-ba8b-4195-8a4f-4c75eab8ec3f",
-      "user_b": "8c21297d-9c14-44c5-b6ae-efc90845d8fb",
+      "description": "T-Mobile CGNAT (AS21928). Two unrelated users linked by shared T-Mobile IP + commodity Quest 2 profile + unknown HMD serial.",
+      "user_a": "d0510540-aaaa-4608-9da1-000000000001",
+      "user_b": "8c21297d-bbbb-44c5-b6ae-000000000002",
       "match_count": 2520,
       "shared_items": ["172.56.91.132", "Meta Quest 2::WIFI::::Unknown::3::8::0::0", "unknown"],
       "asn": 21928,
@@ -19,20 +19,20 @@
     {
       "case": "ip_only",
       "description": "Two users linked solely by a shared AT&T IP address. No other signals.",
-      "user_a": "fcaca6ff-e34a-48a0-81b8-1076820824be",
-      "user_b": "6050f003-50f9-46e2-97be-4d27369821f2",
+      "user_a": "fcaca6ff-cccc-48a0-81b8-000000000003",
+      "user_b": "6050f003-dddd-46e2-97be-000000000004",
       "match_count": 1,
       "shared_items": ["166.205.97.60"],
       "asn": 7018,
       "asn_name": "ATT-INTERNET4",
       "expected_after_fix": "link_broken",
-      "reason": "Single shared IP on AT&T. AT&T uses CGNAT on mobile. Even if not flagged as CGNAT ASN, this is an IP-only link with no corroborating signals."
+      "reason": "Single shared IP on AT&T. Even if not flagged as CGNAT ASN, this is an IP-only link with no corroborating signals."
     },
     {
       "case": "german_isp_dynamic_ip",
-      "description": "Vodafone Germany (AS3209). Two users sharing 83 distinct IPs from dynamic IP pool + commodity Quest 2 profile + unknown HMD. 40,426 match entries creating a 5MB storage record.",
-      "user_a": "e19ea28b-a8b3-4560-b826-fbb2e32d549a",
-      "user_b": "8ebb578c-b805-4dd2-995a-69a398b9e056",
+      "description": "Vodafone Germany (AS3209). Two users sharing many IPs from dynamic IP pool + commodity Quest 2 profile + unknown HMD.",
+      "user_a": "e19ea28b-eeee-4560-b826-000000000005",
+      "user_b": "8ebb578c-ffff-4dd2-995a-000000000006",
       "match_count": 40426,
       "shared_items_non_ip": ["Meta Quest 2::WIFI::::Unknown::3::8::0::0", "unknown"],
       "shared_ip_count": 83,
@@ -40,13 +40,13 @@
       "asn": 3209,
       "asn_name": "VODANET (Vodafone Germany)",
       "expected_after_fix": "link_broken",
-      "reason": "All IPs are from Vodafone dynamic pool (not technically CGNAT but same problem — dynamic IPs reused across customers). Commodity Quest 2 profile and unknown HMD serial are weak signals. Needs Vodafone AS3209 added to CGNAT ASN list or IPs detected by heuristic."
+      "reason": "All IPs are from Vodafone dynamic pool. Commodity Quest 2 profile and unknown HMD serial are weak signals. Needs AS3209 added to CGNAT ASN list."
     },
     {
       "case": "quest3_commodity_profile_only",
-      "description": "Two users from the 66-account cluster who share IP + Quest 3 profile + unknown HMD but NOT the same XPID. This user is NOT the 66-real-alt person — they just happened to share the same AT&T IP.",
-      "user_a": "e250efb9-ceca-41a6-9201-99f48db568d5",
-      "user_b": "243c3ff0-83a9-42a7-bf3c-3882c7b78383",
+      "description": "Two unrelated users who share IP + Quest 3 profile + unknown HMD but NOT the same XPID.",
+      "user_a": "e250efb9-1111-41a6-9201-000000000007",
+      "user_b": "243c3ff0-2222-42a7-bf3c-000000000008",
       "match_count": 9,
       "shared_items": ["108.236.102.152", "Meta Quest 3::WIFI::::Unknown::3::6::0::0", "unknown"],
       "asn": 7018,
@@ -59,9 +59,9 @@
   "true_positives": [
     {
       "case": "real_alt_shared_xpid",
-      "description": "66-account cluster. All accounts share the same XPID (OVR-ORG-3930901337016247) — same physical Quest device, same person creating many accounts.",
-      "user_a": "165071a9-657f-4592-91cb-8706d1fed1cb",
-      "user_b": "001d2cb1-6ea3-4295-b89f-beb5caad52ff",
+      "description": "Multi-account cluster. All accounts share the same XPID — same physical Quest device, same person creating many accounts.",
+      "user_a": "165071a9-3333-4592-91cb-000000000009",
+      "user_b": "001d2cb1-4444-4295-b89f-000000000010",
       "match_count": 1,
       "shared_items": ["108.236.102.152", "Meta Quest 3::WIFI::::Unknown::3::6::0::0", "OVR-ORG-3930901337016247", "unknown"],
       "asn": 7018,

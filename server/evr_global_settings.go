@@ -22,9 +22,10 @@ func ServiceSettings() *ServiceSettingsData {
 
 func ServiceSettingsUpdate(data *ServiceSettingsData) {
 	serviceSettings.Store(data)
-	// Propagate CGNAT settings to the detector if initialized
-	if d := GetCGNATDetector(); d != nil {
-		d.UpdateSettings(data.CGNAT)
+	if data != nil {
+		if d := GetCGNATDetector(); d != nil {
+			d.UpdateSettings(data.CGNAT)
+		}
 	}
 }
 
@@ -87,12 +88,13 @@ type ServiceSettingsData struct {
 // CGNATSettings configures detection of CGNAT and shared-IP providers
 // to prevent false-positive alt account linking.
 type CGNATSettings struct {
-	ASNs                     []int    `json:"asns"`                       // ASN numbers known to use CGNAT (e.g. 14593 for Starlink, 21928 for T-Mobile)
-	CIDRs                    []string `json:"cidrs"`                      // CIDR ranges known to be CGNAT (e.g. "100.64.0.0/10")
-	CommodityProfilePrefixes []string `json:"commodity_profile_prefixes"` // SystemProfile prefixes for commodity hardware (e.g. "Meta Quest 3::")
-	HeuristicEnabled         bool     `json:"heuristic_enabled"`          // Enable heuristic CGNAT detection (warns moderators only)
-	HeuristicAccountThreshold int     `json:"heuristic_threshold"`        // Accounts per IP to trigger warning
-	HeuristicWindowDays      int      `json:"heuristic_window_days"`      // Time window for heuristic in days
+	ASNs                      []int    `json:"asns"`                       // ASN numbers known to use CGNAT (e.g. 14593 for Starlink, 21928 for T-Mobile)
+	CIDRs                     []string `json:"cidrs"`                      // CIDR ranges known to be CGNAT (e.g. "100.64.0.0/10")
+	CommodityProfilePrefixes  []string `json:"commodity_profile_prefixes"` // SystemProfile prefixes for commodity hardware (e.g. "Meta Quest 3::")
+	HeuristicEnabled          bool     `json:"heuristic_enabled"`          // Enable heuristic CGNAT detection (warns moderators only)
+	HeuristicAccountThreshold int      `json:"heuristic_threshold"`        // Accounts per IP to trigger warning
+	HeuristicWindowDays       int      `json:"heuristic_window_days"`      // Time window for heuristic in days
+	CleanupOnStartup          bool     `json:"cleanup_on_startup"`         // Run retroactive cleanup on server startup (default false)
 }
 
 type PruneSettings struct {
@@ -347,6 +349,17 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 	}
 	if data.Matchmaking.ReducingPrecisionMaxCycles == 0 {
 		data.Matchmaking.ReducingPrecisionMaxCycles = 5 // Maximum 5 cycles before fully relaxing
+	}
+
+	// Seed CGNAT detection defaults
+	if len(data.CGNAT.ASNs) == 0 {
+		data.CGNAT.ASNs = []int{14593, 21928} // Starlink, T-Mobile
+	}
+	if len(data.CGNAT.CIDRs) == 0 {
+		data.CGNAT.CIDRs = []string{"100.64.0.0/10"} // RFC 6598 shared address space
+	}
+	if len(data.CGNAT.CommodityProfilePrefixes) == 0 {
+		data.CGNAT.CommodityProfilePrefixes = []string{"Meta Quest 2::", "Meta Quest 3::", "Meta Quest 3S::"}
 	}
 
 	if data.RemoteLogFilters == nil {

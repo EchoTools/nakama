@@ -257,29 +257,52 @@ func (d *CGNATDetector) evictOldestIPs() {
 }
 
 // RefreshASNData downloads and parses both IPv4 and IPv6 ASN data.
+// Returns an error only if both datasets fail to load.
 func (d *CGNATDetector) RefreshASNData(ctx context.Context) error {
-	ranges4, err := loadASNData(ctx, ip2asnV4URL, ip2asnV4Cache, true)
-	if err != nil {
-		d.logger.Warn("CGNAT: failed to load IPv4 ASN data: %v", err)
+	var errs []string
+
+	ranges4, err4 := loadASNData(ctx, ip2asnV4URL, ip2asnV4Cache, true)
+	if err4 != nil {
+		if d.logger != nil {
+			d.logger.Warn("CGNAT: failed to load IPv4 ASN data: %v", err4)
+		}
+		errs = append(errs, fmt.Sprintf("v4: %v", err4))
 	}
 
-	ranges6, err := loadASNData(ctx, ip2asnV6URL, ip2asnV6Cache, false)
-	if err != nil {
-		d.logger.Warn("CGNAT: failed to load IPv6 ASN data: %v", err)
+	ranges6, err6 := loadASNData(ctx, ip2asnV6URL, ip2asnV6Cache, false)
+	if err6 != nil {
+		if d.logger != nil {
+			d.logger.Warn("CGNAT: failed to load IPv6 ASN data: %v", err6)
+		}
+		errs = append(errs, fmt.Sprintf("v6: %v", err6))
 	}
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
+	loaded := false
 	if ranges4 != nil {
 		d.asnRanges4 = convertToRanges4(ranges4)
-		d.logger.Info("CGNAT: loaded %d IPv4 ASN ranges", len(d.asnRanges4))
+		if d.logger != nil {
+			d.logger.Info("CGNAT: loaded %d IPv4 ASN ranges", len(d.asnRanges4))
+		}
+		loaded = true
 	}
 	if ranges6 != nil {
 		d.asnRanges6 = convertToRanges6(ranges6)
-		d.logger.Info("CGNAT: loaded %d IPv6 ASN ranges", len(d.asnRanges6))
+		if d.logger != nil {
+			d.logger.Info("CGNAT: loaded %d IPv6 ASN ranges", len(d.asnRanges6))
+		}
+		loaded = true
 	}
-	d.lastUpdate = time.Now()
+
+	if loaded {
+		d.lastUpdate = time.Now()
+	}
+
+	if ranges4 == nil && ranges6 == nil {
+		return fmt.Errorf("failed to load any ASN data: %s", strings.Join(errs, "; "))
+	}
 	return nil
 }
 
@@ -398,10 +421,8 @@ func loadASNData(ctx context.Context, url, cachePath string, isV4 bool) ([]rawAS
 	}
 
 	// Cache to disk
-	if writeErr := os.WriteFile(cachePath, data, 0644); writeErr != nil {
-		// Non-fatal, just log
-		fmt.Printf("CGNAT: failed to cache ASN data to %s: %v\n", cachePath, writeErr)
-	}
+	// Cache to disk (non-fatal if it fails — data is already in memory)
+	_ = os.WriteFile(cachePath, data, 0644)
 
 	return parseASNGzip(data, isV4)
 }

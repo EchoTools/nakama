@@ -66,17 +66,19 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		cgnat.UpdateSettings(settings.CGNAT)
 	}
 	SetCGNATDetector(cgnat)
-	// Load ASN data and run retroactive cleanup in background (does not block startup)
+	// Load ASN data in background (does not block startup)
 	go func() {
 		if err := cgnat.RefreshASNData(ctx); err != nil {
 			logger.Warn("CGNAT: ASN data refresh failed: %v", err)
 		}
-		// Run retroactive cleanup after ASN data is available
-		brokenLinks, affectedUsers, _, cleanupErr := runCGNATCleanup(ctx, logger, nk, cgnat)
-		if cleanupErr != nil {
-			logger.Warn("CGNAT: startup cleanup failed: %v", cleanupErr)
-		} else if brokenLinks > 0 {
-			logger.Info("CGNAT: startup cleanup broke %d alt links across %d users", brokenLinks, affectedUsers)
+		// Run retroactive cleanup only if enabled in settings
+		if s := ServiceSettings(); s != nil && s.CGNAT.CleanupOnStartup {
+			brokenLinks, affectedUsers, _, cleanupErr := runCGNATCleanup(ctx, logger, nk, cgnat)
+			if cleanupErr != nil {
+				logger.Warn("CGNAT: startup cleanup failed: %v", cleanupErr)
+			} else if brokenLinks > 0 {
+				logger.Info("CGNAT: startup cleanup broke %d alt links across %d users", brokenLinks, affectedUsers)
+			}
 		}
 	}()
 
