@@ -2,6 +2,8 @@ module github.com/heroiclabs/nakama/v3
 
 go 1.25.5
 
+replace github.com/intinig/go-openskill => github.com/thesprockee/go-openskill v0.0.0-20260410050935-54fb95d3a264
+
 require (
 	github.com/anyascii/go v0.3.3
 	github.com/bits-and-blooms/bitset v1.24.3
@@ -41,7 +43,7 @@ require (
 	golang.org/x/crypto v0.47.0
 	golang.org/x/oauth2 v0.34.0
 	golang.org/x/time v0.14.0
-	gonum.org/v1/gonum v0.16.0
+	gonum.org/v1/gonum v0.17.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20260112192933-99fd39fd28a9
 	google.golang.org/grpc v1.78.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
