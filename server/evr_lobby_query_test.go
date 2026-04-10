@@ -134,18 +134,12 @@ func TestRegexEscapeForBluge_QuoteStringValueBroken(t *testing.T) {
 	}
 	for _, input := range problematic {
 		t.Run(input, func(t *testing.T) {
-			quoted := Query.QuoteStringValue(input)
-			afterBluge := simulateBlugeUnescape(quoted)
-			_, err := regexp.Compile(afterBluge)
-			if err == nil {
-				t.Skipf("QuoteStringValue(%q) happens to produce valid regex after Bluge unescape; not a failing case", input)
-			}
-			// Confirm regexEscapeForBluge fixes it.
+			// Verify regexEscapeForBluge produces valid regex after Bluge unescape.
 			escaped := regexEscapeForBluge(input)
-			afterBluge2 := simulateBlugeUnescape(escaped)
-			_, err2 := regexp.Compile(afterBluge2)
-			if err2 != nil {
-				t.Errorf("regexEscapeForBluge(%q) also fails after Bluge unescape: %v", input, err2)
+			afterBluge := simulateBlugeUnescape(escaped)
+			_, err := regexp.Compile(afterBluge)
+			if err != nil {
+				t.Errorf("regexEscapeForBluge(%q) fails after Bluge unescape: %v", input, err)
 			}
 		})
 	}
