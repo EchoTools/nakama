@@ -51,7 +51,7 @@ type GroupMetadata struct {
 
 	KickPlayerAllowPrivates *bool    `json:"kick_player_allow_privates"` // Default allow_privates for /kick-player suspensions (default: true)
 	LoadoutCommandUsernames []string `json:"loadout_command_usernames"`  // Discord usernames allowed to use /loadout (legacy, prefer IDs)
-	LoadoutCommandUserIDs   []string `json:"loadout_command_user_ids"`   // Discord user IDs allowed to use /loadout
+	LoadoutCommandDiscordIDs []string `json:"loadout_command_user_ids"` // Discord user IDs allowed to use /loadout
 }
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {
