@@ -10,6 +10,8 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func (d *DiscordAppBot) linkHeadset(ctx context.Context, logger runtime.Logger, user *discordgo.Member, linkCode string) error {
@@ -45,7 +47,7 @@ func (d *DiscordAppBot) linkHeadset(ctx context.Context, logger runtime.Logger, 
 		// Authenticate/create an account.
 		if userID == "" {
 			tags["new_account"] = "true"
-			userID, _, _, err = d.nk.AuthenticateCustom(ctx, discordID, username, true)
+			userID, _, err = authenticateOrResolveConflict(ctx, nk, discordID, username)
 			if err != nil {
 				return fmt.Errorf("failed to authenticate (or create) user %s: %w", discordID, err)
 			}
@@ -225,4 +227,63 @@ func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.
 	}
 
 	return editInteractionResponse(s, i, content)
+}
+
+// authenticateOrResolveConflict attempts to create an account via AuthenticateCustom.
+// If the username is already taken by a different account, it renames the conflicting
+// account and retries. The Discord username is authoritative: the new user keeps it.
+func authenticateOrResolveConflict(ctx context.Context, nk runtime.NakamaModule, discordID, username string) (string, string, error) {
+	userID, uname, _, err := nk.AuthenticateCustom(ctx, discordID, username, true)
+	if err == nil {
+		return userID, uname, nil
+	}
+
+	if status.Code(err) != codes.AlreadyExists {
+		return "", "", fmt.Errorf("failed to create account: %w", err)
+	}
+
+	// Username conflict. Look up who holds it.
+	users, err := nk.UsersGetUsername(ctx, []string{username})
+	if err != nil {
+		return "", "", fmt.Errorf("failed to look up conflicting username %q: %w", username, err)
+	}
+
+	if len(users) == 0 {
+		// Race condition: conflict gone. Retry once.
+		userID, uname, _, err = nk.AuthenticateCustom(ctx, discordID, username, true)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to create account after conflict resolved: %w", err)
+		}
+		return userID, uname, nil
+	}
+
+	conflicting := users[0]
+
+	// Check if the conflicting account belongs to the same Discord user.
+	conflictAccount, err := nk.AccountGetId(ctx, conflicting.Id)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to look up conflicting account %s: %w", conflicting.Id, err)
+	}
+	if conflictAccount.GetCustomId() == discordID {
+		// Same Discord user already owns this username. Return the existing account.
+		return conflicting.Id, conflicting.Username, nil
+	}
+
+	// Rename the conflicting account: append "_" + first 4 chars of their user ID.
+	suffix := conflicting.Id
+	if len(suffix) > 4 {
+		suffix = suffix[:4]
+	}
+	renamedUsername := username + "_" + suffix
+
+	if err := nk.AccountUpdateId(ctx, conflicting.Id, renamedUsername, nil, "", "", "", "", ""); err != nil {
+		return "", "", fmt.Errorf("failed to resolve username conflict: could not rename account %s: %w", conflicting.Id, err)
+	}
+
+	// Retry authentication with the now-available username.
+	userID, uname, _, err = nk.AuthenticateCustom(ctx, discordID, username, true)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create account after renaming conflicting user: %w", err)
+	}
+	return userID, uname, nil
 }
