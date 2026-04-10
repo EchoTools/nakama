@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"net"
+	"sort"
 	"testing"
 	"time"
 )
@@ -812,12 +813,15 @@ func TestProductionCase_VodafoneGermany(t *testing.T) {
 	d := testDetectorWithASN(t, testRanges4, nil, []int{14593, 21928, 3209})
 	d.commodityProfilePrefixes = []string{"Meta Quest 2::"}
 
-	// Add Vodafone ranges to ASN data
+	// Add Vodafone ranges to ASN data (must re-sort for binary search)
 	d.mu.Lock()
 	d.asnRanges4 = append(d.asnRanges4, asnRange4{
 		Start: ipv4ToUint32(net.ParseIP("95.88.0.0").To4()),
 		End:   ipv4ToUint32(net.ParseIP("95.91.255.255").To4()),
 		ASN:   3209,
+	})
+	sort.Slice(d.asnRanges4, func(i, j int) bool {
+		return d.asnRanges4[i].Start < d.asnRanges4[j].Start
 	})
 	d.mu.Unlock()
 
