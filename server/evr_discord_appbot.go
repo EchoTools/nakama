@@ -1498,10 +1498,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if md.InGameNames == nil {
 					md.InGameNames = make(map[string]GroupInGameName, 1)
 				}
-				// Store the player-chosen display name, clearing any moderator override
 				md.InGameNames[groupID] = GroupInGameName{
 					GroupID:     groupID,
 					DisplayName: displayName,
+					IsOverride:  true,
 				}
 			}
 
