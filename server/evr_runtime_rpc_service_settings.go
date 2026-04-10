@@ -206,14 +206,20 @@ func validateServiceSettings(s *ServiceSettingsData) []string {
 	if mm.MaxRatingRangeExpansion < 0 || mm.MaxRatingRangeExpansion > 100 {
 		errs = append(errs, "matchmaking.max_rating_range_expansion must be between 0 and 100")
 	}
-	if mm.ReservationThresholdSecs < 0 || mm.ReservationThresholdSecs > 600 {
-		errs = append(errs, "matchmaking.reservation_threshold_secs must be between 0 and 600")
+	if mm.AccumulationThresholdSecs < 0 || mm.AccumulationThresholdSecs > 600 {
+		errs = append(errs, "matchmaking.accumulation_threshold_secs must be between 0 and 600")
 	}
-	if mm.MaxReservationRatio < 0 || mm.MaxReservationRatio > 1.0 {
-		errs = append(errs, "matchmaking.max_reservation_ratio must be between 0 and 1.0")
+	if mm.AccumulationMaxAgeSecs < 0 || mm.AccumulationMaxAgeSecs > 3600 {
+		errs = append(errs, "matchmaking.accumulation_max_age_secs must be between 0 and 3600")
 	}
-	if mm.ReservationSafetyValveSecs < 0 || mm.ReservationSafetyValveSecs > 3600 {
-		errs = append(errs, "matchmaking.reservation_safety_valve_secs must be between 0 and 3600")
+	if mm.AccumulationInitialRadius < 0 || mm.AccumulationInitialRadius > 100 {
+		errs = append(errs, "matchmaking.accumulation_initial_radius must be between 0 and 100")
+	}
+	if mm.AccumulationRadiusExpansionPerCycle < 0 || mm.AccumulationRadiusExpansionPerCycle > 100 {
+		errs = append(errs, "matchmaking.accumulation_radius_expansion_per_cycle must be between 0 and 100")
+	}
+	if mm.AccumulationMaxRadius < 0 || mm.AccumulationMaxRadius > 200 {
+		errs = append(errs, "matchmaking.accumulation_max_radius must be between 0 and 200")
 	}
 	if mm.CrashRecoveryWindowSecs < -1 || mm.CrashRecoveryWindowSecs > 600 {
 		errs = append(errs, "matchmaking.crash_recovery_window_secs must be between -1 and 600")
