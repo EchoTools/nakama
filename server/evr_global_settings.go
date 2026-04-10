@@ -22,6 +22,10 @@ func ServiceSettings() *ServiceSettingsData {
 
 func ServiceSettingsUpdate(data *ServiceSettingsData) {
 	serviceSettings.Store(data)
+	// Propagate CGNAT settings to the detector if initialized
+	if d := GetCGNATDetector(); d != nil {
+		d.UpdateSettings(data.CGNAT)
+	}
 }
 
 // RatingDefaults contains the default values for skill ratings

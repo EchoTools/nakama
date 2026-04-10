@@ -60,6 +60,19 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	// Store skill-based matchmaker globally so it can be connected to the lobby builder
 	globalSkillBasedMatchmaker.Store(sbmm)
 
+	// Initialize CGNAT detector for alt detection filtering
+	cgnat := NewCGNATDetector(logger)
+	if settings := ServiceSettings(); settings != nil {
+		cgnat.UpdateSettings(settings.CGNAT)
+	}
+	SetCGNATDetector(cgnat)
+	// Load ASN data in background (does not block startup)
+	go func() {
+		if err := cgnat.RefreshASNData(ctx); err != nil {
+			logger.Warn("CGNAT: ASN data refresh failed: %v", err)
+		}
+	}()
+
 	// Register hooks
 	//if err = initializer.RegisterBeforeReadStorageObjects(BeforeReadStorageObjectsHook); err != nil {
 	//		return fmt.Errorf("unable to register AfterReadStorageObjects hook: %w", err)
