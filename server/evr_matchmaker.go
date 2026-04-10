@@ -39,14 +39,22 @@ type SkillBasedMatchmaker struct {
 	isProcessing     *atomic.Bool  // Whether matchmaker is currently processing
 	processMu        sync.RWMutex  // Protects timing state reads during backfill coordination
 
-	// Reservation state (persists across cycles, in-memory only)
-	reservationMu   sync.Mutex
-	starvingTickets map[string]*StarvingTicket // ticket ID -> state
+	// Accumulation state (persists across cycles, in-memory only)
+	accumulationMu    sync.Mutex
+	accumulationPools map[string]*AccumulationPool // ticket ID -> pool
 }
 
-type StarvingTicket struct {
-	Ticket         string
-	FirstStarvedAt time.Time // When this ticket first became starving
+// AccumulationPool holds reserved players for a starving ticket across matchmaker cycles.
+// Players in the pool are excluded from general candidate formation until the pool
+// has enough players for a full match, at which point they are promoted as a pre-formed candidate.
+type AccumulationPool struct {
+	StarvingTicket  string
+	StarvingEntries []string  // session IDs of the starving ticket's players
+	ReservedPlayers []string  // session IDs of accumulated best-fit players
+	CenterMu        float64  // mean of all party members' rating_mu
+	SkillRadius     float64  // current acceptable skill range (widens over time)
+	CreatedAt       time.Time
+	TargetSize      int      // total players needed (from max_team_size * 2)
 }
 
 func (s *SkillBasedMatchmaker) StoreLatestResult(candidates, madeMatches [][]runtime.MatchmakerEntry) {
@@ -120,7 +128,7 @@ func NewSkillBasedMatchmaker() *SkillBasedMatchmaker {
 		lastProcessStart: atomic.NewInt64(0),
 		lastProcessEnd:   atomic.NewInt64(0),
 		isProcessing:     atomic.NewBool(false),
-		starvingTickets:  make(map[string]*StarvingTicket),
+		accumulationPools: make(map[string]*AccumulationPool),
 	}
 
 	sbmm.latestCandidates.Store([][]runtime.MatchmakerEntry{})
@@ -284,9 +292,9 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		"avg_wait_time_secs":   avgWaitTime,
 	}
 
-	if fc, ok := filterCounts["starving_tickets"]; ok && fc > 0 {
-		logFields["starving_tickets"] = fc
-		logFields["reserved_players"] = filterCounts["reserved_players"]
+	if fc, ok := filterCounts["accumulation_pools"]; ok && fc > 0 {
+		logFields["accumulation_pools"] = fc
+		logFields["accumulated_players"] = filterCounts["accumulated_players"]
 	}
 
 	if len(highSkillWaiters) > 0 {
