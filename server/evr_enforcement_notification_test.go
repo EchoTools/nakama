@@ -8,11 +8,12 @@ import (
 
 func TestGuildEnforcementRecord_GetNotificationMessage(t *testing.T) {
 	tests := []struct {
-		name      string
-		record    GuildEnforcementRecord
-		guildName string
-		want      []string // Strings that should be present in the message
-		notWant   []string // Strings that should NOT be present
+		name         string
+		record       GuildEnforcementRecord
+		guildName    string
+		customFooter string
+		want         []string // Strings that should be present in the message
+		notWant      []string // Strings that should NOT be present
 	}{
 		{
 			name: "Basic suspension with rule violated",
@@ -147,11 +148,50 @@ func TestGuildEnforcementRecord_GetNotificationMessage(t *testing.T) {
 				"Guild:", // Should not show guild field if name is empty
 			},
 		},
+		{
+			name: "Empty custom footer uses default",
+			record: GuildEnforcementRecord{
+				ID:             "test-id-6",
+				UserID:         "user-6",
+				GroupID:        "group-6",
+				CreatedAt:      time.Now(),
+				UpdatedAt:      time.Now(),
+				UserNoticeText: "Test reason",
+				Expiry:         time.Now().Add(1 * time.Hour),
+			},
+			guildName:    "Test Guild",
+			customFooter: "",
+			want: []string{
+				"/whoami",
+				"contact a guild administrator",
+			},
+		},
+		{
+			name: "Custom footer replaces default",
+			record: GuildEnforcementRecord{
+				ID:             "test-id-7",
+				UserID:         "user-7",
+				GroupID:        "group-7",
+				CreatedAt:      time.Now(),
+				UpdatedAt:      time.Now(),
+				UserNoticeText: "Test reason",
+				Expiry:         time.Now().Add(1 * time.Hour),
+			},
+			guildName:    "Test Guild",
+			customFooter: "Contact us at #appeals in our Discord server.",
+			want: []string{
+				"Contact us at #appeals in our Discord server.",
+			},
+			notWant: []string{
+				"/whoami",
+				"contact a guild administrator",
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.record.GetNotificationMessage(tt.guildName)
+			got := tt.record.GetNotificationMessage(tt.guildName, tt.customFooter)
 
 			// Check for expected strings
 			for _, want := range tt.want {
