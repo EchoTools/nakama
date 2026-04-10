@@ -343,7 +343,14 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 
 	// User is suspended from the group.
 	if gg.IsSuspended(userID, &params.xpID) {
-		go SendUserMessage(context.Background(), p.discordCache.dg, lobbyParams.DiscordID, roleSuspensionDMMessage(gg.Name()))
+		go func() {
+			if p.discordCache.dg == nil {
+				return
+			}
+			if _, err := SendUserMessage(context.Background(), p.discordCache.dg, lobbyParams.DiscordID, roleSuspensionDMMessage(gg.Name())); err != nil {
+				p.logger.Warn("Failed to send suspension DM", zap.Error(err))
+			}
+		}()
 		return joinRejected("suspended_user", roleSuspensionUserMessage(gg.Name()), roleSuspensionAuditMessage(gg.Name(), gg.RoleMap.Suspended))
 	}
 
@@ -585,10 +592,10 @@ func roleSuspensionUserMessage(guildName string) string {
 
 // roleSuspensionAuditMessage returns the audit log message for a role-based suspension rejection.
 func roleSuspensionAuditMessage(guildName, suspendedRoleID string) string {
-	return fmt.Sprintf("is suspended from %s via role: <@&%s>", guildName, suspendedRoleID)
+	return fmt.Sprintf("is suspended from %s via role: <@&%s>", EscapeDiscordMarkdown(guildName), suspendedRoleID)
 }
 
 // roleSuspensionDMMessage returns the Discord DM content sent to a role-suspended user.
 func roleSuspensionDMMessage(guildName string) string {
-	return fmt.Sprintf("You have been suspended from **%s** via a server role. Contact a moderator of that server for more information.", guildName)
+	return fmt.Sprintf("You have been suspended from **%s** via a server role. Contact a moderator of that server for more information.", EscapeDiscordMarkdown(guildName))
 }
