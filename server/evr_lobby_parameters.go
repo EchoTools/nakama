@@ -100,6 +100,35 @@ func (s LobbySessionParameters) MetricsTags() map[string]string {
 	}
 }
 
+// resolveDirectiveRole determines the entrant role when a join directive is
+// present. Explicit directive roles (orange, blue, spectator, moderator)
+// override the request. "any" or "" preserve the client's requested role,
+// falling back to TeamUnassigned only when the request itself is unset.
+func resolveDirectiveRole(requestRole int, directive *JoinDirective) int {
+	if directive == nil {
+		return requestRole
+	}
+	switch directive.Role {
+	case "orange":
+		return evr.TeamOrange
+	case "blue":
+		return evr.TeamBlue
+	case "spectator":
+		return evr.TeamSpectator
+	case "moderator":
+		return evr.TeamModerator
+	case "any", "":
+		// Preserve the client's requested role (e.g. spectator stream clients).
+		// Default to unassigned only when the request role is unset.
+		if requestRole >= 0 {
+			return requestRole
+		}
+		return evr.TeamUnassigned
+	default:
+		return requestRole
+	}
+}
+
 func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, session *sessionWS, request evr.LobbySessionRequest) (*LobbySessionParameters, error) {
 
 	var (
@@ -173,18 +202,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 
 			nextMatchID = joinDirective.MatchID
 
-			switch joinDirective.Role {
-			case "orange":
-				entrantRole = evr.TeamOrange
-			case "blue":
-				entrantRole = evr.TeamBlue
-			case "spectator":
-				entrantRole = evr.TeamSpectator
-			case "moderator":
-				entrantRole = evr.TeamModerator
-			case "any", "":
-				entrantRole = evr.TeamUnassigned
-			}
+			entrantRole = resolveDirectiveRole(entrantRole, joinDirective)
 		}
 
 		if !userSettings.IsMatchLocked() {
