@@ -884,7 +884,7 @@ func (d *DiscordAppBot) handleSetIGNModalSubmit(_ context.Context, logger runtim
 	targetProfile.InGameNames[groupID] = GroupInGameName{
 		GroupID:     groupID,
 		DisplayName: sanitizedDisplayName,
-		IsOverride:  isLocked,
+		IsOverride:  true,
 		IsLocked:    isLocked,
 	}
 
