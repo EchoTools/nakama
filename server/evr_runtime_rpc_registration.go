@@ -56,6 +56,15 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 				AllowedGroups: []string{GroupGlobalOperators},
 			},
 		},
+		// cgnat/cleanup - Break false-positive alt links from CGNAT IPs
+		{
+			ID:      "cgnat/cleanup",
+			Handler: CGNATCleanupRPC,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalOperators},
+			},
+		},
 
 		// Leaderboards - Any authenticated user can view
 		{

@@ -245,7 +245,7 @@ func IsLoadoutUserAllowed(metadata *GroupMetadata, discordUserID, discordUsernam
 		return false
 	}
 	// Check by immutable Discord user ID first (preferred).
-	for _, id := range metadata.LoadoutCommandUserIDs {
+	for _, id := range metadata.LoadoutCommandDiscordIDs {
 		if strings.TrimSpace(id) == discordUserID {
 			return true
 		}

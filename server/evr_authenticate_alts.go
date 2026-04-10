@@ -85,6 +85,7 @@ func LoginAlternatePatternSearch(ctx context.Context, nk runtime.NakamaModule, l
 			if err := StorableRead(ctx, nk, obj.UserId, otherHistory, false); err != nil {
 				return nil, nil, fmt.Errorf("error reading alt history: %w", err)
 			}
+			otherHistories[obj.UserId] = otherHistory
 			// Compare the entries.
 			matches = append(matches, loginHistoryCompare(loginHistory, otherHistory)...)
 		}
@@ -150,7 +151,7 @@ func loginHistoryCompare(a, b *LoginHistory) []*AlternateSearchMatch {
 		for _, itemsB := range authUserData[1] {
 			matchingItems := make([]string, 0, len(itemsA))
 			for i, item := range itemsA {
-				if item == itemsB[i] && item != "" {
+				if item == itemsB[i] && item != "" && !matchIgnoredAltPattern(item) {
 					// The items match.
 					matchingItems = append(matchingItems, item)
 				}

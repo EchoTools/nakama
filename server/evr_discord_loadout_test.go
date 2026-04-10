@@ -53,7 +53,7 @@ func TestIsLoadoutUserAllowed(t *testing.T) {
 		},
 		{
 			name:     "allowed by user ID",
-			metadata: &GroupMetadata{LoadoutCommandUserIDs: []string{"123", "456"}},
+			metadata: &GroupMetadata{LoadoutCommandDiscordIDs: []string{"123", "456"}},
 			userID:   "123",
 			username: "otheruser",
 			want:     true,
@@ -74,14 +74,14 @@ func TestIsLoadoutUserAllowed(t *testing.T) {
 		},
 		{
 			name:     "ID takes priority over username",
-			metadata: &GroupMetadata{LoadoutCommandUserIDs: []string{"123"}, LoadoutCommandUsernames: []string{"wrongname"}},
+			metadata: &GroupMetadata{LoadoutCommandDiscordIDs: []string{"123"}, LoadoutCommandUsernames: []string{"wrongname"}},
 			userID:   "123",
 			username: "differentname",
 			want:     true,
 		},
 		{
 			name:     "not allowed",
-			metadata: &GroupMetadata{LoadoutCommandUserIDs: []string{"456"}, LoadoutCommandUsernames: []string{"otheruser"}},
+			metadata: &GroupMetadata{LoadoutCommandDiscordIDs: []string{"456"}, LoadoutCommandUsernames: []string{"otheruser"}},
 			userID:   "123",
 			username: "user",
 			want:     false,

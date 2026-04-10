@@ -1,0 +1,86 @@
+{
+  "_description": "Synthetic test cases modeled on production patterns observed 2026-04-09",
+  "_note": "All IDs and IPs are synthetic. Relationships and signal patterns match real production cases.",
+  "_affected_users_total_observed": 3203,
+
+  "false_positives": [
+    {
+      "case": "tmobile_cgnat",
+      "description": "T-Mobile CGNAT (AS21928). Two unrelated users linked by shared T-Mobile IP + commodity Quest 2 profile + unknown HMD serial.",
+      "user_a": "d0510540-aaaa-4608-9da1-000000000001",
+      "user_b": "8c21297d-bbbb-44c5-b6ae-000000000002",
+      "match_count": 2520,
+      "shared_items": ["172.56.91.132", "Meta Quest 2::WIFI::::Unknown::3::8::0::0", "unknown"],
+      "asn": 21928,
+      "asn_name": "T-MOBILE-AS21928",
+      "expected_after_fix": "link_broken",
+      "reason": "All shared items are weak signals: CGNAT IP (T-Mobile AS21928), commodity Quest 2 profile, unknown HMD serial"
+    },
+    {
+      "case": "ip_only",
+      "description": "Two users linked solely by a shared AT&T IP address. No other signals.",
+      "user_a": "fcaca6ff-cccc-48a0-81b8-000000000003",
+      "user_b": "6050f003-dddd-46e2-97be-000000000004",
+      "match_count": 1,
+      "shared_items": ["166.205.97.60"],
+      "asn": 7018,
+      "asn_name": "ATT-INTERNET4",
+      "expected_after_fix": "link_broken",
+      "reason": "Single shared IP on AT&T. Even if not flagged as CGNAT ASN, this is an IP-only link with no corroborating signals."
+    },
+    {
+      "case": "german_isp_dynamic_ip",
+      "description": "Vodafone Germany (AS3209). Two users sharing many IPs from dynamic IP pool + commodity Quest 2 profile + unknown HMD.",
+      "user_a": "e19ea28b-eeee-4560-b826-000000000005",
+      "user_b": "8ebb578c-ffff-4dd2-995a-000000000006",
+      "match_count": 40426,
+      "shared_items_non_ip": ["Meta Quest 2::WIFI::::Unknown::3::8::0::0", "unknown"],
+      "shared_ip_count": 83,
+      "ip_ranges": ["95.90.252.0/22", "95.91.224.0/19"],
+      "asn": 3209,
+      "asn_name": "VODANET (Vodafone Germany)",
+      "expected_after_fix": "link_broken",
+      "reason": "All IPs are from Vodafone dynamic pool. Commodity Quest 2 profile and unknown HMD serial are weak signals. Needs AS3209 added to CGNAT ASN list."
+    },
+    {
+      "case": "quest3_commodity_profile_only",
+      "description": "Two unrelated users who share IP + Quest 3 profile + unknown HMD but NOT the same XPID.",
+      "user_a": "e250efb9-1111-41a6-9201-000000000007",
+      "user_b": "243c3ff0-2222-42a7-bf3c-000000000008",
+      "match_count": 9,
+      "shared_items": ["108.236.102.152", "Meta Quest 3::WIFI::::Unknown::3::6::0::0", "unknown"],
+      "asn": 7018,
+      "asn_name": "ATT-INTERNET4",
+      "expected_after_fix": "link_broken",
+      "reason": "Shared AT&T IP + commodity Quest 3 profile + unknown HMD. No XPID match. All weak signals."
+    }
+  ],
+
+  "true_positives": [
+    {
+      "case": "real_alt_shared_xpid",
+      "description": "Multi-account cluster. All accounts share the same XPID — same physical Quest device, same person creating many accounts.",
+      "user_a": "165071a9-3333-4592-91cb-000000000009",
+      "user_b": "001d2cb1-4444-4295-b89f-000000000010",
+      "match_count": 1,
+      "shared_items": ["108.236.102.152", "Meta Quest 3::WIFI::::Unknown::3::6::0::0", "OVR-ORG-3930901337016247", "unknown"],
+      "asn": 7018,
+      "asn_name": "ATT-INTERNET4",
+      "expected_after_fix": "link_preserved",
+      "reason": "Shares XPID (strong signal) — same physical device. IP and profile are also shared but the XPID alone is sufficient to maintain the link."
+    }
+  ],
+
+  "asn_reference": {
+    "14593": {"name": "SPACEX-STARLINK", "country": "US", "is_cgnat": true},
+    "21928": {"name": "T-MOBILE-AS21928", "country": "US", "is_cgnat": true},
+    "7018":  {"name": "ATT-INTERNET4", "country": "US", "is_cgnat": "partial — mobile CGNAT, residential is not"},
+    "3209":  {"name": "VODANET (Vodafone Germany)", "country": "DE", "is_cgnat": "dynamic IP pool, functionally similar"}
+  },
+
+  "commodity_profiles": {
+    "quest_2": "Meta Quest 2::WIFI::::Unknown::3::8::0::0",
+    "quest_3": "Meta Quest 3::WIFI::::Unknown::3::6::0::0",
+    "quest_3s": "Meta Quest 3S::WIFI::::Unknown::3::6::0::0"
+  }
+}

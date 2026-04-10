@@ -66,9 +66,38 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 		}
 	}
 
+	// Track login for CGNAT heuristic detection
+	if detector := GetCGNATDetector(); detector != nil {
+		detector.TrackLogin(e.ClientIP, e.UserID, ServiceSettings().ServiceAuditChannelID, dg)
+	}
+
 	hasDiabledAlts, err := loginHistory.UpdateAlternates(ctx, logger, nk)
 	if err != nil {
 		return fmt.Errorf("failed to update alternates: %w", err)
+	}
+
+	// Re-validate disabled alts against weak-signal filter: if all disabled
+	// alts are linked only by weak signals, suppress the kick.
+	if hasDiabledAlts {
+		if detector := GetCGNATDetector(); detector != nil {
+			firstIDs, _ := loginHistory.AlternateIDs()
+			strongIDs := filterStrongAlts(loginHistory, firstIDs, detector)
+			if len(strongIDs) == 0 {
+				hasDiabledAlts = false
+			} else {
+				// Re-check: do any of the strong-signal alts have disabled accounts?
+				hasStrongDisabledAlt := false
+				if accounts, accErr := nk.AccountsGetId(ctx, strongIDs); accErr == nil {
+					for _, a := range accounts {
+						if a.GetDisableTime() != nil && !a.GetDisableTime().AsTime().IsZero() {
+							hasStrongDisabledAlt = true
+							break
+						}
+					}
+				}
+				hasDiabledAlts = hasStrongDisabledAlt
+			}
+		}
 	}
 
 	if err := StorableWrite(ctx, nk, userID, loginHistory); err != nil {
