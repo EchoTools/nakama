@@ -89,7 +89,7 @@ func NewWhoAmI(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModu
 // ignDisplayStatus returns the status suffix for an IGN entry in lookup displays.
 // Returns strings like " (overridden)", " (locked)", " (overridden, locked)", or
 // " (`taken` is taken)" depending on the IGN state.
-func ignDisplayStatus(ign GroupInGameName, ignExists bool, takenName string, username string) string {
+func ignDisplayStatus(ign GroupInGameName, ignExists bool, takenName string) string {
 	if takenName != "" {
 		escapedTaken := strings.ReplaceAll(takenName, "`", "\\`")
 		return fmt.Sprintf(" (`%s` is taken)", escapedTaken)
@@ -142,7 +142,7 @@ func (w *WhoAmI) createUserAccountDetailsEmbed() *discordgo.MessageEmbed {
 			// Add status indicators for override, locked, or taken
 			takenName := w.takenDisplayNames[gid]
 			ign, ignExists := w.profile.InGameNames[gid]
-			status := ignDisplayStatus(ign, ignExists, takenName, w.profile.Username())
+			status := ignDisplayStatus(ign, ignExists, takenName)
 			if takenName != "" {
 				dn = strings.ReplaceAll(w.profile.Username(), "`", "\\`")
 			}
