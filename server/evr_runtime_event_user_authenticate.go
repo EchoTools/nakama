@@ -68,7 +68,9 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 
 	// Track login for CGNAT heuristic detection
 	if detector := GetCGNATDetector(); detector != nil {
-		detector.TrackLogin(e.ClientIP, e.UserID, ServiceSettings().ServiceAuditChannelID, dg)
+		if s := ServiceSettings(); s != nil {
+			detector.TrackLogin(e.ClientIP, e.UserID, s.ServiceAuditChannelID, dg)
+		}
 	}
 
 	hasDiabledAlts, err := loginHistory.UpdateAlternates(ctx, logger, nk)

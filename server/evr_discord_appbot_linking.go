@@ -275,10 +275,15 @@ func authenticateOrResolveConflict(ctx context.Context, nk runtime.NakamaModule,
 		suffix = suffix[:4]
 	}
 	// Truncate base username to leave room for "_" + suffix within 128-byte limit.
+	// Use rune-aware truncation to avoid splitting multi-byte UTF-8 characters.
 	maxBase := 128 - 1 - len(suffix)
 	base := username
 	if len(base) > maxBase {
-		base = base[:maxBase]
+		runes := []rune(base)
+		for len(string(runes)) > maxBase {
+			runes = runes[:len(runes)-1]
+		}
+		base = string(runes)
 	}
 	renamedUsername := base + "_" + suffix
 
