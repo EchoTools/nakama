@@ -519,6 +519,9 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 	params.ignoreDisabledAlternates = loginHistory.IgnoreDisabledAlternates
 	firstIDs, _ := loginHistory.AlternateIDs()
+	if detector := GetCGNATDetector(); detector != nil {
+		firstIDs = filterStrongAlts(loginHistory, firstIDs, detector)
+	}
 	params.enforcementUserIDs = append(firstIDs, params.profile.ID())
 	journals, err := EnforcementJournalsLoad(ctx, p.nk, params.enforcementUserIDs)
 	if err != nil {

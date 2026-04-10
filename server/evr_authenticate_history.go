@@ -49,8 +49,21 @@ func matchIgnoredAltPattern(pattern string) bool {
 	if _, ok := IgnoredLoginValues[pattern]; ok {
 		return true
 	} else if ip := net.ParseIP(pattern); ip != nil {
-		// Check if the IP is a private IP address
 		if ip.IsPrivate() {
+			return true
+		}
+		// Filter CGNAT IPs (Starlink, T-Mobile, etc.)
+		if d := GetCGNATDetector(); d != nil && d.IsCGNAT(pattern) {
+			return true
+		}
+	}
+	// Filter commodity hardware profiles (Quest headsets)
+	if d := GetCGNATDetector(); d != nil && d.IsWeakSignal(pattern) && net.ParseIP(pattern) == nil {
+		// IsWeakSignal on a non-IP, non-empty, non-"unknown" string means it matched
+		// a commodity profile prefix. Only filter if it's actually a profile match,
+		// not just because IsWeakSignal returns true for empty/"unknown" (those are
+		// already handled by IgnoredLoginValues).
+		if pattern != "" && pattern != "unknown" {
 			return true
 		}
 	}
