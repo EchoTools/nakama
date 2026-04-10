@@ -150,7 +150,7 @@ func loginHistoryCompare(a, b *LoginHistory) []*AlternateSearchMatch {
 		for _, itemsB := range authUserData[1] {
 			matchingItems := make([]string, 0, len(itemsA))
 			for i, item := range itemsA {
-				if item == itemsB[i] && item != "" {
+				if item == itemsB[i] && item != "" && !matchIgnoredAltPattern(item) {
 					// The items match.
 					matchingItems = append(matchingItems, item)
 				}
