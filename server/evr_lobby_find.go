@@ -458,7 +458,7 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 		}
 
 		// List all social matches that are open and have available slots.
-		query := lobbyParams.BackfillSearchQuery(false, false)
+		query := lobbyParams.BackfillSearchQuery(false)
 		matches, err := ListMatchStates(ctx, p.nk, query)
 		if err != nil {
 			return fmt.Errorf("failed to list matches: %w", err)

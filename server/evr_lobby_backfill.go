@@ -157,10 +157,7 @@ func (b *PostMatchmakerBackfill) calculateBackfillScoreOptimized(
 	// Rating scoring using pre-loaded settings
 	if bctx.settings.EnableSBMM && candidate.Mode == evr.ModeArenaPublic {
 		ratingDelta := math.Abs(match.Label.RatingMu - candidate.Rating)
-		ratingRange := bctx.settings.RatingRange
-		if ratingRange == 0 {
-			ratingRange = 2.0
-		}
+		ratingRange := 2.0
 
 		const reducingPrecisionRatingWeightScale = 0.5
 		if ratingDelta <= ratingRange || rpf >= reducingPrecisionRatingWeightScale {
@@ -680,10 +677,7 @@ func (b *PostMatchmakerBackfill) CalculateBackfillScore(candidate *BackfillCandi
 	// Rating scoring - closer ratings are better for SBMM
 	if settings.EnableSBMM && candidate.Mode == evr.ModeArenaPublic {
 		ratingDelta := math.Abs(match.Label.RatingMu - candidate.Rating)
-		ratingRange := settings.RatingRange
-		if ratingRange == 0 {
-			ratingRange = 2.0 // Default range
-		}
+		ratingRange := 2.0
 
 		// When reducing precision, only partially dampen rating-based scoring to keep SBMM influence.
 		const reducingPrecisionRatingWeightScale = 0.5

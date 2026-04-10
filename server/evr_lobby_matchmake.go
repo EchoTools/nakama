@@ -73,20 +73,18 @@ type MatchmakingTicketParameters struct {
 	MinCount                int
 	MaxCount                int
 	CountMultiple           int
-	IncludeSBMMRanges       bool
 	IncludeEarlyQuitPenalty bool
 }
 
 func (m *MatchmakingTicketParameters) MarshalText() ([]byte, error) {
-	// encode it as minCount/maxCount/countMultiple/includeRankRange/includeEarlyQuitPenalty
-	s := fmt.Sprintf("%d/%d/%d/%t/%t", m.MinCount, m.MaxCount, m.CountMultiple, m.IncludeSBMMRanges, m.IncludeEarlyQuitPenalty)
+	s := fmt.Sprintf("%d/%d/%d/%t", m.MinCount, m.MaxCount, m.CountMultiple, m.IncludeEarlyQuitPenalty)
 	return []byte(s), nil
 }
 
 func (m *MatchmakingTicketParameters) UnmarshalText(text []byte) error {
 
 	parts := strings.Split(string(text), "/")
-	if len(parts) != 5 {
+	if len(parts) != 4 {
 		return fmt.Errorf("invalid MatchmakingTicketParameters format")
 	}
 
@@ -105,13 +103,11 @@ func (m *MatchmakingTicketParameters) UnmarshalText(text []byte) error {
 		return err
 	}
 
-	includeRankRange := parts[3] == "true"
-	includeEarlyQuitPenalty := parts[4] == "true"
+	includeEarlyQuitPenalty := parts[3] == "true"
 
 	m.MinCount = minCount
 	m.MaxCount = maxCount
 	m.CountMultiple = countMultiple
-	m.IncludeSBMMRanges = includeRankRange
 	m.IncludeEarlyQuitPenalty = includeEarlyQuitPenalty
 
 	return nil
@@ -122,14 +118,12 @@ var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakingTicketParameters{
 		MinCount:                2,
 		MaxCount:                100,
 		CountMultiple:           2,
-		IncludeSBMMRanges:       false,
 		IncludeEarlyQuitPenalty: false,
 	},
 	evr.ModeCombatPublic: {
 		MinCount:                2,
 		MaxCount:                100,
 		CountMultiple:           2,
-		IncludeSBMMRanges:       false,
 		IncludeEarlyQuitPenalty: false,
 	},
 }
@@ -141,14 +135,6 @@ func (p *EvrPipeline) matchmakingTicketTimeout() time.Duration {
 }
 
 func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup, _ ...*EvrMatchPresence) (err error) {
-
-	stream := lobbyParams.GuildGroupStream()
-	count, err := p.nk.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
-	if err != nil {
-		logger.Error("Failed to get stream count", zap.Error(err))
-	}
-
-	// If there are fewer players online, reduce the fallback delay
 
 	var (
 		mmInterval               = time.Duration(p.config.GetMatchmaker().IntervalSec) * time.Second
@@ -166,12 +152,6 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		return fmt.Errorf("matchmaking ticket config not found for mode %s", lobbyParams.Mode)
 	}
 
-	if !strings.Contains(p.node, "dev") {
-		// If there are fewer than SBMMMinPlayerCount players online, reduce the fallback delay
-		if count < ServiceSettings().Matchmaking.SBMMMinPlayerCount {
-			ticketConfig.IncludeSBMMRanges = false
-		}
-	}
 	defer func() {
 		// Clean up the current ticket on exit
 		if currentTicket != "" {

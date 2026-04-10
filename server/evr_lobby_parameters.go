@@ -56,9 +56,7 @@ type LobbySessionParameters struct {
 	EarlyQuitPenaltyLevel        int                           `json:"early_quit_penalty_level"`
 	EarlyQuitMatchmakingTier     int32                         `json:"early_quit_matchmaking_tier"`
 	EnableSBMM                   bool                          `json:"disable_sbmm"`
-	EnableOrdinalRange           bool                          `json:"enable_ordinal_range"`
 	EnableDivisions              bool                          `json:"enable_divisions"`
-	MatchmakingRatingRange       float64                       `json:"rating_range"`
 	MatchmakingDivisions         []string                      `json:"divisions"`
 	MatchmakingExcludedDivisions []string                      `json:"excluded_divisions"`
 	MaxServerRTT                 int                           `json:"max_server_rtt"`
@@ -391,9 +389,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		BlockedIDs:                   blockedIDs,
 		EnableSBMM:                   globalSettings.EnableSBMM,
 		EnableDivisions:              globalSettings.EnableDivisions,
-		EnableOrdinalRange:           globalSettings.EnableOrdinalRange,
 		MatchmakingRating:            atomic.NewPointer(&matchmakingRating),
-		MatchmakingRatingRange:       globalSettings.RatingRange,
 		Verbose:                      sessionParams.profile.DiscordDebugMessages,
 		EarlyQuitPenaltyLevel:        earlyQuitPenaltyLevel,
 		EarlyQuitMatchmakingTier:     earlyQuitMatchmakingTier,
@@ -433,34 +429,7 @@ func (p LobbySessionParameters) String() string {
 	return string(data)
 }
 
-func calculateExpandedRatingRange(baseRange float64, matchmakingTimestamp time.Time) float64 {
-	if matchmakingTimestamp.IsZero() {
-		return baseRange
-	}
-
-	waitTime := time.Since(matchmakingTimestamp)
-	waitMinutes := waitTime.Minutes()
-
-	expansionPerMinute := 0.5
-	maxExpansion := 5.0
-	if settings := ServiceSettings(); settings != nil {
-		if settings.Matchmaking.RatingRangeExpansionPerMinute > 0 {
-			expansionPerMinute = settings.Matchmaking.RatingRangeExpansionPerMinute
-		}
-		if settings.Matchmaking.MaxRatingRangeExpansion > 0 {
-			maxExpansion = settings.Matchmaking.MaxRatingRangeExpansion
-		}
-	}
-
-	expansion := waitMinutes * expansionPerMinute
-	if expansion > maxExpansion {
-		expansion = maxExpansion
-	}
-
-	return baseRange + expansion
-}
-
-func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMaxRTT bool) string {
+func (p *LobbySessionParameters) BackfillSearchQuery(includeMaxRTT bool) string {
 	// Prevent joining matches that have just started (less than 30 seconds old).
 	const MatchStartTimeMinimumAgeSecs = 30
 
@@ -497,18 +466,6 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 		// Add each blocked user that is online to the backfill query addon
 		// Avoid backfilling matches with players that this player blocks.
 		qparts = append(qparts, fmt.Sprintf("-label.players.user_id:%s", Query.CreateMatchPattern(p.BlockedIDs)))
-	}
-
-	if includeMMR {
-		key := "rating_mu"
-		val := p.GetRating().Mu
-		rng := calculateExpandedRatingRange(p.MatchmakingRatingRange, p.MatchmakingTimestamp)
-
-		qparts = append(qparts,
-			// Exclusion
-			fmt.Sprintf("-label.%s:<%f", key, val-rng),
-			fmt.Sprintf("-label.%s:>%f", key, val+rng),
-		)
 	}
 
 	if len(p.RequiredFeatures) > 0 {
@@ -652,20 +609,6 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		rating := p.GetRating()
 		numericProperties["rating_mu"] = rating.Mu
 		numericProperties["rating_sigma"] = rating.Sigma
-
-		if p.EnableOrdinalRange && ticketParams.IncludeSBMMRanges {
-			key := "rating_mu"
-			val := rating.Mu
-			rng := calculateExpandedRatingRange(p.MatchmakingRatingRange, p.MatchmakingTimestamp)
-
-			if val != 0.0 {
-				lower := val - rng
-				upper := val + rng
-				numericProperties[key+"_min"] = lower
-				numericProperties[key+"_max"] = upper
-
-			}
-		}
 
 		/*
 			if p.EnableDivisions && len(p.MatchmakingDivisions) != 0 {

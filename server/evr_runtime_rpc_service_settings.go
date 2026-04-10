@@ -176,17 +176,8 @@ func validateServiceSettings(s *ServiceSettingsData) []string {
 	if mm.MaxServerRTT < 0 || mm.MaxServerRTT > 1000 {
 		errs = append(errs, "matchmaking.max_server_rtt must be between 0 and 1000")
 	}
-	if mm.SBMMMinPlayerCount < 0 || mm.SBMMMinPlayerCount > 1000 {
-		errs = append(errs, "matchmaking.sbmm_min_player_count must be between 0 and 1000")
-	}
-	if mm.PartySkillBoostPercent < 0 || mm.PartySkillBoostPercent > 1.0 {
-		errs = append(errs, "matchmaking.party_skill_boost_percent must be between 0 and 1.0")
-	}
 	if mm.GreenDivisionMaxAccountAgeDays < 0 || mm.GreenDivisionMaxAccountAgeDays > 3650 {
 		errs = append(errs, "matchmaking.green_division_max_account_age_days must be between 0 and 3650")
-	}
-	if mm.RatingRange < 0 || mm.RatingRange > 100 {
-		errs = append(errs, "matchmaking.rating_range must be between 0 and 100")
 	}
 	if mm.BackfillMinTimeSecs < 0 || mm.BackfillMinTimeSecs > 600 {
 		errs = append(errs, "matchmaking.backfill_min_time_secs must be between 0 and 600")
@@ -196,15 +187,6 @@ func validateServiceSettings(s *ServiceSettingsData) []string {
 	}
 	if mm.ReducingPrecisionMaxCycles < 0 || mm.ReducingPrecisionMaxCycles > 100 {
 		errs = append(errs, "matchmaking.reducing_precision_max_cycles must be between 0 and 100")
-	}
-	if mm.WaitTimePriorityThresholdSecs < 0 || mm.WaitTimePriorityThresholdSecs > 600 {
-		errs = append(errs, "matchmaking.wait_time_priority_threshold_secs must be between 0 and 600")
-	}
-	if mm.RatingRangeExpansionPerMinute < 0 || mm.RatingRangeExpansionPerMinute > 100 {
-		errs = append(errs, "matchmaking.rating_range_expansion_per_minute must be between 0 and 100")
-	}
-	if mm.MaxRatingRangeExpansion < 0 || mm.MaxRatingRangeExpansion > 100 {
-		errs = append(errs, "matchmaking.max_rating_range_expansion must be between 0 and 100")
 	}
 	if mm.AccumulationThresholdSecs < 0 || mm.AccumulationThresholdSecs > 600 {
 		errs = append(errs, "matchmaking.accumulation_threshold_secs must be between 0 and 600")
