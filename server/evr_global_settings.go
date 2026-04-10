@@ -120,25 +120,16 @@ type GlobalMatchmakingSettings struct {
 	EarlyQuitTier1Threshold        *int32                  `json:"early_quit_tier1_threshold"`          // Penalty level threshold for Tier 1 (good standing). Players with penalty <= threshold stay in Tier 1. Nil means not configured.
 	EarlyQuitTier2Threshold        *int32                  `json:"early_quit_tier2_threshold"`          // Penalty level threshold for Tier 2 (reserved for future Tier 3+ implementation). Nil means not configured.
 	ServerSelection                ServerSelectionSettings `json:"server_selection"`                    // The server selection settings
-	EnableOrdinalRange             bool                    `json:"enable_ordinal_range"`                // Enable ordinal range
-	RatingRange                    float64                 `json:"rating_range"`                        // The rating range
 	MatchmakingTicketsUseMu        bool                    `json:"sbmm_matchmaking_tickets_use_mu"`     // Use Mu instead of Ordinal for matchmaking tickets
 	BackfillQueriesUseMu           bool                    `json:"sbmm_backfill_queries_use_mu"`        // Use Mu instead of Ordinal for backfill queries
 	MatchmakerUseMu                bool                    `json:"sbmm_matchmaker_use_mu"`              // Use Mu instead of Ordinal for matchmaker player MMR values
 	BackfillMinTimeSecs            int                     `json:"backfill_min_time_secs"`              // Minimum time in seconds before backfilling a player to a match
-	SBMMMinPlayerCount             int                     `json:"sbmm_min_player_count"`               // Minimum player count to enable skill-based matchmaking
-	PartySkillBoostPercent         float64                 `json:"party_skill_boost_percent"`           // Boost party effective skill by this percentage (e.g., 0.10 = 10%) to account for coordination advantage
-	EnableRosterVariants           bool                    `json:"enable_roster_variants"`              // Generate multiple roster variants (balanced/stacked) for better match selection
-	UseSnakeDraftTeamFormation     bool                    `json:"use_snake_draft_team_formation"`      // Use snake draft instead of sequential filling for team formation
 	EnablePostMatchmakerBackfill   bool                    `json:"enable_post_matchmaker_backfill"`     // Enable post-matchmaker backfill using matchmaker exports and match list
 	EnablePostMatchSocialLobby     bool                    `json:"enable_post_match_social_lobby"`      // Create a social lobby for players to transition to after a private arena match ends
 	ReducingPrecisionIntervalSecs  int                     `json:"reducing_precision_interval_secs"`    // Interval in seconds after which constraints are relaxed for backfill (0 = disabled)
 	ReducingPrecisionMaxCycles     int                     `json:"reducing_precision_max_cycles"`       // Maximum number of precision reduction cycles before fully relaxing constraints
 	EnableMatchmakerStateCapture   bool                    `json:"enable_matchmaker_state_capture"`     // Enable capturing matchmaker state to files for debugging and replay (default false)
 	MatchmakerStateCaptureDir      string                  `json:"matchmaker_state_capture_dir"`        // Directory to save matchmaker state files (default "/tmp/matchmaker_replay")
-	WaitTimePriorityThresholdSecs  int                     `json:"wait_time_priority_threshold_secs"`   // Wait time threshold in seconds when wait time priority overrides match size priority (default 120)
-	RatingRangeExpansionPerMinute  float64                 `json:"rating_range_expansion_per_minute"`   // How much to expand rating range per minute of wait time (default 0.5)
-	MaxRatingRangeExpansion        float64                 `json:"max_rating_range_expansion"`          // Maximum total rating range expansion allowed (default 5.0)
 	EnableAccumulation                 bool    `json:"enable_accumulation"`                    // Enable pre-formation accumulation pools for starving tickets (default true)
 	AccumulationThresholdSecs          int     `json:"accumulation_threshold_secs"`             // Wait time before a ticket enters accumulation (default 90)
 	AccumulationMaxAgeSecs             int     `json:"accumulation_max_age_secs"`               // Safety valve: release reservations after this many seconds (default 300)
@@ -334,16 +325,6 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 
 	if data.Matchmaking.ArenaBackfillMaxAgeSecs == 0 {
 		data.Matchmaking.ArenaBackfillMaxAgeSecs = 270 // Default to 270 seconds (4.5 minutes)
-	}
-
-	if data.Matchmaking.SBMMMinPlayerCount == 0 {
-		data.Matchmaking.SBMMMinPlayerCount = 24
-	}
-
-	// Set default party skill boost (10% = 0.10)
-	// This accounts for coordination advantage of parties
-	if data.Matchmaking.PartySkillBoostPercent == 0 {
-		data.Matchmaking.PartySkillBoostPercent = 0.10
 	}
 
 	// Set default tier thresholds if not configured

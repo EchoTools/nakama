@@ -90,14 +90,10 @@ type MatchmakerConfigEarlyQuit struct {
 
 // MatchmakerConfigSBMM contains skill-based matchmaking settings
 type MatchmakerConfigSBMM struct {
-	EnableSkillBasedMatchmaking bool    `json:"enable_skill_based_matchmaking" usage:"Enable skill-based matchmaking (SBMM)."`
-	SBMMMinPlayerCount          int     `json:"sbmm_min_player_count" usage:"Minimum player count to enable skill-based matchmaking."`
-	SBMMMatchmakerUseMu         bool    `json:"sbmm_matchmaker_use_mu" usage:"Use Mu instead of Ordinal for matchmaker player MMR values."`
-	SBMMBackfillQueriesUseMu    bool    `json:"sbmm_backfill_queries_use_mu" usage:"Use Mu instead of Ordinal for backfill queries."`
-	SBMMMatchmakingTicketsUseMu bool    `json:"sbmm_matchmaking_tickets_use_mu" usage:"Use Mu instead of Ordinal for matchmaking tickets."`
-	RatingRange                 float64 `json:"rating_range" usage:"Maximum rating difference for matching players."`
-	EnableOrdinalRange          bool    `json:"enable_ordinal_range" usage:"Enable ordinal range filtering in matchmaking."`
-	PartySkillBoostPercent      float64 `json:"party_skill_boost_percent" usage:"Boost party effective skill by this percentage to account for coordination advantage."`
+	EnableSkillBasedMatchmaking bool `json:"enable_skill_based_matchmaking" usage:"Enable skill-based matchmaking (SBMM)."`
+	SBMMMatchmakerUseMu         bool `json:"sbmm_matchmaker_use_mu" usage:"Use Mu instead of Ordinal for matchmaker player MMR values."`
+	SBMMBackfillQueriesUseMu    bool `json:"sbmm_backfill_queries_use_mu" usage:"Use Mu instead of Ordinal for backfill queries."`
+	SBMMMatchmakingTicketsUseMu bool `json:"sbmm_matchmaking_tickets_use_mu" usage:"Use Mu instead of Ordinal for matchmaking tickets."`
 }
 
 // =============================================================================
@@ -114,11 +110,6 @@ type MatchmakerConfigDivisions struct {
 // Team Formation Configuration
 // =============================================================================
 
-// MatchmakerConfigTeamFormation contains team formation settings
-type MatchmakerConfigTeamFormation struct {
-	EnableRosterVariants       bool `json:"enable_roster_variants" usage:"Generate multiple roster variants (balanced/stacked) for better match selection."`
-	UseSnakeDraftTeamFormation bool `json:"use_snake_draft_team_formation" usage:"Use snake draft instead of sequential filling for team formation."`
-}
 
 // =============================================================================
 // Server Selection Configuration
@@ -141,7 +132,6 @@ type MatchmakerConfigResponse struct {
 	EarlyQuit       MatchmakerConfigEarlyQuit       `json:"early_quit" usage:"Early quit penalty settings."`
 	SBMM            MatchmakerConfigSBMM            `json:"sbmm" usage:"Skill-based matchmaking settings."`
 	Divisions       MatchmakerConfigDivisions       `json:"divisions" usage:"Division settings for player segmentation."`
-	TeamFormation   MatchmakerConfigTeamFormation   `json:"team_formation" usage:"Team formation settings."`
 	ServerSelection MatchmakerConfigServerSelection `json:"server_selection" usage:"Server selection settings."`
 	SkillRating     MatchmakerConfigSkillRating     `json:"skill_rating" usage:"Skill rating configuration for SBMM."`
 }
@@ -276,21 +266,13 @@ func MatchmakerConfigRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		},
 		SBMM: MatchmakerConfigSBMM{
 			EnableSkillBasedMatchmaking: mm.EnableSBMM,
-			SBMMMinPlayerCount:          mm.SBMMMinPlayerCount,
 			SBMMMatchmakerUseMu:         mm.MatchmakerUseMu,
 			SBMMBackfillQueriesUseMu:    mm.BackfillQueriesUseMu,
 			SBMMMatchmakingTicketsUseMu: mm.MatchmakingTicketsUseMu,
-			RatingRange:                 mm.RatingRange,
-			EnableOrdinalRange:          mm.EnableOrdinalRange,
-			PartySkillBoostPercent:      mm.PartySkillBoostPercent,
 		},
 		Divisions: MatchmakerConfigDivisions{
 			EnableDivisions:                mm.EnableDivisions,
 			GreenDivisionMaxAccountAgeDays: mm.GreenDivisionMaxAccountAgeDays,
-		},
-		TeamFormation: MatchmakerConfigTeamFormation{
-			EnableRosterVariants:       mm.EnableRosterVariants,
-			UseSnakeDraftTeamFormation: mm.UseSnakeDraftTeamFormation,
 		},
 		ServerSelection: MatchmakerConfigServerSelection{
 			MaxServerRTT: mm.MaxServerRTT,

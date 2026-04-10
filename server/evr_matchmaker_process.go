@@ -31,14 +31,15 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 	// Filter out players who are too far away from each other
 	filterCounts["max_rtt"] = m.filterWithinMaxRTT(candidates)
 
-	config := PredictionConfig{}
+	config := PredictionConfig{
+		PartyBoostPercent:      0.10,
+		EnableRosterVariants:   true,
+		UseSnakeDraftFormation: true,
+	}
 	if settings := ServiceSettings(); settings != nil {
 		mu := settings.SkillRating.Defaults.Mu
 		sigma := settings.SkillRating.Defaults.Sigma
 		z := settings.SkillRating.Defaults.Z
-		config.PartyBoostPercent = settings.Matchmaking.PartySkillBoostPercent
-		config.EnableRosterVariants = settings.Matchmaking.EnableRosterVariants
-		config.UseSnakeDraftFormation = settings.Matchmaking.UseSnakeDraftTeamFormation
 		config.OpenSkillOptions = &types.OpenSkillOptions{
 			Mu:    &mu,
 			Sigma: &sigma,
@@ -58,38 +59,17 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 		}
 	}
 
-	// Determine if wait time should override size priority
-	now := time.Now().UTC().Unix()
-	oldestWaitTimeSecs := now - oldestTicketTimestamp
-	waitTimeThreshold := int64(120) // Default: 120 seconds (2 minutes)
-	if settings := ServiceSettings(); settings != nil && settings.Matchmaking.WaitTimePriorityThresholdSecs > 0 {
-		waitTimeThreshold = int64(settings.Matchmaking.WaitTimePriorityThresholdSecs)
-	}
-	prioritizeWaitTime := oldestWaitTimeSecs >= waitTimeThreshold
-
+	// Sort by size first, then wait time. Accumulation handles starving
+	// tickets directly, so the wait-time-priority flip is no longer needed.
 	sort.SliceStable(predictions, func(i, j int) bool {
-		if prioritizeWaitTime {
-			// When wait time threshold exceeded, prioritize wait time over size
-			// First priority: Oldest ticket gets priority
-			if predictions[i].OldestTicketTimestamp != predictions[j].OldestTicketTimestamp {
-				return predictions[i].OldestTicketTimestamp < predictions[j].OldestTicketTimestamp
-			}
+		// First priority: Match size (larger matches preferred)
+		if predictions[i].Size != predictions[j].Size {
+			return predictions[i].Size > predictions[j].Size
+		}
 
-			// Second priority: Match size (larger matches preferred)
-			if predictions[i].Size != predictions[j].Size {
-				return predictions[i].Size > predictions[j].Size
-			}
-		} else {
-			// Normal priority: size first, then wait time
-			// First priority: Match size (larger matches preferred)
-			if predictions[i].Size != predictions[j].Size {
-				return predictions[i].Size > predictions[j].Size
-			}
-
-			// Second priority: Oldest ticket gets priority
-			if predictions[i].OldestTicketTimestamp != predictions[j].OldestTicketTimestamp {
-				return predictions[i].OldestTicketTimestamp < predictions[j].OldestTicketTimestamp
-			}
+		// Second priority: Oldest ticket gets priority
+		if predictions[i].OldestTicketTimestamp != predictions[j].OldestTicketTimestamp {
+			return predictions[i].OldestTicketTimestamp < predictions[j].OldestTicketTimestamp
 		}
 
 		// Third priority: Division diversity (fewer divisions preferred for more balanced matches)

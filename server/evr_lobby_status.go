@@ -61,7 +61,6 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, lobbyParams *LobbyS
 	ticketConfig, ok := DefaultMatchmakerTicketConfigs[lobbyParams.Mode]
 	if !ok {
 		ticketConfig = MatchmakingTicketParameters{
-			IncludeSBMMRanges:       true,
 			IncludeEarlyQuitPenalty: true,
 		}
 	}
@@ -82,7 +81,7 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, lobbyParams *LobbyS
 				Data: MatchmakingStreamData{
 					DiscordID:         sessionParams.DiscordID(),
 					Parameters:        lobbyParams,
-					BackfillQuery:     lobbyParams.BackfillSearchQuery(true, true),
+					BackfillQuery:     lobbyParams.BackfillSearchQuery(true),
 					MatchmakingQuery:  query,
 					StringParameters:  stringProps,
 					NumericParameters: numericProps,
