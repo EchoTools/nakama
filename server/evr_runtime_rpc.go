@@ -124,22 +124,22 @@ func (h *RPCHandler) MatchListPublicRPC(ctx context.Context, logger runtime.Logg
 	playerCount := 0
 	gameServers := make([]*GameServerPresence, 0, len(matches))
 	labels := make([]*MatchLabel, 0, len(matches))
-	playerSet := make(map[string]bool) // To avoid counting players multiple times
+	playerSet := make(map[string]bool)
 	for _, m := range matches {
 		l := &MatchLabel{}
 		if err := json.Unmarshal([]byte(m.GetLabel().GetValue()), l); err != nil {
 			return "", fmt.Errorf("failed to unmarshal match label: %s", err.Error())
 		}
 
-		v := l.PublicView()
-
-		for _, p := range v.Players {
-			if _, exists := playerSet[p.UserID]; !exists {
+		// Count from original label so private lobby players are included
+		for _, p := range l.Players {
+			if !playerSet[p.UserID] {
 				playerSet[p.UserID] = true
 				playerCount++
 			}
 		}
 
+		v := l.PublicView()
 		gameServers = append(gameServers, v.GameServer)
 		if v.LobbyType != UnassignedLobby {
 			labels = append(labels, v)
