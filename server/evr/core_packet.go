@@ -130,6 +130,8 @@ var (
 		0x4ecaef95c7dc8627: (*SNSPartyUpdateMemberFailure)(nil),
 		0x451eb6ca40dde289: (*SNSPartyUpdateMemberNotify)(nil),
 		// SNS Friends messages — client requests
+		0xcdc02fd1dbee3aaa: (*SNSFriendListSubscribeRequest)(nil),
+		0xdcfa94680e8d19fc: (*SNSFriendListRefreshRequest)(nil),
 		0x7f0d7a28de3c6f70: (*SNSFriendInviteRequest)(nil),
 		0x1bbcb7e810af4620: (*SNSFriendAcceptRequest)(nil),
 		0x78908988b7fe6db4: (*SNSFriendRemoveRequest)(nil),
