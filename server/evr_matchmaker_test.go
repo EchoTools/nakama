@@ -601,7 +601,6 @@ func newMatchmakingEntryFromExisting(entry *MatchmakerEntry, minCount, maxCount,
 		MinCount:                minCount,
 		MaxCount:                maxCount,
 		CountMultiple:           countMultiple,
-		IncludeSBMMRanges:       true,
 		IncludeEarlyQuitPenalty: true,
 	}
 
