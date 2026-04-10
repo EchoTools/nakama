@@ -262,7 +262,7 @@ func authenticateOrResolveConflict(ctx context.Context, nk runtime.NakamaModule,
 	// Check if the conflicting account belongs to the same Discord user.
 	conflictAccount, err := nk.AccountGetId(ctx, conflicting.Id)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to look up conflicting account %s: %w", conflicting.Id, err)
+		return "", "", fmt.Errorf("failed to resolve username conflict: %w", err)
 	}
 	if conflictAccount.GetCustomId() == discordID {
 		// Same Discord user already owns this username. Return the existing account.
@@ -274,10 +274,16 @@ func authenticateOrResolveConflict(ctx context.Context, nk runtime.NakamaModule,
 	if len(suffix) > 4 {
 		suffix = suffix[:4]
 	}
-	renamedUsername := username + "_" + suffix
+	// Truncate base username to leave room for "_" + suffix within 128-byte limit.
+	maxBase := 128 - 1 - len(suffix)
+	base := username
+	if len(base) > maxBase {
+		base = base[:maxBase]
+	}
+	renamedUsername := base + "_" + suffix
 
 	if err := nk.AccountUpdateId(ctx, conflicting.Id, renamedUsername, nil, "", "", "", "", ""); err != nil {
-		return "", "", fmt.Errorf("failed to resolve username conflict: could not rename account %s: %w", conflicting.Id, err)
+		return "", "", fmt.Errorf("failed to resolve username conflict: %w", err)
 	}
 
 	// Retry authentication with the now-available username.
