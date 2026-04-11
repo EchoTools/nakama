@@ -68,7 +68,7 @@ func scoreTeam(archetypes []string, hasNewPlayer bool) int {
 	if rookieCount >= 2 {
 		score -= 2
 	}
-	if hasNewPlayer && !hasStriker && !hasPlaymaker {
+	if hasNewPlayer && rookieCount == 0 && !hasStriker && !hasPlaymaker {
 		score--
 	}
 

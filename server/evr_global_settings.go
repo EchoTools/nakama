@@ -535,7 +535,11 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 
 func ServiceSettingsSave(ctx context.Context, nk runtime.NakamaModule) error {
 	data := ServiceSettings()
-	data.version = ""
+	if data == nil {
+		return fmt.Errorf("service settings not loaded")
+	}
+	dataCopy := *data
+	dataCopy.version = ""
 
 	_, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
 		Collection:      ServiceSettingsStorageCollection,
@@ -543,7 +547,7 @@ func ServiceSettingsSave(ctx context.Context, nk runtime.NakamaModule) error {
 		UserID:          SystemUserID,
 		PermissionRead:  0,
 		PermissionWrite: 0,
-		Value:           data.String(),
+		Value:           dataCopy.String(),
 	}})
 	if err != nil {
 		return fmt.Errorf("failed to write global settings: %w", err)

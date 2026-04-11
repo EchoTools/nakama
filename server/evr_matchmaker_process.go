@@ -269,7 +269,11 @@ OuterLoop:
 					continue
 				}
 
-				if v.(float64) > maxRTT {
+				rttVal, ok := v.(float64)
+				if !ok {
+					continue
+				}
+				if rttVal > maxRTT {
 					// Server is too far away from this player
 					continue
 				}
