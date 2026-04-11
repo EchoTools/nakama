@@ -212,11 +212,6 @@ func RecordUnreachableServer(ctx context.Context, nk runtime.NakamaModule, logge
 	}
 
 	u := params.unreachableServers.Load()
-	if u == nil {
-		u = NewUnreachableServers()
-		params.unreachableServers.Store(u)
-	}
-
 	u.Add(extIP, reason)
 
 	logger.WithFields(map[string]any{

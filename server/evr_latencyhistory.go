@@ -89,13 +89,17 @@ func (h *LatencyHistory) Add(extIP net.IP, rtt int, limit int, expiry time.Time)
 		}
 	}
 
-	// Remove entries older than the expiry time
+	// Remove entries older than the expiry time.
+	// Entries are in chronological order (oldest first), so find the first
+	// non-expired entry and discard everything before it.
+	expired := len(history)
 	for i := range history {
-		if history[i].Timestamp.Before(expiry) {
-			history = history[:i]
+		if !history[i].Timestamp.Before(expiry) {
+			expired = i
 			break
 		}
 	}
+	history = history[expired:]
 
 	// Set the updated history back
 	h.GameServerLatencies[extIP.String()] = history
