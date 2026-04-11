@@ -173,3 +173,99 @@ func TestDetectArchetype_ExactThresholdNewPlayer(t *testing.T) {
 		t.Errorf("games_played == threshold should NOT be rookie, got %q", got)
 	}
 }
+
+func TestDetectArchetype_ExactlyAtThreshold(t *testing.T) {
+	// Player with real stats and games_played exactly equal to NewPlayerMaxGames.
+	// At the threshold means veteran — should NOT be Rookie.
+	stats := ArchetypeStats{
+		Goals:       30,
+		Assists:     20,
+		Saves:       10,
+		Steals:      15,
+		Passes:      40,
+		ShotsOnGoal: 60,
+	}
+	threshold := 50
+	got := DetectArchetype(stats, threshold, threshold)
+	if got == ArchetypeRookie {
+		t.Errorf("games_played exactly at threshold (%d) should NOT be Rookie, got %q", threshold, got)
+	}
+}
+
+func TestDetectArchetype_AllStatsEqual(t *testing.T) {
+	// All stats identical: goals=assists=saves=steals=passes=10 over 100 games.
+	// save_focus = 10/(10+10+10) = 0.333 — not goalie
+	// goals/gp = 0.1 — not striker
+	// assists/gp = 0.1 — not playmaker
+	// steals/gp = 0.1 — not interceptor
+	// Falls through to LowActivity.
+	stats := ArchetypeStats{
+		Goals:       10,
+		Assists:     10,
+		Saves:       10,
+		Steals:      10,
+		Passes:      10,
+		ShotsOnGoal: 10,
+	}
+	got := DetectArchetype(stats, 100, 50)
+	if got != ArchetypeLowActivity {
+		t.Errorf("equal stats across the board should classify as %q, got %q", ArchetypeLowActivity, got)
+	}
+}
+
+func TestDetectArchetype_VeryHighAllStats(t *testing.T) {
+	// Elite at everything over 100 games:
+	//   goals=3/game, assists=1/game, saves=5/game, steals=3/game, passes=4/game
+	//
+	// save_focus = 500/(500+300+100) = 0.556 → Goalie wins first (priority).
+	// Without goalie check, this player would also qualify for striker
+	// (goals/gp=3.0, shots/gp=5.0) and interceptor (steals/gp=3.0).
+	stats := ArchetypeStats{
+		Goals:       300,
+		Assists:     100,
+		Saves:       500,
+		Steals:      300,
+		Passes:      400,
+		ShotsOnGoal: 500,
+	}
+	got := DetectArchetype(stats, 100, 50)
+	if got != ArchetypeGoalie {
+		t.Errorf("elite player with save_focus > 0.5 should be %q due to priority, got %q", ArchetypeGoalie, got)
+	}
+}
+
+func TestDetectArchetype_OneGamePlayed(t *testing.T) {
+	// Player with exactly 1 game played and some stats.
+	// 1 < 50 (threshold), so should be Rookie regardless of stats.
+	stats := ArchetypeStats{
+		Goals:       3,
+		Assists:     2,
+		Saves:       5,
+		Steals:      1,
+		Passes:      4,
+		ShotsOnGoal: 6,
+	}
+	got := DetectArchetype(stats, 1, 50)
+	if got != ArchetypeRookie {
+		t.Errorf("player with 1 game played should be %q, got %q", ArchetypeRookie, got)
+	}
+}
+
+func TestDetectArchetype_NegativeStats(t *testing.T) {
+	// Negative stat values should not panic or produce unexpected behavior.
+	// save_focus denominator = -5 + -5 + -5 = -15, saveFocus = 0.333 — not goalie.
+	// All per-game rates are negative — no threshold met.
+	// Falls through to LowActivity.
+	stats := ArchetypeStats{
+		Goals:       -5,
+		Assists:     -5,
+		Saves:       -5,
+		Steals:      -5,
+		Passes:      -5,
+		ShotsOnGoal: -5,
+	}
+	got := DetectArchetype(stats, 100, 50)
+	if got != ArchetypeLowActivity {
+		t.Errorf("negative stats should classify as %q, got %q", ArchetypeLowActivity, got)
+	}
+}
