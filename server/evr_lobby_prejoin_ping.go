@@ -30,6 +30,14 @@ var preJoinPingWaiters = MapOf[uuid.UUID, chan struct{}]{}
 // given session sends a LobbyPingResponse.
 func registerPreJoinPingWaiter(sessionID uuid.UUID) chan struct{} {
 	ch := make(chan struct{}, 1)
+	// Evict any previous waiter for this session and signal it so its
+	// goroutine does not hang waiting on an orphaned channel.
+	if old, loaded := preJoinPingWaiters.LoadAndDelete(sessionID); loaded {
+		select {
+		case old <- struct{}{}:
+		default:
+		}
+	}
 	preJoinPingWaiters.Store(sessionID, ch)
 	return ch
 }
@@ -189,8 +197,15 @@ func (p *EvrPipeline) validatePreJoinPing(
 
 			select {
 			case <-np.waiter:
-				// Ping response received; check the updated latency history.
-				entry, found := np.history.LatestEntry(extIP)
+				// Ping response received. Re-load the latency history from
+				// the session in case the pointer was swapped since we cached it.
+				history := np.history
+				if params, ok := LoadParams(np.session.Context()); ok {
+					if fresh := params.latencyHistory.Load(); fresh != nil {
+						history = fresh
+					}
+				}
+				entry, found := history.LatestEntry(extIP)
 				if !found {
 					result.Err = fmt.Errorf("no latency data after ping response")
 					return
