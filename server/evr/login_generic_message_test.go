@@ -21,8 +21,11 @@ func TestGenericMessageEncodeDecode(t *testing.T) {
 	// Unmarshal test packet
 	msgs, err := ParsePacket(packet)
 	if err != nil {
-		t.Errorf("Unmarshal returned an error: %v", err)
+		t.Fatalf("Unmarshal returned an error: %v", err)
 	}
-	t.Errorf("%s", msgs)
+	if len(msgs) == 0 {
+		t.Fatal("expected at least one message, got none")
+	}
+	t.Logf("parsed %d message(s): %s", len(msgs), msgs)
 
 }
