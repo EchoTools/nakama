@@ -146,7 +146,14 @@ type GlobalMatchmakingSettings struct {
 	CrashRecoveryWindowSecs        int                     `json:"crash_recovery_window_secs"`          // Seconds to hold a disconnected player's spot (default 60, 0 = use default, <0 = disabled)
 	RequirePreMatchPing            *bool                   `json:"require_pre_match_ping"`              // Require players to ping all candidate servers before matchmaking (default true)
 	NewPlayerMaxGames              int                     `json:"new_player_max_games"`                // Games played threshold below which a player is considered "new" (default 50)
+	EnableArchetypeDetection       *bool                   `json:"enable_archetype_detection"`          // Classify players into play style archetypes at ticket creation (default true)
 	EnableToxicSeparation          *bool                   `json:"enable_toxic_separation"`             // Prevent players with suspension history from matching with new players (default true)
+	// Quality floor settings — used by the quality floor feature (PR #375).
+	// Included here to avoid settings migration when that PR lands.
+	EnableQualityFloor             bool                    `json:"enable_quality_floor"`                // Reject match candidates below a predicted draw probability floor (default false)
+	QualityFloorInitial            float64                 `json:"quality_floor_initial"`               // Minimum predicted draw probability at t=0 (default 0.10)
+	QualityFloorDecayPerSecond     float64                 `json:"quality_floor_decay_per_second"`      // How fast the floor drops per second of wait time (default 0.0005)
+	QualityFloorMinimum            float64                 `json:"quality_floor_minimum"`               // Floor never drops below this value (default 0.0)
 }
 
 type QueryAddons struct {
@@ -177,6 +184,12 @@ func (g ServiceSettingsData) UseSkillBasedMatchmaking() bool {
 // before entering matchmaking. Defaults to true when not explicitly configured.
 func (g GlobalMatchmakingSettings) RequiresPreMatchPing() bool {
 	return g.RequirePreMatchPing == nil || *g.RequirePreMatchPing
+}
+
+// ArchetypeDetectionEnabled returns whether archetype detection is active.
+// Defaults to true when not explicitly configured.
+func (g GlobalMatchmakingSettings) ArchetypeDetectionEnabled() bool {
+	return g.EnableArchetypeDetection == nil || *g.EnableArchetypeDetection
 }
 
 // ToxicSeparationEnabled returns whether players with suspension history
@@ -371,11 +384,27 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 		data.Matchmaking.NewPlayerMaxGames = 0
 	}
 
+	// Archetype detection defaults to enabled.
+	if data.Matchmaking.EnableArchetypeDetection == nil {
+		t := true
+		data.Matchmaking.EnableArchetypeDetection = &t
+	}
+
 	if data.Matchmaking.EnableToxicSeparation == nil {
 		t := true
 		data.Matchmaking.EnableToxicSeparation = &t
 	}
 
+	// Quality floor defaults -- disabled by default, needs tuning before enabling.
+	// When enabled, rejects match candidates whose predicted draw probability
+	// falls below a floor that decays with wait time.
+	if data.Matchmaking.QualityFloorInitial == 0 {
+		data.Matchmaking.QualityFloorInitial = 0.10
+	}
+	if data.Matchmaking.QualityFloorDecayPerSecond == 0 {
+		data.Matchmaking.QualityFloorDecayPerSecond = 0.0005
+	}
+	// QualityFloorMinimum defaults to 0.0 (zero value), no init needed.
 	// Set default reducing precision settings for post-matchmaker backfill
 	if data.Matchmaking.ReducingPrecisionIntervalSecs == 0 {
 		data.Matchmaking.ReducingPrecisionIntervalSecs = 30 // Relax constraints every 30 seconds
