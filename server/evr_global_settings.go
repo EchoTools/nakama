@@ -365,8 +365,10 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 		data.Matchmaking.RequirePreMatchPing = &t
 	}
 
-	if data.Matchmaking.NewPlayerMaxGames <= 0 {
-		data.Matchmaking.NewPlayerMaxGames = 50
+	// 0 means "disabled" (no player is considered new). Clamp invalid
+	// negative values to 0.
+	if data.Matchmaking.NewPlayerMaxGames < 0 {
+		data.Matchmaking.NewPlayerMaxGames = 0
 	}
 
 	if data.Matchmaking.EnableToxicSeparation == nil {
