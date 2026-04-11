@@ -456,7 +456,11 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	// effective mu so they help rather than carry.
 	if globalSettings.AmbassadorProgramEnabled() && globalSettings.HardDivisionsEnabled() {
 		ambState := NewAmbassadorState()
-		if err := StorableRead(ctx, nk, session.UserID().String(), ambState, false); err == nil && ambState.IsActive {
+		if err := StorableRead(ctx, nk, session.UserID().String(), ambState, false); err != nil {
+			if !isStorageNotFoundError(err) {
+				logger.Warn("Failed to read ambassador state", zap.Error(err))
+			}
+		} else if ambState.IsActive {
 			if IsEligibleAmbassador(gamesPlayed, matchmakingRating.Mu, globalSettings.AmbassadorMinGamesPlayed, globalSettings.AmbassadorMinMu) &&
 				ShouldAmbassadorThisMatch(ambState, globalSettings.AmbassadorCooldownMatches) {
 				ambDiv := GetAmbassadorDivision(lobbyParams.HardDivision, globalSettings.DivisionNames)

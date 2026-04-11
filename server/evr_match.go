@@ -1358,7 +1358,11 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					}
 
 					ambState := NewAmbassadorState()
-					if err := StorableRead(ctx, nk, presence.GetUserId(), ambState, false); err == nil {
+					if err := StorableRead(ctx, nk, presence.GetUserId(), ambState, false); err != nil {
+						if !isStorageNotFoundError(err) {
+							logger.WithField("error", err).Warn("Failed to read ambassador state after match")
+						}
+					} else {
 						if wasAmbassador {
 							ambState.RecordAmbassadorMatch()
 						} else if ambState.IsActive {
