@@ -68,6 +68,7 @@ type LobbySessionParameters struct {
 	FallbackTimeout              time.Duration                 `json:"fallback_timeout"` // The fallback timeout
 	DisplayName                  string                        `json:"display_name"`
 	GamesPlayed                  int                           `json:"games_played"` // Total games played, loaded from GamesPlayed leaderboard
+	HardDivision                 string                        `json:"hard_division"` // Skill division bracket for hard division filtering
 	latencyHistory               *atomic.Pointer[LatencyHistory]
 	unreachableServers           *atomic.Pointer[UnreachableServers]
 }
@@ -438,6 +439,17 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		GamesPlayed:                  gamesPlayed,
 	}
 
+	// Assign hard skill division based on mu and games played.
+	// Division is always computed (even when hard divisions are disabled) so
+	// the label appears on tickets for monitoring.
+	lobbyParams.HardDivision = AssignDivision(
+		matchmakingRating.Mu,
+		gamesPlayed,
+		globalSettings.NewPlayerMaxGames,
+		globalSettings.DivisionBoundaries,
+		globalSettings.DivisionNames,
+	)
+
 	// Check for an existing matchmaking credit to preserve queue position
 	// across re-queues (crashes, cancels, party follower failures).
 	if isMatchmakingCreditMode(mode) {
@@ -647,6 +659,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		"divisions":          strings.Join(p.MatchmakingDivisions, ","),
 		"excluded_divisions": strings.Join(p.MatchmakingExcludedDivisions, ","),
 		"is_moderator":       strconv.FormatBool(p.IsModerator),
+		"division":           p.HardDivision,
 	}
 	var minTeamSize, maxTeamSize float64
 	switch p.Mode {

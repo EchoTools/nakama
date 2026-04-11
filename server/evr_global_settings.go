@@ -146,6 +146,9 @@ type GlobalMatchmakingSettings struct {
 	CrashRecoveryWindowSecs        int                     `json:"crash_recovery_window_secs"`          // Seconds to hold a disconnected player's spot (default 60, 0 = use default, <0 = disabled)
 	RequirePreMatchPing            *bool                   `json:"require_pre_match_ping"`              // Require players to ping all candidate servers before matchmaking (default true)
 	NewPlayerMaxGames              int                     `json:"new_player_max_games"`                // Games played threshold below which a player is considered "new" (default 50)
+	EnableHardDivisions            *bool                   `json:"enable_hard_divisions"`               // Separate matchmaking pools by skill division (default false — needs boundary tuning)
+	DivisionBoundaries             []float64               `json:"division_boundaries"`                 // Mu thresholds between hard skill divisions (default [15.0, 25.0, 35.0])
+	DivisionNames                  []string                `json:"division_names"`                      // Human-readable division bracket names (default ["Bronze", "Silver", "Gold", "Diamond"])
 }
 
 type QueryAddons struct {
@@ -176,6 +179,12 @@ func (g ServiceSettingsData) UseSkillBasedMatchmaking() bool {
 // before entering matchmaking. Defaults to true when not explicitly configured.
 func (g GlobalMatchmakingSettings) RequiresPreMatchPing() bool {
 	return g.RequirePreMatchPing == nil || *g.RequirePreMatchPing
+}
+
+// HardDivisionsEnabled returns whether hard skill divisions are active.
+// Defaults to false (disabled) when not explicitly configured.
+func (g GlobalMatchmakingSettings) HardDivisionsEnabled() bool {
+	return g.EnableHardDivisions != nil && *g.EnableHardDivisions
 }
 
 func ServiceSettingsLoad(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) (*ServiceSettingsData, error) {
@@ -368,6 +377,15 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 	}
 	if data.Matchmaking.ReducingPrecisionMaxCycles == 0 {
 		data.Matchmaking.ReducingPrecisionMaxCycles = 5 // Maximum 5 cycles before fully relaxing
+	}
+
+	// Hard skill divisions default to disabled; boundaries and names are
+	// always populated so division labels appear on tickets for monitoring.
+	if data.Matchmaking.DivisionBoundaries == nil {
+		data.Matchmaking.DivisionBoundaries = []float64{15.0, 25.0, 35.0}
+	}
+	if data.Matchmaking.DivisionNames == nil {
+		data.Matchmaking.DivisionNames = []string{"Bronze", "Silver", "Gold", "Diamond"}
 	}
 
 	// Seed CGNAT detection defaults
