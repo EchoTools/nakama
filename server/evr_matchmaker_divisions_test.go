@@ -86,6 +86,37 @@ func TestAssignDivision_EmptyBoundaries(t *testing.T) {
 	}
 }
 
+func TestAssignDivision_MoreBoundariesThanNames(t *testing.T) {
+	// Misconfigured: 3 boundaries but only 2 names. Should not panic.
+	boundaries := []float64{10.0, 20.0, 30.0}
+	names := []string{"Low", "High"}
+
+	got := AssignDivision(5.0, 100, 50, boundaries, names)
+	if got != "Low" {
+		t.Errorf("got %q, want %q", got, "Low")
+	}
+	got = AssignDivision(15.0, 100, 50, boundaries, names)
+	if got != "High" {
+		t.Errorf("got %q, want %q for mu above clamped boundary", got, "High")
+	}
+}
+
+func TestHighestDivision_UnknownDivisions(t *testing.T) {
+	names := []string{"Bronze", "Silver", "Gold"}
+
+	// All unknown divisions should return empty string.
+	got := HighestDivision([]string{"Fake", "Invalid"}, names)
+	if got != "" {
+		t.Errorf("got %q, want empty string for all unknown divisions", got)
+	}
+
+	// Mix of unknown and known: should return the known one.
+	got = HighestDivision([]string{"Fake", "Silver", "Invalid"}, names)
+	if got != "Silver" {
+		t.Errorf("got %q, want %q", got, "Silver")
+	}
+}
+
 // divTestEntry implements runtime.MatchmakerEntry for division testing
 type divTestEntry struct {
 	ticket     string

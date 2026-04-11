@@ -154,12 +154,14 @@ type GlobalMatchmakingSettings struct {
 	AmbassadorCooldownMatches      int                     `json:"ambassador_cooldown_matches"`          // Matches between ambassador activations (default 1)
 	AmbassadorMinGamesPlayed       int                     `json:"ambassador_min_games_played"`          // Minimum games played to be eligible as ambassador (default 200)
 	AmbassadorMinMu                float64                 `json:"ambassador_min_mu"`                    // Minimum mu to be eligible as ambassador (default 30.0)
+	EnableNewPlayerTeamBias        *bool                   `json:"enable_new_player_team_bias"`         // Bias new players onto the predicted-stronger team during team formation (default true)
 	EnableArchetypeDetection       *bool                   `json:"enable_archetype_detection"`          // Classify players into play style archetypes at ticket creation (default true)
 	EnableToxicSeparation          *bool                   `json:"enable_toxic_separation"`             // Prevent players with suspension history from matching with new players (default true)
 	EnableQualityFloor             bool                    `json:"enable_quality_floor"`                // Reject match candidates below a predicted draw probability floor (default false)
 	QualityFloorInitial            float64                 `json:"quality_floor_initial"`               // Minimum predicted draw probability at t=0 (default 0.10)
 	QualityFloorDecayPerSecond     float64                 `json:"quality_floor_decay_per_second"`      // How fast the floor drops per second of wait time (default 0.0005)
 	QualityFloorMinimum            float64                 `json:"quality_floor_minimum"`               // Floor never drops below this value (default 0.0)
+	EnableArchetypeBalancing       *bool                   `json:"enable_archetype_balancing"`          // Use archetype data to prefer balanced team compositions as a tiebreaker (default false, needs tuning)
 }
 
 type QueryAddons struct {
@@ -204,10 +206,23 @@ func (g GlobalMatchmakingSettings) AmbassadorProgramEnabled() bool {
 	return g.EnableAmbassadorProgram != nil && *g.EnableAmbassadorProgram
 }
 
+// NewPlayerTeamBiasEnabled returns whether new players should be biased onto
+// the predicted-stronger team during team formation. Defaults to true.
+func (g GlobalMatchmakingSettings) NewPlayerTeamBiasEnabled() bool {
+	return g.EnableNewPlayerTeamBias == nil || *g.EnableNewPlayerTeamBias
+}
+
 // ArchetypeDetectionEnabled returns whether archetype detection is active.
 // Defaults to true when not explicitly configured.
 func (g GlobalMatchmakingSettings) ArchetypeDetectionEnabled() bool {
 	return g.EnableArchetypeDetection == nil || *g.EnableArchetypeDetection
+}
+
+// ArchetypeBalancingEnabled returns whether archetype-aware team composition
+// scoring is used as a tiebreaker during team formation.
+// Defaults to false (disabled) when not explicitly configured.
+func (g GlobalMatchmakingSettings) ArchetypeBalancingEnabled() bool {
+	return g.EnableArchetypeBalancing != nil && *g.EnableArchetypeBalancing
 }
 
 // ToxicSeparationEnabled returns whether players with suspension history
@@ -402,6 +417,11 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 		data.Matchmaking.NewPlayerMaxGames = 0
 	}
 
+	if data.Matchmaking.EnableNewPlayerTeamBias == nil {
+		t := true
+		data.Matchmaking.EnableNewPlayerTeamBias = &t
+	}
+
 	// Archetype detection defaults to enabled.
 	if data.Matchmaking.EnableArchetypeDetection == nil {
 		t := true
@@ -434,11 +454,32 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 
 	// Hard skill divisions default to disabled; boundaries and names are
 	// always populated so division labels appear on tickets for monitoring.
+	defaultDivisionBoundaries := []float64{15.0, 25.0, 35.0}
+	defaultDivisionNames := []string{"Bronze", "Silver", "Gold", "Diamond"}
 	if data.Matchmaking.DivisionBoundaries == nil {
-		data.Matchmaking.DivisionBoundaries = []float64{15.0, 25.0, 35.0}
+		data.Matchmaking.DivisionBoundaries = defaultDivisionBoundaries
 	}
 	if data.Matchmaking.DivisionNames == nil {
-		data.Matchmaking.DivisionNames = []string{"Bronze", "Silver", "Gold", "Diamond"}
+		data.Matchmaking.DivisionNames = defaultDivisionNames
+	}
+	// Validate boundaries are sorted and names length matches boundaries+1.
+	validDivisionBoundaries := true
+	for i := 1; i < len(data.Matchmaking.DivisionBoundaries); i++ {
+		if data.Matchmaking.DivisionBoundaries[i-1] >= data.Matchmaking.DivisionBoundaries[i] {
+			validDivisionBoundaries = false
+			break
+		}
+	}
+	if !validDivisionBoundaries || len(data.Matchmaking.DivisionNames) != len(data.Matchmaking.DivisionBoundaries)+1 {
+		logger.Warn("Invalid matchmaking division settings (unsorted boundaries or mismatched name count), resetting to defaults")
+		data.Matchmaking.DivisionBoundaries = defaultDivisionBoundaries
+		data.Matchmaking.DivisionNames = defaultDivisionNames
+	}
+
+	// Archetype balancing defaults to disabled — needs tuning before enabling.
+	if data.Matchmaking.EnableArchetypeBalancing == nil {
+		f := false
+		data.Matchmaking.EnableArchetypeBalancing = &f
 	}
 
 	// Ambassador program defaults — disabled by default, populate thresholds

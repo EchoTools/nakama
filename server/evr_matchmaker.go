@@ -296,6 +296,9 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	// Log per-division queue sizes for monitoring.
 	divisionSizes := make(map[string]int)
 	for _, entry := range entries {
+		if entry == nil {
+			continue
+		}
 		div, _ := entry.GetProperties()["division"].(string)
 		if div == "" {
 			div = "unassigned"
@@ -306,12 +309,18 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		logFields["division_queue_sizes"] = divisionSizes
 
 		// Log divisions with waiting players that could not form a match.
+		// Normalize division keys the same way as divisionSizes (empty -> "unassigned").
 		matchedDivisions := make(map[string]bool)
 		for _, match := range matches {
-			if len(match) > 0 {
-				if d, ok := match[0].GetProperties()["division"].(string); ok {
-					matchedDivisions[d] = true
+			for _, entry := range match {
+				if entry == nil {
+					continue
 				}
+				d, _ := entry.GetProperties()["division"].(string)
+				if d == "" {
+					d = "unassigned"
+				}
+				matchedDivisions[d] = true
 			}
 		}
 		for div, size := range divisionSizes {

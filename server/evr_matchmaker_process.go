@@ -56,6 +56,11 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 			Sigma: &sigma,
 			Z:     &z,
 		}
+		config.EnableArchetypeBalancing = settings.Matchmaking.ArchetypeBalancingEnabled()
+		config.NewPlayerThreshold = settings.Matchmaking.NewPlayerMaxGames
+		if settings.Matchmaking.NewPlayerTeamBiasEnabled() {
+			config.EnableNewPlayerTeamBias = true
+		}
 	}
 
 	// predict the outcome of the matches
@@ -117,6 +122,11 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 		// Third priority: Division diversity (fewer divisions preferred for more balanced matches)
 		if predictions[i].DivisionCount != predictions[j].DivisionCount {
 			return predictions[i].DivisionCount < predictions[j].DivisionCount
+		}
+
+		// Fourth priority: Archetype composition (higher = better balanced teams)
+		if predictions[i].CompositionScore != predictions[j].CompositionScore {
+			return predictions[i].CompositionScore > predictions[j].CompositionScore
 		}
 
 		// Final tiebreaker: Match draw probability (higher draw probability = more evenly matched)
