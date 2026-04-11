@@ -146,6 +146,7 @@ type GlobalMatchmakingSettings struct {
 	CrashRecoveryWindowSecs        int                     `json:"crash_recovery_window_secs"`          // Seconds to hold a disconnected player's spot (default 60, 0 = use default, <0 = disabled)
 	RequirePreMatchPing            *bool                   `json:"require_pre_match_ping"`              // Require players to ping all candidate servers before matchmaking (default true)
 	NewPlayerMaxGames              int                     `json:"new_player_max_games"`                // Games played threshold below which a player is considered "new" (default 50)
+	EnableArchetypeDetection       *bool                   `json:"enable_archetype_detection"`          // Classify players into play style archetypes at ticket creation (default true)
 	EnableToxicSeparation          *bool                   `json:"enable_toxic_separation"`             // Prevent players with suspension history from matching with new players (default true)
 	EnableQualityFloor             bool                    `json:"enable_quality_floor"`                // Reject match candidates below a predicted draw probability floor (default false)
 	QualityFloorInitial            float64                 `json:"quality_floor_initial"`               // Minimum predicted draw probability at t=0 (default 0.10)
@@ -181,6 +182,12 @@ func (g ServiceSettingsData) UseSkillBasedMatchmaking() bool {
 // before entering matchmaking. Defaults to true when not explicitly configured.
 func (g GlobalMatchmakingSettings) RequiresPreMatchPing() bool {
 	return g.RequirePreMatchPing == nil || *g.RequirePreMatchPing
+}
+
+// ArchetypeDetectionEnabled returns whether archetype detection is active.
+// Defaults to true when not explicitly configured.
+func (g GlobalMatchmakingSettings) ArchetypeDetectionEnabled() bool {
+	return g.EnableArchetypeDetection == nil || *g.EnableArchetypeDetection
 }
 
 // ToxicSeparationEnabled returns whether players with suspension history
@@ -373,6 +380,12 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 	// negative values to 0.
 	if data.Matchmaking.NewPlayerMaxGames < 0 {
 		data.Matchmaking.NewPlayerMaxGames = 0
+	}
+
+	// Archetype detection defaults to enabled.
+	if data.Matchmaking.EnableArchetypeDetection == nil {
+		t := true
+		data.Matchmaking.EnableArchetypeDetection = &t
 	}
 
 	if data.Matchmaking.EnableToxicSeparation == nil {
