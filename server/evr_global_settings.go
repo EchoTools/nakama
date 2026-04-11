@@ -145,6 +145,7 @@ type GlobalMatchmakingSettings struct {
 	EnableTicketReservation        bool                    `json:"enable_ticket_reservation"`           // Enable the ticket reservation system (default false)
 	CrashRecoveryWindowSecs        int                     `json:"crash_recovery_window_secs"`          // Seconds to hold a disconnected player's spot (default 60, 0 = use default, <0 = disabled)
 	RequirePreMatchPing            *bool                   `json:"require_pre_match_ping"`              // Require players to ping all candidate servers before matchmaking (default true)
+	NewPlayerMaxGames              int                     `json:"new_player_max_games"`                // Games played threshold below which a player is considered "new" (default 50)
 }
 
 type QueryAddons struct {
@@ -355,6 +356,10 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 	if data.Matchmaking.RequirePreMatchPing == nil {
 		t := true
 		data.Matchmaking.RequirePreMatchPing = &t
+	}
+
+	if data.Matchmaking.NewPlayerMaxGames == 0 {
+		data.Matchmaking.NewPlayerMaxGames = 50
 	}
 
 	// Set default reducing precision settings for post-matchmaker backfill
