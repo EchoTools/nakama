@@ -48,8 +48,9 @@ type SessionParameters struct {
 	earlyQuitConfig              *atomic.Pointer[EarlyQuitPlayerState] // The early quit config
 	isGoldNameTag                *atomic.Bool                     // If this user should have a gold name tag
 	lastMatchmakingError         *atomic.Error                    // The last matchmaking error
-	latencyHistory               *atomic.Pointer[LatencyHistory]  // The latency history
-	isIGPOpen                    *atomic.Bool                     // The user has IGPU open
+	latencyHistory               *atomic.Pointer[LatencyHistory]       // The latency history
+	unreachableServers           *atomic.Pointer[UnreachableServers]  // Per-player unreachable game servers
+	isIGPOpen                    *atomic.Bool                         // The user has IGPU open
 	gameModeSuspensionsByGroupID ActiveGuildEnforcements          // The active suspension records
 	enforcementUserIDs           []string                         // User IDs (self + alts) used for enforcement journal queries
 	ignoreDisabledAlternates     bool                             // Ignore disabled

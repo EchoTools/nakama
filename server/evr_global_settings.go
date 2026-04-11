@@ -144,6 +144,7 @@ type GlobalMatchmakingSettings struct {
 	ReservationSafetyValveSecs     int                     `json:"reservation_safety_valve_secs"`       // After this many seconds, release reservations and let the system flow (default 300)
 	EnableTicketReservation        bool                    `json:"enable_ticket_reservation"`           // Enable the ticket reservation system (default false)
 	CrashRecoveryWindowSecs        int                     `json:"crash_recovery_window_secs"`          // Seconds to hold a disconnected player's spot (default 60, 0 = use default, <0 = disabled)
+	RequirePreMatchPing            *bool                   `json:"require_pre_match_ping"`              // Require players to ping all candidate servers before matchmaking (default true)
 }
 
 type QueryAddons struct {
@@ -168,6 +169,12 @@ func (g *ServiceSettingsData) String() string {
 
 func (g ServiceSettingsData) UseSkillBasedMatchmaking() bool {
 	return g.Matchmaking.EnableSBMM
+}
+
+// RequiresPreMatchPing returns whether players must ping all candidate servers
+// before entering matchmaking. Defaults to true when not explicitly configured.
+func (g GlobalMatchmakingSettings) RequiresPreMatchPing() bool {
+	return g.RequirePreMatchPing == nil || *g.RequirePreMatchPing
 }
 
 func ServiceSettingsLoad(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) (*ServiceSettingsData, error) {
@@ -341,6 +348,13 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 
 	if data.Matchmaking.ServerSelection.RTTDelta == nil {
 		data.Matchmaking.ServerSelection.RTTDelta = make(map[string]int)
+	}
+
+	// Default to requiring pre-match pings so matchmaking only considers
+	// servers with known latency.
+	if data.Matchmaking.RequirePreMatchPing == nil {
+		t := true
+		data.Matchmaking.RequirePreMatchPing = &t
 	}
 
 	// Set default reducing precision settings for post-matchmaker backfill

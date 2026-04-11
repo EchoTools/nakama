@@ -119,6 +119,10 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 	if err := StorableWrite(ctx, p.nk, session.UserID().String(), latencyHistory); err != nil {
 		return status.Errorf(codes.Internal, "failed to write latency history: %v", err)
 	}
+
+	// Signal any pre-join ping waiter for this session.
+	notifyPreJoinPingWaiter(session.ID())
+
 	return nil
 }
 

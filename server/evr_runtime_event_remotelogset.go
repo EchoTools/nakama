@@ -150,6 +150,18 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				"msg":      msg,
 			}).Debug("Disconnected due to timeout")
 
+			// Record the server as unreachable for this player.
+			if timeoutMatchID, err := NewMatchID(msg.SessionUUID(), s.Node); err == nil {
+				if timeoutLabel, err := MatchLabelByID(ctx, nk, timeoutMatchID); err == nil && timeoutLabel != nil {
+					timeoutSession := sessionRegistry.Get(uuid.FromStringOrNil(s.SessionID))
+					if timeoutSession != nil {
+						if timeoutParams, ok := LoadParams(timeoutSession.Context()); ok {
+							RecordUnreachableServer(ctx, nk, logger, timeoutSession.UserID().String(), timeoutParams, timeoutLabel.GameServer.Endpoint.GetExternalIP(), "disconnected_timeout")
+						}
+					}
+				}
+			}
+
 		case *evr.RemoteLogUserDisconnected:
 
 			if !msg.GameInfoIsArena || msg.GameInfoIsPrivate {
@@ -405,6 +417,15 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			}
 
 			nk.MetricsCounterAdd("remotelog_error_server_connection_failed_count", tags, 1)
+
+			// Record the server as unreachable for this player so future
+			// matchmaking avoids sending them there.
+			serverExtIP := label.GameServer.Endpoint.GetExternalIP()
+			reason := "connection_failed"
+			if strings.EqualFold(strings.TrimSpace(msg.ServerAddress), "[INVALID PEER ID]") {
+				reason = "invalid_peer_id"
+			}
+			RecordUnreachableServer(ctx, nk, logger, session.UserID().String(), params, serverExtIP, reason)
 
 		case *evr.RemoteLogPostMatchMatchStats:
 			update, _ = updates.LoadOrStore(msg.SessionUUID(), &MatchGameStateUpdate{})

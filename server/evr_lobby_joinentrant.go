@@ -43,6 +43,11 @@ func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, p
 		return ErrServerSessionNotFound
 	}
 
+	// Validate pre-join ping for all entrants before allowing the join.
+	if err := p.validatePreJoinPing(session.Context(), logger, label, presences); err != nil {
+		return err
+	}
+
 	return LobbyJoinEntrants(logger, p.nk.matchRegistry, p.nk.tracker, session, serverSession, label, presences...)
 }
 func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, entrants ...*EvrMatchPresence) error {
@@ -258,15 +263,6 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	if err := SendEVRMessages(serverSession, false, protobufMsg, connectionSettings); err != nil {
 		logger.Error("failed to send protobuf lobby session success to game server", zap.Error(err))
 		return errors.New("failed to send protobuf lobby session success to game server")
-	}
-
-	if ServiceSettings().PingServerBeforeJoin {
-		// Send a ping request to the client to measure latency to the game server.
-		if err := SendEVRMessages(session, true, evr.NewLobbyPingRequest(250, []evr.Endpoint{label.GameServer.Endpoint})); err != nil {
-			return fmt.Errorf("failed to send ping request: %v", err)
-		}
-		// Wait a short moment to allow the client to process the ping request before sending the join acceptance.
-		<-time.After(125 * time.Millisecond)
 	}
 
 	// Send the lobby session success message to the game client.
