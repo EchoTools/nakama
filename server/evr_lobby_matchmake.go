@@ -288,6 +288,10 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 		}
 	}
 
+	// Known limitation: for party tickets, has_suspension_history and
+	// games_played reflect only the leader, not all party members. A toxic
+	// or new party member bypasses separation when the leader is clean.
+
 	// The matchmaker will always prioritize the players that are about to timeout.
 	priorityThreshold := time.Now().UTC().Add((p.matchmakingTicketTimeout() / 3) * 2)
 
