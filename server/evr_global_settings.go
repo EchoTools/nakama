@@ -146,6 +146,7 @@ type GlobalMatchmakingSettings struct {
 	CrashRecoveryWindowSecs        int                     `json:"crash_recovery_window_secs"`          // Seconds to hold a disconnected player's spot (default 60, 0 = use default, <0 = disabled)
 	RequirePreMatchPing            *bool                   `json:"require_pre_match_ping"`              // Require players to ping all candidate servers before matchmaking (default true)
 	NewPlayerMaxGames              int                     `json:"new_player_max_games"`                // Games played threshold below which a player is considered "new" (default 50)
+	EnableNewPlayerTeamBias        *bool                   `json:"enable_new_player_team_bias"`         // Bias new players onto the predicted-stronger team during team formation (default true)
 	EnableArchetypeDetection       *bool                   `json:"enable_archetype_detection"`          // Classify players into play style archetypes at ticket creation (default true)
 	EnableToxicSeparation          *bool                   `json:"enable_toxic_separation"`             // Prevent players with suspension history from matching with new players (default true)
 	EnableQualityFloor             bool                    `json:"enable_quality_floor"`                // Reject match candidates below a predicted draw probability floor (default false)
@@ -183,6 +184,12 @@ func (g ServiceSettingsData) UseSkillBasedMatchmaking() bool {
 // before entering matchmaking. Defaults to true when not explicitly configured.
 func (g GlobalMatchmakingSettings) RequiresPreMatchPing() bool {
 	return g.RequirePreMatchPing == nil || *g.RequirePreMatchPing
+}
+
+// NewPlayerTeamBiasEnabled returns whether new players should be biased onto
+// the predicted-stronger team during team formation. Defaults to true.
+func (g GlobalMatchmakingSettings) NewPlayerTeamBiasEnabled() bool {
+	return g.EnableNewPlayerTeamBias == nil || *g.EnableNewPlayerTeamBias
 }
 
 // ArchetypeDetectionEnabled returns whether archetype detection is active.
@@ -388,6 +395,11 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 	// negative values to 0.
 	if data.Matchmaking.NewPlayerMaxGames < 0 {
 		data.Matchmaking.NewPlayerMaxGames = 0
+	}
+
+	if data.Matchmaking.EnableNewPlayerTeamBias == nil {
+		t := true
+		data.Matchmaking.EnableNewPlayerTeamBias = &t
 	}
 
 	// Archetype detection defaults to enabled.
