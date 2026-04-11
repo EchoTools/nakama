@@ -365,7 +365,7 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 		data.Matchmaking.RequirePreMatchPing = &t
 	}
 
-	if data.Matchmaking.NewPlayerMaxGames == 0 {
+	if data.Matchmaking.NewPlayerMaxGames <= 0 {
 		data.Matchmaking.NewPlayerMaxGames = 50
 	}
 

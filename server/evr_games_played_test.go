@@ -110,6 +110,16 @@ func TestNewPlayerMaxGamesPreserved(t *testing.T) {
 	}
 }
 
+func TestNewPlayerMaxGamesNegativeClamped(t *testing.T) {
+	data := &ServiceSettingsData{}
+	data.Matchmaking.NewPlayerMaxGames = -5
+	FixDefaultServiceSettings(nil, data)
+
+	if data.Matchmaking.NewPlayerMaxGames != 50 {
+		t.Errorf("expected negative NewPlayerMaxGames to default to 50, got %d", data.Matchmaking.NewPlayerMaxGames)
+	}
+}
+
 func TestGamesPlayedOnLobbySessionParameters(t *testing.T) {
 	params := &LobbySessionParameters{
 		GamesPlayed: 42,

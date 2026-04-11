@@ -331,7 +331,12 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	if groupID != uuid.Nil {
 		gamesPlayed, err = GamesPlayedLoad(ctx, p.nk, userID, groupIDStr, evr.ModeArenaPublic)
 		if err != nil {
-			logger.Warn("Failed to load games played", zap.Error(err))
+			logger.Warn("Failed to load games played",
+				zap.String("user_id", userID),
+				zap.String("group_id", groupIDStr),
+				zap.String("mode", evr.ModeArenaPublic.String()),
+				zap.Error(err),
+			)
 		}
 	}
 
@@ -348,7 +353,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	// Enforcers and global operators are exempt — they may have suspension
 	// history from admin work, not from being toxic.
 	hasSuspensionHistory := false
-	if globalSettings.ToxicSeparationEnabled() && !isModerator {
+	if globalSettings.ToxicSeparationEnabled() && globalSettings.NewPlayerMaxGames > 0 && !isModerator {
 		journal := NewGuildEnforcementJournal(userID)
 		if err := StorableRead(ctx, p.nk, userID, journal, true); err != nil {
 			logger.Warn("Failed to load enforcement journal for toxic separation", zap.Error(err))
