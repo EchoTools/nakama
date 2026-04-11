@@ -1345,6 +1345,34 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 						}
 					}
 				}
+
+				// Update ambassador state after match completion.
+				if serviceSettings.Matchmaking.AmbassadorProgramEnabled() {
+					wasAmbassador := false
+					if s := _nk.sessionRegistry.Get(uuid.FromStringOrNil(presence.GetSessionId())); s != nil {
+						if params, ok := LoadParams(s.Context()); ok {
+							wasAmbassador = params.isAmbassadorMatch.Load()
+							// Reset for next match.
+							params.isAmbassadorMatch.Store(false)
+						}
+					}
+
+					ambState := NewAmbassadorState()
+					if err := StorableRead(ctx, nk, presence.GetUserId(), ambState, false); err != nil {
+						if !isStorageNotFoundError(err) {
+							logger.WithField("error", err).Warn("Failed to read ambassador state after match")
+						}
+					} else {
+						if wasAmbassador {
+							ambState.RecordAmbassadorMatch()
+						} else if ambState.IsActive {
+							ambState.RecordNormalMatch()
+						}
+						if err := StorableWrite(ctx, nk, presence.GetUserId(), ambState); err != nil {
+							logger.WithField("error", err).Warn("Failed to write ambassador state after match")
+						}
+					}
+				}
 			}
 		}
 	}
