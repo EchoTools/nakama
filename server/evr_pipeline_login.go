@@ -633,6 +633,14 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	}
 	params.latencyHistory.Store(latencyHistory)
 
+	// Load per-player unreachable server records.
+	unreachable, err := LoadUnreachableServers(ctx, p.nk, session.userID.String())
+	if err != nil {
+		logger.Warn("Failed to load unreachable servers, starting fresh", zap.Error(err))
+		unreachable = NewUnreachableServers()
+	}
+	params.unreachableServers.Store(unreachable)
+
 	// Load the display name history for the player.
 	displayNameHistory, err := DisplayNameHistoryLoad(ctx, p.nk, session.userID.String())
 	if err != nil {

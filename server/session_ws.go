@@ -205,6 +205,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		earlyQuitConfig:      atomic.NewPointer[EarlyQuitPlayerState](nil),
 		isGoldNameTag:        atomic.NewBool(false),
 		latencyHistory:       atomic.NewPointer[LatencyHistory](nil),
+		unreachableServers:   atomic.NewPointer[UnreachableServers](nil),
 	}
 
 	ctx = context.WithValue(ctx, ctxSessionParametersKey{}, atomic.NewPointer(&params))

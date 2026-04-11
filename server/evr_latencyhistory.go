@@ -101,20 +101,47 @@ func (h *LatencyHistory) Add(extIP net.IP, rtt int, limit int, expiry time.Time)
 	h.GameServerLatencies[extIP.String()] = history
 }
 
-// LatestRTTs returns the latest RTTs for all game servers
-func (h *LatencyHistory) LatestRTTs() map[string]int {
+// LatestRTTs returns the latest RTTs for all game servers.
+// If since is non-zero, only entries recorded after since are considered.
+func (h *LatencyHistory) LatestRTTs(since ...time.Time) map[string]int {
 	h.RLock()
 	defer h.RUnlock()
+
+	var cutoff time.Time
+	if len(since) > 0 {
+		cutoff = since[0]
+	}
+
 	latestRTTs := make(map[string]int)
 	for extIP, history := range h.GameServerLatencies {
 		for i := len(history) - 1; i >= 0; i-- {
 			if history[i].RTT > 0 {
+				if !cutoff.IsZero() && history[i].Timestamp.Before(cutoff) {
+					break // entries are chronological; older ones precede this
+				}
 				latestRTTs[extIP] = int(history[i].RTT.Milliseconds())
 				break
 			}
 		}
 	}
 	return latestRTTs
+}
+
+// LatestEntry returns the most recent non-zero latency item for a single external IP.
+// Returns the item and true if found, or a zero item and false if not found.
+func (h *LatencyHistory) LatestEntry(extIP string) (LatencyHistoryItem, bool) {
+	h.RLock()
+	defer h.RUnlock()
+	history, ok := h.GameServerLatencies[extIP]
+	if !ok || len(history) == 0 {
+		return LatencyHistoryItem{}, false
+	}
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].RTT > 0 {
+			return history[i], true
+		}
+	}
+	return LatencyHistoryItem{}, false
 }
 
 // LatestRTT returns the latest RTT for a single external IP
@@ -156,20 +183,35 @@ func (h *LatencyHistory) AverageRTT(extIP string, roundRTT bool) int {
 	return average
 }
 
-// AverageRTTs returns the average RTTs for all game servers
-func (h *LatencyHistory) AverageRTTs(roundRTTs bool) map[string]int {
+// AverageRTTs returns the average RTTs for all game servers.
+// If since is non-zero, only entries recorded after since are included.
+func (h *LatencyHistory) AverageRTTs(roundRTTs bool, since ...time.Time) map[string]int {
 	h.RLock()
 	defer h.RUnlock()
+
+	var cutoff time.Time
+	if len(since) > 0 {
+		cutoff = since[0]
+	}
+
 	averageRTTs := make(map[string]int)
 	for extIP, history := range h.GameServerLatencies {
 		if len(history) == 0 {
 			continue
 		}
-		average := 0
+		total := 0
+		count := 0
 		for _, l := range history {
-			average += int(l.RTT.Milliseconds())
+			if !cutoff.IsZero() && l.Timestamp.Before(cutoff) {
+				continue
+			}
+			total += int(l.RTT.Milliseconds())
+			count++
 		}
-		average /= len(history)
+		if count == 0 {
+			continue
+		}
+		average := total / count
 
 		if roundRTTs {
 			average = (average + 5) / 10 * 10

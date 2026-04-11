@@ -541,6 +541,14 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 
 	latencyHistory := params.latencyHistory.Load()
 
+	// Build set of IPs this player has failed to connect to.
+	var unreachableIPs map[string]struct{}
+	if params.unreachableServers != nil {
+		if u := params.unreachableServers.Load(); u != nil {
+			unreachableIPs = u.UnreachableIPs()
+		}
+	}
+
 	presences, err := p.nk.StreamUserList(StreamModeGameServer, groupID, "", "", false, true)
 	if err != nil {
 		return fmt.Errorf("Error listing game servers: %v", err)
@@ -565,11 +573,16 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 			logger.Warn("Game server has invalid endpoint, skipping", zap.String("presence", presence.GetStatus()))
 			continue
 		}
-		hostIPs = append(hostIPs, gPresence.Endpoint.GetExternalIP())
-		if _, ok := endpointMap[gPresence.Endpoint.GetExternalIP()]; ok {
+		extIP := gPresence.Endpoint.GetExternalIP()
+		// Skip servers this player cannot reach.
+		if _, blocked := unreachableIPs[extIP]; blocked {
 			continue
 		}
-		endpointMap[gPresence.Endpoint.GetExternalIP()] = gPresence.Endpoint
+		hostIPs = append(hostIPs, extIP)
+		if _, ok := endpointMap[extIP]; ok {
+			continue
+		}
+		endpointMap[extIP] = gPresence.Endpoint
 	}
 
 	sortPingCandidatesByLatencyHistory(hostIPs, latencyHistory)
