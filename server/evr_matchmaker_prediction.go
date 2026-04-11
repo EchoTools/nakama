@@ -27,6 +27,8 @@ type PredictionConfig struct {
 	UseSnakeDraftFormation bool                    // Use snake draft instead of sequential filling
 	Variants               []RosterVariant         // Pre-computed list of variants to generate (if set, overrides other variant settings)
 	OpenSkillOptions       *types.OpenSkillOptions // Options for OpenSkill calculations
+	NewPlayerThreshold     int                     // Games played threshold for new player detection (0 = disabled)
+	EnableNewPlayerTeamBias    bool                    // Apply new player team bias after team formation
 }
 
 type PredictedMatch struct {
@@ -389,6 +391,16 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 				match := make([]runtime.MatchmakerEntry, len(candidate))
 				copy(match[:len(blueTeam)], blueTeam)
 				copy(match[len(blueTeam):], orangeTeam)
+
+				// Apply new player team bias: move new players to the stronger team
+				// when it does not worsen overall balance.
+				if cfg.EnableNewPlayerTeamBias && cfg.NewPlayerThreshold > 0 {
+					defaultMu := NewDefaultRating().Mu
+					if cfg.OpenSkillOptions != nil && cfg.OpenSkillOptions.Mu != nil {
+						defaultMu = *cfg.OpenSkillOptions.Mu
+					}
+					match = ApplyNewPlayerTeamBias(match, teamSize, cfg.NewPlayerThreshold, defaultMu)
+				}
 
 				// Get actual (non-boosted) ratings for draw probability calculation - reuse slices
 				// Grow slices if team exceeds pre-allocated capacity
