@@ -22,11 +22,13 @@ const (
 
 // PredictionConfig contains settings for match outcome prediction
 type PredictionConfig struct {
-	PartyBoostPercent      float64                 // Boost party effective skill by this percentage
-	EnableRosterVariants   bool                    // Generate multiple roster variants for better match selection
-	UseSnakeDraftFormation bool                    // Use snake draft instead of sequential filling
-	Variants               []RosterVariant         // Pre-computed list of variants to generate (if set, overrides other variant settings)
-	OpenSkillOptions       *types.OpenSkillOptions // Options for OpenSkill calculations
+	PartyBoostPercent        float64                 // Boost party effective skill by this percentage
+	EnableRosterVariants     bool                    // Generate multiple roster variants for better match selection
+	UseSnakeDraftFormation   bool                    // Use snake draft instead of sequential filling
+	Variants                 []RosterVariant         // Pre-computed list of variants to generate (if set, overrides other variant settings)
+	OpenSkillOptions         *types.OpenSkillOptions // Options for OpenSkill calculations
+	EnableArchetypeBalancing bool                    // Score team compositions by archetype diversity
+	NewPlayerThreshold       int                     // Games played below which a player is "new"
 }
 
 type PredictedMatch struct {
@@ -35,7 +37,8 @@ type PredictedMatch struct {
 	Size                  int8                      `json:"size"`
 	DivisionCount         int8                      `json:"division_count"`
 	OldestTicketTimestamp int64                     `json:"oldest_ticket"`
-	Variant               RosterVariant             `json:"variant"` // Which team formation strategy was used
+	Variant               RosterVariant             `json:"variant"`           // Which team formation strategy was used
+	CompositionScore      int8                      `json:"composition_score"` // Archetype balance score (higher = better composition)
 }
 
 type MatchmakerEntries []runtime.MatchmakerEntry
@@ -407,6 +410,21 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 				orangeTeam.RatingsInto(orangeActual, cfg.OpenSkillOptions)
 				drawProb = rating.PredictDraw([]types.Team{blueActual, orangeActual}, cfg.OpenSkillOptions)
 
+				var compScore int8
+				if cfg.EnableArchetypeBalancing {
+					split := TeamSplit{
+						BlueIndices:   make([]int, len(blueTeam)),
+						OrangeIndices: make([]int, len(orangeTeam)),
+					}
+					for i := range blueTeam {
+						split.BlueIndices[i] = i
+					}
+					for i := range orangeTeam {
+						split.OrangeIndices[i] = len(blueTeam) + i
+					}
+					compScore = int8(scoreTeamSplitComposition(match, split, cfg.NewPlayerThreshold))
+				}
+
 				out <- PredictedMatch{
 					Candidate:             match,
 					DrawProb:              float32(drawProb),
@@ -414,6 +432,7 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 					DivisionCount:         int8(len(divs)),
 					OldestTicketTimestamp: int64(ticketAge[match[0].GetTicket()]),
 					Variant:               variant,
+					CompositionScore:      compScore,
 				}
 			}
 		}

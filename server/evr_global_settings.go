@@ -151,6 +151,7 @@ type GlobalMatchmakingSettings struct {
 	QualityFloorInitial            float64                 `json:"quality_floor_initial"`               // Minimum predicted draw probability at t=0 (default 0.10)
 	QualityFloorDecayPerSecond     float64                 `json:"quality_floor_decay_per_second"`      // How fast the floor drops per second of wait time (default 0.0005)
 	QualityFloorMinimum            float64                 `json:"quality_floor_minimum"`               // Floor never drops below this value (default 0.0)
+	EnableArchetypeBalancing       *bool                   `json:"enable_archetype_balancing"`          // Use archetype data to prefer balanced team compositions as a tiebreaker (default false, needs tuning)
 }
 
 type QueryAddons struct {
@@ -187,6 +188,13 @@ func (g GlobalMatchmakingSettings) RequiresPreMatchPing() bool {
 // Defaults to true when not explicitly configured.
 func (g GlobalMatchmakingSettings) ArchetypeDetectionEnabled() bool {
 	return g.EnableArchetypeDetection == nil || *g.EnableArchetypeDetection
+}
+
+// ArchetypeBalancingEnabled returns whether archetype-aware team composition
+// scoring is used as a tiebreaker during team formation.
+// Defaults to false (disabled) when not explicitly configured.
+func (g GlobalMatchmakingSettings) ArchetypeBalancingEnabled() bool {
+	return g.EnableArchetypeBalancing != nil && *g.EnableArchetypeBalancing
 }
 
 func ServiceSettingsLoad(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) (*ServiceSettingsData, error) {
@@ -395,6 +403,12 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 	}
 	if data.Matchmaking.ReducingPrecisionMaxCycles == 0 {
 		data.Matchmaking.ReducingPrecisionMaxCycles = 5 // Maximum 5 cycles before fully relaxing
+	}
+
+	// Archetype balancing defaults to disabled — needs tuning before enabling.
+	if data.Matchmaking.EnableArchetypeBalancing == nil {
+		f := false
+		data.Matchmaking.EnableArchetypeBalancing = &f
 	}
 
 	// Seed CGNAT detection defaults
