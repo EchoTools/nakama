@@ -330,7 +330,12 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	if groupID != uuid.Nil {
 		gamesPlayed, err = GamesPlayedLoad(ctx, p.nk, userID, groupIDStr, evr.ModeArenaPublic)
 		if err != nil {
-			logger.Warn("Failed to load games played", zap.Error(err))
+			logger.Warn("Failed to load games played",
+				zap.String("user_id", userID),
+				zap.String("group_id", groupIDStr),
+				zap.String("mode", evr.ModeArenaPublic.String()),
+				zap.Error(err),
+			)
 		}
 	}
 
