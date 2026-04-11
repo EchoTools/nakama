@@ -381,11 +381,26 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 
 	// Hard skill divisions default to disabled; boundaries and names are
 	// always populated so division labels appear on tickets for monitoring.
+	defaultDivisionBoundaries := []float64{15.0, 25.0, 35.0}
+	defaultDivisionNames := []string{"Bronze", "Silver", "Gold", "Diamond"}
 	if data.Matchmaking.DivisionBoundaries == nil {
-		data.Matchmaking.DivisionBoundaries = []float64{15.0, 25.0, 35.0}
+		data.Matchmaking.DivisionBoundaries = defaultDivisionBoundaries
 	}
 	if data.Matchmaking.DivisionNames == nil {
-		data.Matchmaking.DivisionNames = []string{"Bronze", "Silver", "Gold", "Diamond"}
+		data.Matchmaking.DivisionNames = defaultDivisionNames
+	}
+	// Validate boundaries are sorted and names length matches boundaries+1.
+	validDivisionBoundaries := true
+	for i := 1; i < len(data.Matchmaking.DivisionBoundaries); i++ {
+		if data.Matchmaking.DivisionBoundaries[i-1] >= data.Matchmaking.DivisionBoundaries[i] {
+			validDivisionBoundaries = false
+			break
+		}
+	}
+	if !validDivisionBoundaries || len(data.Matchmaking.DivisionNames) != len(data.Matchmaking.DivisionBoundaries)+1 {
+		logger.Warn("Invalid matchmaking division settings (unsorted boundaries or mismatched name count), resetting to defaults")
+		data.Matchmaking.DivisionBoundaries = defaultDivisionBoundaries
+		data.Matchmaking.DivisionNames = defaultDivisionNames
 	}
 
 	// Seed CGNAT detection defaults
