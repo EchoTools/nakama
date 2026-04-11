@@ -70,6 +70,9 @@ func DetectArchetype(stats ArchetypeStats, gamesPlayed int, newPlayerThreshold i
 // LoadArchetypeStats reads the player's cumulative arena statistics from
 // leaderboard records and returns the stats needed for archetype detection
 // along with the total games played.
+//
+// TODO: This runs a synchronous DB query per ticket creation. Consider caching
+// results per user with a short TTL to reduce DB load under peak traffic.
 func LoadArchetypeStats(ctx context.Context, db *sql.DB, logger *zap.Logger, userID, groupID string) (ArchetypeStats, int, error) {
 	statNames := []string{"Goals", "Assists", "Saves", "Steals", "Passes", "ShotsOnGoal", "ArenaWins", "ArenaLosses"}
 	mode := evr.ModeArenaPublic
@@ -122,6 +125,9 @@ func LoadArchetypeStats(ctx context.Context, db *sql.DB, logger *zap.Logger, use
 			continue
 		}
 		values[meta.StatName] = val
+	}
+	if err := rows.Err(); err != nil {
+		return ArchetypeStats{}, 0, err
 	}
 
 	stats := ArchetypeStats{
