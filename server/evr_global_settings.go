@@ -145,6 +145,8 @@ type GlobalMatchmakingSettings struct {
 	EnableTicketReservation        bool                    `json:"enable_ticket_reservation"`           // Enable the ticket reservation system (default false)
 	CrashRecoveryWindowSecs        int                     `json:"crash_recovery_window_secs"`          // Seconds to hold a disconnected player's spot (default 60, 0 = use default, <0 = disabled)
 	RequirePreMatchPing            *bool                   `json:"require_pre_match_ping"`              // Require players to ping all candidate servers before matchmaking (default true)
+	NewPlayerMaxGames              int                     `json:"new_player_max_games"`                // Games played threshold below which a player is considered "new" (default 50)
+	EnableToxicSeparation          *bool                   `json:"enable_toxic_separation"`             // Prevent players with suspension history from matching with new players (default true)
 }
 
 type QueryAddons struct {
@@ -175,6 +177,12 @@ func (g ServiceSettingsData) UseSkillBasedMatchmaking() bool {
 // before entering matchmaking. Defaults to true when not explicitly configured.
 func (g GlobalMatchmakingSettings) RequiresPreMatchPing() bool {
 	return g.RequirePreMatchPing == nil || *g.RequirePreMatchPing
+}
+
+// ToxicSeparationEnabled returns whether players with suspension history
+// should be prevented from matching with new players. Defaults to true.
+func (g GlobalMatchmakingSettings) ToxicSeparationEnabled() bool {
+	return g.EnableToxicSeparation == nil || *g.EnableToxicSeparation
 }
 
 func ServiceSettingsLoad(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) (*ServiceSettingsData, error) {
@@ -355,6 +363,17 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 	if data.Matchmaking.RequirePreMatchPing == nil {
 		t := true
 		data.Matchmaking.RequirePreMatchPing = &t
+	}
+
+	// 0 means "disabled" (no player is considered new). Clamp invalid
+	// negative values to 0.
+	if data.Matchmaking.NewPlayerMaxGames < 0 {
+		data.Matchmaking.NewPlayerMaxGames = 0
+	}
+
+	if data.Matchmaking.EnableToxicSeparation == nil {
+		t := true
+		data.Matchmaking.EnableToxicSeparation = &t
 	}
 
 	// Set default reducing precision settings for post-matchmaker backfill
