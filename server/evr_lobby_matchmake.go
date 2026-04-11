@@ -276,6 +276,21 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 
 	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(&ticketConfig)
 
+	// Detect player archetype from rolling stats and add to ticket properties.
+	if ServiceSettings().Matchmaking.ArchetypeDetectionEnabled() {
+		threshold := ServiceSettings().Matchmaking.NewPlayerMaxGames
+		if threshold <= 0 {
+			threshold = 50
+		}
+		archetypeStats, gamesPlayed, arcErr := LoadArchetypeStats(ctx, p.db, logger, session.UserID().String(), lobbyParams.GroupID.String())
+		if arcErr != nil {
+			logger.Warn("Failed to load archetype stats, defaulting to rookie", zap.Error(arcErr))
+			stringProps["archetype"] = ArchetypeRookie
+		} else {
+			stringProps["archetype"] = DetectArchetype(archetypeStats, gamesPlayed, threshold)
+		}
+	}
+
 	// The matchmaker will always prioritize the players that are about to timeout.
 	priorityThreshold := time.Now().UTC().Add((p.matchmakingTicketTimeout() / 3) * 2)
 
