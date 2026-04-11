@@ -131,9 +131,58 @@ func (d *DiscordAppBot) handleLinkHeadset(ctx context.Context, logger runtime.Lo
 func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 	nk := d.nk
 	options := i.ApplicationCommandData().Options
-	if len(options) == 0 {
 
-		account, err := nk.AccountGetId(ctx, userID)
+	// Resolve target user. If a "user" option is provided, verify the caller
+	// is a global operator and operate on the target's account instead.
+	targetUserID := userID
+	targetDiscordID := user.ID
+	var targetUser *discordgo.User
+	for _, opt := range options {
+		if opt.Name == "user" {
+			targetUser = opt.UserValue(s)
+			break
+		}
+	}
+
+	if targetUser != nil {
+		if targetUser.Bot {
+			return editInteractionResponse(s, i, "Bots don't have accounts.")
+		}
+
+		isGlobalOperator, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+		if err != nil {
+			return fmt.Errorf("failed to check global operator status: %w", err)
+		}
+		if !isGlobalOperator {
+			return editInteractionResponse(s, i, "Only global operators can unlink another user's headset.")
+		}
+
+		targetUserID = d.cache.DiscordIDToUserID(targetUser.ID)
+		if targetUserID == "" {
+			return editInteractionResponse(s, i, "Target user not found.")
+		}
+		targetDiscordID = targetUser.ID
+
+		logger.Info("Global operator unlinking headset for another user",
+			zap.String("operatorUserID", userID),
+			zap.String("operatorDiscordID", user.ID),
+			zap.String("targetUserID", targetUserID),
+			zap.String("targetDiscordID", targetDiscordID),
+		)
+	}
+
+	// Find the device-link option if provided.
+	var xpid string
+	for _, opt := range options {
+		if opt.Name == "device-link" {
+			xpid = opt.StringValue()
+			break
+		}
+	}
+
+	if xpid == "" {
+		// No device specified — show the select menu for the target's devices.
+		account, err := nk.AccountGetId(ctx, targetUserID)
 		if err != nil {
 			logger.Error("Failed to get account", zap.Error(err))
 			return err
@@ -142,21 +191,21 @@ func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.
 			return editInteractionResponse(s, i, "No headsets are linked to this account.")
 		}
 
-		loginHistory := NewLoginHistory(userID)
-		if err := StorableRead(ctx, nk, userID, loginHistory, true); err != nil {
+		loginHistory := NewLoginHistory(targetUserID)
+		if err := StorableRead(ctx, nk, targetUserID, loginHistory, true); err != nil {
 			logger.Error("Failed to load login history", zap.Error(err))
 			return err
 		}
 
-		options := make([]discordgo.SelectMenuOption, 0, len(account.Devices))
+		menuOptions := make([]discordgo.SelectMenuOption, 0, len(account.Devices))
 		for _, device := range account.Devices {
 
 			description := ""
-			xpid, err := evr.ParseEvrId(device.GetId())
+			xpidVal, err := evr.ParseEvrId(device.GetId())
 			if err != nil {
 				continue
 			}
-			if ts, ok := loginHistory.GetXPI(*xpid); ok {
+			if ts, ok := loginHistory.GetXPI(*xpidVal); ok {
 				hours := int(time.Since(ts).Hours())
 				if hours < 1 {
 					minutes := int(time.Since(ts).Minutes())
@@ -172,7 +221,7 @@ func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.
 				}
 			}
 
-			options = append(options, discordgo.SelectMenuOption{
+			menuOptions = append(menuOptions, discordgo.SelectMenuOption{
 				Label: device.GetId(),
 				Value: device.GetId(),
 				Emoji: &discordgo.ComponentEmoji{
@@ -182,13 +231,20 @@ func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.
 			})
 		}
 
+		// Encode the target user ID in the custom ID so the component
+		// callback knows whose device to unlink.
+		customID := "unlink-headset"
+		if targetUser != nil {
+			customID = "unlink-headset:" + targetUserID
+		}
+
 		components := []discordgo.MessageComponent{
 			discordgo.ActionsRow{
 				Components: []discordgo.MessageComponent{
 					discordgo.SelectMenu{
-						CustomID:    "unlink-headset",
+						CustomID:    customID,
 						Placeholder: "<select a device to unlink>",
-						Options:     options,
+						Options:     menuOptions,
 					},
 				},
 			},
@@ -200,7 +256,6 @@ func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.
 		})
 		return err
 	}
-	xpid := options[0].StringValue()
 
 	if user == nil {
 		return nil
@@ -209,20 +264,24 @@ func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.
 	// Only allow unlinking platform device IDs (OVR-ORG-, DMO-, DSC-, etc.).
 	// Reject anything else (e.g. vrml: device links) — those must go through the dedicated VRML unlink flow.
 	if _, err := evr.ParseEvrId(xpid); err != nil {
-		logger.Warn("Attempted to unlink non-headset device via unlink-headset", zap.String("userID", userID), zap.String("discordID", user.ID), zap.String("deviceID", xpid))
+		logger.Warn("Attempted to unlink non-headset device via unlink-headset", zap.String("userID", targetUserID), zap.String("discordID", targetDiscordID), zap.String("deviceID", xpid))
 		return editInteractionResponse(s, i, "Invalid device ID.")
 	}
 
-	logger.Info("Unlinking headset device", zap.String("userID", userID), zap.String("discordID", user.ID), zap.String("deviceID", xpid))
+	logger.Info("Unlinking headset device", zap.String("userID", targetUserID), zap.String("discordID", targetDiscordID), zap.String("deviceID", xpid))
 
-	if err := nk.UnlinkDevice(ctx, userID, xpid); err != nil {
+	if err := nk.UnlinkDevice(ctx, targetUserID, xpid); err != nil {
 		return editInteractionResponse(s, i, err.Error())
 	}
 	d.metrics.CustomCounter("unlink_headset", nil, 1)
-	content := "Your headset has been unlinked. Restart your game."
-	d.cache.QueueSyncMember(i.GuildID, user.ID, false)
 
-	if err := d.cache.updateLinkStatus(ctx, user.ID); err != nil {
+	content := "Headset has been unlinked. Restart the game."
+	if targetUser != nil {
+		content = fmt.Sprintf("Unlinked headset `%s` from <@%s>.", xpid, targetDiscordID)
+	}
+	d.cache.QueueSyncMember(i.GuildID, targetDiscordID, false)
+
+	if err := d.cache.updateLinkStatus(ctx, targetDiscordID); err != nil {
 		return fmt.Errorf("failed to update link status: %w", err)
 	}
 
