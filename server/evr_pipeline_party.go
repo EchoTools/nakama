@@ -111,7 +111,7 @@ func (p *EvrPipeline) resolveUserIDToAccountID(ctx context.Context, userID uuid.
 	if err != nil {
 		return 0, fmt.Errorf("device lookup for user %s: %w", userID, err)
 	}
-	// deviceID is like "OVR-12345" — parse the account ID from after the last dash.
+	// deviceID is like "OVR-12345" or "DSC-12345" — parse the account ID from after the last dash.
 	parsed, err := evr.ParseEvrId(deviceID)
 	if err != nil {
 		return 0, fmt.Errorf("parse evrid %s: %w", deviceID, err)

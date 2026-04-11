@@ -206,7 +206,7 @@ func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.
 		return nil
 	}
 
-	// Only allow unlinking OVR-ORG- and DMO- headset devices.
+	// Only allow unlinking platform device IDs (OVR-ORG-, DMO-, DSC-, etc.).
 	// Reject anything else (e.g. vrml: device links) — those must go through the dedicated VRML unlink flow.
 	if _, err := evr.ParseEvrId(xpid); err != nil {
 		logger.Warn("Attempted to unlink non-headset device via unlink-headset", zap.String("userID", userID), zap.String("discordID", user.ID), zap.String("deviceID", xpid))
