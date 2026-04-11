@@ -67,6 +67,8 @@ type LobbySessionParameters struct {
 	FailsafeTimeout              time.Duration                 `json:"failsafe_timeout"` // The failsafe timeout
 	FallbackTimeout              time.Duration                 `json:"fallback_timeout"` // The fallback timeout
 	DisplayName                  string                        `json:"display_name"`
+	GamesPlayed                  int                           `json:"games_played"`                  // Total games played, loaded from GamesPlayed leaderboard
+	HasSuspensionHistoryFlag     bool                          `json:"has_suspension_history"`         // True if player has any suspension history (exempt: enforcers/operators always false)
 	latencyHistory               *atomic.Pointer[LatencyHistory]
 	unreachableServers           *atomic.Pointer[UnreachableServers]
 }
@@ -324,6 +326,52 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		}
 	}
 
+	// Load the player's total games played for new-player detection.
+	gamesPlayed := 0
+	if groupID != uuid.Nil {
+		gamesPlayed, err = GamesPlayedLoad(ctx, p.nk, userID, groupIDStr, evr.ModeArenaPublic)
+		if err != nil {
+			logger.Warn("Failed to load games played",
+				zap.String("user_id", userID),
+				zap.String("group_id", groupIDStr),
+				zap.String("mode", evr.ModeArenaPublic.String()),
+				zap.Error(err),
+			)
+		}
+	}
+
+	// Determine if user is a moderator (enforcer or operator), independent of division.
+	// Computed early because toxic separation exempts moderators.
+	isModerator := sessionParams.isGlobalOperator
+	if !isModerator && groupID != uuid.Nil {
+		if gg, ok := sessionParams.guildGroups[groupID.String()]; ok {
+			isModerator = gg.IsEnforcer(userID)
+		}
+	}
+
+	// Check suspension history for toxic player separation.
+	// Enforcers and global operators are exempt — they may have suspension
+	// history from admin work, not from being toxic.
+	hasSuspensionHistory := false
+	if globalSettings.ToxicSeparationEnabled() && globalSettings.NewPlayerMaxGames > 0 && !isModerator {
+		journal := NewGuildEnforcementJournal(userID)
+		if err := StorableRead(ctx, p.nk, userID, journal, true); err != nil {
+			logger.Warn("Failed to load enforcement journal for toxic separation", zap.Error(err))
+		} else {
+			for _, records := range journal.RecordsByGroupID {
+				for _, r := range records {
+					if r.IsSuspension() {
+						hasSuspensionHistory = true
+						break
+					}
+				}
+				if hasSuspensionHistory {
+					break
+				}
+			}
+		}
+	}
+
 	maxServerRTT := globalSettings.MaxServerRTT
 
 	if globalSettings.MaxServerRTT <= 60 {
@@ -340,15 +388,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	if sessionParams.IsIGPOpen() {
 		matchmakingDivisions = []string{"green"}
 		matchmakingExcludedDivisions = []string{}
-	}
-
-	// Determine if user is a moderator (enforcer or operator), independent of division
-	isModerator := sessionParams.isGlobalOperator
-	// If not a global operator, check if they're an enforcer in their active group
-	if !isModerator && groupID != uuid.Nil {
-		if gg, ok := sessionParams.guildGroups[groupID.String()]; ok {
-			isModerator = gg.IsEnforcer(userID)
-		}
 	}
 
 	latencyHistory := sessionParams.latencyHistory.Load()
@@ -425,6 +464,8 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		FailsafeTimeout:              time.Duration(failsafeTimeoutSecs) * time.Second,
 		FallbackTimeout:              time.Duration(globalSettings.FallbackTimeoutSecs) * time.Second,
 		DisplayName:                  sessionParams.profile.GetGroupIGN(groupIDStr),
+		GamesPlayed:                  gamesPlayed,
+		HasSuspensionHistoryFlag:     hasSuspensionHistory,
 	}
 
 	// Check for an existing matchmaking credit to preserve queue position
@@ -635,7 +676,8 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		"submission_time":    submissionTime,
 		"divisions":          strings.Join(p.MatchmakingDivisions, ","),
 		"excluded_divisions": strings.Join(p.MatchmakingExcludedDivisions, ","),
-		"is_moderator":       strconv.FormatBool(p.IsModerator),
+		"is_moderator":              strconv.FormatBool(p.IsModerator),
+		"has_suspension_history":    strconv.FormatBool(p.HasSuspensionHistoryFlag),
 	}
 	var minTeamSize, maxTeamSize float64
 	switch p.Mode {
@@ -655,6 +697,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		"max_team_size":    maxTeamSize,
 		"count_multiple":   float64(ticketParams.CountMultiple),
 		"max_count":        float64(ticketParams.MaxCount),
+		"games_played":     float64(p.GamesPlayed),
 	}
 
 	qparts := []string{
