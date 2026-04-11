@@ -231,6 +231,88 @@ func TestEntryArchetype_ValidArchetypes(t *testing.T) {
 	}
 }
 
+func TestScoreTeamComposition_AllSameArchetype(t *testing.T) {
+	// Both teams entirely Strikers: each team gets +2 for having a striker, no playmaker bonus.
+	team1 := []string{ArchetypeStriker, ArchetypeStriker, ArchetypeStriker, ArchetypeStriker}
+	team2 := []string{ArchetypeStriker, ArchetypeStriker, ArchetypeStriker, ArchetypeStriker}
+	got := scoreTeamComposition(team1, team2, false, false)
+	if got <= 0 {
+		t.Errorf("all-striker teams should have positive score, got %d", got)
+	}
+	if got != 4 {
+		t.Errorf("scoreTeamComposition() = %d, want 4 (+2 striker per team)", got)
+	}
+}
+
+func TestScoreTeamComposition_AllRookies(t *testing.T) {
+	// Both teams entirely Rookies: each team gets -2 for 2+ rookies, no striker/playmaker bonus.
+	team1 := []string{ArchetypeRookie, ArchetypeRookie, ArchetypeRookie, ArchetypeRookie}
+	team2 := []string{ArchetypeRookie, ArchetypeRookie, ArchetypeRookie, ArchetypeRookie}
+	got := scoreTeamComposition(team1, team2, false, false)
+	if got >= 0 {
+		t.Errorf("all-rookie teams should have negative score, got %d", got)
+	}
+	if got != -4 {
+		t.Errorf("scoreTeamComposition() = %d, want -4 (-2 rookie penalty per team)", got)
+	}
+}
+
+func TestScoreTeamComposition_EmptyArchetypes(t *testing.T) {
+	// Empty archetype strings (detection disabled): should not crash, should be neutral.
+	team1 := []string{"", "", "", ""}
+	team2 := []string{"", "", "", ""}
+	got := scoreTeamComposition(team1, team2, false, false)
+	if got != 0 {
+		t.Errorf("scoreTeamComposition() with empty archetypes = %d, want 0", got)
+	}
+}
+
+func TestScoreTeamComposition_SinglePlayerTeams(t *testing.T) {
+	// Teams of 1 player each. Scoring should still work correctly.
+	team1 := []string{ArchetypeStriker}
+	team2 := []string{ArchetypePlaymaker}
+	got := scoreTeamComposition(team1, team2, false, false)
+	// team1: +2 (striker), team2: +1 (playmaker) = 3
+	if got != 3 {
+		t.Errorf("scoreTeamComposition() = %d, want 3", got)
+	}
+}
+
+func TestSelectBestTeamSplit_AllSplitsEqual(t *testing.T) {
+	// When all splits have the same composition score, should return the first one.
+	entries := []runtime.MatchmakerEntry{
+		makeCompEntry("p1", ArchetypeStriker, 20.0, 200),
+		makeCompEntry("p2", ArchetypeStriker, 20.0, 200),
+		makeCompEntry("p3", ArchetypeStriker, 20.0, 200),
+		makeCompEntry("p4", ArchetypeStriker, 20.0, 200),
+	}
+
+	split0 := teamSplit{blueIndices: []int{0, 1}, orangeIndices: []int{2, 3}}
+	split1 := teamSplit{blueIndices: []int{0, 2}, orangeIndices: []int{1, 3}}
+	split2 := teamSplit{blueIndices: []int{0, 3}, orangeIndices: []int{1, 2}}
+
+	splits := []teamSplit{split0, split1, split2}
+	best := selectBestTeamSplit(entries, splits, 50)
+
+	// All have same score, so the first split should be returned (deterministic).
+	if best.blueIndices[0] != split0.blueIndices[0] || best.blueIndices[1] != split0.blueIndices[1] ||
+		best.orangeIndices[0] != split0.orangeIndices[0] || best.orangeIndices[1] != split0.orangeIndices[1] {
+		t.Errorf("expected first split to be returned when all scores are equal, got blue=%v orange=%v",
+			best.blueIndices, best.orangeIndices)
+	}
+}
+
+func TestEntryArchetype_InvalidValues(t *testing.T) {
+	// Random garbage strings should return empty, not match any valid archetype.
+	for _, garbage := range []string{"xyzzy", "STRIKER", "Playmaker", "goalie!", "123", "striker "} {
+		entry := makeCompEntry("garbage", garbage, 20.0, 200)
+		got := entryArchetype(entry)
+		if got != "" {
+			t.Errorf("entryArchetype(%q) = %q, want empty string", garbage, got)
+		}
+	}
+}
+
 func BenchmarkScoreTeamComposition(b *testing.B) {
 	team1 := []string{ArchetypeStriker, ArchetypePlaymaker, ArchetypeInterceptor, ArchetypeGoalie}
 	team2 := []string{ArchetypeStriker, ArchetypePlaymaker, ArchetypeInterceptor, ArchetypeGoalie}
