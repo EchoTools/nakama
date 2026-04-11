@@ -22,7 +22,6 @@ const (
 	OVR                         // Oculus VR
 	BOT                         // Bot/AI
 	DMO                         // Demo (no ovr)
-	TEN                         // Tencent
 	DSC                         // Discord
 )
 
@@ -168,8 +167,6 @@ func (code PlatformCode) GetDisplayName() string {
 		return "Bot"
 	case DMO:
 		return "Demo"
-	case TEN:
-		return "Tencent" // TODO: Verify, this is only suspected to be the target of "TEN".
 	case DSC:
 		return "Discord"
 	default:
@@ -210,8 +207,6 @@ func (code PlatformCode) Abbrevation() string {
 		return "BOT"
 	case DMO:
 		return "DMO"
-	case TEN:
-		return "TEN" // TODO: Verify, this is only suspected to be the target of "TEN".
 	case DSC:
 		return "DSC"
 	default:
@@ -238,8 +233,6 @@ func platformCodeFromString(s string) (PlatformCode, bool) {
 		return BOT, true
 	case "DMO":
 		return DMO, true
-	case "TEN":
-		return TEN, true
 	case "DSC":
 		return DSC, true
 	default:
