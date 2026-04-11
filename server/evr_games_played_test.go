@@ -126,6 +126,7 @@ func TestNewPlayerMaxGamesNegativeClamped(t *testing.T) {
 	}
 }
 
+
 func TestGamesPlayedOnLobbySessionParameters(t *testing.T) {
 	params := &LobbySessionParameters{
 		GamesPlayed: 42,
