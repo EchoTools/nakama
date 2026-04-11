@@ -123,6 +123,9 @@ func LoadArchetypeStats(ctx context.Context, db *sql.DB, logger *zap.Logger, use
 		}
 		values[meta.StatName] = val
 	}
+	if err := rows.Err(); err != nil {
+		return ArchetypeStats{}, 0, err
+	}
 
 	stats := ArchetypeStats{
 		Goals:       values["Goals"],
