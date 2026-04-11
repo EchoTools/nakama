@@ -34,10 +34,12 @@ func GamesPlayedLoad(ctx context.Context, nk runtime.NakamaModule, userID, group
 	return int(val), nil
 }
 
-// IsNewPlayer returns true if the matchmaker entry's games_played numeric
-// property is below the given threshold. If the property is missing or not
-// a float64, the player is treated as new (returns true). A threshold of 0
-// means no one is classified as new.
+// IsNewPlayer returns true if the player's games_played is below threshold,
+// or if games_played data is unavailable (treats unknown players as new).
+// When the property is missing or not a valid float64, the player is assumed
+// to be new. A threshold of 0 disables new-player classification for players
+// with a known games_played value, but players without the property are
+// still treated as new.
 func IsNewPlayer(entry runtime.MatchmakerEntry, threshold int) bool {
 	props := entry.GetProperties()
 	gp, ok := props["games_played"].(float64)
