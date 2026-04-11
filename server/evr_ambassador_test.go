@@ -264,6 +264,122 @@ func TestAmbassadorProgramEnabled(t *testing.T) {
 	}
 }
 
+func TestAmbassadorEligible_ExactlyAtMinGames(t *testing.T) {
+	// games_played exactly equal to min. Should be eligible (>= check).
+	got := IsEligibleAmbassador(200, 35.0, 200, 30.0)
+	if !got {
+		t.Error("expected eligible when games_played == minGames")
+	}
+}
+
+func TestAmbassadorEligible_ExactlyAtMinMu(t *testing.T) {
+	// mu exactly equal to min. Should be eligible (>= check).
+	got := IsEligibleAmbassador(300, 30.0, 200, 30.0)
+	if !got {
+		t.Error("expected eligible when mu == minMu")
+	}
+}
+
+func TestAmbassadorEligible_OneBelow(t *testing.T) {
+	// games_played one below min — should NOT be eligible.
+	if IsEligibleAmbassador(199, 35.0, 200, 30.0) {
+		t.Error("expected ineligible when games_played == minGames-1")
+	}
+	// mu fractionally below min — should NOT be eligible.
+	if IsEligibleAmbassador(300, 29.99, 200, 30.0) {
+		t.Error("expected ineligible when mu == minMu-0.01")
+	}
+}
+
+func TestAmbassadorDivisionDrop_CustomDivisionNames(t *testing.T) {
+	names := []string{"Newbie", "Regular", "Expert"}
+
+	tests := []struct {
+		current string
+		want    string
+	}{
+		{"Expert", "Regular"},
+		{"Regular", "Newbie"},
+		{"Newbie", "Newbie"}, // Already lowest
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.current+"->"+tt.want, func(t *testing.T) {
+			got := GetAmbassadorDivision(tt.current, names)
+			if got != tt.want {
+				t.Errorf("GetAmbassadorDivision(%q, custom) = %q, want %q", tt.current, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAmbassadorMuReduction_ReductionLargerThanMu(t *testing.T) {
+	// mu=5, reduction=10 — effective mu should clamp to 0, not go negative.
+	got := ApplyAmbassadorMuReduction(5.0, 10.0)
+	if got != 0.0 {
+		t.Errorf("ApplyAmbassadorMuReduction(5.0, 10.0) = %f, want 0.0", got)
+	}
+	if got < 0 {
+		t.Errorf("mu went negative: %f", got)
+	}
+}
+
+func TestAmbassadorCooldown_HighMatchCount(t *testing.T) {
+	// Ambassador with 1000+ total matches. Ensure no overflow or weird behavior.
+	state := &AmbassadorState{
+		IsActive:                   true,
+		TotalAmbassadorMatches:     1000,
+		MatchesSinceLastAmbassador: 500,
+		LastAmbassadorMatch:        time.Now().Add(-24 * time.Hour),
+	}
+
+	// Should ambassador — 500 matches since last, cooldown is 5.
+	if !ShouldAmbassadorThisMatch(state, 5) {
+		t.Error("expected ShouldAmbassadorThisMatch=true with 500 matches since last and cooldown=5")
+	}
+
+	// Record another ambassador match and verify counters stay sane.
+	state.RecordAmbassadorMatch()
+	if state.TotalAmbassadorMatches != 1001 {
+		t.Errorf("TotalAmbassadorMatches = %d, want 1001", state.TotalAmbassadorMatches)
+	}
+	if state.MatchesSinceLastAmbassador != 0 {
+		t.Errorf("MatchesSinceLastAmbassador = %d, want 0 after RecordAmbassadorMatch", state.MatchesSinceLastAmbassador)
+	}
+
+	// Should NOT ambassador immediately (cooldown not met).
+	if ShouldAmbassadorThisMatch(state, 5) {
+		t.Error("expected ShouldAmbassadorThisMatch=false immediately after ambassador match with cooldown=5")
+	}
+}
+
+func TestAmbassadorState_Toggle(t *testing.T) {
+	state := NewAmbassadorState()
+
+	// Initial state: inactive.
+	if state.IsActive {
+		t.Fatal("new state should be inactive")
+	}
+
+	// Activate.
+	state.IsActive = true
+	if !state.IsActive {
+		t.Fatal("state should be active after activation")
+	}
+
+	// Deactivate.
+	state.IsActive = false
+	if state.IsActive {
+		t.Fatal("state should be inactive after deactivation")
+	}
+
+	// Re-activate — verify clean toggle.
+	state.IsActive = true
+	if !state.IsActive {
+		t.Fatal("state should be active after re-activation")
+	}
+}
+
 func TestAmbassadorStateStorageMeta(t *testing.T) {
 	state := NewAmbassadorState()
 	meta := state.StorageMeta()
