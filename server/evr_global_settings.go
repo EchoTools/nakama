@@ -146,6 +146,7 @@ type GlobalMatchmakingSettings struct {
 	CrashRecoveryWindowSecs        int                     `json:"crash_recovery_window_secs"`          // Seconds to hold a disconnected player's spot (default 60, 0 = use default, <0 = disabled)
 	RequirePreMatchPing            *bool                   `json:"require_pre_match_ping"`              // Require players to ping all candidate servers before matchmaking (default true)
 	NewPlayerMaxGames              int                     `json:"new_player_max_games"`                // Games played threshold below which a player is considered "new" (default 50)
+	EnableNewPlayerTeamBias        *bool                   `json:"enable_new_player_team_bias"`         // Bias new players onto the predicted-stronger team during team formation (default true)
 }
 
 type QueryAddons struct {
@@ -176,6 +177,12 @@ func (g ServiceSettingsData) UseSkillBasedMatchmaking() bool {
 // before entering matchmaking. Defaults to true when not explicitly configured.
 func (g GlobalMatchmakingSettings) RequiresPreMatchPing() bool {
 	return g.RequirePreMatchPing == nil || *g.RequirePreMatchPing
+}
+
+// NewPlayerTeamBiasEnabled returns whether new players should be biased onto
+// the predicted-stronger team during team formation. Defaults to true.
+func (g GlobalMatchmakingSettings) NewPlayerTeamBiasEnabled() bool {
+	return g.EnableNewPlayerTeamBias == nil || *g.EnableNewPlayerTeamBias
 }
 
 func ServiceSettingsLoad(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) (*ServiceSettingsData, error) {
@@ -360,6 +367,11 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 
 	if data.Matchmaking.NewPlayerMaxGames == 0 {
 		data.Matchmaking.NewPlayerMaxGames = 50
+	}
+
+	if data.Matchmaking.EnableNewPlayerTeamBias == nil {
+		t := true
+		data.Matchmaking.EnableNewPlayerTeamBias = &t
 	}
 
 	// Set default reducing precision settings for post-matchmaker backfill
