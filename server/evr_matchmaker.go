@@ -293,6 +293,37 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		logFields["high_skill_waiters"] = highSkillWaiters
 	}
 
+	// Log per-division queue sizes for monitoring.
+	divisionSizes := make(map[string]int)
+	for _, entry := range entries {
+		div, _ := entry.GetProperties()["division"].(string)
+		if div == "" {
+			div = "unassigned"
+		}
+		divisionSizes[div]++
+	}
+	if len(divisionSizes) > 0 {
+		logFields["division_queue_sizes"] = divisionSizes
+
+		// Log divisions with waiting players that could not form a match.
+		matchedDivisions := make(map[string]bool)
+		for _, match := range matches {
+			if len(match) > 0 {
+				if d, ok := match[0].GetProperties()["division"].(string); ok {
+					matchedDivisions[d] = true
+				}
+			}
+		}
+		for div, size := range divisionSizes {
+			if !matchedDivisions[div] && size > 0 {
+				logger.WithFields(map[string]any{
+					"division":   div,
+					"queue_size": size,
+				}).Info("Division has waiting players but no match formed")
+			}
+		}
+	}
+
 	logger.WithFields(logFields).Info("Skill-based matchmaker completed.")
 
 	if candidates != nil && matches != nil && len(candidates) > 0 {

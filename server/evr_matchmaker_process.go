@@ -10,7 +10,27 @@ import (
 )
 
 func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, entries []runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int, []PredictedMatch) {
-	candidates := groupEntriesSequentially(entries)
+
+	settings := ServiceSettings()
+	hardDivisions := settings != nil && settings.Matchmaking.HardDivisionsEnabled()
+
+	var candidates [][]runtime.MatchmakerEntry
+	if hardDivisions {
+		// Group entries by division, then form candidates within each division.
+		// Entries from different divisions never appear in the same candidate.
+		grouped := FilterEntriesByDivision(entries)
+		for division, divEntries := range grouped {
+			divCandidates := groupEntriesSequentially(divEntries)
+			candidates = append(candidates, divCandidates...)
+			logger.WithFields(map[string]any{
+				"division":   division,
+				"queue_size": len(divEntries),
+				"candidates": len(divCandidates),
+			}).Info("Hard division queue status")
+		}
+	} else {
+		candidates = groupEntriesSequentially(entries)
+	}
 
 	filterCounts := make(map[string]int)
 
@@ -18,7 +38,7 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 	filterCounts["max_rtt"] = m.filterWithinMaxRTT(candidates)
 
 	config := PredictionConfig{}
-	if settings := ServiceSettings(); settings != nil {
+	if settings != nil {
 		mu := settings.SkillRating.Defaults.Mu
 		sigma := settings.SkillRating.Defaults.Sigma
 		z := settings.SkillRating.Defaults.Z
@@ -48,7 +68,7 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 	now := time.Now().UTC().Unix()
 	oldestWaitTimeSecs := now - oldestTicketTimestamp
 	waitTimeThreshold := int64(120) // Default: 120 seconds (2 minutes)
-	if settings := ServiceSettings(); settings != nil && settings.Matchmaking.WaitTimePriorityThresholdSecs > 0 {
+	if settings != nil && settings.Matchmaking.WaitTimePriorityThresholdSecs > 0 {
 		waitTimeThreshold = int64(settings.Matchmaking.WaitTimePriorityThresholdSecs)
 	}
 	prioritizeWaitTime := oldestWaitTimeSecs >= waitTimeThreshold
@@ -89,7 +109,6 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 
 	var madeMatches [][]runtime.MatchmakerEntry
 
-	settings := ServiceSettings()
 	useReservations := settings != nil && settings.Matchmaking.EnableTicketReservation
 
 	if useReservations {
