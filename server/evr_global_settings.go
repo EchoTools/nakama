@@ -145,8 +145,9 @@ type GlobalMatchmakingSettings struct {
 	EnableTicketReservation        bool                    `json:"enable_ticket_reservation"`           // Enable the ticket reservation system (default false)
 	CrashRecoveryWindowSecs        int                     `json:"crash_recovery_window_secs"`          // Seconds to hold a disconnected player's spot (default 60, 0 = use default, <0 = disabled)
 	RequirePreMatchPing            *bool                   `json:"require_pre_match_ping"`              // Require players to ping all candidate servers before matchmaking (default true)
-	NewPlayerMaxGames              int                     `json:"new_player_max_games"`                // Games played threshold below which a player is classified as a rookie (default 50, 0 = use default)
+	NewPlayerMaxGames              int                     `json:"new_player_max_games"`                // Games played threshold below which a player is considered "new" (default 50)
 	EnableArchetypeDetection       *bool                   `json:"enable_archetype_detection"`          // Classify players into play style archetypes at ticket creation (default true)
+	EnableToxicSeparation          *bool                   `json:"enable_toxic_separation"`             // Prevent players with suspension history from matching with new players (default true)
 	// Quality floor settings — used by the quality floor feature (PR #375).
 	// Included here to avoid settings migration when that PR lands.
 	EnableQualityFloor             bool                    `json:"enable_quality_floor"`                // Reject match candidates below a predicted draw probability floor (default false)
@@ -189,6 +190,12 @@ func (g GlobalMatchmakingSettings) RequiresPreMatchPing() bool {
 // Defaults to true when not explicitly configured.
 func (g GlobalMatchmakingSettings) ArchetypeDetectionEnabled() bool {
 	return g.EnableArchetypeDetection == nil || *g.EnableArchetypeDetection
+}
+
+// ToxicSeparationEnabled returns whether players with suspension history
+// should be prevented from matching with new players. Defaults to true.
+func (g GlobalMatchmakingSettings) ToxicSeparationEnabled() bool {
+	return g.EnableToxicSeparation == nil || *g.EnableToxicSeparation
 }
 
 func ServiceSettingsLoad(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) (*ServiceSettingsData, error) {
@@ -371,14 +378,21 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 		data.Matchmaking.RequirePreMatchPing = &t
 	}
 
-	if data.Matchmaking.NewPlayerMaxGames == 0 {
-		data.Matchmaking.NewPlayerMaxGames = 50
+	// 0 means "disabled" (no player is considered new). Clamp invalid
+	// negative values to 0.
+	if data.Matchmaking.NewPlayerMaxGames < 0 {
+		data.Matchmaking.NewPlayerMaxGames = 0
 	}
 
 	// Archetype detection defaults to enabled.
 	if data.Matchmaking.EnableArchetypeDetection == nil {
 		t := true
 		data.Matchmaking.EnableArchetypeDetection = &t
+	}
+
+	if data.Matchmaking.EnableToxicSeparation == nil {
+		t := true
+		data.Matchmaking.EnableToxicSeparation = &t
 	}
 
 	// Quality floor defaults -- disabled by default, needs tuning before enabling.
