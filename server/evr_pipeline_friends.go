@@ -16,7 +16,7 @@ import (
 func (p *EvrPipeline) resolveEvrIDToUserID(ctx context.Context, platformCode evr.PlatformCode, accountID uint64) (uuid.UUID, error) {
 	// Try the caller's platform first, then all others.
 	platforms := []evr.PlatformCode{platformCode}
-	for _, pc := range []evr.PlatformCode{evr.OVR, evr.OVR_ORG, evr.STM, evr.DMO, evr.PSN, evr.XBX, evr.BOT, evr.TEN} {
+	for _, pc := range []evr.PlatformCode{evr.DSC, evr.OVR, evr.OVR_ORG, evr.STM, evr.DMO, evr.XBX, evr.BOT} {
 		if pc != platformCode {
 			platforms = append(platforms, pc)
 		}
