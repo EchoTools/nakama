@@ -39,7 +39,7 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 
 	// Filter out candidates where a new player would be matched with a
 	// player who has suspension history (toxic player separation).
-	if settings := ServiceSettings(); settings != nil && settings.Matchmaking.ToxicSeparationEnabled() {
+	if settings != nil && settings.Matchmaking.ToxicSeparationEnabled() {
 		filterCounts["toxic_separation"] = FilterToxicNewPlayerCandidates(candidates, settings.Matchmaking.NewPlayerMaxGames)
 	}
 
