@@ -147,6 +147,8 @@ type GlobalMatchmakingSettings struct {
 	RequirePreMatchPing            *bool                   `json:"require_pre_match_ping"`              // Require players to ping all candidate servers before matchmaking (default true)
 	NewPlayerMaxGames              int                     `json:"new_player_max_games"`                // Games played threshold below which a player is classified as a rookie (default 50, 0 = use default)
 	EnableArchetypeDetection       *bool                   `json:"enable_archetype_detection"`          // Classify players into play style archetypes at ticket creation (default true)
+	// Quality floor settings — used by the quality floor feature (PR #375).
+	// Included here to avoid settings migration when that PR lands.
 	EnableQualityFloor             bool                    `json:"enable_quality_floor"`                // Reject match candidates below a predicted draw probability floor (default false)
 	QualityFloorInitial            float64                 `json:"quality_floor_initial"`               // Minimum predicted draw probability at t=0 (default 0.10)
 	QualityFloorDecayPerSecond     float64                 `json:"quality_floor_decay_per_second"`      // How fast the floor drops per second of wait time (default 0.0005)
