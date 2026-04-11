@@ -90,14 +90,20 @@ func AssignDivision(mu float64, gamesPlayed int, newPlayerThreshold int, boundar
 		return names[0]
 	}
 
-	// Walk the boundaries to find the right bracket.
-	for i, boundary := range boundaries {
-		if mu < boundary {
+	// Walk the boundaries to find the right bracket. Clamp to the number of
+	// safe name indexes so a misconfigured settings object cannot panic.
+	limit := len(boundaries)
+	if max := len(names) - 1; limit > max {
+		limit = max
+	}
+
+	for i := 0; i < limit; i++ {
+		if mu < boundaries[i] {
 			return names[i]
 		}
 	}
 
-	// mu >= all boundaries -> highest division.
+	// mu >= all checked boundaries -> highest division.
 	return names[len(names)-1]
 }
 
@@ -115,12 +121,15 @@ func HighestDivision(divisions []string, names []string) string {
 		rank[name] = i
 	}
 
-	best := divisions[0]
-	bestRank := rank[best]
-	for _, d := range divisions[1:] {
-		if r, ok := rank[d]; ok && r > bestRank {
-			best = d
-			bestRank = r
+	// Find the first known division as the initial best.
+	best := ""
+	bestRank := -1
+	for _, d := range divisions {
+		if r, ok := rank[d]; ok {
+			if r > bestRank {
+				best = d
+				bestRank = r
+			}
 		}
 	}
 	return best
