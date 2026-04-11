@@ -67,6 +67,7 @@ type LobbySessionParameters struct {
 	FailsafeTimeout              time.Duration                 `json:"failsafe_timeout"` // The failsafe timeout
 	FallbackTimeout              time.Duration                 `json:"fallback_timeout"` // The fallback timeout
 	DisplayName                  string                        `json:"display_name"`
+	GamesPlayed                  int                           `json:"games_played"` // Total games played, loaded from GamesPlayed leaderboard
 	latencyHistory               *atomic.Pointer[LatencyHistory]
 	unreachableServers           *atomic.Pointer[UnreachableServers]
 }
@@ -324,6 +325,15 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		}
 	}
 
+	// Load the player's total games played for new-player detection.
+	gamesPlayed := 0
+	if groupID != uuid.Nil {
+		gamesPlayed, err = GamesPlayedLoad(ctx, p.nk, userID, groupIDStr, evr.ModeArenaPublic)
+		if err != nil {
+			logger.Warn("Failed to load games played", zap.Error(err))
+		}
+	}
+
 	maxServerRTT := globalSettings.MaxServerRTT
 
 	if globalSettings.MaxServerRTT <= 60 {
@@ -425,6 +435,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		FailsafeTimeout:              time.Duration(failsafeTimeoutSecs) * time.Second,
 		FallbackTimeout:              time.Duration(globalSettings.FallbackTimeoutSecs) * time.Second,
 		DisplayName:                  sessionParams.profile.GetGroupIGN(groupIDStr),
+		GamesPlayed:                  gamesPlayed,
 	}
 
 	// Check for an existing matchmaking credit to preserve queue position
@@ -655,6 +666,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		"max_team_size":    maxTeamSize,
 		"count_multiple":   float64(ticketParams.CountMultiple),
 		"max_count":        float64(ticketParams.MaxCount),
+		"games_played":     float64(p.GamesPlayed),
 	}
 
 	qparts := []string{
