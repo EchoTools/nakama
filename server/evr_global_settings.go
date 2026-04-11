@@ -149,6 +149,12 @@ type GlobalMatchmakingSettings struct {
 	EnableHardDivisions            *bool                   `json:"enable_hard_divisions"`               // Separate matchmaking pools by skill division (default false — needs boundary tuning)
 	DivisionBoundaries             []float64               `json:"division_boundaries"`                 // Mu thresholds between hard skill divisions (default [15.0, 25.0, 35.0])
 	DivisionNames                  []string                `json:"division_names"`                      // Human-readable division bracket names (default ["Bronze", "Silver", "Gold", "Diamond"])
+	EnableArchetypeDetection       *bool                   `json:"enable_archetype_detection"`          // Classify players into play style archetypes at ticket creation (default true)
+	EnableToxicSeparation          *bool                   `json:"enable_toxic_separation"`             // Prevent players with suspension history from matching with new players (default true)
+	EnableQualityFloor             bool                    `json:"enable_quality_floor"`                // Reject match candidates below a predicted draw probability floor (default false)
+	QualityFloorInitial            float64                 `json:"quality_floor_initial"`               // Minimum predicted draw probability at t=0 (default 0.10)
+	QualityFloorDecayPerSecond     float64                 `json:"quality_floor_decay_per_second"`      // How fast the floor drops per second of wait time (default 0.0005)
+	QualityFloorMinimum            float64                 `json:"quality_floor_minimum"`               // Floor never drops below this value (default 0.0)
 }
 
 type QueryAddons struct {
@@ -185,6 +191,18 @@ func (g GlobalMatchmakingSettings) RequiresPreMatchPing() bool {
 // Defaults to false (disabled) when not explicitly configured.
 func (g GlobalMatchmakingSettings) HardDivisionsEnabled() bool {
 	return g.EnableHardDivisions != nil && *g.EnableHardDivisions
+}
+
+// ArchetypeDetectionEnabled returns whether archetype detection is active.
+// Defaults to true when not explicitly configured.
+func (g GlobalMatchmakingSettings) ArchetypeDetectionEnabled() bool {
+	return g.EnableArchetypeDetection == nil || *g.EnableArchetypeDetection
+}
+
+// ToxicSeparationEnabled returns whether players with suspension history
+// should be prevented from matching with new players. Defaults to true.
+func (g GlobalMatchmakingSettings) ToxicSeparationEnabled() bool {
+	return g.EnableToxicSeparation == nil || *g.EnableToxicSeparation
 }
 
 func ServiceSettingsLoad(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) (*ServiceSettingsData, error) {
@@ -367,9 +385,33 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 		data.Matchmaking.RequirePreMatchPing = &t
 	}
 
-	if data.Matchmaking.NewPlayerMaxGames == 0 {
-		data.Matchmaking.NewPlayerMaxGames = 50
+	// 0 means "disabled" (no player is considered new). Clamp invalid
+	// negative values to 0.
+	if data.Matchmaking.NewPlayerMaxGames < 0 {
+		data.Matchmaking.NewPlayerMaxGames = 0
 	}
+
+	// Archetype detection defaults to enabled.
+	if data.Matchmaking.EnableArchetypeDetection == nil {
+		t := true
+		data.Matchmaking.EnableArchetypeDetection = &t
+	}
+
+	if data.Matchmaking.EnableToxicSeparation == nil {
+		t := true
+		data.Matchmaking.EnableToxicSeparation = &t
+	}
+
+	// Quality floor defaults -- disabled by default, needs tuning before enabling.
+	// When enabled, rejects match candidates whose predicted draw probability
+	// falls below a floor that decays with wait time.
+	if data.Matchmaking.QualityFloorInitial == 0 {
+		data.Matchmaking.QualityFloorInitial = 0.10
+	}
+	if data.Matchmaking.QualityFloorDecayPerSecond == 0 {
+		data.Matchmaking.QualityFloorDecayPerSecond = 0.0005
+	}
+	// QualityFloorMinimum defaults to 0.0 (zero value), no init needed.
 
 	// Set default reducing precision settings for post-matchmaker backfill
 	if data.Matchmaking.ReducingPrecisionIntervalSecs == 0 {

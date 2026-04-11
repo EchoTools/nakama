@@ -1,5 +1,10 @@
 # Makefile for Nakama EVR
 
+# Disable GNU make implicit rules to prevent C yacc from
+# processing Go yacc (.go.y) files.
+MAKEFLAGS += --no-builtin-rules
+.SUFFIXES:
+
 COMMIT=$(shell git rev-parse --short HEAD)
 GIT_DESCRIBE=$(shell git describe --tags --always --abbrev=7 --dirty)
 TAG=$(shell git describe --tags --exact-match 2>/dev/null || echo "dev")

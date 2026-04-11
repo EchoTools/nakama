@@ -190,6 +190,10 @@ func (s *LobbySessionSettings) UnmarshalJSON(data []byte) error {
 	s.AppID = aux.AppID
 	s.Mode = aux.Mode
 	s.SupportedFeatures = aux.SupportedFeatures
+	// Match MarshalJSON behavior: treat zero as unspecified.
+	if s.Level == 0 {
+		s.Level = int64(LevelUnspecified)
+	}
 	return nil
 }
 
