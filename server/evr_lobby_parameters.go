@@ -68,6 +68,7 @@ type LobbySessionParameters struct {
 	FallbackTimeout              time.Duration                 `json:"fallback_timeout"` // The fallback timeout
 	DisplayName                  string                        `json:"display_name"`
 	latencyHistory               *atomic.Pointer[LatencyHistory]
+	unreachableServers           *atomic.Pointer[UnreachableServers]
 }
 
 func (p *LobbySessionParameters) GetPartySize() int {
@@ -406,6 +407,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		NextMatchID:                  nextMatchID,
 		IsModerator:                  isModerator,
 		latencyHistory:               params.latencyHistory,
+		unreachableServers:           params.unreachableServers,
 		BlockedIDs:                   blockedIDs,
 		EnableSBMM:                   globalSettings.EnableSBMM,
 		EnableDivisions:              globalSettings.EnableDivisions,
@@ -556,13 +558,28 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 	}
 
 	if includeMaxRTT {
-		// Exclude servers that cannot be reached (either unreachable or RTT too high)
+		// Exclude servers that cannot be reached (either unreachable or RTT too high).
+		// Only consider latency data from the past week to avoid stale entries.
 		unreachableEndpointIDs := make([]string, 0)
-		for ip, rtt := range p.latencyHistory.Load().LatestRTTs() {
-			if rtt > p.MaxServerRTT {
-				unreachableEndpointIDs = append(unreachableEndpointIDs, EncodeEndpointID(ip))
+		latencyCutoff := time.Now().Add(-7 * 24 * time.Hour)
+		lh := p.latencyHistory.Load()
+		if lh != nil {
+			for ip, rtt := range lh.LatestRTTs(latencyCutoff) {
+				if rtt > p.MaxServerRTT {
+					unreachableEndpointIDs = append(unreachableEndpointIDs, EncodeEndpointID(ip))
+				}
 			}
 		}
+
+		// Also exclude servers this player has previously failed to connect to.
+		if p.unreachableServers != nil {
+			if u := p.unreachableServers.Load(); u != nil {
+				for ip := range u.UnreachableIPs() {
+					unreachableEndpointIDs = append(unreachableEndpointIDs, EncodeEndpointID(ip))
+				}
+			}
+		}
+
 		if len(unreachableEndpointIDs) > 0 {
 			qparts = append(qparts, fmt.Sprintf("-label.broadcaster.endpoint_id:%s", Query.CreateMatchPattern(unreachableEndpointIDs)))
 		}
@@ -695,17 +712,30 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 
 	}
 
-	//maxDelta := 60 // milliseconds
-
-	//maxDelta := 60 // milliseconds
-	rttDeltas := ServiceSettings().Matchmaking.ServerSelection.RTTDelta
-	for ip, v := range p.latencyHistory.Load().AverageRTTs(true) {
-		rtt := v
-		if delta, ok := rttDeltas[ip]; ok {
-			rtt += delta
+	// Build the set of servers this player cannot reach so they are excluded
+	// from the RTT properties (and thus from server selection).
+	var unreachableIPs map[string]struct{}
+	if p.unreachableServers != nil {
+		if u := p.unreachableServers.Load(); u != nil {
+			unreachableIPs = u.UnreachableIPs()
 		}
-		numericProperties[RTTPropertyPrefix+EncodeEndpointID(ip)] = float64(rtt)
-		//qparts = append(qparts, fmt.Sprintf("properties.%s:<=%d", k, v+maxDelta))
+	}
+
+	rttDeltas := ServiceSettings().Matchmaking.ServerSelection.RTTDelta
+	latencyCutoff := time.Now().Add(-7 * 24 * time.Hour)
+	lhAvg := p.latencyHistory.Load()
+	if lhAvg != nil {
+		for ip, v := range lhAvg.AverageRTTs(true, latencyCutoff) {
+			// Skip servers this player has failed to connect to.
+			if _, blocked := unreachableIPs[ip]; blocked {
+				continue
+			}
+			rtt := v
+			if delta, ok := rttDeltas[ip]; ok {
+				rtt += delta
+			}
+			numericProperties[RTTPropertyPrefix+EncodeEndpointID(ip)] = float64(rtt)
+		}
 	}
 
 	// Remove blanks from qparts
