@@ -11,11 +11,16 @@ import (
 // (games_played < threshold) to the predicted-stronger team by swapping them
 // with non-new players on the stronger team who have the closest mu value.
 //
+// defaultMu is the fallback mu value for entries missing "rating_mu" in their
+// properties. Pass the same default used by the prediction/rating system
+// (e.g. from OpenSkillOptions or NewDefaultRating) so that missing-mu entries
+// are treated consistently rather than as zero-skill.
+//
 // Only swaps that do not worsen overall team balance (measured by absolute
 // difference in summed mu) are applied.
 //
 // Returns the (possibly modified) match slice.
-func ApplyNewPlayerTeamBias(match []runtime.MatchmakerEntry, teamSize, threshold int) []runtime.MatchmakerEntry {
+func ApplyNewPlayerTeamBias(match []runtime.MatchmakerEntry, teamSize, threshold int, defaultMu float64) []runtime.MatchmakerEntry {
 	if threshold <= 0 || len(match) < 2*teamSize {
 		return match
 	}
@@ -24,8 +29,8 @@ func ApplyNewPlayerTeamBias(match []runtime.MatchmakerEntry, teamSize, threshold
 	orange := match[teamSize : 2*teamSize]
 
 	// Compute team mu sums.
-	blueMu := teamMuSum(blue)
-	orangeMu := teamMuSum(orange)
+	blueMu := teamMuSum(blue, defaultMu)
+	orangeMu := teamMuSum(orange, defaultMu)
 
 	// Identify stronger team. If equal, no bias needed.
 	if blueMu == orangeMu {
@@ -61,7 +66,7 @@ func ApplyNewPlayerTeamBias(match []runtime.MatchmakerEntry, teamSize, threshold
 				continue
 			}
 
-			newMu := entryMu(weaker[wi])
+			newMu := entryMu(weaker[wi], defaultMu)
 
 			// Find the best swap candidate on the stronger team: a non-new player
 			// with the closest mu to the new player.
@@ -71,7 +76,7 @@ func ApplyNewPlayerTeamBias(match []runtime.MatchmakerEntry, teamSize, threshold
 				if IsNewPlayer(stronger[si], threshold) {
 					continue // don't swap new-for-new
 				}
-				diff := math.Abs(entryMu(stronger[si]) - newMu)
+				diff := math.Abs(entryMu(stronger[si], defaultMu) - newMu)
 				if diff < bestDiff {
 					bestDiff = diff
 					bestIdx = si
@@ -86,7 +91,7 @@ func ApplyNewPlayerTeamBias(match []runtime.MatchmakerEntry, teamSize, threshold
 			// Check whether swapping improves or preserves balance.
 			currentImbalance := math.Abs(blueMu - orangeMu)
 
-			swapMu := entryMu(stronger[bestIdx])
+			swapMu := entryMu(stronger[bestIdx], defaultMu)
 			newBlueMu := blueMu
 			newOrangeMu := orangeMu
 
@@ -146,17 +151,17 @@ func ApplyNewPlayerTeamBias(match []runtime.MatchmakerEntry, teamSize, threshold
 	return match
 }
 
-func teamMuSum(team []runtime.MatchmakerEntry) float64 {
+func teamMuSum(team []runtime.MatchmakerEntry, defaultMu float64) float64 {
 	var sum float64
 	for _, e := range team {
-		sum += entryMu(e)
+		sum += entryMu(e, defaultMu)
 	}
 	return sum
 }
 
-func entryMu(e runtime.MatchmakerEntry) float64 {
+func entryMu(e runtime.MatchmakerEntry, defaultMu float64) float64 {
 	if mu, ok := e.GetProperties()["rating_mu"].(float64); ok {
 		return mu
 	}
-	return 0
+	return defaultMu
 }

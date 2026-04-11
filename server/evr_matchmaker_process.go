@@ -31,7 +31,7 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 			Z:     &z,
 		}
 		if settings.Matchmaking.NewPlayerTeamBiasEnabled() {
-			config.EnableNewPlayerBias = true
+			config.EnableNewPlayerTeamBias = true
 			config.NewPlayerThreshold = settings.Matchmaking.NewPlayerMaxGames
 		}
 	}
