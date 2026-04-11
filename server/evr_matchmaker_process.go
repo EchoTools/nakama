@@ -41,6 +41,9 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 		}
 		config.EnableArchetypeBalancing = settings.Matchmaking.ArchetypeBalancingEnabled()
 		config.NewPlayerThreshold = settings.Matchmaking.NewPlayerMaxGames
+		if settings.Matchmaking.NewPlayerTeamBiasEnabled() {
+			config.EnableNewPlayerTeamBias = true
+		}
 	}
 
 	// predict the outcome of the matches
