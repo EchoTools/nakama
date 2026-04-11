@@ -133,7 +133,7 @@ func TestDetectArchetype_BorderlineGoalie(t *testing.T) {
 
 func TestDetectArchetype_GoaliePriorityOverStriker(t *testing.T) {
 	// Player who has high saves AND high goals should be classified as goalie first
-	// save_focus = 30 / (30 + 20 + 5) = 0.545
+	// save_focus = 300 / (300 + 200 + 50) = 0.545
 	// goals/game = 200/100 = 2.0, shots/game = 400/100 = 4.0
 	stats := ArchetypeStats{
 		Goals:       200,

@@ -279,9 +279,6 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 	// Detect player archetype from rolling stats and add to ticket properties.
 	if ServiceSettings().Matchmaking.ArchetypeDetectionEnabled() {
 		threshold := ServiceSettings().Matchmaking.NewPlayerMaxGames
-		if threshold <= 0 {
-			threshold = 50
-		}
 		archetypeStats, gamesPlayed, arcErr := LoadArchetypeStats(ctx, p.db, logger, session.UserID().String(), lobbyParams.GroupID.String())
 		if arcErr != nil {
 			logger.Warn("Failed to load archetype stats, defaulting to rookie", zap.Error(arcErr))

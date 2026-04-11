@@ -145,7 +145,7 @@ type GlobalMatchmakingSettings struct {
 	EnableTicketReservation        bool                    `json:"enable_ticket_reservation"`           // Enable the ticket reservation system (default false)
 	CrashRecoveryWindowSecs        int                     `json:"crash_recovery_window_secs"`          // Seconds to hold a disconnected player's spot (default 60, 0 = use default, <0 = disabled)
 	RequirePreMatchPing            *bool                   `json:"require_pre_match_ping"`              // Require players to ping all candidate servers before matchmaking (default true)
-	NewPlayerMaxGames              int                     `json:"new_player_max_games"`                // Games played threshold below which a player is classified as a rookie (default 50)
+	NewPlayerMaxGames              int                     `json:"new_player_max_games"`                // Games played threshold below which a player is classified as a rookie (default 50, 0 = use default)
 	EnableArchetypeDetection       *bool                   `json:"enable_archetype_detection"`          // Classify players into play style archetypes at ticket creation (default true)
 	EnableQualityFloor             bool                    `json:"enable_quality_floor"`                // Reject match candidates below a predicted draw probability floor (default false)
 	QualityFloorInitial            float64                 `json:"quality_floor_initial"`               // Minimum predicted draw probability at t=0 (default 0.10)
