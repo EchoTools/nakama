@@ -17,6 +17,12 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 	// Filter out players who are too far away from each other
 	filterCounts["max_rtt"] = m.filterWithinMaxRTT(candidates)
 
+	// Filter out candidates where a new player would be matched with a
+	// player who has suspension history (toxic player separation).
+	if settings := ServiceSettings(); settings != nil && settings.Matchmaking.ToxicSeparationEnabled() {
+		filterCounts["toxic_separation"] = FilterToxicNewPlayerCandidates(candidates, settings.Matchmaking.NewPlayerMaxGames)
+	}
+
 	config := PredictionConfig{}
 	if settings := ServiceSettings(); settings != nil {
 		mu := settings.SkillRating.Defaults.Mu
@@ -48,8 +54,18 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 		}
 	}
 
-	// Determine if wait time should override size priority
+	// Filter out candidates that fail the quality floor check
 	now := time.Now().UTC().Unix()
+	if settings := ServiceSettings(); settings != nil && settings.Matchmaking.EnableQualityFloor {
+		before := len(predictions)
+		predictions = filterByQualityFloor(predictions, &settings.Matchmaking, now)
+		if filtered := before - len(predictions); filtered > 0 {
+			filterCounts["quality_floor"] = filtered
+			logger.WithField("filtered", filtered).WithField("remaining", len(predictions)).Info("Quality floor filtered candidates")
+		}
+	}
+
+	// Determine if wait time should override size priority
 	oldestWaitTimeSecs := now - oldestTicketTimestamp
 	waitTimeThreshold := int64(120) // Default: 120 seconds (2 minutes)
 	if settings := ServiceSettings(); settings != nil && settings.Matchmaking.WaitTimePriorityThresholdSecs > 0 {
