@@ -23,6 +23,7 @@ const (
 	BOT                         // Bot/AI
 	DMO                         // Demo (no ovr)
 	TEN                         // Tencent
+	DSC                         // Discord
 )
 
 // EvrId represents an identifier for a user on the platform.
@@ -121,7 +122,7 @@ func (xpi EvrId) IsNotNil() bool {
 }
 
 func (xpi EvrId) IsValid() bool {
-	return xpi.PlatformCode >= STM && xpi.PlatformCode <= TEN && xpi.AccountId > 0
+	return xpi.PlatformCode >= STM && xpi.PlatformCode <= DSC && xpi.AccountId > 0
 }
 
 func (xpi *EvrId) Stream(s *EasyStream) error {
@@ -169,6 +170,8 @@ func (code PlatformCode) GetDisplayName() string {
 		return "Demo"
 	case TEN:
 		return "Tencent" // TODO: Verify, this is only suspected to be the target of "TEN".
+	case DSC:
+		return "Discord"
 	default:
 		return "Unknown"
 	}
@@ -209,6 +212,8 @@ func (code PlatformCode) Abbrevation() string {
 		return "DMO"
 	case TEN:
 		return "TEN" // TODO: Verify, this is only suspected to be the target of "TEN".
+	case DSC:
+		return "DSC"
 	default:
 		return "UNK"
 	}
@@ -235,6 +240,8 @@ func platformCodeFromString(s string) (PlatformCode, bool) {
 		return DMO, true
 	case "TEN":
 		return TEN, true
+	case "DSC":
+		return DSC, true
 	default:
 		return 0, false
 	}
