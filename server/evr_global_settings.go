@@ -146,6 +146,9 @@ type GlobalMatchmakingSettings struct {
 	CrashRecoveryWindowSecs        int                     `json:"crash_recovery_window_secs"`          // Seconds to hold a disconnected player's spot (default 60, 0 = use default, <0 = disabled)
 	RequirePreMatchPing            *bool                   `json:"require_pre_match_ping"`              // Require players to ping all candidate servers before matchmaking (default true)
 	NewPlayerMaxGames              int                     `json:"new_player_max_games"`                // Games played threshold below which a player is considered "new" (default 50)
+	EnableHardDivisions            *bool                   `json:"enable_hard_divisions"`               // Separate matchmaking pools by skill division (default false — needs boundary tuning)
+	DivisionBoundaries             []float64               `json:"division_boundaries"`                 // Mu thresholds between hard skill divisions (default [15.0, 25.0, 35.0])
+	DivisionNames                  []string                `json:"division_names"`                      // Human-readable division bracket names (default ["Bronze", "Silver", "Gold", "Diamond"])
 	EnableNewPlayerTeamBias        *bool                   `json:"enable_new_player_team_bias"`         // Bias new players onto the predicted-stronger team during team formation (default true)
 	EnableArchetypeDetection       *bool                   `json:"enable_archetype_detection"`          // Classify players into play style archetypes at ticket creation (default true)
 	EnableToxicSeparation          *bool                   `json:"enable_toxic_separation"`             // Prevent players with suspension history from matching with new players (default true)
@@ -184,6 +187,12 @@ func (g ServiceSettingsData) UseSkillBasedMatchmaking() bool {
 // before entering matchmaking. Defaults to true when not explicitly configured.
 func (g GlobalMatchmakingSettings) RequiresPreMatchPing() bool {
 	return g.RequirePreMatchPing == nil || *g.RequirePreMatchPing
+}
+
+// HardDivisionsEnabled returns whether hard skill divisions are active.
+// Defaults to false (disabled) when not explicitly configured.
+func (g GlobalMatchmakingSettings) HardDivisionsEnabled() bool {
+	return g.EnableHardDivisions != nil && *g.EnableHardDivisions
 }
 
 // NewPlayerTeamBiasEnabled returns whether new players should be biased onto
@@ -430,6 +439,30 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 	}
 	if data.Matchmaking.ReducingPrecisionMaxCycles == 0 {
 		data.Matchmaking.ReducingPrecisionMaxCycles = 5 // Maximum 5 cycles before fully relaxing
+	}
+
+	// Hard skill divisions default to disabled; boundaries and names are
+	// always populated so division labels appear on tickets for monitoring.
+	defaultDivisionBoundaries := []float64{15.0, 25.0, 35.0}
+	defaultDivisionNames := []string{"Bronze", "Silver", "Gold", "Diamond"}
+	if data.Matchmaking.DivisionBoundaries == nil {
+		data.Matchmaking.DivisionBoundaries = defaultDivisionBoundaries
+	}
+	if data.Matchmaking.DivisionNames == nil {
+		data.Matchmaking.DivisionNames = defaultDivisionNames
+	}
+	// Validate boundaries are sorted and names length matches boundaries+1.
+	validDivisionBoundaries := true
+	for i := 1; i < len(data.Matchmaking.DivisionBoundaries); i++ {
+		if data.Matchmaking.DivisionBoundaries[i-1] >= data.Matchmaking.DivisionBoundaries[i] {
+			validDivisionBoundaries = false
+			break
+		}
+	}
+	if !validDivisionBoundaries || len(data.Matchmaking.DivisionNames) != len(data.Matchmaking.DivisionBoundaries)+1 {
+		logger.Warn("Invalid matchmaking division settings (unsorted boundaries or mismatched name count), resetting to defaults")
+		data.Matchmaking.DivisionBoundaries = defaultDivisionBoundaries
+		data.Matchmaking.DivisionNames = defaultDivisionNames
 	}
 
 	// Archetype balancing defaults to disabled — needs tuning before enabling.

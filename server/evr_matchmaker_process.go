@@ -12,8 +12,25 @@ import (
 func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, entries []runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int, []PredictedMatch) {
 
 	settings := ServiceSettings()
+	hardDivisions := settings != nil && settings.Matchmaking.HardDivisionsEnabled()
 
-	candidates := groupEntriesSequentially(entries)
+	var candidates [][]runtime.MatchmakerEntry
+	if hardDivisions {
+		// Group entries by division, then form candidates within each division.
+		// Entries from different divisions never appear in the same candidate.
+		grouped := FilterEntriesByDivision(entries)
+		for division, divEntries := range grouped {
+			divCandidates := groupEntriesSequentially(divEntries)
+			candidates = append(candidates, divCandidates...)
+			logger.WithFields(map[string]any{
+				"division":   division,
+				"queue_size": len(divEntries),
+				"candidates": len(divCandidates),
+			}).Info("Hard division queue status")
+		}
+	} else {
+		candidates = groupEntriesSequentially(entries)
+	}
 
 	filterCounts := make(map[string]int)
 
