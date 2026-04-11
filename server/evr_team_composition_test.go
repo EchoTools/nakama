@@ -72,21 +72,21 @@ func TestScoreTeamComposition(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ScoreTeamComposition(tt.team1Archetypes, tt.team2Archetypes, tt.team1HasNewPlayer, tt.team2HasNewPlayer)
+			got := scoreTeamComposition(tt.team1Archetypes, tt.team2Archetypes, tt.team1HasNewPlayer, tt.team2HasNewPlayer)
 			if got != tt.want {
-				t.Errorf("ScoreTeamComposition() = %d, want %d", got, tt.want)
+				t.Errorf("scoreTeamComposition() = %d, want %d", got, tt.want)
 			}
 		})
 	}
 }
 
 func TestScoreTeamComposition_StrikerPlaymakerBetterThanRookies(t *testing.T) {
-	good := ScoreTeamComposition(
+	good := scoreTeamComposition(
 		[]string{ArchetypeStriker, ArchetypePlaymaker, ArchetypeInterceptor, ArchetypeGoalie},
 		[]string{ArchetypeStriker, ArchetypePlaymaker, ArchetypeInterceptor, ArchetypeGoalie},
 		false, false,
 	)
-	bad := ScoreTeamComposition(
+	bad := scoreTeamComposition(
 		[]string{ArchetypeRookie, ArchetypeRookie, ArchetypeInterceptor, ArchetypeGoalie},
 		[]string{ArchetypeRookie, ArchetypeRookie, ArchetypeInterceptor, ArchetypeGoalie},
 		false, false,
@@ -111,27 +111,27 @@ func TestSelectBestTeamSplit(t *testing.T) {
 	}
 
 	// Good split: each team gets a striker + playmaker
-	goodSplit := TeamSplit{
-		BlueIndices:   []int{0, 1, 6, 7}, // striker, playmaker, goalie, interceptor
-		OrangeIndices: []int{4, 5, 2, 3}, // striker, playmaker, goalie, interceptor
+	goodSplit := teamSplit{
+		blueIndices:   []int{0, 1, 6, 7}, // striker, playmaker, goalie, interceptor
+		orangeIndices: []int{4, 5, 2, 3}, // striker, playmaker, goalie, interceptor
 	}
 
 	// Bad split: one team has all the strikers/playmakers
-	badSplit := TeamSplit{
-		BlueIndices:   []int{0, 1, 4, 5}, // 2 strikers, 2 playmakers
-		OrangeIndices: []int{2, 3, 6, 7}, // 2 goalies, 2 interceptors
+	badSplit := teamSplit{
+		blueIndices:   []int{0, 1, 4, 5}, // 2 strikers, 2 playmakers
+		orangeIndices: []int{2, 3, 6, 7}, // 2 goalies, 2 interceptors
 	}
 
-	splits := []TeamSplit{badSplit, goodSplit}
+	splits := []teamSplit{badSplit, goodSplit}
 
-	best := SelectBestTeamSplit(entries, splits, newPlayerThreshold)
+	best := selectBestTeamSplit(entries, splits, newPlayerThreshold)
 
 	goodScore := scoreTeamSplitComposition(entries, goodSplit, newPlayerThreshold)
 	badScore := scoreTeamSplitComposition(entries, badSplit, newPlayerThreshold)
 	bestScore := scoreTeamSplitComposition(entries, best, newPlayerThreshold)
 
 	if bestScore < goodScore {
-		t.Errorf("SelectBestTeamSplit chose split with score %d, expected at least %d (good=%d, bad=%d)",
+		t.Errorf("selectBestTeamSplit chose split with score %d, expected at least %d (good=%d, bad=%d)",
 			bestScore, goodScore, goodScore, badScore)
 	}
 }
@@ -151,20 +151,20 @@ func TestSelectBestTeamSplit_NewPlayerWithSupportiveTeammate(t *testing.T) {
 	}
 
 	// New player paired with striker
-	goodSplit := TeamSplit{
-		BlueIndices:   []int{0, 1, 6, 7}, // new player + striker + goalie + low_activity
-		OrangeIndices: []int{2, 3, 4, 5}, // playmaker + goalie + 2 interceptors
+	goodSplit := teamSplit{
+		blueIndices:   []int{0, 1, 6, 7}, // new player + striker + goalie + low_activity
+		orangeIndices: []int{2, 3, 4, 5}, // playmaker + goalie + 2 interceptors
 	}
 
 	// New player with only goalies and low-activity
-	badSplit := TeamSplit{
-		BlueIndices:   []int{0, 3, 6, 7}, // new player + 2 goalies + low_activity
-		OrangeIndices: []int{1, 2, 4, 5}, // striker + playmaker + 2 interceptors
+	badSplit := teamSplit{
+		blueIndices:   []int{0, 3, 6, 7}, // new player + 2 goalies + low_activity
+		orangeIndices: []int{1, 2, 4, 5}, // striker + playmaker + 2 interceptors
 	}
 
-	splits := []TeamSplit{badSplit, goodSplit}
+	splits := []teamSplit{badSplit, goodSplit}
 
-	best := SelectBestTeamSplit(entries, splits, newPlayerThreshold)
+	best := selectBestTeamSplit(entries, splits, newPlayerThreshold)
 	bestScore := scoreTeamSplitComposition(entries, best, newPlayerThreshold)
 	goodScore := scoreTeamSplitComposition(entries, goodSplit, newPlayerThreshold)
 
@@ -181,12 +181,12 @@ func TestSelectBestTeamSplit_SingleSplit(t *testing.T) {
 		makeCompEntry("p4", ArchetypeInterceptor, 17.0, 80),
 	}
 
-	splits := []TeamSplit{
-		{BlueIndices: []int{0, 1}, OrangeIndices: []int{2, 3}},
+	splits := []teamSplit{
+		{blueIndices: []int{0, 1}, orangeIndices: []int{2, 3}},
 	}
 
-	best := SelectBestTeamSplit(entries, splits, 50)
-	if len(best.BlueIndices) != 2 || len(best.OrangeIndices) != 2 {
+	best := selectBestTeamSplit(entries, splits, 50)
+	if len(best.blueIndices) != 2 || len(best.orangeIndices) != 2 {
 		t.Errorf("expected the only available split to be returned")
 	}
 }
@@ -196,9 +196,38 @@ func TestSelectBestTeamSplit_EmptySplits(t *testing.T) {
 		makeCompEntry("p1", ArchetypeStriker, 20.0, 200),
 	}
 
-	best := SelectBestTeamSplit(entries, nil, 50)
-	if len(best.BlueIndices) != 0 || len(best.OrangeIndices) != 0 {
+	best := selectBestTeamSplit(entries, nil, 50)
+	if len(best.blueIndices) != 0 || len(best.orangeIndices) != 0 {
 		t.Errorf("expected empty split for nil splits input")
+	}
+}
+
+func TestEntryArchetype_MissingReturnsEmpty(t *testing.T) {
+	// Entry with no archetype property should return empty string, not "rookie"
+	entry := makeCompEntry("no-archetype", "", 20.0, 200)
+	entry.Properties["archetype"] = ""
+	got := entryArchetype(entry)
+	if got != "" {
+		t.Errorf("entryArchetype() with empty archetype = %q, want empty string", got)
+	}
+}
+
+func TestEntryArchetype_UnknownReturnsEmpty(t *testing.T) {
+	entry := makeCompEntry("unknown", "not_a_real_archetype", 20.0, 200)
+	got := entryArchetype(entry)
+	if got != "" {
+		t.Errorf("entryArchetype() with unknown archetype = %q, want empty string", got)
+	}
+}
+
+func TestEntryArchetype_ValidArchetypes(t *testing.T) {
+	for _, arch := range []string{ArchetypeStriker, ArchetypePlaymaker, ArchetypeRookie,
+		ArchetypeGoalie, ArchetypeInterceptor, ArchetypeLowActivity} {
+		entry := makeCompEntry("test", arch, 20.0, 200)
+		got := entryArchetype(entry)
+		if got != arch {
+			t.Errorf("entryArchetype() = %q, want %q", got, arch)
+		}
 	}
 }
 
@@ -207,7 +236,7 @@ func BenchmarkScoreTeamComposition(b *testing.B) {
 	team2 := []string{ArchetypeStriker, ArchetypePlaymaker, ArchetypeInterceptor, ArchetypeGoalie}
 	b.ResetTimer()
 	for range b.N {
-		ScoreTeamComposition(team1, team2, false, false)
+		scoreTeamComposition(team1, team2, false, false)
 	}
 }
 
@@ -219,7 +248,7 @@ func BenchmarkSelectBestTeamSplit(b *testing.B) {
 		entries[i] = makeCompEntry(fmt.Sprintf("p%d", i), archetypes[i], 20.0, 200)
 	}
 
-	splits := make([]TeamSplit, 0, 35)
+	splits := make([]teamSplit, 0, 35)
 	for mask := 0; mask < (1 << 8); mask++ {
 		blue := make([]int, 0, 4)
 		orange := make([]int, 0, 4)
@@ -231,12 +260,12 @@ func BenchmarkSelectBestTeamSplit(b *testing.B) {
 			}
 		}
 		if len(blue) == 4 && len(orange) == 4 {
-			splits = append(splits, TeamSplit{BlueIndices: blue, OrangeIndices: orange})
+			splits = append(splits, teamSplit{blueIndices: blue, orangeIndices: orange})
 		}
 	}
 
 	b.ResetTimer()
 	for range b.N {
-		SelectBestTeamSplit(entries, splits, 50)
+		selectBestTeamSplit(entries, splits, 50)
 	}
 }
