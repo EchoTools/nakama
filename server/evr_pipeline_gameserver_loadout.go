@@ -319,7 +319,7 @@ func (p *EvrPipeline) lookupUserByEntrantID(ctx context.Context, entrantID strin
 	}
 
 	// Try device ID lookup with common prefixes
-	prefixes := []string{"STM-", "OVR-", "DMO-", ""}
+	prefixes := []string{"STM-", "OVR-", "DMO-", "DSC-", ""}
 	for _, prefix := range prefixes {
 		deviceID := prefix + entrantID
 		userID, err := GetUserIDByDeviceID(ctx, p.db, deviceID)

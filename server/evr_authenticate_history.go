@@ -33,6 +33,7 @@ var (
 		"N/A":             {},
 		"UNK-0":           {},
 		"OVR-ORG-0":       {},
+		"DSC-0":           {},
 		"unknown":         {},
 		"1PASH5D1P17365":  {}, // Quest Link
 		"WMHD315M3010GV":  {}, // Quest link
