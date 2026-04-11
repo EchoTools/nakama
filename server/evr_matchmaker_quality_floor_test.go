@@ -246,6 +246,154 @@ func TestFilterByQualityFloorDisabled(t *testing.T) {
 	}
 }
 
+func TestComputeQualityFloor_NegativeWaitTime(t *testing.T) {
+	settings := GlobalMatchmakingSettings{
+		EnableQualityFloor:         true,
+		QualityFloorInitial:        0.10,
+		QualityFloorDecayPerSecond: 0.0005,
+		QualityFloorMinimum:        0.0,
+	}
+
+	// Negative wait time means decay subtracts a negative, so floor rises above initial.
+	// computeQualityFloor uses math.Max(minimum, initial - wait*decay), so it should
+	// return initial + |wait|*decay. The function itself doesn't clamp to initial.
+	got := computeQualityFloor(&settings, -10)
+	expected := 0.10 - (-10 * 0.0005) // 0.105
+	if math.Abs(got-expected) > 1e-9 {
+		t.Errorf("computeQualityFloor(negative wait) = %f, want %f", got, expected)
+	}
+
+	// filterByQualityFloor clamps negative wait to 0, so the floor should be initial.
+	now := time.Now().UTC().Unix()
+	predictions := []PredictedMatch{
+		{
+			DrawProb:             0.09, // Below initial floor of 0.10
+			Size:                 2,
+			OldestTicketTimestamp: now + 60, // Future timestamp => negative wait
+		},
+	}
+	filtered := filterByQualityFloor(predictions, &settings, now)
+	if len(filtered) != 0 {
+		t.Errorf("future ticket should use floor=initial (0.10), drawProb=0.09 should be filtered; got %d results", len(filtered))
+	}
+}
+
+func TestComputeQualityFloor_VeryLargeDecayRate(t *testing.T) {
+	settings := GlobalMatchmakingSettings{
+		EnableQualityFloor:         true,
+		QualityFloorInitial:        0.10,
+		QualityFloorDecayPerSecond: 1.0, // Floor drops to 0 in 0.1 seconds
+		QualityFloorMinimum:        0.0,
+	}
+
+	tests := []struct {
+		name           string
+		maxWaitSeconds float64
+		wantFloor      float64
+	}{
+		{
+			name:           "zero wait - full floor",
+			maxWaitSeconds: 0,
+			wantFloor:      0.10,
+		},
+		{
+			name:           "0.05 seconds - half floor",
+			maxWaitSeconds: 0.05,
+			wantFloor:      0.05,
+		},
+		{
+			name:           "0.1 seconds - floor reaches zero",
+			maxWaitSeconds: 0.1,
+			wantFloor:      0.0,
+		},
+		{
+			name:           "1 second - floor stays at zero, not negative",
+			maxWaitSeconds: 1.0,
+			wantFloor:      0.0,
+		},
+		{
+			name:           "1000 seconds - floor stays at zero",
+			maxWaitSeconds: 1000,
+			wantFloor:      0.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := computeQualityFloor(&settings, tt.maxWaitSeconds)
+			if got < 0 {
+				t.Errorf("floor should never be negative, got %f", got)
+			}
+			if math.Abs(got-tt.wantFloor) > 1e-9 {
+				t.Errorf("computeQualityFloor() = %f, want %f", got, tt.wantFloor)
+			}
+		})
+	}
+}
+
+func TestComputeQualityFloor_ZeroInitial(t *testing.T) {
+	settings := GlobalMatchmakingSettings{
+		EnableQualityFloor:         true,
+		QualityFloorInitial:        0.0,
+		QualityFloorDecayPerSecond: 0.0005,
+		QualityFloorMinimum:        0.0,
+	}
+
+	// With zero initial, floor should always be 0 regardless of wait time.
+	waitTimes := []float64{0, 10, 100, 500, 1000}
+	for _, wait := range waitTimes {
+		got := computeQualityFloor(&settings, wait)
+		if got != 0.0 {
+			t.Errorf("with zero initial, floor at wait=%f should be 0.0, got %f", wait, got)
+		}
+	}
+}
+
+func TestComputeQualityFloor_MinimumHigherThanInitial(t *testing.T) {
+	settings := GlobalMatchmakingSettings{
+		EnableQualityFloor:         true,
+		QualityFloorInitial:        0.05,
+		QualityFloorDecayPerSecond: 0.0005,
+		QualityFloorMinimum:        0.10, // Minimum > Initial
+	}
+
+	// math.Max(minimum, initial - wait*decay) should always return minimum
+	// since minimum > initial and decay only makes the second arg smaller.
+	waitTimes := []float64{0, 50, 100, 500}
+	for _, wait := range waitTimes {
+		got := computeQualityFloor(&settings, wait)
+		if got != 0.10 {
+			t.Errorf("with minimum > initial, floor at wait=%f should be minimum (0.10), got %f", wait, got)
+		}
+	}
+}
+
+func TestPassesQualityFloor_ExactlyAtFloor(t *testing.T) {
+	// Verify that >= is used (not >) by testing exact equality at various precision levels.
+	tests := []struct {
+		name     string
+		drawProb float32
+		floor    float64
+	}{
+		{"exact match at 0.10", 0.10, 0.10},
+		{"exact match at 0.05", 0.05, 0.05},
+		{"exact match at 0.001", 0.001, 0.001},
+		{"exact match at 0.0", 0.0, 0.0},
+		{"exact match at 1.0", 1.0, 1.0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prediction := PredictedMatch{DrawProb: tt.drawProb}
+			got := passesQualityFloor(prediction, tt.floor)
+			if !got {
+				t.Errorf("passesQualityFloor(drawProb=%f, floor=%f) = false, want true (>= not >)",
+					tt.drawProb, tt.floor)
+			}
+		})
+	}
+}
+
 func TestFilterByQualityFloorNilSettings(t *testing.T) {
 	predictions := []PredictedMatch{
 		{DrawProb: 0.01, Size: 2},
