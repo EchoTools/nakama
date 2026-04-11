@@ -20,10 +20,8 @@ var (
 
 	SymbolTypes = map[uint64]Message{
 		// This is the complete list of implemented message types.
-		/*
-			0x013e99cb47eb3669: (*GenericMessage)(nil),
-			0x35d810572a230837: (*GenericMessageNotify)(nil),
-		*/
+		0x013e99cb47eb3669: (*GenericMessage)(nil),
+		0x35d810572a230837: (*GenericMessageNotify)(nil),
 		0x0dabc24265508a82: (*ReconcileIAPResult)(nil),
 		0x1225133828150da3: (*OtherUserProfileFailure)(nil),
 		0x1230073227050cb5: (*OtherUserProfileSuccess)(nil),
@@ -300,8 +298,6 @@ func SplitPacket(data []byte) [][]byte {
 }
 
 var ignoredSymbols = []uint64{
-	0x013e99cb47eb3669,
-	0x35d810572a230837,
 	0x80119c19ac72d695,
 }
 
@@ -323,7 +319,8 @@ func ParsePacket(data []byte) ([]Message, error) {
 		buf := bytes.NewBuffer(b)
 		// Verify packet length.
 		if buf.Len() < 16 {
-			return nil, errors.Join(ErrInvalidPacket, ErrInvalidPacket)
+			err = errors.Join(err, ErrInvalidPacket, fmt.Errorf("packet too short (%d bytes)", buf.Len()))
+			break
 		}
 		// Read the message type and data length.
 		sym := dUint64(buf.Next(8))
@@ -336,7 +333,8 @@ func ParsePacket(data []byte) ([]Message, error) {
 		l := int(dUint64(buf.Next(8)))
 		// Verify the message data can be read from the rest of the packet.
 		if buf.Len() != l {
-			return nil, errors.Join(ErrInvalidPacket, fmt.Errorf("truncated packet (expected %d bytes, got %d)", l, buf.Len()))
+			err = errors.Join(err, ErrInvalidPacket, fmt.Errorf("truncated packet (expected %d bytes, got %d)", l, buf.Len()))
+			break
 		}
 		// Read the payload.
 		b = buf.Next(l)
@@ -344,15 +342,14 @@ func ParsePacket(data []byte) ([]Message, error) {
 		// Unmarshal the message.
 		typ, ok := SymbolTypes[sym]
 		if !ok || typ == nil {
-			// Skip unimplemented message types.
-			continue
+			err = errors.Join(err, ErrSymbolNotFound, fmt.Errorf("unknown symbol: 0x%016x", sym))
+			break
 		}
 
 		// Create a new message of the correct type and unmarshal the data into it.
 		message := reflect.New(reflect.TypeOf(typ).Elem()).Interface().(Message)
-		if err = message.Stream(NewEasyStream(DecodeMode, b)); err != nil {
-			return nil, fmt.Errorf("Stream error: %T: %w", typ, err)
-
+		if streamErr := message.Stream(NewEasyStream(DecodeMode, b)); streamErr != nil {
+			return nil, fmt.Errorf("Stream error: %T: %w", typ, streamErr)
 		}
 		messages = append(messages, message)
 	}
