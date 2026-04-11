@@ -149,6 +149,11 @@ type GlobalMatchmakingSettings struct {
 	EnableHardDivisions            *bool                   `json:"enable_hard_divisions"`               // Separate matchmaking pools by skill division (default false — needs boundary tuning)
 	DivisionBoundaries             []float64               `json:"division_boundaries"`                 // Mu thresholds between hard skill divisions (default [15.0, 25.0, 35.0])
 	DivisionNames                  []string                `json:"division_names"`                      // Human-readable division bracket names (default ["Bronze", "Silver", "Gold", "Diamond"])
+	EnableAmbassadorProgram        *bool                   `json:"enable_ambassador_program"`            // Allow veterans to opt-in as mentors in lower divisions (default false)
+	AmbassadorMuReduction          float64                 `json:"ambassador_mu_reduction"`              // Effective mu reduction when playing as ambassador (default 10.0)
+	AmbassadorCooldownMatches      int                     `json:"ambassador_cooldown_matches"`          // Matches between ambassador activations (default 1)
+	AmbassadorMinGamesPlayed       int                     `json:"ambassador_min_games_played"`          // Minimum games played to be eligible as ambassador (default 200)
+	AmbassadorMinMu                float64                 `json:"ambassador_min_mu"`                    // Minimum mu to be eligible as ambassador (default 30.0)
 }
 
 type QueryAddons struct {
@@ -185,6 +190,12 @@ func (g GlobalMatchmakingSettings) RequiresPreMatchPing() bool {
 // Defaults to false (disabled) when not explicitly configured.
 func (g GlobalMatchmakingSettings) HardDivisionsEnabled() bool {
 	return g.EnableHardDivisions != nil && *g.EnableHardDivisions
+}
+
+// AmbassadorProgramEnabled returns whether the ambassador program is active.
+// Defaults to false (disabled) when not explicitly configured.
+func (g GlobalMatchmakingSettings) AmbassadorProgramEnabled() bool {
+	return g.EnableAmbassadorProgram != nil && *g.EnableAmbassadorProgram
 }
 
 func ServiceSettingsLoad(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) (*ServiceSettingsData, error) {
@@ -386,6 +397,21 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 	}
 	if data.Matchmaking.DivisionNames == nil {
 		data.Matchmaking.DivisionNames = []string{"Bronze", "Silver", "Gold", "Diamond"}
+	}
+
+	// Ambassador program defaults — disabled by default, populate thresholds
+	// so they are visible in the settings UI for tuning.
+	if data.Matchmaking.AmbassadorMuReduction == 0 {
+		data.Matchmaking.AmbassadorMuReduction = 10.0
+	}
+	if data.Matchmaking.AmbassadorCooldownMatches == 0 {
+		data.Matchmaking.AmbassadorCooldownMatches = 1
+	}
+	if data.Matchmaking.AmbassadorMinGamesPlayed == 0 {
+		data.Matchmaking.AmbassadorMinGamesPlayed = 200
+	}
+	if data.Matchmaking.AmbassadorMinMu == 0 {
+		data.Matchmaking.AmbassadorMinMu = 30.0
 	}
 
 	// Seed CGNAT detection defaults

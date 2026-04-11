@@ -55,6 +55,8 @@ type SessionParameters struct {
 	enforcementUserIDs           []string                         // User IDs (self + alts) used for enforcement journal queries
 	ignoreDisabledAlternates     bool                             // Ignore disabled
 
+	isAmbassadorMatch *atomic.Bool // True if the player is ambassadoring in the current match
+
 	currentPartyID    uuid.UUID // Nakama party UUID the user is currently in (SNS party)
 	currentSNSPartyID uint64    // SNS wire party ID
 }
