@@ -1231,7 +1231,7 @@ type AccountLookupRequest struct {
 	Username    string    `json:"username"`     // discord/nakama username
 	UserID      uuid.UUID `json:"user_id"`      // nakama user uuid
 	DiscordID   string    `json:"discord_id"`   // discord ID (snowflake)
-	XPID        string    `json:"xp_id"`        // OVR-ORG-123412341234
+	XPID        string    `json:"xp_id"`        // e.g. OVR-ORG-1234, DSC-1234
 	DisplayName string    `json:"display_name"` // active display name (probably unreliable)
 }
 

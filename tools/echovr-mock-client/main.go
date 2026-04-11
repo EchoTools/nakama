@@ -15,7 +15,7 @@ import (
 
 var (
 	flagAddr        = flag.String("addr", "ws://127.0.0.1:7349", "Nakama WebSocket address")
-	flagEvrID       = flag.String("evrid", "DMO-0", "EvrID string (e.g. OVR-ORG-123412341234)")
+	flagEvrID       = flag.String("evrid", "DMO-0", "EvrID string (e.g. DSC-123412341234)")
 	flagDisplayName = flag.String("displayname", "MockClient", "Display name")
 	flagBuild       = flag.Int64("build", int64(evr.StandaloneBuildNumber), "Build number")
 	flagAction      = flag.String("action", "find", "Lobby action: find | create | join")
