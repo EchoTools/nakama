@@ -1087,6 +1087,10 @@ var (
 				},
 			},
 		},
+		{
+			Name:        "ambassador",
+			Description: "Toggle ambassador mode to mentor newer players in lower divisions.",
+		},
 	}
 )
 
@@ -3369,6 +3373,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			return d.handleLoadoutCommand(ctx, s, i, userID)
 		},
 		"vrml-verify": d.handleVRMLVerify,
+		"ambassador":   d.handleAmbassadorCommand,
 	}
 
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {

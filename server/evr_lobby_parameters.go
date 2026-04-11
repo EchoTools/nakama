@@ -69,6 +69,7 @@ type LobbySessionParameters struct {
 	DisplayName                  string                        `json:"display_name"`
 	GamesPlayed                  int                           `json:"games_played"`                  // Total games played, loaded from GamesPlayed leaderboard
 	HardDivision                 string                        `json:"hard_division"`                 // Skill division bracket for hard division filtering
+	IsAmbassador                 bool                          `json:"is_ambassador"`                 // True if player is ambassadoring this match
 	HasSuspensionHistoryFlag     bool                          `json:"has_suspension_history"`         // True if player has any suspension history (exempt: enforcers/operators always false)
 	latencyHistory               *atomic.Pointer[LatencyHistory]
 	unreachableServers           *atomic.Pointer[UnreachableServers]
@@ -480,6 +481,30 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		globalSettings.DivisionNames,
 	)
 
+	// Ambassador program: if the player is an active, eligible ambassador and
+	// not on cooldown, override their division to one below and reduce
+	// effective mu so they help rather than carry.
+	if globalSettings.AmbassadorProgramEnabled() && globalSettings.HardDivisionsEnabled() {
+		ambState := NewAmbassadorState()
+		if err := StorableRead(ctx, nk, session.UserID().String(), ambState, false); err != nil {
+			if !isStorageNotFoundError(err) {
+				logger.Warn("Failed to read ambassador state", zap.Error(err))
+			}
+		} else if ambState.IsActive {
+			if IsEligibleAmbassador(gamesPlayed, matchmakingRating.Mu, globalSettings.AmbassadorMinGamesPlayed, globalSettings.AmbassadorMinMu) &&
+				ShouldAmbassadorThisMatch(ambState, globalSettings.AmbassadorCooldownMatches) {
+				ambDiv := GetAmbassadorDivision(lobbyParams.HardDivision, globalSettings.DivisionNames)
+				if ambDiv != "" {
+					lobbyParams.HardDivision = ambDiv
+					matchmakingRating.Mu = ApplyAmbassadorMuReduction(matchmakingRating.Mu, globalSettings.AmbassadorMuReduction)
+					lobbyParams.MatchmakingRating.Store(&matchmakingRating)
+					lobbyParams.IsAmbassador = true
+					sessionParams.isAmbassadorMatch.Store(true)
+				}
+			}
+		}
+	}
+
 	// Check for an existing matchmaking credit to preserve queue position
 	// across re-queues (crashes, cancels, party follower failures).
 	if isMatchmakingCreditMode(mode) {
@@ -690,6 +715,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		"excluded_divisions": strings.Join(p.MatchmakingExcludedDivisions, ","),
 		"is_moderator":              strconv.FormatBool(p.IsModerator),
 		"division":                  p.HardDivision,
+		"is_ambassador":             strconv.FormatBool(p.IsAmbassador),
 		"has_suspension_history":    strconv.FormatBool(p.HasSuspensionHistoryFlag),
 	}
 	var minTeamSize, maxTeamSize float64
