@@ -37,8 +37,6 @@ type SkillBasedMatchmaker struct {
 	lastProcessStart *atomic.Int64 // Unix nanoseconds when matchmaker started processing
 	lastProcessEnd   *atomic.Int64 // Unix nanoseconds when matchmaker finished processing
 	isProcessing     *atomic.Bool  // Whether matchmaker is currently processing
-	processMu        sync.RWMutex  // Protects timing state reads during backfill coordination
-
 	// Reservation state (persists across cycles, in-memory only)
 	reservationMu   sync.Mutex
 	starvingTickets map[string]*StarvingTicket // ticket ID -> state

@@ -60,7 +60,10 @@ type LobbySessionParameters struct {
 	EnableDivisions              bool                          `json:"enable_divisions"`
 	MatchmakingRatingRange       float64                       `json:"rating_range"`
 	MatchmakingDivisions         []string                      `json:"divisions"`
-	MatchmakingExcludedDivisions []string                      `json:"excluded_divisions"`
+	// TODO: MatchmakingExcludedDivisions is populated and set as a ticket property
+	// but the matchmaker query filter that would read it is commented out.
+	// Wire this into the matchmaker query before considering it active.
+	MatchmakingExcludedDivisions []string `json:"excluded_divisions"`
 	MaxServerRTT                 int                           `json:"max_server_rtt"`
 	MatchmakingTimestamp         time.Time                     `json:"matchmaking_timestamp"`
 	MatchmakingTimeout           time.Duration                 `json:"matchmaking_timeout"`
@@ -138,15 +141,19 @@ func resolveDirectiveRole(requestRole int, directive *JoinDirective) int {
 
 func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, session *sessionWS, request evr.LobbySessionRequest) (*LobbySessionParameters, error) {
 
+	serviceSettings := ServiceSettings()
+	if serviceSettings == nil {
+		return nil, fmt.Errorf("service settings not loaded")
+	}
+
 	var (
-		p               = session.evrPipeline
-		userID          = session.userID.String()
-		mode            = request.GetMode()
-		level           = request.GetLevel()
-		versionLock     = request.GetVersionLock()
-		appID           = request.GetAppID()
-		serviceSettings = ServiceSettings()
-		globalSettings  = serviceSettings.Matchmaking
+		p              = session.evrPipeline
+		userID         = session.userID.String()
+		mode           = request.GetMode()
+		level          = request.GetLevel()
+		versionLock    = request.GetVersionLock()
+		appID          = request.GetAppID()
+		globalSettings = serviceSettings.Matchmaking
 	)
 	sessionParams, ok := LoadParams(ctx)
 	if !ok {
@@ -578,7 +585,10 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 	}
 	// For arena public matches, exclude matches older than the configured max age
 	if p.Mode == evr.ModeArenaPublic {
-		maxAgeSecs := ServiceSettings().Matchmaking.ArenaBackfillMaxAgeSecs
+		var maxAgeSecs int
+		if ss := ServiceSettings(); ss != nil {
+			maxAgeSecs = ss.Matchmaking.ArenaBackfillMaxAgeSecs
+		}
 		if maxAgeSecs > 0 {
 			// Exclude matches that started more than maxAgeSecs ago
 			startTime := p.MatchmakingTimestamp.UTC().Add(-time.Duration(maxAgeSecs) * time.Second).Format(time.RFC3339Nano)
@@ -803,7 +813,10 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		}
 	}
 
-	rttDeltas := ServiceSettings().Matchmaking.ServerSelection.RTTDelta
+	var rttDeltas map[string]int
+	if ss := ServiceSettings(); ss != nil {
+		rttDeltas = ss.Matchmaking.ServerSelection.RTTDelta
+	}
 	latencyCutoff := time.Now().Add(-7 * 24 * time.Hour)
 	lhAvg := p.latencyHistory.Load()
 	if lhAvg != nil {
