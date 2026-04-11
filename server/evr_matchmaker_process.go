@@ -10,6 +10,9 @@ import (
 )
 
 func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, entries []runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int, []PredictedMatch) {
+
+	settings := ServiceSettings()
+
 	candidates := groupEntriesSequentially(entries)
 
 	filterCounts := make(map[string]int)
@@ -24,7 +27,7 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 	}
 
 	config := PredictionConfig{}
-	if settings := ServiceSettings(); settings != nil {
+	if settings != nil {
 		mu := settings.SkillRating.Defaults.Mu
 		sigma := settings.SkillRating.Defaults.Sigma
 		z := settings.SkillRating.Defaults.Z
@@ -36,9 +39,10 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 			Sigma: &sigma,
 			Z:     &z,
 		}
+		config.EnableArchetypeBalancing = settings.Matchmaking.ArchetypeBalancingEnabled()
+		config.NewPlayerThreshold = settings.Matchmaking.NewPlayerMaxGames
 		if settings.Matchmaking.NewPlayerTeamBiasEnabled() {
 			config.EnableNewPlayerTeamBias = true
-			config.NewPlayerThreshold = settings.Matchmaking.NewPlayerMaxGames
 		}
 	}
 
@@ -68,7 +72,7 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 	// Determine if wait time should override size priority
 	oldestWaitTimeSecs := now - oldestTicketTimestamp
 	waitTimeThreshold := int64(120) // Default: 120 seconds (2 minutes)
-	if settings := ServiceSettings(); settings != nil && settings.Matchmaking.WaitTimePriorityThresholdSecs > 0 {
+	if settings != nil && settings.Matchmaking.WaitTimePriorityThresholdSecs > 0 {
 		waitTimeThreshold = int64(settings.Matchmaking.WaitTimePriorityThresholdSecs)
 	}
 	prioritizeWaitTime := oldestWaitTimeSecs >= waitTimeThreshold
@@ -103,13 +107,17 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 			return predictions[i].DivisionCount < predictions[j].DivisionCount
 		}
 
+		// Fourth priority: Archetype composition (higher = better balanced teams)
+		if predictions[i].CompositionScore != predictions[j].CompositionScore {
+			return predictions[i].CompositionScore > predictions[j].CompositionScore
+		}
+
 		// Final tiebreaker: Match draw probability (higher draw probability = more evenly matched)
 		return predictions[i].DrawProb > predictions[j].DrawProb
 	})
 
 	var madeMatches [][]runtime.MatchmakerEntry
 
-	settings := ServiceSettings()
 	useReservations := settings != nil && settings.Matchmaking.EnableTicketReservation
 
 	if useReservations {
