@@ -412,17 +412,7 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 
 				var compScore int8
 				if cfg.EnableArchetypeBalancing {
-					split := TeamSplit{
-						BlueIndices:   make([]int, len(blueTeam)),
-						OrangeIndices: make([]int, len(orangeTeam)),
-					}
-					for i := range blueTeam {
-						split.BlueIndices[i] = i
-					}
-					for i := range orangeTeam {
-						split.OrangeIndices[i] = len(blueTeam) + i
-					}
-					compScore = int8(scoreTeamSplitComposition(match, split, cfg.NewPlayerThreshold))
+					compScore = int8(scoreTeamCompositionFromEntries(blueTeam, orangeTeam, cfg.NewPlayerThreshold))
 				}
 
 				out <- PredictedMatch{
