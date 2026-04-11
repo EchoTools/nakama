@@ -299,6 +299,12 @@ var (
 					Required:     false,
 					Autocomplete: true,
 				},
+				{
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Name:        "user",
+					Description: "Target user (global operators only)",
+					Required:    false,
+				},
 			},
 		},
 		{
@@ -323,6 +329,12 @@ var (
 					Description:  "device link from /whoami",
 					Required:     false,
 					Autocomplete: true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Name:        "user",
+					Description: "Target user (global operators only)",
+					Required:    false,
 				},
 			},
 		},

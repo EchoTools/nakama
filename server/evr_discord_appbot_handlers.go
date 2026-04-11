@@ -426,25 +426,48 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		if len(data.Values) == 0 {
 			return simpleInteractionResponse(s, i, "Invalid device ID.")
 		}
-		value = data.Values[0]
-		if value == "" {
+		deviceID := data.Values[0]
+		if deviceID == "" {
 			return simpleInteractionResponse(s, i, "Invalid device ID.")
 		}
 
-		if err := nk.UnlinkDevice(ctx, userID, value); err != nil {
+		// value contains the target user ID if a global operator is
+		// unlinking another user's device (encoded in the custom ID).
+		targetUserID := userID
+		targetDiscordID := user.ID
+		if value != "" {
+			isGlobalOperator, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+			if err != nil {
+				return fmt.Errorf("failed to check global operator status: %w", err)
+			}
+			if !isGlobalOperator {
+				return simpleInteractionResponse(s, i, "Only global operators can unlink another user's headset.")
+			}
+			targetUserID = value
+			targetDiscordID = d.cache.UserIDToDiscordID(targetUserID)
+			if targetDiscordID == "" {
+				return simpleInteractionResponse(s, i, "Target user not found.")
+			}
+		}
+
+		if err := nk.UnlinkDevice(ctx, targetUserID, deviceID); err != nil {
 			return fmt.Errorf("failed to unlink device ID: %w", err)
 		}
 
-		if err := d.cache.updateLinkStatus(ctx, user.ID); err != nil {
+		if err := d.cache.updateLinkStatus(ctx, targetDiscordID); err != nil {
 			return fmt.Errorf("failed to update link status: %w", err)
 		}
 
-		// Modify the interaction response
+		content := fmt.Sprintf("Unlinked device ID `%s`.", deviceID)
+		if value != "" {
+			content = fmt.Sprintf("Unlinked device `%s` from <@%s>.", deviceID, targetDiscordID)
+		}
+
 		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
 				Flags:   discordgo.MessageFlagsEphemeral,
-				Content: fmt.Sprintf("Unlinked device ID `%s`.", value),
+				Content: content,
 			},
 		}); err != nil {
 			return fmt.Errorf("failed to respond to interaction: %w", err)
