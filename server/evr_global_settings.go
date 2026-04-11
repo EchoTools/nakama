@@ -401,16 +401,16 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 
 	// Ambassador program defaults — disabled by default, populate thresholds
 	// so they are visible in the settings UI for tuning.
-	if data.Matchmaking.AmbassadorMuReduction == 0 {
+	// Only apply defaults when ALL ambassador fields are zero (uninitialized).
+	// If any field is non-zero, the admin has intentionally configured them
+	// and zero values should be preserved (e.g., cooldown=0 for every-match).
+	if data.Matchmaking.AmbassadorMuReduction == 0 &&
+		data.Matchmaking.AmbassadorCooldownMatches == 0 &&
+		data.Matchmaking.AmbassadorMinGamesPlayed == 0 &&
+		data.Matchmaking.AmbassadorMinMu == 0 {
 		data.Matchmaking.AmbassadorMuReduction = 10.0
-	}
-	if data.Matchmaking.AmbassadorCooldownMatches == 0 {
 		data.Matchmaking.AmbassadorCooldownMatches = 1
-	}
-	if data.Matchmaking.AmbassadorMinGamesPlayed == 0 {
 		data.Matchmaking.AmbassadorMinGamesPlayed = 200
-	}
-	if data.Matchmaking.AmbassadorMinMu == 0 {
 		data.Matchmaking.AmbassadorMinMu = 30.0
 	}
 
