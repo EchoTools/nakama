@@ -78,6 +78,12 @@ func TestIsNewPlayer(t *testing.T) {
 			threshold: 0,
 			want:      false,
 		},
+		{
+			name:      "non-numeric property treated as new player",
+			props:     map[string]interface{}{"games_played": "not_a_number"},
+			threshold: 50,
+			want:      true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -91,12 +97,12 @@ func TestIsNewPlayer(t *testing.T) {
 	}
 }
 
-func TestNewPlayerMaxGamesDefault(t *testing.T) {
+func TestNewPlayerMaxGamesZeroPreserved(t *testing.T) {
 	data := &ServiceSettingsData{}
 	FixDefaultServiceSettings(nil, data)
 
-	if data.Matchmaking.NewPlayerMaxGames != 50 {
-		t.Errorf("expected NewPlayerMaxGames default 50, got %d", data.Matchmaking.NewPlayerMaxGames)
+	if data.Matchmaking.NewPlayerMaxGames != 0 {
+		t.Errorf("expected NewPlayerMaxGames zero (disabled) to be preserved, got %d", data.Matchmaking.NewPlayerMaxGames)
 	}
 }
 
@@ -109,6 +115,17 @@ func TestNewPlayerMaxGamesPreserved(t *testing.T) {
 		t.Errorf("expected NewPlayerMaxGames to be preserved as 100, got %d", data.Matchmaking.NewPlayerMaxGames)
 	}
 }
+
+func TestNewPlayerMaxGamesNegativeClamped(t *testing.T) {
+	data := &ServiceSettingsData{}
+	data.Matchmaking.NewPlayerMaxGames = -5
+	FixDefaultServiceSettings(nil, data)
+
+	if data.Matchmaking.NewPlayerMaxGames != 0 {
+		t.Errorf("expected negative NewPlayerMaxGames to clamp to 0, got %d", data.Matchmaking.NewPlayerMaxGames)
+	}
+}
+
 
 func TestGamesPlayedOnLobbySessionParameters(t *testing.T) {
 	params := &LobbySessionParameters{
