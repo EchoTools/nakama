@@ -16,13 +16,12 @@ const (
 	XPlatformIdSize = 16 // 16 bytes
 
 	STM     PlatformCode = iota // Steam
-	PSN                         // Playstation
+	DSC                         // Discord
 	XBX                         // Xbox
 	OVR_ORG                     // Oculus VR user
 	OVR                         // Oculus VR
 	BOT                         // Bot/AI
 	DMO                         // Demo (no ovr)
-	DSC                         // Discord
 )
 
 // EvrId represents an identifier for a user on the platform.
@@ -121,7 +120,7 @@ func (xpi EvrId) IsNotNil() bool {
 }
 
 func (xpi EvrId) IsValid() bool {
-	return xpi.PlatformCode >= STM && xpi.PlatformCode <= DSC && xpi.AccountId > 0
+	return xpi.PlatformCode >= STM && xpi.PlatformCode <= DMO && xpi.AccountId > 0
 }
 
 func (xpi *EvrId) Stream(s *EasyStream) error {
@@ -155,8 +154,8 @@ func (code PlatformCode) GetDisplayName() string {
 	switch code {
 	case STM:
 		return "Steam"
-	case PSN:
-		return "Playstation"
+	case DSC:
+		return "Discord"
 	case XBX:
 		return "Xbox"
 	case OVR_ORG:
@@ -167,8 +166,6 @@ func (code PlatformCode) GetDisplayName() string {
 		return "Bot"
 	case DMO:
 		return "Demo"
-	case DSC:
-		return "Discord"
 	default:
 		return "Unknown"
 	}
@@ -195,8 +192,8 @@ func (code PlatformCode) Abbrevation() string {
 	switch code {
 	case STM:
 		return "STM"
-	case PSN:
-		return "PSN"
+	case DSC:
+		return "DSC"
 	case XBX:
 		return "XBX"
 	case OVR_ORG:
@@ -207,8 +204,6 @@ func (code PlatformCode) Abbrevation() string {
 		return "BOT"
 	case DMO:
 		return "DMO"
-	case DSC:
-		return "DSC"
 	default:
 		return "UNK"
 	}
@@ -219,8 +214,8 @@ func platformCodeFromString(s string) (PlatformCode, bool) {
 	switch s {
 	case "STM":
 		return STM, true
-	case "PSN":
-		return PSN, true
+	case "DSC":
+		return DSC, true
 	case "XBX":
 		return XBX, true
 	case "OVR_ORG":
@@ -233,8 +228,6 @@ func platformCodeFromString(s string) (PlatformCode, bool) {
 		return BOT, true
 	case "DMO":
 		return DMO, true
-	case "DSC":
-		return DSC, true
 	default:
 		return 0, false
 	}
