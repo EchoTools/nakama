@@ -17,6 +17,12 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 	// Filter out players who are too far away from each other
 	filterCounts["max_rtt"] = m.filterWithinMaxRTT(candidates)
 
+	// Filter out candidates where a new player would be matched with a
+	// player who has suspension history (toxic player separation).
+	if settings := ServiceSettings(); settings != nil && settings.Matchmaking.ToxicSeparationEnabled() {
+		filterCounts["toxic_separation"] = FilterToxicNewPlayerCandidates(candidates, settings.Matchmaking.NewPlayerMaxGames)
+	}
+
 	config := PredictionConfig{}
 	if settings := ServiceSettings(); settings != nil {
 		mu := settings.SkillRating.Defaults.Mu
