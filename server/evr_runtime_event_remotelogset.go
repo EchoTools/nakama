@@ -719,6 +719,25 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 				}
 			}
 
+			// Record per-player match result for rolling win-rate calculation.
+			if typeStats.ArenaWins > 0 || typeStats.ArenaLosses > 0 {
+				if mc := globalMongoClient.Load(); mc != nil {
+					go func(uid, mid, mode string, won bool) {
+						ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+						defer cancel()
+						if err := StorePlayerMatchResult(ctx, mc, &PlayerMatchResult{
+							UserID:    uid,
+							MatchID:   mid,
+							Mode:      mode,
+							Won:       won,
+							CreatedAt: time.Now().UTC(),
+						}); err != nil {
+							logger.WithField("error", err).Warn("Failed to store player match result")
+						}
+					}(playerInfo.UserID, matchID.String(), label.Mode.String(), typeStats.ArenaWins > 0)
+				}
+			}
+
 			// Increment the completed matches for the player (arena only — early quit system doesn't apply to combat)
 			if label.Mode == evr.ModeArenaPublic {
 				if err := s.incrementCompletedMatches(ctx, logger, nk, db, sessionRegistry, playerInfo.UserID, playerInfo.SessionID, matchID); err != nil {
