@@ -379,7 +379,7 @@ func TestHashMatchmakerEntries(t *testing.T) {
 		{
 			name:     "Empty entries",
 			entries:  []runtime.MatchmakerEntry{},
-			expected: 0,
+			expected: 5381, // Initial hash seed, no entries to mix
 		},
 		{
 			name: "Single entry",

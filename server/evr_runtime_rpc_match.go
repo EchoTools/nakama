@@ -213,6 +213,9 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 			}
 
 			if err != nil || label == nil {
+				if err == nil {
+					err = fmt.Errorf("no server allocated")
+				}
 				if strings.Contains(err.Error(), "bad request:") {
 					err = runtime.NewError("required features not supported", StatusInvalidArgument)
 				}

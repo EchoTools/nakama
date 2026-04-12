@@ -46,7 +46,7 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 		}
 
 		if err != nil {
-			if strings.Contains("bad request:", err.Error()) {
+			if strings.Contains(err.Error(), "bad request:") {
 				err = NewLobbyErrorf(BadRequest, "required features not supported")
 			}
 			logger.Warn("Failed to allocate game server", zap.Error(err), zap.Any("settings", settings))
