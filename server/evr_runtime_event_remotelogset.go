@@ -720,9 +720,20 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 			}
 
 			// Record per-player match result for rolling win-rate calculation.
+			// Arena uses ArenaWins/ArenaLosses; combat doesn't populate those
+			// fields, so derive the outcome from blueWins and team assignment.
+			var matchResultWon bool
+			var hasMatchResult bool
 			if typeStats.ArenaWins > 0 || typeStats.ArenaLosses > 0 {
+				matchResultWon = typeStats.ArenaWins > 0
+				hasMatchResult = true
+			} else if label.Mode == evr.ModeCombatPublic {
+				matchResultWon = (playerInfo.Team == BlueTeam && blueWins) || (playerInfo.Team == OrangeTeam && !blueWins)
+				hasMatchResult = true
+			}
+			if hasMatchResult {
 				if mc := globalMongoClient.Load(); mc != nil {
-					go func(uid, mid, mode string, won bool) {
+					go func(log runtime.Logger, uid, mid, mode string, won bool) {
 						ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 						defer cancel()
 						if err := StorePlayerMatchResult(ctx, mc, &PlayerMatchResult{
@@ -732,9 +743,9 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 							Won:       won,
 							CreatedAt: time.Now().UTC(),
 						}); err != nil {
-							logger.WithField("error", err).Warn("Failed to store player match result")
+							log.WithField("error", err).Warn("Failed to store player match result")
 						}
-					}(playerInfo.UserID, matchID.String(), label.Mode.String(), typeStats.ArenaWins > 0)
+					}(logger, playerInfo.UserID, matchID.String(), label.Mode.String(), matchResultWon)
 				}
 			}
 
