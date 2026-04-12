@@ -50,8 +50,7 @@ func NewLobbyFindSessionRequest(versionLock Symbol, mode Symbol, level Symbol, p
 }
 
 func (m LobbyFindSessionRequest) String() string {
-	return fmt.Sprintf("LobbyFindSessionRequest{Mode: %s, Level: %s, Channel: %s}", m.Mode, m.Level, m.GroupID)
-
+	return fmt.Sprintf("LobbyFindSessionRequest{Mode: %s, Level: %s, Channel: %s, Entrants: %v}", m.Mode, m.Level, m.GroupID, m.Entrants)
 }
 
 const MaxFindSessionEntrants = 16
