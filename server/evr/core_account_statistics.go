@@ -210,6 +210,7 @@ func (s *PlayerStatistics) UnmarshalJSON(data []byte) error {
 }
 
 type ArenaStatistics struct {
+	RecentWinPercentage          *float64        `json:"-"` // In-memory override for rolling win rate
 	ArenaLosses                  *StatisticValue `json:"ArenaLosses,omitempty" op:"add,omitzero" type:"int"`
 	ArenaMVPPercentage           *StatisticValue `json:"ArenaMVPPercentage,omitempty" op:"rep,omitzero" type:"float"`
 	ArenaMVPs                    *StatisticValue `json:"ArenaMVPs,omitempty" op:"add,omitzero" type:"int"`
@@ -364,7 +365,12 @@ func (s *ArenaStatistics) CalculateFieldsWithOptions(countEarlyQuitsAsLosses boo
 			}
 		}
 
-		if s.ArenaWins != nil {
+		if s.RecentWinPercentage != nil {
+			s.ArenaWinPercentage = &StatisticValue{
+				Value: *s.RecentWinPercentage,
+				Count: 1,
+			}
+		} else if s.ArenaWins != nil {
 			// Validate ArenaWins value to prevent corrupted statistics
 			winsValue := s.ArenaWins.GetValue()
 			if winsValue < 0 || winsValue > gamesPlayed || winsValue > 1e6 {
@@ -569,6 +575,7 @@ func (s *ArenaStatistics) CalculateFieldsWithOptions(countEarlyQuitsAsLosses boo
 }
 
 type CombatStatistics struct {
+	RecentWinPercentage                *float64        `json:"-"` // In-memory override for rolling win rate
 	CombatAssists                      *StatisticValue `json:"CombatAssists,omitempty" op:"add,omitzero" type:"int"`
 	CombatAverageEliminationDeathRatio *StatisticValue `json:"CombatAverageEliminationDeathRatio" op:"rep,omitzero" type:"float"`
 	CombatBestEliminationStreak        *StatisticValue `json:"CombatBestEliminationStreak,omitempty" op:"add,omitzero" type:"int"`
@@ -646,13 +653,21 @@ func (s *CombatStatistics) CalculateFieldsWithOptions(_ bool) {
 		Count: 1,
 	}
 
-	if s.CombatWins != nil && s.GamesPlayed != nil && s.GamesPlayed.Value != 0 {
+	if s.RecentWinPercentage != nil {
+		s.CombatWinPercentage = &StatisticValue{
+			Value: *s.RecentWinPercentage,
+			Count: 1,
+		}
+	} else if s.CombatWins != nil && s.GamesPlayed != nil && s.GamesPlayed.Value != 0 {
 		// Validate CombatWins value to prevent corrupted statistics
 		winsValue := s.CombatWins.GetValue()
 		if winsValue < 0 || winsValue > float64(gamesPlayed) || winsValue > 1e6 {
 			winsValue = 0
 		}
-		s.CombatWinPercentage.Value = winsValue / float64(s.GamesPlayed.Value) * 100
+		s.CombatWinPercentage = &StatisticValue{
+			Value: winsValue / float64(s.GamesPlayed.Value) * 100,
+			Count: 1,
+		}
 	}
 
 	if s.CombatAssists != nil && s.GamesPlayed != nil && s.GamesPlayed.Value != 0 {

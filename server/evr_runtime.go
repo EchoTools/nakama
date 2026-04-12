@@ -205,6 +205,10 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 			logger.Warn("Failed to create guild audit log indexes", zap.Error(err))
 		}
 
+		if err := EnsurePlayerMatchResultIndexes(ctx, mongoClient); err != nil {
+			logger.Warn("Failed to create player match result indexes", zap.Error(err))
+		}
+
 		if err := RegisterSessionEventRPCs(ctx, logger, db, nk, initializer, mongoClient); err != nil {
 			return fmt.Errorf("unable to register session event RPCs: %w", err)
 		}
