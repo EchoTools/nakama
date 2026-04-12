@@ -23,8 +23,9 @@ const (
 	EventSessionStart              = "session_start"
 	EventSessionEnd                = "session_end"
 	EventMatchData                 = "match_data"
-	matchDataDatabaseName          = "nevr"
-	matchDataCollectionName        = "match_data"
+	matchDataDatabaseName              = "nevr"
+	matchDataCollectionName            = "match_data"
+	playerMatchResultsCollectionName   = "player_match_results"
 	redisMatchDataJournalQueueKey  = "match_data_journal_queue"
 	matchDataJournalEventThreshold = 100
 	redisQueueBatchSize            = 10
