@@ -689,7 +689,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 			return nil, 0, regionErr
 		}
 
-		if strings.Contains("bad request:", err.Error()) {
+		if strings.Contains(err.Error(), "bad request:") {
 			err = NewLobbyErrorf(BadRequest, "required features not supported")
 		}
 		logger.Warn("Failed to allocate game server", zap.Error(err), zap.Any("settings", settings))

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -181,7 +182,8 @@ func HashMatchmakerEntries[E runtime.MatchmakerEntry](entries []E) uint64 {
 		ticket := entry.GetTicket()
 
 		// Use FNV-1a hash.
-		for i := range 8 {
+		n := min(len(ticket), 8)
+		for i := range n {
 			hash = (hash * 33) ^ uint64(ticket[i])
 		}
 	}
@@ -286,7 +288,7 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 				oldest := float64(time.Now().UTC().Unix())
 				for _, entry := range entries {
 					props := entry.GetProperties()
-					if st, ok := props["submission_time"].(float64); ok && st < oldest {
+					if st, ok := props["timestamp"].(float64); ok && st < oldest {
 						oldest = st
 					}
 				}
@@ -426,12 +428,20 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 					compScore = int8(scoreTeamCompositionFromEntries(blueTeam, orangeTeam, cfg.NewPlayerThreshold))
 				}
 
+				// Find the oldest ticket across all tickets in this candidate
+				oldestTs := int64(math.MaxInt64)
+				for ticket := range ticketGroups {
+					if a := int64(ticketAge[ticket]); a < oldestTs {
+						oldestTs = a
+					}
+				}
+
 				out <- PredictedMatch{
 					Candidate:             match,
 					DrawProb:              float32(drawProb),
 					Size:                  int8(len(match)),
 					DivisionCount:         int8(len(divs)),
-					OldestTicketTimestamp: int64(ticketAge[match[0].GetTicket()]),
+					OldestTicketTimestamp: oldestTs,
 					Variant:               variant,
 					CompositionScore:      compScore,
 				}
