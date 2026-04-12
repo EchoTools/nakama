@@ -102,6 +102,11 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		logger.Fatal("Failed to load global settings", zap.Error(err))
 	}
 
+	// Load (or initialize) the XP progression table from storage
+	if _, err := XPProgressionLoad(ctx, NewRuntimeGoLogger(logger), nk); err != nil {
+		logger.Fatal("Failed to load XP progression table", zap.Error(err))
+	}
+
 	go func() {
 
 		interval := 30 * time.Second
