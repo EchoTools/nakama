@@ -60,6 +60,10 @@ func GetRecentWinRate(ctx context.Context, mongoClient *mongo.Client, userID str
 		}
 	}
 
+	if err := cursor.Err(); err != nil {
+		return -1, 0, fmt.Errorf("cursor error reading player match results: %w", err)
+	}
+
 	if total == 0 {
 		return -1, 0, nil
 	}
