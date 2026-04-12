@@ -25,11 +25,13 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -641,6 +643,10 @@ func storageWriteObjects(ctx context.Context, logger *zap.Logger, metrics Metric
 			if pgErr.Code == dbErrorUniqueViolation {
 				metrics.StorageWriteRejectCount(map[string]string{"collection": object.Collection, "reason": "version"}, 1)
 				return nil, nil, runtime.ErrStorageRejectedVersion
+			}
+			if pgErr.Code == pgerrcode.ForeignKeyViolation && strings.Contains(pgErr.Message, "user_id") {
+				logger.Warn("Storage write rejected: user no longer exists", zap.String("collection", object.Collection), zap.String("key", object.Key), zap.String("owner_id", op.OwnerID))
+				return nil, nil, runtime.ErrStorageRejectedPermission
 			}
 			return nil, nil, err
 		} else if err == pgx.ErrNoRows {
