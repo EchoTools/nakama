@@ -75,6 +75,13 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 		"username": s.Username,
 		"evrid":    s.XPID.String(),
 	})
+
+	// Skip processing for bot users (Practice_AI matches).
+	if IsBotUserID(s.UserID) {
+		logger.Debug("Skipping remote log processing for bot user")
+		return nil
+	}
+
 	entries, err := s.unmarshalLogs(logger, s.RemoteLogSet.Logs)
 	if err != nil {
 		logger.WithField("error", err).Warn("Failed to unmarshal remote logs")
