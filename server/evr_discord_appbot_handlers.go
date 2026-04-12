@@ -699,7 +699,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	return label, rtt, nil
 }
 
-func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Logger, userID, guildID, region string, mode, level evr.Symbol, startTime time.Time, partyUserIDs []string) (l *MatchLabel, latencyMillis int, err error) {
+func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Logger, userID, guildID, region string, mode, level evr.Symbol, startTime time.Time, partyUserIDs []string, role TeamIndex) (l *MatchLabel, latencyMillis int, err error) {
 
 	// Find a parking match to prepare
 	groupID := d.cache.GuildIDToGroupID(guildID)
@@ -815,12 +815,18 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, fmt.Errorf("no servers within %dms of your location. Your best server has %dms latency", MaxRegionPingMs, minLatencyMs)
 	}
 
-	// Create team alignments for party members to ensure they join the same team
-	// For social modes, use TeamUnassigned; for competitive modes, use TeamBlue
+	// Create team alignments for party members to ensure they join the same team.
+	// For social modes, use TeamUnassigned. For competitive modes, use the
+	// requested role (spectator keeps the creator off a team) or default to
+	// TeamBlue when no role was specified.
 	teamAlignment := evr.TeamUnassigned
 	if mode == evr.ModeArenaPrivate || mode == evr.ModeArenaPublic ||
 		mode == evr.ModeCombatPrivate || mode == evr.ModeCombatPublic {
-		teamAlignment = evr.TeamBlue
+		if role == Spectator {
+			teamAlignment = evr.TeamSpectator
+		} else {
+			teamAlignment = evr.TeamBlue
+		}
 	}
 
 	teamAlignments := make(map[string]int, len(partyUserIDs))
