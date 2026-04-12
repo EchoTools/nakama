@@ -57,3 +57,33 @@ func EnsureMatchDataIndexes(ctx context.Context, mongoClient *mongo.Client) erro
 	_, err := collection.Indexes().CreateMany(ctx, indexes)
 	return err
 }
+
+// EnsurePlayerMatchResultIndexes creates indexes for the player match results collection.
+func EnsurePlayerMatchResultIndexes(ctx context.Context, mongoClient *mongo.Client) error {
+	if mongoClient == nil {
+		return nil
+	}
+
+	collection := mongoClient.Database(matchDataDatabaseName).Collection(playerMatchResultsCollectionName)
+
+	indexes := []mongo.IndexModel{
+		{
+			Keys: bson.D{
+				{Key: "user_id", Value: 1},
+				{Key: "mode", Value: 1},
+				{Key: "created_at", Value: -1},
+			},
+			Options: options.Index().SetBackground(true).SetName("user_mode_created_at"),
+		},
+		{
+			Keys: bson.D{{Key: "created_at", Value: 1}},
+			Options: options.Index().
+				SetBackground(true).
+				SetName("created_at_ttl_90d").
+				SetExpireAfterSeconds(int32(90 * 24 * time.Hour.Seconds())),
+		},
+	}
+
+	_, err := collection.Indexes().CreateMany(ctx, indexes)
+	return err
+}

@@ -115,6 +115,30 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 		return nil, fmt.Errorf("failed to get user tablet statistics: %w", err)
 	}
 
+	// Override win percentages with rolling last-100-games values from MongoDB.
+	if mc := globalMongoClient.Load(); mc != nil {
+		arenaGroup := evr.StatisticsGroup{Mode: evr.ModeArenaPublic, ResetSchedule: evr.ResetScheduleAllTime}
+		if arenaStats, ok := statsBySchedule[arenaGroup]; ok {
+			if arena, ok := arenaStats.(*evr.ArenaStatistics); ok {
+				if winRate, count, err := GetRecentWinRate(ctx, mc, evrProfile.ID(), evr.ModeArenaPublic.String(), 100); err != nil {
+					logger.Warn("Failed to get recent arena win rate", zap.Error(err))
+				} else if count > 0 {
+					arena.RecentWinPercentage = &winRate
+				}
+			}
+		}
+		combatGroup := evr.StatisticsGroup{Mode: evr.ModeCombatPublic, ResetSchedule: evr.ResetScheduleAllTime}
+		if combatStats, ok := statsBySchedule[combatGroup]; ok {
+			if combat, ok := combatStats.(*evr.CombatStatistics); ok {
+				if winRate, count, err := GetRecentWinRate(ctx, mc, evrProfile.ID(), evr.ModeCombatPublic.String(), 100); err != nil {
+					logger.Warn("Failed to get recent combat win rate", zap.Error(err))
+				} else if count > 0 {
+					combat.RecentWinPercentage = &winRate
+				}
+			}
+		}
+	}
+
 	if evrProfile.DisableAFKTimeout {
 		developerFeatures = &evr.DeveloperFeatures{
 			DisableAfkTimeout: true,
