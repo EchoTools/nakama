@@ -139,6 +139,10 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 		}
 	}
 
+	// Consume lifetime XP into level + remainder for client display.
+	// Leaderboard records are not modified — only the profile sent to clients.
+	consumeXPIntoLevel(statsBySchedule)
+
 	if evrProfile.DisableAFKTimeout {
 		developerFeatures = &evr.DeveloperFeatures{
 			DisableAfkTimeout: true,
