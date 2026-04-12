@@ -1,8 +1,11 @@
 package server
 
 import (
+	"net"
 	"testing"
+	"time"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/assert"
 )
@@ -325,4 +328,181 @@ func TestBackfill_EqualTeamsConsiderBoth(t *testing.T) {
 	assert.Equal(t, 2, len(possibleTeams), "Should consider both teams when equal")
 	assert.Contains(t, possibleTeams, evr.TeamBlue, "Should include blue team")
 	assert.Contains(t, possibleTeams, evr.TeamOrange, "Should include orange team")
+}
+
+// TestGetPossibleTeams_CombatNeverReturnsSpectatorOrSocial verifies the actual
+// getPossibleTeams method never assigns spectator or social roles for combat matches.
+func TestGetPossibleTeams_CombatNeverReturnsSpectatorOrSocial(t *testing.T) {
+	backfill := &PostMatchmakerBackfill{}
+
+	combatScenarios := []struct {
+		name       string
+		blueCount  int
+		orangeCount int
+		blueSlots  int
+		orangeSlots int
+		partySize  int
+	}{
+		{"empty match", 0, 0, 5, 5, 1},
+		{"one per team", 1, 1, 4, 4, 1},
+		{"3v2", 3, 2, 2, 3, 1},
+		{"full 5v5", 5, 5, 0, 0, 1},
+		{"one slot left on blue", 4, 5, 1, 0, 1},
+		{"party of 3 into 2v2", 2, 2, 3, 3, 3},
+		{"party of 2 into 4v3", 4, 3, 1, 2, 2},
+	}
+
+	invalidRoles := []int{evr.TeamSpectator, evr.TeamSocial, evr.TeamModerator}
+
+	for _, sc := range combatScenarios {
+		t.Run(sc.name, func(t *testing.T) {
+			candidate := &BackfillCandidate{
+				Mode:          evr.ModeCombatPublic,
+				TeamAlignment: evr.TeamUnassigned,
+			}
+			match := &BackfillMatch{
+				OpenSlots: map[int]int{
+					evr.TeamBlue:   sc.blueSlots,
+					evr.TeamOrange: sc.orangeSlots,
+				},
+				TeamCounts: map[int]int{
+					evr.TeamBlue:   sc.blueCount,
+					evr.TeamOrange: sc.orangeCount,
+				},
+			}
+
+			teams := backfill.getPossibleTeams(candidate, match, sc.partySize)
+			for _, team := range teams {
+				for _, invalid := range invalidRoles {
+					assert.NotEqual(t, invalid, team,
+						"combat backfill must not assign role %d", invalid)
+				}
+			}
+		})
+	}
+}
+
+// TestGetPossibleTeams_ArenaMatchesOnlyBlueOrange does the same for arena.
+func TestGetPossibleTeams_ArenaMatchesOnlyBlueOrange(t *testing.T) {
+	backfill := &PostMatchmakerBackfill{}
+
+	candidate := &BackfillCandidate{
+		Mode:          evr.ModeArenaPublic,
+		TeamAlignment: evr.TeamUnassigned,
+	}
+
+	arenaScenarios := []struct {
+		name       string
+		blueSlots  int
+		orangeSlots int
+		blueCount  int
+		orangeCount int
+	}{
+		{"empty", 4, 4, 0, 0},
+		{"3v3", 1, 1, 3, 3},
+		{"full 4v4", 0, 0, 4, 4},
+		{"3v1", 1, 3, 3, 1},
+	}
+
+	for _, sc := range arenaScenarios {
+		t.Run(sc.name, func(t *testing.T) {
+			match := &BackfillMatch{
+				OpenSlots: map[int]int{
+					evr.TeamBlue:   sc.blueSlots,
+					evr.TeamOrange: sc.orangeSlots,
+				},
+				TeamCounts: map[int]int{
+					evr.TeamBlue:   sc.blueCount,
+					evr.TeamOrange: sc.orangeCount,
+				},
+			}
+
+			teams := backfill.getPossibleTeams(candidate, match, 1)
+			for _, team := range teams {
+				assert.True(t, team == evr.TeamBlue || team == evr.TeamOrange,
+					"arena backfill returned invalid role %d", team)
+			}
+		})
+	}
+}
+
+// TestFindBestBackfillMatchOptimized_CombatRoleAssignment exercises the full
+// backfill scoring path for combat and verifies the result team is always
+// blue or orange.
+func TestFindBestBackfillMatchOptimized_CombatRoleAssignment(t *testing.T) {
+	backfill := &PostMatchmakerBackfill{}
+
+	groupID := uuid.Must(uuid.NewV4())
+
+	candidate := &preparedBackfillCandidate{
+		BackfillCandidate: &BackfillCandidate{
+			Ticket:         "test-ticket",
+			Mode:           evr.ModeCombatPublic,
+			TeamAlignment:  evr.TeamUnassigned,
+			Rating:         15.0,
+			MaxRTT:         180,
+			RTTs:           map[string]int{"1.2.3.4": 50},
+			GroupID:        groupID,
+			SubmissionTime: time.Now().Add(-30 * time.Second),
+		},
+		partySize: 1,
+	}
+
+	scenarios := []struct {
+		name        string
+		blueCount   int
+		orangeCount int
+		blueSlots   int
+		orangeSlots int
+		expectNil   bool // true if no match should be found (both full)
+	}{
+		{"empty combat match", 0, 0, 5, 5, false},
+		{"3v2 combat", 3, 2, 2, 3, false},
+		{"4v5 combat", 4, 5, 1, 0, false},
+		{"5v5 full combat", 5, 5, 0, 0, true},
+	}
+
+	for _, sc := range scenarios {
+		t.Run(sc.name, func(t *testing.T) {
+			match := &preparedBackfillMatch{
+				BackfillMatch: &BackfillMatch{
+					Label: &MatchLabel{
+						Mode:      evr.ModeCombatPublic,
+						RatingMu:  15.0,
+						StartTime: time.Now().Add(-1 * time.Minute),
+						GameServer: &GameServerPresence{
+							Endpoint: evr.Endpoint{
+								ExternalIP: net.ParseIP("1.2.3.4"),
+							},
+						},
+					},
+					OpenSlots: map[int]int{
+						evr.TeamBlue:   sc.blueSlots,
+						evr.TeamOrange: sc.orangeSlots,
+					},
+					TeamCounts: map[int]int{
+						evr.TeamBlue:   sc.blueCount,
+						evr.TeamOrange: sc.orangeCount,
+					},
+					RTTs: map[string]int{"1.2.3.4": 50},
+				},
+				externalIP: "1.2.3.4",
+			}
+
+			bctx := &backfillContext{
+				settings: GlobalMatchmakingSettings{},
+				now:      time.Now(),
+			}
+
+			result := backfill.findBestBackfillMatchOptimized(candidate, []*preparedBackfillMatch{match}, bctx)
+
+			if sc.expectNil {
+				assert.Nil(t, result, "should not find a match when teams are full")
+			} else {
+				assert.NotNil(t, result, "should find a backfill match")
+				assert.True(t, result.Team == evr.TeamBlue || result.Team == evr.TeamOrange,
+					"combat backfill result.Team must be blue (0) or orange (1), got %d", result.Team)
+			}
+		})
+	}
 }
