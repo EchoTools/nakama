@@ -823,13 +823,27 @@ func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logg
 	}
 
 	// This user may use this display name.
-	// Update the EVRProfile's InGameNames map
-	profile.SetGroupDisplayName(groupID, displayName)
-
-	// Persist the updated profile (this also invalidates the ServerProfile cache)
-	if err := EVRProfileUpdate(ctx, d.nk, profile.ID(), profile); err != nil {
-		logger.Error("Error updating EVR profile with new display name", zap.String("display_name", displayName), zap.Error(err))
-		return fmt.Errorf("error updating EVR profile: %w", err)
+	// Update the EVRProfile's InGameNames map and persist with retry on version conflict.
+	// Re-load the full profile on each retry to avoid overwriting concurrent changes.
+	const maxDisplayNameRetries = 3
+	for attempt := 0; attempt < maxDisplayNameRetries; attempt++ {
+		if attempt > 0 {
+			var err error
+			profile, err = EVRProfileLoad(ctx, d.nk, profile.ID())
+			if err != nil {
+				return fmt.Errorf("error reloading EVR profile for retry: %w", err)
+			}
+		}
+		profile.SetGroupDisplayName(groupID, displayName)
+		err := EVRProfileUpdate(ctx, d.nk, profile.ID(), profile)
+		if err == nil {
+			break
+		}
+		if !isVersionConflictError(err) || attempt == maxDisplayNameRetries-1 {
+			logger.Error("Error updating EVR profile with new display name", zap.String("display_name", displayName), zap.Error(err))
+			return fmt.Errorf("error updating EVR profile: %w", err)
+		}
+		logger.Warn("Version conflict updating display name, retrying", zap.Int("attempt", attempt+1), zap.String("display_name", displayName))
 	}
 
 	// Update the display name history as well

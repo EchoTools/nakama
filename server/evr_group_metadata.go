@@ -144,7 +144,28 @@ func GroupMetadataLoad(ctx context.Context, db *sql.DB, groupID string) (*GroupM
 }
 
 func GroupMetadataSave(ctx context.Context, db *sql.DB, groupID string, metadata *GroupMetadata) error {
-	// Save the account.
+	if metadata == nil {
+		return status.Error(codes.InvalidArgument, "metadata must not be nil")
+	}
+
+	// Load existing metadata to preserve immutable fields (GuildID, OwnerID).
+	// These fields are set during group creation and ownership transfer and
+	// must never be overwritten by a caller passing stale or zeroed values.
+	existing, err := GroupMetadataLoad(ctx, db, groupID)
+	if err != nil {
+		return fmt.Errorf("error loading existing metadata before save: %w", err)
+	}
+
+	if metadata.GuildID == "" {
+		metadata.GuildID = existing.GuildID
+	} else if existing.GuildID != "" && metadata.GuildID != existing.GuildID {
+		return fmt.Errorf("cannot change guild_id (have %q, got %q)", existing.GuildID, metadata.GuildID)
+	}
+
+	if metadata.OwnerID == "" {
+		metadata.OwnerID = existing.OwnerID
+	}
+
 	query := "UPDATE groups SET update_time = now(), metadata = $1 WHERE id = $2"
 	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {
