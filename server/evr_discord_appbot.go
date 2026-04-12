@@ -424,6 +424,16 @@ var (
 					Description: "Match ID or Spark link",
 					Required:    true,
 				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "role",
+					Description: "Join as player or spectator",
+					Required:    false,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{Name: "Player", Value: "player"},
+						{Name: "Spectator", Value: "spectator"},
+					},
+				},
 			},
 		},
 		{
@@ -928,6 +938,16 @@ var (
 						}
 						return choices
 					}(),
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "role",
+					Description: "Join as player or spectator (ignored for social lobbies)",
+					Required:    false,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{Name: "Player", Value: "player"},
+						{Name: "Spectator", Value: "spectator"},
+					},
 				},
 			},
 		},
@@ -2137,11 +2157,26 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if user == nil {
 				return nil
 			}
-			if len(i.ApplicationCommandData().Options) == 0 {
+			options := i.ApplicationCommandData().Options
+			if len(options) == 0 {
 				return errors.New("no match provided")
 			}
 
-			matchIDStr := i.ApplicationCommandData().Options[0].StringValue()
+			var matchIDStr string
+			role := AnyTeam
+			for _, o := range options {
+				switch o.Name {
+				case "match-id":
+					matchIDStr = o.StringValue()
+				case "role":
+					r, err := parseRoleOption(o.StringValue())
+					if err != nil {
+						return err
+					}
+					role = r
+				}
+			}
+
 			matchIDStr = MatchUUIDPattern.FindString(strings.ToLower(matchIDStr))
 			if matchIDStr == "" {
 				return fmt.Errorf("invalid match ID: %s", matchIDStr)
@@ -2153,16 +2188,26 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			// Make sure the match exists
-			if _, err := MatchLabelByID(ctx, nk, matchID); err != nil {
+			label, err := MatchLabelByID(ctx, nk, matchID)
+			if err != nil {
 				return fmt.Errorf("failed to get match: %w", err)
 			}
 
+			// Ignore role for social lobbies
+			if label.Mode == evr.ModeSocialPublic || label.Mode == evr.ModeSocialPrivate || label.Mode == evr.ModeSocialNPE {
+				role = AnyTeam
+			}
+
 			// Set the next match ID
-			if err := SetNextMatchID(ctx, nk, userID, matchID, AnyTeam, ""); err != nil {
+			if err := SetNextMatchID(ctx, nk, userID, matchID, role, ""); err != nil {
 				return fmt.Errorf("failed to set next match ID: %w", err)
 			}
 
-			return editInteractionResponse(s, i, fmt.Sprintf("Next match set to `%s`", matchID))
+			roleStr := ""
+			if role != AnyTeam {
+				roleStr = fmt.Sprintf(" as %s", role.String())
+			}
+			return editInteractionResponse(s, i, fmt.Sprintf("Next match set to `%s`%s", matchID, roleStr))
 		},
 		"throw-settings": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
 			settings, err := GamePauseSettingsLoad(ctx, nk, userIDStr)
@@ -2374,6 +2419,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			mode := evr.ModeArenaPrivate
 			region := "default"
 			level := evr.LevelUnspecified
+			role := AnyTeam
 			for _, o := range options {
 				switch o.Name {
 				case "region":
@@ -2382,6 +2428,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					mode = evr.ToSymbol(o.StringValue())
 				case "level":
 					level = evr.ToSymbol(o.StringValue())
+				case "role":
+					r, err := parseRoleOption(o.StringValue())
+					if err != nil {
+						return err
+					}
+					role = r
 				}
 			}
 
@@ -2389,6 +2441,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("invalid mode `%s`", mode)
 			} else if level != evr.LevelUnspecified && !slices.Contains(levels, level) {
 				return fmt.Errorf("invalid level `%s`", level)
+			}
+
+			// Ignore role for social lobbies
+			if mode == evr.ModeSocialPublic || mode == evr.ModeSocialPrivate || mode == evr.ModeSocialNPE {
+				role = AnyTeam
 			}
 
 			startTime := time.Now().Add(90 * time.Second)
@@ -2399,6 +2456,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				"region":    region,
 				"mode":      mode.String(),
 				"level":     level.String(),
+				"role":      role.String(),
 				"startTime": startTime,
 			})
 
@@ -2406,7 +2464,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			// so we can set up team alignments and reservations
 			partyUserIDs := getPartyMembersForUser(ctx, nk, d.pipeline.partyRegistry, userID)
 
-			label, rttMs, err := d.handleCreateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime, partyUserIDs)
+			label, rttMs, err := d.handleCreateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime, partyUserIDs, role)
 			if err != nil {
 				// Check if this is a region fallback error
 				var regionErr ErrMatchmakingNoServersInRegion
@@ -2420,7 +2478,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			// Set next_match_id for all party members so they join together
 			failedMembers := make([]string, 0)
 			for _, memberUserID := range partyUserIDs {
-				if err := SetNextMatchID(ctx, nk, memberUserID, label.ID, AnyTeam, ""); err != nil {
+				if err := SetNextMatchID(ctx, nk, memberUserID, label.ID, role, ""); err != nil {
 					logger.Error("Failed to set next match ID for party member", zap.String("memberUserID", memberUserID), zap.Error(err))
 					failedMembers = append(failedMembers, memberUserID)
 				}
@@ -3901,6 +3959,20 @@ func simpleInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCre
 			Content: content,
 		},
 	})
+}
+
+// parseRoleOption converts a "player"/"spectator" string from a Discord
+// command option into the corresponding TeamIndex. Returns an error for
+// unrecognised values.
+func parseRoleOption(value string) (TeamIndex, error) {
+	switch strings.ToLower(value) {
+	case "player":
+		return AnyTeam, nil
+	case "spectator":
+		return Spectator, nil
+	default:
+		return AnyTeam, fmt.Errorf("invalid role `%s`: must be `player` or `spectator`", value)
+	}
 }
 
 func editInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreate, content string) error {
