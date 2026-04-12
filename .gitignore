@@ -733,3 +733,4 @@ local.yml
 _local/
 BUGS.md
 tools/purge-docker-ips/purge-docker-ips
+.worktrees/
