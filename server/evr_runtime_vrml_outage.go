@@ -19,6 +19,13 @@ func VRMLOutageModeEnabled() bool {
 	return false
 }
 
+// shouldSkipVRMLWork returns true when the VRML worker loop should skip
+// processing and avoid making any HTTP requests to VRML. Called on every
+// iteration so that dynamically enabling outage mode takes effect immediately.
+func shouldSkipVRMLWork() bool {
+	return VRMLOutageModeEnabled()
+}
+
 // IsVRMLOutageError identifies likely network/service outage failures from VRML calls.
 func IsVRMLOutageError(err error) bool {
 	if err == nil {
