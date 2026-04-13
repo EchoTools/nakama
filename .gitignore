@@ -734,3 +734,6 @@ _local/
 BUGS.md
 tools/purge-docker-ips/purge-docker-ips
 .worktrees/
+.claude-line/
+*.lock
+.mcp.json
