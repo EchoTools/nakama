@@ -6,11 +6,12 @@ Provide a release tag (e.g. `v3.27.2-evr.263`) and optionally a base tag. If no 
 
 ## Instructions
 
-You are generating release notes for an EchoVR game server called EchoRelay. The audience is the EchoVR community on Discord. The server is a custom backend that replaces the defunct official servers.
+You are generating release notes for the EchoVR game server (nevr-service / nakama). The audience is the EchoVR community on Discord. The server is a custom backend that replaces the defunct official servers.
 
 ### Step 1: Gather commits
 
 Run:
+
 ```
 git log <base_tag>..<release_tag> --oneline --no-merges
 ```
@@ -23,14 +24,14 @@ For any commit that isn't self-explanatory from its one-line message, read the f
 
 Assign each meaningful commit to one or more audience categories:
 
-| Category | Who sees it | Description |
-|----------|-------------|-------------|
-| `player` | All players | Gameplay fixes, matchmaking improvements, party system changes, crash fixes, connection improvements |
-| `enforcer` | In-game moderators/enforcers | In-game moderation tools, kick/smite/ban actions, enforcement UI, in-match moderation features |
-| `operator` | Guild owners, global operators, moderators | Server management, guild management, Discord bot admin features, enforcement configuration, operator dashboards |
-| `app-developer` | App/integration developers | API changes, RPC endpoints, webhook changes, integration points, SDK-facing changes |
-| `competitive` | Comp server hosts, allocators, coordinators | Changes to echo_arena_private and echo_combat_private modes ONLY. Private match hosting, private match configuration, server allocation for private matches, team settings in private matches. Do NOT include public matchmaking (echo_arena, echo_combat) changes here — those are `player` category |
-| `echotools` | EchoTools core developers | Internal refactors, binary protocol changes, migration changes, code cleanup, architecture, infrastructure |
+| Category        | Who sees it                                 | Description                                                                                                                                                                                                                                                                                           |
+| --------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `player`        | All players                                 | Gameplay fixes, matchmaking improvements, party system changes, crash fixes, connection improvements                                                                                                                                                                                                  |
+| `enforcer`      | In-game moderators/enforcers                | In-game moderation tools, kick/smite/ban actions, enforcement UI, in-match moderation features                                                                                                                                                                                                        |
+| `operator`      | Guild owners, global operators, moderators  | Server management, guild management, Discord bot admin features, enforcement configuration, operator dashboards                                                                                                                                                                                       |
+| `app-developer` | App/integration developers                  | API changes, RPC endpoints, webhook changes, integration points, SDK-facing changes                                                                                                                                                                                                                   |
+| `competitive`   | Comp server hosts, allocators, coordinators | Changes to echo_arena_private and echo_combat_private modes ONLY. Private match hosting, private match configuration, server allocation for private matches, team settings in private matches. Do NOT include public matchmaking (echo_arena, echo_combat) changes here — those are `player` category |
+| `echotools`     | EchoTools core developers                   | Internal refactors, binary protocol changes, migration changes, code cleanup, architecture, infrastructure                                                                                                                                                                                            |
 
 A single commit can belong to multiple categories.
 
@@ -39,12 +40,14 @@ A single commit can belong to multiple categories.
 For each change, write a SHORT (one line) player-friendly description. Do NOT use commit-message language. Translate technical changes into what the player experiences.
 
 Examples:
+
 - `fix: matchmaker reservation system broken by wrong property key` → "Fixed a bug where matchmaking could fail to find matches"
 - `fix: party members don't follow leader into social lobbies` → "Fixed party members not following the party leader into lobbies"
 - `feat: add suspension enforcement system` → "Added suspension enforcement system"
 - `fix: KickPlayerAllowPrivates defaults to false instead of true` → "Players can no longer join private matches while kicked (previously the default allowed it)"
 
 Do NOT include:
+
 - Commit hashes
 - File names or function names
 - Technical jargon about binary formats, protocol rewrites, etc. (except in echotools/app-developer notes)
@@ -213,15 +216,15 @@ Present all seven release notes clearly separated with headers indicating which 
 
 After presenting all release notes, ask the user which ones they want to post. List the channels and let them confirm:
 
-| # | Channel | Audience | Env Var |
-|---|---------|----------|---------|
-| 1 | #release-notes | Players | `WEBHOOK_RELEASE_NOTES` |
-| 2 | #echotools-releases | EchoTools devs | `WEBHOOK_ECHOTOOLS_RELEASES` |
-| 3 | #app-dev-releases | App developers | `WEBHOOK_APP_DEV_RELEASES` |
-| 4 | #operator-releases | Guild owners/operators/mods | `WEBHOOK_OPERATOR_RELEASES` |
-| 5 | #competitive-releases | Comp hosts/allocators/coordinators | `WEBHOOK_COMPETITIVE_RELEASES` |
-| 6 | #enforcer-updates | In-game mods/enforcers | `WEBHOOK_ENFORCER_UPDATES` |
-| 7 | #full-changelog | Detailed changelog (all categories) | `WEBHOOK_FULL_CHANGELOG` |
+| #   | Channel               | Audience                            | Env Var                        |
+| --- | --------------------- | ----------------------------------- | ------------------------------ |
+| 1   | #release-notes        | Players                             | `WEBHOOK_RELEASE_NOTES`        |
+| 2   | #echotools-releases   | EchoTools devs                      | `WEBHOOK_ECHOTOOLS_RELEASES`   |
+| 3   | #app-dev-releases     | App developers                      | `WEBHOOK_APP_DEV_RELEASES`     |
+| 4   | #operator-releases    | Guild owners/operators/mods         | `WEBHOOK_OPERATOR_RELEASES`    |
+| 5   | #competitive-releases | Comp hosts/allocators/coordinators  | `WEBHOOK_COMPETITIVE_RELEASES` |
+| 6   | #enforcer-updates     | In-game mods/enforcers              | `WEBHOOK_ENFORCER_UPDATES`     |
+| 7   | #full-changelog       | Detailed changelog (all categories) | `WEBHOOK_FULL_CHANGELOG`       |
 
 Webhook URLs are stored in `.env` at the project root (gitignored).
 
