@@ -96,15 +96,18 @@ func (v *VRMLScanQueue) Start() error {
 
 	go func() {
 		vg := vrmlgo.New("")
-		seasons, err := vg.GameSeasons(VRMLEchoArenaShortName)
-		if err != nil {
-			v.logger.WithField("error", err).Error("Failed to get seasons")
-		}
-		v.seasons = seasons
 
-		if err := v.cachePlayerLists(); err != nil {
-			v.logger.WithField("error", err).Error("Failed to cache player lists")
-			return
+		if !shouldSkipVRMLWork() {
+			seasons, err := vg.GameSeasons(VRMLEchoArenaShortName)
+			if err != nil {
+				v.logger.WithField("error", err).Error("Failed to get seasons")
+			}
+			v.seasons = seasons
+
+			if err := v.cachePlayerLists(); err != nil {
+				v.logger.WithField("error", err).Error("Failed to cache player lists")
+				return
+			}
 		}
 
 		vg = v.newSession("")
@@ -114,6 +117,10 @@ func (v *VRMLScanQueue) Start() error {
 			case <-v.ctx.Done():
 				return
 			case <-time.After(1 * time.Second):
+			}
+
+			if shouldSkipVRMLWork() {
+				continue
 			}
 
 			entry, err := v.dequeue()
