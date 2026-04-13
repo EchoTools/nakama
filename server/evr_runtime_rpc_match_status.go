@@ -16,6 +16,7 @@ type MatchStatusRequest struct {
 
 // MatchStatusResponse represents the response with match status information
 type MatchStatusResponse struct {
+	Version     string      `json:"version"`
 	MatchID     string      `json:"match_id"`
 	Found       bool        `json:"found"`
 	MatchLabel  *MatchLabel `json:"match_label,omitempty"`
@@ -24,6 +25,8 @@ type MatchStatusResponse struct {
 }
 
 func MatchStatusRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	version, _ := ctx.Value(runtime.RUNTIME_CTX_VERSION).(string)
+
 	var request MatchStatusRequest
 	if payload != "" {
 		if err := json.Unmarshal([]byte(payload), &request); err != nil {
@@ -53,6 +56,7 @@ func MatchStatusRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	if err != nil {
 		logger.Error("Failed to get match %s: %v", request.MatchID, err)
 		response := MatchStatusResponse{
+			Version: version,
 			MatchID: request.MatchID,
 			Found:   false,
 			Error:   "failed to query match",
@@ -62,6 +66,7 @@ func MatchStatusRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	}
 
 	response := MatchStatusResponse{
+		Version: version,
 		MatchID: request.MatchID,
 		Found:   false,
 	}
