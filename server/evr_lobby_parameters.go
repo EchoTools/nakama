@@ -183,6 +183,13 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		return nil, fmt.Errorf("failed to load join directive: %w", err)
 	}
 
+	if joinDirective != nil {
+		logger.Info("Loaded join directive",
+			zap.String("match_id", joinDirective.MatchID.String()),
+			zap.String("role", joinDirective.Role),
+			zap.String("host_discord_id", joinDirective.HostDiscordID))
+	}
+
 	if userSettings.IsMatchLocked() {
 		if joinDirective == nil {
 			joinDirective = &JoinDirective{}
@@ -216,7 +223,13 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 
 			nextMatchID = joinDirective.MatchID
 
-			entrantRole = resolveDirectiveRole(entrantRole, joinDirective)
+			resolvedRole := resolveDirectiveRole(entrantRole, joinDirective)
+			logger.Info("Resolved join directive role",
+				zap.Int("client_role", entrantRole),
+				zap.Int("resolved_role", resolvedRole),
+				zap.String("directive_role", joinDirective.Role),
+				zap.String("match_id", joinDirective.MatchID.String()))
+			entrantRole = resolvedRole
 		}
 
 		if !userSettings.IsMatchLocked() {
@@ -225,6 +238,8 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 				defer cancel()
 				if err := DeleteJoinDirective(ctxCleanup, p.nk, userID); err != nil {
 					logger.Warn("Failed to delete join directive", zap.Error(err))
+				} else {
+					logger.Debug("Deleted join directive")
 				}
 			}()
 		}
