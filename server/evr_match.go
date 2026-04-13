@@ -245,7 +245,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		"uid":      joinPresence.GetUserId(),
 		"username": joinPresence.GetUsername()})
 
-	if joinPresence.GetSessionId() == state.GameServer.SessionID.String() {
+	if state.GameServer != nil && joinPresence.GetSessionId() == state.GameServer.SessionID.String() {
 
 		logger.Debug("Broadcaster joining the match.")
 		state.server = joinPresence
@@ -273,7 +273,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	if serviceSettings != nil {
 		enableEarlyQuitPenalty = serviceSettings.Matchmaking.EnableEarlyQuitPenalty
 	}
-	if enableEarlyQuitPenalty && !meta.Presence.IsSpectator() {
+	if enableEarlyQuitPenalty && !meta.Presence.IsSpectator() && nk != nil {
 		eqConfig := NewEarlyQuitPlayerState()
 		if err := StorableRead(ctx, nk, joinPresence.GetUserId(), eqConfig, true); err != nil {
 			logger.Debug("Failed to load early quit config for logging", zap.Error(err))
@@ -476,28 +476,6 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	} else if slots < len(meta.Presences()) {
 		restoreReconnectReservation()
 		return state, false, ErrJoinRejectReasonLobbyFull.Error()
-	}
-
-	// Enforce team size limits for public arena matches BEFORE adding player to state
-	// This prevents broadcasting an invalid state that exceeds the team capacity
-	if state.Mode == evr.ModeArenaPublic {
-		maxTeamSize := DefaultPublicArenaTeamSize // Always 4 for public arena
-		targetTeam := meta.Presence.RoleAlignment
-		currentCount := state.RoleCount(targetTeam)
-
-		// Check if adding this player would exceed the limit
-		if currentCount >= maxTeamSize {
-			restoreReconnectReservation()
-			logger.WithFields(map[string]interface{}{
-				"blue":          state.RoleCount(evr.TeamBlue),
-				"orange":        state.RoleCount(evr.TeamOrange),
-				"target_team":   targetTeam,
-				"max_team_size": maxTeamSize,
-				"team_size":     state.TeamSize,
-			}).Warn("Rejecting join: team size limit would be exceeded for public arena match.")
-
-			return state, false, ErrJoinRejectReasonLobbyFull.Error()
-		}
 	}
 
 	// Add reservations to the reservation map
