@@ -334,8 +334,8 @@ func (d *DiscordAppBot) handleReportServerIssue(ctx context.Context, logger runt
 	embed := d.createServerInfoEmbed(data)
 
 	// Create buttons with match context encoded in CustomID
-	// Format: report_server_issue:<issue_type>:<matchID>:<serverIP>:<serverPort>:<regionCode>
-	serverContext := fmt.Sprintf("%s:%s:%d:%s", data.MatchID, data.ServerHostIP, data.ServerHostPort, data.RegionCode)
+	// Format: rsi:<issue_type>:<matchUUID>:<serverIP>:<serverPort>:<regionCode>
+	serverContext := buildServerIssueContext(data.MatchID, data.ServerHostIP, data.ServerHostPort, data.RegionCode)
 
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
@@ -343,13 +343,13 @@ func (d *DiscordAppBot) handleReportServerIssue(ctx context.Context, logger runt
 				&discordgo.Button{
 					Label:    "Report Server Lag",
 					Style:    discordgo.DangerButton,
-					CustomID: fmt.Sprintf("report_server_issue:lag:%s", serverContext),
+					CustomID: fmt.Sprintf("rsi:lag:%s", serverContext),
 					Emoji:    &discordgo.ComponentEmoji{Name: "⚡"},
 				},
 				&discordgo.Button{
 					Label:    "Report Other Issue...",
 					Style:    discordgo.SecondaryButton,
-					CustomID: fmt.Sprintf("report_server_issue:other:%s", serverContext),
+					CustomID: fmt.Sprintf("rsi:other:%s", serverContext),
 					Emoji:    &discordgo.ComponentEmoji{Name: "📝"},
 				},
 			},
@@ -426,6 +426,30 @@ func (d *DiscordAppBot) createServerInfoEmbed(data *WhereAmIData) *discordgo.Mes
 	}
 
 	return embed
+}
+
+// buildServerIssueContext constructs the colon-delimited context string for
+// server issue button/modal custom_ids. It strips the node name from the match
+// ID (keeping only the UUID) to stay within Discord's 100-char custom_id limit.
+// If the resulting context would still push a custom_id over 100 chars (e.g.
+// IPv6), the region code is omitted.
+func buildServerIssueContext(matchID, serverIP string, serverPort uint16, regionCode string) string {
+	// Strip the node name suffix from the match ID (e.g. "uuid.nakama-0" -> "uuid")
+	matchUUID := matchID
+	if idx := strings.IndexByte(matchID, '.'); idx != -1 {
+		matchUUID = matchID[:idx]
+	}
+
+	ctx := fmt.Sprintf("%s:%s:%d:%s", matchUUID, serverIP, serverPort, regionCode)
+
+	// Longest prefix is "rsi:other:" (10 chars). Ensure total stays <= 100.
+	const maxPrefix = 10 // len("rsi:other:")
+	if maxPrefix+len(ctx) > 100 {
+		// Drop region code to fit
+		ctx = fmt.Sprintf("%s:%s:%d", matchUUID, serverIP, serverPort)
+	}
+
+	return ctx
 }
 
 // handleReportServerIssueLag handles the "Report Server Lag" button click
@@ -543,7 +567,7 @@ func (d *DiscordAppBot) handleReportServerIssueOther(_ context.Context, _ runtim
 	modal := &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
-			CustomID: fmt.Sprintf("server_issue_modal:other:%s", serverContext),
+			CustomID: fmt.Sprintf("sim:other:%s", serverContext),
 			Title:    "Report Server Issue",
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{
@@ -637,7 +661,7 @@ func (d *DiscordAppBot) handleServerIssueTypeSelection(_ context.Context, logger
 	modal := &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
-			CustomID: fmt.Sprintf("server_issue_modal:%s:%s", issueType, matchID),
+			CustomID: fmt.Sprintf("sim:%s:%s", issueType, matchID),
 			Title:    "Report Server Issue",
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{

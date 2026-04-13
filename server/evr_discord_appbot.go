@@ -3809,10 +3809,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					})
 				}
 
-			case "server_issue_modal":
+			case "sim":
 				// Parse the value which contains issue type and server context
-				// Format: "other:matchID:serverIP:regionCode" (from Report Other button)
-				// or legacy format: "matchID" (old modal format)
+				// Format: "other:matchUUID:serverIP:serverPort:regionCode"
 				parts := strings.SplitN(value, ":", 2)
 				issueType := ""
 				serverContext := value

@@ -517,8 +517,8 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 			},
 		})
 
-	case "report_server_issue":
-		// Parse value format: "<issueType>:<matchID>:<serverIP>:<regionCode>"
+	case "rsi":
+		// Parse value format: "<issueType>:<matchUUID>:<serverIP>:<serverPort>:<regionCode>"
 		issueType, serverContext, _ := strings.Cut(value, ":")
 		switch issueType {
 		case "lag":
