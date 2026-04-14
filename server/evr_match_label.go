@@ -481,6 +481,9 @@ func (s *MatchLabel) rebuildCache() {
 			}
 		}
 		if p.MatchmakingAt != nil {
+			if s.joinTimestamps == nil {
+				s.joinTimestamps = make(map[string]time.Time)
+			}
 			s.joinTimestamps[p.SessionID.String()] = *p.MatchmakingAt
 		}
 		switch s.Mode {
