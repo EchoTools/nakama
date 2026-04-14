@@ -778,7 +778,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		isProtectedModerator := isModerator && hasGreenInDivisions
 
 		// If the player account is less than 7 days old, then assign the "green" division to the player.
-		if time.Since(params.profile.account.User.CreateTime.AsTime()) < time.Duration(serviceSettings.Matchmaking.GreenDivisionMaxAccountAgeDays)*24*time.Hour {
+		if params.profile.account != nil && params.profile.account.User != nil && params.profile.account.User.CreateTime != nil && time.Since(params.profile.account.User.CreateTime.AsTime()) < time.Duration(serviceSettings.Matchmaking.GreenDivisionMaxAccountAgeDays)*24*time.Hour {
 			if !hasGreenInDivisions {
 				settings.Divisions = append(settings.Divisions, "green")
 				updated = true

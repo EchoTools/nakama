@@ -124,10 +124,13 @@ func (s *SocialAuthHandler) githubHttpCallbackHandler(w http.ResponseWriter, r *
 	// Set the authenticated user cookie
 	setRefreshTokenCookie(w, token)
 
-	// If there was a redirect path specified, redirect there
+	// If there was a redirect path specified, redirect there (only allow relative paths)
 	if redirectPath := queryParams.Get("redirect"); redirectPath != "" {
-		http.Redirect(w, r, redirectPath, http.StatusFound)
-		return
+		if len(redirectPath) > 0 && redirectPath[0] == '/' && (len(redirectPath) < 2 || redirectPath[1] != '/') {
+			http.Redirect(w, r, redirectPath, http.StatusFound)
+			return
+		}
+		// Reject absolute URLs and protocol-relative URLs to prevent open redirect
 	}
 
 	// Return the Nakama user ID
