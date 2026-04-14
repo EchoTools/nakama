@@ -85,6 +85,7 @@ func (s *ConsoleServer) AddUser(ctx context.Context, in *console.AddUserRequest)
 			if resp, err := s.httpClient.Do(req); err != nil {
 				s.logger.Debug("Failed to add newsletter subscription.", zap.Error(err))
 			} else {
+				resp.Body.Close()
 				s.logger.Debug("Added newsletter subscription.", zap.Int("status", resp.StatusCode))
 			}
 		}
