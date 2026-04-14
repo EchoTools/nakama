@@ -26,6 +26,24 @@ var voipLoudnessLastWrite sync.Map // map[string]time.Time
 
 const voipLoudnessWriteInterval = 30 * time.Second
 
+func init() {
+	// Periodically purge stale entries from voipLoudnessLastWrite so the map
+	// does not grow without bound over the lifetime of the process.
+	go func() {
+		ticker := time.NewTicker(voipLoudnessWriteInterval * 2)
+		defer ticker.Stop()
+		for range ticker.C {
+			cutoff := time.Now().Add(-voipLoudnessWriteInterval * 2)
+			voipLoudnessLastWrite.Range(func(k, v any) bool {
+				if t, ok := v.(time.Time); ok && t.Before(cutoff) {
+					voipLoudnessLastWrite.Delete(k)
+				}
+				return true
+			})
+		}
+	}()
+}
+
 var _ = Event(&EventRemoteLogSet{})
 
 type EventRemoteLogSet struct {
