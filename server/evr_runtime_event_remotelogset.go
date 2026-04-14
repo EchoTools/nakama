@@ -84,6 +84,11 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 		"evrid":    s.XPID.String(),
 	})
 
+	// Drop unauthenticated events (zero UUID = client never completed login).
+	if s.UserID == uuid.Nil.String() {
+		return nil
+	}
+
 	// Skip processing for bot users (Practice_AI matches).
 	if IsBotUserID(s.UserID) {
 		logger.Debug("Skipping remote log processing for bot user")
