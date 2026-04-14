@@ -2121,9 +2121,6 @@ func (rp *RuntimeProviderLua) StorageIndexFilter(ctx context.Context, indexName 
 	luaCtx := NewRuntimeLuaContext(r.vm, r.node, r.version, r.luaEnv, RuntimeExecutionModeStorageIndexFilter, nil, nil, 0, "", "", nil, "", "", "", "")
 
 	//table, err := storageOpWritesToTable(r.vm, storageWrites)
-	if err != nil {
-		return false, fmt.Errorf("Error running runtime Storage Index Filter hook for %q index: %v", indexName, err)
-	}
 
 	writeTable := r.vm.CreateTable(0, 7)
 	writeTable.RawSetString("key", lua.LString(write.Object.Key))

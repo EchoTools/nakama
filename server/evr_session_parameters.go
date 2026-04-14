@@ -151,5 +151,9 @@ func LoadParams(ctx context.Context) (parameters *SessionParameters, found bool)
 	if !ok {
 		return nil, false
 	}
-	return params.Load(), true
+	p := params.Load()
+	if p == nil {
+		return nil, false
+	}
+	return p, true
 }

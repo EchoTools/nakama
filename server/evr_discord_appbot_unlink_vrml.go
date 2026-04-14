@@ -86,7 +86,7 @@ func (d *DiscordAppBot) handleUnlinkVRML(ctx context.Context, logger runtime.Log
 		vrmlUserID = identifier
 		ownerID, err := GetVRMLAccountOwner(ctx, nk, vrmlUserID)
 		if err != nil {
-			return editResponseFn("Error looking up VRML user ID: %w", err)
+			return editResponseFn("Error looking up VRML user ID: %v", err)
 		}
 		if ownerID != "" {
 			targetUserID = ownerID
@@ -107,7 +107,7 @@ func (d *DiscordAppBot) handleUnlinkVRML(ctx context.Context, logger runtime.Log
 			vrmlUserID = vrmlPlayer.User.UserID
 			ownerID, err := GetVRMLAccountOwner(ctx, nk, vrmlUserID)
 			if err != nil {
-				return editResponseFn("Error looking up VRML account owner: %w", err)
+				return editResponseFn("Error looking up VRML account owner: %v", err)
 			}
 			if ownerID == "" {
 				return editResponseFn("VRML player %s (%s) is not linked to any user", vrmlPlayer.ThisGame.PlayerName, identifier)
@@ -124,7 +124,7 @@ func (d *DiscordAppBot) handleUnlinkVRML(ctx context.Context, logger runtime.Log
 	// Load the target user's profile to get VRML data
 	profile, err := EVRProfileLoad(ctx, nk, targetUserID)
 	if err != nil {
-		return editResponseFn("Failed to load profile for user: %w", err)
+		return editResponseFn("Failed to load profile for user: %v", err)
 	}
 
 	vrmlUserID = profile.VRMLUserID()
@@ -151,7 +151,7 @@ func (d *DiscordAppBot) handleUnlinkVRML(ctx context.Context, logger runtime.Log
 	// Get account creation time
 	account, err := nk.AccountGetId(ctx, targetUserID)
 	if err != nil {
-		return editResponseFn("Failed to get account: %w", err)
+		return editResponseFn("Failed to get account: %v", err)
 	}
 	linkDate := account.GetUser().GetCreateTime()
 

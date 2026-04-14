@@ -845,7 +845,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 					_nk, ok := nk.(*RuntimeGoNakamaModule)
 					if !ok {
 						logger.Warn("nk is not *RuntimeGoNakamaModule, skipping early quit penalty")
-						break
+						continue
 					}
 					if err := StorableRead(ctx, nk, mp.GetUserId(), eqconfig, true); err != nil {
 						logger.WithField("error", err).Warn("Failed to load early quitter config")

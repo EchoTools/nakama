@@ -3784,7 +3784,7 @@ func (n *RuntimeJavascriptNakamaModule) notificationSend(r *goja.Runtime) func(g
 		}
 
 		if err := NotificationSend(n.ctx, n.logger, n.db, n.tracker, n.router, notifications); err != nil {
-			panic(fmt.Sprintf("failed to send notifications: %v", err))
+			panic(r.NewGoError(fmt.Errorf("failed to send notifications: %w", err)))
 		}
 
 		return goja.Undefined()
@@ -4253,7 +4253,7 @@ func (n *RuntimeJavascriptNakamaModule) notificationsDeleteId(r *goja.Runtime) f
 		}
 
 		if err := NotificationsDeleteId(n.ctx, n.logger, n.db, uid, notifIDsArray...); err != nil {
-			panic(r.NewGoError(fmt.Errorf("failed to get notifications by id: %w", err)))
+			panic(r.NewGoError(fmt.Errorf("failed to delete notifications by id: %w", err)))
 		}
 
 		return goja.Undefined()
@@ -6597,7 +6597,7 @@ func (n *RuntimeJavascriptNakamaModule) tournamentAddAttempt(r *goja.Runtime) fu
 		}
 
 		if err := TournamentAddAttempt(n.ctx, n.logger, n.db, n.leaderboardCache, id, ownerID, count); err != nil {
-			panic(r.NewTypeError("error adding tournament attempts: %w", err))
+			panic(r.NewGoError(fmt.Errorf("error adding tournament attempts: %w", err)))
 		}
 
 		return goja.Undefined()

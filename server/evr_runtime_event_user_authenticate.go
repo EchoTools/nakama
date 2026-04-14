@@ -130,7 +130,7 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 			}
 
 			if len(altNames) == 0 || accountMap[userID] == nil {
-				logger.WithField("error", err).Error("failed to get alternate accounts")
+				logger.WithField("user_id", userID).Warn("no alternate accounts found or user account missing from map")
 				return
 			}
 

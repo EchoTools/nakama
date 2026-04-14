@@ -316,9 +316,16 @@ func ParsePacket(data []byte) ([]Message, error) {
 	}
 
 	// Split the packet into individual messages.
+	// bytes.Split prepends an empty chunk before the first MessageMarker, so the
+	// actual message count is len(chunks)-1.  Guard against the degenerate case
+	// where data is empty (len(chunks)==1) before subtracting.
 	chunks := bytes.Split(data, MessageMarker)
-	if len(chunks) > MaxMessagesPerPacket {
-		return nil, fmt.Errorf("%w: too many messages in packet (%d, max %d)", ErrInvalidPacket, len(chunks), MaxMessagesPerPacket)
+	messageCount := len(chunks)
+	if messageCount > 0 {
+		messageCount-- // strip leading empty chunk produced by the opening marker
+	}
+	if messageCount > MaxMessagesPerPacket {
+		return nil, fmt.Errorf("%w: too many messages in packet (%d, max %d)", ErrInvalidPacket, messageCount, MaxMessagesPerPacket)
 	}
 
 	messages := make([]Message, 0, len(chunks))
