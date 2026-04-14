@@ -114,6 +114,7 @@ func (s *EasyStream) StreamByte(value *byte) error {
 
 const MaxStreamBytesSize = MaxMessageLength  // byte streams can't exceed a single message
 const MaxStreamStringLength = 4 * 1024      // 4KB max for individual strings
+const MaxJSONDecompressedSize = 512 * 1024  // 512KB max decompressed JSON (covers large profiles)
 
 // StreamBytes reads or writes bytes to the stream based on the mode of the EasyStream.
 // If the mode is ReadMode, it reads bytes from the stream and stores them in the provided data slice.
@@ -386,8 +387,11 @@ func (s *EasyStream) StreamJson(data interface{}, isNullTerminated bool, compres
 			if err != nil {
 				return err
 			}
-			io.Copy(&buf, r)
+			n, _ := io.Copy(&buf, io.LimitReader(r, int64(MaxJSONDecompressedSize)+1))
 			r.Close()
+			if n > int64(MaxJSONDecompressedSize) {
+				return fmt.Errorf("decompressed JSON exceeds maximum size %d", MaxJSONDecompressedSize)
+			}
 		case ZstdCompression:
 			l32 := uint32(0)
 			if err = binary.Read(s.r, binary.LittleEndian, &l32); err != nil {
@@ -397,8 +401,11 @@ func (s *EasyStream) StreamJson(data interface{}, isNullTerminated bool, compres
 			if err != nil {
 				return err
 			}
-			io.Copy(&buf, r)
+			n, _ := io.Copy(&buf, io.LimitReader(r, int64(MaxJSONDecompressedSize)+1))
 			r.Close()
+			if n > int64(MaxJSONDecompressedSize) {
+				return fmt.Errorf("decompressed JSON exceeds maximum size %d", MaxJSONDecompressedSize)
+			}
 		default:
 			return errInvalidCompressionMode
 		}
@@ -477,11 +484,11 @@ func (s *EasyStream) StreamJSONRawMessage(data *json.RawMessage, isNullTerminate
 			if err != nil {
 				return err
 			}
-			_, err = io.Copy(&buf, r)
-			if err != nil {
-				return err
-			}
+			n, _ := io.Copy(&buf, io.LimitReader(r, int64(MaxJSONDecompressedSize)+1))
 			r.Close()
+			if n > int64(MaxJSONDecompressedSize) {
+				return fmt.Errorf("decompressed JSON exceeds maximum size %d", MaxJSONDecompressedSize)
+			}
 		case ZstdCompression:
 			l32 := uint32(0)
 			if err = binary.Read(s.r, binary.LittleEndian, &l32); err != nil {
@@ -491,11 +498,11 @@ func (s *EasyStream) StreamJSONRawMessage(data *json.RawMessage, isNullTerminate
 			if err != nil {
 				return err
 			}
-			_, err = io.Copy(&buf, r)
-			if err != nil {
-				return err
-			}
+			n, _ := io.Copy(&buf, io.LimitReader(r, int64(MaxJSONDecompressedSize)+1))
 			r.Close()
+			if n > int64(MaxJSONDecompressedSize) {
+				return fmt.Errorf("decompressed JSON exceeds maximum size %d", MaxJSONDecompressedSize)
+			}
 		default:
 			return errInvalidCompressionMode
 		}
