@@ -158,8 +158,8 @@ func GuildPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		if _, err := AuditLogSendGuild(dg, gg, auditMsg); err != nil {
 			logger.Warn("Failed to send guild audit log", zap.Error(err))
 		}
-	} else {
-		if err := AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, auditMsg); err != nil {
+	} else if ss := ServiceSettings(); ss != nil {
+		if err := AuditLogSend(dg, ss.ServiceAuditChannelID, auditMsg); err != nil {
 			logger.Warn("Failed to send audit log", zap.Error(err))
 		}
 	}

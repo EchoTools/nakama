@@ -247,7 +247,7 @@ func ToSymbol(v any) Symbol {
 		}
 		return Symbol(CalculateSymbolValue(str, 0xFFFFFFFFFFFFFFFF, hashLookupArray, 0))
 	default:
-		panic(fmt.Errorf("invalid type: %T", v))
+		return Symbol(0)
 	}
 }
 
@@ -418,7 +418,7 @@ func SymbolOf(m Message) Symbol {
 	typ := reflect.TypeOf(m).String()
 	sym, ok := reverseSymbolTypes[typ]
 	if !ok {
-		panic(fmt.Errorf("Symbol not found: %T", m))
+		return Symbol(0)
 	}
 	return Symbol(sym)
 }

@@ -38,6 +38,9 @@ func (l *snsPartyInviteList) Add(inv *snsPartyInvite) {
 func (l *snsPartyInviteList) RemoveByParty(partyUUID uuid.UUID) {
 	l.Lock()
 	defer l.Unlock()
+	if l.invites == nil {
+		return
+	}
 	filtered := l.invites[:0]
 	for _, inv := range l.invites {
 		if inv.PartyUUID != partyUUID {

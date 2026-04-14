@@ -172,7 +172,10 @@ func (pm *MatchPreemptionManager) preemptSingleMatch(ctx context.Context, matchI
 		// Schedule the actual shutdown after grace period
 		go func() {
 			time.Sleep(pm.gracePeriod)
-			if err := pm.shutdownMatch(ctx, matchID, reason); err != nil {
+			// Use background context since the parent context may be cancelled
+			// before the grace period elapses.
+			bgCtx := context.Background()
+			if err := pm.shutdownMatch(bgCtx, matchID, reason); err != nil {
 				pm.logger.Error("Failed to shutdown match %s after grace period: %v", matchID, err)
 			} else {
 				pm.logger.Info("Successfully preempted match %s after grace period", matchID)

@@ -51,7 +51,7 @@ func NewAppAPIAcceptor(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 	var authErrorBody string
 
 	if data, err := json.Marshal(APIErrorMessage{Code: 0, Message: "Missing or invalid token"}); err != nil {
-		panic(err)
+		authErrorBody = `{"code":0,"message":"Missing or invalid token"}`
 	} else {
 		authErrorBody = string(data)
 	}
