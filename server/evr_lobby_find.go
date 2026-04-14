@@ -532,10 +532,6 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 				}
 				continue
 			}
-			if errors.Is(err, ErrPreJoinPingFailed) {
-				logger.Debug("Pre-join ping failed on auto-created lobby, retrying.", zap.String("endpoint", label.GameServer.Endpoint.String()))
-				continue
-			}
 			return fmt.Errorf("failed to join auto-created social lobby: %w", err)
 		}
 		return nil
