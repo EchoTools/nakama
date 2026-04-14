@@ -48,6 +48,9 @@ func (m *GameServerJoinRejected) Stream(s *EasyStream) error {
 				return err
 			}
 			m.ErrorCode = PlayerRejectionReason(errorCode)
+			if m.ErrorCode > PlayerRejectionReasonInactive {
+				return fmt.Errorf("invalid PlayerRejectionReason: %d", errorCode)
+			}
 			return nil
 		},
 		func() error {

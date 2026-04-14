@@ -715,7 +715,20 @@ func (p *LobbySessionParameters) FromMatchmakerEntry(entry *MatchmakerEntry) {
 	p.BlockedIDs = strings.Split(stringProperties["blocked_ids"], " ")
 	p.DisplayName = stringProperties["display_name"]
 	p.SetRating(rating)
-	p.MatchmakingTimestamp, _ = time.Parse(time.RFC3339, stringProperties["submission_time"])
+	// Use the submission_time from the ticket but clamp it: never allow a timestamp
+	// in the future or more than 10 minutes in the past (prevents clients from
+	// spoofing old timestamps to expand their matchmaking rating range).
+	if ts, err := time.Parse(time.RFC3339, stringProperties["submission_time"]); err == nil {
+		now := time.Now().UTC()
+		if ts.After(now) {
+			ts = now
+		} else if now.Sub(ts) > 10*time.Minute {
+			ts = now.Add(-10 * time.Minute)
+		}
+		p.MatchmakingTimestamp = ts
+	} else {
+		p.MatchmakingTimestamp = time.Now().UTC()
+	}
 	p.MaxServerRTT = 180
 
 	serverRTTs := make(map[string]int)
