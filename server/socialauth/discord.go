@@ -54,7 +54,7 @@ func (s *SocialAuthHandler) discordHttpCallbackHandler(w http.ResponseWriter, r 
 	expiration := time.Now().Add(jwtTokenLifetimeDuration)
 	token, _, err := s.nk.AuthenticateTokenGenerate(userID, username, expiration.Unix(), sessionVars)
 	if err != nil {
-		http.Error(w, "Failed to generate session token: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to generate session token", http.StatusInternalServerError)
 		return
 	}
 	// Set the authenticated user cookie

@@ -125,6 +125,10 @@ RETURNING id, creator_id, name, description, avatar_url, state, edge_count, lang
 			logger.Debug("Could not parse rows.", zap.Error(err))
 			return err
 		}
+		if len(groups) == 0 {
+			logger.Debug("Group creation returned no rows.")
+			return errors.New("group creation returned no rows")
+		}
 
 		group = groups[0]
 		_, err = groupAddUser(ctx, db, tx, uuid.Must(uuid.FromString(group.Id)), userID, 0)

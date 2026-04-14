@@ -88,13 +88,13 @@ func (s *SocialAuthHandler) githubHttpCallbackHandler(w http.ResponseWriter, r *
 	queryParams := r.URL.Query()
 	code, err := s.extractAndValidateOAuth2Callback(queryParams)
 	if err != nil {
-		http.Error(w, "Invalid OAuth2 callback: "+err.Error(), http.StatusBadRequest)
+		http.Error(w, "Invalid OAuth2 callback", http.StatusBadRequest)
 		return
 	}
 
 	userID, username, _, err := s.nk.AuthenticateCustom(ctx, code, "", true)
 	if err != nil {
-		http.Error(w, "GitHub authentication failed: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "GitHub authentication failed", http.StatusInternalServerError)
 		return
 	}
 
@@ -103,13 +103,13 @@ func (s *SocialAuthHandler) githubHttpCallbackHandler(w http.ResponseWriter, r *
 	// Check if they have the required intents
 	sessionVars.Intents.IsGlobalOperator, err = CheckGroupMembershipByName(ctx, s.db, userID, "Global Operators", "system")
 	if err != nil {
-		http.Error(w, "Failed to check group membership: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to check group membership", http.StatusInternalServerError)
 		return
 	}
 
 	sessionVars.Intents.IsGlobalDeveloper, err = CheckGroupMembershipByName(ctx, s.db, userID, "Global Developers", "system")
 	if err != nil {
-		http.Error(w, "Failed to check group membership: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to check group membership", http.StatusInternalServerError)
 		return
 	}
 
@@ -117,7 +117,7 @@ func (s *SocialAuthHandler) githubHttpCallbackHandler(w http.ResponseWriter, r *
 	expiration := time.Now().Add(jwtTokenLifetimeDuration)
 	token, _, err := s.nk.AuthenticateTokenGenerate(userID, username, expiration.Unix(), vars)
 	if err != nil {
-		http.Error(w, "Failed to generate session token: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to generate session token", http.StatusInternalServerError)
 		return
 	}
 
