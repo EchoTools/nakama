@@ -1065,7 +1065,7 @@ func googleNotificationHandler(logger *zap.Logger, db *sql.DB, config *IAPGoogle
 			return
 		}
 
-		gResponse, _, _, err := iap.ValidateSubscriptionReceiptGoogle(context.Background(), httpc, config.ClientEmail, config.PrivateKey, string(encodedReceipt))
+		gResponse, _, _, err := iap.ValidateSubscriptionReceiptGoogle(r.Context(), httpc, config.ClientEmail, config.PrivateKey, string(encodedReceipt))
 		if err != nil {
 			var vErr *iap.ValidationError
 			if errors.As(err, &vErr) {
@@ -1096,7 +1096,7 @@ func googleNotificationHandler(logger *zap.Logger, db *sql.DB, config *IAPGoogle
 			uid = extUID
 		} else if gResponse.ProfileId != "" {
 			var dbUID uuid.UUID
-			if err = db.QueryRowContext(context.Background(), "SELECT id FROM users WHERE google_id = $1", gResponse.ProfileId).Scan(&dbUID); err != nil {
+			if err = db.QueryRowContext(r.Context(), "SELECT id FROM users WHERE google_id = $1", gResponse.ProfileId).Scan(&dbUID); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					logger.Warn("Google Play Billing subscription notification user not found", zap.String("profile_id", gResponse.ProfileId), zap.String("payload", string(body)))
 					w.WriteHeader(http.StatusOK) // Subscription could not be assigned to a user ID, ack and ignore it.
@@ -1108,7 +1108,7 @@ func googleNotificationHandler(logger *zap.Logger, db *sql.DB, config *IAPGoogle
 			uid = dbUID
 		} else {
 			// Get user id by existing validated subscription.
-			sub, err := getSubscriptionByOriginalTransactionId(context.Background(), logger, db, googleNotification.SubscriptionNotification.PurchaseToken)
+			sub, err := getSubscriptionByOriginalTransactionId(r.Context(), logger, db, googleNotification.SubscriptionNotification.PurchaseToken)
 			if err != nil || sub == nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
@@ -1151,7 +1151,7 @@ func googleNotificationHandler(logger *zap.Logger, db *sql.DB, config *IAPGoogle
 			storageSub.originalTransactionId = gResponse.LinkedPurchaseToken
 		}
 
-		if err = upsertSubscription(context.Background(), db, storageSub); err != nil {
+		if err = upsertSubscription(r.Context(), db, storageSub); err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.ForeignKeyViolation && strings.Contains(pgErr.Message, "user_id") {
 				// Record was inserted and the user id was not found, ignore this notification

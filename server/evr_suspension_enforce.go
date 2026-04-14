@@ -163,7 +163,7 @@ func KickPlayerFromMatch(ctx context.Context, nk runtime.NakamaModule, matchID M
 		if presence.GetUserId() != userID {
 			continue
 		}
-		if presence.GetSessionId() == label.GameServer.SessionID.String() {
+		if label.GameServer != nil && presence.GetSessionId() == label.GameServer.SessionID.String() {
 			// Do not kick the game server
 			continue
 		}

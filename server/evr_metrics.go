@@ -203,6 +203,9 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 		playerSet := make(map[string]struct{})
 
 		for _, state := range matchStates {
+			if state.State.GameServer == nil {
+				continue
+			}
 			groupID := state.State.GetGroupID()
 			groupIDs[groupID.String()] = struct{}{}
 			operatorUsername, ok := operatorUsernames[state.State.GameServer.OperatorID]
@@ -303,7 +306,7 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 		locations := make(map[string][]float64)
 
 		for _, state := range matchStates {
-			if state.State.GameServer.Endpoint.GetExternalIP() == "" {
+			if state.State.GameServer == nil || state.State.GameServer.Endpoint.GetExternalIP() == "" {
 				continue
 			}
 			locations[state.State.GameServer.Endpoint.GetExternalIP()] = []float64{
