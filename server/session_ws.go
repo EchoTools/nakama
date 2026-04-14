@@ -446,7 +446,7 @@ IncomingLoop:
 
 			// Reject payloads that don't start with the EVR message marker before
 			// allocating anything — prevents log floods and GC pressure from bad clients.
-			if !bytes.HasPrefix(data, evr.MessageMarker) {
+			if !bytes.HasPrefix(data, evr.MessageMarker) || len(data) > evr.MaxPacketLength {
 				s.logger.Debug("Received malformed payload (no marker)", zap.Int("len", len(data)))
 				reason = "received malformed payload"
 				break
