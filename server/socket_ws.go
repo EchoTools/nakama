@@ -28,7 +28,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-const maxConnsPerIP = 10
+const maxConnsPerIP = 32
 
 var ipConnCount sync.Map // map[string]*int32
 
