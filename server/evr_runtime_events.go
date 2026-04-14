@@ -92,7 +92,7 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		vrmlScanQueue:   vrmlScanQueue,
 		statisticsQueue: statisticsQueue,
 
-		queue:                make(chan *api.Event, 100),
+		queue:                make(chan *api.Event, 4096),
 		matchJournals:        make(map[MatchID]*MatchDataJournal),
 		cache:                &sync.Map{},
 		playerAuthorizations: make(map[string]map[string]struct{}),
@@ -114,12 +114,11 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 				return
 			case evt := <-dispatch.queue:
 
-				doneCh := make(chan struct{})
+				doneCh := make(chan struct{}, 1)
 
 				go func() {
 					defer close(doneCh)
 					dispatch.processEvent(ctx, logger, evt)
-					doneCh <- struct{}{}
 				}()
 				select {
 				case <-ctx.Done():
@@ -136,21 +135,23 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 				dispatch.processRedisQueue(ctx, logger)
 
 				// Clean up old journals (fallback for any remaining in memory)
-				inserts := make([]any, 0, len(dispatch.matchJournals))
+				dispatch.evictStaleJournals(ctx, logger)
+			}
+		}
+	}()
 
-				for k, v := range dispatch.matchJournals {
-					if time.Since(v.UpdatedAt) > 1*time.Minute {
-						delete(dispatch.matchJournals, k)
-						inserts = append(inserts, v)
-					}
-				}
-				if len(inserts) > 0 && dispatch.mongo != nil {
-					// Push to mongo directly
-					collection := dispatch.mongo.Database(matchDataDatabaseName).Collection(matchDataCollectionName)
-					if _, err := collection.InsertMany(ctx, inserts); err != nil {
-						logger.WithField("error", err).Error("failed to insert match data")
-					}
-				}
+	// Independent ticker so journal eviction fires even when the queue is continuously busy
+	// and the time.After(eventDispatchTimeout) branch never gets selected.
+	go func() {
+		ticker := time.NewTicker(matchDataJournalMaxAge)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				dispatch.processRedisQueue(ctx, logger)
+				dispatch.evictStaleJournals(ctx, logger)
 			}
 		}
 	}()
@@ -160,6 +161,10 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 }
 
 func (h *EventDispatcher) eventFn(ctx context.Context, logger runtime.Logger, evt *api.Event) {
+	if len(h.queue) >= cap(h.queue) {
+		logger.Warn("event queue full, dropping event before allocation")
+		return
+	}
 	select {
 	case h.queue <- evt:
 		logger.WithField("event", evt.Name).Debug("event queued for processing")
@@ -519,6 +524,30 @@ func ScheduleDisabledAccountKick(ctx context.Context, nk runtime.NakamaModule, l
 
 func (h *EventDispatcher) getRedisClient() *redis.Client {
 	return h.redis
+}
+
+// evictStaleJournals removes journals that have not been updated within
+// matchDataJournalMaxAge and bulk-inserts them into MongoDB. It is safe to call
+// from multiple goroutines because it acquires the dispatcher lock.
+func (h *EventDispatcher) evictStaleJournals(ctx context.Context, logger runtime.Logger) {
+	h.Lock()
+	inserts := make([]any, 0, len(h.matchJournals))
+	for k, v := range h.matchJournals {
+		if time.Since(v.UpdatedAt) > matchDataJournalMaxAge {
+			delete(h.matchJournals, k)
+			inserts = append(inserts, v)
+		}
+	}
+	h.Unlock()
+
+	if len(inserts) == 0 || h.mongo == nil {
+		return
+	}
+
+	collection := h.mongo.Database(matchDataDatabaseName).Collection(matchDataCollectionName)
+	if _, err := collection.InsertMany(ctx, inserts); err != nil {
+		logger.WithField("error", err).Error("failed to insert stale match journals to MongoDB")
+	}
 }
 
 func (h *EventDispatcher) processRedisQueue(ctx context.Context, logger runtime.Logger) {

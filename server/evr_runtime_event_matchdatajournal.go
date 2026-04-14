@@ -31,19 +31,11 @@ func NewEventMatchDataJournalPersist(journal *MatchDataJournal) *EventMatchDataJ
 	}
 }
 
-func (e *EventMatchDataJournal) Process(ctx context.Context, logger runtime.Logger, dispatcher *EventDispatcher) error {
-	logger = logger.WithFields(map[string]any{
-		"match_id": e.MatchID,
-		"event":    "match_data_journal",
-	})
-
-	// If this is a journal persistence event, handle it differently
-	if e.Journal != nil {
-		return e.persistJournal(ctx, logger, dispatcher)
-	}
-
-	// This is a new entry event, add to the journal
-	return e.addToJournal(ctx, logger, dispatcher)
+func (e *EventMatchDataJournal) Process(_ context.Context, _ runtime.Logger, _ *EventDispatcher) error {
+	// Journal persistence is temporarily disabled. No entries will be accumulated
+	// in memory and no writes will be made to Redis or MongoDB.
+	// TODO: re-enable and route persistence to a directory instead.
+	return nil
 }
 
 func (e *EventMatchDataJournal) addToJournal(ctx context.Context, logger runtime.Logger, dispatcher *EventDispatcher) error {
