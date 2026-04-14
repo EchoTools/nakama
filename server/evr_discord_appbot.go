@@ -3569,8 +3569,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				account, err := nk.AccountGetId(ctx, userID)
-				if err != nil {
+				if err != nil || account == nil {
 					logger.Error("Failed to get account", zap.Error(err))
+					return
 				}
 
 				devices := make([]string, 0, len(account.Devices))

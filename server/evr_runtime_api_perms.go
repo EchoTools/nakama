@@ -417,6 +417,9 @@ func filterMatchesForAnonymous(out *api.MatchList) error {
 	// For anonymous users, only show public match data with minimal info
 	filteredMatches := make([]*api.Match, 0, len(out.Matches))
 	for _, match := range out.Matches {
+		if match.Label == nil {
+			continue
+		}
 		// Parse the label
 		label := &MatchLabel{}
 		if err := json.Unmarshal([]byte(match.Label.Value), label); err != nil {
@@ -447,6 +450,9 @@ func filterMatchesForAnonymous(out *api.MatchList) error {
 
 func filterMatchForUser(match *api.Match, userID string, isGlobalOperator bool, guildGroups map[string]*GuildGroup, suspendedGroupIDs, memberGroupIDs map[string]bool) *api.Match {
 	// Parse the label
+	if match.Label == nil {
+		return nil
+	}
 	label := &MatchLabel{}
 	if err := json.Unmarshal([]byte(match.Label.Value), label); err != nil {
 		return nil

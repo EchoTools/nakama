@@ -868,7 +868,7 @@ func (d *DiscordAppBot) handleSetIGNModalSubmit(_ context.Context, logger runtim
 	originalDisplayName := originalIGN.DisplayName
 	if originalDisplayName == "" {
 		// Fallback to username
-		if a, err := d.nk.AccountGetId(d.ctx, targetUserID); err == nil {
+		if a, err := d.nk.AccountGetId(d.ctx, targetUserID); err == nil && a != nil && a.User != nil {
 			originalDisplayName = a.User.Username
 		}
 	}

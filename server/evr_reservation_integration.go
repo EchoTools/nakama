@@ -216,6 +216,9 @@ func (sum *ServerUtilizationMonitor) checkUtilization(ctx context.Context, dg *d
 	now := time.Now()
 
 	for _, match := range matches {
+		if match.Label == nil {
+			continue
+		}
 		var label MatchLabel
 		if err := json.Unmarshal([]byte(match.Label.Value), &label); err != nil {
 			continue

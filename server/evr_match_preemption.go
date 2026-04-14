@@ -67,6 +67,9 @@ func (pm *MatchPreemptionManager) FindPreemptionCandidates(ctx context.Context, 
 	var candidates []*PreemptionCandidate
 
 	for _, match := range matches {
+		if match.Label == nil {
+			continue
+		}
 		var label MatchLabel
 		if err := json.Unmarshal([]byte(match.Label.Value), &label); err != nil {
 			pm.logger.Warn("Failed to unmarshal match label for %s: %v", match.MatchId, err)
@@ -133,6 +136,9 @@ func (pm *MatchPreemptionManager) preemptSingleMatch(ctx context.Context, matchI
 		return fmt.Errorf("match not found")
 	}
 
+	if match.Label == nil {
+		return fmt.Errorf("match has no label")
+	}
 	var label MatchLabel
 	if err := json.Unmarshal([]byte(match.Label.Value), &label); err != nil {
 		return fmt.Errorf("failed to unmarshal match label: %w", err)

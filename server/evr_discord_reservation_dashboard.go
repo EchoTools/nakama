@@ -143,6 +143,9 @@ func (dm *ReservationDashboardManager) collectServerCapacity(ctx context.Context
 
 	for _, match := range matches {
 		var label MatchLabel
+		if match.Label == nil {
+			continue
+		}
 		if err := json.Unmarshal([]byte(match.Label.Value), &label); err != nil {
 			continue
 		}
@@ -195,6 +198,9 @@ func (dm *ReservationDashboardManager) collectActiveMatches(ctx context.Context,
 
 	for _, match := range matches {
 		var label MatchLabel
+		if match.Label == nil {
+			continue
+		}
 		if err := json.Unmarshal([]byte(match.Label.Value), &label); err != nil {
 			continue
 		}

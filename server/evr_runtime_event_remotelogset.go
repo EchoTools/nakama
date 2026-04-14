@@ -431,7 +431,7 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				continue
 			}
 			acct, err := nk.AccountGetId(ctx, label.GameServer.OperatorID.String())
-			if err != nil {
+			if err != nil || acct == nil || acct.User == nil {
 				logger.WithField("error", err).Warn("Failed to get account")
 				continue
 			}
