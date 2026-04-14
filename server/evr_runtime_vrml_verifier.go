@@ -98,6 +98,11 @@ func (v *VRMLScanQueue) Start() error {
 	go func() {
 		vg := vrmlgo.New("")
 
+		// initialized tracks whether seasons and player-list caches have been
+		// populated. When shouldSkipVRMLWork() is true at startup the block is
+		// deferred to the first iteration of the loop where work is permitted.
+		initialized := false
+
 		if !shouldSkipVRMLWork() {
 			seasons, err := vg.GameSeasons(VRMLEchoArenaShortName)
 			if err != nil {
@@ -109,6 +114,7 @@ func (v *VRMLScanQueue) Start() error {
 				v.logger.WithField("error", err).Error("Failed to cache player lists")
 				return
 			}
+			initialized = true
 		}
 
 		vg = v.newSession("")
@@ -122,6 +128,22 @@ func (v *VRMLScanQueue) Start() error {
 
 			if shouldSkipVRMLWork() {
 				continue
+			}
+
+			// Lazy initialization: if we skipped setup at startup, attempt it now.
+			if !initialized {
+				seasons, err := vg.GameSeasons(VRMLEchoArenaShortName)
+				if err != nil {
+					v.logger.WithField("error", err).Error("Failed to get seasons (lazy init)")
+					continue
+				}
+				v.seasons = seasons
+
+				if err := v.cachePlayerLists(); err != nil {
+					v.logger.WithField("error", err).Error("Failed to cache player lists (lazy init)")
+					continue
+				}
+				initialized = true
 			}
 
 			entry, err := v.dequeue()

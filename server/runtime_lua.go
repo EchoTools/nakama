@@ -2150,7 +2150,7 @@ func (rp *RuntimeProviderLua) StorageIndexFilter(ctx context.Context, indexName 
 	r.vm.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		return false, fmt.Errorf("Error running runtime Storage Index Filter hook for %q index: %v", indexName, err)
+		return false, fmt.Errorf("Error running runtime Storage Index Filter hook for %q index: %w", indexName, err)
 	}
 
 	if retValue == nil || retValue == lua.LNil {

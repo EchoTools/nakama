@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -313,5 +314,41 @@ func TestSortLabelIndexes(t *testing.T) {
 				t.Errorf("sortLabelIndexes() mismatch (-got +want):\n%s", diff)
 			}
 		})
+	}
+}
+
+// TestSelectNextMapCombatRandomizes verifies that selectNextMap returns a valid
+// combat level on the first call (i.e. the queue is populated rather than
+// short-circuited to LevelUnspecified).
+//
+// Bug: selectNextMap returns evr.LevelUnspecified on the first call for any mode
+// because the early-exit at line 648 triggers when mapQueue[mode] has not yet
+// been written (key absent → ok=false), before the queue-refill block at line 654
+// can run. The queue is never seeded, so every call returns LevelUnspecified.
+func TestSelectNextMapCombatRandomizes(t *testing.T) {
+	lb := &LobbyBuilder{
+		mapQueue: make(map[evr.Symbol][]evr.Symbol),
+	}
+
+	validLevels := evr.LevelsByMode[evr.ModeCombatPublic]
+	if len(validLevels) == 0 {
+		t.Fatal("LevelsByMode[ModeCombatPublic] is empty — test precondition violated")
+	}
+
+	// First call: queue is empty (key not present). Should still return a valid level.
+	level := lb.selectNextMap(evr.ModeCombatPublic)
+	assert.NotEqual(t, evr.LevelUnspecified, level,
+		"selectNextMap returned LevelUnspecified on first call; queue was never seeded")
+	assert.Contains(t, validLevels, level,
+		"selectNextMap returned a level not in LevelsByMode[ModeCombatPublic]")
+
+	// Call enough times to exercise the full queue rotation. With 4 combat maps
+	// the queue refills every 4 calls; run 20 iterations to cover multiple cycles.
+	for i := 1; i < 20; i++ {
+		got := lb.selectNextMap(evr.ModeCombatPublic)
+		assert.NotEqual(t, evr.LevelUnspecified, got,
+			"selectNextMap returned LevelUnspecified on call %d", i+1)
+		assert.Contains(t, validLevels, got,
+			"selectNextMap returned an invalid level on call %d: %v", i+1, got)
 	}
 }
