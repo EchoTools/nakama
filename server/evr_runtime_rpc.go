@@ -691,6 +691,18 @@ func LinkUserIdDeviceRpc(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		return "", runtime.NewError("LinkCode is empty", StatusInvalidArgument)
 	}
 
+	// Verify that the authenticated caller owns the target account.
+	// Without this check any authenticated user could link their XPID to an
+	// arbitrary account by supplying a victim's UUID and a valid link code.
+	callerID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || callerID == "" {
+		return "", runtime.NewError("authentication required", StatusUnauthenticated)
+	}
+	if callerID != request.UserID {
+		logger.WithField("caller", callerID).WithField("target", request.UserID).Warn("LinkUserIdDeviceRpc: caller/target mismatch — possible account takeover attempt")
+		return "", runtime.NewError("forbidden", StatusPermissionDenied)
+	}
+
 	// Verify the userId and extract the Nakama user ID
 	logger.WithField("Username", request.UserID).Info("Verifying userId")
 	userIds, err := nk.UsersGetId(ctx, []string{request.UserID}, nil)

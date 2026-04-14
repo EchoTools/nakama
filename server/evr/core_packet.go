@@ -10,10 +10,13 @@ import (
 	"strconv"
 )
 
+const (
+	MaxPacketLength  = 256 * 1024 // 256KB
+	MaxMessageLength = 0x8000     // 32KB
+)
+
 var (
 	MessageMarker     = []byte{246, 64, 187, 120, 162, 231, 140, 187}
-	MaxPacketLength  = 256 * 1024 // 256KB
-	MaxMessageLength = 0x8000    // 32KB
 	ErrInvalidPacket  = errors.New("invalid packet")
 	ErrSymbolNotFound = errors.New("symbol not found")
 	ErrParseError     = errors.New("parse error")
