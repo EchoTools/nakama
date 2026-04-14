@@ -362,8 +362,9 @@ func (s *MatchLabel) rebuildCache() {
 
 	// Include reconnect reservations in the cache (holds slot for crashed players).
 	reconnectSessionIDs := make(map[string]bool, len(s.reconnectReservations))
-	for _, r := range s.reconnectReservations {
+	for uid, r := range s.reconnectReservations {
 		if r.Expiry.Before(time.Now()) {
+			delete(s.reconnectReservations, uid)
 			continue
 		}
 		presences = append(presences, r.Presence)

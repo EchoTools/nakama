@@ -91,7 +91,9 @@ func (s *EasyStream) StreamBool(value *bool) error {
 
 func (s *EasyStream) StreamIpAddress(data *net.IP) error {
 	b := make([]byte, net.IPv4len)
-	copy(b, (*data).To4())
+	if ip4 := (*data).To4(); ip4 != nil {
+		copy(b, ip4)
+	}
 	if err := s.StreamBytes(&b, net.IPv4len); err != nil {
 		return err
 	}
@@ -255,6 +257,10 @@ func (s *EasyStream) StreamStringTable(entries *[]string) error {
 	switch s.Mode {
 	case DecodeMode:
 		strings = make([]string, logCount)
+		if logCount == 0 {
+			*entries = strings
+			return nil
+		}
 		offsets := make([]uint32, logCount)
 		offsets[0] = 0
 		for i := 1; i < int(logCount); i++ {

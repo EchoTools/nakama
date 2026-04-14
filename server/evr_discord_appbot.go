@@ -2582,6 +2582,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// Monitor the match and update the interaction
 				for {
 					select {
+					case <-d.ctx.Done():
+						return
 					case <-ticker.C:
 					}
 
@@ -2598,8 +2600,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 							Embeds: &responseContent.Data.Embeds,
 						}); err != nil {
 							logger.Error("Failed to update interaction", zap.Error(err))
-							return
 						}
+						return
 					}
 
 					// Update the list of playerListStr in the interaction response
@@ -2610,7 +2612,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						}
 						playerListStr.WriteString(fmt.Sprintf("<@!%s>\n", d.cache.UserIDToDiscordID(p.GetUserId())))
 					}
-					responseContent.Data.Embeds[0].Fields[4].Value = playerListStr.String()
+					if len(responseContent.Data.Embeds) > 0 && len(responseContent.Data.Embeds[0].Fields) > 4 {
+						responseContent.Data.Embeds[0].Fields[4].Value = playerListStr.String()
+					}
 
 					if _, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 						Embeds: &responseContent.Data.Embeds,
@@ -3287,6 +3291,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			case "group":
 
+				if len(options) == 0 || len(options[0].Options) == 0 {
+					return errors.New("missing required options")
+				}
 				options := options[0].Options
 				groupName := strings.ToLower(options[0].StringValue())
 
@@ -3551,16 +3558,18 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					devices = append(devices, device.GetId())
 				}
 
-				if partial := data.Options[0].StringValue(); partial != "" {
-					// User is typing a custom device name
-					partial = strings.ToLower(partial)
-					filtered := make([]string, 0, len(devices))
-					for _, dev := range devices {
-						if strings.Contains(strings.ToLower(dev), partial) {
-							filtered = append(filtered, dev)
+				if len(data.Options) > 0 {
+					if partial := data.Options[0].StringValue(); partial != "" {
+						// User is typing a custom device name
+						partial = strings.ToLower(partial)
+						filtered := make([]string, 0, len(devices))
+						for _, dev := range devices {
+							if strings.Contains(strings.ToLower(dev), partial) {
+								filtered = append(filtered, dev)
+							}
 						}
+						devices = filtered
 					}
-					devices = filtered
 				}
 
 				choices := make([]*discordgo.ApplicationCommandOptionChoice, len(devices))
@@ -3778,7 +3787,21 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					logger.Error("Failed to get guild member", zap.Error(err))
 					return
 				}
-				code := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+				if len(data.Components) == 0 {
+					logger.Error("Modal submit has no components")
+					return
+				}
+				row, ok := data.Components[0].(*discordgo.ActionsRow)
+				if !ok || len(row.Components) == 0 {
+					logger.Error("Modal submit has no action row components")
+					return
+				}
+				input, ok := row.Components[0].(*discordgo.TextInput)
+				if !ok {
+					logger.Error("Modal submit component is not a text input")
+					return
+				}
+				code := input.Value
 				if err := d.linkHeadset(ctx, logger, member, code); err != nil {
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
