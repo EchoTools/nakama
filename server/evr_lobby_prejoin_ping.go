@@ -182,11 +182,6 @@ func (p *EvrPipeline) validatePreJoinPing(
 		return nil
 	}
 
-	// Social lobbies skip RTT validation — latency does not affect hangout quality.
-	if label.Mode == evr.ModeSocialPublic || label.Mode == evr.ModeSocialPrivate || label.Mode == evr.ModeSocialNPE {
-		return nil
-	}
-
 	if label.GameServer == nil {
 		return nil
 	}
