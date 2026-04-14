@@ -424,7 +424,9 @@ LIMIT $2`
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
+		// Note: rows.Close() is called explicitly below (lines 468, 483) rather
+		// than with defer, because this runs inside a for-loop and defer would
+		// accumulate unclosed rows across iterations.
 
 		var rowsRead bool
 		batch := bluge.NewBatch()

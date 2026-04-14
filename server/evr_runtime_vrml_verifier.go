@@ -317,7 +317,7 @@ func (v *VRMLScanQueue) retrievePlayerMap(playerCh chan VRMLPlayerListItems) {
 					logger.WithField("error", err).Error("Failed to get player list from VRML API")
 					return
 				}
-				defer resp.Body.Close()
+				// Close body at end of each iteration, not with defer (we're in a loop)
 
 				switch resp.StatusCode {
 				case http.StatusOK:
@@ -332,24 +332,28 @@ func (v *VRMLScanQueue) retrievePlayerMap(playerCh chan VRMLPlayerListItems) {
 					if h := resp.Header.Get("X-RateLimit-Reset-After"); h != "" {
 						resetAfter, err := time.ParseDuration(resp.Header.Get("X-RateLimit-Reset-After") + "s")
 						if err != nil {
+							resp.Body.Close()
 							logger.WithField("error", err).Error("Failed to parse Retry-After header")
 							return
 						}
 						// Parse as "X per Y seconds"
 						parts := strings.Split(resp.Header.Get("X-RateLimit-Limit"), " ")
 						if len(parts) != 4 {
+							resp.Body.Close()
 							logger.WithField("header", h).Error("Invalid X-RateLimit-Limit header format")
 							return
 						}
 
 						tokens, err := strconv.Atoi(parts[0])
 						if err != nil {
+							resp.Body.Close()
 							logger.WithField("error", err).Error("Failed to parse X-RateLimit-Limit header")
 							return
 						}
 
 						seconds, err := time.ParseDuration(parts[2] + "s")
 						if err != nil {
+							resp.Body.Close()
 							logger.WithField("error", err).Error("Failed to parse X-RateLimit-Reset-After header")
 							return
 						}
@@ -359,6 +363,7 @@ func (v *VRMLScanQueue) retrievePlayerMap(playerCh chan VRMLPlayerListItems) {
 							"reset_after": resetAfter,
 						}).Info("Resetting rate limiter")
 
+						resp.Body.Close()
 						<-time.After(resetAfter)                  // Wait for the reset duration before continuing
 						rateLimiter = rate.NewLimiter(newRate, 0) // Reset the rate limiter with the new limit and burst
 						continue
@@ -367,9 +372,11 @@ func (v *VRMLScanQueue) retrievePlayerMap(playerCh chan VRMLPlayerListItems) {
 				}
 				// Read the response body
 				if _, err := buf.ReadFrom(resp.Body); err != nil {
+					resp.Body.Close()
 					logger.WithField("error", err).Error("Failed to read player list response body")
 					return
 				}
+				resp.Body.Close()
 				if buf.Len() == 0 {
 					break
 				}
