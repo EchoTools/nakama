@@ -112,8 +112,8 @@ func (s *EasyStream) StreamByte(value *byte) error {
 	}
 }
 
-const MaxStreamBytesSize = 10 * 1024 * 1024 // 10MB max for generic byte streams
-const MaxStreamStringLength = 64 * 1024     // 64KB max for strings
+const MaxStreamBytesSize = MaxMessageLength  // byte streams can't exceed a single message
+const MaxStreamStringLength = 4 * 1024      // 4KB max for individual strings
 
 // StreamBytes reads or writes bytes to the stream based on the mode of the EasyStream.
 // If the mode is ReadMode, it reads bytes from the stream and stores them in the provided data slice.
@@ -561,6 +561,9 @@ func GetRandomBytes(l int) []byte {
 }
 
 func (s *EasyStream) Skip(count int) (err error) {
+	if count < 0 || count > MaxMessageLength {
+		return fmt.Errorf("skip count %d out of bounds (max %d)", count, MaxMessageLength)
+	}
 	if s.Mode == DecodeMode {
 		_, err = s.r.Seek(int64(count), io.SeekCurrent)
 	} else {
