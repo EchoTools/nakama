@@ -511,6 +511,11 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		}
 	}
 	if envelope != nil {
+		// Enforce authentication for protobuf messages (same gate as legacy messages below).
+		if session.UserID().IsNil() {
+			logger.Warn("Received protobuf message from unauthenticated session, rejecting")
+			return false
+		}
 		// This is a legacy message that has been converted to a protobuf message
 		if err := p.ProcessProtobufRequest(logger, session, envelope); err != nil {
 			logger.Error("Failed to process protobuf message", zap.Any("envelope", envelope), zap.Error(err))
@@ -936,7 +941,11 @@ func (p *EvrPipeline) ProcessProtobufRequest(logger *zap.Logger, session Session
 		return fmt.Errorf("unhandled protobuf message type: %T", in.Message)
 	}
 
-	if err := pipelineFn(logger, session.(*sessionWS), in); err != nil {
+	ws, ok := session.(*sessionWS)
+	if !ok {
+		return fmt.Errorf("session is not a *sessionWS")
+	}
+	if err := pipelineFn(logger, ws, in); err != nil {
 		logger.Error("Failed to process protobuf message", zap.Any("envelope", in), zap.Error(err))
 		return err
 	}

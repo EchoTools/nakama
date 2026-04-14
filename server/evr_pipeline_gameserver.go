@@ -159,6 +159,9 @@ func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, co
 //   - verbose: Enable verbose logging
 func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) error {
 	request := in.GetGameServerRegistration()
+	if request == nil {
+		return fmt.Errorf("envelope missing GameServerRegistration payload")
+	}
 	var (
 		loginSessionID = uuid.FromStringOrNil(request.LoginSessionId)
 		serverID       = request.ServerId
@@ -184,7 +187,11 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 			return errFailedRegistration(session, logger, errors.New("failed to get login session"), evr.BroadcasterRegistration_Unknown)
 		}
 
-		if err := Secondary(session, loginSession.(*sessionWS), true, false); err != nil {
+		loginSessionWS, ok := loginSession.(*sessionWS)
+		if !ok {
+			return errFailedRegistration(session, logger, errors.New("login session is not a WebSocket session"), evr.BroadcasterRegistration_Unknown)
+		}
+		if err := Secondary(session, loginSessionWS, true, false); err != nil {
 			return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Unknown)
 		}
 	}

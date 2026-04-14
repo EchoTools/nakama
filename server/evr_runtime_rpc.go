@@ -916,8 +916,25 @@ type BanUserPayload struct {
 }
 
 func BanUserRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	// Check the user calling the RPC has permissions depending on your criteria
-	hasPermission := true
+	// Verify the caller is a server or admin (not a regular user session)
+	callerID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok || callerID == "" {
+		logger.Error("unprivileged user attempted to use the BanUser RPC")
+		return "", runtime.NewError("unauthorized", 7)
+	}
+
+	// Check if caller has global moderator/admin privileges
+	groups, _, err := nk.UserGroupsList(ctx, callerID, 100, nil, "")
+	if err != nil {
+		return "", runtime.NewError("failed to check permissions", 13)
+	}
+	hasPermission := false
+	for _, g := range groups {
+		if g.GetGroup().GetName() == GroupGlobalPrivateDataAccess {
+			hasPermission = true
+			break
+		}
+	}
 	if !hasPermission {
 		logger.Error("unprivileged user attempted to use the BanUser RPC")
 		return "", runtime.NewError("unauthorized", 7)

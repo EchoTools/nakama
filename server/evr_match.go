@@ -142,7 +142,12 @@ const (
 func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, params map[string]interface{}) (interface{}, int, string) {
 
 	gameserverConfig := GameServerPresence{}
-	if err := json.Unmarshal([]byte(params["gameserver"].(string)), &gameserverConfig); err != nil {
+	gsParam, ok := params["gameserver"].(string)
+	if !ok {
+		logger.Error("Missing or invalid 'gameserver' parameter")
+		return nil, 0, ""
+	}
+	if err := json.Unmarshal([]byte(gsParam), &gameserverConfig); err != nil {
 		logger.Error("Failed to unmarshal gameserver config: %v", err)
 		return nil, 0, ""
 	}
@@ -217,7 +222,8 @@ func (m EntrantMetadata) ToMatchMetadata() map[string]string {
 
 	bytes, err := json.Marshal(m)
 	if err != nil {
-		panic(err)
+		// Return empty metadata rather than crashing the server
+		return map[string]string{}
 	}
 
 	return map[string]string{
@@ -551,7 +557,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 
 	for _, p := range presences {
 		// Game servers don't get added to the presence map.
-		if p.GetSessionId() == state.GameServer.SessionID.String() {
+		if state.GameServer != nil && p.GetSessionId() == state.GameServer.SessionID.String() {
 			continue
 		}
 
@@ -836,7 +842,11 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 					}
 
 					eqconfig := NewEarlyQuitPlayerState()
-					_nk := nk.(*RuntimeGoNakamaModule)
+					_nk, ok := nk.(*RuntimeGoNakamaModule)
+					if !ok {
+						logger.Warn("nk is not *RuntimeGoNakamaModule, skipping early quit penalty")
+						break
+					}
 					if err := StorableRead(ctx, nk, mp.GetUserId(), eqconfig, true); err != nil {
 						logger.WithField("error", err).Warn("Failed to load early quitter config")
 					} else {
@@ -947,6 +957,8 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 			delete(state.presenceMap, p.GetSessionId())
 			delete(state.presenceByEvrID, mp.EvrID)
+			delete(state.joinTimestamps, p.GetSessionId())
+			delete(state.joinTimeMilliseconds, p.GetSessionId())
 		}
 	}
 
@@ -1266,7 +1278,11 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			}
 
 			// Increment completed matches for players who stayed until the end
-			_nk := nk.(*RuntimeGoNakamaModule)
+			_nk, ok := nk.(*RuntimeGoNakamaModule)
+			if !ok {
+				logger.Warn("nk is not *RuntimeGoNakamaModule, skipping post-match processing")
+				return state
+			}
 			serviceSettings := ServiceSettings()
 			if serviceSettings == nil {
 				serviceSettings = &ServiceSettingsData{}
@@ -1399,7 +1415,7 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 		matchID:                      state.ID.String(),
 		playerSessionIDs:             playerSessionIDs,
 		serverSessionID:              serverSessionID,
-		schedulePostMatchSocialLobby: state.Mode == evr.ModeArenaPrivate && state.GameState.IsMatchOver(),
+		schedulePostMatchSocialLobby: state.Mode == evr.ModeArenaPrivate && state.GameState != nil && state.GameState.IsMatchOver(),
 		labelAlreadyStored:           state.terminateTick != 0, // MatchShutdown already stored the label
 	})
 
