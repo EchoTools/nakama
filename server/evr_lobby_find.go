@@ -461,6 +461,12 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 			return fmt.Errorf("failed to list matches: %w", err)
 		}
 
+		logger.Info("Social lobby search",
+			zap.Int("attempt", attempt),
+			zap.Int("candidates", len(matches)),
+			zap.String("query", query),
+		)
+
 		partySize := lobbyParams.GetPartySize()
 		if partySize == 0 {
 			logger.Warn("party size is 0")
@@ -528,6 +534,7 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 		}
 
 		// No suitable social lobby found, create a new one
+		logger.Info("Creating new social lobby", zap.Int("attempt", attempt), zap.Int("candidates_tried", len(matches)))
 		label, err := p.newLobby(ctx, logger, lobbyParams, entrants...)
 		if err != nil {
 			// If the error is a lock error, back off and try again.
