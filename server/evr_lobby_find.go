@@ -444,8 +444,10 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 
 func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.Logger, _ Session, lobbyParams *LobbySessionParameters, entrants ...*EvrMatchPresence) error {
 	interval := 1 * time.Second
+	const maxInterval = 8 * time.Second
+	const maxAttempts = 30
 
-	for {
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("context canceled: %w", ctx.Err())
@@ -506,9 +508,11 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 		// No suitable social lobby found, create a new one
 		label, err := p.newLobby(ctx, logger, lobbyParams, entrants...)
 		if err != nil {
-			// If the error is a lock error, just try again.
+			// If the error is a lock error, back off and try again.
 			if err == ErrFailedToAcquireLock {
-				<-time.After(2 * time.Second)
+				if interval < maxInterval {
+					interval = min(interval*2, maxInterval)
+				}
 				continue
 			}
 
@@ -519,12 +523,16 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 		if err := p.LobbyJoinEntrants(logger, label, entrants...); err != nil {
 			if LobbyErrorCode(err) == ServerIsFull {
 				logger.Debug("Server is full, ignoring.")
+				if interval < maxInterval {
+					interval = min(interval*2, maxInterval)
+				}
 				continue
 			}
 			return fmt.Errorf("failed to join auto-created social lobby: %w", err)
 		}
 		return nil
 	}
+	return NewLobbyErrorf(ServerFindFailed, "exceeded maximum social lobby find attempts")
 }
 
 func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, session *sessionWS, groupID string) error {
