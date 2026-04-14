@@ -22,7 +22,7 @@ func StorageLoadingTipsRPC(ctx context.Context, logger runtime.Logger, db *sql.D
 		},
 	})
 	if err != nil {
-		logger.Error("Error reading loading tips: %v", err)
+		logger.WithField("error", err).Error("Error reading loading tips")
 		return "", err
 	}
 

@@ -377,7 +377,7 @@ func NotificationsGetId(ctx context.Context, logger *zap.Logger, db *sql.DB, use
 	rows, err := db.QueryContext(ctx, query, params...)
 	if err != nil {
 		logger.Error("failed to list notifications by id", zap.Error(err))
-		return nil, fmt.Errorf("failed to list notifications by id: %s", err.Error())
+		return nil, fmt.Errorf("failed to list notifications by id: %w", err)
 	}
 
 	defer rows.Close()
@@ -433,7 +433,7 @@ func NotificationsDeleteId(ctx context.Context, logger *zap.Logger, db *sql.DB, 
 
 	if _, err := db.QueryContext(ctx, "DELETE FROM notification WHERE id = any($1)", ids); err != nil {
 		logger.Error("failed to delete notifications by id", zap.Error(err))
-		return fmt.Errorf("failed to delete notifications: %s", err.Error())
+		return fmt.Errorf("failed to delete notifications: %w", err)
 	}
 
 	return nil
@@ -468,7 +468,7 @@ func NotificationsUpdate(ctx context.Context, logger *zap.Logger, db *sql.DB, up
 		return nil
 	}); err != nil {
 		logger.Error("failed to update notifications", zap.Error(err))
-		return fmt.Errorf("failed to update notifications: %s", err.Error())
+		return fmt.Errorf("failed to update notifications: %w", err)
 	}
 
 	return nil

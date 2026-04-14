@@ -170,13 +170,11 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 		}
 	}
 
-	time.Sleep(1 * time.Second)
-
-	// Check if session context is still valid before tracking
+	// Wait before tracking, but respect context cancellation.
 	select {
 	case <-sessionCtx.Done():
 		return fmt.Errorf("session closed before stream tracking: %w", sessionCtx.Err())
-	default:
+	case <-time.After(1 * time.Second):
 	}
 
 	matchIDStr := label.ID.String()

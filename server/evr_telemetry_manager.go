@@ -78,7 +78,7 @@ func (ltm *LobbyTelemetryManager) Subscribe(ctx context.Context, sessionID, user
 		return fmt.Errorf("failed to join telemetry stream: %w", err)
 	}
 
-	ltm.logger.Info("Session subscribed to lobby telemetry: session_id=%s, user_id=%s, lobby_id=%s", sessionID.String(), userID.String(), lobbyID.String())
+	ltm.logger.WithFields(map[string]interface{}{"session_id": sessionID.String(), "user_id": userID.String(), "lobby_id": lobbyID.String()}).Info("Session subscribed to lobby telemetry")
 
 	return nil
 }
@@ -106,11 +106,11 @@ func (ltm *LobbyTelemetryManager) Unsubscribe(ctx context.Context, sessionID, us
 	}
 
 	if err := ltm.nk.StreamUserLeave(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, userID.String(), sessionID.String()); err != nil {
-		ltm.logger.Warn("Failed to leave telemetry stream: session_id=%s, error=%v", sessionID.String(), err)
+		ltm.logger.WithFields(map[string]interface{}{"session_id": sessionID.String(), "error": err}).Warn("Failed to leave telemetry stream")
 		// Don't return error as subscription is already removed from memory
 	}
 
-	ltm.logger.Info("Session unsubscribed from lobby telemetry: session_id=%s, user_id=%s, lobby_id=%s", sessionID.String(), userID.String(), lobbyID.String())
+	ltm.logger.WithFields(map[string]interface{}{"session_id": sessionID.String(), "user_id": userID.String(), "lobby_id": lobbyID.String()}).Info("Session unsubscribed from lobby telemetry")
 
 	return nil
 }
@@ -158,7 +158,7 @@ func (ltm *LobbyTelemetryManager) BroadcastTelemetry(ctx context.Context, lobbyI
 		// Send the telemetry data to the session's stream
 		if err := ltm.nk.StreamUserUpdate(sessionStream.Mode, sessionStream.Subject.String(), sessionStream.Subcontext.String(), sessionStream.Label,
 			subscription.UserID.String(), subscription.SessionID.String(), false, false, string(messageBytes)); err != nil {
-			ltm.logger.Warn("Failed to send telemetry to session: session_id=%s, lobby_id=%s, error=%v", sessionID.String(), lobbyID.String(), err)
+			ltm.logger.WithFields(map[string]interface{}{"session_id": sessionID.String(), "lobby_id": lobbyID.String(), "error": err}).Warn("Failed to send telemetry to session")
 			continue
 		}
 
@@ -168,7 +168,7 @@ func (ltm *LobbyTelemetryManager) BroadcastTelemetry(ctx context.Context, lobbyI
 		}
 	}
 
-	ltm.logger.Debug("Telemetry broadcasted to subscribers: lobby_id=%s, subscriber_count=%d", lobbyID.String(), len(subscriptions))
+	ltm.logger.WithFields(map[string]interface{}{"lobby_id": lobbyID.String(), "subscriber_count": len(subscriptions)}).Debug("Telemetry broadcasted to subscribers")
 
 	return nil
 }
@@ -216,10 +216,10 @@ func (ltm *LobbyTelemetryManager) CleanupSession(ctx context.Context, sessionID,
 			}
 
 			if err := ltm.nk.StreamUserLeave(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, userID.String(), sessionID.String()); err != nil {
-				ltm.logger.Warn("Failed to leave telemetry stream during cleanup: session_id=%s, lobby_id=%s, error=%v", sessionID.String(), subscription.LobbyID.String(), err)
+				ltm.logger.WithFields(map[string]interface{}{"session_id": sessionID.String(), "lobby_id": subscription.LobbyID.String(), "error": err}).Warn("Failed to leave telemetry stream during cleanup")
 			}
 		}
 	}
 
-	ltm.logger.Debug("Cleaned up telemetry subscriptions for session: session_id=%s, user_id=%s", sessionID.String(), userID.String())
+	ltm.logger.WithFields(map[string]interface{}{"session_id": sessionID.String(), "user_id": userID.String()}).Debug("Cleaned up telemetry subscriptions")
 }

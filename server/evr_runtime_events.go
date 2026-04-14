@@ -42,7 +42,7 @@ type Event interface {
 func SendEvent(ctx context.Context, nk runtime.NakamaModule, e Event) error {
 	payloadBytes, err := json.Marshal(e)
 	if err != nil {
-		return fmt.Errorf("failed to marshal login event payload: %v", err)
+		return fmt.Errorf("failed to marshal login event payload: %w", err)
 	}
 	nk.Event(ctx, &api.Event{
 		Name: fmt.Sprintf("%T", e),
@@ -216,7 +216,7 @@ func (h *EventDispatcher) unmarshalEventFactory(events []Event) func(event *api.
 				return nil, fmt.Errorf("event type does not implement Event: %s", event.Name)
 			}
 			if err := json.Unmarshal([]byte(event.Properties["payload"]), e); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal event payload: %v", err)
+				return nil, fmt.Errorf("failed to unmarshal event payload: %w", err)
 			}
 			return e, nil
 		}
@@ -263,7 +263,7 @@ func (h *EventDispatcher) processEvent(ctx context.Context, logger runtime.Logge
 			logger.WithField("error", err).Error("failed to handle event")
 		}
 	} else {
-		logger.Warn("unhandled event: %s", evt.Name)
+		logger.WithField("name", evt.Name).Warn("unhandled event")
 	}
 }
 
@@ -545,7 +545,7 @@ func ScheduleDisabledAccountKick(ctx context.Context, nk runtime.NakamaModule, l
 		if c, err := DisconnectUserID(ctx, nk, userID, true, true, false); err != nil {
 			logger.WithField("error", err).Error("failed to disconnect user")
 		} else {
-			logger.Info("user %s disconnected: %v sessions", userID, c)
+			logger.WithFields(map[string]interface{}{"user_id": userID, "session_count": c}).Info("user disconnected")
 		}
 
 		// Send audit log message

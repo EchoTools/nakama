@@ -84,7 +84,7 @@ func (ri *ReservationIntegration) startReservationCleanup(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := ri.reservationMgr.CheckNoShowReservations(ctx); err != nil {
-				ri.logger.Error("Failed to check no-show reservations: %v", err)
+				ri.logger.WithField("error", err).Error("Failed to check no-show reservations")
 			}
 			ri.cleanupExpiredReservations(ctx)
 		}
@@ -105,7 +105,7 @@ func (ri *ReservationIntegration) cleanupExpiredReservations(ctx context.Context
 func (ri *ReservationIntegration) cleanupExpiredReservationsWithDiscord(ctx context.Context, dg DiscordMessenger) error {
 	objects, _, err := ri.nk.StorageList(ctx, SystemUserID, SystemUserID, ReservationStorageCollection, 1000, "")
 	if err != nil {
-		ri.logger.Error("Failed to list reservations for cleanup: %v", err)
+		ri.logger.WithField("error", err).Error("Failed to list reservations for cleanup")
 		return fmt.Errorf("failed to list reservations: %w", err)
 	}
 
@@ -113,7 +113,7 @@ func (ri *ReservationIntegration) cleanupExpiredReservationsWithDiscord(ctx cont
 	for _, obj := range objects {
 		var reservation MatchReservation
 		if err := json.Unmarshal([]byte(obj.Value), &reservation); err != nil {
-			ri.logger.Warn("Failed to unmarshal reservation %s during cleanup: %v", obj.Key, err)
+			ri.logger.WithFields(map[string]interface{}{"key": obj.Key, "error": err}).Warn("Failed to unmarshal reservation during cleanup")
 			continue
 		}
 
@@ -134,11 +134,11 @@ func (ri *ReservationIntegration) cleanupExpiredReservationsWithDiscord(ctx cont
 		if shouldRemove {
 			guildID, err := GetGuildIDByGroupIDNK(ctx, ri.nk, reservation.GroupID.String())
 			if err != nil {
-				ri.logger.Warn("Failed to get guild ID for reservation %s cleanup: %v", reservation.ID, err)
+				ri.logger.WithFields(map[string]interface{}{"id": reservation.ID, "error": err}).Warn("Failed to get guild ID for reservation cleanup")
 			} else {
 				auditChannelID, err := GetGuildAuditChannelID(ctx, ri.nk, guildID)
 				if err != nil {
-					ri.logger.Warn("Failed to get audit channel for reservation %s cleanup: %v", reservation.ID, err)
+					ri.logger.WithFields(map[string]interface{}{"id": reservation.ID, "error": err}).Warn("Failed to get audit channel for reservation cleanup")
 				} else {
 					message := fmt.Sprintf("🗑️ **Reservation Cleanup**\n"+
 						"Reservation ID: `%s`\n"+
@@ -158,15 +158,15 @@ func (ri *ReservationIntegration) cleanupExpiredReservationsWithDiscord(ctx cont
 					if _, err := dg.ChannelMessageSendComplex(auditChannelID, &discordgo.MessageSend{
 						Content: message,
 					}); err != nil {
-						ri.logger.Error("Failed to send audit message for reservation %s cleanup: %v", reservation.ID, err)
+						ri.logger.WithFields(map[string]interface{}{"id": reservation.ID, "error": err}).Error("Failed to send audit message for reservation cleanup")
 					}
 				}
 			}
 
 			if err := ri.reservationMgr.DeleteReservation(ctx, reservation.ID); err != nil {
-				ri.logger.Error("Failed to delete expired reservation %s: %v", reservation.ID, err)
+				ri.logger.WithFields(map[string]interface{}{"id": reservation.ID, "error": err}).Error("Failed to delete expired reservation")
 			} else {
-				ri.logger.Info("Cleaned up reservation %s: %s", reservation.ID, reason)
+				ri.logger.WithFields(map[string]interface{}{"id": reservation.ID, "reason": reason}).Info("Cleaned up reservation")
 			}
 		}
 	}
@@ -209,7 +209,7 @@ func (sum *ServerUtilizationMonitor) StartMonitoring(ctx context.Context, dg *di
 func (sum *ServerUtilizationMonitor) checkUtilization(ctx context.Context, dg *discordgo.Session) {
 	matches, err := sum.nk.MatchList(ctx, 100, true, "", nil, nil, "*")
 	if err != nil {
-		sum.logger.Error("Failed to list matches for utilization monitoring: %v", err)
+		sum.logger.WithField("error", err).Error("Failed to list matches for utilization monitoring")
 		return
 	}
 
@@ -244,7 +244,7 @@ func (sum *ServerUtilizationMonitor) checkUtilization(ctx context.Context, dg *d
 
 		// Send low utilization notification
 		if err := sum.sendLowUtilizationAlert(ctx, dg, &label, match.MatchId); err != nil {
-			sum.logger.Error("Failed to send low utilization alert for match %s: %v", match.MatchId, err)
+			sum.logger.WithFields(map[string]interface{}{"match_id": match.MatchId, "error": err}).Error("Failed to send low utilization alert for match")
 		} else {
 			sum.alertTracker[match.MatchId] = now
 		}

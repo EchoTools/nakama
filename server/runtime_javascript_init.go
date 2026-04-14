@@ -430,7 +430,7 @@ func (im *RuntimeJavascriptInitModule) extractRpcFn(r *goja.Runtime, rpcFnName s
 
 	globalFnId, err := im.getRegisteredRpcFnIdentifier(r, bs, initFnVarName, rpcFnName)
 	if err != nil {
-		return "", fmt.Errorf("js %s function key could not be extracted: %s", rpcFnName, err.Error())
+		return "", fmt.Errorf("js %s function key could not be extracted: %w", rpcFnName, err)
 	}
 
 	return globalFnId, nil
@@ -444,7 +444,7 @@ func (im *RuntimeJavascriptInitModule) extractStorageIndexFilterFn(r *goja.Runti
 
 	globalFnId, err := im.getRegisteredFnIdentifier(r, bs, initFnVarName, indexName, "registerStorageIndexFilter")
 	if err != nil {
-		return "", fmt.Errorf("js %s function key could not be extracted: %s", indexName, err.Error())
+		return "", fmt.Errorf("js %s function key could not be extracted: %w", indexName, err)
 	}
 
 	return globalFnId, nil
@@ -1173,7 +1173,7 @@ func (im *RuntimeJavascriptInitModule) registerStorageIndex(r *goja.Runtime) fun
 		}
 
 		if err := im.storageIndex.CreateIndex(context.Background(), idxName, idxCollection, idxKey, fields, sortableFields, idxMaxEntries, indexOnly); err != nil {
-			panic(r.NewGoError(fmt.Errorf("Failed to register storage index: %s", err.Error())))
+			panic(r.NewGoError(fmt.Errorf("Failed to register storage index: %w", err)))
 		}
 
 		return goja.Undefined()
@@ -1246,7 +1246,7 @@ func (im *RuntimeJavascriptInitModule) extractHookFn(registerFnName string) (str
 
 	globalFnId, err := im.getHookFnIdentifier(bs, initFnVarName, registerFnName)
 	if err != nil {
-		return "", fmt.Errorf("js %s function key could not be extracted: %s", registerFnName, err.Error())
+		return "", fmt.Errorf("js %s function key could not be extracted: %w", registerFnName, err)
 	}
 
 	return globalFnId, nil
@@ -1388,7 +1388,7 @@ func (im *RuntimeJavascriptInitModule) extractRtHookFn(r *goja.Runtime, register
 
 	globalFnId, err := im.getRtHookFnIdentifier(r, bs, initFnVarName, registerFnName, fnName)
 	if err != nil {
-		return "", fmt.Errorf("js realtime %s hook function key could not be extracted: %s", registerFnName, err.Error())
+		return "", fmt.Errorf("js realtime %s hook function key could not be extracted: %w", registerFnName, err)
 	}
 
 	return globalFnId, nil
@@ -1809,7 +1809,7 @@ func (im *RuntimeJavascriptInitModule) extractMatchFnKey(r *goja.Runtime, modNam
 
 	globalFnId, err := im.getMatchHookFnIdentifier(r, bs, initFnVarName, modName, matchFnId)
 	if err != nil {
-		return "", fmt.Errorf("js match handler %q function for module %q global id could not be extracted: %s", string(matchFnId), modName, err.Error())
+		return "", fmt.Errorf("js match handler %q function for module %q global id could not be extracted: %w", string(matchFnId), modName, err)
 	}
 
 	return globalFnId, nil

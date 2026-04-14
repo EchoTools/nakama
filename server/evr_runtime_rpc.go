@@ -128,7 +128,7 @@ func (h *RPCHandler) MatchListPublicRPC(ctx context.Context, logger runtime.Logg
 	for _, m := range matches {
 		l := &MatchLabel{}
 		if err := json.Unmarshal([]byte(m.GetLabel().GetValue()), l); err != nil {
-			return "", fmt.Errorf("failed to unmarshal match label: %s", err.Error())
+			return "", fmt.Errorf("failed to unmarshal match label: %w", err)
 		}
 
 		// Count from original label so private lobby players are included
@@ -235,14 +235,14 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 
 	if userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string); ok {
 		if fullAccess, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalPrivateDataAccess); err != nil {
-			return "", fmt.Errorf("failed to check system group membership: %s", err.Error())
+			return "", fmt.Errorf("failed to check system group membership: %w", err)
 		} else {
 			// Unpack the bitsets from the session token
 			vars, ok := ctx.Value(runtime.RUNTIME_CTX_VARS).(map[string]string)
 			if ok {
 				memberships, err = MembershipsFromSessionVars(vars)
 				if err != nil {
-					return "", fmt.Errorf("failed to get memberships from session vars: %s", err.Error())
+					return "", fmt.Errorf("failed to get memberships from session vars: %w", err)
 				}
 			}
 		}
@@ -251,7 +251,7 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 	request := &MatchRpcRequest{}
 	if payload != "" {
 		if err := json.Unmarshal([]byte(payload), request); err != nil {
-			return "", fmt.Errorf("failed to unmarshal payload: %s", err.Error())
+			return "", fmt.Errorf("failed to unmarshal payload: %w", err)
 		}
 	}
 	if request.Query == "" {
@@ -266,7 +266,7 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 		for _, id := range request.MatchIDs {
 			match, err := nk.MatchGet(ctx, id.String())
 			if err != nil {
-				return "", fmt.Errorf("failed to get match: %s", err.Error())
+				return "", fmt.Errorf("failed to get match: %w", err)
 			}
 			matches = append(matches, match)
 		}
@@ -276,7 +276,7 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 		// Get all the matches
 		matches, err = nk.MatchList(ctx, 100, true, "", nil, nil, request.Query)
 		if err != nil {
-			return "", fmt.Errorf("failed to list matches: %s", err.Error())
+			return "", fmt.Errorf("failed to list matches: %w", err)
 		}
 	}
 
@@ -289,7 +289,7 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 		} else {
 			label := &MatchLabel{}
 			if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
-				return "", fmt.Errorf("failed to unmarshal match label: %s", err.Error())
+				return "", fmt.Errorf("failed to unmarshal match label: %w", err)
 			}
 
 			// Remove sensitive data
@@ -321,7 +321,7 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 			}
 			data, err = json.Marshal(label.PublicView())
 			if err != nil {
-				return "", fmt.Errorf("failed to marshal match label: %s", err.Error())
+				return "", fmt.Errorf("failed to marshal match label: %w", err)
 			}
 			labels = append(labels, data)
 		}
@@ -482,7 +482,7 @@ func ExportAccountData(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 		if !ok {
 			return "", fmt.Errorf("failed to get RUNTIME_CTX_QUERY_PARAMS from context")
 		}
-		logger.Info("Query params: %v", queryParams)
+		logger.WithField("query_params", queryParams).Info("Query params")
 
 		// Get the user's account data.
 		account, err := nk.AccountGetId(ctx, runtime.DefaultSession, runtime.DefaultUserID)
@@ -593,7 +593,7 @@ func DiscordSignInRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 	responsejson, err := json.Marshal(response)
 	if err != nil {
-		return "", runtime.NewError(fmt.Sprintf("error marshalling LoginSuccess response: %v", err), StatusInternalError)
+		return "", runtime.NewError(fmt.Sprintf("error marshalling LoginSuccess response: %w", err), StatusInternalError)
 	}
 
 	return string(responsejson), nil
@@ -1142,7 +1142,7 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 
 	request := AuthenticatePasswordRequest{}
 	if err := json.Unmarshal([]byte(payload), &request); err != nil {
-		return "", runtime.NewError(fmt.Sprintf("Failed to unmarshal request: %v", err), StatusInvalidArgument)
+		return "", runtime.NewError(fmt.Sprintf("Failed to unmarshal request: %w", err), StatusInvalidArgument)
 	}
 
 	var err error
@@ -1378,7 +1378,7 @@ func (h *RPCHandler) AccountLookupRPC(ctx context.Context, logger runtime.Logger
 	callerID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 	if ok {
 		if ok, err := CheckSystemGroupMembership(ctx, db, callerID, GroupGlobalPrivateDataAccess); err != nil {
-			logger.Warn("Error checking system group membership for private data access:", err)
+			logger.WithField("error", err).Warn("Error checking system group membership for private data access")
 		} else {
 			includePrivate = ok
 		}
@@ -2155,7 +2155,7 @@ func PlayerOutfitSaveRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	// We only need to check if the limit is reached, so we request MaxOutfitsPerUser items
 	objects, _, err := nk.StorageList(ctx, userID, userID, OutfitCollection, MaxOutfitsPerUser, "")
 	if err != nil {
-		logger.Error("Failed to list outfits: %v", err)
+		logger.WithField("error", err).Error("Failed to list outfits")
 		return "", runtime.NewError("failed to check outfit limit", StatusInternalError)
 	}
 
@@ -2166,7 +2166,7 @@ func PlayerOutfitSaveRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	// Generate new UUID for outfit
 	outfitUUID, err := uuid.NewV4()
 	if err != nil {
-		logger.Error("Failed to generate outfit ID: %v", err)
+		logger.WithField("error", err).Error("Failed to generate outfit ID")
 		return "", runtime.NewError("failed to generate outfit ID", StatusInternalError)
 	}
 	outfitID := outfitUUID.String()
@@ -2185,7 +2185,7 @@ func PlayerOutfitSaveRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	// Marshal outfit to JSON
 	value, err := json.Marshal(outfit)
 	if err != nil {
-		logger.Error("Failed to marshal outfit: %v", err)
+		logger.WithField("error", err).Error("Failed to marshal outfit")
 		return "", runtime.NewError("failed to save outfit", StatusInternalError)
 	}
 
@@ -2199,7 +2199,7 @@ func PlayerOutfitSaveRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		PermissionWrite: 1, // Owner can write
 	}})
 	if err != nil {
-		logger.Error("Failed to write outfit to storage: %v", err)
+		logger.WithField("error", err).Error("Failed to write outfit to storage")
 		return "", runtime.NewError("failed to save outfit", StatusInternalError)
 	}
 
@@ -2212,7 +2212,7 @@ func PlayerOutfitSaveRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 
 	data, err := json.Marshal(response)
 	if err != nil {
-		logger.Error("Failed to marshal response: %v", err)
+		logger.WithField("error", err).Error("Failed to marshal response")
 		return "", runtime.NewError("failed to create response", StatusInternalError)
 	}
 
@@ -2365,7 +2365,7 @@ func AdminPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 
 	data, err := json.Marshal(response)
 	if err != nil {
-		logger.Error("Failed to marshal response: %v", err)
+		logger.WithField("error", err).Error("Failed to marshal response")
 		return "", runtime.NewError("failed to create response", StatusInternalError)
 	}
 
@@ -2384,7 +2384,7 @@ func PlayerOutfitListRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	// Set limit higher than MaxOutfitsPerUser for safety, though users can only have MaxOutfitsPerUser outfits
 	objects, _, err := nk.StorageList(ctx, userID, userID, OutfitCollection, MaxOutfitsPerUser*2, "")
 	if err != nil {
-		logger.Error("Failed to list outfits: %v", err)
+		logger.WithField("error", err).Error("Failed to list outfits")
 		return "", runtime.NewError("failed to list outfits", StatusInternalError)
 	}
 
@@ -2393,7 +2393,7 @@ func PlayerOutfitListRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	for _, obj := range objects {
 		var outfit Outfit
 		if err := json.Unmarshal([]byte(obj.Value), &outfit); err != nil {
-			logger.Warn("Failed to unmarshal outfit %s: %v", obj.Key, err)
+			logger.WithFields(map[string]interface{}{"key": obj.Key, "error": err}).Warn("Failed to unmarshal outfit")
 			continue
 		}
 		outfits = append(outfits, outfit)
@@ -2406,7 +2406,7 @@ func PlayerOutfitListRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 
 	data, err := json.Marshal(response)
 	if err != nil {
-		logger.Error("Failed to marshal response: %v", err)
+		logger.WithField("error", err).Error("Failed to marshal response")
 		return "", runtime.NewError("failed to create response", StatusInternalError)
 	}
 
@@ -2439,7 +2439,7 @@ func PlayerOutfitLoadRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		UserID:     userID,
 	}})
 	if err != nil {
-		logger.Error("Failed to read outfit: %v", err)
+		logger.WithField("error", err).Error("Failed to read outfit")
 		return "", runtime.NewError("failed to load outfit", StatusInternalError)
 	}
 
@@ -2450,7 +2450,7 @@ func PlayerOutfitLoadRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	// Parse outfit
 	var outfit Outfit
 	if err := json.Unmarshal([]byte(objects[0].Value), &outfit); err != nil {
-		logger.Error("Failed to unmarshal outfit: %v", err)
+		logger.WithField("error", err).Error("Failed to unmarshal outfit")
 		return "", runtime.NewError("failed to load outfit", StatusInternalError)
 	}
 
@@ -2462,7 +2462,7 @@ func PlayerOutfitLoadRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 
 	data, err := json.Marshal(response)
 	if err != nil {
-		logger.Error("Failed to marshal response: %v", err)
+		logger.WithField("error", err).Error("Failed to marshal response")
 		return "", runtime.NewError("failed to create response", StatusInternalError)
 	}
 
@@ -2495,7 +2495,7 @@ func PlayerOutfitDeleteRPC(ctx context.Context, logger runtime.Logger, db *sql.D
 		UserID:     userID,
 	}})
 	if err != nil {
-		logger.Error("Failed to verify outfit ownership: %v", err)
+		logger.WithField("error", err).Error("Failed to verify outfit ownership")
 		return "", runtime.NewError("failed to delete outfit", StatusInternalError)
 	}
 
@@ -2510,7 +2510,7 @@ func PlayerOutfitDeleteRPC(ctx context.Context, logger runtime.Logger, db *sql.D
 		UserID:     userID,
 	}})
 	if err != nil {
-		logger.Error("Failed to delete outfit: %v", err)
+		logger.WithField("error", err).Error("Failed to delete outfit")
 		return "", runtime.NewError("failed to delete outfit", StatusInternalError)
 	}
 
@@ -2521,7 +2521,7 @@ func PlayerOutfitDeleteRPC(ctx context.Context, logger runtime.Logger, db *sql.D
 
 	data, err := json.Marshal(response)
 	if err != nil {
-		logger.Error("Failed to marshal response: %v", err)
+		logger.WithField("error", err).Error("Failed to marshal response")
 		return "", runtime.NewError("failed to create response", StatusInternalError)
 	}
 

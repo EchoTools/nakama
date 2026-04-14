@@ -221,7 +221,7 @@ func (r *UserLogJouralRegistry) storageWrite(ctx context.Context, _ *zap.Logger,
 	}
 
 	if _, err = r.nk.StorageWrite(ctx, ops); err != nil {
-		return fmt.Errorf("Failed to write remote log: %v", err)
+		return fmt.Errorf("Failed to write remote log: %w", err)
 	}
 
 	return nil

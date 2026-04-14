@@ -48,7 +48,7 @@ func NewPlayerParticipation(ctx context.Context, logger runtime.Logger, db *sql.
 	if player.PartyID != "" {
 		count, err := nk.StreamCount(StreamModeParty, player.PartyID, "", node)
 		if err != nil {
-			logger.Warn("Failed to get party size for player %s: %v", userID, err)
+			logger.WithFields(map[string]interface{}{"user_id": userID, "error": err}).Warn("Failed to get party size for player")
 		}
 		partySize = max(1, count)
 	}

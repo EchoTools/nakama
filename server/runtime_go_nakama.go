@@ -493,7 +493,7 @@ func (n *RuntimeGoNakamaModule) AccountUpdateId(ctx context.Context, userID, use
 	if metadata != nil {
 		metadataBytes, err := json.Marshal(metadata)
 		if err != nil {
-			return fmt.Errorf("error encoding metadata: %v", err.Error())
+			return fmt.Errorf("error encoding metadata: %w", err)
 		}
 		metadataWrapper = &wrapperspb.StringValue{Value: string(metadataBytes)}
 	}
@@ -560,12 +560,12 @@ func (n *RuntimeGoNakamaModule) AccountExportId(ctx context.Context, userID stri
 
 	export, err := ExportAccount(ctx, n.logger, n.db, u)
 	if err != nil {
-		return "", fmt.Errorf("error exporting account: %v", err.Error())
+		return "", fmt.Errorf("error exporting account: %w", err)
 	}
 
 	exportBytes, err := n.protojsonMarshaler.Marshal(export)
 	if err != nil {
-		return "", fmt.Errorf("error encoding account export: %v", err.Error())
+		return "", fmt.Errorf("error encoding account export: %w", err)
 	}
 
 	return string(exportBytes), nil
@@ -1632,7 +1632,7 @@ func (n *RuntimeGoNakamaModule) NotificationSend(ctx context.Context, userID, su
 
 	contentBytes, err := json.Marshal(content)
 	if err != nil {
-		return fmt.Errorf("failed to convert content: %s", err.Error())
+		return fmt.Errorf("failed to convert content: %w", err)
 	}
 	contentString := string(contentBytes)
 
@@ -1685,7 +1685,7 @@ func (n *RuntimeGoNakamaModule) NotificationsSend(ctx context.Context, notificat
 
 		contentBytes, err := json.Marshal(notification.Content)
 		if err != nil {
-			return fmt.Errorf("failed to convert content: %s", err.Error())
+			return fmt.Errorf("failed to convert content: %w", err)
 		}
 		contentString := string(contentBytes)
 
@@ -1736,7 +1736,7 @@ func (n *RuntimeGoNakamaModule) NotificationSendAll(ctx context.Context, subject
 
 	contentBytes, err := json.Marshal(content)
 	if err != nil {
-		return fmt.Errorf("failed to convert content: %s", err.Error())
+		return fmt.Errorf("failed to convert content: %w", err)
 	}
 	contentString := string(contentBytes)
 
@@ -1892,7 +1892,7 @@ func (n *RuntimeGoNakamaModule) WalletUpdate(ctx context.Context, userID string,
 	if metadata != nil {
 		metadataBytes, err = json.Marshal(metadata)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to convert metadata: %s", err.Error())
+			return nil, nil, fmt.Errorf("failed to convert metadata: %w", err)
 		}
 	}
 
@@ -1941,7 +1941,7 @@ func (n *RuntimeGoNakamaModule) WalletsUpdate(ctx context.Context, updates []*ru
 		if update.Metadata != nil {
 			metadataBytes, err = json.Marshal(update.Metadata)
 			if err != nil {
-				return nil, fmt.Errorf("failed to convert metadata: %s", err.Error())
+				return nil, fmt.Errorf("failed to convert metadata: %w", err)
 			}
 		}
 
@@ -1970,7 +1970,7 @@ func (n *RuntimeGoNakamaModule) WalletLedgerUpdate(ctx context.Context, itemID s
 
 	metadataBytes, err := json.Marshal(metadata)
 	if err != nil {
-		return nil, fmt.Errorf("failed to convert metadata: %s", err.Error())
+		return nil, fmt.Errorf("failed to convert metadata: %w", err)
 	}
 
 	return UpdateWalletLedger(ctx, n.logger, n.db, id, string(metadataBytes))
@@ -2311,7 +2311,7 @@ func (n *RuntimeGoNakamaModule) MultiUpdate(ctx context.Context, accountUpdates 
 		if update.Metadata != nil {
 			metadataBytes, err := json.Marshal(update.Metadata)
 			if err != nil {
-				return nil, nil, fmt.Errorf("error encoding metadata: %v", err.Error())
+				return nil, nil, fmt.Errorf("error encoding metadata: %w", err)
 			}
 			metadataWrapper = &wrapperspb.StringValue{Value: string(metadataBytes)}
 		}
@@ -2429,7 +2429,7 @@ func (n *RuntimeGoNakamaModule) MultiUpdate(ctx context.Context, accountUpdates 
 		if update.Metadata != nil {
 			metadataBytes, err = json.Marshal(update.Metadata)
 			if err != nil {
-				return nil, nil, fmt.Errorf("failed to convert metadata: %s", err.Error())
+				return nil, nil, fmt.Errorf("failed to convert metadata: %w", err)
 			}
 		}
 
@@ -2493,7 +2493,7 @@ func (n *RuntimeGoNakamaModule) LeaderboardCreate(ctx context.Context, leaderboa
 	if metadata != nil {
 		metadataBytes, err := json.Marshal(metadata)
 		if err != nil {
-			return fmt.Errorf("error encoding metadata: %v", err.Error())
+			return fmt.Errorf("error encoding metadata: %w", err)
 		}
 		metadataStr = string(metadataBytes)
 	}
@@ -2644,7 +2644,7 @@ func (n *RuntimeGoNakamaModule) LeaderboardRecordsListCursorFromRank(leaderboard
 
 	ownerId, score, subscore, err := n.leaderboardRankCache.GetDataByRank(leaderboardID, expiryTime, l.SortOrder, rank)
 	if err != nil {
-		return "", fmt.Errorf("failed to get cursor from rank: %s", err.Error())
+		return "", fmt.Errorf("failed to get cursor from rank: %w", err)
 	}
 
 	cursor := &leaderboardRecordListCursor{
@@ -2659,7 +2659,7 @@ func (n *RuntimeGoNakamaModule) LeaderboardRecordsListCursorFromRank(leaderboard
 
 	cursorStr, err := marshalLeaderboardRecordsListCursor(cursor)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal leaderboard cursor: %s", err.Error())
+		return "", fmt.Errorf("failed to marshal leaderboard cursor: %w", err)
 	}
 
 	return cursorStr, nil
@@ -2699,7 +2699,7 @@ func (n *RuntimeGoNakamaModule) LeaderboardRecordWrite(ctx context.Context, id, 
 	if metadata != nil {
 		metadataBytes, err := json.Marshal(metadata)
 		if err != nil {
-			return nil, fmt.Errorf("error encoding metadata: %v", err.Error())
+			return nil, fmt.Errorf("error encoding metadata: %w", err)
 		}
 		metadataStr = string(metadataBytes)
 	}
@@ -2833,7 +2833,7 @@ func (n *RuntimeGoNakamaModule) TournamentCreate(ctx context.Context, id string,
 	if metadata != nil {
 		metadataBytes, err := json.Marshal(metadata)
 		if err != nil {
-			return fmt.Errorf("error encoding metadata: %v", err.Error())
+			return fmt.Errorf("error encoding metadata: %w", err)
 		}
 		metadataStr = string(metadataBytes)
 	}
@@ -3067,7 +3067,7 @@ func (n *RuntimeGoNakamaModule) TournamentRecordWrite(ctx context.Context, id, o
 	if metadata != nil {
 		metadataBytes, err := json.Marshal(metadata)
 		if err != nil {
-			return nil, fmt.Errorf("error encoding metadata: %v", err.Error())
+			return nil, fmt.Errorf("error encoding metadata: %w", err)
 		}
 		metadataStr = string(metadataBytes)
 	}
@@ -3512,7 +3512,7 @@ func (n *RuntimeGoNakamaModule) GroupCreate(ctx context.Context, userID, name, c
 	if metadata != nil {
 		metadataBytes, err := json.Marshal(metadata)
 		if err != nil {
-			return nil, fmt.Errorf("error encoding metadata: %v", err.Error())
+			return nil, fmt.Errorf("error encoding metadata: %w", err)
 		}
 		metadataStr = string(metadataBytes)
 	}
@@ -3589,7 +3589,7 @@ func (n *RuntimeGoNakamaModule) GroupUpdate(ctx context.Context, groupID, userID
 	if metadata != nil {
 		metadataBytes, err := json.Marshal(metadata)
 		if err != nil {
-			return fmt.Errorf("error encoding metadata: %v", err.Error())
+			return fmt.Errorf("error encoding metadata: %w", err)
 		}
 		metadataWrapper = &wrapperspb.StringValue{Value: string(metadataBytes)}
 	}
@@ -4336,7 +4336,7 @@ func (n *RuntimeGoNakamaModule) ChannelMessageSend(ctx context.Context, channelI
 	if content != nil {
 		contentBytes, err := json.Marshal(content)
 		if err != nil {
-			return nil, fmt.Errorf("error encoding content: %v", err.Error())
+			return nil, fmt.Errorf("error encoding content: %w", err)
 		}
 		contentStr = string(contentBytes)
 	}
@@ -4369,7 +4369,7 @@ func (n *RuntimeGoNakamaModule) ChannelMessageUpdate(ctx context.Context, channe
 	if content != nil {
 		contentBytes, err := json.Marshal(content)
 		if err != nil {
-			return nil, fmt.Errorf("error encoding content: %v", err.Error())
+			return nil, fmt.Errorf("error encoding content: %w", err)
 		}
 		contentStr = string(contentBytes)
 	}

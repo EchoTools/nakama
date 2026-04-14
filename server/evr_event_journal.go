@@ -37,7 +37,7 @@ func NewEventJournal(redisClient *redis.Client, logger runtime.Logger) *EventJou
 // Journal adds an event to a Redis Stream for durable storage
 func (ej *EventJournal) Journal(ctx context.Context, eventType string, event *JournalEvent) error {
 	if ej.redisClient == nil {
-		ej.logger.Debug("Redis client not available, skipping journaling: event_type=%s", eventType)
+		ej.logger.WithField("event_type", eventType).Debug("Redis client not available, skipping journaling")
 		return nil
 	}
 
@@ -61,11 +61,11 @@ func (ej *EventJournal) Journal(ctx context.Context, eventType string, event *Jo
 
 	_, err = ej.redisClient.XAdd(args).Result()
 	if err != nil {
-		ej.logger.Error("Failed to add event to Redis Stream: stream=%s, event_type=%s, error=%v", streamKey, eventType, err)
+		ej.logger.WithFields(map[string]interface{}{"stream_key": streamKey, "event_type": eventType, "error": err}).Error("Failed to add event to Redis Stream")
 		return fmt.Errorf("failed to add event to Redis Stream: %w", err)
 	}
 
-	ej.logger.Debug("Event journaled successfully: stream=%s, event_type=%s", streamKey, eventType)
+	ej.logger.WithFields(map[string]interface{}{"stream_key": streamKey, "event_type": eventType}).Debug("Event journaled successfully")
 
 	return nil
 }
@@ -170,8 +170,12 @@ func (ec *EventConsumer) ConsumeEvents(ctx context.Context, streamKey string, ba
 				continue
 			}
 			if err != nil {
-				ec.logger.Error("Error reading from Redis Stream: stream=%s, error=%v", streamKey, err)
-				time.Sleep(time.Second)
+				ec.logger.WithFields(map[string]interface{}{"stream_key": streamKey, "error": err}).Error("Error reading from Redis Stream")
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(time.Second):
+				}
 				continue
 			}
 
@@ -179,13 +183,13 @@ func (ec *EventConsumer) ConsumeEvents(ctx context.Context, streamKey string, ba
 				for _, message := range stream.Messages {
 					// Process the message
 					if err := processFunc(message.ID, message.Values); err != nil {
-						ec.logger.Error("Error processing message: stream=%s, message_id=%s, error=%v", streamKey, message.ID, err)
+						ec.logger.WithFields(map[string]interface{}{"stream_key": streamKey, "message_id": message.ID, "error": err}).Error("Error processing message")
 						continue
 					}
 
 					// Acknowledge the message
 					if err := ec.redisClient.XAck(streamKey, ec.groupName, message.ID).Err(); err != nil {
-						ec.logger.Error("Error acknowledging message: stream=%s, message_id=%s, error=%v", streamKey, message.ID, err)
+						ec.logger.WithFields(map[string]interface{}{"stream_key": streamKey, "message_id": message.ID, "error": err}).Error("Error acknowledging message")
 					}
 				}
 			}

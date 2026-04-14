@@ -72,8 +72,7 @@ func (rm *ReservationManager) CreateReservation(ctx context.Context, req *Create
 		return nil, fmt.Errorf("failed to store reservation: %w", err)
 	}
 
-	rm.logger.Info("Created reservation %s for group %s from %v to %v",
-		reservation.ID, reservation.GroupID.String(), reservation.StartTime, reservation.EndTime)
+	rm.logger.WithFields(map[string]interface{}{"id": reservation.ID, "group": reservation.GroupID.String(), "start_time": reservation.StartTime, "end_time": reservation.EndTime}).Info("Created reservation")
 
 	return reservation, nil
 }
@@ -136,7 +135,7 @@ func (rm *ReservationManager) ListReservations(ctx context.Context, groupID uuid
 	for _, obj := range objects {
 		var reservation MatchReservation
 		if err := json.Unmarshal([]byte(obj.Value), &reservation); err != nil {
-			rm.logger.Warn("Failed to unmarshal reservation %s: %v", obj.Key, err)
+			rm.logger.WithFields(map[string]interface{}{"key": obj.Key, "error": err}).Warn("Failed to unmarshal reservation")
 			continue
 		}
 
@@ -186,16 +185,16 @@ func (rm *ReservationManager) CheckNoShowReservations(ctx context.Context) error
 	for _, obj := range objects {
 		var reservation MatchReservation
 		if err := json.Unmarshal([]byte(obj.Value), &reservation); err != nil {
-			rm.logger.Warn("failed to unmarshal reservation %s during no-show check: %v", obj.Key, err)
+			rm.logger.WithFields(map[string]interface{}{"key": obj.Key, "error": err}).Warn("failed to unmarshal reservation during no-show check")
 			continue
 		}
 
 		if reservation.State == ReservationStateReserved && now.After(reservation.StartTime.Add(noShowThreshold)) {
 			if err := rm.UpdateReservationState(ctx, reservation.ID, ReservationStateExpired, "no-show: not activated within 20 minutes"); err != nil {
-				rm.logger.Error("failed to expire no-show reservation %s: %v", reservation.ID, err)
+				rm.logger.WithFields(map[string]interface{}{"id": reservation.ID, "error": err}).Error("failed to expire no-show reservation")
 				continue
 			}
-			rm.logger.Info("marked reservation %s as no-show expired (classification: %s)", reservation.ID, reservation.Classification.String())
+			rm.logger.WithFields(map[string]interface{}{"id": reservation.ID, "classification": reservation.Classification.String()}).Info("marked reservation as no-show expired")
 		}
 	}
 

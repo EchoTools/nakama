@@ -103,7 +103,7 @@ func generateDeviceAuthCode() string {
 func DeviceAuthRequestRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	codes, err := loadDeviceAuthCodes(ctx, nk)
 	if err != nil {
-		logger.Error("Failed to load device auth codes: %v", err)
+		logger.WithField("error", err).Error("Failed to load device auth codes")
 		return "", runtime.NewError("internal error", StatusInternalError)
 	}
 
@@ -125,11 +125,11 @@ func DeviceAuthRequestRpc(ctx context.Context, logger runtime.Logger, db *sql.DB
 	}
 
 	if err := storeDeviceAuthCodes(ctx, nk, codes); err != nil {
-		logger.Error("Failed to store device auth code: %v", err)
+		logger.WithField("error", err).Error("Failed to store device auth code")
 		return "", runtime.NewError("internal error", StatusInternalError)
 	}
 
-	logger.Info("Device auth code generated: %s", code)
+	logger.WithField("code", code).Info("Device auth code generated")
 
 	response, _ := json.Marshal(map[string]interface{}{
 		"code":       code,
@@ -161,7 +161,7 @@ func DeviceAuthPollRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 
 	codes, err := loadDeviceAuthCodes(ctx, nk)
 	if err != nil {
-		logger.Error("Failed to load device auth codes: %v", err)
+		logger.WithField("error", err).Error("Failed to load device auth codes")
 		return "", runtime.NewError("internal error", StatusInternalError)
 	}
 
@@ -236,7 +236,7 @@ func DeviceAuthVerifyRpc(ctx context.Context, logger runtime.Logger, db *sql.DB,
 
 	codes, err := loadDeviceAuthCodes(ctx, nk)
 	if err != nil {
-		logger.Error("Failed to load device auth codes: %v", err)
+		logger.WithField("error", err).Error("Failed to load device auth codes")
 		return "", runtime.NewError("internal error", StatusInternalError)
 	}
 
@@ -256,7 +256,7 @@ func DeviceAuthVerifyRpc(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	// Look up discord ID for token vars
 	discordID, err := GetDiscordIDByUserID(ctx, db, userID)
 	if err != nil {
-		logger.Warn("Could not look up discord ID for user %s: %v", userID, err)
+		logger.WithFields(map[string]interface{}{"user_id": userID, "error": err}).Warn("Could not look up discord ID for user")
 		discordID = ""
 	}
 
@@ -270,7 +270,7 @@ func DeviceAuthVerifyRpc(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	tokenExpiry := time.Now().Add(1 * time.Hour).Unix()
 	token, tokenExpiry2, err := nk.AuthenticateTokenGenerate(userID, username, tokenExpiry, tokenVars)
 	if err != nil {
-		logger.Error("Failed to generate token for device auth: %v", err)
+		logger.WithField("error", err).Error("Failed to generate token for device auth")
 		return "", runtime.NewError("failed to generate token", StatusInternalError)
 	}
 
@@ -282,7 +282,7 @@ func DeviceAuthVerifyRpc(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	refreshExpiry := time.Now().Add(30 * 24 * time.Hour).Unix()
 	refreshToken, _, err := nk.AuthenticateTokenGenerate(userID, username, refreshExpiry, refreshVars)
 	if err != nil {
-		logger.Error("Failed to generate refresh token: %v", err)
+		logger.WithField("error", err).Error("Failed to generate refresh token")
 		return "", runtime.NewError("failed to generate refresh token", StatusInternalError)
 	}
 
@@ -294,11 +294,11 @@ func DeviceAuthVerifyRpc(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	entry.Username = username
 
 	if err := storeDeviceAuthCodes(ctx, nk, codes); err != nil {
-		logger.Error("Failed to store verified device auth: %v", err)
+		logger.WithField("error", err).Error("Failed to store verified device auth")
 		return "", runtime.NewError("internal error", StatusInternalError)
 	}
 
-	logger.Info("Device auth code %s verified by user %s (%s), token expires at %d", code, username, userID, tokenExpiry2)
+	logger.WithFields(map[string]interface{}{"code": code, "username": username, "user_id": userID, "token_expiry": tokenExpiry2}).Info("Device auth code verified")
 
 	response, _ := json.Marshal(map[string]string{
 		"status":   "ok",
@@ -340,7 +340,7 @@ func DeviceAuthRefreshRpc(ctx context.Context, logger runtime.Logger, db *sql.DB
 	// Look up discord ID for new token vars
 	discordID, err := GetDiscordIDByUserID(ctx, db, userID.String())
 	if err != nil {
-		logger.Warn("Could not look up discord ID for refresh: %v", err)
+		logger.WithField("error", err).Warn("Could not look up discord ID for refresh")
 		discordID = ""
 	}
 
@@ -374,7 +374,7 @@ func DeviceAuthRefreshRpc(ctx context.Context, logger runtime.Logger, db *sql.DB
 		"username":      username,
 	})
 
-	logger.Info("Device auth token refreshed for user %s (%s)", username, userID.String())
+	logger.WithFields(map[string]interface{}{"username": username, "user_id": userID.String()}).Info("Device auth token refreshed")
 	return string(response), nil
 }
 

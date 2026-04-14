@@ -918,7 +918,7 @@ func checkTournamentConfig(resetSchedule string, startTime, endTime, duration, m
 	if resetSchedule != "" {
 		expr, err := cronexpr.Parse(resetSchedule)
 		if err != nil {
-			return nil, fmt.Errorf("could not parse reset schedule: %s", err.Error())
+			return nil, fmt.Errorf("could not parse reset schedule: %w", err)
 		}
 		cron = expr
 	}

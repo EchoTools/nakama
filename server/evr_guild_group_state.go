@@ -105,13 +105,13 @@ func GuildGroupStatesLoad(ctx context.Context, nk runtime.NakamaModule, botUserI
 	// Read all of the states at once
 	objs, err := nk.StorageRead(ctx, reads)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read guild group states: %v", err)
+		return nil, fmt.Errorf("failed to read guild group states: %w", err)
 	}
 	states := make([]*GuildGroupState, 0, len(groupIDs))
 	for _, obj := range objs {
 		state := &GuildGroupState{}
 		if err := json.Unmarshal([]byte(obj.Value), state); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal guild group state: %v", err)
+			return nil, fmt.Errorf("failed to unmarshal guild group state: %w", err)
 		}
 		state.version = obj.Version
 		states = append(states, state)
@@ -135,7 +135,7 @@ func GuildGroupStateSave(ctx context.Context, nk runtime.NakamaModule, botUserID
 	// Store the State
 	err := StorableWrite(ctx, nk, ServiceSettings().DiscordBotUserID, state)
 	if err != nil {
-		return fmt.Errorf("failed to write guild group state: %v", err)
+		return fmt.Errorf("failed to write guild group state: %w", err)
 	}
 
 	return nil

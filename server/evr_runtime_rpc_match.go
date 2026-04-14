@@ -240,7 +240,7 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	// Log the match preparation as an audit log message
 	if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
 		if settingsJSON, err := json.MarshalIndent(settings, "", "  "); err != nil {
-			logger.Error("Failed to marshal match settings: %s", err.Error())
+			logger.WithField("error", err.Error()).Error("Failed to marshal match settings")
 		} else {
 			guid := strings.ToUpper(label.ID.UUID.String())
 			auditMessage := fmt.Sprintf("<@%s> allocated https://echo.taxi/spark://j/%s via RPC:\n\n```json\n%s\n```", callerAccount.GetCustomId(), guid, string(settingsJSON))

@@ -2765,7 +2765,7 @@ func userToLuaTable(l *lua.LState, user *api.User) (*lua.LTable, error) {
 	metadataMap := make(map[string]interface{})
 	err := json.Unmarshal([]byte(user.Metadata), &metadataMap)
 	if err != nil {
-		return nil, fmt.Errorf("failed to convert user metadata to json: %s", err.Error())
+		return nil, fmt.Errorf("failed to convert user metadata to json: %w", err)
 	}
 	metadataTable := RuntimeLuaConvertMap(l, metadataMap)
 	ut.RawSetString("metadata", metadataTable)
@@ -2790,7 +2790,7 @@ func groupToLuaTable(l *lua.LState, group *api.Group) (*lua.LTable, error) {
 	metadataMap := make(map[string]interface{})
 	err := json.Unmarshal([]byte(group.Metadata), &metadataMap)
 	if err != nil {
-		return nil, fmt.Errorf("failed to convert group metadata to json: %s", err.Error())
+		return nil, fmt.Errorf("failed to convert group metadata to json: %w", err)
 	}
 	metadataTable := RuntimeLuaConvertMap(l, metadataMap)
 	gt.RawSetString("metadata", metadataTable)
@@ -7651,7 +7651,7 @@ func leaderboardToLuaTable(l *lua.LState, leaderboard *api.Leaderboard) (*lua.LT
 	metadataMap := make(map[string]interface{})
 	err := json.Unmarshal([]byte(leaderboard.Metadata), &metadataMap)
 	if err != nil {
-		return nil, fmt.Errorf("failed to convert metadata to json: %s", err.Error())
+		return nil, fmt.Errorf("failed to convert metadata to json: %w", err)
 	}
 	metadataTable := RuntimeLuaConvertMap(l, metadataMap)
 	lt.RawSetString("metadata", metadataTable)
@@ -8405,7 +8405,7 @@ func tournamentToLuaTable(l *lua.LState, tournament *api.Tournament) (*lua.LTabl
 	metadataMap := make(map[string]interface{})
 	err := json.Unmarshal([]byte(tournament.Metadata), &metadataMap)
 	if err != nil {
-		return nil, fmt.Errorf("failed to convert metadata to json: %s", err.Error())
+		return nil, fmt.Errorf("failed to convert metadata to json: %w", err)
 	}
 	metadataTable := RuntimeLuaConvertMap(l, metadataMap)
 	tt.RawSetString("metadata", metadataTable)
@@ -8561,7 +8561,7 @@ func recordToLuaTable(l *lua.LState, record *api.LeaderboardRecord) (*lua.LTable
 	metadataMap := make(map[string]interface{})
 	err := json.Unmarshal([]byte(record.Metadata), &metadataMap)
 	if err != nil {
-		return nil, fmt.Errorf("failed to convert metadata to json: %s", err.Error())
+		return nil, fmt.Errorf("failed to convert metadata to json: %w", err)
 	}
 	metadataTable := RuntimeLuaConvertMap(l, metadataMap)
 	recordTable.RawSetString("metadata", metadataTable)

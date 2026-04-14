@@ -119,7 +119,7 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 			)
 
 			if accounts, err := nk.AccountsGetId(ctx, append(firstIDs, userID)); err != nil {
-				logger.Error("failed to get alternate accounts: %v", err)
+				logger.WithField("error", err).Error("failed to get alternate accounts")
 				return
 			} else {
 				for _, a := range accounts {
@@ -129,7 +129,7 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 			}
 
 			if len(altNames) == 0 || accountMap[userID] == nil {
-				logger.Error("failed to get alternate accounts: %v", err)
+				logger.WithField("error", err).Error("failed to get alternate accounts")
 				return
 			}
 
@@ -143,9 +143,9 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 			logger.WithField("delay", kickDelay).Info("kicking (with delay) user %s has disabled alternates", userID)
 			<-time.After(kickDelay)
 			if c, err := DisconnectUserID(ctx, nk, userID, true, true, false); err != nil {
-				logger.Error("failed to disconnect user: %v", err)
+				logger.WithField("error", err).Error("failed to disconnect user")
 			} else {
-				logger.Info("user %s disconnected: %v sessions", userID, c)
+				logger.WithFields(map[string]interface{}{"user_id": userID, "session_count": c}).Info("user disconnected")
 			}
 		}()
 	}

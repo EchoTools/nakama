@@ -72,7 +72,7 @@ func (pm *MatchPreemptionManager) FindPreemptionCandidates(ctx context.Context, 
 		}
 		var label MatchLabel
 		if err := json.Unmarshal([]byte(match.Label.Value), &label); err != nil {
-			pm.logger.Warn("Failed to unmarshal match label for %s: %v", match.MatchId, err)
+			pm.logger.WithFields(map[string]interface{}{"match_id": match.MatchId, "error": err}).Warn("Failed to unmarshal match label")
 			continue
 		}
 
@@ -116,7 +116,7 @@ func (pm *MatchPreemptionManager) PreemptMatches(ctx context.Context, matchIDs [
 
 	for _, matchID := range matchIDs {
 		if err := pm.preemptSingleMatch(ctx, matchID, req, result); err != nil {
-			pm.logger.Error("Failed to preempt match %s: %v", matchID, err)
+			pm.logger.WithFields(map[string]interface{}{"match_id": matchID, "error": err}).Error("Failed to preempt match")
 			result.Errors = append(result.Errors, fmt.Sprintf("match %s: %v", matchID, err))
 			result.Success = false
 		}
@@ -154,7 +154,7 @@ func (pm *MatchPreemptionManager) preemptSingleMatch(ctx context.Context, matchI
 	// Notify spawner
 	if label.SpawnedBy != "" {
 		if err := pm.sendPreemptionNotification(ctx, label.SpawnedBy, matchID, reason); err != nil {
-			pm.logger.Warn("Failed to notify spawner %s: %v", label.SpawnedBy, err)
+			pm.logger.WithFields(map[string]interface{}{"spawned_by": label.SpawnedBy, "error": err}).Warn("Failed to notify spawner")
 		} else {
 			notificationsSent++
 			result.NotificationsSent = append(result.NotificationsSent, label.SpawnedBy)
@@ -164,7 +164,7 @@ func (pm *MatchPreemptionManager) preemptSingleMatch(ctx context.Context, matchI
 	// Notify owner if different from spawner
 	if label.Owner != uuid.Nil && label.Owner.String() != label.SpawnedBy {
 		if err := pm.sendPreemptionNotification(ctx, label.Owner.String(), matchID, reason); err != nil {
-			pm.logger.Warn("Failed to notify owner %s: %v", label.Owner.String(), err)
+			pm.logger.WithFields(map[string]interface{}{"owner": label.Owner.String(), "error": err}).Warn("Failed to notify")
 		} else {
 			notificationsSent++
 			result.NotificationsSent = append(result.NotificationsSent, label.Owner.String())
@@ -173,7 +173,7 @@ func (pm *MatchPreemptionManager) preemptSingleMatch(ctx context.Context, matchI
 
 	// If notifications were sent, wait for grace period
 	if notificationsSent > 0 && !req.Force {
-		pm.logger.Info("Sent preemption notifications for match %s, waiting %v grace period", matchID, pm.gracePeriod)
+		pm.logger.WithFields(map[string]interface{}{"match_id": matchID, "grace_period": pm.gracePeriod}).Info("Sent preemption notifications, waiting grace period")
 
 		// Schedule the actual shutdown after grace period
 		go func() {
@@ -182,9 +182,9 @@ func (pm *MatchPreemptionManager) preemptSingleMatch(ctx context.Context, matchI
 			// before the grace period elapses.
 			bgCtx := context.Background()
 			if err := pm.shutdownMatch(bgCtx, matchID, reason); err != nil {
-				pm.logger.Error("Failed to shutdown match %s after grace period: %v", matchID, err)
+				pm.logger.WithFields(map[string]interface{}{"match_id": matchID, "error": err}).Error("Failed to shutdown match after grace period")
 			} else {
-				pm.logger.Info("Successfully preempted match %s after grace period", matchID)
+				pm.logger.WithField("match_id", matchID).Info("Successfully preempted match after grace period")
 			}
 		}()
 	} else {

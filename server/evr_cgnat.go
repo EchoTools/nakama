@@ -97,7 +97,7 @@ func (d *CGNATDetector) UpdateSettings(settings CGNATSettings) {
 		_, ipNet, err := net.ParseCIDR(cidr)
 		if err != nil {
 			if d.logger != nil {
-				d.logger.Warn("CGNAT: invalid CIDR in settings, skipping: %s: %v", cidr, err)
+				d.logger.WithFields(map[string]interface{}{"cidr": cidr, "error": err}).Warn("CGNAT: invalid CIDR in settings, skipping")
 			}
 			continue
 		}
@@ -264,7 +264,7 @@ func (d *CGNATDetector) RefreshASNData(ctx context.Context) error {
 	ranges4, err4 := loadASNData(ctx, ip2asnV4URL, ip2asnV4Cache, true)
 	if err4 != nil {
 		if d.logger != nil {
-			d.logger.Warn("CGNAT: failed to load IPv4 ASN data: %v", err4)
+			d.logger.WithField("error", err4).Warn("CGNAT: failed to load IPv4 ASN data")
 		}
 		errs = append(errs, fmt.Sprintf("v4: %v", err4))
 	}
@@ -272,7 +272,7 @@ func (d *CGNATDetector) RefreshASNData(ctx context.Context) error {
 	ranges6, err6 := loadASNData(ctx, ip2asnV6URL, ip2asnV6Cache, false)
 	if err6 != nil {
 		if d.logger != nil {
-			d.logger.Warn("CGNAT: failed to load IPv6 ASN data: %v", err6)
+			d.logger.WithField("error", err6).Warn("CGNAT: failed to load IPv6 ASN data")
 		}
 		errs = append(errs, fmt.Sprintf("v6: %v", err6))
 	}
@@ -284,14 +284,14 @@ func (d *CGNATDetector) RefreshASNData(ctx context.Context) error {
 	if ranges4 != nil {
 		d.asnRanges4 = convertToRanges4(ranges4)
 		if d.logger != nil {
-			d.logger.Info("CGNAT: loaded %d IPv4 ASN ranges", len(d.asnRanges4))
+			d.logger.WithField("count", len(d.asnRanges4)).Info("CGNAT: loaded IPv4 ASN ranges")
 		}
 		loaded = true
 	}
 	if ranges6 != nil {
 		d.asnRanges6 = convertToRanges6(ranges6)
 		if d.logger != nil {
-			d.logger.Info("CGNAT: loaded %d IPv6 ASN ranges", len(d.asnRanges6))
+			d.logger.WithField("count", len(d.asnRanges6)).Info("CGNAT: loaded IPv6 ASN ranges")
 		}
 		loaded = true
 	}
