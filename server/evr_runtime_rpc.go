@@ -1550,7 +1550,7 @@ func parseRequest(ctx context.Context, payload string, request any) error {
 		}
 
 		// Parse Query Parameters
-	} else if params := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string); len(params) > 0 {
+	} else if params, _ := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string); len(params) > 0 {
 
 		if err := parseURLParams(params, request); err != nil {
 			return fmt.Errorf("error parsing query parameters: %w", err)
@@ -1586,11 +1586,14 @@ func AccountSearchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		}
 	} else {
 
-		queryParameters := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
+		queryParameters, _ := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
 
 		if len(queryParameters) > 0 {
 
 			for k, v := range queryParameters {
+				if len(v) == 0 {
+					continue
+				}
 				switch k {
 				case "display_name":
 					request.DisplayNamePattern = v[0]
@@ -1795,7 +1798,7 @@ func ServerScoreRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	request := &ServerScoreRPCRequest{}
 
 	// Get the pings from the query string
-	queryParameters := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
+	queryParameters, _ := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
 
 	if payload != "" {
 		if err := json.Unmarshal([]byte(payload), request); err != nil {
@@ -1888,7 +1891,7 @@ func ServerScoresRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	request := &ServerScoresRPCRequest{}
 
 	// Get the pings from the query string
-	queryParameters := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
+	queryParameters, _ := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
 
 	if payload != "" {
 		if err := json.Unmarshal([]byte(payload), request); err != nil {

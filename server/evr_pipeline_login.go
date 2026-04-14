@@ -97,7 +97,10 @@ func (e NewLocationError) Error() string {
 
 // loginRequest handles the login request from the client.
 func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.LoginRequest)
+	request, ok := in.(*evr.LoginRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.LoginRequest, got %T", in)
+	}
 
 	if s := ServiceSettings(); s.DisableLoginMessage != "" {
 		if err := session.SendEvrUnrequire(evr.NewLoginFailure(request.XPID, "System is Temporarily Unavailable:\n"+s.DisableLoginMessage)); err != nil {
@@ -869,7 +872,9 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 }
 
 func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	_ = in.(*evr.ChannelInfoRequest)
+	if _, ok := in.(*evr.ChannelInfoRequest); !ok {
+		return fmt.Errorf("expected *evr.ChannelInfoRequest, got %T", in)
+	}
 
 	params, ok := LoadParams(ctx)
 	if !ok {
@@ -922,7 +927,10 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 }
 
 func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) (err error) {
-	request := in.(*evr.LoggedInUserProfileRequest)
+	request, ok := in.(*evr.LoggedInUserProfileRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.LoggedInUserProfileRequest, got %T", in)
+	}
 	// Start a timer to add to the metrics
 	timer := time.Now()
 	defer func() { p.nk.metrics.CustomTimer("loggedInUserProfileRequest", nil, time.Since(timer)) }()
@@ -993,7 +1001,10 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 }
 
 func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.UpdateClientProfile)
+	request, ok := in.(*evr.UpdateClientProfile)
+	if !ok {
+		return fmt.Errorf("expected *evr.UpdateClientProfile, got %T", in)
+	}
 
 	if err := p.handleClientProfileUpdate(ctx, logger, session, request.XPID, request.Payload); err != nil {
 		if err := session.SendEvr(evr.NewUpdateProfileFailure(request.XPID, uint64(400), err.Error())); err != nil {
@@ -1245,7 +1256,10 @@ func (p *EvrPipeline) applyMuteSpamKick(
 }
 
 func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.RemoteLogSet)
+	request, ok := in.(*evr.RemoteLogSet)
+	if !ok {
+		return fmt.Errorf("expected *evr.RemoteLogSet, got %T", in)
+	}
 
 	go func() {
 		if err := p.processRemoteLogSets(ctx, logger, session, request.EvrID, request); err != nil {
@@ -1257,7 +1271,10 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 }
 
 func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.DocumentRequest)
+	request, ok := in.(*evr.DocumentRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.DocumentRequest, got %T", in)
+	}
 
 	params, ok := LoadParams(ctx)
 	if !ok {
@@ -1367,7 +1384,10 @@ func (p *EvrPipeline) generateEULA(ctx context.Context, logger *zap.Logger, lang
 }
 
 func (p *EvrPipeline) genericMessage(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.GenericMessage)
+	request, ok := in.(*evr.GenericMessage)
+	if !ok {
+		return fmt.Errorf("expected *evr.GenericMessage, got %T", in)
+	}
 	logger.Debug("Received generic message", zap.Any("message", request))
 
 	/*
@@ -1389,7 +1409,10 @@ func (p *EvrPipeline) genericMessage(ctx context.Context, logger *zap.Logger, se
 // A profile update request is sent from the game server's login connection.
 // It is sent 45 seconds before the sessionend is sent, right after the match ends.
 func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.UserServerProfileUpdateRequest)
+	request, ok := in.(*evr.UserServerProfileUpdateRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.UserServerProfileUpdateRequest, got %T", in)
+	}
 
 	if data, err := json.MarshalIndent(in, "", "  "); err != nil {
 		logger.Warn("Failed to marshal profile update request", zap.Error(err))
@@ -1477,7 +1500,10 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 }
 
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.OtherUserProfileRequest)
+	request, ok := in.(*evr.OtherUserProfileRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.OtherUserProfileRequest, got %T", in)
+	}
 
 	tags := map[string]string{
 		"error": "nil",

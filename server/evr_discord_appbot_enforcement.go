@@ -421,7 +421,7 @@ func (d *DiscordAppBot) handleEnforcementVoidModalSubmit(logger runtime.Logger, 
 
 	// Get form data
 	data := i.Interaction.ModalSubmitData()
-	voidReason := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+	voidReason := modalTextInputValue(data, 0, 0)
 
 	// Load the enforcement journal
 	journal := NewGuildEnforcementJournal(targetUserID)

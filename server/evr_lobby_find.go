@@ -396,15 +396,10 @@ func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.
 }
 
 func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, entrants ...*EvrMatchPresence) (*MatchLabel, error) {
-	if createLobbyMu.TryLock() {
-		go func() {
-			// Hold the lock for enough time to create the server
-			<-time.After(5 * time.Second)
-			createLobbyMu.Unlock()
-		}()
-	} else {
+	if !createLobbyMu.TryLock() {
 		return nil, ErrFailedToAcquireLock
 	}
+	defer createLobbyMu.Unlock()
 
 	metricsTags := map[string]string{
 		"version_lock": lobbyParams.VersionLock.String(),
