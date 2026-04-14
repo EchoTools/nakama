@@ -68,7 +68,7 @@ func (v *VRMLScanQueue) RedirectRPC(ctx context.Context, logger runtime.Logger, 
 		return "", runtime.NewError("Missing VRML_OAUTH_CLIENT_ID in server config", StatusInternalError)
 	}
 
-	queryParameters := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
+	queryParameters, _ := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
 
 	// A code was provided; exchange it for a token
 	if _, ok := queryParameters["code"]; !ok {

@@ -58,7 +58,10 @@ func EarlyQuitViewRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		return "", runtime.NewError("group_id and target_user_id are required", StatusInvalidArgument)
 	}
 
-	callerUserID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	callerUserID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if callerUserID == "" {
+		return "", runtime.NewError("unauthorized", StatusUnauthenticated)
+	}
 
 	// Enforce: caller must be enforcer or operator for this guild
 	_, _, _, _, err := RequireEnforcerOperatorOrBot(ctx, db, nk, callerUserID, request.GroupID)
@@ -161,7 +164,10 @@ func EarlyQuitModifyRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError("action is required (set_penalty, reset, set_exempt)", StatusInvalidArgument)
 	}
 
-	callerUserID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	callerUserID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if callerUserID == "" {
+		return "", runtime.NewError("unauthorized", StatusUnauthenticated)
+	}
 
 	// Enforce: caller must be enforcer or operator for this guild
 	_, _, _, _, err := RequireEnforcerOperatorOrBot(ctx, db, nk, callerUserID, request.GroupID)

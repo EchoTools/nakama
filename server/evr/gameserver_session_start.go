@@ -217,7 +217,7 @@ func NewSessionSettings(appID string, mode Symbol, level Symbol, features []stri
 func (s *LobbySessionSettings) String() string {
 	b, err := json.Marshal(s)
 	if err != nil {
-		panic(err)
+		return fmt.Sprintf("<marshal error: %v>", err)
 	}
 	return string(b)
 }

@@ -277,6 +277,11 @@ func ExtendMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	}
 
 	var label MatchLabel
+	if match.Label == nil {
+		response.Error = "Match has no label"
+		responseBytes, _ := json.Marshal(response)
+		return string(responseBytes), nil
+	}
 	if err := json.Unmarshal([]byte(match.Label.Value), &label); err != nil {
 		response.Error = "Failed to parse match label"
 		responseBytes, _ := json.Marshal(response)
@@ -287,7 +292,7 @@ func ExtendMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	if label.Owner.String() != userID && label.SpawnedBy != userID {
 		// Check if user is guild enforcer
 		if label.GroupID != nil {
-			if gg, err := GuildGroupLoad(ctx, nk, label.GroupID.String()); err == nil {
+			if gg, err := GuildGroupLoad(ctx, nk, label.GroupID.String()); err == nil && gg != nil {
 				if !gg.HasRole(userID, gg.RoleMap.Enforcer) {
 					response.Error = "Not authorized to extend this match"
 					responseBytes, _ := json.Marshal(response)

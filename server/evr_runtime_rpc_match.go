@@ -227,6 +227,9 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 	// Guild-specified server-hosts and the server's operators may signal their own game servers.
 	// Otherwise, the game server must host for the guild.
+	if label.GameServer == nil {
+		return "", runtime.NewError("match has no game server", StatusInternalError)
+	}
 	if label.GameServer.OperatorID.String() != userID && !slices.Contains(label.GameServer.GroupIDs, uuid.FromStringOrNil(request.GroupId)) {
 		return "", runtime.NewError("game server does not host for that guild.", StatusPermissionDenied)
 	}

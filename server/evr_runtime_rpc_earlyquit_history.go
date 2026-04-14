@@ -50,8 +50,10 @@ func EarlyQuitHistoryRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		return "", runtime.NewError("Invalid request payload", StatusInvalidArgument)
 	}
 
-	// Get the caller's user ID from context (guaranteed to exist by middleware)
-	callerUserID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	callerUserID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if callerUserID == "" {
+		return "", runtime.NewError("unauthorized", StatusUnauthenticated)
+	}
 
 	// Determine target user ID
 	targetUserID := request.UserID

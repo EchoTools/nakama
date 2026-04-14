@@ -56,7 +56,8 @@ type VRMLScanQueue struct {
 
 func NewVRMLScanQueue(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, appBot *discordgo.Session, redisClient *redis.Client, oauthRedirectURL, oauthCLientID string) (*VRMLScanQueue, error) {
 
-	ctx = context.Background()
+	// Use the parent context so the verifier respects graceful shutdown.
+	// (Previously used context.Background() which ignored cancellation.)
 
 	// Configure the client with the redis cache
 	verifier := &VRMLScanQueue{

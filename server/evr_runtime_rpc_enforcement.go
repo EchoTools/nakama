@@ -43,8 +43,10 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError("Invalid request payload", StatusInvalidArgument)
 	}
 
-	// Get the caller's user ID from context (guaranteed to exist by middleware)
-	userID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	userID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if userID == "" {
+		return "", runtime.NewError("unauthorized", StatusUnauthenticated)
+	}
 
 	// Validate required fields
 	if request.GroupID == "" {
@@ -164,7 +166,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		groupIDs := []string{currentGroupID}
 
 		// Add inherited groups
-		if gg.SuspensionInheritanceGroupIDs != nil {
+		if gg != nil && gg.SuspensionInheritanceGroupIDs != nil {
 			groupIDs = append(groupIDs, gg.SuspensionInheritanceGroupIDs...)
 		}
 
@@ -266,7 +268,10 @@ func EnforcementJournalListRPC(ctx context.Context, logger runtime.Logger, db *s
 		return "", runtime.NewError("group_id is required", StatusInvalidArgument)
 	}
 
-	userID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	userID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if userID == "" {
+		return "", runtime.NewError("unauthorized", StatusUnauthenticated)
+	}
 
 	isOperator, _, gg, err := RequireEnforcerOrOperator(ctx, db, nk, userID, request.GroupID)
 	if err != nil {
@@ -420,8 +425,10 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 		return "", runtime.NewError("record_id is required", StatusInvalidArgument)
 	}
 
-	// Get the caller's user ID from context
-	userID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	userID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if userID == "" {
+		return "", runtime.NewError("unauthorized", StatusUnauthenticated)
+	}
 
 	// Check permissions (global operator or guild enforcer)
 	isOperator, _, gg, err := RequireEnforcerOrOperator(ctx, db, nk, userID, request.GroupID)
@@ -469,7 +476,7 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	// Preserve existing notes when toggle restricts visibility and caller is not the record creator
-	if gg.RestrictEnforcerNoteVisibility && !isOperator && !gg.IsAuditor(userID) && record.EnforcerUserID != userID {
+	if gg != nil && gg.RestrictEnforcerNoteVisibility && !isOperator && !gg.IsAuditor(userID) && record.EnforcerUserID != userID {
 		newAuditorNotes = record.AuditorNotes
 	}
 
@@ -530,7 +537,7 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 
 	// Redact sensitive fields in response when caller shouldn't see notes
 	responseRecord := updatedRecord
-	if gg.RestrictEnforcerNoteVisibility && !isOperator && !gg.IsAuditor(userID) && responseRecord.EnforcerUserID != userID {
+	if gg != nil && gg.RestrictEnforcerNoteVisibility && !isOperator && !gg.IsAuditor(userID) && responseRecord.EnforcerUserID != userID {
 		redacted := *responseRecord
 		redacted.AuditorNotes = ""
 		redacted.EditLog = nil
