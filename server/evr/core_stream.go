@@ -409,7 +409,7 @@ func (s *EasyStream) StreamJson(data interface{}, isNullTerminated bool, compres
 			if copyErr != nil {
 				return fmt.Errorf("zlib decompression error: %w", copyErr)
 			}
-			if n >= int64(MaxJSONDecompressedSize) {
+			if n > int64(MaxJSONDecompressedSize) {
 				return fmt.Errorf("decompressed JSON exceeds maximum size %d", MaxJSONDecompressedSize)
 			}
 		case ZstdCompression:
@@ -426,7 +426,7 @@ func (s *EasyStream) StreamJson(data interface{}, isNullTerminated bool, compres
 			if copyErr != nil {
 				return fmt.Errorf("zstd decompression error: %w", copyErr)
 			}
-			if n >= int64(MaxJSONDecompressedSize) {
+			if n > int64(MaxJSONDecompressedSize) {
 				return fmt.Errorf("decompressed JSON exceeds maximum size %d", MaxJSONDecompressedSize)
 			}
 		default:
@@ -512,7 +512,7 @@ func (s *EasyStream) StreamJSONRawMessage(data *json.RawMessage, isNullTerminate
 			if copyErr != nil {
 				return fmt.Errorf("zlib decompression error: %w", copyErr)
 			}
-			if n >= int64(MaxJSONDecompressedSize) {
+			if n > int64(MaxJSONDecompressedSize) {
 				return fmt.Errorf("decompressed JSON exceeds maximum size %d", MaxJSONDecompressedSize)
 			}
 		case ZstdCompression:
@@ -529,7 +529,7 @@ func (s *EasyStream) StreamJSONRawMessage(data *json.RawMessage, isNullTerminate
 			if copyErr != nil {
 				return fmt.Errorf("zstd decompression error: %w", copyErr)
 			}
-			if n >= int64(MaxJSONDecompressedSize) {
+			if n > int64(MaxJSONDecompressedSize) {
 				return fmt.Errorf("decompressed JSON exceeds maximum size %d", MaxJSONDecompressedSize)
 			}
 		default:

@@ -73,6 +73,7 @@ type EventDispatcher struct {
 	eventUnmarshaler     func(event *api.Event) (Event, error)
 	queue                chan *api.Event
 	matchJournals        map[MatchID]*MatchDataJournal
+	matchJournalsInFlight map[MatchID]*MatchDataJournal // journals currently being inserted into MongoDB
 	cache                *sync.Map
 	playerAuthorizations map[string]map[string]struct{} // map[sessionID]map[groupID]struct{}
 }
@@ -95,6 +96,7 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 		queue:                make(chan *api.Event, 4096),
 		matchJournals:        make(map[MatchID]*MatchDataJournal),
+		matchJournalsInFlight: make(map[MatchID]*MatchDataJournal),
 		cache:                &sync.Map{},
 		playerAuthorizations: make(map[string]map[string]struct{}),
 	}
@@ -561,20 +563,30 @@ func (h *EventDispatcher) getRedisClient() *redis.Client {
 // evictStaleJournals removes journals that have not been updated within
 // matchDataJournalMaxAge and bulk-inserts them into MongoDB. It is safe to call
 // from multiple goroutines because it acquires the dispatcher lock.
+//
+// To prevent a TOCTOU race where two concurrent callers collect the same stale
+// entries and cause duplicate inserts, stale entries are moved into the
+// matchJournalsInFlight map (still under the lock) before the lock is released.
+// Entries remain in-flight until InsertMany completes: on success they are
+// discarded, on failure they are returned to matchJournals for retry.
+// E11000 duplicate-key errors from InsertMany are treated as success because the
+// data is already present in MongoDB.
 func (h *EventDispatcher) evictStaleJournals(ctx context.Context, logger runtime.Logger) {
-	// Collect stale keys and values without deleting yet; deletion happens only
-	// after a successful InsertMany so that no data is lost on insert failure.
-	type staleEntry struct {
-		key MatchID
-		val any
-	}
-
 	h.Lock()
-	stale := make([]staleEntry, 0, len(h.matchJournals))
+	// Collect stale entries that are not already being inserted by another caller.
+	stale := make(map[MatchID]*MatchDataJournal)
 	for k, v := range h.matchJournals {
 		if time.Since(v.UpdatedAt) > matchDataJournalMaxAge {
-			stale = append(stale, staleEntry{key: k, val: v})
+			if _, inFlight := h.matchJournalsInFlight[k]; !inFlight {
+				stale[k] = v
+			}
 		}
+	}
+	// Move collected entries into in-flight before releasing the lock so no
+	// other goroutine can pick them up concurrently.
+	for k, v := range stale {
+		h.matchJournalsInFlight[k] = v
+		delete(h.matchJournals, k)
 	}
 	h.Unlock()
 
@@ -582,21 +594,32 @@ func (h *EventDispatcher) evictStaleJournals(ctx context.Context, logger runtime
 		return
 	}
 
-	inserts := make([]any, len(stale))
-	for i, e := range stale {
-		inserts[i] = e.val
+	inserts := make([]any, 0, len(stale))
+	for _, v := range stale {
+		inserts = append(inserts, v)
 	}
 
 	collection := h.mongo.Database(matchDataDatabaseName).Collection(matchDataCollectionName)
-	if _, err := collection.InsertMany(ctx, inserts); err != nil {
+	_, err := collection.InsertMany(ctx, inserts)
+	if err != nil && !mongo.IsDuplicateKeyError(err) {
 		logger.WithField("error", err).Error("failed to insert stale match journals to MongoDB")
+		// Return the entries to matchJournals so they are retried on the next tick.
+		h.Lock()
+		for k, v := range stale {
+			// Only restore if a fresher entry hasn't already been written.
+			if _, exists := h.matchJournals[k]; !exists {
+				h.matchJournals[k] = v
+			}
+			delete(h.matchJournalsInFlight, k)
+		}
+		h.Unlock()
 		return
 	}
 
-	// Remove from the map only after a successful insert.
+	// Success (or duplicate-key, which means the data is already there).
 	h.Lock()
-	for _, e := range stale {
-		delete(h.matchJournals, e.key)
+	for k := range stale {
+		delete(h.matchJournalsInFlight, k)
 	}
 	h.Unlock()
 }
