@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -59,6 +60,8 @@ type SessionParameters struct {
 
 	currentPartyID    uuid.UUID // Nakama party UUID the user is currently in (SNS party)
 	currentSNSPartyID uint64    // SNS wire party ID
+
+	sessionDurationOnce sync.Once // Ensures the session-duration metrics goroutine is spawned exactly once
 }
 
 func (s SessionParameters) UserID() string {

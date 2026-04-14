@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -17,6 +18,13 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/types"
 )
+
+// voipLoudnessLastWrite tracks the last time a leaderboard write was issued per player UID.
+// This is used to rate-limit VOIP_LOUDNESS leaderboard writes to at most once per 30 seconds
+// per player, preventing bluge index OOM from high-frequency remote log events.
+var voipLoudnessLastWrite sync.Map // map[string]time.Time
+
+const voipLoudnessWriteInterval = 30 * time.Second
 
 var _ = Event(&EventRemoteLogSet{})
 
@@ -1000,6 +1008,17 @@ func (s *EventRemoteLogSet) processVOIPLoudness(ctx context.Context, _ runtime.L
 
 	groupIDStr := label.GetGroupID().String()
 	mode := label.Mode
+
+	// Rate-limit leaderboard writes to at most once per 30 seconds per player.
+	// VOIP_LOUDNESS events arrive very frequently and each write is a bluge index
+	// allocation — without this guard they are the primary OOM driver.
+	now := time.Now()
+	if last, ok := voipLoudnessLastWrite.Load(playerInfo.UserID); ok {
+		if now.Sub(last.(time.Time)) < voipLoudnessWriteInterval {
+			return nil
+		}
+	}
+	voipLoudnessLastWrite.Store(playerInfo.UserID, now)
 
 	// Get the loudness value from the message
 	loudnessDB := msg.VoiceLoudnessDB
