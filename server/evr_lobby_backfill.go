@@ -100,6 +100,9 @@ type preparedBackfillCandidate struct {
 func (b *PostMatchmakerBackfill) prepareMatches(matches []*BackfillMatch, bctx *backfillContext) []*preparedBackfillMatch {
 	prepared := make([]*preparedBackfillMatch, len(matches))
 	for i, m := range matches {
+		if m.Label.GameServer == nil {
+			continue
+		}
 		prepared[i] = &preparedBackfillMatch{
 			BackfillMatch: m,
 			externalIP:    m.Label.GameServer.Endpoint.GetExternalIP(),

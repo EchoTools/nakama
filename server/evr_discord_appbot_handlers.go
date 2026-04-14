@@ -872,7 +872,9 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, fmt.Errorf("failed to allocate game server: label is nil")
 	}
 
-	latencyMillis = latencyHistory.AverageRTT(label.GameServer.Endpoint.ExternalIP.String(), true)
+	if label.GameServer != nil {
+		latencyMillis = latencyHistory.AverageRTT(label.GameServer.Endpoint.ExternalIP.String(), true)
+	}
 
 	return label, latencyMillis, nil
 }
@@ -1250,7 +1252,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			}
 
 			// Check if the user is the game server operator
-			if label.GameServer.OperatorID.String() == callerUserID {
+			if label.GameServer != nil && label.GameServer.OperatorID.String() == callerUserID {
 				permissions = append(permissions, "game server operator")
 			}
 

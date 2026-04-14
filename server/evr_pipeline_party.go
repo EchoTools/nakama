@@ -248,7 +248,10 @@ func (p *EvrPipeline) snsPartyCreateRequest(ctx context.Context, logger *zap.Log
 
 // snsPartyJoinRequest joins an existing party by SNS party ID.
 func (p *EvrPipeline) snsPartyJoinRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	msg := in.(*evr.SNSPartyJoinRequest)
+	msg, ok := in.(*evr.SNSPartyJoinRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.SNSPartyJoinRequest, got %T", in)
+	}
 
 	params, ok := LoadParams(ctx)
 	if !ok {
@@ -331,7 +334,10 @@ func (p *EvrPipeline) snsPartyLeaveRequest(ctx context.Context, logger *zap.Logg
 
 // snsPartySendInviteRequest sends a party invite to another user.
 func (p *EvrPipeline) snsPartySendInviteRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	msg := in.(*evr.SNSPartySendInviteRequest)
+	msg, ok := in.(*evr.SNSPartySendInviteRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.SNSPartySendInviteRequest, got %T", in)
+	}
 
 	params, ok := LoadParams(ctx)
 	if !ok || params.currentPartyID == uuid.Nil {
@@ -414,7 +420,10 @@ func (p *EvrPipeline) snsPartyUnlockRequest(ctx context.Context, logger *zap.Log
 
 // snsPartyKickRequest kicks a member from the party (owner only).
 func (p *EvrPipeline) snsPartyKickRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	msg := in.(*evr.SNSPartyKickRequest)
+	msg, ok := in.(*evr.SNSPartyKickRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.SNSPartyKickRequest, got %T", in)
+	}
 
 	params, ok := LoadParams(ctx)
 	if !ok || params.currentPartyID == uuid.Nil {
@@ -452,7 +461,10 @@ func (p *EvrPipeline) snsPartyKickRequest(ctx context.Context, logger *zap.Logge
 
 // snsPartyPassOwnershipRequest transfers party leadership (owner only).
 func (p *EvrPipeline) snsPartyPassOwnershipRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	msg := in.(*evr.SNSPartyPassOwnershipRequest)
+	msg, ok := in.(*evr.SNSPartyPassOwnershipRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.SNSPartyPassOwnershipRequest, got %T", in)
+	}
 
 	params, ok := LoadParams(ctx)
 	if !ok || params.currentPartyID == uuid.Nil {
@@ -488,7 +500,10 @@ func (p *EvrPipeline) snsPartyPassOwnershipRequest(ctx context.Context, logger *
 
 // snsPartyRespondToInviteRequest accepts or rejects a party invite.
 func (p *EvrPipeline) snsPartyRespondToInviteRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	msg := in.(*evr.SNSPartyRespondToInviteRequest)
+	msg, ok := in.(*evr.SNSPartyRespondToInviteRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.SNSPartyRespondToInviteRequest, got %T", in)
+	}
 
 	params, ok := LoadParams(ctx)
 	if !ok {

@@ -219,6 +219,7 @@ func StartLocalTracker(logger *zap.Logger, config Config, sessionRegistry Sessio
 	go func() {
 		// Asynchronously process and dispatch presence events.
 		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-t.ctx.Done():

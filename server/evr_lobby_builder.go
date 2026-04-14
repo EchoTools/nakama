@@ -558,6 +558,9 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	}
 
 	// Update the entrant ping to the game server
+	if label.GameServer == nil {
+		return nil, fmt.Errorf("match label has no game server")
+	}
 	endpointID := EncodeEndpointID(label.GameServer.Endpoint.ExternalIP.String())
 	for _, p := range entrantPresences {
 		if endpointLatencies, ok := latenciesByPlayerByExtIP[endpointID]; ok && endpointLatencies != nil {
