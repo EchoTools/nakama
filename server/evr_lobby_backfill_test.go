@@ -7,6 +7,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCalculateBackfillScore(t *testing.T) {
@@ -128,7 +129,7 @@ func TestExtractUnmatchedCandidates(t *testing.T) {
 			"max_rtt":   180.0,
 		},
 	}
-	entry1.Properties = make(map[string]interface{})
+	entry1.Properties = make(map[string]any)
 	for k, v := range entry1.StringProperties {
 		entry1.Properties[k] = v
 	}
@@ -152,7 +153,7 @@ func TestExtractUnmatchedCandidates(t *testing.T) {
 			"max_rtt":   180.0,
 		},
 	}
-	entry2.Properties = make(map[string]interface{})
+	entry2.Properties = make(map[string]any)
 	for k, v := range entry2.StringProperties {
 		entry2.Properties[k] = v
 	}
@@ -161,13 +162,13 @@ func TestExtractUnmatchedCandidates(t *testing.T) {
 	}
 
 	// Candidates: all tickets with all players
-	candidates := [][]interface{}{
+	candidates := [][]any{
 		{entry1},
 		{entry2},
 	}
 
 	// Made matches: only session1 was matched
-	madeMatches := [][]interface{}{
+	madeMatches := [][]any{
 		{entry1},
 	}
 
@@ -325,6 +326,75 @@ func TestBackfillResultStructure(t *testing.T) {
 	if result.PlayerUserIDs[0] != "user1" || result.PlayerUserIDs[1] != "user2" {
 		t.Errorf("Expected player user IDs [user1, user2], got %v", result.PlayerUserIDs)
 	}
+}
+
+// TestPrepareMatches_NilGameServerEntriesExcluded verifies that prepareMatches
+// never returns nil entries in the result slice.
+//
+// Before the fix, the function used indexed assignment into a pre-allocated slice:
+//
+//	prepared := make([]*preparedBackfillMatch, len(matches))
+//	for i, m := range matches {
+//	    if m.Label.GameServer == nil { continue }
+//	    prepared[i] = &preparedBackfillMatch{...}
+//	}
+//
+// Matches with nil GameServer were skipped but left their slot as nil, so callers
+// dereferencing prepared[i] would panic.
+//
+// After the fix, the function appends only non-nil entries:
+//
+//	prepared := make([]*preparedBackfillMatch, 0, len(matches))
+//	for _, m := range matches {
+//	    if m.Label.GameServer == nil { continue }
+//	    prepared = append(prepared, &preparedBackfillMatch{...})
+//	}
+func TestPrepareMatches_NilGameServerEntriesExcluded(t *testing.T) {
+	backfill := &PostMatchmakerBackfill{}
+
+	bctx := &backfillContext{
+		now: time.Now(),
+	}
+
+	goodServer := &GameServerPresence{
+		Endpoint: evr.Endpoint{
+			ExternalIP: net.ParseIP("10.0.0.1"),
+		},
+	}
+
+	matches := []*BackfillMatch{
+		// nil GameServer — must be excluded.
+		{
+			Label:     &MatchLabel{Mode: evr.ModeArenaPublic, StartTime: time.Now().Add(-1 * time.Minute)},
+			OpenSlots: map[int]int{evr.TeamBlue: 2},
+		},
+		// valid GameServer — must be included.
+		{
+			Label:     &MatchLabel{Mode: evr.ModeArenaPublic, StartTime: time.Now().Add(-1 * time.Minute), GameServer: goodServer},
+			OpenSlots: map[int]int{evr.TeamBlue: 2},
+		},
+		// another nil GameServer — must be excluded.
+		{
+			Label:     &MatchLabel{Mode: evr.ModeArenaPublic, StartTime: time.Now().Add(-2 * time.Minute)},
+			OpenSlots: map[int]int{evr.TeamOrange: 2},
+		},
+	}
+
+	prepared := backfill.prepareMatches(matches, bctx)
+
+	// Exactly one entry had a valid GameServer.
+	require.Len(t, prepared, 1, "only matches with non-nil GameServer should be returned")
+
+	// No entry in the result must be nil.
+	for i, p := range prepared {
+		require.NotNil(t, p, "prepared[%d] must not be nil", i)
+	}
+
+	// The surviving entry must be the one with a GameServer.
+	require.NotNil(t, prepared[0].BackfillMatch.Label.GameServer,
+		"surviving entry must have a non-nil GameServer")
+	require.Equal(t, goodServer.Endpoint.GetExternalIP(), prepared[0].externalIP,
+		"externalIP must be set from the GameServer endpoint")
 }
 
 func TestBackfillMinAcceptableScore(t *testing.T) {
