@@ -16,8 +16,13 @@ const (
 
 var serviceSettings = atomic.NewPointer((*ServiceSettingsData)(nil))
 
+// ServiceSettings returns the current service settings, never nil.
+// Callers can safely access fields without nil checks.
 func ServiceSettings() *ServiceSettingsData {
-	return serviceSettings.Load()
+	if s := serviceSettings.Load(); s != nil {
+		return s
+	}
+	return &ServiceSettingsData{}
 }
 
 func ServiceSettingsUpdate(data *ServiceSettingsData) {

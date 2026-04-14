@@ -2627,7 +2627,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					// Update the list of playerListStr in the interaction response
 					var playerListStr strings.Builder
 					for _, p := range presences {
-						if p.GetSessionId() == label.GameServer.SessionID.String() {
+						if label.GameServer != nil && p.GetSessionId() == label.GameServer.SessionID.String() {
 							continue
 						}
 						playerListStr.WriteString(fmt.Sprintf("<@!%s>\n", d.cache.UserIDToDiscordID(p.GetUserId())))
@@ -4043,6 +4043,9 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 			continue
 		}
 
+		if state.GameServer == nil {
+			continue
+		}
 		for _, r := range state.GameServer.RegionCodes {
 			if regionStr == r || regionHash == r {
 				tracked = append(tracked, state)
@@ -4089,8 +4092,12 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 
 		}
 
+		serverIDStr := "unknown"
+		if state.GameServer != nil {
+			serverIDStr = strconv.FormatUint(state.GameServer.ServerID, 10)
+		}
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   strconv.FormatUint(state.GameServer.ServerID, 10),
+			Name:   serverIDStr,
 			Value:  status,
 			Inline: false,
 		})
