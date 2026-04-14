@@ -12,8 +12,8 @@ import (
 
 var (
 	MessageMarker     = []byte{246, 64, 187, 120, 162, 231, 140, 187}
-	MaxPacketLength   = 1024 * 1024 * 10 // 10MB
-	MaxMessageLength  = 0x8000           // 32KB
+	MaxPacketLength  = 256 * 1024 // 256KB
+	MaxMessageLength = 0x8000    // 32KB
 	ErrInvalidPacket  = errors.New("invalid packet")
 	ErrSymbolNotFound = errors.New("symbol not found")
 	ErrParseError     = errors.New("parse error")
