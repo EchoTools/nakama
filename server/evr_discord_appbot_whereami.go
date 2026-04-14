@@ -652,7 +652,11 @@ func (d *DiscordAppBot) handleServerIssueTypeSelection(_ context.Context, logger
 	// Get the selected issue type
 	data := i.MessageComponentData()
 	if len(data.Values) == 0 {
-		logger.WithFields(map[string]interface{}{"interaction_id": i.Interaction.ID, "user_id": i.Interaction.Member.User.ID}).Warn("Discord select menu submitted with no values")
+		userID := ""
+		if i.Interaction.Member != nil && i.Interaction.Member.User != nil {
+			userID = i.Interaction.Member.User.ID
+		}
+		logger.WithFields(map[string]interface{}{"interaction_id": i.Interaction.ID, "user_id": userID}).Warn("Discord select menu submitted with no values")
 		return simpleInteractionResponse(s, i, "No issue type selected.")
 	}
 	issueType := data.Values[0]

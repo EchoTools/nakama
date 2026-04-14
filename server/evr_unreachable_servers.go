@@ -207,7 +207,7 @@ func StoreUnreachableServers(ctx context.Context, nk runtime.NakamaModule, userI
 // updates the in-memory session state, and persists to storage. Safe to call
 // from event handlers; logs but does not propagate storage write errors.
 func RecordUnreachableServer(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, userID string, params *SessionParameters, extIP string, reason string) {
-	if params.unreachableServers == nil {
+	if params == nil || params.unreachableServers == nil {
 		return
 	}
 

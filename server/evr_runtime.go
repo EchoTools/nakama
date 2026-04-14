@@ -104,7 +104,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_ENV, vars) // ignore lint
 	// Initialize the discord bot if the token is set
 	if appBotToken, ok := vars["DISCORD_BOT_TOKEN"]; !ok || appBotToken == "" {
-		logger.Warn("DISCORD_BOT_TOKEN is not set, Discord bot will not be used")
+		logger.Error("DISCORD_BOT_TOKEN is not set; cannot initialize Discord bot")
 		return fmt.Errorf("DISCORD_BOT_TOKEN is required but not set")
 	} else {
 		if dg, err = discordgo.New("Bot " + appBotToken); err != nil {
@@ -168,8 +168,9 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register loadout autocomplete handler: %w", err)
 	}
 
-	// The statistics queue handles inserting match statistics into the leaderboard records
-	statisticsQueue := NewStatisticsQueue(ctx, logger, db, nk)
+	// The statistics queue handles inserting match statistics into the leaderboard records.
+	// Use context.Background() because the queue goroutine must outlive the init context.
+	statisticsQueue := NewStatisticsQueue(context.Background(), logger, db, nk)
 
 	// Initialize the VRML scan queue if the configuration is set
 	var vrmlScanQueue *VRMLScanQueue
@@ -348,7 +349,7 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	// Create user for use by the discord bot (and core group ownership)
 	userId, _, _, err := nk.AuthenticateDevice(ctx, SystemUserID, "discordbot", true)
 	if err != nil {
-		logger.WithField("err", err).Error("Error creating discordbot user: %w", err)
+		logger.WithField("err", err).Error("Error creating discordbot user")
 	}
 
 	coreGroups := []string{
@@ -365,7 +366,7 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		// Search for group first
 		groups, _, err := nk.GroupsList(ctx, name, "", nil, nil, 1, "")
 		if err != nil {
-			logger.WithField("err", err).Error("Group list error: %w", err)
+			logger.WithField("err", err).Error("Group list error")
 		}
 		// remove groups that are not lang tag of 'system'
 		for i, group := range groups {

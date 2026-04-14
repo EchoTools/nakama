@@ -232,8 +232,8 @@ func TestQuoteStringValue_SpecialChars(t *testing.T) {
 			name:  "brackets_escaped",
 			input: "arr[0]",
 			check: func(t *testing.T, result string) {
-				if !strings.Contains(result, "\\[") || !strings.Contains(result, "\\]") {
-					t.Errorf("expected escaped brackets, got %q", result)
+				if result != `arr\[0\]` {
+					t.Errorf("expected %q, got %q", `arr\[0\]`, result)
 				}
 			},
 		},

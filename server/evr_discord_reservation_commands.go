@@ -74,15 +74,15 @@ func (h *ReservationSlashCommandHandler) handleAddReservation(ctx context.Contex
 
 	startTimeOpt, ok := params["start_time"]
 	if !ok || startTimeOpt == nil {
-		return errors.New("start_time is required")
+		return h.respondError(dg, i, "start_time is required")
 	}
 	durationOpt, ok := params["duration"]
 	if !ok || durationOpt == nil {
-		return errors.New("duration is required")
+		return h.respondError(dg, i, "duration is required")
 	}
 	classOpt, ok := params["classification"]
 	if !ok || classOpt == nil {
-		return errors.New("classification is required")
+		return h.respondError(dg, i, "classification is required")
 	}
 	startTimeStr := startTimeOpt.StringValue()
 	durationMinutes := int(durationOpt.IntValue())
