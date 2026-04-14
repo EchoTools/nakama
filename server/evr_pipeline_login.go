@@ -721,13 +721,13 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 						if serviceSettings.DisplayNameInUseNotifications {
 							// Notify the player that this display name is in use.
 							ownerDiscordID := p.discordCache.UserIDToDiscordID(ownerIDs[0])
-							go func() {
-								if err := p.discordCache.SendDisplayNameInUseNotification(ctx, params.profile.DiscordID(), ownerDiscordID, dn, params.profile.Username()); err != nil {
+							go func(displayName string) {
+								if err := p.discordCache.SendDisplayNameInUseNotification(ctx, params.profile.DiscordID(), ownerDiscordID, displayName, params.profile.Username()); err != nil {
 									if IsDiscordErrorCode(err, discordgo.ErrCodeCannotSendMessagesToThisUser) {
 										logger.Warn("Failed to send display name in use notification", zap.Error(err))
 									}
 								}
-							}()
+							}(dn)
 						}
 					}
 				}

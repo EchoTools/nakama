@@ -43,6 +43,7 @@ func (s *SocialAuthHandler) discordHttpCallbackHandler(w http.ResponseWriter, r 
 	userID, username, _, err := s.nk.AuthenticateCustom(ctx, code, "", true)
 	if err != nil {
 		http.Error(w, "Discord authentication failed", http.StatusInternalServerError)
+		return
 	}
 
 	sessionVars, err := setUpSessionVars(ctx, s.db, userID)
