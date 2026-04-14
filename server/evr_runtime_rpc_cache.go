@@ -13,6 +13,7 @@ type Cache struct {
 type CacheEntry struct {
 	Value     any
 	Timestamp time.Time
+	timer     *time.Timer
 }
 
 func NewCache() *Cache {
@@ -24,12 +25,16 @@ func NewCache() *Cache {
 func (c *Cache) Set(key string, value any, ttl time.Duration) {
 	c.Lock()
 	defer c.Unlock()
-	c.Store[key] = &CacheEntry{
+	// Stop any existing timer for this key to prevent goroutine accumulation
+	if existing, ok := c.Store[key]; ok && existing.timer != nil {
+		existing.timer.Stop()
+	}
+	entry := &CacheEntry{
 		Value:     value,
 		Timestamp: time.Now(),
 	}
-
-	time.AfterFunc(ttl, func() { c.Remove(key) })
+	entry.timer = time.AfterFunc(ttl, func() { c.Remove(key) })
+	c.Store[key] = entry
 }
 
 func (c *Cache) Get(key string) (value any, timestamp time.Time, found bool) {

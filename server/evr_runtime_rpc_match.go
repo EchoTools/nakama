@@ -188,8 +188,11 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 		// Prepare the session with the given match ID
 		label, err = LobbyPrepareSession(ctx, nk, label.ID, settings)
-		if err != nil || label == nil {
-			return err.Error(), runtime.NewError(err.Error(), StatusInvalidArgument)
+		if err != nil {
+			return "", runtime.NewError(err.Error(), StatusInvalidArgument)
+		}
+		if label == nil {
+			return "", runtime.NewError("match preparation returned nil label", StatusInternalError)
 		}
 	} else {
 		// Allocate a game server for the given group ID and region.

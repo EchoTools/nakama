@@ -141,7 +141,9 @@ func (s *SessionParameters) GeoHash() string {
 }
 
 func StoreParams(ctx context.Context, params *SessionParameters) {
-	ctx.Value(ctxSessionParametersKey{}).(*atomic.Pointer[SessionParameters]).Store(params)
+	if ptr, ok := ctx.Value(ctxSessionParametersKey{}).(*atomic.Pointer[SessionParameters]); ok && ptr != nil {
+		ptr.Store(params)
+	}
 }
 
 func LoadParams(ctx context.Context) (parameters SessionParameters, found bool) {
