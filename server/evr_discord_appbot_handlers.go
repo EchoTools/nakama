@@ -1232,7 +1232,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			}
 
 			// Don't kick game servers
-			if label.GameServer.SessionID.String() == p.GetSessionId() {
+			if label.GameServer != nil && label.GameServer.SessionID.String() == p.GetSessionId() {
 				continue
 			}
 

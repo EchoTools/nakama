@@ -2539,7 +2539,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			serverLocation := "Unknown"
 
-			serverLocation = label.GameServer.LocationRegionCode(true, true)
+			if label.GameServer != nil {
+				serverLocation = label.GameServer.LocationRegionCode(true, true)
+			}
 
 			// local the guild name
 			guild, err := s.Guild(i.GuildID)

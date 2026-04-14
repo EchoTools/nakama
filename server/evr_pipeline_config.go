@@ -22,7 +22,10 @@ var configCache sync.Map // map[string]*cachedConfigEntry
 const configCacheTTL = 5 * time.Minute
 
 func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	message := in.(*evr.ConfigRequest)
+	message, ok := in.(*evr.ConfigRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.ConfigRequest, got %T", in)
+	}
 
 	// Check in-memory cache first — config is global and rarely changes,
 	// so we don't need a DB hit on every unauthenticated ConfigRequest.
@@ -34,6 +37,9 @@ func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, ses
 			if err := json.Unmarshal([]byte(entry.json), &resource); err == nil {
 				return session.SendEvrUnrequire(evr.NewConfigSuccess(message.Type, message.ID, resource))
 			}
+		} else {
+			// Evict expired entry to prevent unbounded sync.Map growth
+			configCache.Delete(cacheKey)
 		}
 	}
 

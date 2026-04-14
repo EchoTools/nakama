@@ -113,7 +113,7 @@ func (q query) QuoteStringValue(input any) string {
 	case stringer:
 		return v.String()
 	default:
-		panic("unsupported type")
+		s = fmt.Sprintf("%v", v)
 	}
 	return q.replacer.Replace(s)
 }
