@@ -57,11 +57,14 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 
 	presence.RoleAlignment = lobbyParams.Role
 	if err := p.LobbyJoinEntrants(logger, label, presence); err != nil {
-		// Send the error to the client
+		// Send the error to the client after a short delay (clients may spam join requests).
+		// Tied to session context so the goroutine exits immediately on disconnect.
 		go func() {
-			// Delay sending the error message to the client.
-			// There are situations where the client will spam the server with join requests.
-			<-time.After(3 * time.Second)
+			select {
+			case <-time.After(3 * time.Second):
+			case <-session.Context().Done():
+				return
+			}
 			if err := SendEVRMessages(session, false, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
 				logger.Debug("Failed to send error message", zap.Error(err))
 			}

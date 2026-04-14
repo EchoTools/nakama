@@ -13,6 +13,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/go-redis/redis"
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -118,6 +119,11 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 				go func() {
 					defer close(doneCh)
+					defer func() {
+						if r := recover(); r != nil {
+							logger.WithField("panic", r).Error("panic recovered in event handler")
+						}
+					}()
 					dispatch.processEvent(ctx, logger, evt)
 				}()
 				select {
@@ -152,6 +158,27 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 			case <-ticker.C:
 				dispatch.processRedisQueue(ctx, logger)
 				dispatch.evictStaleJournals(ctx, logger)
+			}
+		}
+	}()
+
+	// Periodic sweep of playerAuthorizations for sessions that disconnected without
+	// sending EventSessionEnd (crash, network drop, etc).
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				dispatch.Lock()
+				for sessionID := range dispatch.playerAuthorizations {
+					if dispatch.sessionRegistry.Get(uuid.FromStringOrNil(sessionID)) == nil {
+						delete(dispatch.playerAuthorizations, sessionID)
+					}
+				}
+				dispatch.Unlock()
 			}
 		}
 	}()
