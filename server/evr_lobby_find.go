@@ -474,6 +474,24 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 			e.RoleAlignment = team
 		}
 
+		// Pre-warm latency data for all candidate server endpoints in parallel so
+		// that validatePreJoinPing can read from cache rather than issuing a
+		// separate ping round-trip per lobby.
+		{
+			endpoints := make([]evr.Endpoint, 0, len(matches))
+			seen := make(map[string]struct{})
+			for _, m := range matches {
+				if m.State.GameServer != nil && m.State.GameServer.Endpoint.IsValid() {
+					ip := m.State.GameServer.Endpoint.GetExternalIP()
+					if _, ok := seen[ip]; !ok {
+						seen[ip] = struct{}{}
+						endpoints = append(endpoints, m.State.GameServer.Endpoint)
+					}
+				}
+			}
+			p.prewarmEntrantPings(ctx, logger, entrants, endpoints)
+		}
+
 		// Try to join an existing social lobby
 		for _, labelMeta := range matches {
 			select {
