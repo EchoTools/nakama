@@ -65,6 +65,96 @@ func cleanupPreJoinPingWaiter(sessionID uuid.UUID) {
 	preJoinPingWaiters.Delete(sessionID)
 }
 
+// prewarmEntrantPings sends a single ping request covering all provided
+// endpoints to each entrant that lacks recent latency data for any of them,
+// then waits for responses. After this returns, validatePreJoinPing can
+// evaluate each endpoint from cache without issuing per-lobby ping round-trips.
+func (p *EvrPipeline) prewarmEntrantPings(ctx context.Context, logger *zap.Logger, entrants []*EvrMatchPresence, endpoints []evr.Endpoint) {
+	if len(endpoints) == 0 {
+		return
+	}
+
+	settings := ServiceSettings()
+	if settings == nil || !settings.Matchmaking.RequiresPreMatchPing() {
+		return
+	}
+
+	cutoff := time.Now().Add(-preJoinPingMaxAge)
+
+	type waiterEntry struct {
+		sessionID uuid.UUID
+		ch        chan struct{}
+	}
+	waiters := make([]waiterEntry, 0, len(entrants))
+
+	for _, ent := range entrants {
+		sess := p.nk.sessionRegistry.Get(ent.SessionID)
+		if sess == nil {
+			continue
+		}
+
+		params, ok := LoadParams(sess.Context())
+		if !ok {
+			continue
+		}
+
+		lh := params.latencyHistory.Load()
+		if lh == nil {
+			lh = NewLatencyHistory()
+		}
+
+		// Only ping endpoints this entrant lacks fresh data for.
+		var missing []evr.Endpoint
+		for _, ep := range endpoints {
+			extIP := ep.GetExternalIP()
+			if extIP == "" {
+				continue
+			}
+			entry, found := lh.LatestEntry(extIP)
+			if !found || !entry.Timestamp.After(cutoff) {
+				missing = append(missing, ep)
+			}
+		}
+
+		if len(missing) == 0 {
+			continue
+		}
+
+		ch := registerPreJoinPingWaiter(ent.SessionID)
+		if err := SendEVRMessages(sess, true, evr.NewLobbyPingRequest(preJoinPingRTTMax, missing)); err != nil {
+			cleanupPreJoinPingWaiter(ent.SessionID)
+			logger.Warn("Failed to send pre-warm ping request",
+				zap.String("uid", ent.UserID.String()),
+				zap.Error(err))
+			continue
+		}
+		waiters = append(waiters, waiterEntry{sessionID: ent.SessionID, ch: ch})
+	}
+
+	if len(waiters) == 0 {
+		return
+	}
+
+	// Wait for all entrants to respond (or timeout) before returning.
+	var wg sync.WaitGroup
+	for _, w := range waiters {
+		wg.Add(1)
+		go func(w waiterEntry) {
+			defer wg.Done()
+			defer cleanupPreJoinPingWaiter(w.sessionID)
+			timer := time.NewTimer(preJoinPingTimeout)
+			defer timer.Stop()
+			select {
+			case <-w.ch:
+			case <-timer.C:
+				logger.Debug("Pre-warm ping timed out", zap.String("sid", w.sessionID.String()))
+			case <-ctx.Done():
+			}
+		}(w)
+	}
+	wg.Wait()
+}
+
 // preJoinPingResult captures the outcome of a single party member's ping validation.
 type preJoinPingResult struct {
 	UserID    uuid.UUID
