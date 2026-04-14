@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"net"
@@ -80,6 +81,12 @@ IncomingLoop:
 		if s.format == SessionFormatEVR {
 			// EchoVR messages do not map directly onto nakama messages.
 
+			if !bytes.HasPrefix(data, evr.MessageMarker) || len(data) > evr.MaxPacketLength {
+				s.logger.Debug("Received malformed payload (no marker)", zap.Int("len", len(data)))
+				reason = "received malformed payload"
+				break
+			}
+
 			requests, err := evr.ParsePacket(data)
 			if err != nil {
 				if errors.Is(err, evr.ErrSymbolNotFound) {
@@ -87,7 +94,7 @@ IncomingLoop:
 					continue
 				}
 				// If the payload is malformed the client is incompatible or misbehaving, either way disconnect it now.
-				s.logger.Warn("Received malformed payload", zap.Binary("data", data), zap.Error(err))
+				s.logger.Debug("Received malformed payload", zap.Error(err))
 				reason = "received malformed payload"
 				break
 			}
@@ -120,7 +127,7 @@ IncomingLoop:
 			}
 			if err != nil {
 				// If the payload is malformed the client is incompatible or misbehaving, either way disconnect it now.
-				s.logger.Warn("Received malformed payload", zap.Binary("data", data))
+				s.logger.Debug("Received malformed payload", zap.Int("len", len(data)), zap.Error(err))
 				reason = "received malformed payload"
 				break
 			}
