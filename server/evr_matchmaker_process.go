@@ -199,9 +199,43 @@ func groupEntriesSequentially(entries []runtime.MatchmakerEntry) [][]runtime.Mat
 		return len(ticketMap[ticketOrder[i]].entries) > len(ticketMap[ticketOrder[j]].entries)
 	})
 
-	// Pack ticket groups into candidates, never splitting a ticket across candidates.
+	// Pack ticket groups into candidates, never splitting a ticket across
+	// candidates. Each candidate's total size must be a multiple of
+	// countMultiple so the downstream team splitter can form even rosters.
+	//
+	// Track tickets (not entries) while packing so that when we need to
+	// drop entries to hit the countMultiple boundary we can pop whole
+	// tickets from the tail instead of truncating a ticket and silently
+	// dropping one of its players — the old behavior, which reliably
+	// dropped a player when, e.g., a 5-party sat in front of a 4-party
+	// with maxCount=8 and countMultiple=2.
 	candidates := make([][]runtime.MatchmakerEntry, 0, (len(entries)+maxCount-1)/maxCount)
-	current := make([]runtime.MatchmakerEntry, 0, maxCount)
+	currentTickets := make([]*ticketGroup, 0, maxCount)
+	currentSize := 0
+
+	flushCurrent := func() {
+		// Back out whole tickets from the tail until currentSize lands on a
+		// countMultiple boundary. Any ticket popped this way is deferred —
+		// it will stay in the matchmaker queue and get another attempt on
+		// the next cycle rather than be partially matched.
+		for currentSize%countMultiple != 0 && len(currentTickets) > 0 {
+			last := currentTickets[len(currentTickets)-1]
+			currentTickets = currentTickets[:len(currentTickets)-1]
+			currentSize -= len(last.entries)
+		}
+		if currentSize <= 0 {
+			currentTickets = currentTickets[:0]
+			currentSize = 0
+			return
+		}
+		flat := make([]runtime.MatchmakerEntry, 0, currentSize)
+		for _, t := range currentTickets {
+			flat = append(flat, t.entries...)
+		}
+		candidates = append(candidates, flat)
+		currentTickets = currentTickets[:0]
+		currentSize = 0
+	}
 
 	for _, ticket := range ticketOrder {
 		tg := ticketMap[ticket]
@@ -211,32 +245,17 @@ func groupEntriesSequentially(entries []runtime.MatchmakerEntry) [][]runtime.Mat
 			continue
 		}
 
-		// If adding this ticket would exceed maxCount, flush the current candidate.
-		if len(current)+len(tg.entries) > maxCount {
-			// Trim to count_multiple boundary before flushing.
-			if rem := len(current) % countMultiple; rem != 0 {
-				current = current[:len(current)-rem]
-			}
-			if len(current) > 0 {
-				candidate := make([]runtime.MatchmakerEntry, len(current))
-				copy(candidate, current)
-				candidates = append(candidates, candidate)
-			}
-			current = current[:0]
+		// If adding this ticket would exceed maxCount, flush the current candidate first.
+		if currentSize+len(tg.entries) > maxCount {
+			flushCurrent()
 		}
 
-		current = append(current, tg.entries...)
+		currentTickets = append(currentTickets, tg)
+		currentSize += len(tg.entries)
 	}
 
-	// Flush remaining entries.
-	if rem := len(current) % countMultiple; rem != 0 {
-		current = current[:len(current)-rem]
-	}
-	if len(current) > 0 {
-		candidate := make([]runtime.MatchmakerEntry, len(current))
-		copy(candidate, current)
-		candidates = append(candidates, candidate)
-	}
+	// Flush remaining tickets.
+	flushCurrent()
 
 	return candidates
 }

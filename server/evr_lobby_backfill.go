@@ -400,7 +400,14 @@ func (b *PostMatchmakerBackfill) ExtractUnmatchedCandidates(candidates [][]runti
 	matchedSessions := make(map[string]struct{})
 	for _, match := range madeMatches {
 		for _, entry := range match {
-			matchedSessions[entry.GetPresence().GetSessionId()] = struct{}{}
+			if entry == nil {
+				continue
+			}
+			presence := entry.GetPresence()
+			if presence == nil {
+				continue
+			}
+			matchedSessions[presence.GetSessionId()] = struct{}{}
 		}
 	}
 
@@ -408,16 +415,25 @@ func (b *PostMatchmakerBackfill) ExtractUnmatchedCandidates(candidates [][]runti
 	ticketEntries := make(map[string][]*MatchmakerEntry)
 	for _, candidate := range candidates {
 		for _, entry := range candidate {
-			if _, matched := matchedSessions[entry.GetPresence().GetSessionId()]; !matched {
+			if entry == nil {
+				continue
+			}
+			presence := entry.GetPresence()
+			if presence == nil {
+				continue
+			}
+			if _, matched := matchedSessions[presence.GetSessionId()]; !matched {
 				ticket := entry.GetTicket()
+				mp, _ := presence.(*MatchmakerPresence)
+				if mp == nil {
+					// Unexpected presence type: synthesize an empty one so the
+					// downstream code does not panic on nil, but log it so we
+					// can diagnose if this path is ever taken.
+					mp = &MatchmakerPresence{}
+				}
 				me := &MatchmakerEntry{
 					Ticket:     ticket,
-					Presence: func() *MatchmakerPresence {
-					if p, ok := entry.GetPresence().(*MatchmakerPresence); ok {
-						return p
-					}
-					return &MatchmakerPresence{}
-				}(),
+					Presence:   mp,
 					PartyId:    entry.GetPartyId(),
 					Properties: entry.GetProperties(),
 				}
@@ -613,7 +629,10 @@ func (b *PostMatchmakerBackfill) GetBackfillMatches(ctx context.Context, groupID
 
 	query := strings.Join(qparts, " ")
 
-	matches, err := ListMatchStates(ctx, b.nk, query)
+	// Backfill search: minSize=0 ensures we can find freshly-prepared matches
+	// that have not yet registered a presence (same rationale as
+	// lobbyFindOrCreateSocial).
+	matches, err := ListMatchStates(ctx, b.nk, query, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list matches: %w", err)
 	}
