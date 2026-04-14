@@ -175,12 +175,17 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		gameSettings.ActiveFeatures = gg.ActiveFeatures
 	}
 
+	// sessionDurationCeiling caps how long the goroutine below will wait before
+	// recording the metric. 72 hours covers multi-day sessions while still
+	// bounding the goroutine lifetime for pathological cases.
+	const sessionDurationCeiling = 72 * time.Hour
+
 	metricsTags := params.MetricsTags()
 	params.sessionDurationOnce.Do(func() {
 		go func(metricsTags map[string]string) {
 			select {
 			case <-session.Context().Done():
-			case <-time.After(24 * time.Hour): // safety ceiling
+			case <-time.After(sessionDurationCeiling):
 			}
 			// Record the session duration
 			p.nk.metrics.CustomGauge("session_duration_seconds", metricsTags, time.Since(timer).Seconds())

@@ -81,8 +81,13 @@ IncomingLoop:
 		if s.format == SessionFormatEVR {
 			// EchoVR messages do not map directly onto nakama messages.
 
-			if !bytes.HasPrefix(data, evr.MessageMarker) || len(data) > evr.MaxPacketLength {
-				s.logger.Debug("Received malformed payload (no marker)", zap.Int("len", len(data)))
+			if !bytes.HasPrefix(data, evr.MessageMarker) {
+				s.logger.Debug("Received malformed payload: missing message marker", zap.Int("len", len(data)))
+				reason = "received malformed payload"
+				break
+			}
+			if len(data) > evr.MaxPacketLength {
+				s.logger.Debug("Received oversized packet", zap.Int("len", len(data)), zap.Int("max", evr.MaxPacketLength))
 				reason = "received malformed payload"
 				break
 			}
