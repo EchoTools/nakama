@@ -648,7 +648,7 @@ func (b *LobbyBuilder) groupIDFromEntrants(entrants []*MatchmakerEntry) (uuid.UU
 func (b *LobbyBuilder) selectNextMap(mode evr.Symbol) evr.Symbol {
 	queue := b.mapQueue[mode]
 
-	if levels, ok := b.mapQueue[mode]; !ok || len(levels) == 0 {
+	if _, ok := evr.LevelsByMode[mode]; !ok {
 		return evr.LevelUnspecified
 	} else if len(evr.LevelsByMode[mode]) == 1 {
 		return evr.LevelsByMode[mode][0]

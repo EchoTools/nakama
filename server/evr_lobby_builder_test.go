@@ -344,11 +344,18 @@ func TestSelectNextMapCombatRandomizes(t *testing.T) {
 
 	// Call enough times to exercise the full queue rotation. With 4 combat maps
 	// the queue refills every 4 calls; run 20 iterations to cover multiple cycles.
+	seen := map[evr.Symbol]struct{}{level: {}}
 	for i := 1; i < 20; i++ {
 		got := lb.selectNextMap(evr.ModeCombatPublic)
 		assert.NotEqual(t, evr.LevelUnspecified, got,
 			"selectNextMap returned LevelUnspecified on call %d", i+1)
 		assert.Contains(t, validLevels, got,
 			"selectNextMap returned an invalid level on call %d: %v", i+1, got)
+		seen[got] = struct{}{}
 	}
+
+	// Regression: verify the function actually rotates through distinct levels.
+	// With 4 combat maps and 20 calls, at least 2 distinct levels must appear.
+	assert.Greater(t, len(seen), 1,
+		"selectNextMap returned the same level on all 20 calls; queue rotation is broken")
 }
