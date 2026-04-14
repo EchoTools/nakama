@@ -117,13 +117,15 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 	// Build an allowlist of IPs from active game server presences so that
 	// clients cannot inject arbitrary IPs into their latency history and
 	// inflate rtt_* matchmaker properties.
-	// knownIPs is nil when the allowlist could not be populated due to an error;
-	// a nil map means the filter is disabled (fail open) so results are not silently dropped.
-	var knownIPs map[string]struct{}
-	if presences, err := p.nk.StreamUserList(StreamModeGameServer, uuid.Nil.String(), "", "", false, true); err != nil {
-		logger.Warn("failed to list game server presences for ping validation; accepting all ping results", zap.Error(err))
-	} else {
-		knownIPs = make(map[string]struct{})
+	// Query both guild-specific streams and the global stream, matching the
+	// same logic used in sendPingRequest to build the candidate list.
+	knownIPs := make(map[string]struct{})
+	addPresencesFunc := func(subject string) {
+		presences, err := p.nk.StreamUserList(StreamModeGameServer, subject, "", "", false, true)
+		if err != nil {
+			logger.Warn("failed to list game server presences for ping validation", zap.String("subject", subject), zap.Error(err))
+			return
+		}
 		for _, presence := range presences {
 			gp := &GameServerPresence{}
 			if err := json.Unmarshal([]byte(presence.GetStatus()), gp); err != nil {
@@ -137,6 +139,13 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 			}
 		}
 	}
+
+	// Include guild-specific game servers
+	for groupID := range params.guildGroups {
+		addPresencesFunc(groupID)
+	}
+	// Include global game servers
+	addPresencesFunc(uuid.Nil.String())
 
 	for _, result := range response.Results {
 		ip := result.ExternalIP
