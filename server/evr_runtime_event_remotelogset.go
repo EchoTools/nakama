@@ -50,22 +50,26 @@ func NewEventPostMatchRemoteLog(userID, sessionID string, xpid evr.EvrId, userna
 
 func (s *EventRemoteLogSet) unmarshalLogs(logger runtime.Logger, logStrs []string) ([]evr.RemoteLog, error) {
 	entries := make([]evr.RemoteLog, 0, len(logStrs))
+	var unknownCount, failedCount int
 	for _, logStr := range logStrs {
 		// Parse the useful remote logs from the set.
 		parsed, err := evr.UnmarshalRemoteLog([]byte(logStr))
 		if err != nil {
-			logger := logger.WithFields(map[string]any{
-				"log":   logStr,
-				"error": err,
-			})
 			if errors.Is(err, evr.ErrUnknownRemoteLogMessageType) {
-				logger.Warn("Unknown remote log message type")
+				unknownCount++
 			} else if !errors.Is(err, evr.ErrRemoteLogIsNotJSON) {
-				logger.Warn("Failed to parse remote log message")
+				failedCount++
 			}
 			continue
 		}
 		entries = append(entries, parsed)
+	}
+	// Log once per batch rather than once per entry.
+	if unknownCount > 0 {
+		logger.WithField("count", unknownCount).Debug("Unknown remote log message types in batch")
+	}
+	if failedCount > 0 {
+		logger.WithField("count", failedCount).Debug("Failed to parse remote log messages in batch")
 	}
 	return entries, nil
 }

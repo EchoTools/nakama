@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
@@ -11,8 +13,29 @@ import (
 	"go.uber.org/zap"
 )
 
+type cachedConfigEntry struct {
+	json   string
+	expiry time.Time
+}
+
+var configCache sync.Map // map[string]*cachedConfigEntry
+const configCacheTTL = 5 * time.Minute
+
 func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	message := in.(*evr.ConfigRequest)
+
+	// Check in-memory cache first — config is global and rarely changes,
+	// so we don't need a DB hit on every unauthenticated ConfigRequest.
+	cacheKey := message.Type + ":" + message.ID
+	if v, ok := configCache.Load(cacheKey); ok {
+		entry := v.(*cachedConfigEntry)
+		if time.Now().Before(entry.expiry) {
+			resource := make(map[string]any)
+			if err := json.Unmarshal([]byte(entry.json), &resource); err == nil {
+				return session.SendEvrUnrequire(evr.NewConfigSuccess(message.Type, message.ID, resource))
+			}
+		}
+	}
 
 	// Retrieve the requested object.
 	objs, err := StorageReadObjects(ctx, logger, session.pipeline.db, uuid.Nil, []*api.ReadStorageObjectId{
@@ -59,6 +82,9 @@ func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, ses
 		session.SendEvrUnrequire(evr.NewConfigFailure(message.Type, message.ID))
 		return fmt.Errorf("failed to parse config JSON: type=%s: %w", message.Type, err)
 	}
+
+	// Cache the result.
+	configCache.Store(cacheKey, &cachedConfigEntry{json: jsonResource, expiry: time.Now().Add(configCacheTTL)})
 
 	// Send the resource to the client.
 	if err := session.SendEvrUnrequire(evr.NewConfigSuccess(message.Type, message.ID, resource)); err != nil {
