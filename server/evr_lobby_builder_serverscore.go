@@ -98,19 +98,32 @@ func calculateServerScore(bluePings, orangePings []int) (float64, error) {
 	// Sum difference points
 	blueSum, orangeSum := floats.Sum(bPings), floats.Sum(oPings)
 	sumDiff := math.Abs(blueSum - orangeSum)
-	sumPoints := (1 - (sumDiff / maxSumDiff)) * pointsDistribution[0]
+	var sumPoints float64
+	if maxSumDiff > 0 {
+		sumPoints = (1 - (sumDiff / maxSumDiff)) * pointsDistribution[0]
+	}
 
 	// Team variance points
 	meanVar := average(stat.Variance(bPings, nil), stat.Variance(oPings, nil))
-	teamPoints := (1 - (meanVar / maxTeamVar)) * pointsDistribution[1]
+	var teamPoints float64
+	if maxTeamVar > 0 {
+		teamPoints = (1 - (meanVar / maxTeamVar)) * pointsDistribution[1]
+	}
 
 	// Server variance points
 	bothPings := append(bPings, oPings...)
 	serverVar := stat.Variance(bothPings, nil)
-	serverPoints := (1 - (serverVar / maxServerVar)) * pointsDistribution[2]
+	var serverPoints float64
+	if maxServerVar > 0 {
+		serverPoints = (1 - (serverVar / maxServerVar)) * pointsDistribution[2]
+	}
 
 	// High/low ping points
-	hilo := float64((blueSum+orangeSum)-(minPing*float64(ppt)*2)) / float64((pingThreshold*float64(ppt)*2)-(minPing*float64(ppt)*2))
+	hiloDenom := float64((pingThreshold*float64(ppt)*2) - (minPing * float64(ppt) * 2))
+	var hilo float64
+	if hiloDenom > 0 {
+		hilo = float64((blueSum+orangeSum)-(minPing*float64(ppt)*2)) / hiloDenom
+	}
 	hiloPoints := (1 - hilo) * pointsDistribution[3]
 
 	// Final score

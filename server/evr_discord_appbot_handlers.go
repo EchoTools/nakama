@@ -57,7 +57,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 				displayName = member.User.Username
 			}
 
-			content := fmt.Sprintf("<@%s> (%s) used %s in `%s`", member.User.ID, displayName, signature, guild.Name)
+			content := fmt.Sprintf("<@%s> (%s) used %s in `%s`", member.User.ID, EscapeDiscordMarkdown(displayName), signature, EscapeDiscordMarkdown(guild.Name))
 
 			go func() {
 				if _, err := d.dg.ChannelMessageSendComplex(cID, &discordgo.MessageSend{
@@ -872,7 +872,9 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, fmt.Errorf("failed to allocate game server: label is nil")
 	}
 
-	latencyMillis = latencyHistory.AverageRTT(label.GameServer.Endpoint.ExternalIP.String(), true)
+	if label.GameServer != nil {
+		latencyMillis = latencyHistory.AverageRTT(label.GameServer.Endpoint.ExternalIP.String(), true)
+	}
 
 	return label, latencyMillis, nil
 }
@@ -1232,7 +1234,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			}
 
 			// Don't kick game servers
-			if label.GameServer.SessionID.String() == p.GetSessionId() {
+			if label.GameServer != nil && label.GameServer.SessionID.String() == p.GetSessionId() {
 				continue
 			}
 
@@ -1250,7 +1252,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			}
 
 			// Check if the user is the game server operator
-			if label.GameServer.OperatorID.String() == callerUserID {
+			if label.GameServer != nil && label.GameServer.OperatorID.String() == callerUserID {
 				permissions = append(permissions, "game server operator")
 			}
 
@@ -1275,7 +1277,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				continue
 			}
 
-			actions = append(actions, fmt.Sprintf("kicked from [%s](https://echo.taxi/spark://c/%s) session. (%s) [%s]", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), userNotice, strings.Join(permissions, ", ")))
+			actions = append(actions, fmt.Sprintf("kicked from [%s](https://echo.taxi/spark://c/%s) session. (%s) [%s]", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), EscapeDiscordMarkdown(userNotice), strings.Join(permissions, ", ")))
 
 			cnt++
 
@@ -1288,7 +1290,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				if count, err := DisconnectUserID(ctx, d.nk, targetUserID, true, true, false); err != nil {
 					logger.Warn("Failed to disconnect user", zap.Error(err))
 				} else if count > 0 {
-					_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s (%s) from login/match service (%d sessions).", caller.Mention(), target.Mention(), target.Username, count), false)
+					_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s (%s) from login/match service (%d sessions).", caller.Mention(), target.Mention(), EscapeDiscordMarkdown(target.Username), count), false)
 				}
 			}()
 		}
@@ -1298,7 +1300,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		}
 	}
 
-	_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s's `kick-player` actions summary for %s (%s):\n %s", caller.Mention(), target.Mention(), target.Username, strings.Join(actions, ";\n ")), false)
+	_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s's `kick-player` actions summary for %s (%s):\n %s", caller.Mention(), target.Mention(), EscapeDiscordMarkdown(target.Username), strings.Join(actions, ";\n ")), false)
 
 	if i != nil && !sentEmbedResponse {
 		return respondContent(fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(actions, "\n")))

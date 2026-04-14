@@ -85,6 +85,9 @@ func (p *EvrPipeline) validatePreJoinPing(
 		return nil
 	}
 
+	if label.GameServer == nil {
+		return nil
+	}
 	endpoint := label.GameServer.Endpoint
 	if !endpoint.IsValid() {
 		logger.Warn("Game server endpoint invalid, skipping pre-join ping")
@@ -244,12 +247,12 @@ func (p *EvrPipeline) validatePreJoinPing(
 
 	failureDetails := make([]string, 0, len(failures))
 	for _, f := range failures {
-		failureDetails = append(failureDetails, fmt.Sprintf("%s (uid=%s, sid=%s): %v", f.Username, f.UserID, f.SessionID, f.Err))
+		failureDetails = append(failureDetails, fmt.Sprintf("%s (uid=%s, sid=%s): %v", EscapeDiscordMarkdown(f.Username), f.UserID, f.SessionID, f.Err))
 	}
 
 	allEntrantDetails := make([]string, 0, len(entrants))
 	for _, ent := range entrants {
-		allEntrantDetails = append(allEntrantDetails, fmt.Sprintf("uid=%s sid=%s user=%s", ent.UserID, ent.SessionID, ent.Username))
+		allEntrantDetails = append(allEntrantDetails, fmt.Sprintf("uid=%s sid=%s user=%s", ent.UserID, ent.SessionID, EscapeDiscordMarkdown(ent.Username)))
 	}
 
 	logger.Warn("Pre-join ping validation failed",
@@ -267,7 +270,7 @@ func (p *EvrPipeline) validatePreJoinPing(
 		endpoint.ExternalAddress(),
 		strings.Join(failureDetails, "; "),
 		strings.Join(allEntrantDetails, "; "),
-		label.GameServer.Username,
+		EscapeDiscordMarkdown(label.GameServer.Username),
 	)
 	if _, err := p.appBot.LogAuditMessage(ctx, groupID, auditMsg, true); err != nil {
 		logger.Warn("Failed to send pre-join ping audit message", zap.Error(err))
@@ -277,7 +280,7 @@ func (p *EvrPipeline) validatePreJoinPing(
 	errorMsg := fmt.Sprintf("```fix\nPre-join ping validation failed\n\nMatch: %s\nEndpoint: %s\nGame Server: %s\n\nFailed members:\n  %s\n\nAll party members:\n  %s\n```",
 		label.ID.UUID.String(),
 		endpoint.ExternalAddress(),
-		label.GameServer.Username,
+		EscapeDiscordMarkdown(label.GameServer.Username),
 		strings.Join(failureDetails, "\n  "),
 		strings.Join(allEntrantDetails, "\n  "),
 	)

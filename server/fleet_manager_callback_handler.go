@@ -56,6 +56,9 @@ func (fch *LocalFmCallbackHandler) InvokeCallback(callbackId string, status runt
 		return
 	}
 
-	fn := callback.(runtime.FmCreateCallbackFn)
+	fn, ok := callback.(runtime.FmCreateCallbackFn)
+	if !ok {
+		return
+	}
 	fn(status, instanceInfo, sessionInfo, metadata, err)
 }

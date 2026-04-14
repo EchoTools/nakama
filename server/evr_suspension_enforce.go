@@ -163,7 +163,7 @@ func KickPlayerFromMatch(ctx context.Context, nk runtime.NakamaModule, matchID M
 		if presence.GetUserId() != userID {
 			continue
 		}
-		if presence.GetSessionId() == label.GameServer.SessionID.String() {
+		if label.GameServer != nil && presence.GetSessionId() == label.GameServer.SessionID.String() {
 			// Do not kick the game server
 			continue
 		}
@@ -214,15 +214,15 @@ func DisconnectUserID(ctx context.Context, nk runtime.NakamaModule, userID strin
 		for _, presence := range presences {
 
 			// Add a delay to allow the match to process the kick
-			go func() {
+			go func(sessionID string) {
 				if kickFirst {
 					<-time.After(5 * time.Second)
 				}
-				if err := nk.SessionDisconnect(ctx, presence.GetSessionId(), runtime.PresenceReasonDisconnect); err != nil {
+				if err := nk.SessionDisconnect(ctx, sessionID, runtime.PresenceReasonDisconnect); err != nil {
 					// Ignore the error
 					return
 				}
-			}()
+			}(presence.GetSessionId())
 
 			cnt++
 		}

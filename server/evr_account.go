@@ -72,10 +72,16 @@ func (e *EVRProfile) SetStorageMeta(meta StorableMetadata) {
 }
 
 func (e EVRProfile) UserID() string {
+	if e.account == nil || e.account.User == nil {
+		return ""
+	}
 	return e.account.User.Id
 }
 
 func (e EVRProfile) IsDisabled() bool {
+	if e.account == nil {
+		return false
+	}
 	return e.account.DisableTime != nil && e.account.DisableTime.GetSeconds() > 0
 }
 
@@ -88,6 +94,9 @@ func (e EVRProfile) DisabledAt() time.Time {
 }
 
 func (e EVRProfile) IsLinked() bool {
+	if e.account == nil {
+		return false
+	}
 	for _, d := range e.account.Devices {
 		if _, err := evr.ParseEvrId(d.Id); err == nil {
 			return true
@@ -97,6 +106,9 @@ func (e EVRProfile) IsLinked() bool {
 }
 
 func (e EVRProfile) XPIDs() []evr.EvrId {
+	if e.account == nil {
+		return nil
+	}
 	xpids := make([]evr.EvrId, 0, len(e.account.Devices))
 	for _, d := range e.account.Devices {
 		xpid, err := evr.ParseEvrId(d.Id)
@@ -109,26 +121,44 @@ func (e EVRProfile) XPIDs() []evr.EvrId {
 }
 
 func (e EVRProfile) HasPasswordSet() bool {
+	if e.account == nil {
+		return false
+	}
 	return e.account.GetEmail() != ""
 }
 
 func (e EVRProfile) IsOnline() bool {
+	if e.account == nil || e.account.User == nil {
+		return false
+	}
 	return e.account.User.GetOnline()
 }
 
 func (e EVRProfile) DiscordID() string {
+	if e.account == nil {
+		return ""
+	}
 	return e.account.GetCustomId()
 }
 
 func (e EVRProfile) CreatedAt() time.Time {
+	if e.account == nil || e.account.User == nil || e.account.User.GetCreateTime() == nil {
+		return time.Time{}
+	}
 	return e.account.User.GetCreateTime().AsTime()
 }
 
 func (e EVRProfile) UpdatedAt() time.Time {
+	if e.account == nil || e.account.User == nil || e.account.User.GetUpdateTime() == nil {
+		return time.Time{}
+	}
 	return e.account.User.GetUpdateTime().AsTime()
 }
 
 func (e EVRProfile) LinkedXPIDs() []evr.EvrId {
+	if e.account == nil {
+		return nil
+	}
 	devices := make([]evr.EvrId, 0, len(e.account.Devices))
 	for _, d := range e.account.Devices {
 		if xpid, err := evr.ParseEvrId(d.Id); err == nil && xpid != nil {
@@ -139,26 +169,44 @@ func (e EVRProfile) LinkedXPIDs() []evr.EvrId {
 }
 
 func (a EVRProfile) ID() string {
+	if a.account == nil || a.account.User == nil {
+		return ""
+	}
 	return a.account.User.Id
 }
 
 func (a EVRProfile) Username() string {
+	if a.account == nil || a.account.User == nil {
+		return ""
+	}
 	return a.account.User.Username
 }
 
 func (a EVRProfile) DisplayName() string {
+	if a.account == nil || a.account.User == nil {
+		return ""
+	}
 	return a.account.User.DisplayName
 }
 
 func (a EVRProfile) Wallet() string {
+	if a.account == nil {
+		return ""
+	}
 	return a.account.Wallet
 }
 
 func (a EVRProfile) LangTag() string {
+	if a.account == nil || a.account.User == nil {
+		return ""
+	}
 	return a.account.User.LangTag
 }
 
 func (a EVRProfile) AvatarURL() string {
+	if a.account == nil || a.account.User == nil {
+		return ""
+	}
 	return a.account.User.AvatarUrl
 }
 

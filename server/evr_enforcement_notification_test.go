@@ -180,7 +180,7 @@ func TestGuildEnforcementRecord_GetNotificationMessage(t *testing.T) {
 			guildName:    "Test Guild",
 			customFooter: "Contact us at #appeals in our Discord server.",
 			want: []string{
-				"Contact us at #appeals in our Discord server.",
+				`Contact us at \#appeals in our Discord server.`,
 			},
 			notWant: []string{
 				"/whoami",

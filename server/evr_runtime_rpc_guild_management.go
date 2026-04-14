@@ -210,7 +210,7 @@ func GuildGroupTransferOwnershipRPC(ctx context.Context, logger runtime.Logger, 
 	// Demote the old owner from superadmin to admin.
 	if oldOwnerID != "" && oldOwnerID != req.NewOwnerID {
 		if err := nk.GroupUsersDemote(ctx, SystemUserID, req.GroupID, []string{oldOwnerID}); err != nil {
-			logger.Warn("Failed to demote old owner %s in group %s: %v", oldOwnerID, req.GroupID, err)
+			logger.WithFields(map[string]interface{}{"old_owner_id": oldOwnerID, "group_id": req.GroupID, "error": err}).Warn("Failed to demote old owner in group")
 		}
 	}
 

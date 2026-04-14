@@ -17,7 +17,7 @@ func NewOtherUserProfileSuccess(evrId EvrId, profile *ServerProfile) *OtherUserP
 	var data json.RawMessage
 	data, err := json.Marshal(profile)
 	if err != nil {
-		panic("failed to marshal profile")
+		data = json.RawMessage(`{}`)
 	}
 
 	return &OtherUserProfileSuccess{

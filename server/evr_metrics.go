@@ -190,7 +190,7 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 		// Get the match states
 		matchStates, err := ListMatchStates(ctx, nk, "")
 		if err != nil {
-			logger.Error("Error listing match states: %v", err)
+			logger.WithField("error", err).Error("Error listing match states")
 			continue
 		}
 
@@ -203,13 +203,16 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 		playerSet := make(map[string]struct{})
 
 		for _, state := range matchStates {
+			if state.State.GameServer == nil {
+				continue
+			}
 			groupID := state.State.GetGroupID()
 			groupIDs[groupID.String()] = struct{}{}
 			operatorUsername, ok := operatorUsernames[state.State.GameServer.OperatorID]
 			if !ok {
 				account, err := nk.AccountGetId(ctx, state.State.GameServer.OperatorID.String())
-				if err != nil {
-					logger.Error("Error getting account: %v", err)
+				if err != nil || account == nil || account.User == nil {
+					logger.WithField("error", err).Error("Error getting account")
 					continue
 				}
 				operatorUsername = account.User.Username
@@ -294,7 +297,7 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 
 		// Update linked headset counts
 		if linkedUsers, err := CountLinkedUsers(ctx, nk, db); err != nil {
-			logger.Error("Error counting linked users: %v", err)
+			logger.WithField("error", err).Error("Error counting linked users")
 		} else {
 			nk.metrics.CustomGauge("linked_users_count_gauge", nil, float64(linkedUsers))
 		}
@@ -303,7 +306,7 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 		locations := make(map[string][]float64)
 
 		for _, state := range matchStates {
-			if state.State.GameServer.Endpoint.GetExternalIP() == "" {
+			if state.State.GameServer == nil || state.State.GameServer.Endpoint.GetExternalIP() == "" {
 				continue
 			}
 			locations[state.State.GameServer.Endpoint.GetExternalIP()] = []float64{
@@ -319,14 +322,14 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 
 			presences, err := nk.StreamUserList(StreamModeMatchmaking, groupID, "", "", false, true)
 			if err != nil {
-				logger.Error("Error listing matchmaking presences: %v", err)
+				logger.WithField("error", err).Error("Error listing matchmaking presences")
 				continue
 			}
 
 			for _, presence := range presences {
 				lobbyParams := LobbySessionParameters{}
 				if err := json.Unmarshal([]byte(presence.GetStatus()), &lobbyParams); err != nil {
-					logger.Error("Error unmarshalling matchmaking presence: %v", err)
+					logger.WithField("error", err).Error("Error unmarshalling matchmaking presence")
 					continue
 				}
 

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/heroiclabs/nakama-common/api"
@@ -16,6 +17,7 @@ const (
 
 // EnforcementActionMetrics tracks statistics about enforcement actions
 type EnforcementActionMetrics struct {
+	mu                  sync.Mutex              `json:"-"`
 	GroupID             string                  `json:"group_id"`
 	TotalKicks          int                     `json:"total_kicks"`
 	TotalSuspensions    int                     `json:"total_suspensions"`
@@ -82,6 +84,8 @@ func EnforcementActionMetricsFromStorageObject(obj *api.StorageObject) (*Enforce
 
 // RecordKick records a kick action in the metrics
 func (m *EnforcementActionMetrics) RecordKick(userID, rule string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.TotalKicks++
 	if rule != "" {
 		m.KicksByRule[rule]++
@@ -92,6 +96,8 @@ func (m *EnforcementActionMetrics) RecordKick(userID, rule string) {
 
 // RecordSuspension records a suspension action in the metrics
 func (m *EnforcementActionMetrics) RecordSuspension(userID, rule string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.TotalSuspensions++
 	if rule != "" {
 		m.SuspensionsByRule[rule]++
@@ -102,6 +108,8 @@ func (m *EnforcementActionMetrics) RecordSuspension(userID, rule string) {
 
 // RecordVoiding records a voiding action in the metrics
 func (m *EnforcementActionMetrics) RecordVoiding(userID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.TotalVoidings++
 	m.recordActionForDate(userID, "voiding")
 	m.LastUpdated = time.Now().UTC()

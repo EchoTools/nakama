@@ -188,8 +188,11 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 		// Prepare the session with the given match ID
 		label, err = LobbyPrepareSession(ctx, nk, label.ID, settings)
-		if err != nil || label == nil {
-			return err.Error(), runtime.NewError(err.Error(), StatusInvalidArgument)
+		if err != nil {
+			return "", runtime.NewError(err.Error(), StatusInvalidArgument)
+		}
+		if label == nil {
+			return "", runtime.NewError("match preparation returned nil label", StatusInternalError)
 		}
 	} else {
 		// Allocate a game server for the given group ID and region.
@@ -227,6 +230,9 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 	// Guild-specified server-hosts and the server's operators may signal their own game servers.
 	// Otherwise, the game server must host for the guild.
+	if label.GameServer == nil {
+		return "", runtime.NewError("match has no game server", StatusInternalError)
+	}
 	if label.GameServer.OperatorID.String() != userID && !slices.Contains(label.GameServer.GroupIDs, uuid.FromStringOrNil(request.GroupId)) {
 		return "", runtime.NewError("game server does not host for that guild.", StatusPermissionDenied)
 	}
@@ -234,7 +240,7 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	// Log the match preparation as an audit log message
 	if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
 		if settingsJSON, err := json.MarshalIndent(settings, "", "  "); err != nil {
-			logger.Error("Failed to marshal match settings: %s", err.Error())
+			logger.WithField("error", err.Error()).Error("Failed to marshal match settings")
 		} else {
 			guid := strings.ToUpper(label.ID.UUID.String())
 			auditMessage := fmt.Sprintf("<@%s> allocated https://echo.taxi/spark://j/%s via RPC:\n\n```json\n%s\n```", callerAccount.GetCustomId(), guid, string(settingsJSON))

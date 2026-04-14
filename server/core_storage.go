@@ -549,7 +549,10 @@ SELECT collection, key, user_id, value, version, read, write, create_time, updat
 
 	var objects *api.StorageObjects
 	err := ExecuteRetryablePgx(ctx, db, func(conn *pgx.Conn) error {
-		rows, _ := conn.Query(ctx, query, params...)
+		rows, err := conn.Query(ctx, query, params...)
+		if err != nil {
+			return err
+		}
 		defer rows.Close()
 		funcObjects := &api.StorageObjects{Objects: make([]*api.StorageObject, 0, len(objectIDs))}
 		for rows.Next() {

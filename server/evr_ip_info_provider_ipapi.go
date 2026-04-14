@@ -176,13 +176,13 @@ func (s *ipapiClient) load(ip string) (*IPAPIResponse, error) {
 	if err == redis.Nil {
 		return nil, nil
 	} else if err != nil {
-		return nil, fmt.Errorf("failed to get data from redis: %v", err)
+		return nil, fmt.Errorf("failed to get data from redis: %w", err)
 	}
 
 	var result IPAPIResponse
 	err = json.Unmarshal([]byte(cachedData), &result)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal cached data: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal cached data: %w", err)
 	}
 
 	return &result, nil
@@ -191,13 +191,13 @@ func (s *ipapiClient) load(ip string) (*IPAPIResponse, error) {
 func (s *ipapiClient) store(ip string, result *IPAPIResponse) error {
 	data, err := json.Marshal(result)
 	if err != nil {
-		return fmt.Errorf("failed to marshal data: %v", err)
+		return fmt.Errorf("failed to marshal data: %w", err)
 	}
 
 	err = s.redisClient.Set(ipapiRedisKeyPrefix+ip, data, ipapiRedisKeyTTL).Err()
 	if err != nil {
 		s.metrics.CustomCounter("ipapi_cache_store_error", nil, 1)
-		return fmt.Errorf("failed to set data in redis: %v", err)
+		return fmt.Errorf("failed to set data in redis: %w", err)
 	}
 
 	return nil

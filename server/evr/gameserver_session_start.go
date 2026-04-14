@@ -117,6 +117,9 @@ var (
 	}
 )
 
+// RandomLevelByMode returns a random level for the given game mode.
+// math/rand is fine here: this is non-security game-logic randomness
+// (level selection for matches). Predictability has no security impact.
 func RandomLevelByMode(mode Symbol) Symbol {
 	levels, ok := LevelsByMode[mode]
 	if !ok {
@@ -217,7 +220,7 @@ func NewSessionSettings(appID string, mode Symbol, level Symbol, features []stri
 func (s *LobbySessionSettings) String() string {
 	b, err := json.Marshal(s)
 	if err != nil {
-		panic(err)
+		return fmt.Sprintf("<marshal error: %v>", err)
 	}
 	return string(b)
 }
@@ -240,6 +243,8 @@ func NewEntrantDescriptor(playerId EvrId) *EntrantDescriptor {
 	}
 }
 
+// RandomBotEntrantDescriptor creates a bot entrant with a random account ID.
+// math/rand is fine here: bot IDs are opaque game identifiers, not secrets.
 func RandomBotEntrantDescriptor() EntrantDescriptor {
 	botuuid, _ := uuid.NewV4()
 	return EntrantDescriptor{

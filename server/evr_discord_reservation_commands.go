@@ -72,9 +72,21 @@ func (h *ReservationSlashCommandHandler) handleAddReservation(ctx context.Contex
 		params[opt.Name] = opt
 	}
 
-	startTimeStr := params["start_time"].StringValue()
-	durationMinutes := int(params["duration"].IntValue())
-	classificationStr := params["classification"].StringValue()
+	startTimeOpt, ok := params["start_time"]
+	if !ok || startTimeOpt == nil {
+		return h.respondError(dg, i, "start_time is required")
+	}
+	durationOpt, ok := params["duration"]
+	if !ok || durationOpt == nil {
+		return h.respondError(dg, i, "duration is required")
+	}
+	classOpt, ok := params["classification"]
+	if !ok || classOpt == nil {
+		return h.respondError(dg, i, "classification is required")
+	}
+	startTimeStr := startTimeOpt.StringValue()
+	durationMinutes := int(durationOpt.IntValue())
+	classificationStr := classOpt.StringValue()
 
 	var ownerID string
 	if owner, exists := params["owner"]; exists {

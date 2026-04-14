@@ -12,6 +12,9 @@ import (
 
 func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) error {
 	message := in.GetLobbyEntrantConnected()
+	if message == nil {
+		return fmt.Errorf("envelope missing LobbyEntrantConnected payload")
+	}
 
 	baseLogger := logger.With(zap.String("mid", message.LobbySessionId))
 
@@ -121,6 +124,9 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 
 func (p *EvrPipeline) lobbyEntrantsRemove(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) error {
 	message := in.GetLobbyEntrantRemoved()
+	if message == nil {
+		return fmt.Errorf("envelope missing LobbyEntrantRemoved payload")
+	}
 	matchID, _ := NewMatchID(uuid.FromStringOrNil(message.LobbySessionId), p.node)
 	presence, err := PresenceByEntrantID(p.nk, matchID, uuid.FromStringOrNil(message.EntrantId))
 	if err != nil {
@@ -142,6 +148,9 @@ func (p *EvrPipeline) lobbyEntrantsRemove(logger *zap.Logger, session *sessionWS
 
 func (p *EvrPipeline) lobbySessionEvent(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) error {
 	message := in.GetLobbySessionEvent()
+	if message == nil {
+		return fmt.Errorf("envelope missing LobbySessionEvent payload")
+	}
 	matchID, _ := NewMatchID(uuid.FromStringOrNil(message.LobbySessionId), p.node)
 	var opcode SignalOpCode
 	switch rtapi.LobbySessionEventMessage_Code(message.Code) {

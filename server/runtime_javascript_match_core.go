@@ -605,7 +605,7 @@ func (rm *RuntimeJavaScriptMatchCore) broadcastMessageDeferred(r *goja.Runtime) 
 				Envelope:    msg,
 				Reliable:    reliable,
 			}); err != nil {
-				panic(r.NewGoError(fmt.Errorf("error deferring message broadcast: %v", err)))
+				panic(r.NewGoError(fmt.Errorf("error deferring message broadcast: %w", err)))
 			}
 		}
 
@@ -836,7 +836,7 @@ func (rm *RuntimeJavaScriptMatchCore) matchLabelUpdate(r *goja.Runtime) func(goj
 		input := getJsString(r, f.Argument(0))
 
 		if err := rm.matchRegistry.UpdateMatchLabel(rm.id, rm.tickRate, rm.module, input, rm.createTime); err != nil {
-			panic(r.NewGoError(fmt.Errorf("error updating match label: %v", err.Error())))
+			panic(r.NewGoError(fmt.Errorf("error updating match label: %w", err)))
 		}
 		rm.label.Store(input)
 

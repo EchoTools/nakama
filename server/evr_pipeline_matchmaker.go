@@ -35,7 +35,10 @@ func (p *EvrPipeline) lobbyMatchmakerStatusRequest(ctx context.Context, logger *
 }
 
 func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(evr.LobbySessionRequest)
+	request, ok := in.(evr.LobbySessionRequest)
+	if !ok {
+		return fmt.Errorf("expected evr.LobbySessionRequest, got %T", in)
+	}
 
 	go func() {
 
@@ -93,7 +96,10 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 
 // lobbyPingResponse is a message responding to a ping request.
 func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	response := in.(*evr.LobbyPingResponse)
+	response, ok := in.(*evr.LobbyPingResponse)
+	if !ok {
+		return fmt.Errorf("expected *evr.LobbyPingResponse, got %T", in)
+	}
 
 	var (
 		now            = time.Now().UTC()
@@ -206,7 +212,10 @@ func (p *EvrPipeline) lobbyPendingSessionCancel(ctx context.Context, logger *zap
 // lobbyPlayerSessionsRequest is called when a client requests the player sessions for a list of XP IDs.
 // Player Sessions are random UUIDs generated when each player joins the match.
 func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	message := in.(*evr.LobbyPlayerSessionsRequest)
+	message, ok := in.(*evr.LobbyPlayerSessionsRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.LobbyPlayerSessionsRequest, got %T", in)
+	}
 
 	matchID, err := NewMatchID(message.LobbyID, p.node)
 	if err != nil {

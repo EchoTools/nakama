@@ -100,6 +100,9 @@ type preparedBackfillCandidate struct {
 func (b *PostMatchmakerBackfill) prepareMatches(matches []*BackfillMatch, bctx *backfillContext) []*preparedBackfillMatch {
 	prepared := make([]*preparedBackfillMatch, len(matches))
 	for i, m := range matches {
+		if m.Label.GameServer == nil {
+			continue
+		}
 		prepared[i] = &preparedBackfillMatch{
 			BackfillMatch: m,
 			externalIP:    m.Label.GameServer.Endpoint.GetExternalIP(),
@@ -409,7 +412,12 @@ func (b *PostMatchmakerBackfill) ExtractUnmatchedCandidates(candidates [][]runti
 				ticket := entry.GetTicket()
 				me := &MatchmakerEntry{
 					Ticket:     ticket,
-					Presence:   entry.GetPresence().(*MatchmakerPresence),
+					Presence: func() *MatchmakerPresence {
+					if p, ok := entry.GetPresence().(*MatchmakerPresence); ok {
+						return p
+					}
+					return &MatchmakerPresence{}
+				}(),
 					PartyId:    entry.GetPartyId(),
 					Properties: entry.GetProperties(),
 				}
@@ -587,7 +595,7 @@ func (b *PostMatchmakerBackfill) GetBackfillMatches(ctx context.Context, groupID
 	// Build query for open matches in the same group with the same mode
 	qparts := []string{
 		"+label.open:T",
-		fmt.Sprintf("+label.mode:%s", mode.String()),
+		fmt.Sprintf("+label.mode:%s", Query.EscapeIndexValue(mode.String())),
 		fmt.Sprintf("+label.group_id:%s", Query.QuoteStringValue(groupID.String())),
 	}
 

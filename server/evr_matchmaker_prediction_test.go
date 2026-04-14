@@ -35,7 +35,7 @@ func retrieveDataFromRemoteNakamaRPC[T any](uri string, dst T) error {
 
 	resp, err := http.Get(uri + "?unwrap&http_key=" + httpKey)
 	if err != nil {
-		return fmt.Errorf("Error fetching match data: %v", err)
+		return fmt.Errorf("Error fetching match data: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -44,14 +44,14 @@ func retrieveDataFromRemoteNakamaRPC[T any](uri string, dst T) error {
 
 	jsonBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("Error reading file: %v", err)
+		return fmt.Errorf("Error reading file: %w", err)
 	}
 	resp.Body.Close()
 
 	// read in the file
 	err = json.Unmarshal(jsonBytes, dst)
 	if err != nil {
-		return fmt.Errorf("Error decoding file: %v", err)
+		return fmt.Errorf("Error decoding file: %w", err)
 	}
 	return nil
 }

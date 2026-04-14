@@ -43,7 +43,7 @@ func CGNATCleanupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 				summary += fmt.Sprintf("\n... and %d more", len(details)-maxDetails)
 			}
 		}
-		logger.Info("CGNAT cleanup summary: %s", summary)
+		logger.WithField("summary", summary).Info("CGNAT cleanup summary")
 	}
 
 	resp := CGNATCleanupResponse{
@@ -75,7 +75,7 @@ func runCGNATCleanup(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 
 			history := NewLoginHistory(obj.UserId)
 			if readErr := json.Unmarshal([]byte(obj.Value), history); readErr != nil {
-				logger.Warn("CGNAT cleanup: failed to unmarshal history for %s: %v", obj.UserId, readErr)
+				logger.WithFields(map[string]interface{}{"user_id": obj.UserId, "error": readErr}).Warn("CGNAT cleanup: failed to unmarshal history")
 				continue
 			}
 			history.SetStorageMeta(StorableMetadata{
@@ -119,7 +119,7 @@ func runCGNATCleanup(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 				// Load the other user's history first
 				otherHistory := NewLoginHistory(altID)
 				if readErr := StorableRead(ctx, nk, altID, otherHistory, false); readErr != nil {
-					logger.Warn("CGNAT cleanup: failed to load other history %s, skipping pair: %v", altID, readErr)
+					logger.WithFields(map[string]interface{}{"alt_id": altID, "error": readErr}).Warn("CGNAT cleanup: failed to load other history, skipping pair")
 					continue
 				}
 
@@ -141,7 +141,7 @@ func runCGNATCleanup(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 				}}); writeErr != nil {
 					// Version conflict or other error — skip this pair,
 					// the next login will re-evaluate with the CGNAT filter active
-					logger.Warn("CGNAT cleanup: failed to write other history %s (version conflict?), skipping: %v", altID, writeErr)
+					logger.WithFields(map[string]interface{}{"alt_id": altID, "error": writeErr}).Warn("CGNAT cleanup: failed to write other history (version conflict?), skipping")
 					continue
 				}
 
@@ -167,7 +167,7 @@ func runCGNATCleanup(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 					PermissionRead:  histMeta.PermissionRead,
 					PermissionWrite: histMeta.PermissionWrite,
 				}}); writeErr != nil {
-					logger.Warn("CGNAT cleanup: failed to write history %s (version conflict?): %v", obj.UserId, writeErr)
+					logger.WithFields(map[string]interface{}{"user_id": obj.UserId, "error": writeErr}).Warn("CGNAT cleanup: failed to write history (version conflict?)")
 				}
 			}
 		}

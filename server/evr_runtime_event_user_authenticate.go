@@ -115,21 +115,22 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 				altNames           = make([]string, 0, len(loginHistory.AlternateMatches))
 				accountMap         = make(map[string]*api.Account, len(loginHistory.AlternateMatches))
 				delayMin, delayMax = 1, 4
+				// math/rand is fine: jittered kick delay is non-security game logic.
 				kickDelay          = time.Duration(delayMin+rand.Intn(delayMax)) * time.Minute
 			)
 
 			if accounts, err := nk.AccountsGetId(ctx, append(firstIDs, userID)); err != nil {
-				logger.Error("failed to get alternate accounts: %v", err)
+				logger.WithField("error", err).Error("failed to get alternate accounts")
 				return
 			} else {
 				for _, a := range accounts {
 					accountMap[a.User.Id] = a
-					altNames = append(altNames, fmt.Sprintf("<@%s> (%s)", a.CustomId, a.User.Username))
+					altNames = append(altNames, fmt.Sprintf("<@%s> (%s)", a.CustomId, EscapeDiscordMarkdown(a.User.Username)))
 				}
 			}
 
 			if len(altNames) == 0 || accountMap[userID] == nil {
-				logger.Error("failed to get alternate accounts: %v", err)
+				logger.WithField("user_id", userID).Warn("no alternate accounts found or user account missing from map")
 				return
 			}
 
@@ -137,15 +138,15 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 			altNames = slices.Compact(altNames)
 
 			// Send audit log message
-			content := fmt.Sprintf("<@%s> (%s) has disabled alternates, disconnecting session(s) in %d seconds.\n%s", accountMap[userID].CustomId, accountMap[userID].User.Username, int(kickDelay.Seconds()), strings.Join(altNames, ", "))
+			content := fmt.Sprintf("<@%s> (%s) has disabled alternates, disconnecting session(s) in %d seconds.\n%s", accountMap[userID].CustomId, EscapeDiscordMarkdown(accountMap[userID].User.Username), int(kickDelay.Seconds()), strings.Join(altNames, ", "))
 			AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, content)
 
 			logger.WithField("delay", kickDelay).Info("kicking (with delay) user %s has disabled alternates", userID)
 			<-time.After(kickDelay)
 			if c, err := DisconnectUserID(ctx, nk, userID, true, true, false); err != nil {
-				logger.Error("failed to disconnect user: %v", err)
+				logger.WithField("error", err).Error("failed to disconnect user")
 			} else {
-				logger.Info("user %s disconnected: %v sessions", userID, c)
+				logger.WithFields(map[string]interface{}{"user_id": userID, "session_count": c}).Info("user disconnected")
 			}
 		}()
 	}

@@ -223,7 +223,9 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 	userIDSet := make(map[string]bool)
 
 	for _, r := range results {
-		userIDSet[r.account.User.Id] = true
+		if r.account != nil && r.account.User != nil {
+			userIDSet[r.account.User.Id] = true
+		}
 	}
 
 	if canUseWildcards {
@@ -254,7 +256,7 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 					continue
 				}
 				account, err := nk.AccountGetId(ctx, userID)
-				if err != nil {
+				if err != nil || account == nil || account.User == nil {
 					continue
 				}
 				r := result{
@@ -468,6 +470,9 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 	})
 
 	for _, r := range results {
+		if r.account == nil || r.account.User == nil {
+			continue
+		}
 
 		if r.account.User.AvatarUrl != "" && !strings.HasPrefix(r.account.User.AvatarUrl, "https://") {
 			r.account.User.AvatarUrl = discordgo.EndpointUserAvatar(r.account.CustomId, r.account.User.AvatarUrl)

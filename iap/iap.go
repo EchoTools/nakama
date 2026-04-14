@@ -849,6 +849,7 @@ func ValidateReceiptHuawei(ctx context.Context, httpc *http.Client, pubKey, clie
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	defer res.Body.Close()
 
 	buf, err := io.ReadAll(res.Body)
 	if err != nil {

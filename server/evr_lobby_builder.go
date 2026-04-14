@@ -558,6 +558,9 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	}
 
 	// Update the entrant ping to the game server
+	if label.GameServer == nil {
+		return nil, fmt.Errorf("match label has no game server")
+	}
 	endpointID := EncodeEndpointID(label.GameServer.Endpoint.ExternalIP.String())
 	for _, p := range entrantPresences {
 		if endpointLatencies, ok := latenciesByPlayerByExtIP[endpointID]; ok && endpointLatencies != nil {
@@ -653,6 +656,7 @@ func (b *LobbyBuilder) selectNextMap(mode evr.Symbol) evr.Symbol {
 
 	if len(queue) <= 1 {
 		// Fill the queue with the available levels and shuffle.
+		// math/rand is fine: level-queue ordering is non-security game logic.
 		queue = append(queue, evr.LevelsByMode[mode]...)
 
 		rand.Shuffle(len(queue), func(i, j int) {

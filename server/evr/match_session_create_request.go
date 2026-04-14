@@ -65,6 +65,9 @@ func (m *LobbyCreateSessionRequest) Stream(s *EasyStream) error {
 				return err
 			}
 			m.LobbyType = LobbyType(lt)
+			if m.LobbyType > UnassignedLobby {
+				return fmt.Errorf("invalid LobbyType: %d", lt)
+			}
 			return s.Skip(3) // Alignment
 		},
 		func() error {

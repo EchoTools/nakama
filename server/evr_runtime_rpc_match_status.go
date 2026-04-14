@@ -54,7 +54,7 @@ func MatchStatusRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 
 	match, err := nk.MatchGet(ctx, request.MatchID)
 	if err != nil {
-		logger.Error("Failed to get match %s: %v", request.MatchID, err)
+		logger.WithFields(map[string]interface{}{"match_id": request.MatchID, "error": err}).Error("Failed to get match")
 		response := MatchStatusResponse{
 			Version: version,
 			MatchID: request.MatchID,
@@ -76,7 +76,7 @@ func MatchStatusRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 
 		var matchLabel MatchLabel
 		if err := json.Unmarshal([]byte(match.Label.Value), &matchLabel); err != nil {
-			logger.Warn("Failed to unmarshal match label: %v", err)
+			logger.WithField("error", err).Warn("Failed to unmarshal match label")
 			response.Error = "failed to parse match label"
 		} else {
 			userID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)

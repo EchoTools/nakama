@@ -753,7 +753,7 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 	if group.DisplayNameForceNickToIGN {
 		// And the player is online
 		// Search for them in a match from this guild
-		query := fmt.Sprintf("+group_id:%s +players.user_id:%s", groupID, evrAccount.ID())
+		query := fmt.Sprintf("+group_id:%s +players.user_id:%s", Query.EscapeIndexValue(groupID), Query.EscapeIndexValue(evrAccount.ID()))
 		matches, err := d.nk.MatchList(ctx, 100, true, "", nil, nil, query)
 		if err != nil {
 			logger.Warn("Failed to list matches for guild group member", zap.Error(err), zap.String("query", query))
@@ -769,7 +769,7 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 				}
 				if player := label.GetPlayerByUserID(evrAccount.ID()); player != nil {
 					if player.DisplayName != InGameName(e.Member) {
-						AuditLogSendGuild(s, group, fmt.Sprintf("Forcing guild nick to match in-game name for `%s` (`%s` -> `%s`)", e.Member.User.Username, InGameName(e.Member), player.DisplayName))
+						AuditLogSendGuild(s, group, fmt.Sprintf("Forcing guild nick to match in-game name for `%s` (`%s` -> `%s`)", EscapeDiscordMarkdown(e.Member.User.Username), EscapeDiscordMarkdown(InGameName(e.Member)), EscapeDiscordMarkdown(player.DisplayName)))
 						// Force the display name to match the in-game name
 						if err := s.GuildMemberNickname(group.GuildID, e.Member.User.ID, player.DisplayName); err != nil {
 							logger.Warn("Failed to set display name", zap.Error(err))

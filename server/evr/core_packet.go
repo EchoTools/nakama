@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	MaxPacketLength  = 256 * 1024 // 256KB
-	MaxMessageLength = 0x8000     // 32KB
+	MaxPacketLength      = 256 * 1024 // 256KB
+	MaxMessageLength     = 0x8000     // 32KB
+	MaxMessagesPerPacket = 32         // Upper bound on concatenated messages in a single packet
 )
 
 var (
@@ -246,7 +247,7 @@ func ToSymbol(v any) Symbol {
 		}
 		return Symbol(CalculateSymbolValue(str, 0xFFFFFFFFFFFFFFFF, hashLookupArray, 0))
 	default:
-		panic(fmt.Errorf("invalid type: %T", v))
+		return Symbol(0)
 	}
 }
 
@@ -263,7 +264,7 @@ func Marshal(msgs ...Message) ([]byte, error) {
 		// Encode the message.
 		s := NewEasyStream(EncodeMode, []byte{})
 		if err := m.Stream(s); err != nil {
-			errs = errors.Join(fmt.Errorf("could not stream message:%s", err), errs)
+			errs = errors.Join(fmt.Errorf("could not stream message: %w", err), errs)
 			continue
 		}
 		// Write the message type symbol.
@@ -315,7 +316,17 @@ func ParsePacket(data []byte) ([]Message, error) {
 	}
 
 	// Split the packet into individual messages.
+	// bytes.Split prepends an empty chunk before the first MessageMarker, so the
+	// actual message count is len(chunks)-1.  Guard against the degenerate case
+	// where data is empty (len(chunks)==1) before subtracting.
 	chunks := bytes.Split(data, MessageMarker)
+	messageCount := len(chunks)
+	if messageCount > 0 {
+		messageCount-- // strip leading empty chunk produced by the opening marker
+	}
+	if messageCount > MaxMessagesPerPacket {
+		return nil, fmt.Errorf("%w: too many messages in packet (%d, max %d)", ErrInvalidPacket, messageCount, MaxMessagesPerPacket)
+	}
 
 	messages := make([]Message, 0, len(chunks))
 
@@ -338,7 +349,12 @@ func ParsePacket(data []byte) ([]Message, error) {
 			continue
 		}
 
-		l := int(dUint64(buf.Next(8)))
+		rawLen := dUint64(buf.Next(8))
+		if rawLen > uint64(MaxMessageLength) {
+			err = errors.Join(err, ErrInvalidPacket, fmt.Errorf("message too large (%d bytes, max %d)", rawLen, MaxMessageLength))
+			break
+		}
+		l := int(rawLen)
 		// Enforce per-message size limit before allocating the message struct.
 		if l > MaxMessageLength {
 			err = errors.Join(err, ErrInvalidPacket, fmt.Errorf("message too large (%d bytes, max %d)", l, MaxMessageLength))
@@ -360,7 +376,12 @@ func ParsePacket(data []byte) ([]Message, error) {
 		}
 
 		// Create a new message of the correct type and unmarshal the data into it.
-		message := reflect.New(reflect.TypeOf(typ).Elem()).Interface().(Message)
+		newVal := reflect.New(reflect.TypeOf(typ).Elem()).Interface()
+		message, ok := newVal.(Message)
+		if !ok {
+			err = errors.Join(err, fmt.Errorf("registered type %T does not implement Message", newVal))
+			break
+		}
 		if streamErr := message.Stream(NewEasyStream(DecodeMode, b)); streamErr != nil {
 			return nil, fmt.Errorf("Stream error: %T: %w", typ, streamErr)
 		}
@@ -409,7 +430,7 @@ func SymbolOf(m Message) Symbol {
 	typ := reflect.TypeOf(m).String()
 	sym, ok := reverseSymbolTypes[typ]
 	if !ok {
-		panic(fmt.Errorf("Symbol not found: %T", m))
+		return Symbol(0)
 	}
 	return Symbol(sym)
 }
@@ -417,8 +438,10 @@ func SymbolOf(m Message) Symbol {
 // MessageTypeOf returns a new instance of the message type.
 func MessageTypeOf(s Symbol) Message {
 	if m, ok := SymbolTypes[uint64(s)]; ok {
-		// return a new instance of the message type
-		return reflect.New(reflect.TypeOf(m).Elem()).Interface().(Message)
+		newVal := reflect.New(reflect.TypeOf(m).Elem()).Interface()
+		if msg, ok := newVal.(Message); ok {
+			return msg
+		}
 	}
 	return nil
 }

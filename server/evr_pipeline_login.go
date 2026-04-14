@@ -97,7 +97,10 @@ func (e NewLocationError) Error() string {
 
 // loginRequest handles the login request from the client.
 func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.LoginRequest)
+	request, ok := in.(*evr.LoginRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.LoginRequest, got %T", in)
+	}
 
 	if s := ServiceSettings(); s.DisableLoginMessage != "" {
 		if err := session.SendEvrUnrequire(evr.NewLoginFailure(request.XPID, "System is Temporarily Unavailable:\n"+s.DisableLoginMessage)); err != nil {
@@ -127,7 +130,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	logger = logger.With(zap.String("xpid", request.XPID.String()))
 
 	// Process the login request and populate the session parameters.
-	if err := p.processLoginRequest(ctx, logger, session, &params); err != nil {
+	if err := p.processLoginRequest(ctx, logger, session, params); err != nil {
 
 		discordID := ""
 		if userID, err := GetUserIDByDeviceID(ctx, p.db, request.XPID.String()); err == nil {
@@ -141,7 +144,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		return session.SendEvrUnrequire(evr.NewLoginFailure(request.XPID, errMessage))
 	}
 
-	StoreParams(ctx, &params)
+	StoreParams(ctx, params)
 
 	tags := params.MetricsTags()
 	tags["cpu_model"] = strings.TrimSpace(params.loginPayload.SystemInfo.CPUModel)
@@ -339,7 +342,7 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 
 				metricsTags["error"] = "link_ticket_error"
 
-				return fmt.Errorf("error creating link ticket: %s", err)
+				return fmt.Errorf("error creating link ticket: %w", err)
 			} else {
 				botUsername := "EchoTools"
 				if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil && p.appBot.dg.State.User.Username != "" {
@@ -718,13 +721,13 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 						if serviceSettings.DisplayNameInUseNotifications {
 							// Notify the player that this display name is in use.
 							ownerDiscordID := p.discordCache.UserIDToDiscordID(ownerIDs[0])
-							go func() {
-								if err := p.discordCache.SendDisplayNameInUseNotification(ctx, params.profile.DiscordID(), ownerDiscordID, dn, params.profile.Username()); err != nil {
+							go func(displayName string) {
+								if err := p.discordCache.SendDisplayNameInUseNotification(ctx, params.profile.DiscordID(), ownerDiscordID, displayName, params.profile.Username()); err != nil {
 									if IsDiscordErrorCode(err, discordgo.ErrCodeCannotSendMessagesToThisUser) {
 										logger.Warn("Failed to send display name in use notification", zap.Error(err))
 									}
 								}
-							}()
+							}(dn)
 						}
 					}
 				}
@@ -775,7 +778,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		isProtectedModerator := isModerator && hasGreenInDivisions
 
 		// If the player account is less than 7 days old, then assign the "green" division to the player.
-		if time.Since(params.profile.account.User.CreateTime.AsTime()) < time.Duration(serviceSettings.Matchmaking.GreenDivisionMaxAccountAgeDays)*24*time.Hour {
+		if params.profile.account != nil && params.profile.account.User != nil && params.profile.account.User.CreateTime != nil && time.Since(params.profile.account.User.CreateTime.AsTime()) < time.Duration(serviceSettings.Matchmaking.GreenDivisionMaxAccountAgeDays)*24*time.Hour {
 			if !hasGreenInDivisions {
 				settings.Divisions = append(settings.Divisions, "green")
 				updated = true
@@ -869,7 +872,9 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 }
 
 func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	_ = in.(*evr.ChannelInfoRequest)
+	if _, ok := in.(*evr.ChannelInfoRequest); !ok {
+		return fmt.Errorf("expected *evr.ChannelInfoRequest, got %T", in)
+	}
 
 	params, ok := LoadParams(ctx)
 	if !ok {
@@ -922,7 +927,10 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 }
 
 func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) (err error) {
-	request := in.(*evr.LoggedInUserProfileRequest)
+	request, ok := in.(*evr.LoggedInUserProfileRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.LoggedInUserProfileRequest, got %T", in)
+	}
 	// Start a timer to add to the metrics
 	timer := time.Now()
 	defer func() { p.nk.metrics.CustomTimer("loggedInUserProfileRequest", nil, time.Since(timer)) }()
@@ -993,7 +1001,10 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 }
 
 func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.UpdateClientProfile)
+	request, ok := in.(*evr.UpdateClientProfile)
+	if !ok {
+		return fmt.Errorf("expected *evr.UpdateClientProfile, got %T", in)
+	}
 
 	if err := p.handleClientProfileUpdate(ctx, logger, session, request.XPID, request.Payload); err != nil {
 		if err := session.SendEvr(evr.NewUpdateProfileFailure(request.XPID, uint64(400), err.Error())); err != nil {
@@ -1036,7 +1047,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 			}
 
 			// Log the audit message
-			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("User <@%s> (%s) has accepted the community values.", params.DiscordID(), params.profile.Username()), false); err != nil {
+			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("User <@%s> (%s) has accepted the community values.", params.DiscordID(), EscapeDiscordMarkdown(params.profile.Username())), false); err != nil {
 				logger.Warn("Failed to log audit message", zap.Error(err))
 			}
 		}
@@ -1090,7 +1101,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	}
 
 	params.profile = profile
-	StoreParams(ctx, &params)
+	StoreParams(ctx, params)
 	return nil
 }
 
@@ -1132,7 +1143,7 @@ func findNewlyAddedPlayers(oldList, newList []evr.EvrId) []evr.EvrId {
 func (p *EvrPipeline) trackSpamActions(
 	ctx context.Context,
 	logger *zap.Logger,
-	params SessionParameters,
+	params *SessionParameters,
 	groupID string,
 	operatorUserID string,
 	actionType SpamActionType,
@@ -1245,7 +1256,10 @@ func (p *EvrPipeline) applyMuteSpamKick(
 }
 
 func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.RemoteLogSet)
+	request, ok := in.(*evr.RemoteLogSet)
+	if !ok {
+		return fmt.Errorf("expected *evr.RemoteLogSet, got %T", in)
+	}
 
 	go func() {
 		if err := p.processRemoteLogSets(ctx, logger, session, request.EvrID, request); err != nil {
@@ -1257,7 +1271,10 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 }
 
 func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.DocumentRequest)
+	request, ok := in.(*evr.DocumentRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.DocumentRequest, got %T", in)
+	}
 
 	params, ok := LoadParams(ctx)
 	if !ok {
@@ -1367,7 +1384,10 @@ func (p *EvrPipeline) generateEULA(ctx context.Context, logger *zap.Logger, lang
 }
 
 func (p *EvrPipeline) genericMessage(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.GenericMessage)
+	request, ok := in.(*evr.GenericMessage)
+	if !ok {
+		return fmt.Errorf("expected *evr.GenericMessage, got %T", in)
+	}
 	logger.Debug("Received generic message", zap.Any("message", request))
 
 	/*
@@ -1389,7 +1409,10 @@ func (p *EvrPipeline) genericMessage(ctx context.Context, logger *zap.Logger, se
 // A profile update request is sent from the game server's login connection.
 // It is sent 45 seconds before the sessionend is sent, right after the match ends.
 func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.UserServerProfileUpdateRequest)
+	request, ok := in.(*evr.UserServerProfileUpdateRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.UserServerProfileUpdateRequest, got %T", in)
+	}
 
 	if data, err := json.MarshalIndent(in, "", "  "); err != nil {
 		logger.Warn("Failed to marshal profile update request", zap.Error(err))
@@ -1477,7 +1500,10 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 }
 
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.OtherUserProfileRequest)
+	request, ok := in.(*evr.OtherUserProfileRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.OtherUserProfileRequest, got %T", in)
+	}
 
 	tags := map[string]string{
 		"error": "nil",

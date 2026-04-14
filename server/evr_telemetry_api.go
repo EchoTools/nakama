@@ -246,7 +246,7 @@ func (api *TelemetryAPI) writeJSONResponse(w http.ResponseWriter, statusCode int
 	w.WriteHeader(statusCode)
 
 	if err := json.NewEncoder(w).Encode(data); err != nil {
-		api.logger.Error("Failed to encode JSON response: %v", err)
+		api.logger.WithField("error", err).Error("Failed to encode JSON response")
 	}
 }
 
@@ -258,7 +258,7 @@ func (api *TelemetryAPI) writeErrorResponse(w http.ResponseWriter, statusCode in
 	}
 
 	if err != nil {
-		api.logger.Error("%s: %v", message, err)
+		api.logger.WithField("error", err).Error(message)
 		errorResponse["error"] = err.Error()
 	}
 

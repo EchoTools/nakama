@@ -378,7 +378,7 @@ func (d *DiscordAppBot) handleEnforcementEditModalSubmit(logger runtime.Logger, 
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Flags:   discordgo.MessageFlagsEphemeral,
-			Content: fmt.Sprintf("✅ Enforcement record updated successfully.\n\n**New Duration:** %s (expires <t:%d:R>)\n**User Notice:** %s", FormatDuration(newDuration), newExpiry.Unix(), userNotice),
+			Content: fmt.Sprintf("✅ Enforcement record updated successfully.\n\n**New Duration:** %s (expires <t:%d:R>)\n**User Notice:** %s", FormatDuration(newDuration), newExpiry.Unix(), EscapeDiscordMarkdown(userNotice)),
 		},
 	})
 }
@@ -421,7 +421,7 @@ func (d *DiscordAppBot) handleEnforcementVoidModalSubmit(logger runtime.Logger, 
 
 	// Get form data
 	data := i.Interaction.ModalSubmitData()
-	voidReason := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+	voidReason := modalTextInputValue(data, 0, 0)
 
 	// Load the enforcement journal
 	journal := NewGuildEnforcementJournal(targetUserID)
@@ -470,7 +470,7 @@ func (d *DiscordAppBot) handleEnforcementVoidModalSubmit(logger runtime.Logger, 
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Flags:   discordgo.MessageFlagsEphemeral,
-			Content: fmt.Sprintf("✅ Enforcement record voided successfully.\n\n**Reason:** %s", voidReason),
+			Content: fmt.Sprintf("✅ Enforcement record voided successfully.\n\n**Reason:** %s", EscapeDiscordMarkdown(voidReason)),
 		},
 	})
 }
@@ -546,7 +546,7 @@ func (d *DiscordAppBot) sendEnforcementEditAuditLog(logger runtime.Logger, edito
 	// Send to service audit channel
 	serviceAuditChannel := ServiceSettings().ServiceAuditChannelID
 	if serviceAuditChannel != "" {
-		content := fmt.Sprintf("[`%s/%s`] 📝 **Enforcement Record Edited** by <@%s>", gg.Name(), gg.GuildID, editor.ID)
+		content := fmt.Sprintf("[`%s/%s`] 📝 **Enforcement Record Edited** by <@%s>", EscapeDiscordMarkdown(gg.Name()), gg.GuildID, editor.ID)
 		_, err := d.dg.ChannelMessageSendComplex(serviceAuditChannel, &discordgo.MessageSend{
 			Content:         content,
 			Embeds:          []*discordgo.MessageEmbed{beforeEmbed, afterEmbed},
@@ -573,7 +573,7 @@ func (d *DiscordAppBot) sendEnforcementVoidAuditLog(logger runtime.Logger, edito
 	// Send to guild audit channel
 	if gg.AuditChannelID != "" {
 		_, err := d.dg.ChannelMessageSendComplex(gg.AuditChannelID, &discordgo.MessageSend{
-			Content:         fmt.Sprintf("❌ **Enforcement Record Voided** by <@%s>\n**Reason:** %s", editor.ID, reason),
+			Content:         fmt.Sprintf("❌ **Enforcement Record Voided** by <@%s>\n**Reason:** %s", editor.ID, EscapeDiscordMarkdown(reason)),
 			Embeds:          []*discordgo.MessageEmbed{beforeEmbed, afterEmbed},
 			AllowedMentions: &discordgo.MessageAllowedMentions{},
 		})
@@ -585,7 +585,7 @@ func (d *DiscordAppBot) sendEnforcementVoidAuditLog(logger runtime.Logger, edito
 	// Send to service audit channel
 	serviceAuditChannel := ServiceSettings().ServiceAuditChannelID
 	if serviceAuditChannel != "" {
-		content := fmt.Sprintf("[`%s/%s`] ❌ **Enforcement Record Voided** by <@%s>\n**Reason:** %s", gg.Name(), gg.GuildID, editor.ID, reason)
+		content := fmt.Sprintf("[`%s/%s`] ❌ **Enforcement Record Voided** by <@%s>\n**Reason:** %s", EscapeDiscordMarkdown(gg.Name()), gg.GuildID, editor.ID, EscapeDiscordMarkdown(reason))
 		_, err := d.dg.ChannelMessageSendComplex(serviceAuditChannel, &discordgo.MessageSend{
 			Content:         content,
 			Embeds:          []*discordgo.MessageEmbed{beforeEmbed, afterEmbed},

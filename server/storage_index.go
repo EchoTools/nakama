@@ -167,12 +167,14 @@ func (si *LocalStorageIndex) Write(ctx context.Context, objects []*api.StorageOb
 			results, err := reader.Search(ctx, req)
 			if err != nil {
 				si.logger.Error("Failed to evict storage index documents", zap.String("index_name", idx.Name))
+				_ = reader.Close()
 				continue
 			}
 
 			ids, err := si.queryMatchesToDocumentIds(results)
 			if err != nil {
 				si.logger.Error("Failed to get query results document ids", zap.Error(err))
+				_ = reader.Close()
 				continue
 			}
 
@@ -184,6 +186,7 @@ func (si *LocalStorageIndex) Write(ctx context.Context, objects []*api.StorageOb
 				si.logger.Error("Failed to update index", zap.String("index_name", idx.Name), zap.Error(err))
 			}
 		}
+		_ = reader.Close()
 	}
 
 	return updates, deletes
@@ -286,6 +289,7 @@ func (si *LocalStorageIndex) List(ctx context.Context, callerID uuid.UUID, index
 	if err != nil {
 		return nil, "", err
 	}
+	defer func() { _ = indexReader.Close() }()
 
 	results, err := indexReader.Search(ctx, searchReq)
 	if err != nil {
@@ -420,7 +424,9 @@ LIMIT $2`
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
+		// Note: rows.Close() is called explicitly below (lines 468, 483) rather
+		// than with defer, because this runs inside a for-loop and defer would
+		// accumulate unclosed rows across iterations.
 
 		var rowsRead bool
 		batch := bluge.NewBatch()

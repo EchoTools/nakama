@@ -481,3 +481,63 @@ func TestEasyStream_StreamJson_ZstdCompression(t *testing.T) {
 		t.Errorf("StreamJson ZstdCompression (no null) roundtrip failed: got %+v, want %+v", decoded, original)
 	}
 }
+
+// TestStreamStringTable_ZeroEntries verifies that encoding then decoding a
+// string table with zero entries does not panic and produces an empty slice.
+func TestStreamStringTable_ZeroEntries(t *testing.T) {
+	// Encode an empty string table.
+	encBuf := new(bytes.Buffer)
+	encStream := &EasyStream{
+		Mode: EncodeMode,
+		w:    encBuf,
+	}
+	entries := []string{}
+	if err := encStream.StreamStringTable(&entries); err != nil {
+		t.Fatalf("encode zero-entry string table: %v", err)
+	}
+
+	// Decode it back.
+	decStream := &EasyStream{
+		Mode: DecodeMode,
+		r:    bytes.NewReader(encBuf.Bytes()),
+	}
+	var decoded []string
+	if err := decStream.StreamStringTable(&decoded); err != nil {
+		t.Fatalf("decode zero-entry string table: %v", err)
+	}
+	if len(decoded) != 0 {
+		t.Errorf("expected 0 entries, got %d", len(decoded))
+	}
+}
+
+// TestStreamStringTable_RoundTrip verifies that a non-empty string table
+// survives an encode-decode roundtrip.
+func TestStreamStringTable_RoundTrip(t *testing.T) {
+	original := []string{"hello", "world", "test"}
+
+	encBuf := new(bytes.Buffer)
+	encStream := &EasyStream{
+		Mode: EncodeMode,
+		w:    encBuf,
+	}
+	if err := encStream.StreamStringTable(&original); err != nil {
+		t.Fatalf("encode string table: %v", err)
+	}
+
+	decStream := &EasyStream{
+		Mode: DecodeMode,
+		r:    bytes.NewReader(encBuf.Bytes()),
+	}
+	var decoded []string
+	if err := decStream.StreamStringTable(&decoded); err != nil {
+		t.Fatalf("decode string table: %v", err)
+	}
+	if len(decoded) != len(original) {
+		t.Fatalf("length mismatch: got %d, want %d", len(decoded), len(original))
+	}
+	for i := range original {
+		if decoded[i] != original[i] {
+			t.Errorf("entry %d: got %q, want %q", i, decoded[i], original[i])
+		}
+	}
+}

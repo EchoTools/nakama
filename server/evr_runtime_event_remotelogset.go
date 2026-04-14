@@ -180,7 +180,9 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 					timeoutSession := sessionRegistry.Get(uuid.FromStringOrNil(s.SessionID))
 					if timeoutSession != nil {
 						if timeoutParams, ok := LoadParams(timeoutSession.Context()); ok {
-							RecordUnreachableServer(ctx, nk, logger, timeoutSession.UserID().String(), timeoutParams, timeoutLabel.GameServer.Endpoint.GetExternalIP(), "disconnected_timeout")
+							if timeoutLabel.GameServer != nil {
+								RecordUnreachableServer(ctx, nk, logger, timeoutSession.UserID().String(), timeoutParams, timeoutLabel.GameServer.Endpoint.GetExternalIP(), "disconnected_timeout")
+							}
 						}
 					}
 				}
@@ -318,7 +320,7 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 
 			params.profile = profile
 
-			StoreParams(session.Context(), &params)
+			StoreParams(session.Context(), params)
 
 			modes := []evr.Symbol{
 				evr.ModeArenaPublic,
@@ -398,9 +400,9 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				MatchID:          matchID,
 				MatchMode:        label.Mode,
 				MatchStartedAt:   label.StartTime,
-				ServerID:         label.GameServer.SessionID.String(),
-				MatchOperator:    label.GameServer.OperatorID.String(),
-				MatchEndpoint:    label.GameServer.Endpoint.String(),
+				ServerID:         func() string { if label.GameServer != nil { return label.GameServer.SessionID.String() }; return "" }(),
+				MatchOperator:    func() string { if label.GameServer != nil { return label.GameServer.OperatorID.String() }; return "" }(),
+				MatchEndpoint:    func() string { if label.GameServer != nil { return label.GameServer.Endpoint.String() }; return "" }(),
 				ClientIsPCVR:     params.IsPCVR(),
 				ClientUserID:     session.UserID().String(),
 				ClientUsername:   session.Username(),
@@ -425,8 +427,11 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				"msg":      msg,
 			}).Warn("Server connection failed")
 
+			if label.GameServer == nil {
+				continue
+			}
 			acct, err := nk.AccountGetId(ctx, label.GameServer.OperatorID.String())
-			if err != nil {
+			if err != nil || acct == nil || acct.User == nil {
 				logger.WithField("error", err).Warn("Failed to get account")
 				continue
 			}
