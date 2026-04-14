@@ -112,8 +112,9 @@ func (s *EasyStream) StreamByte(value *byte) error {
 	}
 }
 
-const MaxStreamBytesSize = 10 * 1024 * 1024 // 10MB max for generic byte streams
-const MaxStreamStringLength = 64 * 1024     // 64KB max for strings
+const MaxStreamBytesSize = 10 * 1024 * 1024    // 10MB max for generic byte streams
+const MaxStreamStringLength = 64 * 1024        // 64KB max for strings
+const MaxDecompressedSize = 10 * 1024 * 1024   // 10MB max for decompressed payloads
 
 // StreamBytes reads or writes bytes to the stream based on the mode of the EasyStream.
 // If the mode is ReadMode, it reads bytes from the stream and stores them in the provided data slice.
@@ -172,6 +173,9 @@ func (s *EasyStream) StreamNullTerminatedString(str *string) error {
 	switch s.Mode {
 	case DecodeMode:
 		for {
+			if len(b) > MaxStreamStringLength {
+				return fmt.Errorf("null-terminated string length %d exceeds maximum %d", len(b), MaxStreamStringLength)
+			}
 			if c, err := s.r.ReadByte(); err != nil {
 				return err
 			} else if c == 0x0 {
@@ -258,11 +262,18 @@ func (s *EasyStream) StreamStringTable(entries *[]string) error {
 			if err = s.StreamNumber(binary.LittleEndian, &off); err != nil {
 				return err
 			}
+			if off <= offsets[i-1] {
+				return fmt.Errorf("string table offset[%d]=%d is not greater than offset[%d]=%d", i, off, i-1, offsets[i-1])
+			}
 			offsets[i] = off
 		}
 
 		bufferStart := s.Position()
+		remaining := s.r.Len()
 		for i, off := range offsets {
+			if int(off) >= remaining {
+				return fmt.Errorf("string table offset[%d]=%d exceeds remaining data (%d bytes)", i, off, remaining)
+			}
 			if err = s.SetPosition(bufferStart + int(off)); err != nil {
 				return err
 			}
@@ -382,23 +393,41 @@ func (s *EasyStream) StreamJson(data interface{}, isNullTerminated bool, compres
 			if err = binary.Read(s.r, binary.LittleEndian, &l64); err != nil {
 				return fmt.Errorf("zlib length read error: %w", err)
 			}
+			if l64 > MaxDecompressedSize {
+				return fmt.Errorf("zlib declared size %d exceeds maximum %d", l64, MaxDecompressedSize)
+			}
 			r, err := zlib.NewReader(s.r)
 			if err != nil {
 				return err
 			}
-			io.Copy(&buf, r)
+			if _, err = io.Copy(&buf, io.LimitReader(r, MaxDecompressedSize+1)); err != nil {
+				r.Close()
+				return fmt.Errorf("zlib decompress error: %w", err)
+			}
 			r.Close()
+			if buf.Len() > MaxDecompressedSize {
+				return fmt.Errorf("zlib decompressed size %d exceeds maximum %d", buf.Len(), MaxDecompressedSize)
+			}
 		case ZstdCompression:
 			l32 := uint32(0)
 			if err = binary.Read(s.r, binary.LittleEndian, &l32); err != nil {
 				return fmt.Errorf("zstd length read error: %w", err)
 			}
+			if uint64(l32) > MaxDecompressedSize {
+				return fmt.Errorf("zstd declared size %d exceeds maximum %d", l32, MaxDecompressedSize)
+			}
 			r, err := zstd.NewReader(s.r)
 			if err != nil {
 				return err
 			}
-			io.Copy(&buf, r)
+			if _, err = io.Copy(&buf, io.LimitReader(r, MaxDecompressedSize+1)); err != nil {
+				r.Close()
+				return fmt.Errorf("zstd decompress error: %w", err)
+			}
 			r.Close()
+			if buf.Len() > MaxDecompressedSize {
+				return fmt.Errorf("zstd decompressed size %d exceeds maximum %d", buf.Len(), MaxDecompressedSize)
+			}
 		default:
 			return errInvalidCompressionMode
 		}
@@ -473,29 +502,43 @@ func (s *EasyStream) StreamJSONRawMessage(data *json.RawMessage, isNullTerminate
 			if err = binary.Read(s.r, binary.LittleEndian, &l64); err != nil {
 				return fmt.Errorf("zlib length read error: %w", err)
 			}
+			if l64 > MaxDecompressedSize {
+				return fmt.Errorf("zlib declared size %d exceeds maximum %d", l64, MaxDecompressedSize)
+			}
 			r, err := zlib.NewReader(s.r)
 			if err != nil {
 				return err
 			}
-			_, err = io.Copy(&buf, r)
+			_, err = io.Copy(&buf, io.LimitReader(r, MaxDecompressedSize+1))
 			if err != nil {
+				r.Close()
 				return err
 			}
 			r.Close()
+			if buf.Len() > MaxDecompressedSize {
+				return fmt.Errorf("zlib decompressed size %d exceeds maximum %d", buf.Len(), MaxDecompressedSize)
+			}
 		case ZstdCompression:
 			l32 := uint32(0)
 			if err = binary.Read(s.r, binary.LittleEndian, &l32); err != nil {
 				return fmt.Errorf("zstd length read error: %w", err)
 			}
+			if uint64(l32) > MaxDecompressedSize {
+				return fmt.Errorf("zstd declared size %d exceeds maximum %d", l32, MaxDecompressedSize)
+			}
 			r, err := zstd.NewReader(s.r)
 			if err != nil {
 				return err
 			}
-			_, err = io.Copy(&buf, r)
+			_, err = io.Copy(&buf, io.LimitReader(r, MaxDecompressedSize+1))
 			if err != nil {
+				r.Close()
 				return err
 			}
 			r.Close()
+			if buf.Len() > MaxDecompressedSize {
+				return fmt.Errorf("zstd decompressed size %d exceeds maximum %d", buf.Len(), MaxDecompressedSize)
+			}
 		default:
 			return errInvalidCompressionMode
 		}
