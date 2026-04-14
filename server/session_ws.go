@@ -609,14 +609,19 @@ OutgoingLoop:
 			}
 			// Drain any additional pending messages into the same frame.
 			// Only safe for EVR binary protocol which supports concatenated packets.
+			// Use non-blocking select to avoid racing on len(outgoingCh).
 			if s.format == SessionFormatEVR {
-				n := len(s.outgoingCh)
-				for i := 0; i < n; i++ {
-					additional := <-s.outgoingCh
-					if _, err = w.Write(additional); err != nil {
-						break
+			drainLoop:
+				for {
+					select {
+					case additional := <-s.outgoingCh:
+						if _, err = w.Write(additional); err != nil {
+							break drainLoop
+						}
+						bytesSent += int64(len(additional))
+					default:
+						break drainLoop
 					}
-					bytesSent += int64(len(additional))
 				}
 			}
 			if err != nil {

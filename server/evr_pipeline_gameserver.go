@@ -172,6 +172,11 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		versionLock    = evr.Symbol(request.VersionLock)
 	)
 
+	// Validate the internal IP is actually parseable (reject garbage input)
+	if request.InternalIpAddress != "" && internalIP == nil {
+		return errFailedRegistration(session, logger, fmt.Errorf("invalid internal IP address: %s", request.InternalIpAddress), evr.BroadcasterRegistration_Unknown)
+	}
+
 	isNative := false
 	if uuid.FromStringOrNil(request.LoginSessionId) != uuid.Nil {
 		isNative = true

@@ -273,7 +273,11 @@ func (s *EasyStream) StreamStringTable(entries *[]string) error {
 
 		bufferStart := s.Position()
 		for i, off := range offsets {
-			if err = s.SetPosition(bufferStart + int(off)); err != nil {
+			pos := bufferStart + int(off)
+			if pos < bufferStart || pos > MaxMessageLength {
+				return fmt.Errorf("string table offset %d overflows buffer (start=%d)", off, bufferStart)
+			}
+			if err = s.SetPosition(pos); err != nil {
 				return err
 			}
 			if err = s.StreamNullTerminatedString(&strings[i]); err != nil {
