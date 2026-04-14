@@ -71,15 +71,17 @@ func (v *VRMLScanQueue) RedirectRPC(ctx context.Context, logger runtime.Logger, 
 	queryParameters, _ := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
 
 	// A code was provided; exchange it for a token
-	if _, ok := queryParameters["code"]; !ok {
+	codeVals, ok := queryParameters["code"]
+	if !ok || len(codeVals) == 0 {
 		return "", runtime.NewError("No code provided", StatusInvalidArgument)
 	}
 
-	if _, ok := queryParameters["state"]; !ok {
+	stateVals, ok := queryParameters["state"]
+	if !ok || len(stateVals) == 0 {
 		return "", runtime.NewError("No state token", StatusInvalidArgument)
 	}
 
-	callbackData, ok := oauthFlows.LoadAndDelete(queryParameters["state"][0])
+	callbackData, ok := oauthFlows.LoadAndDelete(stateVals[0])
 	if !ok {
 		return "", runtime.NewError("Invalid/expired state token", StatusInvalidArgument)
 	}
@@ -91,7 +93,7 @@ func (v *VRMLScanQueue) RedirectRPC(ctx context.Context, logger runtime.Logger, 
 		"grant_type":    "authorization_code",
 		"client_id":     envVars["VRML_OAUTH_CLIENT_ID"],
 		"code_verifier": callbackData.verifier,
-		"code":          queryParameters["code"][0],
+		"code":          codeVals[0],
 		"redirect_uri":  envVars["VRML_OAUTH_REDIRECT_URL"],
 	}
 

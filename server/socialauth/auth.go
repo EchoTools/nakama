@@ -124,14 +124,23 @@ func (s *SocialAuthHandler) authLogoutHttpHandler(w http.ResponseWriter, r *http
 	// Verify the session token and extract the user ID
 	jwtToken, err := verifySignedJWT(token, s.sessionEncryptionKey)
 	if err != nil {
-		http.Error(w, "Unable to verify session token: "+err.Error(), http.StatusUnauthorized)
+		http.Error(w, "Unable to verify session token", http.StatusUnauthorized)
 		return
 	}
-	userID := jwtToken.Claims.(jwt.MapClaims)["uid"].(string)
+	claims, ok := jwtToken.Claims.(jwt.MapClaims)
+	if !ok {
+		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
+		return
+	}
+	userID, _ := claims["uid"].(string)
+	if userID == "" {
+		http.Error(w, "Invalid token", http.StatusUnauthorized)
+		return
+	}
 
 	// Revoke the tokens
 	if err := s.nk.SessionLogout(userID, token, refreshToken); err != nil {
-		http.Error(w, "Failed to revoke tokens: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to revoke tokens", http.StatusInternalServerError)
 		return
 	}
 

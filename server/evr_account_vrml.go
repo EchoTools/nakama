@@ -31,6 +31,9 @@ func (e *AccountAlreadyLinkedError) Error() string {
 }
 
 func (a EVRProfile) VRMLUserID() string {
+	if a.account == nil {
+		return ""
+	}
 	for _, d := range a.account.Devices {
 		if playerID, found := strings.CutPrefix(d.Id, DeviceIDPrefixVRML); found {
 			return playerID

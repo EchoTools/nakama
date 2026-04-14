@@ -1917,21 +1917,21 @@ func ServerScoresRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			request.DiscordIDs = append(request.DiscordIDs, strings.TrimSpace(v))
 		}
 	}
-	if p, ok := queryParameters["min_rtt"]; ok {
+	if p, ok := queryParameters["min_rtt"]; ok && len(p) > 0 {
 		request.MinRTT, err = strconv.Atoi(p[0])
 		if err != nil {
 			return "", fmt.Errorf("failed to parse min_rtt: %w", err)
 		}
 	}
 
-	if p, ok := queryParameters["max_rtt"]; ok {
+	if p, ok := queryParameters["max_rtt"]; ok && len(p) > 0 {
 		request.MaxRTT, err = strconv.Atoi(p[0])
 		if err != nil {
 			return "", fmt.Errorf("failed to parse max_rtt: %w", err)
 		}
 	}
 
-	if p, ok := queryParameters["threshold_rtt"]; ok {
+	if p, ok := queryParameters["threshold_rtt"]; ok && len(p) > 0 {
 		request.ThresholdRTT, err = strconv.Atoi(p[0])
 		if err != nil {
 			return "", fmt.Errorf("failed to parse threshold_rtt: %w", err)
@@ -2030,9 +2030,9 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		return "", fmt.Errorf("failed to load EVR profile: %w", err)
 	}
 
-	if request.XPID.IsNil() && len(evrProfile.account.Devices) == 0 {
+	if request.XPID.IsNil() && (evrProfile.account == nil || len(evrProfile.account.Devices) == 0) {
 		return "", runtime.NewError("No devices found for user", StatusNotFound)
-	} else {
+	} else if evrProfile.account != nil && len(evrProfile.account.Devices) > 0 {
 		if xpid, err := evr.ParseEvrId(evrProfile.account.Devices[0].Id); err != nil {
 			return "", fmt.Errorf("failed to parse xp_id `%s`: %w", evrProfile.account.Devices[0].Id, err)
 		} else {
