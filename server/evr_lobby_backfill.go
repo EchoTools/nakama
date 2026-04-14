@@ -409,7 +409,12 @@ func (b *PostMatchmakerBackfill) ExtractUnmatchedCandidates(candidates [][]runti
 				ticket := entry.GetTicket()
 				me := &MatchmakerEntry{
 					Ticket:     ticket,
-					Presence:   entry.GetPresence().(*MatchmakerPresence),
+					Presence: func() *MatchmakerPresence {
+					if p, ok := entry.GetPresence().(*MatchmakerPresence); ok {
+						return p
+					}
+					return &MatchmakerPresence{}
+				}(),
 					PartyId:    entry.GetPartyId(),
 					Properties: entry.GetProperties(),
 				}

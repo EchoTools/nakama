@@ -293,16 +293,18 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 			}
 
 			// Remove sensitive data
-			label.GameServer.Latitude = 0
-			label.GameServer.Longitude = 0
-			label.GameServer.ServerID = 0
-			label.GameServer.Endpoint = evr.Endpoint{}
+			if label.GameServer != nil {
+				label.GameServer.Latitude = 0
+				label.GameServer.Longitude = 0
+				label.GameServer.ServerID = 0
+				label.GameServer.Endpoint = evr.Endpoint{}
+			}
 			for i, p := range label.Players {
 				p.ClientIP = ""
 				label.Players[i] = p
 			}
 
-			if label.LobbyType == UnassignedLobby {
+			if label.LobbyType == UnassignedLobby && label.GameServer != nil {
 				for _, id := range label.GameServer.GroupIDs {
 					if m, ok := memberships[id.String()]; ok {
 						if !m.IsAPIAccess {

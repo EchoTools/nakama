@@ -122,8 +122,14 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, p
 			totalField.Set(reflect.New(fieldType.Type.Elem()))
 		}
 
-		totalStat := totalField.Interface().(*evr.StatisticValue)
-		updateStat := updateField.Interface().(*evr.StatisticValue)
+		totalStat, ok := totalField.Interface().(*evr.StatisticValue)
+		if !ok {
+			continue
+		}
+		updateStat, ok := updateField.Interface().(*evr.StatisticValue)
+		if !ok {
+			continue
+		}
 
 		switch opName {
 		case "add":

@@ -68,6 +68,9 @@ func (d *DiscordAppBot) autocompleteRegions(ctx context.Context, logger runtime.
 			logger.Error("Failed to unmarshal match label", zap.Error(err))
 			continue
 		}
+		if label.GameServer == nil {
+			continue
+		}
 		regionCode := label.GameServer.LocationRegionCode(true, true)
 		extIP := label.GameServer.Endpoint.ExternalIP.String()
 		c, found := regionDatas[regionCode]

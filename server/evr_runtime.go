@@ -105,7 +105,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	// Initialize the discord bot if the token is set
 	if appBotToken, ok := vars["DISCORD_BOT_TOKEN"]; !ok || appBotToken == "" {
 		logger.Warn("DISCORD_BOT_TOKEN is not set, Discord bot will not be used")
-		panic("Bot token is not set in context.") // TODO: remove bot dependency
+		return fmt.Errorf("DISCORD_BOT_TOKEN is required but not set")
 	} else {
 		if dg, err = discordgo.New("Bot " + appBotToken); err != nil {
 			logger.Error("Unable to create bot", zap.Error(err))
@@ -125,7 +125,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	if db != nil && nk != nil { // Avoid panic's during some automated tests
 		go func() {
 			if err := RegisterIndexes(initializer); err != nil {
-				panic(fmt.Errorf("unable to register indexes: %v", err))
+				logger.Error("Failed to register indexes", zap.Error(err))
 			}
 		}()
 
