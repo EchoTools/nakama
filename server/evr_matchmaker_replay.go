@@ -136,9 +136,14 @@ func (m *SkillBasedMatchmaker) CaptureMatchmakerState(
 			Entries: make([]MatchmakerEntrySnapshot, 0, len(candidate)),
 		}
 		for _, entry := range candidate {
+			if entry == nil {
+				continue
+			}
 			group.Entries = append(group.Entries, captureMatchmakerEntry(entry))
 			ticketSet[entry.GetTicket()] = struct{}{}
-			playerSet[entry.GetPresence().GetUserId()] = struct{}{}
+			if presence := entry.GetPresence(); presence != nil {
+				playerSet[presence.GetUserId()] = struct{}{}
+			}
 		}
 		state.Candidates = append(state.Candidates, group)
 	}
@@ -150,8 +155,13 @@ func (m *SkillBasedMatchmaker) CaptureMatchmakerState(
 			Entries: make([]MatchmakerEntrySnapshot, 0, len(match)),
 		}
 		for _, entry := range match {
+			if entry == nil {
+				continue
+			}
 			group.Entries = append(group.Entries, captureMatchmakerEntry(entry))
-			matchedPlayerSet[entry.GetPresence().GetUserId()] = struct{}{}
+			if presence := entry.GetPresence(); presence != nil {
+				matchedPlayerSet[presence.GetUserId()] = struct{}{}
+			}
 		}
 		state.Matches = append(state.Matches, group)
 	}

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base32"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,22 @@ func EncodeEndpointID(ip string) string {
 	// Use base32 encoding (alphanumeric, case-insensitive) and take first 8 chars
 	encoded := base32.StdEncoding.EncodeToString(hash[:])
 	return strings.ToLower(encoded[:8])
+}
+
+// isNilPresence returns true for a nil interface value or an interface
+// holding a typed-nil pointer/map/chan/slice/func. The latter case is the
+// common "gotcha" — `var p *MatchmakerPresence = nil; var rp runtime.Presence = p`
+// makes `rp != nil` but any method call on rp panics.
+func isNilPresence(p runtime.Presence) bool {
+	if p == nil {
+		return true
+	}
+	v := reflect.ValueOf(p)
+	switch v.Kind() {
+	case reflect.Ptr, reflect.Interface, reflect.Chan, reflect.Func, reflect.Map, reflect.Slice:
+		return v.IsNil()
+	}
+	return false
 }
 
 type SkillBasedMatchmaker struct {
@@ -136,6 +153,31 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		logger.Debug("No candidates found. Matchmaker cannot run.")
 		return nil
 	}
+
+	// Filter out malformed entries (nil entry, nil/typed-nil presence, missing
+	// properties). Downstream code in processPotentialMatches, reservations,
+	// and snapshotting assumes every entry has a non-nil presence and a
+	// non-nil properties map; a single malformed entry can panic the
+	// matchmaker goroutine and stall the whole queue for the duration of the
+	// nakama match cycle.
+	filtered := entries[:0]
+	droppedMalformed := 0
+	for _, e := range entries {
+		if e == nil || isNilPresence(e.GetPresence()) || e.GetProperties() == nil {
+			droppedMalformed++
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	if droppedMalformed > 0 {
+		logger.WithField("dropped", droppedMalformed).Warn("Dropped malformed matchmaker entries")
+	}
+	entries = filtered
+	if len(entries) == 0 {
+		logger.Debug("No valid candidates found after filtering. Matchmaker cannot run.")
+		return nil
+	}
+
 	startTime := time.Now()
 	defer func() {
 		if nk == nil {

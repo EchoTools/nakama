@@ -419,7 +419,14 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 		ReservationLifetime: 30 * time.Second,
 	}
 
-	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, []string{lobbyParams.RegionCode}, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
+	var latestRTTs map[string]int
+	if lobbyParams.latencyHistory != nil {
+		if lh := lobbyParams.latencyHistory.Load(); lh != nil {
+			latestRTTs = lh.LatestRTTs()
+		}
+	}
+
+	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, latestRTTs, settings, []string{lobbyParams.RegionCode}, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
 	if err != nil {
 		// Check if this is a region fallback error - for pipeline, auto-select closest
 		var regionErr ErrMatchmakingNoServersInRegion
@@ -430,7 +437,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 				zap.Int("latency_ms", regionErr.FallbackInfo.ClosestLatencyMs))
 
 			// Allocate without region requirement to get the closest server
-			label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, nil, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
+			label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, latestRTTs, settings, nil, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
 		}
 
 		if err != nil {
@@ -439,24 +446,67 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 		}
 	}
 
+	// SignalPrepareSession (invoked inside LobbyGameServerAllocate) mutates the
+	// match label but only enqueues it in the registry's pendingUpdates map.
+	// The Bluge index is not refreshed until the next LabelUpdateIntervalMs
+	// tick — up to 1s by default. Without an eager flush, a concurrent
+	// lobbyFindOrCreateSocial caller racing on the same second would see zero
+	// results and spin up its own duplicate lobby. Force an immediate flush
+	// so the new lobby is searchable before we return.
+	flushMatchRegistryLabelUpdates(p.nk)
+
 	return label, nil
 }
 
+// flushMatchRegistryLabelUpdates forces the match registry's pending label
+// updates to be written to the Bluge index synchronously, bypassing the
+// LabelUpdateIntervalMs ticker. No-op if the registry is not a
+// *LocalMatchRegistry.
+func flushMatchRegistryLabelUpdates(nk runtime.NakamaModule) {
+	rgo, ok := nk.(*RuntimeGoNakamaModule)
+	if !ok || rgo == nil {
+		return
+	}
+	lmr, ok := rgo.matchRegistry.(*LocalMatchRegistry)
+	if !ok || lmr == nil {
+		return
+	}
+	lmr.FlushPendingLabelUpdates()
+}
+
 func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.Logger, _ Session, lobbyParams *LobbySessionParameters, entrants ...*EvrMatchPresence) error {
+	// First attempt runs immediately — no pre-wait. The old 1s pre-query wait
+	// was a workaround for the Bluge label-flush lag; newLobby now flushes
+	// synchronously, so the first query sees fresh state. Subsequent attempts
+	// back off exponentially only on specific retryable errors (server full,
+	// failed-to-acquire-lock) — a successful find/create returns immediately.
 	interval := 1 * time.Second
 	const maxInterval = 8 * time.Second
 	const maxAttempts = 30
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("context canceled: %w", ctx.Err())
-		case <-time.After(interval):
+		// Skip the pre-wait on the first attempt so concurrent joiners converge
+		// on the first existing lobby instead of racing to create their own.
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context canceled: %w", ctx.Err())
+			case <-time.After(interval):
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context canceled: %w", ctx.Err())
+			default:
+			}
 		}
 
 		// List all social matches that are open and have available slots.
+		// minSize=0: freshly-allocated social lobbies have zero tracked
+		// presences until the first player joins; excluding them caused every
+		// concurrent finder to spawn its own solo lobby instead of converging.
 		query := lobbyParams.BackfillSearchQuery(false, false)
-		matches, err := ListMatchStates(ctx, p.nk, query)
+		matches, err := ListMatchStates(ctx, p.nk, query, 0)
 		if err != nil {
 			return fmt.Errorf("failed to list matches: %w", err)
 		}
@@ -541,7 +591,10 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 			return NewLobbyErrorf(ServerFindFailed, "failed to create social lobby: %w", err)
 		}
 
-		<-time.After(1 * time.Second)
+		// newLobby already flushed the label index synchronously, so the
+		// just-prepared lobby is searchable and the game server presence has
+		// been tracked. Proceed straight to join without the historical 1s
+		// sleep.
 		if err := p.LobbyJoinEntrants(logger, label, entrants...); err != nil {
 			if LobbyErrorCode(err) == ServerIsFull {
 				logger.Debug("Server is full, ignoring.")

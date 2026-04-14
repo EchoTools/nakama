@@ -131,12 +131,22 @@ func (m *EVRMetrics) CountWebsocketClosed(delta int64) {
 	m.CustomCounter("session_evr_closed", nil, delta)
 }
 
-func ListMatchStates(ctx context.Context, nk runtime.NakamaModule, query string) ([]*MatchLabelMeta, error) {
+// ListMatchStates lists active authoritative matches and unmarshals their
+// labels. minSize is the minimum presence count a match must have to be
+// returned; pass 0 to include freshly-allocated matches that have not yet
+// tracked any presence (e.g. a parking-lot or just-prepared social lobby).
+//
+// Historically this function hardcoded minSize=1, which hid newly-allocated
+// social lobbies from BackfillSearchQuery-style callers — the underlying cause
+// of the "6 players, 6 separate solo lobbies" bug that
+// TestSocialLobbySearchAfterCreate documents.
+func ListMatchStates(ctx context.Context, nk runtime.NakamaModule, query string, minSize int) ([]*MatchLabelMeta, error) {
 	if query == "" {
 		query = "*"
 	}
-	// Get the list of active matches
-	minSize := 1
+	if minSize < 0 {
+		minSize = 0
+	}
 	maxSize := MatchLobbyMaxSize
 
 	matches, err := nk.MatchList(ctx, MaxMatchListResults, true, "", &minSize, &maxSize, query)
@@ -188,7 +198,9 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 		operatorUsernames := make(map[uuid.UUID]string)
 
 		// Get the match states
-		matchStates, err := ListMatchStates(ctx, nk, "")
+		// Metrics loop: minSize=1 preserves prior behavior of excluding empty
+		// parking-lot matches from match-count metrics.
+		matchStates, err := ListMatchStates(ctx, nk, "", 1)
 		if err != nil {
 			logger.WithField("error", err).Error("Error listing match states")
 			continue

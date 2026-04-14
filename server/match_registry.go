@@ -223,6 +223,18 @@ func (r *LocalMatchRegistry) processLabelUpdates(batch *index.Batch) {
 	batch.Reset()
 }
 
+// FlushPendingLabelUpdates forces an immediate flush of any pending match
+// label updates to the Bluge index, bypassing the LabelUpdateIntervalMs
+// ticker. Use this at critical state transitions (e.g. right after a new
+// public lobby is prepared) so that concurrent queries see the new state
+// instead of a stale entry and race to create duplicate lobbies.
+//
+// Safe to call from any goroutine; uses the same mutex as the ticker.
+func (r *LocalMatchRegistry) FlushPendingLabelUpdates() {
+	batch := bluge.NewBatch()
+	r.processLabelUpdates(batch)
+}
+
 func (r *LocalMatchRegistry) CreateMatch(ctx context.Context, createFn RuntimeMatchCreateFunction, module string, params map[string]interface{}) (string, error) {
 	buf := &bytes.Buffer{}
 	if err := gob.NewEncoder(buf).Encode(params); err != nil {
