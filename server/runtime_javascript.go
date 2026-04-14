@@ -1893,7 +1893,7 @@ func (rp *RuntimeProviderJS) MatchmakerMatched(ctx context.Context, entries []*M
 	r.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		return "", false, fmt.Errorf("Error running runtime Matchmaker Matched hook: %v", err.Error())
+		return "", false, fmt.Errorf("Error running runtime Matchmaker Matched hook: %w", err)
 	}
 
 	if retValue == nil {
@@ -1953,7 +1953,7 @@ func (rp *RuntimeProviderJS) TournamentEnd(ctx context.Context, tournament *api.
 	err = json.Unmarshal([]byte(tournament.Metadata), &metadataMap)
 	if err != nil {
 		rp.Put(r)
-		return fmt.Errorf("failed to convert metadata to json: %s", err.Error())
+		return fmt.Errorf("failed to convert metadata to json: %w", err)
 	}
 	pointerizeSlices(metadataMap)
 	_ = tournamentObj.Set("metadata", metadataMap)
@@ -1985,7 +1985,7 @@ func (rp *RuntimeProviderJS) TournamentEnd(ctx context.Context, tournament *api.
 	r.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		return fmt.Errorf("Error running runtime Tournament End hook: %v", err.Error())
+		return fmt.Errorf("Error running runtime Tournament End hook: %w", err)
 	}
 
 	if retValue == nil {
@@ -2030,7 +2030,7 @@ func (rp *RuntimeProviderJS) TournamentReset(ctx context.Context, tournament *ap
 	err = json.Unmarshal([]byte(tournament.Metadata), &metadataMap)
 	if err != nil {
 		rp.Put(r)
-		return fmt.Errorf("failed to convert metadata to json: %s", err.Error())
+		return fmt.Errorf("failed to convert metadata to json: %w", err)
 	}
 	pointerizeSlices(metadataMap)
 	_ = tournamentObj.Set("metadata", metadataMap)
@@ -2062,7 +2062,7 @@ func (rp *RuntimeProviderJS) TournamentReset(ctx context.Context, tournament *ap
 	r.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		return fmt.Errorf("Error running runtime Tournament Reset hook: %v", err.Error())
+		return fmt.Errorf("Error running runtime Tournament Reset hook: %w", err)
 	}
 
 	if retValue == nil {
@@ -2098,7 +2098,7 @@ func (rp *RuntimeProviderJS) LeaderboardReset(ctx context.Context, leaderboard *
 	err = json.Unmarshal([]byte(leaderboard.Metadata), &metadataMap)
 	if err != nil {
 		rp.Put(r)
-		return fmt.Errorf("failed to convert metadata to json: %s", err.Error())
+		return fmt.Errorf("failed to convert metadata to json: %w", err)
 	}
 	pointerizeSlices(metadataMap)
 	_ = leaderboardObj.Set("metadata", metadataMap)
@@ -2124,7 +2124,7 @@ func (rp *RuntimeProviderJS) LeaderboardReset(ctx context.Context, leaderboard *
 	r.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		return fmt.Errorf("Error running runtime Leaderboard Reset hook: %v", err.Error())
+		return fmt.Errorf("Error running runtime Leaderboard Reset hook: %w", err)
 	}
 
 	if retValue == nil {
@@ -2166,7 +2166,7 @@ func (rp *RuntimeProviderJS) Shutdown(ctx context.Context) {
 	r.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		rp.logger.Error(fmt.Sprintf("Error running runtime Shutdown hook: %v", err.Error()))
+		rp.logger.Error(fmt.Sprintf("Error running runtime Shutdown hook: %w", err))
 		return
 	}
 }
@@ -2204,7 +2204,7 @@ func (rp *RuntimeProviderJS) PurchaseNotificationApple(ctx context.Context, purc
 	r.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		return fmt.Errorf("Error running runtime Purchase Notification Apple hook: %v", err.Error())
+		return fmt.Errorf("Error running runtime Purchase Notification Apple hook: %w", err)
 	}
 
 	if retValue == nil {
@@ -2247,7 +2247,7 @@ func (rp *RuntimeProviderJS) SubscriptionNotificationApple(ctx context.Context, 
 	r.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		return fmt.Errorf("Error running runtime Subscription Notification Apple hook: %v", err.Error())
+		return fmt.Errorf("Error running runtime Subscription Notification Apple hook: %w", err)
 	}
 
 	if retValue == nil {
@@ -2290,7 +2290,7 @@ func (rp *RuntimeProviderJS) PurchaseNotificationGoogle(ctx context.Context, pur
 	r.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		return fmt.Errorf("Error running runtime Purchase Notification Google hook: %v", err.Error())
+		return fmt.Errorf("Error running runtime Purchase Notification Google hook: %w", err)
 	}
 
 	if retValue == nil {
@@ -2333,7 +2333,7 @@ func (rp *RuntimeProviderJS) SubscriptionNotificationGoogle(ctx context.Context,
 	r.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		return fmt.Errorf("Error running runtime Subscription Notification Google hook: %v", err.Error())
+		return fmt.Errorf("Error running runtime Subscription Notification Google hook: %w", err)
 	}
 
 	if retValue == nil {
@@ -2384,7 +2384,7 @@ func (rp *RuntimeProviderJS) StorageIndexFilter(ctx context.Context, indexName s
 	valueMap := make(map[string]interface{})
 	err = json.Unmarshal([]byte(storageWrite.Object.Value), &valueMap)
 	if err != nil {
-		return false, fmt.Errorf("Error running runtime Storage Index Filter hook for %q index: %v", indexName, err.Error())
+		return false, fmt.Errorf("Error running runtime Storage Index Filter hook for %q index: %v", indexName, err)
 	}
 	pointerizeSlices(valueMap)
 	objectMap["value"] = valueMap
@@ -2395,7 +2395,7 @@ func (rp *RuntimeProviderJS) StorageIndexFilter(ctx context.Context, indexName s
 	r.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		return false, fmt.Errorf("Error running runtime Storage Index Filter hook for %q index: %v", indexName, err.Error())
+		return false, fmt.Errorf("Error running runtime Storage Index Filter hook for %q index: %v", indexName, err)
 	}
 
 	if retValue == nil {

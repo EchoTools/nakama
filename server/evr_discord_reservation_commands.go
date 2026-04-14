@@ -44,7 +44,7 @@ func (h *ReservationSlashCommandHandler) HandleReserveCommand(ctx context.Contex
 	// Get the user's information
 	userID, guildID, err := h.getUserInfo(ctx, i)
 	if err != nil {
-		return h.respondError(dg, i, fmt.Sprintf("Failed to get user info: %v", err))
+		return h.respondError(dg, i, fmt.Sprintf("Failed to get user info: %w", err))
 	}
 
 	switch subcommand.Name {
@@ -135,7 +135,7 @@ func (h *ReservationSlashCommandHandler) handleAddReservation(ctx context.Contex
 		if conflictErr, ok := err.(*ReservationConflictError); ok {
 			return h.handleReservationConflicts(dg, i, conflictErr.Conflicts)
 		}
-		return h.respondError(dg, i, fmt.Sprintf("Failed to create reservation: %v", err))
+		return h.respondError(dg, i, fmt.Sprintf("Failed to create reservation: %w", err))
 	}
 
 	// Success response
@@ -208,7 +208,7 @@ func (h *ReservationSlashCommandHandler) handleListReservations(ctx context.Cont
 	// Get reservations
 	reservations, err := h.reservationMgr.ListReservations(ctx, uuid.FromStringOrNil(groupID), startTime, endTime)
 	if err != nil {
-		return h.respondError(dg, i, fmt.Sprintf("Failed to list reservations: %v", err))
+		return h.respondError(dg, i, fmt.Sprintf("Failed to list reservations: %w", err))
 	}
 
 	// Build response

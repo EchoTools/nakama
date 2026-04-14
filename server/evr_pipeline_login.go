@@ -342,7 +342,7 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 
 				metricsTags["error"] = "link_ticket_error"
 
-				return fmt.Errorf("error creating link ticket: %s", err)
+				return fmt.Errorf("error creating link ticket: %w", err)
 			} else {
 				botUsername := "EchoTools"
 				if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil && p.appBot.dg.State.User.Username != "" {

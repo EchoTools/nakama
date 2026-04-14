@@ -73,11 +73,11 @@ func (m EndpointPingResult) EndpointID() string {
 }
 
 func (m EndpointPingResult) GetInternalIP() string {
-	return m.InternalIP.String()
+	return ipString(m.InternalIP)
 }
 
 func (m EndpointPingResult) GetExternalIP() string {
-	return m.ExternalIP.String()
+	return ipString(m.ExternalIP)
 }
 func (m EndpointPingResult) RTT() time.Duration {
 	return time.Duration(m.PingMilliseconds) * time.Millisecond
@@ -93,5 +93,5 @@ func (r *EndpointPingResult) Stream(s *EasyStream) error {
 }
 
 func (e EndpointPingResult) String() string {
-	return fmt.Sprintf("%s %dms", e.ExternalIP.String(), e.PingMilliseconds)
+	return fmt.Sprintf("%s %dms", ipString(e.ExternalIP), e.PingMilliseconds)
 }

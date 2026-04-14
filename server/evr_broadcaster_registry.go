@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -33,8 +34,16 @@ func (br *BroadcasterRegistry) RemoveBroadcaster(id string) {
 	delete(br.Broadcasters, id)
 }
 
-func (br *BroadcasterRegistry) HealthCheck() {
+func (br *BroadcasterRegistry) HealthCheck(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
 		var toRemove []string
 
 		br.mutex.RLock()
@@ -54,7 +63,5 @@ func (br *BroadcasterRegistry) HealthCheck() {
 		for _, id := range toRemove {
 			br.RemoveBroadcaster(id)
 		}
-
-		time.Sleep(10 * time.Second)
 	}
 }

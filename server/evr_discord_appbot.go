@@ -147,7 +147,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		// Create a user for the bot based on it's discord profile
 		userID, _, _, err := nk.AuthenticateCustom(ctx, m.User.ID, s.State.User.Username, true)
 		if err != nil {
-			logger.Error("Error creating discordbot user: %s", err)
+			logger.WithField("error", err).Error("Error creating discordbot user")
 		}
 
 		// Update the global settings with the bots ID
@@ -155,7 +155,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		settings.DiscordBotUserID = userID
 		ServiceSettingsUpdate(&settings)
 		if err := ServiceSettingsSave(ctx, nk); err != nil {
-			logger.Error("Error saving global settings: %s", err)
+			logger.WithField("error", err).Error("Error saving global settings")
 		}
 
 		appbot.userID = userID
@@ -166,10 +166,10 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		}
 
 		if err := appbot.RegisterSlashCommands(); err != nil {
-			logger.Error("Failed to register slash commands: %w", err)
+			logger.WithField("error", err).Error("Failed to register slash commands")
 		}
 
-		logger.Info("Bot `%s` ready in %d guilds", displayName, len(dg.State.Guilds))
+		logger.WithFields(map[string]interface{}{"display_name": displayName, "guild_count": len(dg.State.Guilds)}).Info("Bot ready")
 	})
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.RateLimit) {
@@ -2773,12 +2773,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			account, err := nk.AccountGetId(ctx, targetUserID)
 			if err != nil {
-				return editInteractionResponse(s, i, fmt.Sprintf("Failed to get account: %v", err))
+				return editInteractionResponse(s, i, fmt.Sprintf("Failed to get account: %w", err))
 			}
 
 			config := &EarlyQuitPlayerState{}
 			if err := StorableRead(ctx, nk, targetUserID, config, true); err != nil {
-				return editInteractionResponse(s, i, fmt.Sprintf("Failed to load early quit config: %v", err))
+				return editInteractionResponse(s, i, fmt.Sprintf("Failed to load early quit config: %w", err))
 			}
 
 			var lockoutDuration time.Duration
@@ -2791,7 +2791,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			config.PenaltyLevel = int32(penaltyLevel)
 
 			if err := StorableWrite(ctx, nk, targetUserID, config); err != nil {
-				return editInteractionResponse(s, i, fmt.Sprintf("Failed to save early quit config: %v", err))
+				return editInteractionResponse(s, i, fmt.Sprintf("Failed to save early quit config: %w", err))
 			}
 
 			if trigger := globalEarlyQuitMessageTrigger.Load(); trigger != nil {
@@ -3529,7 +3529,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 				}
 			} else {
-				logger.Info("Unhandled command: %v", appCommandName)
+				logger.WithField("app_command_name", appCommandName).Info("Unhandled command")
 			}
 		case discordgo.InteractionMessageComponent:
 
@@ -3918,14 +3918,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				logger.WithField("custom_id", i.ModalSubmitData().CustomID).Info("Unhandled modal submit")
 			}
 		default:
-			logger.Info("Unhandled interaction type: %v", i.Type)
+			logger.WithField("type", i.Type).Info("Unhandled interaction type")
 		}
 	})
 
 	d.logger.Info("Registering slash commands.")
 	// Register global guild commands
 	d.updateSlashCommands(dg, d.logger, "")
-	d.logger.Info("%d Slash commands registered/updated in %d guilds.", len(mainSlashCommands), len(dg.State.Guilds))
+	d.logger.WithFields(map[string]interface{}{"command_count": len(mainSlashCommands), "guild_count": len(dg.State.Guilds)}).Info("Slash commands registered/updated")
 
 	return nil
 }
@@ -3945,7 +3945,7 @@ func (d *DiscordAppBot) updateSlashCommands(s *discordgo.Session, logger runtime
 
 	for _, command := range commands {
 		if _, ok := currentCommands[command.Name]; !ok {
-			logger.Debug("Deleting %s command: %s", guildID, command.Name)
+			logger.WithFields(map[string]interface{}{"guild_id": guildID, "name": command.Name}).Debug("Deleting command")
 			if err := s.ApplicationCommandDelete(s.State.Application.ID, guildID, command.ID); err != nil {
 				logger.WithField("err", err).Error("Failed to delete application command.")
 			}
@@ -4140,21 +4140,21 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 				case <-d.ctx.Done():
 					// Delete the message
 					if err := d.dg.ChannelMessageDelete(channelID, msg.ID); err != nil {
-						logger.Error("Failed to delete region status message: %s", err.Error())
+						logger.WithField("error", err.Error()).Error("Failed to delete region status message")
 
 					}
 					return
 				case <-timer.C:
 					// Delete the message
 					if err := d.dg.ChannelMessageDelete(channelID, msg.ID); err != nil {
-						logger.Error("Failed to delete region status message: %s", err.Error())
+						logger.WithField("error", err.Error()).Error("Failed to delete region status message")
 					}
 					return
 				case <-ticker.C:
 					// Update the message
 					err := d.createRegionStatusEmbed(ctx, logger, regionStr, channelID, msg)
 					if err != nil {
-						logger.Error("Failed to update region status message: %s", err.Error())
+						logger.WithField("error", err.Error()).Error("Failed to update region status message")
 						return
 					}
 				}

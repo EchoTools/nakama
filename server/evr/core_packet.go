@@ -264,7 +264,7 @@ func Marshal(msgs ...Message) ([]byte, error) {
 		// Encode the message.
 		s := NewEasyStream(EncodeMode, []byte{})
 		if err := m.Stream(s); err != nil {
-			errs = errors.Join(fmt.Errorf("could not stream message:%s", err), errs)
+			errs = errors.Join(fmt.Errorf("could not stream message: %w", err), errs)
 			continue
 		}
 		// Write the message type symbol.

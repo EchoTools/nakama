@@ -387,7 +387,7 @@ func (r *RuntimeGoMatchCore) MatchLabelUpdate(label string) error {
 		return ErrMatchStopped
 	}
 	if err := r.matchRegistry.UpdateMatchLabel(r.id, r.tickRate, r.module, label, r.createTime); err != nil {
-		return fmt.Errorf("error updating match label: %v", err.Error())
+		return fmt.Errorf("error updating match label: %w", err)
 	}
 	r.label.Store(label)
 

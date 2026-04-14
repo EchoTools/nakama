@@ -141,7 +141,7 @@ func PartyCreateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	}
 
 	if err := storeParty(ctx, nk, party); err != nil {
-		logger.Error("failed to store party: %v", err)
+		logger.WithField("error", err).Error("failed to store party")
 		return "", runtime.NewError("failed to create party", StatusInternalError)
 	}
 
@@ -169,7 +169,7 @@ func PartyJoinRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 
 	party, err := loadParty(ctx, nk, req.PartyID)
 	if err != nil {
-		logger.Error("failed to load party: %v", err)
+		logger.WithField("error", err).Error("failed to load party")
 		return "", runtime.NewError("failed to load party", StatusInternalError)
 	}
 	if party == nil {
@@ -193,7 +193,7 @@ func PartyJoinRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 	party.Members = append(party.Members, PartyMember{UserID: userID, Username: username})
 
 	if err := storeParty(ctx, nk, party); err != nil {
-		logger.Error("failed to store party: %v", err)
+		logger.WithField("error", err).Error("failed to store party")
 		return "", runtime.NewError("failed to join party", StatusInternalError)
 	}
 
@@ -217,7 +217,7 @@ func PartyLeaveRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 
 	party, err := loadParty(ctx, nk, req.PartyID)
 	if err != nil {
-		logger.Error("failed to load party: %v", err)
+		logger.WithField("error", err).Error("failed to load party")
 		return "", runtime.NewError("failed to load party", StatusInternalError)
 	}
 	if party == nil {
@@ -231,7 +231,7 @@ func PartyLeaveRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 
 	if len(remaining) == 0 {
 		if err := deleteParty(ctx, nk, party.PartyID); err != nil {
-			logger.Error("failed to delete party: %v", err)
+			logger.WithField("error", err).Error("failed to delete party")
 			return "", runtime.NewError("failed to delete party", StatusInternalError)
 		}
 	} else {
@@ -240,7 +240,7 @@ func PartyLeaveRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 			party.LeaderID = remaining[0].UserID
 		}
 		if err := storeParty(ctx, nk, party); err != nil {
-			logger.Error("failed to store party: %v", err)
+			logger.WithField("error", err).Error("failed to store party")
 			return "", runtime.NewError("failed to update party", StatusInternalError)
 		}
 	}
@@ -265,7 +265,7 @@ func PartyKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 
 	party, err := loadParty(ctx, nk, req.PartyID)
 	if err != nil {
-		logger.Error("failed to load party: %v", err)
+		logger.WithField("error", err).Error("failed to load party")
 		return "", runtime.NewError("failed to load party", StatusInternalError)
 	}
 	if party == nil {
@@ -287,7 +287,7 @@ func PartyKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 
 	party.Members = remaining
 	if err := storeParty(ctx, nk, party); err != nil {
-		logger.Error("failed to store party: %v", err)
+		logger.WithField("error", err).Error("failed to store party")
 		return "", runtime.NewError("failed to update party", StatusInternalError)
 	}
 
@@ -311,7 +311,7 @@ func PartyPromoteRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 	party, err := loadParty(ctx, nk, req.PartyID)
 	if err != nil {
-		logger.Error("failed to load party: %v", err)
+		logger.WithField("error", err).Error("failed to load party")
 		return "", runtime.NewError("failed to load party", StatusInternalError)
 	}
 	if party == nil {
@@ -335,7 +335,7 @@ func PartyPromoteRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 	party.LeaderID = req.TargetID
 	if err := storeParty(ctx, nk, party); err != nil {
-		logger.Error("failed to store party: %v", err)
+		logger.WithField("error", err).Error("failed to store party")
 		return "", runtime.NewError("failed to update party", StatusInternalError)
 	}
 
@@ -358,7 +358,7 @@ func PartyListMembersRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 
 	party, err := loadParty(ctx, nk, req.PartyID)
 	if err != nil {
-		logger.Error("failed to load party: %v", err)
+		logger.WithField("error", err).Error("failed to load party")
 		return "", runtime.NewError("failed to load party", StatusInternalError)
 	}
 	if party == nil {

@@ -141,19 +141,27 @@ func (e *Endpoint) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// ipString returns the string form of an IP, or "" if nil (avoiding "<nil>").
+func ipString(ip net.IP) string {
+	if ip == nil {
+		return ""
+	}
+	return ip.String()
+}
+
 // ExternalAddress returns a string of "externalIP:port"
 func (e Endpoint) ExternalAddress() string {
-	return fmt.Sprintf("%s:%d", e.ExternalIP.String(), e.Port)
+	return fmt.Sprintf("%s:%d", ipString(e.ExternalIP), e.Port)
 }
 
 // GetHostID returns a string of "internalIP:externalIP"
 // This is used to identify the host in the game server selection process.
 func (e Endpoint) GetHostID() string {
-	return e.InternalIP.String() + ":" + e.ExternalIP.String()
+	return ipString(e.InternalIP) + ":" + ipString(e.ExternalIP)
 }
 
 func (e Endpoint) GetExternalIP() string {
-	return e.ExternalIP.String()
+	return ipString(e.ExternalIP)
 }
 
 // IsValid returns true if the endpoint has all required fields set.
@@ -163,7 +171,7 @@ func (e Endpoint) IsValid() bool {
 
 // String returns a string of "internalIP:externalIP:port"
 func (e Endpoint) String() string {
-	return fmt.Sprintf("%s:%s:%d", e.InternalIP.String(), e.ExternalIP.String(), e.Port)
+	return fmt.Sprintf("%s:%s:%d", ipString(e.InternalIP), ipString(e.ExternalIP), e.Port)
 }
 
 // EndpointFromString returns an Endpoint from a string of "internalIP:externalIP:port"

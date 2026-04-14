@@ -554,13 +554,13 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 
 	presences, err := p.nk.StreamUserList(StreamModeGameServer, groupID, "", "", false, true)
 	if err != nil {
-		return fmt.Errorf("Error listing game servers: %v", err)
+		return fmt.Errorf("Error listing game servers: %w", err)
 	}
 
 	// Include any global game servers
 	globalPresences, err := p.nk.StreamUserList(StreamModeGameServer, uuid.Nil.String(), "", "", false, true)
 	if err != nil {
-		return fmt.Errorf("Error listing global game servers: %v", err)
+		return fmt.Errorf("Error listing global game servers: %w", err)
 	}
 	presences = append(presences, globalPresences...)
 
@@ -600,7 +600,7 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 	}
 
 	if err := SendEVRMessages(session, true, evr.NewLobbyPingRequest(275, candidates)); err != nil {
-		return fmt.Errorf("failed to send ping request: %v", err)
+		return fmt.Errorf("failed to send ping request: %w", err)
 	}
 
 	return nil

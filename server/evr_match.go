@@ -148,7 +148,7 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 		return nil, 0, ""
 	}
 	if err := json.Unmarshal([]byte(gsParam), &gameserverConfig); err != nil {
-		logger.Error("Failed to unmarshal gameserver config: %v", err)
+		logger.WithField("error", err).Error("Failed to unmarshal gameserver config")
 		return nil, 0, ""
 	}
 
@@ -258,7 +258,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		state.Open = true
 
 		if err := m.updateLabel(logger, dispatcher, state); err != nil {
-			logger.Error("Failed to update label: %v", err)
+			logger.WithField("error", err).Error("Failed to update label")
 		}
 		return state, true, ""
 	}
@@ -270,7 +270,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	// This is a player joining.
 	meta := &EntrantMetadata{}
 	if err := meta.FromMatchMetadata(metadata); err != nil {
-		return state, false, fmt.Sprintf("failed to unmarshal metadata: %v", err)
+		return state, false, fmt.Sprintf("failed to unmarshal metadata: %w", err)
 	}
 
 	// Log early quit penalty status for metrics (client enforces spawn restrictions)
@@ -516,7 +516,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	state.joinTimestamps[sessionID] = time.Now()
 
 	if err := m.updateLabel(logger, dispatcher, state); err != nil {
-		logger.Error("Failed to update label: %v", err)
+		logger.WithField("error", err).Error("Failed to update label")
 	}
 
 	if reconnectReservation != nil {
@@ -710,7 +710,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 			// The entrant stream presence is only present when the player has not disconnect from the server yet.
 			if userPresences, err := nk.StreamUserList(StreamModeEntrant, mp.EntrantID.String(), "", node, false, true); err != nil {
-				logger.Error("Failed to list user streams: %v", err)
+				logger.WithField("error", err).Error("Failed to list user streams")
 
 			} else if len(userPresences) > 0 || p.GetReason() == runtime.PresenceReasonDisconnect {
 				tags["reject_sent"] = "true"
@@ -718,7 +718,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 				rejects = append(rejects, mp.EntrantID)
 
 				if err := nk.StreamUserLeave(StreamModeEntrant, mp.EntrantID.String(), "", node, mp.GetUserId(), mp.GetSessionId()); err != nil {
-					logger.Warn("Failed to leave user stream: %v", err)
+					logger.WithField("error", err).Warn("Failed to leave user stream")
 				}
 
 			} else {
@@ -738,7 +738,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 				Presence: mp,
 				Reason:   reason,
 			}); err != nil {
-				logger.Error("Failed to send match data event: %v", err)
+				logger.WithField("error", err).Error("Failed to send match data event")
 			}
 
 			ts := state.joinTimestamps[mp.GetSessionId()]
@@ -747,7 +747,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			// Store the player's time in the match to a leaderboard
 
 			if err := AccumulateLeaderboardStat(ctx, nk, mp.GetUserId(), mp.DisplayName, state.GetGroupID().String(), state.Mode, LobbyTimeStatisticID, time.Since(ts).Seconds()); err != nil {
-				logger.Warn("Failed to record match time to leaderboard: %v", err)
+				logger.WithField("error", err).Warn("Failed to record match time to leaderboard")
 			}
 
 			if participation, ok := state.participations[p.GetUserId()]; ok {
@@ -817,7 +817,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 					}).Debug("Incrementing early quit for player.")
 
 					if err := AccumulateLeaderboardStat(ctx, nk, mp.GetUserId(), mp.DisplayName, state.GetGroupID().String(), state.Mode, EarlyQuitStatisticID, 1); err != nil {
-						logger.Warn("Failed to record early quit to leaderboard: %v", err)
+						logger.WithField("error", err).Warn("Failed to record early quit to leaderboard")
 					}
 
 					// Save detailed quit record to history
@@ -986,7 +986,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		var msgs []evr.Message
 		msg, err := evr.NewNEVRProtobufMessageV1(envelope)
 		if err != nil {
-			logger.Warn("Failed to create protobuf reject message, falling back to legacy: %v", err)
+			logger.WithField("error", err).Warn("Failed to create protobuf reject message, falling back to legacy")
 		} else {
 			logger.WithFields(map[string]interface{}{
 				"rejects": rejects,
@@ -998,7 +998,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		msgs = append(msgs, evr.NewGameServerEntrantRejected(code, rejects...))
 
 		if err := m.dispatchMessages(ctx, logger, dispatcher, msgs, []runtime.Presence{state.server}, nil); err != nil {
-			logger.Warn("Failed to dispatch message: %v", err)
+			logger.WithField("error", err).Warn("Failed to dispatch message")
 		}
 	}
 	if len(state.presenceMap) == 0 {
@@ -1033,7 +1033,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 			update := MatchGameStateUpdate{}
 			if err := json.Unmarshal(in.GetData(), &update); err != nil {
-				logger.Error("Failed to unmarshal match update: %v", err)
+				logger.WithField("error", err).Error("Failed to unmarshal match update")
 				continue
 			}
 
@@ -1081,7 +1081,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			/*
 				lobbyStatus := evr.NEVRLobbyStatusV1{}
 				if err := json.Unmarshal(in.GetData(), &lobbyStatus); err != nil {
-					logger.Error("Failed to unmarshal lobby status: %v", err)
+					logger.WithField("error", err).Error("Failed to unmarshal lobby status")
 					continue
 				}
 				for _, s := range lobbyStatus.Slots {
@@ -1092,7 +1092,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					// Find the player in the match
 					presence := state.presenceByEvrID[s.XPlatformId]
 					if presence == nil {
-						logger.Warn("Player not found in match: %s", s.XPlatformId)
+						logger.WithField("x_platform_id", s.XPlatformId).Warn("Player not found in match")
 						continue
 					}
 					presence.PingMillis = int(s.Ping)
@@ -1100,19 +1100,19 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				}
 			*/
 		default:
-			logger.Warn("Unknown match message type: %T", in)
+			logger.WithField("in", in).Warn("Unknown match message")
 			/*
 				typ, found := evr.SymbolTypes[uint64(in.GetOpCode())]
 				if !found {
-					logger.Error("Unknown opcode: %v", in.GetOpCode())
+					logger.WithField("opcode", in.GetOpCode().Error("Unknown opcode"))
 					continue
 				}
 
-				logger.Debug("Received match message %T(%s) from %s (%s)", typ, string(in.GetData()), in.GetUsername(), in.GetSessionId())
+				logger.WithFields(map[string]interface{}{"typ": typ, "value": string(in.GetData()), "username": in.GetUsername(), "session_id": in.GetSessionId()}).Debug("Received match message () from ()")
 				// Unmarshal the message into an interface, then switch on the type.
 				msg := reflect.New(reflect.TypeOf(typ).Elem()).Interface().(evr.Message)
 				if err := json.Unmarshal(in.GetData(), &msg); err != nil {
-					logger.Error("Failed to unmarshal message: %v", err)
+					logger.WithField("error", err).Error("Failed to unmarshal message")
 				}
 
 				var messageFn func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *MatchLabel, in runtime.MatchData, msg evr.Message) (*MatchLabel, error)
@@ -1121,21 +1121,21 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				switch msg := msg.(type) {
 
 				default:
-					logger.Warn("Unknown message type: %T", msg)
+					logger.WithField("msg", msg).Warn("Unknown message")
 				}
 
 				// Time the execution
 				start := time.Now()
 				// Execute the message function
 				if messageFn == nil {
-					logger.Warn("No handler for message type: %T", msg)
+					logger.WithField("msg", msg).Warn("No handler for message")
 				} else {
 					state, err = messageFn(ctx, logger, db, nk, dispatcher, state, in, msg)
 					if err != nil {
-						logger.Error("match pipeline: %v", err)
+						logger.WithField("error", err).Error("match pipeline")
 					}
 				}
-				logger.Debug("Message %T took %dms", msg, time.Since(start)/time.Millisecond)
+				logger.WithFields(map[string]interface{}{"msg": msg, "duration_ms": time.Since(start) / time.Millisecond}).Debug("Message processed")
 			*/
 		}
 	}
@@ -1225,11 +1225,11 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	// Ensure the game server presence exists to avoid nil dispatch crashes.
 	if !state.levelLoaded && state.server != nil && (len(state.presenceMap) != 0 || state.Started()) {
 		if state, err = m.MatchStart(ctx, logger, nk, dispatcher, state); err != nil {
-			logger.Error("failed to start session: %v", err)
+			logger.WithField("error", err).Error("failed to start session")
 			return nil
 		}
 		if err := m.updateLabel(logger, dispatcher, state); err != nil {
-			logger.Error("failed to update label: %v", err)
+			logger.WithField("error", err).Error("failed to update label")
 			return nil
 		}
 		return state
@@ -1373,7 +1373,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 	if updateLabel {
 		if err := m.updateLabel(logger, dispatcher, state); err != nil {
-			logger.Error("failed to update label: %v", err)
+			logger.WithField("error", err).Error("failed to update label")
 			return nil
 		}
 	}
@@ -1436,13 +1436,13 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 	defer dbCancel()
 	if state.server != nil && slices.Contains(ValidLeaderboardModes, state.Mode) {
 		if err := AccumulateLeaderboardStat(dbCtx, nk, state.server.GetUserId(), state.server.GetUsername(), state.GetGroupID().String(), state.Mode, GameServerTimeStatisticsID, time.Since(state.StartTime).Seconds()); err != nil {
-			logger.Warn("Failed to record game server time to leaderboard: %v", err)
+			logger.WithField("error", err).Warn("Failed to record game server time to leaderboard")
 		}
 	}
 	state.Open = false
 	state.terminateTick = tick + int64(graceSeconds)*state.tickRate
 	if err := m.updateLabel(logger, dispatcher, state); err != nil {
-		logger.Error("failed to update label: %v", err)
+		logger.WithField("error", err).Error("failed to update label")
 		return nil
 	}
 
@@ -1464,10 +1464,10 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 		}
 		msg, err := evr.NewNEVRProtobufMessageV1(envelope)
 		if err != nil {
-			logger.Warn("Failed to create LobbySessionEvent CODE_ENDED message: %v", err)
+			logger.WithField("error", err).Warn("Failed to create LobbySessionEvent CODE_ENDED message")
 		} else {
 			if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{state.server}, nil); err != nil {
-				logger.Warn("Failed to send LobbySessionEvent CODE_ENDED to game server: %v", err)
+				logger.WithField("error", err).Warn("Failed to send LobbySessionEvent CODE_ENDED to game server")
 			} else {
 				logger.Info("Sent LobbySessionEvent CODE_ENDED to game server — players will return to lobby.")
 			}
@@ -1502,7 +1502,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 	signal := &SignalEnvelope{}
 	err := json.Unmarshal([]byte(data), signal)
 	if err != nil {
-		return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal signal: %v", err)}.String()
+		return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal signal: %w", err)}.String()
 	}
 
 	switch signal.OpCode {
@@ -1510,7 +1510,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		var data SignalKickEntrantsPayload
 
 		if err := json.Unmarshal(signal.Payload, &data); err != nil {
-			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal shutdown payload: %v", err)}.String()
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal shutdown payload: %w", err)}.String()
 		}
 		entrantIDs := make([]uuid.UUID, 0, len(data.UserIDs))
 		for _, e := range data.UserIDs {
@@ -1523,7 +1523,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 		if len(entrantIDs) > 0 {
 			if err := m.kickEntrants(ctx, logger, dispatcher, state, entrantIDs...); err != nil {
-				return state, SignalResponse{Message: fmt.Sprintf("failed to kick player: %v", err)}.String()
+				return state, SignalResponse{Message: fmt.Sprintf("failed to kick player: %w", err)}.String()
 			}
 		}
 
@@ -1537,7 +1537,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		var data SignalShutdownPayload
 
 		if err := json.Unmarshal(signal.Payload, &data); err != nil {
-			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal shutdown payload: %v", err)}.String()
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal shutdown payload: %w", err)}.String()
 		}
 
 		if data.DisconnectGameServer {
@@ -1561,7 +1561,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 		jsonData, err := json.Marshal(state.GameServer.Endpoint)
 		if err != nil {
-			return state, fmt.Sprintf("failed to marshal endpoint: %v", err)
+			return state, fmt.Sprintf("failed to marshal endpoint: %w", err)
 		}
 		return state, SignalResponse{Success: true, Payload: string(jsonData)}.String()
 
@@ -1570,7 +1570,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 		jsonData, err := json.Marshal(state.presenceMap)
 		if err != nil {
-			return state, fmt.Sprintf("failed to marshal presences: %v", err)
+			return state, fmt.Sprintf("failed to marshal presences: %w", err)
 		}
 		return state, SignalResponse{Success: true, Payload: string(jsonData)}.String()
 
@@ -1585,7 +1585,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		settings := MatchSettings{}
 
 		if err := json.Unmarshal(signal.Payload, &settings); err != nil {
-			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal settings: %v", err)}.String()
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal settings: %w", err)}.String()
 		}
 
 		for _, f := range settings.RequiredFeatures {
@@ -1595,7 +1595,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 
 		if ok, err := CheckSystemGroupMembership(ctx, db, settings.SpawnedBy, GroupGlobalDevelopers); err != nil {
-			return state, SignalResponse{Message: fmt.Sprintf("failed to check group membership: %v", err)}.String()
+			return state, SignalResponse{Message: fmt.Sprintf("failed to check group membership: %w", err)}.String()
 		} else if !ok {
 			// Validate the mode
 			if levels, ok := evr.LevelsByMode[settings.Mode]; !ok {
@@ -1727,13 +1727,13 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		// Trigger the MatchLeave event for the game server.
 		if err := nk.StreamUserLeave(StreamModeMatchAuthoritative, state.ID.UUID.String(), "", state.ID.Node, state.GameServer.GetUserId(), state.GameServer.GetSessionId()); err != nil {
 			logger.Warn("Failed to leave match stream", zap.Error(err))
-			return nil, SignalResponse{Message: fmt.Sprintf("failed to leave match stream: %v", err)}.String()
+			return nil, SignalResponse{Message: fmt.Sprintf("failed to leave match stream: %w", err)}.String()
 		}
 
 	case SignalPlayerUpdate:
 		update := MatchPlayerUpdate{}
 		if err := json.Unmarshal(signal.Payload, &update); err != nil {
-			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal player update: %v", err)}.String()
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal player update: %w", err)}.String()
 		}
 		if mp, ok := state.presenceMap[update.SessionID]; ok {
 			if update.RoleAlignment != nil {
@@ -1750,13 +1750,13 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 
 	default:
-		logger.Warn("Unknown signal: %v", signal.OpCode)
+		logger.WithField("op_code", signal.OpCode).Warn("Unknown signal")
 		return state, SignalResponse{Success: false, Message: "unknown signal"}.String()
 	}
 
 	if err := m.updateLabel(logger, dispatcher, state); err != nil {
-		logger.Error("failed to update label: %v", err)
-		return state, SignalResponse{Message: fmt.Sprintf("failed to update label: %v", err)}.String()
+		logger.WithField("error", err).Error("failed to update label")
+		return state, SignalResponse{Message: fmt.Sprintf("failed to update label: %w", err)}.String()
 	}
 
 	nk.MetricsCounterAdd("match_prepare_count", state.MetricsTags(), 1)
@@ -1844,7 +1844,7 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 			humanCount := state.RoleCount(team.role)
 			botsNeeded := state.TeamSize - humanCount
 			if botsNeeded > 0 {
-				logger.Info("Spawning bots for AI CO-OP: team=%d humans=%d bots=%d", team.id, humanCount, botsNeeded)
+				logger.WithFields(map[string]interface{}{"team_id": team.id, "human_count": humanCount, "bots_needed": botsNeeded}).Info("Spawning bots for AI CO-OP")
 				botMessages = append(botMessages, evr.NewSNSLobbySetSpawnBotOnServer(
 					0, // MatchID (unused by game server per binary evidence)
 					team.id,
@@ -1868,7 +1868,7 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 
 func (m *EvrMatch) dispatchMessages(_ context.Context, logger runtime.Logger, dispatcher runtime.MatchDispatcher, messages []evr.Message, presences []runtime.Presence, sender runtime.Presence) error {
 	for _, message := range messages {
-		logger.Debug("Sending message from match: %v", message)
+		logger.WithField("message", message).Debug("Sending message from match")
 		payload, err := evr.Marshal(message)
 		if err != nil {
 			return fmt.Errorf("could not marshal message: %w", err)

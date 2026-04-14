@@ -63,13 +63,13 @@ func IterateBlugeMatches(dmi search.DocumentMatchIterator, loadFields map[string
 			return true
 		})
 		if err != nil {
-			return nil, fmt.Errorf("error visiting stored field: %v", err.Error())
+			return nil, fmt.Errorf("error visiting stored field: %w", err)
 		}
 		rv.Hits = append(rv.Hits, &bm)
 		dm, err = dmi.Next()
 	}
 	if err != nil {
-		return nil, fmt.Errorf("error iterating document matches: %v", err.Error())
+		return nil, fmt.Errorf("error iterating document matches: %w", err)
 	}
 
 	return rv, nil

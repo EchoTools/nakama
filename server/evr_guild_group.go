@@ -22,7 +22,7 @@ func NewGuildGroup(group *api.Group, state *GuildGroupState) (*GuildGroup, error
 
 	md := &GroupMetadata{}
 	if err := json.Unmarshal([]byte(group.Metadata), md); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal group metadata: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal group metadata: %w", err)
 	}
 
 	// Ensure the matchmaking channel IDs have been initialized
@@ -239,7 +239,7 @@ func (g *GuildGroup) IsAllowedMatchmaking(userID string) bool {
 func GuildGroupsLoad(ctx context.Context, nk runtime.NakamaModule, groupIDs []string) ([]*GuildGroup, error) {
 	groups, err := nk.GroupsGetId(ctx, groupIDs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get group: %v", err)
+		return nil, fmt.Errorf("failed to get group: %w", err)
 	}
 	if len(groups) == 0 {
 		return nil, fmt.Errorf("group not found")
@@ -255,7 +255,7 @@ func GuildGroupsLoad(ctx context.Context, nk runtime.NakamaModule, groupIDs []st
 
 	states, err := GuildGroupStatesLoad(ctx, nk, ServiceSettings().DiscordBotUserID, groupIDs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load guild group states: %v", err)
+		return nil, fmt.Errorf("failed to load guild group states: %w", err)
 	}
 
 	stateMap := make(map[string]*GuildGroupState, len(states))
@@ -271,7 +271,7 @@ func GuildGroupsLoad(ctx context.Context, nk runtime.NakamaModule, groupIDs []st
 		}
 		gg, err := NewGuildGroup(group, state)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create guild group: %v", err)
+			return nil, fmt.Errorf("failed to create guild group: %w", err)
 		}
 		guildGroups = append(guildGroups, gg)
 	}
@@ -282,7 +282,7 @@ func GuildGroupsLoad(ctx context.Context, nk runtime.NakamaModule, groupIDs []st
 func GuildGroupLoad(ctx context.Context, nk runtime.NakamaModule, groupID string) (*GuildGroup, error) {
 	groups, err := nk.GroupsGetId(ctx, []string{groupID})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get group: %v", err)
+		return nil, fmt.Errorf("failed to get group: %w", err)
 	}
 	if len(groups) == 0 {
 		return nil, fmt.Errorf("group not found")
@@ -290,7 +290,7 @@ func GuildGroupLoad(ctx context.Context, nk runtime.NakamaModule, groupID string
 
 	state, err := GuildGroupStateLoad(ctx, nk, ServiceSettings().DiscordBotUserID, groupID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load guild group state: %v", err)
+		return nil, fmt.Errorf("failed to load guild group state: %w", err)
 	}
 
 	return NewGuildGroup(groups[0], state)
@@ -305,12 +305,12 @@ func GuildGroupStore(ctx context.Context, nk runtime.NakamaModule, guildGroupReg
 	// Store the State
 	err := StorableWrite(ctx, nk, ServiceSettings().DiscordBotUserID, group.State)
 	if err != nil {
-		return fmt.Errorf("failed to write guild group state: %v", err)
+		return fmt.Errorf("failed to write guild group state: %w", err)
 	}
 
 	// Store the metadata
 	if err := GroupMetadataSave(ctx, _nk.db, group.Group.Id, &group.GroupMetadata); err != nil {
-		return fmt.Errorf("failed to save guild group metadata: %v", err)
+		return fmt.Errorf("failed to save guild group metadata: %w", err)
 	}
 	if guildGroupRegistry != nil {
 		guildGroupRegistry.Add(group)
@@ -358,13 +358,13 @@ func GuildUserGroupsList(ctx context.Context, nk runtime.NakamaModule, guildGrou
 
 	states, err := GuildGroupStatesLoad(ctx, nk, ServiceSettings().DiscordBotUserID, groupIDs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load guild group states: %v", err)
+		return nil, fmt.Errorf("failed to load guild group states: %w", err)
 	}
 
 	for _, state := range states {
 		guildGroups[state.GroupID], err = NewGuildGroup(groups[state.GroupID], state)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create guild group: %v", err)
+			return nil, fmt.Errorf("failed to create guild group: %w", err)
 		}
 	}
 

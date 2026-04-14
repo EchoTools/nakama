@@ -75,7 +75,7 @@ func ReserveMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	// Check server availability
 	serverAvailable, err := checkServerAvailability(ctx, nk, logger)
 	if err != nil {
-		response.Error = fmt.Sprintf("Failed to check server availability: %v", err)
+		response.Error = fmt.Sprintf("Failed to check server availability: %w", err)
 		return marshalResponse(response)
 	}
 
@@ -117,7 +117,7 @@ func processReservationAllocation(ctx context.Context, logger runtime.Logger, nk
 
 	// Update reservation state to activated
 	if err := reservationMgr.UpdateReservationState(ctx, request.ReservationID, ReservationStateActivated, "match allocated"); err != nil {
-		logger.Warn("Failed to update reservation state: %v", err)
+		logger.WithField("error", err).Warn("Failed to update reservation state")
 	}
 
 	// Send activation DM to the owner if discord session is available
@@ -132,17 +132,17 @@ func processReservationAllocation(ctx context.Context, logger runtime.Logger, nk
 		if dmUser, err := dg.User(ownerID); err == nil && dmUser != nil {
 			dmChannel, err := dg.UserChannelCreate(dmUser.ID)
 			if err != nil {
-				logger.Warn("Failed to create DM channel for user %s: %v", ownerID, err)
+				logger.WithFields(map[string]interface{}{"owner_id": ownerID, "error": err}).Warn("Failed to create DM channel for user")
 			} else if dmChannel != nil {
 				_, err = dg.ChannelMessageSend(dmChannel.ID, dmContent)
 				if err != nil {
-					logger.Warn("Failed to send activation DM to user %s: %v", ownerID, err)
+					logger.WithFields(map[string]interface{}{"owner_id": ownerID, "error": err}).Warn("Failed to send activation DM to user")
 				} else {
-					logger.Info("Sent reservation activation DM to user %s for reservation %s", ownerID, reservation.ID)
+					logger.WithFields(map[string]interface{}{"owner_id": ownerID, "reservation_id": reservation.ID}).Info("Sent reservation activation DM")
 				}
 			}
 		} else if err != nil {
-			logger.Warn("Failed to get Discord user %s: %v", ownerID, err)
+			logger.WithFields(map[string]interface{}{"owner_id": ownerID, "error": err}).Warn("Failed to get Discord user")
 		}
 	}
 
@@ -170,7 +170,7 @@ func processAllocationWithPurging(ctx context.Context, logger runtime.Logger, nk
 	// Find preemption candidates
 	candidates, err := preemptionMgr.FindPreemptionCandidates(ctx, preemptionReq)
 	if err != nil {
-		response.Error = fmt.Sprintf("Failed to find preemption candidates: %v", err)
+		response.Error = fmt.Sprintf("Failed to find preemption candidates: %w", err)
 		return marshalResponse(response)
 	}
 
@@ -183,7 +183,7 @@ func processAllocationWithPurging(ctx context.Context, logger runtime.Logger, nk
 	matchesToPreempt := []string{candidates[0].MatchID}
 	preemptionResult, err := preemptionMgr.PreemptMatches(ctx, matchesToPreempt, preemptionReq)
 	if err != nil {
-		response.Error = fmt.Sprintf("Failed to preempt matches: %v", err)
+		response.Error = fmt.Sprintf("Failed to preempt matches: %w", err)
 		return marshalResponse(response)
 	}
 
@@ -317,8 +317,7 @@ func ExtendMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 		return "", runtime.NewError("failed to marshal response: "+err.Error(), StatusInternalError)
 	}
 
-	logger.Info("Match %s extended by %d minutes by user %s. Reason: %s",
-		request.MatchID, request.ExtensionMinutes, userID, request.Reason)
+	logger.WithFields(map[string]interface{}{"match_id": request.MatchID, "extension_minutes": request.ExtensionMinutes, "user_id": userID, "reason": request.Reason}).Info("Match extended")
 
 	return string(responseBytes), nil
 }

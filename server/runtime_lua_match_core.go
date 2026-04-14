@@ -120,7 +120,7 @@ func NewRuntimeLuaMatchCore(logger *zap.Logger, module string, db *sql.DB, proto
 			}
 		}
 		ctxCancelFn()
-		return nil, fmt.Errorf("error loading match module: %v", err.Error())
+		return nil, fmt.Errorf("error loading match module: %w", err)
 	}
 
 	// Extract the expected function references.
@@ -657,7 +657,7 @@ func (r *RuntimeLuaMatchCore) broadcastMessageDeferred(l *lua.LState) int {
 			Envelope:    msg,
 			Reliable:    reliable,
 		}); err != nil {
-			l.RaiseError("error deferring message broadcast: %v", err)
+			l.RaiseError("error deferring message broadcast: %w", err)
 		}
 	}
 
@@ -913,7 +913,7 @@ func (r *RuntimeLuaMatchCore) matchLabelUpdate(l *lua.LState) int {
 	input := l.OptString(1, "")
 
 	if err := r.matchRegistry.UpdateMatchLabel(r.id, r.tickRate, r.module, input, r.createTime); err != nil {
-		l.RaiseError("error updating match label: %v", err.Error())
+		l.RaiseError("error updating match label: %w", err)
 		return 0
 	}
 	r.label.Store(input)

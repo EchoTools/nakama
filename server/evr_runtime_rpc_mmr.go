@@ -158,7 +158,7 @@ func UpdateMMRRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 	muBoardID := StatisticBoardID(req.GroupID, mode, TeamSkillRatingMuStatisticID, evr.ResetScheduleAllTime)
 	muScore, muSubscore, err := Float64ToScore(req.Mu)
 	if err != nil {
-		return "", runtime.NewError(fmt.Sprintf("Invalid Mu value: %v", err), StatusInvalidArgument)
+		return "", runtime.NewError(fmt.Sprintf("Invalid Mu value: %w", err), StatusInvalidArgument)
 	}
 
 	if _, err := nk.LeaderboardRecordWrite(ctx, muBoardID, req.UserID, displayName, muScore, muSubscore, nil, &operatorSet); err != nil {
@@ -183,7 +183,7 @@ func UpdateMMRRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 	sigmaBoardID := StatisticBoardID(req.GroupID, mode, TeamSkillRatingSigmaStatisticID, evr.ResetScheduleAllTime)
 	sigmaScore, sigmaSubscore, err := Float64ToScore(req.Sigma)
 	if err != nil {
-		return "", runtime.NewError(fmt.Sprintf("Invalid Sigma value: %v", err), StatusInvalidArgument)
+		return "", runtime.NewError(fmt.Sprintf("Invalid Sigma value: %w", err), StatusInvalidArgument)
 	}
 
 	if _, err := nk.LeaderboardRecordWrite(ctx, sigmaBoardID, req.UserID, displayName, sigmaScore, sigmaSubscore, nil, &operatorSet); err != nil {
