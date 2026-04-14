@@ -369,7 +369,12 @@ func ParsePacket(data []byte) ([]Message, error) {
 		}
 
 		// Create a new message of the correct type and unmarshal the data into it.
-		message := reflect.New(reflect.TypeOf(typ).Elem()).Interface().(Message)
+		newVal := reflect.New(reflect.TypeOf(typ).Elem()).Interface()
+		message, ok := newVal.(Message)
+		if !ok {
+			err = errors.Join(err, fmt.Errorf("registered type %T does not implement Message", newVal))
+			break
+		}
 		if streamErr := message.Stream(NewEasyStream(DecodeMode, b)); streamErr != nil {
 			return nil, fmt.Errorf("Stream error: %T: %w", typ, streamErr)
 		}
@@ -426,8 +431,10 @@ func SymbolOf(m Message) Symbol {
 // MessageTypeOf returns a new instance of the message type.
 func MessageTypeOf(s Symbol) Message {
 	if m, ok := SymbolTypes[uint64(s)]; ok {
-		// return a new instance of the message type
-		return reflect.New(reflect.TypeOf(m).Elem()).Interface().(Message)
+		newVal := reflect.New(reflect.TypeOf(m).Elem()).Interface()
+		if msg, ok := newVal.(Message); ok {
+			return msg
+		}
 	}
 	return nil
 }

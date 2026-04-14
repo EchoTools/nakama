@@ -87,15 +87,25 @@ func (s *ConsoleServer) CallApiEndpoint(ctx context.Context, in *console.CallApi
 	cval := out[0].Interface()
 	cerr := out[1].Interface()
 	if cerr != nil {
+		if e, ok := cerr.(error); ok {
+			return &console.CallApiEndpointResponse{
+				Body:         "",
+				ErrorMessage: e.Error(),
+			}, nil
+		}
 		return &console.CallApiEndpointResponse{
 			Body:         "",
-			ErrorMessage: cerr.(error).Error(),
+			ErrorMessage: fmt.Sprintf("%v", cerr),
 		}, nil
 	} else {
 		var j []byte
 		if cval != nil {
 			m := new(protojson.MarshalOptions)
-			j, err = m.Marshal(cval.(proto.Message))
+			msg, ok := cval.(proto.Message)
+			if !ok {
+				return nil, status.Error(codes.Internal, "Response is not a proto.Message")
+			}
+			j, err = m.Marshal(msg)
 			if err != nil {
 				s.logger.Error("Error serializing method response body.", zap.String("method", in.Method), zap.Error(err))
 				return nil, status.Error(codes.Internal, "Error serializing method response body.")
