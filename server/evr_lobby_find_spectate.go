@@ -26,13 +26,13 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 			"+label.open:T",
 			"+label.lobby_type:public",
 			fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.QuoteStringValue(params.GroupID)),
-			fmt.Sprintf("+label.mode:%s", Query.EscapeIndexValue(params.Mode.String())),
+			fmt.Sprintf("+label.mode:%s", params.Mode.String()),
 			fmt.Sprintf("+label.size:>=%d +label.size:<=%d", minSize, maxSize),
 		}
 	)
 
 	if params.Level != evr.LevelUnspecified {
-		qparts = append(qparts, fmt.Sprintf("+label.level:%s", Query.EscapeIndexValue(params.Level.String())))
+		qparts = append(qparts, fmt.Sprintf("+label.level:%s", params.Level.String()))
 	}
 
 	query := strings.Join(qparts, " ")

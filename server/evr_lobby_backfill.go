@@ -595,7 +595,7 @@ func (b *PostMatchmakerBackfill) GetBackfillMatches(ctx context.Context, groupID
 	// Build query for open matches in the same group with the same mode
 	qparts := []string{
 		"+label.open:T",
-		fmt.Sprintf("+label.mode:%s", Query.EscapeIndexValue(mode.String())),
+		fmt.Sprintf("+label.mode:%s", mode.String()),
 		fmt.Sprintf("+label.group_id:%s", Query.QuoteStringValue(groupID.String())),
 	}
 
