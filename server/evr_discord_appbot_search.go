@@ -254,7 +254,7 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 					continue
 				}
 				account, err := nk.AccountGetId(ctx, userID)
-				if err != nil {
+				if err != nil || account == nil || account.User == nil {
 					continue
 				}
 				r := result{

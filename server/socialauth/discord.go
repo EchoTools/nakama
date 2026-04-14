@@ -36,18 +36,18 @@ func (s *SocialAuthHandler) discordHttpCallbackHandler(w http.ResponseWriter, r 
 	queryParams := r.URL.Query()
 	code, err := s.extractAndValidateOAuth2Callback(queryParams)
 	if err != nil {
-		http.Error(w, "Invalid OAuth2 callback: "+err.Error(), http.StatusBadRequest)
+		http.Error(w, "Invalid OAuth2 callback", http.StatusBadRequest)
 		return
 	}
 
 	userID, username, _, err := s.nk.AuthenticateCustom(ctx, code, "", true)
 	if err != nil {
-		http.Error(w, "Discord authentication failed: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Discord authentication failed", http.StatusInternalServerError)
 	}
 
 	sessionVars, err := setUpSessionVars(ctx, s.db, userID)
 	if err != nil {
-		http.Error(w, "Failed to set up session variables: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to set up session variables", http.StatusInternalServerError)
 		return
 	}
 
@@ -60,10 +60,13 @@ func (s *SocialAuthHandler) discordHttpCallbackHandler(w http.ResponseWriter, r 
 	// Set the authenticated user cookie
 	setRefreshTokenCookie(w, token)
 
-	// If there was a redirect path specified, redirect there
+	// If there was a redirect path specified, redirect there (only allow relative paths)
 	if redirectPath := queryParams.Get("redirect"); redirectPath != "" {
-		http.Redirect(w, r, redirectPath, http.StatusFound)
-		return
+		if len(redirectPath) > 0 && redirectPath[0] == '/' && (len(redirectPath) < 2 || redirectPath[1] != '/') {
+			http.Redirect(w, r, redirectPath, http.StatusFound)
+			return
+		}
+		// Reject absolute URLs and protocol-relative URLs to prevent open redirect
 	}
 
 	// Return the Nakama user ID

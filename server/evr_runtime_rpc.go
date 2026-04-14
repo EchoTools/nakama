@@ -1817,7 +1817,7 @@ func ServerScoreRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	}
 	var err error
 	// extract the p from the query string
-	if p, ok := queryParameters["rtts"]; ok {
+	if p, ok := queryParameters["rtts"]; ok && len(p) > 0 {
 		// Split by comma
 		s := strings.Split(p[0], ",")
 		rttstrs := make([]string, 0, len(s))
@@ -1910,7 +1910,7 @@ func ServerScoresRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	}
 	var err error
 	// extract the p from the query string
-	if p, ok := queryParameters["discord_ids"]; ok {
+	if p, ok := queryParameters["discord_ids"]; ok && len(p) > 0 {
 
 		s := strings.Split(p[0], ",")
 		for _, v := range s {
