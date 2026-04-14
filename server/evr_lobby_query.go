@@ -120,7 +120,7 @@ func (q query) QuoteStringValue(input any) string {
 	case nil:
 		s = "nil"
 	case stringer:
-		return v.String()
+		return q.replacer.Replace(v.String())
 	default:
 		s = fmt.Sprintf("%v", v)
 	}

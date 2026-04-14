@@ -117,11 +117,13 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 	// Build an allowlist of IPs from active game server presences so that
 	// clients cannot inject arbitrary IPs into their latency history and
 	// inflate rtt_* matchmaker properties.
-	knownIPs := make(map[string]struct{})
+	// knownIPs is nil when the allowlist could not be populated due to an error;
+	// a nil map means the filter is disabled (fail open) so results are not silently dropped.
+	var knownIPs map[string]struct{}
 	if presences, err := p.nk.StreamUserList(StreamModeGameServer, uuid.Nil.String(), "", "", false, true); err != nil {
-		logger.Warn("failed to list game server presences for ping validation", zap.Error(err))
-		// Non-fatal: fall through with an empty allowlist (all results will be dropped).
+		logger.Warn("failed to list game server presences for ping validation; accepting all ping results", zap.Error(err))
 	} else {
+		knownIPs = make(map[string]struct{})
 		for _, presence := range presences {
 			gp := &GameServerPresence{}
 			if err := json.Unmarshal([]byte(presence.GetStatus()), gp); err != nil {
@@ -129,6 +131,9 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 			}
 			if ip := gp.Endpoint.GetExternalIP(); ip != "" {
 				knownIPs[ip] = struct{}{}
+			}
+			if ip := gp.Endpoint.InternalIP; ip != nil {
+				knownIPs[ip.String()] = struct{}{}
 			}
 		}
 	}
@@ -139,9 +144,11 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 			ip = result.InternalIP
 		}
 
-		if _, ok := knownIPs[ip.String()]; !ok {
-			logger.Debug("dropping ping result for unknown game server IP", zap.String("ip", ip.String()))
-			continue
+		if knownIPs != nil {
+			if _, ok := knownIPs[ip.String()]; !ok {
+				logger.Debug("dropping ping result for unknown game server IP", zap.String("ip", ip.String()))
+				continue
+			}
 		}
 
 		latencyHistory.Add(ip, int(result.PingMilliseconds), limit, expiry)

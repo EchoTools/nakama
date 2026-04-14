@@ -211,8 +211,12 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 			operatorUsername, ok := operatorUsernames[state.State.GameServer.OperatorID]
 			if !ok {
 				account, err := nk.AccountGetId(ctx, state.State.GameServer.OperatorID.String())
-				if err != nil || account == nil || account.User == nil {
-					logger.WithField("error", err).Error("Error getting account")
+				if err != nil {
+					logger.WithField("error", err).Error("Error getting operator account")
+					continue
+				}
+				if account == nil || account.User == nil {
+					logger.WithField("operator_id", state.State.GameServer.OperatorID.String()).Error("Operator account or user is nil")
 					continue
 				}
 				operatorUsername = account.User.Username

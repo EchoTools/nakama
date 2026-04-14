@@ -2384,7 +2384,7 @@ func (rp *RuntimeProviderJS) StorageIndexFilter(ctx context.Context, indexName s
 	valueMap := make(map[string]interface{})
 	err = json.Unmarshal([]byte(storageWrite.Object.Value), &valueMap)
 	if err != nil {
-		return false, fmt.Errorf("Error running runtime Storage Index Filter hook for %q index: %v", indexName, err)
+		return false, fmt.Errorf("Error running runtime Storage Index Filter hook for %q index: %w", indexName, err)
 	}
 	pointerizeSlices(valueMap)
 	objectMap["value"] = valueMap
@@ -2395,7 +2395,7 @@ func (rp *RuntimeProviderJS) StorageIndexFilter(ctx context.Context, indexName s
 	r.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		return false, fmt.Errorf("Error running runtime Storage Index Filter hook for %q index: %v", indexName, err)
+		return false, fmt.Errorf("Error running runtime Storage Index Filter hook for %q index: %w", indexName, err)
 	}
 
 	if retValue == nil {

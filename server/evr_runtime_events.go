@@ -562,24 +562,43 @@ func (h *EventDispatcher) getRedisClient() *redis.Client {
 // matchDataJournalMaxAge and bulk-inserts them into MongoDB. It is safe to call
 // from multiple goroutines because it acquires the dispatcher lock.
 func (h *EventDispatcher) evictStaleJournals(ctx context.Context, logger runtime.Logger) {
+	// Collect stale keys and values without deleting yet; deletion happens only
+	// after a successful InsertMany so that no data is lost on insert failure.
+	type staleEntry struct {
+		key MatchID
+		val any
+	}
+
 	h.Lock()
-	inserts := make([]any, 0, len(h.matchJournals))
+	stale := make([]staleEntry, 0, len(h.matchJournals))
 	for k, v := range h.matchJournals {
 		if time.Since(v.UpdatedAt) > matchDataJournalMaxAge {
-			delete(h.matchJournals, k)
-			inserts = append(inserts, v)
+			stale = append(stale, staleEntry{key: k, val: v})
 		}
 	}
 	h.Unlock()
 
-	if len(inserts) == 0 || h.mongo == nil {
+	if len(stale) == 0 || h.mongo == nil {
 		return
+	}
+
+	inserts := make([]any, len(stale))
+	for i, e := range stale {
+		inserts[i] = e.val
 	}
 
 	collection := h.mongo.Database(matchDataDatabaseName).Collection(matchDataCollectionName)
 	if _, err := collection.InsertMany(ctx, inserts); err != nil {
 		logger.WithField("error", err).Error("failed to insert stale match journals to MongoDB")
+		return
 	}
+
+	// Remove from the map only after a successful insert.
+	h.Lock()
+	for _, e := range stale {
+		delete(h.matchJournals, e.key)
+	}
+	h.Unlock()
 }
 
 func (h *EventDispatcher) processRedisQueue(ctx context.Context, logger runtime.Logger) {
