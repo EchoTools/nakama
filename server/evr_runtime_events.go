@@ -398,7 +398,7 @@ func (h *EventDispatcher) alternateLogLineFormatter(userID string, alternates ma
 			continue
 		}
 		// Check if any are banned, or currently suspended by the guild
-		s := fmt.Sprintf("<@%s> (%s)", a.discordID, a.username)
+		s := fmt.Sprintf("<@%s> (%s)", a.discordID, EscapeDiscordMarkdown(a.username))
 		addons := make([]string, 0, 2)
 
 		if len(addons) > 0 {
@@ -416,7 +416,7 @@ func (h *EventDispatcher) alternateLogLineFormatter(userID string, alternates ma
 	if main == nil {
 		return ""
 	}
-	content := fmt.Sprintf("<@%s> (%s) detected as a likely alternate of: %s", main.discordID, main.username, strings.Join(firstDegreeStrs, ", "))
+	content := fmt.Sprintf("<@%s> (%s) detected as a likely alternate of: %s", main.discordID, EscapeDiscordMarkdown(main.username), strings.Join(firstDegreeStrs, ", "))
 
 	if len(secondDegreeStrs) > 0 {
 		content += fmt.Sprintf("\nSecond degree (possible) alternates: %s\n", strings.Join(secondDegreeStrs, ", "))
@@ -429,7 +429,7 @@ func AuditLogSendGuild(dg *discordgo.Session, gg *GuildGroup, message string) (*
 	if message == "" {
 		return nil, nil
 	}
-	content := fmt.Sprintf("[`%s/%s`] %s", gg.Name(), gg.GuildID, message)
+	content := fmt.Sprintf("[`%s/%s`] %s", EscapeDiscordMarkdown(gg.Name()), gg.GuildID, message)
 	if err := AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, content); err != nil {
 		return nil, fmt.Errorf("failed to send service audit message: %w", err)
 	}
@@ -473,7 +473,7 @@ func ScheduleDisabledAccountKick(ctx context.Context, nk runtime.NakamaModule, l
 		} else {
 			for _, a := range accounts {
 				accountMap[a.User.Id] = a
-				altNames = append(altNames, fmt.Sprintf("<@%s> (%s)", a.CustomId, a.User.Username))
+				altNames = append(altNames, fmt.Sprintf("<@%s> (%s)", a.CustomId, EscapeDiscordMarkdown(a.User.Username)))
 			}
 		}
 
@@ -486,7 +486,7 @@ func ScheduleDisabledAccountKick(ctx context.Context, nk runtime.NakamaModule, l
 		altNames = slices.Compact(altNames)
 
 		// Send audit log message
-		content := fmt.Sprintf("<@%s> (%s) has disabled alternates, disconnecting session(s) in %d seconds.\n%s", accountMap[userID].CustomId, accountMap[userID].User.Username, int(delay.Seconds()), strings.Join(altNames, ", "))
+		content := fmt.Sprintf("<@%s> (%s) has disabled alternates, disconnecting session(s) in %d seconds.\n%s", accountMap[userID].CustomId, EscapeDiscordMarkdown(accountMap[userID].User.Username), int(delay.Seconds()), strings.Join(altNames, ", "))
 		AuditLogSendGuild(dg, guildGroup, content)
 
 		logger.WithField("delay", delay).Info("kicking (with delay) user %s has disabled alternates", userID)
@@ -549,7 +549,7 @@ func ScheduleDisabledAccountKick(ctx context.Context, nk runtime.NakamaModule, l
 		}
 
 		// Send audit log message
-		AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, fmt.Sprintf("Disconnected user %s (%s) from %d sessions:\n%s", userID, accountMap[userID].User.Username, len(matchLabels), strings.Join(actions, "\n")))
+		AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, fmt.Sprintf("Disconnected user %s (%s) from %d sessions:\n%s", userID, EscapeDiscordMarkdown(accountMap[userID].User.Username), len(matchLabels), strings.Join(actions, "\n")))
 
 	}()
 }

@@ -195,7 +195,7 @@ func GetDiscordUserInfo(ctx context.Context, accessToken string) (*discordgo.Use
 
 // CheckDiscordSession checks token validity and refreshes if needed, logs out if revoked.
 func CheckDiscordSession(ctx context.Context, nk runtime.NakamaModule, userID string, conf *oauth2.Config) (*oauth2.Token, error) {
-	query := fmt.Sprintf(`+value.user_id:%s +value.expiry<="%s"`, userID, time.Now().Format("2006-01-02T15:04:05Z"))
+	query := fmt.Sprintf(`+value.user_id:%s +value.expiry<="%s"`, escapeIndexValue(userID), time.Now().Format("2006-01-02T15:04:05Z"))
 
 	result, _, err := nk.StorageIndexList(ctx, uuid.Nil.String(), StorageIndexDiscordToken, query, 1, nil, "")
 	if err != nil {

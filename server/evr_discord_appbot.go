@@ -4,10 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/binary"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"net"
 	"regexp"
 	goruntime "runtime"
@@ -46,11 +47,11 @@ const (
 // submit at the given component row and column index. Returns empty string if
 // indices are out of bounds or the component is not a TextInput.
 func modalTextInputValue(data discordgo.ModalSubmitInteractionData, row, col int) string {
-	if row >= len(data.Components) {
+	if row < 0 || row >= len(data.Components) {
 		return ""
 	}
 	ar, ok := data.Components[row].(*discordgo.ActionsRow)
-	if !ok || col >= len(ar.Components) {
+	if !ok || col < 0 || col >= len(ar.Components) {
 		return ""
 	}
 	ti, ok := ar.Components[col].(*discordgo.TextInput)
@@ -2009,7 +2010,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// Send a message to the channel
 				channel := ServiceSettings().VRMLEntitlementNotifyChannelID
 				if channel != "" {
-					_, err = s.ChannelMessageSend(channel, fmt.Sprintf("%s assigned VRML cosmetics `%s` to user `%s`", user.Mention(), badgeCodestr, target.Username))
+					_, err = s.ChannelMessageSend(channel, fmt.Sprintf("%s assigned VRML cosmetics `%s` to user `%s`", user.Mention(), EscapeDiscordMarkdown(badgeCodestr), EscapeDiscordMarkdown(target.Username)))
 					if err != nil {
 						logger.WithFields(map[string]interface{}{
 							"error": err,
@@ -2077,7 +2078,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if err := LinkVRMLAccount(ctx, db, nk, targetUserID, vrmlPlayer.User.UserID); err != nil {
 					if err, ok := err.(*AccountAlreadyLinkedError); ok {
 						ownerID := d.cache.UserIDToDiscordID(err.OwnerUserID)
-						return fmt.Errorf("VRML player [%s](%s) is already linked to <@%s>", vrmlUser.UserName, playerURL, ownerID)
+						return fmt.Errorf("VRML player [%s](%s) is already linked to <@%s>", EscapeDiscordMarkdown(vrmlUser.UserName), playerURL, ownerID)
 					}
 				}
 
@@ -2096,7 +2097,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
 						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: fmt.Sprintf("Linked VRML player [%s](%s) to discord user %s", vrmlUser.UserName, playerURL, target.Mention()),
+						Content: fmt.Sprintf("Linked VRML player [%s](%s) to discord user %s", EscapeDiscordMarkdown(vrmlUser.UserName), playerURL, target.Mention()),
 					},
 				}); err != nil {
 					return fmt.Errorf("failed to send interaction response: %w", err)
@@ -2105,7 +2106,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// Send a message to the channel
 				channel := ServiceSettings().VRMLEntitlementNotifyChannelID
 				if channel != "" {
-					content := fmt.Sprintf("%s manually linked %s to VRML player [%s](%s)", user.Mention(), target.Mention(), vrmlUser.UserName, playerURL)
+					content := fmt.Sprintf("%s manually linked %s to VRML player [%s](%s)", user.Mention(), target.Mention(), EscapeDiscordMarkdown(vrmlUser.UserName), playerURL)
 					if forceLink {
 						content += " (forced)"
 					}
@@ -2773,12 +2774,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			account, err := nk.AccountGetId(ctx, targetUserID)
 			if err != nil {
-				return editInteractionResponse(s, i, fmt.Sprintf("Failed to get account: %w", err))
+				return editInteractionResponse(s, i, fmt.Sprintf("Failed to get account: %v", err))
 			}
 
 			config := &EarlyQuitPlayerState{}
 			if err := StorableRead(ctx, nk, targetUserID, config, true); err != nil {
-				return editInteractionResponse(s, i, fmt.Sprintf("Failed to load early quit config: %w", err))
+				return editInteractionResponse(s, i, fmt.Sprintf("Failed to load early quit config: %v", err))
 			}
 
 			var lockoutDuration time.Duration
@@ -2791,7 +2792,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			config.PenaltyLevel = int32(penaltyLevel)
 
 			if err := StorableWrite(ctx, nk, targetUserID, config); err != nil {
-				return editInteractionResponse(s, i, fmt.Sprintf("Failed to save early quit config: %w", err))
+				return editInteractionResponse(s, i, fmt.Sprintf("Failed to save early quit config: %v", err))
 			}
 
 			if trigger := globalEarlyQuitMessageTrigger.Load(); trigger != nil {
@@ -2834,7 +2835,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			}
 
-			username := account.User.Username
+			username := EscapeDiscordMarkdown(account.User.Username)
 			if penaltyLevel == 0 {
 				_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> cleared lockout for player `%s` (%s)", user.ID, username, targetUserID), false)
 				return editInteractionResponse(s, i, fmt.Sprintf("Lockout cleared for %s.", username))
@@ -4164,21 +4165,35 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 	return nil
 }
 
-var discordMarkdownEscapeReplacer = strings.NewReplacer(
-	`\`, `\\`,
-	"`", "\\`",
-	"~", "\\~",
-	"|", "\\|",
-	"**", "\\**",
-	"~~", "\\~~",
-	"@", "@\u200B",
-	"<", "<\u200B",
-	">", ">\u200B",
-	"_", "\\_",
-)
-
+// EscapeDiscordMarkdown escapes all Discord markdown special characters in s
+// so the string renders as plain text in message content.
+// Characters escaped: \ ` * _ ~ | > [ ] ( ) @ # <
 func EscapeDiscordMarkdown(s string) string {
-	return discordMarkdownEscapeReplacer.Replace(s)
+	// Use a builder for single-pass, per-character escaping. This avoids
+	// ordering issues that arise with strings.NewReplacer when both
+	// multi-char sequences (e.g. "**") and their constituent single chars
+	// ("*") appear in the replacement table.
+	var b strings.Builder
+	b.Grow(len(s) + len(s)/4) // slight over-allocation to reduce resizing
+	for _, r := range s {
+		switch r {
+		case '\\', '`', '*', '_', '~', '|', '>', '[', ']', '(', ')', '#':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		case '@':
+			// Zero-width space prevents accidental mentions.
+			b.WriteRune('@')
+			b.WriteRune('\u200B')
+		case '<':
+			// Zero-width space prevents Discord from parsing < as a
+			// mention/channel/emoji opener.
+			b.WriteRune('<')
+			b.WriteRune('\u200B')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID string, e *LoginHistoryEntry, ipInfo IPInfo) error {
@@ -4212,19 +4227,27 @@ func IPVerificationEmbed(entry *LoginHistoryEntry, ipInfo IPInfo) ([]*discordgo.
 
 	numCodes := 5
 
-	// Generate 3 more random numbers
+	// Generate decoy codes using crypto/rand (this is an IP verification challenge).
 	for len(codes) < numCodes {
-		s := fmt.Sprintf("%02d", rand.Intn(100))
+		n, err := rand.Int(rand.Reader, big.NewInt(100))
+		if err != nil {
+			panic("crypto/rand failed: " + err.Error())
+		}
+		s := fmt.Sprintf("%02d", n.Int64())
 		if slices.Contains(codes, s) {
 			continue
 		}
 		codes = append(codes, s)
 	}
 
-	// Shuffle the numbers
-	rand.Shuffle(len(codes), func(i, j int) {
-		codes[i], codes[j] = codes[j], codes[i]
-	})
+	// Shuffle the codes using Fisher-Yates with crypto/rand.
+	for i := len(codes) - 1; i > 0; i-- {
+		j, err := rand.Int(rand.Reader, big.NewInt(int64(i+1)))
+		if err != nil {
+			panic("crypto/rand failed: " + err.Error())
+		}
+		codes[i], codes[j.Int64()] = codes[j.Int64()], codes[i]
+	}
 
 	options := make([]discordgo.SelectMenuOption, 0, len(codes))
 
@@ -4373,7 +4396,7 @@ func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, mes
 		message = d.cache.ReplaceMentions(message)
 	}
 
-	if err := d.LogServiceAuditMessage(fmt.Sprintf("[`%s/%s`] %s", gg.Name(), gg.GuildID, message)); err != nil {
+	if err := d.LogServiceAuditMessage(fmt.Sprintf("[`%s/%s`] %s", EscapeDiscordMarkdown(gg.Name()), gg.GuildID, message)); err != nil {
 		return nil, err
 	}
 

@@ -551,7 +551,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 				logger.Warn("Failed to get guild member", zap.Error(err))
 			} else if member != nil {
 				if displayName != InGameName(member) {
-					AuditLogSendGuild(p.discordCache.dg, gg, fmt.Sprintf("Setting display name for `%s` to match in-game name: `%s`", member.User.Username, displayName))
+					AuditLogSendGuild(p.discordCache.dg, gg, fmt.Sprintf("Setting display name for `%s` to match in-game name: `%s`", EscapeDiscordMarkdown(member.User.Username), EscapeDiscordMarkdown(displayName)))
 					// Force the display name to match the in-game name
 					if err := p.discordCache.dg.GuildMemberNickname(gg.GuildID, member.User.ID, displayName); err != nil {
 						logger.Warn("Failed to set display name", zap.Error(err))

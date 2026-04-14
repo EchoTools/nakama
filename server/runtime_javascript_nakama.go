@@ -3784,7 +3784,7 @@ func (n *RuntimeJavascriptNakamaModule) notificationSend(r *goja.Runtime) func(g
 		}
 
 		if err := NotificationSend(n.ctx, n.logger, n.db, n.tracker, n.router, notifications); err != nil {
-			panic(fmt.Sprintf("failed to send notifications: %w", err))
+			panic(fmt.Sprintf("failed to send notifications: %v", err))
 		}
 
 		return goja.Undefined()
@@ -4022,7 +4022,7 @@ func (n *RuntimeJavascriptNakamaModule) notificationSendAll(r *goja.Runtime) fun
 		}
 
 		if err := NotificationSendAll(n.ctx, n.logger, n.db, n.tracker, n.router, not); err != nil {
-			panic(fmt.Sprintf("failed to send notification: %w", err))
+			panic(fmt.Sprintf("failed to send notification: %v", err))
 		}
 
 		return goja.Undefined()
@@ -5485,7 +5485,7 @@ func (n *RuntimeJavascriptNakamaModule) leaderboardCreate(r *goja.Runtime) func(
 			}
 			metadataBytes, err := json.Marshal(metadataMap)
 			if err != nil {
-				panic(r.NewTypeError(fmt.Sprintf("error encoding metadata: %w", err)))
+				panic(r.NewTypeError(fmt.Sprintf("error encoding metadata: %v", err)))
 			}
 			metadata = string(metadataBytes)
 		}
@@ -8575,7 +8575,7 @@ func (n *RuntimeJavascriptNakamaModule) channelMessageSend(r *goja.Runtime) func
 			}
 			contentBytes, err := json.Marshal(content)
 			if err != nil {
-				panic(r.NewTypeError(fmt.Sprintf("error encoding content: %w", err)))
+				panic(r.NewTypeError(fmt.Sprintf("error encoding content: %v", err)))
 			}
 			if len(contentBytes) == 0 || contentBytes[0] != byteBracket {
 				panic(r.NewTypeError("expects message content to be a valid JSON object"))
@@ -8653,7 +8653,7 @@ func (n *RuntimeJavascriptNakamaModule) channelMessageUpdate(r *goja.Runtime) fu
 			}
 			contentBytes, err := json.Marshal(content)
 			if err != nil {
-				panic(r.NewTypeError(fmt.Sprintf("error encoding content: %w", err)))
+				panic(r.NewTypeError(fmt.Sprintf("error encoding content: %v", err)))
 			}
 			if len(contentBytes) == 0 || contentBytes[0] != byteBracket {
 				panic(r.NewTypeError("expects message content to be a valid JSON object"))

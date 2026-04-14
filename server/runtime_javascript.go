@@ -2166,7 +2166,7 @@ func (rp *RuntimeProviderJS) Shutdown(ctx context.Context) {
 	r.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		rp.logger.Error(fmt.Sprintf("Error running runtime Shutdown hook: %w", err))
+		rp.logger.Error(fmt.Sprintf("Error running runtime Shutdown hook: %v", err))
 		return
 	}
 }

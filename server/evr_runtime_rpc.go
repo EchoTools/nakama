@@ -593,7 +593,7 @@ func DiscordSignInRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 	responsejson, err := json.Marshal(response)
 	if err != nil {
-		return "", runtime.NewError(fmt.Sprintf("error marshalling LoginSuccess response: %w", err), StatusInternalError)
+		return "", runtime.NewError(fmt.Sprintf("error marshalling LoginSuccess response: %v", err), StatusInternalError)
 	}
 
 	return string(responsejson), nil
@@ -1142,7 +1142,7 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 
 	request := AuthenticatePasswordRequest{}
 	if err := json.Unmarshal([]byte(payload), &request); err != nil {
-		return "", runtime.NewError(fmt.Sprintf("Failed to unmarshal request: %w", err), StatusInvalidArgument)
+		return "", runtime.NewError(fmt.Sprintf("Failed to unmarshal request: %v", err), StatusInvalidArgument)
 	}
 
 	var err error
@@ -2338,9 +2338,9 @@ func AdminPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 
 	// Log the change for audit trail
 	auditMsg := fmt.Sprintf("Admin player rename: <@%s> renamed user <@%s> from `%s` to `%s`",
-		callerDiscordID, targetDiscordID, oldDisplayName, sanitizedName)
+		callerDiscordID, targetDiscordID, EscapeDiscordMarkdown(oldDisplayName), EscapeDiscordMarkdown(sanitizedName))
 	if request.ModeratorNotes != "" {
-		auditMsg += fmt.Sprintf(" | Notes: %s", request.ModeratorNotes)
+		auditMsg += fmt.Sprintf(" | Notes: %s", EscapeDiscordMarkdown(request.ModeratorNotes))
 	}
 
 	// Log to Discord audit channel

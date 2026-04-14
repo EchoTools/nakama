@@ -57,7 +57,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 				displayName = member.User.Username
 			}
 
-			content := fmt.Sprintf("<@%s> (%s) used %s in `%s`", member.User.ID, displayName, signature, guild.Name)
+			content := fmt.Sprintf("<@%s> (%s) used %s in `%s`", member.User.ID, EscapeDiscordMarkdown(displayName), signature, EscapeDiscordMarkdown(guild.Name))
 
 			go func() {
 				if _, err := d.dg.ChannelMessageSendComplex(cID, &discordgo.MessageSend{
@@ -617,7 +617,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	// Get a list of the groups that this user has allocate access to
 	guildGroups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userID)
 	if err != nil {
-		return nil, 0, status.Errorf(codes.Internal, "failed to get guild group memberships: %w", err)
+		return nil, 0, status.Errorf(codes.Internal, "failed to get guild group memberships: %v", err)
 	}
 
 	gg, ok := guildGroups[groupID]
@@ -639,7 +639,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	} else {
 		isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
 		if err != nil {
-			return nil, 0, status.Errorf(codes.Internal, "error checking global operator status: %w", err)
+			return nil, 0, status.Errorf(codes.Internal, "error checking global operator status: %v", err)
 		}
 	}
 
@@ -664,7 +664,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	// Load the latency history for this user
 	latencyHistory := NewLatencyHistory()
 	if err := StorableRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
-		return nil, 0, status.Errorf(codes.Internal, "failed to read latency history: %w", err)
+		return nil, 0, status.Errorf(codes.Internal, "failed to read latency history: %v", err)
 	}
 
 	latestRTTs := latencyHistory.LatestRTTs()
@@ -706,7 +706,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 
 	guildGroups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userID)
 	if err != nil {
-		return nil, 0, status.Errorf(codes.Internal, "failed to get guild groups: %w", err)
+		return nil, 0, status.Errorf(codes.Internal, "failed to get guild groups: %v", err)
 	}
 
 	group, ok := guildGroups[groupID]
@@ -787,7 +787,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 
 	latencyHistory := NewLatencyHistory()
 	if err := StorableRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
-		return nil, 0, status.Errorf(codes.Internal, "failed to read latency history: %w", err)
+		return nil, 0, status.Errorf(codes.Internal, "failed to read latency history: %v", err)
 	}
 	extIPs := latencyHistory.AverageRTTs(true)
 
@@ -1277,7 +1277,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				continue
 			}
 
-			actions = append(actions, fmt.Sprintf("kicked from [%s](https://echo.taxi/spark://c/%s) session. (%s) [%s]", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), userNotice, strings.Join(permissions, ", ")))
+			actions = append(actions, fmt.Sprintf("kicked from [%s](https://echo.taxi/spark://c/%s) session. (%s) [%s]", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), EscapeDiscordMarkdown(userNotice), strings.Join(permissions, ", ")))
 
 			cnt++
 
@@ -1290,7 +1290,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				if count, err := DisconnectUserID(ctx, d.nk, targetUserID, true, true, false); err != nil {
 					logger.Warn("Failed to disconnect user", zap.Error(err))
 				} else if count > 0 {
-					_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s (%s) from login/match service (%d sessions).", caller.Mention(), target.Mention(), target.Username, count), false)
+					_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s (%s) from login/match service (%d sessions).", caller.Mention(), target.Mention(), EscapeDiscordMarkdown(target.Username), count), false)
 				}
 			}()
 		}
@@ -1300,7 +1300,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		}
 	}
 
-	_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s's `kick-player` actions summary for %s (%s):\n %s", caller.Mention(), target.Mention(), target.Username, strings.Join(actions, ";\n ")), false)
+	_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s's `kick-player` actions summary for %s (%s):\n %s", caller.Mention(), target.Mention(), EscapeDiscordMarkdown(target.Username), strings.Join(actions, ";\n ")), false)
 
 	if i != nil && !sentEmbedResponse {
 		return respondContent(fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(actions, "\n")))

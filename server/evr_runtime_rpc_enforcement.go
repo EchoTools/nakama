@@ -244,7 +244,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		"enforcement/kick",
 		groupID,
 		userID,
-		fmt.Sprintf("target_user_id=%s sessions_kicked=%d user_notice=%q actions=%s", targetUserID, cnt, request.UserNotice, strings.Join(actions, "; ")),
+		fmt.Sprintf("target_user_id=%s sessions_kicked=%d user_notice=%q actions=%s", targetUserID, cnt, EscapeDiscordMarkdown(request.UserNotice), strings.Join(actions, "; ")),
 	)
 
 	return string(responseData), nil
@@ -294,7 +294,7 @@ func EnforcementJournalListRPC(ctx context.Context, logger runtime.Logger, db *s
 	}
 
 	// List all journals containing this group_id
-	query := fmt.Sprintf("+value.guild_ids:%s", request.GroupID)
+	query := fmt.Sprintf("+value.guild_ids:%s", Query.EscapeIndexValue(request.GroupID))
 
 	journals := make([]GuildEnforcementJournal, 0)
 	cursor := ""
@@ -532,7 +532,7 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 		"enforcement/record/edit",
 		request.GroupID,
 		userID,
-		fmt.Sprintf("target_user_id=%s record_id=%s new_expiry=%d new_notice=%q", request.TargetUserID, request.RecordID, newExpiry.Unix(), newUserNotice),
+		fmt.Sprintf("target_user_id=%s record_id=%s new_expiry=%d new_notice=%q", request.TargetUserID, request.RecordID, newExpiry.Unix(), EscapeDiscordMarkdown(newUserNotice)),
 	)
 
 	// Redact sensitive fields in response when caller shouldn't see notes

@@ -306,3 +306,71 @@ func TestRegionStatusCommand_DeprecationNotice(t *testing.T) {
 		t.Error("expected reference validation failed")
 	}
 }
+
+// TestModalTextInputValue_OutOfBounds verifies that modalTextInputValue
+// returns empty string for all out-of-range indices without panicking.
+func TestModalTextInputValue_OutOfBounds(t *testing.T) {
+	// Build a minimal ModalSubmitInteractionData with one row, one text input.
+	data := discordgo.ModalSubmitInteractionData{
+		Components: []discordgo.MessageComponent{
+			&discordgo.ActionsRow{
+				Components: []discordgo.MessageComponent{
+					&discordgo.TextInput{Value: "hello"},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name string
+		row  int
+		col  int
+		want string
+	}{
+		{"valid_0_0", 0, 0, "hello"},
+		{"row_negative", -1, 0, ""},
+		{"row_too_large", 1, 0, ""},
+		{"row_way_too_large", 999, 0, ""},
+		{"col_negative", 0, -1, ""},
+		{"col_too_large", 0, 1, ""},
+		{"both_too_large", 5, 5, ""},
+		{"empty_data_row_0", 0, 0, ""}, // will be overridden below
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.name == "empty_data_row_0" {
+				// Test with completely empty components.
+				emptyData := discordgo.ModalSubmitInteractionData{}
+				got := modalTextInputValue(emptyData, 0, 0)
+				if got != "" {
+					t.Errorf("modalTextInputValue(empty, 0, 0) = %q, want %q", got, "")
+				}
+				return
+			}
+			got := modalTextInputValue(data, tt.row, tt.col)
+			if got != tt.want {
+				t.Errorf("modalTextInputValue(data, %d, %d) = %q, want %q", tt.row, tt.col, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestModalTextInputValue_NonTextInputComponent verifies that when the
+// component at the given position is not a *TextInput, empty string is returned.
+func TestModalTextInputValue_NonTextInputComponent(t *testing.T) {
+	data := discordgo.ModalSubmitInteractionData{
+		Components: []discordgo.MessageComponent{
+			&discordgo.ActionsRow{
+				Components: []discordgo.MessageComponent{
+					// A Button instead of a TextInput
+					&discordgo.Button{Label: "click me"},
+				},
+			},
+		},
+	}
+	got := modalTextInputValue(data, 0, 0)
+	if got != "" {
+		t.Errorf("modalTextInputValue with non-TextInput = %q, want empty string", got)
+	}
+}

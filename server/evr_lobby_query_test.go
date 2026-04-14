@@ -192,3 +192,93 @@ func TestQuery_JoinAsRegex(t *testing.T) {
 		})
 	}
 }
+
+// TestQuoteStringValue_SpecialChars verifies that QuoteStringValue properly
+// escapes all special characters that could be interpreted as query syntax.
+func TestQuoteStringValue_SpecialChars(t *testing.T) {
+	tests := []struct {
+		name  string
+		input any
+		check func(t *testing.T, result string)
+	}{
+		{
+			name:  "plain_string",
+			input: "hello",
+			check: func(t *testing.T, result string) {
+				if result != "hello" {
+					t.Errorf("expected 'hello', got %q", result)
+				}
+			},
+		},
+		{
+			name:  "parentheses_escaped",
+			input: "foo(bar)",
+			check: func(t *testing.T, result string) {
+				if !strings.Contains(result, "\\(") || !strings.Contains(result, "\\)") {
+					t.Errorf("expected escaped parentheses, got %q", result)
+				}
+			},
+		},
+		{
+			name:  "colons_escaped",
+			input: "key:value",
+			check: func(t *testing.T, result string) {
+				if !strings.Contains(result, "\\:") {
+					t.Errorf("expected escaped colon, got %q", result)
+				}
+			},
+		},
+		{
+			name:  "brackets_escaped",
+			input: "arr[0]",
+			check: func(t *testing.T, result string) {
+				if !strings.Contains(result, "\\[") || !strings.Contains(result, "\\]") {
+					t.Errorf("expected escaped brackets, got %q", result)
+				}
+			},
+		},
+		{
+			name:  "integer_input",
+			input: 42,
+			check: func(t *testing.T, result string) {
+				if result != "42" {
+					t.Errorf("expected '42', got %q", result)
+				}
+			},
+		},
+		{
+			name:  "bool_true",
+			input: true,
+			check: func(t *testing.T, result string) {
+				if result != "T" {
+					t.Errorf("expected 'T', got %q", result)
+				}
+			},
+		},
+		{
+			name:  "bool_false",
+			input: false,
+			check: func(t *testing.T, result string) {
+				if result != "F" {
+					t.Errorf("expected 'F', got %q", result)
+				}
+			},
+		},
+		{
+			name:  "nil_input",
+			input: nil,
+			check: func(t *testing.T, result string) {
+				if result != "nil" {
+					t.Errorf("expected 'nil', got %q", result)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := Query.QuoteStringValue(tt.input)
+			tt.check(t, result)
+		})
+	}
+}

@@ -91,7 +91,7 @@ func (s *VRMLPlayerSummary) Entitlements() []*VRMLEntitlement {
 
 func GetVRMLAccountOwner(ctx context.Context, nk runtime.NakamaModule, vrmlUserID string) (string, error) {
 	// Check if the account is already owned by another user
-	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, StorageIndexVRMLUserID, fmt.Sprintf("+value.userID:%s", vrmlUserID), 100, nil, "")
+	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, StorageIndexVRMLUserID, fmt.Sprintf("+value.userID:%s", Query.EscapeIndexValue(vrmlUserID)), 100, nil, "")
 	if err != nil {
 		return "", fmt.Errorf("error checking ownership: %w", err)
 	}

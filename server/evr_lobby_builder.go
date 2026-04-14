@@ -656,6 +656,7 @@ func (b *LobbyBuilder) selectNextMap(mode evr.Symbol) evr.Symbol {
 
 	if len(queue) <= 1 {
 		// Fill the queue with the available levels and shuffle.
+		// math/rand is fine: level-queue ordering is non-security game logic.
 		queue = append(queue, evr.LevelsByMode[mode]...)
 
 		rand.Shuffle(len(queue), func(i, j int) {

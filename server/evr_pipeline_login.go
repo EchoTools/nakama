@@ -130,7 +130,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	logger = logger.With(zap.String("xpid", request.XPID.String()))
 
 	// Process the login request and populate the session parameters.
-	if err := p.processLoginRequest(ctx, logger, session, &params); err != nil {
+	if err := p.processLoginRequest(ctx, logger, session, params); err != nil {
 
 		discordID := ""
 		if userID, err := GetUserIDByDeviceID(ctx, p.db, request.XPID.String()); err == nil {
@@ -144,7 +144,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		return session.SendEvrUnrequire(evr.NewLoginFailure(request.XPID, errMessage))
 	}
 
-	StoreParams(ctx, &params)
+	StoreParams(ctx, params)
 
 	tags := params.MetricsTags()
 	tags["cpu_model"] = strings.TrimSpace(params.loginPayload.SystemInfo.CPUModel)
@@ -1047,7 +1047,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 			}
 
 			// Log the audit message
-			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("User <@%s> (%s) has accepted the community values.", params.DiscordID(), params.profile.Username()), false); err != nil {
+			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("User <@%s> (%s) has accepted the community values.", params.DiscordID(), EscapeDiscordMarkdown(params.profile.Username())), false); err != nil {
 				logger.Warn("Failed to log audit message", zap.Error(err))
 			}
 		}
@@ -1101,7 +1101,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	}
 
 	params.profile = profile
-	StoreParams(ctx, &params)
+	StoreParams(ctx, params)
 	return nil
 }
 
@@ -1143,7 +1143,7 @@ func findNewlyAddedPlayers(oldList, newList []evr.EvrId) []evr.EvrId {
 func (p *EvrPipeline) trackSpamActions(
 	ctx context.Context,
 	logger *zap.Logger,
-	params SessionParameters,
+	params *SessionParameters,
 	groupID string,
 	operatorUserID string,
 	actionType SpamActionType,

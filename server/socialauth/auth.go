@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +14,23 @@ import (
 	"github.com/heroiclabs/nakama/v3/internal/intents"
 	"google.golang.org/grpc/codes"
 )
+
+// escapeIndexValue escapes Bluge query-syntax special characters so a value
+// can be safely interpolated into a StorageIndexList query via fmt.Sprintf.
+// This is a local copy of the same logic in server.Query.EscapeIndexValue,
+// duplicated here to avoid a circular import from socialauth -> server.
+var indexValueReplacer = func() *strings.Replacer {
+	const special = "`~!@#$%^&*()-_=+[{]}\\|;:'\",.<>/?"
+	pairs := make([]string, 0, len(special)*2)
+	for _, ch := range special {
+		pairs = append(pairs, string(ch), "\\"+string(ch))
+	}
+	return strings.NewReplacer(pairs...)
+}()
+
+func escapeIndexValue(s string) string {
+	return indexValueReplacer.Replace(s)
+}
 
 const (
 	jwtTokenLifetimeDuration = 24 * time.Hour * 14
