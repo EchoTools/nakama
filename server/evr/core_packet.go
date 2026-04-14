@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	MaxPacketLength  = 256 * 1024 // 256KB
-	MaxMessageLength = 0x8000     // 32KB
+	MaxPacketLength      = 256 * 1024 // 256KB
+	MaxMessageLength     = 0x8000     // 32KB
+	MaxMessagesPerPacket = 32         // Upper bound on concatenated messages in a single packet
 )
 
 var (
@@ -316,6 +317,9 @@ func ParsePacket(data []byte) ([]Message, error) {
 
 	// Split the packet into individual messages.
 	chunks := bytes.Split(data, MessageMarker)
+	if len(chunks) > MaxMessagesPerPacket {
+		return nil, fmt.Errorf("%w: too many messages in packet (%d, max %d)", ErrInvalidPacket, len(chunks), MaxMessagesPerPacket)
+	}
 
 	messages := make([]Message, 0, len(chunks))
 
@@ -338,7 +342,12 @@ func ParsePacket(data []byte) ([]Message, error) {
 			continue
 		}
 
-		l := int(dUint64(buf.Next(8)))
+		rawLen := dUint64(buf.Next(8))
+		if rawLen > uint64(MaxMessageLength) {
+			err = errors.Join(err, ErrInvalidPacket, fmt.Errorf("message too large (%d bytes, max %d)", rawLen, MaxMessageLength))
+			break
+		}
+		l := int(rawLen)
 		// Enforce per-message size limit before allocating the message struct.
 		if l > MaxMessageLength {
 			err = errors.Join(err, ErrInvalidPacket, fmt.Errorf("message too large (%d bytes, max %d)", l, MaxMessageLength))

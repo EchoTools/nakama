@@ -1579,6 +1579,11 @@ type DisplayNameMatchItem struct {
 }
 
 func AccountSearchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Require an authenticated caller
+	if callerID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string); callerID == "" {
+		return "", runtime.NewError("unauthorized", 7)
+	}
+
 	request := AccountSearchRequest{}
 	if payload != "" {
 		if err := json.Unmarshal([]byte(payload), &request); err != nil {
@@ -1984,6 +1989,10 @@ type UserServerProfileRPCRequest struct {
 }
 
 func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Require an authenticated caller
+	if callerID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string); callerID == "" {
+		return "", runtime.NewError("unauthorized", 7)
+	}
 
 	request := &UserServerProfileRPCRequest{}
 	if err := parseRequest(ctx, payload, request); err != nil {
