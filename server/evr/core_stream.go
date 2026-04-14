@@ -115,7 +115,7 @@ func (s *EasyStream) StreamByte(value *byte) error {
 }
 
 const MaxStreamBytesSize = MaxMessageLength  // byte streams can't exceed a single message
-const MaxStreamStringLength = 4 * 1024      // 4KB max for individual strings
+const MaxStreamStringLength = 32 * 1024     // 32KB max for individual strings
 const MaxJSONDecompressedSize = 512 * 1024  // 512KB max decompressed JSON (covers large profiles)
 
 // StreamBytes reads or writes bytes to the stream based on the mode of the EasyStream.

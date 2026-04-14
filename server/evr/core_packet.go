@@ -12,7 +12,7 @@ import (
 
 const (
 	MaxPacketLength      = 256 * 1024 // 256KB
-	MaxMessageLength     = 0x8000     // 32KB
+	MaxMessageLength     = 0x20000    // 128KB
 	MaxMessagesPerPacket = 32         // Upper bound on concatenated messages in a single packet
 )
 
