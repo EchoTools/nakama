@@ -737,9 +737,9 @@ func (d *DiscordAppBot) handleModalSubmit(logger runtime.Logger, i *discordgo.In
 			return fmt.Errorf("failed to get user: %w", err)
 		}
 
-		duration := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
-		userNotice := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
-		notes := data.Components[2].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		duration := modalTextInputValue(data, 0, 0)
+		userNotice := modalTextInputValue(data, 1, 0)
+		notes := modalTextInputValue(data, 2, 0)
 
 		return d.kickPlayer(logger, i, caller, target, duration, userNotice, notes, false, false)
 
@@ -847,12 +847,12 @@ func (d *DiscordAppBot) handleSetIGNModalSubmit(_ context.Context, logger runtim
 	}
 
 	// Get the submitted display name and lock status
-	displayName := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+	displayName := modalTextInputValue(*data, 0, 0)
 
 	// Some modals (e.g. IGP flow) may only provide a display name field
 	var isLocked bool
 	if len(data.Components) >= 2 {
-		lockInput := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		lockInput := modalTextInputValue(*data, 1, 0)
 		lockInput = strings.ToLower(strings.TrimSpace(lockInput))
 		isLocked = lockInput == "true" || lockInput == "yes" || lockInput == "1"
 	}

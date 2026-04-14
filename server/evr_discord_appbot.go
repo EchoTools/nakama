@@ -42,6 +42,24 @@ const (
 	MaximumOutfitNameLength = 72  // Maximum length of an outfit name
 )
 
+// modalTextInputValue safely extracts a text input value from a Discord modal
+// submit at the given component row and column index. Returns empty string if
+// indices are out of bounds or the component is not a TextInput.
+func modalTextInputValue(data discordgo.ModalSubmitInteractionData, row, col int) string {
+	if row >= len(data.Components) {
+		return ""
+	}
+	ar, ok := data.Components[row].(*discordgo.ActionsRow)
+	if !ok || col >= len(ar.Components) {
+		return ""
+	}
+	ti, ok := ar.Components[col].(*discordgo.TextInput)
+	if !ok {
+		return ""
+	}
+	return ti.Value
+}
+
 type DiscordAppBot struct {
 	sync.Mutex
 
