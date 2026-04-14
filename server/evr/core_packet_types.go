@@ -8,7 +8,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const MaxProtobufPayloadSize = 1024 * 1024 // 1MB max payload
+const MaxProtobufPayloadSize = MaxMessageLength // protobuf payload can't exceed a single message
 
 type NEVRProtobufJSONMessageV1 struct {
 	Payload []byte
