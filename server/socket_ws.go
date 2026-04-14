@@ -30,7 +30,10 @@ func NewSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry Sess
 	upgrader := &websocket.Upgrader{
 		ReadBufferSize:  config.GetSocket().ReadBufferSizeBytes,
 		WriteBufferSize: config.GetSocket().WriteBufferSizeBytes,
-		CheckOrigin:     func(r *http.Request) bool { return true },
+		// EVR game clients are native applications that don't send browser Origin
+		// headers, so origin validation would reject legitimate game connections.
+		// Authentication is enforced via JWT tokens validated in the handler below.
+		CheckOrigin: func(r *http.Request) bool { return true },
 	}
 
 	sessionIdGen := uuid.NewGenWithHWAF(func() (net.HardwareAddr, error) {

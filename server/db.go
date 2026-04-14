@@ -147,6 +147,7 @@ func DbConnect(ctx context.Context, logger *zap.Logger, config Config, create bo
 	// Periodically check database hostname for underlying address changes.
 	go func() {
 		ticker := time.NewTicker(time.Duration(config.GetDatabase().DnsScanIntervalSec) * time.Second)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():

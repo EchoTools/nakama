@@ -35,6 +35,9 @@ func RequireEnforcerOrOperator(
 	if err != nil {
 		return false, false, nil, fmt.Errorf("failed to load guild group: %w", err)
 	}
+	if gg == nil {
+		return false, false, nil, runtime.NewError("guild group not found", StatusNotFound)
+	}
 
 	isEnforcer = gg.IsEnforcer(userID)
 
@@ -78,6 +81,9 @@ func RequireEnforcerOperatorOrBot(
 	gg, err = GuildGroupLoad(ctx, nk, groupID)
 	if err != nil {
 		return false, false, false, nil, fmt.Errorf("failed to load guild group: %w", err)
+	}
+	if gg == nil {
+		return false, false, false, nil, runtime.NewError("guild group not found", StatusNotFound)
 	}
 
 	isEnforcer = gg.IsEnforcer(userID)

@@ -4,10 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/binary"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"net"
 	"regexp"
 	goruntime "runtime"
@@ -41,6 +42,24 @@ const (
 	MaximumOutfitCount      = 100 // Maximum number of saved outfits per user
 	MaximumOutfitNameLength = 72  // Maximum length of an outfit name
 )
+
+// modalTextInputValue safely extracts a text input value from a Discord modal
+// submit at the given component row and column index. Returns empty string if
+// indices are out of bounds or the component is not a TextInput.
+func modalTextInputValue(data discordgo.ModalSubmitInteractionData, row, col int) string {
+	if row < 0 || row >= len(data.Components) {
+		return ""
+	}
+	ar, ok := data.Components[row].(*discordgo.ActionsRow)
+	if !ok || col < 0 || col >= len(ar.Components) {
+		return ""
+	}
+	ti, ok := ar.Components[col].(*discordgo.TextInput)
+	if !ok {
+		return ""
+	}
+	return ti.Value
+}
 
 type DiscordAppBot struct {
 	sync.Mutex
@@ -129,7 +148,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		// Create a user for the bot based on it's discord profile
 		userID, _, _, err := nk.AuthenticateCustom(ctx, m.User.ID, s.State.User.Username, true)
 		if err != nil {
-			logger.Error("Error creating discordbot user: %s", err)
+			logger.WithField("error", err).Error("Error creating discordbot user")
 		}
 
 		// Update the global settings with the bots ID
@@ -137,7 +156,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		settings.DiscordBotUserID = userID
 		ServiceSettingsUpdate(&settings)
 		if err := ServiceSettingsSave(ctx, nk); err != nil {
-			logger.Error("Error saving global settings: %s", err)
+			logger.WithField("error", err).Error("Error saving global settings")
 		}
 
 		appbot.userID = userID
@@ -148,10 +167,10 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		}
 
 		if err := appbot.RegisterSlashCommands(); err != nil {
-			logger.Error("Failed to register slash commands: %w", err)
+			logger.WithField("error", err).Error("Failed to register slash commands")
 		}
 
-		logger.Info("Bot `%s` ready in %d guilds", displayName, len(dg.State.Guilds))
+		logger.WithFields(map[string]interface{}{"display_name": displayName, "guild_count": len(dg.State.Guilds)}).Info("Bot ready")
 	})
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.RateLimit) {
@@ -1991,7 +2010,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// Send a message to the channel
 				channel := ServiceSettings().VRMLEntitlementNotifyChannelID
 				if channel != "" {
-					_, err = s.ChannelMessageSend(channel, fmt.Sprintf("%s assigned VRML cosmetics `%s` to user `%s`", user.Mention(), badgeCodestr, target.Username))
+					_, err = s.ChannelMessageSend(channel, fmt.Sprintf("%s assigned VRML cosmetics `%s` to user `%s`", user.Mention(), EscapeDiscordMarkdown(badgeCodestr), EscapeDiscordMarkdown(target.Username)))
 					if err != nil {
 						logger.WithFields(map[string]interface{}{
 							"error": err,
@@ -2059,7 +2078,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if err := LinkVRMLAccount(ctx, db, nk, targetUserID, vrmlPlayer.User.UserID); err != nil {
 					if err, ok := err.(*AccountAlreadyLinkedError); ok {
 						ownerID := d.cache.UserIDToDiscordID(err.OwnerUserID)
-						return fmt.Errorf("VRML player [%s](%s) is already linked to <@%s>", vrmlUser.UserName, playerURL, ownerID)
+						return fmt.Errorf("VRML player [%s](%s) is already linked to <@%s>", EscapeDiscordMarkdown(vrmlUser.UserName), playerURL, ownerID)
 					}
 				}
 
@@ -2078,7 +2097,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
 						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: fmt.Sprintf("Linked VRML player [%s](%s) to discord user %s", vrmlUser.UserName, playerURL, target.Mention()),
+						Content: fmt.Sprintf("Linked VRML player [%s](%s) to discord user %s", EscapeDiscordMarkdown(vrmlUser.UserName), playerURL, target.Mention()),
 					},
 				}); err != nil {
 					return fmt.Errorf("failed to send interaction response: %w", err)
@@ -2087,7 +2106,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// Send a message to the channel
 				channel := ServiceSettings().VRMLEntitlementNotifyChannelID
 				if channel != "" {
-					content := fmt.Sprintf("%s manually linked %s to VRML player [%s](%s)", user.Mention(), target.Mention(), vrmlUser.UserName, playerURL)
+					content := fmt.Sprintf("%s manually linked %s to VRML player [%s](%s)", user.Mention(), target.Mention(), EscapeDiscordMarkdown(vrmlUser.UserName), playerURL)
 					if forceLink {
 						content += " (forced)"
 					}
@@ -2521,7 +2540,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			serverLocation := "Unknown"
 
-			serverLocation = label.GameServer.LocationRegionCode(true, true)
+			if label.GameServer != nil {
+				serverLocation = label.GameServer.LocationRegionCode(true, true)
+			}
 
 			// local the guild name
 			guild, err := s.Guild(i.GuildID)
@@ -2576,14 +2597,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			go func() {
+				ticker := time.NewTicker(15 * time.Second)
+				defer ticker.Stop()
 
 				// Monitor the match and update the interaction
 				for {
-					startCheckTimer := time.NewTicker(15 * time.Second)
-					updateTicker := time.NewTicker(30 * time.Second)
 					select {
-					case <-startCheckTimer.C:
-					case <-updateTicker.C:
+					case <-d.ctx.Done():
+						return
+					case <-ticker.C:
 					}
 
 					presences, err := d.nk.StreamUserList(StreamModeMatchAuthoritative, label.ID.UUID.String(), "", label.ID.Node, false, true)
@@ -2599,19 +2621,21 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 							Embeds: &responseContent.Data.Embeds,
 						}); err != nil {
 							logger.Error("Failed to update interaction", zap.Error(err))
-							return
 						}
+						return
 					}
 
 					// Update the list of playerListStr in the interaction response
 					var playerListStr strings.Builder
 					for _, p := range presences {
-						if p.GetSessionId() == label.GameServer.SessionID.String() {
+						if label.GameServer != nil && p.GetSessionId() == label.GameServer.SessionID.String() {
 							continue
 						}
 						playerListStr.WriteString(fmt.Sprintf("<@!%s>\n", d.cache.UserIDToDiscordID(p.GetUserId())))
 					}
-					responseContent.Data.Embeds[0].Fields[4].Value = playerListStr.String()
+					if len(responseContent.Data.Embeds) > 0 && len(responseContent.Data.Embeds[0].Fields) > 4 {
+						responseContent.Data.Embeds[0].Fields[4].Value = playerListStr.String()
+					}
 
 					if _, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 						Embeds: &responseContent.Data.Embeds,
@@ -2811,7 +2835,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			}
 
-			username := account.User.Username
+			username := EscapeDiscordMarkdown(account.User.Username)
 			if penaltyLevel == 0 {
 				_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> cleared lockout for player `%s` (%s)", user.ID, username, targetUserID), false)
 				return editInteractionResponse(s, i, fmt.Sprintf("Lockout cleared for %s.", username))
@@ -3288,6 +3312,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			case "group":
 
+				if len(options) == 0 || len(options[0].Options) == 0 {
+					return errors.New("missing required options")
+				}
 				options := options[0].Options
 				groupName := strings.ToLower(options[0].StringValue())
 
@@ -3503,7 +3530,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 				}
 			} else {
-				logger.Info("Unhandled command: %v", appCommandName)
+				logger.WithField("app_command_name", appCommandName).Info("Unhandled command")
 			}
 		case discordgo.InteractionMessageComponent:
 
@@ -3543,8 +3570,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				account, err := nk.AccountGetId(ctx, userID)
-				if err != nil {
+				if err != nil || account == nil {
 					logger.Error("Failed to get account", zap.Error(err))
+					return
 				}
 
 				devices := make([]string, 0, len(account.Devices))
@@ -3552,16 +3580,18 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					devices = append(devices, device.GetId())
 				}
 
-				if partial := data.Options[0].StringValue(); partial != "" {
-					// User is typing a custom device name
-					partial = strings.ToLower(partial)
-					filtered := make([]string, 0, len(devices))
-					for _, dev := range devices {
-						if strings.Contains(strings.ToLower(dev), partial) {
-							filtered = append(filtered, dev)
+				if len(data.Options) > 0 {
+					if partial := data.Options[0].StringValue(); partial != "" {
+						// User is typing a custom device name
+						partial = strings.ToLower(partial)
+						filtered := make([]string, 0, len(devices))
+						for _, dev := range devices {
+							if strings.Contains(strings.ToLower(dev), partial) {
+								filtered = append(filtered, dev)
+							}
 						}
+						devices = filtered
 					}
-					devices = filtered
 				}
 
 				choices := make([]*discordgo.ApplicationCommandOptionChoice, len(devices))
@@ -3779,7 +3809,21 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					logger.Error("Failed to get guild member", zap.Error(err))
 					return
 				}
-				code := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+				if len(data.Components) == 0 {
+					logger.Error("Modal submit has no components")
+					return
+				}
+				row, ok := data.Components[0].(*discordgo.ActionsRow)
+				if !ok || len(row.Components) == 0 {
+					logger.Error("Modal submit has no action row components")
+					return
+				}
+				input, ok := row.Components[0].(*discordgo.TextInput)
+				if !ok {
+					logger.Error("Modal submit component is not a text input")
+					return
+				}
+				code := input.Value
 				if err := d.linkHeadset(ctx, logger, member, code); err != nil {
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -3875,14 +3919,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				logger.WithField("custom_id", i.ModalSubmitData().CustomID).Info("Unhandled modal submit")
 			}
 		default:
-			logger.Info("Unhandled interaction type: %v", i.Type)
+			logger.WithField("type", i.Type).Info("Unhandled interaction type")
 		}
 	})
 
 	d.logger.Info("Registering slash commands.")
 	// Register global guild commands
 	d.updateSlashCommands(dg, d.logger, "")
-	d.logger.Info("%d Slash commands registered/updated in %d guilds.", len(mainSlashCommands), len(dg.State.Guilds))
+	d.logger.WithFields(map[string]interface{}{"command_count": len(mainSlashCommands), "guild_count": len(dg.State.Guilds)}).Info("Slash commands registered/updated")
 
 	return nil
 }
@@ -3902,7 +3946,7 @@ func (d *DiscordAppBot) updateSlashCommands(s *discordgo.Session, logger runtime
 
 	for _, command := range commands {
 		if _, ok := currentCommands[command.Name]; !ok {
-			logger.Debug("Deleting %s command: %s", guildID, command.Name)
+			logger.WithFields(map[string]interface{}{"guild_id": guildID, "name": command.Name}).Debug("Deleting command")
 			if err := s.ApplicationCommandDelete(s.State.Application.ID, guildID, command.ID); err != nil {
 				logger.WithField("err", err).Error("Failed to delete application command.")
 			}
@@ -4001,6 +4045,9 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 			continue
 		}
 
+		if state.GameServer == nil {
+			continue
+		}
 		for _, r := range state.GameServer.RegionCodes {
 			if regionStr == r || regionHash == r {
 				tracked = append(tracked, state)
@@ -4047,8 +4094,12 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 
 		}
 
+		serverIDStr := "unknown"
+		if state.GameServer != nil {
+			serverIDStr = strconv.FormatUint(state.GameServer.ServerID, 10)
+		}
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   strconv.FormatUint(state.GameServer.ServerID, 10),
+			Name:   serverIDStr,
 			Value:  status,
 			Inline: false,
 		})
@@ -4090,21 +4141,21 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 				case <-d.ctx.Done():
 					// Delete the message
 					if err := d.dg.ChannelMessageDelete(channelID, msg.ID); err != nil {
-						logger.Error("Failed to delete region status message: %s", err.Error())
+						logger.WithField("error", err.Error()).Error("Failed to delete region status message")
 
 					}
 					return
 				case <-timer.C:
 					// Delete the message
 					if err := d.dg.ChannelMessageDelete(channelID, msg.ID); err != nil {
-						logger.Error("Failed to delete region status message: %s", err.Error())
+						logger.WithField("error", err.Error()).Error("Failed to delete region status message")
 					}
 					return
 				case <-ticker.C:
 					// Update the message
 					err := d.createRegionStatusEmbed(ctx, logger, regionStr, channelID, msg)
 					if err != nil {
-						logger.Error("Failed to update region status message: %s", err.Error())
+						logger.WithField("error", err.Error()).Error("Failed to update region status message")
 						return
 					}
 				}
@@ -4114,21 +4165,35 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 	return nil
 }
 
-var discordMarkdownEscapeReplacer = strings.NewReplacer(
-	`\`, `\\`,
-	"`", "\\`",
-	"~", "\\~",
-	"|", "\\|",
-	"**", "\\**",
-	"~~", "\\~~",
-	"@", "@\u200B",
-	"<", "<\u200B",
-	">", ">\u200B",
-	"_", "\\_",
-)
-
+// EscapeDiscordMarkdown escapes all Discord markdown special characters in s
+// so the string renders as plain text in message content.
+// Characters escaped: \ ` * _ ~ | > [ ] ( ) @ # <
 func EscapeDiscordMarkdown(s string) string {
-	return discordMarkdownEscapeReplacer.Replace(s)
+	// Use a builder for single-pass, per-character escaping. This avoids
+	// ordering issues that arise with strings.NewReplacer when both
+	// multi-char sequences (e.g. "**") and their constituent single chars
+	// ("*") appear in the replacement table.
+	var b strings.Builder
+	b.Grow(len(s) + len(s)/4) // slight over-allocation to reduce resizing
+	for _, r := range s {
+		switch r {
+		case '\\', '`', '*', '_', '~', '|', '>', '[', ']', '(', ')', '#':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		case '@':
+			// Zero-width space prevents accidental mentions.
+			b.WriteRune('@')
+			b.WriteRune('\u200B')
+		case '<':
+			// Zero-width space prevents Discord from parsing < as a
+			// mention/channel/emoji opener.
+			b.WriteRune('<')
+			b.WriteRune('\u200B')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID string, e *LoginHistoryEntry, ipInfo IPInfo) error {
@@ -4162,19 +4227,27 @@ func IPVerificationEmbed(entry *LoginHistoryEntry, ipInfo IPInfo) ([]*discordgo.
 
 	numCodes := 5
 
-	// Generate 3 more random numbers
+	// Generate decoy codes using crypto/rand (this is an IP verification challenge).
 	for len(codes) < numCodes {
-		s := fmt.Sprintf("%02d", rand.Intn(100))
+		n, err := rand.Int(rand.Reader, big.NewInt(100))
+		if err != nil {
+			panic("crypto/rand failed: " + err.Error())
+		}
+		s := fmt.Sprintf("%02d", n.Int64())
 		if slices.Contains(codes, s) {
 			continue
 		}
 		codes = append(codes, s)
 	}
 
-	// Shuffle the numbers
-	rand.Shuffle(len(codes), func(i, j int) {
-		codes[i], codes[j] = codes[j], codes[i]
-	})
+	// Shuffle the codes using Fisher-Yates with crypto/rand.
+	for i := len(codes) - 1; i > 0; i-- {
+		j, err := rand.Int(rand.Reader, big.NewInt(int64(i+1)))
+		if err != nil {
+			panic("crypto/rand failed: " + err.Error())
+		}
+		codes[i], codes[j.Int64()] = codes[j.Int64()], codes[i]
+	}
 
 	options := make([]discordgo.SelectMenuOption, 0, len(codes))
 
@@ -4323,7 +4396,7 @@ func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, mes
 		message = d.cache.ReplaceMentions(message)
 	}
 
-	if err := d.LogServiceAuditMessage(fmt.Sprintf("[`%s/%s`] %s", gg.Name(), gg.GuildID, message)); err != nil {
+	if err := d.LogServiceAuditMessage(fmt.Sprintf("[`%s/%s`] %s", EscapeDiscordMarkdown(gg.Name()), gg.GuildID, message)); err != nil {
 		return nil, err
 	}
 

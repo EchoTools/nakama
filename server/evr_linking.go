@@ -2,9 +2,10 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"net/http"
 	"net/url"
 	"strings"
@@ -123,25 +124,18 @@ func generateLinkTicket(linkTickets map[string]*LinkTicket, xpid evr.EvrId, clie
 }
 
 // generateLinkCode generates a 4 character random link code (excluding homoglyphs, vowels, and numbers).
-// The character set .
-// The random number generator is seeded with the current time to ensure randomness.
-// Returns the generated link code as a string.
+// Uses crypto/rand for unpredictable codes (this is an account-linking token).
 // TODO move this to the evrbackend runtime module
 func generateLinkCode() string {
-	// Define the set of valid validChars for the link code
 	validChars := "ACDEFGHIJKLMNPRSTUXYZ"
-
-	// Create a new local random generator with a known seed value
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	// Create a byte slice with 4 elements
 	code := make([]byte, 4)
-
-	// Randomly select an index from the array and generate the code
 	for i := range code {
-		code[i] = validChars[rng.Intn(len(validChars))]
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(validChars))))
+		if err != nil {
+			panic("crypto/rand failed: " + err.Error())
+		}
+		code[i] = validChars[n.Int64()]
 	}
-
 	return string(code)
 }
 

@@ -2842,7 +2842,7 @@ func (ri *RuntimeGoInitializer) RegisterFleetManager(fleetManager runtime.FleetM
 		return errors.New("fleet manager cannot be nil")
 	}
 	if err := fleetManager.Init(ri.nk, ri.fmCallbackHandler); err != nil {
-		return fmt.Errorf("failed to run fleet manager Init function: %s", err.Error())
+		return fmt.Errorf("failed to run fleet manager Init function: %w", err)
 	}
 	ri.fleetManager = fleetManager
 	if nk, ok := ri.nk.(*RuntimeGoNakamaModule); ok {

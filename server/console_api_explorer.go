@@ -75,7 +75,11 @@ func (s *ConsoleServer) CallApiEndpoint(ctx context.Context, in *console.CallApi
 		}
 		args[2] = reflect.ValueOf(&emptypb.Empty{})
 	} else {
-		request := reflect.New(r.request).Interface().(proto.Message)
+		reqIface := reflect.New(r.request).Interface()
+		request, ok := reqIface.(proto.Message)
+		if !ok {
+			return nil, status.Error(codes.Internal, "Request type does not implement proto.Message")
+		}
 		err = protojson.Unmarshal([]byte(in.Body), request)
 		if err != nil {
 			s.logger.Error("Error parsing method request body.", zap.String("method", in.Method), zap.Error(err))
@@ -87,15 +91,25 @@ func (s *ConsoleServer) CallApiEndpoint(ctx context.Context, in *console.CallApi
 	cval := out[0].Interface()
 	cerr := out[1].Interface()
 	if cerr != nil {
+		if e, ok := cerr.(error); ok {
+			return &console.CallApiEndpointResponse{
+				Body:         "",
+				ErrorMessage: e.Error(),
+			}, nil
+		}
 		return &console.CallApiEndpointResponse{
 			Body:         "",
-			ErrorMessage: cerr.(error).Error(),
+			ErrorMessage: fmt.Sprintf("%v", cerr),
 		}, nil
 	} else {
 		var j []byte
 		if cval != nil {
 			m := new(protojson.MarshalOptions)
-			j, err = m.Marshal(cval.(proto.Message))
+			msg, ok := cval.(proto.Message)
+			if !ok {
+				return nil, status.Error(codes.Internal, "Response is not a proto.Message")
+			}
+			j, err = m.Marshal(msg)
 			if err != nil {
 				s.logger.Error("Error serializing method response body.", zap.String("method", in.Method), zap.Error(err))
 				return nil, status.Error(codes.Internal, "Error serializing method response body.")
@@ -299,7 +313,11 @@ func reflectProtoMessageAsJsonTemplate(s reflect.Type) (string, error) {
 		}
 		return m
 	}
-	i := populate(reflect.New(s)).Interface().(proto.Message)
+	iface := populate(reflect.New(s)).Interface()
+	i, ok := iface.(proto.Message)
+	if !ok {
+		return "", fmt.Errorf("populated type does not implement proto.Message")
+	}
 	m := protojson.MarshalOptions{UseProtoNames: false, UseEnumNumbers: true, EmitUnpopulated: true}
 	j, err := m.Marshal(i)
 	if err != nil {

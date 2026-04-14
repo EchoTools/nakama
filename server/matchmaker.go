@@ -317,6 +317,7 @@ func NewLocalMatchmaker(logger, startupLogger *zap.Logger, config Config, router
 
 	go func() {
 		ticker := time.NewTicker(time.Duration(config.GetMatchmaker().IntervalSec) * time.Second)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():

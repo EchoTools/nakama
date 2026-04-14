@@ -43,8 +43,10 @@ func BreakAlternatesRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError(fmt.Sprintf("Error unmarshalling request: %s", err.Error()), StatusInvalidArgument)
 	}
 
-	// Get the caller's user ID from context (guaranteed to exist by middleware)
-	callerUserID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	callerUserID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if callerUserID == "" {
+		return "", runtime.NewError("unauthorized", StatusUnauthenticated)
+	}
 
 	// Validate user IDs
 	if request.UserID1 == "" || request.UserID2 == "" {

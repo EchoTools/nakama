@@ -82,7 +82,10 @@ func (p *EvrPipeline) sendEVRMessageByUserID(ctx context.Context, logger *zap.Lo
 
 // snsFriendInviteRequest handles a client request to send a friend invitation.
 func (p *EvrPipeline) snsFriendInviteRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	msg := in.(*evr.SNSFriendInviteRequest)
+	msg, ok := in.(*evr.SNSFriendInviteRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.SNSFriendInviteRequest, got %T", in)
+	}
 
 	params, ok := LoadParams(ctx)
 	if !ok {
@@ -196,7 +199,10 @@ func (p *EvrPipeline) snsFriendInviteRequest(ctx context.Context, logger *zap.Lo
 //   - FriendInvitationSent → withdraw sent invite, notify target with WithdrawnNotify
 //   - No relationship → acknowledge silently
 func (p *EvrPipeline) snsFriendAcceptRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	msg := in.(*evr.SNSFriendAcceptRequest)
+	msg, ok := in.(*evr.SNSFriendAcceptRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.SNSFriendAcceptRequest, got %T", in)
+	}
 
 	params, ok := LoadParams(ctx)
 	if !ok {
@@ -284,7 +290,10 @@ func (p *EvrPipeline) snsFriendAcceptRequest(ctx context.Context, logger *zap.Lo
 //   - FriendInvitationSent → reject/block (DeleteFriends + optional block)
 //   - No relationship → block the user
 func (p *EvrPipeline) snsFriendRemoveRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	msg := in.(*evr.SNSFriendRemoveRequest)
+	msg, ok := in.(*evr.SNSFriendRemoveRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.SNSFriendRemoveRequest, got %T", in)
+	}
 
 	params, ok := LoadParams(ctx)
 	if !ok {

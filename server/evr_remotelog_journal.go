@@ -71,16 +71,16 @@ func NewUserRemoteLogJournalRegistry(ctx context.Context, logger *zap.Logger, nk
 						// This is the first entry for this session.
 						if s := sessionRegistry.Get(presence.SessionID); s != nil {
 							// Write it after the session closes.
-							go func() {
+							go func(p JournalPresence) {
 								<-s.Context().Done()
 								<-time.After(10 * time.Second)
 								select {
-								case storageCh <- presence:
+								case storageCh <- p:
 									return
 								default:
 									logger.Warn("Failed to queue log storage")
 								}
-							}()
+							}(presence)
 						}
 						journals[presence] = make(map[time.Time][]string, len(logs))
 					}
@@ -221,7 +221,7 @@ func (r *UserLogJouralRegistry) storageWrite(ctx context.Context, _ *zap.Logger,
 	}
 
 	if _, err = r.nk.StorageWrite(ctx, ops); err != nil {
-		return fmt.Errorf("Failed to write remote log: %v", err)
+		return fmt.Errorf("Failed to write remote log: %w", err)
 	}
 
 	return nil

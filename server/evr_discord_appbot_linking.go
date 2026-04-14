@@ -183,9 +183,9 @@ func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.
 	if xpid == "" {
 		// No device specified — show the select menu for the target's devices.
 		account, err := nk.AccountGetId(ctx, targetUserID)
-		if err != nil {
+		if err != nil || account == nil {
 			logger.Error("Failed to get account", zap.Error(err))
-			return err
+			return fmt.Errorf("failed to get account")
 		}
 		if len(account.Devices) == 0 {
 			return editInteractionResponse(s, i, "No headsets are linked to this account.")

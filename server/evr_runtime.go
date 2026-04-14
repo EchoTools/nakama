@@ -71,15 +71,15 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	go func() {
 		bgCtx := context.Background()
 		if err := cgnat.RefreshASNData(bgCtx); err != nil {
-			logger.Warn("CGNAT: ASN data refresh failed: %v", err)
+			logger.WithField("error", err).Warn("CGNAT: ASN data refresh failed")
 		}
 		// Run retroactive cleanup only if enabled in settings
 		if s := ServiceSettings(); s != nil && s.CGNAT.CleanupOnStartup {
 			brokenLinks, affectedUsers, _, cleanupErr := runCGNATCleanup(bgCtx, logger, nk, cgnat)
 			if cleanupErr != nil {
-				logger.Warn("CGNAT: startup cleanup failed: %v", cleanupErr)
+				logger.WithField("error", cleanupErr).Warn("CGNAT: startup cleanup failed")
 			} else if brokenLinks > 0 {
-				logger.Info("CGNAT: startup cleanup broke %d alt links across %d users", brokenLinks, affectedUsers)
+				logger.WithFields(map[string]interface{}{"broken_links": brokenLinks, "affected_users": affectedUsers}).Info("CGNAT: startup cleanup completed")
 			}
 		}
 	}()
@@ -104,8 +104,8 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_ENV, vars) // ignore lint
 	// Initialize the discord bot if the token is set
 	if appBotToken, ok := vars["DISCORD_BOT_TOKEN"]; !ok || appBotToken == "" {
-		logger.Warn("DISCORD_BOT_TOKEN is not set, Discord bot will not be used")
-		panic("Bot token is not set in context.") // TODO: remove bot dependency
+		logger.Error("DISCORD_BOT_TOKEN is not set; cannot initialize Discord bot")
+		return fmt.Errorf("DISCORD_BOT_TOKEN is required but not set")
 	} else {
 		if dg, err = discordgo.New("Bot " + appBotToken); err != nil {
 			logger.Error("Unable to create bot", zap.Error(err))
@@ -125,7 +125,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	if db != nil && nk != nil { // Avoid panic's during some automated tests
 		go func() {
 			if err := RegisterIndexes(initializer); err != nil {
-				panic(fmt.Errorf("unable to register indexes: %v", err))
+				logger.Error("Failed to register indexes", zap.Error(err))
 			}
 		}()
 
@@ -168,8 +168,9 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register loadout autocomplete handler: %w", err)
 	}
 
-	// The statistics queue handles inserting match statistics into the leaderboard records
-	statisticsQueue := NewStatisticsQueue(logger, db, nk)
+	// The statistics queue handles inserting match statistics into the leaderboard records.
+	// Use context.Background() because the queue goroutine must outlive the init context.
+	statisticsQueue := NewStatisticsQueue(context.Background(), logger, db, nk)
 
 	// Initialize the VRML scan queue if the configuration is set
 	var vrmlScanQueue *VRMLScanQueue
@@ -245,7 +246,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 		// Register telemetry API endpoints
 		if err := telemetryAPI.RegisterTelemetryEndpoints(initializer); err != nil {
-			logger.Warn("Failed to register telemetry API endpoints: %v", err)
+			logger.WithField("error", err).Warn("Failed to register telemetry API endpoints")
 		}
 
 		logger.Info("Event journaling and telemetry systems initialized")
@@ -274,8 +275,14 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	// Update the metrics with match data
 	go func() {
-		<-time.After(15 * time.Second)
-		metricsUpdateLoop(ctx, logger, nk.(*RuntimeGoNakamaModule), db)
+		timer := time.NewTimer(15 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			metricsUpdateLoop(ctx, logger, nk.(*RuntimeGoNakamaModule), db)
+		}
 	}()
 
 	if err := apiAuth.InitModule(ctx, logger, db, nk, initializer); err != nil {
@@ -311,13 +318,13 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 func connectRedis(ctx context.Context, redisURL string) (*redis.Client, error) {
 	redisOptions, err := redis.ParseURL(redisURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse Redis URI: %v", err)
+		return nil, fmt.Errorf("failed to parse Redis URI: %w", err)
 	}
 	redisClient := redis.NewClient(redisOptions)
 	if err := redisClient.WithContext(ctx).Ping().Err(); err != nil {
 		// If the connection fails, return an error
 		redisClient.Close()
-		return nil, fmt.Errorf("failed to connect to Redis: %v", err)
+		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 	}
 	return redisClient, nil
 }
@@ -326,13 +333,13 @@ func connectRedis(ctx context.Context, redisURL string) (*redis.Client, error) {
 func connectMongoDB(ctx context.Context, mongoURI string) (*mongo.Client, error) {
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to MongoDB: %v", err)
+		return nil, fmt.Errorf("failed to connect to MongoDB: %w", err)
 	}
 
 	// Ping the database to verify connection
 	if err := client.Ping(ctx, nil); err != nil {
 		client.Disconnect(ctx)
-		return nil, fmt.Errorf("failed to ping MongoDB: %v", err)
+		return nil, fmt.Errorf("failed to ping MongoDB: %w", err)
 	}
 
 	return client, nil
@@ -342,7 +349,7 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	// Create user for use by the discord bot (and core group ownership)
 	userId, _, _, err := nk.AuthenticateDevice(ctx, SystemUserID, "discordbot", true)
 	if err != nil {
-		logger.WithField("err", err).Error("Error creating discordbot user: %v", err)
+		logger.WithField("err", err).Error("Error creating discordbot user")
 	}
 
 	coreGroups := []string{
@@ -359,7 +366,7 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		// Search for group first
 		groups, _, err := nk.GroupsList(ctx, name, "", nil, nil, 1, "")
 		if err != nil {
-			logger.WithField("err", err).Error("Group list error: %v", err)
+			logger.WithField("err", err).Error("Group list error")
 		}
 		// remove groups that are not lang tag of 'system'
 		for i, group := range groups {
@@ -692,7 +699,7 @@ func GetPartyGroupUserIDs(ctx context.Context, nk runtime.NakamaModule, groupNam
 		return nil, status.Error(codes.InvalidArgument, "user ID is required")
 	}
 
-	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, ActivePartyGroupIndex, fmt.Sprintf("+value.group_id:%s", groupName), 100, nil, "")
+	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, ActivePartyGroupIndex, fmt.Sprintf("+value.group_id:%s", Query.EscapeIndexValue(groupName)), 100, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("error listing party group users: %w", err)
 	}

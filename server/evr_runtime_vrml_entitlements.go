@@ -225,7 +225,7 @@ func RevokeNonEntitledVRMLCosmetics(ctx context.Context, logger runtime.Logger, 
 	// Load the user's wallet.
 	account, err := nk.AccountGetId(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("failed to get account for %s: %v", userID, err)
+		return fmt.Errorf("failed to get account for %s: %w", userID, err)
 	}
 
 	wallet := make(map[string]int64)
@@ -256,7 +256,7 @@ func RevokeNonEntitledVRMLCosmetics(ctx context.Context, logger runtime.Logger, 
 	}
 
 	if _, _, err := nk.WalletUpdate(ctx, userID, changeset, metadata, true); err != nil {
-		return fmt.Errorf("failed to revoke cosmetics for %s: %v", userID, err)
+		return fmt.Errorf("failed to revoke cosmetics for %s: %w", userID, err)
 	}
 
 	logger.WithFields(map[string]any{
@@ -274,7 +274,7 @@ func AssignEntitlements(ctx context.Context, logger runtime.Logger, nk runtime.N
 	// Load the user's wallet
 	account, err := nk.AccountGetId(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("failed to get account for %s: %v", userID, err)
+		return fmt.Errorf("failed to get account for %s: %w", userID, err)
 	}
 
 	wallet := make(map[string]int64)
@@ -306,7 +306,7 @@ func AssignEntitlements(ctx context.Context, logger runtime.Logger, nk runtime.N
 	}
 
 	if _, _, err := nk.WalletUpdate(ctx, userID, changeset, metadata, true); err != nil {
-		return fmt.Errorf("failed to update wallet for %s: %v", userID, err)
+		return fmt.Errorf("failed to update wallet for %s: %w", userID, err)
 	}
 
 	// Log the action

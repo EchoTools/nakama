@@ -16,7 +16,8 @@ package server
 
 import (
 	"context"
-	"math/rand"
+	"crypto/rand"
+	"math/big"
 	"regexp"
 	"strings"
 	"time"
@@ -774,7 +775,11 @@ func generateUsername() string {
 	const usernameAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	b := make([]byte, 10)
 	for i := range b {
-		b[i] = usernameAlphabet[rand.Intn(len(usernameAlphabet))]
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(usernameAlphabet))))
+		if err != nil {
+			panic("crypto/rand failed: " + err.Error())
+		}
+		b[i] = usernameAlphabet[n.Int64()]
 	}
 	return string(b)
 }

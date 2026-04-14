@@ -1716,7 +1716,7 @@ func (rp *RuntimeProviderLua) MatchmakerMatched(ctx context.Context, entries []*
 	r.vm.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		return "", false, fmt.Errorf("Error running runtime Matchmaker Matched hook: %v", err.Error())
+		return "", false, fmt.Errorf("Error running runtime Matchmaker Matched hook: %w", err)
 	}
 
 	if retValue == nil || retValue == lua.LNil {
@@ -1786,7 +1786,7 @@ func (rp *RuntimeProviderLua) TournamentEnd(ctx context.Context, tournament *api
 	err = json.Unmarshal([]byte(tournament.Metadata), &metadataMap)
 	if err != nil {
 		rp.Put(r)
-		return fmt.Errorf("failed to convert metadata to json: %s", err.Error())
+		return fmt.Errorf("failed to convert metadata to json: %w", err)
 	}
 	metadataTable := RuntimeLuaConvertMap(r.vm, metadataMap)
 	tournamentTable.RawSetString("metadata", metadataTable)
@@ -1807,7 +1807,7 @@ func (rp *RuntimeProviderLua) TournamentEnd(ctx context.Context, tournament *api
 	r.vm.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		return fmt.Errorf("Error running runtime Tournament End hook: %v", err.Error())
+		return fmt.Errorf("Error running runtime Tournament End hook: %w", err)
 	}
 
 	if retValue == nil || retValue == lua.LNil {
@@ -1858,7 +1858,7 @@ func (rp *RuntimeProviderLua) TournamentReset(ctx context.Context, tournament *a
 	err = json.Unmarshal([]byte(tournament.Metadata), &metadataMap)
 	if err != nil {
 		rp.Put(r)
-		return fmt.Errorf("failed to convert metadata to json: %s", err.Error())
+		return fmt.Errorf("failed to convert metadata to json: %w", err)
 	}
 	metadataTable := RuntimeLuaConvertMap(r.vm, metadataMap)
 	tournamentTable.RawSetString("metadata", metadataTable)
@@ -1879,7 +1879,7 @@ func (rp *RuntimeProviderLua) TournamentReset(ctx context.Context, tournament *a
 	r.vm.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		return fmt.Errorf("Error running runtime Tournament Reset hook: %v", err.Error())
+		return fmt.Errorf("Error running runtime Tournament Reset hook: %w", err)
 	}
 
 	if retValue == nil || retValue == lua.LNil {
@@ -1919,7 +1919,7 @@ func (rp *RuntimeProviderLua) LeaderboardReset(ctx context.Context, leaderboard 
 	err = json.Unmarshal([]byte(leaderboard.Metadata), &metadataMap)
 	if err != nil {
 		rp.Put(r)
-		return fmt.Errorf("failed to convert metadata to json: %s", err.Error())
+		return fmt.Errorf("failed to convert metadata to json: %w", err)
 	}
 	metadataTable := RuntimeLuaConvertMap(r.vm, metadataMap)
 	leaderboardTable.RawSetString("metadata", metadataTable)
@@ -1933,7 +1933,7 @@ func (rp *RuntimeProviderLua) LeaderboardReset(ctx context.Context, leaderboard 
 	r.vm.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		return fmt.Errorf("Error running runtime Leaderboard Reset hook: %v", err.Error())
+		return fmt.Errorf("Error running runtime Leaderboard Reset hook: %w", err)
 	}
 
 	if retValue == nil || retValue == lua.LNil {
@@ -1966,7 +1966,7 @@ func (rp *RuntimeProviderLua) Shutdown(ctx context.Context) {
 	r.vm.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		rp.logger.Error(fmt.Sprintf("Error running runtime Shutdown hook: %v", err.Error()))
+		rp.logger.Error(fmt.Sprintf("Error running runtime Shutdown hook: %v", err))
 		return
 	}
 }
@@ -2121,9 +2121,6 @@ func (rp *RuntimeProviderLua) StorageIndexFilter(ctx context.Context, indexName 
 	luaCtx := NewRuntimeLuaContext(r.vm, r.node, r.version, r.luaEnv, RuntimeExecutionModeStorageIndexFilter, nil, nil, 0, "", "", nil, "", "", "", "")
 
 	//table, err := storageOpWritesToTable(r.vm, storageWrites)
-	if err != nil {
-		return false, fmt.Errorf("Error running runtime Storage Index Filter hook for %q index: %v", indexName, err.Error())
-	}
 
 	writeTable := r.vm.CreateTable(0, 7)
 	writeTable.RawSetString("key", lua.LString(write.Object.Key))
@@ -2140,7 +2137,7 @@ func (rp *RuntimeProviderLua) StorageIndexFilter(ctx context.Context, indexName 
 	valueMap := make(map[string]interface{})
 	err = json.Unmarshal([]byte(write.Object.Value), &valueMap)
 	if err != nil {
-		return false, fmt.Errorf("failed to convert value to json: %s", err.Error())
+		return false, fmt.Errorf("failed to convert value to json: %w", err)
 	}
 	valueTable := RuntimeLuaConvertMap(r.vm, valueMap)
 	writeTable.RawSetString("value", valueTable)
@@ -2153,7 +2150,7 @@ func (rp *RuntimeProviderLua) StorageIndexFilter(ctx context.Context, indexName 
 	r.vm.SetContext(context.Background())
 	rp.Put(r)
 	if err != nil {
-		return false, fmt.Errorf("Error running runtime Storage Index Filter hook for %q index: %v", indexName, err.Error())
+		return false, fmt.Errorf("Error running runtime Storage Index Filter hook for %q index: %v", indexName, err)
 	}
 
 	if retValue == nil || retValue == lua.LNil {

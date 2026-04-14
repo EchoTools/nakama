@@ -68,6 +68,7 @@ func MigrateAllUsers(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 	if err != nil {
 		return fmt.Errorf("error fetching users: %w", err)
 	}
+	defer rows.Close()
 
 	userIDs := make([]string, 0)
 	for rows.Next() {

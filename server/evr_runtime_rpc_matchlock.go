@@ -49,8 +49,10 @@ func MatchLockRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 		return "", runtime.NewError(fmt.Sprintf("Error unmarshalling request: %s", err.Error()), StatusInvalidArgument)
 	}
 
-	// Get the caller's user ID from context (guaranteed to exist by middleware)
-	callerUserID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	callerUserID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if callerUserID == "" {
+		return "", runtime.NewError("unauthorized", StatusUnauthenticated)
+	}
 
 	// Resolve the target user ID
 	targetUserID := request.TargetUserID

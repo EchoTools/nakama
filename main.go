@@ -91,8 +91,11 @@ func main() {
 			}
 
 			if err = conn.Raw(func(driverConn any) error {
-				pgxConn := driverConn.(*stdlib.Conn).Conn()
-				migrate.RunCmd(ctx, tmpLogger, pgxConn, os.Args[2], config.GetLimit(), config.GetLogger().Format)
+				stdlibConn, ok := driverConn.(*stdlib.Conn)
+				if !ok {
+					return fmt.Errorf("unexpected driver connection type: %T", driverConn)
+				}
+				migrate.RunCmd(ctx, tmpLogger, stdlibConn.Conn(), os.Args[2], config.GetLimit(), config.GetLogger().Format)
 
 				return nil
 			}); err != nil {
@@ -125,8 +128,12 @@ func main() {
 			}
 
 			resp, err := http.Get("http://localhost:" + port)
-			if err != nil || resp.StatusCode != http.StatusOK {
-				tmpLogger.Fatal("healthcheck failed")
+			if err != nil {
+				tmpLogger.Fatal("healthcheck failed", zap.Error(err))
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				tmpLogger.Fatal("healthcheck failed", zap.Int("status", resp.StatusCode))
 			}
 			tmpLogger.Info("healthcheck ok")
 			return
@@ -161,8 +168,11 @@ func main() {
 	}
 
 	if err = conn.Raw(func(driverConn any) error {
-		pgxConn := driverConn.(*stdlib.Conn).Conn()
-		migrate.Check(ctx, startupLogger, pgxConn)
+		stdlibConn, ok := driverConn.(*stdlib.Conn)
+		if !ok {
+			return fmt.Errorf("unexpected driver connection type: %T", driverConn)
+		}
+		migrate.Check(ctx, startupLogger, stdlibConn.Conn())
 		return nil
 	}); err != nil {
 		conn.Close()

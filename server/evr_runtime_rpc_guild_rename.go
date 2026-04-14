@@ -151,15 +151,15 @@ func GuildPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 
 	// Send audit log to guild channel if possible, otherwise global
 	auditMsg := fmt.Sprintf("Guild player rename: <@%s> renamed <@%s> from `%s` to `%s` (%s) in group %s",
-		callerDiscordID, targetDiscordID, oldName, sanitizedName, lockStr, groupID)
+		callerDiscordID, targetDiscordID, EscapeDiscordMarkdown(oldName), EscapeDiscordMarkdown(sanitizedName), lockStr, groupID)
 
 	gg, err := GuildGroupLoad(ctx, nk, groupID)
 	if err == nil && gg != nil {
 		if _, err := AuditLogSendGuild(dg, gg, auditMsg); err != nil {
 			logger.Warn("Failed to send guild audit log", zap.Error(err))
 		}
-	} else {
-		if err := AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, auditMsg); err != nil {
+	} else if ss := ServiceSettings(); ss != nil {
+		if err := AuditLogSend(dg, ss.ServiceAuditChannelID, auditMsg); err != nil {
 			logger.Warn("Failed to send audit log", zap.Error(err))
 		}
 	}

@@ -107,22 +107,22 @@ func (dm *ReservationDashboardManager) collectDashboardData(ctx context.Context,
 
 	// Collect server capacity information
 	if err := dm.collectServerCapacity(ctx, data); err != nil {
-		dm.logger.Warn("Failed to collect server capacity: %v", err)
+		dm.logger.WithField("error", err).Warn("Failed to collect server capacity")
 	}
 
 	// Collect reservation utilization
 	if err := dm.collectReservationUtilization(ctx, uuid.FromStringOrNil(groupID), data); err != nil {
-		dm.logger.Warn("Failed to collect reservation utilization: %v", err)
+		dm.logger.WithField("error", err).Warn("Failed to collect reservation utilization")
 	}
 
 	// Collect active matches
 	if err := dm.collectActiveMatches(ctx, uuid.FromStringOrNil(groupID), data); err != nil {
-		dm.logger.Warn("Failed to collect active matches: %v", err)
+		dm.logger.WithField("error", err).Warn("Failed to collect active matches")
 	}
 
 	// Collect upcoming reservations
 	if err := dm.collectUpcomingReservations(ctx, uuid.FromStringOrNil(groupID), data); err != nil {
-		dm.logger.Warn("Failed to collect upcoming reservations: %v", err)
+		dm.logger.WithField("error", err).Warn("Failed to collect upcoming reservations")
 	}
 
 	return data, nil
@@ -143,6 +143,9 @@ func (dm *ReservationDashboardManager) collectServerCapacity(ctx context.Context
 
 	for _, match := range matches {
 		var label MatchLabel
+		if match.Label == nil {
+			continue
+		}
 		if err := json.Unmarshal([]byte(match.Label.Value), &label); err != nil {
 			continue
 		}
@@ -195,6 +198,9 @@ func (dm *ReservationDashboardManager) collectActiveMatches(ctx context.Context,
 
 	for _, match := range matches {
 		var label MatchLabel
+		if match.Label == nil {
+			continue
+		}
 		if err := json.Unmarshal([]byte(match.Label.Value), &label); err != nil {
 			continue
 		}

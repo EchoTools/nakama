@@ -33,7 +33,7 @@ func (ti *TelemetryIntegration) HandleSNSTelemetryEvent(ctx context.Context, ses
 
 	// Journal the telemetry event
 	if err := ti.eventJournal.JournalTelemetry(ctx, userID, sessionID, lobbyID, telemetryData); err != nil {
-		ti.logger.Error("Failed to journal telemetry event: %v", err)
+		ti.logger.WithField("error", err).Error("Failed to journal telemetry event")
 		return err
 	}
 
@@ -41,12 +41,12 @@ func (ti *TelemetryIntegration) HandleSNSTelemetryEvent(ctx context.Context, ses
 	if ti.telemetryManager != nil {
 		lobbyUUID, err := uuid.FromString(lobbyID)
 		if err != nil {
-			ti.logger.Error("Invalid lobby ID for telemetry broadcast: %v", err)
+			ti.logger.WithField("error", err).Error("Invalid lobby ID for telemetry broadcast")
 			return err
 		}
 
 		if err := ti.telemetryManager.BroadcastTelemetry(ctx, lobbyUUID, telemetryData); err != nil {
-			ti.logger.Error("Failed to broadcast telemetry: %v", err)
+			ti.logger.WithField("error", err).Error("Failed to broadcast telemetry")
 			return err
 		}
 	}
@@ -119,11 +119,11 @@ func (ti *TelemetryIntegration) HandleMatchEnd(ctx context.Context, matchID stri
 
 	// Store in MongoDB
 	if err := ti.matchSummaryStore.Store(ctx, summary); err != nil {
-		ti.logger.Error("Failed to store match summary: %v", err)
+		ti.logger.WithField("error", err).Error("Failed to store match summary")
 		return err
 	}
 
-	ti.logger.Info("Match summary stored successfully: match_id=%s, players=%d", summary.MatchID, len(summary.Players))
+	ti.logger.WithFields(map[string]interface{}{"match_id": summary.MatchID, "players": len(summary.Players)}).Info("Match summary stored successfully")
 	return nil
 }
 

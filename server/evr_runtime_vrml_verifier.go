@@ -56,7 +56,8 @@ type VRMLScanQueue struct {
 
 func NewVRMLScanQueue(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, appBot *discordgo.Session, redisClient *redis.Client, oauthRedirectURL, oauthCLientID string) (*VRMLScanQueue, error) {
 
-	ctx = context.Background()
+	// Use the parent context so the verifier respects graceful shutdown.
+	// (Previously used context.Background() which ignored cancellation.)
 
 	// Configure the client with the redis cache
 	verifier := &VRMLScanQueue{
@@ -76,7 +77,7 @@ func NewVRMLScanQueue(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	perm := PublicRPCPermission()
 	wrappedRPC := WithRPCAuthorization("oauth/vrml_redirect", perm, verifier.RedirectRPC)
 	if err := initializer.RegisterRpc("oauth/vrml_redirect", wrappedRPC); err != nil {
-		return nil, fmt.Errorf("failed to register VRML redirect RPC: %v", err)
+		return nil, fmt.Errorf("failed to register VRML redirect RPC: %w", err)
 	}
 
 	verifier.Start()
@@ -91,7 +92,7 @@ func (v *VRMLScanQueue) Start() error {
 
 	ledger, err := VRMLEntitlementLedgerLoad(v.ctx, v.nk)
 	if err != nil {
-		return fmt.Errorf("failed to load VRML entitlement ledger: %v", err)
+		return fmt.Errorf("failed to load VRML entitlement ledger: %w", err)
 	}
 
 	go func() {
@@ -128,7 +129,7 @@ func (v *VRMLScanQueue) Start() error {
 				if errors.Is(err, ErrQueueEmpty) {
 					continue
 				}
-				v.logger.Error("Failed to dequeue item %v", err)
+				v.logger.WithField("error", err).Error("Failed to dequeue item")
 				continue
 			}
 
@@ -242,7 +243,7 @@ func (v *VRMLScanQueue) cachePlayerLists() error {
 				for _, player := range playerList.Players {
 					// Store the player in the redis cache
 					if err := v.redisClient.Set(VRMLPlayerMapKeyPrefix+player.UserID, player.PlayerID, 0).Err(); err != nil {
-						return fmt.Errorf("failed to store player in cache: %v", err)
+						return fmt.Errorf("failed to store player in cache: %w", err)
 					}
 					// Log the player being cached
 				}
@@ -252,7 +253,7 @@ func (v *VRMLScanQueue) cachePlayerLists() error {
 
 	// Mark the cache as complete
 	if err := v.redisClient.Set(VRMLPlayerListCompleteKey, "1", 0).Err(); err != nil {
-		return fmt.Errorf("failed to mark VRML player list cache as complete: %v", err)
+		return fmt.Errorf("failed to mark VRML player list cache as complete: %w", err)
 	}
 	v.logger.Info("VRML player list cache populated successfully")
 	return nil
@@ -316,7 +317,7 @@ func (v *VRMLScanQueue) retrievePlayerMap(playerCh chan VRMLPlayerListItems) {
 					logger.WithField("error", err).Error("Failed to get player list from VRML API")
 					return
 				}
-				defer resp.Body.Close()
+				// Close body at end of each iteration, not with defer (we're in a loop)
 
 				switch resp.StatusCode {
 				case http.StatusOK:
@@ -331,24 +332,28 @@ func (v *VRMLScanQueue) retrievePlayerMap(playerCh chan VRMLPlayerListItems) {
 					if h := resp.Header.Get("X-RateLimit-Reset-After"); h != "" {
 						resetAfter, err := time.ParseDuration(resp.Header.Get("X-RateLimit-Reset-After") + "s")
 						if err != nil {
+							resp.Body.Close()
 							logger.WithField("error", err).Error("Failed to parse Retry-After header")
 							return
 						}
 						// Parse as "X per Y seconds"
 						parts := strings.Split(resp.Header.Get("X-RateLimit-Limit"), " ")
 						if len(parts) != 4 {
+							resp.Body.Close()
 							logger.WithField("header", h).Error("Invalid X-RateLimit-Limit header format")
 							return
 						}
 
 						tokens, err := strconv.Atoi(parts[0])
 						if err != nil {
+							resp.Body.Close()
 							logger.WithField("error", err).Error("Failed to parse X-RateLimit-Limit header")
 							return
 						}
 
 						seconds, err := time.ParseDuration(parts[2] + "s")
 						if err != nil {
+							resp.Body.Close()
 							logger.WithField("error", err).Error("Failed to parse X-RateLimit-Reset-After header")
 							return
 						}
@@ -358,6 +363,7 @@ func (v *VRMLScanQueue) retrievePlayerMap(playerCh chan VRMLPlayerListItems) {
 							"reset_after": resetAfter,
 						}).Info("Resetting rate limiter")
 
+						resp.Body.Close()
 						<-time.After(resetAfter)                  // Wait for the reset duration before continuing
 						rateLimiter = rate.NewLimiter(newRate, 0) // Reset the rate limiter with the new limit and burst
 						continue
@@ -366,9 +372,11 @@ func (v *VRMLScanQueue) retrievePlayerMap(playerCh chan VRMLPlayerListItems) {
 				}
 				// Read the response body
 				if _, err := buf.ReadFrom(resp.Body); err != nil {
+					resp.Body.Close()
 					logger.WithField("error", err).Error("Failed to read player list response body")
 					return
 				}
+				resp.Body.Close()
 				if buf.Len() == 0 {
 					break
 				}
@@ -419,7 +427,7 @@ func (v *VRMLScanQueue) enqueue(entry VRMLScanQueueEntry) error {
 	// Check if it's already in the queue
 	exists, err := v.redisClient.SIsMember(v.queueKey, entry.String()).Result()
 	if err != nil {
-		return fmt.Errorf("failed to check if entry exists in queue: %v", err)
+		return fmt.Errorf("failed to check if entry exists in queue: %w", err)
 	}
 	if exists {
 		v.logger.WithField("entry", entry.String()).Debug("Entry already exists in queue, skipping enqueue")
@@ -436,12 +444,12 @@ func (v *VRMLScanQueue) dequeue() (VRMLScanQueueEntry, error) {
 	}
 	data, err := res.Bytes()
 	if err != nil {
-		return VRMLScanQueueEntry{}, fmt.Errorf("failed to read queue entry: %v", err)
+		return VRMLScanQueueEntry{}, fmt.Errorf("failed to read queue entry: %w", err)
 	}
 
 	entry := VRMLScanQueueEntry{}
 	if err := json.Unmarshal(data, &entry); err != nil {
-		return VRMLScanQueueEntry{}, fmt.Errorf("failed to unmarshal queue entry: %v", err)
+		return VRMLScanQueueEntry{}, fmt.Errorf("failed to unmarshal queue entry: %w", err)
 	}
 	return entry, err
 }
@@ -451,7 +459,7 @@ func (v *VRMLScanQueue) playerSummary(vg *vrmlgo.Session, player *vrmlgo.Player)
 	// Get the seasons for the game
 	seasons, err := vg.GameSeasons(VRMLEchoArenaShortName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get seasons: %v", err)
+		return nil, fmt.Errorf("failed to get seasons: %w", err)
 	}
 	// Create a map of seasons
 	seasonNameMap := make(map[string]*vrmlgo.Season)
@@ -466,7 +474,7 @@ func (v *VRMLScanQueue) playerSummary(vg *vrmlgo.Session, player *vrmlgo.Player)
 
 		details, err := vg.Team(teamID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get team details: %v", err)
+			return nil, fmt.Errorf("failed to get team details: %w", err)
 		}
 		teams[teamID] = details.Team
 	}
@@ -477,14 +485,14 @@ func (v *VRMLScanQueue) playerSummary(vg *vrmlgo.Session, player *vrmlgo.Player)
 
 		details, err := vg.Team(teamID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get team details: %v", err)
+			return nil, fmt.Errorf("failed to get team details: %w", err)
 		}
 
 		t := details.Team
 
 		history, err := vg.TeamMatchesHistory(t.ID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get team match history: %v", err)
+			return nil, fmt.Errorf("failed to get team match history: %w", err)
 		}
 
 		// Create a map of matches by team, season
@@ -514,7 +522,7 @@ func (v *VRMLScanQueue) playerSummary(vg *vrmlgo.Session, player *vrmlgo.Player)
 				// Get the match details
 				matchDetails, err := vg.GameMatch(VRMLEchoArenaShortName, mID)
 				if err != nil {
-					return nil, fmt.Errorf("failed to get match details: %v", err)
+					return nil, fmt.Errorf("failed to get match details: %w", err)
 				}
 
 				// Skip forfeits where the player's team got 0 points
@@ -544,7 +552,7 @@ func (v *VRMLScanQueue) playerSummary(vg *vrmlgo.Session, player *vrmlgo.Player)
 	}
 	member, err := vg.Member(player.User.UserID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get member data: %v", err)
+		return nil, fmt.Errorf("failed to get member data: %w", err)
 	}
 
 	return &VRMLPlayerSummary{
@@ -914,11 +922,11 @@ func (v *VRMLScanQueue) getPlayerIDByUserID(userID string) (string, error) {
 		if resp.Err() == redis.Nil {
 			return "", fmt.Errorf("no VRML player found for user ID %s", userID)
 		}
-		return "", fmt.Errorf("failed to get VRML player for user ID %s: %v", userID, resp.Err())
+		return "", fmt.Errorf("failed to get VRML player for user ID %s: %w", userID, resp.Err())
 	}
 	playerID, err := resp.Result()
 	if err != nil {
-		return "", fmt.Errorf("failed to parse VRML player ID for user ID %s: %v", userID, err)
+		return "", fmt.Errorf("failed to parse VRML player ID for user ID %s: %w", userID, err)
 	}
 	return playerID, nil
 }

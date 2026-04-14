@@ -56,7 +56,7 @@ func sendRPCAuditMessage(ctx context.Context, logger runtime.Logger, nk runtime.
 				Details:      details,
 			}
 			if err := GuildAuditLogWrite(ctx, mongoClient, entry); err != nil {
-				logger.Warn("Failed to persist guild audit log entry for %s: %v", rpcID, err)
+				logger.WithFields(map[string]interface{}{"rpc_id": rpcID, "error": err}).Warn("Failed to persist guild audit log entry")
 			}
 		}
 	}
@@ -75,7 +75,7 @@ func sendRPCAuditMessage(ctx context.Context, logger runtime.Logger, nk runtime.
 	if groupID != "" {
 		if gg, err := GuildGroupLoad(ctx, nk, groupID); err == nil && gg != nil {
 			if _, err := AuditLogSendGuild(appBot.dg, gg, content); err != nil {
-				logger.Warn("Failed to send guild RPC audit log for %s: %v", rpcID, err)
+				logger.WithFields(map[string]interface{}{"rpc_id": rpcID, "error": err}).Warn("Failed to send guild RPC audit log")
 			}
 			return
 		}
@@ -87,6 +87,6 @@ func sendRPCAuditMessage(ctx context.Context, logger runtime.Logger, nk runtime.
 	}
 
 	if err := AuditLogSend(appBot.dg, svcSettings.ServiceAuditChannelID, content); err != nil {
-		logger.Warn("Failed to send service RPC audit log for %s: %v", rpcID, err)
+		logger.WithFields(map[string]interface{}{"rpc_id": rpcID, "error": err}).Warn("Failed to send service RPC audit log")
 	}
 }

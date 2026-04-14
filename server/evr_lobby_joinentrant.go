@@ -38,6 +38,9 @@ func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, p
 		return ErrSessionNotFound
 	}
 
+	if label.GameServer == nil {
+		return fmt.Errorf("match has no game server")
+	}
 	serverSession := p.nk.sessionRegistry.Get(label.GameServer.SessionID)
 	if serverSession == nil {
 		return ErrServerSessionNotFound
@@ -167,13 +170,11 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 		}
 	}
 
-	time.Sleep(1 * time.Second)
-
-	// Check if session context is still valid before tracking
+	// Wait before tracking, but respect context cancellation.
 	select {
 	case <-sessionCtx.Done():
 		return fmt.Errorf("session closed before stream tracking: %w", sessionCtx.Err())
-	default:
+	case <-time.After(1 * time.Second):
 	}
 
 	matchIDStr := label.ID.String()
@@ -550,7 +551,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 				logger.Warn("Failed to get guild member", zap.Error(err))
 			} else if member != nil {
 				if displayName != InGameName(member) {
-					AuditLogSendGuild(p.discordCache.dg, gg, fmt.Sprintf("Setting display name for `%s` to match in-game name: `%s`", member.User.Username, displayName))
+					AuditLogSendGuild(p.discordCache.dg, gg, fmt.Sprintf("Setting display name for `%s` to match in-game name: `%s`", EscapeDiscordMarkdown(member.User.Username), EscapeDiscordMarkdown(displayName)))
 					// Force the display name to match the in-game name
 					if err := p.discordCache.dg.GuildMemberNickname(gg.GuildID, member.User.ID, displayName); err != nil {
 						logger.Warn("Failed to set display name", zap.Error(err))

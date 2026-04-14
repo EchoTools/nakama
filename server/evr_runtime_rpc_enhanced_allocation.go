@@ -117,7 +117,7 @@ func processReservationAllocation(ctx context.Context, logger runtime.Logger, nk
 
 	// Update reservation state to activated
 	if err := reservationMgr.UpdateReservationState(ctx, request.ReservationID, ReservationStateActivated, "match allocated"); err != nil {
-		logger.Warn("Failed to update reservation state: %v", err)
+		logger.WithField("error", err).Warn("Failed to update reservation state")
 	}
 
 	// Send activation DM to the owner if discord session is available
@@ -132,17 +132,17 @@ func processReservationAllocation(ctx context.Context, logger runtime.Logger, nk
 		if dmUser, err := dg.User(ownerID); err == nil && dmUser != nil {
 			dmChannel, err := dg.UserChannelCreate(dmUser.ID)
 			if err != nil {
-				logger.Warn("Failed to create DM channel for user %s: %v", ownerID, err)
+				logger.WithFields(map[string]interface{}{"owner_id": ownerID, "error": err}).Warn("Failed to create DM channel for user")
 			} else if dmChannel != nil {
 				_, err = dg.ChannelMessageSend(dmChannel.ID, dmContent)
 				if err != nil {
-					logger.Warn("Failed to send activation DM to user %s: %v", ownerID, err)
+					logger.WithFields(map[string]interface{}{"owner_id": ownerID, "error": err}).Warn("Failed to send activation DM to user")
 				} else {
-					logger.Info("Sent reservation activation DM to user %s for reservation %s", ownerID, reservation.ID)
+					logger.WithFields(map[string]interface{}{"owner_id": ownerID, "reservation_id": reservation.ID}).Info("Sent reservation activation DM")
 				}
 			}
 		} else if err != nil {
-			logger.Warn("Failed to get Discord user %s: %v", ownerID, err)
+			logger.WithFields(map[string]interface{}{"owner_id": ownerID, "error": err}).Warn("Failed to get Discord user")
 		}
 	}
 
@@ -277,6 +277,11 @@ func ExtendMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	}
 
 	var label MatchLabel
+	if match.Label == nil {
+		response.Error = "Match has no label"
+		responseBytes, _ := json.Marshal(response)
+		return string(responseBytes), nil
+	}
 	if err := json.Unmarshal([]byte(match.Label.Value), &label); err != nil {
 		response.Error = "Failed to parse match label"
 		responseBytes, _ := json.Marshal(response)
@@ -287,7 +292,7 @@ func ExtendMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	if label.Owner.String() != userID && label.SpawnedBy != userID {
 		// Check if user is guild enforcer
 		if label.GroupID != nil {
-			if gg, err := GuildGroupLoad(ctx, nk, label.GroupID.String()); err == nil {
+			if gg, err := GuildGroupLoad(ctx, nk, label.GroupID.String()); err == nil && gg != nil {
 				if !gg.HasRole(userID, gg.RoleMap.Enforcer) {
 					response.Error = "Not authorized to extend this match"
 					responseBytes, _ := json.Marshal(response)
@@ -312,8 +317,7 @@ func ExtendMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 		return "", runtime.NewError("failed to marshal response: "+err.Error(), StatusInternalError)
 	}
 
-	logger.Info("Match %s extended by %d minutes by user %s. Reason: %s",
-		request.MatchID, request.ExtensionMinutes, userID, request.Reason)
+	logger.WithFields(map[string]interface{}{"match_id": request.MatchID, "extension_minutes": request.ExtensionMinutes, "user_id": userID, "reason": request.Reason}).Info("Match extended")
 
 	return string(responseBytes), nil
 }

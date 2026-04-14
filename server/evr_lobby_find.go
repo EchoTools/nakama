@@ -396,15 +396,10 @@ func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.
 }
 
 func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, entrants ...*EvrMatchPresence) (*MatchLabel, error) {
-	if createLobbyMu.TryLock() {
-		go func() {
-			// Hold the lock for enough time to create the server
-			<-time.After(5 * time.Second)
-			createLobbyMu.Unlock()
-		}()
-	} else {
+	if !createLobbyMu.TryLock() {
 		return nil, ErrFailedToAcquireLock
 	}
+	defer createLobbyMu.Unlock()
 
 	metricsTags := map[string]string{
 		"version_lock": lobbyParams.VersionLock.String(),
@@ -449,8 +444,10 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 
 func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.Logger, _ Session, lobbyParams *LobbySessionParameters, entrants ...*EvrMatchPresence) error {
 	interval := 1 * time.Second
+	const maxInterval = 8 * time.Second
+	const maxAttempts = 30
 
-	for {
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("context canceled: %w", ctx.Err())
@@ -511,9 +508,11 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 		// No suitable social lobby found, create a new one
 		label, err := p.newLobby(ctx, logger, lobbyParams, entrants...)
 		if err != nil {
-			// If the error is a lock error, just try again.
+			// If the error is a lock error, back off and try again.
 			if err == ErrFailedToAcquireLock {
-				<-time.After(2 * time.Second)
+				if interval < maxInterval {
+					interval = min(interval*2, maxInterval)
+				}
 				continue
 			}
 
@@ -524,12 +523,16 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 		if err := p.LobbyJoinEntrants(logger, label, entrants...); err != nil {
 			if LobbyErrorCode(err) == ServerIsFull {
 				logger.Debug("Server is full, ignoring.")
+				if interval < maxInterval {
+					interval = min(interval*2, maxInterval)
+				}
 				continue
 			}
 			return fmt.Errorf("failed to join auto-created social lobby: %w", err)
 		}
 		return nil
 	}
+	return NewLobbyErrorf(ServerFindFailed, "exceeded maximum social lobby find attempts")
 }
 
 func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, session *sessionWS, groupID string) error {
@@ -551,13 +554,13 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 
 	presences, err := p.nk.StreamUserList(StreamModeGameServer, groupID, "", "", false, true)
 	if err != nil {
-		return fmt.Errorf("Error listing game servers: %v", err)
+		return fmt.Errorf("Error listing game servers: %w", err)
 	}
 
 	// Include any global game servers
 	globalPresences, err := p.nk.StreamUserList(StreamModeGameServer, uuid.Nil.String(), "", "", false, true)
 	if err != nil {
-		return fmt.Errorf("Error listing global game servers: %v", err)
+		return fmt.Errorf("Error listing global game servers: %w", err)
 	}
 	presences = append(presences, globalPresences...)
 
@@ -597,7 +600,7 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 	}
 
 	if err := SendEVRMessages(session, true, evr.NewLobbyPingRequest(275, candidates)); err != nil {
-		return fmt.Errorf("failed to send ping request: %v", err)
+		return fmt.Errorf("failed to send ping request: %w", err)
 	}
 
 	return nil

@@ -38,6 +38,9 @@ func (l *snsPartyInviteList) Add(inv *snsPartyInvite) {
 func (l *snsPartyInviteList) RemoveByParty(partyUUID uuid.UUID) {
 	l.Lock()
 	defer l.Unlock()
+	if l.invites == nil {
+		return
+	}
 	filtered := l.invites[:0]
 	for _, inv := range l.invites {
 		if inv.PartyUUID != partyUUID {
@@ -142,7 +145,7 @@ func (p *EvrPipeline) sendEVRMessageToPartyMembers(logger *zap.Logger, partyUUID
 // Party join/leave helpers (shared by create, join, respond-to-invite)
 // ---------------------------------------------------------------------------
 
-func (p *EvrPipeline) snsPartyTrackAndJoin(ctx context.Context, logger *zap.Logger, session *sessionWS, partyUUID uuid.UUID, snsPartyID uint64, params SessionParameters) error {
+func (p *EvrPipeline) snsPartyTrackAndJoin(ctx context.Context, logger *zap.Logger, session *sessionWS, partyUUID uuid.UUID, snsPartyID uint64, params *SessionParameters) error {
 	stream := PresenceStream{Mode: StreamModeParty, Subject: partyUUID, Label: p.node}
 	success, _ := p.nk.tracker.Track(session.Context(), session.ID(), stream, session.UserID(), PresenceMeta{
 		Format:   session.Format(),
@@ -162,11 +165,11 @@ func (p *EvrPipeline) snsPartyTrackAndJoin(ctx context.Context, logger *zap.Logg
 	// Update session params.
 	params.currentPartyID = partyUUID
 	params.currentSNSPartyID = snsPartyID
-	StoreParams(session.Context(), &params)
+	StoreParams(session.Context(), params)
 	return nil
 }
 
-func (p *EvrPipeline) snsPartyLeaveCleanup(ctx context.Context, logger *zap.Logger, session *sessionWS, params SessionParameters) {
+func (p *EvrPipeline) snsPartyLeaveCleanup(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) {
 	if params.currentPartyID == uuid.Nil {
 		return
 	}
@@ -175,7 +178,7 @@ func (p *EvrPipeline) snsPartyLeaveCleanup(ctx context.Context, logger *zap.Logg
 
 	params.currentPartyID = uuid.Nil
 	params.currentSNSPartyID = 0
-	StoreParams(session.Context(), &params)
+	StoreParams(session.Context(), params)
 }
 
 func (p *EvrPipeline) getPartyLeaderAccountID(ctx context.Context, logger *zap.Logger, ph *PartyHandler) uint64 {
@@ -245,7 +248,10 @@ func (p *EvrPipeline) snsPartyCreateRequest(ctx context.Context, logger *zap.Log
 
 // snsPartyJoinRequest joins an existing party by SNS party ID.
 func (p *EvrPipeline) snsPartyJoinRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	msg := in.(*evr.SNSPartyJoinRequest)
+	msg, ok := in.(*evr.SNSPartyJoinRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.SNSPartyJoinRequest, got %T", in)
+	}
 
 	params, ok := LoadParams(ctx)
 	if !ok {
@@ -328,7 +334,10 @@ func (p *EvrPipeline) snsPartyLeaveRequest(ctx context.Context, logger *zap.Logg
 
 // snsPartySendInviteRequest sends a party invite to another user.
 func (p *EvrPipeline) snsPartySendInviteRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	msg := in.(*evr.SNSPartySendInviteRequest)
+	msg, ok := in.(*evr.SNSPartySendInviteRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.SNSPartySendInviteRequest, got %T", in)
+	}
 
 	params, ok := LoadParams(ctx)
 	if !ok || params.currentPartyID == uuid.Nil {
@@ -411,7 +420,10 @@ func (p *EvrPipeline) snsPartyUnlockRequest(ctx context.Context, logger *zap.Log
 
 // snsPartyKickRequest kicks a member from the party (owner only).
 func (p *EvrPipeline) snsPartyKickRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	msg := in.(*evr.SNSPartyKickRequest)
+	msg, ok := in.(*evr.SNSPartyKickRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.SNSPartyKickRequest, got %T", in)
+	}
 
 	params, ok := LoadParams(ctx)
 	if !ok || params.currentPartyID == uuid.Nil {
@@ -449,7 +461,10 @@ func (p *EvrPipeline) snsPartyKickRequest(ctx context.Context, logger *zap.Logge
 
 // snsPartyPassOwnershipRequest transfers party leadership (owner only).
 func (p *EvrPipeline) snsPartyPassOwnershipRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	msg := in.(*evr.SNSPartyPassOwnershipRequest)
+	msg, ok := in.(*evr.SNSPartyPassOwnershipRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.SNSPartyPassOwnershipRequest, got %T", in)
+	}
 
 	params, ok := LoadParams(ctx)
 	if !ok || params.currentPartyID == uuid.Nil {
@@ -485,7 +500,10 @@ func (p *EvrPipeline) snsPartyPassOwnershipRequest(ctx context.Context, logger *
 
 // snsPartyRespondToInviteRequest accepts or rejects a party invite.
 func (p *EvrPipeline) snsPartyRespondToInviteRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	msg := in.(*evr.SNSPartyRespondToInviteRequest)
+	msg, ok := in.(*evr.SNSPartyRespondToInviteRequest)
+	if !ok {
+		return fmt.Errorf("expected *evr.SNSPartyRespondToInviteRequest, got %T", in)
+	}
 
 	params, ok := LoadParams(ctx)
 	if !ok {

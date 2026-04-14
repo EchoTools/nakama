@@ -47,7 +47,7 @@ func LobbySession(s *sessionWS, sessionRegistry SessionRegistry, loginSessionID 
 
 		// Store the login parameters as the lobby session's parameters.
 		lobbyCtx := s.Context()
-		StoreParams(lobbyCtx, &loginParams)
+		StoreParams(lobbyCtx, loginParams)
 
 		// Create a derived context for this session.
 		lobbyCtx = context.WithValue(lobbyCtx, ctxUserIDKey{}, loginSession.UserID())     // apiServer compatibility
@@ -147,7 +147,7 @@ func Secondary(s *sessionWS, loginSession *sessionWS, isLobby bool, isServer boo
 		}
 	}
 
-	StoreParams(s.Context(), &params)
+	StoreParams(s.Context(), params)
 
 	// Replace the session context with a derived one that includes the login session ID and the EVR ID
 	ctx := s.Context()

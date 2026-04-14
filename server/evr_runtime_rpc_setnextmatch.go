@@ -175,6 +175,9 @@ func tryImmediateJoin(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 	}
 
 	// Get the game server session
+	if label.GameServer == nil {
+		return "match has no game server"
+	}
 	serverSession := _nk.sessionRegistry.Get(label.GameServer.SessionID)
 	if serverSession == nil {
 		return "game server session not found; directive stored for next session"

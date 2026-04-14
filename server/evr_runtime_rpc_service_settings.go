@@ -58,7 +58,7 @@ func ServiceSettingsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	}
 
 	logger.Info("Service settings updated",
-		zap.String("caller_id", ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)),
+		zap.String("caller_id", func() string { s, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string); return s }()),
 	)
 
 	data, err := json.MarshalIndent(&incoming, "", "  ")

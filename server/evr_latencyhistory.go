@@ -237,7 +237,8 @@ func (h *LatencyHistory) Get(extIP string) ([]LatencyHistoryItem, bool) {
 
 func sortPingCandidatesByLatencyHistory(hostIPs []string, latencyHistory *LatencyHistory) {
 
-	// Shuffle the candidates
+	// Shuffle the candidates before sorting by latency.
+	// math/rand is fine: ping-candidate ordering is non-security game logic.
 	for i := len(hostIPs) - 1; i > 0; i-- {
 		j := rand.Intn(i + 1)
 		hostIPs[i], hostIPs[j] = hostIPs[j], hostIPs[i]

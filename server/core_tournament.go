@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"encoding/gob"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -781,7 +782,11 @@ func parseTournament(scannable Scannable, now time.Time) (*api.Tournament, error
 
 	var resetSchedule *cronexpr.Expression
 	if dbResetSchedule.Valid {
-		resetSchedule = cronexpr.MustParse(dbResetSchedule.String)
+		var err error
+		resetSchedule, err = cronexpr.Parse(dbResetSchedule.String)
+		if err != nil {
+			return nil, fmt.Errorf("invalid tournament reset schedule %q: %w", dbResetSchedule.String, err)
+		}
 	}
 
 	canEnter := true

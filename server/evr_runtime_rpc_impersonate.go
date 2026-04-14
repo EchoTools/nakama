@@ -141,9 +141,9 @@ func ImpersonateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 			}
 			return callerID
 		}(),
-		callerName,
+		EscapeDiscordMarkdown(callerName),
 		discordID,
-		username,
+		EscapeDiscordMarkdown(username),
 	)
 	if settings := ServiceSettings(); settings != nil && settings.ServiceAuditChannelID != "" {
 		if err := AuditLogSend(dg, settings.ServiceAuditChannelID, auditMsg); err != nil {
