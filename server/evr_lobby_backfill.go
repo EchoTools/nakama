@@ -98,16 +98,16 @@ type preparedBackfillCandidate struct {
 
 // prepareMatches pre-computes match metadata that doesn't change during processing
 func (b *PostMatchmakerBackfill) prepareMatches(matches []*BackfillMatch, bctx *backfillContext) []*preparedBackfillMatch {
-	prepared := make([]*preparedBackfillMatch, len(matches))
-	for i, m := range matches {
+	prepared := make([]*preparedBackfillMatch, 0, len(matches))
+	for _, m := range matches {
 		if m.Label.GameServer == nil {
 			continue
 		}
-		prepared[i] = &preparedBackfillMatch{
+		prepared = append(prepared, &preparedBackfillMatch{
 			BackfillMatch: m,
 			externalIP:    m.Label.GameServer.Endpoint.GetExternalIP(),
 			matchAge:      bctx.now.Sub(m.Label.StartTime),
-		}
+		})
 	}
 	return prepared
 }
