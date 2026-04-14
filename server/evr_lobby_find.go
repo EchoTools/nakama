@@ -500,6 +500,10 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 					logger.Debug("Server is full, ignoring.")
 					continue
 				}
+				if errors.Is(err, ErrPreJoinPingFailed) {
+					logger.Debug("Pre-join ping failed, skipping server.", zap.String("endpoint", l.GameServer.Endpoint.String()))
+					continue
+				}
 				return fmt.Errorf("failed to join existing social lobby: %w", err)
 			}
 			return nil
@@ -526,6 +530,10 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 				if interval < maxInterval {
 					interval = min(interval*2, maxInterval)
 				}
+				continue
+			}
+			if errors.Is(err, ErrPreJoinPingFailed) {
+				logger.Debug("Pre-join ping failed on auto-created lobby, retrying.", zap.String("endpoint", label.GameServer.Endpoint.String()))
 				continue
 			}
 			return fmt.Errorf("failed to join auto-created social lobby: %w", err)
