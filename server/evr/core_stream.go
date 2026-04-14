@@ -173,6 +173,9 @@ func (s *EasyStream) StreamNullTerminatedString(str *string) error {
 	switch s.Mode {
 	case DecodeMode:
 		for {
+			if len(b) > MaxStreamStringLength {
+				return fmt.Errorf("null-terminated string exceeds maximum length %d", MaxStreamStringLength)
+			}
 			if c, err := s.r.ReadByte(); err != nil {
 				return err
 			} else if c == 0x0 {
@@ -358,6 +361,9 @@ func ReadBytes(r io.ByteReader, dst *bytes.Buffer, isNullTerminated bool) error 
 	var err error
 	var b byte
 	for err != io.EOF {
+		if dst.Len() > MaxJSONDecompressedSize {
+			return fmt.Errorf("uncompressed data exceeds maximum size %d", MaxJSONDecompressedSize)
+		}
 		if b, err = r.ReadByte(); isNullTerminated && b == '\x00' {
 			break
 		} else if err != nil {
