@@ -19,18 +19,12 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
 )
-
-const maxConnsPerIP = 32
-
-var ipConnCount sync.Map // map[string]*int32
 
 func NewSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry SessionRegistry, sessionCache SessionCache, statusRegistry StatusRegistry, matchmaker Matchmaker, tracker Tracker, metrics Metrics, runtime *Runtime, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, pipeline *Pipeline, evrPipeline *EvrPipeline, storageIndex StorageIndex) func(http.ResponseWriter, *http.Request) {
 	upgrader := &websocket.Upgrader{
@@ -123,21 +117,6 @@ func NewSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry Sess
 		}
 
 		clientIP, clientPort := extractClientAddressFromRequest(logger, r)
-
-		// Per-IP connection limit — reject before upgrading if over the cap.
-		var connCount *int32
-		if v, loaded := ipConnCount.LoadOrStore(clientIP, new(int32)); loaded {
-			connCount = v.(*int32)
-		} else {
-			connCount = v.(*int32)
-		}
-		if atomic.AddInt32(connCount, 1) > maxConnsPerIP {
-			atomic.AddInt32(connCount, -1)
-			http.Error(w, "Too many connections", http.StatusTooManyRequests)
-			logger.Debug("Rejected connection over per-IP limit", zap.String("ip", clientIP))
-			return
-		}
-		defer atomic.AddInt32(connCount, -1)
 
 		status, _ := strconv.ParseBool(r.URL.Query().Get("status"))
 		sessionID := uuid.Must(sessionIdGen.NewV1())
