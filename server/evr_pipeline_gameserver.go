@@ -229,7 +229,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	}
 
 	params.guildGroups = guildGroups
-	StoreParams(ctx, &params)
+	StoreParams(ctx, params)
 
 	// By default, use the client's IP address as the external IP address
 

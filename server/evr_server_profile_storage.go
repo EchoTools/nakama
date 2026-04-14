@@ -250,7 +250,7 @@ func ServerProfileStoreJSON(ctx context.Context, nk runtime.NakamaModule, userID
 // thundering herd when multiple players request the same user's profile simultaneously.
 func ServerProfileLoadByXPID(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (json.RawMessage, string, error) {
 	// Search the storage index for the XPID
-	query := fmt.Sprintf("+xplatformid:%s", xpID.String())
+	query := fmt.Sprintf("+xplatformid:%s", Query.EscapeIndexValue(xpID.String()))
 
 	objects, _, err := nk.StorageIndexList(ctx, SystemUserID, ServerProfileIndexName, query, 1, nil, "")
 	if err != nil {

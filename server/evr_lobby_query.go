@@ -81,6 +81,15 @@ func (query) CreateMatchPattern(elems []string) string {
 	return fmt.Sprintf("/(%s)/", strings.Join(strs, "|"))
 }
 
+// EscapeIndexValue escapes a string so it can be safely interpolated into a
+// Bluge index query as a literal term value. All Bluge query-syntax special
+// characters (+, -, :, /, ^, ~, etc.) are backslash-escaped. Use this whenever
+// building StorageIndexList or MatchList queries with fmt.Sprintf and
+// user-supplied or dynamic values that are not already escaped.
+func (q query) EscapeIndexValue(s string) string {
+	return q.replacer.Replace(s)
+}
+
 // QuoteStringValue returns a quoted string representation of the input value.
 func (q query) QuoteStringValue(input any) string {
 	type stringer interface {

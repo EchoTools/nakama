@@ -657,7 +657,7 @@ func (r *RuntimeLuaMatchCore) broadcastMessageDeferred(l *lua.LState) int {
 			Envelope:    msg,
 			Reliable:    reliable,
 		}); err != nil {
-			l.RaiseError("error deferring message broadcast: %w", err)
+			l.RaiseError("error deferring message broadcast: %v", err)
 		}
 	}
 
@@ -913,7 +913,7 @@ func (r *RuntimeLuaMatchCore) matchLabelUpdate(l *lua.LState) int {
 	input := l.OptString(1, "")
 
 	if err := r.matchRegistry.UpdateMatchLabel(r.id, r.tickRate, r.module, input, r.createTime); err != nil {
-		l.RaiseError("error updating match label: %w", err)
+		l.RaiseError("error updating match label: %v", err)
 		return 0
 	}
 	r.label.Store(input)

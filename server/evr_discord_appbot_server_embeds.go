@@ -52,7 +52,7 @@ func (d *DiscordAppBot) handleShowServerEmbeds(ctx context.Context, logger runti
 	// List all matches (reduced limit for performance)
 	matches, err := d.nk.MatchList(ctx, MatchListLimit, true, "", nil, nil, "*")
 	if err != nil {
-		return d.editDeferredResponse(s, i, fmt.Sprintf("❌ Failed to list matches: %w", err))
+		return d.editDeferredResponse(s, i, fmt.Sprintf("❌ Failed to list matches: %v", err))
 	}
 
 	guildLabels := collectGuildLabels(logger, matches, groupID)

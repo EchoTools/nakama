@@ -2,9 +2,12 @@ package evr
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"log"
+	"math"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -293,5 +296,89 @@ func TestSymbol_Int64(t *testing.T) {
 				t.Errorf("Symbol.Int64() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// buildMinimalMessage creates a valid single-message packet of the form:
+//
+//	MessageMarker + symbol(8 bytes LE) + length(8 bytes LE) + data
+//
+// It uses the STcpConnectionUnrequireEvent symbol from testMessage.
+func buildMinimalMessage() []byte {
+	sym := uint64(0x43e6963ac76beee4) // STcpConnectionUnrequireEvent
+	data := []byte{0x00}              // 1 byte payload
+	var msg []byte
+	msg = append(msg, MessageMarker...)
+	msg = binary.LittleEndian.AppendUint64(msg, sym)
+	msg = binary.LittleEndian.AppendUint64(msg, uint64(len(data)))
+	msg = append(msg, data...)
+	return msg
+}
+
+// TestParsePacket_TooManyMessages verifies that ParsePacket rejects a packet
+// containing more than MaxMessagesPerPacket messages with a clear error.
+func TestParsePacket_TooManyMessages(t *testing.T) {
+	msg := buildMinimalMessage()
+
+	// bytes.Split on a packet starting with the marker produces an empty
+	// leading chunk plus one chunk per message. With MaxMessagesPerPacket
+	// messages we get MaxMessagesPerPacket+1 chunks, which exceeds the limit.
+	count := MaxMessagesPerPacket // produces count+1 chunks after split
+	var packet []byte
+	for i := 0; i < count; i++ {
+		packet = append(packet, msg...)
+	}
+
+	_, err := ParsePacket(packet)
+	if err == nil {
+		t.Fatal("expected error for too many messages, got nil")
+	}
+	if !errors.Is(err, ErrInvalidPacket) {
+		t.Errorf("expected ErrInvalidPacket, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "too many messages") {
+		t.Errorf("error should mention 'too many messages', got: %v", err)
+	}
+}
+
+// TestParsePacket_MessageLengthOverflow verifies that a message whose encoded
+// length field exceeds MaxMessageLength is rejected before any int cast.
+// This guards against uint64-to-int truncation that could cause out-of-bounds
+// reads or allocations.
+func TestParsePacket_MessageLengthOverflow(t *testing.T) {
+	sym := uint64(0x43e6963ac76beee4) // STcpConnectionUnrequireEvent
+
+	// Craft a packet with a single message whose length field is larger than
+	// MaxMessageLength. We use math.MaxInt64 to also exercise the comparison.
+	var packet []byte
+	packet = append(packet, MessageMarker...)
+	packet = binary.LittleEndian.AppendUint64(packet, sym)
+	packet = binary.LittleEndian.AppendUint64(packet, uint64(math.MaxInt64))
+
+	_, err := ParsePacket(packet)
+	if err == nil {
+		t.Fatal("expected error for oversized message length, got nil")
+	}
+	if !errors.Is(err, ErrInvalidPacket) {
+		t.Errorf("expected ErrInvalidPacket, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "message too large") {
+		t.Errorf("error should mention 'message too large', got: %v", err)
+	}
+}
+
+// TestParsePacket_PacketTooLarge verifies that packets exceeding
+// MaxPacketLength are rejected outright.
+func TestParsePacket_PacketTooLarge(t *testing.T) {
+	data := make([]byte, MaxPacketLength+1)
+	_, err := ParsePacket(data)
+	if err == nil {
+		t.Fatal("expected error for oversized packet, got nil")
+	}
+	if !errors.Is(err, ErrInvalidPacket) {
+		t.Errorf("expected ErrInvalidPacket, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "packet too large") {
+		t.Errorf("error should mention 'packet too large', got: %v", err)
 	}
 }

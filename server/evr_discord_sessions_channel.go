@@ -422,7 +422,7 @@ func (sm *SessionsChannelManager) updateSessionMessages() {
 // updateSessionMessage updates a specific session message
 func (sm *SessionsChannelManager) updateSessionMessage(tracker *SessionMessageTracker) error {
 	// Get the current match state
-	matches, err := sm.nk.MatchList(sm.ctx, 1, true, "", nil, nil, fmt.Sprintf("+label.id:%s", tracker.SessionID))
+	matches, err := sm.nk.MatchList(sm.ctx, 1, true, "", nil, nil, fmt.Sprintf("+label.id:%s", Query.EscapeIndexValue(tracker.SessionID)))
 	if err != nil {
 		return fmt.Errorf("failed to find match: %w", err)
 	}

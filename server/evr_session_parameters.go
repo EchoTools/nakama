@@ -64,15 +64,15 @@ type SessionParameters struct {
 	sessionDurationOnce sync.Once // Ensures the session-duration metrics goroutine is spawned exactly once
 }
 
-func (s SessionParameters) UserID() string {
-	if s.profile == nil {
+func (s *SessionParameters) UserID() string {
+	if s == nil || s.profile == nil {
 		return ""
 	}
 	return s.profile.UserID()
 }
 
-func (s SessionParameters) DisplayName(groupID string) string {
-	if s.profile == nil {
+func (s *SessionParameters) DisplayName(groupID string) string {
+	if s == nil || s.profile == nil {
 		return ""
 	}
 	if s.userDisplayNameOverride != "" {
@@ -146,10 +146,10 @@ func StoreParams(ctx context.Context, params *SessionParameters) {
 	}
 }
 
-func LoadParams(ctx context.Context) (parameters SessionParameters, found bool) {
+func LoadParams(ctx context.Context) (parameters *SessionParameters, found bool) {
 	params, ok := ctx.Value(ctxSessionParametersKey{}).(*atomic.Pointer[SessionParameters])
 	if !ok {
-		return SessionParameters{}, false
+		return nil, false
 	}
-	return *params.Load(), true
+	return params.Load(), true
 }

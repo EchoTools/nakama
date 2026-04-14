@@ -145,7 +145,7 @@ func (p *EvrPipeline) sendEVRMessageToPartyMembers(logger *zap.Logger, partyUUID
 // Party join/leave helpers (shared by create, join, respond-to-invite)
 // ---------------------------------------------------------------------------
 
-func (p *EvrPipeline) snsPartyTrackAndJoin(ctx context.Context, logger *zap.Logger, session *sessionWS, partyUUID uuid.UUID, snsPartyID uint64, params SessionParameters) error {
+func (p *EvrPipeline) snsPartyTrackAndJoin(ctx context.Context, logger *zap.Logger, session *sessionWS, partyUUID uuid.UUID, snsPartyID uint64, params *SessionParameters) error {
 	stream := PresenceStream{Mode: StreamModeParty, Subject: partyUUID, Label: p.node}
 	success, _ := p.nk.tracker.Track(session.Context(), session.ID(), stream, session.UserID(), PresenceMeta{
 		Format:   session.Format(),
@@ -165,11 +165,11 @@ func (p *EvrPipeline) snsPartyTrackAndJoin(ctx context.Context, logger *zap.Logg
 	// Update session params.
 	params.currentPartyID = partyUUID
 	params.currentSNSPartyID = snsPartyID
-	StoreParams(session.Context(), &params)
+	StoreParams(session.Context(), params)
 	return nil
 }
 
-func (p *EvrPipeline) snsPartyLeaveCleanup(ctx context.Context, logger *zap.Logger, session *sessionWS, params SessionParameters) {
+func (p *EvrPipeline) snsPartyLeaveCleanup(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) {
 	if params.currentPartyID == uuid.Nil {
 		return
 	}
@@ -178,7 +178,7 @@ func (p *EvrPipeline) snsPartyLeaveCleanup(ctx context.Context, logger *zap.Logg
 
 	params.currentPartyID = uuid.Nil
 	params.currentSNSPartyID = 0
-	StoreParams(session.Context(), &params)
+	StoreParams(session.Context(), params)
 }
 
 func (p *EvrPipeline) getPartyLeaderAccountID(ctx context.Context, logger *zap.Logger, ph *PartyHandler) uint64 {

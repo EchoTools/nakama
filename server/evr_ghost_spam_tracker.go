@@ -130,7 +130,7 @@ func (t *SpamTracker) TrackAction(operatorID string, targetPlayer evr.EvrId, act
 
 // FindUserIDByEvrID resolves an EvrId to a Nakama user ID via the Profiles storage index.
 func (t *SpamTracker) FindUserIDByEvrID(ctx context.Context, evrID evr.EvrId) (string, error) {
-	storageObjects, _, err := t.nk.StorageIndexList(ctx, "", "Profiles", fmt.Sprintf("+value.server.xplatformid:%s", evrID.String()), 1, nil, "")
+	storageObjects, _, err := t.nk.StorageIndexList(ctx, "", "Profiles", fmt.Sprintf("+value.server.xplatformid:%s", Query.EscapeIndexValue(evrID.String())), 1, nil, "")
 	if err != nil || storageObjects == nil || len(storageObjects.GetObjects()) == 0 {
 		return "", fmt.Errorf("failed to find user by EVR ID %s: %w", evrID.String(), err)
 	}

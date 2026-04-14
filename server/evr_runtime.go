@@ -698,7 +698,7 @@ func GetPartyGroupUserIDs(ctx context.Context, nk runtime.NakamaModule, groupNam
 		return nil, status.Error(codes.InvalidArgument, "user ID is required")
 	}
 
-	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, ActivePartyGroupIndex, fmt.Sprintf("+value.group_id:%s", groupName), 100, nil, "")
+	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, ActivePartyGroupIndex, fmt.Sprintf("+value.group_id:%s", Query.EscapeIndexValue(groupName)), 100, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("error listing party group users: %w", err)
 	}

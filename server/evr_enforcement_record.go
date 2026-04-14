@@ -115,18 +115,18 @@ func (r GuildEnforcementRecord) GetNotificationMessage(guildName, customFooter s
 
 	// Guild context
 	if guildName != "" {
-		parts = append(parts, fmt.Sprintf("**Guild:** %s", guildName))
+		parts = append(parts, fmt.Sprintf("**Guild:** %s", EscapeDiscordMarkdown(guildName)))
 	}
 
 	// Reason
 	reasonLine := "**Reason:** "
 	if r.RuleViolated != "" {
-		reasonLine += r.RuleViolated
+		reasonLine += EscapeDiscordMarkdown(r.RuleViolated)
 		if r.UserNoticeText != "" && r.UserNoticeText != r.RuleViolated {
-			reasonLine += " - " + r.UserNoticeText
+			reasonLine += " - " + EscapeDiscordMarkdown(r.UserNoticeText)
 		}
 	} else if r.UserNoticeText != "" {
-		reasonLine += r.UserNoticeText
+		reasonLine += EscapeDiscordMarkdown(r.UserNoticeText)
 	} else {
 		reasonLine += "Policy violation"
 	}
@@ -159,7 +159,7 @@ func (r GuildEnforcementRecord) GetNotificationMessage(guildName, customFooter s
 	// Footer with instructions
 	parts = append(parts, "")
 	if customFooter != "" {
-		parts = append(parts, customFooter)
+		parts = append(parts, EscapeDiscordMarkdown(customFooter))
 	} else {
 		parts = append(parts, "ℹ️ For more details, use the `/whoami` command in Discord or in-game.")
 		parts = append(parts, "If you believe this action was made in error, please contact a guild administrator.")

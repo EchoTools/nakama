@@ -286,10 +286,11 @@ func (s *EasyStream) StreamStringTable(entries *[]string) error {
 		}
 		*entries = strings
 	case EncodeMode:
-		// write teh offfsets
+		// write the offsets (cumulative byte offsets from buffer start)
+		cumulative := uint32(0)
 		for i := 0; i < int(logCount-1); i++ {
-			off := uint32(len((*entries)[i]) + 1)
-			if err = s.StreamNumber(binary.LittleEndian, &off); err != nil {
+			cumulative += uint32(len((*entries)[i]) + 1) // +1 for null terminator
+			if err = s.StreamNumber(binary.LittleEndian, &cumulative); err != nil {
 				return err
 			}
 		}

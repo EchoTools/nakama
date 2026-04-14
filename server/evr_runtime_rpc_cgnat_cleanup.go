@@ -26,7 +26,7 @@ func CGNATCleanupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 	brokenLinks, affectedUsers, details, err := runCGNATCleanup(ctx, logger, nk, detector)
 	if err != nil {
-		return "", runtime.NewError(fmt.Sprintf("cleanup failed: %w", err), StatusInternalError)
+		return "", runtime.NewError(fmt.Sprintf("cleanup failed: %v", err), StatusInternalError)
 	}
 
 	// Send audit log (best-effort)

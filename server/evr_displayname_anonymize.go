@@ -16,8 +16,9 @@ var nameComponents = struct {
 	},
 }
 
+// RandomDisplayName generates a random "AdjectiveNoun" display name.
+// math/rand is fine here: display name generation is non-security game logic.
 func RandomDisplayName() string {
-	// Select a random adjective and noun
 	adjective := nameComponents.Adjectives[rand.Intn(len(nameComponents.Adjectives))]
 	noun := nameComponents.Nouns[rand.Intn(len(nameComponents.Nouns))]
 

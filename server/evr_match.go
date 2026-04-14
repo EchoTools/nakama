@@ -270,7 +270,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	// This is a player joining.
 	meta := &EntrantMetadata{}
 	if err := meta.FromMatchMetadata(metadata); err != nil {
-		return state, false, fmt.Sprintf("failed to unmarshal metadata: %w", err)
+		return state, false, fmt.Sprintf("failed to unmarshal metadata: %v", err)
 	}
 
 	// Log early quit penalty status for metrics (client enforces spawn restrictions)
@@ -1502,7 +1502,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 	signal := &SignalEnvelope{}
 	err := json.Unmarshal([]byte(data), signal)
 	if err != nil {
-		return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal signal: %w", err)}.String()
+		return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal signal: %v", err)}.String()
 	}
 
 	switch signal.OpCode {
@@ -1510,7 +1510,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		var data SignalKickEntrantsPayload
 
 		if err := json.Unmarshal(signal.Payload, &data); err != nil {
-			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal shutdown payload: %w", err)}.String()
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal shutdown payload: %v", err)}.String()
 		}
 		entrantIDs := make([]uuid.UUID, 0, len(data.UserIDs))
 		for _, e := range data.UserIDs {
@@ -1523,7 +1523,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 		if len(entrantIDs) > 0 {
 			if err := m.kickEntrants(ctx, logger, dispatcher, state, entrantIDs...); err != nil {
-				return state, SignalResponse{Message: fmt.Sprintf("failed to kick player: %w", err)}.String()
+				return state, SignalResponse{Message: fmt.Sprintf("failed to kick player: %v", err)}.String()
 			}
 		}
 
@@ -1537,7 +1537,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		var data SignalShutdownPayload
 
 		if err := json.Unmarshal(signal.Payload, &data); err != nil {
-			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal shutdown payload: %w", err)}.String()
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal shutdown payload: %v", err)}.String()
 		}
 
 		if data.DisconnectGameServer {
@@ -1561,7 +1561,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 		jsonData, err := json.Marshal(state.GameServer.Endpoint)
 		if err != nil {
-			return state, fmt.Sprintf("failed to marshal endpoint: %w", err)
+			return state, fmt.Sprintf("failed to marshal endpoint: %v", err)
 		}
 		return state, SignalResponse{Success: true, Payload: string(jsonData)}.String()
 
@@ -1570,7 +1570,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 		jsonData, err := json.Marshal(state.presenceMap)
 		if err != nil {
-			return state, fmt.Sprintf("failed to marshal presences: %w", err)
+			return state, fmt.Sprintf("failed to marshal presences: %v", err)
 		}
 		return state, SignalResponse{Success: true, Payload: string(jsonData)}.String()
 
@@ -1585,7 +1585,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		settings := MatchSettings{}
 
 		if err := json.Unmarshal(signal.Payload, &settings); err != nil {
-			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal settings: %w", err)}.String()
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal settings: %v", err)}.String()
 		}
 
 		for _, f := range settings.RequiredFeatures {
@@ -1595,13 +1595,14 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 
 		if ok, err := CheckSystemGroupMembership(ctx, db, settings.SpawnedBy, GroupGlobalDevelopers); err != nil {
-			return state, SignalResponse{Message: fmt.Sprintf("failed to check group membership: %w", err)}.String()
+			return state, SignalResponse{Message: fmt.Sprintf("failed to check group membership: %v", err)}.String()
 		} else if !ok {
 			// Validate the mode
 			if levels, ok := evr.LevelsByMode[settings.Mode]; !ok {
 				return state, SignalResponse{Message: fmt.Sprintf("bad request: invalid mode: %v", settings.Mode)}.String()
 			} else {
 				// Set the level to a random level if it is not set.
+				// math/rand is fine: game-level selection, not security-sensitive.
 				if settings.Level == 0xffffffffffffffff || settings.Level == 0 {
 					settings.Level = levels[rand.Intn(len(levels))]
 					// Validate the level, if provided.
@@ -1727,13 +1728,13 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		// Trigger the MatchLeave event for the game server.
 		if err := nk.StreamUserLeave(StreamModeMatchAuthoritative, state.ID.UUID.String(), "", state.ID.Node, state.GameServer.GetUserId(), state.GameServer.GetSessionId()); err != nil {
 			logger.Warn("Failed to leave match stream", zap.Error(err))
-			return nil, SignalResponse{Message: fmt.Sprintf("failed to leave match stream: %w", err)}.String()
+			return nil, SignalResponse{Message: fmt.Sprintf("failed to leave match stream: %v", err)}.String()
 		}
 
 	case SignalPlayerUpdate:
 		update := MatchPlayerUpdate{}
 		if err := json.Unmarshal(signal.Payload, &update); err != nil {
-			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal player update: %w", err)}.String()
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal player update: %v", err)}.String()
 		}
 		if mp, ok := state.presenceMap[update.SessionID]; ok {
 			if update.RoleAlignment != nil {
@@ -1756,7 +1757,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 	if err := m.updateLabel(logger, dispatcher, state); err != nil {
 		logger.WithField("error", err).Error("failed to update label")
-		return state, SignalResponse{Message: fmt.Sprintf("failed to update label: %w", err)}.String()
+		return state, SignalResponse{Message: fmt.Sprintf("failed to update label: %v", err)}.String()
 	}
 
 	nk.MetricsCounterAdd("match_prepare_count", state.MetricsTags(), 1)

@@ -75,7 +75,7 @@ func ReserveMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	// Check server availability
 	serverAvailable, err := checkServerAvailability(ctx, nk, logger)
 	if err != nil {
-		response.Error = fmt.Sprintf("Failed to check server availability: %w", err)
+		response.Error = fmt.Sprintf("Failed to check server availability: %v", err)
 		return marshalResponse(response)
 	}
 
@@ -170,7 +170,7 @@ func processAllocationWithPurging(ctx context.Context, logger runtime.Logger, nk
 	// Find preemption candidates
 	candidates, err := preemptionMgr.FindPreemptionCandidates(ctx, preemptionReq)
 	if err != nil {
-		response.Error = fmt.Sprintf("Failed to find preemption candidates: %w", err)
+		response.Error = fmt.Sprintf("Failed to find preemption candidates: %v", err)
 		return marshalResponse(response)
 	}
 
@@ -183,7 +183,7 @@ func processAllocationWithPurging(ctx context.Context, logger runtime.Logger, nk
 	matchesToPreempt := []string{candidates[0].MatchID}
 	preemptionResult, err := preemptionMgr.PreemptMatches(ctx, matchesToPreempt, preemptionReq)
 	if err != nil {
-		response.Error = fmt.Sprintf("Failed to preempt matches: %w", err)
+		response.Error = fmt.Sprintf("Failed to preempt matches: %v", err)
 		return marshalResponse(response)
 	}
 

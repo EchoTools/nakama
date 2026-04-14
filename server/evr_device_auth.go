@@ -2,9 +2,10 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
-	"math/rand"
+	"math/big"
 	"strings"
 	"time"
 
@@ -85,13 +86,17 @@ func storeDeviceAuthCodes(ctx context.Context, nk runtime.NakamaModule, codes ma
 }
 
 // generateDeviceAuthCode generates an 8-character code in XXXX-XXXX format.
-// Uses a character set that excludes homoglyphs (0/O, 1/I/L, B/8).
+// Uses crypto/rand for unpredictable codes (this is an authentication token).
+// Character set excludes homoglyphs (0/O, 1/I/L, B/8).
 func generateDeviceAuthCode() string {
 	validChars := "ACDEFGHJKMNPRSTUXYZ2345679"
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	code := make([]byte, 8)
 	for i := range code {
-		code[i] = validChars[rng.Intn(len(validChars))]
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(validChars))))
+		if err != nil {
+			panic("crypto/rand failed: " + err.Error())
+		}
+		code[i] = validChars[n.Int64()]
 	}
 	// Format as XXXX-XXXX
 	return string(code[:4]) + "-" + string(code[4:])

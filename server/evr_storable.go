@@ -71,7 +71,7 @@ func StorableRead(ctx context.Context, nk runtime.NakamaModule, userID string, d
 		UserID:     meta.UserID,
 	}})
 	if err != nil {
-		return storableErrorf(meta, codes.Internal, "failed to read: %w", err)
+		return storableErrorf(meta, codes.Internal, "failed to read: %v", err)
 	}
 	switch len(objs) {
 	case 0:
@@ -85,7 +85,7 @@ func StorableRead(ctx context.Context, nk runtime.NakamaModule, userID string, d
 		// One object found, proceed to unmarshal.
 		if err = json.Unmarshal([]byte(objs[0].Value), dst); err != nil {
 			if !create {
-				return storableErrorf(meta, codes.Internal, "failed to unmarshal: %w", err)
+				return storableErrorf(meta, codes.Internal, "failed to unmarshal: %v", err)
 			}
 			// Record is corrupted. Delete it and recreate with defaults so the caller recovers.
 			meta.Version = objs[0].GetVersion()
@@ -117,7 +117,7 @@ func StorableWrite(ctx context.Context, nk runtime.NakamaModule, userID string, 
 	meta.UserID = userID
 	data, err := json.Marshal(src)
 	if err != nil {
-		return storableErrorf(meta, codes.Internal, "failed to marshal: %w", err)
+		return storableErrorf(meta, codes.Internal, "failed to marshal: %v", err)
 	}
 	if acks, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
 		Collection:      meta.Collection,
@@ -128,7 +128,7 @@ func StorableWrite(ctx context.Context, nk runtime.NakamaModule, userID string, 
 		PermissionRead:  meta.PermissionRead,
 		PermissionWrite: meta.PermissionWrite,
 	}}); err != nil {
-		return storableErrorf(meta, codes.Internal, "failed to write: %w", err)
+		return storableErrorf(meta, codes.Internal, "failed to write: %v", err)
 	} else if len(acks) > 0 {
 		// Update the metadata with the version from the write acknowledgment.
 		meta.Version = acks[0].GetVersion()

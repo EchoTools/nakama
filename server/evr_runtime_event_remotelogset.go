@@ -320,7 +320,7 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 
 			params.profile = profile
 
-			StoreParams(session.Context(), &params)
+			StoreParams(session.Context(), params)
 
 			modes := []evr.Symbol{
 				evr.ModeArenaPublic,
