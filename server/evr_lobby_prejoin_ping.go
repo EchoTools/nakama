@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -20,6 +21,12 @@ const (
 	// preJoinPingRTTMax is the RTT ceiling sent in the ping request.
 	preJoinPingRTTMax = 250
 )
+
+// ErrPreJoinPingFailed is returned by validatePreJoinPing when one or more
+// party members cannot reach the target game server within the RTT threshold.
+// Callers that iterate over candidate servers should treat this as "skip and
+// try the next server" rather than a fatal error.
+var ErrPreJoinPingFailed = errors.New("pre-join ping validation failed")
 
 // preJoinPingWaiters tracks pending pre-join ping validations.
 // Key: session ID; value: channel that receives the ping response.
@@ -288,6 +295,6 @@ func (p *EvrPipeline) validatePreJoinPing(
 		logger.Warn("Failed to send pre-join ping error message", zap.Error(err))
 	}
 
-	return NewLobbyErrorf(InternalError, "pre-join ping validation failed: %d of %d party members could not reach server %s",
-		len(failures), len(entrants), endpoint.ExternalAddress())
+	return fmt.Errorf("%w: %w", ErrPreJoinPingFailed, NewLobbyErrorf(InternalError, "pre-join ping validation failed: %d of %d party members could not reach server %s",
+		len(failures), len(entrants), endpoint.ExternalAddress()))
 }
