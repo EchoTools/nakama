@@ -306,6 +306,11 @@ var ignoredSymbols = []uint64{
 func ParsePacket(data []byte) ([]Message, error) {
 	var err error
 
+	// Enforce packet size limit before any allocation.
+	if len(data) > MaxPacketLength {
+		return nil, fmt.Errorf("%w: packet too large (%d bytes, max %d)", ErrInvalidPacket, len(data), MaxPacketLength)
+	}
+
 	// Split the packet into individual messages.
 	chunks := bytes.Split(data, MessageMarker)
 
@@ -331,6 +336,11 @@ func ParsePacket(data []byte) ([]Message, error) {
 		}
 
 		l := int(dUint64(buf.Next(8)))
+		// Enforce per-message size limit before allocating the message struct.
+		if l > MaxMessageLength {
+			err = errors.Join(err, ErrInvalidPacket, fmt.Errorf("message too large (%d bytes, max %d)", l, MaxMessageLength))
+			break
+		}
 		// Verify the message data can be read from the rest of the packet.
 		if buf.Len() != l {
 			err = errors.Join(err, ErrInvalidPacket, fmt.Errorf("truncated packet (expected %d bytes, got %d)", l, buf.Len()))
