@@ -282,8 +282,9 @@ func isDiscordTokenValid(ctx context.Context, accessToken string) bool {
 	req, _ := http.NewRequestWithContext(ctx, "GET", "https://discord.com/api/users/@me", nil)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil || resp.StatusCode != 200 {
+	if err != nil {
 		return false
 	}
-	return true
+	defer resp.Body.Close()
+	return resp.StatusCode == 200
 }

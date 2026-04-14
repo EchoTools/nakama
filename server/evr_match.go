@@ -663,7 +663,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 	// if the server is in the presences, then shut down.
 	for _, p := range presences {
-		if p.GetSessionId() == state.GameServer.SessionID.String() {
+		if state.GameServer != nil && p.GetSessionId() == state.GameServer.SessionID.String() {
 			logger.Debug("Server left the match. Shutting down.")
 			state.server = nil
 			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 2)
@@ -1556,6 +1556,9 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			return nil, SignalResponse{Success: true}.String()
 		}
 	case SignalGetEndpoint:
+		if state.GameServer == nil {
+			return state, SignalResponse{Message: "no game server"}.String()
+		}
 		jsonData, err := json.Marshal(state.GameServer.Endpoint)
 		if err != nil {
 			return state, fmt.Sprintf("failed to marshal endpoint: %v", err)
@@ -1586,7 +1589,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 
 		for _, f := range settings.RequiredFeatures {
-			if !slices.Contains(state.GameServer.Features, f) {
+			if state.GameServer == nil || !slices.Contains(state.GameServer.Features, f) {
 				return state, SignalResponse{Message: fmt.Sprintf("bad request: feature not supported: %v", f)}.String()
 			}
 		}
@@ -1718,6 +1721,9 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 
 	case SignalEndedSession:
+		if state.GameServer == nil {
+			return state, SignalResponse{Message: "no game server"}.String()
+		}
 		// Trigger the MatchLeave event for the game server.
 		if err := nk.StreamUserLeave(StreamModeMatchAuthoritative, state.ID.UUID.String(), "", state.ID.Node, state.GameServer.GetUserId(), state.GameServer.GetSessionId()); err != nil {
 			logger.Warn("Failed to leave match stream", zap.Error(err))

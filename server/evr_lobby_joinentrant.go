@@ -38,6 +38,9 @@ func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, p
 		return ErrSessionNotFound
 	}
 
+	if label.GameServer == nil {
+		return fmt.Errorf("match has no game server")
+	}
 	serverSession := p.nk.sessionRegistry.Get(label.GameServer.SessionID)
 	if serverSession == nil {
 		return ErrServerSessionNotFound

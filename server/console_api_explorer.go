@@ -75,7 +75,11 @@ func (s *ConsoleServer) CallApiEndpoint(ctx context.Context, in *console.CallApi
 		}
 		args[2] = reflect.ValueOf(&emptypb.Empty{})
 	} else {
-		request := reflect.New(r.request).Interface().(proto.Message)
+		reqIface := reflect.New(r.request).Interface()
+		request, ok := reqIface.(proto.Message)
+		if !ok {
+			return nil, status.Error(codes.Internal, "Request type does not implement proto.Message")
+		}
 		err = protojson.Unmarshal([]byte(in.Body), request)
 		if err != nil {
 			s.logger.Error("Error parsing method request body.", zap.String("method", in.Method), zap.Error(err))
@@ -309,7 +313,11 @@ func reflectProtoMessageAsJsonTemplate(s reflect.Type) (string, error) {
 		}
 		return m
 	}
-	i := populate(reflect.New(s)).Interface().(proto.Message)
+	iface := populate(reflect.New(s)).Interface()
+	i, ok := iface.(proto.Message)
+	if !ok {
+		return "", fmt.Errorf("populated type does not implement proto.Message")
+	}
 	m := protojson.MarshalOptions{UseProtoNames: false, UseEnumNumbers: true, EmitUnpopulated: true}
 	j, err := m.Marshal(i)
 	if err != nil {

@@ -505,7 +505,12 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 				zap.String("evr_id", msg.EvrID.String()),
 				zap.Int32("loadout_number", msg.LoadoutNumber))
 			// Process the loadout update directly without converting to protobuf
-			if err := p.gameServerSaveLoadoutRequest(session.Context(), logger, session.(*sessionWS), msg); err != nil {
+			ws, ok := session.(*sessionWS)
+			if !ok {
+				logger.Error("Session is not a WebSocket session")
+				return false
+			}
+			if err := p.gameServerSaveLoadoutRequest(session.Context(), logger, ws, msg); err != nil {
 				logger.Error("Failed to process save loadout request", zap.Error(err))
 			}
 			return true
@@ -646,7 +651,12 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 				case evr.LobbySessionRequest:
 					// associate lobby session with login session
 					// If the message is an identifying message, validate the session and evr id.
-					if err := LobbySession(session.(*sessionWS), p.sessionRegistry, idmessage.GetLoginSessionID()); err != nil {
+					ws, ok := session.(*sessionWS)
+					if !ok {
+						logger.Error("Session is not a WebSocket session")
+						return false
+					}
+					if err := LobbySession(ws, p.sessionRegistry, idmessage.GetLoginSessionID()); err != nil {
 						logger.Error("Invalid session", zap.Error(err))
 						// Disconnect the client if the session is invalid.
 						return false
@@ -697,7 +707,12 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		logger = logger.With(zap.String("uid", session.UserID().String()), zap.String("sid", session.ID().String()), zap.String("username", session.Username()), zap.String("evrid", params.xpID.String()))
 	}
 
-	if err := pipelineFn(session.Context(), logger, session.(*sessionWS), in); err != nil {
+	ws, ok := session.(*sessionWS)
+	if !ok {
+		logger.Error("Session is not a WebSocket session")
+		return false
+	}
+	if err := pipelineFn(session.Context(), logger, ws, in); err != nil {
 		// Unwrap the error
 		logger.Error("Pipeline error", zap.Error(err))
 		// TODO: Handle errors and close the connection

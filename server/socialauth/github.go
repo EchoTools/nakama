@@ -218,10 +218,11 @@ func isGitHubTokenValid(ctx context.Context, accessToken string) bool {
 	req.Header.Set("User-Agent", "Nakama-Server")
 
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil || resp.StatusCode != 200 {
+	if err != nil {
 		return false
 	}
-	return true
+	defer resp.Body.Close()
+	return resp.StatusCode == 200
 }
 
 // ExchangeGitHubCodeForToken exchanges the authorization code for an access token and returns the oauth2 token.

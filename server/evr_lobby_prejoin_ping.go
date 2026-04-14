@@ -85,6 +85,9 @@ func (p *EvrPipeline) validatePreJoinPing(
 		return nil
 	}
 
+	if label.GameServer == nil {
+		return nil
+	}
 	endpoint := label.GameServer.Endpoint
 	if !endpoint.IsValid() {
 		logger.Warn("Game server endpoint invalid, skipping pre-join ping")

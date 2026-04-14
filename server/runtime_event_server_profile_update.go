@@ -165,7 +165,11 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, p
 		jsonTag := fieldType.Tag.Get("json")
 		statName := strings.SplitN(jsonTag, ",", 2)[0]
 
-		statValue := totalField.Interface().(*evr.StatisticValue).GetValue()
+		sv, ok := totalField.Interface().(*evr.StatisticValue)
+		if !ok || sv == nil {
+			continue
+		}
+		statValue := sv.GetValue()
 
 		// Skip stats that are not set or negative
 		if statValue <= 0 {
