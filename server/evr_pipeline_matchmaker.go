@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -107,10 +108,34 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 	}
 	latencyHistory = params.latencyHistory.Load()
 
+	// Build an allowlist of IPs from active game server presences so that
+	// clients cannot inject arbitrary IPs into their latency history and
+	// inflate rtt_* matchmaker properties.
+	knownIPs := make(map[string]struct{})
+	if presences, err := p.nk.StreamUserList(StreamModeGameServer, uuid.Nil.String(), "", "", false, true); err != nil {
+		logger.Warn("failed to list game server presences for ping validation", zap.Error(err))
+		// Non-fatal: fall through with an empty allowlist (all results will be dropped).
+	} else {
+		for _, presence := range presences {
+			gp := &GameServerPresence{}
+			if err := json.Unmarshal([]byte(presence.GetStatus()), gp); err != nil {
+				continue
+			}
+			if ip := gp.Endpoint.GetExternalIP(); ip != "" {
+				knownIPs[ip] = struct{}{}
+			}
+		}
+	}
+
 	for _, result := range response.Results {
 		ip := result.ExternalIP
 		if result.ExternalIP.IsUnspecified() {
 			ip = result.InternalIP
+		}
+
+		if _, ok := knownIPs[ip.String()]; !ok {
+			logger.Debug("dropping ping result for unknown game server IP", zap.String("ip", ip.String()))
+			continue
 		}
 
 		latencyHistory.Add(ip, int(result.PingMilliseconds), limit, expiry)
