@@ -169,7 +169,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	}
 
 	// The statistics queue handles inserting match statistics into the leaderboard records
-	statisticsQueue := NewStatisticsQueue(logger, db, nk)
+	statisticsQueue := NewStatisticsQueue(ctx, logger, db, nk)
 
 	// Initialize the VRML scan queue if the configuration is set
 	var vrmlScanQueue *VRMLScanQueue
@@ -274,8 +274,14 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	// Update the metrics with match data
 	go func() {
-		<-time.After(15 * time.Second)
-		metricsUpdateLoop(ctx, logger, nk.(*RuntimeGoNakamaModule), db)
+		timer := time.NewTimer(15 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			metricsUpdateLoop(ctx, logger, nk.(*RuntimeGoNakamaModule), db)
+		}
 	}()
 
 	if err := apiAuth.InitModule(ctx, logger, db, nk, initializer); err != nil {

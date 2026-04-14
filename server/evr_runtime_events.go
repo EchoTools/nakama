@@ -278,6 +278,11 @@ func (h *EventDispatcher) eventSessionEnd(ctx context.Context, logger runtime.Lo
 
 	delete(h.playerAuthorizations, evt.Properties["session_id"])
 
+	// Clean up VOIP loudness rate-limit entry for this user to prevent unbounded growth
+	if userID := evt.Properties["user_id"]; userID != "" {
+		voipLoudnessLastWrite.Delete(userID)
+	}
+
 	logger.Debug("process event session end: %+v", evt.Properties)
 	return nil
 }

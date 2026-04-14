@@ -42,7 +42,7 @@ type StatisticsQueue struct {
 	ch     chan []*StatisticsQueueEntry
 }
 
-func NewStatisticsQueue(logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) *StatisticsQueue {
+func NewStatisticsQueue(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) *StatisticsQueue {
 	ch := make(chan []*StatisticsQueueEntry, 8*3*100) // three matches ending at the same time, 100 records per player
 	r := &StatisticsQueue{
 		logger: logger,
@@ -51,9 +51,8 @@ func NewStatisticsQueue(logger runtime.Logger, db *sql.DB, nk runtime.NakamaModu
 
 	go func() {
 
-		ctx := context.Background()
-
 		pruneTicker := time.NewTicker(24 * time.Hour)
+		defer pruneTicker.Stop()
 
 		for {
 			select {

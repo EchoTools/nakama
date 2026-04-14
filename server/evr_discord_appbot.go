@@ -2576,14 +2576,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			go func() {
+				ticker := time.NewTicker(15 * time.Second)
+				defer ticker.Stop()
 
 				// Monitor the match and update the interaction
 				for {
-					startCheckTimer := time.NewTicker(15 * time.Second)
-					updateTicker := time.NewTicker(30 * time.Second)
 					select {
-					case <-startCheckTimer.C:
-					case <-updateTicker.C:
+					case <-ticker.C:
 					}
 
 					presences, err := d.nk.StreamUserList(StreamModeMatchAuthoritative, label.ID.UUID.String(), "", label.ID.Node, false, true)
