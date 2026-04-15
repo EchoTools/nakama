@@ -1259,7 +1259,8 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	// Lock the match if it is open and the lock time has passed.
-	if state.Open && state.LockedAt != nil && !state.LockedAt.IsZero() && time.Now().After(*state.LockedAt) {
+	// Skip matches in RoundClosing — they use backfill query filters instead of hard closure.
+	if state.Open && state.GameStatus != GameStatusRoundClosing && state.LockedAt != nil && !state.LockedAt.IsZero() && time.Now().After(*state.LockedAt) {
 		logger.Info("Closing the match in response to a lock.")
 		state.Open = false
 		updateLabel = true
