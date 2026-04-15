@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -27,7 +26,7 @@ type GameServerLoadoutInstance struct {
 // This is triggered when a player updates their loadout at the character customization screen.
 // The game server receives an internal broadcaster message (SR15NetSaveLoadoutRequest) and
 // forwards it to nakama via the TCP broadcaster WebSocket connection.
-func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *zap.Logger, _session *sessionWS, request *evr.GameServerSaveLoadoutRequest) error {
+func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *zap.Logger, request *evr.GameServerSaveLoadoutRequest) error {
 	logger = logger.With(
 		zap.String("evr_id", request.EvrID.String()),
 		zap.Int32("loadout_number", request.LoadoutNumber),
@@ -164,30 +163,4 @@ func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *
 		zap.Any("loadout", loadout))
 
 	return nil
-}
-
-// lookupUserByEntrantID looks up a Nakama user ID by the entrant's account ID
-func (p *EvrPipeline) lookupUserByEntrantID(ctx context.Context, entrantID string) (string, error) {
-	// The entrant ID is the account ID (uint64 as string)
-	// We need to find the user that has this account linked
-
-	// First, try to find by device ID (EvrID format)
-	// If entrantID is numeric, it might be a platform account ID
-	if _, err := strconv.ParseUint(entrantID, 10, 64); err == nil {
-		// It's a numeric account ID - search by linked device
-		// For now, try looking up by EvrID pattern
-		// This might need adjustment based on how IDs are actually stored
-	}
-
-	// Try device ID lookup with common prefixes
-	prefixes := []string{"DSC-", "OVR-ORG-", "STM-", "OVR-", "DMO-", ""}
-	for _, prefix := range prefixes {
-		deviceID := prefix + entrantID
-		userID, err := GetUserIDByDeviceID(ctx, p.db, deviceID)
-		if err == nil && userID != "" {
-			return userID, nil
-		}
-	}
-
-	return "", fmt.Errorf("user not found for entrant ID: %s", entrantID)
 }

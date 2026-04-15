@@ -1707,11 +1707,15 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 	case SignalLockSession:
 		// Lock signal indicates ~1:45 remaining in an arena match.
 		// Only set GameStatusRoundClosing for arena — combat/social are unaffected.
-		// Do NOT set Open=false or LockedAt here. The match stays open;
-		// backfill exclusion is handled by query filters on game_status.
-		// Open=false and LockedAt are set at round/match end (PostMatch), not here.
+		// Do NOT set Open=false here — the match stays open so the label is queryable.
+		// Backfill exclusion is handled by query filters on game_status:round_closing.
+		// Open=false is set later at PostMatch (round/match end), not here.
+		// LockedAt is set here to record when the closing phase began; it persists
+		// until an unlock signal (which the game server does not currently send).
 		if state.Mode == evr.ModeArenaPublic {
 			state.GameStatus = GameStatusRoundClosing
+			now := time.Now().UTC()
+			state.LockedAt = &now
 			logger.Info("Lock signal received, setting game status to round_closing")
 		} else {
 			logger.Debug("Lock signal received, ignoring for non-arena match")
@@ -1977,7 +1981,7 @@ var (
 func getMatchTerminationQueue() *matchTerminationQueue {
 	matchTerminationQueueOnce.Do(func() {
 		q := &matchTerminationQueue{ch: make(chan matchTerminationTask, matchTerminationQueueSize)}
-		for i := 0; i < matchTerminationWorkerCount; i++ {
+		for range matchTerminationWorkerCount {
 			go func() {
 				for task := range q.ch {
 					processMatchTerminationTask(task)

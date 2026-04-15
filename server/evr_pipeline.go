@@ -505,12 +505,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 				zap.String("evr_id", msg.EvrID.String()),
 				zap.Int32("loadout_number", msg.LoadoutNumber))
 			// Process the loadout update directly without converting to protobuf
-			ws, ok := session.(*sessionWS)
-			if !ok {
-				logger.Error("Session is not a WebSocket session")
-				return false
-			}
-			if err := p.gameServerSaveLoadoutRequest(session.Context(), logger, ws, msg); err != nil {
+			if err := p.gameServerSaveLoadoutRequest(session.Context(), logger, msg); err != nil {
 				logger.Error("Failed to process save loadout request", zap.Error(err))
 			}
 			return true
