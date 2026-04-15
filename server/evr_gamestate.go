@@ -22,6 +22,7 @@ const (
 	GameStatusPreSuddenDeath GameStatus = 7
 	GameStatusSuddenDeath    GameStatus = 8
 	GameStatusPostSuddenDeath GameStatus = 9
+	GameStatusRoundClosing    GameStatus = 10
 )
 
 var gameStatusNames = map[GameStatus]string{
@@ -35,6 +36,7 @@ var gameStatusNames = map[GameStatus]string{
 	GameStatusPreSuddenDeath:  "pre_sudden_death",
 	GameStatusSuddenDeath:     "sudden_death",
 	GameStatusPostSuddenDeath: "post_sudden_death",
+	GameStatusRoundClosing:    "round_closing",
 }
 
 var gameStatusValues = func() map[string]GameStatus {
