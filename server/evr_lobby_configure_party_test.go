@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	uatomic "go.uber.org/atomic"
@@ -109,6 +110,76 @@ func TestConfigureParty_FollowerNotOnMatchmakingStream_NotKicked(t *testing.T) {
 	assert.Equal(t, int32(0), ksm.kickCount.Load(),
 		"follower should NOT be kicked from matchmaking stream — "+
 			"they are a party member transitioning between queue cycles")
+}
+
+// TestLeavePartyStream_RemovesPartyStreamPresence verifies that
+// LeavePartyStream removes the player's party stream tracking from the
+// tracker. This documents why LeavePartyStream must NOT be called on
+// matchmaking errors — it destroys the party stream presence.
+func TestLeavePartyStream_RemovesPartyStreamPresence(t *testing.T) {
+	tracker := newMockMatchmakingTracker()
+
+	sessionID := uuid.Must(uuid.NewV4())
+	userID := uuid.Must(uuid.NewV4())
+	partyID := uuid.Must(uuid.NewV4())
+
+	partyStream := PresenceStream{Mode: StreamModeParty, Subject: partyID, Label: "testnode"}
+
+	// Manually track the session on the party stream.
+	tracker.Track(context.Background(), sessionID, partyStream, userID, PresenceMeta{})
+	require.True(t, tracker.hasPresence(sessionID, partyStream, userID),
+		"setup: session should be on party stream")
+
+	// Create a minimal session with the tracker.
+	s := &sessionWS{}
+	s.id = sessionID
+	s.userID = userID
+	s.tracker = tracker
+
+	// LeavePartyStream should remove the party stream presence.
+	LeavePartyStream(s)
+
+	assert.False(t, tracker.hasPresence(sessionID, partyStream, userID),
+		"LeavePartyStream should remove party stream presence")
+}
+
+// TestHandleMatchmakingError_PreservesPartyStream calls handleMatchmakingError
+// directly and verifies the party stream is NOT destroyed.
+//
+// The production bug: matchmaking error → handleMatchmakingError calls
+// LeavePartyStream → party destroyed → player re-queues as solo leader.
+func TestHandleMatchmakingError_PreservesPartyStream(t *testing.T) {
+	tracker := newMockMatchmakingTracker()
+
+	sessionID := uuid.Must(uuid.NewV4())
+	userID := uuid.Must(uuid.NewV4())
+	partyID := uuid.Must(uuid.NewV4())
+
+	partyStream := PresenceStream{Mode: StreamModeParty, Subject: partyID, Label: "testnode"}
+
+	// Player is on the party stream (in a party).
+	tracker.Track(context.Background(), sessionID, partyStream, userID, PresenceMeta{})
+
+	s := &sessionWS{}
+	s.id = sessionID
+	s.userID = userID
+	s.tracker = tracker
+
+	groupID := uuid.Must(uuid.NewV4())
+	lobbyParams := &LobbySessionParameters{
+		GroupID:   groupID,
+		PartySize: uatomic.NewInt64(1),
+	}
+	lobbyParams.Mode = evr.ModeArenaPublic
+
+	// Call handleMatchmakingError with a generic lobby error.
+	someError := NewLobbyError(InternalError, "test error")
+	_ = handleMatchmakingError(loggerForTest(t), s, lobbyParams, &testMetrics{}, someError)
+
+	// Party stream must survive — players don't leave parties on matchmaking errors.
+	assert.True(t, tracker.hasPresence(sessionID, partyStream, userID),
+		"party stream should survive matchmaking error — "+
+			"players don't leave parties just because matchmaking failed")
 }
 
 // TestConfigureParty_AllFollowersOnStream_NoKick is a baseline test:
