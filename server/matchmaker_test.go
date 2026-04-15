@@ -1717,7 +1717,7 @@ func NewLocalBenchMatchmaker(logger, startupLogger *zap.Logger, config Config, r
 
 		indexWriter:      indexWriter,
 		statsCompletions: NewBuffer(10),
-		statsSnapshot:    atomic.NewPointer[api.MatchmakerStats](&api.MatchmakerStats{}),
+		statsSnapshot:    atomic.NewPointer(&api.MatchmakerStats{}),
 		sessionTickets:   make(map[string]map[string]struct{}),
 		partyTickets:     make(map[string]map[string]struct{}),
 		indexes:          make(map[string]*MatchmakerIndex),

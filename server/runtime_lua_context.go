@@ -193,8 +193,6 @@ func RuntimeLuaConvertValue(l *lua.LState, val interface{}) lua.LValue {
 		return lt
 	case time.Time:
 		return lua.LNumber(v.UTC().Unix())
-	case nil:
-		return lua.LNil
 	default:
 		// Never return an actual Go `nil` or it will cause nil pointer dereferences inside gopher-lua.
 		return lua.LNil

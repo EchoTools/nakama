@@ -278,7 +278,7 @@ func (b *PostMatchmakerBackfill) getPossibleTeams(candidate *BackfillCandidate, 
 
 // executeBackfillResultOptimized executes backfill using pre-resolved sessions
 func (b *PostMatchmakerBackfill) executeBackfillResultOptimized(
-	ctx context.Context,
+	_ context.Context,
 	logger *zap.Logger,
 	result *BackfillResult,
 	sessions []Session,
@@ -462,8 +462,7 @@ func (b *PostMatchmakerBackfill) ExtractUnmatchedCandidates(candidates [][]runti
 		// Extract RTTs from properties
 		rtts := make(map[string]int)
 		for k, v := range props {
-			if strings.HasPrefix(k, RTTPropertyPrefix) {
-				ip := strings.TrimPrefix(k, RTTPropertyPrefix)
+			if ip, found := strings.CutPrefix(k, RTTPropertyPrefix); found {
 				if rtt, ok := v.(float64); ok {
 					rtts[ip] = int(rtt)
 				}
@@ -536,8 +535,7 @@ func (b *PostMatchmakerBackfill) ExtractCandidatesFromMatchmaker(extracts []*Mat
 		// Extract RTTs from numeric properties
 		rtts := make(map[string]int)
 		for k, v := range extract.NumericProperties {
-			if strings.HasPrefix(k, RTTPropertyPrefix) {
-				ip := strings.TrimPrefix(k, RTTPropertyPrefix)
+			if ip, found := strings.CutPrefix(k, RTTPropertyPrefix); found {
 				rtts[ip] = int(v)
 			}
 		}
@@ -599,16 +597,11 @@ func (b *PostMatchmakerBackfill) GetBackfillMatches(ctx context.Context, groupID
 		fmt.Sprintf("+label.group_id:%s", Query.QuoteStringValue(groupID.String())),
 	}
 
-	// For arena matches, exclude matches that are too old
+	// For arena matches, exclude matches in round_closing (match is about to end).
+	// The match stays Open during RoundClosing (Open=false is set at PostMatch),
+	// so this query filter is the primary mechanism to prevent arena backfill.
 	if mode == evr.ModeArenaPublic {
-		maxAgeSecs := 270 // Default 4.5 minutes
-		if ss := ServiceSettings(); ss != nil {
-			maxAgeSecs = ss.Matchmaking.ArenaBackfillMaxAgeSecs
-		}
-		if maxAgeSecs > 0 {
-			startTime := time.Now().UTC().Add(-time.Duration(maxAgeSecs) * time.Second).Format(time.RFC3339Nano)
-			qparts = append(qparts, fmt.Sprintf(`-label.start_time:<"%s"`, startTime))
-		}
+		qparts = append(qparts, fmt.Sprintf(`-label.game_status:%s`, GameStatusRoundClosing.String()))
 	}
 
 	query := strings.Join(qparts, " ")
@@ -951,80 +944,3 @@ func (b *PostMatchmakerBackfill) logBackfillSummary(logger *zap.Logger, result *
 	logger.Info("Backfill operation completed", fields...)
 }
 
-// executeBackfillResult executes a single backfill result and returns the number of successfully joined entrants
-func (b *PostMatchmakerBackfill) executeBackfillResult(ctx context.Context, logger *zap.Logger, result *BackfillResult) int {
-	if result == nil || result.Match == nil || result.Candidate == nil {
-		return 0
-	}
-
-	// Create entrant presences from the matchmaker entries
-	entrants := make([]*EvrMatchPresence, 0, len(result.Candidate.Entries))
-	sessions := make([]Session, 0, len(result.Candidate.Entries))
-
-	for _, entry := range result.Candidate.Entries {
-		sessionID := uuid.FromStringOrNil(entry.Presence.GetSessionId())
-		session := b.sessionRegistry.Get(sessionID)
-		if session == nil {
-			logger.Warn("Session not found for backfill", zap.String("session_id", entry.Presence.GetSessionId()))
-			continue
-		}
-
-		mu := entry.NumericProperties["rating_mu"]
-		sigma := entry.NumericProperties["rating_sigma"]
-		rating := NewRating(0, mu, sigma)
-
-		entrant, err := EntrantPresenceFromSession(session, uuid.FromStringOrNil(entry.PartyId), result.Team, rating, result.Candidate.GroupID.String(), 0, "")
-		if err != nil {
-			logger.Warn("Failed to create entrant presence for backfill", zap.Error(err), zap.String("session_id", session.ID().String()))
-			continue
-		}
-
-		entrants = append(entrants, entrant)
-		sessions = append(sessions, session)
-	}
-
-	if len(entrants) == 0 {
-		return 0
-	}
-
-	// Get the server session
-	serverSession := b.sessionRegistry.Get(result.Match.Label.GameServer.SessionID)
-	if serverSession == nil {
-		logger.Warn("Server session not found for backfill", zap.String("match_id", result.Match.Label.ID.String()))
-		return 0
-	}
-
-	// Join entrants to the match concurrently
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	successCount := 0
-	successfulUserIDs := make([]string, 0, len(entrants))
-
-	for i, entrant := range entrants {
-		wg.Add(1)
-		go func(idx int, ent *EvrMatchPresence) {
-			defer wg.Done()
-			if err := LobbyJoinEntrants(logger, b.matchRegistry, b.tracker, sessions[idx], serverSession, result.Match.Label, ent); err != nil {
-				logger.Info("Failed to join entrant to backfill match", zap.Error(err), zap.String("match_id", result.Match.Label.ID.String()), zap.String("user_id", ent.GetUserId()))
-			} else {
-				mu.Lock()
-				successCount++
-				successfulUserIDs = append(successfulUserIDs, ent.GetUserId())
-				mu.Unlock()
-				b.metrics.CustomCounter("lobby_join_post_matchmaker_backfill", result.Match.Label.MetricsTags(), 1)
-				logger.Info("Successfully backfilled player",
-					zap.String("match_id", result.Match.Label.ID.String()),
-					zap.String("user_id", ent.GetUserId()),
-					zap.Int("team", result.Team),
-					zap.Float64("score", result.Score))
-			}
-		}(i, entrant)
-	}
-
-	wg.Wait()
-
-	// Store the successful user IDs in the result for summary logging
-	result.PlayerUserIDs = successfulUserIDs
-
-	return successCount
-}

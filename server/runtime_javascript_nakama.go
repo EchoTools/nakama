@@ -1309,14 +1309,14 @@ func (n *RuntimeJavascriptNakamaModule) bcryptCompare(r *goja.Runtime) func(goja
 			panic(r.NewTypeError("plaintext cannot be empty"))
 		}
 
-		err := bcrypt.CompareHashAndPassword([]byte(input), []byte(plaintext))
-		if err == nil {
+		switch err := bcrypt.CompareHashAndPassword([]byte(input), []byte(plaintext)); err {
+		case nil:
 			return r.ToValue(true)
-		} else if err == bcrypt.ErrHashTooShort || err == bcrypt.ErrMismatchedHashAndPassword {
+		case bcrypt.ErrHashTooShort, bcrypt.ErrMismatchedHashAndPassword:
 			return r.ToValue(false)
+		default:
+			panic(r.NewGoError(fmt.Errorf("error comparing hash and plaintext: %w", err)))
 		}
-
-		panic(r.NewGoError(fmt.Errorf("error comparing hash and plaintext: %w", err)))
 	}
 }
 
@@ -7787,9 +7787,10 @@ func (n *RuntimeJavascriptNakamaModule) friendsAdd(r *goja.Runtime) func(goja.Fu
 				panic(r.NewTypeError("expects an array of strings"))
 			}
 			for _, uname := range usernamesArray {
-				if uname == "" {
+				switch uname {
+				case "":
 					panic(r.NewTypeError("username to add must not be empty"))
-				} else if uname == username {
+				case username:
 					panic(r.NewTypeError("cannot add self as friend"))
 				}
 			}
@@ -7882,9 +7883,10 @@ func (n *RuntimeJavascriptNakamaModule) friendsDelete(r *goja.Runtime) func(goja
 				panic(r.NewTypeError("expects an array of strings"))
 			}
 			for _, uname := range usernamesArray {
-				if uname == "" {
+				switch uname {
+				case "":
 					panic(r.NewTypeError("username to delete must not be empty"))
-				} else if uname == username {
+				case username:
 					panic(r.NewTypeError("cannot delete self"))
 				}
 			}
@@ -7962,9 +7964,10 @@ func (n *RuntimeJavascriptNakamaModule) friendsBlock(r *goja.Runtime) func(goja.
 				panic(r.NewTypeError("expects an array of strings"))
 			}
 			for _, uname := range usernamesArray {
-				if uname == "" {
+				switch uname {
+				case "":
 					panic(r.NewTypeError("username to block must not be empty"))
-				} else if uname == username {
+				case username:
 					panic(r.NewTypeError("cannot block self"))
 				}
 			}
@@ -8546,7 +8549,7 @@ func (n *RuntimeJavascriptNakamaModule) localcacheDelete(r *goja.Runtime) func(g
 	}
 }
 
-func (n *RuntimeJavascriptNakamaModule) localcacheClear(r *goja.Runtime) func(goja.FunctionCall) goja.Value {
+func (n *RuntimeJavascriptNakamaModule) localcacheClear(_r *goja.Runtime) func(goja.FunctionCall) goja.Value {
 	return func(f goja.FunctionCall) goja.Value {
 		n.localCache.Clear()
 

@@ -161,7 +161,7 @@ func (h *ReservationSlashCommandHandler) handleAddReservation(ctx context.Contex
 }
 
 // handleCheckReservation handles the /reserve check command
-func (h *ReservationSlashCommandHandler) handleCheckReservation(ctx context.Context, dg *discordgo.Session, i *discordgo.InteractionCreate, userID, guildID string, options []*discordgo.ApplicationCommandInteractionDataOption) error {
+func (h *ReservationSlashCommandHandler) handleCheckReservation(ctx context.Context, dg *discordgo.Session, i *discordgo.InteractionCreate, _userID, _guildID string, options []*discordgo.ApplicationCommandInteractionDataOption) error {
 	if len(options) == 0 {
 		return h.respondError(dg, i, "Reservation ID required")
 	}
@@ -185,7 +185,7 @@ func (h *ReservationSlashCommandHandler) handleCheckReservation(ctx context.Cont
 }
 
 // handleListReservations handles the /reserve list command
-func (h *ReservationSlashCommandHandler) handleListReservations(ctx context.Context, dg *discordgo.Session, i *discordgo.InteractionCreate, userID, guildID string, options []*discordgo.ApplicationCommandInteractionDataOption) error {
+func (h *ReservationSlashCommandHandler) handleListReservations(ctx context.Context, dg *discordgo.Session, i *discordgo.InteractionCreate, _userID, guildID string, options []*discordgo.ApplicationCommandInteractionDataOption) error {
 	// Get time range for listing (default to next 24 hours)
 	startTime := time.Now()
 	endTime := startTime.Add(24 * time.Hour)
@@ -402,12 +402,12 @@ func (h *ReservationSlashCommandHandler) handleReservationConflicts(dg *discordg
 }
 
 // Stub implementations for remaining handlers
-func (h *ReservationSlashCommandHandler) handleRemoveReservation(ctx context.Context, dg *discordgo.Session, i *discordgo.InteractionCreate, userID, guildID string, options []*discordgo.ApplicationCommandInteractionDataOption) error {
+func (h *ReservationSlashCommandHandler) handleRemoveReservation(_ctx context.Context, dg *discordgo.Session, i *discordgo.InteractionCreate, _userID, _guildID string, _options []*discordgo.ApplicationCommandInteractionDataOption) error {
 	// TODO: Implement reservation removal
 	return h.respondError(dg, i, "Remove reservation not yet implemented")
 }
 
-func (h *ReservationSlashCommandHandler) handleReservationStatus(ctx context.Context, dg *discordgo.Session, i *discordgo.InteractionCreate, userID, guildID string, options []*discordgo.ApplicationCommandInteractionDataOption) error {
+func (h *ReservationSlashCommandHandler) handleReservationStatus(_ctx context.Context, dg *discordgo.Session, i *discordgo.InteractionCreate, _userID, _guildID string, _options []*discordgo.ApplicationCommandInteractionDataOption) error {
 	// TODO: Implement reservation status
 	return h.respondError(dg, i, "Reservation status not yet implemented")
 }

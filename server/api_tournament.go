@@ -115,14 +115,16 @@ func (s *ApiServer) JoinTournament(ctx context.Context, in *api.JoinTournamentRe
 
 	tournamentID := in.GetTournamentId()
 
-	if err := TournamentJoin(ctx, s.logger, s.db, s.leaderboardCache, s.leaderboardRankCache, userID, username, tournamentID); err != nil {
-		if err == runtime.ErrTournamentNotFound {
-			return nil, status.Error(codes.NotFound, "Tournament not found.")
-		} else if err == runtime.ErrTournamentMaxSizeReached {
-			return nil, status.Error(codes.InvalidArgument, "Tournament cannot be joined as it has reached its max size.")
-		} else if err == runtime.ErrTournamentOutsideDuration {
-			return nil, status.Error(codes.InvalidArgument, "Tournament is not active and cannot accept new joins.")
-		}
+	switch err := TournamentJoin(ctx, s.logger, s.db, s.leaderboardCache, s.leaderboardRankCache, userID, username, tournamentID); err {
+	case nil:
+		// Success, continue.
+	case runtime.ErrTournamentNotFound:
+		return nil, status.Error(codes.NotFound, "Tournament not found.")
+	case runtime.ErrTournamentMaxSizeReached:
+		return nil, status.Error(codes.InvalidArgument, "Tournament cannot be joined as it has reached its max size.")
+	case runtime.ErrTournamentOutsideDuration:
+		return nil, status.Error(codes.InvalidArgument, "Tournament is not active and cannot accept new joins.")
+	default:
 		return nil, status.Error(codes.Internal, "Error while trying to join tournament.")
 	}
 
