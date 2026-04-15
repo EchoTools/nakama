@@ -32,7 +32,6 @@ const (
 	maxAttemptsAccount   = 5
 	lockoutPeriodAccount = time.Minute * 1
 
-	maxAttemptsIp   = 10
 	lockoutPeriodIp = time.Minute * 10
 )
 

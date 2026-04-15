@@ -46,7 +46,7 @@ func (p *EvrPipeline) resolveEvrIDToUserID(ctx context.Context, platformCode evr
 }
 
 // sendEVRMessageByUserID sends an EVR message to a user's login session if they're online.
-func (p *EvrPipeline) sendEVRMessageByUserID(ctx context.Context, logger *zap.Logger, userID uuid.UUID, messages ...evr.Message) error {
+func (p *EvrPipeline) sendEVRMessageByUserID(_ctx context.Context, logger *zap.Logger, userID uuid.UUID, messages ...evr.Message) error {
 	presences, err := p.nk.StreamUserList(StreamModeService, userID.String(), "", StreamLabelLoginService, false, true)
 	if err != nil {
 		return fmt.Errorf("stream list: %w", err)
