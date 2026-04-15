@@ -599,16 +599,11 @@ func (b *PostMatchmakerBackfill) GetBackfillMatches(ctx context.Context, groupID
 		fmt.Sprintf("+label.group_id:%s", Query.QuoteStringValue(groupID.String())),
 	}
 
-	// For arena matches, exclude matches that are too old
+	// For arena matches, exclude matches in round_closing (match is about to end).
+	// The match is also set to Open=false when RoundClosing, so it's filtered at line 623
+	// as well, but excluding it from the query avoids fetching matches that can't be used.
 	if mode == evr.ModeArenaPublic {
-		maxAgeSecs := 270 // Default 4.5 minutes
-		if ss := ServiceSettings(); ss != nil {
-			maxAgeSecs = ss.Matchmaking.ArenaBackfillMaxAgeSecs
-		}
-		if maxAgeSecs > 0 {
-			startTime := time.Now().UTC().Add(-time.Duration(maxAgeSecs) * time.Second).Format(time.RFC3339Nano)
-			qparts = append(qparts, fmt.Sprintf(`-label.start_time:<"%s"`, startTime))
-		}
+		qparts = append(qparts, fmt.Sprintf(`-label.game_status:%s`, GameStatusRoundClosing.String()))
 	}
 
 	query := strings.Join(qparts, " ")
