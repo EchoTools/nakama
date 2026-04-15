@@ -112,7 +112,7 @@ func RuntimeLuaConvertMapString(l *lua.LState, data map[string]string) *lua.LTab
 	return lt
 }
 
-func RuntimeLuaConvertMap(l *lua.LState, data map[string]interface{}) *lua.LTable {
+func RuntimeLuaConvertMap(l *lua.LState, data map[string]any) *lua.LTable {
 	lt := l.CreateTable(0, len(data))
 
 	for k, v := range data {
@@ -132,21 +132,19 @@ func RuntimeLuaConvertMapInt64(l *lua.LState, data map[string]int64) *lua.LTable
 	return lt
 }
 
-func RuntimeLuaConvertLuaTable(lv *lua.LTable) map[string]interface{} {
-	returnData, _ := RuntimeLuaConvertLuaValue(lv).(map[string]interface{})
+func RuntimeLuaConvertLuaTable(lv *lua.LTable) map[string]any {
+	returnData, _ := RuntimeLuaConvertLuaValue(lv).(map[string]any)
 	return returnData
 }
 
-func RuntimeLuaConvertValue(l *lua.LState, val interface{}) lua.LValue {
-	if val == nil {
-		return lua.LNil
-	}
-
+func RuntimeLuaConvertValue(l *lua.LState, val any) lua.LValue {
 	// Types looked up from:
 	// https://golang.org/pkg/encoding/json/#Unmarshal
 	// https://developers.google.com/protocol-buffers/docs/proto3#scalar
 	// More types added based on observations.
 	switch v := val.(type) {
+	case nil:
+		return lua.LNil
 	case bool:
 		return lua.LBool(v)
 	case string:
@@ -177,7 +175,7 @@ func RuntimeLuaConvertValue(l *lua.LState, val interface{}) lua.LValue {
 		return RuntimeLuaConvertMapString(l, v)
 	case map[string]int64:
 		return RuntimeLuaConvertMapInt64(l, v)
-	case map[string]interface{}:
+	case map[string]any:
 		return RuntimeLuaConvertMap(l, v)
 	case []string:
 		lt := l.CreateTable(len(val.([]string)), 0)
@@ -185,8 +183,8 @@ func RuntimeLuaConvertValue(l *lua.LState, val interface{}) lua.LValue {
 			lt.RawSetInt(k+1, lua.LString(v))
 		}
 		return lt
-	case []interface{}:
-		lt := l.CreateTable(len(val.([]interface{})), 0)
+	case []any:
+		lt := l.CreateTable(len(val.([]any)), 0)
 		for k, v := range v {
 			lt.RawSetInt(k+1, RuntimeLuaConvertValue(l, v))
 		}
@@ -194,12 +192,12 @@ func RuntimeLuaConvertValue(l *lua.LState, val interface{}) lua.LValue {
 	case time.Time:
 		return lua.LNumber(v.UTC().Unix())
 	default:
-		// Never return an actual Go `nil` or it will cause nil pointer dereferences inside gopher-lua.
+		// Return LNil for unrecognized types to avoid nil pointer dereferences inside gopher-lua.
 		return lua.LNil
 	}
 }
 
-func RuntimeLuaConvertLuaValue(lv lua.LValue) interface{} {
+func RuntimeLuaConvertLuaValue(lv lua.LValue) any {
 	// Taken from: https://github.com/yuin/gluamapper/blob/master/gluamapper.go#L79
 	switch v := lv.(type) {
 	case *lua.LNilType:
@@ -220,7 +218,7 @@ func RuntimeLuaConvertLuaValue(lv lua.LValue) interface{} {
 		maxn := v.MaxN()
 		if maxn == 0 {
 			// Table.
-			ret := make(map[string]interface{})
+			ret := make(map[string]any)
 			v.ForEach(func(key, value lua.LValue) {
 				keyStr := fmt.Sprint(RuntimeLuaConvertLuaValue(key))
 				ret[keyStr] = RuntimeLuaConvertLuaValue(value)
@@ -228,7 +226,7 @@ func RuntimeLuaConvertLuaValue(lv lua.LValue) interface{} {
 			return ret
 		}
 		// Array.
-		ret := make([]interface{}, 0, maxn)
+		ret := make([]any, 0, maxn)
 		for i := 1; i <= maxn; i++ {
 			ret = append(ret, RuntimeLuaConvertLuaValue(v.RawGetInt(i)))
 		}
