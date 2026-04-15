@@ -588,9 +588,10 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	}
 
 	// If the active group is missing from guildGroups (registry race, state
-	// load failure, etc.), fall back to the largest guild for this session
-	// only — never persist the change. The player's stored ActiveGroupID is
-	// left untouched so it isn't silently overwritten.
+	// load failure, etc.), fall back to the largest guild for this session.
+	// For new players (uuid.Nil), persist the assignment so they get a real group.
+	// For existing players with a real group that's temporarily unresolvable,
+	// use session-only fallback — don't overwrite their stored choice.
 	storedActiveGroupID := params.profile.GetActiveGroupID()
 	groupIDAutoAssigned := false
 	if _, ok := params.guildGroups[params.profile.ActiveGroupID]; !ok {
@@ -612,7 +613,14 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 			zap.String("stored_gid", storedActiveGroupID.String()),
 			zap.String("fallback_gid", fallbackID.String()))
 		params.profile.SetActiveGroupID(fallbackID)
-		groupIDAutoAssigned = true
+
+		if storedActiveGroupID == uuid.Nil {
+			// New player with no group set — persist the assignment
+			metadataUpdated = true
+		} else {
+			// Existing player whose group is temporarily unresolvable — session only
+			groupIDAutoAssigned = true
+		}
 	}
 
 	// Resolve all system group memberships in a single query
