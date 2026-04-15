@@ -598,17 +598,9 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 	if p.Mode != evr.ModeSocialPublic {
 		qparts = append(qparts, fmt.Sprintf(`+label.start_time:>="%s"`, minStartTime))
 	}
-	// For arena public matches, exclude matches older than the configured max age
+	// For arena matches, exclude matches in round_closing (about to end).
 	if p.Mode == evr.ModeArenaPublic {
-		var maxAgeSecs int
-		if ss := ServiceSettings(); ss != nil {
-			maxAgeSecs = ss.Matchmaking.ArenaBackfillMaxAgeSecs
-		}
-		if maxAgeSecs > 0 {
-			// Exclude matches that started more than maxAgeSecs ago
-			startTime := p.MatchmakingTimestamp.UTC().Add(-time.Duration(maxAgeSecs) * time.Second).Format(time.RFC3339Nano)
-			qparts = append(qparts, fmt.Sprintf(`-label.start_time:<"%s"`, startTime))
-		}
+		qparts = append(qparts, fmt.Sprintf(`-label.game_status:%s`, GameStatusRoundClosing.String()))
 	}
 
 	if !p.CurrentMatchID.IsNil() {
