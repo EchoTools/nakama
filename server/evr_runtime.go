@@ -79,7 +79,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 			if cleanupErr != nil {
 				logger.WithField("error", cleanupErr).Warn("CGNAT: startup cleanup failed")
 			} else if brokenLinks > 0 {
-				logger.WithFields(map[string]interface{}{"broken_links": brokenLinks, "affected_users": affectedUsers}).Info("CGNAT: startup cleanup completed")
+				logger.WithFields(map[string]any{"broken_links": brokenLinks, "affected_users": affectedUsers}).Info("CGNAT: startup cleanup completed")
 			}
 		}
 	}()
@@ -377,7 +377,7 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 		if len(groups) == 0 {
 			// Create a nakama core group
-			_, err = nk.GroupCreate(ctx, userId, name, userId, SystemGroupLangTag, name, "", false, map[string]interface{}{}, 1000)
+			_, err = nk.GroupCreate(ctx, userId, name, userId, SystemGroupLangTag, name, "", false, map[string]any{}, 1000)
 			if err != nil {
 				logger.WithField("err", err).Warn("Group `%s` create error: %v", name, err)
 			}
@@ -542,7 +542,7 @@ SELECT ge.state FROM groups g, group_edge ge WHERE g.id = ge.destination_id AND 
 AND ge.source_id = $3 AND ge.state >= 0 AND ge.state <= 2;
 `
 
-	params := make([]interface{}, 0, 4)
+	params := make([]any, 0, 4)
 	params = append(params, groupType)
 	params = append(params, groupName)
 	params = append(params, userID)
@@ -566,7 +566,7 @@ SELECT ge.state FROM groups g, group_edge ge WHERE g.id = ge.destination_id AND 
 AND ge.source_id = $3 AND ge.state >= 0 AND ge.state <= $4;
 `
 
-	params := make([]interface{}, 0, 4)
+	params := make([]any, 0, 4)
 	params = append(params, groupType)
 	params = append(params, groupID)
 	params = append(params, userID)

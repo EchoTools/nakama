@@ -313,7 +313,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		// Check if the broadcaster is available
 		retries := 5
 		var rtt time.Duration
-		for i := 0; i < retries; i++ {
+		for range retries {
 			rtt, err = BroadcasterHealthcheck(p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
 			if err != nil {
 				// Try the internal IP
@@ -849,7 +849,7 @@ func BroadcasterRTTcheck(lIP net.IP, rIP net.IP, port, count int, timeout time.D
 	deadline := time.Now().Add(10 * time.Second)
 
 	// Loop count times
-	for i := 0; i < count; i++ {
+	for i := range count {
 		if time.Now().After(deadline) {
 			// Timeout occurred, return an error
 			return nil, fmt.Errorf("broadcaster RTT check timed out after %v", timeout)

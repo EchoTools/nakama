@@ -678,13 +678,13 @@ func (n *RuntimeLuaNakamaModule) event(l *lua.LState) int {
 	}
 
 	var ts *timestamppb.Timestamp
-	timestamp := l.OptInt64(3, -1)
-	if timestamp == 0 {
+	switch timestamp := l.OptInt64(3, -1); timestamp {
+	case 0:
 		l.ArgError(3, "timestamp must be numeric UTC seconds when provided")
 		return 0
-	} else if timestamp == -1 {
+	case -1:
 		ts = nil
-	} else {
+	default:
 		ts = &timestamppb.Timestamp{Seconds: timestamp}
 	}
 
@@ -913,10 +913,10 @@ func (n *RuntimeLuaNakamaModule) sqlExec(l *lua.LState) int {
 		return 0
 	}
 	parameters := l.OptTable(2, nil)
-	var params []interface{}
+	var params []any
 	if parameters != nil && parameters.Len() != 0 {
 		var ok bool
-		params, ok = RuntimeLuaConvertLuaValue(parameters).([]interface{})
+		params, ok = RuntimeLuaConvertLuaValue(parameters).([]any)
 		if !ok {
 			l.ArgError(2, "expects a list of params as a table")
 			return 0
@@ -956,10 +956,10 @@ func (n *RuntimeLuaNakamaModule) sqlQuery(l *lua.LState) int {
 		return 0
 	}
 	parameters := l.OptTable(2, nil)
-	var params []interface{}
+	var params []any
 	if parameters != nil && parameters.Len() != 0 {
 		var ok bool
-		params, ok = RuntimeLuaConvertLuaValue(parameters).([]interface{})
+		params, ok = RuntimeLuaConvertLuaValue(parameters).([]any)
 		if !ok {
 			l.ArgError(2, "expects a list of params as a table")
 			return 0
@@ -984,10 +984,10 @@ func (n *RuntimeLuaNakamaModule) sqlQuery(l *lua.LState) int {
 		return 0
 	}
 	resultColumnCount := len(resultColumns)
-	resultRows := make([][]interface{}, 0)
+	resultRows := make([][]any, 0)
 	for rows.Next() {
-		resultRowValues := make([]interface{}, resultColumnCount)
-		resultRowPointers := make([]interface{}, resultColumnCount)
+		resultRowValues := make([]any, resultColumnCount)
+		resultRowPointers := make([]any, resultColumnCount)
 		for i := range resultRowValues {
 			resultRowPointers[i] = &resultRowValues[i]
 		}
@@ -1150,7 +1150,7 @@ func (n *RuntimeLuaNakamaModule) httpRequest(l *lua.LState) int {
 		return 0
 	}
 	// Read the response headers.
-	responseHeaders := make(map[string]interface{}, len(resp.Header))
+	responseHeaders := make(map[string]any, len(resp.Header))
 	for k, vs := range resp.Header {
 		// TODO accept multiple values per header
 		for _, v := range vs {
@@ -1202,13 +1202,13 @@ func (n *RuntimeLuaNakamaModule) jwtGenerate(l *lua.LState) int {
 		return 0
 	}
 
-	claimset := RuntimeLuaConvertLuaValue(claims).(map[string]interface{})
+	claimset := RuntimeLuaConvertLuaValue(claims).(map[string]any)
 	jwtClaims := jwt.MapClaims{}
 	for k, v := range claimset {
 		jwtClaims[k] = v
 	}
 
-	var pk interface{}
+	var pk any
 	switch signingMethodInterface {
 	case jwt.SigningMethodRS256:
 		block, _ := pem.Decode([]byte(signingKey))
@@ -1273,7 +1273,7 @@ func (n *RuntimeLuaNakamaModule) jsonDecode(l *lua.LState) int {
 		return 0
 	}
 
-	var jsonData interface{}
+	var jsonData any
 	if err := json.Unmarshal([]byte(jsonString), &jsonData); err != nil {
 		l.RaiseError("not a valid JSON string: %v", err.Error())
 		return 0
@@ -2465,7 +2465,7 @@ func (n *RuntimeLuaNakamaModule) accountGetId(l *lua.LState) int {
 	accountTable.RawSetString("create_time", lua.LNumber(account.User.CreateTime.Seconds))
 	accountTable.RawSetString("update_time", lua.LNumber(account.User.UpdateTime.Seconds))
 
-	metadataMap := make(map[string]interface{})
+	metadataMap := make(map[string]any)
 	err = json.Unmarshal([]byte(account.User.Metadata), &metadataMap)
 	if err != nil {
 		l.RaiseError("failed to convert metadata to json: %s", err.Error())
@@ -2595,7 +2595,7 @@ func (n *RuntimeLuaNakamaModule) accountsGetId(l *lua.LState) int {
 		accountTable.RawSetString("create_time", lua.LNumber(account.User.CreateTime.Seconds))
 		accountTable.RawSetString("update_time", lua.LNumber(account.User.UpdateTime.Seconds))
 
-		metadataMap := make(map[string]interface{})
+		metadataMap := make(map[string]any)
 		err = json.Unmarshal([]byte(account.User.Metadata), &metadataMap)
 		if err != nil {
 			l.RaiseError("failed to convert metadata to json: %s", err.Error())
@@ -2660,7 +2660,7 @@ func (n *RuntimeLuaNakamaModule) usersGetId(l *lua.LState) int {
 	userIDs := l.OptTable(1, nil)
 	var uids []string
 	if userIDs != nil {
-		userIDsTable, ok := RuntimeLuaConvertLuaValue(userIDs).([]interface{})
+		userIDsTable, ok := RuntimeLuaConvertLuaValue(userIDs).([]any)
 		if !ok {
 			l.ArgError(1, "invalid user ids list")
 			return 0
@@ -2685,7 +2685,7 @@ func (n *RuntimeLuaNakamaModule) usersGetId(l *lua.LState) int {
 	facebookIDs := l.OptTable(2, nil)
 	var fids []string
 	if facebookIDs != nil {
-		facebookIDsTable, ok := RuntimeLuaConvertLuaValue(facebookIDs).([]interface{})
+		facebookIDsTable, ok := RuntimeLuaConvertLuaValue(facebookIDs).([]any)
 		if !ok {
 			l.ArgError(1, "invalid facebook ids list")
 			return 0
@@ -2762,7 +2762,7 @@ func userToLuaTable(l *lua.LState, user *api.User) (*lua.LTable, error) {
 	ut.RawSetString("create_time", lua.LNumber(user.CreateTime.Seconds))
 	ut.RawSetString("update_time", lua.LNumber(user.UpdateTime.Seconds))
 
-	metadataMap := make(map[string]interface{})
+	metadataMap := make(map[string]any)
 	err := json.Unmarshal([]byte(user.Metadata), &metadataMap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert user metadata to json: %w", err)
@@ -2787,7 +2787,7 @@ func groupToLuaTable(l *lua.LState, group *api.Group) (*lua.LTable, error) {
 	gt.RawSetString("create_time", lua.LNumber(group.CreateTime.Seconds))
 	gt.RawSetString("update_time", lua.LNumber(group.UpdateTime.Seconds))
 
-	metadataMap := make(map[string]interface{})
+	metadataMap := make(map[string]any)
 	err := json.Unmarshal([]byte(group.Metadata), &metadataMap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert group metadata to json: %w", err)
@@ -2886,7 +2886,7 @@ func (n *RuntimeLuaNakamaModule) usersGetUsername(l *lua.LState) int {
 		l.Push(l.CreateTable(0, 0))
 		return 1
 	}
-	usernamesArray, ok := RuntimeLuaConvertLuaValue(usernames).([]interface{})
+	usernamesArray, ok := RuntimeLuaConvertLuaValue(usernames).([]any)
 	if !ok {
 		l.ArgError(1, "invalid username data")
 		return 0
@@ -2945,7 +2945,7 @@ func (n *RuntimeLuaNakamaModule) usersGetFriendStatus(l *lua.LState) int {
 
 	userIDs := l.CheckTable(2)
 
-	uidsTable, ok := RuntimeLuaConvertLuaValue(userIDs).([]interface{})
+	uidsTable, ok := RuntimeLuaConvertLuaValue(userIDs).([]any)
 	if !ok {
 		l.ArgError(2, "invalid user ids list")
 		return 0
@@ -2986,7 +2986,7 @@ func (n *RuntimeLuaNakamaModule) usersGetFriendStatus(l *lua.LState) int {
 		ft.RawSetString("state", lua.LNumber(f.State.Value))
 		ft.RawSetString("update_time", lua.LNumber(f.UpdateTime.Seconds))
 		ft.RawSetString("user", fut)
-		metadataMap := make(map[string]interface{})
+		metadataMap := make(map[string]any)
 		err = json.Unmarshal([]byte(f.Metadata), &metadataMap)
 		if err != nil {
 			l.RaiseError("failed to unmarshal friend metadata: %s", err.Error())
@@ -3050,7 +3050,7 @@ func (n *RuntimeLuaNakamaModule) usersBanId(l *lua.LState) int {
 	if userIDs.Len() == 0 {
 		return 0
 	}
-	userIDsArray, ok := RuntimeLuaConvertLuaValue(userIDs).([]interface{})
+	userIDsArray, ok := RuntimeLuaConvertLuaValue(userIDs).([]any)
 	if !ok {
 		l.ArgError(1, "invalid user id data")
 		return 0
@@ -3099,7 +3099,7 @@ func (n *RuntimeLuaNakamaModule) usersUnbanId(l *lua.LState) int {
 	if userIDs.Len() == 0 {
 		return 0
 	}
-	userIDsArray, ok := RuntimeLuaConvertLuaValue(userIDs).([]interface{})
+	userIDsArray, ok := RuntimeLuaConvertLuaValue(userIDs).([]any)
 	if !ok {
 		l.ArgError(1, "invalid user id data")
 		return 0
@@ -4825,10 +4825,10 @@ func (n *RuntimeLuaNakamaModule) matchCreate(l *lua.LState) int {
 	}
 
 	params := RuntimeLuaConvertLuaValue(l.CheckAny(2))
-	var paramsMap map[string]interface{}
+	var paramsMap map[string]any
 	if params != nil {
 		var ok bool
-		paramsMap, ok = params.(map[string]interface{})
+		paramsMap, ok = params.(map[string]any)
 		if !ok {
 			l.ArgError(2, "expects params to be nil or a table of key-value pairs")
 			return 0
@@ -5556,7 +5556,7 @@ func tableToNotificationUpdates(l *lua.LState, dataTable *lua.LTable) ([]notific
 func (n *RuntimeLuaNakamaModule) notificationsGetId(l *lua.LState) int {
 	notificationIDs := l.CheckTable(1)
 
-	notifIdsTable, ok := RuntimeLuaConvertLuaValue(notificationIDs).([]interface{})
+	notifIdsTable, ok := RuntimeLuaConvertLuaValue(notificationIDs).([]any)
 	if !ok {
 		l.ArgError(1, "invalid user ids list")
 		return 0
@@ -5612,7 +5612,7 @@ func (n *RuntimeLuaNakamaModule) notificationsGetId(l *lua.LState) int {
 func (n *RuntimeLuaNakamaModule) notificationsDeleteId(l *lua.LState) int {
 	notificationIDs := l.OptTable(1, nil)
 
-	notifIdsTable, ok := RuntimeLuaConvertLuaValue(notificationIDs).([]interface{})
+	notifIdsTable, ok := RuntimeLuaConvertLuaValue(notificationIDs).([]any)
 	if !ok {
 		l.ArgError(1, "invalid user ids list")
 		return 0
@@ -5976,7 +5976,7 @@ func (n *RuntimeLuaNakamaModule) statusFollow(l *lua.LState) int {
 
 	userIDs := l.CheckTable(2)
 
-	uidsTable, ok := RuntimeLuaConvertLuaValue(userIDs).([]interface{})
+	uidsTable, ok := RuntimeLuaConvertLuaValue(userIDs).([]any)
 	if !ok {
 		l.ArgError(2, "invalid user ids list")
 		return 0
@@ -6018,7 +6018,7 @@ func (n *RuntimeLuaNakamaModule) statusUnfollow(l *lua.LState) int {
 
 	userIDs := l.CheckTable(2)
 
-	uidsTable, ok := RuntimeLuaConvertLuaValue(userIDs).([]interface{})
+	uidsTable, ok := RuntimeLuaConvertLuaValue(userIDs).([]any)
 	if !ok {
 		l.ArgError(2, "invalid user ids list")
 		return 0
@@ -6109,7 +6109,7 @@ func (n *RuntimeLuaNakamaModule) storageList(l *lua.LState) int {
 		vt.RawSetString("create_time", lua.LNumber(v.CreateTime.Seconds))
 		vt.RawSetString("update_time", lua.LNumber(v.UpdateTime.Seconds))
 
-		valueMap := make(map[string]interface{})
+		valueMap := make(map[string]any)
 		err = json.Unmarshal([]byte(v.Value), &valueMap)
 		if err != nil {
 			l.RaiseError("failed to convert value to json: %s", err.Error())
@@ -6257,7 +6257,7 @@ func (n *RuntimeLuaNakamaModule) storageRead(l *lua.LState) int {
 		vt.RawSetString("create_time", lua.LNumber(v.CreateTime.Seconds))
 		vt.RawSetString("update_time", lua.LNumber(v.UpdateTime.Seconds))
 
-		valueMap := make(map[string]interface{})
+		valueMap := make(map[string]any)
 		err = json.Unmarshal([]byte(v.Value), &valueMap)
 		if err != nil {
 			l.RaiseError("failed to convert value to json: %s", err.Error())
@@ -6454,36 +6454,6 @@ func tableToStorageWrites(l *lua.LState, dataTable *lua.LTable) (StorageOpWrites
 	return ops, nil
 }
 
-//nolint:unused
-func storageOpWritesToTable(l *lua.LState, ops StorageOpWrites) (*lua.LTable, error) {
-	lv := l.CreateTable(len(ops), 0)
-	for i, v := range ops {
-		vt := l.CreateTable(0, 7)
-		vt.RawSetString("key", lua.LString(v.Object.Key))
-		vt.RawSetString("collection", lua.LString(v.Object.Collection))
-		if v.OwnerID != "" {
-			vt.RawSetString("user_id", lua.LString(v.OwnerID))
-		} else {
-			vt.RawSetString("user_id", lua.LNil)
-		}
-		vt.RawSetString("version", lua.LString(v.Object.Version))
-		vt.RawSetString("permission_read", lua.LNumber(v.Object.PermissionRead.GetValue()))
-		vt.RawSetString("permission_write", lua.LNumber(v.Object.PermissionWrite.GetValue()))
-
-		valueMap := make(map[string]interface{})
-		err := json.Unmarshal([]byte(v.Object.Value), &valueMap)
-		if err != nil {
-			l.RaiseError("failed to convert value to json: %s", err.Error())
-			return nil, err
-		}
-		valueTable := RuntimeLuaConvertMap(l, valueMap)
-		vt.RawSetString("value", valueTable)
-
-		lv.RawSetInt(i+1, vt)
-	}
-
-	return lv, nil
-}
 
 // @group storage
 // @summary Remove one or more objects by their collection/keyname and optional user.
@@ -7604,7 +7574,7 @@ func (n *RuntimeLuaNakamaModule) leaderboardsGetId(l *lua.LState) int {
 		l.Push(l.CreateTable(0, 0))
 		return 1
 	}
-	leaderboardIDs, ok := RuntimeLuaConvertLuaValue(IDs).([]interface{})
+	leaderboardIDs, ok := RuntimeLuaConvertLuaValue(IDs).([]any)
 	if !ok {
 		l.ArgError(1, "invalid tournament id data")
 		return 0
@@ -7648,7 +7618,7 @@ func leaderboardToLuaTable(l *lua.LState, leaderboard *api.Leaderboard) (*lua.LT
 	lt.RawSetString("authoritative", lua.LBool(leaderboard.Authoritative))
 	lt.RawSetString("operator", lua.LString(strings.ToLower(leaderboard.Operator.String())))
 	lt.RawSetString("sort_order", lua.LString(strconv.FormatUint(uint64(leaderboard.SortOrder), 10)))
-	metadataMap := make(map[string]interface{})
+	metadataMap := make(map[string]any)
 	err := json.Unmarshal([]byte(leaderboard.Metadata), &metadataMap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert metadata to json: %w", err)
@@ -8334,7 +8304,7 @@ func (n *RuntimeLuaNakamaModule) tournamentsGetId(l *lua.LState) int {
 		l.Push(l.CreateTable(0, 0))
 		return 1
 	}
-	tournamentIDsArray, ok := RuntimeLuaConvertLuaValue(tournamentIDs).([]interface{})
+	tournamentIDsArray, ok := RuntimeLuaConvertLuaValue(tournamentIDs).([]any)
 	if !ok {
 		l.ArgError(1, "invalid tournament id data")
 		return 0
@@ -8402,7 +8372,7 @@ func tournamentToLuaTable(l *lua.LState, tournament *api.Tournament) (*lua.LTabl
 	} else {
 		tt.RawSetString("prev_reset", lua.LNil)
 	}
-	metadataMap := make(map[string]interface{})
+	metadataMap := make(map[string]any)
 	err := json.Unmarshal([]byte(tournament.Metadata), &metadataMap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert metadata to json: %w", err)
@@ -8558,7 +8528,7 @@ func recordToLuaTable(l *lua.LState, record *api.LeaderboardRecord) (*lua.LTable
 	recordTable.RawSetString("num_score", lua.LNumber(record.NumScore))
 	recordTable.RawSetString("max_num_score", lua.LNumber(record.MaxNumScore))
 
-	metadataMap := make(map[string]interface{})
+	metadataMap := make(map[string]any)
 	err := json.Unmarshal([]byte(record.Metadata), &metadataMap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert metadata to json: %w", err)
@@ -8840,7 +8810,7 @@ func (n *RuntimeLuaNakamaModule) groupsGetId(l *lua.LState) int {
 		l.Push(l.CreateTable(0, 0))
 		return 1
 	}
-	groupIDsArray, ok := RuntimeLuaConvertLuaValue(groupIDs).([]interface{})
+	groupIDsArray, ok := RuntimeLuaConvertLuaValue(groupIDs).([]any)
 	if !ok {
 		l.ArgError(1, "invalid group id data")
 		return 0
@@ -8886,7 +8856,7 @@ func (n *RuntimeLuaNakamaModule) groupsGetId(l *lua.LState) int {
 		gt.RawSetString("create_time", lua.LNumber(g.CreateTime.Seconds))
 		gt.RawSetString("update_time", lua.LNumber(g.UpdateTime.Seconds))
 
-		metadataMap := make(map[string]interface{})
+		metadataMap := make(map[string]any)
 		err = json.Unmarshal([]byte(g.Metadata), &metadataMap)
 		if err != nil {
 			l.RaiseError("failed to convert metadata to json: %s", err.Error())
@@ -8974,7 +8944,7 @@ func (n *RuntimeLuaNakamaModule) groupCreate(l *lua.LState) int {
 	groupTable.RawSetString("avatar_url", lua.LString(group.AvatarUrl))
 	groupTable.RawSetString("lang_tag", lua.LString(group.LangTag))
 
-	metadataMap := make(map[string]interface{})
+	metadataMap := make(map[string]any)
 	err = json.Unmarshal([]byte(group.Metadata), &metadataMap)
 	if err != nil {
 		l.RaiseError("failed to convert metadata to json: %s", err.Error())
@@ -9648,7 +9618,7 @@ func (n *RuntimeLuaNakamaModule) groupUsersList(l *lua.LState) int {
 		ut.RawSetString("create_time", lua.LNumber(u.CreateTime.Seconds))
 		ut.RawSetString("update_time", lua.LNumber(u.UpdateTime.Seconds))
 
-		metadataMap := make(map[string]interface{})
+		metadataMap := make(map[string]any)
 		err = json.Unmarshal([]byte(u.Metadata), &metadataMap)
 		if err != nil {
 			l.RaiseError("failed to convert metadata to json: %s", err.Error())
@@ -9729,7 +9699,7 @@ func (n *RuntimeLuaNakamaModule) userGroupsList(l *lua.LState) int {
 		gt.RawSetString("create_time", lua.LNumber(g.CreateTime.Seconds))
 		gt.RawSetString("update_time", lua.LNumber(g.UpdateTime.Seconds))
 
-		metadataMap := make(map[string]interface{})
+		metadataMap := make(map[string]any)
 		err = json.Unmarshal([]byte(g.Metadata), &metadataMap)
 		if err != nil {
 			l.RaiseError("failed to convert metadata to json: %s", err.Error())
@@ -9935,7 +9905,7 @@ func (n *RuntimeLuaNakamaModule) friendsList(l *lua.LState) int {
 		ft.RawSetString("state", lua.LNumber(f.State.Value))
 		ft.RawSetString("update_time", lua.LNumber(f.UpdateTime.Seconds))
 		ft.RawSetString("user", fut)
-		metadataMap := make(map[string]interface{})
+		metadataMap := make(map[string]any)
 		err = json.Unmarshal([]byte(f.Metadata), &metadataMap)
 		if err != nil {
 			l.RaiseError("failed to unmarshal friend metadata: %s", err.Error())
@@ -10037,7 +10007,7 @@ func (n *RuntimeLuaNakamaModule) friendsAdd(l *lua.LState) int {
 	userIDs := l.OptTable(3, nil)
 	var uids []string
 	if userIDs != nil {
-		userIDsTable, ok := RuntimeLuaConvertLuaValue(userIDs).([]interface{})
+		userIDsTable, ok := RuntimeLuaConvertLuaValue(userIDs).([]any)
 		if !ok {
 			l.ArgError(3, "invalid user ids list")
 			return 0
@@ -10064,7 +10034,7 @@ func (n *RuntimeLuaNakamaModule) friendsAdd(l *lua.LState) int {
 	usernames := l.OptTable(4, nil)
 	var usernamesArray []string
 	if usernames != nil {
-		usernamesIDsTable, ok := RuntimeLuaConvertLuaValue(usernames).([]interface{})
+		usernamesIDsTable, ok := RuntimeLuaConvertLuaValue(usernames).([]any)
 		if !ok {
 			l.ArgError(4, "invalid username list")
 			return 0
@@ -10155,7 +10125,7 @@ func (n *RuntimeLuaNakamaModule) friendsDelete(l *lua.LState) int {
 	userIDs := l.OptTable(3, nil)
 	var uids []string
 	if userIDs != nil {
-		userIDsTable, ok := RuntimeLuaConvertLuaValue(userIDs).([]interface{})
+		userIDsTable, ok := RuntimeLuaConvertLuaValue(userIDs).([]any)
 		if !ok {
 			l.ArgError(3, "invalid user ids list")
 			return 0
@@ -10182,7 +10152,7 @@ func (n *RuntimeLuaNakamaModule) friendsDelete(l *lua.LState) int {
 	usernames := l.OptTable(4, nil)
 	var usernamesArray []string
 	if usernames != nil {
-		usernamesIDsTable, ok := RuntimeLuaConvertLuaValue(usernames).([]interface{})
+		usernamesIDsTable, ok := RuntimeLuaConvertLuaValue(usernames).([]any)
 		if !ok {
 			l.ArgError(4, "invalid username list")
 			return 0
@@ -10255,7 +10225,7 @@ func (n *RuntimeLuaNakamaModule) friendsBlock(l *lua.LState) int {
 	userIDs := l.OptTable(3, nil)
 	var uids []string
 	if userIDs != nil {
-		userIDsTable, ok := RuntimeLuaConvertLuaValue(userIDs).([]interface{})
+		userIDsTable, ok := RuntimeLuaConvertLuaValue(userIDs).([]any)
 		if !ok {
 			l.ArgError(3, "invalid user ids list")
 			return 0
@@ -10282,7 +10252,7 @@ func (n *RuntimeLuaNakamaModule) friendsBlock(l *lua.LState) int {
 	usernames := l.OptTable(4, nil)
 	var usernamesArray []string
 	if usernames != nil {
-		usernamesIDsTable, ok := RuntimeLuaConvertLuaValue(usernames).([]interface{})
+		usernamesIDsTable, ok := RuntimeLuaConvertLuaValue(usernames).([]any)
 		if !ok {
 			l.ArgError(4, "invalid username list")
 			return 0
@@ -10774,7 +10744,7 @@ func (n *RuntimeLuaNakamaModule) storageIndexList(l *lua.LState) int {
 		vt.RawSetString("create_time", lua.LNumber(v.CreateTime.Seconds))
 		vt.RawSetString("update_time", lua.LNumber(v.UpdateTime.Seconds))
 
-		valueMap := make(map[string]interface{})
+		valueMap := make(map[string]any)
 		err = json.Unmarshal([]byte(v.Value), &valueMap)
 		if err != nil {
 			l.RaiseError("failed to convert value to json: %s", err.Error())

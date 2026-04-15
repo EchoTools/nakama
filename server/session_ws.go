@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"regexp"
@@ -140,10 +141,8 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 
 	ctx = context.WithValue(ctx, ctxLoggedInAtKey{}, time.Now().UTC())
 	// Add the URL parameters to the context
-	urlParams := make(map[string][]string, 0)
-	for k, v := range request.URL.Query() {
-		urlParams[k] = v
-	}
+	urlParams := make(map[string][]string, len(request.URL.Query()))
+	maps.Copy(urlParams, request.URL.Query())
 
 	ign := parseUserQueryFunc(&request, "ign", 20, nil)
 

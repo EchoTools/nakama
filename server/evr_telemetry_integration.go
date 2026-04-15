@@ -26,7 +26,7 @@ func NewTelemetryIntegration(eventJournal *EventJournal, telemetryManager *Lobby
 }
 
 // HandleSNSTelemetryEvent processes SNSTelemetryEvent messages and journals them
-func (ti *TelemetryIntegration) HandleSNSTelemetryEvent(ctx context.Context, sessionID, userID, lobbyID string, telemetryData map[string]interface{}) error {
+func (ti *TelemetryIntegration) HandleSNSTelemetryEvent(ctx context.Context, sessionID, userID, lobbyID string, telemetryData map[string]any) error {
 	if ti.eventJournal == nil {
 		return nil // Graceful degradation when journaling is not available
 	}
@@ -123,12 +123,12 @@ func (ti *TelemetryIntegration) HandleMatchEnd(ctx context.Context, matchID stri
 		return err
 	}
 
-	ti.logger.WithFields(map[string]interface{}{"match_id": summary.MatchID, "players": len(summary.Players)}).Info("Match summary stored successfully")
+	ti.logger.WithFields(map[string]any{"match_id": summary.MatchID, "players": len(summary.Players)}).Info("Match summary stored successfully")
 	return nil
 }
 
 // HandlePlayerAction processes player action events
-func (ti *TelemetryIntegration) HandlePlayerAction(ctx context.Context, userID, sessionID, matchID, action string, actionData map[string]interface{}) error {
+func (ti *TelemetryIntegration) HandlePlayerAction(ctx context.Context, userID, sessionID, matchID, action string, actionData map[string]any) error {
 	if ti.eventJournal == nil {
 		return nil
 	}
@@ -137,7 +137,7 @@ func (ti *TelemetryIntegration) HandlePlayerAction(ctx context.Context, userID, 
 }
 
 // HandlePurchase processes purchase events
-func (ti *TelemetryIntegration) HandlePurchase(ctx context.Context, userID, sessionID string, purchaseData map[string]interface{}) error {
+func (ti *TelemetryIntegration) HandlePurchase(ctx context.Context, userID, sessionID string, purchaseData map[string]any) error {
 	if ti.eventJournal == nil {
 		return nil
 	}

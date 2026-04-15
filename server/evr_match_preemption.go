@@ -72,7 +72,7 @@ func (pm *MatchPreemptionManager) FindPreemptionCandidates(ctx context.Context, 
 		}
 		var label MatchLabel
 		if err := json.Unmarshal([]byte(match.Label.Value), &label); err != nil {
-			pm.logger.WithFields(map[string]interface{}{"match_id": match.MatchId, "error": err}).Warn("Failed to unmarshal match label")
+			pm.logger.WithFields(map[string]any{"match_id": match.MatchId, "error": err}).Warn("Failed to unmarshal match label")
 			continue
 		}
 
@@ -116,7 +116,7 @@ func (pm *MatchPreemptionManager) PreemptMatches(ctx context.Context, matchIDs [
 
 	for _, matchID := range matchIDs {
 		if err := pm.preemptSingleMatch(ctx, matchID, req, result); err != nil {
-			pm.logger.WithFields(map[string]interface{}{"match_id": matchID, "error": err}).Error("Failed to preempt match")
+			pm.logger.WithFields(map[string]any{"match_id": matchID, "error": err}).Error("Failed to preempt match")
 			result.Errors = append(result.Errors, fmt.Sprintf("match %s: %v", matchID, err))
 			result.Success = false
 		}
@@ -154,7 +154,7 @@ func (pm *MatchPreemptionManager) preemptSingleMatch(ctx context.Context, matchI
 	// Notify spawner
 	if label.SpawnedBy != "" {
 		if err := pm.sendPreemptionNotification(ctx, label.SpawnedBy, matchID, reason); err != nil {
-			pm.logger.WithFields(map[string]interface{}{"spawned_by": label.SpawnedBy, "error": err}).Warn("Failed to notify spawner")
+			pm.logger.WithFields(map[string]any{"spawned_by": label.SpawnedBy, "error": err}).Warn("Failed to notify spawner")
 		} else {
 			notificationsSent++
 			result.NotificationsSent = append(result.NotificationsSent, label.SpawnedBy)
@@ -164,7 +164,7 @@ func (pm *MatchPreemptionManager) preemptSingleMatch(ctx context.Context, matchI
 	// Notify owner if different from spawner
 	if label.Owner != uuid.Nil && label.Owner.String() != label.SpawnedBy {
 		if err := pm.sendPreemptionNotification(ctx, label.Owner.String(), matchID, reason); err != nil {
-			pm.logger.WithFields(map[string]interface{}{"owner": label.Owner.String(), "error": err}).Warn("Failed to notify")
+			pm.logger.WithFields(map[string]any{"owner": label.Owner.String(), "error": err}).Warn("Failed to notify")
 		} else {
 			notificationsSent++
 			result.NotificationsSent = append(result.NotificationsSent, label.Owner.String())
@@ -173,7 +173,7 @@ func (pm *MatchPreemptionManager) preemptSingleMatch(ctx context.Context, matchI
 
 	// If notifications were sent, wait for grace period
 	if notificationsSent > 0 && !req.Force {
-		pm.logger.WithFields(map[string]interface{}{"match_id": matchID, "grace_period": pm.gracePeriod}).Info("Sent preemption notifications, waiting grace period")
+		pm.logger.WithFields(map[string]any{"match_id": matchID, "grace_period": pm.gracePeriod}).Info("Sent preemption notifications, waiting grace period")
 
 		// Schedule the actual shutdown after grace period
 		go func() {
@@ -182,7 +182,7 @@ func (pm *MatchPreemptionManager) preemptSingleMatch(ctx context.Context, matchI
 			// before the grace period elapses.
 			bgCtx := context.Background()
 			if err := pm.shutdownMatch(bgCtx, matchID, reason); err != nil {
-				pm.logger.WithFields(map[string]interface{}{"match_id": matchID, "error": err}).Error("Failed to shutdown match after grace period")
+				pm.logger.WithFields(map[string]any{"match_id": matchID, "error": err}).Error("Failed to shutdown match after grace period")
 			} else {
 				pm.logger.WithField("match_id", matchID).Info("Successfully preempted match after grace period")
 			}
@@ -200,7 +200,7 @@ func (pm *MatchPreemptionManager) preemptSingleMatch(ctx context.Context, matchI
 
 // sendPreemptionNotification sends a DM notification about match preemption
 func (pm *MatchPreemptionManager) sendPreemptionNotification(ctx context.Context, userID, matchID, reason string) error {
-	content := map[string]interface{}{
+	content := map[string]any{
 		"match_id": matchID,
 		"reason":   reason,
 		"message":  fmt.Sprintf("Your match %s has been preempted: %s. The match will be shut down in %d seconds.", matchID, reason, PreemptionGracePeriodSeconds),
