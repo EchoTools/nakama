@@ -311,10 +311,10 @@ func (b *LobbyBuilder) runPostMatchmakerBackfill(isPeriodicRun bool) {
 	logger.Info("Backfill completed successfully", zap.Int("players_backfilled", len(results)))
 }
 
-// createOverflowArenaMatches proactively creates new echo_arena matches when more than
-// 30 players are queued in the matchmaker. It creates floor(n/8) matches, batching
-// exactly 8 entrants per match, grouped by guild (buildMatch requires a single group).
-// Only ModeArenaPublic candidates are considered.
+// createOverflowArenaMatches proactively creates new echo_arena matches when at least
+// 8 players are queued in the matchmaker (the minimum for one match). It creates
+// floor(n/8) matches, batching exactly 8 entrants per match, grouped by guild
+// (buildMatch requires a single group). Only ModeArenaPublic candidates are considered.
 func (b *LobbyBuilder) createOverflowArenaMatches(logger *zap.Logger, candidates []*BackfillCandidate) {
 	// Count total echo_arena entrants across all groups.
 	total := 0
@@ -323,7 +323,7 @@ func (b *LobbyBuilder) createOverflowArenaMatches(logger *zap.Logger, candidates
 			total += len(c.Entries)
 		}
 	}
-	if total <= 30 {
+	if total < 8 {
 		return
 	}
 
