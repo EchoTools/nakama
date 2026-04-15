@@ -33,7 +33,8 @@ func HandleShutdown(ctx context.Context, logger *zap.Logger, matchRegistry Match
 		graceDuration := time.Duration(graceSeconds) * time.Second
 		if shutdownFn != nil {
 			go func() {
-				shCtx, _ := context.WithTimeoutCause(context.WithoutCancel(ctx), graceDuration, runtime.ErrGracePeriodExpired) //nolint:govet
+				shCtx, shCancel := context.WithTimeoutCause(context.WithoutCancel(ctx), graceDuration, runtime.ErrGracePeriodExpired)
+				defer shCancel()
 				shutdownFn(shCtx)
 				close(runtimeShutdownFnDone)
 			}()

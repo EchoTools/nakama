@@ -145,12 +145,6 @@ func (ti *TelemetryIntegration) HandlePurchase(ctx context.Context, userID, sess
 	return ti.eventJournal.JournalPurchase(ctx, userID, sessionID, purchaseData)
 }
 
-// Helper function to calculate ping statistics - simplified for demo
-func calculatePingStats() (min, max int, avg float64) {
-	// Example implementation - in real usage this would process actual ping data
-	return 10, 50, 25.5
-}
-
 // Example integration function that could be called from EVR match handling
 func IntegrateTelemetryWithEVRMatch(nk runtime.NakamaModule, logger runtime.Logger, integration *TelemetryIntegration) {
 	// This would be called during match events to integrate telemetry

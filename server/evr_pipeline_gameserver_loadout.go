@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strconv"
 
-	rtapi "buf.build/gen/go/echotools/nevr-api/protocolbuffers/go/gameservice/v1"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 )
@@ -28,7 +27,7 @@ type GameServerLoadoutInstance struct {
 // This is triggered when a player updates their loadout at the character customization screen.
 // The game server receives an internal broadcaster message (SR15NetSaveLoadoutRequest) and
 // forwards it to nakama via the TCP broadcaster WebSocket connection.
-func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, request *evr.GameServerSaveLoadoutRequest) error {
+func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *zap.Logger, _session *sessionWS, request *evr.GameServerSaveLoadoutRequest) error {
 	logger = logger.With(
 		zap.String("evr_id", request.EvrID.String()),
 		zap.Int32("loadout_number", request.LoadoutNumber),
@@ -162,144 +161,6 @@ func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *
 	logger.Info("Successfully saved loadout update",
 		zap.String("user_id", userID),
 		zap.String("evr_id", request.EvrID.String()),
-		zap.Any("loadout", loadout))
-
-	return nil
-}
-
-// gameServerSaveLoadoutProtobuf handles loadout save requests via protobuf from the game server.
-// This is the new protobuf-based handler that replaces the legacy EVR binary message path.
-func (p *EvrPipeline) gameServerSaveLoadoutProtobuf(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) error {
-	msg := in.GetGameServerSaveLoadout()
-	if msg == nil {
-		return fmt.Errorf("invalid GameServerSaveLoadout message")
-	}
-
-	logger = logger.With(
-		zap.String("lobby_session_id", msg.LobbySessionId),
-		zap.String("entrant_id", msg.EntrantId),
-		zap.Int32("loadout_slot", msg.LoadoutSlot),
-		zap.Int32("jersey_number", msg.JerseyNumber),
-	)
-
-	logger.Info("Processing protobuf save loadout request")
-
-	ctx := session.Context()
-
-	// Look up the user by their entrant_id (account ID as string)
-	// The entrant_id from the game server is the account ID
-	userID, err := p.lookupUserByEntrantID(ctx, msg.EntrantId)
-	if err != nil {
-		return fmt.Errorf("failed to get user by entrant ID: %w", err)
-	}
-
-	if userID == "" {
-		logger.Warn("No user found for entrant ID", zap.String("entrant_id", msg.EntrantId))
-		return nil
-	}
-
-	// Load the user's profile
-	profile, err := EVRProfileLoad(ctx, p.nk, userID)
-	if err != nil {
-		return fmt.Errorf("failed to load EVR profile: %w", err)
-	}
-
-	// Convert the protobuf loadout instances to CosmeticLoadout fields
-	loadout := profile.LoadoutCosmetics.Loadout
-
-	// Process each loadout instance
-	for _, instance := range msg.LoadoutInstances {
-		for _, item := range instance.Items {
-			// Convert fixed64 symbol IDs to evr.Symbol
-			slotSymbol := evr.Symbol(item.SlotType)
-			if slotSymbol == 0 {
-				logger.Warn("Skipping loadout item with zero slot type")
-				continue
-			}
-			equippedSymbol := evr.Symbol(item.EquippedItem)
-			if equippedSymbol == 0 {
-				logger.Debug("Skipping loadout item with zero equipped item", zap.Uint64("slot_type", item.SlotType))
-				continue
-			}
-
-			// Convert symbols to their string names
-			slotName := slotSymbol.String()
-			equippedName := equippedSymbol.String()
-
-			logger.Debug("Processing loadout item",
-				zap.Uint64("slot_type", item.SlotType),
-				zap.String("slot_name", slotName),
-				zap.Uint64("equipped_item", item.EquippedItem),
-				zap.String("equipped_name", equippedName))
-
-			// Map slot names to CosmeticLoadout fields
-			switch slotName {
-			case "banner":
-				loadout.Banner = equippedName
-			case "booster":
-				loadout.Booster = equippedName
-			case "bracer":
-				loadout.Bracer = equippedName
-			case "chassis":
-				loadout.Chassis = equippedName
-			case "decal":
-				loadout.Decal = equippedName
-			case "decal_body":
-				loadout.DecalBody = equippedName
-			case "decalborder":
-				loadout.DecalBorder = equippedName
-			case "decalback":
-				loadout.DecalBack = equippedName
-			case "emissive":
-				loadout.Emissive = equippedName
-			case "emote":
-				loadout.Emote = equippedName
-			case "goal_fx":
-				loadout.GoalFX = equippedName
-			case "medal":
-				loadout.Medal = equippedName
-			case "pattern":
-				loadout.Pattern = equippedName
-			case "pattern_body":
-				loadout.PatternBody = equippedName
-			case "pip":
-				loadout.PIP = equippedName
-			case "secondemote":
-				loadout.SecondEmote = equippedName
-			case "tag":
-				loadout.Tag = equippedName
-			case "tint":
-				loadout.Tint = equippedName
-			case "tint_alignment_a":
-				loadout.TintAlignmentA = equippedName
-			case "tint_alignment_b":
-				loadout.TintAlignmentB = equippedName
-			case "tint_body":
-				loadout.TintBody = equippedName
-			case "title":
-				loadout.Title = equippedName
-			default:
-				logger.Debug("Unknown slot type", zap.String("slot", slotName))
-			}
-		}
-	}
-
-	// Update profile with new loadout
-	profile.LoadoutCosmetics.Loadout = loadout
-
-	// Update jersey number if present
-	if msg.JerseyNumber >= 0 {
-		profile.LoadoutCosmetics.JerseyNumber = int64(msg.JerseyNumber)
-		logger.Info("Updated jersey number", zap.Int32("number", msg.JerseyNumber))
-	}
-
-	// Save the updated profile
-	if err := EVRProfileUpdate(ctx, p.nk, userID, profile); err != nil {
-		return fmt.Errorf("failed to store EVR profile: %w", err)
-	}
-
-	logger.Info("Successfully saved loadout update via protobuf",
-		zap.String("user_id", userID),
 		zap.Any("loadout", loadout))
 
 	return nil
