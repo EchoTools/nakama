@@ -268,7 +268,7 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 	}
 	// Populate PartyID from the registry-assigned party (random UUID, not derived from group name).
 	lobbyParams.PartyID = lobbyGroup.ID()
-	logger.Debug("Joined party group", zap.String("partyID", lobbyGroup.IDStr()))
+	logger.Debug("Joined party group", zap.String("partyID", lobbyGroup.IDStr()), zap.String("partyGroupName", lobbyParams.PartyGroupName))
 
 	// If this is the leader, then set the presence status to the current match ID.
 	if isLeader {
