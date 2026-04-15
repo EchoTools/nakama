@@ -191,8 +191,6 @@ func RuntimeLuaConvertValue(l *lua.LState, val any) lua.LValue {
 		return lt
 	case time.Time:
 		return lua.LNumber(v.UTC().Unix())
-	case nil:
-		return lua.LNil
 	default:
 		// Return LNil for unrecognized types to avoid nil pointer dereferences inside gopher-lua.
 		return lua.LNil
