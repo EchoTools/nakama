@@ -26,6 +26,7 @@ func newTestSessionForParty(t *testing.T, username string, tracker Tracker, part
 	s.logger = loggerForTest(t)
 	s.format = SessionFormatProtobuf
 	s.outgoingCh = make(chan []byte, 16)
+	s.tracker = tracker
 	s.pipeline = &Pipeline{node: "testnode"}
 	s.pipeline.tracker = tracker
 	s.pipeline.partyRegistry = partyRegistry

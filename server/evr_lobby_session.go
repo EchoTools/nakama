@@ -74,33 +74,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			if err == nil {
 				return nil
 			}
-			code := InternalError
-
-			if errors.Is(err, context.Canceled) {
-				logger.Debug("Matchmaking context canceled")
-				return nil
-			}
-			if errors.Is(err, ErrMatchmakingTimeout) {
-				logger.Warn("Matchmaking timed out", zap.String("mode", lobbyParams.Mode.String()), zap.Error(err))
-				err = NewLobbyError(Timeout, "matchmaking timed out")
-			} else {
-				lobbyErr := &LobbyError{}
-				if errors.As(err, &lobbyErr) {
-					code = lobbyErr.code
-				} else {
-					logger.Warn("Unexpected error while finding match", zap.Error(err))
-					code = InternalError
-				}
-
-				tags := lobbyParams.MetricsTags()
-				tags["error_code"] = strconv.Itoa(int(code))
-				tags["error_str"] = code.String()
-
-				p.nk.metrics.CustomCounter("lobby_find_match_error", tags, int64(lobbyParams.GetPartySize()))
-				// On error, leave any party the user might be a member of.
-				LeavePartyStream(session)
-			}
-			return err
+			return handleMatchmakingError(logger, session, lobbyParams, p.nk.metrics, err)
 		}
 		return nil
 
@@ -132,6 +106,35 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 	}
 
 	return nil
+}
+
+// handleMatchmakingError classifies a matchmaking error and performs cleanup.
+// Returns nil if the error is a context cancellation (no error to report),
+// or a wrapped LobbyError for all other cases.
+func handleMatchmakingError(logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, metrics Metrics, err error) error {
+	if errors.Is(err, context.Canceled) {
+		logger.Debug("Matchmaking context canceled")
+		return nil
+	}
+	if errors.Is(err, ErrMatchmakingTimeout) {
+		logger.Warn("Matchmaking timed out", zap.String("mode", lobbyParams.Mode.String()), zap.Error(err))
+		return NewLobbyError(Timeout, "matchmaking timed out")
+	}
+
+	code := InternalError
+	lobbyErr := &LobbyError{}
+	if errors.As(err, &lobbyErr) {
+		code = lobbyErr.code
+	} else {
+		logger.Warn("Unexpected error while finding match", zap.Error(err))
+	}
+
+	tags := lobbyParams.MetricsTags()
+	tags["error_code"] = strconv.Itoa(int(code))
+	tags["error_str"] = code.String()
+
+	metrics.CustomCounter("lobby_find_match_error", tags, int64(lobbyParams.GetPartySize()))
+	return err
 }
 
 func LobbyPrepareSession(ctx context.Context, nk runtime.NakamaModule, matchID MatchID, settings *MatchSettings) (*MatchLabel, error) {
