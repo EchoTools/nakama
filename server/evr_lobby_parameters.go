@@ -588,7 +588,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 
 	qparts := []string{
 		"+label.open:T",
-		fmt.Sprintf("+label.mode:%s", Query.EscapeIndexValue(p.Mode.String())),
+		fmt.Sprintf("+label.mode:%s", p.Mode.String()),
 		fmt.Sprintf("+label.group_id:%s", Query.QuoteStringValue(p.GroupID.String())),
 		//fmt.Sprintf("label.version_lock:%s", p.VersionLock.String()),
 		p.BackfillQueryAddon,

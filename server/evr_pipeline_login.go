@@ -587,30 +587,40 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		return fmt.Errorf("user is not in any groups, try again in 30 seconds")
 	}
 
-	if _, ok := params.guildGroups[params.profile.ActiveGroupID]; !ok && params.profile.GetActiveGroupID() != uuid.Nil {
-		// User is not in the active group
-		logger.Warn("User is not in the active group", zap.String("uid", params.profile.UserID()), zap.String("gid", params.profile.ActiveGroupID))
-		params.profile.SetActiveGroupID(uuid.Nil)
-	}
-
-	// If the user is not in a group, set the active group to the group with the most members
-	if params.profile.GetActiveGroupID() == uuid.Nil {
-		// Active group is not set.
+	// If the active group is missing from guildGroups (registry race, state
+	// load failure, etc.), fall back to the largest guild for this session.
+	// For new players (uuid.Nil), persist the assignment so they get a real group.
+	// For existing players with a real group that's temporarily unresolvable,
+	// use session-only fallback — don't overwrite their stored choice.
+	storedActiveGroupID := params.profile.GetActiveGroupID()
+	groupIDAutoAssigned := false
+	if _, ok := params.guildGroups[params.profile.ActiveGroupID]; !ok {
 
 		groupIDs := make([]string, 0, len(params.guildGroups))
 		for id := range params.guildGroups {
 			groupIDs = append(groupIDs, id)
 		}
 
-		// Sort the groups by the edgecount
+		// Sort the groups by the edgecount (largest first)
 		slices.SortStableFunc(groupIDs, func(a, b string) int {
 			return int(params.guildGroups[a].Group.EdgeCount - params.guildGroups[b].Group.EdgeCount)
 		})
 		slices.Reverse(groupIDs)
 
-		params.profile.SetActiveGroupID(uuid.FromStringOrNil(groupIDs[0]))
-		logger.Debug("Set active group", zap.String("uid", params.profile.UserID()), zap.String("gid", params.profile.ActiveGroupID))
-		metadataUpdated = true
+		fallbackID := uuid.FromStringOrNil(groupIDs[0])
+		logger.Warn("Active group not in guild registry, using session fallback",
+			zap.String("uid", params.profile.UserID()),
+			zap.String("stored_gid", storedActiveGroupID.String()),
+			zap.String("fallback_gid", fallbackID.String()))
+		params.profile.SetActiveGroupID(fallbackID)
+
+		if storedActiveGroupID == uuid.Nil {
+			// New player with no group set — persist the assignment
+			metadataUpdated = true
+		} else {
+			// Existing player whose group is temporarily unresolvable — session only
+			groupIDAutoAssigned = true
+		}
 	}
 
 	// Resolve all system group memberships in a single query
@@ -837,10 +847,24 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	}
 
 	if metadataUpdated {
+		// If the guild was auto-assigned as a temporary fallback, restore
+		// the original stored value before persisting so the player's
+		// explicit choice is preserved. Re-apply the fallback afterward
+		// so the current session still functions.
+		var sessionFallbackGID uuid.UUID
+		if groupIDAutoAssigned {
+			sessionFallbackGID = params.profile.GetActiveGroupID()
+			params.profile.SetActiveGroupID(storedActiveGroupID)
+		}
+
 		// Use EVRProfileUpdate to persist changes AND invalidate the ServerProfile cache
 		if err := EVRProfileUpdate(ctx, p.nk, params.profile.ID(), params.profile); err != nil {
 			metricsTags["error"] = "failed_update_profile"
 			return fmt.Errorf("failed to update user profile: %w", err)
+		}
+
+		if groupIDAutoAssigned {
+			params.profile.SetActiveGroupID(sessionFallbackGID)
 		}
 	}
 
