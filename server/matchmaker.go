@@ -301,7 +301,7 @@ func NewLocalMatchmaker(logger, startupLogger *zap.Logger, config Config, router
 
 		indexWriter:      indexWriter,
 		statsCompletions: NewBuffer(10), // Only keep 10 samples in memory.
-		statsSnapshot:    atomic.NewPointer[api.MatchmakerStats](&api.MatchmakerStats{}),
+		statsSnapshot:    atomic.NewPointer(&api.MatchmakerStats{}),
 		sessionTickets:   make(map[string]map[string]struct{}),
 		partyTickets:     make(map[string]map[string]struct{}),
 		indexes:          make(map[string]*MatchmakerIndex),

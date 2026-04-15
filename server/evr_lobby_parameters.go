@@ -725,8 +725,8 @@ func (p *LobbySessionParameters) FromMatchmakerEntry(entry *MatchmakerEntry) {
 
 	serverRTTs := make(map[string]int)
 	for k, v := range numericProperties {
-		if strings.HasPrefix(k, RTTPropertyPrefix) {
-			serverRTTs[strings.TrimPrefix(k, RTTPropertyPrefix)] = int(v)
+		if ip, ok := strings.CutPrefix(k, RTTPropertyPrefix); ok {
+			serverRTTs[ip] = int(v)
 		}
 	}
 

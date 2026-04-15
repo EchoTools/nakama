@@ -58,7 +58,6 @@ const (
 var (
 	ErrSessionQueueFull = errors.New("session outgoing queue full")
 
-	hmdOverridePattern = regexp.MustCompile(`^[-a-zA-Z0-9_]+$`)
 	featurePattern     = regexp.MustCompile(`^[a-z0-9_]+$`)
 	discordIDPattern   = regexp.MustCompile(`^[0-9]+$`)
 	regionPattern      = regexp.MustCompile(`^[-A-Za-z0-9_]+$`)

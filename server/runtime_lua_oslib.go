@@ -35,7 +35,7 @@ func init() {
 	startedAt = time.Now()
 }
 
-func getIntField(L *lua.LState, tb *lua.LTable, key string, v int) int {
+func getIntField(_L *lua.LState, tb *lua.LTable, key string, v int) int {
 	ret := tb.RawGetString(key)
 	if ln, ok := ret.(lua.LNumber); ok {
 		return int(ln)
@@ -43,7 +43,7 @@ func getIntField(L *lua.LState, tb *lua.LTable, key string, v int) int {
 	return v
 }
 
-func getBoolField(L *lua.LState, tb *lua.LTable, key string, v bool) bool {
+func getBoolField(_L *lua.LState, tb *lua.LTable, key string, v bool) bool {
 	ret := tb.RawGetString(key)
 	if lb, ok := ret.(lua.LBool); ok {
 		return bool(lb)

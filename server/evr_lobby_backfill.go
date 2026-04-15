@@ -278,7 +278,7 @@ func (b *PostMatchmakerBackfill) getPossibleTeams(candidate *BackfillCandidate, 
 
 // executeBackfillResultOptimized executes backfill using pre-resolved sessions
 func (b *PostMatchmakerBackfill) executeBackfillResultOptimized(
-	ctx context.Context,
+	_ctx context.Context,
 	logger *zap.Logger,
 	result *BackfillResult,
 	sessions []Session,
@@ -462,8 +462,7 @@ func (b *PostMatchmakerBackfill) ExtractUnmatchedCandidates(candidates [][]runti
 		// Extract RTTs from properties
 		rtts := make(map[string]int)
 		for k, v := range props {
-			if strings.HasPrefix(k, RTTPropertyPrefix) {
-				ip := strings.TrimPrefix(k, RTTPropertyPrefix)
+			if ip, found := strings.CutPrefix(k, RTTPropertyPrefix); found {
 				if rtt, ok := v.(float64); ok {
 					rtts[ip] = int(rtt)
 				}
@@ -536,8 +535,7 @@ func (b *PostMatchmakerBackfill) ExtractCandidatesFromMatchmaker(extracts []*Mat
 		// Extract RTTs from numeric properties
 		rtts := make(map[string]int)
 		for k, v := range extract.NumericProperties {
-			if strings.HasPrefix(k, RTTPropertyPrefix) {
-				ip := strings.TrimPrefix(k, RTTPropertyPrefix)
+			if ip, found := strings.CutPrefix(k, RTTPropertyPrefix); found {
 				rtts[ip] = int(v)
 			}
 		}
@@ -947,7 +945,7 @@ func (b *PostMatchmakerBackfill) logBackfillSummary(logger *zap.Logger, result *
 }
 
 // executeBackfillResult executes a single backfill result and returns the number of successfully joined entrants
-func (b *PostMatchmakerBackfill) executeBackfillResult(ctx context.Context, logger *zap.Logger, result *BackfillResult) int {
+func (b *PostMatchmakerBackfill) executeBackfillResult(_ctx context.Context, logger *zap.Logger, result *BackfillResult) int {
 	if result == nil || result.Match == nil || result.Candidate == nil {
 		return 0
 	}

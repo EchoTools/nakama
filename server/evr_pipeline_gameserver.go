@@ -36,35 +36,6 @@ var (
 	ErrGameServerPresenceNotFound = errors.New("game server presence not found")
 )
 
-// sendDiscordError sends an error message to the user on discord
-func sendDiscordError(e error, discordId string, logger *zap.Logger, bot *discordgo.Session) {
-	// Message the user on discord
-
-	if bot != nil && discordId != "" {
-		channel, err := bot.UserChannelCreate(discordId)
-		if err != nil {
-			logger.Warn("Failed to create user channel", zap.Error(err))
-			return
-		}
-
-		embed := &discordgo.MessageEmbed{
-			Title:       "❌ Game Server Registration Failed",
-			Description: e.Error(),
-			Color:       0xFF0000, // Red color
-			Timestamp:   time.Now().Format(time.RFC3339),
-			Footer: &discordgo.MessageEmbedFooter{
-				Text: "Server Registration System",
-			},
-		}
-
-		_, err = bot.ChannelMessageSendEmbed(channel.ID, embed)
-		if err != nil {
-			logger.Warn("Failed to send message to user", zap.Error(err))
-			return
-		}
-	}
-}
-
 // sendDiscordServerError sends a formatted error message about a specific game server to the user on discord
 func sendDiscordServerError(internalIP net.IP, externalIP net.IP, port uint16, serverID uint64, errMsg string, discordId string, logger *zap.Logger, bot *discordgo.Session) {
 	if bot != nil && discordId != "" {
@@ -892,22 +863,6 @@ func DetermineExternalIPAddress() (net.IP, error) {
 	}
 
 	return addr, nil
-}
-
-func isPrivateIP(ip net.IP) bool {
-	privateRanges := []string{
-		"127.0.0.0/8",
-		"10.0.0.0/8",
-		"172.16.0.0/12",
-		"192.168.0.0/16",
-	}
-	for _, cidr := range privateRanges {
-		_, subnet, _ := net.ParseCIDR(cidr)
-		if subnet.Contains(ip) {
-			return true
-		}
-	}
-	return false
 }
 
 func GameServerBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (MatchID, runtime.Presence, error) {

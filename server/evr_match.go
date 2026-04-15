@@ -139,7 +139,7 @@ const (
 )
 
 // MatchInit is called when the match is created.
-func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, params map[string]interface{}) (interface{}, int, string) {
+func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, params map[string]any) (any, int, string) {
 
 	gameserverConfig := GameServerPresence{}
 	gsParam, ok := params["gameserver"].(string)
@@ -239,7 +239,7 @@ func (m *EntrantMetadata) FromMatchMetadata(md map[string]string) error {
 }
 
 // MatchJoinAttempt decides whether to accept or deny the player session.
-func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, joinPresence runtime.Presence, metadata map[string]string) (interface{}, bool, string) {
+func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ any, joinPresence runtime.Presence, metadata map[string]string) (any, bool, string) {
 	state, ok := state_.(*MatchLabel)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
@@ -334,7 +334,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	// Check if the main presence is already in the match with the same session ID
 	// Explicitly reject as duplicate; callers should treat as no-op
 	if existing, found := state.presenceMap[meta.Presence.GetSessionId()]; found {
-		logger.WithFields(map[string]interface{}{
+		logger.WithFields(map[string]any{
 			"evrid": existing.EvrID,
 			"uid":   existing.GetUserId(),
 			"sid":   existing.GetSessionId(),
@@ -377,7 +377,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 			// Same user reconnecting with a new session: evict the stale/phantom presence
 			if e.GetUserId() == p.GetUserId() {
-				logger.WithFields(map[string]interface{}{
+				logger.WithFields(map[string]any{
 					"evrid":            p.EvrID,
 					"uid":              p.GetUserId(),
 					"existing_session": e.GetSessionId(),
@@ -391,7 +391,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			}
 
 			// Different user with the same EVR-ID: reject
-			logger.WithFields(map[string]interface{}{
+			logger.WithFields(map[string]any{
 				"evrid":            p.EvrID,
 				"uid":              p.GetUserId(),
 				"existing_session": e.GetSessionId(),
@@ -548,7 +548,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 // MatchJoin is called after the join attempt.
 // MatchJoin updates the match data, and should not have any decision logic.
-func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, presences []runtime.Presence) interface{} {
+func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ any, presences []runtime.Presence) any {
 	state, ok := state_.(*MatchLabel)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
@@ -577,13 +577,13 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 		isBackfill := time.Now().After(state.StartTime.Add(PublicMatchWaitTime))
 
 		if mp, ok := state.presenceMap[p.GetSessionId()]; !ok {
-			logger.WithFields(map[string]interface{}{
+			logger.WithFields(map[string]any{
 				"username": p.GetUsername(),
 				"uid":      p.GetUserId(),
 			}).Error("Presence not found. this should never happen.")
 			return nil
 		} else {
-			logger.WithFields(map[string]interface{}{
+			logger.WithFields(map[string]any{
 				"username": p.GetUsername(),
 				"uid":      p.GetUserId(),
 				"sid":      p.GetSessionId(),
@@ -625,7 +625,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 var PresenceReasonKicked runtime.PresenceReason = 16
 
 // MatchLeave is called after a player leaves the match.
-func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, presences []runtime.Presence) interface{} {
+func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ any, presences []runtime.Presence) any {
 	state, ok := state_.(*MatchLabel)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
@@ -646,7 +646,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			joinTime = state.CreatedAt
 			class = "Server"
 		}
-		logger.WithFields(map[string]interface{}{
+		logger.WithFields(map[string]any{
 			"username": p.GetUsername(),
 			"uid":      p.GetUserId(),
 			"sid":      p.GetSessionId(),
@@ -673,7 +673,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	rejects := make([]uuid.UUID, 0)
 
 	for _, p := range presences {
-		logger := logger.WithFields(map[string]interface{}{
+		logger := logger.WithFields(map[string]any{
 			"username": p.GetUsername(),
 			"uid":      p.GetUserId(),
 			"sid":      p.GetSessionId(),
@@ -808,7 +808,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 					tags["leave_reason"] = string(leaveReason)
 					nk.MetricsCounterAdd("match_entrant_early_quit", tags, 1)
 
-					logger.WithFields(map[string]interface{}{
+					logger.WithFields(map[string]any{
 						"uid":          mp.GetUserId(),
 						"username":     mp.Username,
 						"evrid":        mp.EvrID,
@@ -854,7 +854,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 						// Skip penalty if player is exempt for this guild.
 						groupID := state.GetGroupID().String()
 						if eqconfig.IsExempt(groupID) {
-							logger.WithFields(map[string]interface{}{
+							logger.WithFields(map[string]any{
 								"uid":      mp.GetUserId(),
 								"group_id": groupID,
 							}).Info("Player exempt from early quit penalty in this guild")
@@ -864,7 +864,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 						} else {
 							// For disconnects: still record the quit but don't increment penalty.
 							// The logout forgiveness goroutine handles cleanup.
-							logger.WithFields(map[string]interface{}{
+							logger.WithFields(map[string]any{
 								"uid":          mp.GetUserId(),
 								"leave_reason": leaveReason,
 							}).Info("Disconnect detected — deferring penalty to logout check")
@@ -878,7 +878,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 						}
 						oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
 
-						logger.WithFields(map[string]interface{}{
+						logger.WithFields(map[string]any{
 							"old_tier":     oldTier,
 							"new_tier":     newTier,
 							"tier_changed": tierChanged,
@@ -988,7 +988,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		if err != nil {
 			logger.WithField("error", err).Warn("Failed to create protobuf reject message, falling back to legacy")
 		} else {
-			logger.WithFields(map[string]interface{}{
+			logger.WithFields(map[string]any{
 				"rejects": rejects,
 				"code":    code,
 			}).Debug("Sending reject message to game server.")
@@ -1016,7 +1016,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 }
 
 // MatchLoop is called every tick of the match and handles state, plus messages from the client.
-func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, messages []runtime.MatchData) interface{} {
+func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ any, messages []runtime.MatchData) any {
 	state, ok := state_.(*MatchLabel)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
@@ -1108,7 +1108,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					continue
 				}
 
-				logger.WithFields(map[string]interface{}{"typ": typ, "value": string(in.GetData()), "username": in.GetUsername(), "session_id": in.GetSessionId()}).Debug("Received match message () from ()")
+				logger.WithFields(map[string]any{"typ": typ, "value": string(in.GetData()), "username": in.GetUsername(), "session_id": in.GetSessionId()}).Debug("Received match message () from ()")
 				// Unmarshal the message into an interface, then switch on the type.
 				msg := reflect.New(reflect.TypeOf(typ).Elem()).Interface().(evr.Message)
 				if err := json.Unmarshal(in.GetData(), &msg); err != nil {
@@ -1135,7 +1135,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 						logger.WithField("error", err).Error("match pipeline")
 					}
 				}
-				logger.WithFields(map[string]interface{}{"msg": msg, "duration_ms": time.Since(start) / time.Millisecond}).Debug("Message processed")
+				logger.WithFields(map[string]any{"msg": msg, "duration_ms": time.Since(start) / time.Millisecond}).Debug("Message processed")
 			*/
 		}
 	}
@@ -1309,7 +1309,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				// Check for tier change after completing match
 				oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
 
-				logger.WithFields(map[string]interface{}{
+				logger.WithFields(map[string]any{
 					"user_id":      presence.GetUserId(),
 					"old_tier":     oldTier,
 					"new_tier":     newTier,
@@ -1382,7 +1382,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 }
 
 // MatchTerminate is called when the match is being terminated.
-func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, graceSeconds int) interface{} {
+func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ any, graceSeconds int) any {
 	state, ok := state_.(*MatchLabel)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
@@ -1422,7 +1422,7 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 	return nil
 }
 
-func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, graceSeconds int) interface{} {
+func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ any, graceSeconds int) any {
 	state, ok := state_.(*MatchLabel)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
@@ -1488,7 +1488,7 @@ func (n matchSignalBlockedNakamaModule) MatchSignal(_ context.Context, _ string,
 }
 
 // MatchSignal is called when a signal is sent into the match.
-func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, data string) (interface{}, string) {
+func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ any, data string) (any, string) {
 	state, ok := state_.(*MatchLabel)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
@@ -1705,8 +1705,17 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 
 	case SignalLockSession:
-		// Lock signals are logged but have no effect - matches are locked via round over events
-		logger.Info("Lock signal received (no effect)")
+		// Lock signal indicates ~1:45 remaining in an arena match.
+		// Only set GameStatusRoundClosing for arena — combat/social are unaffected.
+		// Do NOT set Open=false or LockedAt here. The match stays open;
+		// backfill exclusion is handled by query filters on game_status.
+		// Open=false and LockedAt are set at round/match end (PostMatch), not here.
+		if state.Mode == evr.ModeArenaPublic {
+			state.GameStatus = GameStatusRoundClosing
+			logger.Info("Lock signal received, setting game status to round_closing")
+		} else {
+			logger.Debug("Lock signal received, ignoring for non-arena match")
+		}
 
 	case SignalUnlockSession:
 
@@ -1845,7 +1854,7 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 			humanCount := state.RoleCount(team.role)
 			botsNeeded := state.TeamSize - humanCount
 			if botsNeeded > 0 {
-				logger.WithFields(map[string]interface{}{"team_id": team.id, "human_count": humanCount, "bots_needed": botsNeeded}).Info("Spawning bots for AI CO-OP")
+				logger.WithFields(map[string]any{"team_id": team.id, "human_count": humanCount, "bots_needed": botsNeeded}).Info("Spawning bots for AI CO-OP")
 				botMessages = append(botMessages, evr.NewSNSLobbySetSpawnBotOnServer(
 					0, // MatchID (unused by game server per binary evidence)
 					team.id,
@@ -1885,7 +1894,7 @@ func (m *EvrMatch) updateLabel(logger runtime.Logger, dispatcher runtime.MatchDi
 	state.rebuildCache()
 	if dispatcher != nil {
 		if err := dispatcher.MatchLabelUpdate(state.GetLabel()); err != nil {
-			logger.WithFields(map[string]interface{}{
+			logger.WithFields(map[string]any{
 				"state": state,
 				"error": err,
 			}).Error("Failed to update label.")

@@ -210,7 +210,7 @@ func (pm *MatchPreemptionManager) sendPreemptionNotification(ctx context.Context
 }
 
 // shutdownMatch shuts down a match using the proper SignalMatch envelope.
-func (pm *MatchPreemptionManager) shutdownMatch(ctx context.Context, matchID, reason string) error {
+func (pm *MatchPreemptionManager) shutdownMatch(ctx context.Context, matchID, _reason string) error {
 	mID := MatchIDFromStringOrNil(matchID)
 	if mID.IsNil() {
 		return fmt.Errorf("invalid match ID: %s", matchID)
