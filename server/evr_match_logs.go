@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -38,15 +37,8 @@ func (m *EventEnvelopeMatchData) MarshalEvent() (*api.Event, error) {
 }
 
 func MatchDataEvent(ctx context.Context, nk runtime.NakamaModule, matchID MatchID, data any) error {
-	// Create a new match data journal entry
-	entry := &MatchDataJournalEntry{
-		CreatedAt: time.Now().UTC(),
-		Data:      data,
-	}
-
-	// Create the event
-	event := NewEventMatchDataJournal(matchID.String(), entry)
-
-	// Send the event
-	return SendEvent(ctx, nk, event)
+	// Skip sending: EventMatchDataJournal.Process() is a no-op (journal persistence
+	// is disabled). Sending wastes a queue slot and ~10-50KB of serialized JSON per
+	// event. Re-enable this when journal persistence is implemented.
+	return nil
 }

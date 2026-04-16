@@ -61,10 +61,45 @@ func filterRemoteLogs(logs []string) []string {
 	return filteredLogs
 }
 
+const (
+	maxRemoteLogEntries = 50         // max log entries per packet
+	maxRemoteLogPayload = 256 * 1024 // 256KB total payload limit
+)
+
 func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, _ *zap.Logger, session *sessionWS, evrID evr.EvrId, request *evr.RemoteLogSet) error {
-	if !session.userID.IsNil() {
-		p.userRemoteLogJournalRegistry.Add(session.id, session.userID, filterRemoteLogs(request.Logs))
+	// Gate oversized payloads early
+	if len(request.Logs) > maxRemoteLogEntries {
+		request.Logs = request.Logs[:maxRemoteLogEntries]
 	}
+
+	totalSize := 0
+	for i, log := range request.Logs {
+		totalSize += len(log)
+		if totalSize > maxRemoteLogPayload {
+			request.Logs = request.Logs[:i]
+			break
+		}
+	}
+
+	// Filter once, use everywhere
+	filteredLogs := filterRemoteLogs(request.Logs)
+	request.Logs = filteredLogs
+
+	if !session.userID.IsNil() {
+		p.userRemoteLogJournalRegistry.Add(session.id, session.userID, filteredLogs)
+	}
+	if dispatcher := globalEventDispatcher.Load(); dispatcher != nil {
+		dispatcher.Dispatch(ctx, &EventRemoteLogSet{
+			Node:         p.node,
+			UserID:       session.UserID().String(),
+			SessionID:    session.ID().String(),
+			XPID:         evrID,
+			Username:     session.Username(),
+			RemoteLogSet: request,
+		})
+		return nil
+	}
+	// Fallback to legacy JSON path if dispatcher not yet initialized
 	return SendEvent(ctx, p.nk, &EventRemoteLogSet{
 		Node:         p.node,
 		UserID:       session.UserID().String(),

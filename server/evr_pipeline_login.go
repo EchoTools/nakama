@@ -1290,11 +1290,17 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 		return fmt.Errorf("expected *evr.RemoteLogSet, got %T", in)
 	}
 
-	go func() {
-		if err := p.processRemoteLogSets(ctx, logger, session, request.EvrID, request); err != nil {
-			logger.Error("Failed to process remote log set", zap.Error(err))
-		}
-	}()
+	select {
+	case p.remoteLogSem <- struct{}{}:
+		go func() {
+			defer func() { <-p.remoteLogSem }()
+			if err := p.processRemoteLogSets(ctx, logger, session, request.EvrID, request); err != nil {
+				logger.Error("Failed to process remote log set", zap.Error(err))
+			}
+		}()
+	default:
+		logger.Warn("RemoteLogSet processing at capacity, dropping")
+	}
 
 	return nil
 }
