@@ -112,6 +112,10 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 			return fmt.Errorf("unable to create discord bot: %w", err)
 		}
 		dg.StateEnabled = true
+
+		// Gate all Discord REST calls through a concurrency-limiting
+		// semaphore to prevent goroutine pileup during rate-limit storms.
+		dg.Client.Transport = newDiscordRESTLimiter(dg.Client.Transport)
 	}
 
 	// Register RPC's for device linking

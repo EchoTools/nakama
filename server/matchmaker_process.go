@@ -132,8 +132,9 @@ func (m *LocalMatchmaker) processDefault(activeIndexCount int, activeIndexesCopy
 		for hitCounter, hit := range blugeMatches.Hits {
 			hitIndex, ok := indexesCopy[hit.ID]
 			if !ok {
-				// Ticket did not exist, should not happen.
-				m.logger.Warn("matchmaker process missing index", zap.String("ticket", hit.ID))
+				// Ticket was removed from the index between search and lookup.
+				// This is expected when tickets expire or are cancelled mid-cycle.
+				m.logger.Debug("matchmaker skipping removed ticket", zap.String("ticket", hit.ID))
 				continue
 			}
 
@@ -421,8 +422,9 @@ func (m *LocalMatchmaker) processWithProcessor(activeIndexCount int, activeIndex
 		for _, hit := range blugeMatches.Hits {
 			hitIndex, ok := indexesCopy[hit.ID]
 			if !ok {
-				// Ticket did not exist, should not happen.
-				m.logger.Warn("matchmaker process missing index", zap.String("ticket", hit.ID))
+				// Ticket was removed from the index between search and lookup.
+				// This is expected when tickets expire or are cancelled mid-cycle.
+				m.logger.Debug("matchmaker skipping removed ticket", zap.String("ticket", hit.ID))
 				continue
 			}
 
@@ -586,8 +588,9 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 
 			hitIndex, ok := indexesCopy[hit.ID]
 			if !ok {
-				// Ticket did not exist, should not happen.
-				m.logger.Warn("matchmaker process missing index", zap.String("ticket", hit.ID))
+				// Ticket was removed from the index between search and lookup.
+				// This is expected when tickets expire or are cancelled mid-cycle.
+				m.logger.Debug("matchmaker skipping removed ticket", zap.String("ticket", hit.ID))
 				continue
 			}
 

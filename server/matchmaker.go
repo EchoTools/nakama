@@ -424,8 +424,53 @@ func (m *LocalMatchmaker) Process() {
 
 	m.Lock()
 
+	batch := bluge.NewBatch()
+	var batchSize int
 	for _, ticket := range expiredActiveIndexes {
 		delete(m.activeIndexes, ticket)
+
+		index, ok := m.indexes[ticket]
+		if !ok {
+			continue
+		}
+
+		// Tickets where MinCount == MaxCount are just moved to the passive pool (they can still
+		// be found by other active tickets' searches). Only fully remove tickets that have
+		// genuinely expired by reaching MaxIntervals.
+		if index.Intervals < m.config.GetMatchmaker().MaxIntervals {
+			continue
+		}
+
+		// Full cleanup for expired tickets, mirroring the matched entries cleanup path.
+		delete(m.indexes, ticket)
+		m.revCache.Delete(ticket)
+
+		for _, entry := range index.Entries {
+			if sessionTickets, ok := m.sessionTickets[entry.Presence.SessionId]; ok {
+				if l := len(sessionTickets); l <= 1 {
+					delete(m.sessionTickets, entry.Presence.SessionId)
+				} else {
+					delete(sessionTickets, ticket)
+				}
+			}
+		}
+		if index.PartyId != "" {
+			if partyTickets, ok := m.partyTickets[index.PartyId]; ok {
+				if l := len(partyTickets); l <= 1 {
+					delete(m.partyTickets, index.PartyId)
+				} else {
+					delete(partyTickets, ticket)
+				}
+			}
+		}
+
+		batch.Delete(bluge.Identifier(ticket))
+		batchSize++
+	}
+	if batchSize > 0 {
+		if err := m.indexWriter.Batch(batch); err != nil {
+			m.logger.Error("error deleting expired matchmaker index entries", zap.Error(err))
+		}
 	}
 
 	for i := 0; i < len(matchedEntries); i++ {

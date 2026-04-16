@@ -139,6 +139,10 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 			logger.Error("Unable to create bot")
 		}
 		dg.StateEnabled = true
+
+		// Gate all Discord REST calls through a concurrency-limiting
+		// semaphore to prevent goroutine pileup during rate-limit storms.
+		dg.Client.Transport = newDiscordRESTLimiter(dg.Client.Transport)
 	}
 
 	runtimeLogger := NewRuntimeGoLogger(logger)

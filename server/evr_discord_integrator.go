@@ -492,6 +492,16 @@ func (c *DiscordIntegrator) GuildMember(guildID, discordID string) (member *disc
 		if IsDiscordErrorCode(err, discordgo.ErrCodeUnknownMember) {
 			return nil, ErrMemberNotFound
 		}
+
+		// If the REST limiter is overloaded (too many concurrent requests
+		// blocked by rate limits), return stale cached data rather than
+		// failing the entire login/interaction flow.
+		if errors.Is(err, ErrDiscordRESTOverloaded) {
+			if cached, ok := c.memberCache.Load(cacheKey); ok {
+				return cached.member, nil
+			}
+		}
+
 		return nil, fmt.Errorf("error getting guild member: %w", err)
 	}
 
