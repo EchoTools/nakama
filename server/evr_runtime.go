@@ -264,6 +264,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	if err != nil {
 		return fmt.Errorf("unable to create event dispatch: %w", err)
 	}
+	globalEventDispatcher.Store(eventDispatch)
 
 	// Register the event handler
 	if err := initializer.RegisterEvent(eventDispatch.eventFn); err != nil {

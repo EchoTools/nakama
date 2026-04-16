@@ -72,6 +72,7 @@ type EventDispatcher struct {
 
 	eventUnmarshaler     func(event *api.Event) (Event, error)
 	queue                chan *api.Event
+	directQueue          chan Event // bypasses JSON serialization
 	matchJournals        map[MatchID]*MatchDataJournal
 	matchJournalsInFlight map[MatchID]*MatchDataJournal // journals currently being inserted into MongoDB
 	cache                *sync.Map
@@ -95,6 +96,7 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		statisticsQueue: statisticsQueue,
 
 		queue:                make(chan *api.Event, 4096),
+		directQueue:          make(chan Event, 4096),
 		matchJournals:        make(map[MatchID]*MatchDataJournal),
 		matchJournalsInFlight: make(map[MatchID]*MatchDataJournal),
 		cache:                &sync.Map{},
@@ -115,8 +117,35 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 			select {
 			case <-ctx.Done():
 				return
+			case e := <-dispatch.directQueue:
+				// Direct path — no JSON round-trip. The Event is already a
+				// Go interface (pointer-sized), so no serialization occurred.
+				processCtx, cancel := context.WithTimeout(ctx, eventDispatchTimeout)
+				doneCh := make(chan struct{}, 1)
+				go func() {
+					defer close(doneCh)
+					defer func() {
+						if r := recover(); r != nil {
+							logger.WithField("panic", r).Error("panic recovered in direct event handler")
+						}
+					}()
+					if err := e.Process(processCtx, logger, dispatch); err != nil {
+						logger.WithField("error", err).Error("failed to process direct event")
+					}
+				}()
+				select {
+				case <-ctx.Done():
+					cancel()
+					return
+				case <-doneCh:
+					cancel()
+				case <-processCtx.Done():
+					cancel()
+					logger.Debug("direct event processing timed out")
+				}
 			case evt := <-dispatch.queue:
-
+				// Legacy JSON path
+				processCtx, cancel := context.WithTimeout(ctx, eventDispatchTimeout)
 				doneCh := make(chan struct{}, 1)
 
 				go func() {
@@ -126,17 +155,19 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 							logger.WithField("panic", r).Error("panic recovered in event handler")
 						}
 					}()
-					dispatch.processEvent(ctx, logger, evt)
+					dispatch.processEvent(processCtx, logger, evt)
 				}()
 				select {
 				case <-ctx.Done():
+					cancel()
 					logger.Warn("context canceled while processing event")
 					return
 				case <-doneCh:
+					cancel()
 					logger.WithField("event", evt.Name).Debug("processed event")
-				case <-time.After(5 * time.Second):
-					logger.WithField("event", evt.Name).Debug("event processing took too long, skipping")
-					continue
+				case <-processCtx.Done():
+					cancel()
+					logger.WithField("event", evt.Name).Debug("event processing timed out")
 				}
 			case <-time.After(eventDispatchTimeout):
 				// Process Redis queue and persist to MongoDB
@@ -199,6 +230,19 @@ func (h *EventDispatcher) eventFn(ctx context.Context, logger runtime.Logger, ev
 		logger.WithField("event", evt.Name).Debug("event queued for processing")
 	default:
 		logger.Warn("event queue full")
+	}
+}
+
+// Dispatch queues an Event for direct processing, bypassing JSON serialization.
+// Only a pointer-sized interface value is enqueued, avoiding the multi-MB JSON
+// copies that cause OOM under load.
+func (h *EventDispatcher) Dispatch(ctx context.Context, e Event) {
+	select {
+	case <-ctx.Done():
+		return
+	case h.directQueue <- e:
+	default:
+		h.logger.WithField("event", fmt.Sprintf("%T", e)).Warn("direct event queue full, dropping event")
 	}
 }
 

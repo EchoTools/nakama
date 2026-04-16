@@ -37,6 +37,7 @@ var globalAppBot = atomic.NewPointer[DiscordAppBot](nil)
 var globalLobbyBuilder = atomic.NewPointer[LobbyBuilder](nil)
 var globalSkillBasedMatchmaker = atomic.NewPointer[SkillBasedMatchmaker](nil)
 var globalEarlyQuitMessageTrigger = atomic.NewPointer[SNSEarlyQuitMessageTrigger](nil)
+var globalEventDispatcher = atomic.NewPointer[EventDispatcher](nil)
 var globalMongoClient = atomic.NewPointer[mongo.Client](nil)
 
 const (
@@ -84,6 +85,8 @@ type EvrPipeline struct {
 	snsPartyIDCounter atomic.Uint64
 	evrUUIDToUserID   *MapOf[uuid.UUID, uuid.UUID] // EvrId.UUID() -> Nakama user UUID
 	snsPartyInvites   *MapOf[uuid.UUID, *snsPartyInviteList]
+
+	remoteLogSem chan struct{} // limits concurrent RemoteLogSet processing
 }
 
 type ctxDiscordBotTokenKey struct{}
@@ -262,6 +265,8 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		snsPartyUUIDToID: &MapOf[uuid.UUID, uint64]{},
 		evrUUIDToUserID:  &MapOf[uuid.UUID, uuid.UUID]{},
 		snsPartyInvites:  &MapOf[uuid.UUID, *snsPartyInviteList]{},
+
+		remoteLogSem: make(chan struct{}, 16), // max 16 concurrent RemoteLogSet processors
 	}
 
 	// Create and store the early quit message trigger for sending SNS messages to players
