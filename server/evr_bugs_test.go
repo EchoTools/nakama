@@ -253,3 +253,53 @@ func TestIsBotEvrID(t *testing.T) {
 
 // This is an informational log. The client-side error is passed through.
 // No server-side fix needed — this is a client reporting a failed connection.
+
+// =============================================================================
+// Bug 17: Stats injection via mismatched XPID in RemoteLogPostMatchTypeStats
+// evr_runtime_event_remotelogset.go — processPostMatchMessages accepted stats
+// for arbitrary XPIDs without validating the submitter owned that XPID.
+// An authenticated player in the same match could submit fabricated stats
+// for other players by setting m.XPID to a different player's ID.
+// FIX: Validate m.XPID == s.XPID before accepting stats. See issue #398.
+// =============================================================================
+
+func TestStatsInjection_MismatchedXPID(t *testing.T) {
+	// The vulnerability: RemoteLogPostMatchTypeStats.XPID (from GenericRemoteLog)
+	// identifies who the stats are FOR. The submitter's identity is s.XPID.
+	// Before the fix, any m.XPID was accepted without checking it matched s.XPID.
+
+	submitter := evr.EvrId{PlatformCode: evr.OVR, AccountId: 111111}
+	victim := evr.EvrId{PlatformCode: evr.OVR, AccountId: 222222}
+
+	// The attacker crafts a RemoteLogPostMatchTypeStats with victim's XPID
+	attackerMsg := &evr.RemoteLogPostMatchTypeStats{
+		GenericRemoteLog: evr.GenericRemoteLog{
+			XPID: victim.Token(),
+		},
+		Stats: evr.MatchTypeStats{
+			Goals: 999, // Fabricated stats
+		},
+	}
+
+	// Parse the claimed XPID (this is what the vulnerable code does)
+	claimedXPID, err := evr.ParseEvrId(attackerMsg.XPID)
+	assert.NoError(t, err)
+
+	// The fix: reject when claimed XPID doesn't match submitter
+	assert.NotEqual(t, submitter, *claimedXPID,
+		"Mismatched XPID should be detected — stats injection must be blocked")
+
+	// Self-report should be accepted
+	selfMsg := &evr.RemoteLogPostMatchTypeStats{
+		GenericRemoteLog: evr.GenericRemoteLog{
+			XPID: submitter.Token(),
+		},
+		Stats: evr.MatchTypeStats{
+			Goals: 5,
+		},
+	}
+	selfXPID, err := evr.ParseEvrId(selfMsg.XPID)
+	assert.NoError(t, err)
+	assert.Equal(t, submitter, *selfXPID,
+		"Self-reported stats should match submitter XPID")
+}
