@@ -57,6 +57,9 @@ func (g *LobbyGroup) MatchmakerAdd(sessionID, node, query string, minCount, maxC
 	if g.ph == nil {
 		return "", nil, errors.New("party handler is nil")
 	}
+	if settings := ServiceSettings(); settings.Matchmaking.DisableMatchmaker {
+		return "", nil, runtime.NewError("matchmaker is disabled", 14) // UNAVAILABLE
+	}
 	return g.ph.MatchmakerAdd(sessionID, node, query, minCount, maxCount, countMultiple, stringProperties, numericProperties)
 }
 

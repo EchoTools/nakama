@@ -21,6 +21,14 @@ import (
 )
 
 func (p *Pipeline) matchmakerAdd(logger *zap.Logger, session Session, envelope *rtapi.Envelope) (bool, *rtapi.Envelope) {
+	if settings := ServiceSettings(); settings.Matchmaking.DisableMatchmaker {
+		_ = session.Send(&rtapi.Envelope{Cid: envelope.Cid, Message: &rtapi.Envelope_Error{Error: &rtapi.Error{
+			Code:    int32(rtapi.Error_BAD_INPUT),
+			Message: "Matchmaker is temporarily disabled",
+		}}}, true)
+		return false, nil
+	}
+
 	incoming := envelope.GetMatchmakerAdd()
 
 	// Minimum count.
