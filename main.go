@@ -249,6 +249,8 @@ func main() {
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
+	server.StartHeapWatch(logger, 2*time.Minute, "/logs/heap-profiles")
+
 	startupLogger.Info("Startup done")
 
 	// Wait for a termination signal.
