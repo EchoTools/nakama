@@ -109,6 +109,7 @@ type PruneSettings struct {
 }
 
 type GlobalMatchmakingSettings struct {
+	DisableMatchmaker               bool                    `json:"disable_matchmaker"`                  // Completely disable matchmaker — tickets are rejected immediately
 	MatchmakingTimeoutSecs         int                     `json:"matchmaking_timeout_secs"`            // The matchmaking timeout
 	FailsafeTimeoutSecs            int                     `json:"failsafe_timeout_secs"`               // The failsafe timeout
 	FallbackTimeoutSecs            int                     `json:"fallback_timeout_secs"`               // The fallback timeout
