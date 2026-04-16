@@ -103,10 +103,27 @@ func (v *VRMLScanQueue) Start() error {
 		// deferred to the first iteration of the loop where work is permitted.
 		initialized := false
 
+		// Wait for service settings to load before attempting any VRML work.
+		// This prevents the startup race where VRMLOutageModeEnabled() returns
+		// false simply because settings haven't been read from the DB yet.
+		for i := 0; i < 30; i++ {
+			if ServiceSettings() != nil {
+				break
+			}
+			select {
+			case <-v.ctx.Done():
+				return
+			case <-time.After(1 * time.Second):
+			}
+		}
+
 		if !shouldSkipVRMLWork() {
 			seasons, err := vg.GameSeasons(VRMLEchoArenaShortName)
 			if err != nil {
 				v.logger.WithField("error", err).Error("Failed to get seasons")
+				if IsVRMLOutageError(err) {
+					v.logger.Warn("VRML appears to be down, deferring initialization to loop")
+				}
 			}
 			v.seasons = seasons
 
@@ -302,6 +319,7 @@ func (v *VRMLScanQueue) retrievePlayerMap(playerCh chan VRMLPlayerListItems) {
 
 	for _, url := range baseURLs {
 		cursor := 1
+		pageLoop:
 		for {
 			buf.Reset()
 
@@ -391,6 +409,16 @@ func (v *VRMLScanQueue) retrievePlayerMap(playerCh chan VRMLPlayerListItems) {
 						continue
 					}
 
+				default:
+					logger.WithField("status_code", resp.StatusCode).Warn("Unexpected HTTP status from VRML API")
+					resp.Body.Close()
+					// If this looks like a server outage (5xx), skip this URL entirely.
+					if resp.StatusCode >= 500 {
+						logger.Warn("VRML server error; skipping remaining pages for this URL")
+						break pageLoop
+					}
+					// For other unexpected codes (4xx, 3xx, etc.) skip this page and try the next cursor.
+					continue
 				}
 				// Read the response body
 				if _, err := buf.ReadFrom(resp.Body); err != nil {
