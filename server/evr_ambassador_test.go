@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -261,6 +262,57 @@ func TestAmbassadorProgramEnabled(t *testing.T) {
 	settings.EnableAmbassadorProgram = &disabled
 	if settings.AmbassadorProgramEnabled() {
 		t.Error("AmbassadorProgramEnabled should return false when set to false")
+	}
+}
+
+func TestAmbassadorEligibilityMessage(t *testing.T) {
+	tests := []struct {
+		name        string
+		gamesPlayed int
+		mu          float64
+		minGames    int
+		minMu       float64
+		wantContain string
+		wantOmit    string
+	}{
+		{
+			name:        "only mu failing",
+			gamesPlayed: 100,
+			mu:          5.0,
+			minGames:    0,
+			minMu:       10.0,
+			wantContain: "mu of 10+",
+			wantOmit:    "games played",
+		},
+		{
+			name:        "only games failing",
+			gamesPlayed: 50,
+			mu:          35.0,
+			minGames:    200,
+			minMu:       10.0,
+			wantContain: "200 games played",
+			wantOmit:    "mu of",
+		},
+		{
+			name:        "both failing",
+			gamesPlayed: 50,
+			mu:          5.0,
+			minGames:    200,
+			minMu:       10.0,
+			wantContain: "games played",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := ambassadorEligibilityMessage(tt.gamesPlayed, tt.mu, tt.minGames, tt.minMu)
+			if !strings.Contains(msg, tt.wantContain) {
+				t.Errorf("message %q should contain %q", msg, tt.wantContain)
+			}
+			if tt.wantOmit != "" && strings.Contains(msg, tt.wantOmit) {
+				t.Errorf("message %q should not contain %q", msg, tt.wantOmit)
+			}
+		})
 	}
 }
 
