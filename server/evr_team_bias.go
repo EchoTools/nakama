@@ -25,6 +25,8 @@ func ApplyNewPlayerTeamBias(match []runtime.MatchmakerEntry, teamSize, threshold
 		return match
 	}
 
+	partyTickets := partyTicketsInMatch(match[:2*teamSize])
+
 	blue := match[:teamSize]
 	orange := match[teamSize : 2*teamSize]
 
@@ -65,6 +67,10 @@ func ApplyNewPlayerTeamBias(match []runtime.MatchmakerEntry, teamSize, threshold
 			if !IsNewPlayer(weaker[wi], threshold) {
 				continue
 			}
+			if partyTickets[weaker[wi].GetTicket()] {
+				processed[sid] = true
+				continue
+			}
 
 			newMu := entryMu(weaker[wi], defaultMu)
 
@@ -73,6 +79,9 @@ func ApplyNewPlayerTeamBias(match []runtime.MatchmakerEntry, teamSize, threshold
 			bestIdx := -1
 			bestDiff := math.MaxFloat64
 			for si := 0; si < len(stronger); si++ {
+				if partyTickets[stronger[si].GetTicket()] {
+					continue
+				}
 				if IsNewPlayer(stronger[si], threshold) {
 					continue // don't swap new-for-new
 				}
@@ -149,6 +158,21 @@ func ApplyNewPlayerTeamBias(match []runtime.MatchmakerEntry, teamSize, threshold
 	}
 
 	return match
+}
+
+func partyTicketsInMatch(match []runtime.MatchmakerEntry) map[string]bool {
+	ticketCounts := make(map[string]int, len(match))
+	for _, e := range match {
+		ticketCounts[e.GetTicket()]++
+	}
+
+	partyTickets := make(map[string]bool)
+	for ticket, count := range ticketCounts {
+		if count > 1 {
+			partyTickets[ticket] = true
+		}
+	}
+	return partyTickets
 }
 
 func teamMuSum(team []runtime.MatchmakerEntry, defaultMu float64) float64 {
