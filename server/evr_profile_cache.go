@@ -219,19 +219,24 @@ func NewClientProfile(ctx context.Context, evrProfile *EVRProfile, serverProfile
 	if evrProfile.NewUnlocks == nil {
 		evrProfile.NewUnlocks = []int64{}
 	}
+
+	// Copy the slice to avoid mutating the original backing array.
+	newUnlocks := make([]int64, len(evrProfile.NewUnlocks))
+	copy(newUnlocks, evrProfile.NewUnlocks)
+
 	// Remove newunlocks for cosmetics that the user does not have unlocked
-	for i := 0; i < len(evrProfile.NewUnlocks); i++ {
-		sym := evr.ToSymbol(evrProfile.NewUnlocks[i])
+	for i := 0; i < len(newUnlocks); i++ {
+		sym := evr.ToSymbol(newUnlocks[i])
 		name := sym.String()
 		if !serverProfile.IsUnlocked(name) {
-			evrProfile.NewUnlocks = slices.Delete(evrProfile.NewUnlocks, i, i+1)
+			newUnlocks = slices.Delete(newUnlocks, i, i+1)
 			i--
 		}
 	}
 
 	// Remove kissy lips from new unlocks
-	if i := slices.Index(evrProfile.NewUnlocks, -6079176325296842000); i != -1 {
-		evrProfile.NewUnlocks = slices.Delete(evrProfile.NewUnlocks, i, i+1)
+	if i := slices.Index(newUnlocks, -6079176325296842000); i != -1 {
+		newUnlocks = slices.Delete(newUnlocks, i, i+1)
 	}
 
 	var customizationPOIs *evr.Customization
@@ -280,7 +285,7 @@ func NewClientProfile(ctx context.Context, evrProfile *EVRProfile, serverProfile
 			SetupVersion:           1,
 			Channel:                serverProfile.Social.Channel,
 		},
-		NewUnlocks: evrProfile.NewUnlocks, // This could pull from the wallet ledger
+		NewUnlocks: newUnlocks, // This could pull from the wallet ledger
 	}
 }
 

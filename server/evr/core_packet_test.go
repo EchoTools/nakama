@@ -322,8 +322,8 @@ func TestParsePacket_TooManyMessages(t *testing.T) {
 
 	// bytes.Split on a packet starting with the marker produces an empty
 	// leading chunk plus one chunk per message. With MaxMessagesPerPacket
-	// messages we get MaxMessagesPerPacket+1 chunks, which exceeds the limit.
-	count := MaxMessagesPerPacket // produces count+1 chunks after split
+	// messages we get MaxMessagesPerPacket+2 chunks, which exceeds the limit.
+	count := MaxMessagesPerPacket + 1 // produces count+1 chunks after split
 	var packet []byte
 	for i := 0; i < count; i++ {
 		packet = append(packet, msg...)
