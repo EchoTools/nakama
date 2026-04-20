@@ -26,6 +26,12 @@ func makeEntry(id int, mu float64, gamesPlayed int) *MatchmakerEntry {
 	}
 }
 
+func makePartyEntry(id int, ticket string, mu float64, gamesPlayed int) *MatchmakerEntry {
+	entry := makeEntry(id, mu, gamesPlayed)
+	entry.Ticket = ticket
+	return entry
+}
+
 func isNewInSlice(entries []runtime.MatchmakerEntry, threshold int) bool {
 	for _, e := range entries {
 		if IsNewPlayer(e, threshold) {
@@ -33,6 +39,27 @@ func isNewInSlice(entries []runtime.MatchmakerEntry, threshold int) bool {
 		}
 	}
 	return false
+}
+
+func TestNewPlayerTeamBias_DoesNotSplitPartyTicket(t *testing.T) {
+	threshold := 50
+	teamSize := 2
+	partyTicket := uuid.NewV5(uuid.Nil, "bias-party-ticket").String()
+
+	match := []runtime.MatchmakerEntry{
+		makePartyEntry(1, partyTicket, 20.0, 200), // party veteran
+		makePartyEntry(2, partyTicket, 19.0, 5),   // party new player
+		makeEntry(3, 22.0, 200),
+		makeEntry(4, 21.0, 150),
+	}
+
+	result := ApplyNewPlayerTeamBias(match, teamSize, threshold, 25.0)
+
+	bluePartyCount := countByTicket(result[:teamSize], partyTicket)
+	orangePartyCount := countByTicket(result[teamSize:], partyTicket)
+	if bluePartyCount > 0 && orangePartyCount > 0 {
+		t.Fatalf("new-player team bias split party ticket %s: blue=%d orange=%d", partyTicket, bluePartyCount, orangePartyCount)
+	}
 }
 
 func TestNewPlayerTeamBias_SwapsNewPlayerToStrongerTeam(t *testing.T) {
@@ -86,7 +113,7 @@ func TestNewPlayerTeamBias_NoSwapWhenWouldWorsenBalance(t *testing.T) {
 	// New imbalance = 17, worse than current 7. No swap.
 	match := []runtime.MatchmakerEntry{
 		makeEntry(1, 30.0, 200),
-		makeEntry(2, 10.0, 5),   // new player with very different mu
+		makeEntry(2, 10.0, 5), // new player with very different mu
 		makeEntry(3, 25.0, 200),
 		makeEntry(4, 22.0, 150),
 	}
