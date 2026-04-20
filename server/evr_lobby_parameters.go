@@ -87,10 +87,16 @@ func (p *LobbySessionParameters) SetPartySize(size int) {
 }
 
 func (p *LobbySessionParameters) GetRating() types.Rating {
-	if p.MatchmakingRating == nil || p.MatchmakingRating.Load() == nil {
+	if p.MatchmakingRating == nil {
 		return NewDefaultRating()
 	}
-	return *p.MatchmakingRating.Load()
+	// Load once to avoid TOCTOU: another goroutine can Store(nil) between the
+	// nil check and the dereference.
+	r := p.MatchmakingRating.Load()
+	if r == nil {
+		return NewDefaultRating()
+	}
+	return *r
 }
 
 func (p *LobbySessionParameters) SetRating(rating types.Rating) {
