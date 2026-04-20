@@ -612,6 +612,17 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 			if err != nil {
 				return fmt.Errorf("failed to parse evr ID: %w", err)
 			}
+
+			// Only accept stats the submitter reports for themselves.
+			// Prevents injection of fabricated stats for other players.
+			if *xpid != s.XPID {
+				logger.WithFields(map[string]interface{}{
+					"submitter": s.XPID.String(),
+					"claimed":   xpid.String(),
+				}).Warn("Rejected stats submission for mismatched XPID")
+				continue
+			}
+
 			statsByPlayer[*xpid] = m.Stats
 
 		}
