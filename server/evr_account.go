@@ -425,13 +425,15 @@ func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID strin
 	var lastErr error
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
+			// On version conflict, reload the full profile. This is a "last-write-wins" conflict
+			// resolution, where the caller's intended mutations are discarded on retry.
+			// This is safer than accidentally writing stale data. The caller is expected
+			// to implement their own retry loop if they need to preserve their changes.
 			fresh, err := EVRProfileLoad(ctx, nk, userID)
 			if err != nil {
 				lastErr = err
 			} else {
-				meta := md.StorageMeta()
-				meta.Version = fresh.StorageMeta().Version
-				md.SetStorageMeta(meta)
+				*md = *fresh
 			}
 		}
 
