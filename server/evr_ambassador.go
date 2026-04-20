@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -104,6 +105,20 @@ func ApplyAmbassadorMuReduction(mu, reduction float64) float64 {
 	return result
 }
 
+// ambassadorEligibilityMessage returns a user-facing message describing which
+// ambassador requirements the player has not yet met.
+func ambassadorEligibilityMessage(gamesPlayed int, mu float64, minGames int, minMu float64) string {
+	var reasons []string
+	if gamesPlayed < minGames {
+		reasons = append(reasons, fmt.Sprintf("at least %d games played (you have %d)", minGames, gamesPlayed))
+	}
+	if mu < minMu {
+		reasons = append(reasons, fmt.Sprintf("a mu of %.0f+ (yours is %.1f)", minMu, mu))
+	}
+	return fmt.Sprintf("You need %s to be an ambassador. Keep playing and you'll get there!",
+		strings.Join(reasons, " and "))
+}
+
 // handleAmbassadorCommand toggles the player's ambassador mode via /ambassador.
 func (d *DiscordAppBot) handleAmbassadorCommand(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 	if userID == "" {
@@ -139,10 +154,8 @@ func (d *DiscordAppBot) handleAmbassadorCommand(ctx context.Context, logger runt
 		}
 
 		if !IsEligibleAmbassador(gamesPlayed, rating.Mu, mm.AmbassadorMinGamesPlayed, mm.AmbassadorMinMu) {
-			return editInteractionResponse(s, i, fmt.Sprintf(
-				"You need at least %d games played and a mu of %.0f+ to be an ambassador. "+
-					"Keep playing and you'll get there!",
-				mm.AmbassadorMinGamesPlayed, mm.AmbassadorMinMu))
+			return editInteractionResponse(s, i, ambassadorEligibilityMessage(
+				gamesPlayed, rating.Mu, mm.AmbassadorMinGamesPlayed, mm.AmbassadorMinMu))
 		}
 
 		state.IsActive = true
