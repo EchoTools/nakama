@@ -9,29 +9,31 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
-// GamesPlayedLoad reads the all-time GamesPlayed leaderboard record for
-// a player. Returns 0 when the record does not exist yet.
+// GamesPlayedLoad computes a player's all-time games played from ArenaWins +
+// ArenaLosses leaderboard records. The GamesPlayed stat is a derived field
+// that is never written as its own leaderboard, so read the source stats.
+// Returns 0 when the records do not exist yet.
 func GamesPlayedLoad(ctx context.Context, nk runtime.NakamaModule, userID, groupID string, mode evr.Symbol) (int, error) {
-	boardID := StatisticBoardID(groupID, mode, GamesPlayedStatisticID, evr.ResetScheduleAllTime)
-
-	_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 1, "", 0)
-	if err != nil {
-		if errors.Is(err, ErrLeaderboardNotFound) || errors.Is(err, runtime.ErrLeaderboardNotFound) {
-			return 0, nil
+	total := 0
+	for _, statName := range []string{"ArenaWins", "ArenaLosses"} {
+		boardID := StatisticBoardID(groupID, mode, statName, evr.ResetScheduleAllTime)
+		_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 1, "", 0)
+		if err != nil {
+			if errors.Is(err, ErrLeaderboardNotFound) || errors.Is(err, runtime.ErrLeaderboardNotFound) {
+				continue
+			}
+			return 0, err
 		}
-		return 0, err
+		if len(ownerRecords) == 0 {
+			continue
+		}
+		val, err := ScoreToFloat64(ownerRecords[0].Score, ownerRecords[0].Subscore)
+		if err != nil {
+			return 0, fmt.Errorf("failed to decode %s score: %w", statName, err)
+		}
+		total += int(val)
 	}
-
-	if len(ownerRecords) == 0 {
-		return 0, nil
-	}
-
-	val, err := ScoreToFloat64(ownerRecords[0].Score, ownerRecords[0].Subscore)
-	if err != nil {
-		return 0, fmt.Errorf("failed to decode GamesPlayed score: %w", err)
-	}
-
-	return int(val), nil
+	return total, nil
 }
 
 // IsNewPlayer returns true if the player's games_played is below threshold,
