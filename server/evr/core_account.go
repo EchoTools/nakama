@@ -103,14 +103,14 @@ func (s ServerProfile) IsUnlocked(id string) bool {
 		return false
 	}
 	for _, m := range s.UnlockedCosmetics {
-		if _, ok := m[id]; ok {
+		if v, ok := m[id]; ok && v {
 			return true
 		}
 	}
 	return false
 }
 
-func (p ServerProfile) MarshallJSON() ([]byte, error) {
+func (p ServerProfile) MarshalJSON() ([]byte, error) {
 	type Alias ServerProfile
 	a := &struct {
 		*Alias
