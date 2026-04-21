@@ -638,7 +638,7 @@ type ArenaUnlocks struct {
 	GoalFx0004                  bool `json:"rwd_goal_fx_0004,omitempty"`
 	GoalFx0005                  bool `json:"rwd_goal_fx_0005,omitempty"`
 	GoalFx0008                  bool `json:"rwd_goal_fx_0008,omitempty"`
-	GoalFx0009                  bool `json:"rwd_goal_fx_0009" validate:"blocked"`
+	GoalFx0009                  bool `json:"rwd_goal_fx_0009,omitempty"`
 	GoalFx0010                  bool `json:"rwd_goal_fx_0010,omitempty"`
 	GoalFx0011                  bool `json:"rwd_goal_fx_0011,omitempty"`
 	GoalFx0012                  bool `json:"rwd_goal_fx_0012,omitempty"`
@@ -661,7 +661,7 @@ type ArenaUnlocks struct {
 	Medal0014                   bool `json:"rwd_medal_0014,omitempty"`
 	Medal0015                   bool `json:"rwd_medal_0015,omitempty"`
 	Medal0016                   bool `json:"rwd_medal_0016,omitempty"`
-	Medal0017                   bool `json:"rwd_medal_0017" validate:"blocked"`
+	Medal0017                   bool `json:"rwd_medal_0017,omitempty"`
 	MedalDefault                bool `json:"rwd_medal_default,omitempty"`
 	MedalLoneEcho2_A            bool `json:"rwd_medal_lone_echo_2_a,omitempty"`
 	MedalS1ArenaBronze          bool `json:"rwd_medal_s1_arena_bronze,omitempty"`
@@ -935,26 +935,26 @@ type ArenaUnlocks struct {
 	Tag0005                     bool `json:"rwd_tag_0005,omitempty"`
 	Tag0006                     bool `json:"rwd_tag_0006,omitempty"`
 	Tag0007                     bool `json:"rwd_tag_0007,omitempty"`
-	Tag0012                     bool `json:"rwd_tag_0012" validate:"blocked"`
-	Tag0013                     bool `json:"rwd_tag_0013" validate:"blocked"`
-	Tag0014                     bool `json:"rwd_tag_0014" validate:"blocked"`
-	Tag0015                     bool `json:"rwd_tag_0015" validate:"blocked"`
-	Tag0018                     bool `json:"rwd_tag_0018" validate:"blocked"`
-	Tag0019                     bool `json:"rwd_tag_0019" validate:"blocked"`
-	Tag0020                     bool `json:"rwd_tag_0020" validate:"blocked"`
-	Tag0021                     bool `json:"rwd_tag_0021" validate:"blocked"`
-	Tag0023                     bool `json:"rwd_tag_0023" validate:"blocked"`
-	Tag0025                     bool `json:"rwd_tag_0025" validate:"blocked"`
-	Tag0026                     bool `json:"rwd_tag_0026" validate:"blocked"`
-	Tag0027                     bool `json:"rwd_tag_0027" validate:"blocked"`
-	Tag0028                     bool `json:"rwd_tag_0028" validate:"blocked"`
-	Tag0029                     bool `json:"rwd_tag_0029" validate:"blocked"`
-	Tag0030                     bool `json:"rwd_tag_0030" validate:"blocked"`
-	Tag0031                     bool `json:"rwd_tag_0031" validate:"blocked"`
-	Tag0033                     bool `json:"rwd_tag_0033" validate:"blocked"`
-	Tag0034                     bool `json:"rwd_tag_0034" validate:"blocked"`
-	Tag0038                     bool `json:"rwd_tag_0038" validate:"blocked"`
-	Tag0039                     bool `json:"rwd_tag_0039" validate:"blocked"`
+	Tag0012                     bool `json:"rwd_tag_0012,omitempty"`
+	Tag0013                     bool `json:"rwd_tag_0013,omitempty"`
+	Tag0014                     bool `json:"rwd_tag_0014,omitempty"`
+	Tag0015                     bool `json:"rwd_tag_0015,omitempty"`
+	Tag0018                     bool `json:"rwd_tag_0018,omitempty"`
+	Tag0019                     bool `json:"rwd_tag_0019,omitempty"`
+	Tag0020                     bool `json:"rwd_tag_0020,omitempty"`
+	Tag0021                     bool `json:"rwd_tag_0021,omitempty"`
+	Tag0023                     bool `json:"rwd_tag_0023,omitempty"`
+	Tag0025                     bool `json:"rwd_tag_0025,omitempty"`
+	Tag0026                     bool `json:"rwd_tag_0026,omitempty"`
+	Tag0027                     bool `json:"rwd_tag_0027,omitempty"`
+	Tag0028                     bool `json:"rwd_tag_0028,omitempty"`
+	Tag0029                     bool `json:"rwd_tag_0029,omitempty"`
+	Tag0030                     bool `json:"rwd_tag_0030,omitempty"`
+	Tag0031                     bool `json:"rwd_tag_0031,omitempty"`
+	Tag0033                     bool `json:"rwd_tag_0033,omitempty"`
+	Tag0034                     bool `json:"rwd_tag_0034,omitempty"`
+	Tag0038                     bool `json:"rwd_tag_0038,omitempty"`
+	Tag0039                     bool `json:"rwd_tag_0039,omitempty"`
 	TagDefault                  bool `json:"rwd_tag_default,omitempty"`
 	TagDeveloper                bool `json:"rwd_tag_s1_developer" validate:"restricted"`
 	TagDiamonds                 bool `json:"rwd_tag_diamonds_a,omitempty"`
