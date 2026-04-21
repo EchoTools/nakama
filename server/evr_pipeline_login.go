@@ -731,7 +731,10 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 				// This display name is owned by someone else.
 				for gID, gn := range params.profile.DisplayNamesByGroupID() {
 					if strings.EqualFold(gn, dn) {
-						// This display name is owned by someone else.
+						// Preserve admin-granted names even when another user claims ownership.
+						if ignData := params.profile.GetGroupIGNData(gID); ignData.IsOverride || ignData.IsLocked {
+							continue
+						}
 						params.profile.DeleteGroupDisplayName(gID)
 						if serviceSettings.DisplayNameInUseNotifications {
 							// Notify the player that this display name is in use.

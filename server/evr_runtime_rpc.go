@@ -2313,8 +2313,9 @@ func AdminPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 			if err := EVRProfileUpdate(ctx, nk, targetUserID, evrProfile); err != nil {
 				logger.Error("Failed to persist EVR profile rename", zap.Error(err), zap.String("user_id", targetUserID))
 			} else {
-				// Record the change in display name history for auditability.
-				if err := DisplayNameHistoryUpdate(ctx, nk, targetUserID, activeGroupID.String(), sanitizedName, account.User.Username, false); err != nil {
+				// Record the change in display name history and mark as active so the renamed
+				// user becomes the index owner of the new name, preventing login-time pruning.
+				if err := DisplayNameHistoryUpdate(ctx, nk, targetUserID, activeGroupID.String(), sanitizedName, account.User.Username, true); err != nil {
 					logger.Error("Failed to update display name history for admin rename", zap.Error(err), zap.String("user_id", targetUserID))
 				}
 			}
