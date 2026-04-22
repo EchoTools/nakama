@@ -945,7 +945,18 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		if memberPresence == nil {
 			return false
 		}
-		return MatchIDFromStringOrNil(memberPresence.GetStatus()) == leaderMatchID
+		if MatchIDFromStringOrNil(memberPresence.GetStatus()) != leaderMatchID {
+			return false
+		}
+
+		// Verify the follower actually appears in the match's player list,
+		// not just in the tracker stream. The tracker can converge before
+		// the client completes the join (lobbyJoin), causing a false positive.
+		label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
+		if err != nil || label == nil {
+			return false
+		}
+		return label.GetPlayerByUserID(session.userID.String()) != nil
 	}
 
 	// Track consecutive cycles where the leader's match is non-joinable.
@@ -1033,8 +1044,14 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		}
 
 		if memberMatchID == leaderMatchID {
-			logger.Debug("Already in leader's match during poll")
-			return true
+			// Verify the follower actually appears in the match's player list.
+			// Stream convergence alone is not sufficient — the client may not
+			// have completed the join yet.
+			if pollLabel, pollErr := MatchLabelByID(ctx, p.nk, leaderMatchID); pollErr == nil && pollLabel != nil &&
+				pollLabel.GetPlayerByUserID(session.userID.String()) != nil {
+				logger.Debug("Already in leader's match during poll")
+				return true
+			}
 		}
 
 		label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
