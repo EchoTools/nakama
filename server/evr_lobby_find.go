@@ -309,6 +309,31 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 					}
 				}
 			}
+		} else if lobbyParams.CurrentMatchID.IsNil() && lobbyGroup.Size() <= 1 && lobbyParams.Mode != evr.ModeSocialPublic {
+			// Fresh-start matchmaking: the party handler may have just been created and
+			// followers may not have called JoinPartyGroup yet. Wait briefly so the leader
+			// does not submit a solo matchmaking ticket before the follower joins — which
+			// would allow backfill to place the leader in a match with no room left for
+			// the follower.
+			logger.Debug("Waiting for party followers (fresh-start grace period)", zap.Duration("timeout", MatchmakingStartGracePeriod))
+			graceTimer := time.NewTimer(MatchmakingStartGracePeriod)
+			defer graceTimer.Stop()
+			graceTicker := time.NewTicker(200 * time.Millisecond)
+			defer graceTicker.Stop()
+		graceWaitLoop:
+			for lobbyGroup.Size() <= 1 {
+				select {
+				case <-ctx.Done():
+					return nil, nil, false, ctx.Err()
+				case <-graceTimer.C:
+					logger.Debug("Grace period elapsed; no followers joined, proceeding solo")
+					break graceWaitLoop
+				case <-graceTicker.C:
+				}
+			}
+			if lobbyGroup.Size() > 1 {
+				logger.Debug("Party followers joined during grace period", zap.Int("size", lobbyGroup.Size()))
+			}
 		}
 		memberUsernames := make([]string, 0, lobbyGroup.Size())
 
