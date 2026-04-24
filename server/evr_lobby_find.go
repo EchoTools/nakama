@@ -108,18 +108,25 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					// The follower could not follow the leader (e.g. leader
-					// is in an active arena/combat game). Send them to a
-					// social lobby so they aren't stuck at a loading screen.
-					logger.Info("Follower cannot join leader's match, redirecting to social lobby")
-					lobbyParams.Mode = evr.ModeSocialPublic
-					lobbyParams.Level = evr.LevelUnspecified
-					lobbyParams.SetPartySize(1)
-					followerEntrants, err := PrepareEntrantPresences(ctx, logger, p.nk, p.nk.sessionRegistry, lobbyParams, session.id)
-					if err != nil {
-						return fmt.Errorf("failed to prepare follower entrant: %w", err)
+					// The follower could not follow the leader (e.g. leader is in a
+					// full arena/combat match). If the original request was for a
+					// social mode, redirect to social. Otherwise release the follower
+					// to independent matchmaking for their original mode.
+					if lobbyParams.Mode == evr.ModeSocialPublic || lobbyParams.Mode == evr.ModeSocialNPE {
+						logger.Info("Follower cannot join leader's match, redirecting to social lobby")
+						lobbyParams.Level = evr.LevelUnspecified
+						lobbyParams.SetPartySize(1)
+						followerEntrants, err := PrepareEntrantPresences(ctx, logger, p.nk, p.nk.sessionRegistry, lobbyParams, session.id)
+						if err != nil {
+							return fmt.Errorf("failed to prepare follower entrant: %w", err)
+						}
+						return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, followerEntrants...)
 					}
-					return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, followerEntrants...)
+					// Non-social mode: release the follower to independent matchmaking.
+					logger.Info("Follower cannot join leader's match, releasing to independent matchmaking",
+						zap.String("mode", lobbyParams.Mode.String()))
+					lobbyParams.SetPartySize(1)
+					// Fall through to normal matchmaking below.
 				}
 			}
 		} else {
