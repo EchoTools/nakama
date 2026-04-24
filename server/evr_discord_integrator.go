@@ -739,18 +739,17 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 		accountUpdate = true
 	}
 
-	if e.BeforeUpdate != nil && e.BeforeUpdate.User != nil {
-		// Update the username if it has changed.
-		if evrAccount.Username() != e.User.Username {
-			accountUpdate = true
-		}
+	// Update the username if it has changed.
+	if evrAccount.Username() != e.User.Username {
+		accountUpdate = true
+	}
 
-		if InGameName(e.Member) != InGameName(e.BeforeUpdate) {
-			if err := d.syncMembersIGN(ctx, logger, evrAccount, e.Member, group); err != nil {
-				return fmt.Errorf("error syncing display name: %w", err)
-			}
-			accountUpdate = true
+	// Update the display name if it has changed.
+	if InGameName(e.Member) != evrAccount.GetGroupIGNData(groupID).DisplayName {
+		if err := d.syncMembersIGN(ctx, logger, evrAccount, e.Member, group); err != nil {
+			return fmt.Errorf("error syncing display name: %w", err)
 		}
+		accountUpdate = true
 	}
 
 	if accountUpdate {
@@ -802,8 +801,8 @@ func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logg
 
 	// Check if the current IGN data is locked or an override - if so, don't update from Discord
 	currentIGN := profile.GetGroupIGNData(groupID)
-	if currentIGN.IsLocked || currentIGN.IsOverride {
-		// Don't update locked or overridden display names from Discord
+	if currentIGN.IsLocked {
+		// Don't update locked display names from Discord
 		return nil
 	}
 
