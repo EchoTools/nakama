@@ -8,8 +8,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/bwmarrin/discordgo"
 	rtapi "buf.build/gen/go/echotools/nevr-api/protocolbuffers/go/gameservice/v1"
+	"github.com/bwmarrin/discordgo"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -163,9 +163,13 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 		// Use the existing entrant metadata.
 		entrantMeta := tracker.GetLocalBySessionIDStreamUserID(e.SessionID, entrantStream, e.UserID)
 		if entrantMeta == nil {
-			return errors.New("failed to get entrant metadata")
-		}
-		if err := json.Unmarshal([]byte(entrantMeta.Status), e); err != nil {
+			// Presence was cleaned up (reconnect/disconnect race); fall back to treating as new.
+			logger.Warn("entrant metadata not found, falling back to fresh metadata", zap.String("uid", e.UserID.String()), zap.String("sid", e.SessionID.String()))
+			freshMeta := PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: e.String(), Hidden: false}
+			if success := tracker.Update(sessionCtx, e.SessionID, entrantStream, e.UserID, freshMeta); !success {
+				return ErrFailedToTrackEntrantStream
+			}
+		} else if err := json.Unmarshal([]byte(entrantMeta.Status), e); err != nil {
 			return fmt.Errorf("failed to unmarshal entrant metadata: %w", err)
 		}
 	}
