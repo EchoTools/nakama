@@ -9,6 +9,7 @@ import (
 	"maps"
 
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
 )
@@ -268,8 +269,15 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 			}
 
 			// Collect tickets efficiently - group entries by ticket
+			modestr, _ := candidate[0].GetProperties()["game_mode"].(string)
+			isCombat := modestr == evr.ModeCombatPublic.String()
+
 			for _, entry := range candidate {
 				ticket := entry.GetTicket()
+				if isCombat {
+					// For combat, split tickets to allow fair team balancing
+					ticket = entry.GetPresence().GetUserId()
+				}
 				ticketGroups[ticket] = append(ticketGroups[ticket], entry)
 			}
 
@@ -323,6 +331,10 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 			}
 
 			teamSize := len(candidate) / 2
+			if isCombat && len(candidate) >= 7 {
+				// For combat, allow uneven teams (e.g. 3v4) only if teams are large enough
+				teamSize = (len(candidate) + 1) / 2
+			}
 
 			for _, variant := range variants {
 				// Create teams based on variant
@@ -387,8 +399,19 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 					}
 				}
 
-				if len(blueTeam) != len(orangeTeam) {
-					continue
+				if isCombat {
+					// For combat, allow uneven teams (e.g. 3v4) as long as they are within 1 player
+					// of each other AND both teams have at least 3 players.
+					diff := len(blueTeam) - len(orangeTeam)
+					if diff != 0 {
+						if len(blueTeam) < 3 || len(orangeTeam) < 3 || diff > 1 || diff < -1 {
+							continue
+						}
+					}
+				} else {
+					if len(blueTeam) != len(orangeTeam) {
+						continue
+					}
 				}
 
 				// Create a copy of the candidate slice for this variant
