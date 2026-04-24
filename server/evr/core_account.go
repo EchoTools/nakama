@@ -953,8 +953,9 @@ type ArenaUnlocks struct {
 	Tag0031                     bool `json:"rwd_tag_0031,omitempty"`
 	Tag0033                     bool `json:"rwd_tag_0033,omitempty"`
 	Tag0034                     bool `json:"rwd_tag_0034,omitempty"`
-	Tag0038                     bool `json:"rwd_tag_0038" validate:"restricted"`
-	Tag0039                     bool `json:"rwd_tag_0039" validate:"restricted"`
+	// TODO: identify the VRML event these belong to (emissive_0038 = "Springtime"; 2-tier event between S5 and S6)
+	TagVRMLUnknown0038          bool `json:"rwd_tag_0038" validate:"restricted"`
+	TagVRMLUnknown0039          bool `json:"rwd_tag_0039" validate:"restricted"`
 	TagDefault                  bool `json:"rwd_tag_default,omitempty"`
 	TagDeveloper                bool `json:"rwd_tag_s1_developer" validate:"restricted"`
 	TagDiamonds                 bool `json:"rwd_tag_diamonds_a,omitempty"`
