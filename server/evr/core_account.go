@@ -953,8 +953,8 @@ type ArenaUnlocks struct {
 	Tag0031                     bool `json:"rwd_tag_0031,omitempty"`
 	Tag0033                     bool `json:"rwd_tag_0033,omitempty"`
 	Tag0034                     bool `json:"rwd_tag_0034,omitempty"`
-	Tag0038                     bool `json:"rwd_tag_0038" validate:"blocked"`
-	Tag0039                     bool `json:"rwd_tag_0039" validate:"blocked"`
+	Tag0038                     bool `json:"rwd_tag_0038" validate:"restricted"`
+	Tag0039                     bool `json:"rwd_tag_0039" validate:"restricted"`
 	TagDefault                  bool `json:"rwd_tag_default,omitempty"`
 	TagDeveloper                bool `json:"rwd_tag_s1_developer" validate:"restricted"`
 	TagDiamonds                 bool `json:"rwd_tag_diamonds_a,omitempty"`
