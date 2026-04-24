@@ -935,26 +935,27 @@ type ArenaUnlocks struct {
 	Tag0005                     bool `json:"rwd_tag_0005,omitempty"`
 	Tag0006                     bool `json:"rwd_tag_0006,omitempty"`
 	Tag0007                     bool `json:"rwd_tag_0007,omitempty"`
-	Tag0012                     bool `json:"rwd_tag_0012,omitempty"`
-	Tag0013                     bool `json:"rwd_tag_0013,omitempty"`
-	Tag0014                     bool `json:"rwd_tag_0014,omitempty"`
-	Tag0015                     bool `json:"rwd_tag_0015,omitempty"`
-	Tag0018                     bool `json:"rwd_tag_0018,omitempty"`
-	Tag0019                     bool `json:"rwd_tag_0019,omitempty"`
-	Tag0020                     bool `json:"rwd_tag_0020,omitempty"`
-	Tag0021                     bool `json:"rwd_tag_0021,omitempty"`
-	Tag0023                     bool `json:"rwd_tag_0023,omitempty"`
-	Tag0025                     bool `json:"rwd_tag_0025,omitempty"`
-	Tag0026                     bool `json:"rwd_tag_0026,omitempty"`
-	Tag0027                     bool `json:"rwd_tag_0027,omitempty"`
-	Tag0028                     bool `json:"rwd_tag_0028,omitempty"`
-	Tag0029                     bool `json:"rwd_tag_0029,omitempty"`
-	Tag0030                     bool `json:"rwd_tag_0030,omitempty"`
-	Tag0031                     bool `json:"rwd_tag_0031,omitempty"`
-	Tag0033                     bool `json:"rwd_tag_0033,omitempty"`
-	Tag0034                     bool `json:"rwd_tag_0034,omitempty"`
-	Tag0038                     bool `json:"rwd_tag_0038,omitempty"`
-	Tag0039                     bool `json:"rwd_tag_0039,omitempty"`
+	Tag0012                     bool `json:"rwd_tag_0012" validate:"blocked"`
+	Tag0013                     bool `json:"rwd_tag_0013" validate:"blocked"`
+	Tag0014                     bool `json:"rwd_tag_0014" validate:"blocked"`
+	Tag0015                     bool `json:"rwd_tag_0015" validate:"blocked"`
+	Tag0018                     bool `json:"rwd_tag_0018" validate:"blocked"`
+	Tag0019                     bool `json:"rwd_tag_0019" validate:"blocked"`
+	Tag0020                     bool `json:"rwd_tag_0020" validate:"blocked"`
+	Tag0021                     bool `json:"rwd_tag_0021" validate:"blocked"`
+	Tag0023                     bool `json:"rwd_tag_0023" validate:"blocked"`
+	Tag0025                     bool `json:"rwd_tag_0025" validate:"blocked"`
+	Tag0026                     bool `json:"rwd_tag_0026" validate:"blocked"`
+	Tag0027                     bool `json:"rwd_tag_0027" validate:"blocked"`
+	Tag0028                     bool `json:"rwd_tag_0028" validate:"blocked"`
+	Tag0029                     bool `json:"rwd_tag_0029" validate:"blocked"`
+	Tag0030                     bool `json:"rwd_tag_0030" validate:"blocked"`
+	Tag0031                     bool `json:"rwd_tag_0031" validate:"blocked"`
+	Tag0033                     bool `json:"rwd_tag_0033" validate:"blocked"`
+	Tag0034                     bool `json:"rwd_tag_0034" validate:"blocked"`
+	// TODO: identify the VRML event these belong to (emissive_0038 = "Springtime"; 2-tier event between S5 and S6)
+	TagVRMLUnknown0038          bool `json:"rwd_tag_0038" validate:"restricted"`
+	TagVRMLUnknown0039          bool `json:"rwd_tag_0039" validate:"restricted"`
 	TagDefault                  bool `json:"rwd_tag_default,omitempty"`
 	TagDeveloper                bool `json:"rwd_tag_s1_developer" validate:"restricted"`
 	TagDiamonds                 bool `json:"rwd_tag_diamonds_a,omitempty"`
