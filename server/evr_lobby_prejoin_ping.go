@@ -352,7 +352,7 @@ func (p *EvrPipeline) validatePreJoinPing(
 		allEntrantDetails = append(allEntrantDetails, fmt.Sprintf("uid=%s sid=%s user=%s", ent.UserID, ent.SessionID, EscapeDiscordMarkdown(ent.Username)))
 	}
 
-	logger.Warn("Pre-join ping validation failed",
+	logger.Info("Pre-join ping validation failed",
 		zap.String("mid", label.ID.UUID.String()),
 		zap.String("group_id", groupID),
 		zap.String("endpoint", endpoint.String()),
