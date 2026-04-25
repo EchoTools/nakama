@@ -95,6 +95,8 @@ func (s *SessionParameters) MetricsTags() map[string]string {
 		"is_pcvr":        fmt.Sprintf("%t", s.IsPCVR()),
 		"build_version":  fmt.Sprintf("%d", s.BuildNumber()),
 		"device_type":    s.DeviceType(),
+		"error":          "",
+		"device_linked":  "",
 	}
 }
 
