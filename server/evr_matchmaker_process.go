@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/types"
 )
 
@@ -180,8 +181,17 @@ func groupEntriesSequentially(entries []runtime.MatchmakerEntry) [][]runtime.Mat
 
 	ticketOrder := make([]string, 0)
 	ticketMap := make(map[string]*ticketGroup)
+
+	modestr, _ := entries[0].GetProperties()["game_mode"].(string)
+	isCombat := ServiceSettings().Matchmaking.EnableCombatMatchmaking && modestr == evr.ModeCombatPublic.String()
+
 	for _, entry := range entries {
-		ticket := entry.GetTicket()
+		var ticket string
+		if isCombat {
+			ticket = entry.GetPresence().GetSessionId()
+		} else {
+			ticket = entry.GetTicket()
+		}
 		if tg, ok := ticketMap[ticket]; ok {
 			tg.entries = append(tg.entries, entry)
 		} else {
