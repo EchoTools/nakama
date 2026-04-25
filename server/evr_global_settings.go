@@ -168,6 +168,7 @@ type GlobalMatchmakingSettings struct {
 	QualityFloorDecayPerSecond     float64                 `json:"quality_floor_decay_per_second"`      // How fast the floor drops per second of wait time (default 0.0005)
 	QualityFloorMinimum            float64                 `json:"quality_floor_minimum"`               // Floor never drops below this value (default 0.0)
 	EnableArchetypeBalancing       *bool                   `json:"enable_archetype_balancing"`          // Use archetype data to prefer balanced team compositions as a tiebreaker (default false, needs tuning)
+	EnableCombatMatchmaking        bool                    `json:"enable_combat_matchmaking"`           // Enable combat-specific matchmaking: split party tickets and allow uneven teams
 }
 
 type QueryAddons struct {
