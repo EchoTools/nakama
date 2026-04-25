@@ -400,12 +400,13 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 				}
 
 				if isCombat {
-					// Allow 1-player difference, but require at least 3 per team
+					// Allow 1-player difference; uneven matches require at least 3 per team.
+					// Equal-size teams (1v1, 2v2, etc.) are always valid.
 					diff := len(blueTeam) - len(orangeTeam)
 					if diff < -1 || diff > 1 {
 						continue
 					}
-					if len(blueTeam) < 3 || len(orangeTeam) < 3 {
+					if diff != 0 && (len(blueTeam) < 3 || len(orangeTeam) < 3) {
 						continue
 					}
 				} else if len(blueTeam) != len(orangeTeam) {
