@@ -638,7 +638,7 @@ type ArenaUnlocks struct {
 	GoalFx0004                  bool `json:"rwd_goal_fx_0004,omitempty"`
 	GoalFx0005                  bool `json:"rwd_goal_fx_0005,omitempty"`
 	GoalFx0008                  bool `json:"rwd_goal_fx_0008,omitempty"`
-	GoalFx0009                  bool `json:"rwd_goal_fx_0009,omitempty"`
+	StubGoalFx0009              bool `json:"rwd_goal_fx_0009" validate:"blocked"`
 	GoalFx0010                  bool `json:"rwd_goal_fx_0010,omitempty"`
 	GoalFx0011                  bool `json:"rwd_goal_fx_0011,omitempty"`
 	GoalFx0012                  bool `json:"rwd_goal_fx_0012,omitempty"`
@@ -661,7 +661,7 @@ type ArenaUnlocks struct {
 	Medal0014                   bool `json:"rwd_medal_0014,omitempty"`
 	Medal0015                   bool `json:"rwd_medal_0015,omitempty"`
 	Medal0016                   bool `json:"rwd_medal_0016,omitempty"`
-	Medal0017                   bool `json:"rwd_medal_0017,omitempty"`
+	StubMedal0017               bool `json:"rwd_medal_0017" validate:"blocked"`
 	MedalDefault                bool `json:"rwd_medal_default,omitempty"`
 	MedalLoneEcho2_A            bool `json:"rwd_medal_lone_echo_2_a,omitempty"`
 	MedalS1ArenaBronze          bool `json:"rwd_medal_s1_arena_bronze,omitempty"`
