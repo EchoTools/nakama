@@ -692,7 +692,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 			}
 		}
 
-		if !groupIGN.IsOverride && !groupIGN.IsLocked {
+		if !groupIGN.IsLocked {
 			shouldRefreshFromDiscord := groupID == params.profile.ActiveGroupID || groupIGN.DisplayName == ""
 			if !shouldRefreshFromDiscord {
 				params.profile.SetGroupIGNData(groupID, groupIGN)
