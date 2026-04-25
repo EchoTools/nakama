@@ -382,7 +382,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 					"uid":              p.GetUserId(),
 					"existing_session": e.GetSessionId(),
 					"new_session":      p.GetSessionId(),
-				}).Warn("Evicting stale presence for same-user duplicate EVR-ID.")
+				}).Info("Evicting stale presence for same-user duplicate EVR-ID.")
 				delete(state.presenceMap, e.GetSessionId())
 				delete(state.presenceByEvrID, e.EvrID)
 				delete(state.joinTimestamps, e.GetSessionId())

@@ -695,7 +695,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		// If the session is not authenticated, log the error and return.
 		if session != nil && session.UserID() == uuid.Nil {
 
-			logger.Warn("Received unauthenticated message", zap.Any("message", in))
+			logger.Debug("Received unauthenticated message", zap.Any("message", in))
 
 			// Send an unrequire
 			if err := SendEVRMessages(session, false, unrequireMessage); err != nil {
