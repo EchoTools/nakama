@@ -348,8 +348,8 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 			}
 
 			// For combat, enforce a minimum queue time (60s) for the oldest ticket
-			// to allow more players to join the pool.
-			if isCombat {
+			// unless a 4v4 match or larger is already possible.
+			if isCombat && len(candidate) < 8 {
 				oldestTimestamp := float64(time.Now().UTC().Unix())
 				for _, g := range groups {
 					ticket := g[0].GetPresence().GetUserId()

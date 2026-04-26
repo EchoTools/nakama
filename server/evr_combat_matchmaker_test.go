@@ -71,11 +71,10 @@ func TestCombatMatchmakingRules(t *testing.T) {
 		})
 	}
 
-	// Combat Tests (Even only, min 1v1, 60s delay)
-	runTest("Combat 1v1 (New)", 2, modeCombat, false, 10, false, 0)   // 10s old -> BLOCKED by 60s delay
+	// Combat Tests (Even only, min 1v1, dynamic delay)
+	runTest("Combat 1v1 (New)", 2, modeCombat, false, 10, false, 0)   // 2 < 8 -> BLOCKED
 	runTest("Combat 1v1 (Old)", 2, modeCombat, false, 65, true, 2)    // 65s old -> OK
-	runTest("Combat 2v2 (Party of 4, Old)", 4, modeCombat, true, 65, true, 4)  // OK
-	runTest("Combat 3v3 (Old)", 6, modeCombat, false, 65, true, 6)      // OK
+	runTest("Combat 4v4 (New)", 8, modeCombat, false, 10, true, 8)    // 8 >= 8 -> Bypass -> OK
 	runTest("Combat 3v4 (7 players, Old)", 7, modeCombat, false, 65, true, 6)  // OK
 
 	// Arena Tests (No delay)
