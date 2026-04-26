@@ -17,15 +17,12 @@ func TestCombatMatchmakingRules(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			entries := make([]runtime.MatchmakerEntry, totalPlayers)
 			partyTicket := "party-1"
-<<<<<<< Updated upstream
-=======
 			
 			minTeamSize := 1.0
 			if mode == modeCombat {
 				minTeamSize = 2.0
 			}
 
->>>>>>> Stashed changes
 			for i := 0; i < totalPlayers; i++ {
 				ticket := "solo-" + string(rune(48+i))
 				if isParty {
@@ -39,14 +36,9 @@ func TestCombatMatchmakingRules(t *testing.T) {
 					},
 					Properties: map[string]interface{}{
 						"game_mode":      mode,
-<<<<<<< Updated upstream
-						"max_team_size":  float64(5),
-						"count_multiple": float64(1),
-=======
 						"min_team_size":  minTeamSize,
 						"max_team_size":  float64(5),
 						"count_multiple": float64(2),
->>>>>>> Stashed changes
 						"timestamp":      float64(123456789),
 					},
 				}
@@ -77,19 +69,6 @@ func TestCombatMatchmakingRules(t *testing.T) {
 		})
 	}
 
-<<<<<<< Updated upstream
-	// Combat Tests
-	runTest("Combat 1v1 (Solo)", 2, modeCombat, false, true, 2)
-	runTest("Combat 2v2 (Party of 4)", 4, modeCombat, true, true, 4)  // Should split
-	runTest("Combat 3v4 (7 players)", 7, modeCombat, false, true, 7)  // 3v4 allowed
-	runTest("Combat 1v2 (3 players)", 3, modeCombat, false, false, 0) // 1v2 blocked (teams < 3)
-	runTest("Combat 2v3 (5 players)", 5, modeCombat, false, false, 0) // 2v3 blocked (teams < 3)
-
-	// Arena Tests
-	runTest("Arena 1v1 (Solo)", 2, modeArena, false, true, 2)
-	runTest("Arena Party of 4 Matching Alone", 4, modeArena, true, false, 0) // Should NOT split, thus no match (4v0 rejected)
-	runTest("Arena 3v4 (7 players)", 7, modeArena, false, false, 0)          // Uneven blocked
-=======
 	// Combat Tests (Even only, min 2v2)
 	runTest("Combat 1v1 (Solo)", 2, modeCombat, false, false, 0)   // 2 players matched, but team size 1 < min 2. REJECTED.
 	runTest("Combat 2v2 (Party of 4)", 4, modeCombat, true, true, 4)  // Should split into 2v2
@@ -101,5 +80,4 @@ func TestCombatMatchmakingRules(t *testing.T) {
 	runTest("Arena 1v1 (Solo)", 2, modeArena, false, true, 2)
 	runTest("Arena Party of 4 Matching Alone", 4, modeArena, true, false, 0) // Should NOT split, thus no match (4v0 rejected)
 	runTest("Arena 3v4 (7 players)", 7, modeArena, false, true, 6)          // 6 players matched -> 3v3. OK.
->>>>>>> Stashed changes
 }

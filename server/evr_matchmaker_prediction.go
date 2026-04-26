@@ -276,11 +276,7 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 				ticket := entry.GetTicket()
 				if isCombat {
 					// For combat, split tickets to allow fair team balancing
-<<<<<<< Updated upstream
 					ticket = entry.GetPresence().GetUserId()
-=======
-					ticket = entry.GetPresence().GetSessionId()
->>>>>>> Stashed changes
 				}
 				ticketGroups[ticket] = append(ticketGroups[ticket], entry)
 			}
@@ -340,14 +336,8 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 			}
 
 			teamSize := len(candidate) / 2
-<<<<<<< Updated upstream
-			if isCombat && len(candidate) >= 7 {
-				// For combat, allow uneven teams (e.g. 3v4) only if teams are large enough
-				teamSize = (len(candidate) + 1) / 2
-=======
 			if teamSize < minTeamSize {
 				continue
->>>>>>> Stashed changes
 			}
 
 			for _, variant := range variants {
@@ -413,19 +403,8 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 					}
 				}
 
-				if isCombat {
-					// For combat, allow uneven teams (e.g. 3v4) as long as they are within 1 player
-					// of each other AND both teams have at least 3 players.
-					diff := len(blueTeam) - len(orangeTeam)
-					if diff != 0 {
-						if len(blueTeam) < 3 || len(orangeTeam) < 3 || diff > 1 || diff < -1 {
-							continue
-						}
-					}
-				} else {
-					if len(blueTeam) != len(orangeTeam) {
-						continue
-					}
+				if len(blueTeam) != len(orangeTeam) {
+					continue
 				}
 
 				// Create a copy of the candidate slice for this variant
