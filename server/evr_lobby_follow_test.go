@@ -562,7 +562,7 @@ func TestPoll_LeaderStillMatchmaking_KeepsPolling(t *testing.T) {
 func TestPoll_LeaderStillMatchmaking_ThenSettles_FollowerInMatch_ReturnsTrue(t *testing.T) {
 	// Leader starts matchmaking, then finishes and settles into a match.
 	// Follower is also placed in the same match. Poll should eventually return true.
-	env := newFollowTestEnv(t)
+	env := newFollowTestEnv(t).withMockNK(newMockFollowMatchRegistry())
 
 	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	env.setLeaderMatch(matchB)
@@ -637,7 +637,7 @@ func TestPoll_LeaderNilMatchID_KeepsPolling(t *testing.T) {
 func TestPoll_LeaderSwitchesMatches_FollowerInNewMatch_ReturnsTrue(t *testing.T) {
 	// Leader is in Match B, then switches to Match C during the poll.
 	// Follower ends up in Match C. Poll should detect Match C, not Match B.
-	env := newFollowTestEnv(t)
+	env := newFollowTestEnv(t).withMockNK(newMockFollowMatchRegistry())
 
 	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	matchC := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
@@ -705,7 +705,7 @@ func TestPoll_LeaderChangesPartway_NewLeaderInMatch_ReturnsTrue(t *testing.T) {
 	// Original leader is matchmaking. A third player becomes leader during
 	// the poll and is already in a match. The follower is also in that match.
 	// Poll should detect the new leader's match.
-	env := newFollowTestEnv(t)
+	env := newFollowTestEnv(t).withMockNK(newMockFollowMatchRegistry())
 
 	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	newLeaderSID := uuid.Must(uuid.NewV4())

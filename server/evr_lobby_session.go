@@ -79,14 +79,12 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 		return nil
 
 	case *evr.LobbyJoinSessionRequest:
-		LeavePartyStream(session)
 		p.nk.metrics.CustomCounter("lobby_join_session", lobbyParams.MetricsTags(), 1)
 		logger.Info("Joining session", zap.String("mid", lobbyParams.CurrentMatchID.String()), zap.String("role", TeamIndex(lobbyParams.Role).String()))
 
 		return p.lobbyJoin(ctx, logger, session, lobbyParams, lobbyParams.CurrentMatchID)
 
 	case *evr.LobbyCreateSessionRequest:
-
 		if len(lobbyParams.RequiredFeatures) > 0 {
 			// Reject public creation
 			if lobbyParams.Mode == evr.ModeArenaPublic || lobbyParams.Mode == evr.ModeCombatPublic || lobbyParams.Mode == evr.ModeSocialPublic {
@@ -94,7 +92,6 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			}
 		}
 
-		LeavePartyStream(session)
 		p.nk.metrics.CustomCounter("lobby_create_session", lobbyParams.MetricsTags(), 1)
 		logger.Info("Creating session", zap.String("mode", lobbyParams.Mode.String()), zap.String("level", lobbyParams.Level.String()), zap.String("region", lobbyParams.RegionCode))
 		matchID, err = p.lobbyCreate(ctx, logger, session, lobbyParams)

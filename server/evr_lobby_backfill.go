@@ -2,11 +2,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -346,41 +346,42 @@ func (b *PostMatchmakerBackfill) executeBackfillResultOptimized(
 		return 0
 	}
 
-	var wg sync.WaitGroup
-	var mu sync.Mutex
 	successCount := 0
 	successfulUserIDs := make([]string, 0, len(entrantsToJoin))
 
 	for _, data := range entrantsToJoin {
-		wg.Add(1)
-		go func(sess Session, ent *EvrMatchPresence) {
-			defer wg.Done()
-			if err := LobbyJoinEntrants(logger, b.matchRegistry, b.tracker, sess, serverSession, result.Match.Label, ent); err != nil {
-				logger.Info("Failed to join entrant to backfill match",
-					zap.Error(err),
-					zap.String("match_id", result.Match.Label.ID.String()),
-					zap.String("user_id", ent.GetUserId()))
-			} else {
-				mu.Lock()
-				successCount++
-				successfulUserIDs = append(successfulUserIDs, ent.GetUserId())
-				mu.Unlock()
-				b.metrics.CustomCounter("lobby_join_post_matchmaker_backfill", result.Match.Label.MetricsTags(), 1)
-				logger.Info("Successfully backfilled player",
-					zap.String("match_id", result.Match.Label.ID.String()),
-					zap.String("user_id", ent.GetUserId()),
-					zap.Int("team", result.Team),
-					zap.Float64("score", result.Score))
+		if err := LobbyJoinEntrants(logger, b.matchRegistry, b.tracker, data.session, serverSession, result.Match.Label, data.entrant); err != nil {
+			if isLobbyFullError(err) {
+				// Match is full; no point trying remaining entrants.
+				break
 			}
-		}(data.session, data.entrant)
+			logger.Info("Failed to join entrant to backfill match",
+				zap.Error(err),
+				zap.String("match_id", result.Match.Label.ID.String()),
+				zap.String("user_id", data.entrant.GetUserId()))
+		} else {
+			successCount++
+			successfulUserIDs = append(successfulUserIDs, data.entrant.GetUserId())
+			b.metrics.CustomCounter("lobby_join_post_matchmaker_backfill", result.Match.Label.MetricsTags(), 1)
+			logger.Info("Successfully backfilled player",
+				zap.String("match_id", result.Match.Label.ID.String()),
+				zap.String("user_id", data.entrant.GetUserId()),
+				zap.Int("team", result.Team),
+				zap.Float64("score", result.Score))
+		}
 	}
-
-	wg.Wait()
 
 	// Store the successful user IDs in the result for summary logging
 	result.PlayerUserIDs = successfulUserIDs
 
 	return successCount
+}
+
+// isLobbyFullError returns true when the join was rejected because the match is
+// full or the join was otherwise not permitted, meaning further attempts against
+// the same match are pointless.
+func isLobbyFullError(err error) bool {
+	return errors.Is(err, LobbyErrJoinNotAllowed)
 }
 
 // PostMatchmakerBackfill handles backfilling players into existing matches after the matchmaker runs

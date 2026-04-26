@@ -302,7 +302,7 @@ func (a *EVRProfile) SetGroupDisplayName(groupID, displayName string) (updated b
 	a.InGameNames[groupID] = GroupInGameName{
 		GroupID:     groupID,
 		DisplayName: displayName,
-		IsOverride:  current.IsOverride,
+		IsOverride:  false,
 		IsLocked:    current.IsLocked,
 	}
 	return true
