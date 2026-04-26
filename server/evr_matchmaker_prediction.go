@@ -311,7 +311,11 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 
 			groupRatings = groupRatings[:0]
 			for _, g := range groups {
-				groupRatings = append(groupRatings, ticketRatings[g[0].GetTicket()])
+				ticket := g[0].GetTicket()
+				if isCombat {
+					ticket = g[0].GetPresence().GetUserId()
+				}
+				groupRatings = append(groupRatings, ticketRatings[ticket])
 			}
 
 			ranks, _ := rating.PredictRank(groupRatings, nil)
@@ -327,6 +331,9 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 			}
 			for _, g := range groups {
 				ticket := g[0].GetTicket()
+				if isCombat {
+					ticket = g[0].GetPresence().GetUserId()
+				}
 				maps.Copy(divs, ticketDivs[ticket])
 			}
 
@@ -338,6 +345,21 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 			teamSize := len(candidate) / 2
 			if teamSize < minTeamSize {
 				continue
+			}
+
+			// For combat, enforce a minimum queue time (60s) for the oldest ticket
+			// to allow more players to join the pool.
+			if isCombat {
+				oldestTimestamp := float64(time.Now().UTC().Unix())
+				for _, g := range groups {
+					ticket := g[0].GetPresence().GetUserId()
+					if age := ticketAge[ticket]; age < oldestTimestamp {
+						oldestTimestamp = age
+					}
+				}
+				if time.Now().UTC().Unix()-int64(oldestTimestamp) < 60 {
+					continue
+				}
 			}
 
 			for _, variant := range variants {
