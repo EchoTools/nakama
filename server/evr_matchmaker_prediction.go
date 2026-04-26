@@ -276,7 +276,11 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 				ticket := entry.GetTicket()
 				if isCombat {
 					// For combat, split tickets to allow fair team balancing
+<<<<<<< Updated upstream
 					ticket = entry.GetPresence().GetUserId()
+=======
+					ticket = entry.GetPresence().GetSessionId()
+>>>>>>> Stashed changes
 				}
 				ticketGroups[ticket] = append(ticketGroups[ticket], entry)
 			}
@@ -330,10 +334,20 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 				maps.Copy(divs, ticketDivs[ticket])
 			}
 
+			minTeamSize := 1
+			if v, ok := candidate[0].GetProperties()["min_team_size"].(float64); ok && int(v) > 0 {
+				minTeamSize = int(v)
+			}
+
 			teamSize := len(candidate) / 2
+<<<<<<< Updated upstream
 			if isCombat && len(candidate) >= 7 {
 				// For combat, allow uneven teams (e.g. 3v4) only if teams are large enough
 				teamSize = (len(candidate) + 1) / 2
+=======
+			if teamSize < minTeamSize {
+				continue
+>>>>>>> Stashed changes
 			}
 
 			for _, variant := range variants {

@@ -757,7 +757,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	var minTeamSize, maxTeamSize float64
 	switch p.Mode {
 	case evr.ModeCombatPublic:
-		minTeamSize = 3
+		minTeamSize = 2
 		maxTeamSize = 5
 	default:
 		minTeamSize = 4
