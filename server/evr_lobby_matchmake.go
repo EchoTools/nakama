@@ -281,7 +281,7 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 		threshold := ServiceSettings().Matchmaking.NewPlayerMaxGames
 		archetypeStats, gamesPlayed, arcErr := LoadArchetypeStats(ctx, p.db, logger, session.UserID().String(), lobbyParams.GroupID.String())
 		if arcErr != nil {
-			logger.Warn("Failed to load archetype stats, defaulting to rookie", zap.Error(arcErr))
+			logger.Debug("Failed to load archetype stats, defaulting to rookie", zap.Error(arcErr))
 			stringProps["archetype"] = ArchetypeRookie
 		} else {
 			stringProps["archetype"] = DetectArchetype(archetypeStats, gamesPlayed, threshold)
