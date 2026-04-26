@@ -188,7 +188,7 @@ func groupEntriesSequentially(entries []runtime.MatchmakerEntry) [][]runtime.Mat
 		ticket := entry.GetTicket()
 		if isCombat {
 			// For combat, treat each player as a separate ticket to allow party splitting
-			ticket = entry.GetPresence().GetSessionId()
+			ticket = entry.GetPresence().GetUserId()
 		}
 
 		if tg, ok := ticketMap[ticket]; ok {
