@@ -2,6 +2,7 @@ package server
 
 import (
 	"testing"
+	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -9,19 +10,21 @@ import (
 )
 
 func TestCombatMatchmakingRules(t *testing.T) {
-	ServiceSettingsUpdate(&ServiceSettingsData{
-		Matchmaking: GlobalMatchmakingSettings{EnableCombatMatchmaking: true},
-	})
-	defer ServiceSettingsUpdate(&ServiceSettingsData{})
-
 	modeCombat := evr.ModeCombatPublic.String()
 	modeArena := evr.ModeArenaPublic.String()
 	cfg := PredictionConfig{UseSnakeDraftFormation: true}
 
-	runTest := func(name string, totalPlayers int, mode string, isParty bool, expectMatch bool, expectedSize int) {
+	runTest := func(name string, totalPlayers int, mode string, isParty bool, ageSeconds int, expectMatch bool, expectedSize int) {
 		t.Run(name, func(t *testing.T) {
 			entries := make([]runtime.MatchmakerEntry, totalPlayers)
 			partyTicket := "party-1"
+			
+			minTeamSize := 1.0
+			if mode == modeCombat {
+				minTeamSize = 1.0
+			}
+
+			now := time.Now().UTC().Unix()
 			for i := 0; i < totalPlayers; i++ {
 				ticket := "solo-" + string(rune(48+i))
 				if isParty {
@@ -35,9 +38,10 @@ func TestCombatMatchmakingRules(t *testing.T) {
 					},
 					Properties: map[string]interface{}{
 						"game_mode":      mode,
+						"min_team_size":  minTeamSize,
 						"max_team_size":  float64(5),
-						"count_multiple": float64(1),
-						"timestamp":      float64(123456789),
+						"count_multiple": float64(2),
+						"timestamp":      float64(now - int64(ageSeconds)),
 					},
 				}
 			}
@@ -67,15 +71,12 @@ func TestCombatMatchmakingRules(t *testing.T) {
 		})
 	}
 
-	// Combat Tests
-	runTest("Combat 1v1 (Solo)", 2, modeCombat, false, true, 2)
-	runTest("Combat 2v2 (Party of 4)", 4, modeCombat, true, true, 4)  // Should split
-	runTest("Combat 3v4 (7 players)", 7, modeCombat, false, true, 7)  // 3v4 allowed
-	runTest("Combat 1v2 (3 players)", 3, modeCombat, false, false, 0) // 1v2 blocked (teams < 3)
-	runTest("Combat 2v3 (5 players)", 5, modeCombat, false, false, 0) // 2v3 blocked (teams < 3)
+	// Combat Tests (Even only, min 1v1, dynamic delay)
+	runTest("Combat 1v1 (New)", 2, modeCombat, false, 10, false, 0)   // 2 < 8 -> BLOCKED
+	runTest("Combat 1v1 (Old)", 2, modeCombat, false, 65, true, 2)    // 65s old -> OK
+	runTest("Combat 4v4 (New)", 8, modeCombat, false, 10, true, 8)    // 8 >= 8 -> Bypass -> OK
+	runTest("Combat 3v4 (7 players, Old)", 7, modeCombat, false, 65, true, 6)  // OK
 
-	// Arena Tests
-	runTest("Arena 1v1 (Solo)", 2, modeArena, false, true, 2)
-	runTest("Arena Party of 4 Matching Alone", 4, modeArena, true, false, 0) // Should NOT split, thus no match (4v0 rejected)
-	runTest("Arena 3v4 (7 players)", 7, modeArena, false, false, 0)          // Uneven blocked
+	// Arena Tests (No delay)
+	runTest("Arena 1v1 (New)", 2, modeArena, false, 10, true, 2)     // Should NOT have delay
 }

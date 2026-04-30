@@ -245,26 +245,37 @@ func (b *PostMatchmakerBackfill) getPossibleTeams(candidate *BackfillCandidate, 
 	}
 
 	// For competitive modes
+	blueCount := match.TeamCounts[evr.TeamBlue]
+	orangeCount := match.TeamCounts[evr.TeamOrange]
+	blueOpen := match.OpenSlots[evr.TeamBlue] >= partySize
+	orangeOpen := match.OpenSlots[evr.TeamOrange] >= partySize
+
+	isCombat := candidate.Mode == evr.ModeCombatPublic
+
 	if candidate.TeamAlignment != evr.TeamUnassigned {
 		if match.OpenSlots[candidate.TeamAlignment] >= partySize {
+			// For combat, only allow if it doesn't create imbalance
+			if isCombat {
+				if candidate.TeamAlignment == evr.TeamBlue && blueCount+partySize > orangeCount {
+					return nil
+				}
+				if candidate.TeamAlignment == evr.TeamOrange && orangeCount+partySize > blueCount {
+					return nil
+				}
+			}
 			return []int{candidate.TeamAlignment}
 		}
 		return nil
 	}
 
 	// No team preference - prioritize smaller team for balance
-	blueCount := match.TeamCounts[evr.TeamBlue]
-	orangeCount := match.TeamCounts[evr.TeamOrange]
-	blueOpen := match.OpenSlots[evr.TeamBlue] >= partySize
-	orangeOpen := match.OpenSlots[evr.TeamOrange] >= partySize
-
 	var teams []int
 	if blueCount < orangeCount && blueOpen {
 		teams = append(teams, evr.TeamBlue)
 	} else if orangeCount < blueCount && orangeOpen {
 		teams = append(teams, evr.TeamOrange)
-	} else {
-		// Equal or preferred team full - add both available
+	} else if !isCombat {
+		// For non-combat (Arena), allow adding to both teams if they are equal or it doesn't matter as much
 		if blueOpen {
 			teams = append(teams, evr.TeamBlue)
 		}
@@ -904,31 +915,120 @@ func (b *PostMatchmakerBackfill) ProcessAndExecuteBackfill(ctx context.Context, 
 		groupIDStr := key.GroupID.String()
 
 		// Process and execute each candidate immediately
-		for _, candidate := range groupCandidates {
-			// Check for context cancellation before processing each candidate
+		// For Combat, we split candidates into individual players to allow fair distribution
+		// and pair-wise joining to maintain balance.
+		var pool []*preparedBackfillCandidate
+		if key.Mode == evr.ModeCombatPublic {
+			for _, c := range groupCandidates {
+				if len(c.Entries) == 1 {
+					pool = append(pool, c)
+				} else {
+					// Split party into individual candidates
+					for _, entry := range c.Entries {
+						pool = append(pool, &preparedBackfillCandidate{
+							BackfillCandidate: &BackfillCandidate{
+								Ticket:         c.Ticket,
+								Entries:        []*MatchmakerEntry{entry},
+								GroupID:        c.GroupID,
+								Mode:           c.Mode,
+								Rating:         c.Rating,
+								SubmissionTime: c.SubmissionTime,
+								RTTs:           c.RTTs,
+								MaxRTT:         c.MaxRTT,
+								TeamAlignment:  c.TeamAlignment,
+								Intervals:      c.Intervals,
+							},
+							sessions:  b.prepareCandidates([]*BackfillCandidate{{Entries: []*MatchmakerEntry{entry}}})[0].sessions,
+							partySize: 1,
+						})
+					}
+				}
+			}
+		} else {
+			pool = groupCandidates
+		}
+
+		for len(pool) > 0 {
+			// Check for context cancellation
 			select {
 			case <-ctx.Done():
-				b.logger.Debug("Backfill cancelled during candidate processing", zap.Error(ctx.Err()))
 				return results, ctx.Err()
 			default:
 			}
 
-			// Find best match using pre-computed data
-			result := b.findBestBackfillMatchOptimized(candidate, preparedMatches, bctx)
-			if result == nil || result.Score <= BackfillMinAcceptableScore {
-				continue
-			}
+			candidate := pool[0]
+			pool = pool[1:]
 
-			// Execute backfill immediately using pre-resolved sessions
-			successCount := b.executeBackfillResultOptimized(ctx, logger, result, candidate.sessions, groupIDStr)
-			if successCount > 0 {
-				results = append(results, result)
-				// Update tracked slots and team counts for successfully joined entrants
-				result.Match.OpenSlots[result.Team] -= successCount
-				result.Match.TeamCounts[result.Team] += successCount
+			// For Combat, if we are at an even state, try to find another player to join as a pair
+			if key.Mode == evr.ModeCombatPublic {
+				// Find matches that are currently balanced
+				// We need another player from the pool to join this match together
+				result := b.findBestBackfillMatchOptimized(candidate, preparedMatches, bctx)
+				if result != nil && result.Score > BackfillMinAcceptableScore {
+					// If the match is already uneven, this player will join the smaller team (restoring balance)
+					if result.Match.TeamCounts[evr.TeamBlue] != result.Match.TeamCounts[evr.TeamOrange] {
+						successCount := b.executeBackfillResultOptimized(ctx, logger, result, candidate.sessions, groupIDStr)
+						if successCount > 0 {
+							results = append(results, result)
+							result.Match.OpenSlots[result.Team] -= successCount
+							result.Match.TeamCounts[result.Team] += successCount
+							b.logBackfillSummary(logger, result)
+						}
+						continue
+					}
 
-				// Log structured summary after each backfill operation
-				b.logBackfillSummary(logger, result)
+					// If the match is even, we need a second player to join the opposite team
+					if len(pool) > 0 {
+						secondCandidate := pool[0]
+						otherTeam := evr.TeamOrange
+						if result.Team == evr.TeamOrange {
+							otherTeam = evr.TeamBlue
+						}
+
+						if result.Match.OpenSlots[otherTeam] >= 1 {
+							// Found a pair! Execute both.
+							pool = pool[1:] // Consume the second player
+
+							// Join first player
+							s1 := b.executeBackfillResultOptimized(ctx, logger, result, candidate.sessions, groupIDStr)
+							if s1 > 0 {
+								results = append(results, result)
+								result.Match.OpenSlots[result.Team] -= s1
+								result.Match.TeamCounts[result.Team] += s1
+								b.logBackfillSummary(logger, result)
+							}
+
+							// Join second player to the other team
+							result2 := &BackfillResult{
+								Candidate: secondCandidate.BackfillCandidate,
+								Match:     result.Match,
+								Team:      otherTeam,
+								Score:     result.Score,
+							}
+							s2 := b.executeBackfillResultOptimized(ctx, logger, result2, secondCandidate.sessions, groupIDStr)
+							if s2 > 0 {
+								results = append(results, result2)
+								result2.Match.OpenSlots[result2.Team] -= s2
+								result2.Match.TeamCounts[result2.Team] += s2
+								b.logBackfillSummary(logger, result2)
+							}
+						}
+					}
+				}
+			} else {
+				// Standard backfill for non-combat modes
+				result := b.findBestBackfillMatchOptimized(candidate, preparedMatches, bctx)
+				if result == nil || result.Score <= BackfillMinAcceptableScore {
+					continue
+				}
+
+				successCount := b.executeBackfillResultOptimized(ctx, logger, result, candidate.sessions, groupIDStr)
+				if successCount > 0 {
+					results = append(results, result)
+					result.Match.OpenSlots[result.Team] -= successCount
+					result.Match.TeamCounts[result.Team] += successCount
+					b.logBackfillSummary(logger, result)
+				}
 			}
 		}
 	}

@@ -27,53 +27,53 @@ type (
 )
 
 type LobbySessionParameters struct {
-	Node                         string                        `json:"node"`
-	UserID                       uuid.UUID                     `json:"user_id"`
-	SessionID                    uuid.UUID                     `json:"session_id"`
-	DiscordID                    string                        `json:"discord_id"`
-	VersionLock                  evr.Symbol                    `json:"version_lock"`
-	AppID                        evr.Symbol                    `json:"app_id"`
-	GroupID                      uuid.UUID                     `json:"group_id"`
-	RegionCode                   string                        `json:"region_code"`
-	Mode                         evr.Symbol                    `json:"mode"`
-	Level                        evr.Symbol                    `json:"level"`
-	SupportedFeatures            []string                      `json:"supported_features"`
-	RequiredFeatures             []string                      `json:"required_features"`
-	CurrentMatchID               MatchID                       `json:"current_match_id"`
-	NextMatchID                  MatchID                       `json:"next_match_id"`
-	Role                         int                           `json:"role"`
-	PartySize                    *atomic.Int64                 `json:"party_size"`
-	PartyID                      uuid.UUID                     `json:"party_id"`
-	PartyGroupName               string                        `json:"party_group_name"`
-	DisableArenaBackfill         bool                          `json:"disable_arena_backfill"`
-	BackfillQueryAddon           string                        `json:"backfill_query_addon"`
-	MatchmakingQueryAddon        string                        `json:"matchmaking_query_addon"`
-	CreateQueryAddon             string                        `json:"create_query_addon"`
-	Verbose                      bool                          `json:"verbose"`
-	BlockedIDs                   []string                      `json:"blocked_ids"`
-	IsModerator                  bool                          `json:"is_moderator"` // True if user is a moderator (enforcer or operator), regardless of division
-	MatchmakingRating            *atomic.Pointer[types.Rating] `json:"matchmaking_rating"`
-	EarlyQuitPenaltyLevel        int                           `json:"early_quit_penalty_level"`
-	EarlyQuitMatchmakingTier     int32                         `json:"early_quit_matchmaking_tier"`
-	EnableSBMM                   bool                          `json:"disable_sbmm"`
-	EnableOrdinalRange           bool                          `json:"enable_ordinal_range"`
-	EnableDivisions              bool                          `json:"enable_divisions"`
-	MatchmakingRatingRange       float64                       `json:"rating_range"`
-	MatchmakingDivisions         []string                      `json:"divisions"`
+	Node                     string                        `json:"node"`
+	UserID                   uuid.UUID                     `json:"user_id"`
+	SessionID                uuid.UUID                     `json:"session_id"`
+	DiscordID                string                        `json:"discord_id"`
+	VersionLock              evr.Symbol                    `json:"version_lock"`
+	AppID                    evr.Symbol                    `json:"app_id"`
+	GroupID                  uuid.UUID                     `json:"group_id"`
+	RegionCode               string                        `json:"region_code"`
+	Mode                     evr.Symbol                    `json:"mode"`
+	Level                    evr.Symbol                    `json:"level"`
+	SupportedFeatures        []string                      `json:"supported_features"`
+	RequiredFeatures         []string                      `json:"required_features"`
+	CurrentMatchID           MatchID                       `json:"current_match_id"`
+	NextMatchID              MatchID                       `json:"next_match_id"`
+	Role                     int                           `json:"role"`
+	PartySize                *atomic.Int64                 `json:"party_size"`
+	PartyID                  uuid.UUID                     `json:"party_id"`
+	PartyGroupName           string                        `json:"party_group_name"`
+	DisableArenaBackfill     bool                          `json:"disable_arena_backfill"`
+	BackfillQueryAddon       string                        `json:"backfill_query_addon"`
+	MatchmakingQueryAddon    string                        `json:"matchmaking_query_addon"`
+	CreateQueryAddon         string                        `json:"create_query_addon"`
+	Verbose                  bool                          `json:"verbose"`
+	BlockedIDs               []string                      `json:"blocked_ids"`
+	IsModerator              bool                          `json:"is_moderator"` // True if user is a moderator (enforcer or operator), regardless of division
+	MatchmakingRating        *atomic.Pointer[types.Rating] `json:"matchmaking_rating"`
+	EarlyQuitPenaltyLevel    int                           `json:"early_quit_penalty_level"`
+	EarlyQuitMatchmakingTier int32                         `json:"early_quit_matchmaking_tier"`
+	EnableSBMM               bool                          `json:"disable_sbmm"`
+	EnableOrdinalRange       bool                          `json:"enable_ordinal_range"`
+	EnableDivisions          bool                          `json:"enable_divisions"`
+	MatchmakingRatingRange   float64                       `json:"rating_range"`
+	MatchmakingDivisions     []string                      `json:"divisions"`
 	// TODO: MatchmakingExcludedDivisions is populated and set as a ticket property
 	// but the matchmaker query filter that would read it is commented out.
 	// Wire this into the matchmaker query before considering it active.
-	MatchmakingExcludedDivisions []string `json:"excluded_divisions"`
-	MaxServerRTT                 int                           `json:"max_server_rtt"`
-	MatchmakingTimestamp         time.Time                     `json:"matchmaking_timestamp"`
-	MatchmakingTimeout           time.Duration                 `json:"matchmaking_timeout"`
-	FailsafeTimeout              time.Duration                 `json:"failsafe_timeout"` // The failsafe timeout
-	FallbackTimeout              time.Duration                 `json:"fallback_timeout"` // The fallback timeout
-	DisplayName                  string                        `json:"display_name"`
-	GamesPlayed                  int                           `json:"games_played"`                  // Total games played, loaded from GamesPlayed leaderboard
-	HardDivision                 string                        `json:"hard_division"`                 // Skill division bracket for hard division filtering
-	IsAmbassador                 bool                          `json:"is_ambassador"`                 // True if player is ambassadoring this match
-	HasSuspensionHistoryFlag     bool                          `json:"has_suspension_history"`         // True if player has any suspension history (exempt: enforcers/operators always false)
+	MatchmakingExcludedDivisions []string      `json:"excluded_divisions"`
+	MaxServerRTT                 int           `json:"max_server_rtt"`
+	MatchmakingTimestamp         time.Time     `json:"matchmaking_timestamp"`
+	MatchmakingTimeout           time.Duration `json:"matchmaking_timeout"`
+	FailsafeTimeout              time.Duration `json:"failsafe_timeout"` // The failsafe timeout
+	FallbackTimeout              time.Duration `json:"fallback_timeout"` // The fallback timeout
+	DisplayName                  string        `json:"display_name"`
+	GamesPlayed                  int           `json:"games_played"`           // Total games played, loaded from GamesPlayed leaderboard
+	HardDivision                 string        `json:"hard_division"`          // Skill division bracket for hard division filtering
+	IsAmbassador                 bool          `json:"is_ambassador"`          // True if player is ambassadoring this match
+	HasSuspensionHistoryFlag     bool          `json:"has_suspension_history"` // True if player has any suspension history (exempt: enforcers/operators always false)
 	latencyHistory               *atomic.Pointer[LatencyHistory]
 	unreachableServers           *atomic.Pointer[UnreachableServers]
 }
@@ -742,28 +742,23 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 
 	submissionTime := p.MatchmakingTimestamp.UTC().Format(time.RFC3339)
 	stringProperties := map[string]string{
-		"game_mode":          p.Mode.String(),
-		"group_id":           p.GroupID.String(),
-		"version_lock":       p.VersionLock.String(),
-		"display_name":       p.DisplayName,
-		"submission_time":    submissionTime,
-		"divisions":          strings.Join(p.MatchmakingDivisions, ","),
-		"excluded_divisions": strings.Join(p.MatchmakingExcludedDivisions, ","),
-		"is_moderator":              strconv.FormatBool(p.IsModerator),
-		"division":                  p.HardDivision,
-		"is_ambassador":             strconv.FormatBool(p.IsAmbassador),
-		"has_suspension_history":    strconv.FormatBool(p.HasSuspensionHistoryFlag),
+		"game_mode":              p.Mode.String(),
+		"group_id":               p.GroupID.String(),
+		"version_lock":           p.VersionLock.String(),
+		"display_name":           p.DisplayName,
+		"submission_time":        submissionTime,
+		"divisions":              strings.Join(p.MatchmakingDivisions, ","),
+		"excluded_divisions":     strings.Join(p.MatchmakingExcludedDivisions, ","),
+		"is_moderator":           strconv.FormatBool(p.IsModerator),
+		"division":               p.HardDivision,
+		"is_ambassador":          strconv.FormatBool(p.IsAmbassador),
+		"has_suspension_history": strconv.FormatBool(p.HasSuspensionHistoryFlag),
 	}
 	var minTeamSize, maxTeamSize float64
 	switch p.Mode {
 	case evr.ModeCombatPublic:
-		if ServiceSettings().Matchmaking.EnableCombatMatchmaking {
-			minTeamSize = 1
-			maxTeamSize = 5
-		} else {
-			minTeamSize = 3
-			maxTeamSize = 5
-		}
+		minTeamSize = 1
+		maxTeamSize = 5
 	default:
 		minTeamSize = 4
 		maxTeamSize = 4
