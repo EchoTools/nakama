@@ -126,7 +126,7 @@ var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakingTicketParameters{
 		IncludeEarlyQuitPenalty: false,
 	},
 	evr.ModeCombatPublic: {
-		MinCount:                2,
+		MinCount:                4,
 		MaxCount:                100,
 		CountMultiple:           2,
 		IncludeSBMMRanges:       false,

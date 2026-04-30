@@ -268,16 +268,15 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 				delete(ticketGroups, k)
 			}
 
-			modestr, _ := candidate[0].GetProperties()["game_mode"].(string)
-			isCombat := ServiceSettings().Matchmaking.EnableCombatMatchmaking && modestr == evr.ModeCombatPublic.String()
-
 			// Collect tickets efficiently - group entries by ticket
+			modestr, _ := candidate[0].GetProperties()["game_mode"].(string)
+			isCombat := modestr == evr.ModeCombatPublic.String()
+
 			for _, entry := range candidate {
-				var ticket string
+				ticket := entry.GetTicket()
 				if isCombat {
+					// For combat, split tickets to allow fair team balancing
 					ticket = entry.GetPresence().GetUserId()
-				} else {
-					ticket = entry.GetTicket()
 				}
 				ticketGroups[ticket] = append(ticketGroups[ticket], entry)
 			}
@@ -312,7 +311,11 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 
 			groupRatings = groupRatings[:0]
 			for _, g := range groups {
-				groupRatings = append(groupRatings, ticketRatings[g[0].GetTicket()])
+				ticket := g[0].GetTicket()
+				if isCombat {
+					ticket = g[0].GetPresence().GetUserId()
+				}
+				groupRatings = append(groupRatings, ticketRatings[ticket])
 			}
 
 			ranks, _ := rating.PredictRank(groupRatings, nil)
@@ -328,12 +331,35 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 			}
 			for _, g := range groups {
 				ticket := g[0].GetTicket()
+				if isCombat {
+					ticket = g[0].GetPresence().GetUserId()
+				}
 				maps.Copy(divs, ticketDivs[ticket])
 			}
 
+			minTeamSize := 1
+			if v, ok := candidate[0].GetProperties()["min_team_size"].(float64); ok && int(v) > 0 {
+				minTeamSize = int(v)
+			}
+
 			teamSize := len(candidate) / 2
-			if isCombat && len(candidate) >= 7 {
-				teamSize = (len(candidate) + 1) / 2
+			if teamSize < minTeamSize {
+				continue
+			}
+
+			// For combat, enforce a minimum queue time (60s) for the oldest ticket
+			// unless a 4v4 match or larger is already possible.
+			if isCombat && len(candidate) < 8 {
+				oldestTimestamp := float64(time.Now().UTC().Unix())
+				for _, g := range groups {
+					ticket := g[0].GetPresence().GetUserId()
+					if age := ticketAge[ticket]; age < oldestTimestamp {
+						oldestTimestamp = age
+					}
+				}
+				if time.Now().UTC().Unix()-int64(oldestTimestamp) < 60 {
+					continue
+				}
 			}
 
 			for _, variant := range variants {
@@ -399,17 +425,7 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 					}
 				}
 
-				if isCombat {
-					// Allow 1-player difference; uneven matches require at least 3 per team.
-					// Equal-size teams (1v1, 2v2, etc.) are always valid.
-					diff := len(blueTeam) - len(orangeTeam)
-					if diff < -1 || diff > 1 {
-						continue
-					}
-					if diff != 0 && (len(blueTeam) < 3 || len(orangeTeam) < 3) {
-						continue
-					}
-				} else if len(blueTeam) != len(orangeTeam) {
+				if len(blueTeam) != len(orangeTeam) {
 					continue
 				}
 

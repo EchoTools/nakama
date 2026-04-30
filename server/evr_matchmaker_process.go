@@ -179,19 +179,18 @@ func groupEntriesSequentially(entries []runtime.MatchmakerEntry) [][]runtime.Mat
 		entries []runtime.MatchmakerEntry
 	}
 
+	modestr, _ := entries[0].GetProperties()["game_mode"].(string)
+	isCombat := modestr == evr.ModeCombatPublic.String()
+
 	ticketOrder := make([]string, 0)
 	ticketMap := make(map[string]*ticketGroup)
-
-	modestr, _ := entries[0].GetProperties()["game_mode"].(string)
-	isCombat := ServiceSettings().Matchmaking.EnableCombatMatchmaking && modestr == evr.ModeCombatPublic.String()
-
 	for _, entry := range entries {
-		var ticket string
+		ticket := entry.GetTicket()
 		if isCombat {
-			ticket = entry.GetPresence().GetSessionId()
-		} else {
-			ticket = entry.GetTicket()
+			// For combat, treat each player as a separate ticket to allow party splitting
+			ticket = entry.GetPresence().GetUserId()
 		}
+
 		if tg, ok := ticketMap[ticket]; ok {
 			tg.entries = append(tg.entries, entry)
 		} else {
