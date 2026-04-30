@@ -83,11 +83,24 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 					}
 					entrantSessionIDs = append(entrantSessionIDs, sid)
 				}
+			} else if lobbyParams.Mode == evr.ModeSocialPublic || lobbyParams.Mode == evr.ModeSocialNPE {
+				// Social mode: skip the polling loop entirely. Social lobbies
+				// use find-or-create with party reservations, so the follower
+				// will naturally converge to the leader's lobby. Polling for
+				// the leader to settle is unnecessary and can silently timeout,
+				// leaving the client stuck in infinite matchmaking.
+				logger.Info("Follower in social mode, finding social lobby independently (party reservations will converge)")
+				lobbyParams.Level = evr.LevelUnspecified
+				followerEntrants, err := PrepareEntrantPresences(ctx, logger, p.nk, p.nk.sessionRegistry, lobbyParams, session.id)
+				if err != nil {
+					return fmt.Errorf("failed to prepare follower entrant: %w", err)
+				}
+				return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, followerEntrants...)
 			} else {
-				// Still a non-leader. Poll for the leader to settle into a
-				// match we can join. This covers followers at the main menu
-				// whose leader is in a closed/full match — they should wait
-				// rather than immediately erroring out.
+				// Still a non-leader in a non-social mode. Poll for the leader
+				// to settle into a match we can join. This covers followers at
+				// the main menu whose leader is in a closed/full match — they
+				// should wait rather than immediately erroring out.
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
@@ -107,20 +120,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				} else {
 					if ctx.Err() != nil {
 						return ctx.Err()
-					}
-					// The follower could not follow the leader (e.g. leader is in a
-					// full arena/combat match). If the original request was for a
-					// social mode, redirect to social. Otherwise release the follower
-					// to independent matchmaking for their original mode.
-					if lobbyParams.Mode == evr.ModeSocialPublic || lobbyParams.Mode == evr.ModeSocialNPE {
-						logger.Info("Follower cannot join leader's match, redirecting to social lobby")
-						lobbyParams.Level = evr.LevelUnspecified
-						lobbyParams.SetPartySize(1)
-						followerEntrants, err := PrepareEntrantPresences(ctx, logger, p.nk, p.nk.sessionRegistry, lobbyParams, session.id)
-						if err != nil {
-							return fmt.Errorf("failed to prepare follower entrant: %w", err)
-						}
-						return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, followerEntrants...)
 					}
 					// Non-social mode: release the follower to independent matchmaking.
 					logger.Info("Follower cannot join leader's match, releasing to independent matchmaking",
