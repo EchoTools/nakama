@@ -27,8 +27,29 @@ var ErrCreateLock = errors.New("failed to acquire create lock")
 func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters) error {
 
 	startTime := time.Now()
+	entrantSessionIDs := []uuid.UUID{session.id}
 
-	// Do authorization checks related to the guild.
+	var lobbyGroup *LobbyGroup
+	var memberSessionIDs []uuid.UUID
+	var isLeader bool
+
+	// Resolve party state early if applicable
+	if lobbyParams.PartyGroupName != "" && lobbyParams.PartyGroupName != "tablet" {
+		var err error
+		lobbyGroup, memberSessionIDs, isLeader, err = p.configureParty(ctx, logger, session, lobbyParams)
+		if err != nil {
+			return fmt.Errorf("failed to join party: %w", err)
+		}
+
+		// Synchronize mode if the leader is heading to Social
+		if !isLeader && p.isLeaderHeadingToSocial(ctx, logger, session, lobbyParams, lobbyGroup) {
+			logger.Info("Leader is heading to a social lobby, forcing social mode for follower")
+			lobbyParams.Mode = evr.ModeSocialPublic
+			lobbyParams.Level = evr.LevelUnspecified
+		}
+	}
+
+	// Authorize the session
 	if err := p.lobbyAuthorize(ctx, logger, session, lobbyParams); err != nil {
 		return err
 	}
@@ -52,19 +73,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	// Monitor the matchmaking status stream, canceling the context if the stream is closed.
 	go p.monitorMatchmakingStream(ctx, logger, session, lobbyParams, cancel)
 
-	entrantSessionIDs := []uuid.UUID{session.id}
-
-	var lobbyGroup *LobbyGroup
-
-	if lobbyParams.PartyGroupName != "" && lobbyParams.PartyGroupName != "tablet" {
-		var err error
-		var isLeader bool
-		var memberSessionIDs []uuid.UUID
-		lobbyGroup, memberSessionIDs, isLeader, err = p.configureParty(ctx, logger, session, lobbyParams)
-		if err != nil {
-			return fmt.Errorf("failed to join party: %w", err)
-		}
-
+	if lobbyGroup != nil {
 		if !isLeader {
 			if p.TryFollowPartyLeader(ctx, logger, session, lobbyParams, lobbyGroup) {
 				return nil
@@ -705,6 +714,48 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 	}
 
 	return nil
+}
+
+func (p *EvrPipeline) isLeaderHeadingToSocial(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup) bool {
+	leader := lobbyGroup.GetLeader()
+	if leader == nil || leader.SessionId == session.id.String() {
+		return false
+	}
+
+	leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
+	leaderUserID := uuid.FromStringOrNil(leader.UserId)
+
+	// 1. Check if the leader is already in a social lobby.
+	matchStream := PresenceStream{
+		Mode:    StreamModeService,
+		Subject: leaderSessionID,
+		Label:   StreamLabelMatchService,
+	}
+	if presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, matchStream, leaderUserID); presence != nil {
+		if matchID := MatchIDFromStringOrNil(presence.GetStatus()); !matchID.IsNil() {
+			if label, err := MatchLabelByID(ctx, p.nk, matchID); err == nil && label != nil {
+				if label.Mode == evr.ModeSocialPublic || label.Mode == evr.ModeSocialNPE {
+					return true
+				}
+			}
+		}
+	}
+
+	// 2. Check if the leader is matchmaking for a social lobby.
+	mmStream := PresenceStream{
+		Mode:    StreamModeMatchmaking,
+		Subject: lobbyParams.GroupID,
+	}
+	if presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, mmStream, leaderUserID); presence != nil {
+		var leaderParams LobbySessionParameters
+		if err := json.Unmarshal([]byte(presence.GetStatus()), &leaderParams); err == nil {
+			if leaderParams.Mode == evr.ModeSocialPublic || leaderParams.Mode == evr.ModeSocialNPE {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, lobbyParams *LobbySessionParameters, sessionIDs ...uuid.UUID) ([]*EvrMatchPresence, error) {
