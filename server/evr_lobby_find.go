@@ -27,12 +27,26 @@ var ErrCreateLock = errors.New("failed to acquire create lock")
 func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters) error {
 
 	startTime := time.Now()
+	entrantSessionIDs := []uuid.UUID{session.id}
 
-	// If the leader is heading to a social lobby, force the mode to social.
-	if p.isLeaderHeadingToSocial(ctx, logger, session, lobbyParams, nil) {
-		logger.Info("Leader is heading to a social lobby, forcing social mode for follower")
-		lobbyParams.Mode = evr.ModeSocialPublic
-		lobbyParams.Level = evr.LevelUnspecified
+	var lobbyGroup *LobbyGroup
+	var memberSessionIDs []uuid.UUID
+	var isLeader bool
+
+	// Resolve party state early if applicable
+	if lobbyParams.PartyGroupName != "" && lobbyParams.PartyGroupName != "tablet" {
+		var err error
+		lobbyGroup, memberSessionIDs, isLeader, err = p.configureParty(ctx, logger, session, lobbyParams)
+		if err != nil {
+			return fmt.Errorf("failed to join party: %w", err)
+		}
+
+		// Synchronize mode if the leader is heading to Social
+		if !isLeader && p.isLeaderHeadingToSocial(ctx, logger, session, lobbyParams, lobbyGroup) {
+			logger.Info("Leader is heading to a social lobby, forcing social mode for follower")
+			lobbyParams.Mode = evr.ModeSocialPublic
+			lobbyParams.Level = evr.LevelUnspecified
+		}
 	}
 
 	// Authorize the session
@@ -59,19 +73,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	// Monitor the matchmaking status stream, canceling the context if the stream is closed.
 	go p.monitorMatchmakingStream(ctx, logger, session, lobbyParams, cancel)
 
-	entrantSessionIDs := []uuid.UUID{session.id}
-
-	var lobbyGroup *LobbyGroup
-
-	if lobbyParams.PartyGroupName != "" && lobbyParams.PartyGroupName != "tablet" {
-		var err error
-		var isLeader bool
-		var memberSessionIDs []uuid.UUID
-		lobbyGroup, memberSessionIDs, isLeader, err = p.configureParty(ctx, logger, session, lobbyParams)
-		if err != nil {
-			return fmt.Errorf("failed to join party: %w", err)
-		}
-
+	if lobbyGroup != nil {
 		if !isLeader {
 
 			if p.TryFollowPartyLeader(ctx, logger, session, lobbyParams, lobbyGroup) {
@@ -716,17 +718,6 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 }
 
 func (p *EvrPipeline) isLeaderHeadingToSocial(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup) bool {
-	if lobbyGroup == nil {
-		if lobbyParams.PartyGroupName == "" || lobbyParams.PartyGroupName == "tablet" {
-			return false
-		}
-		// Try to resolve the party group if not provided
-		var err error
-		lobbyGroup, _, _, err = p.configureParty(ctx, logger, session, lobbyParams)
-		if err != nil {
-			return false
-		}
-	}
 	leader := lobbyGroup.GetLeader()
 	if leader == nil || leader.SessionId == session.id.String() {
 		return false
