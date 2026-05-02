@@ -239,10 +239,8 @@ func NewClientProfile(ctx context.Context, evrProfile *EVRProfile, serverProfile
 		newUnlocks = slices.Delete(newUnlocks, i, i+1)
 	}
 
-	var customizationPOIs *evr.Customization
-	if evrProfile.CustomizationPOIs != nil {
-		customizationPOIs = evrProfile.CustomizationPOIs
-	} else {
+	customizationPOIs := evrProfile.CustomizationPOIs
+	if customizationPOIs == nil {
 		customizationPOIs = &evr.Customization{
 			BattlePassSeasonPoiVersion: 3246,
 			NewUnlocksPoiVersion:       1,

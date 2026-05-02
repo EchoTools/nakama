@@ -35,10 +35,10 @@ type EarlyQuitFeatures struct {
 }
 
 type Customization struct {
-	BattlePassSeasonPoiVersion uint64 `json:"battlepass_season_poi_version,omitempty"` // Battle pass season point of interest version (manually set to 3246)
-	NewUnlocksPoiVersion       uint64 `json:"new_unlocks_poi_version,omitempty"`       // New unlocks point of interest version
-	StoreEntryPoiVersion       uint64 `json:"store_entry_poi_version,omitempty"`       // Store entry point of interest version
-	ClearNewUnlocksVersion     uint64 `json:"clear_new_unlocks_version,omitempty"`     // Clear new unlocks version
+	BattlePassSeasonPoiVersion uint64 `json:"battlepass_season_poi_version"` // Battle pass season point of interest version (manually set to 3246)
+	NewUnlocksPoiVersion       uint64 `json:"new_unlocks_poi_version"`       // New unlocks point of interest version
+	StoreEntryPoiVersion       uint64 `json:"store_entry_poi_version"`       // Store entry point of interest version
+	ClearNewUnlocksVersion     uint64 `json:"clear_new_unlocks_version"`     // Clear new unlocks version
 }
 
 type Players struct {
@@ -1288,9 +1288,9 @@ func NewClientProfile() ClientProfile {
 			OrangeTintTabSeen: Versioned{Version: 1},
 		},
 		Customization: &Customization{
-			BattlePassSeasonPoiVersion: 0,
+			BattlePassSeasonPoiVersion: 3246,
 			NewUnlocksPoiVersion:       1,
-			StoreEntryPoiVersion:       0,
+			StoreEntryPoiVersion:       1,
 			ClearNewUnlocksVersion:     1,
 		},
 		Social: ClientSocial{
