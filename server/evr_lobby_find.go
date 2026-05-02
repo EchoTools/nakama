@@ -23,6 +23,10 @@ var LobbyTestCounter = 0
 
 var ErrCreateLock = errors.New("failed to acquire create lock")
 
+func shouldFollowerFindOrCreateSocial(mode evr.Symbol) bool {
+	return mode == evr.ModeSocialPublic || mode == evr.ModeSocialNPE
+}
+
 // lobbyJoinSessionRequest is a request to join a specific existing session.
 func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters) error {
 
@@ -92,7 +96,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 					}
 					entrantSessionIDs = append(entrantSessionIDs, sid)
 				}
-			} else if lobbyParams.Mode == evr.ModeSocialPublic || lobbyParams.Mode == evr.ModeSocialNPE {
+			} else if shouldFollowerFindOrCreateSocial(lobbyParams.Mode) {
 				// Social mode: skip the polling loop entirely. Social lobbies
 				// use find-or-create with party reservations, so the follower
 				// will naturally converge to the leader's lobby. Polling for

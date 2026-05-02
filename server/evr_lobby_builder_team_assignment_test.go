@@ -8,6 +8,98 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestRepairSplitTicketTeams_KeepsSplitPartyTogether(t *testing.T) {
+	partyTicket := "party-ticket"
+	entrants := []*MatchmakerEntry{
+		testMatchmakerEntryWithTicket("solo-0"),
+		testMatchmakerEntryWithTicket("solo-1"),
+		testMatchmakerEntryWithTicket("solo-2"),
+		testMatchmakerEntryWithTicket(partyTicket),
+		testMatchmakerEntryWithTicket(partyTicket),
+		testMatchmakerEntryWithTicket("solo-3"),
+		testMatchmakerEntryWithTicket("solo-4"),
+		testMatchmakerEntryWithTicket("solo-5"),
+	}
+
+	teams := [2][]*MatchmakerEntry{
+		append([]*MatchmakerEntry(nil), entrants[:4]...),
+		append([]*MatchmakerEntry(nil), entrants[4:]...),
+	}
+
+	repaired, err := repairSplitTicketTeams(loggerForTest(t), teams)
+	require.NoError(t, err)
+
+	assert.Equal(t, 4, len(repaired[0]))
+	assert.Equal(t, 4, len(repaired[1]))
+	assert.ElementsMatch(t, []int{0, 0}, teamIndexesForTicket(repaired, partyTicket))
+}
+
+func TestRepairSplitTicketTeams_LeavesNaturallyAlignedPartiesAlone(t *testing.T) {
+	partyATicket := "party-a"
+	partyBTicket := "party-b"
+	teams := [2][]*MatchmakerEntry{
+		{
+			testMatchmakerEntryWithTicket(partyATicket),
+			testMatchmakerEntryWithTicket(partyATicket),
+			testMatchmakerEntryWithTicket("solo-0"),
+			testMatchmakerEntryWithTicket("solo-1"),
+		},
+		{
+			testMatchmakerEntryWithTicket(partyBTicket),
+			testMatchmakerEntryWithTicket(partyBTicket),
+			testMatchmakerEntryWithTicket("solo-2"),
+			testMatchmakerEntryWithTicket("solo-3"),
+		},
+	}
+
+	repaired, err := repairSplitTicketTeams(loggerForTest(t), teams)
+	require.NoError(t, err)
+
+	assert.Equal(t, teamTickets(teams[0]), teamTickets(repaired[0]))
+	assert.Equal(t, teamTickets(teams[1]), teamTickets(repaired[1]))
+	assert.ElementsMatch(t, []int{0, 0}, teamIndexesForTicket(repaired, partyATicket))
+	assert.ElementsMatch(t, []int{1, 1}, teamIndexesForTicket(repaired, partyBTicket))
+}
+
+func testMatchmakerEntryWithTicket(ticket string) *MatchmakerEntry {
+	sessionID := uuid.Must(uuid.NewV4())
+	return &MatchmakerEntry{
+		Ticket: ticket,
+		Presence: &MatchmakerPresence{
+			UserId:    sessionID.String(),
+			SessionId: sessionID.String(),
+			Username:  "player-" + sessionID.String()[:8],
+		},
+		StringProperties: map[string]string{
+			"game_mode": "arena",
+		},
+		NumericProperties: map[string]float64{
+			"rating_mu":    25,
+			"rating_sigma": 8.333,
+		},
+	}
+}
+
+func teamTickets(team []*MatchmakerEntry) []string {
+	tickets := make([]string, len(team))
+	for i, entry := range team {
+		tickets[i] = entry.GetTicket()
+	}
+	return tickets
+}
+
+func teamIndexesForTicket(teams [2][]*MatchmakerEntry, ticket string) []int {
+	var indexes []int
+	for teamIndex, team := range teams {
+		for _, entry := range team {
+			if entry.GetTicket() == ticket {
+				indexes = append(indexes, teamIndex)
+			}
+		}
+	}
+	return indexes
+}
+
 // TestBuildMatch_TeamAssignment verifies that buildMatch preserves the matchmaker's team assignments
 func TestBuildMatch_TeamAssignment(t *testing.T) {
 	// Test the team assignment logic in isolation (unit test style)

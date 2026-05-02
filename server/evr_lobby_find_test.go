@@ -16,6 +16,13 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
+func TestShouldFollowerFindOrCreateSocial(t *testing.T) {
+	assert.True(t, shouldFollowerFindOrCreateSocial(evr.ModeSocialPublic))
+	assert.True(t, shouldFollowerFindOrCreateSocial(evr.ModeSocialNPE))
+	assert.False(t, shouldFollowerFindOrCreateSocial(evr.ModeArenaPublic))
+	assert.False(t, shouldFollowerFindOrCreateSocial(evr.ModeCombatPublic))
+}
+
 // createTestMatchRegistryWithInterval creates a LocalMatchRegistry with a
 // configurable label update interval. The default createTestMatchRegistry
 // sets the interval to 1 hour (effectively disabling automatic flushes).
@@ -119,9 +126,9 @@ func TestSocialLobbySearchAfterCreate(t *testing.T) {
 	minSize := 0
 	maxSize := MatchLobbyMaxSize
 	matches, _, err := matchRegistry.ListMatches(context.Background(),
-		100,    // limit
-		nil,    // authoritative filter (nil = any)
-		nil,    // label filter (nil = no exact label match)
+		100, // limit
+		nil, // authoritative filter (nil = any)
+		nil, // label filter (nil = no exact label match)
 		&wrapperspb.Int32Value{Value: int32(minSize)},
 		&wrapperspb.Int32Value{Value: int32(maxSize)},
 		&wrapperspb.StringValue{Value: query},
