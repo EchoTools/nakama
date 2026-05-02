@@ -66,6 +66,15 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 
 		if !isLeader {
+			// If the leader is heading to a social lobby, force the follower into social mode.
+			// This prevents the follower from getting stuck in arena matchmaking when the
+			// leader has moved on to a social lobby.
+			if p.isLeaderHeadingToSocial(ctx, logger, session, lobbyParams, lobbyGroup) {
+				logger.Info("Leader is heading to a social lobby, forcing social mode for follower")
+				lobbyParams.Mode = evr.ModeSocialPublic
+				lobbyParams.Level = evr.LevelUnspecified
+			}
+
 			if p.TryFollowPartyLeader(ctx, logger, session, lobbyParams, lobbyGroup) {
 				return nil
 			}
@@ -705,6 +714,48 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 	}
 
 	return nil
+}
+
+func (p *EvrPipeline) isLeaderHeadingToSocial(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup) bool {
+	leader := lobbyGroup.GetLeader()
+	if leader == nil || leader.SessionId == session.id.String() {
+		return false
+	}
+
+	leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
+	leaderUserID := uuid.FromStringOrNil(leader.UserId)
+
+	// 1. Check if the leader is already in a social lobby.
+	matchStream := PresenceStream{
+		Mode:    StreamModeService,
+		Subject: leaderSessionID,
+		Label:   StreamLabelMatchService,
+	}
+	if presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, matchStream, leaderUserID); presence != nil {
+		if matchID := MatchIDFromStringOrNil(presence.GetStatus()); !matchID.IsNil() {
+			if label, err := MatchLabelByID(ctx, p.nk, matchID); err == nil && label != nil {
+				if label.Mode == evr.ModeSocialPublic || label.Mode == evr.ModeSocialNPE {
+					return true
+				}
+			}
+		}
+	}
+
+	// 2. Check if the leader is matchmaking for a social lobby.
+	mmStream := PresenceStream{
+		Mode:    StreamModeMatchmaking,
+		Subject: lobbyParams.GroupID,
+	}
+	if presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, mmStream, leaderUserID); presence != nil {
+		var leaderParams LobbySessionParameters
+		if err := json.Unmarshal([]byte(presence.GetStatus()), &leaderParams); err == nil {
+			if leaderParams.Mode == evr.ModeSocialPublic || leaderParams.Mode == evr.ModeSocialNPE {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, lobbyParams *LobbySessionParameters, sessionIDs ...uuid.UUID) ([]*EvrMatchPresence, error) {
