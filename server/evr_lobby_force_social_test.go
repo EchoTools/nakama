@@ -7,7 +7,7 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
-func TestLobbyFind_ForceSocialFollower_Reproduction(t *testing.T) {
+func TestLobbyFind_ForceSocialFollower_Unit(t *testing.T) {
 	env := newFollowTestEnv(t)
 	ctx := context.Background()
 	logger := loggerForTest(t)
@@ -27,12 +27,17 @@ func TestLobbyFind_ForceSocialFollower_Reproduction(t *testing.T) {
 	env.params.Mode = evr.ModeArenaPublic
 	env.params.GroupID = env.groupID
 
-	// Simulation: This is the logic we're adding to lobbyFind
-	if env.pipeline.isLeaderHeadingToSocial(ctx, logger, env.session, env.params, env.lobbyGroup) {
+	// Verify the helper function directly
+	isHeading := env.pipeline.isLeaderHeadingToSocial(ctx, logger, env.session, env.params, env.lobbyGroup)
+	if !isHeading {
+		t.Errorf("Expected isLeaderHeadingToSocial to return true")
+	}
+
+	// Simulation: Verify the logic effect
+	if isHeading {
 		env.params.Mode = evr.ModeSocialPublic
 	}
 
-	// Verify the result
 	if env.params.Mode != evr.ModeSocialPublic {
 		t.Errorf("Expected follower mode to be forced to %s, but got %s", evr.ModeSocialPublic.String(), env.params.Mode.String())
 	}

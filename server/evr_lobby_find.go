@@ -28,7 +28,14 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	startTime := time.Now()
 
-	// Do authorization checks related to the guild.
+	// If the leader is heading to a social lobby, force the mode to social.
+	if p.isLeaderHeadingToSocial(ctx, logger, session, lobbyParams, nil) {
+		logger.Info("Leader is heading to a social lobby, forcing social mode for follower")
+		lobbyParams.Mode = evr.ModeSocialPublic
+		lobbyParams.Level = evr.LevelUnspecified
+	}
+
+	// Authorize the session
 	if err := p.lobbyAuthorize(ctx, logger, session, lobbyParams); err != nil {
 		return err
 	}
@@ -66,14 +73,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 
 		if !isLeader {
-			// If the leader is heading to a social lobby, force the follower into social mode.
-			// This prevents the follower from getting stuck in arena matchmaking when the
-			// leader has moved on to a social lobby.
-			if p.isLeaderHeadingToSocial(ctx, logger, session, lobbyParams, lobbyGroup) {
-				logger.Info("Leader is heading to a social lobby, forcing social mode for follower")
-				lobbyParams.Mode = evr.ModeSocialPublic
-				lobbyParams.Level = evr.LevelUnspecified
-			}
 
 			if p.TryFollowPartyLeader(ctx, logger, session, lobbyParams, lobbyGroup) {
 				return nil
@@ -717,6 +716,17 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 }
 
 func (p *EvrPipeline) isLeaderHeadingToSocial(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup) bool {
+	if lobbyGroup == nil {
+		if lobbyParams.PartyGroupName == "" || lobbyParams.PartyGroupName == "tablet" {
+			return false
+		}
+		// Try to resolve the party group if not provided
+		var err error
+		lobbyGroup, _, _, err = p.configureParty(ctx, logger, session, lobbyParams)
+		if err != nil {
+			return false
+		}
+	}
 	leader := lobbyGroup.GetLeader()
 	if leader == nil || leader.SessionId == session.id.String() {
 		return false
