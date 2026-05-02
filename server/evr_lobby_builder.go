@@ -451,6 +451,93 @@ func (b *LobbyBuilder) groupByTicket(entrants []*MatchmakerEntry) [][]*Matchmake
 	return parties
 }
 
+type ticketTeamSlot struct {
+	teamIndex int
+	slotIndex int
+}
+
+func indexTicketTeamSlots(teams [2][]*MatchmakerEntry) map[string][]ticketTeamSlot {
+	ticketSlots := make(map[string][]ticketTeamSlot, len(teams[0])+len(teams[1]))
+	for teamIndex, team := range teams {
+		for slotIndex, entry := range team {
+			ticketSlots[entry.GetTicket()] = append(ticketSlots[entry.GetTicket()], ticketTeamSlot{
+				teamIndex: teamIndex,
+				slotIndex: slotIndex,
+			})
+		}
+	}
+	return ticketSlots
+}
+
+func repairSplitTicketTeams(logger *zap.Logger, teams [2][]*MatchmakerEntry) ([2][]*MatchmakerEntry, error) {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
+	for {
+		ticketSlots := indexTicketTeamSlots(teams)
+		repairedAny := false
+
+		for ticket, slots := range ticketSlots {
+			if len(slots) <= 1 {
+				continue
+			}
+
+			var counts [2]int
+			for _, slot := range slots {
+				counts[slot.teamIndex]++
+			}
+			if counts[0] == 0 || counts[1] == 0 {
+				continue
+			}
+
+			targetTeam := 0
+			if counts[1] > counts[0] {
+				targetTeam = 1
+			}
+			sourceTeam := 1 - targetTeam
+
+			misplacedSlots := make([]int, 0, counts[sourceTeam])
+			for _, slot := range slots {
+				if slot.teamIndex == sourceTeam {
+					misplacedSlots = append(misplacedSlots, slot.slotIndex)
+				}
+			}
+
+			soloSwapSlots := make([]int, 0, len(misplacedSlots))
+			for slotIndex, entry := range teams[targetTeam] {
+				if len(ticketSlots[entry.GetTicket()]) == 1 {
+					soloSwapSlots = append(soloSwapSlots, slotIndex)
+				}
+			}
+
+			if len(soloSwapSlots) < len(misplacedSlots) {
+				return teams, fmt.Errorf("failed to repair split ticket %q: need %d solo swaps on team %d, found %d", ticket, len(misplacedSlots), targetTeam, len(soloSwapSlots))
+			}
+
+			for i, sourceSlot := range misplacedSlots {
+				targetSlot := soloSwapSlots[i]
+				misplacedEntry := teams[sourceTeam][sourceSlot]
+				swapEntry := teams[targetTeam][targetSlot]
+				teams[sourceTeam][sourceSlot], teams[targetTeam][targetSlot] = swapEntry, misplacedEntry
+				logger.Info("Repaired split party team assignment",
+					zap.String("ticket", ticket),
+					zap.Int("from_team", sourceTeam),
+					zap.Int("to_team", targetTeam),
+					zap.String("moved_session_id", misplacedEntry.Presence.GetSessionId()),
+					zap.String("swapped_ticket", swapEntry.GetTicket()))
+			}
+
+			repairedAny = true
+			break
+		}
+
+		if !repairedAny {
+			return teams, nil
+		}
+	}
+}
+
 func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntry) (matchID *MatchID, err error) {
 	// Build matches one at a time.
 
@@ -483,6 +570,10 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	teams := [2][]*MatchmakerEntry{
 		entrants[:teamSize], // Blue team (first half)
 		entrants[teamSize:], // Orange team (second half)
+	}
+	teams, err = repairSplitTicketTeams(logger, teams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to repair team assignments: %w", err)
 	}
 
 	entrantPresences := make([]*EvrMatchPresence, 0, len(entrants))
