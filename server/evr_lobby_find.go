@@ -23,6 +23,10 @@ var LobbyTestCounter = 0
 
 var ErrCreateLock = errors.New("failed to acquire create lock")
 
+func shouldFollowerFindOrCreateSocial(mode evr.Symbol) bool {
+	return mode == evr.ModeSocialPublic || mode == evr.ModeSocialNPE
+}
+
 // lobbyJoinSessionRequest is a request to join a specific existing session.
 func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters) error {
 
@@ -1197,45 +1201,4 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 			return false
 		}
 	}
-}
-
-// isLeaderHeadingToSocial checks if the party leader is either in a social match
-// or currently matchmaking for one.
-func (p *EvrPipeline) isLeaderHeadingToSocial(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup) bool {
-	leader := lobbyGroup.GetLeader()
-	if leader == nil {
-		return false
-	}
-	leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
-	leaderUserID := uuid.FromStringOrNil(leader.UserId)
-
-	// Check if the leader is in a matchmaking stream.
-	stream := lobbyParams.MatchmakingStream()
-	if pr := p.nk.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, stream, leaderUserID); pr != nil {
-		var leaderParams LobbySessionParameters
-		if err := json.Unmarshal([]byte(pr.GetStatus()), &leaderParams); err == nil {
-			if leaderParams.Mode == evr.ModeSocialPublic || leaderParams.Mode == evr.ModeSocialNPE {
-				return true
-			}
-		}
-	}
-
-	// Check if the leader is already in a social match.
-	matchStream := PresenceStream{
-		Mode:    StreamModeService,
-		Subject: leaderSessionID,
-		Label:   StreamLabelMatchService,
-	}
-	if pr := p.nk.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, matchStream, leaderUserID); pr != nil {
-		matchID := MatchIDFromStringOrNil(pr.GetStatus())
-		if !matchID.IsNil() {
-			if label, err := MatchLabelByID(ctx, p.nk, matchID); err == nil && label != nil {
-				if label.IsSocial() {
-					return true
-				}
-			}
-		}
-	}
-
-	return false
 }

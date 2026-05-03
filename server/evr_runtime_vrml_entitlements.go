@@ -51,10 +51,9 @@ const (
 	TagVRMLS5         = "rwd_tag_0035"
 	TagVRMLS5Champion = "rwd_tag_0037"
 	TagVRMLS5Finalist = "rwd_tag_0036"
-	// TODO: identify the VRML event these belong to (emissive_0038 = "Springtime"; 2-tier event between S5 and S6).
-	// Add the season ID constant and a vrmlCosmeticMap entry once the event is identified.
-	TagVRMLUnknown0038 = "rwd_tag_0038"
-	TagVRMLUnknown0039 = "rwd_tag_0039"
+	// rwd_tag_0038: Stand store item; rwd_tag_0039: Liminal event item.
+	TagStand   = "rwd_tag_0038"
+	TagLiminal = "rwd_tag_0039"
 	TagVRMLS6          = "rwd_tag_0040"
 	TagVRMLS6Champion = "rwd_tag_0042"
 	TagVRMLS6Finalist = "rwd_tag_0041"
