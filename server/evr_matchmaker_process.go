@@ -357,8 +357,15 @@ func isUndersizedMatch(candidate []runtime.MatchmakerEntry) bool {
 	}
 
 	minTeamSize := 4.0
-	if v, ok := candidate[0].GetProperties()["min_team_size"].(float64); ok && v > 0 {
-		minTeamSize = v
+	if v, ok := candidate[0].GetProperties()["min_team_size"]; ok {
+		switch v := v.(type) {
+		case float64:
+			minTeamSize = v
+		case int64:
+			minTeamSize = float64(v)
+		case int:
+			minTeamSize = float64(v)
+		}
 	}
 
 	minMatchSize := int(minTeamSize) * 2
@@ -367,8 +374,15 @@ func isUndersizedMatch(candidate []runtime.MatchmakerEntry) bool {
 	}
 
 	failsafeTimeout := 0.0
-	if v, ok := candidate[0].GetProperties()["failsafe_timeout"].(float64); ok {
-		failsafeTimeout = v
+	if v, ok := candidate[0].GetProperties()["failsafe_timeout"]; ok {
+		switch v := v.(type) {
+		case float64:
+			failsafeTimeout = v
+		case int64:
+			failsafeTimeout = float64(v)
+		case int:
+			failsafeTimeout = float64(v)
+		}
 	}
 	if failsafeTimeout <= 0 {
 		return false
@@ -377,8 +391,21 @@ func isUndersizedMatch(candidate []runtime.MatchmakerEntry) bool {
 	now := float64(time.Now().UTC().Unix())
 	oldestTimestamp := now
 	for _, entry := range candidate {
-		if ts, ok := entry.GetProperties()["timestamp"].(float64); ok && ts < oldestTimestamp {
-			oldestTimestamp = ts
+		if v, ok := entry.GetProperties()["timestamp"]; ok {
+			var ts float64
+			switch v := v.(type) {
+			case float64:
+				ts = v
+			case int64:
+				ts = float64(v)
+			case int:
+				ts = float64(v)
+			default:
+				continue
+			}
+			if ts < oldestTimestamp {
+				oldestTimestamp = ts
+			}
 		}
 	}
 

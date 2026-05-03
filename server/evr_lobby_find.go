@@ -428,11 +428,16 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 
 	p.nk.metrics.CustomCounter("lobby_new", metricsTags, 1)
 
+	groupID := lobbyParams.GroupID
+	if lobbyParams.Mode == evr.ModeArenaPublic || lobbyParams.Mode == evr.ModeCombatPublic || lobbyParams.Mode == evr.ModeSocialPublic {
+		groupID = uuid.Nil
+	}
+
 	settings := &MatchSettings{
 		Mode:                lobbyParams.Mode,
 		Level:               lobbyParams.Level,
 		SpawnedBy:           lobbyParams.UserID.String(),
-		GroupID:             lobbyParams.GroupID,
+		GroupID:             groupID,
 		StartTime:           time.Now().UTC(),
 		Reservations:        entrants,
 		ReservationLifetime: 30 * time.Second,
