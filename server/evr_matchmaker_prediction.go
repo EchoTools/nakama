@@ -372,6 +372,9 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 					// Original sequential filling (best groups fill blue team first)
 					for _, g := range groups {
 						ticket := g[0].GetTicket()
+						if isCombat {
+							ticket = g[0].GetPresence().GetUserId()
+						}
 						if len(blueTeam)+len(g) <= teamSize {
 							blueTeam = append(blueTeam, g...)
 							blueRatings = append(blueRatings, ticketRatings[ticket]...)
@@ -393,6 +396,9 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 					// - 8th → Blue
 					for idx, g := range groups {
 						ticket := g[0].GetTicket()
+						if isCombat {
+							ticket = g[0].GetPresence().GetUserId()
+						}
 
 						// Determine which team gets this group using snake pattern
 						// Group index 0: Blue, 1-2: Orange, 3-4: Blue, 5-6: Orange, 7: Blue

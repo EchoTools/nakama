@@ -489,6 +489,15 @@ func BuildEVRProfileFromAccount(account *api.Account) (*EVRProfile, error) {
 	if a.NewUnlocks == nil {
 		a.NewUnlocks = make([]int64, 0)
 	}
+
+	if a.CustomizationPOIs == nil {
+		a.CustomizationPOIs = &evr.Customization{
+			BattlePassSeasonPoiVersion: 3246,
+			NewUnlocksPoiVersion:       1,
+			StoreEntryPoiVersion:       1,
+			ClearNewUnlocksVersion:     1,
+		}
+	}
 	a.account = account
 	return a, nil
 }
