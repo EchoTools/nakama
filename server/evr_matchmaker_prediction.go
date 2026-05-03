@@ -271,6 +271,7 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 			// Collect tickets efficiently - group entries by ticket
 			modestr, _ := candidate[0].GetProperties()["game_mode"].(string)
 			isCombat := modestr == evr.ModeCombatPublic.String()
+			isPublic := modestr == evr.ModeArenaPublic.String() || modestr == evr.ModeCombatPublic.String() || modestr == evr.ModeSocialPublic.String()
 
 			for _, entry := range candidate {
 				ticket := entry.GetTicket()
@@ -296,8 +297,21 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 				oldest := float64(time.Now().UTC().Unix())
 				for _, entry := range entries {
 					props := entry.GetProperties()
-					if st, ok := props["timestamp"].(float64); ok && st < oldest {
-						oldest = st
+					if v, ok := props["timestamp"]; ok {
+						var ts float64
+						switch v := v.(type) {
+						case float64:
+							ts = v
+						case int64:
+							ts = float64(v)
+						case int:
+							ts = float64(v)
+						default:
+							continue
+						}
+						if ts < oldest {
+							oldest = ts
+						}
 					}
 				}
 				ticketAge[ticket] = oldest
@@ -337,19 +351,28 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 				maps.Copy(divs, ticketDivs[ticket])
 			}
 
-			minTeamSize := 1
-			if v, ok := candidate[0].GetProperties()["min_team_size"].(float64); ok && int(v) > 0 {
-				minTeamSize = int(v)
+			minTeamSize := 4
+			if v, ok := candidate[0].GetProperties()["min_team_size"]; ok {
+				switch v := v.(type) {
+				case float64:
+					minTeamSize = int(v)
+				case int64:
+					minTeamSize = int(v)
+				case int:
+					minTeamSize = v
+				}
 			}
+
+
 
 			teamSize := len(candidate) / 2
 			if teamSize < minTeamSize {
 				continue
 			}
 
-			// For combat, enforce a minimum queue time (60s) for the oldest ticket
+			// For public, enforce a minimum queue time (60s) for the oldest ticket
 			// unless a 4v4 match or larger is already possible.
-			if isCombat && len(candidate) < 8 {
+			if isPublic && len(candidate) < 8 {
 				oldestTimestamp := float64(time.Now().UTC().Unix())
 				for _, g := range groups {
 					ticket := g[0].GetPresence().GetUserId()
