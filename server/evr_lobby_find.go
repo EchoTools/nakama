@@ -799,7 +799,27 @@ func (p *EvrPipeline) isLeaderHeadingToSocial(ctx context.Context, logger *zap.L
 	leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
 	leaderUserID := uuid.FromStringOrNil(leader.UserId)
 
-	// 1. Check if the leader is already in a social lobby.
+	// 1. Check if the leader is matchmaking.
+	// Matchmaking intent takes precedence over their current location.
+	mmStream := PresenceStream{
+		Mode:    StreamModeMatchmaking,
+		Subject: lobbyParams.GroupID,
+	}
+	if presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, mmStream, leaderUserID); presence != nil {
+		var leaderParams LobbySessionParameters
+		if err := json.Unmarshal([]byte(presence.GetStatus()), &leaderParams); err == nil {
+			if leaderParams.Mode == evr.ModeSocialPublic || leaderParams.Mode == evr.ModeSocialNPE {
+				return true
+			} else {
+				// Leader is matchmaking for a non-social mode (e.g. Arena).
+				// They are heading to a match, not staying in Social.
+				return false
+			}
+		}
+	}
+
+	// 2. Check if the leader is already in a social lobby.
+	// If they are not matchmaking and are in a social lobby, then they are staying there.
 	matchStream := PresenceStream{
 		Mode:    StreamModeService,
 		Subject: leaderSessionID,
@@ -811,20 +831,6 @@ func (p *EvrPipeline) isLeaderHeadingToSocial(ctx context.Context, logger *zap.L
 				if label.Mode == evr.ModeSocialPublic || label.Mode == evr.ModeSocialNPE {
 					return true
 				}
-			}
-		}
-	}
-
-	// 2. Check if the leader is matchmaking for a social lobby.
-	mmStream := PresenceStream{
-		Mode:    StreamModeMatchmaking,
-		Subject: lobbyParams.GroupID,
-	}
-	if presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, mmStream, leaderUserID); presence != nil {
-		var leaderParams LobbySessionParameters
-		if err := json.Unmarshal([]byte(presence.GetStatus()), &leaderParams); err == nil {
-			if leaderParams.Mode == evr.ModeSocialPublic || leaderParams.Mode == evr.ModeSocialNPE {
-				return true
 			}
 		}
 	}
