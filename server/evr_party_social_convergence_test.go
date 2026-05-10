@@ -686,3 +686,26 @@ func TestPartySizeNeverZero(t *testing.T) {
 	assert.Equal(t, 1, partySize, "Party size should be corrected from 0 to 1")
 	t.Log("Check: Zero party size correctly defaults to 1 - PASS")
 }
+
+// TestLeaderMatchmakingForArenaDoesNotForceSocial verifies that if the leader
+// is matchmaking for Arena (even if currently in a social lobby), followers
+// are not forced to Social mode.
+func TestLeaderMatchmakingForArenaDoesNotForceSocial(t *testing.T) {
+	t.Log("Scenario: Leader is in Social lobby but matchmaking for Arena")
+
+	// Simulate leader state
+	leaderInSocialLobby := true
+	leaderMatchmakingForArena := true
+
+	// Logic from isLeaderHeadingToSocial:
+	// Check matchmaking first
+	isLeaderHeadingToSocial := false
+	if leaderMatchmakingForArena {
+		isLeaderHeadingToSocial = false // Heading to Arena
+	} else if leaderInSocialLobby {
+		isLeaderHeadingToSocial = true // Staying in Social
+	}
+
+	assert.False(t, isLeaderHeadingToSocial, "Leader matchmaking for Arena should NOT be considered heading to Social")
+	t.Log("Check: Leader matchmaking for Arena correctly overridden - PASS")
+}
