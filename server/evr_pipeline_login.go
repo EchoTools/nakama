@@ -531,6 +531,13 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	}
 
 	params.ignoreDisabledAlternates = loginHistory.IgnoreDisabledAlternates
+
+	// Ensure the current login entry is in history so alt search includes it.
+	loginHistory.Update(params.xpID, session.clientIP, params.loginPayload, params.IsWebsocketAuthenticated)
+	if _, err := loginHistory.UpdateAlternates(ctx, p.runtimeLogger, p.nk); err != nil {
+		logger.Warn("Failed to discover alternates during login", zap.Error(err))
+	}
+
 	firstIDs, _ := loginHistory.AlternateIDs()
 	if detector := GetCGNATDetector(); detector != nil {
 		firstIDs = filterStrongAlts(loginHistory, firstIDs, detector)
