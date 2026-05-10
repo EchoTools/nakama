@@ -14,40 +14,42 @@ type AlternateSearchMatch struct {
 	Items       []string `json:"items"`
 }
 
-func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, loginHistory *LoginHistory, skipSelf bool) ([]*AlternateSearchMatch, map[string]*LoginHistory, error) {
-
-	// Build a list of patterns to search for in the index.
-
-	//items := loginHistory.SearchPatterns()
-	// Compile all of the users identifiers
-	items := make([]string, 0, len(loginHistory.History)*3)
-	for _, e := range loginHistory.History {
+func (h *LoginHistory) AltSearchPatterns() []string {
+	items := make([]string, 0, len(h.History)*3+len(h.XPIs))
+	for _, e := range h.History {
 		for _, s := range [...]string{
 			e.ClientIP,
 			e.LoginData.HMDSerialNumber,
+			e.XPID.Token(),
 		} {
 			items = append(items, s)
 		}
 	}
-	for xpi := range loginHistory.XPIs {
+	for xpi := range h.XPIs {
 		items = append(items, xpi)
 	}
 
 	slices.Sort(items)
 	items = slices.Compact(items)
 
-	// Filter out any items that are ignored by the pattern.
 	for i := 0; i < len(items); i++ {
 		if matchIgnoredAltPattern(items[i]) {
 			items = slices.Delete(items, i, i+1)
-			i-- // Adjust index since we removed an item.
+			i--
 		}
 	}
 
 	if len(items) == 0 {
+		return nil
+	}
+	return items
+}
+
+func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, loginHistory *LoginHistory, skipSelf bool) ([]*AlternateSearchMatch, map[string]*LoginHistory, error) {
+	items := loginHistory.AltSearchPatterns()
+	if len(items) == 0 {
 		return nil, nil, nil
 	}
-
 	return LoginAlternatePatternSearch(ctx, nk, loginHistory, items, skipSelf)
 }
 
