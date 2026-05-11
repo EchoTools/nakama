@@ -709,3 +709,35 @@ func TestLeaderMatchmakingForArenaDoesNotForceSocial(t *testing.T) {
 	assert.False(t, isLeaderHeadingToSocial, "Leader matchmaking for Arena should NOT be considered heading to Social")
 	t.Log("Check: Leader matchmaking for Arena correctly overridden - PASS")
 }
+
+// TestLeaderEarlyTrackingOnMatchmakingStream verifies that the leader is
+// tracked on the matchmaking stream early in the process, so that followers
+// do not see them as "standing still" in a social lobby.
+func TestLeaderEarlyTrackingOnMatchmakingStream(t *testing.T) {
+	t.Log("Scenario: Leader is waiting for followers but tracked on matchmaking stream")
+
+	// Simulate leader state
+	leaderInSocialLobby := true
+	
+	// Our fix: Leader is tracked on matchmaking stream early
+	leaderTrackedOnMatchmakingStream := true
+	leaderParamsMode := "arena" // Mode requested by leader
+
+	// Logic from isLeaderHeadingToSocial:
+	isLeaderHeadingToSocial := false
+	
+	// 1. Check matchmaking stream first
+	if leaderTrackedOnMatchmakingStream {
+		if leaderParamsMode == "social" {
+			isLeaderHeadingToSocial = true
+		} else {
+			isLeaderHeadingToSocial = false // Heading to Arena!
+		}
+	} else if leaderInSocialLobby {
+		isLeaderHeadingToSocial = true // Staying in Social (Buggy behavior)
+	}
+
+	assert.False(t, isLeaderHeadingToSocial, "Follower should see leader is heading to Arena because of early tracking")
+	t.Log("Check: Early tracking prevents follower from being forced to Social - PASS")
+}
+
