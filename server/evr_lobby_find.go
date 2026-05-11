@@ -671,6 +671,54 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 								}
 							}
 						}
+					} else {
+						// Leader logic: Check if any followers are in a social lobby.
+						for _, member := range lobbyGroup.List() {
+							if member.Presence.GetSessionId() == session.ID().String() {
+								continue // Skip self
+							}
+							memberSessionID := uuid.FromStringOrNil(member.Presence.GetSessionId())
+							memberUserID := uuid.FromStringOrNil(member.Presence.GetUserId())
+
+							// Look up the member's current match via tracker.
+							stream := PresenceStream{
+								Mode:    StreamModeService,
+								Subject: memberSessionID,
+								Label:   StreamLabelMatchService,
+							}
+							presence := p.nk.tracker.GetLocalBySessionIDStreamUserID(memberSessionID, stream, memberUserID)
+							if presence != nil {
+								memberMatchID := MatchIDFromStringOrNil(presence.GetStatus())
+								if !memberMatchID.IsNil() {
+									// Find this specific match in our search results
+									var followerMatch *MatchLabelMeta
+									for _, m := range matches {
+										if m.State.ID.UUID == memberMatchID.UUID {
+											followerMatch = m
+											break
+										}
+									}
+
+									// If not in search results, fetch label directly
+									if followerMatch == nil {
+										if label, err := MatchLabelByID(ctx, p.nk, memberMatchID); err == nil && label != nil {
+											followerMatch = &MatchLabelMeta{
+												State: label,
+											}
+										}
+									}
+
+									if followerMatch != nil && followerMatch.State.IsSocial() {
+										logger.Info("Priority join: Leader joining follower's social lobby", zap.String("mid", memberMatchID.String()))
+										if err := p.LobbyJoinEntrants(logger, followerMatch.State, entrants...); err == nil {
+											return nil
+										} else {
+											logger.Warn("Failed priority join to follower's lobby", zap.Error(err))
+										}
+									}
+								}
+							}
+						}
 					}
 				}
 			}
@@ -1048,7 +1096,10 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 				zap.Int("required_slots", requiredSlots))
 
 			if params.CurrentMatchID.IsNil() {
-				// Follower is at main menu; fall through to normal find.
+				// Follower is at main menu; force to Social mode to wait in a lobby instead of sitting at menu.
+				logger.Info("Leader's match is full, forcing follower to Social mode")
+				params.Mode = evr.ModeSocialPublic
+				params.Level = evr.LevelUnspecified
 				return false
 			}
 			// Follower is in a lobby; poll and retry.

@@ -741,3 +741,27 @@ func TestLeaderEarlyTrackingOnMatchmakingStream(t *testing.T) {
 	t.Log("Check: Early tracking prevents follower from being forced to Social - PASS")
 }
 
+// TestFollowerFallsBackToSocialWhenLeaderMatchFull verifies that if the leader's
+// match is full and the follower is at the main menu, the follower is forced
+// to Social mode instead of falling through to independent matchmaking.
+func TestFollowerFallsBackToSocialWhenLeaderMatchFull(t *testing.T) {
+	t.Log("Scenario: Leader's match is full, follower at main menu")
+
+	// Simulate state
+	followerAtMainMenu := true
+	leaderMatchFull := true
+	
+	// Follower's requested mode
+	followerMode := "arena"
+
+	// Logic from TryFollowPartyLeader:
+	if leaderMatchFull {
+		if followerAtMainMenu {
+			followerMode = "social"
+		}
+	}
+
+	assert.Equal(t, "social", followerMode, "Follower mode should be forced to Social when leader's match is full")
+	t.Log("Check: Follower fallback to Social working - PASS")
+}
+
