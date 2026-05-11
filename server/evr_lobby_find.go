@@ -45,6 +45,16 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			return fmt.Errorf("failed to join party: %w", err)
 		}
 
+		if isLeader {
+			defer func() {
+				mmStream := PresenceStream{
+					Mode:    StreamModeMatchmaking,
+					Subject: lobbyParams.GroupID,
+				}
+				p.nk.tracker.Untrack(session.id, mmStream, session.userID)
+			}()
+		}
+
 		// Synchronize mode if the leader is heading to Social
 		if !isLeader && p.isLeaderHeadingToSocial(ctx, logger, session, lobbyParams, lobbyGroup) {
 			logger.Info("Leader is heading to a social lobby, forcing social mode for follower")
@@ -304,6 +314,22 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 
 	// If this is the leader, then set the presence status to the current match ID.
 	if isLeader {
+		// Track the leader on the matchmaking stream early so followers know they are queueing for Arena.
+		mmStream := PresenceStream{
+			Mode:    StreamModeMatchmaking,
+			Subject: lobbyParams.GroupID,
+		}
+		statusBytes, _ := json.Marshal(lobbyParams)
+		presenceMeta := PresenceMeta{
+			Format:   session.Format(),
+			Username: session.Username(),
+			Status:   string(statusBytes),
+		}
+		success, _ := p.nk.tracker.Track(ctx, session.id, mmStream, session.userID, presenceMeta)
+		if !success {
+			logger.Warn("Failed to track leader on matchmaking stream early")
+		}
+
 		if !lobbyParams.CurrentMatchID.IsNil() && lobbyParams.Mode != evr.ModeSocialPublic {
 			// Query the match we're leaving to find how many party members should be joining us.
 			// Use the leader's party ID from the match presence (set at join time), not
