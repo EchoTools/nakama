@@ -351,31 +351,23 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 				maps.Copy(divs, ticketDivs[ticket])
 			}
 
-			minTeamSize := 4
-			if v, ok := candidate[0].GetProperties()["min_team_size"]; ok {
-				switch v := v.(type) {
-				case float64:
-					minTeamSize = int(v)
-				case int64:
-					minTeamSize = int(v)
-				case int:
-					minTeamSize = v
-				}
-			}
-
-
-
 			teamSize := len(candidate) / 2
-			if teamSize < minTeamSize {
+			if teamSize < 1 {
 				continue
 			}
 
-			// For public, enforce a minimum queue time (60s) for the oldest ticket
-			// unless a 4v4 match or larger is already possible.
-			if isPublic && len(candidate) < 8 {
+			// For public, enforce a minimum queue time (60s) for undersized matches.
+			// Full-size matches (>= min_team_size*2) are allowed immediately.
+			// Also skipped when failsafe_timeout=0, which signals the lobby fallback
+			// has already decided the player waited long enough.
+			failsafeTimeout, _ := candidate[0].GetProperties()["failsafe_timeout"].(float64)
+			if isPublic && isUndersizedMatch(candidate) && failsafeTimeout > 0 {
 				oldestTimestamp := float64(time.Now().UTC().Unix())
 				for _, g := range groups {
-					ticket := g[0].GetPresence().GetUserId()
+					ticket := g[0].GetTicket()
+					if isCombat {
+						ticket = g[0].GetPresence().GetUserId()
+					}
 					if age := ticketAge[ticket]; age < oldestTimestamp {
 						oldestTimestamp = age
 					}
