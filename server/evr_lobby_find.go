@@ -501,7 +501,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 		Mode:                lobbyParams.Mode,
 		Level:               lobbyParams.Level,
 		SpawnedBy:           lobbyParams.UserID.String(),
-		GroupID:             lobbyParams.GroupID,
+		GroupID:             lobbyParams.publicGroupID(),
 		StartTime:           time.Now().UTC(),
 		Reservations:        entrants,
 		ReservationLifetime: 30 * time.Second,
