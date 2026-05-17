@@ -390,6 +390,7 @@ func isUndersizedMatch(candidate []runtime.MatchmakerEntry) bool {
 
 	now := float64(time.Now().UTC().Unix())
 	oldestTimestamp := now
+	foundTimestamp := false
 	for _, entry := range candidate {
 		if v, ok := entry.GetProperties()["timestamp"]; ok {
 			var ts float64
@@ -406,7 +407,14 @@ func isUndersizedMatch(candidate []runtime.MatchmakerEntry) bool {
 			if ts < oldestTimestamp {
 				oldestTimestamp = ts
 			}
+			foundTimestamp = true
 		}
+	}
+
+	// If no entry has a valid timestamp, we can't compute elapsed time.
+	// Treat as expired so players aren't stuck waiting forever.
+	if !foundTimestamp {
+		return false
 	}
 
 	if now-oldestTimestamp >= failsafeTimeout {
