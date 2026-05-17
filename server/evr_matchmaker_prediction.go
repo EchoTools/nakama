@@ -252,7 +252,7 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 		)
 
 		for _, candidate := range candidates {
-			if candidate == nil {
+			if len(candidate) == 0 {
 				continue
 			}
 
