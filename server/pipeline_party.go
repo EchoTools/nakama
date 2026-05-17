@@ -54,11 +54,14 @@ func (p *Pipeline) partyCreate(logger *zap.Logger, session Session, envelope *rt
 	}
 
 	// If successful, the creator becomes the first user to join the party.
-	success, _ := p.tracker.Track(session.Context(), session.ID(), ph.Stream, session.UserID(), PresenceMeta{
+	success, isNew := p.tracker.Track(session.Context(), session.ID(), ph.Stream, session.UserID(), PresenceMeta{
 		Format:   session.Format(),
 		Username: session.Username(),
 		Status:   "",
 	})
+	if !isNew {
+		p.logger.Warn("Party creator presence was already tracked", zap.String("sid", session.ID().String()))
+	}
 	if !success {
 		_ = session.Send(&rtapi.Envelope{Cid: envelope.Cid, Message: &rtapi.Envelope_Error{Error: &rtapi.Error{
 			Code:    int32(rtapi.Error_RUNTIME_EXCEPTION),
@@ -131,11 +134,14 @@ func (p *Pipeline) partyJoin(logger *zap.Logger, session Session, envelope *rtap
 	// If the party was open and the join was successful, track the new member immediately.
 	if autoJoin {
 		stream := PresenceStream{Mode: StreamModeParty, Subject: partyID, Label: node}
-		success, _ := p.tracker.Track(session.Context(), session.ID(), stream, session.UserID(), PresenceMeta{
+		success, isNew := p.tracker.Track(session.Context(), session.ID(), stream, session.UserID(), PresenceMeta{
 			Format:   session.Format(),
 			Username: session.Username(),
 			Status:   "",
 		})
+		if !isNew {
+			p.logger.Warn("Party join presence was already tracked", zap.String("sid", session.ID().String()))
+		}
 		if !success {
 			_ = session.Send(&rtapi.Envelope{Cid: envelope.Cid, Message: &rtapi.Envelope_Error{Error: &rtapi.Error{
 				Code:    int32(rtapi.Error_RUNTIME_EXCEPTION),
