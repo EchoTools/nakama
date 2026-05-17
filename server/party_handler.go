@@ -94,6 +94,7 @@ func (p *PartyHandler) stop() {
 	p.ctxCancelFn()
 	p.partyRegistry.Delete(p.ID)
 	p.tracker.UntrackByStream(p.Stream)
+	// SMELL(critical): silently swallows error from RemovePartyAll; orphaned matchmaker tickets accumulate silently
 	_ = p.matchmaker.RemovePartyAll(p.IDStr)
 }
 
@@ -117,6 +118,7 @@ func (p *PartyHandler) JoinRequest(presence *Presence) (bool, error) {
 			return false, err
 		}
 		// The party membership has changed, stop any ongoing matchmaking processes.
+		// SMELL(critical): silently swallows error; matchmaker ticket cleanup may fail
 		_ = p.matchmaker.RemovePartyAll(p.IDStr)
 		return true, nil
 	}
@@ -254,7 +256,7 @@ func (p *PartyHandler) Join(presences []*Presence) {
 	members := p.members.List()
 
 	p.Unlock()
-
+	// SMELL(high): member list snapshot inconsistency: member could leave between snapshot and envelope construction, leading to inconsistent party presence info
 	memberUserPresences := make([]*rtapi.UserPresence, 0, len(members))
 	for _, member := range members {
 		memberUserPresences = append(memberUserPresences, member.UserPresence)
@@ -277,6 +279,7 @@ func (p *PartyHandler) Leave(presences []*Presence) {
 		p.Unlock()
 		return
 	}
+	// SMELL(high): TOCTOU window: multiple presences leaving concurrently may all observe leader != nil, then all attempt to promote the oldest member
 
 	presences, _ = p.members.Leave(presences)
 	if len(presences) == 0 {
@@ -322,6 +325,7 @@ func (p *PartyHandler) Leave(presences []*Presence) {
 	p.Unlock()
 
 	// The party membership has changed, stop any ongoing matchmaking processes.
+	// SMELL(critical): silently swallows error; orphaned tickets may remain in matchmaker
 	_ = p.matchmaker.RemovePartyAll(p.IDStr)
 }
 
@@ -363,7 +367,7 @@ func (p *PartyHandler) Promote(sessionID, node string, presence *rtapi.UserPrese
 	}
 
 	p.Unlock()
-
+	// SMELL(high): TOCTOU window: leader could have been removed between lock release and read; envelope will reference stale leader
 	// Attempted to promote a party member that did not exist.
 	if envelope == nil {
 		return runtime.ErrPartyNotMember
@@ -431,10 +435,12 @@ func (p *PartyHandler) Accept(sessionID, node string, presence *rtapi.UserPresen
 
 	if singleParty {
 		// Kick the user from any other parties they may be part of.
+		// SMELL(high): UntrackLocalByModes error ignored; user may remain in multiple party streams
 		p.tracker.UntrackLocalByModes(joinRequestPresence.ID.SessionID, partyStreamMode, p.Stream)
 	}
 
 	// The party membership has changed, stop any ongoing matchmaking processes.
+	// SMELL(critical): silently swallows error
 	_ = p.matchmaker.RemovePartyAll(p.IDStr)
 
 	return nil

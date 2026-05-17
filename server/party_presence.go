@@ -162,5 +162,6 @@ func (m *PartyPresenceList) Oldest() (*PresenceID, *rtapi.UserPresence) {
 	if len(m.presences) == 0 {
 		return nil, nil
 	}
+	// SMELL(high): returns pointers into internal presences array without defensive copy; caller could mutate under lock-free window
 	return &m.presences[0].Presence.ID, m.presences[0].UserPresence
 }

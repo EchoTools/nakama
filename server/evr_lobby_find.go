@@ -37,7 +37,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	var memberSessionIDs []uuid.UUID
 	var isLeader bool
 
-	// Resolve party state early if applicable
+	// SMELL(high): magic string "tablet" check encodes branch logic; no enum or named constant for mode detection
 	if lobbyParams.PartyGroupName != "" && lobbyParams.PartyGroupName != "tablet" {
 		var err error
 		lobbyGroup, memberSessionIDs, isLeader, err = p.configureParty(ctx, logger, session, lobbyParams)
@@ -87,8 +87,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			// during the follow attempt (e.g. original leader left the party).
 			leader := lobbyGroup.GetLeader()
 			if leader != nil && leader.SessionId == session.id.String() {
-				// We're now the leader — populate entrant list and fall through
-				// to matchmaking as the leader.
 				isLeader = true
 				for _, sid := range memberSessionIDs {
 					if sid == session.id {
@@ -97,11 +95,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 					entrantSessionIDs = append(entrantSessionIDs, sid)
 				}
 			} else if shouldFollowerFindOrCreateSocial(lobbyParams.Mode) {
-				// Social mode: skip the polling loop entirely. Social lobbies
-				// use find-or-create with party reservations, so the follower
-				// will naturally converge to the leader's lobby. Polling for
-				// the leader to settle is unnecessary and can silently timeout,
-				// leaving the client stuck in infinite matchmaking.
 				logger.Info("Follower in social mode, finding social lobby independently (party reservations will converge)")
 				lobbyParams.Level = evr.LevelUnspecified
 				followerEntrants, err := PrepareEntrantPresences(ctx, logger, p.nk, p.nk.sessionRegistry, lobbyParams, session.id)
@@ -110,17 +103,12 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				}
 				return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, followerEntrants...)
 			} else {
-				// Still a non-leader in a non-social mode. Poll for the leader
-				// to settle into a match we can join. This covers followers at
-				// the main menu whose leader is in a closed/full match — they
-				// should wait rather than immediately erroring out.
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
 				if p.pollFollowPartyLeader(ctx, logger, session, lobbyParams, lobbyGroup) {
 					return nil
 				}
-				// Re-check leadership one more time after polling.
 				leader = lobbyGroup.GetLeader()
 				if leader != nil && leader.SessionId == session.id.String() {
 					isLeader = true
@@ -134,22 +122,17 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					// Non-social mode: release the follower to independent matchmaking.
 					logger.Info("Follower cannot join leader's match, releasing to independent matchmaking",
 						zap.String("mode", lobbyParams.Mode.String()))
 					lobbyParams.SetPartySize(1)
-					// Fall through to normal matchmaking below.
 				}
 			}
 		} else {
-
-			for _, memberSessionIDs := range memberSessionIDs {
-
-				if memberSessionIDs == session.id {
+			for _, sid := range memberSessionIDs {
+				if sid == session.id {
 					continue
 				}
-
-				entrantSessionIDs = append(entrantSessionIDs, memberSessionIDs)
+				entrantSessionIDs = append(entrantSessionIDs, sid)
 			}
 		}
 	} else {
@@ -313,6 +296,7 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 			}
 			if expectedCount > 0 {
 				logger.Debug("Waiting for party members to start matchmaking", zap.Int("expected", expectedCount), zap.Int("current", lobbyGroup.Size()-1))
+				// SMELL(high): hardcoded 30s timeout used as synchronization primitive; no constant or configuration
 				deadline := time.After(30 * time.Second)
 				ticker := time.NewTicker(500 * time.Millisecond)
 				defer ticker.Stop()
@@ -334,6 +318,7 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 			// does not submit a solo matchmaking ticket before the follower joins — which
 			// would allow backfill to place the leader in a match with no room left for
 			// the follower.
+			// SMELL(high): MatchmakingStartGracePeriod (3s) is a hardcoded synchronization budget with no adaptive retry logic; if followers don't join within 3s, leader goes solo
 			logger.Debug("Waiting for party followers (fresh-start grace period)", zap.Duration("timeout", MatchmakingStartGracePeriod))
 			graceTimer := time.NewTimer(MatchmakingStartGracePeriod)
 			defer graceTimer.Stop()
@@ -441,11 +426,16 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 
 	p.nk.metrics.CustomCounter("lobby_new", metricsTags, 1)
 
+	groupID := lobbyParams.GroupID
+	if lobbyParams.Mode == evr.ModeArenaPublic || lobbyParams.Mode == evr.ModeCombatPublic || lobbyParams.Mode == evr.ModeSocialPublic {
+		groupID = uuid.Nil
+	}
+
 	settings := &MatchSettings{
 		Mode:                lobbyParams.Mode,
 		Level:               lobbyParams.Level,
 		SpawnedBy:           lobbyParams.UserID.String(),
-		GroupID:             lobbyParams.GroupID,
+		GroupID:             groupID,
 		StartTime:           time.Now().UTC(),
 		Reservations:        entrants,
 		ReservationLifetime: 30 * time.Second,
@@ -865,6 +855,7 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 	// which untracks their matchmaking stream and gets them kicked from
 	// the party ticket. This is the primary cause of the "rubber-banding"
 	// bug in parties of 3+.
+	// SMELL(critical): TOCTOU window: leader could transition from matchmaking to settled between check and service-stream read; follower may still follow stale match
 	if pr := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, params.MatchmakingStream(), leaderUserID); pr != nil {
 		logger.Debug("Leader is currently matchmaking, falling through")
 		return false
@@ -894,6 +885,7 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 		Subject: session.id,
 		Label:   StreamLabelMatchService,
 	}
+	// SMELL(high): tracker read-decide-act: leaderMatchID read above, now memberMatchID read; leader could change between checks without convergence guarantee
 	if memberPresence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, memberStream, session.userID); memberPresence != nil {
 		memberMatchID := MatchIDFromStringOrNil(memberPresence.GetStatus())
 		if memberMatchID == leaderMatchID {
@@ -1066,6 +1058,7 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 				return true
 			}
 			return false
+		// SMELL(high): hardcoded 3s poll interval with no backoff or exponential jitter; polling overhead scales with party count
 		case <-time.After(3 * time.Second):
 		}
 
@@ -1193,6 +1186,7 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 			if err := p.lobbyJoin(ctx, logger, session, params, leaderMatchID); err != nil {
 				code := LobbyErrorCode(err)
 				if code == ServerIsFull || code == ServerIsLocked {
+					// SMELL(high): hardcoded 5s fixed backoff on join failure; no exponential backoff or jitter; can cascade across many followers
 					<-time.After(5 * time.Second)
 					continue
 				}

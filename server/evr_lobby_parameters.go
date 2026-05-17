@@ -592,10 +592,15 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 
 	minStartTime := p.MatchmakingTimestamp.UTC().Add(-time.Duration(MatchStartTimeMinimumAgeSecs) * time.Second).Format(time.RFC3339Nano)
 
+	groupID := p.GroupID
+	if p.Mode == evr.ModeArenaPublic || p.Mode == evr.ModeCombatPublic || p.Mode == evr.ModeSocialPublic {
+		groupID = uuid.Nil
+	}
+
 	qparts := []string{
 		"+label.open:T",
 		fmt.Sprintf("+label.mode:%s", p.Mode.String()),
-		fmt.Sprintf("+label.group_id:%s", Query.QuoteStringValue(p.GroupID.String())),
+		fmt.Sprintf("+label.group_id:%s", Query.QuoteStringValue(groupID.String())),
 		//fmt.Sprintf("label.version_lock:%s", p.VersionLock.String()),
 		p.BackfillQueryAddon,
 	}
@@ -740,10 +745,15 @@ func (p *LobbySessionParameters) FromMatchmakerEntry(entry *MatchmakerEntry) {
 
 func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *MatchmakingTicketParameters) (string, map[string]string, map[string]float64) {
 
+	groupID := p.GroupID
+	if p.Mode == evr.ModeArenaPublic || p.Mode == evr.ModeCombatPublic || p.Mode == evr.ModeSocialPublic {
+		groupID = uuid.Nil
+	}
+
 	submissionTime := p.MatchmakingTimestamp.UTC().Format(time.RFC3339)
 	stringProperties := map[string]string{
 		"game_mode":              p.Mode.String(),
-		"group_id":               p.GroupID.String(),
+		"group_id":               groupID.String(),
 		"version_lock":           p.VersionLock.String(),
 		"display_name":           p.DisplayName,
 		"submission_time":        submissionTime,
@@ -777,7 +787,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 
 	qparts := []string{
 		"+properties.game_mode:" + p.Mode.String(),
-		fmt.Sprintf("+properties.group_id:%s", Query.QuoteStringValue(p.GroupID.String())),
+		fmt.Sprintf("+properties.group_id:%s", Query.QuoteStringValue(groupID.String())),
 		fmt.Sprintf(`-properties.blocked_ids:/.*%s.*/`, Query.QuoteStringValue(p.UserID.String())),
 		//"+properties.version_lock:" + p.VersionLock.String(),
 		p.MatchmakingQueryAddon,
@@ -875,11 +885,19 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 }
 
 func (p LobbySessionParameters) MatchmakingStream() PresenceStream {
-	return PresenceStream{Mode: StreamModeMatchmaking, Subject: p.GroupID}
+	groupID := p.GroupID
+	if p.Mode == evr.ModeArenaPublic || p.Mode == evr.ModeCombatPublic || p.Mode == evr.ModeSocialPublic {
+		groupID = uuid.Nil
+	}
+	return PresenceStream{Mode: StreamModeMatchmaking, Subject: groupID}
 }
 
 func (p LobbySessionParameters) GuildGroupStream() PresenceStream {
-	return PresenceStream{Mode: StreamModeGuildGroup, Subject: p.GroupID, Label: p.Mode.String()}
+	groupID := p.GroupID
+	if p.Mode == evr.ModeArenaPublic || p.Mode == evr.ModeCombatPublic || p.Mode == evr.ModeSocialPublic {
+		groupID = uuid.Nil
+	}
+	return PresenceStream{Mode: StreamModeGuildGroup, Subject: groupID, Label: p.Mode.String()}
 }
 
 func (p LobbySessionParameters) PresenceMeta() PresenceMeta {

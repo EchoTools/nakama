@@ -192,6 +192,7 @@ func (p *EvrPipeline) getPartyLeaderAccountID(ctx context.Context, logger *zap.L
 	if leaderUID == uuid.Nil {
 		return 0
 	}
+	// SMELL(critical): database call on party query path; violates "all DB at login" architecture principle
 	accountID, err := p.resolveUserIDToAccountID(ctx, leaderUID)
 	if err != nil {
 		logger.Warn("Failed to resolve leader account ID", zap.Error(err))
@@ -345,6 +346,7 @@ func (p *EvrPipeline) snsPartySendInviteRequest(ctx context.Context, logger *zap
 		return nil
 	}
 
+	// SMELL(high): error from resolveEvrIDToUserID not distinguished from nil result; both silently skipped
 	targetUserID, err := p.resolveEvrIDToUserID(ctx, params.xpID.PlatformCode, msg.TargetUserID)
 	if err != nil || targetUserID == uuid.Nil {
 		logger.Info("Invite target not found", zap.Uint64("target", msg.TargetUserID))

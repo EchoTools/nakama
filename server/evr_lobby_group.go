@@ -98,6 +98,7 @@ func JoinPartyGroup(session *sessionWS, groupName string, currentMatchID MatchID
 	if !created {
 		isMember := false
 		// Check if the player is already a member of the party
+		// SMELL(high): member check before JoinRequest creates TOCTOU: session could be kicked from party between check and join
 		for _, member := range ph.members.List() {
 			if member.Presence.GetUserId() == session.UserID().String() {
 				isMember = true
@@ -119,6 +120,7 @@ func JoinPartyGroup(session *sessionWS, groupName string, currentMatchID MatchID
 	}
 
 	// If successful, the creator becomes the first user to join the party.
+	// SMELL(high): assumes tracker.Track triggers Join hook synchronously before returning; no guarantee or retry if hook fails
 	if success, isNew := session.pipeline.tracker.Track(session.Context(), session.ID(), ph.Stream, session.UserID(), presenceMeta); !success {
 		_ = session.Send(&rtapi.Envelope{Message: &rtapi.Envelope_Error{Error: &rtapi.Error{
 			Code:    int32(rtapi.Error_RUNTIME_EXCEPTION),

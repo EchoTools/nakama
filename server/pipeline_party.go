@@ -54,6 +54,7 @@ func (p *Pipeline) partyCreate(logger *zap.Logger, session Session, envelope *rt
 	}
 
 	// If successful, the creator becomes the first user to join the party.
+	// SMELL(high): tracker.Track assumed synchronous; Join hook may not fire, leaving creator untracked from party
 	success, _ := p.tracker.Track(session.Context(), session.ID(), ph.Stream, session.UserID(), PresenceMeta{
 		Format:   session.Format(),
 		Username: session.Username(),
@@ -131,6 +132,7 @@ func (p *Pipeline) partyJoin(logger *zap.Logger, session Session, envelope *rtap
 	// If the party was open and the join was successful, track the new member immediately.
 	if autoJoin {
 		stream := PresenceStream{Mode: StreamModeParty, Subject: partyID, Label: node}
+		// SMELL(high): tracker.Track assumed synchronous; Join hook may not fire before returning, leaving presence untracked
 		success, _ := p.tracker.Track(session.Context(), session.ID(), stream, session.UserID(), PresenceMeta{
 			Format:   session.Format(),
 			Username: session.Username(),

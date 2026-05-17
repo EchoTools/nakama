@@ -296,8 +296,21 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 				oldest := float64(time.Now().UTC().Unix())
 				for _, entry := range entries {
 					props := entry.GetProperties()
-					if st, ok := props["timestamp"].(float64); ok && st < oldest {
-						oldest = st
+					if v, ok := props["timestamp"]; ok {
+						var ts float64
+						switch v := v.(type) {
+						case float64:
+							ts = v
+						case int64:
+							ts = float64(v)
+						case int:
+							ts = float64(v)
+						default:
+							continue
+						}
+						if ts < oldest {
+							oldest = ts
+						}
 					}
 				}
 				ticketAge[ticket] = oldest
