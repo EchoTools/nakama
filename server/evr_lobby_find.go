@@ -1132,9 +1132,12 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 	}
 
 	switch label.Mode {
-	case evr.ModeSocialPrivate, evr.ModeSocialPublic, evr.ModeCombatPublic, evr.ModeArenaPublic:
+	case evr.ModeSocialPublic, evr.ModeCombatPublic, evr.ModeArenaPublic:
+		// ModeSocialPrivate is intentionally excluded: private lobbies require
+		// explicit invitation. Party follow must not bypass that gate.
 	default:
-		logger.Debug("Leader is in a non-joinable mode", zap.String("mode", label.Mode.String()))
+		logger.Debug("Leader is in a non-joinable mode for party follow",
+			zap.String("mode", label.Mode.String()))
 		return false
 	}
 
@@ -1300,7 +1303,8 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		}
 
 		switch label.Mode {
-		case evr.ModeSocialPrivate, evr.ModeSocialPublic, evr.ModeCombatPublic, evr.ModeArenaPublic:
+		case evr.ModeSocialPublic, evr.ModeCombatPublic, evr.ModeArenaPublic:
+			// ModeSocialPrivate excluded: same reason as TryFollowPartyLeader.
 			logger.Debug("Joining leader's lobby during poll", zap.String("mid", leaderMatchID.String()))
 			if err := p.lobbyJoin(ctx, logger, session, params, leaderMatchID); err != nil {
 				code := LobbyErrorCode(err)
