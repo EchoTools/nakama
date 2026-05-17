@@ -1766,3 +1766,71 @@ func TestPoll_LeaderInFullCombatMatch_ShouldNotLoopForever(t *testing.T) {
 		t.Errorf("pollFollowPartyLeader took %v — should return within ~6s (one poll cycle).", elapsed)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// KC-1: ModeSocialPrivate bypass via party follow
+//
+// A leader in a ModeSocialPrivate lobby must NOT be joinable via the party
+// follow path (TryFollowPartyLeader / pollFollowPartyLeader). Private lobbies
+// require explicit invitation; the follow mechanism must not override that gate.
+// ---------------------------------------------------------------------------
+
+func TestKC1_TryFollowPartyLeader_RefusesPrivateSocialLobby(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	logger := loggerForTest(t)
+
+	privateMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	groupID := env.groupID
+
+	registry := newMockFollowMatchRegistry()
+	registry.SetMatch(privateMatchID, &MatchLabel{
+		ID:          privateMatchID,
+		Open:        true,
+		Mode:        evr.ModeSocialPrivate,
+		PlayerLimit: 12,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setLeaderMatch(privateMatchID)
+
+	result := env.pipeline.TryFollowPartyLeader(
+		context.Background(), logger, env.session, env.params, env.lobbyGroup)
+
+	if result {
+		t.Errorf("KC-1 SECURITY: TryFollowPartyLeader returned true for ModeSocialPrivate lobby. "+
+			"Party follow must not bypass the private-lobby invitation gate.")
+	}
+}
+
+func TestKC1_PollFollowPartyLeader_RefusesPrivateSocialLobby(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+
+	privateMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	groupID := env.groupID
+
+	registry := newMockFollowMatchRegistry()
+	registry.SetMatch(privateMatchID, &MatchLabel{
+		ID:          privateMatchID,
+		Open:        true,
+		Mode:        evr.ModeSocialPrivate,
+		PlayerLimit: 12,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setLeaderMatch(privateMatchID)
+
+	// Poll loop has two 3s waits per cycle (tick + settle): give 10s for one cycle.
+	result, timedOut := env.runPollWithTimeout(context.Background(), t, 10*time.Second)
+
+	if timedOut {
+		t.Fatal("KC-1: pollFollowPartyLeader hung — should return false within one poll cycle (~6s)")
+	}
+	if result {
+		t.Errorf("KC-1 SECURITY: pollFollowPartyLeader returned true for ModeSocialPrivate lobby. "+
+			"Party follow must not bypass the private-lobby invitation gate.")
+	}
+}
