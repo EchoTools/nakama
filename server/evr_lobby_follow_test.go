@@ -166,8 +166,9 @@ func (e *followTestEnv) runPollWithTimeout(ctx context.Context, logger interface
 // ---------------------------------------------------------------------------
 
 type mockFollowMatchRegistry struct {
-	mu      sync.RWMutex
-	matches map[string]*MatchLabel // matchID string → label
+	mu             sync.RWMutex
+	matches        map[string]*MatchLabel // matchID string → label
+	getMatchCalls  atomic.Int32           // count of GetMatch invocations
 }
 
 func newMockFollowMatchRegistry() *mockFollowMatchRegistry {
@@ -181,6 +182,7 @@ func (r *mockFollowMatchRegistry) SetMatch(id MatchID, label *MatchLabel) {
 }
 
 func (r *mockFollowMatchRegistry) GetMatch(_ context.Context, id string) (*api.Match, string, error) {
+	r.getMatchCalls.Add(1)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	label, ok := r.matches[id]
@@ -281,6 +283,7 @@ func TestTryFollowPartyLeader_LeaderMatchmaking_ReturnsFalse(t *testing.T) {
 	}
 
 	ph := &PartyHandler{}
+	ph.members = NewPartyPresenceList(8)
 	ph.leader = &PartyLeader{
 		UserPresence: leaderUP,
 		PresenceID:   &PresenceID{SessionID: leaderSID, Node: "testnode"},
@@ -346,6 +349,7 @@ func TestTryFollowPartyLeader_LeaderNotMatchmaking_ProceedsNormally(t *testing.T
 		Username:  "leader",
 	}
 	ph := &PartyHandler{}
+	ph.members = NewPartyPresenceList(8)
 	ph.leader = &PartyLeader{
 		UserPresence: leaderUP,
 		PresenceID:   &PresenceID{SessionID: leaderSID, Node: "testnode"},
@@ -435,51 +439,86 @@ func TestTryFollow_LeaderEmptyMatchID_ReturnsFalse(t *testing.T) {
 	}
 }
 
-func TestTryFollow_FollowerInDifferentMatch_ReachesMatchValidation(t *testing.T) {
-	// Leader is in Match B, follower is in Match A (different match).
-	// TryFollowPartyLeader should NOT return true (follower != leader match)
-	// and should proceed to match validation (MatchLabelByID). Since we don't
-	// mock nk, this will panic — which confirms the path is reached and
-	// validates that all earlier checks pass correctly.
+// TestTryFollow_FollowerInDifferentMatch_AttemptsJoin verifies that when the
+// follower is in a different match from the leader and the leader's match is
+// joinable (mocked registry returns an open label), TryFollowPartyLeader
+// proceeds through match validation. The critical assertion is that the mock
+// registry's GetMatch was called — confirming all tracker-based early returns
+// were bypassed and match-label validation was reached.
+//
+// Note: lobbyJoin panics on nil metrics (no full pipeline); we recover from it
+// and check that GetMatch was called before the panic, which is sufficient
+// proof that the match-validation code path was exercised.
+func TestTryFollow_FollowerInDifferentMatch_AttemptsJoin(t *testing.T) {
+	t.Parallel()
+
 	env := newFollowTestEnv(t)
 	matchA := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	env.setLeaderMatch(matchB)
 	env.setFollowerMatch(matchA)
 
+	// Provide a mock registry that tracks how many times GetMatch is called.
+	registry := newMockFollowMatchRegistry()
+	registry.SetMatch(matchB, &MatchLabel{
+		ID:          matchB,
+		Mode:        evr.ModeArenaPublic,
+		Open:        true,
+		PlayerLimit: 8,
+	})
+	env.withMockNK(registry)
+
 	logger := loggerForTest(t)
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic from nil nk (MatchLabelByID), indicating the " +
-				"match validation path was reached — all tracker-based checks passed")
-		}
+	// Recover from the panic that lobbyJoin will trigger (nil metrics).
+	// We only care that GetMatch was called before the panic.
+	func() {
+		defer func() { recover() }() //nolint:errcheck
+		env.pipeline.TryFollowPartyLeader(context.Background(), logger, env.session, env.params, env.lobbyGroup)
 	}()
 
-	env.pipeline.TryFollowPartyLeader(context.Background(), logger, env.session, env.params, env.lobbyGroup)
-	t.Error("Should not reach here — expected panic")
+	if registry.getMatchCalls.Load() == 0 {
+		t.Error("TryFollowPartyLeader: expected MatchLabelByID (GetMatch) to be called " +
+			"when follower is in a different match, but registry was never queried — " +
+			"an early-return guard incorrectly blocked the match-validation path")
+	}
 }
 
-func TestTryFollow_FollowerNoMatchPresence_ReachesMatchValidation(t *testing.T) {
-	// Leader is in Match B, follower has no service stream at all (at main menu).
-	// The memberPresence check (line 632) gets nil, so the "already in match"
-	// branch is skipped. Proceeds to MatchLabelByID validation.
+// TestTryFollow_FollowerNoMatchPresence_AttemptsJoin verifies that when the
+// follower is at the main menu (no service stream) and the leader is in a
+// joinable match, TryFollowPartyLeader reaches match validation. The critical
+// assertion: mock registry's GetMatch was called, confirming the code path
+// reached label validation before attempting the join.
+func TestTryFollow_FollowerNoMatchPresence_AttemptsJoin(t *testing.T) {
+	t.Parallel()
+
 	env := newFollowTestEnv(t)
 	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	env.setLeaderMatch(matchB)
-	// No follower service stream set.
+	// No follower service stream set — follower is at main menu.
+
+	registry := newMockFollowMatchRegistry()
+	registry.SetMatch(matchB, &MatchLabel{
+		ID:          matchB,
+		Mode:        evr.ModeArenaPublic,
+		Open:        true,
+		PlayerLimit: 8,
+	})
+	env.withMockNK(registry)
 
 	logger := loggerForTest(t)
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic from nil nk (MatchLabelByID), indicating the " +
-				"'follower not in any match' path reached match validation")
-		}
+	// Recover from any panic from lobbyJoin / lobbyAuthorize (nil metrics).
+	func() {
+		defer func() { recover() }() //nolint:errcheck
+		env.pipeline.TryFollowPartyLeader(context.Background(), logger, env.session, env.params, env.lobbyGroup)
 	}()
 
-	env.pipeline.TryFollowPartyLeader(context.Background(), logger, env.session, env.params, env.lobbyGroup)
-	t.Error("Should not reach here — expected panic")
+	if registry.getMatchCalls.Load() == 0 {
+		t.Error("TryFollowPartyLeader: expected MatchLabelByID (GetMatch) to be called " +
+			"when follower is at main menu and leader is in a joinable match, " +
+			"but registry was never queried — match-validation path was skipped")
+	}
 }
 
 // ===========================================================================
@@ -662,42 +701,60 @@ func TestPoll_LeaderSwitchesMatches_FollowerInNewMatch_ReturnsTrue(t *testing.T)
 	}
 }
 
-func TestPoll_FollowerNotInLeaderMatch_ReachesLabelLookup(t *testing.T) {
-	// After the settle period, the follower is NOT in the leader's match.
-	// The poll should reach the MatchLabelByID call (to check if joinable).
-	// Since we don't mock nk, this will panic — confirming the path is reached.
+// TestPoll_FollowerNotInLeaderMatch_LooksUpLabel verifies that when the leader
+// is settled in a match and the follower is in a different match,
+// pollFollowPartyLeader calls GetMatch on the registry (via MatchLabelByID).
+//
+// The mock registry records GetMatch calls. After the poll completes (or panics
+// from lobbyJoin's nil metrics), we assert that GetMatch was invoked at least
+// once — confirming the poll reached the label-lookup step.
+func TestPoll_FollowerNotInLeaderMatch_LooksUpLabel(t *testing.T) {
+	t.Parallel()
+
 	env := newFollowTestEnv(t)
 	logger := loggerForTest(t)
 
 	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	matchA := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	env.setLeaderMatch(matchB)
-	env.setFollowerMatch(matchA) // Different match
+	env.setFollowerMatch(matchA) // Different match — follower must try to join
+
+	// Wire a mock registry that records GetMatch invocations.
+	registry := newMockFollowMatchRegistry()
+	registry.SetMatch(matchB, &MatchLabel{
+		ID:          matchB,
+		Mode:        evr.ModeArenaPublic,
+		Open:        true,
+		PlayerLimit: 8,
+	})
+	env.withMockNK(registry)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	panicked := make(chan bool, 1)
+	// Run the poll in a goroutine with panic recovery so that a nil-metrics panic
+	// from lobbyJoin does not crash the test process.
+	done := make(chan struct{})
 	go func() {
 		defer func() {
-			if r := recover(); r != nil {
-				panicked <- true
-			} else {
-				panicked <- false
-			}
+			recover() //nolint:errcheck
+			close(done)
 		}()
 		env.pipeline.pollFollowPartyLeader(ctx, logger, env.session, env.params, env.lobbyGroup)
 	}()
 
 	select {
-	case didPanic := <-panicked:
-		if !didPanic {
-			t.Error("Expected panic from nil nk when reaching MatchLabelByID — " +
-				"follower not in leader's match should trigger join attempt")
-		}
+	case <-done:
+		// Poll returned or panicked — check the registry.
 	case <-time.After(12 * time.Second):
 		cancel()
-		t.Fatal("pollFollowPartyLeader neither returned nor panicked within timeout")
+		t.Fatal("pollFollowPartyLeader neither returned nor panicked within 12 seconds")
+	}
+
+	if registry.getMatchCalls.Load() == 0 {
+		t.Error("pollFollowPartyLeader: expected MatchLabelByID (GetMatch) to be called " +
+			"when follower is not in leader's match, but the registry was never queried — " +
+			"the label-lookup step was not reached")
 	}
 }
 
@@ -852,6 +909,7 @@ func TestPollFollowPartyLeader_SameMatch_ReturnsTrue(t *testing.T) {
 		Username:  "leader",
 	}
 	ph := &PartyHandler{}
+	ph.members = NewPartyPresenceList(8)
 	ph.leader = &PartyLeader{
 		UserPresence: leaderUP,
 		PresenceID:   &PresenceID{SessionID: leaderSID, Node: "testnode"},
@@ -963,6 +1021,7 @@ func TestDuoDesync_MonitorCancelsFollowerContext_DuringPoll(t *testing.T) {
 		Username:  "leader",
 	}
 	ph := &PartyHandler{}
+	ph.members = NewPartyPresenceList(8)
 	ph.leader = &PartyLeader{
 		UserPresence: leaderUP,
 		PresenceID:   &PresenceID{SessionID: leaderSID, Node: "testnode"},
@@ -1097,6 +1156,7 @@ func TestDuoDesync_FollowerRetryLoop_ContextAlwaysCanceled(t *testing.T) {
 			Username:  "leader",
 		}
 		ph := &PartyHandler{}
+		ph.members = NewPartyPresenceList(8)
 		ph.leader = &PartyLeader{
 			UserPresence: leaderUP,
 			PresenceID:   &PresenceID{SessionID: leaderSID, Node: "testnode"},
@@ -1160,12 +1220,15 @@ func TestDuoDesync_FollowerRetryLoop_ContextAlwaysCanceled(t *testing.T) {
 		cancel()
 	}
 
-	if consecutiveFailures == maxRetries {
-		t.Errorf("DUO DESYNC RETRY LOOP: All %d consecutive lobbyFind attempts failed. "+
+	// consecutiveFailures == 0 means every attempt succeeded (poll returned true).
+	// Any non-zero count reveals the desync bug: the monitor canceled the context
+	// before pollFollowPartyLeader could detect the follower in the leader's match.
+	if consecutiveFailures != 0 {
+		t.Errorf("DUO DESYNC RETRY LOOP: %d/%d lobbyFind attempts failed. "+
 			"The follower is stuck in a persistent matchmaking loop because the "+
 			"matchmaking monitor cancels the context on every attempt before "+
 			"pollFollowPartyLeader can detect the successful match placement.",
-			maxRetries)
+			consecutiveFailures, maxRetries)
 	}
 }
 
@@ -1215,6 +1278,7 @@ func TestDuoDesync_TryFollow_LeaderStillMatchmaking_FallsToDesyncPoll(t *testing
 		Username:  "leader",
 	}
 	ph := &PartyHandler{}
+	ph.members = NewPartyPresenceList(8)
 	ph.leader = &PartyLeader{
 		UserPresence: leaderUP,
 		PresenceID:   &PresenceID{SessionID: leaderSID, Node: "testnode"},
@@ -1411,6 +1475,7 @@ func TestDuoDesync_PollFollow_ContextCanceledBeforeSettleCheck(t *testing.T) {
 		Username:  "leader",
 	}
 	ph := &PartyHandler{}
+	ph.members = NewPartyPresenceList(8)
 	ph.leader = &PartyLeader{
 		UserPresence: leaderUP,
 		PresenceID:   &PresenceID{SessionID: leaderSID, Node: "testnode"},

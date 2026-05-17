@@ -66,6 +66,7 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 				logger.Debug("Failed to send error message", zap.Error(err))
 			}
 		}()
+		return fmt.Errorf("lobbyJoin: %w", err)
 	}
 	return nil
 }

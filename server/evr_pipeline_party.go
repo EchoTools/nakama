@@ -147,12 +147,15 @@ func (p *EvrPipeline) sendEVRMessageToPartyMembers(logger *zap.Logger, partyUUID
 
 func (p *EvrPipeline) snsPartyTrackAndJoin(ctx context.Context, logger *zap.Logger, session *sessionWS, partyUUID uuid.UUID, snsPartyID uint64, params *SessionParameters) error {
 	stream := PresenceStream{Mode: StreamModeParty, Subject: partyUUID, Label: p.node}
-	success, _ := p.nk.tracker.Track(session.Context(), session.ID(), stream, session.UserID(), PresenceMeta{
+	success, isNew := p.nk.tracker.Track(session.Context(), session.ID(), stream, session.UserID(), PresenceMeta{
 		Format:   session.Format(),
 		Username: session.Username(),
 	})
 	if !success {
 		return fmt.Errorf("failed to track party presence")
+	}
+	if !isNew {
+		logger.Debug("Party presence was already tracked for session", zap.String("sid", session.ID().String()))
 	}
 
 	if p.config.GetSession().SingleParty {
