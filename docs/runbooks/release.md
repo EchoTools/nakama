@@ -76,7 +76,7 @@ Before you do anything:
 - [ ] You're on the right branch (usually `main`) with the commits you want
 - [ ] Tests pass: `go test ./server/...`
 - [ ] Binary builds: `make nakama`
-- [ ] You know what tag to use — convention is `v<VERSION>-evr.<N>` (e.g. `v3.27.2-evr.299`)
+- [ ] You know what tag to use — EVR releases use the next monotonic `-evr.<N>` tag in sequence from the latest existing EVR tag (for example, if the latest is `v3.27.2-evr.304`, the next release is `v3.27.2-evr.305`)
 
 ## Step 1: Tag and push
 
