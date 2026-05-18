@@ -26,6 +26,48 @@ If no release tag is given, determine the latest candidates with:
 git tag --sort=-v:refname | head -5
 ```
 
+## Prerequisites
+
+Before starting, make sure all of these are true:
+
+- Local repo path: `~/src/nakama`
+- Production server: `echovrce@fortytwo.echovrce.com`
+- Production deploy path: `/home/echovrce/deployment/`
+- Production log path: `/home/echovrce/deployment/logs/nakama.log`
+- GitHub repo: `EchoTools/nakama`
+- GitHub Actions page: `https://github.com/EchoTools/nakama/actions`
+- Container image: `ghcr.io/echotools/nakama:<tag>`
+- Docker Compose service name: `nakama`
+- Local webhook env file: `~/src/nakama/.env`
+
+Required access/credentials:
+
+- Git push access for tags on `EchoTools/nakama`
+- GitHub access to verify the release workflow succeeded
+- SSH access to `echovrce@fortytwo.echovrce.com`
+- Docker permissions on the production host
+- Valid webhook URLs present in local `.env` if posting release notes
+
+Required local tools:
+
+- `git`
+- `go`
+- `make`
+- `ssh`
+- `docker` / `docker compose`
+- `curl`
+- `jq` (required by `docs/post-release-notes.sh`)
+
+Required webhook env vars in `.env`:
+
+- `WEBHOOK_RELEASE_NOTES`
+- `WEBHOOK_ECHOTOOLS_RELEASES`
+- `WEBHOOK_APP_DEV_RELEASES`
+- `WEBHOOK_OPERATOR_RELEASES`
+- `WEBHOOK_COMPETITIVE_RELEASES`
+- `WEBHOOK_ENFORCER_UPDATES`
+- `WEBHOOK_FULL_CHANGELOG`
+
 ## Pre-flight
 
 Before you do anything:
