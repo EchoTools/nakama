@@ -1,9 +1,9 @@
 name: release-nakama
 
 on:
-  release:
-    types:
-      - created
+  push:
+    tags:
+      - '*evr*'
 
 env:
   REGISTRY: ghcr.io
@@ -23,7 +23,7 @@ jobs:
       - name: Set env vars
         run: |
           echo "ARG_COMMIT=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-          echo "ARG_VERSION=$(echo -n ${{ github.event.release.name }} | cut -c2-)" >> $GITHUB_ENV
+          echo "ARG_VERSION=$(echo -n ${{ github.ref_name }} | cut -c2-)" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -41,7 +41,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ github.event.release.tag_name }}
+            type=raw,value=${{ github.ref_name }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
