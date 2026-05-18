@@ -23,12 +23,12 @@
 //
 // Typically, if one wants to load from a yaml, one has to define a proper
 // struct, then yaml.Unmarshal(), this is all good. However, there are
-// situations where we want to load most of the configs from the file but
+// situations requiring loading most configs from the file but
 // overriding some configs.
 //
-// Let's say we use a yaml to config our Db connections and upon start of the
-// application we load from the yaml file to get the necessary parameters to
-// create the connection. Our base.yaml looks like this
+// Example: use a yaml to config Db connections and upon start of the
+// application, load from the yaml file to get the necessary parameters to
+// create the connection. Example base.yaml:
 //
 //	base.yaml
 //	---
@@ -39,10 +39,10 @@
 //	  mysql_socket_path: /var/run/mysqld/mysqld.sock
 //	  ... more config options ...
 //
-// we want to load all the configs from it but we want to provide some
-// flexibility for the program to connect via a different db user. We could
-// define a --user command flag then after loading the yaml file, we override
-// the user field with what we get from --user flag.
+// Load all configs from it but allow providing some
+// flexibility for the program to connect via a different db user.
+// Define a --user command flag then after loading the yaml file, override
+// the user field with the value from --user flag.
 //
 // If there are many overriding like this, manual define these flags is
 // tedious. This package provides an automatic way to define this override,
@@ -54,7 +54,7 @@
 // YAML is just used as an example here. In practice, one can use any struct
 // to define flags.
 //
-// Let's say we have our configration object as the following.
+// Example configuration object:
 //
 //	type logging struct {
 //		 Interval int
@@ -199,7 +199,7 @@ type FlagMakingOptions struct {
 	// Create flags in namespaced fashion
 	Flatten bool
 	// If there is a struct tag named 'TagName', use its value as the flag name.
-	// The purpose is that, for yaml/json parsing we often have something like
+	// The purpose is that, for yaml/json parsing, often have something like
 	// Foobar string `yaml:"host_name"`, in which case the flag will be named
 	// 'host_name' rather than 'foobar'.
 	TagName string

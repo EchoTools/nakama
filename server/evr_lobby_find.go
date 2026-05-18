@@ -103,7 +103,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				return nil
 			}
 
-			// TryFollowPartyLeader returned false. Check if we became the leader
+			// TryFollowPartyLeader returned false. Check if the session became the leader
 			// during the follow attempt (e.g. original leader left the party).
 			leader := lobbyGroup.GetLeader()
 			if leader != nil && leader.SessionId == session.id.String() {
@@ -139,7 +139,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, followerEntrants...)
 			} else {
 				// Still a non-leader in a non-social mode. Poll for the leader
-				// to settle into a match we can join. This covers followers at
+				// to settle into a match that can be joined. This covers followers at
 				// the main menu whose leader is in a closed/full match — they
 				// should wait rather than immediately erroring out.
 				if ctx.Err() != nil {
@@ -166,9 +166,8 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 					logger.Info("Follower cannot join leader's match, releasing to independent matchmaking",
 						zap.String("mode", lobbyParams.Mode.String()))
 
-					// For social modes, don't set party size to 1 — we want them
-					// to use party reservations to find each other even if they
-					// are searching independently.
+					// For social modes, don't set party size to 1 — party members should converge
+					// to the leader's lobby even if they are searching independently.
 					if !shouldFollowerFindOrCreateSocial(lobbyParams.Mode) {
 						lobbyParams.SetPartySize(1)
 					}
@@ -661,8 +660,7 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 								// Find this specific match in our search results
 								var leaderMatch *MatchLabelMeta
 								for _, m := range matches {
-									// MatchLabelMeta doesn't have ID, but we can compare its State.ID if we have it
-									// or just rely on fetching the label directly if not found in results
+									// MatchLabelMeta doesn't have ID, but can compare its State.ID if available
 									if m.State.ID.UUID == leaderMatchID.UUID {
 										leaderMatch = m
 										break
