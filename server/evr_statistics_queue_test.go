@@ -15,6 +15,7 @@ func TestStatisticsToEntries(t *testing.T) {
 		groupID     string
 		mode        evr.Symbol
 		update      evr.MatchTypeStats
+		statName    string // the specific stat to verify in the output
 		expected    []*StatisticsQueueEntry
 	}{
 		{
@@ -25,6 +26,7 @@ func TestStatisticsToEntries(t *testing.T) {
 			update: evr.MatchTypeStats{
 				Clears: 10,
 			},
+			statName: "Clears",
 			expected: []*StatisticsQueueEntry{
 				newStatQueueEntry("group1", evr.ModeArenaPublic, "Clears", operatorFromStatField(t, "Clears"), evr.ResetScheduleDaily, "user1", "User One", 1000000000000010, 0),
 				newStatQueueEntry("group1", evr.ModeArenaPublic, "Clears", operatorFromStatField(t, "Clears"), evr.ResetScheduleWeekly, "user1", "User One", 1000000000000010, 0),
@@ -39,11 +41,20 @@ func TestStatisticsToEntries(t *testing.T) {
 			t.Errorf("StatisticsToEntries returned an error: %v", err)
 		}
 
-		if cmp.Diff(entries, test.expected) != "" {
-			t.Errorf("StatisticsToEntries returned unexpected entries: %v", cmp.Diff(entries, test.expected))
+		// Filter to only the stat under test, since all fields are emitted (zero or not)
+		var filtered []*StatisticsQueueEntry
+		for _, e := range entries {
+			if e.BoardMeta.StatName == test.statName {
+				filtered = append(filtered, e)
+			}
+		}
+
+		if cmp.Diff(filtered, test.expected) != "" {
+			t.Errorf("StatisticsToEntries returned unexpected entries for %s: %v", test.statName, cmp.Diff(filtered, test.expected))
 		}
 	}
 }
+
 
 func TestTypeStatsToScoreMap_UsesOperatorTags(t *testing.T) {
 	entries, err := typeStatsToScoreMap(

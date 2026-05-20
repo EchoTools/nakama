@@ -405,6 +405,15 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 					if ok {
 						boardMap[boardID] = v
 					}
+
+					// Track the GamesPlayed boardID for each mode/resetSchedule
+					// This is used later to propagate the games played count to all other stats
+					if fieldType.Name == GamesPlayedStatisticID {
+						gamesPlayedBoardIDs[evr.StatisticsGroup{
+							Mode:          m,
+							ResetSchedule: r,
+						}] = boardID
+					}
 				}
 			}
 		}

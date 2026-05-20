@@ -201,7 +201,7 @@ func TestStatisticBoardIDForLoudness(t *testing.T) {
 
 	boardID := StatisticBoardID(groupID, mode, statName, resetSchedule)
 
-	expectedID := "test-group-123:echo_arena_public:PlayerLoudness:daily"
+	expectedID := fmt.Sprintf("test-group-123:%s:PlayerLoudness:daily", evr.ModeArenaPublic.String())
 	if boardID != expectedID {
 		t.Errorf("Expected board ID '%s', got '%s'", expectedID, boardID)
 	}

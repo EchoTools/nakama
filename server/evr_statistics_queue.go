@@ -43,7 +43,8 @@ type StatisticsQueue struct {
 }
 
 func NewStatisticsQueue(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) *StatisticsQueue {
-	ch := make(chan []*StatisticsQueueEntry, 8*3*100) // three matches ending at the same time, 100 records per player
+	// Increased buffer: 16 simultaneous matches * 3 reset schedules * 100 records per player = 4800 entries
+	ch := make(chan []*StatisticsQueueEntry, 16*3*100)
 	r := &StatisticsQueue{
 		logger: logger,
 		ch:     ch,
@@ -155,8 +156,9 @@ func NewStatisticsQueue(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 
 					if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, md, e.Override()); err != nil {
 
-						// Try to create the leaderboard
-						if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, "desc", string(e.BoardMeta.Operator), ResetScheduleToCron(e.BoardMeta.ResetSchedule), map[string]any{}, true); err != nil {
+						// Try to create the leaderboard.
+						// Always use "set" operator when creating since the queue converts incr/decr to SET.
+						if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, "desc", "set", ResetScheduleToCron(e.BoardMeta.ResetSchedule), map[string]any{}, true); err != nil {
 
 							logger.WithFields(map[string]any{
 								"leaderboard_id": e.BoardMeta.ID(),
@@ -189,18 +191,19 @@ func NewStatisticsQueue(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 }
 
 func (r *StatisticsQueue) Add(entries []*StatisticsQueueEntry) error {
-
+	// Use timeout-based blocking send to prevent silent data loss.
+	// If queue is full, wait up to 30 seconds before dropping.
 	select {
 	case r.ch <- entries:
 		r.logger.WithFields(map[string]any{
 			"count": len(entries),
 		}).Debug("Leaderboard record queued")
 		return nil
-	default:
+	case <-time.After(30 * time.Second):
 		r.logger.WithFields(map[string]any{
 			"count": len(entries),
-		}).Warn("Leaderboard record write queue full, dropping entry")
-		return fmt.Errorf("queue full")
+		}).Warn("Leaderboard record write queue full after 30s timeout, dropping entry")
+		return fmt.Errorf("queue full after timeout")
 	}
 }
 
