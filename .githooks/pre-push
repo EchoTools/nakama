@@ -1,0 +1,29 @@
+#!/bin/bash
+# pre-push hook: reject semver tags that don't include -evr.<N>
+#
+# EchoTools/nakama uses v3.27.2-evr.<N> for EVR releases.
+# Upstream Nakama tags (v3.35.x etc.) must NOT be pushed here.
+#
+# Install: git config core.hooksPath .githooks
+
+while read local_ref local_sha remote_ref remote_sha; do
+    # Only check tag pushes
+    [[ "$remote_ref" != refs/tags/* ]] && continue
+
+    tag="${remote_ref#refs/tags/}"
+
+    # Match v<digit>... (semver-like tags). If it doesn't start with v<digit>, allow it.
+    [[ "$tag" =~ ^v[0-9] ]] || continue
+
+    # Must contain -evr.<N>
+    if [[ ! "$tag" =~ -evr\.[0-9]+$ ]]; then
+        echo "ERROR: Tag '$tag' rejected."
+        echo "       EVR releases use the format: v3.27.2-evr.<N>"
+        echo "       Upstream Nakama tags (v3.x.x) must not be pushed here."
+        echo "       If you meant to push an EVR release tag, use the correct -evr.<N> format."
+        echo "       To bypass (not recommended): git push --no-verify origin $tag"
+        exit 1
+    fi
+done
+
+exit 0
