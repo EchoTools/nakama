@@ -595,7 +595,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 	qparts := []string{
 		"+label.open:T",
 		fmt.Sprintf("+label.mode:%s", p.Mode.String()),
-		fmt.Sprintf("+label.group_id:%s", Query.QuoteStringValue(p.publicGroupID().String())),
+		fmt.Sprintf("+label.group_id:%s", Query.QuoteStringValue(p.GroupID.String())),
 		//fmt.Sprintf("label.version_lock:%s", p.VersionLock.String()),
 		p.BackfillQueryAddon,
 	}
@@ -743,7 +743,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	submissionTime := p.MatchmakingTimestamp.UTC().Format(time.RFC3339)
 	stringProperties := map[string]string{
 		"game_mode":              p.Mode.String(),
-		"group_id":               p.publicGroupID().String(),
+		"group_id":               p.GroupID.String(),
 		"version_lock":           p.VersionLock.String(),
 		"display_name":           p.DisplayName,
 		"submission_time":        submissionTime,
@@ -777,7 +777,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 
 	qparts := []string{
 		"+properties.game_mode:" + p.Mode.String(),
-		fmt.Sprintf("+properties.group_id:%s", Query.QuoteStringValue(p.publicGroupID().String())),
+		fmt.Sprintf("+properties.group_id:%s", Query.QuoteStringValue(p.GroupID.String())),
 		fmt.Sprintf(`-properties.blocked_ids:/.*%s.*/`, Query.QuoteStringValue(p.UserID.String())),
 		//"+properties.version_lock:" + p.VersionLock.String(),
 		p.MatchmakingQueryAddon,
@@ -874,22 +874,22 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	return query, stringProperties, numericProperties
 }
 
-// publicGroupID returns uuid.Nil for public modes so all players share one
-// matchmaking pool regardless of guild, or p.GroupID for private/guild modes.
-func (p LobbySessionParameters) publicGroupID() uuid.UUID {
+func (p LobbySessionParameters) MatchmakingStream() PresenceStream {
+	subject := p.GroupID
 	switch p.Mode {
 	case evr.ModeArenaPublic, evr.ModeCombatPublic, evr.ModeSocialPublic:
-		return uuid.Nil
+		subject = uuid.Nil
 	}
-	return p.GroupID
-}
-
-func (p LobbySessionParameters) MatchmakingStream() PresenceStream {
-	return PresenceStream{Mode: StreamModeMatchmaking, Subject: p.publicGroupID()}
+	return PresenceStream{Mode: StreamModeMatchmaking, Subject: subject}
 }
 
 func (p LobbySessionParameters) GuildGroupStream() PresenceStream {
-	return PresenceStream{Mode: StreamModeGuildGroup, Subject: p.publicGroupID(), Label: p.Mode.String()}
+	subject := p.GroupID
+	switch p.Mode {
+	case evr.ModeArenaPublic, evr.ModeCombatPublic, evr.ModeSocialPublic:
+		subject = uuid.Nil
+	}
+	return PresenceStream{Mode: StreamModeGuildGroup, Subject: subject, Label: p.Mode.String()}
 }
 
 func (p LobbySessionParameters) PresenceMeta() PresenceMeta {
