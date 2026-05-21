@@ -1848,7 +1848,7 @@ func TestKC1_PollFollowPartyLeader_RefusesPrivateSocialLobby(t *testing.T) {
 	env.setLeaderMatch(privateMatchID)
 
 	// Poll loop has two 3s waits per cycle (tick + settle): give 10s for one cycle.
-		result, timedOut := env.runPollWithTimeout(context.Background(), t, 10*time.Second)
+	result, timedOut := env.runPollWithTimeout(context.Background(), t, 10*time.Second)
 
 	if timedOut {
 		t.Fatal("KC-1: pollFollowPartyLeader hung — should return false within one poll cycle (~6s)")
