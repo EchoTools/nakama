@@ -170,6 +170,9 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 					// to the leader's lobby even if they are searching independently.
 					if !shouldFollowerFindOrCreateSocial(lobbyParams.Mode) {
 						lobbyParams.SetPartySize(1)
+						// Released followers must queue as solo. Keeping lobbyGroup attached
+						// causes addTicket to enforce leader-only party submission.
+						lobbyGroup = nil
 					}
 					// Fall through to normal matchmaking below.
 				}
