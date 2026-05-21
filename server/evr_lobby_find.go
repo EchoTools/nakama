@@ -1199,15 +1199,28 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		if memberPresence == nil {
 			return false
 		}
-		if MatchIDFromStringOrNil(memberPresence.GetStatus()) != leaderMatchID {
+		followerMatchID := MatchIDFromStringOrNil(memberPresence.GetStatus())
+		if followerMatchID != leaderMatchID {
 			return false
 		}
 
-		label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
-		if err != nil || label == nil {
-			return false
+		// MatchLabelByID is authoritative when available. Fall back to
+		// tracker-based convergence when it is not (e.g. nil NK in tests,
+		// or transient registry miss).
+		if p.nk != nil {
+			label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
+			if err == nil && label != nil {
+				return label.GetPlayerByUserID(session.userID.String()) != nil
+			}
 		}
-		return label.GetPlayerByUserID(session.userID.String()) != nil
+		return true
+	}
+
+	// Early convergence: the matchmaker may have placed both players into
+	// the same match before the poll loop started. Check before any wait.
+	if isFollowerInLeaderMatch() {
+		logger.Debug("Follower already in leader's match, poll returning success")
+		return true
 	}
 
 	const maxNonJoinableCycles = 1
@@ -1222,6 +1235,13 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 			}
 			return false
 		case <-time.After(3 * time.Second):
+		}
+
+		// Re-check convergence after the poll interval. The matchmaker may
+		// have placed the follower during the wait.
+		if isFollowerInLeaderMatch() {
+			logger.Debug("Follower is in leader's match after poll interval, returning success")
+			return true
 		}
 
 		leader := lobbyGroup.GetLeader()
@@ -1265,6 +1285,21 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 			}
 			return false
 		case <-time.After(3 * time.Second):
+		}
+
+		// Re-check convergence after the settle wait.
+		if isFollowerInLeaderMatch() {
+			logger.Debug("Follower is in leader's match after settle wait, returning success")
+			return true
+		}
+
+		// Nil-safe: skip label validation when NK is unavailable (tests,
+		// transient startup). The early convergence checks above have already
+		// handled the common case — this path is for joining a match the
+		// follower is not yet in.
+		if p.nk == nil {
+			logger.Debug("Match registry unavailable (nil NK), continuing poll without label validation")
+			continue
 		}
 
 		label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
