@@ -88,7 +88,6 @@ git push origin <tag>
 This triggers the `release-nakama` GitHub Action (`.github/workflows/dockerhub-nakama.yaml`), which builds and pushes the Docker image to:
 
 - `ghcr.io/echotools/nakama:<tag>`
-- `ghcr.io/echotools/nakama:latest`
 
 Wait for the action to complete before proceeding. Check: https://github.com/EchoTools/nakama/actions
 
