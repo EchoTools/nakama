@@ -116,7 +116,9 @@ This pushes:
 
 Use this only when the local tag state is correct and you intentionally want to publish from the workstation instead of relying on GitHub Actions.
 
-## Step 2: Generate release notes
+## Step 2: Generate and send release communications
+
+**Order matters: send communications BEFORE deploying.** This way you can focus on any issues that come up during deployment without scrambling to write and send updates. The deployment is the last step, not the middle.
 
 ### Gather commits
 
@@ -298,6 +300,8 @@ Post:
 ```
 
 Discord has a 2000 character limit. The script handles splitting. Messages over limit get chunked at newlines.
+
+**Communications sent. Now deploy.**
 
 ## Step 3: Deploy to fortytwo
 
