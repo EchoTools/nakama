@@ -156,7 +156,7 @@ func NewStatisticsQueue(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 					if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, md, e.Override()); err != nil {
 
 						// Try to create the leaderboard
-						if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, "desc", string(e.BoardMeta.Operator), ResetScheduleToCron(e.BoardMeta.ResetSchedule), map[string]any{}, true); err != nil {
+						if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, "desc", "set", ResetScheduleToCron(e.BoardMeta.ResetSchedule), map[string]any{}, true); err != nil {
 
 							logger.WithFields(map[string]any{
 								"leaderboard_id": e.BoardMeta.ID(),

@@ -401,10 +401,19 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 					if fieldValue.IsNil() {
 						fieldValue.Set(reflect.New(fieldType.Type.Elem()))
 					}
-					v, ok := fieldValue.Interface().(*evr.StatisticValue)
-					if ok {
-						boardMap[boardID] = v
-					}
+				v, ok := fieldValue.Interface().(*evr.StatisticValue)
+				if ok {
+					boardMap[boardID] = v
+				}
+
+				// Track the GamesPlayed boardID for each mode/resetSchedule
+				// so the count-propagation block below can find it.
+				if fieldType.Name == GamesPlayedStatisticID {
+					gamesPlayedBoardIDs[evr.StatisticsGroup{
+						Mode:          m,
+						ResetSchedule: r,
+					}] = boardID
+				}
 				}
 			}
 		}
