@@ -523,6 +523,30 @@ func TestTryFollow_FollowerNoMatchPresence_AttemptsJoin(t *testing.T) {
 
 // ===========================================================================
 // pollFollowPartyLeader — regression tests for every branch/return path
+//
+// isFollowerInLeaderMatch decision matrix (closure inside pollFollowPartyLeader):
+//
+//   ┌──────────────────┬──────────┬──────────┬──────────┬──────────┐
+//   │     Branch       │ Behavior │   Test   │   NK?   │ Witness  │
+//   ├──────────────────┼──────────┼──────────┼──────────┼──────────┤
+//   │ leader == nil    │ false    │ Disappears│ any    │ leader   │
+//   │ self-is-leader   │ false    │ Becomes  │ any     │ leader   │
+//   │ no leader match  │ false    │ LeftMatch│ any     │ tracker  │
+//   │ leader nil match │ false    │ NilMatch │ any     │ tracker  │
+//   │ same CurrentMatch│ false    │StaleFalse│ any     │ params   │
+//   │ follower no match│ false    │ Disappears│ any    │ tracker  │
+//   │ different matchID│ false    │ See below│ any     │ tracker  │
+//   │ NK+label has user│ true     │ SameMatch│ set     │ MatchGet │
+//   │ NK+label no user │ false    │FullMatch │ set     │ MatchGet │
+//   │ NK error→tracker │ true     │RegErrFall│ set     │ fallback │
+//   │ nil NK→tracker   │ true     │ SameMatch│ nil     │ fallback │
+//   └──────────────────┴──────────┴──────────┴──────────┴──────────┘
+//
+// "different matchID" does not immediately return false — the function
+// proceeds to the join-attempt path (label lookup → lobbyJoin). That
+// path is exercised by TestTryFollow_FollowerInDifferentMatch_AttemptsJoin,
+// TestPoll_FollowerNotInLeaderMatch_LooksUpLabel, and the leader-switch
+// tests which reach convergence via the tracker fallback once matches align.
 // ===========================================================================
 
 func TestPoll_LeaderDisappears_ReturnsFalse(t *testing.T) {
@@ -1832,5 +1856,84 @@ func TestKC1_PollFollowPartyLeader_RefusesPrivateSocialLobby(t *testing.T) {
 	if result {
 		t.Errorf("KC-1 SECURITY: pollFollowPartyLeader returned true for ModeSocialPrivate lobby. "+
 			"Party follow must not bypass the private-lobby invitation gate.")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Registry-error fallback: when MatchLabelByID returns an error but both
+// tracker presences point to the same match, isFollowerInLeaderMatch must
+// accept tracker-based evidence rather than returning false (which would
+// trigger a desync). See decision matrix: NK error→tracker → true.
+// ---------------------------------------------------------------------------
+
+func TestPoll_RegistryError_FallsBackToTracker(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	// Wire a mock NK but do NOT register matchB in it.
+	// GetMatch will return ErrMatchNotFound — simulating a transient registry miss.
+	registry := newMockFollowMatchRegistry()
+	env.withMockNK(registry)
+	env.setLeaderMatch(matchB)
+	env.setFollowerMatch(matchB)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result, timedOut := env.runPollWithTimeout(ctx, t, 8*time.Second)
+	if timedOut {
+		t.Fatal("pollFollowPartyLeader timed out — expected tracker fallback to return true immediately")
+	}
+	if !result {
+		t.Error("pollFollowPartyLeader returned false when tracker shows convergence and " +
+			"MatchLabelByID returned an error. The tracker-based fallback must accept " +
+			"matching service stream presences as sufficient evidence of convergence.")
+	}
+
+	// Verify that GetMatch was called (confirming the fallback was triggered,
+	// not that the early-convergence path returned before any registry lookup).
+	if registry.getMatchCalls.Load() == 0 {
+		t.Error("Expected MatchLabelByID (GetMatch) to be called before the tracker fallback " +
+			"accepted convergence, but the registry was never queried.")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Nil NK + mismatch: when NK is unavailable and the follower is NOT in the
+// leader's match, the poll loop must continue polling until context expiration
+// rather than fast-failing. This documents that the nil NK path is not a
+// short-circuit — it defers to context cancellation for loop termination.
+// ---------------------------------------------------------------------------
+
+func TestPoll_NilNK_FollowerNotInLeaderMatch_LoopsUntilContextExpiry(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	matchA := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	env.setLeaderMatch(matchB)
+	env.setFollowerMatch(matchA)
+
+	// Short context timeout — if the function fast-fails, it returns before expiry.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	result, timedOut := env.runPollWithTimeout(ctx, t, 6*time.Second)
+	elapsed := time.Since(start)
+
+	if timedOut {
+		t.Fatal("pollFollowPartyLeader timed out at test level — expected context expiry to return false")
+	}
+	if result {
+		t.Error("pollFollowPartyLeader returned true when follower and leader are in different matches")
+	}
+	// If the function fast-failed (nil NK guard returned false immediately),
+	// elapsed would be < 100ms. It should have polled until ctx expired.
+	if elapsed < 1*time.Second {
+		t.Errorf("pollFollowPartyLeader returned in %v — expected it to loop until context expiry (~3s). "+
+			"This suggests a fast-fail path was triggered instead of polling.", elapsed)
 	}
 }
