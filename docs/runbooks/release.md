@@ -23,14 +23,17 @@ If no base tag is given, use the immediately preceding tag.
 If no release tag is given, determine the latest candidates with:
 
 ```bash
-git tag --sort=-v:refname | head -5
+# Only EVR-format tags — upstream Nakama tags (v3.x.x) are not EVR releases.
+git tag --sort=-v:refname | grep '\-evr\.' | head -5
 ```
 
 ## Prerequisites
 
 Before starting, make sure all of these are true:
 
-- Local repo path: `~/src/nakama`
+- Local repo path: `/srv/src/nakama`
+- Tag format: `v3.27.2-evr.<N>` — monotonic N from latest EVR tag. Upstream Nakama tags (`v3.35.x` etc.) are NOT EVR releases and must not be pushed.
+- Git hook installed: `git config core.hooksPath .githooks` (rejects `v*` tags without `-evr.<N>`)
 - Production server: `echovrce@fortytwo.echovrce.com`
 - Production deploy path: `/home/echovrce/deployment/`
 - Production log path: `/home/echovrce/deployment/logs/nakama.log`
