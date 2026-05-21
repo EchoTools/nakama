@@ -95,6 +95,16 @@ func JoinPartyGroup(session *sessionWS, groupName string, currentMatchID MatchID
 		return nil, false, err
 	}
 
+	// Issue D: guard against the narrow window where stopped=true but Delete()
+	// hasn't run yet. GetOrCreateByGroupName now checks this too, but a race
+	// between our Load and stop() completing can still slip through.
+	ph.RLock()
+	isStopped := ph.stopped
+	ph.RUnlock()
+	if isStopped {
+		return nil, false, runtime.ErrPartyClosed
+	}
+
 	if !created {
 		isMember := false
 		// Check if the player is already a member of the party

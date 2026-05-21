@@ -111,12 +111,23 @@ func (p *LocalPartyRegistry) GetOrCreate(id uuid.UUID, open bool, maxSize int, l
 func (p *LocalPartyRegistry) GetOrCreateByGroupName(groupName string, open bool, maxSize int, leader *rtapi.UserPresence) (*PartyHandler, bool, error) {
 	// Check if there's already a party for this group name.
 	if existingID, ok := p.groupParties.Load(groupName); ok {
-		// Only return an existing party; do not recreate under a stale ID.
+		// Only return an existing, live party — do not recreate under a stale ID.
 		if ph, ok := p.parties.Load(existingID); ok {
-			return ph, false, nil
+			// Issue D: the handler may still be in p.parties while stopped=true
+			// (between PartyHandler.stop() setting stopped and Delete() removing it).
+			// Re-create in that case rather than returning a broken handler.
+			ph.RLock()
+			isStopped := ph.stopped
+			ph.RUnlock()
+			if !isStopped {
+				return ph, false, nil
+			}
+			// Handler is stopped but not yet evicted; treat as stale.
+			p.groupParties.Delete(groupName)
+		} else {
+			// Mapping points to a deleted party; remove it and fall through.
+			p.groupParties.Delete(groupName)
 		}
-		// Mapping points to a deleted party; remove it and fall through.
-		p.groupParties.Delete(groupName)
 	}
 
 	newID := uuid.Must(uuid.NewV4())

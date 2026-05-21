@@ -124,26 +124,67 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 					entrantSessionIDs = append(entrantSessionIDs, sid)
 				}
 			} else if shouldFollowerFindOrCreateSocial(lobbyParams.Mode) || headingToSocial {
-				// Social mode (or leader heading to social): skip the polling
-				// loop entirely. Social lobbies use find-or-create with party
-				// reservations, so the follower will naturally converge to the
-				// leader's lobby. Polling for the leader to settle is
-				// unnecessary and can silently timeout, leaving the client
-				// stuck in infinite matchmaking.
-				// headingToSocial is cached from the early call above — no second read.
-				if !shouldFollowerFindOrCreateSocial(lobbyParams.Mode) {
-					logger.Info("Leader heading to social lobby, forcing follower to social mode")
-					lobbyParams.Mode = evr.ModeSocialPublic
-				} else {
-					logger.Info("Follower in social mode, finding social lobby independently (party reservations will converge)")
+				// Issue A: headingToSocial is cached from the early check at line 75.
+				// The leader may have been in a social lobby when we cached the result
+				// but has since queued for Arena/Combat. Re-read the leader's matchmaking
+				// stream to invalidate the stale cache before forcing social on the follower.
+				if headingToSocial && p.isLeaderMatchmakingForNonSocial(logger, session, lobbyParams, lobbyGroup) {
+					headingToSocial = false
+					logger.Info("Issue A: leader is now matchmaking for non-social mode; overriding stale headingToSocial cache")
 				}
 
-				lobbyParams.Level = evr.LevelUnspecified
-				followerEntrants, err := PrepareEntrantPresences(ctx, logger, p.nk, p.nk.sessionRegistry, lobbyParams, session.id)
-				if err != nil {
-					return NewLobbyError(InternalError, fmt.Sprintf("failed to prepare follower entrant: %s", err))
+				if shouldFollowerFindOrCreateSocial(lobbyParams.Mode) || headingToSocial {
+					// Social mode (or leader genuinely heading to social): skip the polling
+					// loop entirely. Social lobbies use find-or-create with party
+					// reservations, so the follower will naturally converge to the
+					// leader's lobby. Polling for the leader to settle is
+					// unnecessary and can silently timeout, leaving the client
+					// stuck in infinite matchmaking.
+					// headingToSocial is now validated above — no TOCTOU double-read.
+					if !shouldFollowerFindOrCreateSocial(lobbyParams.Mode) {
+						logger.Info("Leader heading to social lobby, forcing follower to social mode")
+						lobbyParams.Mode = evr.ModeSocialPublic
+					} else {
+						logger.Info("Follower in social mode, finding social lobby independently (party reservations will converge)")
+					}
+
+					lobbyParams.Level = evr.LevelUnspecified
+					followerEntrants, err := PrepareEntrantPresences(ctx, logger, p.nk, p.nk.sessionRegistry, lobbyParams, session.id)
+					if err != nil {
+						return NewLobbyError(InternalError, fmt.Sprintf("failed to prepare follower entrant: %s", err))
+					}
+					return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, followerEntrants...)
 				}
-				return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, followerEntrants...)
+
+				// headingToSocial was stale (leader is now queuing for Arena/Combat).
+				// Poll for the leader to settle into the new match instead.
+				logger.Info("headingToSocial cache was stale, polling for leader's non-social match")
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				if p.pollFollowPartyLeader(ctx, logger, session, lobbyParams, lobbyGroup) {
+					return nil
+				}
+				// Re-check leadership after polling.
+				leader = lobbyGroup.GetLeader()
+				if leader != nil && leader.SessionId == session.id.String() {
+					isLeader = true
+					for _, sid := range memberSessionIDs {
+						if sid == session.id {
+							continue
+						}
+						entrantSessionIDs = append(entrantSessionIDs, sid)
+					}
+				} else {
+					if ctx.Err() != nil {
+						return ctx.Err()
+					}
+					logger.Info("Follower cannot join leader's match after stale-cache correction, releasing to independent matchmaking",
+						zap.String("mode", lobbyParams.Mode.String()))
+					if !shouldFollowerFindOrCreateSocial(lobbyParams.Mode) {
+						lobbyParams.SetPartySize(1)
+					}
+				}
 			} else {
 				// Still a non-leader in a non-social mode. Poll for the leader
 				// to settle into a match we can join. This covers followers at
@@ -182,6 +223,8 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 					// Fall through to normal matchmaking below.
 				}
 			}
+
+
 		} else {
 
 			for _, memberSessionIDs := range memberSessionIDs {
@@ -940,6 +983,37 @@ func (p *EvrPipeline) isLeaderHeadingToSocial(ctx context.Context, logger *zap.L
 	return false
 }
 
+// isLeaderMatchmakingForNonSocial returns true when the party leader has an
+// active matchmaking stream presence whose mode is NOT social (e.g. Arena or
+// Combat). It is used to override a stale headingToSocial cache: if the leader
+// was in a social lobby and then queued for Arena, a follower that cached
+// headingToSocial=true before the Arena matchmaking stream appeared would
+// otherwise be forced to social mode incorrectly (Issue A).
+func (p *EvrPipeline) isLeaderMatchmakingForNonSocial(logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup) bool {
+	leader := lobbyGroup.GetLeader()
+	if leader == nil || leader.SessionId == session.id.String() {
+		return false
+	}
+	leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
+	leaderUserID := uuid.FromStringOrNil(leader.UserId)
+	mmStream := PresenceStream{
+		Mode:    StreamModeMatchmaking,
+		Subject: lobbyParams.GroupID,
+	}
+	presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, mmStream, leaderUserID)
+	if presence == nil {
+		// Leader has no matchmaking presence — they are not actively queuing.
+		return false
+	}
+	var leaderParams LobbySessionParameters
+	if err := json.Unmarshal([]byte(presence.GetStatus()), &leaderParams); err != nil {
+		logger.Debug("isLeaderMatchmakingForNonSocial: failed to unmarshal leader matchmaking status",
+			zap.Error(err), zap.String("leader_sid", leaderSessionID.String()))
+		return false
+	}
+	return !shouldFollowerFindOrCreateSocial(leaderParams.Mode)
+}
+
 func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, lobbyParams *LobbySessionParameters, sessionIDs ...uuid.UUID) ([]*EvrMatchPresence, error) {
 
 	entrantPresences := make([]*EvrMatchPresence, 0, len(sessionIDs))
@@ -1152,14 +1226,30 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 	logger.Debug("Joining leader's lobby", zap.String("mid", leaderMatchID.String()))
 	if err := p.lobbyJoin(ctx, logger, session, params, leaderMatchID); err != nil {
 		code := LobbyErrorCode(err)
-		logger.Debug("Failed to join leader's lobby", zap.Error(err), zap.Int("code", int(code)))
-
-		if params.CurrentMatchID.IsNil() {
-			// Follower is at main menu; fall through to normal find.
-			return false
+		if code == ServerIsFull || code == ServerIsLocked {
+			// One retry after a brief wait — the match may have just freed a slot
+			// or finished locking. Mirrors the single-retry budget in pollFollowPartyLeader
+			// (maxNonJoinableCycles = 1). A second failure falls through gracefully.
+			logger.Debug("Leader's lobby full/locked, retrying once after 5s",
+				zap.Error(err), zap.String("mid", leaderMatchID.String()))
+			select {
+			case <-ctx.Done():
+				return false
+			case <-time.After(5 * time.Second):
+			}
+			if err := p.lobbyJoin(ctx, logger, session, params, leaderMatchID); err != nil {
+				logger.Warn("Failed to join leader's lobby after retry, falling through to normal find",
+					zap.Error(err), zap.String("mid", leaderMatchID.String()))
+				return false
+			}
+			return true
 		}
-		// Follower is in a lobby; poll and retry.
-		return p.pollFollowPartyLeader(ctx, logger, session, params, lobbyGroup)
+		// Issues B/C: any other error must not propagate as a hard failure.
+		// Return false so the caller falls through to pollFollowPartyLeader
+		// or independent matchmaking.
+		logger.Warn("Failed to join leader's lobby, falling through to normal find",
+			zap.Error(err), zap.String("mid", leaderMatchID.String()))
+		return false
 	}
 
 	return true
@@ -1379,7 +1469,11 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 				<-time.After(5 * time.Second)
 				continue
 			}
-			logger.Warn("Failed to join leader's lobby during poll", zap.Error(err))
+			// Issues B/C: non-retryable lobbyJoin errors must NOT propagate to the
+			// client as "internal error". Return false so lobbyFind falls through to
+			// independent matchmaking instead of surfacing a hard failure.
+			logger.Warn("Failed to join leader's lobby during poll, releasing to independent matchmaking",
+				zap.Error(err), zap.String("mid", leaderMatchID.String()))
 			return false
 		}
 		return true
