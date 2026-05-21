@@ -3,8 +3,8 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"sync"
 	"go.uber.org/atomic"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,17 +21,17 @@ import (
 // ---------------------------------------------------------------------------
 
 type followTestEnv struct {
-	leaderSID  uuid.UUID
-	leaderUID  uuid.UUID
+	leaderSID   uuid.UUID
+	leaderUID   uuid.UUID
 	followerSID uuid.UUID
 	followerUID uuid.UUID
-	groupID    uuid.UUID
-	tracker    *mockMatchmakingTracker
-	pipeline   *EvrPipeline
-	session    *sessionWS
-	lobbyGroup *LobbyGroup
-	ph         *PartyHandler
-	params     *LobbySessionParameters
+	groupID     uuid.UUID
+	tracker     *mockMatchmakingTracker
+	pipeline    *EvrPipeline
+	session     *sessionWS
+	lobbyGroup  *LobbyGroup
+	ph          *PartyHandler
+	params      *LobbySessionParameters
 }
 
 // newFollowTestEnv creates a standard duo party test environment.
@@ -75,17 +75,17 @@ func newFollowTestEnv(t *testing.T) *followTestEnv {
 	session.pipeline.tracker = tracker
 
 	return &followTestEnv{
-		leaderSID:  leaderSID,
-		leaderUID:  leaderUID,
+		leaderSID:   leaderSID,
+		leaderUID:   leaderUID,
 		followerSID: followerSID,
 		followerUID: followerUID,
-		groupID:    groupID,
-		tracker:    tracker,
-		pipeline:   pipeline,
-		session:    session,
-		lobbyGroup: lobbyGroup,
-		ph:         ph,
-		params:     params,
+		groupID:     groupID,
+		tracker:     tracker,
+		pipeline:    pipeline,
+		session:     session,
+		lobbyGroup:  lobbyGroup,
+		ph:          ph,
+		params:      params,
 	}
 }
 
@@ -166,9 +166,9 @@ func (e *followTestEnv) runPollWithTimeout(ctx context.Context, logger interface
 // ---------------------------------------------------------------------------
 
 type mockFollowMatchRegistry struct {
-	mu             sync.RWMutex
-	matches        map[string]*MatchLabel // matchID string → label
-	getMatchCalls  atomic.Int32           // count of GetMatch invocations
+	mu            sync.RWMutex
+	matches       map[string]*MatchLabel // matchID string → label
+	getMatchCalls atomic.Int32           // count of GetMatch invocations
 }
 
 func newMockFollowMatchRegistry() *mockFollowMatchRegistry {
@@ -203,8 +203,10 @@ func (r *mockFollowMatchRegistry) CreateMatch(context.Context, RuntimeMatchCreat
 func (r *mockFollowMatchRegistry) NewMatch(*zap.Logger, uuid.UUID, RuntimeMatchCore, *atomic.Bool, map[string]interface{}) (*MatchHandler, error) {
 	panic("unimplemented")
 }
-func (r *mockFollowMatchRegistry) RemoveMatch(uuid.UUID, PresenceStream)                      { panic("unimplemented") }
-func (r *mockFollowMatchRegistry) UpdateMatchLabel(uuid.UUID, int, string, string, int64) error { panic("unimplemented") }
+func (r *mockFollowMatchRegistry) RemoveMatch(uuid.UUID, PresenceStream) { panic("unimplemented") }
+func (r *mockFollowMatchRegistry) UpdateMatchLabel(uuid.UUID, int, string, string, int64) error {
+	panic("unimplemented")
+}
 func (r *mockFollowMatchRegistry) ListMatches(context.Context, int, *wrapperspb.BoolValue, *wrapperspb.StringValue, *wrapperspb.Int32Value, *wrapperspb.Int32Value, *wrapperspb.StringValue, *wrapperspb.StringValue) ([]*api.Match, []string, error) {
 	panic("unimplemented")
 }
@@ -213,9 +215,9 @@ func (r *mockFollowMatchRegistry) Count() int             { panic("unimplemented
 func (r *mockFollowMatchRegistry) JoinAttempt(context.Context, uuid.UUID, string, uuid.UUID, uuid.UUID, string, int64, map[string]string, string, string, string, map[string]string) (bool, bool, bool, string, string, []*MatchPresence) {
 	panic("unimplemented")
 }
-func (r *mockFollowMatchRegistry) Join(uuid.UUID, []*MatchPresence)                                  { panic("unimplemented") }
-func (r *mockFollowMatchRegistry) Leave(uuid.UUID, []*MatchPresence)                                 { panic("unimplemented") }
-func (r *mockFollowMatchRegistry) Kick(PresenceStream, []*MatchPresence)                             { panic("unimplemented") }
+func (r *mockFollowMatchRegistry) Join(uuid.UUID, []*MatchPresence)      { panic("unimplemented") }
+func (r *mockFollowMatchRegistry) Leave(uuid.UUID, []*MatchPresence)     { panic("unimplemented") }
+func (r *mockFollowMatchRegistry) Kick(PresenceStream, []*MatchPresence) { panic("unimplemented") }
 func (r *mockFollowMatchRegistry) SendData(uuid.UUID, string, uuid.UUID, uuid.UUID, string, string, int64, []byte, bool, int64) {
 	panic("unimplemented")
 }
@@ -993,12 +995,13 @@ func TestPollFollowPartyLeader_SameMatch_ReturnsTrue(t *testing.T) {
 // pollFollowPartyLeader is waiting for the leader to settle.
 //
 // Timeline:
-//   T=0s: Follower enters pollFollowPartyLeader (3s poll interval)
-//   T=1s: Matchmaker places both players → removes matchmaking streams,
-//          updates service streams to Match B
-//   T=2s: Monitor detects matchmaking presence gone, starts 1s grace period
-//   T=3s: Monitor grace expires → cancels context
-//   T=3s: pollFollowPartyLeader wakes up, sees ctx.Done() → returns false
+//
+//	T=0s: Follower enters pollFollowPartyLeader (3s poll interval)
+//	T=1s: Matchmaker places both players → removes matchmaking streams,
+//	       updates service streams to Match B
+//	T=2s: Monitor detects matchmaking presence gone, starts 1s grace period
+//	T=3s: Monitor grace expires → cancels context
+//	T=3s: pollFollowPartyLeader wakes up, sees ctx.Done() → returns false
 //
 // Expected: pollFollowPartyLeader should return true (both are in Match B).
 // Actual (bug): returns false because context was canceled by the monitor.
@@ -1385,15 +1388,16 @@ func TestDuoDesync_TryFollow_LeaderStillMatchmaking_FallsToDesyncPoll(t *testing
 // doesn't verify it's a NEW match vs the stale original match.
 //
 // Timeline from production logs:
-//   T=0:    All 4 party members in social lobby (matchA)
-//   T=0:    Leader starts LobbyFind → vibinatorsGravity redirects to combat
-//   T=0:    Followers enter pollFollowPartyLeader (leader is matchmaking)
-//   T=0-10m: Leader is in matchmaker. Followers poll every 3s, see "leader is
-//            matchmaking" → continue. No poll iteration reaches the join path.
-//   T=10m:  Context expires (MatchmakingTimeout). isFollowerInLeaderMatch()
-//            returns TRUE because both leader and followers still point to matchA.
-//   T=10m:  pollFollowPartyLeader returns true (false success).
-//   T=10m:  lobbyFind returns nil. No LobbySessionSuccess sent. Players stuck.
+//
+//	T=0:    All 4 party members in social lobby (matchA)
+//	T=0:    Leader starts LobbyFind → vibinatorsGravity redirects to combat
+//	T=0:    Followers enter pollFollowPartyLeader (leader is matchmaking)
+//	T=0-10m: Leader is in matchmaker. Followers poll every 3s, see "leader is
+//	         matchmaking" → continue. No poll iteration reaches the join path.
+//	T=10m:  Context expires (MatchmakingTimeout). isFollowerInLeaderMatch()
+//	         returns TRUE because both leader and followers still point to matchA.
+//	T=10m:  pollFollowPartyLeader returns true (false success).
+//	T=10m:  lobbyFind returns nil. No LobbySessionSuccess sent. Players stuck.
 func TestPoll_StaleMatchFalsePositive_ReturnsFalse(t *testing.T) {
 	env := newFollowTestEnv(t)
 
@@ -1761,7 +1765,7 @@ func TestPoll_LeaderInFullCombatMatch_ShouldNotLoopForever(t *testing.T) {
 	}
 	registry.SetMatch(combatMatchID, &MatchLabel{
 		ID:          combatMatchID,
-		Open:        true,         // Match is "open" but...
+		Open:        true, // Match is "open" but...
 		Mode:        evr.ModeCombatPublic,
 		PlayerLimit: 8,
 		Players:     fullPlayers, // ...no slots available
@@ -1823,7 +1827,7 @@ func TestKC1_TryFollowPartyLeader_RefusesPrivateSocialLobby(t *testing.T) {
 		context.Background(), logger, env.session, env.params, env.lobbyGroup)
 
 	if result {
-		t.Errorf("KC-1 SECURITY: TryFollowPartyLeader returned true for ModeSocialPrivate lobby. "+
+		t.Errorf("KC-1 SECURITY: TryFollowPartyLeader returned true for ModeSocialPrivate lobby. " +
 			"Party follow must not bypass the private-lobby invitation gate.")
 	}
 }
@@ -1854,7 +1858,7 @@ func TestKC1_PollFollowPartyLeader_RefusesPrivateSocialLobby(t *testing.T) {
 		t.Fatal("KC-1: pollFollowPartyLeader hung — should return false within one poll cycle (~6s)")
 	}
 	if result {
-		t.Errorf("KC-1 SECURITY: pollFollowPartyLeader returned true for ModeSocialPrivate lobby. "+
+		t.Errorf("KC-1 SECURITY: pollFollowPartyLeader returned true for ModeSocialPrivate lobby. " +
 			"Party follow must not bypass the private-lobby invitation gate.")
 	}
 }
