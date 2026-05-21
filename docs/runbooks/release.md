@@ -85,9 +85,33 @@ git tag -a <tag> -m "<tag>"
 git push origin <tag>
 ```
 
-This triggers the `release-nakama` GitHub Action (`.github/workflows/dockerhub-nakama.yaml`), which builds and pushes the Docker image to `ghcr.io/echotools/nakama:<tag>`.
+This triggers the `release-nakama` GitHub Action (`.github/workflows/dockerhub-nakama.yaml`), which builds and pushes the Docker image to:
+
+- `ghcr.io/echotools/nakama:<tag>`
 
 Wait for the action to complete before proceeding. Check: https://github.com/EchoTools/nakama/actions
+
+You can watch it either in the browser or with GitHub CLI:
+
+```bash
+gh run list --repo EchoTools/nakama --workflow release-nakama --limit 5
+gh run watch <run-id> --repo EchoTools/nakama
+```
+
+### Alternate release path
+
+If explicitly approved, `make release` can also be used to build and push release images directly from the local machine.
+
+```bash
+make release
+```
+
+This pushes:
+
+- `ghcr.io/echotools/nakama:<tag>`
+- `ghcr.io/echotools/nakama:latest`
+
+Use this only when the local tag state is correct and you intentionally want to publish from the workstation instead of relying on GitHub Actions.
 
 ## Step 2: Generate release notes
 
@@ -172,7 +196,7 @@ All except the full changelog (7) get this footer:
 ```
 
 #### 3. App developers (#app-dev-releases) — `app-developer` only
-If no app-dev changes: "No app-developer-facing changes in this release."
+If there are no meaningful app-dev changes, do not post an app-dev release note at all.
 ```
 ## Release Notes <tag>
 
@@ -185,7 +209,8 @@ If no app-dev changes: "No app-developer-facing changes in this release."
 -# [Full Changelog](...)
 ```
 
-#### 4. Guild owners/operators/mods (#operator-releases) — `player` + `operator` + `enforcer`
+#### 4. Guild owners/operators/mods (#operator-releases) — `player` + `enforcer` + `operator`
+Operator notes always include player-facing changes plus any enforcer-specific and operator-specific changes.
 ```
 ## Release Notes <tag>
 
@@ -199,7 +224,7 @@ If no app-dev changes: "No app-developer-facing changes in this release."
 ```
 
 #### 5. Competitive hosts (#competitive-releases) — `player` + `enforcer` + `competitive`
-If no competitive changes: "No competitive hosting changes in this release."
+If there are no meaningful competitive changes, do not post a competitive release note at all.
 Focus ONLY on private match hosting/config/allocation. Not public queues.
 ```
 ## Release Notes <tag>
@@ -213,8 +238,9 @@ Focus ONLY on private match hosting/config/allocation. Not public queues.
 -# [Full Changelog](...)
 ```
 
-#### 6. Enforcers (#enforcer-updates) — `enforcer` only
-If no enforcer changes: "No enforcer-specific changes in this release."
+#### 6. Enforcers (#enforcer-updates) — `player` + `enforcer`
+Enforcer notes always include player-facing changes plus any enforcer-specific changes.
+If there are no enforcer-specific changes, still include the player-facing items.
 ```
 ## Enforcer Updates <tag>
 
@@ -249,6 +275,8 @@ Present all seven release notes clearly separated with headers indicating which 
 
 Present all seven to Andrew. He picks which to post and confirms. Never post automatically.
 
+Do not send filler "no updates" posts to channels. If a channel has no meaningful audience-specific content and the runbook does not explicitly require player items to be included, skip posting to that channel.
+
 Webhook URLs are in `.env` at the project root. Channel mapping:
 
 | # | Channel | Env var |
@@ -277,6 +305,8 @@ ssh echovrce@fortytwo.echovrce.com
 cd /home/echovrce/deployment/
 docker compose pull nakama
 docker compose up -d --no-deps nakama
+sleep 3
+docker compose exec nginx nginx -s reload
 ```
 
 ## Step 4: Verify
