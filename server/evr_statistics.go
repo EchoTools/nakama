@@ -338,6 +338,135 @@ func statisticsForMode(mode evr.Symbol) (evr.Statistics, error) {
 	}
 }
 
+// buildPlayerStatisticsMaps creates the board maps and statistics objects
+// for all modes and reset schedules using reflection. Returns:
+//   - playerStatistics: map of group to statistics struct
+//   - boardMap: map of boardID to StatisticValue pointer
+//   - boardIDsByGroup: board IDs partitioned by (mode, resetSchedule)
+//   - gamesPlayedBoardIDs: GamesPlayed boardID per group
+func buildPlayerStatisticsMaps(statGroups map[evr.Symbol][]evr.ResetSchedule, groupID string) (evr.PlayerStatistics, map[string]*evr.StatisticValue, map[evr.StatisticsGroup][]string, map[evr.StatisticsGroup]string, error) {
+	playerStatistics := evr.NewStatistics()
+
+	boardMap := make(map[string]*evr.StatisticValue)
+	boardIDsByGroup := make(map[evr.StatisticsGroup][]string)
+	gamesPlayedBoardIDs := make(map[evr.StatisticsGroup]string)
+
+	for m, resetSchedules := range statGroups {
+		for _, r := range resetSchedules {
+			stats, err := statisticsForMode(m)
+			if err != nil {
+				if errors.Is(err, ErrInvalidStatisticsMode) {
+					continue
+				}
+				return nil, nil, nil, nil, fmt.Errorf("failed to resolve statistics type for mode %s: %w", m, err)
+			}
+
+			group := evr.StatisticsGroup{
+				Mode:          m,
+				ResetSchedule: r,
+			}
+
+			playerStatistics[group] = stats
+
+			statsValue := reflect.ValueOf(stats)
+			statsType := statsValue.Elem().Type()
+
+			for i := 0; i < statsType.NumField(); i++ {
+				fieldType := statsType.Field(i)
+				fieldValue := statsValue.Elem().Field(i)
+
+				if fieldValue.Kind() == reflect.Pointer && fieldValue.Type().Elem() == reflect.TypeOf(evr.StatisticValue{}) {
+					boardID := StatisticBoardID(groupID, m, fieldType.Name, r)
+					boardIDsByGroup[group] = append(boardIDsByGroup[group], boardID)
+
+					if fieldValue.IsNil() {
+						fieldValue.Set(reflect.New(fieldType.Type.Elem()))
+					}
+
+					v, ok := fieldValue.Interface().(*evr.StatisticValue)
+					if ok {
+						boardMap[boardID] = v
+					}
+
+					if fieldType.Name == GamesPlayedStatisticID {
+						gamesPlayedBoardIDs[group] = boardID
+					}
+				}
+			}
+		}
+	}
+
+	return playerStatistics, boardMap, boardIDsByGroup, gamesPlayedBoardIDs, nil
+}
+
+// propagateGameCounts fills each board's Count field from the GamesPlayed stat
+// in the same (mode, resetSchedule) group. Boards with value 0 are removed.
+func propagateGameCounts(boardMap map[string]*evr.StatisticValue, boardIDsByGroup map[evr.StatisticsGroup][]string, gamesPlayedBoardIDs map[evr.StatisticsGroup]string, statGroups map[evr.Symbol][]evr.ResetSchedule) {
+	for m, resetSchedules := range statGroups {
+		for _, r := range resetSchedules {
+			group := evr.StatisticsGroup{
+				Mode:          m,
+				ResetSchedule: r,
+			}
+
+			gamesPlayedID := gamesPlayedBoardIDs[group]
+			if stat, ok := boardMap[gamesPlayedID]; ok {
+				for _, boardID := range boardIDsByGroup[group] {
+					if v, ok := boardMap[boardID]; ok {
+						if v.GetValue() == 0 {
+							delete(boardMap, boardID)
+							continue
+						}
+						v.SetCount(int64(stat.GetValue()))
+					}
+				}
+			}
+		}
+	}
+}
+
+// ensureLevelDefaults sets default arena and combat level values
+// if they are nil or zero.
+func ensureLevelDefaults(playerStatistics evr.PlayerStatistics) {
+	if s := playerStatistics[evr.StatisticsGroup{
+		Mode:          evr.ModeArenaPublic,
+		ResetSchedule: evr.ResetScheduleAllTime,
+	}].(*evr.ArenaStatistics); s != nil {
+		if s.Level == nil {
+			s.Level = &evr.StatisticValue{
+				Count: 1,
+				Value: 1,
+			}
+		} else {
+			if s.Level.GetCount() <= 0 {
+				s.Level.SetCount(1)
+			}
+			if s.Level.GetValue() <= 0 {
+				s.Level.SetValue(1)
+			}
+		}
+	}
+
+	if s := playerStatistics[evr.StatisticsGroup{
+		Mode:          evr.ModeCombatPublic,
+		ResetSchedule: evr.ResetScheduleAllTime,
+	}].(*evr.CombatStatistics); s != nil {
+		if s.Level == nil {
+			s.Level = &evr.StatisticValue{
+				Count: 1,
+				Value: 1,
+			}
+		} else {
+			if s.Level.GetCount() <= 0 {
+				s.Level.SetCount(1)
+			}
+			if s.Level.GetValue() <= 0 {
+				s.Level.SetValue(1)
+			}
+		}
+	}
+}
+
 func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, ownerID, groupID string, modes []evr.Symbol, dailyWeeklyStatMode evr.Symbol) (evr.PlayerStatistics, map[string]*evr.StatisticValue, error) {
 
 	startTime := time.Now()
@@ -364,59 +493,9 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 		}
 	}
 
-	playerStatistics := evr.NewStatistics()
-
-	boardMap := make(map[string]*evr.StatisticValue)
-	boardIDs := make([]string, 0, len(boardMap))
-	gamesPlayedBoardIDs := make(map[evr.StatisticsGroup]string)
-
-	// Map boardIDs to the playerStatistics struct fields
-	for m, resetSchedules := range statGroups {
-		for _, r := range resetSchedules {
-			stats, err := statisticsForMode(m)
-			if err != nil {
-				if errors.Is(err, ErrInvalidStatisticsMode) {
-					continue
-				}
-				return nil, nil, fmt.Errorf("failed to resolve statistics type for mode %s: %w", m, err)
-			}
-
-			playerStatistics[evr.StatisticsGroup{
-				Mode:          m,
-				ResetSchedule: r,
-			}] = stats
-
-			statsValue := reflect.ValueOf(stats)
-			statsType := statsValue.Elem().Type()
-
-			for i := 0; i < statsType.NumField(); i++ {
-				fieldType := statsType.Field(i)
-				fieldValue := statsValue.Elem().Field(i)
-
-				// Only operate on pointer fields of type *evr.StatisticValue
-				if fieldValue.Kind() == reflect.Pointer && fieldValue.Type().Elem() == reflect.TypeOf(evr.StatisticValue{}) {
-					boardID := StatisticBoardID(groupID, m, fieldType.Name, r)
-					boardIDs = append(boardIDs, boardID)
-					// Set if nil
-					if fieldValue.IsNil() {
-						fieldValue.Set(reflect.New(fieldType.Type.Elem()))
-					}
-				v, ok := fieldValue.Interface().(*evr.StatisticValue)
-				if ok {
-					boardMap[boardID] = v
-				}
-
-				// Track the GamesPlayed boardID for each mode/resetSchedule
-				// so the count-propagation block below can find it.
-				if fieldType.Name == GamesPlayedStatisticID {
-					gamesPlayedBoardIDs[evr.StatisticsGroup{
-						Mode:          m,
-						ResetSchedule: r,
-					}] = boardID
-				}
-				}
-			}
-		}
+	playerStatistics, boardMap, boardIDsByGroup, gamesPlayedBoardIDs, err := buildPlayerStatisticsMaps(statGroups, groupID)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	query := `
@@ -432,7 +511,13 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 			AND (lr.expiry_time > NOW() OR lr.expiry_time = '1970-01-01 00:00:00+00') -- Include "alltime" records
 			`
 
-	rows, err := db.QueryContext(ctx, query, ownerID, boardIDs)
+	// Build a flat boardID list for the DB query from the grouped map
+	allBoardIDs := make([]string, 0, len(boardMap))
+	for _, ids := range boardIDsByGroup {
+		allBoardIDs = append(allBoardIDs, ids...)
+	}
+
+	rows, err := db.QueryContext(ctx, query, ownerID, allBoardIDs)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// Return the default profile's stats
@@ -473,67 +558,11 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 	}
 
 	// Use the GamesPlayed stat to fill in all the cnt's
-	for m, resetSchedules := range statGroups {
-		for _, r := range resetSchedules {
+	// Only propagate to boards in the same mode/resetSchedule group.
+	propagateGameCounts(boardMap, boardIDsByGroup, gamesPlayedBoardIDs, statGroups)
 
-			gamesPlayedID := gamesPlayedBoardIDs[evr.StatisticsGroup{
-				Mode:          m,
-				ResetSchedule: r,
-			}]
-			if stat, ok := boardMap[gamesPlayedID]; ok {
-				for _, boardID := range boardIDs {
-					if v, ok := boardMap[boardID]; ok {
-						// If the board's value is 0, remove it.
-						if v.GetValue() == 0 {
-							delete(boardMap, boardID)
-							continue
-						}
-						v.SetCount(int64(stat.GetValue()))
-					}
-				}
-			}
-		}
-	}
-
-	// Ensure arena level is always set
-	if s := playerStatistics[evr.StatisticsGroup{
-		Mode:          evr.ModeArenaPublic,
-		ResetSchedule: evr.ResetScheduleAllTime,
-	}].(*evr.ArenaStatistics); s != nil {
-		if s.Level == nil {
-			s.Level = &evr.StatisticValue{
-				Count: 1,
-				Value: 1,
-			}
-		} else {
-			if s.Level.GetCount() <= 0 {
-				s.Level.SetCount(1)
-			}
-			if s.Level.GetValue() <= 0 {
-				s.Level.SetValue(1)
-			}
-		}
-	}
-
-	// Ensure combat level is always set
-	if s := playerStatistics[evr.StatisticsGroup{
-		Mode:          evr.ModeCombatPublic,
-		ResetSchedule: evr.ResetScheduleAllTime,
-	}].(*evr.CombatStatistics); s != nil {
-		if s.Level == nil {
-			s.Level = &evr.StatisticValue{
-				Count: 1,
-				Value: 1,
-			}
-		} else {
-			if s.Level.GetCount() <= 0 {
-				s.Level.SetCount(1)
-			}
-			if s.Level.GetValue() <= 0 {
-				s.Level.SetValue(1)
-			}
-		}
-	}
+	// Ensure arena and combat levels always have defaults
+	ensureLevelDefaults(playerStatistics)
 
 	// Integrate the boardMap values into the playerStatistics
 

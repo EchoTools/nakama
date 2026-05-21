@@ -19,7 +19,10 @@ type StatisticsQueueEntry struct {
 	Metadata    map[string]string
 }
 
-// This converts the operator to the override value for the leaderboard record.
+// Override converts the entry operator to a LeaderboardRecordWrite override value.
+// Only OperatorSet (replace) and OperatorBest (keep best) are allowed.
+// Incr/decr must be resolved to Set before reaching this function (see RMW block).
+// Any other operator is rejected — the producer sent invalid data.
 func (e StatisticsQueueEntry) Override() *int {
 	var o int
 	switch e.BoardMeta.Operator {
@@ -27,14 +30,148 @@ func (e StatisticsQueueEntry) Override() *int {
 		o = 1
 	case OperatorSet:
 		o = 2
-	case OperatorIncrement:
-		o = 3
-	case OperatorDecrement:
-		o = 4
 	default:
 		return nil
 	}
 	return &o
+}
+
+// applyIncrementDecrement resolves an incr/decr entry to a SET entry
+// with the computed value. The entry is mutated in place.
+// Only call for entries with OperatorIncrement or OperatorDecrement.
+func applyIncrementDecrement(e *StatisticsQueueEntry, currentVal float64) error {
+	deltaVal, err := ScoreToFloat64(e.Score, e.Subscore)
+	if err != nil {
+		return fmt.Errorf("failed to decode delta score: %w", err)
+	}
+
+	var newVal float64
+	if e.BoardMeta.Operator == OperatorIncrement {
+		newVal = currentVal + deltaVal
+	} else {
+		newVal = currentVal - deltaVal
+	}
+
+	newScore, newSubscore, err := Float64ToScore(newVal)
+	if err != nil {
+		return fmt.Errorf("failed to encode new score: %w", err)
+	}
+
+	e.Score = newScore
+	e.Subscore = newSubscore
+	e.BoardMeta.Operator = OperatorSet
+	return nil
+}
+
+// processSingleEntry handles one statistics queue entry:
+// validates, resolves incr/decr, checks override, writes leaderboard record.
+// Returns true if the entry was processed, false if it was skipped.
+func processSingleEntry(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, e *StatisticsQueueEntry) bool {
+	// This expects the score and subscore to already be translated to the correct values.
+	if e.Score < 0 || e.Subscore < 0 {
+		logger.WithFields(map[string]any{
+			"leaderboard_id": e.BoardMeta.ID(),
+			"score":          e.Score,
+			"subscore":       e.Subscore,
+		}).Warn("Negative score")
+		return false
+	} else if e.Score == 0 && e.Subscore == 0 {
+		return false
+	}
+
+	if !slices.Contains(ValidLeaderboardModes, e.BoardMeta.Mode) {
+		return false
+	}
+
+	// If the operator is increment or decrement, read the current value, decode it, add the delta, and write it back.
+	// This is because the leaderboard uses a float64 encoding that is not compatible with simple integer arithmetic.
+	if e.BoardMeta.Operator == OperatorIncrement || e.BoardMeta.Operator == OperatorDecrement {
+		var currentVal float64
+		// Handle the case where the leaderboard might not exist yet.
+		_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, e.BoardMeta.ID(), []string{e.UserID}, 1, "", 0)
+		if err != nil {
+			if err == ErrLeaderboardNotFound {
+				// Leaderboard doesn't exist, so current value is 0.
+				currentVal = 0
+			} else {
+				logger.WithFields(map[string]any{
+					"error":          err.Error(),
+					"leaderboard_id": e.BoardMeta.ID(),
+				}).Error("Failed to list leaderboard records")
+				return false
+			}
+		} else {
+			if len(ownerRecords) > 0 {
+				currentVal, err = ScoreToFloat64(ownerRecords[0].Score, ownerRecords[0].Subscore)
+				if err != nil {
+					logger.WithFields(map[string]any{
+						"error":          err.Error(),
+						"leaderboard_id": e.BoardMeta.ID(),
+					}).Error("Failed to decode current score")
+					return false
+				}
+			} else {
+				// Record doesn't exist, so current value is 0.
+				currentVal = 0
+			}
+		}
+
+		if err := applyIncrementDecrement(e, currentVal); err != nil {
+			logger.WithFields(map[string]any{
+				"error":          err.Error(),
+				"leaderboard_id": e.BoardMeta.ID(),
+			}).Error("Failed to apply increment/decrement")
+			return false
+		}
+	}
+
+	var md map[string]any
+	if e.Metadata != nil {
+		md = make(map[string]any)
+		for k, v := range e.Metadata {
+			md[k] = v
+		}
+	}
+
+	override := e.Override()
+	if override == nil {
+		logger.WithFields(map[string]any{
+			"leaderboard_id": e.BoardMeta.ID(),
+			"user_id":        e.UserID,
+			"operator":       string(e.BoardMeta.Operator),
+		}).Error("Statistics queue entry rejected: invalid operator")
+		return false
+	}
+
+	if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, md, override); err != nil {
+
+		// Try to create the leaderboard
+		if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, "desc", string(OperatorSet), ResetScheduleToCron(e.BoardMeta.ResetSchedule), map[string]any{}, true); err != nil {
+
+			logger.WithFields(map[string]any{
+				"leaderboard_id": e.BoardMeta.ID(),
+				"error":          err.Error(),
+			}).Error("Failed to create leaderboard")
+
+		} else {
+			logger.WithFields(map[string]any{
+				"leaderboard_id": e.BoardMeta.ID(),
+			}).Debug("Leaderboard created")
+
+			if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, md, override); err != nil {
+				logger.WithFields(map[string]any{
+					"error":          err.Error(),
+					"leaderboard_id": e.BoardMeta.ID(),
+					"user_id":        e.UserID,
+					"score":          e.Score,
+					"subscore":       e.Subscore,
+				}).Error("Failed to write leaderboard record")
+			}
+
+		}
+	}
+
+	return true
 }
 
 type StatisticsQueue struct {
@@ -65,121 +202,7 @@ func NewStatisticsQueue(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 				}
 			case entries := <-ch:
 				for _, e := range entries {
-					// This expects the score and subscore to already be translated to the correct values.
-					if e.Score < 0 || e.Subscore < 0 {
-						logger.WithFields(map[string]any{
-							"leaderboard_id": e.BoardMeta.ID(),
-							"score":          e.Score,
-							"subscore":       e.Subscore,
-						}).Warn("Negative score")
-						continue
-					} else if e.Score == 0 && e.Subscore == 0 {
-						continue
-					}
-
-					if !slices.Contains(ValidLeaderboardModes, e.BoardMeta.Mode) {
-						continue
-					}
-
-					// If the operator is increment or decrement, read the current value, decode it, add the delta, and write it back.
-					// This is because the leaderboard uses a float64 encoding that is not compatible with simple integer arithmetic.
-					if e.BoardMeta.Operator == OperatorIncrement || e.BoardMeta.Operator == OperatorDecrement {
-						var currentVal float64
-						// Handle the case where the leaderboard might not exist yet.
-						_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, e.BoardMeta.ID(), []string{e.UserID}, 1, "", 0)
-						if err != nil {
-							if err == ErrLeaderboardNotFound {
-								// Leaderboard doesn't exist, so current value is 0.
-								currentVal = 0
-							} else {
-								logger.WithFields(map[string]any{
-									"error":          err.Error(),
-									"leaderboard_id": e.BoardMeta.ID(),
-								}).Error("Failed to list leaderboard records")
-								continue
-							}
-						} else {
-							if len(ownerRecords) > 0 {
-								currentVal, err = ScoreToFloat64(ownerRecords[0].Score, ownerRecords[0].Subscore)
-								if err != nil {
-									logger.WithFields(map[string]any{
-										"error":          err.Error(),
-										"leaderboard_id": e.BoardMeta.ID(),
-									}).Error("Failed to decode current score")
-									continue
-								}
-							} else {
-								// Record doesn't exist, so current value is 0.
-								currentVal = 0
-							}
-						}
-
-						deltaVal, err := ScoreToFloat64(e.Score, e.Subscore)
-						if err != nil {
-							logger.WithFields(map[string]any{
-								"error":          err.Error(),
-								"leaderboard_id": e.BoardMeta.ID(),
-							}).Error("Failed to decode delta score")
-							continue
-						}
-
-						var newVal float64
-						if e.BoardMeta.Operator == OperatorIncrement {
-							newVal = currentVal + deltaVal
-						} else {
-							newVal = currentVal - deltaVal
-						}
-
-						newScore, newSubscore, err := Float64ToScore(newVal)
-						if err != nil {
-							logger.WithFields(map[string]any{
-								"error":          err.Error(),
-								"leaderboard_id": e.BoardMeta.ID(),
-							}).Error("Failed to encode new score")
-							continue
-						}
-
-						// Update the entry to be a SET operation with the new value
-						e.Score = newScore
-						e.Subscore = newSubscore
-						e.BoardMeta.Operator = OperatorSet
-					}
-
-					var md map[string]any
-					if e.Metadata != nil {
-						md = make(map[string]any)
-						for k, v := range e.Metadata {
-							md[k] = v
-						}
-					}
-
-					if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, md, e.Override()); err != nil {
-
-						// Try to create the leaderboard
-						if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, "desc", "set", ResetScheduleToCron(e.BoardMeta.ResetSchedule), map[string]any{}, true); err != nil {
-
-							logger.WithFields(map[string]any{
-								"leaderboard_id": e.BoardMeta.ID(),
-								"error":          err.Error(),
-							}).Error("Failed to create leaderboard")
-
-						} else {
-							logger.WithFields(map[string]any{
-								"leaderboard_id": e.BoardMeta.ID(),
-							}).Debug("Leaderboard created")
-
-							if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, md, e.Override()); err != nil {
-								logger.WithFields(map[string]any{
-									"error":          err.Error(),
-									"leaderboard_id": e.BoardMeta.ID(),
-									"user_id":        e.UserID,
-									"score":          e.Score,
-									"subscore":       e.Subscore,
-								}).Error("Failed to write leaderboard record")
-							}
-
-						}
-					}
+					processSingleEntry(ctx, logger, nk, e)
 				}
 			}
 		}
