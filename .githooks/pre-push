@@ -1,29 +1,105 @@
 #!/bin/bash
-# pre-push hook: reject semver tags that don't include -evr.<N>
+# pre-push hook: quality gates for EchoTools/nakama
 #
-# EchoTools/nakama uses v3.27.2-evr.<N> for EVR releases.
-# Upstream Nakama tags (v3.35.x etc.) must NOT be pushed here.
+# 1. Tag format: reject semver tags without -evr.<N>
+# 2. Go quality: run fast checks on changed files
+#    (gofmt, go vet, gopls staticcheck)
 #
 # Install: git config core.hooksPath .githooks
+# Skip:    git push --no-verify
 
-while read local_ref local_sha remote_ref remote_sha; do
-    # Only check tag pushes
+set -e
+
+# ---- Color helpers ----
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+pass() { echo -e " ${GREEN}✓${NC} $1"; }
+fail() { echo -e " ${RED}✗${NC} $1"; fail_count=$((fail_count + 1)); }
+warn() { echo -e " ${YELLOW}⚠${NC} $1"; }
+fail_count=0
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# ---- Capture push refs ----
+# Pre-push receives refs on stdin: <local-ref> <local-sha> <remote-ref> <remote-sha>
+# Store them so we can iterate in multiple phases.
+PUSH_REFS=$(cat)
+
+# ---- Phase 1: Tag format check ----
+echo "$PUSH_REFS" | while read local_ref local_sha remote_ref remote_sha; do
     [[ "$remote_ref" != refs/tags/* ]] && continue
-
     tag="${remote_ref#refs/tags/}"
-
-    # Match v<digit>... (semver-like tags). If it doesn't start with v<digit>, allow it.
     [[ "$tag" =~ ^v[0-9] ]] || continue
-
-    # Must contain -evr.<N>
     if [[ ! "$tag" =~ -evr\.[0-9]+$ ]]; then
-        echo "ERROR: Tag '$tag' rejected."
-        echo "       EVR releases use the format: v3.27.2-evr.<N>"
+        fail "Tag '$tag' rejected — EVR releases use v3.27.2-evr.<N>"
         echo "       Upstream Nakama tags (v3.x.x) must not be pushed here."
-        echo "       If you meant to push an EVR release tag, use the correct -evr.<N> format."
-        echo "       To bypass (not recommended): git push --no-verify origin $tag"
-        exit 1
     fi
 done
+
+# ---- Phase 2: Go quality checks ----
+# Determine what's changed: diff HEAD against the remote's current state.
+# For branch pushes, check outgoing commits. For first push, check index.
+
+# Determine what changed: use ORIG_HEAD or diff against remote
+if git rev-parse --verify ORIG_HEAD 2>/dev/null; then
+    CHANGED_GO=$(git diff --name-only ORIG_HEAD..HEAD -- '*.go' 2>/dev/null || true)
+else
+    CHANGED_GO=$(git diff --name-only --cached -- '*.go' 2>/dev/null || true)
+fi
+
+if [ -n "$CHANGED_GO" ]; then
+    echo ""
+    echo "── Go quality checks ──"
+
+    # gofmt
+    UNFORMATTED=$(gofmt -l $CHANGED_GO 2>/dev/null || true)
+    if [ -n "$UNFORMATTED" ]; then
+        fail "gofmt needs these files:"
+        echo "$UNFORMATTED" | sed 's/^/       /'
+    else
+        pass "gofmt"
+    fi
+
+    # go vet (targeted, quiet mode)
+    if go vet ./server/... 2>/dev/null; then
+        pass "go vet ./server/..."
+    else
+        fail "go vet ./server/... — run 'go vet ./...' locally to see details"
+    fi
+
+    # gopls check (static analysis)
+    if command -v gopls &>/dev/null; then
+        GOPLS_ANALYSIS=$(gopls check $CHANGED_GO 2>/dev/null | head -20 || true)
+        if [ -n "$GOPLS_ANALYSIS" ]; then
+            warn "gopls diagnostics (review before push):"
+            echo "$GOPLS_ANALYSIS" | while IFS= read -r line; do echo "       $line"; done
+        else
+            pass "gopls check"
+        fi
+    else
+        warn "gopls not installed — skipping gopls check"
+    fi
+
+    # go mod tidy check
+    cd "$REPO_ROOT"
+    TIDY_BEFORE=$(git rev-parse HEAD 2>/dev/null)
+    go mod tidy 2>/dev/null
+    if [ -n "$(git status --porcelain go.mod go.sum 2>/dev/null)" ]; then
+        fail "go mod tidy modified go.mod/go.sum — commit these changes"
+    else
+        pass "go mod tidy"
+    fi
+    cd - >/dev/null
+fi
+
+# ---- Summary ----
+if [ "$fail_count" -gt 0 ]; then
+    echo ""
+    echo -e " ${RED}── ${fail_count} check(s) failed — push rejected ──${NC}"
+    echo " To bypass: git push --no-verify origin <branch>"
+    exit 1
+fi
 
 exit 0
