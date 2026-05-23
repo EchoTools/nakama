@@ -394,19 +394,35 @@ func (b *LobbyBuilder) rankEndpointsByAverageLatency(entrants []*MatchmakerEntry
 
 	latenciesByTeamByExtIP, latenciesByPlayerByExtIP := b.extractLatenciesFromEntrants(entrants)
 
+	maxServerRTT := ServiceSettings().Matchmaking.MaxServerRTT
+
 	meanRTTByExtIP := make(map[string]int, len(latenciesByTeamByExtIP))
 
 	for extIP, latenciesByTeam := range latenciesByTeamByExtIP {
-		// Calculate the mean RTT across the lobby
-		var sum float64
+		// Calculate the mean and max RTT across the lobby
+		var sum, maxLatency float64
+		anyOverThreshold := false
 		for _, teamLatencies := range latenciesByTeam {
 			for _, latency := range teamLatencies {
 				sum += latency
+				if latency > maxLatency {
+					maxLatency = latency
+				}
+				if maxServerRTT > 0 && int(latency) > maxServerRTT {
+					anyOverThreshold = true
+				}
 			}
 		}
 		meanRTT := sum / float64(len(entrants))
 
-		meanRTTByExtIP[extIP] = int(meanRTT)
+		// If any party member exceeds the MaxServerRTT threshold, use the max RTT
+		// instead of the mean. This prevents selecting a server that would pass for
+		// most members but fail pre-join ping validation for the outlier.
+		if anyOverThreshold {
+			meanRTTByExtIP[extIP] = int(maxLatency)
+		} else {
+			meanRTTByExtIP[extIP] = int(meanRTT)
+		}
 	}
 
 	return meanRTTByExtIP, latenciesByPlayerByExtIP
