@@ -374,12 +374,19 @@ func (s *MatchLabel) rebuildCache() {
 	// Rebuild the lookup tables.
 	s.Size = len(presences)
 	s.Players = make([]PlayerInfo, 0, s.Size)
+	// PlayerCount reflects only actual presences (not reservations) so that the
+	// search index field "player_count" shows real occupancy. Reservations are
+	// included in Size for slot-management purposes but must not inflate the
+	// count used by lobby-search queries.
 	s.PlayerCount = 0
-	for _, p := range presences {
-		// Do not include spectators or moderators in player count
+	for _, p := range s.presenceMap {
 		if p.RoleAlignment != evr.TeamSpectator && p.RoleAlignment != evr.TeamModerator {
 			s.PlayerCount++
 		}
+	}
+	for _, p := range presences {
+		// Players slice still iterates all presences (actual + reserved) for full
+		// roster visibility, but PlayerCount is already set above.
 
 		if p.RoleAlignment == evr.TeamSpectator {
 			s.Players = append(s.Players, PlayerInfo{
