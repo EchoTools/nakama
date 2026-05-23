@@ -1,0 +1,480 @@
+# EVR Module Extraction — Refactor Project Plan
+#
+# Machine-readable state tracker. Agents read this at session start to
+# determine current state, and update it after completing each task.
+#
+# Workflow: READ → PLAN → DO → VERIFY → UPDATE → LOOP
+# If anything fails verification, do NOT mark it done — note the failure and stop.
+#
+# Target architecture (informed by nevr prototype at
+# andrew@spriffy:/home/andrew/src/nevr/):
+#
+#   nakama-evr/               ← new standalone Go module
+#   ├── main.go               ← custom binary that wires nakama + EVR components
+#   ├── service/               ← EVR server logic (extracted from server/evr_*.go)
+#   ├── protocol/              ← EVR binary protocol (extracted from server/evr/)
+#   ├── plugin/                ← separate Go module for runtime plugins
+#   ├── internal/              ← module-private internals
+#   └── go.mod                 ← depends on heroiclabs/nakama/v3 as library
+#
+# The existing nevr/ on spriffy is the architectural reference but is stale
+# (Sep 2025). This project extracts from the CURRENT nakama fork state into
+# a clean new module, using nevr's architecture as the template.
+
+project:
+  name: "nakama-evr-extraction"
+  description: >
+    Extract all EchoVR-specific code from server/evr_*.go and server/evr/ into
+    a standalone Go module (github.com/echotools/nakama-evr) that imports
+    heroiclabs/nakama/v3 as a library. The nevr prototype on spriffy shows
+    the target architecture — this project builds that cleanly from current
+    code.
+  reference_arch: "andrew@spriffy:/home/andrew/src/nevr/"
+  created: "2026-05-23"
+  status: "not_started"  # not_started | in_progress | completed | blocked
+
+# =============================================================================
+# PHASES — ordered. Each phase must complete before the next begins.
+# Within a phase, tasks can be done in any order unless dependencies require
+# otherwise.
+# =============================================================================
+
+phases:
+
+  # ---------------------------------------------------------------------------
+  # PHASE 1: Discovery — understand what we're working with
+  # ---------------------------------------------------------------------------
+  - id: 1
+    name: "discovery & architecture blueprint"
+    status: "not_started"
+    description: >
+      Inventory ALL EVR-specific code in the fork. Study the nevr prototype
+      for the target architecture. Map every dependency. Produce the blueprint
+      for extraction — no code changes to production files.
+    completion_criteria:
+      - "Full inventory of server/evr_*.go (332 files) by subsystem"
+      - "Full inventory of server/evr/ protocol types (104 files)"
+      - "Map of every nakama-internal import that EVR code touches"
+      - "Map of every external dependency unique to EVR code"
+      - "Blueprint: which fork files map to which nevr target directories"
+      - "Dependency graph: what the new module needs vs what stays in the fork"
+      - "List of nevr reference files that can be reused vs need rewriting"
+    tasks:
+      - id: 1.1
+        name: "catalog evr_*.go by subsystem"
+        status: "not_started"
+        description: "List all 332 server/evr_*.go files with LoC, subsystem tag (pipeline, matchmaker, discord, auth, etc.), and import list. Write to docs/extraction/inventory-evr-files.md"
+      - id: 1.2
+        name: "catalog server/evr/ protocol types"
+        status: "not_started"
+        description: "List all 104 protocol files with Symbol() hashes and wire format. Write to docs/extraction/inventory-protocol.md"
+      - id: 1.3
+        name: "study nevr prototype"
+        status: "not_started"
+        description: "Read andrew@spriffy:/home/andrew/src/nevr/ — understand main.go wiring, PipelineDependencies, service/ organization, protocol/ layout, plugin/ structure. Document the target architecture."
+      - id: 1.4
+        name: "map nakama internal imports"
+        status: "not_started"
+        description: "For every evr_*.go file, list every import from server/, internal/, etc. that would need to become a library dependency. Write to docs/extraction/nakama-import-surface.md"
+      - id: 1.5
+        name: "audit external dependencies"
+        status: "not_started"
+        description: "Compare go.mod between fork and nevr. Identify which deps are EVR-only, which are shared with nakama core. Write to docs/extraction/dependency-audit.md"
+      - id: 1.6
+        name: "produce extraction blueprint"
+        status: "not_started"
+        description: "Write the master blueprint: which fork file → which target path + which interface changes needed. This drives all subsequent phases."
+
+  # ---------------------------------------------------------------------------
+  # PHASE 2: Scaffold the new module
+  # ---------------------------------------------------------------------------
+  - id: 2
+    name: "scaffold nakama-evr module"
+    status: "not_started"
+    description: >
+      Create the new Go module with the target directory structure, go.mod,
+      Makefile, and CI. Based on the nevr prototype architecture. Write the
+      PipelineDependencies type and main.go skeleton. The module imports
+      heroiclabs/nakama/v3 as a library and compiles (but does nothing yet).
+    completion_criteria:
+      - "New module compiles with go build"
+      - "go.mod declares correct dependencies (copy from nevr + updates)"
+      - "Makefile with nakama build and test targets"
+      - "CI pipeline (copy from nevr or fork)"
+      - "go.work for local development linking fork + new module"
+      - "PipelineDependencies type defined (from nevr's runtime_deps.go)"
+      - "main.go skeleton with nakama component wiring (from nevr's main.go)"
+    tasks:
+      - id: 2.1
+        name: "create repo directory structure"
+        status: "not_started"
+        description: "mkdir -p service/ protocol/ plugin/ internal/ docs/extraction/ build/"
+      - id: 2.2
+        name: "wire go.mod from nevr + updates"
+        status: "not_started"
+        description: "Copy nevr's go.mod, update dependency versions to match current fork. Run go mod tidy."
+      - id: 2.3
+        name: "copy Makefile and CI"
+        status: "not_started"
+        description: "Copy and adapt Makefile, .github/workflows/ from nevr or fork"
+      - id: 2.4
+        name: "write PipelineDependencies"
+        status: "not_started"
+        description: "Copy and adapt service/runtime_deps.go and service/types.go from nevr, update for current nakama interface versions"
+      - id: 2.5
+        name: "write main.go skeleton"
+        status: "not_started"
+        description: "Copy nevr's main.go, strip EVR-specific imports, add TODO markers for each subsystem. Verify it compiles with just nakama core."
+      - id: 2.6
+        name: "create go.work for local dev"
+        status: "not_started"
+        description: "go.work that links this new module with the fork for local testing"
+
+  # ---------------------------------------------------------------------------
+  # PHASE 3: Extract protocol types (server/evr/ → protocol/)
+  # ---------------------------------------------------------------------------
+  - id: 3
+    name: "extract protocol types"
+    status: "not_started"
+    description: >
+      Move the EVR binary protocol types from the fork's server/evr/ into the
+      new module's protocol/. This is the safest extraction — protocol types
+      depend only on stdlib + uuid + restruct. No nakama-internal dependencies.
+      The nevr prototype's protocol/ shows exactly where each file goes.
+    completion_criteria:
+      - "All 104 protocol type files copied to protocol/ and compiling"
+      - "NewMessageFromHash() Symbol registry complete"
+      - "Protocol round-trip tests pass (encode → decode → compare)"
+      - "Fork EVR code can import protocol types from new module"
+      - "Alias shim in fork so existing code still compiles"
+    tasks:
+      - id: 3.1
+        name: "copy protocol files, fix imports"
+        status: "not_started"
+        description: "cp server/evr/*.go → protocol/ in new module. Change package name and fix imports. Verify go build."
+      - id: 3.2
+        name: "verify Symbol registry"
+        status: "not_started"
+        description: "Ensure every *.go file in protocol/ has its Symbol() registered in NewMessageFromHash(). Compare against fork's core_packet_types.go."
+      - id: 3.3
+        name: "get protocol tests passing"
+        status: "not_started"
+        description: "Copy test files, fix imports, run go test ./protocol/..."
+      - id: 3.4
+        name: "create alias shim in fork"
+        status: "not_started"
+        description: "In fork's server/evr/, create alias files that re-export from the new module. This keeps the fork compiling during the transition."
+
+  # ---------------------------------------------------------------------------
+  # PHASE 4: Extract pure-logic service modules
+  # ---------------------------------------------------------------------------
+  - id: 4
+    name: "extract pure-logic modules"
+    status: "not_started"
+    description: >
+      Extract EVR modules that have minimal nakama-internal dependencies:
+      early quit detection, statistics, XP/levels, team composition, player
+      archetype, enforcement, latency history, games played, etc. These are
+      self-contained logic with clear database interfaces.
+    completion_criteria:
+      - "Each extracted module compiles in the new module's service/"
+      - "Each module's tests pass in the new module"
+      - "Alias shims in the fork's server/evr_*.go files"
+      - "Fork compiles with aliases"
+      - "No duplicated symbols"
+    tasks:
+      - id: 4.1
+        name: "extract enforcement modules"
+        status: "not_started"
+        description: "evr_enforcement_journal*, evr_suspension_*, evr_enforcement_* → service/"
+      - id: 4.2
+        name: "extract statistics modules"
+        status: "not_started"
+        description: "evr_statistics*.go → service/"
+      - id: 4.3
+        name: "extract player state modules"
+        status: "not_started"
+        description: "evr_earlyquit*.go, evr_xp_level*.go, evr_games_played*.go, evr_latencyhistory*.go → service/"
+      - id: 4.4
+        name: "extract team/archetype modules"
+        status: "not_started"
+        description: "evr_team_composition*.go, evr_player_archetype*.go, evr_team_bias*.go → service/"
+      - id: 4.5
+        name: "extract remaining pure-logic modules"
+        status: "not_started"
+        description: "evr_profile_cache*.go, evr_global_settings*.go, evr_metrics*.go, evr_remotelog*.go → service/"
+
+  # ---------------------------------------------------------------------------
+  # PHASE 5: Extract core pipeline & matchmaking
+  # ---------------------------------------------------------------------------
+  - id: 5
+    name: "extract pipeline & matchmaking"
+    status: "not_started"
+    description: >
+      Extract the core EVR systems: pipeline, matchmaker, match handler, lobby
+      management. These have the most coupling to nakama internals (session
+      registry, runtime, database) and will require interface adaptation.
+      This is the highest-risk phase.
+    completion_criteria:
+      - "EVRPipeline extracted and compiles in service/"
+      - "Matchmaker extracted and compiles in service/"
+      - "Match handler extracted and compiles in service/"
+      - "Lobby system extracted and compiles in service/"
+      - "All use PipelineDependencies instead of direct nakama-internal access"
+      - "Integration tests pass with module-based wiring"
+    tasks:
+      - id: 5.1
+        name: "extract EVRPipeline"
+        status: "not_started"
+        description: "evr_pipeline*.go → service/. Adapt nakama imports to use PipelineDependencies."
+      - id: 5.2
+        name: "extract matchmaker"
+        status: "not_started"
+        description: "evr_matchmaker*.go → service/. Adapt nakama imports."
+      - id: 5.3
+        name: "extract match handlers"
+        status: "not_started"
+        description: "evr_match*.go → service/. Adapt nakama imports."
+      - id: 5.4
+        name: "extract lobby system"
+        status: "not_started"
+        description: "evr_lobby*.go → service/. Adapt nakama imports."
+      - id: 5.5
+        name: "integration test pipeline"
+        status: "not_started"
+        description: "Wire all extracted components in main.go. Run end-to-end tests."
+
+  # ---------------------------------------------------------------------------
+  # PHASE 6: Extract Discord integration
+  # ---------------------------------------------------------------------------
+  - id: 6
+    name: "extract Discord integration"
+    status: "not_started"
+    description: >
+      Extract all Discord bot code into the new module. The nevr prototype
+      already has significant Discord code in service/ — sync forward from
+      the fork's evr_discord_*.go files.
+    completion_criteria:
+      - "All evr_discord_*.go extracted to service/ and compiling"
+      - "Discord bot tests pass"
+      - "Linked roles and integrator tests pass"
+      - "Nakama compiled and functional with Discord via module"
+    tasks:
+      - id: 6.1
+        name: "extract core discord framework"
+        status: "not_started"
+        description: "evr_discord_cache.go, evr_discord_ratelimit*.go, evr_discord_rest_limiter.go, evr_discord_outfits.go → service/"
+      - id: 6.2
+        name: "extract appbot"
+        status: "not_started"
+        description: "evr_discord_appbot*.go → service/. This is the biggest file group."
+      - id: 6.3
+        name: "extract linked roles"
+        status: "not_started"
+        description: "evr_discord_linked_roles*.go → service/"
+      - id: 6.4
+        name: "extract integrator"
+        status: "not_started"
+        description: "evr_discord_integrator*.go → service/"
+      - id: 6.5
+        name: "extract remaining discord modules"
+        status: "not_started"
+        description: "evr_discord_sessions_channel*.go, evr_discord_loadout*.go, evr_discord_vacate*.go, etc."
+
+  # ---------------------------------------------------------------------------
+  # PHASE 7: Extract authentication & VRML
+  # ---------------------------------------------------------------------------
+  - id: 7
+    name: "extract authentication & VRML"
+    status: "not_started"
+    description: >
+      Extract authentication flows and VRML league integration. These have
+      database and runtime coupling but well-defined interfaces.
+    completion_criteria:
+      - "Authentication module compiles and tests pass"
+      - "Device linking module compiles and tests pass"
+      - "VRML module compiles and tests pass"
+      - "Nakama authenticates users via module"
+    tasks:
+      - id: 7.1
+        name: "extract authentication"
+        status: "not_started"
+        description: "evr_authenticate*.go, evr_auth_*.go, evr_device_auth.go, evr_session*.go → service/"
+      - id: 7.2
+        name: "extract device linking"
+        status: "not_started"
+        description: "evr_linking*.go → service/"
+      - id: 7.3
+        name: "extract VRML integration"
+        status: "not_started"
+        description: "evr_runtime_vrml*.go → service/"
+
+  # ---------------------------------------------------------------------------
+  # PHASE 8: Extract runtime RPCs & API
+  # ---------------------------------------------------------------------------
+  - id: 8
+    name: "extract runtime RPCs & API"
+    status: "not_started"
+    description: >
+      Extract all EVR runtime RPCs, API context, gRPC/HTTP handlers. These
+      expose EVR functionality as Nakama RPCs and API endpoints.
+    completion_criteria:
+      - "All RPC handlers compile in new module"
+      - "Runtime registration works from module (via InitModule)"
+      - "API tests pass"
+      - "gRPC service (apigrpc) in new module"
+      - "End-to-end RPC tests pass"
+    tasks:
+      - id: 8.1
+        name: "extract runtime context & API"
+        status: "not_started"
+        description: "evr_runtime_api*.go, evr_runtime_context.go → service/"
+      - id: 8.2
+        name: "extract RPC handlers"
+        status: "not_started"
+        description: "evr_runtime_rpc*.go → service/ (batch by subsystem)"
+      - id: 8.3
+        name: "extract RPC registration"
+        status: "not_started"
+        description: "evr_runtime.go, evr_runtime_rpc_handler.go, evr_runtime_rpc_registration.go → service/"
+      - id: 8.4
+        name: "extract gRPC API server"
+        status: "not_started"
+        description: "Copy and adapt service/api.go from nevr prototype, wire up gRPC NevrService"
+
+  # ---------------------------------------------------------------------------
+  # PHASE 9: Plugin module
+  # ---------------------------------------------------------------------------
+  - id: 9
+    name: "set up plugin module"
+    status: "not_started"
+    description: >
+      Create the separate plugin Go module (based on nevr/plugin/) that
+      nakama-evr's runtime init will load for user-defined runtime hooks.
+      This is the extension point for Lua/JS/Go runtime modules.
+    completion_criteria:
+      - "Plugin module compiles separately"
+      - "go.mod declares nakama-common dependency"
+      - "Nakama-evr can load plugin at startup"
+      - "Plugin tests pass"
+    tasks:
+      - id: 9.1
+        name: "copy plugin structure from nevr"
+        status: "not_started"
+      - id: 9.2
+        name: "update plugin go.mod"
+        status: "not_started"
+      - id: 9.3
+        name: "wire plugin loading in main.go"
+        status: "not_started"
+
+  # ---------------------------------------------------------------------------
+  # PHASE 10: Wire main.go and integration test
+  # ---------------------------------------------------------------------------
+  - id: 10
+    name: "full wiring & integration"
+    status: "not_started"
+    description: >
+      Complete the main.go wiring (based on nevr's main.go) that instantiates
+      all nakama core components and passes them to the EVR module via
+      PipelineDependencies. End-to-end integration test: start nakama-evr,
+      connect an EVR client, verify functionality.
+    completion_criteria:
+      - "main.go wires all components (from nevr's main.go)"
+      - "InitModule registers all EVR functionality"
+      - "nakama-evr binary builds and starts"
+      - "Healthcheck endpoint responds"
+      - "EVR client can connect and authenticate"
+      - "Matchmaking flow completes end-to-end"
+    tasks:
+      - id: 10.1
+        name: "complete main.go wiring"
+        status: "not_started"
+        description: "Adapt nevr's main.go: wire all nakama core components, inject PipelineDependencies, start all systems"
+      - id: 10.2
+        name: "complete InitModule"
+        status: "not_started"
+        description: "Adapt nevr's runtime_init.go: register matches, RPCs, hooks, event handlers, discord bot, etc."
+      - id: 10.3
+        name: "integration test: server start"
+        status: "not_started"
+        description: "Build nakama-evr binary, start with test config, verify healthcheck"
+      - id: 10.4
+        name: "integration test: auth flow"
+        status: "not_started"
+        description: "Connect EVR client, authenticate, verify session"
+      - id: 10.5
+        name: "integration test: matchmaking"
+        status: "not_started"
+        description: "Run matchmaking flow end-to-end through the module"
+
+  # ---------------------------------------------------------------------------
+  # PHASE 11: Cleanup fork & documentation
+  # ---------------------------------------------------------------------------
+  - id: 11
+    name: "cleanup fork & document"
+    status: "not_started"
+    description: >
+      Remove the extracted EVR code from the nakama fork. Update the fork's
+      go.mod to depend on the new module. Archive the extraction plan.
+      Update all documentation.
+    completion_criteria:
+      - "No server/evr_*.go files remaining in fork (module replaces them)"
+      - "No server/evr/ directory in fork"
+      - "Fork go.mod depends on github.com/echotools/nakama-evr"
+      - "Fork compiles and tests pass with zero EVR code in-tree"
+      - "README updated for both repos"
+      - "AGENTS.md and instructions updated"
+      - "REFACTOR.yaml moved to docs/extraction/ as completed-plan.yaml"
+    tasks:
+      - id: 11.1
+        name: "remove alias shim files from fork"
+        status: "not_started"
+      - id: 11.2
+        name: "update fork go.mod dependency"
+        status: "not_started"
+      - id: 11.3
+        name: "delete extracted files from fork tree"
+        status: "not_started"
+      - id: 11.4
+        name: "full fork integration test"
+        status: "not_started"
+      - id: 11.5
+        name: "update CI/CD for multi-module build"
+        status: "not_started"
+      - id: 11.6
+        name: "update documentation"
+        status: "not_started"
+      - id: 11.7
+        name: "archive extraction plan"
+        status: "not_started"
+
+# =============================================================================
+# BLOCKERS — things that halt progress until resolved
+# =============================================================================
+
+blockers: []
+
+# =============================================================================
+# NOTES — session log for agent-to-agent communication
+# =============================================================================
+
+notes:
+  - timestamp: "2026-05-23T16:25:00Z"
+    agent: "metis-teth"
+    message: >
+      Initial plan created. After reviewing nevr prototype on spriffy, the
+      target architecture is clear: standalone module with service/ + protocol/
+      directories, custom main.go wiring, PipelineDependencies DI, plugin/
+      sub-module. The nevr reference is at
+      andrew@spriffy:/home/andrew/src/nevr/ — study it before starting phase 1.
+  - timestamp: "2026-05-23T16:45:00Z"
+    agent: "metis-teth"
+    message: >
+      Plan updated based on nevr architecture. Key insight: the fork's
+      server/evr_*.go (332 files) needs to become service/ in the new module,
+      and server/evr/ (104 files) needs to become protocol/. The nevr prototype
+      shows exactly how main.go wires nakama core components and injects EVR
+      dependencies via PipelineDependencies. Phases restructured to match:
+      11 phases, starting with discovery of both the fork's code and the nevr
+      architecture, through scaffolding, extraction by layer, wiring, and cleanup.

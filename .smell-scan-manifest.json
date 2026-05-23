@@ -1,0 +1,3372 @@
+{
+  "version": 1,
+  "created": "2026-05-23T16:25:00Z",
+  "last_scan": null,
+  "files": {
+    "main.go": {
+      "sha256": "7741bd06670a80e1a1be9d59360489c1d08b6bb82d798b821a3b4e13674f9cad",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "apigrpc/apigrpc.pb.go": {
+      "sha256": "87b21e0b9e00c75b5ca5807c375d14ad606a6e968848d02c513e101c3de961ce",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "apigrpc/apigrpc.pb.gw.go": {
+      "sha256": "88f814dbc3fdc0b40ee1d4850cc8cccd4994e5e9858b43a99bd2d7013cd8ae46",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "apigrpc/apigrpc_grpc.pb.go": {
+      "sha256": "d17737e67a5afeec79dedff92e1a291724cb6ba778f6234265dd006174a425da",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "apigrpc/build.go": {
+      "sha256": "161dc8970d3e4efe7489937c8326e3a5c25d845276d3408c6240502aa2c68067",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "build/tools.go": {
+      "sha256": "3f8755bf404d5a3bcb234bf7cdcb300d7dfbd67dc5e85444530b1ca1e48f0b0f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "console/build.go": {
+      "sha256": "b2eae9ebfa094ff7eabd35fef7802b48ce6da47563747bbbeba3794261f7b4e9",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "console/console.pb.go": {
+      "sha256": "48f6b0b57ff348d67f10999943f1154cf2e3a7921ae850cad598eb56701449ba",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "console/console.pb.gw.go": {
+      "sha256": "b9ce0e29f724a0d970508f0f4e2e140e538328d58d61682b3f35730cecdb55d0",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "console/console_grpc.pb.go": {
+      "sha256": "7f750909f765bea5d24ef1c51a6c902849dd85204c8be97684bb9b828b974ed4",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "console/ui.go": {
+      "sha256": "5c9ca009cbee861dc0c9c1068d810715210f9cacef83e8d1f105d5a94d32f72e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "console/openapi-gen-angular/main.go": {
+      "sha256": "164dac640fc4243698e6a3dfbddf1508f0e93dc4ce88023ff46ecfbf44594f21",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "console/protoc-gen-angular/main.go": {
+      "sha256": "d173505c71ccf67a417aa41039678e1924d731cfb090f30beb7b7e14c30d55c1",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "flags/flags.go": {
+      "sha256": "5c72f925435e2a08bdb3a4bf9c28a0ddab807e6987b15ba28a5fd5af3853fdf6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "flags/vars.go": {
+      "sha256": "8afa006c8b685e71df69bf2925044659a72039beebcb3e3f392432a7bbd24722",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "iap/iap.go": {
+      "sha256": "c37fe60ca3d20e407e1e32a164ecbd5abfadb555088136eae69dc914c3f26028",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/cronexpr/cronexpr.go": {
+      "sha256": "5f4321fa3c755d592699346fe1db9e95b25f003f88a62fba2e3eff675486ba9b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/cronexpr/cronexpr_next.go": {
+      "sha256": "bd16d02249ce6d609e7fcbe20807c6bd6e5e08b3441f26b2d35940609737967f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/cronexpr/cronexpr_parse.go": {
+      "sha256": "0ef899802e45bf07b929610669dc8a8e1f22f9a09b72b2d5d4329cb58fab185c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/cronexpr/cronexpr_test.go": {
+      "sha256": "9174953c684d78acbf1b18a619ea18c7b12670ab2fd7fea387b7b17486494868",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/cronexpr/example_test.go": {
+      "sha256": "3b91e9569f75979b513765be4fbaa5ecdae0324d497ba0756ad4f6971b7b0d1b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/cronexpr/cronexpr/main.go": {
+      "sha256": "943c526f7f317dd25483198df8bdbb71d86fff4fa1166116f9379ec4d67addf2",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/ctxkeys/ctxkeys.go": {
+      "sha256": "8a8e3d9214b253db173e3f13872fd879fd07aae469bb86a79a03379758938aba",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/_state.go": {
+      "sha256": "2999afb16729bebacff477ff6b98acdea6627e747ce772fb12e72486aba349e5",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/_vm.go": {
+      "sha256": "30c070152df677241df69a34e078b562ba9e18e8b256a84b3578f40d0fbd0764",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/alloc.go": {
+      "sha256": "29b132b7fbe4f673df7898277970af76b2ecf4b9be1053275a6a75ca3e2067cb",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/auxlib.go": {
+      "sha256": "2b5ec915ceffe02b1c5a947b77b683fa92ecc2b8b5e022094c2a9cd09e43d410",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/auxlib_test.go": {
+      "sha256": "d0c937bff2c6bacbf4800130f39270485e073d068dfc3930cd39f7ee3d535d1a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/baselib.go": {
+      "sha256": "c8ed752d0bac0f617ca6bb0b3f01a197237edc35b8a3018d49089389e03405af",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/channellib.go": {
+      "sha256": "3276b6dc40231e8861e8ac1f4b683af961ad234966da0539db816c6e91a511d8",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/channellib_test.go": {
+      "sha256": "d6dc06838dd35e07c93891cbdf8373c93fcbc16740e1016ea9c6fc03e55eeaf0",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/compile.go": {
+      "sha256": "92b6c4d91f78482172d0c77024a638cbdf92562e0697e3b4269e5819e8e862d6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/config.go": {
+      "sha256": "b1b1c85bea7c7ea0e52c706c429980dcc03367d88d01328e5ffa97fcad7c6670",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/coroutinelib.go": {
+      "sha256": "989bc15f7312170c6c2da30710beeed36f84a717c2ee96369b637f3e25b11a5d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/debuglib.go": {
+      "sha256": "549e179502ec7e1f701a0bffda2d7086840138566fca0ee47ae1a067e98f7800",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/function.go": {
+      "sha256": "a33dd55b5655e46187fb4ed686410acdb451a5231a2f30f2ad57a56d3c048c76",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/iolib.go": {
+      "sha256": "748fcb6b58dae2c60dd4b289d4597a6047463ee65911188baade344bb3b9a0d5",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/linit.go": {
+      "sha256": "492a4b04eea6b7d3054351b9d1f1f1e4bbb792449faf8d9445e5eb55808574dd",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/loadlib.go": {
+      "sha256": "381ba54c0f500d0b8277e81ad393543fcfff53012ce0b1a5ce15146960aa081a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/mathlib.go": {
+      "sha256": "f57bb8d72af6f7049f4221086c91d6220afb1cad7f0a5296d063b024d990e07d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/opcode.go": {
+      "sha256": "8a8e1ab2518b6a533477fb2b8ee64e44403db5dc23dae85e32328a7c929f3fa8",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/oslib.go": {
+      "sha256": "e5a9d567a702caf70dda93e416d7159163728770c207e598a694946f3203b106",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/package.go": {
+      "sha256": "85ea6537258904f53625c67e8ec2a953c2439462ed03326c33d94029d3c88f95",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/script_test.go": {
+      "sha256": "90d18b12b349a23511d762528bf4350448da15df6cb746761cec737a0241fe57",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/state.go": {
+      "sha256": "eae1d3c3dd73569221c19b4a4523ff0832410b5d6326f604f4bf5387b8abfc1f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/state_test.go": {
+      "sha256": "26df27c21cc7f49b6f437a4b57993827edd0d121cd0bee1a01b9df178c2344f9",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/stringlib.go": {
+      "sha256": "84436801b63f1471b3548e770cda89078e4da0b880ebc9f8c680e0a2baa5e9be",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/table.go": {
+      "sha256": "6547e2fa79198ef17f9b4d9fd2884b1f5d106607a49afe241ccea0b12be65f8f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/table_test.go": {
+      "sha256": "75805d1a0d6e85fb21c9acf6286c9a74f75859c932e1c33ca8c3bd16c10115cf",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/tablelib.go": {
+      "sha256": "7a316e5d80da86d6e17017701a5e512a94802b6828c7c28c84620c0c150f4e86",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/testutils_test.go": {
+      "sha256": "67dad2774544d29e78a1cddc97bf3069ae4693908cc3677205e58eeb46898d88",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/utils.go": {
+      "sha256": "f0e493c4151bb2a170f89f2b2f1c850223b4e951c0415993d49ed724fcbe72d5",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/value.go": {
+      "sha256": "0650b07b87cdcdd80521cb12e0e52c81b1612e43f7f7d57f76a21c72d922411d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/vm.go": {
+      "sha256": "cd06ec2926b4423446fd54bee77f152a56a537fc263d30fb680d9bc5d9c9ec4d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/ast/ast.go": {
+      "sha256": "64db2e4985cbc330b9b091b50502f79aa9bf4e15c6900672ee403fb36653bd39",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/ast/expr.go": {
+      "sha256": "d1bd25b327116f57f32007c9d9f7a79198a53ca107192220def4c4f8a326b406",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/ast/misc.go": {
+      "sha256": "0832694e9ff67a0e0ec8da135f31dca7428812b211ea3f70db8f4c2d4867f18e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/ast/stmt.go": {
+      "sha256": "1733dc9bf799e54a6617e43a1a89804d1363c0f9950af236759967af86629df3",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/ast/token.go": {
+      "sha256": "d7a1b78549960e25fa124c7f0fd479ae35568c3bf8770558e05fcfecd05db357",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/parse/lexer.go": {
+      "sha256": "cce0ad98bbd0b2cf943365130c480a87ec6df3256186ffc67172efe98d961555",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/parse/parser.go": {
+      "sha256": "da62318fdf9b0a3a54fd72d02ae3db5e7ec3f01361c0e331a3af761ed5fd090e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/gopher-lua/pm/pm.go": {
+      "sha256": "0d9a27fb6eaae76bf1cb96f44cc75607cedeb5443370c6a906b74183420ca5f0",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/intents/intents.go": {
+      "sha256": "274ab20bf4c56a7daee842fbe0394e378b9a56559411cd958df57787cc5ee695",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/intents/intents_test.go": {
+      "sha256": "1ebe90fb60c1b5adfb4272c4ffc14a3a813a5eb8c6927e6cbd67d918c3783b72",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/satori/satori.go": {
+      "sha256": "843e04293b99898e6566fd638c406fca06a24205beb1ac08764305509c526f41",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/satori/satori_test.go": {
+      "sha256": "886d2e59d0530fafacaa35301eab545328dc5011063a19659d31fcecde7becbc",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/skiplist/element.go": {
+      "sha256": "05e6ef899311fe09f9b75334f07d8adf08a941c14f681c302769a50ec0083b6e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/skiplist/skiplist.go": {
+      "sha256": "6de9d8492c5a9527bff0a176e0901473c427ef0be76c9108c546446754d5c0c1",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/skiplist/skiplist_chaos_test.go": {
+      "sha256": "20216a1988124697c2d34fe197ac7dee6fdced1c7b898c4c3d7985b366d62b00",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "internal/skiplist/skiplist_test.go": {
+      "sha256": "074c4ba0e3274810bcf7820d1c11ba71af655612cfb29e07a4fe6691c84c2e8d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "migrate/migrate.go": {
+      "sha256": "63e7d4d1e186d12f05d22fef8b7167b7911baddc059cd688ad47dd744b0915e7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "se/se.go": {
+      "sha256": "39c877eafc27208d96ee36edcd40351715cb096edf11831db55fc166dc232bd7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api.go": {
+      "sha256": "e7560f7df6f3a780662538356f11bc2c70ec4f459e070f2aa0e091309bd20bec",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_account.go": {
+      "sha256": "6e10ecde0188fd70d92242f193ff4624e862dd60b9fbe0c1dcaba23901264176",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_authenticate.go": {
+      "sha256": "5d67cf3240df9a3e268c367c0d32e0463b3b21af3b32d568202b021360e05919",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_channel.go": {
+      "sha256": "dd7d18e06ad2901a92c20917d5b5416826a01d6a90018b8227d8243c21260a46",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_event.go": {
+      "sha256": "a8cd64954b331a76aa4860125c445805d00428bf8690906283dbed88d0495b46",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_friend.go": {
+      "sha256": "6d09389149a6c0de9ee353370fdc132c6ef6ac7413d32ae96d2703229a2abe6f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_group.go": {
+      "sha256": "e25134aa8f8c7c7dd28a9cf25f41873d9948d0dea2b270e1b27348f1132f2434",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_leaderboard.go": {
+      "sha256": "ccd63743eb65691d64e466aa0bb062c09f2815710b72ea546293d7b3d815c9b7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_leaderboard_test.go": {
+      "sha256": "c1d954b14470a6e72867045f30e8533be3fd37126d7aa8b8fbf43e723b5c05f6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_link.go": {
+      "sha256": "c02b3fa118252ce3d0f78f0d65d759a00d0e1f7de0acf34c05890d9395aabc1f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_match.go": {
+      "sha256": "878ff05f09cd3ae501d1b91f3b7015533ccedd4c9067480e43d8946631a116b7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_matchmaker.go": {
+      "sha256": "12b620575f5f7784444527ef39a6d5631ef1d14e3e29b10920f43728a271fe76",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_notification.go": {
+      "sha256": "3b0777a3aba166e67df91dd25bb4074c24adc5f00be1ed86a7c79ee14fdecdd9",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_purchase.go": {
+      "sha256": "946b8513e4349bd61dd25e25fff143e26cb72dd4bc12056608fe20dc94c0aef1",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_rpc.go": {
+      "sha256": "e7772161c0a48530e9f038c8301f4fe6d3688b722ee4222273f9b69e4d61cb0c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_session.go": {
+      "sha256": "f30486b426b086a2bd23d4f92090e06ba9fbd07702d94bf655215118f02ad7ff",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_storage.go": {
+      "sha256": "4d6449711925d9bf1884d266e376f0627e78c53c9e0abf20aedb434503561d95",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_subscription.go": {
+      "sha256": "1600cc624ad2d2d315beb749db88fc833e57ae23a9bf66adf5fd549f1741dcdb",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_test.go": {
+      "sha256": "e0f840d1fbd2e44d31043889ef7f761399cf7f2b43e64dcb53624da62d797cdd",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_tournament.go": {
+      "sha256": "f70c26af8c61e868c624dc84f5ab5ab7de55cdaea833385a062079314d8056ba",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_unlink.go": {
+      "sha256": "ecd5e401f4a3dcfac54df025a57ae7bbf96811447c155ed402315f5949bd2459",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/api_user.go": {
+      "sha256": "eabb491d46e198a14eb220d127796ecfef6190aa8c2fea1f8c019aaa37ac623b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/config.go": {
+      "sha256": "9a0fdc6be11e09aa90ca8aefde9674088d8c0a97af4b28a57bbbd0675c427ed7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/config_test.go": {
+      "sha256": "0b0d4d1f5fbec17d7732f29ccf38d3ed9e3587229f0a04824e1096d25f930f7a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/console.go": {
+      "sha256": "576356914715d416f332bc50ff4a72a0000574139cb08222a1d2a1f7b47b4e14",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/console_account.go": {
+      "sha256": "b3136703883bac894550fa57d846b4f333f2ac23e0d42ecc1e83bc71d0a091f8",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/console_api_explorer.go": {
+      "sha256": "c5f54f98cd1d6f24f553b49a95ba4ca486c25776cc1898d68bd52ab8732a1f15",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/console_authenticate.go": {
+      "sha256": "fd5cce1f7ed323fb36863fea5f82ecfad3f24842e4b37af547d9bc9172ebbf0e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/console_channel.go": {
+      "sha256": "0472e5cf87966fabbf4a8f79074a8c3e77c9de88ab33cb5489a4cb66bfbb7f3b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/console_config.go": {
+      "sha256": "dbf0cf8ebff90d1351978d860911280b998a03663635500e6003866e827ab856",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/console_group.go": {
+      "sha256": "d3e4278e0553fafcd8741bf7e94a1ba16d49ade3856d49413b01f7a44ecb9f4d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/console_leaderboard.go": {
+      "sha256": "f327f5a30362d11493f376464a295c8be556ac612245c7eb405785341c1914b3",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/console_match.go": {
+      "sha256": "942558893e3824041b503d81cdce4ae784b09d902887813094ac8f3e114edc2d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/console_notification.go": {
+      "sha256": "0477278d959851d93c7f182702aaaf52d6970553bb509e503fa027cea6070eda",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/console_purchase.go": {
+      "sha256": "beb3a6d521727a2c3f91ed5232b927df33310252f9f8abddd11209bc3f431a79",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/console_runtime.go": {
+      "sha256": "d5190e571d3d741f700b86adfb5477a80a55f7522e4ea809da1899e7ae1bc562",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/console_status.go": {
+      "sha256": "ea6119d67204694fcffc8fda2d2db1dfa8b99a6afd4335705f44774753c7b584",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/console_storage.go": {
+      "sha256": "d7e1211ab1d340c8cc49b63e413c4053d942ba670a16692e3c94eff02f67bc7b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/console_storage_import.go": {
+      "sha256": "c4897a8d5801a6db29ab7dd7ac368c33ef8ae4d4a69bdcad5c670165616f7373",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/console_subscription.go": {
+      "sha256": "eae995df13295869d6353ca54b2d06cc5f48a80cd1c59c57a562134cbad26648",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/console_unlink.go": {
+      "sha256": "4626ca46d9fd280be9a74c92021afc0302affe4b2bf0663e82227be619d50eb2",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/console_user.go": {
+      "sha256": "126e6a10d25c875b2694509b1bdb34008993692c7b5d0cd71c7b4b0d4801e273",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_account.go": {
+      "sha256": "fb823479ee2eab4a22ee055aab5a8e13e9bb4f3959749d215de52151ba1e0fd6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_authenticate.go": {
+      "sha256": "83912f777ec6b61697ed98a19dbaec0f797b922837d819085ed2f7b9b16e9370",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_channel.go": {
+      "sha256": "7719d99acf5fa794e8c1cd2bdbbd3cb77efed15997da609e22181dd530e600f7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_file.go": {
+      "sha256": "1c47a48d1c686599f739b306f8a7043c28e8afba72064dd28473cceb665498e9",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_friend.go": {
+      "sha256": "a25f0d705542a6810bea8864b1443a6206b495a7392dd2b23a2b566782d2e117",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_friend_test.go": {
+      "sha256": "4c75a4f7831e0840cc22f1ae9cff7a279d88d211d051e3bf2308b675794fd504",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_group.go": {
+      "sha256": "5a7d2459ee8bd838f184bfc79433ec25803741345bd5b05d5abf18a357110fe4",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_leaderboard.go": {
+      "sha256": "a536ccc46242c73df14c0eeb7cbb8767d345e9da18400bf273fecafd3f7b9f0d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_link.go": {
+      "sha256": "2f579917a1acc58ffa143c2b6e8ef811202355ab2a1cb35c5af89fe2f41a143a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_multi.go": {
+      "sha256": "7eb1099287f6b0b25f488b04309c02c6f2ea9c8c474cc16fd0f010a0449b1d2c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_notification.go": {
+      "sha256": "8e2da9946310e17332483aa52e61e4224a886a3bc9ca006251aaa320c1af1cb3",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_purchase.go": {
+      "sha256": "9d68d2211ab4af5e0d98077ae4807bd8108b10368c4681b44814a81c3ba90383",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_session.go": {
+      "sha256": "9afd80940bc447c76240d4da56209276c5a743953bb1a5c22d70e167c8e43fed",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_storage.go": {
+      "sha256": "0744d7ca68d564beee2513604d3ec46e3e20a6eb7b789ba6bd06eb401023dc94",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_storage_test.go": {
+      "sha256": "4fda70512cb2c7e77e8f611acbaaa6602a135c509fdb9576dc9131416705e634",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_subscription.go": {
+      "sha256": "2aef2baba116f9bff9aa769e4448b8761fcb00e56c11f9662e1b3f6d65aaefea",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_tournament.go": {
+      "sha256": "af801e00065f74dea3b298559585bf195c42c21756ff465ed40ccdcf6bb8eac2",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_tournament_test.go": {
+      "sha256": "f180ccf73f222160638b6743c6225740c7ff27e1532e51d6c253092aa7ae8b57",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_unlink.go": {
+      "sha256": "d16815376e0a1fb58db3d902d222717118ab07dd0c24194cba786ba48993ef94",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_user.go": {
+      "sha256": "43c7aa28c476fdcdff37d86708b183600852dc9e755da81b36166d2c81e7e39f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_wallet.go": {
+      "sha256": "298c70e76801e72249392bc78a6cf1fa6af2121922c3b1e1b4b70186ef94f6bd",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/core_wallet_test.go": {
+      "sha256": "bb0485b3b44e71ab7bf5ffe88dac0c8b0d284d3eafbb2e667f74efa478748af0",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/db.go": {
+      "sha256": "a9ff19a748c4f1378b632598fb001031d3eae57b2be05ee10d903ad00a73fb6b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/db_error.go": {
+      "sha256": "cd3aa82d21f6825ae9afd4fd8afaa8cf18e357d9c8e358662f5e0c9b0f8e39df",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/encryption.go": {
+      "sha256": "bf69b12e9e68fdfbc41fb9ea164afa26eb895073ec29a6077c605e97c6e65d0d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_account.go": {
+      "sha256": "a39df79eb19faf946eb595516453ed27d24bdb206def15ab34abcc6af558a25b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_account_displayname.go": {
+      "sha256": "03db89ff03f1bd1081f475d3aff65819213ee19a9f77e530dd3fc179214adc74",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_account_displayname_history.go": {
+      "sha256": "228b04191bcf8b172675761866387065c753828bd9d11504f6e3de8628f9e499",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_account_displayname_history_test.go": {
+      "sha256": "9da2d17b8455c018fdb5a58039a3f1afa409ad5f22e2416a2d103832278d4186",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_account_test.go": {
+      "sha256": "74090aeb5c87c444111db2bc8999a62e8076395b1d53fbdd070be5bb8e4edefc",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_account_vrml.go": {
+      "sha256": "ff508b825b9d2dfceb57fb44304cbafa0e52a0ef71fd277da91567d93f6d0c22",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_account_vrml_summary.go": {
+      "sha256": "3bb7193c733101bbe50b4a865451dc76b5e0ed1f592093a38a994f4ae3e1f939",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_ambassador.go": {
+      "sha256": "0c88a40e866ab78288a664457308117b12d4bce1b51f8a3f9b7fccdfed9a7824",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_ambassador_test.go": {
+      "sha256": "12509d42740febe8fa3465241bb968fb533ee2932ec71f8d9d0c4f54ef35186e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_auth_context.go": {
+      "sha256": "ffb6d263a9306b305ead30644014666aa37e118ddb4dc8f978deda488c6a4883",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_auth_context_test.go": {
+      "sha256": "58018ab8cf165861fb4f4e16281de60271982cb5e5202456fc16c3eba9501340",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_auth_helpers.go": {
+      "sha256": "9ab1c6bc298a6ecde27968af60cf72043309316865eb115c1f40466c82903e85",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_authenticate.go": {
+      "sha256": "a339f80a2de43638365fde1d631f82d0bf76484d56aabb472ad00412c414a303",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_authenticate_alts.go": {
+      "sha256": "41ff705cf8e18c23323f4b37b93c03ba1442962facacf09b4f669e86bbd3a2fb",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_authenticate_alts_test.go": {
+      "sha256": "2516017188519877bac48c54ea8d3c2fbb04963843f062451936e1bd199b04f0",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_authenticate_history.go": {
+      "sha256": "96029995d9c172d748f611b4312b1f2050864c75f3fbea82e4b1ea0c49ec2835",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_authenticate_history_test.go": {
+      "sha256": "f547d3cfd4b5604034853f453b9dcdbae2a9d5bfdd56c8bedd8f9a1ef8dbed13",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_authenticate_test.go": {
+      "sha256": "211758fb7366b3eb7f26b13d4d9c107858cdcdbaaf06fcf50de786814130aff5",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_bot.go": {
+      "sha256": "9cd3b0a1f702178168652ca1e4c7f26ab64b8316e97e2817fe269dffa73f46bc",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_broadcaster_registry.go": {
+      "sha256": "e068b88db8bb6b9d3f4882496ed1142c5fad370527f00e6bffb8b05552a17d80",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_bugfix_test.go": {
+      "sha256": "c2070c58c0782ea2e5664e7ec27a634e42bccbe666deff80962cb7cd66195496",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_bugs_test.go": {
+      "sha256": "bca42437094925c39997e97b7e9952f6537e26b990260afde5f83bad27f2afa9",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_cgnat.go": {
+      "sha256": "095a9994be488e1cc677c3ec24f75e75c7def1577ffb56aba9b62e05f39e57e0",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_cgnat_test.go": {
+      "sha256": "9be58dcc3a8d3ac9a572ed7725838c7009f66e7c7492e90496a10e3c8f9f9118",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_chaos_test.go": {
+      "sha256": "d2a4f088294cd10e142a6cd4f25261afc49f7d51b6b581bd8953b3f6ea338724",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_combat_matchmaker_test.go": {
+      "sha256": "78cf7b15459af661d2a429921e2650c9b50535a2750e1607ca5fa34ffa8b377d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_common.go": {
+      "sha256": "7ca0afd0be792fa1b857c83e5aa9ba1248a15e67c082c2c9f83219daa8f25bf7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_device_auth.go": {
+      "sha256": "a54b40adbe34386d2a5764a8a3cefe28123da446fa5d311f5859cb7547519010",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_allocate_test.go": {
+      "sha256": "d818d1993db325b4727acf5d5d6d55e98aacabdef69d8b660edb043873d77393",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot.go": {
+      "sha256": "f4e1bfba896ef41639e9223b80c57ccf0d73ec25268ec7ed0dcbcbb763193f4a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_create_test.go": {
+      "sha256": "43663ecb1e33509f5773d8463df013ff8fd49bbafd57098fa603671a2c991c17",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_duration_test.go": {
+      "sha256": "3ddf2fbdefc6bd34966c6294ac0ee05fcd1a645c68f14638ce280609955d4f12",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_enforcement.go": {
+      "sha256": "43c5069f70a5a8e3afd19b949d745700b617e54b7fb1db5a2710bbfdb673ead5",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_handlers.go": {
+      "sha256": "5ae4217d079d3e487f79d481f7f01bde7a230af5d49cb625f9b11cbd1cc03300",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_handlers_shutdown_test.go": {
+      "sha256": "c73033ef68f27e523df7aad9a3324d3542475da49bd0a1f565b1ef3d9e841b4f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_ign_modal_test.go": {
+      "sha256": "c4b1864f08bff7086f72096d573e90e4d0cad4810b510f88608c60d9f0dce754",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_igp.go": {
+      "sha256": "e6de8fa48f0b4d91fee7494c6077d8346ce0002ba43e8349cd0331e549fba2e8",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_linking.go": {
+      "sha256": "d9e65fcaa4806ded72678952bc9812bb7da9495881b57200fb7728c098b3133b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_linking_test.go": {
+      "sha256": "b433c6a3cea807748a2cd3e3f18277f338329412a8aaa3f18a0ced89e8cb735d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_modpanel.go": {
+      "sha256": "0b0d4d1f5fbec17d7732f29ccf38d3ed9e3587229f0a04824e1096d25f930f7a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_party_status.go": {
+      "sha256": "c80505b295186ddf61955b3993fde296e114302704c70898dee49804e56015f7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_roles_test.go": {
+      "sha256": "5e0533f3675b1545a1ced2827d4a7d6c4e905fd45652f8a7b35f13ad25b93efa",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_search.go": {
+      "sha256": "12a942803abf3c06cfda7710b7b4181940f8737ba46fe9ba144fb74e43939692",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_search_test.go": {
+      "sha256": "a8a87b056c15a258b98cde88f12ab0d3086a8edcada3a0df517ac3e2ed98e955",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_server_autocomplete.go": {
+      "sha256": "81d0037752d19b4005140693a571f2caa020bc49c52e0b1199cf8449eebbb62e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_server_autocomplete_test.go": {
+      "sha256": "7b7ba251c3341a53aa4ab0fab183539deb47e9687d3859d69cf21e13080945a1",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_server_embeds.go": {
+      "sha256": "0ab80e25394106901002349174ba084976ff5fadb760a184b21d88599f33e65c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_server_embeds_test.go": {
+      "sha256": "8dab15682d93f9359afb43b050899a17b9fd9a048c80652391ad2687685b2761",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_shutdown_test.go": {
+      "sha256": "d874d32dde8c4998bcaa3ab564c3ee55a005f368ff0ebd4e6ccb87aa7c61be86",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_test.go": {
+      "sha256": "044b4410f939ea76e24dae935c3746dfc5b0743d661cd48f3e9a09f92072534e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_unlink_vrml.go": {
+      "sha256": "3b668f6c4f19a12debb28573a2172e2b44e06b6da4bc3bf454575fe2ab22f944",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_whereami.go": {
+      "sha256": "e8139a6269688b625a260357353f3dd87bd1cfba8cd35a5edf77313a196ece20",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_whereami_test.go": {
+      "sha256": "1b3f360af8506680130985bb9e60b52c9124be3689ed6d1c7adf1f047477d57b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_whoami.go": {
+      "sha256": "901adf2e12f2900ef1cd43bb38daabcf4b2512da7aec0702923f89abb092b46e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_appbot_whoami_test.go": {
+      "sha256": "cd4bb59bcfc9004e5c3e54c5f13707db7338b8cbb5cc311c96daad1a5818c344",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_cache.go": {
+      "sha256": "f2c1198d07e935eeca2f0b27fa39f42e425de1fc52fbeed121def4f5f8ed96d9",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_integrator.go": {
+      "sha256": "0961d2b5b856189a2e1c7b8c58dddfea71d089eccf1050271e11e26e9b5c1e96",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_integrator_platform_roles_test.go": {
+      "sha256": "628db0f3d8d98324e936eef55fb467f58505073bf4e3ef366a28b078267983b7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_integrator_pruning.go": {
+      "sha256": "f4c303ba26d47a43a9d2ce90c0d335351127dabf3d5b3b86306491d2b7040246",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_linked_roles.go": {
+      "sha256": "38daa14f39efb3b1d0cf08eb37a9ed4a16ca6223f309116a25f6d84621e8b91b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_linked_roles_test.go": {
+      "sha256": "b65003ee5b41d6c86d80a0527af395690673d473f6dcc3aa23e4999771fa107b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_loadout.go": {
+      "sha256": "94c60787d6d67b9bc74e215be05200900ec6de8a741bcfb64770ea825621433b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_loadout_test.go": {
+      "sha256": "6094aba4c7800feace117e0f056c49ed9b32a0fda69cacee2fa5f1d8ab71aded",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_outfits.go": {
+      "sha256": "0d03cffa9b16a6e4aa158f9e876069af623ebd1b3258e8dc88ef24ea0c7edf29",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_pagenation.go": {
+      "sha256": "2ed0f4f7391a0ae411c46f269bc27162f2d9ba3325480d209c076bff89bc4b44",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_pagenation_test.go": {
+      "sha256": "c76f4a498738248ab7139e70f194418dbac726e6a6a63da0e4d70f9182a67ee2",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_ratelimit_test.go": {
+      "sha256": "451e3911556995ce50768c310618397e9dc504a66014859312ed5e656a15cb12",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_reservation_commands.go": {
+      "sha256": "c765c134e655e9d44be13b14d0e3dfeb6ce0573fb1b90b673236e0d7a45db153",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_reservation_commands_test.go": {
+      "sha256": "d6409fe61feb6f1b44b5970ea37ed93bd0213257eeec7204f10fa43e0bfae12d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_reservation_dashboard.go": {
+      "sha256": "6845d62eed168505f6ee0da54b23c292151a4d5b457c8f453e4201e7d52e38df",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_rest_limiter.go": {
+      "sha256": "67163b203e58fdb4a54efdfbe9ab7e74cecd3f26f2907fc052856e5ec347c9c1",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_sessions_channel.go": {
+      "sha256": "3b0122a6023bf8f45bb45367611b98bff81854a5c319b5472daad5689bfdd71f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_sessions_channel_test.go": {
+      "sha256": "d3c3b3f50e5677fcb2bbd9cab3ca59cbfc7db15269ba30f2d71facd2cb9f538a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_discord_vacate_test.go": {
+      "sha256": "547559e5e1620e650c4c5d6b0ea04e49be617f8446df1f921384e422d549ad93",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_displayname_anonymize.go": {
+      "sha256": "07562f934d27e4dd962584c388fb467d15e524f01df11f67a47476c500a358f1",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_early_quit_message_trigger.go": {
+      "sha256": "20a7ef8fdd3a87b0ea6707a3cc322c411fb5f8e8b549edadbca706907f9d60a2",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_earlyquit.go": {
+      "sha256": "781a8f74fb9a042e1ff60393e322b3500e3b49ec31454beb9c01068c6bbf385f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_earlyquit_detailed.go": {
+      "sha256": "911fb4917b4b7bec79722f03290879b24be4ebe4971f77cfb03bb7f5bbc26b12",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_earlyquit_integration_test.go": {
+      "sha256": "50e5ef5051b8a8660b6b6fb7a74f952cabe2a00f392c987ae4d781ae7811d53d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_earlyquit_leave_reason_test.go": {
+      "sha256": "6cf06fa557347e85d7b029361262cfcdad035e9a6cd213f885ce396c06bc1960",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_earlyquit_logout_test.go": {
+      "sha256": "db70752a429ab47fef14e901ba2008bc1491d15bb8fbb337ad9159a560c1bc62",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_earlyquit_pipeline_test.go": {
+      "sha256": "06c31904515b3ebf35941b189e0d10f1661d918b1e9f769228102d62ef0ddf69",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_earlyquit_test.go": {
+      "sha256": "5be60610cfe43430bfed31676d368fd3a0ba64ace4eecc7b28282b51206cab0f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_enforcement_journal.go": {
+      "sha256": "4728cfab7bd96b5d485333e402f39bb397fbcabb439129ead05bb871df97c73c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_enforcement_journal_test.go": {
+      "sha256": "f51b626feefbf7949e9706e8eb59a204590cad5b3f7789595b708fd70c454d4e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_enforcement_metrics.go": {
+      "sha256": "a039f42279cb67f033b3d91925af8f9c063264d6990772ca089c0613f763e620",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_enforcement_notification_test.go": {
+      "sha256": "cda1b28e32102370e85cb1364f923539c830f5b2b49d941f988d97879095aef9",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_enforcement_record.go": {
+      "sha256": "389c4d69c48aae3da1df3ce0f50f56e03eba3ef0361dfdc9594c11ecb6a27537",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_enforcement_rpc.go": {
+      "sha256": "ee529c8d419c3901e96b95dcda91deabe9599165ac67f825b39b4a28939b814a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_enforcement_rpc_test.go": {
+      "sha256": "89dddc94ac475e7fffc3e8c1c9109f4f8db261f60f57db13035dfdd1e1cf7753",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_event_journal.go": {
+      "sha256": "e748bf386d1816cacf1fbdfc49a82a57cceb2a8e64f8cfbda0cfc15831444f73",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_friends.go": {
+      "sha256": "8cfe6ad92f19e5368cf591d5f2b034543609738c0d227283ff3739714e4f039b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_game_pause_settings.go": {
+      "sha256": "c722ce309b40e0ae91c551993c9fa95dc26778e7aae65183d198988b43e604e3",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_games_played.go": {
+      "sha256": "e3c32c8d3deb23d55be842b27aa215fedd60bc2716573c7ce8304276b2872779",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_games_played_test.go": {
+      "sha256": "46d937966f8d1cb7d52e53da101e3fcc253b3a1758bb5e0b121060f108d70972",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_gameserver_presence.go": {
+      "sha256": "7b90fec0967e507c99dc53a2d4f3c6ee7508b4390214a1e18f1cb8fce069865c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_gamestate.go": {
+      "sha256": "f6994bdb60743df3062b67e2b824ea59ac7de61e670dfaeb5ba0f33c36d88758",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_gamestate_clock.go": {
+      "sha256": "8dd2d0a970cd1291f610bf56954814b05d982dba63405f16fdec7de9cda64ec5",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_gamestate_test.go": {
+      "sha256": "ffebe0329d56f3d90f353e76a8b3ce9388dc272745989d30f838f61410e0328f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_ghost_spam_tracker.go": {
+      "sha256": "2f4a64be700408bc7971853ae68a8b6cfde5c30080b92bd06cbb566665bbfa58",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_ghost_spam_tracker_test.go": {
+      "sha256": "386fb4e91270aa1002f94199894f24832ee4ac02b16df45065edec68c219b1fc",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_global_settings.go": {
+      "sha256": "6ead145af18c40f533bf4f5f189685e9caacccde79f4ea0b6deb2231638d56d6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_global_settings_test.go": {
+      "sha256": "eec5c2398c92761d98f0cce0b86d698341722603e0fa26d1313b2fae8f5c8649",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_group_metadata.go": {
+      "sha256": "2fb6f93e4b8228caf50e81bcdf9dace1c66e6d28267244e3b293cc7ed8fc9e98",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_group_metadata_test.go": {
+      "sha256": "7ebde486ae9af8a389202ee45baf0196f108b6f627026a26ea03168719b6cea7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_guild_applications.go": {
+      "sha256": "000bfba35688e6f8d8d87dee00a7c71395ce9d606127e68ddd8842955b579317",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_guild_audit_log.go": {
+      "sha256": "bbff47a661e85d23c5395614c4a4b8db5f5a17256537491e5ea620665618128b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_guild_group.go": {
+      "sha256": "7c0d0d723bb8b1e3e129f42b127c5127e35537a2d6b6e7411951ee364834f09d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_guild_group_registry.go": {
+      "sha256": "91bd3826bdf3eacecca31d921e36dca406f58cf09d88b6fa045e3c2413bfe5ed",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_guild_group_roles.go": {
+      "sha256": "5ef7aa76b4e13c3f4c225ac5661136e6e6f76b3bf6b3b46219c3f525e76fde38",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_guild_group_state.go": {
+      "sha256": "11da9dffa3d42699b36ba26f7a9168b63850a36df9aa4af3cd543b71346e8303",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_guild_group_test.go": {
+      "sha256": "56eb64f30a593bc7b4a841b850c035b00c9690732b943f0ceede464d44ec5df6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_ip_info.go": {
+      "sha256": "aef1c69b3fc731430e13e514b5400af7539989201133d2cefd32784a84e6c8bc",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_ip_info_cache.go": {
+      "sha256": "94977fde5aab68d2d5238ac22d4824254a181597d074d0abfa6cd2f7be23f05d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_ip_info_provider_ipapi.go": {
+      "sha256": "3f2d22464a542dd798a3b7fb2dd3c2bcf6b578787944c3d8b91b5354266d61d4",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_ip_info_provider_ipqs.go": {
+      "sha256": "23ccaceca3c22eefac475355669420735ceb1fece51f7f782ff2c63b774128b4",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_ip_info_shared.go": {
+      "sha256": "16c8a94adcae18f56e0ef4c5b77d9b379c1a10f0c542f460e98bd4ee463be471",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_latencyhistory.go": {
+      "sha256": "cb5963ed71adc7e57851199ec1ec61f873ea53af42e04f676256d50a4f5c25f2",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_linking.go": {
+      "sha256": "1d80a644d8b6a8023bb7bfee9d4186a1e0e8c2218f7baa5ac960b16234825b56",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_linking_test.go": {
+      "sha256": "b25c2eaac96d7a6f623f3d31637fc5b6024245df25d542137bf1a64b88380851",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_backfill.go": {
+      "sha256": "c2db10ba74d0ac4a29f7a7aca6d30ab3a743ebc0b081947bb113faf7ab190b46",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_backfill_team_balance_test.go": {
+      "sha256": "7c5e997103bd375682093576effe7b1d4ed0d8f35792d54e9519d01dbc80948b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_backfill_test.go": {
+      "sha256": "02281d9af33de51d905a1972f575a53978bc0a26f9f4438848f535127864e5c9",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_builder.go": {
+      "sha256": "df1b0028ca89a8e852c0abe5c6f9691ff64d747838b2c2fda662e9f4aa5ed2e4",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_builder_serverscore.go": {
+      "sha256": "525ec89d272caa80df7538ee79c8758b41d0495bab0ba8f571441e875134782f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_builder_serverscore_test.go": {
+      "sha256": "3589b1d472da0c0acc2e672b35d3de2c9ac8b57a5b38e1104b73cdb2cf1b9549",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_builder_team_assignment_test.go": {
+      "sha256": "0546395def253cdb86630ea965729b95e4fb9b3afae5b9bca8a8dbcc52743abf",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_builder_test.go": {
+      "sha256": "5c10b2fcfb1d76754fed8cdfc8bb080740ba3541e9bf242ba24f0796c6244a60",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_configure_party_test.go": {
+      "sha256": "771ceb38324d828acdd7095facb9332119f3ae33f78163d9661e7682fcd1712a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_create.go": {
+      "sha256": "93860c1839a0fb251379656c43be06b91e03aa308aa8b923c5d5f7b4ac1bf715",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_errors.go": {
+      "sha256": "d60d21a61384a8279b6c15b0b74c93f31202e1c69a58c2543ce8227d6b66afe6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_errors_test.go": {
+      "sha256": "3707663444f5b751168c9ff679bf11291723732f14f4e50d59136d6a4ef3b867",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_events.go": {
+      "sha256": "246c04f24bca1e23ee2cbc33772373ac708609fe95e2e47a702908b1b2d12d41",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_find.go": {
+      "sha256": "cf6a7af2f00cfda369e46981dec64f50382253986f7400e2d7dfaf57bd567b3c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_find_spectate.go": {
+      "sha256": "36190e3f0780d4c4bec33f91ef99995e8846033fcdeda83ec2d6b83254ba8436",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_find_test.go": {
+      "sha256": "6da75090e528a1d3f072240ee7650502757cd4aa766aeeaca56cd9633d79dcf9",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_follow_test.go": {
+      "sha256": "31fb6cf7696e804726264c493cdbaa93a5bde3c930f324eb3ec8583a11dd7506",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_force_social_test.go": {
+      "sha256": "e70d082593ae3c832534d8002b26112579bdf3097a2c516a256ab00c59213e2f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_group.go": {
+      "sha256": "1ea5b3f1cbe416f8cf3db90d24e0b092834d59596cfa88e964abf8d90e43af2c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_group_split_test.go": {
+      "sha256": "081f557c491eaad14623f77bc58905bd0d98abacef1b6ea40e4d80ab2aaff3d2",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_join.go": {
+      "sha256": "edcb757e29e4daa369ff6448fe6ba67007571cab5571e45913e836c1feb5ec84",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_joinentrant.go": {
+      "sha256": "cce602b461cba2d9aaf182ea6648f4d5f5dfe7a7542a193b9a7e6c985e0890f7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_joinentrant_test.go": {
+      "sha256": "e9aa065264e9180851171942a3124cb8ede83ccb1e49ac129a0445e74bcfeb73",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_matchmake.go": {
+      "sha256": "f62246a8a382420097dca3c6d0a7a81423b83a7b8d1f700d7bb0720749550725",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_matchmaking_monitor_test.go": {
+      "sha256": "cadc24ad5adead97633c59da1e8ba1db1b0bb044e6c607e8159764cbcc77cc9b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_parameters.go": {
+      "sha256": "b5656380e1aebc80f208e67f2940661f0b168e37857a980822b41a459b54bb5e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_parameters_test.go": {
+      "sha256": "2ffe56a28a4584084b510ccccd7dbd699d6c5089da9f51b51e7625cc1e2d6cc6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_prejoin_ping.go": {
+      "sha256": "053d661485f6f247d72a3a43a50743d45afc63f406246eb5122a862fbfac1179",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_prejoin_ping_test.go": {
+      "sha256": "85989a97de917315c52b531abb9fd866f76e939dfd55f42b2f6d0cb9d684c80c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_query.go": {
+      "sha256": "ad6f5ea2560ff728b4b6f1b33981e7dd0b1b0cda1100235fce45aa38cb64d314",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_query_test.go": {
+      "sha256": "612f6d1051b93c48a7f4bbb55bb39c06fb85b41c3d4c4f5f92ad7a6595cdd0fe",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_session.go": {
+      "sha256": "fb3b1d08e15acc192b7897e6226977d412b0b39c4467fa219a60167219b85efb",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_lobby_status.go": {
+      "sha256": "8f5893a5d3f1ade1a80e22ddcb36eb6e9ba061d7874c9ceb1a94c92df04c61d4",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match.go": {
+      "sha256": "e6e323f77a953f12749ecb197169aa78d44914a412003ed094a7f0d6bcbe5209",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_data_indexing.go": {
+      "sha256": "d76838f4f5dbb029585bc7a2ab6c09a60d99ff8364024f7f846f06b35ac8e7ed",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_early_quit.go": {
+      "sha256": "84cf7f2c2cb9ee59c353adab4740f9f6db2f9198016112faf5ae1d10f206db35",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_label.go": {
+      "sha256": "cf0eff8986159e1a9510989d23b79f78949e85f45a4298cca852a1c3a464748c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_label_cleanup_test.go": {
+      "sha256": "9e3c1a63be979d077f220d281f87ce4b510b0d0754b7e4c5fcfbf30ead436274",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_label_query.go": {
+      "sha256": "0ca68eca7cd33bb7e8a1428a0ed4c3adaac973fe92ac10feeb243931b10e208e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_label_test.go": {
+      "sha256": "4fdf4685cfaca5b6ed07a13ddede44c8e7a763bf40fda02d7f47316a4f25dc1c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_logs.go": {
+      "sha256": "36c25c09cfdf373144db7010ada6705037eda61f3c352bc976f2bdcda3737403",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_loop_blocking_test.go": {
+      "sha256": "5339c915fef958bcdbb59430f3131fd170a0e73a69fc7204e52c56a674647a69",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_metrics_test.go": {
+      "sha256": "564d8600ebe64753bd3b203540940a7ff3d6d13d96ceef00633a65a7c7ff0287",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_player.go": {
+      "sha256": "3d4614a1f8631c3f1a2044fea47a54fe566e198b57a4d14de6ae5333212c3f4f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_playerupdate.go": {
+      "sha256": "046320a2110f2d6772517660c7e4562e19f1a90e95a4c702516064da4c00c960",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_preemption.go": {
+      "sha256": "b396632cd4750a882347525afe9709d5cdbe2a4c22d3c7e6d9618045af79b0f9",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_presence.go": {
+      "sha256": "7478f681511939390fd9e90911230185104d4006752715536663d5424bc4b8ef",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_private_completion_test.go": {
+      "sha256": "97f9e7b2355585607a4d30ab36870d05e7d648852cc62fb4e55288f16f02e4c9",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_signal_guard_test.go": {
+      "sha256": "5ffe613462d8010a70881a363cbebd8e7ecdde3d1c73a532cc2135f8ed666f07",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_signals.go": {
+      "sha256": "fbc63cf282034005723a3c2761378af58697f76ea4184aa189b2623a434e00ed",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_state.go": {
+      "sha256": "7453e52c299139e43a1964615d36ab3dfe6e7dff9ba7c7e6401db84417a7ab41",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_state_test.go": {
+      "sha256": "acfbe4c7a55ded0b4204e7b883716398c184f2a3ac5002089e324c0364aed3b6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_summary.go": {
+      "sha256": "a40d716e2de31ab044d7a3bf57b10a6ab510f1a891dffe7417832001e6d80f71",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_match_test.go": {
+      "sha256": "86869a9ed7a0c44614c3a62c2fdc4f8c22f931e224cf59d35ac6adfea00a2608",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker.go": {
+      "sha256": "015627042685e97d4a99e43bffb206313ed6f08b394c9c66b3a27fd1a96c8922",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_balance_test.go": {
+      "sha256": "5adca0185197446338d7730b6d5d80bada824c406f3241c0d5047f5571d93d05",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_crackdown_test.go": {
+      "sha256": "792d1a31244de1eacbbf90c2df1349df0c2a6480932a60bf0c537f6aff9fd1f1",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_divisions.go": {
+      "sha256": "c645ce23fdc324d9798d34882e948e2cb96fb1e0078f3a8d8dbd8c50f43096bb",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_divisions_test.go": {
+      "sha256": "26720f7507b90465510583019e9a3d80f39f5e3c27767d484b1c285575af5b29",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_flat_test.go": {
+      "sha256": "4725823a4fea55212d8f90c2eafe8568f5ba1a16900b9919cc72b703f5ec2ba5",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_integration_test.go": {
+      "sha256": "cc1658a6675529c92484788b22f40d109cf39b2e04322517e26f0f2746078377",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_prediction.go": {
+      "sha256": "ff0690a89fe95f61bd6782a18712ca6a601b157e89da983d8ffeb3a6e9b7a12b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_prediction_test.go": {
+      "sha256": "1f680683edba90fa1ebf03d638113f906dabf622b8f264d9c389b7d3ab0492a3",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_priority_test.go": {
+      "sha256": "02fc6e31861295bbee56618681952b2377be9cd59311119a1c73fd5f9fcf4b8a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_process.go": {
+      "sha256": "8f8e40cd92edda8124894da052bc56c9557180bba1c6db6f52850bde90a4a8b9",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_process_test.go": {
+      "sha256": "9110e797491163169ae60e55b18ecc6e51bc853e73c62e5561da704f3662a2d1",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_quality_floor.go": {
+      "sha256": "86750b56f07583b496c4fab3112254eab9ae3c2a6faba26299a279e2b5ca5b87",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_quality_floor_test.go": {
+      "sha256": "8be602df4d06a2c2ea84f64b6fedda860880a2dc0ec0ce41a6b8365f1c478bfd",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_ranks_test.go": {
+      "sha256": "0b0d4d1f5fbec17d7732f29ccf38d3ed9e3587229f0a04824e1096d25f930f7a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_ratings.go": {
+      "sha256": "5b1561587dfb2b606c0cd9de637421df2abfe4e6158b2acc6a348f0564ea9d96",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_ratings_test.go": {
+      "sha256": "fe18740a33b245ed9acc13305049077eb861ca7500356b04688cb2c471196118",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_replay.go": {
+      "sha256": "3853614523495b2d0b861d8c758d1463d64e246ebfc33d2e4f8584e3635a0bed",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_reservation.go": {
+      "sha256": "199621947a70c610026170038f45f382ec37f3c902cb498a3a5ad651009cb6e9",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_reservation_test.go": {
+      "sha256": "2103336eb0ad212992951fd113fb104b89de9d8dcad4bb71f65d08f7ac60c8e6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_test.go": {
+      "sha256": "270105481121a3a7c8d3b14b7bd76a453ef392fa98d756f9dd85dea3edac7296",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaker_waittime_test.go": {
+      "sha256": "feca82542e86a3a103e687a02b95f792847b742077ba556893a11c8686cc55ca",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaking_credit.go": {
+      "sha256": "e0b4f8a3cbc5f8adad75d2b3211fe8e209c05a5f1b39e859e42ec308a7ca41fa",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_matchmaking_credit_test.go": {
+      "sha256": "2a4a0c7f6cbc5d9a596d9ee4761faaf4866a7d25f5db0736aeb26921a1a8a23b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_metrics.go": {
+      "sha256": "40bd7d50609729316c3b2efd6c342254936daf3c05d665d72537ad2c472ac85b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_novelty_vibinator.go": {
+      "sha256": "590d5e2e6baf072f36bbe33234032da7fb5ac4f4d0bcce50a682ea3058490605",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_party_system_test.go": {
+      "sha256": "48672ea363bfbe7378da7566408bf7bc55a0d95d4abd6c413d47bfbbbeeba8e3",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_pipeline.go": {
+      "sha256": "36cceffff6ca818391e27c113671ea0da8e261e8513b4e1c1a0cc4bb99d98448",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_pipeline_config.go": {
+      "sha256": "aa5814a7d9813f771dbedb266f1537ef5adc7c3d19ecb623c4ca367d8a0db453",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_pipeline_friends.go": {
+      "sha256": "d6d22f56598090f73f70c80f19ac6ba890b236cd2ecdf63872262909176e1607",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_pipeline_gameserver.go": {
+      "sha256": "c0e34a3adb26868a1d11b06be08c7e581b83d20cc1b516aee7e1915b452d2a38",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_pipeline_gameserver_loadout.go": {
+      "sha256": "d55115c08e363c0097bcb1dedd405433f24243ee0f736405a5e17b62db4b6de1",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_pipeline_iap.go": {
+      "sha256": "f8293d35e156cf21c5768ababdc2d2556b447cc2c080669772a1304fcb865fb7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_pipeline_lobby.go": {
+      "sha256": "de772a26ca39a7e461d993c787672002489885c5503fd4f76ec8317ad92e8aeb",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_pipeline_login.go": {
+      "sha256": "143bcfa89fc686b916a362bf9bcf9f622e07b826387cc754eb100523f352cb56",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_pipeline_login_displayname_test.go": {
+      "sha256": "abe9a99a89b028dbce178ddf937f02a4a8ff2515c7a28b9233eff0251f7104b5",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_pipeline_login_test.go": {
+      "sha256": "58bb73aded977412c3dd44fa6bc4f5812b2fdcfe4a585e5dabd7db6dcf856b4b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_pipeline_matchmaker.go": {
+      "sha256": "85babc750ad87dc55c3f9876cbc80c463de93030f17cba0f2904aa0e01f6642f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_pipeline_matchmaker_test.go": {
+      "sha256": "45c4318290bd8ed5b49b65948a15e80294a677dae2805a26952664641b78d576",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_pipeline_party.go": {
+      "sha256": "4359e38dccf29ad67ea774738388754c302e719a220161bb5771cb1933d5edf3",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_pipeline_test.go": {
+      "sha256": "d5c65003dcef43a8c690d59ff9d0e39c6120aa735df68ec9d92201d83324655c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_player_archetype.go": {
+      "sha256": "ac4ae3a685887c9f1cdd66bf754ef8aa897c70fb39b39037f986391ec6860c69",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_player_archetype_test.go": {
+      "sha256": "c6a923b7f591fc8ae6ad3caf03a0c90ae4937583e88667f6f60a0693e43d3e35",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_profile_cache.go": {
+      "sha256": "dd9b3fd97a026905a4caf7938810ccf3a46bcfcada5e6c27cf40ed4500f02d16",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_profile_cache_test.go": {
+      "sha256": "892e3d253e6aae0ba97a21cb10591238ab0873d19541956cfc710e1584ef39cd",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_recent_match_results.go": {
+      "sha256": "98d3f6aa5d14d349bc3f01ef8ae74dc434cf19cc3b35c29186c8637cbdb2bb65",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_remotelog_journal.go": {
+      "sha256": "986708831755d8ef651ef6a9e6b641869543fad7d5f54de4b315b4ba91b06c91",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_remotelogset.go": {
+      "sha256": "9988d160d8781ae24721fd595ff11d1e434368a406fe9d470804798043b964f4",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_reservation_integration.go": {
+      "sha256": "fe09a7fc595e4722027392fcd1e9179deb221b7e231ede1324a4e7ee8f384e0a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_reservation_integration_test.go": {
+      "sha256": "0de3017880191843826cb761750613ec4179a4b93a7fcc9fbad876ee140d3959",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_reservation_manager.go": {
+      "sha256": "6ba8d44c2406976a6d1f530e0ee00bddaca94d8850557c6742dbdee5b46c0e0b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_reservation_system.go": {
+      "sha256": "27b9045f39cc6b609fdf7ebdab3dbf9671dc4bfb445030efc21a090567466029",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_reservation_system_test.go": {
+      "sha256": "543908978f5c586bd292160fc37374d2f365ed8bd2643de3e3ff95cba4442a99",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime.go": {
+      "sha256": "8c39bc260c09338a5856229cb79d86397bd925e166eff2876049b301689e0f8d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_api.go": {
+      "sha256": "25b822a01aaac46398980e88cdbac69f451bc6c58d1d9588401a4e35755067bb",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_api_context.go": {
+      "sha256": "5acc4508b5903272d01b25686beadbfd53ac0bda01602b99b3f9be364edad485",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_api_perms.go": {
+      "sha256": "8021f08aafab7834cc009420ded0d4ff5660ba624c865868cb1f43825523fd45",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_api_rest.go": {
+      "sha256": "1504d92875b732cff3226ef74d9b4d3917c18d75ba19556a524eadcb67e50d3d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_api_structs.go": {
+      "sha256": "fde646d596057c8b9062b7b83733d03b7fd36dd84dad73c7b497d1396404c1f4",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_api_token.go": {
+      "sha256": "75ad87e328ea4c68155851f3c2ef1b3e6b257f434a55c35c977fca4ef190a8a0",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_context.go": {
+      "sha256": "83209e6690ec319b1e13822b1157cb8d2df5ac0a875ec4747177eb0ff9696b76",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_event_match_summary.go": {
+      "sha256": "6dd4f1a0ebb0182257491dcb5e48aa55c8b784639264cdd6db0ae9221987214d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_event_matchdatajournal.go": {
+      "sha256": "fedd6d7eea443ec12e0382b95e18f895828410815bef3003eafc06076036e150",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_event_matchdatajournal_test.go": {
+      "sha256": "1e6d71a58222446443746889f753bec9960a4764a003813fbaf2423712b9cbb8",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_event_remotelogset.go": {
+      "sha256": "2d83a4f056c99702f62c4057deeb91bcd9f7c23d4d10c83cfdb53dfefcf75d68",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_event_remotelogset_backfill_test.go": {
+      "sha256": "e3c944c1036c5a69247d60afe94773391fc83b189df2158432342145ce0ca10b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_event_remotelogset_test.go": {
+      "sha256": "3e963861a347627e6db81be180003a747dda6a29e90b77fa888aa8a6d01bce3c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_event_user_authenticate.go": {
+      "sha256": "b9601000c4eed6e867a479fa1bab03bba935aeb099714198bbfd6bbec721ff43",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_events.go": {
+      "sha256": "2e6e433e7326e727da76f33079f8a2a8c43247ce4a0f32647e21d1d770446e78",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_events_match.go": {
+      "sha256": "1f58884d3a11e968aa24a145e9ff8aeb3fec294388c1666fe4a2a0ac0d2b74f6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_events_unmarshal_test.go": {
+      "sha256": "cf69a4b77d309e8797b9f12173f41a5053df32e5ae297ce8f1ad2825f8b1a568",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_migrate.go": {
+      "sha256": "b1163561c5c894eb2a76b0ae7f996bb3f83cc42766759769479ddff24f7a0f3f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc.go": {
+      "sha256": "a7ab5ed0d53e31b6119210b204600ae390a30e600bdfea30539bf5067349a120",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_admin_rename_test.go": {
+      "sha256": "fcdb859df8b22cd16188d23d47117a5995138f6a7d3b851753a328cc92688088",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_api.go": {
+      "sha256": "3315e12aa4c5c152674e1c44bd816e1565b70c7df5f45738dae69b49082d2329",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_audit.go": {
+      "sha256": "1af054baf49e59da0665351ec2a0475ddaf057ad324df64ab63a9fd96b84ae1b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_break_alternates.go": {
+      "sha256": "6c04506f508b00e8d61c6391bf006df180de4a036328bb7f14fe3ead96690c1d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_break_alternates_test.go": {
+      "sha256": "b077e4ac581be01e9ffc3adf6f2879da28bd13d07e87da92c530b34c126da75e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_cache.go": {
+      "sha256": "8bceee24c72b6eba6bf069520c25e108e3c0e7f785262d33c7bf0f01c1a660bb",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_cgnat_cleanup.go": {
+      "sha256": "ca49c51bffdb81a8d9acf0a7edc0b37fc9bada0d79112184a1372ea40396b8c6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_earlyquit_history.go": {
+      "sha256": "30dd45e23a555b3880b75dbf4967142d6d4c5e22eab5ea615f2ed3c84e74b0a5",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_earlyquit_manage.go": {
+      "sha256": "167bface4227c55170f00ac658782d2b25965748f2f73f41f221dec2e42e3230",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_enforcement.go": {
+      "sha256": "e41887c61befc8b1cfca8c53874e340795b534800ff07f362d4e028ccc087d7f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_enhanced_allocation.go": {
+      "sha256": "2a2bad2f6f58e07dd6ebc0c9d8eb33eec4c8a994101b778cede99e6d0efeb887",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_force.go": {
+      "sha256": "bdb63ae69b54512c2ead81fecd6262e39b95657975fa7a129e87d43ff03515db",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_guild_management.go": {
+      "sha256": "33832435ad082e8b09c294b4d4abe43ba4bd11fe58f593e8753731127a0ef20d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_guild_management_test.go": {
+      "sha256": "19b0a031355782ae6570a35d26adb7257114e75816bf23b1fb5af3dcb1392532",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_guild_rename.go": {
+      "sha256": "6758bbad895512dff082626b66a653fcb52de56e8563f17f5a74c08a91a02570",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_guild_rename_test.go": {
+      "sha256": "6fac127d9024b971cf4f0940a93e67ecabc44b5e82fac34f09be995ea67517ce",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_handler.go": {
+      "sha256": "aeed43506b49241f7096ca07aef6b6314fb2cc764b9eeca8875fd994faf7f545",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_healthcheck.go": {
+      "sha256": "cbeee45bc9a294207d2bc1addfb4c64c4f7356c5bb64dfab78083353cc98ed85",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_impersonate.go": {
+      "sha256": "1021ea9e989d6e143ef109e455fb3f7c71cffa35d5b776926e0c100340285ff1",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_leaderboard.go": {
+      "sha256": "a55558e98375c761041c6be9baa9534a2ed6a7888747d392d69a5ac6d6f6ffdc",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_match.go": {
+      "sha256": "030019f821447949a48515f121136be2d6b81ee2b063a2a5220eaf6a162776ac",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_match_status.go": {
+      "sha256": "faae48eec8ed01e47b18eaae9b7e710fc8e27abf8d94defe181a8fa876ee94f0",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_match_test.go": {
+      "sha256": "f46509fbbdf40a3f9364e8354ac64996d9fbd9a98b841c2061f2b5a45abc2974",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_matchlock.go": {
+      "sha256": "860b5262cd3a3d0584f6619eebebf22f64b7c2f32952d2a1edb8840f222e19da",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_matchlock_test.go": {
+      "sha256": "0a381e4f44f059d899eb0ba334022e0e9c997833e903706ada8854ec5064fef5",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_matchmaker.go": {
+      "sha256": "cbba846f224167226380641dbaa811b879fcad398b394c817ced65b86c4f779a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_matchmaker_config.go": {
+      "sha256": "986f801264448cc3dd710da4dbd19a160131f77977ebedef46fdcfc9fde85d8c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_middleware.go": {
+      "sha256": "c6f2e84e0d83aca67a804e92848342c3c7e97c14b7eebb5fe8403afa82573a91",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_middleware_integration_test.go": {
+      "sha256": "e442662cc5f2ad379e12f5cba44d2891eb899b230b0a837ce6edc013b08db9ea",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_middleware_test.go": {
+      "sha256": "c53d2203724f2e919cff8b61f98870e22672c8fbc35b7cff7b603e40a1ef44fc",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_mmr.go": {
+      "sha256": "237bcf44e45d78c06b230a30c768e1f7c14774e66274b34f418a46bc7b57f033",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_mmr_test.go": {
+      "sha256": "79d76d1adfdab6ca2f415244c62626c2053e3773a6a66fa75fa05d85f4a0f2e6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_outfit_test.go": {
+      "sha256": "e8fea6282fd88a19ce518ca74d3c4a81082ff9c57e34d9a170cbd07de7daa53e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_party.go": {
+      "sha256": "3ead92e84996e6d905d9d7762321c8fa6b8fdb86f450dbe8d6c2967af5c5552c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_party_test.go": {
+      "sha256": "fab474d05de0e5fe624bd4da3cdc04f8d6a218bea5762dc172bf730e1e08bdc2",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_registration.go": {
+      "sha256": "f5371b8e4fdcce82d7ef08d487959e4291af266c2336d34aa2946b3944a68d65",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_security_manifest.go": {
+      "sha256": "b5d63bbddc773396dc0f18c5292fe7a4addcf127bcd64f36ddd7e445ca9a24aa",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_service_settings.go": {
+      "sha256": "129369cfc36cc4aa5e77e3587fa089477203571a13d91c0688f56a6f46f65d4c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_setnextmatch.go": {
+      "sha256": "cf375816d1dcd42f7d8451be49ed3cd207efba077d53bf8c9466e7c4e77abbc0",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_stats.go": {
+      "sha256": "52200a6bdc69efbe7b18cff699b984f56cebf7701e5eef9d5f9d83b2fae2fa3a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_storage.go": {
+      "sha256": "e6894fd820828af4255c2757fea938a6c0c2b8a8b59df971034459fcaf8842e0",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_rpc_tot.go": {
+      "sha256": "d41d121017f8c6f10d860bcd314aee86d9b9073fb45da8dbaa1d0b85ffcb096f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_vrml_cache.go": {
+      "sha256": "fb596089583bceb4909c2c26dc2cc74143866db6d1688e70b32e1df5d79597a8",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_vrml_entitlements.go": {
+      "sha256": "a4ba842e1d3aa11ccd0cfdccaa8f4e98af3781468ee092042543f1b0f87d8a34",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_vrml_events.go": {
+      "sha256": "2a5493f419028462929c4861df5fb2ea72e6c72e22b457d2dad4755ddbbe4a2a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_vrml_ledger.go": {
+      "sha256": "50142a3914ae29d7941c0dd97b1b1ae75ce0715524cc55db8fe62a235261d24b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_vrml_oauth.go": {
+      "sha256": "f972cda5e456fd85cb981a8c6f4590a909d9ec891fc74d7b33df313966e3e0e3",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_vrml_outage.go": {
+      "sha256": "c6da813c17a68d7a23a33144562657300e9218bb3a6dc6c6388db69424696aba",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_vrml_outage_test.go": {
+      "sha256": "1bf0df45f47e48f29a9967b00348155accdd8a0513c4cd36bf36780b018207c3",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_vrml_types.go": {
+      "sha256": "d79fa2fc9b3cb5df2df4a057a9919bbd63771ac9480120a525d72776db73a893",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_vrml_verifier.go": {
+      "sha256": "f650992434fe64555320c8892a137ae37a602e8af0ef731d526b4ee6d734af2d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_runtime_vrml_verifier_outage_test.go": {
+      "sha256": "c6a9603f80cc4ab1b0415d30284835cf1bc0574dabb3e28bee35ca0f7dc74e9b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_server_profile_storage.go": {
+      "sha256": "4e1c5b40c66d4b71f8a6696b3996ebfb834351fa46e409d91cb1bbe9bd21bff7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_server_profile_storage_test.go": {
+      "sha256": "5c28f663f913114aefad2fb51d03742b9ace740e6dcfbddc2d4059613a6aaf32",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_session.go": {
+      "sha256": "0532257aeb83b86d30fbe824f664f3efc602916ec9051ad794de33b20387186d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_session_parameters.go": {
+      "sha256": "348bacb34c8bdb2b1f4ed3431d4dbf8f508f1e02b7b1f4819d6497032319b0d4",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_session_start.go": {
+      "sha256": "22ff6b50f3654b10a7a1ebc28dccb70fc642ad6f0ee09747474a721d5efd3597",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_smell_regression_test.go": {
+      "sha256": "6b36f287b49ca91b5c761612a71ed12cc39a2a29ef8b066f4da4aec1b8b1de9b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_statistics.go": {
+      "sha256": "d547b3f69b1ba63157b109711bd75859f05eb27e6c02425dcf138bc27b5ab434",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_statistics_extracted_test.go": {
+      "sha256": "0358a6d6bdafa6dc2daa45e6cad34fc78c40d390bcd1fd5c93531d896cc046d3",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_statistics_issue_test.go": {
+      "sha256": "f9d3daeea82d9de1c5a84c60a38e7cd977463b41beda9e4964cc448485ad825b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_statistics_queue.go": {
+      "sha256": "1e020773a9bfe112cf03bde6f032ba1be2abb42e33dac7127158e550b24fa47c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_statistics_queue_test.go": {
+      "sha256": "719d2bbb9e17ea3812a6bddfeb518603217fe866db4f15f0aa989d1b4860fbb7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_statistics_score_test.go": {
+      "sha256": "6d91d5dafe7501de4d39b2c65e0d4ffd58da83bfad7dba76329a971f83a30874",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_statistics_test.go": {
+      "sha256": "d02b2865bbbd3b071e52844c4a1ff8ffe3c06548b4ca2716d08266c9a6e14ede",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_storable.go": {
+      "sha256": "8e2348998ecdf51bdcf8c238ebafeb1c6ce11c8d0e70b4fb41392834dc290b30",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_suspension_enforce.go": {
+      "sha256": "9987b6f367a0f7b107d0170bff56e6f87d2dc97d769d5fd1394cb963d36b55b7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_suspension_enforce_test.go": {
+      "sha256": "ec32c4f5433bff33890888ba6daa4c2d31fad2b4e64e6b6e444aef633c0d97c4",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_suspension_profile.go": {
+      "sha256": "ef80f1eb497c10845d5bd3ffd429fb25c8a56ebcd5bcbe6df866f2162706bc73",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_team_bias.go": {
+      "sha256": "2c06ac120b6c39497eb6dca807c5ac675d2f2fb921b9c1f4698b0fbda878459d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_team_bias_test.go": {
+      "sha256": "5ffb4619a881dffabb6b6af04c766ec56789bb5105c99de3a96c406a8e2405e7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_team_composition.go": {
+      "sha256": "bb42551d7ece82353c78902329ca2f141ea268eaa97adfcc0adc484145a15e00",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_team_composition_test.go": {
+      "sha256": "8ec0fa528f5ce8222c51af2866e83bb37dc80d058a4dd0018f93f887319af1a4",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_telemetry_api.go": {
+      "sha256": "9140c4c773dcb44db15f014e915c38893ccdf94beb03f4a95e07fdc951a09d1d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_telemetry_integration.go": {
+      "sha256": "8a08d76abe112320d5f2748c7100d039d6be2ed9de5a7f9e100dcb111a8e4f7c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_telemetry_manager.go": {
+      "sha256": "2e45e800946f24f2b6a5661ba0f6ef7e4dd44596d59b061544a8a2251b0b943c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_telemetry_streams.go": {
+      "sha256": "bb075087fdf892a3788291a3b945d4fb239f672cec6a898189cbf87d7ae1c481",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_telemetry_test.go": {
+      "sha256": "bc97874c7361cb24c228a1430b1bf0953a88b3233800a67a7191db39eedccbb7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_toxic_separation.go": {
+      "sha256": "8d69c1dac75974c068ea6c37994ded2c74f07cb911f04fe39be611ed111e8983",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_toxic_separation_test.go": {
+      "sha256": "2a032edc0c342a977ade35021cac61f7e5ac629a9703d7d5b6d0a1b46d1910cc",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_unreachable_servers.go": {
+      "sha256": "b3ab63376c4eea51f42def6bc87dec8238fb38b2d9ff06d846f9a3ad9c76b7ef",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_unreachable_servers_test.go": {
+      "sha256": "4d4afd84ac9cb5e1342dff582c1a0627b859bdf7c10bfdbcc86e2f471bb47207",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_voip_loudness_test.go": {
+      "sha256": "e790ae0c29b9d9cf6ef07009b016a3ee46dfef148f534287b2b4df54af06aa4f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_xp_level.go": {
+      "sha256": "55f7761a40ef0ad83cd942d8e7b7d9d96494704e48aa43a7b4edbcdbe4cc3044",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr_xp_level_test.go": {
+      "sha256": "914f0f345ea9b25417fc0c4f3e0c4d71423ee881e0ac69d3cf3fd8b7727f3a18",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/fleet_manager_callback_handler.go": {
+      "sha256": "7a553609acb405d26e36f77fb15cc1c7334024c9445d6f23a6b6650951db5f2a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/google_refund_scheduler.go": {
+      "sha256": "7624faf183951fd19b43df1b4af49d4cd059d91fe250bb4e25bab45010062d1c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/jwt.go": {
+      "sha256": "f50b8ced87d8b457714ee189a6dfdcee37e78fb57dfbd0b93ea9aade789f8cd2",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/leaderboard_cache.go": {
+      "sha256": "dac371b65cf27126242e1d02e2ab72872cf7bdaeddda05383989e0d4018f0a92",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/leaderboard_rank_cache.go": {
+      "sha256": "a2812242fd06f803ac5e0f21e205deb9ce63847efac79ed6e3f30055c0a2b6fd",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/leaderboard_rank_cache_test.go": {
+      "sha256": "2d66c3463b3d1c28e88c35b98840abbf9172cac01fc38b31a87132a8fd41af8c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/leaderboard_scheduler.go": {
+      "sha256": "973e90692ea3a27d528c2e82e5b56befd3f6f14dcae0955366b08134dbd1271a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/logger.go": {
+      "sha256": "625f31655da52c7ef7b815e727e580c71d3aa6f19a6b59f82a74679b0a7fb08a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/login_attempt_cache.go": {
+      "sha256": "973aa42c12a484be38c37c23d73b45b2b5bcc5e172511c23c68c6aa99cfeacfa",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/map.go": {
+      "sha256": "ed65a819f77f657a6b9bbad561c57a7c17ac06cfc1fcdcf6d6b68d1bf939f723",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/match_common.go": {
+      "sha256": "da029a70a8cd7c76af76fdc2bca585d1080af1998cfb97f240ec7f36032768f6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/match_common_test.go": {
+      "sha256": "1038e237626377119bbc6079a22b26ca36591e9c371e4849d822b546effcf43e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/match_handler.go": {
+      "sha256": "46a6a9c7a477b218551850352be780b71bb9a957f8c9390235b532f9f41b365b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/match_id.go": {
+      "sha256": "58b1d0c01c1792b124d00ac0ecb718a7cc3b72796027c9d2449fd44cb989b874",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/match_id_test.go": {
+      "sha256": "61ec2cc036b94a338760005d2de1ac9be025e59423147325620d413d4192f7b3",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/match_presence.go": {
+      "sha256": "3f7152f37f15e770de43a7b2169a40222084f916976cd31633227ca42d3809c1",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/match_presence_test.go": {
+      "sha256": "f728b10a1f9fc10a7f3661be402b9f31cf3ae209cfcf10e516b9343160356f28",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/match_registry.go": {
+      "sha256": "f7cfc38b3413ec38a0956c71431e14ce966fd0027335c4d3838183fbc7265764",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/match_registry_test.go": {
+      "sha256": "e58e79ae5d125977e64ab0efc2178bc308c4d7c0abf4068167efd5ca4123fae7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/matchmaker.go": {
+      "sha256": "d5c9cb90f379ea5ca3f6a746b07d5fbd09a9f3d024dcadb17951a3eef78dd81b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/matchmaker_process.go": {
+      "sha256": "d2c1bcaf477db687a7a49e9b3835b7cfc28d038451de9b8e0c91bd593d057065",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/matchmaker_process_test.go": {
+      "sha256": "3c03424c0add1427c13ca4ced916369d98c6a3dae4652182204aa1eda092ea62",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/matchmaker_test.go": {
+      "sha256": "df74d559c9aae96a7932c2645ed0867524717890b7f6d5c9329bccdece384d76",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/message_router.go": {
+      "sha256": "87d4205377e090d955b3965bebf46841eed40d57abc9b8b3b06923da3c4f4462",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/metrics.go": {
+      "sha256": "f287e137ca4d2c27bf0fa736c6b69c66b2e76b00aaf0e6862a3145118ddd9f4e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/metrics_grpc_handler.go": {
+      "sha256": "cd596e9f03e98a3de79e290390f106f5f532c3815a20f30e07e5287584a12bad",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/mfa.go": {
+      "sha256": "1176822e8ed97f63915852be970fa97c381763d0d9e398aeb6c5e61bb02c5a70",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/nevr_session.go": {
+      "sha256": "93900979b71013fcc7758139cedb4a650398ba2abf72f5c1f2e7e910f8ac049b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/nevr_session_test.go": {
+      "sha256": "eec8e420905ef7b5b16e68ee3d7b4dfbc565ff667698272676fd97848db429b7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/nevr_ws_acceptor.go": {
+      "sha256": "921bbf6d45def548d2406596edce618b72f59dec709a3a8df52bb55701cd57c5",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/party_handler.go": {
+      "sha256": "43141ffec72e3a51bdac65cc1ca983d45f12d5bcd65509c94ebb0d9422475e01",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/party_handler_test.go": {
+      "sha256": "5434ff6cf6dd995483b9f7a08c3e8f848bd5c9542d7b559d4a0e0883362fef1d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/party_presence.go": {
+      "sha256": "954d58aae3b772b70aa88139ffcc7c6e2dc778c28c6bbb137e45ce6a46d7300d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/party_registry.go": {
+      "sha256": "056871f3ce6d069f5027f2bb5070e04ff86bd892e90964585b3b8e2c0c2ae1af",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/party_registry_test.go": {
+      "sha256": "ad5003dbc78b85a260856d273a7b0dadaff45c5a63d7ba02eb73d1b2da1147db",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/pipeline.go": {
+      "sha256": "711b63edfa75cd73e4540c1c24dfeb1f9edbf2f85918c0fc7ba0554a31c3a973",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/pipeline_channel.go": {
+      "sha256": "802aa3613e0b0b9e74f137b82cfdfef05ad4f94e043e144d9db3ac17fbbc75f6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/pipeline_match.go": {
+      "sha256": "260cc2526f10ce5d3ebde7b6e7fbe254817d5d778ae167e0b39336e499726110",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/pipeline_matchmaker.go": {
+      "sha256": "481781e4e2d78d1a3e4911f531c91dfe262f0045992ab408ac666404a3cfb7f0",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/pipeline_party.go": {
+      "sha256": "421b332be696bb53a47a17332698a7c31c23e2e7c9b9e1086c1073b1b400415b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/pipeline_ping.go": {
+      "sha256": "cbdeb24168cb1210ec796effc428b011acddee693e92fec0388a60bde751d628",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/pipeline_rpc.go": {
+      "sha256": "17e3eb14c3863401fb3a3be7c9c6e93459f6998c6e8235d6e9cc4f827ee83ba5",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/pipeline_status.go": {
+      "sha256": "4f38210e45cf9aaff330bbd367826a33ed69173cb9baed654ec25a01ee59e215",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime.go": {
+      "sha256": "cb25ff0a684229f35f78aa57ff6d258dd404aee30e3893511bb2c601f874b673",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_config.go": {
+      "sha256": "dd9aaa98dbf0f59a0e25593a0c0ac543acf6ea7d2fe288fd4d1a8f592e904bca",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_event.go": {
+      "sha256": "99ee2546dc27c575aa872dcecaec3f59fd5d7d50cfdf027c11fd89247b04a62e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_event_server_profile_update.go": {
+      "sha256": "7688c4b1a4402cbfa14c3a237c7a67a97ac87425e54e9423b0eb7c1f2aa12765",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_go.go": {
+      "sha256": "01338d32d14b5c7feae10a6236e926a6b92cfe6f36f2d9a76b51b1dc56bbe0c2",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_go_context.go": {
+      "sha256": "9b5a66ca22c4515c77cdc16c1752f2800c3ed986b301bbe0299e8da27f997489",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_go_logger.go": {
+      "sha256": "888f983a5d2c076702f3c15913679e281563bf5f0f73eb657c2fcfb6c6c20ba1",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_go_logger_test.go": {
+      "sha256": "5855acbbbd3fdb9c7a5c5f921671da95e4f27e01eae98e67cbb5caefaed03df1",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_go_match_core.go": {
+      "sha256": "f9bfb09be6c91cbc2c38d4f2d58f49d5275bfeec05bc9e54d41facdc4a973645",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_go_nakama.go": {
+      "sha256": "518f30f5976bec8dc097fce46e9519124bb5501c08f39bc0e5f7d71cb19b477e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_javascript.go": {
+      "sha256": "ad125b25afbad1008c71a1df39f9b3317b8bb3be41b221868986bcb22f39a894",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_javascript_context.go": {
+      "sha256": "2bf26dc24250e4a19c5e9c5ea97a00cb76fb1921720b404c07c8e79c28cc9339",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_javascript_init.go": {
+      "sha256": "bb6842be01118f415deb70a82bdf7a2b6edf5d98804c16bb2aadcf81b1847886",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_javascript_localcache.go": {
+      "sha256": "613559e991ab883645e3c4ad5c4b60d5ea04d3bac45ce8435384acaf7cc67395",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_javascript_logger.go": {
+      "sha256": "98f7c2c528d1211c3ca6b6a488630267266f1cc33a84d7eeee07d35ba503ff98",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_javascript_logger_test.go": {
+      "sha256": "404d59215246c2ff5a46fdcdef5a5e38799d3d2ad5a13585ecad63b884633833",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_javascript_match_core.go": {
+      "sha256": "c92bb1a76d4ca793fd3e4e59eed3341b0b14b68dcdd97cc5fe217466698d1d07",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_javascript_nakama.go": {
+      "sha256": "e1ac710c2790eb07fa4a1e7299c3d1d9d09d67721e48d0d960a30c6f6328ced7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_javascript_test.go": {
+      "sha256": "a49b27a2bbccdd1bde423c6897a70e8604892d1f38fbdc44099fe0c4a52b36c8",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_lua.go": {
+      "sha256": "6d74af6dce0868f0d29bf425beca82601a52825b9a8c81618620c65e51414ba3",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_lua_bit32.go": {
+      "sha256": "6ad7ce039fc9d9f470c14cec37956d50084f78de5da09c8217b34467059a6e93",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_lua_context.go": {
+      "sha256": "ffe6a93e7286072533f8f840ea062c74e0c06eb8e928c99158223c976ed3aa33",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_lua_loadlib.go": {
+      "sha256": "df0b3957d6f702f7fc74c5c883788d9bdfce0b2716db51f3c1eb097188481d3c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_lua_localcache.go": {
+      "sha256": "ca1b00b330e2b78f573922875c0b6a7694a7b77cb20b65de107183f9e67f44b3",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_lua_match_core.go": {
+      "sha256": "169048e5c0d8366b1757d794b55332b9b34f350d2e14b4714e7ff3b280845bf9",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_lua_nakama.go": {
+      "sha256": "4aea18692399e6837f07eef854579bf7c2bc62812404bdc7a90ead6484b1e31b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_lua_oslib.go": {
+      "sha256": "f3418c2a2999722cd76d89e53b1920f8804c1b135c310132fab32dfe5e510a06",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_lua_utils.go": {
+      "sha256": "e7da7a805572f483f48a08911606034ab330f8c256f65d36fb374f4070f65e50",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/runtime_test.go": {
+      "sha256": "9852e3d33d5cf165c734deb90b34a244a833d96fce1d099bcbf4eca2dc3fd666",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/session_cache.go": {
+      "sha256": "c7cc40783688ae48b677f3cca72f5afd7eefb8ab4ba0c6e81e3a6ee0ca2964e6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/session_registry.go": {
+      "sha256": "0d906d19a27a23c958b1c7a432095f5dc56aa8b8ece1f281976939b9424a7cf7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/session_ws.go": {
+      "sha256": "1aecfd3071e78a75971f655bdf1038660aabf172abfa7c998c0167150c1bba35",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/shutdown.go": {
+      "sha256": "db6133c31418a31fdcc655c156bd02cf9cc3ff383d4f3f9be136ab062ad1e86b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/shutdown_test.go": {
+      "sha256": "044d4ad39d2864997534eeb385390be8789c394cc296b9fb18ee02ae09b999ba",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/socket_ws.go": {
+      "sha256": "8c0abe842941272f0f8863329673deb4ff1f770004ea6feeaa63157aef1eb792",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/status_handler.go": {
+      "sha256": "4d599e726236daad9ef643cdbdb2d41b4a14f9801f02ca941054133fd2dc7b7f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/status_registry.go": {
+      "sha256": "c3c54945b64cb784a02c2b9b5789858081eb974c44fc150c8068e762e4cb3aec",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/storage_index.go": {
+      "sha256": "3fae7d7e626fff6a96b49498205510cddbfecfa3d2ddd1ac7879c8723457ed78",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/storage_index_test.go": {
+      "sha256": "69876277543be110b8dcbab6b00c82c8890d087d638dd87bc66ae075b20e7792",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/stream_manager.go": {
+      "sha256": "dc950dc8fb84338163e98fb1dfed4862e713fd1d4392f8759ca1aa3fde93187c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/stream_manager_test.go": {
+      "sha256": "55f8d745244f2fa3502c6d84ea9ef91d45cdf7b3950de5fe33e8ad9bfcf6aff1",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/tracker.go": {
+      "sha256": "a1de1b1595df5eb2b1f723c3ac8edc4afb13d6c9b57cedc0f9dfba9b0d870f26",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/arena_statistics_complete_validation_test.go": {
+      "sha256": "e4d4b4285afe38d303b1b54e01aa2909d2b2b96d44c19b1026c210450f62e874",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/broadcaster_registration_failure.go": {
+      "sha256": "36515358ade97b38bda36d2d7f304ca43f8d7caf9c760d6503ad6c0f455b46c0",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/broadcaster_registration_request.go": {
+      "sha256": "ca2974be7a1fb1e6c84e5543cf14933e89870f5bdc5ec76b9279d7eb2265b0c3",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/broadcaster_registration_success.go": {
+      "sha256": "b76fa61191b817c958ff922213c9071b1ddf78d219f22e5d670a0b5825e9a406",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/broadcaster_session_end.go": {
+      "sha256": "d603d4b40555b4646daae52a63f9c18f3c284ecbab6b617b86029ed090391962",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/broadcaster_session_start_test.go": {
+      "sha256": "58a3807e3685d950205a5bf3b1fac17b7ee5ee192a186eb9baa801b6d2018f0e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/bugfix_test.go": {
+      "sha256": "ee02e7ef66aa559d595fe57ea6a9d8ef4fdab420ada87dfbf3271a74bf5d1cfc",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/combat_statistics_validation_test.go": {
+      "sha256": "baee9f29c832cde7115a34374e8ef104972b565f8231db19959cc7b2393c4091",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/common_stcpconnectionunrequireevent.go": {
+      "sha256": "31a7989f7a5338d4cf2fc26a87789d02f3210bdddb7c24381366d772f1900733",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/config_failure.go": {
+      "sha256": "fc7808360e73c502df8eb8b6a308c123110a1e3e7bfac7b1e6326c4045debd07",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/config_request.go": {
+      "sha256": "ec2284e5cd13c25bb23c4c7e178ca1adad4e83974b7fd9a869c81ebc69d3b3c8",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/config_success.go": {
+      "sha256": "584277e71569348286cc3af87221bb85c2b636e69f8efaca2051f97547d7cd31",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/config_success_test.go": {
+      "sha256": "3a3695fa7a19fa10b46e3598c790b38ab08e85a455be2c309ea0a0d5eaa98978",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/core_account.go": {
+      "sha256": "fd547a7b33ef8a2876b34ff140653c5f152844b87e1a1213a65e875b773a0ba5",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/core_account_evrid.go": {
+      "sha256": "6d14bdc84cbbf908ab0455c6465439bb6520e1bac9ae494c253472ddade572cf",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/core_account_evrid_test.go": {
+      "sha256": "7c65d69be891bfac347ed6e6f999c877dc2ed215253cc656f09abd60ba77acc3",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/core_account_statistics.go": {
+      "sha256": "b870b7d0ef91f04c713fda6b08e9f945064e19b77b15327394cbec234c38701f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/core_account_statistics_issue_test.go": {
+      "sha256": "80dd2c025f4ed552d6b8ec797ee02cee217222039f050739c1e09a8e56f29f34",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/core_account_statistics_test.go": {
+      "sha256": "e08a32156781b7af70d9f4e9194bdf6e4cb4f6f4e90013e92ee2f75df5b7f379",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/core_account_test.go": {
+      "sha256": "0e46e07ee583d797b3b1985994e14b65af20a2aebb7775344323620827ef4806",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/core_codec.go": {
+      "sha256": "9cb472551e5f69d8272d121df585bff337dd1d7e3721ea30afc369361a56e41c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/core_hash.go": {
+      "sha256": "f03c0783235b7cff76233fcca15e3bd0c5f460a9008bfbbd9b1426f90aedba51",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/core_hash_lookup.go": {
+      "sha256": "044fdd08589ba6125396bc89d35aeb16811b2dc7af679288d6aae2ffc5f060d9",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/core_hash_lookup_test.go": {
+      "sha256": "fd8d5a7996cf91270ad36bbe810cf4531bddfaf542cf47bacb0f99c40f1df223",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/core_packet.go": {
+      "sha256": "dac0e7d327818d11df33d07a0b645a01adc2a9c051d4b323cb1fd57b564478f8",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/core_packet_test.go": {
+      "sha256": "e963cd41e0f4fb1e1970e69f0df2accba8c6d25fe344faa7d3440fb381b4e302",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/core_packet_types.go": {
+      "sha256": "8e30f875b338bd0ff4c742a85a5b99384710900f66d6284aea6ac5ffef745f8a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/core_sessions.go": {
+      "sha256": "236de81a6270923854954ec7a4c676816477c964aaab16e3bc807376cebe91b8",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/core_stream.go": {
+      "sha256": "81623c9af47af66a4294304f3921467bceb638ac406fd94f5b6676a662a9f4fc",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/core_stream_test.go": {
+      "sha256": "e9bff537a0dd0c1b96759d4ff100fc44b67d22f2beb5b762cfbfc9453124dfa8",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/gameserver.go": {
+      "sha256": "82e8e0cd3dc5f9ea9bdc28f9fee65eeed838a57bdcfdeb751362becf8a51bcac",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/gameserver_join_accepted.go": {
+      "sha256": "bc5653c7eba82e26e691c224a54fe4fc80c9417e73e1c02472064fcaa4a78849",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/gameserver_join_attempt.go": {
+      "sha256": "e4426b4a3fc22beeea150106dbd4127c079e0cb783fdae47d16d98a8b1db6c4d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/gameserver_join_rejected.go": {
+      "sha256": "ebcaaced622c7af3d8a91ae140ea6a1a6ee247a6fa139b89fb7662f450e4e1d2",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/gameserver_player_remove.go": {
+      "sha256": "627410e1c6eed7f8b748dc01a29f6f74def158e50be4d5479e4afbc5121535b7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/gameserver_playersessions_locked.go": {
+      "sha256": "a85431a1b88369fa6c77df46d7fd6fc9179110d6d146f7399bf64d1813775033",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/gameserver_playersessions_unlocked.go": {
+      "sha256": "abae966b669132690426ca50310dbf0c7c2f313cee377c23fe497c369b84a1ff",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/gameserver_save_loadout.go": {
+      "sha256": "294d9e80ed696e2812d3685a35cd2d04684f82f2010822fb738a6dd755e3f3a1",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/gameserver_session.go": {
+      "sha256": "a71b97a99f6769790fe392c04cb27bdc6e8b8b2b4321730c092a4cdaa40e330c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/gameserver_session_start.go": {
+      "sha256": "0cdbb526a983804f09499cce31f15308fb869db959f6c65ac120e125c751697c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/gameserver_spawn_bot.go": {
+      "sha256": "58f937f881e3cc4d4daa0e184fd6e3c6c8254b0b27643caafeca9d0bd24ad3a6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/iap_reconcileiap.go": {
+      "sha256": "5c7f39204b9962354d7a509f4a282a58826eb123c3a04efe587807ff776ade64",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/iap_reconcileiap_result.go": {
+      "sha256": "87ab15048567e6f86531ff2ef2608e023f7ec1890c45af9e89e1e83ff856765d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_channelinfo_request.go": {
+      "sha256": "9ccf79e42ac78b411505c9899e6690774c46bdfe3b13afa5acccf27d234d66ce",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_channelinfo_response.go": {
+      "sha256": "e62e971bd0319bc8bd41e606d03fc5d5d0e423a8b61617d835804230cc915141",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_document_failure.go": {
+      "sha256": "349e621fd9700015947fe106ea91db7b0e13e50e9cec158a7bf1c39d92bdf1fc",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_document_request.go": {
+      "sha256": "601833baf6ba324d3f352e4df5b6274885b8c7b684371112d511a5fc86b6ac59",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_document_success.go": {
+      "sha256": "612da30ecd580c8ecc5851e87f4c725e13c033025de5e8c730333ab221051c41",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_earlyquitconfig.go": {
+      "sha256": "37af01b77995f4f5bde8aadc48bea637e0dfa64f7f41e551edef312e3caadc4b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_earlyquitfeatureflags.go": {
+      "sha256": "87fa514e05a260d8fd49ddad1cd4b7f1744f736eb0c36a7c156eefe4431de175",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_earlyquitupdatenotification.go": {
+      "sha256": "168bd111586d29b511ecfada4de9a64bb81cc848cb4c092ecbb6cf8d64994765",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_failure.go": {
+      "sha256": "0edfd2b37ad2f86afae57319ec56ea9dfc9888281e803eda0660ed60ea3474e1",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_failure_test.go": {
+      "sha256": "ddce8c4782e9e7e98a31e13c49c0b2cf22d8e1ca9a49dfdaf14187174a8888ee",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_generic_message.go": {
+      "sha256": "9a61da5c9d91596fd7ec5f5ccc03d0490590606b70381664abc7dd01e9485ef2",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_generic_message_notify.go": {
+      "sha256": "b367391fb7866d68dc760460d7ff1b3ef624a766229a76e634015493fcf95588",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_generic_message_test.go": {
+      "sha256": "f22e62bb3198899bf5c18c944dd5ccd1d548625ded37a17cb575aecb701fb27b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_loggedinuserprofile_failure.go": {
+      "sha256": "e2e0e521611f003f940ef4ba04c5ec6baa17352647ede906c4ece5fb8b9cceca",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_loggedinuserprofile_request.go": {
+      "sha256": "cadfccb962dd12f2c5381e20f60ef6129fc310f869432504ff3598d0b3b0615c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_loggedinuserprofile_success.go": {
+      "sha256": "9b865ba9878e7a5563303fd00f64b6ca9102d40cd7f6728bfea212ec4d2e7a77",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_match_ended.go": {
+      "sha256": "f25b45b34952102d42ae68e279b71afb3eb17bbd932e7d31507f653fd541310f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_otheruserprofile_failure.go": {
+      "sha256": "9faedaca84795f5f46963aaaf89f06d3d94fc105830f4da648c39832b533cf5f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_otheruserprofile_request.go": {
+      "sha256": "9d2164a4f4fbea1a5903ec189176c2f2525e0d834afec0a7ef143abb794ad194",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_otheruserprofile_success.go": {
+      "sha256": "298b20e62c56651fd9b10098c5613ec599d67314e6b7c8b4108cfda47c2f5c13",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_remotelogset.go": {
+      "sha256": "2e1e949de5b2109b901724aebf52f85029a78e7728e37231325ac151058018e4",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_remotelogset_messages.go": {
+      "sha256": "12473520476c7d3947f6129901f92cd55127ce3f92293053eea057a1efa259a7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_remotelogset_stats.go": {
+      "sha256": "0c5ed93b08ba61620bfd6a7d41cbac4919b4225d6f9dfee036b5160d524ee01f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_remotelogset_test.go": {
+      "sha256": "eec3f53b3c81d17bde3aceeccaeba258860584b62b466ee754156f5d22fae013",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_request.go": {
+      "sha256": "66e806658b8b5121fe8e48530c4fc9e9e2c3a30cddcfb874aed524c8ec5b425f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_serverprofileupdate_request.go": {
+      "sha256": "609e795a14e8e51e029511e4254a0d6ef7d095c04c7d9603c4836ea7832bbcdd",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_serverprofileupdate_request_test.go": {
+      "sha256": "a71b97a99f6769790fe392c04cb27bdc6e8b8b2b4321730c092a4cdaa40e330c",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_serverprofileupdate_success.go": {
+      "sha256": "9eb04e364382d67dd465f9baa2735298d9b1a650132646797955bcc9f6b63613",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_settings.go": {
+      "sha256": "31ccc57e3b27c3a0e27bb438aaf4dbbec68d146212dea467079f17fa9ff13018",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_success.go": {
+      "sha256": "75be0a3c7d16671371cb03f5cf2c02b8980de9b812339076d445b1e50d731245",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_template.go": {
+      "sha256": "0db7f606be98bcbd087d3f928290769c4702a6e2aac25eeef0c5833963dc9de6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_updateprofile_failure.go": {
+      "sha256": "98accf91e15243c64b83103e721b028c87fd71cd2da4d61ace020880c033c26d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_updateprofile_request.go": {
+      "sha256": "da291d746a35e5e4f28e154baeb1507f203e2d3c7b8418b50360b4002f07e3f3",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/login_updateprofile_success.go": {
+      "sha256": "df4a12a68af98377c77f292398cb3c43af83c5698f11b1582ca6a670017538be",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_find_server_region.go": {
+      "sha256": "5d2c610a1450d696c1e665b690d2317caa7e2b008c1cb22bf2588a8fa5c1dca7",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_matchmaker_status_request.go": {
+      "sha256": "8964d5e68fd175d540597a4b6e0fca1caead69e888eeb51f79f96f70b0b826ae",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_matchmaker_status_response.go": {
+      "sha256": "6b8fed7bde773a04cdaa599c1ff84d4bed202c7fe96684014e0d6f61affa91b9",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_pending_session_cancel.go": {
+      "sha256": "87231353da4bcbc5ab1eaa86c70e38d3389d648e65c05c5ba17b5fbbe3a9cdc0",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_ping_request.go": {
+      "sha256": "757f5b3f77c6f1021871745fb86b5d374ece5ed11526cc17c0ae959819cab230",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_ping_request_test.go": {
+      "sha256": "6bc13e58b3398228e5da421908ae7ca8dcbd9bd3c2066a8a2d1a9e8ec8267a1e",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_ping_response.go": {
+      "sha256": "d537e774e8f3819f60a289e795cb3e4b9ba025d9de286ccb5a6217092138d2a2",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_playersessions_request.go": {
+      "sha256": "d533837443d62f25986116d2eb9e14d89fa7497b4ccd547eeb3b97c1745c478d",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_playersessions_success.go": {
+      "sha256": "9b5f6e46b9a123cd3330a24565cc138aa5127ee135c7abab36302cb02ce8c746",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_session_create_request.go": {
+      "sha256": "787a89b7755a28c63100a7edcdcfbc117e2489de6e053bda6077e3d64e0d93bb",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_session_create_request_test.go": {
+      "sha256": "06137cf0663648ffeb39293640f0a2227bb59ced746f202a7e4a225d1db77900",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_session_failure.go": {
+      "sha256": "268d24f4c90a557890635e7d57da8e11acc6d5ebbc655712996dbd1d13aabd28",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_session_find_request.go": {
+      "sha256": "2daee5d339be8c35161e40ca2c7606df44fc0c4ebde9fcddf8bf3b18cf32dbc6",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_session_find_request_test.go": {
+      "sha256": "88816f66813d919e90f18cedf2cf55d20c5b0d1e29f8ba176c301d49269d48e1",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_session_join_request.go": {
+      "sha256": "1718be06547f979556c1a24f085bdf596cf774ce9ce4e3e9e417de0ad84a7189",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_session_join_request_test.go": {
+      "sha256": "9cc2f9fec6d6f71c17ec667c39ddafe70f4bc2119e56328a7151325c4d1cbce3",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_session_success.go": {
+      "sha256": "83028752679ea3a7dc47770072bee9a1fdd1afbec35ab183151cc81b12eb5a1b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_session_success_test.go": {
+      "sha256": "58cc77609f4829055cf7a64cbbf8394663df663648e2cfe9bc58d837ed377719",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/match_status_notify.go": {
+      "sha256": "aa4e3e0743f0dc830eacae8c3329e41121ba6aafeef5dbe5a50b8d726b6383f1",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/session_crypto.go": {
+      "sha256": "c7332fbdddee32a15e2f3f011296863fa35aa63260162a28fac6587fc3999598",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/sns_friends.go": {
+      "sha256": "fd78103b6d46f3d9df73e2f0f441f23e94c81f6a6207be2553dd0c370daecc99",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/sns_friends_test.go": {
+      "sha256": "27a66ab220a0666252e98682c1ccc2e8e952daa397f09a8cd68ba7419a20bd0a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/sns_party.go": {
+      "sha256": "72b1ff1d965abe46a811642a367f0ed91f5931b806004e6a32240bc671098303",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/sns_party_test.go": {
+      "sha256": "eaf864cd61bca174207707a1371e52c119a495576a1bb14aa03bfe49e0d63eef",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/structs.go": {
+      "sha256": "d87454e173d14352a697d99b47b17819d66b70d0c1017f2da6c03c54c4d3fd93",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/structs_test.go": {
+      "sha256": "0d0af8036fd1429d4d95a750312794a8f588a045195846cc7b76799d21c3fa7f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/types.go": {
+      "sha256": "29909c798fc7c6dfe27b546be376a12edbd0af5696e04bf591af89677a397d0a",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/gen_cosmetic_hashes/main.go": {
+      "sha256": "4e621336a8ea8aee0ca665d1c35ab6c5b4335170de6229b35dc60473b99e71c9",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/evr/wire/messages.go": {
+      "sha256": "eb53cba5d7e48740947f2c511fc58659ee5ef69e848cd6f2922cb1ed13d8dbad",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/socialauth/auth.go": {
+      "sha256": "1ba034fac1770ab46f3ad79894f5c5dfddd14c804bb3da223e3feed6bc8ce51f",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/socialauth/discord.go": {
+      "sha256": "ae273c49c042b1785df86f6042d58c6a22d128a4e80edf331949ccdbe732d4f2",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/socialauth/github.go": {
+      "sha256": "9939d0dea22e077e0a4ce6d647109213f13f771bf28e09f046d42ab196dd5fb9",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/socialauth/hooks.go": {
+      "sha256": "cb326472afc1ff1fee1a4d3232625d74183e3f127daf99e0e6361c701e3dd41b",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/socialauth/module.go": {
+      "sha256": "50bac09584fc3ab090af776f016deeafd169d2e06cd68f4e4fa02b9ff114a507",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "server/socialauth/rpc.go": {
+      "sha256": "7f6fc877a33bc4605dc5557c47aa6465da6b80478a8bf6270bd6cb4c33dd8bea",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "social/social.go": {
+      "sha256": "efa62e4cae496add3fe6a62e29e381a27c2fe86ae8a2aef7917d0a78cbb19528",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "test/event_queue_oom/main.go": {
+      "sha256": "1ff5b9d1db976021e3bf3a12f5d15c149605c6348ae0789416a8a821434cc174",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "tools/echovr-mock-client/main.go": {
+      "sha256": "bee15815161d36af6ff40c9a36f7eb87dd81fa4e6dc613e43f8946a8fe5911c0",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "tools/purge-docker-ips/main.go": {
+      "sha256": "21d279ab0ffc7a4c626ef43ec0b3440e3370a23569cda7861ee61650705aedde",
+      "scanned_at": null,
+      "has_annotations": false
+    },
+    "tools/party-split-detector/main.go": {
+      "sha256": "956b66a6915ea202a39082c993eea5a6dabea3878548b6652b9559574d0e65ee",
+      "scanned_at": null,
+      "has_annotations": false
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "project_codename": "nakama-evr-extraction",
+  "customer_id": "andrew",
+  "request_id": "req-nakama-evr-spec-001",
+  "goal": "Review and refine the EVR module extraction spec at docs/extraction/spec.md. The problem: our nakama fork has 332+104 EVR-specific files embedded in the nakama source tree. The goal is to extract all EVR code into a standalone Go module that imports heroiclabs/nakama as a library. There's a stale prototype at andrew@spriffy:/home/andrew/src/nevr/ that shows the target architecture. The spec describes current state, constraints, and risks. Don't author the architecture — identify gaps, clarify scope, and recommend next steps for the architects (Sanjay/Kai).",
+  "workspace_path": "/srv/src/nakama",
+  "execution_mode": "local",
+  "stages": [
+    {
+      "name": "technical-lead — spec review",
+      "agent_ref": "technical-lead",
+      "timeout_seconds": 900,
+      "heartbeat_seconds": 30
+    }
+  ]
+}
