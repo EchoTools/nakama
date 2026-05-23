@@ -1452,9 +1452,21 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 	}
 
 	if state.server != nil {
-		// Ask the game server to return all players to lobby gracefully via CODE_ENDED.
-		// The game server calls NetGameScheduleReturnToLobby and clears its session state,
-		// giving players a smooth transition instead of a hard kick.
+		// Tell the game server to kick all players before ending the lobby.
+		// The game server disconnects each player and reports back to Nakama,
+		// causing MatchLeave to fire naturally for each one.
+		if len(state.presenceMap) > 0 {
+			entrantIDs := make([]uuid.UUID, 0, len(state.presenceMap))
+			for _, p := range state.presenceMap {
+				entrantIDs = append(entrantIDs, p.EntrantID)
+			}
+			if err := m.sendEntrantReject(ctx, logger, dispatcher, state.server, evr.PlayerRejectionReasonLobbyEnding, entrantIDs...); err != nil {
+				logger.WithField("error", err).Warn("Failed to send entrant reject to game server on shutdown")
+			} else {
+				logger.WithField("count", len(entrantIDs)).Info("Sent entrant reject to game server for all players.")
+			}
+		}
+
 		envelope := &rtapi.Envelope{
 			Message: &rtapi.Envelope_LobbySessionEvent{
 				LobbySessionEvent: &rtapi.LobbySessionEventMessage{
@@ -1470,7 +1482,7 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 			if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{state.server}, nil); err != nil {
 				logger.WithField("error", err).Warn("Failed to send LobbySessionEvent CODE_ENDED to game server")
 			} else {
-				logger.Info("Sent LobbySessionEvent CODE_ENDED to game server — players will return to lobby.")
+				logger.Info("Sent LobbySessionEvent CODE_ENDED to game server.")
 			}
 		}
 	}

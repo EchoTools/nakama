@@ -14,6 +14,7 @@ func TestStatisticsToEntries(t *testing.T) {
 		displayName string
 		groupID     string
 		mode        evr.Symbol
+		statName    string // filter to this stat when comparing
 		update      evr.MatchTypeStats
 		expected    []*StatisticsQueueEntry
 	}{
@@ -22,6 +23,7 @@ func TestStatisticsToEntries(t *testing.T) {
 			displayName: "User One",
 			groupID:     "group1",
 			mode:        evr.ModeArenaPublic,
+			statName:    "Clears",
 			update: evr.MatchTypeStats{
 				Clears: 10,
 			},
@@ -39,8 +41,17 @@ func TestStatisticsToEntries(t *testing.T) {
 			t.Errorf("StatisticsToEntries returned an error: %v", err)
 		}
 
-		if cmp.Diff(entries, test.expected) != "" {
-			t.Errorf("StatisticsToEntries returned unexpected entries: %v", cmp.Diff(entries, test.expected))
+		// typeStatsToScoreMap emits entries for all non-omitzero struct
+		// fields. Filter to only the stat under test for comparison.
+		var filtered []*StatisticsQueueEntry
+		for _, e := range entries {
+			if e.BoardMeta.StatName == test.statName {
+				filtered = append(filtered, e)
+			}
+		}
+
+		if cmp.Diff(filtered, test.expected) != "" {
+			t.Errorf("StatisticsToEntries returned unexpected entries for %s: %v", test.statName, cmp.Diff(filtered, test.expected))
 		}
 	}
 }
