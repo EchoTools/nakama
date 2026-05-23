@@ -2457,7 +2457,7 @@ func TestMatchJoinAttempt_PartyFollowerReconnectFindsReservation(t *testing.T) {
 	}
 
 	// Fill the lobby to capacity: leader=1, reservation=1, add 10 fillers = 12
-	for i := 0; i < 15; i++ {
+	for i := 0; i < SocialLobbyMaxSize-2; i++ {
 		filler := &EvrMatchPresence{
 			Node:          "testnode",
 			SessionID:     uuid.Must(uuid.NewV4()),
