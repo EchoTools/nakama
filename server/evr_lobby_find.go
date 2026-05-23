@@ -1205,16 +1205,19 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 			return false
 		}
 
-		// MatchLabelByID is authoritative when available. Fall back to
-		// tracker-based convergence when it is not (e.g. nil NK in tests,
-		// or transient registry miss).
-		if p.nk != nil {
-			label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
-			if err == nil && label != nil {
-				return label.GetPlayerByUserID(session.userID.String()) != nil
-			}
+		// MatchLabelByID is authoritative when available.
+		// When NK is nil (tests, transient startup) fall back to tracker-based
+		// convergence. When NK is available but the label is unavailable
+		// (transient registry miss, match still starting), return false so the
+		// caller keeps polling rather than declaring premature success.
+		if p.nk == nil {
+			return true
 		}
-		return true
+		label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
+		if err != nil || label == nil {
+			return false
+		}
+		return label.GetPlayerByUserID(session.userID.String()) != nil
 	}
 
 	// Early convergence: the matchmaker may have placed both players into
@@ -1224,7 +1227,7 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		return true
 	}
 
-	const maxNonJoinableCycles = 1
+	const maxNonJoinableCycles = 3
 	nonJoinableCycles := 0
 
 	for {
