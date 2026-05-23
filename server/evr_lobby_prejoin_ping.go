@@ -236,96 +236,126 @@ func (p *EvrPipeline) validatePreJoinPing(
 	}
 
 	// Phase 1: identify which members need a ping.
+	// Members with a recent cached entry are handled here:
+	//   - RTT ≤ maxRTT: pass immediately (no re-ping needed).
+	//   - RTT > maxRTT: fail immediately (negative cache — avoid re-pinging a
+	//     server we already know is too far away, which prevents the same bad
+	//     server from being assigned repeatedly within the cache window).
 	type needsPing struct {
 		memberCheck
 		waiter chan struct{}
 	}
 
-	var pending []needsPing
+	var (
+		pending         []needsPing
+		cachedFailures  []preJoinPingResult
+	)
 
 	for _, mc := range checks {
 		entry, found := mc.history.LatestEntry(extIP)
-		if found && entry.Timestamp.After(cutoff) && int(entry.RTT.Milliseconds()) <= maxRTT {
-			// Recent good entry exists; skip.
+		if found && entry.Timestamp.After(cutoff) {
+			rtt := int(entry.RTT.Milliseconds())
+			if rtt <= maxRTT {
+				// Recent good entry exists; pass without re-pinging.
+				continue
+			}
+			// Recent entry exists but RTT exceeds threshold — negative-cache hit.
+			// Record the failure immediately without issuing a new ping request.
+			cachedFailures = append(cachedFailures, preJoinPingResult{
+				UserID:    mc.presence.UserID,
+				SessionID: mc.presence.SessionID,
+				Username:  mc.presence.Username,
+				RTT:       rtt,
+				Cached:    true,
+				Err:       fmt.Errorf("cached RTT %dms exceeds max %dms (negative cache)", rtt, maxRTT),
+			})
 			continue
 		}
 		pending = append(pending, needsPing{memberCheck: mc})
 	}
 
-	if len(pending) == 0 {
+	if len(cachedFailures) == 0 && len(pending) == 0 {
 		// All members have recent good latency data.
 		return nil
 	}
 
-	// Phase 2: send ping requests and register waiters.
-	for i := range pending {
-		np := &pending[i]
-		np.waiter = registerPreJoinPingWaiter(np.presence.SessionID)
-		if err := SendEVRMessages(np.session, true, evr.NewLobbyPingRequest(preJoinPingRTTMax, []evr.Endpoint{endpoint})); err != nil {
-			cleanupPreJoinPingWaiter(np.presence.SessionID)
-			np.waiter = nil
-			logger.Warn("Failed to send pre-join ping request",
-				zap.String("uid", np.presence.UserID.String()),
-				zap.String("sid", np.presence.SessionID.String()),
-				zap.Error(err))
-		}
-	}
+	// Phase 2 + 3: send ping requests and wait for responses for members without
+	// cached data. Members with cached bad RTTs were already recorded above.
+	var results []preJoinPingResult
 
-	// Phase 3: wait for responses concurrently.
-	results := make([]preJoinPingResult, len(pending))
-	var wg sync.WaitGroup
-
-	for i := range pending {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			np := &pending[idx]
-			result := &results[idx]
-			result.UserID = np.presence.UserID
-			result.SessionID = np.presence.SessionID
-			result.Username = np.presence.Username
-
-			if np.waiter == nil {
-				result.Err = fmt.Errorf("failed to send ping request")
-				return
+	if len(pending) > 0 {
+		// Phase 2: send ping requests and register waiters.
+		for i := range pending {
+			np := &pending[i]
+			np.waiter = registerPreJoinPingWaiter(np.presence.SessionID)
+			if err := SendEVRMessages(np.session, true, evr.NewLobbyPingRequest(preJoinPingRTTMax, []evr.Endpoint{endpoint})); err != nil {
+				cleanupPreJoinPingWaiter(np.presence.SessionID)
+				np.waiter = nil
+				logger.Warn("Failed to send pre-join ping request",
+					zap.String("uid", np.presence.UserID.String()),
+					zap.String("sid", np.presence.SessionID.String()),
+					zap.Error(err))
 			}
+		}
 
-			defer cleanupPreJoinPingWaiter(np.presence.SessionID)
+		// Phase 3: wait for responses concurrently.
+		results = make([]preJoinPingResult, len(pending))
+		var wg sync.WaitGroup
 
-			timer := time.NewTimer(preJoinPingTimeout)
-			defer timer.Stop()
+		for i := range pending {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				np := &pending[idx]
+				result := &results[idx]
+				result.UserID = np.presence.UserID
+				result.SessionID = np.presence.SessionID
+				result.Username = np.presence.Username
 
-			select {
-			case <-np.waiter:
-				// Ping response received. Re-load the latency history from
-				// the session in case the pointer was swapped since we cached it.
-				history := np.history
-				if params, ok := LoadParams(np.session.Context()); ok {
-					if fresh := params.latencyHistory.Load(); fresh != nil {
-						history = fresh
-					}
-				}
-				entry, found := history.LatestEntry(extIP)
-				if !found {
-					result.Err = fmt.Errorf("no latency data after ping response")
+				if np.waiter == nil {
+					result.Err = fmt.Errorf("failed to send ping request")
 					return
 				}
-				result.RTT = int(entry.RTT.Milliseconds())
-				if result.RTT > maxRTT {
-					result.Err = fmt.Errorf("RTT %dms exceeds max %dms", result.RTT, maxRTT)
+
+				defer cleanupPreJoinPingWaiter(np.presence.SessionID)
+
+				timer := time.NewTimer(preJoinPingTimeout)
+				defer timer.Stop()
+
+				select {
+				case <-np.waiter:
+					// Ping response received. Re-load the latency history from
+					// the session in case the pointer was swapped since we cached it.
+					history := np.history
+					if params, ok := LoadParams(np.session.Context()); ok {
+						if fresh := params.latencyHistory.Load(); fresh != nil {
+							history = fresh
+						}
+					}
+					entry, found := history.LatestEntry(extIP)
+					if !found {
+						result.Err = fmt.Errorf("no latency data after ping response")
+						return
+					}
+					result.RTT = int(entry.RTT.Milliseconds())
+					if result.RTT > maxRTT {
+						result.Err = fmt.Errorf("RTT %dms exceeds max %dms", result.RTT, maxRTT)
+					}
+				case <-timer.C:
+					result.Err = fmt.Errorf("ping response timed out after %s", preJoinPingTimeout)
+				case <-ctx.Done():
+					result.Err = fmt.Errorf("context canceled: %w", ctx.Err())
 				}
-			case <-timer.C:
-				result.Err = fmt.Errorf("ping response timed out after %s", preJoinPingTimeout)
-			case <-ctx.Done():
-				result.Err = fmt.Errorf("context canceled: %w", ctx.Err())
-			}
-		}(i)
+			}(i)
+		}
+
+		wg.Wait()
 	}
 
-	wg.Wait()
-
 	// Phase 4: check results — if ANY member failed, error the entire party.
+	// Include both cached failures (negative-cache hits) and fresh ping failures.
 	var failures []preJoinPingResult
+	failures = append(failures, cachedFailures...)
 	for _, r := range results {
 		if r.Err != nil {
 			failures = append(failures, r)
