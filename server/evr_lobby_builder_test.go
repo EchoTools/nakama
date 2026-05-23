@@ -359,3 +359,197 @@ func TestSelectNextMapCombatRandomizes(t *testing.T) {
 	assert.Greater(t, len(seen), 1,
 		"selectNextMap returned the same level on all 20 calls; queue rotation is broken")
 }
+
+// TestRankEndpointsByAverageLatency_SymmetricRTT_UsesMean verifies that when all
+// entrants have RTT values within the MaxServerRTT threshold, the mean RTT is used
+// as the score for each endpoint.
+func TestRankEndpointsByAverageLatency_SymmetricRTT_UsesMean(t *testing.T) {
+	// Setup: Save original settings and restore after test
+	originalSettings := ServiceSettings()
+	defer ServiceSettingsUpdate(originalSettings)
+
+	// Configure MaxServerRTT threshold
+	newSettings := &ServiceSettingsData{
+		Matchmaking: GlobalMatchmakingSettings{
+			MaxServerRTT: 180,
+		},
+	}
+	ServiceSettingsUpdate(newSettings)
+
+	// Create test data: 2 entrants, both with ~50ms RTT to server
+	entrants := []*MatchmakerEntry{
+		{
+			Ticket: "ticket1",
+			Presence: &MatchmakerPresence{
+				UserId: "user1",
+			},
+			Properties: map[string]any{
+				"rtt_1.2.3.4": 50.0,
+			},
+		},
+		{
+			Ticket: "ticket1",
+			Presence: &MatchmakerPresence{
+				UserId: "user2",
+			},
+			Properties: map[string]any{
+				"rtt_1.2.3.4": 50.0,
+			},
+		},
+	}
+
+	lb := &LobbyBuilder{}
+	meanRTTByExtIP, _ := lb.rankEndpointsByAverageLatency(entrants)
+
+	// Assert: result should be mean (50), not max
+	assert.Equal(t, 50, meanRTTByExtIP["1.2.3.4"],
+		"Expected mean RTT of 50ms for symmetric latencies")
+}
+
+// TestRankEndpointsByAverageLatency_AsymmetricRTT_OverThreshold_UsesMax verifies that
+// when any entrant exceeds MaxServerRTT, the max RTT is used as the score instead of mean.
+// This prevents selecting servers where one player would fail pre-join validation.
+func TestRankEndpointsByAverageLatency_AsymmetricRTT_OverThreshold_UsesMax(t *testing.T) {
+	// Setup: Save original settings and restore after test
+	originalSettings := ServiceSettings()
+	defer ServiceSettingsUpdate(originalSettings)
+
+	// Configure MaxServerRTT threshold to 180ms
+	newSettings := &ServiceSettingsData{
+		Matchmaking: GlobalMatchmakingSettings{
+			MaxServerRTT: 180,
+		},
+	}
+	ServiceSettingsUpdate(newSettings)
+
+	// Create test data: 2 entrants with asymmetric RTT [50ms, 250ms]
+	// Mean would be 150ms (looks acceptable) but max is 250ms (exceeds 180ms threshold)
+	entrants := []*MatchmakerEntry{
+		{
+			Ticket: "ticket1",
+			Presence: &MatchmakerPresence{
+				UserId: "user1",
+			},
+			Properties: map[string]any{
+				"rtt_1.2.3.4": 50.0,
+			},
+		},
+		{
+			Ticket: "ticket1",
+			Presence: &MatchmakerPresence{
+				UserId: "user2",
+			},
+			Properties: map[string]any{
+				"rtt_1.2.3.4": 250.0,
+			},
+		},
+	}
+
+	lb := &LobbyBuilder{}
+	meanRTTByExtIP, _ := lb.rankEndpointsByAverageLatency(entrants)
+
+	// Assert: result should be max (250), not mean (150)
+	// This ensures the server is penalized for the outlier latency
+	assert.Equal(t, 250, meanRTTByExtIP["1.2.3.4"],
+		"Expected max RTT of 250ms when any entrant exceeds threshold; mean-based selection would hide outlier")
+}
+
+// TestRankEndpointsByAverageLatency_AsymmetricRTT_UnderThreshold_UsesMean verifies that
+// when all entrants are below MaxServerRTT threshold, the mean is used even if there is asymmetry.
+func TestRankEndpointsByAverageLatency_AsymmetricRTT_UnderThreshold_UsesMean(t *testing.T) {
+	// Setup: Save original settings and restore after test
+	originalSettings := ServiceSettings()
+	defer ServiceSettingsUpdate(originalSettings)
+
+	// Configure MaxServerRTT threshold to 180ms
+	newSettings := &ServiceSettingsData{
+		Matchmaking: GlobalMatchmakingSettings{
+			MaxServerRTT: 180,
+		},
+	}
+	ServiceSettingsUpdate(newSettings)
+
+	// Create test data: 2 entrants with asymmetric RTT [50ms, 150ms]
+	// Mean is 100ms, max is 150ms, both under 180ms threshold
+	entrants := []*MatchmakerEntry{
+		{
+			Ticket: "ticket1",
+			Presence: &MatchmakerPresence{
+				UserId: "user1",
+			},
+			Properties: map[string]any{
+				"rtt_1.2.3.4": 50.0,
+			},
+		},
+		{
+			Ticket: "ticket1",
+			Presence: &MatchmakerPresence{
+				UserId: "user2",
+			},
+			Properties: map[string]any{
+				"rtt_1.2.3.4": 150.0,
+			},
+		},
+	}
+
+	lb := &LobbyBuilder{}
+	meanRTTByExtIP, _ := lb.rankEndpointsByAverageLatency(entrants)
+
+	// Assert: result should be mean (100), not max (150)
+	// All entrants are within acceptable threshold, so mean provides better scoring
+	assert.Equal(t, 100, meanRTTByExtIP["1.2.3.4"],
+		"Expected mean RTT of 100ms when all entrants are below threshold")
+}
+
+// TestRankEndpointsByAverageLatency_MultipleServers_MixedThresholds verifies the fix works
+// correctly across multiple servers with mixed threshold behaviors.
+func TestRankEndpointsByAverageLatency_MultipleServers_MixedThresholds(t *testing.T) {
+	// Setup: Save original settings and restore after test
+	originalSettings := ServiceSettings()
+	defer ServiceSettingsUpdate(originalSettings)
+
+	// Configure MaxServerRTT threshold to 180ms
+	newSettings := &ServiceSettingsData{
+		Matchmaking: GlobalMatchmakingSettings{
+			MaxServerRTT: 180,
+		},
+	}
+	ServiceSettingsUpdate(newSettings)
+
+	// Create test data: 2 entrants, 2 servers
+	// Server A (1.1.1.1): entrant1=40ms, entrant2=60ms → both under, use mean=50
+	// Server B (2.2.2.2): entrant1=50ms, entrant2=300ms → one over, use max=300
+	entrants := []*MatchmakerEntry{
+		{
+			Ticket: "ticket1",
+			Presence: &MatchmakerPresence{
+				UserId: "user1",
+			},
+			Properties: map[string]any{
+				"rtt_1.1.1.1": 40.0,
+				"rtt_2.2.2.2": 50.0,
+			},
+		},
+		{
+			Ticket: "ticket1",
+			Presence: &MatchmakerPresence{
+				UserId: "user2",
+			},
+			Properties: map[string]any{
+				"rtt_1.1.1.1": 60.0,
+				"rtt_2.2.2.2": 300.0,
+			},
+		},
+	}
+
+	lb := &LobbyBuilder{}
+	meanRTTByExtIP, _ := lb.rankEndpointsByAverageLatency(entrants)
+
+	// Assert server A uses mean (both under threshold)
+	assert.Equal(t, 50, meanRTTByExtIP["1.1.1.1"],
+		"Expected mean RTT of 50ms for server A (both entrants under threshold)")
+
+	// Assert server B uses max (one over threshold)
+	assert.Equal(t, 300, meanRTTByExtIP["2.2.2.2"],
+		"Expected max RTT of 300ms for server B (one entrant exceeds threshold)")
+}
