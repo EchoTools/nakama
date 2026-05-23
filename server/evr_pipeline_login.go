@@ -300,8 +300,20 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 
 	metricsTags := params.MetricsTags()
 
+	// rateLimitDiscordID holds the Discord ID used for rate limiting once the
+	// device is resolved to an account. Empty means no rate limit entry is tracked.
+	var rateLimitDiscordID string
+	authSucceeded := false
+
 	defer func() {
 		p.nk.MetricsCounterAdd("session_authenticate", metricsTags, 1)
+
+		// Record a failed attempt so subsequent rapid attempts are throttled.
+		// Only record when we have a Discord ID (device was linked to an account)
+		// and the authentication did not succeed.
+		if rateLimitDiscordID != "" && !authSucceeded {
+			p.loginAttemptCache.Add(rateLimitDiscordID, session.clientIP)
+		}
 	}()
 
 	// Validate the XPID
@@ -366,6 +378,15 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 
 		metricsTags["device_linked"] = "true"
 
+		// Capture the Discord ID for rate limiting now that we have a resolved account.
+		rateLimitDiscordID = params.profile.DiscordID()
+
+		// Check rate limit before proceeding with authentication.
+		if rateLimitDiscordID != "" && !p.loginAttemptCache.Allow(rateLimitDiscordID, session.clientIP) {
+			metricsTags["error"] = "rate_limited"
+			return status.Error(codes.ResourceExhausted, "too many failed authentication attempts, please try again later")
+		}
+
 		var (
 			requiresPasswordAuth    = params.profile.HasPasswordSet()
 			authenticatedViaSession = !session.userID.IsNil()
@@ -416,6 +437,12 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 	session.ctx = ctx
 
 	session.Unlock()
+
+	// Authentication succeeded — clear any previous failed-attempt count for this Discord ID.
+	if rateLimitDiscordID != "" {
+		p.loginAttemptCache.Reset(rateLimitDiscordID)
+	}
+	authSucceeded = true
 
 	return nil
 }
