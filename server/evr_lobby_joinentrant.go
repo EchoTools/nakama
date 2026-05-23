@@ -90,6 +90,8 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 		return nil
 	}
 
+	reservationViolated := reason == ErrJoinRejectReasonReservationViolated.Error()
+
 	switch {
 	case !found:
 		err = LobbyErrMatchNotFound
@@ -101,6 +103,10 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	case reason == ErrJoinRejectReasonMatchClosed.Error():
 		// Assuming ErrJoinRejectReasonMatchClosed is defined elsewhere and its Error() method returns the specific string
 		err = LobbyErrMatchClosed
+	case reservationViolated:
+		// The lobby was genuinely over capacity despite the player holding a valid slot
+		// reservation. This is a consistency violation — log at ERROR so it is visible.
+		err = NewLobbyError(ServerIsFull, "lobby full: reservation violated — lobby was over capacity despite a valid slot reservation")
 	case !allowed:
 		// Wrap the base error with the specific reason provided by JoinAttempt
 		err = fmt.Errorf("%w: %s", LobbyErrJoinNotAllowed, reason)
@@ -119,7 +125,11 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 			groupID = label.GroupID.String()
 		}
 
-		logger.Warn("failed to join match",
+		logFn := logger.Warn
+		if reservationViolated {
+			logFn = logger.Error
+		}
+		logFn("failed to join match",
 			zap.Error(err),
 			// Match info
 			zap.String("mid", label.ID.UUID.String()),
@@ -134,6 +144,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 			zap.Int("entrant_count", len(entrants)),
 			zap.Strings("entrant_uids", entrantUserIDs),
 			zap.Strings("entrant_sids", entrantSessionIDs),
+			zap.Bool("reservation_violated", reservationViolated),
 		)
 		return fmt.Errorf("failed to join match: %w", err)
 	}
