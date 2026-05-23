@@ -20,20 +20,76 @@ type StatisticsQueueEntry struct {
 }
 
 // Override converts the entry operator to a LeaderboardRecordWrite override value.
-// Only OperatorSet (replace) and OperatorBest (keep best) are allowed.
-// Incr/decr must be resolved to Set before reaching this function (see RMW block).
-// Any other operator is rejected — the producer sent invalid data.
+// Always returns OperatorSet (2) — the resolved value to write — because:
+//   - OperatorIncrement/Decrement are resolved to Set via RMW before reaching this.
+//   - OperatorBest is resolved to Set via RMW before reaching this.
+//   - Using anything other than Set here would interact with the leaderboard's creation
+//     default operator (which is also Set), producing confusing or incorrect behaviour.
+//
+// Returns nil only when the operator is invalid, which causes the caller to reject the entry.
 func (e StatisticsQueueEntry) Override() *int {
-	var o int
 	switch e.BoardMeta.Operator {
-	case OperatorBest:
-		o = 1
 	case OperatorSet:
-		o = 2
+		o := 2 // SET
+		return &o
 	default:
 		return nil
 	}
-	return &o
+}
+
+// readCurrentVal reads the current leaderboard value for the entry's owner.
+// Returns (value, true) on success, or (0, false) if the record cannot be read.
+// A missing leaderboard or missing record is not an error — it returns (0, true).
+func readCurrentVal(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, e *StatisticsQueueEntry) (float64, bool) {
+	_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, e.BoardMeta.ID(), []string{e.UserID}, 1, "", 0)
+	if err != nil {
+		if err == ErrLeaderboardNotFound {
+			return 0, true
+		}
+		logger.WithFields(map[string]any{
+			"error":          err.Error(),
+			"leaderboard_id": e.BoardMeta.ID(),
+		}).Error("Failed to list leaderboard records")
+		return 0, false
+	}
+	if len(ownerRecords) == 0 {
+		return 0, true
+	}
+	val, err := ScoreToFloat64(ownerRecords[0].Score, ownerRecords[0].Subscore)
+	if err != nil {
+		logger.WithFields(map[string]any{
+			"error":          err.Error(),
+			"leaderboard_id": e.BoardMeta.ID(),
+		}).Error("Failed to decode current score")
+		return 0, false
+	}
+	return val, true
+}
+
+// applyBest resolves a "best" entry to a SET entry by keeping the higher of the
+// current stored value and the incoming value. The entry is mutated in place.
+// Only call for entries with OperatorBest.
+func applyBest(e *StatisticsQueueEntry, currentVal float64) error {
+	incomingVal, err := ScoreToFloat64(e.Score, e.Subscore)
+	if err != nil {
+		return fmt.Errorf("failed to decode incoming score: %w", err)
+	}
+
+	// Leaderboards use descending sort ("desc"), so "best" = highest value.
+	newVal := incomingVal
+	if currentVal > incomingVal {
+		newVal = currentVal
+	}
+
+	newScore, newSubscore, err := Float64ToScore(newVal)
+	if err != nil {
+		return fmt.Errorf("failed to encode best score: %w", err)
+	}
+
+	e.Score = newScore
+	e.Subscore = newSubscore
+	e.BoardMeta.Operator = OperatorSet
+	return nil
 }
 
 // applyIncrementDecrement resolves an incr/decr entry to a SET entry
@@ -83,44 +139,34 @@ func processSingleEntry(ctx context.Context, logger runtime.Logger, nk runtime.N
 		return false
 	}
 
-	// If the operator is increment or decrement, read the current value, decode it, add the delta, and write it back.
-	// This is because the leaderboard uses a float64 encoding that is not compatible with simple integer arithmetic.
-	if e.BoardMeta.Operator == OperatorIncrement || e.BoardMeta.Operator == OperatorDecrement {
-		var currentVal float64
-		// Handle the case where the leaderboard might not exist yet.
-		_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, e.BoardMeta.ID(), []string{e.UserID}, 1, "", 0)
-		if err != nil {
-			if err == ErrLeaderboardNotFound {
-				// Leaderboard doesn't exist, so current value is 0.
-				currentVal = 0
-			} else {
-				logger.WithFields(map[string]any{
-					"error":          err.Error(),
-					"leaderboard_id": e.BoardMeta.ID(),
-				}).Error("Failed to list leaderboard records")
-				return false
-			}
-		} else {
-			if len(ownerRecords) > 0 {
-				currentVal, err = ScoreToFloat64(ownerRecords[0].Score, ownerRecords[0].Subscore)
-				if err != nil {
-					logger.WithFields(map[string]any{
-						"error":          err.Error(),
-						"leaderboard_id": e.BoardMeta.ID(),
-					}).Error("Failed to decode current score")
-					return false
-				}
-			} else {
-				// Record doesn't exist, so current value is 0.
-				currentVal = 0
-			}
+	// Operators that require a read-modify-write (RMW) to produce a resolved SET value:
+	//   - Increment/Decrement: new = current ± delta
+	//   - Best: new = max(current, incoming)   (leaderboard sort is "desc", so higher wins)
+	// After RMW the entry's operator is updated to OperatorSet so Override() accepts it.
+	switch e.BoardMeta.Operator {
+	case OperatorIncrement, OperatorDecrement:
+		currentVal, ok := readCurrentVal(ctx, logger, nk, e)
+		if !ok {
+			return false
 		}
-
 		if err := applyIncrementDecrement(e, currentVal); err != nil {
 			logger.WithFields(map[string]any{
 				"error":          err.Error(),
 				"leaderboard_id": e.BoardMeta.ID(),
 			}).Error("Failed to apply increment/decrement")
+			return false
+		}
+
+	case OperatorBest:
+		currentVal, ok := readCurrentVal(ctx, logger, nk, e)
+		if !ok {
+			return false
+		}
+		if err := applyBest(e, currentVal); err != nil {
+			logger.WithFields(map[string]any{
+				"error":          err.Error(),
+				"leaderboard_id": e.BoardMeta.ID(),
+			}).Error("Failed to apply best operator")
 			return false
 		}
 	}

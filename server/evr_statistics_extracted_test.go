@@ -9,32 +9,26 @@ import (
 
 // ----- Override tests -----
 
-func TestOverride_SetAndBest(t *testing.T) {
-	tests := []struct {
-		op       LeaderboardOperator
-		want     int
-		name     string
-	}{
-		{OperatorSet, 2, "set"},
-		{OperatorBest, 1, "best"},
+// Override() must only return non-nil for OperatorSet.
+// All other operators (including OperatorBest) are resolved to OperatorSet via RMW
+// before Override() is called, so they should never appear at this stage.
+func TestOverride_OnlySetIsAccepted(t *testing.T) {
+	e := StatisticsQueueEntry{BoardMeta: LeaderboardMeta{Operator: OperatorSet}}
+	got := e.Override()
+	if got == nil {
+		t.Fatal("Override() returned nil for OperatorSet")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			e := StatisticsQueueEntry{BoardMeta: LeaderboardMeta{Operator: tt.op}}
-			got := e.Override()
-			if got == nil {
-				t.Fatalf("Override() returned nil for %s", tt.op)
-			}
-			if *got != tt.want {
-				t.Fatalf("Override() = %d, want %d", *got, tt.want)
-			}
-		})
+	if *got != 2 {
+		t.Fatalf("Override() = %d, want 2 (SET)", *got)
 	}
 }
 
-func TestOverride_RejectsInvalid(t *testing.T) {
+func TestOverride_RejectsNonSet(t *testing.T) {
+	// All operators other than OperatorSet must return nil.
+	// OperatorBest is resolved to Set via RMW before this point, so reaching
+	// Override() with Best is an invariant violation and must be rejected.
 	invalidOps := []LeaderboardOperator{
+		OperatorBest,
 		OperatorIncrement,
 		OperatorDecrement,
 		"unknown",
@@ -146,6 +140,93 @@ func TestApplyIncrementDecrement_NegativeDecodeError(t *testing.T) {
 
 	if err := applyIncrementDecrement(e, 10.0); err == nil {
 		t.Fatal("expected error for invalid delta encoding")
+	}
+}
+
+// ----- applyBest tests -----
+
+func TestApplyBest_KeepsHigherValue(t *testing.T) {
+	// incoming (20) > current (10) → result should be 20
+	score20, sub20 := encodeScore(t, 20.0)
+
+	e := &StatisticsQueueEntry{
+		BoardMeta: LeaderboardMeta{Operator: OperatorBest},
+		Score:     score20,
+		Subscore:  sub20,
+	}
+
+	if err := applyBest(e, 10.0); err != nil {
+		t.Fatalf("applyBest: %v", err)
+	}
+
+	if e.Score != score20 || e.Subscore != sub20 {
+		got, _ := ScoreToFloat64(e.Score, e.Subscore)
+		t.Fatalf("expected 20.0 (score=%d sub=%d), got %f (score=%d sub=%d)",
+			score20, sub20, got, e.Score, e.Subscore)
+	}
+	if e.BoardMeta.Operator != OperatorSet {
+		t.Fatalf("expected operator converted to Set, got %s", e.BoardMeta.Operator)
+	}
+}
+
+func TestApplyBest_KeepsCurrentWhenHigher(t *testing.T) {
+	// current (30) > incoming (15) → result should be 30
+	score15, sub15 := encodeScore(t, 15.0)
+	score30, sub30 := encodeScore(t, 30.0)
+
+	e := &StatisticsQueueEntry{
+		BoardMeta: LeaderboardMeta{Operator: OperatorBest},
+		Score:     score15,
+		Subscore:  sub15,
+	}
+
+	if err := applyBest(e, 30.0); err != nil {
+		t.Fatalf("applyBest: %v", err)
+	}
+
+	if e.Score != score30 || e.Subscore != sub30 {
+		got, _ := ScoreToFloat64(e.Score, e.Subscore)
+		t.Fatalf("expected 30.0 (score=%d sub=%d), got %f (score=%d sub=%d)",
+			score30, sub30, got, e.Score, e.Subscore)
+	}
+	if e.BoardMeta.Operator != OperatorSet {
+		t.Fatalf("expected operator converted to Set, got %s", e.BoardMeta.Operator)
+	}
+}
+
+func TestApplyBest_EqualValues(t *testing.T) {
+	// current == incoming → result stays the same
+	score5, sub5 := encodeScore(t, 5.0)
+
+	e := &StatisticsQueueEntry{
+		BoardMeta: LeaderboardMeta{Operator: OperatorBest},
+		Score:     score5,
+		Subscore:  sub5,
+	}
+
+	if err := applyBest(e, 5.0); err != nil {
+		t.Fatalf("applyBest: %v", err)
+	}
+
+	if e.Score != score5 || e.Subscore != sub5 {
+		t.Fatalf("expected unchanged score=%d sub=%d, got score=%d sub=%d",
+			score5, sub5, e.Score, e.Subscore)
+	}
+	if e.BoardMeta.Operator != OperatorSet {
+		t.Fatalf("expected operator converted to Set, got %s", e.BoardMeta.Operator)
+	}
+}
+
+func TestApplyBest_NegativeDecodeError(t *testing.T) {
+	// Invalid incoming encoding should return an error
+	e := &StatisticsQueueEntry{
+		BoardMeta: LeaderboardMeta{Operator: OperatorBest},
+		Score:     -1,
+		Subscore:  0,
+	}
+
+	if err := applyBest(e, 10.0); err == nil {
+		t.Fatal("expected error for invalid incoming encoding")
 	}
 }
 

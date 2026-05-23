@@ -622,7 +622,7 @@ func UpdateLeaderboardStat(ctx context.Context, nk runtime.NakamaModule, leaderb
 		return fmt.Errorf("invalid score value: %w", err)
 	}
 
-	op := 2 // SET
+	op := int(2) // OperatorSet — always overwrite with computed value
 	// Write the record
 	if _, err := nk.LeaderboardRecordWrite(ctx, leaderboardID, userID, username, score, subscore, newMetadata, &op); err != nil {
 		// Try to create the leaderboard
@@ -631,7 +631,7 @@ func UpdateLeaderboardStat(ctx context.Context, nk runtime.NakamaModule, leaderb
 			return fmt.Errorf("failed to parse leaderboard ID: %w", err)
 		}
 
-		if err = nk.LeaderboardCreate(ctx, leaderboardID, true, "desc", "set", ResetScheduleToCron(evr.ResetSchedule(resetSchedule)), nil, true); err != nil {
+		if err = nk.LeaderboardCreate(ctx, leaderboardID, true, "desc", string(OperatorSet), ResetScheduleToCron(evr.ResetSchedule(resetSchedule)), nil, true); err != nil {
 			return fmt.Errorf("Leaderboard create error: %w", err)
 		} else if _, err := nk.LeaderboardRecordWrite(ctx, leaderboardID, userID, username, score, subscore, newMetadata, &op); err != nil {
 			return fmt.Errorf("Leaderboard record write error: %w", err)
