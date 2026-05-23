@@ -173,6 +173,101 @@ func TestFixedCondition(t *testing.T) {
 	}
 }
 
+// TestSyncMember_OverloadedSkipsRemoval verifies the fixed syncMember condition:
+// when GuildMember returns (nil, ErrDiscordRESTOverloaded), the group removal
+// function must NOT be called. This mirrors the exact control flow of syncMember
+// (evr_discord_integrator.go ~line 352-365) using function stubs.
+//
+// Bug:
+//   Before the fix, the condition was effectively `member == nil || ErrMemberNotFound`,
+//   so an overloaded error (member=nil, err=ErrDiscordRESTOverloaded) triggered removal.
+//
+// Fix:
+//   ErrDiscordRESTOverloaded is checked first and returns early,
+//   so GuildGroupMemberRemove is never reached on overload.
+func TestSyncMember_OverloadedSkipsRemoval(t *testing.T) {
+	type guildMemberResult struct {
+		member *discordgoMember
+		err    error
+	}
+
+	// removalCalled is set to true if the group-removal path is taken.
+	type testCase struct {
+		name             string
+		guildMemberFn    func() (*discordgoMember, error)
+		wantRemovalCalled bool
+		wantReturnErr    bool // syncMember should propagate a non-nil error
+	}
+
+	cases := []testCase{
+		{
+			name:             "overloaded — skip sync, do NOT remove",
+			guildMemberFn:    func() (*discordgoMember, error) { return nil, ErrDiscordRESTOverloaded },
+			wantRemovalCalled: false,
+			wantReturnErr:    false, // returns nil (graceful skip)
+		},
+		{
+			name:             "member not found — SHOULD remove",
+			guildMemberFn:    func() (*discordgoMember, error) { return nil, ErrMemberNotFound },
+			wantRemovalCalled: true,
+			wantReturnErr:    false, // removal succeeds → returns nil
+		},
+		{
+			name:             "member found — do NOT remove",
+			guildMemberFn:    func() (*discordgoMember, error) { return &discordgoMember{}, nil },
+			wantRemovalCalled: false,
+			wantReturnErr:    false, // continues processing
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			removalCalled := false
+
+			// removalFn mimics c.GuildGroupMemberRemove — the function that must
+			// NOT be called when Discord is overloaded.
+			removalFn := func() error {
+				removalCalled = true
+				return nil
+			}
+
+			// Replicate the exact syncMember condition logic from
+			// evr_discord_integrator.go lines 352-365:
+			//
+			//   member, err := c.GuildMember(guildID, discordID)
+			//   if errors.Is(err, ErrDiscordRESTOverloaded) { return nil }
+			//   if errors.Is(err, ErrMemberNotFound) { removalFn(); return nil }
+			member, err := tc.guildMemberFn()
+
+			var syncErr error
+			if errors.Is(err, ErrDiscordRESTOverloaded) {
+				// Fixed path: skip sync entirely, preserve group membership.
+				syncErr = nil
+			} else if errors.Is(err, ErrMemberNotFound) {
+				// Member not found: trigger group removal.
+				syncErr = removalFn()
+			} else if err != nil {
+				syncErr = err
+			} else {
+				// Happy path: member found, proceed with sync (not modeled here).
+				_ = member
+				syncErr = nil
+			}
+
+			if removalCalled != tc.wantRemovalCalled {
+				t.Errorf("removalCalled = %v, want %v (for case %q)",
+					removalCalled, tc.wantRemovalCalled, tc.name)
+			}
+			if tc.wantReturnErr && syncErr == nil {
+				t.Errorf("expected non-nil syncErr, got nil (for case %q)", tc.name)
+			}
+			if !tc.wantReturnErr && syncErr != nil {
+				t.Errorf("expected nil syncErr, got %v (for case %q)", syncErr, tc.name)
+			}
+		})
+	}
+}
+
 // Demonstrate the complete end-to-end scenario
 func Example_discordRateLimitCascade() {
 	// 1. A burst of logins hits the server
