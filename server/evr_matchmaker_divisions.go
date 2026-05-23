@@ -91,11 +91,48 @@ func HighestDivision(divisions []string, names []string) string {
 
 // FilterEntriesByDivision groups matchmaker entries by their "division"
 // string property. Entries without a division property are grouped under "".
+//
+// Mixed-division parties (a single ticket whose members span more than one
+// division) are added to every division pool their members belong to. This
+// ensures that a Bronze+Diamond party can compete against players in either
+// the Bronze or the Diamond queue, rather than being marooned in the
+// Diamond-only pool with too few opponents to form a match.
 func FilterEntriesByDivision(entries []runtime.MatchmakerEntry) map[string][]runtime.MatchmakerEntry {
-	result := make(map[string][]runtime.MatchmakerEntry)
+	// First pass: collect per-ticket divisions and preserve insertion order.
+	type ticketInfo struct {
+		entries   []runtime.MatchmakerEntry
+		divisions map[string]struct{} // unique divisions seen for this ticket
+	}
+
+	ticketOrder := make([]string, 0, len(entries))
+	tickets := make(map[string]*ticketInfo, len(entries))
+
 	for _, entry := range entries {
+		ticket := entry.GetTicket()
 		div, _ := entry.GetProperties()["division"].(string)
-		result[div] = append(result[div], entry)
+
+		if ti, ok := tickets[ticket]; ok {
+			ti.entries = append(ti.entries, entry)
+			ti.divisions[div] = struct{}{}
+		} else {
+			ticketOrder = append(ticketOrder, ticket)
+			tickets[ticket] = &ticketInfo{
+				entries:   []runtime.MatchmakerEntry{entry},
+				divisions: map[string]struct{}{div: {}},
+			}
+		}
+	}
+
+	// Second pass: place each ticket's entries into every division pool that
+	// ticket spans. Solo players (single division) land in exactly one pool,
+	// preserving the existing behaviour. Mixed-division parties land in all
+	// relevant pools so they can form a match in any of them.
+	result := make(map[string][]runtime.MatchmakerEntry)
+	for _, ticket := range ticketOrder {
+		ti := tickets[ticket]
+		for div := range ti.divisions {
+			result[div] = append(result[div], ti.entries...)
+		}
 	}
 	return result
 }
