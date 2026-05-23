@@ -2693,7 +2693,7 @@ func TestMatchJoinAttempt_LobbyFull_RoleSlots_WithReservation_ReturnsReservation
 	// TeamBlue has 4 presences + 1 reservation = 5 slots used (MaxSize for that team is 4)
 	blueSlots, _ := state.OpenSlotsByRole(evr.TeamBlue)
 	if blueSlots >= 0 {
-		t.Logf("Expected negative or zero slots for TeamBlue, got %d", blueSlots)
+		t.Fatalf("Expected negative or zero slots for TeamBlue, got %d", blueSlots)
 	}
 
 	// Follower tries to join, will be assigned to TeamBlue (from reservation)
