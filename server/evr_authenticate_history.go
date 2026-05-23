@@ -28,18 +28,19 @@ const (
 
 var (
 	IgnoredLoginValues = map[string]struct{}{
-		"":                {},
-		"1WMHH000X00000":  {},
-		"N/A":             {},
-		"UNK-0":           {},
-		"OVR-ORG-0":       {},
-		"DSC-0":           {},
-		"unknown":         {},
-		"1PASH5D1P17365":  {}, // Quest Link
-		"WMHD315M3010GV":  {}, // Quest link
-		"VRLINKHMDQUEST":  {}, // Quest link
-		"VRLINKHMDQUEST2": {}, // Quest link
-		"VRLINKHMDQUEST3": {}, // Quest link
+		"":                 {},
+		"1WMHH000X00000":   {},
+		"N/A":              {},
+		"UNK-0":            {},
+		"OVR-ORG-0":        {},
+		"DSC-0":            {},
+		"unknown":          {},
+		"1PASH5D1P17365":   {}, // Quest Link
+		"WMHD315M3010GV":   {}, // Quest link
+		"VRLINKHMDQUEST":   {}, // Quest link
+		"VRLINKHMDQUEST2":  {}, // Quest link
+		"VRLINKHMDQUEST3":  {}, // Quest link
+		"VRLINKHMDQUEST3S": {}, // Quest link (Quest 3S, added by Meta)
 	}
 
 	ErrPendingAuthorizationNotFound = errors.New("pending authorization not found")
