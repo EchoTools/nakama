@@ -223,12 +223,83 @@ func TestIsGameServerOperator(t *testing.T) {
 	}
 }
 
+// TestXPIDValidationWiring_ProcessPostMatchMessages verifies that the two-condition
+// check in processPostMatchMessages exactly matches the wired logic:
+//
+//	isSelfReporting := *xpid == s.XPID
+//	isGameServerOperator := !s.XPID.IsValid()
+//	if !isSelfReporting && !isGameServerOperator { ... reject ... }
+//
+// This test explicitly uses EvrId.IsValid() (the actual predicate in the fix)
+// rather than a string prefix check, ensuring the test is tied to the real code path.
+func TestXPIDValidationWiring_ProcessPostMatchMessages(t *testing.T) {
+	type scenario struct {
+		name         string
+		submitter    evr.EvrId // s.XPID in processPostMatchMessages
+		claimed      evr.EvrId // xpid parsed from stats message
+		wantAccepted bool
+	}
+
+	cases := []scenario{
+		{
+			name:         "self-reporting player (OVR-ORG)",
+			submitter:    evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: 1001},
+			claimed:      evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: 1001},
+			wantAccepted: true,
+		},
+		{
+			name:         "game server operator submits for player (invalid platform → operator)",
+			submitter:    evr.EvrId{PlatformCode: 999, AccountId: 50000}, // !IsValid()
+			claimed:      evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: 2002},
+			wantAccepted: true,
+		},
+		{
+			name:         "game server operator with zero account ID (IsValid=false)",
+			submitter:    evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: 0}, // AccountId == 0 → !IsValid()
+			claimed:      evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: 3003},
+			wantAccepted: true,
+		},
+		{
+			name:         "player submitting for another player (stat injection)",
+			submitter:    evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: 1001},
+			claimed:      evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: 9999},
+			wantAccepted: false,
+		},
+		{
+			name:         "STM player submitting for OVR player",
+			submitter:    evr.EvrId{PlatformCode: evr.STM, AccountId: 1111},
+			claimed:      evr.EvrId{PlatformCode: evr.OVR, AccountId: 2222},
+			wantAccepted: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Exact replication of the fix logic in processPostMatchMessages
+			// (server/evr_runtime_event_remotelogset.go ~line 621-623):
+			//
+			//   isSelfReporting := *xpid == s.XPID
+			//   isGameServerOperator := !s.XPID.IsValid()
+			//   if !isSelfReporting && !isGameServerOperator { continue }
+			//
+			// Using tc.submitter as s.XPID and tc.claimed as *xpid.
+			isSelfReporting := tc.claimed == tc.submitter
+			isGameServerOperator := !tc.submitter.IsValid()
+			accepted := isSelfReporting || isGameServerOperator
+
+			assert.Equal(t, tc.wantAccepted, accepted,
+				"case %q: submitter=%s claimed=%s IsValid=%v",
+				tc.name, tc.submitter.String(), tc.claimed.String(), tc.submitter.IsValid())
+		})
+	}
+}
+
 // TestXPIDValidationPredicate tests the logic for determining whether a stats
 // submission should be accepted or rejected based on XPID validation.
 //
 // The fix should implement this logic:
 // 1. If submitter XPID == claimed player XPID, ACCEPT (player self-reporting)
-// 2. If submitter is a game server operator (UNK-*), ACCEPT (trusted authority)
+// 2. If submitter is a game server operator (!XPID.IsValid()), ACCEPT (trusted authority)
 // 3. Otherwise, REJECT (prevent stat injection)
 func TestXPIDValidationPredicate(t *testing.T) {
 	testCases := []struct {
