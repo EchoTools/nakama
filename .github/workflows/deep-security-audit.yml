@@ -1,0 +1,150 @@
+name: Deep security audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      resume_run_id:
+        description: "Optional previous workflow run ID to resume from its nakama-security-audit-manifest artifact."
+        required: false
+        type: string
+      max_file_passes:
+        description: "Maximum file/pass units to process in this run. Use 0 to finish all remaining units."
+        required: true
+        default: "75"
+        type: string
+      run_static_analysis:
+        description: "Install and run the full security/static-analysis toolchain."
+        required: true
+        default: true
+        type: boolean
+      fail_on_findings:
+        description: "Fail the workflow if heuristic candidates or static-analysis failures are found."
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: deep-security-audit-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Deep security audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Set up Node
+        if: ${{ inputs.run_static_analysis }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+
+      - name: Restore resume manifest
+        if: ${{ inputs.resume_run_id != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESUME_RUN_ID: ${{ inputs.resume_run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p audit-state
+          gh run download "$RESUME_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name nakama-security-audit-manifest \
+            --dir audit-state
+          test -f audit-state/manifest.json
+
+      - name: Install audit tools
+        if: ${{ inputs.run_static_analysis }}
+        run: |
+          set -euo pipefail
+          export PATH="$(go env GOPATH)/bin:$HOME/.local/bin:$PATH"
+          sudo apt-get update
+          sudo apt-get install -y jq shellcheck
+          python3 -m pip install --user --upgrade pipx
+          python3 -m pipx ensurepath
+
+          go mod download
+
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+          go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest
+          go install github.com/zricethezav/gitleaks/v8@latest
+          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          go install github.com/anchore/syft/cmd/syft@latest
+          go install github.com/anchore/grype/cmd/grype@latest
+
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b "$HOME/go/bin"
+
+          pipx install semgrep
+          pipx install zizmor
+          pipx install yamllint
+
+          govulncheck -version
+          gosec -version
+          staticcheck -version
+          golangci-lint version
+          osv-scanner --version
+          gitleaks version
+          actionlint -version
+          syft version
+          grype version
+          trivy --version
+          semgrep --version
+          zizmor --version
+          shellcheck --version
+          yamllint --version
+
+      - name: Run resumable audit
+        env:
+          RUN_STATIC_ANALYSIS: ${{ inputs.run_static_analysis }}
+          FAIL_ON_FINDINGS: ${{ inputs.fail_on_findings }}
+          MAX_FILE_PASSES: ${{ inputs.max_file_passes }}
+        run: |
+          set -euo pipefail
+          export PATH="$(go env GOPATH)/bin:$HOME/.local/bin:$PATH"
+          args=(
+            --manifest audit-state/manifest.json
+            --reports-dir audit-results
+            --max-file-passes "$MAX_FILE_PASSES"
+          )
+          if [[ "$RUN_STATIC_ANALYSIS" == "true" ]]; then
+            args+=(--run-static)
+          fi
+          if [[ "$FAIL_ON_FINDINGS" == "true" ]]; then
+            args+=(--fail-on-findings)
+          fi
+          python3 .github/scripts/deep-security-audit.py "${args[@]}"
+
+      - name: Upload resume manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nakama-security-audit-manifest
+          path: audit-state/manifest.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload audit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nakama-security-audit-results
+          path: audit-results/
+          if-no-files-found: warn
+          retention-days: 30
