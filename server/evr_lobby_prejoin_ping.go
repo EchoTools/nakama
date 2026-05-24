@@ -197,6 +197,18 @@ func (p *EvrPipeline) validatePreJoinPing(
 		maxRTT = 180
 	}
 
+	// Spectators and private lobbies need reachability only — high RTT is fine.
+	// Only completely unreachable servers (timeout/no-response) block them.
+	relaxRTT := isPrivateMatch(label.Mode)
+	if !relaxRTT {
+		for _, ent := range entrants {
+			if ent.IsSpectator() {
+				relaxRTT = true
+				break
+			}
+		}
+	}
+
 	cutoff := time.Now().Add(-preJoinPingMaxAge)
 
 	type memberCheck struct {
@@ -245,9 +257,15 @@ func (p *EvrPipeline) validatePreJoinPing(
 
 	for _, mc := range checks {
 		entry, found := mc.history.LatestEntry(extIP)
-		if found && entry.Timestamp.After(cutoff) && int(entry.RTT.Milliseconds()) <= maxRTT {
-			// Recent good entry exists; skip.
-			continue
+		if found && entry.Timestamp.After(cutoff) {
+			if relaxRTT {
+				// Spectators and private lobbies: any recent ping proves reachability.
+				continue
+			}
+			if int(entry.RTT.Milliseconds()) <= maxRTT {
+				// Recent good entry exists; skip.
+				continue
+			}
 		}
 		pending = append(pending, needsPing{memberCheck: mc})
 	}
@@ -311,7 +329,7 @@ func (p *EvrPipeline) validatePreJoinPing(
 					return
 				}
 				result.RTT = int(entry.RTT.Milliseconds())
-				if result.RTT > maxRTT {
+				if result.RTT > maxRTT && !relaxRTT {
 					result.Err = fmt.Errorf("RTT %dms exceeds max %dms", result.RTT, maxRTT)
 				}
 			case <-timer.C:
@@ -387,4 +405,10 @@ func (p *EvrPipeline) validatePreJoinPing(
 
 	return fmt.Errorf("%w: %w", ErrPreJoinPingFailed, NewLobbyErrorf(InternalError, "pre-join ping validation failed: %d of %d party members could not reach server %s",
 		len(failures), len(entrants), endpoint.ExternalAddress()))
+}
+
+// isPrivateMatch returns true if the mode is a private lobby that should
+// have relaxed RTT requirements for pre-join ping validation.
+func isPrivateMatch(mode evr.Symbol) bool {
+	return mode == evr.ModeArenaPrivate || mode == evr.ModeCombatPrivate || mode == evr.ModeSocialPrivate
 }
