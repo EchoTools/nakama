@@ -47,6 +47,43 @@ func TestErrPreJoinPingFailed_Sentinel(t *testing.T) {
 //
 // The test calls validatePreJoinPing with a nil *EvrPipeline, which is safe
 // because the social mode early-return fires before p.nk is ever accessed.
+// TestIsPrivateMatch verifies that isPrivateMatch correctly identifies
+// private lobby modes that should have relaxed RTT requirements.
+func TestIsPrivateMatch(t *testing.T) {
+	tests := []struct {
+		mode evr.Symbol
+		want bool
+	}{
+		{evr.ModeArenaPrivate, true},
+		{evr.ModeCombatPrivate, true},
+		{evr.ModeSocialPrivate, true},
+		{evr.ModeArenaPublic, false},
+		{evr.ModeCombatPublic, false},
+		{evr.ModeSocialPublic, false},
+		{evr.ModeSocialNPE, false},
+		{evr.ToSymbol("echo_combat_tournament"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.mode.String(), func(t *testing.T) {
+			got := isPrivateMatch(tt.mode)
+			assert.Equal(t, tt.want, got, "isPrivateMatch(%s)", tt.mode)
+		})
+	}
+}
+
+// TestEvrMatchPresence_IsSpectator verifies that IsSpectator correctly
+// identifies spectator role alignment.
+func TestEvrMatchPresence_IsSpectator(t *testing.T) {
+	p := &EvrMatchPresence{RoleAlignment: evr.TeamSpectator}
+	assert.True(t, p.IsSpectator(), "spectator role should be detected")
+
+	p2 := &EvrMatchPresence{RoleAlignment: evr.TeamBlue}
+	assert.False(t, p2.IsSpectator(), "blue team should not be spectator")
+
+	p3 := &EvrMatchPresence{RoleAlignment: 0}
+	assert.False(t, p3.IsSpectator(), "unset role should not be spectator")
+}
+
 func TestValidatePreJoinPing_SocialModeSkipsRTT(t *testing.T) {
 	// Ensure RequiresPreMatchPing() returns true so the function does not
 	// short-circuit before reaching the social-mode check.
