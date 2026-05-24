@@ -613,9 +613,14 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 				return fmt.Errorf("failed to parse evr ID: %w", err)
 			}
 
-			// Only accept stats the submitter reports for themselves.
-			// Prevents injection of fabricated stats for other players.
-			if *xpid != s.XPID {
+			// Accept stats if:
+			// 1. The submitter is reporting their own stats (self-reporting), OR
+			// 2. The submitter is a game server operator (unknown platform code / UNK-*),
+			//    which is a trusted authority submitting stats on behalf of players.
+			// Reject any other cross-player submission to prevent stat injection attacks.
+			isSelfReporting := *xpid == s.XPID
+			isGameServerOperator := !s.XPID.IsValid()
+			if !isSelfReporting && !isGameServerOperator {
 				logger.WithFields(map[string]interface{}{
 					"submitter": s.XPID.String(),
 					"claimed":   xpid.String(),
