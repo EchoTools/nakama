@@ -405,3 +405,132 @@ func TestFilterByQualityFloorNilSettings(t *testing.T) {
 		t.Fatalf("with nil settings, all predictions should pass; got %d, want 1", len(filtered))
 	}
 }
+
+// TestFilterByQualityFloor_StarvingExempt verifies that candidates whose oldest
+// ticket has been waiting at or beyond the reservation threshold are exempt from
+// quality floor filtering even when their draw probability is below the floor.
+// This ensures the reservation system can always rescue long-waiting players.
+func TestFilterByQualityFloor_StarvingExempt(t *testing.T) {
+	now := time.Now().UTC().Unix()
+
+	makeEntry := func(ticket, sessionID string) *MatchmakerEntry {
+		return &MatchmakerEntry{
+			Ticket:   ticket,
+			Presence: &MatchmakerPresence{SessionId: sessionID},
+			Properties: map[string]interface{}{
+				"rating_mu":    25.0,
+				"rating_sigma": 8.333,
+			},
+		}
+	}
+
+	settings := GlobalMatchmakingSettings{
+		EnableQualityFloor:         true,
+		QualityFloorInitial:        0.10,
+		QualityFloorDecayPerSecond: 0.0005,
+		QualityFloorMinimum:        0.0,
+		ReservationThresholdSecs:   90,
+	}
+
+	predictions := []PredictedMatch{
+		{
+			// Fresh candidate with low draw prob — should be filtered
+			Candidate: []runtime.MatchmakerEntry{
+				makeEntry("t1", "s1"),
+				makeEntry("t1", "s2"),
+			},
+			DrawProb:              0.04,
+			Size:                  2,
+			OldestTicketTimestamp: now - 5, // 5s wait — not starving
+		},
+		{
+			// Starving candidate with low draw prob — exempt from floor, should pass
+			Candidate: []runtime.MatchmakerEntry{
+				makeEntry("t2", "s3"),
+				makeEntry("t2", "s4"),
+			},
+			DrawProb:              0.04,
+			Size:                  2,
+			OldestTicketTimestamp: now - 90, // At starving threshold
+		},
+		{
+			// Starving candidate well beyond threshold — also exempt
+			Candidate: []runtime.MatchmakerEntry{
+				makeEntry("t3", "s5"),
+				makeEntry("t3", "s6"),
+			},
+			DrawProb:              0.01,
+			Size:                  2,
+			OldestTicketTimestamp: now - 300, // 5 minutes — definitely starving
+		},
+	}
+
+	filtered := filterByQualityFloor(predictions, &settings, now)
+
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 predictions (two starving-exempt), got %d", len(filtered))
+	}
+	if filtered[0].OldestTicketTimestamp != now-90 {
+		t.Errorf("expected first result to be the 90s-wait candidate")
+	}
+	if filtered[1].OldestTicketTimestamp != now-300 {
+		t.Errorf("expected second result to be the 300s-wait candidate")
+	}
+}
+
+// TestFilterByQualityFloor_StarvingThresholdDefault verifies that when
+// ReservationThresholdSecs is 0 (unset), the default of 90s is used.
+func TestFilterByQualityFloor_StarvingThresholdDefault(t *testing.T) {
+	now := time.Now().UTC().Unix()
+
+	makeEntry := func(ticket, sessionID string) *MatchmakerEntry {
+		return &MatchmakerEntry{
+			Ticket:   ticket,
+			Presence: &MatchmakerPresence{SessionId: sessionID},
+			Properties: map[string]interface{}{
+				"rating_mu":    25.0,
+				"rating_sigma": 8.333,
+			},
+		}
+	}
+
+	settings := GlobalMatchmakingSettings{
+		EnableQualityFloor:         true,
+		QualityFloorInitial:        0.10,
+		QualityFloorDecayPerSecond: 0.0005,
+		QualityFloorMinimum:        0.0,
+		ReservationThresholdSecs:   0, // unset — should default to 90s
+	}
+
+	predictions := []PredictedMatch{
+		{
+			// 89s wait — just under default threshold — subject to floor, filtered
+			Candidate: []runtime.MatchmakerEntry{
+				makeEntry("t1", "s1"),
+				makeEntry("t1", "s2"),
+			},
+			DrawProb:              0.04,
+			Size:                  2,
+			OldestTicketTimestamp: now - 89,
+		},
+		{
+			// 90s wait — at default threshold — exempt, passes
+			Candidate: []runtime.MatchmakerEntry{
+				makeEntry("t2", "s3"),
+				makeEntry("t2", "s4"),
+			},
+			DrawProb:              0.04,
+			Size:                  2,
+			OldestTicketTimestamp: now - 90,
+		},
+	}
+
+	filtered := filterByQualityFloor(predictions, &settings, now)
+
+	if len(filtered) != 1 {
+		t.Fatalf("expected 1 prediction (only the 90s starving-exempt one), got %d", len(filtered))
+	}
+	if filtered[0].OldestTicketTimestamp != now-90 {
+		t.Errorf("expected the 90s-wait candidate to be the survivor")
+	}
+}

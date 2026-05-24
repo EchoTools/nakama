@@ -443,11 +443,15 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 	// Quality floor defaults -- disabled by default, needs tuning before enabling.
 	// When enabled, rejects match candidates whose predicted draw probability
 	// falls below a floor that decays with wait time.
+	//
+	// Defaults are intentionally conservative for small populations:
+	//   - Initial=0.05  (halved from 0.10) — 6-14 player pools rarely reach 10%
+	//   - DecayPerSecond=0.001 (doubled from 0.0005) — floor reaches 0 in 50s, not 200s
 	if data.Matchmaking.QualityFloorInitial == 0 {
-		data.Matchmaking.QualityFloorInitial = 0.10
+		data.Matchmaking.QualityFloorInitial = 0.05
 	}
 	if data.Matchmaking.QualityFloorDecayPerSecond == 0 {
-		data.Matchmaking.QualityFloorDecayPerSecond = 0.0005
+		data.Matchmaking.QualityFloorDecayPerSecond = 0.001
 	}
 	// QualityFloorMinimum defaults to 0.0 (zero value), no init needed.
 
