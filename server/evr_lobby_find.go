@@ -104,6 +104,45 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				lc.Transition(StateHolding, "waiting for leader's ticket")
 			}
 
+			// Late arrival detection: if the party has an active matchmaking
+			// ticket and this session is NOT on it, cancel the ticket so
+			// the leader rebuilds with the full party. Per the behavioral
+			// spec, tickets are immutable — cancel and rebuild is the
+			// correct response. This only applies to Arena/Combat modes.
+			// Social lobbies use find-or-create convergence and do not
+			// need ticket cancellation.
+			//
+			// After cancellation the late arrival falls through to the
+			// poll path. The leader's lobbyMatchMakeWithFallback will
+			// submit a new ticket (via replaceTicket) that includes this
+			// session. When matched, the match builder places everyone.
+			if !shouldFollowerFindOrCreateSocial(lobbyParams.Mode) &&
+				lobbyGroup.Size() > 1 &&
+				!lobbyGroup.HasSessionOnTicket(session.id.String()) {
+				p.cancelTicketForLateArrival(ctx, logger, session, lobbyParams, lobbyGroup)
+			}
+
+			// Gate: only enter the follow path when the leader is in a
+			// *social* lobby. For Arena/Combat the correct path is the
+			// one-ticket model — all party members on one matchmaking
+			// ticket. If the follower missed the ticket the answer is
+			// ticket cancellation + rebuild, not chasing the leader's
+			// match. In the interim, redirect the follower to a social
+			// lobby so they are not silently released to solo matchmaking.
+			if p.isLeaderInArenaCombatMatch(ctx, logger, session, lobbyParams, lobbyGroup) {
+				logger.Info("Leader is in arena/combat match, skipping follow path — returning to social lobby")
+				if lc := getMatchLifecycle(session); lc != nil {
+					lc.Transition(StateSocialReady, "leader in arena/combat — waiting in social for next round")
+				}
+				lobbyParams.Mode = evr.ModeSocialPublic
+				lobbyParams.Level = evr.LevelUnspecified
+				followerEntrants, err := PrepareEntrantPresences(ctx, logger, p.nk, p.nk.sessionRegistry, lobbyParams, session.id)
+				if err != nil {
+					return NewLobbyError(InternalError, fmt.Sprintf("failed to prepare follower entrant: %s", err))
+				}
+				return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, followerEntrants...)
+			}
+
 			if p.TryFollowPartyLeader(ctx, logger, session, lobbyParams, lobbyGroup) {
 				return nil
 			}
@@ -957,6 +996,108 @@ func (p *EvrPipeline) isLeaderHeadingToSocial(ctx context.Context, logger *zap.L
 	return false
 }
 
+// isLeaderInArenaCombatMatch reports whether the party leader is currently
+// in an Arena or Combat match (public or private). The follower should NOT
+// enter the follow path when this returns true — the correct path is the
+// one-ticket model where all party members are placed via a single
+// matchmaking ticket.
+//
+// Returns false when the leader cannot be found, is not in a match, is
+// actively matchmaking, or is in a social lobby.
+func (p *EvrPipeline) isLeaderInArenaCombatMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, lobbyGroup *LobbyGroup) bool {
+	leader := lobbyGroup.GetLeader()
+	if leader == nil || leader.SessionId == session.id.String() {
+		return false
+	}
+
+	leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
+	leaderUserID := uuid.FromStringOrNil(leader.UserId)
+
+	// If the leader is actively matchmaking, they have not settled into
+	// a match yet. Do not gate here — let the normal flow handle it.
+	mmStream := PresenceStream{
+		Mode:    StreamModeMatchmaking,
+		Subject: params.PublicGroupID(),
+	}
+	if session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, mmStream, leaderUserID) != nil {
+		return false
+	}
+
+	// Look up the leader's current match.
+	matchStream := PresenceStream{
+		Mode:    StreamModeService,
+		Subject: leaderSessionID,
+		Label:   StreamLabelMatchService,
+	}
+	presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, matchStream, leaderUserID)
+	if presence == nil {
+		return false
+	}
+
+	leaderMatchID := MatchIDFromStringOrNil(presence.GetStatus())
+	if leaderMatchID.IsNil() {
+		return false
+	}
+
+	label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
+	if err != nil || label == nil {
+		return false
+	}
+
+	// Arena or Combat (public or private) — follow path is wrong here.
+	return label.IsArena() || label.IsCombat()
+}
+
+// cancelTicketForLateArrival checks whether the party's leader has an active
+// matchmaking ticket that does not include this session. If so, the ticket is
+// cancelled so the leader can rebuild with the full party.
+//
+// After cancellation the caller should fall through to the normal non-leader
+// path. The leader's lobbyMatchMakeWithFallback will submit a new ticket (via
+// replaceTicket) that includes this session because it is already a party
+// member. When matched, the match builder places everyone.
+//
+// This only applies to Arena/Combat modes. Social lobbies converge via
+// find-or-create and do not use immutable matchmaking tickets.
+func (p *EvrPipeline) cancelTicketForLateArrival(_ context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup) {
+	leader := lobbyGroup.GetLeader()
+	if leader == nil || leader.SessionId == session.id.String() {
+		return
+	}
+
+	leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
+	leaderUserID := uuid.FromStringOrNil(leader.UserId)
+
+	// The leader tracks on the matchmaking stream when actively queueing.
+	// If they are NOT on the stream, there is no ticket to cancel.
+	mmStream := PresenceStream{
+		Mode:    StreamModeMatchmaking,
+		Subject: lobbyParams.PublicGroupID(),
+	}
+	if session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, mmStream, leaderUserID) == nil {
+		return
+	}
+
+	// Leader is matchmaking. Cancel all tickets for the party so the
+	// leader can rebuild with the late arrival included.
+	logger.Info("Cancelling matchmaking ticket for late party arrival",
+		zap.String("late_session", session.id.String()),
+		zap.String("leader_session", leader.SessionId),
+		zap.String("party_id", lobbyGroup.IDStr()),
+		zap.Int("party_size", lobbyGroup.Size()))
+
+	if err := lobbyGroup.MatchmakerRemoveAll(); err != nil {
+		logger.Warn("Failed to cancel matchmaking tickets for late arrival",
+			zap.Error(err))
+		return
+	}
+
+	// Observer: ticket cancelled due to late arrival.
+	if lc := getMatchLifecycle(session); lc != nil {
+		lc.Transition(StateHolding, "ticket cancelled for late arrival, rebuilding")
+	}
+}
+
 func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, lobbyParams *LobbySessionParameters, sessionIDs ...uuid.UUID) ([]*EvrMatchPresence, error) {
 
 	entrantPresences := make([]*EvrMatchPresence, 0, len(sessionIDs))
@@ -1155,11 +1296,17 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 		}
 	}
 
-	switch label.Mode {
-	case evr.ModeSocialPublic, evr.ModeCombatPublic, evr.ModeArenaPublic:
-		// ModeSocialPrivate is intentionally excluded: private lobbies require
-		// explicit invitation. Party follow must not bypass that gate.
-	default:
+	// Defense-in-depth: the follow path is only for social lobby convergence.
+	// Arena/Combat uses the one-ticket model. The gate in lobbyFind should
+	// have prevented reaching here for non-social modes, but guard anyway.
+	if !label.IsSocial() {
+		logger.Info("Leader is in a non-social match, follow path not applicable",
+			zap.String("leader_match_mode", label.Mode.String()))
+		return false
+	}
+	// ModeSocialPrivate is excluded: private lobbies require explicit invitation.
+	// Party follow must not bypass that gate.
+	if label.Mode != evr.ModeSocialPublic {
 		logger.Debug("Leader is in a non-joinable mode for party follow",
 			zap.String("mode", label.Mode.String()))
 		return false
@@ -1371,27 +1518,29 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 			return false
 		}
 
-		switch label.Mode {
-		case evr.ModeSocialPublic, evr.ModeCombatPublic, evr.ModeArenaPublic:
-			// ModeSocialPrivate excluded: same reason as TryFollowPartyLeader.
-			logger.Debug("Joining leader's lobby during poll", zap.String("mid", leaderMatchID.String()))
-			if err := p.lobbyJoin(ctx, logger, session, params, leaderMatchID); err != nil {
-				code := LobbyErrorCode(err)
-				if code == ServerIsFull || code == ServerIsLocked {
-					<-time.After(5 * time.Second)
-					continue
-				}
-				logger.Warn("Failed to join leader's lobby during poll", zap.Error(err))
-				return false
-			}
-			// Observer: follower joined leader's match during poll.
-			if lc := getMatchLifecycle(session); lc != nil {
-				lc.TransitionTo(StateInMatch, "followed leader to match via poll", WithMatchID(leaderMatchID.String()))
-			}
-			return true
-		default:
-			logger.Debug("Leader is in a non-joinable mode during poll", zap.String("mode", label.Mode.String()))
+		// Defense-in-depth: follow path is only for social lobby convergence.
+		// Arena/Combat uses the one-ticket model. The gate in lobbyFind
+		// should have prevented reaching here for non-social modes.
+		if label.Mode != evr.ModeSocialPublic {
+			logger.Info("Leader is in a non-social match during poll, follow path not applicable",
+				zap.String("leader_match_mode", label.Mode.String()))
 			return false
 		}
+
+		logger.Debug("Joining leader's social lobby during poll", zap.String("mid", leaderMatchID.String()))
+		if err := p.lobbyJoin(ctx, logger, session, params, leaderMatchID); err != nil {
+			code := LobbyErrorCode(err)
+			if code == ServerIsFull || code == ServerIsLocked {
+				<-time.After(5 * time.Second)
+				continue
+			}
+			logger.Warn("Failed to join leader's lobby during poll", zap.Error(err))
+			return false
+		}
+		// Observer: follower joined leader's social lobby during poll.
+		if lc := getMatchLifecycle(session); lc != nil {
+			lc.TransitionTo(StateInMatch, "followed leader to social lobby via poll", WithMatchID(leaderMatchID.String()))
+		}
+		return true
 	}
 }
