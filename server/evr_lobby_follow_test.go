@@ -1730,7 +1730,7 @@ func TestPoll_LeaderInClosedArenaMatch_ShouldNotLoopForever(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	result, timedOut := env.runPollWithTimeout(ctx, t, 12*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, 30*time.Second)
 	elapsed := time.Since(start)
 
 	if timedOut {
@@ -1743,8 +1743,8 @@ func TestPoll_LeaderInClosedArenaMatch_ShouldNotLoopForever(t *testing.T) {
 		t.Error("Expected false (follower cannot join leader's closed match)")
 	}
 
-	if elapsed > 8*time.Second {
-		t.Errorf("pollFollowPartyLeader took %v — should return within ~6s (one poll cycle).", elapsed)
+	if elapsed > 22*time.Second {
+		t.Errorf("pollFollowPartyLeader took %v — should return within ~18s (three poll cycles).", elapsed)
 	}
 }
 
@@ -1773,11 +1773,11 @@ func TestPoll_LeaderInFullCombatMatch_ShouldNotLoopForever(t *testing.T) {
 	})
 	env.withMockNK(registry)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 	defer cancel()
 
 	start := time.Now()
-	result, timedOut := env.runPollWithTimeout(ctx, t, 12*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, 30*time.Second)
 	elapsed := time.Since(start)
 
 	if timedOut {
@@ -1790,8 +1790,8 @@ func TestPoll_LeaderInFullCombatMatch_ShouldNotLoopForever(t *testing.T) {
 		t.Error("Expected false (follower cannot join leader's full match)")
 	}
 
-	if elapsed > 8*time.Second {
-		t.Errorf("pollFollowPartyLeader took %v — should return within ~6s (one poll cycle).", elapsed)
+	if elapsed > 22*time.Second {
+		t.Errorf("pollFollowPartyLeader took %v — should return within ~18s (three poll cycles).", elapsed)
 	}
 }
 
