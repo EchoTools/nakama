@@ -272,15 +272,32 @@ If there are no enforcer-specific changes, still include the player-facing items
 * **<Title>:** <Technical description>
 ```
 
+### Writing rules
+
+- **Player notes must be simple.** No technical jargon, no file names, no commit hashes,
+  no internal terminology. Short bullets in plain language. Players are not engineers.
+- **Do not overclaim fixes.** If a bug has been "fixed" in previous releases and is being
+  fixed again, say "should be much better" not "fixed." Ask players to report if they
+  still see issues. Honesty builds trust; false confidence destroys it.
+- **Do not send empty announcements.** If a channel has no meaningful audience-specific
+  content and the runbook does not explicitly require player items, skip that channel
+  entirely. Never post a "no updates" message. Never post to a channel just because
+  it exists.
+- **IGMs (enforcers) always get player items.** Per the template: enforcer notes include
+  player-facing changes PLUS any enforcer-specific changes. Even if there are no
+  enforcer-specific changes, still include the player items.
+
 ### Output format
 
-Present all seven release notes clearly separated with headers indicating which audience each targets. Wrap each one in a markdown code block so Andrew can copy-paste into Discord without cleanup. Use Discord markdown only.
+Present release notes clearly separated with headers indicating which audience each targets. Wrap each one in a markdown code block so Andrew can copy-paste into Discord without cleanup. Use Discord markdown only.
+
+Only present notes for channels that have content. Do not present empty channel notes.
 
 ### Post to Discord
 
-Present all seven to Andrew. He picks which to post and confirms. Never post automatically.
+Present notes to Andrew. He picks which to post and confirms. Never post automatically.
 
-Do not send filler "no updates" posts to channels. If a channel has no meaningful audience-specific content and the runbook does not explicitly require player items to be included, skip posting to that channel.
+The #general-announcements post is written by Andrew manually at deploy time. Prepare the text for him but do not post it via webhook.
 
 Webhook URLs are in `.env` at the project root. Channel mapping:
 
