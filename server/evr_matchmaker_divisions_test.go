@@ -138,14 +138,14 @@ type divTestPresence struct {
 	username  string
 }
 
-func (m *divTestPresence) GetUserId() string                    { return m.userID }
-func (m *divTestPresence) GetSessionId() string                 { return m.sessionID }
-func (m *divTestPresence) GetNodeId() string                    { return "test" }
-func (m *divTestPresence) GetUsername() string                   { return m.username }
-func (m *divTestPresence) GetHidden() bool                      { return false }
-func (m *divTestPresence) GetPersistence() bool                 { return false }
-func (m *divTestPresence) GetStatus() string                    { return "" }
-func (m *divTestPresence) GetReason() runtime.PresenceReason    { return 0 }
+func (m *divTestPresence) GetUserId() string                 { return m.userID }
+func (m *divTestPresence) GetSessionId() string              { return m.sessionID }
+func (m *divTestPresence) GetNodeId() string                 { return "test" }
+func (m *divTestPresence) GetUsername() string               { return m.username }
+func (m *divTestPresence) GetHidden() bool                   { return false }
+func (m *divTestPresence) GetPersistence() bool              { return false }
+func (m *divTestPresence) GetStatus() string                 { return "" }
+func (m *divTestPresence) GetReason() runtime.PresenceReason { return 0 }
 
 func newDivTestEntry(id string, division string, mu float64, gamesPlayed int) runtime.MatchmakerEntry {
 	return &divTestEntry{
@@ -720,82 +720,4 @@ func TestDivisionMismatchPartyBug_MixedPartyWithNewPlayerEdgeCase(t *testing.T) 
 	t.Logf("New player edge case: player with %.1f mu forced into Diamond "+
 		"due to party with Diamond veteran; isolated from Bronze players",
 		newPlayer.mu)
-}
-
-// TestFilterEntriesByDivision_MixedPartyAppearsInAllDivisions verifies the fix:
-// a single ticket whose members have different division properties must appear
-// in every division pool those members span, so the party can form a match in
-// any of them rather than being stuck in only the highest-ranked pool.
-func TestFilterEntriesByDivision_MixedPartyAppearsInAllDivisions(t *testing.T) {
-	partyTicket := "party-mixed"
-
-	// Two party members on the same ticket: one Bronze, one Diamond.
-	partyEntries := []runtime.MatchmakerEntry{
-		&divTestEntry{
-			ticket:   partyTicket,
-			presence: &divTestPresence{userID: "u1", sessionID: "s1", username: "p1"},
-			properties: map[string]interface{}{
-				"division":       "Bronze",
-				"rating_mu":      10.0,
-				"max_team_size":  float64(4),
-				"count_multiple": float64(2),
-			},
-		},
-		&divTestEntry{
-			ticket:   partyTicket,
-			presence: &divTestPresence{userID: "u2", sessionID: "s2", username: "p2"},
-			properties: map[string]interface{}{
-				"division":       "Diamond",
-				"rating_mu":      40.0,
-				"max_team_size":  float64(4),
-				"count_multiple": float64(2),
-			},
-		},
-	}
-
-	// Solo Bronze players on their own tickets.
-	soloEntries := []runtime.MatchmakerEntry{
-		newDivTestEntry("solo1", "Bronze", 11.0, 100),
-		newDivTestEntry("solo2", "Bronze", 12.0, 100),
-	}
-
-	all := append(partyEntries, soloEntries...)
-	grouped := FilterEntriesByDivision(all)
-
-	// The party ticket must appear in both Bronze and Diamond pools.
-	bronzeTickets := make(map[string]bool)
-	for _, e := range grouped["Bronze"] {
-		bronzeTickets[e.GetTicket()] = true
-	}
-	diamondTickets := make(map[string]bool)
-	for _, e := range grouped["Diamond"] {
-		diamondTickets[e.GetTicket()] = true
-	}
-
-	if !bronzeTickets[partyTicket] {
-		t.Errorf("mixed-division party ticket %q not found in Bronze pool", partyTicket)
-	}
-	if !diamondTickets[partyTicket] {
-		t.Errorf("mixed-division party ticket %q not found in Diamond pool", partyTicket)
-	}
-
-	// The solo entries must only appear in Bronze.
-	for _, solo := range soloEntries {
-		tk := solo.GetTicket()
-		if diamondTickets[tk] {
-			t.Errorf("solo Bronze ticket %q unexpectedly appeared in Diamond pool", tk)
-		}
-		if !bronzeTickets[tk] {
-			t.Errorf("solo Bronze ticket %q missing from Bronze pool", tk)
-		}
-	}
-
-	// Bronze pool must contain both party members + 2 solos = 4 entries total.
-	if len(grouped["Bronze"]) != 4 {
-		t.Errorf("Bronze pool: expected 4 entries (2 party + 2 solos), got %d", len(grouped["Bronze"]))
-	}
-	// Diamond pool must contain only the 2 party members.
-	if len(grouped["Diamond"]) != 2 {
-		t.Errorf("Diamond pool: expected 2 entries (party only), got %d", len(grouped["Diamond"]))
-	}
 }

@@ -197,6 +197,7 @@ var (
 	ErrJoinRejectReasonDuplicateJoin             = errors.New("duplicate join")
 	ErrJoinRejectDuplicateEvrID                  = errors.New("duplicate evr id")
 	ErrJoinRejectReasonLobbyFull                 = errors.New("lobby full")
+	ErrJoinRejectReasonReservationViolated       = errors.New("lobby full: reservation violated")
 	ErrJoinRejectReasonFailedToAssignTeam        = errors.New("failed to assign team")
 	ErrJoinInvalidRoleForLevel                   = errors.New("invalid role for level")
 	ErrJoinRejectReasonPartyMembersMustHaveRoles = errors.New("party members must have roles")
@@ -407,17 +408,31 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	// at the OpenSlots gate before the reservation lookup is reached.
 	// First try by session ID (fast path). If that misses — e.g. the follower
 	// disconnected and reconnected with a new session — fall back to user ID.
-	var slotReservationPresence *EvrMatchPresence
-	if e, found := state.LoadAndDeleteReservation(meta.Presence.GetSessionId()); found {
-		slotReservationPresence = e
-	} else if e, found := state.LoadAndDeleteReservationByUserID(meta.Presence.GetUserId()); found {
-		slotReservationPresence = e
+	var consumedSlotReservation *slotReservation       // the full reservation (with original expiry)
+	var consumedSlotReservationSessionID string        // the map key to restore under
+	if r, found := state.LoadAndDeleteReservationRaw(meta.Presence.GetSessionId()); found {
+		consumedSlotReservation = r
+		consumedSlotReservationSessionID = meta.Presence.GetSessionId()
+	} else if r, found := state.LoadAndDeleteReservationByUserIDRaw(meta.Presence.GetUserId()); found {
+		consumedSlotReservation = r
+		consumedSlotReservationSessionID = r.Presence.GetSessionId()
 	}
-	if slotReservationPresence != nil {
-		meta.Presence.PartyID = slotReservationPresence.PartyID
-		meta.Presence.RoleAlignment = slotReservationPresence.RoleAlignment
+	if consumedSlotReservation != nil {
+		meta.Presence.PartyID = consumedSlotReservation.Presence.PartyID
+		meta.Presence.RoleAlignment = consumedSlotReservation.Presence.RoleAlignment
 		state.rebuildCache()
 		logger = logger.WithField("has_reservation", true)
+	}
+
+	// restoreSlotReservation puts the consumed slot reservation back into the map
+	// so the player can retry. Must be called whenever a join is rejected after a
+	// reservation was consumed, to avoid silently losing the reservation.
+	restoreSlotReservation := func() {
+		if consumedSlotReservation != nil && consumedSlotReservationSessionID != "" {
+			state.reservationMap[consumedSlotReservationSessionID] = consumedSlotReservation
+			state.rebuildCache()
+			consumedSlotReservation = nil // prevent double-restore
+		}
 	}
 
 	// Ensure the match has enough slots available.
@@ -428,6 +443,11 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	}
 	if availableSlots < len(meta.Presences()) {
 		restoreReconnectReservation()
+		if consumedSlotReservationSessionID != "" {
+			restoreSlotReservation()
+			logger.WithField("session_id", consumedSlotReservationSessionID).Error("Lobby capacity exceeded despite valid slot reservation; reservation restored.")
+			return state, false, ErrJoinRejectReasonReservationViolated.Error()
+		}
 		return state, false, ErrJoinRejectReasonLobbyFull.Error()
 	}
 
@@ -478,9 +498,18 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	// check the available slots
 	if slots, err := state.OpenSlotsByRole(meta.Presence.RoleAlignment); err != nil {
 		restoreReconnectReservation()
+		restoreSlotReservation()
 		return state, false, ErrJoinRejectReasonFailedToAssignTeam.Error()
 	} else if slots < len(meta.Presences()) {
 		restoreReconnectReservation()
+		if consumedSlotReservationSessionID != "" {
+			restoreSlotReservation()
+			logger.WithFields(map[string]any{
+				"session_id": consumedSlotReservationSessionID,
+				"role":       meta.Presence.RoleAlignment,
+			}).Error("Role slot capacity exceeded despite valid slot reservation; reservation restored.")
+			return state, false, ErrJoinRejectReasonReservationViolated.Error()
+		}
 		return state, false, ErrJoinRejectReasonLobbyFull.Error()
 	}
 
