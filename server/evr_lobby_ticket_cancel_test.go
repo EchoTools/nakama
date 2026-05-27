@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"testing"
 
 	"github.com/gofrs/uuid/v5"
@@ -111,6 +112,66 @@ func TestTicketCancelRebuiltTicketIncludesAll(t *testing.T) {
 	}
 	if !lg.HasSessionOnTicket(lateSID.String()) {
 		t.Fatal("late arrival should be on the rebuilt ticket")
+	}
+}
+
+// Sprockee (or cat), have I ever complained about how much I dislike these long ass function names?
+// Anything for "proper" testing I guess...
+
+
+// verifies that when a solo leader submits a ticket tagged with the 
+// party group ID (as the fixed addTicket does),
+// MatchmakerRemoveAll can cancel it. This is the regression test. Before the fix,
+// addTicket passed partyId="" for solo leaders, so RemovePartyAll was a no-op
+// and the ticket survived, causing the leader to be matched without the follower
+func TestTicketCancelSoloLeaderTaggedWithPartyID(t *testing.T) {
+	t.Parallel()
+
+	ph, cleanup := createDefaultPartyHandler(t)
+	defer cleanup()
+
+	// Solo party: only the leader joins.
+	_, sessionIDs := addMembers(t, ph, 1)
+	leaderSID := sessionIDs[0]
+
+	lg := &LobbyGroup{ph: ph}
+	if lg.Size() != 1 {
+		t.Fatalf("expected party size 1, got %d", lg.Size())
+	}
+
+	// Simulate what the fixed addTicket does for a solo leader that is in a
+	// lobby group: submit via matchmaker.Add but tag the ticket with ph.IDStr
+	// (the party group ID) instead of "". 
+	leaderMember := ph.members.List()[0]
+	presences := []*MatchmakerPresence{{
+		UserId:    leaderMember.UserPresence.UserId,
+		SessionId: leaderMember.UserPresence.SessionId,
+		Username:  leaderMember.UserPresence.Username,
+		Node:      partyTestNode,
+		SessionID: leaderMember.PresenceID.SessionID,
+	}}
+	ticket, _, err := ph.matchmaker.Add(context.Background(), presences, leaderSID.String(), ph.IDStr, "", 2, 8, 2, nil, nil)
+	if err != nil {
+		t.Fatalf("matchmaker.Add: %v", err)
+	}
+	if ticket == "" {
+		t.Fatal("expected non-empty ticket")
+	}
+
+	// Leader must appear on the party ticket via HasSessionOnPartyTicket.
+	if !lg.HasSessionOnTicket(leaderSID.String()) {
+		t.Fatal("leader should be on the solo ticket tagged with party ID")
+	}
+
+	// MatchmakerRemoveAll is called by both JoinRequest (when a late arrival
+	// joins an open party) and cancelTicketForLateArrival. It must find and
+	// remove the solo ticket because it is now in partyTickets[ph.IDStr].
+	if err := lg.MatchmakerRemoveAll(); err != nil {
+		t.Fatalf("MatchmakerRemoveAll: %v", err)
+	}
+
+	if lg.HasSessionOnTicket(leaderSID.String()) {
+		t.Fatal("solo ticket should be removed by MatchmakerRemoveAll after tagging with party ID")
 	}
 }
 
