@@ -43,18 +43,18 @@ type SessionParameters struct {
 	defaultRegion       string              // The default region code for the server
 	urlParameters       map[string][]string // The URL parameters
 
-	profile                      *EVRProfile                      // The account
-	matchmakingSettings          *MatchmakingSettings             // The matchmaking settings
-	guildGroups                  map[string]*GuildGroup           // map[string]*GuildGroup
+	profile                      *EVRProfile                           // The account
+	matchmakingSettings          *MatchmakingSettings                  // The matchmaking settings
+	guildGroups                  map[string]*GuildGroup                // map[string]*GuildGroup
 	earlyQuitConfig              *atomic.Pointer[EarlyQuitPlayerState] // The early quit config
-	isGoldNameTag                *atomic.Bool                     // If this user should have a gold name tag
-	lastMatchmakingError         *atomic.Error                    // The last matchmaking error
+	isGoldNameTag                *atomic.Bool                          // If this user should have a gold name tag
+	lastMatchmakingError         *atomic.Error                         // The last matchmaking error
 	latencyHistory               *atomic.Pointer[LatencyHistory]       // The latency history
-	unreachableServers           *atomic.Pointer[UnreachableServers]  // Per-player unreachable game servers
-	isIGPOpen                    *atomic.Bool                         // The user has IGPU open
-	gameModeSuspensionsByGroupID ActiveGuildEnforcements          // The active suspension records
-	enforcementUserIDs           []string                         // User IDs (self + alts) used for enforcement journal queries
-	ignoreDisabledAlternates     bool                             // Ignore disabled
+	unreachableServers           *atomic.Pointer[UnreachableServers]   // Per-player unreachable game servers
+	isIGPOpen                    *atomic.Bool                          // The user has IGPU open
+	gameModeSuspensionsByGroupID ActiveGuildEnforcements               // The active suspension records
+	enforcementUserIDs           []string                              // User IDs (self + alts) used for enforcement journal queries
+	ignoreDisabledAlternates     bool                                  // Ignore disabled
 
 	isAmbassadorMatch *atomic.Bool // True if the player is ambassadoring in the current match
 
@@ -62,6 +62,10 @@ type SessionParameters struct {
 	currentSNSPartyID uint64    // SNS wire party ID
 
 	sessionDurationOnce sync.Once // Ensures the session-duration metrics goroutine is spawned exactly once
+
+	// MatchLifecycle tracks this player's position in the match participation
+	// lifecycle (observer mode only — logs transitions, does not gate behavior).
+	MatchLifecycle *PlayerMatchLifecycle
 }
 
 func (s *SessionParameters) UserID() string {
@@ -140,6 +144,16 @@ func (s *SessionParameters) GeoHash() string {
 		return ""
 	}
 	return s.ipInfo.GeoHash(2)
+}
+
+// getMatchLifecycle returns the PlayerMatchLifecycle for the given session.
+// Returns nil if session parameters are unavailable.
+func getMatchLifecycle(session *sessionWS) *PlayerMatchLifecycle {
+	params, ok := LoadParams(session.Context())
+	if !ok || params == nil {
+		return nil
+	}
+	return params.MatchLifecycle
 }
 
 func StoreParams(ctx context.Context, params *SessionParameters) {
