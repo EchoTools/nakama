@@ -794,6 +794,24 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 					participation.LeaveReason = LeaveReasonCrashRecovery
 				}
 			}
+
+			// Observer: log lifecycle transition for player leaving match.
+			if _nkLocal, ok := nk.(*RuntimeGoNakamaModule); ok {
+				if s := _nkLocal.sessionRegistry.Get(uuid.FromStringOrNil(p.GetSessionId())); s != nil {
+					if ws, ok := s.(*sessionWS); ok {
+						if lc := getMatchLifecycle(ws); lc != nil {
+							if hasReconnectReservation {
+								lc.Transition(StateCrashed, "disconnected")
+							} else if p.GetReason() == runtime.PresenceReasonLeave || state.GameState.IsMatchOver() {
+								lc.Transition(StateReturning, "match ended")
+							} else {
+								lc.Transition(StateCrashed, "disconnected")
+							}
+						}
+					}
+				}
+			}
+
 			// If the round is not over, then add an early quit count to the player.
 			// Count all quits before match completion (both pre-game and early quits)
 			if !hasReconnectReservation && state.Mode == evr.ModeArenaPublic && !state.GameState.IsMatchOver() {

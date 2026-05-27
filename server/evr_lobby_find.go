@@ -99,6 +99,11 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	if lobbyGroup != nil {
 		if !isLeader {
+			// Observer: non-leader entering holding pattern, waiting for leader's ticket.
+			if lc := getMatchLifecycle(session); lc != nil {
+				lc.Transition(StateHolding, "waiting for leader's ticket")
+			}
+
 			if p.TryFollowPartyLeader(ctx, logger, session, lobbyParams, lobbyGroup) {
 				return nil
 			}
@@ -165,6 +170,11 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 					// Non-social mode: release the follower to independent matchmaking.
 					logger.Info("Follower cannot join leader's match, releasing to independent matchmaking",
 						zap.String("mode", lobbyParams.Mode.String()))
+
+					// Observer: released from follow path, regrouping.
+					if lc := getMatchLifecycle(session); lc != nil {
+						lc.Transition(StateSocialReady, "released from follow path, regrouping")
+					}
 
 					// For social modes, don't set party size to 1 — party members should converge
 					// to the leader's lobby even if they are searching independently.
@@ -424,6 +434,11 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 		partySize := lobbyGroup.Size()
 		logger.Debug("Party is ready", zap.String("leader", session.id.String()), zap.Int("size", partySize), zap.Strings("members", memberUsernames))
 
+		// Observer: leader submitting matchmaking ticket.
+		if lc := getMatchLifecycle(session); lc != nil {
+			lc.TransitionTo(StateMatchmaking, "leader submitted ticket", WithIsLeader(true))
+		}
+
 		lobbyParams.SetPartySize(partySize)
 	}
 
@@ -432,6 +447,14 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 	for _, member := range lobbyGroup.List() {
 		if member.Presence.GetSessionId() == session.id.String() {
 			continue
+		}
+		// Observer: party member included on leader's ticket.
+		if memberSession := p.nk.sessionRegistry.Get(uuid.FromStringOrNil(member.Presence.GetSessionId())); memberSession != nil {
+			if ws, ok := memberSession.(*sessionWS); ok {
+				if lc := getMatchLifecycle(ws); lc != nil {
+					lc.Transition(StateMatchmaking, "included on leader's ticket")
+				}
+			}
 		}
 		memberSessionIDs = append(memberSessionIDs, uuid.FromStringOrNil(member.Presence.GetSessionId()))
 	}
@@ -1156,6 +1179,11 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 		return p.pollFollowPartyLeader(ctx, logger, session, params, lobbyGroup)
 	}
 
+	// Observer: follower successfully followed leader to match.
+	if lc := getMatchLifecycle(session); lc != nil {
+		lc.TransitionTo(StateInMatch, "followed leader to match", WithMatchID(leaderMatchID.String()))
+	}
+
 	return true
 }
 
@@ -1355,6 +1383,10 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 				}
 				logger.Warn("Failed to join leader's lobby during poll", zap.Error(err))
 				return false
+			}
+			// Observer: follower joined leader's match during poll.
+			if lc := getMatchLifecycle(session); lc != nil {
+				lc.TransitionTo(StateInMatch, "followed leader to match via poll", WithMatchID(leaderMatchID.String()))
 			}
 			return true
 		default:

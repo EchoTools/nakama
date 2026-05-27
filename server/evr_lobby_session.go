@@ -24,7 +24,16 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 
 			p.nk.metrics.CustomCounter("lobby_join_next_match", lobbyParams.MetricsTags(), 1)
 			logger.Info("Joining next match", zap.String("mid", lobbyParams.NextMatchID.UUID.String()))
-			return p.lobbyJoin(ctx, logger, session, lobbyParams, lobbyParams.NextMatchID)
+			joinErr := p.lobbyJoin(ctx, logger, session, lobbyParams, lobbyParams.NextMatchID)
+			// Observer: log reconnect outcome.
+			if lc := getMatchLifecycle(session); lc != nil {
+				if joinErr == nil {
+					lc.TransitionTo(StateInMatch, "reconnected", WithMatchID(lobbyParams.NextMatchID.String()))
+				} else {
+					lc.Transition(StateIdle, "reconnect failed, reservation expired")
+				}
+			}
+			return joinErr
 		}
 
 		if len(lobbyParams.RequiredFeatures) > 0 {
