@@ -647,6 +647,16 @@ func flushMatchRegistryLabelUpdates(nk runtime.NakamaModule) {
 }
 
 func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, entrants ...*EvrMatchPresence) error {
+	// Fast path: if the player is already in a social lobby that matches
+	// the search criteria (same group, social mode), treat as no-op.
+	// This prevents the party follow path from producing an error when it
+	// directs a player to a social lobby they are already in. (#462)
+	if currentMatchID := p.currentSocialLobbyForSession(ctx, logger, session, lobbyParams); !currentMatchID.IsNil() {
+		logger.Debug("Player already in a matching social lobby, treating as no-op",
+			zap.String("mid", currentMatchID.String()))
+		return nil
+	}
+
 	// First attempt runs immediately — no pre-wait. The old 1s pre-query wait
 	// was a workaround for the Bluge label-flush lag; newLobby now flushes
 	// synchronously, so the first query sees fresh state. Subsequent attempts
@@ -1048,6 +1058,52 @@ func (p *EvrPipeline) isFollowerInActiveMatch(ctx context.Context, logger *zap.L
 	}
 
 	return label.IsArena() || label.IsCombat()
+}
+
+// currentSocialLobbyForSession returns the match ID of the social lobby that
+// the player is currently in, if it matches the search criteria (same group ID
+// and social mode). Returns a nil MatchID when the player is not in a matching
+// social lobby.
+//
+// Used as a fast-path guard in lobbyFindOrCreateSocial to avoid rejoining a
+// lobby the player is already in — the party follow path can direct a player
+// to a social lobby they never left. (#462)
+func (p *EvrPipeline) currentSocialLobbyForSession(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters) MatchID {
+	matchStream := PresenceStream{
+		Mode:    StreamModeService,
+		Subject: session.ID(),
+		Label:   StreamLabelMatchService,
+	}
+
+	ws, ok := session.(*sessionWS)
+	if !ok {
+		return MatchID{}
+	}
+
+	presence := ws.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.ID(), matchStream, session.UserID())
+	if presence == nil {
+		return MatchID{}
+	}
+
+	currentMatchID := MatchIDFromStringOrNil(presence.GetStatus())
+	if currentMatchID.IsNil() {
+		return MatchID{}
+	}
+
+	label, err := MatchLabelByID(ctx, p.nk, currentMatchID)
+	if err != nil || label == nil {
+		return MatchID{}
+	}
+
+	if !label.IsSocial() {
+		return MatchID{}
+	}
+
+	if label.GetGroupID() != lobbyParams.GroupID {
+		return MatchID{}
+	}
+
+	return currentMatchID
 }
 
 // isFollowerAlreadyInLeaderMatch checks whether the follower is already in

@@ -2602,3 +2602,123 @@ func TestIsFollowerAlreadyInLeaderMatch_HeartbeatDoesNotTriggerFollow(t *testing
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Tests for currentSocialLobbyForSession (#462)
+// ---------------------------------------------------------------------------
+
+// TestCurrentSocialLobby_AlreadyInMatchingSocialLobby verifies that when a
+// player is in a social lobby with the same group ID, the function returns
+// the current match ID (no-op fast path).
+func TestCurrentSocialLobby_AlreadyInMatchingSocialLobby(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	socialMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	registry.SetMatch(socialMatchID, &MatchLabel{
+		ID:          socialMatchID,
+		Mode:        evr.ModeSocialPublic,
+		Open:        true,
+		PlayerLimit: 12,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setFollowerMatch(socialMatchID)
+	env.params.GroupID = groupID
+
+	logger := loggerForTest(t)
+	result := env.pipeline.currentSocialLobbyForSession(
+		context.Background(), logger, env.session, env.params)
+
+	if result.IsNil() {
+		t.Error("currentSocialLobbyForSession should return the match ID when player is already in a matching social lobby")
+	}
+	if result != socialMatchID {
+		t.Errorf("expected match ID %s, got %s", socialMatchID, result)
+	}
+}
+
+// TestCurrentSocialLobby_DifferentLobby_ReturnsNil verifies that when a
+// player needs to join a different lobby (different group), the function
+// returns nil so the normal find-or-create proceeds.
+func TestCurrentSocialLobby_DifferentLobby_ReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	socialMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	differentGroupID := uuid.Must(uuid.NewV4())
+	registry.SetMatch(socialMatchID, &MatchLabel{
+		ID:          socialMatchID,
+		Mode:        evr.ModeSocialPublic,
+		Open:        true,
+		PlayerLimit: 12,
+		GroupID:     &differentGroupID,
+	})
+	env.withMockNK(registry)
+	env.setFollowerMatch(socialMatchID)
+	// Searching for a different group.
+	env.params.GroupID = uuid.Must(uuid.NewV4())
+
+	logger := loggerForTest(t)
+	result := env.pipeline.currentSocialLobbyForSession(
+		context.Background(), logger, env.session, env.params)
+
+	if !result.IsNil() {
+		t.Error("currentSocialLobbyForSession should return nil when player is in a lobby with a different group ID")
+	}
+}
+
+// TestCurrentSocialLobby_InArenaMatch_ReturnsNil verifies that a player
+// in an arena match is not treated as already in a social lobby.
+func TestCurrentSocialLobby_InArenaMatch_ReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	arenaMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	registry.SetMatch(arenaMatchID, &MatchLabel{
+		ID:          arenaMatchID,
+		Mode:        evr.ModeArenaPublic,
+		Open:        true,
+		PlayerLimit: 8,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setFollowerMatch(arenaMatchID)
+	env.params.GroupID = groupID
+
+	logger := loggerForTest(t)
+	result := env.pipeline.currentSocialLobbyForSession(
+		context.Background(), logger, env.session, env.params)
+
+	if !result.IsNil() {
+		t.Error("currentSocialLobbyForSession should return nil when player is in an arena match")
+	}
+}
+
+// TestCurrentSocialLobby_NotInAnyMatch_ReturnsNil verifies that a player
+// who is not in any match gets nil (proceed with find-or-create).
+func TestCurrentSocialLobby_NotInAnyMatch_ReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	registry := newMockFollowMatchRegistry()
+	env.withMockNK(registry)
+	// Do NOT call setFollowerMatch — player has no match presence.
+	env.params.GroupID = env.groupID
+
+	logger := loggerForTest(t)
+	result := env.pipeline.currentSocialLobbyForSession(
+		context.Background(), logger, env.session, env.params)
+
+	if !result.IsNil() {
+		t.Error("currentSocialLobbyForSession should return nil when player is not in any match")
+	}
+}
