@@ -57,7 +57,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			defer func() {
 				mmStream := PresenceStream{
 					Mode:    StreamModeMatchmaking,
-					Subject: lobbyParams.PublicGroupID(),
+					Subject: lobbyParams.GroupID,
 				}
 				p.nk.tracker.Untrack(session.id, mmStream, session.userID)
 			}()
@@ -379,7 +379,7 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 		// Track the leader on the matchmaking stream early so followers know they are queueing for Arena.
 		mmStream := PresenceStream{
 			Mode:    StreamModeMatchmaking,
-			Subject: lobbyParams.PublicGroupID(),
+			Subject: lobbyParams.GroupID,
 		}
 		statusBytes, err := json.Marshal(lobbyParams)
 		if err != nil {
@@ -959,7 +959,7 @@ func (p *EvrPipeline) isLeaderHeadingToSocial(ctx context.Context, logger *zap.L
 	// Matchmaking intent takes precedence over their current location.
 	mmStream := PresenceStream{
 		Mode:    StreamModeMatchmaking,
-		Subject: lobbyParams.PublicGroupID(),
+		Subject: lobbyParams.GroupID,
 	}
 	if presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, mmStream, leaderUserID); presence != nil {
 		var leaderParams LobbySessionParameters
@@ -1017,7 +1017,7 @@ func (p *EvrPipeline) isLeaderInArenaCombatMatch(ctx context.Context, logger *za
 	// a match yet. Do not gate here — let the normal flow handle it.
 	mmStream := PresenceStream{
 		Mode:    StreamModeMatchmaking,
-		Subject: params.PublicGroupID(),
+		Subject: params.GroupID,
 	}
 	if session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, mmStream, leaderUserID) != nil {
 		return false
@@ -1072,7 +1072,7 @@ func (p *EvrPipeline) cancelTicketForLateArrival(_ context.Context, logger *zap.
 	// If they are NOT on the stream, there is no ticket to cancel.
 	mmStream := PresenceStream{
 		Mode:    StreamModeMatchmaking,
-		Subject: lobbyParams.PublicGroupID(),
+		Subject: lobbyParams.GroupID,
 	}
 	if session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, mmStream, leaderUserID) == nil {
 		return
