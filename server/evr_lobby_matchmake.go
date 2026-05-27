@@ -321,7 +321,7 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 		}
 
 	} else {
-		// This is a solo matchmaker.
+		// This is a solo matchmaker (lobbyGroup is nil or has exactly 1 member)
 		presences := []*MatchmakerPresence{
 			{
 				UserId:    session.UserID().String(),
@@ -332,8 +332,16 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 			},
 		}
 
-		// If the user is not in a party, the must submit the ticket through the matchmaker instead of the party handler.
-		ticket, _, err = session.matchmaker.Add(ctx, presences, sessionID, "", query, minCount, maxCount, countMultiple, stringProps, numericProps)
+		// Tag the ticket with the party group ID even when submitting solo.
+		// This stores the ticket in partyTickets[groupID] so that
+		// RemovePartyAll (called by JoinRequest when a late arrival joins and
+		// by cancelTicketForLateArrival) can cancel it
+		partyID := ""
+		if lobbyGroup != nil {
+			partyID = lobbyGroup.IDStr()
+		}
+
+		ticket, _, err = session.matchmaker.Add(ctx, presences, sessionID, partyID, query, minCount, maxCount, countMultiple, stringProps, numericProps)
 		if err != nil {
 			logger.Error("Failed to add solo matchmaker ticket", zap.Error(err), zap.String("query", query), zap.Any("string_properties", stringProps), zap.Any("numeric_properties", numericProps))
 			return "", fmt.Errorf("failed to add solo matchmaker ticket: %w", err)
