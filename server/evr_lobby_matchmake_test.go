@@ -22,9 +22,9 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/stretchr/testify/require"
 	uatomic "go.uber.org/atomic"
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // stubDB returns a non-nil *sql.DB that will fail gracefully (with an error,
@@ -66,9 +66,10 @@ func makeMatchmakeTestParty(leaderSID, leaderUID, followerSID, followerUID uuid.
 	}
 
 	ph := &PartyHandler{
-		members:    NewPartyPresenceList(8),
-		matchmaker: mm,
-		ctx:        context.Background(),
+		members:         NewPartyPresenceList(8),
+		matchmaker:      mm,
+		ctx:             context.Background(),
+		ticketRebuildCh: make(chan struct{}, 1),
 	}
 	ph.leader = &PartyLeader{
 		UserPresence: leaderPresence,

@@ -1086,11 +1086,25 @@ func (p *EvrPipeline) cancelTicketForLateArrival(_ context.Context, logger *zap.
 		zap.String("party_id", lobbyGroup.IDStr()),
 		zap.Int("party_size", lobbyGroup.Size()))
 
+	// Remove party-scoped tickets first.
 	if err := lobbyGroup.MatchmakerRemoveAll(); err != nil {
-		logger.Warn("Failed to cancel matchmaking tickets for late arrival",
+		logger.Warn("Failed to cancel party matchmaking tickets for late arrival",
 			zap.Error(err))
-		return
 	}
+
+	// Also remove any solo ticket the leader submitted before the late
+	// arrival joined. When the leader initially had a party of 1, addTicket
+	// takes the solo path and creates a ticket with an empty party ID.
+	// MatchmakerRemoveAll only removes tickets keyed by the party ID, so
+	// the solo ticket survives. RemoveSessionAll catches it.
+	if err := lobbyGroup.MatchmakerRemoveSessionAll(leader.SessionId); err != nil {
+		logger.Warn("Failed to cancel leader session tickets for late arrival",
+			zap.Error(err))
+	}
+
+	// Signal the leader's matchmaking loop to rebuild the ticket
+	// immediately instead of waiting for the fallback timer.
+	lobbyGroup.SignalTicketRebuild()
 
 	// Observer: ticket cancelled due to late arrival.
 	if lc := getMatchLifecycle(session); lc != nil {
