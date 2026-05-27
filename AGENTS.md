@@ -41,6 +41,13 @@ Install: `git config core.hooksPath .githooks`
 - **Log discipline**: expected behavior is `info` or `debug`. `warn` = someone should look.
   `error` = something broke. Never downgrade `warn` to `debug` without explicit review.
 
+### Hard invariants (DO NOT CHANGE)
+
+- **Guild isolation is absolute.** All matchmaking streams, tickets, queries, and lobby
+  searches are scoped to `GroupID`. Players in different guilds NEVER match together,
+  even in public modes. Do NOT normalize, nil-out, or bypass GroupID for "cross-guild"
+  matching. This has been incorrectly "fixed" multiple times. It is not a bug.
+
 ### Common violations to flag on sight
 
 - Removing logging (debug/warn/error) without explanation
