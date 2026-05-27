@@ -33,6 +33,14 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	startTime := time.Now()
 	entrantSessionIDs := []uuid.UUID{session.id}
 
+	// if this player is currently playing in a match,
+	// do not process the party follow request, it would pull them out
+	// mid-game. Wait for the match to end naturally.
+	if lc := getMatchLifecycle(session); lc != nil && lc.State() == StateInMatch {
+		logger.Info("Player is mid-match in Arena/Combat, ignoring LobbyFindSessionRequest (party follow gate)")
+		return nil
+	}
+
 	var lobbyGroup *LobbyGroup
 	var memberSessionIDs []uuid.UUID
 	var isLeader bool
