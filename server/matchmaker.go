@@ -68,11 +68,11 @@ func (p *MatchmakerPresence) GetReason() runtime.PresenceReason {
 }
 
 type MatchmakerEntry struct {
-	Ticket     string                 `json:"ticket"`
-	Presence   *MatchmakerPresence    `json:"presence"`
-	Properties map[string]any `json:"properties"`
-	PartyId    string                 `json:"party_id"`
-	CreateTime int64                  `json:"create_time"`
+	Ticket     string              `json:"ticket"`
+	Presence   *MatchmakerPresence `json:"presence"`
+	Properties map[string]any      `json:"properties"`
+	PartyId    string              `json:"party_id"`
+	CreateTime int64               `json:"create_time"`
 
 	StringProperties  map[string]string  `json:"-"`
 	NumericProperties map[string]float64 `json:"-"`
@@ -95,12 +95,12 @@ func (m *MatchmakerEntry) GetCreateTime() int64 {
 }
 
 type MatchmakerIndex struct {
-	Ticket     string                 `json:"ticket"`
+	Ticket     string         `json:"ticket"`
 	Properties map[string]any `json:"properties"`
-	MinCount   int                    `json:"min_count"`
-	MaxCount   int                    `json:"max_count"`
-	PartyId    string                 `json:"party_id"`
-	CreatedAt  int64                  `json:"created_at"`
+	MinCount   int            `json:"min_count"`
+	MaxCount   int            `json:"max_count"`
+	PartyId    string         `json:"party_id"`
+	CreatedAt  int64          `json:"created_at"`
 
 	// Parameters used for correctly processing various matchmaker operations, but not indexed for searching.
 	Query             string              `json:"-"`
@@ -190,6 +190,7 @@ type Matchmaker interface {
 	RemovePartyAll(partyID string) error
 	RemoveAll(node string)
 	Remove(tickets []string)
+	HasSessionOnPartyTicket(partyID, sessionID string) bool
 	GetStats() *api.MatchmakerStats
 	SetStats(*api.MatchmakerStats)
 }
@@ -1075,6 +1076,30 @@ func (m *LocalMatchmaker) RemovePartyAll(partyID string) error {
 		return runtime.ErrMatchmakerDelete
 	}
 	return nil
+}
+
+// HasSessionOnPartyTicket reports whether sessionID is included on any active
+// matchmaking ticket for the given partyID. This is used to detect late party
+// arrivals: a member whose session is NOT on the party's ticket arrived after
+// the leader submitted it.
+func (m *LocalMatchmaker) HasSessionOnPartyTicket(partyID, sessionID string) bool {
+	m.Lock()
+	defer m.Unlock()
+
+	partyTickets, ok := m.partyTickets[partyID]
+	if !ok {
+		return false
+	}
+	for ticket := range partyTickets {
+		idx, ok := m.indexes[ticket]
+		if !ok {
+			continue
+		}
+		if _, found := idx.SessionIDs[sessionID]; found {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *LocalMatchmaker) RemoveAll(node string) {

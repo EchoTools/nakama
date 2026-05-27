@@ -743,7 +743,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	submissionTime := p.MatchmakingTimestamp.UTC().Format(time.RFC3339)
 	stringProperties := map[string]string{
 		"game_mode":              p.Mode.String(),
-		"group_id":               p.GroupID.String(),
+		"group_id":               p.PublicGroupID().String(),
 		"version_lock":           p.VersionLock.String(),
 		"display_name":           p.DisplayName,
 		"submission_time":        submissionTime,
@@ -777,7 +777,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 
 	qparts := []string{
 		"+properties.game_mode:" + p.Mode.String(),
-		fmt.Sprintf("+properties.group_id:%s", Query.QuoteStringValue(p.GroupID.String())),
+		fmt.Sprintf("+properties.group_id:%s", Query.QuoteStringValue(p.PublicGroupID().String())),
 		fmt.Sprintf(`-properties.blocked_ids:/.*%s.*/`, Query.QuoteStringValue(p.UserID.String())),
 		//"+properties.version_lock:" + p.VersionLock.String(),
 		p.MatchmakingQueryAddon,
@@ -874,8 +874,19 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	return query, stringProperties, numericProperties
 }
 
+// PublicGroupID returns uuid.Nil for public modes (where cross-guild matching
+// is expected) and the actual GroupID for private/restricted modes.
+func (p *LobbySessionParameters) PublicGroupID() uuid.UUID {
+	switch p.Mode {
+	case evr.ModeArenaPublic, evr.ModeCombatPublic, evr.ModeSocialPublic:
+		return uuid.Nil
+	default:
+		return p.GroupID
+	}
+}
+
 func (p *LobbySessionParameters) MatchmakingStream() PresenceStream {
-	return PresenceStream{Mode: StreamModeMatchmaking, Subject: p.GroupID}
+	return PresenceStream{Mode: StreamModeMatchmaking, Subject: p.PublicGroupID()}
 }
 
 func (p *LobbySessionParameters) GuildGroupStream() PresenceStream {

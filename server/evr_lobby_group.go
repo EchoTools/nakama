@@ -63,6 +63,26 @@ func (g *LobbyGroup) MatchmakerAdd(sessionID, node, query string, minCount, maxC
 	return g.ph.MatchmakerAdd(sessionID, node, query, minCount, maxCount, countMultiple, stringProperties, numericProperties)
 }
 
+// MatchmakerRemoveAll cancels all active matchmaking tickets for this party.
+// Used when a late arrival requires the ticket to be rebuilt with the full
+// party. Returns nil if the party handler is nil or has no active tickets.
+func (g *LobbyGroup) MatchmakerRemoveAll() error {
+	if g.ph == nil {
+		return nil
+	}
+	return g.ph.matchmaker.RemovePartyAll(g.ph.IDStr)
+}
+
+// HasSessionOnTicket reports whether sessionID is included on any active
+// matchmaking ticket for this party. Returns false when the party handler
+// is nil or has no active tickets.
+func (g *LobbyGroup) HasSessionOnTicket(sessionID string) bool {
+	if g.ph == nil {
+		return false
+	}
+	return g.ph.matchmaker.HasSessionOnPartyTicket(g.ph.IDStr, sessionID)
+}
+
 func JoinPartyGroup(session *sessionWS, groupName string, currentMatchID MatchID) (*LobbyGroup, bool, error) {
 
 	userPresence := &rtapi.UserPresence{

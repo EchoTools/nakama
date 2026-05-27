@@ -146,6 +146,14 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 			zap.Strings("entrant_sids", entrantSessionIDs),
 			zap.Bool("reservation_violated", reservationViolated),
 		)
+
+		// Observer: join failed, player regrouping.
+		if ws, ok := session.(*sessionWS); ok {
+			if lc := getMatchLifecycle(ws); lc != nil {
+				lc.Transition(StateSocialReady, "join failed, regrouping")
+			}
+		}
+
 		return fmt.Errorf("failed to join match: %w", err)
 	}
 
@@ -279,6 +287,17 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	if err := SendEVRMessages(serverSession, false, protobufMsg, connectionSettings); err != nil {
 		logger.Error("failed to send protobuf lobby session success to game server", zap.Error(err))
 		return errors.New("failed to send protobuf lobby session success to game server")
+	}
+
+	// Observer: match found, sending LobbySessionSuccess to client.
+	if ws, ok := session.(*sessionWS); ok {
+		if lc := getMatchLifecycle(ws); lc != nil {
+			if label.IsSocial() {
+				lc.TransitionTo(StateSocialReady, "joined social lobby", WithMatchID(label.ID.String()))
+			} else {
+				lc.TransitionTo(StateJoining, "match found, joining", WithMatchID(label.ID.String()))
+			}
+		}
 	}
 
 	// Send the lobby session success message to the game client.

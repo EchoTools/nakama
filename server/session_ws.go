@@ -59,11 +59,11 @@ const (
 var (
 	ErrSessionQueueFull = errors.New("session outgoing queue full")
 
-	featurePattern     = regexp.MustCompile(`^[a-z0-9_]+$`)
-	discordIDPattern   = regexp.MustCompile(`^[0-9]+$`)
-	regionPattern      = regexp.MustCompile(`^[-A-Za-z0-9_]+$`)
-	guildPattern       = regexp.MustCompile(`^([0-9]+|any)$`)
-	tagsPattern        = regexp.MustCompile(`^[-.A-Za-z0-9_:]+$`)
+	featurePattern   = regexp.MustCompile(`^[a-z0-9_]+$`)
+	discordIDPattern = regexp.MustCompile(`^[0-9]+$`)
+	regionPattern    = regexp.MustCompile(`^[-A-Za-z0-9_]+$`)
+	guildPattern     = regexp.MustCompile(`^([0-9]+|any)$`)
+	tagsPattern      = regexp.MustCompile(`^[-.A-Za-z0-9_:]+$`)
 )
 
 type (
@@ -206,6 +206,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		isAmbassadorMatch:    atomic.NewBool(false),
 		latencyHistory:       atomic.NewPointer(NewLatencyHistory()),
 		unreachableServers:   atomic.NewPointer(NewUnreachableServers()),
+		MatchLifecycle:       NewPlayerMatchLifecycle(logger),
 	}
 
 	ctx = context.WithValue(ctx, ctxSessionParametersKey{}, atomic.NewPointer(&params))

@@ -294,6 +294,11 @@ func (p *EvrPipeline) snsPartyJoinRequest(ctx context.Context, logger *zap.Logge
 		return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: msg.PartyID, ErrorCode: 1})
 	}
 
+	// Observer: player joined a party group.
+	if lc := getMatchLifecycle(session); lc != nil {
+		lc.TransitionTo(StateSocialConverging, "joined party group", WithPartyID(partyUUID.String()))
+	}
+
 	ph, ok := p.nk.partyRegistry.Get(partyUUID)
 	if !ok {
 		return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: msg.PartyID, ErrorCode: 1})
@@ -587,6 +592,11 @@ func (p *EvrPipeline) snsPartyRespondToInviteRequest(ctx context.Context, logger
 
 	if err := p.snsPartyTrackAndJoin(ctx, logger, session, partyUUID, snsPartyID, params); err != nil {
 		return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: snsPartyID, ErrorCode: 1})
+	}
+
+	// Observer: player joined a party group via invite acceptance.
+	if lc := getMatchLifecycle(session); lc != nil {
+		lc.TransitionTo(StateSocialConverging, "joined party group via invite", WithPartyID(partyUUID.String()))
 	}
 
 	ph, ok := p.nk.partyRegistry.Get(partyUUID)
