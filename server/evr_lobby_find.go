@@ -63,6 +63,17 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			}()
 		}
 
+		// Fast path: if the follower is already in the leader's match,
+		// skip all heavyweight operations (authorization, matchmaking
+		// stream, monitor goroutine, TryFollowPartyLeader). This
+		// prevents repeated "Joined party group" / "Already in
+		// leader's match" churn when the client re-sends
+		// LobbyFindSessionRequest on its normal message cycle.
+		if !isLeader && p.isFollowerAlreadyInLeaderMatch(logger, session, lobbyGroup) {
+			logger.Debug("Follower already in leader's match, skipping follow path")
+			return nil
+		}
+
 		// Synchronize mode if the leader is heading to Social.
 		// Cache the result to avoid a TOCTOU double-read later (line 111).
 		headingToSocial = !isLeader && p.isLeaderHeadingToSocial(ctx, logger, session, lobbyParams, lobbyGroup)
@@ -99,6 +110,15 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	if lobbyGroup != nil {
 		if !isLeader {
+			// Guard: if the follower is in an active Arena/Combat match,
+			// do not process the party follow. Let them finish their match.
+			// The party will pick them up when they return to social.
+			// Fixes #460: player mid-match yanked back to social by party follow.
+			if p.isFollowerInActiveMatch(ctx, logger, session) {
+				logger.Info("Follower is in an active arena/combat match, skipping party follow")
+				return nil
+			}
+
 			// Observer: non-leader entering holding pattern, waiting for leader's ticket.
 			if lc := getMatchLifecycle(session); lc != nil {
 				lc.Transition(StateHolding, "waiting for leader's ticket")
@@ -994,6 +1014,86 @@ func (p *EvrPipeline) isLeaderHeadingToSocial(ctx context.Context, logger *zap.L
 	}
 
 	return false
+}
+
+// isFollowerInActiveMatch reports whether the follower (session) is currently
+// in an Arena or Combat match (public or private). When this returns true,
+// the party follow system must not process the LobbyFindSessionRequest —
+// doing so would yank the player out of their active match.
+//
+// Returns false when the session has no match presence, the match label
+// cannot be resolved, or the match is a social lobby.
+//
+// Fixes #460: player mid-match was pulled back to social when party leader
+// hit matchmaking.
+func (p *EvrPipeline) isFollowerInActiveMatch(ctx context.Context, logger *zap.Logger, session *sessionWS) bool {
+	matchStream := PresenceStream{
+		Mode:    StreamModeService,
+		Subject: session.id,
+		Label:   StreamLabelMatchService,
+	}
+	presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, matchStream, session.userID)
+	if presence == nil {
+		return false
+	}
+
+	followerMatchID := MatchIDFromStringOrNil(presence.GetStatus())
+	if followerMatchID.IsNil() {
+		return false
+	}
+
+	label, err := MatchLabelByID(ctx, p.nk, followerMatchID)
+	if err != nil || label == nil {
+		return false
+	}
+
+	return label.IsArena() || label.IsCombat()
+}
+
+// isFollowerAlreadyInLeaderMatch checks whether the follower is already in
+// the same match as the party leader. This is a lightweight tracker-only
+// check (no match registry calls) used as a fast path at the top of
+// lobbyFind to avoid redundant configureParty / authorization / matchmaking
+// stream / TryFollowPartyLeader work when the client re-sends
+// LobbyFindSessionRequest on its normal message cycle.
+//
+// Returns false when the leader cannot be found, either player is not in a
+// match, or their match IDs differ.
+func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(logger *zap.Logger, session *sessionWS, lobbyGroup *LobbyGroup) bool {
+	leader := lobbyGroup.GetLeader()
+	if leader == nil || leader.SessionId == session.id.String() {
+		return false
+	}
+
+	leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
+	leaderUserID := uuid.FromStringOrNil(leader.UserId)
+
+	leaderStream := PresenceStream{
+		Mode:    StreamModeService,
+		Subject: leaderSessionID,
+		Label:   StreamLabelMatchService,
+	}
+	leaderPresence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, leaderStream, leaderUserID)
+	if leaderPresence == nil {
+		return false
+	}
+	leaderMatchID := MatchIDFromStringOrNil(leaderPresence.GetStatus())
+	if leaderMatchID.IsNil() {
+		return false
+	}
+
+	followerStream := PresenceStream{
+		Mode:    StreamModeService,
+		Subject: session.id,
+		Label:   StreamLabelMatchService,
+	}
+	followerPresence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, followerStream, session.userID)
+	if followerPresence == nil {
+		return false
+	}
+	followerMatchID := MatchIDFromStringOrNil(followerPresence.GetStatus())
+
+	return followerMatchID == leaderMatchID
 }
 
 // isLeaderInArenaCombatMatch reports whether the party leader is currently

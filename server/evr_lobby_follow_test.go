@@ -2265,6 +2265,156 @@ func TestPoll_LeaderInCombatMatch_ReturnsFalseImmediately(t *testing.T) {
 // short-circuit — it defers to context cancellation for loop termination.
 // ---------------------------------------------------------------------------
 
+// ===========================================================================
+// Issue #460: Party follow must not pull a follower out of an active match.
+//
+// When a follower is in an active Arena or Combat match, the party follow
+// system must not process a LobbyFindSessionRequest that would yank them
+// back to the social lobby. isFollowerInActiveMatch returns true for
+// Arena/Combat, false for Social, and false when the follower has no match.
+// ===========================================================================
+
+// TestIsFollowerInActiveMatch_ArenaPublic verifies that a follower in an
+// active ModeArenaPublic match is detected as being in an active match.
+func TestIsFollowerInActiveMatch_ArenaPublic(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	arenaMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	registry.SetMatch(arenaMatchID, &MatchLabel{
+		ID:          arenaMatchID,
+		Mode:        evr.ModeArenaPublic,
+		Open:        true,
+		PlayerLimit: 8,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setFollowerMatch(arenaMatchID)
+
+	logger := loggerForTest(t)
+	result := env.pipeline.isFollowerInActiveMatch(
+		context.Background(), logger, env.session)
+
+	if !result {
+		t.Error("Expected true when follower is in ModeArenaPublic match")
+	}
+}
+
+// TestIsFollowerInActiveMatch_CombatPublic verifies that a follower in an
+// active ModeCombatPublic match is detected as being in an active match.
+func TestIsFollowerInActiveMatch_CombatPublic(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	combatMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	registry.SetMatch(combatMatchID, &MatchLabel{
+		ID:          combatMatchID,
+		Mode:        evr.ModeCombatPublic,
+		Open:        true,
+		PlayerLimit: 8,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setFollowerMatch(combatMatchID)
+
+	logger := loggerForTest(t)
+	result := env.pipeline.isFollowerInActiveMatch(
+		context.Background(), logger, env.session)
+
+	if !result {
+		t.Error("Expected true when follower is in ModeCombatPublic match")
+	}
+}
+
+// TestIsFollowerInActiveMatch_SocialPublic verifies that a follower in a
+// ModeSocialPublic lobby is NOT treated as being in an active match. The
+// party follow system should proceed normally for social lobbies.
+func TestIsFollowerInActiveMatch_SocialPublic(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	socialMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	registry.SetMatch(socialMatchID, &MatchLabel{
+		ID:          socialMatchID,
+		Mode:        evr.ModeSocialPublic,
+		Open:        true,
+		PlayerLimit: 12,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setFollowerMatch(socialMatchID)
+
+	logger := loggerForTest(t)
+	result := env.pipeline.isFollowerInActiveMatch(
+		context.Background(), logger, env.session)
+
+	if result {
+		t.Error("Expected false when follower is in ModeSocialPublic — party follow should proceed")
+	}
+}
+
+// TestIsFollowerInActiveMatch_NoMatch verifies that a follower with no
+// current match (e.g. at the main menu) is NOT treated as being in an
+// active match. The party follow system should proceed normally.
+func TestIsFollowerInActiveMatch_NoMatch(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	// No follower match set — follower is not in any match.
+
+	logger := loggerForTest(t)
+	result := env.pipeline.isFollowerInActiveMatch(
+		context.Background(), logger, env.session)
+
+	if result {
+		t.Error("Expected false when follower has no match presence")
+	}
+}
+
+// TestIsFollowerInActiveMatch_PrivateArenaCombat verifies that private
+// arena/combat modes are also treated as active matches.
+func TestIsFollowerInActiveMatch_PrivateArenaCombat(t *testing.T) {
+	t.Parallel()
+
+	for _, mode := range []evr.Symbol{evr.ModeArenaPrivate, evr.ModeCombatPrivate} {
+		t.Run(mode.String(), func(t *testing.T) {
+			t.Parallel()
+
+			env := newFollowTestEnv(t)
+			matchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+			registry := newMockFollowMatchRegistry()
+			groupID := env.groupID
+			registry.SetMatch(matchID, &MatchLabel{
+				ID:          matchID,
+				Mode:        mode,
+				Open:        true,
+				PlayerLimit: 8,
+				GroupID:     &groupID,
+			})
+			env.withMockNK(registry)
+			env.setFollowerMatch(matchID)
+
+			logger := loggerForTest(t)
+			result := env.pipeline.isFollowerInActiveMatch(
+				context.Background(), logger, env.session)
+
+			if !result {
+				t.Errorf("Expected true when follower is in %s match", mode.String())
+			}
+		})
+	}
+}
+
 func TestPoll_NilNK_FollowerNotInLeaderMatch_LoopsUntilContextExpiry(t *testing.T) {
 	t.Parallel()
 
@@ -2293,5 +2443,162 @@ func TestPoll_NilNK_FollowerNotInLeaderMatch_LoopsUntilContextExpiry(t *testing.
 	if elapsed < 1*time.Second {
 		t.Errorf("pollFollowPartyLeader returned in %v — expected it to loop until context expiry (~3s). "+
 			"This suggests a fast-fail path was triggered instead of polling.", elapsed)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// isFollowerAlreadyInLeaderMatch — issue #461 regression tests
+// ---------------------------------------------------------------------------
+
+// TestIsFollowerAlreadyInLeaderMatch_SameMatch verifies that when the follower
+// and leader are in the same match, isFollowerAlreadyInLeaderMatch returns true.
+// This is the fast path that prevents repeated "Joined party group" /
+// "Already in leader's match" churn when the client re-sends
+// LobbyFindSessionRequest on its normal message cycle.
+func TestIsFollowerAlreadyInLeaderMatch_SameMatch(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	matchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	logger := loggerForTest(t)
+
+	env.setLeaderMatch(matchID)
+	env.setFollowerMatch(matchID)
+
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup)
+	if !result {
+		t.Error("isFollowerAlreadyInLeaderMatch should return true when both are in the same match")
+	}
+}
+
+// TestIsFollowerAlreadyInLeaderMatch_DifferentMatches verifies that when the
+// follower and leader are in different matches, the function returns false.
+func TestIsFollowerAlreadyInLeaderMatch_DifferentMatches(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	matchA := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	logger := loggerForTest(t)
+
+	env.setLeaderMatch(matchA)
+	env.setFollowerMatch(matchB)
+
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup)
+	if result {
+		t.Error("isFollowerAlreadyInLeaderMatch should return false when in different matches")
+	}
+}
+
+// TestIsFollowerAlreadyInLeaderMatch_LeaderNotInMatch verifies that when the
+// leader is not in any match, the function returns false.
+func TestIsFollowerAlreadyInLeaderMatch_LeaderNotInMatch(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	matchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	logger := loggerForTest(t)
+
+	// Only follower is in a match; leader is not.
+	env.setFollowerMatch(matchID)
+
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup)
+	if result {
+		t.Error("isFollowerAlreadyInLeaderMatch should return false when leader has no match")
+	}
+}
+
+// TestIsFollowerAlreadyInLeaderMatch_FollowerNotInMatch verifies that when the
+// follower is not in any match, the function returns false.
+func TestIsFollowerAlreadyInLeaderMatch_FollowerNotInMatch(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	matchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	logger := loggerForTest(t)
+
+	// Only leader is in a match; follower is not.
+	env.setLeaderMatch(matchID)
+
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup)
+	if result {
+		t.Error("isFollowerAlreadyInLeaderMatch should return false when follower has no match")
+	}
+}
+
+// TestIsFollowerAlreadyInLeaderMatch_NoLeader verifies that when the party has
+// no leader, the function returns false gracefully.
+func TestIsFollowerAlreadyInLeaderMatch_NoLeader(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	logger := loggerForTest(t)
+
+	env.clearLeader()
+
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup)
+	if result {
+		t.Error("isFollowerAlreadyInLeaderMatch should return false when there is no leader")
+	}
+}
+
+// TestIsFollowerAlreadyInLeaderMatch_FollowerIsLeader verifies that when the
+// follower is the leader (same session), the function returns false.
+func TestIsFollowerAlreadyInLeaderMatch_FollowerIsLeader(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	matchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	logger := loggerForTest(t)
+
+	// Promote the follower to leader.
+	env.setLeader(env.followerSID, env.followerUID, "follower")
+	env.setFollowerMatch(matchID)
+
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup)
+	if result {
+		t.Error("isFollowerAlreadyInLeaderMatch should return false when follower is the leader")
+	}
+}
+
+// TestIsFollowerAlreadyInLeaderMatch_HeartbeatDoesNotTriggerFollow verifies
+// that non-LobbyFindSessionRequest messages (heartbeats, profile updates)
+// do not reach the party follow path. This is a structural test that confirms
+// the ProcessRequestEVR dispatch table only routes LobbyFindSessionRequest,
+// LobbyCreateSessionRequest, and LobbyJoinSessionRequest to lobbySessionRequest.
+func TestIsFollowerAlreadyInLeaderMatch_HeartbeatDoesNotTriggerFollow(t *testing.T) {
+	t.Parallel()
+
+	// Verify that non-lobby message types are NOT routed to lobbySessionRequest.
+	// The dispatch table in ProcessRequestEVR maps message types to handler
+	// functions. Only LobbyFindSessionRequest, LobbyCreateSessionRequest, and
+	// LobbyJoinSessionRequest should reach lobbySessionRequest (and from there,
+	// lobbyFind). Other message types like GenericMessage, UpdateClientProfile,
+	// RemoteLogSet, etc. are routed to their own handlers that do not call
+	// lobbyFind or any party follow logic.
+
+	// This test validates the contract by checking that the message types that
+	// could be confused as "heartbeat" or "routine client traffic" do not
+	// implement the LobbySessionRequest interface, which is the gate in
+	// lobbySessionRequest (line 38 of evr_pipeline_matchmaker.go).
+	nonLobbyMessages := []evr.Message{
+		&evr.GenericMessage{},
+		&evr.UpdateClientProfile{},
+		&evr.RemoteLogSet{},
+		&evr.ConfigRequest{},
+		&evr.DocumentRequest{},
+		&evr.LoggedInUserProfileRequest{},
+		&evr.ChannelInfoRequest{},
+		&evr.OtherUserProfileRequest{},
+		&evr.LobbyMatchmakerStatusRequest{},
+		&evr.LobbyPingResponse{},
+		&evr.LobbyPendingSessionCancel{},
+	}
+
+	for _, msg := range nonLobbyMessages {
+		if _, ok := msg.(evr.LobbySessionRequest); ok {
+			t.Errorf("%T implements LobbySessionRequest — it would reach "+
+				"lobbySessionRequest and potentially trigger the follow path", msg)
+		}
 	}
 }
