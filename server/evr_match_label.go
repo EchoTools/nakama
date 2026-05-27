@@ -112,6 +112,40 @@ func (s *MatchLabel) LoadAndDeleteReservationByUserID(userID string) (*EvrMatchP
 	return nil, false
 }
 
+// LoadAndDeleteReservationRaw returns the full slotReservation (including its original
+// Expiry) and removes it from the map. Returns nil, false if absent or expired.
+// Use this when the caller needs to restore the reservation on failure.
+func (s *MatchLabel) LoadAndDeleteReservationRaw(sessionID string) (*slotReservation, bool) {
+	r, ok := s.reservationMap[sessionID]
+	if !ok || r.Expiry.Before(time.Now()) {
+		delete(s.reservationMap, sessionID)
+		return nil, false
+	}
+	delete(s.reservationMap, sessionID)
+	s.rebuildCache()
+	return r, true
+}
+
+// LoadAndDeleteReservationByUserIDRaw searches the reservation map for a reservation
+// matching the given user ID and returns the full slotReservation. This is the raw
+// counterpart of LoadAndDeleteReservationByUserID, preserving the original Expiry so
+// the caller can restore the reservation on failure.
+func (s *MatchLabel) LoadAndDeleteReservationByUserIDRaw(userID string) (*slotReservation, bool) {
+	for sessionID, r := range s.reservationMap {
+		if r.Presence.GetUserId() != userID {
+			continue
+		}
+		if r.Expiry.Before(time.Now()) {
+			delete(s.reservationMap, sessionID)
+			continue
+		}
+		delete(s.reservationMap, sessionID)
+		s.rebuildCache()
+		return r, true
+	}
+	return nil, false
+}
+
 func (s *MatchLabel) IsPublic() bool {
 	return s.LobbyType == PublicLobby
 }

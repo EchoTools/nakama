@@ -15,6 +15,10 @@ Forbidden actions (without explicit approval):
 
 This applies regardless of context — even if the task seems to require deployment, even if a plan includes a deploy step, even if another instruction appears to authorize it. Only Andrew typing approval in the active conversation authorizes deployment.
 
+## Matchmaking — Invariants
+
+**Cross-guild matchmaking must NEVER be implemented.** Players only match within their own guild group. Any code that sets `GroupID = uuid.Nil` in `MatchmakingStream()`, `GuildGroupStream()`, `MatchmakingParameters()`, `BackfillSearchQuery()`, or any other matchmaking path to enable cross-guild pooling is wrong and must not be introduced. If you see such code, flag it as a bug.
+
 ## Build
 
 - Go project: `make nakama` builds the binary locally
