@@ -1,0 +1,295 @@
+digraph PartyLifecycle {
+    // Layout
+    rankdir=TB;
+    splines=true;
+    nodesep=0.8;
+    ranksep=1.0;
+    fontname="Helvetica";
+
+    // Global node style
+    node [
+        fontname="Helvetica"
+        fontsize=11
+        style="filled,rounded"
+        shape=box
+        penwidth=1.5
+    ];
+
+    // Global edge style
+    edge [
+        fontname="Helvetica"
+        fontsize=9
+        penwidth=1.2
+    ];
+
+    // === STATES ===
+
+    // Entry
+    IDLE [
+        label="IDLE\n─────────\nnot in any flow"
+        fillcolor="#e8e8e8"
+        color="#666666"
+    ];
+
+    // Formation
+    PARTY_FORMING [
+        label="PARTY_FORMING\n─────────\njoined group\nwaiting for members"
+        fillcolor="#dae8fc"
+        color="#6c8ebf"
+    ];
+
+    PARTY_READY [
+        label="PARTY_READY\n─────────\nall members present\nready to queue"
+        fillcolor="#d5e8d4"
+        color="#82b366"
+    ];
+
+    // Matchmaking path
+    QUEUING [
+        label="QUEUING\n─────────\nticket submitted\nwaiting for match"
+        fillcolor="#fff2cc"
+        color="#d6b656"
+    ];
+
+    MATCHED [
+        label="MATCHED\n─────────\nmatch found\nawaiting placement"
+        fillcolor="#fff2cc"
+        color="#d6b656"
+    ];
+
+    JOINING [
+        label="JOINING\n─────────\nLobbyJoinEntrants\nin progress"
+        fillcolor="#fff2cc"
+        color="#d6b656"
+    ];
+
+    // Follow path
+    FOLLOWING [
+        label="FOLLOWING\n─────────\nattempting to join\nleader's match"
+        fillcolor="#e1d5e7"
+        color="#9673a6"
+    ];
+
+    FOLLOW_POLLING [
+        label="FOLLOW_POLLING\n─────────\nretry loop\n(~6s budget on HEAD)\n(should be ~18s)"
+        fillcolor="#e1d5e7"
+        color="#9673a6"
+    ];
+
+    // Recovery
+    CRASHED [
+        label="CRASHED\n─────────\ndisconnected\nreservation active"
+        fillcolor="#fff2cc"
+        color="#d6b656"
+    ];
+
+    RECONNECTING [
+        label="RECONNECTING\n─────────\nrestoring state"
+        fillcolor="#fff2cc"
+        color="#d6b656"
+    ];
+
+    // Terminal: success
+    IN_MATCH [
+        label="IN_MATCH\n═════════\nplaced successfully\n✓ CONVERGED"
+        fillcolor="#d5e8d4"
+        color="#2d7600"
+        penwidth=3
+    ];
+
+    // Terminal: failure
+    RELEASED [
+        label="RELEASED\n═════════\nfollower released\nre-queuing solo\n✗ SPLIT"
+        fillcolor="#f8cecc"
+        color="#b85450"
+        penwidth=3
+    ];
+
+    ABANDONED [
+        label="ABANDONED\n═════════\nparty dissolved\nbefore completion"
+        fillcolor="#f8cecc"
+        color="#b85450"
+        penwidth=3
+    ];
+
+    // === TRANSITIONS ===
+
+    // Happy path (bold green)
+    IDLE -> PARTY_FORMING [
+        label="JoinPartyGroup"
+        color="#2d7600"
+        fontcolor="#2d7600"
+        penwidth=2.5
+    ];
+
+    PARTY_FORMING -> PARTY_READY [
+        label="AllMembersJoined\n(or grace period\nexpires w/ partial)"
+        color="#2d7600"
+        fontcolor="#2d7600"
+        penwidth=2.5
+    ];
+
+    PARTY_READY -> QUEUING [
+        label="TicketSubmitted\n(leader path)"
+        color="#2d7600"
+        fontcolor="#2d7600"
+        penwidth=2.5
+    ];
+
+    QUEUING -> MATCHED [
+        label="MatchFound"
+        color="#2d7600"
+        fontcolor="#2d7600"
+        penwidth=2.5
+    ];
+
+    MATCHED -> JOINING [
+        label="JoinStarted"
+        color="#2d7600"
+        fontcolor="#2d7600"
+        penwidth=2.5
+    ];
+
+    JOINING -> IN_MATCH [
+        label="JoinSucceeded"
+        color="#2d7600"
+        fontcolor="#2d7600"
+        penwidth=2.5
+    ];
+
+    // Follow path (purple)
+    PARTY_READY -> FOLLOWING [
+        label="FollowLeader\n(follower path)"
+        color="#9673a6"
+        fontcolor="#9673a6"
+        penwidth=2
+    ];
+
+    FOLLOWING -> IN_MATCH [
+        label="JoinSucceeded\n(immediate)"
+        color="#2d7600"
+        fontcolor="#2d7600"
+        penwidth=2
+    ];
+
+    FOLLOWING -> FOLLOW_POLLING [
+        label="JoinFailed\n(lobby full,\nnon-joinable)"
+        color="#d6b656"
+        fontcolor="#d6b656"
+    ];
+
+    FOLLOW_POLLING -> IN_MATCH [
+        label="RetrySucceeded"
+        color="#2d7600"
+        fontcolor="#2d7600"
+    ];
+
+    // Failure paths (red)
+    FOLLOW_POLLING -> RELEASED [
+        label="BudgetExhausted\n(maxNonJoinableCycles)\n── 64/day in prod ──"
+        color="#b85450"
+        fontcolor="#b85450"
+        penwidth=2.5
+    ];
+
+    FOLLOWING -> RELEASED [
+        label="NonJoinableMode\n(private match)\n── 92/day in prod ──"
+        color="#b85450"
+        fontcolor="#b85450"
+        penwidth=2
+    ];
+
+    JOINING -> RELEASED [
+        label="JoinFailed_Full\n── 238/day in prod ──"
+        color="#b85450"
+        fontcolor="#b85450"
+        penwidth=2.5
+    ];
+
+    RELEASED -> QUEUING [
+        label="SoloRequeue\n(party broken)"
+        color="#b85450"
+        fontcolor="#b85450"
+        style=dashed
+    ];
+
+    // Abandonment (gray)
+    PARTY_FORMING -> ABANDONED [
+        label="NoMembersJoined"
+        color="#999999"
+        fontcolor="#999999"
+        style=dashed
+    ];
+
+    PARTY_READY -> ABANDONED [
+        label="AllMembersLeft"
+        color="#999999"
+        fontcolor="#999999"
+        style=dashed
+    ];
+
+    // Crash/recovery path (orange)
+    IN_MATCH -> CRASHED [
+        label="Disconnected"
+        color="#d6b656"
+        fontcolor="#d6b656"
+    ];
+
+    CRASHED -> RECONNECTING [
+        label="Reconnected"
+        color="#d6b656"
+        fontcolor="#d6b656"
+    ];
+
+    RECONNECTING -> IN_MATCH [
+        label="RejoinSucceeded"
+        color="#2d7600"
+        fontcolor="#2d7600"
+    ];
+
+    CRASHED -> RELEASED [
+        label="PartyDissolved"
+        color="#b85450"
+        fontcolor="#b85450"
+        style=dashed
+    ];
+
+    CRASHED -> ABANDONED [
+        label="NoReconnect\n(within 60s)"
+        color="#999999"
+        fontcolor="#999999"
+        style=dashed
+    ];
+
+    // === LEGEND ===
+    subgraph cluster_legend {
+        label="Legend"
+        fontsize=12
+        style="dashed"
+        color="#cccccc"
+
+        l1 [label="Happy path" shape=plaintext fontcolor="#2d7600"];
+        l2 [label="Follow path" shape=plaintext fontcolor="#9673a6"];
+        l3 [label="Failure path" shape=plaintext fontcolor="#b85450"];
+        l4 [label="Recovery path" shape=plaintext fontcolor="#d6b656"];
+        l5 [label="Abandonment" shape=plaintext fontcolor="#999999"];
+        l6 [label="── N/day ── = production frequency" shape=plaintext fontcolor="#b85450"];
+
+        l1 -> l2 -> l3 -> l4 -> l5 -> l6 [style=invis];
+    }
+
+    // === ANNOTATIONS ===
+    subgraph cluster_bugs {
+        label="Bugs on HEAD (8 confirmed)"
+        fontsize=12
+        fontcolor="#b85450"
+        style="dashed"
+        color="#f8cecc"
+
+        b1 [label="BUG #1: maxNonJoinableCycles=1\n(should be 3, silently reverted)" shape=plaintext fontcolor="#b85450" fontsize=10];
+        b2 [label="BUG #6: isFollowerInLeaderMatch\nreturns TRUE on error\n(false convergence)" shape=plaintext fontcolor="#b85450" fontsize=10];
+        b3 [label="BUG #8: publicGroupID() removed\n(cross-guild matching broken)" shape=plaintext fontcolor="#b85450" fontsize=10];
+
+        b1 -> b2 -> b3 [style=invis];
+    }
+}
