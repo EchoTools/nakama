@@ -68,6 +68,14 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 			//p.tracker.UntrackLocalByModes(session.ID(), matchStreamModes, stream)
 		}
 
+		// Observer: player connected to game server (non-social matches only).
+		// Social lobbies already transition to StateSocialReady in LobbyJoinEntrants.
+		if ws, ok := s.(*sessionWS); ok {
+			if lc := getMatchLifecycle(ws); lc != nil && lc.State() == StateJoining {
+				lc.TransitionTo(StateInMatch, "joined match", WithMatchID(matchID.String()))
+			}
+		}
+
 		acceptedIDs = append(acceptedIDs, entrantID)
 	}
 
