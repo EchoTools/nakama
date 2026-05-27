@@ -57,7 +57,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			defer func() {
 				mmStream := PresenceStream{
 					Mode:    StreamModeMatchmaking,
-					Subject: lobbyParams.GroupID,
+					Subject: lobbyParams.PublicGroupID(),
 				}
 				p.nk.tracker.Untrack(session.id, mmStream, session.userID)
 			}()
@@ -330,7 +330,7 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 		// Track the leader on the matchmaking stream early so followers know they are queueing for Arena.
 		mmStream := PresenceStream{
 			Mode:    StreamModeMatchmaking,
-			Subject: lobbyParams.GroupID,
+			Subject: lobbyParams.PublicGroupID(),
 		}
 		statusBytes, err := json.Marshal(lobbyParams)
 		if err != nil {
@@ -897,7 +897,7 @@ func (p *EvrPipeline) isLeaderHeadingToSocial(ctx context.Context, logger *zap.L
 	// Matchmaking intent takes precedence over their current location.
 	mmStream := PresenceStream{
 		Mode:    StreamModeMatchmaking,
-		Subject: lobbyParams.GroupID,
+		Subject: lobbyParams.PublicGroupID(),
 	}
 	if presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, mmStream, leaderUserID); presence != nil {
 		var leaderParams LobbySessionParameters
@@ -1206,12 +1206,17 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		}
 
 		// MatchLabelByID is authoritative when available. Fall back to
-		// tracker-based convergence when it is not (e.g. nil NK in tests,
-		// or transient registry miss).
+		// tracker-based convergence only when the registry is unreachable
+		// (nil NK) or the match is genuinely not found. When the context
+		// is canceled the label lookup fails spuriously — return false to
+		// avoid false-positive convergence that causes party splits.
 		if p.nk != nil {
 			label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
 			if err == nil && label != nil {
 				return label.GetPlayerByUserID(session.userID.String()) != nil
+			}
+			if ctx.Err() != nil {
+				return false
 			}
 		}
 		return true
@@ -1224,7 +1229,7 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		return true
 	}
 
-	const maxNonJoinableCycles = 1
+	const maxNonJoinableCycles = 3
 	nonJoinableCycles := 0
 
 	for {
