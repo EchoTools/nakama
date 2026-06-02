@@ -67,8 +67,9 @@ func TestConfigureParty_FollowerNotOnMatchmakingStream_NotKicked(t *testing.T) {
 	pipeline := &EvrPipeline{
 		node: "testnode",
 		nk: &RuntimeGoNakamaModule{
-			tracker:       tracker,
-			streamManager: ksm,
+			tracker:         tracker,
+			streamManager:   ksm,
+			sessionRegistry: &testSessionRegistry{},
 		},
 	}
 
@@ -207,8 +208,9 @@ func TestConfigureParty_AllFollowersOnStream_NoKick(t *testing.T) {
 	pipeline := &EvrPipeline{
 		node: "testnode",
 		nk: &RuntimeGoNakamaModule{
-			tracker:       tracker,
-			streamManager: ksm,
+			tracker:         tracker,
+			streamManager:   ksm,
+			sessionRegistry: &testSessionRegistry{},
 		},
 	}
 
