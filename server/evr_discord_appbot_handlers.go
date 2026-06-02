@@ -890,7 +890,13 @@ func isCreateModeExcluded(mode evr.Symbol, excludedModes []string) bool {
 		if excluded == "" {
 			continue
 		}
+		// Match by exact mode token ("echo_arena_private"), by exact symbol, or by
+		// the canonical short alias ("arena_private") used elsewhere for modes.
 		if strings.EqualFold(excluded, modeToken) || evr.ToSymbol(excluded) == mode {
+			return true
+		}
+		var sg evr.StatisticsGroup
+		if err := sg.UnmarshalText([]byte(strings.ToLower(excluded))); err == nil && sg.Mode == mode {
 			return true
 		}
 	}
