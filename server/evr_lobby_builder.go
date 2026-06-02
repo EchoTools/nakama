@@ -454,15 +454,18 @@ func (b *LobbyBuilder) rankEndpointsByServerScore(entrants []*MatchmakerEntry) [
 }
 
 func (b *LobbyBuilder) groupByTicket(entrants []*MatchmakerEntry) [][]*MatchmakerEntry {
-	partyMap := make(map[string][]*MatchmakerEntry, DefaultTeamMapCapacity)
+	// Emit groups in first-seen ticket order so the result is deterministic;
+	// ranging a map would order the groups randomly.
+	indexByTicket := make(map[string]int, DefaultTeamMapCapacity)
+	parties := make([][]*MatchmakerEntry, 0, DefaultTeamMapCapacity)
 	for _, e := range entrants {
 		t := e.GetTicket()
-		partyMap[t] = append(partyMap[t], e)
-	}
-
-	parties := make([][]*MatchmakerEntry, 0, len(partyMap))
-	for _, p := range partyMap {
-		parties = append(parties, p)
+		if idx, ok := indexByTicket[t]; ok {
+			parties[idx] = append(parties[idx], e)
+			continue
+		}
+		indexByTicket[t] = len(parties)
+		parties = append(parties, []*MatchmakerEntry{e})
 	}
 	return parties
 }

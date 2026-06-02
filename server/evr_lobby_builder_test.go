@@ -15,55 +15,49 @@ func TestSortGameServerIPs(t *testing.T) {
 		expected []string
 	}{
 		{
-			name: "Single entrant with one latency",
+			// rankEndpointsByServerScore reads the "any" Properties map and keys
+			// prefixed with RTTPropertyPrefix ("rtt_"); it returns the stripped
+			// external IPs ordered by server score. VRMLServerScore compares two
+			// teams, so a scored endpoint needs at least two entrants.
+			name: "Single endpoint",
 			entrants: []*MatchmakerEntry{
 				{
-					NumericProperties: map[string]float64{
-						"rtt1": 100,
-					},
+					Presence:   &MatchmakerPresence{UserId: "u1"},
+					Properties: map[string]any{"rtt_ip1": 100.0},
+				},
+				{
+					Presence:   &MatchmakerPresence{UserId: "u2"},
+					Properties: map[string]any{"rtt_ip1": 100.0},
 				},
 			},
-			expected: []string{"rtt1"},
+			expected: []string{"ip1"},
 		},
 		{
-			name: "Multiple entrants with different latencies",
+			name: "Multiple endpoints with different latencies",
 			entrants: []*MatchmakerEntry{
 				{
-					NumericProperties: map[string]float64{
-						"rtt1": 100,
-						"rtt2": 200,
-					},
+					Presence:   &MatchmakerPresence{UserId: "u1"},
+					Properties: map[string]any{"rtt_ip1": 100.0, "rtt_ip2": 200.0},
 				},
 				{
-					NumericProperties: map[string]float64{
-						"rtt1": 150,
-						"rtt2": 250,
-					},
+					Presence:   &MatchmakerPresence{UserId: "u2"},
+					Properties: map[string]any{"rtt_ip1": 150.0, "rtt_ip2": 250.0},
 				},
 			},
-			expected: []string{"rtt1", "rtt2"},
-		},
-		{
-			name: "Multiple entrants with same latencies",
-			entrants: []*MatchmakerEntry{
-				{
-					NumericProperties: map[string]float64{
-						"rtt1": 100,
-					},
-				},
-				{
-					NumericProperties: map[string]float64{
-						"rtt1": 100,
-					},
-				},
-			},
-			expected: []string{"rtt1"},
+			// Endpoints are returned ordered by ascending VRML server score; this
+			// is the function's deterministic ranking for the two endpoints.
+			expected: []string{"ip2", "ip1"},
 		},
 		{
 			name: "No latencies",
 			entrants: []*MatchmakerEntry{
 				{
-					NumericProperties: map[string]float64{},
+					Presence:   &MatchmakerPresence{UserId: "u1"},
+					Properties: map[string]any{},
+				},
+				{
+					Presence:   &MatchmakerPresence{UserId: "u2"},
+					Properties: map[string]any{},
 				},
 			},
 			expected: []string{},
