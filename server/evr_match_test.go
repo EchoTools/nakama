@@ -36,12 +36,14 @@ func TestEvrMatch_EvrMatchState(t *testing.T) {
 				data: `{"id":"7aab54ba-90ae-4e7f-abcf-69b30f5e8db7.testnode","open":true,"lobby_type":"public","mode":"social_2.0","level":"mpl_lobby_b2","session_settings":{"appid":"1369078409873402","gametype":301069346851901300},"limit":15,"size":14}`,
 			},
 			want: MatchLabel{
-				ID:              MatchID{UUID: uuid.Must(uuid.FromString("7aab54ba-90ae-4e7f-abcf-69b30f5e8db7")), Node: "testnode"},
-				Open:            true,
-				LobbyType:       PublicLobby,
-				Mode:            evr.ToSymbol("social_2.0"),
-				Level:           evr.ToSymbol("mpl_lobby_b2"),
-				SessionSettings: &evr.LobbySessionSettings{AppID: "1369078409873402", Mode: 301069346851901300},
+				ID:        MatchID{UUID: uuid.Must(uuid.FromString("7aab54ba-90ae-4e7f-abcf-69b30f5e8db7")), Node: "testnode"},
+				Open:      true,
+				LobbyType: PublicLobby,
+				Mode:      evr.ToSymbol("social_2.0"),
+				Level:     evr.ToSymbol("mpl_lobby_b2"),
+				// LobbySessionSettings.UnmarshalJSON normalizes a missing/zero level to
+				// LevelUnspecified, so the decoded value carries that sentinel.
+				SessionSettings: &evr.LobbySessionSettings{AppID: "1369078409873402", Mode: 301069346851901300, Level: int64(evr.LevelUnspecified)},
 				MaxSize:         15,
 				Size:            14,
 			},

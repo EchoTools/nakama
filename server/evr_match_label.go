@@ -598,6 +598,11 @@ func (s *MatchLabel) rebuildCache() {
 func (l *MatchLabel) CalculateRatingWeights() map[evr.EvrId]int {
 	// Calculate the weight of each player's rating in the match
 	byPlayer := make(map[evr.EvrId]int)
+	// Seed every player at 0 so the result always represents the full roster,
+	// including players who neither scored nor were on the winning team.
+	for _, p := range l.Players {
+		byPlayer[p.EvrID] = 0
+	}
 	byTeam := make(map[TeamIndex]int)
 	for _, g := range l.goals {
 		byPlayer[g.XPID] += g.PointsValue            // Shooter gets the points
