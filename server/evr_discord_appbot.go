@@ -3570,7 +3570,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			return editInteractionResponse(s, i, fmt.Sprintf("Server `%s` has been removed from your blacklist.", displayName))
 		},
 		"vrml-verify": d.handleVRMLVerify,
-		"ambassador":   d.handleAmbassadorCommand,
+		"ambassador":  d.handleAmbassadorCommand,
 	}
 
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -3937,8 +3937,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if len(data.Options) > 0 {
 					partial = strings.ToLower(data.Options[0].StringValue())
 				}
-				bl := NewServerBlacklist()
-				_ = StorableRead(ctx, d.nk, userID, bl, false)
+				bl := loadUserBlacklist(ctx, d.nk, userID)
 				removeChoices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(bl.Servers))
 				for extIP, displayName := range bl.Servers {
 					name := fmt.Sprintf("%s [%s]", displayName, extIP)

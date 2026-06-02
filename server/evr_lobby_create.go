@@ -35,8 +35,7 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 		}
 	}
 
-	userBL := NewServerBlacklist()
-	_ = StorableRead(ctx, nk, session.UserID().String(), userBL, false)
+	userBL := loadUserBlacklist(ctx, nk, session.UserID().String())
 
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
 	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), nk, []string{params.GroupID.String()}, latestRTTs, settings, []string{params.RegionCode}, false, false, queryAddon, userBL.IPs())

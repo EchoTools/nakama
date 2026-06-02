@@ -152,7 +152,7 @@ func (g GameServerAutocompleteData) Description() string {
 }
 
 // autocompleteGameServers returns individual game servers for the given group,
-// sorted by latency, for use in discord autocomplete fields 
+// sorted by latency, for use in discord autocomplete fields
 func (d *DiscordAppBot) autocompleteGameServers(ctx context.Context, logger runtime.Logger, userID string, groupID string) ([]*discordgo.ApplicationCommandOptionChoice, error) {
 	latencyHistory := NewLatencyHistory()
 	if err := StorableRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {

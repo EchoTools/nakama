@@ -598,8 +598,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 		}
 	}
 
-	userBL := NewServerBlacklist()
-	_ = StorableRead(ctx, p.nk, lobbyParams.UserID.String(), userBL, false)
+	userBL := loadUserBlacklist(ctx, p.nk, lobbyParams.UserID.String())
 
 	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, latestRTTs, settings, []string{lobbyParams.RegionCode}, true, false, ServiceSettings().Matchmaking.QueryAddons.Create, userBL.IPs())
 	if err != nil {
@@ -649,6 +648,26 @@ func flushMatchRegistryLabelUpdates(nk runtime.NakamaModule) {
 	lmr.FlushPendingLabelUpdates()
 }
 
+// filterBlacklistedSocialMatches drops any candidate social match hosted on a
+// server whose external IP is in blacklistedIPs. An empty blacklist is a no-op
+// and returns the input slice unchanged. Filtering happens AFTER the GroupID-scoped
+// match query — it only ever narrows results, never widens them across guilds.
+func filterBlacklistedSocialMatches(matches []*MatchLabelMeta, blacklistedIPs map[string]struct{}) []*MatchLabelMeta {
+	if len(blacklistedIPs) == 0 {
+		return matches
+	}
+	filtered := matches[:0]
+	for _, m := range matches {
+		if m.State.GameServer != nil {
+			if _, blocked := blacklistedIPs[m.State.GameServer.Endpoint.GetExternalIP()]; blocked {
+				continue
+			}
+		}
+		filtered = append(filtered, m)
+	}
+	return filtered
+}
+
 func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, entrants ...*EvrMatchPresence) error {
 	// Fast path: if the player is already in a social lobby that matches
 	// the search criteria (same group, social mode), treat as no-op.
@@ -661,9 +680,7 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 	}
 
 	// Load the user's server blacklist once before the retry loop
-	userBL := NewServerBlacklist()
-	_ = StorableRead(ctx, p.nk, session.UserID().String(), userBL, false)
-	blacklistedIPs := userBL.IPSet()
+	blacklistedIPs := loadUserBlacklist(ctx, p.nk, session.UserID().String()).IPSet()
 
 	// First attempt runs immediately — no pre-wait. The old 1s pre-query wait
 	// was a workaround for the Bluge label-flush lag; newLobby now flushes
@@ -701,19 +718,8 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 			return fmt.Errorf("failed to list matches: %w", err)
 		}
 
-		// Filter out any matches hosted on servers the user has blacklisted
-		if len(blacklistedIPs) > 0 {
-			filtered := matches[:0]
-			for _, m := range matches {
-				if m.State.GameServer != nil {
-					if _, blocked := blacklistedIPs[m.State.GameServer.Endpoint.GetExternalIP()]; blocked {
-						continue
-					}
-				}
-				filtered = append(filtered, m)
-			}
-			matches = filtered
-		}
+		// Filter out any matches hosted on servers the user has blacklisted.
+		matches = filterBlacklistedSocialMatches(matches, blacklistedIPs)
 
 		logger.Info("Social lobby search",
 			zap.Int("attempt", attempt),
