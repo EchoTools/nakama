@@ -16,7 +16,4 @@ func TestCombatSymbol(t *testing.T) {
 
 		t.Log(string(s) + " " + sym.HexString())
 	}
-
-	t.Error()
-
 }

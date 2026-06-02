@@ -24,7 +24,10 @@ func TestEvrId_UUID(t *testing.T) {
 				PlatformCode: 1,
 				AccountId:    1,
 			},
-			want: uuid.FromStringOrNil("496d8944-6159-5c53-bdc8-1cab22f9d28d"),
+			// PlatformCode 1 == STM, so Token() == "STM-1". UUID() is the
+			// deterministic uuid.NewV5(uuid.Nil, "STM-1"). The previous
+			// hardcoded want was never produced by any token form.
+			want: uuid.FromStringOrNil("f79994ef-c2dd-5b1f-8795-6767b2f3e53b"),
 		},
 		{
 			name: "invalid PlatformCode",
@@ -326,7 +329,10 @@ func TestEvrId_UnmarshalJSON(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "invalid",
+			// An empty string is the canonical representation of a nil EvrId
+			// (see MarshalText, which emits "" for a zero EvrId). Round-tripping
+			// it back must succeed, not error.
+			name: "empty (nil EvrId)",
 			fields: fields{
 				PlatformCode: 0,
 				AccountId:    0,
@@ -334,7 +340,7 @@ func TestEvrId_UnmarshalJSON(t *testing.T) {
 			args: args{
 				b: []byte(`""`),
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 	}
 	for _, tt := range tests {
