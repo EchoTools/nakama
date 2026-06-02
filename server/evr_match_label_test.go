@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"net"
 	"testing"
 	"time"
 
@@ -382,5 +383,87 @@ func TestMatchLabel_ClassificationRoundtrip(t *testing.T) {
 	}
 	if decoded.Owner != testUUID {
 		t.Errorf("expected Owner=%v, got %v", testUUID, decoded.Owner)
+	}
+}
+
+// TestMatchLabel_GetEntrantConnectMessage_StripsNonRoutableExternalIP verifies
+// the JOIN-time endpoint sanitization for nakama issue #465: a non-routable
+// external address must be replaced with 0.0.0.0 (the EVR client's "skip this
+// address" sentinel) before being sent to the client, while a public external
+// address and the LAN internal address are left intact.
+func TestMatchLabel_GetEntrantConnectMessage_StripsNonRoutableExternalIP(t *testing.T) {
+	tests := []struct {
+		name         string
+		internalIP   net.IP
+		externalIP   net.IP
+		port         uint16
+		wantInternal net.IP // expected internal IP slot in the client message
+		wantExternal net.IP // expected external IP slot in the client message
+	}{
+		{
+			name:         "non-routable external (RFC1918) is zeroed, LAN internal kept",
+			internalIP:   net.ParseIP("192.168.1.50"),
+			externalIP:   net.ParseIP("10.0.0.5"),
+			port:         6792,
+			wantInternal: net.ParseIP("192.168.1.50"),
+			wantExternal: net.IPv4zero,
+		},
+		{
+			name:         "public external is untouched, LAN internal kept",
+			internalIP:   net.ParseIP("192.168.1.50"),
+			externalIP:   net.ParseIP("203.0.113.7"),
+			port:         6792,
+			wantInternal: net.ParseIP("192.168.1.50"),
+			wantExternal: net.ParseIP("203.0.113.7"),
+		},
+		{
+			name:         "loopback external is zeroed",
+			internalIP:   net.ParseIP("192.168.1.50"),
+			externalIP:   net.ParseIP("127.0.0.1"),
+			port:         6792,
+			wantInternal: net.ParseIP("192.168.1.50"),
+			wantExternal: net.IPv4zero,
+		},
+		{
+			name:         "CGNAT (100.64/10) external is zeroed",
+			internalIP:   net.ParseIP("192.168.1.50"),
+			externalIP:   net.ParseIP("100.64.0.1"),
+			port:         6792,
+			wantInternal: net.ParseIP("192.168.1.50"),
+			wantExternal: net.IPv4zero,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			matchID, err := NewMatchID(uuid.Must(uuid.NewV4()), "node")
+			if err != nil {
+				t.Fatalf("NewMatchID failed: %v", err)
+			}
+			label := &MatchLabel{
+				ID:   matchID,
+				Mode: evr.ModeArenaPublic,
+				GameServer: &GameServerPresence{
+					Endpoint: evr.Endpoint{
+						InternalIP: tt.internalIP,
+						ExternalIP: tt.externalIP,
+						Port:       tt.port,
+					},
+				},
+			}
+
+			msg := label.GetEntrantConnectMessage(0, false, false)
+
+			if !msg.Endpoint.InternalIP.Equal(tt.wantInternal) {
+				t.Errorf("InternalIP = %v, want %v", msg.Endpoint.InternalIP, tt.wantInternal)
+			}
+			if !msg.Endpoint.ExternalIP.Equal(tt.wantExternal) {
+				t.Errorf("ExternalIP = %v, want %v", msg.Endpoint.ExternalIP, tt.wantExternal)
+			}
+			if msg.Endpoint.Port != tt.port {
+				t.Errorf("Port = %d, want %d", msg.Endpoint.Port, tt.port)
+			}
+		})
 	}
 }
