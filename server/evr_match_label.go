@@ -384,6 +384,21 @@ func (s *MatchLabel) rebuildCache() {
 		presences = append(presences, p)
 	}
 
+	// presenceByEvrID is a derived lookup over presenceMap; rebuild it here so it
+	// stays consistent with presenceMap and is always non-nil after rebuildCache
+	// (matching the other caches), regardless of how the MatchLabel was constructed.
+	s.presenceByEvrID = make(map[evr.EvrId]*EvrMatchPresence, len(s.presenceMap))
+	for _, p := range s.presenceMap {
+		s.presenceByEvrID[p.EvrID] = p
+	}
+
+	// joinTimestamps accumulates real join times, so it is preserved rather than
+	// rebuilt; ensure it is non-nil so later writes (and MatchJoinAttempt) never
+	// assign into a nil map when the label was not built via MatchInit.
+	if s.joinTimestamps == nil {
+		s.joinTimestamps = make(map[string]time.Time)
+	}
+
 	// Include the reservations in the cache.
 	for id, r := range s.reservationMap {
 		if r.Expiry.Before(time.Now()) {
@@ -639,10 +654,10 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 		PlayerCount:      l.PlayerCount,
 		PlayerLimit:      l.PlayerLimit,
 		TeamSize:         l.TeamSize,
-		GameServer: l.publicGameServer(),
-		Players:  make([]PlayerInfo, 0),
-		RatingMu:   l.RatingMu,
-		GameStatus: l.GameStatus,
+		GameServer:       l.publicGameServer(),
+		Players:          make([]PlayerInfo, 0),
+		RatingMu:         l.RatingMu,
+		GameStatus:       l.GameStatus,
 	}
 	if l.LobbyType == PrivateLobby || l.LobbyType == UnassignedLobby {
 		// Set the last bytes to FF to hide the ID
