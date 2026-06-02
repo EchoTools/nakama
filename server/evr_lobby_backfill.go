@@ -282,6 +282,15 @@ func (b *PostMatchmakerBackfill) getPossibleTeams(candidate *BackfillCandidate, 
 		if orangeOpen {
 			teams = append(teams, evr.TeamOrange)
 		}
+	} else {
+		// Combat with balanced team counts: still backfillable. Assign to a single
+		// open team (prefer blue) so an empty/balanced match starts filling; the
+		// resulting one-player lead is the normal start of a match.
+		if blueOpen {
+			teams = append(teams, evr.TeamBlue)
+		} else if orangeOpen {
+			teams = append(teams, evr.TeamOrange)
+		}
 	}
 
 	return teams
@@ -1063,4 +1072,3 @@ func (b *PostMatchmakerBackfill) logBackfillSummary(logger *zap.Logger, result *
 
 	logger.Info("Backfill operation completed", fields...)
 }
-
