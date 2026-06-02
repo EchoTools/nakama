@@ -334,10 +334,21 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 
 			ranks, _ := rating.PredictRank(groupRatings, nil)
 
-			// Sort groups by best rating first
-			sort.SliceStable(groups, func(i, j int) bool {
-				return ranks[i] < ranks[j]
+			// Sort groups by best rating first. ranks is indexed by the current
+			// group order, so it must be permuted alongside groups; sorting groups
+			// while indexing the unpermuted ranks slice corrupts the ordering.
+			order := make([]int, len(groups))
+			for i := range order {
+				order[i] = i
+			}
+			sort.SliceStable(order, func(i, j int) bool {
+				return ranks[order[i]] < ranks[order[j]]
 			})
+			sortedGroups := make([]MatchmakerEntries, len(groups))
+			for newIdx, oldIdx := range order {
+				sortedGroups[newIdx] = groups[oldIdx]
+			}
+			copy(groups, sortedGroups)
 
 			// Collect division set - reuse map from cache
 			for k := range divs {
