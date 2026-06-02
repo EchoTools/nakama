@@ -1139,6 +1139,32 @@ var (
 			},
 		},
 		{
+			Name:        "blacklist-server",
+			Description: "Prevent a game server from being used when matchmaking",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:         discordgo.ApplicationCommandOptionString,
+					Name:         "server",
+					Description:  "Game server to blacklist",
+					Required:     true,
+					Autocomplete: true,
+				},
+			},
+		},
+		{
+			Name:        "blacklist-server-remove",
+			Description: "Remove a game server from your blacklist",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:         discordgo.ApplicationCommandOptionString,
+					Name:         "server",
+					Description:  "Game server to remove from your blacklist",
+					Required:     true,
+					Autocomplete: true,
+				},
+			},
+		},
+		{
 			Name:        "ambassador",
 			Description: "Toggle ambassador mode to mentor newer players in lower divisions.",
 		},
@@ -3469,6 +3495,80 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		"loadout": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			return d.handleLoadoutCommand(ctx, s, i, userID)
 		},
+		"blacklist-server": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+			options := i.ApplicationCommandData().Options
+			if len(options) == 0 {
+				return editInteractionResponse(s, i, "No server selected.")
+			}
+			extIP := options[0].StringValue()
+			if extIP == "" {
+				return editInteractionResponse(s, i, "No server selected.")
+			}
+
+			bl := NewServerBlacklist()
+			if err := StorableRead(ctx, nk, userID, bl, true); err != nil {
+				return fmt.Errorf("failed to read blacklist: %w", err)
+			}
+
+			if _, exists := bl.Servers[extIP]; exists {
+				return editInteractionResponse(s, i, fmt.Sprintf("Server `%s` is already blacklisted.", extIP))
+			}
+
+			// Resolve a friendly display name by looking up the live server.
+			displayName := extIP
+			minSize, maxSize := 0, 100
+			query := fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/ +label.broadcaster.region_codes:default", Query.QuoteStringValue(groupID))
+			if matchList, err := nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query); err == nil {
+				for _, m := range matchList {
+					label := MatchLabel{}
+					if err := json.Unmarshal([]byte(m.GetLabel().GetValue()), &label); err == nil && label.GameServer != nil {
+						if label.GameServer.Endpoint.ExternalIP.String() == extIP {
+							if loc := label.GameServer.Location(true); loc != "" {
+								displayName = loc
+							}
+							break
+						}
+					}
+				}
+			}
+
+			bl.Servers[extIP] = displayName
+			if err := StorableWrite(ctx, nk, userID, bl); err != nil {
+				return fmt.Errorf("failed to save blacklist: %w", err)
+			}
+
+			return editInteractionResponse(s, i, fmt.Sprintf("Server `%s` has been added to your blacklist. You will no longer be matched to this server.", displayName))
+		},
+		"blacklist-server-remove": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+			options := i.ApplicationCommandData().Options
+			if len(options) == 0 {
+				return editInteractionResponse(s, i, "No server selected.")
+			}
+			extIP := options[0].StringValue()
+			if extIP == "" {
+				return editInteractionResponse(s, i, "No server selected.")
+			}
+
+			bl := NewServerBlacklist()
+			if err := StorableRead(ctx, nk, userID, bl, false); err != nil {
+				if status.Code(err) == codes.NotFound {
+					return editInteractionResponse(s, i, "Server is not blacklisted.")
+				}
+				return fmt.Errorf("failed to read blacklist: %w", err)
+			}
+
+			displayName, exists := bl.Servers[extIP]
+			if !exists {
+				return editInteractionResponse(s, i, "Server is not blacklisted.")
+			}
+			delete(bl.Servers, extIP)
+
+			if err := StorableWrite(ctx, nk, userID, bl); err != nil {
+				return fmt.Errorf("failed to save blacklist: %w", err)
+			}
+
+			return editInteractionResponse(s, i, fmt.Sprintf("Server `%s` has been removed from your blacklist.", displayName))
+		},
 		"vrml-verify": d.handleVRMLVerify,
 		"ambassador":   d.handleAmbassadorCommand,
 	}
@@ -3790,6 +3890,75 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					},
 				}); err != nil {
 					logger.Error("Failed to respond to loadout autocomplete", zap.Error(err))
+				}
+
+			case "blacklist-server":
+				userID := d.cache.DiscordIDToUserID(user.ID)
+				if userID == "" {
+					return
+				}
+				groupID := d.cache.GuildIDToGroupID(i.GuildID)
+				if groupID == "" {
+					return
+				}
+				partial := ""
+				if len(data.Options) > 0 {
+					partial = strings.ToLower(data.Options[0].StringValue())
+				}
+				serverChoices, err := d.autocompleteGameServers(ctx, logger, userID, groupID)
+				if err != nil {
+					logger.Error("Failed to get game servers for blacklist autocomplete", zap.Error(err))
+					return
+				}
+				if partial != "" {
+					filtered := serverChoices[:0]
+					for _, c := range serverChoices {
+						if strings.Contains(strings.ToLower(c.Name), partial) {
+							filtered = append(filtered, c)
+						}
+					}
+					serverChoices = filtered
+				}
+				if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionApplicationCommandAutocompleteResult,
+					Data: &discordgo.InteractionResponseData{
+						Choices: serverChoices,
+					},
+				}); err != nil {
+					logger.Error("Failed to respond to blacklist-server autocomplete", zap.Error(err))
+				}
+
+			case "blacklist-server-remove":
+				userID := d.cache.DiscordIDToUserID(user.ID)
+				if userID == "" {
+					return
+				}
+				partial := ""
+				if len(data.Options) > 0 {
+					partial = strings.ToLower(data.Options[0].StringValue())
+				}
+				bl := NewServerBlacklist()
+				_ = StorableRead(ctx, d.nk, userID, bl, false)
+				removeChoices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(bl.Servers))
+				for extIP, displayName := range bl.Servers {
+					name := fmt.Sprintf("%s [%s]", displayName, extIP)
+					if displayName == extIP {
+						name = extIP
+					}
+					if partial == "" || strings.Contains(strings.ToLower(name), partial) {
+						removeChoices = append(removeChoices, &discordgo.ApplicationCommandOptionChoice{
+							Name:  name,
+							Value: extIP,
+						})
+					}
+				}
+				if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionApplicationCommandAutocompleteResult,
+					Data: &discordgo.InteractionResponseData{
+						Choices: removeChoices,
+					},
+				}); err != nil {
+					logger.Error("Failed to respond to blacklist-server-remove autocomplete", zap.Error(err))
 				}
 			}
 

@@ -2190,6 +2190,7 @@ func allocatePostMatchSocialLobby(ctx context.Context, logger runtime.Logger, nk
 		true,
 		false,
 		queryAddon,
+		nil,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to allocate social lobby for post-match transition: %w", err)

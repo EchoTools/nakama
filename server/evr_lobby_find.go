@@ -578,7 +578,10 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 		}
 	}
 
-	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, latestRTTs, settings, []string{lobbyParams.RegionCode}, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
+	userBL := NewServerBlacklist()
+	_ = StorableRead(ctx, p.nk, lobbyParams.UserID.String(), userBL, false)
+
+	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, latestRTTs, settings, []string{lobbyParams.RegionCode}, true, false, ServiceSettings().Matchmaking.QueryAddons.Create, userBL.IPs())
 	if err != nil {
 		// Check if this is a region fallback error - for pipeline, auto-select closest
 		var regionErr ErrMatchmakingNoServersInRegion
@@ -589,7 +592,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 				zap.Int("latency_ms", regionErr.FallbackInfo.ClosestLatencyMs))
 
 			// Allocate without region requirement to get the closest server
-			label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, latestRTTs, settings, nil, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
+			label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, latestRTTs, settings, nil, true, false, ServiceSettings().Matchmaking.QueryAddons.Create, userBL.IPs())
 		}
 
 		if err != nil {
@@ -627,6 +630,11 @@ func flushMatchRegistryLabelUpdates(nk runtime.NakamaModule) {
 }
 
 func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, entrants ...*EvrMatchPresence) error {
+	// Load the user's server blacklist once before the retry loop
+	userBL := NewServerBlacklist()
+	_ = StorableRead(ctx, p.nk, session.UserID().String(), userBL, false)
+	blacklistedIPs := userBL.IPSet()
+
 	// First attempt runs immediately — no pre-wait. The old 1s pre-query wait
 	// was a workaround for the Bluge label-flush lag; newLobby now flushes
 	// synchronously, so the first query sees fresh state. Subsequent attempts
@@ -661,6 +669,20 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 		matches, err := ListMatchStates(ctx, p.nk, query, 0)
 		if err != nil {
 			return fmt.Errorf("failed to list matches: %w", err)
+		}
+
+		// Filter out any matches hosted on servers the user has blacklisted
+		if len(blacklistedIPs) > 0 {
+			filtered := matches[:0]
+			for _, m := range matches {
+				if m.State.GameServer != nil {
+					if _, blocked := blacklistedIPs[m.State.GameServer.Endpoint.GetExternalIP()]; blocked {
+						continue
+					}
+				}
+				filtered = append(filtered, m)
+			}
+			matches = filtered
 		}
 
 		logger.Info("Social lobby search",

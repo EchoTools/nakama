@@ -137,6 +137,96 @@ func isRegionPrivileged(ctx context.Context, db *sql.DB, nk runtime.NakamaModule
 	return gg.IsEnforcer(userID), nil
 }
 
+// GameServerAutocompleteData holds per-server display info for discord autocomplete
+type GameServerAutocompleteData struct {
+	ExternalIP  string
+	DisplayName string
+	Ping        int
+}
+
+func (g GameServerAutocompleteData) Description() string {
+	if g.Ping > 0 {
+		return fmt.Sprintf("%s -- %dms [%s]", g.DisplayName, g.Ping, g.ExternalIP)
+	}
+	return fmt.Sprintf("%s [%s]", g.DisplayName, g.ExternalIP)
+}
+
+// autocompleteGameServers returns individual game servers for the given group,
+// sorted by latency, for use in discord autocomplete fields 
+func (d *DiscordAppBot) autocompleteGameServers(ctx context.Context, logger runtime.Logger, userID string, groupID string) ([]*discordgo.ApplicationCommandOptionChoice, error) {
+	latencyHistory := NewLatencyHistory()
+	if err := StorableRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
+		logger.Error("Failed to read latency history", zap.Error(err))
+		return nil, err
+	}
+
+	rtts := latencyHistory.AverageRTTs(true)
+
+	minSize := 0
+	maxSize := 100
+	query := fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/ +label.broadcaster.region_codes:default", Query.QuoteStringValue(groupID))
+	matches, err := d.nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]*GameServerAutocompleteData)
+	for _, m := range matches {
+		label := MatchLabel{}
+		if err := json.Unmarshal([]byte(m.GetLabel().GetValue()), &label); err != nil {
+			continue
+		}
+		if label.GameServer == nil {
+			continue
+		}
+		extIP := label.GameServer.Endpoint.ExternalIP.String()
+		if _, exists := seen[extIP]; exists {
+			continue
+		}
+		displayName := label.GameServer.Location(true)
+		if displayName == "" {
+			displayName = extIP
+		}
+		seen[extIP] = &GameServerAutocompleteData{
+			ExternalIP:  extIP,
+			DisplayName: displayName,
+			Ping:        rtts[extIP],
+		}
+	}
+
+	servers := make([]*GameServerAutocompleteData, 0, len(seen))
+	for _, s := range seen {
+		servers = append(servers, s)
+	}
+
+	slices.SortFunc(servers, func(a, b *GameServerAutocompleteData) int {
+		aHasPing := a.Ping > 0
+		bHasPing := b.Ping > 0
+		if aHasPing != bHasPing {
+			if aHasPing {
+				return -1
+			}
+			return 1
+		}
+		if a.Ping < b.Ping {
+			return -1
+		}
+		if a.Ping > b.Ping {
+			return 1
+		}
+		return 0
+	})
+
+	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(servers))
+	for _, s := range servers {
+		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
+			Name:  s.Description(),
+			Value: s.ExternalIP,
+		})
+	}
+	return choices, nil
+}
+
 // filterAndSortRegionChoices filters out unavailable regions and sorts by latency.
 // When privileged is false, regions with MinPing > MaxRegionPingMs or MinPing == 0
 // (no ping data) are excluded.

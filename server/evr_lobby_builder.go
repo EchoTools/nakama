@@ -644,6 +644,16 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		StartTime:           time.Now().UTC(),
 	}
 
+	// Build union of all matched players' server blacklists so none of them
+	// gets allocated to a server any one of them has blacklisted
+	var builderExcludeList []string
+	for _, session := range sessions {
+		bl := NewServerBlacklist()
+		if err := StorableRead(ctx, b.nk, session.UserID().String(), bl, false); err == nil {
+			builderExcludeList = append(builderExcludeList, bl.IPs()...)
+		}
+	}
+
 	var label *MatchLabel
 	timeout := time.After(ServerAllocationTimeoutSeconds * time.Second)
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.LobbyBuilder
@@ -655,7 +665,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 			return nil, ErrMatchmakingNoAvailableServers
 		default:
 		}
-		label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), b.nk, []string{groupID.String()}, meanRTTByExtIP, settings, nil, true, false, queryAddon)
+		label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), b.nk, []string{groupID.String()}, meanRTTByExtIP, settings, nil, true, false, queryAddon, builderExcludeList)
 		if err != nil || label == nil {
 			logger.Error("Failed to allocate game server.", zap.Error(err))
 			<-time.After(ServerAllocationRetrySeconds * time.Second)
@@ -832,7 +842,7 @@ func LobbyGameServerList(ctx context.Context, nk runtime.NakamaModule, query str
 	return labels, nil
 }
 
-func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupIDs []string, rttsByEndpoint map[string]int, settings *MatchSettings, regions []string, requireDefaultRegion bool, requireRegion bool, queryAddon string) (*MatchLabel, error) {
+func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupIDs []string, rttsByEndpoint map[string]int, settings *MatchSettings, regions []string, requireDefaultRegion bool, requireRegion bool, queryAddon string, additionalExcludeList []string) (*MatchLabel, error) {
 
 	if len(groupIDs) == 0 {
 		return nil, fmt.Errorf("no group IDs provided")
@@ -907,6 +917,9 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 		hostID := label.GameServer.Endpoint.GetHostID()
 
 		if slices.Contains(globalSettings.ServerSelection.ExcludeList, label.GameServer.Username) || slices.Contains(globalSettings.ServerSelection.ExcludeList, extIP) {
+			continue
+		}
+		if slices.Contains(additionalExcludeList, label.GameServer.Username) || slices.Contains(additionalExcludeList, extIP) {
 			continue
 		}
 
