@@ -83,6 +83,41 @@ func (g *LobbyGroup) HasSessionOnTicket(sessionID string) bool {
 	return g.ph.matchmaker.HasSessionOnPartyTicket(g.ph.IDStr, sessionID)
 }
 
+// TicketRebuildCh returns a channel that is signalled when party membership
+// changes require the active matchmaking ticket to be rebuilt. Returns nil
+// when the LobbyGroup or party handler is nil.
+func (g *LobbyGroup) TicketRebuildCh() <-chan struct{} {
+	if g == nil || g.ph == nil {
+		return nil
+	}
+	return g.ph.ticketRebuildCh
+}
+
+// SignalTicketRebuild sends a non-blocking signal on the ticket rebuild
+// channel, notifying the leader's matchmaking loop that the party
+// membership has changed and the ticket must be rebuilt.
+func (g *LobbyGroup) SignalTicketRebuild() {
+	if g == nil || g.ph == nil {
+		return
+	}
+	select {
+	case g.ph.ticketRebuildCh <- struct{}{}:
+	default:
+		// Already signalled; the leader will pick it up.
+	}
+}
+
+// MatchmakerRemoveSessionAll removes all matchmaking tickets associated
+// with the given sessionID, regardless of party affiliation. This is
+// necessary when the leader submitted a solo ticket (no party ID) and a
+// late arrival needs to cancel it.
+func (g *LobbyGroup) MatchmakerRemoveSessionAll(sessionID string) error {
+	if g == nil || g.ph == nil {
+		return nil
+	}
+	return g.ph.matchmaker.RemoveSessionAll(sessionID)
+}
+
 func JoinPartyGroup(session *sessionWS, groupName string, currentMatchID MatchID) (*LobbyGroup, bool, error) {
 
 	userPresence := &rtapi.UserPresence{

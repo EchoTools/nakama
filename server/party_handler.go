@@ -59,6 +59,13 @@ type PartyHandler struct {
 	joinRequests          []*PartyJoinRequest
 
 	members *PartyPresenceList
+
+	// ticketRebuildCh is signalled when party membership changes while a
+	// matchmaking ticket is active. The leader's lobbyMatchMakeWithFallback
+	// selects on this channel to trigger an immediate ticket rebuild instead
+	// of waiting for the fallback timer. The channel is non-blocking (cap 1)
+	// so senders never block.
+	ticketRebuildCh chan struct{}
 }
 
 func NewPartyHandler(logger *zap.Logger, partyRegistry PartyRegistry, matchmaker Matchmaker, tracker Tracker, streamManager StreamManager, router MessageRouter, id uuid.UUID, node string, open bool, maxSize int, presence *rtapi.UserPresence) *PartyHandler {
@@ -86,7 +93,8 @@ func NewPartyHandler(logger *zap.Logger, partyRegistry PartyRegistry, matchmaker
 		leader:                nil,
 		joinRequests:          make([]*PartyJoinRequest, 0, maxSize),
 
-		members: NewPartyPresenceList(maxSize),
+		members:         NewPartyPresenceList(maxSize),
+		ticketRebuildCh: make(chan struct{}, 1),
 	}
 }
 

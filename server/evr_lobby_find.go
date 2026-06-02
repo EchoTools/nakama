@@ -63,6 +63,17 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			}()
 		}
 
+		// Fast path: if the follower is already in the leader's match,
+		// skip all heavyweight operations (authorization, matchmaking
+		// stream, monitor goroutine, TryFollowPartyLeader). This
+		// prevents repeated "Joined party group" / "Already in
+		// leader's match" churn when the client re-sends
+		// LobbyFindSessionRequest on its normal message cycle.
+		if !isLeader && p.isFollowerAlreadyInLeaderMatch(logger, session, lobbyGroup) {
+			logger.Debug("Follower already in leader's match, skipping follow path")
+			return nil
+		}
+
 		// Synchronize mode if the leader is heading to Social.
 		// Cache the result to avoid a TOCTOU double-read later (line 111).
 		headingToSocial = !isLeader && p.isLeaderHeadingToSocial(ctx, logger, session, lobbyParams, lobbyGroup)
@@ -99,6 +110,15 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	if lobbyGroup != nil {
 		if !isLeader {
+			// Guard: if the follower is in an active Arena/Combat match,
+			// do not process the party follow. Let them finish their match.
+			// The party will pick them up when they return to social.
+			// Fixes #460: player mid-match yanked back to social by party follow.
+			if p.isFollowerInActiveMatch(ctx, logger, session) {
+				logger.Info("Follower is in an active arena/combat match, skipping party follow")
+				return nil
+			}
+
 			// Observer: non-leader entering holding pattern, waiting for leader's ticket.
 			if lc := getMatchLifecycle(session); lc != nil {
 				lc.Transition(StateHolding, "waiting for leader's ticket")
@@ -627,6 +647,16 @@ func flushMatchRegistryLabelUpdates(nk runtime.NakamaModule) {
 }
 
 func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, entrants ...*EvrMatchPresence) error {
+	// Fast path: if the player is already in a social lobby that matches
+	// the search criteria (same group, social mode), treat as no-op.
+	// This prevents the party follow path from producing an error when it
+	// directs a player to a social lobby they are already in. (#462)
+	if currentMatchID := p.currentSocialLobbyForSession(ctx, logger, session, lobbyParams); !currentMatchID.IsNil() {
+		logger.Debug("Player already in a matching social lobby, treating as no-op",
+			zap.String("mid", currentMatchID.String()))
+		return nil
+	}
+
 	// First attempt runs immediately — no pre-wait. The old 1s pre-query wait
 	// was a workaround for the Bluge label-flush lag; newLobby now flushes
 	// synchronously, so the first query sees fresh state. Subsequent attempts
@@ -996,6 +1026,132 @@ func (p *EvrPipeline) isLeaderHeadingToSocial(ctx context.Context, logger *zap.L
 	return false
 }
 
+// isFollowerInActiveMatch reports whether the follower (session) is currently
+// in an Arena or Combat match (public or private). When this returns true,
+// the party follow system must not process the LobbyFindSessionRequest —
+// doing so would yank the player out of their active match.
+//
+// Returns false when the session has no match presence, the match label
+// cannot be resolved, or the match is a social lobby.
+//
+// Fixes #460: player mid-match was pulled back to social when party leader
+// hit matchmaking.
+func (p *EvrPipeline) isFollowerInActiveMatch(ctx context.Context, logger *zap.Logger, session *sessionWS) bool {
+	matchStream := PresenceStream{
+		Mode:    StreamModeService,
+		Subject: session.id,
+		Label:   StreamLabelMatchService,
+	}
+	presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, matchStream, session.userID)
+	if presence == nil {
+		return false
+	}
+
+	followerMatchID := MatchIDFromStringOrNil(presence.GetStatus())
+	if followerMatchID.IsNil() {
+		return false
+	}
+
+	label, err := MatchLabelByID(ctx, p.nk, followerMatchID)
+	if err != nil || label == nil {
+		return false
+	}
+
+	return label.IsArena() || label.IsCombat()
+}
+
+// currentSocialLobbyForSession returns the match ID of the social lobby that
+// the player is currently in, if it matches the search criteria (same group ID
+// and social mode). Returns a nil MatchID when the player is not in a matching
+// social lobby.
+//
+// Used as a fast-path guard in lobbyFindOrCreateSocial to avoid rejoining a
+// lobby the player is already in — the party follow path can direct a player
+// to a social lobby they never left. (#462)
+func (p *EvrPipeline) currentSocialLobbyForSession(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters) MatchID {
+	matchStream := PresenceStream{
+		Mode:    StreamModeService,
+		Subject: session.ID(),
+		Label:   StreamLabelMatchService,
+	}
+
+	ws, ok := session.(*sessionWS)
+	if !ok {
+		return MatchID{}
+	}
+
+	presence := ws.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.ID(), matchStream, session.UserID())
+	if presence == nil {
+		return MatchID{}
+	}
+
+	currentMatchID := MatchIDFromStringOrNil(presence.GetStatus())
+	if currentMatchID.IsNil() {
+		return MatchID{}
+	}
+
+	label, err := MatchLabelByID(ctx, p.nk, currentMatchID)
+	if err != nil || label == nil {
+		return MatchID{}
+	}
+
+	if !label.IsSocial() {
+		return MatchID{}
+	}
+
+	if label.GetGroupID() != lobbyParams.GroupID {
+		return MatchID{}
+	}
+
+	return currentMatchID
+}
+
+// isFollowerAlreadyInLeaderMatch checks whether the follower is already in
+// the same match as the party leader. This is a lightweight tracker-only
+// check (no match registry calls) used as a fast path at the top of
+// lobbyFind to avoid redundant configureParty / authorization / matchmaking
+// stream / TryFollowPartyLeader work when the client re-sends
+// LobbyFindSessionRequest on its normal message cycle.
+//
+// Returns false when the leader cannot be found, either player is not in a
+// match, or their match IDs differ.
+func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(logger *zap.Logger, session *sessionWS, lobbyGroup *LobbyGroup) bool {
+	leader := lobbyGroup.GetLeader()
+	if leader == nil || leader.SessionId == session.id.String() {
+		return false
+	}
+
+	leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
+	leaderUserID := uuid.FromStringOrNil(leader.UserId)
+
+	leaderStream := PresenceStream{
+		Mode:    StreamModeService,
+		Subject: leaderSessionID,
+		Label:   StreamLabelMatchService,
+	}
+	leaderPresence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, leaderStream, leaderUserID)
+	if leaderPresence == nil {
+		return false
+	}
+	leaderMatchID := MatchIDFromStringOrNil(leaderPresence.GetStatus())
+	if leaderMatchID.IsNil() {
+		return false
+	}
+
+	followerStream := PresenceStream{
+		Mode:    StreamModeService,
+		Subject: session.id,
+		Label:   StreamLabelMatchService,
+	}
+	followerPresence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, followerStream, session.userID)
+	if followerPresence == nil {
+		return false
+	}
+	followerMatchID := MatchIDFromStringOrNil(followerPresence.GetStatus())
+
+	return followerMatchID == leaderMatchID
+}
+
 // isLeaderInArenaCombatMatch reports whether the party leader is currently
 // in an Arena or Combat match (public or private). The follower should NOT
 // enter the follow path when this returns true — the correct path is the
@@ -1086,11 +1242,25 @@ func (p *EvrPipeline) cancelTicketForLateArrival(_ context.Context, logger *zap.
 		zap.String("party_id", lobbyGroup.IDStr()),
 		zap.Int("party_size", lobbyGroup.Size()))
 
+	// Remove party-scoped tickets first.
 	if err := lobbyGroup.MatchmakerRemoveAll(); err != nil {
-		logger.Warn("Failed to cancel matchmaking tickets for late arrival",
+		logger.Warn("Failed to cancel party matchmaking tickets for late arrival",
 			zap.Error(err))
-		return
 	}
+
+	// Also remove any solo ticket the leader submitted before the late
+	// arrival joined. When the leader initially had a party of 1, addTicket
+	// takes the solo path and creates a ticket with an empty party ID.
+	// MatchmakerRemoveAll only removes tickets keyed by the party ID, so
+	// the solo ticket survives. RemoveSessionAll catches it.
+	if err := lobbyGroup.MatchmakerRemoveSessionAll(leader.SessionId); err != nil {
+		logger.Warn("Failed to cancel leader session tickets for late arrival",
+			zap.Error(err))
+	}
+
+	// Signal the leader's matchmaking loop to rebuild the ticket
+	// immediately instead of waiting for the fallback timer.
+	lobbyGroup.SignalTicketRebuild()
 
 	// Observer: ticket cancelled due to late arrival.
 	if lc := getMatchLifecycle(session); lc != nil {
