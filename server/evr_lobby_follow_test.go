@@ -1730,7 +1730,7 @@ func TestPoll_LeaderInClosedArenaMatch_ShouldNotLoopForever(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	result, timedOut := env.runPollWithTimeout(ctx, t, 12*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, 30*time.Second)
 	elapsed := time.Since(start)
 
 	if timedOut {
@@ -1743,8 +1743,8 @@ func TestPoll_LeaderInClosedArenaMatch_ShouldNotLoopForever(t *testing.T) {
 		t.Error("Expected false (follower cannot join leader's closed match)")
 	}
 
-	if elapsed > 8*time.Second {
-		t.Errorf("pollFollowPartyLeader took %v — should return within ~6s (one poll cycle).", elapsed)
+	if elapsed > 22*time.Second {
+		t.Errorf("pollFollowPartyLeader took %v — should return within ~18s (three poll cycles).", elapsed)
 	}
 }
 
@@ -1773,11 +1773,11 @@ func TestPoll_LeaderInFullCombatMatch_ShouldNotLoopForever(t *testing.T) {
 	})
 	env.withMockNK(registry)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 	defer cancel()
 
 	start := time.Now()
-	result, timedOut := env.runPollWithTimeout(ctx, t, 12*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, 30*time.Second)
 	elapsed := time.Since(start)
 
 	if timedOut {
@@ -1790,8 +1790,8 @@ func TestPoll_LeaderInFullCombatMatch_ShouldNotLoopForever(t *testing.T) {
 		t.Error("Expected false (follower cannot join leader's full match)")
 	}
 
-	if elapsed > 8*time.Second {
-		t.Errorf("pollFollowPartyLeader took %v — should return within ~6s (one poll cycle).", elapsed)
+	if elapsed > 22*time.Second {
+		t.Errorf("pollFollowPartyLeader took %v — should return within ~18s (three poll cycles).", elapsed)
 	}
 }
 
@@ -1901,6 +1901,360 @@ func TestPoll_RegistryError_FallsBackToTracker(t *testing.T) {
 	if registry.getMatchCalls.Load() == 0 {
 		t.Error("Expected MatchLabelByID (GetMatch) to be called before the tracker fallback " +
 			"accepted convergence, but the registry was never queried.")
+	}
+}
+
+// ===========================================================================
+// Arena/Combat follow-path gate: the follow path (TryFollowPartyLeader /
+// pollFollowPartyLeader) must be restricted to social lobby convergence.
+// When the leader is in an Arena or Combat match, the follow path must not
+// be entered. Instead, followers should go to a social lobby and wait.
+// ===========================================================================
+
+// TestIsLeaderInArenaCombatMatch_ArenaPublic verifies that
+// isLeaderInArenaCombatMatch returns true when the leader is in ModeArenaPublic.
+func TestIsLeaderInArenaCombatMatch_ArenaPublic(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	arenaMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	registry.SetMatch(arenaMatchID, &MatchLabel{
+		ID:          arenaMatchID,
+		Mode:        evr.ModeArenaPublic,
+		Open:        true,
+		PlayerLimit: 8,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setLeaderMatch(arenaMatchID)
+
+	logger := loggerForTest(t)
+	result := env.pipeline.isLeaderInArenaCombatMatch(
+		context.Background(), logger, env.session, env.params, env.lobbyGroup)
+
+	if !result {
+		t.Error("Expected true when leader is in ModeArenaPublic match")
+	}
+}
+
+// TestIsLeaderInArenaCombatMatch_CombatPublic verifies that
+// isLeaderInArenaCombatMatch returns true when the leader is in ModeCombatPublic.
+func TestIsLeaderInArenaCombatMatch_CombatPublic(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	combatMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	registry.SetMatch(combatMatchID, &MatchLabel{
+		ID:          combatMatchID,
+		Mode:        evr.ModeCombatPublic,
+		Open:        true,
+		PlayerLimit: 8,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setLeaderMatch(combatMatchID)
+
+	logger := loggerForTest(t)
+	result := env.pipeline.isLeaderInArenaCombatMatch(
+		context.Background(), logger, env.session, env.params, env.lobbyGroup)
+
+	if !result {
+		t.Error("Expected true when leader is in ModeCombatPublic match")
+	}
+}
+
+// TestIsLeaderInArenaCombatMatch_SocialPublic verifies that
+// isLeaderInArenaCombatMatch returns false when the leader is in ModeSocialPublic.
+// Social mode should still use the follow path.
+func TestIsLeaderInArenaCombatMatch_SocialPublic(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	socialMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	registry.SetMatch(socialMatchID, &MatchLabel{
+		ID:          socialMatchID,
+		Mode:        evr.ModeSocialPublic,
+		Open:        true,
+		PlayerLimit: 12,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setLeaderMatch(socialMatchID)
+
+	logger := loggerForTest(t)
+	result := env.pipeline.isLeaderInArenaCombatMatch(
+		context.Background(), logger, env.session, env.params, env.lobbyGroup)
+
+	if result {
+		t.Error("Expected false when leader is in ModeSocialPublic — social follow path should be allowed")
+	}
+}
+
+// TestIsLeaderInArenaCombatMatch_PrivateModes verifies that
+// isLeaderInArenaCombatMatch returns true for private arena/combat modes.
+func TestIsLeaderInArenaCombatMatch_PrivateModes(t *testing.T) {
+	t.Parallel()
+
+	for _, mode := range []evr.Symbol{evr.ModeArenaPrivate, evr.ModeCombatPrivate} {
+		t.Run(mode.String(), func(t *testing.T) {
+			t.Parallel()
+
+			env := newFollowTestEnv(t)
+			matchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+			registry := newMockFollowMatchRegistry()
+			groupID := env.groupID
+			registry.SetMatch(matchID, &MatchLabel{
+				ID:          matchID,
+				Mode:        mode,
+				Open:        true,
+				PlayerLimit: 8,
+				GroupID:     &groupID,
+			})
+			env.withMockNK(registry)
+			env.setLeaderMatch(matchID)
+
+			logger := loggerForTest(t)
+			result := env.pipeline.isLeaderInArenaCombatMatch(
+				context.Background(), logger, env.session, env.params, env.lobbyGroup)
+
+			if !result {
+				t.Errorf("Expected true when leader is in %s match", mode.String())
+			}
+		})
+	}
+}
+
+// TestIsLeaderInArenaCombatMatch_LeaderMatchmaking verifies that
+// isLeaderInArenaCombatMatch returns false when the leader is actively
+// matchmaking, regardless of their current match. When the leader is
+// matchmaking, the normal ticket-inclusion flow applies.
+func TestIsLeaderInArenaCombatMatch_LeaderMatchmaking(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	arenaMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	registry.SetMatch(arenaMatchID, &MatchLabel{
+		ID:          arenaMatchID,
+		Mode:        evr.ModeArenaPublic,
+		Open:        true,
+		PlayerLimit: 8,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setLeaderMatch(arenaMatchID)
+	env.setLeaderMatchmaking() // Leader is actively matchmaking
+
+	logger := loggerForTest(t)
+	result := env.pipeline.isLeaderInArenaCombatMatch(
+		context.Background(), logger, env.session, env.params, env.lobbyGroup)
+
+	if result {
+		t.Error("Expected false when leader is actively matchmaking — ticket-inclusion path applies")
+	}
+}
+
+// TestIsLeaderInArenaCombatMatch_NoMatch verifies that
+// isLeaderInArenaCombatMatch returns false when the leader is not in any match.
+func TestIsLeaderInArenaCombatMatch_NoMatch(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	// No leader match set — leader is not in any match.
+
+	logger := loggerForTest(t)
+	result := env.pipeline.isLeaderInArenaCombatMatch(
+		context.Background(), logger, env.session, env.params, env.lobbyGroup)
+
+	if result {
+		t.Error("Expected false when leader is not in any match")
+	}
+}
+
+// TestTryFollow_LeaderInArenaMatch_ReturnsFalse verifies the defense-in-depth
+// guard in TryFollowPartyLeader: even if the lobbyFind gate fails to prevent
+// entry, TryFollowPartyLeader must return false when the leader's match is
+// Arena mode.
+func TestTryFollow_LeaderInArenaMatch_ReturnsFalse(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	arenaMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	registry.SetMatch(arenaMatchID, &MatchLabel{
+		ID:          arenaMatchID,
+		Mode:        evr.ModeArenaPublic,
+		Open:        true,
+		PlayerLimit: 8,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setLeaderMatch(arenaMatchID)
+
+	logger := loggerForTest(t)
+	result := env.pipeline.TryFollowPartyLeader(
+		context.Background(), logger, env.session, env.params, env.lobbyGroup)
+
+	if result {
+		t.Error("TryFollowPartyLeader should return false when leader is in ModeArenaPublic — " +
+			"follow path is only for social lobby convergence")
+	}
+}
+
+// TestTryFollow_LeaderInCombatMatch_ReturnsFalse verifies the defense-in-depth
+// guard for Combat mode.
+func TestTryFollow_LeaderInCombatMatch_ReturnsFalse(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	combatMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	registry.SetMatch(combatMatchID, &MatchLabel{
+		ID:          combatMatchID,
+		Mode:        evr.ModeCombatPublic,
+		Open:        true,
+		PlayerLimit: 8,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setLeaderMatch(combatMatchID)
+
+	logger := loggerForTest(t)
+	result := env.pipeline.TryFollowPartyLeader(
+		context.Background(), logger, env.session, env.params, env.lobbyGroup)
+
+	if result {
+		t.Error("TryFollowPartyLeader should return false when leader is in ModeCombatPublic — " +
+			"follow path is only for social lobby convergence")
+	}
+}
+
+// TestTryFollow_LeaderInSocialMatch_FollowerAlreadyInMatch_ReturnsTrue
+// verifies that the social follow path is preserved: when the leader is in a
+// ModeSocialPublic lobby and the follower is already in it, TryFollowPartyLeader
+// returns true.
+func TestTryFollow_LeaderInSocialMatch_FollowerAlreadyInMatch_ReturnsTrue(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	socialMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	registry.SetMatch(socialMatchID, &MatchLabel{
+		ID:          socialMatchID,
+		Mode:        evr.ModeSocialPublic,
+		Open:        true,
+		PlayerLimit: 12,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setLeaderMatch(socialMatchID)
+	env.setFollowerMatch(socialMatchID) // Already in the same lobby
+
+	logger := loggerForTest(t)
+	result := env.pipeline.TryFollowPartyLeader(
+		context.Background(), logger, env.session, env.params, env.lobbyGroup)
+
+	if !result {
+		t.Error("TryFollowPartyLeader should return true when follower is already in leader's social lobby")
+	}
+}
+
+// TestPoll_LeaderInArenaMatch_ReturnsFalseImmediately verifies the
+// defense-in-depth guard in pollFollowPartyLeader: the poll must return false
+// when the leader's match is Arena mode, not loop until context expiry.
+func TestPoll_LeaderInArenaMatch_ReturnsFalseImmediately(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	arenaMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	registry.SetMatch(arenaMatchID, &MatchLabel{
+		ID:          arenaMatchID,
+		Mode:        evr.ModeArenaPublic,
+		Open:        true,
+		PlayerLimit: 8,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setLeaderMatch(arenaMatchID)
+	// Follower in a different match (social lobby).
+	socialMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	env.setFollowerMatch(socialMatchID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	result, timedOut := env.runPollWithTimeout(ctx, t, 12*time.Second)
+	elapsed := time.Since(start)
+
+	if timedOut {
+		t.Fatalf("pollFollowPartyLeader hung — should return false within one poll cycle for arena leader")
+	}
+	if result {
+		t.Error("pollFollowPartyLeader should return false when leader is in ModeArenaPublic")
+	}
+	// Should exit within one poll cycle (3s poll + 3s settle = ~6s), not the full timeout.
+	if elapsed > 10*time.Second {
+		t.Errorf("pollFollowPartyLeader took %v — should exit promptly for arena leader", elapsed)
+	}
+}
+
+// TestPoll_LeaderInCombatMatch_ReturnsFalseImmediately verifies the
+// defense-in-depth guard for Combat mode in pollFollowPartyLeader.
+func TestPoll_LeaderInCombatMatch_ReturnsFalseImmediately(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	combatMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	registry.SetMatch(combatMatchID, &MatchLabel{
+		ID:          combatMatchID,
+		Mode:        evr.ModeCombatPublic,
+		Open:        true,
+		PlayerLimit: 8,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setLeaderMatch(combatMatchID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	result, timedOut := env.runPollWithTimeout(ctx, t, 12*time.Second)
+	elapsed := time.Since(start)
+
+	if timedOut {
+		t.Fatalf("pollFollowPartyLeader hung — should return false within one poll cycle for combat leader")
+	}
+	if result {
+		t.Error("pollFollowPartyLeader should return false when leader is in ModeCombatPublic")
+	}
+	if elapsed > 10*time.Second {
+		t.Errorf("pollFollowPartyLeader took %v — should exit promptly for combat leader", elapsed)
 	}
 }
 

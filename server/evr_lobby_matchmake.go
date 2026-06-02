@@ -22,7 +22,7 @@ const (
 )
 
 const (
-	MatchmakingStartGracePeriod = 3 * time.Second
+	MatchmakingStartGracePeriod = 10 * time.Second
 	MadeMatchBackfillDelay      = 15 * time.Second
 )
 
