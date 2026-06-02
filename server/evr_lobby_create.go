@@ -35,8 +35,11 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 		}
 	}
 
+	userBL := NewServerBlacklist()
+	_ = StorableRead(ctx, nk, session.UserID().String(), userBL, false)
+
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
-	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), nk, []string{params.GroupID.String()}, latestRTTs, settings, []string{params.RegionCode}, false, false, queryAddon)
+	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), nk, []string{params.GroupID.String()}, latestRTTs, settings, []string{params.RegionCode}, false, false, queryAddon, userBL.IPs())
 	if err != nil {
 		// Check if this is a region fallback error - for lobby create, auto-select closest
 		var regionErr ErrMatchmakingNoServersInRegion
@@ -47,7 +50,7 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 				zap.Int("latency_ms", regionErr.FallbackInfo.ClosestLatencyMs))
 
 			// Allocate without region requirement to get the closest server
-			label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), nk, []string{params.GroupID.String()}, latestRTTs, settings, nil, false, false, queryAddon)
+			label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), nk, []string{params.GroupID.String()}, latestRTTs, settings, nil, false, false, queryAddon, userBL.IPs())
 		}
 
 		if err != nil {
