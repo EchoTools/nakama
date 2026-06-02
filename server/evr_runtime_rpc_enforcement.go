@@ -25,6 +25,8 @@ type EnforcementKickRequest struct {
 	ModeratorNotes         string `json:"moderator_notes,omitempty"`          // Notes for the audit log (other moderators)
 	AllowPrivateLobbies    *bool  `json:"allow_private_lobbies,omitempty"`    // Limit the user to only joining private lobbies (defaults to guild group setting)
 	RequireCommunityValues bool   `json:"require_community_values,omitempty"` // Require the user to accept the community values before they can rejoin
+	ReporterUserID         string `json:"reporter_user_id,omitempty"`         // User ID of the player who filed/reported the action (issue #466; empty for operator-initiated kicks)
+	ReportID               string `json:"report_id,omitempty"`                // ID of a linked PlayerReport (see PlayerReport.ID) this action stems from
 }
 
 // EnforcementKickResponse represents the response from the kick/enforcement RPC
@@ -156,9 +158,21 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 			enforcerDiscordID = account.CustomId
 		}
 
+		// Resolve the reporter's Discord ID for the audit trail, if a reporter was supplied (issue #466).
+		// Operator-initiated kicks supply no reporter, leaving these empty.
+		reporterDiscordID := ""
+		if request.ReporterUserID != "" {
+			reporterAccount, rErr := nk.AccountGetId(ctx, request.ReporterUserID)
+			if rErr != nil {
+				logger.Warn("Failed to load reporter account for Discord ID", zap.Error(rErr), zap.String("reporter_user_id", request.ReporterUserID))
+			} else if reporterAccount != nil && reporterAccount.CustomId != "" {
+				reporterDiscordID = reporterAccount.CustomId
+			}
+		}
+
 		// Add a new suspension record
 		actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
-		record := journal.AddRecord(groupID, enforcerUserID, enforcerDiscordID, request.UserNotice, request.ModeratorNotes, request.RequireCommunityValues, allowPrivateLobbies, suspensionDuration)
+		record := journal.AddRecordWithOptions(groupID, enforcerUserID, enforcerDiscordID, request.UserNotice, request.ModeratorNotes, "", request.RequireCommunityValues, allowPrivateLobbies, false, suspensionDuration, request.ReporterUserID, reporterDiscordID, request.ReportID)
 		recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
 	} else if voidActiveSuspensions {
 		// Void active suspensions
