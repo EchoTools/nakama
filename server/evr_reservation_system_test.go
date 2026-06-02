@@ -338,11 +338,13 @@ func TestReservationConflictDetection(t *testing.T) {
 			conflictType:   "overlap",
 		},
 		{
+			// Half-open interval semantics (the logic this test exercises):
+			// a request that ends exactly when the existing reservation starts
+			// touches but does not overlap, so it is NOT a conflict.
 			name:           "Adjacent - ends when existing starts",
 			requestStart:   baseTime.Add(30 * time.Minute),
 			requestEnd:     baseTime.Add(60 * time.Minute),
-			shouldConflict: true,
-			conflictType:   "adjacent",
+			shouldConflict: false,
 		},
 	}
 
