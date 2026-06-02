@@ -163,6 +163,9 @@ func StoreParams(ctx context.Context, params *SessionParameters) {
 }
 
 func LoadParams(ctx context.Context) (parameters *SessionParameters, found bool) {
+	if ctx == nil {
+		return nil, false
+	}
 	params, ok := ctx.Value(ctxSessionParametersKey{}).(*atomic.Pointer[SessionParameters])
 	if !ok {
 		return nil, false
