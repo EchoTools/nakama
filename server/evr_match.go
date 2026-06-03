@@ -2194,6 +2194,22 @@ func allocatePostMatchSocialLobby(ctx context.Context, logger runtime.Logger, nk
 		return nil
 	}
 	queryAddon := serviceSettings.Matchmaking.QueryAddons.Create
+
+	// Build the union of present participants' blacklisted server IPs so the
+	// post-match auto-move never lands anyone on a server they have blacklisted.
+	participantUserIDs := make([]string, 0, len(participants))
+	for _, presence := range participants {
+		participantUserIDs = append(participantUserIDs, presence.GetUserId())
+	}
+	blacklistedSet := unionBlacklistedIPs(ctx, nk, participantUserIDs)
+	var blacklistedIPs []string
+	if len(blacklistedSet) > 0 {
+		blacklistedIPs = make([]string, 0, len(blacklistedSet))
+		for ip := range blacklistedSet {
+			blacklistedIPs = append(blacklistedIPs, ip)
+		}
+	}
+
 	label, err := LobbyGameServerAllocate(
 		ctx,
 		logger,
@@ -2205,6 +2221,7 @@ func allocatePostMatchSocialLobby(ctx context.Context, logger runtime.Logger, nk
 		true,
 		false,
 		queryAddon,
+		blacklistedIPs,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to allocate social lobby for post-match transition: %w", err)
