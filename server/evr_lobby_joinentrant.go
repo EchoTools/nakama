@@ -245,18 +245,6 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 
 	connectionSettings := label.GetEntrantConnectMessage(e.RoleAlignment, e.DisableEncryption, e.DisableMAC)
 
-	// A game server registered with a non-routable external address is
-	// unreachable by remote clients. GetEndpoint replaces that slot with
-	// 0.0.0.0 (the EVR client's "skip this address" sentinel) so the client
-	// falls back to the internal address instead of hanging on a dead one.
-	// Warn so the operator can fix the server's external endpoint (#465).
-	if rawEndpoint := label.GetGameServerEndpoint(); rawEndpoint.ExternalIP != nil && connectionSettings.Endpoint.ExternalIP.IsUnspecified() && !rawEndpoint.ExternalIP.IsUnspecified() {
-		logger.Warn("Game server external address is non-routable; stripping for client",
-			zap.String("raw_external_ip", rawEndpoint.ExternalIP.String()),
-			zap.String("internal_ip", rawEndpoint.InternalIP.String()),
-			zap.Uint16("port", rawEndpoint.Port))
-	}
-
 	// Quest (standalone) clients use a different encoder flag bit layout (shifted by 1).
 	if ServiceSettings().UseQuestEncoderFlags {
 		if params, ok := LoadParams(sessionCtx); ok && !params.IsPCVR() {
