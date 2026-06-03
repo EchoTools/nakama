@@ -307,7 +307,23 @@ func (s *MatchLabel) GetGroupID() uuid.UUID {
 	return *s.GroupID
 }
 
+// GetEndpoint returns the game server endpoint sanitized for delivery to a
+// client: any non-routable external address is replaced with 0.0.0.0 so the EVR
+// client skips it instead of attempting an unreachable connection (issue #465).
+// A routable external address, the internal (LAN) address, and the port are
+// preserved unchanged.
 func (s *MatchLabel) GetEndpoint() evr.Endpoint {
+	if s.GameServer == nil {
+		return evr.Endpoint{}
+	}
+	return s.GameServer.Endpoint.SanitizedForClient()
+}
+
+// GetGameServerEndpoint returns the raw, unsanitized game server endpoint as
+// registered. Use GetEndpoint for anything sent to a client; this accessor
+// exists for diagnostics (e.g. logging the original external address before it
+// is stripped).
+func (s *MatchLabel) GetGameServerEndpoint() evr.Endpoint {
 	if s.GameServer == nil {
 		return evr.Endpoint{}
 	}
@@ -639,10 +655,10 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 		PlayerCount:      l.PlayerCount,
 		PlayerLimit:      l.PlayerLimit,
 		TeamSize:         l.TeamSize,
-		GameServer: l.publicGameServer(),
-		Players:  make([]PlayerInfo, 0),
-		RatingMu:   l.RatingMu,
-		GameStatus: l.GameStatus,
+		GameServer:       l.publicGameServer(),
+		Players:          make([]PlayerInfo, 0),
+		RatingMu:         l.RatingMu,
+		GameStatus:       l.GameStatus,
 	}
 	if l.LobbyType == PrivateLobby || l.LobbyType == UnassignedLobby {
 		// Set the last bytes to FF to hide the ID
