@@ -206,6 +206,14 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		return err
 	}
 
+	// rebuildCh is signalled by cancelTicketForLateArrival when a late
+	// party member arrives and the current ticket must be rebuilt with the
+	// full party. May be nil when there is no party.
+	var rebuildCh <-chan struct{}
+	if lobbyGroup != nil {
+		rebuildCh = lobbyGroup.TicketRebuildCh()
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -213,6 +221,17 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		case <-timeoutTimer.C:
 			logger.Debug("Matchmaking timeout")
 			return ErrMatchmakingTimeout
+
+		case <-rebuildCh:
+			// A late party member arrived and cancelled the current
+			// ticket. Rebuild immediately with the full party.
+			logger.Info("Ticket rebuild triggered by late party arrival",
+				zap.Int("party_size", lobbyGroup.Size()))
+			currentTicket = "" // Already removed by cancelTicketForLateArrival.
+			if err := replaceTicket(ticketConfig); err != nil {
+				return err
+			}
+
 		case <-fallbackTimer.C:
 			fallbackCount++
 
