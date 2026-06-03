@@ -350,7 +350,13 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 	}
 
 	member, err := c.GuildMember(guildID, discordID)
-	if errors.Is(err, ErrMemberNotFound) || member == nil {
+	if errors.Is(err, ErrDiscordRESTOverloaded) {
+		// Discord REST API is temporarily unavailable due to rate limiting.
+		// Skip the sync rather than treating this as "user not found."
+		logger.Warn("Discord REST overloaded, skipping guild member sync", zap.String("discord_id", discordID), zap.String("guild_id", guildID))
+		return nil
+	}
+	if errors.Is(err, ErrMemberNotFound) {
 		if removeErr := c.GuildGroupMemberRemove(ctx, guildID, discordID, ""); removeErr != nil {
 			return fmt.Errorf("failed to remove guild group member: %w", removeErr)
 		}
