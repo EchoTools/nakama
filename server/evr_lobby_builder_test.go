@@ -8,6 +8,39 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestServerExcluded covers the predicate that drops a game server from
+// selection when its IP or username is in any exclude list — including the
+// per-allocation blacklist union built from all matched players.
+func TestServerExcluded(t *testing.T) {
+	t.Parallel()
+
+	global := []string{"banned-host"}
+	blacklistUnion := []string{"10.0.0.5", "10.0.0.6"}
+
+	cases := []struct {
+		name     string
+		extIP    string
+		username string
+		want     bool
+	}{
+		{"clean server selectable", "10.0.0.1", "good-host", false},
+		{"server blacklisted by a matched player excluded", "10.0.0.5", "good-host", true},
+		{"second blacklisted ip excluded", "10.0.0.6", "good-host", true},
+		{"globally excluded username excluded", "10.0.0.1", "banned-host", true},
+		{"empty exclude lists select everything", "10.0.0.1", "good-host", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := serverExcluded(tc.extIP, tc.username, global, blacklistUnion)
+			if got != tc.want {
+				t.Fatalf("serverExcluded(%q,%q) = %v, want %v", tc.extIP, tc.username, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSortGameServerIPs(t *testing.T) {
 	tests := []struct {
 		name     string
