@@ -1015,8 +1015,9 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		if addSuspension {
 			// Add a new record
 			actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
-			// Use AddRecordWithOptions to support new fields (RuleViolated, IsPubliclyVisible)
-			record := journal.AddRecordWithOptions(groupID, callerUserID, caller.User.ID, userNotice, notes, "", requireCommunityValues, allowPrivateLobbies, false, suspensionDuration)
+			// Use AddRecordWithOptions to support new fields (RuleViolated, IsPubliclyVisible).
+			// This enforce flow is operator-initiated, not report-initiated, so no reporter is known.
+			record := journal.AddRecordWithOptions(groupID, callerUserID, caller.User.ID, userNotice, notes, "", requireCommunityValues, allowPrivateLobbies, false, suspensionDuration, "", "", "")
 			recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
 
 			// Send DM notification to the user

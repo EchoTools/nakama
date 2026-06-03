@@ -504,6 +504,16 @@ func createEnforcementRecordEmbed(title string, record GuildEnforcementRecord, g
 		Inline: true,
 	})
 
+	// Surface who filed/reported the action (issue #466). Legacy records that
+	// never stored a reporter degrade gracefully by omitting this field.
+	if reporterValue := formatEnforcementReporter(record); reporterValue != "" {
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:   "Reporter",
+			Value:  reporterValue,
+			Inline: true,
+		})
+	}
+
 	fields = append(fields, &discordgo.MessageEmbedField{
 		Name:   "Created",
 		Value:  fmt.Sprintf("<t:%d:F>", record.CreatedAt.Unix()),
