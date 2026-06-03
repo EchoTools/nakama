@@ -647,6 +647,27 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		StartTime:           time.Now().UTC(),
 	}
 
+	// Build union of all matched players' server blacklists so none of them
+	// gets allocated to a server any one of them has blacklisted. Dedup by
+	// userID so a user listed in multiple sessions is read only once.
+	builderUserIDs := make([]string, 0, len(sessions))
+	seenBuilderUsers := make(map[string]struct{}, len(sessions))
+	for _, session := range sessions {
+		uid := session.UserID().String()
+		if _, ok := seenBuilderUsers[uid]; ok {
+			continue
+		}
+		seenBuilderUsers[uid] = struct{}{}
+		builderUserIDs = append(builderUserIDs, uid)
+	}
+	var builderExcludeList []string
+	if blSet := unionBlacklistedIPs(ctx, b.nk, builderUserIDs); len(blSet) > 0 {
+		builderExcludeList = make([]string, 0, len(blSet))
+		for ip := range blSet {
+			builderExcludeList = append(builderExcludeList, ip)
+		}
+	}
+
 	var label *MatchLabel
 	timeout := time.After(ServerAllocationTimeoutSeconds * time.Second)
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.LobbyBuilder
@@ -658,7 +679,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 			return nil, ErrMatchmakingNoAvailableServers
 		default:
 		}
-		label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), b.nk, []string{groupID.String()}, meanRTTByExtIP, settings, nil, true, false, queryAddon)
+		label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), b.nk, []string{groupID.String()}, meanRTTByExtIP, settings, nil, true, false, queryAddon, builderExcludeList)
 		if err != nil || label == nil {
 			logger.Error("Failed to allocate game server.", zap.Error(err))
 			<-time.After(ServerAllocationRetrySeconds * time.Second)
@@ -835,7 +856,20 @@ func LobbyGameServerList(ctx context.Context, nk runtime.NakamaModule, query str
 	return labels, nil
 }
 
-func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupIDs []string, rttsByEndpoint map[string]int, settings *MatchSettings, regions []string, requireDefaultRegion bool, requireRegion bool, queryAddon string) (*MatchLabel, error) {
+// serverExcluded reports whether a game server identified by its external IP or
+// username appears in any of the supplied exclude lists. Used to honor both the
+// global server-selection exclude list and the per-allocation blacklist union so
+// a server blacklisted by any matched player is never selected.
+func serverExcluded(extIP, username string, excludeLists ...[]string) bool {
+	for _, list := range excludeLists {
+		if slices.Contains(list, username) || slices.Contains(list, extIP) {
+			return true
+		}
+	}
+	return false
+}
+
+func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupIDs []string, rttsByEndpoint map[string]int, settings *MatchSettings, regions []string, requireDefaultRegion bool, requireRegion bool, queryAddon string, additionalExcludeList []string) (*MatchLabel, error) {
 
 	if len(groupIDs) == 0 {
 		return nil, fmt.Errorf("no group IDs provided")
@@ -909,7 +943,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 		extIP := label.GameServer.Endpoint.ExternalIP.String()
 		hostID := label.GameServer.Endpoint.GetHostID()
 
-		if slices.Contains(globalSettings.ServerSelection.ExcludeList, label.GameServer.Username) || slices.Contains(globalSettings.ServerSelection.ExcludeList, extIP) {
+		if serverExcluded(extIP, label.GameServer.Username, globalSettings.ServerSelection.ExcludeList, additionalExcludeList) {
 			continue
 		}
 

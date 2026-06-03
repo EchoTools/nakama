@@ -13,6 +13,8 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Backfill scoring constants
@@ -92,8 +94,9 @@ type preparedBackfillMatch struct {
 // preparedBackfillCandidate holds pre-computed candidate data including resolved sessions
 type preparedBackfillCandidate struct {
 	*BackfillCandidate
-	sessions  []Session
-	partySize int
+	sessions           []Session
+	partySize          int
+	BlacklistedServers map[string]struct{} // union of all party members' blacklisted server IPs
 }
 
 // prepareMatches pre-computes match metadata that doesn't change during processing
@@ -206,6 +209,16 @@ func (b *PostMatchmakerBackfill) calculateBackfillScoreOptimized(
 	return score
 }
 
+// candidateServerBlacklisted reports whether the candidate (party) has
+// blacklisted the given external IP. A nil/empty blacklist allows all servers.
+func candidateServerBlacklisted(candidate *preparedBackfillCandidate, externalIP string) bool {
+	if externalIP == "" {
+		return false
+	}
+	_, blocked := candidate.BlacklistedServers[externalIP]
+	return blocked
+}
+
 // findBestBackfillMatchOptimized finds best match using pre-computed data
 func (b *PostMatchmakerBackfill) findBestBackfillMatchOptimized(
 	candidate *preparedBackfillCandidate,
@@ -216,6 +229,9 @@ func (b *PostMatchmakerBackfill) findBestBackfillMatchOptimized(
 	partySize := candidate.partySize
 
 	for _, match := range matches {
+		if candidateServerBlacklisted(candidate, match.externalIP) {
+			continue
+		}
 		possibleTeams := b.getPossibleTeams(candidate.BackfillCandidate, match.BackfillMatch, partySize)
 		if len(possibleTeams) == 0 {
 			continue
@@ -888,6 +904,35 @@ func (b *PostMatchmakerBackfill) ProcessAndExecuteBackfill(ctx context.Context, 
 		return nil, nil
 	}
 
+	// Load the server blacklist for each candidate (union of all party members).
+	// Memoize per userID for this cycle so a user appearing across multiple
+	// candidates/entries is read from storage only once. Reads fail open.
+	blacklistByUser := make(map[string][]string)
+	for _, c := range preparedCandidates {
+		blacklisted := make(map[string]struct{})
+		for _, entry := range c.Entries {
+			userID := entry.Presence.GetUserId()
+			ips, cached := blacklistByUser[userID]
+			if !cached {
+				bl := NewServerBlacklist()
+				if err := StorableRead(ctx, b.nk, userID, bl, false); err != nil {
+					if status.Code(err) != codes.NotFound {
+						logger.Debug("Failed to read server blacklist for backfill candidate",
+							zap.String("user_id", userID), zap.Error(err))
+					}
+					ips = nil
+				} else {
+					ips = bl.IPs()
+				}
+				blacklistByUser[userID] = ips
+			}
+			for _, ip := range ips {
+				blacklisted[ip] = struct{}{}
+			}
+		}
+		c.BlacklistedServers = blacklisted
+	}
+
 	// Group candidates by groupID and mode
 	type groupKey struct {
 		GroupID uuid.UUID
@@ -949,8 +994,9 @@ func (b *PostMatchmakerBackfill) ProcessAndExecuteBackfill(ctx context.Context, 
 								TeamAlignment:  c.TeamAlignment,
 								Intervals:      c.Intervals,
 							},
-							sessions:  b.prepareCandidates([]*BackfillCandidate{{Entries: []*MatchmakerEntry{entry}}})[0].sessions,
-							partySize: 1,
+							sessions:           b.prepareCandidates([]*BackfillCandidate{{Entries: []*MatchmakerEntry{entry}}})[0].sessions,
+							partySize:          1,
+							BlacklistedServers: c.BlacklistedServers,
 						})
 					}
 				}
@@ -994,6 +1040,18 @@ func (b *PostMatchmakerBackfill) ProcessAndExecuteBackfill(ctx context.Context, 
 						otherTeam := evr.TeamOrange
 						if result.Team == evr.TeamOrange {
 							otherTeam = evr.TeamBlue
+						}
+
+						// The second player did not select this match; the first
+						// player did. Honor the second player's blacklist before
+						// pairing them onto result.Match. Skip the pairing (leave
+						// them in the pool for a later cycle) if blacklisted.
+						matchExtIP := ""
+						if result.Match.Label != nil && result.Match.Label.GameServer != nil {
+							matchExtIP = result.Match.Label.GameServer.Endpoint.GetExternalIP()
+						}
+						if candidateServerBlacklisted(secondCandidate, matchExtIP) {
+							continue
 						}
 
 						if result.Match.OpenSlots[otherTeam] >= 1 {

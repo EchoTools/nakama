@@ -680,7 +680,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		Classification: classification,
 	}
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Allocate
-	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, allocatorGroupIDs, latestRTTs, settings, []string{regionCode}, false, true, queryAddon)
+	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, allocatorGroupIDs, latestRTTs, settings, []string{regionCode}, false, true, queryAddon, nil)
 	if err != nil {
 		// Check if this is a region fallback error
 		var regionErr ErrMatchmakingNoServersInRegion
@@ -857,7 +857,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	}
 	// Otherwise: no explicit region selected (empty or RegionDefault), pass empty regions slice to allow allocator to choose best region without triggering fallback UI.
 
-	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, filteredIPs, settings, regions, true, requireRegion, queryAddon)
+	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, filteredIPs, settings, regions, true, requireRegion, queryAddon, nil)
 	if err != nil {
 		// Check if this is a region fallback error
 		var regionErr ErrMatchmakingNoServersInRegion
@@ -1021,8 +1021,9 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		if addSuspension {
 			// Add a new record
 			actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
-			// Use AddRecordWithOptions to support new fields (RuleViolated, IsPubliclyVisible)
-			record := journal.AddRecordWithOptions(groupID, callerUserID, caller.User.ID, userNotice, notes, "", requireCommunityValues, allowPrivateLobbies, false, suspensionDuration)
+			// Use AddRecordWithOptions to support new fields (RuleViolated, IsPubliclyVisible).
+			// This enforce flow is operator-initiated, not report-initiated, so no reporter is known.
+			record := journal.AddRecordWithOptions(groupID, callerUserID, caller.User.ID, userNotice, notes, "", requireCommunityValues, allowPrivateLobbies, false, suspensionDuration, "", "", "")
 			recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
 
 			// Send DM notification to the user

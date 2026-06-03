@@ -160,7 +160,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				if err != nil {
 					return NewLobbyError(InternalError, fmt.Sprintf("failed to prepare follower entrant: %s", err))
 				}
-				return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, followerEntrants...)
+				return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, lobbyGroup, followerEntrants...)
 			}
 
 			if p.TryFollowPartyLeader(ctx, logger, session, lobbyParams, lobbyGroup) {
@@ -200,7 +200,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				if err != nil {
 					return NewLobbyError(InternalError, fmt.Sprintf("failed to prepare follower entrant: %s", err))
 				}
-				return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, followerEntrants...)
+				return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, lobbyGroup, followerEntrants...)
 			} else {
 				// Still a non-leader in a non-social mode. Poll for the leader
 				// to settle into a match that can be joined. This covers followers at
@@ -372,7 +372,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				}
 			}
 		}
-		return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, entrants...)
+		return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, lobbyGroup, entrants...)
 	}
 
 	// Arena and Combat lobbies use the matchmaker (backfill is handled by the matchmaker process)
@@ -598,7 +598,9 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 		}
 	}
 
-	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, latestRTTs, settings, []string{lobbyParams.RegionCode}, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
+	userBL := loadUserBlacklist(ctx, p.nk, lobbyParams.UserID.String())
+
+	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, latestRTTs, settings, []string{lobbyParams.RegionCode}, true, false, ServiceSettings().Matchmaking.QueryAddons.Create, userBL.IPs())
 	if err != nil {
 		// Check if this is a region fallback error - for pipeline, auto-select closest
 		var regionErr ErrMatchmakingNoServersInRegion
@@ -609,7 +611,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 				zap.Int("latency_ms", regionErr.FallbackInfo.ClosestLatencyMs))
 
 			// Allocate without region requirement to get the closest server
-			label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, latestRTTs, settings, nil, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
+			label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, latestRTTs, settings, nil, true, false, ServiceSettings().Matchmaking.QueryAddons.Create, userBL.IPs())
 		}
 
 		if err != nil {
@@ -646,16 +648,42 @@ func flushMatchRegistryLabelUpdates(nk runtime.NakamaModule) {
 	lmr.FlushPendingLabelUpdates()
 }
 
-func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, entrants ...*EvrMatchPresence) error {
-	// Fast path: if the player is already in a social lobby that matches
-	// the search criteria (same group, social mode), treat as no-op.
-	// This prevents the party follow path from producing an error when it
-	// directs a player to a social lobby they are already in. (#462)
-	if currentMatchID := p.currentSocialLobbyForSession(ctx, logger, session, lobbyParams); !currentMatchID.IsNil() {
-		logger.Debug("Player already in a matching social lobby, treating as no-op",
+// filterBlacklistedSocialMatches drops any candidate social match hosted on a
+// server whose external IP is in blacklistedIPs. An empty blacklist is a no-op
+// and returns the input slice unchanged. Filtering happens AFTER the GroupID-scoped
+// match query — it only ever narrows results, never widens them across guilds.
+func filterBlacklistedSocialMatches(matches []*MatchLabelMeta, blacklistedIPs map[string]struct{}) []*MatchLabelMeta {
+	if len(blacklistedIPs) == 0 {
+		return matches
+	}
+	filtered := matches[:0]
+	for _, m := range matches {
+		if m.State.GameServer != nil {
+			if _, blocked := blacklistedIPs[m.State.GameServer.Endpoint.GetExternalIP()]; blocked {
+				continue
+			}
+		}
+		filtered = append(filtered, m)
+	}
+	return filtered
+}
+
+func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup, entrants ...*EvrMatchPresence) error {
+	// Fast path: if the player is already in the social lobby we intend to
+	// send them to, treat as no-op. The guard is target-aware — it only
+	// short-circuits when the player's current social lobby equals the
+	// intended target (the party leader's lobby in a follow, or the
+	// player's own CurrentMatchID otherwise). A same-guild move to a
+	// *different* social lobby, and a forced relocation (cleared
+	// CurrentMatchID), are NOT no-ops. (#462)
+	if currentMatchID := p.currentSocialLobbyForSession(ctx, logger, session, lobbyParams, lobbyGroup); !currentMatchID.IsNil() {
+		logger.Debug("Player already in the intended social lobby, treating as no-op",
 			zap.String("mid", currentMatchID.String()))
 		return nil
 	}
+
+	// Load the user's server blacklist once before the retry loop
+	blacklistedIPs := loadUserBlacklist(ctx, p.nk, session.UserID().String()).IPSet()
 
 	// First attempt runs immediately — no pre-wait. The old 1s pre-query wait
 	// was a workaround for the Bluge label-flush lag; newLobby now flushes
@@ -692,6 +720,9 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 		if err != nil {
 			return fmt.Errorf("failed to list matches: %w", err)
 		}
+
+		// Filter out any matches hosted on servers the user has blacklisted.
+		matches = filterBlacklistedSocialMatches(matches, blacklistedIPs)
 
 		logger.Info("Social lobby search",
 			zap.Int("attempt", attempt),
@@ -1061,14 +1092,31 @@ func (p *EvrPipeline) isFollowerInActiveMatch(ctx context.Context, logger *zap.L
 }
 
 // currentSocialLobbyForSession returns the match ID of the social lobby that
-// the player is currently in, if it matches the search criteria (same group ID
-// and social mode). Returns a nil MatchID when the player is not in a matching
-// social lobby.
+// the player is currently in, but ONLY when that lobby is the one we intend to
+// send them to. Returns a nil MatchID otherwise, so the normal
+// find-or-create flow proceeds.
+//
+// The guard is TARGET-AWARE (#462). It is not enough for the player's current
+// lobby to be a social lobby of the same guild; it must be the *intended
+// target*:
+//
+//   - In a party-follow context (PartyGroupName set, follower is not the
+//     leader, and the leader is resolvable to a current match), the target is
+//     the leader's match. This lets a player in social lobby X of guild G be
+//     correctly moved to a DIFFERENT social lobby Y of the same guild G
+//     (GAP 1) instead of being short-circuited on a mere group-ID match.
+//   - Otherwise the target is lobbyParams.CurrentMatchID. A cleared
+//     CurrentMatchID (the relocate path at lobbyFind nils it to force a move
+//     to a larger lobby) yields a nil target, so the requested relocation is
+//     NOT short-circuited (GAP 2).
+//
+// Guild isolation is preserved: a current lobby in a different guild never
+// matches the search group and is rejected before the target comparison.
 //
 // Used as a fast-path guard in lobbyFindOrCreateSocial to avoid rejoining a
 // lobby the player is already in — the party follow path can direct a player
-// to a social lobby they never left. (#462)
-func (p *EvrPipeline) currentSocialLobbyForSession(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters) MatchID {
+// to a social lobby they never left.
+func (p *EvrPipeline) currentSocialLobbyForSession(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup) MatchID {
 	matchStream := PresenceStream{
 		Mode:    StreamModeService,
 		Subject: session.ID(),
@@ -1099,11 +1147,63 @@ func (p *EvrPipeline) currentSocialLobbyForSession(ctx context.Context, logger *
 		return MatchID{}
 	}
 
+	// Guild isolation: a current lobby in a different guild is never the
+	// target of a search scoped to lobbyParams.GroupID.
 	if label.GetGroupID() != lobbyParams.GroupID {
 		return MatchID{}
 	}
 
+	// Resolve the intended target match. Only no-op when the player's current
+	// social lobby IS that target.
+	target := p.intendedSocialTargetMatchID(ws, lobbyParams, lobbyGroup)
+	if target.IsNil() {
+		// No concrete target (forced relocation cleared CurrentMatchID, or no
+		// follow leader to align with): do not short-circuit the requested move.
+		logger.Debug("Social lobby guard: no intended target, not treating as no-op",
+			zap.String("current_mid", currentMatchID.String()))
+		return MatchID{}
+	}
+
+	if target != currentMatchID {
+		// Player is in a different social lobby of the same guild than the one
+		// we intend to send them to (GAP 1): this is a real move, not a no-op.
+		logger.Debug("Social lobby guard: current lobby differs from intended target, not a no-op",
+			zap.String("current_mid", currentMatchID.String()),
+			zap.String("target_mid", target.String()))
+		return MatchID{}
+	}
+
 	return currentMatchID
+}
+
+// intendedSocialTargetMatchID resolves the social lobby that the caller intends
+// to place this session into. In a party-follow context (PartyGroupName set,
+// session is not the leader, leader resolvable to a current match) the target
+// is the leader's match, resolved via the tracker. Otherwise the target is the
+// session's own lobbyParams.CurrentMatchID, which is nil when a relocation was
+// requested. Returns a nil MatchID when no concrete target can be resolved.
+func (p *EvrPipeline) intendedSocialTargetMatchID(session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup) MatchID {
+	if lobbyGroup != nil && lobbyParams.PartyGroupName != "" && lobbyParams.PartyGroupName != "tablet" {
+		leader := lobbyGroup.GetLeader()
+		if leader != nil && leader.SessionId != session.ID().String() {
+			leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
+			leaderUserID := uuid.FromStringOrNil(leader.UserId)
+
+			leaderStream := PresenceStream{
+				Mode:    StreamModeService,
+				Subject: leaderSessionID,
+				Label:   StreamLabelMatchService,
+			}
+			leaderPresence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, leaderStream, leaderUserID)
+			if leaderPresence != nil {
+				if leaderMatchID := MatchIDFromStringOrNil(leaderPresence.GetStatus()); !leaderMatchID.IsNil() {
+					return leaderMatchID
+				}
+			}
+		}
+	}
+
+	return lobbyParams.CurrentMatchID
 }
 
 // isFollowerAlreadyInLeaderMatch checks whether the follower is already in

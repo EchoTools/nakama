@@ -192,11 +192,14 @@ func (s *GuildEnforcementJournal) IsVoid(groupID, recordID string) bool {
 }
 
 func (s *GuildEnforcementJournal) AddRecord(groupID, enforcerUserID, enforcerDiscordID, suspensionNotice, notes string, requireCommunityValues, allowPrivateLobbies bool, suspensionDuration time.Duration) GuildEnforcementRecord {
-	return s.AddRecordWithOptions(groupID, enforcerUserID, enforcerDiscordID, suspensionNotice, notes, "", requireCommunityValues, allowPrivateLobbies, false, suspensionDuration)
+	// Operator-initiated actions have no reporter; pass empty reporter fields.
+	return s.AddRecordWithOptions(groupID, enforcerUserID, enforcerDiscordID, suspensionNotice, notes, "", requireCommunityValues, allowPrivateLobbies, false, suspensionDuration, "", "", "")
 }
 
-// AddRecordWithOptions creates a new enforcement record with additional options
-func (s *GuildEnforcementJournal) AddRecordWithOptions(groupID, enforcerUserID, enforcerDiscordID, suspensionNotice, notes, ruleViolated string, requireCommunityValues, allowPrivateLobbies, isPubliclyVisible bool, suspensionDuration time.Duration) GuildEnforcementRecord {
+// AddRecordWithOptions creates a new enforcement record with additional options.
+// reporterUserID/reporterDiscordID/reportID capture WHO filed/reported the action
+// (issue #466). They are empty for operator-initiated actions where no reporter is known.
+func (s *GuildEnforcementJournal) AddRecordWithOptions(groupID, enforcerUserID, enforcerDiscordID, suspensionNotice, notes, ruleViolated string, requireCommunityValues, allowPrivateLobbies, isPubliclyVisible bool, suspensionDuration time.Duration, reporterUserID, reporterDiscordID, reportID string) GuildEnforcementRecord {
 	if s.RecordsByGroupID == nil {
 		s.RecordsByGroupID = make(map[string][]GuildEnforcementRecord)
 	}
@@ -210,6 +213,9 @@ func (s *GuildEnforcementJournal) AddRecordWithOptions(groupID, enforcerUserID, 
 		GroupID:                 groupID,
 		EnforcerUserID:          enforcerUserID,
 		EnforcerDiscordID:       enforcerDiscordID,
+		ReporterUserID:          reporterUserID,
+		ReporterDiscordID:       reporterDiscordID,
+		ReportID:                reportID,
 		CreatedAt:               now,
 		UpdatedAt:               now,
 		UserNoticeText:          suspensionNotice,
@@ -466,6 +472,34 @@ func FormatDuration(d time.Duration) string {
 	return "0s"
 }
 
+// formatEnforcementReporter renders the reporter/filer of an enforcement record
+// for operator-facing displays (issue #466). It returns an empty string when no
+// reporter was recorded so callers can omit the line entirely — legacy records
+// stored before reporter tracking degrade gracefully rather than showing a blank
+// or fabricated reporter. A linked PlayerReport ID is surfaced as a
+// `report-NNNN` style reference when present.
+func formatEnforcementReporter(r GuildEnforcementRecord) string {
+	if r.ReporterUserID == "" && r.ReporterDiscordID == "" && r.ReportID == "" {
+		return ""
+	}
+
+	var who string
+	switch {
+	case r.ReporterDiscordID != "":
+		who = fmt.Sprintf("<@!%s>", r.ReporterDiscordID)
+	case r.ReporterUserID != "":
+		// Discord ID unknown (e.g. legacy/portal-sourced); show the Nakama user ID.
+		who = fmt.Sprintf("`%s`", r.ReporterUserID)
+	default:
+		who = "unknown"
+	}
+
+	if r.ReportID != "" {
+		return fmt.Sprintf("%s (report `%s`)", who, r.ReportID)
+	}
+	return who
+}
+
 // createSuspensionDetailsEmbedField builds a Discord embed field summarizing enforcement records.
 // callerUserID restricts note visibility per-record: empty string means show all notes (auditor/operator),
 // non-empty means only show notes on records where EnforcerUserID matches the caller.
@@ -500,6 +534,15 @@ func createSuspensionDetailsEmbedField(guildName string, records []GuildEnforcem
 			fmt.Sprintf("- `%s`", r.UserNoticeText),
 		)
 
+		// Surface who filed/reported the action (issue #466), gated the same way as
+		// enforcer info: only to moderators viewing a record for the current guild.
+		// Records without a stored reporter (legacy or operator-initiated) omit this line.
+		if showEnforcerID && r.GroupID == currentGuildID {
+			if reporterValue := formatEnforcementReporter(r); reporterValue != "" {
+				parts = append(parts, fmt.Sprintf("- reported by %s", reporterValue))
+			}
+		}
+
 		if includeAuditorNotes {
 			// When callerUserID is set, only show notes on records the caller created
 			canSeeNotes := callerUserID == "" || r.EnforcerUserID == callerUserID
@@ -524,7 +567,6 @@ func createSuspensionDetailsEmbedField(guildName string, records []GuildEnforcem
 	}
 	return field
 }
-
 
 // SendEnforcementNotification sends a DM to the user about their enforcement action.
 // If customFooter is non-empty, it replaces the default footer in the notification message.

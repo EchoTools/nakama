@@ -75,9 +75,9 @@ func NewDiscordIntegrator(ctx context.Context, logger *zap.Logger, config Config
 		dg: dg,
 
 		guildGroupRegistry: guildGroupRegistry,
-		queueCooldowns: &MapOf[QueueEntry, time.Time]{},
-		idcache:        &MapOf[string, string]{},
-		memberCache:    &MapOf[string, cachedMember]{},
+		queueCooldowns:     &MapOf[QueueEntry, time.Time]{},
+		idcache:            &MapOf[string, string]{},
+		memberCache:        &MapOf[string, cachedMember]{},
 
 		queueCh: make(chan QueueEntry, 50),
 	}
@@ -350,7 +350,13 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 	}
 
 	member, err := c.GuildMember(guildID, discordID)
-	if errors.Is(err, ErrMemberNotFound) || member == nil {
+	if errors.Is(err, ErrDiscordRESTOverloaded) {
+		// Discord REST API is temporarily unavailable due to rate limiting.
+		// Skip the sync rather than treating this as "user not found."
+		logger.Warn("Discord REST overloaded, skipping guild member sync", zap.String("discord_id", discordID), zap.String("guild_id", guildID))
+		return nil
+	}
+	if errors.Is(err, ErrMemberNotFound) {
 		if removeErr := c.GuildGroupMemberRemove(ctx, guildID, discordID, ""); removeErr != nil {
 			return fmt.Errorf("failed to remove guild group member: %w", removeErr)
 		}
@@ -943,6 +949,56 @@ func (d *DiscordIntegrator) GuildGroupMemberRemove(ctx context.Context, guildID,
 	return nil
 }
 
+// guildBanEnforcementNotice is the user-facing notice attached to the
+// enforcement record written when a player is banned from a guild via Discord.
+const guildBanEnforcementNotice = "Banned from this guild's Discord server."
+
+// writeGuildBanEnforcement records a durable, lifetime enforcement suspension so
+// that the shared lobby join gate (lobbyAuthorize) rejects the banned user on
+// BOTH the direct-join and matchmaking/find paths, for PUBLIC and private guilds
+// alike (issue #467: a Discord guild ban previously only removed group membership,
+// which has zero effect on join authorization for public guilds).
+//
+// The record is scoped to the banning guild's groupID and is written with
+// AllowPrivateLobbies=false so CheckEnforcementSuspensions applies it to every
+// game mode (evr.AllModes). It MUST NOT be widened to other guilds: guild
+// isolation is absolute (AGENTS.md). reason is recorded as the auditor note;
+// enforcerUserID/enforcerDiscordID identify the banning moderator when known.
+func (d *DiscordIntegrator) writeGuildBanEnforcement(ctx context.Context, logger *zap.Logger, groupID, userID, enforcerUserID, enforcerDiscordID, reason string) error {
+	if groupID == "" {
+		return fmt.Errorf("writeGuildBanEnforcement: empty groupID")
+	}
+	if userID == "" {
+		return fmt.Errorf("writeGuildBanEnforcement: empty userID")
+	}
+
+	journal := NewGuildEnforcementJournal(userID)
+	if err := StorableRead(ctx, d.nk, userID, journal, false); err != nil {
+		// A missing journal is expected for users who have never been
+		// enforced; continue with the freshly-initialized journal. Any other
+		// read failure (e.g. storage unavailable) is logged but must not abort
+		// the ban: failing to read MUST NOT leave the ban unenforced.
+		if status.Code(err) != codes.NotFound {
+			logger.Warn("Failed to read enforcement journal for guild ban; continuing with new journal",
+				zap.String("uid", userID), zap.String("gid", groupID), zap.Error(err))
+		}
+	}
+
+	// Lifetime suspension scoped to the banning guild. AllowPrivateLobbies=false
+	// ensures the suspension covers all modes (public and private lobbies).
+	journal.AddRecord(groupID, enforcerUserID, enforcerDiscordID,
+		guildBanEnforcementNotice, reason,
+		false, // requireCommunityValues
+		false, // allowPrivateLobbies: false -> blocks ALL modes
+		LifetimeSuspensionDuration)
+
+	if err := SyncJournalAndProfileWithRetry(ctx, d.nk, userID, journal); err != nil {
+		return fmt.Errorf("writeGuildBanEnforcement: failed to persist enforcement journal: %w", err)
+	}
+
+	return nil
+}
+
 func (d *DiscordIntegrator) handleGuildBanAdd(ctx context.Context, logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildBanAdd) error {
 
 	groupID := d.GuildIDToGroupID(e.GuildID)
@@ -966,7 +1022,11 @@ func (d *DiscordIntegrator) handleGuildBanAdd(ctx context.Context, logger *zap.L
 	if err != nil {
 		return fmt.Errorf("error fetching audit log: %w", err)
 	}
-	var issuerDiscordID string
+	var (
+		issuerDiscordID string
+		issuerUserID    string
+		banReason       string
+	)
 	if len(auditLogs.AuditLogEntries) == 0 {
 		logger.Warn("No relevant audit log entries found.")
 	} else if latestBan := auditLogs.AuditLogEntries[0]; latestBan.TargetID != e.User.ID {
@@ -975,7 +1035,8 @@ func (d *DiscordIntegrator) handleGuildBanAdd(ctx context.Context, logger *zap.L
 		logger.Warn("Failed to fetch issuing user", zap.Error(err))
 	} else {
 		issuerDiscordID = issuer.ID
-		issuerUserID := d.DiscordIDToUserID(issuer.ID)
+		issuerUserID = d.DiscordIDToUserID(issuer.ID)
+		banReason = latestBan.Reason
 		logger = logger.With(
 			zap.String("issuer_username", issuer.Username),
 			zap.String("issuer_user_id", issuerUserID),
@@ -986,7 +1047,23 @@ func (d *DiscordIntegrator) handleGuildBanAdd(ctx context.Context, logger *zap.L
 	}
 
 	if err := d.GuildGroupMemberRemove(ctx, e.GuildID, e.User.ID, issuerDiscordID); err != nil {
+		// A failed membership removal (e.g. "group permission denied") MUST NOT
+		// silently leave the ban unenforced. The enforcement marker below is the
+		// authoritative join gate, so we log and proceed to write it regardless.
 		logger.Warn("Error removing guild group member", zap.Any("guildMemberRemove", e), zap.Error(err))
+	}
+
+	// Write a durable enforcement record scoped to THIS guild's group so the
+	// shared lobby join gate rejects the banned user on both the direct-join and
+	// matchmaking/find paths, regardless of guild privacy (issue #467). Membership
+	// removal alone does not block joins to public guilds.
+	auditNote := fmt.Sprintf("Discord guild ban (banned by <@%s>)", issuerDiscordID)
+	if banReason != "" {
+		auditNote = fmt.Sprintf("%s: %s", auditNote, banReason)
+	}
+	if err := d.writeGuildBanEnforcement(ctx, logger, groupID, userID, issuerUserID, issuerDiscordID, auditNote); err != nil {
+		logger.Error("Failed to write guild ban enforcement; banned user may still be able to join", zap.Error(err))
+		return fmt.Errorf("failed to enforce guild ban: %w", err)
 	}
 
 	logger.Info("User was banned from guild", zap.String("event", "GuildBanAdd"))

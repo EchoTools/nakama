@@ -2628,10 +2628,14 @@ func TestCurrentSocialLobby_AlreadyInMatchingSocialLobby(t *testing.T) {
 	env.withMockNK(registry)
 	env.setFollowerMatch(socialMatchID)
 	env.params.GroupID = groupID
+	// No relocation requested and no party-follow context: the intended target
+	// is the player's CurrentMatchID, which equals the lobby they are in. This
+	// is the originally-reported rejoin-same-lobby case (#462) — must stay a no-op.
+	env.params.CurrentMatchID = socialMatchID
 
 	logger := loggerForTest(t)
 	result := env.pipeline.currentSocialLobbyForSession(
-		context.Background(), logger, env.session, env.params)
+		context.Background(), logger, env.session, env.params, env.lobbyGroup)
 
 	if result.IsNil() {
 		t.Error("currentSocialLobbyForSession should return the match ID when player is already in a matching social lobby")
@@ -2666,7 +2670,7 @@ func TestCurrentSocialLobby_DifferentLobby_ReturnsNil(t *testing.T) {
 
 	logger := loggerForTest(t)
 	result := env.pipeline.currentSocialLobbyForSession(
-		context.Background(), logger, env.session, env.params)
+		context.Background(), logger, env.session, env.params, env.lobbyGroup)
 
 	if !result.IsNil() {
 		t.Error("currentSocialLobbyForSession should return nil when player is in a lobby with a different group ID")
@@ -2696,7 +2700,7 @@ func TestCurrentSocialLobby_InArenaMatch_ReturnsNil(t *testing.T) {
 
 	logger := loggerForTest(t)
 	result := env.pipeline.currentSocialLobbyForSession(
-		context.Background(), logger, env.session, env.params)
+		context.Background(), logger, env.session, env.params, env.lobbyGroup)
 
 	if !result.IsNil() {
 		t.Error("currentSocialLobbyForSession should return nil when player is in an arena match")
@@ -2716,9 +2720,137 @@ func TestCurrentSocialLobby_NotInAnyMatch_ReturnsNil(t *testing.T) {
 
 	logger := loggerForTest(t)
 	result := env.pipeline.currentSocialLobbyForSession(
-		context.Background(), logger, env.session, env.params)
+		context.Background(), logger, env.session, env.params, env.lobbyGroup)
 
 	if !result.IsNil() {
 		t.Error("currentSocialLobbyForSession should return nil when player is not in any match")
+	}
+}
+
+// TestCurrentSocialLobby_MoveToDifferentLobbySameGuild_ReturnsNil covers GAP 1
+// (#462): a player already in social lobby X of guild G who is being directed
+// (via the party-follow path) to a DIFFERENT social lobby Y of the SAME guild G
+// must NOT be treated as a no-op. The guard must be target-aware: it may only
+// short-circuit when the player's current social lobby equals the intended
+// target (here, the leader's lobby Y), not merely when the group IDs match.
+func TestCurrentSocialLobby_MoveToDifferentLobbySameGuild_ReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	groupID := env.groupID
+
+	// Player (follower) is currently in social lobby X of guild G.
+	lobbyX := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	// Party leader is in a DIFFERENT social lobby Y of the SAME guild G —
+	// this is the intended target.
+	lobbyY := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	registry.SetMatch(lobbyX, &MatchLabel{
+		ID:          lobbyX,
+		Mode:        evr.ModeSocialPublic,
+		Open:        true,
+		PlayerLimit: 12,
+		GroupID:     &groupID,
+	})
+	registry.SetMatch(lobbyY, &MatchLabel{
+		ID:          lobbyY,
+		Mode:        evr.ModeSocialPublic,
+		Open:        true,
+		PlayerLimit: 12,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+
+	env.setFollowerMatch(lobbyX)
+	env.setLeaderMatch(lobbyY)
+	env.params.GroupID = groupID
+	env.params.PartyGroupName = "squad" // party-follow context
+	// Follower's CurrentMatchID is their current lobby X; the intended target
+	// is the leader's lobby Y. These differ, so this is a real move, not a no-op.
+	env.params.CurrentMatchID = lobbyX
+
+	logger := loggerForTest(t)
+	result := env.pipeline.currentSocialLobbyForSession(
+		context.Background(), logger, env.session, env.params, env.lobbyGroup)
+
+	if !result.IsNil() {
+		t.Errorf("GAP 1: moving from social lobby X to a DIFFERENT social lobby Y of the same guild must NOT be a no-op; got match %s", result)
+	}
+}
+
+// TestCurrentSocialLobby_ForcedRelocation_ReturnsNil covers GAP 2 (#462): the
+// relocate path clears lobbyParams.CurrentMatchID to force a move to a larger
+// social lobby. The guard must respect that relocation intent and NOT no-op the
+// requested move, even though the player is still tracked in their old social
+// lobby of the same guild.
+func TestCurrentSocialLobby_ForcedRelocation_ReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	groupID := env.groupID
+
+	// Player is still in their (too-small) social lobby of guild G.
+	oldLobby := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	registry.SetMatch(oldLobby, &MatchLabel{
+		ID:          oldLobby,
+		Mode:        evr.ModeSocialPublic,
+		Open:        true,
+		PlayerLimit: 12,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+
+	env.setFollowerMatch(oldLobby)
+	env.params.GroupID = groupID
+	// Relocate path (evr_lobby_find.go:371) cleared CurrentMatchID to signal
+	// "find/create a different, larger lobby". No party-follow leader target.
+	env.params.CurrentMatchID = MatchID{}
+
+	logger := loggerForTest(t)
+	result := env.pipeline.currentSocialLobbyForSession(
+		context.Background(), logger, env.session, env.params, env.lobbyGroup)
+
+	if !result.IsNil() {
+		t.Errorf("GAP 2: a forced relocation (cleared CurrentMatchID) must NOT be short-circuited as a no-op; got match %s", result)
+	}
+}
+
+// TestCurrentSocialLobby_FollowToLeaderSameLobby_IsNoop verifies the
+// originally-reported case in the party-follow context: the follower is
+// directed to the leader's social lobby, which is the SAME lobby the follower
+// is already in. This must stay a no-op (return the current match ID).
+func TestCurrentSocialLobby_FollowToLeaderSameLobby_IsNoop(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	groupID := env.groupID
+
+	sharedLobby := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	registry.SetMatch(sharedLobby, &MatchLabel{
+		ID:          sharedLobby,
+		Mode:        evr.ModeSocialPublic,
+		Open:        true,
+		PlayerLimit: 12,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+
+	env.setFollowerMatch(sharedLobby)
+	env.setLeaderMatch(sharedLobby)
+	env.params.GroupID = groupID
+	env.params.PartyGroupName = "squad"
+	env.params.CurrentMatchID = sharedLobby
+
+	logger := loggerForTest(t)
+	result := env.pipeline.currentSocialLobbyForSession(
+		context.Background(), logger, env.session, env.params, env.lobbyGroup)
+
+	if result != sharedLobby {
+		t.Errorf("rejoin of the leader's (same) social lobby must remain a no-op; expected %s, got %s", sharedLobby, result)
 	}
 }
