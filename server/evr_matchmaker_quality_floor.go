@@ -1,6 +1,24 @@
 package server
 
-import "math"
+import (
+	"math"
+
+	"github.com/heroiclabs/nakama/v3/server/evr"
+)
+
+// isCombatCandidate reports whether a predicted match is for the Combat mode
+// (echo_combat / evr.ModeCombatPublic). Combat must NEVER be skill-gated at
+// match creation (issue #479): SBMM is only allowed to sort players onto teams,
+// not to decide whether a combat match forms. The mode is carried per-entry in
+// the "game_mode" property, mirroring how groupEntriesSequentially and
+// predictCandidateOutcomes read it.
+func isCombatCandidate(prediction PredictedMatch) bool {
+	if len(prediction.Candidate) == 0 {
+		return false
+	}
+	modeStr, _ := prediction.Candidate[0].GetProperties()["game_mode"].(string)
+	return modeStr == evr.ModeCombatPublic.String()
+}
 
 // computeQualityFloor calculates the effective quality floor for a given wait time.
 // The floor decays linearly from QualityFloorInitial toward QualityFloorMinimum
@@ -40,6 +58,16 @@ func filterByQualityFloor(predictions []PredictedMatch, settings *GlobalMatchmak
 
 	filtered := make([]PredictedMatch, 0, len(predictions))
 	for _, p := range predictions {
+		// Combat (echo_combat) is never skill-gated at match creation (issue
+		// #479). SBMM may only sort players onto teams for combat, so combat
+		// candidates always pass the quality floor regardless of DrawProb. This
+		// keeps combat match formation count/availability-only. Arena and other
+		// modes are unaffected.
+		if isCombatCandidate(p) {
+			filtered = append(filtered, p)
+			continue
+		}
+
 		maxWaitSeconds := float64(nowUnix - p.OldestTicketTimestamp)
 		if maxWaitSeconds < 0 {
 			maxWaitSeconds = 0
