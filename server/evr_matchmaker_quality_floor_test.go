@@ -7,7 +7,74 @@ import (
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 )
+
+// TestFilterByQualityFloorExemptsCombat asserts the issue #479 invariant:
+// Combat (echo_combat / ModeCombatPublic) must NEVER be skill-gated at match
+// creation. With EnableQualityFloor=true, a Combat candidate whose DrawProb is
+// below the floor must NOT be dropped, while an Arena candidate below the same
+// floor IS still dropped (other modes unchanged).
+func TestFilterByQualityFloorExemptsCombat(t *testing.T) {
+	now := time.Now().UTC().Unix()
+	recentTime := now // submitted now => floor is at initial (0.10)
+
+	makeEntry := func(ticket, sessionID, mode string) *MatchmakerEntry {
+		return &MatchmakerEntry{
+			Ticket:   ticket,
+			Presence: &MatchmakerPresence{SessionId: sessionID},
+			Properties: map[string]interface{}{
+				"game_mode":    mode,
+				"rating_mu":    25.0,
+				"rating_sigma": 8.333,
+			},
+		}
+	}
+
+	settings := GlobalMatchmakingSettings{
+		EnableQualityFloor:         true,
+		QualityFloorInitial:        0.10,
+		QualityFloorDecayPerSecond: 0.0005,
+		QualityFloorMinimum:        0.0,
+	}
+
+	combatMode := evr.ModeCombatPublic.String()
+	arenaMode := evr.ModeArenaPublic.String()
+
+	predictions := []PredictedMatch{
+		{
+			// Combat candidate below the floor -- MUST pass (combat is never skill-gated).
+			Candidate: []runtime.MatchmakerEntry{
+				makeEntry("c1", "cs1", combatMode),
+				makeEntry("c1", "cs2", combatMode),
+			},
+			DrawProb:              0.02, // well below floor of 0.10
+			Size:                  2,
+			OldestTicketTimestamp: recentTime,
+		},
+		{
+			// Arena candidate below the floor -- MUST still be dropped (unchanged).
+			Candidate: []runtime.MatchmakerEntry{
+				makeEntry("a1", "as1", arenaMode),
+				makeEntry("a1", "as2", arenaMode),
+			},
+			DrawProb:              0.02, // well below floor of 0.10
+			Size:                  2,
+			OldestTicketTimestamp: recentTime,
+		},
+	}
+
+	filtered := filterByQualityFloor(predictions, &settings, now)
+
+	if len(filtered) != 1 {
+		t.Fatalf("expected exactly 1 prediction after filtering (combat kept, arena dropped), got %d", len(filtered))
+	}
+
+	gotMode, _ := filtered[0].Candidate[0].GetProperties()["game_mode"].(string)
+	if gotMode != combatMode {
+		t.Fatalf("expected the surviving candidate to be the Combat one (%q), got %q", combatMode, gotMode)
+	}
+}
 
 func TestComputeQualityFloor(t *testing.T) {
 	settings := GlobalMatchmakingSettings{
