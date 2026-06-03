@@ -27,11 +27,11 @@ type GuildEnforcementEditEntry struct {
 	PreviousAuditorNotes   string    `json:"previous_auditor_notes"`
 
 	// New values (after edit)
-	NewExpiry              time.Time `json:"new_expiry"`
-	NewUserNoticeText      string    `json:"new_user_notice"`
-	NewAuditorNotes        string    `json:"new_auditor_notes"`
-	PreviousAllowPrivates  bool      `json:"previous_allow_privates,omitempty"`
-	NewAllowPrivates       bool      `json:"new_allow_privates,omitempty"`
+	NewExpiry             time.Time `json:"new_expiry"`
+	NewUserNoticeText     string    `json:"new_user_notice"`
+	NewAuditorNotes       string    `json:"new_auditor_notes"`
+	PreviousAllowPrivates bool      `json:"previous_allow_privates,omitempty"`
+	NewAllowPrivates      bool      `json:"new_allow_privates,omitempty"`
 }
 
 type GuildEnforcementRecord struct {
@@ -40,6 +40,9 @@ type GuildEnforcementRecord struct {
 	GroupID                 string    `json:"group_id"`
 	EnforcerUserID          string    `json:"enforcer_user_id"`
 	EnforcerDiscordID       string    `json:"enforcer_discord_id"`
+	ReporterUserID          string    `json:"reporter_user_id,omitempty"`    // Nakama user ID of the player who filed/reported the action (empty for operator-initiated actions)
+	ReporterDiscordID       string    `json:"reporter_discord_id,omitempty"` // Discord ID of the reporter, if known
+	ReportID                string    `json:"report_id,omitempty"`           // ID of the linked PlayerReport (see PlayerReport.ID), if this action stemmed from a report
 	CreatedAt               time.Time `json:"created_at"`
 	UpdatedAt               time.Time `json:"updated_at"`
 	UserNoticeText          string    `json:"suspension_notice"`

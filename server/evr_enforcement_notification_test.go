@@ -236,6 +236,9 @@ func TestGuildEnforcementJournal_AddRecordWithOptions(t *testing.T) {
 		allowPrivateLobbies,
 		isPubliclyVisible,
 		suspensionDuration,
+		"", // reporterUserID
+		"", // reporterDiscordID
+		"", // reportID
 	)
 
 	// Verify the record was created correctly
