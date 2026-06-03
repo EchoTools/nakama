@@ -58,10 +58,13 @@ func TestSplitFieldValue(t *testing.T) {
 			expected: []string{"a", "b", "c"},
 		},
 		{
+			// splitFieldValue prefers to break on a newline within the window
+			// rather than mid-line, so each chunk ends at a line boundary when one
+			// is available (chunks still stay within maxLen).
 			name:     "long string with newlines",
 			input:    "line1\nline2\nline3",
 			maxLen:   8,
-			expected: []string{"line1\nli", "ne2\nline", "3"},
+			expected: []string{"line1\n", "line2\n", "line3"},
 		},
 	}
 
@@ -311,8 +314,9 @@ func TestPaginateEmbedsNewlineBoundaries(t *testing.T) {
 			expectedChunks: []string{
 				"short line\n",
 				"very long line ",
-				"that exceeds l",
-				"imit",
+				// No newline in this tail, so it fills the full 15-rune window.
+				"that exceeds li",
+				"mit",
 			},
 		},
 		{

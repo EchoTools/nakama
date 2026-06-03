@@ -91,20 +91,27 @@ func (d *noopDispatcher) BroadcastMessageDeferred(_ int64, _ []byte, _ []runtime
 func (d *noopDispatcher) MatchKick(_ []runtime.Presence) error { return nil }
 func (d *noopDispatcher) MatchLabelUpdate(_ string) error      { return nil }
 
-// TestMatchLoop_AllocatePostMatchSocialLobby_Blocks confirms that MatchLoop blocks the
-// calling goroutine inside nk.MatchSignal when allocatePostMatchSocialLobby is triggered.
+// TestMatchLoop_AllocatePostMatchSocialLobby_DoesNotBlock is the regression guard
+// for the social-lobby allocation bug. The original bug called
+// allocatePostMatchSocialLobby (which calls nk.MatchSignal) synchronously inside
+// MatchLoop, so a slow or hung target match froze the calling match's tick
+// goroutine for up to 10 seconds.
 //
-// Trigger conditions (evr_match.go):
+// The fix (commit "Queue async side effects from MatchTerminate") moved the
+// allocation off the MatchLoop path entirely: it now runs in the asynchronous
+// match-termination worker (processMatchTerminationTask), scheduled by
+// MatchTerminate. MatchLoop must therefore NEVER call nk.MatchSignal, even when
+// a private match has just ended, so a blocking signal cannot freeze the tick.
 //
-//	state.Mode == evr.ModeArenaPrivate
-//	tick % (2*tickRate) == 0
-//	state.GameState != nil && state.GameState.MatchOver
-//	!state.matchSummarySent
-func TestMatchLoop_AllocatePostMatchSocialLobby_Blocks(t *testing.T) {
-	t.Parallel()
-
+// This test drives MatchLoop with the exact conditions that used to trigger the
+// synchronous allocation and asserts that MatchLoop returns promptly without ever
+// entering nk.MatchSignal.
+func TestMatchLoop_AllocatePostMatchSocialLobby_DoesNotBlock(t *testing.T) {
+	// Mutates the process-global ServiceSettings, so it must not run in
+	// parallel with other tests that touch it.
 	settings := &ServiceSettingsData{}
 	settings.Matchmaking.QueryAddons.Create = "+label.open:T"
+	settings.Matchmaking.EnablePostMatchSocialLobby = true
 	ServiceSettingsUpdate(settings)
 	t.Cleanup(func() { ServiceSettingsUpdate(nil) })
 
@@ -124,7 +131,16 @@ func TestMatchLoop_AllocatePostMatchSocialLobby_Blocks(t *testing.T) {
 		t.Fatalf("marshal fake server label: %v", err)
 	}
 
+	// A blocking MatchSignal: if MatchLoop ever calls it, nk.entered closes and we
+	// fail. The unblock channel is closed in cleanup so a stray goroutine cannot leak.
 	nk := newBlockingMatchSignalNK(string(fakeServerLabel))
+	t.Cleanup(func() {
+		select {
+		case <-nk.unblock:
+		default:
+			close(nk.unblock)
+		}
+	})
 
 	groupID := uuid.Must(uuid.NewV4())
 	player := &EvrMatchPresence{
@@ -154,7 +170,7 @@ func TestMatchLoop_AllocatePostMatchSocialLobby_Blocks(t *testing.T) {
 	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_MATCH_ID, state.ID.String())
 	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_NODE, "testnode")
 
-	// tick=20 satisfies 20 % (2*10) == 0
+	// tick=20 satisfies the former trigger 20 % (2*10) == 0.
 	const testTick int64 = 20
 
 	loopDone := make(chan struct{})
@@ -165,18 +181,12 @@ func TestMatchLoop_AllocatePostMatchSocialLobby_Blocks(t *testing.T) {
 
 	select {
 	case <-nk.entered:
-
+		t.Fatal("MatchLoop called nk.MatchSignal synchronously — the blocking allocation regression is back")
 	case <-loopDone:
-		t.Fatal("MatchLoop returned before blocking in nk.MatchSignal: trigger conditions not met or bug is fixed")
+		// MatchLoop returned without ever signalling: the allocation is off the
+		// tick path (now handled asynchronously by the termination worker).
 	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting for MatchLoop to enter nk.MatchSignal")
-	}
-
-	close(nk.unblock)
-	select {
-	case <-loopDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("MatchLoop did not return after nk.MatchSignal was unblocked")
+		t.Fatal("MatchLoop neither returned nor signalled within the timeout")
 	}
 }
 
@@ -225,8 +235,8 @@ func (m *busyMatchSignalNK) StorageRead(_ context.Context, _ []*runtime.StorageR
 // unassigned servers, all servers are perpetually busy signalling each other, so
 // every post-match social lobby allocation fails and players are left stranded.
 func TestAllocatePostMatchSocialLobby_ErrMatchBusy(t *testing.T) {
-	t.Parallel()
-
+	// Mutates the process-global ServiceSettings, so it must not run in
+	// parallel with other tests that touch it.
 	settings := &ServiceSettingsData{}
 	settings.Matchmaking.QueryAddons.Create = "+label.open:T"
 	ServiceSettingsUpdate(settings)
@@ -284,26 +294,26 @@ func TestAllocatePostMatchSocialLobby_ErrMatchBusy(t *testing.T) {
 	}
 }
 
-// TestAllocatePostMatchSocialLobby_FailedAllocationPreventsRetry confirms the
-// matchSummarySent-before-allocation bug.
+// TestProcessMatchTerminationTask_FailedAllocationDoesNotRetryStorm confirms the
+// no-runaway-match property the original "FailedAllocationPreventsRetry" test
+// guarded, expressed against the current architecture.
 //
-// Previous (buggy) code path:
+// The post-match social lobby is now allocated asynchronously by the match
+// termination worker (processMatchTerminationTask), not synchronously in
+// MatchLoop. When every candidate unassigned server is busy (MatchSignal returns
+// ErrMatchBusy), a single termination task must:
+//   - call MatchSignal exactly once (no internal retry loop that would spin and
+//     spawn runaway matches — the "700 matches" symptom), and
+//   - complete without blocking or panicking despite the failure.
 //
-//	line 1117: state.matchSummarySent = true      ← set BEFORE allocation
-//	line 1118: allocatePostMatchSocialLobby(...)   ← returns error (ErrMatchBusy)
-//	line 1119: logger.Error(...)                  ← error logged, flag already set
-//
-// Because the flag is set before the call, a second tick (tick=40) finds
-// state.matchSummarySent==true and skips the block entirely — MatchSignal is
-// never called again.  With the fix (set flag only on success) the second tick
-// retries the allocation and MatchSignal is called a second time.
-//
-// This test FAILS against the current code and PASSES after the fix.
-func TestAllocatePostMatchSocialLobby_FailedAllocationPreventsRetry(t *testing.T) {
-	t.Parallel()
-
+// Each end-of-match enqueues exactly one task, so "one task -> at most one signal"
+// is the invariant that prevents the retry storm.
+func TestProcessMatchTerminationTask_FailedAllocationDoesNotRetryStorm(t *testing.T) {
+	// Mutates the process-global ServiceSettings, so it must not run in
+	// parallel with other tests that touch it.
 	settings := &ServiceSettingsData{}
 	settings.Matchmaking.QueryAddons.Create = "+label.open:T"
+	settings.Matchmaking.EnablePostMatchSocialLobby = true
 	ServiceSettingsUpdate(settings)
 	t.Cleanup(func() { ServiceSettingsUpdate(nil) })
 
@@ -323,6 +333,8 @@ func TestAllocatePostMatchSocialLobby_FailedAllocationPreventsRetry(t *testing.T
 		t.Fatalf("marshal fake server label: %v", err)
 	}
 
+	// busyMatchSignalNK returns ErrMatchBusy on every MatchSignal and records the
+	// call count, plus no-ops the SessionDisconnect/StoreMatchLabel side effects.
 	nk := newBusyMatchSignalNK(string(fakeServerLabel))
 
 	groupID := uuid.Must(uuid.NewV4())
@@ -333,45 +345,40 @@ func TestAllocatePostMatchSocialLobby_FailedAllocationPreventsRetry(t *testing.T
 		RoleAlignment: evr.TeamBlue,
 	}
 	state := &MatchLabel{
-		ID:               MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"},
-		Mode:             evr.ModeArenaPrivate,
-		GroupID:          &groupID,
-		tickRate:         10,
-		GameState:        &GameState{MatchOver: true},
-		matchSummarySent: false,
+		ID:      MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"},
+		Mode:    evr.ModeArenaPrivate,
+		GroupID: &groupID,
 		presenceMap: map[string]*EvrMatchPresence{
 			player.SessionID.String(): player,
 		},
-		presenceByEvrID: make(map[evr.EvrId]*EvrMatchPresence),
-		joinTimestamps:  make(map[string]time.Time),
-		participations:  make(map[string]*PlayerParticipation),
-		reservationMap:  make(map[string]*slotReservation),
 	}
 
-	m := &EvrMatch{}
 	logger := NewRuntimeGoLogger(NewJSONLogger(os.Stdout, zapcore.ErrorLevel, JSONFormat))
-	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_MATCH_ID, state.ID.String())
-	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_NODE, "testnode")
 
-	// First tick: allocation fails with ErrMatchBusy.
-	const tick1 int64 = 20 // 20 % (2*10) == 0
-	m.MatchLoop(ctx, logger, nil, nk, &noopDispatcher{}, tick1, state, nil)
+	task := matchTerminationTask{
+		logger:                       logger,
+		nk:                           nk,
+		stateSnapshot:                state,
+		matchID:                      state.ID.String(),
+		schedulePostMatchSocialLobby: true,
+		labelAlreadyStored:           true,
+	}
+
+	// Process the task synchronously (bypassing the worker pool) so we can assert
+	// the signal count deterministically.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		processMatchTerminationTask(task)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("processMatchTerminationTask blocked on a busy MatchSignal")
+	}
 
 	if nk.callCount != 1 {
-		t.Fatalf("first tick: expected MatchSignal called 1 time, got %d", nk.callCount)
-	}
-
-	// After a failed allocation the flag must NOT be set — the next eligible tick
-	// must retry.
-	if state.matchSummarySent {
-		t.Fatal("matchSummarySent must be false after a failed allocation (BUG: flag set before allocation)")
-	}
-
-	// Second tick: the retry should call MatchSignal again.
-	const tick2 int64 = 40 // 40 % (2*10) == 0
-	m.MatchLoop(ctx, logger, nil, nk, &noopDispatcher{}, tick2, state, nil)
-
-	if nk.callCount != 2 {
-		t.Errorf("second tick: expected MatchSignal called 2 times total, got %d — failed allocation silently prevents retries (matchSummarySent set before allocation)", nk.callCount)
+		t.Errorf("expected MatchSignal called exactly 1 time per termination task, got %d — a retry loop would spawn runaway matches", nk.callCount)
 	}
 }

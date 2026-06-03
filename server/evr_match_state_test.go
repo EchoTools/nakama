@@ -564,6 +564,9 @@ func TestMatchMeta_RoleLimit(t *testing.T) {
 			want: 0,
 		},
 		{
+			// Private arena: a valid role's limit is the lobby SizeLimit (matches
+			// the identical "Private Arena Blue" case above). These were stale
+			// duplicates asserting 0.
 			name: "Private Arena Blue",
 			fields: fields{
 				Visibility: "private",
@@ -572,7 +575,7 @@ func TestMatchMeta_RoleLimit(t *testing.T) {
 			args: args{
 				r: BlueRole,
 			},
-			want: 0,
+			want: SocialLobbyMaxSize,
 		},
 		{
 			name: "Private Arena Orange",
@@ -583,7 +586,7 @@ func TestMatchMeta_RoleLimit(t *testing.T) {
 			args: args{
 				r: OrangeRole,
 			},
-			want: 0,
+			want: SocialLobbyMaxSize,
 		},
 	}
 	for _, tt := range tests {

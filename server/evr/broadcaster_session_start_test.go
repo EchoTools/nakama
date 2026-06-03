@@ -27,16 +27,18 @@ func TestNewSessionSettings(t *testing.T) {
 				level: 1,
 			},
 			want: LobbySessionSettings{
-				AppID: "test",
-				Mode:  1,
-				Level: int64(LevelUnspecified),
+				AppID:             "test",
+				Mode:              1,
+				Level:             1,
+				SupportedFeatures: []string{},
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := NewSessionSettings(tt.args.appID, tt.args.mode, tt.args.level, []string{}); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("NewSessionSettings() = %v, want %v", got, tt.want)
+			// NewSessionSettings returns *LobbySessionSettings; compare the pointee.
+			if got := NewSessionSettings(tt.args.appID, tt.args.mode, tt.args.level, []string{}); !reflect.DeepEqual(*got, tt.want) {
+				t.Errorf("NewSessionSettings() = %+v, want %+v", *got, tt.want)
 			}
 		})
 	}
@@ -52,11 +54,14 @@ func TestSessionSettings_MarshalJSON(t *testing.T) {
 		{
 			name: "TestSessionSettings_MarshalJSON",
 			s: LobbySessionSettings{
-				AppID: "test",
-				Mode:  1,
-				Level: int64(LevelUnspecified),
+				AppID:             "test",
+				Mode:              1,
+				Level:             int64(LevelUnspecified),
+				SupportedFeatures: []string{"my_feature"},
 			},
-			want:    []byte(`{"appid":"test","gametype":1,"level":null, "features": ["my_feature"]}`),
+			// LevelUnspecified is the int64 sentinel (-1) on the wire; it is
+			// not serialized as JSON null (see LobbySessionSettings.Level int64).
+			want:    []byte(`{"appid":"test","gametype":1,"level":-1,"features":["my_feature"]}`),
 			wantErr: false,
 		},
 	}

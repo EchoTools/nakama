@@ -102,7 +102,10 @@ func checkStorageObjectAuthorization(ctx context.Context, logger runtime.Logger)
 		return true, nil
 	}
 
-	return false, runtime.NewError("storage object access denied: missing required intent", StatusPermissionDenied)
+	// Missing the required intent is a normal "not authorized" result, not an
+	// error: the Before* hooks block such requests by returning (nil, nil). The
+	// error return is reserved for genuine failures (e.g. unparsable vars above).
+	return false, nil
 }
 
 // BeforeWriteStorageObjectsHook is a hook that runs before writing storage objects.

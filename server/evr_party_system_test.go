@@ -1023,9 +1023,12 @@ func TestLobbyGroup_GetLeaderReturnsActualLeader(t *testing.T) {
 }
 
 func TestLobbyGroup_SizeWithNilHandler(t *testing.T) {
+	// A nil party handler is a degenerate/empty group (production always assigns
+	// a real handler, even for a lone player). Size() reports 0, consistent with
+	// GetLeader()/List() returning nil for a nil handler.
 	lg := &LobbyGroup{ph: nil}
-	if lg.Size() != 1 {
-		t.Fatalf("expected 1 for nil handler, got %d", lg.Size())
+	if lg.Size() != 0 {
+		t.Fatalf("expected 0 for nil handler, got %d", lg.Size())
 	}
 }
 

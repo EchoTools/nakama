@@ -219,6 +219,13 @@ func (s *MatchState) OpenSlotsByRole(r int) int {
 
 func (s *MatchState) SelectRole(desired int) (int, bool) {
 	if !s.meta.IsPublic() {
+		// Private matches do not enforce per-role limits, so an unassigned
+		// player is admitted whenever there is any open player slot;
+		// OpenSlotsByRole(UnassignedRole) would otherwise be 0 because the
+		// unassigned role carries no RoleLimit entry.
+		if desired == UnassignedRole {
+			return desired, s.OpenPlayerSlots() > 0
+		}
 		return desired, s.OpenSlotsByRole(desired) > 0
 	}
 

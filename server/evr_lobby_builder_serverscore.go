@@ -119,7 +119,7 @@ func calculateServerScore(bluePings, orangePings []int) (float64, error) {
 	}
 
 	// High/low ping points
-	hiloDenom := float64((pingThreshold*float64(ppt)*2) - (minPing * float64(ppt) * 2))
+	hiloDenom := float64((pingThreshold * float64(ppt) * 2) - (minPing * float64(ppt) * 2))
 	var hilo float64
 	if hiloDenom > 0 {
 		hilo = float64((blueSum+orangeSum)-(minPing*float64(ppt)*2)) / hiloDenom
@@ -165,13 +165,18 @@ func VRMLServerScore(latencies [][]float64, minRTT, maxRTT, thresholdRTT float64
 
 	// calculate the maximum variance within a team
 
-	rtts = make([]float64, teamSize)
-	for i := 0; i < (teamSize+1)/2; i++ {
+	// The loop fills a min-half and a max-half, each of size (teamSize+1)/2, so
+	// the slice must hold 2*((teamSize+1)/2) entries. For even teamSize this is
+	// teamSize; for odd teamSize it is teamSize+1 (a plain teamSize allocation
+	// overflowed at rtts[i+(teamSize+1)/2]).
+	half := (teamSize + 1) / 2
+	rtts = make([]float64, 2*half)
+	for i := 0; i < half; i++ {
 		// first half of the team has minRTT
 		rtts[i] = minRTT
 
 		// second half of the team has maxRTT
-		rtts[i+(teamSize+1)/2] = maxRTT
+		rtts[i+half] = maxRTT
 	}
 
 	maxTeamVariance := stat.Variance(rtts, nil)

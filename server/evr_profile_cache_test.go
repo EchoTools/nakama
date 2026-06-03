@@ -179,6 +179,21 @@ var serverProfile = `
 	"lobbyversion": 1680630467,
 	"stats": {
 		"arena": {
+			"ArenaTies": {
+				"cnt": 1,
+				"op": "add",
+				"val": 0
+			},
+			"EarlyQuits": {
+				"cnt": 1,
+				"op": "add",
+				"val": 0
+			},
+			"GamesPlayed": {
+				"cnt": 1,
+				"op": "add",
+				"val": 0
+			},
 			"Level": {
 				"cnt": 1,
 				"op": "add",
@@ -186,6 +201,11 @@ var serverProfile = `
 			}
 		},
 		"combat": {
+			"GamesPlayed": {
+				"cnt": 1,
+				"op": "add",
+				"val": 0
+			},
 			"Level": {
 				"cnt": 1,
 				"op": "add",

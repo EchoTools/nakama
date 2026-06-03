@@ -43,16 +43,16 @@ type GroupMetadata struct {
 	CreateCommandExcludedModes           []string          `json:"create_command_excluded_modes"`            // Explicitly excluded /create modes for this guild group
 	CreateCommandMaxPlayersByMode        map[string]int    `json:"create_command_max_players_by_mode"`       // Max online players (per mode) before /create is disabled for non-privileged users (0 = no limit)
 	EnableServerEmbedsCommand            bool              `json:"enable_server_embeds_command"`             // Enable /show command for allocators to see server status embeds
-	DefaultBlockMinutes                  int               `json:"default_block_minutes"`                    // Default match block duration in minutes (default: 50)
+	DefaultBlockMinutes                  int               `json:"default_block_minutes,omitempty"`          // Default match block duration in minutes (default: 50)
 
 	MaintenanceMinutes int `json:"maintenance_minutes,omitempty"` // Maintenance window duration in minutes (default: 10)
 
 	RestrictEnforcerNoteVisibility bool `json:"restrict_enforcer_note_visibility"` // Enforcers only see notes on their own records; auditors see all
 
-	KickPlayerAllowPrivates  *bool    `json:"kick_player_allow_privates"`  // Default allow_privates for /kick-player suspensions (default: true)
-	LoadoutCommandUsernames  []string `json:"loadout_command_usernames"`   // Discord usernames allowed to use /loadout (legacy, prefer IDs)
-	LoadoutCommandDiscordIDs []string `json:"loadout_command_user_ids"`    // Discord user IDs allowed to use /loadout
-	SuspensionDMFooter       string   `json:"suspension_dm_footer"`        // Custom footer for suspension DM notifications; empty = default footer
+	KickPlayerAllowPrivates  *bool    `json:"kick_player_allow_privates"` // Default allow_privates for /kick-player suspensions (default: true)
+	LoadoutCommandUsernames  []string `json:"loadout_command_usernames"`  // Discord usernames allowed to use /loadout (legacy, prefer IDs)
+	LoadoutCommandDiscordIDs []string `json:"loadout_command_user_ids"`   // Discord user IDs allowed to use /loadout
+	SuspensionDMFooter       string   `json:"suspension_dm_footer"`       // Custom footer for suspension DM notifications; empty = default footer
 }
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {
@@ -61,11 +61,11 @@ func NewGuildGroupMetadata(guildID string) *GroupMetadata {
 		MatchmakingChannelIDs: make(map[string]string),
 		AllowedFeatures:       make([]string, 0),
 		CreateCommandMaxPlayersByMode: map[string]int{
-			"echo_arena":         0,
-			"echo_combat":        0,
-			"echo_arena_private": 0,
+			"echo_arena":          0,
+			"echo_combat":         0,
+			"echo_arena_private":  0,
 			"echo_combat_private": 0,
-			"social_2.0_private": 0,
+			"social_2.0_private":  0,
 		},
 	}
 }

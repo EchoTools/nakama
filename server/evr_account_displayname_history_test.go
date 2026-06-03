@@ -25,6 +25,10 @@ func TestDisplayNameHistory_Compile(t *testing.T) {
 			expectedCache:  []string{},
 		},
 		{
+			// Active names are derived from InGameNames (+ Reserved + Username)
+			// since the "Refactor display name handling" change; Histories only
+			// feeds the (searchable) history cache. Name1 is a current in-game
+			// name (recent LastUsed) so it is active; Name2 is only historical.
 			name: "history with active and reserved names",
 			history: &DisplayNameHistory{
 				Histories: map[string]map[string]time.Time{
@@ -32,6 +36,10 @@ func TestDisplayNameHistory_Compile(t *testing.T) {
 						"Name1": time.Now().Add(-time.Hour * 24 * 10),
 						"Name2": time.Now().Add(-time.Hour * 24 * 40),
 					},
+				},
+				InGameNames: []string{"Name1"},
+				LastUsed: map[string]time.Time{
+					"Name1": time.Now().Add(-time.Hour * 24 * 10),
 				},
 				Reserved: []string{
 					"ReservedName",

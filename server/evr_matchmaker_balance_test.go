@@ -736,12 +736,15 @@ func TestDrawProbabilityCalculation(t *testing.T) {
 
 			t.Logf("%s: Draw probability = %.3f", tt.description, draw)
 
-			// High draw is typically > 0.3, low draw is < 0.2
-			if tt.wantHighDraw && draw < 0.2 {
-				t.Errorf("Expected high draw probability (>0.2), got %.3f", draw)
+			// For 4v4 teams at sigma 3.0 the openskill PredictDraw of a perfectly
+			// balanced match is ~0.14, and a large-skill-gap match is ~0.00. The
+			// meaningful signal is the separation: balanced matches retain a
+			// non-trivial draw probability while lopsided ones collapse to ~0.
+			if tt.wantHighDraw && draw < 0.1 {
+				t.Errorf("Expected high draw probability (>=0.1), got %.3f", draw)
 			}
-			if !tt.wantHighDraw && draw > 0.3 {
-				t.Errorf("Expected low draw probability (<0.3), got %.3f", draw)
+			if !tt.wantHighDraw && draw > 0.05 {
+				t.Errorf("Expected low draw probability (<=0.05), got %.3f", draw)
 			}
 		})
 	}

@@ -14,10 +14,12 @@ func TestGuildGroupMembership_ToUint64(t *testing.T) {
 		expected   uint64
 	}{
 		{
+			// 9 permission bits since IsAuditor was added: 0x1ff == 0b111111111.
 			name: "All flags set",
 			membership: guildGroupPermissions{
 				IsAllowedMatchmaking: true,
 				IsEnforcer:           true,
+				IsAuditor:            true,
 				IsServerHost:         true,
 				IsAllocator:          true,
 				IsSuspended:          true,
@@ -25,35 +27,23 @@ func TestGuildGroupMembership_ToUint64(t *testing.T) {
 				IsAccountAgeBypass:   true,
 				IsVPNBypass:          true,
 			},
-			expected: uint64(0xff), // 111111111 in binary
+			expected: uint64(0x1ff),
 		},
 		{
-			name: "No flags set",
-			membership: guildGroupPermissions{
-				IsAllowedMatchmaking: false,
-				IsEnforcer:           false,
-				IsServerHost:         false,
-				IsAllocator:          false,
-				IsSuspended:          false,
-				IsAPIAccess:          false,
-				IsAccountAgeBypass:   false,
-				IsVPNBypass:          false,
-			},
-			expected: uint64(0),
+			name:       "No flags set",
+			membership: guildGroupPermissions{},
+			expected:   uint64(0),
 		},
 		{
+			// bits 0,3,5,7 set (matchmaking, serverhost, suspended, accountage).
 			name: "Some flags set",
 			membership: guildGroupPermissions{
 				IsAllowedMatchmaking: true,
-				IsEnforcer:           false,
 				IsServerHost:         true,
-				IsAllocator:          false,
 				IsSuspended:          true,
-				IsAPIAccess:          false,
 				IsAccountAgeBypass:   true,
-				IsVPNBypass:          false,
 			},
-			expected: uint64(0x55), // 101010101 in binary
+			expected: uint64(0xa9),
 		},
 	}
 
@@ -71,11 +61,13 @@ func TestGuildGroupMembership_FromBitSet(t *testing.T) {
 		expected guildGroupPermissions
 	}{
 		{
+			// 0x1ff sets all 9 permission bits (IsAuditor included).
 			name:   "All flags set",
-			bitset: bitset.From([]uint64{511}), // 111111111 in binary
+			bitset: bitset.From([]uint64{0x1ff}),
 			expected: guildGroupPermissions{
 				IsAllowedMatchmaking: true,
 				IsEnforcer:           true,
+				IsAuditor:            true,
 				IsServerHost:         true,
 				IsAllocator:          true,
 				IsSuspended:          true,
@@ -85,31 +77,20 @@ func TestGuildGroupMembership_FromBitSet(t *testing.T) {
 			},
 		},
 		{
-			name:   "No flags set",
-			bitset: bitset.From([]uint64{0}),
-			expected: guildGroupPermissions{
-				IsAllowedMatchmaking: false,
-				IsEnforcer:           false,
-				IsServerHost:         false,
-				IsAllocator:          false,
-				IsSuspended:          false,
-				IsAPIAccess:          false,
-				IsAccountAgeBypass:   false,
-				IsVPNBypass:          false,
-			},
+			name:     "No flags set",
+			bitset:   bitset.From([]uint64{0}),
+			expected: guildGroupPermissions{},
 		},
 		{
+			// 0x155 == bits 0,2,4,6,8 (matchmaking, auditor, allocator, apiaccess, vpn).
 			name:   "Some flags set",
-			bitset: bitset.From([]uint64{341}), // 101010101 in binary
+			bitset: bitset.From([]uint64{0x155}),
 			expected: guildGroupPermissions{
 				IsAllowedMatchmaking: true,
-				IsEnforcer:           false,
-				IsServerHost:         true,
-				IsAllocator:          false,
-				IsSuspended:          true,
-				IsAPIAccess:          false,
-				IsAccountAgeBypass:   true,
-				IsVPNBypass:          false,
+				IsAuditor:            true,
+				IsAllocator:          true,
+				IsAPIAccess:          true,
+				IsVPNBypass:          true,
 			},
 		},
 	}
@@ -133,6 +114,7 @@ func TestGuildGroupMembership_asBitSet(t *testing.T) {
 			membership: guildGroupPermissions{
 				IsAllowedMatchmaking: true,
 				IsEnforcer:           true,
+				IsAuditor:            true,
 				IsServerHost:         true,
 				IsAllocator:          true,
 				IsSuspended:          true,
@@ -140,35 +122,23 @@ func TestGuildGroupMembership_asBitSet(t *testing.T) {
 				IsAccountAgeBypass:   true,
 				IsVPNBypass:          true,
 			},
-			expected: bitset.From([]uint64{511}), // 111111111 in binary
+			expected: bitset.From([]uint64{0x1ff}),
 		},
 		{
-			name: "No flags set",
-			membership: guildGroupPermissions{
-				IsAllowedMatchmaking: false,
-				IsEnforcer:           false,
-				IsServerHost:         false,
-				IsAllocator:          false,
-				IsSuspended:          false,
-				IsAPIAccess:          false,
-				IsAccountAgeBypass:   false,
-				IsVPNBypass:          false,
-			},
-			expected: bitset.From([]uint64{0}),
+			name:       "No flags set",
+			membership: guildGroupPermissions{},
+			expected:   bitset.From([]uint64{0}),
 		},
 		{
+			// bits 0,3,5,7 (matchmaking, serverhost, suspended, accountage).
 			name: "Some flags set",
 			membership: guildGroupPermissions{
 				IsAllowedMatchmaking: true,
-				IsEnforcer:           false,
 				IsServerHost:         true,
-				IsAllocator:          false,
 				IsSuspended:          true,
-				IsAPIAccess:          false,
 				IsAccountAgeBypass:   true,
-				IsVPNBypass:          false,
 			},
-			expected: bitset.From([]uint64{341}), // 101010101 in binary
+			expected: bitset.From([]uint64{0xa9}),
 		},
 	}
 

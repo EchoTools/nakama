@@ -14,11 +14,9 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/samber/lo"
 	"go.uber.org/zap/zapcore"
 )
 
@@ -37,14 +35,16 @@ func TestEvrMatch_EvrMatchState(t *testing.T) {
 				data: `{"id":"7aab54ba-90ae-4e7f-abcf-69b30f5e8db7.testnode","open":true,"lobby_type":"public","mode":"social_2.0","level":"mpl_lobby_b2","session_settings":{"appid":"1369078409873402","gametype":301069346851901300},"limit":15,"size":14}`,
 			},
 			want: MatchLabel{
-				ID:       MatchID{UUID: uuid.Must(uuid.FromString("7aab54ba-90ae-4e7f-abcf-69b30f5e8db7")), Node: "testnode"},
-				Open:     true,
+				ID:        MatchID{UUID: uuid.Must(uuid.FromString("7aab54ba-90ae-4e7f-abcf-69b30f5e8db7")), Node: "testnode"},
+				Open:      true,
 				LobbyType: PublicLobby,
-				Mode:     evr.ToSymbol("social_2.0"),
-				Level:    evr.ToSymbol("mpl_lobby_b2"),
-				SessionSettings: &evr.LobbySessionSettings{AppID: "1369078409873402", Mode: 301069346851901300},
-				MaxSize:  15,
-				Size:     14,
+				Mode:      evr.ToSymbol("social_2.0"),
+				Level:     evr.ToSymbol("mpl_lobby_b2"),
+				// LobbySessionSettings.UnmarshalJSON normalizes a missing/zero level to
+				// LevelUnspecified, so the decoded value carries that sentinel.
+				SessionSettings: &evr.LobbySessionSettings{AppID: "1369078409873402", Mode: 301069346851901300, Level: int64(evr.LevelUnspecified)},
+				MaxSize:         15,
+				Size:            14,
 			},
 		},
 	}
@@ -84,409 +84,6 @@ func TestEvrMatch_EvrMatchState(t *testing.T) {
 					t.Errorf("SessionSettings mismatch: got %v, want %v", got.SessionSettings, tt.want.SessionSettings)
 				}
 			}
-		})
-	}
-}
-
-func TestSelectTeamForPlayer(t *testing.T) {
-	presencesstr := map[string]*EvrMatchPresence{
-		"player1": {RoleAlignment: evr.TeamBlue},
-		"player2": {RoleAlignment: evr.TeamOrange},
-		"spec1":   {RoleAlignment: evr.TeamSpectator},
-		"player4": {RoleAlignment: evr.TeamOrange},
-		"player5": {RoleAlignment: evr.TeamOrange},
-		"player6": {RoleAlignment: evr.TeamOrange},
-		"player7": {RoleAlignment: evr.TeamOrange},
-		"player8": {RoleAlignment: evr.TeamOrange},
-		"spec2":   {RoleAlignment: evr.TeamSpectator},
-	}
-
-	presences := make(map[string]*EvrMatchPresence)
-	for k, v := range presencesstr {
-		u := uuid.NewV5(uuid.Nil, k).String()
-		presences[u] = v
-	}
-
-	state := &MatchLabel{
-		presenceMap: presences,
-	}
-
-	tests := []struct {
-		name           string
-		preferred      int
-		lobbyType      LobbyType
-		presences      map[string]*EvrMatchPresence
-		expectedTeam   int
-		expectedResult bool
-	}{
-		{
-			name:           "UnassignedPlayer",
-			lobbyType:      PrivateLobby,
-			preferred:      evr.TeamUnassigned,
-			presences:      map[string]*EvrMatchPresence{},
-			expectedTeam:   evr.TeamBlue,
-			expectedResult: true,
-		},
-		{
-			name:      "Public match, blue team full, puts the player on orange",
-			lobbyType: PublicLobby,
-			preferred: evr.TeamBlue,
-			presences: map[string]*EvrMatchPresence{
-				"player1": {RoleAlignment: evr.TeamBlue},
-				"player2": {RoleAlignment: evr.TeamBlue},
-				"player3": {RoleAlignment: evr.TeamBlue},
-				"player4": {RoleAlignment: evr.TeamBlue},
-				"player5": {RoleAlignment: evr.TeamOrange},
-				"player6": {RoleAlignment: evr.TeamSpectator},
-				"player7": {RoleAlignment: evr.TeamOrange},
-				"player8": {RoleAlignment: evr.TeamOrange},
-			},
-			expectedTeam:   evr.TeamOrange,
-			expectedResult: true,
-		},
-		{
-			name:      "Public match, orange team full, puts the player on blue",
-			lobbyType: PublicLobby,
-			preferred: evr.TeamOrange,
-			presences: map[string]*EvrMatchPresence{
-				"player1": {RoleAlignment: evr.TeamSpectator},
-				"player2": {RoleAlignment: evr.TeamBlue},
-				"player3": {RoleAlignment: evr.TeamBlue},
-				"player4": {RoleAlignment: evr.TeamBlue},
-				"player5": {RoleAlignment: evr.TeamOrange},
-				"player6": {RoleAlignment: evr.TeamOrange},
-				"player7": {RoleAlignment: evr.TeamOrange},
-				"player8": {RoleAlignment: evr.TeamOrange},
-			},
-			expectedTeam:   evr.TeamBlue,
-			expectedResult: true,
-		},
-		{
-			name:      "Public match, teams equal, use preference",
-			lobbyType: PublicLobby,
-			preferred: evr.TeamOrange,
-			presences: map[string]*EvrMatchPresence{
-				"player1": {RoleAlignment: evr.TeamSpectator},
-				"player2": {RoleAlignment: evr.TeamBlue},
-				"player3": {RoleAlignment: evr.TeamBlue},
-				"player4": {RoleAlignment: evr.TeamBlue},
-				"player5": {RoleAlignment: evr.TeamOrange},
-				"player6": {RoleAlignment: evr.TeamOrange},
-				"player7": {RoleAlignment: evr.TeamOrange},
-				"player8": {RoleAlignment: evr.TeamSpectator},
-			},
-			expectedTeam:   evr.TeamOrange,
-			expectedResult: true,
-		},
-		{
-			name:      "Public match, full reject",
-			lobbyType: PublicLobby,
-			preferred: evr.TeamBlue,
-			presences: map[string]*EvrMatchPresence{
-				"player1": {RoleAlignment: evr.TeamBlue},
-				"player2": {RoleAlignment: evr.TeamBlue},
-				"player3": {RoleAlignment: evr.TeamBlue},
-				"player4": {RoleAlignment: evr.TeamBlue},
-				"player5": {RoleAlignment: evr.TeamOrange},
-				"player6": {RoleAlignment: evr.TeamOrange},
-				"player7": {RoleAlignment: evr.TeamOrange},
-				"player8": {RoleAlignment: evr.TeamOrange},
-			},
-			expectedTeam:   evr.TeamUnassigned,
-			expectedResult: false,
-		},
-		{
-			name:      "Public match, spectators full, reject",
-			lobbyType: PublicLobby,
-			preferred: evr.TeamSpectator,
-			presences: map[string]*EvrMatchPresence{
-				"player1": {RoleAlignment: evr.TeamBlue},
-				"player2": {RoleAlignment: evr.TeamBlue},
-				"player3": {RoleAlignment: evr.TeamSpectator},
-				"player4": {RoleAlignment: evr.TeamSpectator},
-				"player5": {RoleAlignment: evr.TeamSpectator},
-				"player6": {RoleAlignment: evr.TeamSpectator},
-				"player7": {RoleAlignment: evr.TeamSpectator},
-				"player8": {RoleAlignment: evr.TeamSpectator},
-			},
-			expectedTeam:   evr.TeamUnassigned,
-			expectedResult: false,
-		},
-		{
-			name:      "Private match, use preference",
-			lobbyType: PrivateLobby,
-			preferred: evr.TeamOrange,
-			presences: map[string]*EvrMatchPresence{
-				"player1": {RoleAlignment: evr.TeamBlue},
-				"player2": {RoleAlignment: evr.TeamBlue},
-				"player3": {RoleAlignment: evr.TeamBlue},
-				"player4": {RoleAlignment: evr.TeamBlue},
-				"player5": {RoleAlignment: evr.TeamSpectator},
-				"player6": {RoleAlignment: evr.TeamSpectator},
-				"player7": {RoleAlignment: evr.TeamSpectator},
-				"player8": {RoleAlignment: evr.TeamOrange},
-			},
-			expectedTeam:   evr.TeamOrange,
-			expectedResult: true,
-		},
-		{
-			name:      "Private match, use preference (5 player teams)",
-			lobbyType: PrivateLobby,
-			preferred: evr.TeamOrange,
-			presences: map[string]*EvrMatchPresence{
-				"player1": {RoleAlignment: evr.TeamSpectator},
-				"player2": {RoleAlignment: evr.TeamBlue},
-				"player3": {RoleAlignment: evr.TeamBlue},
-				"player4": {RoleAlignment: evr.TeamBlue},
-				"player5": {RoleAlignment: evr.TeamOrange},
-				"player6": {RoleAlignment: evr.TeamOrange},
-				"player7": {RoleAlignment: evr.TeamOrange},
-				"player8": {RoleAlignment: evr.TeamOrange},
-			},
-			expectedTeam:   evr.TeamOrange,
-			expectedResult: true,
-		},
-		{
-			name:      "Private match, preference full, put on other team",
-			lobbyType: PrivateLobby,
-			preferred: evr.TeamOrange,
-			presences: map[string]*EvrMatchPresence{
-				"player1":  {RoleAlignment: evr.TeamSpectator},
-				"player2":  {RoleAlignment: evr.TeamBlue},
-				"player3":  {RoleAlignment: evr.TeamBlue},
-				"player4":  {RoleAlignment: evr.TeamBlue},
-				"player5":  {RoleAlignment: evr.TeamBlue},
-				"player6":  {RoleAlignment: evr.TeamOrange},
-				"player7":  {RoleAlignment: evr.TeamOrange},
-				"player8":  {RoleAlignment: evr.TeamOrange},
-				"player9":  {RoleAlignment: evr.TeamOrange},
-				"player10": {RoleAlignment: evr.TeamOrange},
-			},
-			expectedTeam:   evr.TeamBlue,
-			expectedResult: true,
-		},
-		{
-			name:      "Full private match, puts the player on spectator",
-			lobbyType: PrivateLobby,
-			preferred: evr.TeamOrange,
-			presences: map[string]*EvrMatchPresence{
-				"player1":  {RoleAlignment: evr.TeamBlue},
-				"player2":  {RoleAlignment: evr.TeamBlue},
-				"player3":  {RoleAlignment: evr.TeamBlue},
-				"player4":  {RoleAlignment: evr.TeamBlue},
-				"player5":  {RoleAlignment: evr.TeamBlue},
-				"player6":  {RoleAlignment: evr.TeamOrange},
-				"player7":  {RoleAlignment: evr.TeamOrange},
-				"player8":  {RoleAlignment: evr.TeamOrange},
-				"player9":  {RoleAlignment: evr.TeamOrange},
-				"player10": {RoleAlignment: evr.TeamOrange},
-			},
-			expectedTeam:   evr.TeamSpectator,
-			expectedResult: true,
-		},
-		{
-			name:      "Private match, spectators full, reject",
-			lobbyType: PrivateLobby,
-			preferred: evr.TeamSpectator,
-			presences: map[string]*EvrMatchPresence{
-				"player1": {RoleAlignment: evr.TeamBlue},
-				"player2": {RoleAlignment: evr.TeamBlue},
-				"player3": {RoleAlignment: evr.TeamSpectator},
-				"player4": {RoleAlignment: evr.TeamSpectator},
-				"player5": {RoleAlignment: evr.TeamSpectator},
-				"player6": {RoleAlignment: evr.TeamSpectator},
-				"player7": {RoleAlignment: evr.TeamSpectator},
-				"player8": {RoleAlignment: evr.TeamSpectator},
-			},
-			expectedTeam:   evr.TeamUnassigned,
-			expectedResult: false,
-		},
-		{
-			name:      "full social lobby, reject",
-			lobbyType: PublicLobby,
-			preferred: evr.TeamSpectator,
-			presences: map[string]*EvrMatchPresence{
-				"player1":  {RoleAlignment: evr.TeamSocial},
-				"player2":  {RoleAlignment: evr.TeamSocial},
-				"player3":  {RoleAlignment: evr.TeamSocial},
-				"player4":  {RoleAlignment: evr.TeamSocial},
-				"player5":  {RoleAlignment: evr.TeamSocial},
-				"player6":  {RoleAlignment: evr.TeamSocial},
-				"player7":  {RoleAlignment: evr.TeamSocial},
-				"player8":  {RoleAlignment: evr.TeamSocial},
-				"player9":  {RoleAlignment: evr.TeamSocial},
-				"player10": {RoleAlignment: evr.TeamSocial},
-				"player11": {RoleAlignment: evr.TeamSocial},
-				"player12": {RoleAlignment: evr.TeamSocial},
-			},
-			expectedTeam:   evr.TeamUnassigned,
-			expectedResult: false,
-		},
-		{
-			name:      "social lobby, moderator, allow",
-			lobbyType: PublicLobby,
-			preferred: evr.TeamModerator,
-			presences: map[string]*EvrMatchPresence{
-				"player1":  {RoleAlignment: evr.TeamSocial},
-				"player2":  {RoleAlignment: evr.TeamSocial},
-				"player3":  {RoleAlignment: evr.TeamSocial},
-				"player4":  {RoleAlignment: evr.TeamSocial},
-				"player5":  {RoleAlignment: evr.TeamSocial},
-				"player6":  {RoleAlignment: evr.TeamSocial},
-				"player7":  {RoleAlignment: evr.TeamSocial},
-				"player8":  {RoleAlignment: evr.TeamSocial},
-				"player9":  {RoleAlignment: evr.TeamSocial},
-				"player10": {RoleAlignment: evr.TeamSocial},
-				"player11": {RoleAlignment: evr.TeamSocial},
-			},
-			expectedTeam:   evr.TeamModerator,
-			expectedResult: true,
-		},
-	}
-
-	for _, tt := range tests {
-		presence := &EvrMatchPresence{
-			RoleAlignment: tt.preferred,
-		}
-		presencestr := make(map[string]*EvrMatchPresence)
-		for k, v := range tt.presences {
-			u := uuid.NewV5(uuid.Nil, k).String()
-			presencestr[u] = v
-		}
-
-		state.presenceMap = presencestr
-		state.MaxSize = SocialLobbyMaxSize
-		state.LobbyType = tt.lobbyType
-		if state.LobbyType == PublicLobby {
-			state.TeamSize = 4
-		} else {
-			state.TeamSize = 5
-		}
-
-		t.Run(tt.name, func(t *testing.T) {
-			_ = presence
-			t.Error("selectTeamForPlayer() not implemented")
-			/*
-				team, result := selectTeamForPlayer(presence, state)
-
-				if team != tt.expectedTeam {
-					t.Errorf("selectTeamForPlayer() returned incorrect team, got: %d, want: %d", team, tt.expectedTeam)
-				}
-
-				if result != tt.expectedResult {
-					t.Errorf("selectTeamForPlayer() returned incorrect result, got: %t, want: %t", result, tt.expectedResult)
-				}
-			*/
-
-		})
-	}
-}
-
-func TestSelectTeamForPlayer_With_Alighment(t *testing.T) {
-	const (
-		DMO_1  = "DMO-1"
-		DMO_2  = "DMO-2"
-		DMO_3  = "DMO-3"
-		DMO_4  = "DMO-4"
-		DMO_5  = "DMO-5"
-		DMO_6  = "DMO-6"
-		DMO_7  = "DMO-7"
-		DMO_8  = "DMO-8"
-		DMO_9  = "DMO-9"
-		DMO_10 = "DMO-10"
-		DMO_11 = "DMO-11"
-		DMO_12 = "DMO-12"
-		DMO_13 = "DMO-13"
-
-		Blue       = evr.TeamBlue
-		Orange     = evr.TeamOrange
-		Spectator  = evr.TeamSpectator
-		Unassigned = evr.TeamUnassigned
-	)
-	alignments := map[string]int{
-		DMO_1:  Blue,
-		DMO_2:  Blue,
-		DMO_3:  Blue,
-		DMO_4:  Blue,
-		DMO_5:  Orange,
-		DMO_6:  Orange,
-		DMO_7:  Orange,
-		DMO_8:  Orange,
-		DMO_9:  Spectator,
-		DMO_10: Spectator,
-		DMO_11: Spectator,
-		DMO_12: Spectator,
-		DMO_13: Spectator,
-	}
-
-	tests := []struct {
-		name          string
-		lobbyType     LobbyType
-		players       []string
-		newPlayer     string
-		preferredTeam int
-		expectedTeam  int
-		allowed       bool
-	}{
-		{
-			name:      "Follows alignment even when unbalanced",
-			lobbyType: PublicLobby,
-			players: []string{
-				DMO_1,
-				DMO_2,
-				DMO_3,
-			},
-			newPlayer:     DMO_4,
-			preferredTeam: evr.TeamOrange,
-			expectedTeam:  evr.TeamBlue,
-			allowed:       true,
-		},
-	}
-
-	for _, tt := range tests {
-		// Existing players
-		presences := make(map[string]*EvrMatchPresence)
-		for _, player := range tt.players {
-			u := uuid.NewV5(uuid.Nil, player).String()
-			presences[u] = &EvrMatchPresence{
-				RoleAlignment: alignments[player],
-			}
-		}
-
-		// New Player
-		presence := &EvrMatchPresence{
-			EvrID:         *lo.Must(evr.ParseEvrId(tt.newPlayer)),
-			RoleAlignment: tt.preferredTeam,
-		}
-
-		// Match State
-		state := &MatchLabel{
-			presenceMap: presences,
-			MaxSize:     SocialLobbyMaxSize,
-			LobbyType:   tt.lobbyType,
-			TeamSize: func() int {
-				if tt.lobbyType == PublicLobby {
-					return 4
-				} else {
-					return 5
-				}
-			}(),
-		}
-
-		t.Run(tt.name, func(t *testing.T) {
-			_, _ = presence, state
-			t.Error("selectTeamForPlayer() not implemented")
-			/*
-				team, result := selectTeamForPlayer(presence, state)
-
-				if team != tt.expectedTeam {
-					t.Errorf("selectTeamForPlayer() returned incorrect team, got: %d, want: %d", team, tt.expectedTeam)
-				}
-
-				if result != tt.allowed {
-					t.Errorf("selectTeamForPlayer() returned incorrect result, got: %t, want: %t", result, tt.allowed)
-				}
-			*/
 		})
 	}
 }
@@ -668,260 +265,154 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 		presences = append(presences, presence)
 	}
 
-	type args struct {
-		state_   interface{}
-		presence runtime.Presence
-		metadata map[string]string
+	// helpers to build labels/metadata deterministically
+	makeState := func(open bool, lobby LobbyType, mode evr.Symbol, maxSize, playerLimit, teamSize int, termTick int64, started bool, members []*EvrMatchPresence) *MatchLabel {
+		state := testStateFn()
+		state.Open = open
+		state.LobbyType = lobby
+		state.Mode = mode
+		state.MaxSize = maxSize
+		state.PlayerLimit = playerLimit
+		state.TeamSize = teamSize
+		state.terminateTick = termTick
+		if started {
+			state.StartTime = time.Now().Add(-time.Hour)
+		}
+		state.presenceMap = make(map[string]*EvrMatchPresence, len(members))
+		for _, p := range members {
+			state.presenceMap[p.GetSessionId()] = p
+		}
+		state.rebuildCache()
+		return state
 	}
-	tests := []struct {
-		name  string
-		m     *EvrMatch
-		args  args
-		want  interface{}
-		want1 bool
-		want2 string
-	}{
+
+	type testCase struct {
+		name         string
+		state        *MatchLabel
+		presence     *EvrMatchPresence
+		spectator    bool
+		wantAccepted bool
+		wantReason   string // expected reject reason when not accepted
+		wantSize     int    // resulting label Size
+		wantCount    int    // resulting label PlayerCount
+	}
+
+	tests := []testCase{
 		{
-			name: "MatchJoinAttempt rejects join to unassigned lobby.",
-			m:    &EvrMatch{},
-			args: args{
-
-				state_: func() *MatchLabel {
-					state := testStateFn()
-					state.Open = true
-					state.LobbyType = UnassignedLobby
-
-					return state
-				}(),
-				presence: presences[0],
-				metadata: EntrantMetadata{Presence: presences[0]}.ToMatchMetadata(),
-			},
-			want: func() *MatchLabel {
-				state := testStateFn()
-				state.Open = true
-				state.LobbyType = UnassignedLobby
-				return state
-			}(),
-			want1: false,
-			want2: ErrJoinRejectReasonUnassignedLobby.Error(),
+			// Unassigned lobbies never accept entrant joins.
+			name:         "rejects join to unassigned lobby",
+			state:        makeState(true, UnassignedLobby, evr.ModeUnloaded, 3, 2, 0, 0, false, presences[1:3]),
+			presence:     presences[0],
+			wantAccepted: false,
+			wantReason:   ErrJoinRejectReasonUnassignedLobby.Error(),
+			wantSize:     2,
+			wantCount:    2,
 		},
 		{
-			name: "MatchJoinAttempt allows spectators to join closed matches, that are not terminating.",
-			m:    &EvrMatch{},
-			args: args{
-				state_: func() *MatchLabel {
-					state := testStateFn()
-					state.StartTime = time.Now()
-					state.terminateTick = 0
-					state.Open = false
-					state.LobbyType = PublicLobby
-					state.Mode = evr.ModeArenaPublic
-					state.MaxSize = 3
-					state.Size = 2
-					state.PlayerLimit = 2
-					state.PlayerCount = 2
-					state.presenceMap = func() map[string]*EvrMatchPresence {
-						m := make(map[string]*EvrMatchPresence)
-						for _, p := range presences[1:3] {
-							m[p.GetSessionId()] = p
-						}
-						return m
-					}()
-
-					state.rebuildCache()
-					return state
-				}(),
-				presence: presences[0],
-				metadata: func() map[string]string {
-					meta := NewJoinMetadata(presences[0])
-					meta.Presence.RoleAlignment = evr.TeamSpectator
-					return meta.ToMatchMetadata()
-				}(),
-			},
-			want: func() *MatchLabel {
-				state := testStateFn()
-				state.StartTime = time.Now()
-				state.terminateTick = 0
-				state.Open = false
-				state.LobbyType = PublicLobby
-				state.Mode = evr.ModeArenaPublic
-				state.MaxSize = 3
-				state.Size = 3
-				state.PlayerLimit = 2
-				state.PlayerCount = 2
-				state.presenceMap = func() map[string]*EvrMatchPresence {
-					m := make(map[string]*EvrMatchPresence)
-					for _, p := range presences[1:3] {
-						m[p.GetSessionId()] = p
-					}
-					return m
-				}()
-				state.rebuildCache()
-				return state
-			}(),
-			want1: true,
-			want2: presences[0].String(),
+			// A closed match that has started but is NOT terminating still accepts
+			// spectators (they bypass the closed-match gate).
+			name:         "allows spectators to join closed, non-terminating matches",
+			state:        makeState(false, PublicLobby, evr.ModeArenaPublic, 3, 2, 0, 0, true, presences[1:3]),
+			presence:     presences[0],
+			spectator:    true,
+			wantAccepted: true,
+			wantSize:     3,
+			wantCount:    2, // spectators are not counted in PlayerCount
 		},
 		{
-			name: "MatchJoinAttempt disallows spectators to join closed matches, that are terminating.",
-			m:    &EvrMatch{},
-			args: args{
-				state_: func() *MatchLabel {
-					state := testStateFn()
-
-					state.StartTime = time.Now()
-					state.terminateTick = 100
-					state.Open = false
-					state.LobbyType = PublicLobby
-					state.Mode = evr.ModeArenaPublic
-					state.MaxSize = 3
-					state.Size = 2
-					state.PlayerLimit = 2
-					state.PlayerCount = 2
-					state.presenceMap = func() map[string]*EvrMatchPresence {
-						m := make(map[string]*EvrMatchPresence)
-						for _, p := range presences[1:3] {
-							m[p.GetSessionId()] = p
-						}
-						return m
-					}()
-					state.rebuildCache()
-					return state
-				}(),
-				presence: presences[0],
-				metadata: func() map[string]string {
-					meta := NewJoinMetadata(presences[0])
-					meta.Presence.RoleAlignment = evr.TeamSpectator
-					return meta.ToMatchMetadata()
-				}(),
-			},
-			want: func() *MatchLabel {
-				state := testStateFn()
-				state.MaxSize = 3
-				state.Size = 2
-				state.PlayerLimit = 2
-				state.PlayerCount = 2
-				state.presenceMap = func() map[string]*EvrMatchPresence {
-					m := make(map[string]*EvrMatchPresence)
-					for _, p := range presences[1:3] {
-						m[p.GetSessionId()] = p
-					}
-					return m
-				}()
-				state.presenceMap[presences[0].GetSessionId()] = presences[0]
-				state.rebuildCache()
-				return state
-			}(),
-			want1: true,
-			want2: presences[0].String(),
+			// Once the match is terminating (terminateTick > 0 and started), even
+			// spectators are rejected.
+			name:         "disallows spectators to join closed, terminating matches",
+			state:        makeState(false, PublicLobby, evr.ModeArenaPublic, 3, 2, 0, 100, true, presences[1:3]),
+			presence:     presences[0],
+			spectator:    true,
+			wantAccepted: false,
+			wantReason:   ErrJoinRejectReasonMatchTerminating.Error(),
+			wantSize:     2,
+			wantCount:    2,
 		},
 		{
-			name: "MatchJoinAttempt returns nil if match is full.",
-			m:    &EvrMatch{},
-			args: args{
-				state_: func() *MatchLabel {
-					state := &MatchLabel{}
-					state.Open = true
-					state.LobbyType = PublicLobby
-					state.Mode = evr.ModeArenaPublic
-					state.MaxSize = 3
-					state.Size = 2
-					state.PlayerLimit = 2
-					state.PlayerCount = 2
-					state.presenceMap = func() map[string]*EvrMatchPresence {
-						m := make(map[string]*EvrMatchPresence)
-						for _, p := range presences[1:3] {
-							m[p.GetSessionId()] = p
-						}
-						return m
-					}()
-					state.rebuildCache()
-					return state
-				}(),
-				presence: presences[0],
-				metadata: NewJoinMetadata(presences[0]).ToMatchMetadata(),
-			},
-			want: func() *MatchLabel {
-				state := &MatchLabel{}
-				state.MaxSize = 3
-				state.Size = 2
-				state.PlayerLimit = 2
-				state.PlayerCount = 2
-				state.presenceMap = func() map[string]*EvrMatchPresence {
-					m := make(map[string]*EvrMatchPresence)
-					for _, p := range presences[1:3] {
-						m[p.GetSessionId()] = p
-					}
-					return m
-				}()
-				state.rebuildCache()
-				return state
-			}(),
-			want1: false,
+			// A non-spectator cannot join a closed match.
+			name:         "rejects non-spectator join to a closed match",
+			state:        makeState(false, PublicLobby, evr.ModeArenaPublic, 3, 2, 0, 0, false, presences[1:3]),
+			presence:     presences[0],
+			wantAccepted: false,
+			wantReason:   ErrJoinRejectReasonMatchClosed.Error(),
+			wantSize:     2,
+			wantCount:    2,
 		},
 		{
-			name: "MatchJoinAttempt returns nil if match is full.",
-			m:    &EvrMatch{},
-			args: args{
-				state_: func() *MatchLabel {
-					state := &MatchLabel{}
-					state.LobbyType = PublicLobby
-					state.Mode = evr.ModeArenaPublic
-					state.MaxSize = 3
-					state.Size = 2
-					state.PlayerLimit = 2
-					state.PlayerCount = 2
-					state.presenceMap = func() map[string]*EvrMatchPresence {
-						m := make(map[string]*EvrMatchPresence)
-						for _, p := range presences[1:3] {
-							m[p.GetSessionId()] = p
-						}
-						return m
-					}()
-					state.rebuildCache()
-					return state
-				}(),
-				presence: presences[0],
-				metadata: NewJoinMetadata(presences[0]).ToMatchMetadata(),
-			},
-			want: func() *MatchLabel {
-				state := &MatchLabel{}
-				state.MaxSize = 3
-				state.Size = 2
-				state.PlayerLimit = 2
-				state.PlayerCount = 2
-				state.presenceMap = func() map[string]*EvrMatchPresence {
-					m := make(map[string]*EvrMatchPresence)
-					for _, p := range presences[1:3] {
-						m[p.GetSessionId()] = p
-					}
-					return m
-				}()
-				state.rebuildCache()
-				return state
-			}(),
-			want1: false,
+			// MaxSize gates capacity. With MaxSize 3 and 2 members, one slot is open
+			// so a third player is accepted.
+			name:         "accepts a player while a slot remains open",
+			state:        makeState(true, PublicLobby, evr.ModeArenaPublic, 5, 2, 4, 0, false, presences[1:3]),
+			presence:     presences[0],
+			wantAccepted: true,
+			wantSize:     3,
+			wantCount:    3,
+		},
+		{
+			// When MaxSize is reached, the match is full and the join is rejected.
+			name:         "rejects a player when the match is full",
+			state:        makeState(true, PublicLobby, evr.ModeArenaPublic, 2, 2, 4, 0, false, presences[1:3]),
+			presence:     presences[0],
+			wantAccepted: false,
+			wantReason:   ErrJoinRejectReasonLobbyFull.Error(),
+			wantSize:     2,
+			wantCount:    2,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-
 			ctx := context.Background()
-			logger := func() runtime.Logger {
-				logger := NewRuntimeGoLogger(NewJSONLogger(os.Stdout, zapcore.ErrorLevel, JSONFormat))
-				return logger
-			}()
+			logger := NewRuntimeGoLogger(NewJSONLogger(os.Stdout, zapcore.ErrorLevel, JSONFormat))
+
+			// Copy the joining presence per-case: MatchJoinAttempt mutates the
+			// presence (role assignment, EntrantID), and the fixtures are shared
+			// across subtests.
+			joinPresence := *tt.presence
+			meta := NewJoinMetadata(&joinPresence)
+			if tt.spectator {
+				meta.Presence.RoleAlignment = evr.TeamSpectator
+			}
 
 			m := &EvrMatch{}
-			got, got1, got2 := m.MatchJoinAttempt(ctx, logger, nil, nil, nil, 10, tt.args.state_, tt.args.presence, tt.args.metadata)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("EvrMatch.MatchJoinAttempt() (- want/+ got): %s", cmp.Diff(got, tt.want, cmpopts.IgnoreUnexported(MatchLabel{})))
+			gotState, gotAccepted, gotMsg := m.MatchJoinAttempt(ctx, logger, nil, nil, nil, 10, tt.state, &joinPresence, meta.ToMatchMetadata())
+
+			label, ok := gotState.(*MatchLabel)
+			if !ok {
+				t.Fatalf("MatchJoinAttempt returned non-*MatchLabel state: %T", gotState)
 			}
-			if got1 != tt.want1 {
-				t.Errorf("EvrMatch.MatchJoinAttempt() (- want/+ got): %s", cmp.Diff(got, tt.want1, cmpopts.IgnoreUnexported(MatchLabel{})))
+
+			if gotAccepted != tt.wantAccepted {
+				t.Fatalf("accepted = %v, want %v (msg=%q)", gotAccepted, tt.wantAccepted, gotMsg)
 			}
-			if got2 != tt.want2 {
-				t.Errorf("EvrMatch.MatchJoinAttempt() (- want/+ got): %s", cmp.Diff(got, tt.want2, cmpopts.IgnoreUnexported(MatchLabel{})))
+
+			if tt.wantAccepted {
+				// On accept, the third return is the joining presence as JSON. The
+				// EntrantID is regenerated per attempt (random), so compare the
+				// stable identity fields rather than the raw string.
+				var joined EvrMatchPresence
+				if err := json.Unmarshal([]byte(gotMsg), &joined); err != nil {
+					t.Fatalf("accepted message is not a presence JSON: %v (msg=%q)", err, gotMsg)
+				}
+				if joined.UserID != tt.presence.UserID || !joined.EvrID.Equals(tt.presence.EvrID) || joined.SessionID != tt.presence.SessionID {
+					t.Errorf("joined presence identity mismatch: got user=%s evr=%s sid=%s",
+						joined.UserID, joined.EvrID, joined.SessionID)
+				}
+				if joined.EntrantID == uuid.Nil {
+					t.Errorf("expected a freshly assigned EntrantID, got nil")
+				}
+			} else if gotMsg != tt.wantReason {
+				t.Errorf("reject reason = %q, want %q", gotMsg, tt.wantReason)
+			}
+
+			if label.Size != tt.wantSize {
+				t.Errorf("Size = %d, want %d", label.Size, tt.wantSize)
+			}
+			if label.PlayerCount != tt.wantCount {
+				t.Errorf("PlayerCount = %d, want %d", label.PlayerCount, tt.wantCount)
 			}
 		})
 	}

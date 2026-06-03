@@ -8,7 +8,6 @@ package evr
 
 import (
 	"encoding/json"
-	"reflect"
 	"testing"
 
 	"github.com/gofrs/uuid/v5"
@@ -100,9 +99,12 @@ func TestGUID_MarshalJSON(t *testing.T) {
 
 func TestDeveloperFeatures_Omitted_When_Empty(t *testing.T) {
 
+	// omitzero (Go 1.24+) is required to omit a zero-valued struct field;
+	// omitempty never omits struct-typed fields. The production profile uses
+	// *DeveloperFeatures + omitempty (nil pointer omitted) to the same effect.
 	type testProfile struct {
 		BeforeDev         string            `json:"before_dev,omitempty"`
-		DeveloperFeatures DeveloperFeatures `json:"dev,omitempty"`
+		DeveloperFeatures DeveloperFeatures `json:"dev,omitzero"`
 		AfterDev          string            `json:"after_dev,omitempty"`
 	}
 
@@ -125,8 +127,8 @@ func TestDeveloperFeatures_Omitted_When_Empty(t *testing.T) {
 	}
 
 	want := `{"before_dev":"before","after_dev":"after"}`
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("DeveloperFeatures.MarshalJSON() = `%v`, want `%v`", string(got), string(want))
+	if string(got) != want {
+		t.Errorf("DeveloperFeatures.MarshalJSON() = `%v`, want `%v`", string(got), want)
 	}
 
 }

@@ -81,12 +81,15 @@ func TestCombatMatchmakingRules(t *testing.T) {
 	}
 
 	// Combat Tests (Even only, min 1v1, dynamic delay)
-	// The 60-second gate: isCombat && len(candidate) < 8 → skip if oldest ticket < 60s old.
-	runTest("Combat 1v1 (New)", 2, modeCombat, false, 10, false, 0)          // 10s < 60s → BLOCKED by combat gate
-	runTest("Combat 1v1 (Old)", 2, modeCombat, false, 65, true, 2)           // 65s > 60s → gate passes
-	runTest("Combat 4v4 (New)", 8, modeCombat, false, 10, true, 8)           // 8 >= 8 → gate bypassed → OK
+	// The 60-second grace gate only applies to UNDERSIZED matches
+	// (len < min_team_size*2). With min_team_size=1, a 1v1 (2 players) is
+	// full-size, so it is never gated and matches immediately regardless of age
+	// (consistent with Arena 1v1 (New) below).
+	runTest("Combat 1v1 (New)", 2, modeCombat, false, 10, true, 2)            // full-size 1v1 → not gated
+	runTest("Combat 1v1 (Old)", 2, modeCombat, false, 65, true, 2)            // 65s > 60s → gate passes
+	runTest("Combat 4v4 (New)", 8, modeCombat, false, 10, true, 8)            // 8 >= 8 → gate bypassed → OK
 	runTest("Combat 3v4 (7 players, Old)", 7, modeCombat, false, 65, true, 6) // 65s old → gate passes
-	runTest("Combat Party 2v2 (Old)", 4, modeCombat, true, 65, true, 4)      // party ticket split for combat → 4 solos → gate passes
+	runTest("Combat Party 2v2 (Old)", 4, modeCombat, true, 65, true, 4)       // party ticket split for combat → 4 solos → gate passes
 
 	// Arena Tests (No combat-gate delay; min_team_size=1 so 2 players suffices)
 	runTest("Arena 1v1 (New)", 2, modeArena, false, 10, true, 2) // No 60s gate for arena
@@ -112,7 +115,7 @@ func TestCombatGate_ExactBoundary_60Seconds(t *testing.T) {
 	// Two combat players whose tickets are exactly 60 seconds old.
 	entries := []runtime.MatchmakerEntry{
 		&MatchmakerEntry{
-			Ticket: "solo-a",
+			Ticket:   "solo-a",
 			Presence: &MatchmakerPresence{UserId: "ua", SessionId: "sa"},
 			Properties: map[string]interface{}{
 				"game_mode":      evr.ModeCombatPublic.String(),
@@ -123,7 +126,7 @@ func TestCombatGate_ExactBoundary_60Seconds(t *testing.T) {
 			},
 		},
 		&MatchmakerEntry{
-			Ticket: "solo-b",
+			Ticket:   "solo-b",
 			Presence: &MatchmakerPresence{UserId: "ub", SessionId: "sb"},
 			Properties: map[string]interface{}{
 				"game_mode":      evr.ModeCombatPublic.String(),
