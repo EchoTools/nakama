@@ -408,8 +408,8 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	// at the OpenSlots gate before the reservation lookup is reached.
 	// First try by session ID (fast path). If that misses — e.g. the follower
 	// disconnected and reconnected with a new session — fall back to user ID.
-	var consumedSlotReservation *slotReservation       // the full reservation (with original expiry)
-	var consumedSlotReservationSessionID string        // the map key to restore under
+	var consumedSlotReservation *slotReservation // the full reservation (with original expiry)
+	var consumedSlotReservationSessionID string  // the map key to restore under
 	if r, found := state.LoadAndDeleteReservationRaw(meta.Presence.GetSessionId()); found {
 		consumedSlotReservation = r
 		consumedSlotReservationSessionID = meta.Presence.GetSessionId()
@@ -1187,10 +1187,25 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		}
 	}
 
-	// If the match is terminating, terminate on the tick.
+	// If the match is terminating, drain it before tearing down (issue #439).
+	//
+	// terminateTick is a BOUNDED FALLBACK deadline, not the primary trigger.
+	// MatchShutdown has already told the game server to remove the players
+	// (entrant reject + CODE_ENDED); as each player leaves, MatchLeave empties
+	// presenceMap. We must terminate as soon as the players are actually gone so
+	// that MatchTerminate does not disconnect the game-server session while
+	// players are still on it (orphaning the server).
+	//
+	// If the game server does not cooperate (players never leave), the deadline
+	// still forces teardown so a match cannot hang forever.
 	if state.terminateTick != 0 {
+		if len(state.presenceMap) == 0 {
+			logger.Debug("Match drained; all players have left. Terminating.")
+			return m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
+		}
 		if tick >= state.terminateTick {
-			logger.Debug("Match termination tick reached.")
+			logger.WithField("remaining_players", len(state.presenceMap)).
+				Warn("Match drain timed out with players still present; forcing termination.")
 			return m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
 		}
 		return state
