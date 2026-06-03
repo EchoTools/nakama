@@ -145,10 +145,12 @@ func TestFloat64ToScore(t *testing.T) {
 			expectedError: nil,
 		},
 		{
+			// Exact negative integers encode subscore = fracScale (1e9), the top
+			// of the fractional range, so -1.0 sorts above -1.0001 etc.
 			name:          "negative integer",
 			input:         -1.0,
 			expectedScore: 999999999999998, // 1e15 - 1 - 1
-			expectedSub:   0,
+			expectedSub:   1000000000,      // fracScale: exact negative integer
 			expectedError: nil,
 		},
 		{
@@ -218,7 +220,7 @@ func TestFloat64ToScore(t *testing.T) {
 			name:          "maximum valid negative",
 			input:         -(1e15 - 1), // This should work
 			expectedScore: 0,
-			expectedSub:   0,
+			expectedSub:   1000000000, // exact negative integer -> fracScale
 			expectedError: nil,
 		},
 	}
@@ -271,9 +273,11 @@ func TestScoreToFloat64(t *testing.T) {
 			expectedError: nil,
 		},
 		{
+			// Exact negative integers carry subscore == fracScale (1e9); subscore 0
+			// at this score would decode to -2.0 (fracPart 1.0), not -1.0.
 			name:          "negative integer",
 			score:         999999999999998, // 1e15 - 1 - 1
-			subscore:      0,
+			subscore:      1000000000,      // fracScale
 			expected:      -1.0,
 			expectedError: nil,
 		},
@@ -306,11 +310,13 @@ func TestScoreToFloat64(t *testing.T) {
 			expectedError: fmt.Errorf("invalid subscore: -1"),
 		},
 		{
+			// subscore == fracScale (1e9) is the valid maximum (used for exact
+			// negative integers); only subscore > 1e9 is rejected.
 			name:          "subscore too large",
 			score:         1000000000000000,
-			subscore:      1000000000, // 1e9
+			subscore:      1000000001, // 1e9 + 1
 			expected:      0.0,
-			expectedError: fmt.Errorf("invalid subscore: 1000000000"),
+			expectedError: fmt.Errorf("invalid subscore: 1000000001"),
 		},
 	}
 

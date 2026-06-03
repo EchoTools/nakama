@@ -101,16 +101,18 @@ type preparedBackfillCandidate struct {
 
 // prepareMatches pre-computes match metadata that doesn't change during processing
 func (b *PostMatchmakerBackfill) prepareMatches(matches []*BackfillMatch, bctx *backfillContext) []*preparedBackfillMatch {
-	prepared := make([]*preparedBackfillMatch, len(matches))
-	for i, m := range matches {
+	// Append only matches with a non-nil GameServer; pre-sizing and indexing by i
+	// left nil holes for skipped matches, which callers would later dereference.
+	prepared := make([]*preparedBackfillMatch, 0, len(matches))
+	for _, m := range matches {
 		if m.Label.GameServer == nil {
 			continue
 		}
-		prepared[i] = &preparedBackfillMatch{
+		prepared = append(prepared, &preparedBackfillMatch{
 			BackfillMatch: m,
 			externalIP:    m.Label.GameServer.Endpoint.GetExternalIP(),
 			matchAge:      bctx.now.Sub(m.Label.StartTime),
-		}
+		})
 	}
 	return prepared
 }
@@ -296,6 +298,15 @@ func (b *PostMatchmakerBackfill) getPossibleTeams(candidate *BackfillCandidate, 
 			teams = append(teams, evr.TeamBlue)
 		}
 		if orangeOpen {
+			teams = append(teams, evr.TeamOrange)
+		}
+	} else {
+		// Combat with balanced team counts: still backfillable. Assign to a single
+		// open team (prefer blue) so an empty/balanced match starts filling; the
+		// resulting one-player lead is the normal start of a match.
+		if blueOpen {
+			teams = append(teams, evr.TeamBlue)
+		} else if orangeOpen {
 			teams = append(teams, evr.TeamOrange)
 		}
 	}
@@ -1121,4 +1132,3 @@ func (b *PostMatchmakerBackfill) logBackfillSummary(logger *zap.Logger, result *
 
 	logger.Info("Backfill operation completed", fields...)
 }
-

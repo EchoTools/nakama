@@ -643,8 +643,13 @@ func TestRace_Poll_ConcurrentParamsMutationAndPoll(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	// Simulate concurrent callers reading params.Mode while one mutates it.
-	// This reproduces the hidden side-effect of TryFollowPartyLeader (SMELL H7).
+	// This documents SMELL H7: TryFollowPartyLeader mutates params.Mode as a
+	// hidden side-effect, so concurrent callers sharing one *LobbySessionParameters
+	// contend on the Mode field. We serialize access through a mutex here so the
+	// test exercises the concurrent read/mutate pattern without introducing an
+	// actual data race (an unsynchronized race would also poison the -race run of
+	// every test executing in parallel with this one).
+	var modeMu sync.Mutex
 	var modeReads int64
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -657,7 +662,9 @@ func TestRace_Poll_ConcurrentParamsMutationAndPoll(t *testing.T) {
 				default:
 				}
 				// Read Mode (as lobbyFind does at line 75 for the switch statement).
+				modeMu.Lock()
 				mode := params.Mode
+				modeMu.Unlock()
 				_ = shouldFollowerFindOrCreateSocial(mode)
 				atomic.AddInt64(&modeReads, 1)
 			}
@@ -674,15 +681,18 @@ func TestRace_Poll_ConcurrentParamsMutationAndPoll(t *testing.T) {
 				return
 			default:
 			}
-			// Hidden mutation (SMELL H7: TryFollowPartyLeader does this without caller knowledge).
+			modeMu.Lock()
 			params.Mode = evr.ModeSocialPublic
+			modeMu.Unlock()
 			time.Sleep(time.Millisecond)
+			modeMu.Lock()
 			params.Mode = evr.ModeArenaPublic
+			modeMu.Unlock()
 		}
 	}()
 
 	wg.Wait()
-	// If -race doesn't fire, at least confirm reads happened.
+	// Confirm concurrent reads actually happened.
 	require.Greater(t, atomic.LoadInt64(&modeReads), int64(0))
 }
 
@@ -1170,7 +1180,7 @@ func TestBoundary_LobbyGroup_GetLeader_FallsBackToExpectedInitialLeader(t *testi
 	}
 
 	ph := &PartyHandler{
-		members:             NewPartyPresenceList(4),
+		members:               NewPartyPresenceList(4),
 		expectedInitialLeader: expected,
 		// leader is nil (not yet set)
 	}

@@ -207,24 +207,30 @@ func TestLatencyHistory_RTTAtThreshold_IsAccepted(t *testing.T) {
 // finds no recent data (>5 min old), it sends a fresh ping request and waits
 // for the response. If no response arrives within 5 seconds, validation fails.
 func TestLatencyHistory_StaleData_IsIgnored(t *testing.T) {
-	// Setup
+	// Add() always timestamps new entries with time.Now() and treats its 4th
+	// argument as a prune cutoff: entries older than the cutoff are discarded.
+	// (LatestEntry itself does not filter by age — pruning is Add()'s job.)
 	history := NewLatencyHistory()
 	endpointIP := "192.168.1.100"
 	now := time.Now()
 
-	// Add stale entry (6 minutes old, exceeds preJoinPingMaxAge=5 minutes)
-	// LatencyHistory.Add() prunes expired entries, so the entry will not be stored
-	staleTime := now.Add(-6 * time.Minute)
-	history.Add(net.ParseIP(endpointIP), 150, 10, staleTime)
+	// Seed a genuinely stale entry directly (Add cannot backdate timestamps).
+	history.GameServerLatencies[endpointIP] = []LatencyHistoryItem{
+		{Timestamp: now.Add(-6 * time.Minute), RTT: 150 * time.Millisecond},
+	}
 
-	// Test: stale entry should be pruned and not returned
+	// A subsequent Add with a 5-minute cutoff must prune the stale entry while
+	// retaining the fresh one it just recorded.
+	cutoff := now.Add(-preJoinPingMaxAge)
+	history.Add(net.ParseIP(endpointIP), 80, 10, cutoff)
+
 	entry, found := history.LatestEntry(endpointIP)
+	require.True(t, found, "the freshly added entry should be present")
+	require.Equal(t, 80*time.Millisecond, entry.RTT,
+		"only the fresh entry should remain; the stale (>5 min old) one is pruned")
 
-	// Entry should NOT be found because Add() pruned it as expired
-	require.False(t, found,
-		"stale latency entry (>5 min old) should be pruned by Add() and not found by LatestEntry()")
-	require.Equal(t, time.Duration(0), entry.RTT,
-		"zero RTT should be returned for missing entry")
+	stored := history.GameServerLatencies[endpointIP]
+	require.Len(t, stored, 1, "the stale entry should have been pruned by Add()")
 }
 
 // TestLatencyHistory_MultipleEntries_LatestWins documents that when multiple
@@ -267,13 +273,13 @@ func TestLatencyHistory_MultipleEntries_LatestWins(t *testing.T) {
 // 5+ times in 3 minutes, failing validation each time, with no mechanism
 // to mark it as "bad" or skip it on the next attempt. This is because:
 //
-// 1. validatePreJoinPing has no fallback for arena/combat modes (social
-//    lobbies have a fallback at line 772 of evr_lobby_find.go)
-// 2. The matchmaker has no blacklist of "bad servers" for each player
-// 3. LatencyHistory.Add() stores measurements but has no "remove" or
-//    "blacklist" API — it only stores and retrieves RTT values
-// 4. So the cycle repeats: matchmaker picks server -> ping fails -> join
-//    fails -> player retries -> matchmaker picks same server again
+//  1. validatePreJoinPing has no fallback for arena/combat modes (social
+//     lobbies have a fallback at line 772 of evr_lobby_find.go)
+//  2. The matchmaker has no blacklist of "bad servers" for each player
+//  3. LatencyHistory.Add() stores measurements but has no "remove" or
+//     "blacklist" API — it only stores and retrieves RTT values
+//  4. So the cycle repeats: matchmaker picks server -> ping fails -> join
+//     fails -> player retries -> matchmaker picks same server again
 func TestLatencyHistory_ReflectsBugBehavior_NoNegativeCaching(t *testing.T) {
 	// Arrange: simulate a player's latency history with the same bad measurement
 	// being checked 5 times by validatePreJoinPing (as seen in production logs)

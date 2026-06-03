@@ -42,10 +42,12 @@ func TestGenerateLinkTicketWithExistingToken(t *testing.T) {
 	ticket := generateLinkTicket(linkTickets, *evrID, "127.0.0.1", loginData)
 
 	assert.NotNil(t, ticket, "Expected a non-nil link ticket")
+	assert.Contains(t, linkTickets, ticket.Code, "Expected linkTickets to contain the code")
 
-	assert.Equal(t, loginData, ticket.LoginProfile, "Expected LoginRequest to match")
-	assert.Contains(t, linkTickets, ticket.Code, "Expected linkTickets to contain the generated code")
-	assert.NotEqual(t, "existing-code", ticket.Code, "Expected a new code to be generated")
+	// generateLinkTicket is idempotent per XPID (since "Implement new
+	// authentication flow"): a pending ticket for the same device is reused
+	// rather than orphaned by minting a fresh code.
+	assert.Equal(t, "existing-code", ticket.Code, "Expected the existing ticket for this XPID to be reused")
 }
 
 type mockSession struct {

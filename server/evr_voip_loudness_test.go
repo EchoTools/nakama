@@ -201,7 +201,8 @@ func TestStatisticBoardIDForLoudness(t *testing.T) {
 
 	boardID := StatisticBoardID(groupID, mode, statName, resetSchedule)
 
-	expectedID := "test-group-123:echo_arena_public:PlayerLoudness:daily"
+	// ModeArenaPublic.String() is the symbol token "echo_arena", not "echo_arena_public".
+	expectedID := "test-group-123:echo_arena:PlayerLoudness:daily"
 	if boardID != expectedID {
 		t.Errorf("Expected board ID '%s', got '%s'", expectedID, boardID)
 	}
