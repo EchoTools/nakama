@@ -83,6 +83,48 @@ type Endpoint struct {
 	Port       uint16
 }
 
+// cgnatRange is the RFC 6598 shared address space (Carrier-Grade NAT), which
+// net.IP.IsPrivate does not classify as private.
+var cgnatRange = net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
+// isNonRoutableIP reports whether ip is an address that a remote client on the
+// public internet cannot reach: RFC1918 private ranges (10/8, 172.16/12,
+// 192.168/16), RFC 6598 CGNAT (100.64/10), loopback (127/8, ::1), link-local
+// (169.254/16, fe80::/10), the unspecified address, and multicast — plus their
+// IPv6 equivalents. A nil IP is treated as non-routable so it is skipped by the
+// client rather than serialized as "<nil>".
+func isNonRoutableIP(ip net.IP) bool {
+	if ip == nil || ip.IsUnspecified() {
+		return true
+	}
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsPrivate() {
+		return true
+	}
+	if ip4 := ip.To4(); ip4 != nil && cgnatRange.Contains(ip4) {
+		return true
+	}
+	return false
+}
+
+// SanitizedForClient returns a copy of the endpoint suitable for sending to a
+// remote game client. If the external address is non-routable (a private,
+// CGNAT, loopback, or link-local address that a remote client cannot reach), it
+// is replaced with 0.0.0.0, which the EVR client interprets as "skip this
+// address" and falls back to the internal address. The internal address is
+// intentionally left untouched: it is expected to be a LAN address used by
+// same-network clients to connect directly, and zeroing it would break that
+// path. The port and a routable external address are always preserved, so a
+// correctly configured server is sent unchanged.
+//
+// See nakama issue #465.
+func (e Endpoint) SanitizedForClient() Endpoint {
+	out := e
+	if isNonRoutableIP(out.ExternalIP) {
+		out.ExternalIP = net.IPv4zero
+	}
+	return out
+}
+
 func ParseEndpointID(id string) (internalIP, externalIP net.IP, port uint16) {
 	components := strings.SplitN(id, ":", 3)
 	switch len(components) {
