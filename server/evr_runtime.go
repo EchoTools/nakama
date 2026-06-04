@@ -219,43 +219,17 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		}
 	}
 
-	// Initialize event journaling system
-	var eventJournal *EventJournal
-	var telemetryManager *LobbyTelemetryManager
-	var telemetryAPI *TelemetryAPI
-	var matchSummaryStore *MatchSummaryStore
-
-	// Use existing Redis client if available, otherwise try to create a new one
+	// Connect the Redis client used by the event dispatch journal-flush machinery.
+	// Prefer a dedicated journal URI, otherwise reuse the VRML Redis connection.
 	var journalRedisClient *redis.Client
 	if vars["JOURNAL_REDIS_URI"] != "" {
 		if journalRedisClient, err = connectRedis(ctx, vars["JOURNAL_REDIS_URI"]); err != nil {
 			logger.Warn("Failed to connect to Redis for event journaling", zap.Error(err))
 		}
 	} else if vars["VRML_REDIS_URI"] != "" {
-		// Reuse VRML Redis connection for journaling if no dedicated URI is provided
 		if journalRedisClient, err = connectRedis(ctx, vars["VRML_REDIS_URI"]); err != nil {
 			logger.Warn("Failed to connect to Redis for event journaling", zap.Error(err))
 		}
-	}
-
-	if journalRedisClient != nil {
-		eventJournal = NewEventJournal(journalRedisClient, logger)
-		telemetryManager = NewLobbyTelemetryManager(nk, logger, eventJournal)
-
-		if mongoClient != nil {
-			matchSummaryStore = NewMatchSummaryStore(mongoClient, "nakama", "match_summaries")
-		}
-
-		telemetryAPI = NewTelemetryAPI(logger, db, nk, telemetryManager, eventJournal, matchSummaryStore)
-
-		// Register telemetry API endpoints
-		if err := telemetryAPI.RegisterTelemetryEndpoints(initializer); err != nil {
-			logger.WithField("error", err).Warn("Failed to register telemetry API endpoints")
-		}
-
-		logger.Info("Event journaling and telemetry systems initialized")
-	} else {
-		logger.Info("Redis not available, event journaling and telemetry systems disabled")
 	}
 
 	// Register the event dispatch
