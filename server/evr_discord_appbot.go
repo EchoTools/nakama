@@ -2,9 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/binary"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -2626,10 +2626,20 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				ticker := time.NewTicker(15 * time.Second)
 				defer ticker.Stop()
 
+				// Discord interaction tokens expire ~15 minutes after the
+				// interaction is created. Bound the monitor's lifetime to just
+				// under that as belt-and-suspenders so it never edits with a
+				// dead token even if expiry detection is missed.
+				deadline := time.NewTimer(14 * time.Minute)
+				defer deadline.Stop()
+
 				// Monitor the match and update the interaction
 				for {
 					select {
 					case <-d.ctx.Done():
+						return
+					case <-deadline.C:
+						logger.Info("interaction token lifetime reached; stopping match monitor")
 						return
 					case <-ticker.C:
 					}
@@ -2646,6 +2656,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						if _, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 							Embeds: &responseContent.Data.Embeds,
 						}); err != nil {
+							if isInteractionTokenExpired(err) {
+								logger.Info("interaction token expired; stopping match monitor")
+								return
+							}
 							logger.Error("Failed to update interaction", zap.Error(err))
 						}
 						return
@@ -2666,6 +2680,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					if _, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 						Embeds: &responseContent.Data.Embeds,
 					}); err != nil {
+						if isInteractionTokenExpired(err) {
+							logger.Info("interaction token expired; stopping match monitor")
+							return
+						}
 						logger.Error("Failed to update interaction", zap.Error(err))
 						return
 					}
@@ -3599,7 +3617,16 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if handler, ok := commandHandlers[appCommandName]; ok {
 				err := d.handleInteractionApplicationCommand(ctx, logger, s, i, appCommandName, handler)
 				if err != nil {
-					logger.WithField("err", err).Error("Failed to handle interaction")
+					// Expected, user-facing failures (rate limits, no free
+					// servers, player-not-found) are benign outcomes of normal
+					// usage and log at Warn so they don't trip error dashboards.
+					// The deferred response is still edited with err.Error()
+					// below either way.
+					if isExpectedUserError(err) {
+						logger.WithField("err", err).Warn("Failed to handle interaction")
+					} else {
+						logger.WithField("err", err).Error("Failed to handle interaction")
+					}
 					// Queue the user to be updated in the cache
 					userID := d.cache.DiscordIDToUserID(user.ID)
 					groupID := d.cache.GuildIDToGroupID(i.GuildID)
@@ -4788,6 +4815,44 @@ func (d *DiscordAppBot) getSkipDeferredACKCommands() map[string]bool {
 func IsDiscordErrorCode(err error, code int) bool {
 	var restError *discordgo.RESTError
 	if errors.As(err, &restError) && restError.Message != nil && restError.Message.Code == code {
+		return true
+	}
+	return false
+}
+
+// isInteractionTokenExpired reports whether err indicates the Discord
+// interaction/webhook token is no longer usable. Discord interaction tokens
+// expire ~15 minutes after the interaction is created; once expired,
+// InteractionResponseEdit (a webhook edit under the hood) returns one of:
+//
+//	50027 — Invalid Webhook Token
+//	10015 — Unknown Webhook
+//
+// The create-match monitor uses this to stop cleanly instead of spamming the
+// error log every 15s for the life of the process.
+func isInteractionTokenExpired(err error) bool {
+	return IsDiscordErrorCode(err, 50027) || IsDiscordErrorCode(err, 10015)
+}
+
+// isExpectedUserError reports whether err is an expected, user-facing failure
+// that should be logged at Warn rather than Error. These are benign outcomes
+// of normal usage (rate limits, no free game servers, looking up a player who
+// is not in a match) and must not trip error dashboards. Genuinely unexpected
+// failures (DB/storage/internal) return false and stay at Error.
+func isExpectedUserError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// gRPC rate-limit (e.g. /create command rate limiter).
+	if status.Code(err) == codes.ResourceExhausted {
+		return true
+	}
+	// Allocation could not find a free game server.
+	if errors.Is(err, ErrMatchmakingNoAvailableServers) {
+		return true
+	}
+	// A targeted player was not found in the requested match/guild.
+	if errors.Is(err, ErrPlayerNotFound) || strings.Contains(err.Error(), "player not found") {
 		return true
 	}
 	return false
