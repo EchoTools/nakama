@@ -147,23 +147,37 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 	// Include global game servers
 	addPresencesFunc(uuid.Nil.String())
 
-	for _, result := range response.Results {
-		ip := result.ExternalIP
-		if result.ExternalIP.IsUnspecified() {
-			ip = result.InternalIP
-		}
-
-		if knownIPs != nil {
-			if _, ok := knownIPs[ip.String()]; !ok {
-				logger.Debug("dropping ping result for unknown game server IP", zap.String("ip", ip.String()))
-				continue
+	// applyPingResults re-applies this session's just-received ping samples onto
+	// the (possibly refreshed) latencyHistory. It is run once now and re-run on
+	// each version-conflict retry after StorableWriteWithRetry re-reads the
+	// concurrent winner's object, so a user's concurrent sessions merge their
+	// samples losslessly instead of one clobbering the other. The Add call keeps
+	// limit/expiry pruning inside the closure so the merged result stays bounded.
+	applyPingResults := func() error {
+		for _, result := range response.Results {
+			ip := result.ExternalIP
+			if result.ExternalIP.IsUnspecified() {
+				ip = result.InternalIP
 			}
-		}
 
-		latencyHistory.Add(ip, int(result.PingMilliseconds), limit, expiry)
+			if knownIPs != nil {
+				if _, ok := knownIPs[ip.String()]; !ok {
+					logger.Debug("dropping ping result for unknown game server IP", zap.String("ip", ip.String()))
+					continue
+				}
+			}
+
+			latencyHistory.Add(ip, int(result.PingMilliseconds), limit, expiry)
+		}
+		return nil
 	}
 
-	if err := StorableWrite(ctx, p.nk, session.UserID().String(), latencyHistory); err != nil {
+	// Apply this session's samples once before the first write attempt.
+	if err := applyPingResults(); err != nil {
+		return status.Errorf(codes.Internal, "failed to apply ping results: %v", err)
+	}
+
+	if err := StorableWriteWithRetry(ctx, p.nk, session.UserID().String(), latencyHistory, applyPingResults); err != nil {
 		return status.Errorf(codes.Internal, "failed to write latency history: %v", err)
 	}
 
