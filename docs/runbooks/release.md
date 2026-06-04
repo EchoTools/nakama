@@ -244,13 +244,18 @@ Focus ONLY on private match hosting/config/allocation. Not public queues.
 ```
 
 #### 6. Enforcers (#enforcer-updates) — `player` + `enforcer`
-Enforcer notes always include player-facing changes plus any enforcer-specific changes.
-If there are no enforcer-specific changes, still include the player-facing items.
+**Send the COMPLETE player release notes to the enforcers channel — every player item, in
+full, not abbreviated.** Enforcers are players too: the #enforcer-updates post gets the
+entire #release-notes (Players) content verbatim, followed by any enforcer-specific changes.
+Do NOT reduce the player items to short one-liners for this channel.
 ```
 ## Enforcer Updates <tag>
 
-* <Short one-line description>
-* <Short one-line description>
+<The full player release notes — IDENTICAL to the #release-notes (Players) post: every
+topic and every item, in full. Copy the player notes here verbatim.>
+
+### Enforcer-specific
+* <enforcer-only change — omit this section entirely if there are none>
 
 -# [Full Changelog](...)
 ```
@@ -283,9 +288,10 @@ If there are no enforcer-specific changes, still include the player-facing items
   content and the runbook does not explicitly require player items, skip that channel
   entirely. Never post a "no updates" message. Never post to a channel just because
   it exists.
-- **IGMs (enforcers) always get player items.** Per the template: enforcer notes include
-  player-facing changes PLUS any enforcer-specific changes. Even if there are no
-  enforcer-specific changes, still include the player items.
+- **IGMs (enforcers) get the FULL player release notes — always, verbatim.** The
+  #enforcer-updates post MUST contain the complete #release-notes (Players) content — every
+  topic and every item, in full, not shortened to one-liners — PLUS any enforcer-specific
+  changes. Never abbreviate the player items for enforcers and never skip them.
 
 ### Output format
 
