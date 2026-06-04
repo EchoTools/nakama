@@ -18,8 +18,8 @@ import (
 
 	"fmt"
 
-	"github.com/bwmarrin/discordgo"
 	rtapi "buf.build/gen/go/echotools/nevr-api/protocolbuffers/go/gameservice/v1"
+	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -35,6 +35,43 @@ const RegionCodeMaxLength = 32
 var (
 	ErrGameServerPresenceNotFound = errors.New("game server presence not found")
 )
+
+// cgnatRange is the RFC 6598 shared address space (Carrier-Grade NAT). net.IP's
+// IsPrivate does NOT classify it as private, so it is checked explicitly.
+var cgnatRange = net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
+// isInternalIP reports whether ip is a genuine private/internal address that a
+// remote client on the public internet cannot reach: RFC1918 (10/8, 172.16/12,
+// 192.168/16), RFC6598 CGNAT (100.64/10), loopback (127/8, ::1), and link-local
+// (169.254/16, fe80::/10). A nil IP is not internal (callers treat nil as the
+// already-empty slot). Anything that is not internal is a routable public
+// address, which is forbidden in the endpoint's internal slot (issue #465).
+func isInternalIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() {
+		return true
+	}
+	if ip4 := ip.To4(); ip4 != nil && cgnatRange.Contains(ip4) {
+		return true
+	}
+	return false
+}
+
+// normalizeInternalIP enforces the issue #465 invariant that the endpoint's
+// internal slot holds a genuine private/internal address or nothing. A
+// private/internal address is returned unchanged; a routable public address is
+// normalized to nil (dropped) so the server still registers and serves via its
+// external IP. The second return reports whether a public address was dropped,
+// so the caller can warn the operator that their internal_ip is misconfigured.
+// A nil input returns nil with dropped=false (the slot was already empty).
+func normalizeInternalIP(ip net.IP) (normalized net.IP, dropped bool) {
+	if ip == nil || isInternalIP(ip) {
+		return ip, false
+	}
+	return nil, true
+}
 
 // sendDiscordServerError sends a formatted error message about a specific game server to the user on discord
 func sendDiscordServerError(internalIP net.IP, externalIP net.IP, port uint16, serverID uint64, errMsg string, discordId string, logger *zap.Logger, bot *discordgo.Session) {
@@ -146,6 +183,19 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	// Validate the internal IP is actually parseable (reject garbage input)
 	if request.InternalIpAddress != "" && internalIP == nil {
 		return errFailedRegistration(session, logger, fmt.Errorf("invalid internal IP address: %s", request.InternalIpAddress), evr.BroadcasterRegistration_Unknown)
+	}
+
+	// Enforce the single-external-IP topology (issue #465 / ADR 0001): the
+	// internal endpoint slot must be a genuine private/internal address or
+	// empty. A routable public address here is publicly reachable, so the EVR
+	// client tries it and stalls when it ICMP-rejects or times out. Normalize a
+	// public internal IP to empty so the server still registers and serves via
+	// its external IP; the registration is not rejected.
+	if normalized, dropped := normalizeInternalIP(internalIP); dropped {
+		logger.Warn("Game server internal_ip is a public address; normalizing to empty (server will serve via external IP). Configure a private/internal address (RFC1918, CGNAT 100.64/10, loopback, or link-local) or leave it empty.",
+			zap.String("internal_ip", internalIP.String()),
+			zap.Uint64("server_id", serverID))
+		internalIP = normalized
 	}
 
 	isNative := false
@@ -316,7 +366,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 
 		// Send audit message to all guilds this server is hosting for
 		auditMessage := fmt.Sprintf("Game server registered with 'novalidation' tag by <@%s> (Server ID: %d, internal: %s:%d, external: %s:%d)",
-				params.DiscordID(), config.ServerID, config.Endpoint.InternalIP, config.Endpoint.Port, config.Endpoint.ExternalIP, config.Endpoint.Port)
+			params.DiscordID(), config.ServerID, config.Endpoint.InternalIP, config.Endpoint.Port, config.Endpoint.ExternalIP, config.Endpoint.Port)
 		for _, gg := range guildGroups {
 			go func(guildGroup *GuildGroup) {
 				if _, err := AuditLogSendGuild(p.discordCache.dg, guildGroup, auditMessage); err != nil {
@@ -327,7 +377,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 
 		// Send DM to the user
 		dmMessage := fmt.Sprintf("⚠️ Your game server (Server ID: %d, internal: %s:%d, external: %s:%d) has been registered with 'novalidation' tag. This is for testing purposes only. The server will not be validated for connectivity.",
-				config.ServerID, config.Endpoint.InternalIP, config.Endpoint.Port, config.Endpoint.ExternalIP, config.Endpoint.Port)
+			config.ServerID, config.Endpoint.InternalIP, config.Endpoint.Port, config.Endpoint.ExternalIP, config.Endpoint.Port)
 		if _, err := SendUserMessage(ctx, p.discordCache.dg, params.DiscordID(), dmMessage); err != nil {
 			logger.Warn("Failed to send DM to user", zap.Error(err))
 		}
