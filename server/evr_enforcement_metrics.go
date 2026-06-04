@@ -12,7 +12,6 @@ import (
 
 const (
 	StorageCollectionEnforcementMetrics = "EnforcementMetrics"
-	StorageKeyEnforcementMetrics        = "metrics"
 )
 
 // EnforcementActionMetrics tracks statistics about enforcement actions
@@ -53,18 +52,23 @@ func NewEnforcementActionMetrics(groupID string) *EnforcementActionMetrics {
 }
 
 func (m *EnforcementActionMetrics) StorageMeta() StorableMetadata {
+	// The object is per-guild and keyed by the guild groupID. The storage OWNER
+	// (UserID) is supplied at write time as the bot user — NOT the groupID — to
+	// satisfy the storage table's FOREIGN KEY (user_id) REFERENCES users(id).
+	// Mirrors GuildGroupState. See #417 / #420.
 	return StorableMetadata{
 		Collection:      StorageCollectionEnforcementMetrics,
-		Key:             StorageKeyEnforcementMetrics,
+		Key:             m.GroupID,
 		PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
 		PermissionWrite: runtime.STORAGE_PERMISSION_NO_WRITE,
 		Version:         m.version,
-		UserID:          m.GroupID,
 	}
 }
 
 func (m *EnforcementActionMetrics) SetStorageMeta(meta StorableMetadata) {
-	m.GroupID = meta.UserID
+	// The group id lives in the Key (the owner is the bot user), so derive
+	// GroupID from the Key, not the owner.
+	m.GroupID = meta.Key
 	m.version = meta.Version
 }
 
@@ -77,7 +81,8 @@ func EnforcementActionMetricsFromStorageObject(obj *api.StorageObject) (*Enforce
 	if err := json.Unmarshal([]byte(obj.GetValue()), metrics); err != nil {
 		return nil, err
 	}
-	metrics.GroupID = obj.GetUserId()
+	// The group id lives in the Key; the owner (UserId) is the bot user.
+	metrics.GroupID = obj.GetKey()
 	metrics.version = obj.GetVersion()
 	return metrics, nil
 }
@@ -204,10 +209,14 @@ func (m *EnforcementActionMetrics) CleanupOldMetrics(retentionDays int) int {
 // LoadEnforcementMetrics loads the enforcement metrics for a guild
 func LoadEnforcementMetrics(ctx context.Context, nk runtime.NakamaModule, groupID string) (*EnforcementActionMetrics, error) {
 	metrics := NewEnforcementActionMetrics(groupID)
-	if err := StorableRead(ctx, nk, groupID, metrics, true); err != nil {
+	// The metrics object is owned by the bot user and keyed by the groupID.
+	if err := StorableRead(ctx, nk, ServiceSettings().DiscordBotUserID, metrics, true); err != nil {
 		// If not found, return a new empty metrics object (don't treat as error)
 		return metrics, nil
 	}
+	// StorableRead/SetStorageMeta restore GroupID from the Key; ensure it stays
+	// the requested group even on the not-found/create path.
+	metrics.GroupID = groupID
 	return metrics, nil
 }
 
@@ -215,7 +224,8 @@ func LoadEnforcementMetrics(ctx context.Context, nk runtime.NakamaModule, groupI
 func SaveEnforcementMetrics(ctx context.Context, nk runtime.NakamaModule, metrics *EnforcementActionMetrics) error {
 	// Cleanup old metrics before saving
 	metrics.CleanupOldMetrics(90)
-	return StorableWrite(ctx, nk, metrics.GroupID, metrics)
+	// Owner is the bot user (an existing users row); the groupID is the Key.
+	return StorableWrite(ctx, nk, ServiceSettings().DiscordBotUserID, metrics)
 }
 
 // RecordEnforcementMetrics records an enforcement action in the metrics
