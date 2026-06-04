@@ -21,7 +21,7 @@ The root cause is narrow: a **routable (public) address sitting in the internal 
 
 1. **Game servers are supported with a single external IP only.** The external address is the one nakama observes at registration (`session.ClientIP()`), which is inherently the real public address.
 2. **The `InternalIP` slot MUST be a genuine private/internal address or empty.** Permitted: RFC1918 (`10/8`, `172.16/12`, `192.168/16`), CGNAT (`100.64/10`), loopback, link-local. A public IP is never permitted in the internal slot.
-3. **Enforced at game-server registration** (`server/evr_pipeline_gameserver.go`). A non-private internal IP is normalized to empty (the server still registers and serves via its external IP) with an operator warning. *(Reject-vs-normalize is the one open call — see Consequences.)*
+3. **Enforced at game-server registration** (`server/evr_pipeline_gameserver.go`). A non-private internal IP is **normalized to empty** (the server still registers and serves via its external IP) with an operator warning. We chose normalize over reject (decided 2026-06-03): it fixes the connection bug without risking a surprise outage for a currently-misconfigured live server on deploy.
 4. **`Endpoint.IsValid()` / `MarshalJSON` treat the internal slot as optional** — external IP + port are sufficient. An empty internal serializes as `0.0.0.0` (the client's "skip this address" value).
 
 ## Consequences
@@ -30,4 +30,4 @@ The root cause is narrow: a **routable (public) address sitting in the internal 
 - Remote clients connect via external (the internal is non-routable and skipped); LAN players (no hairpin) keep the internal path.
 - Hosts with two *public* IPs must designate one as external; the second is not advertised. This is acceptable — single-external-IP is our supported topology.
 - **#469 (per-client endpoint filtering) is unnecessary and closed.** This ADR implements #465.
-- **Open call for the implementing PR:** normalize (drop the bad internal, keep the server online — *recommended, no surprise outages*) vs. reject the registration outright (forces config fix but can take a currently-misconfigured live server offline on deploy).
+- **Decision (2026-06-03): normalize**, not reject. A misconfigured server is kept online (bad internal dropped + operator warned) rather than refused — chosen to avoid taking a currently-misconfigured live server offline on deploy. Reject remains a one-line call-site change if stricter enforcement is ever wanted.
