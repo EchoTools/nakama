@@ -87,6 +87,123 @@ func TestEndpoint_MarshalJSON(t *testing.T) {
 		t.Errorf("expected %s, got %s", expectedResult, resultString)
 	}
 }
+
+// TestEndpoint_IsValid covers issue #465: the internal slot is optional. An
+// endpoint with only an external IP + port is valid; missing external or port
+// is not.
+func TestEndpoint_IsValid(t *testing.T) {
+	tests := []struct {
+		name string
+		in   Endpoint
+		want bool
+	}{
+		{
+			name: "both set is valid",
+			in:   Endpoint{InternalIP: net.ParseIP("192.168.1.10"), ExternalIP: net.ParseIP("203.0.113.7"), Port: 6792},
+			want: true,
+		},
+		{
+			name: "external-only (internal nil) is valid",
+			in:   Endpoint{ExternalIP: net.ParseIP("203.0.113.7"), Port: 6792},
+			want: true,
+		},
+		{
+			name: "missing external is invalid",
+			in:   Endpoint{InternalIP: net.ParseIP("192.168.1.10"), Port: 6792},
+			want: false,
+		},
+		{
+			name: "missing port is invalid",
+			in:   Endpoint{ExternalIP: net.ParseIP("203.0.113.7")},
+			want: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.in.IsValid(); got != tc.want {
+				t.Errorf("IsValid() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestEndpoint_MarshalJSON_NilInternal covers issue #465: when the internal
+// slot is empty it serializes as 0.0.0.0 (the client's "skip this address"
+// value) rather than dropping the endpoint, and the both-set case is unchanged.
+func TestEndpoint_MarshalJSON_NilInternal(t *testing.T) {
+	tests := []struct {
+		name string
+		in   Endpoint
+		want string
+	}{
+		{
+			name: "nil internal serializes as 0.0.0.0",
+			in:   Endpoint{ExternalIP: net.ParseIP("203.0.113.7"), Port: 6792},
+			want: "0.0.0.0:203.0.113.7:6792",
+		},
+		{
+			name: "both set unchanged",
+			in:   Endpoint{InternalIP: net.ParseIP("192.168.1.10"), ExternalIP: net.ParseIP("203.0.113.7"), Port: 6792},
+			want: "192.168.1.10:203.0.113.7:6792",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b, err := tc.in.MarshalJSON()
+			if err != nil {
+				t.Fatalf("MarshalJSON: %v", err)
+			}
+			var got string
+			if err := json.Unmarshal(b, &got); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("MarshalJSON() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestEndpoint_Stream_NilInternal covers issue #465: the wire encoder writes
+// 0.0.0.0 for a nil internal IP, and the encoded form round-trips to a
+// wire-valid endpoint (internal decodes back to 0.0.0.0, external + port
+// preserved).
+func TestEndpoint_Stream_NilInternal(t *testing.T) {
+	in := Endpoint{ExternalIP: net.ParseIP("203.0.113.7"), Port: 6792}
+
+	enc := NewEasyStream(EncodeMode, nil)
+	if err := in.Stream(enc); err != nil {
+		t.Fatalf("encode Stream: %v", err)
+	}
+	encoded := enc.Bytes()
+
+	// 4 bytes internal + 4 bytes external + 2 bytes port = 10 bytes.
+	if len(encoded) != 10 {
+		t.Fatalf("encoded length = %d, want 10", len(encoded))
+	}
+	// Internal slot (first 4 bytes) must be 0.0.0.0.
+	for i := 0; i < net.IPv4len; i++ {
+		if encoded[i] != 0 {
+			t.Fatalf("internal slot byte %d = %d, want 0 (0.0.0.0)", i, encoded[i])
+		}
+	}
+
+	var out Endpoint
+	dec := NewEasyStream(DecodeMode, encoded)
+	if err := out.Stream(dec); err != nil {
+		t.Fatalf("decode Stream: %v", err)
+	}
+	if !out.InternalIP.Equal(net.IPv4zero) {
+		t.Errorf("decoded InternalIP = %v, want 0.0.0.0", out.InternalIP)
+	}
+	if !out.ExternalIP.Equal(in.ExternalIP) {
+		t.Errorf("decoded ExternalIP = %v, want %v", out.ExternalIP, in.ExternalIP)
+	}
+	if out.Port != in.Port {
+		t.Errorf("decoded Port = %d, want %d", out.Port, in.Port)
+	}
+}
+
 func TestEndpoint_UnmarshalJSON(t *testing.T) {
 	testCases := []struct {
 		name           string

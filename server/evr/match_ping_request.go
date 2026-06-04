@@ -108,12 +108,21 @@ func FromEndpointID(id string) Endpoint {
 	}
 }
 
-// MarshalJSON marshals the endpoint to a string of "internalIP:externalIP:port"
+// MarshalJSON marshals the endpoint to a string of "internalIP:externalIP:port".
+//
+// The internal slot is optional (issue #465): a server is supported with a
+// single external IP. When the internal IP is empty it is serialized as
+// 0.0.0.0, which the EVR client interprets as "skip this address" and falls
+// back to the external address. An external IP and port are required.
 func (e Endpoint) MarshalJSON() ([]byte, error) {
-	if e.InternalIP == nil || e.ExternalIP == nil || e.Port == 0 {
+	if e.ExternalIP == nil || e.Port == 0 {
 		return json.Marshal("")
 	}
-	s := fmt.Sprintf("%s:%s:%d", e.InternalIP.String(), e.ExternalIP.String(), e.Port)
+	internal := e.InternalIP
+	if internal == nil {
+		internal = net.IPv4zero
+	}
+	s := fmt.Sprintf("%s:%s:%d", internal.String(), e.ExternalIP.String(), e.Port)
 	return json.Marshal(s)
 }
 
@@ -164,14 +173,25 @@ func (e Endpoint) GetExternalIP() string {
 	return ipString(e.ExternalIP)
 }
 
-// IsValid returns true if the endpoint has all required fields set.
+// IsValid returns true if the endpoint has the required fields set.
+//
+// The internal slot is optional (issue #465): a routable external IP and a
+// port are sufficient. The internal IP may be nil, in which case the wire and
+// string forms serialize it as 0.0.0.0 (the client's "skip this address"
+// value).
 func (e Endpoint) IsValid() bool {
-	return e.InternalIP != nil && e.ExternalIP != nil && e.Port != 0
+	return e.ExternalIP != nil && e.Port != 0
 }
 
-// String returns a string of "internalIP:externalIP:port"
+// String returns a string of "internalIP:externalIP:port". An empty internal
+// slot is rendered as 0.0.0.0 (issue #465), matching the wire/JSON form and the
+// client's "skip this address" value.
 func (e Endpoint) String() string {
-	return fmt.Sprintf("%s:%s:%d", ipString(e.InternalIP), ipString(e.ExternalIP), e.Port)
+	internal := ipString(e.InternalIP)
+	if e.InternalIP == nil {
+		internal = net.IPv4zero.String()
+	}
+	return fmt.Sprintf("%s:%s:%d", internal, ipString(e.ExternalIP), e.Port)
 }
 
 // EndpointFromString returns an Endpoint from a string of "internalIP:externalIP:port"
