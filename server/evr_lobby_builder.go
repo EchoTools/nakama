@@ -88,10 +88,57 @@ func (b *LobbyBuilder) SetSkillBasedMatchmaker(sbmm *SkillBasedMatchmaker) {
 }
 
 func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
-	// build matches one at a time.
 	for _, entrants := range entries {
+		// Save entrants before buildMatch may modify them in-place.
+		saved := make([]*MatchmakerEntry, len(entrants))
+		copy(saved, entrants)
+
 		if _, err := b.buildMatch(b.logger, entrants); err != nil {
 			b.logger.With(zap.Any("entries", entries)).Error("Failed to build match", zap.Error(err))
+			// Reinsert the matched entries back into the matchmaker so the
+			// players aren't left in limbo — their tickets were already removed
+			// from the index before handleMatchedEntries was called.
+			if mm := globalMatchmaker.Load(); mm != nil {
+				byTicket := make(map[string][]*MatchmakerEntry)
+				for _, e := range saved {
+					byTicket[e.Ticket] = append(byTicket[e.Ticket], e)
+				}
+				extracts := make([]*MatchmakerExtract, 0, len(byTicket))
+				for ticket, entries := range byTicket {
+					presences := make([]*MatchmakerPresence, len(entries))
+					for i, e := range entries {
+						presences[i] = e.Presence
+					}
+					isParty := entries[0].PartyId != ""
+					sid := entries[0].Presence.SessionId
+					if isParty {
+						sid = "" // party tickets use PartyId, not SessionID
+					}
+				// Use a wildcard query for reinserted tickets. The original
+				// query is not stored on MatchmakerEntry — it is only on
+				// MatchmakerIndex. The EVR processor applies game_mode,
+				// division, and other filters downstream regardless.
+				extracts = append(extracts, &MatchmakerExtract{
+					Ticket:            ticket,
+					Presences:         presences,
+					SessionID:         sid,
+					PartyId:           entries[0].PartyId,
+					Query:             "*",
+						MinCount:          2,
+						MaxCount:          100,
+						CountMultiple:     2,
+						StringProperties:  entries[0].StringProperties,
+						NumericProperties: entries[0].NumericProperties,
+						Count:             len(entries),
+						Intervals:         0, // reset so it gets a full lifetime
+						CreatedAt:         time.Now().UTC().UnixNano(),
+						Node:              entries[0].Presence.Node,
+					})
+				}
+				if err := mm.Insert(extracts); err != nil {
+					b.logger.Error("Failed to reinsert matchmaker entries after build failure", zap.Error(err))
+				}
+			}
 			return
 		}
 	}
@@ -531,7 +578,12 @@ func repairSplitTicketTeams(logger *zap.Logger, teams [2][]*MatchmakerEntry) ([2
 			}
 
 			if len(soloSwapSlots) < len(misplacedSlots) {
-				return teams, fmt.Errorf("failed to repair split ticket %q: need %d solo swaps on team %d, found %d", ticket, len(misplacedSlots), targetTeam, len(soloSwapSlots))
+				logger.Warn("Split ticket cannot be repaired — no solos available to swap, accepting split",
+					zap.String("ticket", ticket),
+					zap.Int("misplaced", len(misplacedSlots)),
+					zap.Int("team", targetTeam),
+					zap.Int("solo_swaps_found", len(soloSwapSlots)))
+				break
 			}
 
 			for i, sourceSlot := range misplacedSlots {
