@@ -721,7 +721,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				return
 			}
 
-			if err := LobbyJoinEntrants(logger, b.matchRegistry, b.tracker, session, serverSession, label, p); err != nil {
+			if err := LobbyJoinEntrants(logger, asGoNakamaModule(b.nk), b.matchRegistry, b.tracker, session, serverSession, label, p); err != nil {
 				logger.Error("Failed to join entrant to match", zap.String("mid", label.ID.UUID.String()), zap.String("uid", p.GetUserId()), zap.Error(err))
 				erroredCh <- p
 				return

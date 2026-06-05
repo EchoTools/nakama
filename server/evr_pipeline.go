@@ -273,6 +273,11 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		loginAttemptCache: NewLocalLoginAttemptCache(),
 	}
 
+	// Wire the guild group registry into the nk module so the shared per-guild
+	// enforcement gate (evaluateEntrantEnforcement) can resolve guild config for
+	// every placement path that routes through LobbyJoinEntrants.
+	evrPipeline.nk.SetGuildGroupRegistry(guildGroupRegistry)
+
 	// Create and store the early quit message trigger for sending SNS messages to players
 	earlyQuitMessageTrigger := NewSNSEarlyQuitMessageTrigger(evrPipeline, logger, nk, db)
 	evrPipeline.earlyQuitMessageTrigger = earlyQuitMessageTrigger

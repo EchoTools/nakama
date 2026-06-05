@@ -59,7 +59,15 @@ func SetNextMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		request.TargetUserID = callerUserID
 	}
 
-	if request.TargetUserID != callerUserID {
+	// Resolve operator status once. This RPC is operator-privileged: it can place
+	// an arbitrary user into an arbitrary match. Two distinct operations gate on it:
+	//   1. Targeting ANOTHER user (request.TargetUserID != callerUserID).
+	//   2. join_immediately — an immediate forced join that bypasses the normal
+	//      request-driven lobbyAuthorize path. A self-target join_immediately must
+	//      NOT let an unprivileged user skip the operator/enforcement check, so it
+	//      is operator-gated regardless of target.
+	isOtherTarget := request.TargetUserID != callerUserID
+	if isOtherTarget || request.JoinImmediately {
 		isGlobalOperator := false
 		if perms := PermissionsFromContext(ctx); perms != nil {
 			isGlobalOperator = perms.IsGlobalOperator
@@ -72,7 +80,10 @@ func SetNextMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		}
 
 		if !isGlobalOperator {
-			return "", runtime.NewError("You do not have permission to set the next match for another user", StatusPermissionDenied)
+			if isOtherTarget {
+				return "", runtime.NewError("You do not have permission to set the next match for another user", StatusPermissionDenied)
+			}
+			return "", runtime.NewError("You do not have permission to immediately join a match via this RPC", StatusPermissionDenied)
 		}
 	}
 
@@ -204,7 +215,7 @@ func tryImmediateJoin(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 
 	// Join the user into the match
 	zapLogger := RuntimeLoggerToZapLogger(logger)
-	if err := LobbyJoinEntrants(zapLogger, _nk.matchRegistry, _nk.tracker, session, serverSession, label, presence); err != nil {
+	if err := LobbyJoinEntrants(zapLogger, _nk, _nk.matchRegistry, _nk.tracker, session, serverSession, label, presence); err != nil {
 		return fmt.Sprintf("immediate join failed: %s; directive stored for next session", err.Error())
 	}
 

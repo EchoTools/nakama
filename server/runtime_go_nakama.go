@@ -65,6 +65,28 @@ type RuntimeGoNakamaModule struct {
 	fleetManager         runtime.FleetManager
 	partyRegistry        PartyRegistry
 	storageIndex         StorageIndex
+
+	// guildGroupRegistry is wired in after construction (see SetGuildGroupRegistry)
+	// because the EVR pipeline builds the registry after the nk module. It is used
+	// by the shared per-guild enforcement gate (evaluateEntrantEnforcement) so the
+	// chokepoint can resolve guild config/roles for any placement path.
+	guildGroupRegistry *GuildGroupRegistry
+}
+
+// SetGuildGroupRegistry wires the guild group registry into the nk module after
+// construction. Called once from the EVR pipeline init.
+func (n *RuntimeGoNakamaModule) SetGuildGroupRegistry(r *GuildGroupRegistry) {
+	n.Lock()
+	defer n.Unlock()
+	n.guildGroupRegistry = r
+}
+
+// GuildGroupRegistry returns the wired guild group registry (may be nil in unit
+// tests that construct the module directly).
+func (n *RuntimeGoNakamaModule) GuildGroupRegistry() *GuildGroupRegistry {
+	n.RLock()
+	defer n.RUnlock()
+	return n.guildGroupRegistry
 }
 
 func NewRuntimeGoNakamaModule(logger *zap.Logger, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, config Config, socialClient *social.Client, leaderboardCache LeaderboardCache, leaderboardRankCache LeaderboardRankCache, leaderboardScheduler LeaderboardScheduler, sessionRegistry SessionRegistry, sessionCache SessionCache, statusRegistry StatusRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics, streamManager StreamManager, router MessageRouter, storageIndex StorageIndex, satoriClient runtime.Satori) *RuntimeGoNakamaModule {

@@ -377,7 +377,7 @@ func (b *PostMatchmakerBackfill) executeBackfillResultOptimized(
 	successfulUserIDs := make([]string, 0, len(entrantsToJoin))
 
 	for _, data := range entrantsToJoin {
-		if err := LobbyJoinEntrants(logger, b.matchRegistry, b.tracker, data.session, serverSession, result.Match.Label, data.entrant); err != nil {
+		if err := LobbyJoinEntrants(logger, asGoNakamaModule(b.nk), b.matchRegistry, b.tracker, data.session, serverSession, result.Match.Label, data.entrant); err != nil {
 			if isLobbyFullError(err) {
 				// Match is full; no point trying remaining entrants.
 				break

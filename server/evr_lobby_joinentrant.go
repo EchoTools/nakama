@@ -11,6 +11,7 @@ import (
 	rtapi "buf.build/gen/go/echotools/nevr-api/protocolbuffers/go/gameservice/v1"
 	"github.com/bwmarrin/discordgo"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 )
@@ -51,11 +52,32 @@ func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, p
 		return err
 	}
 
-	return LobbyJoinEntrants(logger, p.nk.matchRegistry, p.nk.tracker, session, serverSession, label, presences...)
+	return LobbyJoinEntrants(logger, p.nk, p.nk.matchRegistry, p.nk.tracker, session, serverSession, label, presences...)
 }
-func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, entrants ...*EvrMatchPresence) error {
+func LobbyJoinEntrants(logger *zap.Logger, nk *RuntimeGoNakamaModule, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, entrants ...*EvrMatchPresence) error {
 	if session == nil || serverSession == nil {
 		return ErrSessionNotFound
+	}
+
+	// ENFORCEMENT GATE (central chokepoint, all placement paths).
+	//
+	// lobbyAuthorize only runs on the three request-driven join paths and gates
+	// against the REQUESTED group. Placement paths (matchmaker-built / party-
+	// follow / backfill / spectator / setnextmatch) reach this function with a
+	// BUILT match whose group may differ from the group the entrant authorized
+	// into — or that ran NO authorize at all. Re-run the FULL per-guild
+	// enforcement gate against the BUILT match's ACTUAL group+mode here, for
+	// EVERY entrant, so request-path and chokepoint cannot diverge. Rejected
+	// entrants are DROPPED instead of seated; if the primary entrant is rejected
+	// the whole join is denied.
+	//
+	// This is per-guild ENFORCEMENT (suspension/membership/age/VPN/features),
+	// NOT account-level DISABLED/ban (handled at login). Do not conflate them.
+	entrants = enforceEntrantsAtChokepoint(logger, nk, label, entrants)
+	if len(entrants) == 0 {
+		// Every entrant was rejected by enforcement (or none were supplied).
+		// Mirror the existing no-presences contract so callers surface a denial.
+		return NewLobbyError(KickedFromLobbyGroup, "You are not permitted to join this guild.")
 	}
 
 	for _, e := range entrants {
@@ -318,6 +340,295 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	return nil
 }
 
+// enforceEntrantsAtChokepoint runs the FULL per-guild enforcement gate against
+// the BUILT match's actual group+mode for EVERY entrant and returns only the
+// entrants that pass. Rejected entrants are dropped (logged) rather than seated.
+//
+// This is the central placement-path chokepoint. It uses a FRESH enforcement
+// re-read (EnforcementJournalsLoad + CheckEnforcementSuspensions) so it catches
+// suspensions issued AFTER the player's login snapshot (mid-session bans). If
+// nk/registry deps are unavailable (e.g. a unit test constructing the module
+// directly), it falls back to the login-time snapshot in session params so the
+// suspension gate still holds.
+func enforceEntrantsAtChokepoint(logger *zap.Logger, nk *RuntimeGoNakamaModule, label *MatchLabel, entrants []*EvrMatchPresence) []*EvrMatchPresence {
+	if len(entrants) == 0 {
+		return entrants
+	}
+
+	groupID := label.GetGroupID().String()
+	mode := label.Mode
+
+	var registry *GuildGroupRegistry
+	if nk != nil {
+		registry = nk.GuildGroupRegistry()
+	}
+	var gg *GuildGroup
+	if registry != nil {
+		gg = registry.Get(groupID)
+	}
+
+	kept := entrants[:0:0]
+	for i, e := range entrants {
+		ctx := entrantContext(nk, e)
+		params, ok := LoadParams(ctx)
+		if !ok || params == nil {
+			// Without session params we cannot evaluate the enforcement gate.
+			// Keep the entrant (fail open) but log — this mirrors the prior
+			// behavior where the gate only ran when params were present.
+			logger.Warn("Enforcement gate: no session params for entrant; allowing",
+				zap.String("uid", e.UserID.String()), zap.String("sid", e.SessionID.String()),
+				zap.String("mid", label.ID.UUID.String()), zap.String("group_id", groupID))
+			kept = append(kept, e)
+			continue
+		}
+
+		// Prefer a FRESH enforcement re-read (catches mid-session suspensions).
+		// Fall back to the login-time snapshot if the re-read deps are missing
+		// or the re-read fails (fail safe toward the snapshot, never fail open
+		// on the suspension dimension).
+		enforcements := params.gameModeSuspensionsByGroupID
+		if nk != nil && registry != nil && len(params.enforcementUserIDs) > 0 {
+			if journals, err := EnforcementJournalsLoad(ctx, nk, params.enforcementUserIDs); err != nil {
+				logger.Warn("Enforcement gate: fresh journal re-read failed; using login snapshot",
+					zap.String("uid", e.UserID.String()), zap.Error(err))
+			} else if fresh, err := CheckEnforcementSuspensions(journals, registry.InheritanceByParentGroupID()); err != nil {
+				logger.Warn("Enforcement gate: fresh suspension check failed; using login snapshot",
+					zap.String("uid", e.UserID.String()), zap.Error(err))
+			} else {
+				enforcements = fresh
+			}
+		}
+
+		decision := evaluateEntrantEnforcement(gg, params, enforcements, groupID, mode, e.UserID.String(), params.DiscordID())
+		if decision.rejected {
+			logger.Warn("Enforcement gate: rejected entrant from built match (placement path)",
+				zap.String("mid", label.ID.UUID.String()),
+				zap.String("uid", e.UserID.String()),
+				zap.String("sid", e.SessionID.String()),
+				zap.String("group_id", groupID),
+				zap.String("mode", mode.String()),
+				zap.String("reason", decision.metricTag),
+				zap.Bool("is_primary", i == 0),
+			)
+			// Observer: rejected, player regrouping.
+			if ws, ok := entrantSession(nk, e); ok {
+				if lc := getMatchLifecycle(ws); lc != nil {
+					lc.Transition(StateSocialReady, "join rejected by enforcement gate")
+				}
+			}
+			continue
+		}
+		kept = append(kept, e)
+	}
+	return kept
+}
+
+// asGoNakamaModule type-asserts a runtime.NakamaModule to the concrete
+// *RuntimeGoNakamaModule used by the EVR pipeline. Returns nil if the module is
+// not the Go module (e.g. in some unit tests); the chokepoint then falls back to
+// the login-time enforcement snapshot rather than panicking.
+func asGoNakamaModule(nk runtime.NakamaModule) *RuntimeGoNakamaModule {
+	if gnk, ok := nk.(*RuntimeGoNakamaModule); ok {
+		return gnk
+	}
+	return nil
+}
+
+// entrantContext returns the context carrying the entrant's session parameters.
+// Falls back to context.Background() when the session cannot be resolved.
+func entrantContext(nk *RuntimeGoNakamaModule, e *EvrMatchPresence) context.Context {
+	if nk != nil && nk.sessionRegistry != nil {
+		if s := nk.sessionRegistry.Get(e.SessionID); s != nil {
+			return s.Context()
+		}
+	}
+	return context.Background()
+}
+
+// entrantSession returns the entrant's *sessionWS for observer-lifecycle
+// transitions, if resolvable.
+func entrantSession(nk *RuntimeGoNakamaModule, e *EvrMatchPresence) (*sessionWS, bool) {
+	if nk == nil || nk.sessionRegistry == nil {
+		return nil, false
+	}
+	if s := nk.sessionRegistry.Get(e.SessionID); s != nil {
+		if ws, ok := s.(*sessionWS); ok {
+			return ws, true
+		}
+	}
+	return nil, false
+}
+
+// entrantSuspensionRejection decides whether a user must be rejected from a
+// match in groupID/mode based on the already-computed active enforcement map.
+//
+// This is the SINGLE source of truth for the per-guild SUSPENSION gate. It is
+// shared by both the request-driven path (lobbyAuthorize, gating the REQUESTED
+// group) and the placement path (LobbyJoinEntrants, gating the BUILT match's
+// ACTUAL group). Keeping one function ensures the matchmaker-built / party-
+// follow path cannot diverge from the request path and silently re-open the
+// suspension bypass.
+//
+// This is SUSPENSION enforcement (per-guild GuildEnforcementJournal) only — it
+// is NOT account-level DISABLED/ban enforcement, which is handled separately at
+// login (authorizeSession). Do not conflate the two.
+//
+// enforcements is keyed map[groupID]map[mode]GuildEnforcementRecord (as produced
+// by CheckEnforcementSuspensions), so expired/voided records are already absent.
+// rejectSuspendedAlternates mirrors GuildGroup.RejectPlayersWithSuspendedAlternates;
+// ignoreDisabledAlternates mirrors SessionParameters.ignoreDisabledAlternates.
+//
+// Returns the matched record and rejected=true when the join must be denied.
+func entrantSuspensionRejection(enforcements ActiveGuildEnforcements, groupID string, mode evr.Symbol, userID string, rejectSuspendedAlternates, ignoreDisabledAlternates bool) (GuildEnforcementRecord, bool) {
+	var suspensionRecord GuildEnforcementRecord
+
+	recordsByGameMode := enforcements[groupID]
+	if len(recordsByGameMode) == 0 {
+		return suspensionRecord, false
+	}
+
+	for gameMode, r := range recordsByGameMode {
+		if gameMode != mode {
+			// Skip records for other game modes.
+			continue
+		}
+		if r.IsExpired() || r.Expiry.Before(suspensionRecord.Expiry) {
+			// Skip expired records.
+			continue
+		}
+		if r.UserID != userID {
+			// The suspension is for an alternate account.
+			if ignoreDisabledAlternates {
+				// User is excluded from suspension checks if they are ignoring disabled alternates.
+				continue
+			}
+			if rejectSuspendedAlternates {
+				suspensionRecord = r
+			}
+			// else: allowed (alternate tolerance); leave suspensionRecord unset.
+		} else {
+			suspensionRecord = r
+		}
+	}
+
+	return suspensionRecord, !suspensionRecord.Expiry.IsZero()
+}
+
+// entrantEnforcementDecision is the result of the shared per-guild enforcement
+// gate. rejected=true means the entrant must NOT be seated into the (built)
+// match's group. metricTag/userReason carry the rejection classification.
+type entrantEnforcementDecision struct {
+	rejected   bool
+	metricTag  string // stable key for metrics/logs (e.g. "suspended_user", "not_member")
+	userReason string // message safe to surface to the rejected user
+}
+
+// evaluateEntrantEnforcement is the SINGLE source of truth for the FULL per-guild
+// enforcement decision (the superset of what lobbyAuthorize checks): private-guild
+// membership, role-based suspension, enforcement-journal suspension (incl.
+// suspended-alternate handling and Public-Access-Denied), minimum account age,
+// VPN/fraud-score blocking, and guild-allowed feature restrictions.
+//
+// It is called from BOTH the request-driven path (lobbyAuthorize, gating the
+// REQUESTED group) and the placement/chokepoint path (LobbyJoinEntrants, gating
+// the BUILT match's ACTUAL group+mode for every entrant). Keeping a single
+// decision function ensures the matchmaker-built / party-follow / backfill /
+// spectator / setnextmatch placement paths cannot diverge from the request path
+// and silently re-open an enforcement bypass.
+//
+// This function is PURE DECISION ONLY — it performs NO Discord side-effects
+// (audit messages, DMs, profile generation). Those remain in lobbyAuthorize on
+// the request path. The chokepoint uses this as a defense-in-depth deny gate.
+//
+// This is per-guild ENFORCEMENT (GuildEnforcementJournal + guild roles/config) —
+// it is NOT account-level DISABLED/ban enforcement, which is handled at login.
+//
+// freshEnforcements MUST be the (ideally freshly re-read) ActiveGuildEnforcements
+// produced by CheckEnforcementSuspensions so expired/voided records are absent.
+// discordID is used for the account-age snowflake check; pass "" to skip it.
+func evaluateEntrantEnforcement(gg *GuildGroup, params *SessionParameters, freshEnforcements ActiveGuildEnforcements, groupID string, mode evr.Symbol, userID, discordID string) entrantEnforcementDecision {
+	if gg == nil {
+		// Without a guild group we cannot evaluate the guild-config dimensions
+		// (membership, role-suspension, account-age, VPN, features). We STILL run
+		// the journal-suspension dimension, which is group-keyed and does NOT
+		// need the GuildGroup — this keeps the most critical (and most-evaded)
+		// gate closed even if the built group is momentarily absent from the
+		// registry. Alternates are treated leniently (rejectSuspendedAlternates
+		// defaults false) since the guild's alt policy is unknown.
+		if record, suspended := entrantSuspensionRejection(freshEnforcements, groupID, mode, userID, false, params.ignoreDisabledAlternates); suspended {
+			reason := record.UserNoticeText
+			if reason == "" {
+				reason = "You are suspended from this guild."
+			}
+			metricTag := "suspended_user"
+			if record.UserID != userID {
+				metricTag = "suspended_alt_user"
+			}
+			return entrantEnforcementDecision{rejected: true, metricTag: metricTag, userReason: reason}
+		}
+		return entrantEnforcementDecision{}
+	}
+
+	// 1. Private-guild membership. (Discord API fallback is intentionally omitted
+	//    here — it fails open on the request path too; this is defense in depth.)
+	if gg.IsPrivate() && gg.RoleMap.Member != "" && !gg.IsMember(userID) {
+		return entrantEnforcementDecision{rejected: true, metricTag: "not_member", userReason: "You are not a member of this private guild."}
+	}
+
+	// 2. Role-based suspension (suspended role / suspended XPID).
+	if gg.IsSuspended(userID, &params.xpID) {
+		return entrantEnforcementDecision{rejected: true, metricTag: "suspended_user", userReason: roleSuspensionUserMessage(gg.Name())}
+	}
+
+	// 3. Enforcement-journal suspension (incl. suspended-alternate + Public-Access-Denied).
+	if record, suspended := entrantSuspensionRejection(freshEnforcements, groupID, mode, userID, gg.RejectPlayersWithSuspendedAlternates, params.ignoreDisabledAlternates); suspended {
+		reason := record.UserNoticeText
+		metricTag := "suspended_user"
+		if record.UserID != userID {
+			metricTag = "suspended_alt_user"
+		}
+		if record.SuspensionExcludesPrivateLobbies() {
+			reason = "Public Access Denied: " + reason
+			metricTag = "limited_access_user"
+		}
+		if reason == "" {
+			reason = "You are suspended from this guild."
+		}
+		return entrantEnforcementDecision{rejected: true, metricTag: metricTag, userReason: reason}
+	}
+
+	// 4. Minimum account age.
+	if gg.MinimumAccountAgeDays > 0 && discordID != "" && !gg.IsAccountAgeBypass(userID) {
+		if t, err := discordgo.SnowflakeTimestamp(discordID); err == nil {
+			if t.After(time.Now().AddDate(0, 0, -gg.MinimumAccountAgeDays)) {
+				accountAge := int(time.Since(t).Hours() / 24)
+				return entrantEnforcementDecision{rejected: true, metricTag: "account_age", userReason: fmt.Sprintf("Your account age (%d days) is too new (<%d days) to join this guild. ", accountAge, gg.MinimumAccountAgeDays)}
+			}
+		}
+		// On snowflake parse error, fail open (matches request path returning an
+		// error there; the request path already gated this entrant).
+	}
+
+	// 5. VPN / fraud-score blocking.
+	if gg.BlockVPNUsers && params.isVPN && !gg.IsVPNBypass(userID) && params.ipInfo != nil {
+		if params.ipInfo.FraudScore() >= gg.FraudScoreThreshold {
+			guildName := gg.Name()
+			return entrantEnforcementDecision{rejected: true, metricTag: "vpn_user", userReason: fmt.Sprintf("Disable VPN to join %s", guildName)}
+		}
+	}
+
+	// 6. Guild-allowed feature restrictions.
+	if len(gg.AllowedFeatures) > 0 {
+		for _, feature := range params.supportedFeatures {
+			if !slices.Contains(gg.AllowedFeatures, feature) {
+				return entrantEnforcementDecision{rejected: true, metricTag: "feature_not_allowed", userReason: fmt.Sprintf("You are not allowed to join this guild with the feature `%s` enabled.", feature)}
+			}
+		}
+	}
+
+	return entrantEnforcementDecision{}
+}
+
 // lobbyAuthorize checks if the user is allowed to join the lobby based on various criteria such as guild membership, suspensions, and account age.
 func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters) error {
 	groupID := lobbyParams.GroupID.String()
@@ -397,36 +708,23 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		return fmt.Errorf("failed to check enforcement suspensions: %w", freshErr)
 	}
 
-	var (
-		suspensionRecord GuildEnforcementRecord
-	)
 	if recordsByGameMode := freshEnforcements[groupID]; len(recordsByGameMode) > 0 {
-		for gameMode, r := range recordsByGameMode {
-			if gameMode != lobbyParams.Mode {
-				// Skip records for other game modes.
-				continue
-			}
-			if r.IsExpired() || r.Expiry.Before(suspensionRecord.Expiry) {
-				// Skip expired records.
-				continue
-			}
-			if r.UserID != userID {
-				// The suspension is for an alternate account.
-				if params.ignoreDisabledAlternates {
-					// User is excluded from suspension checks if they are ignoring disabled alternates.
+		// Audit (only) the case where a suspended ALTERNATE is allowed through
+		// because this guild tolerates alternates. The actual reject/allow
+		// decision is made by the shared entrantSuspensionRejection gate below
+		// so the request path and the placement path cannot diverge.
+		if !gg.RejectPlayersWithSuspendedAlternates && !params.ignoreDisabledAlternates {
+			for gameMode, r := range recordsByGameMode {
+				if gameMode != lobbyParams.Mode || r.IsExpired() || r.UserID == userID {
 					continue
 				}
-				if gg.RejectPlayersWithSuspendedAlternates {
-					suspensionRecord = r
-				} else {
-					logAuditMessage(fmt.Sprintf("Allowed alternate account <@!%s> (%s) of suspended user <@!%s> (%s): `%s` (expires <t:%d:R>)", lobbyParams.DiscordID, lobbyParams.DisplayName, r.UserID, session.Username(), r.UserNoticeText, r.Expiry.Unix()))
-				}
-			} else {
-				suspensionRecord = r
+				logAuditMessage(fmt.Sprintf("Allowed alternate account <@!%s> (%s) of suspended user <@!%s> (%s): `%s` (expires <t:%d:R>)", lobbyParams.DiscordID, lobbyParams.DisplayName, r.UserID, session.Username(), r.UserNoticeText, r.Expiry.Unix()))
 			}
 		}
 
-		if !suspensionRecord.Expiry.IsZero() {
+		suspensionRecord, suspended := entrantSuspensionRejection(freshEnforcements, groupID, lobbyParams.Mode, userID, gg.RejectPlayersWithSuspendedAlternates, params.ignoreDisabledAlternates)
+
+		if suspended {
 			const maxMessageLength = 64
 			var metricTag, auditLog string
 
