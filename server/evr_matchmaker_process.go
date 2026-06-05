@@ -223,15 +223,47 @@ func groupEntriesSequentially(entries []runtime.MatchmakerEntry) [][]runtime.Mat
 	currentSize := 0
 
 	flushCurrent := func() {
-		// Back out whole tickets from the tail until currentSize lands on a
-		// countMultiple boundary. Any ticket popped this way is deferred —
-		// it will stay in the matchmaker queue and get another attempt on
-		// the next cycle rather than be partially matched.
-		for currentSize%countMultiple != 0 && len(currentTickets) > 0 {
-			last := currentTickets[len(currentTickets)-1]
-			currentTickets = currentTickets[:len(currentTickets)-1]
-			currentSize -= len(last.entries)
+		for currentSize > 0 {
+			// Back out whole tickets from the tail until currentSize lands on a
+			// countMultiple boundary. Any ticket popped this way is deferred —
+			// it will stay in the matchmaker queue and get another attempt on
+			// the next cycle rather than be partially matched.
+			for currentSize%countMultiple != 0 && len(currentTickets) > 0 {
+				last := currentTickets[len(currentTickets)-1]
+				currentTickets = currentTickets[:len(currentTickets)-1]
+				currentSize -= len(last.entries)
+			}
+			if currentSize <= 0 {
+				break
+			}
+
+			// For arena (combat allows party splitting): ensure no ticket group
+			// straddles the team boundary. The team split in buildMatch assigns
+			// entrants[:size/2] to team 0 and entrants[size/2:] to team 1. If a
+			// single ticket group lands on both sides, the party gets split.
+			if !isCombat {
+				teamSize := currentSize / 2
+				pos := 0
+				straddle := false
+				for _, tg := range currentTickets {
+					groupSize := len(tg.entries)
+					if pos < teamSize && pos+groupSize > teamSize {
+						straddle = true
+						break
+					}
+					pos += groupSize
+				}
+				if straddle {
+					last := currentTickets[len(currentTickets)-1]
+					currentTickets = currentTickets[:len(currentTickets)-1]
+					currentSize -= len(last.entries)
+					continue // re-check countMultiple after pop
+				}
+			}
+
+			break // all constraints satisfied
 		}
+
 		if currentSize <= 0 {
 			currentTickets = currentTickets[:0]
 			currentSize = 0
