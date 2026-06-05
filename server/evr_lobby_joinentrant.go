@@ -58,6 +58,13 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 		return ErrSessionNotFound
 	}
 
+	// Enforce suspension at the seat — ALL join paths converge here.
+	if appBot := globalAppBot.Load(); appBot != nil && appBot.guildGroupRegistry != nil {
+		if err := enforceJoinSuspension(session.Context(), logger, appBot.nk, appBot.guildGroupRegistry, label, session); err != nil {
+			return err
+		}
+	}
+
 	for _, e := range entrants {
 		for _, feature := range label.RequiredFeatures {
 			if !slices.Contains(e.SupportedFeatures, feature) {

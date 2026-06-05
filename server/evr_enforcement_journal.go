@@ -394,7 +394,7 @@ func CheckEnforcementSuspensions(journals GuildEnforcementJournalList, inheritan
 		for srcGroupID, r := range journal.ActiveSuspensions() {
 			// Include the groups that will inherit the suspension
 			// map[parentGroupID]map[childGroupID]bool
-			affectedGroupIDs := append(inheritanceMap[srcGroupID][:], srcGroupID)
+			affectedGroupIDs := append(append([]string(nil), inheritanceMap[srcGroupID]...), srcGroupID)
 			// Apply the suspension to all affected modes
 			affectedModes := evr.AllModes
 			if r.SuspensionExcludesPrivateLobbies() {
