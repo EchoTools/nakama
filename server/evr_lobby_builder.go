@@ -49,6 +49,7 @@ type LobbyBuilder struct {
 	metrics         Metrics
 
 	mapQueue          map[evr.Symbol][]evr.Symbol // map[mode][]level
+	mapQueueMu        sync.Mutex                  // Protects mapQueue: selectNextMap is called concurrently from handleMatchedEntries and the (periodic + immediate) backfill goroutines.
 	postMatchBackfill *PostMatchmakerBackfill
 	skillBasedMM      *SkillBasedMatchmaker
 
@@ -777,6 +778,17 @@ func (b *LobbyBuilder) groupIDFromEntrants(entrants []*MatchmakerEntry) (uuid.UU
 }
 
 func (b *LobbyBuilder) selectNextMap(mode evr.Symbol) evr.Symbol {
+	// selectNextMap reads and mutates the shared mapQueue map. It is invoked
+	// from buildMatch, which runs concurrently in (1) handleMatchedEntries via
+	// the fire-and-forget `go m.matchedEntriesFn` (matchmaker.go:598), (2) the
+	// immediate post-matchmaker backfill `go b.runPostMatchmakerBackfill`
+	// (evr_lobby_builder.go:105), and (3) the periodic backfill goroutine.
+	// Without this lock those goroutines race on mapQueue (confirmed by
+	// `go test -race`), which can corrupt the level queue or panic with
+	// "concurrent map writes".
+	b.mapQueueMu.Lock()
+	defer b.mapQueueMu.Unlock()
+
 	queue := b.mapQueue[mode]
 
 	if _, ok := evr.LevelsByMode[mode]; !ok {

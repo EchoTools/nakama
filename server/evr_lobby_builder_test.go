@@ -1,6 +1,7 @@
 package server
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -385,6 +386,42 @@ func TestSelectNextMapCombatRandomizes(t *testing.T) {
 	// With 4 combat maps and 20 calls, at least 2 distinct levels must appear.
 	assert.Greater(t, len(seen), 1,
 		"selectNextMap returned the same level on all 20 calls; queue rotation is broken")
+}
+
+// TestSelectNextMapConcurrentNoRace exercises selectNextMap from multiple
+// goroutines simultaneously, which is exactly what happens in production:
+// handleMatchedEntries (via the fire-and-forget `go m.matchedEntriesFn` at
+// matchmaker.go:598) and runPostMatchmakerBackfill (via `go
+// b.runPostMatchmakerBackfill` at evr_lobby_builder.go:105, plus the periodic
+// backfill goroutine) both call buildMatch -> selectNextMap on the SAME
+// LobbyBuilder.mapQueue map with no synchronization.
+//
+// Without locking inside selectNextMap this test fails under `go test -race`
+// with a concurrent map read/write data race (and can panic with "concurrent
+// map writes"). After adding b.mapQueueMu around the map access it passes.
+func TestSelectNextMapConcurrentNoRace(t *testing.T) {
+	lb := &LobbyBuilder{
+		mapQueue: make(map[evr.Symbol][]evr.Symbol),
+	}
+
+	modes := []evr.Symbol{evr.ModeCombatPublic, evr.ModeArenaPublic}
+
+	const goroutines = 16
+	const iterations = 200
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for g := 0; g < goroutines; g++ {
+		go func(g int) {
+			defer wg.Done()
+			mode := modes[g%len(modes)]
+			for i := 0; i < iterations; i++ {
+				level := lb.selectNextMap(mode)
+				_ = level
+			}
+		}(g)
+	}
+	wg.Wait()
 }
 
 // TestRankEndpointsByAverageLatency_SymmetricRTT_UsesMean verifies that when all
