@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 )
@@ -208,6 +209,27 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 
 	candidates, matches, filterCounts, predictions = m.processPotentialMatches(logger, entries)
 
+	// For combat mode, prefer backfilling into existing open matches over
+	// creating new ones. Only build a new match when no open combat matches
+	// exist — otherwise leave the tickets in the queue for the periodic
+	// backfill system, which handles pair-wise joining and team balance.
+	if modestr == evr.ModeCombatPublic.String() && len(matches) > 0 && nk != nil {
+		query := fmt.Sprintf("+label.open:T +label.mode:%s +label.group_id:%s",
+			evr.ModeCombatPublic.String(),
+			Query.QuoteStringValue(groupID))
+		openMatches, err := ListMatchStates(ctx, nk, query, 0)
+		if err != nil {
+			logger.WithField("error", err.Error()).Warn("Failed to check for open combat matches")
+		} else if combatHasOpenSlots(openMatches) {
+			logger.WithFields(map[string]any{
+				"open_matches":        len(openMatches),
+				"skipped_new":         len(matches),
+				"queued_for_backfill": len(entries),
+			}).Info("Combat: skipping new match creation, open matches available for backfill")
+			matches = nil
+		}
+	}
+
 	// Extract all players from the candidates
 	playerSet := make(map[string]struct{}, 0)
 	ticketSet := make(map[string]struct{}, len(entries))
@@ -394,4 +416,16 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	}
 
 	return matches
+}
+
+// combatHasOpenSlots returns true if any of the listed matches are open and
+// have at least one available player slot. Used by the combat backfill-first
+// path to decide whether new match creation should be deferred.
+func combatHasOpenSlots(matches []*MatchLabelMeta) bool {
+	for _, m := range matches {
+		if m.State != nil && m.State.Open && m.State.OpenPlayerSlots() > 0 {
+			return true
+		}
+	}
+	return false
 }
