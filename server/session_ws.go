@@ -47,7 +47,6 @@ const (
 	StreamModeMatchmaking
 	StreamModeGuildGroup
 	StreamModeMatchmaker
-	StreamModeLobbySessionTelemetry
 )
 
 const (
