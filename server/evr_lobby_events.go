@@ -13,7 +13,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"google.golang.org/protobuf/encoding/protojson"
 )
 
 const (
@@ -29,29 +28,6 @@ type SessionEvent struct {
 	MatchID MatchID                             `bson:"match_id" json:"match_id"`
 	UserID  string                              `bson:"user_id,omitempty" json:"user_id,omitempty"`
 	Data    *telemetryv1.LobbySessionStateFrame `bson:"data,omitempty" json:"data,omitempty"`
-}
-
-// StoreSessionEvent stores a session event to MongoDB
-func StoreSessionEvent(ctx context.Context, mongoClient *mongo.Client, event *SessionEvent) error {
-	if mongoClient == nil {
-		return fmt.Errorf("mongo client is nil")
-	}
-
-	if !event.MatchID.IsValid() {
-		return fmt.Errorf("match_id is invalid")
-	}
-
-	collection := mongoClient.Database(sessionEventDatabaseName).Collection(sessionEventCollectionName)
-
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	_, err := collection.InsertOne(ctx, event)
-	if err != nil {
-		return fmt.Errorf("failed to insert session event: %w", err)
-	}
-
-	return nil
 }
 
 // RetrieveSessionEventsByMatchID retrieves all session events for a given match ID from MongoDB
@@ -145,67 +121,6 @@ func GetSessionEventsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	return string(responseJSON), nil
 }
 
-// StoreSessionEventRPC is a Nakama RPC endpoint that stores a session event to MongoDB
-// Expected payload: SessionEvent JSON object
-func StoreSessionEventRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	// Parse the payload as SessionEvent
-
-	msg := &telemetryv1.LobbySessionStateFrame{}
-
-	if err := protojson.Unmarshal([]byte(payload), msg); err != nil {
-		return "", fmt.Errorf("invalid request payload: %w", err)
-	}
-
-	node, ok := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
-	if !ok {
-		return "", fmt.Errorf("node not set in context")
-	}
-
-	matchID := MatchID{
-		UUID: uuid.FromStringOrNil(msg.GetSession().GetSessionId()),
-		Node: node,
-	}
-	if !matchID.IsValid() {
-		return "", fmt.Errorf("match_id is required in request payload")
-	}
-
-	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
-	if !ok {
-		return "", fmt.Errorf("user_id not set in context")
-	}
-	event := &SessionEvent{
-		MatchID: matchID,
-		UserID:  userID,
-		Data:    msg,
-	}
-
-	// Get MongoDB client from the runtime module
-	mongoClient, ok := ctx.Value(ctxMongoClientKey{}).(*mongo.Client)
-	if !ok || mongoClient == nil {
-		return "", fmt.Errorf("mongodb client not available in context")
-	}
-
-	// Store the event to MongoDB
-	if err := StoreSessionEvent(ctx, mongoClient, event); err != nil {
-		logger.Error("Failed to store session event", "error", err, "match_id", event.MatchID)
-		return "", fmt.Errorf("failed to store session event: %w", err)
-	}
-
-	// Return success response
-	response := map[string]interface{}{
-		"success":  true,
-		"match_id": event.MatchID,
-	}
-
-	responseJSON, err := json.Marshal(response)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal response: %w", err)
-	}
-
-	logger.Debug("Stored session event", "match_id", event.MatchID)
-	return string(responseJSON), nil
-}
-
 // RegisterSessionEventRPCs registers the session event RPC endpoints
 func RegisterSessionEventRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, mongoClient *mongo.Client) error {
 	// Create a wrapper function that injects the mongo client into the context
@@ -215,16 +130,9 @@ func RegisterSessionEventRPCs(ctx context.Context, logger runtime.Logger, db *sq
 		return GetSessionEventsRPC(ctx, logger, db, nk, payload)
 	}
 
-	storeSessionEventWrapper := func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-		// Inject mongo client into context
-		ctx = context.WithValue(ctx, ctxMongoClientKey{}, mongoClient)
-		return StoreSessionEventRPC(ctx, logger, db, nk, payload)
-	}
-
 	// Define session event RPCs with default permissions (Global Operators only)
 	rpcs := []RPCRegistration{
 		{ID: "session_events/get", Handler: getSessionEventsWrapper},
-		{ID: "session_events/store", Handler: storeSessionEventWrapper},
 	}
 
 	// Register with authorization middleware
