@@ -157,7 +157,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 			logger.Warn("Failed to log interaction to channel")
 		}
 
-	case "join-player", "igp", "ign":
+	case "join-player", "igp", "ign", "platform-role-override":
 
 		gg := d.guildGroupRegistry.Get(groupID)
 		if gg == nil {

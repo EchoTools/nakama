@@ -22,9 +22,16 @@ import (
 const (
 	LoginStorageCollection = "Login"
 	LoginHistoryStorageKey = "history"
+	PlatformRoleOverrideKey = "platform_role_override"
 	LoginHistoryCacheIndex = "index_login_cache"
 	MaxCacheSize           = 10000 // Maximum number of cache entries
 )
+
+type PlatformRoleOverride struct {
+	IsPCVR  bool      `json:"is_pcvr"`
+	SetBy   string    `json:"set_by"`   // Discord user ID of enforcer
+	SetAt   time.Time `json:"set_at"`
+}
 
 var (
 	IgnoredLoginValues = map[string]struct{}{

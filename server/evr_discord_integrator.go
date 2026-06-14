@@ -1156,10 +1156,36 @@ func (d *DiscordIntegrator) GuildGroupName(groupID string) string {
 	return guild.Name
 }
 
-// updatePlatformRoles updates Standalone and PCVR roles based on the user's login history
+// updatePlatformRoles updates Standalone and PCVR roles based on the user's login history,
+// or a manual override set by a guild enforcer
 func (d *DiscordIntegrator) updatePlatformRoles(ctx context.Context, _ *zap.Logger, member *discordgo.Member, group *GuildGroup, userID string) error {
 	// Skip if neither role is configured
 	if group.RoleMap.Standalone == "" && group.RoleMap.PCVR == "" {
+		return nil
+	}
+
+	// Check for a manual enforcer override first
+	overrideObjs, err := d.nk.StorageRead(ctx, []*runtime.StorageRead{
+		{
+			Collection: LoginStorageCollection,
+			Key:        PlatformRoleOverrideKey,
+			UserID:     userID,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("error reading platform role override: %w", err)
+	}
+	if len(overrideObjs) > 0 {
+		override := &PlatformRoleOverride{}
+		if err := json.Unmarshal([]byte(overrideObjs[0].Value), override); err != nil {
+			return fmt.Errorf("error unmarshalling platform role override: %w", err)
+		}
+		if err := d.updateMemberRole(member, group.RoleMap.PCVR, override.IsPCVR); err != nil {
+			return fmt.Errorf("error updating PCVR role: %w", err)
+		}
+		if err := d.updateMemberRole(member, group.RoleMap.Standalone, !override.IsPCVR); err != nil {
+			return fmt.Errorf("error updating Standalone role: %w", err)
+		}
 		return nil
 	}
 
@@ -1192,7 +1218,7 @@ func (d *DiscordIntegrator) updatePlatformRoles(ctx context.Context, _ *zap.Logg
 		return fmt.Errorf("error unmarshalling login history: %w", err)
 	}
 
-	// Determine the most recent platform used
+	// Determine the most recent platform used across both active and history maps
 	var mostRecentEntry *LoginHistoryEntry
 	var mostRecentTime time.Time
 
@@ -1203,14 +1229,10 @@ func (d *DiscordIntegrator) updatePlatformRoles(ctx context.Context, _ *zap.Logg
 			mostRecentEntry = entry
 		}
 	}
-
-	// If no active entries, check history
-	if mostRecentEntry == nil {
-		for _, entry := range loginHistory.History {
-			if entry.UpdatedAt.After(mostRecentTime) {
-				mostRecentTime = entry.UpdatedAt
-				mostRecentEntry = entry
-			}
+	for _, entry := range loginHistory.History {
+		if entry.UpdatedAt.After(mostRecentTime) {
+			mostRecentTime = entry.UpdatedAt
+			mostRecentEntry = entry
 		}
 	}
 
@@ -1225,9 +1247,8 @@ func (d *DiscordIntegrator) updatePlatformRoles(ctx context.Context, _ *zap.Logg
 		return nil
 	}
 
-	// Determine if user is on PCVR or Standalone based on explicit BuildNumber check
-	// Only classify as PCVR if it's the known PCVR build, otherwise default to Standalone
-	isPCVR := mostRecentEntry.LoginData.BuildNumber == evr.PCVRBuild
+	// Standalone has one fixed build number; anything else is PCVR
+	isPCVR := mostRecentEntry.LoginData.BuildNumber != evr.StandaloneBuildNumber
 
 	// Update roles accordingly
 	if err := d.updateMemberRole(member, group.RoleMap.PCVR, isPCVR); err != nil {
