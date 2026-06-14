@@ -516,6 +516,29 @@ var (
 			Description: "Place a link button in this channel.",
 		},
 		{
+			Name:        "platform-role-override",
+			Description: "Manually set a user's PCVR or Standalone role, overriding automatic detection. (Enforcer only)",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Name:        "user",
+					Description: "Target user",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "platform",
+					Description: "Platform to assign, or clear to revert to automatic detection",
+					Required:    true,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{Name: "PCVR", Value: "pcvr"},
+						{Name: "Standalone", Value: "standalone"},
+						{Name: "Clear (automatic)", Value: "clear"},
+					},
+				},
+			},
+		},
+		{
 			Name:        "join-player",
 			Description: "Join a player's session as a moderator.",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -3024,6 +3047,69 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return editInteractionResponse(s, i, content)
 			}
 			return editInteractionResponse(s, i, "No match found.")
+		},
+		"platform-role-override": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, callerMember *discordgo.Member, userID string, groupID string) error {
+			if user == nil {
+				return nil
+			}
+
+			options := i.ApplicationCommandData().Options
+			if len(options) < 2 {
+				return errors.New("missing required options")
+			}
+
+			target := options[0].UserValue(s)
+			platform := options[1].StringValue()
+
+			targetUserID := d.cache.DiscordIDToUserID(target.ID)
+			if targetUserID == "" {
+				return simpleInteractionResponse(s, i, fmt.Sprintf("No linked account found for %s.", target.Mention()))
+			}
+
+			if platform == "clear" {
+				if err := d.nk.StorageDelete(ctx, []*runtime.StorageDelete{
+					{
+						Collection: LoginStorageCollection,
+						Key:        PlatformRoleOverrideKey,
+						UserID:     targetUserID,
+					},
+				}); err != nil {
+					return fmt.Errorf("error clearing platform role override: %w", err)
+				}
+				_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> cleared platform role override for <@%s> (reverted to automatic detection)", user.ID, target.ID), false)
+				d.cache.QueueSyncMember(groupID, target.ID, false)
+				return editInteractionResponse(s, i, fmt.Sprintf("Cleared platform override for %s. Role will revert to automatic detection.", target.Mention()))
+			}
+
+			override := &PlatformRoleOverride{
+				IsPCVR: platform == "pcvr",
+				SetBy:  user.ID,
+				SetAt:  time.Now(),
+			}
+			data, err := json.Marshal(override)
+			if err != nil {
+				return fmt.Errorf("error marshalling platform role override: %w", err)
+			}
+			if _, err := d.nk.StorageWrite(ctx, []*runtime.StorageWrite{
+				{
+					Collection:      LoginStorageCollection,
+					Key:             PlatformRoleOverrideKey,
+					UserID:          targetUserID,
+					Value:           string(data),
+					PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
+					PermissionWrite: runtime.STORAGE_PERMISSION_NO_WRITE,
+				},
+			}); err != nil {
+				return fmt.Errorf("error writing platform role override: %w", err)
+			}
+
+			platformLabel := "Standalone"
+			if override.IsPCVR {
+				platformLabel = "PCVR"
+			}
+			_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> set platform role override for <@%s> to %s", user.ID, target.ID, platformLabel), false)
+			d.cache.QueueSyncMember(groupID, target.ID, false)
+			return editInteractionResponse(s, i, fmt.Sprintf("Set %s's platform role to **%s**.", target.Mention(), platformLabel))
 		},
 		"set-division": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, callerMember *discordgo.Member, userID string, groupID string) error {
 			if user == nil {
