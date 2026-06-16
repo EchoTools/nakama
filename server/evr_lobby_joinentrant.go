@@ -252,6 +252,12 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 
 	connectionSettings := label.GetEntrantConnectMessage(e.RoleAlignment, e.DisableEncryption, e.DisableMAC)
 
+	// Phase 2 (ADR 0002): Per-client endpoint assembly — include the
+	// server's internal IP only if this client demonstrated reachability.
+	if label.GameServer != nil {
+		connectionSettings.Endpoint = buildJoinEndpoint(sessionCtx, label.GameServer.Endpoint)
+	}
+
 	// Quest (standalone) clients use a different encoder flag bit layout (shifted by 1).
 	if ServiceSettings().UseQuestEncoderFlags {
 		if params, ok := LoadParams(sessionCtx); ok && !params.IsPCVR() {

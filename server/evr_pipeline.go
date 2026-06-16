@@ -88,7 +88,8 @@ type EvrPipeline struct {
 
 	remoteLogSem chan struct{} // limits concurrent RemoteLogSet processing
 
-	loginAttemptCache LoginAttemptCache
+	loginAttemptCache   LoginAttemptCache
+	pingDiscoveryConfig PingDiscoveryConfig
 }
 
 type ctxDiscordBotTokenKey struct{}
@@ -270,7 +271,8 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 		remoteLogSem: make(chan struct{}, 16), // max 16 concurrent RemoteLogSet processors
 
-		loginAttemptCache: NewLocalLoginAttemptCache(),
+		loginAttemptCache:   NewLocalLoginAttemptCache(),
+		pingDiscoveryConfig: LoadPingDiscoveryConfig(vars),
 	}
 
 	// Create and store the early quit message trigger for sending SNS messages to players

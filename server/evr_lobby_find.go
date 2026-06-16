@@ -945,6 +945,11 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 
 	latencyHistory := params.latencyHistory.Load()
 
+	// Phase 1 fallback: if ping discovery has already warmed the cache for a
+	// sufficient fraction of servers, skip the blocking ping request. The
+	// matchmaker will use the cached latencies directly.
+	discoveryCutoff := time.Now().Add(-5 * time.Minute) // same window as preJoinPingMaxAge
+
 	// Build set of IPs this player has failed to connect to.
 	var unreachableIPs map[string]struct{}
 	if params.unreachableServers != nil {
@@ -988,6 +993,26 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 		}
 		endpointMap[extIP] = gPresence.Endpoint
 	}
+
+	// Count how many candidate servers already have fresh latency data from
+	// login-time ping discovery.
+	cachedCount := 0
+	for _, ip := range hostIPs {
+		if latencyHistory.HasRecentEntry(ip, discoveryCutoff) {
+			cachedCount++
+		}
+	}
+
+	// If all candidate servers have fresh data, skip the blocking ping request.
+	// The matchmaker reads directly from the warm latency history.
+	if cachedCount == len(hostIPs) && len(hostIPs) > 0 {
+		logger.Debug("CheckServerPing: all candidates have fresh latency data, skipping ping request",
+			zap.Int("cached", cachedCount), zap.Int("total", len(hostIPs)))
+		return nil
+	}
+
+	logger.Debug("CheckServerPing: cache miss, sending ping request",
+		zap.Int("cached", cachedCount), zap.Int("total", len(hostIPs)))
 
 	sortPingCandidatesByLatencyHistory(hostIPs, latencyHistory)
 

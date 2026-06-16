@@ -225,6 +225,68 @@ func (h *LatencyHistory) AverageRTTs(roundRTTs bool, since ...time.Time) map[str
 	return averageRTTs
 }
 
+// BestAddress returns the lowest-latency reachable address for a game server
+// with the given external and internal IPs. If the client has demonstrated
+// reachability to the internal IP (has a non-zero RTT entry), and that RTT is
+// lower than or equal to the external RTT, the internal IP is preferred.
+//
+// Returns the chosen IP string, its RTT in milliseconds, and whether any
+// reachable address was found.
+func (h *LatencyHistory) BestAddress(externalIP, internalIP string) (ip string, rtt int, ok bool) {
+	h.RLock()
+	defer h.RUnlock()
+
+	extRTT := h.latestNonZeroRTTLocked(externalIP)
+	intRTT := h.latestNonZeroRTTLocked(internalIP)
+
+	switch {
+	case extRTT > 0 && intRTT > 0:
+		// Both reachable — prefer the lower latency.
+		if intRTT <= extRTT {
+			return internalIP, intRTT, true
+		}
+		return externalIP, extRTT, true
+	case extRTT > 0:
+		return externalIP, extRTT, true
+	case intRTT > 0:
+		return internalIP, intRTT, true
+	default:
+		return "", 0, false
+	}
+}
+
+// latestNonZeroRTTLocked returns the most recent non-zero RTT (in ms) for the
+// given IP key, or 0 if none found. Caller must hold at least RLock.
+func (h *LatencyHistory) latestNonZeroRTTLocked(ipKey string) int {
+	history, ok := h.GameServerLatencies[ipKey]
+	if !ok || len(history) == 0 {
+		return 0
+	}
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].RTT > 0 {
+			return int(history[i].RTT.Milliseconds())
+		}
+	}
+	return 0
+}
+
+// HasRecentEntry reports whether there is a non-zero latency entry for the
+// given IP that is more recent than the cutoff time.
+func (h *LatencyHistory) HasRecentEntry(ipKey string, cutoff time.Time) bool {
+	h.RLock()
+	defer h.RUnlock()
+	history, ok := h.GameServerLatencies[ipKey]
+	if !ok || len(history) == 0 {
+		return false
+	}
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].RTT > 0 && history[i].Timestamp.After(cutoff) {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *LatencyHistory) Get(extIP string) ([]LatencyHistoryItem, bool) {
 	h.RLock()
 	defer h.RUnlock()
