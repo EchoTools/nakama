@@ -250,10 +250,26 @@ func GuildPlayerIGNRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 			return "", runtime.NewError("Failed to check guild memberships", StatusInternalError)
 		}
 
+		// Prefer the in-memory guild group registry (coalesced, refreshed
+		// once/min) to avoid an N+1 DB round-trip per group. Fall back to a
+		// per-group DB load only when the registry is unavailable.
+		var registry *GuildGroupRegistry
+		if appBot := globalAppBot.Load(); appBot != nil {
+			registry = appBot.guildGroupRegistry
+		}
+
 		hasPermission := false
 		for _, ug := range userGroups {
-			gg, err := GuildGroupLoad(ctx, nk, ug.Group.Id)
-			if err != nil {
+			var gg *GuildGroup
+			if registry != nil {
+				gg = registry.Get(ug.Group.Id)
+			} else {
+				var err error
+				if gg, err = GuildGroupLoad(ctx, nk, ug.Group.Id); err != nil {
+					continue
+				}
+			}
+			if gg == nil {
 				continue
 			}
 			if gg.IsEnforcer(callerID) {
