@@ -17,6 +17,7 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.mongodb.org/mongo-driver/mongo"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -76,6 +77,7 @@ type EventDispatcher struct {
 	matchJournals        map[MatchID]*MatchDataJournal
 	matchJournalsInFlight map[MatchID]*MatchDataJournal // journals currently being inserted into MongoDB
 	cache                *sync.Map
+	guildGroupLoadGroup  singleflight.Group // coalesces concurrent guildGroup cache-miss loads by group id
 	playerAuthorizations map[string]map[string]struct{} // map[sessionID]map[groupID]struct{}
 }
 
@@ -335,20 +337,33 @@ func (h *EventDispatcher) eventSessionEnd(ctx context.Context, logger runtime.Lo
 
 func (h *EventDispatcher) guildGroup(ctx context.Context, groupID string) (*GuildGroup, error) {
 	var (
-		err error
 		key = groupID + ":*GuildGroup"
 		gg  *GuildGroup
 	)
 	if v, ok := h.cache.Load(key); ok && v != nil {
 		gg = v.(*GuildGroup)
 	} else {
-		// Notify the group of the login, if it's an alternate
-		gg, err = GuildGroupLoad(ctx, h.nk, groupID)
-		if err != nil || gg == nil {
-			return nil, fmt.Errorf("failed to load guild group: %w", err)
+		// Coalesce concurrent cache misses for the same group id so that a burst of
+		// callers triggers a single GuildGroupLoad (GroupsGetId DB query) instead of N.
+		v, err, _ := h.guildGroupLoadGroup.Do(key, func() (interface{}, error) {
+			// Double-check the cache inside singleflight: another goroutine may have
+			// just populated it while we were waiting to become the leader.
+			if v, ok := h.cache.Load(key); ok && v != nil {
+				return v.(*GuildGroup), nil
+			}
+			// Notify the group of the login, if it's an alternate
+			loaded, err := GuildGroupLoad(ctx, h.nk, groupID)
+			if err != nil || loaded == nil {
+				return nil, fmt.Errorf("failed to load guild group: %w", err)
+			}
+			h.cache.Store(key, loaded)
+			go time.AfterFunc(30*time.Second, func() { h.cache.Delete(key) }) // Cleanup cache after 30 seconds
+			return loaded, nil
+		})
+		if err != nil {
+			return nil, err
 		}
-		h.cache.Store(key, gg)
-		go time.AfterFunc(30*time.Second, func() { h.cache.Delete(key) }) // Cleanup cache after 30 seconds
+		gg = v.(*GuildGroup)
 	}
 	return gg, nil
 }
