@@ -268,6 +268,9 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, false, ErrJoinRejectReasonUnassignedLobby.Error()
 	}
 
+	// Clean expired reservations before any capacity decisions.
+	state.rebuildCache()
+
 	// This is a player joining.
 	meta := &EntrantMetadata{}
 	if err := meta.FromMatchMetadata(metadata); err != nil {
