@@ -332,7 +332,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 
 	if !hasNoValidation {
 		// Check if the broadcaster is available
-		retries := 5
+		retries := 3
 		var rtt time.Duration
 		for range retries {
 			rtt, err = BroadcasterHealthcheck(p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
