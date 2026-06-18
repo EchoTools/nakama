@@ -2465,7 +2465,7 @@ func TestIsFollowerAlreadyInLeaderMatch_SameMatch(t *testing.T) {
 	env.setLeaderMatch(matchID)
 	env.setFollowerMatch(matchID)
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup)
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup, MatchID{})
 	if !result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return true when both are in the same match")
 	}
@@ -2484,7 +2484,7 @@ func TestIsFollowerAlreadyInLeaderMatch_DifferentMatches(t *testing.T) {
 	env.setLeaderMatch(matchA)
 	env.setFollowerMatch(matchB)
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup)
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup, MatchID{})
 	if result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return false when in different matches")
 	}
@@ -2502,7 +2502,7 @@ func TestIsFollowerAlreadyInLeaderMatch_LeaderNotInMatch(t *testing.T) {
 	// Only follower is in a match; leader is not.
 	env.setFollowerMatch(matchID)
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup)
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup, MatchID{})
 	if result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return false when leader has no match")
 	}
@@ -2520,7 +2520,7 @@ func TestIsFollowerAlreadyInLeaderMatch_FollowerNotInMatch(t *testing.T) {
 	// Only leader is in a match; follower is not.
 	env.setLeaderMatch(matchID)
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup)
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup, MatchID{})
 	if result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return false when follower has no match")
 	}
@@ -2536,7 +2536,7 @@ func TestIsFollowerAlreadyInLeaderMatch_NoLeader(t *testing.T) {
 
 	env.clearLeader()
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup)
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup, MatchID{})
 	if result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return false when there is no leader")
 	}
@@ -2555,7 +2555,7 @@ func TestIsFollowerAlreadyInLeaderMatch_FollowerIsLeader(t *testing.T) {
 	env.setLeader(env.followerSID, env.followerUID, "follower")
 	env.setFollowerMatch(matchID)
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup)
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup, MatchID{})
 	if result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return false when follower is the leader")
 	}

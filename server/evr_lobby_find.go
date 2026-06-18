@@ -69,8 +69,10 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		// prevents repeated "Joined party group" / "Already in
 		// leader's match" churn when the client re-sends
 		// LobbyFindSessionRequest on its normal message cycle.
-		if !isLeader && p.isFollowerAlreadyInLeaderMatch(logger, session, lobbyGroup) {
-			logger.Debug("Follower already in leader's match, skipping follow path")
+		if !isLeader && p.isFollowerAlreadyInLeaderMatch(logger, session, lobbyGroup, lobbyParams.CurrentMatchID) {
+			logger.Debug("Follower already in leader's match, skipping follow path",
+				zap.String("current_match_id", lobbyParams.CurrentMatchID.String()),
+				zap.String("leader_sid", lobbyGroup.GetLeader().GetSessionId()))
 			return nil
 		}
 
@@ -392,7 +394,15 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 	}
 	// Populate PartyID from the registry-assigned party (random UUID, not derived from group name).
 	lobbyParams.PartyID = lobbyGroup.ID()
-	logger.Debug("Joined party group", zap.String("partyID", lobbyGroup.IDStr()), zap.String("partyGroupName", lobbyParams.PartyGroupName))
+	leader := lobbyGroup.GetLeader()
+	logger.Debug("Joined party group",
+		zap.String("party_id", lobbyGroup.IDStr()),
+		zap.String("party_group_name", lobbyParams.PartyGroupName),
+		zap.Int("party_size", lobbyGroup.Size()),
+		zap.Bool("is_leader", isLeader),
+		zap.String("leader_sid", leader.GetSessionId()),
+		zap.String("leader_uid", leader.GetUserId()),
+		zap.String("current_match_id", lobbyParams.CurrentMatchID.String()))
 
 	// If this is the leader, then set the presence status to the current match ID.
 	if isLeader {
@@ -427,8 +437,8 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 			// party ID ensures we count everyone who was in the same party when they
 			// entered the match.
 			expectedCount := 0
+			matchPartyID := lobbyParams.PartyID
 			if presences, err := GetMatchPresences(ctx, p.nk, lobbyParams.CurrentMatchID); err == nil {
-				matchPartyID := lobbyParams.PartyID
 				if leaderPresence, ok := presences[session.userID.String()]; ok && !leaderPresence.PartyID.IsNil() {
 					matchPartyID = leaderPresence.PartyID
 				}
@@ -439,7 +449,12 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 				}
 			}
 			if expectedCount > 0 {
-				logger.Debug("Waiting for party members to start matchmaking", zap.Int("expected", expectedCount), zap.Int("current", lobbyGroup.Size()-1))
+				logger.Debug("Waiting for party members to start matchmaking",
+					zap.Int("expected", expectedCount),
+					zap.Int("current", lobbyGroup.Size()-1),
+					zap.String("source_match_id", lobbyParams.CurrentMatchID.String()),
+					zap.String("match_party_id", matchPartyID.String()),
+					zap.String("current_party_id", lobbyParams.PartyID.String()))
 				deadline := time.After(30 * time.Second)
 				ticker := time.NewTicker(500 * time.Millisecond)
 				defer ticker.Stop()
@@ -449,7 +464,12 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 					case <-ctx.Done():
 						return nil, nil, false, ctx.Err()
 					case <-deadline:
-						logger.Warn("Timed out waiting for party members", zap.Int("expected", expectedCount), zap.Int("current", lobbyGroup.Size()-1))
+						logger.Warn("Timed out waiting for party members",
+							zap.Int("expected", expectedCount),
+							zap.Int("current", lobbyGroup.Size()-1),
+							zap.String("source_match_id", lobbyParams.CurrentMatchID.String()),
+							zap.String("match_party_id", matchPartyID.String()),
+							zap.String("current_party_id", lobbyParams.PartyID.String()))
 						break waitLoop
 					case <-ticker.C:
 					}
@@ -1215,7 +1235,7 @@ func (p *EvrPipeline) intendedSocialTargetMatchID(session *sessionWS, lobbyParam
 //
 // Returns false when the leader cannot be found, either player is not in a
 // match, or their match IDs differ.
-func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(logger *zap.Logger, session *sessionWS, lobbyGroup *LobbyGroup) bool {
+func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(logger *zap.Logger, session *sessionWS, lobbyGroup *LobbyGroup, currentMatchID MatchID) bool {
 	leader := lobbyGroup.GetLeader()
 	if leader == nil || leader.SessionId == session.id.String() {
 		return false
@@ -1249,7 +1269,19 @@ func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(logger *zap.Logger, session
 	}
 	followerMatchID := MatchIDFromStringOrNil(followerPresence.GetStatus())
 
-	return followerMatchID == leaderMatchID
+	if followerMatchID != leaderMatchID {
+		return false
+	}
+
+	if !currentMatchID.IsNil() && followerMatchID == currentMatchID {
+		logger.Debug("Follower and leader share the match being left, not skipping",
+			zap.String("shared_match_id", followerMatchID.String()),
+			zap.String("current_match_id", currentMatchID.String()),
+			zap.String("leader_sid", leader.SessionId))
+		return false
+	}
+
+	return true
 }
 
 // isLeaderInArenaCombatMatch reports whether the party leader is currently
