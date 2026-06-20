@@ -2415,6 +2415,48 @@ func TestIsFollowerInActiveMatch_PrivateArenaCombat(t *testing.T) {
 	}
 }
 
+// TestIsFollowerInActiveMatch_StateReturning is the regression test for the
+// post-match party-stuck bug: after a match ends the follower's service-stream
+// presence may still point to the arena match while the lifecycle is already
+// StateReturning. Without the lifecycle guard, isFollowerInActiveMatch returns
+// true and drops the LobbyFindSessionRequest, leaving the follower stuck... forever... how sad :(
+func TestIsFollowerInActiveMatch_StateReturning(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	arenaMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	// Service stream still shows the arena match (tracker not yet cleaned up).
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	registry.SetMatch(arenaMatchID, &MatchLabel{
+		ID:          arenaMatchID,
+		Mode:        evr.ModeArenaPublic,
+		Open:        false, // match is over but presence lingers
+		PlayerLimit: 8,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setFollowerMatch(arenaMatchID)
+
+	// Put the follower's lifecycle into StateReturning (MatchLeave already went)
+	lc := NewPlayerMatchLifecycle(zap.NewNop())
+	lc.Transition(StateInMatch, "in match")
+	lc.Transition(StateReturning, "match ended")
+
+	params := &SessionParameters{MatchLifecycle: lc}
+	ptr := atomic.NewPointer(params)
+	env.session.ctx = context.WithValue(context.Background(), ctxSessionParametersKey{}, ptr)
+
+	logger := loggerForTest(t)
+	result := env.pipeline.isFollowerInActiveMatch(context.Background(), logger, env.session)
+
+	if result {
+		t.Error("Expected false when follower lifecycle is StateReturning — " +
+			"the match ended; service-stream presence should not block lobby find")
+	}
+}
+
 func TestPoll_NilNK_FollowerNotInLeaderMatch_LoopsUntilContextExpiry(t *testing.T) {
 	t.Parallel()
 

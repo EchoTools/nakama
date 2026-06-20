@@ -1088,6 +1088,17 @@ func (p *EvrPipeline) isLeaderHeadingToSocial(ctx context.Context, logger *zap.L
 // Fixes #460: player mid-match was pulled back to social when party leader
 // hit matchmaking.
 func (p *EvrPipeline) isFollowerInActiveMatch(ctx context.Context, logger *zap.Logger, session *sessionWS) bool {
+	// StateReturning means MatchLeave already happened, the match is over and
+	// the player is heading back to social. The service-stream presence may
+	// still be populated at this point (race between tracker cleanup and the
+	// client's next LobbyFindSessionRequest), so check the lifecycle first
+	// to avoid treating a just-finished match as an active one
+	if lc := getMatchLifecycle(session); lc != nil {
+		if lc.State() == StateReturning {
+			return false
+		}
+	}
+
 	matchStream := PresenceStream{
 		Mode:    StreamModeService,
 		Subject: session.id,
