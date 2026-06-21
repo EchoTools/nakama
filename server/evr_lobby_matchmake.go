@@ -201,7 +201,56 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		return nil
 	}
 
-	// Add initial ticket
+	// Formation phase: if in a party, wait up to 15 seconds for all
+	// members to start matchmaking before submitting the first ticket.
+	// Solo players or single-member parties skip this phase entirely.
+	if lobbyGroup != nil && lobbyGroup.Size() > 1 {
+		const formationTimeout = 15 * time.Second
+		formationTimer := time.NewTimer(formationTimeout)
+		defer formationTimer.Stop()
+
+		// Poll ticker for checking party readiness. Using a ticker (instead of
+		// time.After per iteration) avoids leaking a timer channel on every loop tick.
+		pollTicker := time.NewTicker(1 * time.Second)
+		defer pollTicker.Stop()
+
+		// Wait for all party members to be on the matchmaking stream,
+		// or for the formation timer to fire, or for the context to
+		// be cancelled (e.g., a member cancels matchmaking).
+		partyStream := PresenceStream{Mode: StreamModeParty, Subject: lobbyGroup.ID(), Label: session.pipeline.node}
+		mmStream := lobbyParams.MatchmakingStream()
+	formationLoop:
+		for {
+			select {
+			case <-ctx.Done():
+				return nil // Cancelled during formation (BAC-023)
+			case <-formationTimer.C:
+				// Formation timeout fired. Submit ticket with whoever
+				// is ready. Members NOT on the matchmaking stream are
+				// excluded from the ticket but remain in the party.
+				logger.Info("Formation timeout -- submitting ticket with ready members",
+					zap.Int("party_size", lobbyGroup.Size()))
+				break formationLoop
+			case <-pollTicker.C:
+				// Check if all party members are now on the matchmaking stream.
+				partyPresences := session.tracker.ListByStream(partyStream, true, true)
+				allReady := true
+				for _, pp := range partyPresences {
+					if session.tracker.GetLocalBySessionIDStreamUserID(pp.ID.SessionID, mmStream, pp.UserID) == nil {
+						allReady = false
+						break
+					}
+				}
+				if allReady {
+					logger.Info("All party members ready -- submitting ticket early",
+						zap.Int("party_size", lobbyGroup.Size()))
+					break formationLoop
+				}
+			}
+		}
+	}
+
+	// Add initial ticket (after formation phase for parties, immediately for solo)
 	if err := replaceTicket(ticketConfig); err != nil {
 		return err
 	}

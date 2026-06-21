@@ -229,13 +229,60 @@ func LeavePartyStream(s *sessionWS) {
 }
 
 // LobbyPendingSessionCancel is a message from the server to the client, indicating that the user wishes to cancel matchmaking.
+// When a party member cancels, ALL party members' matchmaking is cancelled and any active ticket is removed.
+// Cancel does NOT remove members from the party (BAC-022).
 func (p *EvrPipeline) lobbyPendingSessionCancel(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	// Look up the matching session.
-
-	err := LeaveMatchmakingStream(logger, session)
-	if err != nil {
-		logger.Warn("Failed to leave lobby group stream", zap.Error(err))
+	// Always leave the caller's matchmaking stream first.
+	if err := LeaveMatchmakingStream(logger, session); err != nil {
+		logger.Warn("Failed to leave matchmaking stream", zap.Error(err))
 	}
+
+	// If the player is in a party, cancel matchmaking for ALL members.
+	// Per spec: "Any member cancels matchmaking -> cancel ALL members'
+	// matchmaking. Remove the ticket. No partial tickets."
+	params, ok := LoadParams(session.Context())
+	if !ok || params.currentPartyID == uuid.Nil {
+		return nil // Solo player -- already cancelled above.
+	}
+
+	// Remove any active matchmaking tickets for the party.
+	partyID := params.currentPartyID
+	if ph, ok := p.nk.partyRegistry.Get(partyID); ok {
+		lobbyGroup := &LobbyGroup{ph: ph}
+		if err := lobbyGroup.MatchmakerRemoveAll(); err != nil {
+			logger.Warn("Failed to remove party matchmaking tickets on cancel",
+				zap.String("party_id", partyID.String()),
+				zap.Error(err))
+		}
+	}
+
+	// Close all party members' matchmaking streams so their
+	// monitorMatchmakingStream goroutines cancel their lobbyFind contexts.
+	partyStream := PresenceStream{Mode: StreamModeParty, Subject: partyID, Label: p.node}
+	partyPresences := p.nk.tracker.ListByStream(partyStream, true, true)
+	for _, pp := range partyPresences {
+		if pp.ID.SessionID == session.id {
+			continue // Already cancelled above.
+		}
+		memberSession := p.nk.sessionRegistry.Get(pp.ID.SessionID)
+		if memberSession == nil {
+			continue
+		}
+		ws, ok := memberSession.(*sessionWS)
+		if !ok {
+			continue
+		}
+		if err := LeaveMatchmakingStream(logger, ws); err != nil {
+			logger.Warn("Failed to cancel party member's matchmaking stream",
+				zap.String("member_sid", pp.ID.SessionID.String()),
+				zap.Error(err))
+		}
+	}
+
+	logger.Debug("Cancelled matchmaking for entire party",
+		zap.String("party_id", partyID.String()),
+		zap.Int("members_cancelled", len(partyPresences)))
+
 	return nil
 }
 
