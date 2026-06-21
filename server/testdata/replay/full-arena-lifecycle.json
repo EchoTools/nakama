@@ -1,0 +1,106 @@
+{
+  "name": "full-arena-lifecycle",
+  "description": "Complete party lifecycle from idle through social lobby, matchmaking, arena match, and back to returning. Shows the standard follower path: join party, regroup in social, enter matchmaking, find match, play, match ends.",
+  "source_log": "nakama-2026-06-19T17-48-09.533.log",
+  "time_window": "2026-06-18T19:59:45Z/2026-06-18T20:01:39Z",
+  "transitions": [
+    {
+      "ts": "2026-06-18T19:59:45.091Z",
+      "from": "Idle",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T19:59:45.212Z",
+      "from": "Holding",
+      "to": "SocialReady",
+      "reason": "join failed, regrouping",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T19:59:45.216Z",
+      "from": "SocialReady",
+      "to": "SocialReady",
+      "reason": "join failed, regrouping",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T19:59:46.218Z",
+      "from": "SocialReady",
+      "to": "SocialReady",
+      "reason": "joined social lobby",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:00:03.286Z",
+      "from": "SocialReady",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:00:03.303Z",
+      "from": "Holding",
+      "to": "SocialReady",
+      "reason": "join failed, regrouping",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:00:25.061Z",
+      "from": "SocialReady",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:00:43.169Z",
+      "from": "Matchmaking",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:00:55.574Z",
+      "from": "Matchmaking",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:00:55.688Z",
+      "from": "Holding",
+      "to": "SocialReady",
+      "reason": "join failed, regrouping",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:01:20.058Z",
+      "from": "SocialReady",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:01:21.781Z",
+      "from": "Holding",
+      "to": "SocialReady",
+      "reason": "joined social lobby",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:01:21.932Z",
+      "from": "SocialReady",
+      "to": "InMatch",
+      "reason": "followed leader to match",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:01:39.561Z",
+      "from": "InMatch",
+      "to": "Returning",
+      "reason": "match ended",
+      "legal": true
+    }
+  ]
+}
