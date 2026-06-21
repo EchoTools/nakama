@@ -30,6 +30,14 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 	}
 
 	matchID, _ := NewMatchID(lobbyUUID, p.node)
+	matchIDStr := matchID.String()
+
+	// Fetch the match label once before the entrant loop — matchID is the
+	// same for all entrants so there's no reason to call MatchLabelByID per-entrant.
+	matchLabel, matchLabelErr := MatchLabelByID(session.Context(), p.nk, matchID)
+	if matchLabelErr != nil {
+		baseLogger.Warn("Failed to get match label for guild group stream", zap.Error(matchLabelErr))
+	}
 
 	for _, entrantID := range message.EntrantIds {
 		logger := baseLogger.With(zap.String("entrant_id", entrantID))
@@ -50,9 +58,22 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 		}
 
 		ctx := s.Context()
-		// Update tracker with the entrant's presence.
-		for _, subject := range [...]uuid.UUID{presence.SessionID, presence.UserID, presence.EvrID.UUID()} {
-			session.tracker.Update(ctx, s.ID(), PresenceStream{Mode: StreamModeService, Subject: subject, Label: StreamLabelMatchService}, s.UserID(), PresenceMeta{Format: s.Format(), Hidden: false, Status: matchID.String()})
+
+		// Update service streams — this is the authoritative "player is in this match" state.
+		// All 4 subjects: SessionID, LoginSessionID, UserID, EvrID.
+		for _, subject := range [...]uuid.UUID{presence.SessionID, presence.LoginSessionID, presence.UserID, presence.EvrID.UUID()} {
+			if !session.tracker.Update(ctx, s.ID(), PresenceStream{Mode: StreamModeService, Subject: subject, Label: StreamLabelMatchService}, s.UserID(), PresenceMeta{Format: s.Format(), Hidden: false, Status: matchIDStr}) {
+				logger.Warn("Failed to update service stream for entrant",
+					zap.String("subject", subject.String()),
+					zap.String("entrant_uid", presence.GetUserId()))
+			}
+		}
+
+		// Update guild group stream and leave matchmaking streams.
+		if matchLabel != nil {
+			guildGroupStream := PresenceStream{Mode: StreamModeGuildGroup, Subject: matchLabel.GetGroupID(), Label: matchLabel.Mode.String()}
+			session.tracker.Update(ctx, s.ID(), guildGroupStream, s.UserID(), PresenceMeta{Format: s.Format(), Username: s.Username(), Hidden: false, Status: matchIDStr})
+			session.tracker.UntrackLocalByModes(s.ID(), map[uint8]struct{}{StreamModeMatchmaking: {}, StreamModeGuildGroup: {}}, guildGroupStream)
 		}
 
 		// Trigger the MatchJoin event.
@@ -72,11 +93,29 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 		// Social lobbies already transition to StateSocialReady in LobbyJoinEntrants.
 		if ws, ok := s.(*sessionWS); ok {
 			if lc := getMatchLifecycle(ws); lc != nil && lc.State() == StateJoining {
-				lc.TransitionTo(StateInMatch, "joined match", WithMatchID(matchID.String()))
+				lc.TransitionTo(StateInMatch, "joined match", WithMatchID(matchIDStr))
 			}
 		}
 
 		acceptedIDs = append(acceptedIDs, entrantID)
+
+		// Create party reservations for followers when the leader connects.
+		// NOTE: `s` is the player's session (line 45), NOT `session` (the game server).
+		if params, ok := LoadParams(s.Context()); ok && params.currentPartyID != uuid.Nil {
+			// Check if this player is the party leader via the party registry.
+			if ph, ok := p.nk.partyRegistry.Get(params.currentPartyID); ok {
+				ph.RLock()
+				leader := ph.leader
+				ph.RUnlock()
+				if leader != nil && leader.UserPresence.SessionId == presence.GetSessionId() {
+					// This entrant is the party leader. Dispatch reservation
+					// creation asynchronously. Use context.WithoutCancel so
+					// reservation creation completes even if the player
+					// disconnects mid-creation.
+					go p.createPartyReservations(context.WithoutCancel(s.Context()), logger, matchID, uuid.FromStringOrNil(presence.GetSessionId()), params.currentPartyID)
+				}
+			}
+		}
 	}
 
 	messages := make([]evr.Message, 0, 4)
@@ -128,6 +167,91 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 		messages = append(messages, evr.NewGameServerEntrantRejected(evr.PlayerRejectionReasonBadRequest, uuids...))
 	}
 	return session.SendEvr(messages...)
+}
+
+// createPartyReservations creates slot reservations in the given match for
+// all party members who are not already in the match. Called from
+// lobbyEntrantConnected when the connected entrant is the party leader.
+//
+// IMPORTANT: This function is dispatched as a goroutine. The caller MUST
+// pass context.WithoutCancel(s.Context()) so that reservation creation
+// completes even if the triggering player session disconnects. Using the
+// raw session context would cancel the goroutine mid-creation if the
+// player disconnects, leaving some members with reservations and others
+// without.
+func (p *EvrPipeline) createPartyReservations(ctx context.Context, logger *zap.Logger, matchID MatchID, leaderSessionID uuid.UUID, partyID uuid.UUID) {
+	// Verify the party still exists and the leader is still a member.
+	// The partyID was captured at lobbyEntrantConnected time and may be
+	// stale if the player left the party between then and now.
+	ph, ok := p.nk.partyRegistry.Get(partyID)
+	if !ok {
+		logger.Debug("Party no longer exists, skipping reservation creation",
+			zap.String("party_id", partyID.String()))
+		return
+	}
+	leaderStillMember := false
+	for _, member := range ph.members.List() {
+		if member.PresenceID != nil && member.PresenceID.SessionID == leaderSessionID {
+			leaderStillMember = true
+			break
+		}
+	}
+	if !leaderStillMember {
+		logger.Debug("Leader no longer in party, skipping reservation creation",
+			zap.String("party_id", partyID.String()),
+			zap.String("leader_sid", leaderSessionID.String()))
+		return
+	}
+
+	// List party members via the party stream.
+	stream := PresenceStream{Mode: StreamModeParty, Subject: partyID, Label: p.node}
+	presences := p.nk.tracker.ListByStream(stream, true, true)
+
+	members := make([]*EvrMatchPresence, 0, len(presences))
+	for _, pp := range presences {
+		if pp.ID.SessionID == leaderSessionID {
+			continue // skip the leader
+		}
+		memberSession := p.nk.sessionRegistry.Get(pp.ID.SessionID)
+		if memberSession == nil {
+			continue // skip dead sessions (BAC-013)
+		}
+
+		member := &EvrMatchPresence{
+			SessionID:     pp.ID.SessionID,
+			UserID:        pp.UserID,
+			Username:      memberSession.Username(),
+			PartyID:       partyID,
+			RoleAlignment: evr.TeamSocial,
+			Node:          p.node,
+		}
+
+		// Load additional fields from session params if available.
+		if memberParams, ok := LoadParams(memberSession.Context()); ok {
+			member.EvrID = memberParams.xpID
+			member.DisplayName = memberParams.profile.DisplayName()
+		}
+
+		members = append(members, member)
+	}
+
+	if len(members) == 0 {
+		return
+	}
+
+	payload := SignalCreatePartyReservationsPayload{Members: members}
+	if _, err := SignalMatch(ctx, p.nk, matchID, SignalCreatePartyReservations, payload); err != nil {
+		logger.Warn("Failed to signal match for party reservations",
+			zap.Error(err),
+			zap.String("match_id", matchID.String()),
+			zap.String("party_id", partyID.String()))
+		return
+	}
+
+	logger.Info("Created party reservations",
+		zap.Int("members", len(members)),
+		zap.String("match_id", matchID.String()),
+		zap.String("party_id", partyID.String()))
 }
 
 func (p *EvrPipeline) lobbyEntrantsRemove(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) error {

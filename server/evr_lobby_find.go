@@ -112,6 +112,26 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	if lobbyGroup != nil {
 		if !isLeader {
+			// Reservation-based follow: if the leader has created a reservation
+			// for this follower, join directly without tracker-read follow logic.
+			if reservationMatchID, found := p.findReservation(ctx, logger, session, lobbyGroup); found {
+				logger.Info("Found party reservation, joining directly",
+					zap.String("reservation_mid", reservationMatchID.String()))
+				if err := p.lobbyJoin(ctx, logger, session, lobbyParams, reservationMatchID); err != nil {
+					logger.Warn("Failed to join via reservation, falling through to legacy path",
+						zap.Error(err))
+				} else {
+					// Observer: follower joined via reservation. Transition to StateJoining
+					// (not StateInMatch) — lobbyEntrantConnected will promote to StateInMatch
+					// when the game server confirms the join. This keeps the crash-detection
+					// window active during the join handshake.
+					if lc := getMatchLifecycle(session); lc != nil {
+						lc.TransitionTo(StateJoining, "reservation found, joining", WithMatchID(reservationMatchID.String()))
+					}
+					return nil
+				}
+			}
+
 			// Guard: if the follower is in an active Arena/Combat match,
 			// do not process the party follow. Let them finish their match.
 			// The party will pick them up when they return to social.
@@ -122,7 +142,9 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			}
 
 			// Observer: non-leader entering holding pattern, waiting for leader's ticket.
-			if lc := getMatchLifecycle(session); lc != nil {
+			// Guard: skip if the player is still InMatch — the match leave
+			// hasn't fired yet; transitioning to Holding would be premature.
+			if lc := getMatchLifecycle(session); lc != nil && lc.State() != StateInMatch {
 				lc.Transition(StateHolding, "waiting for leader's ticket")
 			}
 
@@ -514,7 +536,9 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 		logger.Debug("Party is ready", zap.String("leader", session.id.String()), zap.Int("size", partySize), zap.Strings("members", memberUsernames))
 
 		// Observer: leader submitting matchmaking ticket.
-		if lc := getMatchLifecycle(session); lc != nil {
+		// Guard: skip if the player is still InMatch — the match leave
+		// hasn't fired yet; transitioning to Matchmaking would be premature.
+		if lc := getMatchLifecycle(session); lc != nil && lc.State() != StateInMatch {
 			lc.TransitionTo(StateMatchmaking, "leader submitted ticket", WithIsLeader(true))
 		}
 
@@ -528,9 +552,11 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 			continue
 		}
 		// Observer: party member included on leader's ticket.
+		// Guard: skip if the member is still InMatch — their match leave
+		// hasn't fired yet; transitioning to Matchmaking would be premature.
 		if memberSession := p.nk.sessionRegistry.Get(uuid.FromStringOrNil(member.Presence.GetSessionId())); memberSession != nil {
 			if ws, ok := memberSession.(*sessionWS); ok {
-				if lc := getMatchLifecycle(ws); lc != nil {
+				if lc := getMatchLifecycle(ws); lc != nil && lc.State() != StateInMatch {
 					lc.Transition(StateMatchmaking, "included on leader's ticket")
 				}
 			}
@@ -779,6 +805,33 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 				}
 			}
 			p.prewarmEntrantPings(ctx, logger, entrants, endpoints)
+		}
+
+		// Reservation-based follow: if the leader has created a reservation
+		// for this follower in a social lobby, join directly without the
+		// tracker-read priority join path.
+		if ws, ok := session.(*sessionWS); ok {
+			if lobbyParams.PartyGroupName != "" && lobbyParams.PartyGroupName != "tablet" {
+				if lobbyGroup, _, err := JoinPartyGroup(ws, lobbyParams.PartyGroupName, lobbyParams.CurrentMatchID); err == nil && lobbyGroup != nil {
+					if reservationMatchID, found := p.findReservation(ctx, logger, ws, lobbyGroup); found {
+						logger.Info("Found party reservation in social lobby path, joining directly",
+							zap.String("reservation_mid", reservationMatchID.String()))
+						if err := p.lobbyJoin(ctx, logger, ws, lobbyParams, reservationMatchID); err != nil {
+							logger.Warn("Failed to join via reservation in social path, falling through to legacy priority join",
+								zap.Error(err))
+						} else {
+							// Observer: follower joined via reservation in social lobby path.
+							// Transition to StateJoining (not StateInMatch) — lobbyEntrantConnected
+							// will promote to StateInMatch when the game server confirms. This keeps
+							// the crash-detection window active during the join handshake.
+							if lc := getMatchLifecycle(ws); lc != nil {
+								lc.TransitionTo(StateJoining, "reservation found, joining", WithMatchID(reservationMatchID.String()))
+							}
+							return nil
+						}
+					}
+				}
+			}
 		}
 
 		// Priority 1: If we're in a party, try to find the leader's specific lobby first.
@@ -1395,7 +1448,9 @@ func (p *EvrPipeline) cancelTicketForLateArrival(_ context.Context, logger *zap.
 	lobbyGroup.SignalTicketRebuild()
 
 	// Observer: ticket cancelled due to late arrival.
-	if lc := getMatchLifecycle(session); lc != nil {
+	// Guard: skip if the player is still InMatch — the match leave
+	// hasn't fired yet; transitioning to Holding would be premature.
+	if lc := getMatchLifecycle(session); lc != nil && lc.State() != StateInMatch {
 		lc.Transition(StateHolding, "ticket cancelled for late arrival, rebuilding")
 	}
 }
@@ -1845,4 +1900,71 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		}
 		return true
 	}
+}
+
+// findReservation checks whether the party leader's current match has a
+// reservation for this follower. It looks up the leader's match via the
+// leader's service stream, fetches the match label, and checks the
+// Players slice for an entry with IsReservation == true matching this
+// session's ID.
+//
+// Returns the match ID and true if a reservation is found. Returns
+// MatchID{}, false if no reservation exists (leader not in a match,
+// match label unreadable, or follower not reserved).
+//
+// This replaces the old StreamModeReservation tracker-read approach.
+// Cost: one tracker read (leader's service stream) + one MatchLabelByID
+// call per invocation.
+func (p *EvrPipeline) findReservation(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyGroup *LobbyGroup) (MatchID, bool) {
+	leader := lobbyGroup.GetLeader()
+	if leader == nil {
+		return MatchID{}, false
+	}
+	leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
+	leaderUserID := uuid.FromStringOrNil(leader.UserId)
+	if leaderSessionID == session.id {
+		return MatchID{}, false // caller IS the leader
+	}
+
+	// Look up leader's current match via their service stream.
+	stream := PresenceStream{
+		Mode:    StreamModeService,
+		Subject: leaderSessionID,
+		Label:   StreamLabelMatchService,
+	}
+	presence := p.nk.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, stream, leaderUserID)
+	if presence == nil {
+		return MatchID{}, false // leader not in a match
+	}
+	leaderMatchID := MatchIDFromStringOrNil(presence.GetStatus())
+	if leaderMatchID.IsNil() {
+		return MatchID{}, false
+	}
+
+	// Fetch match label and check for our reservation.
+	label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
+	if err != nil || label == nil {
+		logger.Debug("Failed to get leader's match label for reservation check",
+			zap.Error(err), zap.String("mid", leaderMatchID.String()))
+		return MatchID{}, false
+	}
+
+	// Check if our session ID appears as a reservation in the Players slice.
+	//
+	// Known benign race: the reservation may not be in the label yet because
+	// updateLabel hasn't run since createPartyReservations signalled the match.
+	// In that case findReservation returns false and the caller falls through
+	// to the legacy tracker-read follow path, which converges correctly.
+	sessionIDStr := session.id.String()
+	for _, player := range label.Players {
+		if player.SessionID == sessionIDStr && player.IsReservation {
+			logger.Debug("Found reservation in leader's match",
+				zap.String("match_id", leaderMatchID.String()))
+			return leaderMatchID, true
+		}
+	}
+	logger.Debug("No reservation found in leader's match label (may be label publication lag)",
+		zap.String("match_id", leaderMatchID.String()),
+		zap.String("session_id", sessionIDStr))
+	return MatchID{}, false
 }

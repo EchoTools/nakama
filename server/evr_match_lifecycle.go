@@ -85,38 +85,78 @@ func (s MatchLifecycleState) IsTerminal() bool {
 // illegal transitions are logged as warnings but still applied.
 var legalTransitions = map[MatchLifecycleState]map[MatchLifecycleState]bool{
 	StateIdle: {
-		StateSocialConverging: true,
+		StateSocialConverging: true, // Party follower heading to leader's social lobby.
+		StateSocialReady:      true, // Solo player joined social lobby directly.
+		StateHolding:          true, // Solo/follower sent LobbyFindSessionRequest.
+		StateMatchmaking:      true, // Solo/leader submitted ticket from menu.
+		StateJoining:          true, // Direct match join (echo taxi / reconnect).
+		StateIdle:             true, // Reconnect failed (idempotent).
 	},
 	StateSocialConverging: {
-		StateSocialReady: true,
+		StateSocialReady: true, // Arrived at leader's social lobby.
 	},
 	StateSocialReady: {
 		StateHolding:     true, // Non-leader sent LobbyFindSessionRequest.
 		StateMatchmaking: true, // Leader submits ticket.
+		StateJoining:     true, // Match found, joining (direct placement).
+		StateInMatch:     true, // Followed leader to match / reconnect.
 		StateIdle:        true, // Left party.
+		StateSocialReady: true, // Lobby switch or join-failed regroup.
+		StateCrashed:     true, // Disconnect from social (rare).
 	},
 	StateHolding: {
 		StateMatchmaking: true, // Leader's ticket includes this member.
-		StateSocialReady: true, // Matchmaking cancelled.
+		StateSocialReady: true, // Matchmaking cancelled / leader in arena.
+		StateJoining:     true, // Match found while in holding (skipped Matchmaking).
+		StateInMatch:     true, // Followed leader directly (rare).
+		StateHolding:     true, // Ticket cancelled for late arrival, rebuilding.
+		StateReturning:   true, // Stale match-end during holding.
 	},
 	StateMatchmaking: {
 		StateJoining:     true, // Match found, join started.
-		StateSocialReady: true, // Ticket cancelled (late arrival rebuild).
+		StateSocialReady: true, // Ticket cancelled / join failed.
+		StateMatchmaking: true, // Ticket rebuild (late arrival, party change).
+		StateHolding:     true, // Re-entered holding (ticket structure change).
+		StateReturning:   true, // Stale match-end (see §5B — add guard).
+		StateCrashed:     true, // Disconnect while on ticket.
 	},
 	StateJoining: {
 		StateInMatch:     true, // Connected to game server.
 		StateSocialReady: true, // Join failed, return to social.
+		StateReturning:   true, // Match ended during join window.
+		StateCrashed:     true, // Disconnect during join.
+		StateMatchmaking: true, // Ticket placed during join window.
+		StateJoining:     true, // Duplicate match-found (idempotent).
 	},
 	StateInMatch: {
 		StateReturning: true, // Match ended naturally.
 		StateCrashed:   true, // Client disconnected.
+		// Below are stale-state transitions — should be eliminated by code
+		// guards but listed for observer-mode tolerance during transition:
+		StateSocialReady: true, // Joined social while stale InMatch.
+		StateMatchmaking: true, // Ticket submitted while stale InMatch.
+		StateHolding:     true, // Holding entered while stale InMatch.
+		StateJoining:     true, // Match found while stale InMatch.
+		StateIdle:        true, // Reconnect failed (rare).
 	},
 	StateReturning: {
 		StateSocialReady: true, // Back in social lobby.
+		StateMatchmaking: true, // Fast requeue — leader submitted ticket.
+		StateHolding:     true, // Fast requeue — follower waiting for ticket.
+		StateJoining:     true, // Match found during return window.
+		StateReturning:   true, // Duplicate match-end (idempotent).
+		StateCrashed:     true, // Disconnect during return.
+		StateIdle:        true, // Reconnect failed.
 	},
 	StateCrashed: {
-		StateInMatch: true, // Reconnected within 27s.
-		StateIdle:    true, // Reconnect failed, reservation expired.
+		StateInMatch:     true, // Reconnected within 27s.
+		StateIdle:        true, // Reconnect failed, reservation expired.
+		StateJoining:     true, // Match found while reservation active.
+		StateReturning:   true, // Match ends while reservation active.
+		StateMatchmaking: true, // Picked up by new ticket.
+		StateSocialReady: true, // Joined social (gave up on reconnect).
+		StateHolding:     true, // Re-entered party flow.
+		StateCrashed:     true, // Duplicate crash event.
 	},
 }
 
