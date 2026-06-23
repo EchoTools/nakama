@@ -1,0 +1,211 @@
+{
+  "name": "party-churn-repeated-cycles",
+  "description": "Extended party session showing repeated matchmaking/holding cycles: initial party follow, first match, stale match-end bounce, ticket cancellation, second arena visit, crash during join, recovery, and another stale bounce. Demonstrates party churn under real conditions.",
+  "source_log": "nakama-2026-06-19T17-48-09.533.log",
+  "time_window": "2026-06-18T20:06:14Z/2026-06-18T20:17:30Z",
+  "transitions": [
+    {
+      "ts": "2026-06-18T20:06:14.473Z",
+      "from": "Idle",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:06:16.110Z",
+      "from": "Holding",
+      "to": "SocialReady",
+      "reason": "joined social lobby",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:06:16.261Z",
+      "from": "SocialReady",
+      "to": "InMatch",
+      "reason": "followed leader to match",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:06:36.239Z",
+      "from": "InMatch",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:06:42.425Z",
+      "from": "Holding",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:07:09.854Z",
+      "from": "Matchmaking",
+      "to": "Joining",
+      "reason": "match found, joining",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:07:17.481Z",
+      "from": "Joining",
+      "to": "Returning",
+      "reason": "match ended",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:14:19.114Z",
+      "from": "Returning",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:14:19.427Z",
+      "from": "Matchmaking",
+      "to": "Returning",
+      "reason": "match ended",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:14:19.445Z",
+      "from": "Returning",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:14:20.987Z",
+      "from": "Holding",
+      "to": "SocialReady",
+      "reason": "joined social lobby",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:14:37.293Z",
+      "from": "SocialReady",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:14:37.829Z",
+      "from": "Matchmaking",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:14:37.829Z",
+      "from": "Holding",
+      "to": "Holding",
+      "reason": "ticket cancelled for late arrival, rebuilding",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:14:44.849Z",
+      "from": "Holding",
+      "to": "SocialReady",
+      "reason": "joined social lobby",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:14:45.000Z",
+      "from": "SocialReady",
+      "to": "InMatch",
+      "reason": "followed leader to social lobby via poll",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:14:52.513Z",
+      "from": "InMatch",
+      "to": "Returning",
+      "reason": "match ended",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:15:09.917Z",
+      "from": "Returning",
+      "to": "Joining",
+      "reason": "match found, joining",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:15:47.693Z",
+      "from": "Joining",
+      "to": "Crashed",
+      "reason": "disconnected",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:16:16.695Z",
+      "from": "Crashed",
+      "to": "Matchmaking",
+      "reason": "leader submitted ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:16:21.365Z",
+      "from": "Matchmaking",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:16:42.185Z",
+      "from": "Matchmaking",
+      "to": "Joining",
+      "reason": "match found, joining",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:16:49.838Z",
+      "from": "Joining",
+      "to": "InMatch",
+      "reason": "joined match",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:16:49.856Z",
+      "from": "InMatch",
+      "to": "Returning",
+      "reason": "match ended",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:17:10.900Z",
+      "from": "Returning",
+      "to": "Matchmaking",
+      "reason": "leader submitted ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:17:10.939Z",
+      "from": "Matchmaking",
+      "to": "Returning",
+      "reason": "match ended",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:17:15.605Z",
+      "from": "Returning",
+      "to": "SocialReady",
+      "reason": "joined social lobby",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:17:30.418Z",
+      "from": "SocialReady",
+      "to": "Matchmaking",
+      "reason": "leader submitted ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:17:30.516Z",
+      "from": "Matchmaking",
+      "to": "Returning",
+      "reason": "match ended",
+      "legal": true
+    }
+  ]
+}

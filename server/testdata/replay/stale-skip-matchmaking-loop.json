@@ -1,0 +1,169 @@
+{
+  "name": "stale-skip-matchmaking-loop",
+  "description": "Player experiences the stale fast-path skip bug: after a crash during join, recovers into matchmaking but gets stuck in Matchmaking loop for 3+ minutes. Shows the ticket inclusion storm from stale stream data.",
+  "source_log": "nakama-2026-06-19T17-48-09.533.log",
+  "time_window": "2026-06-18T20:05:31Z/2026-06-18T20:20:50Z",
+  "transitions": [
+    {
+      "ts": "2026-06-18T20:05:31.311Z",
+      "from": "Idle",
+      "to": "Matchmaking",
+      "reason": "leader submitted ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:05:33.340Z",
+      "from": "Matchmaking",
+      "to": "SocialReady",
+      "reason": "joined social lobby",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:05:54.528Z",
+      "from": "SocialReady",
+      "to": "Matchmaking",
+      "reason": "leader submitted ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:06:14.452Z",
+      "from": "Matchmaking",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:06:36.220Z",
+      "from": "Matchmaking",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:06:42.425Z",
+      "from": "Matchmaking",
+      "to": "Matchmaking",
+      "reason": "leader submitted ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:07:09.853Z",
+      "from": "Matchmaking",
+      "to": "Joining",
+      "reason": "match found, joining",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:07:17.447Z",
+      "from": "Joining",
+      "to": "Returning",
+      "reason": "match ended",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:14:19.114Z",
+      "from": "Returning",
+      "to": "Matchmaking",
+      "reason": "leader submitted ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:14:19.196Z",
+      "from": "Matchmaking",
+      "to": "Returning",
+      "reason": "match ended",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:14:19.383Z",
+      "from": "Returning",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:14:23.209Z",
+      "from": "Matchmaking",
+      "to": "SocialReady",
+      "reason": "join failed, regrouping",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:14:24.211Z",
+      "from": "SocialReady",
+      "to": "SocialReady",
+      "reason": "joined social lobby",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:14:37.293Z",
+      "from": "SocialReady",
+      "to": "Matchmaking",
+      "reason": "leader submitted ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:14:37.809Z",
+      "from": "Matchmaking",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:15:09.920Z",
+      "from": "Matchmaking",
+      "to": "Joining",
+      "reason": "match found, joining",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:15:47.655Z",
+      "from": "Joining",
+      "to": "Crashed",
+      "reason": "disconnected",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:17:10.900Z",
+      "from": "Crashed",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:17:30.418Z",
+      "from": "Matchmaking",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:19:06.138Z",
+      "from": "Matchmaking",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:20:10.684Z",
+      "from": "Matchmaking",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:20:35.768Z",
+      "from": "Matchmaking",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:20:50.500Z",
+      "from": "Matchmaking",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    }
+  ]
+}

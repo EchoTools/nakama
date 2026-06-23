@@ -828,10 +828,13 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			}
 
 			// Observer: log lifecycle transition for player leaving match.
+			// Only apply match-leave transitions if the player is still InMatch.
+			// Stale leave events (player already advanced to Matchmaking,
+			// SocialReady, etc.) should be ignored — the player has moved on.
 			if _nkLocal, ok := nk.(*RuntimeGoNakamaModule); ok {
 				if s := _nkLocal.sessionRegistry.Get(uuid.FromStringOrNil(p.GetSessionId())); s != nil {
 					if ws, ok := s.(*sessionWS); ok {
-						if lc := getMatchLifecycle(ws); lc != nil {
+						if lc := getMatchLifecycle(ws); lc != nil && lc.State() == StateInMatch {
 							if hasReconnectReservation {
 								lc.Transition(StateCrashed, "disconnected")
 							} else if p.GetReason() == runtime.PresenceReasonLeave || state.GameState.IsMatchOver() {
@@ -841,6 +844,54 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 							}
 						}
 					}
+				}
+			}
+
+			// Clear party reservations based on whether the leaving player is the leader.
+			// Leader leaves -> clear ALL party reservations (followers should not join
+			// a match the leader has left).
+			// Non-leader leaves -> clear only THEIR OWN reservation (other followers'
+			// reservations remain valid because the leader is still present).
+			if mp.PartyID != uuid.Nil {
+				isLeader := false
+				if _nk, ok := nk.(*RuntimeGoNakamaModule); ok {
+					if ph, ok := _nk.partyRegistry.Get(mp.PartyID); ok {
+						ph.RLock()
+						if ph.leader != nil {
+							isLeader = ph.leader.UserPresence.SessionId == mp.GetSessionId()
+						}
+						ph.RUnlock()
+					}
+					// If partyRegistry.Get fails (party already disbanded), fall through
+					// to the non-leader path: clear only this player's own reservation.
+					// This is the safe default -- clearing all reservations without
+					// confirming leadership could delete valid reservations for other
+					// members who are still expected.
+				}
+
+				cleared := 0
+				if isLeader {
+					// Leader is leaving: clear ALL reservations for this party.
+					for sid, r := range state.reservationMap {
+						if r.Presence.PartyID == mp.PartyID {
+							delete(state.reservationMap, sid)
+							cleared++
+						}
+					}
+				} else {
+					// Non-leader is leaving: clear only THEIR OWN reservation.
+					if _, exists := state.reservationMap[mp.GetSessionId()]; exists {
+						delete(state.reservationMap, mp.GetSessionId())
+						cleared = 1
+					}
+				}
+				if cleared > 0 {
+					state.rebuildCache()
+					logger.WithFields(map[string]any{
+						"party_id":  mp.PartyID.String(),
+						"is_leader": isLeader,
+						"cleared":   cleared,
+					}).Debug("Cleared party reservations for departing player")
 				}
 			}
 
@@ -1840,6 +1891,58 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 				}
 			}
 		}
+
+	// NOTE: These cases intentionally do NOT return early.
+	// They fall through to updateLabel and return
+	// SignalResponse{Success: true}, following the same pattern as
+	// SignalPrepareSession, SignalLockSession, and SignalPlayerUpdate.
+	case SignalCreatePartyReservations:
+		var payload SignalCreatePartyReservationsPayload
+		if err := json.Unmarshal(signal.Payload, &payload); err != nil {
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal create party reservations: %v", err)}.String()
+		}
+		created := 0
+		for _, member := range payload.Members {
+			sid := member.GetSessionId()
+			if _, exists := state.presenceMap[sid]; exists {
+				continue // already in match
+			}
+			if _, exists := state.reservationMap[sid]; exists {
+				continue // already reserved
+			}
+			state.reservationMap[sid] = &slotReservation{
+				Presence: member,
+				Expiry:   time.Now().Add(5 * time.Minute),
+			}
+			created++
+		}
+		if created > 0 {
+			state.rebuildCache()
+		}
+		logger.WithFields(map[string]any{
+			"requested": len(payload.Members),
+			"created":   created,
+		}).Info("Created party reservations via signal")
+
+	case SignalClearPartyReservations:
+		var payload SignalClearPartyReservationsPayload
+		if err := json.Unmarshal(signal.Payload, &payload); err != nil {
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal clear party reservations: %v", err)}.String()
+		}
+		cleared := 0
+		for sid, r := range state.reservationMap {
+			if r.Presence.PartyID == payload.PartyID {
+				delete(state.reservationMap, sid)
+				cleared++
+			}
+		}
+		if cleared > 0 {
+			state.rebuildCache()
+		}
+		logger.WithFields(map[string]any{
+			"party_id": payload.PartyID.String(),
+			"cleared":  cleared,
+		}).Debug("Cleared party reservations via signal")
 
 	default:
 		logger.WithField("op_code", signal.OpCode).Warn("Unknown signal")

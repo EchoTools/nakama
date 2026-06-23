@@ -1,0 +1,176 @@
+{
+  "name": "crash-recovery-rejoin",
+  "description": "Player crashes mid-return from a match, reconnects 27 seconds later through Crashed state, regroups in social lobby, then successfully follows leader to a second match. Demonstrates the full crash recovery path.",
+  "source_log": "nakama-2026-06-19T17-48-09.533.log",
+  "time_window": "2026-06-18T19:59:45Z/2026-06-18T20:02:59Z",
+  "transitions": [
+    {
+      "ts": "2026-06-18T19:59:45.091Z",
+      "from": "Idle",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T19:59:45.212Z",
+      "from": "Holding",
+      "to": "SocialReady",
+      "reason": "join failed, regrouping",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T19:59:45.216Z",
+      "from": "SocialReady",
+      "to": "SocialReady",
+      "reason": "join failed, regrouping",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T19:59:46.218Z",
+      "from": "SocialReady",
+      "to": "SocialReady",
+      "reason": "joined social lobby",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:00:03.286Z",
+      "from": "SocialReady",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:00:03.303Z",
+      "from": "Holding",
+      "to": "SocialReady",
+      "reason": "join failed, regrouping",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:00:25.061Z",
+      "from": "SocialReady",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:00:43.169Z",
+      "from": "Matchmaking",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:00:55.574Z",
+      "from": "Matchmaking",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:00:55.688Z",
+      "from": "Holding",
+      "to": "SocialReady",
+      "reason": "join failed, regrouping",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:01:20.058Z",
+      "from": "SocialReady",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:01:21.781Z",
+      "from": "Holding",
+      "to": "SocialReady",
+      "reason": "joined social lobby",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:01:21.932Z",
+      "from": "SocialReady",
+      "to": "InMatch",
+      "reason": "followed leader to match",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:01:39.561Z",
+      "from": "InMatch",
+      "to": "Returning",
+      "reason": "match ended",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:01:43.236Z",
+      "from": "Returning",
+      "to": "Crashed",
+      "reason": "disconnected",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:02:10.357Z",
+      "from": "Crashed",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:02:10.569Z",
+      "from": "Holding",
+      "to": "SocialReady",
+      "reason": "join failed, regrouping",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:02:11.252Z",
+      "from": "SocialReady",
+      "to": "SocialReady",
+      "reason": "join failed, regrouping",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:02:12.259Z",
+      "from": "SocialReady",
+      "to": "SocialReady",
+      "reason": "joined social lobby",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:02:33.007Z",
+      "from": "SocialReady",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:02:34.115Z",
+      "from": "Holding",
+      "to": "SocialReady",
+      "reason": "joined social lobby",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:02:34.266Z",
+      "from": "SocialReady",
+      "to": "InMatch",
+      "reason": "followed leader to match",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:02:41.718Z",
+      "from": "InMatch",
+      "to": "Returning",
+      "reason": "match ended",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:02:59.477Z",
+      "from": "Returning",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    }
+  ]
+}

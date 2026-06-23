@@ -108,6 +108,8 @@ type (
 
 		storageIndex StorageIndex
 		evrPipeline  *EvrPipeline
+
+		sendEvrHook func(messages []evr.Message) // nil in production; set by tests to capture SendEvr calls
 	}
 
 	// Keys used for storing/retrieving user information in the context of a request after authentication.
@@ -682,6 +684,10 @@ func (s *sessionWS) SendEvrUnrequire(messages ...evr.Message) error {
 // SendEvr sends messages to the client in the EchoVR format.
 // Multiple messages are marshaled into a single payload to reduce WebSocket writes.
 func (s *sessionWS) SendEvr(messages ...evr.Message) error {
+	if s.sendEvrHook != nil {
+		s.sendEvrHook(messages)
+	}
+
 	isDebug := s.logger.Core().Enabled(zap.DebugLevel)
 
 	// Filter nil messages and log in debug mode.

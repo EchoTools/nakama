@@ -1,0 +1,64 @@
+{
+  "name": "reconnect-social-lobby-join",
+  "description": "Player reconnects after disconnect and successfully joins a social lobby, then follows leader to arena match",
+  "source_log": "nakama-2026-06-19T17-48-09.533.log",
+  "time_window": "2026-06-18T20:22:15Z/2026-06-18T20:23:18Z",
+  "transitions": [
+    {
+      "ts": "2026-06-18T20:22:32.241Z",
+      "from": "Idle",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:22:33.733Z",
+      "from": "Holding",
+      "to": "SocialReady",
+      "reason": "joined social lobby",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:22:33.884Z",
+      "from": "SocialReady",
+      "to": "InMatch",
+      "reason": "followed leader to match",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:22:54.676Z",
+      "from": "InMatch",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:22:54.825Z",
+      "from": "Holding",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:23:09.881Z",
+      "from": "Matchmaking",
+      "to": "Joining",
+      "reason": "match found, joining",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:23:17.618Z",
+      "from": "Joining",
+      "to": "InMatch",
+      "reason": "joined match",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T20:23:17.678Z",
+      "from": "InMatch",
+      "to": "Returning",
+      "reason": "match ended",
+      "legal": true
+    }
+  ]
+}

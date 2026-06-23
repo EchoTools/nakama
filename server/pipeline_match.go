@@ -15,7 +15,9 @@
 package server
 
 import (
+	"context"
 	"crypto"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -327,7 +329,52 @@ func (p *Pipeline) matchLeave(logger *zap.Logger, session Session, envelope *rta
 	// Check and drop the presence if possible, will always succeed.
 	stream := PresenceStream{Mode: mode, Subject: matchID, Label: matchIDComponents[1]}
 
-	p.tracker.Untrack(session.ID(), stream, session.UserID())
+	if mode == StreamModeMatchAuthoritative {
+		// EchoVR-specific signal path in a generic handler:
+		//
+		// EchoVR authoritative matches have a game server that is the authority
+		// for who is in the match. We signal the match handler to kick the
+		// player through the game server rather than directly untracking.
+		// The match handler sends an EntrantReject to the game server, which
+		// removes the player and sends LobbyEntrantRemoved back, triggering
+		// the real presence cleanup via lobbyEntrantsRemove.
+		//
+		// Non-EchoVR authoritative matches (or any match that doesn't handle
+		// SignalKickEntrants) will fail the signal or return Success=false.
+		// In either case we fall back to direct Untrack, which preserves
+		// standard Nakama behavior for non-EchoVR matches.
+		matchIDStr := fmt.Sprintf("%s.%s", matchID.String(), matchIDComponents[1])
+
+		routed := false
+		if payload, err := json.Marshal(SignalKickEntrantsPayload{
+			UserIDs: []uuid.UUID{session.UserID()},
+		}); err == nil {
+			signal := SignalEnvelope{
+				UserID:  session.UserID().String(),
+				OpCode:  SignalKickEntrants,
+				Payload: payload,
+			}
+			if signalData, err := json.Marshal(signal); err == nil {
+				signalCtx, signalCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				result, signalErr := p.matchRegistry.Signal(signalCtx, matchIDStr, string(signalData))
+				signalCancel()
+				if signalErr == nil {
+					resp := SignalResponseFromString(result)
+					if resp.Success {
+						routed = true
+						logger.Debug("Match leave routed through game server signal",
+							zap.String("match_id", matchIDStr),
+							zap.String("uid", session.UserID().String()))
+					}
+				}
+			}
+		}
+		if !routed {
+			p.tracker.Untrack(session.ID(), stream, session.UserID())
+		}
+	} else {
+		p.tracker.Untrack(session.ID(), stream, session.UserID())
+	}
 
 	out := &rtapi.Envelope{Cid: envelope.Cid}
 	_ = session.Send(out, true)
