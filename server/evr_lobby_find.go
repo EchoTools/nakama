@@ -421,32 +421,16 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 		}
 
 		if !lobbyParams.CurrentMatchID.IsNil() && lobbyParams.Mode != evr.ModeSocialPublic {
-			// Query the match we're leaving to find how many party members should be joining us.
-			// Use the leader's party ID from the match presence (set at join time), not
-			// lobbyParams.PartyID. The user may have changed their LobbyGroupName since
-			// joining the match (via /party group), which changes lobbyParams.PartyID but
-			// doesn't update the match presence. Comparing against the match presence
-			// party ID ensures we count everyone who was in the same party when they
-			// entered the match.
-			expectedCount := 0
-			matchPartyID := lobbyParams.PartyID
-			if presences, err := GetMatchPresences(ctx, p.nk, lobbyParams.CurrentMatchID); err == nil {
-				if leaderPresence, ok := presences[session.userID.String()]; ok && !leaderPresence.PartyID.IsNil() {
-					matchPartyID = leaderPresence.PartyID
-				}
-				for _, mp := range presences {
-					if mp.PartyID == matchPartyID && mp.UserID != session.userID {
-						expectedCount++
-					}
-				}
-			}
+			// The leader operates off party membership (lobbyGroup.Size()) only.
+			// The party stream is the source of truth for who's in the party;
+			// match presences give wrong counts when followers have already left.
+			expectedCount := lobbyGroup.Size() - 1
 			if expectedCount > 0 {
 				logger.Debug("Waiting for party members to start matchmaking",
 					zap.Int("expected", expectedCount),
 					zap.Int("current", lobbyGroup.Size()-1),
 					zap.String("source_match_id", lobbyParams.CurrentMatchID.String()),
-					zap.String("match_party_id", matchPartyID.String()),
-					zap.String("current_party_id", lobbyParams.PartyID.String()))
+					zap.String("party_id", lobbyParams.PartyID.String()))
 				deadline := time.After(30 * time.Second)
 				ticker := time.NewTicker(500 * time.Millisecond)
 				defer ticker.Stop()
@@ -460,8 +444,7 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 							zap.Int("expected", expectedCount),
 							zap.Int("current", lobbyGroup.Size()-1),
 							zap.String("source_match_id", lobbyParams.CurrentMatchID.String()),
-							zap.String("match_party_id", matchPartyID.String()),
-							zap.String("current_party_id", lobbyParams.PartyID.String()))
+							zap.String("party_id", lobbyParams.PartyID.String()))
 						break waitLoop
 					case <-ticker.C:
 					}
