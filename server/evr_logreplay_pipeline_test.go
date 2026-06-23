@@ -309,7 +309,6 @@ func TestPipelineReplay_FindReservation_SoloNoParty(t *testing.T) {
 //
 // Test:
 //   1. findReservation for player_A finds the reservation in the social lobby
-//   2. isFollowerInActiveMatch reports whether the follower is "stuck" in arena
 //
 // Assert:
 //   - findReservation returns the social lobby match ID (not the arena match)
@@ -407,105 +406,6 @@ func TestPipelineReplay_BigDuckII_FollowerNotStuck(t *testing.T) {
 		"Reservation should point to the social lobby, not the arena match")
 	assert.Equal(t, socialMatchID.Node, reservationMatchID.Node)
 
-	// --- Verify: isFollowerInActiveMatch would detect the stale arena match ---
-	// In the old code (before reservations), this check would fire and return nil
-	// from lobbyFind, leaving the player stuck. With reservations, findReservation
-	// runs BEFORE this check in lobbyFind (line 117 vs line 136), so the follower
-	// is directed to the social lobby before the active-match guard can block them.
-	inActiveMatch := env.pipeline.isFollowerInActiveMatch(
-		context.Background(), loggerForTest(t), followerSession)
-	assert.True(t, inActiveMatch,
-		"isFollowerInActiveMatch should detect the stale arena match — this is the "+
-			"bug trigger that findReservation bypasses")
-}
-
-// TestPipelineReplay_BigDuckII_OldCode_WouldStuck verifies that WITHOUT the
-// reservation (simulating old code), the follower would get stuck. Set up the
-// same scenario as the BigDuckII test but with NO reservation in the social
-// lobby. The isFollowerInActiveMatch check should fire and return true,
-// documenting the old behavior that caused infinite matchmaking.
-func TestPipelineReplay_BigDuckII_OldCode_WouldStuck(t *testing.T) {
-	env := newReplayTestEnv(t)
-
-	leaderUID := uuid.Must(uuid.NewV4())
-	leaderSID := uuid.Must(uuid.NewV4())
-	followerUID := uuid.Must(uuid.NewV4())
-	followerSID := uuid.Must(uuid.NewV4())
-	groupID := uuid.Must(uuid.NewV4())
-
-	arenaMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
-	socialMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
-
-	_ = env.newTestSession("player_B", leaderUID, leaderSID)
-	followerSession := env.newTestSession("player_A", followerUID, followerSID)
-
-	// Leader's service stream → social lobby.
-	env.tracker.Track(context.Background(), leaderSID,
-		PresenceStream{Mode: StreamModeService, Subject: leaderSID, Label: StreamLabelMatchService},
-		leaderUID,
-		PresenceMeta{Status: socialMatchID.String()},
-	)
-
-	// Follower's service stream → arena match (stale).
-	env.tracker.Track(context.Background(), followerSID,
-		PresenceStream{Mode: StreamModeService, Subject: followerSID, Label: StreamLabelMatchService},
-		followerUID,
-		PresenceMeta{Status: arenaMatchID.String()},
-	)
-
-	// Arena match in registry.
-	env.matchRegistry.SetMatch(arenaMatchID, &MatchLabel{
-		ID:          arenaMatchID,
-		Open:        false,
-		Mode:        evr.ModeArenaPublic,
-		PlayerLimit: 8,
-		Players: []PlayerInfo{
-			{UserID: leaderUID.String(), SessionID: leaderSID.String()},
-			{UserID: followerUID.String(), SessionID: followerSID.String()},
-		},
-		GroupID: &groupID,
-	})
-
-	// Social lobby — NO reservation for follower (simulating old code).
-	env.matchRegistry.SetMatch(socialMatchID, &MatchLabel{
-		ID:          socialMatchID,
-		Open:        true,
-		Mode:        evr.ModeSocialPublic,
-		PlayerLimit: 12,
-		Players: []PlayerInfo{
-			{UserID: leaderUID.String(), SessionID: leaderSID.String()},
-			// No reservation for follower — old code behavior.
-		},
-		GroupID: &groupID,
-	})
-
-	// Party state.
-	ph := &PartyHandler{members: NewPartyPresenceList(8)}
-	ph.leader = &PartyLeader{
-		UserPresence: &rtapi.UserPresence{
-			UserId:    leaderUID.String(),
-			SessionId: leaderSID.String(),
-			Username:  "player_B",
-		},
-		PresenceID: &PresenceID{SessionID: leaderSID, Node: "testnode"},
-	}
-	lobbyGroup := &LobbyGroup{ph: ph}
-
-	// Without reservations, findReservation returns false.
-	_, found := env.pipeline.findReservation(
-		context.Background(), loggerForTest(t), followerSession, lobbyGroup)
-	assert.False(t, found,
-		"Without reservation, findReservation should return false (old code behavior)")
-
-	// The follower is stuck: isFollowerInActiveMatch sees the stale arena match
-	// and would return true, causing lobbyFind to return nil with no
-	// LobbySessionSuccess — the infinite matchmaking loop.
-	inActiveMatch := env.pipeline.isFollowerInActiveMatch(
-		context.Background(), loggerForTest(t), followerSession)
-	assert.True(t, inActiveMatch,
-		"OLD CODE BUG: isFollowerInActiveMatch returns true for stale arena match. "+
-			"Without findReservation running first, lobbyFind returns nil and the "+
-			"follower gets stuck in infinite matchmaking.")
 }
 
 // ---------------------------------------------------------------------------

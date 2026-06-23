@@ -132,15 +132,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				}
 			}
 
-			// Guard: if the follower is in an active Arena/Combat match,
-			// do not process the party follow. Let them finish their match.
-			// The party will pick them up when they return to social.
-			// Fixes #460: player mid-match yanked back to social by party follow.
-			if p.isFollowerInActiveMatch(ctx, logger, session) {
-				logger.Info("Follower is in an active arena/combat match, skipping party follow")
-				return nil
-			}
-
 			// Observer: non-leader entering holding pattern, waiting for leader's ticket.
 			// Guard: skip if the player is still InMatch — the match leave
 			// hasn't fired yet; transitioning to Holding would be premature.
@@ -1128,40 +1119,6 @@ func (p *EvrPipeline) isLeaderHeadingToSocial(ctx context.Context, logger *zap.L
 	}
 
 	return false
-}
-
-// isFollowerInActiveMatch reports whether the follower (session) is currently
-// in an Arena or Combat match (public or private). When this returns true,
-// the party follow system must not process the LobbyFindSessionRequest —
-// doing so would yank the player out of their active match.
-//
-// Returns false when the session has no match presence, the match label
-// cannot be resolved, or the match is a social lobby.
-//
-// Fixes #460: player mid-match was pulled back to social when party leader
-// hit matchmaking.
-func (p *EvrPipeline) isFollowerInActiveMatch(ctx context.Context, logger *zap.Logger, session *sessionWS) bool {
-	matchStream := PresenceStream{
-		Mode:    StreamModeService,
-		Subject: session.id,
-		Label:   StreamLabelMatchService,
-	}
-	presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, matchStream, session.userID)
-	if presence == nil {
-		return false
-	}
-
-	followerMatchID := MatchIDFromStringOrNil(presence.GetStatus())
-	if followerMatchID.IsNil() {
-		return false
-	}
-
-	label, err := MatchLabelByID(ctx, p.nk, followerMatchID)
-	if err != nil || label == nil {
-		return false
-	}
-
-	return label.IsArena() || label.IsCombat()
 }
 
 // currentSocialLobbyForSession returns the match ID of the social lobby that
