@@ -166,27 +166,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				p.cancelTicketForLateArrival(ctx, logger, session, lobbyParams, lobbyGroup)
 			}
 
-			// Gate: only enter the follow path when the leader is in a
-			// *social* lobby. For Arena/Combat the correct path is the
-			// one-ticket model — all party members on one matchmaking
-			// ticket. If the follower missed the ticket the answer is
-			// ticket cancellation + rebuild, not chasing the leader's
-			// match. In the interim, redirect the follower to a social
-			// lobby so they are not silently released to solo matchmaking.
-			if p.isLeaderInArenaCombatMatch(ctx, logger, session, lobbyParams, lobbyGroup) {
-				logger.Info("Leader is in arena/combat match, skipping follow path — returning to social lobby")
-				if lc := getMatchLifecycle(session); lc != nil {
-					lc.Transition(StateSocialReady, "leader in arena/combat — waiting in social for next round")
-				}
-				lobbyParams.Mode = evr.ModeSocialPublic
-				lobbyParams.Level = evr.LevelUnspecified
-				followerEntrants, err := PrepareEntrantPresences(ctx, logger, p.nk, p.nk.sessionRegistry, lobbyParams, session.id)
-				if err != nil {
-					return NewLobbyError(InternalError, fmt.Sprintf("failed to prepare follower entrant: %s", err))
-				}
-				return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, lobbyGroup, followerEntrants...)
-			}
-
 			if p.TryFollowPartyLeader(ctx, logger, session, lobbyParams, lobbyGroup) {
 				return nil
 			}
@@ -1335,58 +1314,6 @@ func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(logger *zap.Logger, session
 	}
 
 	return true
-}
-
-// isLeaderInArenaCombatMatch reports whether the party leader is currently
-// in an Arena or Combat match (public or private). The follower should NOT
-// enter the follow path when this returns true — the correct path is the
-// one-ticket model where all party members are placed via a single
-// matchmaking ticket.
-//
-// Returns false when the leader cannot be found, is not in a match, is
-// actively matchmaking, or is in a social lobby.
-func (p *EvrPipeline) isLeaderInArenaCombatMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, lobbyGroup *LobbyGroup) bool {
-	leader := lobbyGroup.GetLeader()
-	if leader == nil || leader.SessionId == session.id.String() {
-		return false
-	}
-
-	leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
-	leaderUserID := uuid.FromStringOrNil(leader.UserId)
-
-	// If the leader is actively matchmaking, they have not settled into
-	// a match yet. Do not gate here — let the normal flow handle it.
-	mmStream := PresenceStream{
-		Mode:    StreamModeMatchmaking,
-		Subject: params.GroupID,
-	}
-	if session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, mmStream, leaderUserID) != nil {
-		return false
-	}
-
-	// Look up the leader's current match.
-	matchStream := PresenceStream{
-		Mode:    StreamModeService,
-		Subject: leaderSessionID,
-		Label:   StreamLabelMatchService,
-	}
-	presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, matchStream, leaderUserID)
-	if presence == nil {
-		return false
-	}
-
-	leaderMatchID := MatchIDFromStringOrNil(presence.GetStatus())
-	if leaderMatchID.IsNil() {
-		return false
-	}
-
-	label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
-	if err != nil || label == nil {
-		return false
-	}
-
-	// Arena or Combat (public or private) — follow path is wrong here.
-	return label.IsArena() || label.IsCombat()
 }
 
 // cancelTicketForLateArrival checks whether the party's leader has an active
