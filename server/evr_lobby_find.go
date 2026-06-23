@@ -69,7 +69,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		// prevents repeated "Joined party group" / "Already in
 		// leader's match" churn when the client re-sends
 		// LobbyFindSessionRequest on its normal message cycle.
-		if !isLeader && p.isFollowerAlreadyInLeaderMatch(logger, session, lobbyGroup, lobbyParams.CurrentMatchID) {
+		if !isLeader && p.isFollowerAlreadyInLeaderMatch(ctx, logger, session, lobbyGroup, lobbyParams.CurrentMatchID) {
 			logger.Debug("Follower already in leader's match, skipping follow path",
 				zap.String("current_match_id", lobbyParams.CurrentMatchID.String()),
 				zap.String("leader_sid", lobbyGroup.GetLeader().GetSessionId()))
@@ -1207,7 +1207,7 @@ func (p *EvrPipeline) intendedSocialTargetMatchID(session *sessionWS, lobbyParam
 //
 // Returns false when the leader cannot be found, either player is not in a
 // match, or their match IDs differ.
-func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(logger *zap.Logger, session *sessionWS, lobbyGroup *LobbyGroup, currentMatchID MatchID) bool {
+func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyGroup *LobbyGroup, currentMatchID MatchID) bool {
 	leader := lobbyGroup.GetLeader()
 	if leader == nil || leader.SessionId == session.id.String() {
 		return false
@@ -1246,6 +1246,16 @@ func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(logger *zap.Logger, session
 	}
 
 	if !currentMatchID.IsNil() && followerMatchID == currentMatchID {
+		// Both players are in the same match that the client reports as
+		// "current." Distinguish social (staying) from arena (leaving).
+		if p.nk != nil {
+			label, err := MatchLabelByID(ctx, p.nk, followerMatchID)
+			if err == nil && label != nil && label.IsSocial() {
+				logger.Debug("Follower and leader share a social lobby, already converged",
+					zap.String("shared_match_id", followerMatchID.String()))
+				return true
+			}
+		}
 		logger.Debug("Follower and leader share the match being left, not skipping",
 			zap.String("shared_match_id", followerMatchID.String()),
 			zap.String("current_match_id", currentMatchID.String()),
@@ -1587,7 +1597,18 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		}
 
 		if !params.CurrentMatchID.IsNil() && leaderMatchID == params.CurrentMatchID {
-			return false
+			// Both players share the match the client reports as "current."
+			// Social lobbies persist (staying); arena lobbies are dying (leaving).
+			isSocial := false
+			if p.nk != nil {
+				label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
+				if err == nil && label != nil && label.IsSocial() {
+					isSocial = true
+				}
+			}
+			if !isSocial {
+				return false
+			}
 		}
 
 		memberStream := PresenceStream{
