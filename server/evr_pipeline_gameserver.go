@@ -198,6 +198,17 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		internalIP = normalized
 	}
 
+	// Null out the internal IP when it duplicates the external IP. The internal
+	// slot is only useful when Nakama and the game server share a LAN; when both
+	// addresses are the same the field adds no information and the ping retry
+	// would just repeat the same probe.
+	if internalIP != nil && internalIP.Equal(externalIP) {
+		logger.Debug("Game server internal_ip equals external_ip; clearing internal_ip",
+			zap.String("ip", internalIP.String()),
+			zap.Uint64("server_id", serverID))
+		internalIP = nil
+	}
+
 	isNative := false
 	if uuid.FromStringOrNil(request.LoginSessionId) != uuid.Nil {
 		isNative = true
@@ -337,13 +348,8 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		for range retries {
 			rtt, err = BroadcasterHealthcheck(p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
 			if err != nil {
-				// Try the internal IP
-				rtt, err = BroadcasterHealthcheck(p.internalIP, config.Endpoint.InternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
-				if err != nil {
-					time.Sleep(500 * time.Millisecond)
-					continue
-				}
-
+				time.Sleep(500 * time.Millisecond)
+				continue
 			}
 			if rtt >= 0 {
 				isAlive = true
