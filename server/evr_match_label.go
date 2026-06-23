@@ -32,18 +32,19 @@ type reconnectReservation struct {
 }
 
 type MatchLabel struct {
-	ID          MatchID      `json:"id"`                   // The Session Id used by EVR (the same as match id)
-	Open        bool         `json:"open"`                 // Whether the lobby is open to new players (Matching Only)
-	LockedAt    *time.Time   `json:"locked_at,omitempty"`  // The time the match was locked.
-	LobbyType   LobbyType    `json:"lobby_type"`           // The type of lobby (Public, Private, Unassigned) (EVR)
-	Mode        evr.Symbol   `json:"mode,omitempty"`       // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
-	Level       evr.Symbol   `json:"level,omitempty"`      // The level to play on (EVR).
-	Size        int          `json:"size"`                 // The number of players (including spectators) in the match.
-	PlayerCount int          `json:"player_count"`         // The number of participants (not including spectators) in the match.
-	Players     []PlayerInfo `json:"players,omitempty"`    // The displayNames of the players (by team name) in the match.
-	RatingMu    float64      `json:"rating_mu"`            // The average rating mu of the players in the match.
-	GameState   *GameState   `json:"game_state,omitempty"` // The game state for the match.
-	GameStatus  GameStatus   `json:"game_status"`          // The current phase of the match.
+	ID               MatchID      `json:"id"`                   // The Session Id used by EVR (the same as match id)
+	Open             bool         `json:"open"`                 // Whether the lobby is open to new players (Matching Only)
+	LockedAt         *time.Time   `json:"locked_at,omitempty"`  // The time the match was locked.
+	LobbyType        LobbyType    `json:"lobby_type"`           // The type of lobby (Public, Private, Unassigned) (EVR)
+	Mode             evr.Symbol   `json:"mode,omitempty"`       // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
+	Level            evr.Symbol   `json:"level,omitempty"`      // The level to play on (EVR).
+	Size             int          `json:"size"`                 // The number of actual players (including spectators) in the match.
+	PlayerCount      int          `json:"player_count"`         // The number of participants (not including spectators) in the match.
+	ReservationCount int          `json:"reservation_count"`    // The number of reserved slots (party + reconnect, not yet connected).
+	Players          []PlayerInfo `json:"players,omitempty"`    // The displayNames of the players (by team name) in the match.
+	RatingMu         float64      `json:"rating_mu"`            // The average rating mu of the players in the match.
+	GameState        *GameState   `json:"game_state,omitempty"` // The game state for the match.
+	GameStatus       GameStatus   `json:"game_status"`          // The current phase of the match.
 
 	TeamSize         int      `json:"team_size,omitempty"`    // The size of each team in arena/combat (either 4 or 5)
 	MaxSize          int      `json:"limit,omitempty"`        // The total lobby size limit (players + specs)
@@ -185,20 +186,22 @@ func (s *MatchLabel) IsLocked() bool {
 	return false
 }
 
+// GetPlayerCount returns the number of actual players (not spectators, moderators, or reservations).
 func (s *MatchLabel) GetPlayerCount() int {
 	count := 0
 	for _, p := range s.Players {
-		if int(p.Team) != evr.TeamSpectator && int(p.Team) != evr.TeamModerator {
+		if !p.IsReservation && int(p.Team) != evr.TeamSpectator && int(p.Team) != evr.TeamModerator {
 			count++
 		}
 	}
 	return count
 }
 
+// GetNonPlayerCount returns the number of actual spectators/moderators (not reservations).
 func (s *MatchLabel) GetNonPlayerCount() int {
 	count := 0
 	for _, p := range s.Players {
-		if int(p.Team) == evr.TeamSpectator || int(p.Team) == evr.TeamModerator {
+		if !p.IsReservation && (int(p.Team) == evr.TeamSpectator || int(p.Team) == evr.TeamModerator) {
 			count++
 		}
 	}
@@ -232,7 +235,7 @@ func (s *MatchLabel) OpenNonPlayerSlots() int {
 }
 
 func (s *MatchLabel) OpenSlots() int {
-	return int(s.MaxSize) - s.Size
+	return int(s.MaxSize) - s.Size - s.ReservationCount
 }
 
 func (s *MatchLabel) OpenSlotsByRole(role int) (int, error) {
@@ -270,10 +273,11 @@ func (s *MatchLabel) roleLimit(role int) int {
 	return 0
 }
 
+// RoleCount returns the number of actual players (not reservations) in the given role.
 func (s *MatchLabel) RoleCount(role int) int {
 	count := 0
 	for _, p := range s.Players {
-		if p.Team == TeamIndex(role) {
+		if p.Team == TeamIndex(role) && !p.IsReservation {
 			count++
 		}
 	}
@@ -421,12 +425,14 @@ func (s *MatchLabel) rebuildCache() {
 	}
 
 	// Rebuild the lookup tables.
-	s.Size = len(presences)
-	s.Players = make([]PlayerInfo, 0, s.Size)
+	// Size reflects actual presences only (not reservations). Reservations are
+	// tracked separately in ReservationCount so consumers can distinguish real
+	// occupancy from committed capacity.
+	s.Size = len(s.presenceMap)
+	s.ReservationCount = len(presences) - len(s.presenceMap)
+	s.Players = make([]PlayerInfo, 0, len(presences))
 	// PlayerCount reflects only actual presences (not reservations) so that the
-	// search index field "player_count" shows real occupancy. Reservations are
-	// included in Size for slot-management purposes but must not inflate the
-	// count used by lobby-search queries.
+	// search index field "player_count" shows real occupancy.
 	s.PlayerCount = 0
 	for _, p := range s.presenceMap {
 		if p.RoleAlignment != evr.TeamSpectator && p.RoleAlignment != evr.TeamModerator {
@@ -657,6 +663,7 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 		MaxSize:          l.MaxSize,
 		Size:             l.Size,
 		PlayerCount:      l.PlayerCount,
+		ReservationCount: l.ReservationCount,
 		PlayerLimit:      l.PlayerLimit,
 		TeamSize:         l.TeamSize,
 		GameServer:       l.publicGameServer(),
