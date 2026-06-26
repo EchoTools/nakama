@@ -681,6 +681,19 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 		return nil
 	}
 
+	// Party-cohesion: ensure the social find reserves room for the WHOLE party,
+	// regardless of which caller invoked it. The leader path appends these
+	// placeholders before calling in (see lobbyFind ~line 271), but the follower
+	// fallthrough (lobbyFind ~line 197) passes a self-only entrant list. Without
+	// this, the Priority-2 open-slots gate below (n < len(entrants), len==1)
+	// would admit a lobby with only ONE open slot and reserve nothing for the
+	// rest of the party — the other member's convergence join is then rejected
+	// with ServerIsFull and the party fragments. appendPartyReservationPlaceholders
+	// is idempotent (members already in the entrant set are skipped), so the
+	// leader path's earlier call adds nothing here, and solo players / party-of-1
+	// are unaffected (the helper no-ops on lobbyGroup == nil || Size() <= 1).
+	entrants = appendPartyReservationPlaceholders(logger, entrants, lobbyGroup, lobbyParams, p.node)
+
 	// Load the user's server blacklist once before the retry loop
 	blacklistedIPs := loadUserBlacklist(ctx, p.nk, session.UserID().String()).IPSet()
 
