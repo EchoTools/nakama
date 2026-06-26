@@ -172,7 +172,7 @@ func TestCreateSuspensionDetailsEmbedField_Reporter(t *testing.T) {
 
 	t.Run("reporter present is rendered", func(t *testing.T) {
 		t.Parallel()
-		field := createSuspensionDetailsEmbedField("Guild A", withReporter, nil, false, true, true, groupA, "")
+		field := createSuspensionDetailsEmbedField("Guild A", withReporter, nil, false, true, true, groupA, "", false)
 		if field == nil {
 			t.Fatal("expected non-nil field")
 		}
@@ -192,7 +192,7 @@ func TestCreateSuspensionDetailsEmbedField_Reporter(t *testing.T) {
 			UserNoticeText:    "Notice text",
 			Expiry:            time.Now().Add(time.Hour),
 		}}
-		field := createSuspensionDetailsEmbedField("Guild A", legacy, nil, false, true, true, groupA, "")
+		field := createSuspensionDetailsEmbedField("Guild A", legacy, nil, false, true, true, groupA, "", false)
 		if field == nil {
 			t.Fatal("expected non-nil field")
 		}

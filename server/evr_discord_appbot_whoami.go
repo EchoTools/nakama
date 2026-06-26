@@ -42,8 +42,9 @@ type UserProfileRequestOptions struct {
 	ShowLoginsSince                time.Time
 	SendFileOnError                bool // If true, send a file with the error message instead of an ephemeral message
 
-	CallerUserID    string // Nakama user ID of the caller (for per-record note filtering)
-	CallerIsAuditor bool   // Auditors bypass per-record note restriction
+	CallerUserID           string // Nakama user ID of the caller (for per-record note filtering)
+	CallerIsAuditor        bool   // Auditors bypass per-record note restriction
+	CallerIsGlobalOperator bool   // Global operators see enforcement attribution across all guilds
 }
 
 const (
@@ -510,7 +511,7 @@ func (w *WhoAmI) createSuspensionsEmbed() *discordgo.MessageEmbed {
 				callerForFilter = w.opts.CallerUserID
 			}
 
-			if field := createSuspensionDetailsEmbedField(gName, records, voids, w.opts.IncludeInactiveSuspensions, w.opts.IncludeSuspensionAuditorNotes, w.opts.IncludeSuspensionAuditorNotes, w.GroupID, callerForFilter); field != nil {
+			if field := createSuspensionDetailsEmbedField(gName, records, voids, w.opts.IncludeInactiveSuspensions, w.opts.IncludeSuspensionAuditorNotes, w.opts.IncludeSuspensionAuditorNotes, w.GroupID, callerForFilter, w.opts.CallerIsGlobalOperator); field != nil {
 				if field.Value != "" {
 					fields = append(fields, field)
 				}
