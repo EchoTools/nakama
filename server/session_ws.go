@@ -109,6 +109,8 @@ type (
 		storageIndex StorageIndex
 		evrPipeline  *EvrPipeline
 
+		inboundLimiter *inboundRateLimiter // per-session inbound message flood limiter (SEC-2); nil = disabled
+
 		sendEvrHook func(messages []evr.Message) // nil in production; set by tests to capture SendEvr calls
 	}
 
@@ -325,6 +327,8 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		evrPipeline:     evrPipeline,
 		storageIndex:    storageIndex,
 
+		inboundLimiter: newInboundRateLimiter(config.GetSocket().InboundMessageRateLimitPerSec, config.GetSocket().InboundMessageRateLimitBurst),
+
 		stopped:                false,
 		conn:                   conn,
 		receivedMessageCounter: config.GetSocket().PingBackoffThreshold,
@@ -472,6 +476,23 @@ IncomingLoop:
 					logger.Debug("Received message")
 				}
 				if request == nil {
+					continue
+				}
+
+				// Per-session inbound rate limit (SEC-2): drop messages that
+				// exceed the token bucket before they reach a handler, so a
+				// single socket cannot flood cheap-request/expensive-handler
+				// pairs (e.g. ConfigRequest -> storage read). Dropping is
+				// audited (never silent): increment a counter per drop and warn
+				// (throttled) with what was dropped.
+				if !s.inboundLimiter.allow() {
+					s.metrics.CustomCounter("socket_inbound_ratelimited_dropped", nil, 1)
+					if s.inboundLimiter.logDue(time.Now().UnixNano(), int64(time.Second)) {
+						s.logger.Warn("inbound message rate limit exceeded; dropping messages",
+							zap.String("client_ip", s.clientIP),
+							zap.String("request_type", fmt.Sprintf("%T", request)),
+							zap.Int64("dropped_total", s.inboundLimiter.droppedTotal()))
+					}
 					continue
 				}
 
