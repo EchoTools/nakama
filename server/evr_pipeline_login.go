@@ -147,14 +147,15 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	StoreParams(ctx, params)
 
 	tags := params.MetricsTags()
-	tags["cpu_model"] = strings.TrimSpace(params.loginPayload.SystemInfo.CPUModel)
-	tags["gpu_model"] = strings.TrimSpace(params.loginPayload.SystemInfo.VideoCard)
-	tags["network_type"] = params.loginPayload.SystemInfo.NetworkType
+	// SEC-4: bound attacker-controlled SystemInfo strings to allow-lists so a
+	// randomized login payload cannot blow up metrics cardinality. Unknown
+	// values bucket to metricTagOther; see systemInfoMetricTags.
+	for k, v := range systemInfoMetricTags(params.loginPayload.SystemInfo) {
+		tags[k] = v
+	}
 	tags["total_memory"] = strconv.FormatInt(params.loginPayload.SystemInfo.MemoryTotal, 10)
 	tags["num_logical_cores"] = strconv.FormatInt(params.loginPayload.SystemInfo.NumLogicalCores, 10)
 	tags["num_physical_cores"] = strconv.FormatInt(params.loginPayload.SystemInfo.NumPhysicalCores, 10)
-	tags["driver_version"] = strings.TrimSpace(params.loginPayload.SystemInfo.DriverVersion)
-	tags["headset_type"] = normalizeHeadsetType(params.loginPayload.SystemInfo.HeadsetType)
 	tags["build_number"] = strconv.FormatInt(int64(params.loginPayload.BuildNumber), 10)
 	tags["app_id"] = strconv.FormatInt(int64(params.loginPayload.AppId), 10)
 	tags["publisher_lock"] = strings.TrimSpace(params.loginPayload.PublisherLock)

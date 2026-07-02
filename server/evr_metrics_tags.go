@@ -110,19 +110,20 @@ func systemInfoTagCardinalityBound(field string) int {
 }
 
 // systemInfoMetricTags builds the client-controlled portion of the login metric
-// tags from a SystemInfo login payload.
+// tags from a SystemInfo login payload, with every attacker-controlled string
+// bounded to its allow-list (unknown values bucket to metricTagOther).
 //
-// SEC-4: every field below is attacker-controlled JSON from the login payload.
-// Emitting the raw strings as metric tag values lets one authenticated account
-// mint an unbounded number of distinct Prometheus series (one per unique tuple)
-// by randomizing SystemInfo on repeated logins -> metrics-backend memory
-// pressure. See BUGS.md SEC-4.
+// SEC-4: these fields are attacker-controlled JSON from the login payload.
+// Emitting the raw strings as metric tag values would let one authenticated
+// account mint an unbounded number of distinct Prometheus series (one per
+// unique tuple) by randomizing SystemInfo on repeated logins ->
+// metrics-backend memory pressure. See BUGS.md SEC-4.
 func systemInfoMetricTags(si evr.SystemInfo) map[string]string {
 	return map[string]string{
-		"cpu_model":      strings.TrimSpace(si.CPUModel),
-		"gpu_model":      strings.TrimSpace(si.VideoCard),
-		"network_type":   si.NetworkType,
-		"driver_version": strings.TrimSpace(si.DriverVersion),
-		"headset_type":   normalizeHeadsetType(si.HeadsetType),
+		"cpu_model":      cpuModelAllowlist.normalize(si.CPUModel),
+		"gpu_model":      gpuModelAllowlist.normalize(si.VideoCard),
+		"network_type":   networkTypeAllowlist.normalize(si.NetworkType),
+		"driver_version": driverVersionAllowlist.normalize(si.DriverVersion),
+		"headset_type":   boundHeadsetMetricTag(si.HeadsetType),
 	}
 }
