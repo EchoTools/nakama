@@ -1519,18 +1519,35 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
 
+	senderSessionID := session.ID()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 		defer cancel()
 
-		if err := p.processUserServerProfileUpdate(ctx, logger, request.EvrID, label, payload); err != nil {
+		if err := p.processUserServerProfileUpdate(ctx, logger, p.nk, senderSessionID, request.EvrID, label, payload); err != nil {
 			logger.Error("Failed to process user server profile update", zap.Error(err))
 		}
 	}()
 	return nil
 }
 
-func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger *zap.Logger, evrID evr.EvrId, label *MatchLabel, payload *evr.UpdatePayload) error {
+func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, senderSessionID uuid.UUID, evrID evr.EvrId, label *MatchLabel, payload *evr.UpdatePayload) error {
+	// SEC-3: A server profile update is only legitimate when it comes from the
+	// match's authoritative game server ("the game server's login connection").
+	// The authoritative game server for a match is the broadcaster session bound
+	// to it, identified by label.GameServer.SessionID (set to the registering
+	// session's ID in gameserverRegistrationRequest and used elsewhere to detect
+	// the broadcaster, e.g. evr_match.go). Reject any sender whose session is not
+	// that game server, otherwise any authenticated client could inject stats for
+	// a player in a live non-arena match whose session ID it knows.
+	if label.GameServer == nil || senderSessionID != label.GameServer.SessionID {
+		logger.Warn("Rejected server profile update from non-authoritative sender",
+			zap.String("sender_sid", senderSessionID.String()),
+			zap.String("evr_id", evrID.String()),
+			zap.String("mid", label.ID.String()))
+		return nil
+	}
+
 	// Get the player's information
 	playerInfo := label.GetPlayerByEvrID(evrID)
 
@@ -1541,7 +1558,7 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 	logger = logger.With(zap.String("player_uid", playerInfo.UserID), zap.String("player_sid", playerInfo.SessionID), zap.String("player_xpid", playerInfo.EvrID.String()))
 
 	// If the player isn't a member of the group, do not update the stats
-	profile, err := EVRProfileLoad(ctx, p.nk, playerInfo.UserID)
+	profile, err := EVRProfileLoad(ctx, nk, playerInfo.UserID)
 	if err != nil {
 		return fmt.Errorf("failed to get account profile: %w", err)
 	}
@@ -1559,7 +1576,7 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 		return nil
 	}
 
-	return SendEvent(ctx, p.nk, &EventServerProfileUpdate{
+	return SendEvent(ctx, nk, &EventServerProfileUpdate{
 		UserID:      playerInfo.UserID,
 		GroupID:     groupIDStr,
 		DisplayName: playerInfo.DisplayName,
