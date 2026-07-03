@@ -1169,7 +1169,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				// Create a field for each group
 				// Show enforcer ID in enforcement notice channel; hide notes when toggle restricts visibility
 				showNotes := !gg.RestrictEnforcerNoteVisibility
-				field := createSuspensionDetailsEmbedField(gn, records, voids, true, showNotes, true, gID, "")
+				field := createSuspensionDetailsEmbedField(gn, records, voids, true, showNotes, true, gID, "", false)
 				embed.Fields = append(embed.Fields, field)
 			}
 

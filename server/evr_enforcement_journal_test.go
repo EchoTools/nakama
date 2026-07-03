@@ -310,7 +310,8 @@ func TestCreateSuspensionDetailsEmbedField(t *testing.T) {
 				tc.includeAuditorNotes,
 				tc.showEnforcerID,
 				tc.currentGuildID,
-				"", // callerUserID: empty = no per-record restriction
+				"",    // callerUserID: empty = no per-record restriction
+				false, // callerIsGlobalOperator
 			)
 
 			if field == nil {
@@ -365,7 +366,7 @@ func TestCreateSuspensionDetailsEmbedField_CallerFiltering(t *testing.T) {
 	}
 
 	t.Run("Empty callerUserID shows all notes (auditor/operator path)", func(t *testing.T) {
-		field := createSuspensionDetailsEmbedField("Guild A", records, nil, false, true, true, groupA, "")
+		field := createSuspensionDetailsEmbedField("Guild A", records, nil, false, true, true, groupA, "", false)
 		if field == nil {
 			t.Fatal("expected field to be non-nil")
 		}
@@ -378,7 +379,7 @@ func TestCreateSuspensionDetailsEmbedField_CallerFiltering(t *testing.T) {
 	})
 
 	t.Run("CallerUserID=enforcerA sees only own notes", func(t *testing.T) {
-		field := createSuspensionDetailsEmbedField("Guild A", records, nil, false, true, true, groupA, enforcerA)
+		field := createSuspensionDetailsEmbedField("Guild A", records, nil, false, true, true, groupA, enforcerA, false)
 		if field == nil {
 			t.Fatal("expected field to be non-nil")
 		}
@@ -391,7 +392,7 @@ func TestCreateSuspensionDetailsEmbedField_CallerFiltering(t *testing.T) {
 	})
 
 	t.Run("CallerUserID=enforcerB sees only own notes", func(t *testing.T) {
-		field := createSuspensionDetailsEmbedField("Guild A", records, nil, false, true, true, groupA, enforcerB)
+		field := createSuspensionDetailsEmbedField("Guild A", records, nil, false, true, true, groupA, enforcerB, false)
 		if field == nil {
 			t.Fatal("expected field to be non-nil")
 		}
@@ -404,7 +405,7 @@ func TestCreateSuspensionDetailsEmbedField_CallerFiltering(t *testing.T) {
 	})
 
 	t.Run("CallerUserID=unrelated sees no notes", func(t *testing.T) {
-		field := createSuspensionDetailsEmbedField("Guild A", records, nil, false, true, true, groupA, "unrelated-enforcer")
+		field := createSuspensionDetailsEmbedField("Guild A", records, nil, false, true, true, groupA, "unrelated-enforcer", false)
 		if field == nil {
 			t.Fatal("expected field to be non-nil")
 		}
@@ -432,7 +433,7 @@ func TestCreateSuspensionDetailsEmbedField_CallerFiltering(t *testing.T) {
 			},
 		}
 		// enforcerB should not see void notes on A's record
-		field := createSuspensionDetailsEmbedField("Guild A", records, voids, true, true, true, groupA, enforcerB)
+		field := createSuspensionDetailsEmbedField("Guild A", records, voids, true, true, true, groupA, enforcerB, false)
 		if field == nil {
 			t.Fatal("expected field to be non-nil")
 		}
@@ -441,7 +442,7 @@ func TestCreateSuspensionDetailsEmbedField_CallerFiltering(t *testing.T) {
 		}
 
 		// enforcerA should see void notes on their own record
-		field = createSuspensionDetailsEmbedField("Guild A", records, voids, true, true, true, groupA, enforcerA)
+		field = createSuspensionDetailsEmbedField("Guild A", records, voids, true, true, true, groupA, enforcerA, false)
 		if field == nil {
 			t.Fatal("expected field to be non-nil")
 		}
@@ -642,4 +643,49 @@ func TestMidSessionSuspension_StaleEnforcementsMissPostLoginKick(t *testing.T) {
 	if !found || len(freshModeRecords) == 0 {
 		t.Errorf("fresh enforcement check missed the mid-session suspension: got %v", freshEnforcements)
 	}
+}
+
+// TestSuspensionAttribution_GlobalOperatorSeesCrossGuild verifies that a global
+// operator running /lookup sees enforcement attribution (who issued the
+// suspension) for records belonging to OTHER guilds, not just the guild the
+// command was run in. Regular enforcers/auditors remain scoped to the current
+// guild. Regression for: global operators were filtered like regular enforcers
+// and could not see cross-guild enforcement-journal attribution.
+func TestSuspensionAttribution_GlobalOperatorSeesCrossGuild(t *testing.T) {
+	const (
+		currentGuild = "guild-A"
+		otherGuild   = "guild-B"
+	)
+	// A suspension issued in a DIFFERENT guild than the one /lookup is run in.
+	records := []GuildEnforcementRecord{{
+		ID:                "rec-cross",
+		GroupID:           otherGuild,
+		EnforcerDiscordID: "enforcer-disc-999",
+		EnforcerUserID:    "enforcer-uid-999",
+		CreatedAt:         time.Now().Add(-time.Hour),
+		UpdatedAt:         time.Now().Add(-time.Hour),
+		UserNoticeText:    "Cross-guild notice",
+		Expiry:            time.Now().Add(time.Hour),
+	}}
+	const attribution = "by <@!enforcer-disc-999>"
+
+	t.Run("global operator sees cross-guild attribution", func(t *testing.T) {
+		field := createSuspensionDetailsEmbedField("Guild B", records, nil, false, true, true, currentGuild, "", true)
+		if field == nil {
+			t.Fatal("expected field to be non-nil")
+		}
+		if !strings.Contains(field.Value, attribution) {
+			t.Errorf("global operator should see cross-guild attribution; got: %s", field.Value)
+		}
+	})
+
+	t.Run("non-global viewer does not see cross-guild attribution", func(t *testing.T) {
+		field := createSuspensionDetailsEmbedField("Guild B", records, nil, false, true, true, currentGuild, "", false)
+		if field == nil {
+			t.Fatal("expected field to be non-nil")
+		}
+		if strings.Contains(field.Value, attribution) {
+			t.Errorf("non-global viewer must NOT see attribution for another guild's record; got: %s", field.Value)
+		}
+	})
 }

@@ -503,7 +503,7 @@ func formatEnforcementReporter(r GuildEnforcementRecord) string {
 // createSuspensionDetailsEmbedField builds a Discord embed field summarizing enforcement records.
 // callerUserID restricts note visibility per-record: empty string means show all notes (auditor/operator),
 // non-empty means only show notes on records where EnforcerUserID matches the caller.
-func createSuspensionDetailsEmbedField(guildName string, records []GuildEnforcementRecord, voids map[string]GuildEnforcementRecordVoid, includeInactive, includeAuditorNotes, showEnforcerID bool, currentGuildID string, callerUserID string) *discordgo.MessageEmbedField {
+func createSuspensionDetailsEmbedField(guildName string, records []GuildEnforcementRecord, voids map[string]GuildEnforcementRecordVoid, includeInactive, includeAuditorNotes, showEnforcerID bool, currentGuildID string, callerUserID string, callerIsGlobalOperator bool) *discordgo.MessageEmbedField {
 	if len(records) == 0 {
 		return nil
 	}
@@ -523,9 +523,11 @@ func createSuspensionDetailsEmbedField(guildName string, records []GuildEnforcem
 			durationText = fmt.Sprintf("~~%s~~", durationText)
 		}
 
-		// Show enforcer Discord ID only if viewer is a moderator AND suspension is for current guild
+		// Show enforcer Discord ID only if viewer is a moderator AND suspension is for
+		// the current guild — except global operators, who oversee all guilds and see
+		// attribution everywhere.
 		enforcerInfo := ""
-		if showEnforcerID && r.GroupID == currentGuildID {
+		if showEnforcerID && (callerIsGlobalOperator || r.GroupID == currentGuildID) {
 			enforcerInfo = fmt.Sprintf(" by <@!%s>", r.EnforcerDiscordID)
 		}
 
@@ -535,9 +537,10 @@ func createSuspensionDetailsEmbedField(guildName string, records []GuildEnforcem
 		)
 
 		// Surface who filed/reported the action (issue #466), gated the same way as
-		// enforcer info: only to moderators viewing a record for the current guild.
+		// enforcer info: only to moderators viewing a record for the current guild,
+		// plus global operators who see all guilds.
 		// Records without a stored reporter (legacy or operator-initiated) omit this line.
-		if showEnforcerID && r.GroupID == currentGuildID {
+		if showEnforcerID && (callerIsGlobalOperator || r.GroupID == currentGuildID) {
 			if reporterValue := formatEnforcementReporter(r); reporterValue != "" {
 				parts = append(parts, fmt.Sprintf("- reported by %s", reporterValue))
 			}

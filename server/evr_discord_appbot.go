@@ -2443,8 +2443,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				ShowLoginsSince:                loginsSince,
 				SendFileOnError:                access.IsGlobalOperator,
 
-				CallerUserID:    callerUserID,
-				CallerIsAuditor: access.IsAuditor,
+				CallerUserID:           callerUserID,
+				CallerIsAuditor:        access.IsAuditor,
+				CallerIsGlobalOperator: access.IsGlobalOperator,
 			}
 
 			return d.handleProfileRequest(ctx, logger, nk, s, i, target, opts)

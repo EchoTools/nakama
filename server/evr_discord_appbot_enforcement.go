@@ -647,7 +647,7 @@ func (d *DiscordAppBot) updateEnforcementMessage(i *discordgo.InteractionCreate,
 
 	// Regenerate the suspension details field; hide notes in channel message when toggle is active
 	showNotes := !gg.RestrictEnforcerNoteVisibility
-	suspensionField := createSuspensionDetailsEmbedField(gg.Name(), []GuildEnforcementRecord{newRecord}, voids, true, showNotes, true, gg.Group.Id, "")
+	suspensionField := createSuspensionDetailsEmbedField(gg.Name(), []GuildEnforcementRecord{newRecord}, voids, true, showNotes, true, gg.Group.Id, "", false)
 	if suspensionField != nil {
 		updatedEmbed.Fields = append(updatedEmbed.Fields, suspensionField)
 	}
