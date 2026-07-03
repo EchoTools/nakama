@@ -17,8 +17,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/bwmarrin/discordgo"
 	rtapi "buf.build/gen/go/echotools/nevr-api/protocolbuffers/go/gameservice/v1"
+	"github.com/bwmarrin/discordgo"
 	"github.com/go-redis/redis"
 	"github.com/gofrs/uuid/v5"
 

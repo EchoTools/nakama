@@ -252,11 +252,16 @@ func buildJoinEndpoint(ctx context.Context, serverEndpoint evr.Endpoint) evr.End
 		return serverEndpoint
 	}
 
-	// Check if the client demonstrated reachability to the internal IP.
-	_, intRTT, _ := lh.BestAddress(extIP.String(), intIP.String())
-
-	if intRTT > 0 {
-		// Client can reach internal IP — include it.
+	// Include the internal IP only when the client demonstrated that it is the
+	// best reachable path to this server — i.e. the client returned an RTT for
+	// the internal address AND that address is at least as fast as the external
+	// (ADR 0002: "LAN players get optimal routing"). BestAddress returns the
+	// chosen address, so we must compare it against the internal IP; reading its
+	// RTT alone would wrongly treat an external-only result as internal-reachable
+	// and leak the server's private IP to a remote client.
+	bestIP, _, ok := lh.BestAddress(extIP.String(), intIP.String())
+	if ok && bestIP == intIP.String() {
+		// Client can reach the internal IP and it is the best path — include it.
 		return evr.Endpoint{
 			InternalIP: intIP,
 			ExternalIP: extIP,
@@ -264,7 +269,8 @@ func buildJoinEndpoint(ctx context.Context, serverEndpoint evr.Endpoint) evr.End
 		}
 	}
 
-	// Client cannot reach internal IP — external only.
+	// Client cannot reach the internal IP (or the external path is faster) —
+	// external only. Never hand a private IP to a client that cannot use it.
 	return evr.Endpoint{
 		InternalIP: nil,
 		ExternalIP: extIP,

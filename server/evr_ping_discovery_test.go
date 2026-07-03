@@ -1,17 +1,30 @@
 package server
 
 import (
+	"context"
 	"net"
 	"testing"
 	"time"
 
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 )
+
+// newPingParamsCtx returns a context carrying SessionParameters whose latency
+// history is lh, mirroring how a live session stores its params on the context.
+func newPingParamsCtx(lh *LatencyHistory) context.Context {
+	params := &SessionParameters{
+		latencyHistory: atomic.NewPointer(lh),
+	}
+	ptr := atomic.NewPointer(params)
+	return context.WithValue(context.Background(), ctxSessionParametersKey{}, ptr)
+}
 
 func TestBestAddress_BothReachable_PrefersInternal(t *testing.T) {
 	h := NewLatencyHistory()
-	h.Add(net.ParseIP("1.2.3.4"), 35, 25, time.Time{})   // external: 35ms
+	h.Add(net.ParseIP("1.2.3.4"), 35, 25, time.Time{})    // external: 35ms
 	h.Add(net.ParseIP("192.168.1.5"), 2, 25, time.Time{}) // internal: 2ms
 
 	ip, rtt, ok := h.BestAddress("1.2.3.4", "192.168.1.5")
@@ -22,7 +35,7 @@ func TestBestAddress_BothReachable_PrefersInternal(t *testing.T) {
 
 func TestBestAddress_BothReachable_PrefersLower(t *testing.T) {
 	h := NewLatencyHistory()
-	h.Add(net.ParseIP("1.2.3.4"), 10, 25, time.Time{})    // external: 10ms
+	h.Add(net.ParseIP("1.2.3.4"), 10, 25, time.Time{})     // external: 10ms
 	h.Add(net.ParseIP("192.168.1.5"), 50, 25, time.Time{}) // internal: 50ms (worse)
 
 	ip, rtt, ok := h.BestAddress("1.2.3.4", "192.168.1.5")
@@ -134,4 +147,99 @@ func TestLoadPingDiscoveryConfig_InvalidFallsBackToDefault(t *testing.T) {
 	})
 	assert.Equal(t, 8, cfg.MaxMessages)
 	assert.Equal(t, 60, cfg.SpreadSeconds)
+}
+
+func TestBuildJoinEndpoint_NoParams_ReturnsUnchanged(t *testing.T) {
+	server := evr.Endpoint{
+		InternalIP: net.ParseIP("192.168.1.5"),
+		ExternalIP: net.ParseIP("1.2.3.4"),
+		Port:       6792,
+	}
+	// Context with no session params — must return the endpoint as-is.
+	got := buildJoinEndpoint(context.Background(), server)
+	assert.Equal(t, server, got)
+}
+
+func TestBuildJoinEndpoint_NoInternalIP_ReturnsUnchanged(t *testing.T) {
+	server := evr.Endpoint{
+		InternalIP: nil,
+		ExternalIP: net.ParseIP("1.2.3.4"),
+		Port:       6792,
+	}
+	ctx := newPingParamsCtx(NewLatencyHistory())
+
+	got := buildJoinEndpoint(ctx, server)
+	assert.Equal(t, server, got)
+}
+
+func TestBuildJoinEndpoint_UnspecifiedInternalIP_ReturnsUnchanged(t *testing.T) {
+	server := evr.Endpoint{
+		InternalIP: net.IPv4zero,
+		ExternalIP: net.ParseIP("1.2.3.4"),
+		Port:       6792,
+	}
+	ctx := newPingParamsCtx(NewLatencyHistory())
+
+	got := buildJoinEndpoint(ctx, server)
+	assert.Equal(t, server, got)
+}
+
+func TestBuildJoinEndpoint_InternalReachable_IncludesInternal(t *testing.T) {
+	intIP := net.ParseIP("192.168.1.5")
+	extIP := net.ParseIP("1.2.3.4")
+	server := evr.Endpoint{InternalIP: intIP, ExternalIP: extIP, Port: 6792}
+
+	lh := NewLatencyHistory()
+	lh.Add(extIP, 35, 25, time.Time{}) // external reachable
+	lh.Add(intIP, 2, 25, time.Time{})  // internal reachable (client is on LAN)
+	ctx := newPingParamsCtx(lh)
+
+	got := buildJoinEndpoint(ctx, server)
+	assert.Equal(t, intIP, got.InternalIP, "internal IP should be included when client reached it")
+	assert.Equal(t, extIP, got.ExternalIP)
+	assert.Equal(t, uint16(6792), got.Port)
+}
+
+func TestBuildJoinEndpoint_InternalUnreachable_ExternalOnly(t *testing.T) {
+	intIP := net.ParseIP("192.168.1.5")
+	extIP := net.ParseIP("1.2.3.4")
+	server := evr.Endpoint{InternalIP: intIP, ExternalIP: extIP, Port: 6792}
+
+	lh := NewLatencyHistory()
+	lh.Add(extIP, 35, 25, time.Time{}) // only external reachable (remote client)
+	ctx := newPingParamsCtx(lh)
+
+	got := buildJoinEndpoint(ctx, server)
+	assert.Nil(t, got.InternalIP, "internal IP must be omitted when client could not reach it")
+	assert.Equal(t, extIP, got.ExternalIP)
+	assert.Equal(t, uint16(6792), got.Port)
+}
+
+func TestBuildJoinEndpoint_InternalReachableButSlower_ExternalOnly(t *testing.T) {
+	intIP := net.ParseIP("192.168.1.5")
+	extIP := net.ParseIP("1.2.3.4")
+	server := evr.Endpoint{InternalIP: intIP, ExternalIP: extIP, Port: 6792}
+
+	lh := NewLatencyHistory()
+	lh.Add(extIP, 20, 25, time.Time{}) // external is the faster path
+	lh.Add(intIP, 40, 25, time.Time{}) // internal reachable but slower
+	ctx := newPingParamsCtx(lh)
+
+	// Optimal routing: the external path is best, so the internal IP is omitted.
+	got := buildJoinEndpoint(ctx, server)
+	assert.Nil(t, got.InternalIP, "internal must be omitted when the external path is faster")
+	assert.Equal(t, extIP, got.ExternalIP)
+}
+
+func TestBuildJoinEndpoint_NeitherReachable_ExternalOnly(t *testing.T) {
+	intIP := net.ParseIP("192.168.1.5")
+	extIP := net.ParseIP("1.2.3.4")
+	server := evr.Endpoint{InternalIP: intIP, ExternalIP: extIP, Port: 6792}
+
+	// Empty history — player queued before discovery finished.
+	ctx := newPingParamsCtx(NewLatencyHistory())
+
+	got := buildJoinEndpoint(ctx, server)
+	assert.Nil(t, got.InternalIP, "safe default is external-only when no latency data exists")
+	assert.Equal(t, extIP, got.ExternalIP)
 }
