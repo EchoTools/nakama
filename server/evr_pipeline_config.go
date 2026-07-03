@@ -18,7 +18,7 @@ const configCacheTTL = 5 * time.Minute
 
 // configCacheMaxEntries bounds the number of distinct config Types held in
 // memory. ConfigRequest is reachable with only the (public) ServerKey, so the
-// cache must never be able to grow without a hard size cap. See BUGS.md SEC-1.
+// cache must never be able to grow without a hard size cap (SEC-1).
 const configCacheMaxEntries = 256
 
 // configStorageRead is the storage read used by configRequest. It is a package
@@ -41,8 +41,7 @@ type cachedConfigEntry struct {
 // client-controlled Type+":"+ID, which let any remote caller holding the
 // public ServerKey (a) miss the cache on every packet and force one DB read
 // each, and (b) grow the cache without bound when a stored Config:<Type>
-// object existed. Keying on Type plus an LRU size cap removes both. See
-// BUGS.md SEC-1.
+// object existed. Keying on Type plus an LRU size cap removes both (SEC-1).
 type configCacheStore struct {
 	mu      sync.Mutex
 	ll      *list.List
@@ -131,7 +130,7 @@ func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, ses
 	// Look up (and cache) the stored config for this Type. The lookup is keyed
 	// on Type only — the client-supplied ID never touches the cache key or the
 	// storage read — so distinct-ID floods for the same Type cost at most one
-	// DB read. See BUGS.md SEC-1.
+	// DB read (SEC-1).
 	jsonResource, err := p.loadConfigJSON(ctx, logger, session, message.Type)
 	if err != nil {
 		// DB error: log and fall back to the default below.

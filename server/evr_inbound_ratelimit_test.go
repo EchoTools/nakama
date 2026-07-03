@@ -1,6 +1,10 @@
 package server
 
-import "testing"
+import (
+	"math"
+	"testing"
+	"time"
+)
 
 // --- SEC-2 regression tests -------------------------------------------------
 //
@@ -21,13 +25,23 @@ func TestSEC2_InboundRateLimiter_ThrottlesFlood(t *testing.T) {
 		t.Fatal("expected a limiter for perSec>0")
 	}
 
+	// A token bucket that starts full guarantees two timing-independent facts:
+	// the first `burst` calls are always admitted, and over any wall-clock
+	// window of duration d the total admitted count cannot exceed
+	// burst + perSec*d (the bucket's refill rate). rate.Limiter.Allow() reads
+	// time.Now() on each call, so a slow or -race loop legitimately replenishes
+	// tokens as it runs; we therefore measure d around the loop and assert
+	// against that exact bound instead of a hardcoded constant, which is what
+	// makes this test deterministic rather than flaky under load.
 	const flood = 1000
+	start := time.Now()
 	allowed := 0
 	for i := 0; i < flood; i++ {
 		if l.allow() {
 			allowed++
 		}
 	}
+	elapsed := time.Since(start)
 
 	if allowed >= flood {
 		t.Fatalf("SEC-2: limiter allowed all %d messages (no throttle)", flood)
@@ -35,8 +49,14 @@ func TestSEC2_InboundRateLimiter_ThrottlesFlood(t *testing.T) {
 	if allowed < burst {
 		t.Fatalf("SEC-2: limiter allowed %d < burst %d (would throttle legitimate bursts)", allowed, burst)
 	}
-	if allowed > burst+perSec {
-		t.Fatalf("SEC-2: limiter allowed %d, well above burst %d (cap ineffective)", allowed, burst)
+	// Upper bound from the token-bucket refill guarantee, computed from the
+	// measured loop duration (+1 for a token that may land exactly on the
+	// window boundary). A correct limiter can never exceed this regardless of
+	// machine speed, so the assertion is deterministic.
+	maxAllowed := burst + int(math.Ceil(perSec*elapsed.Seconds())) + 1
+	if allowed > maxAllowed {
+		t.Fatalf("SEC-2: limiter allowed %d, above token-bucket bound %d (burst %d + %d/s over %v; cap ineffective)",
+			allowed, maxAllowed, burst, perSec, elapsed)
 	}
 	dropped := int64(flood - allowed)
 	if got := l.droppedTotal(); got != dropped {
