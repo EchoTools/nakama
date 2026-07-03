@@ -7,11 +7,11 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
-// RegisterEVRRPCs registers all EVR RPC endpoints with authorization middleware
-func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, rpcHandler *RPCHandler, sbmm *SkillBasedMatchmaker) error {
-	// Define all RPC registrations with their permissions in one place
-	// This declarative approach ensures endpoint IDs are defined only once
-	rpcs := []RPCRegistration{
+// buildEVRRPCRegistrations returns the declarative table of all EVR RPC endpoints
+// with their handlers and permissions. This declarative approach ensures endpoint
+// IDs are defined only once, and lets tests inspect the table without registering.
+func buildEVRRPCRegistrations(rpcHandler *RPCHandler, sbmm *SkillBasedMatchmaker) []RPCRegistration {
+	return []RPCRegistration{
 		// Account management
 		// account/search - Authenticated users, filtered by shared guild membership in RPC
 		{
@@ -116,7 +116,10 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 				AllowedGroups: []string{},
 			},
 		},
-		{ID: "match/allocate", Handler: AllocateMatchRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{GroupGlobalOperators, GroupGlobalBots}}},
+		// match/allocate - Global ops, global bots, and users with the guild allocator role.
+		// Gate is delegated to the handler's own IsAllocator check (mirrors match/prepare);
+		// a group-restricted middleware list here would reject allocator-role users before the handler runs.
+		{ID: "match/allocate", Handler: AllocateMatchRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 		// match/terminate - Global ops, guild enforcers, match creator, server owner
 		{
 			ID:      "match/terminate",
@@ -139,6 +142,8 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			},
 		},
 		{ID: "player/statistics", Handler: PlayerStatisticsRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+		// player/report - Any authenticated user (rate-limit, self-report rejection, and validation enforced in handler)
+		{ID: "player/report", Handler: PlayerReportRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 		// player/kick - Global ops, guild enforcers, match creator, server owner
 		{
 			ID:      "player/kick",
@@ -483,6 +488,11 @@ func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			},
 		},
 	}
+}
+
+// RegisterEVRRPCs registers all EVR RPC endpoints with authorization middleware
+func RegisterEVRRPCs(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, rpcHandler *RPCHandler, sbmm *SkillBasedMatchmaker) error {
+	rpcs := buildEVRRPCRegistrations(rpcHandler, sbmm)
 
 	// Register RPCs with authorization middleware
 	for _, rpc := range rpcs {
