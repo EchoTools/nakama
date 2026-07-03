@@ -80,23 +80,124 @@ func TestAddSystemInfoMetricTagsWritesInPlace(t *testing.T) {
 	}
 }
 
+// TestBoundMemoryTotalTag proves MemoryTotal (attacker-controlled bytes) buckets
+// to a coarse GB tier, with adversarial / out-of-band values collapsing to the
+// metricTagOther sentinel.
+func TestBoundMemoryTotalTag(t *testing.T) {
+	cases := []struct {
+		name  string
+		bytes int64
+		want  string
+	}{
+		{"rtx3080-fixture-16gb", 16777216000, "16"}, // real login-history capture
+		{"8gib-exact", 8 * (1 << 30), "8"},
+		{"12gib-exact", 12 * (1 << 30), "12"},
+		{"16gib-exact", 16 * (1 << 30), "16"},
+		{"32gib-exact", 32 * (1 << 30), "32"},
+		{"128gib-exact", 128 * (1 << 30), "128"},
+		{"4gib-exact", 4 * (1 << 30), "4"},
+		{"2gib-below-band", 2 * (1 << 30), metricTagOther},
+		{"mock-16384-bytes-tiny", 16384, metricTagOther},
+		{"zero", 0, metricTagOther},
+		{"negative", -1 << 40, metricTagOther},
+		{"300gib-above-band", 300 * (1 << 30), metricTagOther},
+		{"absurd-petabyte", 1 << 50, metricTagOther},
+	}
+	for _, c := range cases {
+		if got := boundMemoryTotalTag(c.bytes); got != c.want {
+			t.Errorf("%s: boundMemoryTotalTag(%d) = %q, want %q", c.name, c.bytes, got, c.want)
+		}
+	}
+}
+
+// TestBoundCoreCountTag proves core counts clamp to a plausible range, out-of-range
+// values collapsing to metricTagOther.
+func TestBoundCoreCountTag(t *testing.T) {
+	cases := []struct {
+		cores int64
+		want  string
+	}{
+		{1, "1"}, {8, "8"}, {16, "16"}, {64, "64"},
+		{0, metricTagOther}, {65, metricTagOther}, {-4, metricTagOther}, {1 << 40, metricTagOther},
+	}
+	for _, c := range cases {
+		if got := boundCoreCountTag(c.cores); got != c.want {
+			t.Errorf("boundCoreCountTag(%d) = %q, want %q", c.cores, got, c.want)
+		}
+	}
+}
+
+// TestSystemInfoIntTagCardinality is the SEC-4 int-field property: N randomized /
+// adversarial memory & core payloads must NOT produce N distinct tag values. Each
+// int field is bounded by its bucket set (+1 for the "other" sentinel).
+func TestSystemInfoIntTagCardinality(t *testing.T) {
+	const n = 2000
+	rng := rand.New(rand.NewSource(7))
+	intFields := []string{"total_memory", "num_logical_cores", "num_physical_cores"}
+
+	distinct := make(map[string]map[string]struct{}, len(intFields))
+	for _, f := range intFields {
+		distinct[f] = make(map[string]struct{})
+	}
+
+	for i := 0; i < n; i++ {
+		si := evr.SystemInfo{
+			MemoryTotal:      rng.Int63(),
+			NumLogicalCores:  rng.Int63(),
+			NumPhysicalCores: rng.Int63(),
+		}
+		if i%3 == 0 { // also exercise small / in-band adversarial values
+			si.MemoryTotal = int64(rng.Intn(1 << 20))
+			si.NumLogicalCores = int64(rng.Intn(1000))
+			si.NumPhysicalCores = int64(rng.Intn(1000))
+		}
+		tags := systemInfoMetricTags(si)
+		for _, f := range intFields {
+			distinct[f][tags[f]] = struct{}{}
+		}
+	}
+
+	for _, f := range intFields {
+		bound := systemInfoTagCardinalityBound(f)
+		if bound == 0 {
+			t.Errorf("field %q: no cardinality bound registered", f)
+		}
+		if got := len(distinct[f]); got > bound {
+			t.Errorf("field %q: %d distinct values from %d random inputs (bound %d) — unbounded cardinality (SEC-4 int)", f, got, n, bound)
+		}
+	}
+}
+
 // TestSystemInfoFingerprintDeterministicAndDistinct proves the per-player
 // fingerprint is stable for identical bounded tuples, changes when a SEC-4 field
-// changes, and — crucially — ignores non-SEC-4 keys (total_memory, cores,
-// build_number) so churn on those does not manufacture new "systems".
+// changes, and — crucially — ignores keys outside systemInfoMetricTagFields
+// (e.g. build_number) so churn on non-SystemInfo tags does not manufacture new
+// "systems".
 func TestSystemInfoFingerprintDeterministicAndDistinct(t *testing.T) {
-	a := map[string]string{"cpu_model": "x", "gpu_model": metricTagOther, "network_type": "WiFi", "driver_version": metricTagOther, "headset_type": "Meta Quest 3"}
-	b := map[string]string{"cpu_model": "x", "gpu_model": metricTagOther, "network_type": "WiFi", "driver_version": metricTagOther, "headset_type": "Meta Quest 3"}
+	mk := func(headset string) map[string]string {
+		return map[string]string{
+			"cpu_model": "x", "gpu_model": metricTagOther, "network_type": "WiFi",
+			"driver_version": metricTagOther, "headset_type": headset,
+			"total_memory": "16", "num_logical_cores": "8", "num_physical_cores": "8",
+		}
+	}
+	a, b := mk("Meta Quest 3"), mk("Meta Quest 3")
 	if systemInfoFingerprint(a) != systemInfoFingerprint(b) {
 		t.Errorf("identical bounded tuples must fingerprint equal")
 	}
-	c := map[string]string{"cpu_model": "x", "gpu_model": metricTagOther, "network_type": "WiFi", "driver_version": metricTagOther, "headset_type": "Meta Quest 2"}
-	if systemInfoFingerprint(a) == systemInfoFingerprint(c) {
+	if systemInfoFingerprint(a) == systemInfoFingerprint(mk("Meta Quest 2")) {
 		t.Errorf("different bounded tuples must fingerprint differently")
 	}
-	a["total_memory"] = "123456789"
+	// A SEC-4 int field IS part of the fingerprint.
+	mem := mk("Meta Quest 3")
+	mem["total_memory"] = "32"
+	if systemInfoFingerprint(a) == systemInfoFingerprint(mem) {
+		t.Errorf("total_memory is a SEC-4 field and must affect the fingerprint")
+	}
+	// A key outside systemInfoMetricTagFields must NOT.
+	a["build_number"] = "123456789"
 	if systemInfoFingerprint(a) != systemInfoFingerprint(b) {
-		t.Errorf("non-SEC-4 keys must not affect the system fingerprint")
+		t.Errorf("keys outside systemInfoMetricTagFields must not affect the fingerprint")
 	}
 }
 
@@ -221,7 +322,7 @@ func TestBoundSystemsPerPlayerCollapsesBeyondCap(t *testing.T) {
 			}
 			continue
 		}
-		for _, f := range sec4TagFields {
+		for _, f := range systemInfoMetricTagFields {
 			if tags[f] != metricTagOther {
 				t.Errorf("system %d over cap: field %q = %q, want %q", i, f, tags[f], metricTagOther)
 			}

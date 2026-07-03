@@ -150,15 +150,15 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	// SEC-4: bound attacker-controlled SystemInfo strings to allow-lists so a
 	// randomized login payload cannot blow up metrics cardinality. Unknown
 	// values bucket to metricTagOther; see addSystemInfoMetricTags.
+	// SEC-4: bound every attacker-controlled SystemInfo tag — strings to allow-lists,
+	// ints (memory/cores) to bucket sets — so a randomized login payload cannot blow
+	// up metrics cardinality. addSystemInfoMetricTags writes all of them bounded.
 	addSystemInfoMetricTags(tags, params.loginPayload.SystemInfo)
 	// SEC-4 (per-player cap): even with per-field bounding, one player reconnecting
 	// with a varying SystemInfo mix can walk the bounded-tuple space and churn
 	// series. Cap the distinct systems a single player may mint; beyond the cap the
-	// SEC-4 fields collapse to metricTagOther. Keyed on the resolved account.
+	// SystemInfo tags collapse to metricTagOther. Keyed on the resolved account.
 	boundSystemsPerPlayer(loginSystemFingerprintLimiter, tags, params.UserID())
-	tags["total_memory"] = strconv.FormatInt(params.loginPayload.SystemInfo.MemoryTotal, 10)
-	tags["num_logical_cores"] = strconv.FormatInt(params.loginPayload.SystemInfo.NumLogicalCores, 10)
-	tags["num_physical_cores"] = strconv.FormatInt(params.loginPayload.SystemInfo.NumPhysicalCores, 10)
 	tags["build_number"] = strconv.FormatInt(int64(params.loginPayload.BuildNumber), 10)
 	tags["app_id"] = strconv.FormatInt(int64(params.loginPayload.AppId), 10)
 	tags["publisher_lock"] = strings.TrimSpace(params.loginPayload.PublisherLock)

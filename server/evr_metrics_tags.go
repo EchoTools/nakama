@@ -3,18 +3,23 @@ package server
 import (
 	"container/list"
 	"hash/fnv"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
-// sec4TagFields is the fixed, ordered set of attacker-controlled SystemInfo
-// string fields bounded by SEC-4. It is the single source of truth for both the
-// per-player system fingerprint (systemInfoFingerprint) and the beyond-cap
-// collapse (boundSystemsPerPlayer). Order is load-bearing: the fingerprint hash
-// depends on it, so do not reorder.
-var sec4TagFields = []string{"cpu_model", "gpu_model", "network_type", "driver_version", "headset_type"}
+// systemInfoMetricTagFields is the fixed, ordered set of attacker-controlled
+// SystemInfo fields emitted as login metric tags, all bounded by SEC-4 (five
+// allow-listed strings plus three bucketed ints). It is the single source of
+// truth for the per-player system fingerprint (systemInfoFingerprint) and the
+// beyond-cap collapse (boundSystemsPerPlayer). Order is load-bearing: the
+// fingerprint hash depends on it, so do not reorder.
+var systemInfoMetricTagFields = []string{
+	"cpu_model", "gpu_model", "network_type", "driver_version", "headset_type",
+	"total_memory", "num_logical_cores", "num_physical_cores",
+}
 
 // metricTagOther is the sentinel bucket for any client-supplied SystemInfo
 // value that is not on the bounded allow-list. Bucketing unknown values here
@@ -99,9 +104,76 @@ func boundHeadsetMetricTag(raw string) string {
 	return metricTagOther
 }
 
+// SEC-4 int tags: MemoryTotal / NumLogicalCores / NumPhysicalCores are raw
+// attacker-controlled int64s from the login payload. Emitting them verbatim as
+// metric tags is the same unbounded-cardinality hole the string allow-lists
+// close — one account varying memory_total each login mints unlimited Prometheus
+// series. These are bucketed to a small fixed set (unknown/out-of-range ->
+// metricTagOther), the identical approach used for the string fields.
+
+const bytesPerGiB = 1 << 30
+
+// memoryTiersGiB are the coarse GB buckets MemoryTotal snaps to. MemoryTotal is
+// in BYTES on the wire: the login-history fixture reports DedicatedGPUMemory =
+// 10737418240 (exactly 10 GiB, an RTX 3080's VRAM) alongside MemoryTotal =
+// 16777216000 (~15.6 GiB, a 16 GB machine), so the field is byte-denominated.
+var memoryTiersGiB = []int64{4, 8, 12, 16, 24, 32, 48, 64, 96, 128}
+
+// memoryBandGiB is the plausible-RAM band (inclusive). A rounded value outside it
+// buckets to metricTagOther; inside it snaps to the nearest tier.
+const (
+	memoryBandLowGiB  = 3
+	memoryBandHighGiB = 192
+)
+
+// boundMemoryTotalTag buckets attacker-controlled MemoryTotal (bytes) into a
+// coarse GB tier string, or metricTagOther when it rounds outside the plausible
+// band. Cardinality is bounded to len(memoryTiersGiB)+1 regardless of input.
+func boundMemoryTotalTag(memoryTotalBytes int64) string {
+	if memoryTotalBytes <= 0 {
+		return metricTagOther
+	}
+	gib := (memoryTotalBytes + bytesPerGiB/2) / bytesPerGiB // round to nearest GiB
+	if gib < memoryBandLowGiB || gib > memoryBandHighGiB {
+		return metricTagOther
+	}
+	nearest := memoryTiersGiB[0]
+	best := absInt64(gib - nearest)
+	for _, t := range memoryTiersGiB[1:] {
+		if d := absInt64(gib - t); d < best {
+			best, nearest = d, t
+		}
+	}
+	return strconv.FormatInt(nearest, 10)
+}
+
+// core-count clamp bounds: real CPUs report a small integer count. Out of range
+// (including 0 and negatives) buckets to metricTagOther.
+const (
+	minPlausibleCores = 1
+	maxPlausibleCores = 64
+)
+
+// boundCoreCountTag emits an in-range core count verbatim, else metricTagOther.
+// Cardinality is bounded to (maxPlausibleCores-minPlausibleCores+1)+1.
+func boundCoreCountTag(cores int64) string {
+	if cores < minPlausibleCores || cores > maxPlausibleCores {
+		return metricTagOther
+	}
+	return strconv.FormatInt(cores, 10)
+}
+
+func absInt64(v int64) int64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
 // systemInfoTagCardinalityBound returns the maximum number of distinct values a
-// given SEC-4 metric tag may take: allow-list size + 1 for the metricTagOther
-// sentinel. headset_type also allows the "Unknown" empty-input sentinel.
+// given SEC-4 metric tag may take: allow-list / bucket-set size + 1 for the
+// metricTagOther sentinel. headset_type also allows the "Unknown" empty-input
+// sentinel.
 func systemInfoTagCardinalityBound(field string) int {
 	switch field {
 	case "cpu_model":
@@ -114,6 +186,10 @@ func systemInfoTagCardinalityBound(field string) int {
 		return len(driverVersionAllowlist) + 1
 	case "headset_type":
 		return len(canonicalHeadsetTypes) + 1
+	case "total_memory":
+		return len(memoryTiersGiB) + 1
+	case "num_logical_cores", "num_physical_cores":
+		return (maxPlausibleCores - minPlausibleCores + 1) + 1
 	default:
 		return 0
 	}
@@ -126,23 +202,27 @@ func systemInfoTagCardinalityBound(field string) int {
 // the login path.
 //
 // SEC-4: these fields are attacker-controlled JSON from the login payload.
-// Emitting the raw strings as metric tag values would let one authenticated
-// account mint an unbounded number of distinct Prometheus series (one per
-// unique tuple) by randomizing SystemInfo on repeated logins ->
-// metrics-backend memory pressure. See BUGS.md SEC-4.
+// Emitting the raw values as metric tags would let one authenticated account mint
+// an unbounded number of distinct Prometheus series (one per unique tuple) by
+// randomizing SystemInfo on repeated logins -> metrics-backend memory pressure.
+// Every SystemInfo-derived tag written here is bounded: strings to allow-lists,
+// ints (memory/cores) to bucket sets. No SystemInfo field is emitted raw.
 func addSystemInfoMetricTags(tags map[string]string, si evr.SystemInfo) {
 	tags["cpu_model"] = cpuModelAllowlist.normalize(si.CPUModel)
 	tags["gpu_model"] = gpuModelAllowlist.normalize(si.VideoCard)
 	tags["network_type"] = networkTypeAllowlist.normalize(si.NetworkType)
 	tags["driver_version"] = driverVersionAllowlist.normalize(si.DriverVersion)
 	tags["headset_type"] = boundHeadsetMetricTag(si.HeadsetType)
+	tags["total_memory"] = boundMemoryTotalTag(si.MemoryTotal)
+	tags["num_logical_cores"] = boundCoreCountTag(si.NumLogicalCores)
+	tags["num_physical_cores"] = boundCoreCountTag(si.NumPhysicalCores)
 }
 
 // systemInfoMetricTags builds a fresh map of the bounded SEC-4 tags. It is a
 // thin wrapper over addSystemInfoMetricTags retained for tests; the login path
 // uses addSystemInfoMetricTags to write into its existing tags map.
 func systemInfoMetricTags(si evr.SystemInfo) map[string]string {
-	tags := make(map[string]string, 5)
+	tags := make(map[string]string, len(systemInfoMetricTagFields))
 	addSystemInfoMetricTags(tags, si)
 	return tags
 }
@@ -178,7 +258,7 @@ const (
 // share a fingerprint and therefore do not add cardinality.
 func systemInfoFingerprint(tags map[string]string) uint64 {
 	h := fnv.New64a()
-	for _, f := range sec4TagFields {
+	for _, f := range systemInfoMetricTagFields {
 		_, _ = h.Write([]byte(tags[f]))
 		_, _ = h.Write([]byte{0}) // separator: avoid "ab"+"c" == "a"+"bc" collisions
 	}
@@ -269,7 +349,7 @@ func boundSystemsPerPlayer(l *systemFingerprintLimiter, tags map[string]string, 
 	if l.allow(playerID, systemInfoFingerprint(tags)) {
 		return
 	}
-	for _, f := range sec4TagFields {
+	for _, f := range systemInfoMetricTagFields {
 		tags[f] = metricTagOther
 	}
 }
