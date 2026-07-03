@@ -1,10 +1,20 @@
 package server
 
 import (
+	"container/list"
+	"hash/fnv"
 	"strings"
+	"sync"
 
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
+
+// sec4TagFields is the fixed, ordered set of attacker-controlled SystemInfo
+// string fields bounded by SEC-4. It is the single source of truth for both the
+// per-player system fingerprint (systemInfoFingerprint) and the beyond-cap
+// collapse (boundSystemsPerPlayer). Order is load-bearing: the fingerprint hash
+// depends on it, so do not reorder.
+var sec4TagFields = []string{"cpu_model", "gpu_model", "network_type", "driver_version", "headset_type"}
 
 // metricTagOther is the sentinel bucket for any client-supplied SystemInfo
 // value that is not on the bounded allow-list. Bucketing unknown values here
@@ -135,4 +145,131 @@ func systemInfoMetricTags(si evr.SystemInfo) map[string]string {
 	tags := make(map[string]string, 5)
 	addSystemInfoMetricTags(tags, si)
 	return tags
+}
+
+// SEC-4 (per-player distinct-system cap): the allow-lists above bound each field
+// independently, but the emitted metric series is the *tuple* of bounded fields.
+// A single authenticated player who reconnects over and over cycling different
+// allow-listed combinations can still walk that tuple space and churn Prometheus
+// series (Andrew's review note on this file). boundSystemsPerPlayer caps how many
+// distinct bounded tuples ("systems") one player may mint: beyond the cap, further
+// new systems collapse to the metricTagOther sentinel — the same bucketing SEC-4
+// already uses — so no additional series is created.
+const (
+	// maxDistinctSystemsPerPlayer is the per-player distinct-system cap. A real
+	// player has a small handful of machines (a PC, a standalone headset) whose
+	// bounded tuple changes only occasionally (GPU/driver upgrade). 8 gives ample
+	// headroom for legitimate churn while making abuse (dozens+ of systems) collapse
+	// to "other". Exceeding the cap is metrics-only: it never blocks a login, it only
+	// buckets that login's SEC-4 tags to the sentinel.
+	maxDistinctSystemsPerPlayer = 8
+	// maxTrackedPlayersForSystemLimit bounds tracker memory via a player-level LRU.
+	// Worst-case retained state is maxTrackedPlayersForSystemLimit *
+	// maxDistinctSystemsPerPlayer uint64 fingerprints (~a few MB at these values).
+	// Evicting the least-recently-active player is safe: on their next login they
+	// simply start counting systems from zero again.
+	maxTrackedPlayersForSystemLimit = 50000
+)
+
+// systemInfoFingerprint hashes the already-bounded SEC-4 tag tuple into a single
+// value identifying a "system". Only sec4TagFields participate: non-SEC-4 keys
+// (total_memory, cores, build_number) are intentionally excluded so churn on them
+// does not manufacture new systems. Two logins that bucket identically per field
+// share a fingerprint and therefore do not add cardinality.
+func systemInfoFingerprint(tags map[string]string) uint64 {
+	h := fnv.New64a()
+	for _, f := range sec4TagFields {
+		_, _ = h.Write([]byte(tags[f]))
+		_, _ = h.Write([]byte{0}) // separator: avoid "ab"+"c" == "a"+"bc" collisions
+	}
+	return h.Sum64()
+}
+
+// systemFingerprintLimiter tracks, per player, the set of distinct system
+// fingerprints seen, capped at maxPerPlayer. A player-level LRU bounds total
+// memory at maxPlayers. It is safe for concurrent use by the login path.
+type systemFingerprintLimiter struct {
+	mu           sync.Mutex
+	maxPerPlayer int
+	maxPlayers   int
+	order        *list.List               // front = most-recently-active; values are *playerSystems
+	index        map[string]*list.Element // playerID -> element in order
+}
+
+// playerSystems is one player's bounded set of distinct system fingerprints.
+type playerSystems struct {
+	playerID string
+	seen     map[uint64]struct{}
+}
+
+func newSystemFingerprintLimiter(maxPerPlayer, maxPlayers int) *systemFingerprintLimiter {
+	return &systemFingerprintLimiter{
+		maxPerPlayer: maxPerPlayer,
+		maxPlayers:   maxPlayers,
+		order:        list.New(),
+		index:        make(map[string]*list.Element, maxPlayers),
+	}
+}
+
+// allow reports whether player may emit a distinct metric series for fingerprint
+// fp. An already-seen fingerprint always returns true. A new fingerprint returns
+// true and is recorded while the player is under maxPerPlayer; once at the cap,
+// new fingerprints return false and are NOT recorded, keeping the set bounded.
+// Every access moves the player to the front of the LRU (active players resist
+// eviction); a new player may evict the least-recently-active one.
+func (l *systemFingerprintLimiter) allow(playerID string, fp uint64) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if el, ok := l.index[playerID]; ok {
+		l.order.MoveToFront(el)
+		ps := el.Value.(*playerSystems)
+		if _, seen := ps.seen[fp]; seen {
+			return true
+		}
+		if len(ps.seen) >= l.maxPerPlayer {
+			return false
+		}
+		ps.seen[fp] = struct{}{}
+		return true
+	}
+
+	// New player. Evict the least-recently-active one if at capacity.
+	if l.order.Len() >= l.maxPlayers {
+		if back := l.order.Back(); back != nil {
+			evicted := l.order.Remove(back).(*playerSystems)
+			delete(l.index, evicted.playerID)
+		}
+	}
+	ps := &playerSystems{playerID: playerID, seen: map[uint64]struct{}{fp: {}}}
+	l.index[playerID] = l.order.PushFront(ps)
+	return true
+}
+
+// trackedPlayers returns the number of players currently held. Test-support only.
+func (l *systemFingerprintLimiter) trackedPlayers() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.order.Len()
+}
+
+// loginSystemFingerprintLimiter is the process-wide limiter for the login path.
+var loginSystemFingerprintLimiter = newSystemFingerprintLimiter(maxDistinctSystemsPerPlayer, maxTrackedPlayersForSystemLimit)
+
+// boundSystemsPerPlayer applies the per-player distinct-system cap on top of the
+// per-field SEC-4 allow-list bounding already written into tags. If the player has
+// exceeded maxPerPlayer distinct systems, every SEC-4 field collapses to
+// metricTagOther so this login mints no new series. An empty playerID (identity
+// unavailable) is not tracked — pooling unrelated players under one key would
+// over-collapse — so its tags pass through unchanged.
+func boundSystemsPerPlayer(l *systemFingerprintLimiter, tags map[string]string, playerID string) {
+	if playerID == "" {
+		return
+	}
+	if l.allow(playerID, systemInfoFingerprint(tags)) {
+		return
+	}
+	for _, f := range sec4TagFields {
+		tags[f] = metricTagOther
+	}
 }

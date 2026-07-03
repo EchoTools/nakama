@@ -151,6 +151,11 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	// randomized login payload cannot blow up metrics cardinality. Unknown
 	// values bucket to metricTagOther; see addSystemInfoMetricTags.
 	addSystemInfoMetricTags(tags, params.loginPayload.SystemInfo)
+	// SEC-4 (per-player cap): even with per-field bounding, one player reconnecting
+	// with a varying SystemInfo mix can walk the bounded-tuple space and churn
+	// series. Cap the distinct systems a single player may mint; beyond the cap the
+	// SEC-4 fields collapse to metricTagOther. Keyed on the resolved account.
+	boundSystemsPerPlayer(loginSystemFingerprintLimiter, tags, params.UserID())
 	tags["total_memory"] = strconv.FormatInt(params.loginPayload.SystemInfo.MemoryTotal, 10)
 	tags["num_logical_cores"] = strconv.FormatInt(params.loginPayload.SystemInfo.NumLogicalCores, 10)
 	tags["num_physical_cores"] = strconv.FormatInt(params.loginPayload.SystemInfo.NumPhysicalCores, 10)

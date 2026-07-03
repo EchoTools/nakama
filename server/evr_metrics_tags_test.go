@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
 
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -76,6 +77,186 @@ func TestAddSystemInfoMetricTagsWritesInPlace(t *testing.T) {
 	}
 	if got := tags["cpu_model"]; got != metricTagOther {
 		t.Errorf("cpu_model: unknown value not bucketed: got %q, want %q", got, metricTagOther)
+	}
+}
+
+// TestSystemInfoFingerprintDeterministicAndDistinct proves the per-player
+// fingerprint is stable for identical bounded tuples, changes when a SEC-4 field
+// changes, and — crucially — ignores non-SEC-4 keys (total_memory, cores,
+// build_number) so churn on those does not manufacture new "systems".
+func TestSystemInfoFingerprintDeterministicAndDistinct(t *testing.T) {
+	a := map[string]string{"cpu_model": "x", "gpu_model": metricTagOther, "network_type": "WiFi", "driver_version": metricTagOther, "headset_type": "Meta Quest 3"}
+	b := map[string]string{"cpu_model": "x", "gpu_model": metricTagOther, "network_type": "WiFi", "driver_version": metricTagOther, "headset_type": "Meta Quest 3"}
+	if systemInfoFingerprint(a) != systemInfoFingerprint(b) {
+		t.Errorf("identical bounded tuples must fingerprint equal")
+	}
+	c := map[string]string{"cpu_model": "x", "gpu_model": metricTagOther, "network_type": "WiFi", "driver_version": metricTagOther, "headset_type": "Meta Quest 2"}
+	if systemInfoFingerprint(a) == systemInfoFingerprint(c) {
+		t.Errorf("different bounded tuples must fingerprint differently")
+	}
+	a["total_memory"] = "123456789"
+	if systemInfoFingerprint(a) != systemInfoFingerprint(b) {
+		t.Errorf("non-SEC-4 keys must not affect the system fingerprint")
+	}
+}
+
+// TestSystemFingerprintLimiterCapsDistinctPerPlayer proves a single player is
+// capped at maxPerPlayer distinct systems: the first cap are admitted, further
+// NEW fingerprints are denied (collapse to sentinel), and already-seen ones are
+// always admitted.
+func TestSystemFingerprintLimiterCapsDistinctPerPlayer(t *testing.T) {
+	const capN = 4
+	l := newSystemFingerprintLimiter(capN, 100)
+	const player = "p1"
+
+	for i := 0; i < capN; i++ {
+		if !l.allow(player, uint64(i)) {
+			t.Fatalf("fingerprint %d: want allowed (under cap), got denied", i)
+		}
+	}
+	if !l.allow(player, 0) {
+		t.Errorf("already-seen fingerprint 0: want allowed, got denied")
+	}
+	for i := capN; i < capN+5; i++ {
+		if l.allow(player, uint64(i)) {
+			t.Errorf("fingerprint %d: want denied (over cap), got allowed", i)
+		}
+	}
+	if !l.allow(player, uint64(capN-1)) {
+		t.Errorf("already-seen fingerprint %d after cap: want allowed, got denied", capN-1)
+	}
+}
+
+// TestSystemFingerprintLimiterIsPerPlayer proves one player saturating their cap
+// does not affect another player's independent budget.
+func TestSystemFingerprintLimiterIsPerPlayer(t *testing.T) {
+	const capN = 2
+	l := newSystemFingerprintLimiter(capN, 100)
+
+	l.allow("A", 1)
+	l.allow("A", 2)
+	if l.allow("A", 3) {
+		t.Fatalf("player A over cap: want denied")
+	}
+	for i := uint64(0); i < uint64(capN); i++ {
+		if !l.allow("B", 100+i) {
+			t.Errorf("player B fingerprint %d: want allowed, got denied", 100+i)
+		}
+	}
+}
+
+// TestSystemFingerprintLimiterEvictsLRUPlayers proves the tracker is
+// memory-bounded: it never holds more than maxPlayers, evicting the
+// least-recently-used player, whose state resets on re-appearance.
+func TestSystemFingerprintLimiterEvictsLRUPlayers(t *testing.T) {
+	const maxPlayers = 3
+	l := newSystemFingerprintLimiter(4, maxPlayers)
+
+	for p := 0; p < maxPlayers; p++ {
+		l.allow(fmt.Sprintf("p%d", p), 1)
+	}
+	if got := l.trackedPlayers(); got != maxPlayers {
+		t.Fatalf("tracked players: got %d, want %d", got, maxPlayers)
+	}
+	// New player overflows the tracker -> LRU (p0) evicted, stays bounded.
+	l.allow("p3", 1)
+	if got := l.trackedPlayers(); got != maxPlayers {
+		t.Fatalf("tracked players after overflow: got %d, want %d (LRU not bounded)", got, maxPlayers)
+	}
+	// p0 was evicted: fresh state, admits up to cap distinct systems again.
+	for f := 0; f < 4; f++ {
+		if !l.allow("p0", uint64(1000+f)) {
+			t.Errorf("evicted p0 fresh fingerprint %d: want allowed, got denied", 1000+f)
+		}
+	}
+}
+
+// TestSystemFingerprintLimiterConcurrent exercises allow() under the race
+// detector and asserts the player LRU stays bounded under contention.
+func TestSystemFingerprintLimiterConcurrent(t *testing.T) {
+	l := newSystemFingerprintLimiter(8, 64)
+	var wg sync.WaitGroup
+	for g := 0; g < 32; g++ {
+		wg.Add(1)
+		go func(seed int) {
+			defer wg.Done()
+			rng := rand.New(rand.NewSource(int64(seed)))
+			for i := 0; i < 500; i++ {
+				l.allow(fmt.Sprintf("p%d", rng.Intn(128)), rng.Uint64())
+			}
+		}(g)
+	}
+	wg.Wait()
+	if got := l.trackedPlayers(); got > 64 {
+		t.Errorf("tracked players %d exceeds max 64 under concurrency", got)
+	}
+}
+
+// TestBoundSystemsPerPlayerCollapsesBeyondCap proves the integration helper: the
+// first cap distinct systems keep their bounded tags, systems beyond the cap
+// collapse every SEC-4 field to metricTagOther, and a previously-admitted system
+// is still emitted with its real tags.
+func TestBoundSystemsPerPlayerCollapsesBeyondCap(t *testing.T) {
+	const capN = 2
+	l := newSystemFingerprintLimiter(capN, 100)
+	const player = "abuser"
+
+	mk := func(headset string) map[string]string {
+		return map[string]string{
+			"cpu_model":      metricTagOther,
+			"gpu_model":      metricTagOther,
+			"network_type":   "WiFi",
+			"driver_version": metricTagOther,
+			"headset_type":   headset,
+		}
+	}
+
+	systems := []string{"sys-a", "sys-b", "sys-c", "sys-d"}
+	for i, s := range systems {
+		tags := mk(s)
+		boundSystemsPerPlayer(l, tags, player)
+		if i < capN {
+			if tags["headset_type"] != s {
+				t.Errorf("system %d under cap: headset_type collapsed to %q, want %q", i, tags["headset_type"], s)
+			}
+			continue
+		}
+		for _, f := range sec4TagFields {
+			if tags[f] != metricTagOther {
+				t.Errorf("system %d over cap: field %q = %q, want %q", i, f, tags[f], metricTagOther)
+			}
+		}
+	}
+
+	// A previously-admitted system is still emitted with its real tags.
+	tags := mk("sys-a")
+	boundSystemsPerPlayer(l, tags, player)
+	if tags["headset_type"] != "sys-a" {
+		t.Errorf("re-seen system: headset_type = %q, want %q", tags["headset_type"], "sys-a")
+	}
+}
+
+// TestBoundSystemsPerPlayerEmptyPlayerIDSkips proves an unavailable player ID is
+// NOT tracked (which would pool unrelated players under one key) and never
+// collapses tags.
+func TestBoundSystemsPerPlayerEmptyPlayerIDSkips(t *testing.T) {
+	l := newSystemFingerprintLimiter(1, 100)
+	for i := 0; i < 10; i++ {
+		want := fmt.Sprintf("sys-%d", i)
+		tags := map[string]string{
+			"cpu_model":      metricTagOther,
+			"gpu_model":      metricTagOther,
+			"network_type":   "WiFi",
+			"driver_version": metricTagOther,
+			"headset_type":   want,
+		}
+		boundSystemsPerPlayer(l, tags, "")
+		if tags["headset_type"] != want {
+			t.Errorf("empty playerID system %d: collapsed to %q, want passthrough %q", i, tags["headset_type"], want)
+		}
+	}
+	if got := l.trackedPlayers(); got != 0 {
+		t.Errorf("empty playerID must not be tracked: tracked=%d, want 0", got)
 	}
 }
 
