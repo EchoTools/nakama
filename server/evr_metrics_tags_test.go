@@ -53,6 +53,32 @@ func TestSystemInfoMetricTagCardinality(t *testing.T) {
 	}
 }
 
+// TestAddSystemInfoMetricTagsWritesInPlace proves addSystemInfoMetricTags writes
+// the bounded SEC-4 tags directly into the caller's existing map (no intermediate
+// map allocation) without clobbering pre-existing keys. SEC-4 bounding must be
+// identical to systemInfoMetricTags.
+func TestAddSystemInfoMetricTagsWritesInPlace(t *testing.T) {
+	tags := map[string]string{"existing": "keep-me"}
+	addSystemInfoMetricTags(tags, evr.SystemInfo{
+		NetworkType: "WiFi",    // seeded allow-list value
+		HeadsetType: "Quest 3", // maps to canonical "Meta Quest 3"
+		CPUModel:    "totally-made-up-cpu-string",
+	})
+
+	if got := tags["existing"]; got != "keep-me" {
+		t.Errorf("pre-existing key clobbered: got %q, want %q", got, "keep-me")
+	}
+	if got := tags["network_type"]; got != "WiFi" {
+		t.Errorf("network_type: known-good value not preserved: got %q, want %q", got, "WiFi")
+	}
+	if got := tags["headset_type"]; got != "Meta Quest 3" {
+		t.Errorf("headset_type: known headset not normalized: got %q, want %q", got, "Meta Quest 3")
+	}
+	if got := tags["cpu_model"]; got != metricTagOther {
+		t.Errorf("cpu_model: unknown value not bucketed: got %q, want %q", got, metricTagOther)
+	}
+}
+
 // TestSystemInfoMetricTagKnownGoodPassthrough proves the fix does not lose
 // legitimate cardinality: values on the allow-list survive unchanged, while
 // unknown values bucket to the sentinel rather than passing raw through.

@@ -149,10 +149,8 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	tags := params.MetricsTags()
 	// SEC-4: bound attacker-controlled SystemInfo strings to allow-lists so a
 	// randomized login payload cannot blow up metrics cardinality. Unknown
-	// values bucket to metricTagOther; see systemInfoMetricTags.
-	for k, v := range systemInfoMetricTags(params.loginPayload.SystemInfo) {
-		tags[k] = v
-	}
+	// values bucket to metricTagOther; see addSystemInfoMetricTags.
+	addSystemInfoMetricTags(tags, params.loginPayload.SystemInfo)
 	tags["total_memory"] = strconv.FormatInt(params.loginPayload.SystemInfo.MemoryTotal, 10)
 	tags["num_logical_cores"] = strconv.FormatInt(params.loginPayload.SystemInfo.NumLogicalCores, 10)
 	tags["num_physical_cores"] = strconv.FormatInt(params.loginPayload.SystemInfo.NumPhysicalCores, 10)

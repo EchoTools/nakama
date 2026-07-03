@@ -109,21 +109,30 @@ func systemInfoTagCardinalityBound(field string) int {
 	}
 }
 
-// systemInfoMetricTags builds the client-controlled portion of the login metric
-// tags from a SystemInfo login payload, with every attacker-controlled string
-// bounded to its allow-list (unknown values bucket to metricTagOther).
+// addSystemInfoMetricTags writes the client-controlled portion of the login
+// metric tags directly into the caller's existing tags map, with every
+// attacker-controlled string bounded to its allow-list (unknown values bucket
+// to metricTagOther). Writing in place avoids an intermediate map allocation on
+// the login path.
 //
 // SEC-4: these fields are attacker-controlled JSON from the login payload.
 // Emitting the raw strings as metric tag values would let one authenticated
 // account mint an unbounded number of distinct Prometheus series (one per
 // unique tuple) by randomizing SystemInfo on repeated logins ->
 // metrics-backend memory pressure. See BUGS.md SEC-4.
+func addSystemInfoMetricTags(tags map[string]string, si evr.SystemInfo) {
+	tags["cpu_model"] = cpuModelAllowlist.normalize(si.CPUModel)
+	tags["gpu_model"] = gpuModelAllowlist.normalize(si.VideoCard)
+	tags["network_type"] = networkTypeAllowlist.normalize(si.NetworkType)
+	tags["driver_version"] = driverVersionAllowlist.normalize(si.DriverVersion)
+	tags["headset_type"] = boundHeadsetMetricTag(si.HeadsetType)
+}
+
+// systemInfoMetricTags builds a fresh map of the bounded SEC-4 tags. It is a
+// thin wrapper over addSystemInfoMetricTags retained for tests; the login path
+// uses addSystemInfoMetricTags to write into its existing tags map.
 func systemInfoMetricTags(si evr.SystemInfo) map[string]string {
-	return map[string]string{
-		"cpu_model":      cpuModelAllowlist.normalize(si.CPUModel),
-		"gpu_model":      gpuModelAllowlist.normalize(si.VideoCard),
-		"network_type":   networkTypeAllowlist.normalize(si.NetworkType),
-		"driver_version": driverVersionAllowlist.normalize(si.DriverVersion),
-		"headset_type":   boundHeadsetMetricTag(si.HeadsetType),
-	}
+	tags := make(map[string]string, 5)
+	addSystemInfoMetricTags(tags, si)
+	return tags
 }
