@@ -1519,30 +1519,34 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
 
-	senderSessionID := session.ID()
+	senderOperatorID := session.UserID()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 		defer cancel()
 
-		if err := p.processUserServerProfileUpdate(ctx, logger, p.nk, senderSessionID, request.EvrID, label, payload); err != nil {
+		if err := p.processUserServerProfileUpdate(ctx, logger, p.nk, senderOperatorID, request.EvrID, label, payload); err != nil {
 			logger.Error("Failed to process user server profile update", zap.Error(err))
 		}
 	}()
 	return nil
 }
 
-func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, senderSessionID uuid.UUID, evrID evr.EvrId, label *MatchLabel, payload *evr.UpdatePayload) error {
+func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, senderOperatorID uuid.UUID, evrID evr.EvrId, label *MatchLabel, payload *evr.UpdatePayload) error {
 	// SEC-3: A server profile update is only legitimate when it comes from the
 	// match's authoritative game server ("the game server's login connection").
-	// The authoritative game server for a match is the broadcaster session bound
-	// to it, identified by label.GameServer.SessionID (set to the registering
-	// session's ID in gameserverRegistrationRequest and used elsewhere to detect
-	// the broadcaster, e.g. evr_match.go). Reject any sender whose session is not
-	// that game server, otherwise any authenticated client could inject stats for
-	// a player in a live non-arena match whose session ID it knows.
-	if label.GameServer == nil || senderSessionID != label.GameServer.SessionID {
-		logger.Warn("Rejected server profile update from non-authoritative sender",
-			zap.String("sender_sid", senderSessionID.String()),
+	// Pre-nevr-runtime, that update arrives over a DIFFERENT connection than the
+	// game server's own registered session, so the sender's session ID does not
+	// match label.GameServer.SessionID. Authority is therefore checked against the
+	// operator that registered the server: label.GameServer.OperatorID (the user
+	// id of the server, set to the registering user in NewGameServerPresence and
+	// used elsewhere as the server-host identity, e.g. evr_runtime_rpc_match.go).
+	// Compare it to the sender session's authenticated user id. Reject any sender
+	// whose operator is not that game server's operator (or a nil operator),
+	// otherwise any authenticated client could inject stats for a player in a live
+	// non-arena match whose session ID it knows.
+	if label.GameServer == nil || label.GameServer.OperatorID.IsNil() || senderOperatorID != label.GameServer.OperatorID {
+		logger.Warn("Rejected server profile update from non-authoritative operator",
+			zap.String("sender_operator_id", senderOperatorID.String()),
 			zap.String("evr_id", evrID.String()),
 			zap.String("mid", label.ID.String()))
 		return nil

@@ -1,8 +1,15 @@
 package server
 
 // SEC-3 regression tests: userServerProfileUpdateRequest must only apply
-// server-profile stat updates when the sender is the authoritative game server
-// (the broadcaster session bound to the referenced match). See BUGS.md SEC-3.
+// server-profile stat updates when the sender is the authoritative game server,
+// identified by the operator (user) that registered the server bound to the
+// referenced match. See BUGS.md SEC-3.
+//
+// Pre-nevr-runtime, the server-profile update arrives over a DIFFERENT
+// connection than the game server's own registered session, so the sender's
+// session ID does not match label.GameServer.SessionID. Authority is therefore
+// checked against label.GameServer.OperatorID (the user id of the server) vs
+// the sender session's authenticated user id.
 //
 // Before the fix, processUserServerProfileUpdate applied the update for any
 // caller as long as the target EvrID was a player in the match and a group
@@ -49,18 +56,18 @@ func (n *sec3MockNK) Event(_ context.Context, evt *api.Event) error {
 // sec3Fixture builds a live non-arena (combat) match label plus the mock nk and
 // payload that a legitimate server-profile update would carry.
 type sec3Fixture struct {
-	pipeline  *EvrPipeline
-	nk        *sec3MockNK
-	label     *MatchLabel
-	payload   *evr.UpdatePayload
-	evrID     evr.EvrId
-	serverSID uuid.UUID // the match's authoritative game server session
+	pipeline    *EvrPipeline
+	nk          *sec3MockNK
+	label       *MatchLabel
+	payload     *evr.UpdatePayload
+	evrID       evr.EvrId
+	serverOpsID uuid.UUID // the operator (user id) of the match's authoritative game server
 }
 
 func newSEC3Fixture(t *testing.T) *sec3Fixture {
 	t.Helper()
 
-	serverSID := uuid.Must(uuid.NewV4())
+	serverOpsID := uuid.Must(uuid.NewV4())
 	groupID := uuid.Must(uuid.NewV4())
 	matchUUID := uuid.Must(uuid.NewV4())
 	userID := uuid.Must(uuid.NewV4()).String()
@@ -78,10 +85,16 @@ func newSEC3Fixture(t *testing.T) *sec3Fixture {
 	}
 
 	label := &MatchLabel{
-		ID:         MatchID{UUID: matchUUID, Node: "node"},
-		Mode:       evr.ModeCombatPublic,
-		GroupID:    &groupID,
-		GameServer: &GameServerPresence{SessionID: serverSID},
+		ID:      MatchID{UUID: matchUUID, Node: "node"},
+		Mode:    evr.ModeCombatPublic,
+		GroupID: &groupID,
+		// SessionID is deliberately distinct from the operator id: authority is
+		// checked against OperatorID, not SessionID (the update arrives over a
+		// different connection than the game server's registered session).
+		GameServer: &GameServerPresence{
+			SessionID:  uuid.Must(uuid.NewV4()),
+			OperatorID: serverOpsID,
+		},
 		Players: []PlayerInfo{
 			{
 				EvrID:       evrID,
@@ -103,66 +116,68 @@ func newSEC3Fixture(t *testing.T) *sec3Fixture {
 	}
 
 	return &sec3Fixture{
-		pipeline:  &EvrPipeline{},
-		nk:        &sec3MockNK{profileJSON: string(profileJSON)},
-		label:     label,
-		payload:   payload,
-		evrID:     evrID,
-		serverSID: serverSID,
+		pipeline:    &EvrPipeline{},
+		nk:          &sec3MockNK{profileJSON: string(profileJSON)},
+		label:       label,
+		payload:     payload,
+		evrID:       evrID,
+		serverOpsID: serverOpsID,
 	}
 }
 
-// TestSEC3_ProfileUpdate_RejectsNonAuthoritativeSender proves that a sender that
-// is NOT the match's authoritative game server cannot get a stat update applied.
+// TestSEC3_ProfileUpdate_RejectsNonAuthoritativeOperator proves that a sender
+// whose operator (user id) is NOT the match's authoritative game server operator
+// cannot get a stat update applied.
 //
 // RED (pre-fix): the update is applied (nk.Event called) even though the sender
-// is an ordinary session, not the broadcaster -> len(events) == 1 -> FAIL.
+// is not the operator -> len(events) == 1 -> FAIL.
 // GREEN (post-fix): the update is rejected with a warn log -> len(events) == 0.
-func TestSEC3_ProfileUpdate_RejectsNonAuthoritativeSender(t *testing.T) {
+func TestSEC3_ProfileUpdate_RejectsNonAuthoritativeOperator(t *testing.T) {
 	f := newSEC3Fixture(t)
 
-	// An ordinary authenticated session that is NOT the match's game server.
-	attackerSID := uuid.Must(uuid.NewV4())
-	if attackerSID == f.serverSID {
-		t.Fatal("attacker session collided with server session")
+	// An ordinary authenticated user that is NOT the match's server operator.
+	attackerOperatorID := uuid.Must(uuid.NewV4())
+	if attackerOperatorID == f.serverOpsID {
+		t.Fatal("attacker operator collided with server operator")
 	}
 
 	core, logs := observer.New(zapcore.WarnLevel)
 	logger := zap.New(core)
 
 	err := f.pipeline.processUserServerProfileUpdate(
-		context.Background(), logger, f.nk, attackerSID, f.evrID, f.label, f.payload)
+		context.Background(), logger, f.nk, attackerOperatorID, f.evrID, f.label, f.payload)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if len(f.nk.events) != 0 {
-		t.Fatalf("SEC-3: non-authoritative sender %s had a stat update APPLIED (%d event(s)); expected rejection with zero events",
-			attackerSID, len(f.nk.events))
+		t.Fatalf("SEC-3: non-authoritative operator %s had a stat update APPLIED (%d event(s)); expected rejection with zero events",
+			attackerOperatorID, len(f.nk.events))
 	}
 
 	if logs.FilterMessageSnippet("non-authoritative").Len() == 0 {
-		t.Errorf("expected a warn-level log for the rejected non-authoritative sender; got: %v", logs.All())
+		t.Errorf("expected a warn-level log for the rejected non-authoritative operator; got: %v", logs.All())
 	}
 }
 
-// TestSEC3_ProfileUpdate_AcceptsAuthoritativeBroadcaster proves the fix does not
-// over-reject: the legitimate game-server session (the broadcaster bound to the
-// match) still has its stat update applied.
-func TestSEC3_ProfileUpdate_AcceptsAuthoritativeBroadcaster(t *testing.T) {
+// TestSEC3_ProfileUpdate_AcceptsAuthoritativeOperator proves the fix does not
+// over-reject: a sender whose authenticated user id matches the match's game
+// server operator still has its stat update applied — even though the sender's
+// session is a different connection than the game server's registered session.
+func TestSEC3_ProfileUpdate_AcceptsAuthoritativeOperator(t *testing.T) {
 	f := newSEC3Fixture(t)
 
 	logger := zap.NewNop()
 
-	// Sender IS the match's authoritative game server.
+	// Sender's operator IS the match's authoritative game server operator.
 	err := f.pipeline.processUserServerProfileUpdate(
-		context.Background(), logger, f.nk, f.serverSID, f.evrID, f.label, f.payload)
+		context.Background(), logger, f.nk, f.serverOpsID, f.evrID, f.label, f.payload)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if len(f.nk.events) != 1 {
-		t.Fatalf("legitimate broadcaster update was not applied: got %d event(s), want 1", len(f.nk.events))
+		t.Fatalf("legitimate operator update was not applied: got %d event(s), want 1", len(f.nk.events))
 	}
 	if got := f.nk.events[0].Name; got != "*server.EventServerProfileUpdate" {
 		t.Errorf("unexpected event name: %q", got)
