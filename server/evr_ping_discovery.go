@@ -1,9 +1,7 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
-	"net"
 	"strconv"
 	"time"
 
@@ -53,24 +51,34 @@ func LoadPingDiscoveryConfig(vars map[string]string) PingDiscoveryConfig {
 	return cfg
 }
 
-// PingTarget maps a single pingable address back to its owning game server.
-type PingTarget struct {
-	Address    net.IP // The IP to ping (placed in Endpoint.ExternalIP)
-	Port       uint16 // Server port
-	ServerKey  string // ExternalIP string of the owning server (reverse lookup key)
-	IsInternal bool   // True if this address is the server's internal IP
+// pingEndpoint returns the endpoint to ping for a single game server. Per ADR
+// 0002, the pre-connect ping carries BOTH the external and internal address in
+// one endpoint (req 3), so the client pings both and at least one returns a
+// valid RTT. The internal slot is kept only when it is a genuine private/
+// internal address (req 2); a publicly-routable address is zeroed to nil so it
+// is never placed in the internal slot.
+func pingEndpoint(ep evr.Endpoint) evr.Endpoint {
+	intIP := ep.InternalIP
+	if intIP != nil && (intIP.IsUnspecified() || !isInternalIP(intIP)) {
+		intIP = nil
+	}
+	return evr.Endpoint{
+		InternalIP: intIP,
+		ExternalIP: ep.ExternalIP,
+		Port:       ep.Port,
+	}
 }
 
-// buildPingTargets enumerates all alive game server presences and produces a
-// flat list of PingTarget entries. Each server with an internal IP yields two
-// targets (one external, one internal-in-external-slot); servers without an
-// internal IP yield one target.
+// buildPingEndpoints enumerates all alive game server presences and produces one
+// paired endpoint per server (external + private internal), deduplicated by
+// external IP. Each entry carries both addresses so the client validates them
+// together (ADR 0002 req 3).
 //
 // The guildGroups map keys are the group IDs the player belongs to. Presences
 // are queried for each guild plus the global (uuid.Nil) stream.
-func (p *EvrPipeline) buildPingTargets(logger *zap.Logger, guildGroups map[string]struct{}) []PingTarget {
-	seen := make(map[string]struct{}) // dedup by "address:port"
-	var targets []PingTarget
+func (p *EvrPipeline) buildPingEndpoints(logger *zap.Logger, guildGroups map[string]struct{}) []evr.Endpoint {
+	seen := make(map[string]struct{}) // dedup by external "address:port"
+	var endpoints []evr.Endpoint
 
 	addPresences := func(subject string) {
 		presences, err := p.nk.StreamUserList(StreamModeGameServer, subject, "", "", false, true)
@@ -88,36 +96,12 @@ func (p *EvrPipeline) buildPingTargets(logger *zap.Logger, guildGroups map[strin
 				continue
 			}
 
-			extIP := gp.Endpoint.ExternalIP
-			port := gp.Endpoint.Port
-			serverKey := extIP.String()
-
-			// External target (always)
-			extKey := extIP.String() + ":" + strconv.Itoa(int(port))
-			if _, dup := seen[extKey]; !dup {
-				seen[extKey] = struct{}{}
-				targets = append(targets, PingTarget{
-					Address:    extIP,
-					Port:       port,
-					ServerKey:  serverKey,
-					IsInternal: false,
-				})
+			key := gp.Endpoint.ExternalIP.String() + ":" + strconv.Itoa(int(gp.Endpoint.Port))
+			if _, dup := seen[key]; dup {
+				continue
 			}
-
-			// Internal target (only if server has a genuine internal IP)
-			intIP := gp.Endpoint.InternalIP
-			if intIP != nil && !intIP.IsUnspecified() && isInternalIP(intIP) {
-				intKey := intIP.String() + ":" + strconv.Itoa(int(port))
-				if _, dup := seen[intKey]; !dup {
-					seen[intKey] = struct{}{}
-					targets = append(targets, PingTarget{
-						Address:    intIP,
-						Port:       port,
-						ServerKey:  serverKey,
-						IsInternal: true,
-					})
-				}
-			}
+			seen[key] = struct{}{}
+			endpoints = append(endpoints, pingEndpoint(gp.Endpoint))
 		}
 	}
 
@@ -126,7 +110,7 @@ func (p *EvrPipeline) buildPingTargets(logger *zap.Logger, guildGroups map[strin
 	}
 	addPresences(uuid.Nil.String())
 
-	return targets
+	return endpoints
 }
 
 // runPingDiscovery is launched as a goroutine after login success. It sends
@@ -152,16 +136,16 @@ func (p *EvrPipeline) runPingDiscovery(session *sessionWS) {
 		guildGroupIDs[gid] = struct{}{}
 	}
 
-	targets := p.buildPingTargets(logger, guildGroupIDs)
-	if len(targets) == 0 {
-		logger.Debug("ping discovery: no targets found")
+	endpoints := p.buildPingEndpoints(logger, guildGroupIDs)
+	if len(endpoints) == 0 {
+		logger.Debug("ping discovery: no endpoints found")
 		return
 	}
 
 	cfg := p.pingDiscoveryConfig
 
-	// Chunk targets into batches of EndpointsPerMessage.
-	batches := chunkPingTargets(targets, EndpointsPerMessage)
+	// Chunk endpoints into batches of EndpointsPerMessage.
+	batches := chunkEndpoints(endpoints, EndpointsPerMessage)
 
 	// Cap at max_messages.
 	if len(batches) > cfg.MaxMessages {
@@ -175,7 +159,7 @@ func (p *EvrPipeline) runPingDiscovery(session *sessionWS) {
 	}
 
 	logger.Info("ping discovery: starting",
-		zap.Int("targets", len(targets)),
+		zap.Int("endpoints", len(endpoints)),
 		zap.Int("batches", len(batches)),
 		zap.Duration("interval", interval),
 	)
@@ -190,16 +174,7 @@ func (p *EvrPipeline) runPingDiscovery(session *sessionWS) {
 		default:
 		}
 
-		endpoints := make([]evr.Endpoint, len(batch))
-		for j, t := range batch {
-			endpoints[j] = evr.Endpoint{
-				InternalIP: net.IPv4zero,
-				ExternalIP: t.Address,
-				Port:       t.Port,
-			}
-		}
-
-		if err := SendEVRMessages(session, true, evr.NewLobbyPingRequest(pingDiscoveryRTTMax, endpoints)); err != nil {
+		if err := SendEVRMessages(session, true, evr.NewLobbyPingRequest(pingDiscoveryRTTMax, batch)); err != nil {
 			logger.Warn("ping discovery: failed to send batch",
 				zap.Int("batch", i), zap.Error(err))
 			return
@@ -221,72 +196,30 @@ func (p *EvrPipeline) runPingDiscovery(session *sessionWS) {
 
 	logger.Info("ping discovery: complete",
 		zap.Int("batches_sent", len(batches)),
-		zap.Int("targets_sent", min(len(targets), cfg.MaxMessages*EndpointsPerMessage)),
+		zap.Int("endpoints_sent", min(len(endpoints), cfg.MaxMessages*EndpointsPerMessage)),
 	)
 }
 
 // buildJoinEndpoint constructs the Endpoint that will be sent to the client in
-// LobbySessionSuccess. If the client has demonstrated reachability to the
-// server's internal IP (via ping discovery), the internal IP is included so the
-// client can use the lower-latency path. Otherwise, the internal slot is set to
-// nil (serialized as 0.0.0.0, the client's "skip this address" value).
-//
-// This implements Phase 2 of ADR 0002.
-func buildJoinEndpoint(ctx context.Context, serverEndpoint evr.Endpoint) evr.Endpoint {
-	params, ok := LoadParams(ctx)
-	if !ok {
-		// No session params — return the endpoint as-is (external + internal).
-		return serverEndpoint
-	}
-
-	lh := params.latencyHistory.Load()
-	if lh == nil {
-		return serverEndpoint
-	}
-
-	extIP := serverEndpoint.ExternalIP
-	intIP := serverEndpoint.InternalIP
-
-	// If the server has no internal IP, nothing to decide.
-	if intIP == nil || intIP.IsUnspecified() {
-		return serverEndpoint
-	}
-
-	// Include the internal IP only when the client demonstrated that it is the
-	// best reachable path to this server — i.e. the client returned an RTT for
-	// the internal address AND that address is at least as fast as the external
-	// (ADR 0002: "LAN players get optimal routing"). BestAddress returns the
-	// chosen address, so we must compare it against the internal IP; reading its
-	// RTT alone would wrongly treat an external-only result as internal-reachable
-	// and leak the server's private IP to a remote client.
-	bestIP, _, ok := lh.BestAddress(extIP.String(), intIP.String())
-	if ok && bestIP == intIP.String() {
-		// Client can reach the internal IP and it is the best path — include it.
-		return evr.Endpoint{
-			InternalIP: intIP,
-			ExternalIP: extIP,
-			Port:       serverEndpoint.Port,
-		}
-	}
-
-	// Client cannot reach the internal IP (or the external path is faster) —
-	// external only. Never hand a private IP to a client that cannot use it.
-	return evr.Endpoint{
-		InternalIP: nil,
-		ExternalIP: extIP,
-		Port:       serverEndpoint.Port,
-	}
+// LobbySessionSuccess. Per ADR 0002, the client is handed BOTH the external and
+// the (private) internal address so it can validate them at connect time and use
+// whichever it can reach — at least one is valid (req 3). The internal slot is
+// included only when it holds a genuine private/internal address (req 2); a
+// publicly-routable or unspecified internal IP is stripped to nil (serialized as
+// 0.0.0.0, the client's "skip this address" value).
+func buildJoinEndpoint(serverEndpoint evr.Endpoint) evr.Endpoint {
+	return pingEndpoint(serverEndpoint)
 }
 
-// chunkPingTargets splits a slice of PingTarget into batches of at most size n.
-func chunkPingTargets(targets []PingTarget, n int) [][]PingTarget {
-	var batches [][]PingTarget
-	for i := 0; i < len(targets); i += n {
+// chunkEndpoints splits a slice of endpoints into batches of at most size n.
+func chunkEndpoints(endpoints []evr.Endpoint, n int) [][]evr.Endpoint {
+	var batches [][]evr.Endpoint
+	for i := 0; i < len(endpoints); i += n {
 		end := i + n
-		if end > len(targets) {
-			end = len(targets)
+		if end > len(endpoints) {
+			end = len(endpoints)
 		}
-		batches = append(batches, targets[i:end])
+		batches = append(batches, endpoints[i:end])
 	}
 	return batches
 }

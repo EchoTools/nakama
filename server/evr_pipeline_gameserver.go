@@ -73,6 +73,15 @@ func normalizeInternalIP(ip net.IP) (normalized net.IP, dropped bool) {
 	return nil, true
 }
 
+// serverProbeTarget returns the address nakama probes when a game server
+// connects and while it is monitored. Per ADR 0002 req 1, nakama pings ONLY the
+// external IP: the internal IP is a LAN address that nakama itself may not be
+// able to reach, so it is never a probe target. Routing every health check
+// through this helper keeps the invariant in one place.
+func serverProbeTarget(ep evr.Endpoint) net.IP {
+	return ep.ExternalIP
+}
+
 // sendDiscordServerError sends a formatted error message about a specific game server to the user on discord
 func sendDiscordServerError(internalIP net.IP, externalIP net.IP, port uint16, serverID uint64, errMsg string, discordId string, logger *zap.Logger, bot *discordgo.Session) {
 	if bot != nil && discordId != "" {
@@ -346,7 +355,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		retries := 3
 		var rtt time.Duration
 		for range retries {
-			rtt, err = BroadcasterHealthcheck(p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
+			rtt, err = BroadcasterHealthcheck(p.internalIP, serverProbeTarget(config.Endpoint), int(config.Endpoint.Port), 500*time.Millisecond)
 			if err != nil {
 				time.Sleep(500 * time.Millisecond)
 				continue
@@ -432,7 +441,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 				return
 			case <-time.After(5 * time.Second):
 				// Check if the game server is still alive
-				rtts, err := BroadcasterRTTcheck(p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 5, 500*time.Millisecond)
+				rtts, err := BroadcasterRTTcheck(p.internalIP, serverProbeTarget(config.Endpoint), int(config.Endpoint.Port), 5, 500*time.Millisecond)
 				if err != nil || len(rtts) == 0 {
 					logger.Warn("Game server is not responding", zap.Error(err), zap.String("endpoint", config.Endpoint.String()))
 					// Send the discord error
@@ -474,7 +483,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	}()
 
 	if ServiceSettings().EnableContinuousGameserverHealthCheck {
-		go HealthCheckStart(ctx, logger, p.nk, session, p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
+		go HealthCheckStart(ctx, logger, p.nk, session, p.internalIP, serverProbeTarget(config.Endpoint), int(config.Endpoint.Port), 500*time.Millisecond)
 	}
 
 	// Build protobuf registration success message
