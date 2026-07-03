@@ -82,6 +82,60 @@ func wantGotDiff(t *testing.T, want, got interface{}) {
 	}
 }
 
+func TestEquipAndSanitize_RejectsUnownedVRMLTag(t *testing.T) {
+	// COSMETIC-1: the in-game equip path must not persist a cosmetic the player
+	// does not own. An empty-wallet player equipping a restricted VRML finalist
+	// tag must have that slot reset to the default tag, not the finalist tag.
+	owned := cosmeticDefaults(false) // empty wallet: defaults only, all VRML restricted
+
+	loadout := evr.DefaultCosmeticLoadout()
+	result, err := EquipAndSanitize(loadout, "tag", "rwd_tag_s1_vrml_s1_finalist", owned)
+	if err != nil {
+		t.Fatalf("EquipAndSanitize returned error: %v", err)
+	}
+
+	def := evr.DefaultCosmeticLoadout().Tag
+	if result.Tag == "rwd_tag_s1_vrml_s1_finalist" {
+		t.Errorf("unowned VRML finalist tag persisted; got %q, want default %q", result.Tag, def)
+	}
+	if result.Tag != def {
+		t.Errorf("tag slot not reset to default; got %q, want %q", result.Tag, def)
+	}
+}
+
+func TestEquipAndSanitize_AllowsOwnedVRMLTag(t *testing.T) {
+	// Regression guard: a legitimately entitled player (wallet grants the tag)
+	// must still be able to equip it.
+	owned := cosmeticDefaults(false)
+	owned = walletToCosmetics(map[string]int64{
+		"cosmetic:arena:rwd_tag_s1_vrml_s1_finalist": 1,
+	}, owned)
+
+	loadout := evr.DefaultCosmeticLoadout()
+	result, err := EquipAndSanitize(loadout, "tag", "rwd_tag_s1_vrml_s1_finalist", owned)
+	if err != nil {
+		t.Fatalf("EquipAndSanitize returned error: %v", err)
+	}
+	if result.Tag != "rwd_tag_s1_vrml_s1_finalist" {
+		t.Errorf("owned VRML tag was stripped; got %q, want %q", result.Tag, "rwd_tag_s1_vrml_s1_finalist")
+	}
+}
+
+func TestEquipAndSanitize_AllowsDefaultItem(t *testing.T) {
+	// Regression guard: default items (not present in the unlock structs) must
+	// still equip — the gate must not reject the standard defaults everyone uses.
+	owned := cosmeticDefaults(false)
+
+	loadout := evr.DefaultCosmeticLoadout()
+	result, err := EquipAndSanitize(loadout, "tag", "rwd_tag_s1_a_secondary", owned)
+	if err != nil {
+		t.Fatalf("EquipAndSanitize returned error: %v", err)
+	}
+	if result.Tag != "rwd_tag_s1_a_secondary" {
+		t.Errorf("default tag was altered; got %q, want %q", result.Tag, "rwd_tag_s1_a_secondary")
+	}
+}
+
 func TestSanitizeLoadout_CombatChassis(t *testing.T) {
 	// Bug: sanitizeLoadout only checks cosmetics["arena"], so combat-only
 	// items (e.g. rwd_chassis_body_s10_a) get reverted to the default chassis

@@ -67,12 +67,11 @@ func walletToCosmetics(wallet map[string]int64, unlocks map[string]map[string]bo
 	return unlocks
 }
 
-func UserServerProfileFromParameters(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, params *SessionParameters, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (*evr.ServerProfile, error) {
-	return NewUserServerProfile(ctx, logger, db, nk, params.profile, params.xpID, groupID, modes, dailyWeeklyMode, params.profile.GetGroupIGN(groupID))
-}
-
-func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, evrProfile *EVRProfile, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol, displayName string) (*evr.ServerProfile, error) {
-
+// profileOwnedCosmetics returns the mode→item→owned set the player is entitled to:
+// the default (or all, when EnableAllCosmetics) cosmetics merged with wallet-granted
+// unlocks. This is the single source of truth for "does this player own this cosmetic",
+// used both when building the broadcast server profile and when validating an equip.
+func profileOwnedCosmetics(evrProfile *EVRProfile) (map[string]map[string]bool, error) {
 	var wallet map[string]int64
 	if err := json.Unmarshal([]byte(evrProfile.Wallet()), &wallet); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal wallet: %w", err)
@@ -83,7 +82,34 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 		cosmetics[m] = make(map[string]bool, len(c))
 		maps.Copy(cosmetics[m], c)
 	}
-	cosmetics = walletToCosmetics(wallet, cosmetics)
+	return walletToCosmetics(wallet, cosmetics), nil
+}
+
+// EquipAndSanitize applies a client-requested equip and then strips any resulting
+// cosmetic the player does not own, returning a loadout safe to persist. This closes
+// COSMETIC-1: the in-game equip path previously stored whatever the client claimed to
+// equip (e.g. VRML finalist tags) with no ownership check. Sanitizing here mirrors the
+// broadcast path (NewUserServerProfile), so the stored loadout can never hold an item
+// the player is not entitled to, while default items and legitimately-owned cosmetics
+// pass through unchanged.
+func EquipAndSanitize(loadout evr.CosmeticLoadout, category, name string, owned map[string]map[string]bool) (evr.CosmeticLoadout, error) {
+	equipped, err := LoadoutEquipItem(loadout, category, name)
+	if err != nil {
+		return loadout, err
+	}
+	return sanitizeLoadout(equipped, owned), nil
+}
+
+func UserServerProfileFromParameters(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, params *SessionParameters, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (*evr.ServerProfile, error) {
+	return NewUserServerProfile(ctx, logger, db, nk, params.profile, params.xpID, groupID, modes, dailyWeeklyMode, params.profile.GetGroupIGN(groupID))
+}
+
+func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, evrProfile *EVRProfile, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol, displayName string) (*evr.ServerProfile, error) {
+
+	cosmetics, err := profileOwnedCosmetics(evrProfile)
+	if err != nil {
+		return nil, err
+	}
 
 	cosmeticLoadout := evrProfile.LoadoutCosmetics.Loadout
 	cosmeticLoadout = sanitizeLoadout(cosmeticLoadout, cosmetics)
