@@ -200,55 +200,9 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 		}
 	}
 
-	// Wait before tracking, but respect context cancellation.
-	select {
-	case <-sessionCtx.Done():
-		return fmt.Errorf("session closed before stream tracking: %w", sessionCtx.Err())
-	case <-time.After(1 * time.Second):
-	}
-
-	matchIDStr := label.ID.String()
-
-	guildGroupStream := PresenceStream{Mode: StreamModeGuildGroup, Subject: label.GetGroupID(), Label: label.Mode.String()}
-
-	ops := []*TrackerOp{
-		{
-			guildGroupStream,
-			PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: false},
-		},
-		{
-			PresenceStream{Mode: StreamModeService, Subject: e.SessionID, Label: StreamLabelMatchService},
-			PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: false},
-		},
-		{
-			PresenceStream{Mode: StreamModeService, Subject: e.LoginSessionID, Label: StreamLabelMatchService},
-			PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: false},
-		},
-		{
-			PresenceStream{Mode: StreamModeService, Subject: e.UserID, Label: StreamLabelMatchService},
-			PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: false},
-		},
-		{
-			PresenceStream{Mode: StreamModeService, Subject: e.EvrID.UUID(), Label: StreamLabelMatchService},
-			PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: false},
-		},
-	}
-
-	// Update the statuses with retry logic to handle transient session state issues.
-	// This is looked up by the pipeline when the game server sends the new entrant message,
-	// and also by the IGP (In-Game Panel) to find players in matches.
-	const maxRetries = 3
-	const retryDelay = 100 * time.Millisecond
-
-	for _, op := range ops {
-		if ok := tracker.Update(sessionCtx, e.SessionID, op.Stream, e.UserID, op.Meta); !ok {
-			logger.Warn("Failed to track stream", zap.Any("stream", op.Stream), zap.String("uid", e.UserID.String()))
-			return ErrFailedToTrackSessionID
-		}
-	}
-
-	// Leave any other lobby group stream.
-	tracker.UntrackLocalByModes(session.ID(), map[uint8]struct{}{StreamModeMatchmaking: {}, StreamModeGuildGroup: {}}, guildGroupStream)
+	// Service stream updates, guild group stream, and matchmaking untrack are
+	// deferred to lobbyEntrantConnected — they should only be set once the game
+	// server confirms the player actually connected.
 
 	connectionSettings := label.GetEntrantConnectMessage(e.RoleAlignment, e.DisableEncryption, e.DisableMAC)
 

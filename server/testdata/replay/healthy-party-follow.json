@@ -1,0 +1,57 @@
+{
+  "name": "healthy-party-follow",
+  "description": "Clean party lifecycle: join party, arrive in social lobby, follow leader to arena, get pulled back to holding when match ends, enter matchmaking on leader ticket, find match, play match. All transitions legal — no bugs, no churn, no crashes.",
+  "source_log": "nakama-2026-06-19T17-48-09.533.log",
+  "time_window": "2026-06-18T23:59:43Z/2026-06-19T00:02:17Z",
+  "transitions": [
+    {
+      "ts": "2026-06-18T23:59:43.917Z",
+      "from": "Idle",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T23:59:45.016Z",
+      "from": "Holding",
+      "to": "SocialReady",
+      "reason": "joined social lobby",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-18T23:59:45.167Z",
+      "from": "SocialReady",
+      "to": "InMatch",
+      "reason": "followed leader to match",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-19T00:01:46.125Z",
+      "from": "InMatch",
+      "to": "Holding",
+      "reason": "waiting for leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-19T00:01:46.712Z",
+      "from": "Holding",
+      "to": "Matchmaking",
+      "reason": "included on leader's ticket",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-19T00:02:09.900Z",
+      "from": "Matchmaking",
+      "to": "Joining",
+      "reason": "match found, joining",
+      "legal": true
+    },
+    {
+      "ts": "2026-06-19T00:02:17.484Z",
+      "from": "Joining",
+      "to": "Returning",
+      "reason": "match ended",
+      "legal": true
+    }
+  ]
+}

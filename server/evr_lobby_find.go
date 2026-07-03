@@ -69,8 +69,10 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		// prevents repeated "Joined party group" / "Already in
 		// leader's match" churn when the client re-sends
 		// LobbyFindSessionRequest on its normal message cycle.
-		if !isLeader && p.isFollowerAlreadyInLeaderMatch(logger, session, lobbyGroup) {
-			logger.Debug("Follower already in leader's match, skipping follow path")
+		if !isLeader && p.isFollowerAlreadyInLeaderMatch(ctx, logger, session, lobbyGroup, lobbyParams.CurrentMatchID) {
+			logger.Debug("Follower already in leader's match, skipping follow path",
+				zap.String("current_match_id", lobbyParams.CurrentMatchID.String()),
+				zap.String("leader_sid", lobbyGroup.GetLeader().GetSessionId()))
 			return nil
 		}
 
@@ -110,17 +112,30 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	if lobbyGroup != nil {
 		if !isLeader {
-			// Guard: if the follower is in an active Arena/Combat match,
-			// do not process the party follow. Let them finish their match.
-			// The party will pick them up when they return to social.
-			// Fixes #460: player mid-match yanked back to social by party follow.
-			if p.isFollowerInActiveMatch(ctx, logger, session) {
-				logger.Info("Follower is in an active arena/combat match, skipping party follow")
-				return nil
+			// Reservation-based follow: if the leader has created a reservation
+			// for this follower, join directly without tracker-read follow logic.
+			if reservationMatchID, found := p.findReservation(ctx, logger, session, lobbyGroup); found {
+				logger.Info("Found party reservation, joining directly",
+					zap.String("reservation_mid", reservationMatchID.String()))
+				if err := p.lobbyJoin(ctx, logger, session, lobbyParams, reservationMatchID); err != nil {
+					logger.Warn("Failed to join via reservation, falling through to legacy path",
+						zap.Error(err))
+				} else {
+					// Observer: follower joined via reservation. Transition to StateJoining
+					// (not StateInMatch) — lobbyEntrantConnected will promote to StateInMatch
+					// when the game server confirms the join. This keeps the crash-detection
+					// window active during the join handshake.
+					if lc := getMatchLifecycle(session); lc != nil {
+						lc.TransitionTo(StateJoining, "reservation found, joining", WithMatchID(reservationMatchID.String()))
+					}
+					return nil
+				}
 			}
 
 			// Observer: non-leader entering holding pattern, waiting for leader's ticket.
-			if lc := getMatchLifecycle(session); lc != nil {
+			// Guard: skip if the player is still InMatch — the match leave
+			// hasn't fired yet; transitioning to Holding would be premature.
+			if lc := getMatchLifecycle(session); lc != nil && lc.State() != StateInMatch {
 				lc.Transition(StateHolding, "waiting for leader's ticket")
 			}
 
@@ -140,27 +155,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				lobbyGroup.Size() > 1 &&
 				!lobbyGroup.HasSessionOnTicket(session.id.String()) {
 				p.cancelTicketForLateArrival(ctx, logger, session, lobbyParams, lobbyGroup)
-			}
-
-			// Gate: only enter the follow path when the leader is in a
-			// *social* lobby. For Arena/Combat the correct path is the
-			// one-ticket model — all party members on one matchmaking
-			// ticket. If the follower missed the ticket the answer is
-			// ticket cancellation + rebuild, not chasing the leader's
-			// match. In the interim, redirect the follower to a social
-			// lobby so they are not silently released to solo matchmaking.
-			if p.isLeaderInArenaCombatMatch(ctx, logger, session, lobbyParams, lobbyGroup) {
-				logger.Info("Leader is in arena/combat match, skipping follow path — returning to social lobby")
-				if lc := getMatchLifecycle(session); lc != nil {
-					lc.Transition(StateSocialReady, "leader in arena/combat — waiting in social for next round")
-				}
-				lobbyParams.Mode = evr.ModeSocialPublic
-				lobbyParams.Level = evr.LevelUnspecified
-				followerEntrants, err := PrepareEntrantPresences(ctx, logger, p.nk, p.nk.sessionRegistry, lobbyParams, session.id)
-				if err != nil {
-					return NewLobbyError(InternalError, fmt.Sprintf("failed to prepare follower entrant: %s", err))
-				}
-				return p.lobbyFindOrCreateSocial(ctx, logger, session, lobbyParams, lobbyGroup, followerEntrants...)
 			}
 
 			if p.TryFollowPartyLeader(ctx, logger, session, lobbyParams, lobbyGroup) {
@@ -392,7 +386,15 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 	}
 	// Populate PartyID from the registry-assigned party (random UUID, not derived from group name).
 	lobbyParams.PartyID = lobbyGroup.ID()
-	logger.Debug("Joined party group", zap.String("partyID", lobbyGroup.IDStr()), zap.String("partyGroupName", lobbyParams.PartyGroupName))
+	leader := lobbyGroup.GetLeader()
+	logger.Debug("Joined party group",
+		zap.String("party_id", lobbyGroup.IDStr()),
+		zap.String("party_group_name", lobbyParams.PartyGroupName),
+		zap.Int("party_size", lobbyGroup.Size()),
+		zap.Bool("is_leader", isLeader),
+		zap.String("leader_sid", leader.GetSessionId()),
+		zap.String("leader_uid", leader.GetUserId()),
+		zap.String("current_match_id", lobbyParams.CurrentMatchID.String()))
 
 	// If this is the leader, then set the presence status to the current match ID.
 	if isLeader {
@@ -419,27 +421,16 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 		}
 
 		if !lobbyParams.CurrentMatchID.IsNil() && lobbyParams.Mode != evr.ModeSocialPublic {
-			// Query the match we're leaving to find how many party members should be joining us.
-			// Use the leader's party ID from the match presence (set at join time), not
-			// lobbyParams.PartyID. The user may have changed their LobbyGroupName since
-			// joining the match (via /party group), which changes lobbyParams.PartyID but
-			// doesn't update the match presence. Comparing against the match presence
-			// party ID ensures we count everyone who was in the same party when they
-			// entered the match.
-			expectedCount := 0
-			if presences, err := GetMatchPresences(ctx, p.nk, lobbyParams.CurrentMatchID); err == nil {
-				matchPartyID := lobbyParams.PartyID
-				if leaderPresence, ok := presences[session.userID.String()]; ok && !leaderPresence.PartyID.IsNil() {
-					matchPartyID = leaderPresence.PartyID
-				}
-				for _, mp := range presences {
-					if mp.PartyID == matchPartyID && mp.UserID != session.userID {
-						expectedCount++
-					}
-				}
-			}
+			// The leader operates off party membership (lobbyGroup.Size()) only.
+			// The party stream is the source of truth for who's in the party;
+			// match presences give wrong counts when followers have already left.
+			expectedCount := lobbyGroup.Size() - 1
 			if expectedCount > 0 {
-				logger.Debug("Waiting for party members to start matchmaking", zap.Int("expected", expectedCount), zap.Int("current", lobbyGroup.Size()-1))
+				logger.Debug("Waiting for party members to start matchmaking",
+					zap.Int("expected", expectedCount),
+					zap.Int("current", lobbyGroup.Size()-1),
+					zap.String("source_match_id", lobbyParams.CurrentMatchID.String()),
+					zap.String("party_id", lobbyParams.PartyID.String()))
 				deadline := time.After(30 * time.Second)
 				ticker := time.NewTicker(500 * time.Millisecond)
 				defer ticker.Stop()
@@ -449,7 +440,11 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 					case <-ctx.Done():
 						return nil, nil, false, ctx.Err()
 					case <-deadline:
-						logger.Warn("Timed out waiting for party members", zap.Int("expected", expectedCount), zap.Int("current", lobbyGroup.Size()-1))
+						logger.Warn("Timed out waiting for party members",
+							zap.Int("expected", expectedCount),
+							zap.Int("current", lobbyGroup.Size()-1),
+							zap.String("source_match_id", lobbyParams.CurrentMatchID.String()),
+							zap.String("party_id", lobbyParams.PartyID.String()))
 						break waitLoop
 					case <-ticker.C:
 					}
@@ -494,7 +489,9 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 		logger.Debug("Party is ready", zap.String("leader", session.id.String()), zap.Int("size", partySize), zap.Strings("members", memberUsernames))
 
 		// Observer: leader submitting matchmaking ticket.
-		if lc := getMatchLifecycle(session); lc != nil {
+		// Guard: skip if the player is still InMatch — the match leave
+		// hasn't fired yet; transitioning to Matchmaking would be premature.
+		if lc := getMatchLifecycle(session); lc != nil && lc.State() != StateInMatch {
 			lc.TransitionTo(StateMatchmaking, "leader submitted ticket", WithIsLeader(true))
 		}
 
@@ -508,9 +505,11 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 			continue
 		}
 		// Observer: party member included on leader's ticket.
+		// Guard: skip if the member is still InMatch — their match leave
+		// hasn't fired yet; transitioning to Matchmaking would be premature.
 		if memberSession := p.nk.sessionRegistry.Get(uuid.FromStringOrNil(member.Presence.GetSessionId())); memberSession != nil {
 			if ws, ok := memberSession.(*sessionWS); ok {
-				if lc := getMatchLifecycle(ws); lc != nil {
+				if lc := getMatchLifecycle(ws); lc != nil && lc.State() != StateInMatch {
 					lc.Transition(StateMatchmaking, "included on leader's ticket")
 				}
 			}
@@ -682,6 +681,19 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 		return nil
 	}
 
+	// Party-cohesion: ensure the social find reserves room for the WHOLE party,
+	// regardless of which caller invoked it. The leader path appends these
+	// placeholders before calling in (see lobbyFind ~line 271), but the follower
+	// fallthrough (lobbyFind ~line 197) passes a self-only entrant list. Without
+	// this, the Priority-2 open-slots gate below (n < len(entrants), len==1)
+	// would admit a lobby with only ONE open slot and reserve nothing for the
+	// rest of the party — the other member's convergence join is then rejected
+	// with ServerIsFull and the party fragments. appendPartyReservationPlaceholders
+	// is idempotent (members already in the entrant set are skipped), so the
+	// leader path's earlier call adds nothing here, and solo players / party-of-1
+	// are unaffected (the helper no-ops on lobbyGroup == nil || Size() <= 1).
+	entrants = appendPartyReservationPlaceholders(logger, entrants, lobbyGroup, lobbyParams, p.node)
+
 	// Load the user's server blacklist once before the retry loop
 	blacklistedIPs := loadUserBlacklist(ctx, p.nk, session.UserID().String()).IPSet()
 
@@ -759,6 +771,33 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 				}
 			}
 			p.prewarmEntrantPings(ctx, logger, entrants, endpoints)
+		}
+
+		// Reservation-based follow: if the leader has created a reservation
+		// for this follower in a social lobby, join directly without the
+		// tracker-read priority join path.
+		if ws, ok := session.(*sessionWS); ok {
+			if lobbyParams.PartyGroupName != "" && lobbyParams.PartyGroupName != "tablet" {
+				if lobbyGroup, _, err := JoinPartyGroup(ws, lobbyParams.PartyGroupName, lobbyParams.CurrentMatchID); err == nil && lobbyGroup != nil {
+					if reservationMatchID, found := p.findReservation(ctx, logger, ws, lobbyGroup); found {
+						logger.Info("Found party reservation in social lobby path, joining directly",
+							zap.String("reservation_mid", reservationMatchID.String()))
+						if err := p.lobbyJoin(ctx, logger, ws, lobbyParams, reservationMatchID); err != nil {
+							logger.Warn("Failed to join via reservation in social path, falling through to legacy priority join",
+								zap.Error(err))
+						} else {
+							// Observer: follower joined via reservation in social lobby path.
+							// Transition to StateJoining (not StateInMatch) — lobbyEntrantConnected
+							// will promote to StateInMatch when the game server confirms. This keeps
+							// the crash-detection window active during the join handshake.
+							if lc := getMatchLifecycle(ws); lc != nil {
+								lc.TransitionTo(StateJoining, "reservation found, joining", WithMatchID(reservationMatchID.String()))
+							}
+							return nil
+						}
+					}
+				}
+			}
 		}
 
 		// Priority 1: If we're in a party, try to find the leader's specific lobby first.
@@ -1082,40 +1121,6 @@ func (p *EvrPipeline) isLeaderHeadingToSocial(ctx context.Context, logger *zap.L
 	return false
 }
 
-// isFollowerInActiveMatch reports whether the follower (session) is currently
-// in an Arena or Combat match (public or private). When this returns true,
-// the party follow system must not process the LobbyFindSessionRequest —
-// doing so would yank the player out of their active match.
-//
-// Returns false when the session has no match presence, the match label
-// cannot be resolved, or the match is a social lobby.
-//
-// Fixes #460: player mid-match was pulled back to social when party leader
-// hit matchmaking.
-func (p *EvrPipeline) isFollowerInActiveMatch(ctx context.Context, logger *zap.Logger, session *sessionWS) bool {
-	matchStream := PresenceStream{
-		Mode:    StreamModeService,
-		Subject: session.id,
-		Label:   StreamLabelMatchService,
-	}
-	presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, matchStream, session.userID)
-	if presence == nil {
-		return false
-	}
-
-	followerMatchID := MatchIDFromStringOrNil(presence.GetStatus())
-	if followerMatchID.IsNil() {
-		return false
-	}
-
-	label, err := MatchLabelByID(ctx, p.nk, followerMatchID)
-	if err != nil || label == nil {
-		return false
-	}
-
-	return label.IsArena() || label.IsCombat()
-}
-
 // currentSocialLobbyForSession returns the match ID of the social lobby that
 // the player is currently in, but ONLY when that lobby is the one we intend to
 // send them to. Returns a nil MatchID otherwise, so the normal
@@ -1240,7 +1245,7 @@ func (p *EvrPipeline) intendedSocialTargetMatchID(session *sessionWS, lobbyParam
 //
 // Returns false when the leader cannot be found, either player is not in a
 // match, or their match IDs differ.
-func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(logger *zap.Logger, session *sessionWS, lobbyGroup *LobbyGroup) bool {
+func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyGroup *LobbyGroup, currentMatchID MatchID) bool {
 	leader := lobbyGroup.GetLeader()
 	if leader == nil || leader.SessionId == session.id.String() {
 		return false
@@ -1274,59 +1279,29 @@ func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(logger *zap.Logger, session
 	}
 	followerMatchID := MatchIDFromStringOrNil(followerPresence.GetStatus())
 
-	return followerMatchID == leaderMatchID
-}
-
-// isLeaderInArenaCombatMatch reports whether the party leader is currently
-// in an Arena or Combat match (public or private). The follower should NOT
-// enter the follow path when this returns true — the correct path is the
-// one-ticket model where all party members are placed via a single
-// matchmaking ticket.
-//
-// Returns false when the leader cannot be found, is not in a match, is
-// actively matchmaking, or is in a social lobby.
-func (p *EvrPipeline) isLeaderInArenaCombatMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, lobbyGroup *LobbyGroup) bool {
-	leader := lobbyGroup.GetLeader()
-	if leader == nil || leader.SessionId == session.id.String() {
+	if followerMatchID != leaderMatchID {
 		return false
 	}
 
-	leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
-	leaderUserID := uuid.FromStringOrNil(leader.UserId)
-
-	// If the leader is actively matchmaking, they have not settled into
-	// a match yet. Do not gate here — let the normal flow handle it.
-	mmStream := PresenceStream{
-		Mode:    StreamModeMatchmaking,
-		Subject: params.GroupID,
-	}
-	if session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, mmStream, leaderUserID) != nil {
+	if !currentMatchID.IsNil() && followerMatchID == currentMatchID {
+		// Both players are in the same match that the client reports as
+		// "current." Distinguish social (staying) from arena (leaving).
+		if p.nk != nil {
+			label, err := MatchLabelByID(ctx, p.nk, followerMatchID)
+			if err == nil && label != nil && label.IsSocial() {
+				logger.Debug("Follower and leader share a social lobby, already converged",
+					zap.String("shared_match_id", followerMatchID.String()))
+				return true
+			}
+		}
+		logger.Debug("Follower and leader share the match being left, not skipping",
+			zap.String("shared_match_id", followerMatchID.String()),
+			zap.String("current_match_id", currentMatchID.String()),
+			zap.String("leader_sid", leader.SessionId))
 		return false
 	}
 
-	// Look up the leader's current match.
-	matchStream := PresenceStream{
-		Mode:    StreamModeService,
-		Subject: leaderSessionID,
-		Label:   StreamLabelMatchService,
-	}
-	presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, matchStream, leaderUserID)
-	if presence == nil {
-		return false
-	}
-
-	leaderMatchID := MatchIDFromStringOrNil(presence.GetStatus())
-	if leaderMatchID.IsNil() {
-		return false
-	}
-
-	label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
-	if err != nil || label == nil {
-		return false
-	}
-
-	// Arena or Combat (public or private) — follow path is wrong here.
-	return label.IsArena() || label.IsCombat()
+	return true
 }
 
 // cancelTicketForLateArrival checks whether the party's leader has an active
@@ -1388,7 +1363,9 @@ func (p *EvrPipeline) cancelTicketForLateArrival(_ context.Context, logger *zap.
 	lobbyGroup.SignalTicketRebuild()
 
 	// Observer: ticket cancelled due to late arrival.
-	if lc := getMatchLifecycle(session); lc != nil {
+	// Guard: skip if the player is still InMatch — the match leave
+	// hasn't fired yet; transitioning to Holding would be premature.
+	if lc := getMatchLifecycle(session); lc != nil && lc.State() != StateInMatch {
 		lc.Transition(StateHolding, "ticket cancelled for late arrival, rebuilding")
 	}
 }
@@ -1658,7 +1635,18 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		}
 
 		if !params.CurrentMatchID.IsNil() && leaderMatchID == params.CurrentMatchID {
-			return false
+			// Both players share the match the client reports as "current."
+			// Social lobbies persist (staying); arena lobbies are dying (leaving).
+			isSocial := false
+			if p.nk != nil {
+				label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
+				if err == nil && label != nil && label.IsSocial() {
+					isSocial = true
+				}
+			}
+			if !isSocial {
+				return false
+			}
 		}
 
 		memberStream := PresenceStream{
@@ -1838,4 +1826,71 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		}
 		return true
 	}
+}
+
+// findReservation checks whether the party leader's current match has a
+// reservation for this follower. It looks up the leader's match via the
+// leader's service stream, fetches the match label, and checks the
+// Players slice for an entry with IsReservation == true matching this
+// session's ID.
+//
+// Returns the match ID and true if a reservation is found. Returns
+// MatchID{}, false if no reservation exists (leader not in a match,
+// match label unreadable, or follower not reserved).
+//
+// This replaces the old StreamModeReservation tracker-read approach.
+// Cost: one tracker read (leader's service stream) + one MatchLabelByID
+// call per invocation.
+func (p *EvrPipeline) findReservation(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyGroup *LobbyGroup) (MatchID, bool) {
+	leader := lobbyGroup.GetLeader()
+	if leader == nil {
+		return MatchID{}, false
+	}
+	leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
+	leaderUserID := uuid.FromStringOrNil(leader.UserId)
+	if leaderSessionID == session.id {
+		return MatchID{}, false // caller IS the leader
+	}
+
+	// Look up leader's current match via their service stream.
+	stream := PresenceStream{
+		Mode:    StreamModeService,
+		Subject: leaderSessionID,
+		Label:   StreamLabelMatchService,
+	}
+	presence := p.nk.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, stream, leaderUserID)
+	if presence == nil {
+		return MatchID{}, false // leader not in a match
+	}
+	leaderMatchID := MatchIDFromStringOrNil(presence.GetStatus())
+	if leaderMatchID.IsNil() {
+		return MatchID{}, false
+	}
+
+	// Fetch match label and check for our reservation.
+	label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
+	if err != nil || label == nil {
+		logger.Debug("Failed to get leader's match label for reservation check",
+			zap.Error(err), zap.String("mid", leaderMatchID.String()))
+		return MatchID{}, false
+	}
+
+	// Check if our session ID appears as a reservation in the Players slice.
+	//
+	// Known benign race: the reservation may not be in the label yet because
+	// updateLabel hasn't run since createPartyReservations signalled the match.
+	// In that case findReservation returns false and the caller falls through
+	// to the legacy tracker-read follow path, which converges correctly.
+	sessionIDStr := session.id.String()
+	for _, player := range label.Players {
+		if player.SessionID == sessionIDStr && player.IsReservation {
+			logger.Debug("Found reservation in leader's match",
+				zap.String("match_id", leaderMatchID.String()))
+			return leaderMatchID, true
+		}
+	}
+	logger.Debug("No reservation found in leader's match label (may be label publication lag)",
+		zap.String("match_id", leaderMatchID.String()),
+		zap.String("session_id", sessionIDStr))
+	return MatchID{}, false
 }

@@ -26,6 +26,8 @@ const (
 	SignalShutdown
 	SignalPlayerUpdate
 	SignalKickEntrants
+	SignalCreatePartyReservations
+	SignalClearPartyReservations
 )
 
 type SignalEnvelope struct {
@@ -102,6 +104,18 @@ type SignalReserveSlotsPayload struct {
 	SessionIDs    []string
 	RoleAlignment int
 	ExpiryTime    time.Time
+}
+
+// SignalCreatePartyReservationsPayload carries the list of party members
+// who need slot reservations in the match.
+type SignalCreatePartyReservationsPayload struct {
+	Members []*EvrMatchPresence `json:"members"`
+}
+
+// SignalClearPartyReservationsPayload carries the party ID whose
+// reservations should be removed from the match.
+type SignalClearPartyReservationsPayload struct {
+	PartyID uuid.UUID `json:"party_id"`
 }
 
 // SignalMatch is a helper function to send a signal to a match.

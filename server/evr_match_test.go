@@ -2007,6 +2007,72 @@ func TestMatchJoinAttempt_PartyFollowerReconnectFindsReservation(t *testing.T) {
 // TestMatchJoinAttempt_LobbyFull_WithoutReservation_ReturnsLobbyFull verifies the
 // baseline case: a full social lobby (12/12 players) with no reservations rejects
 // any new player without a reservation with the "lobby full" error.
+// TestMatchJoinAttempt_ExpiredReconnectReservation_DoesNotBlockJoin verifies the
+// fix for the "lobby full" false rejection bug. When reconnect reservations expire
+// between the last tick and a join attempt, they must not inflate Size and block
+// the join. The rebuildCache() call at the top of MatchJoinAttempt cleans them.
+func TestMatchJoinAttempt_ExpiredReconnectReservation_DoesNotBlockJoin(t *testing.T) {
+	state := newSocialTestMatchLabel()
+	state.Mode = evr.ModeSocialPublic
+	state.LobbyType = PublicLobby
+	state.MaxSize = SocialLobbyMaxSize
+	state.PlayerLimit = SocialLobbyMaxSize
+
+	// Fill the lobby to MaxSize - 1 (11 of 12) with actual players
+	for i := 0; i < SocialLobbyMaxSize-1; i++ {
+		player := reconnectTestPlayer(fmt.Sprintf("player-%d", i), evr.TeamSocial)
+		state.presenceMap[player.GetSessionId()] = player
+		state.presenceByEvrID[player.EvrID] = player
+		state.joinTimestamps[player.GetSessionId()] = time.Now().Add(-1 * time.Minute)
+	}
+
+	// Add an EXPIRED reconnect reservation — this is the bug trigger.
+	// It should not count toward Size, but without rebuildCache() it does.
+	crashedPlayer := reconnectTestPlayer("crashed-player", evr.TeamSocial)
+	state.reconnectReservations[crashedPlayer.GetUserId()] = &reconnectReservation{
+		Presence:     crashedPlayer,
+		Expiry:       time.Now().Add(-30 * time.Second), // expired 30 seconds ago
+		UserID:       crashedPlayer.GetUserId(),
+		DeferPenalty: false,
+	}
+
+	// Call rebuildCache to simulate the last tick's state — the expired reservation
+	// is still in the map (tick hasn't run yet), so Size includes it.
+	state.rebuildCache()
+
+	// Verify: Size should be 12 (11 players + 1 expired reservation that hasn't been cleaned)
+	// Actually rebuildCache DOES clean expired reservations, so after calling it, Size = 11.
+	// The real bug was: rebuildCache wasn't called in MatchJoinAttempt, so a stale Size was used.
+	// To reproduce the bug, we need to add the expired reservation AFTER rebuildCache.
+	state.reconnectReservations[crashedPlayer.GetUserId()] = &reconnectReservation{
+		Presence:     crashedPlayer,
+		Expiry:       time.Now().Add(-30 * time.Second),
+		UserID:       crashedPlayer.GetUserId(),
+		DeferPenalty: false,
+	}
+	// Manually inflate Size without calling rebuildCache (simulating stale state between ticks)
+	state.Size = SocialLobbyMaxSize // 12 = 11 players + 1 phantom reservation
+
+	if state.OpenSlots() != 0 {
+		t.Fatalf("Pre-condition: expected 0 open slots (stale Size), got %d", state.OpenSlots())
+	}
+
+	// New player tries to join — without the fix, this would be rejected as "lobby full"
+	newPlayer := reconnectTestPlayer("new-joiner", evr.TeamSocial)
+	metadata := NewJoinMetadata(newPlayer).ToMatchMetadata()
+
+	ctx := context.Background()
+	logger := reconnectTestLogger()
+	nk := &reconnectTestNakamaModule{}
+	m := &EvrMatch{}
+
+	_, allowed, reason := m.MatchJoinAttempt(ctx, logger, nil, nk, nil, 0, state, newPlayer, metadata)
+
+	if !allowed {
+		t.Fatalf("Join should be ALLOWED after expired reconnect reservation is cleaned, but was rejected: %s", reason)
+	}
+}
+
 func TestMatchJoinAttempt_LobbyFull_WithoutReservation_ReturnsLobbyFull(t *testing.T) {
 	state := newSocialTestMatchLabel()
 	state.Mode = evr.ModeSocialPublic

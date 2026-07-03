@@ -42,13 +42,16 @@ func TestPlayerMatchLifecycle_LegalTransitions(t *testing.T) {
 		{"SocialReady_to_Idle", StateSocialReady, StateIdle, "Left party"},
 		{"Holding_to_Matchmaking", StateHolding, StateMatchmaking, "Leader's ticket includes this member"},
 		{"Holding_to_SocialReady", StateHolding, StateSocialReady, "Matchmaking cancelled"},
+		{"Holding_to_InMatch", StateHolding, StateInMatch, "Followed leader directly (rare)"},
 		{"Matchmaking_to_Joining", StateMatchmaking, StateJoining, "Match found, join started"},
 		{"Matchmaking_to_SocialReady", StateMatchmaking, StateSocialReady, "Ticket cancelled (late arrival rebuild)"},
 		{"Joining_to_InMatch", StateJoining, StateInMatch, "Connected to game server"},
 		{"Joining_to_SocialReady", StateJoining, StateSocialReady, "Join failed, return to social"},
 		{"InMatch_to_Returning", StateInMatch, StateReturning, "Match ended naturally"},
 		{"InMatch_to_Crashed", StateInMatch, StateCrashed, "Client disconnected"},
+		{"InMatch_to_Matchmaking", StateInMatch, StateMatchmaking, "Ticket submitted while stale InMatch"},
 		{"Returning_to_SocialReady", StateReturning, StateSocialReady, "Back in social lobby"},
+		{"Returning_to_Crashed", StateReturning, StateCrashed, "Disconnect during return"},
 		{"Crashed_to_InMatch", StateCrashed, StateInMatch, "Reconnected within 27s"},
 		{"Crashed_to_Idle", StateCrashed, StateIdle, "Reconnect failed, reservation expired"},
 	}
@@ -95,13 +98,10 @@ func TestPlayerMatchLifecycle_IllegalTransitions(t *testing.T) {
 		to     MatchLifecycleState
 		reason string
 	}{
-		{"Holding_to_InMatch", StateHolding, StateInMatch, "skip ticket"},
 		{"SocialConverging_to_Matchmaking", StateSocialConverging, StateMatchmaking, "premature matchmake"},
 		{"Matchmaking_to_Idle", StateMatchmaking, StateIdle, "silent drop"},
 		{"Joining_to_Idle", StateJoining, StateIdle, "silent abandon"},
-		{"InMatch_to_Matchmaking", StateInMatch, StateMatchmaking, "matchmake while playing"},
 		{"Idle_to_InMatch", StateIdle, StateInMatch, "direct jump"},
-		{"Returning_to_Crashed", StateReturning, StateCrashed, "crash during return"},
 	}
 
 	for _, tc := range cases {

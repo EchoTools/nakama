@@ -312,6 +312,9 @@ func (p *EvrPipeline) snsPartyJoinRequest(ctx context.Context, logger *zap.Logge
 		MemberID: params.xpID.AccountId,
 	})
 
+	// Create reservation for the new member if leader is in a social match.
+	go p.createReservationForNewPartyMember(context.WithoutCancel(ctx), logger, session, partyUUID)
+
 	return SendEVRMessages(session, false, &evr.SNSPartyJoinSuccess{
 		PartyID: msg.PartyID,
 		OwnerID: ownerAccountID,
@@ -333,6 +336,10 @@ func (p *EvrPipeline) snsPartyLeaveRequest(ctx context.Context, logger *zap.Logg
 		PartyID:  snsID,
 		MemberID: params.xpID.AccountId,
 	})
+
+	// Clear any reservation for the departing member.
+	// Must run BEFORE snsPartyLeaveCleanup, which clears params.currentPartyID.
+	p.clearMemberReservation(ctx, logger, session, partyUUID)
 
 	// Untrack triggers partyLeaveListener -> PartyHandler.Leave().
 	p.snsPartyLeaveCleanup(ctx, logger, session, params)
@@ -464,6 +471,13 @@ func (p *EvrPipeline) snsPartyKickRequest(ctx context.Context, logger *zap.Logge
 		KickID:  targetAccountID,
 	})
 
+	// Clear any reservation for the kicked member.
+	if kickedSession := p.nk.sessionRegistry.Get(uuid.FromStringOrNil(targetPresence.SessionId)); kickedSession != nil {
+		if ws, ok := kickedSession.(*sessionWS); ok {
+			p.clearMemberReservation(ctx, logger, ws, params.currentPartyID)
+		}
+	}
+
 	return SendEVRMessages(session, false, &evr.SNSPartyKickSuccess{})
 }
 
@@ -502,6 +516,41 @@ func (p *EvrPipeline) snsPartyPassOwnershipRequest(ctx context.Context, logger *
 		PartyID:    snsID,
 		NewOwnerID: targetAccountID,
 	})
+
+	// Clear old leader's reservations and cancel tickets.
+	// The old leader's match may still have reservations for party members.
+	oldLeaderStream := PresenceStream{
+		Mode:    StreamModeService,
+		Subject: session.id,
+		Label:   StreamLabelMatchService,
+	}
+	if oldLeaderPresence := p.nk.tracker.GetLocalBySessionIDStreamUserID(session.id, oldLeaderStream, session.userID); oldLeaderPresence != nil {
+		oldMatchID := MatchIDFromStringOrNil(oldLeaderPresence.GetStatus())
+		if !oldMatchID.IsNil() {
+			payload := SignalClearPartyReservationsPayload{PartyID: params.currentPartyID}
+			if _, err := SignalMatch(ctx, p.nk, oldMatchID, SignalClearPartyReservations, payload); err != nil {
+				logger.Warn("Failed to clear old leader's reservations", zap.Error(err))
+			}
+		}
+	}
+	// New leader may need to create reservations in their current match.
+	if newLeaderSession := p.nk.sessionRegistry.Get(uuid.FromStringOrNil(targetPresence.SessionId)); newLeaderSession != nil {
+		if ws, ok := newLeaderSession.(*sessionWS); ok {
+			newLeaderStream := PresenceStream{
+				Mode:    StreamModeService,
+				Subject: ws.id,
+				Label:   StreamLabelMatchService,
+			}
+			if newPresence := p.nk.tracker.GetLocalBySessionIDStreamUserID(ws.id, newLeaderStream, ws.userID); newPresence != nil {
+				newMatchID := MatchIDFromStringOrNil(newPresence.GetStatus())
+				if !newMatchID.IsNil() {
+					if label, err := MatchLabelByID(ctx, p.nk, newMatchID); err == nil && label != nil && label.IsSocial() {
+						go p.createPartyReservations(context.WithoutCancel(ctx), logger, newMatchID, ws.id, params.currentPartyID)
+					}
+				}
+			}
+		}
+	}
 
 	return SendEVRMessages(session, false, &evr.SNSPartyPassSuccess{})
 }
@@ -611,6 +660,9 @@ func (p *EvrPipeline) snsPartyRespondToInviteRequest(ctx context.Context, logger
 		MemberID: params.xpID.AccountId,
 	})
 
+	// Create reservation for the new member if leader is in a social match.
+	go p.createReservationForNewPartyMember(context.WithoutCancel(ctx), logger, session, partyUUID)
+
 	return SendEVRMessages(session, false, &evr.SNSPartyJoinSuccess{
 		PartyID: snsPartyID,
 		OwnerID: ownerAccountID,
@@ -683,4 +735,137 @@ func (p *EvrPipeline) findPartyMemberPresence(partyUUID uuid.UUID, targetUserID 
 		}
 	}
 	return nil
+}
+
+// createReservationForNewPartyMember checks if the party leader is currently
+// in a social match and, if so, creates a reservation for the new member.
+// Called after a successful party join or invite acceptance.
+func (p *EvrPipeline) createReservationForNewPartyMember(ctx context.Context, logger *zap.Logger, memberSession *sessionWS, partyID uuid.UUID) {
+	// Find the party leader.
+	ph, ok := p.nk.partyRegistry.Get(partyID)
+	if !ok {
+		return
+	}
+	ph.RLock()
+	leader := ph.leader
+	ph.RUnlock()
+	if leader == nil {
+		return
+	}
+	leaderSessionID := uuid.FromStringOrNil(leader.UserPresence.SessionId)
+	leaderUserID := uuid.FromStringOrNil(leader.UserPresence.UserId)
+	if leaderSessionID == memberSession.id {
+		return // new member IS the leader
+	}
+
+	// Look up leader's current match.
+	leaderStream := PresenceStream{
+		Mode:    StreamModeService,
+		Subject: leaderSessionID,
+		Label:   StreamLabelMatchService,
+	}
+	leaderPresence := p.nk.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, leaderStream, leaderUserID)
+	if leaderPresence == nil {
+		return // leader not in a match
+	}
+	leaderMatchID := MatchIDFromStringOrNil(leaderPresence.GetStatus())
+	if leaderMatchID.IsNil() {
+		return
+	}
+
+	// Check if leader is in a social match (skip arena/combat -- BAC-010).
+	label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
+	if err != nil || label == nil || !label.IsSocial() {
+		return
+	}
+
+	// Build reservation presence for the new member.
+	memberParams, ok := LoadParams(memberSession.Context())
+	if !ok {
+		logger.Warn("Failed to load params for new party member reservation")
+		return
+	}
+
+	member := &EvrMatchPresence{
+		SessionID:     memberSession.id,
+		UserID:        memberSession.userID,
+		Username:      memberSession.Username(),
+		PartyID:       partyID,
+		RoleAlignment: evr.TeamSocial,
+		Node:          p.node,
+		EvrID:         memberParams.xpID,
+		DisplayName:   memberParams.profile.DisplayName(),
+	}
+
+	// Signal match to create reservation.
+	payload := SignalCreatePartyReservationsPayload{Members: []*EvrMatchPresence{member}}
+	if _, err := SignalMatch(ctx, p.nk, leaderMatchID, SignalCreatePartyReservations, payload); err != nil {
+		logger.Warn("Failed to signal match for new party member reservation", zap.Error(err))
+		return
+	}
+
+	logger.Info("Created reservation for new party member",
+		zap.String("member_sid", memberSession.id.String()),
+		zap.String("leader_match_id", leaderMatchID.String()))
+}
+
+// clearMemberReservation looks up the party leader's current match and
+// signals it to delete the departing member's reservation slot. Called
+// when a member leaves or is kicked from the party.
+//
+// The partyID parameter must be captured BEFORE snsPartyLeaveCleanup
+// (which clears params.currentPartyID to uuid.Nil).
+func (p *EvrPipeline) clearMemberReservation(ctx context.Context, logger *zap.Logger, session *sessionWS, partyID uuid.UUID) {
+	// Find the party leader's current match.
+	ph, ok := p.nk.partyRegistry.Get(partyID)
+	if !ok {
+		return // party already disbanded
+	}
+	ph.RLock()
+	leader := ph.leader
+	ph.RUnlock()
+	if leader == nil {
+		return
+	}
+	leaderSessionID := uuid.FromStringOrNil(leader.UserPresence.SessionId)
+	leaderUserID := uuid.FromStringOrNil(leader.UserPresence.UserId)
+
+	leaderStream := PresenceStream{
+		Mode:    StreamModeService,
+		Subject: leaderSessionID,
+		Label:   StreamLabelMatchService,
+	}
+	leaderPresence := p.nk.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, leaderStream, leaderUserID)
+	if leaderPresence == nil {
+		return // leader not in a match
+	}
+	leaderMatchID := MatchIDFromStringOrNil(leaderPresence.GetStatus())
+	if leaderMatchID.IsNil() {
+		return
+	}
+
+	// Signal the match to delete reservations for this party.
+	//
+	// Phase 1 limitation: SignalClearPartyReservations clears ALL reservations
+	// for the party ID, not just the departing member's slot. This is broader
+	// than needed but safe — remaining members will get fresh reservations
+	// from the next lobbyEntrantConnected (createPartyReservations) or from
+	// appendPartyReservationPlaceholders on the next match tick.
+	//
+	// Phase 2 (TODO): Add SignalClearMemberReservation (by session ID) for
+	// surgical single-member removal.
+	payload := SignalClearPartyReservationsPayload{PartyID: partyID}
+	if _, err := SignalMatch(ctx, p.nk, leaderMatchID, SignalClearPartyReservations, payload); err != nil {
+		logger.Warn("Failed to clear departing member's reservation",
+			zap.Error(err),
+			zap.String("sid", session.id.String()),
+			zap.String("match_id", leaderMatchID.String()),
+			zap.String("party_id", partyID.String()))
+		return
+	}
+
+	logger.Debug("Cleared reservation for departing member",
+		zap.String("sid", session.id.String()),
+		zap.String("match_id", leaderMatchID.String()),
+		zap.String("party_id", partyID.String()))
 }
