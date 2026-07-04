@@ -10,15 +10,33 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
-// systemInfoMetricTagFields is the fixed, ordered set of attacker-controlled
-// SystemInfo fields emitted as login metric tags, all bounded by SEC-4 (five
-// allow-listed strings plus three bucketed ints). It is the single source of
-// truth for the per-player system fingerprint (systemInfoFingerprint) and the
-// beyond-cap collapse (boundSystemsPerPlayer). Order is load-bearing: the
-// fingerprint hash depends on it, so do not reorder.
+// systemInfoMetricTagFields is the SystemInfo-derived subset of the login metric
+// tags, each bounded by SEC-4 (allow-listed strings + bucketed ints).
+//
+// F4: cpu_model, gpu_model and driver_version were REMOVED. With no in-repo
+// ground-truth allow-list they bucketed to metricTagOther for 100% of traffic — a
+// permanently-constant tag is pure cardinality overhead and a misleading dashboard
+// dimension, never a signal. Their raw values are still retained forensically in
+// the login-history record (not in metrics); when OPS has a real allow-list they
+// can be reintroduced here with populated sets.
 var systemInfoMetricTagFields = []string{
-	"cpu_model", "gpu_model", "network_type", "driver_version", "headset_type",
+	"network_type", "headset_type",
 	"total_memory", "num_logical_cores", "num_physical_cores",
+}
+
+// loginMetricFingerprintFields is the FULL, ordered set of attacker-controlled tag
+// keys on the login_success metric: the SystemInfo subset above plus the
+// LoginProfile-derived fields (build_number/app_id/publisher_lock) and their
+// MetricsTags duplicates (device_type ≡ headset_type, build_version ≡ build_number).
+// It is the single source of truth for BOTH the per-player system fingerprint
+// (systemInfoFingerprint) and the beyond-cap collapse (boundSystemsPerPlayer), so a
+// single account cannot mint new series by varying ANY of these fields. Order is
+// load-bearing: the fingerprint hash depends on it, so do not reorder.
+var loginMetricFingerprintFields = []string{
+	"network_type", "headset_type",
+	"total_memory", "num_logical_cores", "num_physical_cores",
+	"build_number", "app_id", "publisher_lock",
+	"device_type", "build_version",
 }
 
 // metricTagOther is the sentinel bucket for any client-supplied SystemInfo
@@ -60,22 +78,61 @@ func (a tagAllowlist) normalize(raw string) string {
 }
 
 var (
-	// cpuModelAllowlist / gpuModelAllowlist / driverVersionAllowlist are seeded
-	// empty on purpose: there is no production ground-truth list of legitimate
-	// values in-repo. Until OPS populates these from real telemetry, every value
-	// buckets to metricTagOther — the SEC-4 cardinality bound holds immediately,
-	// at the cost of signal on these fields until the list is filled.
-	cpuModelAllowlist      = newTagAllowlist()
-	gpuModelAllowlist      = newTagAllowlist()
-	driverVersionAllowlist = newTagAllowlist()
-
 	// networkTypeAllowlist is seeded with the only value evidenced in-repo.
 	// OPS: add other engine-reported network types (e.g. wired/ethernet/offline)
 	// as they are observed.
 	networkTypeAllowlist = newTagAllowlist(
 		"WiFi",
 	)
+
+	// publisherLockAllowlist bounds the free-form client PublisherLock string
+	// (LoginProfile.publisher_lock — SEC-4). "rad15_live" is the value carried in
+	// the login-history fixture (evr_profile_cache_test.go:177); "echovrce" is the
+	// server-side publisher lock (evr_profile_cache.go:156). Any other value buckets
+	// to metricTagOther, so a client varying publisher_lock each login cannot mint
+	// unbounded series.
+	publisherLockAllowlist = newTagAllowlist("rad15_live", "echovrce")
 )
+
+// knownBuildSet is the set of legitimate client build numbers (evr.KnownBuilds:
+// StandaloneBuildNumber / PCVRBuild). BuildNumber is attacker-controlled
+// (LoginProfile.buildversion); emitting it raw as build_number/build_version lets
+// one account mint unbounded series by varying it each login. Unknown builds bucket
+// to metricTagOther.
+var knownBuildSet = func() map[evr.BuildNumber]struct{} {
+	set := make(map[evr.BuildNumber]struct{}, len(evr.KnownBuilds))
+	for _, b := range evr.KnownBuilds {
+		set[b] = struct{}{}
+	}
+	return set
+}()
+
+// boundBuildNumberTag emits an allow-listed build number verbatim, else
+// metricTagOther. Cardinality is bounded to len(evr.KnownBuilds)+1.
+func boundBuildNumberTag(bn evr.BuildNumber) string {
+	if _, ok := knownBuildSet[bn]; ok {
+		return strconv.FormatInt(int64(bn), 10)
+	}
+	return metricTagOther
+}
+
+// knownAppIDSet is the set of legitimate client application IDs (evr_authenticate.go:
+// NoOvrAppId / QuestAppId / PcvrAppId). AppId is attacker-controlled
+// (LoginProfile.appid); bucket unknown values to metricTagOther.
+var knownAppIDSet = map[uint64]struct{}{
+	NoOvrAppId: {},
+	QuestAppId: {},
+	PcvrAppId:  {},
+}
+
+// boundAppIDTag emits an allow-listed app ID verbatim, else metricTagOther.
+// Cardinality is bounded to len(knownAppIDSet)+1.
+func boundAppIDTag(appID uint64) string {
+	if _, ok := knownAppIDSet[appID]; ok {
+		return strconv.FormatUint(appID, 10)
+	}
+	return metricTagOther
+}
 
 // canonicalHeadsetTypes is the bounded universe of headset tag values: the
 // canonical names produced by headsetMappings, plus normalizeHeadsetType's
@@ -176,20 +233,20 @@ func absInt64(v int64) int64 {
 // sentinel.
 func systemInfoTagCardinalityBound(field string) int {
 	switch field {
-	case "cpu_model":
-		return len(cpuModelAllowlist) + 1
-	case "gpu_model":
-		return len(gpuModelAllowlist) + 1
 	case "network_type":
 		return len(networkTypeAllowlist) + 1
-	case "driver_version":
-		return len(driverVersionAllowlist) + 1
-	case "headset_type":
+	case "headset_type", "device_type":
 		return len(canonicalHeadsetTypes) + 1
 	case "total_memory":
 		return len(memoryTiersGiB) + 1
 	case "num_logical_cores", "num_physical_cores":
 		return (maxPlausibleCores - minPlausibleCores + 1) + 1
+	case "build_number", "build_version":
+		return len(knownBuildSet) + 1
+	case "app_id":
+		return len(knownAppIDSet) + 1
+	case "publisher_lock":
+		return len(publisherLockAllowlist) + 1
 	default:
 		return 0
 	}
@@ -208,10 +265,7 @@ func systemInfoTagCardinalityBound(field string) int {
 // Every SystemInfo-derived tag written here is bounded: strings to allow-lists,
 // ints (memory/cores) to bucket sets. No SystemInfo field is emitted raw.
 func addSystemInfoMetricTags(tags map[string]string, si evr.SystemInfo) {
-	tags["cpu_model"] = cpuModelAllowlist.normalize(si.CPUModel)
-	tags["gpu_model"] = gpuModelAllowlist.normalize(si.VideoCard)
 	tags["network_type"] = networkTypeAllowlist.normalize(si.NetworkType)
-	tags["driver_version"] = driverVersionAllowlist.normalize(si.DriverVersion)
 	tags["headset_type"] = boundHeadsetMetricTag(si.HeadsetType)
 	tags["total_memory"] = boundMemoryTotalTag(si.MemoryTotal)
 	tags["num_logical_cores"] = boundCoreCountTag(si.NumLogicalCores)
@@ -251,14 +305,17 @@ const (
 	maxTrackedPlayersForSystemLimit = 50000
 )
 
-// systemInfoFingerprint hashes the already-bounded SEC-4 tag tuple into a single
-// value identifying a "system". Only sec4TagFields participate: non-SEC-4 keys
-// (total_memory, cores, build_number) are intentionally excluded so churn on them
-// does not manufacture new systems. Two logins that bucket identically per field
-// share a fingerprint and therefore do not add cardinality.
+// systemInfoFingerprint hashes the already-bounded login tag tuple into a single
+// value identifying a "system". Every attacker-controlled login_success tag
+// (loginMetricFingerprintFields — SystemInfo subset plus build_number/app_id/
+// publisher_lock and their device_type/build_version duplicates) participates, so a
+// player who varies ANY of these fields walks the same capped fingerprint space.
+// Non-attacker keys (websocket_auth, is_vr, error, ...) are excluded so churn on
+// them does not manufacture new systems. Two logins that bucket identically per
+// field share a fingerprint and therefore do not add cardinality.
 func systemInfoFingerprint(tags map[string]string) uint64 {
 	h := fnv.New64a()
-	for _, f := range systemInfoMetricTagFields {
+	for _, f := range loginMetricFingerprintFields {
 		_, _ = h.Write([]byte(tags[f]))
 		_, _ = h.Write([]byte{0}) // separator: avoid "ab"+"c" == "a"+"bc" collisions
 	}
@@ -349,7 +406,7 @@ func boundSystemsPerPlayer(l *systemFingerprintLimiter, tags map[string]string, 
 	if l.allow(playerID, systemInfoFingerprint(tags)) {
 		return
 	}
-	for _, f := range systemInfoMetricTagFields {
+	for _, f := range loginMetricFingerprintFields {
 		tags[f] = metricTagOther
 	}
 }

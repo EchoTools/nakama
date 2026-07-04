@@ -10,8 +10,10 @@ import (
 )
 
 // sec4Fields are the attacker-controlled SystemInfo strings that flow into
-// login metric tags (BUGS.md SEC-4).
-var sec4Fields = []string{"cpu_model", "gpu_model", "network_type", "driver_version", "headset_type"}
+// login metric tags (BUGS.md SEC-4). F4 dropped cpu_model/gpu_model/driver_version
+// (empty allow-lists → permanently "other"); the bounded string fields that remain
+// are network_type and headset_type.
+var sec4Fields = []string{"network_type", "headset_type"}
 
 // randomSystemInfo returns a SystemInfo whose SEC-4 string fields are all
 // unique per call, simulating an attacker randomizing the login payload.
@@ -61,9 +63,9 @@ func TestSystemInfoMetricTagCardinality(t *testing.T) {
 func TestAddSystemInfoMetricTagsWritesInPlace(t *testing.T) {
 	tags := map[string]string{"existing": "keep-me"}
 	addSystemInfoMetricTags(tags, evr.SystemInfo{
-		NetworkType: "WiFi",    // seeded allow-list value
-		HeadsetType: "Quest 3", // maps to canonical "Meta Quest 3"
-		CPUModel:    "totally-made-up-cpu-string",
+		NetworkType: "WiFi",     // seeded allow-list value
+		HeadsetType: "Quest 3",  // maps to canonical "Meta Quest 3"
+		CPUModel:    "unlisted", // F4: no longer emitted as a metric tag
 	})
 
 	if got := tags["existing"]; got != "keep-me" {
@@ -75,8 +77,8 @@ func TestAddSystemInfoMetricTagsWritesInPlace(t *testing.T) {
 	if got := tags["headset_type"]; got != "Meta Quest 3" {
 		t.Errorf("headset_type: known headset not normalized: got %q, want %q", got, "Meta Quest 3")
 	}
-	if got := tags["cpu_model"]; got != metricTagOther {
-		t.Errorf("cpu_model: unknown value not bucketed: got %q, want %q", got, metricTagOther)
+	if _, ok := tags["cpu_model"]; ok {
+		t.Errorf("cpu_model: F4-dropped tag must not be emitted, got %q", tags["cpu_model"])
 	}
 }
 
@@ -169,16 +171,18 @@ func TestSystemInfoIntTagCardinality(t *testing.T) {
 }
 
 // TestSystemInfoFingerprintDeterministicAndDistinct proves the per-player
-// fingerprint is stable for identical bounded tuples, changes when a SEC-4 field
-// changes, and — crucially — ignores keys outside systemInfoMetricTagFields
-// (e.g. build_number) so churn on non-SystemInfo tags does not manufacture new
+// fingerprint is stable for identical bounded tuples, changes when ANY
+// attacker-controlled login tag changes (loginMetricFingerprintFields — including
+// the LoginProfile-derived build_number/app_id/publisher_lock), and ignores
+// non-attacker keys (e.g. websocket_auth) so churn on them does not manufacture new
 // "systems".
 func TestSystemInfoFingerprintDeterministicAndDistinct(t *testing.T) {
 	mk := func(headset string) map[string]string {
 		return map[string]string{
-			"cpu_model": "x", "gpu_model": metricTagOther, "network_type": "WiFi",
-			"driver_version": metricTagOther, "headset_type": headset,
+			"network_type": "WiFi", "headset_type": headset,
 			"total_memory": "16", "num_logical_cores": "8", "num_physical_cores": "8",
+			"build_number": "630783", "app_id": "0", "publisher_lock": "rad15_live",
+			"device_type": headset, "build_version": "630783",
 		}
 	}
 	a, b := mk("Meta Quest 3"), mk("Meta Quest 3")
@@ -192,12 +196,20 @@ func TestSystemInfoFingerprintDeterministicAndDistinct(t *testing.T) {
 	mem := mk("Meta Quest 3")
 	mem["total_memory"] = "32"
 	if systemInfoFingerprint(a) == systemInfoFingerprint(mem) {
-		t.Errorf("total_memory is a SEC-4 field and must affect the fingerprint")
+		t.Errorf("total_memory is a fingerprint field and must affect the fingerprint")
 	}
-	// A key outside systemInfoMetricTagFields must NOT.
-	a["build_number"] = "123456789"
+	// LoginProfile-derived fields ARE part of the fingerprint (folded into the cap).
+	for _, f := range []string{"build_number", "app_id", "publisher_lock"} {
+		v := mk("Meta Quest 3")
+		v[f] = "different-bounded-value"
+		if systemInfoFingerprint(a) == systemInfoFingerprint(v) {
+			t.Errorf("field %q must affect the fingerprint (folded into the per-player cap)", f)
+		}
+	}
+	// A non-attacker key must NOT affect the fingerprint.
+	a["websocket_auth"] = "true"
 	if systemInfoFingerprint(a) != systemInfoFingerprint(b) {
-		t.Errorf("keys outside systemInfoMetricTagFields must not affect the fingerprint")
+		t.Errorf("non-attacker keys must not affect the fingerprint")
 	}
 }
 
@@ -368,7 +380,6 @@ func TestSystemInfoMetricTagKnownGoodPassthrough(t *testing.T) {
 	tags := systemInfoMetricTags(evr.SystemInfo{
 		NetworkType: "WiFi",    // seeded allow-list value
 		HeadsetType: "Quest 3", // maps to canonical "Meta Quest 3"
-		CPUModel:    "totally-made-up-cpu-string",
 	})
 
 	if got := tags["network_type"]; got != "WiFi" {
@@ -377,7 +388,8 @@ func TestSystemInfoMetricTagKnownGoodPassthrough(t *testing.T) {
 	if got := tags["headset_type"]; got != "Meta Quest 3" {
 		t.Errorf("headset_type: known headset not normalized: got %q, want %q", got, "Meta Quest 3")
 	}
-	if got := tags["cpu_model"]; got != metricTagOther {
-		t.Errorf("cpu_model: unknown value not bucketed: got %q, want %q", got, metricTagOther)
+	// An unlisted headset must bucket to the sentinel, not pass raw.
+	if got := boundHeadsetMetricTag("totally-made-up-headset"); got != metricTagOther {
+		t.Errorf("unlisted headset: not bucketed: got %q, want %q", got, metricTagOther)
 	}
 }
