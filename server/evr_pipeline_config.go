@@ -173,6 +173,21 @@ func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, ses
 // the database again. Transient DB errors are not cached so a real config can
 // still appear once the database recovers.
 func (p *EvrPipeline) loadConfigJSON(ctx context.Context, logger *zap.Logger, session *sessionWS, configType string) (string, error) {
+	// Whitelist gate (SEC-1): only the small, fixed set of legitimate config
+	// types may reach the cache or the storage read. configType is the fully
+	// client-controlled message.Type; keying the cache on Type alone (the SEC-1
+	// re-key) does not help when Type itself is unvalidated — an attacker sending
+	// a unique Type per packet misses the cache every time, forcing one DB read
+	// each (negative-cached, then LRU-evicted), which reproduces the exact
+	// per-packet DB amplification SEC-1 exists to kill. Rejecting unrecognized
+	// Types here — before the cache and before configStorageRead — makes an
+	// unknown-Type flood cost zero DB reads. The valid set is
+	// evr.IsValidConfigType, derived from the same table GetDefaultConfigResource
+	// uses (single source of truth: server/evr/config_success.go).
+	if !evr.IsValidConfigType(configType) {
+		return "", nil
+	}
+
 	if entry, ok := configCache.get(configType); ok {
 		return entry.json, nil
 	}

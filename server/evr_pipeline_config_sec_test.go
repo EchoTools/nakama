@@ -146,6 +146,48 @@ func TestSEC1_ConfigCache_BoundedUnderDistinctIDs(t *testing.T) {
 	}
 }
 
+// SEC-1(c): unknown-Type amplification. SEC-1 re-keyed the cache from Type+":"+ID
+// to Type, but Type is exactly as client-controlled and unvalidated as ID was.
+// An attacker sending a UNIQUE, unrecognized Type per packet ("a0","a1",...)
+// misses the cache on every packet and, without a whitelist in front of the DB,
+// forces one storage read per packet (each result negative-cached, then evicted
+// by the 256-entry LRU, so it never stops hitting the DB). The whitelist must
+// make unknown Types cost ZERO storage reads, while a legitimate Type still
+// reads the DB exactly once and then serves from cache.
+func TestSEC1_ConfigRequest_UnknownTypeFlood_ZeroDBReads(t *testing.T) {
+	stub := &configTestStub{} // no stored object
+	installConfigStub(t, stub)
+
+	p := &EvrPipeline{}
+	session, _ := newNilIdentityConfigSession(t, p)
+
+	// A unique, unrecognized Type per packet — the amplification vector.
+	const n = 1000
+	for i := 0; i < n; i++ {
+		tp := fmt.Sprintf("a%d", i)
+		msg := &evr.ConfigRequest{Type: tp, ID: tp}
+		_ = p.configRequest(session.ctx, session.logger, session, msg)
+	}
+
+	if got := atomic.LoadInt64(&stub.reads); got != 0 {
+		t.Fatalf("SEC-1 unknown-Type amplification: %d unique unknown Types caused %d storage reads, want 0 "+
+			"(unrecognized Types must be rejected before any DB read)", n, got)
+	}
+	if entries := configCacheLenForTest(); entries != 0 {
+		t.Fatalf("SEC-1 unknown-Type amplification: unknown Types populated %d cache entries, want 0", entries)
+	}
+
+	// Preservation: a legitimate Type must still read the DB exactly once across
+	// many requests (varying ID), then serve from cache.
+	for i := 0; i < 10; i++ {
+		msg := &evr.ConfigRequest{Type: "main_menu", ID: fmt.Sprintf("id-%d", i)}
+		_ = p.configRequest(session.ctx, session.logger, session, msg)
+	}
+	if got := atomic.LoadInt64(&stub.reads); got != 1 {
+		t.Fatalf("legit Type after unknown flood: want exactly 1 storage read, got %d", got)
+	}
+}
+
 // SEC-1: the cache must be size-bounded so a flood of distinct Types cannot
 // grow it without limit.
 func TestSEC1_ConfigCache_SizeCapped(t *testing.T) {
