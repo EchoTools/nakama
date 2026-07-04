@@ -8,7 +8,7 @@ import "testing"
 // 1.845 msg/s, σ at 1.790, and the observed per-second max at 21 msg/s. Because
 // the distribution is heavily right-tailed, a σ-multiple (mean+3.5σ≈9) undershoots
 // the real ceiling; the sustained cap is instead pinned to observed-max + margin
-// = 30 msg/s. This test pins that value so the DoS cap cannot silently drift back
+// (21 msg/s observed peak + 9 headroom = 30). This test pins that value so the DoS cap cannot silently drift back
 // to an unverified number. If the traffic profile is re-measured, update both this
 // test and the derivation comment in NewSocketConfig together.
 func TestSEC2_DefaultInboundRateLimit_IsDataDerived(t *testing.T) {
