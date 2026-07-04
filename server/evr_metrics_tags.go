@@ -298,10 +298,14 @@ const (
 	// buckets that login's SEC-4 tags to the sentinel.
 	maxDistinctSystemsPerPlayer = 8
 	// maxTrackedPlayersForSystemLimit bounds tracker memory via a player-level LRU.
-	// Worst-case retained state is maxTrackedPlayersForSystemLimit *
-	// maxDistinctSystemsPerPlayer uint64 fingerprints (~a few MB at these values).
-	// Evicting the least-recently-active player is safe: on their next login they
-	// simply start counting systems from zero again.
+	// The raw fingerprints alone are maxTrackedPlayersForSystemLimit *
+	// maxDistinctSystemsPerPlayer uint64s (~3 MB at these values), but the
+	// surrounding per-player bookkeeping dominates: an LRU list element, an index
+	// map entry keyed on the string player ID, and a per-player seen-set map each
+	// cost far more than the 8 bytes of a fingerprint. Realistic retained heap is
+	// ~20-40 MB at these values — still bounded and safe. Evicting the
+	// least-recently-active player is safe: on their next login they simply start
+	// counting systems from zero again.
 	maxTrackedPlayersForSystemLimit = 50000
 )
 
@@ -310,9 +314,11 @@ const (
 // (loginMetricFingerprintFields — SystemInfo subset plus build_number/app_id/
 // publisher_lock and their device_type/build_version duplicates) participates, so a
 // player who varies ANY of these fields walks the same capped fingerprint space.
-// Non-attacker keys (websocket_auth, is_vr, error, ...) are excluded so churn on
-// them does not manufacture new systems. Two logins that bucket identically per
-// field share a fingerprint and therefore do not add cardinality.
+// The excluded keys are either operational (websocket_auth, error, device_linked)
+// or attacker-derived but low-cardinality booleans intentionally left uncapped
+// (is_vr, is_pcvr — each bounded to 2 values); excluding them means churn on them
+// does not manufacture new systems. Two logins that bucket identically per field
+// share a fingerprint and therefore do not add cardinality.
 func systemInfoFingerprint(tags map[string]string) uint64 {
 	h := fnv.New64a()
 	for _, f := range loginMetricFingerprintFields {
