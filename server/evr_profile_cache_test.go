@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
@@ -82,6 +83,43 @@ func wantGotDiff(t *testing.T, want, got interface{}) {
 	}
 }
 
+// TestCosmeticDefaults_DoesNotLeakAcrossCalls guards against a real production hazard,
+// not just test hygiene: cosmeticDefaults(false)/cosmeticDefaults(true) return the
+// process-lifetime defaultCosmetics/allCosmetics singletons. walletToCosmetics mutates
+// its "unlocks" argument in place. Every known production caller
+// (UserUnlockedCosmetics in evr_discord_loadout.go:212, hit on every /loadout
+// autocomplete keystroke and on /loadout set) does exactly
+// `unlocks := cosmeticDefaults(...); unlocks = walletToCosmetics(wallet, unlocks)`.
+// If cosmeticDefaults ever again returns the shared map by reference instead of a copy,
+// the first player whose wallet grants a restricted cosmetic (a VRML tag, a medal) would
+// permanently mark that item "owned by default" for every other player for the life of
+// the process — a much wider-blast-radius sibling of COSMETIC-1. This test proves two
+// independent calls never observe each other's wallet-derived mutations.
+func TestCosmeticDefaults_DoesNotLeakAcrossCalls(t *testing.T) {
+	const restrictedTag = "rwd_tag_s1_vrml_s1_finalist"
+
+	// Sanity: the item must actually be restricted (i.e. absent/false) by default,
+	// otherwise this test would pass vacuously.
+	before := cosmeticDefaults(false)
+	if before["arena"][restrictedTag] {
+		t.Fatalf("test setup invalid: %q is already marked default-owned", restrictedTag)
+	}
+
+	// Simulate UserUnlockedCosmetics for a player whose wallet grants the tag.
+	granted := cosmeticDefaults(false)
+	granted = walletToCosmetics(map[string]int64{"cosmetic:arena:" + restrictedTag: 1}, granted)
+	if !granted["arena"][restrictedTag] {
+		t.Fatalf("test setup invalid: wallet grant did not mark %q owned in the local result", restrictedTag)
+	}
+
+	// A second, unrelated call (e.g. a different player with an empty wallet, or the
+	// same map re-fetched) must NOT see the first call's wallet-derived grant.
+	after := cosmeticDefaults(false)
+	if after["arena"][restrictedTag] {
+		t.Errorf("cosmeticDefaults leaked a wallet-derived grant across calls: %q is now marked default-owned for every caller", restrictedTag)
+	}
+}
+
 func TestEquipAndSanitize_RejectsUnownedVRMLTag(t *testing.T) {
 	// COSMETIC-1: the in-game equip path must not persist a cosmetic the player
 	// does not own. An empty-wallet player equipping a restricted VRML finalist
@@ -133,6 +171,78 @@ func TestEquipAndSanitize_AllowsDefaultItem(t *testing.T) {
 	}
 	if result.Tag != "rwd_tag_s1_a_secondary" {
 		t.Errorf("default tag was altered; got %q, want %q", result.Tag, "rwd_tag_s1_a_secondary")
+	}
+}
+
+// TestEquippedCosmeticsForProfile_PoisonedAccountNeverServesUnownedItem is the read-path
+// counterpart to the equip-time fixes (EquipAndSanitize, sanitizeGameServerLoadout). It
+// simulates an account that was already "poisoned" before those fixes existed — i.e. an
+// unowned VRML finalist tag is already sitting directly in
+// EVRProfile.LoadoutCosmetics.Loadout, exactly like the reported sample account
+// db484900-7f6c-4c3a-b7fd-aed3518cffc3 (empty wallet, VRML tag present in stored
+// loadout). equippedCosmeticsForProfile is what NewUserServerProfile calls to build
+// evr.ServerProfile.EquippedCosmetics — the value that ServerProfileStore persists and
+// that otherUserProfileRequest/the broadcast game server serve to OTHER players. This
+// test proves that boundary strips the poisoned value on every regeneration, with no
+// backfill required: ownership is re-derived from the current wallet every time.
+func TestEquippedCosmeticsForProfile_PoisonedAccountNeverServesUnownedItem(t *testing.T) {
+	profile := &EVRProfile{
+		account: &api.Account{Wallet: "{}"}, // empty wallet, like db484900-...
+	}
+	// Simulate pre-fix stored state: unowned items already written directly into the
+	// stored loadout (as if by the unpatched equip or game-server save-loadout path).
+	profile.LoadoutCosmetics.Loadout = evr.DefaultCosmeticLoadout()
+	profile.LoadoutCosmetics.Loadout.Tag = "rwd_tag_s1_vrml_s1_finalist"
+	profile.LoadoutCosmetics.Loadout.Medal = "rwd_medal_0006"
+
+	loadout, owned, err := equippedCosmeticsForProfile(profile)
+	if err != nil {
+		t.Fatalf("equippedCosmeticsForProfile returned error: %v", err)
+	}
+
+	def := evr.DefaultCosmeticLoadout()
+	if loadout.Tag == "rwd_tag_s1_vrml_s1_finalist" {
+		t.Errorf("poisoned VRML finalist tag was served; got %q, want default %q", loadout.Tag, def.Tag)
+	}
+	if loadout.Tag != def.Tag {
+		t.Errorf("tag slot not reset to default; got %q, want %q", loadout.Tag, def.Tag)
+	}
+	if loadout.Medal == "rwd_medal_0006" {
+		t.Errorf("poisoned medal was served; got %q, want default %q", loadout.Medal, def.Medal)
+	}
+	if loadout.Medal != def.Medal {
+		t.Errorf("medal slot not reset to default; got %q, want %q", loadout.Medal, def.Medal)
+	}
+
+	// Belt-and-suspenders: the returned owned-cosmetics set (also used to populate
+	// ServerProfile.UnlockedCosmetics, which the client uses to render what's owned)
+	// must not claim the poisoned items are owned either.
+	for _, modeUnlocks := range owned {
+		if modeUnlocks["rwd_tag_s1_vrml_s1_finalist"] {
+			t.Errorf("owned-cosmetics set falsely marks the poisoned VRML tag as owned")
+		}
+		if modeUnlocks["rwd_medal_0006"] {
+			t.Errorf("owned-cosmetics set falsely marks the poisoned medal as owned")
+		}
+	}
+}
+
+// TestEquippedCosmeticsForProfile_WalletGrantedItemStillServed is the regression guard:
+// a legitimately entitled player (wallet grants the item) must still see it served, not
+// just stripped indiscriminately.
+func TestEquippedCosmeticsForProfile_WalletGrantedItemStillServed(t *testing.T) {
+	profile := &EVRProfile{
+		account: &api.Account{Wallet: `{"cosmetic:arena:rwd_tag_s1_vrml_s1_finalist":1}`},
+	}
+	profile.LoadoutCosmetics.Loadout = evr.DefaultCosmeticLoadout()
+	profile.LoadoutCosmetics.Loadout.Tag = "rwd_tag_s1_vrml_s1_finalist"
+
+	loadout, _, err := equippedCosmeticsForProfile(profile)
+	if err != nil {
+		t.Fatalf("equippedCosmeticsForProfile returned error: %v", err)
+	}
+	if loadout.Tag != "rwd_tag_s1_vrml_s1_finalist" {
+		t.Errorf("wallet-owned VRML tag was stripped; got %q, want %q", loadout.Tag, "rwd_tag_s1_vrml_s1_finalist")
 	}
 }
 
