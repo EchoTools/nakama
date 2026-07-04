@@ -206,6 +206,12 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 
 	connectionSettings := label.GetEntrantConnectMessage(e.RoleAlignment, e.DisableEncryption, e.DisableMAC)
 
+	// ADR 0002: hand the client both the external and the (private) internal
+	// address so it validates them at connect and uses whichever it can reach.
+	if label.GameServer != nil {
+		connectionSettings.Endpoint = buildJoinEndpoint(label.GameServer.Endpoint)
+	}
+
 	// Quest (standalone) clients use a different encoder flag bit layout (shifted by 1).
 	if ServiceSettings().UseQuestEncoderFlags {
 		if params, ok := LoadParams(sessionCtx); ok && !params.IsPCVR() {

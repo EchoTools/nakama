@@ -186,7 +186,16 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		unrequireMessage,
 		gameSettings,
 	}
-	return session.SendEvr(messagesToSend...)
+	if err := session.SendEvr(messagesToSend...); err != nil {
+		return err
+	}
+
+	// Start background ping discovery after login messages are sent.
+	// The goroutine is tied to session.Context() and self-terminates on
+	// disconnect or completion.
+	go p.runPingDiscovery(session)
+
+	return nil
 }
 
 // buildLoginSuccessMetricTags assembles the exact tag set emitted with the
