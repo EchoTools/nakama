@@ -778,7 +778,15 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 		// tracker-read priority join path.
 		if ws, ok := session.(*sessionWS); ok {
 			if lobbyParams.PartyGroupName != "" && lobbyParams.PartyGroupName != "tablet" {
-				if lobbyGroup, _, err := JoinPartyGroup(ws, lobbyParams.PartyGroupName, lobbyParams.CurrentMatchID); err == nil && lobbyGroup != nil {
+				lobbyGroup, _, err := JoinPartyGroup(ws, lobbyParams.PartyGroupName, lobbyParams.CurrentMatchID)
+				if err != nil {
+					logger.Warn("Failed to join party group in social lobby path",
+						zap.String("username", ws.Username()),
+						zap.String("sid", ws.ID().String()),
+						zap.String("group_name", lobbyParams.PartyGroupName),
+						zap.Error(err))
+				}
+				if err == nil && lobbyGroup != nil {
 					if reservationMatchID, found := p.findReservation(ctx, logger, ws, lobbyGroup); found {
 						logger.Info("Found party reservation in social lobby path, joining directly",
 							zap.String("reservation_mid", reservationMatchID.String()))
@@ -806,6 +814,13 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 			ws, ok := session.(*sessionWS)
 			if ok {
 				lobbyGroup, _, err := JoinPartyGroup(ws, lobbyParams.PartyGroupName, lobbyParams.CurrentMatchID)
+				if err != nil {
+					logger.Warn("Failed to join party group in priority join path",
+						zap.String("username", ws.Username()),
+						zap.String("sid", ws.ID().String()),
+						zap.String("group_name", lobbyParams.PartyGroupName),
+						zap.Error(err))
+				}
 				if err == nil && lobbyGroup != nil {
 					leader := lobbyGroup.GetLeader()
 					if leader != nil && leader.SessionId != session.ID().String() {

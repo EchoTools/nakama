@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/rtapi"
@@ -120,6 +121,18 @@ func (g *LobbyGroup) MatchmakerRemoveSessionAll(sessionID string) error {
 
 func JoinPartyGroup(session *sessionWS, groupName string, currentMatchID MatchID) (*LobbyGroup, bool, error) {
 
+	// Fail fast: if the session is already dying (its context is canceled),
+	// refuse the join before creating a party or adding any member. This is the
+	// common source of party "ghost members": the social-find loop re-invokes
+	// JoinPartyGroup after the session's connection has dropped. Without this
+	// guard, JoinRequest would insert the session into ph.members but the
+	// subsequent tracker.Track would fail (LocalTracker.Track guards on
+	// ctx.Err()), leaving a member with no party-stream presence that the
+	// stream-driven disconnect-eviction path can never evict.
+	if err := session.Context().Err(); err != nil {
+		return nil, false, fmt.Errorf("session context done, refusing party join: %w", err)
+	}
+
 	userPresence := &rtapi.UserPresence{
 		UserId:    session.UserID().String(),
 		SessionId: session.ID().String(),
@@ -150,6 +163,10 @@ func JoinPartyGroup(session *sessionWS, groupName string, currentMatchID MatchID
 		return nil, false, err
 	}
 
+	// addedMember records whether THIS call inserted the session into
+	// ph.members via JoinRequest. It gates the rollback below so we only ever
+	// remove state this call created.
+	addedMember := false
 	if !created {
 		isMember := false
 		// Check if the player is already a member of the party
@@ -170,11 +187,24 @@ func JoinPartyGroup(session *sessionWS, groupName string, currentMatchID MatchID
 			if !success {
 				return nil, false, errors.New("failed to join party")
 			}
+			addedMember = true
 		}
 	}
 
-	// If successful, the creator becomes the first user to join the party.
+	// Track the session on the party stream. This must be transactional: if
+	// Track fails, roll back any state this call created so that ph.members
+	// never retains a session that is not tracked on the party stream (the
+	// ghost-member invariant). The just-added member (if any) is guaranteed not
+	// to be the party leader here — leader assignment only happens via the
+	// tracker Join event, which requires a successful Track — so removing it
+	// directly from ph.members is the precise inverse of JoinRequest.
 	if success, isNew := session.pipeline.tracker.Track(session.Context(), session.ID(), ph.Stream, session.UserID(), presenceMeta); !success {
+		if addedMember {
+			ph.members.Leave([]*Presence{&presence})
+		}
+		if created {
+			session.pipeline.partyRegistry.Delete(ph.ID)
+		}
 		_ = session.Send(&rtapi.Envelope{Message: &rtapi.Envelope_Error{Error: &rtapi.Error{
 			Code:    int32(rtapi.Error_RUNTIME_EXCEPTION),
 			Message: "Error tracking party creation",
