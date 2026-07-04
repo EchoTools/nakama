@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 
 	"github.com/gofrs/uuid/v5"
@@ -199,6 +200,27 @@ func JoinPartyGroup(session *sessionWS, groupName string, currentMatchID MatchID
 	// The player is a member of the party, they will follow the leader to lobbies.
 	leader := lobbyGroup.GetLeader()
 	isLeader := leader != nil && leader.SessionId == session.id.String()
+
+	// Unify group-name parties onto the existing party-reservation machinery.
+	// A group-name party is the party the user is in, exactly like a native/SNS
+	// party. Populating currentPartyID (mirroring snsPartyTrackAndJoin) makes the
+	// leader-connect reservation trigger (lobbyEntrantConnected) and the
+	// matchmaker cancel path engage for group parties too. Without this the
+	// signal-based reservation path is dead for the only party type real clients
+	// use.
+	if params, ok := LoadParams(session.Context()); ok {
+		params.currentPartyID = ph.ID
+		StoreParams(session.Context(), params)
+	}
+
+	// The leader-connect trigger only fires once, when the leader connects. A
+	// member that joins the party AFTER the leader is already sitting in a social
+	// lobby would never get a reserved seat. Create one now if the leader is
+	// currently in a social lobby. createReservationForNewPartyMember no-ops when
+	// this session is the leader, or when the leader is not in a social match.
+	if !isLeader && session.evrPipeline != nil {
+		go session.evrPipeline.createReservationForNewPartyMember(context.WithoutCancel(session.Context()), session.logger, session, ph.ID)
+	}
 
 	return lobbyGroup, isLeader, nil
 }
