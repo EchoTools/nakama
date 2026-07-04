@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -146,18 +145,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 
 	StoreParams(ctx, params)
 
-	tags := params.MetricsTags()
-	tags["cpu_model"] = strings.TrimSpace(params.loginPayload.SystemInfo.CPUModel)
-	tags["gpu_model"] = strings.TrimSpace(params.loginPayload.SystemInfo.VideoCard)
-	tags["network_type"] = params.loginPayload.SystemInfo.NetworkType
-	tags["total_memory"] = strconv.FormatInt(params.loginPayload.SystemInfo.MemoryTotal, 10)
-	tags["num_logical_cores"] = strconv.FormatInt(params.loginPayload.SystemInfo.NumLogicalCores, 10)
-	tags["num_physical_cores"] = strconv.FormatInt(params.loginPayload.SystemInfo.NumPhysicalCores, 10)
-	tags["driver_version"] = strings.TrimSpace(params.loginPayload.SystemInfo.DriverVersion)
-	tags["headset_type"] = normalizeHeadsetType(params.loginPayload.SystemInfo.HeadsetType)
-	tags["build_number"] = strconv.FormatInt(int64(params.loginPayload.BuildNumber), 10)
-	tags["app_id"] = strconv.FormatInt(int64(params.loginPayload.AppId), 10)
-	tags["publisher_lock"] = strings.TrimSpace(params.loginPayload.PublisherLock)
+	tags := buildLoginSuccessMetricTags(params, loginSystemFingerprintLimiter)
 
 	p.nk.metrics.CustomCounter("login_success", tags, 1)
 	p.nk.metrics.CustomTimer("login_process_latency", params.MetricsTags(), time.Since(timer))
@@ -199,6 +187,30 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		gameSettings,
 	}
 	return session.SendEvr(messagesToSend...)
+}
+
+// buildLoginSuccessMetricTags assembles the exact tag set emitted with the
+// login_success counter. It is the single seam the login path and tests share (so
+// tests exercise the real emitted map, not a helper in isolation) and the single
+// place SEC-4 bounding is applied across EVERY attacker-controlled field:
+//   - SystemInfo strings/ints via addSystemInfoMetricTags (allow-list + buckets)
+//   - device_type / build_version via params.MetricsTags() (bounded at that source)
+//   - build_number / app_id / publisher_lock via their allow-lists
+//
+// The fully-bounded tuple then passes through the per-player distinct-system cap
+// (boundSystemsPerPlayer), which collapses every attacker-controlled tag to
+// metricTagOther once one account exceeds maxDistinctSystemsPerPlayer distinct
+// systems — so a single client cannot churn Prometheus series by varying ANY payload
+// field. build_number/app_id/publisher_lock are bounded and written BEFORE the cap so
+// they participate in the fingerprint and the collapse (loginMetricFingerprintFields).
+func buildLoginSuccessMetricTags(params *SessionParameters, limiter *systemFingerprintLimiter) map[string]string {
+	tags := params.MetricsTags()
+	addSystemInfoMetricTags(tags, params.loginPayload.SystemInfo)
+	tags["build_number"] = boundBuildNumberTag(params.loginPayload.BuildNumber)
+	tags["app_id"] = boundAppIDTag(params.loginPayload.AppId)
+	tags["publisher_lock"] = publisherLockAllowlist.normalize(params.loginPayload.PublisherLock)
+	boundSystemsPerPlayer(limiter, tags, params.UserID())
+	return tags
 }
 
 // normalizes all the meta headset types to a common format

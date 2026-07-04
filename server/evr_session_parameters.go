@@ -92,16 +92,36 @@ func (s *SessionParameters) IsIGPOpen() bool {
 	return s.isIGPOpen.Load()
 }
 
+// MetricsTags is the shared tag source for every login-path metric that does not
+// carry the full SystemInfo tuple (login_process_latency, session_duration_seconds,
+// session_authenticate/authorize/initialize) as well as the base for login_success.
+// SEC-4: device_type and build_version are attacker-controlled (both derive from the
+// login payload) and MUST be bounded here at the source, or a randomized payload
+// mints unbounded Prometheus series on every one of those metrics. device_type shares
+// its source (SystemInfo.HeadsetType) with the bounded headset_type tag, so it is
+// bounded identically; build_version shares its source (BuildNumber) with build_number.
 func (s *SessionParameters) MetricsTags() map[string]string {
 	return map[string]string{
 		"websocket_auth": fmt.Sprintf("%t", s.IsWebsocketAuthenticated),
 		"is_vr":          fmt.Sprintf("%t", s.IsVR()),
 		"is_pcvr":        fmt.Sprintf("%t", s.IsPCVR()),
-		"build_version":  fmt.Sprintf("%d", s.BuildNumber()),
-		"device_type":    s.DeviceType(),
+		"build_version":  boundBuildNumberTag(s.BuildNumber()),
+		"device_type":    s.boundDeviceType(),
 		"error":          "",
 		"device_linked":  "",
 	}
+}
+
+// boundDeviceType returns the SEC-4-bounded headset tag for metrics. It mirrors
+// DeviceType() but buckets any non-canonical headset to metricTagOther via
+// boundHeadsetMetricTag (DeviceType()/normalizeHeadsetType alone fall through to the
+// raw client string). Kept separate from DeviceType() so the latter still reports the
+// real device type to any non-metrics caller.
+func (s *SessionParameters) boundDeviceType() string {
+	if s.loginPayload == nil {
+		return boundHeadsetMetricTag("")
+	}
+	return boundHeadsetMetricTag(s.loginPayload.SystemInfo.HeadsetType)
 }
 
 func (s *SessionParameters) IsVR() bool {
