@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,11 +25,11 @@ func TestTryFollowPartyLeader_DoesNotSelfFollow(t *testing.T) {
 	require.NotEqual(t, env.session.id.String(), env.ph.leader.UserPresence.SessionId,
 		"leader must be a different session than the follower")
 
-	// Put the ghost leader "in a match" so that, WITHOUT the guard, the code
-	// would advance past the early checks and consult the tracker's service
-	// stream to try to follow it.
-	env.setLeaderMatch(MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"})
-
+	// No tracker state is set up on purpose: WITHOUT the guard the code advances
+	// past the early checks and queries the tracker for the leader's streams
+	// (incrementing getLocalCount). WITH the guard it must return before any of
+	// that. So the assertion below distinguishes the two regardless of what the
+	// tracker would have returned.
 	before := env.tracker.getLocalCount.Load()
 	result := env.pipeline.TryFollowPartyLeader(
 		context.Background(), loggerForTest(t), env.session, env.params, env.lobbyGroup)
@@ -45,17 +44,18 @@ func TestTryFollowPartyLeader_DoesNotSelfFollow(t *testing.T) {
 // self-follow guard — it proceeds to consult the tracker exactly as before.
 func TestTryFollowPartyLeader_RealLeaderStillConsultsTracker(t *testing.T) {
 	env := newFollowTestEnv(t) // leader is a different user by default
-	env.setLeaderMatch(MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"})
+
+	// Put the (real) leader on the matchmaking stream. The guard does not fire
+	// for a different user, so the code proceeds to consult the tracker and then
+	// returns cleanly at the "leader is currently matchmaking" check — no nil-nk
+	// panic, so no recover() is needed to observe the tracker consultation.
+	env.setLeaderMatchmaking()
 
 	before := env.tracker.getLocalCount.Load()
-	// Past the guard, the test's nil nk may panic downstream (MatchLabelByID);
-	// we only assert the guard did NOT short-circuit — i.e. the tracker WAS
-	// consulted for a real leader.
-	func() {
-		defer func() { _ = recover() }()
-		env.pipeline.TryFollowPartyLeader(
-			context.Background(), loggerForTest(t), env.session, env.params, env.lobbyGroup)
-	}()
+	result := env.pipeline.TryFollowPartyLeader(
+		context.Background(), loggerForTest(t), env.session, env.params, env.lobbyGroup)
+
+	require.False(t, result, "leader is matchmaking → follower falls through")
 	require.Greater(t, env.tracker.getLocalCount.Load(), before,
 		"a real (different-user) leader must still be looked up via the tracker")
 }
