@@ -152,13 +152,20 @@ func (p *EvrPipeline) runPingDiscovery(session *sessionWS) {
 		batches = batches[:cfg.MaxMessages]
 	}
 
-	// Calculate interval between messages.
-	interval := time.Duration(cfg.SpreadSeconds) * time.Second / time.Duration(len(batches))
+	// Calculate interval between messages. We sleep between batches only
+	// (len(batches)-1 gaps), so divide the spread window by the number of gaps
+	// to spread sends across the full SpreadSeconds rather than finishing early.
+	// The division is in nanoseconds, so no fractional-second truncation.
+	gaps := len(batches) - 1
+	if gaps < 1 {
+		gaps = 1
+	}
+	interval := time.Duration(cfg.SpreadSeconds) * time.Second / time.Duration(gaps)
 	if interval < 1*time.Second {
 		interval = 1 * time.Second
 	}
 
-	logger.Info("ping discovery: starting",
+	logger.Debug("ping discovery: starting",
 		zap.Int("endpoints", len(endpoints)),
 		zap.Int("batches", len(batches)),
 		zap.Duration("interval", interval),
@@ -194,7 +201,7 @@ func (p *EvrPipeline) runPingDiscovery(session *sessionWS) {
 		}
 	}
 
-	logger.Info("ping discovery: complete",
+	logger.Debug("ping discovery: complete",
 		zap.Int("batches_sent", len(batches)),
 		zap.Int("endpoints_sent", min(len(endpoints), cfg.MaxMessages*EndpointsPerMessage)),
 	)

@@ -18,10 +18,9 @@ func TestLatencyHistory_Add_And_LatestRTT(t *testing.T) {
 	assert.Equal(t, 35, got)
 }
 
-func TestLatencyHistory_BestAddress(t *testing.T) {
-	// Tests are in evr_ping_discovery_test.go — this file tests the base
-	// LatencyHistory methods. BestAddress tests are grouped with discovery.
-}
+// BestAddress is exercised in evr_ping_discovery_test.go alongside the rest of
+// the discovery paths; no stub test is kept here (an empty test body reads as
+// coverage that does not exist).
 
 func TestLatencyHistory_HasRecentEntry_Boundary(t *testing.T) {
 	h := NewLatencyHistory()
