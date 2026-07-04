@@ -818,7 +818,7 @@ type SocketConfig struct {
 	PingPeriodMs                  int               `yaml:"ping_period_ms" json:"ping_period_ms" usage:"Time in milliseconds to wait between sending ping messages to the client. This value must be less than the pong_wait_ms. Used for real-time connections."`
 	PingBackoffThreshold          int               `yaml:"ping_backoff_threshold" json:"ping_backoff_threshold" usage:"Minimum number of messages received from the client during a single ping period that will delay the sending of a ping until the next ping period, to avoid sending unnecessary pings on regularly active connections. Default 20."`
 	OutgoingQueueSize             int               `yaml:"outgoing_queue_size" json:"outgoing_queue_size" usage:"The maximum number of messages waiting to be sent to the client. If this is exceeded the client is considered too slow and will disconnect. Used when processing real-time connections."`
-	InboundMessageRateLimitPerSec int               `yaml:"inbound_message_rate_limit_per_sec" json:"inbound_message_rate_limit_per_sec" usage:"Maximum sustained inbound messages per second per real-time session before excess messages are dropped. Protects against per-message floods on an established socket. Set to 0 to disable. Default 9 (mean+3.5σ of measured production per-session inbound rate)."`
+	InboundMessageRateLimitPerSec int               `yaml:"inbound_message_rate_limit_per_sec" json:"inbound_message_rate_limit_per_sec" usage:"Maximum sustained inbound messages per second per real-time session before excess messages are dropped. Protects against per-message floods on an established socket. Set to 0 to disable. Default 30 (comfortable headroom above the measured production per-session peak rate of 21 msg/s)."`
 	InboundMessageRateLimitBurst  int               `yaml:"inbound_message_rate_limit_burst" json:"inbound_message_rate_limit_burst" usage:"Burst allowance for the per-session inbound message rate limiter. Should exceed any legitimate connect-time message burst. Default 200."`
 	SSLCertificate                string            `yaml:"ssl_certificate" json:"ssl_certificate" usage:"Path to certificate file if you want the server to use SSL directly. Must also supply ssl_private_key. NOT recommended for production use."`
 	SSLPrivateKey                 string            `yaml:"ssl_private_key" json:"ssl_private_key" usage:"Path to private key file if you want the server to use SSL directly. Must also supply ssl_certificate. NOT recommended for production use."`
@@ -899,16 +899,18 @@ func NewSocketConfig() *SocketConfig {
 		PingPeriodMs:         15000,
 		PingBackoffThreshold: 20,
 		OutgoingQueueSize:    64,
-		// Per-session inbound message flood protection (SEC-2). Data-derived, not
-		// guessed: measured from one month of production debug logs (each inbound
-		// EVR message logs "Received message" with its sid, the same messages the
-		// limiter counts). Window 2026-06-03 → 2026-07-03, n=10,782,318 active
-		// session-seconds, mean=1.845 msg/s/session, σ=1.790 → mean+3.5σ=8.11,
-		// rounded up to 9. The observed per-second max was 21 msg/s; the 200 burst
-		// sits ~10x above that so a legitimate connect-time burst (config/document/
-		// login) is never clipped, while the 9 msg/s sustained rate caps a single
+		// Per-session inbound message flood protection (SEC-2). Grounded in measured
+		// production traffic, not guessed: one month of debug logs (each inbound EVR
+		// message logs "Received message" with its sid, the same messages the limiter
+		// counts). Window 2026-06-03 → 2026-07-03, n=10,782,318 active session-seconds,
+		// mean=1.845 msg/s/session, σ=1.790, and an observed per-second max of 21 msg/s.
+		// The sustained cap is set to 30 — comfortable headroom above that observed max
+		// (a σ-multiple like mean+3.5σ≈9 undershoots because the distribution is heavily
+		// right-tailed, so the ceiling is pinned to observed-max + margin instead). The
+		// 200 burst sits well above any legitimate connect-time burst (config/document/
+		// login) so it is never clipped, while 30 msg/s sustained still caps a single
 		// socket far below the thousands/sec an unthrottled flood can push.
-		InboundMessageRateLimitPerSec: 9,
+		InboundMessageRateLimitPerSec: 30,
 		InboundMessageRateLimitBurst:  200,
 		SSLCertificate:                "",
 		SSLPrivateKey:                 "",
