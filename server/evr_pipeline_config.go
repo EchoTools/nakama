@@ -1,7 +1,6 @@
 package server
 
 import (
-	"container/list"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,11 +14,6 @@ import (
 )
 
 const configCacheTTL = 5 * time.Minute
-
-// configCacheMaxEntries bounds the number of distinct config Types held in
-// memory. ConfigRequest is reachable with only the (public) ServerKey, so the
-// cache must never be able to grow without a hard size cap (SEC-1).
-const configCacheMaxEntries = 256
 
 // configStorageRead is the storage read used by configRequest. It is a package
 // variable so tests can substitute a counting stub without a live database;
@@ -35,30 +29,29 @@ type cachedConfigEntry struct {
 	expiry time.Time
 }
 
-// configCacheStore is a bounded, TTL'd LRU keyed on the config Type only — the
-// same key the storage read itself uses (Collection "Config:"+Type, Key Type;
-// the read ignores ID). The previous implementation keyed the cache on the
-// client-controlled Type+":"+ID, which let any remote caller holding the
-// public ServerKey (a) miss the cache on every packet and force one DB read
-// each, and (b) grow the cache without bound when a stored Config:<Type>
-// object existed. Keying on Type plus an LRU size cap removes both (SEC-1).
+// configCacheStore is a TTL'd cache keyed on the config Type only — the same key
+// the storage read itself uses (Collection "Config:"+Type, Key Type; the read
+// ignores ID). The previous implementation keyed the cache on the
+// client-controlled Type+":"+ID, which let any remote caller holding the public
+// ServerKey (a) miss the cache on every packet and force one DB read each, and
+// (b) grow the cache without bound when a stored Config:<Type> object existed.
+// Keying on Type is what removes both (SEC-1).
+//
+// The cache needs no size cap of its own: loadConfigJSON only ever calls put for
+// Types that pass the evr.IsValidConfigType whitelist (the fixed ~4 types in
+// evr.defaultConfigResources), so the map holds at most len(defaultConfigResources)
+// entries no matter how the client varies Type or ID. (A former container/list
+// LRU with a 256-entry cap sat behind that whitelist and was therefore
+// unreachable — the cache could never exceed the whitelist size — so it was
+// removed in favor of this plain map.)
 type configCacheStore struct {
 	mu      sync.Mutex
-	ll      *list.List
-	entries map[string]*list.Element
-	maxSize int
+	entries map[string]*cachedConfigEntry
 }
 
-type configCacheItem struct {
-	key   string
-	entry *cachedConfigEntry
-}
-
-func newConfigCacheStore(maxSize int) *configCacheStore {
+func newConfigCacheStore() *configCacheStore {
 	return &configCacheStore{
-		ll:      list.New(),
-		entries: make(map[string]*list.Element),
-		maxSize: maxSize,
+		entries: make(map[string]*cachedConfigEntry),
 	}
 }
 
@@ -66,56 +59,37 @@ func newConfigCacheStore(maxSize int) *configCacheStore {
 func (c *configCacheStore) get(key string) (*cachedConfigEntry, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	el, ok := c.entries[key]
+	entry, ok := c.entries[key]
 	if !ok {
 		return nil, false
 	}
-	item := el.Value.(*configCacheItem)
-	if time.Now().After(item.entry.expiry) {
-		c.ll.Remove(el)
+	if time.Now().After(entry.expiry) {
 		delete(c.entries, key)
 		return nil, false
 	}
-	c.ll.MoveToFront(el)
-	return item.entry, true
+	return entry, true
 }
 
-// put stores entry under key, evicting the least-recently-used entries once
-// the store exceeds maxSize.
+// put stores entry under key.
 func (c *configCacheStore) put(key string, entry *cachedConfigEntry) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if el, ok := c.entries[key]; ok {
-		el.Value.(*configCacheItem).entry = entry
-		c.ll.MoveToFront(el)
-		return
-	}
-	el := c.ll.PushFront(&configCacheItem{key: key, entry: entry})
-	c.entries[key] = el
-	for c.maxSize > 0 && c.ll.Len() > c.maxSize {
-		oldest := c.ll.Back()
-		if oldest == nil {
-			break
-		}
-		c.ll.Remove(oldest)
-		delete(c.entries, oldest.Value.(*configCacheItem).key)
-	}
+	c.entries[key] = entry
 }
 
 func (c *configCacheStore) len() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.ll.Len()
+	return len(c.entries)
 }
 
 func (c *configCacheStore) clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.ll.Init()
-	c.entries = make(map[string]*list.Element)
+	c.entries = make(map[string]*cachedConfigEntry)
 }
 
-var configCache = newConfigCacheStore(configCacheMaxEntries)
+var configCache = newConfigCacheStore()
 
 // Test helpers (used by evr_pipeline_config_sec_test.go).
 func clearConfigCacheForTest()   { configCache.clear() }
@@ -178,8 +152,9 @@ func (p *EvrPipeline) loadConfigJSON(ctx context.Context, logger *zap.Logger, se
 	// client-controlled message.Type; keying the cache on Type alone (the SEC-1
 	// re-key) does not help when Type itself is unvalidated — an attacker sending
 	// a unique Type per packet misses the cache every time, forcing one DB read
-	// each (negative-cached, then LRU-evicted), which reproduces the exact
-	// per-packet DB amplification SEC-1 exists to kill. Rejecting unrecognized
+	// each (and, absent this gate, one cache entry per unique Type — unbounded
+	// growth), which reproduces the exact per-packet DB amplification SEC-1 exists
+	// to kill. Rejecting unrecognized
 	// Types here — before the cache and before configStorageRead — makes an
 	// unknown-Type flood cost zero DB reads. The valid set is
 	// evr.IsValidConfigType, derived from the same table GetDefaultConfigResource

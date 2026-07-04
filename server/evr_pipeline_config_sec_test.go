@@ -150,8 +150,8 @@ func TestSEC1_ConfigCache_BoundedUnderDistinctIDs(t *testing.T) {
 // to Type, but Type is exactly as client-controlled and unvalidated as ID was.
 // An attacker sending a UNIQUE, unrecognized Type per packet ("a0","a1",...)
 // misses the cache on every packet and, without a whitelist in front of the DB,
-// forces one storage read per packet (each result negative-cached, then evicted
-// by the 256-entry LRU, so it never stops hitting the DB). The whitelist must
+// forces one storage read per packet (and one negative-cache entry per unique
+// Type — unbounded growth, on top of never-ending DB reads). The whitelist must
 // make unknown Types cost ZERO storage reads, while a legitimate Type still
 // reads the DB exactly once and then serves from cache.
 func TestSEC1_ConfigRequest_UnknownTypeFlood_ZeroDBReads(t *testing.T) {
@@ -188,24 +188,51 @@ func TestSEC1_ConfigRequest_UnknownTypeFlood_ZeroDBReads(t *testing.T) {
 	}
 }
 
-// SEC-1: the cache must be size-bounded so a flood of distinct Types cannot
-// grow it without limit.
-func TestSEC1_ConfigCache_SizeCapped(t *testing.T) {
+// SEC-1: the cache is bounded by the IsValidConfigType whitelist, not a size
+// cap. A flood of invalid Types is rejected before put and never cached; the
+// only Types that can ever be cached are the fixed whitelist, so the cache holds
+// exactly the number of distinct valid Types requested — no more, regardless of
+// how the client varies Type or ID. (The former LRU size cap sat behind this
+// whitelist and was unreachable dead code, so an assertion that the cache stayed
+// under the cap was vacuous: a flood of invalid Types never reached put, leaving
+// the cache at 0 and the <=256 assertion trivially true. This asserts the real
+// bound instead.)
+func TestSEC1_ConfigCache_BoundedByWhitelist(t *testing.T) {
 	stub := &configTestStub{storedJSON: `{"ok":true}`}
 	installConfigStub(t, stub)
 
 	p := &EvrPipeline{}
 	session, _ := newNilIdentityConfigSession(t, p)
 
-	n := configCacheMaxEntries * 3
-	for i := 0; i < n; i++ {
-		msg := &evr.ConfigRequest{Type: fmt.Sprintf("type-%d", i), ID: fmt.Sprintf("type-%d", i)}
+	// Flood of unique INVALID Types (with varying IDs): every one is rejected by
+	// the whitelist before put, so none is ever cached.
+	const invalidFlood = 1000
+	for i := 0; i < invalidFlood; i++ {
+		msg := &evr.ConfigRequest{Type: fmt.Sprintf("invalid-%d", i), ID: fmt.Sprintf("id-%d", i)}
 		_ = p.configRequest(session.ctx, session.logger, session, msg)
 	}
+	if entries := configCacheLenForTest(); entries != 0 {
+		t.Fatalf("SEC-1 whitelist bound: %d invalid Types produced %d cache entries, want 0", invalidFlood, entries)
+	}
 
-	if entries := configCacheLenForTest(); entries > configCacheMaxEntries {
-		t.Fatalf("SEC-1 cache cap: %d distinct Types produced %d cache entries, want <= %d",
-			n, entries, configCacheMaxEntries)
+	// Every VALID Type, each requested many times with distinct client-supplied
+	// IDs. The cache must hold exactly one entry per valid Type (ID never touches
+	// the cache key) and never grow beyond the whitelist size.
+	validTypes := []string{
+		"main_menu",
+		"active_battle_pass_season",
+		"active_store_entry",
+		"active_store_featured_entry",
+	}
+	for _, tp := range validTypes {
+		for j := 0; j < 20; j++ {
+			msg := &evr.ConfigRequest{Type: tp, ID: fmt.Sprintf("%s-id-%d", tp, j)}
+			_ = p.configRequest(session.ctx, session.logger, session, msg)
+		}
+	}
+	if got, want := configCacheLenForTest(), len(validTypes); got != want {
+		t.Fatalf("SEC-1 whitelist bound: cache holds %d entries after valid+invalid flood, want exactly %d (one per valid Type)",
+			got, want)
 	}
 }
 
