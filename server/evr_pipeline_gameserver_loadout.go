@@ -22,6 +22,19 @@ type GameServerLoadoutInstance struct {
 	Items        map[string]string `json:"items"` // slot_hash -> equipped_hash (both as hex strings)
 }
 
+// sanitizeGameServerLoadout strips any cosmetic the player does not own from a loadout
+// parsed from a GameServerSaveLoadoutRequest, mirroring EquipAndSanitize's protection
+// for the RemoteLogSet equip path (COSMETIC-1). It is a separate entry point because
+// this handler builds a full loadout from a set of slot->item pairs rather than a single
+// category/name equip.
+func sanitizeGameServerLoadout(loadout evr.CosmeticLoadout, evrProfile *EVRProfile) (evr.CosmeticLoadout, error) {
+	owned, err := profileOwnedCosmetics(evrProfile)
+	if err != nil {
+		return loadout, err
+	}
+	return sanitizeLoadout(loadout, owned), nil
+}
+
 // gameServerSaveLoadoutRequest handles loadout save requests from the game server.
 // This is triggered when a player updates their loadout at the character customization screen.
 // The game server receives an internal broadcaster message (SR15NetSaveLoadoutRequest) and
@@ -143,8 +156,19 @@ func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *
 		}
 	}
 
-	// Update profile with new loadout
-	profile.LoadoutCosmetics.Loadout = loadout
+	// Update profile with new loadout, rejecting any cosmetic the player does not own
+	// (COSMETIC-1). This handler is the *sole* persistence path for game servers with
+	// NativeSupport: evr_runtime_event_remotelogset.go's equip handler explicitly skips
+	// itself for NativeSupport matches ("NEVR (non-legacy) servers already persist
+	// loadout equips themselves"), so the ownership fix applied there does not run for
+	// those servers at all. Without this check, a NativeSupport-hosted character
+	// customization equip would persist an unowned cosmetic (e.g. a VRML finalist tag)
+	// exactly like the original remotelogset bug.
+	sanitized, err := sanitizeGameServerLoadout(loadout, profile)
+	if err != nil {
+		return fmt.Errorf("failed to compute owned cosmetics: %w", err)
+	}
+	profile.LoadoutCosmetics.Loadout = sanitized
 
 	// Update jersey number if present
 	if payload.Number >= 0 {
