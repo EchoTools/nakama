@@ -1534,12 +1534,46 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, senderOperatorID uuid.UUID, evrID evr.EvrId, label *MatchLabel, payload *evr.UpdatePayload) error {
 	// SEC-3: A server profile update is only legitimate when it comes from the
 	// match's authoritative game server ("the game server's login connection").
-	// Pre-nevr-runtime, that update arrives over a DIFFERENT connection than the
-	// game server's own registered session, so the sender's session ID does not
-	// match label.GameServer.SessionID. Authority is therefore checked against the
-	// operator that registered the server: label.GameServer.OperatorID (the user
-	// id of the server, set to the registering user in NewGameServerPresence and
-	// used elsewhere as the server-host identity, e.g. evr_runtime_rpc_match.go).
+	//
+	// This is NOT the same session as label.GameServer.SessionID, so this check
+	// deliberately does not compare raw session IDs. Proof (static analysis,
+	// pre-nevr-runtime legacy sessionWS flow, current production path):
+	//
+	//  1. label.GameServer.SessionID is set from the WS session that handled the
+	//     *registration* RPC: gameserverRegistrationRequest() builds the label via
+	//     NewGameServerPresence(session.UserID(), session.id, ...) in
+	//     evr_pipeline_gameserver.go:331, i.e. SessionID == the registering
+	//     connection's own session.id.
+	//  2. UserServerProfileUpdateRequest is explicitly documented as arriving over
+	//     a *different* connection -- the game server's login connection, not its
+	//     registration/server session:
+	//       - dispatch table comment, evr_pipeline.go:574: "Broadcaster only via
+	//         it's login connection" (predates SEC-3; introduced in 7a693b1f7).
+	//       - handler doc comment, evr_pipeline_login.go:1478-1479: "A profile
+	//         update request is sent from the game server's login connection. It
+	//         is sent 45 seconds before the sessionend is sent, right after the
+	//         match ends." (predates SEC-3; introduced by Andrew Bates in
+	//         8f761168c, Aug 2024).
+	//  3. EVR game servers, like EVR clients, run multiple WS connections that all
+	//     derive identity from one login session rather than a single persistent
+	//     socket: see the "secondary connection" model in evr_session.go
+	//     (LobbySession doc comment, evr_session.go:21-22, and Secondary(),
+	//     evr_session.go:119, which explicitly tracks the "server session" via
+	//     params.serverSession separately from the login session).
+	//  => Comparing raw session IDs would reject every legitimate stat update in
+	//     production, exactly per the open risk this fix addresses.
+	//
+	// Authority is therefore checked against the operator that registered the
+	// server: label.GameServer.OperatorID (the user id of the server, set to the
+	// registering user in NewGameServerPresence, evr_gameserver_presence.go:122-123,
+	// and used elsewhere as the server-host identity, e.g.
+	// evr_runtime_rpc_match.go:236,310 and evr_discord_appbot.go:4744). That
+	// operator identity is stable across all of a game server's WS connections
+	// because each connection independently authenticates the same broadcaster
+	// credentials (discordid+password / native login) to the same Nakama user id
+	// -- see gameserverRegistrationRequest's pre-registration auth check,
+	// evr_pipeline_gameserver.go:236.
+	//
 	// Compare it to the sender session's authenticated user id. Reject any sender
 	// whose operator is not that game server's operator (or a nil operator),
 	// otherwise any authenticated client could inject stats for a player in a live
