@@ -32,19 +32,36 @@ func (m *ConfigSuccess) Stream(s *EasyStream) error {
 	})
 }
 
+// defaultConfigResources is the single source of truth for the small, fixed set
+// of legitimate config resource types and their built-in default payloads. Both
+// GetDefaultConfigResource and IsValidConfigType derive from this map, so the
+// DB-read whitelist (SEC-1) can never drift from the set of types that actually
+// resolve to a default. A legitimate resource has id == type (the client always
+// requests, e.g., type="main_menu" id="main_menu").
+var defaultConfigResources = map[string]string{
+	"main_menu":                   DefaultMainMenuConfigResource,
+	"active_battle_pass_season":   DefaultActiveBattlePassSeasonConfigResource,
+	"active_store_entry":          DefaultActiveStoreEntryConfigResource,
+	"active_store_featured_entry": DefaultActiveStoreFeaturedEntryConfigResource,
+}
+
 func GetDefaultConfigResource(_type string, id string) string {
-	switch _type + ":" + id {
-	case "main_menu:main_menu":
-		return DefaultMainMenuConfigResource
-	case "active_battle_pass_season:active_battle_pass_season":
-		return DefaultActiveBattlePassSeasonConfigResource
-	case "active_store_entry:active_store_entry":
-		return DefaultActiveStoreEntryConfigResource
-	case "active_store_featured_entry:active_store_featured_entry":
-		return DefaultActiveStoreFeaturedEntryConfigResource
-	default:
+	if _type != id {
 		return ""
 	}
+	return defaultConfigResources[_type]
+}
+
+// IsValidConfigType reports whether _type is one of the small, fixed set of
+// legitimate config resource types. It is the whitelist used to reject
+// unrecognized (attacker-controlled) Types before any storage read (SEC-1):
+// message.Type is fully client-controlled, so without this gate an attacker can
+// send a unique Type per packet and force one DB read each. The lookup is an
+// O(1) map read with no per-call allocation, so the check itself cannot become
+// an amplification vector.
+func IsValidConfigType(_type string) bool {
+	_, ok := defaultConfigResources[_type]
+	return ok
 }
 
 const (
