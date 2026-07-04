@@ -1717,22 +1717,37 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 	}
 	pollDeadline := time.Now().Add(maxPollDuration)
 
-	for {
+	// pollWait sleeps for one poll interval, bounded by the time remaining in
+	// the overall budget so the total wait can never overshoot maxPollDuration
+	// by a full interval. It reports done=true when the caller should stop
+	// polling — because the budget is exhausted or the context was canceled —
+	// and converged=true when the matchmaker placed the follower during a
+	// canceled wait.
+	pollWait := func() (converged, done bool) {
+		remaining := time.Until(pollDeadline)
+		if remaining <= 0 {
+			logger.Debug("Poll budget exhausted; leader did not become joinable, releasing to independent matchmaking")
+			return false, true
+		}
+		wait := pollInterval
+		if wait > remaining {
+			wait = remaining
+		}
 		select {
 		case <-ctx.Done():
 			if isFollowerInLeaderMatch() {
 				logger.Debug("Context canceled but follower is in leader's match (placed by matchmaker)")
-				return true
+				return true, true
 			}
-			return false
-		case <-time.After(pollInterval):
+			return false, true
+		case <-time.After(wait):
+			return false, false
 		}
+	}
 
-		// Give up once the overall poll budget is exhausted — the leader never
-		// landed in a joinable lobby within the wait window.
-		if time.Now().After(pollDeadline) {
-			logger.Debug("Poll budget exhausted; leader did not become joinable, releasing to independent matchmaking")
-			return false
+	for {
+		if converged, done := pollWait(); done {
+			return converged
 		}
 
 		// Re-check convergence after the poll interval. The matchmaker may
@@ -1779,15 +1794,10 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 			continue
 		}
 
-		// Wait for the leader to settle into the match before attempting to join.
-		select {
-		case <-ctx.Done():
-			if isFollowerInLeaderMatch() {
-				logger.Debug("Context canceled during settle but follower is in leader's match")
-				return true
-			}
-			return false
-		case <-time.After(pollInterval):
+		// Wait for the leader to settle into the match before attempting to join
+		// (also bounded by the remaining budget so it can't overshoot).
+		if converged, done := pollWait(); done {
+			return converged
 		}
 
 		// Re-check convergence after the settle wait.
