@@ -325,8 +325,16 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				continue
 			}
 
-			// Update the equipped item in the profile.
-			if profile.LoadoutCosmetics.Loadout, err = LoadoutEquipItem(profile.LoadoutCosmetics.Loadout, category, name); err != nil {
+			// Update the equipped item in the profile, rejecting any cosmetic the
+			// player does not own (COSMETIC-1). EquipAndSanitize mirrors the
+			// broadcast-path sanitize, so an unowned item (e.g. a VRML finalist tag
+			// on an empty wallet) is reset to the slot default instead of persisted.
+			owned, err := profileOwnedCosmetics(profile)
+			if err != nil {
+				logger.WithField("error", err).Warn("Failed to compute owned cosmetics")
+				continue
+			}
+			if profile.LoadoutCosmetics.Loadout, err = EquipAndSanitize(profile.LoadoutCosmetics.Loadout, category, name, owned); err != nil {
 				return fmt.Errorf("failed to update equipped item: %w", err)
 			}
 
@@ -415,12 +423,27 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				ClientIsPCVR     bool       `json:"client_is_pcvr"`
 				RemoteLogMessage string     `json:"remote_log_message"`
 			}{
-				MatchID:          matchID,
-				MatchMode:        label.Mode,
-				MatchStartedAt:   label.StartTime,
-				ServerID:         func() string { if label.GameServer != nil { return label.GameServer.SessionID.String() }; return "" }(),
-				MatchOperator:    func() string { if label.GameServer != nil { return label.GameServer.OperatorID.String() }; return "" }(),
-				MatchEndpoint:    func() string { if label.GameServer != nil { return label.GameServer.Endpoint.String() }; return "" }(),
+				MatchID:        matchID,
+				MatchMode:      label.Mode,
+				MatchStartedAt: label.StartTime,
+				ServerID: func() string {
+					if label.GameServer != nil {
+						return label.GameServer.SessionID.String()
+					}
+					return ""
+				}(),
+				MatchOperator: func() string {
+					if label.GameServer != nil {
+						return label.GameServer.OperatorID.String()
+					}
+					return ""
+				}(),
+				MatchEndpoint: func() string {
+					if label.GameServer != nil {
+						return label.GameServer.Endpoint.String()
+					}
+					return ""
+				}(),
 				ClientIsPCVR:     params.IsPCVR(),
 				ClientUserID:     session.UserID().String(),
 				ClientUsername:   session.Username(),

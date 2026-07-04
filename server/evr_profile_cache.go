@@ -67,12 +67,11 @@ func walletToCosmetics(wallet map[string]int64, unlocks map[string]map[string]bo
 	return unlocks
 }
 
-func UserServerProfileFromParameters(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, params *SessionParameters, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (*evr.ServerProfile, error) {
-	return NewUserServerProfile(ctx, logger, db, nk, params.profile, params.xpID, groupID, modes, dailyWeeklyMode, params.profile.GetGroupIGN(groupID))
-}
-
-func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, evrProfile *EVRProfile, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol, displayName string) (*evr.ServerProfile, error) {
-
+// profileOwnedCosmetics returns the mode→item→owned set the player is entitled to:
+// the default (or all, when EnableAllCosmetics) cosmetics merged with wallet-granted
+// unlocks. This is the single source of truth for "does this player own this cosmetic",
+// used both when building the broadcast server profile and when validating an equip.
+func profileOwnedCosmetics(evrProfile *EVRProfile) (map[string]map[string]bool, error) {
 	var wallet map[string]int64
 	if err := json.Unmarshal([]byte(evrProfile.Wallet()), &wallet); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal wallet: %w", err)
@@ -83,15 +82,61 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 		cosmetics[m] = make(map[string]bool, len(c))
 		maps.Copy(cosmetics[m], c)
 	}
-	cosmetics = walletToCosmetics(wallet, cosmetics)
+	return walletToCosmetics(wallet, cosmetics), nil
+}
 
-	cosmeticLoadout := evrProfile.LoadoutCosmetics.Loadout
-	cosmeticLoadout = sanitizeLoadout(cosmeticLoadout, cosmetics)
+// EquipAndSanitize applies a client-requested equip and then strips any resulting
+// cosmetic the player does not own, returning a loadout safe to persist. This closes
+// COSMETIC-1: the in-game equip path previously stored whatever the client claimed to
+// equip (e.g. VRML finalist tags) with no ownership check. Sanitizing here mirrors the
+// broadcast path (NewUserServerProfile), so the stored loadout can never hold an item
+// the player is not entitled to, while default items and legitimately-owned cosmetics
+// pass through unchanged.
+func EquipAndSanitize(loadout evr.CosmeticLoadout, category, name string, owned map[string]map[string]bool) (evr.CosmeticLoadout, error) {
+	equipped, err := LoadoutEquipItem(loadout, category, name)
+	if err != nil {
+		return loadout, err
+	}
+	return sanitizeLoadout(equipped, owned), nil
+}
+
+// equippedCosmeticsForProfile computes the sanitized cosmetic loadout that is safe to
+// serve — to other players (via ServerProfileStore -> otherUserProfileRequest) and to
+// the broadcast game server — even when evrProfile.LoadoutCosmetics.Loadout already
+// holds an unowned item (e.g. an account "poisoned" before the COSMETIC-1 equip-time
+// fixes existed, such as db484900-...). This is the read-path counterpart to
+// EquipAndSanitize / sanitizeGameServerLoadout: those guard what gets *written*: this
+// guards what gets *served*, and it runs unconditionally every time NewUserServerProfile
+// is called (login, lobby join, equip event) regardless of which path wrote the stored
+// value. No backfill of already-poisoned accounts is required for the "other players
+// see it" concern because of this: every regeneration re-derives ownership from the
+// current wallet and strips anything not currently owned.
+func equippedCosmeticsForProfile(evrProfile *EVRProfile) (evr.CosmeticLoadout, map[string]map[string]bool, error) {
+	cosmetics, err := profileOwnedCosmetics(evrProfile)
+	if err != nil {
+		return evr.CosmeticLoadout{}, nil, err
+	}
+
+	cosmeticLoadout := sanitizeLoadout(evrProfile.LoadoutCosmetics.Loadout, cosmetics)
 
 	// If the player has "kissy lips" emote equipped, set their emote to default.
 	if cosmeticLoadout.Emote == "emote_kissy_lips_a" {
 		cosmeticLoadout.Emote = "emote_blink_smiley_a"
 		cosmeticLoadout.SecondEmote = "emote_blink_smiley_a"
+	}
+
+	return cosmeticLoadout, cosmetics, nil
+}
+
+func UserServerProfileFromParameters(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, params *SessionParameters, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (*evr.ServerProfile, error) {
+	return NewUserServerProfile(ctx, logger, db, nk, params.profile, params.xpID, groupID, modes, dailyWeeklyMode, params.profile.GetGroupIGN(groupID))
+}
+
+func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, evrProfile *EVRProfile, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol, displayName string) (*evr.ServerProfile, error) {
+
+	cosmeticLoadout, cosmetics, err := equippedCosmeticsForProfile(evrProfile)
+	if err != nil {
+		return nil, err
 	}
 
 	var developerFeatures *evr.DeveloperFeatures
@@ -445,11 +490,32 @@ var allCosmetics = func() map[string]map[string]bool {
 	return all
 }()
 
+// cosmeticDefaults returns a fresh deep copy of the process-lifetime defaultCosmetics
+// (or allCosmetics) singleton. This MUST copy rather than return the shared map
+// directly: every known caller feeds the result straight into walletToCosmetics, which
+// mutates its "unlocks" argument in place (unlocks[mode][item] = true). Before this
+// function copied, that meant a single call — e.g. UserUnlockedCosmetics
+// (evr_discord_loadout.go), invoked on every /loadout autocomplete keystroke and on
+// /loadout set — would permanently merge one player's wallet-granted cosmetic (VRML
+// tag, medal, etc.) into the shared defaultCosmetics/allCosmetics map for the lifetime
+// of the running process, silently granting that restricted item to every other player
+// from then on. This is a distinct, likely-live contributor to COSMETIC-1 reports beyond
+// the unvalidated-equip write paths, and a test-isolation hazard (a test calling
+// cosmeticDefaults(false) followed by walletToCosmetics would poison every later test in
+// the same process, exactly as observed by
+// TestEquippedCosmeticsForProfile_PoisonedAccountNeverServesUnownedItem failing only when
+// run after TestEquipAndSanitize_AllowsOwnedVRMLTag in the same binary).
 func cosmeticDefaults(enableAll bool) map[string]map[string]bool {
+	src := defaultCosmetics
 	if enableAll {
-		return allCosmetics
+		src = allCosmetics
 	}
-	return defaultCosmetics
+	out := make(map[string]map[string]bool, len(src))
+	for m, c := range src {
+		out[m] = make(map[string]bool, len(c))
+		maps.Copy(out[m], c)
+	}
+	return out
 }
 
 type StoredCosmeticLoadout struct {
