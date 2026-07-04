@@ -16,6 +16,10 @@ import (
 type mockEnforcementNakamaModule struct {
 	runtime.NakamaModule
 	storageObjects map[string][]*api.StorageObject
+	// storageListErr, when set, forces StorageList to fail — used to prove the
+	// rate limiter fails CLOSED (denies) rather than open (allows) on a storage
+	// error.
+	storageListErr error
 }
 
 func newMockEnforcementNakamaModule() *mockEnforcementNakamaModule {
@@ -74,6 +78,9 @@ func (m *mockEnforcementNakamaModule) StorageWrite(ctx context.Context, writes [
 }
 
 func (m *mockEnforcementNakamaModule) StorageList(ctx context.Context, callerID, userID, collection string, limit int, cursor string) ([]*api.StorageObject, string, error) {
+	if m.storageListErr != nil {
+		return nil, "", m.storageListErr
+	}
 	objects := make([]*api.StorageObject, 0)
 	for _, objs := range m.storageObjects {
 		for i := range objs {
@@ -361,7 +368,7 @@ func TestCheckReportRateLimit(t *testing.T) {
 	userID := "test-user"
 
 	// No reports yet - should pass
-	err := checkReportRateLimit(ctx, nk, userID)
+	err := checkReportRateLimit(ctx, nil, nk, userID)
 	if err != nil {
 		t.Errorf("Expected no error with no reports, got: %v", err)
 	}
@@ -393,7 +400,7 @@ func TestCheckReportRateLimit(t *testing.T) {
 	}
 
 	// Still under limit (4) - should pass
-	err = checkReportRateLimit(ctx, nk, userID)
+	err = checkReportRateLimit(ctx, nil, nk, userID)
 	if err != nil {
 		t.Errorf("Expected no error with 4 reports, got: %v", err)
 	}
@@ -421,7 +428,7 @@ func TestCheckReportRateLimit(t *testing.T) {
 	_, _ = nk.StorageWrite(ctx, writes)
 
 	// Still should pass (4 recent + 1 old = 5 total, but only 4 recent)
-	err = checkReportRateLimit(ctx, nk, userID)
+	err = checkReportRateLimit(ctx, nil, nk, userID)
 	if err != nil {
 		t.Errorf("Expected no error with 4 recent + 1 old reports, got: %v", err)
 	}
@@ -449,9 +456,25 @@ func TestCheckReportRateLimit(t *testing.T) {
 	_, _ = nk.StorageWrite(ctx, writes)
 
 	// Now at limit (5 recent) - should be rate limited
-	err = checkReportRateLimit(ctx, nk, userID)
+	err = checkReportRateLimit(ctx, nil, nk, userID)
 	if err == nil {
 		t.Error("Expected rate limit error with 5 recent reports, got nil")
+	}
+}
+
+// TestCheckReportRateLimit_StorageErrorDenies proves the rate limiter fails
+// CLOSED: when the storage read errors, the report is DENIED, not allowed.
+// player/report is reachable by any authenticated user, so a fail-open path
+// (return nil on error) would let an attacker who can induce storage errors
+// bypass the MaxReportsPerHour cap entirely.
+func TestCheckReportRateLimit_StorageErrorDenies(t *testing.T) {
+	ctx := context.Background()
+	nk := newMockEnforcementNakamaModule()
+	nk.storageListErr = fmt.Errorf("simulated storage outage")
+
+	err := checkReportRateLimit(ctx, nil, nk, "test-user")
+	if err == nil {
+		t.Fatal("expected rate limiter to DENY (fail closed) on storage error, got nil (fail open — an attacker inducing storage errors bypasses the cap)")
 	}
 }
 

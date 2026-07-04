@@ -527,7 +527,11 @@ func createSuspensionDetailsEmbedField(guildName string, records []GuildEnforcem
 		// the current guild — except global operators, who oversee all guilds and see
 		// attribution everywhere.
 		enforcerInfo := ""
-		if showEnforcerID && (callerIsGlobalOperator || r.GroupID == currentGuildID) {
+		// Only attribute when we actually have an enforcer Discord ID. Legacy /
+		// operator-initiated records carry an empty EnforcerDiscordID; formatting it
+		// unconditionally renders a broken "by <@!>" mention. Symmetric with the
+		// reporter path below, which omits its line when the reporter is blank.
+		if showEnforcerID && (callerIsGlobalOperator || r.GroupID == currentGuildID) && r.EnforcerDiscordID != "" {
 			enforcerInfo = fmt.Sprintf(" by <@!%s>", r.EnforcerDiscordID)
 		}
 

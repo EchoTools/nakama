@@ -197,12 +197,25 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 //   - device_type / build_version via params.MetricsTags() (bounded at that source)
 //   - build_number / app_id / publisher_lock via their allow-lists
 //
+// Note: on login_success, headset_type (from addSystemInfoMetricTags) always equals
+// device_type (from MetricsTags), and build_number always equals build_version, since
+// each pair derives from the same payload field via the same bounding function. This
+// duplicate tag-width is intentionally kept: dropping headset_type/build_number from
+// the emitted tuple would require also removing them from loginMetricFingerprintFields
+// (else boundSystemsPerPlayer's collapse loop re-adds them as metricTagOther), i.e.
+// changing the DoS-critical fingerprint/cap logic. Correlated tags do not expand the
+// Prometheus series space (device_type/build_version carry identical values), so the
+// cost is bytes, not cardinality — not worth touching the fingerprint for.
+//
 // The fully-bounded tuple then passes through the per-player distinct-system cap
-// (boundSystemsPerPlayer), which collapses every attacker-controlled tag to
-// metricTagOther once one account exceeds maxDistinctSystemsPerPlayer distinct
-// systems — so a single client cannot churn Prometheus series by varying ANY payload
-// field. build_number/app_id/publisher_lock are bounded and written BEFORE the cap so
-// they participate in the fingerprint and the collapse (loginMetricFingerprintFields).
+// (boundSystemsPerPlayer), which collapses every FINGERPRINTED attacker-controlled tag
+// to metricTagOther once one account exceeds maxDistinctSystemsPerPlayer distinct
+// systems. The only attacker-derived tags NOT collapsed are the two low-cardinality
+// booleans is_vr/is_pcvr (from MetricsTags, intentionally uncapped at 2 values each and
+// deliberately excluded from the fingerprint), so a single client still cannot churn
+// Prometheus series by varying any payload field. build_number/app_id/publisher_lock are
+// bounded and written BEFORE the cap so they participate in the fingerprint and the
+// collapse (loginMetricFingerprintFields).
 func buildLoginSuccessMetricTags(params *SessionParameters, limiter *systemFingerprintLimiter) map[string]string {
 	tags := params.MetricsTags()
 	addSystemInfoMetricTags(tags, params.loginPayload.SystemInfo)

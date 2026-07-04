@@ -689,3 +689,33 @@ func TestSuspensionAttribution_GlobalOperatorSeesCrossGuild(t *testing.T) {
 		}
 	})
 }
+
+// TestSuspensionAttribution_EmptyEnforcerIDOmitsMention verifies that a record
+// with no enforcer Discord ID (legacy / operator-initiated, now more visible to
+// global operators cross-guild) does NOT render a malformed "by <@!>" mention.
+func TestSuspensionAttribution_EmptyEnforcerIDOmitsMention(t *testing.T) {
+	const currentGuild = "guild-A"
+	records := []GuildEnforcementRecord{{
+		ID:                "rec-legacy",
+		GroupID:           currentGuild,
+		EnforcerDiscordID: "", // no enforcer Discord ID on record
+		EnforcerUserID:    "",
+		CreatedAt:         time.Now().Add(-time.Hour),
+		UpdatedAt:         time.Now().Add(-time.Hour),
+		UserNoticeText:    "Operator-initiated notice",
+		Expiry:            time.Now().Add(time.Hour),
+	}}
+
+	// showEnforcerID=true and same-guild, so the attribution branch is taken; the
+	// empty ID must still suppress the mention rather than emit "by <@!>".
+	field := createSuspensionDetailsEmbedField("Guild A", records, nil, false, true, true, currentGuild, "", false)
+	if field == nil {
+		t.Fatal("expected field to be non-nil")
+	}
+	if strings.Contains(field.Value, "<@!>") {
+		t.Errorf("empty enforcer ID must not render a malformed mention; got: %s", field.Value)
+	}
+	if strings.Contains(field.Value, " by ") {
+		t.Errorf("empty enforcer ID must omit the \"by\" attribution entirely; got: %s", field.Value)
+	}
+}
