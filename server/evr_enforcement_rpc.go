@@ -91,7 +91,7 @@ func PlayerReportRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	}
 
 	// Check rate limit - max 5 reports per hour per user
-	if err := checkReportRateLimit(ctx, nk, userID); err != nil {
+	if err := checkReportRateLimit(ctx, logger, nk, userID); err != nil {
 		return "", err
 	}
 
@@ -162,7 +162,7 @@ func PlayerReportRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 }
 
 // checkReportRateLimit checks if the user has exceeded the rate limit of 5 reports per hour
-func checkReportRateLimit(ctx context.Context, nk runtime.NakamaModule, userID string) error {
+func checkReportRateLimit(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID string) error {
 	// List all reports by this user, paging through storage with a cursor.
 	// This avoids relying on StorageList ordering, which is not guaranteed to be time-based.
 
@@ -173,8 +173,22 @@ func checkReportRateLimit(ctx context.Context, nk runtime.NakamaModule, userID s
 	for {
 		objects, newCursor, err := nk.StorageList(ctx, SystemUserID, userID, StorageCollectionPlayerReports, 100, cursor)
 		if err != nil {
-			// If there's an error reading storage, allow the report (fail open for rate limiting)
-			return nil
+			// Fail CLOSED: a storage error must not become a rate-limit bypass.
+			// player/report is reachable by any authenticated user, so returning
+			// nil here (fail open) would let anyone who can induce storage errors
+			// exceed the MaxReportsPerHour cap at will. Deny the report instead and
+			// warn — someone should look, because reports are being blocked by a
+			// storage fault, not by the cap.
+			if logger != nil {
+				logger.WithFields(map[string]interface{}{
+					"user_id": userID,
+					"error":   err.Error(),
+				}).Warn("player/report rate-limit storage read failed; denying report (fail closed)")
+			}
+			return runtime.NewError(
+				"Unable to verify report rate limit right now. Please try again later.",
+				StatusUnavailable,
+			)
 		}
 
 		for _, obj := range objects {
