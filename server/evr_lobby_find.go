@@ -1607,6 +1607,17 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 }
 
 // pollFollowPartyLeader polls for the party leader to join a match.
+const (
+	// pollFollowIntervalDefault is how often the follow poll re-checks whether
+	// the leader has landed in a joinable lobby.
+	pollFollowIntervalDefault = 3 * time.Second
+	// pollFollowMaxDurationDefault is how long a follower keeps trying to
+	// converge on the leader before falling back to solo matchmaking. 60s
+	// comfortably covers a slow ("potato") leader that is between matches while
+	// still bounding the wait.
+	pollFollowMaxDurationDefault = 60 * time.Second
+)
+
 func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, lobbyGroup *LobbyGroup) bool {
 	logger.Debug("Polling to follow party leader")
 
@@ -1690,6 +1701,22 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 	const maxNonJoinableCycles = 3
 	nonJoinableCycles := 0
 
+	// A follower waits up to maxPollDuration for the leader to land in a
+	// joinable lobby before falling back to independent (solo) matchmaking.
+	// After a match ends the leader is frequently "between matches" (has no
+	// match presence) for several seconds — longer on slow clients — so the
+	// poll must be patient and keep waiting for the leader to reappear rather
+	// than bailing on the first tick. The overall budget bounds the wait.
+	pollInterval := p.pollFollowInterval
+	if pollInterval <= 0 {
+		pollInterval = pollFollowIntervalDefault
+	}
+	maxPollDuration := p.pollFollowMaxDuration
+	if maxPollDuration <= 0 {
+		maxPollDuration = pollFollowMaxDurationDefault
+	}
+	pollDeadline := time.Now().Add(maxPollDuration)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -1698,7 +1725,14 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 				return true
 			}
 			return false
-		case <-time.After(3 * time.Second):
+		case <-time.After(pollInterval):
+		}
+
+		// Give up once the overall poll budget is exhausted — the leader never
+		// landed in a joinable lobby within the wait window.
+		if time.Now().After(pollDeadline) {
+			logger.Debug("Poll budget exhausted; leader did not become joinable, releasing to independent matchmaking")
+			return false
 		}
 
 		// Re-check convergence after the poll interval. The matchmaker may
@@ -1731,8 +1765,13 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 
 		presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, stream, leaderUserID)
 		if presence == nil {
-			logger.Debug("Leader left match during poll")
-			return false
+			// Leader is between matches — they left the previous lobby and have
+			// not yet landed in the next. This is the normal post-match
+			// transition, not a reason to abandon the party. Keep polling (the
+			// pollDeadline above bounds the total wait) instead of releasing the
+			// follower to solo the instant the leader has no match.
+			logger.Debug("Leader is between matches during poll, continuing to wait for them to land")
+			continue
 		}
 
 		leaderMatchID := MatchIDFromStringOrNil(presence.GetStatus())
@@ -1748,7 +1787,7 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 				return true
 			}
 			return false
-		case <-time.After(3 * time.Second):
+		case <-time.After(pollInterval):
 		}
 
 		// Re-check convergence after the settle wait.

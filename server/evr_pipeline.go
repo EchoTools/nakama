@@ -59,6 +59,12 @@ type EvrPipeline struct {
 	config  Config
 	version string
 
+	// Party-follow poll timing. Zero means use the package defaults
+	// (pollFollowIntervalDefault / pollFollowMaxDurationDefault). Overridable in
+	// tests to avoid multi-second real waits.
+	pollFollowInterval    time.Duration
+	pollFollowMaxDuration time.Duration
+
 	sessionRegistry SessionRegistry
 	runtime         *Runtime
 	nk              *RuntimeGoNakamaModule
