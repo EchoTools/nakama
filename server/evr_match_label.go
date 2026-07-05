@@ -147,6 +147,37 @@ func (s *MatchLabel) LoadAndDeleteReservationByUserIDRaw(userID string) (*slotRe
 	return nil, false
 }
 
+// upsertReservationByUserID inserts a slot reservation keyed by its presence's
+// session ID, after first removing any existing reservation held by the SAME
+// user ID under a (possibly stale) different session ID.
+//
+// EVR clients receive a NEW nakama session ID on every WebSocket reconnect while
+// their user ID (from the auth token) stays stable. Keying create-side dedup on
+// session ID alone therefore lets a reconnected member acquire a SECOND
+// reservation while their original one is still un-expired -- a phantom seat that
+// counts toward capacity (OpenSlots/ReservationCount) until it expires. This
+// makes the CREATE side symmetric with the already-UserID-aware consume path
+// (LoadAndDeleteReservationByUserIDRaw): a member always ends with exactly one
+// reservation.
+//
+// Removal and insertion happen in the same call, so a re-seed/restore of the
+// same member can never net to zero reservations. Callers are expected to
+// rebuildCache() afterward (as the create paths already do) so the derived
+// capacity counters reflect the change.
+func (s *MatchLabel) upsertReservationByUserID(reservation *slotReservation) {
+	userID := reservation.Presence.UserID
+	// A nil user ID is not a stable identity; key on session ID only in that
+	// case so two distinct members that both lack a user ID are never collapsed.
+	if userID != uuid.Nil {
+		for sid, r := range s.reservationMap {
+			if r.Presence.UserID == userID {
+				delete(s.reservationMap, sid)
+			}
+		}
+	}
+	s.reservationMap[reservation.Presence.GetSessionId()] = reservation
+}
+
 func (s *MatchLabel) IsPublic() bool {
 	return s.LobbyType == PublicLobby
 }

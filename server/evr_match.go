@@ -533,7 +533,10 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			// Reserve spots for party members for 5 minutes
 			reservation.Expiry = time.Now().Add(time.Minute * 5)
 		}
-		state.reservationMap[sessionID] = reservation
+		// Upsert by user ID so a member who reconnected (new session ID) does not
+		// leave a phantom reservation under their stale session ID. Symmetric with
+		// the UserID-aware consume path (LoadAndDeleteReservationByUserIDRaw).
+		state.upsertReservationByUserID(reservation)
 		state.joinTimestamps[sessionID] = time.Now()
 	}
 
@@ -880,9 +883,15 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 					}
 				} else {
 					// Non-leader is leaving: clear only THEIR OWN reservation.
-					if _, exists := state.reservationMap[mp.GetSessionId()]; exists {
-						delete(state.reservationMap, mp.GetSessionId())
-						cleared = 1
+					// Match by user ID, not just session ID: a member who
+					// reconnected holds their reservation under a NEW session ID
+					// (see upsertReservationByUserID), so a session-ID-only delete
+					// would orphan the old entry.
+					for sid, r := range state.reservationMap {
+						if r.Presence.UserID == mp.UserID {
+							delete(state.reservationMap, sid)
+							cleared++
+						}
 					}
 				}
 				if cleared > 0 {
@@ -1903,17 +1912,28 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 		created := 0
 		for _, member := range payload.Members {
-			sid := member.GetSessionId()
-			if _, exists := state.presenceMap[sid]; exists {
+			// Skip if the member is already an active presence. Match by user ID,
+			// not just session ID: a member who reconnected holds their presence
+			// under a NEW session ID, so a session-ID-only check would miss them
+			// and create a phantom reservation.
+			alreadyPresent := false
+			for _, p := range state.presenceMap {
+				if p.UserID == member.UserID {
+					alreadyPresent = true
+					break
+				}
+			}
+			if alreadyPresent {
 				continue // already in match
 			}
-			if _, exists := state.reservationMap[sid]; exists {
-				continue // already reserved
-			}
-			state.reservationMap[sid] = &slotReservation{
+			// Upsert by user ID: replace any existing reservation for this member
+			// (possibly under a stale session ID from a prior connection) so they
+			// end up with exactly one reservation. Symmetric with the UserID-aware
+			// consume path (LoadAndDeleteReservationByUserIDRaw).
+			state.upsertReservationByUserID(&slotReservation{
 				Presence: member,
 				Expiry:   time.Now().Add(5 * time.Minute),
-			}
+			})
 			created++
 		}
 		if created > 0 {
