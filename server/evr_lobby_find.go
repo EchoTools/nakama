@@ -396,6 +396,20 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 		zap.String("leader_uid", leader.GetUserId()),
 		zap.String("current_match_id", lobbyParams.CurrentMatchID.String()))
 
+	// E2 (D1): if this session is NOT the leader, a member may have joined a
+	// party whose leader is ALREADY settled in a social lobby (I3's timing case),
+	// which the one-shot leader-connect trigger (E1) cannot cover. Reserve a seat
+	// for them now. createReservationForNewPartyMember self-guards leader-is-self
+	// (:757), leader-in-a-match (:768) and leader-in-social (:778) internally, so
+	// it is a no-op unless the leader is currently in a social match — do NOT
+	// duplicate those checks here. Dispatched WithoutCancel so it survives this
+	// session's find-loop teardown, matching the SNS caller (snsPartyJoinRequest).
+	// Idempotent via #512's UserID-keyed dedup, so a repeat fire yields one
+	// reservation (BAC-5).
+	if !isLeader {
+		go p.createReservationForNewPartyMember(context.WithoutCancel(ctx), logger, session, lobbyGroup.ID())
+	}
+
 	// If this is the leader, then set the presence status to the current match ID.
 	if isLeader {
 		// Track the leader on the matchmaking stream early so followers know they are queueing for Arena.

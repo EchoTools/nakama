@@ -236,6 +236,19 @@ func JoinPartyGroup(session *sessionWS, groupName string, currentMatchID MatchID
 		_ = session.Send(out, true)
 	}
 
+	// Make currentPartyID party-type-agnostic (D2): group-party members now
+	// carry the party UUID exactly like SNS members do, so the reservation
+	// trigger (evr_pipeline_lobby.go lobbyEntrantConnected) and the
+	// matchmaker-cancel path (lobbyPendingSessionCancel) fire for group parties.
+	// Placed AFTER the transactional Track (PR #510): a rolled-back join returns
+	// before reaching here, so we never set currentPartyID for a non-member.
+	if params, ok := LoadParams(session.Context()); ok {
+		params.currentPartyID = ph.ID
+		// currentSNSPartyID stays 0 for group parties: every reader of it is
+		// inside an sns* message handler that group-party users never invoke.
+		StoreParams(session.Context(), params)
+	}
+
 	lobbyGroup := &LobbyGroup{
 		name: groupName,
 		ph:   ph,
