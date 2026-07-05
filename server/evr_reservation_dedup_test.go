@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
@@ -203,5 +205,129 @@ func TestReservationDedup_DistinctMembersUnaffected(t *testing.T) {
 	}
 	if state.ReservationCount != 2 {
 		t.Errorf("expected ReservationCount=2 for two distinct members, got %d", state.ReservationCount)
+	}
+}
+
+// TestReservationDedup_NilUserIDLeaveOnlyClearsOwn pins Fix 1: two DISTINCT
+// members that both lack a user ID (UserID == uuid.Nil) hold party reservations.
+// When one leaves as a non-leader, only the LEAVER's own reservation (keyed by
+// session ID) must be cleared. A nil user ID is not a stable identity, so the
+// by-UserID delete loop must NOT be used for it -- otherwise it would wrongly
+// collapse the other nil-UserID member's still-valid reservation (mirrors
+// upsertReservationByUserID's nil handling).
+//
+// Red without the guard: the by-UserID loop deletes BOTH nil-UserID
+// reservations. Green with it: only the leaver's own reservation is deleted.
+func TestReservationDedup_NilUserIDLeaveOnlyClearsOwn(t *testing.T) {
+	m := &EvrMatch{}
+	state := reconnectTestState(evr.ModeSocialPublic)
+
+	partyID := uuid.Must(uuid.NewV4())
+	leaverSid := uuid.Must(uuid.NewV4())
+	otherSid := uuid.Must(uuid.NewV4())
+
+	// Two distinct members, both with a NIL user ID, in the SAME party.
+	leaver := &EvrMatchPresence{
+		Node:          "test-node",
+		UserID:        uuid.Nil,
+		SessionID:     leaverSid,
+		PartyID:       partyID,
+		RoleAlignment: evr.TeamSocial,
+		Username:      "leaver",
+		DisplayName:   "Leaver",
+		EvrID:         evr.EvrId{PlatformCode: 4, AccountId: 1},
+		EntrantID:     uuid.Must(uuid.NewV4()),
+	}
+	other := &EvrMatchPresence{
+		Node:          "test-node",
+		UserID:        uuid.Nil,
+		SessionID:     otherSid,
+		PartyID:       partyID,
+		RoleAlignment: evr.TeamSocial,
+		Username:      "other",
+		DisplayName:   "Other",
+		EvrID:         evr.EvrId{PlatformCode: 4, AccountId: 2},
+		EntrantID:     uuid.Must(uuid.NewV4()),
+	}
+
+	// Both are active presences and both hold reservations keyed by session ID.
+	state.presenceMap[leaverSid.String()] = leaver
+	state.presenceMap[otherSid.String()] = other
+	state.joinTimestamps[leaverSid.String()] = time.Now().Add(-time.Minute)
+	state.joinTimestamps[otherSid.String()] = time.Now().Add(-time.Minute)
+	state.reservationMap[leaverSid.String()] = &slotReservation{Presence: leaver, Expiry: time.Now().Add(5 * time.Minute)}
+	state.reservationMap[otherSid.String()] = &slotReservation{Presence: other, Expiry: time.Now().Add(5 * time.Minute)}
+	state.rebuildCache()
+
+	nk := &reconnectTestNakamaModule{}
+	dispatcher := &reconnectTestDispatcher{}
+	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
+	// Non-leader voluntary leave (nk is not *RuntimeGoNakamaModule, so the
+	// leadership lookup falls through to the non-leader path).
+	leavePresence := reconnectTestPresence{EvrMatchPresence: leaver, reason: runtime.PresenceReasonLeave}
+
+	got := m.MatchLeave(ctx, reconnectTestLogger(), nil, nk, dispatcher, 1, state, []runtime.Presence{leavePresence})
+	stateAfter, ok := got.(*MatchLabel)
+	if !ok {
+		t.Fatalf("MatchLeave returned non-*MatchLabel state: %T", got)
+	}
+
+	// The leaver's own reservation must be gone.
+	if _, ok := stateAfter.reservationMap[leaverSid.String()]; ok {
+		t.Errorf("expected leaver's own reservation (sid %s) to be cleared", leaverSid)
+	}
+	// The OTHER nil-UserID member's reservation must REMAIN.
+	if _, ok := stateAfter.reservationMap[otherSid.String()]; !ok {
+		t.Errorf("other nil-UserID member's reservation (sid %s) was wrongly collapsed by the by-UserID delete", otherSid)
+	}
+	if got := len(stateAfter.reservationMap); got != 1 {
+		t.Errorf("expected exactly 1 reservation remaining (the other member's), got %d", got)
+	}
+}
+
+// TestReservationDedup_NilUserIDCreateNotSkipped pins Fix 2: a member with a
+// NIL user ID whose session ID is NOT already an active presence must get a
+// reservation created, even when some OTHER nil-UserID presence exists. A nil
+// user ID is not a stable identity, so the "alreadyPresent" short-circuit must
+// NOT treat all nil-UserID presences as the same user (mirrors
+// upsertReservationByUserID, which keys nil reservations by session ID).
+//
+// Red without the guard: the by-UserID alreadyPresent check matches the other
+// nil-UserID presence and skips creation (0 reservations). Green with it: the
+// session-ID comparison finds no match and the reservation is created.
+func TestReservationDedup_NilUserIDCreateNotSkipped(t *testing.T) {
+	m := &EvrMatch{}
+	state := newDedupTestState()
+
+	// An UNRELATED active presence that also lacks a user ID.
+	otherSid := uuid.Must(uuid.NewV4())
+	state.presenceMap[otherSid.String()] = &EvrMatchPresence{
+		UserID:        uuid.Nil,
+		SessionID:     otherSid,
+		RoleAlignment: evr.TeamSocial,
+		Username:      "other",
+		DisplayName:   "Other",
+		EvrID:         evr.EvrId{PlatformCode: 4, AccountId: 9},
+	}
+	state.rebuildCache()
+
+	// A DIFFERENT member, also nil UserID, whose session ID is NOT in presenceMap.
+	newSid := uuid.Must(uuid.NewV4())
+	member := &EvrMatchPresence{
+		UserID:        uuid.Nil,
+		SessionID:     newSid,
+		RoleAlignment: evr.TeamSocial,
+		Username:      "new",
+		DisplayName:   "New",
+		EvrID:         evr.EvrId{PlatformCode: 4, AccountId: 10},
+	}
+	state = signalCreatePartyReservations(t, m, state, member)
+
+	// The reservation must be created, keyed by the member's own session ID.
+	if _, ok := state.reservationMap[newSid.String()]; !ok {
+		t.Errorf("expected a reservation created for nil-UserID member (sid %s); it was wrongly skipped as already-present", newSid)
+	}
+	if got := len(state.reservationMap); got != 1 {
+		t.Errorf("expected exactly 1 reservation, got %d", got)
 	}
 }

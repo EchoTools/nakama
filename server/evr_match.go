@@ -881,6 +881,15 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 							cleared++
 						}
 					}
+				} else if mp.UserID == uuid.Nil {
+					// Non-leader with a NIL user ID. A nil user ID is not a stable
+					// identity (mirrors upsertReservationByUserID): matching by it
+					// would delete EVERY nil-UserID reservation, collapsing unrelated
+					// members. Clear only this member's own reservation by session ID.
+					if _, ok := state.reservationMap[mp.GetSessionId()]; ok {
+						delete(state.reservationMap, mp.GetSessionId())
+						cleared++
+					}
 				} else {
 					// Non-leader is leaving: clear only THEIR OWN reservation.
 					// Match by user ID, not just session ID: a member who
@@ -1918,7 +1927,17 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			// and create a phantom reservation.
 			alreadyPresent := false
 			for _, p := range state.presenceMap {
-				if p.UserID == member.UserID {
+				if member.UserID == uuid.Nil {
+					// A nil user ID is not a stable identity (mirrors
+					// upsertReservationByUserID): matching by it would treat every
+					// nil-UserID presence as the same user and wrongly skip a needed
+					// reservation. Compare by session ID instead; the upsert below
+					// already keys nil reservations by session ID.
+					if p.GetSessionId() == member.GetSessionId() {
+						alreadyPresent = true
+						break
+					}
+				} else if p.UserID == member.UserID {
 					alreadyPresent = true
 					break
 				}
