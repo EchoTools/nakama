@@ -172,6 +172,16 @@ func (p *EvrPipeline) snsPartyTrackAndJoin(ctx context.Context, logger *zap.Logg
 	return nil
 }
 
+// clearPartyParams clears the session's current-party fields and re-stores the
+// params. Shared by snsPartyLeaveCleanup (SNS leave) and the spectator
+// group-leave path (D3). Field-clear only — it does NOT untrack the party
+// stream (callers own their own stream teardown).
+func clearPartyParams(ctx context.Context, params *SessionParameters) {
+	params.currentPartyID = uuid.Nil
+	params.currentSNSPartyID = 0
+	StoreParams(ctx, params)
+}
+
 func (p *EvrPipeline) snsPartyLeaveCleanup(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) {
 	if params.currentPartyID == uuid.Nil {
 		return
@@ -179,9 +189,7 @@ func (p *EvrPipeline) snsPartyLeaveCleanup(ctx context.Context, logger *zap.Logg
 	stream := PresenceStream{Mode: StreamModeParty, Subject: params.currentPartyID, Label: p.node}
 	p.nk.tracker.Untrack(session.ID(), stream, session.UserID())
 
-	params.currentPartyID = uuid.Nil
-	params.currentSNSPartyID = 0
-	StoreParams(session.Context(), params)
+	clearPartyParams(session.Context(), params)
 }
 
 func (p *EvrPipeline) getPartyLeaderAccountID(ctx context.Context, logger *zap.Logger, ph *PartyHandler) uint64 {
@@ -804,7 +812,11 @@ func (p *EvrPipeline) createReservationForNewPartyMember(ctx context.Context, lo
 		return
 	}
 
-	logger.Info("Created reservation for new party member",
+	// Debug (not Info): configureParty dispatches this on every follower
+	// LobbyFindSessionRequest re-send, so a successful reservation is a routine,
+	// repeated event — Info would be log-spam. A genuine failure above still logs
+	// at Warn. (Log-discipline downgrade for the group-party E2 wiring.)
+	logger.Debug("Created reservation for new party member",
 		zap.String("member_sid", memberSession.id.String()),
 		zap.String("leader_match_id", leaderMatchID.String()))
 }

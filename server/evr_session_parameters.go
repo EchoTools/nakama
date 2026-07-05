@@ -58,7 +58,7 @@ type SessionParameters struct {
 
 	isAmbassadorMatch *atomic.Bool // True if the player is ambassadoring in the current match
 
-	currentPartyID    uuid.UUID // Nakama party UUID the user is currently in (SNS party)
+	currentPartyID    uuid.UUID // current party (SNS or group) — Nakama party UUID the session is currently in
 	currentSNSPartyID uint64    // SNS wire party ID
 
 	sessionDurationOnce sync.Once // Ensures the session-duration metrics goroutine is spawned exactly once

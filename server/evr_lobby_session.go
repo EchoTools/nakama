@@ -65,6 +65,12 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 		if lobbyParams.Role == evr.TeamSpectator {
 			// Leave the party if the user is in one
 			LeavePartyStream(session)
+			// Group-leave field-clear (D3): LeavePartyStream untracks the party
+			// stream but does not touch params. Clear currentPartyID so a
+			// spectating ex-member does not carry stale party state (BAC-4).
+			if params, ok := LoadParams(ctx); ok {
+				clearPartyParams(ctx, params)
+			}
 			// Spectators are only allowed in arena and combat matches.
 			if lobbyParams.Mode != evr.ModeArenaPublic && lobbyParams.Mode != evr.ModeCombatPublic {
 				err = NewLobbyErrorf(BadRequest, "spectators are only allowed in arena and combat matches")
