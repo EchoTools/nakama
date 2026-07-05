@@ -202,14 +202,28 @@ func JoinPartyGroup(session *sessionWS, groupName string, currentMatchID MatchID
 		if addedMember {
 			ph.members.Leave([]*Presence{&presence})
 		}
-		if created {
+		// Only delete the party if THIS call created it AND it is still empty.
+		// `created` alone is not sufficient: two sessions can converge on the
+		// same LobbyGroupName, with one creating the party (created=true) and a
+		// second concurrently joining it (created=false) — the second's
+		// JoinRequest commits it into ph.members before this creator's async
+		// tracker Join resolves. The creator never self-adds via JoinRequest
+		// (only via the tracker Join event that just failed), so on Track
+		// failure the creator is not in ph.members and Size() reflects only
+		// other, legitimate members. Deleting a party another session has
+		// already joined would evict a real member and orphan their party.
+		//
+		// Size()==0-then-Delete carries a strictly narrower residual window
+		// than the bug it fixes (see commit notes); it cannot recreate the
+		// evict-a-committed-member failure this guards against.
+		if created && ph.members.Size() == 0 {
 			session.pipeline.partyRegistry.Delete(ph.ID)
 		}
 		_ = session.Send(&rtapi.Envelope{Message: &rtapi.Envelope_Error{Error: &rtapi.Error{
 			Code:    int32(rtapi.Error_RUNTIME_EXCEPTION),
-			Message: "Error tracking party creation",
+			Message: "Error tracking party membership",
 		}}}, true)
-		return nil, false, errors.New("failed to track party creation")
+		return nil, false, errors.New("failed to track party membership")
 	} else if isNew {
 		out := &rtapi.Envelope{Message: &rtapi.Envelope_Party{Party: &rtapi.Party{
 			PartyId:   ph.IDStr,

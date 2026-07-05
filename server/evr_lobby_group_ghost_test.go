@@ -58,6 +58,25 @@ func (t *ghostFailTracker) Track(ctx context.Context, sessionID uuid.UUID, strea
 	return false, false
 }
 
+// coMemberInjectTracker fails Track, but runs an injection hook first. It is
+// used to deterministically reproduce the concurrency the party-delete guard
+// protects against: the creator (user A) makes the group-name party
+// (created=true) and relies on the async tracker Join for its own membership;
+// before A's Track resolves, a concurrent joiner (user B) joins the
+// just-created party and becomes a committed member of ph.members. A's Track
+// then fails. The rollback must NOT delete the party out from under B.
+type coMemberInjectTracker struct {
+	*mockMatchmakingTracker
+	inject func()
+}
+
+func (t *coMemberInjectTracker) Track(ctx context.Context, sessionID uuid.UUID, stream PresenceStream, userID uuid.UUID, meta PresenceMeta) (bool, bool) {
+	if t.inject != nil {
+		t.inject()
+	}
+	return false, false
+}
+
 // membersContainUser reports whether ph.members holds a presence for userID.
 func membersContainUser(ph *PartyHandler, userID uuid.UUID) bool {
 	for _, m := range ph.members.List() {
@@ -194,6 +213,67 @@ func TestJoinPartyGroup_Rollback_DeletesParty_OnTrackFailure(t *testing.T) {
 	_, found := pr.LookupGroupPartyID(groupName)
 	assert.False(t, found,
 		"ORPHAN: the just-created party must be deleted from the registry when Track fails")
+}
+
+// TestJoinPartyGroup_Rollback_PreservesParty_WithCoMember_OnTrackFailure proves
+// the party-delete rollback is guarded on emptiness. The creator (user A) makes
+// a new group-name party (created=true); before A's Track resolves, a concurrent
+// joiner (user B) becomes a committed member. A's Track then fails.
+//
+// Because B is a legitimate member, the rollback must NOT delete the party.
+// Against unconditional `if created { Delete }` this FAILS: A deletes the party
+// out from under B. With the `ph.members.Size() == 0` guard it PASSES: the
+// non-empty party is preserved and B is retained.
+func TestJoinPartyGroup_Rollback_PreservesParty_WithCoMember_OnTrackFailure(t *testing.T) {
+	logger := loggerForTest(t)
+	tracker := &coMemberInjectTracker{mockMatchmakingTracker: newMockMatchmakingTracker()}
+	mm, mmCleanup := createLightMatchmaker(t, logger)
+	defer mmCleanup()
+
+	tsm := testStreamManager{}
+	dmr := &DummyMessageRouter{}
+	pr := NewLocalPartyRegistry(logger, cfg, mm, tracker, tsm, dmr, "testnode")
+
+	groupName := "insurgent"
+
+	// User B is the concurrent co-member. Build B's presence up front so the
+	// injection hook can add it to ph.members exactly as a real JoinRequest on
+	// an open party would (members.Join).
+	bUserID := uuid.Must(uuid.NewV4())
+	bSessionID := uuid.Must(uuid.NewV4())
+	bPresence := &Presence{
+		ID:     PresenceID{Node: "testnode", SessionID: bSessionID},
+		UserID: bUserID,
+		Meta:   PresenceMeta{Username: "co-member"},
+	}
+
+	// The hook runs during the creator's Track: the party already exists in the
+	// registry by then, so look it up and add B as a committed member.
+	tracker.inject = func() {
+		id, ok := pr.LookupGroupPartyID(groupName)
+		require.True(t, ok, "party must exist in registry during the creator's Track")
+		ph, ok := pr.Get(id)
+		require.True(t, ok)
+		_, err := ph.members.Join([]*Presence{bPresence})
+		require.NoError(t, err)
+	}
+
+	// User A (live context) creates the group-name party; its Track fails after
+	// B has joined.
+	creator := newTestSessionForParty(t, "creator", tracker, pr)
+	_, _, err := JoinPartyGroup(creator, groupName, MatchID{})
+	require.Error(t, err, "creator's join must fail when Track fails")
+
+	// The party must be preserved because B is a committed member.
+	id, found := pr.LookupGroupPartyID(groupName)
+	require.True(t, found,
+		"party with a co-member must NOT be deleted when the creator's Track fails")
+	ph, ok := pr.Get(id)
+	require.True(t, ok, "party handler must still be registered")
+	assert.True(t, membersContainUser(ph, bUserID),
+		"co-member B must remain in ph.members after the creator's failed join")
+	assert.False(t, membersContainUser(ph, creator.UserID()),
+		"creator must not linger in ph.members (its Track never succeeded)")
 }
 
 // TestJoinPartyGroup_HappyPath_JoinsExistingParty is the control/regression:
