@@ -19,6 +19,7 @@ type mockMatchmakingTracker struct {
 	mu              sync.RWMutex
 	presences       map[presenceKey]*PresenceMeta
 	untrackAllCount atomic.Int32
+	getLocalCount   atomic.Int32
 }
 
 type presenceKey struct {
@@ -51,6 +52,7 @@ func (t *mockMatchmakingTracker) Update(ctx context.Context, sessionID uuid.UUID
 }
 
 func (t *mockMatchmakingTracker) GetLocalBySessionIDStreamUserID(sessionID uuid.UUID, stream PresenceStream, userID uuid.UUID) *PresenceMeta {
+	t.getLocalCount.Add(1)
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	key := presenceKey{sessionID: sessionID, stream: stream, userID: userID}

@@ -1464,6 +1464,17 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 		return false
 	}
 
+	// Self-follow guard: never follow another of your own sessions. The party
+	// leader being the same user on a different session means a stale/ghost
+	// session (e.g. a dropped connection whose presence lingered) is holding
+	// leadership — following it would chase a session that is not in a real
+	// match and get released to solo. Fall through to normal matchmaking.
+	if leader.UserId == session.userID.String() {
+		logger.Debug("Party leader is this player's own (different) session, not self-following",
+			zap.String("leader_sid", leader.SessionId))
+		return false
+	}
+
 	leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
 	leaderUserID := uuid.FromStringOrNil(leader.UserId)
 
@@ -1609,6 +1620,16 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 // pollFollowPartyLeader polls for the party leader to join a match.
 func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, lobbyGroup *LobbyGroup) bool {
 	logger.Debug("Polling to follow party leader")
+
+	// Self-follow guard (mirrors TryFollowPartyLeader): never poll to follow
+	// another of your own sessions. A same-user, different-session leader is a
+	// stale/ghost session holding party leadership — polling it never converges.
+	if leader := lobbyGroup.GetLeader(); leader != nil &&
+		leader.UserId == session.userID.String() &&
+		leader.SessionId != session.id.String() {
+		logger.Debug("Party leader is this player's own session, not self-following in poll")
+		return false
+	}
 
 	// isFollowerInLeaderMatch checks if the follower was placed into the
 	// leader's match (e.g., by the matchmaker).
