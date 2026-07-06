@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
@@ -516,6 +517,31 @@ func (c *DiscordIntegrator) GuildMember(guildID, discordID string) (member *disc
 	return member, nil
 }
 
+// maxGroupTextLength is the column size of the groups table's name and
+// description columns (VARCHAR(255), migrate/sql/20180103142001_initial_schema.sql:182-183).
+// Discord guild descriptions can exceed it, which makes GroupCreate/GroupUpdate
+// fail with SQLSTATE 22001 ("value too long for type character varying(255)")
+// and permanently prevents the guild's group from being registered.
+const maxGroupTextLength = 255
+
+// truncateRuneSafe truncates s so its byte length is at most maxBytes without
+// splitting a multi-byte character (Discord descriptions contain emoji). The
+// byte limit is conservative for PostgreSQL VARCHAR(n), which counts characters.
+func truncateRuneSafe(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	if maxBytes <= 0 {
+		return ""
+	}
+	for i := maxBytes; i > 0; i-- {
+		if utf8.RuneStart(s[i]) {
+			return s[:i]
+		}
+	}
+	return ""
+}
+
 func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, guild *discordgo.Guild) error {
 	logger = logger.With(zap.String("guild_id", guild.ID), zap.String("guild_name", guild.Name))
 
@@ -565,6 +591,11 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 		return nil
 	}
 
+	// Fit within the groups table's VARCHAR(255) name/description columns;
+	// oversize values fail with SQLSTATE 22001 and the guild can never register.
+	groupName := truncateRuneSafe(guild.Name, maxGroupTextLength)
+	groupDescription := truncateRuneSafe(guild.Description, maxGroupTextLength)
+
 	groupID = d.GuildIDToGroupID(guild.ID)
 	if groupID == "" {
 		// This is a new guild.
@@ -581,7 +612,7 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 			return fmt.Errorf("error marshalling guild group metadata: %w", err)
 		}
 
-		group, err := d.nk.GroupCreate(ctx, ownerUserID, guild.Name, botUserID, GuildGroupLangTag, guild.Description, guild.IconURL("512"), false, metadataMap, 100000)
+		group, err := d.nk.GroupCreate(ctx, ownerUserID, groupName, botUserID, GuildGroupLangTag, groupDescription, guild.IconURL("512"), false, metadataMap, 100000)
 		if err != nil {
 			return fmt.Errorf("error creating group: %w", err)
 		}
@@ -591,7 +622,7 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 		// Invite the owner to the game service guild.
 	} else {
 		// Update the group data
-		if err := d.nk.GroupUpdate(ctx, groupID, SystemUserID, guild.Name, botUserID, GuildGroupLangTag, guild.Description, guild.IconURL("512"), false, nil, 100000); err != nil {
+		if err := d.nk.GroupUpdate(ctx, groupID, SystemUserID, groupName, botUserID, GuildGroupLangTag, groupDescription, guild.IconURL("512"), false, nil, 100000); err != nil {
 			return fmt.Errorf("error updating group: %w", err)
 		}
 	}
