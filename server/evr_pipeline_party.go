@@ -861,8 +861,9 @@ func (p *EvrPipeline) clearMemberReservation(ctx context.Context, logger *zap.Lo
 	// Phase 1 limitation: SignalClearPartyReservations clears ALL reservations
 	// for the party ID, not just the departing member's slot. This is broader
 	// than needed but safe — remaining members will get fresh reservations
-	// from the next lobbyEntrantConnected (createPartyReservations) or from
-	// appendPartyReservationPlaceholders on the next match tick.
+	// atomically from appendPartyReservationPlaceholders on the leader's next
+	// lobby find (evr_lobby_find.go:271), or from createReservationForNewPartyMember
+	// when a member re-joins while the leader is already in a social lobby.
 	//
 	// Phase 2 (TODO): Add SignalClearMemberReservation (by session ID) for
 	// surgical single-member removal.

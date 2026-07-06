@@ -99,23 +99,18 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 
 		acceptedIDs = append(acceptedIDs, entrantID)
 
-		// Create party reservations for followers when the leader connects.
-		// NOTE: `s` is the player's session (line 45), NOT `session` (the game server).
-		if params, ok := LoadParams(s.Context()); ok && params.currentPartyID != uuid.Nil {
-			// Check if this player is the party leader via the party registry.
-			if ph, ok := p.nk.partyRegistry.Get(params.currentPartyID); ok {
-				ph.RLock()
-				leader := ph.leader
-				ph.RUnlock()
-				if leader != nil && leader.UserPresence.SessionId == presence.GetSessionId() {
-					// This entrant is the party leader. Dispatch reservation
-					// creation asynchronously. Use context.WithoutCancel so
-					// reservation creation completes even if the player
-					// disconnects mid-creation.
-					go p.createPartyReservations(context.WithoutCancel(s.Context()), logger, matchID, uuid.FromStringOrNil(presence.GetSessionId()), params.currentPartyID)
-				}
-			}
-		}
+		// Deliberately NO party-reservation creation here. Slot reservations are
+		// Nakama-internal capacity accounting (state.reservationMap / OpenSlots,
+		// consumed in MatchJoinAttempt) and must be created ATOMICALLY at the
+		// join, capacity-gated, not on a game-server connect event. The leader's
+		// party is reserved synchronously in MatchJoinAttempt via the entrants[1:]
+		// path (appendPartyReservationPlaceholders, evr_lobby_find.go:271 ->
+		// LobbyJoinEntrants, evr_lobby_joinentrant.go:79-80). Late joiners are
+		// handled by createReservationForNewPartyMember (evr_pipeline_party.go).
+		// Firing reservation creation here (as this handler once did) deferred a
+		// capacity decision to an async round-trip and raced other players into
+		// the seats, tripping ReservationViolated (evr_match.go:451) in prod
+		// (v3.27.2-evr.319). Do not re-add it.
 	}
 
 	messages := make([]evr.Message, 0, 4)
