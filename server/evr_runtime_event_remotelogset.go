@@ -334,11 +334,19 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				logger.WithField("error", err).Warn("Failed to compute owned cosmetics")
 				continue
 			}
-			if profile.LoadoutCosmetics.Loadout, err = EquipAndSanitize(profile.LoadoutCosmetics.Loadout, category, name, owned); err != nil {
+			applyEquip := func() error {
+				updated, err := EquipAndSanitize(profile.LoadoutCosmetics.Loadout, category, name, owned)
+				if err != nil {
+					return err
+				}
+				profile.LoadoutCosmetics.Loadout = updated
+				return nil
+			}
+			if err := applyEquip(); err != nil {
 				return fmt.Errorf("failed to update equipped item: %w", err)
 			}
 
-			if err := EVRProfileUpdate(ctx, nk, session.UserID().String(), profile); err != nil {
+			if err := EVRProfileUpdateWithRetry(ctx, nk, session.UserID().String(), profile, applyEquip); err != nil {
 				logger.WithField("error", err).Warn("Failed to set account metadata")
 			}
 

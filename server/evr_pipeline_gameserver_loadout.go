@@ -77,114 +77,113 @@ func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *
 		return fmt.Errorf("failed to load EVR profile: %w", err)
 	}
 
-	// Convert the hash-based items to CosmeticLoadout fields
-	loadout := profile.LoadoutCosmetics.Loadout
+	// applyPayload maps the hash-based slot/item pairs onto profile.LoadoutCosmetics
+	// and rejects any cosmetic the player doesn't own (COSMETIC-1)
+	applyPayload := func() error {
+		loadout := profile.LoadoutCosmetics.Loadout
 
-	// Process each loadout instance
-	for _, instance := range payload.LoadoutInstances {
-		for slotHex, equippedHex := range instance.Items {
-			slotSymbol := evr.ToSymbol(slotHex)
-			if slotSymbol == 0 {
-				logger.Warn("Failed to parse slot hash", zap.String("slot", slotHex))
-				continue
-			}
-			equippedSymbol := evr.ToSymbol(equippedHex)
-			if equippedSymbol == 0 {
-				logger.Warn("Failed to parse equipped hash", zap.String("equipped", equippedHex))
-				continue
-			}
+		// Process each loadout instance
+		for _, instance := range payload.LoadoutInstances {
+			for slotHex, equippedHex := range instance.Items {
+				slotSymbol := evr.ToSymbol(slotHex)
+				if slotSymbol == 0 {
+					logger.Warn("Failed to parse slot hash", zap.String("slot", slotHex))
+					continue
+				}
+				equippedSymbol := evr.ToSymbol(equippedHex)
+				if equippedSymbol == 0 {
+					logger.Warn("Failed to parse equipped hash", zap.String("equipped", equippedHex))
+					continue
+				}
 
-			// Convert symbols to their string names
-			slotName := slotSymbol.String()
-			equippedName := equippedSymbol.String()
+				// Convert symbols to their string names
+				slotName := slotSymbol.String()
+				equippedName := equippedSymbol.String()
 
-			logger.Debug("Processing loadout item",
-				zap.String("slot_hash", slotHex),
-				zap.String("slot_name", slotName),
-				zap.String("equipped_hash", equippedHex),
-				zap.String("equipped_name", equippedName))
+				logger.Debug("Processing loadout item",
+					zap.String("slot_hash", slotHex),
+					zap.String("slot_name", slotName),
+					zap.String("equipped_hash", equippedHex),
+					zap.String("equipped_name", equippedName))
 
-			// Map slot names to CosmeticLoadout fields
-			switch slotName {
-			case "banner":
-				loadout.Banner = equippedName
-			case "booster":
-				loadout.Booster = equippedName
-			case "bracer":
-				loadout.Bracer = equippedName
-			case "chassis":
-				loadout.Chassis = equippedName
-			case "decal":
-				loadout.Decal = equippedName
-			case "decal_body":
-				loadout.DecalBody = equippedName
-			case "decalborder":
-				loadout.DecalBorder = equippedName
-			case "decalback":
-				loadout.DecalBack = equippedName
-			case "emissive":
-				loadout.Emissive = equippedName
-			case "emote":
-				loadout.Emote = equippedName
-			case "goal_fx":
-				loadout.GoalFX = equippedName
-			case "medal":
-				loadout.Medal = equippedName
-			case "pattern":
-				loadout.Pattern = equippedName
-			case "pattern_body":
-				loadout.PatternBody = equippedName
-			case "pip":
-				loadout.PIP = equippedName
-			case "secondemote":
-				loadout.SecondEmote = equippedName
-			case "tag":
-				loadout.Tag = equippedName
-			case "tint":
-				loadout.Tint = equippedName
-			case "tint_alignment_a":
-				loadout.TintAlignmentA = equippedName
-			case "tint_alignment_b":
-				loadout.TintAlignmentB = equippedName
-			case "tint_body":
-				loadout.TintBody = equippedName
-			case "title":
-				loadout.Title = equippedName
-			default:
-				logger.Debug("Unknown slot type", zap.String("slot", slotName))
+				// Map slot names to CosmeticLoadout fields
+				switch slotName {
+				case "banner":
+					loadout.Banner = equippedName
+				case "booster":
+					loadout.Booster = equippedName
+				case "bracer":
+					loadout.Bracer = equippedName
+				case "chassis":
+					loadout.Chassis = equippedName
+				case "decal":
+					loadout.Decal = equippedName
+				case "decal_body":
+					loadout.DecalBody = equippedName
+				case "decalborder":
+					loadout.DecalBorder = equippedName
+				case "decalback":
+					loadout.DecalBack = equippedName
+				case "emissive":
+					loadout.Emissive = equippedName
+				case "emote":
+					loadout.Emote = equippedName
+				case "goal_fx":
+					loadout.GoalFX = equippedName
+				case "medal":
+					loadout.Medal = equippedName
+				case "pattern":
+					loadout.Pattern = equippedName
+				case "pattern_body":
+					loadout.PatternBody = equippedName
+				case "pip":
+					loadout.PIP = equippedName
+				case "secondemote":
+					loadout.SecondEmote = equippedName
+				case "tag":
+					loadout.Tag = equippedName
+				case "tint":
+					loadout.Tint = equippedName
+				case "tint_alignment_a":
+					loadout.TintAlignmentA = equippedName
+				case "tint_alignment_b":
+					loadout.TintAlignmentB = equippedName
+				case "tint_body":
+					loadout.TintBody = equippedName
+				case "title":
+					loadout.Title = equippedName
+				default:
+					logger.Debug("Unknown slot type", zap.String("slot", slotName))
+				}
 			}
 		}
+
+		sanitized, err := sanitizeGameServerLoadout(loadout, profile)
+		if err != nil {
+			return fmt.Errorf("failed to compute owned cosmetics: %w", err)
+		}
+		profile.LoadoutCosmetics.Loadout = sanitized
+
+		// Update jersey number if present
+		if payload.Number >= 0 {
+			profile.LoadoutCosmetics.JerseyNumber = int64(payload.Number)
+		}
+
+		return nil
 	}
 
-	// Update profile with new loadout, rejecting any cosmetic the player does not own
-	// (COSMETIC-1). This handler is the *sole* persistence path for game servers with
-	// NativeSupport: evr_runtime_event_remotelogset.go's equip handler explicitly skips
-	// itself for NativeSupport matches ("NEVR (non-legacy) servers already persist
-	// loadout equips themselves"), so the ownership fix applied there does not run for
-	// those servers at all. Without this check, a NativeSupport-hosted character
-	// customization equip would persist an unowned cosmetic (e.g. a VRML finalist tag)
-	// exactly like the original remotelogset bug.
-	sanitized, err := sanitizeGameServerLoadout(loadout, profile)
-	if err != nil {
-		return fmt.Errorf("failed to compute owned cosmetics: %w", err)
-	}
-	profile.LoadoutCosmetics.Loadout = sanitized
-
-	// Update jersey number if present
-	if payload.Number >= 0 {
-		profile.LoadoutCosmetics.JerseyNumber = int64(payload.Number)
-		logger.Info("Updated jersey number", zap.Int("number", payload.Number))
+	if err := applyPayload(); err != nil {
+		return err
 	}
 
-	// Save the updated profile
-	if err := EVRProfileUpdate(ctx, p.nk, userID, profile); err != nil {
+	if err := EVRProfileUpdateWithRetry(ctx, p.nk, userID, profile, applyPayload); err != nil {
 		return fmt.Errorf("failed to store EVR profile: %w", err)
 	}
 
 	logger.Info("Successfully saved loadout update",
 		zap.String("user_id", userID),
 		zap.String("evr_id", request.EvrID.String()),
-		zap.Any("loadout", loadout))
+		zap.Any("loadout", profile.LoadoutCosmetics.Loadout))
 
 	return nil
 }

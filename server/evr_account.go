@@ -461,6 +461,27 @@ func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID strin
 	return fmt.Errorf("failed to write profile storage: %w", lastErr)
 }
 
+// this is EVRProfileUpdate, but on a version conflict it re-reads the fresh profile and calls reapply (must be idempotent)
+// to reapply the caller's mutation before retrying
+func EVRProfileUpdateWithRetry(ctx context.Context, nk runtime.NakamaModule, userID string, md *EVRProfile, reapply func() error) error {
+	if userID == SystemUserID {
+		return fmt.Errorf("cannot set metadata for system user")
+	}
+	if md == nil {
+		return fmt.Errorf("profile cannot be nil")
+	}
+
+	if err := StorableWriteWithRetry(ctx, nk, userID, md, reapply); err != nil {
+		return fmt.Errorf("failed to write profile storage: %w", err)
+	}
+
+	// Invalidate any cached ServerProfile so it will be regenerated with the updated data
+	_ = ServerProfileInvalidate(ctx, nk, userID)
+
+	// Also update the account metadata to keep it in sync
+	return nk.AccountUpdateId(ctx, userID, "", md.MarshalMap(), "", "", "", "", "")
+}
+
 func BuildEVRProfileFromAccount(account *api.Account) (*EVRProfile, error) {
 	if account == nil || account.User == nil {
 		return nil, fmt.Errorf("account is nil")

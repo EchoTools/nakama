@@ -403,8 +403,14 @@ func (d *DiscordAppBot) handleLoadoutCommand(ctx context.Context, s *discordgo.S
 			return editInteractionResponse(s, i, fmt.Sprintf("Loadout `%s` does not exist.", name))
 		}
 
-		profile.LoadoutCosmetics = *outfit
-		if err := EVRProfileUpdate(ctx, d.nk, userID, profile); err != nil {
+		applyOutfit := func() error {
+			profile.LoadoutCosmetics = *outfit
+			return nil
+		}
+		if err := applyOutfit(); err != nil {
+			return fmt.Errorf("failed to apply loadout: %w", err)
+		}
+		if err := EVRProfileUpdateWithRetry(ctx, d.nk, userID, profile, applyOutfit); err != nil {
 			return fmt.Errorf("failed to apply loadout: %w", err)
 		}
 		return editInteractionResponse(s, i, fmt.Sprintf("Applied loadout `%s`.", name))
@@ -474,8 +480,14 @@ func (d *DiscordAppBot) handleLoadoutCommand(ctx context.Context, s *discordgo.S
 			return editInteractionResponse(s, i, "That VRML cosmetic is not entitled for your account.")
 		}
 
-		applyLoadoutSlot(&profile.LoadoutCosmetics.Loadout, slot, value)
-		if err := EVRProfileUpdate(ctx, d.nk, userID, profile); err != nil {
+		applySlot := func() error {
+			applyLoadoutSlot(&profile.LoadoutCosmetics.Loadout, slot, value)
+			return nil
+		}
+		if err := applySlot(); err != nil {
+			return fmt.Errorf("failed to set loadout slot: %w", err)
+		}
+		if err := EVRProfileUpdateWithRetry(ctx, d.nk, userID, profile, applySlot); err != nil {
 			return fmt.Errorf("failed to set loadout slot: %w", err)
 		}
 
