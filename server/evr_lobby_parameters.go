@@ -379,6 +379,13 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		}
 	}
 
+	// SEC-5: the entrant role is client-claimed. Moderator is only legitimate
+	// for verified moderators (global operator or guild enforcer); anything
+	// else claiming it gets downgraded to unassigned.
+	if entrantRole == evr.TeamModerator && !isModerator {
+		entrantRole = evr.TeamUnassigned
+	}
+
 	// Check suspension history for toxic player separation.
 	// Enforcers and global operators are exempt — they may have suspension
 	// history from admin work, not from being toxic.

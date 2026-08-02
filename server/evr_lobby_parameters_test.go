@@ -1,10 +1,15 @@
 package server
 
 import (
+	"context"
+	"database/sql"
 	"testing"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/atomic"
+	"go.uber.org/zap"
 )
 
 func TestLobbyParamResolveDirectiveRole(t *testing.T) {
@@ -169,5 +174,93 @@ func TestResolveDirectiveRole_StaleDirectiveScenarios(t *testing.T) {
 			got := resolveDirectiveRole(tt.clientRole, directive)
 			assert.Equal(t, tt.wantRole, got, tt.description)
 		})
+	}
+}
+
+// TestLobbyParameters_ModeratorRoleAuthorization verifies SEC-5: a client that
+// claims TeamModerator in its entrant role without being a global operator or
+// guild enforcer is downgraded to TeamUnassigned. A session that IS a global
+// operator keeps the moderator role.
+//
+// Exercises the real resolution path: NewLobbyParametersFromRequest with a
+// real LobbyFindSessionRequest over the test DB.
+func TestLobbyParameters_ModeratorRoleAuthorization(t *testing.T) {
+	logger := loggerForTest(t)
+	db, nk := newChargeModule(t, logger)
+
+	// Deterministic defaults: NewPlayerMaxGames=0 disables the toxic
+	// separation journal read; EnableSBMM=false skips rating loads.
+	originalSettings := ServiceSettings()
+	defer ServiceSettingsUpdate(originalSettings)
+	ServiceSettingsUpdate(&ServiceSettingsData{})
+
+	t.Run("non-moderator client claiming TeamModerator is downgraded to TeamUnassigned", func(t *testing.T) {
+		session := newLobbyParamsTestSession(t, logger, db, nk, false)
+		lobbyParams, err := NewLobbyParametersFromRequest(session.ctx, logger, nk, session, moderatorClaimRequest())
+		if err != nil {
+			t.Fatalf("NewLobbyParametersFromRequest failed: %v", err)
+		}
+		assert.Equal(t, evr.TeamUnassigned, lobbyParams.Role,
+			"non-moderator must not keep a forged moderator role")
+	})
+
+	t.Run("global operator claiming TeamModerator keeps it", func(t *testing.T) {
+		session := newLobbyParamsTestSession(t, logger, db, nk, true)
+		lobbyParams, err := NewLobbyParametersFromRequest(session.ctx, logger, nk, session, moderatorClaimRequest())
+		if err != nil {
+			t.Fatalf("NewLobbyParametersFromRequest failed: %v", err)
+		}
+		assert.Equal(t, evr.TeamModerator, lobbyParams.Role,
+			"global operator must keep the moderator role")
+	})
+}
+
+// moderatorClaimRequest builds a LobbyFindSessionRequest whose entrant claims
+// TeamModerator — the SEC-5 forge vector.
+func moderatorClaimRequest() *evr.LobbyFindSessionRequest {
+	return &evr.LobbyFindSessionRequest{
+		Mode:    evr.ModeArenaPublic,
+		GroupID: uuid.Nil, // no active group: skips guild-enforcer and rating paths
+		Entrants: []evr.Entrant{{
+			EvrID: evr.EvrId{
+				PlatformCode: 4,
+				AccountId:    3963667097037078,
+			},
+			Role: int8(evr.TeamModerator),
+		}},
+	}
+}
+
+// newLobbyParamsTestSession builds a sessionWS with real pipeline dependencies
+// (DB-backed nk) and SessionParameters stored in ctx. isGlobalOperator controls
+// the moderator privilege the session holds.
+func newLobbyParamsTestSession(t *testing.T, logger *zap.Logger, db *sql.DB, nk *RuntimeGoNakamaModule, isGlobalOperator bool) *sessionWS {
+	t.Helper()
+	userID := uuid.Must(uuid.NewV4())
+	InsertUser(t, db, userID)
+
+	ep := &EvrPipeline{
+		node:   "test-node",
+		logger: logger,
+		db:     db,
+		config: NewConfig(logger),
+		nk:     nk,
+	}
+
+	params := &SessionParameters{
+		profile:          &EVRProfile{}, // non-nil: GetGroupIGN/GetActiveGroupID dereference it
+		isGlobalOperator: isGlobalOperator,
+		latencyHistory:   atomic.NewPointer[LatencyHistory](NewLatencyHistory()),
+	}
+	ctx := context.WithValue(context.Background(), ctxSessionParametersKey{}, atomic.NewPointer(params))
+
+	return &sessionWS{
+		id:          uuid.Must(uuid.NewV4()),
+		userID:      userID,
+		username:    atomic.NewString("sec5-test"),
+		ctx:         ctx,
+		logger:      logger,
+		pipeline:    &Pipeline{node: "test-node"},
+		evrPipeline: ep,
 	}
 }
