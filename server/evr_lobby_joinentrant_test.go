@@ -4,7 +4,45 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
+
+// TestVPNDegradedWarning_FiresWhenIPQSLookupUnavailable simulates IPQS
+// degradation: a guild has BlockVPNUsers enabled but the IPQS lookup is
+// unavailable (params.ipInfo is nil), so the VPN gate in lobbyAuthorize
+// silently no-ops and VPN users pass with no audit trail (SEC-6).
+//
+// warnVPNDegraded is the extracted logging path of that degradation case: it
+// must fire a warn-level operator alert carrying the client IP, Discord ID,
+// and guild ID. The "player still passes" property is structural — the
+// degradation branch in lobbyAuthorize contains no return — and is covered by
+// the gate being an else-if rather than a rejection path.
+func TestVPNDegradedWarning_FiresWhenIPQSLookupUnavailable(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	logger := zap.New(core)
+
+	const (
+		clientIP  = "203.0.113.7"
+		discordID = "123456789012345678"
+		guildID   = "987654321098765432"
+	)
+
+	warnVPNDegraded(logger, clientIP, discordID, guildID)
+
+	entries := logs.FilterMessage("VPN blocking degraded: IPQS lookup unavailable for VPN check").All()
+	require.Len(t, entries, 1, "expected exactly one degraded-VPN warning")
+
+	entry := entries[0]
+	require.Equal(t, zapcore.WarnLevel, entry.Level, "degradation warning must be warn-level")
+
+	ctx := entry.ContextMap()
+	assert.Equal(t, clientIP, ctx["client_ip"])
+	assert.Equal(t, discordID, ctx["discord_id"])
+	assert.Equal(t, guildID, ctx["guild_id"])
+}
 
 func TestSuspensionRoleBased_MessageIncludesGuildName(t *testing.T) {
 	tests := []struct {
