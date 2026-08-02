@@ -321,7 +321,7 @@ func EarlyQuitModifyRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 func loadEarlyQuitServiceConfigOrDefault(ctx context.Context, nk runtime.NakamaModule) *evr.SNSEarlyQuitConfig {
 	cfg := evr.NewDefaultSNSEarlyQuitConfig()
 	storable := &EarlyQuitServiceConfigStorable{SNSEarlyQuitConfig: cfg}
-	if err := StorableRead(ctx, nk, "", storable, false); err != nil {
+	if err := StorableRead(ctx, nk, SystemUserID, storable, false); err != nil {
 		return evr.NewDefaultSNSEarlyQuitConfig()
 	}
 	return storable.SNSEarlyQuitConfig

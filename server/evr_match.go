@@ -287,18 +287,12 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		eqConfig := NewEarlyQuitPlayerState()
 		if err := StorableRead(ctx, nk, joinPresence.GetUserId(), eqConfig, true); err != nil {
 			logger.Debug("Failed to load early quit config for logging", zap.Error(err))
-		} else if eqConfig.PenaltyLevel > 0 {
-			lockoutDuration := GetLockoutDuration(int(eqConfig.PenaltyLevel))
-			penaltyTime := time.Unix(eqConfig.PenaltyTimestamp, 0)
-			timeSinceLastQuit := time.Since(penaltyTime)
-
-			if timeSinceLastQuit < lockoutDuration {
-				remainingTime := lockoutDuration - timeSinceLastQuit
-				logger.Info("Player joining with active early quit penalty (client-side enforcement expected)",
-					zap.String("user_id", joinPresence.GetUserId()),
-					zap.Int32("penalty_level", eqConfig.PenaltyLevel),
-					zap.Duration("remaining", remainingTime))
-			}
+		} else if eqConfig.PenaltyLevel > 0 && eqConfig.PenaltyTimestamp > 0 && time.Now().Unix() < eqConfig.PenaltyTimestamp {
+			remainingTime := time.Until(time.Unix(eqConfig.PenaltyTimestamp, 0))
+			logger.Info("Player joining with active early quit penalty (client-side enforcement expected)",
+				zap.String("user_id", joinPresence.GetUserId()),
+				zap.Int32("penalty_level", eqConfig.PenaltyLevel),
+				zap.Duration("remaining", remainingTime))
 		}
 	}
 
@@ -659,6 +653,46 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 
 var PresenceReasonKicked runtime.PresenceReason = 16
 
+// recordEarlyQuitForPlayer persists the side effects shared by the immediate
+// early-quit charge path (MatchLeave) and the deferred reconnect-reservation
+// expiry path (MatchLoop): the increment log line, the leaderboard stat, and
+// the quit-history record. Both call sites must stay in lockstep, so the block
+// lives here rather than inline.
+func recordEarlyQuitForPlayer(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, state *MatchLabel, mp *EvrMatchPresence, leaveReason LeaveReason) {
+	logger.WithFields(map[string]any{
+		"uid":          mp.GetUserId(),
+		"username":     mp.Username,
+		"evrid":        mp.EvrID,
+		"display_name": mp.DisplayName,
+		"leave_reason": leaveReason,
+	}).Debug("Incrementing early quit for player.")
+
+	if err := AccumulateLeaderboardStat(ctx, nk, mp.GetUserId(), mp.DisplayName, state.GetGroupID().String(), state.Mode, EarlyQuitStatisticID, 1); err != nil {
+		logger.WithField("error", err).Warn("Failed to record early quit to leaderboard")
+	}
+
+	// Save detailed quit record to history
+	if participation, ok := state.participations[mp.GetUserId()]; ok {
+		history := NewEarlyQuitHistory(mp.GetUserId())
+		if err := StorableRead(ctx, nk, mp.GetUserId(), history, false); err != nil {
+			logger.WithField("error", err).Debug("Creating new early quit history")
+		}
+
+		quitRecord := CreateQuitRecordFromParticipation(state, participation)
+		history.AddQuitRecord(quitRecord)
+
+		// Prune old records (keep last 90 days)
+		prunedQuits, prunedCompletions := history.PruneOldRecords(90 * 24 * time.Hour)
+		if prunedQuits > 0 || prunedCompletions > 0 {
+			logger.Debug("Pruned old early quit history records", zap.Int("quits", prunedQuits), zap.Int("completions", prunedCompletions))
+		}
+
+		if err := StorableWrite(ctx, nk, mp.GetUserId(), history); err != nil {
+			logger.Warn("Failed to write early quit history", zap.Error(err))
+		}
+	}
+}
+
 // MatchLeave is called after a player leaves the match.
 func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ any, presences []runtime.Presence) any {
 	state, ok := state_.(*MatchLabel)
@@ -927,38 +961,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 					tags["leave_reason"] = string(leaveReason)
 					nk.MetricsCounterAdd("match_entrant_early_quit", tags, 1)
 
-					logger.WithFields(map[string]any{
-						"uid":          mp.GetUserId(),
-						"username":     mp.Username,
-						"evrid":        mp.EvrID,
-						"display_name": mp.DisplayName,
-						"leave_reason": leaveReason,
-					}).Debug("Incrementing early quit for player.")
-
-					if err := AccumulateLeaderboardStat(ctx, nk, mp.GetUserId(), mp.DisplayName, state.GetGroupID().String(), state.Mode, EarlyQuitStatisticID, 1); err != nil {
-						logger.WithField("error", err).Warn("Failed to record early quit to leaderboard")
-					}
-
-					// Save detailed quit record to history
-					if participation, ok := state.participations[mp.GetUserId()]; ok {
-						history := NewEarlyQuitHistory(mp.GetUserId())
-						if err := StorableRead(ctx, nk, mp.GetUserId(), history, false); err != nil {
-							logger.WithField("error", err).Debug("Creating new early quit history")
-						}
-
-						quitRecord := CreateQuitRecordFromParticipation(state, participation)
-						history.AddQuitRecord(quitRecord)
-
-						// Prune old records (keep last 90 days)
-						prunedQuits, prunedCompletions := history.PruneOldRecords(90 * 24 * time.Hour)
-						if prunedQuits > 0 || prunedCompletions > 0 {
-							logger.Debug("Pruned old early quit history records", zap.Int("quits", prunedQuits), zap.Int("completions", prunedCompletions))
-						}
-
-						if err := StorableWrite(ctx, nk, mp.GetUserId(), history); err != nil {
-							logger.Warn("Failed to write early quit history", zap.Error(err))
-						}
-					}
+					recordEarlyQuitForPlayer(ctx, logger, nk, state, mp, leaveReason)
 
 					eqconfig := NewEarlyQuitPlayerState()
 					_nk, ok := nk.(*RuntimeGoNakamaModule)
@@ -980,6 +983,12 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 						} else if leaveReason == LeaveReasonVoluntary || leaveReason == LeaveReasonUnknown || leaveReason == "" {
 							// Differential penalty: only apply immediate penalty for voluntary leaves.
 							eqconfig.IncrementEarlyQuit()
+
+							// Resolve the penalty level from the STORED ladder and set the
+							// lockout expiry so the matchmaker can enforce it. Reading the
+							// stored EarlyQuit|config row (SystemUserID) keeps this path
+							// consistent with the ladder the login/profile path enforces.
+							resolveAndApplyPenaltyLockout(ctx, nk, logger, eqconfig)
 						} else {
 							// For disconnects: still record the quit but don't increment penalty.
 							// The logout forgiveness goroutine handles cleanup.
@@ -1340,10 +1349,18 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					logger.WithField("error", err).Warn("Failed to load early quitter config for deferred penalty")
 				} else {
 					eqconfig.IncrementEarlyQuit()
+					resolveAndApplyPenaltyLockout(ctx, nk, logger, eqconfig)
 					eqconfig.LastEarlyQuitMatchID = state.ID
 					if err := StorableWrite(ctx, nk, rr.UserID, eqconfig); err != nil {
 						logger.WithField("error", err).Warn("Failed to write early quitter config for deferred penalty")
 					}
+				}
+
+				// A deferred penalty must produce the same side effects as the
+				// immediate charge path in MatchLeave: the increment log line,
+				// the leaderboard stat, and the quit-history record.
+				if rr.Presence != nil {
+					recordEarlyQuitForPlayer(ctx, logger, nk, state, rr.Presence, LeaveReasonReservationExp)
 				}
 			}
 		}
@@ -1434,11 +1451,13 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					continue
 				}
 
-				eqconfig.IncrementCompletedMatches()
-
-				// Track completion in detailed history
-				if err := TrackMatchCompletion(ctx, logger, nk, presence.GetUserId(), state.ID, time.Now().UTC()); err != nil {
+				// Track completion in detailed history first; only credit the
+				// counter when this is the first time the match is reported
+				// (the post-match stats upload also reports it).
+				if first, err := TrackMatchCompletion(ctx, logger, nk, presence.GetUserId(), state.ID, time.Now().UTC()); err != nil {
 					logger.WithField("error", err).Debug("Failed to track match completion in history")
+				} else if first {
+					eqconfig.IncrementCompletedMatches()
 				}
 
 				// Check for tier change after completing match

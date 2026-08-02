@@ -341,7 +341,12 @@ func CreateQuitRecordFromParticipation(state *MatchLabel, participation *PlayerP
 
 // TrackMatchCompletion tracks a match completion in the player's early quit history
 // This is a helper function to reduce code duplication
-func TrackMatchCompletion(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID string, matchID MatchID, completionTime time.Time) error {
+//
+// Returns (true, nil) when the completion is a new occurrence for this match and
+// was persisted; (false, nil) when the match was already tracked (the same match
+// is reported by both the post-match stats upload and the MatchLoop MatchOver
+// dispatch, so only the first occurrence is a real completion credit).
+func TrackMatchCompletion(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID string, matchID MatchID, completionTime time.Time) (bool, error) {
 	history := NewEarlyQuitHistory(userID)
 	if err := StorableRead(ctx, nk, userID, history, false); err != nil {
 		if status.Code(err) == codes.NotFound {
@@ -353,11 +358,19 @@ func TrackMatchCompletion(ctx context.Context, logger runtime.Logger, nk runtime
 		}
 	}
 
+	// Dedupe: the same (user, match) can arrive from the post-match stats upload
+	// AND from the MatchLoop MatchOver dispatch. Count it only once.
+	for _, record := range history.Completions {
+		if record.MatchID.Equals(matchID) {
+			return false, nil
+		}
+	}
+
 	history.AddCompletion(matchID, completionTime)
 	if err := StorableWrite(ctx, nk, userID, history); err != nil {
 		logger.WithField("error", err).Warn("Failed to write completion to early quit history")
-		return err
+		return false, err
 	}
 
-	return nil
+	return true, nil
 }

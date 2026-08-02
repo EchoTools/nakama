@@ -10,6 +10,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/zap"
 )
 
 const (
@@ -131,6 +132,30 @@ func ResolvePenaltyLevel(numQuits int32, cfg *evr.SNSEarlyQuitConfig) (level int
 		return int32(last.PenaltyLevel), int32(last.MMLockoutSec)
 	}
 	return 0, 0
+}
+
+// resolveAndApplyPenaltyLockout resolves the penalty level from the STORED
+// early quit service config (EarlyQuit|config under SystemUserID) and applies
+// the resulting lockout to eqconfig. Call it after IncrementEarlyQuit() so the
+// new quit count is reflected. When the count maps to a level with no lockout
+// (level 0), any stale PenaltyLevel/PenaltyTimestamp are cleared to zero.
+func resolveAndApplyPenaltyLockout(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, eqconfig *EarlyQuitPlayerState) {
+	// RuntimeLoggerToZapLogger hard-casts to *RuntimeGoLogger, which test
+	// doubles (e.g. captureLogger) do not satisfy. LoadEarlyQuitServiceConfig
+	// tolerates a nil logger, so degrade gracefully instead of panicking.
+	var zapLogger *zap.Logger
+	if zl, ok := logger.(*RuntimeGoLogger); ok {
+		zapLogger = zl.logger
+	}
+	config := LoadEarlyQuitServiceConfig(ctx, nk, zapLogger)
+	level, lockoutSec := ResolvePenaltyLevel(eqconfig.NumEarlyQuits, config)
+	if lockoutSec > 0 {
+		eqconfig.PenaltyLevel = level
+		eqconfig.PenaltyTimestamp = time.Now().Unix() + int64(lockoutSec)
+	} else {
+		eqconfig.PenaltyLevel = 0
+		eqconfig.PenaltyTimestamp = 0
+	}
 }
 
 // ResolveSteadyPlayerLevel determines the steady player level from the config.
@@ -334,29 +359,29 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 		return
 	}
 
-	// Check if the player is still logged in
-	sessionUUID, err := uuid.FromString(sessionID)
+	// Check if the player is still online — ANY session for this user counts.
+	// The specific session captured at quit time may be gone (player relogged on
+	// a new session), but if they have any active session they never logged out,
+	// so the early quit penalty stays.
+	userUUID, err := uuid.FromString(userID)
 	if err != nil {
-		logger.WithField("error", err).Warn("Invalid session ID format for early quit check")
+		logger.WithField("error", err).Warn("Invalid user ID format for early quit check")
 		return
 	}
 
-	// If session still exists, player is still logged in to this session
-	// No action needed as they're still using the system
-	if sessionRegistry.Get(sessionUUID) != nil {
+	online := false
+	sessionRegistry.Range(func(s Session) bool {
+		if s.UserID() == userUUID {
+			online = true
+			return false
+		}
+		return true
+	})
+	if online {
 		logger.WithFields(map[string]any{
 			"uid":        userID,
 			"session_id": sessionID,
 		}).Debug("Player still has active session, early quit penalty remains")
-		return
-	}
-
-	// Session doesn't exist, but we need to check if user has ANY active session
-	// For now, we'll assume if this session is gone, we should remove the early quit
-	// since it indicates they've fully logged out
-	userUUID, err := uuid.FromString(userID)
-	if err != nil {
-		logger.WithField("error", err).Warn("Invalid user ID format for early quit check")
 		return
 	}
 
@@ -470,7 +495,10 @@ func CheckAndApplyEarlyQuitIfStillOnline(ctx context.Context, logger runtime.Log
 		return
 	}
 
-	// If session is gone, player logged out — genuine crash/disconnect, no penalty.
+	// If the session captured at quit time is gone, the player genuinely
+	// disconnected (crash/network issue) — forgive, no penalty. A reconnect on
+	// a NEW session must not count: the crash-recovery reservation feature
+	// (reconnectReservations) protects the crash+reconnect flow.
 	if sessionRegistry.Get(sessionUUID) == nil {
 		logger.WithFields(map[string]any{
 			"uid":        userID,
@@ -492,6 +520,7 @@ func CheckAndApplyEarlyQuitIfStillOnline(ctx context.Context, logger runtime.Log
 	}
 
 	eqconfig.IncrementEarlyQuit()
+	resolveAndApplyPenaltyLockout(ctx, nk, logger, eqconfig)
 	eqconfig.LastEarlyQuitMatchID = matchID
 
 	serviceSettings := ServiceSettings()

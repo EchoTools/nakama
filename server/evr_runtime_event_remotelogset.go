@@ -573,11 +573,13 @@ func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logge
 	if err := StorableRead(ctx, nk, userID, eqconfig, true); err != nil {
 		logger.WithField("error", err).Warn("Failed to load early quitter config")
 	} else {
-		eqconfig.IncrementCompletedMatches()
-
-		// Track completion in detailed history
-		if err := TrackMatchCompletion(ctx, logger, nk, userID, matchID, time.Now().UTC()); err != nil {
+		// Track completion in detailed history first; only credit the counter
+		// when this is the first time the match is reported (the MatchLoop
+		// MatchOver dispatch also reports it).
+		if first, err := TrackMatchCompletion(ctx, logger, nk, userID, matchID, time.Now().UTC()); err != nil {
 			logger.WithField("error", err).Debug("Failed to track match completion in history")
+		} else if first {
+			eqconfig.IncrementCompletedMatches()
 		}
 
 		// Check for tier change after completing match

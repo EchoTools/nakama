@@ -1,175 +1,120 @@
 package server
 
 import (
+	"context"
+	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/zap"
 )
 
-// TestEarlyQuitDetectionPipeline validates that early quits are properly detected
-// and the total_early_quits counter is incremented
+// TestEarlyQuitDetectionPipeline validates that early quits are properly
+// detected and the total_early_quits counter is incremented.
+//
+// The previous version of this file never called production code: it
+// re-implemented a hand-rolled shouldDetectEarlyQuit predicate (including a
+// 60-second grace period that production does not implement — see
+// evr_match.go:918, which has no duration threshold) and asserted on that
+// re-implementation. Every gate case here instead drives the REAL MatchLeave
+// charge gate:
+//
+//	!hasReconnectReservation && Mode == ArenaPublic && !GameState.IsMatchOver() && IsPlayer()
+//
+// and asserts on the stored EarlyQuit|statistics counter.
+//
+// Requires a real Postgres (TEST_DB_URL) — the gate's StorableRead/StorableWrite
+// run through RuntimeGoNakamaModule, which uses pgx connections directly.
 func TestEarlyQuitDetectionPipeline(t *testing.T) {
+	logger := loggerForTest(t)
+	db, nk := newChargeModule(t, logger)
+	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
+
 	t.Run("Player leaving mid-game increments early quit counter", func(t *testing.T) {
-		// This test validates that when a player leaves during an active match,
-		// the early quit is detected and the counter is properly incremented.
+		player := reconnectTestPlayer("b6-pipe-midgame", evr.TeamBlue)
+		InsertUser(t, db, player.UserID)
+		preseedEarlyQuitConfig(t, ctx, nk, player.GetUserId())
 
-		// Setup: Create a mock match state with an active game
-		state := &MatchLabel{
-			Mode:      evr.ModeArenaPublic,
-			StartTime: time.Now().Add(-2 * time.Minute), // Match started 2 minutes ago
-			GameState: &GameState{
-				MatchOver: false, // Match is still active
-			},
-			presenceMap: make(map[string]*EvrMatchPresence),
+		state := chargeState(evr.ModeArenaPublic, player)
+		driveVoluntaryLeave(ctx, t, db, nk, state, player)
+
+		if err := assertStoredEarlyQuitCount(t, ctx, nk, player.GetUserId(), 1); err != nil {
+			t.Error(err)
 		}
+	})
 
-		// Create a player presence
-		playerUserID := uuid.Must(uuid.NewV4())
-		playerSessionID := uuid.Must(uuid.NewV4())
+	t.Run("Player leaving before 60 second mark increments early quit counter", func(t *testing.T) {
+		// Production has NO 60-second grace period: the charge gate at
+		// evr_match.go:918 never consults the match start time. A leave 30
+		// seconds in charges exactly like one 2 minutes in. This test replaces
+		// the old "60 second grace" case, which asserted a rule production
+		// does not implement.
+		player := reconnectTestPlayer("b6-pipe-early", evr.TeamBlue)
+		InsertUser(t, db, player.UserID)
+		preseedEarlyQuitConfig(t, ctx, nk, player.GetUserId())
 
-		playerPresence := &EvrMatchPresence{
-			SessionID:     playerSessionID,
-			UserID:        playerUserID,
-			Username:      "test_player",
-			RoleAlignment: evr.TeamBlue, // Player role
-			DisplayName:   "TestPlayer",
-		}
+		state := chargeState(evr.ModeArenaPublic, player)
+		state.joinTimestamps[player.GetSessionId()] = time.Now().Add(-30 * time.Second) // 30 seconds into the match
+		driveVoluntaryLeave(ctx, t, db, nk, state, player)
 
-		state.presenceMap[playerSessionID.String()] = playerPresence
-
-		// Before leaving, record initial early quit count
-		// In a real scenario, we would read from storage
-		initialConfig := NewEarlyQuitPlayerState()
-		initialEarlyQuits := initialConfig.NumEarlyQuits
-
-		// Simulate player leaving
-		// The early quit detection happens when:
-		// 1. Match is ModeArenaPublic
-		// 2. Match started more than 60 seconds ago
-		// 3. GameState exists and match is not over
-		// 4. Player is an actual player (not spectator/broadcaster)
-
-		// Validate detection conditions
-		if state.Mode != evr.ModeArenaPublic {
-			t.Fatal("Test setup error: Mode should be ModeArenaPublic")
-		}
-
-		if !time.Now().After(state.StartTime.Add(time.Second * 60)) {
-			t.Fatal("Test setup error: Match should be past 60 second mark")
-		}
-
-		if state.GameState == nil || state.GameState.MatchOver {
-			t.Fatal("Test setup error: GameState should exist and match should not be over")
-		}
-
-		if !playerPresence.IsPlayer() {
-			t.Fatal("Test setup error: Presence should be a player")
-		}
-
-		// The actual test would require running the match loop logic
-		// For now, we're validating the conditions that should trigger early quit detection
-
-		// Simulate the early quit increment
-		config := NewEarlyQuitPlayerState()
-		config.IncrementEarlyQuit()
-
-		if config.NumEarlyQuits != initialEarlyQuits+1 {
-			t.Errorf("Expected TotalEarlyQuits to increment from %d to %d, got %d",
-				initialEarlyQuits, initialEarlyQuits+1, config.NumEarlyQuits)
-		}
-
-		if config.NumSteadyEarlyQuits != 1 {
-			t.Errorf("Expected NumSteadyEarlyQuits to be 1, got %d", config.NumSteadyEarlyQuits)
+		if err := assertStoredEarlyQuitCount(t, ctx, nk, player.GetUserId(), 1); err != nil {
+			t.Error(err)
 		}
 	})
 
 	t.Run("Player leaving after match ends does not increment early quit", func(t *testing.T) {
-		state := &MatchLabel{
-			Mode:      evr.ModeArenaPublic,
-			StartTime: time.Now().Add(-10 * time.Minute),
-			GameState: &GameState{
-				MatchOver: true, // Match is over
-			},
-		}
+		player := reconnectTestPlayer("b6-pipe-after", evr.TeamBlue)
+		InsertUser(t, db, player.UserID)
+		preseedEarlyQuitConfig(t, ctx, nk, player.GetUserId())
 
-		// Should NOT trigger early quit detection when match is over
-		shouldDetectEarlyQuit := state.Mode == evr.ModeArenaPublic &&
-			time.Now().After(state.StartTime.Add(time.Second*60)) &&
-			state.GameState != nil &&
-			!state.GameState.MatchOver
+		state := chargeState(evr.ModeArenaPublic, player)
+		state.GameState = &GameState{MatchOver: true}
+		driveVoluntaryLeave(ctx, t, db, nk, state, player)
 
-		if shouldDetectEarlyQuit {
-			t.Error("Should not detect early quit when match is over")
-		}
-	})
-
-	t.Run("Player leaving before 60 second mark does not increment early quit", func(t *testing.T) {
-		state := &MatchLabel{
-			Mode:      evr.ModeArenaPublic,
-			StartTime: time.Now().Add(-30 * time.Second), // Only 30 seconds into match
-			GameState: &GameState{
-				MatchOver: false,
-			},
-		}
-
-		// Should NOT trigger early quit detection before 60 seconds
-		shouldDetectEarlyQuit := state.Mode == evr.ModeArenaPublic &&
-			time.Now().After(state.StartTime.Add(time.Second*60)) &&
-			state.GameState != nil &&
-			!state.GameState.MatchOver
-
-		if shouldDetectEarlyQuit {
-			t.Error("Should not detect early quit before 60 second mark")
+		if err := assertStoredEarlyQuitCount(t, ctx, nk, player.GetUserId(), 0); err != nil {
+			t.Error(err)
 		}
 	})
 
 	t.Run("Spectator leaving does not increment early quit", func(t *testing.T) {
-		spectatorPresence := &EvrMatchPresence{
-			UserID:        uuid.Must(uuid.NewV4()),
-			SessionID:     uuid.Must(uuid.NewV4()),
-			Username:      "spectator",
-			RoleAlignment: evr.TeamSpectator, // Spectator role
-		}
+		player := reconnectTestPlayer("b6-pipe-spec", evr.TeamSpectator)
+		InsertUser(t, db, player.UserID)
+		preseedEarlyQuitConfig(t, ctx, nk, player.GetUserId())
 
-		// Spectators should not trigger early quit
-		if spectatorPresence.IsPlayer() {
-			t.Error("Spectator should not be considered a player")
+		state := chargeState(evr.ModeArenaPublic, player)
+		driveVoluntaryLeave(ctx, t, db, nk, state, player)
+
+		if err := assertStoredEarlyQuitCount(t, ctx, nk, player.GetUserId(), 0); err != nil {
+			t.Error(err)
 		}
 	})
 
 	t.Run("Moderator leaving does not increment early quit", func(t *testing.T) {
-		moderatorPresence := &EvrMatchPresence{
-			UserID:        uuid.Must(uuid.NewV4()),
-			SessionID:     uuid.Must(uuid.NewV4()),
-			Username:      "moderator",
-			RoleAlignment: evr.TeamModerator, // Moderator role
-		}
+		player := reconnectTestPlayer("b6-pipe-mod", evr.TeamModerator)
+		InsertUser(t, db, player.UserID)
+		preseedEarlyQuitConfig(t, ctx, nk, player.GetUserId())
 
-		// Moderators should not trigger early quit
-		if moderatorPresence.IsPlayer() {
-			t.Error("Moderator should not be considered a player")
+		state := chargeState(evr.ModeArenaPublic, player)
+		driveVoluntaryLeave(ctx, t, db, nk, state, player)
+
+		if err := assertStoredEarlyQuitCount(t, ctx, nk, player.GetUserId(), 0); err != nil {
+			t.Error(err)
 		}
 	})
 
 	t.Run("Social lobby leaving does not increment early quit", func(t *testing.T) {
-		state := &MatchLabel{
-			Mode:      evr.ModeSocialPublic, // Social mode, not arena
-			StartTime: time.Now().Add(-2 * time.Minute),
-			GameState: &GameState{
-				MatchOver: false,
-			},
-		}
+		player := reconnectTestPlayer("b6-pipe-social", evr.TeamBlue)
+		InsertUser(t, db, player.UserID)
+		preseedEarlyQuitConfig(t, ctx, nk, player.GetUserId())
 
-		// Should NOT trigger early quit detection in social lobbies
-		shouldDetectEarlyQuit := state.Mode == evr.ModeArenaPublic &&
-			time.Now().After(state.StartTime.Add(time.Second*60)) &&
-			state.GameState != nil &&
-			!state.GameState.MatchOver
+		state := chargeState(evr.ModeSocialPublic, player)
+		driveVoluntaryLeave(ctx, t, db, nk, state, player)
 
-		if shouldDetectEarlyQuit {
-			t.Error("Should not detect early quit in social lobbies")
+		if err := assertStoredEarlyQuitCount(t, ctx, nk, player.GetUserId(), 0); err != nil {
+			t.Error(err)
 		}
 	})
 
@@ -199,210 +144,227 @@ func TestEarlyQuitDetectionPipeline(t *testing.T) {
 			t.Errorf("Expected NumSteadyEarlyQuits 3, got %d", config.NumSteadyEarlyQuits)
 		}
 	})
-
 }
 
-// TestEarlyQuitConditions tests the specific conditions that must be met
-// for early quit detection to trigger
+// TestEarlyQuitConditions exercises the conditions that must hold for the
+// early-quit charge gate to fire, driving the REAL MatchLeave for each row and
+// asserting on the stored counter.
+//
+// The previous version re-implemented the gate's conditions in the test (with
+// a 60-second grace clause production does not have) and asserted on that
+// re-implementation — it could never fail. There is deliberately no
+// match-started-ago field: production has no duration threshold.
 func TestEarlyQuitConditions(t *testing.T) {
+	logger := loggerForTest(t)
+	db, nk := newChargeModule(t, logger)
+	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
+
 	tests := []struct {
-		name            string
-		mode            evr.Symbol
-		matchStartedAgo time.Duration
-		gameStateExists bool
-		matchOver       bool
-		roleAlignment   int
-		shouldTrigger   bool
-		description     string
+		name          string
+		seed          string
+		mode          evr.Symbol
+		gameState     *GameState // nil means "no game state"
+		roleAlignment int
+		shouldTrigger bool
+		description   string
 	}{
 		{
-			name:            "Normal early quit - arena public, mid-game player leave",
-			mode:            evr.ModeArenaPublic,
-			matchStartedAgo: 2 * time.Minute,
-			gameStateExists: true,
-			matchOver:       false,
-			roleAlignment:   evr.TeamBlue,
-			shouldTrigger:   true,
-			description:     "Player leaving arena match after 60s should trigger",
+			name:          "Normal early quit - arena public, mid-game player leave",
+			seed:          "b6-cond-arena",
+			mode:          evr.ModeArenaPublic,
+			gameState:     &GameState{MatchOver: false},
+			roleAlignment: evr.TeamBlue,
+			shouldTrigger: true,
+			description:   "Player leaving arena match should charge an early quit",
 		},
 		{
-			name:            "Before 60 second grace period",
-			mode:            evr.ModeArenaPublic,
-			matchStartedAgo: 30 * time.Second,
-			gameStateExists: true,
-			matchOver:       false,
-			roleAlignment:   evr.TeamBlue,
-			shouldTrigger:   false,
-			description:     "Player leaving before 60s should not trigger",
+			name:          "Player leaving before 60 second mark",
+			seed:          "b6-cond-early",
+			mode:          evr.ModeArenaPublic,
+			gameState:     &GameState{MatchOver: false},
+			roleAlignment: evr.TeamBlue,
+			shouldTrigger: true,
+			description:   "Production has no grace period: a leave 30s into the match charges like any other",
 		},
 		{
-			name:            "After match ends",
-			mode:            evr.ModeArenaPublic,
-			matchStartedAgo: 10 * time.Minute,
-			gameStateExists: true,
-			matchOver:       true,
-			roleAlignment:   evr.TeamBlue,
-			shouldTrigger:   false,
-			description:     "Player leaving after match ends should not trigger",
+			name:          "After match ends",
+			seed:          "b6-cond-over",
+			mode:          evr.ModeArenaPublic,
+			gameState:     &GameState{MatchOver: true},
+			roleAlignment: evr.TeamBlue,
+			shouldTrigger: false,
+			description:   "Player leaving after match ends should not charge an early quit",
 		},
 		{
-			name:            "Private arena match",
-			mode:            evr.ModeArenaPrivate,
-			matchStartedAgo: 2 * time.Minute,
-			gameStateExists: true,
-			matchOver:       false,
-			roleAlignment:   evr.TeamBlue,
-			shouldTrigger:   false,
-			description:     "Private matches should not trigger early quit",
+			name:          "Private arena match",
+			seed:          "b6-cond-private",
+			mode:          evr.ModeArenaPrivate,
+			gameState:     &GameState{MatchOver: false},
+			roleAlignment: evr.TeamBlue,
+			shouldTrigger: false,
+			description:   "Private matches should not charge early quits",
 		},
 		{
-			name:            "Combat mode",
-			mode:            evr.ModeCombatPublic,
-			matchStartedAgo: 2 * time.Minute,
-			gameStateExists: true,
-			matchOver:       false,
-			roleAlignment:   evr.TeamBlue,
-			shouldTrigger:   false,
-			description:     "Combat matches should not trigger early quit (only arena)",
+			name:          "Combat mode",
+			seed:          "b6-cond-combat",
+			mode:          evr.ModeCombatPublic,
+			gameState:     &GameState{MatchOver: false},
+			roleAlignment: evr.TeamBlue,
+			shouldTrigger: false,
+			description:   "Combat matches should not charge early quits (only arena)",
 		},
 		{
-			name:            "Social lobby",
-			mode:            evr.ModeSocialPublic,
-			matchStartedAgo: 2 * time.Minute,
-			gameStateExists: true,
-			matchOver:       false,
-			roleAlignment:   evr.TeamBlue,
-			shouldTrigger:   false,
-			description:     "Social lobbies should not trigger early quit",
+			name:          "Social lobby",
+			seed:          "b6-cond-social",
+			mode:          evr.ModeSocialPublic,
+			gameState:     &GameState{MatchOver: false},
+			roleAlignment: evr.TeamBlue,
+			shouldTrigger: false,
+			description:   "Social lobbies should not charge early quits",
 		},
 		{
-			name:            "Spectator leaving",
-			mode:            evr.ModeArenaPublic,
-			matchStartedAgo: 2 * time.Minute,
-			gameStateExists: true,
-			matchOver:       false,
-			roleAlignment:   evr.TeamSpectator,
-			shouldTrigger:   false,
-			description:     "Spectators leaving should not trigger early quit",
+			name:          "Spectator leaving",
+			seed:          "b6-cond-spectator",
+			mode:          evr.ModeArenaPublic,
+			gameState:     &GameState{MatchOver: false},
+			roleAlignment: evr.TeamSpectator,
+			shouldTrigger: false,
+			description:   "Spectators leaving should not charge early quits",
 		},
 		{
-			name:            "Moderator leaving",
-			mode:            evr.ModeArenaPublic,
-			matchStartedAgo: 2 * time.Minute,
-			gameStateExists: true,
-			matchOver:       false,
-			roleAlignment:   evr.TeamModerator,
-			shouldTrigger:   false,
-			description:     "Moderators leaving should not trigger early quit",
+			name:          "Moderator leaving",
+			seed:          "b6-cond-moderator",
+			mode:          evr.ModeArenaPublic,
+			gameState:     &GameState{MatchOver: false},
+			roleAlignment: evr.TeamModerator,
+			shouldTrigger: false,
+			description:   "Moderators leaving should not charge early quits",
 		},
 		{
-			name:            "No game state",
-			mode:            evr.ModeArenaPublic,
-			matchStartedAgo: 2 * time.Minute,
-			gameStateExists: false,
-			matchOver:       false,
-			roleAlignment:   evr.TeamBlue,
-			shouldTrigger:   false,
-			description:     "No game state should not trigger early quit",
+			name:          "No game state",
+			seed:          "b6-cond-nostate",
+			mode:          evr.ModeArenaPublic,
+			gameState:     nil,
+			roleAlignment: evr.TeamBlue,
+			shouldTrigger: true,
+			description:   "GameState.IsMatchOver() is nil-safe: no game state is treated as not over",
 		},
 		{
-			name:            "Orange team player leaving",
-			mode:            evr.ModeArenaPublic,
-			matchStartedAgo: 2 * time.Minute,
-			gameStateExists: true,
-			matchOver:       false,
-			roleAlignment:   evr.TeamOrange,
-			shouldTrigger:   true,
-			description:     "Orange team player leaving should trigger",
+			name:          "Orange team player leaving",
+			seed:          "b6-cond-orange",
+			mode:          evr.ModeArenaPublic,
+			gameState:     &GameState{MatchOver: false},
+			roleAlignment: evr.TeamOrange,
+			shouldTrigger: true,
+			description:   "Orange team player leaving should charge an early quit",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			state := &MatchLabel{
-				Mode:      tt.mode,
-				StartTime: time.Now().Add(-tt.matchStartedAgo),
+			player := reconnectTestPlayer(tt.seed, tt.roleAlignment)
+			InsertUser(t, db, player.UserID)
+			preseedEarlyQuitConfig(t, ctx, nk, player.GetUserId())
+
+			state := chargeState(tt.mode, player)
+			if tt.gameState == nil {
+				state.GameState = nil
+			} else {
+				state.GameState = tt.gameState
 			}
+			driveVoluntaryLeave(ctx, t, db, nk, state, player)
 
-			if tt.gameStateExists {
-				state.GameState = &GameState{
-					MatchOver: tt.matchOver,
-				}
+			want := int32(0)
+			if tt.shouldTrigger {
+				want = 1
 			}
-
-			presence := &EvrMatchPresence{
-				RoleAlignment: tt.roleAlignment,
-			}
-
-			// Check if early quit should trigger
-			shouldTrigger := state.Mode == evr.ModeArenaPublic &&
-				time.Now().After(state.StartTime.Add(time.Second*60)) &&
-				state.GameState != nil &&
-				!state.GameState.MatchOver &&
-				presence.IsPlayer()
-
-			if shouldTrigger != tt.shouldTrigger {
-				t.Errorf("%s: expected shouldTrigger=%v, got %v",
-					tt.description, tt.shouldTrigger, shouldTrigger)
+			if err := assertStoredEarlyQuitCount(t, ctx, nk, player.GetUserId(), want); err != nil {
+				t.Errorf("%s: %v", tt.description, err)
 			}
 		})
 	}
 }
 
-// TestEarlyQuitScopeIssue tests for the specific bug where early quit code
-// was outside the scope of the presence check
-func TestEarlyQuitScopeIssue(t *testing.T) {
-	t.Run("Verify early quit code runs for each presence in the loop", func(t *testing.T) {
-		// This test validates that the early quit detection logic
-		// properly accesses the player presence variable (mp)
-		// which should be in scope when the early quit code runs.
+// newChargeModule returns a real RuntimeGoNakamaModule over the test DB. The
+// leaderboard cache is the same stub the charge-gate tests use: leaderboard
+// ops degrade to non-fatal warnings, which is what MatchLeave expects.
+func newChargeModule(t *testing.T, logger *zap.Logger) (*sql.DB, *RuntimeGoNakamaModule) {
+	t.Helper()
+	db := NewDB(t)
+	t.Cleanup(func() { _ = db.Close() })
+	cfg := NewConfig(logger)
 
-		// Setup: Create multiple player presences
-		presences := []*EvrMatchPresence{
-			{
-				UserID:        uuid.Must(uuid.NewV4()),
-				SessionID:     uuid.Must(uuid.NewV4()),
-				Username:      "player1",
-				RoleAlignment: evr.TeamBlue,
-				DisplayName:   "Player1",
-			},
-			{
-				UserID:        uuid.Must(uuid.NewV4()),
-				SessionID:     uuid.Must(uuid.NewV4()),
-				Username:      "player2",
-				RoleAlignment: evr.TeamOrange,
-				DisplayName:   "Player2",
-			},
-		}
+	storageIndex, err := NewLocalStorageIndex(logger, db, &StorageConfig{}, &testMetrics{})
+	if err != nil {
+		t.Fatalf("failed to create storage index: %v", err)
+	}
+	nk := NewRuntimeGoNakamaModule(logger, db, nil, cfg,
+		nil, &chargeTestLeaderboardCache{}, nil, nil,
+		&testSessionRegistry{}, nil, nil, nil,
+		&testTracker{}, &testMetrics{}, nil, &testMessageRouter{},
+		storageIndex, nil)
+	return db, nk
+}
 
-		// Simulate the loop that should process each presence
-		earlyQuitCount := 0
-		for _, p := range presences {
-			// This simulates the presence map lookup
-			mp := p
-			if mp == nil {
-				t.Error("Presence should not be nil")
-				continue
-			}
+// chargeState builds a match label in the given mode with one player present
+// and ready for MatchLeave.
+func chargeState(mode evr.Symbol, player *EvrMatchPresence) *MatchLabel {
+	state := reconnectTestState(mode)
+	state.ID.Node = "test-node" // MatchID only round-trips through storage with a non-empty node
+	state.presenceMap[player.GetSessionId()] = player
+	state.joinTimestamps[player.GetSessionId()] = time.Now().Add(-2 * time.Minute)
+	state.participations[player.GetUserId()] = &PlayerParticipation{
+		UserID:      player.GetUserId(),
+		Username:    player.Username,
+		DisplayName: player.DisplayName,
+		Team:        BlueTeam,
+		JoinTime:    time.Now().Add(-2 * time.Minute),
+	}
+	state.rebuildCache()
+	return state
+}
 
-			// This is where the bug was - code was accessing mp outside its scope
-			// Verify we can access mp fields here
-			if mp.GetUserId() == "" {
-				t.Error("Should be able to access mp.GetUserId()")
-			}
+// preseedEarlyQuitConfig writes a clean early-quit config so repeated runs are
+// deterministic (storage rows persist across runs in the test DB).
+func preseedEarlyQuitConfig(t *testing.T, ctx context.Context, nk runtime.NakamaModule, userID string) {
+	t.Helper()
+	if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
+		Collection:      StorageCollectionEarlyQuit,
+		Key:             StorageKeyEarlyQuit,
+		UserID:          userID,
+		Value:           `{"num_early_quits":0,"num_steady_early_quits":0,"matchmaking_tier":1}`,
+		Version:         "",
+		PermissionRead:  int(runtime.STORAGE_PERMISSION_NO_READ),
+		PermissionWrite: int(runtime.STORAGE_PERMISSION_NO_WRITE),
+	}}); err != nil {
+		t.Fatalf("preseed early quit state failed: %v", err)
+	}
+}
 
-			if mp.IsPlayer() {
-				earlyQuitCount++
+// driveVoluntaryLeave runs the real MatchLeave charge gate for the given state
+// and player.
+func driveVoluntaryLeave(ctx context.Context, t *testing.T, db *sql.DB, nk runtime.NakamaModule, state *MatchLabel, player *EvrMatchPresence) {
+	t.Helper()
+	dispatcher := &reconnectTestDispatcher{}
+	leavePresence := reconnectTestPresence{EvrMatchPresence: player, reason: runtime.PresenceReasonLeave}
 
-				// Simulate what should happen in the early quit code
-				if mp.DisplayName == "" {
-					t.Error("Should be able to access mp.DisplayName in early quit code")
-				}
-			}
-		}
+	m := &EvrMatch{}
+	got := m.MatchLeave(ctx, reconnectTestLogger(), db, nk, dispatcher, 1, state, []runtime.Presence{leavePresence})
+	if _, ok := got.(*MatchLabel); !ok {
+		t.Fatalf("MatchLeave returned non-*MatchLabel state: %T", got)
+	}
+}
 
-		if earlyQuitCount != 2 {
-			t.Errorf("Expected 2 early quits to be detected, got %d", earlyQuitCount)
-		}
-	})
+// assertStoredEarlyQuitCount reads the stored early-quit counter and compares
+// it to want.
+func assertStoredEarlyQuitCount(t *testing.T, ctx context.Context, nk runtime.NakamaModule, userID string, want int32) error {
+	t.Helper()
+	eqconfig := NewEarlyQuitPlayerState()
+	if err := StorableRead(ctx, nk, userID, eqconfig, false); err != nil {
+		return fmt.Errorf("expected early quit config to exist (preseeded): %v", err)
+	}
+	if eqconfig.NumEarlyQuits != want {
+		return fmt.Errorf("expected early quit counter %d, got %d", want, eqconfig.NumEarlyQuits)
+	}
+	return nil
 }

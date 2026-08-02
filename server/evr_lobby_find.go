@@ -306,18 +306,12 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		eqConfig := NewEarlyQuitPlayerState()
 		if err := StorableRead(ctx, p.nk, lobbyParams.UserID.String(), eqConfig, true); err != nil {
 			logger.Debug("Failed to load early quit config for logging", zap.Error(err))
-		} else {
-			penaltyTime := time.Unix(eqConfig.PenaltyTimestamp, 0)
-			timeSinceLastQuit := time.Since(penaltyTime)
-			lockoutDuration := GetLockoutDuration(lobbyParams.EarlyQuitPenaltyLevel)
-
-			if timeSinceLastQuit < lockoutDuration {
-				remainingTime := lockoutDuration - timeSinceLastQuit
-				logger.Info("Player queueing with active early quit penalty (client-side enforcement expected)",
-					zap.String("user_id", lobbyParams.UserID.String()),
-					zap.Int("penalty_level", lobbyParams.EarlyQuitPenaltyLevel),
-					zap.Duration("remaining", remainingTime))
-			}
+		} else if eqConfig.PenaltyTimestamp > 0 && time.Now().Unix() < eqConfig.PenaltyTimestamp {
+			remainingTime := time.Until(time.Unix(eqConfig.PenaltyTimestamp, 0))
+			logger.Info("Player queueing with active early quit penalty (client-side enforcement expected)",
+				zap.String("user_id", lobbyParams.UserID.String()),
+				zap.Int("penalty_level", lobbyParams.EarlyQuitPenaltyLevel),
+				zap.Duration("remaining", remainingTime))
 		}
 	}
 

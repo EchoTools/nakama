@@ -357,6 +357,14 @@ func (t *SNSEarlyQuitMessageTrigger) Stop() {
 	}
 }
 
+// earlyQuitPenaltyExpired reports whether the penalty lockout whose absolute
+// expiry timestamp is penaltyTs (unix seconds) has expired as of now. A zero or
+// negative timestamp (no penalty recorded) is never expired — a zero ts must
+// not make a lockout instantly "expired" on the next scheduler tick.
+func earlyQuitPenaltyExpired(penaltyTs int64, now time.Time) bool {
+	return penaltyTs > 0 && now.Unix() >= penaltyTs
+}
+
 // checkAndNotifyExpiredPenalties checks all connected players' penalties and sends expiry notifications
 // Only notifies players who are currently connected
 func (t *SNSEarlyQuitMessageTrigger) checkAndNotifyExpiredPenalties(ctx context.Context) {
@@ -392,19 +400,11 @@ func (t *SNSEarlyQuitMessageTrigger) checkAndNotifyExpiredPenalties(ctx context.
 			return true // No penalty
 		}
 
-		// Get lockout duration for current penalty level
-		lockoutDuration := GetLockoutDurationSeconds(int(penaltyLevel))
-
-		if lockoutDuration == 0 {
-			return true // No lockout for penalty level 0
-		}
-
-		// Calculate time since last early quit
+		// The lockout has expired once now passes the absolute expiry
+		// timestamp. Comparing now - penalty_ts against the lockout duration
+		// would notify a full lockout late and instantly expire zero timestamps.
 		now := time.Now()
-		timeSinceLastQuit := now.Sub(time.Unix(eqConfig.PenaltyTimestamp, 0)).Seconds()
-
-		// If enough time has passed, check if we already notified
-		if timeSinceLastQuit >= float64(lockoutDuration) {
+		if earlyQuitPenaltyExpired(eqConfig.PenaltyTimestamp, now) {
 			// Skip if we already sent notification for this penalty
 			if !eqConfig.LastExpiryNotificationSent.IsZero() && eqConfig.LastExpiryNotificationSent.After(time.Unix(eqConfig.PenaltyTimestamp, 0)) {
 				return true // Already notified for this penalty

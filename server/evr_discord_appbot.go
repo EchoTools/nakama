@@ -2836,6 +2836,16 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			config.PenaltyLevel = int32(penaltyLevel)
 
+			// Set the absolute lockout expiry timestamp. Without it a zero ts
+			// makes the scheduler treat the lockout as instantly expired on
+			// its next tick and IsPenaltyActive() report no active lockout.
+			if penaltyLevel > 0 {
+				config.PenaltyTimestamp = time.Now().Unix() + int64(lockoutDuration.Seconds())
+			} else {
+				// Level 0 = penalty cleared.
+				config.PenaltyTimestamp = 0
+			}
+
 			if err := StorableWrite(ctx, nk, targetUserID, config); err != nil {
 				return editInteractionResponse(s, i, fmt.Sprintf("Failed to save early quit config: %v", err))
 			}
