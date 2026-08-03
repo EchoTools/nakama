@@ -266,16 +266,36 @@ func (s *EarlyQuitPlayerState) IsPenaltyActive() bool {
 }
 
 // earlyQuitEnforcementTestUserIDs is the set of Nakama user IDs for whom
-// server-side early-quit enforcement is active during validation. When
-// guild-level config lands, this gate is replaced by a per-guild setting.
-// Until then, only these users are blocked from matchmaking while under
-// an active early-quit penalty.
+// server-side early-quit enforcement is active during validation. The
+// guild-level EnforceEarlyQuitPenalty setting gates this further: refusal
+// requires the test user AND a guild that has opted in (or is not cached —
+// the lookup is lenient, never requiring guild presence to enforce).
 var earlyQuitEnforcementTestUserIDs = map[string]bool{
 	"580230ee-3866-446f-8f3f-6cc68e3c8621": true, // sprockee / Andrew
 }
 
 func isEarlyQuitEnforcementTestUser(userID string) bool {
 	return earlyQuitEnforcementTestUserIDs[userID]
+}
+
+// earlyQuitEnforcementEnabled reports whether server-side early-quit
+// enforcement is active for the given group (the guild hosting the match, or
+// the player's active group when queueing). Enforcement is enabled unless the
+// guild is present in the session parameters AND its metadata explicitly
+// opted out via EnforceEarlyQuitPenalty. When the guild is not cached (no
+// session parameters, or the group is not in them), enforcement remains
+// enabled — the lookup is lenient and never blocks enforcement on a cache
+// miss. Only a known guild with the flag unset/false disables it.
+func earlyQuitEnforcementEnabled(ctx context.Context, groupID string) bool {
+	params, ok := LoadParams(ctx)
+	if !ok {
+		return true
+	}
+	gg, ok := params.guildGroups[groupID]
+	if !ok {
+		return true
+	}
+	return gg.GetEnforceEarlyQuitPenalty()
 }
 
 func (s *EarlyQuitPlayerState) GetPenaltyLevel() int {

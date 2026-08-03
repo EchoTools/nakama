@@ -289,7 +289,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			logger.Debug("Failed to load early quit config for logging", zap.Error(err))
 			} else if eqConfig.PenaltyLevel > 0 && eqConfig.PenaltyTimestamp > 0 && time.Now().Unix() < eqConfig.PenaltyTimestamp {
 				remainingTime := time.Until(time.Unix(eqConfig.PenaltyTimestamp, 0))
-				if isEarlyQuitEnforcementTestUser(joinPresence.GetUserId()) {
+				if isEarlyQuitEnforcementTestUser(joinPresence.GetUserId()) && earlyQuitEnforcementEnabled(ctx, state.GetGroupID().String()) {
 					return state, false, fmt.Sprintf("early quit penalty active [exp: %s]", FormatDuration(remainingTime))
 				}
 				logger.Info("Player joining with active early quit penalty (client-side enforcement expected)",
@@ -976,13 +976,21 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 						logger.WithField("error", err).Warn("Failed to load early quitter config")
 					} else {
 
-						// Skip penalty if player is exempt for this guild.
+						// Skip penalty if player is exempt for this guild, or the
+						// guild hosting the match has not opted in to server-side
+						// enforcement (EnforceEarlyQuitPenalty).
 						groupID := state.GetGroupID().String()
+						enforce := earlyQuitEnforcementEnabled(ctx, groupID)
 						if eqconfig.IsExempt(groupID) {
 							logger.WithFields(map[string]any{
 								"uid":      mp.GetUserId(),
 								"group_id": groupID,
 							}).Info("Player exempt from early quit penalty in this guild")
+						} else if !enforce {
+							logger.WithFields(map[string]any{
+								"uid":      mp.GetUserId(),
+								"group_id": groupID,
+							}).Info("Early quit penalty skipped: guild has not opted in to enforcement")
 						} else if leaveReason == LeaveReasonVoluntary || leaveReason == LeaveReasonUnknown || leaveReason == "" {
 							// Differential penalty: only apply immediate penalty for voluntary leaves.
 							eqconfig.IncrementEarlyQuit()
@@ -1065,20 +1073,24 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 							// Launch goroutine for deferred penalty resolution.
 							// Use background context to ensure goroutine isn't cancelled when match ends.
-							if leaveReason == LeaveReasonVoluntary || leaveReason == LeaveReasonUnknown || leaveReason == "" {
-								// Voluntary leave: penalty applied immediately. If player logs out
-								// within 5 minutes, forgive the penalty (crash during quit flow).
-								go func(userID, sessionID string) {
-									bgCtx := context.Background()
-									CheckAndStrikeEarlyQuitIfLoggedOut(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, 5*time.Minute)
-								}(mp.GetUserId(), mp.GetSessionId())
-							} else {
-								// Disconnect: penalty deferred. If player is still online after
-								// 5 minutes, they force-closed intentionally — apply the penalty.
-								go func(userID, sessionID string, matchID MatchID) {
-									bgCtx := context.Background()
-									CheckAndApplyEarlyQuitIfStillOnline(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, matchID, 5*time.Minute)
-								}(mp.GetUserId(), mp.GetSessionId(), state.ID)
+							// Only when the guild opted in: a skipped charge must not be
+							// retroactively applied (or forgiven) by the goroutines.
+							if enforce {
+								if leaveReason == LeaveReasonVoluntary || leaveReason == LeaveReasonUnknown || leaveReason == "" {
+									// Voluntary leave: penalty applied immediately. If player logs out
+									// within 5 minutes, forgive the penalty (crash during quit flow).
+									go func(userID, sessionID string) {
+										bgCtx := context.Background()
+										CheckAndStrikeEarlyQuitIfLoggedOut(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, 5*time.Minute)
+									}(mp.GetUserId(), mp.GetSessionId())
+								} else {
+									// Disconnect: penalty deferred. If player is still online after
+									// 5 minutes, they force-closed intentionally — apply the penalty.
+									go func(userID, sessionID string, matchID MatchID) {
+										bgCtx := context.Background()
+										CheckAndApplyEarlyQuitIfStillOnline(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, matchID, 5*time.Minute)
+									}(mp.GetUserId(), mp.GetSessionId(), state.ID)
+								}
 							}
 						}
 					}
@@ -1350,8 +1362,12 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				if err := StorableRead(ctx, nk, rr.UserID, eqconfig, true); err != nil {
 					logger.WithField("error", err).Warn("Failed to load early quitter config for deferred penalty")
 				} else {
-					eqconfig.IncrementEarlyQuit()
-					resolveAndApplyPenaltyLockout(ctx, nk, logger, eqconfig)
+					// Charge only when the guild hosting the match opted in to
+					// server-side enforcement (EnforceEarlyQuitPenalty).
+					if earlyQuitEnforcementEnabled(ctx, state.GetGroupID().String()) {
+						eqconfig.IncrementEarlyQuit()
+						resolveAndApplyPenaltyLockout(ctx, nk, logger, eqconfig)
+					}
 					eqconfig.LastEarlyQuitMatchID = state.ID
 					if err := StorableWrite(ctx, nk, rr.UserID, eqconfig); err != nil {
 						logger.WithField("error", err).Warn("Failed to write early quitter config for deferred penalty")

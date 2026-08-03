@@ -8,8 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/atomic"
 )
 
 // chargeTestLeaderboardCache is a LeaderboardCache test double whose Get returns
@@ -142,6 +144,119 @@ func TestEarlyQuitChargeGate_SetsPenaltyState(t *testing.T) {
 		t.Errorf("expected lockout ~120s, got %ds", d)
 	}
 }
+
+// TestEarlyQuitChargeGate_GuildEnforcementFlag proves the charge gate is gated
+// by the guild's EnforceEarlyQuitPenalty flag (GroupMetadata). A guild that has
+// not opted in — flag nil (default) or explicitly false — must NOT be charged
+// a penalty for an early quit; an opted-in guild (flag true) must be charged
+// exactly as before.
+func TestEarlyQuitChargeGate_GuildEnforcementFlag(t *testing.T) {
+	cases := []struct {
+		name       string
+		enforce    *bool
+		wantQuits  int32
+		wantActive bool
+	}{
+		{"guild-flag-nil", nil, 2, false},
+		{"guild-flag-false", boolPtr(false), 2, false},
+		{"guild-flag-true", boolPtr(true), 3, true},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := loggerForTest(t)
+			db := NewDB(t)
+			cfg := NewConfig(logger)
+
+			storageIndex, err := NewLocalStorageIndex(logger, db, &StorageConfig{}, &testMetrics{})
+			if err != nil {
+				t.Fatalf("failed to create storage index: %v", err)
+			}
+			nk := NewRuntimeGoNakamaModule(logger, db, nil, cfg,
+				nil, &chargeTestLeaderboardCache{}, nil, nil,
+				&testSessionRegistry{}, nil, nil, nil,
+				&testTracker{}, &testMetrics{}, nil, &testMessageRouter{},
+				storageIndex, nil)
+
+			ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
+			writeEarlyQuitServiceConfig(t, ctx, nk, defaultEarlyQuitConfigJSON(t))
+
+			// The guild hosting the match, with the enforcement flag under test.
+			guildID := uuid.Must(uuid.NewV4())
+			ctx = withGuildEnforcement(ctx, guildID, tc.enforce)
+
+			// Player with 2 prior early quits (3rd quit crosses into penalty level 1).
+			player := reconnectTestPlayer(fmt.Sprintf("charge-guild-flag-%d", i), evr.TeamBlue)
+			InsertUser(t, db, player.UserID)
+
+			if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
+				Collection:      StorageCollectionEarlyQuit,
+				Key:             StorageKeyEarlyQuit,
+				UserID:          player.GetUserId(),
+				Value:           `{"num_early_quits":2,"num_steady_early_quits":2,"matchmaking_tier":1}`,
+				Version:         "",
+				PermissionRead:  int(runtime.STORAGE_PERMISSION_NO_READ),
+				PermissionWrite: int(runtime.STORAGE_PERMISSION_NO_WRITE),
+			}}); err != nil {
+				t.Fatalf("preseed early quit state failed: %v", err)
+			}
+
+			// Arena-public, pre-matchover match hosted by the guild.
+			state := reconnectTestState(evr.ModeArenaPublic)
+			state.ID.Node = "test-node"
+			state.GroupID = &guildID
+			state.presenceMap[player.GetSessionId()] = player
+			state.presenceByEvrID[player.EvrID] = player
+			state.joinTimestamps[player.GetSessionId()] = time.Now().Add(-2 * time.Minute)
+			state.participations[player.GetUserId()] = &PlayerParticipation{
+				UserID:      player.GetUserId(),
+				Username:    player.Username,
+				DisplayName: player.DisplayName,
+				Team:        BlueTeam,
+				JoinTime:    time.Now().Add(-2 * time.Minute),
+			}
+			state.rebuildCache()
+
+			// Voluntary leave.
+			dispatcher := &reconnectTestDispatcher{}
+			leavePresence := reconnectTestPresence{EvrMatchPresence: player, reason: runtime.PresenceReasonLeave}
+
+			m := &EvrMatch{}
+			if _, ok := m.MatchLeave(ctx, reconnectTestLogger(), db, nk, dispatcher, 1, state, []runtime.Presence{leavePresence}).(*MatchLabel); !ok {
+				t.Fatalf("MatchLeave returned non-*MatchLabel state")
+			}
+
+			// Read back what the charge gate wrote to storage.
+			eqconfig := NewEarlyQuitPlayerState()
+			if err := StorableRead(ctx, nk, player.GetUserId(), eqconfig, false); err != nil {
+				t.Fatalf("failed to read back early quit state: %v", err)
+			}
+
+			if eqconfig.NumEarlyQuits != tc.wantQuits {
+				t.Errorf("expected %d early quits, got %d", tc.wantQuits, eqconfig.NumEarlyQuits)
+			}
+			if got := eqconfig.IsPenaltyActive(); got != tc.wantActive {
+				t.Errorf("expected penalty active=%v, got %v (penalty_level=%d penalty_ts=%d)", tc.wantActive, got, eqconfig.PenaltyLevel, eqconfig.PenaltyTimestamp)
+			}
+		})
+	}
+}
+
+// withGuildEnforcement returns a copy of ctx whose session parameters map the
+// given guild to a GuildGroup carrying the given EnforceEarlyQuitPenalty flag
+// (nil leaves the flag unset — the getter's default). This is how the charge
+// gate learns whether a guild has opted in to server-side enforcement.
+func withGuildEnforcement(ctx context.Context, guildID uuid.UUID, enforce *bool) context.Context {
+	params := &SessionParameters{
+		guildGroups: map[string]*GuildGroup{
+			guildID.String(): {
+				GroupMetadata: GroupMetadata{EnforceEarlyQuitPenalty: enforce},
+			},
+		},
+	}
+	return context.WithValue(ctx, ctxSessionParametersKey{}, atomic.NewPointer(params))
+}
+
+func boolPtr(b bool) *bool { return &b }
 
 // writeEarlyQuitServiceConfig pins the stored EarlyQuit|config row under
 // SystemUserID — the row LoadEarlyQuitServiceConfig reads. Tests that drive the

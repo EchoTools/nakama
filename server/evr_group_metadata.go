@@ -49,10 +49,11 @@ type GroupMetadata struct {
 
 	RestrictEnforcerNoteVisibility bool `json:"restrict_enforcer_note_visibility"` // Enforcers only see notes on their own records; auditors see all
 
-	KickPlayerAllowPrivates  *bool    `json:"kick_player_allow_privates"` // Default allow_privates for /kick-player suspensions (default: true)
-	LoadoutCommandUsernames  []string `json:"loadout_command_usernames"`  // Discord usernames allowed to use /loadout (legacy, prefer IDs)
-	LoadoutCommandDiscordIDs []string `json:"loadout_command_user_ids"`   // Discord user IDs allowed to use /loadout
-	SuspensionDMFooter       string   `json:"suspension_dm_footer"`       // Custom footer for suspension DM notifications; empty = default footer
+	KickPlayerAllowPrivates  *bool    `json:"kick_player_allow_privates"`           // Default allow_privates for /kick-player suspensions (default: true)
+	EnforceEarlyQuitPenalty  *bool    `json:"enforce_early_quit_penalty,omitempty"` // Enforce early quit penalties (default: false)
+	LoadoutCommandUsernames  []string `json:"loadout_command_usernames"`            // Discord usernames allowed to use /loadout (legacy, prefer IDs)
+	LoadoutCommandDiscordIDs []string `json:"loadout_command_user_ids"`             // Discord user IDs allowed to use /loadout
+	SuspensionDMFooter       string   `json:"suspension_dm_footer"`                 // Custom footer for suspension DM notifications; empty = default footer
 }
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {
@@ -94,6 +95,15 @@ func (g *GroupMetadata) GetKickPlayerAllowPrivates() bool {
 		return true
 	}
 	return *g.KickPlayerAllowPrivates
+}
+
+// GetEnforceEarlyQuitPenalty returns whether the guild has opted in to
+// server-side early quit enforcement. Defaults to false when unset.
+func (g *GroupMetadata) GetEnforceEarlyQuitPenalty() bool {
+	if g == nil || g.EnforceEarlyQuitPenalty == nil {
+		return false
+	}
+	return *g.EnforceEarlyQuitPenalty
 }
 
 func (g *GroupMetadata) MarshalMap() map[string]any {
