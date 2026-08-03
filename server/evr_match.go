@@ -287,13 +287,16 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		eqConfig := NewEarlyQuitPlayerState()
 		if err := StorableRead(ctx, nk, joinPresence.GetUserId(), eqConfig, true); err != nil {
 			logger.Debug("Failed to load early quit config for logging", zap.Error(err))
-		} else if eqConfig.PenaltyLevel > 0 && eqConfig.PenaltyTimestamp > 0 && time.Now().Unix() < eqConfig.PenaltyTimestamp {
-			remainingTime := time.Until(time.Unix(eqConfig.PenaltyTimestamp, 0))
-			logger.Info("Player joining with active early quit penalty (client-side enforcement expected)",
-				zap.String("user_id", joinPresence.GetUserId()),
-				zap.Int32("penalty_level", eqConfig.PenaltyLevel),
-				zap.Duration("remaining", remainingTime))
-		}
+			} else if eqConfig.PenaltyLevel > 0 && eqConfig.PenaltyTimestamp > 0 && time.Now().Unix() < eqConfig.PenaltyTimestamp {
+				remainingTime := time.Until(time.Unix(eqConfig.PenaltyTimestamp, 0))
+				if isEarlyQuitEnforcementTestUser(joinPresence.GetUserId()) {
+					return state, false, fmt.Sprintf("early quit penalty active [exp: %s]", FormatDuration(remainingTime))
+				}
+				logger.Info("Player joining with active early quit penalty (client-side enforcement expected)",
+					zap.String("user_id", joinPresence.GetUserId()),
+					zap.Int32("penalty_level", eqConfig.PenaltyLevel),
+					zap.Duration("remaining", remainingTime))
+			}
 	}
 
 	// Check if the match is locked.

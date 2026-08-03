@@ -308,6 +308,11 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			logger.Debug("Failed to load early quit config for logging", zap.Error(err))
 		} else if eqConfig.PenaltyTimestamp > 0 && time.Now().Unix() < eqConfig.PenaltyTimestamp {
 			remainingTime := time.Until(time.Unix(eqConfig.PenaltyTimestamp, 0))
+			if isEarlyQuitEnforcementTestUser(lobbyParams.UserID.String()) {
+				return NewLobbyErrorf(KickedFromLobbyGroup,
+					"complete matches to reduce your early quit penalty [exp: %s]",
+					FormatDuration(remainingTime))
+			}
 			logger.Info("Player queueing with active early quit penalty (client-side enforcement expected)",
 				zap.String("user_id", lobbyParams.UserID.String()),
 				zap.Int("penalty_level", lobbyParams.EarlyQuitPenaltyLevel),

@@ -265,6 +265,19 @@ func (s *EarlyQuitPlayerState) IsPenaltyActive() bool {
 	return s.PenaltyTimestamp > 0 && time.Now().Unix() < s.PenaltyTimestamp
 }
 
+// earlyQuitEnforcementTestUserIDs is the set of Nakama user IDs for whom
+// server-side early-quit enforcement is active during validation. When
+// guild-level config lands, this gate is replaced by a per-guild setting.
+// Until then, only these users are blocked from matchmaking while under
+// an active early-quit penalty.
+var earlyQuitEnforcementTestUserIDs = map[string]bool{
+	"580230ee-3866-446f-8f3f-6cc68e3c8621": true, // sprockee / Andrew
+}
+
+func isEarlyQuitEnforcementTestUser(userID string) bool {
+	return earlyQuitEnforcementTestUserIDs[userID]
+}
+
 func (s *EarlyQuitPlayerState) GetPenaltyLevel() int {
 	s.Lock()
 	defer s.Unlock()
