@@ -1,17 +1,30 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"net"
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/heroiclabs/nakama-common/runtime"
 )
 
 const (
 	LatencyHistoryStorageCollection = "LatencyHistory"
 	LatencyHistoryStorageKey        = "store"
+)
+
+const (
+	// latencyRetryMaxAttempts bounds writeWithRetry so a persistently contended
+	// object cannot spin forever. Includes the initial attempt.
+	latencyRetryMaxAttempts = 5
+	// latencyRetryBaseBackoff is the base unit of jittered backoff between
+	// retry attempts. Kept small: contention here is brief (per-user object).
+	latencyRetryBaseBackoff = 5 * time.Millisecond
 )
 
 type LatencyHistoryItem struct {
@@ -45,6 +58,65 @@ func (h *LatencyHistory) SetStorageMeta(meta StorableMetadata) {
 	h.Lock()
 	defer h.Unlock()
 	h.version = meta.Version
+}
+
+// writeWithRetry writes the history, retrying on optimistic-concurrency
+// (version-check) conflicts only. On such a conflict it re-reads the current
+// stored object into h (adopting the concurrent winner's version and contents),
+// invokes reapply to re-apply this caller's pending samples onto that fresh
+// object, and writes again. This makes a user's concurrent sessions lossless:
+// neither the winner's nor this caller's new entries are clobbered.
+//
+// The pattern is only sound because LatencyHistory.Add appends to per-server
+// lists — a commutative mutation. Do NOT generalize it to types whose updates
+// overwrite fields, where last-retrier-wins silently drops the other writer's
+// mutation.
+//
+// reapply MUST be idempotent across attempts and MUST re-apply the same pending
+// mutation onto the (now-refreshed) h each time it is called. It is NOT invoked
+// before the first attempt — the caller is responsible for having applied its
+// mutation to h once before calling. Any pruning/limit/expiry logic that must
+// stay bounded after a merge should live inside reapply.
+//
+// Only version-conflict errors are retried; any other error (including
+// non-conflict storage failures) is returned immediately without re-reading.
+// Attempts are bounded by latencyRetryMaxAttempts with small jittered backoff.
+func (h *LatencyHistory) writeWithRetry(ctx context.Context, nk runtime.NakamaModule, userID string, reapply func() error) error {
+	var lastErr error
+	for attempt := 0; attempt < latencyRetryMaxAttempts; attempt++ {
+		err := StorableWrite(ctx, nk, userID, h)
+		if err == nil {
+			return nil
+		}
+		if !isVersionConflictError(err) {
+			// Not an OCC conflict: do not re-read or retry.
+			return err
+		}
+		lastErr = err
+
+		// Conflict: a concurrent writer advanced the version. Re-read the fresh
+		// object (picking up the winner's version + entries) then re-apply this
+		// caller's pending mutation onto it before writing again.
+		if rerr := StorableRead(ctx, nk, userID, h, false); rerr != nil {
+			return fmt.Errorf("LatencyHistory.writeWithRetry: re-read after conflict: %w", rerr)
+		}
+		if rerr := reapply(); rerr != nil {
+			return fmt.Errorf("LatencyHistory.writeWithRetry: re-apply after conflict: %w", rerr)
+		}
+
+		// Jittered backoff before the next attempt (skip after the final loop).
+		if attempt < latencyRetryMaxAttempts-1 {
+			backoff := time.Duration(attempt+1) * latencyRetryBaseBackoff
+			// rand is fine here: this is contention jitter, not security.
+			jitter := time.Duration(rand.Int63n(int64(latencyRetryBaseBackoff)))
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("LatencyHistory.writeWithRetry: %w", ctx.Err())
+			case <-time.After(backoff + jitter):
+			}
+		}
+	}
+	return fmt.Errorf("LatencyHistory.writeWithRetry: exhausted %d attempts: %w", latencyRetryMaxAttempts, lastErr)
 }
 
 func (h *LatencyHistory) String() string {

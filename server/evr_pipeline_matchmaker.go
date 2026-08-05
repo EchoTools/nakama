@@ -149,10 +149,11 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 
 	// applyPingResults re-applies this session's just-received ping samples onto
 	// the (possibly refreshed) latencyHistory. It is run once now and re-run on
-	// each version-conflict retry after StorableWriteWithRetry re-reads the
-	// concurrent winner's object, so a user's concurrent sessions merge their
-	// samples losslessly instead of one clobbering the other. The Add call keeps
-	// limit/expiry pruning inside the closure so the merged result stays bounded.
+	// each version-conflict retry inside LatencyHistory.writeWithRetry, which
+	// re-reads the concurrent winner's object before each retry, so a user's
+	// concurrent sessions merge their samples losslessly instead of one
+	// clobbering the other. The Add call keeps limit/expiry pruning inside the
+	// closure so the merged result stays bounded.
 	applyPingResults := func() error {
 		for _, result := range response.Results {
 			ip := result.ExternalIP
@@ -177,7 +178,7 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 		return status.Errorf(codes.Internal, "failed to apply ping results: %v", err)
 	}
 
-	if err := StorableWriteWithRetry(ctx, p.nk, session.UserID().String(), latencyHistory, applyPingResults); err != nil {
+	if err := latencyHistory.writeWithRetry(ctx, p.nk, session.UserID().String(), applyPingResults); err != nil {
 		return status.Errorf(codes.Internal, "failed to write latency history: %v", err)
 	}
 
