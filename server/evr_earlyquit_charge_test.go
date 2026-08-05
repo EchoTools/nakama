@@ -243,8 +243,23 @@ func TestEarlyQuitChargeGate_GuildEnforcementFlag(t *testing.T) {
 
 // withGuildEnforcement returns a copy of ctx whose session parameters map the
 // given guild to a GuildGroup carrying the given EnforceEarlyQuitPenalty flag
-// (nil leaves the flag unset — the getter's default). This is how the charge
-// gate learns whether a guild has opted in to server-side enforcement.
+// (nil leaves the flag unset — the getter's default).
+//
+// WARNING — THIS CONTEXT SHAPE DOES NOT OCCUR IN PRODUCTION.
+//
+// ctxSessionParametersKey{} is planted on the *session* context by the EVR
+// pipeline. The context that the Nakama match runtime hands to MatchLeave is
+// built by the match runtime, not by a session, and it never carries that key.
+// So the branch that TestEarlyQuitChargeGate_GuildEnforcementFlag exercises
+// through this helper is reachable only from the test.
+//
+// Consequence: that test does NOT prove the guild opt-in gate works. In
+// production earlyQuitEnforcementEnabled cannot find the session parameters, so
+// LoadParams fails and it takes its fail-open `return true` branch — every guild
+// is treated as opted in and the flag never suppresses anything. That is a real
+// production bug; it is deliberately NOT fixed here (this change set is
+// test/build tooling only) and needs its own PR. Do not read a green run of this
+// test as evidence the gate is enforced.
 func withGuildEnforcement(ctx context.Context, guildID uuid.UUID, enforce *bool) context.Context {
 	params := &SessionParameters{
 		guildGroups: map[string]*GuildGroup{

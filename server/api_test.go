@@ -170,6 +170,38 @@ func NewConsoleLogger(output *os.File, verbose bool) *zap.Logger {
 	return zap.New(core, options...)
 }
 
+// isDatabaseUnreachable reports whether err means "nothing is listening" rather
+// than "the database rejected us". Only the former is grounds for skipping: a
+// reachable database that refuses the connection (bad credentials, missing
+// database, failed migration) is a real failure and must stay loud.
+func isDatabaseUnreachable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return true
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	// A connect attempt that never completes is indistinguishable, from the
+	// test's point of view, from nothing listening at all.
+	return errors.Is(err, context.DeadlineExceeded)
+}
+
+// NewDB opens the test database.
+//
+// When no database is listening the test is SKIPPED rather than failed, so the
+// suite is runnable with no services running (`just test`). Any other error --
+// authentication rejected, database missing, schema not migrated -- still fails
+// loudly, because that means a database IS present and something is genuinely
+// wrong with it.
+//
+// Set TEST_DB_REQUIRED=1 (what `just test-db` does) to turn unreachability back
+// into a hard failure, so a run that is supposed to cover the DB-backed tests
+// cannot quietly skip all of them.
 func NewDB(t *testing.T) *sql.DB {
 	//dbUrl := "postgresql://postgres@127.0.0.1:5432/nakama?sslmode=disable"
 	dbUrl := "postgresql://root@127.0.0.1:26257/nakama?sslmode=disable"
@@ -181,8 +213,15 @@ func NewDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatal("Error connecting to database", err)
 	}
-	err = db.Ping()
-	if err != nil {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		if isDatabaseUnreachable(err) && os.Getenv("TEST_DB_REQUIRED") == "" {
+			t.Skipf("skipping: no test database reachable at %s (%v); start one and re-run, or use `just test-db`", dbUrl, err)
+		}
 		t.Fatal("Error pinging database", err)
 	}
 	return db

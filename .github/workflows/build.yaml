@@ -41,10 +41,42 @@ jobs:
           cache: true  # Built-in caching for Go modules and build cache
 
       - name: Install just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v4
 
       - name: Vendor dependencies
         run: go mod tidy && go mod vendor
 
       - name: Build binary
         run: just nakama
+
+  test:
+    name: Run DB-free test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Required for git describe tags
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true  # Built-in caching for Go modules and build cache
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+
+      - name: Vendor dependencies
+        run: go mod tidy && go mod vendor
+
+      # No repo-wide `gofmt -l` gate yet: ~50 files under server/ are already
+      # unformatted at this commit, so the check would fail on arrival. Adding it
+      # needs its own mechanical reformat PR.
+      - name: Vet
+        run: go vet ./server/...
+
+      # No CockroachDB service and no DISCORD_BOT_TOKEN: the DB-backed tests
+      # skip themselves when no database is reachable. `just test-db` is the
+      # recipe that requires one.
+      - name: Run tests
+        run: just test

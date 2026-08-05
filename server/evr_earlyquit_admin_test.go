@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
@@ -19,28 +18,12 @@ import (
 // production config row (EarlyQuit/config under SystemUserID) was never read
 // and the defaults were always used.
 //
-// Requires a real Postgres (TEST_DB_URL) — the read/write path runs through
-// RuntimeGoNakamaModule, which uses pgx connections directly.
+// Runs against the in-memory evrTestNakamaModule: the loader only needs a
+// storage read, so no database is required.
 func TestLoadEarlyQuitServiceConfigOrDefault_ReadsSystemConfig(t *testing.T) {
-	// --- setup: real module over the test DB ---
-	logger := loggerForTest(t)
-	db := NewDB(t)
-	cfg := NewConfig(logger)
-
-	storageIndex, err := NewLocalStorageIndex(logger, db, &StorageConfig{}, &testMetrics{})
-	if err != nil {
-		t.Fatalf("failed to create storage index: %v", err)
-	}
-	nk := NewRuntimeGoNakamaModule(logger, db, nil, cfg,
-		nil, &chargeTestLeaderboardCache{}, nil, nil,
-		&testSessionRegistry{}, nil, nil, nil,
-		&testTracker{}, &testMetrics{}, nil, &testMessageRouter{},
-		storageIndex, nil)
+	nk := newEvrTestNakamaModule()
 
 	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
-
-	// The config row lives under the system user, not any real player.
-	InsertUser(t, db, uuid.Must(uuid.FromString(SystemUserID)))
 
 	// Custom ladder: level 1 lockout = 999s instead of the default 120s.
 	custom := evr.NewDefaultSNSEarlyQuitConfig()

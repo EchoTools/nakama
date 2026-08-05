@@ -5,12 +5,13 @@
 COMMIT := `git rev-parse --short HEAD`
 GIT_DESCRIBE := `git describe --tags --always --abbrev=7 --dirty`
 TAG := `git describe --tags --exact-match 2>/dev/null || echo "dev"`
-SRC_FILES := `find . -type f -name '*.go'`
-SRC_DIRS := `find . -type d -name '*.go' | sed 's/\/[^/]*$//'`
 PWD := `pwd`
 
 DEBUG_FLAGS := "-trimpath -gcflags \"-trimpath " + PWD + "\" -gcflags=\"all=-N -l\" -asmflags \"-trimpath " + PWD + "\""
-RELEASE_FLAGS := "-trimpath -gcflags \"-trimpath " + PWD + "\" -asmflags \"-trimpath " + PWD + "\""
+
+# Connection string used by the DB-backed tests. Override to point at your own
+# CockroachDB/Postgres: just TEST_DB_URL=postgresql://... test-db
+TEST_DB_URL := env_var_or_default("TEST_DB_URL", "postgresql://root@127.0.0.1:26257/nakama?sslmode=disable")
 
 # Build nakama (debug). Default target.
 all: nakama
@@ -28,7 +29,7 @@ build:
         --build-arg VERSION={{ GIT_DESCRIBE }} \
         -t ghcr.io/echotools/nakama:{{ TAG }} . -f build/Dockerfile.local
 
-# Docker buildx push; refuses to run when TAG is "dev". Override with: just release TAG=v1.2.3 (or run from a tagged commit)
+# Docker buildx push; refuses to run when TAG is "dev". Override with: just TAG=v1.2.3 release (just takes variable assignments BEFORE the recipe name), or run from a tagged commit
 release:
     @if [ "{{ TAG }}" = "dev" ]; then \
         echo "ERROR: TAG is 'dev'. Refusing to push release images."; \
@@ -62,13 +63,24 @@ bench-compare:
 bench-check: bench-compare
     @echo "Benchmark regression check passed"
 
-# Run all server tests (local; CI uses docker compose)
-test:
-    go test ./server/...
+# Needs no CockroachDB and no Discord bot token: tests that require a database
+# skip themselves when none is reachable.
 
-# Run tests with verbose output
+# Run the DB-free server test suite
+test:
+    go test ./server/... -count=1
+
+# Run the DB-free suite with verbose output.
 test-verbose:
-    go test -v ./server/...
+    go test -v ./server/... -count=1
+
+# Requires a reachable CockroachDB/Postgres at TEST_DB_URL. TEST_DB_REQUIRED
+# makes an unreachable database a hard failure instead of a silent skip, so this
+# recipe cannot pass vacuously.
+
+# Run the FULL suite, including the DB-backed tests
+test-db:
+    TEST_DB_URL="{{ TEST_DB_URL }}" TEST_DB_REQUIRED=1 go test ./server/... -count=1
 
 # Formatting.
 # Scope is repo-wide: every *tracked* Go file except generated sources.
@@ -106,7 +118,7 @@ fmt-check:
 
 # GitHub Actions local testing with act.
 # Use medium image for better compatibility (default is too minimal).
-ACT_FLAGS := "--container-architecture linux/amd64"
+ACT_FLAGS := env_var_or_default("ACT_FLAGS", "--container-architecture linux/amd64")
 
 # List all available GitHub Actions workflows and jobs
 act-list:
