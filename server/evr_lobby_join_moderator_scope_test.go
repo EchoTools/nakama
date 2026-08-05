@@ -213,6 +213,13 @@ func TestIsModeratorOfGroup(t *testing.T) {
 	enforcerGroup := newTestGuildGroup(groupID, userID.String())
 	strangerGroup := newTestGuildGroup(groupID, otherID.String())
 
+	// The cross-guild case: the user enforces some *other* guild, and both
+	// guilds are present in the session's map. Without this, every case below
+	// carries at most the queried guild, so a predicate that ignored groupID
+	// entirely and scanned the whole map would still pass.
+	otherGroupID := uuid.Must(uuid.NewV4())
+	otherGuildEnforcerGroup := newTestGuildGroup(otherGroupID, userID.String())
+
 	for _, tc := range []struct {
 		name             string
 		isGlobalOperator bool
@@ -227,6 +234,13 @@ func TestIsModeratorOfGroup(t *testing.T) {
 		{"nil group entry", false, map[string]*GuildGroup{groupID.String(): nil}, groupID, false},
 		{"nil map", false, nil, groupID, false},
 		{"nil group id", false, map[string]*GuildGroup{groupID.String(): enforcerGroup}, uuid.Nil, false},
+		{"enforcer of another guild only", false, map[string]*GuildGroup{
+			otherGroupID.String(): otherGuildEnforcerGroup,
+			groupID.String():      strangerGroup,
+		}, groupID, false},
+		{"enforcer of another guild, queried guild absent", false, map[string]*GuildGroup{
+			otherGroupID.String(): otherGuildEnforcerGroup,
+		}, groupID, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, isModeratorOfGroup(tc.isGlobalOperator, tc.guildGroups, tc.groupID, userID.String()))
