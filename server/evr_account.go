@@ -418,8 +418,8 @@ func EVRProfileLoad(ctx context.Context, nk runtime.NakamaModule, userID string)
 //
 // There is exactly one write attempt. On a storage version conflict the error is
 // returned immediately, wrapped with %w so runtime.ErrStorageRejectedVersion
-// stays detectable via errors.Is (and via the "version check failed" substring
-// that isVersionConflictError matches). Callers that need retry-on-conflict must
+// stays detectable via errors.Is, which is what isVersionConflictError now uses.
+// Callers that need retry-on-conflict must
 // reload and re-apply their own mutation — this function will not silently
 // discard the caller's changes to make a write succeed.
 func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID string, md *EVRProfile) error {
