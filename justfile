@@ -70,6 +70,40 @@ test:
 test-verbose:
     go test -v ./server/...
 
+# Formatting.
+# Scope is repo-wide: every *tracked* Go file except generated sources.
+#
+# Tracked-only is deliberate. vendor/ is not gitignored but is never committed,
+# so `git ls-files` structurally cannot sweep it in — even on a machine where
+# `go mod vendor` has been run. (Listing untracked files instead would drag the
+# whole vendor tree in.) The tradeoff: a brand-new file is not checked until it
+# is `git add`ed. That is harmless, since CI checks out a commit, where every
+# file in the PR is tracked.
+#
+# The grep drops files carrying a "Code generated ... DO NOT EDIT" header —
+# those are owned by their generators (protobuf, grpc-gateway, gopher-lua
+# parser), not by us.
+#
+# Plain gofmt, not gofumpt: standard-library-canonical formatting, nothing more
+# opinionated.
+FMT_FILES := "git ls-files '*.go' | xargs grep -LE 'Code generated .* DO NOT EDIT'"
+
+# Format all non-generated Go sources in place (prints the files it rewrote)
+fmt:
+    @{{ FMT_FILES }} | xargs gofmt -w -l
+
+# Verify all non-generated Go sources are gofmt-clean; non-zero exit on failure
+fmt-check:
+    @unformatted="$({{ FMT_FILES }} | xargs gofmt -l)"; \
+    if [ -n "$unformatted" ]; then \
+        echo "ERROR: these files are not gofmt-formatted:"; \
+        echo "$unformatted" | sed 's/^/  /'; \
+        echo ""; \
+        echo "Fix with: just fmt"; \
+        exit 1; \
+    fi; \
+    echo "gofmt: all non-generated Go sources are formatted"
+
 # GitHub Actions local testing with act.
 # Use medium image for better compatibility (default is too minimal).
 ACT_FLAGS := "--container-architecture linux/amd64"
