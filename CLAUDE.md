@@ -28,6 +28,39 @@ This applies regardless of context — even if the task seems to require deploym
 - Full suite including DB-backed tests: `just test-db` (requires a reachable database at `TEST_DB_URL`)
 - Docker image build (local only, no push): `just build` — FORBIDDEN without explicit approval, see above
 
+## Tests — per-test-binary memory cap
+
+A runaway test once reached 11.6 GB. The kernel OOM killer picks victims
+machine-wide by heuristic, so it did not kill the test — it killed two unrelated
+developer sessions. `scripts/go-test-limit.sh` fixes the *attribution*: it runs
+each test binary in its own bounded cgroup so the offending test is the only
+process eligible to die, and it dies naming itself.
+
+`just test`, `just test-verbose` and `just test-db` apply it automatically.
+
+To get the same protection on a raw `go test` (which is how the 11.6 GB run was
+started), add this to `.claude/settings.local.json` — it is gitignored, which is
+required here because the path must be absolute and `settings.json` `env` values
+are **not** interpolated:
+
+```json
+{
+  "env": {
+    "GOFLAGS": "-exec=/home/andrew/src/nakama/scripts/go-test-limit.sh",
+    "GO_TEST_MEMORY_LIMIT": "4G"
+  }
+}
+```
+
+One absolute path covers every worktree — the wrapper only wraps whatever binary
+it is handed, so it does not care which checkout it lives in.
+
+- Default cap is 4G per test binary. Raise for one run: `GO_TEST_MEMORY_LIMIT=8G go test ...`
+- Disable: `GO_TEST_MEMORY_LIMIT=off`
+- Degrades to running unwrapped where cgroups are unavailable (CI containers, non-systemd), so it can never fail a run that would otherwise pass.
+- Do NOT rely on `GOMEMLIMIT` for this. It is a soft limit: against a genuinely
+  live heap Go keeps allocating and GC-thrashes to the timeout instead of failing.
+
 ## Project
 
 This is a fork of [heroiclabs/nakama](https://github.com/heroiclabs/nakama) with EchoVR-specific extensions. The EVR runtime module lives in `server/evr_*.go`.
