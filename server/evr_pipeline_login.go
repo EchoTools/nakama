@@ -927,12 +927,18 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 
 		userID := params.profile.ID()
 
-		// Everything this function mutates on the profile is captured here so a
-		// retry can re-apply it to a freshly read profile: the resolved active
-		// group, and the broken-cosmetic repair. Login is racing its own
-		// QueueSyncMember call above, which writes the same key from the Discord
-		// sync path, so a version conflict is realistic and must not reject the
-		// login outright.
+		// The two mutations that set metadataUpdated are captured here so a retry
+		// can re-apply them to a freshly read profile: the resolved active group,
+		// and the broken-cosmetic repair. Login is racing its own QueueSyncMember
+		// call above, which writes the same key from the Discord sync path, so a
+		// version conflict is realistic and must not reject the login outright.
+		//
+		// The in-game names recomputed earlier in this function are deliberately
+		// NOT re-applied on a retry. Re-applying them would mean writing this
+		// session's whole IGN map over the fresh read, which is precisely how the
+		// concurrent writer's work gets discarded — and the guild-rename RPC
+		// writes exactly that field. On the rare retry the fresh profile's IGNs
+		// win; login recomputes them on the next connect anyway.
 		desiredActiveGroupID := params.profile.GetActiveGroupID()
 		ignoreBrokenCosmetics := params.profile.IgnoreBrokenCosmetics
 		reapply := func(profile *EVRProfile) error {
