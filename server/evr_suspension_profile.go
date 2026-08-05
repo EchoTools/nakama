@@ -43,7 +43,7 @@ type SuspensionProfileRecord struct {
 	// authoritative check uses, so the projection and the gate agree.
 	//
 	// This matters because both suspension gates key on mode:
-	// evr_lobby_joinentrant_enforce.go:60 and evr_lobby_joinentrant.go:377-380.
+	// evr_lobby_joinentrant_enforce.go:60 and evr_lobby_joinentrant.go:372-375.
 	AffectedModes       []string `json:"affected_modes"`
 	AllowPrivateLobbies bool     `json:"allow_private_lobbies"`
 
@@ -84,7 +84,7 @@ type SuspensionProfileRecord struct {
 //  1. SELF ONLY -- no alternate accounts. The authoritative check runs over
 //     params.enforcementUserIDs, which is self PLUS alts and is rebuilt on
 //     every login from dynamically-discovered alternates
-//     (evr_pipeline_login.go:603-606). Alt membership therefore changes with
+//     (evr_pipeline_login.go:602-606). Alt membership therefore changes with
 //     no enforcement write occurring; baking it in would require fanning a
 //     write out to every alt each time alt detection changed its mind.
 //
@@ -98,7 +98,7 @@ type SuspensionProfileRecord struct {
 //  3. SERVED FROM A NODE-LOCAL INDEX. The declared index is IndexOnly, so
 //     reads through it never touch the database. Index population happens only
 //     on the node performing the write (core_storage.go:838) and at boot
-//     (storage_index.go:384). A ban issued on node A is invisible to node B
+//     (storage_index.go:396). A ban issued on node A is invisible to node B
 //     until node B restarts, and evicted entries are never reloaded -- so an
 //     absent entry reads as "not banned", which is fail-OPEN.
 //
@@ -151,12 +151,12 @@ func (s SuspensionProfile) GetStorageVersion() string {
 // Fields governs TWO things at once, and both matter here:
 //
 //  1. What is RETURNED. With IndexOnly: true, List returns idxResult.Value
-//     verbatim (storage_index.go:349) and that value is the field-filtered map
-//     built in mapIndexStorageFields (storage_index.go:528-536) -- NOT the
+//     verbatim (storage_index.go:360) and that value is the field-filtered map
+//     built in mapIndexStorageFields (storage_index.go:562-570) -- NOT the
 //     stored object. A field absent from Fields is discarded before the
 //     document is written and can never be read back.
 //  2. What is SEARCHABLE. BlugeWalkDocument walks the same already-filtered
-//     map (storage_index.go:560), so an absent field is not queryable either.
+//     map (storage_index.go:599), so an absent field is not queryable either.
 //
 // "suspensions" is therefore mandatory: without it this projection returns
 // {"user_id":"..."} and answers no suspension question at all. See
@@ -164,7 +164,7 @@ func (s SuspensionProfile) GetStorageVersion() string {
 //
 // "updated_at" is deliberately EXCLUDED. Every stored field costs index memory
 // against MaxEntries, and the freshness of the projection is already carried by
-// the index's own always-stored update_time field (storage_index.go:539), which
+// the index's own always-stored update_time field (storage_index.go:579), which
 // mapIndexStorageFields adds regardless of Fields.
 func (s *SuspensionProfile) StorageIndexes() []StorableIndexMeta {
 	return []StorableIndexMeta{{
@@ -182,7 +182,7 @@ func (s *SuspensionProfile) StorageIndexes() []StorableIndexMeta {
 		// enforcement history, and exceeding it degrades silently in two
 		// directions: eviction (evicted entries are never reloaded) and
 		// boot-load truncation (load stops dead at MaxEntries,
-		// storage_index.go:479+491). Both make an entry simply absent.
+		// storage_index.go:503+514). Both make an entry simply absent.
 		//
 		// Sized to match DisplayNameHistory, the closest structural analogue
 		// here: also one entry per user, also cumulative, already sized by this

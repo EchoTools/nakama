@@ -22,8 +22,8 @@ import (
 // hard-coded, so a regression in the production config surfaces as a test
 // failure rather than being papered over by a test-local copy.
 //
-// No database is required: CreateIndex (storage_index.go:661), Write
-// (storage_index.go:81) and the IndexOnly branch of List (storage_index.go:328)
+// No database is required: CreateIndex (storage_index.go:695), Write
+// (storage_index.go:83) and the IndexOnly branch of List (storage_index.go:340)
 // are all served entirely from the in-process bluge index.
 func newSuspensionProfileIndex(t *testing.T) (StorageIndex, StorableIndexMeta) {
 	t.Helper()
@@ -87,9 +87,9 @@ func suspensionProfileFixture(userID, groupID string) *SuspensionProfile {
 //
 // SuspensionProfile exists for exactly one reason: to be a pre-compiled
 // projection of the enforcement journal that can be served straight out of the
-// storage index. With IndexOnly: true, storage_index.go:349 returns
+// storage index. With IndexOnly: true, storage_index.go:360 returns
 // idxResult.Value verbatim -- and idxResult.Value is the FIELD-FILTERED map
-// built at storage_index.go:528-536, not the stored object. So if "suspensions"
+// built at storage_index.go:562-570, not the stored object. So if "suspensions"
 // is not in Fields, the array is discarded before the document is ever written,
 // and every query returns a profile with zero suspensions no matter how many
 // bans the user actually has.
@@ -117,7 +117,7 @@ func TestSuspensionProfileIndex_ServesSuspensionData(t *testing.T) {
 
 // TestSuspensionProfileIndex_QueryableByGroupID pins the other half of the
 // Fields contract: Fields governs what is SEARCHABLE as well as what is
-// returned, because BlugeWalkDocument (storage_index.go:560) only walks the
+// returned, because BlugeWalkDocument (storage_index.go:599) only walks the
 // already-filtered map. A portal that cannot ask "who is suspended in guild X"
 // cannot use this projection at all.
 func TestSuspensionProfileIndex_QueryableByGroupID(t *testing.T) {
@@ -142,11 +142,11 @@ func TestSuspensionProfileIndex_QueryableByGroupID(t *testing.T) {
 //
 // The seat check keys suspensions by mode -- recordsByMode[label.Mode]
 // (evr_lobby_joinentrant_enforce.go:60) -- and lobbyAuthorize skips records
-// whose mode differs (evr_lobby_joinentrant.go:377-380). A projection with no
+// whose mode differs (evr_lobby_joinentrant.go:372-375). A projection with no
 // mode information cannot answer "is this player suspended from THIS mode".
 //
 // Note there is no mode FIELD on GuildEnforcementRecord to copy. The mode set
-// is DERIVED: CheckEnforcementSuspensions (evr_enforcement_journal.go:399-402)
+// is DERIVED: EnforcementRecordAffectedModes (evr_enforcement_journal.go:395)
 // applies a record to evr.AllModes normally, and to evr.PublicModes only when
 // AllowPrivateLobbies is set. The projection must derive it the same way.
 func TestSyncFromJournal_PopulatesAffectedModes(t *testing.T) {
@@ -429,7 +429,7 @@ func TestSyncJournalAndProfile_ProfileFailureDoesNotAdvanceJournal(t *testing.T)
 // one profile describes exactly one user, never their alts.
 //
 // Alts cannot be baked in either. enforcementUserIDs is rebuilt on every login
-// from dynamically-discovered alternates (evr_pipeline_login.go:603-606), so
+// from dynamically-discovered alternates (evr_pipeline_login.go:602-606), so
 // alt membership changes without any enforcement write occurring, and encoding
 // it would require fanning a write out to every alt whenever alt detection
 // changed its mind.

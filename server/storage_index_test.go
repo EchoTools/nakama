@@ -469,7 +469,7 @@ func TestLocalStorageIndex_List(t *testing.T) {
 
 		// indexOnly = FALSE. This is the branch the test name has always
 		// claimed to cover. It previously passed true, so the db-read path at
-		// storage_index.go:361 had no coverage at all.
+		// storage_index.go:372 had no coverage at all.
 		if err := storageIdx.CreateIndex(ctx, indexName, collection, key, []string{"one", "two", "three"}, []string{}, maxEntries, false); err != nil {
 			t.Fatal(err.Error())
 		}

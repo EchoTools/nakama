@@ -33,8 +33,9 @@ func (m *gaugeCapturingMetrics) GaugeStorageIndexEntries(indexName string, value
 
 // TestStorageIndexEviction_IsObservable covers the silent-eviction gap.
 //
-// Above MaxEntries + 10%, Write evicts the oldest documents (storage_index.go
-// :161-190) and Nakama never reloads evicted entries. For an index backing any
+// Above MaxEntries + 10%, Write evicts the oldest documents
+// (storage_index.go:161) and Nakama never reloads evicted entries. For an index
+// backing any
 // kind of negative check that is a fail-OPEN condition: the entry is simply
 // absent, and absent is indistinguishable from "no such record".
 //
@@ -102,7 +103,7 @@ func TestStorageIndexEviction_IsObservable(t *testing.T) {
 //	a field absent from Fields is not RETURNED, and it is not SEARCHABLE.
 //
 // Both follow from mapIndexStorageFields reducing the value to the filtered map
-// (storage_index.go:528-536) before either storing it or walking it for terms.
+// (storage_index.go:562-570) before either storing it or walking it for terms.
 //
 // Database-free: with indexOnly true nothing in this path touches the db.
 func TestStorageIndexFieldFilter_IndexOnlyReturnsOnlyFilteredFields(t *testing.T) {
@@ -153,13 +154,13 @@ func TestStorageIndexFieldFilter_IndexOnlyReturnsOnlyFilteredFields(t *testing.T
 // The SuspensionProfile collection holds one entry per user who has ever had an
 // enforcement journal synced -- including users whose suspensions have all
 // expired or been voided, because a zero-suspension profile still carries
-// user_id and so is still indexed (storage_index.go:541-543). The set is
+// user_id and so is still indexed (storage_index.go:573). The set is
 // therefore CUMULATIVE and monotonic: it never shrinks.
 //
 // That makes the old cap of 10,000 a ceiling on lifetime enforcement history,
 // not on concurrent bans -- and hitting it degrades silently in two ways:
 // eviction (never reloaded) and boot-load truncation (load stops dead at
-// MaxEntries, storage_index.go:479+491).
+// MaxEntries, storage_index.go:503+514).
 //
 // Rather than invent a peak number, this couples the cap to DisplayNameHistory,
 // the closest structural analogue in this codebase: also one entry per user,
