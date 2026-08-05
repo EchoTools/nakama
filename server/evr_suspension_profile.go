@@ -32,6 +32,18 @@ type SuspensionProfileRecord struct {
 	IsLifetime bool      `json:"is_lifetime"`
 	Duration   string    `json:"duration"` // Human-readable format (e.g., "7d", "lifetime")
 
+	// Scope information
+	//
+	// AffectedModes lists the game modes this suspension applies to, as symbol
+	// tokens. There is no mode field on the underlying enforcement record -- the
+	// set is derived by EnforcementRecordAffectedModes, the same helper the
+	// authoritative check uses, so the projection and the gate agree.
+	//
+	// This matters because both suspension gates key on mode:
+	// evr_lobby_joinentrant_enforce.go:60 and evr_lobby_joinentrant.go:377-380.
+	AffectedModes       []string `json:"affected_modes"`
+	AllowPrivateLobbies bool     `json:"allow_private_lobbies"`
+
 	// Enforcement information
 	EnforcerUserID    string `json:"enforcer_user_id"`
 	EnforcerDiscordID string `json:"enforcer_discord_id"`
@@ -148,18 +160,28 @@ func (s *SuspensionProfile) SyncFromJournal(journal *GuildEnforcementJournal) {
 	// Iterate through all records in the journal
 	for groupID, records := range journal.RecordsByGroupID {
 		for _, record := range records {
+			// Derive the affected mode set using the same helper the
+			// authoritative check uses, so the two cannot drift.
+			modes := EnforcementRecordAffectedModes(record)
+			affectedModes := make([]string, 0, len(modes))
+			for _, m := range modes {
+				affectedModes = append(affectedModes, m.String())
+			}
+
 			// Build the profile record
 			profileRec := SuspensionProfileRecord{
-				ID:                record.ID,
-				GroupID:           groupID,
-				UserNotice:        record.UserNoticeText,
-				AuditorNotes:      record.AuditorNotes,
-				CreatedAt:         record.CreatedAt,
-				ExpiryAt:          record.Expiry,
-				IsLifetime:        record.IsLifetime(),
-				Duration:          FormatDuration(record.Expiry.Sub(record.CreatedAt)),
-				EnforcerUserID:    record.EnforcerUserID,
-				EnforcerDiscordID: record.EnforcerDiscordID,
+				ID:                  record.ID,
+				GroupID:             groupID,
+				UserNotice:          record.UserNoticeText,
+				AuditorNotes:        record.AuditorNotes,
+				CreatedAt:           record.CreatedAt,
+				ExpiryAt:            record.Expiry,
+				IsLifetime:          record.IsLifetime(),
+				Duration:            FormatDuration(record.Expiry.Sub(record.CreatedAt)),
+				AffectedModes:       affectedModes,
+				AllowPrivateLobbies: record.AllowPrivateLobbies,
+				EnforcerUserID:      record.EnforcerUserID,
+				EnforcerDiscordID:   record.EnforcerDiscordID,
 			}
 
 			// Add editor information if available

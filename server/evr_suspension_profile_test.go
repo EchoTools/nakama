@@ -9,6 +9,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -134,4 +135,81 @@ func TestSuspensionProfileIndex_QueryableByGroupID(t *testing.T) {
 
 	require.Len(t, objs.Objects, 1, "index should be queryable by the group a suspension belongs to")
 	assert.Equal(t, suspendedUser, objs.Objects[0].UserId)
+}
+
+// TestSyncFromJournal_PopulatesAffectedModes covers the mode axis.
+//
+// The seat check keys suspensions by mode -- recordsByMode[label.Mode]
+// (evr_lobby_joinentrant_enforce.go:60) -- and lobbyAuthorize skips records
+// whose mode differs (evr_lobby_joinentrant.go:377-380). A projection with no
+// mode information cannot answer "is this player suspended from THIS mode".
+//
+// Note there is no mode FIELD on GuildEnforcementRecord to copy. The mode set
+// is DERIVED: CheckEnforcementSuspensions (evr_enforcement_journal.go:399-402)
+// applies a record to evr.AllModes normally, and to evr.PublicModes only when
+// AllowPrivateLobbies is set. The projection must derive it the same way.
+func TestSyncFromJournal_PopulatesAffectedModes(t *testing.T) {
+	userID := uuid.Must(uuid.NewV4()).String()
+	groupID := uuid.Must(uuid.NewV4()).String()
+
+	for _, tc := range []struct {
+		name                string
+		allowPrivateLobbies bool
+		wantModes           []evr.Symbol
+	}{
+		{"full suspension applies to all modes", false, evr.AllModes},
+		{"private-lobbies-allowed applies to public modes only", true, evr.PublicModes},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			journal := NewGuildEnforcementJournal(userID)
+			journal.AddRecord(groupID, "enforcer", "1234", "Toxic Behavior", "notes",
+				false, tc.allowPrivateLobbies, 24*time.Hour)
+
+			profile := NewSuspensionProfile(userID)
+			profile.SyncFromJournal(journal)
+
+			require.Len(t, profile.Suspensions, 1)
+
+			want := make([]string, 0, len(tc.wantModes))
+			for _, m := range tc.wantModes {
+				want = append(want, m.String())
+			}
+			assert.ElementsMatch(t, want, profile.Suspensions[0].AffectedModes,
+				"profile must record which game modes the suspension applies to")
+			assert.Equal(t, tc.allowPrivateLobbies, profile.Suspensions[0].AllowPrivateLobbies)
+		})
+	}
+}
+
+// TestSyncFromJournal_AffectedModesAgreeWithAuthority is the anti-drift test.
+//
+// The projection is only trustworthy if its mode set is identical to the one
+// the authoritative check produces. Rather than restating the derivation, this
+// compares the projection against CheckEnforcementSuspensions itself, so any
+// future change to the authority that is not mirrored here fails the build.
+func TestSyncFromJournal_AffectedModesAgreeWithAuthority(t *testing.T) {
+	userID := uuid.Must(uuid.NewV4()).String()
+	groupID := uuid.Must(uuid.NewV4()).String()
+
+	for _, allowPrivate := range []bool{false, true} {
+		journal := NewGuildEnforcementJournal(userID)
+		journal.AddRecord(groupID, "enforcer", "1234", "Toxic Behavior", "notes",
+			false, allowPrivate, 24*time.Hour)
+
+		authoritative, err := CheckEnforcementSuspensions(
+			GuildEnforcementJournalList{userID: journal}, nil)
+		require.NoError(t, err)
+
+		wantModes := make([]string, 0)
+		for mode := range authoritative[groupID] {
+			wantModes = append(wantModes, mode.String())
+		}
+
+		profile := NewSuspensionProfile(userID)
+		profile.SyncFromJournal(journal)
+		require.Len(t, profile.Suspensions, 1)
+
+		assert.ElementsMatch(t, wantModes, profile.Suspensions[0].AffectedModes,
+			"projection mode set must match CheckEnforcementSuspensions (allow_private_lobbies=%v)", allowPrivate)
+	}
 }

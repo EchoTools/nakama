@@ -379,6 +379,26 @@ func EnforcementJournalsLoad(ctx context.Context, nk runtime.NakamaModule, userI
 // map[GroupID]map[GameMode]GuildEnforcementRecord
 type ActiveGuildEnforcements map[string]map[evr.Symbol]GuildEnforcementRecord
 
+// EnforcementRecordAffectedModes returns the game modes a suspension record
+// applies to.
+//
+// There is no mode field on GuildEnforcementRecord -- the mode set is derived.
+// A record normally suspends every mode; a record that allows private lobbies
+// suspends only the public ones.
+//
+// This is the single source of truth for that derivation. Both the
+// authoritative check (CheckEnforcementSuspensions) and the SuspensionProfile
+// projection call it, so the two cannot drift apart. See
+// TestSyncFromJournal_AffectedModesAgreeWithAuthority.
+//
+// The returned slice is shared package state and must not be mutated.
+func EnforcementRecordAffectedModes(r GuildEnforcementRecord) []evr.Symbol {
+	if r.SuspensionExcludesPrivateLobbies() {
+		return evr.PublicModes
+	}
+	return evr.AllModes
+}
+
 // map[GroupID]map[GameMode]GuildEnforcementRecord
 func CheckEnforcementSuspensions(journals GuildEnforcementJournalList, inheritanceMap map[string][]string) (ActiveGuildEnforcements, error) {
 
@@ -396,10 +416,7 @@ func CheckEnforcementSuspensions(journals GuildEnforcementJournalList, inheritan
 			// map[parentGroupID]map[childGroupID]bool
 			affectedGroupIDs := append(append([]string(nil), inheritanceMap[srcGroupID]...), srcGroupID)
 			// Apply the suspension to all affected modes
-			affectedModes := evr.AllModes
-			if r.SuspensionExcludesPrivateLobbies() {
-				affectedModes = evr.PublicModes
-			}
+			affectedModes := EnforcementRecordAffectedModes(r)
 			// Apply the suspension to all affected modes/groups
 			for _, mode := range affectedModes {
 				for _, affectedGroupID := range affectedGroupIDs {
