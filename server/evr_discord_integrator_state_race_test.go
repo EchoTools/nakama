@@ -1,0 +1,351 @@
+package server
+
+import (
+	"fmt"
+	"testing"
+
+	"github.com/bwmarrin/discordgo"
+)
+
+// discordgo owns Session.State and mutates it from the gateway goroutine under
+// State.Lock():
+//
+//   - GuildAdd (state.go:89) appends to State.Guilds (state.go:142) and, for a
+//     guild already in the cache, overwrites the existing *Guild IN PLACE
+//     (`*g = *guild`, state.go:141).
+//   - ChannelAdd (state.go:482) appends to guild.Channels and overwrites an
+//     existing *Channel in place (`*c = *channel`).
+//   - ChannelRemove (state.go:529) compacts guild.Channels.
+//
+// pruneGuildGroups runs on the 15-minute prune ticker goroutine
+// (evr_discord_integrator.go:189), NOT the gateway goroutine. It read
+// d.dg.State.Guilds with no lock held and handed the LIVE *Guild pointers on to
+// deep readers: guildSync (evr_discord_integrator.go:550) ranges guild.Channels
+// looking for #rules, and the prune-leave path logs `"guild_metadata": guild`,
+// which zap reflect-walks the whole struct.
+//
+// Before PR #514, guildSync only ever received the event-owned e.Guild from a
+// Guild Create/Update, which is fresh and unshared; the orphan reconciliation
+// added in #514 is what wired live state objects into a deep read.
+//
+// The copy-semantics tests below fail deterministically without the fix; the
+// concurrency tests fail under -race.
+
+// guildSyncStyleRead performs the same reads on a guild that guildSync does:
+// the scalar fields it copies into the Nakama group, and the #rules channel
+// scan over guild.Channels.
+func guildSyncStyleRead(g *discordgo.Guild) string {
+	rules := ""
+	_ = g.ID
+	_ = g.Name
+	_ = g.OwnerID
+	_ = g.Description
+	_ = g.IconURL("512")
+	for _, channel := range g.Channels {
+		if channel == nil {
+			continue
+		}
+		if channel.Type == discordgo.ChannelTypeGuildText && channel.Name == "rules" {
+			rules = channel.Topic
+			break
+		}
+	}
+	return rules
+}
+
+// newTestDiscordState builds a state with n guilds, each carrying a #rules
+// channel, as the gateway would after a Ready + Guild Create burst.
+func newTestDiscordState(t *testing.T, n int) *discordgo.State {
+	t.Helper()
+	state := discordgo.NewState()
+	for i := 0; i < n; i++ {
+		guildID := fmt.Sprintf("guild-%d", i)
+		g := &discordgo.Guild{
+			ID:          guildID,
+			Name:        fmt.Sprintf("Guild %d", i),
+			OwnerID:     fmt.Sprintf("owner-%d", i),
+			Description: "a guild",
+			Icon:        "icon-hash",
+			Channels: []*discordgo.Channel{
+				{ID: guildID + "-rules", GuildID: guildID, Type: discordgo.ChannelTypeGuildText, Name: "rules", Topic: "be nice"},
+				{ID: guildID + "-general", GuildID: guildID, Type: discordgo.ChannelTypeGuildText, Name: "general"},
+			},
+		}
+		if err := state.GuildAdd(g); err != nil {
+			t.Fatalf("GuildAdd: %v", err)
+		}
+	}
+	return state
+}
+
+// TestSnapshotStateGuilds_ReturnsCopiesNotLiveGuilds is the deterministic core
+// of the fix: the snapshot must not alias the *Guild objects that the gateway
+// goroutine overwrites in place. It fails without -race.
+func TestSnapshotStateGuilds_ReturnsCopiesNotLiveGuilds(t *testing.T) {
+	state := newTestDiscordState(t, 2)
+
+	live, err := state.Guild("guild-0")
+	if err != nil {
+		t.Fatalf("Guild: %v", err)
+	}
+
+	snap := snapshotStateGuilds(state)
+	var got *discordgo.Guild
+	for _, g := range snap {
+		if g.ID == "guild-0" {
+			got = g
+		}
+	}
+	if got == nil {
+		t.Fatalf("guild-0 missing from snapshot")
+	}
+
+	if got == live {
+		t.Fatal("snapshot returned the LIVE *Guild from discordgo state; the gateway goroutine overwrites it in place under State.Lock()")
+	}
+	if len(got.Channels) > 0 && len(live.Channels) > 0 && got.Channels[0] == live.Channels[0] {
+		t.Fatal("snapshot returned the LIVE *Channel pointers; ChannelAdd overwrites them in place under State.Lock()")
+	}
+}
+
+// TestSnapshotStateGuilds_SnapshotIsStableAcrossStateMutation pins the whole
+// point of copying: once taken, the snapshot the prune path iterates must not
+// change underneath it when the gateway mutates state. Deterministic.
+func TestSnapshotStateGuilds_SnapshotIsStableAcrossStateMutation(t *testing.T) {
+	state := newTestDiscordState(t, 1)
+
+	snap := snapshotStateGuilds(state)
+	if len(snap) != 1 {
+		t.Fatalf("got %d guilds, want 1", len(snap))
+	}
+	if rules := guildSyncStyleRead(snap[0]); rules != "be nice" {
+		t.Fatalf("rules topic = %q, want %q", rules, "be nice")
+	}
+
+	// The gateway re-delivers the guild (in-place *g = *guild), renames it,
+	// and drops the #rules channel.
+	if err := state.GuildAdd(&discordgo.Guild{
+		ID:          "guild-0",
+		Name:        "Renamed",
+		OwnerID:     "someone-else",
+		Description: "changed",
+		Channels: []*discordgo.Channel{
+			{ID: "guild-0-general", GuildID: "guild-0", Type: discordgo.ChannelTypeGuildText, Name: "general"},
+		},
+	}); err != nil {
+		t.Fatalf("GuildAdd: %v", err)
+	}
+
+	if snap[0].Name != "Guild 0" {
+		t.Errorf("snapshot guild name changed to %q after a state mutation; it aliases live state", snap[0].Name)
+	}
+	if snap[0].OwnerID != "owner-0" {
+		t.Errorf("snapshot guild owner changed to %q after a state mutation; it aliases live state", snap[0].OwnerID)
+	}
+	if rules := guildSyncStyleRead(snap[0]); rules != "be nice" {
+		t.Errorf("snapshot rules topic changed to %q after a state mutation; it aliases live state", rules)
+	}
+}
+
+// TestSnapshotStateGuilds_DropsUncopiedLiveCollections pins the safety
+// contract: reference-typed fields that the snapshot does not deep-copy must be
+// cleared, not aliased. Otherwise the prune-leave path's
+// `"guild_metadata": guild` zap reflect-walk reaches straight back into
+// gateway-mutated slices.
+func TestSnapshotStateGuilds_DropsUncopiedLiveCollections(t *testing.T) {
+	state := discordgo.NewState()
+	if err := state.GuildAdd(&discordgo.Guild{
+		ID:      "guild-x",
+		Name:    "X",
+		OwnerID: "owner-x",
+		Roles:   []*discordgo.Role{{ID: "role-1"}},
+		Emojis:  []*discordgo.Emoji{{ID: "emoji-1"}},
+		Members: []*discordgo.Member{{User: &discordgo.User{ID: "u1"}}},
+		Threads: []*discordgo.Channel{{ID: "thread-1", GuildID: "guild-x"}},
+		Channels: []*discordgo.Channel{
+			{ID: "c1", GuildID: "guild-x", Type: discordgo.ChannelTypeGuildText, Name: "rules", Topic: "t",
+				Messages: []*discordgo.Message{{ID: "m1"}}},
+		},
+	}); err != nil {
+		t.Fatalf("GuildAdd: %v", err)
+	}
+
+	snap := snapshotStateGuilds(state)
+	if len(snap) != 1 {
+		t.Fatalf("got %d guilds, want 1", len(snap))
+	}
+	g := snap[0]
+
+	for name, v := range map[string]int{
+		"Roles":   len(g.Roles),
+		"Emojis":  len(g.Emojis),
+		"Members": len(g.Members),
+		"Threads": len(g.Threads),
+	} {
+		if v != 0 {
+			t.Errorf("snapshot still carries %s (%d entries); it aliases gateway-mutated state", name, v)
+		}
+	}
+	if len(g.Channels) != 1 {
+		t.Fatalf("snapshot lost the channels the prune path reads: %+v", g.Channels)
+	}
+	if len(g.Channels[0].Messages) != 0 {
+		t.Errorf("snapshot channel still carries Messages; MessageAdd appends to it under State.Lock()")
+	}
+}
+
+// TestSnapshotStateGuilds_SafeAgainstGatewayChannelMutation proves the guilds
+// handed to a deep reader are not the live objects the gateway mutates via
+// ChannelAdd / ChannelRemove. Fails under -race without the fix.
+func TestSnapshotStateGuilds_SafeAgainstGatewayChannelMutation(t *testing.T) {
+	const guilds = 4
+	state := newTestDiscordState(t, guilds)
+
+	stop := make(chan struct{})
+	gatewayDone := make(chan struct{})
+	go func() {
+		defer close(gatewayDone)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			guildID := fmt.Sprintf("guild-%d", i%guilds)
+			// A bounded churn set: the same channel is added and removed, so
+			// guild.Channels is appended to and compacted repeatedly without
+			// the state growing without bound.
+			ch := &discordgo.Channel{
+				ID:      fmt.Sprintf("%s-churn", guildID),
+				GuildID: guildID,
+				Type:    discordgo.ChannelTypeGuildText,
+				Name:    "rules",
+				Topic:   "churn",
+			}
+			_ = state.ChannelAdd(ch)
+			_ = state.ChannelRemove(ch)
+		}
+	}()
+
+	for i := 0; i < 500; i++ {
+		for _, g := range snapshotStateGuilds(state) {
+			_ = guildSyncStyleRead(g)
+		}
+	}
+
+	close(stop)
+	<-gatewayDone
+}
+
+// TestSnapshotStateGuilds_SafeAgainstGatewayGuildMutation covers the other two
+// live-state mutations GuildAdd performs under State.Lock(): appending to
+// State.Guilds and overwriting an existing *Guild in place. Fails under -race
+// without the fix.
+func TestSnapshotStateGuilds_SafeAgainstGatewayGuildMutation(t *testing.T) {
+	const guilds = 4
+	state := newTestDiscordState(t, guilds)
+
+	stop := make(chan struct{})
+	gatewayDone := make(chan struct{})
+	go func() {
+		defer close(gatewayDone)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			// Re-deliver an existing guild (in-place *g = *guild overwrite)...
+			existingID := fmt.Sprintf("guild-%d", i%guilds)
+			_ = state.GuildAdd(&discordgo.Guild{
+				ID:          existingID,
+				Name:        fmt.Sprintf("Guild %d rev %d", i%guilds, i),
+				OwnerID:     fmt.Sprintf("owner-%d", i),
+				Description: "updated",
+				Icon:        fmt.Sprintf("icon-%d", i),
+				Channels: []*discordgo.Channel{
+					{ID: existingID + "-rules", GuildID: existingID, Type: discordgo.ChannelTypeGuildText, Name: "rules", Topic: "rev"},
+				},
+			})
+			// ...and join a guild from a bounded pool, which appends to
+			// State.Guilds the first time each ID is seen. Bounded so the
+			// snapshot cost stays constant instead of growing quadratically.
+			newID := fmt.Sprintf("guild-new-%d", i%guilds)
+			_ = state.GuildAdd(&discordgo.Guild{ID: newID, Name: newID, OwnerID: "owner-new"})
+		}
+	}()
+
+	for i := 0; i < 500; i++ {
+		for _, g := range snapshotStateGuilds(state) {
+			_ = guildSyncStyleRead(g)
+		}
+	}
+
+	close(stop)
+	<-gatewayDone
+}
+
+// TestSnapshotStateGuilds_Contents pins what the snapshot must contain: every
+// guild, with the fields the prune path and guildSync read.
+func TestSnapshotStateGuilds_Contents(t *testing.T) {
+	state := newTestDiscordState(t, 3)
+
+	got := snapshotStateGuilds(state)
+	if len(got) != 3 {
+		t.Fatalf("got %d guilds, want 3", len(got))
+	}
+
+	byID := make(map[string]*discordgo.Guild, len(got))
+	for _, g := range got {
+		byID[g.ID] = g
+	}
+	g, ok := byID["guild-1"]
+	if !ok {
+		t.Fatalf("guild-1 missing from snapshot: %v", byID)
+	}
+	if g.Name != "Guild 1" || g.OwnerID != "owner-1" || g.Description != "a guild" {
+		t.Errorf("guild-1 fields not carried over: %+v", g)
+	}
+	if g.IconURL("512") == "" {
+		t.Errorf("guild-1 icon not carried over; guildSync passes IconURL to GroupCreate/GroupUpdate")
+	}
+	if len(g.Channels) != 2 {
+		t.Fatalf("guild-1 channels not carried over: %+v", g.Channels)
+	}
+	if rules := guildSyncStyleRead(g); rules != "be nice" {
+		t.Errorf("rules topic = %q, want %q", rules, "be nice")
+	}
+}
+
+// TestSnapshotStateGuilds_NilState covers the defensive path: a session with no
+// state must not panic the prune job.
+func TestSnapshotStateGuilds_NilState(t *testing.T) {
+	if got := snapshotStateGuilds(nil); got != nil {
+		t.Fatalf("got %v, want nil", got)
+	}
+}
+
+// TestSnapshotStateGuilds_EmptyState pins the signal pruneGuildGroups relies on
+// to abort: an empty state yields an empty snapshot.
+func TestSnapshotStateGuilds_EmptyState(t *testing.T) {
+	if got := snapshotStateGuilds(discordgo.NewState()); len(got) != 0 {
+		t.Fatalf("got %d guilds, want 0", len(got))
+	}
+}
+
+// TestSnapshotStateGuilds_SkipsNilGuild covers a defensive path: a nil entry in
+// State.Guilds must not panic the prune job.
+func TestSnapshotStateGuilds_SkipsNilGuild(t *testing.T) {
+	state := newTestDiscordState(t, 1)
+	state.Guilds = append(state.Guilds, nil)
+
+	got := snapshotStateGuilds(state)
+	for _, g := range got {
+		if g == nil {
+			t.Fatal("snapshot carried a nil *Guild through to the prune path")
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d guilds, want 1", len(got))
+	}
+}
