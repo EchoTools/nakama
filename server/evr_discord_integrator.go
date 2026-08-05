@@ -10,7 +10,6 @@ import (
 	"slices"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
@@ -517,29 +516,38 @@ func (c *DiscordIntegrator) GuildMember(guildID, discordID string) (member *disc
 	return member, nil
 }
 
-// maxGroupTextLength is the column size of the groups table's name and
-// description columns (VARCHAR(255), migrate/sql/20180103142001_initial_schema.sql:182-183).
-// Discord guild descriptions can exceed it, which makes GroupCreate/GroupUpdate
-// fail with SQLSTATE 22001 ("value too long for type character varying(255)")
-// and permanently prevents the guild's group from being registered.
+// maxGroupTextLength is the column size, IN CHARACTERS, of the groups table's
+// name and description columns (VARCHAR(255),
+// migrate/sql/20180103142001_initial_schema.sql:182-183). PostgreSQL and
+// CockroachDB both measure VARCHAR(n) in characters, not bytes.
+//
+// Discord guild descriptions can reach 300 characters and so can exceed it,
+// which makes GroupCreate/GroupUpdate fail with SQLSTATE 22001 ("value too
+// long for type character varying(255)") and permanently prevents the guild's
+// group from being registered. Discord guild names cap at 100 characters and
+// therefore never reach this limit.
 const maxGroupTextLength = 255
 
-// truncateRuneSafe truncates s so its byte length is at most maxBytes without
-// splitting a multi-byte character (Discord descriptions contain emoji). The
-// byte limit is conservative for PostgreSQL VARCHAR(n), which counts characters.
-func truncateRuneSafe(s string, maxBytes int) string {
-	if len(s) <= maxBytes {
-		return s
-	}
-	if maxBytes <= 0 {
+// truncateRuneSafe truncates s to at most maxChars characters, never splitting
+// a multi-byte character (Discord names and descriptions contain emoji). The
+// unit is characters because that is the unit VARCHAR(n) counts; measuring in
+// bytes would cut a 100-character emoji guild name down to 63 characters and
+// could collapse two distinct guild names onto the same 255-byte prefix, which
+// the UNIQUE constraint groups_name_key would then reject.
+func truncateRuneSafe(s string, maxChars int) string {
+	if maxChars <= 0 {
 		return ""
 	}
-	for i := maxBytes; i > 0; i-- {
-		if utf8.RuneStart(s[i]) {
-			return s[:i]
-		}
+	if len(s) <= maxChars {
+		// A string can never have more characters than bytes, so this is
+		// already within the limit.
+		return s
 	}
-	return ""
+	runes := []rune(s)
+	if len(runes) <= maxChars {
+		return s
+	}
+	return string(runes[:maxChars])
 }
 
 // guildSync registers (or updates) the Nakama group backing a Discord guild.
@@ -549,6 +557,15 @@ func truncateRuneSafe(s string, maxBytes int) string {
 // no guild is left before the threshold check can run.
 func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, guild *discordgo.Guild, leaveOnBannedOwner bool) error {
 	logger = logger.With(zap.String("guild_id", guild.ID), zap.String("guild_name", guild.Name))
+
+	// An unavailable-guild stub carries no name. groups.name is NOT NULL and
+	// carries the UNIQUE constraint groups_name_key, so syncing one would
+	// either fail outright or collide with every other unnamed guild. Refuse
+	// explicitly rather than relying on the owner lookup below happening to
+	// fail first.
+	if guild.Name == "" {
+		return fmt.Errorf("guild %s has no name; refusing to sync (unavailable guild stub?)", guild.ID)
+	}
 
 	var err error
 	botUserID := d.DiscordIDToUserID(d.dg.State.User.ID)
