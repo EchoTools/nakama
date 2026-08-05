@@ -280,12 +280,13 @@ func isEarlyQuitEnforcementTestUser(userID string) bool {
 
 // earlyQuitEnforcementEnabled reports whether server-side early-quit
 // enforcement is active for the given group (the guild hosting the match, or
-// the player's active group when queueing). Enforcement is enabled unless the
-// guild is present in the session parameters AND its metadata explicitly
-// opted out via EnforceEarlyQuitPenalty. When the guild is not cached (no
-// session parameters, or the group is not in them), enforcement remains
-// enabled — the lookup is lenient and never blocks enforcement on a cache
-// miss. Only a known guild with the flag unset/false disables it.
+// the player's active group when queueing). Enforcement is opt-in: it is
+// enabled only when the guild is present in the session parameters AND its
+// metadata explicitly opts in via EnforceEarlyQuitPenalty (which defaults to
+// false when unset). When the guild is not cached (no session parameters, or
+// the group is not in them), enforcement remains enabled — the lookup is
+// lenient and never blocks enforcement on a cache miss. Only a known guild
+// with the flag explicitly set true enables it.
 func earlyQuitEnforcementEnabled(ctx context.Context, groupID string) bool {
 	params, ok := LoadParams(ctx)
 	if !ok {
