@@ -161,8 +161,10 @@ func TestGroupEntriesSequentially_NoStraddle(t *testing.T) {
 		// value = number of players for that ticket. []int{4,1,1,1,1} means
 		// one party of 4 and 4 solos = 8 total.
 		ticketSizes []int
-		// optional override for max_team_size on the first entry (affects maxCount)
+		// optional override for max_team_size (affects maxCount = *2)
 		maxTeamSize int
+		// count_multiple; 0 means the production default of 2
+		countMultiple float64
 		// expected candidate sizes after grouping, nil = flushed as empty
 		wantSizes []int
 	}{
@@ -248,6 +250,36 @@ func TestGroupEntriesSequentially_NoStraddle(t *testing.T) {
 			wantSizes:   nil,
 		},
 		{
+			// count_multiple is operator-configurable (MatchmakingTicketParameters).
+			// At 1 the countMultiple trim never fires, so the feasibility guard
+			// is the only thing standing between an odd pool and a candidate
+			// that can never satisfy len(blue) == len(orange).
+			name:          "arena count_multiple=1 — lone solo is not an even match",
+			mode:          "echo_arena",
+			ticketSizes:   []int{1},
+			countMultiple: 1,
+			wantSizes:     nil,
+		},
+		{
+			// 5 players, odd: trim the tail solo and the remaining 2+2 is a
+			// legal 2v2. Proves the odd-total pop converges on a real salvage
+			// rather than draining.
+			name:          "arena count_multiple=1 — odd pool trims to an even 2v2",
+			mode:          "echo_arena",
+			ticketSizes:   []int{2, 2, 1},
+			countMultiple: 1,
+			wantSizes:     []int{4},
+		},
+		{
+			// 5 players with an atomic 3-party: no even split survives any
+			// trim, so nothing is emitted.
+			name:          "arena count_multiple=1 — odd pool with a 3-party drains",
+			mode:          "echo_arena",
+			ticketSizes:   []int{3, 1, 1},
+			countMultiple: 1,
+			wantSizes:     nil,
+		},
+		{
 			name:        "combat same config as arena — straddle check skipped",
 			mode:        "echo_combat",
 			ticketSizes: []int{4, 1, 1, 1, 1},
@@ -266,23 +298,25 @@ func TestGroupEntriesSequentially_NoStraddle(t *testing.T) {
 			// Build flat entry list
 			var entries []runtime.MatchmakerEntry
 			ticketID := 0
-			firstEntry := true
+			ticketSizeOf := map[string]int{}
 			for _, sz := range tt.ticketSizes {
 				ticketID++
 				ticket := fmt.Sprintf("ticket-%d", ticketID)
+				ticketSizeOf[ticket] = sz
 				for j := range sz {
+					// Config lives in Properties, not NumericProperties:
+					// MatchmakerEntry.GetProperties() returns only Properties
+					// (server/matchmaker.go), so anything set in
+					// NumericProperties is invisible to the code under test.
+					// Every entry in a real pool carries the same config, so
+					// set it on every entry rather than only the first.
 					props := map[string]any{
-						"game_mode": tt.mode,
+						"game_mode":      tt.mode,
+						"count_multiple": tt.countMultiple,
 					}
-					numProps := map[string]float64{
-						"count_multiple": 2,
-						"max_count":      8,
-					}
-					// Apply max_team_size override only to the first entry
-					if firstEntry && tt.maxTeamSize > 0 {
+					if tt.maxTeamSize > 0 {
 						props["max_team_size"] = float64(tt.maxTeamSize)
 					}
-					_ = j
 					entries = append(entries, &MatchmakerEntry{
 						Ticket: ticket,
 						Presence: &MatchmakerPresence{
@@ -290,15 +324,38 @@ func TestGroupEntriesSequentially_NoStraddle(t *testing.T) {
 							UserId:    fmt.Sprintf("user-%d-%d", ticketID, j),
 							Node:      "test",
 						},
-						Properties:        props,
-						StringProperties:  map[string]string{"game_mode": tt.mode},
-						NumericProperties: numProps,
+						Properties:       props,
+						StringProperties: map[string]string{"game_mode": tt.mode},
 					})
 				}
-				firstEntry = false
 			}
 
 			candidates := groupEntriesSequentially(entries)
+
+			// Sizes alone would pass for an implementation that emitted the
+			// right count of entries built from a truncated ticket, so check
+			// membership too: for arena every emitted ticket must appear whole
+			// and in exactly one candidate.
+			if tt.mode == "echo_arena" {
+				appearances := map[string]int{}
+				for i, c := range candidates {
+					counts := map[string]int{}
+					for _, e := range c {
+						counts[e.GetTicket()]++
+					}
+					for ticket, n := range counts {
+						appearances[ticket]++
+						if n != ticketSizeOf[ticket] {
+							t.Errorf("candidate[%d] holds %d of ticket %s's %d entries (split)", i, n, ticket, ticketSizeOf[ticket])
+						}
+					}
+				}
+				for ticket, n := range appearances {
+					if n > 1 {
+						t.Errorf("ticket %s appears in %d candidates", ticket, n)
+					}
+				}
+			}
 
 			if tt.wantSizes == nil {
 				if len(candidates) != 0 {

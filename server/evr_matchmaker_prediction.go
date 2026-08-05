@@ -191,6 +191,63 @@ func HashMatchmakerEntries[E runtime.MatchmakerEntry](entries []E) uint64 {
 	return hash
 }
 
+// partitionGroupsEvenly assigns whole ticket groups to the blue team so that
+// blue sums to exactly teamSize and orange takes the rest. It returns a mask
+// indexed by the caller's group slice, and false when no even split exists.
+//
+// Groups arrive sorted best-rank-first. The walk prefers to place an earlier
+// (stronger) group on blue whenever the remainder is still reachable without
+// it, preserving RosterVariantSequential's "best groups fill blue first"
+// intent while actually solving the partition instead of first-fitting it.
+// The result is a deterministic function of the group order.
+//
+// This is the same subset-sum feasibility question groupEntriesSequentially
+// answers when it admits a candidate; solving it here is what makes the
+// packer's guarantee hold end to end. Bounded by 10 groups and teamSize 5.
+func partitionGroupsEvenly(groups []MatchmakerEntries, teamSize int) ([]bool, bool) {
+	n := len(groups)
+	if teamSize < 1 || n == 0 {
+		return nil, false
+	}
+	total := 0
+	for _, g := range groups {
+		total += len(g)
+	}
+	// An odd candidate can never split evenly; teamSize floors in the caller.
+	if total != teamSize*2 {
+		return nil, false
+	}
+
+	// suffix[i][k] reports whether groups[i:] can sum to exactly k.
+	suffix := make([][]bool, n+1)
+	for i := range suffix {
+		suffix[i] = make([]bool, teamSize+1)
+	}
+	suffix[n][0] = true
+	for i := n - 1; i >= 0; i-- {
+		sz := len(groups[i])
+		for k := 0; k <= teamSize; k++ {
+			if suffix[i+1][k] || (sz <= k && suffix[i+1][k-sz]) {
+				suffix[i][k] = true
+			}
+		}
+	}
+	if !suffix[0][teamSize] {
+		return nil, false
+	}
+
+	mask := make([]bool, n)
+	remaining := teamSize
+	for i := 0; i < n; i++ {
+		sz := len(groups[i])
+		if sz <= remaining && suffix[i+1][remaining-sz] {
+			mask[i] = true
+			remaining -= sz
+		}
+	}
+	return mask, remaining == 0
+}
+
 // predictCandidateOutcomesWithConfig allows testing with specific settings
 func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, cfg PredictionConfig) <-chan PredictedMatch {
 	// Generate roster variants based on config if not already specified
@@ -448,6 +505,42 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 						}
 
 						if assignToBlue {
+							blueTeam = append(blueTeam, g...)
+							blueRatings = append(blueRatings, ticketRatings[ticket]...)
+						} else {
+							orangeTeam = append(orangeTeam, g...)
+							orangeRatings = append(orangeRatings, ticketRatings[ticket]...)
+						}
+					}
+				}
+
+				// Repair pass. Both fills above are greedy first-fit over
+				// rank order with no backtracking, so they can fail to find an
+				// even split that provably exists. Example: groups {3,3,1,1} at
+				// teamSize 4 with the two solos ranked first — sequential fills
+				// blue={1,1}, then both 3-parties overflow into orange={3,3},
+				// and the candidate is discarded even though 3+1 vs 3+1 is a
+				// perfect split. groupEntriesSequentially only admits arena
+				// candidates for which such a split exists, so without this the
+				// packer's feasibility guarantee is thrown away one stage later
+				// and the whole lobby starves.
+				//
+				// Only runs when the variant's own fill failed, so every roster
+				// the greedy pass could already form is byte-identical to
+				// before; this strictly converts non-matches into matches.
+				if len(blueTeam) != len(orangeTeam) {
+					blueIdx, ok := partitionGroupsEvenly(groups, teamSize)
+					if !ok {
+						continue
+					}
+					blueTeam, orangeTeam = blueTeam[:0], orangeTeam[:0]
+					blueRatings, orangeRatings = blueRatings[:0], orangeRatings[:0]
+					for i, g := range groups {
+						ticket := g[0].GetTicket()
+						if isCombat {
+							ticket = g[0].GetPresence().GetUserId()
+						}
+						if blueIdx[i] {
 							blueTeam = append(blueTeam, g...)
 							blueRatings = append(blueRatings, ticketRatings[ticket]...)
 						} else {

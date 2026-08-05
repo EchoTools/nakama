@@ -138,21 +138,28 @@ func TestGroupEntries_5_4_2_NoPlayerDropped(t *testing.T) {
 
 	candidates := groupEntriesSequentially(entries)
 
-	// No shape here admits an even 4v4 or 3v3 split of whole tickets.
-	require.Len(t, candidates, 0, "expected no candidates, got sizes %v", candidateSizes(candidates))
-
-	// The original invariant: a ticket is emitted whole or not at all. In
-	// particular the 5-party is never partially included.
+	// Assert the namesake invariant FIRST, so it is evaluated against whatever
+	// the function actually produced. Asserting the count first would abort the
+	// test and leave this loop dead — a regression that emitted 4-of-the-
+	// 5-party would then report only a count mismatch, never the truncation.
+	//
+	// A ticket is emitted whole or not at all; in particular the 5-party is
+	// never partially included.
+	sizes := map[string]int{"a": 5, "b": 4, "c": 2}
 	for i, c := range candidates {
 		tickets := map[string]int{}
 		for _, e := range c {
 			tickets[e.GetTicket()]++
 		}
 		for ticket, count := range tickets {
-			want := map[string]int{"a": 5, "b": 4, "c": 2}[ticket]
-			assert.Equal(t, want, count, "candidate[%d] holds a partial %s-ticket", i, ticket)
+			assert.Equal(t, sizes[ticket], count, "candidate[%d] holds a partial %s-ticket (got %d of %d)", i, ticket, count, sizes[ticket])
 		}
 	}
+
+	// No shape here admits an even 4v4 or 3v3 split of whole tickets:
+	// {4,2} needs a 3-seat team the atomic 4-party cannot occupy, {5,*} cannot
+	// occupy any team at maxCount=8, and 5+4+2 exceeds maxCount.
+	require.Len(t, candidates, 0, "expected no candidates, got sizes %v", candidateSizes(candidates))
 }
 
 // ---------------------------------------------------------------------------
