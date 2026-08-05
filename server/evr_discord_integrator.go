@@ -804,7 +804,11 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 	}
 
 	if accountUpdate {
-		if err := d.nk.AccountUpdateId(ctx, evrAccount.ID(), e.Member.User.Username, evrAccount.MarshalMap(), evrAccount.GetActiveGroupDisplayName(), "", "", locale, avatarURL); err != nil {
+		accountMetadata, err := evrAccount.MarshalMap()
+		if err != nil {
+			return fmt.Errorf("failed to marshal account metadata: %w", err)
+		}
+		if err := d.nk.AccountUpdateId(ctx, evrAccount.ID(), e.Member.User.Username, accountMetadata, evrAccount.GetActiveGroupDisplayName(), "", "", locale, avatarURL); err != nil {
 			return fmt.Errorf("failed to update account: %w", err)
 		}
 	}

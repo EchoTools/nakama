@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -323,11 +324,32 @@ func (a EVRProfile) GetActiveGroupDisplayName() string {
 	return a.GetGroupIGN(a.ActiveGroupID)
 }
 
-func (a EVRProfile) MarshalMap() map[string]any {
-	b, _ := json.Marshal(a)
+// MarshalMap renders the profile as the generic map that runtime.AccountUpdate
+// expects for account metadata.
+//
+// Decoding uses json.Decoder.UseNumber() rather than a plain json.Unmarshal:
+// the default decoder turns every JSON number into a float64, which silently
+// truncates the 64-bit EchoVR item hashes in NewUnlocks (and the uint64
+// customization POI versions) above 2^53. Because EVRProfileUpdate writes the
+// storage value with json.Marshal and the account metadata with this function in
+// a single MultiUpdate, a lossy encoding here makes the two halves of one atomic
+// write commit different data. json.Number keeps the literal intact, and
+// encoding/json re-emits it verbatim when MultiUpdate serializes the map.
+//
+// Both json errors are returned rather than discarded; a swallowed error here
+// would blank the account metadata on the next write.
+func (a EVRProfile) MarshalMap() (map[string]any, error) {
+	b, err := json.Marshal(a)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal profile: %w", err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
 	var m map[string]any
-	_ = json.Unmarshal(b, &m)
-	return m
+	if err := dec.Decode(&m); err != nil {
+		return nil, fmt.Errorf("failed to decode profile into map: %w", err)
+	}
+	return m, nil
 }
 
 func (a EVRProfile) GetMuted() []evr.EvrId {
@@ -437,10 +459,15 @@ func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID strin
 		return fmt.Errorf("failed to marshal profile: %w", err)
 	}
 
+	metadata, err := md.MarshalMap()
+	if err != nil {
+		return fmt.Errorf("failed to marshal profile metadata: %w", err)
+	}
+
 	acks, _, err := nk.MultiUpdate(ctx,
 		[]*runtime.AccountUpdate{{
 			UserID:   userID,
-			Metadata: md.MarshalMap(),
+			Metadata: metadata,
 		}},
 		[]*runtime.StorageWrite{{
 			Collection:      meta.Collection,
