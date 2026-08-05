@@ -1598,13 +1598,11 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				// The staged record is the dedupe marker, so it is committed
 				// together with the credit below — never on its own, which
 				// would make a failed counter write lose the credit for good.
-				// Warn, not Debug: this is the failure that costs the player
-				// match credit, so it must be at least as visible as the
-				// adjacent eqconfig write failure below.
-				first, history, err := PrepareMatchCompletion(ctx, logger, nk, presence.GetUserId(), state.ID, time.Now().UTC())
-				if err != nil {
-					logger.WithField("error", err).Warn("Failed to track match completion in history")
-				} else if first {
+				// A history read failure no longer surfaces here:
+				// PrepareMatchCompletion self-heals an unreadable row and logs
+				// it at Warn itself.
+				first, history := PrepareMatchCompletion(ctx, logger, nk, presence.GetUserId(), state.ID, time.Now().UTC())
+				if first {
 					eqconfig.IncrementCompletedMatches()
 				}
 

@@ -250,3 +250,52 @@ func TestMatchCompletion_FirstEverCompletionDoesNotClobberAConcurrentOne(t *test
 			state.TotalCompletedMatches)
 	}
 }
+
+// TestMatchCompletion_CorruptHistoryRowStillCreditsTheCompletion pins the
+// interaction between the completion history's version staging and the atomic
+// batch that now commits the history together with the credit.
+//
+// The history row is read with create=false, so a row that EXISTS but does not
+// unmarshal comes back as codes.Internal — not NotFound. Staging that read
+// failure as a create-only write ("*") makes the batch fail against the row
+// that is still sitting there, and because the credit is in the same
+// transaction the credit is rolled back with it. Nothing on this path ever
+// repairs the row, so the player never gains completion credit or recovers
+// tier again — every completed match, forever.
+//
+// Correct behaviour: only a genuinely absent row is staged create-only. A row
+// that could not be read is overwritten unconditionally, which is what this
+// path did before the batch existed and is how the quit-record path recovers
+// too.
+func TestMatchCompletion_CorruptHistoryRowStillCreditsTheCompletion(t *testing.T) {
+	logger := NewRuntimeGoLogger(loggerForTest(t))
+	nk := newCompletionTestNK()
+	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
+
+	userID := uuid.Must(uuid.NewV4()).String()
+	matchID, err := NewMatchID(uuid.Must(uuid.NewV4()), "test-node")
+	if err != nil {
+		t.Fatalf("new match id: %v", err)
+	}
+
+	// The row exists and is unreadable.
+	nk.seedObject(userID, StorageCollectionEarlyQuitHistory, StorageKeyEarlyQuitHistory, "{ not json")
+
+	s := &EventRemoteLogSet{}
+
+	// Report the same match three times: the first must credit it, the rest
+	// must dedupe against the now-repaired history.
+	for i := 0; i < 3; i++ {
+		if err := s.incrementCompletedMatches(ctx, logger, nk, nil, &testSessionRegistry{}, userID, "", matchID); err != nil {
+			t.Fatalf("report %d: %v", i+1, err)
+		}
+	}
+
+	state, history := storedCompletionState(t, ctx, nk, userID)
+	if state.TotalCompletedMatches != 1 {
+		t.Errorf("TotalCompletedMatches = %d, want 1: an unreadable history row rolled back the credit", state.TotalCompletedMatches)
+	}
+	if got := countCompletionsFor(history, matchID); got != 1 {
+		t.Errorf("completion records for the match = %d, want 1 (the corrupt row was not repaired)", got)
+	}
+}
