@@ -693,8 +693,19 @@ func (d *DiscordIntegrator) handleGuildDelete(logger *zap.Logger, _ *discordgo.S
 	}
 
 	// Log the metadata of the group before deleting it.
-	gg := d.guildGroupRegistry.Get(groupID)
-	logger.Info("Deleting guild group", zap.String("group_id", groupID), zap.Any("metadata", gg.GroupMetadata))
+	//
+	// Get returns nil when the group exists in the database but is absent from the
+	// registry (the rebuild filters on GuildGroupLangTag, and any failure between
+	// GroupCreate and registry.Add in guildSync leaves that window open).
+	// GroupMetadata is an embedded VALUE, so dereferencing a nil *GuildGroup here
+	// panics — and discordgo runs handlers on bare goroutines with no recover, so
+	// the panic would take down the process. Still delete the group; only the
+	// metadata detail in the log is lost.
+	if gg := d.guildGroupRegistry.Get(groupID); gg != nil {
+		logger.Info("Deleting guild group", zap.String("group_id", groupID), zap.Any("metadata", gg.GroupMetadata))
+	} else {
+		logger.Info("Deleting guild group (not present in registry)", zap.String("group_id", groupID))
+	}
 
 	if err := d.nk.GroupDelete(d.ctx, groupID); err != nil {
 		return fmt.Errorf("error deleting group: %w", err)

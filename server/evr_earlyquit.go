@@ -284,8 +284,12 @@ func earlyQuitEnforcementEnabled(ctx context.Context, groupID string) bool {
 	if !ok {
 		return true
 	}
+	// A nil entry is treated exactly like an absent one. The nil guard inside
+	// GetEnforceEarlyQuitPenalty cannot catch it: GroupMetadata is embedded by
+	// VALUE in GuildGroup, so gg.GetEnforceEarlyQuitPenalty() takes the address
+	// &gg.GroupMetadata before the method body runs and a nil gg panics first.
 	gg, ok := params.guildGroups[groupID]
-	if !ok {
+	if !ok || gg == nil {
 		return true
 	}
 	return gg.GetEnforceEarlyQuitPenalty()
