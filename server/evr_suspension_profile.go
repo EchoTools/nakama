@@ -66,9 +66,48 @@ type SuspensionProfileRecord struct {
 	VoidNotes string    `json:"void_notes,omitempty"`
 }
 
-// SuspensionProfile is the user-readable version of the enforcement journal
-// Permission: OWNER_READ (400) - Only the player can read their own profile
-// This is maintained in sync with GuildEnforcementJournal for portal display
+// SuspensionProfile is the user-readable version of the enforcement journal.
+// Permission: OWNER_READ (400) - Only the player can read their own profile.
+// This is maintained in sync with GuildEnforcementJournal for portal display.
+//
+// ============================ SCOPE CONTRACT ============================
+//
+// THIS TYPE IS A DISPLAY PROJECTION. IT IS NOT AN AUTHORIZATION SOURCE.
+// DO NOT USE IT TO DECIDE WHETHER A PLAYER MAY JOIN A MATCH.
+//
+// It is deliberately narrower than the authoritative check in three ways, and
+// each omission is load-bearing rather than an oversight:
+//
+//  1. SELF ONLY -- no alternate accounts. The authoritative check runs over
+//     params.enforcementUserIDs, which is self PLUS alts and is rebuilt on
+//     every login from dynamically-discovered alternates
+//     (evr_pipeline_login.go:603-606). Alt membership therefore changes with
+//     no enforcement write occurring; baking it in would require fanning a
+//     write out to every alt each time alt detection changed its mind.
+//
+//  2. NO GUILD INHERITANCE. The authoritative check fans a suspension out to
+//     child guilds via ggRegistry.InheritanceByParentGroupID(). That map is an
+//     atomic a registry rebuild REPLACES wholesale
+//     (evr_guild_group_registry.go:121), so re-parenting a guild changes the
+//     correct answer for every already-written profile with, again, no
+//     enforcement write to trigger a resync.
+//
+//  3. SERVED FROM A NODE-LOCAL INDEX. The declared index is IndexOnly, so
+//     reads through it never touch the database. Index population happens only
+//     on the node performing the write (core_storage.go:838) and at boot
+//     (storage_index.go:384). A ban issued on node A is invisible to node B
+//     until node B restarts, and evicted entries are never reloaded -- so an
+//     absent entry reads as "not banned", which is fail-OPEN.
+//
+// Callers that need a correct suspension decision MUST use
+// EnforcementJournalsLoad + CheckEnforcementSuspensions against the database,
+// as evr_lobby_joinentrant_enforce.go:41-48 and evr_lobby_joinentrant.go:356-361
+// do. Both of those are fail-closed by design; this type cannot be.
+//
+// Pinned by TestSyncFromJournal_DoesNotApplyInheritance and
+// TestSyncFromJournal_IsSelfOnly.
+//
+// ========================================================================
 type SuspensionProfile struct {
 	UserID      string                    `json:"user_id"`
 	Suspensions []SuspensionProfileRecord `json:"suspensions"`

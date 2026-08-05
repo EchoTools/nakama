@@ -270,3 +270,69 @@ func TestSyncFromJournal_VoidedExclusionMatchesAuthority(t *testing.T) {
 	assert.Empty(t, profile.Suspensions,
 		"the projection must agree with the authority that nothing is enforceable here")
 }
+
+// TestSyncFromJournal_DoesNotApplyInheritance pins the SCOPE contract of the
+// projection: it is self-only and inheritance-free, deliberately.
+//
+// This is a characterization test for a decision, not a bug. Guild inheritance
+// cannot be baked into a per-user projection at enforcement-write time:
+// InheritanceByParentGroupID reads an atomic that a registry rebuild REPLACES
+// wholesale (evr_guild_group_registry.go:121), so a guild admin re-parenting a
+// guild changes the correct answer for every already-written profile, with no
+// enforcement write to trigger a resync.
+//
+// If this test ever fails, someone has started applying inheritance at sync
+// time and must first solve the invalidation problem it creates.
+func TestSyncFromJournal_DoesNotApplyInheritance(t *testing.T) {
+	userID := uuid.Must(uuid.NewV4()).String()
+	parentGroupID := uuid.Must(uuid.NewV4()).String()
+	childGroupID := uuid.Must(uuid.NewV4()).String()
+
+	journal := NewGuildEnforcementJournal(userID)
+	journal.AddRecord(parentGroupID, "enforcer", "1234", "Toxic Behavior", "", false, false, 24*time.Hour)
+
+	// The authority, given an inheritance map, DOES fan the suspension out to
+	// the child guild. This is the behaviour the projection deliberately omits.
+	inheritance := map[string][]string{parentGroupID: {childGroupID}}
+	authoritative, err := CheckEnforcementSuspensions(GuildEnforcementJournalList{userID: journal}, inheritance)
+	require.NoError(t, err)
+	require.NotEmpty(t, authoritative[childGroupID],
+		"precondition: the authority DOES apply inheritance to the child guild")
+
+	profile := NewSuspensionProfile(userID)
+	profile.SyncFromJournal(journal)
+
+	groups := make([]string, 0, len(profile.Suspensions))
+	for _, s := range profile.Suspensions {
+		groups = append(groups, s.GroupID)
+	}
+
+	assert.Contains(t, groups, parentGroupID, "the guild that issued the suspension must be present")
+	assert.NotContains(t, groups, childGroupID,
+		"the projection is inheritance-free by contract; callers needing inherited suspensions must consult CheckEnforcementSuspensions with a live registry inheritance map")
+}
+
+// TestSyncFromJournal_IsSelfOnly pins the other half of the scope contract:
+// one profile describes exactly one user, never their alts.
+//
+// Alts cannot be baked in either. enforcementUserIDs is rebuilt on every login
+// from dynamically-discovered alternates (evr_pipeline_login.go:603-606), so
+// alt membership changes without any enforcement write occurring, and encoding
+// it would require fanning a write out to every alt whenever alt detection
+// changed its mind.
+func TestSyncFromJournal_IsSelfOnly(t *testing.T) {
+	userID := uuid.Must(uuid.NewV4()).String()
+	groupID := uuid.Must(uuid.NewV4()).String()
+
+	journal := NewGuildEnforcementJournal(userID)
+	journal.AddRecord(groupID, "enforcer", "1234", "Toxic Behavior", "", false, false, 24*time.Hour)
+
+	profile := NewSuspensionProfile(userID)
+	profile.SyncFromJournal(journal)
+
+	assert.Equal(t, userID, profile.UserID)
+	for _, s := range profile.Suspensions {
+		assert.Equal(t, groupID, s.GroupID,
+			"the projection carries only this user's own records")
+	}
+}
