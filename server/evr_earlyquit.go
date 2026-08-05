@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"math"
 	"sync"
 	"time"
 
@@ -113,23 +114,57 @@ func (s *EarlyQuitPlayerState) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// clampLockoutSec converts a config-supplied lockout (a 64-bit `int` read from
+// stored JSON) to the int32 the penalty state carries, saturating instead of
+// wrapping. Wrapping is not a theoretical concern: every caller gates on
+// `lockoutSec > 0`, so 2^31 (which wraps negative) and 2^32 (which wraps to
+// zero) would both take the CLEAR branch and silently disable the very penalty
+// the config asked to lengthen. Stored configs are not re-validated on read,
+// so this is the only place the bound is enforced.
+func clampLockoutSec(sec int) int32 {
+	if sec <= 0 {
+		return 0
+	}
+	if sec > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(sec)
+}
+
 // ResolvePenaltyLevel determines the penalty level and lockout duration from the
 // config's penalty_levels array, matching the binary's algorithm: find the first
 // level where numQuits >= min AND numQuits <= max.
+//
+// Resolution is total: a quit count that lands in no band (the ladder may have
+// gaps, and its first band need not start at 0 — validatePenaltyLevels closes
+// overlaps but not gaps) resolves to the highest band whose floor the count has
+// already reached, and to no penalty at all when it is below every band. Only a
+// count ABOVE every band gets the top level.
 func ResolvePenaltyLevel(numQuits int32, cfg *evr.SNSEarlyQuitConfig) (level int32, lockoutSec int32) {
 	if cfg == nil {
 		return 0, 0
 	}
+	var (
+		bestLevel   int32
+		bestLockout int32
+		bestMin     int
+		found       bool
+	)
 	for _, pl := range cfg.PenaltyLevels {
 		if int(numQuits) >= pl.MinEarlyQuits && int(numQuits) <= pl.MaxEarlyQuits {
-			return int32(pl.PenaltyLevel), int32(pl.MMLockoutSec)
+			return int32(pl.PenaltyLevel), clampLockoutSec(pl.MMLockoutSec)
+		}
+		// Not in this band. Remember it if the count has cleared its floor:
+		// it is the candidate for a count that sits in a gap above it or
+		// beyond the end of the ladder.
+		if int(numQuits) > pl.MaxEarlyQuits && (!found || pl.MinEarlyQuits >= bestMin) {
+			bestLevel, bestLockout, bestMin, found = int32(pl.PenaltyLevel), clampLockoutSec(pl.MMLockoutSec), pl.MinEarlyQuits, true
 		}
 	}
-	// If no level matches (quit count above all ranges), use the highest level
-	if len(cfg.PenaltyLevels) > 0 {
-		last := cfg.PenaltyLevels[len(cfg.PenaltyLevels)-1]
-		return int32(last.PenaltyLevel), int32(last.MMLockoutSec)
+	if found {
+		return bestLevel, bestLockout
 	}
+	// Below every configured band: no penalty.
 	return 0, 0
 }
 
