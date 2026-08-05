@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
@@ -258,24 +261,31 @@ func (s *SuspensionProfile) SyncFromJournal(journal *GuildEnforcementJournal) {
 	s.UpdatedAt = time.Now().UTC()
 }
 
-// SyncJournalAndProfile updates both the enforcement journal and suspension profile in storage
-// This ensures they stay in sync whenever enforcement data changes
+// SyncJournalAndProfile updates both the enforcement journal and suspension
+// profile in storage, ATOMICALLY.
+//
+// The journal is the authority; the profile is a projection of it. Previously
+// this issued two separate StorableWrite calls, i.e. two independent
+// transactions. If the second one failed, the journal had already advanced
+// while the projection still described the previous state -- and it lagged in
+// the PERMISSIVE direction, with a freshly-issued suspension present in the
+// authority but absent from the projection, and no trace that they disagreed.
+//
+// Both objects now go through StorableWriteMany, which puts them in a single
+// ExecuteInTxPgx transaction (core_storage.go:587). The pair cannot half-apply:
+// if the projection write fails, the journal write fails with it and the caller
+// gets an error naming both objects.
 func SyncJournalAndProfile(ctx context.Context, nk runtime.NakamaModule, userID string, journal *GuildEnforcementJournal) error {
 	profile := NewSuspensionProfile(userID)
-	if err := StorableRead(ctx, nk, userID, profile, true); err != nil {
+	// create=false: a missing profile is not an error here. Creating it via the
+	// read would be a THIRD separate write, defeating the point; the fresh
+	// profile already carries version "*", so the atomic write below inserts it.
+	if err := StorableRead(ctx, nk, userID, profile, false); err != nil && status.Code(err) != codes.NotFound {
 		return err
 	}
 	profile.SyncFromJournal(journal)
 
-	if err := StorableWrite(ctx, nk, userID, journal); err != nil {
-		return err
-	}
-
-	if err := StorableWrite(ctx, nk, userID, profile); err != nil {
-		return err
-	}
-
-	return nil
+	return StorableWriteMany(ctx, nk, userID, journal, profile)
 }
 
 // SyncJournalAndProfileWithRetry syncs journal and profile with retry logic for concurrent writes.

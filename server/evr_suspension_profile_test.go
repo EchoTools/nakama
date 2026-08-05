@@ -9,6 +9,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -310,6 +311,118 @@ func TestSyncFromJournal_DoesNotApplyInheritance(t *testing.T) {
 	assert.Contains(t, groups, parentGroupID, "the guild that issued the suspension must be present")
 	assert.NotContains(t, groups, childGroupID,
 		"the projection is inheritance-free by contract; callers needing inherited suspensions must consult CheckEnforcementSuspensions with a live registry inheritance map")
+}
+
+// syncTestNK is a storage double that models the ONE property this test cares
+// about: the transaction boundary. StorageWriteObjects wraps an entire batch in
+// a single ExecuteInTxPgx (core_storage.go:587), so one StorageWrite call is
+// all-or-nothing and two calls are two independent transactions. The double
+// applies a batch only if every op in it is accepted.
+type syncTestNK struct {
+	runtime.NakamaModule
+	objects map[string]string // "collection/key" -> value
+	batches [][]string        // collections seen, per StorageWrite call
+	// rejectCollection fails any batch containing this collection.
+	rejectCollection string
+}
+
+func newSyncTestNK() *syncTestNK {
+	return &syncTestNK{objects: make(map[string]string)}
+}
+
+func (m *syncTestNK) StorageRead(ctx context.Context, reads []*runtime.StorageRead) ([]*api.StorageObject, error) {
+	objs := make([]*api.StorageObject, 0, len(reads))
+	for _, r := range reads {
+		if v, ok := m.objects[r.Collection+"/"+r.Key]; ok {
+			objs = append(objs, &api.StorageObject{
+				Collection: r.Collection, Key: r.Key, UserId: r.UserID, Value: v, Version: "v1",
+			})
+		}
+	}
+	return objs, nil
+}
+
+func (m *syncTestNK) StorageWrite(ctx context.Context, writes []*runtime.StorageWrite) ([]*api.StorageObjectAck, error) {
+	collections := make([]string, 0, len(writes))
+	for _, w := range writes {
+		collections = append(collections, w.Collection)
+	}
+	m.batches = append(m.batches, collections)
+
+	// Transaction semantics: reject the WHOLE batch, persisting nothing.
+	for _, w := range writes {
+		if m.rejectCollection != "" && w.Collection == m.rejectCollection {
+			return nil, runtime.ErrStorageRejectedVersion
+		}
+	}
+
+	acks := make([]*api.StorageObjectAck, 0, len(writes))
+	for _, w := range writes {
+		m.objects[w.Collection+"/"+w.Key] = w.Value
+		acks = append(acks, &api.StorageObjectAck{
+			Collection: w.Collection, Key: w.Key, UserId: w.UserID, Version: "v1",
+		})
+	}
+	return acks, nil
+}
+
+// TestSyncJournalAndProfile_IsAtomic covers the split-write bug.
+//
+// SyncJournalAndProfile issued the journal write and the profile write as two
+// separate StorableWrite calls, hence two separate transactions. If the second
+// failed, the journal -- the AUTHORITY -- had already advanced while the
+// projection still described the previous state. The projection lagged in the
+// PERMISSIVE direction: a freshly-issued ban was absent from the profile.
+//
+// Writing both objects in a single StorageWrite call puts them in one
+// ExecuteInTxPgx transaction (core_storage.go:587), so the pair cannot split.
+func TestSyncJournalAndProfile_IsAtomic(t *testing.T) {
+	userID := uuid.Must(uuid.NewV4()).String()
+	groupID := uuid.Must(uuid.NewV4()).String()
+
+	nk := newSyncTestNK()
+	journal := NewGuildEnforcementJournal(userID)
+	journal.AddRecord(groupID, "enforcer", "1234", "Toxic Behavior", "", false, false, 24*time.Hour)
+
+	require.NoError(t, SyncJournalAndProfile(context.Background(), nk, userID, journal))
+
+	// Ignore the read-through create of an absent profile; look at the batch
+	// that actually carries the journal.
+	var journalBatch []string
+	for _, b := range nk.batches {
+		for _, c := range b {
+			if c == StorageCollectionEnforcementJournal {
+				journalBatch = b
+			}
+		}
+	}
+	require.NotNil(t, journalBatch, "the journal must have been written")
+
+	assert.ElementsMatch(t,
+		[]string{StorageCollectionEnforcementJournal, StorageCollectionSuspensionProfile},
+		journalBatch,
+		"journal and profile must be written in ONE StorageWrite call so they share a transaction; got batches %v", nk.batches)
+}
+
+// TestSyncJournalAndProfile_ProfileFailureDoesNotAdvanceJournal is the
+// consequence that actually matters in production: if the projection write
+// fails, the authority must not have advanced without it.
+func TestSyncJournalAndProfile_ProfileFailureDoesNotAdvanceJournal(t *testing.T) {
+	userID := uuid.Must(uuid.NewV4()).String()
+	groupID := uuid.Must(uuid.NewV4()).String()
+
+	nk := newSyncTestNK()
+	nk.rejectCollection = StorageCollectionSuspensionProfile
+
+	journal := NewGuildEnforcementJournal(userID)
+	journal.AddRecord(groupID, "enforcer", "1234", "Toxic Behavior", "", false, false, 24*time.Hour)
+
+	err := SyncJournalAndProfile(context.Background(), nk, userID, journal)
+	require.Error(t, err, "a failed projection write must surface as an error, not be swallowed")
+
+	_, journalPersisted := nk.objects[StorageCollectionEnforcementJournal+"/"+StorageKeyEnforcementJournal]
+	assert.False(t, journalPersisted,
+		"the journal must NOT have advanced when the profile write failed; a suspension recorded in the authority but missing from the projection is a silent permissive drift")
 }
 
 // TestSyncFromJournal_IsSelfOnly pins the other half of the scope contract:
