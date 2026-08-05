@@ -155,35 +155,6 @@ func groupEntriesSequentially(entries []runtime.MatchmakerEntry) [][]runtime.Mat
 		return nil
 	}
 
-	// Guild scoping. Players must only ever match within their own guild
-	// group. Each per-ticket index search is group-scoped, but the core
-	// unions the hits of every active ticket and then partitions that union
-	// by game_mode alone (matchmaker_process.go), so a pool handed to this
-	// function can contain tickets from more than one guild whenever two
-	// guilds queue the same mode in the same cycle. Nothing downstream
-	// re-checks it: EvrMatchmakerFn reads group_id off entries[0] for
-	// logging only.
-	//
-	// Pack each guild independently rather than dropping the minority, so no
-	// guild is starved, and recurse only once (each sub-pool is single-guild).
-	// First-appearance ordering keeps the output deterministic.
-	groupOrder := make([]string, 0, 1)
-	byGroup := make(map[string][]runtime.MatchmakerEntry, 1)
-	for _, entry := range entries {
-		gid, _ := entry.GetProperties()["group_id"].(string)
-		if _, ok := byGroup[gid]; !ok {
-			groupOrder = append(groupOrder, gid)
-		}
-		byGroup[gid] = append(byGroup[gid], entry)
-	}
-	if len(groupOrder) > 1 {
-		out := make([][]runtime.MatchmakerEntry, 0, len(groupOrder))
-		for _, gid := range groupOrder {
-			out = append(out, groupEntriesSequentially(byGroup[gid])...)
-		}
-		return out
-	}
-
 	maxCount := 8
 	countMultiple := 2
 

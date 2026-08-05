@@ -3,7 +3,6 @@ package server
 import (
 	"fmt"
 	"math"
-	"sort"
 	"testing"
 	"time"
 
@@ -285,68 +284,5 @@ func TestPartitionGroupsEvenlyIsDeterministic(t *testing.T) {
 		if !ok || fmt.Sprint(got) != fmt.Sprint(first) {
 			t.Fatalf("run %d differed: %v vs %v (ok=%v)", i, got, first, ok)
 		}
-	}
-}
-
-// TestGroupEntriesSequentiallyNeverMixesGuilds pins the cross-guild invariant
-// at the one place candidates are assembled. The core matchmaker partitions
-// its entry pool by game_mode only (matchmaker_process.go), so a pool reaching
-// this function can hold tickets from more than one guild whenever two guilds
-// queue the same mode in the same cycle. No candidate may span guilds.
-func TestGroupEntriesSequentiallyNeverMixesGuilds(t *testing.T) {
-	withGuild := func(e []runtime.MatchmakerEntry, guild string) []runtime.MatchmakerEntry {
-		for _, entry := range e {
-			entry.GetProperties()["group_id"] = guild
-		}
-		return e
-	}
-
-	var entries []runtime.MatchmakerEntry
-	// Interleaved so a guild-blind packer would certainly mix them.
-	for i := 0; i < 4; i++ {
-		entries = append(entries, withGuild(buildArenaPool([]int{1}, []float64{10}), "guild-a")...)
-		entries = append(entries, withGuild(buildArenaPool([]int{1}, []float64{10}), "guild-b")...)
-	}
-	// Rewrite tickets and sessions so the two guilds' entries stay distinct.
-	for i, e := range entries {
-		me := e.(*MatchmakerEntry)
-		guild := me.Properties["group_id"].(string)
-		me.Ticket = uuid.NewV5(uuid.Nil, fmt.Sprintf("%s-t%d", guild, i)).String()
-		me.Presence.UserId = uuid.NewV5(uuid.Nil, fmt.Sprintf("%s-u%d", guild, i)).String()
-		me.Presence.SessionId = uuid.NewV5(uuid.Nil, fmt.Sprintf("%s-s%d", guild, i)).String()
-	}
-
-	candidates := groupEntriesSequentially(entries)
-	if len(candidates) == 0 {
-		t.Fatal("expected candidates for two guilds of 4 solos each")
-	}
-
-	totalPlaced := 0
-	perGuild := map[string]int{}
-	for i, c := range candidates {
-		guilds := map[string]int{}
-		for _, e := range c {
-			guilds[e.GetProperties()["group_id"].(string)]++
-		}
-		if len(guilds) != 1 {
-			names := make([]string, 0, len(guilds))
-			for g := range guilds {
-				names = append(names, g)
-			}
-			sort.Strings(names)
-			t.Errorf("candidate[%d] spans guilds %v — cross-guild matchmaking", i, names)
-		}
-		for g, n := range guilds {
-			perGuild[g] += n
-		}
-		totalPlaced += len(c)
-	}
-
-	// Neither guild may be starved by the other's presence in the pool.
-	if perGuild["guild-a"] != 4 || perGuild["guild-b"] != 4 {
-		t.Errorf("expected both guilds packed independently, got %v", perGuild)
-	}
-	if totalPlaced != 8 {
-		t.Errorf("expected all 8 players packed, got %d", totalPlaced)
 	}
 }
