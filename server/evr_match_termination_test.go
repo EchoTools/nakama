@@ -370,3 +370,97 @@ func TestMatchJoinAttempt_EvictionClearsJoinTimeMilliseconds(t *testing.T) {
 		t.Error("evicted session left a stale joinTimeMilliseconds entry behind")
 	}
 }
+
+// TestMatchJoin_OrphanPresenceDoesNotLeakJoinTimeMilliseconds closes the other
+// half of the eviction cleanup. MatchJoinAttempt evicts the stale session and
+// deletes its joinTimeMilliseconds, but the MatchJoin for that same session is
+// already queued behind it on the handler goroutine. MatchJoin used to write
+// joinTimeMilliseconds BEFORE the presence-map lookup, so the orphan's entry was
+// written straight back and then skipped over by the `continue`. Nothing ever
+// removes it afterwards: MatchLeave only deletes the key for sessions it finds
+// in the presence map, so the entry survives for the life of the match.
+func TestMatchJoin_OrphanPresenceDoesNotLeakJoinTimeMilliseconds(t *testing.T) {
+	state := reconnectTestState(evr.ModeArenaPublic)
+	state.StartTime = time.Now().UTC().Add(-time.Minute)
+	state.levelLoaded = true
+	// A live scoreboard is what makes MatchJoin record a join clock time at all.
+	state.GameState = &GameState{SessionScoreboard: NewSessionScoreboard(RoundDuration, time.Now())}
+	state.rebuildCache()
+
+	// The orphan is deliberately NOT in the presence map: MatchJoinAttempt
+	// already evicted it.
+	orphan := reconnectTestPlayer("join-orphan-jtms", evr.TeamBlue)
+
+	nk := &reconnectTestNakamaModule{}
+	m := &EvrMatch{}
+	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
+
+	got := m.MatchJoin(ctx, reconnectTestLogger(), nil, nk, &reconnectTestDispatcher{}, 1, state,
+		[]runtime.Presence{reconnectTestPresence{EvrMatchPresence: orphan, reason: runtime.PresenceReasonJoin}})
+	if got == nil {
+		t.Fatal("MatchJoin returned nil for an orphan presence, killing the match for everyone")
+	}
+	after, ok := got.(*MatchLabel)
+	if !ok {
+		t.Fatalf("MatchJoin returned %T, want *MatchLabel", got)
+	}
+
+	if v, ok := after.joinTimeMilliseconds[orphan.GetSessionId()]; ok {
+		t.Errorf("the skipped orphan session left joinTimeMilliseconds=%d behind; nothing will ever delete it", v)
+	}
+}
+
+// TestMatchLeave_GameServerLeavingEmptyMatchClearsServer: the normal end-of-life
+// sequence is "all the players leave, then the game server disconnects", so the
+// game server's own leave arrives with an empty presence map. The empty-match
+// branch used to sit above the game-server check and win that race, running the
+// shutdown with state.server still pointing at the departed game server: a
+// LobbySessionEvent CODE_ENDED dispatched to a presence that has already gone, a
+// stored label still advertising the game server, a 5s grace instead of 2s, and
+// a MatchTerminate snapshot carrying a live serverSessionID.
+func TestMatchLeave_GameServerLeavingEmptyMatchClearsServer(t *testing.T) {
+	state := reconnectTestState(evr.ModeSocialPublic)
+	state.StartTime = time.Now().UTC().Add(-time.Minute)
+	state.levelLoaded = true
+	state.rebuildCache() // presenceMap is empty: every player already left
+
+	gameServer := reconnectTestPresence{
+		EvrMatchPresence: &EvrMatchPresence{
+			Node:      "test-node",
+			SessionID: state.GameServer.SessionID,
+			UserID:    state.GameServer.OperatorID,
+			Username:  "broadcaster:gameserver",
+		},
+		reason: runtime.PresenceReasonDisconnect,
+	}
+
+	nk := &reconnectTestNakamaModule{}
+	dispatcher := &drainTestDispatcher{}
+	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
+	m := &EvrMatch{}
+
+	const leaveTick = int64(3)
+	got := m.MatchLeave(ctx, reconnectTestLogger(), nil, nk, dispatcher, leaveTick, state,
+		[]runtime.Presence{gameServer})
+	if got == nil {
+		t.Fatal("MatchLeave returned nil when the game server left an empty match")
+	}
+	after, ok := got.(*MatchLabel)
+	if !ok {
+		t.Fatalf("MatchLeave returned %T, want *MatchLabel", got)
+	}
+
+	if after.server != nil {
+		t.Error("state.server still points at the departed game server; the shutdown will dispatch to a presence that has already left")
+	}
+	if wantGrace := 2 * state.tickRate; after.terminateTick-leaveTick != wantGrace {
+		t.Errorf("drain grace is %d ticks, want %d (2s): the game-server-left path uses a 2s grace, the empty-match path 5s",
+			after.terminateTick-leaveTick, wantGrace)
+	}
+	if dispatcher.broadcastCount() != 0 {
+		t.Errorf("shutdown broadcast %d message(s) to the departed game server presence", dispatcher.broadcastCount())
+	}
+	if after.Open {
+		t.Error("expected the match to be closed to new joins after shutdown")
+	}
+}

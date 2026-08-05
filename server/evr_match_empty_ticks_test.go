@@ -16,7 +16,8 @@ package server
 //
 // Each timer must own its counter. These tests pin the exact deadline of each
 // one across started/not-started x server/no-server, and pin the cases where NO
-// timer may fire.
+// timer may fire. Most cases fail against the pre-fix shared counter; the one
+// that does not is annotated inline as a plain regression pin.
 
 import (
 	"context"
@@ -150,7 +151,11 @@ func TestMatchLoop_EmptyTickTimersAreIndependent(t *testing.T) {
 			started:        false,
 			maxIterations:  400,
 			wantShutdownAt: 10*tickRate + 1,
-			why:            "a parking match whose game server never arrives must not leak",
+			// NOTE: this case also passes against the pre-fix shared counter —
+			// at base the UnassignedLobby branch returns before the reset that
+			// broke the other cases. It is kept as a plain regression pin, not
+			// as evidence that the counter split was necessary.
+			why: "a parking match whose game server never arrives must not leak",
 		},
 		{
 			name:           "server/unassigned parking fires the 120s unallocated timer",
