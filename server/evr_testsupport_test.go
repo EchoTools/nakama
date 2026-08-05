@@ -36,18 +36,29 @@ func requireCharacterizationFixture(t *testing.T, path string) {
 // are inert stubs, which is faithful enough because the code under test treats
 // all of them as best-effort (failures are logged, not propagated).
 //
-// Fidelity caveat: production passes a *RuntimeGoNakamaModule, and several
-// branches in MatchLeave are guarded by `nk.(*RuntimeGoNakamaModule)` type
-// assertions (session-lifecycle transitions, party-registry reservation
-// clearing). Those branches are NOT exercised when this double is used. Tests
-// asserting on those behaviours need the real module and a database.
+// The MatchLeave branches that used to be gated behind a
+// `nk.(*RuntimeGoNakamaModule)` assertion (session-lifecycle transitions,
+// party-registry reservation clearing, the early-quit charge gate) now reach
+// for the registries through the narrow evrSessionRegistryProvider /
+// evrPartyRegistryProvider interfaces, which this double implements. Leave
+// `sessions` / `parties` nil to model "registry unavailable"; set them (a real
+// LocalSessionRegistry works fine in-memory) to exercise those branches.
 type evrTestNakamaModule struct {
 	*occTestNakamaModule
+
+	sessions SessionRegistry
+	parties  PartyRegistry
 }
 
 func newEvrTestNakamaModule() *evrTestNakamaModule {
 	return &evrTestNakamaModule{occTestNakamaModule: newOCCTestNakamaModule()}
 }
+
+// SessionRegistry / PartyRegistry satisfy the narrow provider interfaces the EVR
+// match handler asserts for. Returning nil is a valid answer and the production
+// call sites treat it as "no registry available".
+func (m *evrTestNakamaModule) SessionRegistry() SessionRegistry { return m.sessions }
+func (m *evrTestNakamaModule) PartyRegistry() PartyRegistry     { return m.parties }
 
 func (m *evrTestNakamaModule) StorageList(ctx context.Context, callerID, userID, collection string, limit int, cursor string) ([]*api.StorageObject, string, error) {
 	m.mu.Lock()
@@ -117,6 +128,13 @@ func (m *evrTestNakamaModule) LeaderboardRecordsList(ctx context.Context, id str
 
 func (m *evrTestNakamaModule) GroupsGetId(ctx context.Context, groupIDs []string) ([]*api.Group, error) {
 	return nil, nil
+}
+
+// FriendsList reports a player with no friends and therefore no ghosted/blocked
+// players. NewLobbyParametersFromRequest calls it to build the blocked-ID list;
+// an empty list is the ordinary case and keeps the ghost-filter addon empty.
+func (m *evrTestNakamaModule) FriendsList(ctx context.Context, userID string, limit int, state *int, cursor string) ([]*api.Friend, string, error) {
+	return nil, "", nil
 }
 
 func (m *evrTestNakamaModule) UsersGetId(ctx context.Context, userIDs []string, facebookIDs []string) ([]*api.User, error) {
