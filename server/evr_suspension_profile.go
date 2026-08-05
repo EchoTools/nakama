@@ -84,12 +84,32 @@ func (s SuspensionProfile) GetStorageVersion() string {
 	return s.version
 }
 
+// StorageIndexes declares the index that serves the portal read path.
+//
+// Fields governs TWO things at once, and both matter here:
+//
+//  1. What is RETURNED. With IndexOnly: true, List returns idxResult.Value
+//     verbatim (storage_index.go:349) and that value is the field-filtered map
+//     built in mapIndexStorageFields (storage_index.go:528-536) -- NOT the
+//     stored object. A field absent from Fields is discarded before the
+//     document is written and can never be read back.
+//  2. What is SEARCHABLE. BlugeWalkDocument walks the same already-filtered
+//     map (storage_index.go:560), so an absent field is not queryable either.
+//
+// "suspensions" is therefore mandatory: without it this projection returns
+// {"user_id":"..."} and answers no suspension question at all. See
+// TestSuspensionProfileIndex_ServesSuspensionData.
+//
+// "updated_at" is deliberately EXCLUDED. Every stored field costs index memory
+// against MaxEntries, and the freshness of the projection is already carried by
+// the index's own always-stored update_time field (storage_index.go:539), which
+// mapIndexStorageFields adds regardless of Fields.
 func (s *SuspensionProfile) StorageIndexes() []StorableIndexMeta {
 	return []StorableIndexMeta{{
 		Name:       StorageIndexSuspensionProfile,
 		Collection: StorageCollectionSuspensionProfile,
 		Key:        StorageKeySuspensionProfile,
-		Fields:     []string{"user_id"},
+		Fields:     []string{"user_id", "suspensions"},
 		MaxEntries: 10000,
 		IndexOnly:  true,
 	}}
