@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
@@ -159,6 +160,14 @@ func TestMatchLoop_LabelUpdateFailureKeepsMatchAlive(t *testing.T) {
 
 // TestMatchLoop_StartFailureKeepsMatchAlive: a failed MatchStart dispatch is
 // retryable. Killing the match strands the players and the game server.
+//
+// This pins only HALF the contract — "retryable". It deliberately runs a single
+// tick, so on its own it would also pass for a match that retries forever. The
+// other half, "still bounded", lives in
+// TestMatchLoop_FailedStartIsBoundedAndShutsDownOrderly
+// (evr_match_start_retry_test.go), which drives the loop to the retry ceiling
+// and requires an orderly shutdown. Change one, check the other: the pair is
+// the contract.
 func TestMatchLoop_StartFailureKeepsMatchAlive(t *testing.T) {
 	state := reconnectTestState(evr.ModeSocialPublic)
 	state.levelLoaded = false
@@ -462,5 +471,100 @@ func TestMatchLeave_GameServerLeavingEmptyMatchClearsServer(t *testing.T) {
 	}
 	if after.Open {
 		t.Error("expected the match to be closed to new joins after shutdown")
+	}
+}
+
+// shutdownCountingNK counts the accounting side effects MatchShutdown performs
+// exactly once per match: the shutdown counter, the session-duration timer, and
+// the game-server time accumulated to the leaderboard.
+type shutdownCountingNK struct {
+	reconnectTestNakamaModule
+	shutdownCounts   int
+	durationRecords  int
+	leaderboardWrite int
+}
+
+func (m *shutdownCountingNK) MetricsCounterAdd(name string, _ map[string]string, delta int64) {
+	if name == "match_shutdown_count" {
+		m.shutdownCounts += int(delta)
+	}
+}
+
+func (m *shutdownCountingNK) MetricsTimerRecord(name string, _ map[string]string, _ time.Duration) {
+	if name == "lobby_session_duration" {
+		m.durationRecords++
+	}
+}
+
+func (m *shutdownCountingNK) LeaderboardRecordWrite(ctx context.Context, leaderboardId, ownerID, username string, score, subscore int64, metadata map[string]any, operator *int) (*api.LeaderboardRecord, error) {
+	m.leaderboardWrite++
+	return &api.LeaderboardRecord{}, nil
+}
+
+// TestMatchShutdown_IsIdempotent: several callers can reach MatchShutdown for
+// the same match. A straggler MatchLeave for a session that is no longer in the
+// presence map re-enters the empty-match branch, and SignalShutdown can be
+// issued again by an operator or by the preemption path while the drain is
+// already running. Each re-entry used to re-count match_shutdown_count,
+// re-record lobby_session_duration, re-accumulate the FULL game-server time to
+// the leaderboard (so a 30-minute match banked 30 minutes twice), and push
+// terminateTick further out.
+//
+// ModeArenaPublic is deliberate: it is in ValidLeaderboardModes, so the
+// AccumulateLeaderboardStat call in MatchShutdown is live.
+func TestMatchShutdown_IsIdempotent(t *testing.T) {
+	state := reconnectTestState(evr.ModeArenaPublic)
+	state.StartTime = time.Now().UTC().Add(-30 * time.Minute)
+	state.levelLoaded = true
+	state.rebuildCache() // presenceMap is empty: every player already left
+
+	nk := &shutdownCountingNK{}
+	dispatcher := &drainTestDispatcher{}
+	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
+	m := &EvrMatch{}
+
+	// A player whose presence was already evicted; its leave event arrives late.
+	straggler := reconnectTestPresence{
+		EvrMatchPresence: reconnectTestPlayer("late-leaver", evr.TeamBlue),
+		reason:           runtime.PresenceReasonDisconnect,
+	}
+
+	var firstTerminateTick int64
+	var writesAfterFirst int
+	for i := 0; i < 3; i++ {
+		got := m.MatchLeave(ctx, reconnectTestLogger(), nil, nk, dispatcher, int64(i+1), state,
+			[]runtime.Presence{straggler})
+		if got == nil {
+			t.Fatalf("MatchLeave returned nil on straggler leave %d", i)
+		}
+		if i == 0 {
+			firstTerminateTick = state.terminateTick
+			writesAfterFirst = nk.leaderboardWrite
+			if firstTerminateTick == 0 {
+				t.Fatal("the first straggler leave on an empty started match did not arm the drain")
+			}
+			// One AccumulateLeaderboardStat call fans out to the daily, weekly
+			// and all-time boards, so the single legitimate shutdown is
+			// expected to write more than once here. What must not happen is
+			// the count growing on the repeats below.
+			if writesAfterFirst == 0 {
+				t.Fatal("test did not exercise the leaderboard path; pick a mode in ValidLeaderboardModes")
+			}
+		}
+	}
+
+	if nk.shutdownCounts != 1 {
+		t.Errorf("match_shutdown_count incremented %d times for one shutdown, want 1", nk.shutdownCounts)
+	}
+	if nk.durationRecords != 1 {
+		t.Errorf("lobby_session_duration recorded %d times for one shutdown, want 1", nk.durationRecords)
+	}
+	if nk.leaderboardWrite != writesAfterFirst {
+		t.Errorf("game-server time was accumulated again on the repeat shutdowns (%d leaderboard writes, want %d): each extra accumulation banks the FULL match duration a second time",
+			nk.leaderboardWrite, writesAfterFirst)
+	}
+	if state.terminateTick != firstTerminateTick {
+		t.Errorf("the drain deadline was re-armed from %d to %d; repeated shutdowns must not push teardown further out",
+			firstTerminateTick, state.terminateTick)
 	}
 }

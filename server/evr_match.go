@@ -1488,7 +1488,15 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		// are therefore bounded by MatchStartMaxAttempts and, after the first,
 		// throttled to one per second so a dead game server is not re-dispatched
 		// at tick rate.
-		if state.startAttempts == 0 || tick%state.tickRate == 0 {
+		// MatchInit clamps tickRate to 10 when it is unset, so the guard below
+		// is belt-and-braces: this is the first modulo in MatchLoop and the
+		// branch returns before the pre-existing ones, so a zero tickRate would
+		// now panic here rather than there.
+		throttleTicks := state.tickRate
+		if throttleTicks < 1 {
+			throttleTicks = 1
+		}
+		if state.startAttempts == 0 || tick%throttleTicks == 0 {
 			state.startAttempts++
 			started, err := m.MatchStart(ctx, logger, nk, dispatcher, state)
 			if err != nil {
@@ -1714,6 +1722,21 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 		logger.Error("state not a valid lobby state object")
 		return nil
 	}
+	// MatchShutdown is idempotent: the drain is armed exactly once. Several
+	// callers can reach it for the same match — a straggler MatchLeave for a
+	// session that is no longer in the presence map re-enters the empty-match
+	// branch above, and SignalShutdown can be issued again by an operator or by
+	// the preemption path while the drain is already running. Every re-entry
+	// used to re-count match_shutdown_count, re-record lobby_session_duration,
+	// re-accumulate the FULL game-server time to the leaderboard, and push
+	// terminateTick further out. Re-arming can only ever delay teardown: the
+	// primary trigger in MatchLoop is "presenceMap is empty", not the deadline.
+	if state.terminateTick != 0 {
+		logger.WithField("terminate_tick", state.terminateTick).
+			Debug("MatchShutdown called on a match that is already draining; ignoring.")
+		return state
+	}
+
 	logger.WithField("state", state).Info("MatchShutdown called.")
 	nk.MetricsCounterAdd("match_shutdown_count", state.MetricsTags(), 1)
 
@@ -2170,9 +2193,9 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 	// Started() == true with levelLoaded == false, which permanently disables
 	// the "did not start on time" reclaim in MatchLoop and traps the loop in
 	// the start branch. Deferring the commit also preserves a scheduled
-	// StartTime set by SignalPrepareSession (:1893-1897) across a failed start,
-	// and stops a retry from rebuilding the SessionScoreboard (which would
-	// reset the round clock on every attempt).
+	// StartTime set by the SignalPrepareSession case in MatchSignal across a
+	// failed start, and stops a retry from rebuilding the SessionScoreboard
+	// (which would reset the round clock on every attempt).
 	var newGameState *GameState
 	switch state.Mode {
 	case evr.ModeArenaPublic, evr.ModeArenaPublicAI:

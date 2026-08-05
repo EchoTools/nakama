@@ -103,10 +103,17 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 		m    *EvrMatch
 		args args
 		want interface{}
+		// stubRuntime installs stub nk/dispatcher for this case only. Just the
+		// reclaim case needs them (it now runs the MatchShutdown sequence,
+		// which records metrics and stores the label); the other cases keep the
+		// original nil pair so the nil-dispatcher path in updateLabel stays
+		// covered.
+		stubRuntime bool
 	}{
 		{
-			name: "Match did not start on time.",
-			m:    &EvrMatch{},
+			name:        "Match did not start on time.",
+			m:           &EvrMatch{},
+			stubRuntime: true,
 			args: args{
 				tick: 500,
 				state_: func() *MatchLabel {
@@ -144,13 +151,16 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 			want: "non-nil", // match is within idle timeout, should return state
 		},
 		{
-			name: "MatchLoop increments emptyTicks when no broadcaster",
+			// The no-server deadline is counted by noServerTicks, not emptyTicks:
+			// this state has a player in the presence map and no game server, so
+			// it is the no-server timer that advances here.
+			name: "MatchLoop increments noServerTicks when no game server",
 			m:    &EvrMatch{},
 			args: args{
 				tick: 30 * 10,
 				state_: &MatchLabel{
-					emptyTicks: 0,
-					tickRate:   10,
+					noServerTicks: 0,
+					tickRate:      10,
 					presenceMap: map[string]*EvrMatchPresence{
 						uuid.Must(uuid.NewV4()).String(): {},
 					},
@@ -183,11 +193,12 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 			m := &EvrMatch{}
 			ctx := context.Background()
 			var db *sql.DB
-			// A real (stub) module is required: the idle-reclaim path now runs
-			// the MatchShutdown sequence, which records metrics and stores the
-			// label.
-			var nk runtime.NakamaModule = &reconnectTestNakamaModule{}
-			var dispatcher runtime.MatchDispatcher = &reconnectTestDispatcher{}
+			var nk runtime.NakamaModule
+			var dispatcher runtime.MatchDispatcher
+			if tt.stubRuntime {
+				nk = &reconnectTestNakamaModule{}
+				dispatcher = &reconnectTestDispatcher{}
+			}
 
 			got := m.MatchLoop(ctx, logger, db, nk, dispatcher, tt.args.tick, tt.args.state_, tt.args.messages)
 			if tt.want == "non-nil" {
