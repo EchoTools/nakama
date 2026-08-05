@@ -3,7 +3,6 @@ package evr
 import (
 	"fmt"
 	"sort"
-	"time"
 )
 
 const (
@@ -76,10 +75,6 @@ type EarlyQuitConfig struct {
 	NumSteadyMatches  int32 `json:"num_steady_matches,omitempty"`
 	PenaltyLevel      int32 `json:"penalty_level,omitempty"`
 	PenaltyTimestamp  int64 `json:"penalty_ts,omitempty"`
-}
-
-func (c EarlyQuitConfig) PenaltyTimestampAsTime() time.Time {
-	return time.Unix(c.PenaltyTimestamp, 0)
 }
 
 // NewSNSEarlyQuitConfig creates a new SNS message for early quit config.
