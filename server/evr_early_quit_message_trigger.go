@@ -221,7 +221,7 @@ func (t *SNSEarlyQuitMessageTrigger) SendFeatureFlagsOnLogin(ctx context.Context
 	}
 
 	// Get the default feature flags
-	flags := evr.DefaultEarlyQuitFeatureFlags()
+	flags := &evr.SNSEarlyQuitFeatureFlags{Flags: evr.DefaultEarlyQuitFeatureFlags()}
 
 	// Send to the player
 	if err := session.SendEvr(flags); err != nil {
@@ -272,7 +272,7 @@ func (t *SNSEarlyQuitMessageTrigger) SendEarlyQuitUpdateNotification(ctx context
 // This is used when feature flags change server-side
 func (t *SNSEarlyQuitMessageTrigger) BroadcastFeatureFlagsUpdate(ctx context.Context, flags *evr.SNSEarlyQuitFeatureFlags) error {
 	if flags == nil {
-		flags = evr.DefaultEarlyQuitFeatureFlags()
+		flags = &evr.SNSEarlyQuitFeatureFlags{Flags: evr.DefaultEarlyQuitFeatureFlags()}
 	}
 
 	count := 0

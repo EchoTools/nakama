@@ -1036,8 +1036,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 										penaltyLevel = int32(MaxEarlyQuitPenaltyLevel)
 									}
 									if penaltyLevel >= 3 {
-										featureFlags := evr.DefaultEarlyQuitFeatureFlags()
-										if featureFlags != nil && featureFlags.IsAutoReportEnabled() {
+										if evr.DefaultEarlyQuitFeatureFlags()&evr.EarlyQuitFlagAutoReport != 0 {
 											TriggerAutoReport(ctx, logger, mp.GetUserId(), penaltyLevel)
 										}
 									}

@@ -1,9 +1,7 @@
 package evr
 
 import (
-	"encoding/binary"
 	"fmt"
-	"hash/crc32"
 	"sort"
 	"time"
 )
@@ -15,28 +13,10 @@ const (
 
 // SNSEarlyQuitConfig is the on-wire message for early quit penalty configuration.
 //
-// Wire layout (0x40 fixed header + variable zlib payload):
-//   +0x00  uint32  ConfigVersion
-//   +0x04  uint32  NumPenaltyLevels
-//   +0x08  uint32  NumSteadyLevels
-//   +0x0C  uint32  Flags
-//   +0x10  uint64  Timestamp
-//   +0x18  uint64  DataOffset
-//   +0x20  uint32  DataLength
-//   +0x24  uint32  Checksum
-//   +0x28  [3]uint64 Reserved
-//   +0x58  []byte  zlib-compressed JSON (penalty_levels + steady_player_levels)
+// Wire layout (variable zstd payload):
+//   +0x00  uint32  size (decompressed JSON size, LE)
+//   +0x04  []byte  zstd-compressed JSON (penalty_levels + steady_player_levels)
 type SNSEarlyQuitConfig struct {
-	ConfigVersion    uint32    `json:"-"`
-	NumPenaltyLevels uint32    `json:"-"`
-	NumSteadyLevels  uint32    `json:"-"`
-	Flags            uint32    `json:"-"`
-	Timestamp        uint64    `json:"-"`
-	DataOffset       uint64    `json:"-"`
-	DataLength       uint32    `json:"-"`
-	Checksum         uint32    `json:"-"`
-	Reserved         [3]uint64 `json:"-"`
-
 	PenaltyLevels      []EarlyQuitPenaltyLevelConfig      `json:"penalty_levels"`
 	SteadyPlayerLevels []EarlyQuitSteadyPlayerLevelConfig `json:"steady_player_levels"`
 
@@ -52,28 +32,13 @@ func (m *SNSEarlyQuitConfig) Symbol() Symbol {
 }
 
 func (m *SNSEarlyQuitConfig) String() string {
-	return fmt.Sprintf("%s(v=%d, penalty_levels=%d, steady_levels=%d, flags=0x%x)",
-		m.Token(), m.ConfigVersion, m.NumPenaltyLevels, m.NumSteadyLevels, m.Flags)
+	return fmt.Sprintf("%s(penalty_levels=%d, steady_levels=%d)",
+		m.Token(), len(m.PenaltyLevels), len(m.SteadyPlayerLevels))
 }
 
 func (m *SNSEarlyQuitConfig) Stream(s *EasyStream) error {
-	// Stream the 0x40-byte fixed header
-	if err := RunErrorFunctions([]func() error{
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.ConfigVersion) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.NumPenaltyLevels) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.NumSteadyLevels) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.Flags) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.Timestamp) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.DataOffset) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.DataLength) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.Checksum) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.Reserved) },
-	}); err != nil {
-		return fmt.Errorf("header: %w", err)
-	}
-
-	// Stream the zlib-compressed JSON payload
-	return s.StreamJson(m, false, ZlibCompression)
+	// Wire format: u32 decompressed JSON size (LE) + zstd-compressed JSON body.
+	return s.StreamJson(m, false, ZstdCompression)
 }
 
 // StorageVersion returns the storage version.
@@ -117,14 +82,8 @@ func (c EarlyQuitConfig) PenaltyTimestampAsTime() time.Time {
 }
 
 // NewSNSEarlyQuitConfig creates a new SNS message for early quit config.
-// It populates the fixed header fields from the payload data.
 func NewSNSEarlyQuitConfig(penaltyLevels []EarlyQuitPenaltyLevelConfig, steadyLevels []EarlyQuitSteadyPlayerLevelConfig) *SNSEarlyQuitConfig {
 	msg := &SNSEarlyQuitConfig{
-		ConfigVersion:      1,
-		NumPenaltyLevels:   uint32(len(penaltyLevels)),
-		NumSteadyLevels:    uint32(len(steadyLevels)),
-		Flags:              0,
-		Timestamp:          uint64(time.Now().Unix()),
 		PenaltyLevels:      penaltyLevels,
 		SteadyPlayerLevels: steadyLevels,
 		version:            "*",
@@ -162,11 +121,6 @@ func DefaultEarlyQuitLevels() defaultLevels {
 	}
 }
 
-// ComputeChecksum returns the CRC32 checksum of the JSON payload bytes.
-func ComputeChecksum(data []byte) uint32 {
-	return crc32.ChecksumIEEE(data)
-}
-
 // Validate ensures the config is sequentially valid and fixes any invalid values.
 func (m *SNSEarlyQuitConfig) Validate() {
 	if m == nil {
@@ -174,8 +128,6 @@ func (m *SNSEarlyQuitConfig) Validate() {
 	}
 	m.validatePenaltyLevels()
 	m.validateSteadyPlayerLevels()
-	m.NumPenaltyLevels = uint32(len(m.PenaltyLevels))
-	m.NumSteadyLevels = uint32(len(m.SteadyPlayerLevels))
 }
 
 func (m *SNSEarlyQuitConfig) validatePenaltyLevels() {
