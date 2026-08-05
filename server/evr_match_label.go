@@ -73,7 +73,9 @@ type MatchLabel struct {
 	joinTimeMilliseconds map[string]int64                // The round clock time of when players joined the match. map[sessionId]time.Time
 	participations       map[string]*PlayerParticipation // map[userID]*PlayerParticipation - tracks all players who ever joined
 	tickRate             int64                           // The number of ticks per second.
-	emptyTicks           int64                           // The number of ticks the match has been empty.
+	emptyTicks           int64                           // Consecutive ticks a STARTED match has had no players (60s deadline).
+	noServerTicks        int64                           // Consecutive ticks the match has had no game server presence (10s deadline).
+	unallocatedTicks     int64                           // Consecutive ticks an unassigned parking match with a server has gone unallocated (120s deadline).
 	terminateTick        int64                           // The tick count at which the match will be shut down.
 	goals                []*evr.MatchGoal                // The goals scored in the match.
 	matchSummarySent     bool                            // Whether the match summary has been sent.

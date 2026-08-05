@@ -1347,26 +1347,34 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		}
 		return state
 	} else if state.server == nil {
-		state.emptyTicks++
-		if state.emptyTicks > 10*state.tickRate {
-			logger.Warn("Match has been empty for too long. Shutting down.")
+		// Timer (a): no game server presence. Owns its own counter — sharing one
+		// with the other two timers let a later reset wipe this count every tick
+		// (so it never fired) or a second increment halve its deadline.
+		state.noServerTicks++
+		if state.noServerTicks > 10*state.tickRate {
+			logger.Warn("Match has been without a game server for too long. Shutting down.")
 			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
 		}
-	} else if state.emptyTicks > 0 && !(state.Started() && len(state.presenceMap) == 0) {
-		state.emptyTicks = 0
+	} else {
+		state.noServerTicks = 0
 	}
 
 	if state.LobbyType == UnassignedLobby {
-		// Parking matches with a server that are never allocated should time out.
+		// Timer (b): parking matches with a server that are never allocated
+		// should time out.
 		if state.server != nil {
-			state.emptyTicks++
-			if state.emptyTicks > 120*state.tickRate { // 2 minutes
+			state.unallocatedTicks++
+			if state.unallocatedTicks > 120*state.tickRate { // 2 minutes
 				logger.Warn("Unassigned parking match with server has not been allocated. Shutting down.")
 				return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 5)
 			}
+		} else {
+			state.unallocatedTicks = 0
 		}
 		return state
 	}
+	// The lobby has been assigned; the unallocated deadline no longer applies.
+	state.unallocatedTicks = 0
 
 	// Enforce 5-minute lifetime for post-match social lobbies.
 	if state.SpawnedBy == "post-match-transition" && !state.CreatedAt.IsZero() && time.Since(state.CreatedAt) > 5*time.Minute {
