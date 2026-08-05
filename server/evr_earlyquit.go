@@ -58,13 +58,23 @@ type EarlyQuitPlayerState struct {
 	PenaltyLevel        int32 `json:"penalty_level"`          // Resolved from config (clamped uint8)
 	SteadyPlayerLevel   int32 `json:"steady_player_level"`    // Resolved from config (clamped uint8)
 
-	// PenaltyIsManual marks PenaltyLevel/PenaltyTimestamp as a
-	// moderator-applied sanction rather than a value derived from the
-	// quit-count ladder. While it is set and the lockout has not expired,
-	// ladder resolution must not lower or erase the penalty — otherwise the
-	// sanctioned player's very next early quit wipes the sanction, because one
-	// quit maps to ladder level 0 and level 0 clears the lockout.
-	PenaltyIsManual bool `json:"penalty_is_manual,omitempty"`
+	// ModeratorPenaltyLevel/ModeratorPenaltyUntil record a moderator-applied
+	// sanction SEPARATELY from the effective penalty above. The effective
+	// penalty is always the harsher of the quit-count ladder's result and an
+	// unexpired sanction, recomputed from both on every resolution.
+	//
+	// Keeping the sanction in its own fields is what makes that recomputation
+	// total. Marking the effective fields "manual" with a bool instead would
+	// conflate the two: once a ladder result raised the level or extended the
+	// expiry, there would be nothing left to compare against, so the raised
+	// value would ratchet — the player would keep serving the harsher of every
+	// penalty they had ever accrued for as long as the sanction ran.
+	//
+	// Without any of this, the sanctioned player's very next early quit wipes
+	// the sanction, because one quit maps to ladder level 0 and level 0 clears
+	// the lockout.
+	ModeratorPenaltyLevel int32 `json:"moderator_penalty_level,omitempty"`
+	ModeratorPenaltyUntil int64 `json:"moderator_penalty_until,omitempty"`
 
 	// Nakama extensions (kept for matchmaker/UI compat)
 	TotalCompletedMatches      int32     `json:"total_completed_matches"`
@@ -176,21 +186,34 @@ func ResolvePenaltyLevel(numQuits int32, cfg *evr.SNSEarlyQuitConfig) (level int
 	return 0, 0
 }
 
-// ApplyModeratorPenalty records a moderator-applied sanction: the penalty level,
-// its absolute expiry, and the marker that keeps quit-count ladder resolution
-// from lowering or erasing it while it is in force. A lockoutSec of zero or less
-// means "penalty cleared", which also clears the marker.
+// ApplyModeratorPenalty records a moderator-applied sanction: it becomes the
+// effective penalty immediately AND is retained in its own fields so that
+// quit-count ladder resolution cannot afterwards lower or shorten it while it
+// is in force. A lockoutSec of zero or less means "no lockout", which retains
+// nothing — there is no sanction to protect.
 func (s *EarlyQuitPlayerState) ApplyModeratorPenalty(level int32, lockoutSec int32) {
 	s.Lock()
 	defer s.Unlock()
 	s.PenaltyLevel = level
 	if level > 0 && lockoutSec > 0 {
 		s.PenaltyTimestamp = time.Now().Unix() + int64(lockoutSec)
-		s.PenaltyIsManual = true
+		s.ModeratorPenaltyLevel = level
+		s.ModeratorPenaltyUntil = s.PenaltyTimestamp
 	} else {
 		s.PenaltyTimestamp = 0
-		s.PenaltyIsManual = false
+		s.ModeratorPenaltyLevel = 0
+		s.ModeratorPenaltyUntil = 0
 	}
+}
+
+// ClearModeratorPenalty drops any retained moderator sanction. Call it when the
+// player's record is reset: leaving the sanction behind would keep blocking
+// ladder resolution for the rest of its original lockout.
+func (s *EarlyQuitPlayerState) ClearModeratorPenalty() {
+	s.Lock()
+	defer s.Unlock()
+	s.ModeratorPenaltyLevel = 0
+	s.ModeratorPenaltyUntil = 0
 }
 
 // resolveAndApplyPenaltyLockout resolves the penalty level from the STORED
@@ -200,25 +223,50 @@ func (s *EarlyQuitPlayerState) ApplyModeratorPenalty(level int32, lockoutSec int
 // maps to a level with no lockout (level 0), any stale
 // PenaltyLevel/PenaltyTimestamp are cleared to zero.
 //
-// A moderator-applied sanction that has not expired is left alone: the ladder
-// must not shorten or erase it. The ladder still wins when it resolves to a
-// strictly harsher level, so a sanctioned player who keeps quitting is not
-// insulated by their sanction.
+// An unexpired moderator sanction is a FLOOR in both dimensions: the ladder may
+// raise the level or extend the expiry, never lower or shorten either. Without
+// the expiry half of that floor the direction is perverse — a player under a
+// long, light sanction shortens it by quitting more, because the harsher ladder
+// level also brings the ladder's much shorter lockout with it.
 func resolveAndApplyPenaltyLockout(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, eqconfig *EarlyQuitPlayerState) {
-	config := LoadEarlyQuitServiceConfig(ctx, nk, logger)
-	level, lockoutSec := ResolvePenaltyLevel(eqconfig.NumEarlyQuits, config)
-	now := time.Now().Unix()
-	if eqconfig.PenaltyIsManual && eqconfig.PenaltyTimestamp > now && eqconfig.PenaltyLevel >= level {
-		return
-	}
+	eqconfig.applyLadderPenalty(LoadEarlyQuitServiceConfig(ctx, nk, logger), time.Now().Unix())
+}
+
+// applyLadderPenalty recomputes the effective penalty from the quit-count ladder
+// and any unexpired moderator sanction. It is the whole of
+// resolveAndApplyPenaltyLockout's logic, split out so it can be exercised
+// without a storage round trip and so the mutation happens under the state's
+// own lock.
+func (s *EarlyQuitPlayerState) applyLadderPenalty(cfg *evr.SNSEarlyQuitConfig, now int64) {
+	s.Lock()
+	defer s.Unlock()
+
+	level, lockoutSec := ResolvePenaltyLevel(s.NumEarlyQuits, cfg)
+	var expiry int64
 	if lockoutSec > 0 {
-		eqconfig.PenaltyLevel = level
-		eqconfig.PenaltyTimestamp = now + int64(lockoutSec)
+		expiry = now + int64(lockoutSec)
 	} else {
-		eqconfig.PenaltyLevel = 0
-		eqconfig.PenaltyTimestamp = 0
+		// A level carrying no lockout is no penalty at all.
+		level = 0
 	}
-	eqconfig.PenaltyIsManual = false
+
+	if s.ModeratorPenaltyUntil > now {
+		// Both floors come from the SANCTION, never from the currently stored
+		// penalty: comparing against the stored value would let a ladder result
+		// that has since lapsed ratchet the sanction permanently upward.
+		if level < s.ModeratorPenaltyLevel {
+			level = s.ModeratorPenaltyLevel
+		}
+		if expiry < s.ModeratorPenaltyUntil {
+			expiry = s.ModeratorPenaltyUntil
+		}
+	} else {
+		s.ModeratorPenaltyLevel = 0
+		s.ModeratorPenaltyUntil = 0
+	}
+
+	s.PenaltyLevel = level
+	s.PenaltyTimestamp = expiry
 }
 
 // ResolveSteadyPlayerLevel determines the steady player level from the config.

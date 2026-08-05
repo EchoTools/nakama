@@ -231,9 +231,9 @@ func EarlyQuitModifyRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		state.NumEarlyQuits = 0
 		state.NumSteadyEarlyQuits = 0
 		state.PenaltyTimestamp = 0
-		// A reset also lifts any moderator-applied sanction; leaving the marker
-		// set would block ladder resolution for the rest of the old lockout.
-		state.PenaltyIsManual = false
+		// A reset also lifts any moderator-applied sanction; leaving it retained
+		// would keep flooring ladder resolution for the rest of the old lockout.
+		state.ClearModeratorPenalty()
 
 		// Re-resolve penalty from config (should be level 0 with 0 quits)
 		level, _ := ResolvePenaltyLevel(0, serviceConfig)

@@ -264,14 +264,20 @@ func TestResolveAndApplyPenaltyLockout_ModeratorSanctionBoundaries(t *testing.T)
 		seedEarlyQuitLadder(t, ctx, nk, evr.DefaultEarlyQuitLevels().PenaltyLevels)
 
 		state := sanction(t, ctx, nk, groupID, targetID, 3)
-		state.PenaltyTimestamp = time.Now().Unix() - 1 // sanction just lapsed
-		state.NumEarlyQuits = 1                        // ladder level 0
+		// The sanction just lapsed.
+		state.PenaltyTimestamp = time.Now().Unix() - 1
+		state.ModeratorPenaltyUntil = state.PenaltyTimestamp
+		state.NumEarlyQuits = 1 // ladder level 0
 
 		resolveAndApplyPenaltyLockout(ctx, nk, logger, state)
 
 		if state.PenaltyLevel != 0 || state.PenaltyTimestamp != 0 {
 			t.Errorf("after the sanction expired, ladder resolution must apply: got level %d ts %d, want 0/0",
 				state.PenaltyLevel, state.PenaltyTimestamp)
+		}
+		if state.ModeratorPenaltyLevel != 0 || state.ModeratorPenaltyUntil != 0 {
+			t.Errorf("a lapsed sanction must be dropped, not retained: got level %d until %d",
+				state.ModeratorPenaltyLevel, state.ModeratorPenaltyUntil)
 		}
 	})
 
@@ -309,4 +315,101 @@ func TestResolveAndApplyPenaltyLockout_ModeratorSanctionBoundaries(t *testing.T)
 			t.Errorf("ladder penalty was not lifted: got level %d ts %d, want 0/0", state.PenaltyLevel, state.PenaltyTimestamp)
 		}
 	})
+}
+
+// TestEarlyQuit_QuittingMoreCannotShortenAModeratorSanction is the second half
+// of the sanction-wipe bug: the guard that stopped a quit ERASING a sanction
+// compared levels only, so a quit could still SHORTEN one.
+//
+// The Discord /early-quit handler takes an explicit duration-minutes
+// (evr_discord_appbot.go, "duration-minutes" option), so a moderator can hand
+// out a long, deliberately light sanction — level 1 for 24 hours. The default
+// ladder's harshest rung is level 3 for 900 seconds. A player who then quits
+// their way to 11 quits resolves to level 3, and because level 3 > level 1 the
+// guard stood aside and the ladder wrote its own 900s expiry over the
+// moderator's — the player served 15 minutes instead of 24 hours. Quitting MORE
+// shortened the punishment.
+//
+// Correct behaviour: an unexpired sanction is a floor in BOTH dimensions. The
+// ladder may raise the level and it may extend the expiry; it may do neither in
+// reverse.
+func TestEarlyQuit_QuittingMoreCannotShortenAModeratorSanction(t *testing.T) {
+	nk, ctx, _, _ := newEarlyQuitAdminHarness(t)
+	logger := NewRuntimeGoLogger(loggerForTest(t))
+	seedEarlyQuitLadder(t, ctx, nk, evr.DefaultEarlyQuitLevels().PenaltyLevels)
+
+	// A moderator sanctions level 1 for 24 hours.
+	state := NewEarlyQuitPlayerState()
+	state.ApplyModeratorPenalty(1, 24*60*60)
+	sanctionExpiry := state.PenaltyTimestamp
+
+	// The player racks up quits until the ladder resolves to level 3 / 900s.
+	state.NumEarlyQuits = 11
+	resolveAndApplyPenaltyLockout(ctx, nk, logger, state)
+
+	if state.PenaltyLevel != 3 {
+		t.Errorf("PenaltyLevel = %d, want 3: the ladder must still be able to RAISE the level", state.PenaltyLevel)
+	}
+	if state.PenaltyTimestamp < sanctionExpiry {
+		t.Errorf("PenaltyTimestamp = %d, want >= %d: quitting more shortened the moderator's sanction by %ds",
+			state.PenaltyTimestamp, sanctionExpiry, sanctionExpiry-state.PenaltyTimestamp)
+	}
+
+	// ...and the sanction keeps flooring the level for its full duration, even
+	// after the quits that raised it are forgiven.
+	state.NumEarlyQuits = 0
+	resolveAndApplyPenaltyLockout(ctx, nk, logger, state)
+	if state.PenaltyLevel != 1 {
+		t.Errorf("PenaltyLevel = %d after the quits were forgiven, want 1 (the sanctioned level): "+
+			"the ladder's transient level 3 ratcheted into the sanction", state.PenaltyLevel)
+	}
+	if state.PenaltyTimestamp != sanctionExpiry {
+		t.Errorf("PenaltyTimestamp = %d after the quits were forgiven, want %d (the sanction's own expiry)",
+			state.PenaltyTimestamp, sanctionExpiry)
+	}
+}
+
+// TestEarlyQuit_ResetLiftsAModeratorSanction pins that the admin reset action
+// drops the retained sanction. Without that, the sanction would keep flooring
+// ladder resolution for the rest of its original lockout even though the
+// operator just wiped the player's record.
+func TestEarlyQuit_ResetLiftsAModeratorSanction(t *testing.T) {
+	nk, ctx, targetID, groupID := newEarlyQuitAdminHarness(t)
+	logger := NewRuntimeGoLogger(loggerForTest(t))
+	seedEarlyQuitLadder(t, ctx, nk, evr.DefaultEarlyQuitLevels().PenaltyLevels)
+
+	state := NewEarlyQuitPlayerState()
+	state.ApplyModeratorPenalty(3, 24*60*60)
+	state.NumEarlyQuits = 20
+	if err := StorableWrite(ctx, nk, targetID, state); err != nil {
+		t.Fatalf("seed player state: %v", err)
+	}
+
+	payload, err := json.Marshal(EarlyQuitModifyRequest{
+		GroupID:      groupID,
+		TargetUserID: targetID,
+		Action:       "reset",
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if _, err := EarlyQuitModifyRPC(ctx, logger, nil, nk, string(payload)); err != nil {
+		t.Fatalf("EarlyQuitModifyRPC: %v", err)
+	}
+
+	after := NewEarlyQuitPlayerState()
+	if err := StorableRead(ctx, nk, targetID, after, false); err != nil {
+		t.Fatalf("read reset state: %v", err)
+	}
+	if after.ModeratorPenaltyLevel != 0 || after.ModeratorPenaltyUntil != 0 {
+		t.Errorf("reset left a retained sanction: level %d until %d", after.ModeratorPenaltyLevel, after.ModeratorPenaltyUntil)
+	}
+
+	// A subsequent quit must resolve purely from the ladder again.
+	after.NumEarlyQuits = 1
+	resolveAndApplyPenaltyLockout(ctx, nk, logger, after)
+	if after.PenaltyLevel != 0 || after.PenaltyTimestamp != 0 {
+		t.Errorf("after a reset the ladder must govern: got level %d ts %d, want 0/0",
+			after.PenaltyLevel, after.PenaltyTimestamp)
+	}
 }
