@@ -213,3 +213,60 @@ func TestSyncFromJournal_AffectedModesAgreeWithAuthority(t *testing.T) {
 			"projection mode set must match CheckEnforcementSuspensions (allow_private_lobbies=%v)", allowPrivate)
 	}
 }
+
+// TestSyncFromJournal_ExcludesVoidedRecords pins the fail-closed contract for
+// retracted suspensions.
+//
+// SyncFromJournal used to COPY VoidedAt/VoidedBy/VoidNotes onto the projected
+// record while still emitting the record itself. Every consumer then had to
+// remember to check VoidedAt before acting -- and a consumer that forgot would
+// enforce a ban a moderator had explicitly retracted. The authoritative path
+// has no such trap: ActiveSuspensions drops voided records outright
+// (evr_enforcement_journal.go:166).
+//
+// The projection now matches the authority: voided records do not appear.
+func TestSyncFromJournal_ExcludesVoidedRecords(t *testing.T) {
+	userID := uuid.Must(uuid.NewV4()).String()
+	groupID := uuid.Must(uuid.NewV4()).String()
+
+	journal := NewGuildEnforcementJournal(userID)
+	kept := journal.AddRecord(groupID, "enforcer", "1234", "Still banned", "", false, false, 24*time.Hour)
+	voided := journal.AddRecord(groupID, "enforcer", "1234", "Retracted ban", "", false, false, 24*time.Hour)
+	journal.VoidRecord(groupID, voided.ID, "moderator", "5678", "issued in error")
+
+	profile := NewSuspensionProfile(userID)
+	profile.SyncFromJournal(journal)
+
+	ids := make([]string, 0, len(profile.Suspensions))
+	for _, s := range profile.Suspensions {
+		ids = append(ids, s.ID)
+	}
+
+	assert.NotContains(t, ids, voided.ID,
+		"a voided suspension must not appear in the projection; a consumer that forgets to check VoidedAt would enforce a retracted ban")
+	assert.Contains(t, ids, kept.ID, "non-voided suspensions must still be projected")
+	assert.Len(t, profile.Suspensions, 1)
+}
+
+// TestSyncFromJournal_VoidedExclusionMatchesAuthority cross-checks the void
+// filter against the authoritative check rather than against a literal, so the
+// two cannot drift.
+func TestSyncFromJournal_VoidedExclusionMatchesAuthority(t *testing.T) {
+	userID := uuid.Must(uuid.NewV4()).String()
+	groupID := uuid.Must(uuid.NewV4()).String()
+
+	journal := NewGuildEnforcementJournal(userID)
+	voided := journal.AddRecord(groupID, "enforcer", "1234", "Retracted ban", "", false, false, 24*time.Hour)
+	journal.VoidRecord(groupID, voided.ID, "moderator", "5678", "issued in error")
+
+	authoritative, err := CheckEnforcementSuspensions(GuildEnforcementJournalList{userID: journal}, nil)
+	require.NoError(t, err)
+	require.Empty(t, authoritative[groupID],
+		"precondition: the authority treats a fully-voided journal as carrying no active suspension")
+
+	profile := NewSuspensionProfile(userID)
+	profile.SyncFromJournal(journal)
+
+	assert.Empty(t, profile.Suspensions,
+		"the projection must agree with the authority that nothing is enforceable here")
+}

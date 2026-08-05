@@ -52,7 +52,15 @@ type SuspensionProfileRecord struct {
 	LastEditedBy string    `json:"last_edited_by,omitempty"`
 	LastEditedAt time.Time `json:"last_edited_at,omitempty"`
 
-	// Void information (if this suspension was voided)
+	// Void information.
+	//
+	// DEPRECATED as an output. SyncFromJournal no longer emits voided records
+	// at all (they are dropped), so these are always zero on a freshly synced
+	// profile. They are retained only so that profiles written before that
+	// change still round-trip through json.Unmarshal without data loss.
+	//
+	// Do not reintroduce "annotate but still emit": it makes correctness
+	// opt-in for every consumer. See TestSyncFromJournal_ExcludesVoidedRecords.
 	VoidedAt  time.Time `json:"voided_at,omitempty"`
 	VoidedBy  string    `json:"voided_by,omitempty"`
 	VoidNotes string    `json:"void_notes,omitempty"`
@@ -160,6 +168,19 @@ func (s *SuspensionProfile) SyncFromJournal(journal *GuildEnforcementJournal) {
 	// Iterate through all records in the journal
 	for groupID, records := range journal.RecordsByGroupID {
 		for _, record := range records {
+			// Voided records are DROPPED, not annotated.
+			//
+			// This used to copy VoidedAt/VoidedBy/VoidNotes onto the projected
+			// record and emit it anyway, which made correctness opt-in: every
+			// consumer had to remember to check VoidedAt, and one that forgot
+			// would enforce a ban a moderator had explicitly retracted.
+			//
+			// The authoritative path has no such trap -- ActiveSuspensions
+			// skips voided records outright -- so the projection matches it.
+			if journal.IsVoid(groupID, record.ID) {
+				continue
+			}
+
 			// Derive the affected mode set using the same helper the
 			// authoritative check uses, so the two cannot drift.
 			modes := EnforcementRecordAffectedModes(record)
@@ -189,13 +210,6 @@ func (s *SuspensionProfile) SyncFromJournal(journal *GuildEnforcementJournal) {
 				lastEdit := record.EditLog[len(record.EditLog)-1]
 				profileRec.LastEditedBy = lastEdit.EditorUserID
 				profileRec.LastEditedAt = lastEdit.EditedAt
-			}
-
-			// Add void information if applicable
-			if void, found := journal.GetVoid(groupID, record.ID); found {
-				profileRec.VoidedAt = void.VoidedAt
-				profileRec.VoidedBy = void.AuthorID
-				profileRec.VoidNotes = void.Notes
 			}
 
 			s.Suspensions = append(s.Suspensions, profileRec)
