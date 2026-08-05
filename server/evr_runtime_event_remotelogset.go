@@ -576,8 +576,11 @@ func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logge
 		// Track completion in detailed history first; only credit the counter
 		// when this is the first time the match is reported (the MatchLoop
 		// MatchOver dispatch also reports it).
+		// Warn, not Debug: this is the failure that costs the player match
+		// credit (no history write means no IncrementCompletedMatches), so it
+		// must be at least as visible as the adjacent eqconfig write failure.
 		if first, err := TrackMatchCompletion(ctx, logger, nk, userID, matchID, time.Now().UTC()); err != nil {
-			logger.WithField("error", err).Debug("Failed to track match completion in history")
+			logger.WithField("error", err).Warn("Failed to track match completion in history")
 		} else if first {
 			eqconfig.IncrementCompletedMatches()
 		}
