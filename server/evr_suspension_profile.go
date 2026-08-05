@@ -3,10 +3,13 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -185,25 +188,28 @@ func SyncJournalAndProfile(ctx context.Context, nk runtime.NakamaModule, userID 
 
 // SyncJournalAndProfileWithRetry syncs journal and profile with retry logic for concurrent writes.
 // This handles version conflicts by retrying with exponential backoff.
-// On each retry, it re-reads both journal and profile from storage to get the latest versions.
+//
+// On each retry it re-reads the stored journal and MERGES the caller's pending
+// records and voids into it (see GuildEnforcementJournal.mergeStored), adopting
+// the concurrent winner's storage version. Adopting only the version — writing
+// the caller's stale copy on top of the winner — silently destroys whatever the
+// winner recorded, while reporting success. If the re-read itself fails the sync
+// aborts: without the winner's state there is nothing safe to write, and
+// re-writing the unchanged stale journal can only conflict again.
 func SyncJournalAndProfileWithRetry(ctx context.Context, nk runtime.NakamaModule, userID string, journal *GuildEnforcementJournal) error {
 	const maxRetries = 3
 	var lastErr error
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		// On retry, re-read the journal from storage to get the latest version
-		// This ensures we have the correct storage version for the write
 		if attempt > 0 {
-			freshJournal := NewGuildEnforcementJournal(userID)
-			if err := StorableRead(ctx, nk, userID, freshJournal, true); err != nil {
-				lastErr = err
-				// On read failure, continue with the existing journal
-			} else {
-				// Update the journal's storage version to the latest from storage
-				meta := journal.StorageMeta()
-				meta.Version = freshJournal.GetStorageVersion()
-				journal.SetStorageMeta(meta)
+			// A NotFound here means the object was removed between attempts; the
+			// freshly-constructed journal then merges as an empty base at the
+			// create-only version "*".
+			stored := NewGuildEnforcementJournal(userID)
+			if err := StorableRead(ctx, nk, userID, stored, false); err != nil && status.Code(err) != codes.NotFound {
+				return fmt.Errorf("SyncJournalAndProfileWithRetry: re-read after conflict: %w", err)
 			}
+			journal.mergeStored(stored)
 		}
 
 		// Load existing profile from storage to get the current version, or create if it doesn't exist

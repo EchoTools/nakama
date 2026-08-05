@@ -306,6 +306,75 @@ func (s *GuildEnforcementJournal) EditRecord(groupID, recordID, editorUserID, ed
 	return record
 }
 
+// mergeStored reconciles s with stored — the same journal freshly re-read from
+// storage after an optimistic-concurrency conflict — and leaves s holding the
+// union of both, at stored's storage version so the retry writes on top of the
+// concurrent winner.
+//
+// This is sound because the journal is append-structured: moderators add
+// records and voids, they do not rewrite the collection. Records are keyed by
+// their (unique) ID — a record only the winner has is kept, a record only s has
+// is appended, and a record both have resolves to whichever carries the later
+// UpdatedAt (EditRecord bumps it), with ties going to the stored copy. Voids are
+// keyed by record ID within a group and unioned, stored winning ties.
+//
+// Without this merge, a retry writes the caller's stale copy under the winner's
+// version and the winner's records disappear while the write reports success.
+func (s *GuildEnforcementJournal) mergeStored(stored *GuildEnforcementJournal) {
+	if stored == nil {
+		return
+	}
+
+	merged := make(map[string][]GuildEnforcementRecord, len(stored.RecordsByGroupID)+len(s.RecordsByGroupID))
+	for groupID, records := range stored.RecordsByGroupID {
+		merged[groupID] = append(make([]GuildEnforcementRecord, 0, len(records)), records...)
+	}
+	for groupID, records := range s.RecordsByGroupID {
+		existing := merged[groupID]
+		indexByID := make(map[string]int, len(existing))
+		for i, r := range existing {
+			indexByID[r.ID] = i
+		}
+		for _, local := range records {
+			i, ok := indexByID[local.ID]
+			if !ok {
+				indexByID[local.ID] = len(existing)
+				existing = append(existing, local)
+				continue
+			}
+			if local.UpdatedAt.After(existing[i].UpdatedAt) {
+				existing[i] = local
+			}
+		}
+		merged[groupID] = existing
+	}
+	s.RecordsByGroupID = merged
+
+	voids := make(map[string]map[string]GuildEnforcementRecordVoid, len(stored.VoidsByRecordIDByGroupID)+len(s.VoidsByRecordIDByGroupID))
+	for groupID, byRecordID := range stored.VoidsByRecordIDByGroupID {
+		voids[groupID] = maps.Clone(byRecordID)
+	}
+	for groupID, byRecordID := range s.VoidsByRecordIDByGroupID {
+		if voids[groupID] == nil {
+			voids[groupID] = make(map[string]GuildEnforcementRecordVoid, len(byRecordID))
+		}
+		for recordID, void := range byRecordID {
+			if _, ok := voids[groupID][recordID]; !ok {
+				voids[groupID][recordID] = void
+			}
+		}
+	}
+	s.VoidsByRecordIDByGroupID = voids
+
+	// Keep the later completion. updateFields() re-clears it at marshal time if
+	// a merged-in record requires community values after that timestamp.
+	if stored.CommunityValuesCompletedAt.After(s.CommunityValuesCompletedAt) {
+		s.CommunityValuesCompletedAt = stored.CommunityValuesCompletedAt
+	}
+
+	s.version = stored.version
+}
+
 func (s *GuildEnforcementJournal) GroupVoids(groupID ...string) map[string]GuildEnforcementRecordVoid {
 	voids := make(map[string]GuildEnforcementRecordVoid)
 	for _, g := range groupID {
