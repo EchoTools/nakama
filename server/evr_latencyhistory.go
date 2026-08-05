@@ -100,9 +100,14 @@ func (h *LatencyHistory) writeWithRetry(ctx context.Context, nk runtime.NakamaMo
 		}
 		lastErr = err
 
-		// Attempts are spent. Re-reading now would cost a round-trip whose
-		// result is never written, and would leave the caller's (session-shared)
-		// history holding merged state that was never persisted.
+		// Attempts are spent: break rather than pay for a re-read and re-apply
+		// whose result would never be written.
+		//
+		// This does NOT leave h clean. Every earlier attempt adopted the stored
+		// object and re-applied onto it before its write failed, so on
+		// exhaustion h already holds merged state that was never persisted.
+		// Callers must treat a writeWithRetry error as "h is now stale" — which
+		// matters because h is typically the session-shared history.
 		if attempt == latencyRetryMaxAttempts-1 {
 			break
 		}

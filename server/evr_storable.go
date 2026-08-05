@@ -113,17 +113,46 @@ func StorableRead(ctx context.Context, nk runtime.NakamaModule, userID string, d
 			if !create {
 				return storableErrorf(meta, codes.Internal, "failed to unmarshal: %w", err)
 			}
-			// Record is corrupted. Delete it and recreate with defaults so the caller recovers.
-			meta.Version = objs[0].GetVersion()
-			if err := nk.StorageDelete(ctx, []*runtime.StorageDelete{{
+			// Record is corrupted for this type. Recover by replacing it with
+			// dst's defaults — without ever destroying an object that another
+			// writer put there in the meantime.
+			//
+			// The delete is version-guarded, so it lands only while the corrupt
+			// record is still the current object, and its outcome selects the
+			// guard for the follow-up write:
+			//
+			//   - delete landed: the object is gone, so write create-only ("*").
+			//     A concurrent recreate wins that race and is adopted into dst.
+			//   - delete did not land: either the record was replaced (its
+			//     version moved on) or storage failed transiently and the
+			//     corrupt record is still sitting there. Write guarded on the
+			//     corrupt record's own version, which succeeds only in the
+			//     second case — precisely the case this recovery path exists
+			//     for. A rejection means someone else owns the object now, so
+			//     fall through to the create-only path and adopt their object
+			//     instead of clobbering it.
+			//
+			// Writing unconditionally here (as this path did before) recovers
+			// the same corrupt record but also silently overwrites a healthy
+			// concurrent replacement; refusing to write at all (create-only in
+			// both branches) leaves the corrupt record in place forever and
+			// turns every later StorableRead(create=true) for this user into a
+			// hard "failed to unmarshal".
+			corruptVersion := objs[0].GetVersion()
+			meta.Version = corruptVersion
+			if derr := nk.StorageDelete(ctx, []*runtime.StorageDelete{{
 				Collection: meta.Collection,
 				Key:        meta.Key,
 				UserID:     meta.UserID,
-				Version:    meta.Version,
-			}}); err != nil {
-				// Intentionally not returning here; the create below is version-guarded
-				// and will adopt whatever object replaced the corrupt one.
-				_ = err
+				Version:    corruptVersion,
+			}}); derr != nil {
+				werr := storableWriteVersion(ctx, nk, userID, dst, corruptVersion)
+				if werr == nil {
+					return nil
+				}
+				if !errors.Is(werr, runtime.ErrStorageRejectedVersion) {
+					return werr
+				}
 			}
 			return storableCreate(ctx, nk, userID, dst)
 		}
@@ -138,6 +167,13 @@ func StorableRead(ctx context.Context, nk runtime.NakamaModule, userID string, d
 	}
 }
 
+// storableCreateMaxAttempts bounds storableCreate. Two attempts covers the only
+// interleaving that needs one: the create loses the race and the winner's object
+// is then deleted before the fallback re-read reaches it, leaving nothing stored
+// and nothing to adopt. Retrying rather than surfacing NotFound keeps
+// StorableRead(create=true) honest — it is a get-or-create.
+const storableCreateMaxAttempts = 2
+
 // storableCreate writes dst as a brand new object under the create-only version
 // "*", so it can never overwrite an object that another writer created between
 // the caller's read and this write. If the create loses that race, the winner's
@@ -147,16 +183,41 @@ func StorableRead(ctx context.Context, nk runtime.NakamaModule, userID string, d
 // The version must be forced onto the wire here: StorableWrite re-derives its
 // metadata from src.StorageMeta(), so mutating a local StorableMetadata copy has
 // no effect on the write.
+//
+// NOTE: the fallback re-read decodes into the caller's dst without resetting it,
+// so dst is a merge target, not a replacement target — encoding/json keeps
+// existing keys of a non-nil map and leaves fields absent from the winner's JSON
+// untouched. That is the intended shape for the common caller (a
+// constructor-fresh dst holding only defaults), but on the corrupt-record path
+// dst has already been through a failed json.Unmarshal and may carry residue
+// from the corrupt bytes. Resetting dst generically is not safe here: several
+// StorableAdapter implementations derive their storage key from their own fields
+// (GuildGroupState.StorageMeta uses s.GroupID) or embed a mutex
+// (LatencyHistory), so neither zeroing nor wholesale assignment is sound without
+// a per-type hook. Tracked as a follow-up.
 func storableCreate(ctx context.Context, nk runtime.NakamaModule, userID string, dst StorableAdapter) error {
-	err := storableWriteVersion(ctx, nk, userID, dst, "*")
-	if err == nil {
-		return nil
+	var lastErr error
+	for attempt := 0; attempt < storableCreateMaxAttempts; attempt++ {
+		err := storableWriteVersion(ctx, nk, userID, dst, "*")
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, runtime.ErrStorageRejectedVersion) {
+			return err
+		}
+		// Lost the create race: adopt the concurrent winner's object.
+		rerr := StorableRead(ctx, nk, userID, dst, false)
+		if rerr == nil {
+			return nil
+		}
+		if status.Code(rerr) != codes.NotFound {
+			return rerr
+		}
+		// The winner's object is already gone. Nothing is stored, so the
+		// create can simply be retried.
+		lastErr = rerr
 	}
-	if !errors.Is(err, runtime.ErrStorageRejectedVersion) {
-		return err
-	}
-	// Lost the create race: adopt the concurrent winner's object.
-	return StorableRead(ctx, nk, userID, dst, false)
+	return lastErr
 }
 
 func StorableWrite(ctx context.Context, nk runtime.NakamaModule, userID string, src StorableAdapter) error {

@@ -43,8 +43,16 @@ type storableRaceNK struct {
 	// index onward fail with readErr.
 	readErrFrom int
 	readErr     error
+	// deleteErr, when non-nil, makes every StorageDelete fail with it and
+	// remove nothing — a transient storage failure, as distinct from the
+	// version-guarded rejection the mock raises on its own.
+	deleteErr error
 
 	afterRead func(m *storableRaceNK)
+	// afterWrite runs once a StorageWrite has been resolved (whether it was
+	// accepted or rejected), which lets a test simulate a concurrent writer
+	// acting in the window between a rejected write and the read that follows.
+	afterWrite func(m *storableRaceNK)
 }
 
 func newStorableRaceNK() *storableRaceNK {
@@ -111,6 +119,17 @@ func (m *storableRaceNK) StorageRead(ctx context.Context, reads []*runtime.Stora
 }
 
 func (m *storableRaceNK) StorageWrite(ctx context.Context, writes []*runtime.StorageWrite) ([]*api.StorageObjectAck, error) {
+	acks, err := m.storageWriteLocked(writes)
+	m.mu.Lock()
+	hook := m.afterWrite
+	m.mu.Unlock()
+	if hook != nil {
+		hook(m)
+	}
+	return acks, err
+}
+
+func (m *storableRaceNK) storageWriteLocked(writes []*runtime.StorageWrite) ([]*api.StorageObjectAck, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.writes++
@@ -155,6 +174,9 @@ func (m *storableRaceNK) StorageDelete(ctx context.Context, deletes []*runtime.S
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.deletes++
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
 	for _, d := range deletes {
 		k := storableRaceKey(d.UserID, d.Collection, d.Key)
 		existing, ok := m.objects[k]
@@ -272,6 +294,77 @@ func TestStorableRead_CorruptRecoveryDoesNotClobberConcurrentRecreate(t *testing
 	}
 	if _, ok := dst.GameServerLatencies["10.0.0.1"]; !ok {
 		t.Errorf("dst did not adopt the recreated object, got %+v", dst.GameServerLatencies)
+	}
+}
+
+// TestStorableRead_CorruptRecoverySelfHealsWhenDeleteFails is the other half of
+// the corrupt-record contract: recovery must still recover.
+//
+// The delete is version-guarded and its error is deliberately not fatal, so a
+// transient delete failure leaves the corrupt record in place. If the follow-up
+// write is create-only ("*") it is then rejected, the fallback re-read hits the
+// same unparseable bytes, and StorableRead(create=true) returns a hard "failed
+// to unmarshal" for every future call — a permanent, per-user failure on an API
+// whose whole job is get-or-create.
+func TestStorableRead_CorruptRecoverySelfHealsWhenDeleteFails(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	userID := uuid.Must(uuid.NewV4()).String()
+	nk := newStorableRaceNK()
+
+	nk.set(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey, `{"game_server_latencies":"corrupt"}`)
+	nk.deleteErr = errors.New("storage delete failed transiently")
+
+	dst := NewLatencyHistory()
+	if err := StorableRead(ctx, nk, userID, dst, true); err != nil {
+		t.Fatalf("corrupt-record recovery must self-heal when the delete does not land, got: %v", err)
+	}
+
+	stored := nk.get(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey)
+	if stored == nil {
+		t.Fatal("no object stored")
+	}
+	if strings.Contains(stored.Value, "corrupt") {
+		t.Errorf("the corrupt object was left in place; stored value = %s", stored.Value)
+	}
+	if v := dst.StorageMeta().Version; v == "" || v == "*" {
+		t.Errorf("dst version not updated from the write ack, got %q", v)
+	}
+}
+
+// TestStorableRead_CreateRetriesWhenWinnerVanishes pins the get-or-create
+// contract across the narrow window in which the caller loses the create race
+// and then the winner's object is deleted before the fallback re-read reaches
+// it. Surfacing NotFound there would be a get-or-create call returning
+// "not found" with nothing stored — several callers treat any error from
+// StorableRead(create=true) as fatal.
+func TestStorableRead_CreateRetriesWhenWinnerVanishes(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	userID := uuid.Must(uuid.NewV4()).String()
+	nk := newStorableRaceNK()
+
+	// A concurrent writer creates the object between our read (which misses)
+	// and our create-only write, so the write is rejected...
+	nk.afterRead = onceHook(func(m *storableRaceNK) {
+		m.set(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey, winnerLatencyJSON(t, "10.0.0.1"))
+	})
+	// ...and then deletes it again before we can read it back.
+	nk.afterWrite = onceHook(func(m *storableRaceNK) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		delete(m.objects, storableRaceKey(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey))
+	})
+
+	dst := NewLatencyHistory()
+	if err := StorableRead(ctx, nk, userID, dst, true); err != nil {
+		t.Fatalf("get-or-create must not surface NotFound when nothing is stored: %v", err)
+	}
+	if nk.get(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey) == nil {
+		t.Fatal("create=true returned success without creating the object")
+	}
+	if v := dst.StorageMeta().Version; v == "" || v == "*" {
+		t.Errorf("dst version not updated from the write ack, got %q", v)
 	}
 }
 

@@ -94,3 +94,46 @@ func TestLatencyHistory_writeWithRetry_NoRereadOnFinalAttempt(t *testing.T) {
 		t.Errorf("the final attempt must not re-apply: re-applies = %d, want %d", reapplies, latencyRetryMaxAttempts-1)
 	}
 }
+
+// TestLatencyHistory_writeWithRetry_ExhaustionLeavesHistoryStale pins what the
+// early break on the final attempt does and does NOT achieve.
+//
+// It saves a round-trip; it does not leave h consistent with storage. Earlier
+// attempts already adopted the stored object and re-applied onto it, so on
+// exhaustion h holds merged state that was never persisted. h is typically the
+// session-shared history (evr_pipeline_login.go), so a caller that ignores the
+// error keeps serving that unpersisted state for the rest of the session. This
+// test documents the contract rather than endorsing it.
+func TestLatencyHistory_writeWithRetry_ExhaustionLeavesHistoryStale(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	userID := uuid.Must(uuid.NewV4()).String()
+	nk := newStorableRaceNK()
+	nk.set(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey, winnerLatencyJSON(t, "10.0.0.1"))
+	nk.alwaysConflict = true
+
+	h := staleLatencyHistory("10.9.9.9")
+	reapply := func() error {
+		h.Add(net.ParseIP("10.0.0.2"), 99, 25, time.Time{})
+		return nil
+	}
+	if err := reapply(); err != nil {
+		t.Fatalf("reapply: %v", err)
+	}
+	if err := h.writeWithRetry(ctx, nk, userID, reapply); err == nil {
+		t.Fatal("expected an error after exhausting attempts, got nil")
+	}
+
+	// h now reflects the last adopted-and-re-applied attempt, none of which
+	// reached storage.
+	if _, ok := h.GameServerLatencies["10.0.0.2"]; !ok {
+		t.Errorf("expected the caller's re-applied sample to still be in h, got %v", h.GameServerLatencies)
+	}
+	stored := NewLatencyHistory()
+	if err := StorableRead(ctx, nk, userID, stored, false); err != nil {
+		t.Fatalf("read stored: %v", err)
+	}
+	if _, ok := stored.GameServerLatencies["10.0.0.2"]; ok {
+		t.Fatalf("precondition: nothing should have been persisted, got %v", stored.GameServerLatencies)
+	}
+}

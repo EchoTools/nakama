@@ -206,6 +206,106 @@ func TestSyncJournalAndProfileWithRetry_KeepsLocalEditOfSharedRecord(t *testing.
 	}
 }
 
+// TestSyncJournalAndProfileWithRetry_NotFoundKeepsPendingCommunityValues covers
+// the merge base used when the journal object is absent on the post-conflict
+// re-read.
+//
+// A requirement is "pending" when the newest CommunityValuesRequired record was
+// created AFTER CommunityValuesCompletedAt; updateFields() then zeroes the
+// timestamp at marshal time (evr_enforcement_journal.go updateFields).
+//
+// NewGuildEnforcementJournal seeds CommunityValuesCompletedAt with time.Now(),
+// so using a constructor-fresh journal as the merge base hands mergeStored a
+// completion timestamp later than any record the caller just added. mergeStored
+// keeps the later one, updateFields no longer sees a record newer than it, and
+// the requirement is silently satisfied without the player ever re-accepting.
+func TestSyncJournalAndProfileWithRetry_NotFoundKeepsPendingCommunityValues(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	userID := uuid.Must(uuid.NewV4()).String()
+	nk := newStorableRaceNK()
+
+	// Seed a journal whose last community-values acceptance is an hour old, so
+	// a record added now is unambiguously newer than it.
+	seed := NewGuildEnforcementJournal(userID)
+	seed.CommunityValuesCompletedAt = time.Now().UTC().Add(-time.Hour)
+	nk.set(userID, StorageCollectionEnforcementJournal, StorageKeyEnforcementJournal, mustStorableJSON(t, seed))
+
+	journalA := NewGuildEnforcementJournal(userID)
+	if err := StorableRead(ctx, nk, userID, journalA, false); err != nil {
+		t.Fatalf("read journal A: %v", err)
+	}
+	journalB := NewGuildEnforcementJournal(userID)
+	if err := StorableRead(ctx, nk, userID, journalB, false); err != nil {
+		t.Fatalf("read journal B: %v", err)
+	}
+
+	// A lands first so B's write will conflict.
+	journalA.AddRecord("group-A", "mod-A", "", "A ban", "A notes", false, false, time.Hour)
+	if err := StorableWrite(ctx, nk, userID, journalA); err != nil {
+		t.Fatalf("write journal A: %v", err)
+	}
+
+	// B records a ban that requires the player to re-accept community values.
+	rec := journalB.AddRecord("group-1", "mod-B", "", "B ban", "B notes", true, false, time.Hour)
+	if !rec.CreatedAt.After(journalB.CommunityValuesCompletedAt) {
+		t.Fatalf("precondition: the new record must post-date the last acceptance (%v vs %v)", rec.CreatedAt, journalB.CommunityValuesCompletedAt)
+	}
+
+	// The journal object is removed before B's retry re-reads it, so the retry
+	// takes the NotFound branch.
+	nk.afterWrite = onceHook(func(m *storableRaceNK) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		delete(m.objects, storableRaceKey(userID, StorageCollectionEnforcementJournal, StorageKeyEnforcementJournal))
+	})
+
+	if err := SyncJournalAndProfileWithRetry(ctx, nk, userID, journalB); err != nil {
+		t.Fatalf("SyncJournalAndProfileWithRetry: %v", err)
+	}
+
+	final := NewGuildEnforcementJournal(userID)
+	if err := StorableRead(ctx, nk, userID, final, false); err != nil {
+		t.Fatalf("final read: %v", err)
+	}
+	if len(final.RecordsByGroupID["group-1"]) != 1 {
+		t.Fatalf("precondition: B's record must have been written; records = %+v", final.RecordsByGroupID)
+	}
+	if !final.CommunityValuesCompletedAt.IsZero() {
+		t.Errorf("the pending community-values requirement was cleared by the merge: CommunityValuesCompletedAt = %v, want the zero time", final.CommunityValuesCompletedAt)
+	}
+}
+
+// TestGuildEnforcementJournal_mergeStored_StoredEditWins pins the reverse merge
+// direction of the same-record case: when the concurrent winner holds the newer
+// edit of a record both copies carry, the winner's version survives.
+func TestGuildEnforcementJournal_mergeStored_StoredEditWins(t *testing.T) {
+	t.Parallel()
+
+	userID := uuid.Must(uuid.NewV4()).String()
+	base := NewGuildEnforcementJournal(userID)
+	rec := base.AddRecord("group-1", "mod-0", "", "original", "notes", false, false, time.Hour)
+
+	local := NewGuildEnforcementJournal(userID)
+	local.RecordsByGroupID = map[string][]GuildEnforcementRecord{"group-1": {*base.GetRecord("group-1", rec.ID)}}
+
+	stored := NewGuildEnforcementJournal(userID)
+	stored.RecordsByGroupID = map[string][]GuildEnforcementRecord{"group-1": {*base.GetRecord("group-1", rec.ID)}}
+	if edited := stored.EditRecord("group-1", rec.ID, "mod-A", "", rec.Expiry, "stored edit", "stored notes", false); edited == nil {
+		t.Fatal("EditRecord returned nil")
+	}
+
+	local.mergeStored(stored)
+
+	merged := local.GetRecord("group-1", rec.ID)
+	if merged == nil {
+		t.Fatal("the record vanished from the merge")
+	}
+	if merged.UserNoticeText != "stored edit" {
+		t.Errorf("the concurrent winner's newer edit was discarded: %q", merged.UserNoticeText)
+	}
+}
+
 // TestSyncJournalAndProfileWithRetry_AbortsWhenRereadFails proves that a failed
 // post-conflict re-read stops the loop instead of re-writing the unchanged
 // stale journal — which can only conflict again and burn every attempt.

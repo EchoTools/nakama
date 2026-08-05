@@ -202,12 +202,22 @@ func SyncJournalAndProfileWithRetry(ctx context.Context, nk runtime.NakamaModule
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
-			// A NotFound here means the object was removed between attempts; the
-			// freshly-constructed journal then merges as an empty base at the
-			// create-only version "*".
 			stored := NewGuildEnforcementJournal(userID)
-			if err := StorableRead(ctx, nk, userID, stored, false); err != nil && status.Code(err) != codes.NotFound {
-				return fmt.Errorf("SyncJournalAndProfileWithRetry: re-read after conflict: %w", err)
+			if err := StorableRead(ctx, nk, userID, stored, false); err != nil {
+				if status.Code(err) != codes.NotFound {
+					return fmt.Errorf("SyncJournalAndProfileWithRetry: re-read after conflict: %w", err)
+				}
+				// The object was removed between attempts, so merge against a
+				// genuinely empty journal at the create-only version "*".
+				//
+				// A constructor-fresh journal is NOT empty for this purpose:
+				// NewGuildEnforcementJournal seeds CommunityValuesCompletedAt
+				// with time.Now(), and mergeStored keeps the later completion.
+				// A pending community-values requirement is encoded as the ZERO
+				// time, so "now" would win and updateFields() would no longer
+				// see a record newer than the completion — silently satisfying a
+				// requirement the moderator is in the middle of recording.
+				stored = &GuildEnforcementJournal{UserID: userID, version: "*"}
 			}
 			journal.mergeStored(stored)
 		}
