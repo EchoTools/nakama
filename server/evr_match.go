@@ -422,6 +422,9 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 				delete(state.presenceMap, e.GetSessionId())
 				delete(state.presenceByEvrID, e.EvrID)
 				delete(state.joinTimestamps, e.GetSessionId())
+				// Mirror the MatchLeave cleanup: a stale join-clock entry would
+				// otherwise outlive the evicted session.
+				delete(state.joinTimeMilliseconds, e.GetSessionId())
 				state.rebuildCache()
 				break
 			}
@@ -644,11 +647,17 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 		isBackfill := time.Now().After(state.StartTime.Add(PublicMatchWaitTime))
 
 		if mp, ok := state.presenceMap[p.GetSessionId()]; !ok {
+			// MatchJoinAttempt and MatchJoin are separately queued calls on the
+			// match handler goroutine, so another join attempt can evict this
+			// session (same-user duplicate EvrID) between them. Skip the orphan
+			// presence: returning nil would Stop() the handler without ever
+			// calling MatchTerminate, killing the match for everyone.
 			logger.WithFields(map[string]any{
 				"username": p.GetUsername(),
 				"uid":      p.GetUserId(),
-			}).Error("Presence not found. this should never happen.")
-			return nil
+				"sid":      p.GetSessionId(),
+			}).Error("Presence not found in the presence map; skipping join for this session.")
+			continue
 		} else {
 			logger.WithFields(map[string]any{
 				"username": p.GetUsername(),
@@ -764,8 +773,12 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 	if state.Started() && len(state.presenceMap) == 0 {
 		// If the match is empty, and the server has left, then shut down.
+		// Go through MatchShutdown so the drain -> MatchTerminate sequence runs:
+		// a bare `return nil` makes the handler Stop() without MatchTerminate,
+		// skipping the summary, the stored-label cleanup and the game-server
+		// notification entirely.
 		logger.Debug("Match is empty. Shutting down.")
-		return nil
+		return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 5)
 	}
 
 	// if the server is in the presences, then shut down.
@@ -1191,9 +1204,12 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		logger.Debug("Match is empty. Closing it.")
 	}
 
-	// Update the label that includes the new player list.
+	// Update the label that includes the new player list. A failure here is a
+	// transient bookkeeping problem (e.g. a database blip): it must NOT end the
+	// match for everyone still in it. Returning nil would make the handler
+	// Stop() without ever calling MatchTerminate.
 	if err := m.updateLabel(logger, dispatcher, state); err != nil {
-		return nil
+		logger.WithField("error", err).Error("failed to update label after leave")
 	}
 
 	return state
@@ -1207,7 +1223,6 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		return nil
 	}
 
-	var err error
 	var updateLabel bool
 
 	// Handle the messages, one by one
@@ -1438,21 +1453,28 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	// If the match has a server but never started and has been idle too long, shut it down.
+	// Route through MatchShutdown so the drain -> MatchTerminate sequence runs.
 	if !state.levelLoaded && state.server != nil && !state.Started() && len(state.presenceMap) == 0 && !state.CreatedAt.IsZero() && time.Since(state.CreatedAt) > 15*time.Minute {
 		logger.Warn("Match did not start on time. Shutting down.")
-		return nil
+		return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 5)
 	}
 
 	// If the match is prepared and the start time has been reached, start it.
 	// Ensure the game server presence exists to avoid nil dispatch crashes.
 	if !state.levelLoaded && state.server != nil && (len(state.presenceMap) != 0 || state.Started()) {
-		if state, err = m.MatchStart(ctx, logger, nk, dispatcher, state); err != nil {
+		// A failed start is retryable on the next tick; killing the match here
+		// would Stop() the handler without MatchTerminate. MatchStart can return
+		// a nil label on failure, so keep the existing state in that case.
+		started, err := m.MatchStart(ctx, logger, nk, dispatcher, state)
+		if err != nil {
 			logger.WithField("error", err).Error("failed to start session")
-			return nil
+			return state
+		}
+		if started != nil {
+			state = started
 		}
 		if err := m.updateLabel(logger, dispatcher, state); err != nil {
 			logger.WithField("error", err).Error("failed to update label")
-			return nil
 		}
 		return state
 	}
@@ -1599,9 +1621,11 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	if updateLabel {
+		// Bookkeeping only: a transient failure must not tear the match down
+		// without a shutdown sequence. The next tick that sets updateLabel will
+		// retry.
 		if err := m.updateLabel(logger, dispatcher, state); err != nil {
 			logger.WithField("error", err).Error("failed to update label")
-			return nil
 		}
 	}
 

@@ -119,7 +119,12 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 
 				messages: []runtime.MatchData{},
 			},
-			want: nil,
+			// The reclaim now runs the orderly MatchShutdown -> drain ->
+			// MatchTerminate sequence instead of bare-returning nil (which made
+			// the handler Stop() without ever calling MatchTerminate). The
+			// draining state is returned; see
+			// TestMatchLoop_NeverStartedMatchShutsDownOrderly.
+			want: "non-nil",
 		},
 		{
 			name: "MatchLoop returns state.",
@@ -178,8 +183,11 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 			m := &EvrMatch{}
 			ctx := context.Background()
 			var db *sql.DB
-			var nk runtime.NakamaModule
-			var dispatcher runtime.MatchDispatcher
+			// A real (stub) module is required: the idle-reclaim path now runs
+			// the MatchShutdown sequence, which records metrics and stores the
+			// label.
+			var nk runtime.NakamaModule = &reconnectTestNakamaModule{}
+			var dispatcher runtime.MatchDispatcher = &reconnectTestDispatcher{}
 
 			got := m.MatchLoop(ctx, logger, db, nk, dispatcher, tt.args.tick, tt.args.state_, tt.args.messages)
 			if tt.want == "non-nil" {
