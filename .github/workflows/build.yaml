@@ -19,9 +19,11 @@ jobs:
           go-version: stable
           cache: true  # Built-in caching for Go modules and build cache
 
+      - name: Install just
+        uses: extractions/setup-just@v2
 
       - name: Vendor dependencies
         run: go mod tidy && go mod vendor
 
       - name: Build binary
-        run: make nakama
+        run: just nakama

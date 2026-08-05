@@ -18,7 +18,7 @@ fi
 # Check if baseline exists
 if [ ! -f "$BASELINE_FILE" ]; then
     echo "ERROR: Baseline file not found: $BASELINE_FILE"
-    echo "Run 'make bench-baseline' to create one"
+    echo "Run 'just bench-baseline' to create one"
     exit 1
 fi
 
