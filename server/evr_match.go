@@ -1692,9 +1692,13 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 	}
 	state.Open = false
 	state.terminateTick = tick + int64(graceSeconds)*state.tickRate
+	// The label refresh is bookkeeping. Bailing out with nil here would make the
+	// handler Stop() without ever calling MatchTerminate, so the drain would
+	// never complete, the stored label would leak and the game server would
+	// never be told to kick its players — the exact teardown this function
+	// exists to perform.
 	if err := m.updateLabel(logger, dispatcher, state); err != nil {
-		logger.WithField("error", err).Error("failed to update label")
-		return nil
+		logger.WithField("error", err).Error("failed to update label on shutdown")
 	}
 
 	if err := StoreMatchLabel(dbCtx, nk, state); err != nil {

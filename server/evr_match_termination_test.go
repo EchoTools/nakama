@@ -244,6 +244,48 @@ func TestMatchLoop_NeverStartedMatchShutsDownOrderly(t *testing.T) {
 	}
 }
 
+// TestMatchShutdown_LabelUpdateFailureStillArmsTheDrain: MatchShutdown is the
+// entry point of the orderly teardown, and it is now what the "match is empty"
+// and "match did not start on time" decisions route through. Bailing out with
+// nil when the label update fails defeats the whole point: the handler Stop()s
+// without MatchTerminate, so the drain never completes, the label is never
+// stored and the game server is never told to kick its players. The label
+// refresh is bookkeeping; the teardown must proceed regardless.
+func TestMatchShutdown_LabelUpdateFailureStillArmsTheDrain(t *testing.T) {
+	state := reconnectTestState(evr.ModeSocialPublic)
+	state.StartTime = time.Now().UTC().Add(-time.Minute)
+	state.levelLoaded = true
+
+	p := reconnectTestPlayer("shutdown-label-fail", evr.TeamBlue)
+	state.presenceMap[p.GetSessionId()] = p
+	state.presenceByEvrID[p.EvrID] = p
+	state.joinTimestamps[p.GetSessionId()] = time.Now().Add(-time.Minute)
+	state.rebuildCache()
+
+	nk := &reconnectTestNakamaModule{}
+	dispatcher := &labelFailDispatcher{}
+	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
+	m := &EvrMatch{}
+
+	got := m.MatchShutdown(ctx, reconnectTestLogger(), nil, nk, dispatcher, 11, state, 5)
+	if got == nil {
+		t.Fatal("MatchShutdown returned nil after a transient label-update failure: the handler Stop()s without MatchTerminate, so the drain never runs, the stored label is never cleaned up and the game server is never told to kick its players")
+	}
+	after, ok := got.(*MatchLabel)
+	if !ok {
+		t.Fatalf("MatchShutdown returned %T, want *MatchLabel", got)
+	}
+	if dispatcher.calls == 0 {
+		t.Fatal("test did not exercise the label-update failure path")
+	}
+	if after.terminateTick == 0 {
+		t.Error("expected the drain deadline (terminateTick) to be armed despite the label-update failure")
+	}
+	if after.Open {
+		t.Error("expected the match to be closed to new joins")
+	}
+}
+
 // TestMatchJoin_UnknownPresenceDoesNotKillMatch: MatchJoinAttempt and MatchJoin
 // are separately queued on the handler goroutine, so a presence can be evicted
 // from the presence map between them (see the same-user duplicate-EvrID eviction
