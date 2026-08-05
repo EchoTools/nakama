@@ -505,7 +505,15 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 	// Reduce early quit penalty by one level without inflating match completion statistics.
 	// This forgives the early quit since the player logged out entirely rather than
 	// just leaving the match to join another.
+	oldPenaltyLevel := eqconfig.GetPenaltyLevel()
 	eqconfig.ForgiveLastQuit()
+
+	// Re-resolve the lockout from the reduced quit count. ForgiveLastQuit only
+	// touches the counters and leaves PenaltyLevel/PenaltyTimestamp to the
+	// caller; without this the forgiven player keeps serving the full lockout
+	// the forgiven quit caused, and UpdateTier below reads a stale penalty
+	// level so the tier never recovers.
+	resolveAndApplyPenaltyLockout(ctx, nk, logger, eqconfig)
 
 	// Check if tier should be updated after penalty reduction
 	serviceSettings := ServiceSettings()
@@ -522,7 +530,7 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 
 	logger.WithFields(map[string]any{
 		"uid":               userID,
-		"old_penalty_level": eqconfig.GetPenaltyLevel() + 1, // +1 because we just decremented it
+		"old_penalty_level": oldPenaltyLevel,
 		"new_penalty_level": eqconfig.GetPenaltyLevel(),
 		"old_tier":          oldTier,
 		"new_tier":          newTier,
