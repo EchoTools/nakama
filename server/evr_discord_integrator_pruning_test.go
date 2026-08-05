@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/heroiclabs/nakama-common/api"
@@ -411,4 +412,95 @@ func findLogEntry(t *testing.T, logs *observer.ObservedLogs, msg string) observe
 		t.Fatalf("want exactly one %q log entry, got %d; all entries: %v", msg, len(entries), got)
 	}
 	return entries[0]
+}
+
+// TestComputePrunePlanIgnoresUnavailableStubGuilds pins that a guild present
+// in session state only as an unavailable stub is never a leave candidate.
+// On READY, and while a Discord shard is down, State.Guilds holds stubs with
+// Unavailable=true and no Name, OwnerID, or Channels. Reconciliation cannot
+// sync such a stub, so treating it as an orphan candidate means the bot leaves
+// a healthy guild purely because Discord was having an outage.
+func TestComputePrunePlanIgnoresUnavailableStubGuilds(t *testing.T) {
+	stub := &discordgo.Guild{ID: "d_stub", Unavailable: true}
+	healthy := testOrphanGuild("d_healthy")
+
+	plan := computePrunePlan(map[string]*api.Group{}, []*discordgo.Guild{stub, healthy}, nil)
+
+	if got := orphanGuildIDs(plan.orphanGuilds); len(got) != 1 || got[0] != "d_healthy" {
+		t.Fatalf("orphan guilds = %v; want only [d_healthy] -- an unavailable stub is not a prune candidate", got)
+	}
+}
+
+// TestComputePrunePlanKeepsGroupsOfUnavailableGuilds pins the outage-safety
+// invariant with the largest blast radius in this file.
+//
+// discordgo calls State.GuildRemove on EVERY GUILD_DELETE, including
+// Unavailable=true (discordgo@v0.29.0 state.go:973-981), and state is updated
+// before any handler runs (event.go:188-200). So when a shard goes down, the
+// affected guilds simply vanish from State.Guilds -- the integrator's own
+// "ignore unavailable" check in Start() runs too late to matter. Their groups
+// then look orphaned, and GroupDelete destroys role maps, channel IDs,
+// suspension-inheritance configuration and every membership, none of which is
+// recoverable from Discord.
+//
+// The integrator therefore remembers guilds it saw go unavailable, and those
+// guilds count as present for the purpose of orphan-group detection.
+func TestComputePrunePlanKeepsGroupsOfUnavailableGuilds(t *testing.T) {
+	groups := map[string]*api.Group{
+		"g_down":     {Id: "grp_down", Name: "down"},
+		"g_up":       {Id: "grp_up", Name: "up"},
+		"g_departed": {Id: "grp_departed", Name: "departed"},
+	}
+	// The shard hosting g_down died: discordgo already dropped it from state.
+	// g_departed is a real departure -- the bot was kicked or the guild was
+	// deleted -- so it is genuinely orphaned.
+	stateGuilds := []*discordgo.Guild{{ID: "g_up", Name: "up"}}
+	unavailable := map[string]struct{}{"g_down": {}}
+
+	plan := computePrunePlan(groups, stateGuilds, unavailable)
+
+	got := orphanGroupIDs(plan.orphanGroups)
+	if len(got) != 1 || got[0] != "grp_departed" {
+		t.Fatalf("orphan groups = %v; want only [grp_departed] -- an unavailable guild's group must never be deleted", got)
+	}
+	// An unavailable guild is not a leave candidate either: it is not in state
+	// at all, so it cannot be, but assert it explicitly.
+	if ids := orphanGuildIDs(plan.orphanGuilds); len(ids) != 0 {
+		t.Errorf("orphan guilds = %v; want none", ids)
+	}
+}
+
+// TestUnavailableGuildTracking pins the bookkeeping the prune pass depends on:
+// a guild marked unavailable is remembered, GUILD_CREATE clears it, and an
+// entry that has sat unavailable past the grace window expires so a guild the
+// bot silently left while a shard was down can eventually be pruned.
+func TestUnavailableGuildTracking(t *testing.T) {
+	d := &DiscordIntegrator{unavailableGuilds: &MapOf[string, time.Time]{}}
+	now := time.Now()
+
+	d.markGuildUnavailable("g1", now)
+	d.markGuildUnavailable("g2", now.Add(-unavailableGuildGraceTTL-time.Minute))
+	d.markGuildUnavailable("g3", now)
+	d.markGuildAvailable("g3")
+
+	ids := d.unavailableGuildIDsAsOf(now)
+
+	if _, ok := ids["g1"]; !ok {
+		t.Errorf("g1 missing; a freshly unavailable guild must be remembered")
+	}
+	if _, ok := ids["g2"]; ok {
+		t.Errorf("g2 present; an entry older than the %s grace window must expire", unavailableGuildGraceTTL)
+	}
+	if _, ok := ids["g3"]; ok {
+		t.Errorf("g3 present; a guild that came back must be cleared")
+	}
+	if len(ids) != 1 {
+		t.Errorf("unavailable IDs = %v; want exactly {g1}", ids)
+	}
+
+	// The expired entry must actually be dropped, not merely filtered, so the
+	// map cannot grow without bound.
+	if _, loaded := d.unavailableGuilds.Load("g2"); loaded {
+		t.Errorf("expired entry g2 was filtered but not deleted")
+	}
 }

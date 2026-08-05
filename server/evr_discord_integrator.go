@@ -57,7 +57,20 @@ type DiscordIntegrator struct {
 	queueCooldowns     *MapOf[QueueEntry, time.Time]
 	idcache            *MapOf[string, string]
 	memberCache        *MapOf[string, cachedMember]
+
+	// unavailableGuilds records, by guild ID, when the bot last saw a guild
+	// go unavailable. discordgo drops such guilds from State.Guilds, so this
+	// is the only remaining evidence that they exist. See
+	// unavailableGuildIDsAsOf.
+	unavailableGuilds *MapOf[string, time.Time]
 }
+
+// unavailableGuildGraceTTL is how long a guild that went unavailable keeps
+// being treated as present. It bounds the damage of a Discord outage without
+// pinning a guild forever: after a full IDENTIFY, a guild the bot is no longer
+// in is simply absent from READY and no GUILD_DELETE ever arrives for it, so
+// without an expiry its entry would never be cleared.
+const unavailableGuildGraceTTL = 24 * time.Hour
 
 func NewDiscordIntegrator(ctx context.Context, logger *zap.Logger, config Config, metrics Metrics, nk runtime.NakamaModule, db *sql.DB, dg *discordgo.Session, guildGroupRegistry *GuildGroupRegistry) *DiscordIntegrator {
 	ctx, cancelFn := context.WithCancel(ctx)
@@ -78,6 +91,7 @@ func NewDiscordIntegrator(ctx context.Context, logger *zap.Logger, config Config
 		queueCooldowns:     &MapOf[QueueEntry, time.Time]{},
 		idcache:            &MapOf[string, string]{},
 		memberCache:        &MapOf[string, cachedMember]{},
+		unavailableGuilds:  &MapOf[string, time.Time]{},
 
 		queueCh: make(chan QueueEntry, 50),
 	}
@@ -207,9 +221,14 @@ func (c *DiscordIntegrator) Start() {
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.GuildDelete) {
 		if m.Unavailable {
 			// This is not an error; the guild is just temporarily unavailable.
-			logger.Warn("Guild became unavailable", zap.Any("guildDelete", m))
+			// discordgo has already removed it from State.Guilds, so record it
+			// or pruning will see its group as orphaned and delete it.
+			c.markGuildUnavailable(m.ID, time.Now())
+			logger.Warn("Guild became unavailable", zap.String("guild_id", m.ID))
 			return
 		}
+		// A real departure, not an availability blip.
+		c.markGuildAvailable(m.ID)
 		logger.Info("Guild Delete", zap.Any("guildDelete", m))
 		if err := c.handleGuildDelete(logger, s, m); err != nil {
 			logger.Error("Error handling guild delete", zap.Any("guildDelete", m), zap.Error(err))
@@ -278,6 +297,51 @@ func (d *DiscordIntegrator) Purge(id string) bool {
 	}
 	d.idcache.Delete(value)
 	return true
+}
+
+// markGuildUnavailable records that a guild went unavailable at the given
+// time. discordgo removes a guild from State.Guilds on EVERY GUILD_DELETE,
+// including Unavailable=true, and it does so before any handler runs, so this
+// record is the only remaining evidence that the guild exists.
+func (d *DiscordIntegrator) markGuildUnavailable(guildID string, at time.Time) {
+	if d.unavailableGuilds == nil || guildID == "" {
+		return
+	}
+	d.unavailableGuilds.Store(guildID, at)
+}
+
+// markGuildAvailable clears a guild's unavailable record. Called when the
+// guild comes back (GUILD_CREATE) and when it is genuinely gone (a
+// GUILD_DELETE that is not an availability blip).
+func (d *DiscordIntegrator) markGuildAvailable(guildID string) {
+	if d.unavailableGuilds == nil {
+		return
+	}
+	d.unavailableGuilds.Delete(guildID)
+}
+
+// unavailableGuildIDsAsOf returns the guilds that are currently absent from
+// Discord state only because they are unavailable. Pruning treats them as
+// present, so a shard outage cannot make their groups look orphaned and get
+// them deleted -- which would destroy role maps, channel IDs, suspension
+// inheritance and every membership, none of it recoverable from Discord.
+//
+// Entries older than unavailableGuildGraceTTL are expired and removed, so the
+// map cannot grow without bound.
+func (d *DiscordIntegrator) unavailableGuildIDsAsOf(now time.Time) map[string]struct{} {
+	ids := make(map[string]struct{})
+	if d.unavailableGuilds == nil {
+		return ids
+	}
+	d.unavailableGuilds.Range(func(guildID string, since time.Time) bool {
+		if now.Sub(since) > unavailableGuildGraceTTL {
+			d.unavailableGuilds.Delete(guildID)
+			return true
+		}
+		ids[guildID] = struct{}{}
+		return true
+	})
+	return ids
 }
 
 // Discord ID to Nakama UserID, with a lookup cache
@@ -686,6 +750,8 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 
 func (d *DiscordIntegrator) handleGuildCreate(logger *zap.Logger, _ *discordgo.Session, e *discordgo.GuildCreate) error {
 	logger.Info("Guild Create", zap.Any("guild", e.Guild.ID))
+	// The guild is back in state; it no longer needs outage protection.
+	d.markGuildAvailable(e.Guild.ID)
 	if err := d.guildSync(d.ctx, logger, e.Guild, true); err != nil {
 		return fmt.Errorf("error during guild sync: %w", err)
 	}

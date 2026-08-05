@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/heroiclabs/nakama-common/api"
@@ -84,7 +85,15 @@ func reconcileOrphanGuilds(logger runtime.Logger, orphanGuilds []*discordgo.Guil
 // computePrunePlan identifies orphaned groups and guilds by comparing the
 // Nakama groups keyed by Discord guild ID against the guilds present in the
 // Discord session state.
-func computePrunePlan(groupByGuildID map[string]*api.Group, stateGuilds []*discordgo.Guild) prunePlan {
+//
+// unavailableGuildIDs are guilds the bot saw go unavailable. discordgo removes
+// a guild from State.Guilds on EVERY GUILD_DELETE, including Unavailable=true
+// (discordgo@v0.29.0 state.go:973-981), and it does so before any handler runs
+// (event.go:188-200) -- so a shard outage silently shrinks State.Guilds. Those
+// guilds count as present here: their groups hold role maps, channel IDs,
+// suspension-inheritance configuration and every membership, none of which can
+// be rebuilt from Discord if GroupDelete removes them.
+func computePrunePlan(groupByGuildID map[string]*api.Group, stateGuilds []*discordgo.Guild, unavailableGuildIDs map[string]struct{}) prunePlan {
 	botGuildMap := make(map[string]*discordgo.Guild, len(stateGuilds))
 	for _, g := range stateGuilds {
 		botGuildMap[g.ID] = g
@@ -93,9 +102,13 @@ func computePrunePlan(groupByGuildID map[string]*api.Group, stateGuilds []*disco
 	var plan prunePlan
 
 	for id, g := range groupByGuildID {
-		if _, ok := botGuildMap[id]; !ok {
-			plan.orphanGroups = append(plan.orphanGroups, orphanGroup{guildID: id, group: g})
+		if _, ok := botGuildMap[id]; ok {
+			continue
 		}
+		if _, unavailable := unavailableGuildIDs[id]; unavailable {
+			continue
+		}
+		plan.orphanGroups = append(plan.orphanGroups, orphanGroup{guildID: id, group: g})
 	}
 	// Map iteration order is random; sort so logs and behaviour are stable.
 	sort.Slice(plan.orphanGroups, func(i, j int) bool {
@@ -103,6 +116,13 @@ func computePrunePlan(groupByGuildID map[string]*api.Group, stateGuilds []*disco
 	})
 
 	for _, g := range stateGuilds {
+		if g.Unavailable {
+			// On READY, and whenever a shard is down, State.Guilds holds
+			// stubs with no Name, OwnerID or Channels. guildSync cannot
+			// reconcile one, so treating it as a leave candidate would make
+			// the bot leave a healthy guild because Discord had an outage.
+			continue
+		}
 		if _, ok := groupByGuildID[g.ID]; !ok {
 			plan.orphanGuilds = append(plan.orphanGuilds, g)
 		}
@@ -272,7 +292,7 @@ func (d *DiscordIntegrator) pruneGuildGroups(ctx context.Context, logger runtime
 		return nil
 	}
 
-	plan := computePrunePlan(groupByGuildID, d.dg.State.Guilds)
+	plan := computePrunePlan(groupByGuildID, d.dg.State.Guilds, d.unavailableGuildIDsAsOf(time.Now()))
 
 	actions := pruneActions{
 		// Reconciliation must be non-destructive (leaveOnBannedOwner=false):
