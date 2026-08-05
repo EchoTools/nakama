@@ -62,10 +62,16 @@ func (h *LatencyHistory) SetStorageMeta(meta StorableMetadata) {
 
 // writeWithRetry writes the history, retrying on optimistic-concurrency
 // (version-check) conflicts only. On such a conflict it re-reads the current
-// stored object into h (adopting the concurrent winner's version and contents),
-// invokes reapply to re-apply this caller's pending samples onto that fresh
-// object, and writes again. This makes a user's concurrent sessions lossless:
-// neither the winner's nor this caller's new entries are clobbered.
+// stored object and REPLACES h's contents and version with it — the concurrent
+// winner's object is the truth — then invokes reapply to re-apply this caller's
+// pending samples onto that fresh object, and writes again. This makes a user's
+// concurrent sessions lossless: neither the winner's nor this caller's new
+// entries are clobbered.
+//
+// The replacement must be wholesale. Unmarshalling straight into h would merge
+// rather than adopt (encoding/json keeps existing keys of a non-nil map), so
+// per-IP entries the winner had pruned would be resurrected on every retry —
+// including addresses that the caller's game-server allowlist rejects.
 //
 // The pattern is only sound because LatencyHistory.Add appends to per-server
 // lists — a commutative mutation. Do NOT generalize it to types whose updates
@@ -94,26 +100,35 @@ func (h *LatencyHistory) writeWithRetry(ctx context.Context, nk runtime.NakamaMo
 		}
 		lastErr = err
 
-		// Conflict: a concurrent writer advanced the version. Re-read the fresh
-		// object (picking up the winner's version + entries) then re-apply this
-		// caller's pending mutation onto it before writing again.
-		if rerr := StorableRead(ctx, nk, userID, h, false); rerr != nil {
-			return fmt.Errorf("LatencyHistory.writeWithRetry: re-read after conflict: %w", rerr)
-		}
-		if rerr := reapply(); rerr != nil {
-			return fmt.Errorf("LatencyHistory.writeWithRetry: re-apply after conflict: %w", rerr)
+		// Attempts are spent. Re-reading now would cost a round-trip whose
+		// result is never written, and would leave the caller's (session-shared)
+		// history holding merged state that was never persisted.
+		if attempt == latencyRetryMaxAttempts-1 {
+			break
 		}
 
-		// Jittered backoff before the next attempt (skip after the final loop).
-		if attempt < latencyRetryMaxAttempts-1 {
-			backoff := time.Duration(attempt+1) * latencyRetryBaseBackoff
-			// rand is fine here: this is contention jitter, not security.
-			jitter := time.Duration(rand.Int63n(int64(latencyRetryBaseBackoff)))
-			select {
-			case <-ctx.Done():
-				return fmt.Errorf("LatencyHistory.writeWithRetry: %w", ctx.Err())
-			case <-time.After(backoff + jitter):
-			}
+		// Jittered backoff before re-reading for the next attempt.
+		backoff := time.Duration(attempt+1) * latencyRetryBaseBackoff
+		// rand is fine here: this is contention jitter, not security.
+		jitter := time.Duration(rand.Int63n(int64(latencyRetryBaseBackoff)))
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("LatencyHistory.writeWithRetry: %w", ctx.Err())
+		case <-time.After(backoff + jitter):
+		}
+
+		// Conflict: a concurrent writer advanced the version. Adopt the winner's
+		// object wholesale (read into a fresh value so a failed read cannot
+		// leave h half-cleared), then re-apply this caller's pending mutation
+		// onto it before writing again.
+		fresh := NewLatencyHistory()
+		if rerr := StorableRead(ctx, nk, userID, fresh, false); rerr != nil {
+			return fmt.Errorf("LatencyHistory.writeWithRetry: re-read after conflict: %w", rerr)
+		}
+		h.GameServerLatencies = fresh.GameServerLatencies
+		h.SetStorageMeta(fresh.StorageMeta())
+		if rerr := reapply(); rerr != nil {
+			return fmt.Errorf("LatencyHistory.writeWithRetry: re-apply after conflict: %w", rerr)
 		}
 	}
 	return fmt.Errorf("LatencyHistory.writeWithRetry: exhausted %d attempts: %w", latencyRetryMaxAttempts, lastErr)
