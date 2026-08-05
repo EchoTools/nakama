@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -66,7 +67,13 @@ func MultiUpdate(ctx context.Context, logger *zap.Logger, db *sql.DB, metrics Me
 		if e, ok := err.(*statusError); ok {
 			return nil, walletUpdateResults, e.Cause()
 		}
-		logger.Error("Error running multi update.", zap.Error(err))
+		// Expected OCC conflicts and permission denials are not errors —
+		// they're normal outcomes that callers handle.
+		if errors.Is(err, runtime.ErrStorageRejectedVersion) || errors.Is(err, runtime.ErrStorageRejectedPermission) {
+			logger.Debug("Multi update conflict.", zap.Error(err))
+		} else {
+			logger.Error("Error running multi update.", zap.Error(err))
+		}
 		return nil, walletUpdateResults, err
 	}
 
