@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 
@@ -49,8 +50,34 @@ type StorableIndexMeta struct {
 	IndexOnly      bool
 }
 
+// storableError carries a gRPC status code alongside the underlying cause,
+// keeping that cause reachable through errors.Is/errors.As. Formatting the
+// cause away (as `%v` inside a fmt.Errorf/status.Errorf) makes sentinels such
+// as runtime.ErrStorageRejectedVersion undetectable and forces callers into
+// substring matching on error text.
+type storableError struct {
+	code codes.Code
+	msg  string
+	err  error
+}
+
+func (e *storableError) Error() string { return e.msg }
+
+func (e *storableError) Unwrap() error { return e.err }
+
+// GRPCStatus lets status.Code/status.FromError recover the code.
+func (e *storableError) GRPCStatus() *status.Status { return status.New(e.code, e.msg) }
+
+// storableErrorf builds a storage error for m. The format string is evaluated
+// with fmt.Errorf, so a `%w` verb keeps the underlying storage error in the
+// chain — callers can then use errors.Is(err, runtime.ErrStorageRejectedVersion).
 func storableErrorf(m StorableMetadata, c codes.Code, format string, a ...any) error {
-	return fmt.Errorf("storable error on %s/%s/%s/%s: %v", m.UserID, m.Collection, m.Key, m.Version, status.Errorf(c, format, a...))
+	cause := fmt.Errorf(format, a...)
+	return &storableError{
+		code: c,
+		msg:  fmt.Sprintf("storable error on %s/%s/%s/%s: %s", m.UserID, m.Collection, m.Key, m.Version, cause.Error()),
+		err:  errors.Unwrap(cause),
+	}
 }
 
 func StorableRead(ctx context.Context, nk runtime.NakamaModule, userID string, dst StorableAdapter, create bool) error {
@@ -71,7 +98,7 @@ func StorableRead(ctx context.Context, nk runtime.NakamaModule, userID string, d
 		UserID:     meta.UserID,
 	}})
 	if err != nil {
-		return storableErrorf(meta, codes.Internal, "failed to read: %v", err)
+		return storableErrorf(meta, codes.Internal, "failed to read: %w", err)
 	}
 	switch len(objs) {
 	case 0:
@@ -85,7 +112,7 @@ func StorableRead(ctx context.Context, nk runtime.NakamaModule, userID string, d
 		// One object found, proceed to unmarshal.
 		if err = json.Unmarshal([]byte(objs[0].Value), dst); err != nil {
 			if !create {
-				return storableErrorf(meta, codes.Internal, "failed to unmarshal: %v", err)
+				return storableErrorf(meta, codes.Internal, "failed to unmarshal: %w", err)
 			}
 			// Record is corrupted. Delete it and recreate with defaults so the caller recovers.
 			meta.Version = objs[0].GetVersion()
@@ -117,7 +144,7 @@ func StorableWrite(ctx context.Context, nk runtime.NakamaModule, userID string, 
 	meta.UserID = userID
 	data, err := json.Marshal(src)
 	if err != nil {
-		return storableErrorf(meta, codes.Internal, "failed to marshal: %v", err)
+		return storableErrorf(meta, codes.Internal, "failed to marshal: %w", err)
 	}
 	if acks, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
 		Collection:      meta.Collection,
@@ -128,7 +155,7 @@ func StorableWrite(ctx context.Context, nk runtime.NakamaModule, userID string, 
 		PermissionRead:  meta.PermissionRead,
 		PermissionWrite: meta.PermissionWrite,
 	}}); err != nil {
-		return storableErrorf(meta, codes.Internal, "failed to write: %v", err)
+		return storableErrorf(meta, codes.Internal, "failed to write: %w", err)
 	} else if len(acks) > 0 {
 		// Update the metadata with the version from the write acknowledgment.
 		meta.Version = acks[0].GetVersion()
