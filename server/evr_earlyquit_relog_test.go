@@ -19,29 +19,17 @@ import (
 // specific-session lookup finds S1 gone and would forgive the quit — but the
 // player is still online via S2, so the penalty must remain.
 //
-// Requires a real Postgres (TEST_DB_URL) — the forgiveness path's
-// StorableRead/StorableWrite run through RuntimeGoNakamaModule.
+// Runs against the in-memory evrTestNakamaModule: the forgiveness path only
+// needs storage read/write plus a session registry, so no database is required.
 func TestCheckAndStrikeEarlyQuitIfLoggedOut_RelogKeepsPenalty(t *testing.T) {
-	// --- setup: real module over the test DB ---
 	consoleLogger := loggerForTest(t)
 	logger := NewRuntimeGoLogger(consoleLogger)
-	db := NewDB(t)
 	cfg := NewConfig(consoleLogger)
-
-	storageIndex, err := NewLocalStorageIndex(consoleLogger, db, &StorageConfig{}, &testMetrics{})
-	if err != nil {
-		t.Fatalf("failed to create storage index: %v", err)
-	}
-	nk := NewRuntimeGoNakamaModule(consoleLogger, db, nil, cfg,
-		nil, &chargeTestLeaderboardCache{}, nil, nil,
-		&testSessionRegistry{}, nil, nil, nil,
-		&testTracker{}, &testMetrics{}, nil, &testMessageRouter{},
-		storageIndex, nil)
+	nk := newEvrTestNakamaModule()
 
 	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
 
 	userID := uuid.Must(uuid.NewV4())
-	InsertUser(t, db, userID)
 	uid := userID.String()
 
 	// --- session registry: S1 (the quit session) closes, S2 (relog) stays ---
@@ -76,7 +64,7 @@ func TestCheckAndStrikeEarlyQuitIfLoggedOut_RelogKeepsPenalty(t *testing.T) {
 	}
 
 	// --- run the forgiveness check as the goroutine would, with S1's session ID ---
-	CheckAndStrikeEarlyQuitIfLoggedOut(ctx, logger, nk, db, registry, uid, s1ID.String(), 5*time.Millisecond)
+	CheckAndStrikeEarlyQuitIfLoggedOut(ctx, logger, nk, nil, registry, uid, s1ID.String(), 5*time.Millisecond)
 
 	// --- the penalty must NOT be forgiven: the user is still online via S2 ---
 	eqconfig := NewEarlyQuitPlayerState()

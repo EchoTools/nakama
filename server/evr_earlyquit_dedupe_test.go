@@ -18,26 +18,14 @@ import (
 // same match ID must be a no-op: no extra counter increment, no duplicate
 // history record.
 func TestTrackMatchCompletion_DedupeSameMatchID(t *testing.T) {
-	// --- setup: real module over the test DB ---
+	// --- setup: in-memory storage module, no database required ---
 	consoleLogger := loggerForTest(t)
 	logger := NewRuntimeGoLogger(consoleLogger)
-	db := NewDB(t)
-	cfg := NewConfig(consoleLogger)
-
-	storageIndex, err := NewLocalStorageIndex(consoleLogger, db, &StorageConfig{}, &testMetrics{})
-	if err != nil {
-		t.Fatalf("failed to create storage index: %v", err)
-	}
-	nk := NewRuntimeGoNakamaModule(consoleLogger, db, nil, cfg,
-		nil, &chargeTestLeaderboardCache{}, nil, nil,
-		&testSessionRegistry{}, nil, nil, nil,
-		&testTracker{}, &testMetrics{}, nil, &testMessageRouter{},
-		storageIndex, nil)
+	nk := newEvrTestNakamaModule()
 
 	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
 
 	userID := uuid.Must(uuid.NewV4())
-	InsertUser(t, db, userID)
 	uid := userID.String()
 
 	matchID, err := NewMatchID(uuid.Must(uuid.NewV4()), "test-node")
@@ -47,13 +35,13 @@ func TestTrackMatchCompletion_DedupeSameMatchID(t *testing.T) {
 
 	// First completion for (user, match): credits once.
 	s := &EventRemoteLogSet{}
-	if err := s.incrementCompletedMatches(ctx, logger, nk, db, &testSessionRegistry{}, uid, "", matchID); err != nil {
+	if err := s.incrementCompletedMatches(ctx, logger, nk, nil, &testSessionRegistry{}, uid, "", matchID); err != nil {
 		t.Fatalf("first incrementCompletedMatches failed: %v", err)
 	}
 
 	// Second completion for the same (user, match) — the duplicate path.
 	// Must NOT credit again.
-	if err := s.incrementCompletedMatches(ctx, logger, nk, db, &testSessionRegistry{}, uid, "", matchID); err != nil {
+	if err := s.incrementCompletedMatches(ctx, logger, nk, nil, &testSessionRegistry{}, uid, "", matchID); err != nil {
 		t.Fatalf("second incrementCompletedMatches failed: %v", err)
 	}
 

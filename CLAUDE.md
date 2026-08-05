@@ -8,7 +8,9 @@ Forbidden actions (without explicit approval):
 
 - `docker build`, `docker buildx build`, or any image build targeting `ghcr.io/echotools/nakama`
 - `docker push` to any registry
+- `just release` or `just build` — these are the commands that now actually build and push images (`justfile` `release` runs `docker buildx build --push`)
 - `make release`, `make build`, or any Makefile target that builds/pushes images
+- Any `just` recipe that invokes `docker build`, `docker buildx build`, or `docker push`
 - `ssh` to `fortytwo.echovrce.com` or any production server to run `docker compose pull`, `docker compose up`, `docker compose restart`, or any container lifecycle command
 - Creating GitHub releases or tags that trigger CI image builds
 - Any action that causes a running production container to restart, recreate, or update
@@ -21,9 +23,10 @@ This applies regardless of context — even if the task seems to require deploym
 
 ## Build
 
-- Go project: `make nakama` builds the binary locally
-- Tests: `go test ./server/...`
-- Docker image build (local only, no push): `make build`
+- Go project: `just nakama` builds the binary locally
+- Tests: `just test` (DB-free suite; no CockroachDB or Discord bot token needed) or `go test ./server/...`
+- Full suite including DB-backed tests: `just test-db` (requires a reachable database at `TEST_DB_URL`)
+- Docker image build (local only, no push): `just build` — FORBIDDEN without explicit approval, see above
 
 ## Project
 

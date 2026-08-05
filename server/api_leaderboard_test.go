@@ -94,7 +94,11 @@ func TestApiLeaderboard(t *testing.T) {
 		WaitForSocket(syscall.ECONNREFUSED, cfg)
 	}
 
-	newAPI := func(lb *Leaderboard) (*grpc.ClientConn, apigrpc.NakamaClient, *ApiServer, context.Context) {
+	// Takes the SUBTEST's *testing.T. NewDB and the require.* helpers below call
+	// t.Skip / t.Fatal, and calling those on the parent T from inside a subtest
+	// goroutine aborts that goroutine without the parent noticing, which the
+	// subtest's runner reports as a FAIL instead of a skip.
+	newAPI := func(t *testing.T, lb *Leaderboard) (*grpc.ClientConn, apigrpc.NakamaClient, *ApiServer, context.Context) {
 
 		modules := map[string]string{
 			"lb-init": fmt.Sprintf(`
@@ -129,7 +133,7 @@ nk.leaderboard_create(%q, %t, %q, %q, reset, metadata, %t)
 
 	t.Run("create and list leaderboard", func(t *testing.T) {
 		lbId := newId().String()
-		conn, cl, srv, ctx := newAPI(&Leaderboard{
+		conn, cl, srv, ctx := newAPI(t, &Leaderboard{
 			Id: lbId,
 		})
 		defer conn.Close()
@@ -146,7 +150,7 @@ nk.leaderboard_create(%q, %t, %q, %q, reset, metadata, %t)
 	t.Run("override records", func(t *testing.T) {
 		lbId := newId().String()
 		db := NewDB(t)
-		conn, cl, srv, ctx := newAPI(&Leaderboard{
+		conn, cl, srv, ctx := newAPI(t, &Leaderboard{
 			Id:        lbId,
 			SortOrder: LeaderboardSortOrderDescending,
 			Operator:  LeaderboardOperatorSet,
@@ -195,7 +199,7 @@ nk.leaderboard_create(%q, %t, %q, %q, reset, metadata, %t)
 	t.Run("delete records", func(t *testing.T) {
 		lbId := newId().String()
 		db := NewDB(t)
-		conn, cl, srv, ctx := newAPI(&Leaderboard{
+		conn, cl, srv, ctx := newAPI(t, &Leaderboard{
 			Id:        lbId,
 			SortOrder: LeaderboardSortOrderDescending,
 			Operator:  LeaderboardOperatorSet,
@@ -232,7 +236,7 @@ nk.leaderboard_create(%q, %t, %q, %q, reset, metadata, %t)
 	t.Run("list records around owner", func(t *testing.T) {
 		lbId := newId().String()
 		db := NewDB(t)
-		conn, cl, srv, ctx := newAPI(&Leaderboard{
+		conn, cl, srv, ctx := newAPI(t, &Leaderboard{
 			Id:          lbId,
 			SortOrder:   LeaderboardSortOrderDescending,
 			Operator:    LeaderboardOperatorSet,
@@ -306,7 +310,7 @@ nk.leaderboard_create(%q, %t, %q, %q, reset, metadata, %t)
 	t.Run("disable ranks", func(t *testing.T) {
 		lbId := newId().String()
 		db := NewDB(t)
-		conn, cl, srv, ctx := newAPI(&Leaderboard{
+		conn, cl, srv, ctx := newAPI(t, &Leaderboard{
 			Id:          lbId,
 			SortOrder:   LeaderboardSortOrderDescending,
 			Operator:    LeaderboardOperatorSet,

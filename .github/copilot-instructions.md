@@ -17,7 +17,7 @@ This Nakama fork adds EchoVR game server functionality:
 
 ```bash
 # Build (requires protoc for full build, ~2m expected)
-go mod vendor && make nakama
+go mod vendor && just nakama
 
 # Database setup (PostgreSQL, NOT CockroachDB)
 docker compose up -d postgres
@@ -137,7 +137,7 @@ for improved readability. No behavior changes.
 
 ## Validation Cycle
 
-1. `make nakama` (build)
+1. `just nakama` (build)
 2. Run migrations
 3. Start server, verify endpoints
 4. Run EVR tests

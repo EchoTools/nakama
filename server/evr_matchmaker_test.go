@@ -59,6 +59,10 @@ func createTestMatchmakerWithOverride(t fatalable, logger *zap.Logger, tickerAct
 		t.Fatalf("error creating test match registry: %v", err)
 	}
 
+	// See disableEvrRuntimeModules: without this the EVR InitModule fails on the
+	// missing DISCORD_BOT_TOKEN and runtime_go.go escalates that to a zap fatal,
+	// os.Exit-ing the whole test binary.
+	t.Cleanup(disableEvrRuntimeModules())
 	rt, _, err := NewRuntime(context.Background(), logger, logger, nil, jsonpbMarshaler, jsonpbUnmarshaler, cfg, "", nil, nil, nil, nil, sessionRegistry, nil, nil, nil, tracker, metrics, nil, messageRouter, storageIdx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +205,10 @@ type CandidateData struct {
 
 func TestCharacterizationMatchmaker1v1(t *testing.T) {
 
-	EvrRuntimeModuleFns = nil
+	// Restores on test exit; the previous `EvrRuntimeModuleFns = nil` was never
+	// restored, which left the EVR runtime modules disabled for every test that
+	// ran afterwards and made the suite order-dependent.
+	t.Cleanup(disableEvrRuntimeModules())
 
 	// read the yml config file
 
@@ -210,6 +217,9 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 	saveCopy := true
 	candidatesFilenames := []string{
 		"../_local/candidates.json",
+	}
+	for _, f := range candidatesFilenames {
+		requireCharacterizationFixture(t, f)
 	}
 
 	reconstruct := true
@@ -637,12 +647,17 @@ func newMatchmakingEntryFromExisting(entry *MatchmakerEntry, minCount, maxCount,
 
 func TestCharacterizeMatchmakerOverload(t *testing.T) {
 
-	EvrRuntimeModuleFns = nil // Avoid initializing the runtime module functions
+	// Avoid initializing the runtime module functions. Restores on test exit;
+	// the previous bare `EvrRuntimeModuleFns = nil` was never restored.
+	t.Cleanup(disableEvrRuntimeModules())
 
 	// read the yml config file
 
 	indexFilenames := []string{
 		"../_local/mm-all-indexes.json",
+	}
+	for _, f := range indexFilenames {
+		requireCharacterizationFixture(t, f)
 	}
 
 	var (

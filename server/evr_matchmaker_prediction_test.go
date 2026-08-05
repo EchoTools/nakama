@@ -183,6 +183,8 @@ func TestCharacterizationMatchmaker(t *testing.T) {
 		downloadLiveData = true
 		stateFilename    = "../_local/matchmaker-state.json"
 	)
+	requireCharacterizationFixture(t, stateFilename)
+
 	state := MatchmakerStateResponse{}
 
 	// Load the candidate data from the json file
