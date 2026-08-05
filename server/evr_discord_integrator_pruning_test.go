@@ -333,6 +333,31 @@ func TestExecutePrunePlanCompletionLogCountsPartialLeaveFailures(t *testing.T) {
 	}
 }
 
+// TestExecutePrunePlanPurgesIDCacheAfterGroupDelete pins finding 2: the prune
+// path must purge the guild ID -> group ID cache exactly as handleGuildDelete
+// does. Otherwise the guild's return produces a GUILD_CREATE whose guildSync
+// resolves the deleted group ID from cache, takes the UPDATE branch, matches
+// zero rows, and fails with runtime.ErrGroupNotUpdated forever -- after which
+// the next prune tick leaves the healthy guild.
+func TestExecutePrunePlanPurgesIDCacheAfterGroupDelete(t *testing.T) {
+	logger, _ := observedLogger()
+	rec := newPruneRecorder()
+	rec.deleteFails["grp2"] = true
+
+	plan := prunePlan{orphanGroups: []orphanGroup{
+		testOrphanGroup("g1", "grp1"),
+		testOrphanGroup("g2", "grp2"),
+	}}
+
+	if _, err := executePrunePlan(logger, plan, false, true, 100, rec.actions()); err != nil {
+		t.Fatalf("executePrunePlan returned error: %v", err)
+	}
+
+	if len(rec.purged) != 1 || rec.purged[0] != "g1" {
+		t.Fatalf("purged = %v; want exactly [g1] (g2's delete failed, so its cache entry is still valid)", rec.purged)
+	}
+}
+
 // TestExecutePrunePlanLogsIdentifiersNotWholeStructs pins finding 6: logging a
 // *discordgo.Guild drags in members, channels, presences and emojis -- the
 // largest possible log line at the worst possible moment.

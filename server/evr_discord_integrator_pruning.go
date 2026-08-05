@@ -186,6 +186,13 @@ func executePrunePlan(logger runtime.Logger, plan prunePlan, doGuildLeaves, doGr
 				continue
 			}
 			outcome.groupsDeleted++
+			// Drop the guild ID -> group ID mapping, exactly as
+			// handleGuildDelete does. A stale entry would make the guild's
+			// eventual return resolve the deleted group ID, take guildSync's
+			// UPDATE branch, match zero rows, and fail with
+			// runtime.ErrGroupNotUpdated for the life of the process -- after
+			// which the next prune tick would leave the healthy guild.
+			actions.purgeGuild(og.guildID)
 		}
 	}
 
