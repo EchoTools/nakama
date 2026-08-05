@@ -1659,9 +1659,8 @@ func createTestMatchmaker(t fatalable, logger *zap.Logger, tickerActive bool, me
 	// See disableEvrRuntimeModules: without this the EVR InitModule fails on the
 	// missing DISCORD_BOT_TOKEN and runtime_go.go escalates that to a zap fatal,
 	// os.Exit-ing the whole test binary.
-	restoreEvrModules := disableEvrRuntimeModules()
+	t.Cleanup(disableEvrRuntimeModules())
 	runtime, _, err := NewRuntime(context.Background(), logger, logger, nil, jsonpbMarshaler, jsonpbUnmarshaler, cfg, "", nil, nil, nil, nil, sessionRegistry, nil, nil, nil, tracker, metrics, nil, messageRouter, storageIdx, nil)
-	restoreEvrModules()
 	if err != nil {
 		t.Fatal(err)
 	}
