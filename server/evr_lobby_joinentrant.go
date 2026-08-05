@@ -596,8 +596,13 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 const vpnDegradedLogWindow = time.Minute
 
 // vpnDegradedLogThrottle rate-limits the degraded-VPN warning per guild.
-// Package-level so the window spans sessions; tests replace it.
-var vpnDegradedLogThrottle = newLogThrottle(vpnDegradedLogWindow)
+// Package-level so the window spans sessions.
+//
+// Tests must not reassign this var — call vpnDegradedLogThrottle.reset() (and
+// .setClock() for a fake clock) so the mutation goes through the throttle's own
+// lock. Reassignment is an unsynchronized write to shared state and leaves the
+// next test's expectations at the mercy of whatever ran before it.
+var vpnDegradedLogThrottle = newPerKeyLogThrottle(vpnDegradedLogWindow)
 
 // shouldWarnVPNDegraded reports whether the VPN gate silently no-oped for this
 // player: the guild blocks VPN users, this player is not exempt from that

@@ -41,6 +41,10 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 	// player count, the moderator slot pool, early-quit tracking and the
 	// post-match social transition). Fails closed: no session parameters means
 	// no verified moderator.
+	//
+	// IsModerator is re-scoped in step with GroupID and Mode just above: from
+	// here down, every guild-derived field on lobbyParams describes the lobby
+	// being joined rather than the request that asked for it.
 	sessionParams, _ := LoadParams(ctx)
 	lobbyParams.IsModerator = sessionParams != nil &&
 		isModeratorOfGroup(sessionParams.isGlobalOperator, sessionParams.guildGroups, lobbyParams.GroupID, lobbyParams.UserID.String())

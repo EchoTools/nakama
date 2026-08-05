@@ -21,7 +21,7 @@ import (
 // degradation branch in lobbyAuthorize contains no return — and is covered by
 // the gate being an else-if rather than a rejection path.
 func TestVPNDegradedWarning_FiresWhenIPQSLookupUnavailable(t *testing.T) {
-	vpnDegradedLogThrottle = newLogThrottle(vpnDegradedLogWindow)
+	resetVPNDegradedThrottle(t)
 
 	core, logs := observer.New(zapcore.DebugLevel)
 	logger := zap.New(core)

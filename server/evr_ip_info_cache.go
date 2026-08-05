@@ -58,9 +58,17 @@ func (s *IPInfoCache) Get(ctx context.Context, ip string) (IPInfo, error) {
 			// the degradation was invisible. The fail-open policy is unchanged —
 			// a failed lookup still yields no IP info rather than a denial — but
 			// it is now counted so it can be alerted on.
-			s.metrics.CustomCounter("ip_info_provider_error", map[string]string{"provider": client.Name()}, 1)
-			s.logger.Debug("IP info provider failed, failing open.",
-				zap.String("provider", client.Name()), zap.Error(err))
+			//
+			// Both dependencies are optional: NewIPInfoCache does not require
+			// them and existing callers pass nil (server/evr_bugfix_test.go).
+			// Observability must never be the thing that panics a login path.
+			if s.metrics != nil {
+				s.metrics.CustomCounter("ip_info_provider_error", map[string]string{"provider": client.Name()}, 1)
+			}
+			if s.logger != nil {
+				s.logger.Debug("IP info provider failed, failing open.",
+					zap.String("provider", client.Name()), zap.Error(err))
+			}
 			continue
 		}
 		if result != nil {

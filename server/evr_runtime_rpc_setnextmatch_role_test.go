@@ -17,6 +17,14 @@ import (
 // validation already ran — and that validation rejects "moderator" for every
 // mode. These tests pin that claim, so removing the unreachable mapping is
 // provably safe rather than merely plausible.
+//
+// Scope note: this says nothing about a directive with NO match ID. That path
+// skips validateSetNextMatchRole entirely (SetNextMatchRPC only enters the
+// validating branch under `if !request.MatchID.IsNil()`), so `{"role":
+// "moderator"}` is still storable and resolveDirectiveRole maps it to
+// evr.TeamModerator. What contains it is the SEC-5 downgrade this PR adds in
+// lobbyJoin, not the string being unstorable. Moving the validation out of the
+// match-ID branch is a separate fix, tracked as a follow-up.
 func TestValidateSetNextMatchRole_ModeratorIsRejectedForEveryMode(t *testing.T) {
 	modes := append([]evr.Symbol{}, evr.AllModes...)
 	modes = append(modes,
@@ -29,9 +37,9 @@ func TestValidateSetNextMatchRole_ModeratorIsRejectedForEveryMode(t *testing.T) 
 	for _, mode := range modes {
 		t.Run(mode.String(), func(t *testing.T) {
 			require.Error(t, validateSetNextMatchRole("moderator", mode),
-				"a directive must never be able to request the moderator role: "+
-					"tryImmediateJoin joins the entrant directly, skipping lobbyJoin's "+
-					"guild-scoped moderator re-validation")
+				"a directive that names a match must never be able to request the "+
+					"moderator role: tryImmediateJoin joins the entrant directly, "+
+					"skipping lobbyJoin's guild-scoped moderator re-validation")
 		})
 	}
 }

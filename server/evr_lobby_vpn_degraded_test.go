@@ -59,11 +59,25 @@ func (m *recordingMetrics) tagsFor(name string) map[string]string {
 	return m.tags[name]
 }
 
+// resetVPNDegradedThrottle clears the process-wide degraded-VPN log throttle
+// before the test and again after it.
+//
+// It deliberately mutates the existing throttle rather than replacing the
+// package var: a reassignment is an unsynchronized write to state production
+// code reads, and leftover throttle state from a previous test would suppress
+// the very log line these tests count — making an assertion of "0 lines" pass
+// for entirely the wrong reason.
+func resetVPNDegradedThrottle(t *testing.T) {
+	t.Helper()
+	vpnDegradedLogThrottle.reset()
+	t.Cleanup(vpnDegradedLogThrottle.reset)
+}
+
 // (a) The degraded state must be alertable. Every sibling rejection path in
 // lobbyAuthorize increments a counter; the degradation path is the one place
 // where VPN blocking silently stops working, and it had only a bare zap.Warn.
 func TestWarnVPNDegraded_IncrementsAlertableCounter(t *testing.T) {
-	vpnDegradedLogThrottle = newLogThrottle(time.Minute)
+	resetVPNDegradedThrottle(t)
 
 	core, _ := observer.New(zapcore.DebugLevel)
 	metrics := newRecordingMetrics()
@@ -83,7 +97,7 @@ func TestWarnVPNDegraded_IncrementsAlertableCounter(t *testing.T) {
 // every VPN-blocking guild, burying its own signal. The counter must still
 // count every occurrence (that is the true volume); the log line must not.
 func TestWarnVPNDegraded_LogIsThrottledPerGuildButCounterIsNot(t *testing.T) {
-	vpnDegradedLogThrottle = newLogThrottle(time.Minute)
+	resetVPNDegradedThrottle(t)
 
 	core, logs := observer.New(zapcore.DebugLevel)
 	logger := zap.New(core)
@@ -111,11 +125,10 @@ func TestWarnVPNDegraded_LogIsThrottledPerGuildButCounterIsNot(t *testing.T) {
 }
 
 func TestWarnVPNDegraded_LogResumesAfterThrottleWindow(t *testing.T) {
-	throttle := newLogThrottle(time.Minute)
-	vpnDegradedLogThrottle = throttle
+	resetVPNDegradedThrottle(t)
 
 	now := time.Now()
-	throttle.now = func() time.Time { return now }
+	vpnDegradedLogThrottle.setClock(func() time.Time { return now })
 
 	core, logs := observer.New(zapcore.DebugLevel)
 	logger := zap.New(core)
@@ -136,7 +149,7 @@ func TestWarnVPNDegraded_LogResumesAfterThrottleWindow(t *testing.T) {
 // The warning must still carry the triage fields it always carried, plus the
 // session's VPN flag — the condition the guard dropped.
 func TestWarnVPNDegraded_CarriesTriageFields(t *testing.T) {
-	vpnDegradedLogThrottle = newLogThrottle(time.Minute)
+	resetVPNDegradedThrottle(t)
 
 	core, logs := observer.New(zapcore.DebugLevel)
 	metrics := newRecordingMetrics()
@@ -226,4 +239,27 @@ func TestIPInfoCache_SuccessfulProviderIsNotCountedAsAnError(t *testing.T) {
 	require.NotNil(t, info, "a later provider that succeeds must still be used")
 	require.Equal(t, int64(1), metrics.count("ip_info_provider_error"),
 		"only the failing provider is counted")
+}
+
+// Review follow-up. Counting the provider error introduced the first
+// dereference of s.metrics and s.logger on this path; NewIPInfoCache validates
+// neither and existing callers pass nil for both (server/evr_bugfix_test.go:62,
+// :88). Observability must never be the thing that panics a login path, so the
+// error branch has to survive a cache built with no logger and no metrics.
+func TestIPInfoCache_ProviderErrorWithNilLoggerAndMetricsDoesNotPanic(t *testing.T) {
+	cache, err := NewIPInfoCache(nil, nil,
+		&erroringIPInfoProvider{name: "IPQS", err: errors.New("quota exhausted")},
+	)
+	require.NoError(t, err)
+
+	require.NotPanics(t, func() {
+		info, getErr := cache.Get(context.Background(), "203.0.113.7")
+		require.NoError(t, getErr)
+		require.Nil(t, info, "the fail-open result is unchanged when there is nowhere to report to")
+	})
+
+	require.NotPanics(t, func() {
+		require.False(t, cache.IsVPN("203.0.113.7"),
+			"IsVPN still fails open when the provider errors and there is no logger")
+	})
 }
