@@ -1,8 +1,10 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,6 +77,10 @@ func testOrphanGroup(guildID, groupID string) orphanGroup {
 		group:   &api.Group{Id: groupID, Name: "group-" + guildID},
 	}
 }
+
+// sentinelChannelTopic is a marker buried deep inside a guild's object graph.
+// It can only appear in a log line if the whole struct was logged.
+const sentinelChannelTopic = "SENTINEL_CHANNEL_TOPIC"
 
 func testOrphanGuild(id string) *discordgo.Guild {
 	return &discordgo.Guild{ID: id, Name: "guild-" + id}
@@ -367,7 +373,7 @@ func TestExecutePrunePlanLogsIdentifiersNotWholeStructs(t *testing.T) {
 	rec := newPruneRecorder()
 
 	fat := testOrphanGuild("d1")
-	fat.Channels = []*discordgo.Channel{{ID: "c1", Topic: "SENTINEL_CHANNEL_TOPIC"}}
+	fat.Channels = []*discordgo.Channel{{ID: "c1", Topic: sentinelChannelTopic}}
 
 	plan := prunePlan{
 		orphanGuilds: []*discordgo.Guild{fat, testOrphanGuild("d2")},
@@ -379,26 +385,23 @@ func TestExecutePrunePlanLogsIdentifiersNotWholeStructs(t *testing.T) {
 		t.Fatal("expected the safety valve to trip")
 	}
 
+	// Render each field the way a log encoder does. Formatting with %v is NOT
+	// good enough: a []*discordgo.Guild formats as a slice of pointer
+	// addresses ("[0xc000123456]"), so a leak would be invisible while the
+	// JSON the encoder actually writes carries the whole object graph.
 	for _, entry := range logs.All() {
 		for k, v := range entry.ContextMap() {
-			if s := fmt.Sprintf("%v", v); containsSentinel(s) {
-				t.Fatalf("log entry %q field %q leaked a whole struct: %s", entry.Message, k, s)
+			encoded, err := json.Marshal(v)
+			if err != nil {
+				// Not encodable as JSON; fall back to the Go rendering.
+				encoded = []byte(fmt.Sprintf("%+v", v))
+			}
+			if strings.Contains(string(encoded), sentinelChannelTopic) {
+				t.Fatalf("log entry %q field %q leaked a whole struct (%d bytes): %.200s",
+					entry.Message, k, len(encoded), encoded)
 			}
 		}
 	}
-}
-
-func containsSentinel(s string) bool {
-	return len(s) > 0 && (indexOf(s, "SENTINEL_CHANNEL_TOPIC") >= 0)
-}
-
-func indexOf(haystack, needle string) int {
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return i
-		}
-	}
-	return -1
 }
 
 func findLogEntry(t *testing.T, logs *observer.ObservedLogs, msg string) observer.LoggedEntry {
