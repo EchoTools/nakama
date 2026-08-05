@@ -1,0 +1,343 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
+)
+
+// A *LatencyHistory is shared across a session's goroutines: it lives in
+// sessionParameters.latencyHistory (*atomic.Pointer[LatencyHistory]) and is
+// loaded by lobbyPingResponse (inbound pipeline goroutine) while the
+// lobbySessionRequest goroutine reads it via CheckServerPing ->
+// HasRecentEntry / sortPingCandidatesByLatencyHistory and via
+// NewLobbyParametersFromRequest -> AverageRTTs.
+//
+// Every accessor on the type takes the embedded RWMutex, but the storage path
+// did not: StorableWrite json.Marshal'd the live object and StorableRead
+// json.Unmarshal'd into it with no lock held. The unmarshal is a map WRITE, so
+// it races with the locked readers on the other goroutine — Go reports that as
+// "fatal error: concurrent map read and map write", a runtime throw that takes
+// the whole process down rather than a recoverable panic.
+//
+// These tests pin the storage path to the same locking discipline as the rest
+// of the type. They only fail under -race (or, nondeterministically, with the
+// map fatal error).
+
+// conflictAlternatingModule rejects every other StorageWrite with a version
+// conflict so that each writeWithRetry call exercises BOTH the marshal path
+// (StorableWrite) and the re-read/unmarshal path (StorableRead) before it
+// finally succeeds.
+type conflictAlternatingModule struct {
+	*occTestNakamaModule
+	callMu sync.Mutex
+	calls  int
+}
+
+func (m *conflictAlternatingModule) StorageWrite(ctx context.Context, writes []*runtime.StorageWrite) ([]*api.StorageObjectAck, error) {
+	m.callMu.Lock()
+	m.calls++
+	conflict := m.calls%2 == 1
+	m.callMu.Unlock()
+	if conflict {
+		return nil, runtime.ErrStorageRejectedVersion
+	}
+	return m.occTestNakamaModule.StorageWrite(ctx, writes)
+}
+
+// seedLatencyHistory returns a history populated with n game server entries.
+func seedLatencyHistory(n int) *LatencyHistory {
+	h := NewLatencyHistory()
+	for i := 0; i < n; i++ {
+		h.Add(net.ParseIP(fmt.Sprintf("10.0.0.%d", i+1)), 20+i, 25, time.Time{})
+	}
+	return h
+}
+
+// hammerReaders runs the locked read accessors that the lobby-find goroutine
+// uses, until stop is closed.
+func hammerReaders(h *LatencyHistory, stop <-chan struct{}, done chan<- struct{}) {
+	defer close(done)
+	cutoff := time.Now().Add(-time.Hour)
+	for {
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		_ = h.AverageRTTs(false)
+		_ = h.LatestRTTs()
+		_ = h.HasRecentEntry("10.0.0.1", cutoff)
+		_ = h.AverageRTT("10.0.0.2", true)
+		_, _, _ = h.BestAddress("10.0.0.1", "10.0.0.2")
+		ips := []string{"10.0.0.1", "10.0.0.2", "10.0.0.3"}
+		sortPingCandidatesByLatencyHistory(ips, h)
+	}
+}
+
+// TestLatencyHistory_StorableRead_UnmarshalIsLocked proves the re-read after a
+// version conflict (StorableRead -> json.Unmarshal into the live object) does
+// not race with the locked readers on another goroutine.
+func TestLatencyHistory_StorableRead_UnmarshalIsLocked(t *testing.T) {
+	ctx := context.Background()
+
+	base := newOCCTestNakamaModule()
+	base.seedObject(occTestUserID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey, seedLatencyHistory(16).String())
+	nk := &conflictAlternatingModule{occTestNakamaModule: base}
+
+	// The session-shared history, as loaded from params.latencyHistory.
+	h := seedLatencyHistory(4)
+
+	stop := make(chan struct{})
+	readersDone := make(chan struct{})
+	go hammerReaders(h, stop, readersDone)
+
+	expiry := time.Now().Add(-14 * 24 * time.Hour)
+	reapply := func() error {
+		h.Add(net.ParseIP("10.0.0.99"), 42, 25, expiry)
+		return nil
+	}
+	for i := 0; i < 20; i++ {
+		if err := reapply(); err != nil {
+			t.Fatalf("reapply: %v", err)
+		}
+		if err := h.writeWithRetry(ctx, nk, occTestUserID, reapply); err != nil {
+			t.Fatalf("writeWithRetry iteration %d: %v", i, err)
+		}
+	}
+
+	close(stop)
+	<-readersDone
+}
+
+// TestLatencyHistory_StorableWrite_MarshalIsLocked proves the marshal inside
+// StorableWrite does not race with a concurrent locked mutation (Add) of the
+// same session-shared history.
+func TestLatencyHistory_StorableWrite_MarshalIsLocked(t *testing.T) {
+	ctx := context.Background()
+
+	nk := newOCCTestNakamaModule()
+	h := seedLatencyHistory(8)
+
+	stop := make(chan struct{})
+	addersDone := make(chan struct{})
+	go func() {
+		defer close(addersDone)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			h.Add(net.ParseIP(fmt.Sprintf("10.1.0.%d", i%32)), 10+i%50, 25, time.Time{})
+		}
+	}()
+
+	for i := 0; i < 200; i++ {
+		if err := StorableWrite(ctx, nk, occTestUserID, h); err != nil {
+			t.Fatalf("StorableWrite iteration %d: %v", i, err)
+		}
+	}
+
+	close(stop)
+	<-addersDone
+}
+
+// TestLatencyHistory_String_ConcurrentWithAdd proves String() (which marshals)
+// is safe against a concurrent locked mutation, and that adding a locking
+// MarshalJSON did not reintroduce a recursive read-lock deadlock in String().
+func TestLatencyHistory_String_ConcurrentWithAdd(t *testing.T) {
+	h := seedLatencyHistory(4)
+
+	stop := make(chan struct{})
+	addersDone := make(chan struct{})
+	go func() {
+		defer close(addersDone)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			h.Add(net.ParseIP(fmt.Sprintf("10.2.0.%d", i%16)), 10+i%40, 25, time.Time{})
+		}
+	}()
+
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		for i := 0; i < 500; i++ {
+			if s := h.String(); s == "" {
+				panic("String() returned empty; marshal failed")
+			}
+		}
+	}()
+
+	select {
+	case <-finished:
+	case <-time.After(30 * time.Second):
+		close(stop)
+		t.Fatal("String() deadlocked (recursive read lock?)")
+	}
+
+	close(stop)
+	<-addersDone
+}
+
+// TestLatencyHistory_Get_DoesNotEscapeLiveSlice proves Get hands back memory the
+// caller can safely read after the lock is released.
+//
+// sortPingCandidatesByLatencyHistory (the lobby-find goroutine) calls Get and
+// then reads history[len(history)-1] with no lock held. Add compacts the stored
+// slice in place via slices.Delete, which both shifts and zeroes elements the
+// escaped slice still spans. A stored record containing a zero-RTT entry is
+// enough to reach that path: Add strips zeroes it appends, but a record decoded
+// from storage (written by another session, or legacy data) can carry an
+// interior zero entry that the next Add then deletes in place.
+func TestLatencyHistory_Get_DoesNotEscapeLiveSlice(t *testing.T) {
+	const extIP = "10.5.0.1"
+
+	// decodedRecord builds a record carrying an interior zero-RTT entry, as
+	// StorableRead can produce. Generous capacity so Add compacts the slice in
+	// place instead of reallocating.
+	decodedRecord := func() []LatencyHistoryItem {
+		items := make([]LatencyHistoryItem, 0, 64)
+		for i := 0; i < 12; i++ {
+			rtt := time.Duration(20+i) * time.Millisecond
+			if i == 4 {
+				rtt = 0
+			}
+			items = append(items, LatencyHistoryItem{Timestamp: time.Now(), RTT: rtt})
+		}
+		return items
+	}
+
+	h := NewLatencyHistory()
+	h.GameServerLatencies[extIP] = decodedRecord()
+
+	stop := make(chan struct{})
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(readerDone)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			// Exactly what sortPingCandidatesByLatencyHistory does: read the
+			// returned entries after Get's lock has been released.
+			if history, ok := h.Get(extIP); ok {
+				for i := range history {
+					_ = history[i].RTT
+					_ = history[i].Timestamp
+				}
+			}
+		}
+	}()
+
+	for i := 0; i < 2000; i++ {
+		// Install a freshly decoded record (its own backing array, never touched
+		// by this goroutine again) so the next Add hits the in-place delete path.
+		// All in-place mutation of reader-visible memory is therefore done by
+		// production code, not by the test.
+		h.Lock()
+		h.GameServerLatencies[extIP] = decodedRecord()
+		h.Unlock()
+		h.Add(net.ParseIP(extIP), 30, 25, time.Time{})
+	}
+
+	close(stop)
+	<-readerDone
+}
+
+// TestLatencyHistory_JSONRoundTrip pins the wire format so that locking the
+// marshal/unmarshal path cannot silently change what is persisted. A regression
+// here would orphan every stored LatencyHistory record.
+func TestLatencyHistory_JSONRoundTrip(t *testing.T) {
+	ts := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	h := NewLatencyHistory()
+	h.GameServerLatencies = map[string][]LatencyHistoryItem{
+		"10.0.0.1": {{Timestamp: ts, RTT: 42 * time.Millisecond}},
+	}
+
+	data, err := json.Marshal(h)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal into raw: %v", err)
+	}
+	if _, ok := raw["game_server_latencies"]; !ok {
+		t.Fatalf("marshalled form lost the game_server_latencies key: %s", data)
+	}
+	if len(raw) != 1 {
+		t.Fatalf("marshalled form has unexpected keys: %s", data)
+	}
+
+	got := NewLatencyHistory()
+	if err := json.Unmarshal(data, got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	items, ok := got.GameServerLatencies["10.0.0.1"]
+	if !ok || len(items) != 1 {
+		t.Fatalf("round trip lost entries: %#v", got.GameServerLatencies)
+	}
+	if !items[0].Timestamp.Equal(ts) || items[0].RTT != 42*time.Millisecond {
+		t.Fatalf("round trip corrupted entry: %#v", items[0])
+	}
+}
+
+// TestLatencyHistory_UnmarshalMergesIntoExisting pins the pre-existing
+// encoding/json map semantics that writeWithRetry's re-read relies on: keys
+// present only in the in-memory object survive the re-read, and keys present in
+// the stored object are adopted.
+func TestLatencyHistory_UnmarshalMergesIntoExisting(t *testing.T) {
+	local := NewLatencyHistory()
+	local.Add(net.ParseIP("10.0.0.2"), 99, 25, time.Time{})
+
+	stored := NewLatencyHistory()
+	stored.Add(net.ParseIP("10.0.0.1"), 42, 25, time.Time{})
+
+	if err := json.Unmarshal([]byte(stored.String()), local); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if _, ok := local.GameServerLatencies["10.0.0.1"]; !ok {
+		t.Errorf("stored key was not adopted: %#v", local.GameServerLatencies)
+	}
+	if _, ok := local.GameServerLatencies["10.0.0.2"]; !ok {
+		t.Errorf("local-only key was dropped: %#v", local.GameServerLatencies)
+	}
+}
+
+// TestLatencyHistory_UnmarshalIntoNilMap covers the fresh-object path used by
+// every StorableRead into a zero-valued LatencyHistory.
+func TestLatencyHistory_UnmarshalIntoNilMap(t *testing.T) {
+	h := &LatencyHistory{}
+	if err := json.Unmarshal([]byte(seedLatencyHistory(3).String()), h); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(h.GameServerLatencies) != 3 {
+		t.Fatalf("expected 3 entries, got %#v", h.GameServerLatencies)
+	}
+}
+
+// TestLatencyHistory_UnmarshalRejectsGarbage ensures a decode failure is still
+// reported (StorableRead depends on the error to trigger its corrupt-record
+// recovery path).
+func TestLatencyHistory_UnmarshalRejectsGarbage(t *testing.T) {
+	h := NewLatencyHistory()
+	if err := json.Unmarshal([]byte(`{"game_server_latencies":"not-a-map"}`), h); err == nil {
+		t.Fatal("expected an error unmarshalling a malformed record, got nil")
+	}
+}
