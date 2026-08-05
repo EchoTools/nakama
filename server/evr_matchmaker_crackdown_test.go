@@ -117,11 +117,19 @@ func TestGroupEntriesNeverSplitsTicket(t *testing.T) {
 	}
 }
 
-// TestGroupEntries_5_4_2_NoPlayerDropped nails down the concrete regression:
-// with maxCount=8 countMultiple=2 and sorted-largest-first packing,
-// [5, 4, 2] must yield candidates where the 4-party and 2-party are paired
-// together (total=6) and the 5-party is deferred whole — NOT a [4-of-5]
-// candidate plus a [4+2] candidate.
+// TestGroupEntries_5_4_2_NoPlayerDropped nails down the concrete regression
+// this fixture was written for: with maxCount=8 countMultiple=2 and
+// sorted-largest-first packing, no player from the 5-party may be silently
+// dropped — the ticket is deferred whole or not at all.
+//
+// It deliberately does NOT assert a [4+2] candidate. A 4-party and a 2-party
+// cannot form a match: predictCandidateOutcomesWithConfig packs whole ticket
+// groups per team and rejects len(blueTeam) != len(orangeTeam)
+// (evr_matchmaker_prediction.go), so the 4-party can only ever land on one
+// side of a 3-seat team and the candidate dies there. Emitting it would pin
+// an intermediate value that never becomes a game. This also matches the
+// {4,2} -> nil contract already encoded in
+// TestGroupEntriesSequentially_NoStraddle.
 func TestGroupEntries_5_4_2_NoPlayerDropped(t *testing.T) {
 	var entries []runtime.MatchmakerEntry
 	entries = append(entries, makePartyTicket("a", 5, nil)...)
@@ -130,18 +138,21 @@ func TestGroupEntries_5_4_2_NoPlayerDropped(t *testing.T) {
 
 	candidates := groupEntriesSequentially(entries)
 
-	// Expect exactly one candidate: [b(4) + c(2)] = 6 entries.
-	require.Len(t, candidates, 1, "expected exactly one candidate (4+2), got %d", len(candidates))
-	assert.Len(t, candidates[0], 6)
+	// No shape here admits an even 4v4 or 3v3 split of whole tickets.
+	require.Len(t, candidates, 0, "expected no candidates, got sizes %v", candidateSizes(candidates))
 
-	// Verify it's b + c, not fragments of a.
-	tickets := map[string]int{}
-	for _, e := range candidates[0] {
-		tickets[e.GetTicket()]++
+	// The original invariant: a ticket is emitted whole or not at all. In
+	// particular the 5-party is never partially included.
+	for i, c := range candidates {
+		tickets := map[string]int{}
+		for _, e := range c {
+			tickets[e.GetTicket()]++
+		}
+		for ticket, count := range tickets {
+			want := map[string]int{"a": 5, "b": 4, "c": 2}[ticket]
+			assert.Equal(t, want, count, "candidate[%d] holds a partial %s-ticket", i, ticket)
+		}
 	}
-	assert.Equal(t, 4, tickets["b"], "expected full 4-party b")
-	assert.Equal(t, 2, tickets["c"], "expected full 2-party c")
-	assert.Equal(t, 0, tickets["a"], "5-party a should NOT appear in any candidate (deferred whole, not split)")
 }
 
 // ---------------------------------------------------------------------------
@@ -170,7 +181,7 @@ func TestEvrMatchmakerFn_FiltersNilPresence(t *testing.T) {
 
 	entries := []runtime.MatchmakerEntry{
 		nil, // nil entry
-		&MatchmakerEntry{Ticket: "t1", Presence: nil, Properties: goodProps}, // nil presence
+		&MatchmakerEntry{Ticket: "t1", Presence: nil, Properties: goodProps},                                        // nil presence
 		&MatchmakerEntry{Ticket: "t2", Presence: &MatchmakerPresence{UserId: "u", SessionId: "s"}, Properties: nil}, // nil properties
 		&MatchmakerEntry{Ticket: "t3", Presence: &MatchmakerPresence{UserId: "u3", SessionId: "s3"}, Properties: goodProps},
 	}

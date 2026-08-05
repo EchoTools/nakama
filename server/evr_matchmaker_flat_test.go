@@ -326,12 +326,22 @@ func TestGroupEntriesPartyAtomicity(t *testing.T) {
 		}
 	})
 
-	t.Run("party exactly fills candidate", func(t *testing.T) {
+	// A candidate made of a single ticket can never become a match: the party
+	// is atomic, so one team gets all of it and the other gets nobody, which
+	// predictCandidateOutcomesWithConfig rejects at
+	// len(blueTeam) != len(orangeTeam). "Exactly fills the candidate" is
+	// therefore the wrong target; "exactly fills one team" is the real one.
+	//
+	// NOTE: groupEntriesSequentially reads "max_team_size" (maxCount =
+	// max_team_size * 2). It does not read "max_count" — that key is consumed
+	// by core matchmaker.go. This subtest previously set "max_count": 4.0 and
+	// so silently ran at the default maxCount=8, never testing what it claimed.
+	t.Run("lone party filling every seat yields no candidate", func(t *testing.T) {
 		now := float64(time.Now().UTC().Unix())
 		baseProps := map[string]any{
 			"group_id":        "group-1",
 			"game_mode":       "echo_arena",
-			"max_count":       4.0,
+			"max_team_size":   2.0, // maxCount = 4, so the 4-party fills every seat
 			"count_multiple":  2.0,
 			"max_rtt":         250.0,
 			"rtt_test":        40.0,
@@ -358,11 +368,74 @@ func TestGroupEntriesPartyAtomicity(t *testing.T) {
 		}
 
 		candidates := groupEntriesSequentially(entries)
-		if len(candidates) != 1 {
-			t.Fatalf("expected 1 candidate, got %d", len(candidates))
+		if len(candidates) != 0 {
+			t.Fatalf("expected 0 candidates for a lone atomic party, got %d with sizes %v",
+				len(candidates), candidateSizes(candidates))
 		}
-		if len(candidates[0]) != 4 {
-			t.Fatalf("expected candidate size 4, got %d", len(candidates[0]))
+	})
+
+	t.Run("party exactly fills one team", func(t *testing.T) {
+		now := float64(time.Now().UTC().Unix())
+		baseProps := map[string]any{
+			"group_id":        "group-1",
+			"game_mode":       "echo_arena",
+			"max_team_size":   4.0, // maxCount = 8, teams of 4
+			"count_multiple":  2.0,
+			"max_rtt":         250.0,
+			"rtt_test":        40.0,
+			"rating_mu":       25.0,
+			"rating_sigma":    8.33,
+			"submission_time": now,
+		}
+
+		entries := make([]runtime.MatchmakerEntry, 0, 8)
+		// A 4-party that is exactly one team, plus 4 solos to be the other.
+		for i := 0; i < 4; i++ {
+			props := make(map[string]any)
+			for k, v := range baseProps {
+				props[k] = v
+			}
+			entries = append(entries, &MatchmakerEntry{
+				Ticket: "exact-party",
+				Presence: &MatchmakerPresence{
+					UserId:    fmt.Sprintf("user-%d", i),
+					SessionId: fmt.Sprintf("session-%d", i),
+					Username:  fmt.Sprintf("player-%d", i),
+				},
+				Properties: props,
+			})
+		}
+		for i := 0; i < 4; i++ {
+			props := make(map[string]any)
+			for k, v := range baseProps {
+				props[k] = v
+			}
+			entries = append(entries, &MatchmakerEntry{
+				Ticket: fmt.Sprintf("solo-%d", i),
+				Presence: &MatchmakerPresence{
+					UserId:    fmt.Sprintf("solo-user-%d", i),
+					SessionId: fmt.Sprintf("solo-session-%d", i),
+					Username:  fmt.Sprintf("solo-%d", i),
+				},
+				Properties: props,
+			})
+		}
+
+		candidates := groupEntriesSequentially(entries)
+		if len(candidates) != 1 {
+			t.Fatalf("expected 1 candidate, got %d with sizes %v", len(candidates), candidateSizes(candidates))
+		}
+		if len(candidates[0]) != 8 {
+			t.Fatalf("expected candidate size 8, got %d", len(candidates[0]))
+		}
+		party := 0
+		for _, e := range candidates[0] {
+			if e.GetTicket() == "exact-party" {
+				party++
+			}
+		}
+		if party != 4 {
+			t.Fatalf("expected all 4 party members in the candidate, got %d", party)
 		}
 	})
 

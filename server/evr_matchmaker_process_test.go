@@ -155,8 +155,8 @@ func TestOverrideFn(t *testing.T) {
 // (arena only). Combat mode skips the straddle check.
 func TestGroupEntriesSequentially_NoStraddle(t *testing.T) {
 	tests := []struct {
-		name       string
-		mode       string
+		name string
+		mode string
 		// entries grouped by ticket: each entry in the outer slice = 1 ticket,
 		// value = number of players for that ticket. []int{4,1,1,1,1} means
 		// one party of 4 and 4 solos = 8 total.
@@ -173,11 +173,11 @@ func TestGroupEntriesSequentially_NoStraddle(t *testing.T) {
 			wantSizes:   []int{8},
 		},
 		{
-			name:         "arena party of 4 with max_team_size=3 (maxCount=6) — straddles, popped to empty",
-			mode:         "echo_arena",
-			ticketSizes:  []int{4, 2}, // candidate=6, boundary=3, party at 0-4 straddles
-			maxTeamSize:  3,
-			wantSizes:    nil, // pop 2 → [4]=4, check boundary=2, still straddles → pop 4 → empty
+			name:        "arena party of 4 with max_team_size=3 (maxCount=6) — straddles, popped to empty",
+			mode:        "echo_arena",
+			ticketSizes: []int{4, 2}, // candidate=6, boundary=3, party at 0-4 straddles
+			maxTeamSize: 3,
+			wantSizes:   nil, // pop 2 → [4]=4, check boundary=2, still straddles → pop 4 → empty
 		},
 		{
 			name:        "arena party of 4 and party of 2 — 6 total, straddles (boundary=3), popped",
@@ -196,6 +196,56 @@ func TestGroupEntriesSequentially_NoStraddle(t *testing.T) {
 			mode:        "echo_arena",
 			ticketSizes: []int{3, 1, 1, 1, 1, 1},
 			wantSizes:   []int{8},
+		},
+		{
+			// Regression: the offending group is at index 1, not the head.
+			// 3+1 and 2+2 both make a team of 4, so this is a legal 4v4 and
+			// must be emitted whole. The positional check saw 3+2>4 at pos=3
+			// and drained the candidate to nothing, starving all 8 players.
+			name:        "arena 3-2-2-1 — even split exists (3+1 vs 2+2)",
+			mode:        "echo_arena",
+			ticketSizes: []int{3, 2, 2, 1},
+			wantSizes:   []int{8},
+		},
+		{
+			// Regression: 3+1 vs 3+1 is a legal 4v4. The positional check
+			// fired on the second 3-party and popped solos until only [3,3]
+			// remained, silently dropping two unrelated solo players.
+			name:        "arena 3-3-1-1 — even split exists (3+1 vs 3+1)",
+			mode:        "echo_arena",
+			ticketSizes: []int{3, 3, 1, 1},
+			wantSizes:   []int{8},
+		},
+		{
+			// Anchor: no even split of 3+3+2 into two teams of 4 exists, so
+			// trimming the 2-party down to a 3v3 is the correct salvage.
+			// This must keep working — it is the guard's whole justification.
+			name:        "arena 3-3-2 — no 4v4 split, trims to a 3v3",
+			mode:        "echo_arena",
+			ticketSizes: []int{3, 3, 2},
+			wantSizes:   []int{6},
+		},
+		{
+			// Anchor: two 4-parties are exactly one team each.
+			name:        "arena 4-4 — each party is exactly one team",
+			mode:        "echo_arena",
+			ticketSizes: []int{4, 4},
+			wantSizes:   []int{8},
+		},
+		{
+			// A 5-party cannot occupy a 4-seat team, and 5+3 has no even
+			// split, so nothing here is formable.
+			name:        "arena 5-3 — 5-party cannot fit a 4-seat team",
+			mode:        "echo_arena",
+			ticketSizes: []int{5, 3},
+			wantSizes:   nil,
+		},
+		{
+			// A party of 3 plus one solo cannot be split 2v2.
+			name:        "arena 3-1 — no 2v2 split of a 3-party",
+			mode:        "echo_arena",
+			ticketSizes: []int{3, 1},
+			wantSizes:   nil,
 		},
 		{
 			name:        "combat same config as arena — straddle check skipped",
@@ -268,6 +318,75 @@ func TestGroupEntriesSequentially_NoStraddle(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGroupEntriesSequentially_Boundaries covers the edges of the packing
+// contract: empty input, maxCount derived from max_team_size, a party that
+// exactly equals maxCount, and a party too large to fit at all.
+func TestGroupEntriesSequentially_Boundaries(t *testing.T) {
+	// maxCount = max_team_size * 2, so max_team_size=2 gives 4 seats / 2-seat teams.
+	small := map[string]any{"max_team_size": 2.0, "count_multiple": 2.0}
+
+	t.Run("empty input returns no candidates", func(t *testing.T) {
+		if got := groupEntriesSequentially(nil); got != nil {
+			t.Errorf("expected nil for empty input, got %v", candidateSizes(got))
+		}
+		if got := groupEntriesSequentially([]runtime.MatchmakerEntry{}); got != nil {
+			t.Errorf("expected nil for empty slice, got %v", candidateSizes(got))
+		}
+	})
+
+	t.Run("party exactly equals maxCount but cannot split into two teams", func(t *testing.T) {
+		// A 4-party fills all 4 seats, but both seats-per-team are 2 and the
+		// party is atomic, so no legal 2v2 exists. Prediction would reject it
+		// at len(blueTeam) != len(orangeTeam); emitting it is pure waste.
+		entries := makePartyTicket("quad", 4, small)
+		if got := groupEntriesSequentially(entries); len(got) != 0 {
+			t.Errorf("expected no candidates for a lone 4-party at maxCount=4, got %v", candidateSizes(got))
+		}
+	})
+
+	t.Run("two 2-parties exactly fill both teams", func(t *testing.T) {
+		var entries []runtime.MatchmakerEntry
+		entries = append(entries, makePartyTicket("duoA", 2, small)...)
+		entries = append(entries, makePartyTicket("duoB", 2, small)...)
+
+		candidates := groupEntriesSequentially(entries)
+		if len(candidates) != 1 {
+			t.Fatalf("expected 1 candidate, got %d: %v", len(candidates), candidateSizes(candidates))
+		}
+		if len(candidates[0]) != 4 {
+			t.Fatalf("expected candidate size 4, got %d", len(candidates[0]))
+		}
+	})
+
+	t.Run("party larger than maxCount is skipped entirely", func(t *testing.T) {
+		entries := makePartyTicket("toobig", 5, small)
+		if got := groupEntriesSequentially(entries); len(got) != 0 {
+			t.Errorf("expected no candidates for a 5-party at maxCount=4, got %v", candidateSizes(got))
+		}
+	})
+
+	t.Run("oversized party is skipped without starving the rest", func(t *testing.T) {
+		// The 5-party can never fit maxCount=4; the two solos still form a 1v1.
+		var entries []runtime.MatchmakerEntry
+		entries = append(entries, makePartyTicket("toobig", 5, small)...)
+		entries = append(entries, makePartyTicket("s1", 1, small)...)
+		entries = append(entries, makePartyTicket("s2", 1, small)...)
+
+		candidates := groupEntriesSequentially(entries)
+		if len(candidates) != 1 {
+			t.Fatalf("expected 1 candidate, got %d: %v", len(candidates), candidateSizes(candidates))
+		}
+		if len(candidates[0]) != 2 {
+			t.Fatalf("expected candidate size 2, got %d", len(candidates[0]))
+		}
+		for _, e := range candidates[0] {
+			if e.GetTicket() == "toobig" {
+				t.Errorf("oversized party leaked into a candidate")
+			}
+		}
+	})
 }
 
 func candidateSizes(candidates [][]runtime.MatchmakerEntry) []int {

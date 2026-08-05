@@ -237,22 +237,33 @@ func groupEntriesSequentially(entries []runtime.MatchmakerEntry) [][]runtime.Mat
 				break
 			}
 
-			// For arena (combat allows party splitting): ensure no ticket group
-			// straddles the team boundary. The team split in buildMatch assigns
-			// entrants[:size/2] to team 0 and entrants[size/2:] to team 1. If a
-			// single ticket group lands on both sides, the party gets split.
+			// For arena (combat allows party splitting): ensure the whole ticket
+			// groups can be partitioned into two equal teams. This is a
+			// feasibility question, not a positional one — the order this
+			// function emits is not the order teams are formed in.
+			// predictCandidateOutcomesWithConfig re-groups by ticket, assigns
+			// whole groups per team, and rejects len(blue) != len(orange), so a
+			// candidate with no even partition can never produce a match.
+			//
+			// Checking position instead of feasibility rejected candidates that
+			// were perfectly formable (e.g. 3+2+2+1, which splits 3+1 vs 2+2)
+			// and, because the remedy pops the tail while the check scans from
+			// the head, could fail to converge and drain the whole candidate.
+			//
+			// Subset-sum over at most maxCount (8) groups is trivially cheap.
 			if !isCombat {
 				teamSize := currentSize / 2
-				pos := 0
-				straddle := false
+				reachable := make([]bool, teamSize+1)
+				reachable[0] = true
 				for _, tg := range currentTickets {
 					groupSize := len(tg.entries)
-					if pos < teamSize && pos+groupSize > teamSize {
-						straddle = true
-						break
+					for k := teamSize; k >= groupSize; k-- {
+						if reachable[k-groupSize] {
+							reachable[k] = true
+						}
 					}
-					pos += groupSize
 				}
+				straddle := teamSize < 1 || !reachable[teamSize]
 				if straddle {
 					last := currentTickets[len(currentTickets)-1]
 					currentTickets = currentTickets[:len(currentTickets)-1]
