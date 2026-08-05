@@ -339,14 +339,27 @@ func CreateQuitRecordFromParticipation(state *MatchLabel, participation *PlayerP
 	}
 }
 
-// TrackMatchCompletion tracks a match completion in the player's early quit history
-// This is a helper function to reduce code duplication
+// PrepareMatchCompletion loads the player's early quit history and stages a
+// completion record for the match, WITHOUT writing anything.
 //
-// Returns (true, nil) when the completion is a new occurrence for this match and
-// was persisted; (false, nil) when the match was already tracked (the same match
-// is reported by both the post-match stats upload and the MatchLoop MatchOver
-// dispatch, so only the first occurrence is a real completion credit).
-func TrackMatchCompletion(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID string, matchID MatchID, completionTime time.Time) (bool, error) {
+// Returns first=false when the match is already recorded: the same completed
+// match is reported by both the post-match stats upload and the MatchLoop
+// MatchOver dispatch, so only the first report is a real completion credit.
+//
+// When first=true the returned history carries the staged record and the caller
+// must commit it together with the credited counter in one atomic
+// StorableWriteMany. Committing the record on its own is what previously lost
+// credits for good: the record is the dedupe marker, so once it is stored the
+// other reporter returns first=false and the credit can never be re-earned.
+//
+// The history is staged with version "*" when the player has none yet, so
+// creating it is conditional on it not already existing. An unconditional
+// create would overwrite a history another reporter created in the meantime,
+// destroying the completion record — and therefore the dedupe marker — already
+// committed there. This is set here explicitly rather than by asking
+// StorableRead to create the row, so it does not depend on StorableRead's own
+// version handling.
+func PrepareMatchCompletion(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID string, matchID MatchID, completionTime time.Time) (bool, *EarlyQuitHistory, error) {
 	history := NewEarlyQuitHistory(userID)
 	if err := StorableRead(ctx, nk, userID, history, false); err != nil {
 		if status.Code(err) == codes.NotFound {
@@ -356,21 +369,19 @@ func TrackMatchCompletion(ctx context.Context, logger runtime.Logger, nk runtime
 			// Align behavior with quit tracking: log but proceed with a new history so completions are still tracked.
 			logger.WithField("error", err).Warn("Failed to load early quit history for completion tracking, proceeding with new history")
 		}
+		meta := history.StorageMeta()
+		meta.Version = "*"
+		history.SetStorageMeta(meta)
 	}
 
 	// Dedupe: the same (user, match) can arrive from the post-match stats upload
 	// AND from the MatchLoop MatchOver dispatch. Count it only once.
 	for _, record := range history.Completions {
 		if record.MatchID.Equals(matchID) {
-			return false, nil
+			return false, nil, nil
 		}
 	}
 
 	history.AddCompletion(matchID, completionTime)
-	if err := StorableWrite(ctx, nk, userID, history); err != nil {
-		logger.WithField("error", err).Warn("Failed to write completion to early quit history")
-		return false, err
-	}
-
-	return true, nil
+	return true, history, nil
 }

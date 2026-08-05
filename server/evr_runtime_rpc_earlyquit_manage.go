@@ -216,7 +216,7 @@ func EarlyQuitModifyRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		// current quit count maps to made a level absent from the ladder borrow
 		// a different level's lockout. When the ladder does not configure the
 		// requested level, fall back to the built-in duration for that level.
-		lockoutSec := GetLockoutDurationSeconds(int(level))
+		lockoutSec := int32(GetLockoutDuration(int(level)).Seconds())
 		for _, pl := range serviceConfig.PenaltyLevels {
 			if int32(pl.PenaltyLevel) == level {
 				lockoutSec = clampLockoutSec(pl.MMLockoutSec)

@@ -263,9 +263,10 @@ func storableCreate(ctx context.Context, nk runtime.NakamaModule, userID string,
 // conflict on this path look like a hard failure and defeat the retry loop in
 // SyncJournalAndProfileWithRetry.
 //
-// Acks come back in input order (storageWriteObjects assigns them by the
-// original index at core_storage.go:686), so versions are propagated back to
-// the matching source object.
+// Versions are propagated back to the source objects by applyStorageAcks, which
+// matches on collection/key rather than trusting ack order. Nakama's own
+// implementation does assign acks by the original index (storageWriteObjects,
+// core_storage.go:686), but the runtime API does not promise it.
 func StorableWriteMany(ctx context.Context, nk runtime.NakamaModule, userID string, srcs ...StorableAdapter) error {
 	if len(srcs) == 0 {
 		return nil
@@ -305,14 +306,7 @@ func StorableWriteMany(ctx context.Context, nk runtime.NakamaModule, userID stri
 			"atomic write of %d objects failed, none applied (%s): %w", len(ops), strings.Join(paths, ", "), err)
 	}
 
-	for i, ack := range acks {
-		if i >= len(srcs) {
-			break
-		}
-		meta := metas[i]
-		meta.Version = ack.GetVersion()
-		srcs[i].SetStorageMeta(meta)
-	}
+	applyStorageAcks(acks, metas, srcs)
 	return nil
 }
 

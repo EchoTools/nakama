@@ -1592,13 +1592,17 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					continue
 				}
 
-				// Track completion in detailed history first; only credit the
-				// counter when this is the first time the match is reported
-				// (the post-match stats upload also reports it).
+				// Stage the completion in the detailed history; only credit
+				// the counter when this is the first time the match is
+				// reported (the post-match stats upload also reports it).
+				// The staged record is the dedupe marker, so it is committed
+				// together with the credit below — never on its own, which
+				// would make a failed counter write lose the credit for good.
 				// Warn, not Debug: this is the failure that costs the player
 				// match credit, so it must be at least as visible as the
 				// adjacent eqconfig write failure below.
-				if first, err := TrackMatchCompletion(ctx, logger, nk, presence.GetUserId(), state.ID, time.Now().UTC()); err != nil {
+				first, history, err := PrepareMatchCompletion(ctx, logger, nk, presence.GetUserId(), state.ID, time.Now().UTC())
+				if err != nil {
 					logger.WithField("error", err).Warn("Failed to track match completion in history")
 				} else if first {
 					eqconfig.IncrementCompletedMatches()
@@ -1615,8 +1619,14 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					"eqconfig":     eqconfig,
 				}).Debug("Player completed match tier update.")
 
-				if err := StorableWrite(ctx, nk, presence.GetUserId(), eqconfig); err != nil {
-					logger.Warn("Failed to write early quitter config after completed match", zap.Error(err))
+				var writeErr error
+				if first && history != nil {
+					writeErr = StorableWriteMany(ctx, nk, presence.GetUserId(), eqconfig, history)
+				} else {
+					writeErr = StorableWrite(ctx, nk, presence.GetUserId(), eqconfig)
+				}
+				if writeErr != nil {
+					logger.Warn("Failed to write early quitter config after completed match", zap.Error(writeErr))
 				} else {
 					if sessions != nil {
 						if s := sessions.Get(uuid.FromStringOrNil(presence.GetSessionId())); s != nil {
