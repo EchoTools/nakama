@@ -440,16 +440,25 @@ func TestLocalStorageIndex_List(t *testing.T) {
 		key := "key"
 		maxEntries := 10
 
+		// Each value carries an "unindexed" key deliberately absent from the
+		// index Fields below. With indexOnly false the object is read back from
+		// the database in full, so that key MUST survive the round trip. This is
+		// what makes the test discriminate: previously every key in the value
+		// was also in Fields, so the assertions could not tell the index-served
+		// and db-served paths apart even in principle.
 		valueOneBytes, _ := json.Marshal(map[string]any{
-			"one": 1,
+			"one":       1,
+			"unindexed": "kept",
 		})
 		valueOne := string(valueOneBytes)
 		valueTwoBytes, _ := json.Marshal(map[string]any{
-			"two": 2,
+			"two":       2,
+			"unindexed": "kept",
 		})
 		valueTwo := string(valueTwoBytes)
 		valueThreeBytes, _ := json.Marshal(map[string]any{
-			"three": 3,
+			"three":     3,
+			"unindexed": "kept",
 		})
 		valueThree := string(valueThreeBytes)
 
@@ -458,7 +467,10 @@ func TestLocalStorageIndex_List(t *testing.T) {
 			t.Fatal(err.Error())
 		}
 
-		if err := storageIdx.CreateIndex(ctx, indexName, collection, key, []string{"one", "two", "three"}, []string{}, maxEntries, true); err != nil {
+		// indexOnly = FALSE. This is the branch the test name has always
+		// claimed to cover. It previously passed true, so the db-read path at
+		// storage_index.go:361 had no coverage at all.
+		if err := storageIdx.CreateIndex(ctx, indexName, collection, key, []string{"one", "two", "three"}, []string{}, maxEntries, false); err != nil {
 			t.Fatal(err.Error())
 		}
 
@@ -501,6 +513,15 @@ func TestLocalStorageIndex_List(t *testing.T) {
 		assert.Len(t, entries.Objects, 2, "indexed results did not match query params")
 		assert.Equal(t, valueOne, strings.ReplaceAll(entries.Objects[0].Value, " ", ""), "expected value retrieved from db did not match")
 		assert.Equal(t, valueThree, strings.ReplaceAll(entries.Objects[1].Value, " ", ""), "expected value retrieved from db did not match")
+
+		// The discriminating assertion: "unindexed" is not in Fields, so it is
+		// absent from the index document. Its presence here proves the object
+		// came from the database and is COMPLETE, which is the entire
+		// difference between indexOnly false and indexOnly true.
+		for i, obj := range entries.Objects {
+			assert.Contains(t, obj.Value, "unindexed",
+				"object %d must be the complete db object, not the field-filtered index document", i)
+		}
 
 		delOps := make(StorageOpDeletes, 0, len(writeOps))
 		for _, op := range writeOps {

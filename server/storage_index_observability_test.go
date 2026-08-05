@@ -92,6 +92,62 @@ func TestStorageIndexEviction_IsObservable(t *testing.T) {
 	assert.True(t, found, "the eviction log must name the index that lost entries; got %+v", evictionLogs)
 }
 
+// TestStorageIndexFieldFilter_IndexOnlyReturnsOnlyFilteredFields is the
+// generic counterpart to the SuspensionProfile regression.
+//
+// Every existing field-filter test in storage_index_test.go listed EVERY key
+// of its test value in Fields, so none of them could observe the filter at all.
+// This one deliberately omits a key and pins both consequences:
+//
+//	a field absent from Fields is not RETURNED, and it is not SEARCHABLE.
+//
+// Both follow from mapIndexStorageFields reducing the value to the filtered map
+// (storage_index.go:528-536) before either storing it or walking it for terms.
+//
+// Database-free: with indexOnly true nothing in this path touches the db.
+func TestStorageIndexFieldFilter_IndexOnlyReturnsOnlyFilteredFields(t *testing.T) {
+	si, err := NewLocalStorageIndex(logger, nil, &StorageConfig{}, newGaugeCapturingMetrics())
+	require.NoError(t, err)
+
+	const indexName = "test_field_filter"
+	const collection = "filter_collection"
+	const key = "key"
+
+	// "kept" is indexed; "dropped" is not.
+	require.NoError(t, si.CreateIndex(context.Background(), indexName, collection, key,
+		[]string{"kept"}, nil, 10, true))
+
+	value, err := json.Marshal(map[string]any{"kept": "yes", "dropped": "no"})
+	require.NoError(t, err)
+
+	userID := uuid.Must(uuid.NewV4()).String()
+	now := time.Now().UTC()
+	si.Write(context.Background(), []*api.StorageObject{{
+		Collection: collection,
+		Key:        key,
+		UserId:     userID,
+		Value:      string(value),
+		Version:    "v1",
+		CreateTime: timestamppb.New(now),
+		UpdateTime: timestamppb.New(now),
+	}})
+
+	entries, _, err := si.List(context.Background(), uuid.Nil, indexName, "+value.kept:yes", 10, nil, "")
+	require.NoError(t, err)
+	require.Len(t, entries.Objects, 1, "the indexed field must be queryable")
+
+	got := entries.Objects[0].Value
+	assert.Contains(t, got, "kept", "a field listed in Fields must be returned")
+	assert.NotContains(t, got, "dropped",
+		"a field absent from Fields is discarded before the document is stored and cannot be returned; got %s", got)
+
+	// The same filter also removes the field from the searchable terms.
+	unfiltered, _, err := si.List(context.Background(), uuid.Nil, indexName, "+value.dropped:no", 10, nil, "")
+	require.NoError(t, err)
+	assert.Empty(t, unfiltered.Objects,
+		"a field absent from Fields is not indexed and must not be queryable")
+}
+
 // TestSuspensionProfileIndex_MaxEntriesCannotBind pins the capacity decision.
 //
 // The SuspensionProfile collection holds one entry per user who has ever had an
