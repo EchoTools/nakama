@@ -363,20 +363,20 @@ func TestResolveSteadyPlayerLevel(t *testing.T) {
 	// Default steady levels: 0(0 matches, 0.0), 1(10 matches, 0.9), 2(25 matches, 0.95)
 
 	tests := []struct {
-		name          string
-		matches       int32
-		quits         int32
-		expectLevel   int32
+		name        string
+		matches     int32
+		quits       int32
+		expectLevel int32
 	}{
 		{"no matches", 0, 0, 0},
-		{"5 matches no quits", 5, 0, 0},          // below 10 min_matches for level 1
-		{"10 matches no quits", 10, 0, 1},         // 100% ratio >= 0.9, matches >= 10
-		{"10 matches 1 quit", 10, 1, 1},           // 90% ratio >= 0.9
-		{"10 matches 2 quits", 10, 2, 0},          // 80% ratio < 0.9
-		{"25 matches no quits", 25, 0, 2},         // 100% ratio >= 0.95, matches >= 25
-		{"25 matches 1 quit", 25, 1, 2},           // 96% ratio >= 0.95
-		{"25 matches 2 quits", 25, 2, 1},          // 92% ratio < 0.95 but >= 0.9, matches >= 10
-		{"100 matches 5 quits", 100, 5, 2},        // 95% ratio >= 0.95
+		{"5 matches no quits", 5, 0, 0},    // below 10 min_matches for level 1
+		{"10 matches no quits", 10, 0, 1},  // 100% ratio >= 0.9, matches >= 10
+		{"10 matches 1 quit", 10, 1, 1},    // 90% ratio >= 0.9
+		{"10 matches 2 quits", 10, 2, 0},   // 80% ratio < 0.9
+		{"25 matches no quits", 25, 0, 2},  // 100% ratio >= 0.95, matches >= 25
+		{"25 matches 1 quit", 25, 1, 2},    // 96% ratio >= 0.95
+		{"25 matches 2 quits", 25, 2, 1},   // 92% ratio < 0.95 but >= 0.9, matches >= 10
+		{"100 matches 5 quits", 100, 5, 2}, // 95% ratio >= 0.95
 	}
 
 	for _, tt := range tests {

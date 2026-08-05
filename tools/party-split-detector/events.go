@@ -58,7 +58,7 @@ type identityFields struct {
 // baseEvent for events that carry per-player context.
 func (f identityFields) GetSID() string      { return f.SID }
 func (f identityFields) GetUID() string      { return f.UID }
-func (f identityFields) GetUsername() string  { return f.Username }
+func (f identityFields) GetUsername() string { return f.Username }
 
 // ── Party Formation ──────────────────────────────────────────────────────────
 
@@ -170,9 +170,9 @@ type MatchBuilt struct {
 	Module   string          `json:"module,omitempty"`
 }
 
-func (MatchBuilt) EventType() string { return "MatchBuilt" }
-func (MatchBuilt) GetSID() string    { return "" }
-func (MatchBuilt) GetUID() string    { return "" }
+func (MatchBuilt) EventType() string   { return "MatchBuilt" }
+func (MatchBuilt) GetSID() string      { return "" }
+func (MatchBuilt) GetUID() string      { return "" }
 func (MatchBuilt) GetUsername() string { return "" }
 
 // ── Follow Failures ──────────────────────────────────────────────────────────
@@ -307,9 +307,9 @@ type SplitRepaired struct {
 	MatchID string `json:"match_id,omitempty"`
 }
 
-func (SplitRepaired) EventType() string { return "SplitRepaired" }
-func (SplitRepaired) GetSID() string    { return "" }
-func (SplitRepaired) GetUID() string    { return "" }
+func (SplitRepaired) EventType() string   { return "SplitRepaired" }
+func (SplitRepaired) GetSID() string      { return "" }
+func (SplitRepaired) GetUID() string      { return "" }
 func (SplitRepaired) GetUsername() string { return "" }
 
 // ── Matchmaking ──────────────────────────────────────────────────────────────
@@ -390,9 +390,9 @@ type UnknownPartyEvent struct {
 	Fields map[string]json.RawMessage `json:"fields,omitempty"`
 }
 
-func (UnknownPartyEvent) EventType() string { return "UnknownPartyEvent" }
-func (UnknownPartyEvent) GetSID() string    { return "" }
-func (UnknownPartyEvent) GetUID() string    { return "" }
+func (UnknownPartyEvent) EventType() string   { return "UnknownPartyEvent" }
+func (UnknownPartyEvent) GetSID() string      { return "" }
+func (UnknownPartyEvent) GetUID() string      { return "" }
 func (UnknownPartyEvent) GetUsername() string { return "" }
 
 // ── OutputEvent bridge: GetEventType() and GetDetails() ─────────────────────

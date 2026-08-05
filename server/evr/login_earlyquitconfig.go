@@ -14,8 +14,9 @@ const (
 // SNSEarlyQuitConfig is the on-wire message for early quit penalty configuration.
 //
 // Wire layout (variable zstd payload):
-//   +0x00  uint32  size (decompressed JSON size, LE)
-//   +0x04  []byte  zstd-compressed JSON (penalty_levels + steady_player_levels)
+//
+//	+0x00  uint32  size (decompressed JSON size, LE)
+//	+0x04  []byte  zstd-compressed JSON (penalty_levels + steady_player_levels)
 type SNSEarlyQuitConfig struct {
 	PenaltyLevels      []EarlyQuitPenaltyLevelConfig      `json:"penalty_levels"`
 	SteadyPlayerLevels []EarlyQuitSteadyPlayerLevelConfig `json:"steady_player_levels"`

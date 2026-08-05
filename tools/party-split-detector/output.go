@@ -95,10 +95,10 @@ type summaryLine struct {
 
 // lifecycleStats holds aggregated statistics across all party results.
 type lifecycleStats struct {
-	Total           int
-	ByOutcome       map[string]int
-	FailureReasons  map[string]int
-	SplitsByUser    map[string]int
+	Total          int
+	ByOutcome      map[string]int
+	FailureReasons map[string]int
+	SplitsByUser   map[string]int
 }
 
 func newLifecycleStats() *lifecycleStats {

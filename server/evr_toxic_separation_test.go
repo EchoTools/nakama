@@ -13,10 +13,10 @@ type toxicSepMockEntry struct {
 	presence   runtime.Presence
 }
 
-func (m *toxicSepMockEntry) GetTicket() string                      { return m.ticket }
-func (m *toxicSepMockEntry) GetPresence() runtime.Presence          { return m.presence }
-func (m *toxicSepMockEntry) GetPartyId() string                     { return "" }
-func (m *toxicSepMockEntry) GetCreateTime() int64                   { return 0 }
+func (m *toxicSepMockEntry) GetTicket() string                     { return m.ticket }
+func (m *toxicSepMockEntry) GetPresence() runtime.Presence         { return m.presence }
+func (m *toxicSepMockEntry) GetPartyId() string                    { return "" }
+func (m *toxicSepMockEntry) GetCreateTime() int64                  { return 0 }
 func (m *toxicSepMockEntry) GetProperties() map[string]interface{} { return m.properties }
 
 // toxicSepMockPresence implements runtime.Presence for toxic separation tests.
@@ -29,8 +29,8 @@ func (p *toxicSepMockPresence) GetSessionId() string { return p.sessionID }
 func (p *toxicSepMockPresence) GetNodeId() string    { return "" }
 func (p *toxicSepMockPresence) GetHidden() bool      { return false }
 func (p *toxicSepMockPresence) GetPersistence() bool { return false }
-func (p *toxicSepMockPresence) GetUsername() string   { return "" }
-func (p *toxicSepMockPresence) GetStatus() string     { return "" }
+func (p *toxicSepMockPresence) GetUsername() string  { return "" }
+func (p *toxicSepMockPresence) GetStatus() string    { return "" }
 func (p *toxicSepMockPresence) GetReason() runtime.PresenceReason {
 	return runtime.PresenceReason(0)
 }
@@ -50,9 +50,9 @@ func TestCandidateContainsToxicNewPlayerMix(t *testing.T) {
 	threshold := 50
 
 	tests := []struct {
-		name       string
-		candidate  []runtime.MatchmakerEntry
-		wantToxic  bool
+		name      string
+		candidate []runtime.MatchmakerEntry
+		wantToxic bool
 	}{
 		{
 			name: "new player + toxic player is rejected",
@@ -81,7 +81,7 @@ func TestCandidateContainsToxicNewPlayerMix(t *testing.T) {
 		{
 			name: "new player + enforcer with suspensions is accepted (enforcer exempt)",
 			candidate: []runtime.MatchmakerEntry{
-				newToxicSepEntry("new1", 10, "false"),    // new player
+				newToxicSepEntry("new1", 10, "false"),       // new player
 				newToxicSepEntry("enforcer1", 200, "false"), // enforcer — exempt, so has_suspension_history="false"
 			},
 			wantToxic: false,

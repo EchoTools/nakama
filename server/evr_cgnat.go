@@ -230,8 +230,8 @@ func (d *CGNATDetector) TrackLogin(ipStr string, userID string, auditChannelID s
 // Must be called with d.mu held.
 func (d *CGNATDetector) evictOldestIPs() {
 	type ipAge struct {
-		ip      string
-		newest  time.Time
+		ip     string
+		newest time.Time
 	}
 
 	ages := make([]ipAge, 0, len(d.ipCounts))

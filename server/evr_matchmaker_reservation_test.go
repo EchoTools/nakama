@@ -363,7 +363,7 @@ func TestProcessPotentialMatches_FeatureFlagDisabled(t *testing.T) {
 				},
 				Properties: map[string]any{
 					"timestamp": float64(time.Now().Unix() - 120),
-					"max_rtt":         200.0,
+					"max_rtt":   200.0,
 				},
 			},
 			&MatchmakerEntry{
@@ -376,7 +376,7 @@ func TestProcessPotentialMatches_FeatureFlagDisabled(t *testing.T) {
 				},
 				Properties: map[string]any{
 					"timestamp": float64(time.Now().Unix() - 30),
-					"max_rtt":         200.0,
+					"max_rtt":   200.0,
 				},
 			},
 		},

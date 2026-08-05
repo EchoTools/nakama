@@ -51,12 +51,12 @@ type EarlyQuitPlayerState struct {
 	sync.Mutex `json:"-"`
 
 	// Binary-aligned fields (match earlyquit| profile keys)
-	PenaltyTimestamp    int64 `json:"penalty_ts"`              // Absolute expiry timestamp (unix seconds), -1 = none
-	NumEarlyQuits       int32 `json:"num_early_quits"`         // Accumulating early quit count
-	NumSteadyMatches    int32 `json:"num_steady_matches"`      // Matches counted toward steady player status
-	NumSteadyEarlyQuits int32 `json:"num_steady_early_quits"`  // Quits counted toward steady player status
-	PenaltyLevel        int32 `json:"penalty_level"`           // Resolved from config (clamped uint8)
-	SteadyPlayerLevel   int32 `json:"steady_player_level"`     // Resolved from config (clamped uint8)
+	PenaltyTimestamp    int64 `json:"penalty_ts"`             // Absolute expiry timestamp (unix seconds), -1 = none
+	NumEarlyQuits       int32 `json:"num_early_quits"`        // Accumulating early quit count
+	NumSteadyMatches    int32 `json:"num_steady_matches"`     // Matches counted toward steady player status
+	NumSteadyEarlyQuits int32 `json:"num_steady_early_quits"` // Quits counted toward steady player status
+	PenaltyLevel        int32 `json:"penalty_level"`          // Resolved from config (clamped uint8)
+	SteadyPlayerLevel   int32 `json:"steady_player_level"`    // Resolved from config (clamped uint8)
 
 	// Nakama extensions (kept for matchmaker/UI compat)
 	TotalCompletedMatches      int32     `json:"total_completed_matches"`

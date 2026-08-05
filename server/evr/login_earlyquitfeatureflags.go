@@ -7,7 +7,8 @@ import (
 // SNSEarlyQuitFeatureFlags represents the feature flags for the early quit system.
 //
 // Wire layout (0x01 bytes):
-//   +0x00  uint8  Flags     (bitfield of feature flags)
+//
+//	+0x00  uint8  Flags     (bitfield of feature flags)
 type SNSEarlyQuitFeatureFlags struct {
 	Flags uint8
 }

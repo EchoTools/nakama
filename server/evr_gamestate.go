@@ -12,15 +12,15 @@ import (
 type GameStatus int
 
 const (
-	GameStatusUnspecified    GameStatus = 0
-	GameStatusPreMatch       GameStatus = 1
-	GameStatusRoundStart     GameStatus = 2
-	GameStatusPlaying        GameStatus = 3
-	GameStatusScore          GameStatus = 4
-	GameStatusRoundOver      GameStatus = 5
-	GameStatusPostMatch      GameStatus = 6
-	GameStatusPreSuddenDeath GameStatus = 7
-	GameStatusSuddenDeath    GameStatus = 8
+	GameStatusUnspecified     GameStatus = 0
+	GameStatusPreMatch        GameStatus = 1
+	GameStatusRoundStart      GameStatus = 2
+	GameStatusPlaying         GameStatus = 3
+	GameStatusScore           GameStatus = 4
+	GameStatusRoundOver       GameStatus = 5
+	GameStatusPostMatch       GameStatus = 6
+	GameStatusPreSuddenDeath  GameStatus = 7
+	GameStatusSuddenDeath     GameStatus = 8
 	GameStatusPostSuddenDeath GameStatus = 9
 	GameStatusRoundClosing    GameStatus = 10
 )

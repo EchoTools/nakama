@@ -137,13 +137,13 @@ type mockPresence struct {
 	userID string
 }
 
-func (p *mockPresence) GetUserId() string                { return p.userID }
-func (p *mockPresence) GetSessionId() string             { return "" }
-func (p *mockPresence) GetNodeId() string                { return "testnode" }
-func (p *mockPresence) GetHidden() bool                  { return false }
-func (p *mockPresence) GetPersistence() bool             { return false }
+func (p *mockPresence) GetUserId() string                 { return p.userID }
+func (p *mockPresence) GetSessionId() string              { return "" }
+func (p *mockPresence) GetNodeId() string                 { return "testnode" }
+func (p *mockPresence) GetHidden() bool                   { return false }
+func (p *mockPresence) GetPersistence() bool              { return false }
 func (p *mockPresence) GetUsername() string               { return "" }
-func (p *mockPresence) GetStatus() string                { return "" }
+func (p *mockPresence) GetStatus() string                 { return "" }
 func (p *mockPresence) GetReason() runtime.PresenceReason { return runtime.PresenceReasonUnknown }
 
 // mockPartyRegistryForLookup implements just the LookupGroupPartyID method.

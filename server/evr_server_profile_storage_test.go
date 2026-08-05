@@ -136,9 +136,9 @@ func TestFilterUnlocksToEquipped_EmptyUnlocks(t *testing.T) {
 
 func TestFilterUnlocksToEquipped_PreservesOtherFields(t *testing.T) {
 	profile := map[string]any{
-		"displayname":   "TestPlayer",
-		"xplatformid":   "OVR-ORG-1234",
-		"stats":         map[string]any{"wins": 10},
+		"displayname":     "TestPlayer",
+		"xplatformid":     "OVR-ORG-1234",
+		"stats":           map[string]any{"wins": 10},
 		"purchasedcombat": 1,
 		"unlocks": map[string]map[string]bool{
 			"arena": {"item_a": true, "item_b": true},

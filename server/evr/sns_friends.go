@@ -63,7 +63,7 @@ type SNSFriendInviteRequest struct {
 }
 
 func (m SNSFriendInviteRequest) Token() string   { return "SNSFriendInviteRequest" }
-func (m *SNSFriendInviteRequest) Symbol() Symbol  { return ToSymbol(m.Token()) }
+func (m *SNSFriendInviteRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSFriendInviteRequest) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
@@ -88,7 +88,7 @@ type SNSFriendAcceptRequest struct {
 }
 
 func (m SNSFriendAcceptRequest) Token() string   { return "SNSFriendAcceptRequest" }
-func (m *SNSFriendAcceptRequest) Symbol() Symbol  { return ToSymbol(m.Token()) }
+func (m *SNSFriendAcceptRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSFriendAcceptRequest) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
@@ -114,7 +114,7 @@ type SNSFriendRemoveRequest struct {
 }
 
 func (m SNSFriendRemoveRequest) Token() string   { return "SNSFriendRemoveRequest" }
-func (m *SNSFriendRemoveRequest) Symbol() Symbol  { return ToSymbol(m.Token()) }
+func (m *SNSFriendRemoveRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSFriendRemoveRequest) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
@@ -147,7 +147,7 @@ type SNSFriendListResponse struct {
 }
 
 func (m SNSFriendListResponse) Token() string   { return "SNSFriendListResponse" }
-func (m *SNSFriendListResponse) Symbol() Symbol  { return ToSymbol(m.Token()) }
+func (m *SNSFriendListResponse) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSFriendListResponse) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
@@ -180,7 +180,7 @@ type SNSFriendStatusNotify struct {
 }
 
 func (m SNSFriendStatusNotify) Token() string   { return "SNSFriendStatusNotify" }
-func (m *SNSFriendStatusNotify) Symbol() Symbol  { return ToSymbol(m.Token()) }
+func (m *SNSFriendStatusNotify) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSFriendStatusNotify) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
@@ -206,7 +206,7 @@ type SNSFriendInviteFailure struct {
 }
 
 func (m SNSFriendInviteFailure) Token() string   { return "SNSFriendInviteFailure" }
-func (m *SNSFriendInviteFailure) Symbol() Symbol  { return ToSymbol(m.Token()) }
+func (m *SNSFriendInviteFailure) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSFriendInviteFailure) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
@@ -231,7 +231,7 @@ type SNSFriendAcceptSuccess struct {
 }
 
 func (m SNSFriendAcceptSuccess) Token() string   { return "SNSFriendAcceptSuccess" }
-func (m *SNSFriendAcceptSuccess) Symbol() Symbol  { return ToSymbol(m.Token()) }
+func (m *SNSFriendAcceptSuccess) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSFriendAcceptSuccess) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
@@ -257,7 +257,7 @@ type SNSFriendAcceptFailure struct {
 }
 
 func (m SNSFriendAcceptFailure) Token() string   { return "SNSFriendAcceptFailure" }
-func (m *SNSFriendAcceptFailure) Symbol() Symbol  { return ToSymbol(m.Token()) }
+func (m *SNSFriendAcceptFailure) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSFriendAcceptFailure) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
@@ -282,7 +282,7 @@ type SNSFriendAcceptNotify struct {
 }
 
 func (m SNSFriendAcceptNotify) Token() string   { return "SNSFriendAcceptNotify" }
-func (m *SNSFriendAcceptNotify) Symbol() Symbol  { return ToSymbol(m.Token()) }
+func (m *SNSFriendAcceptNotify) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSFriendAcceptNotify) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
@@ -308,7 +308,7 @@ type SNSFriendInviteSuccess struct {
 }
 
 func (m SNSFriendInviteSuccess) Token() string   { return "SNSFriendInviteSuccess" }
-func (m *SNSFriendInviteSuccess) Symbol() Symbol  { return ToSymbol(m.Token()) }
+func (m *SNSFriendInviteSuccess) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSFriendInviteSuccess) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
@@ -328,7 +328,7 @@ type SNSFriendInviteNotify struct {
 }
 
 func (m SNSFriendInviteNotify) Token() string   { return "SNSFriendInviteNotify" }
-func (m *SNSFriendInviteNotify) Symbol() Symbol  { return ToSymbol(m.Token()) }
+func (m *SNSFriendInviteNotify) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSFriendInviteNotify) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
@@ -348,7 +348,7 @@ type SNSFriendRemoveResponse struct {
 }
 
 func (m SNSFriendRemoveResponse) Token() string   { return "SNSFriendRemoveResponse" }
-func (m *SNSFriendRemoveResponse) Symbol() Symbol  { return ToSymbol(m.Token()) }
+func (m *SNSFriendRemoveResponse) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSFriendRemoveResponse) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
@@ -368,7 +368,7 @@ type SNSFriendRemoveNotify struct {
 }
 
 func (m SNSFriendRemoveNotify) Token() string   { return "SNSFriendRemoveNotify" }
-func (m *SNSFriendRemoveNotify) Symbol() Symbol  { return ToSymbol(m.Token()) }
+func (m *SNSFriendRemoveNotify) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSFriendRemoveNotify) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
@@ -388,7 +388,7 @@ type SNSFriendWithdrawnNotify struct {
 }
 
 func (m SNSFriendWithdrawnNotify) Token() string   { return "SNSFriendWithdrawnNotify" }
-func (m *SNSFriendWithdrawnNotify) Symbol() Symbol  { return ToSymbol(m.Token()) }
+func (m *SNSFriendWithdrawnNotify) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSFriendWithdrawnNotify) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
@@ -408,7 +408,7 @@ type SNSFriendRejectNotify struct {
 }
 
 func (m SNSFriendRejectNotify) Token() string   { return "SNSFriendRejectNotify" }
-func (m *SNSFriendRejectNotify) Symbol() Symbol  { return ToSymbol(m.Token()) }
+func (m *SNSFriendRejectNotify) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSFriendRejectNotify) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
@@ -434,7 +434,7 @@ type SNSFriendListSubscribeRequest struct {
 }
 
 func (m SNSFriendListSubscribeRequest) Token() string   { return "SNSFriendListSubscribeRequest" }
-func (m *SNSFriendListSubscribeRequest) Symbol() Symbol  { return ToSymbol(m.Token()) }
+func (m *SNSFriendListSubscribeRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSFriendListSubscribeRequest) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
@@ -457,7 +457,7 @@ type SNSFriendListRefreshRequest struct {
 }
 
 func (m SNSFriendListRefreshRequest) Token() string   { return "SNSFriendListRefreshRequest" }
-func (m *SNSFriendListRefreshRequest) Symbol() Symbol  { return ToSymbol(m.Token()) }
+func (m *SNSFriendListRefreshRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSFriendListRefreshRequest) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{

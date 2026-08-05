@@ -5,6 +5,27 @@ on:
     types: [opened, synchronize]
 
 jobs:
+  gofmt_check:
+    name: Check gofmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      # Runs the same recipe developers run locally, so CI and local behavior
+      # cannot drift. Scope (all tracked, non-generated Go files) is defined once
+      # in the justfile's FMT_FILES.
+      - name: Verify formatting
+        run: just fmt-check
+
   build_binary:
     name: Build nakama binary
     runs-on: ubuntu-latest

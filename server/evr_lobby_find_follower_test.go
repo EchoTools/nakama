@@ -156,8 +156,8 @@ func TestExpectedFollowerCount_AllInMatch(t *testing.T) {
 	partySize := 3
 	matchPresenceCount := 3 // all still in match
 
-	expectedFromMatch := matchPresenceCount - 1  // 2
-	expectedFromParty := partySize - 1            // 2
+	expectedFromMatch := matchPresenceCount - 1 // 2
+	expectedFromParty := partySize - 1          // 2
 
 	if expectedFromMatch != expectedFromParty {
 		t.Fatal("when all members are present, both sources should agree")
