@@ -106,6 +106,13 @@ type PruneSettings struct {
 	LeaveOrphanedGuilds  bool `json:"leave_orphan_guilds"` // Prune Discord guilds that do not have a corresponding Nakama group
 	DeleteOrphanedGroups bool `json:"leave_orphan_groups"` // Prune Nakama groups that do not have a corresponding Discord guild
 	SafetyLimit          int  `json:"safety_limit"`        // The maximum number of orphaned groups or guilds that can be deleted/left before the pruning operation is aborted
+	// DisableReconciliation turns off the non-destructive repair pass that
+	// re-runs guildSync for member guilds with no Nakama group. That pass is
+	// what heals a guild whose join-time sync failed, so it runs by default,
+	// independently of the two prune flags above. Setting this makes the prune
+	// tick write nothing at all -- and, because a guild is only ever left
+	// after a failed repair attempt, it also suppresses guild leaves.
+	DisableReconciliation bool `json:"disable_reconciliation"`
 }
 
 type GlobalMatchmakingSettings struct {

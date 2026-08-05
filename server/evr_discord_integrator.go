@@ -195,12 +195,18 @@ func (c *DiscordIntegrator) Start() {
 
 				pruneTicker.Reset(time.Minute * 15)
 
-				// Prune the guild groups
-				doLeaves := ServiceSettings().PruneSettings.LeaveOrphanedGuilds
-				doDeletes := ServiceSettings().PruneSettings.DeleteOrphanedGroups
-				pruneSafetyThreshold := ServiceSettings().PruneSettings.SafetyLimit
-				if err := c.pruneGuildGroups(c.ctx, runtimeLogger, doLeaves, doDeletes, pruneSafetyThreshold); err != nil {
-					logger.Error("Error pruning guild groups", zap.Error(err), zap.Bool("do_leaves", doLeaves), zap.Bool("do_deletes", doDeletes), zap.Int("prune_safety_threshold", pruneSafetyThreshold))
+				// Prune the guild groups. Read the settings once: they are
+				// swapped atomically, and three separate reads could mix two
+				// generations of policy.
+				prune := ServiceSettings().PruneSettings
+				cfg := pruneConfig{
+					doGuildLeaves:         prune.LeaveOrphanedGuilds,
+					doGroupDeletes:        prune.DeleteOrphanedGroups,
+					safetyThreshold:       prune.SafetyLimit,
+					disableReconciliation: prune.DisableReconciliation,
+				}
+				if err := c.pruneGuildGroups(c.ctx, runtimeLogger, cfg); err != nil {
+					logger.Error("Error pruning guild groups", zap.Error(err), zap.Bool("do_leaves", cfg.doGuildLeaves), zap.Bool("do_deletes", cfg.doGroupDeletes), zap.Int("prune_safety_threshold", cfg.safetyThreshold))
 				}
 			}
 		}
@@ -229,9 +235,12 @@ func (c *DiscordIntegrator) Start() {
 		}
 		// A real departure, not an availability blip.
 		c.markGuildAvailable(m.ID)
-		logger.Info("Guild Delete", zap.Any("guildDelete", m))
+		// Identifiers only. discordgo populates GuildDelete.BeforeDelete from
+		// state, so zap.Any on m drags in the guild's members, channels,
+		// presences and emojis.
+		logger.Info("Guild Delete", zap.String("guild_id", m.ID))
 		if err := c.handleGuildDelete(logger, s, m); err != nil {
-			logger.Error("Error handling guild delete", zap.Any("guildDelete", m), zap.Error(err))
+			logger.Error("Error handling guild delete", zap.String("guild_id", m.ID), zap.Error(err))
 		}
 	})
 

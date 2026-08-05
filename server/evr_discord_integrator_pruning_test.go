@@ -164,74 +164,100 @@ func TestReconcileOrphanGuilds(t *testing.T) {
 	}
 }
 
-// TestExecutePrunePlanReportOnlyModePerformsNoWrites pins the report-only
-// contract: with both do* flags false an operator is asking the 15-minute tick
-// for a REPORT. Nothing may be written -- not a guild leave, not a group
-// delete, and not the reconciliation guildSync, which creates Nakama groups,
-// writes GuildGroupState and mutates the guild group registry.
-func TestExecutePrunePlanReportOnlyModePerformsNoWrites(t *testing.T) {
-	logger, _ := observedLogger()
-	rec := newPruneRecorder()
-
-	plan := prunePlan{
-		orphanGroups: []orphanGroup{testOrphanGroup("g1", "grp1"), testOrphanGroup("g2", "grp2")},
-		orphanGuilds: []*discordgo.Guild{testOrphanGuild("d1"), testOrphanGuild("d2")},
-	}
-
-	outcome, err := executePrunePlan(logger, plan, false, false, 100, rec.actions())
-	if err != nil {
-		t.Fatalf("executePrunePlan returned error: %v", err)
-	}
-
-	if len(rec.synced) != 0 {
-		t.Errorf("report-only mode ran %d reconciliation syncs (%v); want 0", len(rec.synced), rec.synced)
-	}
-	if len(rec.left) != 0 {
-		t.Errorf("report-only mode left guilds %v; want none", rec.left)
-	}
-	if len(rec.deleted) != 0 {
-		t.Errorf("report-only mode deleted groups %v; want none", rec.deleted)
-	}
-	if outcome.guildsLeft != 0 || outcome.groupsDeleted != 0 || outcome.reconciledGuilds != 0 {
-		t.Errorf("report-only outcome = %+v; want all zero", outcome)
+// prunePolicy is a terse constructor for pruneConfig in tests.
+func prunePolicy(doGuildLeaves, doGroupDeletes bool, safetyThreshold int) pruneConfig {
+	return pruneConfig{
+		doGuildLeaves:   doGuildLeaves,
+		doGroupDeletes:  doGroupDeletes,
+		safetyThreshold: safetyThreshold,
 	}
 }
 
-// TestExecutePrunePlanReconcilesOnlyWhenLeavingGuilds pins that the write-heavy
-// reconciliation pass exists to prevent a prune-LEAVE. When leaves are
-// disabled it has nothing to protect and must not run.
-func TestExecutePrunePlanReconcilesOnlyWhenLeavingGuilds(t *testing.T) {
-	plan := prunePlan{orphanGuilds: []*discordgo.Guild{testOrphanGuild("d1")}}
+// TestExecutePrunePlanHealsOrphanGuildAtShippedDefaults is the regression test
+// for the incident this whole path exists for. Guild 1522261692355055849 is a
+// guild the bot is a member of whose join-time guildSync failed with SQLSTATE
+// 22001, so it has no Nakama group and its players cannot matchmake. Gateway
+// Guild Create events are not replayed on reconnect, so the 15-minute prune
+// tick is the ONLY thing that can ever repair it.
+//
+// It must therefore repair it at the SHIPPED DEFAULTS: LeaveOrphanedGuilds
+// false, DeleteOrphanedGroups false, SafetyLimit 0 (nothing in the tree ever
+// assigns SafetyLimit a default -- FixDefaultServiceSettings does not mention
+// it -- so an unconfigured deployment runs with 0).
+func TestExecutePrunePlanHealsOrphanGuildAtShippedDefaults(t *testing.T) {
+	incidentGuild := &discordgo.Guild{ID: "1522261692355055849", Name: "Jett's Hangout"}
 
 	for _, tt := range []struct {
-		doGuildLeaves  bool
-		doGroupDeletes bool
-		wantSyncs      int
+		name string
+		cfg  pruneConfig
 	}{
-		{false, false, 0},
-		{false, true, 0},
-		{true, false, 1},
-		{true, true, 1},
+		{"shipped defaults (leaves=false deletes=false SafetyLimit=0)", prunePolicy(false, false, 0)},
+		{"deletes only, SafetyLimit=0", prunePolicy(false, true, 0)},
+		{"leaves+deletes, SafetyLimit=0", prunePolicy(true, true, 0)},
+		{"leaves+deletes, SafetyLimit=100", prunePolicy(true, true, 100)},
 	} {
-		t.Run(fmt.Sprintf("leaves=%v/deletes=%v", tt.doGuildLeaves, tt.doGroupDeletes), func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			logger, _ := observedLogger()
 			rec := newPruneRecorder()
-			if _, err := executePrunePlan(logger, plan, tt.doGuildLeaves, tt.doGroupDeletes, 100, rec.actions()); err != nil {
+			plan := prunePlan{orphanGuilds: []*discordgo.Guild{incidentGuild}}
+
+			outcome, err := executePrunePlan(logger, plan, tt.cfg, rec.actions())
+			if err != nil {
 				t.Fatalf("executePrunePlan returned error: %v", err)
 			}
-			if len(rec.synced) != tt.wantSyncs {
-				t.Errorf("got %d reconciliation syncs (%v); want %d", len(rec.synced), rec.synced, tt.wantSyncs)
+			if len(rec.synced) != 1 || rec.synced[0] != incidentGuild.ID {
+				t.Fatalf("reconciliation syncs = %v; want exactly [%s] -- the guild can never self-heal otherwise",
+					rec.synced, incidentGuild.ID)
+			}
+			if outcome.reconciledGuilds != 1 {
+				t.Errorf("outcome.reconciledGuilds = %d; want 1", outcome.reconciledGuilds)
+			}
+			// The repair succeeded, so it is no longer a leave candidate --
+			// even with leaves enabled and a zero threshold.
+			if len(rec.left) != 0 {
+				t.Errorf("left guilds %v after a successful repair; want none", rec.left)
 			}
 		})
 	}
 }
 
-// TestExecutePrunePlanSafetyValveAbortsBeforeAnyWrite pins the ordering: the
-// mass-leave threshold must be checked BEFORE any side effect. A partial
-// GroupsList result that makes 200 guilds look orphaned must not cause 200
-// guildSync calls (a Discord REST call plus several DB writes each) and only
-// then abort.
-func TestExecutePrunePlanSafetyValveAbortsBeforeAnyWrite(t *testing.T) {
+// TestExecutePrunePlanDisableReconciliationSuppressesAllWrites pins the
+// operator's escape hatch. Reconciliation writes (it creates Nakama groups,
+// writes GuildGroupState and mutates the guild group registry), so an operator
+// freezing writes during an incident sets DisableReconciliation. That must also
+// suppress guild leaves: the bot may never leave a guild it did not try to
+// repair.
+func TestExecutePrunePlanDisableReconciliationSuppressesAllWrites(t *testing.T) {
+	logger, _ := observedLogger()
+	rec := newPruneRecorder()
+
+	plan := prunePlan{
+		orphanGroups: []orphanGroup{testOrphanGroup("g1", "grp1")},
+		orphanGuilds: []*discordgo.Guild{testOrphanGuild("d1"), testOrphanGuild("d2")},
+	}
+	cfg := pruneConfig{doGuildLeaves: true, safetyThreshold: 100, disableReconciliation: true}
+
+	outcome, err := executePrunePlan(logger, plan, cfg, rec.actions())
+	if err != nil {
+		t.Fatalf("executePrunePlan returned error: %v", err)
+	}
+	if len(rec.synced) != 0 {
+		t.Errorf("ran %d reconciliation syncs with reconciliation disabled (%v); want 0", len(rec.synced), rec.synced)
+	}
+	if len(rec.left) != 0 {
+		t.Errorf("left guilds %v without attempting a repair; want none", rec.left)
+	}
+	if outcome.guildsLeft != 0 || outcome.reconciledGuilds != 0 {
+		t.Errorf("outcome = %+v; want guildsLeft=0 reconciledGuilds=0", outcome)
+	}
+}
+
+// TestExecutePrunePlanSkipsReconcileAndLeavesOnImplausibleOrphanCount pins the
+// bound on the repair pass. A partial GroupsList result that makes 200 guilds
+// look orphaned is a symptom of a bad read, not 200 broken guilds. It must not
+// cost 200 guildSync calls (a Discord REST call plus several DB writes each),
+// and because no guild was vetted, none may be left either.
+func TestExecutePrunePlanSkipsReconcileAndLeavesOnImplausibleOrphanCount(t *testing.T) {
 	logger, _ := observedLogger()
 	rec := newPruneRecorder()
 
@@ -241,18 +267,99 @@ func TestExecutePrunePlanSafetyValveAbortsBeforeAnyWrite(t *testing.T) {
 	}
 	plan := prunePlan{orphanGuilds: guilds}
 
-	outcome, err := executePrunePlan(logger, plan, true, true, 5, rec.actions())
+	outcome, err := executePrunePlan(logger, plan, prunePolicy(true, true, 500), rec.actions())
+	if err != nil {
+		t.Fatalf("executePrunePlan returned error: %v", err)
+	}
+	if len(rec.synced) != 0 {
+		t.Errorf("ran %d reconciliation syncs for %d orphan guilds; want 0 (limit %d)",
+			len(rec.synced), len(guilds), maxReconcileGuildsPerPass)
+	}
+	// The threshold is 500, well above 200, so only the "no repair was
+	// attempted" rule can stop these leaves.
+	if len(rec.left) != 0 {
+		t.Errorf("left %d guilds without attempting a repair; want 0", len(rec.left))
+	}
+	if outcome.reconciledGuilds != 0 || outcome.guildsLeft != 0 {
+		t.Errorf("outcome = %+v; want reconciledGuilds=0 guildsLeft=0", outcome)
+	}
+}
+
+// TestExecutePrunePlanReconcilesUpToTheLimit is the other side of the bound: a
+// plausible orphan count is repaired normally.
+func TestExecutePrunePlanReconcilesUpToTheLimit(t *testing.T) {
+	logger, _ := observedLogger()
+	rec := newPruneRecorder()
+
+	var guilds []*discordgo.Guild
+	for i := 0; i < maxReconcileGuildsPerPass; i++ {
+		guilds = append(guilds, testOrphanGuild(fmt.Sprintf("d%d", i)))
+	}
+
+	outcome, err := executePrunePlan(logger, prunePlan{orphanGuilds: guilds}, prunePolicy(false, false, 0), rec.actions())
+	if err != nil {
+		t.Fatalf("executePrunePlan returned error: %v", err)
+	}
+	if len(rec.synced) != maxReconcileGuildsPerPass {
+		t.Errorf("ran %d reconciliation syncs; want %d", len(rec.synced), maxReconcileGuildsPerPass)
+	}
+	if outcome.reconciledGuilds != maxReconcileGuildsPerPass {
+		t.Errorf("outcome.reconciledGuilds = %d; want %d", outcome.reconciledGuilds, maxReconcileGuildsPerPass)
+	}
+}
+
+// TestExecutePrunePlanSafetyValveAbortsLeavesAfterFailedRepair pins that the
+// mass-leave threshold is evaluated against the POST-repair candidates and
+// aborts before any leave. Every sync here fails, so all six guilds survive as
+// leave candidates and the threshold of 5 must stop them.
+func TestExecutePrunePlanSafetyValveAbortsLeavesAfterFailedRepair(t *testing.T) {
+	logger, _ := observedLogger()
+	rec := newPruneRecorder()
+
+	var guilds []*discordgo.Guild
+	for i := 0; i < 6; i++ {
+		id := fmt.Sprintf("d%d", i)
+		guilds = append(guilds, testOrphanGuild(id))
+		rec.syncFails[id] = true
+	}
+
+	outcome, err := executePrunePlan(logger, prunePlan{orphanGuilds: guilds}, prunePolicy(true, true, 5), rec.actions())
 	if err == nil {
 		t.Fatal("executePrunePlan accepted a mass leave; want an error")
 	}
-	if len(rec.synced) != 0 {
-		t.Errorf("safety valve ran %d reconciliation syncs before aborting; want 0", len(rec.synced))
-	}
 	if len(rec.left) != 0 || len(rec.deleted) != 0 {
-		t.Errorf("safety valve left %v and deleted %v before aborting; want none", rec.left, rec.deleted)
+		t.Errorf("safety valve left %v and deleted %v; want none", rec.left, rec.deleted)
 	}
-	if outcome.reconciledGuilds != 0 {
-		t.Errorf("outcome.reconciledGuilds = %d; want 0", outcome.reconciledGuilds)
+	if outcome.guildsLeft != 0 {
+		t.Errorf("outcome.guildsLeft = %d; want 0", outcome.guildsLeft)
+	}
+}
+
+// TestExecutePrunePlanSafetyValveDoesNotTripOnRepairedGuilds is the companion:
+// the same six guilds, but the repairs succeed. Nothing would be destroyed, so
+// the valve must NOT trip -- this is precisely what the pre-review ordering
+// (valve before repair) got wrong.
+func TestExecutePrunePlanSafetyValveDoesNotTripOnRepairedGuilds(t *testing.T) {
+	logger, _ := observedLogger()
+	rec := newPruneRecorder()
+
+	var guilds []*discordgo.Guild
+	for i := 0; i < 6; i++ {
+		guilds = append(guilds, testOrphanGuild(fmt.Sprintf("d%d", i)))
+	}
+
+	outcome, err := executePrunePlan(logger, prunePlan{orphanGuilds: guilds}, prunePolicy(true, true, 5), rec.actions())
+	if err != nil {
+		t.Fatalf("executePrunePlan returned error after repairing every guild: %v", err)
+	}
+	if len(rec.synced) != 6 {
+		t.Errorf("reconciliation syncs = %v; want all 6", rec.synced)
+	}
+	if len(rec.left) != 0 {
+		t.Errorf("left guilds %v after repairing them all; want none", rec.left)
+	}
+	if outcome.reconciledGuilds != 6 {
+		t.Errorf("outcome.reconciledGuilds = %d; want 6", outcome.reconciledGuilds)
 	}
 }
 
@@ -268,11 +375,42 @@ func TestExecutePrunePlanSafetyValveTripsOnOrphanGroups(t *testing.T) {
 		groups = append(groups, testOrphanGroup(fmt.Sprintf("g%d", i), fmt.Sprintf("grp%d", i)))
 	}
 
-	if _, err := executePrunePlan(logger, prunePlan{orphanGroups: groups}, true, true, 3, rec.actions()); err == nil {
+	if _, err := executePrunePlan(logger, prunePlan{orphanGroups: groups}, prunePolicy(true, true, 3), rec.actions()); err == nil {
 		t.Fatal("executePrunePlan accepted a mass group delete; want an error")
 	}
 	if len(rec.deleted) != 0 {
 		t.Errorf("deleted groups %v after tripping the safety valve; want none", rec.deleted)
+	}
+}
+
+// TestExecutePrunePlanValvesAreIndependent pins that a tripped group-delete
+// valve does not suppress the guild-leave side, and vice versa. Conflating them
+// meant one orphaned group could block the repair of an unrelated guild.
+func TestExecutePrunePlanValvesAreIndependent(t *testing.T) {
+	logger, _ := observedLogger()
+	rec := newPruneRecorder()
+
+	// Ten orphan groups (over the threshold of 3) and one unrepairable orphan
+	// guild (under it).
+	var groups []orphanGroup
+	for i := 0; i < 10; i++ {
+		groups = append(groups, testOrphanGroup(fmt.Sprintf("g%d", i), fmt.Sprintf("grp%d", i)))
+	}
+	rec.syncFails["d1"] = true
+	plan := prunePlan{orphanGroups: groups, orphanGuilds: []*discordgo.Guild{testOrphanGuild("d1")}}
+
+	outcome, err := executePrunePlan(logger, plan, prunePolicy(true, true, 3), rec.actions())
+	if err == nil {
+		t.Fatal("want an error: the group-delete valve tripped")
+	}
+	if len(rec.deleted) != 0 {
+		t.Errorf("deleted groups %v with the group valve tripped; want none", rec.deleted)
+	}
+	if len(rec.left) != 1 || rec.left[0] != "d1" {
+		t.Errorf("left = %v; want [d1] -- the guild valve did not trip and must still act", rec.left)
+	}
+	if outcome.guildsLeft != 1 {
+		t.Errorf("outcome.guildsLeft = %d; want 1", outcome.guildsLeft)
 	}
 }
 
@@ -290,7 +428,7 @@ func TestExecutePrunePlanCompletionLogReportsOnlyRealWork(t *testing.T) {
 		orphanGuilds: []*discordgo.Guild{testOrphanGuild("d1"), testOrphanGuild("d2"), testOrphanGuild("d3")},
 	}
 
-	outcome, err := executePrunePlan(logger, plan, false, true, 100, rec.actions())
+	outcome, err := executePrunePlan(logger, plan, prunePolicy(false, true, 100), rec.actions())
 	if err != nil {
 		t.Fatalf("executePrunePlan returned error: %v", err)
 	}
@@ -326,7 +464,7 @@ func TestExecutePrunePlanCompletionLogCountsPartialLeaveFailures(t *testing.T) {
 	rec.syncFails["d2"] = true
 	rec.syncFails["d3"] = true
 
-	outcome, err := executePrunePlan(logger, plan, true, false, 100, rec.actions())
+	outcome, err := executePrunePlan(logger, plan, prunePolicy(true, false, 100), rec.actions())
 	if err != nil {
 		t.Fatalf("executePrunePlan returned error: %v", err)
 	}
@@ -356,7 +494,7 @@ func TestExecutePrunePlanPurgesIDCacheAfterGroupDelete(t *testing.T) {
 		testOrphanGroup("g2", "grp2"),
 	}}
 
-	if _, err := executePrunePlan(logger, plan, false, true, 100, rec.actions()); err != nil {
+	if _, err := executePrunePlan(logger, plan, prunePolicy(false, true, 100), rec.actions()); err != nil {
 		t.Fatalf("executePrunePlan returned error: %v", err)
 	}
 
@@ -368,39 +506,118 @@ func TestExecutePrunePlanPurgesIDCacheAfterGroupDelete(t *testing.T) {
 // TestExecutePrunePlanLogsIdentifiersNotWholeStructs pins finding 6: logging a
 // *discordgo.Guild drags in members, channels, presences and emojis -- the
 // largest possible log line at the worst possible moment.
+//
+// Every log site that receives a guild must be exercised. The abort log and the
+// per-guild "Leaving orphaned discord guild" log are on mutually exclusive
+// branches, so each needs its own scenario; a test that only trips the valve
+// leaves the leave-loop log completely unguarded.
 func TestExecutePrunePlanLogsIdentifiersNotWholeStructs(t *testing.T) {
-	logger, logs := observedLogger()
-	rec := newPruneRecorder()
-
-	fat := testOrphanGuild("d1")
-	fat.Channels = []*discordgo.Channel{{ID: "c1", Topic: sentinelChannelTopic}}
-
-	plan := prunePlan{
-		orphanGuilds: []*discordgo.Guild{fat, testOrphanGuild("d2")},
-		orphanGroups: []orphanGroup{testOrphanGroup("g1", "grp1")},
+	newFatPlan := func() (prunePlan, *discordgo.Guild) {
+		fat := testOrphanGuild("d1")
+		fat.Channels = []*discordgo.Channel{{ID: "c1", Topic: sentinelChannelTopic}}
+		return prunePlan{
+			orphanGuilds: []*discordgo.Guild{fat, testOrphanGuild("d2")},
+			orphanGroups: []orphanGroup{testOrphanGroup("g1", "grp1")},
+		}, fat
 	}
 
-	// Threshold of 1 trips on the two orphan guilds, exercising the abort log.
-	if _, err := executePrunePlan(logger, plan, true, true, 1, rec.actions()); err == nil {
-		t.Fatal("expected the safety valve to trip")
-	}
+	for _, tt := range []struct {
+		name string
+		// wantMsg is a log message the scenario must actually produce, so a
+		// silent branch change cannot make this test vacuously pass.
+		wantMsg string
+		run     func(t *testing.T, logger runtime.Logger, rec *pruneRecorder, plan prunePlan)
+	}{
+		{
+			name:    "safety valve abort log",
+			wantMsg: "Pruning Discord guilds and groups will leave more than 1, skipping to avoid mass leave",
+			run: func(t *testing.T, logger runtime.Logger, rec *pruneRecorder, plan prunePlan) {
+				// Both repairs fail, so both guilds survive as leave
+				// candidates and a threshold of 1 trips.
+				rec.syncFails["d1"] = true
+				rec.syncFails["d2"] = true
+				if _, err := executePrunePlan(logger, plan, prunePolicy(true, true, 1), rec.actions()); err == nil {
+					t.Fatal("expected the safety valve to trip")
+				}
+			},
+		},
+		{
+			name:    "per-guild leave log",
+			wantMsg: "Leaving orphaned discord guild",
+			run: func(t *testing.T, logger runtime.Logger, rec *pruneRecorder, plan prunePlan) {
+				// Repairs fail but the threshold is generous, so the leave
+				// loop actually runs and logs each guild.
+				rec.syncFails["d1"] = true
+				rec.syncFails["d2"] = true
+				if _, err := executePrunePlan(logger, plan, prunePolicy(true, false, 100), rec.actions()); err != nil {
+					t.Fatalf("executePrunePlan returned error: %v", err)
+				}
+				if len(rec.left) != 2 {
+					t.Fatalf("left = %v; want both guilds left so the leave log is exercised", rec.left)
+				}
+			},
+		},
+		{
+			name:    "reconciliation log",
+			wantMsg: "Attempting to reconcile orphan guild via guild sync",
+			run: func(t *testing.T, logger runtime.Logger, rec *pruneRecorder, plan prunePlan) {
+				if _, err := executePrunePlan(logger, plan, prunePolicy(false, false, 100), rec.actions()); err != nil {
+					t.Fatalf("executePrunePlan returned error: %v", err)
+				}
+			},
+		},
+		{
+			name:    "implausible-orphan-count log",
+			wantMsg: "skipping reconciliation and guild leaves",
+			run: func(t *testing.T, logger runtime.Logger, rec *pruneRecorder, plan prunePlan) {
+				_, fat := newFatPlan()
+				guilds := []*discordgo.Guild{fat}
+				for i := 0; i < maxReconcileGuildsPerPass; i++ {
+					guilds = append(guilds, testOrphanGuild(fmt.Sprintf("x%d", i)))
+				}
+				if _, err := executePrunePlan(logger, prunePlan{orphanGuilds: guilds}, prunePolicy(true, true, 1000), rec.actions()); err != nil {
+					t.Fatalf("executePrunePlan returned error: %v", err)
+				}
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			logger, logs := observedLogger()
+			rec := newPruneRecorder()
+			plan, _ := newFatPlan()
 
-	// Render each field the way a log encoder does. Formatting with %v is NOT
-	// good enough: a []*discordgo.Guild formats as a slice of pointer
-	// addresses ("[0xc000123456]"), so a leak would be invisible while the
-	// JSON the encoder actually writes carries the whole object graph.
-	for _, entry := range logs.All() {
-		for k, v := range entry.ContextMap() {
-			encoded, err := json.Marshal(v)
-			if err != nil {
-				// Not encodable as JSON; fall back to the Go rendering.
-				encoded = []byte(fmt.Sprintf("%+v", v))
+			tt.run(t, logger, rec, plan)
+
+			var sawWanted bool
+			for _, entry := range logs.All() {
+				if strings.Contains(entry.Message, tt.wantMsg) {
+					sawWanted = true
+				}
+				// Render each field the way a log encoder does. Formatting
+				// with %v is NOT good enough: a []*discordgo.Guild formats as
+				// a slice of pointer addresses ("[0xc000123456]"), so a leak
+				// would be invisible while the JSON the encoder actually
+				// writes carries the whole object graph.
+				for k, v := range entry.ContextMap() {
+					encoded, err := json.Marshal(v)
+					if err != nil {
+						// Not encodable as JSON; fall back to the Go rendering.
+						encoded = []byte(fmt.Sprintf("%+v", v))
+					}
+					if strings.Contains(string(encoded), sentinelChannelTopic) {
+						t.Fatalf("log entry %q field %q leaked a whole struct (%d bytes): %.200s",
+							entry.Message, k, len(encoded), encoded)
+					}
+				}
 			}
-			if strings.Contains(string(encoded), sentinelChannelTopic) {
-				t.Fatalf("log entry %q field %q leaked a whole struct (%d bytes): %.200s",
-					entry.Message, k, len(encoded), encoded)
+			if !sawWanted {
+				var got []string
+				for _, e := range logs.All() {
+					got = append(got, e.Message)
+				}
+				t.Fatalf("scenario never emitted %q, so it guards nothing; entries: %v", tt.wantMsg, got)
 			}
-		}
+		})
 	}
 }
 

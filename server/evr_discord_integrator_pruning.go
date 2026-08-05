@@ -12,7 +12,14 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
-// pruneSafetyThreshold is the maximum number of orphaned groups or guilds that can be deleted/left before the pruning operation is aborted.
+// maxReconcileGuildsPerPass bounds the non-destructive repair pass. Each
+// reconciliation is a Discord REST call plus several DB writes, so a partial
+// GroupsList result that makes hundreds of guilds look orphaned must not turn
+// into hundreds of syncs. A count this large is a symptom of a bad read rather
+// than that many genuinely broken guilds, so the pass is skipped entirely
+// rather than truncated -- and, because a guild is only ever left after a
+// failed repair attempt, skipping it also suppresses every guild leave.
+const maxReconcileGuildsPerPass = 25
 
 // orphanGroup pairs an orphaned Nakama group with the Discord guild ID taken
 // from its metadata, so the prune path can act on both without re-parsing.
@@ -41,6 +48,24 @@ type pruneActions struct {
 	leaveGuild  func(guildID string) error
 	deleteGroup func(groupID string) error
 	purgeGuild  func(guildID string)
+}
+
+// pruneConfig is the operator-controlled policy for a prune pass.
+type pruneConfig struct {
+	// doGuildLeaves permits leaving Discord guilds that have no Nakama group
+	// and could not be repaired.
+	doGuildLeaves bool
+	// doGroupDeletes permits deleting Nakama groups whose Discord guild the
+	// bot is no longer in.
+	doGroupDeletes bool
+	// safetyThreshold is the maximum number of guilds that may be left, or
+	// groups that may be deleted, in one pass. Exceeding it aborts that side
+	// of the prune.
+	safetyThreshold int
+	// disableReconciliation turns off the non-destructive repair pass. It also
+	// suppresses guild leaves, because a guild is only ever left after a
+	// failed repair attempt.
+	disableReconciliation bool
 }
 
 // pruneOutcome records what a prune pass actually did, as opposed to what it
@@ -93,6 +118,12 @@ func reconcileOrphanGuilds(logger runtime.Logger, orphanGuilds []*discordgo.Guil
 // guilds count as present here: their groups hold role maps, channel IDs,
 // suspension-inheritance configuration and every membership, none of which can
 // be rebuilt from Discord if GroupDelete removes them.
+//
+// The record is best-effort, not a hard guarantee. discordgo dispatches typed
+// handlers on a goroutine unless Session.SyncEvents is set (event.go:166-173),
+// which this codebase does not set, so there is a brief window in which a
+// guild is neither in State.Guilds nor recorded as unavailable. That window is
+// microseconds against a 15-minute prune tick.
 func computePrunePlan(groupByGuildID map[string]*api.Group, stateGuilds []*discordgo.Guild, unavailableGuildIDs map[string]struct{}) prunePlan {
 	botGuildMap := make(map[string]*discordgo.Guild, len(stateGuilds))
 	for _, g := range stateGuilds {
@@ -131,53 +162,87 @@ func computePrunePlan(groupByGuildID map[string]*api.Group, stateGuilds []*disco
 	return plan
 }
 
-// executePrunePlan carries out a prune plan, subject to the do* flags and the
-// safety threshold.
+// executePrunePlan carries out a prune plan, subject to cfg.
 //
 // Ordering and gating are load-bearing:
-//   - The mass-leave safety threshold is checked before ANY side effect. It
-//     cannot guard work that runs in front of it, so nothing -- including the
-//     write-heavy reconciliation pass -- may precede it.
-//   - Every write is gated on a do* flag. With both flags false the caller is
-//     running this as a report, and a report must not create Nakama groups,
-//     write GuildGroupState, or mutate the guild group registry.
+//
+//   - Reconciliation is a REPAIR, not a prune action, and runs on every pass
+//     regardless of the do* flags. It creates the Nakama group a member guild
+//     should already have had -- the exact condition guild
+//     1522261692355055849 was stuck in after its join-time guildSync failed
+//     with SQLSTATE 22001. Gating it on the destructive flags, or behind the
+//     mass-leave valve, makes that incident unhealable at the shipped
+//     defaults, where both flags are false and SafetyLimit is 0. Operators who
+//     need a genuinely write-free pass set disableReconciliation.
+//
+//   - Reconciliation is bounded by maxReconcileGuildsPerPass instead, so a
+//     partial GroupsList result still cannot cost hundreds of REST calls.
+//
+//   - A guild is only ever LEFT after a failed repair attempt. If the repair
+//     pass did not run, guild leaves are suppressed for the whole pass: the
+//     bot must never leave a guild it did not try to fix.
+//
+//   - Each safety valve guards its own side and is evaluated against what
+//     would actually be destroyed -- guild leaves against the POST-repair
+//     candidates, group deletes against the orphaned groups. Tripping one
+//     skips that side's writes and returns an error; it does not suppress the
+//     repair that already ran.
+//
 //   - The returned outcome counts work that actually succeeded, so the
 //     completion log never claims guilds were left or groups deleted when they
 //     were not.
-func executePrunePlan(logger runtime.Logger, plan prunePlan, doGuildLeaves, doGroupDeletes bool, pruneSafetyThreshold int, actions pruneActions) (pruneOutcome, error) {
+func executePrunePlan(logger runtime.Logger, plan prunePlan, cfg pruneConfig, actions pruneActions) (pruneOutcome, error) {
 	var outcome pruneOutcome
 
 	orphanGroupCount := len(plan.orphanGroups)
 	orphanGuildCount := len(plan.orphanGuilds)
 
-	// Safety check to ensure this is not a mass leave operation. This runs
-	// first: a partial GroupsList result that makes hundreds of guilds look
-	// orphaned must abort here rather than after hundreds of reconciliation
-	// syncs (a Discord REST call plus several DB writes each).
-	if orphanGroupCount > pruneSafetyThreshold || orphanGuildCount > pruneSafetyThreshold {
+	// Repair pass.
+	leaveCandidates := plan.orphanGuilds
+	reconciled := false
+	switch {
+	case cfg.disableReconciliation:
+		if orphanGuildCount > 0 {
+			logger.WithField("orphan_guild_count", orphanGuildCount).
+				Warn("Orphan guild reconciliation is disabled; guild leaves are suppressed")
+		}
+	case orphanGuildCount > maxReconcileGuildsPerPass:
+		// Log identifiers only: a *discordgo.Guild carries members, channels,
+		// presences and emojis.
+		logger.WithFields(map[string]any{
+			"orphan_guild_count": orphanGuildCount,
+			"reconcile_limit":    maxReconcileGuildsPerPass,
+			"orphan_guild_ids":   orphanGuildIDs(plan.orphanGuilds),
+		}).Error(fmt.Sprintf("More than %d orphaned guilds; skipping reconciliation and guild leaves (suspect a bad read, not that many broken guilds)", maxReconcileGuildsPerPass))
+	default:
+		leaveCandidates = reconcileOrphanGuilds(logger, plan.orphanGuilds, actions.syncGuild)
+		outcome.reconciledGuilds = orphanGuildCount - len(leaveCandidates)
+		reconciled = true
+	}
+
+	var pruneErr error
+
+	// Safety valves, evaluated against what would actually be destroyed.
+	leaveTripped := len(leaveCandidates) > cfg.safetyThreshold
+	deleteTripped := orphanGroupCount > cfg.safetyThreshold
+	if leaveTripped || deleteTripped {
 		// Log identifiers only: a *discordgo.Guild carries members, channels,
 		// presences and emojis, which would make this the largest log line in
 		// the process at the worst possible moment.
 		logger.WithFields(map[string]any{
-			"orphan_group_count": orphanGroupCount,
-			"orphan_guild_count": orphanGuildCount,
-			"orphan_group_ids":   orphanGroupIDs(plan.orphanGroups),
-			"orphan_guild_ids":   orphanGuildIDs(plan.orphanGuilds),
-		}).Error(fmt.Sprintf("Pruning Discord guilds and groups will leave more than %d, skipping to avoid mass leave", pruneSafetyThreshold))
-		return outcome, fmt.Errorf("pruning Discord guilds and groups will leave more than %d, skipping to avoid mass leave", pruneSafetyThreshold)
+			"orphan_group_count":    orphanGroupCount,
+			"orphan_guild_count":    orphanGuildCount,
+			"leave_candidate_count": len(leaveCandidates),
+			"orphan_group_ids":      orphanGroupIDs(plan.orphanGroups),
+			"leave_candidate_ids":   orphanGuildIDs(leaveCandidates),
+			"guild_leaves_skipped":  leaveTripped,
+			"group_deletes_skipped": deleteTripped,
+		}).Error(fmt.Sprintf("Pruning Discord guilds and groups will leave more than %d, skipping to avoid mass leave", cfg.safetyThreshold))
+		pruneErr = fmt.Errorf("pruning Discord guilds and groups will leave more than %d, skipping to avoid mass leave", cfg.safetyThreshold)
 	}
 
-	// Remove any guilds that are not in Nakama
-	if doGuildLeaves {
-		// Try to repair orphan guilds before treating them as prune
-		// candidates: re-run guildSync so a guild whose join-time sync failed
-		// gets its group created instead of the bot leaving a healthy
-		// community. This is gated on doGuildLeaves because a leave is the
-		// only thing it protects against -- and because it writes, so it must
-		// not run when the caller only wants a report.
-		leaveCandidates := reconcileOrphanGuilds(logger, plan.orphanGuilds, actions.syncGuild)
-		outcome.reconciledGuilds = orphanGuildCount - len(leaveCandidates)
-
+	// Remove any guilds that are not in Nakama and could not be repaired.
+	if cfg.doGuildLeaves && !leaveTripped && reconciled {
 		for _, guild := range leaveCandidates {
 			logger.WithFields(map[string]any{
 				"guild_name": guild.Name,
@@ -193,12 +258,17 @@ func executePrunePlan(logger runtime.Logger, plan prunePlan, doGuildLeaves, doGr
 	}
 
 	// Remove any Nakama groups of guilds that the bot is not a member of
-	if doGroupDeletes {
+	if cfg.doGroupDeletes && !deleteTripped {
 		for _, og := range plan.orphanGroups {
 			logger.WithFields(map[string]any{
 				"group_id":   og.group.GetId(),
 				"group_name": og.group.GetName(),
 				"guild_id":   og.guildID,
+				// GroupMetadata (role map, matchmaking/audit channel IDs,
+				// suspension inheritance) is exactly what this delete
+				// destroys and cannot be rebuilt from Discord. This log line
+				// is the only forensic record of it.
+				"metadata": og.group.GetMetadata(),
 			}).Info("Deleting orphaned group from Nakama")
 			if err := actions.deleteGroup(og.group.GetId()); err != nil {
 				logger.WithField("error", err).Warn("Failed to delete orphaned group from Nakama")
@@ -228,12 +298,12 @@ func executePrunePlan(logger runtime.Logger, plan prunePlan, doGuildLeaves, doGr
 			"failed_group_deletes": outcome.groupDeleteErrors,
 			"left_guilds":          outcome.guildsLeft,
 			"failed_guild_leaves":  outcome.guildLeaveErrors,
-			"do_guild_leaves":      doGuildLeaves,
-			"do_group_deletes":     doGroupDeletes,
+			"do_guild_leaves":      cfg.doGuildLeaves,
+			"do_group_deletes":     cfg.doGroupDeletes,
 		}).Info("Pruned unused groups and guilds")
 	}
 
-	return outcome, nil
+	return outcome, pruneErr
 }
 
 func orphanGroupIDs(orphans []orphanGroup) []string {
@@ -252,7 +322,7 @@ func orphanGuildIDs(guilds []*discordgo.Guild) []string {
 	return ids
 }
 
-func (d *DiscordIntegrator) pruneGuildGroups(ctx context.Context, logger runtime.Logger, doGuildLeaves, doGroupDeletes bool, pruneSafetyThreshold int) error {
+func (d *DiscordIntegrator) pruneGuildGroups(ctx context.Context, logger runtime.Logger, cfg pruneConfig) error {
 	var (
 		groupByGuildID = make(map[string]*api.Group)
 		cursor         string
@@ -312,6 +382,6 @@ func (d *DiscordIntegrator) pruneGuildGroups(ctx context.Context, logger runtime
 		},
 	}
 
-	_, err = executePrunePlan(logger, plan, doGuildLeaves, doGroupDeletes, pruneSafetyThreshold, actions)
+	_, err = executePrunePlan(logger, plan, cfg, actions)
 	return err
 }
