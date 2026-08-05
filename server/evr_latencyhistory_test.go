@@ -167,11 +167,11 @@ func (m *failOnceNakamaModule) StorageWrite(ctx context.Context, writes []*runti
 
 const occTestUserID = "00000000-0000-0000-0000-000000000001"
 
-// TestLatencyHistory_WriteWithRetry_LosslessMerge proves that when the first
-// write hits a version conflict, WriteWithRetry re-reads the fresh stored object
+// TestLatencyHistory_writeWithRetry_LosslessMerge proves that when the first
+// write hits a version conflict, writeWithRetry re-reads the fresh stored object
 // (picking up a concurrent winner's entries) and re-applies the caller's pending
 // mutation, so BOTH the winner's and this caller's new entries survive.
-func TestLatencyHistory_WriteWithRetry_LosslessMerge(t *testing.T) {
+func TestLatencyHistory_writeWithRetry_LosslessMerge(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
@@ -201,8 +201,8 @@ func TestLatencyHistory_WriteWithRetry_LosslessMerge(t *testing.T) {
 		t.Fatalf("reapply: %v", err)
 	}
 
-	if err := sessionA.WriteWithRetry(ctx, nk, occTestUserID, reapply); err != nil {
-		t.Fatalf("WriteWithRetry: %v", err)
+	if err := sessionA.writeWithRetry(ctx, nk, occTestUserID, reapply); err != nil {
+		t.Fatalf("writeWithRetry: %v", err)
 	}
 
 	// Read back the final stored object and assert lossless merge.
@@ -218,10 +218,10 @@ func TestLatencyHistory_WriteWithRetry_LosslessMerge(t *testing.T) {
 	}
 }
 
-// TestLatencyHistory_WriteWithRetry_NoRetryOnNonVersionError proves that a
+// TestLatencyHistory_writeWithRetry_NoRetryOnNonVersionError proves that a
 // non-version storage error is returned immediately without re-reading or
 // retrying.
-func TestLatencyHistory_WriteWithRetry_NoRetryOnNonVersionError(t *testing.T) {
+func TestLatencyHistory_writeWithRetry_NoRetryOnNonVersionError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
@@ -235,7 +235,7 @@ func TestLatencyHistory_WriteWithRetry_NoRetryOnNonVersionError(t *testing.T) {
 		return nil
 	}
 
-	err := h.WriteWithRetry(ctx, nk, occTestUserID, reapply)
+	err := h.writeWithRetry(ctx, nk, occTestUserID, reapply)
 	if err == nil {
 		t.Fatal("expected error for non-version failure, got nil")
 	}
@@ -247,9 +247,9 @@ func TestLatencyHistory_WriteWithRetry_NoRetryOnNonVersionError(t *testing.T) {
 	}
 }
 
-// TestLatencyHistory_WriteWithRetry_BoundedAttempts proves WriteWithRetry gives
+// TestLatencyHistory_writeWithRetry_BoundedAttempts proves writeWithRetry gives
 // up after a bounded number of attempts when conflicts persist indefinitely.
-func TestLatencyHistory_WriteWithRetry_BoundedAttempts(t *testing.T) {
+func TestLatencyHistory_writeWithRetry_BoundedAttempts(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
@@ -262,7 +262,7 @@ func TestLatencyHistory_WriteWithRetry_BoundedAttempts(t *testing.T) {
 	h := NewLatencyHistory()
 	reapply := func() error { return nil }
 
-	err := h.WriteWithRetry(ctx, nk, occTestUserID, reapply)
+	err := h.writeWithRetry(ctx, nk, occTestUserID, reapply)
 	if err == nil {
 		t.Fatal("expected error after exhausting retries, got nil")
 	}

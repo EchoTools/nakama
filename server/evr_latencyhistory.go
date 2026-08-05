@@ -19,7 +19,7 @@ const (
 )
 
 const (
-	// latencyRetryMaxAttempts bounds WriteWithRetry so a persistently contended
+	// latencyRetryMaxAttempts bounds writeWithRetry so a persistently contended
 	// object cannot spin forever. Includes the initial attempt.
 	latencyRetryMaxAttempts = 5
 	// latencyRetryBaseBackoff is the base unit of jittered backoff between
@@ -60,7 +60,7 @@ func (h *LatencyHistory) SetStorageMeta(meta StorableMetadata) {
 	h.version = meta.Version
 }
 
-// WriteWithRetry writes the history, retrying on optimistic-concurrency
+// writeWithRetry writes the history, retrying on optimistic-concurrency
 // (version-check) conflicts only. On such a conflict it re-reads the current
 // stored object into h (adopting the concurrent winner's version and contents),
 // invokes reapply to re-apply this caller's pending samples onto that fresh
@@ -81,7 +81,7 @@ func (h *LatencyHistory) SetStorageMeta(meta StorableMetadata) {
 // Only version-conflict errors are retried; any other error (including
 // non-conflict storage failures) is returned immediately without re-reading.
 // Attempts are bounded by latencyRetryMaxAttempts with small jittered backoff.
-func (h *LatencyHistory) WriteWithRetry(ctx context.Context, nk runtime.NakamaModule, userID string, reapply func() error) error {
+func (h *LatencyHistory) writeWithRetry(ctx context.Context, nk runtime.NakamaModule, userID string, reapply func() error) error {
 	var lastErr error
 	for attempt := 0; attempt < latencyRetryMaxAttempts; attempt++ {
 		err := StorableWrite(ctx, nk, userID, h)
@@ -98,10 +98,10 @@ func (h *LatencyHistory) WriteWithRetry(ctx context.Context, nk runtime.NakamaMo
 		// object (picking up the winner's version + entries) then re-apply this
 		// caller's pending mutation onto it before writing again.
 		if rerr := StorableRead(ctx, nk, userID, h, false); rerr != nil {
-			return fmt.Errorf("LatencyHistory.WriteWithRetry: re-read after conflict: %w", rerr)
+			return fmt.Errorf("LatencyHistory.writeWithRetry: re-read after conflict: %w", rerr)
 		}
 		if rerr := reapply(); rerr != nil {
-			return fmt.Errorf("LatencyHistory.WriteWithRetry: re-apply after conflict: %w", rerr)
+			return fmt.Errorf("LatencyHistory.writeWithRetry: re-apply after conflict: %w", rerr)
 		}
 
 		// Jittered backoff before the next attempt (skip after the final loop).
@@ -111,12 +111,12 @@ func (h *LatencyHistory) WriteWithRetry(ctx context.Context, nk runtime.NakamaMo
 			jitter := time.Duration(rand.Int63n(int64(latencyRetryBaseBackoff)))
 			select {
 			case <-ctx.Done():
-				return fmt.Errorf("LatencyHistory.WriteWithRetry: %w", ctx.Err())
+				return fmt.Errorf("LatencyHistory.writeWithRetry: %w", ctx.Err())
 			case <-time.After(backoff + jitter):
 			}
 		}
 	}
-	return fmt.Errorf("LatencyHistory.WriteWithRetry: exhausted %d attempts: %w", latencyRetryMaxAttempts, lastErr)
+	return fmt.Errorf("LatencyHistory.writeWithRetry: exhausted %d attempts: %w", latencyRetryMaxAttempts, lastErr)
 }
 
 func (h *LatencyHistory) String() string {
