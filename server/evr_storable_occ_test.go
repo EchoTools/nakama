@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
@@ -175,6 +177,142 @@ func mustStorableJSON(t *testing.T, v any) string {
 		t.Fatalf("marshal: %v", err)
 	}
 	return string(b)
+}
+
+// onceHook returns an afterRead hook that runs fn only on its first invocation.
+func onceHook(fn func(m *storableRaceNK)) func(m *storableRaceNK) {
+	var done bool
+	return func(m *storableRaceNK) {
+		if done {
+			return
+		}
+		done = true
+		fn(m)
+	}
+}
+
+// winnerLatencyJSON builds a stored LatencyHistory holding a single entry for
+// the given IP, as a concurrent writer would have left it.
+func winnerLatencyJSON(t *testing.T, ip string) string {
+	t.Helper()
+	winner := NewLatencyHistory()
+	winner.GameServerLatencies[ip] = []LatencyHistoryItem{{Timestamp: time.Now().UTC(), RTT: 42 * time.Millisecond}}
+	return mustStorableJSON(t, winner)
+}
+
+// TestStorableRead_CreateDoesNotClobberConcurrentCreate proves that
+// StorableRead(create=true) really is create-only: if another writer creates the
+// object between the read that misses and the write that follows, the winner's
+// object survives and is adopted into dst, rather than being overwritten with
+// this caller's defaults.
+//
+// LatencyHistory is used because its zero value carries an empty storage
+// version — the case where the write goes out unconditional.
+func TestStorableRead_CreateDoesNotClobberConcurrentCreate(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	userID := uuid.Must(uuid.NewV4()).String()
+	nk := newStorableRaceNK()
+
+	winnerJSON := winnerLatencyJSON(t, "10.0.0.1")
+	nk.afterRead = onceHook(func(m *storableRaceNK) {
+		m.set(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey, winnerJSON)
+	})
+
+	dst := NewLatencyHistory()
+	if err := StorableRead(ctx, nk, userID, dst, true); err != nil {
+		t.Fatalf("StorableRead(create=true): %v", err)
+	}
+
+	stored := nk.get(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey)
+	if stored == nil {
+		t.Fatal("no object stored")
+	}
+	if !strings.Contains(stored.Value, "10.0.0.1") {
+		t.Errorf("create clobbered the concurrently-created object; stored value = %s", stored.Value)
+	}
+	if _, ok := dst.GameServerLatencies["10.0.0.1"]; !ok {
+		t.Errorf("dst did not adopt the winner's object, got %+v", dst.GameServerLatencies)
+	}
+}
+
+// TestStorableRead_CorruptRecoveryDoesNotClobberConcurrentRecreate proves that
+// the corrupt-record recovery path honours its own contract ("disallow
+// overwriting any concurrently-recreated object"): if another writer replaces
+// the corrupt object before our versioned delete lands, that good object must
+// not be overwritten with defaults.
+func TestStorableRead_CorruptRecoveryDoesNotClobberConcurrentRecreate(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	userID := uuid.Must(uuid.NewV4()).String()
+	nk := newStorableRaceNK()
+
+	// Stored object is unparseable for this type.
+	nk.set(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey, `{"game_server_latencies":"corrupt"}`)
+
+	winnerJSON := winnerLatencyJSON(t, "10.0.0.1")
+	// After our read of the corrupt object, a concurrent writer replaces it with
+	// a valid object under a new version, so our versioned delete matches
+	// nothing.
+	nk.afterRead = onceHook(func(m *storableRaceNK) {
+		m.set(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey, winnerJSON)
+	})
+
+	dst := NewLatencyHistory()
+	if err := StorableRead(ctx, nk, userID, dst, true); err != nil {
+		t.Fatalf("StorableRead(create=true): %v", err)
+	}
+
+	stored := nk.get(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey)
+	if stored == nil {
+		t.Fatal("no object stored")
+	}
+	if !strings.Contains(stored.Value, "10.0.0.1") {
+		t.Errorf("corrupt-record recovery clobbered the concurrently-recreated object; stored value = %s", stored.Value)
+	}
+	if _, ok := dst.GameServerLatencies["10.0.0.1"]; !ok {
+		t.Errorf("dst did not adopt the recreated object, got %+v", dst.GameServerLatencies)
+	}
+}
+
+// TestStorableRead_CreateStillCreatesWhenAbsent is the companion boundary case:
+// with no concurrent writer, create=true must still create the object and leave
+// dst holding a usable storage version. Both a type whose zero storage version
+// is empty (LatencyHistory) and one that starts at "*" (the journal) are
+// covered.
+func TestStorableRead_CreateStillCreatesWhenAbsent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	t.Run("empty initial version", func(t *testing.T) {
+		userID := uuid.Must(uuid.NewV4()).String()
+		nk := newStorableRaceNK()
+		dst := NewLatencyHistory()
+		if err := StorableRead(ctx, nk, userID, dst, true); err != nil {
+			t.Fatalf("StorableRead(create=true): %v", err)
+		}
+		if nk.get(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey) == nil {
+			t.Fatal("create=true did not create the object")
+		}
+		if v := dst.StorageMeta().Version; v == "" || v == "*" {
+			t.Errorf("dst version not updated from the write ack, got %q", v)
+		}
+	})
+
+	t.Run("star initial version", func(t *testing.T) {
+		userID := uuid.Must(uuid.NewV4()).String()
+		nk := newStorableRaceNK()
+		dst := NewGuildEnforcementJournal(userID)
+		if err := StorableRead(ctx, nk, userID, dst, true); err != nil {
+			t.Fatalf("StorableRead(create=true): %v", err)
+		}
+		if nk.get(userID, StorageCollectionEnforcementJournal, StorageKeyEnforcementJournal) == nil {
+			t.Fatal("create=true did not create the object")
+		}
+		if v := dst.GetStorageVersion(); v == "" || v == "*" {
+			t.Errorf("dst version not updated from the write ack, got %q", v)
+		}
+	})
 }
 
 // TestStorableWrite_VersionConflictPreservesSentinel proves the error returned

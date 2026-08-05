@@ -104,8 +104,7 @@ func StorableRead(ctx context.Context, nk runtime.NakamaModule, userID string, d
 	case 0:
 		// No objects found
 		if create {
-			meta.Version = "*"                         // Disallow overwriting existing objects.
-			return StorableWrite(ctx, nk, userID, dst) // Attempt to write the object if it doesn't exist.
+			return storableCreate(ctx, nk, userID, dst) // Attempt to write the object if it doesn't exist.
 		}
 		return status.Errorf(codes.NotFound, "no %s/%s found", userID, meta.String())
 	case 1:
@@ -122,11 +121,11 @@ func StorableRead(ctx context.Context, nk runtime.NakamaModule, userID string, d
 				UserID:     meta.UserID,
 				Version:    meta.Version,
 			}}); err != nil {
-				// Intentionally not returning here; the write below will fail with a version conflict if needed.
+				// Intentionally not returning here; the create below is version-guarded
+				// and will adopt whatever object replaced the corrupt one.
 				_ = err
 			}
-			meta.Version = "*" // Disallow overwriting any concurrently-recreated object.
-			return StorableWrite(ctx, nk, userID, dst)
+			return storableCreate(ctx, nk, userID, dst)
 		}
 		meta.Version = objs[0].GetVersion()
 		meta.PermissionRead = int(objs[0].GetPermissionRead())
@@ -139,9 +138,37 @@ func StorableRead(ctx context.Context, nk runtime.NakamaModule, userID string, d
 	}
 }
 
+// storableCreate writes dst as a brand new object under the create-only version
+// "*", so it can never overwrite an object that another writer created between
+// the caller's read and this write. If the create loses that race, the winner's
+// object is read back into dst — leaving StorableRead(create=true) with
+// get-or-create semantics rather than read-or-clobber.
+//
+// The version must be forced onto the wire here: StorableWrite re-derives its
+// metadata from src.StorageMeta(), so mutating a local StorableMetadata copy has
+// no effect on the write.
+func storableCreate(ctx context.Context, nk runtime.NakamaModule, userID string, dst StorableAdapter) error {
+	err := storableWriteVersion(ctx, nk, userID, dst, "*")
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, runtime.ErrStorageRejectedVersion) {
+		return err
+	}
+	// Lost the create race: adopt the concurrent winner's object.
+	return StorableRead(ctx, nk, userID, dst, false)
+}
+
 func StorableWrite(ctx context.Context, nk runtime.NakamaModule, userID string, src StorableAdapter) error {
+	return storableWriteVersion(ctx, nk, userID, src, src.StorageMeta().Version)
+}
+
+// storableWriteVersion writes src under an explicit storage version, which
+// StorableWrite fills in from src's own metadata.
+func storableWriteVersion(ctx context.Context, nk runtime.NakamaModule, userID string, src StorableAdapter, version string) error {
 	meta := src.StorageMeta()
 	meta.UserID = userID
+	meta.Version = version
 	data, err := json.Marshal(src)
 	if err != nil {
 		return storableErrorf(meta, codes.Internal, "failed to marshal: %w", err)
