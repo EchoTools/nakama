@@ -21,6 +21,8 @@ import (
 // degradation branch in lobbyAuthorize contains no return — and is covered by
 // the gate being an else-if rather than a rejection path.
 func TestVPNDegradedWarning_FiresWhenIPQSLookupUnavailable(t *testing.T) {
+	vpnDegradedLogThrottle = newLogThrottle(vpnDegradedLogWindow)
+
 	core, logs := observer.New(zapcore.DebugLevel)
 	logger := zap.New(core)
 
@@ -30,7 +32,7 @@ func TestVPNDegradedWarning_FiresWhenIPQSLookupUnavailable(t *testing.T) {
 		guildID   = "987654321098765432"
 	)
 
-	warnVPNDegraded(logger, clientIP, discordID, guildID)
+	warnVPNDegraded(logger, newRecordingMetrics().CustomCounter, clientIP, discordID, guildID, false)
 
 	entries := logs.FilterMessage("VPN blocking degraded: IPQS lookup unavailable for VPN check").All()
 	require.Len(t, entries, 1, "expected exactly one degraded-VPN warning")

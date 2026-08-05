@@ -491,9 +491,10 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 	// Get the IPQS Data
 
-	if params.ipInfo, err = p.ipInfoCache.Get(ctx, session.clientIP); err != nil {
-		logger.Debug("Failed to get IPQS details", zap.Error(err))
-	}
+	// Fails open by contract: IPInfoCache.Get never returns a non-nil error, and
+	// a nil params.ipInfo means "unknown", not "clean" (SEC-6). Lookup failures
+	// are counted by the ip_info_provider_error / ipqs_* metrics.
+	params.ipInfo, _ = p.ipInfoCache.Get(ctx, session.clientIP)
 
 	// The account is now authenticated. Authorize the session.
 	if params.profile.IsDisabled() {
