@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -153,6 +154,8 @@ func TestSnapshotStateGuilds_SnapshotIsStableAcrossStateMutation(t *testing.T) {
 // `"guild_metadata": guild` zap reflect-walk reaches straight back into
 // gateway-mutated slices.
 func TestSnapshotStateGuilds_DropsUncopiedLiveCollections(t *testing.T) {
+	pinnedAt := time.Now()
+	sortOrder := discordgo.ForumSortOrderLatestActivity
 	state := discordgo.NewState()
 	if err := state.GuildAdd(&discordgo.Guild{
 		ID:      "guild-x",
@@ -164,7 +167,16 @@ func TestSnapshotStateGuilds_DropsUncopiedLiveCollections(t *testing.T) {
 		Threads: []*discordgo.Channel{{ID: "thread-1", GuildID: "guild-x"}},
 		Channels: []*discordgo.Channel{
 			{ID: "c1", GuildID: "guild-x", Type: discordgo.ChannelTypeGuildText, Name: "rules", Topic: "t",
-				Messages: []*discordgo.Message{{ID: "m1"}}},
+				Messages:             []*discordgo.Message{{ID: "m1"}},
+				Recipients:           []*discordgo.User{{ID: "u1"}},
+				PermissionOverwrites: []*discordgo.PermissionOverwrite{{ID: "po1"}},
+				ThreadMetadata:       &discordgo.ThreadMetadata{Archived: true},
+				Member:               &discordgo.ThreadMember{ID: "tm1"},
+				Members:              []*discordgo.ThreadMember{{ID: "tm2"}},
+				AvailableTags:        []discordgo.ForumTag{{ID: "tag1"}},
+				AppliedTags:          []string{"tag1"},
+				LastPinTimestamp:     &pinnedAt,
+				DefaultSortOrder:     &sortOrder},
 		},
 	}); err != nil {
 		t.Fatalf("GuildAdd: %v", err)
@@ -189,8 +201,35 @@ func TestSnapshotStateGuilds_DropsUncopiedLiveCollections(t *testing.T) {
 	if len(g.Channels) != 1 {
 		t.Fatalf("snapshot lost the channels the prune path reads: %+v", g.Channels)
 	}
-	if len(g.Channels[0].Messages) != 0 {
-		t.Errorf("snapshot channel still carries Messages; MessageAdd appends to it under State.Lock()")
+	// Every reference-typed field on discordgo.Channel must be either
+	// deep-copied or cleared. `go doc discordgo.Channel` enumerates exactly
+	// these ten; none is read through the snapshot, so all ten are cleared.
+	ch := g.Channels[0]
+	for name, v := range map[string]int{
+		"Messages":             len(ch.Messages),
+		"Recipients":           len(ch.Recipients),
+		"PermissionOverwrites": len(ch.PermissionOverwrites),
+		"Members":              len(ch.Members),
+		"AvailableTags":        len(ch.AvailableTags),
+		"AppliedTags":          len(ch.AppliedTags),
+	} {
+		if v != 0 {
+			t.Errorf("snapshot channel still carries %s (%d entries); it aliases gateway-mutated state", name, v)
+		}
+	}
+	for name, ptr := range map[string]bool{
+		"ThreadMetadata":   ch.ThreadMetadata != nil,
+		"Member":           ch.Member != nil,
+		"LastPinTimestamp": ch.LastPinTimestamp != nil,
+		"DefaultSortOrder": ch.DefaultSortOrder != nil,
+	} {
+		if ptr {
+			t.Errorf("snapshot channel still aliases %s; clear it or deep-copy it", name)
+		}
+	}
+	// The scalar fields guildSync actually reads must survive.
+	if ch.ID != "c1" || ch.Name != "rules" || ch.Topic != "t" || ch.Type != discordgo.ChannelTypeGuildText {
+		t.Errorf("snapshot dropped the channel scalars guildSync reads: %+v", ch)
 	}
 }
 

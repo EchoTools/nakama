@@ -151,9 +151,19 @@ func (h *LatencyHistory) MarshalJSON() ([]byte, error) {
 // write" — a runtime throw that kills the process rather than a recoverable
 // panic.
 //
-// Merge semantics match what encoding/json did for the plain struct: keys from
-// the decoded record are adopted, and keys present only in the receiver are
-// preserved.
+// Merge semantics match what encoding/json did for the plain struct in every
+// case except one: keys from the decoded record are adopted, and keys present
+// only in the receiver are preserved.
+//
+// The one divergence is a JSON null for the map. Reflection-decoding
+// `{"game_server_latencies":null}` set the field to a nil map, discarding
+// whatever the receiver already held; this implementation leaves the receiver's
+// entries in place. That document is reachable in production — StorableWrite on
+// a `&LatencyHistory{}` with a nil map (constructed at evr_pipeline_login.go,
+// evr_runtime_rpc.go and evr_runtime_rpc_match.go) persists exactly that — and
+// the divergence is strictly the safer direction: writeWithRetry's re-read no
+// longer silently drops the caller's pending samples when the concurrent winner
+// stored a null map. Pinned by TestLatencyHistory_UnmarshalNullMapPreservesExisting.
 func (h *LatencyHistory) UnmarshalJSON(data []byte) error {
 	var decoded latencyHistoryData
 	if err := json.Unmarshal(data, &decoded); err != nil {

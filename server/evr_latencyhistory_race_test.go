@@ -216,7 +216,10 @@ func TestLatencyHistory_String_ConcurrentWithAdd(t *testing.T) {
 		defer close(finished)
 		for i := 0; i < 500; i++ {
 			if s := h.String(); s == "" {
-				panic("String() returned empty; marshal failed")
+				// t.Fatal is illegal off the test goroutine, and panicking
+				// here would abort the whole ./server/ test binary.
+				t.Errorf("String() returned empty; marshal failed")
+				return
 			}
 		}
 	}()
@@ -358,6 +361,35 @@ func TestLatencyHistory_UnmarshalMergesIntoExisting(t *testing.T) {
 	}
 	if _, ok := local.GameServerLatencies["10.0.0.2"]; !ok {
 		t.Errorf("local-only key was dropped: %#v", local.GameServerLatencies)
+	}
+}
+
+// TestLatencyHistory_UnmarshalNullMapPreservesExisting pins the ONE case where
+// the explicit UnmarshalJSON diverges from the reflection decode it replaced.
+//
+// A `&LatencyHistory{}` with a nil map (evr_pipeline_login.go:720,
+// evr_runtime_rpc.go:1950, evr_runtime_rpc_match.go:168) marshals to
+// `{"game_server_latencies":null}`, so this document is genuinely stored.
+// Reflection-decoding it set the receiver's map to nil, discarding the caller's
+// pending samples during writeWithRetry's re-read; the merge keeps them. The
+// divergence is deliberate and strictly the safer direction.
+func TestLatencyHistory_UnmarshalNullMapPreservesExisting(t *testing.T) {
+	// The document really is what a nil-map history serializes to.
+	if got := (&LatencyHistory{}).String(); got != `{"game_server_latencies":null}` {
+		t.Fatalf("nil-map history serialized to %s; the null case may no longer be reachable", got)
+	}
+
+	h := NewLatencyHistory()
+	h.Add(net.ParseIP("10.0.0.2"), 99, 25, time.Time{})
+
+	if err := json.Unmarshal([]byte(`{"game_server_latencies":null}`), h); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if h.GameServerLatencies == nil {
+		t.Fatal("null map nil'd the receiver's map; pending samples would be lost on the OCC re-read")
+	}
+	if _, ok := h.GameServerLatencies["10.0.0.2"]; !ok {
+		t.Errorf("null map dropped the local-only key: %#v", h.GameServerLatencies)
 	}
 }
 

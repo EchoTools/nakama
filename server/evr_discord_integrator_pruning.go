@@ -105,6 +105,12 @@ func copyStateGuild(g *discordgo.Guild) *discordgo.Guild {
 		chCopy.Members = nil
 		chCopy.AvailableTags = nil
 		chCopy.AppliedTags = nil
+		// Pointer fields nothing here reads. ChannelAdd replaces the pointer
+		// (`*c = *channel`) rather than writing through it, so aliasing them
+		// would not actually race — but "cleared unless copied" has to hold
+		// for every reference-typed field or the contract is unenforceable.
+		chCopy.LastPinTimestamp = nil
+		chCopy.DefaultSortOrder = nil
 		c.Channels = append(c.Channels, &chCopy)
 	}
 	c.Features = slices.Clone(g.Features)
