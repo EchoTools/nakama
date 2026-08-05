@@ -412,9 +412,17 @@ func EVRProfileLoad(ctx context.Context, nk runtime.NakamaModule, userID string)
 	return BuildEVRProfileFromAccount(account)
 }
 
+// EVRProfileUpdate persists md for userID in a single atomic transaction: the
+// profile storage write, the account metadata sync, and the cached ServerProfile
+// invalidation all commit together or not at all.
+//
+// There is exactly one write attempt. On a storage version conflict the error is
+// returned immediately, wrapped with %w so runtime.ErrStorageRejectedVersion
+// stays detectable via errors.Is (and via the "version check failed" substring
+// that isVersionConflictError matches). Callers that need retry-on-conflict must
+// reload and re-apply their own mutation — this function will not silently
+// discard the caller's changes to make a write succeed.
 func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID string, md *EVRProfile) error {
-	const maxRetries = 3
-
 	if userID == SystemUserID {
 		return fmt.Errorf("cannot set metadata for system user")
 	}
@@ -422,43 +430,48 @@ func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID strin
 		return fmt.Errorf("metadata cannot be nil")
 	}
 
-	var lastErr error
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		if attempt > 0 {
-			// On version conflict, reload the full profile. This is a "last-write-wins" conflict
-			// resolution, where the caller's intended mutations are discarded on retry.
-			// This is safer than accidentally writing stale data. The caller is expected
-			// to implement their own retry loop if they need to preserve their changes.
-			fresh, err := EVRProfileLoad(ctx, nk, userID)
-			if err != nil {
-				lastErr = err
-			} else {
-				*md = *fresh
-			}
-		}
-
-		if err := StorableWrite(ctx, nk, userID, md); err != nil {
-			lastErr = err
-			if isVersionConflictError(err) && attempt < maxRetries-1 {
-				backoff := time.Duration(10*(1<<uint(attempt))) * time.Millisecond
-				select {
-				case <-time.After(backoff):
-					continue
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}
-			return fmt.Errorf("failed to write profile storage: %w", err)
-		}
-
-		// Invalidate any cached ServerProfile so it will be regenerated with the updated EVRProfile data.
-		_ = ServerProfileInvalidate(ctx, nk, userID)
-
-		// Also update the account metadata to keep it in sync
-		return nk.AccountUpdateId(ctx, userID, "", md.MarshalMap(), "", "", "", "", "")
+	meta := md.StorageMeta()
+	meta.UserID = userID
+	data, err := json.Marshal(md)
+	if err != nil {
+		return fmt.Errorf("failed to marshal profile: %w", err)
 	}
 
-	return fmt.Errorf("failed to write profile storage: %w", lastErr)
+	acks, _, err := nk.MultiUpdate(ctx,
+		[]*runtime.AccountUpdate{{
+			UserID:   userID,
+			Metadata: md.MarshalMap(),
+		}},
+		[]*runtime.StorageWrite{{
+			Collection:      meta.Collection,
+			Key:             meta.Key,
+			UserID:          meta.UserID,
+			Value:           string(data),
+			Version:         meta.Version,
+			PermissionRead:  meta.PermissionRead,
+			PermissionWrite: meta.PermissionWrite,
+		}},
+		// Invalidate any cached ServerProfile so it is regenerated from the
+		// updated EVRProfile. Unconditional (no version): a missing key is a no-op.
+		[]*runtime.StorageDelete{{
+			Collection: StorageCollectionServerProfile,
+			Key:        StorageKeyServerProfile,
+			UserID:     userID,
+		}},
+		nil, // walletUpdates
+		false,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update profile: %w", err)
+	}
+
+	// Update the in-memory version from the write ack.
+	if len(acks) > 0 {
+		meta.Version = acks[0].GetVersion()
+		md.SetStorageMeta(meta)
+	}
+
+	return nil
 }
 
 func BuildEVRProfileFromAccount(account *api.Account) (*EVRProfile, error) {
