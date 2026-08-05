@@ -20,8 +20,9 @@ import (
 // 1522261692355055849), since gateway Guild Create events are not replayed
 // on reconnect.
 // Guilds whose sync attempt fails are returned as the remaining orphan
-// candidates for the leave/safety-threshold logic. Note that syncFn itself may
-// leave a guild whose owner is globally banned; that is existing behavior.
+// candidates for the leave/safety-threshold logic. syncFn must be
+// non-destructive: it must not leave the guild, so that every guild leave is
+// performed by the caller's safety-checked prune path.
 func reconcileOrphanGuilds(logger runtime.Logger, orphanGuilds []*discordgo.Guild, syncFn func(*discordgo.Guild) error) []*discordgo.Guild {
 	var remaining []*discordgo.Guild
 	for _, guild := range orphanGuilds {
@@ -35,7 +36,7 @@ func reconcileOrphanGuilds(logger runtime.Logger, orphanGuilds []*discordgo.Guil
 			remaining = append(remaining, guild)
 			continue
 		}
-		logger.WithFields(fields).Info("Reconciled orphan guild, group created")
+		logger.WithFields(fields).Info("Orphan guild sync succeeded")
 	}
 	return remaining
 }
@@ -103,9 +104,12 @@ func (d *DiscordIntegrator) pruneGuildGroups(ctx context.Context, logger runtime
 
 	// Try to repair orphan guilds before treating them as prune candidates:
 	// re-run guildSync so a guild whose join-time sync failed gets its group
-	// created instead of the bot leaving a healthy community.
+	// created instead of the bot leaving a healthy community. The sync runs
+	// non-destructively (leaveOnBannedOwner=false): a guild that cannot be
+	// synced (e.g. a globally banned owner) stays an orphan candidate and is
+	// only left by the safety-threshold-checked prune path below.
 	orphanGuilds = reconcileOrphanGuilds(logger, orphanGuilds, func(guild *discordgo.Guild) error {
-		return d.guildSync(ctx, d.logger, guild)
+		return d.guildSync(ctx, d.logger, guild, false)
 	})
 
 	// Safety check to ensure this is not a mass leave operation

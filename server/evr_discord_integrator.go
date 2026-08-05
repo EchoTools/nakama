@@ -542,7 +542,12 @@ func truncateRuneSafe(s string, maxBytes int) string {
 	return ""
 }
 
-func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, guild *discordgo.Guild) error {
+// guildSync registers (or updates) the Nakama group backing a Discord guild.
+// When the guild owner is globally banned, the sync normally leaves the guild;
+// leaveOnBannedOwner controls that. Reconciliation during pruning passes false
+// so that leaving is deferred to the safety-threshold-checked prune path and
+// no guild is left before the threshold check can run.
+func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, guild *discordgo.Guild, leaveOnBannedOwner bool) error {
 	logger = logger.With(zap.String("guild_id", guild.ID), zap.String("guild_name", guild.Name))
 
 	var err error
@@ -562,8 +567,11 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 
 		ownerUserID, _, _, err = AuthenticateCustom(ctx, logger, d.db, ownerMember.User.ID, ownerMember.User.Username, true)
 		if err != nil {
-			// Leave guilds where the owner is globally banned.
-			if status.Code(err) == codes.PermissionDenied {
+			// Leave guilds where the owner is globally banned. When called
+			// from reconciliation (leaveOnBannedOwner=false), the leave is
+			// deferred: the guild remains an orphan candidate and is left by
+			// the safety-threshold-checked prune path instead.
+			if leaveOnBannedOwner && status.Code(err) == codes.PermissionDenied {
 				logger.Warn("Guild owner is globally banned. Leaving guild.", zap.String("guild_id", guild.ID), zap.String("owner_id", guild.OwnerID))
 				if err := d.dg.GuildLeave(guild.ID); err != nil {
 					return fmt.Errorf("error leaving guild: %w", err)
@@ -580,15 +588,21 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 	}
 
 	if ownerAccount.GetDisableTime() != nil {
-		message := fmt.Sprintf("The owner of the guild `%s` (ID: %s) owned by <@%s> is globally banned. The guild will be removed.", guild.Name, guild.ID, guild.OwnerID)
-		d.LogServiceAuditMessage(ctx, message, false)
+		if leaveOnBannedOwner {
+			message := fmt.Sprintf("The owner of the guild `%s` (ID: %s) owned by <@%s> is globally banned. The guild will be removed.", guild.Name, guild.ID, guild.OwnerID)
+			d.LogServiceAuditMessage(ctx, message, false)
 
-		logger.Warn("Guild owner is globally banned. Leaving guild.", zap.String("guild_id", guild.ID), zap.String("owner_id", guild.OwnerID))
-		if err := d.dg.GuildLeave(guild.ID); err != nil {
-			return fmt.Errorf("error leaving guild: %w", err)
+			logger.Warn("Guild owner is globally banned. Leaving guild.", zap.String("guild_id", guild.ID), zap.String("owner_id", guild.OwnerID))
+			if err := d.dg.GuildLeave(guild.ID); err != nil {
+				return fmt.Errorf("error leaving guild: %w", err)
+			}
+
+			return nil
 		}
-
-		return nil
+		// Reconciliation must not leave guilds: leave decisions belong to the
+		// safety-threshold-checked prune path. Report the failure so the guild
+		// remains an orphan candidate and is left there instead.
+		return fmt.Errorf("guild owner %s is globally banned", guild.OwnerID)
 	}
 
 	// Fit within the groups table's VARCHAR(255) name/description columns;
@@ -655,7 +669,7 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 
 func (d *DiscordIntegrator) handleGuildCreate(logger *zap.Logger, _ *discordgo.Session, e *discordgo.GuildCreate) error {
 	logger.Info("Guild Create", zap.Any("guild", e.Guild.ID))
-	if err := d.guildSync(d.ctx, logger, e.Guild); err != nil {
+	if err := d.guildSync(d.ctx, logger, e.Guild, true); err != nil {
 		return fmt.Errorf("error during guild sync: %w", err)
 	}
 	return nil
@@ -663,7 +677,7 @@ func (d *DiscordIntegrator) handleGuildCreate(logger *zap.Logger, _ *discordgo.S
 
 func (d *DiscordIntegrator) handleGuildUpdate(logger *zap.Logger, _ *discordgo.Session, e *discordgo.GuildUpdate) error {
 	logger.Info("Guild Update", zap.Any("guild", e.Guild.ID))
-	if err := d.guildSync(d.ctx, logger, e.Guild); err != nil {
+	if err := d.guildSync(d.ctx, logger, e.Guild, true); err != nil {
 		return fmt.Errorf("error during guild sync: %w", err)
 	}
 	return nil
