@@ -58,6 +58,14 @@ type EarlyQuitPlayerState struct {
 	PenaltyLevel        int32 `json:"penalty_level"`          // Resolved from config (clamped uint8)
 	SteadyPlayerLevel   int32 `json:"steady_player_level"`    // Resolved from config (clamped uint8)
 
+	// PenaltyIsManual marks PenaltyLevel/PenaltyTimestamp as a
+	// moderator-applied sanction rather than a value derived from the
+	// quit-count ladder. While it is set and the lockout has not expired,
+	// ladder resolution must not lower or erase the penalty — otherwise the
+	// sanctioned player's very next early quit wipes the sanction, because one
+	// quit maps to ladder level 0 and level 0 clears the lockout.
+	PenaltyIsManual bool `json:"penalty_is_manual,omitempty"`
+
 	// Nakama extensions (kept for matchmaker/UI compat)
 	TotalCompletedMatches      int32     `json:"total_completed_matches"`
 	MatchmakingTier            int32     `json:"matchmaking_tier"`
@@ -168,21 +176,49 @@ func ResolvePenaltyLevel(numQuits int32, cfg *evr.SNSEarlyQuitConfig) (level int
 	return 0, 0
 }
 
+// ApplyModeratorPenalty records a moderator-applied sanction: the penalty level,
+// its absolute expiry, and the marker that keeps quit-count ladder resolution
+// from lowering or erasing it while it is in force. A lockoutSec of zero or less
+// means "penalty cleared", which also clears the marker.
+func (s *EarlyQuitPlayerState) ApplyModeratorPenalty(level int32, lockoutSec int32) {
+	s.Lock()
+	defer s.Unlock()
+	s.PenaltyLevel = level
+	if level > 0 && lockoutSec > 0 {
+		s.PenaltyTimestamp = time.Now().Unix() + int64(lockoutSec)
+		s.PenaltyIsManual = true
+	} else {
+		s.PenaltyTimestamp = 0
+		s.PenaltyIsManual = false
+	}
+}
+
 // resolveAndApplyPenaltyLockout resolves the penalty level from the STORED
 // early quit service config (EarlyQuit|config under SystemUserID) and applies
-// the resulting lockout to eqconfig. Call it after IncrementEarlyQuit() so the
-// new quit count is reflected. When the count maps to a level with no lockout
-// (level 0), any stale PenaltyLevel/PenaltyTimestamp are cleared to zero.
+// the resulting lockout to eqconfig. Call it after IncrementEarlyQuit() (or
+// after ForgiveLastQuit()) so the new quit count is reflected. When the count
+// maps to a level with no lockout (level 0), any stale
+// PenaltyLevel/PenaltyTimestamp are cleared to zero.
+//
+// A moderator-applied sanction that has not expired is left alone: the ladder
+// must not shorten or erase it. The ladder still wins when it resolves to a
+// strictly harsher level, so a sanctioned player who keeps quitting is not
+// insulated by their sanction.
 func resolveAndApplyPenaltyLockout(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, eqconfig *EarlyQuitPlayerState) {
 	config := LoadEarlyQuitServiceConfig(ctx, nk, logger)
 	level, lockoutSec := ResolvePenaltyLevel(eqconfig.NumEarlyQuits, config)
+	now := time.Now().Unix()
+	if eqconfig.PenaltyIsManual && eqconfig.PenaltyTimestamp > now && eqconfig.PenaltyLevel >= level {
+		return
+	}
 	if lockoutSec > 0 {
 		eqconfig.PenaltyLevel = level
-		eqconfig.PenaltyTimestamp = time.Now().Unix() + int64(lockoutSec)
+		eqconfig.PenaltyTimestamp = now + int64(lockoutSec)
 	} else {
 		eqconfig.PenaltyLevel = 0
 		eqconfig.PenaltyTimestamp = 0
 	}
+	eqconfig.PenaltyIsManual = false
 }
 
 // ResolveSteadyPlayerLevel determines the steady player level from the config.

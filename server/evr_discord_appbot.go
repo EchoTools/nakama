@@ -2834,17 +2834,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				lockoutDuration = GetLockoutDuration(int(penaltyLevel))
 			}
 
-			config.PenaltyLevel = int32(penaltyLevel)
-
-			// Set the absolute lockout expiry timestamp. Without it a zero ts
-			// makes the scheduler treat the lockout as instantly expired on
-			// its next tick and IsPenaltyActive() report no active lockout.
-			if penaltyLevel > 0 {
-				config.PenaltyTimestamp = time.Now().Unix() + int64(lockoutDuration.Seconds())
-			} else {
-				// Level 0 = penalty cleared.
-				config.PenaltyTimestamp = 0
-			}
+			// Record it as a moderator-applied sanction. This sets the absolute
+			// lockout expiry timestamp — without it a zero ts makes the
+			// scheduler treat the lockout as instantly expired on its next tick
+			// and IsPenaltyActive() report no active lockout — and marks the
+			// penalty manual so the player's next early quit cannot erase it by
+			// re-resolving the quit-count ladder. Level 0 clears the penalty.
+			config.ApplyModeratorPenalty(int32(penaltyLevel), clampLockoutSec(int(lockoutDuration.Seconds())))
 
 			if err := StorableWrite(ctx, nk, targetUserID, config); err != nil {
 				return editInteractionResponse(s, i, fmt.Sprintf("Failed to save early quit config: %v", err))

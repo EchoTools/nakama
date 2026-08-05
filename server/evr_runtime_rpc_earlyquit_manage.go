@@ -211,22 +211,19 @@ func EarlyQuitModifyRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		state.GuildOverrides[request.GroupID].PenaltyLevel = &level
 		state.GuildOverrides[request.GroupID].ModeratorNotes = request.ModeratorNotes
 
-		// Also update global penalty and lockout from config
-		state.PenaltyLevel = level
-		_, lockoutSec := ResolvePenaltyLevel(state.NumEarlyQuits, serviceConfig)
-		_ = lockoutSec // Use config lockout for the resolved level
-		// Find lockout for the SET level specifically
+		// Also update global penalty and lockout from config. The lockout must
+		// come from the level being SET: seeding it from the level the target's
+		// current quit count maps to made a level absent from the ladder borrow
+		// a different level's lockout. When the ladder does not configure the
+		// requested level, fall back to the built-in duration for that level.
+		lockoutSec := GetLockoutDurationSeconds(int(level))
 		for _, pl := range serviceConfig.PenaltyLevels {
 			if int32(pl.PenaltyLevel) == level {
-				lockoutSec = int32(pl.MMLockoutSec)
+				lockoutSec = clampLockoutSec(pl.MMLockoutSec)
 				break
 			}
 		}
-		if lockoutSec > 0 {
-			state.PenaltyTimestamp = time.Now().Unix() + int64(lockoutSec)
-		} else {
-			state.PenaltyTimestamp = 0
-		}
+		state.ApplyModeratorPenalty(level, lockoutSec)
 
 		message = fmt.Sprintf("Penalty level set to %d", level)
 
@@ -234,6 +231,9 @@ func EarlyQuitModifyRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		state.NumEarlyQuits = 0
 		state.NumSteadyEarlyQuits = 0
 		state.PenaltyTimestamp = 0
+		// A reset also lifts any moderator-applied sanction; leaving the marker
+		// set would block ladder resolution for the rest of the old lockout.
+		state.PenaltyIsManual = false
 
 		// Re-resolve penalty from config (should be level 0 with 0 quits)
 		level, _ := ResolvePenaltyLevel(0, serviceConfig)
