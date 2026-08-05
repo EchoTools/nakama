@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
@@ -516,7 +517,37 @@ func (c *DiscordIntegrator) GuildMember(guildID, discordID string) (member *disc
 	return member, nil
 }
 
-func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, guild *discordgo.Guild) error {
+// maxGroupTextLength is the column size of the groups table's name and
+// description columns (VARCHAR(255), migrate/sql/20180103142001_initial_schema.sql:182-183).
+// Discord guild descriptions can exceed it, which makes GroupCreate/GroupUpdate
+// fail with SQLSTATE 22001 ("value too long for type character varying(255)")
+// and permanently prevents the guild's group from being registered.
+const maxGroupTextLength = 255
+
+// truncateRuneSafe truncates s so its byte length is at most maxBytes without
+// splitting a multi-byte character (Discord descriptions contain emoji). The
+// byte limit is conservative for PostgreSQL VARCHAR(n), which counts characters.
+func truncateRuneSafe(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	if maxBytes <= 0 {
+		return ""
+	}
+	for i := maxBytes; i > 0; i-- {
+		if utf8.RuneStart(s[i]) {
+			return s[:i]
+		}
+	}
+	return ""
+}
+
+// guildSync registers (or updates) the Nakama group backing a Discord guild.
+// When the guild owner is globally banned, the sync normally leaves the guild;
+// leaveOnBannedOwner controls that. Reconciliation during pruning passes false
+// so that leaving is deferred to the safety-threshold-checked prune path and
+// no guild is left before the threshold check can run.
+func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, guild *discordgo.Guild, leaveOnBannedOwner bool) error {
 	logger = logger.With(zap.String("guild_id", guild.ID), zap.String("guild_name", guild.Name))
 
 	var err error
@@ -536,8 +567,11 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 
 		ownerUserID, _, _, err = AuthenticateCustom(ctx, logger, d.db, ownerMember.User.ID, ownerMember.User.Username, true)
 		if err != nil {
-			// Leave guilds where the owner is globally banned.
-			if status.Code(err) == codes.PermissionDenied {
+			// Leave guilds where the owner is globally banned. When called
+			// from reconciliation (leaveOnBannedOwner=false), the leave is
+			// deferred: the guild remains an orphan candidate and is left by
+			// the safety-threshold-checked prune path instead.
+			if leaveOnBannedOwner && status.Code(err) == codes.PermissionDenied {
 				logger.Warn("Guild owner is globally banned. Leaving guild.", zap.String("guild_id", guild.ID), zap.String("owner_id", guild.OwnerID))
 				if err := d.dg.GuildLeave(guild.ID); err != nil {
 					return fmt.Errorf("error leaving guild: %w", err)
@@ -554,16 +588,27 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 	}
 
 	if ownerAccount.GetDisableTime() != nil {
-		message := fmt.Sprintf("The owner of the guild `%s` (ID: %s) owned by <@%s> is globally banned. The guild will be removed.", guild.Name, guild.ID, guild.OwnerID)
-		d.LogServiceAuditMessage(ctx, message, false)
+		if leaveOnBannedOwner {
+			message := fmt.Sprintf("The owner of the guild `%s` (ID: %s) owned by <@%s> is globally banned. The guild will be removed.", guild.Name, guild.ID, guild.OwnerID)
+			d.LogServiceAuditMessage(ctx, message, false)
 
-		logger.Warn("Guild owner is globally banned. Leaving guild.", zap.String("guild_id", guild.ID), zap.String("owner_id", guild.OwnerID))
-		if err := d.dg.GuildLeave(guild.ID); err != nil {
-			return fmt.Errorf("error leaving guild: %w", err)
+			logger.Warn("Guild owner is globally banned. Leaving guild.", zap.String("guild_id", guild.ID), zap.String("owner_id", guild.OwnerID))
+			if err := d.dg.GuildLeave(guild.ID); err != nil {
+				return fmt.Errorf("error leaving guild: %w", err)
+			}
+
+			return nil
 		}
-
-		return nil
+		// Reconciliation must not leave guilds: leave decisions belong to the
+		// safety-threshold-checked prune path. Report the failure so the guild
+		// remains an orphan candidate and is left there instead.
+		return fmt.Errorf("guild owner %s is globally banned", guild.OwnerID)
 	}
+
+	// Fit within the groups table's VARCHAR(255) name/description columns;
+	// oversize values fail with SQLSTATE 22001 and the guild can never register.
+	groupName := truncateRuneSafe(guild.Name, maxGroupTextLength)
+	groupDescription := truncateRuneSafe(guild.Description, maxGroupTextLength)
 
 	groupID = d.GuildIDToGroupID(guild.ID)
 	if groupID == "" {
@@ -581,7 +626,7 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 			return fmt.Errorf("error marshalling guild group metadata: %w", err)
 		}
 
-		group, err := d.nk.GroupCreate(ctx, ownerUserID, guild.Name, botUserID, GuildGroupLangTag, guild.Description, guild.IconURL("512"), false, metadataMap, 100000)
+		group, err := d.nk.GroupCreate(ctx, ownerUserID, groupName, botUserID, GuildGroupLangTag, groupDescription, guild.IconURL("512"), false, metadataMap, 100000)
 		if err != nil {
 			return fmt.Errorf("error creating group: %w", err)
 		}
@@ -591,7 +636,7 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 		// Invite the owner to the game service guild.
 	} else {
 		// Update the group data
-		if err := d.nk.GroupUpdate(ctx, groupID, SystemUserID, guild.Name, botUserID, GuildGroupLangTag, guild.Description, guild.IconURL("512"), false, nil, 100000); err != nil {
+		if err := d.nk.GroupUpdate(ctx, groupID, SystemUserID, groupName, botUserID, GuildGroupLangTag, groupDescription, guild.IconURL("512"), false, nil, 100000); err != nil {
 			return fmt.Errorf("error updating group: %w", err)
 		}
 	}
@@ -624,7 +669,7 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 
 func (d *DiscordIntegrator) handleGuildCreate(logger *zap.Logger, _ *discordgo.Session, e *discordgo.GuildCreate) error {
 	logger.Info("Guild Create", zap.Any("guild", e.Guild.ID))
-	if err := d.guildSync(d.ctx, logger, e.Guild); err != nil {
+	if err := d.guildSync(d.ctx, logger, e.Guild, true); err != nil {
 		return fmt.Errorf("error during guild sync: %w", err)
 	}
 	return nil
@@ -632,7 +677,7 @@ func (d *DiscordIntegrator) handleGuildCreate(logger *zap.Logger, _ *discordgo.S
 
 func (d *DiscordIntegrator) handleGuildUpdate(logger *zap.Logger, _ *discordgo.Session, e *discordgo.GuildUpdate) error {
 	logger.Info("Guild Update", zap.Any("guild", e.Guild.ID))
-	if err := d.guildSync(d.ctx, logger, e.Guild); err != nil {
+	if err := d.guildSync(d.ctx, logger, e.Guild, true); err != nil {
 		return fmt.Errorf("error during guild sync: %w", err)
 	}
 	return nil
