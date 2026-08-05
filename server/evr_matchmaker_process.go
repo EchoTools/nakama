@@ -237,23 +237,46 @@ func groupEntriesSequentially(entries []runtime.MatchmakerEntry) [][]runtime.Mat
 				break
 			}
 
-			// For arena (combat allows party splitting): ensure no ticket group
-			// straddles the team boundary. The team split in buildMatch assigns
-			// entrants[:size/2] to team 0 and entrants[size/2:] to team 1. If a
-			// single ticket group lands on both sides, the party gets split.
+			// For arena (combat allows party splitting): ensure the whole ticket
+			// groups can be partitioned into two equal teams. This is a
+			// feasibility question, not a positional one — the order this
+			// function emits is not the order teams are formed in.
+			// predictCandidateOutcomesWithConfig re-groups by ticket, assigns
+			// whole groups per team, and rejects len(blue) != len(orange), so a
+			// candidate with no even partition can never produce a match.
+			//
+			// Feasibility alone is only NECESSARY downstream, not sufficient:
+			// both roster variants fill greedily and can miss a split that
+			// exists. partitionGroupsEvenly in evr_matchmaker_prediction.go
+			// closes that gap, so this guard and prediction now agree. Do not
+			// relax one without the other.
+			//
+			// Checking position instead of feasibility rejected candidates that
+			// were perfectly formable (e.g. 3+2+2+1, which splits 3+1 vs 2+2)
+			// and, because the remedy pops the tail while the check scans from
+			// the head, could fail to converge and drain the whole candidate.
+			//
+			// Subset-sum over at most maxCount (8) groups is trivially cheap.
 			if !isCombat {
-				teamSize := currentSize / 2
-				pos := 0
-				straddle := false
-				for _, tg := range currentTickets {
-					groupSize := len(tg.entries)
-					if pos < teamSize && pos+groupSize > teamSize {
-						straddle = true
-						break
+				// An odd total can never split evenly, and prediction floors
+				// teamSize, so check evenness explicitly rather than relying on
+				// countMultiple being 2. It is operator-configurable.
+				infeasible := currentSize < 2 || currentSize%2 != 0
+				if !infeasible {
+					teamSize := currentSize / 2
+					reachable := make([]bool, teamSize+1)
+					reachable[0] = true
+					for _, tg := range currentTickets {
+						groupSize := len(tg.entries)
+						for k := teamSize; k >= groupSize; k-- {
+							if reachable[k-groupSize] {
+								reachable[k] = true
+							}
+						}
 					}
-					pos += groupSize
+					infeasible = !reachable[teamSize]
 				}
-				if straddle {
+				if infeasible {
 					last := currentTickets[len(currentTickets)-1]
 					currentTickets = currentTickets[:len(currentTickets)-1]
 					currentSize -= len(last.entries)
