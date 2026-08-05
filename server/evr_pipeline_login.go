@@ -925,11 +925,36 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 			params.profile.SetActiveGroupID(storedActiveGroupID)
 		}
 
+		userID := params.profile.ID()
+
+		// Everything this function mutates on the profile is captured here so a
+		// retry can re-apply it to a freshly read profile: the resolved active
+		// group, and the broken-cosmetic repair. Login is racing its own
+		// QueueSyncMember call above, which writes the same key from the Discord
+		// sync path, so a version conflict is realistic and must not reject the
+		// login outright.
+		desiredActiveGroupID := params.profile.GetActiveGroupID()
+		ignoreBrokenCosmetics := params.profile.IgnoreBrokenCosmetics
+		reapply := func(profile *EVRProfile) error {
+			profile.SetActiveGroupID(desiredActiveGroupID)
+			if !ignoreBrokenCosmetics {
+				profile.FixBrokenCosmetics()
+			}
+			return nil
+		}
+
 		// Use EVRProfileUpdate to persist changes AND invalidate the ServerProfile cache
-		if err := EVRProfileUpdate(ctx, p.nk, params.profile.ID(), params.profile); err != nil {
+		updated, err := evrProfileUpdateWithRetry(ctx, p.nk, userID, params.profile, reapply)
+		if err != nil {
 			metricsTags["error"] = "failed_update_profile"
+			// Restore the session fallback before bailing so params.profile is
+			// never left holding the stored value it was temporarily swapped to.
+			if groupIDAutoAssigned {
+				params.profile.SetActiveGroupID(sessionFallbackGID)
+			}
 			return fmt.Errorf("failed to update user profile: %w", err)
 		}
+		params.profile = updated
 
 		if groupIDAutoAssigned {
 			params.profile.SetActiveGroupID(sessionFallbackGID)

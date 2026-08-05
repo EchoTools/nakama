@@ -164,20 +164,34 @@ func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *
 	// those servers at all. Without this check, a NativeSupport-hosted character
 	// customization equip would persist an unowned cosmetic (e.g. a VRML finalist tag)
 	// exactly like the original remotelogset bug.
-	sanitized, err := sanitizeGameServerLoadout(loadout, profile)
-	if err != nil {
-		return fmt.Errorf("failed to compute owned cosmetics: %w", err)
-	}
-	profile.LoadoutCosmetics.Loadout = sanitized
+	// applyLoadout is factored out so a retry after a version conflict can
+	// re-apply it against a freshly read profile. Ownership is recomputed each
+	// time, since the fresh profile is the authority on what the player owns.
+	applyLoadout := func(profile *EVRProfile) error {
+		sanitized, err := sanitizeGameServerLoadout(loadout, profile)
+		if err != nil {
+			return fmt.Errorf("failed to compute owned cosmetics: %w", err)
+		}
+		profile.LoadoutCosmetics.Loadout = sanitized
 
-	// Update jersey number if present
+		// Update jersey number if present
+		if payload.Number >= 0 {
+			profile.LoadoutCosmetics.JerseyNumber = int64(payload.Number)
+		}
+		return nil
+	}
+
+	if err := applyLoadout(profile); err != nil {
+		return err
+	}
 	if payload.Number >= 0 {
-		profile.LoadoutCosmetics.JerseyNumber = int64(payload.Number)
 		logger.Info("Updated jersey number", zap.Int("number", payload.Number))
 	}
 
-	// Save the updated profile
-	if err := EVRProfileUpdate(ctx, p.nk, userID, profile); err != nil {
+	// Save the updated profile. A concurrent writer on the same key (the Discord
+	// sync path and the login path both write it) must not lose this equip, so
+	// retry on a version conflict with a fresh read rather than failing outright.
+	if _, err := evrProfileUpdateWithRetry(ctx, p.nk, userID, profile, applyLoadout); err != nil {
 		return fmt.Errorf("failed to store EVR profile: %w", err)
 	}
 

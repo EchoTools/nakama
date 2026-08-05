@@ -113,18 +113,29 @@ func GuildPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 	}
 
 	// Set the new per-guild display name with override and lock flags
-	evrProfile.SetGroupIGNData(groupID, GroupInGameName{
-		GroupID:     groupID,
-		DisplayName: sanitizedName,
-		IsOverride:  true,
-		IsLocked:    request.IsLocked,
-	})
+	setIGN := func(profile *EVRProfile) error {
+		profile.SetGroupIGNData(groupID, GroupInGameName{
+			GroupID:     groupID,
+			DisplayName: sanitizedName,
+			IsOverride:  true,
+			IsLocked:    request.IsLocked,
+		})
+		return nil
+	}
+	// setIGN never fails; the error return exists only to satisfy
+	// evrProfileUpdateWithRetry's callback signature.
+	_ = setIGN(evrProfile)
 
-	// Persist the profile (writes storage + invalidates ServerProfile cache)
-	if err := EVRProfileUpdate(ctx, nk, targetUserID, evrProfile); err != nil {
+	// Persist the profile (writes storage + invalidates ServerProfile cache).
+	// Retry on a version conflict with a fresh read: the Discord sync and login
+	// paths write this same key, and a rename must not be rejected because one of
+	// them happened to commit first.
+	updated, err := evrProfileUpdateWithRetry(ctx, nk, targetUserID, evrProfile, setIGN)
+	if err != nil {
 		logger.Error("Failed to update EVR profile", zap.Error(err), zap.String("user_id", targetUserID))
 		return "", runtime.NewError("Failed to update player profile", StatusInternalError)
 	}
+	evrProfile = updated
 
 	// Record the change in display name history
 	if err := DisplayNameHistoryUpdate(ctx, nk, targetUserID, groupID, sanitizedName, evrProfile.Username(), false); err != nil {

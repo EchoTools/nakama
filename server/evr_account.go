@@ -501,6 +501,55 @@ func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID strin
 	return nil
 }
 
+// evrProfileUpdateMaxAttempts bounds evrProfileUpdateWithRetry. Three attempts
+// matches the retry budget the display-name sync in evr_discord_integrator.go
+// already uses for the same key.
+const evrProfileUpdateMaxAttempts = 3
+
+// evrProfileUpdateWithRetry writes profile via EVRProfileUpdate with a bounded
+// retry on storage version conflicts.
+//
+// EVRProfileUpdate itself makes exactly one attempt by design: retrying with the
+// caller's stale payload would silently discard whatever the concurrent writer
+// committed. This helper supplies the safe form of the retry — on a conflict it
+// RE-READS the current stored profile and hands it to apply, so the caller's
+// mutation is re-applied on top of fresh data instead of overwriting it. Callers
+// must therefore keep apply free of side effects; it may run more than once.
+//
+// The returned *EVRProfile is the object that was actually written: the caller's
+// own pointer when the first attempt succeeded, or the reloaded profile
+// otherwise. Callers that keep the profile around (e.g. session parameters) must
+// adopt the returned value.
+//
+// Non-conflict errors are surfaced immediately; the final conflict error is
+// returned unchanged so errors.Is / isVersionConflictError still recognise it.
+func evrProfileUpdateWithRetry(ctx context.Context, nk runtime.NakamaModule, userID string, profile *EVRProfile, apply func(*EVRProfile) error) (*EVRProfile, error) {
+	var err error
+	for attempt := 0; attempt < evrProfileUpdateMaxAttempts; attempt++ {
+		if attempt > 0 {
+			var reloaded *EVRProfile
+			reloaded, err = EVRProfileLoad(ctx, nk, userID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to reload profile for retry: %w", err)
+			}
+			profile = reloaded
+			if apply != nil {
+				if err := apply(profile); err != nil {
+					return nil, err
+				}
+			}
+		}
+
+		if err = EVRProfileUpdate(ctx, nk, userID, profile); err == nil {
+			return profile, nil
+		}
+		if !isVersionConflictError(err) {
+			return nil, err
+		}
+	}
+	return nil, err
+}
+
 func BuildEVRProfileFromAccount(account *api.Account) (*EVRProfile, error) {
 	if account == nil || account.User == nil {
 		return nil, fmt.Errorf("account is nil")
