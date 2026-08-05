@@ -692,7 +692,9 @@ func TestPartyJoinRPC_ClosedParty(t *testing.T) {
 	logger := partyLogger()
 
 	resp, _ := PartyCreateRPC(ctx1, logger, nil, nk, `{"max_size":4,"open":false}`)
-	var created struct{ PartyID string `json:"party_id"` }
+	var created struct {
+		PartyID string `json:"party_id"`
+	}
 	json.Unmarshal([]byte(resp), &created)
 
 	_, err := PartyJoinRPC(ctx2, logger, nil, nk, `{"party_id":"`+created.PartyID+`"}`)
@@ -707,7 +709,9 @@ func TestPartyKickRPC_SelfKick(t *testing.T) {
 	logger := partyLogger()
 
 	resp, _ := PartyCreateRPC(ctx1, logger, nil, nk, `{}`)
-	var created struct{ PartyID string `json:"party_id"` }
+	var created struct {
+		PartyID string `json:"party_id"`
+	}
 	json.Unmarshal([]byte(resp), &created)
 
 	_, err := PartyKickRPC(ctx1, logger, nil, nk, `{"party_id":"`+created.PartyID+`","target_id":"user-1"}`)
@@ -722,7 +726,9 @@ func TestPartyKickRPC_NonMember(t *testing.T) {
 	logger := partyLogger()
 
 	resp, _ := PartyCreateRPC(ctx1, logger, nil, nk, `{}`)
-	var created struct{ PartyID string `json:"party_id"` }
+	var created struct {
+		PartyID string `json:"party_id"`
+	}
 	json.Unmarshal([]byte(resp), &created)
 
 	_, err := PartyKickRPC(ctx1, logger, nil, nk, `{"party_id":"`+created.PartyID+`","target_id":"user-nonexistent"}`)
@@ -737,7 +743,9 @@ func TestPartyPromoteRPC_NonMember(t *testing.T) {
 	logger := partyLogger()
 
 	resp, _ := PartyCreateRPC(ctx1, logger, nil, nk, `{}`)
-	var created struct{ PartyID string `json:"party_id"` }
+	var created struct {
+		PartyID string `json:"party_id"`
+	}
 	json.Unmarshal([]byte(resp), &created)
 
 	_, err := PartyPromoteRPC(ctx1, logger, nil, nk, `{"party_id":"`+created.PartyID+`","target_id":"user-ghost"}`)
@@ -752,7 +760,9 @@ func TestPartyCreateRPC_MaxSizeCapped(t *testing.T) {
 	logger := partyLogger()
 
 	resp, _ := PartyCreateRPC(ctx, logger, nil, nk, `{"max_size":999}`)
-	var created struct{ PartyID string `json:"party_id"` }
+	var created struct {
+		PartyID string `json:"party_id"`
+	}
 	json.Unmarshal([]byte(resp), &created)
 
 	party, _ := loadParty(ctx, nk, created.PartyID)
@@ -771,7 +781,9 @@ func TestPartyRPCs_EmptyStringPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create with empty payload should use defaults: %v", err)
 	}
-	var created struct{ PartyID string `json:"party_id"` }
+	var created struct {
+		PartyID string `json:"party_id"`
+	}
 	json.Unmarshal([]byte(resp), &created)
 	if created.PartyID == "" {
 		t.Error("should still create a party")
@@ -790,7 +802,9 @@ func TestPartyJoinRPC_AlreadyMember_ReturnsError(t *testing.T) {
 	logger := partyLogger()
 
 	resp, _ := PartyCreateRPC(ctx1, logger, nil, nk, `{}`)
-	var created struct{ PartyID string `json:"party_id"` }
+	var created struct {
+		PartyID string `json:"party_id"`
+	}
 	json.Unmarshal([]byte(resp), &created)
 
 	_, err := PartyJoinRPC(ctx1, logger, nil, nk, `{"party_id":"`+created.PartyID+`"}`)

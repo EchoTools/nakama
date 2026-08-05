@@ -71,6 +71,25 @@ func TestNewSessionParametersFromLobbySessionRequest(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// SKIPPED: pre-existing failure, present at f2901629b and unrelated
+			// to this change set. The test cannot pass as written, for two
+			// independent reasons:
+			//
+			//  1. It compares `got` (a *LobbySessionParameters) against `want`
+			//     (a LobbySessionParameters value). reflect.DeepEqual of a
+			//     pointer and a struct is always false.
+			//  2. It passes context.Background() and an empty &sessionWS{}, so
+			//     NewLobbyParametersFromRequest fails LoadParams(ctx) and
+			//     returns (nil, "failed to load session parameters") before
+			//     setting anything. The discarded error hides that.
+			//
+			// Observed diff: want a populated struct, got
+			// (*server.LobbySessionParameters)(nil).
+			//
+			// Fixing it means building a session context with real session
+			// parameters -- a test rewrite that belongs in its own PR.
+			t.Skip("pre-existing broken test: compares *LobbySessionParameters against a value, and the call returns (nil, \"failed to load session parameters\") for an empty sessionWS; needs a follow-up PR")
+
 			if got, _ := NewLobbyParametersFromRequest(ctx, logger, nil, &sessionWS{}, tt.args.r); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("(- want / + got) %s", cmp.Diff(tt.want, got))
 			}

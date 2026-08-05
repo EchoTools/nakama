@@ -48,6 +48,41 @@ const (
 	PreMatchToPlayingTimeout   = 60 * time.Second
 )
 
+// evrSessionRegistryProvider and evrPartyRegistryProvider are the two narrow
+// capabilities the EVR match handler needs beyond runtime.NakamaModule.
+//
+// They are declared here, at the consumer, and kept to the single method each
+// call site actually uses. *RuntimeGoNakamaModule satisfies both. They replace
+// `nk.(*RuntimeGoNakamaModule)` assertions, which no test double could satisfy:
+// every double fell through to the failure branch, so the guarded code was never
+// exercised by any test and the tests that "covered" it proved nothing.
+type evrSessionRegistryProvider interface {
+	SessionRegistry() SessionRegistry
+}
+
+type evrPartyRegistryProvider interface {
+	PartyRegistry() PartyRegistry
+}
+
+// evrSessionRegistry returns nk's session registry, or nil when nk does not
+// provide one. Call sites must handle nil: it means "cannot look sessions up",
+// not "abandon the surrounding work".
+func evrSessionRegistry(nk runtime.NakamaModule) SessionRegistry {
+	if p, ok := nk.(evrSessionRegistryProvider); ok {
+		return p.SessionRegistry()
+	}
+	return nil
+}
+
+// evrPartyRegistry returns nk's party registry, or nil when nk does not provide
+// one.
+func evrPartyRegistry(nk runtime.NakamaModule) PartyRegistry {
+	if p, ok := nk.(evrPartyRegistryProvider); ok {
+		return p.PartyRegistry()
+	}
+	return nil
+}
+
 var (
 	LobbySizeByMode = map[evr.Symbol]int{
 		evr.ModeArenaPublic:   MatchLobbyMaxSize,
@@ -287,16 +322,16 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		eqConfig := NewEarlyQuitPlayerState()
 		if err := StorableRead(ctx, nk, joinPresence.GetUserId(), eqConfig, true); err != nil {
 			logger.Debug("Failed to load early quit config for logging", zap.Error(err))
-			} else if eqConfig.PenaltyLevel > 0 && eqConfig.PenaltyTimestamp > 0 && time.Now().Unix() < eqConfig.PenaltyTimestamp {
-				remainingTime := time.Until(time.Unix(eqConfig.PenaltyTimestamp, 0))
-				if isEarlyQuitEnforcementTestUser(joinPresence.GetUserId()) && earlyQuitEnforcementEnabled(ctx, state.GetGroupID().String()) {
-					return state, false, fmt.Sprintf("early quit penalty active [exp: %s]", FormatDuration(remainingTime))
-				}
-				logger.Info("Player joining with active early quit penalty (client-side enforcement expected)",
-					zap.String("user_id", joinPresence.GetUserId()),
-					zap.Int32("penalty_level", eqConfig.PenaltyLevel),
-					zap.Duration("remaining", remainingTime))
+		} else if eqConfig.PenaltyLevel > 0 && eqConfig.PenaltyTimestamp > 0 && time.Now().Unix() < eqConfig.PenaltyTimestamp {
+			remainingTime := time.Until(time.Unix(eqConfig.PenaltyTimestamp, 0))
+			if isEarlyQuitEnforcementTestUser(joinPresence.GetUserId()) && earlyQuitEnforcementEnabled(ctx, state.GetGroupID().String()) {
+				return state, false, fmt.Sprintf("early quit penalty active [exp: %s]", FormatDuration(remainingTime))
 			}
+			logger.Info("Player joining with active early quit penalty (client-side enforcement expected)",
+				zap.String("user_id", joinPresence.GetUserId()),
+				zap.Int32("penalty_level", eqConfig.PenaltyLevel),
+				zap.Duration("remaining", remainingTime))
+		}
 	}
 
 	// Check if the match is locked.
@@ -871,8 +906,8 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			// Only apply match-leave transitions if the player is still InMatch.
 			// Stale leave events (player already advanced to Matchmaking,
 			// SocialReady, etc.) should be ignored — the player has moved on.
-			if _nkLocal, ok := nk.(*RuntimeGoNakamaModule); ok {
-				if s := _nkLocal.sessionRegistry.Get(uuid.FromStringOrNil(p.GetSessionId())); s != nil {
+			if sessions := evrSessionRegistry(nk); sessions != nil {
+				if s := sessions.Get(uuid.FromStringOrNil(p.GetSessionId())); s != nil {
 					if ws, ok := s.(*sessionWS); ok {
 						if lc := getMatchLifecycle(ws); lc != nil && lc.State() == StateInMatch {
 							if hasReconnectReservation {
@@ -894,8 +929,8 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			// reservations remain valid because the leader is still present).
 			if mp.PartyID != uuid.Nil {
 				isLeader := false
-				if _nk, ok := nk.(*RuntimeGoNakamaModule); ok {
-					if ph, ok := _nk.partyRegistry.Get(mp.PartyID); ok {
+				if parties := evrPartyRegistry(nk); parties != nil {
+					if ph, ok := parties.Get(mp.PartyID); ok {
 						ph.RLock()
 						if ph.leader != nil {
 							isLeader = ph.leader.UserPresence.SessionId == mp.GetSessionId()
@@ -980,11 +1015,11 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 						recordEarlyQuitForPlayer(ctx, logger, nk, state, mp, leaveReason)
 
 						eqconfig := NewEarlyQuitPlayerState()
-						_nk, ok := nk.(*RuntimeGoNakamaModule)
-						if !ok {
-							logger.Warn("nk is not *RuntimeGoNakamaModule, skipping early quit penalty")
-							continue
-						}
+						// Used to refresh the quitter's live session cache and by
+						// the deferred-penalty goroutines. nil means no registry is
+						// available; the penalty itself is still charged and
+						// persisted, only the session-side follow-ups are skipped.
+						sessions := evrSessionRegistry(nk)
 						if err := StorableRead(ctx, nk, mp.GetUserId(), eqconfig, true); err != nil {
 							logger.WithField("error", err).Warn("Failed to load early quitter config")
 						} else {
@@ -1031,9 +1066,11 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 							if err := StorableWrite(ctx, nk, mp.GetUserId(), eqconfig); err != nil {
 								logger.Warn("Failed to write early quitter config", zap.Error(err))
 							} else {
-								if s := _nk.sessionRegistry.Get(uuid.FromStringOrNil(mp.GetSessionId())); s != nil {
-									if params, ok := LoadParams(s.Context()); ok {
-										params.earlyQuitConfig.Store(eqconfig)
+								if sessions != nil {
+									if s := sessions.Get(uuid.FromStringOrNil(mp.GetSessionId())); s != nil {
+										if params, ok := LoadParams(s.Context()); ok {
+											params.earlyQuitConfig.Store(eqconfig)
+										}
 									}
 								}
 
@@ -1077,19 +1114,23 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 								// Launch goroutine for deferred penalty resolution.
 								// Use background context to ensure goroutine isn't cancelled when match ends.
-								if leaveReason == LeaveReasonVoluntary || leaveReason == LeaveReasonUnknown || leaveReason == "" {
+								// Both callees dereference the registry unconditionally,
+								// so skip the deferral when none is available.
+								if sessions == nil {
+									logger.Warn("No session registry available; skipping deferred early quit penalty resolution")
+								} else if leaveReason == LeaveReasonVoluntary || leaveReason == LeaveReasonUnknown || leaveReason == "" {
 									// Voluntary leave: penalty applied immediately. If player logs out
 									// within 5 minutes, forgive the penalty (crash during quit flow).
 									go func(userID, sessionID string) {
 										bgCtx := context.Background()
-										CheckAndStrikeEarlyQuitIfLoggedOut(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, 5*time.Minute)
+										CheckAndStrikeEarlyQuitIfLoggedOut(bgCtx, logger, nk, db, sessions, userID, sessionID, 5*time.Minute)
 									}(mp.GetUserId(), mp.GetSessionId())
 								} else {
 									// Disconnect: penalty deferred. If player is still online after
 									// 5 minutes, they force-closed intentionally — apply the penalty.
 									go func(userID, sessionID string, matchID MatchID) {
 										bgCtx := context.Background()
-										CheckAndApplyEarlyQuitIfStillOnline(bgCtx, logger, nk, db, _nk.sessionRegistry, userID, sessionID, matchID, 5*time.Minute)
+										CheckAndApplyEarlyQuitIfStillOnline(bgCtx, logger, nk, db, sessions, userID, sessionID, matchID, 5*time.Minute)
 									}(mp.GetUserId(), mp.GetSessionId(), state.ID)
 								}
 							}
@@ -1451,12 +1492,10 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				logger.WithField("error", err).Error("failed to send match summary")
 			}
 
-			// Increment completed matches for players who stayed until the end
-			_nk, ok := nk.(*RuntimeGoNakamaModule)
-			if !ok {
-				logger.Warn("nk is not *RuntimeGoNakamaModule, skipping post-match processing")
-				return state
-			}
+			// Increment completed matches for players who stayed until the end.
+			// A nil registry only costs the live-session cache refresh below; the
+			// completion counters are still credited and persisted.
+			sessions := evrSessionRegistry(nk)
 			serviceSettings := ServiceSettings()
 			if serviceSettings == nil {
 				serviceSettings = &ServiceSettingsData{}
@@ -1496,9 +1535,11 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				if err := StorableWrite(ctx, nk, presence.GetUserId(), eqconfig); err != nil {
 					logger.Warn("Failed to write early quitter config after completed match", zap.Error(err))
 				} else {
-					if s := _nk.sessionRegistry.Get(uuid.FromStringOrNil(presence.GetSessionId())); s != nil {
-						if params, ok := LoadParams(s.Context()); ok {
-							params.earlyQuitConfig.Store(eqconfig)
+					if sessions != nil {
+						if s := sessions.Get(uuid.FromStringOrNil(presence.GetSessionId())); s != nil {
+							if params, ok := LoadParams(s.Context()); ok {
+								params.earlyQuitConfig.Store(eqconfig)
+							}
 						}
 					}
 
@@ -1519,11 +1560,13 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				// Update ambassador state after match completion.
 				if serviceSettings.Matchmaking.AmbassadorProgramEnabled() {
 					wasAmbassador := false
-					if s := _nk.sessionRegistry.Get(uuid.FromStringOrNil(presence.GetSessionId())); s != nil {
-						if params, ok := LoadParams(s.Context()); ok {
-							wasAmbassador = params.isAmbassadorMatch.Load()
-							// Reset for next match.
-							params.isAmbassadorMatch.Store(false)
+					if sessions != nil {
+						if s := sessions.Get(uuid.FromStringOrNil(presence.GetSessionId())); s != nil {
+							if params, ok := LoadParams(s.Context()); ok {
+								wasAmbassador = params.isAmbassadorMatch.Load()
+								// Reset for next match.
+								params.isAmbassadorMatch.Store(false)
+							}
 						}
 					}
 

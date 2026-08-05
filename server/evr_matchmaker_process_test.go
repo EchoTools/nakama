@@ -88,6 +88,9 @@ func TestOverrideFn(t *testing.T) {
 	candidatesFilenames := []string{
 		"/tmp/candidates.json",
 	}
+	for _, f := range candidatesFilenames {
+		requireCharacterizationFixture(t, f)
+	}
 
 	for _, candidatesFilename := range candidatesFilenames {
 

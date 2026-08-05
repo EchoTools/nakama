@@ -22,29 +22,18 @@ import (
 // flow. A user-wide scan (the B3 behavior) would see S2 online and wrongly
 // apply the penalty.
 //
-// Requires a real Postgres (TEST_DB_URL) — the deferred penalty path's
-// StorableRead/StorableWrite run through RuntimeGoNakamaModule.
+// Runs against the in-memory evrTestNakamaModule: the deferred penalty path only
+// needs storage read/write, so no database is required.
 func TestCheckAndApplyEarlyQuitIfStillOnline_CrashReconnectForgiven(t *testing.T) {
-	// --- setup: real module over the test DB ---
+	// --- setup: in-memory storage module, no database required ---
 	consoleLogger := loggerForTest(t)
 	logger := NewRuntimeGoLogger(consoleLogger)
-	db := NewDB(t)
 	cfg := NewConfig(consoleLogger)
-
-	storageIndex, err := NewLocalStorageIndex(consoleLogger, db, &StorageConfig{}, &testMetrics{})
-	if err != nil {
-		t.Fatalf("failed to create storage index: %v", err)
-	}
-	nk := NewRuntimeGoNakamaModule(consoleLogger, db, nil, cfg,
-		nil, &chargeTestLeaderboardCache{}, nil, nil,
-		&testSessionRegistry{}, nil, nil, nil,
-		&testTracker{}, &testMetrics{}, nil, &testMessageRouter{},
-		storageIndex, nil)
+	nk := newEvrTestNakamaModule()
 
 	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
 
 	userID := uuid.Must(uuid.NewV4())
-	InsertUser(t, db, userID)
 	uid := userID.String()
 
 	// --- session registry: S1 (the crashed session) closes, S2 (reconnect) stays ---
@@ -83,7 +72,7 @@ func TestCheckAndApplyEarlyQuitIfStillOnline_CrashReconnectForgiven(t *testing.T
 	if err != nil {
 		t.Fatalf("failed to create match ID: %v", err)
 	}
-	CheckAndApplyEarlyQuitIfStillOnline(ctx, logger, nk, db, registry, uid, s1ID.String(), matchID, 5*time.Millisecond)
+	CheckAndApplyEarlyQuitIfStillOnline(ctx, logger, nk, nil, registry, uid, s1ID.String(), matchID, 5*time.Millisecond)
 
 	// --- the penalty must NOT be applied: S1 is gone, the player genuinely crashed ---
 	eqconfig := NewEarlyQuitPlayerState()
@@ -103,26 +92,15 @@ func TestCheckAndApplyEarlyQuitIfStillOnline_CrashReconnectForgiven(t *testing.T
 // exact session captured at quit time is still in the registry, the player
 // force-closed intentionally and the deferred penalty must be applied.
 func TestCheckAndApplyEarlyQuitIfStillOnline_SameSessionOnlineAppliesPenalty(t *testing.T) {
-	// --- setup: real module over the test DB ---
+	// --- setup: in-memory storage module, no database required ---
 	consoleLogger := loggerForTest(t)
 	logger := NewRuntimeGoLogger(consoleLogger)
-	db := NewDB(t)
 	cfg := NewConfig(consoleLogger)
-
-	storageIndex, err := NewLocalStorageIndex(consoleLogger, db, &StorageConfig{}, &testMetrics{})
-	if err != nil {
-		t.Fatalf("failed to create storage index: %v", err)
-	}
-	nk := NewRuntimeGoNakamaModule(consoleLogger, db, nil, cfg,
-		nil, &chargeTestLeaderboardCache{}, nil, nil,
-		&testSessionRegistry{}, nil, nil, nil,
-		&testTracker{}, &testMetrics{}, nil, &testMessageRouter{},
-		storageIndex, nil)
+	nk := newEvrTestNakamaModule()
 
 	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
 
 	userID := uuid.Must(uuid.NewV4())
-	InsertUser(t, db, userID)
 	uid := userID.String()
 
 	// --- session registry: the quit session S1 is still online ---
@@ -152,7 +130,7 @@ func TestCheckAndApplyEarlyQuitIfStillOnline_SameSessionOnlineAppliesPenalty(t *
 	if err != nil {
 		t.Fatalf("failed to create match ID: %v", err)
 	}
-	CheckAndApplyEarlyQuitIfStillOnline(ctx, logger, nk, db, registry, uid, s1ID.String(), matchID, 5*time.Millisecond)
+	CheckAndApplyEarlyQuitIfStillOnline(ctx, logger, nk, nil, registry, uid, s1ID.String(), matchID, 5*time.Millisecond)
 
 	// --- the penalty MUST be applied: the exact quit session is still online ---
 	eqconfig := NewEarlyQuitPlayerState()

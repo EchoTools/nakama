@@ -69,10 +69,10 @@ type socialFindJoinCall struct {
 type socialFindMockRegistry struct {
 	*mockFollowMatchRegistry
 
-	mu         sync.Mutex
+	mu          sync.Mutex
 	listMatches []*api.Match
-	labelJSON  map[string]string // matchID string -> label JSON (for GetState)
-	joinCalls  []socialFindJoinCall
+	labelJSON   map[string]string // matchID string -> label JSON (for GetState)
+	joinCalls   []socialFindJoinCall
 }
 
 func (r *socialFindMockRegistry) ListMatches(_ context.Context, _ int, _ *wrapperspb.BoolValue, _ *wrapperspb.StringValue, _ *wrapperspb.Int32Value, _ *wrapperspb.Int32Value, _ *wrapperspb.StringValue, _ *wrapperspb.StringValue) ([]*api.Match, []string, error) {

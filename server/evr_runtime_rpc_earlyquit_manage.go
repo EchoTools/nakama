@@ -20,12 +20,12 @@ type EarlyQuitViewRequest struct {
 
 // EarlyQuitViewResponse contains the player's early quit state and guild-scoped stats.
 type EarlyQuitViewResponse struct {
-	UserID    string                   `json:"user_id"`
-	GroupID   string                   `json:"group_id"`
-	State     *EarlyQuitStateView      `json:"state"`
-	Guild     *EarlyQuitGuildView      `json:"guild"`
-	Override  *EarlyQuitGuildOverride   `json:"override,omitempty"`
-	Records   []QuitRecord             `json:"recent_records"`
+	UserID   string                  `json:"user_id"`
+	GroupID  string                  `json:"group_id"`
+	State    *EarlyQuitStateView     `json:"state"`
+	Guild    *EarlyQuitGuildView     `json:"guild"`
+	Override *EarlyQuitGuildOverride `json:"override,omitempty"`
+	Records  []QuitRecord            `json:"recent_records"`
 }
 
 // EarlyQuitStateView is the read-only view of global state.
@@ -146,9 +146,9 @@ type EarlyQuitModifyRequest struct {
 
 // EarlyQuitModifyResponse is the response for a successful modification.
 type EarlyQuitModifyResponse struct {
-	Success bool                   `json:"success"`
-	Message string                 `json:"message"`
-	State   *EarlyQuitStateView    `json:"state"`
+	Success bool                `json:"success"`
+	Message string              `json:"message"`
+	State   *EarlyQuitStateView `json:"state"`
 }
 
 // EarlyQuitModifyRPC modifies a player's early quit state (enforcer/operator only).

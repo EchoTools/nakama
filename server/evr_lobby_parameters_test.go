@@ -2,10 +2,10 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/atomic"
@@ -183,10 +183,10 @@ func TestResolveDirectiveRole_StaleDirectiveScenarios(t *testing.T) {
 // operator keeps the moderator role.
 //
 // Exercises the real resolution path: NewLobbyParametersFromRequest with a
-// real LobbyFindSessionRequest over the test DB.
+// real LobbyFindSessionRequest, against the in-memory module — no database.
 func TestLobbyParameters_ModeratorRoleAuthorization(t *testing.T) {
 	logger := loggerForTest(t)
-	db, nk := newChargeModule(t, logger)
+	nk, _ := newChargeModule(t)
 
 	// Deterministic defaults: NewPlayerMaxGames=0 disables the toxic
 	// separation journal read; EnableSBMM=false skips rating loads.
@@ -195,7 +195,7 @@ func TestLobbyParameters_ModeratorRoleAuthorization(t *testing.T) {
 	ServiceSettingsUpdate(&ServiceSettingsData{})
 
 	t.Run("non-moderator client claiming TeamModerator is downgraded to TeamUnassigned", func(t *testing.T) {
-		session := newLobbyParamsTestSession(t, logger, db, nk, false)
+		session := newLobbyParamsTestSession(t, logger, nk, false)
 		lobbyParams, err := NewLobbyParametersFromRequest(session.ctx, logger, nk, session, moderatorClaimRequest())
 		if err != nil {
 			t.Fatalf("NewLobbyParametersFromRequest failed: %v", err)
@@ -205,7 +205,7 @@ func TestLobbyParameters_ModeratorRoleAuthorization(t *testing.T) {
 	})
 
 	t.Run("global operator claiming TeamModerator keeps it", func(t *testing.T) {
-		session := newLobbyParamsTestSession(t, logger, db, nk, true)
+		session := newLobbyParamsTestSession(t, logger, nk, true)
 		lobbyParams, err := NewLobbyParametersFromRequest(session.ctx, logger, nk, session, moderatorClaimRequest())
 		if err != nil {
 			t.Fatalf("NewLobbyParametersFromRequest failed: %v", err)
@@ -231,20 +231,23 @@ func moderatorClaimRequest() *evr.LobbyFindSessionRequest {
 	}
 }
 
-// newLobbyParamsTestSession builds a sessionWS with real pipeline dependencies
-// (DB-backed nk) and SessionParameters stored in ctx. isGlobalOperator controls
-// the moderator privilege the session holds.
-func newLobbyParamsTestSession(t *testing.T, logger *zap.Logger, db *sql.DB, nk *RuntimeGoNakamaModule, isGlobalOperator bool) *sessionWS {
+// newLobbyParamsTestSession builds a sessionWS with SessionParameters stored in
+// ctx. isGlobalOperator controls the moderator privilege the session holds.
+//
+// EvrPipeline.nk is left nil on purpose. NewLobbyParametersFromRequest takes the
+// module as a parameter and (since this change set) uses that parameter for
+// every storage read rather than reaching back through session.evrPipeline.nk.
+// A nil pipeline module is therefore the assertion that it does not regress: if
+// some future edit reintroduces a p.nk read on this path, this test panics
+// rather than quietly going back to needing a database.
+func newLobbyParamsTestSession(t *testing.T, logger *zap.Logger, nk runtime.NakamaModule, isGlobalOperator bool) *sessionWS {
 	t.Helper()
 	userID := uuid.Must(uuid.NewV4())
-	InsertUser(t, db, userID)
 
 	ep := &EvrPipeline{
 		node:   "test-node",
 		logger: logger,
-		db:     db,
 		config: NewConfig(logger),
-		nk:     nk,
 	}
 
 	params := &SessionParameters{

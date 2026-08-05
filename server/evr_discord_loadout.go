@@ -20,11 +20,11 @@ import (
 )
 
 const (
-	loadoutAutocompleteEndpoint  = "/discord/loadout/autocomplete"
-	loadoutAutocompleteTTL       = 15 * time.Second
-	loadoutAutocompleteMax       = 25
+	loadoutAutocompleteEndpoint = "/discord/loadout/autocomplete"
+	loadoutAutocompleteTTL      = 15 * time.Second
+	loadoutAutocompleteMax      = 25
 	loadoutAutocompleteCacheMax = 1000
-	maxLoadoutValueLength      = 128
+	maxLoadoutValueLength       = 128
 )
 
 var (
@@ -43,29 +43,29 @@ var (
 	// that belong to it. Derived from the json tags on ArenaUnlocks and
 	// CombatUnlocks in server/evr/core_account.go.
 	slotCosmeticPrefixes = map[string][]string{
-		"banner":          {"rwd_banner_"},
-		"booster":         {"rwd_booster_"},
-		"bracer":          {"rwd_bracer_"},
-		"chassis":         {"rwd_chassis_"},
-		"decal":           {"decal_", "rwd_decal_"},
-		"decal_body":      {"decal_", "rwd_decal_"},
-		"decalborder":     {"rwd_decalborder_"},
-		"decalback":       {"rwd_decalback_"},
-		"emissive":        {"emissive_", "rwd_emissive_"},
-		"emote":           {"emote_", "rwd_emote_"},
-		"secondemote":     {"emote_", "rwd_emote_"},
-		"goal_fx":         {"rwd_goal_fx_"},
-		"medal":           {"rwd_medal_"},
-		"pattern":         {"pattern_", "rwd_pattern_"},
-		"pattern_body":    {"pattern_", "rwd_pattern_"},
+		"banner":       {"rwd_banner_"},
+		"booster":      {"rwd_booster_"},
+		"bracer":       {"rwd_bracer_"},
+		"chassis":      {"rwd_chassis_"},
+		"decal":        {"decal_", "rwd_decal_"},
+		"decal_body":   {"decal_", "rwd_decal_"},
+		"decalborder":  {"rwd_decalborder_"},
+		"decalback":    {"rwd_decalback_"},
+		"emissive":     {"emissive_", "rwd_emissive_"},
+		"emote":        {"emote_", "rwd_emote_"},
+		"secondemote":  {"emote_", "rwd_emote_"},
+		"goal_fx":      {"rwd_goal_fx_"},
+		"medal":        {"rwd_medal_"},
+		"pattern":      {"pattern_", "rwd_pattern_"},
+		"pattern_body": {"pattern_", "rwd_pattern_"},
 		// The pip slot uses decalback items (default: rwd_decalback_default).
-		"pip":             {"rwd_pip_", "rwd_decalback_"},
-		"tag":             {"rwd_tag_"},
-		"tint":            {"tint_", "rwd_tint_"},
-		"tint_body":       {"tint_", "rwd_tint_"},
+		"pip":              {"rwd_pip_", "rwd_decalback_"},
+		"tag":              {"rwd_tag_"},
+		"tint":             {"tint_", "rwd_tint_"},
+		"tint_body":        {"tint_", "rwd_tint_"},
 		"tint_alignment_a": {"tint_", "rwd_tint_"},
 		"tint_alignment_b": {"tint_", "rwd_tint_"},
-		"title":           {"rwd_title_"},
+		"title":            {"rwd_title_"},
 	}
 
 	globalLoadoutAutocompleteService struct {

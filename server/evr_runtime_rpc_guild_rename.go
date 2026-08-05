@@ -14,9 +14,9 @@ import (
 // GuildPlayerRenameRequest represents the request payload for the guild/player/rename RPC.
 type GuildPlayerRenameRequest struct {
 	TargetUserID   string `json:"target_user_id"`   // User ID of the player to rename (required)
-	GroupID        string `json:"group_id"`          // Guild group ID (required)
-	NewDisplayName string `json:"new_display_name"`  // New display name (required)
-	IsLocked       bool   `json:"is_locked"`         // Whether to lock the name (prevent player from changing it)
+	GroupID        string `json:"group_id"`         // Guild group ID (required)
+	NewDisplayName string `json:"new_display_name"` // New display name (required)
+	IsLocked       bool   `json:"is_locked"`        // Whether to lock the name (prevent player from changing it)
 }
 
 // GuildPlayerRenameResponse represents the response from the guild/player/rename RPC.

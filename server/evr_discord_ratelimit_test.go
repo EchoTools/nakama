@@ -58,11 +58,11 @@ type discordgoMember struct {
 }
 
 type discordgoUser struct {
-	ID       string
-	Username string
+	ID            string
+	Username      string
 	Discriminator string
-	Avatar   string
-	Bot      bool
+	Avatar        string
+	Bot           bool
 }
 
 // TestGuildMemberOverloadedCacheMiss demonstrates the complete path:
@@ -179,12 +179,14 @@ func TestFixedCondition(t *testing.T) {
 // (evr_discord_integrator.go ~line 352-365) using function stubs.
 //
 // Bug:
-//   Before the fix, the condition was effectively `member == nil || ErrMemberNotFound`,
-//   so an overloaded error (member=nil, err=ErrDiscordRESTOverloaded) triggered removal.
+//
+//	Before the fix, the condition was effectively `member == nil || ErrMemberNotFound`,
+//	so an overloaded error (member=nil, err=ErrDiscordRESTOverloaded) triggered removal.
 //
 // Fix:
-//   ErrDiscordRESTOverloaded is checked first and returns early,
-//   so GuildGroupMemberRemove is never reached on overload.
+//
+//	ErrDiscordRESTOverloaded is checked first and returns early,
+//	so GuildGroupMemberRemove is never reached on overload.
 func TestSyncMember_OverloadedSkipsRemoval(t *testing.T) {
 	type guildMemberResult struct {
 		member *discordgoMember
@@ -193,30 +195,30 @@ func TestSyncMember_OverloadedSkipsRemoval(t *testing.T) {
 
 	// removalCalled is set to true if the group-removal path is taken.
 	type testCase struct {
-		name             string
-		guildMemberFn    func() (*discordgoMember, error)
+		name              string
+		guildMemberFn     func() (*discordgoMember, error)
 		wantRemovalCalled bool
-		wantReturnErr    bool // syncMember should propagate a non-nil error
+		wantReturnErr     bool // syncMember should propagate a non-nil error
 	}
 
 	cases := []testCase{
 		{
-			name:             "overloaded — skip sync, do NOT remove",
-			guildMemberFn:    func() (*discordgoMember, error) { return nil, ErrDiscordRESTOverloaded },
+			name:              "overloaded — skip sync, do NOT remove",
+			guildMemberFn:     func() (*discordgoMember, error) { return nil, ErrDiscordRESTOverloaded },
 			wantRemovalCalled: false,
-			wantReturnErr:    false, // returns nil (graceful skip)
+			wantReturnErr:     false, // returns nil (graceful skip)
 		},
 		{
-			name:             "member not found — SHOULD remove",
-			guildMemberFn:    func() (*discordgoMember, error) { return nil, ErrMemberNotFound },
+			name:              "member not found — SHOULD remove",
+			guildMemberFn:     func() (*discordgoMember, error) { return nil, ErrMemberNotFound },
 			wantRemovalCalled: true,
-			wantReturnErr:    false, // removal succeeds → returns nil
+			wantReturnErr:     false, // removal succeeds → returns nil
 		},
 		{
-			name:             "member found — do NOT remove",
-			guildMemberFn:    func() (*discordgoMember, error) { return &discordgoMember{}, nil },
+			name:              "member found — do NOT remove",
+			guildMemberFn:     func() (*discordgoMember, error) { return &discordgoMember{}, nil },
 			wantRemovalCalled: false,
-			wantReturnErr:    false, // continues processing
+			wantReturnErr:     false, // continues processing
 		},
 	}
 

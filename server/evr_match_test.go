@@ -466,252 +466,236 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 		return state
 	}
 
-	presences := make([]*EvrMatchPresence, 0)
-	for i := 0; i < 15; i++ {
-		s := strconv.FormatInt(int64(i), 10)
-		presence := &EvrMatchPresence{
-			Node:           "testnode",
-			SessionID:      uuid.NewV5(uuid.Nil, fmt.Sprintf("session-%d", i)),
-			LoginSessionID: uuid.NewV5(uuid.Nil, fmt.Sprintf("login-%d", i)),
-			UserID:         uuid.NewV5(uuid.Nil, fmt.Sprintf("user-%d", i)),
-			EvrID:          evr.EvrId{PlatformCode: 4, AccountId: uint64(i)},
-			DiscordID:      "10000" + s,
-			ClientIP:       "127.0.0." + s,
-			ClientPort:     "100" + s,
-			Username:       "Test username" + s,
-			DisplayName:    "Test User" + s,
-			PartyID:        uuid.NewV5(uuid.Nil, fmt.Sprintf("party-%d", i)),
-			RoleAlignment:  evr.TeamBlue,
-			Query:          "testquery",
-			SessionExpiry:  1234567890,
+	// newPresences builds a FRESH set of presences for a single table case.
+	//
+	// This used to be one shared slice built once, and each case's state closure
+	// mutated RoleAlignment on those shared pointers at table-construction time.
+	// Because Go evaluates every element of a slice literal before the loop runs,
+	// the LAST case's mutations ("Social", which set presences[1:13] to
+	// TeamSocial) had already overwritten the role alignments every earlier case
+	// depended on by the time any subtest executed. Every case was therefore
+	// running against the same final state, not the state it declared.
+	newPresences := func() []*EvrMatchPresence {
+		presences := make([]*EvrMatchPresence, 0, 15)
+		for i := 0; i < 15; i++ {
+			s := strconv.FormatInt(int64(i), 10)
+			presence := &EvrMatchPresence{
+				Node:           "testnode",
+				SessionID:      uuid.NewV5(uuid.Nil, fmt.Sprintf("session-%d", i)),
+				LoginSessionID: uuid.NewV5(uuid.Nil, fmt.Sprintf("login-%d", i)),
+				UserID:         uuid.NewV5(uuid.Nil, fmt.Sprintf("user-%d", i)),
+				EvrID:          evr.EvrId{PlatformCode: 4, AccountId: uint64(i)},
+				DiscordID:      "10000" + s,
+				ClientIP:       "127.0.0." + s,
+				ClientPort:     "100" + s,
+				Username:       "Test username" + s,
+				DisplayName:    "Test User" + s,
+				PartyID:        uuid.NewV5(uuid.Nil, fmt.Sprintf("party-%d", i)),
+				RoleAlignment:  evr.TeamBlue,
+				Query:          "testquery",
+				SessionExpiry:  1234567890,
+			}
+			presences = append(presences, presence)
 		}
-		presences = append(presences, presence)
+		return presences
 	}
 
-	type args struct {
-		state_   interface{}
-		presence runtime.Presence
-		metadata map[string]string
-	}
+	// setup builds the case's state, the joining presence, and its join metadata.
+	// It runs inside the subtest, so each case owns its presences outright.
 	tests := []struct {
 		name        string
-		m           *EvrMatch
-		args        args
+		setup       func() (*MatchLabel, *EvrMatchPresence, map[string]string)
 		wantAllowed bool
 		wantReason  string
 	}{
 		{
 			name: "MatchJoinAttempt returns full if both teams are full",
-			m:    &EvrMatch{},
-			args: args{
-				state_: func() *MatchLabel {
-					state := testStateFn()
-					state.Open = true
-					state.LobbyType = PublicLobby
-					state.Mode = evr.ModeArenaPublic
-					state.MaxSize = 16
-					state.PlayerLimit = 8
-					state.TeamSize = 4
+			setup: func() (*MatchLabel, *EvrMatchPresence, map[string]string) {
+				presences := newPresences()
+				state := testStateFn()
+				state.Open = true
+				state.LobbyType = PublicLobby
+				state.Mode = evr.ModeArenaPublic
+				state.MaxSize = 16
+				state.PlayerLimit = 8
+				state.TeamSize = 4
 
-					state.presenceMap = func() map[string]*EvrMatchPresence {
-						m := make(map[string]*EvrMatchPresence)
-						for i, p := range presences[1:9] {
-							if i >= 4 {
-								p.RoleAlignment = evr.TeamOrange
-							}
-							m[p.GetSessionId()] = p
+				state.presenceMap = func() map[string]*EvrMatchPresence {
+					m := make(map[string]*EvrMatchPresence)
+					for i, p := range presences[1:9] {
+						if i >= 4 {
+							p.RoleAlignment = evr.TeamOrange
 						}
-						return m
-					}()
-					state.rebuildCache()
-					return state
-				}(),
-				presence: presences[0],
-				metadata: func() map[string]string {
-					presences[0].RoleAlignment = evr.TeamOrange
-					return NewJoinMetadata(presences[0]).ToMatchMetadata()
-				}(),
+						m[p.GetSessionId()] = p
+					}
+					return m
+				}()
+				state.rebuildCache()
+
+				joiner := presences[0]
+				joiner.RoleAlignment = evr.TeamOrange
+				return state, joiner, NewJoinMetadata(joiner).ToMatchMetadata()
 			},
 			wantAllowed: false,
 			wantReason:  ErrJoinRejectReasonLobbyFull.Error(),
 		},
 		{
 			name: "MatchJoinAttempt returns full if both teams are full, and player has no team set",
-			m:    &EvrMatch{},
-			args: args{
-				state_: func() *MatchLabel {
-					state := testStateFn()
-					state.Open = true
-					state.LobbyType = PublicLobby
-					state.Mode = evr.ModeArenaPublic
-					state.MaxSize = 16
-					state.PlayerLimit = 8
-					state.TeamSize = 4
+			setup: func() (*MatchLabel, *EvrMatchPresence, map[string]string) {
+				presences := newPresences()
+				state := testStateFn()
+				state.Open = true
+				state.LobbyType = PublicLobby
+				state.Mode = evr.ModeArenaPublic
+				state.MaxSize = 16
+				state.PlayerLimit = 8
+				state.TeamSize = 4
 
-					state.presenceMap = func() map[string]*EvrMatchPresence {
-						m := make(map[string]*EvrMatchPresence)
-						for i, p := range presences[1:9] {
-							if i >= 4 {
-								p.RoleAlignment = evr.TeamOrange
-							}
-							m[p.GetSessionId()] = p
+				state.presenceMap = func() map[string]*EvrMatchPresence {
+					m := make(map[string]*EvrMatchPresence)
+					for i, p := range presences[1:9] {
+						if i >= 4 {
+							p.RoleAlignment = evr.TeamOrange
 						}
-						return m
-					}()
-					state.rebuildCache()
-					return state
-				}(),
-				presence: presences[0],
-				metadata: func() map[string]string {
-					presences[0].RoleAlignment = evr.TeamUnassigned
-					return NewJoinMetadata(presences[0]).ToMatchMetadata()
-				}(),
+						m[p.GetSessionId()] = p
+					}
+					return m
+				}()
+				state.rebuildCache()
+
+				joiner := presences[0]
+				joiner.RoleAlignment = evr.TeamUnassigned
+				return state, joiner, NewJoinMetadata(joiner).ToMatchMetadata()
 			},
 			wantAllowed: false,
 			wantReason:  ErrJoinRejectReasonLobbyFull.Error(),
 		},
 		{
 			name: "Combat: rejects join when both teams are full (5v5)",
-			m:    &EvrMatch{},
-			args: args{
-				state_: func() *MatchLabel {
-					state := testStateFn()
-					state.Open = true
-					state.LobbyType = PublicLobby
-					state.Mode = evr.ModeCombatPublic
-					state.MaxSize = 16
-					state.PlayerLimit = 10
-					state.TeamSize = 5
+			setup: func() (*MatchLabel, *EvrMatchPresence, map[string]string) {
+				presences := newPresences()
+				state := testStateFn()
+				state.Open = true
+				state.LobbyType = PublicLobby
+				state.Mode = evr.ModeCombatPublic
+				state.MaxSize = 16
+				state.PlayerLimit = 10
+				state.TeamSize = 5
 
-					state.presenceMap = func() map[string]*EvrMatchPresence {
-						m := make(map[string]*EvrMatchPresence)
-						for i, p := range presences[1:11] {
-							if i < 5 {
-								p.RoleAlignment = evr.TeamBlue
-							} else {
-								p.RoleAlignment = evr.TeamOrange
-							}
-							m[p.GetSessionId()] = p
+				state.presenceMap = func() map[string]*EvrMatchPresence {
+					m := make(map[string]*EvrMatchPresence)
+					for i, p := range presences[1:11] {
+						if i < 5 {
+							p.RoleAlignment = evr.TeamBlue
+						} else {
+							p.RoleAlignment = evr.TeamOrange
 						}
-						return m
-					}()
-					state.rebuildCache()
-					return state
-				}(),
-				presence: presences[0],
-				metadata: func() map[string]string {
-					presences[0].RoleAlignment = evr.TeamOrange
-					return NewJoinMetadata(presences[0]).ToMatchMetadata()
-				}(),
+						m[p.GetSessionId()] = p
+					}
+					return m
+				}()
+				state.rebuildCache()
+
+				joiner := presences[0]
+				joiner.RoleAlignment = evr.TeamOrange
+				return state, joiner, NewJoinMetadata(joiner).ToMatchMetadata()
 			},
 			wantAllowed: false,
 			wantReason:  ErrJoinRejectReasonLobbyFull.Error(),
 		},
 		{
 			name: "Combat: rejects join when target team is full but other has space",
-			m:    &EvrMatch{},
-			args: args{
-				state_: func() *MatchLabel {
-					state := testStateFn()
-					state.Open = true
-					state.LobbyType = PublicLobby
-					state.Mode = evr.ModeCombatPublic
-					state.MaxSize = 16
-					state.PlayerLimit = 10
-					state.TeamSize = 5
+			setup: func() (*MatchLabel, *EvrMatchPresence, map[string]string) {
+				presences := newPresences()
+				state := testStateFn()
+				state.Open = true
+				state.LobbyType = PublicLobby
+				state.Mode = evr.ModeCombatPublic
+				state.MaxSize = 16
+				state.PlayerLimit = 10
+				state.TeamSize = 5
 
-					state.presenceMap = func() map[string]*EvrMatchPresence {
-						m := make(map[string]*EvrMatchPresence)
-						// 5 on blue (full), 3 on orange (has space)
-						for i, p := range presences[1:9] {
-							if i < 5 {
-								p.RoleAlignment = evr.TeamBlue
-							} else {
-								p.RoleAlignment = evr.TeamOrange
-							}
-							m[p.GetSessionId()] = p
+				state.presenceMap = func() map[string]*EvrMatchPresence {
+					m := make(map[string]*EvrMatchPresence)
+					// 5 on blue (full), 3 on orange (has space)
+					for i, p := range presences[1:9] {
+						if i < 5 {
+							p.RoleAlignment = evr.TeamBlue
+						} else {
+							p.RoleAlignment = evr.TeamOrange
 						}
-						return m
-					}()
-					state.rebuildCache()
-					return state
-				}(),
-				presence: presences[0],
-				metadata: func() map[string]string {
-					presences[0].RoleAlignment = evr.TeamBlue // trying to join the full team
-					return NewJoinMetadata(presences[0]).ToMatchMetadata()
-				}(),
+						m[p.GetSessionId()] = p
+					}
+					return m
+				}()
+				state.rebuildCache()
+
+				joiner := presences[0]
+				joiner.RoleAlignment = evr.TeamBlue // trying to join the full team
+				return state, joiner, NewJoinMetadata(joiner).ToMatchMetadata()
 			},
 			wantAllowed: false,
 			wantReason:  ErrJoinRejectReasonLobbyFull.Error(),
 		},
 		{
 			name: "Arena: rejects join when target team (4) is full",
-			m:    &EvrMatch{},
-			args: args{
-				state_: func() *MatchLabel {
-					state := testStateFn()
-					state.Open = true
-					state.LobbyType = PublicLobby
-					state.Mode = evr.ModeArenaPublic
-					state.MaxSize = 16
-					state.PlayerLimit = 8
-					state.TeamSize = 4
+			setup: func() (*MatchLabel, *EvrMatchPresence, map[string]string) {
+				presences := newPresences()
+				state := testStateFn()
+				state.Open = true
+				state.LobbyType = PublicLobby
+				state.Mode = evr.ModeArenaPublic
+				state.MaxSize = 16
+				state.PlayerLimit = 8
+				state.TeamSize = 4
 
-					state.presenceMap = func() map[string]*EvrMatchPresence {
-						m := make(map[string]*EvrMatchPresence)
-						// 4 on blue (full), 2 on orange
-						for i, p := range presences[1:7] {
-							if i < 4 {
-								p.RoleAlignment = evr.TeamBlue
-							} else {
-								p.RoleAlignment = evr.TeamOrange
-							}
-							m[p.GetSessionId()] = p
+				state.presenceMap = func() map[string]*EvrMatchPresence {
+					m := make(map[string]*EvrMatchPresence)
+					// 4 on blue (full), 2 on orange
+					for i, p := range presences[1:7] {
+						if i < 4 {
+							p.RoleAlignment = evr.TeamBlue
+						} else {
+							p.RoleAlignment = evr.TeamOrange
 						}
-						return m
-					}()
-					state.rebuildCache()
-					return state
-				}(),
-				presence: presences[0],
-				metadata: func() map[string]string {
-					presences[0].RoleAlignment = evr.TeamBlue
-					return NewJoinMetadata(presences[0]).ToMatchMetadata()
-				}(),
+						m[p.GetSessionId()] = p
+					}
+					return m
+				}()
+				state.rebuildCache()
+
+				joiner := presences[0]
+				joiner.RoleAlignment = evr.TeamBlue
+				return state, joiner, NewJoinMetadata(joiner).ToMatchMetadata()
 			},
 			wantAllowed: false,
 			wantReason:  ErrJoinRejectReasonLobbyFull.Error(),
 		},
 		{
 			name: "Social: rejects join when lobby is at 12 players",
-			m:    &EvrMatch{},
-			args: args{
-				state_: func() *MatchLabel {
-					state := testStateFn()
-					state.Open = true
-					state.LobbyType = PublicLobby
-					state.Mode = evr.ModeSocialPublic
-					state.MaxSize = 12
-					state.PlayerLimit = 12
-					state.TeamSize = 12
+			setup: func() (*MatchLabel, *EvrMatchPresence, map[string]string) {
+				presences := newPresences()
+				state := testStateFn()
+				state.Open = true
+				state.LobbyType = PublicLobby
+				state.Mode = evr.ModeSocialPublic
+				state.MaxSize = 12
+				state.PlayerLimit = 12
+				state.TeamSize = 12
 
-					state.presenceMap = func() map[string]*EvrMatchPresence {
-						m := make(map[string]*EvrMatchPresence)
-						for _, p := range presences[1:13] {
-							p.RoleAlignment = evr.TeamSocial
-							m[p.GetSessionId()] = p
-						}
-						return m
-					}()
-					state.rebuildCache()
-					return state
-				}(),
-				presence: presences[0],
-				metadata: func() map[string]string {
-					presences[0].RoleAlignment = evr.TeamSocial
-					return NewJoinMetadata(presences[0]).ToMatchMetadata()
-				}(),
+				state.presenceMap = func() map[string]*EvrMatchPresence {
+					m := make(map[string]*EvrMatchPresence)
+					for _, p := range presences[1:13] {
+						p.RoleAlignment = evr.TeamSocial
+						m[p.GetSessionId()] = p
+					}
+					return m
+				}()
+				state.rebuildCache()
+
+				joiner := presences[0]
+				joiner.RoleAlignment = evr.TeamSocial
+				return state, joiner, NewJoinMetadata(joiner).ToMatchMetadata()
 			},
 			wantAllowed: false,
 			wantReason:  ErrJoinRejectReasonLobbyFull.Error(),
@@ -719,15 +703,16 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-
 			ctx := context.Background()
 			logger := func() runtime.Logger {
 				logger := NewRuntimeGoLogger(NewJSONLogger(os.Stdout, zapcore.ErrorLevel, JSONFormat))
 				return logger
 			}()
 
+			state, presence, metadata := tt.setup()
+
 			m := &EvrMatch{}
-			_, gotAllowed, gotResponse := m.MatchJoinAttempt(ctx, logger, nil, nil, nil, 10, tt.args.state_, tt.args.presence, tt.args.metadata)
+			_, gotAllowed, gotResponse := m.MatchJoinAttempt(ctx, logger, nil, nil, nil, 10, state, presence, metadata)
 			if gotAllowed != tt.wantAllowed {
 				t.Errorf("EvrMatch.MatchJoinAttempt() gotAllowed = %v, want %v", gotAllowed, tt.wantAllowed)
 			}

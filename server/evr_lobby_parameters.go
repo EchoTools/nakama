@@ -171,7 +171,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	}
 
 	// Load the user's matchmaking config
-	userSettings, err := LoadMatchmakingSettings(ctx, p.nk, userID)
+	userSettings, err := LoadMatchmakingSettings(ctx, nk, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load user matchmaking settings: %w", err)
 	}
@@ -184,7 +184,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 			zap.String("reason", userSettings.MatchLockReason))
 	}
 
-	joinDirective, err := LoadJoinDirective(ctx, p.nk, userID)
+	joinDirective, err := LoadJoinDirective(ctx, nk, userID)
 	if err != nil && status.Code(err) != codes.NotFound {
 		return nil, fmt.Errorf("failed to load join directive: %w", err)
 	}
@@ -206,7 +206,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	if joinDirective != nil && joinDirective.HostDiscordID != "" {
 		hostUserIDStr := p.discordCache.DiscordIDToUserID(joinDirective.HostDiscordID)
 		if hostUserID := uuid.FromStringOrNil(hostUserIDStr); !hostUserID.IsNil() {
-			presences, _ := p.nk.StreamUserList(StreamModeService, hostUserID.String(), "", StreamLabelMatchService, false, true)
+			presences, _ := nk.StreamUserList(StreamModeService, hostUserID.String(), "", StreamLabelMatchService, false, true)
 			for _, presence := range presences {
 				matchID := MatchIDFromStringOrNil(presence.GetStatus())
 				if !matchID.IsNil() {
@@ -242,7 +242,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 			go func() {
 				ctxCleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				if err := DeleteJoinDirective(ctxCleanup, p.nk, userID); err != nil {
+				if err := DeleteJoinDirective(ctxCleanup, nk, userID); err != nil {
 					logger.Warn("Failed to delete join directive", zap.Error(err))
 				} else {
 					logger.Debug("Deleted join directive")
@@ -348,7 +348,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		if userSettings.StaticRatingMu != nil && userSettings.StaticRatingSigma != nil {
 			matchmakingRating = types.Rating{Mu: *userSettings.StaticRatingMu, Sigma: *userSettings.StaticRatingSigma}
 		} else {
-			matchmakingRating, err = MatchmakingRatingLoad(ctx, p.nk, userID, groupIDStr, mmMode)
+			matchmakingRating, err = MatchmakingRatingLoad(ctx, nk, userID, groupIDStr, mmMode)
 			if err != nil {
 				logger.Warn("Failed to load matchmaking rating", zap.String("group_id", groupIDStr), zap.String("mode", mmMode.String()), zap.Error(err))
 				matchmakingRating = NewDefaultRating()
@@ -359,7 +359,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	// Load the player's total games played for new-player detection.
 	gamesPlayed := 0
 	if groupID != uuid.Nil {
-		gamesPlayed, err = GamesPlayedLoad(ctx, p.nk, userID, groupIDStr, evr.ModeArenaPublic)
+		gamesPlayed, err = GamesPlayedLoad(ctx, nk, userID, groupIDStr, evr.ModeArenaPublic)
 		if err != nil {
 			logger.Warn("Failed to load games played",
 				zap.String("user_id", userID),
@@ -392,7 +392,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	hasSuspensionHistory := false
 	if globalSettings.ToxicSeparationEnabled() && globalSettings.NewPlayerMaxGames > 0 && !isModerator {
 		journal := NewGuildEnforcementJournal(userID)
-		if err := StorableRead(ctx, p.nk, userID, journal, true); err != nil {
+		if err := StorableRead(ctx, nk, userID, journal, true); err != nil {
 			logger.Warn("Failed to load enforcement journal for toxic separation", zap.Error(err))
 		} else {
 			for _, records := range journal.RecordsByGroupID {
@@ -880,7 +880,6 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 
 	return query, stringProperties, numericProperties
 }
-
 
 func (p *LobbySessionParameters) MatchmakingStream() PresenceStream {
 	return PresenceStream{Mode: StreamModeMatchmaking, Subject: p.GroupID}

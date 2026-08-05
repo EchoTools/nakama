@@ -21,16 +21,16 @@ import (
 )
 
 const (
-	EventLobbySessionAuthorized    = "lobby_session_authorized"
-	EventSessionStart              = "session_start"
-	EventSessionEnd                = "session_end"
-	EventMatchData                 = "match_data"
-	matchDataDatabaseName              = "nevr"
-	matchDataCollectionName            = "match_data"
-	playerMatchResultsCollectionName   = "player_match_results"
-	redisMatchDataJournalQueueKey  = "match_data_journal_queue"
-	matchDataJournalEventThreshold = 100
-	redisQueueBatchSize            = 10
+	EventLobbySessionAuthorized      = "lobby_session_authorized"
+	EventSessionStart                = "session_start"
+	EventSessionEnd                  = "session_end"
+	EventMatchData                   = "match_data"
+	matchDataDatabaseName            = "nevr"
+	matchDataCollectionName          = "match_data"
+	playerMatchResultsCollectionName = "player_match_results"
+	redisMatchDataJournalQueueKey    = "match_data_journal_queue"
+	matchDataJournalEventThreshold   = 100
+	redisQueueBatchSize              = 10
 )
 
 const eventDispatchTimeout = 5 * time.Second
@@ -71,14 +71,14 @@ type EventDispatcher struct {
 	statisticsQueue *StatisticsQueue
 	vrmlScanQueue   *VRMLScanQueue
 
-	eventUnmarshaler     func(event *api.Event) (Event, error)
-	queue                chan *api.Event
-	directQueue          chan Event // bypasses JSON serialization
-	matchJournals        map[MatchID]*MatchDataJournal
+	eventUnmarshaler      func(event *api.Event) (Event, error)
+	queue                 chan *api.Event
+	directQueue           chan Event // bypasses JSON serialization
+	matchJournals         map[MatchID]*MatchDataJournal
 	matchJournalsInFlight map[MatchID]*MatchDataJournal // journals currently being inserted into MongoDB
-	cache                *sync.Map
-	guildGroupLoadGroup  singleflight.Group // coalesces concurrent guildGroup cache-miss loads by group id
-	playerAuthorizations map[string]map[string]struct{} // map[sessionID]map[groupID]struct{}
+	cache                 *sync.Map
+	guildGroupLoadGroup   singleflight.Group             // coalesces concurrent guildGroup cache-miss loads by group id
+	playerAuthorizations  map[string]map[string]struct{} // map[sessionID]map[groupID]struct{}
 }
 
 func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, mongoClient *mongo.Client, redisClient *redis.Client, dg *discordgo.Session, statisticsQueue *StatisticsQueue, vrmlScanQueue *VRMLScanQueue) (*EventDispatcher, error) {
@@ -97,12 +97,12 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		vrmlScanQueue:   vrmlScanQueue,
 		statisticsQueue: statisticsQueue,
 
-		queue:                make(chan *api.Event, 4096),
-		directQueue:          make(chan Event, 4096),
-		matchJournals:        make(map[MatchID]*MatchDataJournal),
+		queue:                 make(chan *api.Event, 4096),
+		directQueue:           make(chan Event, 4096),
+		matchJournals:         make(map[MatchID]*MatchDataJournal),
 		matchJournalsInFlight: make(map[MatchID]*MatchDataJournal),
-		cache:                &sync.Map{},
-		playerAuthorizations: make(map[string]map[string]struct{}),
+		cache:                 &sync.Map{},
+		playerAuthorizations:  make(map[string]map[string]struct{}),
 	}
 
 	dispatch.eventUnmarshaler = dispatch.unmarshalEventFactory([]Event{

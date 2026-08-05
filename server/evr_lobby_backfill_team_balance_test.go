@@ -336,12 +336,12 @@ func TestGetPossibleTeams_CombatNeverReturnsSpectatorOrSocial(t *testing.T) {
 	backfill := &PostMatchmakerBackfill{}
 
 	combatScenarios := []struct {
-		name       string
-		blueCount  int
+		name        string
+		blueCount   int
 		orangeCount int
-		blueSlots  int
+		blueSlots   int
 		orangeSlots int
-		partySize  int
+		partySize   int
 	}{
 		{"empty match", 0, 0, 5, 5, 1},
 		{"one per team", 1, 1, 4, 4, 1},
@@ -392,10 +392,10 @@ func TestGetPossibleTeams_ArenaMatchesOnlyBlueOrange(t *testing.T) {
 	}
 
 	arenaScenarios := []struct {
-		name       string
-		blueSlots  int
+		name        string
+		blueSlots   int
 		orangeSlots int
-		blueCount  int
+		blueCount   int
 		orangeCount int
 	}{
 		{"empty", 4, 4, 0, 0},

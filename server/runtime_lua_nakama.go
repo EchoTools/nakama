@@ -6454,7 +6454,6 @@ func tableToStorageWrites(l *lua.LState, dataTable *lua.LTable) (StorageOpWrites
 	return ops, nil
 }
 
-
 // @group storage
 // @summary Remove one or more objects by their collection/keyname and optional user.
 // @param keys(type=table) A list of object identifiers to be deleted.

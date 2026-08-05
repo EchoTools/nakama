@@ -144,7 +144,7 @@ cd nakama
 go mod vendor
 
 # Build the server (~1 minute)  
-make nakama
+just nakama
 ```
 
 ### 2. Start Database
@@ -341,10 +341,10 @@ cd nakama
 go mod vendor
 
 # Build for development (with debug symbols)
-make nakama
+just nakama
 
 # Build Docker image
-make build
+just build
 
 # Verify build
 ./nakama --version

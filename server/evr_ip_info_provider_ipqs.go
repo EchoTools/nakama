@@ -173,8 +173,8 @@ type IPQSClient struct {
 
 	mu              sync.Mutex
 	lastFailureTime time.Time
-	backoffDuration     time.Duration
-	circuitOpen         bool
+	backoffDuration time.Duration
+	circuitOpen     bool
 }
 
 const (

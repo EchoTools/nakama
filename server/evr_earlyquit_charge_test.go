@@ -52,23 +52,10 @@ func (c *chargeTestLeaderboardCache) Remove(id string) {}
 // penalty level from the ladder, setting PenaltyLevel and a future
 // PenaltyTimestamp so IsPenaltyActive() reports a live lockout.
 //
-// Requires a real Postgres (TEST_DB_URL) — the gate's StorableRead/StorableWrite
-// run through RuntimeGoNakamaModule, which uses pgx connections directly.
+// Runs against the in-memory evrTestNakamaModule: no database, no services.
 func TestEarlyQuitChargeGate_SetsPenaltyState(t *testing.T) {
-	// --- setup: real module over the test DB ---
-	logger := loggerForTest(t)
-	db := NewDB(t)
-	cfg := NewConfig(logger)
-
-	storageIndex, err := NewLocalStorageIndex(logger, db, &StorageConfig{}, &testMetrics{})
-	if err != nil {
-		t.Fatalf("failed to create storage index: %v", err)
-	}
-	nk := NewRuntimeGoNakamaModule(logger, db, nil, cfg,
-		nil, &chargeTestLeaderboardCache{}, nil, nil,
-		&testSessionRegistry{}, nil, nil, nil,
-		&testTracker{}, &testMetrics{}, nil, &testMessageRouter{},
-		storageIndex, nil)
+	// --- setup: in-memory module, no database required ---
+	nk, db := newChargeModule(t)
 
 	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
 
@@ -79,7 +66,6 @@ func TestEarlyQuitChargeGate_SetsPenaltyState(t *testing.T) {
 
 	// --- player with 2 prior early quits on record (3rd quit crosses into penalty level 1) ---
 	player := reconnectTestPlayer("b1-charge", evr.TeamBlue)
-	InsertUser(t, db, player.UserID)
 
 	if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
 		Collection:      StorageCollectionEarlyQuit,
@@ -163,19 +149,7 @@ func TestEarlyQuitChargeGate_GuildEnforcementFlag(t *testing.T) {
 	}
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			logger := loggerForTest(t)
-			db := NewDB(t)
-			cfg := NewConfig(logger)
-
-			storageIndex, err := NewLocalStorageIndex(logger, db, &StorageConfig{}, &testMetrics{})
-			if err != nil {
-				t.Fatalf("failed to create storage index: %v", err)
-			}
-			nk := NewRuntimeGoNakamaModule(logger, db, nil, cfg,
-				nil, &chargeTestLeaderboardCache{}, nil, nil,
-				&testSessionRegistry{}, nil, nil, nil,
-				&testTracker{}, &testMetrics{}, nil, &testMessageRouter{},
-				storageIndex, nil)
+			nk, db := newChargeModule(t)
 
 			ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
 			writeEarlyQuitServiceConfig(t, ctx, nk, defaultEarlyQuitConfigJSON(t))
@@ -186,7 +160,6 @@ func TestEarlyQuitChargeGate_GuildEnforcementFlag(t *testing.T) {
 
 			// Player with 2 prior early quits (3rd quit crosses into penalty level 1).
 			player := reconnectTestPlayer(fmt.Sprintf("charge-guild-flag-%d", i), evr.TeamBlue)
-			InsertUser(t, db, player.UserID)
 
 			if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
 				Collection:      StorageCollectionEarlyQuit,
@@ -243,8 +216,31 @@ func TestEarlyQuitChargeGate_GuildEnforcementFlag(t *testing.T) {
 
 // withGuildEnforcement returns a copy of ctx whose session parameters map the
 // given guild to a GuildGroup carrying the given EnforceEarlyQuitPenalty flag
-// (nil leaves the flag unset — the getter's default). This is how the charge
-// gate learns whether a guild has opted in to server-side enforcement.
+// (nil leaves the flag unset — the getter's default).
+//
+// WARNING — THIS CONTEXT SHAPE DOES NOT OCCUR IN PRODUCTION.
+//
+// ctxSessionParametersKey{} is planted on the *session* context by the EVR
+// pipeline. The context that the Nakama match runtime hands to MatchLeave is
+// built by the match runtime, not by a session, and it never carries that key.
+// So the branch that TestEarlyQuitChargeGate_GuildEnforcementFlag exercises
+// through this helper is reachable only from the test.
+//
+// Consequence: that test does NOT prove the guild opt-in gate works. In
+// production earlyQuitEnforcementEnabled cannot find the session parameters, so
+// LoadParams fails and it takes its fail-open `return true` branch — every guild
+// is treated as opted in and the flag never suppresses anything. That is a real
+// production bug; it is deliberately NOT fixed here (this change set is a
+// testability refactor and must not alter behaviour) and needs its own PR. Do
+// not read a green run of this test as evidence the gate is enforced.
+//
+// What the test DOES now prove, which it could not before: the subtests actually
+// execute. Until the *RuntimeGoNakamaModule assertion was removed from the charge
+// gate they were skipped for want of a database, and before that a test double
+// fell straight through the assertion's `continue`. Flipping
+// earlyQuitEnforcementEnabled to an unconditional `return true` now turns the
+// guild-flag-nil and guild-flag-false cases red, so the suppression branch is
+// genuinely exercised — just from a context production never constructs.
 func withGuildEnforcement(ctx context.Context, guildID uuid.UUID, enforce *bool) context.Context {
 	params := &SessionParameters{
 		guildGroups: map[string]*GuildGroup{
@@ -294,19 +290,7 @@ func defaultEarlyQuitConfigJSON(t *testing.T) string {
 // defaults B1 used. Regression for BUG-3: a custom ladder that puts level 1 at
 // 2 quits with a 60s lockout must be honored (defaults would say level 0).
 func TestEarlyQuitChargeGate_UsesStoredConfigLadder(t *testing.T) {
-	logger := loggerForTest(t)
-	db := NewDB(t)
-	cfg := NewConfig(logger)
-
-	storageIndex, err := NewLocalStorageIndex(logger, db, &StorageConfig{}, &testMetrics{})
-	if err != nil {
-		t.Fatalf("failed to create storage index: %v", err)
-	}
-	nk := NewRuntimeGoNakamaModule(logger, db, nil, cfg,
-		nil, &chargeTestLeaderboardCache{}, nil, nil,
-		&testSessionRegistry{}, nil, nil, nil,
-		&testTracker{}, &testMetrics{}, nil, &testMessageRouter{},
-		storageIndex, nil)
+	nk, db := newChargeModule(t)
 
 	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
 
@@ -318,7 +302,6 @@ func TestEarlyQuitChargeGate_UsesStoredConfigLadder(t *testing.T) {
 
 	// --- player with 1 prior early quit (2nd quit crosses into custom level 1) ---
 	player := reconnectTestPlayer("b2-stored-ladder", evr.TeamBlue)
-	InsertUser(t, db, player.UserID)
 
 	if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
 		Collection:      StorageCollectionEarlyQuit,
@@ -377,19 +360,7 @@ func TestEarlyQuitChargeGate_UsesStoredConfigLadder(t *testing.T) {
 // PenaltyTimestamp are cleared to zero (B1 left them untouched, which could keep
 // a dead lockout on record indefinitely).
 func TestEarlyQuitChargeGate_ClearsPenaltyAtLevelZero(t *testing.T) {
-	logger := loggerForTest(t)
-	db := NewDB(t)
-	cfg := NewConfig(logger)
-
-	storageIndex, err := NewLocalStorageIndex(logger, db, &StorageConfig{}, &testMetrics{})
-	if err != nil {
-		t.Fatalf("failed to create storage index: %v", err)
-	}
-	nk := NewRuntimeGoNakamaModule(logger, db, nil, cfg,
-		nil, &chargeTestLeaderboardCache{}, nil, nil,
-		&testSessionRegistry{}, nil, nil, nil,
-		&testTracker{}, &testMetrics{}, nil, &testMessageRouter{},
-		storageIndex, nil)
+	nk, db := newChargeModule(t)
 
 	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
 
@@ -400,7 +371,6 @@ func TestEarlyQuitChargeGate_ClearsPenaltyAtLevelZero(t *testing.T) {
 	// 2nd quit maps to level 0, so the stale lockout must be cleared. ---
 	staleTS := time.Now().Add(time.Hour).Unix()
 	player := reconnectTestPlayer("b2-level0-clear", evr.TeamBlue)
-	InsertUser(t, db, player.UserID)
 
 	if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
 		Collection:      StorageCollectionEarlyQuit,

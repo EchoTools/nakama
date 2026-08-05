@@ -386,11 +386,11 @@ func (pl *PartyLifecycle) RecordMatchJoin(uid, matchID string) {
 // These methods make PartyLifecycle satisfy the PartyResult interface defined
 // in output.go, enabling direct use with the output layer.
 
-func (pl *PartyLifecycle) GetPartyID() string    { return pl.PartyID }
-func (pl *PartyLifecycle) GetFormedAt() time.Time { return pl.FormedAt }
-func (pl *PartyLifecycle) GetLeader() string      { return pl.Leader.Username }
-func (pl *PartyLifecycle) GetOutcome() string     { return pl.Outcome.String() }
-func (pl *PartyLifecycle) GetOutcomeReason() string { return pl.OutcomeInfo }
+func (pl *PartyLifecycle) GetPartyID() string         { return pl.PartyID }
+func (pl *PartyLifecycle) GetFormedAt() time.Time     { return pl.FormedAt }
+func (pl *PartyLifecycle) GetLeader() string          { return pl.Leader.Username }
+func (pl *PartyLifecycle) GetOutcome() string         { return pl.Outcome.String() }
+func (pl *PartyLifecycle) GetOutcomeReason() string   { return pl.OutcomeInfo }
 func (pl *PartyLifecycle) GetDuration() time.Duration { return pl.Duration }
 
 // GetMembers returns all member usernames including the leader.

@@ -144,9 +144,9 @@ type replayTestEnv struct {
 	matchRegistry   *mockReplayMatchRegistry
 	sessionRegistry *mockReplaySessionRegistry
 
-	sessions         map[string]*sessionWS        // keyed by player name
-	capturedMessages map[uuid.UUID][]evr.Message   // keyed by session ID
-	mu               sync.Mutex                    // protects capturedMessages
+	sessions         map[string]*sessionWS       // keyed by player name
+	capturedMessages map[uuid.UUID][]evr.Message // keyed by session ID
+	mu               sync.Mutex                  // protects capturedMessages
 }
 
 func newReplayTestEnv(t *testing.T) *replayTestEnv {
@@ -308,7 +308,7 @@ func TestPipelineReplay_FindReservation_SoloNoParty(t *testing.T) {
 //   - The social lobby has a reservation for player_A (created by leader's lobbyEntrantConnected)
 //
 // Test:
-//   1. findReservation for player_A finds the reservation in the social lobby
+//  1. findReservation for player_A finds the reservation in the social lobby
 //
 // Assert:
 //   - findReservation returns the social lobby match ID (not the arena match)
@@ -322,7 +322,7 @@ func TestPipelineReplay_BigDuckII_FollowerNotStuck(t *testing.T) {
 	env := newReplayTestEnv(t)
 
 	// Player identities — anonymized from production logs.
-	leaderUID := uuid.Must(uuid.NewV4())  // the_noodle_of_doom
+	leaderUID := uuid.Must(uuid.NewV4()) // the_noodle_of_doom
 	leaderSID := uuid.Must(uuid.NewV4())
 	followerUID := uuid.Must(uuid.NewV4()) // bigduckii
 	followerSID := uuid.Must(uuid.NewV4())

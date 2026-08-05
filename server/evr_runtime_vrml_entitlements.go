@@ -52,9 +52,9 @@ const (
 	TagVRMLS5Champion = "rwd_tag_0037"
 	TagVRMLS5Finalist = "rwd_tag_0036"
 	// rwd_tag_0038: Stand store item; rwd_tag_0039: Liminal event item.
-	TagStand   = "rwd_tag_0038"
-	TagLiminal = "rwd_tag_0039"
-	TagVRMLS6          = "rwd_tag_0040"
+	TagStand          = "rwd_tag_0038"
+	TagLiminal        = "rwd_tag_0039"
+	TagVRMLS6         = "rwd_tag_0040"
 	TagVRMLS6Champion = "rwd_tag_0042"
 	TagVRMLS6Finalist = "rwd_tag_0041"
 	TagVRMLS7         = "rwd_tag_0043"

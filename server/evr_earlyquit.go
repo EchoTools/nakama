@@ -10,7 +10,6 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"go.uber.org/zap"
 )
 
 const (
@@ -51,12 +50,12 @@ type EarlyQuitPlayerState struct {
 	sync.Mutex `json:"-"`
 
 	// Binary-aligned fields (match earlyquit| profile keys)
-	PenaltyTimestamp    int64 `json:"penalty_ts"`              // Absolute expiry timestamp (unix seconds), -1 = none
-	NumEarlyQuits       int32 `json:"num_early_quits"`         // Accumulating early quit count
-	NumSteadyMatches    int32 `json:"num_steady_matches"`      // Matches counted toward steady player status
-	NumSteadyEarlyQuits int32 `json:"num_steady_early_quits"`  // Quits counted toward steady player status
-	PenaltyLevel        int32 `json:"penalty_level"`           // Resolved from config (clamped uint8)
-	SteadyPlayerLevel   int32 `json:"steady_player_level"`     // Resolved from config (clamped uint8)
+	PenaltyTimestamp    int64 `json:"penalty_ts"`             // Absolute expiry timestamp (unix seconds), -1 = none
+	NumEarlyQuits       int32 `json:"num_early_quits"`        // Accumulating early quit count
+	NumSteadyMatches    int32 `json:"num_steady_matches"`     // Matches counted toward steady player status
+	NumSteadyEarlyQuits int32 `json:"num_steady_early_quits"` // Quits counted toward steady player status
+	PenaltyLevel        int32 `json:"penalty_level"`          // Resolved from config (clamped uint8)
+	SteadyPlayerLevel   int32 `json:"steady_player_level"`    // Resolved from config (clamped uint8)
 
 	// Nakama extensions (kept for matchmaker/UI compat)
 	TotalCompletedMatches      int32     `json:"total_completed_matches"`
@@ -140,14 +139,7 @@ func ResolvePenaltyLevel(numQuits int32, cfg *evr.SNSEarlyQuitConfig) (level int
 // new quit count is reflected. When the count maps to a level with no lockout
 // (level 0), any stale PenaltyLevel/PenaltyTimestamp are cleared to zero.
 func resolveAndApplyPenaltyLockout(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, eqconfig *EarlyQuitPlayerState) {
-	// RuntimeLoggerToZapLogger hard-casts to *RuntimeGoLogger, which test
-	// doubles (e.g. captureLogger) do not satisfy. LoadEarlyQuitServiceConfig
-	// tolerates a nil logger, so degrade gracefully instead of panicking.
-	var zapLogger *zap.Logger
-	if zl, ok := logger.(*RuntimeGoLogger); ok {
-		zapLogger = zl.logger
-	}
-	config := LoadEarlyQuitServiceConfig(ctx, nk, zapLogger)
+	config := LoadEarlyQuitServiceConfig(ctx, nk, logger)
 	level, lockoutSec := ResolvePenaltyLevel(eqconfig.NumEarlyQuits, config)
 	if lockoutSec > 0 {
 		eqconfig.PenaltyLevel = level

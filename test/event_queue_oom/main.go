@@ -7,8 +7,9 @@
 // heap usage. With queue=100, events are dropped under pressure, bounding memory.
 //
 // Usage:
-//   go run . -queue 4096 -duration 5m -rate 2.4
-//   go run . -queue 100 -duration 5m -rate 2.4
+//
+//	go run . -queue 4096 -duration 5m -rate 2.4
+//	go run . -queue 100 -duration 5m -rate 2.4
 package main
 
 import (
