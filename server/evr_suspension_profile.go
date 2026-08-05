@@ -172,7 +172,29 @@ func (s *SuspensionProfile) StorageIndexes() []StorableIndexMeta {
 		Collection: StorageCollectionSuspensionProfile,
 		Key:        StorageKeySuspensionProfile,
 		Fields:     []string{"user_id", "suspensions"},
-		MaxEntries: 10000,
+		// MaxEntries bounds a CUMULATIVE set, not a concurrent one. This
+		// collection holds one entry per user who has ever had an enforcement
+		// journal synced -- including users whose suspensions have all expired
+		// or been voided, since a zero-suspension profile still carries user_id
+		// and is still indexed. It never shrinks.
+		//
+		// The old value of 10,000 was therefore a ceiling on LIFETIME
+		// enforcement history, and exceeding it degrades silently in two
+		// directions: eviction (evicted entries are never reloaded) and
+		// boot-load truncation (load stops dead at MaxEntries,
+		// storage_index.go:479+491). Both make an entry simply absent.
+		//
+		// Sized to match DisplayNameHistory, the closest structural analogue
+		// here: also one entry per user, also cumulative, already sized by this
+		// project for EVR's real population. Enforced users are a strict subset
+		// of users with a display-name history, so this cap provably cannot
+		// bind before that one does.
+		//
+		// This is an order-of-magnitude judgement, not a measured peak. The
+		// accompanying observability -- the entry gauge now published at boot,
+		// plus warnings on eviction and load truncation -- is what makes the
+		// real number visible so this can be right-sized from evidence.
+		MaxEntries: 1000000,
 		IndexOnly:  true,
 	}}
 }
