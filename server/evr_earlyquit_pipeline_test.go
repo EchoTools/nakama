@@ -9,7 +9,6 @@ import (
 
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"go.uber.org/zap"
 )
 
 // TestEarlyQuitDetectionPipeline validates that early quits are properly
@@ -26,16 +25,13 @@ import (
 //
 // and asserts on the stored EarlyQuit|statistics counter.
 //
-// Requires a real Postgres (TEST_DB_URL) — the gate's StorableRead/StorableWrite
-// run through RuntimeGoNakamaModule, which uses pgx connections directly.
+// Runs against the in-memory evrTestNakamaModule: no database, no services.
 func TestEarlyQuitDetectionPipeline(t *testing.T) {
-	logger := loggerForTest(t)
-	db, nk := newChargeModule(t, logger)
+	nk, db := newChargeModule(t)
 	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
 
 	t.Run("Player leaving mid-game increments early quit counter", func(t *testing.T) {
 		player := reconnectTestPlayer("b6-pipe-midgame", evr.TeamBlue)
-		InsertUser(t, db, player.UserID)
 		preseedEarlyQuitConfig(t, ctx, nk, player.GetUserId())
 
 		state := chargeState(evr.ModeArenaPublic, player)
@@ -53,7 +49,6 @@ func TestEarlyQuitDetectionPipeline(t *testing.T) {
 		// the old "60 second grace" case, which asserted a rule production
 		// does not implement.
 		player := reconnectTestPlayer("b6-pipe-early", evr.TeamBlue)
-		InsertUser(t, db, player.UserID)
 		preseedEarlyQuitConfig(t, ctx, nk, player.GetUserId())
 
 		state := chargeState(evr.ModeArenaPublic, player)
@@ -67,7 +62,6 @@ func TestEarlyQuitDetectionPipeline(t *testing.T) {
 
 	t.Run("Player leaving after match ends does not increment early quit", func(t *testing.T) {
 		player := reconnectTestPlayer("b6-pipe-after", evr.TeamBlue)
-		InsertUser(t, db, player.UserID)
 		preseedEarlyQuitConfig(t, ctx, nk, player.GetUserId())
 
 		state := chargeState(evr.ModeArenaPublic, player)
@@ -81,7 +75,6 @@ func TestEarlyQuitDetectionPipeline(t *testing.T) {
 
 	t.Run("Spectator leaving does not increment early quit", func(t *testing.T) {
 		player := reconnectTestPlayer("b6-pipe-spec", evr.TeamSpectator)
-		InsertUser(t, db, player.UserID)
 		preseedEarlyQuitConfig(t, ctx, nk, player.GetUserId())
 
 		state := chargeState(evr.ModeArenaPublic, player)
@@ -94,7 +87,6 @@ func TestEarlyQuitDetectionPipeline(t *testing.T) {
 
 	t.Run("Moderator leaving does not increment early quit", func(t *testing.T) {
 		player := reconnectTestPlayer("b6-pipe-mod", evr.TeamModerator)
-		InsertUser(t, db, player.UserID)
 		preseedEarlyQuitConfig(t, ctx, nk, player.GetUserId())
 
 		state := chargeState(evr.ModeArenaPublic, player)
@@ -107,7 +99,6 @@ func TestEarlyQuitDetectionPipeline(t *testing.T) {
 
 	t.Run("Social lobby leaving does not increment early quit", func(t *testing.T) {
 		player := reconnectTestPlayer("b6-pipe-social", evr.TeamBlue)
-		InsertUser(t, db, player.UserID)
 		preseedEarlyQuitConfig(t, ctx, nk, player.GetUserId())
 
 		state := chargeState(evr.ModeSocialPublic, player)
@@ -155,8 +146,7 @@ func TestEarlyQuitDetectionPipeline(t *testing.T) {
 // re-implementation — it could never fail. There is deliberately no
 // match-started-ago field: production has no duration threshold.
 func TestEarlyQuitConditions(t *testing.T) {
-	logger := loggerForTest(t)
-	db, nk := newChargeModule(t, logger)
+	nk, db := newChargeModule(t)
 	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
 
 	tests := []struct {
@@ -263,7 +253,6 @@ func TestEarlyQuitConditions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			player := reconnectTestPlayer(tt.seed, tt.roleAlignment)
-			InsertUser(t, db, player.UserID)
 			preseedEarlyQuitConfig(t, ctx, nk, player.GetUserId())
 
 			state := chargeState(tt.mode, player)
@@ -285,25 +274,25 @@ func TestEarlyQuitConditions(t *testing.T) {
 	}
 }
 
-// newChargeModule returns a real RuntimeGoNakamaModule over the test DB. The
-// leaderboard cache is the same stub the charge-gate tests use: leaderboard
-// ops degrade to non-fatal warnings, which is what MatchLeave expects.
-func newChargeModule(t *testing.T, logger *zap.Logger) (*sql.DB, *RuntimeGoNakamaModule) {
+// newChargeModule returns the in-memory NakamaModule the charge-gate tests drive
+// MatchLeave with, plus the nil *sql.DB that MatchLeave is handed alongside it.
+//
+// No database and no services. The module carries a real (in-memory)
+// LocalSessionRegistry so the charge gate's session-refresh branch and its
+// deferred-penalty goroutines run against a genuine registry rather than being
+// skipped. The registry is empty, so the refresh finds no live session — the
+// same shape as a player whose session has already gone.
+//
+// The *sql.DB is nil on purpose: MatchLeave only touches db on the Discord
+// tier-change DM path, which is gated behind
+// ServiceSettings().Matchmaking.EnableEarlyQuitPenalty. These tests leave that
+// false, so a nil db is never dereferenced. A regression that reaches it would
+// panic loudly rather than pass quietly.
+func newChargeModule(t *testing.T) (*evrTestNakamaModule, *sql.DB) {
 	t.Helper()
-	db := NewDB(t)
-	t.Cleanup(func() { _ = db.Close() })
-	cfg := NewConfig(logger)
-
-	storageIndex, err := NewLocalStorageIndex(logger, db, &StorageConfig{}, &testMetrics{})
-	if err != nil {
-		t.Fatalf("failed to create storage index: %v", err)
-	}
-	nk := NewRuntimeGoNakamaModule(logger, db, nil, cfg,
-		nil, &chargeTestLeaderboardCache{}, nil, nil,
-		&testSessionRegistry{}, nil, nil, nil,
-		&testTracker{}, &testMetrics{}, nil, &testMessageRouter{},
-		storageIndex, nil)
-	return db, nk
+	nk := newEvrTestNakamaModule()
+	nk.sessions = NewLocalSessionRegistry(&testMetrics{})
+	return nk, nil
 }
 
 // chargeState builds a match label in the given mode with one player present

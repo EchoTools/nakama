@@ -4482,3 +4482,16 @@ func (n *RuntimeGoNakamaModule) PartyList(ctx context.Context, limit int, open *
 func (n *RuntimeGoNakamaModule) SetPartyRegistry(pr PartyRegistry) {
 	n.partyRegistry = pr
 }
+
+// SessionRegistry and PartyRegistry expose the registries this module was built
+// with. They exist so callers that need a registry can ask a narrow interface
+// for it (see evrSessionRegistryProvider / evrPartyRegistryProvider in
+// evr_match.go) instead of type-asserting runtime.NakamaModule down to this
+// concrete type — an assertion no test double can ever satisfy.
+func (n *RuntimeGoNakamaModule) SessionRegistry() SessionRegistry {
+	return n.sessionRegistry
+}
+
+func (n *RuntimeGoNakamaModule) PartyRegistry() PartyRegistry {
+	return n.partyRegistry
+}

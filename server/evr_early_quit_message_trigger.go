@@ -49,7 +49,13 @@ func (c *EarlyQuitServiceConfigStorable) SetStorageMeta(meta StorableMetadata) {
 
 // LoadEarlyQuitServiceConfig loads the early quit service config from storage,
 // or creates it with defaults if not found or blank. The config is validated and fixed if invalid.
-func LoadEarlyQuitServiceConfig(ctx context.Context, nk runtime.NakamaModule, logger *zap.Logger) *evr.SNSEarlyQuitConfig {
+//
+// logger is a runtime.Logger, not a *zap.Logger, so that callers holding the
+// runtime logger can pass it straight through. It previously took *zap.Logger,
+// which forced its only match-path caller to hard-cast logger.(*RuntimeGoLogger)
+// to reach the wrapped zap logger — a cast that panics on any other
+// implementation. nil is still accepted and silences the warnings.
+func LoadEarlyQuitServiceConfig(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger) *evr.SNSEarlyQuitConfig {
 	configStorable := &EarlyQuitServiceConfigStorable{
 		SNSEarlyQuitConfig: evr.NewDefaultSNSEarlyQuitConfig(),
 	}
@@ -65,8 +71,7 @@ func LoadEarlyQuitServiceConfig(ctx context.Context, nk runtime.NakamaModule, lo
 			configStorable.SNSEarlyQuitConfig = config
 			if writeErr := StorableWrite(ctx, nk, SystemUserID, configStorable); writeErr != nil {
 				if logger != nil {
-					logger.Warn("Failed to write early quit config to storage",
-						zap.Error(writeErr))
+					logger.WithField("error", writeErr).Warn("Failed to write early quit config to storage")
 				}
 			}
 			return config
@@ -75,8 +80,7 @@ func LoadEarlyQuitServiceConfig(ctx context.Context, nk runtime.NakamaModule, lo
 		// Some other error occurred; suppress logs if the context was canceled.
 		if ctx.Err() == nil {
 			if logger != nil {
-				logger.Warn("Failed to load early quit config from storage, using defaults",
-					zap.Error(err))
+				logger.WithField("error", err).Warn("Failed to load early quit config from storage, using defaults")
 			}
 		}
 		config := evr.NewDefaultSNSEarlyQuitConfig()
@@ -100,8 +104,7 @@ func LoadEarlyQuitServiceConfig(ctx context.Context, nk runtime.NakamaModule, lo
 		configStorable.SNSEarlyQuitConfig = config
 		if writeErr := StorableWrite(ctx, nk, SystemUserID, configStorable); writeErr != nil {
 			if logger != nil {
-				logger.Warn("Failed to write populated early quit config to storage",
-					zap.Error(writeErr))
+				logger.WithField("error", writeErr).Warn("Failed to write populated early quit config to storage")
 			}
 		}
 	}
@@ -128,8 +131,7 @@ func LoadEarlyQuitServiceConfig(ctx context.Context, nk runtime.NakamaModule, lo
 		configStorable.SNSEarlyQuitConfig = config
 		if writeErr := StorableWrite(ctx, nk, SystemUserID, configStorable); writeErr != nil {
 			if logger != nil {
-				logger.Warn("Failed to write validated early quit config to storage",
-					zap.Error(writeErr))
+				logger.WithField("error", writeErr).Warn("Failed to write validated early quit config to storage")
 			}
 		}
 	}
@@ -197,7 +199,7 @@ func (t *SNSEarlyQuitMessageTrigger) SendEarlyQuitConfigOnLogin(ctx context.Cont
 	}
 
 	// Load the configuration from storage (or defaults)
-	config := LoadEarlyQuitServiceConfig(ctx, t.nk, t.logger)
+	config := LoadEarlyQuitServiceConfig(ctx, t.nk, NewRuntimeGoLogger(t.logger))
 
 	// Send to the player
 	if err := session.SendEvr(config); err != nil {
