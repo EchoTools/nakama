@@ -74,13 +74,23 @@ func observedLogger() (runtime.Logger, *observer.ObservedLogs) {
 func testOrphanGroup(guildID, groupID string) orphanGroup {
 	return orphanGroup{
 		guildID: guildID,
-		group:   &api.Group{Id: groupID, Name: "group-" + guildID},
+		group: &api.Group{
+			Id:       groupID,
+			Name:     "group-" + guildID,
+			Metadata: fmt.Sprintf(`{"guild_id":%q,"audit_channel_id":%q}`, guildID, sentinelAuditChannelID),
+		},
 	}
 }
 
 // sentinelChannelTopic is a marker buried deep inside a guild's object graph.
 // It can only appear in a log line if the whole struct was logged.
 const sentinelChannelTopic = "SENTINEL_CHANNEL_TOPIC"
+
+// sentinelAuditChannelID is a marker inside a group's GroupMetadata. Unlike a
+// *discordgo.Guild, GroupMetadata is a small bounded config struct, and it is
+// exactly what a group delete destroys -- so it MUST appear in the pre-delete
+// log.
+const sentinelAuditChannelID = "SENTINEL_AUDIT_CHANNEL"
 
 func testOrphanGuild(id string) *discordgo.Guild {
 	return &discordgo.Guild{ID: id, Name: "guild-" + id}
@@ -500,6 +510,31 @@ func TestExecutePrunePlanPurgesIDCacheAfterGroupDelete(t *testing.T) {
 
 	if len(rec.purged) != 1 || rec.purged[0] != "g1" {
 		t.Fatalf("purged = %v; want exactly [g1] (g2's delete failed, so its cache entry is still valid)", rec.purged)
+	}
+}
+
+// TestExecutePrunePlanLogsGroupMetadataBeforeDeleting pins that the pre-delete
+// log records the configuration the delete is about to destroy. GroupMetadata
+// carries the role map, matchmaking and audit channel IDs and the suspension
+// inheritance list; none of it can be rebuilt from Discord, and this log line
+// is the only forensic record of it. It is a small bounded struct, unlike the
+// *discordgo.Guild that TestExecutePrunePlanLogsIdentifiersNotWholeStructs
+// keeps out of the logs.
+func TestExecutePrunePlanLogsGroupMetadataBeforeDeleting(t *testing.T) {
+	logger, logs := observedLogger()
+	rec := newPruneRecorder()
+
+	plan := prunePlan{orphanGroups: []orphanGroup{testOrphanGroup("g1", "grp1")}}
+
+	if _, err := executePrunePlan(logger, plan, prunePolicy(false, true, 100), rec.actions()); err != nil {
+		t.Fatalf("executePrunePlan returned error: %v", err)
+	}
+
+	fields := findLogEntry(t, logs, "Deleting orphaned group from Nakama").ContextMap()
+	metadata, _ := fields["metadata"].(string)
+	if !strings.Contains(metadata, sentinelAuditChannelID) {
+		t.Fatalf("pre-delete log metadata = %q; want it to carry the group configuration being destroyed (%s)",
+			metadata, sentinelAuditChannelID)
 	}
 }
 

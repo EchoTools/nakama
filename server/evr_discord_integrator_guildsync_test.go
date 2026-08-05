@@ -138,7 +138,20 @@ func TestTruncateRuneSafeDistinguishesNamesSharingABytePrefix(t *testing.T) {
 // owner lookup failing further down.
 func TestGuildSyncRejectsUnnamedGuild(t *testing.T) {
 	d := &DiscordIntegrator{}
-	err := d.guildSync(context.Background(), zap.NewNop(), &discordgo.Guild{ID: "1522261692355055849"}, false)
+
+	// Without the guard, execution reaches d.dg.State.User.ID and nil-derefs.
+	// Recover so this reports as one failed test instead of taking the whole
+	// test binary down and masking every other failure in the run.
+	var err error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("guildSync panicked on a guild with an empty name instead of refusing it: %v", r)
+			}
+		}()
+		err = d.guildSync(context.Background(), zap.NewNop(), &discordgo.Guild{ID: "1522261692355055849"}, false)
+	}()
+
 	if err == nil {
 		t.Fatal("guildSync accepted a guild with an empty name; want an error")
 	}
