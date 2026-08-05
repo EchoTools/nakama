@@ -11,10 +11,10 @@ type gamesPlayedMockEntry struct {
 	properties map[string]interface{}
 }
 
-func (m *gamesPlayedMockEntry) GetTicket() string                      { return "" }
-func (m *gamesPlayedMockEntry) GetPresence() runtime.Presence          { return nil }
-func (m *gamesPlayedMockEntry) GetPartyId() string                     { return "" }
-func (m *gamesPlayedMockEntry) GetCreateTime() int64                   { return 0 }
+func (m *gamesPlayedMockEntry) GetTicket() string                     { return "" }
+func (m *gamesPlayedMockEntry) GetPresence() runtime.Presence         { return nil }
+func (m *gamesPlayedMockEntry) GetPartyId() string                    { return "" }
+func (m *gamesPlayedMockEntry) GetCreateTime() int64                  { return 0 }
 func (m *gamesPlayedMockEntry) GetProperties() map[string]interface{} { return m.properties }
 
 func TestIsNewPlayer(t *testing.T) {
@@ -125,7 +125,6 @@ func TestNewPlayerMaxGamesNegativeClamped(t *testing.T) {
 		t.Errorf("expected negative NewPlayerMaxGames to clamp to 0, got %d", data.Matchmaking.NewPlayerMaxGames)
 	}
 }
-
 
 func TestGamesPlayedOnLobbySessionParameters(t *testing.T) {
 	params := &LobbySessionParameters{

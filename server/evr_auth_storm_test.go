@@ -27,11 +27,11 @@ import (
 // session, creating a denial-of-service vector.
 //
 // Bug Description:
-// - No server-side rate limiting on auth attempts per Discord identity
-// - LoginAttemptCache exists but is not used in EvrPipeline.authenticateSession
-// - Each failed auth attempt can create a new WebSocket session
-// - This is NOT a test of actual functionality; it's a test skeleton that documents
-//   what the fix should prevent
+//   - No server-side rate limiting on auth attempts per Discord identity
+//   - LoginAttemptCache exists but is not used in EvrPipeline.authenticateSession
+//   - Each failed auth attempt can create a new WebSocket session
+//   - This is NOT a test of actual functionality; it's a test skeleton that documents
+//     what the fix should prevent
 //
 // TODO: This test should be completed once rate limiting is integrated into
 // the EvrPipeline authentication flow.
@@ -142,11 +142,11 @@ func TestAuthStormRateLimiting(t *testing.T) {
 		testIP := "10.0.0.1"
 
 		var (
-			allowedCount   int32
-			lockedCount    int32
-			wg             sync.WaitGroup
-			numGoroutines  = 20  // More than maxAttemptsAccount (5)
-			attemptsPerGo  = 3
+			allowedCount  int32
+			lockedCount   int32
+			wg            sync.WaitGroup
+			numGoroutines = 20 // More than maxAttemptsAccount (5)
+			attemptsPerGo = 3
 		)
 
 		wg.Add(numGoroutines)

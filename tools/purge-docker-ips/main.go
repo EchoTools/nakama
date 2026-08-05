@@ -21,16 +21,16 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/heroiclabs/nakama/v3/server"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // Type aliases for server types
 type (
-	LoginHistory          = server.LoginHistory
-	LoginHistoryEntry     = server.LoginHistoryEntry
-	AlternateSearchMatch  = server.AlternateSearchMatch
-	StorableMetadata      = server.StorableMetadata
+	LoginHistory         = server.LoginHistory
+	LoginHistoryEntry    = server.LoginHistoryEntry
+	AlternateSearchMatch = server.AlternateSearchMatch
+	StorableMetadata     = server.StorableMetadata
 )
 
 const MaxCacheSize = 10000

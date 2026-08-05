@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	SpamActionThreshold = 3
-	SpamActionWindow    = 30 * time.Second
+	SpamActionThreshold  = 3
+	SpamActionWindow     = 30 * time.Second
 	GhostSuspendDuration = 1 * time.Hour
 )
 

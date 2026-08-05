@@ -881,7 +881,6 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	return query, stringProperties, numericProperties
 }
 
-
 func (p *LobbySessionParameters) MatchmakingStream() PresenceStream {
 	return PresenceStream{Mode: StreamModeMatchmaking, Subject: p.GroupID}
 }

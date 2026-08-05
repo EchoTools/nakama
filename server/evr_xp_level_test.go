@@ -10,10 +10,10 @@ func TestComputeLevelFromXP(t *testing.T) {
 	table := DefaultXPProgressionTable()
 
 	tests := []struct {
-		name            string
-		totalXP         float64
-		expectedLevel   int
-		expectedXP      float64 // remainder toward next level
+		name          string
+		totalXP       float64
+		expectedLevel int
+		expectedXP    float64 // remainder toward next level
 	}{
 		{
 			name:          "zero XP is level 1",

@@ -19,10 +19,10 @@ const (
 // AmbassadorState tracks a player's ambassador program participation.
 // Stored per-player in Nakama storage via the Storable interface.
 type AmbassadorState struct {
-	IsActive                    bool      `json:"is_active"`
-	LastAmbassadorMatch         time.Time `json:"last_ambassador_match"`
-	TotalAmbassadorMatches      int       `json:"total_ambassador_matches"`
-	MatchesSinceLastAmbassador  int       `json:"matches_since_last_ambassador"`
+	IsActive                   bool      `json:"is_active"`
+	LastAmbassadorMatch        time.Time `json:"last_ambassador_match"`
+	TotalAmbassadorMatches     int       `json:"total_ambassador_matches"`
+	MatchesSinceLastAmbassador int       `json:"matches_since_last_ambassador"`
 
 	version string
 }

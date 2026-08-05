@@ -49,11 +49,11 @@ func sendRPCAuditMessage(ctx context.Context, logger runtime.Logger, nk runtime.
 				actorUsername = account.User.Username
 			}
 			entry := &GuildAuditEntry{
-				GroupID:      groupID,
-				ActorID:      callerUserID,
+				GroupID:       groupID,
+				ActorID:       callerUserID,
 				ActorUsername: actorUsername,
-				Action:       rpcID,
-				Details:      details,
+				Action:        rpcID,
+				Details:       details,
 			}
 			if err := GuildAuditLogWrite(ctx, mongoClient, entry); err != nil {
 				logger.WithFields(map[string]interface{}{"rpc_id": rpcID, "error": err}).Warn("Failed to persist guild audit log entry")

@@ -319,7 +319,7 @@ func (v *VRMLScanQueue) retrievePlayerMap(playerCh chan VRMLPlayerListItems) {
 
 	for _, url := range baseURLs {
 		cursor := 1
-		pageLoop:
+	pageLoop:
 		for {
 			buf.Reset()
 

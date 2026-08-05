@@ -33,7 +33,7 @@ type SNSPartyJoinRequest struct {
 	PartyID       uint64
 }
 
-func (m SNSPartyJoinRequest) Token() string  { return "SNSPartyJoinRequest" }
+func (m SNSPartyJoinRequest) Token() string   { return "SNSPartyJoinRequest" }
 func (m *SNSPartyJoinRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyJoinRequest) Stream(s *EasyStream) error {
@@ -58,7 +58,7 @@ type SNSPartyLeaveRequest struct {
 	TargetParam   uint64
 }
 
-func (m SNSPartyLeaveRequest) Token() string  { return "SNSPartyLeaveRequest" }
+func (m SNSPartyLeaveRequest) Token() string   { return "SNSPartyLeaveRequest" }
 func (m *SNSPartyLeaveRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyLeaveRequest) Stream(s *EasyStream) error {
@@ -83,7 +83,7 @@ type SNSPartySendInviteRequest struct {
 	TargetUserID  uint64
 }
 
-func (m SNSPartySendInviteRequest) Token() string  { return "SNSPartyInviteRequest" }
+func (m SNSPartySendInviteRequest) Token() string   { return "SNSPartyInviteRequest" }
 func (m *SNSPartySendInviteRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartySendInviteRequest) Stream(s *EasyStream) error {
@@ -108,7 +108,7 @@ type SNSPartyLockRequest struct {
 	TargetParam   uint64
 }
 
-func (m SNSPartyLockRequest) Token() string  { return "SNSPartyLockRequest" }
+func (m SNSPartyLockRequest) Token() string   { return "SNSPartyLockRequest" }
 func (m *SNSPartyLockRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyLockRequest) Stream(s *EasyStream) error {
@@ -133,7 +133,7 @@ type SNSPartyUnlockRequest struct {
 	TargetParam   uint64
 }
 
-func (m SNSPartyUnlockRequest) Token() string  { return "SNSPartyUnlockRequest" }
+func (m SNSPartyUnlockRequest) Token() string   { return "SNSPartyUnlockRequest" }
 func (m *SNSPartyUnlockRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyUnlockRequest) Stream(s *EasyStream) error {
@@ -163,7 +163,7 @@ type SNSPartyKickRequest struct {
 	Reserved       uint32
 }
 
-func (m SNSPartyKickRequest) Token() string  { return "SNSPartyKickRequest" }
+func (m SNSPartyKickRequest) Token() string   { return "SNSPartyKickRequest" }
 func (m *SNSPartyKickRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyKickRequest) Stream(s *EasyStream) error {
@@ -190,7 +190,7 @@ type SNSPartyPassOwnershipRequest struct {
 	Reserved       uint32
 }
 
-func (m SNSPartyPassOwnershipRequest) Token() string  { return "SNSPartyPassRequest" }
+func (m SNSPartyPassOwnershipRequest) Token() string   { return "SNSPartyPassRequest" }
 func (m *SNSPartyPassOwnershipRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyPassOwnershipRequest) Stream(s *EasyStream) error {
@@ -218,7 +218,7 @@ type SNSPartyRespondToInviteRequest struct {
 	Reserved       uint32
 }
 
-func (m SNSPartyRespondToInviteRequest) Token() string  { return "SNSPartyInviteResponse" }
+func (m SNSPartyRespondToInviteRequest) Token() string   { return "SNSPartyInviteResponse" }
 func (m *SNSPartyRespondToInviteRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyRespondToInviteRequest) Stream(s *EasyStream) error {
@@ -250,7 +250,7 @@ type SNSPartyJoinSuccess struct {
 	OwnerID uint64
 }
 
-func (m SNSPartyJoinSuccess) Token() string  { return "SNSPartyJoinSuccess" }
+func (m SNSPartyJoinSuccess) Token() string   { return "SNSPartyJoinSuccess" }
 func (m *SNSPartyJoinSuccess) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyJoinSuccess) Stream(s *EasyStream) error {
@@ -270,7 +270,7 @@ type SNSPartyJoinFailure struct {
 	ErrorCode uint8
 }
 
-func (m SNSPartyJoinFailure) Token() string  { return "SNSPartyJoinFailure" }
+func (m SNSPartyJoinFailure) Token() string   { return "SNSPartyJoinFailure" }
 func (m *SNSPartyJoinFailure) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyJoinFailure) Stream(s *EasyStream) error {
@@ -289,7 +289,7 @@ type SNSPartyLeaveSuccess struct {
 	Unused byte
 }
 
-func (m SNSPartyLeaveSuccess) Token() string  { return "SNSPartyLeaveSuccess" }
+func (m SNSPartyLeaveSuccess) Token() string   { return "SNSPartyLeaveSuccess" }
 func (m *SNSPartyLeaveSuccess) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyLeaveSuccess) Stream(s *EasyStream) error {
@@ -306,7 +306,7 @@ type SNSPartyLeaveNotify struct {
 	MemberID uint64
 }
 
-func (m SNSPartyLeaveNotify) Token() string  { return "SNSPartyLeaveNotify" }
+func (m SNSPartyLeaveNotify) Token() string   { return "SNSPartyLeaveNotify" }
 func (m *SNSPartyLeaveNotify) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyLeaveNotify) Stream(s *EasyStream) error {
@@ -326,7 +326,7 @@ type SNSPartyKickNotify struct {
 	KickID  uint64
 }
 
-func (m SNSPartyKickNotify) Token() string  { return "SNSPartyKickNotify" }
+func (m SNSPartyKickNotify) Token() string   { return "SNSPartyKickNotify" }
 func (m *SNSPartyKickNotify) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyKickNotify) Stream(s *EasyStream) error {
@@ -346,7 +346,7 @@ type SNSPartyPassNotify struct {
 	NewOwnerID uint64
 }
 
-func (m SNSPartyPassNotify) Token() string  { return "SNSPartyPassNotify" }
+func (m SNSPartyPassNotify) Token() string   { return "SNSPartyPassNotify" }
 func (m *SNSPartyPassNotify) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyPassNotify) Stream(s *EasyStream) error {
@@ -365,7 +365,7 @@ type SNSPartyLockNotify struct {
 	PartyID uint64
 }
 
-func (m SNSPartyLockNotify) Token() string  { return "SNSPartyLockNotify" }
+func (m SNSPartyLockNotify) Token() string   { return "SNSPartyLockNotify" }
 func (m *SNSPartyLockNotify) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyLockNotify) Stream(s *EasyStream) error {
@@ -381,7 +381,7 @@ type SNSPartyUnlockNotify struct {
 	PartyID uint64
 }
 
-func (m SNSPartyUnlockNotify) Token() string  { return "SNSPartyUnlockNotify" }
+func (m SNSPartyUnlockNotify) Token() string   { return "SNSPartyUnlockNotify" }
 func (m *SNSPartyUnlockNotify) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyUnlockNotify) Stream(s *EasyStream) error {
@@ -405,7 +405,7 @@ type SNSPartyCreateRequest struct {
 	TargetParam   uint64
 }
 
-func (m SNSPartyCreateRequest) Token() string  { return "SNSPartyCreateRequest" }
+func (m SNSPartyCreateRequest) Token() string   { return "SNSPartyCreateRequest" }
 func (m *SNSPartyCreateRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyCreateRequest) Stream(s *EasyStream) error {
@@ -430,7 +430,7 @@ type SNSPartyUpdateRequest struct {
 	TargetParam   uint64
 }
 
-func (m SNSPartyUpdateRequest) Token() string  { return "SNSPartyUpdateRequest" }
+func (m SNSPartyUpdateRequest) Token() string   { return "SNSPartyUpdateRequest" }
 func (m *SNSPartyUpdateRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyUpdateRequest) Stream(s *EasyStream) error {
@@ -455,7 +455,7 @@ type SNSPartyUpdateMemberRequest struct {
 	TargetParam   uint64
 }
 
-func (m SNSPartyUpdateMemberRequest) Token() string  { return "SNSPartyUpdateMemberRequest" }
+func (m SNSPartyUpdateMemberRequest) Token() string   { return "SNSPartyUpdateMemberRequest" }
 func (m *SNSPartyUpdateMemberRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyUpdateMemberRequest) Stream(s *EasyStream) error {
@@ -480,7 +480,7 @@ type SNSPartyInviteListRefreshRequest struct {
 	TargetParam   uint64
 }
 
-func (m SNSPartyInviteListRefreshRequest) Token() string  { return "SNSPartyInviteListRefreshRequest" }
+func (m SNSPartyInviteListRefreshRequest) Token() string   { return "SNSPartyInviteListRefreshRequest" }
 func (m *SNSPartyInviteListRefreshRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyInviteListRefreshRequest) Stream(s *EasyStream) error {
@@ -507,7 +507,7 @@ type SNSPartyCreateSuccess struct {
 	OwnerID uint64
 }
 
-func (m SNSPartyCreateSuccess) Token() string  { return "SNSPartyCreateSuccess" }
+func (m SNSPartyCreateSuccess) Token() string   { return "SNSPartyCreateSuccess" }
 func (m *SNSPartyCreateSuccess) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyCreateSuccess) Stream(s *EasyStream) error {
@@ -526,7 +526,7 @@ type SNSPartyCreateFailure struct {
 	ErrorCode uint8
 }
 
-func (m SNSPartyCreateFailure) Token() string  { return "SNSPartyCreateFailure" }
+func (m SNSPartyCreateFailure) Token() string   { return "SNSPartyCreateFailure" }
 func (m *SNSPartyCreateFailure) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyCreateFailure) Stream(s *EasyStream) error {
@@ -543,7 +543,7 @@ type SNSPartyJoinNotify struct {
 	MemberID uint64
 }
 
-func (m SNSPartyJoinNotify) Token() string  { return "SNSPartyJoinNotify" }
+func (m SNSPartyJoinNotify) Token() string   { return "SNSPartyJoinNotify" }
 func (m *SNSPartyJoinNotify) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyJoinNotify) Stream(s *EasyStream) error {
@@ -562,7 +562,7 @@ type SNSPartyLeaveFailure struct {
 	ErrorCode uint8
 }
 
-func (m SNSPartyLeaveFailure) Token() string  { return "SNSPartyLeaveFailure" }
+func (m SNSPartyLeaveFailure) Token() string   { return "SNSPartyLeaveFailure" }
 func (m *SNSPartyLeaveFailure) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyLeaveFailure) Stream(s *EasyStream) error {
@@ -578,7 +578,7 @@ type SNSPartyKickSuccess struct {
 	Unused byte
 }
 
-func (m SNSPartyKickSuccess) Token() string  { return "SNSPartyKickSuccess" }
+func (m SNSPartyKickSuccess) Token() string   { return "SNSPartyKickSuccess" }
 func (m *SNSPartyKickSuccess) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyKickSuccess) Stream(s *EasyStream) error {
@@ -592,7 +592,7 @@ type SNSPartyKickFailure struct {
 	ErrorCode uint8
 }
 
-func (m SNSPartyKickFailure) Token() string  { return "SNSPartyKickFailure" }
+func (m SNSPartyKickFailure) Token() string   { return "SNSPartyKickFailure" }
 func (m *SNSPartyKickFailure) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyKickFailure) Stream(s *EasyStream) error {
@@ -608,7 +608,7 @@ type SNSPartyPassSuccess struct {
 	Unused byte
 }
 
-func (m SNSPartyPassSuccess) Token() string  { return "SNSPartyPassSuccess" }
+func (m SNSPartyPassSuccess) Token() string   { return "SNSPartyPassSuccess" }
 func (m *SNSPartyPassSuccess) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyPassSuccess) Stream(s *EasyStream) error {
@@ -622,7 +622,7 @@ type SNSPartyPassFailure struct {
 	ErrorCode uint8
 }
 
-func (m SNSPartyPassFailure) Token() string  { return "SNSPartyPassFailure" }
+func (m SNSPartyPassFailure) Token() string   { return "SNSPartyPassFailure" }
 func (m *SNSPartyPassFailure) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyPassFailure) Stream(s *EasyStream) error {
@@ -638,7 +638,7 @@ type SNSPartyLockSuccess struct {
 	PartyID uint64
 }
 
-func (m SNSPartyLockSuccess) Token() string  { return "SNSPartyLockSuccess" }
+func (m SNSPartyLockSuccess) Token() string   { return "SNSPartyLockSuccess" }
 func (m *SNSPartyLockSuccess) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyLockSuccess) Stream(s *EasyStream) error {
@@ -654,7 +654,7 @@ type SNSPartyLockFailure struct {
 	ErrorCode uint8
 }
 
-func (m SNSPartyLockFailure) Token() string  { return "SNSPartyLockFailure" }
+func (m SNSPartyLockFailure) Token() string   { return "SNSPartyLockFailure" }
 func (m *SNSPartyLockFailure) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyLockFailure) Stream(s *EasyStream) error {
@@ -670,7 +670,7 @@ type SNSPartyUnlockSuccess struct {
 	PartyID uint64
 }
 
-func (m SNSPartyUnlockSuccess) Token() string  { return "SNSPartyUnlockSuccess" }
+func (m SNSPartyUnlockSuccess) Token() string   { return "SNSPartyUnlockSuccess" }
 func (m *SNSPartyUnlockSuccess) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyUnlockSuccess) Stream(s *EasyStream) error {
@@ -686,7 +686,7 @@ type SNSPartyUnlockFailure struct {
 	ErrorCode uint8
 }
 
-func (m SNSPartyUnlockFailure) Token() string  { return "SNSPartyUnlockFailure" }
+func (m SNSPartyUnlockFailure) Token() string   { return "SNSPartyUnlockFailure" }
 func (m *SNSPartyUnlockFailure) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyUnlockFailure) Stream(s *EasyStream) error {
@@ -703,7 +703,7 @@ type SNSPartyInviteNotify struct {
 	InviterID uint64
 }
 
-func (m SNSPartyInviteNotify) Token() string  { return "SNSPartyInviteNotify" }
+func (m SNSPartyInviteNotify) Token() string   { return "SNSPartyInviteNotify" }
 func (m *SNSPartyInviteNotify) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyInviteNotify) Stream(s *EasyStream) error {
@@ -722,7 +722,7 @@ type SNSPartyInviteListResponse struct {
 	Count uint32
 }
 
-func (m SNSPartyInviteListResponse) Token() string  { return "SNSPartyInviteListResponse" }
+func (m SNSPartyInviteListResponse) Token() string   { return "SNSPartyInviteListResponse" }
 func (m *SNSPartyInviteListResponse) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyInviteListResponse) Stream(s *EasyStream) error {
@@ -738,7 +738,7 @@ type SNSPartyUpdateSuccess struct {
 	PartyID uint64
 }
 
-func (m SNSPartyUpdateSuccess) Token() string  { return "SNSPartyUpdateSuccess" }
+func (m SNSPartyUpdateSuccess) Token() string   { return "SNSPartyUpdateSuccess" }
 func (m *SNSPartyUpdateSuccess) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyUpdateSuccess) Stream(s *EasyStream) error {
@@ -754,7 +754,7 @@ type SNSPartyUpdateFailure struct {
 	ErrorCode uint8
 }
 
-func (m SNSPartyUpdateFailure) Token() string  { return "SNSPartyUpdateFailure" }
+func (m SNSPartyUpdateFailure) Token() string   { return "SNSPartyUpdateFailure" }
 func (m *SNSPartyUpdateFailure) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyUpdateFailure) Stream(s *EasyStream) error {
@@ -770,7 +770,7 @@ type SNSPartyUpdateNotify struct {
 	PartyID uint64
 }
 
-func (m SNSPartyUpdateNotify) Token() string  { return "SNSPartyUpdateNotify" }
+func (m SNSPartyUpdateNotify) Token() string   { return "SNSPartyUpdateNotify" }
 func (m *SNSPartyUpdateNotify) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyUpdateNotify) Stream(s *EasyStream) error {
@@ -786,7 +786,7 @@ type SNSPartyUpdateMemberSuccess struct {
 	PartyID uint64
 }
 
-func (m SNSPartyUpdateMemberSuccess) Token() string  { return "SNSPartyUpdateMemberSuccess" }
+func (m SNSPartyUpdateMemberSuccess) Token() string   { return "SNSPartyUpdateMemberSuccess" }
 func (m *SNSPartyUpdateMemberSuccess) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyUpdateMemberSuccess) Stream(s *EasyStream) error {
@@ -802,7 +802,7 @@ type SNSPartyUpdateMemberFailure struct {
 	ErrorCode uint8
 }
 
-func (m SNSPartyUpdateMemberFailure) Token() string  { return "SNSPartyUpdateMemberFailure" }
+func (m SNSPartyUpdateMemberFailure) Token() string   { return "SNSPartyUpdateMemberFailure" }
 func (m *SNSPartyUpdateMemberFailure) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyUpdateMemberFailure) Stream(s *EasyStream) error {
@@ -819,7 +819,7 @@ type SNSPartyUpdateMemberNotify struct {
 	MemberID uint64
 }
 
-func (m SNSPartyUpdateMemberNotify) Token() string  { return "SNSPartyUpdateMemberNotify" }
+func (m SNSPartyUpdateMemberNotify) Token() string   { return "SNSPartyUpdateMemberNotify" }
 func (m *SNSPartyUpdateMemberNotify) Symbol() Symbol { return ToSymbol(m.Token()) }
 
 func (m *SNSPartyUpdateMemberNotify) Stream(s *EasyStream) error {

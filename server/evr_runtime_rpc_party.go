@@ -108,7 +108,7 @@ func PartyCreateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	username, _ := ctx.Value(runtime.RUNTIME_CTX_USERNAME).(string)
 
 	var req struct {
-		MaxSize int  `json:"max_size"`
+		MaxSize int   `json:"max_size"`
 		Open    *bool `json:"open"`
 	}
 	if payload != "" {

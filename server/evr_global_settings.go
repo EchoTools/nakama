@@ -84,9 +84,9 @@ type ServiceSettingsData struct {
 	EnableSessionDebug                    bool                      `json:"enable_session_debug"`
 	version                               string
 	serviceStatusMessage                  string
-	PingServerBeforeJoin                  bool `json:"ping_server_before_join"`      // Ping the server before joining to measure latency
-	EnableVibinatorsGravity               bool `json:"enable_vibinators_gravity"`    // Novelty: redirect social-lobby echo_arena matchmakers toward vibinator's echo_combat
-	UseQuestEncoderFlags                  bool         `json:"use_quest_encoder_flags"` // Send Quest-shifted encoder flag bit layout in LobbySessionSuccessv5 for standalone clients
+	PingServerBeforeJoin                  bool          `json:"ping_server_before_join"`   // Ping the server before joining to measure latency
+	EnableVibinatorsGravity               bool          `json:"enable_vibinators_gravity"` // Novelty: redirect social-lobby echo_arena matchmakers toward vibinator's echo_combat
+	UseQuestEncoderFlags                  bool          `json:"use_quest_encoder_flags"`   // Send Quest-shifted encoder flag bit layout in LobbySessionSuccessv5 for standalone clients
 	CGNAT                                 CGNATSettings `json:"cgnat"`
 }
 
@@ -109,7 +109,7 @@ type PruneSettings struct {
 }
 
 type GlobalMatchmakingSettings struct {
-	DisableMatchmaker               bool                    `json:"disable_matchmaker"`                  // Completely disable matchmaker — tickets are rejected immediately
+	DisableMatchmaker              bool                    `json:"disable_matchmaker"`                  // Completely disable matchmaker — tickets are rejected immediately
 	MatchmakingTimeoutSecs         int                     `json:"matchmaking_timeout_secs"`            // The matchmaking timeout
 	FailsafeTimeoutSecs            int                     `json:"failsafe_timeout_secs"`               // The failsafe timeout
 	FallbackTimeoutSecs            int                     `json:"fallback_timeout_secs"`               // The fallback timeout
@@ -155,11 +155,11 @@ type GlobalMatchmakingSettings struct {
 	EnableHardDivisions            *bool                   `json:"enable_hard_divisions"`               // Separate matchmaking pools by skill division (default false — needs boundary tuning)
 	DivisionBoundaries             []float64               `json:"division_boundaries"`                 // Mu thresholds between hard skill divisions (default [15.0, 25.0, 35.0])
 	DivisionNames                  []string                `json:"division_names"`                      // Human-readable division bracket names (default ["Bronze", "Silver", "Gold", "Diamond"])
-	EnableAmbassadorProgram        *bool                   `json:"enable_ambassador_program"`            // Allow veterans to opt-in as mentors in lower divisions (default false)
-	AmbassadorMuReduction          float64                 `json:"ambassador_mu_reduction"`              // Effective mu reduction when playing as ambassador (default 10.0)
-	AmbassadorCooldownMatches      int                     `json:"ambassador_cooldown_matches"`          // Matches between ambassador activations (default 1)
-	AmbassadorMinGamesPlayed       int                     `json:"ambassador_min_games_played"`          // Minimum games played to be eligible as ambassador (default 200)
-	AmbassadorMinMu                float64                 `json:"ambassador_min_mu"`                    // Minimum mu to be eligible as ambassador (default 30.0)
+	EnableAmbassadorProgram        *bool                   `json:"enable_ambassador_program"`           // Allow veterans to opt-in as mentors in lower divisions (default false)
+	AmbassadorMuReduction          float64                 `json:"ambassador_mu_reduction"`             // Effective mu reduction when playing as ambassador (default 10.0)
+	AmbassadorCooldownMatches      int                     `json:"ambassador_cooldown_matches"`         // Matches between ambassador activations (default 1)
+	AmbassadorMinGamesPlayed       int                     `json:"ambassador_min_games_played"`         // Minimum games played to be eligible as ambassador (default 200)
+	AmbassadorMinMu                float64                 `json:"ambassador_min_mu"`                   // Minimum mu to be eligible as ambassador (default 30.0)
 	EnableNewPlayerTeamBias        *bool                   `json:"enable_new_player_team_bias"`         // Bias new players onto the predicted-stronger team during team formation (default true)
 	EnableArchetypeDetection       *bool                   `json:"enable_archetype_detection"`          // Classify players into play style archetypes at ticket creation (default true)
 	EnableToxicSeparation          *bool                   `json:"enable_toxic_separation"`             // Prevent players with suspension history from matching with new players (default true)

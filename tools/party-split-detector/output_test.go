@@ -24,8 +24,8 @@ type mockEvent struct {
 	details  map[string]string
 }
 
-func (e *mockEvent) GetTimestamp() time.Time      { return e.ts }
-func (e *mockEvent) GetEventType() string         { return e.evType }
+func (e *mockEvent) GetTimestamp() time.Time       { return e.ts }
+func (e *mockEvent) GetEventType() string          { return e.evType }
 func (e *mockEvent) GetUsername() string           { return e.username }
 func (e *mockEvent) GetRawLine() string            { return e.rawLine }
 func (e *mockEvent) GetDetails() map[string]string { return e.details }
@@ -35,21 +35,21 @@ type mockPartyResult struct {
 	formedAt time.Time
 	leader   string
 	members  []string
-	outcome string
+	outcome  string
 	reason   string
 	duration time.Duration
 	events   []OutputEvent
 	matchIDs map[string][]string
 }
 
-func (m *mockPartyResult) GetPartyID() string              { return m.partyID }
-func (m *mockPartyResult) GetFormedAt() time.Time          { return m.formedAt }
-func (m *mockPartyResult) GetLeader() string               { return m.leader }
-func (m *mockPartyResult) GetMembers() []string            { return m.members }
-func (m *mockPartyResult) GetOutcome() string              { return m.outcome }
-func (m *mockPartyResult) GetOutcomeReason() string        { return m.reason }
-func (m *mockPartyResult) GetDuration() time.Duration      { return m.duration }
-func (m *mockPartyResult) GetEvents() []OutputEvent        { return m.events }
+func (m *mockPartyResult) GetPartyID() string               { return m.partyID }
+func (m *mockPartyResult) GetFormedAt() time.Time           { return m.formedAt }
+func (m *mockPartyResult) GetLeader() string                { return m.leader }
+func (m *mockPartyResult) GetMembers() []string             { return m.members }
+func (m *mockPartyResult) GetOutcome() string               { return m.outcome }
+func (m *mockPartyResult) GetOutcomeReason() string         { return m.reason }
+func (m *mockPartyResult) GetDuration() time.Duration       { return m.duration }
+func (m *mockPartyResult) GetEvents() []OutputEvent         { return m.events }
 func (m *mockPartyResult) GetMatchIDs() map[string][]string { return m.matchIDs }
 
 // ── Test fixtures ───────────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ func newTestSplitResult() *mockPartyResult {
 			},
 		},
 		matchIDs: map[string][]string{
-			"player1":      {"abc123"},
+			"player1":       {"abc123"},
 			"souleater0061": {"def456"},
 		},
 	}
@@ -453,8 +453,8 @@ func TestWriteLifecycleHuman(t *testing.T) {
 	out := buf.String()
 
 	checks := []struct {
-		desc    string
-		needle  string
+		desc   string
+		needle string
 	}{
 		{"header bar", lifecycleHR},
 		{"outcome label", "PARTY SPLIT"},

@@ -155,8 +155,8 @@ func TestOverrideFn(t *testing.T) {
 // (arena only). Combat mode skips the straddle check.
 func TestGroupEntriesSequentially_NoStraddle(t *testing.T) {
 	tests := []struct {
-		name       string
-		mode       string
+		name string
+		mode string
 		// entries grouped by ticket: each entry in the outer slice = 1 ticket,
 		// value = number of players for that ticket. []int{4,1,1,1,1} means
 		// one party of 4 and 4 solos = 8 total.
@@ -173,11 +173,11 @@ func TestGroupEntriesSequentially_NoStraddle(t *testing.T) {
 			wantSizes:   []int{8},
 		},
 		{
-			name:         "arena party of 4 with max_team_size=3 (maxCount=6) — straddles, popped to empty",
-			mode:         "echo_arena",
-			ticketSizes:  []int{4, 2}, // candidate=6, boundary=3, party at 0-4 straddles
-			maxTeamSize:  3,
-			wantSizes:    nil, // pop 2 → [4]=4, check boundary=2, still straddles → pop 4 → empty
+			name:        "arena party of 4 with max_team_size=3 (maxCount=6) — straddles, popped to empty",
+			mode:        "echo_arena",
+			ticketSizes: []int{4, 2}, // candidate=6, boundary=3, party at 0-4 straddles
+			maxTeamSize: 3,
+			wantSizes:   nil, // pop 2 → [4]=4, check boundary=2, still straddles → pop 4 → empty
 		},
 		{
 			name:        "arena party of 4 and party of 2 — 6 total, straddles (boundary=3), popped",

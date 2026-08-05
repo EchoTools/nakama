@@ -114,16 +114,16 @@ func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 					if isParty {
 						sid = "" // party tickets use PartyId, not SessionID
 					}
-				// Use a wildcard query for reinserted tickets. The original
-				// query is not stored on MatchmakerEntry — it is only on
-				// MatchmakerIndex. The EVR processor applies game_mode,
-				// division, and other filters downstream regardless.
-				extracts = append(extracts, &MatchmakerExtract{
-					Ticket:            ticket,
-					Presences:         presences,
-					SessionID:         sid,
-					PartyId:           entries[0].PartyId,
-					Query:             "*",
+					// Use a wildcard query for reinserted tickets. The original
+					// query is not stored on MatchmakerEntry — it is only on
+					// MatchmakerIndex. The EVR processor applies game_mode,
+					// division, and other filters downstream regardless.
+					extracts = append(extracts, &MatchmakerExtract{
+						Ticket:            ticket,
+						Presences:         presences,
+						SessionID:         sid,
+						PartyId:           entries[0].PartyId,
+						Query:             "*",
 						MinCount:          2,
 						MaxCount:          100,
 						CountMultiple:     2,

@@ -19,14 +19,14 @@ type ImpersonateRequest struct {
 
 // ImpersonateResponse is the response from the admin/impersonate RPC.
 type ImpersonateResponse struct {
-	Token        string              `json:"token"`         // Session JWT
-	RefreshToken string              `json:"refresh_token"` // Refresh JWT
-	UserID       string              `json:"user_id"`
-	Username     string              `json:"username"`
-	DisplayName  string              `json:"display_name"`
-	AvatarURL    string              `json:"avatar_url"`
-	DiscordID    string              `json:"discord_id"`
-	Guilds       []ImpersonateGuild  `json:"guilds"` // Guild memberships
+	Token        string             `json:"token"`         // Session JWT
+	RefreshToken string             `json:"refresh_token"` // Refresh JWT
+	UserID       string             `json:"user_id"`
+	Username     string             `json:"username"`
+	DisplayName  string             `json:"display_name"`
+	AvatarURL    string             `json:"avatar_url"`
+	DiscordID    string             `json:"discord_id"`
+	Guilds       []ImpersonateGuild `json:"guilds"` // Guild memberships
 }
 
 // ImpersonateGuild is a guild membership entry in the impersonate response.
@@ -88,8 +88,8 @@ func ImpersonateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	// Generate refresh token (8 hours — shorter than normal for safety)
 	refreshExpiry := time.Now().Add(8 * time.Hour).Unix()
 	refreshToken, _, err := nk.AuthenticateTokenGenerate(targetUserID, username, refreshExpiry, map[string]string{
-		"refresh":          "true",
-		"impersonated_by":  callerID,
+		"refresh":         "true",
+		"impersonated_by": callerID,
 	})
 	if err != nil {
 		logger.Error("Failed to generate impersonate refresh token", zap.Error(err))

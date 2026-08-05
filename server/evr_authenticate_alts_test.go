@@ -178,7 +178,7 @@ func TestFirstLogin_EnforcementUserIDs_MissesAlts(t *testing.T) {
 		},
 		// AlternateMatches is nil — UpdateAlternates hasn't run yet
 		AlternateMatches: nil,
-		XPIs:            nil,
+		XPIs:             nil,
 	}
 
 	// AltSearchPatterns returns identifiers that WOULD find banned alts in the index

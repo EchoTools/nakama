@@ -43,10 +43,10 @@ import (
 // eliminating the second call and the TOCTOU window entirely.
 //
 // This test verifies that:
-// 1. A single call to isLeaderHeadingToSocial returns a consistent point-in-time result.
-// 2. The function returns true when the leader is on the matchmaking stream heading to social.
-// 3. After Untrack fires (simulating leader joining a match), the function returns false —
-//    but this doesn't matter because production code now caches the first result.
+//  1. A single call to isLeaderHeadingToSocial returns a consistent point-in-time result.
+//  2. The function returns true when the leader is on the matchmaking stream heading to social.
+//  3. After Untrack fires (simulating leader joining a match), the function returns false —
+//     but this doesn't matter because production code now caches the first result.
 //
 // After fix: PASSES — the test documents the point-in-time sensitivity of the function
 // and proves that the production fix (caching) is the correct mitigation.
@@ -285,7 +285,7 @@ func TestC3_LobbyJoinSilentlySwallowsEntrantError(t *testing.T) {
 	// returns (nil, nil) for any match ID → lobbyJoin returns ErrMatchNotFound.
 	p := &EvrPipeline{
 		nk: &RuntimeGoNakamaModule{
-			matchRegistry: newMockFollowMatchRegistry(),
+			matchRegistry:   newMockFollowMatchRegistry(),
 			sessionRegistry: &testSessionRegistry{},
 		},
 	}
@@ -848,11 +848,13 @@ func TestH10_CallerErrorHandlingIsDeadCode(t *testing.T) {
 // TestH11_LobbyGroupTrackIsNewCapturedButUnused verifies H11 behavior.
 //
 // evr_lobby_group.go:122 correctly uses isNew in an else-if branch:
-//   if success, isNew := tracker.Track(...); !success {
-//       ...error handling...
-//   } else if isNew {
-//       ...send party welcome message...  ← only for NEW tracks
-//   }
+//
+//	if success, isNew := tracker.Track(...); !success {
+//	    ...error handling...
+//	} else if isNew {
+//	    ...send party welcome message...  ← only for NEW tracks
+//	}
+//
 // When isNew=false (re-track), the welcome message is NOT sent — correct behavior.
 // The SMELL annotation was stale; this test documents the correct behavior.
 //

@@ -116,7 +116,7 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 				accountMap         = make(map[string]*api.Account, len(loginHistory.AlternateMatches))
 				delayMin, delayMax = 1, 4
 				// math/rand is fine: jittered kick delay is non-security game logic.
-				kickDelay          = time.Duration(delayMin+rand.Intn(delayMax)) * time.Minute
+				kickDelay = time.Duration(delayMin+rand.Intn(delayMax)) * time.Minute
 			)
 
 			if accounts, err := nk.AccountsGetId(ctx, append(firstIDs, userID)); err != nil {

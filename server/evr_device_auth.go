@@ -20,14 +20,14 @@ const (
 
 // DeviceAuthCode represents a pending device authorization code.
 type DeviceAuthCode struct {
-	Code      string `json:"code"`
-	Status    string `json:"status"`     // "pending" or "verified"
-	Token     string `json:"token"`      // set when verified
-	RefreshToken string `json:"refresh_token"` // set when verified
-	CreatedAt time.Time `json:"created_at"`
-	ExpiresAt time.Time `json:"expires_at"`
-	UserID    string `json:"user_id,omitempty"`   // set when verified
-	Username  string `json:"username,omitempty"`  // set when verified
+	Code         string    `json:"code"`
+	Status       string    `json:"status"`        // "pending" or "verified"
+	Token        string    `json:"token"`         // set when verified
+	RefreshToken string    `json:"refresh_token"` // set when verified
+	CreatedAt    time.Time `json:"created_at"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	UserID       string    `json:"user_id,omitempty"`  // set when verified
+	Username     string    `json:"username,omitempty"` // set when verified
 }
 
 // loadDeviceAuthCodes loads all pending device auth codes from storage.

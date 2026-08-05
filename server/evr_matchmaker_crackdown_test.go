@@ -170,7 +170,7 @@ func TestEvrMatchmakerFn_FiltersNilPresence(t *testing.T) {
 
 	entries := []runtime.MatchmakerEntry{
 		nil, // nil entry
-		&MatchmakerEntry{Ticket: "t1", Presence: nil, Properties: goodProps}, // nil presence
+		&MatchmakerEntry{Ticket: "t1", Presence: nil, Properties: goodProps},                                        // nil presence
 		&MatchmakerEntry{Ticket: "t2", Presence: &MatchmakerPresence{UserId: "u", SessionId: "s"}, Properties: nil}, // nil properties
 		&MatchmakerEntry{Ticket: "t3", Presence: &MatchmakerPresence{UserId: "u3", SessionId: "s3"}, Properties: goodProps},
 	}

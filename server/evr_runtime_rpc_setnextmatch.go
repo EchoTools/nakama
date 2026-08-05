@@ -133,10 +133,10 @@ func SetNextMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	}
 
 	logger.WithFields(map[string]interface{}{
-		"caller_user_id":    callerUserID,
-		"target_user_id":    request.TargetUserID,
-		"match_id":          request.MatchID.String(),
-		"join_immediately":  request.JoinImmediately,
+		"caller_user_id":     callerUserID,
+		"target_user_id":     request.TargetUserID,
+		"match_id":           request.MatchID.String(),
+		"join_immediately":   request.JoinImmediately,
 		"joined_immediately": response.JoinedImmediately,
 	}).Info("Set next match")
 
