@@ -22,6 +22,96 @@ type GameServerLoadoutInstance struct {
 	Items        map[string]string `json:"items"` // slot_hash -> equipped_hash (both as hex strings)
 }
 
+// gameServerLoadoutEquip is one slot assignment named by a
+// GameServerSaveLoadoutRequest, already decoded from its symbol hashes.
+type gameServerLoadoutEquip struct{ slot, equipped string }
+
+// applyGameServerLoadout composes equips onto the CURRENT loadout of profile,
+// strips any cosmetic the player does not own, and stores the result on profile.
+// A jerseyNumber below zero leaves the stored jersey number untouched. It returns
+// the loadout it stored.
+//
+// Every input other than equips is read from profile, which is what makes this
+// safe to call more than once: on a retry after a version conflict, profile is a
+// freshly read object, so only the slots this request actually named change and
+// a concurrent writer's other slots survive. Deriving the base loadout from a
+// profile captured BEFORE the conflict would instead stamp a stale full loadout
+// back over that writer's work.
+func applyGameServerLoadout(profile *EVRProfile, equips []gameServerLoadoutEquip, jerseyNumber int) (evr.CosmeticLoadout, error) {
+	loadout := profile.LoadoutCosmetics.Loadout
+	for _, e := range equips {
+		setLoadoutSlot(&loadout, e.slot, e.equipped)
+	}
+
+	sanitized, err := sanitizeGameServerLoadout(loadout, profile)
+	if err != nil {
+		return evr.CosmeticLoadout{}, fmt.Errorf("failed to compute owned cosmetics: %w", err)
+	}
+	profile.LoadoutCosmetics.Loadout = sanitized
+
+	// Update jersey number if present
+	if jerseyNumber >= 0 {
+		profile.LoadoutCosmetics.JerseyNumber = int64(jerseyNumber)
+	}
+	return sanitized, nil
+}
+
+// setLoadoutSlot assigns equippedName to the named slot of l, and reports whether
+// slotName is a slot this server recognises. Splitting the slot-name switch out of
+// the request handler is what lets the equips be replayed onto a freshly read
+// profile when a write hits a version conflict.
+func setLoadoutSlot(l *evr.CosmeticLoadout, slotName, equippedName string) bool {
+	switch slotName {
+	case "banner":
+		l.Banner = equippedName
+	case "booster":
+		l.Booster = equippedName
+	case "bracer":
+		l.Bracer = equippedName
+	case "chassis":
+		l.Chassis = equippedName
+	case "decal":
+		l.Decal = equippedName
+	case "decal_body":
+		l.DecalBody = equippedName
+	case "decalborder":
+		l.DecalBorder = equippedName
+	case "decalback":
+		l.DecalBack = equippedName
+	case "emissive":
+		l.Emissive = equippedName
+	case "emote":
+		l.Emote = equippedName
+	case "goal_fx":
+		l.GoalFX = equippedName
+	case "medal":
+		l.Medal = equippedName
+	case "pattern":
+		l.Pattern = equippedName
+	case "pattern_body":
+		l.PatternBody = equippedName
+	case "pip":
+		l.PIP = equippedName
+	case "secondemote":
+		l.SecondEmote = equippedName
+	case "tag":
+		l.Tag = equippedName
+	case "tint":
+		l.Tint = equippedName
+	case "tint_alignment_a":
+		l.TintAlignmentA = equippedName
+	case "tint_alignment_b":
+		l.TintAlignmentB = equippedName
+	case "tint_body":
+		l.TintBody = equippedName
+	case "title":
+		l.Title = equippedName
+	default:
+		return false
+	}
+	return true
+}
+
 // sanitizeGameServerLoadout strips any cosmetic the player does not own from a loadout
 // parsed from a GameServerSaveLoadoutRequest, mirroring EquipAndSanitize's protection
 // for the RemoteLogSet equip path (COSMETIC-1). It is a separate entry point because
@@ -77,8 +167,18 @@ func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *
 		return fmt.Errorf("failed to load EVR profile: %w", err)
 	}
 
-	// Convert the hash-based items to CosmeticLoadout fields
-	loadout := profile.LoadoutCosmetics.Loadout
+	// Convert the hash-based items to (slot, equipped) name pairs.
+	//
+	// Parsing is deliberately independent of the profile. A retry after a version
+	// conflict must compose these equips onto the loadout of the FRESHLY read
+	// profile; capturing a base loadout here instead would stamp this request's
+	// pre-conflict copy back over whatever the concurrent writer committed —
+	// exactly the clobber evrProfileUpdateWithRetry exists to prevent.
+	equips := make([]gameServerLoadoutEquip, 0, len(payload.LoadoutInstances))
+
+	// slotProbe exists only so an unrecognised slot name is detected — and logged
+	// — once here during parsing, rather than once per write attempt.
+	var slotProbe evr.CosmeticLoadout
 
 	// Process each loadout instance
 	for _, instance := range payload.LoadoutInstances {
@@ -104,55 +204,11 @@ func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *
 				zap.String("equipped_hash", equippedHex),
 				zap.String("equipped_name", equippedName))
 
-			// Map slot names to CosmeticLoadout fields
-			switch slotName {
-			case "banner":
-				loadout.Banner = equippedName
-			case "booster":
-				loadout.Booster = equippedName
-			case "bracer":
-				loadout.Bracer = equippedName
-			case "chassis":
-				loadout.Chassis = equippedName
-			case "decal":
-				loadout.Decal = equippedName
-			case "decal_body":
-				loadout.DecalBody = equippedName
-			case "decalborder":
-				loadout.DecalBorder = equippedName
-			case "decalback":
-				loadout.DecalBack = equippedName
-			case "emissive":
-				loadout.Emissive = equippedName
-			case "emote":
-				loadout.Emote = equippedName
-			case "goal_fx":
-				loadout.GoalFX = equippedName
-			case "medal":
-				loadout.Medal = equippedName
-			case "pattern":
-				loadout.Pattern = equippedName
-			case "pattern_body":
-				loadout.PatternBody = equippedName
-			case "pip":
-				loadout.PIP = equippedName
-			case "secondemote":
-				loadout.SecondEmote = equippedName
-			case "tag":
-				loadout.Tag = equippedName
-			case "tint":
-				loadout.Tint = equippedName
-			case "tint_alignment_a":
-				loadout.TintAlignmentA = equippedName
-			case "tint_alignment_b":
-				loadout.TintAlignmentB = equippedName
-			case "tint_body":
-				loadout.TintBody = equippedName
-			case "title":
-				loadout.Title = equippedName
-			default:
+			if !setLoadoutSlot(&slotProbe, slotName, equippedName) {
 				logger.Debug("Unknown slot type", zap.String("slot", slotName))
+				continue
 			}
+			equips = append(equips, gameServerLoadoutEquip{slot: slotName, equipped: equippedName})
 		}
 	}
 
@@ -165,19 +221,22 @@ func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *
 	// customization equip would persist an unowned cosmetic (e.g. a VRML finalist tag)
 	// exactly like the original remotelogset bug.
 	// applyLoadout is factored out so a retry after a version conflict can
-	// re-apply it against a freshly read profile. Ownership is recomputed each
-	// time, since the fresh profile is the authority on what the player owns.
-	applyLoadout := func(profile *EVRProfile) error {
-		sanitized, err := sanitizeGameServerLoadout(loadout, profile)
-		if err != nil {
-			return fmt.Errorf("failed to compute owned cosmetics: %w", err)
-		}
-		profile.LoadoutCosmetics.Loadout = sanitized
+	// re-apply it against a freshly read profile. BOTH the base loadout and the
+	// ownership check are taken from that profile, so a retry only ever changes
+	// the slots this request actually named; every other slot keeps the value the
+	// concurrent writer committed.
+	//
+	// writtenLoadout is the loadout the most recent attempt actually produced, used
+	// for the success log below. On a retry it reflects the fresh base, so the log
+	// matches what was persisted.
+	var writtenLoadout evr.CosmeticLoadout
 
-		// Update jersey number if present
-		if payload.Number >= 0 {
-			profile.LoadoutCosmetics.JerseyNumber = int64(payload.Number)
+	applyLoadout := func(profile *EVRProfile) error {
+		written, err := applyGameServerLoadout(profile, equips, payload.Number)
+		if err != nil {
+			return err
 		}
+		writtenLoadout = written
 		return nil
 	}
 
@@ -198,7 +257,7 @@ func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *
 	logger.Info("Successfully saved loadout update",
 		zap.String("user_id", userID),
 		zap.String("evr_id", request.EvrID.String()),
-		zap.Any("loadout", loadout))
+		zap.Any("loadout", writtenLoadout))
 
 	return nil
 }

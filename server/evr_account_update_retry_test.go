@@ -52,10 +52,18 @@ func (m *profileUpdateTestModule) StorageDelete(ctx context.Context, deletes []*
 }
 
 func (m *profileUpdateTestModule) MultiUpdate(ctx context.Context, accountUpdates []*runtime.AccountUpdate, storageWrites []*runtime.StorageWrite, storageDeletes []*runtime.StorageDelete, walletUpdates []*runtime.WalletUpdate, updateLedger bool) ([]*api.StorageObjectAck, []*runtime.WalletUpdateResult, error) {
+	// These counters share the embedded module's mutex, which its own
+	// StorageWrite/StorageDelete also take. Guard them here rather than relying on
+	// the current tests being single-goroutine.
+	m.mu.Lock()
 	m.multiUpdateCalls++
-
-	if m.conflictsRemaining > 0 {
+	conflict := m.conflictsRemaining > 0
+	if conflict {
 		m.conflictsRemaining--
+	}
+	m.mu.Unlock()
+
+	if conflict {
 		return nil, nil, runtime.ErrStorageRejectedVersion
 	}
 
@@ -66,10 +74,19 @@ func (m *profileUpdateTestModule) MultiUpdate(ctx context.Context, accountUpdate
 	if err := m.StorageDelete(ctx, storageDeletes); err != nil {
 		return nil, nil, err
 	}
+	m.mu.Lock()
 	for _, au := range accountUpdates {
 		m.metadata[au.UserID] = au.Metadata
 	}
+	m.mu.Unlock()
 	return acks, nil, nil
+}
+
+// calls returns multiUpdateCalls under the mutex.
+func (m *profileUpdateTestModule) calls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.multiUpdateCalls
 }
 
 // storedProfile decodes the EVRProfile storage row for userID.
@@ -156,7 +173,7 @@ func TestEVRProfileUpdateWithRetry_SucceedsFirstTryWithoutReload(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Same(t, mine, updated, "no conflict means the caller's own profile object is kept")
-	require.Equal(t, 1, m.multiUpdateCalls)
+	require.Equal(t, 1, m.calls())
 	require.Zero(t, applyCalls, "apply must not be re-run when the first attempt succeeds")
 }
 
@@ -174,8 +191,13 @@ func TestEVRProfileUpdateWithRetry_GivesUpAfterBoundedAttempts(t *testing.T) {
 	_, err := evrProfileUpdateWithRetry(ctx, m, userID, mine, func(p *EVRProfile) error { return nil })
 	require.Error(t, err)
 	require.True(t, isVersionConflictError(err), "the surfaced error must still be recognisable as a conflict: %v", err)
-	require.Equal(t, evrProfileUpdateMaxAttempts, m.multiUpdateCalls,
-		"retry must be bounded at evrProfileUpdateMaxAttempts attempts")
+	// Assert against a literal, not against evrProfileUpdateMaxAttempts itself:
+	// comparing the constant to itself would keep this test green for ANY value,
+	// including 1 (no retry at all).
+	require.Equal(t, 3, m.calls(),
+		"retry must make exactly 3 bounded attempts")
+	require.Equal(t, 3, evrProfileUpdateMaxAttempts,
+		"evrProfileUpdateMaxAttempts changed; update this test deliberately")
 }
 
 // TestEVRProfileUpdateWithRetry_DoesNotRetryNonConflictErrors pins that an
@@ -192,5 +214,5 @@ func TestEVRProfileUpdateWithRetry_DoesNotRetryNonConflictErrors(t *testing.T) {
 	_, err := evrProfileUpdateWithRetry(ctx, m, userID, mine, func(p *EVRProfile) error { return nil })
 	require.Error(t, err)
 	require.False(t, isVersionConflictError(err))
-	require.Equal(t, 1, m.multiUpdateCalls, "a non-conflict error must not be retried")
+	require.Equal(t, 1, m.calls(), "a non-conflict error must not be retried")
 }
