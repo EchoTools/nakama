@@ -117,6 +117,47 @@ func TestLatencyHistory_StorableRead_UnmarshalIsLocked(t *testing.T) {
 	<-readersDone
 }
 
+// TestLatencyHistory_StorageMeta_IsLocked pins the locking contract on the
+// version field: SetStorageMeta writes h.version under the write lock (it is
+// called by both StorableRead and StorableWrite), so StorageMeta must read it
+// under the read lock.
+//
+// Unlike the marshal/unmarshal races above, no confirmed production
+// interleaving reaches this today: the two StorableRead call sites that touch a
+// LatencyHistory (evr_pipeline_login.go:721 and the appbot handlers) all read
+// into an object that is not yet published to params.latencyHistory. This test
+// pins the type's contract rather than a reproduced production failure — every
+// other accessor on LatencyHistory locks, and an unlocked version read is a
+// trap for the next caller that does a storage op on the shared object.
+func TestLatencyHistory_StorageMeta_IsLocked(t *testing.T) {
+	h := seedLatencyHistory(2)
+
+	stop := make(chan struct{})
+	started := make(chan struct{})
+	writersDone := make(chan struct{})
+	go func() {
+		defer close(writersDone)
+		h.SetStorageMeta(StorableMetadata{Version: "v0"})
+		close(started) // Guarantee the two loops actually overlap.
+		for i := 1; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			h.SetStorageMeta(StorableMetadata{Version: fmt.Sprintf("v%d", i)})
+		}
+	}()
+
+	<-started
+	for i := 0; i < 200000; i++ {
+		_ = h.StorageMeta().Version
+	}
+
+	close(stop)
+	<-writersDone
+}
+
 // TestLatencyHistory_StorableWrite_MarshalIsLocked proves the marshal inside
 // StorableWrite does not race with a concurrent locked mutation (Add) of the
 // same session-shared history.
