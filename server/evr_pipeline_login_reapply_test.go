@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"strings"
 	"testing"
 
 	"github.com/gofrs/uuid/v5"
@@ -113,8 +114,10 @@ func TestLoginProfileReapply_PrunesDisplayNameOwnedByAnotherAccount(t *testing.T
 	const guild = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 
 	r := loginProfileReapply{
-		// Stored lowercased, matching how initializeSession builds the set.
-		displayNamesOwnedByOthers: map[string]struct{}{"takenname": {}},
+		// Deliberately a different case from the stored name below: the prune in
+		// initializeSession matches with strings.EqualFold, and the retry must use
+		// the same comparison rather than an exact or lowercase-only match.
+		displayNamesOwnedByOthers: []string{"takenname"},
 	}
 
 	fresh := newReapplyTestProfile(t)
@@ -142,7 +145,7 @@ func TestLoginProfileReapply_KeepsUnrelatedConcurrentRename(t *testing.T) {
 	r := loginProfileReapply{
 		username:                  "tester",
 		usernameOnlyGroupIDs:      []string{usernameOnlyGuild},
-		displayNamesOwnedByOthers: map[string]struct{}{"takenname": {}},
+		displayNamesOwnedByOthers: []string{"takenname"},
 	}
 
 	fresh := newReapplyTestProfile(t)
@@ -173,7 +176,7 @@ func TestLoginProfileReapply_IsIdempotent(t *testing.T) {
 		fixBrokenCosmetics:        true,
 		username:                  "tester",
 		usernameOnlyGroupIDs:      []string{usernameOnlyGuild},
-		displayNamesOwnedByOthers: map[string]struct{}{"takenname": {}},
+		displayNamesOwnedByOthers: []string{"takenname"},
 	}
 
 	fresh := newReapplyTestProfile(t)
@@ -248,4 +251,53 @@ func TestInitializeSession_NotificationGoroutineDoesNotReadParamsProfile(t *test
 
 	require.Positive(t, goStmts,
 		"expected at least one go statement in initializeSession; this guard test is stale")
+}
+
+// TestLoginProfileReapply_PrunesUsingTheSameFoldAsInitializeSession pins that the
+// retry's prune uses strings.EqualFold — the exact comparison initializeSession's
+// own prune uses — and not lowercase-set membership, which is a subtly different
+// rule.
+//
+// 'U+017F LATIN SMALL LETTER LONG S' is the discriminator: EqualFold folds it to
+// 's'; strings.ToLower leaves it alone. Under a lowercased set the retry would
+// therefore MISS a name the non-retry path deleted, leaving the player logged in
+// under a name the server had already ruled belongs to someone else.
+//
+// Reachability: the name is installed with SetGroupIGNData, which is what the
+// display-name-override path in initializeSession uses, and which does NOT
+// sanitize. That override comes straight from the "ign" query parameter on the
+// login WebSocket URL, parsed with a nil pattern (server/evr_session.go
+// parseUserQueryFunc), so a client controls these bytes exactly. Building the
+// state with SetGroupDisplayName instead would make this test vacuous: that
+// setter runs sanitizeDisplayName, whose anyascii transliteration rewrites the
+// long s to a plain 's' before either comparison ever sees it.
+func TestLoginProfileReapply_PrunesUsingTheSameFoldAsInitializeSession(t *testing.T) {
+	const (
+		guild     = "77777777-8888-4999-8aaa-bbbbbbbbbbbb"
+		longSName = "\u017fam" // "\u017fam" — folds to "sam", does not lowercase to it
+	)
+
+	// Guard the discriminator itself, so this test cannot quietly become a
+	// tautology if the constant is edited or the stdlib changes.
+	require.True(t, strings.EqualFold(longSName, "Sam"),
+		"precondition: EqualFold must fold these; otherwise this test proves nothing")
+	require.NotEqual(t, strings.ToLower(longSName), strings.ToLower("Sam"),
+		"precondition: ToLower must NOT collapse them, or there is nothing to discriminate")
+
+	r := loginProfileReapply{displayNamesOwnedByOthers: []string{"Sam"}}
+
+	fresh := newReapplyTestProfile(t)
+	// SetGroupIGNData, not SetGroupDisplayName: the override path stores the
+	// client-supplied name verbatim. See the reachability note above.
+	fresh.SetGroupIGNData(guild, GroupInGameName{GroupID: guild, DisplayName: longSName})
+
+	// Precondition: the name really did survive unsanitized into the profile.
+	require.Equal(t, longSName, fresh.DisplayNamesByGroupID()[guild],
+		"precondition: SetGroupIGNData must store the name verbatim")
+
+	require.NoError(t, r.apply(fresh))
+
+	_, found := fresh.GetGroupDisplayName(guild)
+	require.False(t, found,
+		"the retry must prune with EqualFold, matching initializeSession's prune")
 }

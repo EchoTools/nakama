@@ -650,11 +650,17 @@ type loginProfileReapply struct {
 	username             string
 	usernameOnlyGroupIDs []string
 
-	// displayNamesOwnedByOthers is the lowercased set of in-game names this login
-	// found registered to a different account. Any matching name on the fresh
-	// profile is pruned again, so a retry cannot resurrect a name the server had
-	// already rejected for this player.
-	displayNamesOwnedByOthers map[string]struct{}
+	// displayNamesOwnedByOthers lists the in-game names this login found
+	// registered to a different account. Any matching name on the fresh profile is
+	// pruned again, so a retry cannot resurrect a name the server had already
+	// rejected for this player.
+	//
+	// Matched with strings.EqualFold, exactly as the prune in initializeSession
+	// does. Case folding is NOT the same as lowercasing both sides — EqualFold
+	// applies simple Unicode folding, so pairs like 'ſ'/'s' compare equal to it and
+	// not to strings.ToLower. Keeping the same comparison here is what makes this a
+	// re-evaluation of the original rule rather than a slightly different one.
+	displayNamesOwnedByOthers []string
 }
 
 // apply re-applies the login mutations to profile. It is safe to call repeatedly
@@ -672,8 +678,11 @@ func (r loginProfileReapply) apply(profile *EVRProfile) error {
 		profile.SetGroupDisplayName(groupID, r.username)
 	}
 	for gID, gn := range profile.DisplayNamesByGroupID() {
-		if _, taken := r.displayNamesOwnedByOthers[strings.ToLower(gn)]; taken {
-			profile.DeleteGroupDisplayName(gID)
+		for _, taken := range r.displayNamesOwnedByOthers {
+			if strings.EqualFold(gn, taken) {
+				profile.DeleteGroupDisplayName(gID)
+				break
+			}
 		}
 	}
 	return nil
@@ -856,11 +865,13 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		displayNames = append(displayNames, dn)
 	}
 
-	// displayNamesOwnedByOthers collects, lowercased, every in-game name this
-	// login found to belong to a different account. It is re-evaluated against the
-	// fresh profile on a storage retry (see the reapply closure below) so the
-	// prune below cannot be undone by adopting a reloaded profile.
-	displayNamesOwnedByOthers := make(map[string]struct{})
+	// displayNamesOwnedByOthers collects every in-game name this login found to
+	// belong to a different account. It is re-evaluated against the fresh profile
+	// on a storage retry (see the reapply closure below) so the prune below cannot
+	// be undone by adopting a reloaded profile. Names are stored verbatim; the
+	// retry matches them with strings.EqualFold, the same comparison the prune
+	// below uses.
+	displayNamesOwnedByOthers := make([]string, 0)
 
 	// The notification goroutine below must not close over params.profile: the
 	// retry path further down reassigns that field, which would be a data race
@@ -875,7 +886,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		for _, dn := range params.profile.DisplayNamesByGroupID() {
 			if ownerIDs, ok := ownerMap[dn]; ok && !slices.Contains(ownerIDs, params.profile.ID()) {
 				// This display name is owned by someone else.
-				displayNamesOwnedByOthers[strings.ToLower(dn)] = struct{}{}
+				displayNamesOwnedByOthers = append(displayNamesOwnedByOthers, dn)
 				for gID, gn := range params.profile.DisplayNamesByGroupID() {
 					if strings.EqualFold(gn, dn) {
 						// This display name is owned by someone else.
@@ -1008,9 +1019,17 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 
 		// The mutations that set metadataUpdated are re-applied here to a freshly
 		// read profile on a retry: the resolved active group, and the
-		// broken-cosmetic repair. Login is racing its own QueueSyncMember call
-		// above, which writes the same key from the Discord sync path, so a version
-		// conflict is realistic and must not reject the login outright.
+		// broken-cosmetic repair.
+		//
+		// The competing writers are the Discord member-sync path and the
+		// guild-rename RPC, both of which write this same key and are driven by
+		// Discord commands, account linking, and this player's other reconnect
+		// attempts — none of which are sequenced against this session. A version
+		// conflict is therefore realistic and must not reject the login outright.
+		//
+		// Not the QueueSyncMember call earlier in this function: that one sits on
+		// the "user is not in any groups" branch and returns immediately after, so
+		// it never reaches this write.
 		//
 		// reapply runs ONLY on a retry, and only against a profile just read from
 		// storage. Everything it does is therefore expressed as a rule re-evaluated
