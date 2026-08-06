@@ -195,6 +195,25 @@ func (si *LocalStorageIndex) Write(ctx context.Context, objects []*api.StorageOb
 					zap.Int("evicted_count", len(ids)),
 					zap.Uint64("entries_before_eviction", count),
 					zap.Int("max_entries", idx.MaxEntries))
+
+				// The gauge emitted above is now stale: it holds the
+				// pre-eviction count, and a gauge keeps its last value until
+				// the next Write. An index that evicts and then goes idle would
+				// report occupancy above MaxEntries indefinitely, and Load
+				// publishes the true count at boot, so the same index would
+				// read differently before and after a restart. Re-emit from a
+				// fresh reader -- the count is observed, never assumed, and the
+				// extra open only happens on the rare eviction path.
+				if evictedReader, err := idx.Index.Reader(); err != nil {
+					si.logger.Error("Failed to get index storage reader after eviction; entry gauge left at its pre-eviction value", zap.String("index_name", idx.Name), zap.Error(err))
+				} else {
+					if postCount, err := evictedReader.Count(); err != nil {
+						si.logger.Error("Failed to count index entries after eviction; entry gauge left at its pre-eviction value", zap.String("index_name", idx.Name), zap.Error(err))
+					} else {
+						si.metrics.GaugeStorageIndexEntries(idx.Name, float64(postCount))
+					}
+					_ = evictedReader.Close()
+				}
 			}
 		}
 		_ = reader.Close()

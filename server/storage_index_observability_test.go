@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // gaugeCapturingMetrics records the storage-index entry gauge so a test can
@@ -75,8 +76,24 @@ func TestStorageIndexEviction_IsObservable(t *testing.T) {
 	}
 	si.Write(context.Background(), objs)
 
-	assert.Equal(t, float64(20), metrics.gauges[indexName],
-		"the entry gauge must reflect occupancy so headroom is visible")
+	// The gauge is a point-in-time occupancy reading, not a high-water mark: it
+	// holds its last value until the next Write, so a value set before eviction
+	// misreports the index for as long as the index sits idle -- and an idle
+	// ban-heavy index is exactly the one whose headroom matters. Compare it
+	// against the index's real document count rather than a constant, so the
+	// assertion tracks the eviction arithmetic instead of restating it.
+	local, ok := si.(*LocalStorageIndex)
+	require.True(t, ok)
+	reader, err := local.indexByName[indexName].Index.Reader()
+	require.NoError(t, err)
+	actual, err := reader.Count()
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+
+	require.Equal(t, uint64(maxEntries), actual,
+		"precondition: eviction must have trimmed the index back to MaxEntries")
+	assert.Equal(t, float64(actual), metrics.gauges[indexName],
+		"the entry gauge must reflect occupancy so headroom is visible; the index holds %d entries", actual)
 
 	evictionLogs := logs.FilterMessageSnippet("evict").All()
 	require.NotEmpty(t, evictionLogs,
@@ -209,6 +226,49 @@ func TestStorageIndexWrite_PairsAcksToTheirOwnOps(t *testing.T) {
 		"Alpha was indexed with another object's version")
 	assert.Equal(t, "version-zeta", versionByCollection["Zeta"],
 		"Zeta was indexed with another object's version")
+}
+
+// TestStorageIndexWrite_CarriesWritePermissionFromTheWriteField pins the source
+// field of each permission storageIndexWrite copies into the indexed document.
+//
+// PermissionWrite was populated from the object's PermissionRead, so every
+// document indexed at runtime carried its READ permission in the WRITE slot.
+// Nothing enforces writes from the index -- storagePrepBatch gates them in SQL
+// with "AND storage.write = 1" (core_storage.go:706) against the database
+// column -- so this is a fidelity bug, not an authorization hole. It still
+// escapes: an indexOnly index answers StorageIndexList straight out of the
+// document (storage_index.go:354), so callers and clients are handed the wrong
+// PermissionWrite, and a registered index filter function receives the same
+// wrong value in its StorageOpWrite (storage_index.go:109).
+//
+// The common read=2/write=0 shape corrupts in the permissive direction: the
+// listing claims the object is client-writable when it is not.
+func TestStorageIndexWrite_CarriesWritePermissionFromTheWriteField(t *testing.T) {
+	ownerID := uuid.Must(uuid.NewV4()).String()
+
+	// Public read, no client write -- the shape where read and write differ.
+	ops := StorageOpWrites{{
+		OwnerID: ownerID,
+		Object: &api.WriteStorageObject{
+			Collection:      "Coll",
+			Key:             "k",
+			Value:           `{"a":1}`,
+			PermissionRead:  wrapperspb.Int32(2),
+			PermissionWrite: wrapperspb.Int32(0),
+		},
+	}}
+	acks := []*api.StorageObjectAck{
+		{Collection: "Coll", Key: "k", UserId: ownerID, Version: "v1"},
+	}
+
+	idx := &recordingStorageIndex{}
+	storageIndexWrite(context.Background(), idx, ops, acks)
+
+	require.Len(t, idx.written, 1)
+	assert.Equal(t, int32(2), idx.written[0].PermissionRead,
+		"the indexed document must carry the object's read permission")
+	assert.Equal(t, int32(0), idx.written[0].PermissionWrite,
+		"the indexed document must carry the object's WRITE permission, not a second copy of its read permission")
 }
 
 // TestSuspensionProfileIndex_MaxEntriesCannotBind pins the capacity decision.
