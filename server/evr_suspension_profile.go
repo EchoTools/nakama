@@ -310,76 +310,78 @@ func SyncJournalAndProfile(ctx context.Context, nk runtime.NakamaModule, userID 
 	return StorableWriteMany(ctx, nk, userID, journal, profile)
 }
 
-// SyncJournalAndProfileWithRetry syncs journal and profile with retry logic for concurrent writes.
-// This handles version conflicts by retrying with exponential backoff.
-// On each retry, it re-reads both journal and profile from storage to get the latest versions.
+// SyncJournalAndProfileWithRetry syncs journal and profile with retry logic for
+// concurrent writes, handling version conflicts with exponential backoff.
+//
+// Every attempt writes the journal and the projection in ONE nk.MultiUpdate, so
+// they share a transaction and cannot half-apply. This is the more exposed of
+// the two sync functions -- five call sites to SyncJournalAndProfile's three --
+// and it previously issued two separate StorableWrite calls, i.e. two
+// independent transactions. A failure between them advanced the authority while
+// leaving the projection describing the previous state, in the PERMISSIVE
+// direction.
+//
+// Neither read creates its object. A read-through create is itself an unpaired
+// single-object write, which would defeat the very atomicity this function now
+// provides; a freshly constructed object already carries version "*", so the
+// atomic write below inserts it.
+//
+// RETRY LAYERING: this function does NOT retry the journal write, and must not.
+//
+// It receives an ALREADY-MUTATED journal, so it does not know which records the
+// caller just added. On a version conflict it therefore has no way to re-apply
+// that mutation to the winner's copy -- its only option would be to resubmit
+// the stale payload, which is what the old loop did: it adopted the winner's
+// VERSION, wrote its own contents on top, and returned nil. That silently
+// destroyed the winner's ban record while reporting success.
+//
+// Re-applying is the CALLER's job, because only the caller knows the mutation.
+// A conflict is returned so the caller can decide: re-read, re-apply its
+// record, and call again, or surface the failure. Losing a race and saying so
+// is correct; succeeding while discarding data is not.
+//
+// The bounded loop that remains covers only the PROJECTION, which is safe to
+// re-derive because it is a pure function of the journal (SyncFromJournal). If
+// the profile's version moved underneath us, re-reading and re-deriving it is
+// obviously correct and costs nothing. A journal conflict is returned as-is.
 func SyncJournalAndProfileWithRetry(ctx context.Context, nk runtime.NakamaModule, userID string, journal *GuildEnforcementJournal) error {
-	const maxRetries = 3
+	const maxAttempts = 3
 	var lastErr error
 
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		// On retry, re-read the journal from storage to get the latest version
-		// This ensures we have the correct storage version for the write
-		if attempt > 0 {
-			freshJournal := NewGuildEnforcementJournal(userID)
-			if err := StorableRead(ctx, nk, userID, freshJournal, true); err != nil {
-				lastErr = err
-				// On read failure, continue with the existing journal
-			} else {
-				// Update the journal's storage version to the latest from storage
-				meta := journal.StorageMeta()
-				meta.Version = freshJournal.GetStorageVersion()
-				journal.SetStorageMeta(meta)
-			}
-		}
-
-		// Load existing profile from storage to get the current version, or create if it doesn't exist
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		// Re-read the profile to pick up its current version. This is the only
+		// state safe to re-derive here: it is a projection of the journal, not
+		// an independent mutation. A missing profile is not an error; the fresh
+		// one carries version "*" and the atomic write below inserts it.
 		profile := NewSuspensionProfile(userID)
-		if err := StorableRead(ctx, nk, userID, profile, true); err != nil {
-			// If we can't read (and create) the profile, try to just create a new one
+		if err := StorableRead(ctx, nk, userID, profile, false); err != nil && status.Code(err) != codes.NotFound {
 			lastErr = err
 			profile = NewSuspensionProfile(userID)
 		}
-		// Update profile with latest journal data
 		profile.SyncFromJournal(journal)
 
-		// Try to write both to storage
-		if err := StorableWrite(ctx, nk, userID, journal); err != nil {
-			lastErr = err
-			// Only retry on version conflicts, fail fast on other errors
-			if isVersionConflictError(err) && attempt < maxRetries-1 {
-				// Exponential backoff: 10ms, 20ms, 40ms
-				backoff := time.Duration(10*(1<<uint(attempt))) * time.Millisecond
-				// Context-aware sleep to respect cancellation
-				select {
-				case <-time.After(backoff):
-					continue
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}
+		// Write both in a single transaction.
+		err := StorableWriteMany(ctx, nk, userID, journal, profile)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+
+		if !isVersionConflictError(err) || attempt == maxAttempts-1 {
 			return err
 		}
 
-		if err := StorableWrite(ctx, nk, userID, profile); err != nil {
-			lastErr = err
-			// Only retry on version conflicts, fail fast on other errors
-			if isVersionConflictError(err) && attempt < maxRetries-1 {
-				// Exponential backoff: 10ms, 20ms, 40ms
-				backoff := time.Duration(10*(1<<uint(attempt))) * time.Millisecond
-				// Context-aware sleep to respect cancellation
-				select {
-				case <-time.After(backoff):
-					continue
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}
-			return err
+		// The journal's version is deliberately NOT refreshed between attempts.
+		// If the conflict was the journal's, the next attempt conflicts again
+		// and the caller gets the error -- which is the correct outcome, since
+		// only the caller can re-apply. If it was the profile's, the re-read at
+		// the top of the loop resolves it.
+		backoff := time.Duration(10*(1<<uint(attempt))) * time.Millisecond
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-
-		// Success
-		return nil
 	}
 
 	return lastErr

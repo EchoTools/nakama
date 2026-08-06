@@ -59,6 +59,14 @@ func (m *fkEnforcingNakamaModule) StorageWrite(ctx context.Context, writes []*ru
 	return acks, nil
 }
 
+// MultiUpdate delegates to StorageWrite so this double keeps a single set of
+// semantics. StorableWriteMany writes through nk.MultiUpdate; in production both
+// entry points funnel into storageWriteObjects inside one transaction.
+func (m *fkEnforcingNakamaModule) MultiUpdate(ctx context.Context, accountUpdates []*runtime.AccountUpdate, storageWrites []*runtime.StorageWrite, storageDeletes []*runtime.StorageDelete, walletUpdates []*runtime.WalletUpdate, updateLedger bool) ([]*api.StorageObjectAck, []*runtime.WalletUpdateResult, error) {
+	acks, err := m.StorageWrite(ctx, storageWrites)
+	return acks, nil, err
+}
+
 func (m *fkEnforcingNakamaModule) StorageRead(ctx context.Context, reads []*runtime.StorageRead) ([]*api.StorageObject, error) {
 	objects := make([]*api.StorageObject, 0, len(reads))
 	for _, read := range reads {

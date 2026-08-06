@@ -313,29 +313,109 @@ func TestSyncFromJournal_DoesNotApplyInheritance(t *testing.T) {
 		"the projection is inheritance-free by contract; callers needing inherited suspensions must consult CheckEnforcementSuspensions with a live registry inheritance map")
 }
 
-// syncTestNK is a storage double that models the ONE property this test cares
-// about: the transaction boundary. StorageWriteObjects wraps an entire batch in
-// a single ExecuteInTxPgx (core_storage.go:587), so one StorageWrite call is
-// all-or-nothing and two calls are two independent transactions. The double
-// applies a batch only if every op in it is accepted.
+// syncTestNK is a storage double that models the ONE property these tests care
+// about: the transaction boundary.
+//
+// Both write paths funnel into storageWriteObjects inside a single
+// ExecuteInTxPgx -- StorageWriteObjects at core_storage.go:587 and MultiUpdate
+// at core_multi.go:37. So one call of either kind is all-or-nothing, and two
+// calls are two independent transactions. The double applies a batch only if
+// every op in it is accepted, and records each batch so a test can assert how
+// many transactions a code path actually used.
 type syncTestNK struct {
 	runtime.NakamaModule
 	objects map[string]string // "collection/key" -> value
-	batches [][]string        // collections seen, per StorageWrite call
+	batches [][]string        // collections seen, per write call
 	// rejectCollection fails any batch containing this collection.
 	rejectCollection string
+	// failWritesUntil rejects the first N write calls with a version conflict,
+	// to drive the retry loop.
+	failWritesUntil int
+	writeCalls      int
+	// enforceVersions turns on optimistic-concurrency checking, so the double
+	// can model a genuine lost race rather than just a canned error.
+	enforceVersions bool
+	versions        map[string]string // "collection/key" -> current version
 }
 
 func newSyncTestNK() *syncTestNK {
-	return &syncTestNK{objects: make(map[string]string)}
+	return &syncTestNK{
+		objects:  make(map[string]string),
+		versions: make(map[string]string),
+	}
+}
+
+// applyBatch is the shared transaction body for both StorageWrite and
+// MultiUpdate, so the double cannot accidentally give one path stronger
+// guarantees than the other.
+func (m *syncTestNK) applyBatch(writes []*runtime.StorageWrite) ([]*api.StorageObjectAck, error) {
+	collections := make([]string, 0, len(writes))
+	for _, w := range writes {
+		collections = append(collections, w.Collection)
+	}
+	m.batches = append(m.batches, collections)
+	m.writeCalls++
+
+	if m.writeCalls <= m.failWritesUntil {
+		return nil, runtime.ErrStorageRejectedVersion
+	}
+
+	// Transaction semantics: reject the WHOLE batch, persisting nothing.
+	for _, w := range writes {
+		if m.rejectCollection != "" && w.Collection == m.rejectCollection {
+			return nil, runtime.ErrStorageRejectedVersion
+		}
+		if m.enforceVersions {
+			k := w.Collection + "/" + w.Key
+			current, exists := m.versions[k]
+			switch {
+			case w.Version == "":
+				// Unconditional write.
+			case w.Version == "*":
+				if exists {
+					return nil, runtime.ErrStorageRejectedVersion
+				}
+			case !exists || w.Version != current:
+				return nil, runtime.ErrStorageRejectedVersion
+			}
+		}
+	}
+
+	acks := make([]*api.StorageObjectAck, 0, len(writes))
+	for i, w := range writes {
+		k := w.Collection + "/" + w.Key
+		m.objects[k] = w.Value
+		newVersion := fmt.Sprintf("w%d-%d", m.writeCalls, i)
+		m.versions[k] = newVersion
+		acks = append(acks, &api.StorageObjectAck{
+			Collection: w.Collection, Key: w.Key, UserId: w.UserID, Version: newVersion,
+		})
+	}
+	return acks, nil
+}
+
+// seed installs an object at a known version, standing in for a concurrent
+// writer that won the race before our caller attempted its write.
+func (m *syncTestNK) seed(collection, key, value, version string) {
+	m.objects[collection+"/"+key] = value
+	m.versions[collection+"/"+key] = version
+}
+
+func (m *syncTestNK) MultiUpdate(ctx context.Context, accountUpdates []*runtime.AccountUpdate, storageWrites []*runtime.StorageWrite, storageDeletes []*runtime.StorageDelete, walletUpdates []*runtime.WalletUpdate, updateLedger bool) ([]*api.StorageObjectAck, []*runtime.WalletUpdateResult, error) {
+	acks, err := m.applyBatch(storageWrites)
+	return acks, nil, err
 }
 
 func (m *syncTestNK) StorageRead(ctx context.Context, reads []*runtime.StorageRead) ([]*api.StorageObject, error) {
 	objs := make([]*api.StorageObject, 0, len(reads))
 	for _, r := range reads {
 		if v, ok := m.objects[r.Collection+"/"+r.Key]; ok {
+			version := m.versions[r.Collection+"/"+r.Key]
+			if version == "" {
+				version = "v1"
+			}
 			objs = append(objs, &api.StorageObject{
-				Collection: r.Collection, Key: r.Key, UserId: r.UserID, Value: v, Version: "v1",
+				Collection: r.Collection, Key: r.Key, UserId: r.UserID, Value: v, Version: version,
 			})
 		}
 	}
@@ -343,27 +423,7 @@ func (m *syncTestNK) StorageRead(ctx context.Context, reads []*runtime.StorageRe
 }
 
 func (m *syncTestNK) StorageWrite(ctx context.Context, writes []*runtime.StorageWrite) ([]*api.StorageObjectAck, error) {
-	collections := make([]string, 0, len(writes))
-	for _, w := range writes {
-		collections = append(collections, w.Collection)
-	}
-	m.batches = append(m.batches, collections)
-
-	// Transaction semantics: reject the WHOLE batch, persisting nothing.
-	for _, w := range writes {
-		if m.rejectCollection != "" && w.Collection == m.rejectCollection {
-			return nil, runtime.ErrStorageRejectedVersion
-		}
-	}
-
-	acks := make([]*api.StorageObjectAck, 0, len(writes))
-	for _, w := range writes {
-		m.objects[w.Collection+"/"+w.Key] = w.Value
-		acks = append(acks, &api.StorageObjectAck{
-			Collection: w.Collection, Key: w.Key, UserId: w.UserID, Version: "v1",
-		})
-	}
-	return acks, nil
+	return m.applyBatch(writes)
 }
 
 // TestSyncJournalAndProfile_IsAtomic covers the split-write bug.
@@ -423,6 +483,160 @@ func TestSyncJournalAndProfile_ProfileFailureDoesNotAdvanceJournal(t *testing.T)
 	_, journalPersisted := nk.objects[StorageCollectionEnforcementJournal+"/"+StorageKeyEnforcementJournal]
 	assert.False(t, journalPersisted,
 		"the journal must NOT have advanced when the profile write failed; a suspension recorded in the authority but missing from the projection is a silent permissive drift")
+}
+
+// journalBatchOf returns the write batch that carried the enforcement journal.
+func journalBatchOf(t *testing.T, nk *syncTestNK) []string {
+	t.Helper()
+	var found []string
+	for _, b := range nk.batches {
+		for _, c := range b {
+			if c == StorageCollectionEnforcementJournal {
+				found = b
+			}
+		}
+	}
+	require.NotNil(t, found, "the journal must have been written; batches were %v", nk.batches)
+	return found
+}
+
+// TestSyncJournalAndProfileWithRetry_IsAtomic is the retry-path counterpart to
+// TestSyncJournalAndProfile_IsAtomic.
+//
+// This is the MORE exposed of the two functions -- it has five call sites to
+// the plain variant's three -- and it carried the same split-write defect: the
+// journal and the projection went out as two separate StorableWrite calls,
+// hence two independent transactions. A failure between them advanced the
+// authority while leaving the projection describing the previous state, in the
+// PERMISSIVE direction.
+//
+// Both objects must now go out in a single nk.MultiUpdate, which commits
+// everything inside one ExecuteInTxPgx (core_multi.go:37).
+func TestSyncJournalAndProfileWithRetry_IsAtomic(t *testing.T) {
+	userID := uuid.Must(uuid.NewV4()).String()
+	groupID := uuid.Must(uuid.NewV4()).String()
+
+	nk := newSyncTestNK()
+	journal := NewGuildEnforcementJournal(userID)
+	journal.AddRecord(groupID, "enforcer", "1234", "Toxic Behavior", "", false, false, 24*time.Hour)
+
+	require.NoError(t, SyncJournalAndProfileWithRetry(context.Background(), nk, userID, journal))
+
+	assert.ElementsMatch(t,
+		[]string{StorageCollectionEnforcementJournal, StorageCollectionSuspensionProfile},
+		journalBatchOf(t, nk),
+		"journal and profile must be written in ONE call so they share a transaction; got batches %v", nk.batches)
+}
+
+// TestSyncJournalAndProfileWithRetry_ProfileFailureDoesNotAdvanceJournal is the
+// consequence that matters in production: a failed projection write must not
+// leave the authority advanced without it.
+func TestSyncJournalAndProfileWithRetry_ProfileFailureDoesNotAdvanceJournal(t *testing.T) {
+	userID := uuid.Must(uuid.NewV4()).String()
+	groupID := uuid.Must(uuid.NewV4()).String()
+
+	nk := newSyncTestNK()
+	nk.rejectCollection = StorageCollectionSuspensionProfile
+
+	journal := NewGuildEnforcementJournal(userID)
+	journal.AddRecord(groupID, "enforcer", "1234", "Toxic Behavior", "", false, false, 24*time.Hour)
+
+	err := SyncJournalAndProfileWithRetry(context.Background(), nk, userID, journal)
+	require.Error(t, err, "a failed projection write must surface as an error, not be swallowed")
+
+	_, journalPersisted := nk.objects[StorageCollectionEnforcementJournal+"/"+StorageKeyEnforcementJournal]
+	assert.False(t, journalPersisted,
+		"the journal must NOT have advanced when the profile write failed; a suspension in the authority but missing from the projection is a silent permissive drift")
+}
+
+// TestSyncJournalAndProfileWithRetry_RetriesAtomically pins that the retry loop
+// survives the switch to MultiUpdate.
+//
+// The version-conflict sentinel must still be recognised through the new write
+// path -- isVersionConflictError matches on the "version check failed"
+// substring (evr_server_profile_storage.go:354), and MultiUpdate returns
+// runtime.ErrStorageRejectedVersion whose text carries it. If that link broke,
+// a conflict would fail immediately instead of retrying, and this test would
+// see a single batch and no persisted journal.
+func TestSyncJournalAndProfileWithRetry_RetriesAtomically(t *testing.T) {
+	userID := uuid.Must(uuid.NewV4()).String()
+	groupID := uuid.Must(uuid.NewV4()).String()
+
+	nk := newSyncTestNK()
+	nk.failWritesUntil = 1 // first write call conflicts, second succeeds
+
+	journal := NewGuildEnforcementJournal(userID)
+	journal.AddRecord(groupID, "enforcer", "1234", "Toxic Behavior", "", false, false, 24*time.Hour)
+
+	require.NoError(t, SyncJournalAndProfileWithRetry(context.Background(), nk, userID, journal),
+		"a single version conflict must be retried, not surfaced; batches were %v", nk.batches)
+
+	// Every batch that touched storage must have carried BOTH objects: a retry
+	// must not degrade into single-object writes.
+	for i, b := range nk.batches {
+		assert.ElementsMatch(t,
+			[]string{StorageCollectionEnforcementJournal, StorageCollectionSuspensionProfile}, b,
+			"batch %d was not atomic; batches were %v", i, nk.batches)
+	}
+
+	value, ok := nk.objects[StorageCollectionEnforcementJournal+"/"+StorageKeyEnforcementJournal]
+	require.True(t, ok, "the journal must be persisted after a successful retry")
+	assert.Contains(t, value, "Toxic Behavior",
+		"the retry must re-apply the caller's mutation, not write a payload that lost it")
+}
+
+// TestSyncJournalAndProfileWithRetry_NeverSucceedsAfterDiscardingAMutation is
+// the invariant that actually matters in a race, stated by the repo owner as:
+// "errors are okay, retries are picking a winner in a race."
+//
+// Losing a race is fine. Reporting SUCCESS while silently dropping the winner's
+// record is not. The original loop re-read the stored journal, adopted only its
+// VERSION, and then wrote the caller's stale in-memory contents on top at that
+// version -- destroying whatever the winner had recorded and returning nil.
+//
+// This function cannot re-apply on conflict even in principle: it receives an
+// ALREADY-MUTATED journal, so it does not know which records the caller just
+// added. Re-applying is the caller's job because only the caller knows the
+// mutation. A low-level helper that retries anyway has no recourse but to try
+// blindly, which is exactly how a ban record gets lost.
+//
+// So the bar is: either return an error, or leave the winner's data intact.
+// Never both-succeed-and-discard.
+func TestSyncJournalAndProfileWithRetry_NeverSucceedsAfterDiscardingAMutation(t *testing.T) {
+	userID := uuid.Must(uuid.NewV4()).String()
+	groupID := uuid.Must(uuid.NewV4()).String()
+
+	nk := newSyncTestNK()
+	nk.enforceVersions = true
+
+	// A concurrent moderator already recorded a ban and won the race.
+	winner := NewGuildEnforcementJournal(userID)
+	winner.AddRecord(groupID, "enforcer-A", "1111", "WINNER RECORD", "", false, false, 48*time.Hour)
+	winnerJSON, err := json.Marshal(winner)
+	require.NoError(t, err)
+	nk.seed(StorageCollectionEnforcementJournal, StorageKeyEnforcementJournal, string(winnerJSON), "winner-version")
+
+	// Our caller mutated a journal it read BEFORE the winner committed, so it
+	// holds a stale version and does not contain the winner's record.
+	loser := NewGuildEnforcementJournal(userID)
+	loser.AddRecord(groupID, "enforcer-B", "2222", "LOSER RECORD", "", false, false, 24*time.Hour)
+	meta := loser.StorageMeta()
+	meta.Version = "stale-version"
+	loser.SetStorageMeta(meta)
+
+	syncErr := SyncJournalAndProfileWithRetry(context.Background(), nk, userID, loser)
+
+	stored := nk.objects[StorageCollectionEnforcementJournal+"/"+StorageKeyEnforcementJournal]
+
+	if syncErr == nil {
+		// Success is only honest if the winner's record survived.
+		assert.Contains(t, stored, "WINNER RECORD",
+			"returned success while DISCARDING the concurrent winner's ban record -- a silently lost enforcement action. Either fail the race honestly or preserve the winner's data. Stored journal was: %s", stored)
+	} else {
+		// Losing the race and saying so is correct. The winner must be intact.
+		assert.Contains(t, stored, "WINNER RECORD",
+			"the winner's record must survive a lost race; stored journal was: %s", stored)
+	}
 }
 
 // TestSyncFromJournal_IsSelfOnly pins the other half of the scope contract:

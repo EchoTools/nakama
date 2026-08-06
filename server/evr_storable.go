@@ -114,17 +114,27 @@ func StorableRead(ctx context.Context, nk runtime.NakamaModule, userID string, d
 }
 
 // StorableWriteMany writes several storables owned by one user in a SINGLE
-// nk.StorageWrite call.
+// nk.MultiUpdate call.
 //
 // This is not merely a batching convenience -- it is a transaction boundary.
-// nk.StorageWrite funnels into StorageWriteObjects, which wraps the whole batch
-// in one ExecuteInTxPgx (core_storage.go:587), so either every object lands or
-// none of them do. Two successive StorableWrite calls are two independent
+// MultiUpdate runs every account update, storage write and storage delete
+// inside one ExecuteInTxPgx (core_multi.go:37-66), so either every object lands
+// or none of them do. Two successive StorableWrite calls are two independent
 // transactions and CAN half-apply.
 //
 // Use this whenever two objects must not disagree with each other -- notably an
 // authoritative record and a projection derived from it, where a half-applied
 // write leaves the projection describing a state that no longer exists.
+//
+// MultiUpdate is preferred over a multi-object nk.StorageWrite even though both
+// are a single transaction today, because MultiUpdate is the one entry point
+// that can also carry account updates and deletes in that same transaction.
+// Callers that later need to widen the atomic unit do not have to change shape.
+//
+// Version conflicts stay detectable: MultiUpdate returns
+// runtime.ErrStorageRejectedVersion, whose text carries the "version check
+// failed" substring that isVersionConflictError matches on
+// (evr_server_profile_storage.go:354), and the wrapper below preserves it.
 //
 // Acks come back in input order (storageWriteObjects assigns them by the
 // original index at core_storage.go:686), so versions are propagated back to
@@ -155,7 +165,8 @@ func StorableWriteMany(ctx context.Context, nk runtime.NakamaModule, userID stri
 		metas = append(metas, meta)
 	}
 
-	acks, err := nk.StorageWrite(ctx, ops)
+	// Storage writes only: no account updates, no deletes, no wallet updates.
+	acks, _, err := nk.MultiUpdate(ctx, nil, ops, nil, nil, false)
 	if err != nil {
 		// Name every object in the batch: the caller needs to know that NONE of
 		// them were applied, not just the one that happened to be rejected.

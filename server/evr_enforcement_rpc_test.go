@@ -77,6 +77,14 @@ func (m *mockEnforcementNakamaModule) StorageWrite(ctx context.Context, writes [
 	return acks, nil
 }
 
+// MultiUpdate delegates to StorageWrite so this double keeps a single set of
+// semantics. StorableWriteMany writes through nk.MultiUpdate; in production both
+// entry points funnel into storageWriteObjects inside one transaction.
+func (m *mockEnforcementNakamaModule) MultiUpdate(ctx context.Context, accountUpdates []*runtime.AccountUpdate, storageWrites []*runtime.StorageWrite, storageDeletes []*runtime.StorageDelete, walletUpdates []*runtime.WalletUpdate, updateLedger bool) ([]*api.StorageObjectAck, []*runtime.WalletUpdateResult, error) {
+	acks, err := m.StorageWrite(ctx, storageWrites)
+	return acks, nil, err
+}
+
 func (m *mockEnforcementNakamaModule) StorageList(ctx context.Context, callerID, userID, collection string, limit int, cursor string) ([]*api.StorageObject, string, error) {
 	if m.storageListErr != nil {
 		return nil, "", m.storageListErr
