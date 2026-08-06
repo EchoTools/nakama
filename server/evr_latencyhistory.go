@@ -155,15 +155,27 @@ func (h *LatencyHistory) MarshalJSON() ([]byte, error) {
 // case except one: keys from the decoded record are adopted, and keys present
 // only in the receiver are preserved.
 //
-// The one divergence is a JSON null for the map. Reflection-decoding
-// `{"game_server_latencies":null}` set the field to a nil map, discarding
-// whatever the receiver already held; this implementation leaves the receiver's
-// entries in place. That document is reachable in production — StorableWrite on
-// a `&LatencyHistory{}` with a nil map (constructed at evr_pipeline_login.go,
-// evr_runtime_rpc.go and evr_runtime_rpc_match.go) persists exactly that — and
-// the divergence is strictly the safer direction: writeWithRetry's re-read no
-// longer silently drops the caller's pending samples when the concurrent winner
-// stored a null map. Pinned by TestLatencyHistory_UnmarshalNullMapPreservesExisting.
+// The one divergence is a JSON null (or an absent key) for the map.
+// Reflection-decoding `{"game_server_latencies":null}` set the field to a nil
+// map, discarding whatever the receiver already held; this implementation
+// leaves the receiver exactly as it found it. That document is reachable in
+// production — StorableWrite on a `&LatencyHistory{}` with a nil map
+// (constructed at evr_pipeline_login.go, evr_runtime_rpc.go and
+// evr_runtime_rpc_match.go) persists exactly that — and the divergence is
+// strictly the safer direction: writeWithRetry's re-read no longer silently
+// drops the caller's pending samples when the concurrent winner stored a null
+// map. Pinned by TestLatencyHistory_UnmarshalNullMapPreservesExisting.
+//
+// "Leaves the receiver as it found it" includes leaving a nil map NIL. The
+// null case returns before allocating, because whether the map is nil is
+// persisted state, not an implementation detail: a nil map marshals to `null`
+// and an allocated empty one to `{}`, so allocating here would make the
+// StorableRead -> StorableWrite round trip rewrite a stored null record into
+// `{}` without a single sample having changed. An explicit
+// `{"game_server_latencies":{}}` is NOT null and still allocates, matching
+// encoding/json. Pinned by TestLatencyHistory_UnmarshalNullMapIntoNilReceiverStaysNil,
+// TestLatencyHistory_NullMapRecordRoundTrips and
+// TestLatencyHistory_UnmarshalEmptyObjectMapStillAllocates.
 //
 // Decoding is also all-or-nothing where the reflection decode salvaged whatever
 // it had already parsed: a record whose map holds one malformed value now
@@ -178,6 +190,12 @@ func (h *LatencyHistory) UnmarshalJSON(data []byte) error {
 	var decoded latencyHistoryData
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
+	}
+	if decoded.GameServerLatencies == nil {
+		// Null or absent: there is nothing to merge and nothing to allocate, so
+		// this is a no-op on the receiver and needs no lock — same as the decode
+		// error above, which also returns before locking.
+		return nil
 	}
 	h.Lock()
 	defer h.Unlock()
