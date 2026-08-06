@@ -137,8 +137,16 @@ func (s *EarlyQuitPlayerState) UnmarshalJSON(data []byte) error {
 // wrapping. Wrapping is not a theoretical concern: every caller gates on
 // `lockoutSec > 0`, so 2^31 (which wraps negative) and 2^32 (which wraps to
 // zero) would both take the CLEAR branch and silently disable the very penalty
-// the config asked to lengthen. Stored configs are not re-validated on read,
-// so this is the only place the bound is enforced.
+// the config asked to lengthen.
+//
+// Validation does not cover this. LoadEarlyQuitServiceConfig DOES re-validate a
+// stored config on the read-success path (evr_early_quit_message_trigger.go, the
+// `config.Validate()` after the blank-config fill-in), but validatePenaltyLevels
+// bounds MMLockoutSec only from BELOW — `if level.MMLockoutSec < 0 { … = 0 }` in
+// server/evr/login_earlyquitconfig.go — and imposes no upper bound anywhere. The
+// admin RPC's own loader, loadEarlyQuitServiceConfigOrDefault in
+// evr_runtime_rpc_earlyquit_manage.go, skips Validate entirely. So this is the
+// only place the upper bound is enforced on either path.
 func clampLockoutSec(sec int) int32 {
 	if sec <= 0 {
 		return 0
@@ -155,9 +163,19 @@ func clampLockoutSec(sec int) int32 {
 //
 // Resolution is total: a quit count that lands in no band (the ladder may have
 // gaps, and its first band need not start at 0 — validatePenaltyLevels closes
-// overlaps but not gaps) resolves to the highest band whose floor the count has
-// already reached, and to no penalty at all when it is below every band. Only a
-// count ABOVE every band gets the top level.
+// overlaps but not gaps) resolves to the band with the highest FLOOR among those
+// the count has cleared ENTIRELY, i.e. those whose ceiling it is already above
+// (`numQuits > MaxEarlyQuits`, the condition below). It resolves to no penalty
+// at all when it has cleared no band. Only a count ABOVE every band gets the top
+// level.
+//
+// "Cleared entirely" and "reached the floor" coincide for every well-formed band,
+// since Min <= Max makes numQuits > Max imply numQuits >= Min. They diverge only
+// for an inverted Min > Max band, which validatePenaltyLevels swaps back
+// (server/evr/login_earlyquitconfig.go) — but the admin RPC's
+// loadEarlyQuitServiceConfigOrDefault does not call Validate, so an inverted band
+// can still reach this function from evr_runtime_rpc_earlyquit_manage.go. The
+// ceiling test is the operative one; prefer it when reasoning about that case.
 func ResolvePenaltyLevel(numQuits int32, cfg *evr.SNSEarlyQuitConfig) (level int32, lockoutSec int32) {
 	if cfg == nil {
 		return 0, 0

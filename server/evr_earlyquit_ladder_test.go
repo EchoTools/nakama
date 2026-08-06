@@ -24,9 +24,9 @@ import (
 //     shapes survive validation and reach production.
 //
 // Correct behaviour: resolution must be total and monotonic. A count that is
-// not inside any band resolves to the highest band whose floor it has already
-// reached (i.e. the band below the gap), and to no penalty at all when it is
-// below every band.
+// not inside any band resolves to the band with the highest floor among those it
+// has cleared entirely — those whose CEILING it is already above, i.e. the band
+// below the gap — and to no penalty at all when it has cleared no band.
 func TestResolvePenaltyLevel_UnderRangeAndGapDoNotGiveMaxPenalty(t *testing.T) {
 	// Ladder with a gap: 3 and 4 quits belong to no band.
 	gapped := &evr.SNSEarlyQuitConfig{
@@ -86,8 +86,11 @@ func TestResolvePenaltyLevel_UnderRangeAndGapDoNotGiveMaxPenalty(t *testing.T) {
 // conversion of the config-supplied lockout.
 //
 // MMLockoutSec is a plain `int` (64-bit) that arrives from stored JSON.
-// validatePenaltyLevels clamps only negatives, and configs read back through
-// StorableRead are never re-validated at all, so an out-of-range value reaches
+// Re-validation on read does not help: LoadEarlyQuitServiceConfig does call
+// config.Validate() on the read-success path, but validatePenaltyLevels bounds
+// MMLockoutSec only from below (`if level.MMLockoutSec < 0 { … = 0 }`) and never
+// from above — and the admin RPC's loadEarlyQuitServiceConfigOrDefault skips
+// Validate altogether. Either way an out-of-range value reaches
 // ResolvePenaltyLevel intact. `int32(pl.MMLockoutSec)` then wraps: 2^31 becomes
 // negative and 2^32 becomes exactly zero. Every caller gates on
 // `lockoutSec > 0`, so a wrapped value takes the CLEAR branch — the penalty is
@@ -96,18 +99,35 @@ func TestResolvePenaltyLevel_UnderRangeAndGapDoNotGiveMaxPenalty(t *testing.T) {
 // Correct behaviour: saturate at math.MaxInt32. An absurdly long lockout is
 // still a lockout.
 func TestResolvePenaltyLevel_LockoutSaturatesInsteadOfWrapping(t *testing.T) {
+	// The out-of-int32-range cases are built at RUN time, not as untyped
+	// constants: on a 32-bit GOARCH `int` is int32, so a literal
+	// `math.MaxInt32 + 1` in the table below is a compile-time overflow that
+	// makes the whole package unbuildable there (`GOARCH=386 go vet ./server/`:
+	// "cannot use math.MaxInt32 + 1 (untyped int constant 2147483648) as int
+	// value in struct literal (overflows)"). Deriving them from a variable
+	// keeps the file portable; the subtests themselves are skipped where the
+	// values are not representable, since there is nothing to saturate.
+	maxInt32 := int(math.MaxInt32)
+	overByOne := maxInt32 + 1      // 2^31 on a 64-bit int; wraps on a 32-bit one
+	twoPow32 := (maxInt32 + 1) * 2 // 2^32 on a 64-bit int; wraps on a 32-bit one
+	intIs64Bit := overByOne > maxInt32
+
 	for _, tc := range []struct {
 		name        string
 		lockoutSec  int
 		wantLockout int32
+		needs64Bit  bool
 	}{
-		{"ordinary value passes through", 900, 900},
-		{"exactly MaxInt32 passes through", math.MaxInt32, math.MaxInt32},
-		{"MaxInt32+1 saturates instead of going negative", math.MaxInt32 + 1, math.MaxInt32},
-		{"2^32 saturates instead of becoming zero", 1 << 32, math.MaxInt32},
-		{"negative is clamped to zero", -5, 0},
+		{"ordinary value passes through", 900, 900, false},
+		{"exactly MaxInt32 passes through", math.MaxInt32, math.MaxInt32, false},
+		{"MaxInt32+1 saturates instead of going negative", overByOne, math.MaxInt32, true},
+		{"2^32 saturates instead of becoming zero", twoPow32, math.MaxInt32, true},
+		{"negative is clamped to zero", -5, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.needs64Bit && !intIs64Bit {
+				t.Skip("int is 32 bits on this GOARCH: an out-of-int32-range MMLockoutSec is not representable")
+			}
 			cfg := &evr.SNSEarlyQuitConfig{
 				PenaltyLevels: []evr.EarlyQuitPenaltyLevelConfig{
 					{PenaltyLevel: 2, MinEarlyQuits: 0, MaxEarlyQuits: 999, MMLockoutSec: tc.lockoutSec},

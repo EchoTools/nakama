@@ -230,9 +230,13 @@ func TestEarlyQuit_ModeratorSanctionSurvivesASubsequentQuit(t *testing.T) {
 }
 
 // TestResolveAndApplyPenaltyLockout_ModeratorSanctionBoundaries covers the
-// edges around the sanction guard: it must not become permanent immunity, must
-// yield to a harsher ladder result, and must not stop an ordinary (ladder-set)
-// penalty from being lifted.
+// edges around the sanction floor: it must hold both dimensions while it is in
+// force, must not become permanent immunity, must yield to a harsher ladder
+// result, and must not stop an ordinary (ladder-set) penalty from being lifted.
+//
+// Only the first subtest can fail from deleting the floor; the other three are
+// over-correction guards, and they pass with the feature removed entirely. Read
+// them as "the fix did not break the ordinary case", not as coverage of the fix.
 func TestResolveAndApplyPenaltyLockout_ModeratorSanctionBoundaries(t *testing.T) {
 	logger := NewRuntimeGoLogger(loggerForTest(t))
 
@@ -258,6 +262,34 @@ func TestResolveAndApplyPenaltyLockout_ModeratorSanctionBoundaries(t *testing.T)
 		}
 		return state
 	}
+
+	t.Run("an unexpired sanction floors both the level and the expiry", func(t *testing.T) {
+		nk, ctx, targetID, groupID := newEarlyQuitAdminHarness(t)
+		seedEarlyQuitLadder(t, ctx, nk, evr.DefaultEarlyQuitLevels().PenaltyLevels)
+
+		state := sanction(t, ctx, nk, groupID, targetID, 3)
+		// A week-long sanction, the shape the Discord handler's
+		// duration-minutes option exists to produce.
+		weekOut := time.Now().Unix() + 7*24*60*60
+		state.PenaltyTimestamp = weekOut
+		state.ModeratorPenaltyUntil = weekOut
+		// The ladder on its own would say "no penalty at all" for this player.
+		state.NumEarlyQuits = 1
+
+		resolveAndApplyPenaltyLockout(ctx, nk, logger, state)
+
+		if state.PenaltyLevel != 3 {
+			t.Errorf("PenaltyLevel = %d, want 3: ladder resolution lowered a level the moderator set", state.PenaltyLevel)
+		}
+		if state.PenaltyTimestamp != weekOut {
+			t.Errorf("PenaltyTimestamp = %d, want %d (delta %ds): ladder resolution shortened a moderator sanction",
+				state.PenaltyTimestamp, weekOut, weekOut-state.PenaltyTimestamp)
+		}
+		if state.ModeratorPenaltyLevel != 3 || state.ModeratorPenaltyUntil != weekOut {
+			t.Errorf("retained sanction = level %d until %d, want 3 until %d: an unexpired sanction must survive resolution",
+				state.ModeratorPenaltyLevel, state.ModeratorPenaltyUntil, weekOut)
+		}
+	})
 
 	t.Run("expired sanction stops blocking the ladder", func(t *testing.T) {
 		nk, ctx, targetID, groupID := newEarlyQuitAdminHarness(t)

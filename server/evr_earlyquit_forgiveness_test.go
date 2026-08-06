@@ -2,6 +2,10 @@ package server
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -122,5 +126,106 @@ func TestCheckAndStrikeEarlyQuitIfLoggedOut_ForgivenessLiftsTheLockout(t *testin
 					got.MatchmakingTier, tc.wantTier)
 			}
 		})
+	}
+}
+
+// unreachableDBDriver is a database/sql driver whose connections always fail.
+// It stands in for "a real *sql.DB is wired up but the query does not succeed",
+// which is the only shape of database interaction this DB-free suite can drive.
+// It counts Open calls so a test can prove a code path that touches the database
+// was actually entered.
+type unreachableDBDriver struct{ opens atomic.Int64 }
+
+func (d *unreachableDBDriver) Open(string) (driver.Conn, error) {
+	d.opens.Add(1)
+	return nil, errors.New("no database is reachable in this test")
+}
+
+var unreachableDB = func() *unreachableDBDriver {
+	d := &unreachableDBDriver{}
+	sql.Register("evr-earlyquit-unreachable", d)
+	return d
+}()
+
+// TestCheckAndStrikeEarlyQuitIfLoggedOut_TierRestoredNotificationIsReachable
+// covers a path that only became live in this PR.
+//
+// The tier-change notification block at the end of
+// CheckAndStrikeEarlyQuitIfLoggedOut is gated on `tierChanged`. Before the
+// forgiveness fix, UpdateTier there was fed a PenaltyLevel that forgiveness had
+// never re-resolved, so it always matched the stored tier and `tierChanged` was
+// permanently false: the whole block — GetDiscordIDByUserID against the *sql.DB,
+// SendEarlyQuitUpdateNotification, the Discord DM — was dead code. Re-resolving
+// the penalty makes it execute in production for the first time.
+//
+// Newly-live code with no coverage is exactly where a nil dereference hides, so
+// this pins two things: the block IS entered (the database is touched, which
+// cannot happen unless tierChanged was true), and it survives the database being
+// unusable rather than taking the whole goroutine down. The player's forgiven
+// state must still be persisted either way — a notification failure must not
+// cost the player their lockout release.
+func TestCheckAndStrikeEarlyQuitIfLoggedOut_TierRestoredNotificationIsReachable(t *testing.T) {
+	logger := NewRuntimeGoLogger(loggerForTest(t))
+
+	// The block is gated on the penalty system being enabled and not silent.
+	saved := ServiceSettings()
+	settings := &ServiceSettingsData{}
+	settings.Matchmaking.EnableEarlyQuitPenalty = true
+	settings.Matchmaking.SilentEarlyQuitSystem = false
+	ServiceSettingsUpdate(settings)
+	t.Cleanup(func() { ServiceSettingsUpdate(saved) })
+
+	db, err := sql.Open("evr-earlyquit-unreachable", "")
+	if err != nil {
+		t.Fatalf("open stub db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	nk := newEvrTestNakamaModule()
+	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
+	seedEarlyQuitLadder(t, ctx, nk, evr.DefaultEarlyQuitLevels().PenaltyLevels)
+
+	userID := uuid.Must(uuid.NewV4()).String()
+	sessionID := uuid.Must(uuid.NewV4()).String()
+
+	// 3 quits => level 1 => Tier 2. Forgiving one drops it to 2 quits => level 0
+	// => Tier 1, which is the tier-RESTORED transition this block reports.
+	state := NewEarlyQuitPlayerState()
+	state.NumEarlyQuits = 3
+	state.NumSteadyEarlyQuits = 3
+	state.PenaltyLevel = 1
+	state.PenaltyTimestamp = time.Now().Unix() + 120
+	state.UpdateTier(nil)
+	if state.MatchmakingTier != MatchmakingTier2 {
+		t.Fatalf("precondition: seeded tier = %d, want %d", state.MatchmakingTier, MatchmakingTier2)
+	}
+	if err := StorableWrite(ctx, nk, userID, state); err != nil {
+		t.Fatalf("seed player state: %v", err)
+	}
+
+	opensBefore := unreachableDB.opens.Load()
+
+	// Must not panic: this is the first execution of this block, ever.
+	CheckAndStrikeEarlyQuitIfLoggedOut(ctx, logger, nk, db, &testSessionRegistry{}, userID, sessionID, 0)
+
+	if got := unreachableDB.opens.Load(); got <= opensBefore {
+		t.Errorf("the database was never touched (opens %d -> %d): the tier-change notification block was not reached, so this test is not covering it",
+			opensBefore, got)
+	}
+
+	got := NewEarlyQuitPlayerState()
+	if err := StorableRead(ctx, nk, userID, got, false); err != nil {
+		t.Fatalf("read back player state: %v", err)
+	}
+	if got.NumEarlyQuits != 2 {
+		t.Errorf("NumEarlyQuits = %d, want 2", got.NumEarlyQuits)
+	}
+	if got.PenaltyLevel != 0 || got.PenaltyTimestamp != 0 {
+		t.Errorf("PenaltyLevel/PenaltyTimestamp = %d/%d, want 0/0: the forgiveness was lost",
+			got.PenaltyLevel, got.PenaltyTimestamp)
+	}
+	if got.MatchmakingTier != MatchmakingTier1 {
+		t.Errorf("MatchmakingTier = %d, want %d: an unreachable database cost the player their tier restoration",
+			got.MatchmakingTier, MatchmakingTier1)
 	}
 }
