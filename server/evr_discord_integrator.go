@@ -200,10 +200,10 @@ func (c *DiscordIntegrator) Start() {
 				// generations of policy.
 				prune := ServiceSettings().PruneSettings
 				cfg := pruneConfig{
-					doGuildLeaves:         prune.LeaveOrphanedGuilds,
-					doGroupDeletes:        prune.DeleteOrphanedGroups,
-					safetyThreshold:       prune.SafetyLimit,
-					disableReconciliation: prune.DisableReconciliation,
+					doGuildLeaves:   prune.LeaveOrphanedGuilds,
+					doGroupDeletes:  prune.DeleteOrphanedGroups,
+					safetyThreshold: prune.SafetyLimit,
+					reportOnly:      prune.ReportOnly,
 				}
 				if err := c.pruneGuildGroups(c.ctx, runtimeLogger, cfg); err != nil {
 					logger.Error("Error pruning guild groups", zap.Error(err), zap.Bool("do_leaves", cfg.doGuildLeaves), zap.Bool("do_deletes", cfg.doGroupDeletes), zap.Int("prune_safety_threshold", cfg.safetyThreshold))
@@ -225,23 +225,7 @@ func (c *DiscordIntegrator) Start() {
 	})
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.GuildDelete) {
-		if m.Unavailable {
-			// This is not an error; the guild is just temporarily unavailable.
-			// discordgo has already removed it from State.Guilds, so record it
-			// or pruning will see its group as orphaned and delete it.
-			c.markGuildUnavailable(m.ID, time.Now())
-			logger.Warn("Guild became unavailable", zap.String("guild_id", m.ID))
-			return
-		}
-		// A real departure, not an availability blip.
-		c.markGuildAvailable(m.ID)
-		// Identifiers only. discordgo populates GuildDelete.BeforeDelete from
-		// state, so zap.Any on m drags in the guild's members, channels,
-		// presences and emojis.
-		logger.Info("Guild Delete", zap.String("guild_id", m.ID))
-		if err := c.handleGuildDelete(logger, s, m); err != nil {
-			logger.Error("Error handling guild delete", zap.String("guild_id", m.ID), zap.Error(err))
-		}
+		c.onGuildDelete(logger, s, m)
 	})
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMemberAdd) {
@@ -306,6 +290,36 @@ func (d *DiscordIntegrator) Purge(id string) bool {
 	}
 	d.idcache.Delete(value)
 	return true
+}
+
+// onGuildDelete is the body of the GUILD_DELETE handler, extracted from the
+// closure in Start() so the availability bookkeeping it performs can be
+// tested. Discord sends GUILD_DELETE both when the bot genuinely leaves a
+// guild and when a guild merely goes unavailable, and discordgo removes the
+// guild from State.Guilds either way, so recording the difference here is the
+// only thing that keeps a shard outage from looking like a mass departure to
+// the prune pass.
+func (c *DiscordIntegrator) onGuildDelete(logger *zap.Logger, s *discordgo.Session, m *discordgo.GuildDelete) {
+	if m.Unavailable {
+		// This is not an error; the guild is just temporarily unavailable.
+		// discordgo has already removed it from State.Guilds, so record it or
+		// pruning will see its group as orphaned and delete it.
+		c.markGuildUnavailable(m.ID, time.Now())
+		// Identifiers only: this branch fires once per affected guild when a
+		// shard drops, and discordgo populates GuildDelete.BeforeDelete from
+		// state, so zap.Any on m would dump every member, channel, presence
+		// and emoji of every affected guild at once.
+		logger.Warn("Guild became unavailable", zap.String("guild_id", m.ID))
+		return
+	}
+	// A real departure, not an availability blip. Logged in full: it happens
+	// at most once per guild, and BeforeDelete is the only surviving record of
+	// what was lost.
+	c.markGuildAvailable(m.ID)
+	logger.Info("Guild Delete", zap.Any("guildDelete", m))
+	if err := c.handleGuildDelete(logger, s, m); err != nil {
+		logger.Error("Error handling guild delete", zap.Any("guildDelete", m), zap.Error(err))
+	}
 }
 
 // markGuildUnavailable records that a guild went unavailable at the given
@@ -607,6 +621,12 @@ const maxGroupTextLength = 255
 // bytes would cut a 100-character emoji guild name down to 63 characters and
 // could collapse two distinct guild names onto the same 255-byte prefix, which
 // the UNIQUE constraint groups_name_key would then reject.
+//
+// On a string that is not valid UTF-8 AND longer than maxChars, the []rune
+// conversion replaces each invalid byte with U+FFFD, so the result is a
+// sanitised string rather than a byte prefix of the input. The character count
+// is still correct, and Discord only ever hands us valid UTF-8, so this is a
+// property of the function rather than a reachable behaviour.
 func truncateRuneSafe(s string, maxChars int) string {
 	if maxChars <= 0 {
 		return ""

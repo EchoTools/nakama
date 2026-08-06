@@ -136,26 +136,44 @@ func TestTruncateRuneSafeDistinguishesNamesSharingABytePrefix(t *testing.T) {
 // syncing one would either fail or collide with every other unnamed guild.
 // The refusal must be explicit rather than an incidental side effect of the
 // owner lookup failing further down.
+//
+// Both directions are asserted, because "returns an error mentioning name"
+// alone cannot distinguish a name guard from any other early return. The
+// integrator here has a nil session, so guildSync reaches d.dg.State.User.ID
+// and panics the moment it gets past the guard: an unnamed guild must return
+// an error (the guard fired) and a NAMED guild must reach the nil session (the
+// guard did not fire). An unconditional early return fails the second case.
 func TestGuildSyncRejectsUnnamedGuild(t *testing.T) {
-	d := &DiscordIntegrator{}
-
-	// Without the guard, execution reaches d.dg.State.User.ID and nil-derefs.
-	// Recover so this reports as one failed test instead of taking the whole
-	// test binary down and masking every other failure in the run.
-	var err error
-	func() {
+	// callGuildSync reports the error guildSync returned, or the panic it
+	// produced by running on past the guard into the nil session.
+	callGuildSync := func(guild *discordgo.Guild) (err error, panicked bool) {
+		d := &DiscordIntegrator{}
 		defer func() {
 			if r := recover(); r != nil {
-				t.Fatalf("guildSync panicked on a guild with an empty name instead of refusing it: %v", r)
+				panicked = true
 			}
 		}()
-		err = d.guildSync(context.Background(), zap.NewNop(), &discordgo.Guild{ID: "1522261692355055849"}, false)
-	}()
+		err = d.guildSync(context.Background(), zap.NewNop(), guild, false)
+		return err, false
+	}
 
+	err, panicked := callGuildSync(&discordgo.Guild{ID: "1522261692355055849"})
+	if panicked {
+		t.Fatal("guildSync ran past the empty-name guard and nil-dereferenced the session; the guard is missing")
+	}
 	if err == nil {
 		t.Fatal("guildSync accepted a guild with an empty name; want an error")
 	}
 	if !strings.Contains(err.Error(), "name") {
-		t.Fatalf("guildSync error %q does not mention the missing name", err)
+		t.Errorf("guildSync error %q does not mention the missing name", err)
+	}
+	if !strings.Contains(err.Error(), "1522261692355055849") {
+		t.Errorf("guildSync error %q does not identify the guild it refused", err)
+	}
+
+	// The guard must key on the name and nothing else: a named guild has to get
+	// past it and on to the session lookup.
+	if _, panicked := callGuildSync(&discordgo.Guild{ID: "1522261692355055849", Name: "Jett's Hangout"}); !panicked {
+		t.Fatal("guildSync refused a NAMED guild too; the guard is not keyed on the name")
 	}
 }

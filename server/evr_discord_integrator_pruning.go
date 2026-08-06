@@ -10,6 +10,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"go.uber.org/zap"
 )
 
 // maxReconcileGuildsPerPass bounds the non-destructive repair pass. Each
@@ -62,10 +63,10 @@ type pruneConfig struct {
 	// groups that may be deleted, in one pass. Exceeding it aborts that side
 	// of the prune.
 	safetyThreshold int
-	// disableReconciliation turns off the non-destructive repair pass. It also
-	// suppresses guild leaves, because a guild is only ever left after a
-	// failed repair attempt.
-	disableReconciliation bool
+	// reportOnly suppresses every write the pass could make: the repair pass,
+	// guild leaves and group deletes. It overrides doGuildLeaves and
+	// doGroupDeletes.
+	reportOnly bool
 }
 
 // pruneOutcome records what a prune pass actually did, as opposed to what it
@@ -167,13 +168,14 @@ func computePrunePlan(groupByGuildID map[string]*api.Group, stateGuilds []*disco
 // Ordering and gating are load-bearing:
 //
 //   - Reconciliation is a REPAIR, not a prune action, and runs on every pass
-//     regardless of the do* flags. It creates the Nakama group a member guild
-//     should already have had -- the exact condition guild
-//     1522261692355055849 was stuck in after its join-time guildSync failed
-//     with SQLSTATE 22001. Gating it on the destructive flags, or behind the
-//     mass-leave valve, makes that incident unhealable at the shipped
-//     defaults, where both flags are false and SafetyLimit is 0. Operators who
-//     need a genuinely write-free pass set disableReconciliation.
+//     regardless of the do* flags -- exactly as it did before this file was
+//     split out. It creates the Nakama group a member guild should already
+//     have had, the condition guild 1522261692355055849 was stuck in after its
+//     join-time guildSync failed with SQLSTATE 22001. Gating it on the
+//     destructive flags, or behind the mass-leave valve, would make that
+//     incident unhealable at the shipped defaults, where both flags are false
+//     and SafetyLimit is 0. Operators who need a genuinely write-free pass set
+//     reportOnly, which suppresses every write below.
 //
 //   - Reconciliation is bounded by maxReconcileGuildsPerPass instead, so a
 //     partial GroupsList result still cannot cost hundreds of REST calls.
@@ -182,11 +184,14 @@ func computePrunePlan(groupByGuildID map[string]*api.Group, stateGuilds []*disco
 //     pass did not run, guild leaves are suppressed for the whole pass: the
 //     bot must never leave a guild it did not try to fix.
 //
-//   - Each safety valve guards its own side and is evaluated against what
-//     would actually be destroyed -- guild leaves against the POST-repair
-//     candidates, group deletes against the orphaned groups. Tripping one
+//   - Each safety valve guards its own side, is evaluated against what would
+//     actually be destroyed -- guild leaves against the POST-repair
+//     candidates, group deletes against the orphaned groups -- and is only
+//     evaluated at all when that side can act. A valve that "trips" for writes
+//     that are already switched off is a false alarm, and because the pass
+//     runs every 15 minutes it is a false alarm forever. Tripping a live valve
 //     skips that side's writes and returns an error; it does not suppress the
-//     repair that already ran.
+//     other side, nor the repair that already ran.
 //
 //   - The returned outcome counts work that actually succeeded, so the
 //     completion log never claims guilds were left or groups deleted when they
@@ -201,10 +206,12 @@ func executePrunePlan(logger runtime.Logger, plan prunePlan, cfg pruneConfig, ac
 	leaveCandidates := plan.orphanGuilds
 	reconciled := false
 	switch {
-	case cfg.disableReconciliation:
-		if orphanGuildCount > 0 {
-			logger.WithField("orphan_guild_count", orphanGuildCount).
-				Warn("Orphan guild reconciliation is disabled; guild leaves are suppressed")
+	case cfg.reportOnly:
+		if orphanGroupCount+orphanGuildCount > 0 {
+			logger.WithFields(map[string]any{
+				"orphan_group_count": orphanGroupCount,
+				"orphan_guild_count": orphanGuildCount,
+			}).Warn("Prune is in report-only mode; no repairs, guild leaves or group deletes will be performed")
 		}
 	case orphanGuildCount > maxReconcileGuildsPerPass:
 		// Log identifiers only: a *discordgo.Guild carries members, channels,
@@ -222,9 +229,16 @@ func executePrunePlan(logger runtime.Logger, plan prunePlan, cfg pruneConfig, ac
 
 	var pruneErr error
 
-	// Safety valves, evaluated against what would actually be destroyed.
-	leaveTripped := len(leaveCandidates) > cfg.safetyThreshold
-	deleteTripped := orphanGroupCount > cfg.safetyThreshold
+	// Which sides of the prune can act at all. reconciled is false whenever
+	// the repair pass was skipped, including in report-only mode, so it
+	// already covers the leave side.
+	leavesEnabled := cfg.doGuildLeaves && reconciled
+	deletesEnabled := cfg.doGroupDeletes && !cfg.reportOnly
+
+	// Safety valves, evaluated against what would actually be destroyed, and
+	// only for a side that could destroy something.
+	leaveTripped := leavesEnabled && len(leaveCandidates) > cfg.safetyThreshold
+	deleteTripped := deletesEnabled && orphanGroupCount > cfg.safetyThreshold
 	if leaveTripped || deleteTripped {
 		// Log identifiers only: a *discordgo.Guild carries members, channels,
 		// presences and emojis, which would make this the largest log line in
@@ -242,7 +256,7 @@ func executePrunePlan(logger runtime.Logger, plan prunePlan, cfg pruneConfig, ac
 	}
 
 	// Remove any guilds that are not in Nakama and could not be repaired.
-	if cfg.doGuildLeaves && !leaveTripped && reconciled {
+	if leavesEnabled && !leaveTripped {
 		for _, guild := range leaveCandidates {
 			logger.WithFields(map[string]any{
 				"guild_name": guild.Name,
@@ -258,7 +272,7 @@ func executePrunePlan(logger runtime.Logger, plan prunePlan, cfg pruneConfig, ac
 	}
 
 	// Remove any Nakama groups of guilds that the bot is not a member of
-	if cfg.doGroupDeletes && !deleteTripped {
+	if deletesEnabled && !deleteTripped {
 		for _, og := range plan.orphanGroups {
 			logger.WithFields(map[string]any{
 				"group_id":   og.group.GetId(),
@@ -300,6 +314,7 @@ func executePrunePlan(logger runtime.Logger, plan prunePlan, cfg pruneConfig, ac
 			"failed_guild_leaves":  outcome.guildLeaveErrors,
 			"do_guild_leaves":      cfg.doGuildLeaves,
 			"do_group_deletes":     cfg.doGroupDeletes,
+			"report_only":          cfg.reportOnly,
 		}).Info("Pruned unused groups and guilds")
 	}
 
@@ -322,21 +337,39 @@ func orphanGuildIDs(guilds []*discordgo.Guild) []string {
 	return ids
 }
 
-func (d *DiscordIntegrator) pruneGuildGroups(ctx context.Context, logger runtime.Logger, cfg pruneConfig) error {
-	var (
-		groupByGuildID = make(map[string]*api.Group)
-		cursor         string
-		err            error
-		groups         []*api.Group
-	)
-	// Collect the guild groups from Nakama
+// prunePageSize is the GroupsList page size used to enumerate guild groups.
+const prunePageSize = 100
+
+// prunePassDeps are the integrator-bound inputs and side effects of one prune
+// pass. Bundling them makes the pass itself a pure function of its
+// dependencies, so the wiring (newPrunePassDeps) and the policy (runPrunePass,
+// executePrunePlan) can each be tested without a database or a live Discord
+// session. Every write this package can perform passes through
+// prunePassDeps.actions.
+type prunePassDeps struct {
+	// listGroups returns one page of Nakama groups plus the next cursor.
+	listGroups func(ctx context.Context, cursor string) ([]*api.Group, string, error)
+	// stateGuilds returns the guilds currently in the Discord session state.
+	stateGuilds func() []*discordgo.Guild
+	// unavailableGuildIDs returns the guilds that are absent from state only
+	// because they went unavailable. See computePrunePlan.
+	unavailableGuildIDs func(now time.Time) map[string]struct{}
+	actions             pruneActions
+}
+
+// collectGuildGroups enumerates every Nakama guild group, keyed by the Discord
+// guild ID in its metadata. Groups with unreadable or guild-less metadata are
+// skipped rather than treated as orphans: a group that cannot be keyed must
+// never become a delete candidate.
+func collectGuildGroups(ctx context.Context, logger runtime.Logger, listGroups func(context.Context, string) ([]*api.Group, string, error)) (map[string]*api.Group, error) {
+	groupByGuildID := make(map[string]*api.Group)
+	var cursor string
 	for {
-		groups, cursor, err = d.nk.GroupsList(ctx, "", GuildGroupLangTag, nil, nil, 100, cursor)
+		groups, next, err := listGroups(ctx, cursor)
 		if err != nil {
 			logger.WithField("error", err).Error("Failed to list groups")
-			return err
+			return nil, err
 		}
-		// Iterate over the groups and extract the guild ID from the metadata
 		for _, group := range groups {
 			metadata := GroupMetadata{}
 			if err := json.Unmarshal([]byte(group.Metadata), &metadata); err != nil {
@@ -352,36 +385,71 @@ func (d *DiscordIntegrator) pruneGuildGroups(ctx context.Context, logger runtime
 			}
 			groupByGuildID[metadata.GuildID] = group
 		}
-		if cursor == "" {
-			break
+		if next == "" {
+			return groupByGuildID, nil
 		}
+		cursor = next
+	}
+}
+
+// runPrunePass is one whole prune tick: enumerate groups, compare them against
+// Discord state, then act. It is separated from newPrunePassDeps so the
+// sequencing here -- in particular that the unavailable-guild record is
+// consulted, and that an empty state short-circuits before anything can be
+// destroyed -- is testable.
+func runPrunePass(ctx context.Context, logger runtime.Logger, deps prunePassDeps, cfg pruneConfig, now time.Time) (pruneOutcome, error) {
+	groupByGuildID, err := collectGuildGroups(ctx, logger, deps.listGroups)
+	if err != nil {
+		return pruneOutcome{}, err
 	}
 
-	if len(d.dg.State.Guilds) == 0 {
+	stateGuilds := deps.stateGuilds()
+	if len(stateGuilds) == 0 {
+		// Every group would look orphaned. This is a bad read, not an empty
+		// deployment.
 		logger.Warn("No guilds found in Discord state, skipping pruning operation")
-		return nil
+		return pruneOutcome{}, nil
 	}
 
-	plan := computePrunePlan(groupByGuildID, d.dg.State.Guilds, d.unavailableGuildIDsAsOf(time.Now()))
+	plan := computePrunePlan(groupByGuildID, stateGuilds, deps.unavailableGuildIDs(now))
 
-	actions := pruneActions{
-		// Reconciliation must be non-destructive (leaveOnBannedOwner=false):
-		// a guild that cannot be synced stays an orphan candidate and is only
-		// left by the safety-threshold-checked prune path below.
-		syncGuild: func(guild *discordgo.Guild) error {
-			return d.guildSync(ctx, d.logger, guild, false)
+	return executePrunePlan(logger, plan, cfg, deps.actions)
+}
+
+// newPrunePassDeps binds a prune pass to this integrator. syncGuild is passed
+// in rather than read off d so a test can observe how the repair pass calls it;
+// production always supplies d.guildSync.
+func (d *DiscordIntegrator) newPrunePassDeps(ctx context.Context, syncGuild func(context.Context, *zap.Logger, *discordgo.Guild, bool) error) prunePassDeps {
+	return prunePassDeps{
+		listGroups: func(ctx context.Context, cursor string) ([]*api.Group, string, error) {
+			return d.nk.GroupsList(ctx, "", GuildGroupLangTag, nil, nil, prunePageSize, cursor)
 		},
-		leaveGuild: func(guildID string) error {
-			return d.dg.GuildLeave(guildID)
-		},
-		deleteGroup: func(groupID string) error {
-			return d.nk.GroupDelete(ctx, groupID)
-		},
-		purgeGuild: func(guildID string) {
-			d.Purge(guildID)
+		stateGuilds:         func() []*discordgo.Guild { return d.dg.State.Guilds },
+		unavailableGuildIDs: d.unavailableGuildIDsAsOf,
+		actions: pruneActions{
+			// Reconciliation must be non-destructive
+			// (leaveOnBannedOwner=false): a guild that cannot be synced stays
+			// an orphan candidate and is only ever left by the
+			// safety-threshold-checked prune path in executePrunePlan.
+			syncGuild: func(guild *discordgo.Guild) error {
+				return syncGuild(ctx, d.logger, guild, false)
+			},
+			leaveGuild: func(guildID string) error {
+				return d.dg.GuildLeave(guildID)
+			},
+			deleteGroup: func(groupID string) error {
+				return d.nk.GroupDelete(ctx, groupID)
+			},
+			// Deleting a group without dropping its guild ID -> group ID cache
+			// entry strands the guild forever. See executePrunePlan.
+			purgeGuild: func(guildID string) {
+				d.Purge(guildID)
+			},
 		},
 	}
+}
 
-	_, err = executePrunePlan(logger, plan, cfg, actions)
+func (d *DiscordIntegrator) pruneGuildGroups(ctx context.Context, logger runtime.Logger, cfg pruneConfig) error {
+	_, err := runPrunePass(ctx, logger, d.newPrunePassDeps(ctx, d.guildSync), cfg, time.Now())
 	return err
 }

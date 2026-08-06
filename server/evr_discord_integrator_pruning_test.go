@@ -231,34 +231,95 @@ func TestExecutePrunePlanHealsOrphanGuildAtShippedDefaults(t *testing.T) {
 	}
 }
 
-// TestExecutePrunePlanDisableReconciliationSuppressesAllWrites pins the
-// operator's escape hatch. Reconciliation writes (it creates Nakama groups,
-// writes GuildGroupState and mutates the guild group registry), so an operator
-// freezing writes during an incident sets DisableReconciliation. That must also
-// suppress guild leaves: the bot may never leave a guild it did not try to
-// repair.
-func TestExecutePrunePlanDisableReconciliationSuppressesAllWrites(t *testing.T) {
+// TestExecutePrunePlanReportOnlyPerformsNoWrites pins the operator's freeze
+// switch. Every side effect this package can perform goes through pruneActions,
+// so asserting all four recorders are empty is an exhaustive statement that the
+// pass wrote nothing.
+//
+// It runs with BOTH prune flags on and a generous threshold, because
+// PruneSettings.ReportOnly exists precisely to override an already-armed
+// configuration: an operator freezing writes mid-incident should not have to
+// also remember to turn LeaveOrphanedGuilds and DeleteOrphanedGroups off.
+func TestExecutePrunePlanReportOnlyPerformsNoWrites(t *testing.T) {
 	logger, _ := observedLogger()
 	rec := newPruneRecorder()
 
 	plan := prunePlan{
-		orphanGroups: []orphanGroup{testOrphanGroup("g1", "grp1")},
+		orphanGroups: []orphanGroup{testOrphanGroup("g1", "grp1"), testOrphanGroup("g2", "grp2")},
 		orphanGuilds: []*discordgo.Guild{testOrphanGuild("d1"), testOrphanGuild("d2")},
 	}
-	cfg := pruneConfig{doGuildLeaves: true, safetyThreshold: 100, disableReconciliation: true}
+	cfg := pruneConfig{doGuildLeaves: true, doGroupDeletes: true, safetyThreshold: 100, reportOnly: true}
 
 	outcome, err := executePrunePlan(logger, plan, cfg, rec.actions())
 	if err != nil {
 		t.Fatalf("executePrunePlan returned error: %v", err)
 	}
 	if len(rec.synced) != 0 {
-		t.Errorf("ran %d reconciliation syncs with reconciliation disabled (%v); want 0", len(rec.synced), rec.synced)
+		t.Errorf("ran %d reconciliation syncs in report-only mode (%v); want 0", len(rec.synced), rec.synced)
 	}
 	if len(rec.left) != 0 {
-		t.Errorf("left guilds %v without attempting a repair; want none", rec.left)
+		t.Errorf("left guilds %v in report-only mode; want none", rec.left)
 	}
-	if outcome.guildsLeft != 0 || outcome.reconciledGuilds != 0 {
-		t.Errorf("outcome = %+v; want guildsLeft=0 reconciledGuilds=0", outcome)
+	if len(rec.deleted) != 0 {
+		t.Errorf("deleted groups %v in report-only mode; want none", rec.deleted)
+	}
+	if len(rec.purged) != 0 {
+		t.Errorf("purged cache entries %v in report-only mode; want none", rec.purged)
+	}
+	if outcome != (pruneOutcome{}) {
+		t.Errorf("outcome = %+v; want the zero outcome -- nothing happened", outcome)
+	}
+}
+
+// TestExecutePrunePlanDoesNotAlarmWhenNothingCanBePruned pins that a safety
+// valve is only evaluated for a side that can actually destroy something.
+//
+// The shipped defaults are LeaveOrphanedGuilds=false, DeleteOrphanedGroups=false
+// and SafetyLimit=0 (FixDefaultServiceSettings never assigns PruneSettings, so
+// an unconfigured deployment runs with the zero values). Under those settings a
+// single orphan exceeds the threshold, but no leave or delete can happen -- so
+// returning "will leave more than 0, skipping to avoid mass leave" is a false
+// alarm, and because the pass runs every 15 minutes it is a false alarm
+// forever.
+func TestExecutePrunePlanDoesNotAlarmWhenNothingCanBePruned(t *testing.T) {
+	const massLeaveMsg = "skipping to avoid mass leave"
+
+	for _, tt := range []struct {
+		name string
+		cfg  pruneConfig
+	}{
+		{"shipped defaults (leaves=false deletes=false SafetyLimit=0)", prunePolicy(false, false, 0)},
+		{"report-only with both flags armed, SafetyLimit=0", pruneConfig{doGuildLeaves: true, doGroupDeletes: true, reportOnly: true}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			logger, logs := observedLogger()
+			rec := newPruneRecorder()
+
+			// Unrepairable orphan guilds plus orphan groups: both candidate
+			// lists are non-empty and both exceed a threshold of 0.
+			var guilds []*discordgo.Guild
+			for i := 0; i < 3; i++ {
+				id := fmt.Sprintf("d%d", i)
+				guilds = append(guilds, testOrphanGuild(id))
+				rec.syncFails[id] = true
+			}
+			plan := prunePlan{
+				orphanGuilds: guilds,
+				orphanGroups: []orphanGroup{testOrphanGroup("g1", "grp1"), testOrphanGroup("g2", "grp2")},
+			}
+
+			if _, err := executePrunePlan(logger, plan, tt.cfg, rec.actions()); err != nil {
+				t.Fatalf("executePrunePlan returned %v; want nil -- neither side can prune, so there is nothing to abort", err)
+			}
+			for _, entry := range logs.All() {
+				if strings.Contains(entry.Message, massLeaveMsg) {
+					t.Fatalf("emitted the mass-leave alarm %q with pruning switched off; an operator would see this every 15 minutes forever", entry.Message)
+				}
+			}
+			if len(rec.left) != 0 || len(rec.deleted) != 0 {
+				t.Fatalf("left %v and deleted %v; want neither", rec.left, rec.deleted)
+			}
+		})
 	}
 }
 
@@ -394,34 +455,71 @@ func TestExecutePrunePlanSafetyValveTripsOnOrphanGroups(t *testing.T) {
 }
 
 // TestExecutePrunePlanValvesAreIndependent pins that a tripped group-delete
-// valve does not suppress the guild-leave side, and vice versa. Conflating them
-// meant one orphaned group could block the repair of an unrelated guild.
+// valve does not suppress the guild-leave side, and that a tripped guild-leave
+// valve does not suppress the group-delete side. Conflating them meant one
+// orphaned group could block the repair of an unrelated guild -- and it also
+// means a perturbation that ANDs the two conditions together is only caught if
+// both directions are exercised.
 func TestExecutePrunePlanValvesAreIndependent(t *testing.T) {
-	logger, _ := observedLogger()
-	rec := newPruneRecorder()
+	// Both scenarios use a threshold of 3: one side is over it, the other is
+	// under it, and the under-threshold side must still do its work.
+	t.Run("group valve tripped, guild leaves still run", func(t *testing.T) {
+		logger, _ := observedLogger()
+		rec := newPruneRecorder()
 
-	// Ten orphan groups (over the threshold of 3) and one unrepairable orphan
-	// guild (under it).
-	var groups []orphanGroup
-	for i := 0; i < 10; i++ {
-		groups = append(groups, testOrphanGroup(fmt.Sprintf("g%d", i), fmt.Sprintf("grp%d", i)))
-	}
-	rec.syncFails["d1"] = true
-	plan := prunePlan{orphanGroups: groups, orphanGuilds: []*discordgo.Guild{testOrphanGuild("d1")}}
+		var groups []orphanGroup
+		for i := 0; i < 10; i++ {
+			groups = append(groups, testOrphanGroup(fmt.Sprintf("g%d", i), fmt.Sprintf("grp%d", i)))
+		}
+		rec.syncFails["d1"] = true
+		plan := prunePlan{orphanGroups: groups, orphanGuilds: []*discordgo.Guild{testOrphanGuild("d1")}}
 
-	outcome, err := executePrunePlan(logger, plan, prunePolicy(true, true, 3), rec.actions())
-	if err == nil {
-		t.Fatal("want an error: the group-delete valve tripped")
-	}
-	if len(rec.deleted) != 0 {
-		t.Errorf("deleted groups %v with the group valve tripped; want none", rec.deleted)
-	}
-	if len(rec.left) != 1 || rec.left[0] != "d1" {
-		t.Errorf("left = %v; want [d1] -- the guild valve did not trip and must still act", rec.left)
-	}
-	if outcome.guildsLeft != 1 {
-		t.Errorf("outcome.guildsLeft = %d; want 1", outcome.guildsLeft)
-	}
+		outcome, err := executePrunePlan(logger, plan, prunePolicy(true, true, 3), rec.actions())
+		if err == nil {
+			t.Fatal("want an error: the group-delete valve tripped")
+		}
+		if len(rec.deleted) != 0 {
+			t.Errorf("deleted groups %v with the group valve tripped; want none", rec.deleted)
+		}
+		if len(rec.left) != 1 || rec.left[0] != "d1" {
+			t.Errorf("left = %v; want [d1] -- the guild valve did not trip and must still act", rec.left)
+		}
+		if outcome.guildsLeft != 1 {
+			t.Errorf("outcome.guildsLeft = %d; want 1", outcome.guildsLeft)
+		}
+	})
+
+	t.Run("guild valve tripped, group deletes still run", func(t *testing.T) {
+		logger, _ := observedLogger()
+		rec := newPruneRecorder()
+
+		// Six unrepairable orphan guilds (over the threshold of 3) and two
+		// orphan groups (under it).
+		var guilds []*discordgo.Guild
+		for i := 0; i < 6; i++ {
+			id := fmt.Sprintf("d%d", i)
+			guilds = append(guilds, testOrphanGuild(id))
+			rec.syncFails[id] = true
+		}
+		plan := prunePlan{
+			orphanGuilds: guilds,
+			orphanGroups: []orphanGroup{testOrphanGroup("g1", "grp1"), testOrphanGroup("g2", "grp2")},
+		}
+
+		outcome, err := executePrunePlan(logger, plan, prunePolicy(true, true, 3), rec.actions())
+		if err == nil {
+			t.Fatal("want an error: the guild-leave valve tripped")
+		}
+		if len(rec.left) != 0 {
+			t.Errorf("left guilds %v with the guild valve tripped; want none", rec.left)
+		}
+		if len(rec.deleted) != 2 {
+			t.Errorf("deleted = %v; want both groups -- the group valve did not trip and must still act", rec.deleted)
+		}
+		if outcome.groupsDeleted != 2 || outcome.guildsLeft != 0 {
+			t.Errorf("outcome = %+v; want groupsDeleted=2 guildsLeft=0", outcome)
+		}
+	})
 }
 
 // TestExecutePrunePlanCompletionLogReportsOnlyRealWork pins finding 5: the
