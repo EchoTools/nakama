@@ -13,6 +13,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -180,12 +181,19 @@ func (m *storableRaceNK) StorageDelete(ctx context.Context, deletes []*runtime.S
 	for _, d := range deletes {
 		k := storableRaceKey(d.UserID, d.Collection, d.Key)
 		existing, ok := m.objects[k]
-		if !ok {
+		if d.Version != "" {
+			// Version-guarded delete. Real storage rejects whenever the guarded
+			// DELETE matches no row (core_storage.go storageDeleteObjects checks
+			// rowsAffected == 0), which covers BOTH "the object was replaced"
+			// and "the object is already gone" — the latter is the interleaving
+			// a lenient mock would silently report as success.
+			if !ok || existing.Version != d.Version {
+				return StatusError(codes.InvalidArgument, "Storage delete rejected.", errors.New("Storage delete rejected - not found, version check failed, or permission denied."))
+			}
+		} else if !ok {
+			// Unversioned authoritative delete of a missing object is a no-op
+			// in real storage (the `continue` before the rowsAffected check).
 			continue
-		}
-		if d.Version != "" && existing.Version != d.Version {
-			// Versioned delete matched nothing: the object was replaced.
-			return StatusError(codes.InvalidArgument, "Storage delete rejected.", errors.New("Storage delete rejected - not found, version check failed, or permission denied."))
 		}
 		delete(m.objects, k)
 	}
@@ -332,6 +340,53 @@ func TestStorableRead_CorruptRecoverySelfHealsWhenDeleteFails(t *testing.T) {
 	}
 }
 
+// TestStorableRead_CorruptRecoveryWhenObjectConcurrentlyDeleted covers the last
+// interleaving of the recovery decision tree: the corrupt record is deleted by
+// somebody else between our read and our version-guarded delete.
+//
+// Our delete is then rejected (rowsAffected == 0, indistinguishable from "the
+// record was replaced"), so the follow-up write is guarded on the corrupt
+// record's own version — which now matches nothing and is rejected too. The path
+// must fall through to the create-only write and leave a healthy object, not
+// surface the rejection to the caller.
+func TestStorableRead_CorruptRecoveryWhenObjectConcurrentlyDeleted(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	userID := uuid.Must(uuid.NewV4()).String()
+	nk := newStorableRaceNK()
+
+	nk.set(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey, `{"game_server_latencies":"corrupt"}`)
+	// Between our read of the corrupt object and our delete, it is removed.
+	nk.afterRead = onceHook(func(m *storableRaceNK) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		delete(m.objects, storableRaceKey(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey))
+	})
+
+	dst := NewLatencyHistory()
+	if err := StorableRead(ctx, nk, userID, dst, true); err != nil {
+		t.Fatalf("corrupt-record recovery must still create when the object vanished: %v", err)
+	}
+
+	stored := nk.get(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey)
+	if stored == nil {
+		t.Fatal("get-or-create returned success without creating the object")
+	}
+	if strings.Contains(stored.Value, "corrupt") {
+		t.Errorf("the corrupt object was resurrected; stored value = %s", stored.Value)
+	}
+	if v := dst.StorageMeta().Version; v == "" || v == "*" {
+		t.Errorf("dst version not updated from the write ack, got %q", v)
+	}
+	// Two writes prove the delete really was rejected and the guarded
+	// corrupt-version write ran before the create-only fallback. A mock that
+	// reported the delete as a success would reach the same end state in one
+	// write, leaving this branch untested.
+	if _, writes, _ := nk.counts(); writes != 2 {
+		t.Errorf("expected the guarded corrupt-version write then the create: %d writes, want 2", writes)
+	}
+}
+
 // TestStorableRead_CreateRetriesWhenWinnerVanishes pins the get-or-create
 // contract across the narrow window in which the caller loses the create race
 // and then the winner's object is deleted before the fallback re-read reaches
@@ -458,10 +513,20 @@ func TestStorableRead_ReadFailurePreservesCause(t *testing.T) {
 }
 
 // TestIsVersionConflictError_MatchesSentinelNotSubstring pins which errors are
-// classified retryable. Note that a storage DELETE rejection (core_storage.go
-// storageDeleteObjects) names "version check failed" only in its *cause*, which
-// statusError.Error() does not render, so it was never matched by the old
-// substring predicate either — it must stay unmatched.
+// classified retryable, and records the ONE deliberate reclassification.
+//
+// A rejected storage delete is raised inside the transaction as
+// StatusError(codes.InvalidArgument, "Storage delete rejected.", cause), but
+// StorageDeleteObjects unwraps it and hands the runtime e.Cause()
+// (core_storage.go, `return e.Code(), e.Cause()`). That cause's text DOES
+// contain "version check failed", so the old substring predicate classified a
+// delete rejection as a version conflict; the sentinel predicate does not.
+//
+// The reclassification is unreachable in production: all six call sites receive
+// a WRITE error (EVRProfileUpdate, ServerProfileStore, ServerProfileStoreJSON,
+// StorableWrite x3), and the only delete on any of those paths is
+// EVRProfileUpdate's unversioned MultiUpdate delete, which storageDeleteObjects
+// short-circuits with `continue` before it can reject. Documented, not hidden.
 func TestIsVersionConflictError_MatchesSentinelNotSubstring(t *testing.T) {
 	t.Parallel()
 
@@ -474,11 +539,145 @@ func TestIsVersionConflictError_MatchesSentinelNotSubstring(t *testing.T) {
 	if !isVersionConflictError(fmt.Errorf("wrapped: %w", runtime.ErrStorageRejectedVersion)) {
 		t.Error("a wrapped sentinel must be a version conflict")
 	}
-	deleteRejected := StatusError(codes.InvalidArgument, "Storage delete rejected.", errors.New("Storage delete rejected - not found, version check failed, or permission denied."))
-	if isVersionConflictError(deleteRejected) {
-		t.Errorf("a delete rejection must not be classified as a write version conflict: %v", deleteRejected)
-	}
 	if isVersionConflictError(errors.New("some unrelated failure")) {
 		t.Error("unrelated errors must not be version conflicts")
+	}
+
+	// The delete rejection exactly as core_storage.go builds it...
+	deleteRejected := StatusError(codes.InvalidArgument, "Storage delete rejected.", errors.New("Storage delete rejected - not found, version check failed, or permission denied."))
+	// ...and what a runtime caller would actually receive.
+	causer, ok := deleteRejected.(ErrorCauser)
+	if !ok {
+		t.Fatalf("StatusError no longer implements ErrorCauser: %T", deleteRejected)
+	}
+	cause := causer.Cause()
+	if !strings.Contains(cause.Error(), "version check failed") {
+		t.Fatalf("precondition: the delete rejection reaching callers must still carry the legacy substring, got %q", cause.Error())
+	}
+	if isVersionConflictError(cause) {
+		t.Errorf("a delete rejection must not be classified as a write version conflict: %v", cause)
+	}
+}
+
+// multiUpdateRejectNK reports the storage optimistic-concurrency rejection the
+// way real storage does on the MultiUpdate path: storageWriteObjects returns the
+// bare runtime.ErrStorageRejectedVersion, which is not a *statusError, so
+// core_multi.go MultiUpdate falls through its own errors.Is check on that same
+// sentinel and returns it unwrapped.
+type multiUpdateRejectNK struct{ runtime.NakamaModule }
+
+func (multiUpdateRejectNK) MultiUpdate(ctx context.Context, accountUpdates []*runtime.AccountUpdate, storageWrites []*runtime.StorageWrite, storageDeletes []*runtime.StorageDelete, walletUpdates []*runtime.WalletUpdate, updateLedger bool) ([]*api.StorageObjectAck, []*runtime.WalletUpdateResult, error) {
+	return nil, nil, runtime.ErrStorageRejectedVersion
+}
+
+// TestEVRProfileUpdate_VersionConflictStaysRetryable guards the one caller that
+// would fail SILENTLY if the substring-to-sentinel switch missed a path: the
+// display-name update loop (evr_discord_integrator.go) stops retrying and
+// reports a hard failure the moment isVersionConflictError says "not a
+// conflict". EVRProfileUpdate's %w must therefore keep the sentinel reachable.
+func TestEVRProfileUpdate_VersionConflictStaysRetryable(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	userID := uuid.Must(uuid.NewV4()).String()
+
+	err := EVRProfileUpdate(ctx, multiUpdateRejectNK{}, userID, &EVRProfile{})
+	if err == nil {
+		t.Fatal("expected the rejection to be reported")
+	}
+	if !isVersionConflictError(err) {
+		t.Errorf("a MultiUpdate version rejection must stay retryable through EVRProfileUpdate; got %v", err)
+	}
+}
+
+// legacyStorableErrorf reproduces storableErrorf exactly as it was at
+// d3e7e5549, so the message contract can be asserted rather than described.
+func legacyStorableErrorf(m StorableMetadata, c codes.Code, format string, a ...any) error {
+	return fmt.Errorf("storable error on %s/%s/%s/%s: %v", m.UserID, m.Collection, m.Key, m.Version, status.Errorf(c, format, a...))
+}
+
+// TestStorableErrorf_MessageMatchesLegacyFormat pins the operator- and
+// player-visible text of every storage error this package produces. The message
+// reaches players through LobbySessionFailureFromError and operators through
+// nakama.log, so preserving the cause in the error chain must not perturb it.
+func TestStorableErrorf_MessageMatchesLegacyFormat(t *testing.T) {
+	t.Parallel()
+	m := StorableMetadata{UserID: "u", Collection: "c", Key: "k", Version: "v"}
+
+	cases := []struct {
+		name   string
+		build  func(format string, a ...any) error
+		format string
+		args   []any
+	}{
+		{"wrapped cause", nil, "failed to write: %w", []any{runtime.ErrStorageRejectedVersion}},
+		{"no verb", nil, "multiple objects returned", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := storableErrorf(m, codes.Internal, tc.format, tc.args...).Error()
+			// The legacy formatter used %v where the new one uses %w; both
+			// render an error operand identically.
+			legacyFormat := strings.ReplaceAll(tc.format, "%w", "%v")
+			want := legacyStorableErrorf(m, codes.Internal, legacyFormat, tc.args...).Error()
+			if got != want {
+				t.Errorf("storage error text changed:\n got: %q\nwant: %q", got, want)
+			}
+		})
+	}
+}
+
+// TestStorableErrorf_LobbyAndLoginMessagesUnchanged proves that giving
+// storableError a gRPC status does not change what a player sees when a storage
+// failure aborts a lobby join, nor what a failed login reports — for a bare
+// storable error and for one wrapped by an outer %w (the shape
+// evr_lobby_parameters.go produces via "failed to load join directive: %w").
+func TestStorableErrorf_LobbyAndLoginMessagesUnchanged(t *testing.T) {
+	t.Parallel()
+	m := StorableMetadata{UserID: "u", Collection: "c", Key: "k", Version: "v"}
+	mode := evr.ModeArenaPublic
+	groupID := uuid.Must(uuid.NewV4())
+
+	for _, tc := range []struct {
+		name string
+		wrap func(error) error
+	}{
+		{"bare", func(err error) error { return err }},
+		{"wrapped", func(err error) error { return fmt.Errorf("failed to load join directive: %w", err) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			current := tc.wrap(storableErrorf(m, codes.Internal, "failed to read: %w", errors.New("storage unavailable")))
+			legacy := tc.wrap(legacyStorableErrorf(m, codes.Internal, "failed to read: %v", errors.New("storage unavailable")))
+
+			gotMsg := LobbySessionFailureFromError(mode, groupID, current).(*evr.LobbySessionFailurev4)
+			wantMsg := LobbySessionFailureFromError(mode, groupID, legacy).(*evr.LobbySessionFailurev4)
+			if gotMsg.ErrorCode != wantMsg.ErrorCode {
+				t.Errorf("lobby failure code changed: got %v, want %v", gotMsg.ErrorCode, wantMsg.ErrorCode)
+			}
+			if gotMsg.Message != wantMsg.Message {
+				t.Errorf("lobby failure message changed:\n got: %q\nwant: %q", gotMsg.Message, wantMsg.Message)
+			}
+
+			xpID := evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: 1234}
+			if got, want := formatLoginErrorMessage(xpID, "", current), formatLoginErrorMessage(xpID, "", legacy); got != want {
+				t.Errorf("login failure message changed:\n got: %q\nwant: %q", got, want)
+			}
+		})
+	}
+}
+
+// TestStorableErrorf_PreservesChainThroughMultiWrap guards the footgun in a
+// helper whose entire purpose is chain preservation: Go's multi-%w wrapper
+// implements Unwrap() []error, which errors.Unwrap reports as nil.
+func TestStorableErrorf_PreservesChainThroughMultiWrap(t *testing.T) {
+	t.Parallel()
+	m := StorableMetadata{UserID: "u", Collection: "c", Key: "k", Version: "v"}
+	other := errors.New("some other failure")
+
+	err := storableErrorf(m, codes.Internal, "failed to write: %w (while %w)", runtime.ErrStorageRejectedVersion, other)
+	if !errors.Is(err, runtime.ErrStorageRejectedVersion) {
+		t.Errorf("a two-%%w format dropped the version sentinel from the chain: %v", err)
+	}
+	if !errors.Is(err, other) {
+		t.Errorf("a two-%%w format dropped the second cause from the chain: %v", err)
 	}
 }

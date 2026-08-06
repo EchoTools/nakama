@@ -59,6 +59,70 @@ func TestLatencyHistory_writeWithRetry_AdoptsWinnerRatherThanUnion(t *testing.T)
 	}
 }
 
+// TestLatencyHistory_writeWithRetry_AdoptionDropsUnpersistedEarlierSamples pins
+// the cost of adopting the winner wholesale instead of unioning, so the trade is
+// a tested contract rather than an accident.
+//
+// h is the session-shared history. If one ping round exhausts its attempts, its
+// samples exist only in h; the next round's first conflict replaces h's map with
+// storage's and those samples are gone for good. A union would eventually have
+// written them. Adoption is still the right default — see the writeWithRetry doc
+// comment — but callers must not treat h as a durable accumulator.
+func TestLatencyHistory_writeWithRetry_AdoptionDropsUnpersistedEarlierSamples(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	userID := uuid.Must(uuid.NewV4()).String()
+	nk := newStorableRaceNK()
+	nk.set(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey, winnerLatencyJSON(t, "10.0.0.1"))
+
+	h := staleLatencyHistory("10.9.9.9")
+
+	// Round 1 never persists: every write conflicts and the attempts run out.
+	nk.alwaysConflict = true
+	round1 := func() error {
+		h.Add(net.ParseIP("10.1.1.1"), 99, 25, time.Time{})
+		return nil
+	}
+	if err := round1(); err != nil {
+		t.Fatalf("round 1 apply: %v", err)
+	}
+	if err := h.writeWithRetry(ctx, nk, userID, round1); err == nil {
+		t.Fatal("precondition: round 1 must exhaust its attempts")
+	}
+	if _, ok := h.GameServerLatencies["10.1.1.1"]; !ok {
+		t.Fatalf("precondition: round 1's sample should still be in h, got %v", h.GameServerLatencies)
+	}
+
+	// A concurrent writer advances storage, so round 2's first write conflicts.
+	nk.alwaysConflict = false
+	nk.set(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey, winnerLatencyJSON(t, "10.0.0.1"))
+
+	round2 := func() error {
+		h.Add(net.ParseIP("10.2.2.2"), 99, 25, time.Time{})
+		return nil
+	}
+	if err := round2(); err != nil {
+		t.Fatalf("round 2 apply: %v", err)
+	}
+	if err := h.writeWithRetry(ctx, nk, userID, round2); err != nil {
+		t.Fatalf("round 2 writeWithRetry: %v", err)
+	}
+
+	final := NewLatencyHistory()
+	if err := StorableRead(ctx, nk, userID, final, false); err != nil {
+		t.Fatalf("final read: %v", err)
+	}
+	if _, ok := final.GameServerLatencies["10.2.2.2"]; !ok {
+		t.Errorf("round 2's sample was lost: %v", final.GameServerLatencies)
+	}
+	if _, ok := final.GameServerLatencies["10.0.0.1"]; !ok {
+		t.Errorf("the concurrent winner's entry was clobbered: %v", final.GameServerLatencies)
+	}
+	if _, ok := final.GameServerLatencies["10.1.1.1"]; ok {
+		t.Errorf("round 1's unpersisted sample was expected to be dropped by adoption, but it survived: %v", final.GameServerLatencies)
+	}
+}
+
 // TestLatencyHistory_writeWithRetry_NoRereadOnFinalAttempt proves the loop does
 // not spend a read + re-apply round-trip whose result it will never write. On
 // permanent contention there must be exactly maxAttempts writes but only

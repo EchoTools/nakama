@@ -55,6 +55,12 @@ type StorableIndexMeta struct {
 // cause away (as `%v` inside a fmt.Errorf/status.Errorf) makes sentinels such
 // as runtime.ErrStorageRejectedVersion undetectable and forces callers into
 // substring matching on error text.
+//
+// Error() is byte-identical to what this package produced before the cause was
+// preserved, including the "rpc error: code = X desc = " infix that
+// status.Errorf renders. That string is player-visible (LobbySessionFailure via
+// LobbySessionFailureFromError) and operator-visible (nakama.log), so it is held
+// fixed deliberately: see TestStorableErrorf_MessageMatchesLegacyFormat.
 type storableError struct {
 	code codes.Code
 	msg  string
@@ -65,18 +71,29 @@ func (e *storableError) Error() string { return e.msg }
 
 func (e *storableError) Unwrap() error { return e.err }
 
-// GRPCStatus lets status.Code/status.FromError recover the code.
+// GRPCStatus lets status.Code/status.FromError recover the code, which the old
+// text-formatted error could not carry. It does not change any message: for a
+// bare storableError status.FromError returns this status (Message() == e.msg ==
+// Error()), and for a wrapped one grpc-go overwrites the message with
+// err.Error() — the full chain — before returning (grpc status.FromError).
 func (e *storableError) GRPCStatus() *status.Status { return status.New(e.code, e.msg) }
 
 // storableErrorf builds a storage error for m. The format string is evaluated
 // with fmt.Errorf, so a `%w` verb keeps the underlying storage error in the
 // chain — callers can then use errors.Is(err, runtime.ErrStorageRejectedVersion).
 func storableErrorf(m StorableMetadata, c codes.Code, format string, a ...any) error {
+	// fmt.Errorf renders a %w operand exactly as %v would, so routing the
+	// rendered text back through status.Error reproduces the legacy
+	// status.Errorf(c, format, a...) message verbatim.
 	cause := fmt.Errorf(format, a...)
 	return &storableError{
 		code: c,
-		msg:  fmt.Sprintf("storable error on %s/%s/%s/%s: %s", m.UserID, m.Collection, m.Key, m.Version, cause.Error()),
-		err:  errors.Unwrap(cause),
+		msg:  fmt.Sprintf("storable error on %s/%s/%s/%s: %v", m.UserID, m.Collection, m.Key, m.Version, status.Error(c, cause.Error())),
+		// Keep `cause` itself rather than errors.Unwrap(cause): a format with
+		// two %w verbs produces an Unwrap() []error that errors.Unwrap does not
+		// understand and reports as nil, silently dropping the whole chain.
+		// Holding the wrapper costs nothing — Error() never consults it.
+		err: cause,
 	}
 }
 

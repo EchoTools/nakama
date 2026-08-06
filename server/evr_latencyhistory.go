@@ -73,6 +73,14 @@ func (h *LatencyHistory) SetStorageMeta(meta StorableMetadata) {
 // per-IP entries the winner had pruned would be resurrected on every retry —
 // including addresses that the caller's game-server allowlist rejects.
 //
+// The trade this makes, deliberately: adoption also discards entries that live
+// ONLY in h because an EARLIER writeWithRetry call exhausted its attempts
+// without persisting them. Those samples are gone for good, where a union would
+// eventually have written them. That is the correct side to err on — h is the
+// session-shared history and the earlier call already reported its failure to
+// its caller — but it means a caller must not treat h as a durable accumulator
+// across failed writes.
+//
 // The pattern is only sound because LatencyHistory.Add appends to per-server
 // lists — a commutative mutation. Do NOT generalize it to types whose updates
 // overwrite fields, where last-retrier-wins silently drops the other writer's

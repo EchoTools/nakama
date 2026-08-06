@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -276,6 +277,130 @@ func TestSyncJournalAndProfileWithRetry_NotFoundKeepsPendingCommunityValues(t *t
 	}
 }
 
+// seedPendingCommunityValuesJournal stores a journal for userID that holds one
+// CommunityValuesRequired record and a PENDING requirement — the zero
+// CommunityValuesCompletedAt that updateFields() writes when the newest
+// requiring record post-dates the last acceptance. It returns the record.
+func seedPendingCommunityValuesJournal(t *testing.T, nk *storableRaceNK, userID, groupID string) GuildEnforcementRecord {
+	t.Helper()
+	seed := NewGuildEnforcementJournal(userID)
+	seed.CommunityValuesCompletedAt = time.Now().UTC().Add(-time.Hour)
+	rec := seed.AddRecord(groupID, "mod-0", "", "accept the rules", "notes", true, false, time.Hour)
+	stored := mustStorableJSON(t, seed)
+	if !seed.CommunityValuesCompletedAt.IsZero() {
+		t.Fatalf("precondition: marshalling must leave the requirement pending, got %v", seed.CommunityValuesCompletedAt)
+	}
+	nk.set(userID, StorageCollectionEnforcementJournal, StorageKeyEnforcementJournal, stored)
+	return rec
+}
+
+// TestSyncJournalAndProfileWithRetry_FoundKeepsPendingCommunityValues is the
+// found-branch twin of the NotFound case above, and it is the one two production
+// callers actually take.
+//
+// writeGuildBanEnforcement (evr_discord_integrator.go) and
+// applyGhostSpamSuspension (evr_pipeline_login.go) both continue with a
+// CONSTRUCTOR-FRESH journal when their StorableRead fails transiently — and
+// NewGuildEnforcementJournal seeds CommunityValuesCompletedAt with time.Now().
+// Resolving that field by "later wins" then lets the fabricated "now" beat the
+// stored ZERO that encodes a pending requirement, and updateFields() no longer
+// sees a record newer than the completion, so the requirement is silently
+// satisfied and the player is never gated (evr_pipeline_login.go IsZero checks).
+func TestSyncJournalAndProfileWithRetry_FoundKeepsPendingCommunityValues(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	userID := uuid.Must(uuid.NewV4()).String()
+	nk := newStorableRaceNK()
+
+	rec := seedPendingCommunityValuesJournal(t, nk, userID, "group-2")
+
+	// The caller never managed to read the journal, exactly as the two
+	// production callers do when StorableRead fails for any non-NotFound reason.
+	journal := NewGuildEnforcementJournal(userID)
+	if journal.CommunityValuesCompletedAt.IsZero() {
+		t.Fatal("precondition: a constructor-fresh journal must carry a non-zero completion")
+	}
+	journal.AddRecord("group-1", "mod-B", "", "guild ban", "banned", false, false, time.Hour)
+
+	// version "*" against an existing object: the first write conflicts and the
+	// retry merges against the stored journal.
+	if err := SyncJournalAndProfileWithRetry(ctx, nk, userID, journal); err != nil {
+		t.Fatalf("SyncJournalAndProfileWithRetry: %v", err)
+	}
+
+	final := NewGuildEnforcementJournal(userID)
+	if err := StorableRead(ctx, nk, userID, final, false); err != nil {
+		t.Fatalf("final read: %v", err)
+	}
+	if final.GetRecord("group-2", rec.ID) == nil {
+		t.Errorf("the stored community-values record was destroyed by the retry; records = %+v", final.RecordsByGroupID)
+	}
+	if len(final.RecordsByGroupID["group-1"]) != 1 {
+		t.Errorf("the caller's own record was lost; records = %+v", final.RecordsByGroupID)
+	}
+	if !final.CommunityValuesCompletedAt.IsZero() {
+		t.Errorf("a pending community-values requirement was cleared by mergeStored: CommunityValuesCompletedAt = %v, want the zero time", final.CommunityValuesCompletedAt)
+	}
+}
+
+// TestGuildEnforcementJournal_mergeStored_CommunityValues pins the merge rule
+// for CommunityValuesCompletedAt in both directions. stored was re-read AFTER
+// the conflict, so it is the newest persisted value of a field this merge path
+// never legitimately mutates; the caller's copy is either an older snapshot or a
+// constructor default. stored therefore wins outright, and updateFields()
+// re-derives the gate from the merged record set at marshal time.
+func TestGuildEnforcementJournal_mergeStored_CommunityValues(t *testing.T) {
+	t.Parallel()
+	userID := uuid.Must(uuid.NewV4()).String()
+	accepted := time.Now().UTC().Add(-time.Hour)
+
+	t.Run("stored pending beats a constructor-fresh completion", func(t *testing.T) {
+		local := NewGuildEnforcementJournal(userID) // CommunityValuesCompletedAt = now
+		stored := NewGuildEnforcementJournal(userID)
+		stored.CommunityValuesCompletedAt = time.Time{}
+
+		local.mergeStored(stored)
+
+		if !local.CommunityValuesCompletedAt.IsZero() {
+			t.Errorf("pending requirement lost: got %v, want the zero time", local.CommunityValuesCompletedAt)
+		}
+	})
+
+	t.Run("stored acceptance beats a locally pending snapshot", func(t *testing.T) {
+		// The player accepted concurrently, so the caller's older "pending"
+		// snapshot must not re-gate them.
+		local := NewGuildEnforcementJournal(userID)
+		local.CommunityValuesCompletedAt = time.Time{}
+		stored := NewGuildEnforcementJournal(userID)
+		stored.CommunityValuesCompletedAt = accepted
+
+		local.mergeStored(stored)
+
+		if !local.CommunityValuesCompletedAt.Equal(accepted) {
+			t.Errorf("the concurrent acceptance was discarded: got %v, want %v", local.CommunityValuesCompletedAt, accepted)
+		}
+	})
+
+	t.Run("a locally added requiring record still re-gates after adoption", func(t *testing.T) {
+		local := NewGuildEnforcementJournal(userID)
+		local.AddRecord("group-1", "mod-B", "", "accept the rules", "notes", true, false, time.Hour)
+		stored := NewGuildEnforcementJournal(userID)
+		stored.CommunityValuesCompletedAt = accepted
+
+		local.mergeStored(stored)
+		if !local.CommunityValuesCompletedAt.Equal(accepted) {
+			t.Fatalf("merge should adopt the stored acceptance first: got %v", local.CommunityValuesCompletedAt)
+		}
+		// updateFields runs from MarshalJSON, which is what StorableWrite calls.
+		if _, err := local.MarshalJSON(); err != nil {
+			t.Fatalf("MarshalJSON: %v", err)
+		}
+		if !local.CommunityValuesCompletedAt.IsZero() {
+			t.Errorf("the newly added requirement did not re-gate the player: got %v, want the zero time", local.CommunityValuesCompletedAt)
+		}
+	})
+}
+
 // TestGuildEnforcementJournal_mergeStored_StoredEditWins pins the reverse merge
 // direction of the same-record case: when the concurrent winner holds the newer
 // edit of a record both copies carry, the winner's version survives.
@@ -303,6 +428,62 @@ func TestGuildEnforcementJournal_mergeStored_StoredEditWins(t *testing.T) {
 	}
 	if merged.UserNoticeText != "stored edit" {
 		t.Errorf("the concurrent winner's newer edit was discarded: %q", merged.UserNoticeText)
+	}
+}
+
+// TestGuildEnforcementJournal_mergeStored_UnionsEditLogs covers the audit-trail
+// consequence of whole-record last-writer-wins: two moderators editing the same
+// record from copies read before either wrote. Only one moderator's field values
+// can survive, but the EditLog is append-only history and BOTH entries must
+// remain — otherwise the losing moderator's edit leaves no trace anywhere.
+func TestGuildEnforcementJournal_mergeStored_UnionsEditLogs(t *testing.T) {
+	t.Parallel()
+
+	userID := uuid.Must(uuid.NewV4()).String()
+	base := NewGuildEnforcementJournal(userID)
+	rec := base.AddRecord("group-1", "mod-0", "", "original", "notes", false, false, time.Hour)
+	original := *base.GetRecord("group-1", rec.ID)
+
+	// Moderator A's edit lands first and is what the retrier re-reads.
+	stored := NewGuildEnforcementJournal(userID)
+	stored.RecordsByGroupID = map[string][]GuildEnforcementRecord{"group-1": {original}}
+	if edited := stored.EditRecord("group-1", rec.ID, "mod-A", "", rec.Expiry, "A notice", "A notes", false); edited == nil {
+		t.Fatal("EditRecord(A) returned nil")
+	}
+
+	// Moderator B edits the same record from the pre-A copy, then retries.
+	local := NewGuildEnforcementJournal(userID)
+	local.RecordsByGroupID = map[string][]GuildEnforcementRecord{"group-1": {original}}
+	if edited := local.EditRecord("group-1", rec.ID, "mod-B", "", rec.Expiry, "B notice", "B notes", false); edited == nil {
+		t.Fatal("EditRecord(B) returned nil")
+	}
+
+	local.mergeStored(stored)
+
+	merged := local.GetRecord("group-1", rec.ID)
+	if merged == nil {
+		t.Fatal("the record vanished from the merge")
+	}
+	editors := make([]string, 0, len(merged.EditLog))
+	for _, e := range merged.EditLog {
+		editors = append(editors, e.EditorUserID)
+	}
+	if len(merged.EditLog) != 2 {
+		t.Fatalf("the losing moderator's audit entry was destroyed: EditLog editors = %v, want both mod-A and mod-B", editors)
+	}
+	if !slices.Contains(editors, "mod-A") || !slices.Contains(editors, "mod-B") {
+		t.Errorf("EditLog editors = %v, want both mod-A and mod-B", editors)
+	}
+	for i := 1; i < len(merged.EditLog); i++ {
+		if merged.EditLog[i].EditedAt.Before(merged.EditLog[i-1].EditedAt) {
+			t.Errorf("EditLog is not ordered by EditedAt: %v", merged.EditLog)
+		}
+	}
+
+	// Re-merging the same pair must not duplicate entries.
+	local.mergeStored(stored)
+	if got := len(local.GetRecord("group-1", rec.ID).EditLog); got != 2 {
+		t.Errorf("re-merging duplicated edit entries: %d, want 2", got)
 	}
 }
 

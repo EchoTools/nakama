@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"sort"
 	"strings"
 	"time"
 
@@ -315,8 +316,25 @@ func (s *GuildEnforcementJournal) EditRecord(groupID, recordID, editorUserID, ed
 // records and voids, they do not rewrite the collection. Records are keyed by
 // their (unique) ID — a record only the winner has is kept, a record only s has
 // is appended, and a record both have resolves to whichever carries the later
-// UpdatedAt (EditRecord bumps it), with ties going to the stored copy. Voids are
-// keyed by record ID within a group and unioned, stored winning ties.
+// UpdatedAt (EditRecord bumps it), with ties going to the stored copy. The two
+// copies' EditLogs are UNIONED onto the winner rather than replaced, so a
+// concurrent EditRecord cannot erase the loser's audit entry even though the
+// loser's field values are dropped. Voids are keyed by record ID within a group
+// and unioned, stored winning ties.
+//
+// CommunityValuesCompletedAt is NOT resolved by "later wins". It is a two-state
+// field, not a clock: the ZERO time means "the player must (re-)accept community
+// values" and any non-zero value is an acceptance instant, so comparing them
+// always loses the sentinel. stored was re-read AFTER the conflict, which makes
+// it the newest persisted value of a field this merge path never legitimately
+// mutates — the only writer of an acceptance is the player's own
+// UpdateClientProfile handler, and that path calls SyncJournalAndProfile, never
+// this one (evr_pipeline_login.go handleClientProfileUpdate). s holds either an
+// older snapshot of the same field or, for callers that continue with a
+// constructor-fresh journal after a failed read, a fabricated time.Now(). So
+// stored wins outright and updateFields() then re-derives the gate from the
+// merged record set at marshal time, which re-zeroes it if any merged-in record
+// requires community values after that acceptance.
 //
 // Without this merge, a retry writes the caller's stale copy under the winner's
 // version and the winner's records disappear while the write reports success.
@@ -342,9 +360,11 @@ func (s *GuildEnforcementJournal) mergeStored(stored *GuildEnforcementJournal) {
 				existing = append(existing, local)
 				continue
 			}
+			editLog := mergeEnforcementEditLogs(existing[i].EditLog, local.EditLog)
 			if local.UpdatedAt.After(existing[i].UpdatedAt) {
 				existing[i] = local
 			}
+			existing[i].EditLog = editLog
 		}
 		merged[groupID] = existing
 	}
@@ -366,13 +386,42 @@ func (s *GuildEnforcementJournal) mergeStored(stored *GuildEnforcementJournal) {
 	}
 	s.VoidsByRecordIDByGroupID = voids
 
-	// Keep the later completion. updateFields() re-clears it at marshal time if
-	// a merged-in record requires community values after that timestamp.
-	if stored.CommunityValuesCompletedAt.After(s.CommunityValuesCompletedAt) {
-		s.CommunityValuesCompletedAt = stored.CommunityValuesCompletedAt
-	}
+	// The stored acceptance is authoritative; see the doc comment. updateFields()
+	// re-clears it at marshal time if a merged-in record requires community
+	// values after that timestamp.
+	s.CommunityValuesCompletedAt = stored.CommunityValuesCompletedAt
 
 	s.version = stored.version
+}
+
+// mergeEnforcementEditLogs returns the union of two edit logs, ordered by
+// EditedAt. Edit entries are append-only history, so a record that both copies
+// carry must keep BOTH sides' entries even though only one side's field values
+// survive — otherwise two moderators editing the same record concurrently leave
+// the loser's edit with no trace at all. Entries are deduplicated on
+// (editor, EditedAt), which is representation-independent and therefore stable
+// across the JSON round-trip that only the stored side has been through.
+func mergeEnforcementEditLogs(stored, local []GuildEnforcementEditEntry) []GuildEnforcementEditEntry {
+	if len(local) == 0 {
+		return stored
+	}
+	if len(stored) == 0 {
+		return local
+	}
+	seen := make(map[string]struct{}, len(stored)+len(local))
+	out := make([]GuildEnforcementEditEntry, 0, len(stored)+len(local))
+	for _, entries := range [][]GuildEnforcementEditEntry{stored, local} {
+		for _, e := range entries {
+			k := fmt.Sprintf("%s|%d", e.EditorUserID, e.EditedAt.UnixNano())
+			if _, ok := seen[k]; ok {
+				continue
+			}
+			seen[k] = struct{}{}
+			out = append(out, e)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].EditedAt.Before(out[j].EditedAt) })
+	return out
 }
 
 func (s *GuildEnforcementJournal) GroupVoids(groupID ...string) map[string]GuildEnforcementRecordVoid {
