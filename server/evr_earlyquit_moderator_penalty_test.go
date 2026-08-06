@@ -445,3 +445,99 @@ func TestEarlyQuit_ResetLiftsAModeratorSanction(t *testing.T) {
 			after.PenaltyLevel, after.PenaltyTimestamp)
 	}
 }
+
+// TestEarlyQuit_ASanctionWithNoLockoutLeavesNoPhantomLevel pins the one
+// invariant every reader of PenaltyLevel depends on: a non-zero PenaltyLevel
+// always carries a non-zero PenaltyTimestamp.
+//
+// applyLadderPenalty already states the rule — "A level carrying no lockout is
+// no penalty at all" (evr_earlyquit.go), and it zeroes the level to enforce it.
+// ApplyModeratorPenalty assigned s.PenaltyLevel = level BEFORE branching, so the
+// no-lockout branch cleared the timestamp and the retained sanction but left the
+// level standing. Same ladder, same requested level, two different stored
+// states depending on which path last touched the record.
+//
+// The phantom level is not inert. Both match-completion paths
+// (evr_match.go MatchOver, EventRemoteLogSet.incrementCompletedMatches) read the
+// stored state and call UpdateTier WITHOUT re-resolving the level first, so the
+// phantom drives the player into the Tier 2 queue and fires the "Account
+// flagged for early quitting" DM — for a player IsPenaltyActive() says is not
+// penalized. Nothing on the completion path ever recomputes PenaltyLevel, so
+// "Complete full matches to restore Tier 1 status" cannot come true; only a
+// later early quit (which does re-resolve) clears it.
+func TestEarlyQuit_ASanctionWithNoLockoutLeavesNoPhantomLevel(t *testing.T) {
+	t.Run("the level is cleared with the lockout", func(t *testing.T) {
+		state := NewEarlyQuitPlayerState()
+		state.ApplyModeratorPenalty(2, 0)
+
+		if state.PenaltyLevel != 0 || state.PenaltyTimestamp != 0 {
+			t.Errorf("ApplyModeratorPenalty(2, 0) = level %d ts %d, want 0/0: a level with no lockout is no penalty at all",
+				state.PenaltyLevel, state.PenaltyTimestamp)
+		}
+		if state.PenaltyLevel > 0 && !state.IsPenaltyActive() {
+			t.Errorf("PenaltyLevel = %d while IsPenaltyActive() = false: readers that consult the level alone "+
+				"(UpdateTier, the client profile's EarlyQuitFeatures.PenaltyLevel) now disagree with the lockout",
+				state.PenaltyLevel)
+		}
+	})
+
+	// The reachable path: a ladder that configures a level with no matchmaking
+	// lockout (a coherent config — the level still carries SpawnLock/AutoReport),
+	// and a moderator setting that level through earlyquit/modify. The RPC reads
+	// the lockout straight off that ladder entry and hands 0 to
+	// ApplyModeratorPenalty.
+	t.Run("a moderator setting a lockout-less ladder level does not queue-degrade the player", func(t *testing.T) {
+		nk, ctx, targetID, groupID := newEarlyQuitAdminHarness(t)
+		seedEarlyQuitLadder(t, ctx, nk, []evr.EarlyQuitPenaltyLevelConfig{
+			{PenaltyLevel: 0, MinEarlyQuits: 0, MaxEarlyQuits: 2, MMLockoutSec: 0},
+			// Level 2 punishes with a spawn lock and an auto-report, but no
+			// matchmaking lockout. validatePenaltyLevels bounds MMLockoutSec
+			// only from below, and the admin RPC's loader skips Validate
+			// entirely, so this ladder reaches the handler as written.
+			{PenaltyLevel: 2, MinEarlyQuits: 3, MaxEarlyQuits: 999, MMLockoutSec: 0, SpawnLock: 1, AutoReport: 1},
+		})
+
+		state := NewEarlyQuitPlayerState()
+		if err := StorableWrite(ctx, nk, targetID, state); err != nil {
+			t.Fatalf("seed player state: %v", err)
+		}
+
+		level := int32(2)
+		payload, err := json.Marshal(EarlyQuitModifyRequest{
+			GroupID:      groupID,
+			TargetUserID: targetID,
+			Action:       "set_penalty",
+			PenaltyLevel: &level,
+		})
+		if err != nil {
+			t.Fatalf("marshal payload: %v", err)
+		}
+		if _, err := EarlyQuitModifyRPC(ctx, NewRuntimeGoLogger(loggerForTest(t)), nil, nk, string(payload)); err != nil {
+			t.Fatalf("EarlyQuitModifyRPC: %v", err)
+		}
+
+		// Read it back exactly as the completion paths do.
+		stored := NewEarlyQuitPlayerState()
+		if err := StorableRead(ctx, nk, targetID, stored, false); err != nil {
+			t.Fatalf("read stored state: %v", err)
+		}
+		if stored.IsPenaltyActive() {
+			t.Fatalf("precondition: the stored penalty must be inactive (ts %d)", stored.PenaltyTimestamp)
+		}
+		if stored.PenaltyLevel != 0 {
+			t.Errorf("stored PenaltyLevel = %d with PenaltyTimestamp = %d: a phantom level no lockout backs",
+				stored.PenaltyLevel, stored.PenaltyTimestamp)
+		}
+
+		// evr_match.go's MatchOver handler: read, credit the completion, then
+		// UpdateTier — with no re-resolution of the level in between.
+		threshold := int32(0)
+		stored.IncrementCompletedMatches()
+		oldTier, newTier, changed := stored.UpdateTier(&threshold)
+		if newTier != MatchmakingTier1 {
+			t.Errorf("completing a match moved the player from tier %d to tier %d (changed=%v) "+
+				"while IsPenaltyActive() = false: an unpenalized player was degraded to the Tier 2 queue",
+				oldTier, newTier, changed)
+		}
+	})
+}

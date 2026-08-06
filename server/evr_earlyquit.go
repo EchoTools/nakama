@@ -209,15 +209,34 @@ func ResolvePenaltyLevel(numQuits int32, cfg *evr.SNSEarlyQuitConfig) (level int
 // quit-count ladder resolution cannot afterwards lower or shorten it while it
 // is in force. A lockoutSec of zero or less means "no lockout", which retains
 // nothing — there is no sanction to protect.
+//
+// A level with no lockout clears the level too, exactly as applyLadderPenalty
+// does ("A level carrying no lockout is no penalty at all"). Setting the level
+// while zeroing the expiry left a penalty nothing could lift: the level alone
+// governs UpdateTier and the client profile's EarlyQuitFeatures.PenaltyLevel,
+// neither of which consults the timestamp, while IsPenaltyActive() reported no
+// penalty. Since the completion paths (evr_match.go's MatchOver,
+// EventRemoteLogSet.incrementCompletedMatches) call UpdateTier WITHOUT
+// re-resolving the level first, that phantom put the player in the Tier 2 queue
+// and sent the "flagged for early quitting" DM permanently — "complete full
+// matches to restore Tier 1 status" could never come true, because completing
+// matches never recomputes the level.
+//
+// This does not discard the moderator's request. The one reachable caller,
+// earlyquit/modify's set_penalty action, records the requested level in the
+// guild override (GuildOverrides[groupID].PenaltyLevel) before calling here, and
+// reports the resulting state — PenaltyLevel alongside PenaltyActive — straight
+// back to the moderator.
 func (s *EarlyQuitPlayerState) ApplyModeratorPenalty(level int32, lockoutSec int32) {
 	s.Lock()
 	defer s.Unlock()
-	s.PenaltyLevel = level
 	if level > 0 && lockoutSec > 0 {
+		s.PenaltyLevel = level
 		s.PenaltyTimestamp = time.Now().Unix() + int64(lockoutSec)
 		s.ModeratorPenaltyLevel = level
 		s.ModeratorPenaltyUntil = s.PenaltyTimestamp
 	} else {
+		s.PenaltyLevel = 0
 		s.PenaltyTimestamp = 0
 		s.ModeratorPenaltyLevel = 0
 		s.ModeratorPenaltyUntil = 0
