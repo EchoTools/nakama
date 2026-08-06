@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 )
@@ -112,6 +113,56 @@ func setLoadoutSlot(l *evr.CosmeticLoadout, slotName, equippedName string) bool 
 	return true
 }
 
+// knownLoadoutSlot reports whether slotName is a slot this server recognises.
+//
+// The handler uses it while PARSING, so an unrecognised slot is rejected and
+// logged exactly once per request rather than re-discovered on every write
+// attempt of a retry.
+func knownLoadoutSlot(slotName string) bool {
+	var probe evr.CosmeticLoadout
+	return setLoadoutSlot(&probe, slotName, "")
+}
+
+// persistGameServerLoadout applies equips to profile and writes it, retrying on a
+// storage version conflict.
+//
+// The retry is the entire reason this is a function rather than a few lines inline
+// in the handler. evrProfileUpdateWithRetry RE-READS the profile after a conflict
+// and hands that fresh object to the callback, so the callback must derive
+// everything except equips from the profile it is HANDED. A callback that instead
+// closed over the caller's pre-conflict profile would stamp that stale 22-slot
+// loadout back over whatever the concurrent writer committed — precisely the
+// clobber the retry exists to prevent, and a silent one: no error, no log.
+//
+// That mistake is a one-character edit away (dropping the parameter, or renaming
+// it so the outer variable is no longer shadowed) and the type checker cannot see
+// it. Keeping the callback here, next to a test that drives a real version
+// conflict through this function, is what makes the mistake fail loudly.
+//
+// It returns the loadout actually stored: after a retry that is the one composed
+// onto the FRESH base, so the caller's success log matches storage rather than the
+// attempt that lost.
+func persistGameServerLoadout(ctx context.Context, nk runtime.NakamaModule, userID string, profile *EVRProfile, equips []gameServerLoadoutEquip, jerseyNumber int) (evr.CosmeticLoadout, error) {
+	var written evr.CosmeticLoadout
+
+	apply := func(profile *EVRProfile) error {
+		w, err := applyGameServerLoadout(profile, equips, jerseyNumber)
+		if err != nil {
+			return err
+		}
+		written = w
+		return nil
+	}
+
+	if err := apply(profile); err != nil {
+		return evr.CosmeticLoadout{}, err
+	}
+	if _, err := evrProfileUpdateWithRetry(ctx, nk, userID, profile, apply); err != nil {
+		return evr.CosmeticLoadout{}, fmt.Errorf("failed to store EVR profile: %w", err)
+	}
+	return written, nil
+}
+
 // sanitizeGameServerLoadout strips any cosmetic the player does not own from a loadout
 // parsed from a GameServerSaveLoadoutRequest, mirroring EquipAndSanitize's protection
 // for the RemoteLogSet equip path (COSMETIC-1). It is a separate entry point because
@@ -176,10 +227,6 @@ func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *
 	// exactly the clobber evrProfileUpdateWithRetry exists to prevent.
 	equips := make([]gameServerLoadoutEquip, 0, len(payload.LoadoutInstances))
 
-	// slotProbe exists only so an unrecognised slot name is detected — and logged
-	// — once here during parsing, rather than once per write attempt.
-	var slotProbe evr.CosmeticLoadout
-
 	// Process each loadout instance
 	for _, instance := range payload.LoadoutInstances {
 		for slotHex, equippedHex := range instance.Items {
@@ -204,7 +251,7 @@ func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *
 				zap.String("equipped_hash", equippedHex),
 				zap.String("equipped_name", equippedName))
 
-			if !setLoadoutSlot(&slotProbe, slotName, equippedName) {
+			if !knownLoadoutSlot(slotName) {
 				logger.Debug("Unknown slot type", zap.String("slot", slotName))
 				continue
 			}
@@ -220,38 +267,20 @@ func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *
 	// those servers at all. Without this check, a NativeSupport-hosted character
 	// customization equip would persist an unowned cosmetic (e.g. a VRML finalist tag)
 	// exactly like the original remotelogset bug.
-	// applyLoadout is factored out so a retry after a version conflict can
-	// re-apply it against a freshly read profile. BOTH the base loadout and the
-	// ownership check are taken from that profile, so a retry only ever changes
-	// the slots this request actually named; every other slot keeps the value the
-	// concurrent writer committed.
-	//
-	// writtenLoadout is the loadout the most recent attempt actually produced, used
-	// for the success log below. On a retry it reflects the fresh base, so the log
-	// matches what was persisted.
-	var writtenLoadout evr.CosmeticLoadout
-
-	applyLoadout := func(profile *EVRProfile) error {
-		written, err := applyGameServerLoadout(profile, equips, payload.Number)
-		if err != nil {
-			return err
-		}
-		writtenLoadout = written
-		return nil
-	}
-
-	if err := applyLoadout(profile); err != nil {
+	// persistGameServerLoadout applies the equips and saves the profile, retrying
+	// on a version conflict with a fresh read: a concurrent writer on the same key
+	// (the Discord sync path and the login path both write it) must not cost the
+	// player this equip. The retry composes the equips onto the RE-READ profile, so
+	// only the slots this request named change; see its doc comment.
+	writtenLoadout, err := persistGameServerLoadout(ctx, p.nk, userID, profile, equips, payload.Number)
+	if err != nil {
 		return err
 	}
+
+	// Logged only after the write commits. Emitting it before meant a failed write
+	// still reported a jersey number that never persisted.
 	if payload.Number >= 0 {
 		logger.Info("Updated jersey number", zap.Int("number", payload.Number))
-	}
-
-	// Save the updated profile. A concurrent writer on the same key (the Discord
-	// sync path and the login path both write it) must not lose this equip, so
-	// retry on a version conflict with a fresh read rather than failing outright.
-	if _, err := evrProfileUpdateWithRetry(ctx, p.nk, userID, profile, applyLoadout); err != nil {
-		return fmt.Errorf("failed to store EVR profile: %w", err)
 	}
 
 	logger.Info("Successfully saved loadout update",
