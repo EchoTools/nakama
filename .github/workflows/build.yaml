@@ -29,6 +29,22 @@ jobs:
       - name: Verify formatting
         run: just fmt-check
 
+  exec_bit_check:
+    name: Check script exec bits
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+
+      # Runs the same recipe developers run locally. The check reads modes from
+      # the git index, not from disk, so it cannot be fooled by a local
+      # core.fileMode=false — which is exactly what hid this class of breakage
+      # until scripts/bench-compare.sh shipped non-executable.
+      - name: Verify script exec bits
+        run: just exec-bit-check
+
   build_binary:
     name: Build nakama binary
     runs-on: ubuntu-latest
