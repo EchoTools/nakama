@@ -103,9 +103,32 @@ type CGNATSettings struct {
 }
 
 type PruneSettings struct {
-	LeaveOrphanedGuilds  bool `json:"leave_orphan_guilds"` // Prune Discord guilds that do not have a corresponding Nakama group
-	DeleteOrphanedGroups bool `json:"leave_orphan_groups"` // Prune Nakama groups that do not have a corresponding Discord guild
-	SafetyLimit          int  `json:"safety_limit"`        // The maximum number of orphaned groups or guilds that can be deleted/left before the pruning operation is aborted
+	LeaveOrphanedGuilds bool `json:"leave_orphan_guilds"` // Prune Discord guilds that do not have a corresponding Nakama group
+
+	// DeleteOrphanedGroups arms the DELETE of Nakama groups that have no
+	// corresponding Discord guild.
+	//
+	// NOTE THE KEY: it is `leave_orphan_groups`, not `delete_orphan_groups`.
+	// The name is wrong -- this flag deletes groups, it does not leave them --
+	// and it is one character away from `leave_orphan_guilds` above, which is a
+	// different setting. Read it carefully when editing settings by hand.
+	//
+	// The key is kept deliberately and MUST NOT be renamed in place.
+	// ServiceSettingsLoad reads the settings object from storage and, on a
+	// process's first load, writes the whole struct straight back (see below,
+	// ~line 281) via json.Marshal with no omitempty. A rename would therefore
+	// not just stop reading a deployment's stored `leave_orphan_groups` -- the
+	// write-back on that same boot would re-serialize the object without it,
+	// destroying the operator's configured value with no record left to migrate
+	// from. The field falls back to false, which is the safe direction for a
+	// delete, but the configuration is gone.
+	//
+	// Renaming it safely needs a migration: read both keys for at least one
+	// release, write both, and only then drop the old one.
+	// TestPruneSettingsWireKeysAreLoadBearing fails if this key changes.
+	DeleteOrphanedGroups bool `json:"leave_orphan_groups"`
+
+	SafetyLimit int `json:"safety_limit"` // The maximum number of orphaned groups or guilds that can be deleted/left before the pruning operation is aborted
 	// ReportOnly makes a prune pass perform NO writes at all: no orphan-guild
 	// repair, no guild leaves, no group deletes. It overrides the two flags
 	// above, so it is the operator's single freeze switch during an incident.

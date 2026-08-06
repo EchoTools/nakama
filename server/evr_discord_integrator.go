@@ -778,7 +778,12 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 }
 
 func (d *DiscordIntegrator) handleGuildCreate(logger *zap.Logger, _ *discordgo.Session, e *discordgo.GuildCreate) error {
-	logger.Info("Guild Create", zap.Any("guild", e.Guild.ID))
+	// Identifiers only, and typed: this fires once per guild on every reconnect,
+	// so zap.Any here would silently accept a whole *discordgo.Guild in a later
+	// refactor and dump every member, channel and presence of every returning
+	// guild -- the same failure removed from the "Guild became unavailable"
+	// branch above.
+	logger.Info("Guild Create", zap.String("guild_id", e.Guild.ID))
 	// The guild is back in state; it no longer needs outage protection.
 	d.markGuildAvailable(e.Guild.ID)
 	if err := d.guildSync(d.ctx, logger, e.Guild, true); err != nil {

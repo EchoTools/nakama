@@ -14,6 +14,8 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // The tests in this file guard the WIRING of the prune pass rather than its
@@ -363,4 +365,56 @@ func TestOnGuildDeleteRecordsAvailability(t *testing.T) {
 			t.Fatalf("unavailable guilds = %v; want empty -- a guild we genuinely left must not be protected from pruning", ids)
 		}
 	})
+}
+
+// TestHandleGuildCreateLogsGuildIDOnly pins the GUILD_CREATE counterpart of the
+// availability bookkeeping above, and the shape of the line that reports it.
+//
+// GUILD_CREATE fires once per guild on every reconnect, so this is the line an
+// operator greps to see a shard come back -- the same event the outage
+// protection exists for. It must carry a typed `guild_id` string, not an ID
+// hidden under a `guild` key: `guild` reads as the guild object, and a later
+// refactor to pass e.Guild through zap.Any would dump every member, channel and
+// presence of every returning guild at once, which is precisely the failure this
+// PR removed from the `Guild became unavailable` branch.
+func TestHandleGuildCreateLogsGuildIDOnly(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	d := &DiscordIntegrator{unavailableGuilds: &MapOf[string, time.Time]{}}
+	d.markGuildUnavailable("g_back", time.Now())
+
+	// guildSync needs a database, which this test does not have. The log line
+	// and the availability clear both run before it, so recovering here still
+	// proves both -- and a refactor that moved either below guildSync would
+	// fail the assertions.
+	func() {
+		defer func() { _ = recover() }()
+		_ = d.handleGuildCreate(zap.New(core), nil, &discordgo.GuildCreate{
+			Guild: &discordgo.Guild{ID: "g_back"},
+		})
+	}()
+
+	entries := logs.FilterMessage("Guild Create").All()
+	if len(entries) != 1 {
+		t.Fatalf("Guild Create entries = %d; want 1", len(entries))
+	}
+	fields := entries[0].ContextMap()
+	if _, ok := fields["guild"]; ok {
+		t.Errorf("log carries a %q field holding an ID; operators grep %q for an identifier: %v", "guild", "guild_id", fields)
+	}
+	if got, ok := fields["guild_id"]; !ok || got != "g_back" {
+		t.Errorf("guild_id = %v (present=%v); want %q", got, ok, "g_back")
+	}
+	// zap.Any would still render a string as StringType, but it silently
+	// accepts a whole *discordgo.Guild too. Pinning the type is what makes that
+	// substitution fail here instead of in production log volume.
+	if ft := entries[0].Context[0].Type; ft != zapcore.StringType {
+		t.Errorf("field type = %v; want zapcore.StringType -- a struct would serialize as ReflectType", ft)
+	}
+	if len(entries[0].Context) != 1 {
+		t.Errorf("Guild Create fields = %d; want exactly 1 (guild_id)", len(entries[0].Context))
+	}
+
+	if ids := d.unavailableGuildIDsAsOf(time.Now()); len(ids) != 0 {
+		t.Errorf("unavailable guilds = %v; want empty -- a guild that came back must lose its outage protection", ids)
+	}
 }
