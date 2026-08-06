@@ -69,8 +69,12 @@ func (m *recordingMetrics) tagsFor(name string) map[string]string {
 // for entirely the wrong reason.
 func resetVPNDegradedThrottle(t *testing.T) {
 	t.Helper()
-	vpnDegradedLogThrottle.reset()
-	t.Cleanup(vpnDegradedLogThrottle.reset)
+	reset := func() {
+		vpnDegradedLogThrottle.reset()
+		vpnUnconfiguredLogThrottle.reset()
+	}
+	reset()
+	t.Cleanup(reset)
 }
 
 // (a) The degraded state must be alertable. Every sibling rejection path in
@@ -82,7 +86,7 @@ func TestWarnVPNDegraded_IncrementsAlertableCounter(t *testing.T) {
 	core, _ := observer.New(zapcore.DebugLevel)
 	metrics := newRecordingMetrics()
 
-	warnVPNDegraded(zap.New(core), metrics.CustomCounter, "203.0.113.7", "123456789012345678", "987654321098765432", false)
+	warnVPNDegraded(zap.New(core), metrics.CustomCounter, "203.0.113.7", "123456789012345678", "987654321098765432", false, vpnDegradedLookupFailed)
 
 	require.Equal(t, int64(1), metrics.count("lobby_vpn_check_degraded"),
 		"SEC-6(a): the degraded VPN gate must emit a counter so it can be alerted on")
@@ -107,9 +111,9 @@ func TestWarnVPNDegraded_LogIsThrottledPerGuildButCounterIsNot(t *testing.T) {
 	const guildB = "222222222222222222"
 
 	for i := 0; i < 25; i++ {
-		warnVPNDegraded(logger, metrics.CustomCounter, "203.0.113.7", "123456789012345678", guildA, false)
+		warnVPNDegraded(logger, metrics.CustomCounter, "203.0.113.7", "123456789012345678", guildA, false, vpnDegradedLookupFailed)
 	}
-	warnVPNDegraded(logger, metrics.CustomCounter, "203.0.113.8", "123456789012345679", guildB, true)
+	warnVPNDegraded(logger, metrics.CustomCounter, "203.0.113.8", "123456789012345679", guildB, true, vpnDegradedLookupFailed)
 
 	require.Equal(t, int64(26), metrics.count("lobby_vpn_check_degraded"),
 		"the counter carries the real per-player volume and must not be throttled")
@@ -136,11 +140,11 @@ func TestWarnVPNDegraded_LogResumesAfterThrottleWindow(t *testing.T) {
 
 	const guild = "111111111111111111"
 
-	warnVPNDegraded(logger, metrics.CustomCounter, "203.0.113.7", "1", guild, false)
+	warnVPNDegraded(logger, metrics.CustomCounter, "203.0.113.7", "1", guild, false, vpnDegradedLookupFailed)
 	now = now.Add(59 * time.Second)
-	warnVPNDegraded(logger, metrics.CustomCounter, "203.0.113.7", "1", guild, false)
+	warnVPNDegraded(logger, metrics.CustomCounter, "203.0.113.7", "1", guild, false, vpnDegradedLookupFailed)
 	now = now.Add(2 * time.Second)
-	warnVPNDegraded(logger, metrics.CustomCounter, "203.0.113.7", "1", guild, false)
+	warnVPNDegraded(logger, metrics.CustomCounter, "203.0.113.7", "1", guild, false, vpnDegradedLookupFailed)
 
 	require.Len(t, logs.FilterMessage("VPN blocking degraded: IPQS lookup unavailable for VPN check").All(), 2,
 		"a persistent outage must keep re-announcing itself once the window elapses")
@@ -154,7 +158,7 @@ func TestWarnVPNDegraded_CarriesTriageFields(t *testing.T) {
 	core, logs := observer.New(zapcore.DebugLevel)
 	metrics := newRecordingMetrics()
 
-	warnVPNDegraded(zap.New(core), metrics.CustomCounter, "203.0.113.7", "123456789012345678", "987654321098765432", true)
+	warnVPNDegraded(zap.New(core), metrics.CustomCounter, "203.0.113.7", "123456789012345678", "987654321098765432", true, vpnDegradedLookupFailed)
 
 	entries := logs.FilterMessage("VPN blocking degraded: IPQS lookup unavailable for VPN check").All()
 	require.Len(t, entries, 1)
@@ -187,9 +191,140 @@ func TestShouldWarnVPNDegraded(t *testing.T) {
 		{name: "lookup succeeded", blockVPNUsers: true, isVPNBypass: false, ipInfo: &StubIPInfo{}, want: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, shouldWarnVPNDegraded(tc.blockVPNUsers, tc.isVPNBypass, tc.ipInfo), tc.wantExplainedBy)
+			got := shouldWarnVPNDegraded(tc.blockVPNUsers, tc.ipInfo, func() bool { return tc.isVPNBypass })
+			require.Equal(t, tc.want, got, tc.wantExplainedBy)
 		})
 	}
+}
+
+// Review follow-up. The bypass check reaches through GuildGroup.HasRole into a
+// per-guild RLock (server/evr_guild_group.go), so it must stay behind the two
+// cheap conditions the way the original `&&` chain had it. Passing a plain bool
+// made Go evaluate it on every lobby authorize, including the overwhelmingly
+// common case where the guild does not block VPNs at all.
+func TestShouldWarnVPNDegraded_DoesNotEvaluateBypassUnlessItMatters(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		blockVPNUsers bool
+		ipInfo        IPInfo
+	}{
+		{"guild does not block VPNs", false, nil},
+		{"lookup succeeded, so the gate ran normally", true, &StubIPInfo{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			require.False(t, shouldWarnVPNDegraded(tc.blockVPNUsers, tc.ipInfo, func() bool { called = true; return false }))
+			require.False(t, called,
+				"the bypass lookup takes a per-guild read lock; it must stay short-circuited behind the cheap checks")
+		})
+	}
+}
+
+// Review follow-up (blocking). SEC-6(a) made the degraded gate alertable, but on
+// an untagged counter the alert is useless on a large class of deployments.
+//
+// The IP intelligence providers are only constructed inside `if redisClient !=
+// nil` (server/evr_pipeline.go), and redisClient is nil unless REDIS_URI is set.
+// A deployment without Redis therefore has *no* providers: IPInfoCache.Get
+// returns (nil, nil) for every public IP, permanently — not transiently.
+// shouldWarnVPNDegraded is then true for every player in every BlockVPNUsers
+// guild on every lobby authorize, forever, so an alert wired to
+// lobby_vpn_check_degraded fires forever and carries zero information. That is
+// the same "buries its own signal" failure SEC-6(b) exists to fix, relocated
+// from the log into the metric.
+//
+// The fix is to tell the two apart. The standing configuration gap is still
+// counted and still logged — it is a real security gap — but on its own reason
+// tag and its own much longer log window, so it can neither be mistaken for an
+// outage nor drown one out.
+func TestVPNDegradedReasonFor_DistinguishesAStandingGapFromAnOutage(t *testing.T) {
+	configured, err := NewIPInfoCache(nil, nil, &erroringIPInfoProvider{name: "IPQS", info: &StubIPInfo{}})
+	require.NoError(t, err)
+	require.Equal(t, vpnDegradedLookupFailed, vpnDegradedReasonFor(configured),
+		"with a provider wired up, an empty result is a transient lookup failure — the alertable case")
+
+	unconfigured, err := NewIPInfoCache(nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, vpnDegradedNotConfigured, vpnDegradedReasonFor(unconfigured),
+		"with no provider at all the gate can never evaluate; this is a standing config gap, not an outage")
+
+	require.Equal(t, vpnDegradedNotConfigured, vpnDegradedReasonFor(nil),
+		"a nil cache is the same standing gap, and classifying it must not panic")
+}
+
+func TestIPInfoCache_IsConfigured(t *testing.T) {
+	none, err := NewIPInfoCache(nil, nil)
+	require.NoError(t, err)
+	require.False(t, none.IsConfigured(),
+		"no REDIS_URI means no providers are ever appended (server/evr_pipeline.go)")
+
+	some, err := NewIPInfoCache(nil, nil, &erroringIPInfoProvider{name: "IPQS", info: &StubIPInfo{}})
+	require.NoError(t, err)
+	require.True(t, some.IsConfigured())
+
+	var nilCache *IPInfoCache
+	require.False(t, nilCache.IsConfigured(), "must be nil-safe: callers classify before dereferencing")
+}
+
+func TestWarnVPNDegraded_CounterCarriesReasonSoAlertsCanSelectTheTransientCase(t *testing.T) {
+	resetVPNDegradedThrottle(t)
+
+	core, _ := observer.New(zapcore.DebugLevel)
+	metrics := newRecordingMetrics()
+
+	warnVPNDegraded(zap.New(core), metrics.CustomCounter, "203.0.113.7", "1", "987654321098765432", false, vpnDegradedNotConfigured)
+
+	tags := metrics.tagsFor("lobby_vpn_check_degraded")
+	require.NotNil(t, tags)
+	require.Equal(t, "not_configured", tags["reason"],
+		"a permanently-firing counter must be distinguishable from a real outage, or the alert is noise")
+
+	warnVPNDegraded(zap.New(core), metrics.CustomCounter, "203.0.113.7", "1", "987654321098765432", false, vpnDegradedLookupFailed)
+	require.Equal(t, "lookup_failed", metrics.tagsFor("lobby_vpn_check_degraded")["reason"],
+		"alert on reason=lookup_failed to page only on the transient case")
+}
+
+// The standing gap must not consume the outage warning's throttle budget, and
+// must not be reported in the outage's words: an operator grepping for the IPQS
+// outage message must not find a deployment that simply has no provider.
+func TestWarnVPNDegraded_UnconfiguredGapDoesNotImpersonateOrCrowdOutAnOutage(t *testing.T) {
+	resetVPNDegradedThrottle(t)
+
+	now := time.Now()
+	vpnDegradedLogThrottle.setClock(func() time.Time { return now })
+	vpnUnconfiguredLogThrottle.setClock(func() time.Time { return now })
+
+	core, logs := observer.New(zapcore.DebugLevel)
+	logger := zap.New(core)
+	metrics := newRecordingMetrics()
+
+	const guild = "111111111111111111"
+
+	// A whole hour of authorizes on a deployment with no provider configured.
+	for i := 0; i < 60; i++ {
+		warnVPNDegraded(logger, metrics.CustomCounter, "203.0.113.7", "1", guild, false, vpnDegradedNotConfigured)
+		now = now.Add(time.Minute)
+	}
+
+	outage := logs.FilterMessage("VPN blocking degraded: IPQS lookup unavailable for VPN check").All()
+	require.Empty(t, outage,
+		"a deployment with no provider is not an IPQS outage and must not be logged as one")
+
+	gap := logs.FilterMessage("VPN blocking inert: no IP intelligence provider is configured").All()
+	require.Len(t, gap, 1,
+		"the standing gap holds until the process is restarted with a provider configured, so it gets a "+
+			"long window — 60 lines per guild per hour, forever, is the log spam SEC-6(b) exists to prevent")
+	require.Equal(t, zapcore.WarnLevel, gap[0].Level)
+	require.Equal(t, "not_configured", gap[0].ContextMap()["reason"])
+
+	require.Equal(t, int64(60), metrics.count("lobby_vpn_check_degraded"),
+		"the counter still carries the true volume; only the prose is throttled")
+
+	// The outage warning's budget is untouched: a real IPQS failure in the same
+	// guild still gets its line immediately.
+	warnVPNDegraded(logger, metrics.CustomCounter, "203.0.113.7", "1", guild, false, vpnDegradedLookupFailed)
+	require.Len(t, logs.FilterMessage("VPN blocking degraded: IPQS lookup unavailable for VPN check").All(), 1,
+		"the two conditions must throttle independently, or a standing gap silences a real outage")
 }
 
 // (c) The `errored` map in IPInfoCache.Get was populated and never read, so Get

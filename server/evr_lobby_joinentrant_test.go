@@ -32,7 +32,7 @@ func TestVPNDegradedWarning_FiresWhenIPQSLookupUnavailable(t *testing.T) {
 		guildID   = "987654321098765432"
 	)
 
-	warnVPNDegraded(logger, newRecordingMetrics().CustomCounter, clientIP, discordID, guildID, false)
+	warnVPNDegraded(logger, newRecordingMetrics().CustomCounter, clientIP, discordID, guildID, false, vpnDegradedLookupFailed)
 
 	entries := logs.FilterMessage("VPN blocking degraded: IPQS lookup unavailable for VPN check").All()
 	require.Len(t, entries, 1, "expected exactly one degraded-VPN warning")

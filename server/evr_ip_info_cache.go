@@ -38,6 +38,21 @@ func NewIPInfoCache(logger *zap.Logger, metrics Metrics, clients ...IPInfoProvid
 	return &ipqs, nil
 }
 
+// IsConfigured reports whether any IP intelligence provider is wired up.
+//
+// Providers are only constructed inside `if redisClient != nil` in
+// server/evr_pipeline.go, and redisClient is nil unless REDIS_URI is set — so a
+// deployment without Redis has none at all and Get returns (nil, nil) for every
+// public IP permanently, rather than transiently. Callers that report a degraded
+// VPN gate use this to tell a standing configuration gap apart from an outage;
+// without it, a per-authorize alert on the degraded gate fires forever and
+// carries no information.
+//
+// Nil-safe so a caller can classify before dereferencing.
+func (s *IPInfoCache) IsConfigured() bool {
+	return s != nil && len(s.clients) > 0
+}
+
 // Get returns IP intelligence for ip from the first provider that has it.
 //
 // The error return is part of the IPInfoProvider shape and is always nil today:
