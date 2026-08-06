@@ -423,6 +423,65 @@ func TestStorableRead_CreateRetriesWhenWinnerVanishes(t *testing.T) {
 	}
 }
 
+// TestStorableRead_CreateFailsHonestlyWhenTheRaceNeverSettles pins the terminal
+// behaviour of storableCreate when its attempts run out, and pins the reason it
+// is left alone.
+//
+// The interleaving: a concurrent writer recreates the object after every read
+// (so every create-only write is rejected) and deletes it after every write (so
+// every adoption re-read misses). storableCreate spends both attempts and
+// returns the last error it observed, which is the NotFound from the final
+// adoption read. That NotFound is not a lie — it is exactly what the last read
+// saw — but it does leave a get-or-create reporting absence.
+//
+// It is deliberately NOT converted into a further write attempt. The invariant
+// that matters is that a conflict never resolves to a false success, and it
+// holds here: the call reports failure and nothing of dst was persisted. Adding
+// one more create-only write does not remove the failure — in this exact
+// interleaving it is rejected too, and the call returns
+// "failed to write: Storage write rejected - version check failed" instead of
+// "no ... found". That is a relabelled error bought with an extra round-trip,
+// and it pushes retry down to a layer that has no way to know whether retrying
+// is the right answer for this data. Retry belongs to the caller.
+//
+// Reachability is effectively nil regardless: no path in this package deletes a
+// create=true object's collection+key except StorableRead's own corrupt-record
+// recovery, which cannot fire on an object a writer of the same type just
+// created.
+func TestStorableRead_CreateFailsHonestlyWhenTheRaceNeverSettles(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	userID := uuid.Must(uuid.NewV4()).String()
+	nk := newStorableRaceNK()
+
+	nk.afterRead = func(m *storableRaceNK) {
+		m.set(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey, winnerLatencyJSON(t, "10.0.0.1"))
+	}
+	nk.afterWrite = func(m *storableRaceNK) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		delete(m.objects, storableRaceKey(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey))
+	}
+
+	dst := NewLatencyHistory()
+	err := StorableRead(ctx, nk, userID, dst, true)
+	if err == nil {
+		t.Fatal("a create that never won must not report success")
+	}
+	if got := status.Code(err); got != codes.NotFound {
+		t.Errorf("terminal error code = %v, want %v (the last observed read); err = %v", got, codes.NotFound, err)
+	}
+	// The load-bearing half: failure is reported, and no mutation was silently
+	// discarded behind a success.
+	if _, writes, _ := nk.counts(); writes != storableCreateMaxAttempts {
+		t.Errorf("write attempts = %d, want %d — the terminal error must not be bought with an extra blind write",
+			writes, storableCreateMaxAttempts)
+	}
+	if v := dst.StorageMeta().Version; v != "stale-version" && v != "" {
+		t.Errorf("dst must not carry a version it never got an ack for, got %q", v)
+	}
+}
+
 // TestStorableRead_CreateStillCreatesWhenAbsent is the companion boundary case:
 // with no concurrent writer, create=true must still create the object and leave
 // dst holding a usable storage version. Both a type whose zero storage version
