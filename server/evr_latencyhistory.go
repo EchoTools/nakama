@@ -45,6 +45,8 @@ func NewLatencyHistory() *LatencyHistory {
 }
 
 func (h *LatencyHistory) StorageMeta() StorableMetadata {
+	h.RLock()
+	defer h.RUnlock()
 	return StorableMetadata{
 		Collection:      LatencyHistoryStorageCollection,
 		Key:             LatencyHistoryStorageKey,
@@ -119,9 +121,97 @@ func (h *LatencyHistory) writeWithRetry(ctx context.Context, nk runtime.NakamaMo
 	return fmt.Errorf("LatencyHistory.writeWithRetry: exhausted %d attempts: %w", latencyRetryMaxAttempts, lastErr)
 }
 
-func (h *LatencyHistory) String() string {
+// latencyHistoryData is the wire form of LatencyHistory. It exists so that
+// MarshalJSON/UnmarshalJSON can serialize the exported state without copying
+// the embedded RWMutex (a `type Alias LatencyHistory` conversion would copy the
+// lock). Any exported field added to LatencyHistory must be mirrored here or it
+// will silently stop being persisted.
+type latencyHistoryData struct {
+	GameServerLatencies map[string][]LatencyHistoryItem `json:"game_server_latencies"`
+}
+
+// MarshalJSON serializes the history under the read lock.
+//
+// A *LatencyHistory is shared across a session's goroutines via
+// sessionParameters.latencyHistory, and StorableWrite marshals the live object,
+// so the encoder walks the same map that Add mutates. Without this the encode
+// is an unsynchronized map read racing a locked map write.
+func (h *LatencyHistory) MarshalJSON() ([]byte, error) {
 	h.RLock()
 	defer h.RUnlock()
+	return json.Marshal(latencyHistoryData{GameServerLatencies: h.GameServerLatencies})
+}
+
+// UnmarshalJSON deserializes the history under the write lock.
+//
+// StorableRead decodes straight into the live, session-shared object (see
+// writeWithRetry's re-read after a version conflict), so the decode is a map
+// write that must be serialized against the locked readers on other goroutines.
+// Unsynchronized, it surfaces as "fatal error: concurrent map read and map
+// write" — a runtime throw that kills the process rather than a recoverable
+// panic.
+//
+// Merge semantics match what encoding/json did for the plain struct in every
+// case except one: keys from the decoded record are adopted, and keys present
+// only in the receiver are preserved.
+//
+// The one divergence is a JSON null (or an absent key) for the map.
+// Reflection-decoding `{"game_server_latencies":null}` set the field to a nil
+// map, discarding whatever the receiver already held; this implementation
+// leaves the receiver exactly as it found it. That document is reachable in
+// production — StorableWrite on a `&LatencyHistory{}` with a nil map
+// (constructed at evr_pipeline_login.go, evr_runtime_rpc.go and
+// evr_runtime_rpc_match.go) persists exactly that — and the divergence is
+// strictly the safer direction: writeWithRetry's re-read no longer silently
+// drops the caller's pending samples when the concurrent winner stored a null
+// map. Pinned by TestLatencyHistory_UnmarshalNullMapPreservesExisting.
+//
+// "Leaves the receiver as it found it" includes leaving a nil map NIL. The
+// null case returns before allocating, because whether the map is nil is
+// persisted state, not an implementation detail: a nil map marshals to `null`
+// and an allocated empty one to `{}`, so allocating here would make the
+// StorableRead -> StorableWrite round trip rewrite a stored null record into
+// `{}` without a single sample having changed. An explicit
+// `{"game_server_latencies":{}}` is NOT null and still allocates, matching
+// encoding/json. Pinned by TestLatencyHistory_UnmarshalNullMapIntoNilReceiverStaysNil,
+// TestLatencyHistory_NullMapRecordRoundTrips and
+// TestLatencyHistory_UnmarshalEmptyObjectMapStillAllocates.
+//
+// Decoding is also all-or-nothing where the reflection decode salvaged whatever
+// it had already parsed: a record whose map holds one malformed value now
+// contributes NOTHING to the receiver instead of contributing its valid keys.
+// Both versions return the same error, and StorableRead's corrupt-record path
+// (evr_storable.go) deletes and recreates the record from the in-memory object
+// either way, so the only delta is that partially-salvaged keys are no longer
+// folded into that rewrite. Atomic is the intended semantic: a half-applied
+// decode leaves the session's live object in a state no stored record ever had.
+// Pinned by TestLatencyHistory_UnmarshalErrorLeavesReceiverUntouched.
+func (h *LatencyHistory) UnmarshalJSON(data []byte) error {
+	var decoded latencyHistoryData
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if decoded.GameServerLatencies == nil {
+		// Null or absent: there is nothing to merge and nothing to allocate, so
+		// this is a no-op on the receiver and needs no lock — same as the decode
+		// error above, which also returns before locking.
+		return nil
+	}
+	h.Lock()
+	defer h.Unlock()
+	if h.GameServerLatencies == nil {
+		h.GameServerLatencies = make(map[string][]LatencyHistoryItem, len(decoded.GameServerLatencies))
+	}
+	for extIP, history := range decoded.GameServerLatencies {
+		h.GameServerLatencies[extIP] = history
+	}
+	return nil
+}
+
+func (h *LatencyHistory) String() string {
+	// json.Marshal dispatches to MarshalJSON, which takes the read lock. Taking
+	// it here as well would be a recursive RLock and can deadlock against a
+	// waiting writer.
 	data, err := json.Marshal(h)
 	if err != nil {
 		return ""
@@ -359,6 +449,10 @@ func (h *LatencyHistory) HasRecentEntry(ipKey string, cutoff time.Time) bool {
 	return false
 }
 
+// Get returns a copy of the recorded history for an external IP. The copy is
+// required: Add mutates the stored slice in place (append into spare capacity,
+// slices.Delete compaction), so handing out the live slice lets the caller read
+// it after the lock is released, racing the next Add.
 func (h *LatencyHistory) Get(extIP string) ([]LatencyHistoryItem, bool) {
 	h.RLock()
 	defer h.RUnlock()
@@ -366,7 +460,7 @@ func (h *LatencyHistory) Get(extIP string) ([]LatencyHistoryItem, bool) {
 	if !ok || len(history) == 0 {
 		return nil, false
 	}
-	return history, true
+	return slices.Clone(history), true
 }
 
 func sortPingCandidatesByLatencyHistory(hostIPs []string, latencyHistory *LatencyHistory) {

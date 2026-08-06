@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/heroiclabs/nakama-common/api"
@@ -41,6 +42,92 @@ func reconcileOrphanGuilds(logger runtime.Logger, orphanGuilds []*discordgo.Guil
 	return remaining
 }
 
+// snapshotStateGuilds returns a copy of the guilds the bot is a member of,
+// taken under the discordgo state's read lock.
+//
+// discordgo owns Session.State and mutates it from the gateway goroutine under
+// State.Lock(): GuildAdd appends to State.Guilds and overwrites an existing
+// *Guild in place (`*g = *guild`), ChannelAdd appends to guild.Channels and
+// overwrites an existing *Channel in place, and ChannelRemove compacts
+// guild.Channels. pruneGuildGroups runs on the prune ticker goroutine, not the
+// gateway goroutine, so reading State.Guilds unlocked and passing the LIVE
+// *Guild pointers on to a deep reader — guildSync ranges guild.Channels, and
+// the leave path logs the whole guild, which zap reflect-walks it — races the
+// gateway. In production that surfaces as a torn slice header (index out of
+// range) or a read of an already-removed channel.
+//
+// The copy goes exactly as deep as the consumers read: the Guild struct and its
+// Channels. Every other reference-typed field is CLEARED rather than left
+// aliasing live state, so a future deep read cannot silently reach back into
+// gateway-mutated memory; a caller that needs one of them must extend the
+// copy here.
+func snapshotStateGuilds(state *discordgo.State) []*discordgo.Guild {
+	if state == nil {
+		return nil
+	}
+
+	state.RLock()
+	defer state.RUnlock()
+
+	guilds := make([]*discordgo.Guild, 0, len(state.Guilds))
+	for _, g := range state.Guilds {
+		if g == nil {
+			continue
+		}
+		guilds = append(guilds, copyStateGuild(g))
+	}
+	return guilds
+}
+
+// copyStateGuild copies a guild out of the discordgo state. It must be called
+// with the state's read lock held. See snapshotStateGuilds for why.
+func copyStateGuild(g *discordgo.Guild) *discordgo.Guild {
+	// discordgo.Guild carries no lock, so the struct copy is safe; it takes the
+	// scalar fields guildSync reads (ID, Name, OwnerID, Description, Icon).
+	c := *g
+
+	// Channels is the one collection read deeply: guildSync scans it for the
+	// #rules channel, and ChannelAdd overwrites *Channel values in place.
+	c.Channels = make([]*discordgo.Channel, 0, len(g.Channels))
+	for _, ch := range g.Channels {
+		if ch == nil {
+			continue
+		}
+		chCopy := *ch
+		// The channel's own collections still alias live state (MessageAdd
+		// appends to Channel.Messages under State.Lock()). Nothing reads them
+		// here, so drop them rather than hand out an aliased header.
+		chCopy.Recipients = nil
+		chCopy.Messages = nil
+		chCopy.PermissionOverwrites = nil
+		chCopy.ThreadMetadata = nil
+		chCopy.Member = nil
+		chCopy.Members = nil
+		chCopy.AvailableTags = nil
+		chCopy.AppliedTags = nil
+		// Pointer fields nothing here reads. ChannelAdd replaces the pointer
+		// (`*c = *channel`) rather than writing through it, so aliasing them
+		// would not actually race — but "cleared unless copied" has to hold
+		// for every reference-typed field or the contract is unenforceable.
+		chCopy.LastPinTimestamp = nil
+		chCopy.DefaultSortOrder = nil
+		c.Channels = append(c.Channels, &chCopy)
+	}
+	c.Features = slices.Clone(g.Features)
+
+	// Collections no consumer of this snapshot reads. Cleared, not aliased.
+	c.Roles = nil
+	c.Emojis = nil
+	c.Stickers = nil
+	c.Members = nil
+	c.Presences = nil
+	c.Threads = nil
+	c.VoiceStates = nil
+	c.StageInstances = nil
+
+	return &c
+}
+
 func (d *DiscordIntegrator) pruneGuildGroups(ctx context.Context, logger runtime.Logger, doGuildLeaves, doGroupDeletes bool, pruneSafetyThreshold int) error {
 	var (
 		groupByGuildID = make(map[string]*api.Group)
@@ -76,13 +163,14 @@ func (d *DiscordIntegrator) pruneGuildGroups(ctx context.Context, logger runtime
 		}
 	}
 
-	if len(d.dg.State.Guilds) == 0 {
+	stateGuilds := snapshotStateGuilds(d.dg.State)
+	if len(stateGuilds) == 0 {
 		logger.Warn("No guilds found in Discord state, skipping pruning operation")
 		return nil
 	}
 	// Get the guilds where the bot is a member
-	botGuildMap := make(map[string]*discordgo.Guild)
-	for _, g := range d.dg.State.Guilds {
+	botGuildMap := make(map[string]*discordgo.Guild, len(stateGuilds))
+	for _, g := range stateGuilds {
 		botGuildMap[g.ID] = g
 	}
 
