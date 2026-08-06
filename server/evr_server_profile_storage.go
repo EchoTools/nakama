@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -344,14 +344,12 @@ func ServerProfileLoadByXPID(ctx context.Context, logger *zap.Logger, db *sql.DB
 	return r.profile, r.userID, nil
 }
 
-// isVersionConflictError checks if an error is a storage version conflict.
-// These are expected during concurrent profile writes and should be ignored
-// since the profiles being written are identical.
+// isVersionConflictError reports whether err is a storage optimistic-concurrency
+// rejection, i.e. whether runtime.ErrStorageRejectedVersion is anywhere in its
+// chain. Every storage write path in this package preserves that sentinel with
+// %w, so no text matching is needed.
 func isVersionConflictError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "version check failed")
+	return errors.Is(err, runtime.ErrStorageRejectedVersion)
 }
 
 // ServerProfileDelete removes a ServerProfile from storage

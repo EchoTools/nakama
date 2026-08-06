@@ -3,13 +3,13 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
-
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -313,45 +313,79 @@ func SyncJournalAndProfile(ctx context.Context, nk runtime.NakamaModule, userID 
 // SyncJournalAndProfileWithRetry syncs journal and profile with retry logic for
 // concurrent writes, handling version conflicts with exponential backoff.
 //
-// Every attempt writes the journal and the projection in ONE nk.MultiUpdate, so
-// they share a transaction and cannot half-apply. This is the more exposed of
-// the two sync functions -- five call sites to SyncJournalAndProfile's three --
-// and it previously issued two separate StorableWrite calls, i.e. two
-// independent transactions. A failure between them advanced the authority while
-// leaving the projection describing the previous state, in the PERMISSIVE
-// direction.
+// ATOMICITY. Every attempt writes the journal and the projection in ONE
+// nk.MultiUpdate, so they share a transaction and cannot half-apply. This is
+// the more exposed of the two sync functions -- five call sites to
+// SyncJournalAndProfile's three -- and it previously issued two separate
+// StorableWrite calls, i.e. two independent transactions. A failure between
+// them advanced the authority while leaving the projection describing the
+// previous state, in the PERMISSIVE direction.
 //
 // Neither read creates its object. A read-through create is itself an unpaired
-// single-object write, which would defeat the very atomicity this function now
+// single-object write, which would defeat the very atomicity this function
 // provides; a freshly constructed object already carries version "*", so the
 // atomic write below inserts it.
 //
-// RETRY LAYERING: this function does NOT retry the journal write, and must not.
+// WHAT GETS RE-WRITTEN ON A CONFLICT. The invariant is that this function must
+// never report success after discarding somebody else's mutation. The original
+// loop broke it in the worst possible way: it re-read the stored journal,
+// adopted ONLY the winner's storage VERSION, wrote the caller's stale in-memory
+// contents on top, and returned nil -- destroying a concurrent moderator's ban
+// record while reporting success.
 //
-// It receives an ALREADY-MUTATED journal, so it does not know which records the
-// caller just added. On a version conflict it therefore has no way to re-apply
-// that mutation to the winner's copy -- its only option would be to resubmit
-// the stale payload, which is what the old loop did: it adopted the winner's
-// VERSION, wrote its own contents on top, and returned nil. That silently
-// destroyed the winner's ban record while reporting success.
+// The fix is NOT to adopt the version alone, and it is NOT to blindly resubmit
+// the stale payload either. It is GuildEnforcementJournal.mergeStored: the
+// stored journal is re-read and the caller's pending records and voids are
+// merged INTO it, so the payload the retry submits is the union of both writers
+// rather than either one's snapshot. Adopting the winner's version is sound
+// only as part of that merge -- it is what lets the union land on top of the
+// winner -- and is a data-destroying bug without it. The merge is sound because
+// the journal is append-structured; see mergeStored for the per-field rules,
+// including why CommunityValuesCompletedAt is NOT resolved by "later wins".
 //
-// Re-applying is the CALLER's job, because only the caller knows the mutation.
-// A conflict is returned so the caller can decide: re-read, re-apply its
-// record, and call again, or surface the failure. Losing a race and saying so
-// is correct; succeeding while discarding data is not.
+// If the post-conflict re-read itself fails, the sync ABORTS. Without the
+// winner's state there is nothing safe to write, and re-writing the unchanged
+// stale journal can only conflict again. Losing a race and saying so is
+// correct; succeeding while discarding data is not.
 //
-// The bounded loop that remains covers only the PROJECTION, which is safe to
-// re-derive because it is a pure function of the journal (SyncFromJournal). If
-// the profile's version moved underneath us, re-reading and re-deriving it is
-// obviously correct and costs nothing. A journal conflict is returned as-is.
+// The profile needs no such care: it is a pure projection of the journal
+// (SyncFromJournal), so it is simply re-read for its current version and
+// re-derived from the merged journal on every attempt.
 func SyncJournalAndProfileWithRetry(ctx context.Context, nk runtime.NakamaModule, userID string, journal *GuildEnforcementJournal) error {
 	const maxAttempts = 3
 	var lastErr error
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		// Re-read the profile to pick up its current version. This is the only
-		// state safe to re-derive here: it is a projection of the journal, not
-		// an independent mutation. A missing profile is not an error; the fresh
+		if attempt > 0 {
+			// Reconcile the journal with whoever won the previous attempt
+			// BEFORE the projection is derived below, so the profile reflects
+			// the merged record set and not just the caller's snapshot.
+			stored := NewGuildEnforcementJournal(userID)
+			if err := StorableRead(ctx, nk, userID, stored, false); err != nil {
+				if status.Code(err) != codes.NotFound {
+					return fmt.Errorf("SyncJournalAndProfileWithRetry: re-read after conflict: %w", err)
+				}
+				// The object was removed between attempts. There is no
+				// concurrent state to reconcile with, so do NOT merge: retry
+				// the caller's own journal under the create-only version.
+				//
+				// Merging against a stand-in empty journal would be wrong in
+				// both directions. mergeStored treats stored as authoritative
+				// for CommunityValuesCompletedAt, and an empty journal's zero
+				// value means "the player must accept community values" — it
+				// would gate a player whose journal does not even exist.
+				meta := journal.StorageMeta()
+				meta.UserID = userID
+				meta.Version = "*"
+				journal.SetStorageMeta(meta)
+			} else {
+				journal.mergeStored(stored)
+			}
+		}
+
+		// Re-read the profile to pick up its current version. This is safe to
+		// re-derive unconditionally: it is a projection of the journal, not an
+		// independent mutation. A missing profile is not an error; the fresh
 		// one carries version "*" and the atomic write below inserts it.
 		profile := NewSuspensionProfile(userID)
 		if err := StorableRead(ctx, nk, userID, profile, false); err != nil && status.Code(err) != codes.NotFound {
@@ -371,11 +405,15 @@ func SyncJournalAndProfileWithRetry(ctx context.Context, nk runtime.NakamaModule
 			return err
 		}
 
-		// The journal's version is deliberately NOT refreshed between attempts.
-		// If the conflict was the journal's, the next attempt conflicts again
-		// and the caller gets the error -- which is the correct outcome, since
-		// only the caller can re-apply. If it was the profile's, the re-read at
-		// the top of the loop resolves it.
+		// Back off, then reconcile at the top of the next attempt. Only a
+		// version conflict reaches here -- MultiUpdate is all-or-nothing, so
+		// nothing was written and either object may have been the one rejected.
+		// A profile conflict is resolved by the unconditional re-read; a journal
+		// conflict is resolved by mergeStored, which is the only thing that
+		// makes refreshing the journal's version safe. Never refresh that
+		// version without merging first: writing the caller's stale contents at
+		// the winner's version is precisely the bug that silently destroyed a
+		// concurrent moderator's ban record.
 		backoff := time.Duration(10*(1<<uint(attempt))) * time.Millisecond
 		select {
 		case <-time.After(backoff):
