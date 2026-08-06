@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -199,5 +201,88 @@ func TestLatencyHistory_writeWithRetry_ExhaustionLeavesHistoryStale(t *testing.T
 	}
 	if _, ok := stored.GameServerLatencies["10.0.0.2"]; ok {
 		t.Fatalf("precondition: nothing should have been persisted, got %v", stored.GameServerLatencies)
+	}
+}
+
+// wideLatencyJSON builds a stored history with n distinct game servers. Width
+// matters for TestLatencyHistory_writeWithRetry_AdoptionIsLocked: the readers it
+// races hold the read lock for the length of a full map iteration, so a wide map
+// keeps their critical sections open across the adoption instead of closing them
+// in the nanoseconds between two of writeWithRetry's own lock acquisitions.
+func wideLatencyJSON(t *testing.T, n int) string {
+	t.Helper()
+	winner := NewLatencyHistory()
+	for i := 0; i < n; i++ {
+		winner.GameServerLatencies[fmt.Sprintf("10.0.%d.%d", i/256, i%256)] = []LatencyHistoryItem{
+			{Timestamp: time.Now().UTC(), RTT: time.Duration(i+1) * time.Millisecond},
+		}
+	}
+	return mustStorableJSON(t, winner)
+}
+
+// TestLatencyHistory_writeWithRetry_AdoptionIsLocked pins that the post-conflict
+// adoption of the winner's object happens under h's write lock.
+//
+// h is the session-shared history (sessionParameters.latencyHistory), read
+// concurrently by the lobby-find and matchmaker goroutines through LatestRTTs /
+// AverageRTTs / HasRecentEntry, all of which take h.RLock. Replacing
+// h.GameServerLatencies with a bare field assignment is therefore an
+// unsynchronized write against every one of those locked readers — a wider race
+// than the unmarshal-into-h it replaced, because the map header itself is the
+// thing being swapped.
+//
+// The map pointer and the storage version must also move together: a reader that
+// observes the winner's entries paired with this caller's stale version has seen
+// a state that no stored record ever had.
+//
+// This test needs -race. Without the detector a torn map-header swap is very
+// unlikely to be observed, which is exactly why the detector is the instrument.
+func TestLatencyHistory_writeWithRetry_AdoptionIsLocked(t *testing.T) {
+	ctx := context.Background()
+	userID := uuid.Must(uuid.NewV4()).String()
+	nk := newStorableRaceNK()
+	nk.set(userID, LatencyHistoryStorageCollection, LatencyHistoryStorageKey, wideLatencyJSON(t, 512))
+	// Permanent contention: every write is rejected, so the loop performs
+	// latencyRetryMaxAttempts-1 adoptions with jittered backoff between them.
+	nk.alwaysConflict = true
+
+	h := staleLatencyHistory("10.9.9.9")
+	for i := 0; i < 512; i++ {
+		h.Add(net.ParseIP(fmt.Sprintf("10.1.%d.%d", i/256, i%256)), i+1, 25, time.Time{})
+	}
+
+	// reapply is a no-op so that the ONLY write to h from the writeWithRetry
+	// goroutine is the adoption itself. An Add here would muddy the finding.
+	reapply := func() error { return nil }
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				_ = h.LatestRTTs()
+				_ = h.AverageRTTs(false)
+				_ = h.HasRecentEntry("10.0.0.1", time.Time{})
+			}
+		}()
+	}
+
+	err := h.writeWithRetry(ctx, nk, userID, reapply)
+	close(stop)
+	wg.Wait()
+
+	if err == nil {
+		t.Fatal("precondition: permanent contention must exhaust the attempts")
+	}
+	if _, writes, _ := nk.counts(); writes != latencyRetryMaxAttempts {
+		t.Fatalf("precondition: want %d write attempts (so %d adoptions ran), got %d",
+			latencyRetryMaxAttempts, latencyRetryMaxAttempts-1, writes)
 	}
 }

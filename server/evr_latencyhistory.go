@@ -138,8 +138,22 @@ func (h *LatencyHistory) writeWithRetry(ctx context.Context, nk runtime.NakamaMo
 		if rerr := StorableRead(ctx, nk, userID, fresh, false); rerr != nil {
 			return fmt.Errorf("LatencyHistory.writeWithRetry: re-read after conflict: %w", rerr)
 		}
+		// The adoption swaps the map header itself, so it must be serialized
+		// against the locked accessors (Add, LatestRTTs, AverageRTTs,
+		// HasRecentEntry, ...) that share this object — h is the session-shared
+		// history. Map and version move under ONE acquisition: split, a reader
+		// can observe the winner's entries paired with this caller's stale
+		// version, a pairing no stored record ever had.
+		//
+		// h.version is assigned directly rather than through SetStorageMeta,
+		// which takes h.Lock itself and would deadlock here. fresh's metadata is
+		// read BEFORE the lock is taken so no second object's lock is ever
+		// acquired while holding h's.
+		freshMeta := fresh.StorageMeta()
+		h.Lock()
 		h.GameServerLatencies = fresh.GameServerLatencies
-		h.SetStorageMeta(fresh.StorageMeta())
+		h.version = freshMeta.Version
+		h.Unlock()
 		if rerr := reapply(); rerr != nil {
 			return fmt.Errorf("LatencyHistory.writeWithRetry: re-apply after conflict: %w", rerr)
 		}
