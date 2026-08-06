@@ -77,6 +77,7 @@ type MatchLabel struct {
 	noServerTicks        int64                           // Consecutive ticks the match has had no game server presence (10s deadline).
 	unallocatedTicks     int64                           // Consecutive ticks an unassigned parking match with a server has gone unallocated (120s deadline).
 	startAttempts        int64                           // Number of MatchStart attempts made; bounds the start retry loop (MatchStartMaxAttempts).
+	lastStartAttemptTick int64                           // MatchLoop tick of the most recent MatchStart attempt; throttles the retry to one per second. Its own field: sharing storage with a timer would let that timer's reset re-open the throttle.
 	terminateTick        int64                           // The tick count at which the match will be shut down.
 	goals                []*evr.MatchGoal                // The goals scored in the match.
 	matchSummarySent     bool                            // Whether the match summary has been sent.

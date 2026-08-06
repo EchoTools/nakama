@@ -1488,16 +1488,23 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		// are therefore bounded by MatchStartMaxAttempts and, after the first,
 		// throttled to one per second so a dead game server is not re-dispatched
 		// at tick rate.
-		// MatchInit clamps tickRate to 10 when it is unset, so the guard below
-		// is belt-and-braces: this is the first modulo in MatchLoop and the
-		// branch returns before the pre-existing ones, so a zero tickRate would
-		// now panic here rather than there.
+		//
+		// The throttle gates on the gap since the last attempt, not on
+		// `tick % tickRate == 0`: a modulo aligns retries to absolute tick
+		// boundaries, so a first attempt at tick 9 (tickRate 10) would be
+		// followed by a second at tick 10, 0.1s later. lastStartAttemptTick is
+		// this throttle's own field for the same reason each idle timer got its
+		// own counter — a shared one lets an unrelated reset re-open the gate.
+		// MatchInit clamps tickRate to 10 when it is unset; the guard below is
+		// belt-and-braces for a hand-built label with a zero tickRate, which
+		// would otherwise retry every tick.
 		throttleTicks := state.tickRate
 		if throttleTicks < 1 {
 			throttleTicks = 1
 		}
-		if state.startAttempts == 0 || tick%throttleTicks == 0 {
+		if state.startAttempts == 0 || tick-state.lastStartAttemptTick >= throttleTicks {
 			state.startAttempts++
+			state.lastStartAttemptTick = tick
 			started, err := m.MatchStart(ctx, logger, nk, dispatcher, state)
 			if err != nil {
 				logger.WithFields(map[string]any{
