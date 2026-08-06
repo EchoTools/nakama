@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -11,12 +12,13 @@ import (
 // discordgo owns Session.State and mutates it from the gateway goroutine under
 // State.Lock():
 //
-//   - GuildAdd (state.go:89) appends to State.Guilds (state.go:142) and, for a
-//     guild already in the cache, overwrites the existing *Guild IN PLACE
-//     (`*g = *guild`, state.go:141).
-//   - ChannelAdd (state.go:482) appends to guild.Channels and overwrites an
-//     existing *Channel in place (`*c = *channel`).
-//   - ChannelRemove (state.go:529) compacts guild.Channels.
+// (all line numbers are discordgo v0.29.0's state.go)
+//
+//   - GuildAdd (:89) appends to State.Guilds (:146) and, for a guild already in
+//     the cache, overwrites the existing *Guild IN PLACE (`*g = *guild`, :142).
+//   - ChannelAdd (:482) appends to guild.Channels (:520) and overwrites an
+//     existing *Channel in place (`*c = *channel`, :502).
+//   - ChannelRemove (:529) compacts guild.Channels.
 //
 // pruneGuildGroups runs on the 15-minute prune ticker goroutine
 // (evr_discord_integrator.go:189), NOT the gateway goroutine. It read
@@ -158,13 +160,17 @@ func TestSnapshotStateGuilds_DropsUncopiedLiveCollections(t *testing.T) {
 	sortOrder := discordgo.ForumSortOrderLatestActivity
 	state := discordgo.NewState()
 	if err := state.GuildAdd(&discordgo.Guild{
-		ID:      "guild-x",
-		Name:    "X",
-		OwnerID: "owner-x",
-		Roles:   []*discordgo.Role{{ID: "role-1"}},
-		Emojis:  []*discordgo.Emoji{{ID: "emoji-1"}},
-		Members: []*discordgo.Member{{User: &discordgo.User{ID: "u1"}}},
-		Threads: []*discordgo.Channel{{ID: "thread-1", GuildID: "guild-x"}},
+		ID:             "guild-x",
+		Name:           "X",
+		OwnerID:        "owner-x",
+		Roles:          []*discordgo.Role{{ID: "role-1"}},
+		Emojis:         []*discordgo.Emoji{{ID: "emoji-1"}},
+		Stickers:       []*discordgo.Sticker{{ID: "sticker-1"}},
+		Members:        []*discordgo.Member{{User: &discordgo.User{ID: "u1"}}},
+		Presences:      []*discordgo.Presence{{User: &discordgo.User{ID: "u1"}}},
+		VoiceStates:    []*discordgo.VoiceState{{UserID: "u1"}},
+		StageInstances: []*discordgo.StageInstance{{ID: "stage-1"}},
+		Threads:        []*discordgo.Channel{{ID: "thread-1", GuildID: "guild-x"}},
 		Channels: []*discordgo.Channel{
 			{ID: "c1", GuildID: "guild-x", Type: discordgo.ChannelTypeGuildText, Name: "rules", Topic: "t",
 				Messages:             []*discordgo.Message{{ID: "m1"}},
@@ -188,11 +194,18 @@ func TestSnapshotStateGuilds_DropsUncopiedLiveCollections(t *testing.T) {
 	}
 	g := snap[0]
 
+	// The eight Guild collections copyStateGuild clears. Channels is deep-copied
+	// and Features cloned; together that is all ten of discordgo.Guild's
+	// reference-typed fields.
 	for name, v := range map[string]int{
-		"Roles":   len(g.Roles),
-		"Emojis":  len(g.Emojis),
-		"Members": len(g.Members),
-		"Threads": len(g.Threads),
+		"Roles":          len(g.Roles),
+		"Emojis":         len(g.Emojis),
+		"Stickers":       len(g.Stickers),
+		"Members":        len(g.Members),
+		"Presences":      len(g.Presences),
+		"VoiceStates":    len(g.VoiceStates),
+		"StageInstances": len(g.StageInstances),
+		"Threads":        len(g.Threads),
 	} {
 		if v != 0 {
 			t.Errorf("snapshot still carries %s (%d entries); it aliases gateway-mutated state", name, v)
@@ -231,6 +244,111 @@ func TestSnapshotStateGuilds_DropsUncopiedLiveCollections(t *testing.T) {
 	if ch.ID != "c1" || ch.Name != "rules" || ch.Topic != "t" || ch.Type != discordgo.ChannelTypeGuildText {
 		t.Errorf("snapshot dropped the channel scalars guildSync reads: %+v", ch)
 	}
+}
+
+// populateNilReferenceFields fills every nil reference-typed field on a struct
+// with a non-nil value. It is what makes the aliasing guard below survive a
+// discordgo upgrade: a field added by a future version is populated here by
+// reflection, without this test knowing its name, so copyStateGuild's shallow
+// `c := *g` cannot silently start aliasing it.
+func populateNilReferenceFields(t *testing.T, v reflect.Value) {
+	t.Helper()
+	typ := v.Type()
+	for i := 0; i < typ.NumField(); i++ {
+		if !typ.Field(i).IsExported() {
+			continue
+		}
+		fv := v.Field(i)
+		switch fv.Kind() {
+		case reflect.Slice:
+			if fv.IsNil() {
+				fv.Set(reflect.MakeSlice(fv.Type(), 1, 1))
+			}
+		case reflect.Map:
+			if fv.IsNil() {
+				fv.Set(reflect.MakeMap(fv.Type()))
+			}
+		case reflect.Pointer:
+			if fv.IsNil() {
+				fv.Set(reflect.New(fv.Type().Elem()))
+			}
+		}
+	}
+}
+
+// assertNoLiveAliasing checks the contract copyStateGuild documents: every
+// reference-typed field is either CLEARED (nil) or deep-copied. Sharing backing
+// memory with the live object is the one thing it must never do, because the
+// gateway goroutine mutates that memory under State.Lock().
+func assertNoLiveAliasing(t *testing.T, label string, snap, live reflect.Value) {
+	t.Helper()
+	typ := snap.Type()
+	for i := 0; i < typ.NumField(); i++ {
+		f := typ.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		sv, lv := snap.Field(i), live.Field(i)
+		switch sv.Kind() {
+		case reflect.Slice, reflect.Map, reflect.Pointer, reflect.Chan, reflect.Func:
+		default:
+			continue
+		}
+		if sv.IsNil() || lv.IsNil() {
+			continue // cleared, or nothing to alias
+		}
+		if sv.Kind() == reflect.Slice && (sv.Len() == 0 || lv.Len() == 0) {
+			continue // no backing array to share
+		}
+		if sv.Pointer() == lv.Pointer() {
+			t.Errorf("%s.%s aliases live discordgo state (both %#x); copyStateGuild must deep-copy it or clear it",
+				label, f.Name, sv.Pointer())
+		}
+	}
+}
+
+// TestSnapshotStateGuilds_NoFieldAliasesLiveState is the self-enforcing version
+// of the copy contract. The table-driven test above names the fields it knows;
+// this one reflects over EVERY exported reference-typed field of Guild and
+// Channel, so a discordgo upgrade that adds one fails here instead of silently
+// handing gateway-mutated memory to the prune-leave path's zap reflect-walk.
+func TestSnapshotStateGuilds_NoFieldAliasesLiveState(t *testing.T) {
+	ch := &discordgo.Channel{
+		ID: "c1", GuildID: "guild-a", Type: discordgo.ChannelTypeGuildText, Name: "rules", Topic: "t",
+	}
+	populateNilReferenceFields(t, reflect.ValueOf(ch).Elem())
+
+	g := &discordgo.Guild{
+		ID: "guild-a", Name: "A", OwnerID: "owner-a",
+		Channels: []*discordgo.Channel{ch},
+	}
+	populateNilReferenceFields(t, reflect.ValueOf(g).Elem())
+
+	// State.Guilds is set directly rather than via GuildAdd: the reflective
+	// fixture leaves nil elements inside the pointer slices it fills, and
+	// GuildAdd dereferences guild.Threads[i] (state.go:103-105 @ v0.29.0) and,
+	// via createMemberMap, guild.Members[i].User (state.go:108-109). Only the
+	// slice headers matter
+	// for aliasing, and snapshotStateGuilds reads State.Guilds directly.
+	state := discordgo.NewState()
+	state.Guilds = []*discordgo.Guild{g}
+	live := g
+
+	snap := snapshotStateGuilds(state)
+	if len(snap) != 1 {
+		t.Fatalf("got %d guilds, want 1", len(snap))
+	}
+	got := snap[0]
+
+	assertNoLiveAliasing(t, "Guild", reflect.ValueOf(got).Elem(), reflect.ValueOf(live).Elem())
+
+	if len(got.Channels) != 1 || len(live.Channels) != 1 {
+		t.Fatalf("channels not carried: snapshot=%d live=%d", len(got.Channels), len(live.Channels))
+	}
+	if got.Channels[0] == live.Channels[0] {
+		t.Fatal("snapshot reused the live *Channel pointer")
+	}
+	assertNoLiveAliasing(t, "Channel", reflect.ValueOf(got.Channels[0]).Elem(), reflect.ValueOf(live.Channels[0]).Elem())
 }
 
 // TestSnapshotStateGuilds_SafeAgainstGatewayChannelMutation proves the guilds

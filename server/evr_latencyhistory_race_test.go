@@ -414,3 +414,33 @@ func TestLatencyHistory_UnmarshalRejectsGarbage(t *testing.T) {
 		t.Fatal("expected an error unmarshalling a malformed record, got nil")
 	}
 }
+
+// TestLatencyHistory_UnmarshalErrorLeavesReceiverUntouched pins the second
+// deliberate divergence from the reflection decode: decoding is all-or-nothing.
+//
+// Reflection decoded into the receiver key by key and kept whatever it had
+// parsed before hitting the malformed value, so a partially-corrupt record
+// contributed its valid keys AND wiped nothing. This implementation decodes
+// into a scratch value and returns before taking the lock, so a failed decode
+// contributes nothing and — critically — cannot leave the live, session-shared
+// object holding a half-applied merge of a record that never existed.
+func TestLatencyHistory_UnmarshalErrorLeavesReceiverUntouched(t *testing.T) {
+	h := NewLatencyHistory()
+	h.Add(net.ParseIP("10.0.0.9"), 7, 25, time.Time{})
+
+	// One valid entry, one malformed: the reflection decode salvaged 1.1.1.1.
+	const partial = `{"game_server_latencies":{"1.1.1.1":[{"timestamp":"2024-01-01T00:00:00Z","rtt":1000000}],"2.2.2.2":"bad"}}`
+	if err := json.Unmarshal([]byte(partial), h); err == nil {
+		t.Fatal("expected an error unmarshalling a partially malformed record, got nil")
+	}
+
+	if _, ok := h.GameServerLatencies["1.1.1.1"]; ok {
+		t.Error("a failed decode contributed a key to the receiver; decoding must be all-or-nothing")
+	}
+	if _, ok := h.GameServerLatencies["2.2.2.2"]; ok {
+		t.Error("a failed decode contributed the malformed key to the receiver")
+	}
+	if _, ok := h.GameServerLatencies["10.0.0.9"]; !ok {
+		t.Errorf("a failed decode dropped the receiver's own entries: %#v", h.GameServerLatencies)
+	}
+}

@@ -164,6 +164,16 @@ func (h *LatencyHistory) MarshalJSON() ([]byte, error) {
 // the divergence is strictly the safer direction: writeWithRetry's re-read no
 // longer silently drops the caller's pending samples when the concurrent winner
 // stored a null map. Pinned by TestLatencyHistory_UnmarshalNullMapPreservesExisting.
+//
+// Decoding is also all-or-nothing where the reflection decode salvaged whatever
+// it had already parsed: a record whose map holds one malformed value now
+// contributes NOTHING to the receiver instead of contributing its valid keys.
+// Both versions return the same error, and StorableRead's corrupt-record path
+// (evr_storable.go) deletes and recreates the record from the in-memory object
+// either way, so the only delta is that partially-salvaged keys are no longer
+// folded into that rewrite. Atomic is the intended semantic: a half-applied
+// decode leaves the session's live object in a state no stored record ever had.
+// Pinned by TestLatencyHistory_UnmarshalErrorLeavesReceiverUntouched.
 func (h *LatencyHistory) UnmarshalJSON(data []byte) error {
 	var decoded latencyHistoryData
 	if err := json.Unmarshal(data, &decoded); err != nil {
