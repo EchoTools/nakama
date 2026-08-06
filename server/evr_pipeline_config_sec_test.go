@@ -57,6 +57,38 @@ func installConfigStub(t *testing.T, stub *configTestStub) {
 	})
 }
 
+// configSessionOutgoingCapacity bounds the outgoing queue of the test session.
+//
+// This capacity is load-bearing, not arbitrary. sessionWS.Close dereferences
+// six collaborators this minimal session does not have -- matchmaker, tracker,
+// statusRegistry, sessionRegistry, pingTimer, conn -- so ANY path that reaches
+// Close segfaults the whole test binary. A full outgoing queue is exactly such
+// a path, and there are two of them:
+//
+//	SendBytes  (session_ws.go:792) spawns `go s.Close(...)` when the queue is full
+//	SendEvr    (session_ws.go:740) calls s.Close(...) when SendBytes returns that error
+//
+// The previous version relied on a background goroutine draining the queue
+// faster than the test could fill it. That is a race, and the test loses it
+// whenever the drain is not scheduled promptly -- reproducible locally with
+// GOMAXPROCS=1, and observed as a CI failure on a loaded runner:
+//
+//	--- FAIL: TestSEC1_ConfigCache_BoundedByWhitelist
+//	panic: runtime error: invalid memory address or nil pointer dereference
+//	  (*sessionWS).Close    session_ws.go:825
+//	  (*sessionWS).SendEvr  session_ws.go:740
+//
+// Draining is now a backstop rather than a correctness requirement: the queue
+// is sized so the heaviest test in this file cannot fill it even if the drain
+// goroutine never runs at all. The heaviest is
+// TestSEC1_ConfigCache_BoundedByWhitelist at 1000 + 4*20 = 1080 requests, and
+// each request emits at most two writes (the payload, then the unrequire
+// event), so ~2160 writes. This leaves an order of magnitude of headroom.
+//
+// If a test in this file ever needs materially more requests than that, raise
+// this instead of assuming the drain will keep up.
+const configSessionOutgoingCapacity = 1 << 15 // 32768
+
 // newNilIdentityConfigSession builds a minimal *sessionWS with a nil user
 // identity (as produced by the ServerKey auth path in socket_ws.go) that can
 // serve ConfigRequests. sendEvrHook captures responses; a buffered outgoing
@@ -77,15 +109,16 @@ func newNilIdentityConfigSession(t *testing.T, p *EvrPipeline) (*sessionWS, *[]e
 		ctxCancelFn: cancel,
 		pipeline:    &Pipeline{}, // db is nil; the storage read is stubbed
 		evrPipeline: p,
-		outgoingCh:  make(chan []byte, 1024),
+		outgoingCh:  make(chan []byte, configSessionOutgoingCapacity),
 	}
 	s.sendEvrHook = func(messages []evr.Message) {
 		mu.Lock()
 		defer mu.Unlock()
 		*captured = append(*captured, messages...)
 	}
-	// Drain the outgoing channel so SendBytes never fills the buffer (which
-	// would otherwise trigger a Close on the nil matchmaker under load).
+	// Backstop drain, so a long-running test cannot accumulate without bound.
+	// Correctness does not depend on this goroutine being scheduled promptly --
+	// see configSessionOutgoingCapacity.
 	go func() {
 		for {
 			select {
