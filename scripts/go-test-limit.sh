@@ -54,6 +54,17 @@ probe_cache="${TMPDIR:-/tmp}/.go-test-limit-probe-$(id -u)"
 readonly probe_cache
 if [ -f "${probe_cache}" ] && [ -z "${GO_TEST_MEMORY_LIMIT_REPROBE:-}" ]; then
 	cap_ok="$(cat "${probe_cache}" 2>/dev/null || echo no)"
+	# The cache is keyed only by uid, so it can outlive the environment that
+	# wrote it: a container sharing this TMPDIR and uid would inherit the host's
+	# "yes" and then die on `systemd-run: command not found` (exit 127), failing
+	# a run that would otherwise pass. Re-check presence before trusting a cached
+	# "yes". `command -v` is a shell builtin — no fork, no D-Bus — so the point of
+	# the cache (not paying for the real probe every package) is unaffected.
+	# Deliberately not rewritten to "no": the verdict is still correct for the
+	# environment that wrote it, and this re-check is free on every run.
+	if [ "${cap_ok}" = "yes" ] && ! command -v systemd-run >/dev/null 2>&1; then
+		cap_ok=no
+	fi
 else
 	if probe_cgroup_cap; then cap_ok=yes; else cap_ok=no; fi
 	printf '%s' "${cap_ok}" >"${probe_cache}" 2>/dev/null || true

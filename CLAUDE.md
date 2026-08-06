@@ -46,11 +46,17 @@ are **not** interpolated:
 ```json
 {
   "env": {
-    "GOFLAGS": "-exec=/home/andrew/src/nakama/scripts/go-test-limit.sh",
+    "GOFLAGS": "-exec=/ABSOLUTE/PATH/TO/nakama/scripts/go-test-limit.sh",
     "GO_TEST_MEMORY_LIMIT": "4G"
   }
 }
 ```
+
+**Substitute your own path.** Replace `/ABSOLUTE/PATH/TO/nakama` with the
+absolute path to your checkout — `git rev-parse --show-toplevel` prints it. A
+relative path will not work (`go test` runs the wrapper with cwd set to the
+package directory), and neither will `${CLAUDE_PROJECT_DIR}`, which is passed
+through literally for the reason above.
 
 One absolute path covers every worktree — the wrapper only wraps whatever binary
 it is handed, so it does not care which checkout it lives in.
