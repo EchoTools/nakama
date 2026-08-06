@@ -149,6 +149,68 @@ func TestStorageIndexFieldFilter_IndexOnlyReturnsOnlyFilteredFields(t *testing.T
 		"a field absent from Fields is not indexed and must not be queryable")
 }
 
+// recordingStorageIndex captures what storageIndexWrite hands to the index.
+type recordingStorageIndex struct {
+	StorageIndex
+	written []*api.StorageObject
+}
+
+func (r *recordingStorageIndex) Write(ctx context.Context, objects []*api.StorageObject) (int, int) {
+	r.written = append(r.written, objects...)
+	return len(objects), 0
+}
+
+// TestStorageIndexWrite_PairsAcksToTheirOwnOps covers a latent misalignment in
+// storageIndexWrite that a multi-object batch makes reachable.
+//
+// storageWriteObjects sorts the ops for deadlock avoidance and returns the
+// SORTED slice, but writes acks back at each op's ORIGINAL index
+// (core_storage.go:686). Both MultiUpdate (core_multi.go:81) and
+// StorageWriteObjects (core_storage.go:610) then hand that sorted slice and the
+// input-ordered acks to storageIndexWrite, which pairs them BY POSITION.
+//
+// Whenever the sort actually reorders a batch, every indexed document gets
+// another object's version and timestamps. The index then holds versions that
+// never belonged to those records.
+//
+// A single-object write can never expose this, which is why it survived. Now
+// that StorableWriteMany submits multi-object batches, it is reachable.
+func TestStorageIndexWrite_PairsAcksToTheirOwnOps(t *testing.T) {
+	ownerID := uuid.Must(uuid.NewV4()).String()
+
+	newOp := func(collection, value string) *StorageOpWrite {
+		return &StorageOpWrite{
+			OwnerID: ownerID,
+			Object: &api.WriteStorageObject{
+				Collection: collection, Key: "k", Value: value,
+			},
+		}
+	}
+
+	// The caller submitted [Zeta, Alpha]; storageWriteObjects sorts by
+	// collection, so the ops come back as [Alpha, Zeta]...
+	sortedOps := StorageOpWrites{newOp("Alpha", `{"a":1}`), newOp("Zeta", `{"z":1}`)}
+	// ...while the acks remain at the ORIGINAL submission index.
+	acks := []*api.StorageObjectAck{
+		{Collection: "Zeta", Key: "k", UserId: ownerID, Version: "version-zeta"},
+		{Collection: "Alpha", Key: "k", UserId: ownerID, Version: "version-alpha"},
+	}
+
+	idx := &recordingStorageIndex{}
+	storageIndexWrite(context.Background(), idx, sortedOps, acks)
+
+	require.Len(t, idx.written, 2)
+	versionByCollection := make(map[string]string, 2)
+	for _, o := range idx.written {
+		versionByCollection[o.Collection] = o.Version
+	}
+
+	assert.Equal(t, "version-alpha", versionByCollection["Alpha"],
+		"Alpha was indexed with another object's version")
+	assert.Equal(t, "version-zeta", versionByCollection["Zeta"],
+		"Zeta was indexed with another object's version")
+}
+
 // TestSuspensionProfileIndex_MaxEntriesCannotBind pins the capacity decision.
 //
 // The SuspensionProfile collection holds one entry per user who has ever had an
