@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -336,8 +337,13 @@ func (a EVRProfile) GetActiveGroupDisplayName() string {
 // write commit different data. json.Number keeps the literal intact, and
 // encoding/json re-emits it verbatim when MultiUpdate serializes the map.
 //
-// Both json errors are returned rather than discarded; a swallowed error here
-// would blank the account metadata on the next write.
+// Both json errors are returned rather than discarded. Swallowing one would hand
+// MultiUpdate a nil metadata map, and RuntimeGoNakamaModule.MultiUpdate skips the
+// account update entirely in that case (`if update.Metadata != nil`, see
+// server/runtime_go_nakama.go) rather than blanking it. The storage row would
+// still commit the new profile while account metadata silently kept the old one,
+// leaving the two halves of a single atomic write disagreeing with no error
+// raised anywhere.
 func (a EVRProfile) MarshalMap() (map[string]any, error) {
 	b, err := json.Marshal(a)
 	if err != nil {
@@ -506,6 +512,33 @@ func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID strin
 // already uses for the same key.
 const evrProfileUpdateMaxAttempts = 3
 
+// evrProfileUpdateRetryBaseDelay is the pause before the first retry; each
+// further attempt doubles it, so the three attempts span roughly 60ms.
+//
+// Without any pause the attempts are issued back to back within a few hundred
+// microseconds — far inside the window a genuinely concurrent writer holds the
+// key for. All three would then lose to the same writer and the caller would see
+// a hard failure that a few milliseconds of patience avoids. The delay is
+// deliberately short: login blocks on this call.
+var evrProfileUpdateRetryBaseDelay = 20 * time.Millisecond
+
+// evrProfileUpdateRetryBackoff waits before retry number attempt (1-based).
+//
+// A cancelled context aborts the wait rather than sleeping out the full delay,
+// and reports the conflict error joined with the context error: the caller's
+// contract is that a returned conflict stays recognisable to
+// isVersionConflictError, and errors.Join keeps both messages in Error().
+func evrProfileUpdateRetryBackoff(ctx context.Context, attempt int, conflictErr error) error {
+	timer := time.NewTimer(evrProfileUpdateRetryBaseDelay << (attempt - 1))
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return errors.Join(conflictErr, ctx.Err())
+	case <-timer.C:
+		return nil
+	}
+}
+
 // evrProfileUpdateWithRetry writes profile via EVRProfileUpdate with a bounded
 // retry on storage version conflicts.
 //
@@ -527,6 +560,9 @@ func evrProfileUpdateWithRetry(ctx context.Context, nk runtime.NakamaModule, use
 	var err error
 	for attempt := 0; attempt < evrProfileUpdateMaxAttempts; attempt++ {
 		if attempt > 0 {
+			if waitErr := evrProfileUpdateRetryBackoff(ctx, attempt, err); waitErr != nil {
+				return nil, waitErr
+			}
 			var reloaded *EVRProfile
 			reloaded, err = EVRProfileLoad(ctx, nk, userID)
 			if err != nil {

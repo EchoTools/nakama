@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -215,4 +216,64 @@ func TestEVRProfileUpdateWithRetry_DoesNotRetryNonConflictErrors(t *testing.T) {
 	require.Error(t, err)
 	require.False(t, isVersionConflictError(err))
 	require.Equal(t, 1, m.calls(), "a non-conflict error must not be retried")
+}
+
+// TestEVRProfileUpdateWithRetry_BacksOffBetweenAttempts pins that the retries are
+// spaced rather than issued back to back.
+//
+// Three attempts fired within a few hundred microseconds all fall inside the
+// window a single concurrent writer holds the key for, so they lose to the same
+// writer and the caller gets a hard failure a few milliseconds of patience would
+// have avoided. The assertion is a lower bound on elapsed time, which is the only
+// thing about a backoff that is worth pinning and the only thing that stays true
+// on a loaded CI box.
+func TestEVRProfileUpdateWithRetry_BacksOffBetweenAttempts(t *testing.T) {
+	ctx := context.Background()
+	const userID = "aaaaaaaa-0000-4000-8000-000000000001"
+
+	m := newProfileUpdateTestModule()
+	seedStoredProfile(t, m, userID, &EVRProfile{TeamName: "original"})
+	m.conflictsRemaining = 1000 // every attempt conflicts
+
+	// attempt 1 waits base, attempt 2 waits 2*base.
+	wantMin := evrProfileUpdateRetryBaseDelay * 3
+
+	start := time.Now()
+	_, err := evrProfileUpdateWithRetry(ctx, m, userID, &EVRProfile{}, func(p *EVRProfile) error { return nil })
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	require.Equal(t, 3, m.calls(), "precondition: all three attempts must have run")
+	require.GreaterOrEqual(t, elapsed, wantMin,
+		"the retries must be spaced by a backoff, not fired back to back")
+}
+
+// TestEVRProfileUpdateWithRetry_CancelledContextAbortsTheBackoff pins that a
+// caller who has given up is not held for the full backoff, and that the error
+// they get back is STILL recognisable as a version conflict — isVersionConflictError
+// matches on the message, so joining the context error must not displace it.
+func TestEVRProfileUpdateWithRetry_CancelledContextAbortsTheBackoff(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	const userID = "aaaaaaaa-0000-4000-8000-000000000002"
+
+	m := newProfileUpdateTestModule()
+	seedStoredProfile(t, m, userID, &EVRProfile{TeamName: "original"})
+	m.conflictsRemaining = 1000
+
+	// Cancel as soon as the first attempt has been rejected, so the abort happens
+	// during the backoff rather than before the first write.
+	cancel()
+
+	start := time.Now()
+	_, err := evrProfileUpdateWithRetry(ctx, m, userID, &EVRProfile{}, func(p *EVRProfile) error { return nil })
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	require.Equal(t, 1, m.calls(),
+		"a cancelled caller must not keep hammering the key")
+	require.Less(t, elapsed, evrProfileUpdateRetryBaseDelay,
+		"the backoff must abort on cancellation, not sleep it out")
+	require.ErrorIs(t, err, context.Canceled)
+	require.True(t, isVersionConflictError(err),
+		"the conflict must stay recognisable after the context error is joined: %v", err)
 }
