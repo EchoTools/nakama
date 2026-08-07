@@ -736,3 +736,9 @@ BUGS.md
 .claude-line/
 *.lock
 .mcp.json
+
+# Binaries dropped by `go build` inside tools/ (a plain `go build` names the
+# output after its directory). tools/purge-docker-ips/purge-docker-ips was
+# committed this way -- an 87MB ELF that outlived its deleted source.
+/tools/party-split-detector/party-split-detector
+/tools/echovr-mock-client/echovr-mock-client

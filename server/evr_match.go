@@ -1515,8 +1515,11 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				// Track completion in detailed history first; only credit the
 				// counter when this is the first time the match is reported
 				// (the post-match stats upload also reports it).
+				// Warn, not Debug: this is the failure that costs the player
+				// match credit, so it must be at least as visible as the
+				// adjacent eqconfig write failure below.
 				if first, err := TrackMatchCompletion(ctx, logger, nk, presence.GetUserId(), state.ID, time.Now().UTC()); err != nil {
-					logger.WithField("error", err).Debug("Failed to track match completion in history")
+					logger.WithField("error", err).Warn("Failed to track match completion in history")
 				} else if first {
 					eqconfig.IncrementCompletedMatches()
 				}

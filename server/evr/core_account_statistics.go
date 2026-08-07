@@ -31,6 +31,14 @@ var (
 
 type TabletStatisticGroup Symbol
 
+// timeNow is the clock used to date-stamp the daily and weekly statistic group
+// names. It is a package-level var rather than a field on StatisticsGroup
+// because StatisticsGroup is used as a map key (see PlayerStatistics), and a
+// func field would make the struct non-comparable. Production always uses
+// time.Now; tests pin it to a fixed instant so the date-stamped names do not
+// depend on when or where the suite runs.
+var timeNow = time.Now
+
 type StatisticsGroup struct {
 	Mode          Symbol
 	ResetSchedule ResetSchedule
@@ -44,7 +52,7 @@ func (g *StatisticsGroup) String() string {
 func (g StatisticsGroup) MarshalText() ([]byte, error) {
 	switch g.ResetSchedule {
 	case ResetScheduleDaily:
-		return []byte("daily_" + time.Now().UTC().Format("2006_01_02")), nil
+		return []byte("daily_" + timeNow().UTC().Format("2006_01_02")), nil
 	case ResetScheduleWeekly:
 		return []byte("weekly_" + mostRecentThursday().Format("2006_01_02")), nil
 	default:
@@ -896,7 +904,7 @@ func NewStatistics() PlayerStatistics {
 
 // Echo normally resets stats on Thursday, so use that as the default
 func mostRecentThursday() time.Time {
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	offset := (int(now.Weekday()) - int(time.Thursday) + 7) % 7
 	return now.AddDate(0, 0, -offset)
 }

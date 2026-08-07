@@ -105,26 +105,44 @@ func GuildPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		return "", runtime.NewError("Player profile not found", StatusNotFound)
 	}
 
-	// Get the old display name for this guild
-	oldIGN := evrProfile.GetGroupIGNData(groupID)
-	oldName := oldIGN.DisplayName
-	if oldName == "" {
-		oldName = evrProfile.Username()
-	}
+	// oldName is the display name this rename replaced. It is captured INSIDE
+	// setIGN, from the profile setIGN is handed, rather than read once up front:
+	// on a retry after a version conflict the callback runs again against a
+	// freshly read profile, and the audit log and RPC response below must quote
+	// the name that was actually replaced, not the one this request happened to
+	// read before the concurrent writer committed.
+	var oldName string
 
 	// Set the new per-guild display name with override and lock flags
-	evrProfile.SetGroupIGNData(groupID, GroupInGameName{
-		GroupID:     groupID,
-		DisplayName: sanitizedName,
-		IsOverride:  true,
-		IsLocked:    request.IsLocked,
-	})
+	setIGN := func(profile *EVRProfile) error {
+		oldName = profile.GetGroupIGNData(groupID).DisplayName
+		if oldName == "" {
+			oldName = profile.Username()
+		}
+		profile.SetGroupIGNData(groupID, GroupInGameName{
+			GroupID:     groupID,
+			DisplayName: sanitizedName,
+			IsOverride:  true,
+			IsLocked:    request.IsLocked,
+		})
+		return nil
+	}
+	// setIGN never fails; the error return exists only to satisfy
+	// evrProfileUpdateWithRetry's callback signature. Calling it here both applies
+	// the rename to the profile already in hand and records oldName for the
+	// uncontended path, where the callback is never invoked again.
+	_ = setIGN(evrProfile)
 
-	// Persist the profile (writes storage + invalidates ServerProfile cache)
-	if err := EVRProfileUpdate(ctx, nk, targetUserID, evrProfile); err != nil {
+	// Persist the profile (writes storage + invalidates ServerProfile cache).
+	// Retry on a version conflict with a fresh read: the Discord sync and login
+	// paths write this same key, and a rename must not be rejected because one of
+	// them happened to commit first.
+	updated, err := evrProfileUpdateWithRetry(ctx, nk, targetUserID, evrProfile, setIGN)
+	if err != nil {
 		logger.Error("Failed to update EVR profile", zap.Error(err), zap.String("user_id", targetUserID))
 		return "", runtime.NewError("Failed to update player profile", StatusInternalError)
 	}
+	evrProfile = updated
 
 	// Record the change in display name history
 	if err := DisplayNameHistoryUpdate(ctx, nk, targetUserID, groupID, sanitizedName, evrProfile.Username(), false); err != nil {

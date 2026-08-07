@@ -9,7 +9,37 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
+// pinClock pins the package clock to a fixed instant for the duration of the
+// test. Without it both the daily and weekly cases below read the ambient wall
+// clock, which made them pass or fail depending on the machine's timezone.
+func pinClock(t *testing.T, at time.Time) {
+	t.Helper()
+	prev := timeNow
+	timeNow = func() time.Time { return at }
+	t.Cleanup(func() { timeNow = prev })
+}
+
+// The two instants below straddle a UTC midnight and are deliberately carried
+// in non-UTC zones, so the wall clock they read disagrees with their UTC date.
+// That disagreement is what makes the assertions fail if the formatters ever
+// stop normalizing to UTC.
+
+// justAfterUTCMidnight is 2026-08-06T00:30:00Z (a Thursday) held in a UTC-5
+// zone, where the wall clock still reads Wednesday 2026-08-05.
+func justAfterUTCMidnight() time.Time {
+	return time.Date(2026, 8, 5, 19, 30, 0, 0, time.FixedZone("UTC-5", -5*60*60))
+}
+
+// justBeforeUTCMidnight is 2026-08-05T23:30:00Z (a Wednesday) held in a UTC+13
+// zone, where the wall clock already reads Thursday 2026-08-06.
+func justBeforeUTCMidnight() time.Time {
+	return time.Date(2026, 8, 6, 12, 30, 0, 0, time.FixedZone("UTC+13", 13*60*60))
+}
+
 func TestStatisticsGroup_MarshalText(t *testing.T) {
+	// 2026-08-06 UTC is itself a Thursday, so the weekly stamp is the same day.
+	pinClock(t, justAfterUTCMidnight())
+
 	tests := []struct {
 		name     string
 		group    StatisticsGroup
@@ -21,7 +51,7 @@ func TestStatisticsGroup_MarshalText(t *testing.T) {
 				Mode:          ModeArenaPublic,
 				ResetSchedule: ResetScheduleDaily,
 			},
-			expected: "daily_" + time.Now().Format("2006_01_02"),
+			expected: "daily_2026_08_06",
 		},
 		{
 			name: "Weekly Arena",
@@ -29,7 +59,7 @@ func TestStatisticsGroup_MarshalText(t *testing.T) {
 				Mode:          ModeArenaPublic,
 				ResetSchedule: ResetScheduleWeekly,
 			},
-			expected: "weekly_" + mostRecentThursday().Format("2006_01_02"),
+			expected: "weekly_2026_08_06",
 		},
 		{
 			name: "All Time Arena",
@@ -64,6 +94,62 @@ func TestStatisticsGroup_MarshalText(t *testing.T) {
 		})
 	}
 }
+
+// Statistic groups partition by UTC day and UTC week so that guilds in
+// different timezones share one bucket. These cases pin instants that sit on
+// either side of a UTC midnight, while the clock they carry reads the adjacent
+// date, so the rollover is covered explicitly rather than incidentally.
+func TestStatisticsGroup_MarshalText_UTCDateBoundary(t *testing.T) {
+	tests := []struct {
+		name         string
+		at           time.Time
+		wantDaily    string
+		wantWeekly   string
+		localReading string
+	}{
+		{
+			name:         "instant after UTC midnight, local clock a day behind",
+			at:           justAfterUTCMidnight(),
+			wantDaily:    "daily_2026_08_06",
+			wantWeekly:   "weekly_2026_08_06", // 2026-08-06 UTC is a Thursday
+			localReading: "2026-08-05 19:30 UTC-5",
+		},
+		{
+			name:         "instant before UTC midnight, local clock a day ahead",
+			at:           justBeforeUTCMidnight(),
+			wantDaily:    "daily_2026_08_05",
+			wantWeekly:   "weekly_2026_07_30", // Thursday preceding Wed 2026-08-05 UTC
+			localReading: "2026-08-06 12:30 UTC+13",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pinClock(t, tt.at)
+
+			daily := StatisticsGroup{Mode: ModeArenaPublic, ResetSchedule: ResetScheduleDaily}
+			got, err := daily.MarshalText()
+			if err != nil {
+				t.Fatalf("MarshalText() error = %v", err)
+			}
+			if string(got) != tt.wantDaily {
+				t.Errorf("daily at %s (%s local): got = %s, expected %s",
+					tt.at.UTC().Format(time.RFC3339), tt.localReading, got, tt.wantDaily)
+			}
+
+			weekly := StatisticsGroup{Mode: ModeArenaPublic, ResetSchedule: ResetScheduleWeekly}
+			got, err = weekly.MarshalText()
+			if err != nil {
+				t.Fatalf("MarshalText() error = %v", err)
+			}
+			if string(got) != tt.wantWeekly {
+				t.Errorf("weekly at %s (%s local): got = %s, expected %s",
+					tt.at.UTC().Format(time.RFC3339), tt.localReading, got, tt.wantWeekly)
+			}
+		})
+	}
+}
+
 func TestStatisticsGroup_UnmarshalText(t *testing.T) {
 	tests := []struct {
 		name     string

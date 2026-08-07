@@ -1,8 +1,10 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -323,11 +325,37 @@ func (a EVRProfile) GetActiveGroupDisplayName() string {
 	return a.GetGroupIGN(a.ActiveGroupID)
 }
 
-func (a EVRProfile) MarshalMap() map[string]any {
-	b, _ := json.Marshal(a)
+// MarshalMap renders the profile as the generic map that runtime.AccountUpdate
+// expects for account metadata.
+//
+// Decoding uses json.Decoder.UseNumber() rather than a plain json.Unmarshal:
+// the default decoder turns every JSON number into a float64, which silently
+// truncates the 64-bit EchoVR item hashes in NewUnlocks (and the uint64
+// customization POI versions) above 2^53. Because EVRProfileUpdate writes the
+// storage value with json.Marshal and the account metadata with this function in
+// a single MultiUpdate, a lossy encoding here makes the two halves of one atomic
+// write commit different data. json.Number keeps the literal intact, and
+// encoding/json re-emits it verbatim when MultiUpdate serializes the map.
+//
+// Both json errors are returned rather than discarded. Swallowing one would hand
+// MultiUpdate a nil metadata map, and RuntimeGoNakamaModule.MultiUpdate skips the
+// account update entirely in that case (`if update.Metadata != nil`, see
+// server/runtime_go_nakama.go) rather than blanking it. The storage row would
+// still commit the new profile while account metadata silently kept the old one,
+// leaving the two halves of a single atomic write disagreeing with no error
+// raised anywhere.
+func (a EVRProfile) MarshalMap() (map[string]any, error) {
+	b, err := json.Marshal(a)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal profile: %w", err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
 	var m map[string]any
-	_ = json.Unmarshal(b, &m)
-	return m
+	if err := dec.Decode(&m); err != nil {
+		return nil, fmt.Errorf("failed to decode profile into map: %w", err)
+	}
+	return m, nil
 }
 
 func (a EVRProfile) GetMuted() []evr.EvrId {
@@ -438,10 +466,15 @@ func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID strin
 		return fmt.Errorf("failed to marshal profile: %w", err)
 	}
 
+	metadata, err := md.MarshalMap()
+	if err != nil {
+		return fmt.Errorf("failed to marshal profile metadata: %w", err)
+	}
+
 	acks, _, err := nk.MultiUpdate(ctx,
 		[]*runtime.AccountUpdate{{
 			UserID:   userID,
-			Metadata: md.MarshalMap(),
+			Metadata: metadata,
 		}},
 		[]*runtime.StorageWrite{{
 			Collection:      meta.Collection,
@@ -473,6 +506,85 @@ func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID strin
 	}
 
 	return nil
+}
+
+// evrProfileUpdateMaxAttempts bounds evrProfileUpdateWithRetry. Three attempts
+// matches the retry budget the display-name sync in evr_discord_integrator.go
+// already uses for the same key.
+const evrProfileUpdateMaxAttempts = 3
+
+// evrProfileUpdateRetryBaseDelay is the pause before the first retry; each
+// further attempt doubles it, so the three attempts span roughly 60ms.
+//
+// Without any pause the attempts are issued back to back within a few hundred
+// microseconds — far inside the window a genuinely concurrent writer holds the
+// key for. All three would then lose to the same writer and the caller would see
+// a hard failure that a few milliseconds of patience avoids. The delay is
+// deliberately short: login blocks on this call.
+var evrProfileUpdateRetryBaseDelay = 20 * time.Millisecond
+
+// evrProfileUpdateRetryBackoff waits before retry number attempt (1-based).
+//
+// A cancelled context aborts the wait rather than sleeping out the full delay,
+// and reports the conflict error joined with the context error: the caller's
+// contract is that a returned conflict stays recognisable to
+// isVersionConflictError, and errors.Join keeps both messages in Error().
+func evrProfileUpdateRetryBackoff(ctx context.Context, attempt int, conflictErr error) error {
+	timer := time.NewTimer(evrProfileUpdateRetryBaseDelay << (attempt - 1))
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return errors.Join(conflictErr, ctx.Err())
+	case <-timer.C:
+		return nil
+	}
+}
+
+// evrProfileUpdateWithRetry writes profile via EVRProfileUpdate with a bounded
+// retry on storage version conflicts.
+//
+// EVRProfileUpdate itself makes exactly one attempt by design: retrying with the
+// caller's stale payload would silently discard whatever the concurrent writer
+// committed. This helper supplies the safe form of the retry — on a conflict it
+// RE-READS the current stored profile and hands it to apply, so the caller's
+// mutation is re-applied on top of fresh data instead of overwriting it. Callers
+// must therefore keep apply free of side effects; it may run more than once.
+//
+// The returned *EVRProfile is the object that was actually written: the caller's
+// own pointer when the first attempt succeeded, or the reloaded profile
+// otherwise. Callers that keep the profile around (e.g. session parameters) must
+// adopt the returned value.
+//
+// Non-conflict errors are surfaced immediately; the final conflict error is
+// returned unchanged so errors.Is / isVersionConflictError still recognise it.
+func evrProfileUpdateWithRetry(ctx context.Context, nk runtime.NakamaModule, userID string, profile *EVRProfile, apply func(*EVRProfile) error) (*EVRProfile, error) {
+	var err error
+	for attempt := 0; attempt < evrProfileUpdateMaxAttempts; attempt++ {
+		if attempt > 0 {
+			if waitErr := evrProfileUpdateRetryBackoff(ctx, attempt, err); waitErr != nil {
+				return nil, waitErr
+			}
+			var reloaded *EVRProfile
+			reloaded, err = EVRProfileLoad(ctx, nk, userID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to reload profile for retry: %w", err)
+			}
+			profile = reloaded
+			if apply != nil {
+				if err := apply(profile); err != nil {
+					return nil, err
+				}
+			}
+		}
+
+		if err = EVRProfileUpdate(ctx, nk, userID, profile); err == nil {
+			return profile, nil
+		}
+		if !isVersionConflictError(err) {
+			return nil, err
+		}
+	}
+	return nil, err
 }
 
 func BuildEVRProfileFromAccount(account *api.Account) (*EVRProfile, error) {

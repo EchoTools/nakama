@@ -627,6 +627,67 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	return nil
 }
 
+// loginProfileReapply holds the mutations login must re-assert when its profile
+// write loses a version race and has to be retried against a freshly read
+// profile.
+//
+// Every field is a RULE, not a captured value to replay: apply re-evaluates each
+// one against the profile it is handed. That distinction is the whole point — the
+// retry exists so a concurrent writer's committed work survives, and replaying
+// this session's pre-conflict snapshot would discard exactly that work.
+type loginProfileReapply struct {
+	// setActiveGroupID is true only when this session deliberately chose a new
+	// active group. When false the fresh profile's active group is left alone,
+	// since it may be a change the concurrent writer just made on purpose.
+	setActiveGroupID bool
+	activeGroupID    uuid.UUID
+
+	// fixBrokenCosmetics mirrors !profile.IgnoreBrokenCosmetics.
+	fixBrokenCosmetics bool
+
+	// username, plus the guilds whose UsernameOnly role forces the player's
+	// display name to it.
+	username             string
+	usernameOnlyGroupIDs []string
+
+	// displayNamesOwnedByOthers lists the in-game names this login found
+	// registered to a different account. Any matching name on the fresh profile is
+	// pruned again, so a retry cannot resurrect a name the server had already
+	// rejected for this player.
+	//
+	// Matched with strings.EqualFold, exactly as the prune in initializeSession
+	// does. Case folding is NOT the same as lowercasing both sides — EqualFold
+	// applies simple Unicode folding, so pairs like 'ſ'/'s' compare equal to it and
+	// not to strings.ToLower. Keeping the same comparison here is what makes this a
+	// re-evaluation of the original rule rather than a slightly different one.
+	displayNamesOwnedByOthers []string
+}
+
+// apply re-applies the login mutations to profile. It is safe to call repeatedly
+// and is deliberately NOT a wholesale write of this session's in-game name map:
+// the guild-rename RPC writes that same map, so overwriting it would clobber a
+// rename that landed while we were writing.
+func (r loginProfileReapply) apply(profile *EVRProfile) error {
+	if r.setActiveGroupID {
+		profile.SetActiveGroupID(r.activeGroupID)
+	}
+	if r.fixBrokenCosmetics {
+		profile.FixBrokenCosmetics()
+	}
+	for _, groupID := range r.usernameOnlyGroupIDs {
+		profile.SetGroupDisplayName(groupID, r.username)
+	}
+	for gID, gn := range profile.DisplayNamesByGroupID() {
+		for _, taken := range r.displayNamesOwnedByOthers {
+			if strings.EqualFold(gn, taken) {
+				profile.DeleteGroupDisplayName(gID)
+				break
+			}
+		}
+	}
+	return nil
+}
+
 func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) error {
 	var err error
 	serviceSettings := ServiceSettings()
@@ -662,6 +723,11 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	// use session-only fallback — don't overwrite their stored choice.
 	storedActiveGroupID := params.profile.GetActiveGroupID()
 	groupIDAutoAssigned := false
+	// activeGroupIDPersist records whether THIS session deliberately changed the
+	// stored active group. Only then may a storage retry re-assert it against a
+	// freshly read profile; otherwise the retry would revert an active-group
+	// change committed by the very writer we are retrying around.
+	activeGroupIDPersist := false
 	if _, ok := params.guildGroups[params.profile.ActiveGroupID]; !ok {
 
 		groupIDs := make([]string, 0, len(params.guildGroups))
@@ -685,6 +751,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		if storedActiveGroupID == uuid.Nil {
 			// New player with no group set — persist the assignment
 			metadataUpdated = true
+			activeGroupIDPersist = true
 		} else {
 			// Existing player whose group is temporarily unresolvable — session only
 			groupIDAutoAssigned = true
@@ -711,8 +778,16 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 
 	// Update in-memory account metadata for guilds that the user has
 	// the force username role.
+	//
+	// usernameOnlyGroupIDs records which guilds this enforcement applies to so a
+	// storage retry further down can re-assert it against a freshly read profile
+	// (see the reapply closure below). Without that, a retry would drop the
+	// session back to whatever display name storage happens to hold, silently
+	// bypassing the guild's UsernameOnly role for the rest of the session.
+	usernameOnlyGroupIDs := make([]string, 0, len(params.guildGroups))
 	for groupID, gg := range params.guildGroups {
 		if gg.HasRole(session.userID.String(), gg.RoleMap.UsernameOnly) {
+			usernameOnlyGroupIDs = append(usernameOnlyGroupIDs, groupID)
 			params.profile.SetGroupDisplayName(groupID, params.profile.Username())
 		}
 	}
@@ -790,6 +865,20 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		displayNames = append(displayNames, dn)
 	}
 
+	// displayNamesOwnedByOthers collects every in-game name this login found to
+	// belong to a different account. It is re-evaluated against the fresh profile
+	// on a storage retry (see the reapply closure below) so the prune below cannot
+	// be undone by adopting a reloaded profile. Names are stored verbatim; the
+	// retry matches them with strings.EqualFold, the same comparison the prune
+	// below uses.
+	displayNamesOwnedByOthers := make([]string, 0)
+
+	// The notification goroutine below must not close over params.profile: the
+	// retry path further down reassigns that field, which would be a data race
+	// against these reads. Snapshot the two values it needs up front.
+	notifyDiscordID := params.profile.DiscordID()
+	notifyUsername := params.profile.Username()
+
 	if ownerMap, err := DisplayNameOwnerSearch(ctx, p.nk, displayNames); err != nil {
 		logger.Warn("Failed to check display name owner", zap.Any("display_names", displayNames), zap.Error(err))
 	} else {
@@ -797,6 +886,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		for _, dn := range params.profile.DisplayNamesByGroupID() {
 			if ownerIDs, ok := ownerMap[dn]; ok && !slices.Contains(ownerIDs, params.profile.ID()) {
 				// This display name is owned by someone else.
+				displayNamesOwnedByOthers = append(displayNamesOwnedByOthers, dn)
 				for gID, gn := range params.profile.DisplayNamesByGroupID() {
 					if strings.EqualFold(gn, dn) {
 						// This display name is owned by someone else.
@@ -805,7 +895,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 							// Notify the player that this display name is in use.
 							ownerDiscordID := p.discordCache.UserIDToDiscordID(ownerIDs[0])
 							go func(displayName string) {
-								if err := p.discordCache.SendDisplayNameInUseNotification(ctx, params.profile.DiscordID(), ownerDiscordID, displayName, params.profile.Username()); err != nil {
+								if err := p.discordCache.SendDisplayNameInUseNotification(ctx, notifyDiscordID, ownerDiscordID, displayName, notifyUsername); err != nil {
 									if IsDiscordErrorCode(err, discordgo.ErrCodeCannotSendMessagesToThisUser) {
 										logger.Warn("Failed to send display name in use notification", zap.Error(err))
 									}
@@ -925,11 +1015,58 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 			params.profile.SetActiveGroupID(storedActiveGroupID)
 		}
 
+		userID := params.profile.ID()
+
+		// The mutations that set metadataUpdated are re-applied here to a freshly
+		// read profile on a retry: the resolved active group, and the
+		// broken-cosmetic repair.
+		//
+		// The competing writers are the Discord member-sync path and the
+		// guild-rename RPC, both of which write this same key and are driven by
+		// Discord commands, account linking, and this player's other reconnect
+		// attempts — none of which are sequenced against this session. A version
+		// conflict is therefore realistic and must not reject the login outright.
+		//
+		// Not the QueueSyncMember call earlier in this function: that one sits on
+		// the "user is not in any groups" branch and returns immediately after, so
+		// it never reaches this write.
+		//
+		// reapply runs ONLY on a retry, and only against a profile just read from
+		// storage. Everything it does is therefore expressed as a rule re-evaluated
+		// against that fresh profile, never as a replay of this session's stale
+		// values — replaying stale values is exactly how the concurrent writer's
+		// work gets discarded.
+		//
+		// The in-game names recomputed earlier in this function are deliberately
+		// NOT re-applied wholesale: the guild-rename RPC writes that same map, and
+		// overwriting it would clobber a rename that landed while we were writing.
+		// On a retry the fresh profile's IGNs win; login recomputes them on the next
+		// connect anyway. The two IGN rules that are *enforcement* rather than
+		// preference are re-evaluated, because dropping them would leave the session
+		// running with a name the server had already rejected:
+		//   - guilds with the UsernameOnly role must show the username;
+		//   - a name found to belong to another account must not be used.
+		reapply := loginProfileReapply{
+			setActiveGroupID:          activeGroupIDPersist,
+			activeGroupID:             params.profile.GetActiveGroupID(),
+			fixBrokenCosmetics:        !params.profile.IgnoreBrokenCosmetics,
+			username:                  params.profile.Username(),
+			usernameOnlyGroupIDs:      usernameOnlyGroupIDs,
+			displayNamesOwnedByOthers: displayNamesOwnedByOthers,
+		}
+
 		// Use EVRProfileUpdate to persist changes AND invalidate the ServerProfile cache
-		if err := EVRProfileUpdate(ctx, p.nk, params.profile.ID(), params.profile); err != nil {
+		updated, err := evrProfileUpdateWithRetry(ctx, p.nk, userID, params.profile, reapply.apply)
+		if err != nil {
 			metricsTags["error"] = "failed_update_profile"
+			// Restore the session fallback before bailing so params.profile is
+			// never left holding the stored value it was temporarily swapped to.
+			if groupIDAutoAssigned {
+				params.profile.SetActiveGroupID(sessionFallbackGID)
+			}
 			return fmt.Errorf("failed to update user profile: %w", err)
 		}
+		params.profile = updated
 
 		if groupIDAutoAssigned {
 			params.profile.SetActiveGroupID(sessionFallbackGID)

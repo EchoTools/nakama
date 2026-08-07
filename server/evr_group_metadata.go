@@ -99,6 +99,12 @@ func (g *GroupMetadata) GetKickPlayerAllowPrivates() bool {
 
 // GetEnforceEarlyQuitPenalty returns whether the guild has opted in to
 // server-side early quit enforcement. Defaults to false when unset.
+//
+// The `g == nil` guard only protects a genuinely nil *GroupMetadata. It does NOT
+// protect a nil *GuildGroup: GroupMetadata is embedded by value, so
+// gg.GetEnforceEarlyQuitPenalty() evaluates &gg.GroupMetadata before entering
+// this body and panics on a nil gg. Callers holding a *GuildGroup must nil-check
+// it themselves (see earlyQuitEnforcementEnabled).
 func (g *GroupMetadata) GetEnforceEarlyQuitPenalty() bool {
 	if g == nil || g.EnforceEarlyQuitPenalty == nil {
 		return false

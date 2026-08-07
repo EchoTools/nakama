@@ -179,11 +179,6 @@ func GetLockoutDuration(penaltyLevel int) time.Duration {
 	return duration
 }
 
-// GetLockoutDurationSeconds returns the lockout duration in seconds for a given penalty level.
-func GetLockoutDurationSeconds(penaltyLevel int) int32 {
-	return int32(GetLockoutDuration(penaltyLevel).Seconds())
-}
-
 func NewEarlyQuitPlayerState() *EarlyQuitPlayerState {
 	return &EarlyQuitPlayerState{
 		MatchmakingTier: MatchmakingTier1,
@@ -284,8 +279,12 @@ func earlyQuitEnforcementEnabled(ctx context.Context, groupID string) bool {
 	if !ok {
 		return true
 	}
+	// A nil entry is treated exactly like an absent one. The nil guard inside
+	// GetEnforceEarlyQuitPenalty cannot catch it: GroupMetadata is embedded by
+	// VALUE in GuildGroup, so gg.GetEnforceEarlyQuitPenalty() takes the address
+	// &gg.GroupMetadata before the method body runs and a nil gg panics first.
 	gg, ok := params.guildGroups[groupID]
-	if !ok {
+	if !ok || gg == nil {
 		return true
 	}
 	return gg.GetEnforceEarlyQuitPenalty()
@@ -307,19 +306,6 @@ func (s *EarlyQuitPlayerState) GetEarlyQuitCount() int32 {
 	s.Lock()
 	defer s.Unlock()
 	return s.NumEarlyQuits
-}
-
-// GetEffectivePenaltyLevel returns the penalty level for a specific guild,
-// checking guild overrides first, falling back to global.
-func (s *EarlyQuitPlayerState) GetEffectivePenaltyLevel(groupID string) int32 {
-	s.Lock()
-	defer s.Unlock()
-	if s.GuildOverrides != nil {
-		if override, ok := s.GuildOverrides[groupID]; ok && override.PenaltyLevel != nil {
-			return *override.PenaltyLevel
-		}
-	}
-	return s.PenaltyLevel
 }
 
 // IsExempt returns true if the player is exempt from early quit tracking in the given guild.
