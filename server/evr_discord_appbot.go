@@ -1193,14 +1193,23 @@ func (d *DiscordAppBot) UnregisterCommandsAll(ctx context.Context, logger runtim
 
 // If guildID is empty, it will unregister all global commands.
 func (d *DiscordAppBot) UnregisterCommands(ctx context.Context, logger runtime.Logger, dg *discordgo.Session, guildID string) {
-	commands, err := dg.ApplicationCommands(dg.State.User.ID, guildID)
+	// One locked read, reused: the delete loop below used to re-read the ID per
+	// command, so a reconnect mid-loop could delete against a different
+	// application than the fetch listed.
+	botID := botDiscordIDFromState(dg.State)
+	if botID == "" {
+		logger.Error("Cannot unregister commands: bot user ID not in state yet")
+		return
+	}
+
+	commands, err := dg.ApplicationCommands(botID, guildID)
 	if err != nil {
 		logger.Error("Error fetching commands,", zap.Error(err))
 		return
 	}
 
 	for _, command := range commands {
-		err := dg.ApplicationCommandDelete(dg.State.User.ID, guildID, command.ID)
+		err := dg.ApplicationCommandDelete(botID, guildID, command.ID)
 		if err != nil {
 			logger.Error("Error deleting command,", zap.Error(err))
 		} else {
