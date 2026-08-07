@@ -65,6 +65,20 @@ The server-side backstop for an uninstalled hook is
   even in public modes. Do NOT normalize, nil-out, or bypass GroupID for "cross-guild"
   matching. This has been incorrectly "fixed" multiple times. It is not a bug.
 
+### Before you touch push safety or test doubles
+
+Read [`docs/handoff-push-safety-and-open-candidates.md`](docs/handoff-push-safety-and-open-candidates.md).
+
+It records the exact status of the two `main` guards and **what each does not
+cover** — the pre-push hook does not arm itself, and the CI audit is detection
+after the fact, not prevention. Do not read "gates exist" as "`main` is
+protected."
+
+It also carries four open CANDIDATEs: known defect classes with no mechanical
+detector, recorded so a second occurrence is recognized as one. Two are load-
+bearing for work already queued — a test-double trap that blocks #394, and a
+`-race` failure mode where a passing test proves nothing.
+
 ### Common violations to flag on sight
 
 - Removing logging (debug/warn/error) without explanation
