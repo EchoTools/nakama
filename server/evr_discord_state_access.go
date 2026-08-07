@@ -64,3 +64,48 @@ func stateGuildCount(state *discordgo.State) int {
 	defer state.RUnlock()
 	return len(state.Guilds)
 }
+
+// botUsernameFromState returns the bot's own Discord username, read under the
+// discordgo state's read lock. present reports whether State.User existed at
+// all, which is NOT the same question as whether the username is non-empty --
+// see evr_pipeline_login.go's IP-verification branch, where the two decide
+// different things and conflating them would let a login through that the
+// original guard blocked.
+//
+// Same hazard as botDiscordIDFromState above: State.User is a *User that
+// discordgo replaces wholesale on every gateway READY, under State.Lock().
+//
+// The widest exposure for this one is the login pipeline
+// (evr_pipeline_login.go), which reads it on a session goroutine once per
+// player login -- not a startup-only path, so it is live for the life of the
+// process.
+func botUsernameFromState(state *discordgo.State) (username string, present bool) {
+	if state == nil {
+		return "", false
+	}
+	state.RLock()
+	defer state.RUnlock()
+	if state.User == nil {
+		return "", false
+	}
+	return state.User.Username, true
+}
+
+// botDisplayNameFromState returns the name to show for the bot: its global
+// (display) name when it has one, otherwise its username. Both fields are read
+// in ONE critical section, so the fallback cannot straddle a gateway READY and
+// mix a stale GlobalName with a fresh Username.
+func botDisplayNameFromState(state *discordgo.State) string {
+	if state == nil {
+		return ""
+	}
+	state.RLock()
+	defer state.RUnlock()
+	if state.User == nil {
+		return ""
+	}
+	if state.User.GlobalName != "" {
+		return state.User.GlobalName
+	}
+	return state.User.Username
+}
