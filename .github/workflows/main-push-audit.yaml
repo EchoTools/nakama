@@ -1,0 +1,78 @@
+# Flags any commit that reaches main without an associated pull request.
+#
+# DETECTION, NOT PREVENTION. This runs after the push has landed. When it goes
+# red the commit is already on main and already fetchable. It converts a silent
+# direct push into a dated, red one; it cannot stop one.
+#
+# The layer that PREVENTS is .githooks/pre-push -- but only in a clone that has
+# run `just hooks`, so it is off by default in a fresh clone, a new worktree, or
+# an agent starting cold. That is the population the guard exists for, which is
+# why this server-side backstop is here: it arms itself and cannot be skipped by
+# a clone that never set anything up.
+#
+# The mechanism that would close this properly is GitHub branch protection
+# requiring a PR to land on main. That is unbypassable, but it is a repository
+# setting rather than a file and it constrains every human with push access, so
+# it is the owner's call and is deliberately not assumed here.
+
+name: Main push audit
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  audit:
+    name: Commits on main came through a PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The audit reads commit subjects and authors for its report, and needs
+          # the pushed range present locally. 0 = full history; the range can be
+          # arbitrarily long after a force-push or an initial import.
+          fetch-depth: 0
+
+      - name: Collect the commits this push added to main
+        id: collect
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          set -uo pipefail
+          # A new branch (or an unreachable before) reports all-zeros. There is
+          # no range to walk, so audit just the tip.
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "no usable before-ref; auditing the pushed tip only" >&2
+            shas="$AFTER"
+          else
+            shas="$(git rev-list "$BEFORE..$AFTER")"
+          fi
+
+          if [ -z "$shas" ]; then
+            echo "nothing to audit" >&2
+          fi
+          {
+            echo "shas<<EOF"
+            echo "$shas"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Audit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          shas="$(printf '%s' '${{ steps.collect.outputs.shas }}' | tr -d '\r')"
+          if [ -z "$(printf '%s' "$shas" | tr -d '[:space:]')" ]; then
+            echo "no commits to audit"
+            exit 0
+          fi
+          # shellcheck disable=SC2086
+          ./scripts/audit-main-push.sh $shas
