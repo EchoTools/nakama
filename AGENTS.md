@@ -22,13 +22,30 @@ govulncheck    # vulnerability check
 ### Pre-push hook (automated gate)
 
 The repo ships a pre-push hook in `.githooks/pre-push` that checks:
+0. Destination — refuses a push that **resolves** to `main`
 1. Tag format (`v*` tags must include `-evr.<N>`)
 2. `gofmt` compliance
 3. `go vet` on changed packages
 4. `gopls` diagnostics on changed files
 5. `go mod tidy` hasn't drifted
 
-Install: `git config core.hooksPath .githooks`
+Install: `just hooks` (or `git config core.hooksPath .githooks`)
+
+**The hook is off until installed, and that failure mode is silent** —
+`core.hooksPath` is local config and cannot be committed, so a fresh clone or a
+newly created worktree is unguarded with no warning. Check with
+`git config --get core.hooksPath`. `git push --no-verify` also skips it entirely.
+
+Check 0 exists because a worktree branch created from `origin/main` *tracks*
+`origin/main`, and with `push.default=tracking` git resolves the destination
+from the upstream rather than the branch name — so `git push -u origin
+my-branch` lands on `main`. That has happened twice here. Push with an explicit
+refspec (`git push origin HEAD:refs/heads/<branch>`); to push to `main`
+deliberately, say so: `ALLOW_MAIN_PUSH=1 git push ...`.
+
+The server-side backstop for an uninstalled hook is
+`.github/workflows/main-push-audit.yaml`, which flags a commit that reached
+`main` without a PR. It is detection after the fact, not prevention.
 
 ### Architecture rules
 
