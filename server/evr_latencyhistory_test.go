@@ -113,6 +113,20 @@ func (m *occTestNakamaModule) StorageWrite(ctx context.Context, writes []*runtim
 	return acks, nil
 }
 
+// MultiUpdate models the entry point StorableWriteMany uses. Only the storage
+// writes are modelled: nothing in this package batches account, wallet or delete
+// operations through it, and a test that starts doing so should teach this
+// double what that means rather than have it silently no-op.
+//
+// CAUTION: Go embedding does not dispatch virtually, so this calls THIS type's
+// StorageWrite, not an override on a type that embeds it. A double that
+// overrides StorageWrite to inject a fault must override MultiUpdate too, or the
+// fault is silently bypassed on the batch path and the write appears to succeed.
+func (m *occTestNakamaModule) MultiUpdate(ctx context.Context, accountUpdates []*runtime.AccountUpdate, storageWrites []*runtime.StorageWrite, storageDeletes []*runtime.StorageDelete, walletUpdates []*runtime.WalletUpdate, updateLedger bool) ([]*api.StorageObjectAck, []*runtime.WalletUpdateResult, error) {
+	acks, err := m.StorageWrite(ctx, storageWrites)
+	return acks, nil, err
+}
+
 func (m *occTestNakamaModule) StorageRead(ctx context.Context, reads []*runtime.StorageRead) ([]*api.StorageObject, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

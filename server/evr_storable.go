@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"strings"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 	"google.golang.org/grpc/codes"
@@ -263,9 +262,10 @@ func storableCreate(ctx context.Context, nk runtime.NakamaModule, userID string,
 // conflict on this path look like a hard failure and defeat the retry loop in
 // SyncJournalAndProfileWithRetry.
 //
-// Acks come back in input order (storageWriteObjects assigns them by the
-// original index at core_storage.go:686), so versions are propagated back to
-// the matching source object.
+// Versions are propagated back to the source objects by applyStorageAcks, which
+// matches on collection/key rather than trusting ack order. Nakama's own
+// implementation does assign acks by the original index (storageWriteObjects,
+// core_storage.go:686), but the runtime API does not promise it.
 func StorableWriteMany(ctx context.Context, nk runtime.NakamaModule, userID string, srcs ...StorableAdapter) error {
 	if len(srcs) == 0 {
 		return nil
@@ -295,24 +295,14 @@ func StorableWriteMany(ctx context.Context, nk runtime.NakamaModule, userID stri
 	// Storage writes only: no account updates, no deletes, no wallet updates.
 	acks, _, err := nk.MultiUpdate(ctx, nil, ops, nil, nil, false)
 	if err != nil {
-		// Name every object in the batch: the caller needs to know that NONE of
-		// them were applied, not just the one that happened to be rejected.
-		paths := make([]string, 0, len(metas))
-		for _, m := range metas {
-			paths = append(paths, m.String())
-		}
-		return storableErrorf(metas[0], codes.Internal,
-			"atomic write of %d objects failed, none applied (%s): %w", len(ops), strings.Join(paths, ", "), err)
+		// Attribute the failure to the batch, not to metas[0]: the caller needs
+		// to know that NONE of them were applied, and the storage layer does not
+		// tell us which object was actually rejected.
+		return storableBatchErrorf(metas, codes.Internal,
+			"atomic write of %d objects failed, none applied: %w", len(ops), err)
 	}
 
-	for i, ack := range acks {
-		if i >= len(srcs) {
-			break
-		}
-		meta := metas[i]
-		meta.Version = ack.GetVersion()
-		srcs[i].SetStorageMeta(meta)
-	}
+	applyStorageAcks(acks, metas, srcs)
 	return nil
 }
 

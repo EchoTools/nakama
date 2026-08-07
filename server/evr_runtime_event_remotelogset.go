@@ -573,15 +573,16 @@ func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logge
 	if err := StorableRead(ctx, nk, userID, eqconfig, true); err != nil {
 		logger.WithField("error", err).Warn("Failed to load early quitter config")
 	} else {
-		// Track completion in detailed history first; only credit the counter
+		// Stage the completion in the detailed history; only credit the counter
 		// when this is the first time the match is reported (the MatchLoop
-		// MatchOver dispatch also reports it).
-		// Warn, not Debug: this is the failure that costs the player match
-		// credit (no history write means no IncrementCompletedMatches), so it
-		// must be at least as visible as the adjacent eqconfig write failure.
-		if first, err := TrackMatchCompletion(ctx, logger, nk, userID, matchID, time.Now().UTC()); err != nil {
-			logger.WithField("error", err).Warn("Failed to track match completion in history")
-		} else if first {
+		// MatchOver dispatch also reports it). The staged record is the dedupe
+		// marker, so it is committed together with the credit below — never on
+		// its own, which would make a failed counter write lose the credit for
+		// good.
+		// A history read failure no longer surfaces here: PrepareMatchCompletion
+		// self-heals an unreadable row and logs it at Warn itself.
+		first, history := PrepareMatchCompletion(ctx, logger, nk, userID, matchID, time.Now().UTC())
+		if first {
 			eqconfig.IncrementCompletedMatches()
 		}
 
@@ -589,8 +590,14 @@ func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logge
 		serviceSettings := ServiceSettings()
 		oldTier, newTier, tierChanged := eqconfig.UpdateTier(serviceSettings.Matchmaking.EarlyQuitTier1Threshold)
 
-		if err := StorableWrite(ctx, nk, userID, eqconfig); err != nil {
-			logger.WithField("error", err).Warn("Failed to store early quitter config")
+		var writeErr error
+		if first && history != nil {
+			writeErr = StorableWriteMany(ctx, nk, userID, eqconfig, history)
+		} else {
+			writeErr = StorableWrite(ctx, nk, userID, eqconfig)
+		}
+		if writeErr != nil {
+			logger.WithField("error", writeErr).Warn("Failed to store early quitter config")
 		} else {
 			// Update session cache
 			if playerSession := sessionRegistry.Get(uuid.FromStringOrNil(sessionID)); playerSession != nil {

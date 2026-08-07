@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"math"
 	"sync"
 	"time"
 
@@ -56,6 +57,24 @@ type EarlyQuitPlayerState struct {
 	NumSteadyEarlyQuits int32 `json:"num_steady_early_quits"` // Quits counted toward steady player status
 	PenaltyLevel        int32 `json:"penalty_level"`          // Resolved from config (clamped uint8)
 	SteadyPlayerLevel   int32 `json:"steady_player_level"`    // Resolved from config (clamped uint8)
+
+	// ModeratorPenaltyLevel/ModeratorPenaltyUntil record a moderator-applied
+	// sanction SEPARATELY from the effective penalty above. The effective
+	// penalty is always the harsher of the quit-count ladder's result and an
+	// unexpired sanction, recomputed from both on every resolution.
+	//
+	// Keeping the sanction in its own fields is what makes that recomputation
+	// total. Marking the effective fields "manual" with a bool instead would
+	// conflate the two: once a ladder result raised the level or extended the
+	// expiry, there would be nothing left to compare against, so the raised
+	// value would ratchet — the player would keep serving the harsher of every
+	// penalty they had ever accrued for as long as the sanction ran.
+	//
+	// Without any of this, the sanctioned player's very next early quit wipes
+	// the sanction, because one quit maps to ladder level 0 and level 0 clears
+	// the lockout.
+	ModeratorPenaltyLevel int32 `json:"moderator_penalty_level,omitempty"`
+	ModeratorPenaltyUntil int64 `json:"moderator_penalty_until,omitempty"`
 
 	// Nakama extensions (kept for matchmaker/UI compat)
 	TotalCompletedMatches      int32     `json:"total_completed_matches"`
@@ -113,41 +132,178 @@ func (s *EarlyQuitPlayerState) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// clampLockoutSec converts a config-supplied lockout (a 64-bit `int` read from
+// stored JSON) to the int32 the penalty state carries, saturating instead of
+// wrapping. Wrapping is not a theoretical concern: every caller gates on
+// `lockoutSec > 0`, so 2^31 (which wraps negative) and 2^32 (which wraps to
+// zero) would both take the CLEAR branch and silently disable the very penalty
+// the config asked to lengthen.
+//
+// Validation does not cover this. LoadEarlyQuitServiceConfig DOES re-validate a
+// stored config on the read-success path (evr_early_quit_message_trigger.go, the
+// `config.Validate()` after the blank-config fill-in), but validatePenaltyLevels
+// bounds MMLockoutSec only from BELOW — `if level.MMLockoutSec < 0 { … = 0 }` in
+// server/evr/login_earlyquitconfig.go — and imposes no upper bound anywhere. The
+// admin RPC's own loader, loadEarlyQuitServiceConfigOrDefault in
+// evr_runtime_rpc_earlyquit_manage.go, skips Validate entirely. So this is the
+// only place the upper bound is enforced on either path.
+func clampLockoutSec(sec int) int32 {
+	if sec <= 0 {
+		return 0
+	}
+	if sec > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(sec)
+}
+
 // ResolvePenaltyLevel determines the penalty level and lockout duration from the
 // config's penalty_levels array, matching the binary's algorithm: find the first
 // level where numQuits >= min AND numQuits <= max.
+//
+// Resolution is total: a quit count that lands in no band (the ladder may have
+// gaps, and its first band need not start at 0 — validatePenaltyLevels closes
+// overlaps but not gaps) resolves to the band with the highest FLOOR among those
+// the count has cleared ENTIRELY, i.e. those whose ceiling it is already above
+// (`numQuits > MaxEarlyQuits`, the condition below). It resolves to no penalty
+// at all when it has cleared no band. Only a count ABOVE every band gets the top
+// level.
+//
+// "Cleared entirely" and "reached the floor" coincide for every well-formed band,
+// since Min <= Max makes numQuits > Max imply numQuits >= Min. They diverge only
+// for an inverted Min > Max band, which validatePenaltyLevels swaps back
+// (server/evr/login_earlyquitconfig.go) — but the admin RPC's
+// loadEarlyQuitServiceConfigOrDefault does not call Validate, so an inverted band
+// can still reach this function from evr_runtime_rpc_earlyquit_manage.go. The
+// ceiling test is the operative one; prefer it when reasoning about that case.
 func ResolvePenaltyLevel(numQuits int32, cfg *evr.SNSEarlyQuitConfig) (level int32, lockoutSec int32) {
 	if cfg == nil {
 		return 0, 0
 	}
+	var (
+		bestLevel   int32
+		bestLockout int32
+		bestMin     int
+		found       bool
+	)
 	for _, pl := range cfg.PenaltyLevels {
 		if int(numQuits) >= pl.MinEarlyQuits && int(numQuits) <= pl.MaxEarlyQuits {
-			return int32(pl.PenaltyLevel), int32(pl.MMLockoutSec)
+			return int32(pl.PenaltyLevel), clampLockoutSec(pl.MMLockoutSec)
+		}
+		// Not in this band. Remember it if the count has cleared its floor:
+		// it is the candidate for a count that sits in a gap above it or
+		// beyond the end of the ladder.
+		if int(numQuits) > pl.MaxEarlyQuits && (!found || pl.MinEarlyQuits >= bestMin) {
+			bestLevel, bestLockout, bestMin, found = int32(pl.PenaltyLevel), clampLockoutSec(pl.MMLockoutSec), pl.MinEarlyQuits, true
 		}
 	}
-	// If no level matches (quit count above all ranges), use the highest level
-	if len(cfg.PenaltyLevels) > 0 {
-		last := cfg.PenaltyLevels[len(cfg.PenaltyLevels)-1]
-		return int32(last.PenaltyLevel), int32(last.MMLockoutSec)
+	if found {
+		return bestLevel, bestLockout
 	}
+	// Below every configured band: no penalty.
 	return 0, 0
+}
+
+// ApplyModeratorPenalty records a moderator-applied sanction: it becomes the
+// effective penalty immediately AND is retained in its own fields so that
+// quit-count ladder resolution cannot afterwards lower or shorten it while it
+// is in force. A lockoutSec of zero or less means "no lockout", which retains
+// nothing — there is no sanction to protect.
+//
+// A level with no lockout clears the level too, exactly as applyLadderPenalty
+// does ("A level carrying no lockout is no penalty at all"). Setting the level
+// while zeroing the expiry left a penalty nothing could lift: the level alone
+// governs UpdateTier and the client profile's EarlyQuitFeatures.PenaltyLevel,
+// neither of which consults the timestamp, while IsPenaltyActive() reported no
+// penalty. Since the completion paths (evr_match.go's MatchOver,
+// EventRemoteLogSet.incrementCompletedMatches) call UpdateTier WITHOUT
+// re-resolving the level first, that phantom put the player in the Tier 2 queue
+// and sent the "flagged for early quitting" DM permanently — "complete full
+// matches to restore Tier 1 status" could never come true, because completing
+// matches never recomputes the level.
+//
+// This does not discard the moderator's request. The one reachable caller,
+// earlyquit/modify's set_penalty action, records the requested level in the
+// guild override (GuildOverrides[groupID].PenaltyLevel) before calling here, and
+// reports the resulting state — PenaltyLevel alongside PenaltyActive — straight
+// back to the moderator.
+func (s *EarlyQuitPlayerState) ApplyModeratorPenalty(level int32, lockoutSec int32) {
+	s.Lock()
+	defer s.Unlock()
+	if level > 0 && lockoutSec > 0 {
+		s.PenaltyLevel = level
+		s.PenaltyTimestamp = time.Now().Unix() + int64(lockoutSec)
+		s.ModeratorPenaltyLevel = level
+		s.ModeratorPenaltyUntil = s.PenaltyTimestamp
+	} else {
+		s.PenaltyLevel = 0
+		s.PenaltyTimestamp = 0
+		s.ModeratorPenaltyLevel = 0
+		s.ModeratorPenaltyUntil = 0
+	}
+}
+
+// ClearModeratorPenalty drops any retained moderator sanction. Call it when the
+// player's record is reset: leaving the sanction behind would keep blocking
+// ladder resolution for the rest of its original lockout.
+func (s *EarlyQuitPlayerState) ClearModeratorPenalty() {
+	s.Lock()
+	defer s.Unlock()
+	s.ModeratorPenaltyLevel = 0
+	s.ModeratorPenaltyUntil = 0
 }
 
 // resolveAndApplyPenaltyLockout resolves the penalty level from the STORED
 // early quit service config (EarlyQuit|config under SystemUserID) and applies
-// the resulting lockout to eqconfig. Call it after IncrementEarlyQuit() so the
-// new quit count is reflected. When the count maps to a level with no lockout
-// (level 0), any stale PenaltyLevel/PenaltyTimestamp are cleared to zero.
+// the resulting lockout to eqconfig. Call it after IncrementEarlyQuit() (or
+// after ForgiveLastQuit()) so the new quit count is reflected. When the count
+// maps to a level with no lockout (level 0), any stale
+// PenaltyLevel/PenaltyTimestamp are cleared to zero.
+//
+// An unexpired moderator sanction is a FLOOR in both dimensions: the ladder may
+// raise the level or extend the expiry, never lower or shorten either. Without
+// the expiry half of that floor the direction is perverse — a player under a
+// long, light sanction shortens it by quitting more, because the harsher ladder
+// level also brings the ladder's much shorter lockout with it.
 func resolveAndApplyPenaltyLockout(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, eqconfig *EarlyQuitPlayerState) {
-	config := LoadEarlyQuitServiceConfig(ctx, nk, logger)
-	level, lockoutSec := ResolvePenaltyLevel(eqconfig.NumEarlyQuits, config)
+	eqconfig.applyLadderPenalty(LoadEarlyQuitServiceConfig(ctx, nk, logger), time.Now().Unix())
+}
+
+// applyLadderPenalty recomputes the effective penalty from the quit-count ladder
+// and any unexpired moderator sanction. It is the whole of
+// resolveAndApplyPenaltyLockout's logic, split out so it can be exercised
+// without a storage round trip and so the mutation happens under the state's
+// own lock.
+func (s *EarlyQuitPlayerState) applyLadderPenalty(cfg *evr.SNSEarlyQuitConfig, now int64) {
+	s.Lock()
+	defer s.Unlock()
+
+	level, lockoutSec := ResolvePenaltyLevel(s.NumEarlyQuits, cfg)
+	var expiry int64
 	if lockoutSec > 0 {
-		eqconfig.PenaltyLevel = level
-		eqconfig.PenaltyTimestamp = time.Now().Unix() + int64(lockoutSec)
+		expiry = now + int64(lockoutSec)
 	} else {
-		eqconfig.PenaltyLevel = 0
-		eqconfig.PenaltyTimestamp = 0
+		// A level carrying no lockout is no penalty at all.
+		level = 0
 	}
+
+	if s.ModeratorPenaltyUntil > now {
+		// Both floors come from the SANCTION, never from the currently stored
+		// penalty: comparing against the stored value would let a ladder result
+		// that has since lapsed ratchet the sanction permanently upward.
+		if level < s.ModeratorPenaltyLevel {
+			level = s.ModeratorPenaltyLevel
+		}
+		if expiry < s.ModeratorPenaltyUntil {
+			expiry = s.ModeratorPenaltyUntil
+		}
+	} else {
+		s.ModeratorPenaltyLevel = 0
+		s.ModeratorPenaltyUntil = 0
+	}
+
+	s.PenaltyLevel = level
+	s.PenaltyTimestamp = expiry
 }
 
 // ResolveSteadyPlayerLevel determines the steady player level from the config.
@@ -434,7 +590,15 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 	// Reduce early quit penalty by one level without inflating match completion statistics.
 	// This forgives the early quit since the player logged out entirely rather than
 	// just leaving the match to join another.
+	oldPenaltyLevel := eqconfig.GetPenaltyLevel()
 	eqconfig.ForgiveLastQuit()
+
+	// Re-resolve the lockout from the reduced quit count. ForgiveLastQuit only
+	// touches the counters and leaves PenaltyLevel/PenaltyTimestamp to the
+	// caller; without this the forgiven player keeps serving the full lockout
+	// the forgiven quit caused, and UpdateTier below reads a stale penalty
+	// level so the tier never recovers.
+	resolveAndApplyPenaltyLockout(ctx, nk, logger, eqconfig)
 
 	// Check if tier should be updated after penalty reduction
 	serviceSettings := ServiceSettings()
@@ -451,7 +615,7 @@ func CheckAndStrikeEarlyQuitIfLoggedOut(ctx context.Context, logger runtime.Logg
 
 	logger.WithFields(map[string]any{
 		"uid":               userID,
-		"old_penalty_level": eqconfig.GetPenaltyLevel() + 1, // +1 because we just decremented it
+		"old_penalty_level": oldPenaltyLevel,
 		"new_penalty_level": eqconfig.GetPenaltyLevel(),
 		"old_tier":          oldTier,
 		"new_tier":          newTier,
