@@ -31,7 +31,13 @@ const (
 	TierRestoredMessage = "Matchmaking Priority Restored: You have returned to Tier 1 status. Complete full matches to maintain your standing."
 )
 
-// EarlyQuitLockoutDurations maps penalty levels to their lockout durations
+// EarlyQuitLockoutDurations maps penalty levels to their lockout durations.
+//
+// It must have an entry for every level in 0..MaxEarlyQuitPenaltyLevel:
+// GetLockoutDuration returns 0 for an unmapped level, which reads as "no
+// lockout" and is indistinguishable from level 0. Raising the max without
+// extending this map would silently un-penalise the new top level, so
+// TestEarlyQuitLockoutDurations_CoversEveryLevel fails if the two drift.
 var EarlyQuitLockoutDurations = map[int]time.Duration{
 	0: 0 * time.Second,   // No lockout
 	1: 120 * time.Second, // 2 minutes
@@ -325,8 +331,32 @@ func ResolveSteadyPlayerLevel(steadyMatches, steadyEarlyQuits int32, cfg *evr.SN
 	return best
 }
 
-// GetLockoutDuration returns the lockout duration for a given penalty level.
-// Uses the hardcoded fallback map (deprecated — callers should use ResolvePenaltyLevel with config).
+// GetLockoutDuration returns the built-in lockout duration for a penalty LEVEL.
+//
+// This carried a note saying it was deprecated and that callers should use
+// ResolvePenaltyLevel with config instead. That was withdrawn: ResolvePenaltyLevel
+// cannot answer this question. It is keyed on QUIT COUNT --
+// ResolvePenaltyLevel(numQuits, cfg) maps a count to the band it falls in and
+// returns that band's lockout. Getting "the lockout for level L" out of it means
+// inventing a quit count that resolves to L, and for a level absent from the
+// configured ladder no such count exists.
+//
+// Following the old advice is what produced the bug fixed in #535: seeding the
+// lockout from the level the target's CURRENT quit count maps to made a level
+// absent from the ladder borrow a different level's lockout. See the comment at
+// evr_runtime_rpc_earlyquit_manage.go where the lockout must come from the level
+// being SET.
+//
+// So the two coexist deliberately:
+//
+//	ResolvePenaltyLevel  quit count -> (level, lockout), config-driven
+//	GetLockoutDuration   level      -> lockout, built-in defaults
+//
+// A caller that has config and wants a configured level's lockout should still
+// prefer the config value; this is the floor underneath it. Its domain is
+// 0..MaxEarlyQuitPenaltyLevel and TestEarlyQuitLockoutDurations_CoversEveryLevel
+// pins that, because an unmapped level returns 0 -- a silent "no lockout" that
+// nothing downstream would report.
 func GetLockoutDuration(penaltyLevel int) time.Duration {
 	duration, ok := EarlyQuitLockoutDurations[penaltyLevel]
 	if !ok {
