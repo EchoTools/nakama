@@ -45,7 +45,12 @@ func NewReservationIntegration(nk runtime.NakamaModule, logger runtime.Logger) *
 func (ri *ReservationIntegration) RegisterDiscordCommands(dg *discordgo.Session) error {
 	command := GetReserveCommandDefinition()
 
-	_, err := dg.ApplicationCommandCreate(dg.State.User.ID, "", command)
+	botID := botDiscordIDFromState(dg.State)
+	if botID == "" {
+		return fmt.Errorf("failed to register /reserve command: bot user ID not in state yet")
+	}
+
+	_, err := dg.ApplicationCommandCreate(botID, "", command)
 	if err != nil {
 		return fmt.Errorf("failed to register /reserve command: %w", err)
 	}
