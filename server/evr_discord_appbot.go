@@ -170,7 +170,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 			logger.WithField("error", err).Error("Failed to register slash commands")
 		}
 
-		logger.WithFields(map[string]interface{}{"display_name": displayName, "guild_count": len(dg.State.Guilds)}).Info("Bot ready")
+		logger.WithFields(map[string]interface{}{"display_name": displayName, "guild_count": stateGuildCount(dg.State)}).Info("Bot ready")
 	})
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.RateLimit) {
@@ -4128,7 +4128,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 	d.logger.Info("Registering slash commands.")
 	// Register global guild commands
 	d.updateSlashCommands(dg, d.logger, "")
-	d.logger.WithFields(map[string]interface{}{"command_count": len(mainSlashCommands), "guild_count": len(dg.State.Guilds)}).Info("Slash commands registered/updated")
+	d.logger.WithFields(map[string]interface{}{"command_count": len(mainSlashCommands), "guild_count": stateGuildCount(dg.State)}).Info("Slash commands registered/updated")
 
 	return nil
 }

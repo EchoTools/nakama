@@ -36,3 +36,31 @@ func botDiscordIDFromState(state *discordgo.State) string {
 	}
 	return state.User.ID
 }
+
+// stateGuildCount returns the number of guilds the bot is in, read under the
+// discordgo state's read lock.
+//
+// The count is only ever logged, so the stakes look low — but the read is a
+// plain data race and the writer is the busiest one discordgo has. GuildAdd
+// takes State.Lock() and APPENDS to State.Guilds (state.go:89-95, :146 @
+// v0.29.0), and for a bot over the large-guild threshold the gateway delivers
+// GUILD_CREATE for every guild AFTER READY. So the window is not an exotic
+// interleaving; it is startup.
+//
+// Both callers run on a handler goroutine rather than the gateway goroutine:
+// discordgo dispatches handlers with `go eh.eventHandler.Handle(s, i)` unless
+// Session.SyncEvents is set (event.go:171, :180 @ v0.29.0), and this repo never
+// sets it.
+//
+// An unlocked len() of a slice being appended to reads a torn slice header. On
+// amd64 the realistic outcome is a wrong number in one log line rather than a
+// crash, which is precisely why it survived: nothing downstream notices, and
+// -race is the only thing that ever complains.
+func stateGuildCount(state *discordgo.State) int {
+	if state == nil {
+		return 0
+	}
+	state.RLock()
+	defer state.RUnlock()
+	return len(state.Guilds)
+}
