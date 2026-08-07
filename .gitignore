@@ -739,6 +739,18 @@ BUGS.md
 
 # Binaries dropped by `go build` inside tools/ (a plain `go build` names the
 # output after its directory). tools/purge-docker-ips/purge-docker-ips was
-# committed this way -- an 87MB ELF that outlived its deleted source.
-/tools/party-split-detector/party-split-detector
-/tools/echovr-mock-client/echovr-mock-client
+# committed this way -- an 87MB ELF that outlived its deleted source, and the
+# enumeration that replaced it did not list the very binary it named.
+#
+# So match the SHAPE instead of the names: a build output has no extension,
+# every source file under tools/ has one. Ignore extensionless files one level
+# under tools/*/, then re-admit anything with a dot and any subdirectory (git
+# does not descend into an ignored directory, so testdata/ needs the exception
+# to stay visible).
+#
+# Caveat for whoever adds the next tool: an extensionless file you DO want
+# tracked -- Makefile, LICENSE, Dockerfile -- lands in the ignored set. `git
+# status --ignored` will show it, and `git add -f` overrides.
+/tools/*/*
+!/tools/*/*.*
+!/tools/*/*/
