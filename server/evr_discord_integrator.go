@@ -10,7 +10,6 @@ import (
 	"slices"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
@@ -58,7 +57,20 @@ type DiscordIntegrator struct {
 	queueCooldowns     *MapOf[QueueEntry, time.Time]
 	idcache            *MapOf[string, string]
 	memberCache        *MapOf[string, cachedMember]
+
+	// unavailableGuilds records, by guild ID, when the bot last saw a guild
+	// go unavailable. discordgo drops such guilds from State.Guilds, so this
+	// is the only remaining evidence that they exist. See
+	// unavailableGuildIDsAsOf.
+	unavailableGuilds *MapOf[string, time.Time]
 }
+
+// unavailableGuildGraceTTL is how long a guild that went unavailable keeps
+// being treated as present. It bounds the damage of a Discord outage without
+// pinning a guild forever: after a full IDENTIFY, a guild the bot is no longer
+// in is simply absent from READY and no GUILD_DELETE ever arrives for it, so
+// without an expiry its entry would never be cleared.
+const unavailableGuildGraceTTL = 24 * time.Hour
 
 func NewDiscordIntegrator(ctx context.Context, logger *zap.Logger, config Config, metrics Metrics, nk runtime.NakamaModule, db *sql.DB, dg *discordgo.Session, guildGroupRegistry *GuildGroupRegistry) *DiscordIntegrator {
 	ctx, cancelFn := context.WithCancel(ctx)
@@ -79,6 +91,7 @@ func NewDiscordIntegrator(ctx context.Context, logger *zap.Logger, config Config
 		queueCooldowns:     &MapOf[QueueEntry, time.Time]{},
 		idcache:            &MapOf[string, string]{},
 		memberCache:        &MapOf[string, cachedMember]{},
+		unavailableGuilds:  &MapOf[string, time.Time]{},
 
 		queueCh: make(chan QueueEntry, 50),
 	}
@@ -182,12 +195,18 @@ func (c *DiscordIntegrator) Start() {
 
 				pruneTicker.Reset(time.Minute * 15)
 
-				// Prune the guild groups
-				doLeaves := ServiceSettings().PruneSettings.LeaveOrphanedGuilds
-				doDeletes := ServiceSettings().PruneSettings.DeleteOrphanedGroups
-				pruneSafetyThreshold := ServiceSettings().PruneSettings.SafetyLimit
-				if err := c.pruneGuildGroups(c.ctx, runtimeLogger, doLeaves, doDeletes, pruneSafetyThreshold); err != nil {
-					logger.Error("Error pruning guild groups", zap.Error(err), zap.Bool("do_leaves", doLeaves), zap.Bool("do_deletes", doDeletes), zap.Int("prune_safety_threshold", pruneSafetyThreshold))
+				// Prune the guild groups. Read the settings once: they are
+				// swapped atomically, and three separate reads could mix two
+				// generations of policy.
+				prune := ServiceSettings().PruneSettings
+				cfg := pruneConfig{
+					doGuildLeaves:   prune.LeaveOrphanedGuilds,
+					doGroupDeletes:  prune.DeleteOrphanedGroups,
+					safetyThreshold: prune.SafetyLimit,
+					reportOnly:      prune.ReportOnly,
+				}
+				if err := c.pruneGuildGroups(c.ctx, runtimeLogger, cfg); err != nil {
+					logger.Error("Error pruning guild groups", zap.Error(err), zap.Bool("do_leaves", cfg.doGuildLeaves), zap.Bool("do_deletes", cfg.doGroupDeletes), zap.Int("prune_safety_threshold", cfg.safetyThreshold))
 				}
 			}
 		}
@@ -206,15 +225,7 @@ func (c *DiscordIntegrator) Start() {
 	})
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.GuildDelete) {
-		if m.Unavailable {
-			// This is not an error; the guild is just temporarily unavailable.
-			logger.Warn("Guild became unavailable", zap.Any("guildDelete", m))
-			return
-		}
-		logger.Info("Guild Delete", zap.Any("guildDelete", m))
-		if err := c.handleGuildDelete(logger, s, m); err != nil {
-			logger.Error("Error handling guild delete", zap.Any("guildDelete", m), zap.Error(err))
-		}
+		c.onGuildDelete(logger, s, m)
 	})
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMemberAdd) {
@@ -279,6 +290,81 @@ func (d *DiscordIntegrator) Purge(id string) bool {
 	}
 	d.idcache.Delete(value)
 	return true
+}
+
+// onGuildDelete is the body of the GUILD_DELETE handler, extracted from the
+// closure in Start() so the availability bookkeeping it performs can be
+// tested. Discord sends GUILD_DELETE both when the bot genuinely leaves a
+// guild and when a guild merely goes unavailable, and discordgo removes the
+// guild from State.Guilds either way, so recording the difference here is the
+// only thing that keeps a shard outage from looking like a mass departure to
+// the prune pass.
+func (c *DiscordIntegrator) onGuildDelete(logger *zap.Logger, s *discordgo.Session, m *discordgo.GuildDelete) {
+	if m.Unavailable {
+		// This is not an error; the guild is just temporarily unavailable.
+		// discordgo has already removed it from State.Guilds, so record it or
+		// pruning will see its group as orphaned and delete it.
+		c.markGuildUnavailable(m.ID, time.Now())
+		// Identifiers only: this branch fires once per affected guild when a
+		// shard drops, and discordgo populates GuildDelete.BeforeDelete from
+		// state, so zap.Any on m would dump every member, channel, presence
+		// and emoji of every affected guild at once.
+		logger.Warn("Guild became unavailable", zap.String("guild_id", m.ID))
+		return
+	}
+	// A real departure, not an availability blip. Logged in full: it happens
+	// at most once per guild, and BeforeDelete is the only surviving record of
+	// what was lost.
+	c.markGuildAvailable(m.ID)
+	logger.Info("Guild Delete", zap.Any("guildDelete", m))
+	if err := c.handleGuildDelete(logger, s, m); err != nil {
+		logger.Error("Error handling guild delete", zap.Any("guildDelete", m), zap.Error(err))
+	}
+}
+
+// markGuildUnavailable records that a guild went unavailable at the given
+// time. discordgo removes a guild from State.Guilds on EVERY GUILD_DELETE,
+// including Unavailable=true, and it does so before any handler runs, so this
+// record is the only remaining evidence that the guild exists.
+func (d *DiscordIntegrator) markGuildUnavailable(guildID string, at time.Time) {
+	if d.unavailableGuilds == nil || guildID == "" {
+		return
+	}
+	d.unavailableGuilds.Store(guildID, at)
+}
+
+// markGuildAvailable clears a guild's unavailable record. Called when the
+// guild comes back (GUILD_CREATE) and when it is genuinely gone (a
+// GUILD_DELETE that is not an availability blip).
+func (d *DiscordIntegrator) markGuildAvailable(guildID string) {
+	if d.unavailableGuilds == nil {
+		return
+	}
+	d.unavailableGuilds.Delete(guildID)
+}
+
+// unavailableGuildIDsAsOf returns the guilds that are currently absent from
+// Discord state only because they are unavailable. Pruning treats them as
+// present, so a shard outage cannot make their groups look orphaned and get
+// them deleted -- which would destroy role maps, channel IDs, suspension
+// inheritance and every membership, none of it recoverable from Discord.
+//
+// Entries older than unavailableGuildGraceTTL are expired and removed, so the
+// map cannot grow without bound.
+func (d *DiscordIntegrator) unavailableGuildIDsAsOf(now time.Time) map[string]struct{} {
+	ids := make(map[string]struct{})
+	if d.unavailableGuilds == nil {
+		return ids
+	}
+	d.unavailableGuilds.Range(func(guildID string, since time.Time) bool {
+		if now.Sub(since) > unavailableGuildGraceTTL {
+			d.unavailableGuilds.Delete(guildID)
+			return true
+		}
+		ids[guildID] = struct{}{}
+		return true
+	})
+	return ids
 }
 
 // Discord ID to Nakama UserID, with a lookup cache
@@ -517,29 +603,44 @@ func (c *DiscordIntegrator) GuildMember(guildID, discordID string) (member *disc
 	return member, nil
 }
 
-// maxGroupTextLength is the column size of the groups table's name and
-// description columns (VARCHAR(255), migrate/sql/20180103142001_initial_schema.sql:182-183).
-// Discord guild descriptions can exceed it, which makes GroupCreate/GroupUpdate
-// fail with SQLSTATE 22001 ("value too long for type character varying(255)")
-// and permanently prevents the guild's group from being registered.
+// maxGroupTextLength is the column size, IN CHARACTERS, of the groups table's
+// name and description columns (VARCHAR(255),
+// migrate/sql/20180103142001_initial_schema.sql:182-183). PostgreSQL and
+// CockroachDB both measure VARCHAR(n) in characters, not bytes.
+//
+// Discord guild descriptions can reach 300 characters and so can exceed it,
+// which makes GroupCreate/GroupUpdate fail with SQLSTATE 22001 ("value too
+// long for type character varying(255)") and permanently prevents the guild's
+// group from being registered. Discord guild names cap at 100 characters and
+// therefore never reach this limit.
 const maxGroupTextLength = 255
 
-// truncateRuneSafe truncates s so its byte length is at most maxBytes without
-// splitting a multi-byte character (Discord descriptions contain emoji). The
-// byte limit is conservative for PostgreSQL VARCHAR(n), which counts characters.
-func truncateRuneSafe(s string, maxBytes int) string {
-	if len(s) <= maxBytes {
-		return s
-	}
-	if maxBytes <= 0 {
+// truncateRuneSafe truncates s to at most maxChars characters, never splitting
+// a multi-byte character (Discord names and descriptions contain emoji). The
+// unit is characters because that is the unit VARCHAR(n) counts; measuring in
+// bytes would cut a 100-character emoji guild name down to 63 characters and
+// could collapse two distinct guild names onto the same 255-byte prefix, which
+// the UNIQUE constraint groups_name_key would then reject.
+//
+// On a string that is not valid UTF-8 AND longer than maxChars, the []rune
+// conversion replaces each invalid byte with U+FFFD, so the result is a
+// sanitised string rather than a byte prefix of the input. The character count
+// is still correct, and Discord only ever hands us valid UTF-8, so this is a
+// property of the function rather than a reachable behaviour.
+func truncateRuneSafe(s string, maxChars int) string {
+	if maxChars <= 0 {
 		return ""
 	}
-	for i := maxBytes; i > 0; i-- {
-		if utf8.RuneStart(s[i]) {
-			return s[:i]
-		}
+	if len(s) <= maxChars {
+		// A string can never have more characters than bytes, so this is
+		// already within the limit.
+		return s
 	}
-	return ""
+	runes := []rune(s)
+	if len(runes) <= maxChars {
+		return s
+	}
+	return string(runes[:maxChars])
 }
 
 // guildSync registers (or updates) the Nakama group backing a Discord guild.
@@ -549,6 +650,15 @@ func truncateRuneSafe(s string, maxBytes int) string {
 // no guild is left before the threshold check can run.
 func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, guild *discordgo.Guild, leaveOnBannedOwner bool) error {
 	logger = logger.With(zap.String("guild_id", guild.ID), zap.String("guild_name", guild.Name))
+
+	// An unavailable-guild stub carries no name. groups.name is NOT NULL and
+	// carries the UNIQUE constraint groups_name_key, so syncing one would
+	// either fail outright or collide with every other unnamed guild. Refuse
+	// explicitly rather than relying on the owner lookup below happening to
+	// fail first.
+	if guild.Name == "" {
+		return fmt.Errorf("guild %s has no name; refusing to sync (unavailable guild stub?)", guild.ID)
+	}
 
 	var err error
 	botUserID := d.DiscordIDToUserID(botDiscordIDFromState(d.dg.State))
@@ -668,7 +778,14 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 }
 
 func (d *DiscordIntegrator) handleGuildCreate(logger *zap.Logger, _ *discordgo.Session, e *discordgo.GuildCreate) error {
-	logger.Info("Guild Create", zap.Any("guild", e.Guild.ID))
+	// Identifiers only, and typed: this fires once per guild on every reconnect,
+	// so zap.Any here would silently accept a whole *discordgo.Guild in a later
+	// refactor and dump every member, channel and presence of every returning
+	// guild -- the same failure removed from the "Guild became unavailable"
+	// branch above.
+	logger.Info("Guild Create", zap.String("guild_id", e.Guild.ID))
+	// The guild is back in state; it no longer needs outage protection.
+	d.markGuildAvailable(e.Guild.ID)
 	if err := d.guildSync(d.ctx, logger, e.Guild, true); err != nil {
 		return fmt.Errorf("error during guild sync: %w", err)
 	}

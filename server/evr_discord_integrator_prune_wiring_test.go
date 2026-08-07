@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/heroiclabs/nakama-common/api"
@@ -13,11 +14,14 @@ import (
 )
 
 // The tests in this file exist because snapshotStateGuilds is only a fix if
-// pruneGuildGroups actually CALLS it. The snapshot contract tests in
+// the prune path actually CALLS it. The snapshot contract tests in
 // evr_discord_integrator_state_race_test.go all invoke snapshotStateGuilds
 // directly, so every one of them would keep passing if the read site at
 // evr_discord_integrator_pruning.go reverted to `d.dg.State.Guilds` and the
-// snapshot became dead code. These tests drive pruneGuildGroups itself.
+// snapshot became dead code. These tests drive the prune pass itself.
+//
+// That read site is prunePassDeps.stateGuilds, bound by newPrunePassDeps --
+// the single line every prune tick goes through to reach Discord state.
 //
 // TestPruneGuildGroups_UsesSnapshotNotLiveState is deliberately deterministic
 // rather than -race-dependent: CI runs `just test` (justfile:70-71 —
@@ -79,25 +83,6 @@ func (l *prunePhaseLogger) WithFields(fields map[string]interface{}) runtime.Log
 
 func (l *prunePhaseLogger) Fields() map[string]interface{} { return l.fields }
 
-// orphanGuildsLogged returns the guild slice pruneGuildGroups attached to its
-// mass-leave safety abort.
-func (l *prunePhaseLogger) orphanGuildsLogged(t *testing.T) []*discordgo.Guild {
-	t.Helper()
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for _, e := range *l.events {
-		if v, ok := e.fields["orphan_guilds"]; ok {
-			guilds, ok := v.([]*discordgo.Guild)
-			if !ok {
-				t.Fatalf("orphan_guilds logged as %T, want []*discordgo.Guild", v)
-			}
-			return guilds
-		}
-	}
-	t.Fatalf("pruneGuildGroups never logged orphan_guilds; events=%+v", *l.events)
-	return nil
-}
-
 // emptyGroupsNakamaModule reports that Nakama has no guild groups at all, so
 // every guild in the discordgo state becomes an orphan candidate. Every other
 // NakamaModule method is nil: if pruneGuildGroups reaches one, the test panics
@@ -123,24 +108,34 @@ func newPruneTestIntegrator(t *testing.T, state *discordgo.State) *DiscordIntegr
 	idcache := &MapOf[string, string]{}
 	idcache.Store(botDiscordIDForPruneTest, "")
 	return &DiscordIntegrator{
-		ctx:     context.Background(),
-		logger:  zap.NewNop(),
-		nk:      &emptyGroupsNakamaModule{},
-		dg:      &discordgo.Session{State: state},
-		idcache: idcache,
+		ctx:               context.Background(),
+		logger:            zap.NewNop(),
+		nk:                &emptyGroupsNakamaModule{},
+		dg:                &discordgo.Session{State: state},
+		idcache:           idcache,
+		unavailableGuilds: &MapOf[string, time.Time]{},
 	}
 }
 
 const botDiscordIDForPruneTest = "bot-discord-id"
 
-// TestPruneGuildGroups_UsesSnapshotNotLiveState is the wiring pin: it drives
-// pruneGuildGroups end to end and proves the *discordgo.Guild values it works
-// with came from snapshotStateGuilds, not from d.dg.State.Guilds.
+// TestPruneGuildGroups_UsesSnapshotNotLiveState is the wiring pin: it drives a
+// whole prune pass through the integrator's own dependency binding and proves
+// the *discordgo.Guild values the pass works with came from
+// snapshotStateGuilds, not from d.dg.State.Guilds.
+//
+// The observation point is the repair pass's syncGuild argument, not a log
+// field. The prune path deliberately logs guild IDENTIFIERS only -- a
+// *discordgo.Guild carries every member, channel and presence, and zap
+// reflect-walks it -- and guildSync, which ranges guild.Channels, is precisely
+// the deep reader the snapshot exists to protect. Handing it a live pointer is
+// the bug; handing it a copy is the fix.
 //
 // It fails deterministically (no -race needed) if the read site reverts to live
 // state, because the live guild carries a populated Roles slice that
 // copyStateGuild clears, and the live *Guild / *Channel pointers are the ones
-// the gateway overwrites in place.
+// the gateway overwrites in place. The nil entry in State.Guilds makes an
+// unguarded live read panic outright.
 func TestPruneGuildGroups_UsesSnapshotNotLiveState(t *testing.T) {
 	state := discordgo.NewState()
 	state.User = &discordgo.User{ID: botDiscordIDForPruneTest}
@@ -169,39 +164,131 @@ func TestPruneGuildGroups_UsesSnapshotNotLiveState(t *testing.T) {
 
 	d := newPruneTestIntegrator(t, state)
 	logger := newPrunePhaseLogger()
+	ctx := context.Background()
 
-	// pruneSafetyThreshold 0 with one orphan guild trips the mass-leave abort,
-	// which logs the orphan guilds and returns before any GuildLeave or
-	// GroupDelete call. doGuildLeaves/doGroupDeletes are false as well.
-	err = d.pruneGuildGroups(context.Background(), logger, false, false, 0)
-	if err == nil {
-		t.Fatal("expected the mass-leave safety abort to return an error")
+	var synced []*discordgo.Guild
+	syncGuild := func(_ context.Context, _ *zap.Logger, guild *discordgo.Guild, _ bool) error {
+		synced = append(synced, guild)
+		return nil
 	}
 
-	got := logger.orphanGuildsLogged(t)
-	if len(got) != 1 {
-		t.Fatalf("got %d orphan guilds, want 1 (the nil State.Guilds entry must be skipped)", len(got))
+	// nk reports no guild groups at all, so the one guild in state is an orphan
+	// guild and reaches the repair pass. Both do* flags are off and the
+	// threshold is 0, so nothing may be left or deleted; with neither
+	// destructive side armed, neither safety valve is live and the pass returns
+	// no error.
+	deps := d.newPrunePassDeps(ctx, syncGuild)
+	if _, err := runPrunePass(ctx, logger, deps, prunePolicy(false, false, 0), time.Now()); err != nil {
+		t.Fatalf("runPrunePass: %v", err)
 	}
-	g := got[0]
+
+	if len(synced) != 1 {
+		t.Fatalf("repair pass saw %d guilds, want 1 (the nil State.Guilds entry must be skipped)", len(synced))
+	}
+	g := synced[0]
 
 	if g == live {
-		t.Error("pruneGuildGroups operated on the LIVE *Guild from discordgo state; it must use snapshotStateGuilds, whose copies the gateway cannot overwrite in place")
+		t.Error("the prune pass operated on the LIVE *Guild from discordgo state; it must use snapshotStateGuilds, whose copies the gateway cannot overwrite in place")
 	}
 	if len(g.Roles) != 0 {
-		t.Error("pruneGuildGroups' guild still carries Roles; copyStateGuild clears them, so this guild came from live state")
+		t.Error("the prune pass' guild still carries Roles; copyStateGuild clears them, so this guild came from live state")
 	}
 	if len(g.Members) != 0 {
-		t.Error("pruneGuildGroups' guild still carries Members; copyStateGuild clears them, so this guild came from live state")
+		t.Error("the prune pass' guild still carries Members; copyStateGuild clears them, so this guild came from live state")
 	}
 	if len(g.Channels) != 1 {
 		t.Fatalf("got %d channels, want 1", len(g.Channels))
 	}
 	if g.Channels[0] == liveChannel {
-		t.Error("pruneGuildGroups' guild aliases the LIVE *Channel pointers; ChannelAdd overwrites them in place under State.Lock()")
+		t.Error("the prune pass' guild aliases the LIVE *Channel pointers; ChannelAdd overwrites them in place under State.Lock()")
 	}
 	// The scalars the prune path and guildSync read must survive the copy.
 	if g.ID != "guild-orphan" || g.Name != "Orphan" || g.OwnerID != "owner-1" {
 		t.Errorf("snapshot dropped scalars the prune path reads: %+v", g)
+	}
+}
+
+// TestPruneGuildGroups_SnapshotPreservesUnavailableStubs pins the seam between
+// the two independent fixes on this path, which nothing else covers.
+//
+// The outage protection has two mechanisms for two different failure modes:
+//
+//   - A guild that goes unavailable MID-SESSION is removed from State.Guilds
+//     outright. discordgo's GUILD_DELETE branch calls GuildRemove
+//     unconditionally (state.go:973-981 @ v0.29.0) -- there is no flag left to
+//     read -- so the unavailableGuilds side-channel is the only cover.
+//
+//   - A guild that is unavailable at READY is PRESENT in State.Guilds as a
+//     stub with Unavailable=true and no Name, and stays there until the
+//     matching GUILD_CREATE. No GUILD_DELETE is ever sent for it, so the
+//     side-channel never learns about it and the Unavailable flag is the only
+//     cover.
+//
+// The second mechanism reads a field off a guild the prune path now receives
+// from snapshotStateGuilds rather than from live state. If copyStateGuild ever
+// stopped carrying Unavailable -- it rides along today only because the copy
+// starts as a whole-struct assignment -- the flag filter would silently read
+// false for every stub and the bot would leave healthy guilds during exactly
+// the outage the fix was written for. That is a silent failure: every existing
+// test still passes, because they all build their guilds by hand instead of
+// taking them through the snapshot.
+func TestPruneGuildGroups_SnapshotPreservesUnavailableStubs(t *testing.T) {
+	state := discordgo.NewState()
+	state.User = &discordgo.User{ID: botDiscordIDForPruneTest}
+
+	// A healthy member guild with no Nakama group: a genuine orphan.
+	if err := state.GuildAdd(&discordgo.Guild{
+		ID:      "guild-live",
+		Name:    "Live",
+		OwnerID: "owner-live",
+	}); err != nil {
+		t.Fatalf("GuildAdd: %v", err)
+	}
+	// Exactly what READY delivers for a guild whose shard is down: an ID, the
+	// Unavailable flag, and nothing else.
+	if err := state.GuildAdd(&discordgo.Guild{
+		ID:          "guild-stub",
+		Unavailable: true,
+	}); err != nil {
+		t.Fatalf("GuildAdd: %v", err)
+	}
+
+	// The flag must survive the copy, or the filter downstream reads false.
+	snap := snapshotStateGuilds(state)
+	if len(snap) != 2 {
+		t.Fatalf("snapshotStateGuilds returned %d guilds, want 2", len(snap))
+	}
+	for _, g := range snap {
+		if g.ID == "guild-stub" && !g.Unavailable {
+			t.Fatal("copyStateGuild dropped the Unavailable flag; every READY outage stub would look like a healthy orphan and be left")
+		}
+	}
+
+	d := newPruneTestIntegrator(t, state)
+	logger := newPrunePhaseLogger()
+	ctx := context.Background()
+
+	var synced []string
+	syncGuild := func(_ context.Context, _ *zap.Logger, guild *discordgo.Guild, _ bool) error {
+		synced = append(synced, guild.ID)
+		return nil
+	}
+
+	// nk reports no guild groups, so without the flag filter BOTH guilds would
+	// be orphan guilds, and the stub would go on to the leave path. The repair
+	// pass is the observation point: a guild reaches it if and only if the plan
+	// classified it as an orphan guild, which is the step before a leave.
+	//
+	// The do* flags stay off, so no GuildLeave/GroupDelete is reachable -- this
+	// integrator's session has no HTTP client and a leave attempt would be a
+	// real network call.
+	deps := d.newPrunePassDeps(ctx, syncGuild)
+	if _, err := runPrunePass(ctx, logger, deps, prunePolicy(false, false, 10), time.Now()); err != nil {
+		t.Fatalf("runPrunePass: %v", err)
+	}
+
+	if len(synced) != 1 || synced[0] != "guild-live" {
+		t.Fatalf("repair pass saw %v; want only [guild-live] -- the unavailable READY stub must never become a prune candidate", synced)
 	}
 }
 
@@ -267,11 +354,12 @@ func TestPruneGuildGroups_SafeAgainstGatewayMutation(t *testing.T) {
 		}
 	}()
 
-	// A threshold above the guild count keeps the safety abort quiet, so the
-	// full prune body runs. doGuildLeaves/doGroupDeletes stay false, so no
-	// GuildLeave/GroupDelete call is ever made.
+	// doGuildLeaves/doGroupDeletes stay false, so no GuildLeave/GroupDelete
+	// call is ever made and neither safety valve is live. The guild count stays
+	// under maxReconcileGuildsPerPass, so the repair pass -- and therefore
+	// guildSync, the deep reader of guild.Channels -- runs on every iteration.
 	for i := 0; i < 200; i++ {
-		if err := d.pruneGuildGroups(context.Background(), logger, false, false, 1000); err != nil {
+		if err := d.pruneGuildGroups(context.Background(), logger, prunePolicy(false, false, 1000)); err != nil {
 			close(stop)
 			<-gatewayDone
 			t.Fatalf("pruneGuildGroups: %v", err)
