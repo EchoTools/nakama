@@ -661,7 +661,7 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 	}
 
 	var err error
-	botUserID := d.DiscordIDToUserID(d.dg.State.User.ID)
+	botUserID := d.DiscordIDToUserID(botDiscordIDFromState(d.dg.State))
 	if botUserID == "" {
 		return fmt.Errorf("failed to get bot user ID from state")
 	}

@@ -45,6 +45,8 @@ func NewLatencyHistory() *LatencyHistory {
 }
 
 func (h *LatencyHistory) StorageMeta() StorableMetadata {
+	h.RLock()
+	defer h.RUnlock()
 	return StorableMetadata{
 		Collection:      LatencyHistoryStorageCollection,
 		Key:             LatencyHistoryStorageKey,
@@ -62,10 +64,24 @@ func (h *LatencyHistory) SetStorageMeta(meta StorableMetadata) {
 
 // writeWithRetry writes the history, retrying on optimistic-concurrency
 // (version-check) conflicts only. On such a conflict it re-reads the current
-// stored object into h (adopting the concurrent winner's version and contents),
-// invokes reapply to re-apply this caller's pending samples onto that fresh
-// object, and writes again. This makes a user's concurrent sessions lossless:
-// neither the winner's nor this caller's new entries are clobbered.
+// stored object and REPLACES h's contents and version with it — the concurrent
+// winner's object is the truth — then invokes reapply to re-apply this caller's
+// pending samples onto that fresh object, and writes again. This makes a user's
+// concurrent sessions lossless: neither the winner's nor this caller's new
+// entries are clobbered.
+//
+// The replacement must be wholesale. Unmarshalling straight into h would merge
+// rather than adopt (encoding/json keeps existing keys of a non-nil map), so
+// per-IP entries the winner had pruned would be resurrected on every retry —
+// including addresses that the caller's game-server allowlist rejects.
+//
+// The trade this makes, deliberately: adoption also discards entries that live
+// ONLY in h because an EARLIER writeWithRetry call exhausted its attempts
+// without persisting them. Those samples are gone for good, where a union would
+// eventually have written them. That is the correct side to err on — h is the
+// session-shared history and the earlier call already reported its failure to
+// its caller — but it means a caller must not treat h as a durable accumulator
+// across failed writes.
 //
 // The pattern is only sound because LatencyHistory.Add appends to per-server
 // lists — a commutative mutation. Do NOT generalize it to types whose updates
@@ -94,34 +110,150 @@ func (h *LatencyHistory) writeWithRetry(ctx context.Context, nk runtime.NakamaMo
 		}
 		lastErr = err
 
-		// Conflict: a concurrent writer advanced the version. Re-read the fresh
-		// object (picking up the winner's version + entries) then re-apply this
-		// caller's pending mutation onto it before writing again.
-		if rerr := StorableRead(ctx, nk, userID, h, false); rerr != nil {
-			return fmt.Errorf("LatencyHistory.writeWithRetry: re-read after conflict: %w", rerr)
-		}
-		if rerr := reapply(); rerr != nil {
-			return fmt.Errorf("LatencyHistory.writeWithRetry: re-apply after conflict: %w", rerr)
+		// Attempts are spent: break rather than pay for a re-read and re-apply
+		// whose result would never be written.
+		//
+		// This does NOT leave h clean. Every earlier attempt adopted the stored
+		// object and re-applied onto it before its write failed, so on
+		// exhaustion h already holds merged state that was never persisted.
+		// Callers must treat a writeWithRetry error as "h is now stale" — which
+		// matters because h is typically the session-shared history.
+		if attempt == latencyRetryMaxAttempts-1 {
+			break
 		}
 
-		// Jittered backoff before the next attempt (skip after the final loop).
-		if attempt < latencyRetryMaxAttempts-1 {
-			backoff := time.Duration(attempt+1) * latencyRetryBaseBackoff
-			// rand is fine here: this is contention jitter, not security.
-			jitter := time.Duration(rand.Int63n(int64(latencyRetryBaseBackoff)))
-			select {
-			case <-ctx.Done():
-				return fmt.Errorf("LatencyHistory.writeWithRetry: %w", ctx.Err())
-			case <-time.After(backoff + jitter):
-			}
+		// Jittered backoff before re-reading for the next attempt.
+		backoff := time.Duration(attempt+1) * latencyRetryBaseBackoff
+		// rand is fine here: this is contention jitter, not security.
+		jitter := time.Duration(rand.Int63n(int64(latencyRetryBaseBackoff)))
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("LatencyHistory.writeWithRetry: %w", ctx.Err())
+		case <-time.After(backoff + jitter):
+		}
+
+		// Conflict: a concurrent writer advanced the version. Adopt the winner's
+		// object wholesale (read into a fresh value so a failed read cannot
+		// leave h half-cleared), then re-apply this caller's pending mutation
+		// onto it before writing again.
+		fresh := NewLatencyHistory()
+		if rerr := StorableRead(ctx, nk, userID, fresh, false); rerr != nil {
+			return fmt.Errorf("LatencyHistory.writeWithRetry: re-read after conflict: %w", rerr)
+		}
+		// The adoption swaps the map header itself, so it must be serialized
+		// against the locked accessors (Add, LatestRTTs, AverageRTTs,
+		// HasRecentEntry, ...) that share this object — h is the session-shared
+		// history. Map and version move under ONE acquisition: split, a reader
+		// can observe the winner's entries paired with this caller's stale
+		// version, a pairing no stored record ever had.
+		//
+		// h.version is assigned directly rather than through SetStorageMeta,
+		// which takes h.Lock itself and would deadlock here. fresh's metadata is
+		// read BEFORE the lock is taken so no second object's lock is ever
+		// acquired while holding h's.
+		freshMeta := fresh.StorageMeta()
+		h.Lock()
+		h.GameServerLatencies = fresh.GameServerLatencies
+		h.version = freshMeta.Version
+		h.Unlock()
+		if rerr := reapply(); rerr != nil {
+			return fmt.Errorf("LatencyHistory.writeWithRetry: re-apply after conflict: %w", rerr)
 		}
 	}
 	return fmt.Errorf("LatencyHistory.writeWithRetry: exhausted %d attempts: %w", latencyRetryMaxAttempts, lastErr)
 }
 
-func (h *LatencyHistory) String() string {
+// latencyHistoryData is the wire form of LatencyHistory. It exists so that
+// MarshalJSON/UnmarshalJSON can serialize the exported state without copying
+// the embedded RWMutex (a `type Alias LatencyHistory` conversion would copy the
+// lock). Any exported field added to LatencyHistory must be mirrored here or it
+// will silently stop being persisted.
+type latencyHistoryData struct {
+	GameServerLatencies map[string][]LatencyHistoryItem `json:"game_server_latencies"`
+}
+
+// MarshalJSON serializes the history under the read lock.
+//
+// A *LatencyHistory is shared across a session's goroutines via
+// sessionParameters.latencyHistory, and StorableWrite marshals the live object,
+// so the encoder walks the same map that Add mutates. Without this the encode
+// is an unsynchronized map read racing a locked map write.
+func (h *LatencyHistory) MarshalJSON() ([]byte, error) {
 	h.RLock()
 	defer h.RUnlock()
+	return json.Marshal(latencyHistoryData{GameServerLatencies: h.GameServerLatencies})
+}
+
+// UnmarshalJSON deserializes the history under the write lock.
+//
+// StorableRead decodes straight into the live, session-shared object (see
+// writeWithRetry's re-read after a version conflict), so the decode is a map
+// write that must be serialized against the locked readers on other goroutines.
+// Unsynchronized, it surfaces as "fatal error: concurrent map read and map
+// write" — a runtime throw that kills the process rather than a recoverable
+// panic.
+//
+// Merge semantics match what encoding/json did for the plain struct in every
+// case except one: keys from the decoded record are adopted, and keys present
+// only in the receiver are preserved.
+//
+// The one divergence is a JSON null (or an absent key) for the map.
+// Reflection-decoding `{"game_server_latencies":null}` set the field to a nil
+// map, discarding whatever the receiver already held; this implementation
+// leaves the receiver exactly as it found it. That document is reachable in
+// production — StorableWrite on a `&LatencyHistory{}` with a nil map
+// (constructed at evr_pipeline_login.go, evr_runtime_rpc.go and
+// evr_runtime_rpc_match.go) persists exactly that — and the divergence is
+// strictly the safer direction: writeWithRetry's re-read no longer silently
+// drops the caller's pending samples when the concurrent winner stored a null
+// map. Pinned by TestLatencyHistory_UnmarshalNullMapPreservesExisting.
+//
+// "Leaves the receiver as it found it" includes leaving a nil map NIL. The
+// null case returns before allocating, because whether the map is nil is
+// persisted state, not an implementation detail: a nil map marshals to `null`
+// and an allocated empty one to `{}`, so allocating here would make the
+// StorableRead -> StorableWrite round trip rewrite a stored null record into
+// `{}` without a single sample having changed. An explicit
+// `{"game_server_latencies":{}}` is NOT null and still allocates, matching
+// encoding/json. Pinned by TestLatencyHistory_UnmarshalNullMapIntoNilReceiverStaysNil,
+// TestLatencyHistory_NullMapRecordRoundTrips and
+// TestLatencyHistory_UnmarshalEmptyObjectMapStillAllocates.
+//
+// Decoding is also all-or-nothing where the reflection decode salvaged whatever
+// it had already parsed: a record whose map holds one malformed value now
+// contributes NOTHING to the receiver instead of contributing its valid keys.
+// Both versions return the same error, and StorableRead's corrupt-record path
+// (evr_storable.go) deletes and recreates the record from the in-memory object
+// either way, so the only delta is that partially-salvaged keys are no longer
+// folded into that rewrite. Atomic is the intended semantic: a half-applied
+// decode leaves the session's live object in a state no stored record ever had.
+// Pinned by TestLatencyHistory_UnmarshalErrorLeavesReceiverUntouched.
+func (h *LatencyHistory) UnmarshalJSON(data []byte) error {
+	var decoded latencyHistoryData
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if decoded.GameServerLatencies == nil {
+		// Null or absent: there is nothing to merge and nothing to allocate, so
+		// this is a no-op on the receiver and needs no lock — same as the decode
+		// error above, which also returns before locking.
+		return nil
+	}
+	h.Lock()
+	defer h.Unlock()
+	if h.GameServerLatencies == nil {
+		h.GameServerLatencies = make(map[string][]LatencyHistoryItem, len(decoded.GameServerLatencies))
+	}
+	for extIP, history := range decoded.GameServerLatencies {
+		h.GameServerLatencies[extIP] = history
+	}
+	return nil
+}
+
+func (h *LatencyHistory) String() string {
+	// json.Marshal dispatches to MarshalJSON, which takes the read lock. Taking
+	// it here as well would be a recursive RLock and can deadlock against a
+	// waiting writer.
 	data, err := json.Marshal(h)
 	if err != nil {
 		return ""
@@ -359,6 +491,10 @@ func (h *LatencyHistory) HasRecentEntry(ipKey string, cutoff time.Time) bool {
 	return false
 }
 
+// Get returns a copy of the recorded history for an external IP. The copy is
+// required: Add mutates the stored slice in place (append into spare capacity,
+// slices.Delete compaction), so handing out the live slice lets the caller read
+// it after the lock is released, racing the next Add.
 func (h *LatencyHistory) Get(extIP string) ([]LatencyHistoryItem, bool) {
 	h.RLock()
 	defer h.RUnlock()
@@ -366,7 +502,7 @@ func (h *LatencyHistory) Get(extIP string) ([]LatencyHistoryItem, bool) {
 	if !ok || len(history) == 0 {
 		return nil, false
 	}
-	return history, true
+	return slices.Clone(history), true
 }
 
 func sortPingCandidatesByLatencyHistory(hostIPs []string, latencyHistory *LatencyHistory) {

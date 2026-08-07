@@ -116,6 +116,39 @@ fmt-check:
     fi; \
     echo "gofmt: all non-generated Go sources are formatted"
 
+# Executable bits.
+# Scripts documented as `./script.sh` must be tracked 100755, or they arrive
+# non-executable in every fresh clone and the invocation fails.
+#
+# This rots invisibly. Git records only the owner-x bit (100755 vs 100644), and
+# this clone carried core.fileMode=false for a while, which tells git to ignore
+# on-disk modes entirely: a script could be executable on disk, be committed as
+# 100644, and `git status` would never say a word. That is how
+# scripts/bench-compare.sh — run by `just bench-compare` — shipped broken.
+#
+# `git ls-files -s` reads the mode out of the index, so this check is immune to
+# core.fileMode and gives the same answer locally and in CI.
+#
+# build/do-marketplace/scripts/ is exempt: packer's shell provisioner uploads
+# each script to the build droplet and chmods it there, so the tracked mode is
+# irrelevant. That directory's own 01-test says so in its header comment.
+EXEC_BIT_EXEMPT := "^build/do-marketplace/scripts/"
+
+# Verify every tracked *.sh with a shebang is tracked executable; non-zero exit on failure
+exec-bit-check:
+    @nonexec="$(git ls-files -s '*.sh' | grep -v '^100755' | cut -f2 \
+        | grep -vE '{{ EXEC_BIT_EXEMPT }}' \
+        | while read -r f; do if [ "$(head -c 2 "$f")" = '#!' ]; then echo "$f"; fi; done)"; \
+    if [ -n "$nonexec" ]; then \
+        echo "ERROR: these shell scripts have a shebang but are not tracked executable (100755):"; \
+        echo "$nonexec" | sed 's/^/  /'; \
+        echo ""; \
+        echo "Fix with: git update-index --chmod=+x <file>"; \
+        echo "A plain chmod is NOT enough — it is not recorded when core.fileMode=false."; \
+        exit 1; \
+    fi; \
+    echo "exec bits: every tracked *.sh with a shebang is 100755"
+
 # GitHub Actions local testing with act.
 # Use medium image for better compatibility (default is too minimal).
 ACT_FLAGS := env_var_or_default("ACT_FLAGS", "--container-architecture linux/amd64")
