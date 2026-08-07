@@ -13,6 +13,16 @@ DEBUG_FLAGS := "-trimpath -gcflags \"-trimpath " + PWD + "\" -gcflags=\"all=-N -
 # CockroachDB/Postgres: just TEST_DB_URL=postgresql://... test-db
 TEST_DB_URL := env_var_or_default("TEST_DB_URL", "postgresql://root@127.0.0.1:26257/nakama?sslmode=disable")
 
+# Per-test-binary memory cap. See scripts/go-test-limit.sh for the rationale:
+# a runaway test must die itself rather than letting the machine-wide OOM killer
+# pick an unrelated victim. Raise for one run with:
+#   just GO_TEST_MEMORY_LIMIT=8G test        (or GO_TEST_MEMORY_LIMIT=off to disable)
+#
+# The path must be ABSOLUTE: `go test -exec` runs the wrapper with the working
+# directory set to the package under test, so a relative path fails to resolve.
+GO_TEST_MEMORY_LIMIT := env_var_or_default("GO_TEST_MEMORY_LIMIT", "4G")
+TEST_LIMIT_FLAG := "-exec=" + justfile_directory() + "/scripts/go-test-limit.sh"
+
 # Build nakama (debug). Default target.
 all: nakama
 
@@ -68,11 +78,13 @@ bench-check: bench-compare
 
 # Run the DB-free server test suite
 test:
-    go test ./server/... -count=1
+    GOFLAGS="${GOFLAGS:-} {{ TEST_LIMIT_FLAG }}" GO_TEST_MEMORY_LIMIT="{{ GO_TEST_MEMORY_LIMIT }}" \
+        go test ./server/... -count=1
 
 # Run the DB-free suite with verbose output.
 test-verbose:
-    go test -v ./server/... -count=1
+    GOFLAGS="${GOFLAGS:-} {{ TEST_LIMIT_FLAG }}" GO_TEST_MEMORY_LIMIT="{{ GO_TEST_MEMORY_LIMIT }}" \
+        go test -v ./server/... -count=1
 
 # Requires a reachable CockroachDB/Postgres at TEST_DB_URL. TEST_DB_REQUIRED
 # makes an unreachable database a hard failure instead of a silent skip, so this
@@ -80,7 +92,9 @@ test-verbose:
 
 # Run the FULL suite, including the DB-backed tests
 test-db:
-    TEST_DB_URL="{{ TEST_DB_URL }}" TEST_DB_REQUIRED=1 go test ./server/... -count=1
+    TEST_DB_URL="{{ TEST_DB_URL }}" TEST_DB_REQUIRED=1 \
+        GOFLAGS="${GOFLAGS:-} {{ TEST_LIMIT_FLAG }}" GO_TEST_MEMORY_LIMIT="{{ GO_TEST_MEMORY_LIMIT }}" \
+        go test ./server/... -count=1
 
 # Formatting.
 # Scope is repo-wide: every *tracked* Go file except generated sources.
