@@ -67,6 +67,14 @@ func (m *completionTestNK) StorageWrite(ctx context.Context, writes []*runtime.S
 	return m.evrTestNakamaModule.StorageWrite(ctx, writes)
 }
 
+// MultiUpdate is the entry point StorableWriteMany actually calls. The atomic
+// completion path carries storage writes only, so it routes through the same
+// whole-batch validation and fault injection as StorageWrite above.
+func (m *completionTestNK) MultiUpdate(ctx context.Context, accountUpdates []*runtime.AccountUpdate, storageWrites []*runtime.StorageWrite, storageDeletes []*runtime.StorageDelete, walletUpdates []*runtime.WalletUpdate, updateLedger bool) ([]*api.StorageObjectAck, []*runtime.WalletUpdateResult, error) {
+	acks, err := m.StorageWrite(ctx, storageWrites)
+	return acks, nil, err
+}
+
 // storedCompletionState reads back the player's counter and history.
 func storedCompletionState(t *testing.T, ctx context.Context, nk runtime.NakamaModule, userID string) (*EarlyQuitPlayerState, *EarlyQuitHistory) {
 	t.Helper()

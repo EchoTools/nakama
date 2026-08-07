@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -26,6 +27,13 @@ type rejectSecondWriteNakamaModule struct {
 func (m *rejectSecondWriteNakamaModule) StorageWrite(ctx context.Context, writes []*runtime.StorageWrite) ([]*api.StorageObjectAck, error) {
 	m.seen = append(m.seen, writes)
 	return nil, runtime.ErrStorageRejectedVersion
+}
+
+// MultiUpdate is the entry point StorableWriteMany actually calls; this path
+// only ever carries storage writes, so it rejects the same way.
+func (m *rejectSecondWriteNakamaModule) MultiUpdate(ctx context.Context, accountUpdates []*runtime.AccountUpdate, storageWrites []*runtime.StorageWrite, storageDeletes []*runtime.StorageDelete, walletUpdates []*runtime.WalletUpdate, updateLedger bool) ([]*api.StorageObjectAck, []*runtime.WalletUpdateResult, error) {
+	acks, err := m.StorageWrite(ctx, storageWrites)
+	return acks, nil, err
 }
 
 // TestStorableWriteMany_BatchErrorDoesNotBlameTheWrongObject pins what a failed
@@ -73,5 +81,15 @@ func TestStorableWriteMany_BatchErrorDoesNotBlameTheWrongObject(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), runtime.ErrStorageRejectedVersion.Error()) {
 		t.Errorf("batch error dropped the underlying cause %q: %v", runtime.ErrStorageRejectedVersion, err)
+	}
+
+	// The sentinel must survive in the CHAIN, not just in the text.
+	// isVersionConflictError is errors.Is-based, so formatting the cause away
+	// here (a %v where a %w belongs) would make every version conflict on this
+	// path read as a hard failure and silently stop the retry loop in
+	// SyncJournalAndProfileWithRetry.
+	if !errors.Is(err, runtime.ErrStorageRejectedVersion) {
+		t.Errorf("batch error broke the errors.Is chain to ErrStorageRejectedVersion, "+
+			"so isVersionConflictError can no longer see a version conflict: %v", err)
 	}
 }
