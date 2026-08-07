@@ -2099,6 +2099,156 @@ func TestPoll_LeaderInCombatMatch_ReturnsFalseImmediately(t *testing.T) {
 // short-circuit — it defers to context cancellation for loop termination.
 // ---------------------------------------------------------------------------
 
+// ===========================================================================
+// Issue #460: Party follow must not pull a follower out of an active match.
+//
+// When a follower is in an active Arena or Combat match, the party follow
+// system must not process a LobbyFindSessionRequest that would yank them
+// back to the social lobby. isFollowerInActiveMatch returns true for
+// Arena/Combat, false for Social, and false when the follower has no match.
+// ===========================================================================
+
+// TestIsFollowerInActiveMatch_ArenaPublic verifies that a follower in an
+// active ModeArenaPublic match is detected as being in an active match.
+func TestIsFollowerInActiveMatch_ArenaPublic(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	arenaMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	registry.SetMatch(arenaMatchID, &MatchLabel{
+		ID:          arenaMatchID,
+		Mode:        evr.ModeArenaPublic,
+		Open:        true,
+		PlayerLimit: 8,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setFollowerMatch(arenaMatchID)
+
+	logger := loggerForTest(t)
+	result := env.pipeline.isFollowerInActiveMatch(
+		context.Background(), logger, env.session)
+
+	if !result {
+		t.Error("Expected true when follower is in ModeArenaPublic match")
+	}
+}
+
+// TestIsFollowerInActiveMatch_CombatPublic verifies that a follower in an
+// active ModeCombatPublic match is detected as being in an active match.
+func TestIsFollowerInActiveMatch_CombatPublic(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	combatMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	registry.SetMatch(combatMatchID, &MatchLabel{
+		ID:          combatMatchID,
+		Mode:        evr.ModeCombatPublic,
+		Open:        true,
+		PlayerLimit: 8,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setFollowerMatch(combatMatchID)
+
+	logger := loggerForTest(t)
+	result := env.pipeline.isFollowerInActiveMatch(
+		context.Background(), logger, env.session)
+
+	if !result {
+		t.Error("Expected true when follower is in ModeCombatPublic match")
+	}
+}
+
+// TestIsFollowerInActiveMatch_SocialPublic verifies that a follower in a
+// ModeSocialPublic lobby is NOT treated as being in an active match. The
+// party follow system should proceed normally for social lobbies.
+func TestIsFollowerInActiveMatch_SocialPublic(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	socialMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	groupID := env.groupID
+	registry.SetMatch(socialMatchID, &MatchLabel{
+		ID:          socialMatchID,
+		Mode:        evr.ModeSocialPublic,
+		Open:        true,
+		PlayerLimit: 12,
+		GroupID:     &groupID,
+	})
+	env.withMockNK(registry)
+	env.setFollowerMatch(socialMatchID)
+
+	logger := loggerForTest(t)
+	result := env.pipeline.isFollowerInActiveMatch(
+		context.Background(), logger, env.session)
+
+	if result {
+		t.Error("Expected false when follower is in ModeSocialPublic — party follow should proceed")
+	}
+}
+
+// TestIsFollowerInActiveMatch_NoMatch verifies that a follower with no
+// current match (e.g. at the main menu) is NOT treated as being in an
+// active match. The party follow system should proceed normally.
+func TestIsFollowerInActiveMatch_NoMatch(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	// No follower match set — follower is not in any match.
+
+	logger := loggerForTest(t)
+	result := env.pipeline.isFollowerInActiveMatch(
+		context.Background(), logger, env.session)
+
+	if result {
+		t.Error("Expected false when follower has no match presence")
+	}
+}
+
+// TestIsFollowerInActiveMatch_PrivateArenaCombat verifies that private
+// arena/combat modes are also treated as active matches.
+func TestIsFollowerInActiveMatch_PrivateArenaCombat(t *testing.T) {
+	t.Parallel()
+
+	for _, mode := range []evr.Symbol{evr.ModeArenaPrivate, evr.ModeCombatPrivate} {
+		t.Run(mode.String(), func(t *testing.T) {
+			t.Parallel()
+
+			env := newFollowTestEnv(t)
+			matchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+			registry := newMockFollowMatchRegistry()
+			groupID := env.groupID
+			registry.SetMatch(matchID, &MatchLabel{
+				ID:          matchID,
+				Mode:        mode,
+				Open:        true,
+				PlayerLimit: 8,
+				GroupID:     &groupID,
+			})
+			env.withMockNK(registry)
+			env.setFollowerMatch(matchID)
+
+			logger := loggerForTest(t)
+			result := env.pipeline.isFollowerInActiveMatch(
+				context.Background(), logger, env.session)
+
+			if !result {
+				t.Errorf("Expected true when follower is in %s match", mode.String())
+			}
+		})
+	}
+}
+
 func TestPoll_NilNK_FollowerNotInLeaderMatch_LoopsUntilContextExpiry(t *testing.T) {
 	t.Parallel()
 
@@ -2149,7 +2299,7 @@ func TestIsFollowerAlreadyInLeaderMatch_SameMatch(t *testing.T) {
 	env.setLeaderMatch(matchID)
 	env.setFollowerMatch(matchID)
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{})
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup)
 	if !result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return true when both are in the same match")
 	}
@@ -2168,7 +2318,7 @@ func TestIsFollowerAlreadyInLeaderMatch_DifferentMatches(t *testing.T) {
 	env.setLeaderMatch(matchA)
 	env.setFollowerMatch(matchB)
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{})
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup)
 	if result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return false when in different matches")
 	}
@@ -2186,7 +2336,7 @@ func TestIsFollowerAlreadyInLeaderMatch_LeaderNotInMatch(t *testing.T) {
 	// Only follower is in a match; leader is not.
 	env.setFollowerMatch(matchID)
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{})
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup)
 	if result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return false when leader has no match")
 	}
@@ -2204,7 +2354,7 @@ func TestIsFollowerAlreadyInLeaderMatch_FollowerNotInMatch(t *testing.T) {
 	// Only leader is in a match; follower is not.
 	env.setLeaderMatch(matchID)
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{})
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup)
 	if result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return false when follower has no match")
 	}
@@ -2220,7 +2370,7 @@ func TestIsFollowerAlreadyInLeaderMatch_NoLeader(t *testing.T) {
 
 	env.clearLeader()
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{})
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup)
 	if result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return false when there is no leader")
 	}
@@ -2239,7 +2389,7 @@ func TestIsFollowerAlreadyInLeaderMatch_FollowerIsLeader(t *testing.T) {
 	env.setLeader(env.followerSID, env.followerUID, "follower")
 	env.setFollowerMatch(matchID)
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{})
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(logger, env.session, env.lobbyGroup)
 	if result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return false when follower is the leader")
 	}
@@ -2312,14 +2462,10 @@ func TestCurrentSocialLobby_AlreadyInMatchingSocialLobby(t *testing.T) {
 	env.withMockNK(registry)
 	env.setFollowerMatch(socialMatchID)
 	env.params.GroupID = groupID
-	// No relocation requested and no party-follow context: the intended target
-	// is the player's CurrentMatchID, which equals the lobby they are in. This
-	// is the originally-reported rejoin-same-lobby case (#462) — must stay a no-op.
-	env.params.CurrentMatchID = socialMatchID
 
 	logger := loggerForTest(t)
 	result := env.pipeline.currentSocialLobbyForSession(
-		context.Background(), logger, env.session, env.params, env.lobbyGroup)
+		context.Background(), logger, env.session, env.params)
 
 	if result.IsNil() {
 		t.Error("currentSocialLobbyForSession should return the match ID when player is already in a matching social lobby")
@@ -2354,7 +2500,7 @@ func TestCurrentSocialLobby_DifferentLobby_ReturnsNil(t *testing.T) {
 
 	logger := loggerForTest(t)
 	result := env.pipeline.currentSocialLobbyForSession(
-		context.Background(), logger, env.session, env.params, env.lobbyGroup)
+		context.Background(), logger, env.session, env.params)
 
 	if !result.IsNil() {
 		t.Error("currentSocialLobbyForSession should return nil when player is in a lobby with a different group ID")
@@ -2384,7 +2530,7 @@ func TestCurrentSocialLobby_InArenaMatch_ReturnsNil(t *testing.T) {
 
 	logger := loggerForTest(t)
 	result := env.pipeline.currentSocialLobbyForSession(
-		context.Background(), logger, env.session, env.params, env.lobbyGroup)
+		context.Background(), logger, env.session, env.params)
 
 	if !result.IsNil() {
 		t.Error("currentSocialLobbyForSession should return nil when player is in an arena match")
@@ -2404,275 +2550,9 @@ func TestCurrentSocialLobby_NotInAnyMatch_ReturnsNil(t *testing.T) {
 
 	logger := loggerForTest(t)
 	result := env.pipeline.currentSocialLobbyForSession(
-		context.Background(), logger, env.session, env.params, env.lobbyGroup)
+		context.Background(), logger, env.session, env.params)
 
 	if !result.IsNil() {
 		t.Error("currentSocialLobbyForSession should return nil when player is not in any match")
-	}
-}
-
-// TestCurrentSocialLobby_MoveToDifferentLobbySameGuild_ReturnsNil covers GAP 1
-// (#462): a player already in social lobby X of guild G who is being directed
-// (via the party-follow path) to a DIFFERENT social lobby Y of the SAME guild G
-// must NOT be treated as a no-op. The guard must be target-aware: it may only
-// short-circuit when the player's current social lobby equals the intended
-// target (here, the leader's lobby Y), not merely when the group IDs match.
-func TestCurrentSocialLobby_MoveToDifferentLobbySameGuild_ReturnsNil(t *testing.T) {
-	t.Parallel()
-
-	env := newFollowTestEnv(t)
-	groupID := env.groupID
-
-	// Player (follower) is currently in social lobby X of guild G.
-	lobbyX := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
-	// Party leader is in a DIFFERENT social lobby Y of the SAME guild G —
-	// this is the intended target.
-	lobbyY := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
-
-	registry := newMockFollowMatchRegistry()
-	registry.SetMatch(lobbyX, &MatchLabel{
-		ID:          lobbyX,
-		Mode:        evr.ModeSocialPublic,
-		Open:        true,
-		PlayerLimit: 12,
-		GroupID:     &groupID,
-	})
-	registry.SetMatch(lobbyY, &MatchLabel{
-		ID:          lobbyY,
-		Mode:        evr.ModeSocialPublic,
-		Open:        true,
-		PlayerLimit: 12,
-		GroupID:     &groupID,
-	})
-	env.withMockNK(registry)
-
-	env.setFollowerMatch(lobbyX)
-	env.setLeaderMatch(lobbyY)
-	env.params.GroupID = groupID
-	env.params.PartyGroupName = "squad" // party-follow context
-	// Follower's CurrentMatchID is their current lobby X; the intended target
-	// is the leader's lobby Y. These differ, so this is a real move, not a no-op.
-	env.params.CurrentMatchID = lobbyX
-
-	logger := loggerForTest(t)
-	result := env.pipeline.currentSocialLobbyForSession(
-		context.Background(), logger, env.session, env.params, env.lobbyGroup)
-
-	if !result.IsNil() {
-		t.Errorf("GAP 1: moving from social lobby X to a DIFFERENT social lobby Y of the same guild must NOT be a no-op; got match %s", result)
-	}
-}
-
-// TestCurrentSocialLobby_ForcedRelocation_ReturnsNil covers GAP 2 (#462): the
-// relocate path clears lobbyParams.CurrentMatchID to force a move to a larger
-// social lobby. The guard must respect that relocation intent and NOT no-op the
-// requested move, even though the player is still tracked in their old social
-// lobby of the same guild.
-func TestCurrentSocialLobby_ForcedRelocation_ReturnsNil(t *testing.T) {
-	t.Parallel()
-
-	env := newFollowTestEnv(t)
-	groupID := env.groupID
-
-	// Player is still in their (too-small) social lobby of guild G.
-	oldLobby := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
-
-	registry := newMockFollowMatchRegistry()
-	registry.SetMatch(oldLobby, &MatchLabel{
-		ID:          oldLobby,
-		Mode:        evr.ModeSocialPublic,
-		Open:        true,
-		PlayerLimit: 12,
-		GroupID:     &groupID,
-	})
-	env.withMockNK(registry)
-
-	env.setFollowerMatch(oldLobby)
-	env.params.GroupID = groupID
-	// Relocate path (evr_lobby_find.go:371) cleared CurrentMatchID to signal
-	// "find/create a different, larger lobby". No party-follow leader target.
-	env.params.CurrentMatchID = MatchID{}
-
-	logger := loggerForTest(t)
-	result := env.pipeline.currentSocialLobbyForSession(
-		context.Background(), logger, env.session, env.params, env.lobbyGroup)
-
-	if !result.IsNil() {
-		t.Errorf("GAP 2: a forced relocation (cleared CurrentMatchID) must NOT be short-circuited as a no-op; got match %s", result)
-	}
-}
-
-// TestCurrentSocialLobby_FollowToLeaderSameLobby_IsNoop verifies the
-// originally-reported case in the party-follow context: the follower is
-// directed to the leader's social lobby, which is the SAME lobby the follower
-// is already in. This must stay a no-op (return the current match ID).
-func TestCurrentSocialLobby_FollowToLeaderSameLobby_IsNoop(t *testing.T) {
-	t.Parallel()
-
-	env := newFollowTestEnv(t)
-	groupID := env.groupID
-
-	sharedLobby := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
-
-	registry := newMockFollowMatchRegistry()
-	registry.SetMatch(sharedLobby, &MatchLabel{
-		ID:          sharedLobby,
-		Mode:        evr.ModeSocialPublic,
-		Open:        true,
-		PlayerLimit: 12,
-		GroupID:     &groupID,
-	})
-	env.withMockNK(registry)
-
-	env.setFollowerMatch(sharedLobby)
-	env.setLeaderMatch(sharedLobby)
-	env.params.GroupID = groupID
-	env.params.PartyGroupName = "squad"
-	env.params.CurrentMatchID = sharedLobby
-
-	logger := loggerForTest(t)
-	result := env.pipeline.currentSocialLobbyForSession(
-		context.Background(), logger, env.session, env.params, env.lobbyGroup)
-
-	if result != sharedLobby {
-		t.Errorf("rejoin of the leader's (same) social lobby must remain a no-op; expected %s, got %s", sharedLobby, result)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Social lobby snap-back bug -- isFollowerAlreadyInLeaderMatch
-// ---------------------------------------------------------------------------
-
-// TestFollowerInSocialLobby_QueueArena_NoSnapBack verifies that when both
-// the follower and leader are in the same social lobby and the follower
-// queues for an arena, isFollowerAlreadyInLeaderMatch returns true
-// (already converged).
-func TestFollowerInSocialLobby_QueueArena_NoSnapBack(t *testing.T) {
-	t.Parallel()
-
-	env := newFollowTestEnv(t)
-	socialLobby := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
-	logger := loggerForTest(t)
-
-	env.setLeaderMatch(socialLobby)
-	env.setFollowerMatch(socialLobby)
-
-	registry := newMockFollowMatchRegistry()
-	registry.SetMatch(socialLobby, &MatchLabel{
-		ID:   socialLobby,
-		Mode: evr.ModeSocialPublic,
-		Open: true,
-	})
-	env.withMockNK(registry)
-
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(
-		context.Background(), logger, env.session, env.lobbyGroup, socialLobby)
-
-	if !result {
-		t.Fatal("isFollowerAlreadyInLeaderMatch returned false when both players " +
-			"are in the same social lobby -- snap-back bug")
-	}
-}
-
-// TestFollowerInArenaLobby_BothLeaving_NotConverged verifies that when both
-// players are in a dying arena lobby, the function returns false.
-func TestFollowerInArenaLobby_BothLeaving_NotConverged(t *testing.T) {
-	t.Parallel()
-
-	env := newFollowTestEnv(t)
-	arenaLobby := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
-	logger := loggerForTest(t)
-
-	env.setLeaderMatch(arenaLobby)
-	env.setFollowerMatch(arenaLobby)
-
-	registry := newMockFollowMatchRegistry()
-	registry.SetMatch(arenaLobby, &MatchLabel{
-		ID:   arenaLobby,
-		Mode: evr.ModeArenaPublic,
-		Open: true,
-	})
-	env.withMockNK(registry)
-
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(
-		context.Background(), logger, env.session, env.lobbyGroup, arenaLobby)
-
-	if result {
-		t.Fatal("isFollowerAlreadyInLeaderMatch returned true when both players " +
-			"are in a dying arena lobby -- should return false")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Social lobby snap-back bug -- isFollowerInLeaderMatch closure
-// ---------------------------------------------------------------------------
-
-// TestPollFollowerInSocialLobby_NoRejoin verifies the closure returns true
-// when both players are in the same social lobby.
-func TestPollFollowerInSocialLobby_NoRejoin(t *testing.T) {
-	t.Parallel()
-
-	env := newFollowTestEnv(t)
-	socialLobby := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
-
-	env.setLeaderMatch(socialLobby)
-	env.setFollowerMatch(socialLobby)
-
-	registry := newMockFollowMatchRegistry()
-	registry.SetMatch(socialLobby, &MatchLabel{
-		ID:          socialLobby,
-		Mode:        evr.ModeSocialPublic,
-		Open:        true,
-		PlayerLimit: 12,
-		Players: []PlayerInfo{
-			{UserID: env.followerUID.String(), Team: 0},
-			{UserID: env.leaderUID.String(), Team: 0},
-		},
-	})
-	env.withMockNK(registry)
-
-	env.params.CurrentMatchID = socialLobby
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	result, timedOut := env.runPollWithTimeout(ctx, t, 5*time.Second)
-	if timedOut {
-		t.Fatal("pollFollowPartyLeader timed out -- closure failed to detect social lobby convergence")
-	}
-	if !result {
-		t.Fatal("pollFollowPartyLeader returned false when both players are " +
-			"in the same social lobby -- should return true")
-	}
-}
-
-// TestPollFollowerInArenaLobby_BothLeaving_FallsThrough verifies the closure
-// returns false when both players are in a dying arena lobby.
-func TestPollFollowerInArenaLobby_BothLeaving_FallsThrough(t *testing.T) {
-	t.Parallel()
-
-	env := newFollowTestEnv(t)
-	arenaLobby := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
-
-	env.setLeaderMatch(arenaLobby)
-	env.setFollowerMatch(arenaLobby)
-
-	registry := newMockFollowMatchRegistry()
-	registry.SetMatch(arenaLobby, &MatchLabel{
-		ID:   arenaLobby,
-		Mode: evr.ModeArenaPublic,
-		Open: true,
-	})
-	env.withMockNK(registry)
-
-	env.params.CurrentMatchID = arenaLobby
-
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer cancel()
-
-	result, _ := env.runPollWithTimeout(ctx, t, 10*time.Second)
-	if result {
-		t.Fatal("pollFollowPartyLeader returned true when both players are " +
-			"in a dying arena lobby -- should not treat as convergence")
 	}
 }
