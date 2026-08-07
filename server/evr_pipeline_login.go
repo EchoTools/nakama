@@ -396,8 +396,10 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 				return fmt.Errorf("error creating link ticket: %w", err)
 			} else {
 				botUsername := "EchoTools"
-				if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil && p.appBot.dg.State.User.Username != "" {
-					botUsername = p.appBot.dg.State.User.Username
+				if p.appBot != nil && p.appBot.dg != nil {
+					if name, _ := botUsernameFromState(p.appBot.dg.State); name != "" {
+						botUsername = name
+					}
 				}
 
 				return DeviceNotLinkedError{
@@ -553,8 +555,21 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		// Use the last two digits of the nanos seconds as the 2FA code.
 		twoFactorCode := fmt.Sprintf("%02d", entry.CreatedAt.Nanosecond()%100)
 		metricsTags["error"] = "ip_verification_required"
-		if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil {
-			botUsername := p.appBot.dg.State.User.Username
+		// botUsername is read ONCE here and reused below. The branch at the
+		// bottom used to re-read State.User.Username twice more, so a gateway
+		// READY landing mid-branch could name a different bot than the one this
+		// block already decided to use.
+		//
+		// The entry condition stays "State.User was present", NOT "the username
+		// is non-empty": every path inside this block returns an error, so
+		// skipping it lets the login proceed. Gating on a non-empty username
+		// would turn a degenerate state (User present, Username "") from a
+		// blocked login into an allowed one.
+		botUsername, botUserPresent := "", false
+		if p.appBot != nil && p.appBot.dg != nil {
+			botUsername, botUserPresent = botUsernameFromState(p.appBot.dg.State)
+		}
+		if botUserPresent {
 			if err := p.appBot.SendIPApprovalRequest(ctx, params.profile.ID(), entry, params.ipInfo); err == nil {
 				return NewLocationError{
 					code:        twoFactorCode,
@@ -575,10 +590,10 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 							code:      twoFactorCode,
 						}
 					}
-				} else if p.appBot.dg.State.User.Username != "" {
+				} else if botUsername != "" {
 					// Use the bot name
 					return NewLocationError{
-						botUsername: p.appBot.dg.State.User.Username,
+						botUsername: botUsername,
 						code:        twoFactorCode,
 					}
 				} else {

@@ -145,8 +145,14 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 
 	dg.AddHandlerOnce(func(s *discordgo.Session, m *discordgo.Ready) {
 
-		// Create a user for the bot based on it's discord profile
-		userID, _, _, err := nk.AuthenticateCustom(ctx, m.User.ID, s.State.User.Username, true)
+		// Create a user for the bot based on it's discord profile.
+		//
+		// Both fields come from m, the handler's own READY payload, rather than
+		// from s.State: m is not shared with the gateway goroutine, so it needs
+		// no lock and cannot be swapped mid-read. The ID was already read this
+		// way; the username was not, and an unlocked s.State.User.Username here
+		// could persist a stale name onto the bot's own Nakama account.
+		userID, _, _, err := nk.AuthenticateCustom(ctx, m.User.ID, m.User.Username, true)
 		if err != nil {
 			logger.WithField("error", err).Error("Error creating discordbot user")
 		}
@@ -161,10 +167,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 
 		appbot.userID = userID
 
-		displayName := dg.State.User.GlobalName
-		if displayName == "" {
-			displayName = dg.State.User.Username
-		}
+		displayName := botDisplayNameFromState(dg.State)
 
 		if err := appbot.RegisterSlashCommands(); err != nil {
 			logger.WithField("error", err).Error("Failed to register slash commands")
