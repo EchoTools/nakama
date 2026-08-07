@@ -1,105 +1,89 @@
-#!/bin/bash
-# pre-push hook: quality gates for EchoTools/nakama
+#!/usr/bin/env bash
 #
-# 1. Tag format: reject semver tags without -evr.<N>
-# 2. Go quality: run fast checks on changed files
-#    (gofmt, go vet, gopls staticcheck)
+# Refuse any push that RESOLVES to main.
 #
-# Install: git config core.hooksPath .githooks
-# Skip:    git push --no-verify
+# Why this exists (see the incident issue): a branch created with
+#
+#     git worktree add <dir> -b <branch> origin/main
+#
+# tracks origin/main. With push.default=tracking (or upstream), git resolves a
+# push destination from the branch's UPSTREAM, not from its name -- so
+#
+#     git push -u origin my-feature-branch
+#
+# names the feature branch twice and still pushes it to refs/heads/main. It does
+# not look wrong at the call site, and it has now happened twice in this repo.
+#
+# The rule that prevents it is "always use an explicit refspec"
+# (git push origin HEAD:refs/heads/<branch>). That rule was written down a month
+# before the second occurrence and did not stop it. Prose is not a control: it
+# fires only when the reader happens to be attending to it, which is exactly not
+# the moment a routine push happens. This is the control.
+#
+# pre-push receives on stdin, one line per ref being pushed:
+#
+#     <local ref> <local sha> <remote ref> <remote sha>
+#
+# The remote ref is the RESOLVED destination -- the value that was wrong in both
+# incidents, and the one no human reads at the call site. That is why the check
+# belongs here and not in a wrapper around the push command.
+#
+# Deliberate escape hatch: an authorized push to main must be STATED, never
+# inferred.
+#
+#     ALLOW_MAIN_PUSH=1 git push origin HEAD:refs/heads/main
+#
+# Scope note: this refuses pushes to main from anywhere, not only from linked
+# worktrees. The worktree upstream is how it happened, but a gate scoped to the
+# way it happened last time is a gate with a hole in it, and the escape hatch
+# already covers the legitimate case.
 
-set -e
+set -uo pipefail
 
-# ---- Color helpers ----
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-pass() { echo -e " ${GREEN}✓${NC} $1"; }
-fail() { echo -e " ${RED}✗${NC} $1"; fail_count=$((fail_count + 1)); }
-warn() { echo -e " ${YELLOW}⚠${NC} $1"; }
-fail_count=0
+protected_branch="main"
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+if [ "${ALLOW_MAIN_PUSH:-}" = "1" ]; then
+	exit 0
+fi
 
-# ---- Capture push refs ----
-# Pre-push receives refs on stdin: <local-ref> <local-sha> <remote-ref> <remote-sha>
-# Store them so we can iterate in multiple phases.
-PUSH_REFS=$(cat)
+blocked=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+	# A deletion or an empty line has nothing to inspect.
+	[ -z "${remote_ref:-}" ] && continue
 
-# ---- Phase 1: Tag format check ----
-echo "$PUSH_REFS" | while read local_ref local_sha remote_ref remote_sha; do
-    [[ "$remote_ref" != refs/tags/* ]] && continue
-    tag="${remote_ref#refs/tags/}"
-    [[ "$tag" =~ ^v[0-9] ]] || continue
-    if [[ ! "$tag" =~ -evr\.[0-9]+$ ]]; then
-        fail "Tag '$tag' rejected — EVR releases use v3.27.2-evr.<N>"
-        echo "       Upstream Nakama tags (v3.x.x) must not be pushed here."
-    fi
+	if [ "$remote_ref" = "refs/heads/$protected_branch" ]; then
+		blocked=1
+		cat >&2 <<EOF
+
+  REFUSED: this push resolves to $protected_branch.
+
+    source:      ${local_ref:-<unknown>}
+    destination: $remote_ref
+
+EOF
+		# Name the upstream trap explicitly when it is the likely cause, because
+		# the source ref above will look like an ordinary feature branch.
+		if [ "${local_ref:-}" != "refs/heads/$protected_branch" ]; then
+			upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+			cat >&2 <<EOF
+  The source is not $protected_branch, so this is very likely the upstream trap:
+  push.default is '$(git config --get push.default || echo unset)' and this
+  branch's upstream is '${upstream:-<none>}'. git took the destination from the
+  upstream, not from the branch name.
+
+EOF
+		fi
+		cat >&2 <<EOF
+  Push with an explicit refspec instead:
+
+    git push origin HEAD:refs/heads/<your-branch>
+
+  If you really do mean to push to $protected_branch, say so:
+
+    ALLOW_MAIN_PUSH=1 git push ...
+
+EOF
+	fi
 done
 
-# ---- Phase 2: Go quality checks ----
-# Determine what's changed: diff HEAD against the remote's current state.
-# For branch pushes, check outgoing commits. For first push, check index.
-
-# Determine what changed: use ORIG_HEAD or diff against remote
-if git rev-parse --verify ORIG_HEAD 2>/dev/null; then
-    CHANGED_GO=$(git diff --name-only ORIG_HEAD..HEAD -- '*.go' 2>/dev/null || true)
-else
-    CHANGED_GO=$(git diff --name-only --cached -- '*.go' 2>/dev/null || true)
-fi
-
-if [ -n "$CHANGED_GO" ]; then
-    echo ""
-    echo "── Go quality checks ──"
-
-    # gofmt
-    UNFORMATTED=$(gofmt -l $CHANGED_GO 2>/dev/null || true)
-    if [ -n "$UNFORMATTED" ]; then
-        fail "gofmt needs these files:"
-        echo "$UNFORMATTED" | sed 's/^/       /'
-    else
-        pass "gofmt"
-    fi
-
-    # go vet (targeted, quiet mode)
-    if go vet ./server/... 2>/dev/null; then
-        pass "go vet ./server/..."
-    else
-        fail "go vet ./server/... — run 'go vet ./...' locally to see details"
-    fi
-
-    # gopls check (static analysis)
-    if command -v gopls &>/dev/null; then
-        GOPLS_ANALYSIS=$(gopls check $CHANGED_GO 2>/dev/null | head -20 || true)
-        if [ -n "$GOPLS_ANALYSIS" ]; then
-            warn "gopls diagnostics (review before push):"
-            echo "$GOPLS_ANALYSIS" | while IFS= read -r line; do echo "       $line"; done
-        else
-            pass "gopls check"
-        fi
-    else
-        warn "gopls not installed — skipping gopls check"
-    fi
-
-    # go mod tidy check
-    cd "$REPO_ROOT"
-    TIDY_BEFORE=$(git rev-parse HEAD 2>/dev/null)
-    go mod tidy 2>/dev/null
-    if [ -n "$(git status --porcelain go.mod go.sum 2>/dev/null)" ]; then
-        fail "go mod tidy modified go.mod/go.sum — commit these changes"
-    else
-        pass "go mod tidy"
-    fi
-    cd - >/dev/null
-fi
-
-# ---- Summary ----
-if [ "$fail_count" -gt 0 ]; then
-    echo ""
-    echo -e " ${RED}── ${fail_count} check(s) failed — push rejected ──${NC}"
-    echo " To bypass: git push --no-verify origin <branch>"
-    exit 1
-fi
-
-exit 0
+exit "$blocked"

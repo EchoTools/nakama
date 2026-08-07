@@ -114,6 +114,18 @@ test-db:
 # opinionated.
 FMT_FILES := "git ls-files '*.go' | xargs grep -LE 'Code generated .* DO NOT EDIT'"
 
+# Point git at the repo's tracked hooks (.githooks). One-time, per clone.
+#
+# core.hooksPath is local config and cannot be committed, so a tracked hooks
+# directory does not activate itself -- this recipe is the activation step. Run
+# it once per clone; linked worktrees inherit it from the parent repo.
+#
+# Installs the pre-push guard that refuses a push resolving to main. See
+# .githooks/pre-push for why that guard exists and how to override it.
+hooks:
+    @git config core.hooksPath .githooks
+    @echo "core.hooksPath -> $(git config --get core.hooksPath)"
+
 # Format all non-generated Go sources in place (prints the files it rewrote)
 fmt:
     @{{ FMT_FILES }} | xargs gofmt -w -l
@@ -148,9 +160,15 @@ fmt-check:
 # irrelevant. That directory's own 01-test says so in its header comment.
 EXEC_BIT_EXEMPT := "^build/do-marketplace/scripts/"
 
-# Verify every tracked *.sh with a shebang is tracked executable; non-zero exit on failure
+# Verify every tracked *.sh and .githooks/* with a shebang is tracked executable;
+# non-zero exit on failure.
+#
+# .githooks/ is in scope because a git hook that is not executable does not run
+# AND does not complain — git skips it silently. A guard that silently stops
+# guarding is worse than no guard, since the absence of a refusal reads as
+# permission.
 exec-bit-check:
-    @nonexec="$(git ls-files -s '*.sh' | grep -v '^100755' | cut -f2 \
+    @nonexec="$(git ls-files -s '*.sh' '.githooks/*' | grep -v '^100755' | cut -f2 \
         | grep -vE '{{ EXEC_BIT_EXEMPT }}' \
         | while read -r f; do if [ "$(head -c 2 "$f")" = '#!' ]; then echo "$f"; fi; done)"; \
     if [ -n "$nonexec" ]; then \
@@ -161,7 +179,7 @@ exec-bit-check:
         echo "A plain chmod is NOT enough — it is not recorded when core.fileMode=false."; \
         exit 1; \
     fi; \
-    echo "exec bits: every tracked *.sh with a shebang is 100755"
+    echo "exec bits: every tracked *.sh and .githooks/* with a shebang is 100755"
 
 # GitHub Actions local testing with act.
 # Use medium image for better compatibility (default is too minimal).
