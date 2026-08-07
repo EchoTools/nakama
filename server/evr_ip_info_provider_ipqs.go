@@ -256,6 +256,11 @@ func (s *IPQSClient) store(ip string, result *IPQSResponse) error {
 	return nil
 }
 
+// Get returns IPQS data for ip. It fails open by design: a circuit-breaker
+// trip, an HTTP error, a non-200, or a Success:false body (what quota
+// exhaustion returns) all yield (nil, nil) so the caller proceeds without IP
+// intelligence rather than denying the player. The error return is therefore
+// always nil; failures surface through the ipqs_* metrics instead.
 func (s *IPQSClient) Get(ctx context.Context, ip string) (IPInfo, error) {
 	if s == nil {
 		return nil, nil
@@ -335,13 +340,11 @@ func (s *IPQSClient) retrieve(ctx context.Context, ip string) (*IPQSResponse, er
 	return &result, nil
 }
 
+// IsVPN reports whether the IP is a known VPN, failing open on any lookup
+// problem. Get never returns a non-nil error — every failure path below returns
+// (nil, nil) so callers fail open — so there is no error branch here.
 func (s *IPQSClient) IsVPN(ip string) bool {
-
-	result, err := s.Get(s.ctx, ip)
-	if err != nil {
-		s.logger.Warn("Failed to get IPQS details, failing open.", zap.Error(err))
-		return false
-	}
+	result, _ := s.Get(s.ctx, ip)
 	if result == nil {
 		return false
 	}

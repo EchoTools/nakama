@@ -116,6 +116,28 @@ func (s LobbySessionParameters) MetricsTags() map[string]string {
 	}
 }
 
+// isModeratorOfGroup reports whether the user holds moderator privileges for a
+// specific guild group: either a global operator (moderator everywhere), or an
+// enforcer of that exact guild.
+//
+// The check is guild-scoped on purpose (SEC-5): moderator privileges in one
+// guild must never carry into another guild's lobby. It fails closed — a nil
+// group ID, a guild missing from the session's guild group map, or a nil entry
+// all mean "not a moderator".
+func isModeratorOfGroup(isGlobalOperator bool, guildGroups map[string]*GuildGroup, groupID uuid.UUID, userID string) bool {
+	if isGlobalOperator {
+		return true
+	}
+	if groupID == uuid.Nil {
+		return false
+	}
+	gg, ok := guildGroups[groupID.String()]
+	if !ok || gg == nil {
+		return false
+	}
+	return gg.IsEnforcer(userID)
+}
+
 // resolveDirectiveRole determines the entrant role when a join directive is
 // present. Explicit directive roles (orange, blue, spectator, moderator)
 // override the request. "any" or "" preserve the client's requested role,
@@ -372,12 +394,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 
 	// Determine if user is a moderator (enforcer or operator), independent of division.
 	// Computed early because toxic separation exempts moderators.
-	isModerator := sessionParams.isGlobalOperator
-	if !isModerator && groupID != uuid.Nil {
-		if gg, ok := sessionParams.guildGroups[groupID.String()]; ok {
-			isModerator = gg.IsEnforcer(userID)
-		}
-	}
+	isModerator := isModeratorOfGroup(sessionParams.isGlobalOperator, sessionParams.guildGroups, groupID, userID)
 
 	// SEC-5: the entrant role is client-claimed. Moderator is only legitimate
 	// for verified moderators (global operator or guild enforcer); anything

@@ -516,12 +516,16 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 			auditLog := fmt.Sprintf("vpn probability score %d >= %d", params.ipInfo.FraudScore(), gg.FraudScoreThreshold)
 			return joinRejected("vpn_user", reason, auditLog)
 		}
-	} else if gg.BlockVPNUsers && params.ipInfo == nil {
-		// IPQS is circuit-broken: the lookup was unavailable, so params.ipInfo is
-		// nil and the gate above silently no-ops. VPN blocking is degraded — warn
-		// operators so the gap is visible. The player still passes; this is
-		// visibility, not blocking (SEC-6).
-		warnVPNDegraded(logger, session.ClientIP(), lobbyParams.DiscordID, groupID)
+	} else if shouldWarnVPNDegraded(gg.BlockVPNUsers, params.ipInfo, func() bool { return gg.IsVPNBypass(userID) }) {
+		// No IP intelligence was available, so params.ipInfo is nil and the gate
+		// above silently no-ops. VPN blocking is degraded — warn operators so the
+		// gap is visible. The player still passes; this is visibility, not
+		// blocking (SEC-6).
+		//
+		// The reason separates a circuit-broken IPQS (transient, alertable) from
+		// a deployment with no provider configured at all (permanent, and
+		// otherwise indistinguishable on the wire).
+		warnVPNDegraded(logger, p.nk.MetricsCounterAdd, session.ClientIP(), lobbyParams.DiscordID, groupID, params.isVPN, vpnDegradedReasonFor(p.ipInfoCache))
 	}
 
 	if len(gg.AllowedFeatures) > 0 {
@@ -589,15 +593,115 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	return nil
 }
 
-// warnVPNDegraded logs an operator-facing warning when a guild has
-// BlockVPNUsers enabled but the IPQS lookup was unavailable (params.ipInfo is
-// nil), so the VPN gate silently no-ops and VPN users pass with no audit trail.
-// This is visibility, not blocking — the player still passes.
-func warnVPNDegraded(logger *zap.Logger, clientIP, discordID, groupID string) {
-	logger.Warn("VPN blocking degraded: IPQS lookup unavailable for VPN check",
+// vpnDegradedReason classifies why the VPN gate had no IP intelligence to act
+// on. It tags lobby_vpn_check_degraded so an alert can select the transient case
+// instead of firing forever on a deployment that has no provider at all.
+type vpnDegradedReason string
+
+const (
+	// vpnDegradedLookupFailed: providers are configured but none returned data
+	// for this IP. Transient — the IPQS circuit breaker backs off 5s→5min — and
+	// the case worth paging on.
+	vpnDegradedLookupFailed vpnDegradedReason = "lookup_failed"
+
+	// vpnDegradedNotConfigured: no IP intelligence provider is wired up, so the
+	// gate can never evaluate. Providers are only built when REDIS_URI is set
+	// (server/evr_pipeline.go), so this holds for every player in every
+	// BlockVPNUsers guild on every authorize until the process is restarted with
+	// one configured. Still a real security gap and still counted, but it is a
+	// standing condition rather than an outage, so it must not be alertable or
+	// greppable as one.
+	vpnDegradedNotConfigured vpnDegradedReason = "not_configured"
+)
+
+// vpnDegradedLogWindow is how often a single guild may re-announce that its VPN
+// gate is degraded. The IPQS circuit breaker backs off up to 5 minutes, so a
+// one-minute window re-announces a few times per outage without producing a line
+// per player per lobby authorize.
+const vpnDegradedLogWindow = time.Minute
+
+// vpnUnconfiguredLogWindow is the same budget for the standing "no provider
+// configured" gap. That condition cannot resolve on its own, so a one-minute
+// window would emit a line per guild per minute forever; an hour still puts it
+// in front of an operator without burying anything.
+const vpnUnconfiguredLogWindow = time.Hour
+
+// vpnDegradedLogThrottle and vpnUnconfiguredLogThrottle rate-limit the two
+// degraded-VPN warnings per guild. Package-level so the window spans sessions,
+// and separate so a permanent configuration gap cannot consume the budget a
+// real, transient outage needs.
+//
+// Tests must not reassign these vars — call .reset() (and .setClock() for a fake
+// clock) so the mutation goes through the throttle's own lock. Reassignment is
+// an unsynchronized write to shared state and leaves the next test's
+// expectations at the mercy of whatever ran before it.
+var (
+	vpnDegradedLogThrottle     = newPerKeyLogThrottle(vpnDegradedLogWindow)
+	vpnUnconfiguredLogThrottle = newPerKeyLogThrottle(vpnUnconfiguredLogWindow)
+)
+
+// vpnDegradedReasonFor classifies an empty IP intelligence result: a cache with
+// providers wired up came back empty because the lookup failed, one with none
+// was never able to answer in the first place.
+func vpnDegradedReasonFor(cache *IPInfoCache) vpnDegradedReason {
+	if cache.IsConfigured() {
+		return vpnDegradedLookupFailed
+	}
+	return vpnDegradedNotConfigured
+}
+
+// shouldWarnVPNDegraded reports whether the VPN gate silently no-oped for this
+// player: the guild blocks VPN users, the IP intelligence lookup came back empty
+// so the gate had nothing to evaluate, and this player is not exempt from the
+// blocking anyway.
+//
+// SEC-6: this mirrors the gate it stands in for, minus params.isVPN — which is
+// itself derived from the same unavailable lookup and is therefore false during
+// a degradation, so requiring it would silence the warning exactly when it
+// matters. The bypass check is kept: a player the guild has explicitly exempted
+// would have passed the gate anyway, so their failed lookup is not a gap.
+//
+// isVPNBypass is a func so it stays short-circuited behind the two cheap
+// conditions, as it was in the original `&&` chain: it reaches through
+// GuildGroup.HasRole into a per-guild read lock, and the overwhelmingly common
+// case is a guild that does not block VPN users at all.
+func shouldWarnVPNDegraded(blockVPNUsers bool, ipInfo IPInfo, isVPNBypass func() bool) bool {
+	return blockVPNUsers && ipInfo == nil && !isVPNBypass()
+}
+
+// warnVPNDegraded reports that a guild has BlockVPNUsers enabled but no IP
+// intelligence was available, so the VPN gate silently no-ops and VPN users pass
+// with no audit trail. This is visibility, not blocking — the player still
+// passes.
+//
+// SEC-6: the counter is incremented on every occurrence, so the degradation is
+// alertable and its true volume is visible. It carries the reason so an alert
+// can page on the transient case alone. The log line is throttled per guild, on
+// a separate budget per reason, so neither a multi-minute outage nor a permanent
+// configuration gap buries the signal it exists to raise.
+func warnVPNDegraded(logger *zap.Logger, metricsCounterAdd func(name string, tags map[string]string, delta int64), clientIP, discordID, groupID string, sessionFlaggedVPN bool, reason vpnDegradedReason) {
+	if metricsCounterAdd != nil {
+		metricsCounterAdd("lobby_vpn_check_degraded", map[string]string{
+			"group_id": groupID,
+			"reason":   string(reason),
+		}, 1)
+	}
+
+	throttle, message := vpnDegradedLogThrottle, "VPN blocking degraded: IPQS lookup unavailable for VPN check"
+	if reason == vpnDegradedNotConfigured {
+		throttle, message = vpnUnconfiguredLogThrottle, "VPN blocking inert: no IP intelligence provider is configured"
+	}
+
+	if !throttle.allow(groupID) {
+		return
+	}
+
+	logger.Warn(message,
 		zap.String("client_ip", clientIP),
 		zap.String("discord_id", discordID),
-		zap.String("guild_id", groupID))
+		zap.String("guild_id", groupID),
+		zap.String("reason", string(reason)),
+		zap.Bool("session_flagged_vpn", sessionFlaggedVPN))
 }
 
 // roleSuspensionUserMessage returns the in-game message shown to a user suspended via guild role.

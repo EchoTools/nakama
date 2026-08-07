@@ -95,18 +95,8 @@ func SetNextMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		}
 
 		// Validate the role
-		if request.Role != "" && request.Role != "any" {
-			switch label.Mode {
-
-			case evr.ModeArenaPublic, evr.ModeCombatPublic:
-				return "", runtime.NewError("Match is a public match, but role is set", StatusInvalidArgument)
-			case evr.ModeArenaPrivate, evr.ModeCombatPrivate:
-				if request.Role != "orange" && request.Role != "blue" && request.Role != "spectator" {
-					return "", runtime.NewError("Match is a private match, but role is not set to 'orange', 'blue', or 'spectator'.", StatusInvalidArgument)
-				}
-			default:
-				return "", runtime.NewError(fmt.Sprintf("Role may not be set for %s matches", label.Mode.String()), StatusInvalidArgument)
-			}
+		if err := validateSetNextMatchRole(request.Role, label.Mode); err != nil {
+			return "", err
 		}
 		if gid := label.GetGroupID(); !gid.IsNil() {
 			auditGroupID = gid.String()
@@ -153,6 +143,52 @@ func SetNextMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	return response.String(), nil
 }
 
+// validateSetNextMatchRole checks that an explicitly requested directive role is
+// legal for the mode of the match being targeted. "" and "any" mean "no explicit
+// role" and are always legal.
+//
+// Note that "moderator" is legal for no mode at all: the immediate-join path
+// this feeds does not go through lobbyJoin, so a moderator role granted here
+// would never face the guild-scoped re-validation added for SEC-5.
+func validateSetNextMatchRole(role string, mode evr.Symbol) error {
+	if role == "" || role == "any" {
+		return nil
+	}
+
+	switch mode {
+	case evr.ModeArenaPublic, evr.ModeCombatPublic:
+		return runtime.NewError("Match is a public match, but role is set", StatusInvalidArgument)
+	case evr.ModeArenaPrivate, evr.ModeCombatPrivate:
+		if role != "orange" && role != "blue" && role != "spectator" {
+			return runtime.NewError("Match is a private match, but role is not set to 'orange', 'blue', or 'spectator'.", StatusInvalidArgument)
+		}
+		return nil
+	default:
+		return runtime.NewError(fmt.Sprintf("Role may not be set for %s matches", mode.String()), StatusInvalidArgument)
+	}
+}
+
+// resolveImmediateJoinRole maps a validated directive role string to a team
+// index for the immediate-join path.
+//
+// There is deliberately no "moderator" arm. tryImmediateJoin calls
+// LobbyJoinEntrants directly, bypassing lobbyJoin and its guild-scoped
+// moderator re-validation (SEC-5), so this path must not be able to mint a
+// moderator. validateSetNextMatchRole already rejects "moderator" for every
+// mode, which is what made the arm that used to be here unreachable.
+func resolveImmediateJoinRole(role string) int {
+	switch role {
+	case "orange":
+		return evr.TeamOrange
+	case "blue":
+		return evr.TeamBlue
+	case "spectator":
+		return evr.TeamSpectator
+	default:
+		return evr.TeamUnassigned
+	}
+}
+
 // tryImmediateJoin attempts to join the target user into the match right now.
 // Returns an informational message (empty on success). Sets response.JoinedImmediately on success.
 func tryImmediateJoin(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, request SetNextMatchRPCRequest, label *MatchLabel, response *SetNextMatchRPCResponse) string {
@@ -183,21 +219,8 @@ func tryImmediateJoin(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		return "game server session not found; directive stored for next session"
 	}
 
-	// Resolve role string to int
-	role := evr.TeamUnassigned
-	switch request.Role {
-	case "orange":
-		role = evr.TeamOrange
-	case "blue":
-		role = evr.TeamBlue
-	case "spectator":
-		role = evr.TeamSpectator
-	case "moderator":
-		role = evr.TeamModerator
-	}
-
 	// Build entrant presence from the active session
-	presence, err := EntrantPresenceFromSession(session, uuid.Nil, role, types.Rating{}, label.GetGroupID().String(), 0, "")
+	presence, err := EntrantPresenceFromSession(session, uuid.Nil, resolveImmediateJoinRole(request.Role), types.Rating{}, label.GetGroupID().String(), 0, "")
 	if err != nil {
 		return fmt.Sprintf("failed to create entrant presence: %s", err.Error())
 	}

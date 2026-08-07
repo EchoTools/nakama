@@ -30,6 +30,34 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 	lobbyParams.GroupID = label.GetGroupID()
 	lobbyParams.Mode = label.Mode
 
+	// SEC-5: re-validate the client-claimed moderator role against the guild
+	// that actually owns this lobby.
+	//
+	// NewLobbyParametersFromRequest validated it against the group ID on the
+	// request, but a LobbyJoinSessionRequest carries no group ID — the check
+	// there fell back to the user's *active* guild. The lobby being joined can
+	// belong to a different guild, so an enforcer of guild A could otherwise
+	// enter a guild-B lobby as TeamModerator (which exempts them from the
+	// player count, the moderator slot pool, early-quit tracking and the
+	// post-match social transition). Fails closed: no session parameters means
+	// no verified moderator.
+	//
+	// IsModerator is re-scoped in step with GroupID and Mode just above: from
+	// here down, every guild-derived field on lobbyParams describes the lobby
+	// being joined rather than the request that asked for it.
+	sessionParams, _ := LoadParams(ctx)
+	lobbyParams.IsModerator = sessionParams != nil &&
+		isModeratorOfGroup(sessionParams.isGlobalOperator, sessionParams.guildGroups, lobbyParams.GroupID, lobbyParams.UserID.String())
+
+	if lobbyParams.Role == evr.TeamModerator && !lobbyParams.IsModerator {
+		logger.Warn("Downgrading unverified moderator role claim",
+			zap.String("uid", lobbyParams.UserID.String()),
+			zap.String("gid", lobbyParams.GroupID.String()),
+			zap.String("mid", matchID.UUID.String()))
+		p.nk.MetricsCounterAdd("lobby_moderator_role_downgraded", map[string]string{"group_id": lobbyParams.GroupID.String()}, 1)
+		lobbyParams.Role = evr.TeamUnassigned
+	}
+
 	// Do authorization checks related to the lobby's guild.
 	if err := p.lobbyAuthorize(ctx, logger, session, lobbyParams); err != nil {
 		return err
