@@ -1412,7 +1412,19 @@ func (h *RPCHandler) AccountLookupRPC(ctx context.Context, logger runtime.Logger
 		AvatarURL:   account.User.AvatarUrl,
 	}
 
-	// Fetch suspension records if caller has private data access
+	// Fetch suspension records if caller has private data access.
+	//
+	// This deliberately uses StorableRead (a direct database read) rather than
+	// StorageIndexList against StorageIndexSuspensionProfile, even though that
+	// index exists and now carries the suspension payload.
+	//
+	// The index would be strictly worse here. This is a point lookup for a
+	// userID already in hand, so the database read is a primary-key hit on
+	// (collection, key, user_id) -- there is no scan for an index to avoid. In
+	// exchange, StorageIndexList would return data that is node-local (only the
+	// node that performed the write has it, see core_storage.go:838), possibly
+	// stale, and evictable. The index earns its keep only for SEARCHES, e.g.
+	// "which users are suspended in guild X", which this RPC does not perform.
 	if includePrivate {
 		profile := NewSuspensionProfile(userID)
 		if err := StorableRead(ctx, nk, userID, profile, false); err == nil {

@@ -184,6 +184,36 @@ func (si *LocalStorageIndex) Write(ctx context.Context, objects []*api.StorageOb
 			}
 			if err = idx.Index.Batch(evictBatch); err != nil {
 				si.logger.Error("Failed to update index", zap.String("index_name", idx.Name), zap.Error(err))
+			} else {
+				// Evicted entries are NEVER reloaded into the index. For any
+				// index consulted as a negative check, an evicted entry is
+				// indistinguishable from a record that never existed, so this
+				// degrades silently and permissively. Announce it so the
+				// undersized index can be found before it misleads a caller.
+				si.logger.Warn("Storage index at capacity; evicted oldest entries (evicted entries are not reloaded)",
+					zap.String("index_name", idx.Name),
+					zap.Int("evicted_count", len(ids)),
+					zap.Uint64("entries_before_eviction", count),
+					zap.Int("max_entries", idx.MaxEntries))
+
+				// The gauge emitted above is now stale: it holds the
+				// pre-eviction count, and a gauge keeps its last value until
+				// the next Write. An index that evicts and then goes idle would
+				// report occupancy above MaxEntries indefinitely, and Load
+				// publishes the true count at boot, so the same index would
+				// read differently before and after a restart. Re-emit from a
+				// fresh reader -- the count is observed, never assumed, and the
+				// extra open only happens on the rare eviction path.
+				if evictedReader, err := idx.Index.Reader(); err != nil {
+					si.logger.Error("Failed to get index storage reader after eviction; entry gauge left at its pre-eviction value", zap.String("index_name", idx.Name), zap.Error(err))
+				} else {
+					if postCount, err := evictedReader.Count(); err != nil {
+						si.logger.Error("Failed to count index entries after eviction; entry gauge left at its pre-eviction value", zap.String("index_name", idx.Name), zap.Error(err))
+					} else {
+						si.metrics.GaugeStorageIndexEntries(idx.Name, float64(postCount))
+					}
+					_ = evictedReader.Close()
+				}
 			}
 		}
 		_ = reader.Close()
@@ -390,6 +420,17 @@ func (si *LocalStorageIndex) Load(ctx context.Context) error {
 			return err
 		}
 
+		// Publish occupancy at boot. Previously the entry gauge was only
+		// emitted from Write, so an index that was loaded and then never
+		// written reported nothing at all -- exactly the idle, ban-heavy index
+		// whose headroom an operator most wants to see.
+		if reader, err := idx.Index.Reader(); err == nil {
+			if count, err := reader.Count(); err == nil {
+				si.metrics.GaugeStorageIndexEntries(idx.Name, float64(count))
+			}
+			_ = reader.Close()
+		}
+
 		elapsedTimeMs := time.Since(t).Milliseconds()
 		si.logger.Info("Storage index loaded.", zap.Any("config", idx), zap.Int64("elapsed_time_ms", elapsedTimeMs))
 	}
@@ -489,6 +530,18 @@ LIMIT $2`
 		}
 
 		if count >= idx.MaxEntries || !rowsRead {
+			if count >= idx.MaxEntries {
+				// The index is full and the collection was NOT fully read. The
+				// unread remainder is absent until those rows are written
+				// again, which for a cold collection may be never. Silent
+				// truncation at boot is the most dangerous form of this failure
+				// because nothing else in the process will ever mention it.
+				si.logger.Warn("Storage index truncated at load: MaxEntries reached before the collection was exhausted",
+					zap.String("index_name", idx.Name),
+					zap.String("collection", idx.Collection),
+					zap.Int("loaded", count),
+					zap.Int("max_entries", idx.MaxEntries))
+			}
 			break
 		}
 

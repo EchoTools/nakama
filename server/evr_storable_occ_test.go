@@ -130,6 +130,21 @@ func (m *storableRaceNK) StorageWrite(ctx context.Context, writes []*runtime.Sto
 	return acks, err
 }
 
+// MultiUpdate models the transactional write path. Real MultiUpdate runs every
+// write inside one ExecuteInTxPgx (core_multi.go), so the batch is
+// all-or-nothing: storageWriteLocked below therefore validates every version
+// guard BEFORE applying any of them, and a single rejection leaves storage
+// untouched. A mock that applied writes as it went would let a test pass while
+// the code under test half-applied a pair that must not disagree.
+//
+// It is otherwise indistinguishable from StorageWrite — same write counter,
+// same afterWrite hook — so a test cannot accidentally observe stronger or
+// weaker guarantees just because the code under test switched entry points.
+func (m *storableRaceNK) MultiUpdate(ctx context.Context, accountUpdates []*runtime.AccountUpdate, storageWrites []*runtime.StorageWrite, storageDeletes []*runtime.StorageDelete, walletUpdates []*runtime.WalletUpdate, updateLedger bool) ([]*api.StorageObjectAck, []*runtime.WalletUpdateResult, error) {
+	acks, err := m.StorageWrite(ctx, storageWrites)
+	return acks, nil, err
+}
+
 func (m *storableRaceNK) storageWriteLocked(writes []*runtime.StorageWrite) ([]*api.StorageObjectAck, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -137,10 +152,10 @@ func (m *storableRaceNK) storageWriteLocked(writes []*runtime.StorageWrite) ([]*
 	if m.alwaysConflict {
 		return nil, runtime.ErrStorageRejectedVersion
 	}
-	acks := make([]*api.StorageObjectAck, 0, len(writes))
+	// Validate the whole batch first: nothing is applied unless every guard
+	// passes. See MultiUpdate above.
 	for _, w := range writes {
-		k := storableRaceKey(w.UserID, w.Collection, w.Key)
-		existing, ok := m.objects[k]
+		existing, ok := m.objects[storableRaceKey(w.UserID, w.Collection, w.Key)]
 		switch w.Version {
 		case "":
 			// Unconditional upsert.
@@ -153,6 +168,10 @@ func (m *storableRaceNK) storageWriteLocked(writes []*runtime.StorageWrite) ([]*
 				return nil, runtime.ErrStorageRejectedVersion
 			}
 		}
+	}
+	acks := make([]*api.StorageObjectAck, 0, len(writes))
+	for _, w := range writes {
+		k := storableRaceKey(w.UserID, w.Collection, w.Key)
 		ver := m.nextVersionLocked()
 		m.objects[k] = &api.StorageObject{
 			Collection: w.Collection,

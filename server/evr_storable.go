@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 	"google.golang.org/grpc/codes"
@@ -235,6 +236,84 @@ func storableCreate(ctx context.Context, nk runtime.NakamaModule, userID string,
 		lastErr = rerr
 	}
 	return lastErr
+}
+
+// StorableWriteMany writes several storables owned by one user in a SINGLE
+// nk.MultiUpdate call.
+//
+// This is not merely a batching convenience -- it is a transaction boundary.
+// MultiUpdate runs every account update, storage write and storage delete
+// inside one ExecuteInTxPgx (core_multi.go:37-66), so either every object lands
+// or none of them do. Two successive StorableWrite calls are two independent
+// transactions and CAN half-apply.
+//
+// Use this whenever two objects must not disagree with each other -- notably an
+// authoritative record and a projection derived from it, where a half-applied
+// write leaves the projection describing a state that no longer exists.
+//
+// MultiUpdate is preferred over a multi-object nk.StorageWrite even though both
+// are a single transaction today, because MultiUpdate is the one entry point
+// that can also carry account updates and deletes in that same transaction.
+// Callers that later need to widen the atomic unit do not have to change shape.
+//
+// Version conflicts stay detectable: MultiUpdate returns
+// runtime.ErrStorageRejectedVersion, and the wrapper below preserves it in the
+// error chain with %w. isVersionConflictError is errors.Is-based, so the
+// sentinel must survive wrapping — formatting it away with %v would make every
+// conflict on this path look like a hard failure and defeat the retry loop in
+// SyncJournalAndProfileWithRetry.
+//
+// Acks come back in input order (storageWriteObjects assigns them by the
+// original index at core_storage.go:686), so versions are propagated back to
+// the matching source object.
+func StorableWriteMany(ctx context.Context, nk runtime.NakamaModule, userID string, srcs ...StorableAdapter) error {
+	if len(srcs) == 0 {
+		return nil
+	}
+
+	ops := make([]*runtime.StorageWrite, 0, len(srcs))
+	metas := make([]StorableMetadata, 0, len(srcs))
+	for _, src := range srcs {
+		meta := src.StorageMeta()
+		meta.UserID = userID
+		data, err := json.Marshal(src)
+		if err != nil {
+			return storableErrorf(meta, codes.Internal, "failed to marshal: %w", err)
+		}
+		ops = append(ops, &runtime.StorageWrite{
+			Collection:      meta.Collection,
+			Key:             meta.Key,
+			UserID:          meta.UserID,
+			Value:           string(data),
+			Version:         meta.Version,
+			PermissionRead:  meta.PermissionRead,
+			PermissionWrite: meta.PermissionWrite,
+		})
+		metas = append(metas, meta)
+	}
+
+	// Storage writes only: no account updates, no deletes, no wallet updates.
+	acks, _, err := nk.MultiUpdate(ctx, nil, ops, nil, nil, false)
+	if err != nil {
+		// Name every object in the batch: the caller needs to know that NONE of
+		// them were applied, not just the one that happened to be rejected.
+		paths := make([]string, 0, len(metas))
+		for _, m := range metas {
+			paths = append(paths, m.String())
+		}
+		return storableErrorf(metas[0], codes.Internal,
+			"atomic write of %d objects failed, none applied (%s): %w", len(ops), strings.Join(paths, ", "), err)
+	}
+
+	for i, ack := range acks {
+		if i >= len(srcs) {
+			break
+		}
+		meta := metas[i]
+		meta.Version = ack.GetVersion()
+		srcs[i].SetStorageMeta(meta)
+	}
+	return nil
 }
 
 func StorableWrite(ctx context.Context, nk runtime.NakamaModule, userID string, src StorableAdapter) error {

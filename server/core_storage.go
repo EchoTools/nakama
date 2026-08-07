@@ -836,18 +836,41 @@ func storageDeleteObjects(ctx context.Context, logger *zap.Logger, tx pgx.Tx, au
 }
 
 func storageIndexWrite(ctx context.Context, storageIndex StorageIndex, ops StorageOpWrites, acks []*api.StorageObjectAck) {
+	// Acks must be matched to their own op by identity, NOT by position.
+	//
+	// storageWriteObjects sorts the ops for deadlock avoidance and returns the
+	// SORTED slice, but assigns acks at each op's ORIGINAL index
+	// (see acks[indexedOps[op]] above). Callers hand both to this function, so
+	// whenever the sort actually reorders a batch the two slices disagree and
+	// every document would be indexed with another record's version and
+	// timestamps. Single-object batches can never expose it; multi-object ones
+	// do. See TestStorageIndexWrite_PairsAcksToTheirOwnOps.
+	ackFor := make(map[string]*api.StorageObjectAck, len(acks))
+	for _, a := range acks {
+		if a == nil {
+			continue
+		}
+		ackFor[fmt.Sprintf("%s.%s.%s", a.Collection, a.Key, a.UserId)] = a
+	}
+
 	sw := make([]*api.StorageObject, 0, len(ops))
-	for i, o := range ops {
+	for _, o := range ops {
+		ack, ok := ackFor[fmt.Sprintf("%s.%s.%s", o.Object.Collection, o.Object.Key, o.OwnerID)]
+		if !ok {
+			// No ack for this op means it was not actually written; indexing it
+			// would assert a version the database never issued.
+			continue
+		}
 		sw = append(sw, &api.StorageObject{
 			Collection:      o.Object.Collection,
 			Key:             o.Object.Key,
 			UserId:          o.OwnerID,
 			Value:           o.Object.Value,
-			Version:         acks[i].Version,
+			Version:         ack.Version,
 			PermissionRead:  o.Object.PermissionRead.GetValue(),
-			PermissionWrite: o.Object.PermissionRead.GetValue(),
-			CreateTime:      acks[i].CreateTime,
-			UpdateTime:      acks[i].UpdateTime,
+			PermissionWrite: o.Object.PermissionWrite.GetValue(),
+			CreateTime:      ack.CreateTime,
+			UpdateTime:      ack.UpdateTime,
 		})
 	}
 
