@@ -46,6 +46,12 @@ const (
 	PreMatchWaitTime           = 45 * time.Second
 	PublicMatchWaitTime        = PreMatchWaitTime + CatapultDuration + RoundCatapultDelayDuration
 	PreMatchToPlayingTimeout   = 60 * time.Second
+
+	// MatchStartMaxAttempts bounds how many times MatchLoop retries a failing
+	// MatchStart before giving up and shutting the match down. Attempts after
+	// the first are throttled to one per second, so this doubles as the retry
+	// window in seconds.
+	MatchStartMaxAttempts int64 = 15
 )
 
 // evrSessionRegistryProvider and evrPartyRegistryProvider are the two narrow
@@ -422,6 +428,9 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 				delete(state.presenceMap, e.GetSessionId())
 				delete(state.presenceByEvrID, e.EvrID)
 				delete(state.joinTimestamps, e.GetSessionId())
+				// Mirror the MatchLeave cleanup: a stale join-clock entry would
+				// otherwise outlive the evicted session.
+				delete(state.joinTimeMilliseconds, e.GetSessionId())
 				state.rebuildCache()
 				break
 			}
@@ -634,22 +643,34 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			delete(state.TeamAlignments, p.GetUserId())
 		}
 
-		// If the session scoreboard is being used, set the join clock time
-		if state.GameState != nil && state.GameState.SessionScoreboard != nil {
-			// Do not overwrite an existing value
-			if _, ok := state.joinTimeMilliseconds[p.GetSessionId()]; !ok {
-				state.joinTimeMilliseconds[p.GetSessionId()] = state.GameState.SessionScoreboard.Elapsed().Milliseconds()
-			}
-		}
 		isBackfill := time.Now().After(state.StartTime.Add(PublicMatchWaitTime))
 
 		if mp, ok := state.presenceMap[p.GetSessionId()]; !ok {
+			// MatchJoinAttempt and MatchJoin are separately queued calls on the
+			// match handler goroutine, so another join attempt can evict this
+			// session (same-user duplicate EvrID) between them. Skip the orphan
+			// presence: returning nil would Stop() the handler without ever
+			// calling MatchTerminate, killing the match for everyone.
 			logger.WithFields(map[string]any{
 				"username": p.GetUsername(),
 				"uid":      p.GetUserId(),
-			}).Error("Presence not found. this should never happen.")
-			return nil
+				"sid":      p.GetSessionId(),
+			}).Error("Presence not found in the presence map; skipping join for this session.")
+			continue
 		} else {
+			// Record the join clock time only for a session that is actually in
+			// the presence map. Writing it above this check would re-add the very
+			// joinTimeMilliseconds entry MatchJoinAttempt just evicted, and the
+			// `continue` above would leave it there for the life of the match:
+			// MatchLeave only deletes the key for sessions it finds in the
+			// presence map, so nothing would ever clean it up.
+			if state.GameState != nil && state.GameState.SessionScoreboard != nil {
+				// Do not overwrite an existing value
+				if _, ok := state.joinTimeMilliseconds[p.GetSessionId()]; !ok {
+					state.joinTimeMilliseconds[p.GetSessionId()] = state.GameState.SessionScoreboard.Elapsed().Milliseconds()
+				}
+			}
+
 			logger.WithFields(map[string]any{
 				"username": p.GetUsername(),
 				"uid":      p.GetUserId(),
@@ -762,19 +783,30 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		}).Debug(class + " leaving the match.")
 	}
 
-	if state.Started() && len(state.presenceMap) == 0 {
-		// If the match is empty, and the server has left, then shut down.
-		logger.Debug("Match is empty. Shutting down.")
-		return nil
-	}
-
-	// if the server is in the presences, then shut down.
+	// If the game server is in the presences, then shut down. This must be
+	// checked BEFORE the empty-match branch below: the normal end-of-life
+	// sequence is "all players leave, then the game server disconnects", which
+	// arrives here with an empty presence map. Letting the empty branch win
+	// would run MatchShutdown with state.server still pointing at the departed
+	// game server — dispatching LobbySessionEvent CODE_ENDED to a presence that
+	// is already gone, storing a label that still advertises the game server,
+	// and handing MatchTerminate a snapshot with a live serverSessionID.
 	for _, p := range presences {
 		if state.GameServer != nil && p.GetSessionId() == state.GameServer.SessionID.String() {
 			logger.Debug("Server left the match. Shutting down.")
 			state.server = nil
 			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 2)
 		}
+	}
+
+	if state.Started() && len(state.presenceMap) == 0 {
+		// If the match is empty, then shut down.
+		// Go through MatchShutdown so the drain -> MatchTerminate sequence runs:
+		// a bare `return nil` makes the handler Stop() without MatchTerminate,
+		// skipping the summary, the stored-label cleanup and the game-server
+		// notification entirely.
+		logger.Debug("Match is empty. Shutting down.")
+		return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 5)
 	}
 
 	rejects := make([]uuid.UUID, 0)
@@ -1191,9 +1223,12 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		logger.Debug("Match is empty. Closing it.")
 	}
 
-	// Update the label that includes the new player list.
+	// Update the label that includes the new player list. A failure here is a
+	// transient bookkeeping problem (e.g. a database blip): it must NOT end the
+	// match for everyone still in it. Returning nil would make the handler
+	// Stop() without ever calling MatchTerminate.
 	if err := m.updateLabel(logger, dispatcher, state); err != nil {
-		return nil
+		logger.WithField("error", err).Error("failed to update label after leave")
 	}
 
 	return state
@@ -1207,7 +1242,6 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		return nil
 	}
 
-	var err error
 	var updateLabel bool
 
 	// Handle the messages, one by one
@@ -1347,26 +1381,34 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		}
 		return state
 	} else if state.server == nil {
-		state.emptyTicks++
-		if state.emptyTicks > 10*state.tickRate {
-			logger.Warn("Match has been empty for too long. Shutting down.")
+		// Timer (a): no game server presence. Owns its own counter — sharing one
+		// with the other two timers let a later reset wipe this count every tick
+		// (so it never fired) or a second increment halve its deadline.
+		state.noServerTicks++
+		if state.noServerTicks > 10*state.tickRate {
+			logger.Warn("Match has been without a game server for too long. Shutting down.")
 			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
 		}
-	} else if state.emptyTicks > 0 && !(state.Started() && len(state.presenceMap) == 0) {
-		state.emptyTicks = 0
+	} else {
+		state.noServerTicks = 0
 	}
 
 	if state.LobbyType == UnassignedLobby {
-		// Parking matches with a server that are never allocated should time out.
+		// Timer (b): parking matches with a server that are never allocated
+		// should time out.
 		if state.server != nil {
-			state.emptyTicks++
-			if state.emptyTicks > 120*state.tickRate { // 2 minutes
+			state.unallocatedTicks++
+			if state.unallocatedTicks > 120*state.tickRate { // 2 minutes
 				logger.Warn("Unassigned parking match with server has not been allocated. Shutting down.")
 				return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 5)
 			}
+		} else {
+			state.unallocatedTicks = 0
 		}
 		return state
 	}
+	// The lobby has been assigned; the unallocated deadline no longer applies.
+	state.unallocatedTicks = 0
 
 	// Enforce 5-minute lifetime for post-match social lobbies.
 	if state.SpawnedBy == "post-match-transition" && !state.CreatedAt.IsZero() && time.Since(state.CreatedAt) > 5*time.Minute {
@@ -1430,21 +1472,59 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	// If the match has a server but never started and has been idle too long, shut it down.
+	// Route through MatchShutdown so the drain -> MatchTerminate sequence runs.
 	if !state.levelLoaded && state.server != nil && !state.Started() && len(state.presenceMap) == 0 && !state.CreatedAt.IsZero() && time.Since(state.CreatedAt) > 15*time.Minute {
 		logger.Warn("Match did not start on time. Shutting down.")
-		return nil
+		return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 5)
 	}
 
 	// If the match is prepared and the start time has been reached, start it.
 	// Ensure the game server presence exists to avoid nil dispatch crashes.
 	if !state.levelLoaded && state.server != nil && (len(state.presenceMap) != 0 || state.Started()) {
-		if state, err = m.MatchStart(ctx, logger, nk, dispatcher, state); err != nil {
-			logger.WithField("error", err).Error("failed to start session")
-			return nil
+		// A failed start is retryable: killing the match here would Stop() the
+		// handler without MatchTerminate. But retrying every tick forever is
+		// just as bad — this branch returns before every idle timer below, so
+		// nothing could ever reclaim a match whose start keeps failing. Retries
+		// are therefore bounded by MatchStartMaxAttempts and, after the first,
+		// throttled to one per second so a dead game server is not re-dispatched
+		// at tick rate.
+		//
+		// The throttle gates on the gap since the last attempt, not on
+		// `tick % tickRate == 0`: a modulo aligns retries to absolute tick
+		// boundaries, so a first attempt at tick 9 (tickRate 10) would be
+		// followed by a second at tick 10, 0.1s later. lastStartAttemptTick is
+		// this throttle's own field for the same reason each idle timer got its
+		// own counter — a shared one lets an unrelated reset re-open the gate.
+		// MatchInit clamps tickRate to 10 when it is unset; the guard below is
+		// belt-and-braces for a hand-built label with a zero tickRate, which
+		// would otherwise retry every tick.
+		throttleTicks := state.tickRate
+		if throttleTicks < 1 {
+			throttleTicks = 1
 		}
-		if err := m.updateLabel(logger, dispatcher, state); err != nil {
-			logger.WithField("error", err).Error("failed to update label")
-			return nil
+		if state.startAttempts == 0 || tick-state.lastStartAttemptTick >= throttleTicks {
+			state.startAttempts++
+			state.lastStartAttemptTick = tick
+			started, err := m.MatchStart(ctx, logger, nk, dispatcher, state)
+			if err != nil {
+				logger.WithFields(map[string]any{
+					"error":    err,
+					"attempts": state.startAttempts,
+				}).Error("failed to start session")
+				if state.startAttempts >= MatchStartMaxAttempts {
+					logger.WithField("attempts", state.startAttempts).Warn("Match failed to start after repeated attempts. Shutting down.")
+					return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 5)
+				}
+				return state
+			}
+			// MatchStart can return a nil label on failure; keep the existing
+			// state in that case.
+			if started != nil {
+				state = started
+			}
+			if err := m.updateLabel(logger, dispatcher, state); err != nil {
+				logger.WithField("error", err).Error("failed to update label")
+			}
 		}
 		return state
 	}
@@ -1594,9 +1674,11 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	if updateLabel {
+		// Bookkeeping only: a transient failure must not tear the match down
+		// without a shutdown sequence. The next tick that sets updateLabel will
+		// retry.
 		if err := m.updateLabel(logger, dispatcher, state); err != nil {
 			logger.WithField("error", err).Error("failed to update label")
-			return nil
 		}
 	}
 
@@ -1650,6 +1732,21 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 		logger.Error("state not a valid lobby state object")
 		return nil
 	}
+	// MatchShutdown is idempotent: the drain is armed exactly once. Several
+	// callers can reach it for the same match — a straggler MatchLeave for a
+	// session that is no longer in the presence map re-enters the empty-match
+	// branch above, and SignalShutdown can be issued again by an operator or by
+	// the preemption path while the drain is already running. Every re-entry
+	// used to re-count match_shutdown_count, re-record lobby_session_duration,
+	// re-accumulate the FULL game-server time to the leaderboard, and push
+	// terminateTick further out. Re-arming can only ever delay teardown: the
+	// primary trigger in MatchLoop is "presenceMap is empty", not the deadline.
+	if state.terminateTick != 0 {
+		logger.WithField("terminate_tick", state.terminateTick).
+			Debug("MatchShutdown called on a match that is already draining; ignoring.")
+		return state
+	}
+
 	logger.WithField("state", state).Info("MatchShutdown called.")
 	nk.MetricsCounterAdd("match_shutdown_count", state.MetricsTags(), 1)
 
@@ -1663,9 +1760,13 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 	}
 	state.Open = false
 	state.terminateTick = tick + int64(graceSeconds)*state.tickRate
+	// The label refresh is bookkeeping. Bailing out with nil here would make the
+	// handler Stop() without ever calling MatchTerminate, so the drain would
+	// never complete, the stored label would leak and the game server would
+	// never be told to kick its players — the exact teardown this function
+	// exists to perform.
 	if err := m.updateLabel(logger, dispatcher, state); err != nil {
-		logger.WithField("error", err).Error("failed to update label")
-		return nil
+		logger.WithField("error", err).Error("failed to update label on shutdown")
 	}
 
 	if err := StoreMatchLabel(dbCtx, nk, state); err != nil {
@@ -2096,18 +2197,28 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 		groupID = *state.GroupID
 	}
 
+	// Compute the start-time and game-state updates, but do NOT commit them to
+	// the label until the start message actually dispatches. A failed start
+	// that has already moved StartTime forward leaves the label reporting
+	// Started() == true with levelLoaded == false, which permanently disables
+	// the "did not start on time" reclaim in MatchLoop and traps the loop in
+	// the start branch. Deferring the commit also preserves a scheduled
+	// StartTime set by the SignalPrepareSession case in MatchSignal across a
+	// failed start, and stops a retry from rebuilding the SessionScoreboard
+	// (which would reset the round clock on every attempt).
+	var newGameState *GameState
 	switch state.Mode {
 	case evr.ModeArenaPublic, evr.ModeArenaPublicAI:
-		state.GameState = &GameState{
+		newGameState = &GameState{
 			SessionScoreboard: NewSessionScoreboard(RoundDuration, time.Now().Add(PublicMatchWaitTime)),
 		}
 	case evr.ModeArenaPrivate:
-		state.GameState = &GameState{
+		newGameState = &GameState{
 			SessionScoreboard: NewSessionScoreboard(0, time.Time{}),
 		}
 	}
 
-	state.StartTime = time.Now().UTC()
+	startTime := time.Now().UTC()
 
 	envelope := &rtapi.Envelope{
 		Message: &rtapi.Envelope_LobbySessionCreate{
@@ -2149,6 +2260,12 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 	if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.server}, nil); err != nil {
 		return state, fmt.Errorf("failed to dispatch message: %w", err)
 	}
+
+	// The start is committed: only now may the label advertise it as started.
+	if newGameState != nil {
+		state.GameState = newGameState
+	}
+	state.StartTime = startTime
 	state.levelLoaded = true
 
 	// For AI CO-OP mode, send bot spawn messages to fill both teams to TeamSize.
