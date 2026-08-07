@@ -37,6 +37,30 @@
 # worktrees. The worktree upstream is how it happened, but a gate scoped to the
 # way it happened last time is a gate with a hole in it, and the escape hatch
 # already covers the legitimate case.
+#
+# THIS HOOK IS OFF UNTIL ARMED, AND ITS FAILURE MODE IS SILENCE.
+#
+# core.hooksPath is local config and cannot be committed, so this file shipping
+# with the repo does not activate it. Until someone runs `just hooks` in a given
+# clone, git never looks here and pushes are unguarded -- with no warning, since
+# a hook that is not wired up is indistinguishable from a hook that approved.
+#
+# That gap is not a rounding error: a fresh clone, a newly created worktree, and
+# an agent starting cold are all unarmed by default, and those are exactly the
+# situations this guard was built for.
+#
+# Check whether it is armed here:
+#
+#     git config --get core.hooksPath     # must print .githooks
+#
+# Two other layers exist because of that gap:
+#
+#   - .github/workflows/main-push-audit.yaml flags a commit that reached main
+#     without a PR. Server-side, so it arms itself -- but it is DETECTION: it
+#     goes red after the push has landed.
+#   - GitHub branch protection requiring a PR would be actual prevention and
+#     cannot be bypassed. It is a repository setting, not a file, and it
+#     constrains every human with push access, so it is the owner's decision.
 
 set -uo pipefail
 
