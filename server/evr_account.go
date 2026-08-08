@@ -80,6 +80,20 @@ func (e EVRProfile) UserID() string {
 	return e.account.User.Id
 }
 
+// AccountCreateTime reports when the Nakama account itself was created.
+//
+// The second return distinguishes "not loaded" from "created at the zero time",
+// which matters to callers that gate on account age: every real account has a
+// creation time, so an absent one means the profile is incomplete rather than
+// that the account is brand new. Silently returning the zero time would make an
+// unloaded profile look infinitely old and pass any age check.
+func (e EVRProfile) AccountCreateTime() (time.Time, bool) {
+	if e.account == nil || e.account.User == nil || e.account.User.CreateTime == nil {
+		return time.Time{}, false
+	}
+	return e.account.User.CreateTime.AsTime(), true
+}
+
 func (e EVRProfile) IsDisabled() bool {
 	if e.account == nil {
 		return false

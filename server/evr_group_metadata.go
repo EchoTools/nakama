@@ -12,9 +12,22 @@ import (
 )
 
 type GroupMetadata struct {
-	GuildID                              string            `json:"guild_id"`                      // The guild ID
-	OwnerID                              string            `json:"owner_id"`                      // The owner ID
-	MinimumAccountAgeDays                int               `json:"minimum_account_age_days"`      // The minimum account age in days to be able to play echo on this guild's sessions
+	GuildID               string `json:"guild_id"`                 // The guild ID
+	OwnerID               string `json:"owner_id"`                 // The owner ID
+	MinimumAccountAgeDays int    `json:"minimum_account_age_days"` // The minimum DISCORD account age in days to be able to play echo on this guild's sessions
+	// MinimumNakamaAccountAgeDays gates on the age of the EchoVR account itself,
+	// which MinimumAccountAgeDays does not: that one reads the Discord
+	// snowflake, so a fresh burner created on an aged Discord account passes it
+	// unchanged. See #516.
+	//
+	// Zero means off, and off is the default, because this gate is not a
+	// strictly better version of the Discord one -- it rejects genuinely new
+	// EchoVR players who happen to have long-standing Discord accounts, which
+	// is a real population and not the one it is aimed at. Guilds opt in.
+	//
+	// The two are independent and both apply when both are set: an account must
+	// clear whichever gates the guild has enabled.
+	MinimumNakamaAccountAgeDays          int               `json:"minimum_nakama_account_age_days"`
 	EnableMembersOnlyMatchmaking         bool              `json:"members_only_matchmaking"`      // Restrict matchmaking to members only (when this group is the active one)
 	DisableCreateCommand                 bool              `json:"disable_create_command"`        // Disable the public allocate command
 	LogAlternateAccounts                 bool              `json:"log_alternate_accounts"`        // Log alternate accounts
