@@ -104,7 +104,24 @@ func runtimeWithModulesWithData(t *testing.T, modules map[string]string) (*Runti
 	tracker := &LocalTracker{sessionRegistry: sessionRegistry}
 	statusRegistry := NewLocalStatusRegistry(logger, cfg, sessionRegistry, protojsonMarshaler)
 
+	// See disableEvrRuntimeModules: without this the EVR InitModule fails on the
+	// missing DISCORD_BOT_TOKEN and runtime_go.go escalates that to a zap fatal,
+	// os.Exit-ing the whole test binary.
+	//
+	// This harness is the reason the `server` package died in 0.07s whenever a
+	// database was reachable (#553). Without a database NewDB(t) skips first, so
+	// nothing here is ever reached and the package looks green -- which is why
+	// the failure was invisible locally and appeared only in the one
+	// configuration nobody was running.
+	//
+	// These are upstream Nakama tests. They construct a full runtime because
+	// that is what the API surface they exercise needs; none of them wants the
+	// EVR module, so disabling it costs no coverage here. What the EVR
+	// InitModule itself does with a real database remains untested -- that is a
+	// separate gap, not one this closes.
+	restoreEvrModules := disableEvrRuntimeModules()
 	rt, rtInfo, err := NewRuntime(ctx, logger, logger, db, protojsonMarshaler, protojsonUnmarshaler, cfg, "", nil, lbCache, lbRankCache, lbSched, sessionRegistry, nil, statusRegistry, nil, tracker, metrics, nil, &DummyMessageRouter{}, storageIdx, nil)
+	restoreEvrModules()
 
 	return rt, rtInfo, data, err
 }
