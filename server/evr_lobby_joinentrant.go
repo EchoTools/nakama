@@ -286,6 +286,21 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 }
 
 // lobbyAuthorize checks if the user is allowed to join the lobby based on various criteria such as guild membership, suspensions, and account age.
+// accountTooNew reports whether an account created at createdAt is younger than
+// minDays, and its age in whole days for the rejection message.
+//
+// Extracted so the policy can be exercised without a session, a guild, or a
+// database -- the gates that call it sit deep inside lobby authorization, which
+// is why their behaviour at the boundaries went untested for as long as it did.
+//
+// The cutoff is calendar arithmetic (AddDate), not minDays*24h. Those differ
+// across a DST transition, and this preserves the original behaviour rather
+// than quietly changing where the line falls.
+func accountTooNew(createdAt time.Time, minDays int, now time.Time) (tooNew bool, ageDays int) {
+	ageDays = int(now.Sub(createdAt).Hours() / 24)
+	return createdAt.After(now.AddDate(0, 0, -minDays)), ageDays
+}
+
 func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters) error {
 	groupID := lobbyParams.GroupID.String()
 	metricsTags := map[string]string{
@@ -432,11 +447,36 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 			return fmt.Errorf("failed to get discord snowflake timestamp: %w", err)
 		}
 
-		if t.After(time.Now().AddDate(0, 0, -gg.MinimumAccountAgeDays)) {
-			accountAge := time.Since(t).Hours() / 24
-			reason := fmt.Sprintf("Your account age (%d days) is too new (<%d days) to join this guild. ", int(accountAge), gg.MinimumAccountAgeDays)
-			auditLog := fmt.Sprintf("account age (%d > %d days.", int(accountAge), gg.MinimumAccountAgeDays)
+		if tooNew, ageDays := accountTooNew(t, gg.MinimumAccountAgeDays, time.Now()); tooNew {
+			reason := fmt.Sprintf("Your account age (%d days) is too new (<%d days) to join this guild. ", ageDays, gg.MinimumAccountAgeDays)
+			auditLog := fmt.Sprintf("account age (%d > %d days.", ageDays, gg.MinimumAccountAgeDays)
 			return joinRejected("account_age", reason, auditLog)
+		}
+	}
+
+	// The EchoVR account's own age, which the Discord gate above cannot see: it
+	// reads the Discord snowflake, so a fresh burner created on an aged Discord
+	// account clears it unchanged. That is the evasion recorded in #516.
+	//
+	// Independent of the Discord gate rather than a replacement for it. Both
+	// apply when both are configured, and this one is off unless the guild sets
+	// it -- see MinimumNakamaAccountAgeDays for why it is not simply the
+	// stricter default.
+	if gg.MinimumNakamaAccountAgeDays > 0 && !gg.IsAccountAgeBypass(userID) {
+		createdAt, ok := params.profile.AccountCreateTime()
+		if !ok {
+			// Every Nakama account has a creation time, so an absent one means
+			// the profile did not load rather than that the account is new.
+			// Treated as an error for the same reason the malformed-snowflake
+			// case above is: a gate that cannot read its input must not decide
+			// it passed.
+			return fmt.Errorf("cannot evaluate minimum_nakama_account_age_days: account creation time unavailable for %s", userID)
+		}
+
+		if tooNew, ageDays := accountTooNew(createdAt, gg.MinimumNakamaAccountAgeDays, time.Now()); tooNew {
+			reason := fmt.Sprintf("Your EchoVR account age (%d days) is too new (<%d days) to join this guild. ", ageDays, gg.MinimumNakamaAccountAgeDays)
+			auditLog := fmt.Sprintf("echovr account age (%d < %d days).", ageDays, gg.MinimumNakamaAccountAgeDays)
+			return joinRejected("nakama_account_age", reason, auditLog)
 		}
 	}
 
