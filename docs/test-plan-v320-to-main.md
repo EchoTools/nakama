@@ -1,20 +1,49 @@
 # Test plan: `v3.27.2-evr.320` → `main`
 
-Covers the 133 commits (24 merged PRs) between tag `v3.27.2-evr.320` and `main` at
-`90b28ba4b`.
+Covers the 137 commits (26 merged PRs) between tag `v3.27.2-evr.320` and `main` at
+`a681d7a61`.
 
 ```
 $ git rev-list --count v3.27.2-evr.320..origin/main
-133
+137
 ```
 
 **Written 2026-08-08.** Regenerate the ranges below against the actual release
 commit before using this — the count moves every time `main` does.
 
-## Read this first: you cannot lean on the automated suite
+---
 
-Two findings from measuring the suite while writing this plan. Both change what
-this document has to be.
+# Assumptions
+
+## **CI green is not currently a statement about this codebase.**
+
+Read that before planning any of the work below, and do not let a green check
+mark on a PR stand in for it.
+
+**Every manual test in this plan is load-bearing, because the automated suite is
+a subset of the codebase rather than a gate over it.** Three separate facts
+combine to make that true, and each is filed:
+
+| | fact | issue |
+|---|---|---|
+| 1 | The `server` package — where all EVR code lives — **does not execute in CI at all**. With a database reachable the test binary aborts in 0.07 s on a missing `DISCORD_BOT_TOKEN`. It normally takes ~148 s. | #553 |
+| 2 | `internal/` is covered by **no routine gate**, and has a red test sitting in it right now. Every `just` test recipe runs `./server/...` only. | #554 |
+| 3 | The compose workflow that would run `./...` is `workflow_dispatch`-only — its `pull_request` trigger is commented out — **so no test gate runs on PRs at all**, and it could not complete anyway because of (1). | — |
+
+The checks that *are* green on a PR — gofmt, exec bits, CodeQL, build, and the
+DB-free `./server/...` suite — are real and worth having. They are also not
+coverage of the behaviour this plan is about. **A reader who confuses the two
+will skip the manual passes and ship untested subsystems.**
+
+Corollary for whoever runs this plan: when a manual step here disagrees with
+"but CI is green", the manual step wins. There is no automated result that
+contradicts it, because for these subsystems there is no automated result at
+all.
+
+## The evidence behind that
+
+Both findings came from measuring the suite while writing this plan, not from
+reading it.
 
 **The `server` package does not run in CI at all.** With a database reachable,
 the whole test binary aborts in 0.07 seconds:
@@ -38,10 +67,8 @@ test recipe runs `./server/...` only; `./...` appears solely in the compose
 workflow, which is `workflow_dispatch`-only and blocked by the above. Filed as
 **#554**.
 
-Consequence for this plan: **a green `just test` is the floor, not the
-verification.** The manual passes below are load-bearing, not belt-and-braces.
-Prioritise the subsystems marked ⚠ — they are player-facing, destructive, or
-both.
+A green `just test` is the floor, not the verification. Prioritise the
+subsystems marked ⚠ — they are player-facing, destructive, or both.
 
 ## What this plan is grounded in
 
@@ -633,6 +660,21 @@ checks). `21f37f4eb` the main-push audit workflow. `c2825b587` explicit
 permissions on the build workflow. `684c895af` / `87924552e` `.gitignore` for
 `tools/` build outputs.
 
+**Added after this plan was first drafted:** PR #552 (`4b6543139`, merged as
+`a681d7a61`) bounds test-suite memory at the compose layer — `test` 4g, `db` 2g,
+`nakama` 2g, each with `memswap_limit` equal to `mem_limit`. `tests.yaml` gained
+a pre-flight check that every service declares a limit, and a post-run step that
+reads `HostConfig.Memory` off the containers that ran and **fails the job if any
+ran with no limit applied**. That step also names an OOM kill rather than
+leaving exit 137 to read as a mystery.
+
+Note the interaction with the section above: this bounds the workflow that
+**cannot currently complete** (#553). The limits are correct and verified —
+planting a memory hog produces `oom_killed=true exit=137` and the reporting step
+names it — but they will not have been exercised by a real suite run until #553
+is fixed. First green run of that workflow, check the reported limits are
+non-zero for all three services.
+
 ### Verification
 
 ```bash
@@ -653,6 +695,88 @@ just act-lint         # workflow syntax
 
 ---
 
+---
+
+# 13 ⚠ Alt detection and account linking
+
+**Added to the range after this plan was first drafted** — PR #551 (`56e9a9c2d`)
+merged as `5dc351220`, closing the linking half of #516. It is here because it
+changes *who the server decides is the same person*, which is as player-facing
+as anything in §1 or §2, and a false positive links an innocent account to a
+banned one.
+
+### What changed
+
+`AltSearchPatterns` now includes the machine fingerprint (`SystemProfile`) among
+the keys used to **discover** candidate alt accounts. Previously the fingerprint
+was captured, indexed, and compared — but never searched on. Since
+`loginHistoryCompare` only ever runs against candidates the index query already
+returned, an account whose only overlap with a banned account was the machine
+itself produced **zero edges**. Confirmed on account #11 (2026-07-13): an exact
+`system_profile` match to three accounts banned 26 minutes earlier formed no
+link.
+
+A second change guards the first. `isDegenerateSystemProfile`, in
+`matchIgnoredAltPattern`, drops any profile whose four descriptive fields
+(headset type, network type, video card, CPU model) are all empty or the
+`Unknown` placeholder.
+
+### What needs testing
+
+**The false-positive direction is the risk here, not the false-negative one.**
+The fix widens who gets linked; that is its purpose, and it is also how it could
+do harm.
+
+- **Degenerate profiles must not link.** Every account that logs in without
+  `SystemInfo` emits the byte-identical string `Unknown::::::::0::0::0::0`. That
+  is not a rare fingerprint, it is a bucket. Unguarded, this change would have
+  linked every profile-less account to every other one on its first run. **This
+  string already exists in production data** — it has been written into the
+  indexed `cache` of every profile-less account all along, inert only because
+  nothing queried for it. Confirm that after deploy, no account acquires alt
+  edges purely on a degenerate profile.
+- **Commodity headsets must not link.** Quest profiles are low-entropy and are
+  filtered by the pre-existing `IsWeakSignal` prefix check — **but that filter
+  depends on `CommodityProfilePrefixes` being configured.** Verify the live
+  config actually lists the current Quest prefixes. Unconfigured, a popular
+  headset becomes a wide match, and this change moves that from the comparison
+  side (bounded) to the discovery side (unbounded).
+- **Query volume.** Every login now searches on one more key. Each returned
+  candidate triggers a `StorableRead`. Watch alt-search latency and storage read
+  volume after deploy — a high-population shared fingerprint would show up here
+  first.
+- **The true-positive direction**: a known cheater on a fresh account with a
+  rotated IP, HMD serial and XPID, on the same hardware, should now link.
+
+### Manual verification
+
+1. **Before deploy**, sample the live index for the degenerate string and count
+   how many accounts carry it. That number is the blast radius if the guard
+   regresses, and it is worth knowing rather than assuming small.
+2. Confirm `CommodityProfilePrefixes` in the live config covers every Quest
+   variant currently in use, including Quest 3S.
+3. After deploy, review newly-formed alt edges for a day. Any edge whose only
+   matching item is a system profile deserves a manual look before action is
+   taken on it.
+4. Confirm a legitimate household — two players, same model of PC, different
+   accounts — does **not** link. Different machines with identical specs produce
+   identical profile strings; the fingerprint is hardware *class*, not hardware
+   *identity*. This is the most likely real-world false positive and it is worth
+   a deliberate test.
+5. Confirm the true positive: a test account on known hardware, with IP, serial
+   and XPID all changed, links to its prior identity.
+
+### Not changed by that PR — still open on #516
+
+Do not test for these; they were deliberately not implemented. First-sight
+reject on a banned machine, subnet/ASN reuse as a link signal, and the
+Nakama-vs-Discord account-age gate are enforcement policy rather than linking.
+`"N/A"` remains in `IgnoredLoginValues` on purpose: a nulled HMD serial is
+shared by everyone who nulls it, so as a *linking key* it would mass-link
+strangers.
+
+---
+
 # Suggested order
 
 Run in this order — each stage's failures make the next stage's results
@@ -669,7 +793,8 @@ uninterpretable.
 | 7 | §3 matchmaker, §4 match lifecycle | Need real players; gate the rest of gameplay testing. |
 | 8 | §1 early quit, §2 suspensions | The most player-visible. Test with enforcement **off** first, then a single opt-in test guild. |
 | 9 | §11 client wire formats | Needs real Quest and PC hardware. |
-| 10 | §5 prune with `do*` flags | Destructive. Last, one guild at a time, only after §5 report-only was clean. |
+| 10 | §13 alt detection | Its risk is false positives, which only appear against real login volume. Sample the index **before** deploy (step 1); review edges **after**. |
+| 11 | §5 prune with `do*` flags | Destructive. Last, one guild at a time, only after §5 report-only was clean. |
 
 # Known-red before you start
 
