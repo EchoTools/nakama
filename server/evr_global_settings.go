@@ -61,33 +61,48 @@ type SkillRatingSettings struct {
 }
 
 type ServiceSettingsData struct {
-	LinkInstructions                      string                    `json:"link_instructions"`     // Instructions for linking the headset
-	DisableLoginMessage                   string                    `json:"disable_login_message"` // Disable the login, and show this message
-	ServiceGuildID                        string                    `json:"service_guild_id"`      // Central/Support guild ID
-	DisableStatisticsUpdates              bool                      `json:"disable_statistics_updates"`
-	PruneSettings                         PruneSettings             `json:"prune_settings"` // Settings for pruning Discord guilds and Nakama groups
-	SkillRating                           SkillRatingSettings       `json:"skill_rating"`   // Skill rating configuration
-	Matchmaking                           GlobalMatchmakingSettings `json:"matchmaking"`
-	RemoteLogFilters                      map[string][]string       `json:"remote_logs_filter"` //	Ignore remote logs from specific servers
-	ReportURL                             string                    `json:"report_url"`         // URL to report issues
-	ServiceAuditChannelID                 string                    `json:"service_audit_channel_id"`
-	ServiceSessionsChannelID              string                    `json:"service_sessions_channel_id"` // Service-wide sessions channel
-	ServiceDebugChannelID                 string                    `json:"service_debug_channel_id"`
-	GlobalErrorChannelID                  string                    `json:"service_error_channel_id"`
-	CommandLogChannelID                   string                    `json:"service_command_log_channel_id"`
-	DiscordBotUserID                      string                    `json:"discord_bot_user_id"`
-	KickPlayersWithDisabledAlternates     bool                      `json:"kick_players_with_disabled_alts"` // Kick players with disabled alts
-	VRMLEntitlementNotifyChannelID        string                    `json:"vrml_entitlement_notify_channel_id"`
-	VRMLOutageMode                        bool                      `json:"vrml_outage_mode"` // Disable live VRML API calls and rely on cached data only.
-	EnableContinuousGameserverHealthCheck bool                      `json:"enable_continuous_gameserver_health_check"`
-	DisplayNameInUseNotifications         bool                      `json:"display_name_in_use_notifications"` // Display name in use notifications
-	EnableSessionDebug                    bool                      `json:"enable_session_debug"`
-	version                               string
-	serviceStatusMessage                  string
-	PingServerBeforeJoin                  bool          `json:"ping_server_before_join"`   // Ping the server before joining to measure latency
-	EnableVibinatorsGravity               bool          `json:"enable_vibinators_gravity"` // Novelty: redirect social-lobby echo_arena matchmakers toward vibinator's echo_combat
-	UseQuestEncoderFlags                  bool          `json:"use_quest_encoder_flags"`   // Send Quest-shifted encoder flag bit layout in LobbySessionSuccessv5 for standalone clients
-	CGNAT                                 CGNATSettings `json:"cgnat"`
+	LinkInstructions                  string                    `json:"link_instructions"`     // Instructions for linking the headset
+	DisableLoginMessage               string                    `json:"disable_login_message"` // Disable the login, and show this message
+	ServiceGuildID                    string                    `json:"service_guild_id"`      // Central/Support guild ID
+	DisableStatisticsUpdates          bool                      `json:"disable_statistics_updates"`
+	PruneSettings                     PruneSettings             `json:"prune_settings"` // Settings for pruning Discord guilds and Nakama groups
+	SkillRating                       SkillRatingSettings       `json:"skill_rating"`   // Skill rating configuration
+	Matchmaking                       GlobalMatchmakingSettings `json:"matchmaking"`
+	RemoteLogFilters                  map[string][]string       `json:"remote_logs_filter"` //	Ignore remote logs from specific servers
+	ReportURL                         string                    `json:"report_url"`         // URL to report issues
+	ServiceAuditChannelID             string                    `json:"service_audit_channel_id"`
+	ServiceSessionsChannelID          string                    `json:"service_sessions_channel_id"` // Service-wide sessions channel
+	ServiceDebugChannelID             string                    `json:"service_debug_channel_id"`
+	GlobalErrorChannelID              string                    `json:"service_error_channel_id"`
+	CommandLogChannelID               string                    `json:"service_command_log_channel_id"`
+	DiscordBotUserID                  string                    `json:"discord_bot_user_id"`
+	KickPlayersWithDisabledAlternates bool                      `json:"kick_players_with_disabled_alts"` // Kick players with disabled alts
+	// RejectDisabledAlternatesOnMachineMatch refuses the LOGIN, rather than
+	// admitting the session and kicking it 1-4 minutes later, when the account
+	// shares a full machine fingerprint with a currently-disabled account.
+	//
+	// Narrow on purpose: only the machine fingerprint, and only a specific one
+	// (commodity headset profiles and degenerate all-empty profiles are
+	// excluded, since those are buckets rather than keys). IP and HMD serial do
+	// NOT trigger it -- they are rotated trivially, and a shared IP is a
+	// household, not a person.
+	//
+	// Off by default, because it is a trade rather than an upgrade. The delayed
+	// kick costs a few minutes of presence and buys ambiguity about which signal
+	// caught them; rejecting at login is immediate but tells an evader exactly
+	// what to change, on the login that carried it. See #516.
+	RejectDisabledAlternatesOnMachineMatch bool   `json:"reject_disabled_alts_on_machine_match"`
+	VRMLEntitlementNotifyChannelID         string `json:"vrml_entitlement_notify_channel_id"`
+	VRMLOutageMode                         bool   `json:"vrml_outage_mode"` // Disable live VRML API calls and rely on cached data only.
+	EnableContinuousGameserverHealthCheck  bool   `json:"enable_continuous_gameserver_health_check"`
+	DisplayNameInUseNotifications          bool   `json:"display_name_in_use_notifications"` // Display name in use notifications
+	EnableSessionDebug                     bool   `json:"enable_session_debug"`
+	version                                string
+	serviceStatusMessage                   string
+	PingServerBeforeJoin                   bool          `json:"ping_server_before_join"`   // Ping the server before joining to measure latency
+	EnableVibinatorsGravity                bool          `json:"enable_vibinators_gravity"` // Novelty: redirect social-lobby echo_arena matchmakers toward vibinator's echo_combat
+	UseQuestEncoderFlags                   bool          `json:"use_quest_encoder_flags"`   // Send Quest-shifted encoder flag bit layout in LobbySessionSuccessv5 for standalone clients
+	CGNAT                                  CGNATSettings `json:"cgnat"`
 }
 
 // CGNATSettings configures detection of CGNAT and shared-IP providers

@@ -4,10 +4,46 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
+
+// disabledAccountIDs returns which of the given user IDs belong to accounts
+// that are currently disabled.
+//
+// Returns an error rather than swallowing one, so callers choose their own
+// failure posture. The two that gate on this choose differently and both are
+// deliberate: the login rejection fails open (a lookup failure must not lock a
+// legitimate player out, and the delayed kick still runs behind it), while a
+// caller that already admitted the session can afford to be stricter.
+func disabledAccountIDs(ctx context.Context, nk runtime.NakamaModule, userIDs []string) ([]string, error) {
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+
+	accounts, err := nk.AccountsGetId(ctx, userIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get accounts for user IDs %v: %w", userIDs, err)
+	}
+
+	disabled := make([]string, 0, len(accounts))
+	for _, a := range accounts {
+		// A zero DisableTime is "not disabled", not "disabled at the epoch" --
+		// both the nil and the zero form appear in practice.
+		if a.GetDisableTime() == nil || a.GetDisableTime().AsTime().IsZero() {
+			continue
+		}
+		if a.GetUser() != nil {
+			disabled = append(disabled, a.GetUser().GetId())
+		}
+	}
+	if len(disabled) == 0 {
+		return nil, nil
+	}
+	return disabled, nil
+}
 
 type AlternateSearchMatch struct {
 	OtherUserID string   `json:"other_user_id"`
@@ -142,6 +178,68 @@ func LoginDeniedClientIPAddressSearch(ctx context.Context, nk runtime.NakamaModu
 	}
 	return userIDs, nil
 
+}
+
+// isMachineFingerprint reports whether an alt-match item is a specific machine
+// fingerprint, as opposed to any of the other things a match can be keyed on.
+//
+// The distinction is the whole basis for treating this signal differently from
+// the rest. An IP is a household and is rotated by a reboot; an HMD serial is
+// rotated by editing a config. The full system profile is the one key that
+// tracks the hardware someone actually owns.
+//
+// "Specific" is doing real work here. The same string is a bucket rather than a
+// key in two cases, and both are excluded:
+//
+//   - matchIgnoredAltPattern drops the degenerate profile -- every account that
+//     logs in without SystemInfo emits the identical Unknown::::::::0::0::0::0,
+//     which links strangers to each other en masse.
+//   - IsWeakSignal drops commodity headset prefixes: "Meta Quest 3::..." plus
+//     stock numbers describes a large share of the player base.
+//
+// A nil detector only skips the commodity check. It does not turn the whole
+// test into "true" -- an unavailable classifier must narrow what this matches,
+// never widen it.
+func isMachineFingerprint(item string, detector *CGNATDetector) bool {
+	if len(strings.Split(item, "::")) != systemProfileComponents {
+		return false
+	}
+	if matchIgnoredAltPattern(item) {
+		return false
+	}
+	if detector != nil && detector.IsWeakSignal(item) {
+		return false
+	}
+	return true
+}
+
+// machineMatchedAlts returns the subset of altIDs linked to this account by a
+// specific machine fingerprint.
+//
+// Narrower than filterStrongAlts on purpose: that one keeps an alt if ANY of
+// its match items is a strong signal, so an alt linked only by a residential IP
+// on a non-CGNAT range survives it. This one asks the single question #516's
+// item 1 is about -- is this the same machine?
+func machineMatchedAlts(history *LoginHistory, altIDs []string, detector *CGNATDetector) []string {
+	if history == nil || len(altIDs) == 0 {
+		return nil
+	}
+
+	matched := make([]string, 0, len(altIDs))
+	for _, altID := range altIDs {
+		for _, m := range history.AlternateMatches[altID] {
+			if slices.ContainsFunc(m.Items, func(item string) bool {
+				return isMachineFingerprint(item, detector)
+			}) {
+				matched = append(matched, altID)
+				break
+			}
+		}
+	}
+	if len(matched) == 0 {
+		return nil
+	}
+	return matched
 }
 
 func loginHistoryCompare(a, b *LoginHistory) []*AlternateSearchMatch {
