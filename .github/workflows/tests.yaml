@@ -13,8 +13,61 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Fails fast if a service lost its memory limit in an edit. This only
+      # reads the file; whether the runtime HONOURED the key is a separate
+      # question, checked after the run below.
+      - name: Check memory limits are declared
+        run: |
+          set -euo pipefail
+          missing=0
+          for svc in db nakama test; do
+            limit="$(docker compose -f ./docker-compose-tests.yml config --format json \
+              | jq -r --arg s "$svc" '.services[$s].mem_limit // "null"')"
+            if [ "$limit" = "null" ] || [ "$limit" = "0" ]; then
+              echo "::error::service '$svc' declares no mem_limit in docker-compose-tests.yml"
+              missing=1
+            else
+              echo "$svc: mem_limit=$limit"
+            fi
+          done
+          exit "$missing"
+
       - name: Run tests
         run: docker compose -f ./docker-compose-tests.yml up --build --abort-on-container-exit
+
+      # Two jobs, both about not trusting silence.
+      #
+      # 1. An OOM kill surfaces as a bare exit 137 and reads as a mystery. Name
+      #    it, so an over-budget test is attributed instead of investigated.
+      # 2. Assert the limit was actually APPLIED. A memory key that the runtime
+      #    ignores yields a limit that does nothing plus a false sense of
+      #    coverage, and it fails the same way it succeeds — silently. The
+      #    authority is HostConfig.Memory on the container that just ran, not
+      #    the key in the file.
+      - name: Report container memory outcome
+        if: always()
+        run: |
+          set -uo pipefail
+          failed=0
+          for id in $(docker compose -f ./docker-compose-tests.yml ps -aq); do
+            read -r name limit oom code <<< "$(docker inspect \
+              -f '{{.Name}} {{.HostConfig.Memory}} {{.State.OOMKilled}} {{.State.ExitCode}}' "$id")"
+            echo "${name#/}: limit=${limit} oom_killed=${oom} exit=${code}"
+            if [ "$limit" = "0" ]; then
+              echo "::error::${name#/} ran with NO memory limit applied — the compose key was not honoured"
+              failed=1
+            fi
+            if [ "$oom" = "true" ] || [ "$code" = "137" ]; then
+              echo "::error::${name#/} was killed for exceeding its ${limit}-byte memory limit (exit ${code}). This is a memory budget failure, not an infrastructure flake."
+              failed=1
+            fi
+          done
+          # This step fails on an OOM in its own right rather than leaning on the
+          # run step above. `docker compose up --abort-on-container-exit` does
+          # propagate 137 today (verified), but that is version-dependent
+          # behaviour, and a guard that only reports while something else does
+          # the failing is one release away from being decoration.
+          exit "$failed"
 
       - name: Cleanup
         if: always()

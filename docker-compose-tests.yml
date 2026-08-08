@@ -1,8 +1,15 @@
+# Memory limits: see the `test` service below for the measurement they come
+# from and why they are stated as a pair (mem_limit + memswap_limit).
 services:
   db:
     container_name: db
     image: postgres:16.8-alpine
     command: -c 'max_connections=1000'
+    # An unbounded Postgres is the other route to exhausting the runner. This is
+    # generous for a test database — the suite's working set is small — and is
+    # here so a runaway query cannot take the runner down anonymously.
+    mem_limit: 2g
+    memswap_limit: 2g
     environment:
       - POSTGRES_DB=nakama
       - POSTGRES_PASSWORD=localdb
@@ -20,6 +27,9 @@ services:
       context: .
       dockerfile: ./build/Dockerfile
     image: nakama-tests
+    # The server under test: one Go process against a small dataset.
+    mem_limit: 2g
+    memswap_limit: 2g
     entrypoint:
       - "/bin/sh"
       - "-ecx"
@@ -42,6 +52,43 @@ services:
   test:
       image: "golang:1.25"
       command: /bin/sh -c "mkdir -p /nakama/internal/gopher-lua/_lua5.1-tests/libs/P1; go test -vet=off -v -race ./..."
+
+      # ---- Memory budget ----------------------------------------------------
+      #
+      # WHY: a test fixture with an unbounded producer goroutine reached 11.6 GB
+      # RSS and was still climbing after seven minutes. It OOM'd a developer
+      # machine twice, and because the kernel's machine-wide OOM killer picks by
+      # badness heuristic it killed unrelated processes while the runaway test
+      # kept going. The point of this cap is not hygiene, it is ATTRIBUTION: the
+      # test container is the only thing eligible to die, and it dies naming
+      # itself. Had that fixture been pushed, this job would otherwise have died
+      # as an opaque runner failure.
+      #
+      # THE VALUE: measured, not guessed. The full suite as this service runs it
+      # (`-race -v`, cold cache, `-p 4` to match the runner's 4 cores) peaks at
+      # 1.04 GiB aggregate across all parallel test binaries — read from cgroup
+      # v2 `memory.peak`, which is the sum actually resident, not
+      # `/usr/bin/time -v`'s max-of-any-single-child. 4g is ~4x that, and is the
+      # same number as GO_TEST_MEMORY_LIMIT in the justfile, so there is one
+      # budget to reason about rather than two.
+      #
+      # Caveat on the measurement, stated because it bounds what the number
+      # proves: DB-backed tests skipped in that run, and the `server` package's
+      # full-runtime tests cannot execute at all right now (they abort the test
+      # binary on a missing DISCORD_BOT_TOKEN). 1.04 GiB is therefore a floor.
+      # It is still four times below this cap, and the runaway it exists to
+      # catch was three times ABOVE the cap.
+      #
+      # HEADROOM: ubuntu-latest for public repositories is 4 cores / 16 GB. The
+      # three services here total 8 GB, leaving 8 GB for the runner agent and
+      # page cache.
+      #
+      # memswap_limit IS LOAD-BEARING and must equal mem_limit. Docker's default
+      # is to allow swap up to 2x mem_limit; with swap available the container
+      # thrashes for minutes before anything dies, which is the slow version of
+      # the failure this cap exists to make fast. Equal values mean no swap.
+      mem_limit: 4g
+      memswap_limit: 4g
 
       working_dir: "/nakama"
       environment:
