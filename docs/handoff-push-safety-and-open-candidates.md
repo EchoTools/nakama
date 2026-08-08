@@ -7,6 +7,19 @@ this file is the operational state.
 
 Last updated 2026-08-07.
 
+> **A second session followed this one.** See
+> [`handoff-2026-08-08-detection-and-ci-coverage.md`](handoff-2026-08-08-detection-and-ci-coverage.md)
+> for current state.
+>
+> Still current here, and worth reading in full: the section immediately below,
+> and the CANDIDATE list C1–C4.
+>
+> **Stale here:** "Retained state" — `wt535` is gone (the host cleaned that
+> session's scratchpad, which this file anticipated as acceptable; nothing was
+> lost, `rebase/535` is on the remote). And the pre-push hook's arming gap named
+> below now has a fix in flight — issue #557, PR #555 — though the *residual*
+> gap it describes is permanent and correctly stated.
+
 ## Do not read "gates built" as "main is protected"
 
 There are two mechanisms guarding `main`. **Neither is prevention that arms
