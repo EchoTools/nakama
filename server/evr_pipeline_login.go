@@ -616,7 +616,53 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	}
 
 	firstIDs, _ := loginHistory.AlternateIDs()
-	if detector := GetCGNATDetector(); detector != nil {
+	detector := GetCGNATDetector()
+
+	// #516 item 1: refuse the login outright when this machine is the same
+	// machine as a currently-disabled account's, instead of admitting the
+	// session and kicking it minutes later.
+	//
+	// Deliberately evaluated before filterStrongAlts narrows firstIDs, so the
+	// two filters cannot mask one another; machineMatchedAlts applies its own,
+	// stricter test.
+	//
+	// Off unless the operator turns it on -- see
+	// RejectDisabledAlternatesOnMachineMatch for the trade. ignoreDisabledAlternates
+	// is honoured here exactly as the delayed-kick path honours it, so an account
+	// cleared by a moderator stays cleared.
+	if ServiceSettings().RejectDisabledAlternatesOnMachineMatch && !params.ignoreDisabledAlternates {
+		if machineIDs := machineMatchedAlts(loginHistory, firstIDs, detector); len(machineIDs) > 0 {
+			disabled, err := disabledAccountIDs(ctx, p.nk, machineIDs)
+			if err != nil {
+				// Fail open, and say so. This gate is an addition to the
+				// existing delayed kick, not a replacement for it: a lookup
+				// failure must not lock out a legitimate player, and the
+				// delayed path still runs behind it.
+				logger.Warn("Failed to check machine-matched alternates for disabled accounts", zap.Error(err))
+			} else if len(disabled) > 0 {
+				p.nk.MetricsCounterAdd("login_rejected_machine_matched_disabled_alt", nil, 1)
+
+				logger.Info("Rejected login: machine fingerprint matches a disabled account.",
+					zap.String("xpid", params.xpID.Token()),
+					zap.String("client_ip", session.clientIP),
+					zap.String("uid", params.profile.ID()),
+					zap.Strings("disabled_alt_uids", disabled))
+
+				metricsTags["error"] = "machine_matched_disabled_alt"
+
+				// The same error a disabled account itself gets. Telling an
+				// evader which signal caught them is the cost this whole
+				// setting trades against; the audit log above carries the
+				// detail for moderators.
+				return AccountDisabledError{
+					message:   "Account Disabled",
+					reportURL: ServiceSettings().ReportURL,
+				}
+			}
+		}
+	}
+
+	if detector != nil {
 		firstIDs = filterStrongAlts(loginHistory, firstIDs, detector)
 	}
 	params.enforcementUserIDs = append(firstIDs, params.profile.ID())
