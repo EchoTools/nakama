@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -112,6 +113,20 @@ func (r *IPQSData) IsVPN() bool {
 		return false
 	}
 	return r.Response.VPN
+}
+
+// IsDataCenter reports IPQS's connection_type, which is reported independently
+// of its vpn flag.
+//
+// Matched case-insensitively and without assuming spacing: IPQS documents the
+// value as "Data Center", but a classifier that silently answers "no" because a
+// provider changed a space is worse than one that is slightly loose here.
+func (r *IPQSData) IsDataCenter() bool {
+	if r.IsSharedIP() {
+		return false
+	}
+	normalized := strings.ToLower(strings.ReplaceAll(r.Response.ConnectionType, " ", ""))
+	return normalized == "datacenter"
 }
 
 func (r *IPQSData) IsSharedIP() bool {

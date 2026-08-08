@@ -65,6 +65,19 @@ func (r *ipapiData) IsVPN() bool {
 	return r.Response.Proxy
 }
 
+// IsDataCenter reports ip-api's `hosting` flag, which is a separate field from
+// `proxy` and is already requested in this client's field mask.
+//
+// IsSharedIP short-circuits it for the same reason IsVPN does: a known shared
+// provider is a false positive for both questions, and the shared-provider list
+// exists precisely to stop those from being treated as evidence.
+func (r *ipapiData) IsDataCenter() bool {
+	if r.IsSharedIP() {
+		return false
+	}
+	return r.Response.Hosting
+}
+
 func (r *ipapiData) IsSharedIP() bool {
 	return isKnownSharedIPProvider(r.Response.ISP, r.Response.Organization)
 }

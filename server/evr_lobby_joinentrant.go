@@ -520,6 +520,16 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 					Inline: true,
 				},
 				{
+					// Informational, and deliberately separate from the VPN
+					// determination that produced this embed: a datacenter
+					// address is a different fact from a proxy address, and a
+					// moderator reading this should be able to tell which one
+					// they are looking at.
+					Name:   "Data Center",
+					Value:  fmt.Sprintf("%t", params.ipInfo.IsDataCenter()),
+					Inline: true,
+				},
+				{
 					Name:   "City",
 					Value:  params.ipInfo.City(),
 					Inline: true,
