@@ -1,5 +1,12 @@
 # Handoff: detection, CI coverage, and the end of the push-safety campaign
 
+> **A later session continued this work.** See
+> [`handoff-2026-08-08-enforcement-and-coverage-floor.md`](handoff-2026-08-08-enforcement-and-coverage-floor.md).
+> Everything below is still accurate for what it covers, **except the open-issue
+> table** — #553, #554 and #557 have all moved since, and the "one thing to read"
+> section's claim that the `server` package does not execute in CI was fixed by
+> #561.
+
 Written for the next seat, 2026-08-08. Covers **both** sessions of this campaign:
 the 2026-08-07 concurrency/push-safety work and the 2026-08-08 detection/CI work
 that followed it.
