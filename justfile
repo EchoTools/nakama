@@ -116,6 +116,18 @@ test:
     GOFLAGS="${GOFLAGS:-} {{ TEST_LIMIT_FLAG }}" GO_TEST_MEMORY_LIMIT="{{ GO_TEST_MEMORY_LIMIT }}" \
         go test {{ TEST_PKGS }} -count=1
 
+# Run the DB-free suite and refuse a green result that covered almost nothing.
+#
+# Same suite as `test`, plus a coverage floor per package and a visible count of
+# what skipped. This is what CI runs, because `ok` is not by itself a claim
+# about how much executed -- the `server` package once reported in 0.07s
+# instead of ~130s (#553), and a package that SKIPS its way to empty reports
+# success just as loudly. See scripts/test-audit.sh for why the floor is a test
+# count and not a duration.
+test-audit:
+    GOFLAGS="${GOFLAGS:-} {{ TEST_LIMIT_FLAG }}" GO_TEST_MEMORY_LIMIT="{{ GO_TEST_MEMORY_LIMIT }}" \
+        TEST_PKGS="{{ TEST_PKGS }}" ./scripts/test-audit.sh
+
 # Run the DB-free suite with verbose output.
 test-verbose:
     GOFLAGS="${GOFLAGS:-} {{ TEST_LIMIT_FLAG }}" GO_TEST_MEMORY_LIMIT="{{ GO_TEST_MEMORY_LIMIT }}" \
