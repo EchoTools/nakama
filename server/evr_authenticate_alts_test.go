@@ -3,6 +3,7 @@ package server
 import (
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -291,6 +292,201 @@ func TestFilterStrongAlts(t *testing.T) {
 			slices.Sort(tt.want)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("filterStrongAlts() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// #516 — the machine fingerprint must be a DISCOVERY key, not only a
+// comparison key.
+// ---------------------------------------------------------------------------
+
+// profileString joins system-profile components exactly the way
+// LoginHistoryEntry.SystemProfile does. Building the expected strings from
+// their parts rather than typing them out is deliberate: the separator is "::"
+// and several components are empty, so a hand-written literal turns into a run
+// of colons that is trivial to miscount — and a test asserting the wrong string
+// fails for a reason that has nothing to do with the behaviour under test.
+func profileString(components ...string) string {
+	if len(components) != systemProfileComponents {
+		panic("profileString: wrong component count")
+	}
+	return strings.Join(components, "::")
+}
+
+// richSystemInfo is a desktop profile with real hardware strings: the kind of
+// fingerprint that identifies one machine rather than a class of them.
+func richSystemInfo() evr.SystemInfo {
+	return evr.SystemInfo{
+		HeadsetType:        "Valve Index",
+		NetworkType:        "Wired",
+		VideoCard:          "NVIDIA GeForce RTX 4080",
+		CPUModel:           "AMD Ryzen 9 7950X 16-Core Processor",
+		NumPhysicalCores:   16,
+		NumLogicalCores:    32,
+		MemoryTotal:        68719476736,
+		DedicatedGPUMemory: 17179869184,
+	}
+}
+
+// TestAltSearchPatterns_IncludesSystemProfile is the direct regression test for
+// #516: the fingerprint has to appear among the keys the index is queried with.
+func TestAltSearchPatterns_IncludesSystemProfile(t *testing.T) {
+	entry := &LoginHistoryEntry{
+		XPID:     evr.EvrId{PlatformCode: evr.OVR, AccountId: 27670},
+		ClientIP: "45.33.90.154",
+		LoginData: &evr.LoginProfile{
+			HMDSerialNumber: "WMHD3157200FJE",
+			SystemInfo:      richSystemInfo(),
+		},
+	}
+	h := &LoginHistory{
+		userID:  "user-a",
+		History: map[string]*LoginHistoryEntry{entry.Key(): entry},
+	}
+
+	patterns := h.AltSearchPatterns()
+	want := entry.SystemProfile()
+	if !slices.Contains(patterns, want) {
+		t.Errorf("AltSearchPatterns() omits the system profile %q; got %v", want, patterns)
+	}
+}
+
+// TestAltSearchPatterns_RotatedIdentifiersStillDiscoverable is the defect as
+// reported. Two accounts share nothing but the machine: different IP, different
+// HMD serial, different XPID — every key a cheater can rotate by hand.
+//
+// Discoverability is asserted the way the index actually decides it. The query
+// in LoginAlternatePatternSearch is `+value.cache:<patterns>` against the
+// indexed `cache` field, so the other account is returned iff one of this
+// account's search patterns appears in that account's rebuilt cache. Anything
+// the query does not return is never passed to loginHistoryCompare, so it can
+// never form an edge no matter what loginHistoryCompare would have concluded.
+func TestAltSearchPatterns_RotatedIdentifiersStillDiscoverable(t *testing.T) {
+	sysinfo := richSystemInfo()
+
+	bannedEntry := &LoginHistoryEntry{
+		XPID:      evr.EvrId{PlatformCode: evr.OVR, AccountId: 11111},
+		ClientIP:  "45.33.90.154",
+		UpdatedAt: time.Now(),
+		LoginData: &evr.LoginProfile{
+			HMDSerialNumber: "SERIAL-OLD",
+			SystemInfo:      sysinfo,
+		},
+	}
+	banned := &LoginHistory{
+		userID:  "banned-user",
+		History: map[string]*LoginHistoryEntry{bannedEntry.Key(): bannedEntry},
+	}
+	banned.rebuildCache()
+
+	// The burner: same machine, every hand-rotatable identifier changed.
+	burnerEntry := &LoginHistoryEntry{
+		XPID:      evr.EvrId{PlatformCode: evr.OVR, AccountId: 22222},
+		ClientIP:  "198.51.100.7",
+		UpdatedAt: time.Now(),
+		LoginData: &evr.LoginProfile{
+			HMDSerialNumber: "SERIAL-NEW",
+			SystemInfo:      sysinfo,
+		},
+	}
+	burner := &LoginHistory{
+		userID:  "burner-user",
+		History: map[string]*LoginHistoryEntry{burnerEntry.Key(): burnerEntry},
+	}
+
+	// Guard the premise: if the two accounts shared a rotatable key, this test
+	// would pass for the wrong reason.
+	for _, shared := range []string{bannedEntry.ClientIP, bannedEntry.LoginData.HMDSerialNumber, bannedEntry.XPID.Token()} {
+		if slices.Contains(burner.AltSearchPatterns(), shared) {
+			t.Fatalf("premise broken: the two accounts share rotatable key %q", shared)
+		}
+	}
+
+	var hits []string
+	for _, p := range burner.AltSearchPatterns() {
+		if slices.Contains(banned.Cache, p) {
+			hits = append(hits, p)
+		}
+	}
+	if len(hits) == 0 {
+		t.Fatalf("burner account is not discoverable from the banned account's index entry; "+
+			"search patterns %v matched nothing in cache %v", burner.AltSearchPatterns(), banned.Cache)
+	}
+
+	// And once discovered, an edge actually forms.
+	if matches := loginHistoryCompare(burner, banned); len(matches) == 0 {
+		t.Error("loginHistoryCompare formed no edge between accounts sharing a machine")
+	}
+}
+
+// TestAltSearchPatterns_ExcludesDegenerateSystemProfile guards the hazard the
+// fix introduces if left unguarded. Every account that logs in with no
+// SystemInfo produces the byte-identical profile string, so making the profile
+// a discovery key without this filter would make every profile-less account a
+// candidate alt of every other one.
+func TestAltSearchPatterns_ExcludesDegenerateSystemProfile(t *testing.T) {
+	newHistory := func(userID string, accountID uint64, ip string) *LoginHistory {
+		e := &LoginHistoryEntry{
+			XPID:      evr.EvrId{PlatformCode: evr.OVR, AccountId: accountID},
+			ClientIP:  ip,
+			UpdatedAt: time.Now(),
+			LoginData: &evr.LoginProfile{HMDSerialNumber: "SERIAL-" + userID},
+		}
+		h := &LoginHistory{userID: userID, History: map[string]*LoginHistoryEntry{e.Key(): e}}
+		h.rebuildCache()
+		return h
+	}
+
+	a := newHistory("user-a", 1, "45.33.90.154")
+	b := newHistory("user-b", 2, "198.51.100.7")
+
+	// Both produce the same empty profile — that is the point.
+	degenerate := profileString("Unknown", "", "", "", "0", "0", "0", "0")
+	for name, h := range map[string]*LoginHistory{"a": a, "b": b} {
+		for _, e := range h.History {
+			if got := e.SystemProfile(); got != degenerate {
+				t.Fatalf("premise broken: account %s profile is %q, expected the degenerate %q", name, got, degenerate)
+			}
+		}
+		if slices.Contains(h.AltSearchPatterns(), degenerate) {
+			t.Errorf("account %s searches on the degenerate profile %q", name, degenerate)
+		}
+		if slices.Contains(h.Cache, degenerate) {
+			t.Errorf("account %s indexes the degenerate profile %q", name, degenerate)
+		}
+	}
+
+	// Nothing links them: they share no machine and no rotatable key.
+	for _, p := range a.AltSearchPatterns() {
+		if slices.Contains(b.Cache, p) {
+			t.Errorf("unrelated accounts linked by %q", p)
+		}
+	}
+}
+
+func TestIsDegenerateSystemProfile(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern string
+		want    bool
+	}{
+		{"no SystemInfo at all", profileString("Unknown", "", "", "", "0", "0", "0", "0"), true},
+		{"placeholder headset, numbers only", profileString("Unknown", "", "", "", "16", "32", "68719476736", "17179869184"), true},
+		{"empty headset, numbers only", profileString("", "", "", "", "16", "32", "68719476736", "17179869184"), true},
+		{"real desktop profile", profileString("Valve Index", "Wired", "NVIDIA GeForce RTX 4080", "AMD Ryzen 9 7950X 16-Core Processor", "16", "32", "68719476736", "17179869184"), false},
+		{"headset only", profileString("Meta Quest 3", "", "", "", "0", "0", "0", "0"), false},
+		{"network type only", profileString("Unknown", "Wireless", "", "", "0", "0", "0", "0"), false},
+		{"not a system profile — HMD serial", "WMHD3157200FJE", false},
+		{"not a system profile — IP", "45.33.90.154", false},
+		{"not a system profile — empty", "", false},
+		{"wrong component count", "a::b::c", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isDegenerateSystemProfile(tt.pattern); got != tt.want {
+				t.Errorf("isDegenerateSystemProfile(%q) = %v, want %v", tt.pattern, got, tt.want)
 			}
 		})
 	}

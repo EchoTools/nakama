@@ -14,13 +14,32 @@ type AlternateSearchMatch struct {
 	Items       []string `json:"items"`
 }
 
+// AltSearchPatterns returns the keys used to DISCOVER candidate alternate
+// accounts in the login-cache index.
+//
+// These must stay in step with the keys rebuildCache writes into the indexed
+// `cache` field (LoginHistoryEntry.Items) and with the keys loginHistoryCompare
+// forms edges on. A key that is written and compared but never searched is
+// inert: the comparison only ever runs against candidates this query already
+// returned, so an account whose ONLY overlap with a banned account is that key
+// is never surfaced, never compared, and produces zero edges.
+//
+// SystemProfile was in exactly that state — captured in Items, indexed, and
+// compared, but absent here. A cheater rotating IP, HMD serial and XPID (all
+// trivially changed) kept the same machine and linked to nothing. That is #516.
 func (h *LoginHistory) AltSearchPatterns() []string {
-	items := make([]string, 0, len(h.History)*3+len(h.XPIs))
+	items := make([]string, 0, len(h.History)*4+len(h.XPIs))
 	for _, e := range h.History {
 		for _, s := range [...]string{
 			e.ClientIP,
 			e.LoginData.HMDSerialNumber,
 			e.XPID.Token(),
+			// The machine fingerprint. Rotating an account does not rotate the
+			// hardware. Commodity profiles (Quest headsets, and any profile with
+			// no hardware identity at all) are dropped by matchIgnoredAltPattern
+			// below, so this adds a discovery key only where it is a fingerprint
+			// rather than a bucket.
+			e.SystemProfile(),
 		} {
 			items = append(items, s)
 		}

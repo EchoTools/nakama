@@ -69,7 +69,47 @@ func matchIgnoredAltPattern(pattern string) bool {
 			return true
 		}
 	}
+	// Filter system profiles that carry no hardware identity.
+	if isDegenerateSystemProfile(pattern) {
+		return true
+	}
 	return false
+}
+
+// systemProfileComponents is the number of "::"-joined fields produced by
+// LoginHistoryEntry.SystemProfile. A string with any other count is not a
+// system profile and is left alone.
+const systemProfileComponents = 8
+
+// isDegenerateSystemProfile reports whether a system-profile string is present
+// but carries no hardware identity — every one of its four descriptive fields
+// (headset type, network type, video card, CPU model) is empty or the
+// normalizer's "Unknown" placeholder.
+//
+// This matters because such a profile is not rare, it is SHARED. Every account
+// that logs in without SystemInfo produces the byte-identical string
+// "Unknown::::::0::0::0::0". Left unfiltered it is not a fingerprint, it is a
+// bucket that every profile-less account falls into at once, and any code that
+// treats profile equality as evidence of shared hardware would link them all.
+//
+// The remaining four fields are numeric (core counts, memory sizes). They are
+// deliberately not enough to rescue a profile on their own: "8 cores, 32 GB"
+// describes a large share of the player base, so a profile identified only by
+// its numbers is still a bucket rather than a fingerprint.
+func isDegenerateSystemProfile(pattern string) bool {
+	parts := strings.Split(pattern, "::")
+	if len(parts) != systemProfileComponents {
+		return false
+	}
+	// parts[0:4] are headset type, network type, video card, CPU model.
+	for _, p := range parts[:4] {
+		// "Unknown" is what normalizeHeadsetType substitutes for an empty
+		// headset type, so it is an absent value wearing a name.
+		if p != "" && p != "Unknown" {
+			return false
+		}
+	}
+	return true
 }
 
 type LoginHistoryEntry struct {
