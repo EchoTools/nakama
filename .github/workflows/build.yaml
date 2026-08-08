@@ -92,10 +92,17 @@ jobs:
       # unformatted at this commit, so the check would fail on arrival. Adding it
       # needs its own mechanical reformat PR.
       - name: Vet
-        run: go vet ./server/...
+        # Same scope as the test suite. These drifted apart when the test scope
+        # widened to the whole repo: vet stayed on ./server/... and silently
+        # stopped covering everything the tests had started covering.
+        run: go vet $(go list ./... | grep -v '/internal/gopher-lua')
 
       # No CockroachDB service and no DISCORD_BOT_TOKEN: the DB-backed tests
       # skip themselves when no database is reachable. `just test-db` is the
       # recipe that requires one.
+      #
+      # test-audit rather than test: same suite, plus a per-package floor on how
+      # many tests actually passed, and a printed count of what skipped. `ok` on
+      # its own is not a claim about coverage -- see scripts/test-audit.sh.
       - name: Run tests
-        run: just test
+        run: just test-audit
