@@ -24,8 +24,12 @@ This applies regardless of context — even if the task seems to require deploym
 ## Build
 
 - Go project: `just nakama` builds the binary locally
-- Tests: `just test` (DB-free suite; no CockroachDB or Discord bot token needed) or `go test ./server/...`
+- Tests: `just test` (DB-free suite; no CockroachDB or Discord bot token needed)
 - Full suite including DB-backed tests: `just test-db` (requires a reachable database at `TEST_DB_URL`)
+- Test scope is every package except the vendored `internal/gopher-lua` — see
+  `TEST_PKGS` in the `justfile` for what that exclusion costs and why. Prefer the
+  recipes over a hand-written `go test ./server/...`, which silently skips
+  `internal/`
 - Docker image build (local only, no push): `just build` — FORBIDDEN without explicit approval, see above
 
 ## Tests — per-test-binary memory cap

@@ -13,7 +13,7 @@ Key requirements for any agent (including heisthecat31 or any AI assistant):
 gofmt -l -w    # format
 go vet ./...   # static analysis
 golangci-lint run  # comprehensive lint
-go test -race ./server/...  # tests with race detector
+just test      # tests -- repo-wide scope, see TEST_PKGS in the justfile
 go fix ./...   # apply modernizers
 go mod tidy    # clean dependencies
 govulncheck    # vulnerability check

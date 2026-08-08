@@ -73,18 +73,53 @@ bench-compare:
 bench-check: bench-compare
     @echo "Benchmark regression check passed"
 
+# ---------------------------------------------------------------------------
+# Test scope.
+#
+# These recipes used to run `./server/...`, which meant `internal/` was covered
+# by NO routine gate. That is not a theoretical hole: `TestIntent_MarshalText`
+# sat red on main and nobody got a red signal, because nothing anyone runs
+# executed the package (#554).
+#
+# The scope is now discovered rather than enumerated, so a package added under
+# internal/ tomorrow is gated tomorrow, without anyone remembering to add it.
+#
+# internal/gopher-lua is the one exclusion, and it is vendored third-party code
+# rather than ours. Including it would cost more than it is worth, measured:
+#
+#   1. `go test` runs a subset of vet, and gopher-lua has 19 non-constant-format
+#      -string findings, so the package does not even BUILD under test. Covering
+#      it means `-vet=off`, which would disable printf/atomic/bool/... checks on
+#      OUR code in order to accommodate vendored code. That is turning a
+#      fail-closed control off to keep a green light on.
+#   2. Its Lua 5.1 conformance suite needs a fixture directory
+#      (_lua5.1-tests/libs/) that git cannot track because it is empty on
+#      checkout, so the suite is red on a fresh clone until someone mkdirs it.
+#
+# docker-compose-tests.yml already carries both workarounds (`-vet=off` and a
+# volume for that directory), so gopher-lua is covered there and only there.
+# Excluded here, deliberately and visibly -- not silently dropped.
+#
+# The trailing fallback is load-bearing. If `go list` fails or the filter ever
+# matches everything, the substitution is empty -- and `go test -count=1` with
+# no package arguments does not error, it tests the current directory, which is
+# a package with no test files. That is a green run over nothing: the exact
+# failure mode this scope change exists to remove. Substituting a path that
+# cannot exist turns that silence into a hard, self-naming failure.
+TEST_PKGS := "$(go list ./... | grep -v '/internal/gopher-lua' | grep . || echo ./TEST_PKGS_MATCHED_NO_PACKAGES)"
+
 # Needs no CockroachDB and no Discord bot token: tests that require a database
 # skip themselves when none is reachable.
 
-# Run the DB-free server test suite
+# Run the DB-free test suite
 test:
     GOFLAGS="${GOFLAGS:-} {{ TEST_LIMIT_FLAG }}" GO_TEST_MEMORY_LIMIT="{{ GO_TEST_MEMORY_LIMIT }}" \
-        go test ./server/... -count=1
+        go test {{ TEST_PKGS }} -count=1
 
 # Run the DB-free suite with verbose output.
 test-verbose:
     GOFLAGS="${GOFLAGS:-} {{ TEST_LIMIT_FLAG }}" GO_TEST_MEMORY_LIMIT="{{ GO_TEST_MEMORY_LIMIT }}" \
-        go test -v ./server/... -count=1
+        go test -v {{ TEST_PKGS }} -count=1
 
 # Requires a reachable CockroachDB/Postgres at TEST_DB_URL. TEST_DB_REQUIRED
 # makes an unreachable database a hard failure instead of a silent skip, so this
@@ -94,7 +129,7 @@ test-verbose:
 test-db:
     TEST_DB_URL="{{ TEST_DB_URL }}" TEST_DB_REQUIRED=1 \
         GOFLAGS="${GOFLAGS:-} {{ TEST_LIMIT_FLAG }}" GO_TEST_MEMORY_LIMIT="{{ GO_TEST_MEMORY_LIMIT }}" \
-        go test ./server/... -count=1
+        go test {{ TEST_PKGS }} -count=1
 
 # Formatting.
 # Scope is repo-wide: every *tracked* Go file except generated sources.
