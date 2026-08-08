@@ -114,17 +114,73 @@ test-db:
 # opinionated.
 FMT_FILES := "git ls-files '*.go' | xargs grep -LE 'Code generated .* DO NOT EDIT'"
 
-# Point git at the repo's tracked hooks (.githooks). One-time, per clone.
+# ---------------------------------------------------------------------------
+# Hook arming.
 #
-# core.hooksPath is local config and cannot be committed, so a tracked hooks
-# directory does not activate itself -- this recipe is the activation step. Run
-# it once per clone; linked worktrees inherit it from the parent repo.
+# `.githooks/pre-push` ships with the repo but does NOT activate itself.
+# core.hooksPath is local config and cannot be committed, so until something
+# sets it, git never looks at .githooks and every push is unguarded -- with no
+# warning, because a hook that is not wired up is indistinguishable from one
+# that approved. A fresh clone, a newly created worktree, and an agent starting
+# cold are all unarmed by default, which is exactly the population the
+# destination guard exists for.
 #
-# Installs the pre-push guard that refuses a push resolving to main. See
-# .githooks/pre-push for why that guard exists and how to override it.
+# just evaluates variables before running any recipe, so this arms the clone on
+# the first `just <anything that runs>` -- `just test`, `just nakama`,
+# `just fmt`. The unguarded window shrinks from "until someone reads AGENTS.md
+# and runs a git config command" to "until someone runs one just recipe", and
+# running a recipe is the first thing anyone working here does.
+#
+# IT DOES NOT CLOSE THE WINDOW, AND NOTHING CAN. Git deliberately refuses to let
+# a repository activate its own hooks: a clone that armed itself would be
+# arbitrary code execution on `git clone`. That is a security boundary, not an
+# oversight, so "the hook arms itself" is not achievable at any level of effort
+# -- only "the hook is armed earlier, by something the user already runs".
+# Whoever clones and pushes without ever running a recipe is still unguarded.
+# The self-arming backstop for that case is
+# .github/workflows/main-push-audit.yaml, which is server-side and cannot be
+# skipped -- but detects after the push has landed rather than preventing it.
+#
+# `just --list` alone does NOT arm: just evaluates variables lazily and --list
+# does not trigger them (verified, just 1.57). That is acceptable -- --list does
+# not push anything.
+#
+# Backticks run with the working directory set to the justfile's directory
+# regardless of where just was invoked from, and regardless of -f (verified,
+# just 1.57), so this cannot arm the wrong repository.
+#
+# Opt out with NAKAMA_NO_AUTO_HOOKS=1. Every failure path here is non-fatal: a
+# missing git, or a directory that is not a repository, must never break
+# `just test`.
+_HOOKS_ARMED := ```
+    if [ -n "${NAKAMA_NO_AUTO_HOOKS:-}" ]; then
+        echo opted-out
+    elif [ ! -x .githooks/pre-push ]; then
+        # Nothing to point at, or it is not executable. Git skips a
+        # non-executable hook SILENTLY, so arming toward one would install the
+        # appearance of a guard without the guard. See exec-bit-check.
+        echo unavailable
+    elif [ "$(git config --get core.hooksPath 2>/dev/null || true)" = ".githooks" ]; then
+        echo armed
+    elif git config core.hooksPath .githooks 2>/dev/null; then
+        # Announced once, on the run that changes it, and silent forever after.
+        echo "git hooks armed: core.hooksPath -> .githooks (pre-push guards now active)" >&2
+        echo armed
+    else
+        echo unavailable
+    fi
+```
+
+# Point git at the repo's tracked hooks (.githooks) and report the result.
+#
+# Recipes arm the clone on their own (see _HOOKS_ARMED above). This recipe
+# remains the explicit form: it is what to run after NAKAMA_NO_AUTO_HOOKS, what
+# to point someone at, and what answers "is this clone guarded?" without having
+# to infer it from silence.
 hooks:
     @git config core.hooksPath .githooks
     @echo "core.hooksPath -> $(git config --get core.hooksPath)"
+    @echo "auto-arm status: {{ _HOOKS_ARMED }}"
 
 # Format all non-generated Go sources in place (prints the files it rewrote)
 fmt:
