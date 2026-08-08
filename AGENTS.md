@@ -29,12 +29,23 @@ The repo ships a pre-push hook in `.githooks/pre-push` that checks:
 4. `gopls` diagnostics on changed files
 5. `go mod tidy` hasn't drifted
 
-Install: `just hooks` (or `git config core.hooksPath .githooks`)
+Install: automatic — running any `just` recipe arms the clone. Explicitly:
+`just hooks` (or `git config core.hooksPath .githooks`).
 
 **The hook is off until installed, and that failure mode is silent** —
-`core.hooksPath` is local config and cannot be committed, so a fresh clone or a
-newly created worktree is unguarded with no warning. Check with
-`git config --get core.hooksPath`. `git push --no-verify` also skips it entirely.
+`core.hooksPath` is local config and cannot be committed, so nothing in the
+repository can activate it on its own. Git refuses that deliberately: a clone
+that armed its own hooks would be arbitrary code execution on `git clone`.
+
+So the auto-arm shrinks the window rather than closing it. **If you clone and
+push without running a single `just` recipe, you are unguarded.** `just --list`
+does not count — just evaluates variables lazily and `--list` does not trigger
+them. Check with `git config --get core.hooksPath`; it must print `.githooks`.
+`git push --no-verify` also skips the hook entirely.
+
+The backstop for everything the hook cannot cover is
+`.github/workflows/main-push-audit.yaml`, which is server-side and arms itself —
+but detects after the push has landed rather than preventing it.
 
 Check 0 exists because a worktree branch created from `origin/main` *tracks*
 `origin/main`, and with `push.default=tracking` git resolves the destination

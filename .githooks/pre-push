@@ -6,20 +6,27 @@
 # 2. Go quality: run fast checks on changed files
 #    (gofmt, go vet, gopls staticcheck)
 #
-# Install: git config core.hooksPath .githooks
+# Install: automatic on the first `just <recipe>`; or `just hooks`; or
+#          git config core.hooksPath .githooks
 # Skip:    git push --no-verify
 #
 # THIS HOOK IS OFF UNTIL ARMED, AND ITS FAILURE MODE IS SILENCE.
 #
 # core.hooksPath is local config and cannot be committed, so this file shipping
-# with the repo does not activate it. Until someone runs `just hooks` (or the
-# git config line above) in a given clone, git never looks here and pushes are
-# unguarded -- with no warning, since a hook that is not wired up is
-# indistinguishable from one that approved.
+# with the repo does not activate it. Until something sets that config in a
+# given clone, git never looks here and pushes are unguarded -- with no warning,
+# since a hook that is not wired up is indistinguishable from one that approved.
 #
-# That gap is not a rounding error: a fresh clone, a newly created worktree, and
-# an agent starting cold are all unarmed by default, and those are exactly the
-# situations phase 0 was built for.
+# The justfile now arms the clone whenever any recipe runs (see _HOOKS_ARMED
+# there), so in practice `just test` or `just nakama` is enough. That shrinks
+# the window; it does not close it. Git will not let a repository activate its
+# own hooks -- a clone that armed itself would be arbitrary code execution on
+# `git clone` -- so a clone that pushes without ever running a recipe is still
+# unguarded, permanently and by design.
+#
+# That residual gap is not a rounding error: a fresh clone, a newly created
+# worktree, and an agent starting cold are all unarmed until they run something,
+# and those are exactly the situations phase 0 was built for.
 #
 # Check whether it is armed:
 #
