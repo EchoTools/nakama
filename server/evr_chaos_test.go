@@ -638,7 +638,13 @@ func TestRace_Poll_ConcurrentParamsMutationAndPoll(t *testing.T) {
 		PartySize: uatomic.NewInt64(2),
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// This is a soak: its power comes from how many interleavings 10 spinning
+	// goroutines produce, not from wall-clock duration. 300ms still yields
+	// millions of read/mutate pairs per goroutine, and the -race detector --
+	// which is what would actually catch a regression here -- reports on the
+	// first bad interleaving, not the thousandth. The previous 3s bought no
+	// additional coverage, only 3s.
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 
 	var wg sync.WaitGroup

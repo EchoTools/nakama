@@ -30,9 +30,16 @@ import (
 // stubDB returns a non-nil *sql.DB that will fail gracefully (with an error,
 // not a panic) when queries are attempted. Used to satisfy addTicket's
 // LoadArchetypeStats call without requiring a live database.
+//
+// The target must fail *fast*. This previously pointed at an unresolvable
+// hostname, and every query spent the resolver's full search-and-retry budget
+// before failing: the three TestAddTicket_* tests cost 22.7s between them, all
+// of it in DNS. A closed port on the loopback interface refuses immediately,
+// needs no name resolution, and reaches the same error path -- the same three
+// tests now finish in 0.016s.
 func stubDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("pgx", "host=invalid-test-host-for-unit-tests user=nobody dbname=nobody")
+	db, err := sql.Open("pgx", "host=127.0.0.1 port=1 user=nobody dbname=nobody connect_timeout=1")
 	if err != nil {
 		t.Fatalf("sql.Open: %v", err)
 	}
@@ -49,9 +56,11 @@ func makeMatchmakeTestLobbyParams(userID, groupID uuid.UUID, mode evr.Symbol, pa
 		Mode:                 mode,
 		PartySize:            uatomic.NewInt64(partySize),
 		MatchmakingTimestamp: time.Now(),
-		MatchmakingTimeout:   5 * time.Second,
-		latencyHistory:       new(uatomic.Pointer[LatencyHistory]),
-		unreachableServers:   new(uatomic.Pointer[UnreachableServers]),
+		// These tests drive lobbyMatchMakeWithFallback to its timeout, so this
+		// value is the test's wall-clock cost. Scaled -- see testClockSpeedup.
+		MatchmakingTimeout: scaledDuration(5 * time.Second),
+		latencyHistory:     new(uatomic.Pointer[LatencyHistory]),
+		unreachableServers: new(uatomic.Pointer[UnreachableServers]),
 	}
 }
 
@@ -139,9 +148,11 @@ func TestAddTicket_NonLeaderPartyMember_ReturnsError(t *testing.T) {
 	lobbyParams := makeMatchmakeTestLobbyParams(followerUID, groupID, evr.ModeArenaPublic, 1)
 
 	p := &EvrPipeline{
-		node:   "testnode",
-		config: cfg,
-		db:     stubDB(t),
+		partyFormationTimeout:      scaledDuration(partyFormationTimeoutDefault),
+		partyFormationPollInterval: scaledDuration(partyFormationPollIntervalDefault),
+		node:                       "testnode",
+		config:                     cfg,
+		db:                         stubDB(t),
 		nk: &RuntimeGoNakamaModule{
 			tracker:       tracker,
 			streamManager: testStreamManager{},
@@ -180,9 +191,11 @@ func TestAddTicket_SoloPlayer_NoNonLeaderError(t *testing.T) {
 	lobbyParams := makeMatchmakeTestLobbyParams(soloUID, groupID, evr.ModeArenaPublic, 1)
 
 	p := &EvrPipeline{
-		node:   "testnode",
-		config: cfg,
-		db:     stubDB(t),
+		partyFormationTimeout:      scaledDuration(partyFormationTimeoutDefault),
+		partyFormationPollInterval: scaledDuration(partyFormationPollIntervalDefault),
+		node:                       "testnode",
+		config:                     cfg,
+		db:                         stubDB(t),
 		nk: &RuntimeGoNakamaModule{
 			tracker:       tracker,
 			streamManager: testStreamManager{},
@@ -227,9 +240,11 @@ func TestAddTicket_LeaderCanSubmitTicket(t *testing.T) {
 	lobbyParams := makeMatchmakeTestLobbyParams(leaderUID, groupID, evr.ModeArenaPublic, 2)
 
 	p := &EvrPipeline{
-		node:   "testnode",
-		config: cfg,
-		db:     stubDB(t),
+		partyFormationTimeout:      scaledDuration(partyFormationTimeoutDefault),
+		partyFormationPollInterval: scaledDuration(partyFormationPollIntervalDefault),
+		node:                       "testnode",
+		config:                     cfg,
+		db:                         stubDB(t),
 		nk: &RuntimeGoNakamaModule{
 			tracker:       tracker,
 			streamManager: testStreamManager{},

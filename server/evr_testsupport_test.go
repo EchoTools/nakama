@@ -11,6 +11,50 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
+// testClockSpeedup compresses the virtual clock that the party-follow and
+// ticket-formation tests run on.
+//
+// Why this exists: those tests assert the *ordering* of events around a poll
+// loop -- "the leader vanishes before the next tick", "the formation window
+// closes before all members arrive". None of that logic reads a clock; it only
+// needs one interval to be shorter than another. Left at production values a
+// single 3s poll interval costs 3 real seconds per tick, and 29 such tests
+// accounted for 158s of a 165s package run while the other 1,487 tests
+// finished in 7.3s combined.
+//
+// Every duration in those tests is scaled by this one factor, so all
+// relationships between them are preserved exactly and only the wall-clock
+// cost changes. Scale durations with scaledDuration; do not mix scaled and
+// unscaled values in the same test.
+//
+// 50 is chosen to leave a wide margin over goroutine scheduling jitter (~1ms
+// on a loaded runner): the shortest scaled interval still used here is 150ms/50
+// = 3ms, and the intervals it must stay ordered against are 20ms and 60ms.
+const testClockSpeedup = 50
+
+// scaledDuration converts a production-scale duration into the compressed
+// virtual clock described on testClockSpeedup.
+func scaledDuration(d time.Duration) time.Duration {
+	return d / testClockSpeedup
+}
+
+// newFollowPollPipeline builds an EvrPipeline whose follow-poll timing runs on
+// the compressed virtual clock (see testClockSpeedup).
+//
+// The values are the production defaults divided by testClockSpeedup, so the
+// poll behaves exactly as it would with pollFollowIntervalDefault and
+// pollFollowMaxDurationDefault -- same number of ticks, same ordering against
+// any scaledDuration wait a test schedules -- at 1/50th the wall-clock cost.
+//
+// A test needing different timing overrides the fields directly, as
+// evr_lobby_poll_patience_test.go does.
+func newFollowPollPipeline() *EvrPipeline {
+	return &EvrPipeline{
+		pollFollowInterval:    scaledDuration(pollFollowIntervalDefault),
+		pollFollowMaxDuration: scaledDuration(pollFollowMaxDurationDefault),
+	}
+}
+
 // requireCharacterizationFixture skips the test when a developer-local
 // characterization fixture is missing.
 //

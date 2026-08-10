@@ -134,6 +134,33 @@ var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakingTicketParameters{
 	},
 }
 
+const (
+	// partyFormationTimeoutDefault is how long a party waits for all of its
+	// members to start matchmaking before submitting the first ticket with
+	// whoever is ready.
+	partyFormationTimeoutDefault = 15 * time.Second
+	// partyFormationPollIntervalDefault is how often the formation phase
+	// re-checks which members have arrived on the matchmaking stream.
+	partyFormationPollIntervalDefault = 1 * time.Second
+)
+
+// partyFormationTiming returns the formation window and its poll interval.
+//
+// Zero fields on the pipeline mean "use the defaults"; they exist so tests can
+// compress the window instead of spending it in real time. Same arrangement as
+// pollFollowInterval / pollFollowMaxDuration.
+func (p *EvrPipeline) partyFormationTiming() (timeout, pollInterval time.Duration) {
+	timeout = p.partyFormationTimeout
+	if timeout <= 0 {
+		timeout = partyFormationTimeoutDefault
+	}
+	pollInterval = p.partyFormationPollInterval
+	if pollInterval <= 0 {
+		pollInterval = partyFormationPollIntervalDefault
+	}
+	return timeout, pollInterval
+}
+
 func (p *EvrPipeline) matchmakingTicketTimeout() time.Duration {
 	maxIntervals := p.config.GetMatchmaker().MaxIntervals
 	intervalSecs := p.config.GetMatchmaker().IntervalSec
@@ -205,13 +232,13 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	// members to start matchmaking before submitting the first ticket.
 	// Solo players or single-member parties skip this phase entirely.
 	if lobbyGroup != nil && lobbyGroup.Size() > 1 {
-		const formationTimeout = 15 * time.Second
+		formationTimeout, formationPollInterval := p.partyFormationTiming()
 		formationTimer := time.NewTimer(formationTimeout)
 		defer formationTimer.Stop()
 
 		// Poll ticker for checking party readiness. Using a ticker (instead of
 		// time.After per iteration) avoids leaking a timer channel on every loop tick.
-		pollTicker := time.NewTicker(1 * time.Second)
+		pollTicker := time.NewTicker(formationPollInterval)
 		defer pollTicker.Stop()
 
 		// Wait for all party members to be on the matchmaking stream,

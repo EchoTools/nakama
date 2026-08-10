@@ -66,7 +66,7 @@ func newFollowTestEnv(t *testing.T) *followTestEnv {
 
 	params := &LobbySessionParameters{GroupID: groupID}
 
-	pipeline := &EvrPipeline{}
+	pipeline := newFollowPollPipeline()
 
 	session := &sessionWS{}
 	session.id = followerSID
@@ -298,7 +298,7 @@ func TestTryFollowPartyLeader_LeaderMatchmaking_ReturnsFalse(t *testing.T) {
 	}
 
 	// Create a minimal pipeline with our mock tracker.
-	pipeline := &EvrPipeline{}
+	pipeline := newFollowPollPipeline()
 
 	// Create a minimal sessionWS.
 	session := &sessionWS{}
@@ -362,7 +362,7 @@ func TestTryFollowPartyLeader_LeaderNotMatchmaking_ProceedsNormally(t *testing.T
 		GroupID: uuid.Must(uuid.NewV4()),
 	}
 
-	pipeline := &EvrPipeline{}
+	pipeline := newFollowPollPipeline()
 	session := &sessionWS{}
 	session.id = followerSID
 	session.userID = followerUID
@@ -560,16 +560,16 @@ func TestPoll_LeaderDisappears_ReturnsFalse(t *testing.T) {
 	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	env.setLeaderMatch(matchB)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(15*time.Second))
 	defer cancel()
 
 	// After 1 second, leader disappears.
 	go func() {
-		time.Sleep(1 * time.Second)
+		time.Sleep(scaledDuration(1 * time.Second))
 		env.clearLeader()
 	}()
 
-	result, timedOut := env.runPollWithTimeout(ctx, t, 10*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(10*time.Second))
 	if timedOut {
 		t.Fatal("pollFollowPartyLeader hung after leader disappeared")
 	}
@@ -587,16 +587,16 @@ func TestPoll_FollowerBecomesLeader_ReturnsFalse(t *testing.T) {
 	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	env.setLeaderMatch(matchB)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(15*time.Second))
 	defer cancel()
 
 	// After 1 second, follower becomes the leader.
 	go func() {
-		time.Sleep(1 * time.Second)
+		time.Sleep(scaledDuration(1 * time.Second))
 		env.setLeader(env.followerSID, env.followerUID, "follower-now-leader")
 	}()
 
-	result, timedOut := env.runPollWithTimeout(ctx, t, 10*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(10*time.Second))
 	if timedOut {
 		t.Fatal("pollFollowPartyLeader hung after leadership transfer")
 	}
@@ -615,10 +615,10 @@ func TestPoll_LeaderStillMatchmaking_KeepsPolling(t *testing.T) {
 	env.setLeaderMatch(matchB)
 	env.setLeaderMatchmaking()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(5*time.Second))
 	defer cancel()
 
-	_, timedOut := env.runPollWithTimeout(ctx, t, 4*time.Second)
+	_, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(4*time.Second))
 	if !timedOut {
 		t.Error("Expected poll to keep waiting while leader is matchmaking, but it returned early")
 	}
@@ -633,18 +633,18 @@ func TestPoll_LeaderStillMatchmaking_ThenSettles_FollowerInMatch_ReturnsTrue(t *
 	env.setLeaderMatch(matchB)
 	env.setLeaderMatchmaking()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(15*time.Second))
 	defer cancel()
 
 	// After 1 second, leader finishes matchmaking and enters Match B.
 	// Follower is also placed in Match B.
 	go func() {
-		time.Sleep(1 * time.Second)
+		time.Sleep(scaledDuration(1 * time.Second))
 		env.removeLeaderMatchmaking()
 		env.setFollowerMatch(matchB)
 	}()
 
-	result, timedOut := env.runPollWithTimeout(ctx, t, 12*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(12*time.Second))
 	if timedOut {
 		t.Fatal("pollFollowPartyLeader timed out waiting for leader to settle")
 	}
@@ -674,16 +674,16 @@ func TestPoll_LeaderLeftMatch_ReturnsFalse(t *testing.T) {
 	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	env.setLeaderMatch(matchB)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(15*time.Second))
 	defer cancel()
 
 	// After 1 second, leader leaves their match.
 	go func() {
-		time.Sleep(1 * time.Second)
+		time.Sleep(scaledDuration(1 * time.Second))
 		env.removeLeaderMatch()
 	}()
 
-	result, timedOut := env.runPollWithTimeout(ctx, t, 10*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(10*time.Second))
 	if timedOut {
 		t.Fatal("pollFollowPartyLeader hung after leader left match")
 	}
@@ -703,10 +703,10 @@ func TestPoll_LeaderNilMatchID_KeepsPolling(t *testing.T) {
 		env.leaderUID,
 		PresenceMeta{Status: ""}) // Will produce NilMatchID
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(5*time.Second))
 	defer cancel()
 
-	_, timedOut := env.runPollWithTimeout(ctx, t, 4*time.Second)
+	_, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(4*time.Second))
 	if !timedOut {
 		t.Error("Expected poll to keep waiting when leader has nil match ID, but it returned early")
 	}
@@ -721,17 +721,17 @@ func TestPoll_LeaderSwitchesMatches_FollowerInNewMatch_ReturnsTrue(t *testing.T)
 	matchC := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	env.setLeaderMatch(matchB)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(20*time.Second))
 	defer cancel()
 
 	// After the first poll interval, switch leader to Match C and place follower there.
 	go func() {
-		time.Sleep(2 * time.Second)
+		time.Sleep(scaledDuration(2 * time.Second))
 		env.setLeaderMatch(matchC)
 		env.setFollowerMatch(matchC)
 	}()
 
-	result, timedOut := env.runPollWithTimeout(ctx, t, 15*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(15*time.Second))
 	if timedOut {
 		t.Fatal("pollFollowPartyLeader timed out")
 	}
@@ -768,7 +768,7 @@ func TestPoll_FollowerNotInLeaderMatch_LooksUpLabel(t *testing.T) {
 	})
 	env.withMockNK(registry)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(15*time.Second))
 	defer cancel()
 
 	// Run the poll in a goroutine with panic recovery so that a nil-metrics panic
@@ -809,13 +809,13 @@ func TestPoll_LeaderChangesPartway_NewLeaderInMatch_ReturnsTrue(t *testing.T) {
 
 	env.setLeaderMatchmaking()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(15*time.Second))
 	defer cancel()
 
 	// After 1 second, new leader takes over and is in Match B.
 	// Follower is also in Match B.
 	go func() {
-		time.Sleep(1 * time.Second)
+		time.Sleep(scaledDuration(1 * time.Second))
 		env.setLeader(newLeaderSID, newLeaderUID, "new-leader")
 		env.tracker.Track(context.Background(), newLeaderSID,
 			PresenceStream{Mode: StreamModeService, Subject: newLeaderSID, Label: StreamLabelMatchService},
@@ -824,7 +824,7 @@ func TestPoll_LeaderChangesPartway_NewLeaderInMatch_ReturnsTrue(t *testing.T) {
 		env.setFollowerMatch(matchB)
 	}()
 
-	result, timedOut := env.runPollWithTimeout(ctx, t, 12*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(12*time.Second))
 	if timedOut {
 		t.Fatal("pollFollowPartyLeader timed out after leader change")
 	}
@@ -842,10 +842,10 @@ func TestPoll_ContextTimeout_ReturnsFalse(t *testing.T) {
 	env.setLeaderMatchmaking()
 	env.setLeaderMatch(MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(2*time.Second))
 	defer cancel()
 
-	result, timedOut := env.runPollWithTimeout(ctx, t, 5*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(5*time.Second))
 	if timedOut {
 		t.Fatal("poll should have returned when context expired, not timed out at test level")
 	}
@@ -865,7 +865,7 @@ func TestPoll_ConcurrentLeaderAndFollowerUpdates(t *testing.T) {
 	env.setLeaderMatchmaking()
 	env.setLeaderMatch(matchB)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(10*time.Second))
 	defer cancel()
 
 	// Rapidly toggle leader state from multiple goroutines.
@@ -875,9 +875,9 @@ func TestPoll_ConcurrentLeaderAndFollowerUpdates(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 5; i++ {
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(scaledDuration(200 * time.Millisecond))
 			env.removeLeaderMatchmaking()
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(scaledDuration(200 * time.Millisecond))
 			env.setLeaderMatchmaking()
 		}
 		// Finally settle: leader in match, follower in same match.
@@ -888,7 +888,7 @@ func TestPoll_ConcurrentLeaderAndFollowerUpdates(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 5; i++ {
-			time.Sleep(150 * time.Millisecond)
+			time.Sleep(scaledDuration(150 * time.Millisecond))
 			newMatch := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 			env.setLeaderMatch(newMatch)
 		}
@@ -896,7 +896,7 @@ func TestPoll_ConcurrentLeaderAndFollowerUpdates(t *testing.T) {
 		env.setLeaderMatch(matchB)
 	}()
 
-	result, timedOut := env.runPollWithTimeout(ctx, t, 8*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(8*time.Second))
 	wg.Wait()
 
 	if timedOut {
@@ -959,7 +959,7 @@ func TestPollFollowPartyLeader_SameMatch_ReturnsTrue(t *testing.T) {
 		GroupID: groupID,
 	}
 
-	pipeline := &EvrPipeline{}
+	pipeline := newFollowPollPipeline()
 	session := &sessionWS{}
 	session.id = followerSID
 	session.userID = followerUID
@@ -968,7 +968,7 @@ func TestPollFollowPartyLeader_SameMatch_ReturnsTrue(t *testing.T) {
 
 	// Use a short timeout to detect the infinite loop bug. Without the fix,
 	// the function would loop forever and hit the timeout.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(10*time.Second))
 	defer cancel()
 
 	done := make(chan bool, 1)
@@ -1072,7 +1072,7 @@ func TestDuoDesync_MonitorCancelsFollowerContext_DuringPoll(t *testing.T) {
 		GroupID: groupID,
 	}
 
-	pipeline := &EvrPipeline{}
+	pipeline := newFollowPollPipeline()
 	session := &sessionWS{}
 	session.id = followerSID
 	session.userID = followerUID
@@ -1080,7 +1080,7 @@ func TestDuoDesync_MonitorCancelsFollowerContext_DuringPoll(t *testing.T) {
 	session.pipeline.tracker = tracker
 
 	// Create a cancellable context that simulates what lobbyFind creates.
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(15*time.Second))
 	defer cancel()
 
 	// Start the matchmaking monitor (just like lobbyFind does).
@@ -1109,7 +1109,7 @@ func TestDuoDesync_MonitorCancelsFollowerContext_DuringPoll(t *testing.T) {
 	// This is what happens inside LobbyJoinEntrants:
 	//   1. Update service streams to point to the new match
 	//   2. UntrackLocalByModes removes StreamModeMatchmaking presences
-	time.Sleep(1 * time.Second)
+	time.Sleep(scaledDuration(1 * time.Second))
 
 	// Leader enters Match B (matchmaker places leader first).
 	tracker.Track(context.Background(), leaderSID,
@@ -1204,14 +1204,14 @@ func TestDuoDesync_FollowerRetryLoop_ContextAlwaysCanceled(t *testing.T) {
 		lobbyGroup := &LobbyGroup{ph: ph}
 		params := &LobbySessionParameters{GroupID: groupID}
 
-		pipeline := &EvrPipeline{}
+		pipeline := newFollowPollPipeline()
 		session := &sessionWS{}
 		session.id = followerSID
 		session.userID = followerUID
 		session.pipeline = &Pipeline{node: "testnode"}
 		session.pipeline.tracker = tracker
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(10*time.Second))
 
 		// Start the matchmaking monitor.
 		mmSession := &MatchmakingSession{
@@ -1237,7 +1237,7 @@ func TestDuoDesync_FollowerRetryLoop_ContextAlwaysCanceled(t *testing.T) {
 		// (In reality, this happens when LobbyJoinEntrants runs for the follower
 		// or when the matchmaker processes the result.)
 		go func() {
-			time.Sleep(800 * time.Millisecond)
+			time.Sleep(scaledDuration(800 * time.Millisecond))
 			// Update follower's service stream to Match B (matchmaker placed them).
 			tracker.Track(context.Background(), followerSID,
 				PresenceStream{Mode: StreamModeService, Subject: followerSID, Label: StreamLabelMatchService},
@@ -1326,7 +1326,7 @@ func TestDuoDesync_TryFollow_LeaderStillMatchmaking_FallsToDesyncPoll(t *testing
 	lobbyGroup := &LobbyGroup{ph: ph}
 	params := &LobbySessionParameters{GroupID: groupID}
 
-	pipeline := &EvrPipeline{}
+	pipeline := newFollowPollPipeline()
 	session := &sessionWS{}
 	session.id = followerSID
 	session.userID = followerUID
@@ -1361,7 +1361,7 @@ func TestDuoDesync_TryFollow_LeaderStillMatchmaking_FallsToDesyncPoll(t *testing
 
 	// Simulate matchmaker placing both after 1 second.
 	go func() {
-		time.Sleep(1 * time.Second)
+		time.Sleep(scaledDuration(1 * time.Second))
 		// Leader enters Match B.
 		tracker.Track(context.Background(), leaderSID,
 			PresenceStream{Mode: StreamModeService, Subject: leaderSID, Label: StreamLabelMatchService},
@@ -1424,10 +1424,10 @@ func TestPoll_StaleMatchFalsePositive_ReturnsFalse(t *testing.T) {
 	env.params.CurrentMatchID = matchA
 
 	// Context expires after 2 seconds (simulates 10-minute matchmaking timeout).
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(2*time.Second))
 	defer cancel()
 
-	result, timedOut := env.runPollWithTimeout(ctx, t, 5*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(5*time.Second))
 	if timedOut {
 		t.Fatal("pollFollowPartyLeader hung — should have returned when context expired")
 	}
@@ -1453,18 +1453,18 @@ func TestPoll_StaleMatchFalsePositive_ContextCancelWithNewMatch_ReturnsTrue(t *t
 	env.setLeaderMatchmaking()
 	env.params.CurrentMatchID = matchA
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(15*time.Second))
 	defer cancel()
 
 	// After 1 second, matchmaker places both into matchB.
 	go func() {
-		time.Sleep(1 * time.Second)
+		time.Sleep(scaledDuration(1 * time.Second))
 		env.removeLeaderMatchmaking()
 		env.setLeaderMatch(matchB)
 		env.setFollowerMatch(matchB)
 	}()
 
-	result, timedOut := env.runPollWithTimeout(ctx, t, 12*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(12*time.Second))
 	if timedOut {
 		t.Fatal("pollFollowPartyLeader timed out waiting for new match detection")
 	}
@@ -1524,7 +1524,7 @@ func TestDuoDesync_PollFollow_ContextCanceledBeforeSettleCheck(t *testing.T) {
 	lobbyGroup := &LobbyGroup{ph: ph}
 	params := &LobbySessionParameters{GroupID: groupID}
 
-	pipeline := &EvrPipeline{}
+	pipeline := newFollowPollPipeline()
 	session := &sessionWS{}
 	session.id = followerSID
 	session.userID = followerUID
@@ -1551,7 +1551,7 @@ func TestDuoDesync_PollFollow_ContextCanceledBeforeSettleCheck(t *testing.T) {
 	//   T=4: select picks ctx.Done() → returns false
 	//   (never reaches the memberMatchID == leaderMatchID check)
 	go func() {
-		time.Sleep(4 * time.Second) // After first wait, during settle wait
+		time.Sleep(scaledDuration(4 * time.Second)) // After first wait, during settle wait
 		cancel()
 	}()
 
@@ -1739,11 +1739,11 @@ func TestPoll_LeaderInClosedArenaMatch_ShouldNotLoopForever(t *testing.T) {
 
 	// One poll cycle is ~6s (3s poll + 3s settle). After 1 cycle of seeing
 	// a non-joinable non-social match, pollFollowPartyLeader should give up.
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(15*time.Second))
 	defer cancel()
 
 	start := time.Now()
-	result, timedOut := env.runPollWithTimeout(ctx, t, 30*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(30*time.Second))
 	elapsed := time.Since(start)
 
 	if timedOut {
@@ -1756,7 +1756,7 @@ func TestPoll_LeaderInClosedArenaMatch_ShouldNotLoopForever(t *testing.T) {
 		t.Error("Expected false (follower cannot join leader's closed match)")
 	}
 
-	if elapsed > 22*time.Second {
+	if elapsed > scaledDuration(22*time.Second) {
 		t.Errorf("pollFollowPartyLeader took %v — should return within ~18s (three poll cycles).", elapsed)
 	}
 }
@@ -1786,11 +1786,11 @@ func TestPoll_LeaderInFullCombatMatch_ShouldNotLoopForever(t *testing.T) {
 	})
 	env.withMockNK(registry)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(35*time.Second))
 	defer cancel()
 
 	start := time.Now()
-	result, timedOut := env.runPollWithTimeout(ctx, t, 30*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(30*time.Second))
 	elapsed := time.Since(start)
 
 	if timedOut {
@@ -1803,7 +1803,7 @@ func TestPoll_LeaderInFullCombatMatch_ShouldNotLoopForever(t *testing.T) {
 		t.Error("Expected false (follower cannot join leader's full match)")
 	}
 
-	if elapsed > 22*time.Second {
+	if elapsed > scaledDuration(22*time.Second) {
 		t.Errorf("pollFollowPartyLeader took %v — should return within ~18s (three poll cycles).", elapsed)
 	}
 }
@@ -1865,7 +1865,7 @@ func TestKC1_PollFollowPartyLeader_RefusesPrivateSocialLobby(t *testing.T) {
 	env.setLeaderMatch(privateMatchID)
 
 	// Poll loop has two 3s waits per cycle (tick + settle): give 10s for one cycle.
-	result, timedOut := env.runPollWithTimeout(context.Background(), t, 10*time.Second)
+	result, timedOut := env.runPollWithTimeout(context.Background(), t, scaledDuration(10*time.Second))
 
 	if timedOut {
 		t.Fatal("KC-1: pollFollowPartyLeader hung — should return false within one poll cycle (~6s)")
@@ -1896,10 +1896,10 @@ func TestPoll_RegistryError_FallsBackToTracker(t *testing.T) {
 	env.setLeaderMatch(matchB)
 	env.setFollowerMatch(matchB)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(10*time.Second))
 	defer cancel()
 
-	result, timedOut := env.runPollWithTimeout(ctx, t, 8*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(8*time.Second))
 	if timedOut {
 		t.Fatal("pollFollowPartyLeader timed out — expected tracker fallback to return true immediately")
 	}
@@ -2035,11 +2035,11 @@ func TestPoll_LeaderInArenaMatch_ReturnsFalseImmediately(t *testing.T) {
 	socialMatchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	env.setFollowerMatch(socialMatchID)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(15*time.Second))
 	defer cancel()
 
 	start := time.Now()
-	result, timedOut := env.runPollWithTimeout(ctx, t, 12*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(12*time.Second))
 	elapsed := time.Since(start)
 
 	if timedOut {
@@ -2049,7 +2049,7 @@ func TestPoll_LeaderInArenaMatch_ReturnsFalseImmediately(t *testing.T) {
 		t.Error("pollFollowPartyLeader should return false when leader is in ModeArenaPublic")
 	}
 	// Should exit within one poll cycle (3s poll + 3s settle = ~6s), not the full timeout.
-	if elapsed > 10*time.Second {
+	if elapsed > scaledDuration(10*time.Second) {
 		t.Errorf("pollFollowPartyLeader took %v — should exit promptly for arena leader", elapsed)
 	}
 }
@@ -2074,11 +2074,11 @@ func TestPoll_LeaderInCombatMatch_ReturnsFalseImmediately(t *testing.T) {
 	env.withMockNK(registry)
 	env.setLeaderMatch(combatMatchID)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(15*time.Second))
 	defer cancel()
 
 	start := time.Now()
-	result, timedOut := env.runPollWithTimeout(ctx, t, 12*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(12*time.Second))
 	elapsed := time.Since(start)
 
 	if timedOut {
@@ -2087,7 +2087,7 @@ func TestPoll_LeaderInCombatMatch_ReturnsFalseImmediately(t *testing.T) {
 	if result {
 		t.Error("pollFollowPartyLeader should return false when leader is in ModeCombatPublic")
 	}
-	if elapsed > 10*time.Second {
+	if elapsed > scaledDuration(10*time.Second) {
 		t.Errorf("pollFollowPartyLeader took %v — should exit promptly for combat leader", elapsed)
 	}
 }
@@ -2109,11 +2109,11 @@ func TestPoll_NilNK_FollowerNotInLeaderMatch_LoopsUntilContextExpiry(t *testing.
 	env.setFollowerMatch(matchA)
 
 	// Short context timeout — if the function fast-fails, it returns before expiry.
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(3*time.Second))
 	defer cancel()
 
 	start := time.Now()
-	result, timedOut := env.runPollWithTimeout(ctx, t, 6*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(6*time.Second))
 	elapsed := time.Since(start)
 
 	if timedOut {
@@ -2122,11 +2122,14 @@ func TestPoll_NilNK_FollowerNotInLeaderMatch_LoopsUntilContextExpiry(t *testing.
 	if result {
 		t.Error("pollFollowPartyLeader returned true when follower and leader are in different matches")
 	}
-	// If the function fast-failed (nil NK guard returned false immediately),
-	// elapsed would be < 100ms. It should have polled until ctx expired.
-	if elapsed < 1*time.Second {
-		t.Errorf("pollFollowPartyLeader returned in %v — expected it to loop until context expiry (~3s). "+
-			"This suggests a fast-fail path was triggered instead of polling.", elapsed)
+	// If the function fast-failed (nil NK guard returned false immediately) it
+	// would return almost instantly. It should instead have polled until ctx
+	// expired, so require it to have spent at least a third of the budget.
+	// Scaled with everything else in this file -- see testClockSpeedup.
+	if elapsed < scaledDuration(1*time.Second) {
+		t.Errorf("pollFollowPartyLeader returned in %v — expected it to loop until context expiry (~%v). "+
+			"This suggests a fast-fail path was triggered instead of polling.",
+			elapsed, scaledDuration(3*time.Second))
 	}
 }
 
@@ -2633,10 +2636,10 @@ func TestPollFollowerInSocialLobby_NoRejoin(t *testing.T) {
 
 	env.params.CurrentMatchID = socialLobby
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(5*time.Second))
 	defer cancel()
 
-	result, timedOut := env.runPollWithTimeout(ctx, t, 5*time.Second)
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(5*time.Second))
 	if timedOut {
 		t.Fatal("pollFollowPartyLeader timed out -- closure failed to detect social lobby convergence")
 	}
@@ -2667,10 +2670,10 @@ func TestPollFollowerInArenaLobby_BothLeaving_FallsThrough(t *testing.T) {
 
 	env.params.CurrentMatchID = arenaLobby
 
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(4*time.Second))
 	defer cancel()
 
-	result, _ := env.runPollWithTimeout(ctx, t, 10*time.Second)
+	result, _ := env.runPollWithTimeout(ctx, t, scaledDuration(10*time.Second))
 	if result {
 		t.Fatal("pollFollowPartyLeader returned true when both players are " +
 			"in a dying arena lobby -- should not treat as convergence")
