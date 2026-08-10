@@ -834,6 +834,10 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		teamAlignments[memberUserID] = teamAlignment
 	}
 
+	// Hold slots for online party members against backfill (RESV-1). The creator
+	// joins directly via the normal join race, so only followers need a reservation.
+	reservations := getOnlinePartyReservations(ctx, d.nk, logger, userID, partyUserIDs, teamAlignment)
+
 	settings := &MatchSettings{
 		Mode:                mode,
 		Level:               level,
@@ -841,6 +845,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		StartTime:           startTime.UTC().Add(1 * time.Minute),
 		SpawnedBy:           userID,
 		TeamAlignments:      teamAlignments,
+		Reservations:        reservations,
 		ReservationLifetime: 45 * time.Second,
 	}
 
