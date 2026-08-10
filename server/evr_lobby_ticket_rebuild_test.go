@@ -524,9 +524,11 @@ func TestTicketRebuild_MatchMakeWithFallbackIntegration(t *testing.T) {
 	lobbyParams := makeMatchmakeTestLobbyParams(leaderUID, groupID, evr.ModeArenaPublic, 1)
 
 	p := &EvrPipeline{
-		node:   partyTestNode,
-		config: cfg,
-		db:     stubDB(t),
+		partyFormationTimeout:      scaledDuration(partyFormationTimeoutDefault),
+		partyFormationPollInterval: scaledDuration(partyFormationPollIntervalDefault),
+		node:                       partyTestNode,
+		config:                     cfg,
+		db:                         stubDB(t),
 		nk: &RuntimeGoNakamaModule{
 			tracker:       tracker,
 			streamManager: testStreamManager{},

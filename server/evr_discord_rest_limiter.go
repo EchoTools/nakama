@@ -34,6 +34,19 @@ var ErrDiscordRESTOverloaded = fmt.Errorf("discord REST API overloaded, try agai
 type discordRESTLimiter struct {
 	inner http.RoundTripper
 	sem   *semaphore.Weighted
+
+	// acquireTimeout overrides discordRESTAcquireTimeout. Zero means use the
+	// constant. It exists so a test can prove the timeout path without
+	// spending the production timeout in real time.
+	acquireTimeout time.Duration
+}
+
+// timeout returns the semaphore acquisition timeout for this limiter.
+func (l *discordRESTLimiter) timeout() time.Duration {
+	if l.acquireTimeout > 0 {
+		return l.acquireTimeout
+	}
+	return discordRESTAcquireTimeout
 }
 
 // newDiscordRESTLimiter wraps the given transport (or http.DefaultTransport if
@@ -58,7 +71,7 @@ func (l *discordRESTLimiter) RoundTrip(req *http.Request) (*http.Response, error
 	// Create a timeout context for semaphore acquisition. This is separate
 	// from the request context so we don't cancel the actual HTTP request
 	// if the semaphore times out.
-	acquireCtx, cancel := context.WithTimeout(ctx, discordRESTAcquireTimeout)
+	acquireCtx, cancel := context.WithTimeout(ctx, l.timeout())
 	defer cancel()
 
 	if err := l.sem.Acquire(acquireCtx, 1); err != nil {

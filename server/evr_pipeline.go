@@ -65,6 +65,12 @@ type EvrPipeline struct {
 	pollFollowInterval    time.Duration
 	pollFollowMaxDuration time.Duration
 
+	// Party formation timing. Zero means use the package defaults
+	// (partyFormationTimeoutDefault / partyFormationPollIntervalDefault).
+	// Overridable in tests to avoid multi-second real waits.
+	partyFormationTimeout      time.Duration
+	partyFormationPollInterval time.Duration
+
 	sessionRegistry SessionRegistry
 	runtime         *Runtime
 	nk              *RuntimeGoNakamaModule

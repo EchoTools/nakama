@@ -114,6 +114,10 @@ func TestConcurrencyLimiterExhaustion(t *testing.T) {
 	defer deferFn()
 
 	limiter := newDiscordRESTLimiter(blockedTransport)
+	// The assertion is that acquisition *times out*; the length of that timeout
+	// is not what is under test. At the production 5s this test spent 5.05s
+	// waiting to observe a value it already knew.
+	limiter.acquireTimeout = scaledDuration(discordRESTAcquireTimeout)
 
 	errs := make(chan error, maxConcurrentDiscordREST+1)
 
