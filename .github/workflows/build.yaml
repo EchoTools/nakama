@@ -95,7 +95,18 @@ jobs:
         # Same scope as the test suite. These drifted apart when the test scope
         # widened to the whole repo: vet stayed on ./server/... and silently
         # stopped covering everything the tests had started covering.
-        run: go vet $(go list ./... | grep -v '/internal/gopher-lua')
+        # The `grep . ||` tail is load-bearing, and is the same guard the
+        # justfile and scripts/test-audit.sh already carry. Without it, a
+        # failing or empty `go list` leaves the substitution empty, `go vet`
+        # runs bare on the repo root package alone, and the step passes having
+        # vetted almost nothing -- set -e does not propagate a failure from a
+        # command substitution used as an argument.
+        run: |
+          PKGS=$(go list ./... | grep -v '/internal/gopher-lua' | grep . || {
+            echo "vet: go list matched no packages" >&2
+            exit 1
+          })
+          go vet $PKGS
 
       # No CockroachDB service and no DISCORD_BOT_TOKEN: the DB-backed tests
       # skip themselves when no database is reachable. `just test-db` is the

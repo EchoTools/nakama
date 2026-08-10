@@ -650,8 +650,11 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 				metricsTags["error"] = "machine_matched_disabled_alt"
 
-				// The same error a disabled account itself gets. The audit log
-				// above carries the detail for moderators.
+				// The same error a disabled account itself gets. The detail is
+				// in the server log above -- note that this is a zap entry in
+				// nakama.log, NOT an AuditLogSend to a guild's Discord audit
+				// channel, so a moderator investigating a rejection will not
+				// find it there.
 				return AccountDisabledError{
 					message:   "Account Disabled",
 					reportURL: ServiceSettings().ReportURL,

@@ -35,7 +35,7 @@ reading commit history, `#546` alone will mislead you.
 
 Phases, in order:
 
-| | check |
+| phase | check |
 |---|---|
 | 0 | **Destination** — refuses a push that *resolves* to `main` (added #546, re-integrated #549) |
 | 1 | Tag format — `v*` tags must carry `-evr.<N>` (inherited) |

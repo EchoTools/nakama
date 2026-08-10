@@ -33,19 +33,27 @@ fi
 
 repo="${GITHUB_REPOSITORY:-EchoTools/nakama}"
 violations=0
+# Commits the API could not be asked about. Counted so the success line cannot
+# claim coverage it does not have: an API outage during a direct push would
+# otherwise skip the one violating SHA and report the opposite of the truth.
+skipped=0
 
 for sha in "$@"; do
 	# A commit that arrived through a PR -- the merge commit itself, and every
 	# commit the PR carried -- is associated with that PR. A commit pushed
 	# straight to main is associated with none.
 	#
-	# On API failure this prints nothing and count stays empty; treat that as
-	# UNKNOWN and do not fail the build on it. A flaky API call must not read as
-	# a policy violation, or the check trains people to ignore it.
+	# On API failure this prints nothing and count stays empty. That is UNKNOWN,
+	# not innocent: it is counted below and reported as INCONCLUSIVE rather than
+	# being folded into the success line. A flaky API call still must not read as
+	# a policy VIOLATION -- that would train people to ignore the check -- but it
+	# must not read as a pass either, because the one commit an outage hides is
+	# exactly the one a direct pusher would want hidden.
 	count="$(gh api "repos/${repo}/commits/${sha}/pulls" --jq 'length' 2>/dev/null)"
 
 	if [ -z "$count" ]; then
 		echo "  ?  ${sha}  could not query associated PRs (API error) -- not counted" >&2
+		skipped=$((skipped + 1))
 		continue
 	fi
 
@@ -75,6 +83,12 @@ shared history to hide the mistake is worse than the mistake.
 If it was intentional, nothing here objects to that; it just refuses to let it
 be quiet.
 EOF
+	exit 1
+fi
+
+if [ "$skipped" -gt 0 ]; then
+	echo "INCONCLUSIVE: ${skipped} commit(s) could not be checked (API error)."
+	echo "No violation was found among the rest, but this push was not fully audited."
 	exit 1
 fi
 

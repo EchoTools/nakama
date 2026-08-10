@@ -33,7 +33,7 @@ left open for the next seat.
 
 ## What this session changed
 
-| PR | | closes |
+| PR | what it did | closes |
 |---|---|---|
 | #555 | arm the tracked git hooks from any `just` recipe | **#557** |
 | #559 | correct the intents wire token; widen the test gate 2 → 22 packages | **#554** |

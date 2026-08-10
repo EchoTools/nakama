@@ -11,7 +11,7 @@ Written for the next seat, 2026-08-08. Covers **both** sessions of this campaign
 the 2026-08-07 concurrency/push-safety work and the 2026-08-08 detection/CI work
 that followed it.
 
-Companion documents, both still current for what they cover:
+Companion documents, all still current for what they cover:
 
 - [`campaign-2026-08-07-concurrency-and-push-safety.md`](campaign-2026-08-07-concurrency-and-push-safety.md)
   — the narrative, facing the repo's history
@@ -30,7 +30,7 @@ Companion documents, both still current for what they cover:
 
 Three separate facts, each filed, combine to make that true:
 
-| | fact | issue |
+| area | fact | issue |
 |---|---|---|
 | 1 | The `server` package — where all EVR code lives — **does not execute in CI at all**. With a database reachable the test binary aborts in 0.07 s on a missing `DISCORD_BOT_TOKEN`. It normally takes ~148 s. | **#553** |
 | 2 | `internal/` is covered by **no routine gate** and has a red test in it right now. Every `just` test recipe scopes to `./server/...`. | **#554** |
@@ -49,7 +49,7 @@ plan treats every manual pass as load-bearing.
 
 ### Session 1 — 2026-08-07, concurrency and push safety (16 PRs merged)
 
-| PR | |
+| PR | what it did |
 |---|---|
 | #527 | `SuspensionProfile` actually serves suspension data |
 | #528 | per-test-binary memory cap in a cgroup, for correct attribution |
@@ -70,7 +70,7 @@ plan treats every manual pass as load-bearing.
 
 ### Session 2 — 2026-08-08, detection and CI coverage (2 PRs merged, 2 open)
 
-| | |
+| item | status |
 |---|---|
 | **#551 merged** | `fix(alts)`: search the machine fingerprint, not only compare it — closes the linking half of **#516** |
 | **#552 merged** | `ci`: bound test-suite memory at the compose layer — closes **#526** |

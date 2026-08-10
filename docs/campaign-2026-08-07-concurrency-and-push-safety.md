@@ -1,6 +1,6 @@
 # Campaign record: 2026-08-07
 
-Twelve pull requests merged to `main` in one afternoon. This note exists so that
+Twelve pull requests merged to `main` in one afternoon. This note exists so that it
 is legible later, and so the parts that were **not** fixed are as findable as the
 parts that were.
 
@@ -13,7 +13,7 @@ before merging because each merge moved the base for the next.
 **Backlog that was already open and reviewed** — merged sequentially, each
 re-verified against the base the previous merge had moved:
 
-| PR | |
+| PR | what it did |
 |----|---|
 | #528 | cap per-test-binary memory in a cgroup |
 | #530 | assorted one-off correctness fixes (Tier-1 batch) |
@@ -29,7 +29,7 @@ deleted as dead. Both resolutions are recorded in that PR.
 
 **Defects found during the campaign, then fixed** — see "What was found" below:
 
-| PR | Issue | |
+| PR | Issue | what it did |
 |----|-------|---|
 | #542 | #537 | read the guild count under the discordgo state lock |
 | #543 | #538 | take the bot application ID from the locked accessor |

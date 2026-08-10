@@ -1,9 +1,10 @@
 # Diagnosis: party members split off when they drop & reconnect
 
-Source investigation: `echovrce-ops/cases/2026-06-30-coastermaster77-party-split/`
-(coastermaster77, Discord 770665684824489995). Logs showed 34 party-full + 14
-lobby-full lockouts over 72h, 45 sessions, reconnect storms of 24 and 14
-failures. This file records the **code-level** root cause + the fix plan.
+Source investigation: `echovrce-ops/cases/2026-06-30-party-split/` (player
+identity is recorded there, not here — this repository is public). Logs showed
+34 party-full + 14 lobby-full lockouts over 72h, 45 sessions, reconnect storms
+of 24 and 14 failures. This file records the **code-level** root cause + the
+fix plan.
 
 ## The player-visible symptom
 
