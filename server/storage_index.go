@@ -470,6 +470,10 @@ LIMIT $2`
 		// accumulate unclosed rows across iterations.
 
 		var rowsRead bool
+		// truncated records that a row existed beyond MaxEntries, i.e. that
+		// rows were actually dropped -- as distinct from merely filling the
+		// index exactly.
+		var truncated bool
 		batch := bluge.NewBatch()
 		var dbUserID *uuid.UUID
 		var dbKey string
@@ -520,6 +524,12 @@ LIMIT $2`
 			batch.Update(doc.ID(), doc)
 			count++
 			if count >= idx.MaxEntries {
+				// Reaching MaxEntries is not by itself truncation: a collection
+				// holding exactly MaxEntries rows fills the index with nothing
+				// left over. Only a row that exists past the cap proves rows
+				// were dropped. rows is closed immediately below and pagination
+				// stops either way, so consuming one more row costs nothing.
+				truncated = rows.Next()
 				break
 			}
 		}
@@ -530,7 +540,7 @@ LIMIT $2`
 		}
 
 		if count >= idx.MaxEntries || !rowsRead {
-			if count >= idx.MaxEntries {
+			if truncated {
 				// The index is full and the collection was NOT fully read. The
 				// unread remainder is absent until those rows are written
 				// again, which for a cold collection may be never. Silent

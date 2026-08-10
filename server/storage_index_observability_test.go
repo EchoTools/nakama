@@ -297,3 +297,95 @@ func TestSuspensionProfileIndex_MaxEntriesCannotBind(t *testing.T) {
 		"SuspensionProfile holds a strict subset of the users DisplayNameHistory holds, so its cap must be at least as large to be provably non-binding; suspension=%d displayNames=%d",
 		suspension.MaxEntries, displayNames.MaxEntries)
 }
+
+// TestStorageIndexLoad_TruncationWarnRequiresActualTruncation pins the boot-time
+// truncation warning to the condition it names.
+//
+// Load fills the index until count reaches MaxEntries and then stops. Reaching
+// MaxEntries is not by itself truncation: a collection holding exactly
+// MaxEntries rows fills the index with nothing left over. The warning
+// previously fired on count >= MaxEntries, so that exactly-full collection
+// reported "MaxEntries reached before the collection was exhausted" -- an
+// alertable claim of permanent silent data loss -- on every process boot.
+//
+// This is a DB-backed test: the load path reads the storage table, so it cannot
+// be exercised by the DB-free suite. It runs under `just test-db`.
+func TestStorageIndexLoad_TruncationWarnRequiresActualTruncation(t *testing.T) {
+	const (
+		indexName  = "truncation_warn_index"
+		collection = "truncation_warn_collection"
+		maxEntries = 4
+		warnMsg    = "Storage index truncated at load: MaxEntries reached before the collection was exhausted"
+	)
+
+	// writeN writes n objects into the collection, then builds a fresh index
+	// over it and Loads. It returns the number of truncation warnings emitted.
+	loadWarnings := func(t *testing.T, n int) int {
+		t.Helper()
+
+		db := NewDB(t)
+		ctx := context.Background()
+		value, _ := json.Marshal(map[string]any{"one": 1})
+
+		core, logs := observer.New(zap.WarnLevel)
+		obsLogger := zap.New(core)
+
+		writeIdx, err := NewLocalStorageIndex(obsLogger, db, &StorageConfig{}, newGaugeCapturingMetrics())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ops := make(StorageOpWrites, 0, n)
+		for i := 0; i < n; i++ {
+			ops = append(ops, &StorageOpWrite{
+				OwnerID: uuid.Nil.String(),
+				Object: &api.WriteStorageObject{
+					Collection: collection,
+					Key:        fmt.Sprintf("key%03d", i),
+					Value:      string(value),
+				},
+			})
+		}
+		if _, _, err := StorageWriteObjects(ctx, obsLogger, db, newGaugeCapturingMetrics(), writeIdx, true, ops); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			dels := make(StorageOpDeletes, 0, len(ops))
+			for _, op := range ops {
+				dels = append(dels, &StorageOpDelete{
+					OwnerID:  uuid.Nil.String(),
+					ObjectID: &api.DeleteStorageObjectId{Collection: collection, Key: op.Object.Key},
+				})
+			}
+			_, _ = StorageDeleteObjects(context.Background(), obsLogger, db, writeIdx, true, dels)
+		})
+
+		// A second index instance, loading the collection the first one wrote.
+		loadIdx, err := NewLocalStorageIndex(obsLogger, db, &StorageConfig{}, newGaugeCapturingMetrics())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := loadIdx.CreateIndex(ctx, indexName, collection, "", []string{"one"}, []string{}, maxEntries, false); err != nil {
+			t.Fatal(err)
+		}
+		if err := loadIdx.Load(ctx); err != nil {
+			t.Fatal(err)
+		}
+
+		return logs.FilterMessage(warnMsg).Len()
+	}
+
+	t.Run("exactly MaxEntries rows is not truncation", func(t *testing.T) {
+		if got := loadWarnings(t, maxEntries); got != 0 {
+			t.Errorf("collection holding exactly MaxEntries (%d) rows emitted %d truncation warning(s); "+
+				"the index was filled exactly and nothing was dropped", maxEntries, got)
+		}
+	})
+
+	t.Run("more than MaxEntries rows is truncation", func(t *testing.T) {
+		if got := loadWarnings(t, maxEntries+1); got != 1 {
+			t.Errorf("collection holding MaxEntries+1 (%d) rows emitted %d truncation warning(s), want 1; "+
+				"rows were genuinely dropped and the operator must be told", maxEntries+1, got)
+		}
+	})
+}
