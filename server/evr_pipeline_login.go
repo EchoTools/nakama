@@ -626,9 +626,9 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	// two filters cannot mask one another; machineMatchedAlts applies its own,
 	// stricter test.
 	//
-	// Off unless the operator turns it on -- see
-	// RejectDisabledAlternatesOnMachineMatch for the trade. ignoreDisabledAlternates
-	// is honoured here exactly as the delayed-kick path honours it, so an account
+	// Off, and it stays off unless the service owner says otherwise -- see
+	// RejectDisabledAlternatesOnMachineMatch. ignoreDisabledAlternates is
+	// honoured here exactly as the delayed-kick path honours it, so an account
 	// cleared by a moderator stays cleared.
 	if ServiceSettings().RejectDisabledAlternatesOnMachineMatch && !params.ignoreDisabledAlternates {
 		if machineIDs := machineMatchedAlts(loginHistory, firstIDs, detector); len(machineIDs) > 0 {
@@ -650,10 +650,8 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 				metricsTags["error"] = "machine_matched_disabled_alt"
 
-				// The same error a disabled account itself gets. Telling an
-				// evader which signal caught them is the cost this whole
-				// setting trades against; the audit log above carries the
-				// detail for moderators.
+				// The same error a disabled account itself gets. The audit log
+				// above carries the detail for moderators.
 				return AccountDisabledError{
 					message:   "Account Disabled",
 					reportURL: ServiceSettings().ReportURL,

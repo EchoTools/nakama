@@ -87,10 +87,10 @@ type ServiceSettingsData struct {
 	// NOT trigger it -- they are rotated trivially, and a shared IP is a
 	// household, not a person.
 	//
-	// Off by default, because it is a trade rather than an upgrade. The delayed
-	// kick costs a few minutes of presence and buys ambiguity about which signal
-	// caught them; rejecting at login is immediate but tells an evader exactly
-	// what to change, on the login that carried it. See #516.
+	// OFF, AND IT STAYS OFF UNLESS THE SERVICE OWNER SAYS OTHERWISE. The
+	// existing delayed kick is deliberate and is not a placeholder for this.
+	// Do not enable this, and do not change the kick timing, without asking
+	// first. See #516.
 	RejectDisabledAlternatesOnMachineMatch bool   `json:"reject_disabled_alts_on_machine_match"`
 	VRMLEntitlementNotifyChannelID         string `json:"vrml_entitlement_notify_channel_id"`
 	VRMLOutageMode                         bool   `json:"vrml_outage_mode"` // Disable live VRML API calls and rely on cached data only.

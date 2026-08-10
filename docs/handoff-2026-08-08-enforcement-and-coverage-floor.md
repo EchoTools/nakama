@@ -9,20 +9,25 @@ which is still current for everything it covers except its open-issue table.
 
 ## The one thing to read if you read nothing else
 
-**Nothing mechanical is left on #516 or #553. Everything remaining is an
-operator decision, and one of those decisions is a question nobody has answered
-in three attempts:**
+**Nothing mechanical is left on #516 or #553, and the enforcement questions are
+settled. Two things remain, both cost/data calls rather than code: #553's
+`pull_request` trigger, and #516 item 2.**
 
-> Is `KickPlayersWithDisabledAlternates` actually enabled in production?
+The enforcement side is closed out:
 
-It matters more than any code in this campaign. It is the switch on the
-delayed-kick path — the only enforcement #516 has ever had. If it is **off**,
-then the alt-linker has been detecting correctly and doing nothing about it the
-entire time, every detection fix in this campaign has landed in front of an
-inert path, and the right next move is to turn one setting on rather than to
-write anything.
+- `KickPlayersWithDisabledAlternates` **is enabled.** The delayed-kick path is
+  live, so the detection work from #551 onward feeds something real.
+- **The delayed kick's current behaviour is deliberate.** It is not a rough
+  edge, and it is not waiting to be upgraded into a login-time reject. The
+  `RejectDisabledAlternatesOnMachineMatch` setting built for that is **off and
+  stays off**.
 
-Check it before building anything else on #516.
+> **Do not enable `RejectDisabledAlternatesOnMachineMatch`, and do not change
+> the delayed kick's timing, without asking the service owner first.**
+
+That is the one instruction in this document that is not a suggestion. Both
+gates being built-and-off is a decision that has already been made, not one
+left open for the next seat.
 
 ---
 
@@ -52,7 +57,7 @@ rather than an upgrade, and the trade belongs to whoever runs the service.
 | setting | what it does | why it is off |
 |---|---|---|
 | `MinimumNakamaAccountAgeDays` (per guild) | gates on the EchoVR account's age, which the existing gate cannot see — it reads the Discord snowflake, so a fresh burner on an aged Discord clears it | making Nakama age authoritative rejects **genuinely new EchoVR players with long-standing Discord accounts** — a real population, and not the one it aims at |
-| `RejectDisabledAlternatesOnMachineMatch` (service) | refuses the login on an exact machine-fingerprint match to a disabled account, instead of admitting the session and kicking it 1–4 minutes later | the delayed kick buys **ambiguity about which signal caught them**; rejecting at login tells an evader exactly what to change, on the login that carried it |
+| `RejectDisabledAlternatesOnMachineMatch` (service) | refuses the login on an exact machine-fingerprint match to a disabled account, instead of admitting the session and kicking it 1–4 minutes later | **Settled: it stays off.** The existing delayed kick is deliberate and is not a placeholder for this. Do not enable it, and do not change the kick timing, without asking the service owner |
 | — | `ipapiData.IsVPN()` ignoring `Response.Hosting` is **left as-is** | widening it blocks players in every guild with `BlockVPNUsers` on. The current behaviour is now pinned by test, so changing it is a deliberate edit rather than a silent shift |
 
 ---
@@ -228,10 +233,21 @@ Run `git add` **before** the checks, not after.
 
 In order:
 
-1. **Answer the `KickPlayersWithDisabledAlternates` question.** Everything else
-   on #516 is downstream of it.
-2. Decide whether to enable the two new gates. Both are built and off.
+1. ~~Answer the `KickPlayersWithDisabledAlternates` question.~~ **Answered: it
+   is enabled.** The delayed-kick path is live, so the detection work from #551
+   onward feeds something real.
+2. ~~Decide whether to enable the two new gates.~~ **Both settled, both stay
+   off:**
+   - `RejectDisabledAlternatesOnMachineMatch` — **do not enable it, and do not
+     change the delayed kick's timing, without asking the service owner.** The
+     current behaviour is deliberate. This is not an upgrade waiting to be
+     switched on.
+   - `MinimumDiscordAccountAgeDays` — one guild uses it, and that guild is the
+     owner's to configure. `MinimumNakamaAccountAgeDays` stays available and
+     off.
 3. #553's `pull_request` trigger — a cost call, and the suite can now complete.
+   **Still open.**
 4. Only then, item 2, and only with production data on datacenter `/24` sharing.
+   **Still open.**
 
 Do not implement item 2 by reasoning about it. That is how a bucket ships.
