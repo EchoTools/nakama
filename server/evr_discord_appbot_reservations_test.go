@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -69,11 +68,15 @@ func TestGetOnlinePartyReservations(t *testing.T) {
 		},
 	}
 
-	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "testnode")
+	// The node is an explicit argument now. This test used to plant it as
+	// runtime.RUNTIME_CTX_NODE, which is exactly why it stayed green while the
+	// production caller -- a Discord slash command, whose context never carries
+	// that key -- got nil back and the whole slot-hold feature did nothing.
+	const node = "testnode"
 
 	t.Run("solo creator produces no reservations", func(t *testing.T) {
 		nk.calls = nil
-		got := getOnlinePartyReservations(ctx, nk, logger, creatorID, []string{creatorID}, evr.TeamBlue)
+		got := getOnlinePartyReservations(nk, logger, creatorID, []string{creatorID}, evr.TeamBlue, node)
 		if len(got) != 0 {
 			t.Fatalf("expected no reservations for solo creator, got %d", len(got))
 		}
@@ -85,7 +88,7 @@ func TestGetOnlinePartyReservations(t *testing.T) {
 	t.Run("online follower gets a reservation, offline follower is skipped", func(t *testing.T) {
 		nk.calls = nil
 		partyUserIDs := []string{creatorID, followerOnlineID, followerOfflineID}
-		got := getOnlinePartyReservations(ctx, nk, logger, creatorID, partyUserIDs, evr.TeamBlue)
+		got := getOnlinePartyReservations(nk, logger, creatorID, partyUserIDs, evr.TeamBlue, node)
 
 		if len(got) != 1 {
 			t.Fatalf("expected exactly 1 reservation (online follower only), got %d: %+v", len(got), got)
@@ -122,16 +125,20 @@ func TestGetOnlinePartyReservations(t *testing.T) {
 	})
 
 	t.Run("empty party produces no reservations", func(t *testing.T) {
-		got := getOnlinePartyReservations(ctx, nk, logger, creatorID, nil, evr.TeamBlue)
+		got := getOnlinePartyReservations(nk, logger, creatorID, nil, evr.TeamBlue, node)
 		if len(got) != 0 {
 			t.Fatalf("expected no reservations for empty party, got %d", len(got))
 		}
 	})
 
-	t.Run("missing node in context bails out", func(t *testing.T) {
-		got := getOnlinePartyReservations(context.Background(), nk, logger, creatorID, []string{creatorID, followerOnlineID}, evr.TeamBlue)
+	t.Run("empty node bails out", func(t *testing.T) {
+		// A reservation placeholder without a node cannot be matched to a real
+		// presence, so producing one would be worse than producing none. This is
+		// now the only way to reach that branch: the node is a parameter, so it
+		// cannot silently go missing the way a context value did.
+		got := getOnlinePartyReservations(nk, logger, creatorID, []string{creatorID, followerOnlineID}, evr.TeamBlue, "")
 		if got != nil {
-			t.Fatalf("expected nil reservations when node is missing from context, got %+v", got)
+			t.Fatalf("expected nil reservations when the node is empty, got %+v", got)
 		}
 	})
 }

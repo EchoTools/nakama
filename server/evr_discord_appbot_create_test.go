@@ -62,7 +62,11 @@ func TestGetPartyMembersForUser(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "testnode")
+			// The node is passed explicitly now. It used to be planted here as
+			// runtime.RUNTIME_CTX_NODE, which is what let this test pass while
+			// the production caller -- a Discord slash command, whose context
+			// never carries that key -- got nothing back but the creator.
+			ctx := context.Background()
 
 			// Create mock NakamaModule
 			nk := &mockNakamaModuleForParty{
@@ -73,7 +77,7 @@ func TestGetPartyMembersForUser(t *testing.T) {
 
 			// Create a mock registry that returns a fixed UUID for any group name.
 			pr := &mockPartyRegistryForLookup{groupID: tt.partyGroupID, partyID: uuid.Must(uuid.NewV4())}
-			userIDs := getPartyMembersForUser(ctx, nk, pr, tt.userID)
+			userIDs := getPartyMembersForUser(ctx, nk, pr, tt.userID, "testnode")
 
 			if len(userIDs) != len(tt.expectedUserIDs) {
 				t.Errorf("Expected %d user IDs, got %d", len(tt.expectedUserIDs), len(userIDs))

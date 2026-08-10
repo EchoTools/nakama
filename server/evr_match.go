@@ -476,7 +476,17 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		if consumedSlotReservation.Presence.PartyID != uuid.Nil {
 			meta.Presence.PartyID = consumedSlotReservation.Presence.PartyID
 		}
-		meta.Presence.RoleAlignment = consumedSlotReservation.Presence.RoleAlignment
+		// Do not let a reservation seat someone in the stands. The TeamAlignments
+		// path below already refuses to adopt spectator/moderator for exactly this
+		// reason; the reservation path adopted them unconditionally, so a
+		// reservation built with TeamSpectator would force the joiner into a
+		// spectator slot and skip the auto-assign that would have given them a
+		// team. Same guard, same place, same reasoning as the PartyID check above:
+		// at the consume site, so no future builder can reintroduce it.
+		if consumedSlotReservation.Presence.RoleAlignment != evr.TeamSpectator &&
+			consumedSlotReservation.Presence.RoleAlignment != evr.TeamModerator {
+			meta.Presence.RoleAlignment = consumedSlotReservation.Presence.RoleAlignment
+		}
 		state.rebuildCache()
 		logger = logger.WithField("has_reservation", true)
 	}

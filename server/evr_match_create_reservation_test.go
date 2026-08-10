@@ -244,3 +244,82 @@ func TestMatchJoinAttempt_ReservationWithoutPartyIDPreservesJoinersParty(t *test
 			"PartyID != uuid.Nil and would now skip this player", joined.PartyID, realPartyID)
 	}
 }
+
+// TestMatchJoinAttempt_SpectatorReservationDoesNotSeatJoinerInTheStands pins the
+// guard on role adoption.
+//
+// `/create role:spectator` means the CREATOR watches. It never meant their
+// party watches. handleCreateMatch stamped the creator's requested role onto
+// every member's team alignment and onto every reservation, and
+// MatchJoinAttempt adopted a consumed reservation's RoleAlignment
+// unconditionally -- so a follower would have been seated as a spectator and
+// the auto-assign that would have given them a team never runs, because their
+// role is no longer TeamUnassigned.
+//
+// This was unreachable until /create started resolving party members at all
+// (the node was read from a context the Discord appbot never populates), which
+// is why it had no symptom. The TeamAlignments path immediately below the
+// adoption already refuses spectator and moderator for exactly this reason;
+// this pins the same refusal on the reservation path.
+func TestMatchJoinAttempt_SpectatorReservationDoesNotSeatJoinerInTheStands(t *testing.T) {
+	state := newSocialTestMatchLabel()
+	state.Mode = evr.ModeArenaPrivate
+	state.LobbyType = PrivateLobby
+	state.MaxSize = 8
+	state.PlayerLimit = 8
+
+	followerUserID := uuid.Must(uuid.NewV4())
+	followerLoginSessionID := uuid.Must(uuid.NewV4())
+	followerMatchSessionID := uuid.Must(uuid.NewV4())
+
+	// A reservation carrying the creator's spectator role, which is what the
+	// pre-fix /create path produced for every party member.
+	state.reservationMap[followerLoginSessionID.String()] = &slotReservation{
+		Presence: &EvrMatchPresence{
+			Node:          "testnode",
+			SessionID:     followerLoginSessionID,
+			UserID:        followerUserID,
+			Username:      "follower",
+			RoleAlignment: evr.TeamSpectator,
+		},
+		Expiry: time.Now().Add(45 * time.Second),
+	}
+	state.rebuildCache()
+
+	m := &EvrMatch{}
+	ctx := context.Background()
+	logger := NewRuntimeGoLogger(NewJSONLogger(os.Stdout, zapcore.ErrorLevel, JSONFormat))
+	nk := &reconnectTestNakamaModule{}
+	disp := &reconnectTestDispatcher{}
+
+	// The follower arrives intending to play, on a different session than the
+	// placeholder.
+	followerPresence := &EvrMatchPresence{
+		Node:          "testnode",
+		SessionID:     followerMatchSessionID,
+		UserID:        followerUserID,
+		EvrID:         evr.EvrId{PlatformCode: 4, AccountId: 7},
+		Username:      "follower",
+		RoleAlignment: evr.TeamBlue,
+		SessionExpiry: 9999999999,
+	}
+	meta := NewJoinMetadata(followerPresence)
+	resultState, allowed, reason := m.MatchJoinAttempt(ctx, logger, nil, nk, disp, 0, state, followerPresence, meta.ToMatchMetadata())
+	if !allowed {
+		t.Fatalf("expected the follower to join by consuming their reservation, got rejected: %s", reason)
+	}
+	state = resultState.(*MatchLabel)
+
+	joined, ok := state.presenceMap[followerMatchSessionID.String()]
+	if !ok {
+		t.Fatal("follower is not in the presence map after a successful join")
+	}
+	if joined.RoleAlignment == evr.TeamSpectator {
+		t.Error("follower was seated as a spectator by their reservation; `/create role:spectator` " +
+			"applies to the creator, not to everyone who came with them")
+	}
+	if joined.RoleAlignment != evr.TeamBlue {
+		t.Errorf("follower's RoleAlignment is %d, want TeamBlue (%d) — the role they arrived with must survive "+
+			"a reservation that carries no playable team", joined.RoleAlignment, evr.TeamBlue)
+	}
+}
