@@ -742,6 +742,64 @@ func getPartyMembersForUser(ctx context.Context, nk runtime.NakamaModule, partyR
 	return partyUserIDs
 }
 
+// getOnlinePartyReservations resolves party members (excluding the creator) who are
+// currently online into EvrMatchPresence placeholders suitable for
+// MatchSettings.Reservations, so a newly-created match can hold their slot against
+// backfill for the settings.ReservationLifetime (see RESV-1). A member's login-service
+// presence is used as the placeholder session -- it does not need to match the session
+// ID the member eventually joins with, because MatchJoinAttempt falls back to a
+// user-ID lookup (LoadAndDeleteReservationByUserIDRaw) when the session ID differs.
+// Members who are not currently online (no resolvable login-service presence) are
+// skipped -- reservations can only be made for resolvable, connected presences.
+// This function never returns an error; unresolvable members are silently skipped
+// (matching getPartyMembersForUser's fail-open convention above).
+func getOnlinePartyReservations(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, creatorUserID string, partyUserIDs []string, roleAlignment int) []*EvrMatchPresence {
+	node, ok := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
+	if !ok {
+		return nil
+	}
+
+	reservations := make([]*EvrMatchPresence, 0, len(partyUserIDs))
+	for _, memberUserID := range partyUserIDs {
+		if memberUserID == "" || memberUserID == creatorUserID {
+			continue // the creator joins directly; no reservation needed
+		}
+
+		presences, err := nk.StreamUserList(StreamModeService, memberUserID, "", StreamLabelLoginService, false, true)
+		if err != nil || len(presences) == 0 {
+			logger.WithField("user_id", memberUserID).Debug("Skipping match reservation for offline party member")
+			continue
+		}
+
+		var presence runtime.Presence
+		for _, p := range presences {
+			if p.GetUserId() == memberUserID {
+				presence = p
+				break
+			}
+		}
+		if presence == nil {
+			continue
+		}
+
+		sessionID := uuid.FromStringOrNil(presence.GetSessionId())
+		userID := uuid.FromStringOrNil(memberUserID)
+		if sessionID == uuid.Nil || userID == uuid.Nil {
+			continue
+		}
+
+		reservations = append(reservations, &EvrMatchPresence{
+			Node:          node,
+			SessionID:     sessionID,
+			UserID:        userID,
+			Username:      presence.GetUsername(),
+			RoleAlignment: roleAlignment,
+		})
+	}
+
+	return reservations
+}
+
 func SetNextMatchID(ctx context.Context, nk runtime.NakamaModule, userID string, matchID MatchID, role TeamIndex, hostDiscordID string) error {
 	directive := &JoinDirective{
 		MatchID:       matchID,

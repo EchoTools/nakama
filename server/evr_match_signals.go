@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -21,7 +20,6 @@ const (
 	SignalEndedSession
 	SignalGetEndpoint
 	SignalGetPresences
-	SignalReserveSlots
 	SignalPruneUnderutilized
 	SignalShutdown
 	SignalPlayerUpdate
@@ -98,12 +96,6 @@ type SignalShutdownPayload struct {
 
 type SignalKickEntrantsPayload struct {
 	UserIDs []uuid.UUID `json:"user_ids"`
-}
-
-type SignalReserveSlotsPayload struct {
-	SessionIDs    []string
-	RoleAlignment int
-	ExpiryTime    time.Time
 }
 
 // SignalCreatePartyReservationsPayload carries the list of party members
