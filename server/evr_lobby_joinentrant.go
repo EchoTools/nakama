@@ -440,16 +440,17 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		}
 	}
 
-	if gg.MinimumAccountAgeDays > 0 && !gg.IsAccountAgeBypass(userID) {
-		// Check the account creation date.
+	if minDiscordAgeDays := gg.MinimumDiscordAccountAge(); minDiscordAgeDays > 0 && !gg.IsAccountAgeBypass(userID) {
+		// The DISCORD account's creation date, from the snowflake. The EchoVR
+		// account's own age is a separate gate below.
 		t, err := discordgo.SnowflakeTimestamp(lobbyParams.DiscordID)
 		if err != nil {
 			return fmt.Errorf("failed to get discord snowflake timestamp: %w", err)
 		}
 
-		if tooNew, ageDays := accountTooNew(t, gg.MinimumAccountAgeDays, time.Now()); tooNew {
-			reason := fmt.Sprintf("Your account age (%d days) is too new (<%d days) to join this guild. ", ageDays, gg.MinimumAccountAgeDays)
-			auditLog := fmt.Sprintf("account age (%d > %d days.", ageDays, gg.MinimumAccountAgeDays)
+		if tooNew, ageDays := accountTooNew(t, minDiscordAgeDays, time.Now()); tooNew {
+			reason := fmt.Sprintf("Your Discord account age (%d days) is too new (<%d days) to join this guild. ", ageDays, minDiscordAgeDays)
+			auditLog := fmt.Sprintf("discord account age (%d < %d days).", ageDays, minDiscordAgeDays)
 			return joinRejected("account_age", reason, auditLog)
 		}
 	}

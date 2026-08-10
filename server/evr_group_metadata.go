@@ -12,11 +12,34 @@ import (
 )
 
 type GroupMetadata struct {
-	GuildID               string `json:"guild_id"`                 // The guild ID
-	OwnerID               string `json:"owner_id"`                 // The owner ID
-	MinimumAccountAgeDays int    `json:"minimum_account_age_days"` // The minimum DISCORD account age in days to be able to play echo on this guild's sessions
+	GuildID string `json:"guild_id"` // The guild ID
+	OwnerID string `json:"owner_id"` // The owner ID
+	// MinimumDiscordAccountAgeDays is the minimum age of the DISCORD account,
+	// measured from the snowflake, to play on this guild's sessions.
+	//
+	// Read it through MinimumDiscordAccountAge(), never directly -- see
+	// LegacyMinimumAccountAgeDays below.
+	MinimumDiscordAccountAgeDays int `json:"minimum_discord_account_age_days"`
+
+	// LegacyMinimumAccountAgeDays carries the original key for the field above.
+	//
+	// The old name was `minimum_account_age_days`, which does not say WHICH
+	// account -- and that ambiguity is exactly how the Discord-versus-EchoVR
+	// confusion in #516 stayed invisible for as long as it did. The Go field is
+	// renamed; the stored key could not simply follow it.
+	//
+	// Renaming a key in place resets it to zero for every guild that had it
+	// set, and zero on an age gate means the gate is OFF. A rename that
+	// silently disables a security control on the guilds already using it is a
+	// fail-open, so this field keeps reading the old key and
+	// MinimumDiscordAccountAge() prefers whichever is set.
+	//
+	// Deprecated: write MinimumDiscordAccountAgeDays. This exists only so
+	// existing guild metadata keeps working until it is rewritten.
+	LegacyMinimumAccountAgeDays int `json:"minimum_account_age_days,omitempty"`
+
 	// MinimumNakamaAccountAgeDays gates on the age of the EchoVR account itself,
-	// which MinimumAccountAgeDays does not: that one reads the Discord
+	// which MinimumDiscordAccountAgeDays does not: that one reads the Discord
 	// snowflake, so a fresh burner created on an aged Discord account passes it
 	// unchanged. See #516.
 	//
@@ -82,6 +105,24 @@ func NewGuildGroupMetadata(guildID string) *GroupMetadata {
 			"social_2.0_private":  0,
 		},
 	}
+}
+
+// MinimumDiscordAccountAge returns the configured minimum Discord account age
+// in days, 0 meaning no gate.
+//
+// It reads the current key and falls back to the legacy one, because guild
+// metadata written before the rename still carries `minimum_account_age_days`
+// and a gate that reads only the new key would report 0 -- i.e. disabled -- for
+// exactly the guilds that had bothered to configure it.
+//
+// This lives on an accessor rather than in GroupMetadataLoad because
+// GroupMetadata is unmarshalled from more than one place; a migration wired
+// into one loader is a migration the other loaders skip.
+func (g *GroupMetadata) MinimumDiscordAccountAge() int {
+	if g.MinimumDiscordAccountAgeDays > 0 {
+		return g.MinimumDiscordAccountAgeDays
+	}
+	return g.LegacyMinimumAccountAgeDays
 }
 
 // IsPrivate returns true if the group is private, meaning it has members-only matchmaking enabled.
