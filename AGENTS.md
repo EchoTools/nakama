@@ -25,7 +25,7 @@ The repo ships a pre-push hook in `.githooks/pre-push` that checks:
 0. Destination — refuses a push that **resolves** to `main`
 1. Tag format (`v*` tags must include `-evr.<N>`)
 2. `gofmt` compliance
-3. `go vet` on changed packages
+3. `go vet ./server/...` (not the changed packages -- a change under `internal/` gets no vet coverage here; CI vets the full tree)
 4. `gopls` diagnostics on changed files
 5. `go mod tidy` hasn't drifted
 

@@ -4,7 +4,7 @@
 # 0. Destination: refuse a push that RESOLVES to main
 # 1. Tag format: reject semver tags without -evr.<N>
 # 2. Go quality: run fast checks on changed files
-#    (gofmt, go vet, gopls staticcheck)
+#    (gofmt, go vet, gopls check, go mod tidy)
 #
 # Install: automatic on the first `just <recipe>`; or `just hooks`; or
 #          git config core.hooksPath .githooks
@@ -120,15 +120,57 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 done <<< "$PUSH_REFS"
 
 # ---- Phase 2: Go quality checks ----
-# Determine what's changed: diff HEAD against the remote's current state.
-# For branch pushes, check outgoing commits. For first push, check index.
+#
+# The file set comes from the refs actually being pushed. That is the only
+# authoritative source, and getting it from anywhere else made this phase
+# fail open:
+#
+#   - ORIG_HEAD is wherever the last pull or merge happened to leave the
+#     branch. It has no relationship to what is being pushed: in this repo it
+#     routinely spans commits that merged days ago while omitting the commit
+#     in the push.
+#   - On a fresh clone ORIG_HEAD does not exist, so the old code fell back to
+#     `git diff --cached`, which is EMPTY once the work is committed. Verified
+#     by reproduction: clone, add an unformatted .go file, commit, push --
+#     CHANGED_GO came back empty and gofmt, vet, gopls and tidy were all
+#     skipped in silence. The hook printed nothing and exited 0.
+#
+# An all-zero remote sha means the branch does not exist on the remote yet;
+# bound that range at the default branch so a first push checks the branch's
+# own commits rather than all of history. An all-zero local sha is a deletion
+# and carries no files.
+ZERO_SHA='0000000000000000000000000000000000000000'
+CHANGED_GO=""
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+    # Explicit `if`, for the reason phase 0 documents: under `set -e` a trailing
+    # AND-list that evaluates false is a non-zero body result.
+    if [ -z "${local_sha:-}" ] || [ "$local_sha" = "$ZERO_SHA" ]; then
+        continue
+    fi
 
-# Determine what changed: use ORIG_HEAD or diff against remote
-if git rev-parse --verify ORIG_HEAD 2>/dev/null; then
-    CHANGED_GO=$(git diff --name-only ORIG_HEAD..HEAD -- '*.go' 2>/dev/null || true)
-else
-    CHANGED_GO=$(git diff --name-only --cached -- '*.go' 2>/dev/null || true)
-fi
+    if [ "${remote_sha:-$ZERO_SHA}" = "$ZERO_SHA" ]; then
+        range_base=$(git merge-base "$local_sha" origin/HEAD 2>/dev/null \
+            || git merge-base "$local_sha" origin/main 2>/dev/null || true)
+    else
+        range_base="$remote_sha"
+    fi
+
+    if [ -n "$range_base" ]; then
+        ref_files=$(git diff --name-only "$range_base".."$local_sha" -- '*.go' 2>/dev/null || true)
+    else
+        # No common ancestor to bound against (orphan branch); fall back to the
+        # tip commit rather than diffing the whole history.
+        ref_files=$(git show --name-only --pretty=format: "$local_sha" -- '*.go' 2>/dev/null || true)
+    fi
+
+    CHANGED_GO=$(printf '%s\n%s' "$CHANGED_GO" "$ref_files")
+done <<< "$PUSH_REFS"
+
+# Drop blanks and duplicates, and drop paths deleted by the push -- gofmt and
+# gopls error on a file that is not on disk.
+CHANGED_GO=$(printf '%s\n' "$CHANGED_GO" | sort -u | while IFS= read -r f; do
+    [ -n "$f" ] && [ -f "$REPO_ROOT/$f" ] && echo "$f"
+done || true)
 
 if [ -n "$CHANGED_GO" ]; then
     echo ""
@@ -143,11 +185,14 @@ if [ -n "$CHANGED_GO" ]; then
         pass "gofmt"
     fi
 
-    # go vet (targeted, quiet mode)
-    if go vet ./server/... 2>/dev/null; then
+    # go vet. Show the diagnostics: sending them to /dev/null left the
+    # developer with a one-line refusal and nothing to act on, and the old
+    # message named a broader command than the one that actually failed.
+    if VET_OUTPUT=$(go vet ./server/... 2>&1); then
         pass "go vet ./server/..."
     else
-        fail "go vet ./server/... — run 'go vet ./...' locally to see details"
+        fail "go vet ./server/... failed:"
+        echo "$VET_OUTPUT" | head -20 | sed 's/^/       /'
     fi
 
     # gopls check (static analysis)
@@ -163,15 +208,31 @@ if [ -n "$CHANGED_GO" ]; then
         warn "gopls not installed — skipping gopls check"
     fi
 
-    # go mod tidy check
+    # go mod tidy check.
+    #
+    # `go mod tidy` rewrites go.mod/go.sum in place. Previously nothing put
+    # them back, so a rejected push also left the working tree dirty with
+    # changes the developer did not make -- and the dead TIDY_BEFORE variable
+    # showed a restore had been intended and never written. Snapshot both
+    # files and restore them whatever the outcome, so this check observes
+    # without mutating.
     cd "$REPO_ROOT"
-    TIDY_BEFORE=$(git rev-parse HEAD 2>/dev/null)
-    go mod tidy 2>/dev/null
+    TIDY_BACKUP=$(mktemp -d)
+    cp go.mod "$TIDY_BACKUP/go.mod" 2>/dev/null || true
+    cp go.sum "$TIDY_BACKUP/go.sum" 2>/dev/null || true
+    go mod tidy 2>/dev/null || true
     if [ -n "$(git status --porcelain go.mod go.sum 2>/dev/null)" ]; then
-        fail "go mod tidy modified go.mod/go.sum — commit these changes"
+        fail "go mod tidy modified go.mod/go.sum — run 'go mod tidy' and commit the result"
     else
         pass "go mod tidy"
     fi
+    # Restore byte-for-byte. Capturing with $(cat) and rewriting with printf
+    # does not round-trip: command substitution strips trailing newlines, so
+    # the "restored" file still differed from the original and the tree stayed
+    # dirty -- the very thing this is here to prevent.
+    cp "$TIDY_BACKUP/go.mod" go.mod 2>/dev/null || true
+    cp "$TIDY_BACKUP/go.sum" go.sum 2>/dev/null || true
+    rm -rf "$TIDY_BACKUP"
     cd - >/dev/null
 fi
 
