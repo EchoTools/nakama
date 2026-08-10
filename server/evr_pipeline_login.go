@@ -66,6 +66,25 @@ type NewLocationError struct {
 	useDMs      bool
 }
 
+// ipVerificationLocationError picks how to tell a player their IP is
+// unverified, given whatever naming information was resolvable.
+//
+// It ALWAYS returns an error. There is no combination of inputs that admits
+// the session: the guild name and bot username only choose the wording, and
+// being unable to determine either is not evidence the IP is trustworthy. It
+// is a function so the total behaviour can be tested directly -- the calling
+// path needs a Discord gateway and is otherwise unreachable from a test.
+func ipVerificationLocationError(guildName, botUsername, code string) NewLocationError {
+	switch {
+	case guildName != "":
+		return NewLocationError{guildName: guildName, code: code}
+	case botUsername != "":
+		return NewLocationError{botUsername: botUsername, code: code}
+	default:
+		return NewLocationError{code: code}
+	}
+}
+
 func (e NewLocationError) Error() string {
 	if e.useDMs {
 		// DM was successful
@@ -581,28 +600,33 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 					metricsTags["error"] = "failed_send_ip_approval_request"
 					return fmt.Errorf("failed to send IP approval request: %w", err)
 				}
-				// The user has DMs from non-friends disabled. Tell them to use the slash command instead.
+				// The user has DMs from non-friends disabled. Tell them to use the
+				// slash command instead.
+				//
+				// Naming the guild is a nicety; failing to name it is NOT a reason
+				// to admit the session. The previous form was an if / else-if /
+				// else chain whose FIRST arm could fall through: when the active
+				// group resolved to a guild ID but `dg.Guild()` errored -- a stale
+				// guild the bot has left, or any transient API failure -- no arm
+				// returned, execution left the whole verification block, and
+				// authorizeSession went on to authorize a session whose IP had
+				// never been verified. That directly contradicted the invariant
+				// asserted above ("every path inside this block returns an
+				// error").
+				//
+				// Resolving the name first and then returning unconditionally
+				// makes the fall-through unrepresentable rather than merely fixed.
+				guildName := ""
 				if guildID := p.discordCache.GroupIDToGuildID(params.profile.ActiveGroupID); guildID != "" {
-					// Use the guild name
 					if guild, err := p.discordCache.dg.Guild(guildID); err == nil {
-						return NewLocationError{
-							guildName: guild.Name,
-							code:      twoFactorCode,
-						}
-					}
-				} else if botUsername != "" {
-					// Use the bot name
-					return NewLocationError{
-						botUsername: botUsername,
-						code:        twoFactorCode,
-					}
-				} else {
-					// Just return an error, since there's no way to verify the user.
-					metricsTags["error"] = "ip_verification_failed"
-					return NewLocationError{
-						code: twoFactorCode,
+						guildName = guild.Name
+					} else {
+						logger.Warn("Could not resolve guild for IP verification message; refusing with the generic form",
+							zap.String("guild_id", guildID), zap.Error(err))
 					}
 				}
+				metricsTags["error"] = "ip_verification_failed"
+				return ipVerificationLocationError(guildName, botUsername, twoFactorCode)
 			}
 		}
 	}
