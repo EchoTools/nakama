@@ -2116,6 +2116,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal create party reservations: %v", err)}.String()
 		}
 		created := 0
+		skipped := 0
 		for _, member := range payload.Members {
 			// Skip if the member is already an active presence. Match by user ID,
 			// not just session ID: a member who reconnected holds their presence
@@ -2141,6 +2142,24 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			if alreadyPresent {
 				continue // already in match
 			}
+			// Refuse to reserve a slot the match does not have.
+			//
+			// Without this the handler overbooks: OpenSlots() goes negative and
+			// the lobby holds more reservations than seats. What the spec asks
+			// for is in docs/spec-party-reservation-system.md -- "should only
+			// create reservations for members that fit" -- and it was never
+			// implemented.
+			//
+			// The check has to be INSIDE the loop, and rebuildCache below has to
+			// be too. OpenSlots() is computed from the cached Size and
+			// ReservationCount, so a single check before the loop reads the same
+			// stale value for every member: two followers would both pass a
+			// one-slot check and both get in. Recomputing per member is what
+			// makes the guard hold for the second one.
+			if state.OpenSlots() <= 0 {
+				skipped++
+				continue
+			}
 			// Upsert by user ID: replace any existing reservation for this member
 			// (possibly under a stale session ID from a prior connection) so they
 			// end up with exactly one reservation. Symmetric with the UserID-aware
@@ -2150,13 +2169,13 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 				Expiry:   time.Now().Add(5 * time.Minute),
 			})
 			created++
-		}
-		if created > 0 {
+			// Make the reservation visible to the next iteration's OpenSlots().
 			state.rebuildCache()
 		}
 		logger.WithFields(map[string]any{
 			"requested": len(payload.Members),
 			"created":   created,
+			"skipped":   skipped,
 		}).Info("Created party reservations via signal")
 
 	case SignalClearPartyReservations:
