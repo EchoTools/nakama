@@ -13,6 +13,11 @@ go.work.sum
 .serena/
 .opencode/
 .vscode/
+# Claude Code's per-clone state, including any worktrees it creates under
+# .claude/worktrees. Same category as the agent and editor directories
+# above; it was the only one missing, so it showed up as untracked noise in
+# every `git status` and in the fmt/exec-bit checks that glob the tree.
+.claude/
 
 ### Angular ###
 ## Angular ##
