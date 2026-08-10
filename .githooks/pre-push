@@ -52,6 +52,9 @@ fail_count=0
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
+# Git invokes a pre-push hook as: pre-push <remote-name-or-url> <remote-url>
+PUSH_REMOTE="${1:-origin}"
+
 # ---- Capture push refs ----
 # Pre-push receives refs on stdin: <local-ref> <local-sha> <remote-ref> <remote-sha>
 # Store them so we can iterate in multiple phases.
@@ -149,8 +152,13 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
     fi
 
     if [ "${remote_sha:-$ZERO_SHA}" = "$ZERO_SHA" ]; then
-        range_base=$(git merge-base "$local_sha" origin/HEAD 2>/dev/null \
-            || git merge-base "$local_sha" origin/main 2>/dev/null || true)
+        # Bound against the remote actually being pushed to. Git passes its
+        # name as $1; hardcoding "origin" picks the wrong merge-base for anyone
+        # pushing to a second remote. If $1 is a URL rather than a name (git
+        # allows `git push <url>`), neither ref resolves, range_base stays
+        # empty, and the tip-commit fallback below applies.
+        range_base=$(git merge-base "$local_sha" "$PUSH_REMOTE/HEAD" 2>/dev/null \
+            || git merge-base "$local_sha" "$PUSH_REMOTE/main" 2>/dev/null || true)
     else
         range_base="$remote_sha"
     fi
@@ -220,8 +228,14 @@ if [ -n "$CHANGED_GO" ]; then
     TIDY_BACKUP=$(mktemp -d)
     cp go.mod "$TIDY_BACKUP/go.mod" 2>/dev/null || true
     cp go.sum "$TIDY_BACKUP/go.sum" 2>/dev/null || true
-    go mod tidy 2>/dev/null || true
-    if [ -n "$(git status --porcelain go.mod go.sum 2>/dev/null)" ]; then
+    # A tidy that ERRORS is a failed check, not a passed one. Discarding its
+    # status with `|| true` meant a module-resolution error printed
+    # "✓ go mod tidy" so long as the files happened not to change -- the same
+    # could-not-check-so-call-it-fine shape this phase was just fixed for.
+    if ! TIDY_OUTPUT=$(go mod tidy 2>&1); then
+        fail "go mod tidy failed:"
+        echo "$TIDY_OUTPUT" | head -10 | sed 's/^/       /'
+    elif [ -n "$(git status --porcelain go.mod go.sum 2>/dev/null)" ]; then
         fail "go mod tidy modified go.mod/go.sum — run 'go mod tidy' and commit the result"
     else
         pass "go mod tidy"

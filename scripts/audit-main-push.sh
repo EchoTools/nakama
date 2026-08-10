@@ -52,7 +52,7 @@ for sha in "$@"; do
 	count="$(gh api "repos/${repo}/commits/${sha}/pulls" --jq 'length' 2>/dev/null)"
 
 	if [ -z "$count" ]; then
-		echo "  ?  ${sha}  could not query associated PRs (API error) -- not counted" >&2
+		echo "  ?  ${sha}  could not query associated PRs (API error) -- audit INCONCLUSIVE" >&2
 		skipped=$((skipped + 1))
 		continue
 	fi
