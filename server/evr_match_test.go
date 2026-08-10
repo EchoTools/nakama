@@ -894,6 +894,23 @@ type reconnectTestNakamaModule struct {
 	streamUsers   []runtime.Presence
 }
 
+// GroupsGetId reports the fixture's guild as having opted in to early-quit
+// enforcement.
+//
+// The charge gate resolves the guild through nk and fails closed when it
+// cannot, so a double that returns nothing would suppress every charge and the
+// tests that assert one would fail for a reason unrelated to what they test.
+// reconnectTestState leaves MatchLabel.GroupID nil, so the gate asks about
+// uuid.Nil; answering for any requested ID keeps this double indifferent to
+// which fixture calls it.
+func (m *reconnectTestNakamaModule) GroupsGetId(ctx context.Context, groupIDs []string) ([]*api.Group, error) {
+	out := make([]*api.Group, 0, len(groupIDs))
+	for _, id := range groupIDs {
+		out = append(out, &api.Group{Id: id, Metadata: `{"enforce_early_quit_penalty":true}`})
+	}
+	return out, nil
+}
+
 func (m *reconnectTestNakamaModule) StreamUserList(mode uint8, subject, subcontext, label string, includeHidden, includeNotHidden bool) ([]runtime.Presence, error) {
 	return m.streamUsers, nil
 }

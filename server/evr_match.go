@@ -330,7 +330,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			logger.Debug("Failed to load early quit config for logging", zap.Error(err))
 		} else if eqConfig.PenaltyLevel > 0 && eqConfig.PenaltyTimestamp > 0 && time.Now().Unix() < eqConfig.PenaltyTimestamp {
 			remainingTime := time.Until(time.Unix(eqConfig.PenaltyTimestamp, 0))
-			if isEarlyQuitEnforcementTestUser(joinPresence.GetUserId()) && earlyQuitEnforcementEnabled(ctx, state.GetGroupID().String()) {
+			if isEarlyQuitEnforcementTestUser(joinPresence.GetUserId()) && earlyQuitEnforcementEnabled(ctx, nk, logger, state.GetGroupID().String()) {
 				return state, false, fmt.Sprintf("early quit penalty active [exp: %s]", FormatDuration(remainingTime))
 			}
 			logger.Info("Player joining with active early quit penalty (client-side enforcement expected)",
@@ -1057,7 +1057,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 					// and quit-history record, the eqconfig mutation/write, and
 					// the notifications/DMs.
 					groupID := state.GetGroupID().String()
-					enforce := earlyQuitEnforcementEnabled(ctx, groupID)
+					enforce := earlyQuitEnforcementEnabled(ctx, nk, logger, groupID)
 					if !enforce {
 						logger.WithFields(map[string]any{
 							"uid":      mp.GetUserId(),
@@ -1470,7 +1470,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				// enforcement is disabled, suppress ALL side effects: the
 				// eqconfig mutation/write and the leaderboard/quit-history
 				// record.
-				if earlyQuitEnforcementEnabled(ctx, state.GetGroupID().String()) {
+				if earlyQuitEnforcementEnabled(ctx, nk, logger, state.GetGroupID().String()) {
 					eqconfig := NewEarlyQuitPlayerState()
 					if err := StorableRead(ctx, nk, rr.UserID, eqconfig, true); err != nil {
 						logger.WithField("error", err).Warn("Failed to load early quitter config for deferred penalty")

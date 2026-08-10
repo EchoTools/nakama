@@ -92,10 +92,16 @@ type evrTestNakamaModule struct {
 
 	sessions SessionRegistry
 	parties  PartyRegistry
+
+	// groups backs GroupsGetId, which GuildGroupLoad calls first. Tests that
+	// exercise a guild-gated code path must populate this: an empty map means
+	// "group not found", and gates that resolve their guild through nk treat
+	// that as not-opted-in. See optInGuildToEarlyQuitEnforcement.
+	groups map[string]*api.Group
 }
 
 func newEvrTestNakamaModule() *evrTestNakamaModule {
-	return &evrTestNakamaModule{occTestNakamaModule: newOCCTestNakamaModule()}
+	return &evrTestNakamaModule{occTestNakamaModule: newOCCTestNakamaModule(), groups: map[string]*api.Group{}}
 }
 
 // SessionRegistry / PartyRegistry satisfy the narrow provider interfaces the EVR
@@ -103,6 +109,23 @@ func newEvrTestNakamaModule() *evrTestNakamaModule {
 // call sites treat it as "no registry available".
 func (m *evrTestNakamaModule) SessionRegistry() SessionRegistry { return m.sessions }
 func (m *evrTestNakamaModule) PartyRegistry() PartyRegistry     { return m.parties }
+
+// optInGuildToEarlyQuitEnforcement registers a guild whose metadata sets
+// EnforceEarlyQuitPenalty, so earlyQuitEnforcementEnabled resolves it to true.
+//
+// This is required for any test that expects a charge. The gate resolves the
+// guild through nk and fails CLOSED when it cannot -- a guild that does not
+// exist cannot have opted in. Before that, the gate read session parameters and
+// returned true when they were absent, which is the whole reason it never
+// suppressed anything in production: the match runtime's context never carries
+// them.
+func optInGuildToEarlyQuitEnforcement(t *testing.T, m *evrTestNakamaModule, groupID string) {
+	t.Helper()
+	m.groups[groupID] = &api.Group{
+		Id:       groupID,
+		Metadata: `{"enforce_early_quit_penalty":true}`,
+	}
+}
 
 func (m *evrTestNakamaModule) StorageList(ctx context.Context, callerID, userID, collection string, limit int, cursor string) ([]*api.StorageObject, string, error) {
 	m.mu.Lock()
@@ -171,7 +194,13 @@ func (m *evrTestNakamaModule) LeaderboardRecordsList(ctx context.Context, id str
 }
 
 func (m *evrTestNakamaModule) GroupsGetId(ctx context.Context, groupIDs []string) ([]*api.Group, error) {
-	return nil, nil
+	out := make([]*api.Group, 0, len(groupIDs))
+	for _, id := range groupIDs {
+		if g, ok := m.groups[id]; ok {
+			out = append(out, g)
+		}
+	}
+	return out, nil
 }
 
 // FriendsList reports a player with no friends and therefore no ghosted/blocked
