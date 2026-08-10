@@ -462,7 +462,20 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		consumedSlotReservationSessionID = r.Presence.GetSessionId()
 	}
 	if consumedSlotReservation != nil {
-		meta.Presence.PartyID = consumedSlotReservation.Presence.PartyID
+		// Only adopt a party identity the reservation actually carries. A
+		// reservation built without one holds uuid.Nil, and copying that over
+		// the joiner's real PartyID erases their party membership: the
+		// leave-time party cleanup below is keyed on `mp.PartyID != uuid.Nil`,
+		// so it would be skipped, and the player is reported party-less in the
+		// match label, the match summary and the early-quit record.
+		//
+		// getOnlinePartyReservations (the /create path) omits PartyID while
+		// its two sibling builders set it, which is how this was found. Guard
+		// here rather than at each builder so a future builder that forgets
+		// cannot reintroduce the erasure.
+		if consumedSlotReservation.Presence.PartyID != uuid.Nil {
+			meta.Presence.PartyID = consumedSlotReservation.Presence.PartyID
+		}
 		meta.Presence.RoleAlignment = consumedSlotReservation.Presence.RoleAlignment
 		state.rebuildCache()
 		logger = logger.WithField("has_reservation", true)

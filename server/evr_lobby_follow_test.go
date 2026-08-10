@@ -1095,7 +1095,7 @@ func TestDuoDesync_MonitorCancelsFollowerContext_DuringPoll(t *testing.T) {
 	}
 	monitorDone := make(chan struct{})
 	go func() {
-		MonitorMatchmakingStreamV2(ctx, logger, mmSession, 500*time.Millisecond, 500*time.Millisecond, cancel)
+		MonitorMatchmakingStreamV2(ctx, logger, mmSession, scaledDuration(500*time.Millisecond), scaledDuration(500*time.Millisecond), cancel)
 		close(monitorDone)
 	}()
 
@@ -1142,9 +1142,25 @@ func TestDuoDesync_MonitorCancelsFollowerContext_DuringPoll(t *testing.T) {
 		t.Fatal("pollFollowPartyLeader did not return within 12 seconds")
 	}
 
+	// Precondition, not decoration. This test is named for the monitor
+	// canceling the follower's context mid-poll, but the assertion above is
+	// satisfied whether or not the monitor ever ran. If the monitor's check
+	// interval is longer than the context's own deadline it never reaches a
+	// single check, the context ends by timeout instead, and the test passes
+	// having exercised nothing. Requiring a cancellation rather than a
+	// deadline expiry makes that failure visible.
+	select {
+	case <-monitorDone:
+	case <-time.After(scaledDuration(10 * time.Second)):
+		t.Fatal("matchmaking monitor never returned, so it cannot have canceled the context")
+	}
+	if ctx.Err() != context.Canceled {
+		t.Errorf("context ended as %v, want context.Canceled: the monitor is supposed to cancel it. "+
+			"A DeadlineExceeded here means the monitor never ran and this test proved nothing.", ctx.Err())
+	}
+
 	// Cleanup
 	cancel()
-	<-monitorDone
 }
 
 // TestDuoDesync_FollowerRetryLoop_ContextAlwaysCanceled demonstrates the
@@ -1220,7 +1236,7 @@ func TestDuoDesync_FollowerRetryLoop_ContextAlwaysCanceled(t *testing.T) {
 			Stream:    PresenceStream{Mode: StreamModeMatchmaking, Subject: groupID},
 			Tracker:   tracker,
 		}
-		go MonitorMatchmakingStreamV2(ctx, logger, mmSession, 300*time.Millisecond, 300*time.Millisecond, cancel)
+		go MonitorMatchmakingStreamV2(ctx, logger, mmSession, scaledDuration(300*time.Millisecond), scaledDuration(300*time.Millisecond), cancel)
 
 		// Simulate: TryFollowPartyLeader runs first. Leader is NOT matchmaking,
 		// so it proceeds to check leader's match. Follower is NOT in leader's
@@ -1352,7 +1368,7 @@ func TestDuoDesync_TryFollow_LeaderStillMatchmaking_FallsToDesyncPoll(t *testing
 		Stream:    PresenceStream{Mode: StreamModeMatchmaking, Subject: groupID},
 		Tracker:   tracker,
 	}
-	go MonitorMatchmakingStreamV2(ctx2, logger, mmSession, 300*time.Millisecond, 300*time.Millisecond, cancel2)
+	go MonitorMatchmakingStreamV2(ctx2, logger, mmSession, scaledDuration(300*time.Millisecond), scaledDuration(300*time.Millisecond), cancel2)
 
 	pollResult := make(chan bool, 1)
 	go func() {

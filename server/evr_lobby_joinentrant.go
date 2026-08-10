@@ -449,7 +449,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		}
 
 		if tooNew, ageDays := accountTooNew(t, minDiscordAgeDays, time.Now()); tooNew {
-			reason := fmt.Sprintf("Your Discord account age (%d days) is too new (<%d days) to join this guild. ", ageDays, minDiscordAgeDays)
+			reason := fmt.Sprintf("Your Discord account age (%d days) is too new (<%d days) to play in this guild.", ageDays, minDiscordAgeDays)
 			auditLog := fmt.Sprintf("discord account age (%d < %d days).", ageDays, minDiscordAgeDays)
 			return joinRejected("account_age", reason, auditLog)
 		}
@@ -475,7 +475,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		}
 
 		if tooNew, ageDays := accountTooNew(createdAt, gg.MinimumNakamaAccountAgeDays, time.Now()); tooNew {
-			reason := fmt.Sprintf("Your EchoVR account age (%d days) is too new (<%d days) to join this guild. ", ageDays, gg.MinimumNakamaAccountAgeDays)
+			reason := fmt.Sprintf("Your EchoVR account age (%d days) is too new (<%d days) to play in this guild.", ageDays, gg.MinimumNakamaAccountAgeDays)
 			auditLog := fmt.Sprintf("echovr account age (%d < %d days).", ageDays, gg.MinimumNakamaAccountAgeDays)
 			return joinRejected("nakama_account_age", reason, auditLog)
 		}
@@ -583,7 +583,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		allowedFeatures := gg.AllowedFeatures
 		for _, feature := range params.supportedFeatures {
 			if !slices.Contains(allowedFeatures, feature) {
-				reason := fmt.Sprintf("You are not allowed to join this guild with the feature `%s` enabled.", feature)
+				reason := fmt.Sprintf("You are not allowed to play in this guild with the feature `%s` enabled.", feature)
 				auditLog := fmt.Sprintf("feature `%s` not allowed in this guild", feature)
 				return joinRejected("feature_not_allowed", reason, auditLog)
 			}

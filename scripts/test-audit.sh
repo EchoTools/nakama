@@ -141,6 +141,18 @@ for pkg, floor in sorted(FLOORS.items()):
             f"{short}: {passed[pkg]} passing test(s), floor is {floor}"
         )
 
+if violations and go_status != 0:
+    # The tests already failed, and a build error or a genuine failure drives
+    # the pass count to zero all by itself. Leading with "COVERAGE FLOOR
+    # VIOLATED" here points the reader at the floor -- and at the advice to
+    # change it -- when the thing to fix is printed far earlier in the log.
+    print()
+    print("note: the coverage floor was also missed, but the test run itself failed.")
+    print("      Fix the failure above first; the floor is a consequence, not the cause.")
+    for v in violations:
+        print(f"  {v}")
+    sys.exit(go_status)
+
 if violations:
     print()
     print("COVERAGE FLOOR VIOLATED -- this run did not execute what it claims to.")

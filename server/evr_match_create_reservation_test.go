@@ -161,3 +161,86 @@ func TestMatchJoinAttempt_CreateReservationHoldsSlotAgainstBackfill(t *testing.T
 		t.Error("follower should now be a real presence in the match")
 	}
 }
+
+// TestMatchJoinAttempt_ReservationWithoutPartyIDPreservesJoinersParty pins the
+// party identity of a player who joins by consuming a reservation.
+//
+// MatchJoinAttempt adopts the reservation's PartyID onto the joining presence.
+// getOnlinePartyReservations -- the /create path -- builds its placeholders
+// without a PartyID, so that copy wrote uuid.Nil over the follower's real
+// party UUID, which lobbyFind had already set from lobbyParams.PartyID.
+//
+// The consequence is not cosmetic: the leave-time party-reservation cleanup in
+// MatchLeave is keyed on `mp.PartyID != uuid.Nil`, so it is skipped for the
+// erased player, and the match label, match summary and early-quit record all
+// report them as having no party.
+//
+// Note that TestMatchJoinAttempt_CreateReservationHoldsSlotAgainstBackfill
+// above constructs its reservation WITH a PartyID while describing itself as
+// exercising the production conversion -- which is why this went unnoticed.
+// This test deliberately builds the reservation the way production does.
+func TestMatchJoinAttempt_ReservationWithoutPartyIDPreservesJoinersParty(t *testing.T) {
+	state := newSocialTestMatchLabel()
+	state.Mode = evr.ModeSocialPublic
+	state.LobbyType = PublicLobby
+	state.MaxSize = 4
+	state.PlayerLimit = 4
+
+	realPartyID := uuid.Must(uuid.NewV4())
+	followerUserID := uuid.Must(uuid.NewV4())
+	followerLoginSessionID := uuid.Must(uuid.NewV4())
+	followerMatchSessionID := uuid.Must(uuid.NewV4())
+
+	// Exactly what getOnlinePartyReservations emits: no PartyID field.
+	state.reservationMap[followerLoginSessionID.String()] = &slotReservation{
+		Presence: &EvrMatchPresence{
+			Node:          "testnode",
+			SessionID:     followerLoginSessionID,
+			UserID:        followerUserID,
+			Username:      "follower",
+			RoleAlignment: evr.TeamSocial,
+		},
+		Expiry: time.Now().Add(45 * time.Second),
+	}
+	state.rebuildCache()
+
+	m := &EvrMatch{}
+	ctx := context.Background()
+	logger := NewRuntimeGoLogger(NewJSONLogger(os.Stdout, zapcore.ErrorLevel, JSONFormat))
+	nk := &reconnectTestNakamaModule{}
+	disp := &reconnectTestDispatcher{}
+
+	// The follower arrives on a different session than the placeholder, with
+	// their real party identity already set by lobbyFind.
+	followerPresence := &EvrMatchPresence{
+		Node:          "testnode",
+		SessionID:     followerMatchSessionID,
+		UserID:        followerUserID,
+		EvrID:         evr.EvrId{PlatformCode: 4, AccountId: 2},
+		Username:      "follower",
+		PartyID:       realPartyID,
+		RoleAlignment: evr.TeamSocial,
+		SessionExpiry: 9999999999,
+	}
+	meta := NewJoinMetadata(followerPresence)
+	resultState, allowed, reason := m.MatchJoinAttempt(ctx, logger, nil, nk, disp, 0, state, followerPresence, meta.ToMatchMetadata())
+	if !allowed {
+		t.Fatalf("expected the follower to join by consuming their reservation, got rejected: %s", reason)
+	}
+	state = resultState.(*MatchLabel)
+
+	// The user-ID fallback must have matched despite the differing session ID.
+	if _, stillHeld := state.reservationMap[followerLoginSessionID.String()]; stillHeld {
+		t.Error("reservation was not consumed — the user-ID fallback did not match the placeholder session")
+	}
+
+	joined, ok := state.presenceMap[followerMatchSessionID.String()]
+	if !ok {
+		t.Fatal("follower is not in the presence map after a successful join")
+	}
+	if joined.PartyID != realPartyID {
+		t.Errorf("follower's PartyID is %v, want %v — consuming a reservation that carries no party "+
+			"must not erase the party the joiner arrived with; MatchLeave's party cleanup is keyed on "+
+			"PartyID != uuid.Nil and would now skip this player", joined.PartyID, realPartyID)
+	}
+}

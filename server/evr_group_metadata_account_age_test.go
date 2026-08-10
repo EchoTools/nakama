@@ -44,8 +44,17 @@ func TestMinimumDiscordAccountAge_LegacyKey(t *testing.T) {
 			want: 0,
 		},
 		{
-			// An explicit zero on the new key must not resurrect the legacy
-			// value. Setting it to zero is how a guild turns the gate off.
+			// An explicit zero on the new key falls back to the legacy value,
+			// so a guild with a stored minimum_account_age_days keeps its gate
+			// until that key is cleared too. This is deliberate and
+			// fail-closed: zero is indistinguishable from unset on an int, so
+			// preferring the legacy value cannot silently disable an
+			// enforcement setting a guild had turned on.
+			//
+			// The consequence is real and is asserted, not glossed: writing 0
+			// to the new key does NOT turn the gate off while the legacy key
+			// is set. Do not "fix" the accessor to match a tidier reading --
+			// that converts fail-closed precedence into fail-open.
 			name: "NewKeyZeroWithLegacySet",
 			raw:  `{"minimum_discord_account_age_days": 0, "minimum_account_age_days": 30}`,
 			want: 30,

@@ -145,7 +145,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 
 	dg.AddHandlerOnce(func(s *discordgo.Session, m *discordgo.Ready) {
 
-		// Create a user for the bot based on it's discord profile.
+		// Create a user for the bot based on its discord profile.
 		//
 		// Both fields come from m, the handler's own READY payload, rather than
 		// from s.State: m is not shared with the gateway goroutine, so it needs
