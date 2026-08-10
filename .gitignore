@@ -759,3 +759,10 @@ BUGS.md
 /tools/*/*
 !/tools/*/*.*
 !/tools/*/*/
+
+# Session artifacts. Handoffs, campaign summaries and dated test plans are
+# ephemeral by policy -- see "Handoffs are ephemeral" in AGENTS.md. Ignored so
+# they cannot be committed by habit; write them outside the repo.
+docs/handoff-*.md
+docs/campaign-*.md
+docs/test-plan-*.md
