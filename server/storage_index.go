@@ -57,6 +57,13 @@ type storageIndex struct {
 }
 
 type LocalStorageIndex struct {
+	// loadPageSize is the row batch size used by load(). Zero means the
+	// production default. It is overridable so a test can reproduce the
+	// page-boundary case cheaply: MaxEntries landing exactly on a page
+	// boundary is the normal production alignment, and it is the case the
+	// in-page truncation probe cannot decide.
+	loadPageSize int
+
 	logger                *zap.Logger
 	db                    *sql.DB
 	metrics               Metrics
@@ -438,6 +445,16 @@ func (si *LocalStorageIndex) Load(ctx context.Context) error {
 	return rangeError
 }
 
+// storageIndexLoadPageSize is the number of rows load() reads per query.
+const storageIndexLoadPageSize = 10_000
+
+func (si *LocalStorageIndex) pageSize() int {
+	if si.loadPageSize > 0 {
+		return si.loadPageSize
+	}
+	return storageIndexLoadPageSize
+}
+
 func (si *LocalStorageIndex) load(ctx context.Context, idx *storageIndex) error {
 	query := `
 SELECT user_id, key, version, value, read, write, create_time, update_time
@@ -445,7 +462,7 @@ FROM storage
 WHERE collection = $1
 ORDER BY collection, key, user_id
 LIMIT $2`
-	params := []any{idx.Collection, 10_000}
+	params := []any{idx.Collection, si.pageSize()}
 
 	if idx.Key != "" {
 		query = `
@@ -526,9 +543,15 @@ LIMIT $2`
 			if count >= idx.MaxEntries {
 				// Reaching MaxEntries is not by itself truncation: a collection
 				// holding exactly MaxEntries rows fills the index with nothing
-				// left over. Only a row that exists past the cap proves rows
-				// were dropped. rows is closed immediately below and pagination
-				// stops either way, so consuming one more row costs nothing.
+				// left over. Only a row existing past the cap proves rows were
+				// dropped.
+				//
+				// This settles it when the cap is hit MID-page. It cannot settle
+				// the page boundary: the load pages at 10_000 and every index
+				// here sets MaxEntries to a multiple of that, so the cap is
+				// normally reached on a page's LAST row and rows.Next() is false
+				// even when the collection continues. That case is resolved
+				// after the loop by asking the database directly.
 				truncated = rows.Next()
 				break
 			}
@@ -537,6 +560,20 @@ LIMIT $2`
 
 		if err = idx.Index.Batch(batch); err != nil {
 			return err
+		}
+
+		if count >= idx.MaxEntries && !truncated && dbUserID != nil {
+			// The cap was reached exactly as the page ran out, so the in-page
+			// probe above could not tell truncation from a perfect fit. One
+			// bounded lookup for a single row past the last one indexed settles
+			// it. This runs at most once per load, and only for a full index.
+			hasMore, probeErr := si.collectionHasRowPast(ctx, idx, dbKey, dbUserID)
+			if probeErr != nil {
+				si.logger.Error("Failed to determine whether the storage index truncated at load; assuming it did not",
+					zap.String("index_name", idx.Name), zap.Error(probeErr))
+			} else {
+				truncated = hasMore
+			}
 		}
 
 		if count >= idx.MaxEntries || !rowsRead {
@@ -572,10 +609,49 @@ AND user_id > $4
 ORDER BY collection, key, user_id
 LIMIT $2`
 		}
-		params = []any{idx.Collection, 10_000, dbKey, dbUserID}
+		params = []any{idx.Collection, si.pageSize(), dbKey, dbUserID}
 	}
 
 	return nil
+}
+
+// collectionHasRowPast reports whether the collection holds any row ordered
+// after (lastKey, lastUserID), using the same keyset ordering the load
+// pagination uses.
+//
+// It exists so the boot-time truncation warning can tell "the index filled and
+// rows remain" from "the index filled exactly". Detecting that from the page
+// buffer alone is not possible when MaxEntries lands on a page boundary, which
+// is the normal case here: pages are 10,000 rows and the indexes in this
+// codebase use MaxEntries of 10,000 / 100,000 / 1,000,000.
+func (si *LocalStorageIndex) collectionHasRowPast(ctx context.Context, idx *storageIndex, lastKey string, lastUserID *uuid.UUID) (bool, error) {
+	query := `
+SELECT 1
+FROM storage
+WHERE collection = $1
+AND (collection, key, user_id) > ($1, $2, $3)
+LIMIT 1`
+	args := []any{idx.Collection, lastKey, lastUserID}
+
+	if idx.Key != "" {
+		query = `
+SELECT 1
+FROM storage
+WHERE collection = $1
+AND key = $2
+AND user_id > $3
+LIMIT 1`
+		args = []any{idx.Collection, idx.Key, lastUserID}
+	}
+
+	var found int
+	if err := si.db.QueryRowContext(ctx, query, args...).Scan(&found); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func (si *LocalStorageIndex) mapIndexStorageFields(userID, collection, key, version, value string, read, write int32, createTime, updateTime time.Time, filters []string, sortFilters []string, indexOnly bool) (*bluge.Document, error) {

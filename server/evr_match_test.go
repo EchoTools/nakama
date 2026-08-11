@@ -892,6 +892,29 @@ type reconnectTestNakamaModule struct {
 	storageReads  []*runtime.StorageRead
 	storageDelete []*runtime.StorageDelete
 	streamUsers   []runtime.Presence
+
+	// earlyQuitStateJSON is what StorageRead returns for EarlyQuit|statistics.
+	// Empty means the default below. Tests that need a player with existing
+	// state -- a moderator exemption, a prior quit count -- set it, because
+	// this double does not persist what StorableWrite hands it.
+	earlyQuitStateJSON string
+}
+
+// GroupsGetId reports the fixture's guild as having opted in to early-quit
+// enforcement.
+//
+// The charge gate resolves the guild through nk and fails closed when it
+// cannot, so a double that returns nothing would suppress every charge and the
+// tests that assert one would fail for a reason unrelated to what they test.
+// reconnectTestState leaves MatchLabel.GroupID nil, so the gate asks about
+// uuid.Nil; answering for any requested ID keeps this double indifferent to
+// which fixture calls it.
+func (m *reconnectTestNakamaModule) GroupsGetId(ctx context.Context, groupIDs []string) ([]*api.Group, error) {
+	out := make([]*api.Group, 0, len(groupIDs))
+	for _, id := range groupIDs {
+		out = append(out, &api.Group{Id: id, Metadata: `{"enforce_early_quit_penalty":true}`})
+	}
+	return out, nil
 }
 
 func (m *reconnectTestNakamaModule) StreamUserList(mode uint8, subject, subcontext, label string, includeHidden, includeNotHidden bool) ([]runtime.Presence, error) {
@@ -924,6 +947,13 @@ func (m *reconnectTestNakamaModule) LeaderboardCreate(ctx context.Context, id st
 	return nil
 }
 
+func (m *reconnectTestNakamaModule) earlyQuitState() string {
+	if m.earlyQuitStateJSON != "" {
+		return m.earlyQuitStateJSON
+	}
+	return `{"matchmaking_tier":1}`
+}
+
 func (m *reconnectTestNakamaModule) StorageRead(ctx context.Context, keys []*runtime.StorageRead) ([]*api.StorageObject, error) {
 	m.storageReads = append(m.storageReads, keys...)
 	for _, key := range keys {
@@ -932,7 +962,7 @@ func (m *reconnectTestNakamaModule) StorageRead(ctx context.Context, keys []*run
 				Collection:     StorageCollectionEarlyQuit,
 				Key:            StorageKeyEarlyQuit,
 				UserId:         key.UserID,
-				Value:          `{"matchmaking_tier":1}`,
+				Value:          m.earlyQuitState(),
 				Version:        "v1",
 				PermissionRead: int32(runtime.STORAGE_PERMISSION_NO_READ),
 			}}, nil

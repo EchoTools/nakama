@@ -460,20 +460,52 @@ func isEarlyQuitEnforcementTestUser(userID string) bool {
 // the group is not in them), enforcement remains enabled — the lookup is
 // lenient and never blocks enforcement on a cache miss. Only a known guild
 // with the flag explicitly set true enables it.
-func earlyQuitEnforcementEnabled(ctx context.Context, groupID string) bool {
-	params, ok := LoadParams(ctx)
-	if !ok {
-		return true
+func earlyQuitEnforcementEnabled(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, groupID string) bool {
+	if groupID == "" {
+		return false
 	}
-	// A nil entry is treated exactly like an absent one. The nil guard inside
-	// GetEnforceEarlyQuitPenalty cannot catch it: GroupMetadata is embedded by
-	// VALUE in GuildGroup, so gg.GetEnforceEarlyQuitPenalty() takes the address
-	// &gg.GroupMetadata before the method body runs and a nil gg panics first.
-	gg, ok := params.guildGroups[groupID]
-	if !ok || gg == nil {
-		return true
+
+	// Resolved through nk, NOT through session parameters.
+	//
+	// This gate previously read params.guildGroups via LoadParams(ctx) and
+	// returned true when they were absent. ctxSessionParametersKey is planted
+	// only on the WebSocket session context (session_ws.go); the context Nakama
+	// hands a match callback is built by the match runtime and never carries
+	// it. So every match-side caller -- the MatchLeave charge, the MatchLoop
+	// deferred charge, and MatchJoinAttempt -- took the fail-open branch on
+	// every real invocation, and the flag suppressed nothing: quit counters,
+	// lockouts, tier degradation and "flagged for early quitting" DMs were
+	// applied in guilds that never opted in.
+	//
+	// nk is available to every match callback, so the lookup now works from the
+	// contexts that actually call this.
+	// Read the group metadata directly rather than going through
+	// GuildGroupLoad, which additionally loads GuildGroupState -- a second
+	// storage read, keyed on the Discord bot user ID, that this decision does
+	// not use. The opt-in flag lives in the group's metadata and nowhere else.
+	groups, err := nk.GroupsGetId(ctx, []string{groupID})
+	var md *GroupMetadata
+	if err == nil && len(groups) > 0 {
+		md = &GroupMetadata{}
+		if jsonErr := json.Unmarshal([]byte(groups[0].Metadata), md); jsonErr != nil {
+			md, err = nil, jsonErr
+		}
 	}
-	return gg.GetEnforceEarlyQuitPenalty()
+	if err != nil || md == nil {
+		// Fail CLOSED, which is the reverse of what this did before.
+		//
+		// The setting is opt-in: the absence of an explicit yes is a no. Being
+		// unable to read a guild's configuration is not evidence that it wanted
+		// enforcement, and the cost of guessing wrong is asymmetric -- a missed
+		// charge is recoverable, while a wrongly-charged player accrues a
+		// lifetime NumEarlyQuits increment that never decays and moves them
+		// permanently down the penalty ladder.
+		if err != nil {
+			logger.WithField("group_id", groupID).Warn("Could not resolve guild for early-quit enforcement; not charging")
+		}
+		return false
+	}
+	return md.GetEnforceEarlyQuitPenalty()
 }
 
 func (s *EarlyQuitPlayerState) GetPenaltyLevel() int {

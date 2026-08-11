@@ -330,7 +330,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			logger.Debug("Failed to load early quit config for logging", zap.Error(err))
 		} else if eqConfig.PenaltyLevel > 0 && eqConfig.PenaltyTimestamp > 0 && time.Now().Unix() < eqConfig.PenaltyTimestamp {
 			remainingTime := time.Until(time.Unix(eqConfig.PenaltyTimestamp, 0))
-			if isEarlyQuitEnforcementTestUser(joinPresence.GetUserId()) && earlyQuitEnforcementEnabled(ctx, state.GetGroupID().String()) {
+			if isEarlyQuitEnforcementTestUser(joinPresence.GetUserId()) && earlyQuitEnforcementEnabled(ctx, nk, logger, state.GetGroupID().String()) {
 				return state, false, fmt.Sprintf("early quit penalty active [exp: %s]", FormatDuration(remainingTime))
 			}
 			logger.Info("Player joining with active early quit penalty (client-side enforcement expected)",
@@ -476,7 +476,17 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		if consumedSlotReservation.Presence.PartyID != uuid.Nil {
 			meta.Presence.PartyID = consumedSlotReservation.Presence.PartyID
 		}
-		meta.Presence.RoleAlignment = consumedSlotReservation.Presence.RoleAlignment
+		// Do not let a reservation seat someone in the stands. The TeamAlignments
+		// path below already refuses to adopt spectator/moderator for exactly this
+		// reason; the reservation path adopted them unconditionally, so a
+		// reservation built with TeamSpectator would force the joiner into a
+		// spectator slot and skip the auto-assign that would have given them a
+		// team. Same guard, same place, same reasoning as the PartyID check above:
+		// at the consume site, so no future builder can reintroduce it.
+		if consumedSlotReservation.Presence.RoleAlignment != evr.TeamSpectator &&
+			consumedSlotReservation.Presence.RoleAlignment != evr.TeamModerator {
+			meta.Presence.RoleAlignment = consumedSlotReservation.Presence.RoleAlignment
+		}
 		state.rebuildCache()
 		logger = logger.WithField("has_reservation", true)
 	}
@@ -1047,7 +1057,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 					// and quit-history record, the eqconfig mutation/write, and
 					// the notifications/DMs.
 					groupID := state.GetGroupID().String()
-					enforce := earlyQuitEnforcementEnabled(ctx, groupID)
+					enforce := earlyQuitEnforcementEnabled(ctx, nk, logger, groupID)
 					if !enforce {
 						logger.WithFields(map[string]any{
 							"uid":      mp.GetUserId(),
@@ -1460,10 +1470,23 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				// enforcement is disabled, suppress ALL side effects: the
 				// eqconfig mutation/write and the leaderboard/quit-history
 				// record.
-				if earlyQuitEnforcementEnabled(ctx, state.GetGroupID().String()) {
+				deferredGroupID := state.GetGroupID().String()
+				if earlyQuitEnforcementEnabled(ctx, nk, logger, deferredGroupID) {
+					charged := false
 					eqconfig := NewEarlyQuitPlayerState()
 					if err := StorableRead(ctx, nk, rr.UserID, eqconfig, true); err != nil {
 						logger.WithField("error", err).Warn("Failed to load early quitter config for deferred penalty")
+					} else if eqconfig.IsExempt(deferredGroupID) {
+						// A moderator exempted this player. The immediate charge
+						// path in MatchLeave honours that; this one did not, so a
+						// player who was explicitly protected was still charged
+						// whenever they failed to reconnect inside the crash
+						// window -- i.e. exactly the crash case the exemption is
+						// most often granted for.
+						logger.WithFields(map[string]any{
+							"uid":      rr.UserID,
+							"group_id": deferredGroupID,
+						}).Info("Deferred early quit penalty skipped: player is exempt in this guild")
 					} else {
 						eqconfig.IncrementEarlyQuit()
 						resolveAndApplyPenaltyLockout(ctx, nk, logger, eqconfig)
@@ -1471,12 +1494,16 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 						if err := StorableWrite(ctx, nk, rr.UserID, eqconfig); err != nil {
 							logger.WithField("error", err).Warn("Failed to write early quitter config for deferred penalty")
 						}
+						charged = true
 					}
 
 					// A deferred penalty must produce the same side effects as the
 					// immediate charge path in MatchLeave: the increment log line,
-					// the leaderboard stat, and the quit-history record.
-					if rr.Presence != nil {
+					// the leaderboard stat, and the quit-history record. An exempt
+					// player gets none of them -- recording the quit while
+					// suppressing the counter would still feed the moderator-facing
+					// quit stats and re-punish them by another route.
+					if charged && rr.Presence != nil {
 						recordEarlyQuitForPlayer(ctx, logger, nk, state, rr.Presence, LeaveReasonReservationExp)
 					}
 				}

@@ -292,6 +292,20 @@ func newChargeModule(t *testing.T) (*evrTestNakamaModule, *sql.DB) {
 	t.Helper()
 	nk := newEvrTestNakamaModule()
 	nk.sessions = NewLocalSessionRegistry(&testMetrics{})
+
+	// Opt the match's guild in to early-quit enforcement.
+	//
+	// The charge gate resolves the guild through nk and fails closed when it
+	// cannot, so without this every test here would assert against a guild that
+	// never opted in and no charge would happen. reconnectTestState leaves
+	// MatchLabel.GroupID nil, so the gate sees uuid.Nil -- that is the guild
+	// these fixtures run in (spelled out rather than uuid.Nil to avoid an import
+	// solely for a constant).
+	//
+	// Tests that need the flag OFF set their own group metadata instead; see
+	// TestEarlyQuitChargeGate_GuildEnforcementFlag.
+	optInGuildToEarlyQuitEnforcement(t, nk, "00000000-0000-0000-0000-000000000000")
+
 	return nk, nil
 }
 

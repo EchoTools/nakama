@@ -819,24 +819,41 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	// For social modes, use TeamUnassigned. For competitive modes, use the
 	// requested role (spectator keeps the creator off a team) or default to
 	// TeamBlue when no role was specified.
-	teamAlignment := evr.TeamUnassigned
+	// The requested role belongs to the CREATOR, not to their party. `role:spectator`
+	// means "put me in the stands"; it does not mean the three friends who came with
+	// them also came to watch. The comment this replaces said as much -- "spectator
+	// keeps the creator off a team" -- while the loop below stamped it on everyone.
+	//
+	// It only became reachable once /create started resolving party members at all,
+	// so there was never a symptom to notice.
+	creatorAlignment := evr.TeamUnassigned
+	memberAlignment := evr.TeamUnassigned
 	if mode == evr.ModeArenaPrivate || mode == evr.ModeArenaPublic ||
 		mode == evr.ModeCombatPrivate || mode == evr.ModeCombatPublic {
+		memberAlignment = evr.TeamBlue
 		if role == Spectator {
-			teamAlignment = evr.TeamSpectator
+			creatorAlignment = evr.TeamSpectator
 		} else {
-			teamAlignment = evr.TeamBlue
+			creatorAlignment = evr.TeamBlue
 		}
 	}
 
 	teamAlignments := make(map[string]int, len(partyUserIDs))
 	for _, memberUserID := range partyUserIDs {
-		teamAlignments[memberUserID] = teamAlignment
+		if memberUserID == userID {
+			teamAlignments[memberUserID] = creatorAlignment
+			continue
+		}
+		teamAlignments[memberUserID] = memberAlignment
 	}
 
 	// Hold slots for online party members against backfill (RESV-1). The creator
-	// joins directly via the normal join race, so only followers need a reservation.
-	reservations := getOnlinePartyReservations(ctx, d.nk, logger, userID, partyUserIDs, teamAlignment)
+	// joins directly via the normal join race, so only followers need a reservation
+	// -- and they get the member alignment, never the creator's spectator role.
+	//
+	// node comes from the pipeline, not the context: this is a Discord slash
+	// command, and the appbot's context never carries RUNTIME_CTX_NODE.
+	reservations := getOnlinePartyReservations(d.nk, logger, userID, partyUserIDs, memberAlignment, d.pipeline.node)
 
 	settings := &MatchSettings{
 		Mode:                mode,

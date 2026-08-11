@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // groupDeleteRecorderModule records GroupDelete calls. handleGuildDelete's only
@@ -133,32 +136,121 @@ func TestHandleGuildDelete_UnknownGuildIsNoOp(t *testing.T) {
 	require.Empty(t, nk.deleted)
 }
 
-// TestEarlyQuitEnforcementEnabled_NilGuildGroupEntry pins the same nil-*GuildGroup
-// class of bug on the other site the review flagged.
+// TestEarlyQuitEnforcementEnabled_FailsClosedWhenGuildUnresolvable pins the
+// direction this gate errs in.
 //
-// GetEnforceEarlyQuitPenalty opens with `if g == nil` — but its receiver is
-// *GroupMetadata, and GroupMetadata is embedded by VALUE in GuildGroup. The call
-// `gg.GetEnforceEarlyQuitPenalty()` is shorthand for
-// `(&gg.GroupMetadata).GetEnforceEarlyQuitPenalty()`, so the receiver address is
-// computed from gg BEFORE the method body runs. A nil gg therefore panics and the
-// guard never fires: it is decorative at this call site.
+// It used to read the guild from session parameters and return TRUE when they
+// were absent. ctxSessionParametersKey is planted only on the WebSocket session
+// context; the context Nakama hands a match callback never carries it, so every
+// match-side caller took that fail-open branch on every real invocation and the
+// opt-in flag suppressed nothing. Players in guilds that never opted in accrued
+// quit counters, lockouts, tier degradation and Discord DMs.
 //
-// GuildUserGroupsList currently filters nil registry lookups out of the map, so
-// the panic is not reachable through that path today. The guard is cheap, matches
-// the defensive nil check evr_lobby_joinentrant.go already applies to the same
-// map, and stops a future populator from turning a map entry into a crash.
-func TestEarlyQuitEnforcementEnabled_NilGuildGroupEntry(t *testing.T) {
+// It now resolves through nk, and when that fails it returns FALSE. The setting
+// is opt-in, so the absence of an explicit yes is a no, and the costs are
+// asymmetric: a missed charge is recoverable, while a wrongly-charged player
+// takes a lifetime NumEarlyQuits increment that never decays.
+func TestEarlyQuitEnforcementEnabled_FailsClosedWhenGuildUnresolvable(t *testing.T) {
+	logger := NewRuntimeGoLogger(NewJSONLogger(os.Stdout, zapcore.ErrorLevel, JSONFormat))
+
+	t.Run("empty group id does not charge", func(t *testing.T) {
+		require.False(t, earlyQuitEnforcementEnabled(context.Background(), &guildLookupFailsNakamaModule{}, logger, ""),
+			"no guild means no opt-in; charging would punish a player for a lookup we never made")
+	})
+
+	t.Run("group lookup error does not charge", func(t *testing.T) {
+		groupID := uuid.Must(uuid.NewV4()).String()
+		var enabled bool
+		require.NotPanics(t, func() {
+			enabled = earlyQuitEnforcementEnabled(context.Background(), &guildLookupFailsNakamaModule{}, logger, groupID)
+		})
+		require.False(t, enabled,
+			"an unreadable guild configuration is not evidence the guild wanted enforcement")
+	})
+
+	t.Run("guild that opted in does charge", func(t *testing.T) {
+		groupID := uuid.Must(uuid.NewV4()).String()
+		nk := newEvrTestNakamaModule()
+		optInGuildToEarlyQuitEnforcement(t, nk, groupID)
+		require.True(t, earlyQuitEnforcementEnabled(context.Background(), nk, logger, groupID),
+			"a guild with enforce_early_quit_penalty set must enforce")
+	})
+
+	t.Run("guild present but not opted in does not charge", func(t *testing.T) {
+		groupID := uuid.Must(uuid.NewV4()).String()
+		nk := newEvrTestNakamaModule()
+		nk.groups[groupID] = &api.Group{Id: groupID, Metadata: `{}`}
+		require.False(t, earlyQuitEnforcementEnabled(context.Background(), nk, logger, groupID),
+			"an existing guild that never set the flag has not opted in")
+	})
+
+	t.Run("group not found does not charge", func(t *testing.T) {
+		groupID := uuid.Must(uuid.NewV4()).String()
+		require.False(t, earlyQuitEnforcementEnabled(context.Background(), &guildMissingNakamaModule{}, logger, groupID),
+			"a group that does not exist cannot have opted in")
+	})
+}
+
+// guildLookupFailsNakamaModule fails the group read GuildGroupLoad starts with.
+type guildLookupFailsNakamaModule struct {
+	runtime.NakamaModule
+}
+
+func (m *guildLookupFailsNakamaModule) GroupsGetId(ctx context.Context, groupIDs []string) ([]*api.Group, error) {
+	return nil, errors.New("simulated group read failure")
+}
+
+// guildMissingNakamaModule returns no groups, as happens for an unknown ID.
+type guildMissingNakamaModule struct {
+	runtime.NakamaModule
+}
+
+func (m *guildMissingNakamaModule) GroupsGetId(ctx context.Context, groupIDs []string) ([]*api.Group, error) {
+	return nil, nil
+}
+
+// TestHandleGuildDelete_ReportOnlyFreezesTheDelete pins report_only against the
+// promise its own documentation makes.
+//
+// PruneSettings.ReportOnly is described as making a pass "perform NO writes at
+// all ... the operator's single freeze switch during an incident". It gated the
+// prune pass and nothing else, so this event path deleted guild groups straight
+// through the freeze.
+//
+// That matters because of when it fires. An operator sets report_only during a
+// Discord incident, which is exactly when Discord's reads are least
+// trustworthy -- the same premise the prune pass was hardened against. A
+// GUILD_DELETE arriving then destroyed the group's role mappings, channel IDs
+// and suspension inheritance, and a re-add returned a fresh group with default
+// metadata. There is no undo.
+func TestHandleGuildDelete_ReportOnlyFreezesTheDelete(t *testing.T) {
+	const guildID = "323456789012345678"
 	groupID := uuid.Must(uuid.NewV4()).String()
 
-	params := &SessionParameters{
-		guildGroups: map[string]*GuildGroup{groupID: nil},
-	}
-	ctx := context.WithValue(context.Background(), ctxSessionParametersKey{}, atomic.NewPointer(params))
+	restore := ServiceSettings()
+	t.Cleanup(func() { ServiceSettingsUpdate(restore) })
 
-	var enabled bool
-	require.NotPanics(t, func() {
-		enabled = earlyQuitEnforcementEnabled(ctx, groupID)
+	frozen := &ServiceSettingsData{}
+	frozen.PruneSettings.ReportOnly = true
+	frozen.PruneSettings.DeleteOrphanedGroups = true // armed, and still must not fire
+	ServiceSettingsUpdate(frozen)
+
+	nk := &groupDeleteRecorderModule{}
+	d := newGuildDeleteTestIntegrator(t, nk)
+
+	d.idcache.Store(guildID, groupID)
+	d.idcache.Store(groupID, guildID)
+	d.guildGroupRegistry.Add(&GuildGroup{
+		GroupMetadata: GroupMetadata{GuildID: guildID},
+		Group:         &api.Group{Id: groupID, Name: "Frozen Guild"},
 	})
-	require.True(t, enabled,
-		"an unusable guild-group entry must fall through to the lenient default, like an absent one")
+
+	err := d.handleGuildDelete(zap.NewNop(), nil, &discordgo.GuildDelete{
+		Guild: &discordgo.Guild{ID: guildID, OwnerID: "987654321098765432"},
+	})
+	require.NoError(t, err)
+
+	require.Empty(t, nk.deleted,
+		"report_only must freeze the event-driven group delete, not only the prune pass; "+
+			"the group can be collected later, but a deleted one cannot be recovered")
 }

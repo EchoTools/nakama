@@ -1172,3 +1172,98 @@ func TestPartyHandler_PromoteThenMatchmake(t *testing.T) {
 		t.Fatal("expected ticket")
 	}
 }
+
+// --- Party-split on reconnect: the two acts -------------------------------
+//
+// These pin the production shape of the party-split lockout, which two prior
+// reviews disagreed about because each saw only one half of it.
+//
+// EVR creates ONLY open parties (evr_lobby_group.go: GetOrCreateByGroupName
+// with open=true). Every existing JoinRequest test builds the handler with
+// open=false, so the path production actually runs had no coverage at all.
+
+// TestPartyHandler_OpenPartyJoinRequestIgnoresIdentity is act two.
+//
+// For an open party the already-member check at the bottom of JoinRequest is
+// unreachable: the capacity check returns ErrPartyFull first, and the Open
+// branch returns before identity is ever considered. So a member reconnecting
+// into their own full party is told the party is full, with no bypass for the
+// fact that they are already in it.
+//
+// This is what the player sees as "party is full" on reconnect, and what turns
+// a reconnect storm into a lockout: every retry hits the same wall.
+func TestPartyHandler_OpenPartyJoinRequestIgnoresIdentity(t *testing.T) {
+	const maxSize = 4
+	ph, cleanup := createLightPartyHandler(t, loggerForTest(t), true, maxSize, nil)
+	defer cleanup()
+
+	members, _ := addMembers(t, ph, maxSize)
+	if got := ph.members.Size(); got != maxSize {
+		t.Fatalf("precondition: expected a full party of %d, got %d", maxSize, got)
+	}
+
+	// An existing member asks to join again -- the shape of a reconnect whose
+	// stale entry is still counted.
+	_, err := ph.JoinRequest(members[0])
+
+	if errors.Is(err, runtime.ErrPartyJoinRequestAlreadyMember) {
+		t.Fatal("open-party JoinRequest now recognises an existing member; " +
+			"the reconnect lockout is fixed and this test should assert the new behaviour")
+	}
+	if !errors.Is(err, runtime.ErrPartyFull) {
+		t.Fatalf("expected ErrPartyFull (identity is not consulted for open parties), got %v", err)
+	}
+
+	// The same request against a CLOSED party is recognised, which is the
+	// asymmetry: the protection exists, and the only kind of party EVR builds
+	// cannot reach it.
+	closed, closedCleanup := createLightPartyHandler(t, loggerForTest(t), false, maxSize, nil)
+	defer closedCleanup()
+	closedMembers, _ := addMembers(t, closed, 1)
+	if _, err := closed.JoinRequest(closedMembers[0]); !errors.Is(err, runtime.ErrPartyJoinRequestAlreadyMember) {
+		t.Fatalf("closed party should recognise an existing member, got %v", err)
+	}
+}
+
+// TestPartyHandler_JoinSilentlyDropsMemberWhenFull is act one, and it is the
+// half that leaves no trace.
+//
+// A reconnecting member is re-tracked on the party stream, which drives
+// PartyHandler.Join. With their stale session still counted the party is at
+// MaxSize, PartyPresenceList.Join returns ErrPartyFull, and Join logs
+// "Should not happen, this process is just a confirmation" and returns.
+//
+// The presence is now tracked on the stream but absent from ph.members. The
+// leader's matchmaking cohort is built from members, so the reconnecting
+// player is silently excluded -- split off from their own party with no error
+// surfaced to anyone. Act two is only what they see on the next attempt.
+func TestPartyHandler_JoinSilentlyDropsMemberWhenFull(t *testing.T) {
+	const maxSize = 4
+	ph, cleanup := createLightPartyHandler(t, loggerForTest(t), true, maxSize, nil)
+	defer cleanup()
+
+	members, _ := addMembers(t, ph, maxSize)
+	original := members[1]
+
+	// Same user, new session: a reconnect before the old presence is untracked.
+	reconnect := newPresenceWithIDs(partyTestNode, uuid.Must(uuid.NewV4()), original.UserID)
+
+	before := ph.members.Size()
+	ph.Join([]*Presence{reconnect})
+	after := ph.members.Size()
+
+	if after != before {
+		t.Fatalf("expected the roster to be unchanged at %d (the join was rejected as full), got %d", before, after)
+	}
+
+	for _, m := range ph.members.presences {
+		if m.Presence.GetSessionId() == reconnect.GetSessionId() {
+			t.Fatal("reconnecting session is now in the roster; PartyHandler.Join no longer drops it " +
+				"and this test should assert the new behaviour")
+		}
+	}
+
+	// The player is on the stream but not in the party, and nothing returned an
+	// error to say so. This is the defect: Join has no way to report failure --
+	// its signature returns nothing.
+}

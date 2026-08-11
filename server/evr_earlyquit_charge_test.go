@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"go.uber.org/atomic"
 )
 
 // chargeTestLeaderboardCache is a LeaderboardCache test double whose Get returns
@@ -81,6 +81,10 @@ func TestEarlyQuitChargeGate_SetsPenaltyState(t *testing.T) {
 
 	// --- arena-public, pre-matchover match with one player mid-round ---
 	state := reconnectTestState(evr.ModeArenaPublic)
+	// The charge gate resolves the guild through nk and fails closed when it
+	// cannot. Opt this guild in explicitly; the gate no longer charges just
+	// because it could not tell.
+	optInGuildToEarlyQuitEnforcement(t, nk, state.GetGroupID().String())
 	// The charge gate persists LastEarlyQuitMatchID; MatchID only round-trips
 	// through storage with a non-empty node (prod always sets one).
 	state.ID.Node = "test-node"
@@ -155,8 +159,18 @@ func TestEarlyQuitChargeGate_GuildEnforcementFlag(t *testing.T) {
 			writeEarlyQuitServiceConfig(t, ctx, nk, defaultEarlyQuitConfigJSON(t))
 
 			// The guild hosting the match, with the enforcement flag under test.
+			//
+			// The flag is set in the group's METADATA, which is where production
+			// keeps it and where the gate now reads it. This used to be planted on
+			// the context as session parameters -- a shape the match runtime never
+			// builds -- so the subtests below agreed with each other while the
+			// production gate always enforced regardless of the flag.
 			guildID := uuid.Must(uuid.NewV4())
-			ctx = withGuildEnforcement(ctx, guildID, tc.enforce)
+			metadata := `{}`
+			if tc.enforce != nil {
+				metadata = fmt.Sprintf(`{"enforce_early_quit_penalty":%t}`, *tc.enforce)
+			}
+			nk.groups[guildID.String()] = &api.Group{Id: guildID.String(), Metadata: metadata}
 
 			// Player with 2 prior early quits (3rd quit crosses into penalty level 1).
 			player := reconnectTestPlayer(fmt.Sprintf("charge-guild-flag-%d", i), evr.TeamBlue)
@@ -214,43 +228,16 @@ func TestEarlyQuitChargeGate_GuildEnforcementFlag(t *testing.T) {
 	}
 }
 
-// withGuildEnforcement returns a copy of ctx whose session parameters map the
-// given guild to a GuildGroup carrying the given EnforceEarlyQuitPenalty flag
-// (nil leaves the flag unset — the getter's default).
+// NOTE: withGuildEnforcement used to live here. It planted the guild-enforcement
+// flag on the context as session parameters, and every subtest above went
+// through it. That context shape is built only by the WebSocket session; the
+// match runtime's context never carries it, so the gate those subtests claimed
+// to exercise took its fail-open branch in production and enforced for every
+// guild regardless of the flag. The helper's own comment said so.
 //
-// WARNING — THIS CONTEXT SHAPE DOES NOT OCCUR IN PRODUCTION.
-//
-// ctxSessionParametersKey{} is planted on the *session* context by the EVR
-// pipeline. The context that the Nakama match runtime hands to MatchLeave is
-// built by the match runtime, not by a session, and it never carries that key.
-// So the branch that TestEarlyQuitChargeGate_GuildEnforcementFlag exercises
-// through this helper is reachable only from the test.
-//
-// Consequence: that test does NOT prove the guild opt-in gate works. In
-// production earlyQuitEnforcementEnabled cannot find the session parameters, so
-// LoadParams fails and it takes its fail-open `return true` branch — every guild
-// is treated as opted in and the flag never suppresses anything. That is a real
-// production bug; it is deliberately NOT fixed here (this change set is a
-// testability refactor and must not alter behaviour) and needs its own PR. Do
-// not read a green run of this test as evidence the gate is enforced.
-//
-// What the test DOES now prove, which it could not before: the subtests actually
-// execute. Until the *RuntimeGoNakamaModule assertion was removed from the charge
-// gate they were skipped for want of a database, and before that a test double
-// fell straight through the assertion's `continue`. Flipping
-// earlyQuitEnforcementEnabled to an unconditional `return true` now turns the
-// guild-flag-nil and guild-flag-false cases red, so the suppression branch is
-// genuinely exercised — just from a context production never constructs.
-func withGuildEnforcement(ctx context.Context, guildID uuid.UUID, enforce *bool) context.Context {
-	params := &SessionParameters{
-		guildGroups: map[string]*GuildGroup{
-			guildID.String(): {
-				GroupMetadata: GroupMetadata{EnforceEarlyQuitPenalty: enforce},
-			},
-		},
-	}
-	return context.WithValue(ctx, ctxSessionParametersKey{}, atomic.NewPointer(params))
-}
+// The flag now lives where production keeps it -- the group's metadata, read
+// through nk -- so there is nothing left to fake, and the subtests exercise the
+// same code path a real match does.
 
 func boolPtr(b bool) *bool { return &b }
 
@@ -316,6 +303,10 @@ func TestEarlyQuitChargeGate_UsesStoredConfigLadder(t *testing.T) {
 	}
 
 	state := reconnectTestState(evr.ModeArenaPublic)
+	// The charge gate resolves the guild through nk and fails closed when it
+	// cannot. Opt this guild in explicitly; the gate no longer charges just
+	// because it could not tell.
+	optInGuildToEarlyQuitEnforcement(t, nk, state.GetGroupID().String())
 	state.ID.Node = "test-node"
 	state.presenceMap[player.GetSessionId()] = player
 	state.presenceByEvrID[player.EvrID] = player
@@ -385,6 +376,10 @@ func TestEarlyQuitChargeGate_ClearsPenaltyAtLevelZero(t *testing.T) {
 	}
 
 	state := reconnectTestState(evr.ModeArenaPublic)
+	// The charge gate resolves the guild through nk and fails closed when it
+	// cannot. Opt this guild in explicitly; the gate no longer charges just
+	// because it could not tell.
+	optInGuildToEarlyQuitEnforcement(t, nk, state.GetGroupID().String())
 	state.ID.Node = "test-node"
 	state.presenceMap[player.GetSessionId()] = player
 	state.presenceByEvrID[player.EvrID] = player

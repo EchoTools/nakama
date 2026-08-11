@@ -320,7 +320,7 @@ func TestStorageIndexLoad_TruncationWarnRequiresActualTruncation(t *testing.T) {
 
 	// writeN writes n objects into the collection, then builds a fresh index
 	// over it and Loads. It returns the number of truncation warnings emitted.
-	loadWarnings := func(t *testing.T, n int) int {
+	loadWarningsWith := func(t *testing.T, maxEntries, pageSize, n int) int {
 		t.Helper()
 
 		db := NewDB(t)
@@ -365,6 +365,9 @@ func TestStorageIndexLoad_TruncationWarnRequiresActualTruncation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if pageSize > 0 {
+			loadIdx.(*LocalStorageIndex).loadPageSize = pageSize
+		}
 		if err := loadIdx.CreateIndex(ctx, indexName, collection, "", []string{"one"}, []string{}, maxEntries, false); err != nil {
 			t.Fatal(err)
 		}
@@ -373,6 +376,18 @@ func TestStorageIndexLoad_TruncationWarnRequiresActualTruncation(t *testing.T) {
 		}
 
 		return logs.FilterMessage(warnMsg).Len()
+	}
+
+	loadWarnings := func(t *testing.T, n int) int {
+		t.Helper()
+		return loadWarningsWith(t, maxEntries, 0, n)
+	}
+
+	// loadWarningsPaged reproduces the production alignment: MaxEntries equal to
+	// the page size, so the cap is reached on a page's last row.
+	loadWarningsPaged := func(t *testing.T, size, n int) int {
+		t.Helper()
+		return loadWarningsWith(t, size, size, n)
 	}
 
 	t.Run("exactly MaxEntries rows is not truncation", func(t *testing.T) {
@@ -386,6 +401,29 @@ func TestStorageIndexLoad_TruncationWarnRequiresActualTruncation(t *testing.T) {
 		if got := loadWarnings(t, maxEntries+1); got != 1 {
 			t.Errorf("collection holding MaxEntries+1 (%d) rows emitted %d truncation warning(s), want 1; "+
 				"rows were genuinely dropped and the operator must be told", maxEntries+1, got)
+		}
+	})
+
+	t.Run("truncation is detected when the cap lands on a page boundary", func(t *testing.T) {
+		// The original fix probed for an extra row with rows.Next() on the page
+		// buffer. That cannot see past the end of a page, and the load pages at
+		// 10,000 rows while every index in this codebase sets MaxEntries to a
+		// multiple of that -- so in production the cap is reached on a page's
+		// LAST row and the probe always came back false. The warning could not
+		// fire for any index that could actually truncate.
+		//
+		// loadWarningsPaged sets MaxEntries equal to the page size, reproducing
+		// that alignment at a size a test can afford.
+		if got := loadWarningsPaged(t, 4, 5); got != 1 {
+			t.Errorf("collection holding one row past a page-aligned MaxEntries emitted %d truncation "+
+				"warning(s), want 1; the in-page probe cannot see past the page and the database must be asked", got)
+		}
+	})
+
+	t.Run("exact page-aligned fit is not truncation", func(t *testing.T) {
+		if got := loadWarningsPaged(t, 4, 4); got != 0 {
+			t.Errorf("collection holding exactly a page-aligned MaxEntries emitted %d truncation warning(s), "+
+				"want 0; the index filled exactly and nothing was dropped", got)
 		}
 	})
 }

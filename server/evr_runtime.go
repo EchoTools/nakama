@@ -706,7 +706,17 @@ func RuntimeLoggerToZapLogger(logger runtime.Logger) *zap.Logger {
 // getPartyMembersForUser retrieves all party members for a user, including the user themselves.
 // If the user is not in a party, it returns only the user's ID.
 // This function never returns an error - all failure cases result in returning just the user's ID.
-func getPartyMembersForUser(ctx context.Context, nk runtime.NakamaModule, partyRegistry PartyRegistry, userID string) []string {
+//
+// node is the Nakama node name, used as the party stream's label. It is a
+// PARAMETER, not a context lookup, because the only caller is a Discord slash
+// command: the appbot's context is hand-built (evr_pipeline.go, background +
+// bot token + env) and never carries runtime.RUNTIME_CTX_NODE. Reading it from
+// the context — copied from the RPC handlers in this file, where Nakama does
+// supply it — made this function return the caller alone on every real
+// invocation, so /create never resolved a party at all. The failure was
+// invisible because "no node" and "not in a party" produce the same result.
+// The node is available on the caller as d.pipeline.node.
+func getPartyMembersForUser(ctx context.Context, nk runtime.NakamaModule, partyRegistry PartyRegistry, userID, node string) []string {
 	// Load the user's matchmaking settings to get their party group
 	settings, err := LoadMatchmakingSettings(ctx, nk, userID)
 	if err != nil {
@@ -723,8 +733,7 @@ func getPartyMembersForUser(ctx context.Context, nk runtime.NakamaModule, partyR
 		return []string{userID}
 	}
 
-	node, ok := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
-	if !ok {
+	if node == "" {
 		return []string{userID}
 	}
 
@@ -753,9 +762,14 @@ func getPartyMembersForUser(ctx context.Context, nk runtime.NakamaModule, partyR
 // skipped -- reservations can only be made for resolvable, connected presences.
 // This function never returns an error; unresolvable members are silently skipped
 // (matching getPartyMembersForUser's fail-open convention above).
-func getOnlinePartyReservations(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, creatorUserID string, partyUserIDs []string, roleAlignment int) []*EvrMatchPresence {
-	node, ok := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
-	if !ok {
+//
+// node is a PARAMETER for the same reason as getPartyMembersForUser: the only
+// caller is a Discord slash command whose context never carries
+// runtime.RUNTIME_CTX_NODE, so reading it there returned nil every time and the
+// whole slot-hold feature was inert in production while its test passed by
+// planting the key itself.
+func getOnlinePartyReservations(nk runtime.NakamaModule, logger runtime.Logger, creatorUserID string, partyUserIDs []string, roleAlignment int, node string) []*EvrMatchPresence {
+	if node == "" {
 		return nil
 	}
 
