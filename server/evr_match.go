@@ -2209,7 +2209,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			//
 			// Capacity still binds for genuinely new reservations, which is what
 			// the guard was added for.
-			refresh := state.hasReservationForUserID(member.GetUserId())
+			refresh := state.hasReservationFor(member)
 			if !refresh && state.OpenSlots() <= 0 {
 				skipped++
 				continue

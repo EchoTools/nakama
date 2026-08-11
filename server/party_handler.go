@@ -128,7 +128,13 @@ func (p *PartyHandler) JoinRequest(presence *Presence) (bool, error) {
 	// which is the reconnect-storm lockout in the ops case.
 	//
 	// A closed party already behaved this way; this makes the two agree.
-	for _, member := range p.members.presences {
+	//
+	// List() reads the atomic snapshot rather than p.members.presences
+	// directly. PartyPresenceList has its own mutex, and holding the handler's
+	// lock does not confer it -- JoinPartyGroup's rollback path calls
+	// members.Leave without holding the handler lock at all, so a direct read
+	// of the slice races it. The snapshot is what every other reader uses.
+	for _, member := range p.members.List() {
 		if member.Presence.UserID == presence.UserID {
 			p.Unlock()
 			return false, runtime.ErrPartyJoinRequestAlreadyMember

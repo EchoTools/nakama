@@ -103,19 +103,20 @@ func (m *PartyPresenceList) Join(joins []*Presence) ([]*Presence, error) {
 		if reservationFound || presenceFound {
 			continue
 		}
-		// Replacing one of this user's own sessions frees the slot it holds.
-		replacesOwnSession := false
-		for _, existing := range m.presences {
-			if existing.Presence.UserID == join.UserID && existing.Presence.ID.SessionID != join.ID.SessionID {
-				replacesOwnSession = true
-				break
-			}
-		}
-		if !replacesOwnSession {
-			newPresences++
-		}
+		newPresences++
 	}
-	if newPresences > 0 && len(m.reservedMap)+len(m.presenceMap)+newPresences > m.maxSize {
+
+	// Compare against the occupancy this call will actually produce, not the
+	// current one: the stale sessions above are removed below, so counting them
+	// would reject a batch that fits.
+	//
+	// That is not hypothetical. A user carrying two stale sessions (which a
+	// reconnect storm could produce before this fix) whose replacement arrives
+	// batched with one genuine newcomer would be refused, even though dropping
+	// the two stale entries leaves room for both -- and the caller
+	// (PartyHandler.Join) discards ErrPartyFull, so the refusal would be the
+	// same silent roster drop this change exists to remove.
+	if newPresences > 0 && len(m.reservedMap)+len(m.presenceMap)-len(staleSessions)+newPresences > m.maxSize {
 		m.Unlock()
 		return nil, runtime.ErrPartyFull
 	}

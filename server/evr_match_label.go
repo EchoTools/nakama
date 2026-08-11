@@ -168,24 +168,33 @@ func (s *MatchLabel) LoadAndDeleteReservationByUserIDRaw(userID string) (*slotRe
 // same member can never net to zero reservations. Callers are expected to
 // rebuildCache() afterward (as the create paths already do) so the derived
 // capacity counters reflect the change.
-// hasReservationForUserID reports whether this member already holds a slot
+// hasReservationFor reports whether this member already holds a slot
 // reservation, under any session ID.
 //
 // It exists to tell a REFRESH from a new booking. upsertReservationByUserID
 // deletes any existing reservation for the user before inserting, so refreshing
 // one is slot-neutral -- and a capacity check that cannot see the difference
 // refuses to extend the expiry of a member who is already holding a seat.
-func (s *MatchLabel) hasReservationForUserID(userID string) bool {
-	uid := uuid.FromStringOrNil(userID)
-	if uid == uuid.Nil {
+//
+// The match falls back to the session ID when the user ID is nil, exactly as
+// upsertReservationByUserID does: a nil user ID is not a stable identity, so
+// those reservations are keyed on session instead. Matching only on user ID
+// would treat a nil-ID member's refresh as a new booking and skip it in a full
+// lobby -- the very case this exists to prevent.
+func (s *MatchLabel) hasReservationFor(presence *EvrMatchPresence) bool {
+	if presence == nil {
 		return false
 	}
-	for _, r := range s.reservationMap {
-		if r.Presence.UserID == uid {
-			return true
+	if presence.UserID != uuid.Nil {
+		for _, r := range s.reservationMap {
+			if r.Presence.UserID == presence.UserID {
+				return true
+			}
 		}
+		return false
 	}
-	return false
+	_, ok := s.reservationMap[presence.GetSessionId()]
+	return ok
 }
 
 func (s *MatchLabel) upsertReservationByUserID(reservation *slotReservation) {
