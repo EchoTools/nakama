@@ -168,6 +168,26 @@ func (s *MatchLabel) LoadAndDeleteReservationByUserIDRaw(userID string) (*slotRe
 // same member can never net to zero reservations. Callers are expected to
 // rebuildCache() afterward (as the create paths already do) so the derived
 // capacity counters reflect the change.
+// hasReservationForUserID reports whether this member already holds a slot
+// reservation, under any session ID.
+//
+// It exists to tell a REFRESH from a new booking. upsertReservationByUserID
+// deletes any existing reservation for the user before inserting, so refreshing
+// one is slot-neutral -- and a capacity check that cannot see the difference
+// refuses to extend the expiry of a member who is already holding a seat.
+func (s *MatchLabel) hasReservationForUserID(userID string) bool {
+	uid := uuid.FromStringOrNil(userID)
+	if uid == uuid.Nil {
+		return false
+	}
+	for _, r := range s.reservationMap {
+		if r.Presence.UserID == uid {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *MatchLabel) upsertReservationByUserID(reservation *slotReservation) {
 	userID := reservation.Presence.UserID
 	// A nil user ID is not a stable identity; key on session ID only in that

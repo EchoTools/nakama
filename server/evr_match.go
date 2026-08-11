@@ -2156,6 +2156,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal create party reservations: %v", err)}.String()
 		}
 		created := 0
+		refreshed := 0
 		skipped := 0
 		for _, member := range payload.Members {
 			// Skip if the member is already an active presence. Match by user ID,
@@ -2196,7 +2197,20 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			// stale value for every member: two followers would both pass a
 			// one-slot check and both get in. Recomputing per member is what
 			// makes the guard hold for the second one.
-			if state.OpenSlots() <= 0 {
+			// A member who already holds a reservation is REFRESHING it, and
+			// upsertReservationByUserID deletes the old one before inserting, so
+			// the operation consumes no additional slot. Gating that on
+			// OpenSlots meant a follower in a full lobby could never have their
+			// expiry extended: their client re-sends LobbyFindSessionRequest,
+			// the signal fires, the guard skips them, and at the 5-minute expiry
+			// rebuildCache drops the reservation and a backfill player takes the
+			// seat they were holding -- the party split this subsystem exists to
+			// prevent.
+			//
+			// Capacity still binds for genuinely new reservations, which is what
+			// the guard was added for.
+			refresh := state.hasReservationForUserID(member.GetUserId())
+			if !refresh && state.OpenSlots() <= 0 {
 				skipped++
 				continue
 			}
@@ -2208,15 +2222,30 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 				Presence: member,
 				Expiry:   time.Now().Add(5 * time.Minute),
 			})
-			created++
+			if refresh {
+				refreshed++
+			} else {
+				created++
+			}
 			// Make the reservation visible to the next iteration's OpenSlots().
 			state.rebuildCache()
 		}
-		logger.WithFields(map[string]any{
+		// createReservationForNewPartyMember signals on every follower's
+		// LobbyFindSessionRequest re-send, so a full lobby with retrying
+		// followers produced a steady stream of Info lines announcing "Created"
+		// alongside created: 0. Say what happened, and only raise it to Info
+		// when something did.
+		reservationFields := map[string]any{
 			"requested": len(payload.Members),
 			"created":   created,
+			"refreshed": refreshed,
 			"skipped":   skipped,
-		}).Info("Created party reservations via signal")
+		}
+		if created > 0 || refreshed > 0 {
+			logger.WithFields(reservationFields).Info("Party reservations updated via signal")
+		} else {
+			logger.WithFields(reservationFields).Debug("Party reservation signal made no changes")
+		}
 
 	case SignalClearPartyReservations:
 		var payload SignalClearPartyReservationsPayload

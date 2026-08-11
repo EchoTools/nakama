@@ -254,3 +254,41 @@ func TestHandleGuildDelete_ReportOnlyFreezesTheDelete(t *testing.T) {
 		"report_only must freeze the event-driven group delete, not only the prune pass; "+
 			"the group can be collected later, but a deleted one cannot be recovered")
 }
+
+// TestPruneDeletesAllowed_SuppressedAfterBoot pins the post-restart grace on
+// destructive prunes.
+//
+// unavailableGuilds -- the record of which guilds are merely dark rather than
+// departed -- lives only in memory. A restart erases it, and it is the only
+// thing between a Discord read anomaly and an unrecoverable GroupDelete.
+// Normally READY lists unavailable guilds as stubs and they are protected
+// anyway, but a READY that omits a member guild is precisely the "Discord is
+// lying" case this pass was hardened against, and it is most likely during the
+// incident that caused the restart.
+//
+// Leaves and the non-destructive repair pass are deliberately unaffected:
+// re-inviting the bot undoes a leave, nothing undoes a delete.
+func TestPruneDeletesAllowed_SuppressedAfterBoot(t *testing.T) {
+	cases := []struct {
+		name       string
+		configured bool
+		uptime     time.Duration
+		want       bool
+	}{
+		{"armed, just booted", true, 0, false},
+		{"armed, one prune interval in", true, 15 * time.Minute, false},
+		{"armed, one second short of the grace", true, pruneDeleteStartupGrace - time.Second, false},
+		{"armed, grace elapsed", true, pruneDeleteStartupGrace, true},
+		{"armed, long-running process", true, 72 * time.Hour, true},
+		{"not configured, grace elapsed", false, 72 * time.Hour, false},
+		{"not configured, just booted", false, 0, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pruneDeletesAllowed(tc.configured, tc.uptime); got != tc.want {
+				t.Errorf("pruneDeletesAllowed(%t, %v) = %t, want %t", tc.configured, tc.uptime, got, tc.want)
+			}
+		})
+	}
+}

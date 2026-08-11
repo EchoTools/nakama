@@ -63,6 +63,11 @@ type DiscordIntegrator struct {
 	// is the only remaining evidence that they exist. See
 	// unavailableGuildIDsAsOf.
 	unavailableGuilds *MapOf[string, time.Time]
+
+	// startedAt is when this process began tracking guild availability. The
+	// unavailable-guild record above lives only in memory, so immediately after
+	// a restart there is none -- see pruneDeleteStartupGrace.
+	startedAt time.Time
 }
 
 // unavailableGuildGraceTTL is how long a guild that went unavailable keeps
@@ -71,6 +76,32 @@ type DiscordIntegrator struct {
 // in is simply absent from READY and no GUILD_DELETE ever arrives for it, so
 // without an expiry its entry would never be cleared.
 const unavailableGuildGraceTTL = 24 * time.Hour
+
+// pruneDeleteStartupGrace is how long after boot the prune pass refuses to
+// DELETE guild groups, regardless of configuration.
+//
+// unavailableGuilds is process-local: a restart erases every record of which
+// guilds were merely dark, and the only thing standing between a Discord read
+// anomaly and an unrecoverable GroupDelete is that record. Normally READY
+// lists unavailable guilds as stubs and they are protected anyway -- but a
+// READY that omits a member guild is exactly the "Discord is lying" case this
+// pass was hardened against, and it is most likely during the incident that
+// caused the restart.
+//
+// Two prune intervals is enough for a gateway to settle and for the first
+// GUILD_CREATE burst to land. Leaves and the non-destructive repair pass are
+// unaffected: a leave is recoverable by re-inviting the bot, a delete is not.
+const pruneDeleteStartupGrace = 30 * time.Minute
+
+// pruneDeletesAllowed reports whether the prune pass may delete guild groups,
+// given how long this process has been tracking guild availability.
+//
+// Split out from the loop so the rule can be tested without a gateway: the
+// decision is the whole point, and it runs inside a goroutine started by
+// Start().
+func pruneDeletesAllowed(configured bool, uptime time.Duration) bool {
+	return configured && uptime >= pruneDeleteStartupGrace
+}
 
 func NewDiscordIntegrator(ctx context.Context, logger *zap.Logger, config Config, metrics Metrics, nk runtime.NakamaModule, db *sql.DB, dg *discordgo.Session, guildGroupRegistry *GuildGroupRegistry) *DiscordIntegrator {
 	ctx, cancelFn := context.WithCancel(ctx)
@@ -92,6 +123,7 @@ func NewDiscordIntegrator(ctx context.Context, logger *zap.Logger, config Config
 		idcache:            &MapOf[string, string]{},
 		memberCache:        &MapOf[string, cachedMember]{},
 		unavailableGuilds:  &MapOf[string, time.Time]{},
+		startedAt:          time.Now(),
 
 		queueCh: make(chan QueueEntry, 50),
 	}
@@ -204,6 +236,12 @@ func (c *DiscordIntegrator) Start() {
 					doGroupDeletes:  prune.DeleteOrphanedGroups,
 					safetyThreshold: prune.SafetyLimit,
 					reportOnly:      prune.ReportOnly,
+				}
+				if uptime := time.Since(c.startedAt); !pruneDeletesAllowed(cfg.doGroupDeletes, uptime) && cfg.doGroupDeletes {
+					cfg.doGroupDeletes = false
+					logger.Warn("Prune: group deletes suppressed, still inside the post-boot grace period",
+						zap.Duration("uptime", uptime),
+						zap.Duration("grace", pruneDeleteStartupGrace))
 				}
 				if err := c.pruneGuildGroups(c.ctx, runtimeLogger, cfg); err != nil {
 					logger.Error("Error pruning guild groups", zap.Error(err), zap.Bool("do_leaves", cfg.doGuildLeaves), zap.Bool("do_deletes", cfg.doGroupDeletes), zap.Int("prune_safety_threshold", cfg.safetyThreshold))
