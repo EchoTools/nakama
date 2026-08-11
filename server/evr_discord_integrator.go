@@ -824,6 +824,25 @@ func (d *DiscordIntegrator) handleGuildDelete(logger *zap.Logger, _ *discordgo.S
 		logger.Info("Deleting guild group (not present in registry)", zap.String("group_id", groupID))
 	}
 
+	// report_only is documented as "the operator's single freeze switch during
+	// an incident", and it was not one: it gated the prune pass only, while
+	// this event path deleted groups regardless. A GUILD_DELETE arriving mid
+	// incident -- which is precisely when Discord's reads are least
+	// trustworthy, and the reason the prune pass learned to distrust them --
+	// destroyed the group's role mappings, channel IDs and suspension
+	// inheritance despite the freeze, and a re-add would come back as a fresh
+	// group with default metadata.
+	//
+	// Under the freeze the group is left in place. If the bot really was
+	// removed, the prune pass collects it once writes are re-armed; the cost
+	// of waiting is a stale group, and the cost of not waiting is
+	// unrecoverable.
+	if ServiceSettings().PruneSettings.ReportOnly {
+		logger.Warn("Guild delete: group NOT deleted, prune settings are report-only",
+			zap.String("group_id", groupID), zap.String("guild_id", e.Guild.ID))
+		return nil
+	}
+
 	if err := d.nk.GroupDelete(d.ctx, groupID); err != nil {
 		return fmt.Errorf("error deleting group: %w", err)
 	}

@@ -208,3 +208,49 @@ type guildMissingNakamaModule struct {
 func (m *guildMissingNakamaModule) GroupsGetId(ctx context.Context, groupIDs []string) ([]*api.Group, error) {
 	return nil, nil
 }
+
+// TestHandleGuildDelete_ReportOnlyFreezesTheDelete pins report_only against the
+// promise its own documentation makes.
+//
+// PruneSettings.ReportOnly is described as making a pass "perform NO writes at
+// all ... the operator's single freeze switch during an incident". It gated the
+// prune pass and nothing else, so this event path deleted guild groups straight
+// through the freeze.
+//
+// That matters because of when it fires. An operator sets report_only during a
+// Discord incident, which is exactly when Discord's reads are least
+// trustworthy -- the same premise the prune pass was hardened against. A
+// GUILD_DELETE arriving then destroyed the group's role mappings, channel IDs
+// and suspension inheritance, and a re-add returned a fresh group with default
+// metadata. There is no undo.
+func TestHandleGuildDelete_ReportOnlyFreezesTheDelete(t *testing.T) {
+	const guildID = "323456789012345678"
+	groupID := uuid.Must(uuid.NewV4()).String()
+
+	restore := ServiceSettings()
+	t.Cleanup(func() { ServiceSettingsUpdate(restore) })
+
+	frozen := &ServiceSettingsData{}
+	frozen.PruneSettings.ReportOnly = true
+	frozen.PruneSettings.DeleteOrphanedGroups = true // armed, and still must not fire
+	ServiceSettingsUpdate(frozen)
+
+	nk := &groupDeleteRecorderModule{}
+	d := newGuildDeleteTestIntegrator(t, nk)
+
+	d.idcache.Store(guildID, groupID)
+	d.idcache.Store(groupID, guildID)
+	d.guildGroupRegistry.Add(&GuildGroup{
+		GroupMetadata: GroupMetadata{GuildID: guildID},
+		Group:         &api.Group{Id: groupID, Name: "Frozen Guild"},
+	})
+
+	err := d.handleGuildDelete(zap.NewNop(), nil, &discordgo.GuildDelete{
+		Guild: &discordgo.Guild{ID: guildID, OwnerID: "987654321098765432"},
+	})
+	require.NoError(t, err)
+
+	require.Empty(t, nk.deleted,
+		"report_only must freeze the event-driven group delete, not only the prune pass; "+
+			"the group can be collected later, but a deleted one cannot be recovered")
+}
