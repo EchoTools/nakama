@@ -984,7 +984,11 @@ func TestStorageIndex_HasNoCrossNodePropagationMechanism(t *testing.T) {
 	}
 	sort.Strings(fields)
 
-	want := []string{"config", "customFilterFunctions", "db", "indexByName", "indicesByCollection", "logger", "metrics"}
+	// loadPageSize is a tuning knob for load()'s row batch size, not a
+	// collaborator: it is an int with a production default, touches no peer and
+	// carries no state between nodes. It exists so a test can reproduce the
+	// page-boundary case that the truncation probe has to handle.
+	want := []string{"config", "customFilterFunctions", "db", "indexByName", "indicesByCollection", "loadPageSize", "logger", "metrics"}
 	if !reflect.DeepEqual(fields, want) {
 		t.Errorf("LocalStorageIndex collaborators changed.\n got: %v\nwant: %v\n"+
 			"If a peer/broadcast collaborator was added, cross-node propagation may now exist and "+
