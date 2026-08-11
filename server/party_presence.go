@@ -74,17 +74,68 @@ func (m *PartyPresenceList) Release(presence *Presence) {
 func (m *PartyPresenceList) Join(joins []*Presence) ([]*Presence, error) {
 	processed := make([]*Presence, 0, len(joins))
 	m.Lock()
+
+	// A join whose USER is already present on a different session is a session
+	// replacement, not a new member -- the reconnect case. Counting it as new
+	// is what made a party reject its own member: capacity is keyed on session
+	// ID, so a reconnecting player's fresh session counted against a limit
+	// their stale session was still occupying. The caller
+	// (PartyHandler.Join, reached from the tracker's Join event) discards the
+	// error as "should not happen", so the player was silently left tracked on
+	// the party stream but absent from the roster, and the leader's matchmaking
+	// cohort excluded them.
+	//
+	// Stale sessions for the same user are dropped below, so the party's
+	// occupancy is unchanged by a replacement and MaxSize still holds.
+	staleSessions := make(map[uuid.UUID]struct{})
+	for _, join := range joins {
+		for _, existing := range m.presences {
+			if existing.Presence.UserID == join.UserID && existing.Presence.ID.SessionID != join.ID.SessionID {
+				staleSessions[existing.Presence.ID.SessionID] = struct{}{}
+			}
+		}
+	}
+
 	var newPresences int
 	for _, join := range joins {
 		_, reservationFound := m.reservedMap[join.ID.SessionID]
 		_, presenceFound := m.presenceMap[join.ID.SessionID]
-		if !reservationFound && !presenceFound {
-			newPresences++
+		if reservationFound || presenceFound {
+			continue
 		}
+		newPresences++
 	}
-	if newPresences > 0 && len(m.reservedMap)+len(m.presenceMap)+newPresences > m.maxSize {
+
+	// Compare against the occupancy this call will actually produce, not the
+	// current one: the stale sessions above are removed below, so counting them
+	// would reject a batch that fits.
+	//
+	// That is not hypothetical. A user carrying two stale sessions (which a
+	// reconnect storm could produce before this fix) whose replacement arrives
+	// batched with one genuine newcomer would be refused, even though dropping
+	// the two stale entries leaves room for both -- and the caller
+	// (PartyHandler.Join) discards ErrPartyFull, so the refusal would be the
+	// same silent roster drop this change exists to remove.
+	if newPresences > 0 && len(m.reservedMap)+len(m.presenceMap)-len(staleSessions)+newPresences > m.maxSize {
 		m.Unlock()
 		return nil, runtime.ErrPartyFull
+	}
+
+	// Drop the superseded sessions before adding the replacements, so the user
+	// never appears twice and occupancy never transiently exceeds MaxSize.
+	if len(staleSessions) > 0 {
+		kept := m.presences[:0]
+		for _, existing := range m.presences {
+			if _, stale := staleSessions[existing.Presence.ID.SessionID]; stale {
+				delete(m.presenceMap, existing.Presence.ID.SessionID)
+				continue
+			}
+			kept = append(kept, existing)
+		}
+		for i := len(kept); i < len(m.presences); i++ {
+			m.presences[i] = nil
+		}
+		m.presences = kept
 	}
 
 	for _, join := range joins {

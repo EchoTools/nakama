@@ -1173,71 +1173,62 @@ func TestPartyHandler_PromoteThenMatchmake(t *testing.T) {
 	}
 }
 
-// --- Party-split on reconnect: the two acts -------------------------------
-//
-// These pin the production shape of the party-split lockout, which two prior
-// reviews disagreed about because each saw only one half of it.
+// --- Party-split on reconnect: the two acts, now fixed ---------------------
 //
 // EVR creates ONLY open parties (evr_lobby_group.go: GetOrCreateByGroupName
-// with open=true). Every existing JoinRequest test builds the handler with
-// open=false, so the path production actually runs had no coverage at all.
+// with open=true). Every pre-existing JoinRequest test builds the handler with
+// open=false, so the path production actually runs had no coverage, which is
+// why two reviews could disagree about this for weeks.
 
-// TestPartyHandler_OpenPartyJoinRequestIgnoresIdentity is act two.
+// TestPartyHandler_OpenPartyJoinRequestRecognisesExistingMember is act two.
 //
-// For an open party the already-member check at the bottom of JoinRequest is
-// unreachable: the capacity check returns ErrPartyFull first, and the Open
-// branch returns before identity is ever considered. So a member reconnecting
-// into their own full party is told the party is full, with no bypass for the
-// fact that they are already in it.
+// JoinRequest checked capacity before identity, and its already-member check
+// sat below the p.Open branch -- unreachable for an open party. A member
+// reconnecting into their own full party was told the party was full, with no
+// bypass for already being in it, and every retry hit the same wall.
 //
-// This is what the player sees as "party is full" on reconnect, and what turns
-// a reconnect storm into a lockout: every retry hits the same wall.
-func TestPartyHandler_OpenPartyJoinRequestIgnoresIdentity(t *testing.T) {
+// Identity is now checked first, because an existing member consumes no new
+// slot. A closed party always behaved this way; the two now agree.
+func TestPartyHandler_OpenPartyJoinRequestRecognisesExistingMember(t *testing.T) {
 	const maxSize = 4
-	ph, cleanup := createLightPartyHandler(t, loggerForTest(t), true, maxSize, nil)
-	defer cleanup()
 
-	members, _ := addMembers(t, ph, maxSize)
-	if got := ph.members.Size(); got != maxSize {
-		t.Fatalf("precondition: expected a full party of %d, got %d", maxSize, got)
-	}
+	for _, open := range []bool{true, false} {
+		name := "closed party"
+		if open {
+			name = "open party"
+		}
+		t.Run(name, func(t *testing.T) {
+			ph, cleanup := createLightPartyHandler(t, loggerForTest(t), open, maxSize, nil)
+			defer cleanup()
 
-	// An existing member asks to join again -- the shape of a reconnect whose
-	// stale entry is still counted.
-	_, err := ph.JoinRequest(members[0])
+			members, _ := addMembers(t, ph, maxSize)
+			if got := ph.members.Size(); got != maxSize {
+				t.Fatalf("precondition: expected a full party of %d, got %d", maxSize, got)
+			}
 
-	if errors.Is(err, runtime.ErrPartyJoinRequestAlreadyMember) {
-		t.Fatal("open-party JoinRequest now recognises an existing member; " +
-			"the reconnect lockout is fixed and this test should assert the new behaviour")
-	}
-	if !errors.Is(err, runtime.ErrPartyFull) {
-		t.Fatalf("expected ErrPartyFull (identity is not consulted for open parties), got %v", err)
-	}
-
-	// The same request against a CLOSED party is recognised, which is the
-	// asymmetry: the protection exists, and the only kind of party EVR builds
-	// cannot reach it.
-	closed, closedCleanup := createLightPartyHandler(t, loggerForTest(t), false, maxSize, nil)
-	defer closedCleanup()
-	closedMembers, _ := addMembers(t, closed, 1)
-	if _, err := closed.JoinRequest(closedMembers[0]); !errors.Is(err, runtime.ErrPartyJoinRequestAlreadyMember) {
-		t.Fatalf("closed party should recognise an existing member, got %v", err)
+			_, err := ph.JoinRequest(members[0])
+			if !errors.Is(err, runtime.ErrPartyJoinRequestAlreadyMember) {
+				t.Fatalf("an existing member must be recognised as one even when the party is full, got %v", err)
+			}
+		})
 	}
 }
 
-// TestPartyHandler_JoinSilentlyDropsMemberWhenFull is act one, and it is the
-// half that leaves no trace.
+// TestPartyHandler_JoinReplacesOwnStaleSession is act one, and it was the half
+// that left no trace.
 //
-// A reconnecting member is re-tracked on the party stream, which drives
-// PartyHandler.Join. With their stale session still counted the party is at
-// MaxSize, PartyPresenceList.Join returns ErrPartyFull, and Join logs
-// "Should not happen, this process is just a confirmation" and returns.
+// Party capacity is keyed on session ID. A reconnecting player's fresh session
+// counted as a new member while their stale session still held a slot, so
+// PartyPresenceList.Join returned ErrPartyFull -- and PartyHandler.Join
+// discards that error as "should not happen, this process is just a
+// confirmation". The player ended up tracked on the party stream but absent
+// from ph.members, so the leader's matchmaking cohort silently excluded them.
+// That is the split. Act two was only what they saw on the next attempt.
 //
-// The presence is now tracked on the stream but absent from ph.members. The
-// leader's matchmaking cohort is built from members, so the reconnecting
-// player is silently excluded -- split off from their own party with no error
-// surfaced to anyone. Act two is only what they see on the next attempt.
-func TestPartyHandler_JoinSilentlyDropsMemberWhenFull(t *testing.T) {
+// A join whose user is already present on a different session is now treated
+// as a session replacement: the stale entry is dropped, the new one takes its
+// place, and occupancy is unchanged.
+func TestPartyHandler_JoinReplacesOwnStaleSession(t *testing.T) {
 	const maxSize = 4
 	ph, cleanup := createLightPartyHandler(t, loggerForTest(t), true, maxSize, nil)
 	defer cleanup()
@@ -1245,25 +1236,49 @@ func TestPartyHandler_JoinSilentlyDropsMemberWhenFull(t *testing.T) {
 	members, _ := addMembers(t, ph, maxSize)
 	original := members[1]
 
-	// Same user, new session: a reconnect before the old presence is untracked.
 	reconnect := newPresenceWithIDs(partyTestNode, uuid.Must(uuid.NewV4()), original.UserID)
-
-	before := ph.members.Size()
 	ph.Join([]*Presence{reconnect})
-	after := ph.members.Size()
 
-	if after != before {
-		t.Fatalf("expected the roster to be unchanged at %d (the join was rejected as full), got %d", before, after)
+	if got := ph.members.Size(); got != maxSize {
+		t.Fatalf("a session replacement must not change occupancy: expected %d, got %d", maxSize, got)
 	}
 
+	var sawReconnect, sawStale bool
 	for _, m := range ph.members.presences {
-		if m.Presence.GetSessionId() == reconnect.GetSessionId() {
-			t.Fatal("reconnecting session is now in the roster; PartyHandler.Join no longer drops it " +
-				"and this test should assert the new behaviour")
+		switch m.Presence.GetSessionId() {
+		case reconnect.GetSessionId():
+			sawReconnect = true
+		case original.GetSessionId():
+			sawStale = true
 		}
 	}
+	if !sawReconnect {
+		t.Error("the reconnecting session is not in the roster; it was dropped, which is the party split -- " +
+			"the player stays tracked on the party stream but the leader's matchmaking cohort excludes them")
+	}
+	if sawStale {
+		t.Error("the superseded session is still in the roster; the user now appears twice and occupies two slots")
+	}
+}
 
-	// The player is on the stream but not in the party, and nothing returned an
-	// error to say so. This is the defect: Join has no way to report failure --
-	// its signature returns nothing.
+// TestPartyHandler_JoinStillRejectsAGenuineNewMemberWhenFull guards the other
+// direction: the replacement path must not become a way past MaxSize.
+func TestPartyHandler_JoinStillRejectsAGenuineNewMemberWhenFull(t *testing.T) {
+	const maxSize = 4
+	ph, cleanup := createLightPartyHandler(t, loggerForTest(t), true, maxSize, nil)
+	defer cleanup()
+
+	addMembers(t, ph, maxSize)
+
+	stranger, _, _ := newPresence(partyTestNode)
+	ph.Join([]*Presence{stranger})
+
+	if got := ph.members.Size(); got != maxSize {
+		t.Fatalf("a full party must still refuse an unrelated joiner: expected %d, got %d", maxSize, got)
+	}
+	for _, m := range ph.members.presences {
+		if m.Presence.GetSessionId() == stranger.GetSessionId() {
+			t.Fatal("an unrelated presence joined a full party; the same-user replacement path must not bypass MaxSize")
+		}
+	}
 }

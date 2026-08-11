@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -158,4 +159,98 @@ func TestCreatePartyReservations_SocialMatch_ReservesFollower(t *testing.T) {
 
 	assert.Contains(t, env.registry.reservedSessionIDs(), follower.id,
 		"a follower whose leader is in a social match must still be reserved")
+}
+
+// TestReservationCapacity_RefreshInFullLobbyIsAllowed pins the distinction
+// between booking a slot and refreshing one already held.
+//
+// The capacity guard ran before the upsert and could not tell the two apart.
+// upsertReservationByUserID deletes any existing reservation for the user
+// before inserting, so refreshing is slot-neutral -- but a follower in a full
+// lobby was skipped every time their client re-sent LobbyFindSessionRequest,
+// so their expiry was never extended. At the 5-minute mark rebuildCache dropped
+// the reservation and a backfill player took the seat they had been holding:
+// the party split this subsystem exists to prevent, produced by the guard meant
+// to protect it.
+func TestReservationCapacity_RefreshInFullLobbyIsAllowed(t *testing.T) {
+	m := &EvrMatch{}
+	state := newDedupTestState()
+
+	// One open slot, and a follower reserves it.
+	fillSocialLobby(state, SocialLobbyMaxSize-1)
+	member := socialMember()
+	state = signalCreatePartyReservations(t, m, state, member)
+
+	original, ok := state.reservationMap[member.SessionID.String()]
+	if !ok {
+		t.Fatalf("setup: expected the follower to hold a reservation")
+	}
+	if got := state.OpenSlots(); got != 0 {
+		t.Fatalf("setup: expected the lobby to be full once the slot is held, got OpenSlots()=%d", got)
+	}
+
+	// Age the reservation so a refresh is observable.
+	original.Expiry = time.Now().Add(30 * time.Second)
+	staleExpiry := original.Expiry
+
+	// The follower's client re-sends its find request against the now-full lobby.
+	state = signalCreatePartyReservations(t, m, state, member)
+
+	refreshed, ok := state.reservationMap[member.SessionID.String()]
+	if !ok {
+		t.Fatal("the follower's reservation disappeared on refresh; they will lose their seat at expiry " +
+			"and a backfill player will take it")
+	}
+	if !refreshed.Expiry.After(staleExpiry) {
+		t.Errorf("expiry was not extended (%v, was %v): a member already holding a reservation must be able "+
+			"to refresh it in a full lobby, because the upsert consumes no additional slot",
+			refreshed.Expiry, staleExpiry)
+	}
+	if got := len(state.reservationMap); got != 1 {
+		t.Errorf("expected exactly one reservation after refresh, got %d", got)
+	}
+	if got := state.OpenSlots(); got < 0 {
+		t.Errorf("OpenSlots() went negative (%d): a refresh must not consume a slot", got)
+	}
+}
+
+// TestReservationCapacity_NilUserIDRefreshInFullLobby covers the member the
+// user-ID path cannot see.
+//
+// The reservation system supports members with no user ID by keying their
+// reservation on session ID -- upsertReservationByUserID says so explicitly. A
+// refresh check that matched only on user ID therefore classified such a
+// member's refresh as a NEW booking and skipped it in a full lobby, which is
+// the same lost seat the refresh path exists to prevent.
+func TestReservationCapacity_NilUserIDRefreshInFullLobby(t *testing.T) {
+	m := &EvrMatch{}
+	state := newDedupTestState()
+
+	fillSocialLobby(state, SocialLobbyMaxSize-1)
+
+	member := socialMember()
+	member.UserID = uuid.Nil // keyed on session ID only
+
+	state = signalCreatePartyReservations(t, m, state, member)
+	original, ok := state.reservationMap[member.SessionID.String()]
+	if !ok {
+		t.Fatalf("setup: expected a reservation keyed on session ID for a nil-user-ID member")
+	}
+	if got := state.OpenSlots(); got != 0 {
+		t.Fatalf("setup: expected a full lobby, got OpenSlots()=%d", got)
+	}
+
+	original.Expiry = time.Now().Add(30 * time.Second)
+	staleExpiry := original.Expiry
+
+	state = signalCreatePartyReservations(t, m, state, member)
+
+	refreshed, ok := state.reservationMap[member.SessionID.String()]
+	if !ok {
+		t.Fatal("the nil-user-ID member's reservation disappeared on refresh")
+	}
+	if !refreshed.Expiry.After(staleExpiry) {
+		t.Errorf("expiry was not extended (%v, was %v): a nil user ID is keyed on session, and that "+
+			"reservation must be refreshable in a full lobby like any other", refreshed.Expiry, staleExpiry)
+	}
 }
