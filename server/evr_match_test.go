@@ -892,6 +892,12 @@ type reconnectTestNakamaModule struct {
 	storageReads  []*runtime.StorageRead
 	storageDelete []*runtime.StorageDelete
 	streamUsers   []runtime.Presence
+
+	// earlyQuitStateJSON is what StorageRead returns for EarlyQuit|statistics.
+	// Empty means the default below. Tests that need a player with existing
+	// state -- a moderator exemption, a prior quit count -- set it, because
+	// this double does not persist what StorableWrite hands it.
+	earlyQuitStateJSON string
 }
 
 // GroupsGetId reports the fixture's guild as having opted in to early-quit
@@ -941,6 +947,13 @@ func (m *reconnectTestNakamaModule) LeaderboardCreate(ctx context.Context, id st
 	return nil
 }
 
+func (m *reconnectTestNakamaModule) earlyQuitState() string {
+	if m.earlyQuitStateJSON != "" {
+		return m.earlyQuitStateJSON
+	}
+	return `{"matchmaking_tier":1}`
+}
+
 func (m *reconnectTestNakamaModule) StorageRead(ctx context.Context, keys []*runtime.StorageRead) ([]*api.StorageObject, error) {
 	m.storageReads = append(m.storageReads, keys...)
 	for _, key := range keys {
@@ -949,7 +962,7 @@ func (m *reconnectTestNakamaModule) StorageRead(ctx context.Context, keys []*run
 				Collection:     StorageCollectionEarlyQuit,
 				Key:            StorageKeyEarlyQuit,
 				UserId:         key.UserID,
-				Value:          `{"matchmaking_tier":1}`,
+				Value:          m.earlyQuitState(),
 				Version:        "v1",
 				PermissionRead: int32(runtime.STORAGE_PERMISSION_NO_READ),
 			}}, nil

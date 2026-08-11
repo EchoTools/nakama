@@ -1470,10 +1470,23 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				// enforcement is disabled, suppress ALL side effects: the
 				// eqconfig mutation/write and the leaderboard/quit-history
 				// record.
-				if earlyQuitEnforcementEnabled(ctx, nk, logger, state.GetGroupID().String()) {
+				deferredGroupID := state.GetGroupID().String()
+				if earlyQuitEnforcementEnabled(ctx, nk, logger, deferredGroupID) {
+					charged := false
 					eqconfig := NewEarlyQuitPlayerState()
 					if err := StorableRead(ctx, nk, rr.UserID, eqconfig, true); err != nil {
 						logger.WithField("error", err).Warn("Failed to load early quitter config for deferred penalty")
+					} else if eqconfig.IsExempt(deferredGroupID) {
+						// A moderator exempted this player. The immediate charge
+						// path in MatchLeave honours that; this one did not, so a
+						// player who was explicitly protected was still charged
+						// whenever they failed to reconnect inside the crash
+						// window -- i.e. exactly the crash case the exemption is
+						// most often granted for.
+						logger.WithFields(map[string]any{
+							"uid":      rr.UserID,
+							"group_id": deferredGroupID,
+						}).Info("Deferred early quit penalty skipped: player is exempt in this guild")
 					} else {
 						eqconfig.IncrementEarlyQuit()
 						resolveAndApplyPenaltyLockout(ctx, nk, logger, eqconfig)
@@ -1481,12 +1494,16 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 						if err := StorableWrite(ctx, nk, rr.UserID, eqconfig); err != nil {
 							logger.WithField("error", err).Warn("Failed to write early quitter config for deferred penalty")
 						}
+						charged = true
 					}
 
 					// A deferred penalty must produce the same side effects as the
 					// immediate charge path in MatchLeave: the increment log line,
-					// the leaderboard stat, and the quit-history record.
-					if rr.Presence != nil {
+					// the leaderboard stat, and the quit-history record. An exempt
+					// player gets none of them -- recording the quit while
+					// suppressing the counter would still feed the moderator-facing
+					// quit stats and re-punish them by another route.
+					if charged && rr.Presence != nil {
 						recordEarlyQuitForPlayer(ctx, logger, nk, state, rr.Presence, LeaveReasonReservationExp)
 					}
 				}

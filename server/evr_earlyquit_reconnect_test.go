@@ -195,3 +195,72 @@ func TestReconnectReservationExpiry_RecordsEarlyQuitEffects(t *testing.T) {
 		t.Errorf("expected num_early_quits 1 in config write, got: %s", eqWrite.Value)
 	}
 }
+
+// TestReconnectReservationExpiry_ExemptPlayerIsNotCharged pins the moderator
+// exemption on the DEFERRED charge path.
+//
+// MatchLeave's immediate charge honours EarlyQuitPlayerState.IsExempt. The
+// reservation-expiry charge in MatchLoop did not, and MatchLeave skips its
+// entire charge block -- exemption check included -- when a reconnect
+// reservation exists. So an exempt player who crashed and did not get back in
+// before the window closed was charged anyway: counter incremented, lockout
+// resolved, leaderboard stat and quit-history record written.
+//
+// That is the worst population to get wrong. The exemption is most often
+// granted to players with known-bad connections, which is exactly who fails to
+// reconnect inside the window.
+func TestReconnectReservationExpiry_ExemptPlayerIsNotCharged(t *testing.T) {
+	logger := newCaptureLogger()
+	nk := &reconnectLeaderboardSpyModule{reconnectTestNakamaModule: &reconnectTestNakamaModule{}}
+	dispatcher := &reconnectTestDispatcher{}
+	ctx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_NODE, "test-node")
+
+	state := reconnectTestState(evr.ModeArenaPublic)
+	state.ID.Node = "test-node"
+	player := reconnectTestPlayer("b7-expiry-exempt", evr.TeamBlue)
+	groupID := state.GetGroupID().String()
+
+	// The player carries a moderator exemption for this guild, as the
+	// earlyquit/modify RPC would have written.
+	nk.earlyQuitStateJSON = fmt.Sprintf(
+		`{"matchmaking_tier":1,"guild_overrides":{%q:{"exempt":true}}}`, groupID)
+
+	state.participations[player.GetUserId()] = &PlayerParticipation{
+		UserID:      player.GetUserId(),
+		Username:    player.Username,
+		DisplayName: player.DisplayName,
+		Team:        BlueTeam,
+		JoinTime:    time.Now().Add(-2 * time.Minute),
+		LeaveTime:   time.Now(),
+	}
+	state.reconnectReservations[player.GetUserId()] = &reconnectReservation{
+		Presence:     player,
+		Expiry:       time.Now().Add(-time.Second),
+		UserID:       player.GetUserId(),
+		DeferPenalty: true,
+	}
+
+	m := &EvrMatch{}
+	if got := m.MatchLoop(ctx, logger, nil, nk, dispatcher, 1, state, nil); got == nil {
+		t.Fatal("MatchLoop returned nil state")
+	}
+
+	if _, ok := logger.find("info", "Deferred early quit penalty skipped: player is exempt in this guild"); !ok {
+		t.Error("expected the deferred charge to log that it skipped an exempt player")
+	}
+
+	if _, ok := logger.find("debug", "Incrementing early quit for player."); ok {
+		t.Error("an exempt player must not have their early quit counter incremented on reservation expiry")
+	}
+
+	if len(nk.leaderboardWrites) != 0 {
+		t.Errorf("expected no leaderboard writes for an exempt player, got %v", nk.leaderboardWrites)
+	}
+
+	for _, w := range nk.storageWrites {
+		if w.Collection == StorageCollectionEarlyQuitHistory && w.Key == StorageKeyEarlyQuitHistory {
+			t.Error("an exempt player must not get a quit-history record; it feeds the moderator-facing " +
+				"quit stats and would re-punish them by another route")
+		}
+	}
+}
