@@ -112,6 +112,28 @@ func (p *PartyHandler) JoinRequest(presence *Presence) (bool, error) {
 		return false, runtime.ErrPartyClosed
 	}
 
+	// Check if party already has this user.
+	//
+	// Identity is checked BEFORE capacity, and before the p.Open branch, because
+	// an existing member consumes no new slot: telling them the party is full is
+	// answering a question they did not ask. This check used to sit at the bottom
+	// of the function, which made it unreachable for an open party -- the
+	// capacity check returned ErrPartyFull first, and the Open branch returned
+	// before identity was ever considered.
+	//
+	// That mattered because EVR creates only open parties, and a member
+	// reconnecting into their own full party is exactly the case: their stale
+	// session still counts toward MaxSize, so the party looks full to the very
+	// person who is already in it. Every reconnect attempt hit the same wall,
+	// which is the reconnect-storm lockout in the ops case.
+	//
+	// A closed party already behaved this way; this makes the two agree.
+	for _, member := range p.members.presences {
+		if member.Presence.UserID == presence.UserID {
+			p.Unlock()
+			return false, runtime.ErrPartyJoinRequestAlreadyMember
+		}
+	}
 	// Check if party is full.
 	if p.members.Size() >= p.MaxSize {
 		p.Unlock()
@@ -140,14 +162,6 @@ func (p *PartyHandler) JoinRequest(presence *Presence) (bool, error) {
 			return false, runtime.ErrPartyJoinRequestDuplicate
 		}
 	}
-	// Check if party already has this user.
-	for _, member := range p.members.presences {
-		if member.Presence.UserID == presence.UserID {
-			p.Unlock()
-			return false, runtime.ErrPartyJoinRequestAlreadyMember
-		}
-	}
-
 	joinRequest := &PartyJoinRequest{
 		Presence: presence,
 		UserPresence: &rtapi.UserPresence{

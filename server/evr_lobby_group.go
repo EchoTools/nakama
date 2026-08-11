@@ -180,14 +180,29 @@ func JoinPartyGroup(session *sessionWS, groupName string, currentMatchID MatchID
 		if !isMember {
 			// Join the party
 			success, err := ph.JoinRequest(&presence)
-			if err != nil && err != runtime.ErrPartyJoinRequestAlreadyMember {
+
+			// Already being a member is success, not failure. This branch
+			// already meant to say so, but could never take effect: JoinRequest
+			// returns (false, ErrPartyJoinRequestAlreadyMember), so tolerating
+			// the error only fell through to the !success check below and
+			// returned "failed to join party" anyway.
+			//
+			// It also could not be reached before now -- for an open party,
+			// which is the only kind EVR creates, JoinRequest returned
+			// ErrPartyFull without ever consulting identity. With that fixed, a
+			// reconnecting member reaches this branch, and it has to mean what
+			// it says or the reconnect still fails.
+			alreadyMember := errors.Is(err, runtime.ErrPartyJoinRequestAlreadyMember)
+			if err != nil && !alreadyMember {
 				return nil, false, err
 			}
 
-			if !success {
+			if !success && !alreadyMember {
 				return nil, false, errors.New("failed to join party")
 			}
-			addedMember = true
+			// Only a genuine join needs rolling back if the Track below fails;
+			// a member who was already there was not added by this call.
+			addedMember = !alreadyMember
 		}
 	}
 
