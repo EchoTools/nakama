@@ -334,17 +334,45 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				logger.WithField("error", err).Warn("Failed to compute owned cosmetics")
 				continue
 			}
-			if profile.LoadoutCosmetics.Loadout, err = EquipAndSanitize(profile.LoadoutCosmetics.Loadout, category, name, owned); err != nil {
+			// Re-applied on every retry attempt against a freshly loaded
+			// profile, so a conflict costs the write, not the player's equip.
+			applyEquip := func(p *EVRProfile) error {
+				var applyErr error
+				p.LoadoutCosmetics.Loadout, applyErr = EquipAndSanitize(p.LoadoutCosmetics.Loadout, category, name, owned)
+				return applyErr
+			}
+			if err := applyEquip(profile); err != nil {
 				return fmt.Errorf("failed to update equipped item: %w", err)
 			}
 
-			if err := EVRProfileUpdate(ctx, nk, session.UserID().String(), profile); err != nil {
-				logger.WithField("error", err).Warn("Failed to set account metadata")
+			// Retry on version conflict rather than logging and moving on.
+			//
+			// EVRProfileUpdate stopped retrying internally this cycle, so a
+			// conflict now reaches callers -- and this one logged at Warn and
+			// then adopted `profile` into the session parameters anyway. The
+			// player saw the cosmetic equipped for the rest of their session
+			// and it silently reverted on next login, because nothing had been
+			// written. Any later write from that adopted object also started
+			// from a stale version.
+			//
+			// The conflict is not hypothetical: the Discord member sync writes
+			// the same EVRProfile key on ordinary member-update events.
+			// evrProfileUpdateWithRetry is what the release built for this; its
+			// sibling equip path in evr_pipeline_gameserver_loadout.go already
+			// uses it.
+			updated, err := evrProfileUpdateWithRetry(ctx, nk, session.UserID().String(), profile, applyEquip)
+			if err != nil {
+				// Do NOT adopt an unpersisted profile. Leaving the session on
+				// the last known-good one means the equip is lost, which the
+				// player can see and redo -- the alternative is a session that
+				// disagrees with storage until logout.
+				logger.WithField("error", err).Warn("Failed to persist equipped item; session profile left unchanged")
+				continue
 			}
 
 			// swap the metadata in the session parameters
 
-			params.profile = profile
+			params.profile = updated
 
 			StoreParams(session.Context(), params)
 
