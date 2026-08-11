@@ -151,16 +151,13 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 			want: "non-nil", // match is within idle timeout, should return state
 		},
 		{
-			// The no-server deadline is counted by noServerTicks, not emptyTicks:
-			// this state has a player in the presence map and no game server, so
-			// it is the no-server timer that advances here.
-			name: "MatchLoop increments noServerTicks when no game server",
+			name: "MatchLoop increments emptyTicks when no broadcaster",
 			m:    &EvrMatch{},
 			args: args{
 				tick: 30 * 10,
 				state_: &MatchLabel{
-					noServerTicks: 0,
-					tickRate:      10,
+					emptyTicks: 0,
+					tickRate:   10,
 					presenceMap: map[string]*EvrMatchPresence{
 						uuid.Must(uuid.NewV4()).String(): {},
 					},

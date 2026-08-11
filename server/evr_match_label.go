@@ -73,9 +73,7 @@ type MatchLabel struct {
 	joinTimeMilliseconds map[string]int64                // The round clock time of when players joined the match. map[sessionId]time.Time
 	participations       map[string]*PlayerParticipation // map[userID]*PlayerParticipation - tracks all players who ever joined
 	tickRate             int64                           // The number of ticks per second.
-	emptyTicks           int64                           // Consecutive ticks a STARTED match has had no players (60s deadline).
-	noServerTicks        int64                           // Consecutive ticks the match has had no game server presence (10s deadline).
-	unallocatedTicks     int64                           // Consecutive ticks an unassigned parking match with a server has gone unallocated (120s deadline).
+	emptyTicks           int64                           // The number of ticks the match has been empty.
 	startAttempts        int64                           // Number of MatchStart attempts made; bounds the start retry loop (MatchStartMaxAttempts).
 	lastStartAttemptTick int64                           // MatchLoop tick of the most recent MatchStart attempt; throttles the retry to one per second. Its own field: sharing storage with a timer would let that timer's reset re-open the throttle.
 	terminateTick        int64                           // The tick count at which the match will be shut down.

@@ -69,8 +69,8 @@ func TestMatchLoop_StartRetryEnforcesMinimumGap(t *testing.T) {
 
 // TestMatchLoop_StartRetryThrottleIsIndependentOfTheIdleTimers pins the
 // counter-aliasing hazard: the throttle's bookkeeping must live in its own
-// field. If it shared storage with noServerTicks / unallocatedTicks /
-// emptyTicks, a reset on one of those would silently re-open the throttle.
+// field. If it shared storage with emptyTicks, a reset on that counter would
+// silently re-open the throttle.
 func TestMatchLoop_StartRetryThrottleIsIndependentOfTheIdleTimers(t *testing.T) {
 	state := startRetryState(evr.ModeArenaPublic, 1)
 
@@ -86,20 +86,12 @@ func TestMatchLoop_StartRetryThrottleIsIndependentOfTheIdleTimers(t *testing.T) 
 	// The idle timers must be untouched by a start attempt: the start branch
 	// returns above all of them, and a match with a server present has nothing
 	// to count.
-	if state.noServerTicks != 0 {
-		t.Errorf("noServerTicks=%d after a start attempt; the start throttle must not share a counter with the no-server timer", state.noServerTicks)
-	}
-	if state.unallocatedTicks != 0 {
-		t.Errorf("unallocatedTicks=%d after a start attempt; the start throttle must not share a counter with the unallocated timer", state.unallocatedTicks)
-	}
 	if state.emptyTicks != 0 {
 		t.Errorf("emptyTicks=%d after a start attempt; the start throttle must not share a counter with the empty-match timer", state.emptyTicks)
 	}
 
-	// Clearing every idle counter (what a presence change does) must not let
+	// Clearing the idle counter (what a presence change does) must not let
 	// the next tick re-attempt the start ahead of the throttle window.
-	state.noServerTicks = 0
-	state.unallocatedTicks = 0
 	state.emptyTicks = 0
 
 	attemptsBefore := state.startAttempts
