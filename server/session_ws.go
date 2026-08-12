@@ -22,6 +22,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/netip"
 	"regexp"
 	"slices"
 	"strconv"
@@ -120,6 +121,60 @@ type (
 	ctxLoggedInAtKey        struct{} // The time the user logged in
 )
 
+// newSessionClientIP resolves the client IP for a new session and emits the
+// connect log carrying that resolved value.
+//
+// A forwarding header is only meaningful when the peer that sent it is a
+// reverse proxy we operate. This previously honoured CF-Connecting-IP from any
+// peer, unvalidated, so a client could name its own address for VPN
+// classification, alt detection, the IP denial index and every audit log.
+// Trust is now keyed on request.RemoteAddr -- the TCP peer, the one address in
+// a request a client cannot choose -- against socket.trusted_proxies, which
+// defaults to empty and therefore trusts nothing.
+//
+// When the peer is not trusted the peer address IS the client address. The
+// caller's clientIP is derived by extractClientAddressFromRequest, which
+// prefers X-Forwarded-For, so accepting it unconditionally would leave the
+// same spoof open under a different header name.
+//
+// Resolution and logging live in one function on purpose. They were two
+// statements in NewSessionWS, in the wrong order: the connect log fired before
+// the override, so the address a client had named for itself never appeared in
+// "New WebSocket session connected", and the spoof stayed invisible through an
+// entire outage investigation. Keeping them together makes it impossible for
+// them to drift apart again.
+func newSessionClientIP(logger *zap.Logger, request *http.Request, format SessionFormat, clientIP, clientPort string, trusted []netip.Prefix) string {
+	forwarded := request.Header.Get("CF-Connecting-IP")
+
+	if isTrustedProxy(request.RemoteAddr, trusted) {
+		// Support Cloudflare. The value is data until it parses as an address:
+		// unvalidated it flows into a Bluge regex query in
+		// LoginDeniedClientIPAddressSearch.
+		if forwarded != "" {
+			if addr, err := netip.ParseAddr(strings.TrimSpace(forwarded)); err == nil {
+				clientIP = addr.Unmap().String()
+			} else {
+				logger.Warn("Ignoring malformed CF-Connecting-IP header from trusted proxy",
+					zap.String("cf_connecting_ip", forwarded), zap.String("remote_addr", request.RemoteAddr))
+			}
+		}
+	} else {
+		// Any forwarding this peer claims is unverifiable, including the
+		// X-Forwarded-For already folded into clientIP by the caller.
+		if peerIP, _ := extractClientAddress(logger, request.RemoteAddr, request, "request"); peerIP != "" {
+			clientIP = peerIP
+		}
+		if forwarded != "" {
+			logger.Warn("Ignoring CF-Connecting-IP header from an untrusted peer; set socket.trusted_proxies if this peer is a reverse proxy",
+				zap.String("cf_connecting_ip", forwarded), zap.String("remote_addr", request.RemoteAddr), zap.String("client_ip", clientIP))
+		}
+	}
+
+	logger.Info("New WebSocket session connected", zap.String("request_uri", request.URL.Path), zap.String("query", request.URL.RawQuery), zap.Uint8("format", uint8(format)), zap.String("client_ip", clientIP), zap.String("client_port", clientPort))
+
+	return clientIP
+}
+
 func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessionID, userID uuid.UUID, username string, vars map[string]string, expiry int64, clientIP, clientPort, lang string, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, conn *websocket.Conn, sessionRegistry SessionRegistry, statusRegistry StatusRegistry, matchmaker Matchmaker, tracker Tracker, metrics Metrics, pipeline *Pipeline, evrPipeline *EvrPipeline, runtime *Runtime, request http.Request, storageIndex StorageIndex) Session {
 	logger = logger.With(zap.String("sid", sessionID.String()))
 
@@ -130,12 +185,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		logger = logger.With(zap.String("username", username))
 	}
 
-	logger.Info("New WebSocket session connected", zap.String("request_uri", request.URL.Path), zap.String("query", request.URL.RawQuery), zap.Uint8("format", uint8(format)), zap.String("client_ip", clientIP), zap.String("client_port", clientPort))
-
-	// Support Cloudflare
-	if ip := request.Header.Get("CF-Connecting-IP"); ip != "" {
-		clientIP = ip
-	}
+	clientIP = newSessionClientIP(logger, &request, format, clientIP, clientPort, config.GetSocket().TrustedProxyPrefixes)
 
 	ctx, ctxCancelFn := context.WithCancel(context.Background())
 

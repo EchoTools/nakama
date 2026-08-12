@@ -24,6 +24,8 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"gopkg.in/yaml.v3"
+	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -381,6 +383,12 @@ func ValidateConfig(logger *zap.Logger, c Config) map[string]string {
 			}
 			c.GetSocket().Headers[parts[0]] = parts[1]
 		}
+	}
+
+	if prefixes, err := parseTrustedProxies(c.GetSocket().TrustedProxies); err != nil {
+		logger.Fatal("Trusted proxies configuration invalid, each entry must be an IP address or CIDR range", zap.String("param", "socket.trusted_proxies"), zap.Error(err))
+	} else {
+		c.GetSocket().TrustedProxyPrefixes = prefixes
 	}
 
 	// Log warnings for SSL usage.
@@ -823,7 +831,9 @@ type SocketConfig struct {
 	SSLCertificate                string            `yaml:"ssl_certificate" json:"ssl_certificate" usage:"Path to certificate file if you want the server to use SSL directly. Must also supply ssl_private_key. NOT recommended for production use."`
 	SSLPrivateKey                 string            `yaml:"ssl_private_key" json:"ssl_private_key" usage:"Path to private key file if you want the server to use SSL directly. Must also supply ssl_certificate. NOT recommended for production use."`
 	ResponseHeaders               []string          `yaml:"response_headers" json:"response_headers" usage:"Additional headers to send to clients with every response. Values here are only used if the response would not otherwise contain a value for the specified headers."`
+	TrustedProxies                []string          `yaml:"trusted_proxies" json:"trusted_proxies" usage:"IP addresses or CIDR ranges of reverse proxies permitted to override a connection's client IP via forwarding headers such as CF-Connecting-IP. Requests from any other peer have those headers ignored. Default empty: no proxy is trusted and forwarding headers are never honoured."`
 	Headers                       map[string]string `yaml:"-" json:"-"` // Created by parsing ResponseHeaders above, not set from input args directly.
+	TrustedProxyPrefixes          []netip.Prefix    `yaml:"-" json:"-"` // Created by parsing TrustedProxies above, not set from input args directly.
 	CertPEMBlock                  []byte            `yaml:"-" json:"-"` // Created by fully reading the file contents of SSLCertificate, not set from input args directly.
 	KeyPEMBlock                   []byte            `yaml:"-" json:"-"` // Created by fully reading the file contents of SSLPrivateKey, not set from input args directly.
 	TLSCert                       []tls.Certificate `yaml:"-" json:"-"` // Created by processing CertPEMBlock and KeyPEMBlock, not set from input args directly.
@@ -845,6 +855,71 @@ func (cfg *SocketConfig) GetProtocol() string {
 	return cfg.Protocol
 }
 
+// parseTrustedProxies converts socket.trusted_proxies entries into prefixes.
+//
+// Each entry is either a bare address ("192.0.2.1", "2001:db8::1") or a CIDR
+// range ("173.245.48.0/20"). A bare address becomes a single-host prefix.
+//
+// An unparseable entry is an error rather than a silently dropped element:
+// a typo in this list is the difference between "this proxy is trusted" and
+// "every client can name its own IP", and that must not fail quietly.
+func parseTrustedProxies(entries []string) ([]netip.Prefix, error) {
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	prefixes := make([]netip.Prefix, 0, len(entries))
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if strings.Contains(entry, "/") {
+			prefix, err := netip.ParsePrefix(entry)
+			if err != nil {
+				return nil, fmt.Errorf("invalid CIDR range %q: %w", entry, err)
+			}
+			prefixes = append(prefixes, prefix.Masked())
+			continue
+		}
+		addr, err := netip.ParseAddr(entry)
+		if err != nil {
+			return nil, fmt.Errorf("invalid IP address %q: %w", entry, err)
+		}
+		prefixes = append(prefixes, netip.PrefixFrom(addr.Unmap(), addr.Unmap().BitLen()))
+	}
+	if len(prefixes) == 0 {
+		return nil, nil
+	}
+	return prefixes, nil
+}
+
+// isTrustedProxy reports whether addr, the peer address of the TCP connection,
+// belongs to a configured reverse proxy.
+//
+// The peer address is the only address in a request that a client cannot
+// choose, so it is the only thing a trust decision may be keyed on. An empty
+// prefix list trusts nothing, which is the safe default.
+func isTrustedProxy(addr string, trusted []netip.Prefix) bool {
+	if len(trusted) == 0 {
+		return false
+	}
+	// The peer address arrives as either "host:port" or a bare host.
+	if host, _, err := net.SplitHostPort(strings.TrimSpace(addr)); err == nil {
+		addr = host
+	}
+	ip, err := netip.ParseAddr(strings.TrimSpace(addr))
+	if err != nil {
+		return false
+	}
+	ip = ip.Unmap()
+	for _, prefix := range trusted {
+		if prefix.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
 func (cfg *SocketConfig) Clone() (*SocketConfig, error) {
 	if cfg == nil {
 		return nil, nil
@@ -855,6 +930,14 @@ func (cfg *SocketConfig) Clone() (*SocketConfig, error) {
 	if cfg.ResponseHeaders != nil {
 		cfgCopy.ResponseHeaders = make([]string, len(cfg.ResponseHeaders))
 		copy(cfgCopy.ResponseHeaders, cfg.ResponseHeaders)
+	}
+	if cfg.TrustedProxies != nil {
+		cfgCopy.TrustedProxies = make([]string, len(cfg.TrustedProxies))
+		copy(cfgCopy.TrustedProxies, cfg.TrustedProxies)
+	}
+	if cfg.TrustedProxyPrefixes != nil {
+		cfgCopy.TrustedProxyPrefixes = make([]netip.Prefix, len(cfg.TrustedProxyPrefixes))
+		copy(cfgCopy.TrustedProxyPrefixes, cfg.TrustedProxyPrefixes)
 	}
 	if cfg.Headers != nil {
 		cfgCopy.Headers = make(map[string]string, len(cfg.Headers))
