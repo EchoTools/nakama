@@ -168,10 +168,21 @@ func LoginDeniedClientIPAddressSearch(ctx context.Context, nk runtime.NakamaModu
 	query := fmt.Sprintf("+value.denied_client_addrs:/%s/", regexEscapeForBluge(clientIPAddress))
 	// Perform the storage list operation
 
-	cursor := ""
+	// `var cursor` with plain assignment below, NOT `result, cursor, err :=`.
+	// The short form declares a second cursor scoped to the loop body, leaving
+	// the outer one -- the one handed back to StorageIndexList -- empty
+	// forever: page one is re-fetched and re-appended without end. This is
+	// called on every login, so the loop only had to be armed by a query
+	// matching more than one page. Same shape as LoginAlternatePatternSearch
+	// above, which is the correct one.
+	var (
+		cursor string
+		result *api.StorageObjects
+		err    error
+	)
 	userIDs := make([]string, 0)
 	for {
-		result, cursor, err := nk.StorageIndexList(ctx, SystemUserID, LoginHistoryCacheIndex, query, 10, nil, cursor)
+		result, cursor, err = nk.StorageIndexList(ctx, SystemUserID, LoginHistoryCacheIndex, query, 10, nil, cursor)
 		if err != nil {
 			return nil, fmt.Errorf("error listing display name history: %w", err)
 		}
