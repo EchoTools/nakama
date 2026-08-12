@@ -21,6 +21,7 @@ type UserMigrater interface {
 func MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) {
 	systemMigrations := []SystemMigrator{
 		&MigrationBreakIgnoredAlts{},
+		&MigrationClearAlternateMatches{},
 	}
 
 	allUserMigrations := []UserMigrater{
