@@ -315,18 +315,25 @@ func ParsePacket(data []byte) ([]Message, error) {
 		return nil, fmt.Errorf("%w: packet too large (%d bytes, max %d)", ErrInvalidPacket, len(data), MaxPacketLength)
 	}
 
-	// Split the packet into individual messages.
-	// bytes.Split prepends an empty chunk before the first MessageMarker, so the
-	// actual message count is len(chunks)-1.  Guard against the degenerate case
-	// where data is empty (len(chunks)==1) before subtracting.
-	chunks := bytes.Split(data, MessageMarker)
-	messageCount := len(chunks)
-	if messageCount > 0 {
-		messageCount-- // strip leading empty chunk produced by the opening marker
-	}
+	// Count the markers BEFORE splitting. bytes.Split scans for the separator
+	// and then allocates make([][]byte, Count+1) up front, which is a 24-byte
+	// slice header per marker: at the 256 KB MaxPacketLength a packet of
+	// back-to-back 8-byte markers declares 32,768 of them and buys 768 KiB of
+	// headers to describe a packet the guard below immediately rejects. A
+	// constant ~3x amplification of the attacker's bytes for a packet that is
+	// never processed.
+	//
+	// bytes.Count is the same scan without the allocation, and yields exactly
+	// the number the old code derived: bytes.Split returns Count+1 chunks, the
+	// extra one being the empty prefix before the opening marker. Empty input
+	// gives Count 0, matching the old len(chunks)-1 == 0.
+	messageCount := bytes.Count(data, MessageMarker)
 	if messageCount > MaxMessagesPerPacket {
 		return nil, fmt.Errorf("%w: too many messages in packet (%d, max %d)", ErrInvalidPacket, messageCount, MaxMessagesPerPacket)
 	}
+
+	// Split the packet into individual messages.
+	chunks := bytes.Split(data, MessageMarker)
 
 	messages := make([]Message, 0, len(chunks))
 
