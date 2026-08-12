@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/blugelabs/bluge"
@@ -54,6 +55,13 @@ type storageIndex struct {
 	SortableFields []string
 	IndexOnly      bool
 	Index          *bluge.Writer
+
+	// evictMu makes the capacity check and the eviction that follows it atomic
+	// per index. bluge synchronizes each individual batch, but nothing made the
+	// read-count / decide / delete sequence a unit, so every concurrent writer
+	// that opened a reader before another writer's delete batch landed saw the
+	// same over-capacity count and issued its own full-size delete batch.
+	evictMu sync.Mutex
 }
 
 type LocalStorageIndex struct {
@@ -156,77 +164,98 @@ func (si *LocalStorageIndex) Write(ctx context.Context, objects []*api.StorageOb
 			continue
 		}
 
-		reader, err := idx.Index.Reader()
-		if err != nil {
-			si.logger.Error("Failed to get index storage reader", zap.Error(err))
-			continue
-		}
-		count, _ := reader.Count() // cannot return err
-
-		si.metrics.GaugeStorageIndexEntries(idx.Name, float64(count))
-
-		// Apply eviction strategy if size of index is +10% than max size
-		if count > uint64(float32(idx.MaxEntries)*(1.1)) {
-			deleteCount := int(count - uint64(idx.MaxEntries))
-			req := bluge.NewTopNSearch(deleteCount, bluge.NewMatchAllQuery())
-			req.SortBy([]string{"update_time"})
-
-			results, err := reader.Search(ctx, req)
-			if err != nil {
-				si.logger.Error("Failed to evict storage index documents", zap.String("index_name", idx.Name))
-				_ = reader.Close()
-				continue
-			}
-
-			ids, err := si.queryMatchesToDocumentIds(results)
-			if err != nil {
-				si.logger.Error("Failed to get query results document ids", zap.Error(err))
-				_ = reader.Close()
-				continue
-			}
-
-			evictBatch := bluge.NewBatch()
-			for _, docID := range ids {
-				evictBatch.Delete(bluge.Identifier(docID))
-			}
-			if err = idx.Index.Batch(evictBatch); err != nil {
-				si.logger.Error("Failed to update index", zap.String("index_name", idx.Name), zap.Error(err))
-			} else {
-				// Evicted entries are NEVER reloaded into the index. For any
-				// index consulted as a negative check, an evicted entry is
-				// indistinguishable from a record that never existed, so this
-				// degrades silently and permissively. Announce it so the
-				// undersized index can be found before it misleads a caller.
-				si.logger.Warn("Storage index at capacity; evicted oldest entries (evicted entries are not reloaded)",
-					zap.String("index_name", idx.Name),
-					zap.Int("evicted_count", len(ids)),
-					zap.Uint64("entries_before_eviction", count),
-					zap.Int("max_entries", idx.MaxEntries))
-
-				// The gauge emitted above is now stale: it holds the
-				// pre-eviction count, and a gauge keeps its last value until
-				// the next Write. An index that evicts and then goes idle would
-				// report occupancy above MaxEntries indefinitely, and Load
-				// publishes the true count at boot, so the same index would
-				// read differently before and after a restart. Re-emit from a
-				// fresh reader -- the count is observed, never assumed, and the
-				// extra open only happens on the rare eviction path.
-				if evictedReader, err := idx.Index.Reader(); err != nil {
-					si.logger.Error("Failed to get index storage reader after eviction; entry gauge left at its pre-eviction value", zap.String("index_name", idx.Name), zap.Error(err))
-				} else {
-					if postCount, err := evictedReader.Count(); err != nil {
-						si.logger.Error("Failed to count index entries after eviction; entry gauge left at its pre-eviction value", zap.String("index_name", idx.Name), zap.Error(err))
-					} else {
-						si.metrics.GaugeStorageIndexEntries(idx.Name, float64(postCount))
-					}
-					_ = evictedReader.Close()
-				}
-			}
-		}
-		_ = reader.Close()
+		si.checkCapacityAndEvict(ctx, idx)
 	}
 
 	return updates, deletes
+}
+
+// checkCapacityAndEvict publishes the index occupancy gauge and, if the index
+// is over capacity, evicts its oldest documents.
+//
+// It holds idx.evictMu for the whole sequence. bluge synchronizes each batch on
+// its own, but the read-count / decide / delete sequence was not a unit, so
+// every writer that opened a reader before another writer's delete batch landed
+// read the same over-capacity count, computed the same deleteCount and issued
+// its own full-size delete batch. Production 2026-08-12 23:43:38.120-.124:
+// eight writers each read entries_before_eviction=1101 and each ran a
+// 101-delete batch.
+//
+// The lock deliberately does NOT cover the write batch above. A writer that
+// waits here re-reads the count once it holds the lock, so it sees the effect
+// of any eviction that ran while it waited and correctly declines to run a
+// second one.
+func (si *LocalStorageIndex) checkCapacityAndEvict(ctx context.Context, idx *storageIndex) {
+	idx.evictMu.Lock()
+	defer idx.evictMu.Unlock()
+
+	reader, err := idx.Index.Reader()
+	if err != nil {
+		si.logger.Error("Failed to get index storage reader", zap.Error(err))
+		return
+	}
+	defer reader.Close()
+
+	count, _ := reader.Count() // cannot return err
+
+	si.metrics.GaugeStorageIndexEntries(idx.Name, float64(count))
+
+	// Apply eviction strategy if size of index is +10% than max size
+	if count > uint64(float32(idx.MaxEntries)*(1.1)) {
+		deleteCount := int(count - uint64(idx.MaxEntries))
+		req := bluge.NewTopNSearch(deleteCount, bluge.NewMatchAllQuery())
+		req.SortBy([]string{"update_time"})
+
+		results, err := reader.Search(ctx, req)
+		if err != nil {
+			si.logger.Error("Failed to evict storage index documents", zap.String("index_name", idx.Name))
+			return
+		}
+
+		ids, err := si.queryMatchesToDocumentIds(results)
+		if err != nil {
+			si.logger.Error("Failed to get query results document ids", zap.Error(err))
+			return
+		}
+
+		evictBatch := bluge.NewBatch()
+		for _, docID := range ids {
+			evictBatch.Delete(bluge.Identifier(docID))
+		}
+		if err = idx.Index.Batch(evictBatch); err != nil {
+			si.logger.Error("Failed to update index", zap.String("index_name", idx.Name), zap.Error(err))
+		} else {
+			// Evicted entries are NEVER reloaded into the index. For any
+			// index consulted as a negative check, an evicted entry is
+			// indistinguishable from a record that never existed, so this
+			// degrades silently and permissively. Announce it so the
+			// undersized index can be found before it misleads a caller.
+			si.logger.Warn("Storage index at capacity; evicted oldest entries (evicted entries are not reloaded)",
+				zap.String("index_name", idx.Name),
+				zap.Int("evicted_count", len(ids)),
+				zap.Uint64("entries_before_eviction", count),
+				zap.Int("max_entries", idx.MaxEntries))
+
+			// The gauge emitted above is now stale: it holds the
+			// pre-eviction count, and a gauge keeps its last value until
+			// the next Write. An index that evicts and then goes idle would
+			// report occupancy above MaxEntries indefinitely, and Load
+			// publishes the true count at boot, so the same index would
+			// read differently before and after a restart. Re-emit from a
+			// fresh reader -- the count is observed, never assumed, and the
+			// extra open only happens on the rare eviction path.
+			if evictedReader, err := idx.Index.Reader(); err != nil {
+				si.logger.Error("Failed to get index storage reader after eviction; entry gauge left at its pre-eviction value", zap.String("index_name", idx.Name), zap.Error(err))
+			} else {
+				if postCount, err := evictedReader.Count(); err != nil {
+					si.logger.Error("Failed to count index entries after eviction; entry gauge left at its pre-eviction value", zap.String("index_name", idx.Name), zap.Error(err))
+				} else {
+					si.metrics.GaugeStorageIndexEntries(idx.Name, float64(postCount))
+				}
+				_ = evictedReader.Close()
+			}
+		}
+	}
 }
 
 func (si *LocalStorageIndex) Delete(ctx context.Context, objects StorageOpDeletes) (deletes int) {
