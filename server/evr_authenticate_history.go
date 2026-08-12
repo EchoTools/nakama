@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"google.golang.org/grpc/codes"
@@ -771,11 +772,19 @@ func LoginHistoryRegexSearch(ctx context.Context, nk runtime.NakamaModule, patte
 	query := fmt.Sprintf("+value.cache:/%s/", pattern)
 	// Perform the storage list operation
 
-	cursor := ""
+	// `var cursor` with plain assignment below, NOT `result, cursor, err :=`.
+	// The short form declares a second cursor scoped to the loop body, leaving
+	// the outer one -- the one handed back to StorageIndexList -- empty
+	// forever: page one is re-fetched and re-appended without end.
+	var (
+		cursor string
+		result *api.StorageObjects
+		err    error
+	)
 
 	userIDs := make([]string, 0, limit)
 	for {
-		result, cursor, err := nk.StorageIndexList(ctx, SystemUserID, LoginHistoryCacheIndex, query, limit, nil, cursor)
+		result, cursor, err = nk.StorageIndexList(ctx, SystemUserID, LoginHistoryCacheIndex, query, limit, nil, cursor)
 		if err != nil {
 			return nil, fmt.Errorf("error listing display name history: %w", err)
 		}
