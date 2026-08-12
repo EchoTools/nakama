@@ -157,7 +157,15 @@ func LoginAlternatePatternSearch(ctx context.Context, nk runtime.NakamaModule, l
 
 func LoginDeniedClientIPAddressSearch(ctx context.Context, nk runtime.NakamaModule, clientIPAddress string) ([]string, error) {
 
-	query := fmt.Sprintf("+value.denied_client_addrs:/%s/", Query.QuoteStringValue(clientIPAddress))
+	// regexEscapeForBluge, not Query.QuoteStringValue. The value is
+	// interpolated into a REGEX clause, and QuoteStringValue escapes with a
+	// single backslash -- which Bluge's query lexer strips from every
+	// character in its reserved set, delivering the metacharacter bare to the
+	// regex engine. See TestRegexEscapeForBluge_QuoteStringValueBroken.
+	//
+	// This runs on every login with a client-influenced address, so a value of
+	// "[^x]*" was a match-everything regex over the whole login-cache index.
+	query := fmt.Sprintf("+value.denied_client_addrs:/%s/", regexEscapeForBluge(clientIPAddress))
 	// Perform the storage list operation
 
 	cursor := ""
