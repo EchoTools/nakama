@@ -60,22 +60,37 @@ type AlternateSearchMatch struct {
 // returned, so an account whose ONLY overlap with a banned account is that key
 // is never surfaced, never compared, and produces zero edges.
 //
-// SystemProfile was in exactly that state — captured in Items, indexed, and
-// compared, but absent here. A cheater rotating IP, HMD serial and XPID (all
-// trivially changed) kept the same machine and linked to nothing. That is #516.
+// SystemProfile is deliberately NOT among them. It stays a COMPARISON key --
+// loginHistoryCompare still forms edges on it, and rebuildCache still writes it
+// into the indexed cache -- so it can corroborate a candidate that an IP, HMD
+// serial or XPID already surfaced. It may not surface one on its own.
+//
+// v3.27.2-evr.321 (56e9a9c2d) promoted it to a discovery key for #516, on the
+// reading that a cheater who rotates IP, serial and XPID keeps the same
+// machine. The premise does not hold: nothing in the string is machine-unique.
+// It is headset_model::network_type::video_card::cpu_model plus four integers,
+// so two people who bought the same headset produce identical bytes. Measured
+// against production on 2026-08-12:
+//
+//	12,803 accounts share "Meta Quest 2::WIFI::::Unknown::3::8::0::0"
+//	26,787 of 45,967 accounts sit in some collision group
+//	 1,920 remain enforcement-eligible after the commodity-profile filter
+//	    49 currently share a profile with a disabled account
+//
+// As a discovery key it returns strangers, and the comparison that follows then
+// confirms the very key that surfaced them, so the collision is invisible in
+// the resulting edge. Enforcement acting on those edges bans bystanders.
+//
+// This restores the pre-.321 behaviour and nothing more. Whether alt detection
+// should have a real hardware fingerprint at all is a product question that
+// this does not answer.
 func (h *LoginHistory) AltSearchPatterns() []string {
-	items := make([]string, 0, len(h.History)*4+len(h.XPIs))
+	items := make([]string, 0, len(h.History)*3+len(h.XPIs))
 	for _, e := range h.History {
 		for _, s := range [...]string{
 			e.ClientIP,
 			e.LoginData.HMDSerialNumber,
 			e.XPID.Token(),
-			// The machine fingerprint. Rotating an account does not rotate the
-			// hardware. Commodity profiles (Quest headsets, and any profile with
-			// no hardware identity at all) are dropped by matchIgnoredAltPattern
-			// below, so this adds a discovery key only where it is a fingerprint
-			// rather than a bucket.
-			e.SystemProfile(),
 		} {
 			items = append(items, s)
 		}

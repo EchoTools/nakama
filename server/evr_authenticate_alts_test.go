@@ -298,8 +298,19 @@ func TestFilterStrongAlts(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// #516 — the machine fingerprint must be a DISCOVERY key, not only a
-// comparison key.
+// #516 — the machine fingerprint as a DISCOVERY key. REVERTED.
+//
+// v3.27.2-evr.321 (56e9a9c2d) added e.SystemProfile() to AltSearchPatterns so
+// that a cheater who rotates IP, HMD serial and XPID would still be linked by
+// the machine. The premise turned out to be false: the profile string is
+// headset_model::network_type::video_card::cpu_model plus four integers, and
+// nothing in it is machine-unique. Measured against production 2026-08-12,
+// 12,803 accounts share one Quest 2 profile and 26,787 of 45,967 accounts sit
+// in some collision group.
+//
+// The profile is back to being a COMPARISON key only. The tests below now pin
+// the reverted behaviour; TestAltSearchPatterns_SystemProfileDoesNotDiscoverAlts
+// in evr_authenticate_alts_systemprofile_test.go is the primary statement of it.
 // ---------------------------------------------------------------------------
 
 // profileString joins system-profile components exactly the way
@@ -330,9 +341,10 @@ func richSystemInfo() evr.SystemInfo {
 	}
 }
 
-// TestAltSearchPatterns_IncludesSystemProfile is the direct regression test for
-// #516: the fingerprint has to appear among the keys the index is queried with.
-func TestAltSearchPatterns_IncludesSystemProfile(t *testing.T) {
+// TestAltSearchPatterns_ExcludesSystemProfile is the inverse of what #516 asked
+// for. The index is queried only on keys that identify an account, never on the
+// profile string, however specific that particular profile happens to look.
+func TestAltSearchPatterns_ExcludesSystemProfile(t *testing.T) {
 	entry := &LoginHistoryEntry{
 		XPID:     evr.EvrId{PlatformCode: evr.OVR, AccountId: 27670},
 		ClientIP: "45.33.90.154",
@@ -347,23 +359,34 @@ func TestAltSearchPatterns_IncludesSystemProfile(t *testing.T) {
 	}
 
 	patterns := h.AltSearchPatterns()
-	want := entry.SystemProfile()
-	if !slices.Contains(patterns, want) {
-		t.Errorf("AltSearchPatterns() omits the system profile %q; got %v", want, patterns)
+	profile := entry.SystemProfile()
+	if slices.Contains(patterns, profile) {
+		t.Errorf("AltSearchPatterns() queries the index on the system profile %q; got %v", profile, patterns)
+	}
+	// The control: the account's own identifiers are still discovery keys.
+	for _, want := range []string{entry.ClientIP, entry.LoginData.HMDSerialNumber, entry.XPID.Token()} {
+		if !slices.Contains(patterns, want) {
+			t.Errorf("AltSearchPatterns() omits %q; got %v", want, patterns)
+		}
 	}
 }
 
-// TestAltSearchPatterns_RotatedIdentifiersStillDiscoverable is the defect as
-// reported. Two accounts share nothing but the machine: different IP, different
-// HMD serial, different XPID — every key a cheater can rotate by hand.
+// TestAltSearchPatterns_RotatedIdentifiersAreNotDiscoverable pins the gap this
+// revert knowingly reopens: two accounts that share nothing but the machine are
+// NOT linked. That is #516 as reported, and it is now an accepted limitation
+// rather than a defect, because the alternative -- treating the profile string
+// as a fingerprint -- links 26,787 production accounts that have nothing to do
+// with each other.
 //
 // Discoverability is asserted the way the index actually decides it. The query
 // in LoginAlternatePatternSearch is `+value.cache:<patterns>` against the
 // indexed `cache` field, so the other account is returned iff one of this
 // account's search patterns appears in that account's rebuilt cache. Anything
 // the query does not return is never passed to loginHistoryCompare, so it can
-// never form an edge no matter what loginHistoryCompare would have concluded.
-func TestAltSearchPatterns_RotatedIdentifiersStillDiscoverable(t *testing.T) {
+// never form an edge no matter what loginHistoryCompare would have concluded --
+// which is why the comparison-only role, asserted at the end of this test, is
+// not a substitute for discovery.
+func TestAltSearchPatterns_RotatedIdentifiersAreNotDiscoverable(t *testing.T) {
 	sysinfo := richSystemInfo()
 
 	bannedEntry := &LoginHistoryEntry{
@@ -410,14 +433,16 @@ func TestAltSearchPatterns_RotatedIdentifiersStillDiscoverable(t *testing.T) {
 			hits = append(hits, p)
 		}
 	}
-	if len(hits) == 0 {
-		t.Fatalf("burner account is not discoverable from the banned account's index entry; "+
-			"search patterns %v matched nothing in cache %v", burner.AltSearchPatterns(), banned.Cache)
+	if len(hits) > 0 {
+		t.Fatalf("burner account is discoverable from the banned account's index entry via %v; "+
+			"the system profile must not be a discovery key (search patterns %v, cache %v)",
+			hits, burner.AltSearchPatterns(), banned.Cache)
 	}
 
-	// And once discovered, an edge actually forms.
+	// But the profile is still a COMPARISON key, so if either account is
+	// surfaced by some other key the shared machine is reported on the edge.
 	if matches := loginHistoryCompare(burner, banned); len(matches) == 0 {
-		t.Error("loginHistoryCompare formed no edge between accounts sharing a machine")
+		t.Error("loginHistoryCompare formed no edge between accounts sharing a machine; the profile must remain a comparison key")
 	}
 }
 
