@@ -260,9 +260,9 @@ func StartApiServer(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	// Enable max size check on requests coming arriving the gateway.
 	// Enable compression on responses sent by the gateway.
 	// Enable decompression on requests received by the gateway.
-	handlerWithDecompressRequest := decompressHandler(logger, grpcGatewayMux)
-	handlerWithCompressResponse := handlers.CompressHandler(handlerWithDecompressRequest)
 	maxMessageSizeBytes := config.GetSocket().MaxRequestSizeBytes
+	handlerWithDecompressRequest := decompressHandler(logger, grpcGatewayMux, maxMessageSizeBytes)
+	handlerWithCompressResponse := handlers.CompressHandler(handlerWithDecompressRequest)
 	handlerWithMaxBody := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Check max body size before decompressing incoming request body.
 		r.Body = http.MaxBytesReader(w, r.Body, maxMessageSizeBytes)
@@ -537,7 +537,25 @@ func parseToken(hmacSecretByte []byte, tokenString string) (userID uuid.UUID, us
 	return userID, claims.Username, claims.Vars, claims.ExpiresAt, claims.TokenId, claims.IssuedAt, true
 }
 
-func decompressHandler(logger *zap.Logger, h http.Handler) http.HandlerFunc {
+// decompressHandler transparently decompresses a request body the client sent
+// with Content-Encoding: gzip or deflate.
+//
+// maxRequestSizeBytes caps the DECOMPRESSED stream, not just the compressed
+// bytes the caller already capped. Without it a client could spend its entire
+// compressed budget on zeros — deflate reaches 1032:1, so the 2,048,000 bytes
+// admitted on fortytwo expand to ~2.1 GB — and the downstream io.ReadAll in
+// RpcFuncHttp (api_rpc.go:155) would allocate all of it. That is the 2026-08-12
+// incident: heap-212628.pb.gz, captured 34s before the 21:27:06Z kill, shows
+// io.ReadAll holding 3,383 MB live, 92.5% of the heap, on exactly that stack;
+// the process was OOM-killed at ~6.27 GB anon-rss every 3-5 minutes.
+//
+// The cap is the same value applied to the compressed body, because it is the
+// same limit: a request body may not exceed max_request_size_bytes. Compression
+// changes the encoding of a request, not what a request is allowed to be.
+// Exceeding it produces http.MaxBytesReader's "http: request body too large",
+// which readers of the body already handle as a 400 rather than silently
+// truncating.
+func decompressHandler(logger *zap.Logger, h http.Handler, maxRequestSizeBytes int64) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Header.Get("Content-Encoding") {
 		case "gzip":
@@ -546,9 +564,9 @@ func decompressHandler(logger *zap.Logger, h http.Handler) http.HandlerFunc {
 				logger.Debug("Error processing gzip request body, attempting to read uncompressed", zap.Error(err))
 				break
 			}
-			r.Body = gr
+			r.Body = http.MaxBytesReader(w, gr, maxRequestSizeBytes)
 		case "deflate":
-			r.Body = flate.NewReader(r.Body)
+			r.Body = http.MaxBytesReader(w, flate.NewReader(r.Body), maxRequestSizeBytes)
 		default:
 			// No request compression.
 		}
