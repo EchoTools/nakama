@@ -118,6 +118,32 @@ const MaxStreamBytesSize = MaxMessageLength // byte streams can't exceed a singl
 const MaxStreamStringLength = 32 * 1024     // 32KB max for individual strings
 const MaxJSONDecompressedSize = 512 * 1024  // 512KB max decompressed JSON (covers large profiles)
 
+// MaxZstdWindowSize bounds the decompression window a client may request.
+//
+// A zstd frame header carries a Window_Descriptor byte, and the decoder
+// allocates windowSize + maxBlockSize/2 during FRAME SETUP -- before it emits a
+// single output byte. klauspost/compress defaults to MaxWindowSize = 1<<29
+// (512 MiB), so an unbounded zstd.NewReader lets a client force a half-gigabyte
+// allocation from a handful of bytes on the wire.
+//
+// The io.LimitReader below does NOT prevent this: it bounds decompressed
+// OUTPUT, which is checked only after the window buffer already exists.
+//
+// Measured against the unbounded decoder, 2026-08-12:
+//   - a 17-byte payload (length prefix + a 512 MiB-window frame decoding to the
+//     JSON literal `null`) allocated 537,941,168 bytes -- ~9,000,000x
+//   - 32 such messages in one 1.8 KB packet (MaxMessagesPerPacket) allocated
+//     17,213,668,424 bytes (16.03 GiB)
+//
+// This path is reachable PRE-AUTHENTICATION: ParsePacket runs Stream() before
+// any handler, rate limiter, or account check. It OOM-killed production nine
+// times at a 6 GiB cgroup limit.
+//
+// 1 MiB is well above any legitimate frame: every compressed payload here is
+// already capped at MaxJSONDecompressedSize (512 KiB) decompressed, and a
+// window never needs to exceed the content it decodes.
+const MaxZstdWindowSize = 1 << 20 // 1MiB
+
 // StreamBytes reads or writes bytes to the stream based on the mode of the EasyStream.
 // If the mode is ReadMode, it reads bytes from the stream and stores them in the provided data slice.
 // If the length parameter is -1, it reads all available bytes from the stream.
@@ -244,6 +270,16 @@ func (s *EasyStream) StreamGUID(guid *uuid.UUID) error {
 
 const MaxStringTableEntries = 1024
 
+// MaxStringTableBytes is the maximum total string data that may be allocated
+// by a single StreamStringTable decode, across all entries. The per-entry cap
+// is MaxStreamStringLength (32 KB) and the per-count cap is
+// MaxStringTableEntries (1024); without a product cap a client can supply
+// offsets that all land at a position holding a 32 KB string, and each of the
+// 1024 entries independently allocates its own copy via append growth, pushing
+// total allocation past 32 MB. That is reachable from any client-reachable
+// message that carries a string table (RemoteLogSet, LobbyFindSession, …).
+const MaxStringTableBytes = 512 * 1024
+
 func (s *EasyStream) StreamStringTable(entries *[]string) error {
 	var err error
 	var strings []string
@@ -271,6 +307,7 @@ func (s *EasyStream) StreamStringTable(entries *[]string) error {
 			offsets[i] = off
 		}
 
+		var totalBytes int
 		bufferStart := s.Position()
 		for i, off := range offsets {
 			pos := bufferStart + int(off)
@@ -282,6 +319,10 @@ func (s *EasyStream) StreamStringTable(entries *[]string) error {
 			}
 			if err = s.StreamNullTerminatedString(&strings[i]); err != nil {
 				return err
+			}
+			totalBytes += len(strings[i])
+			if totalBytes > MaxStringTableBytes {
+				return fmt.Errorf("string table total size %d exceeds maximum %d", totalBytes, MaxStringTableBytes)
 			}
 		}
 		*entries = strings
@@ -417,7 +458,9 @@ func (s *EasyStream) StreamJson(data interface{}, isNullTerminated bool, compres
 			if err = binary.Read(s.r, binary.LittleEndian, &l32); err != nil {
 				return fmt.Errorf("zstd length read error: %w", err)
 			}
-			r, err := zstd.NewReader(s.r)
+			r, err := zstd.NewReader(s.r,
+				zstd.WithDecoderMaxWindow(MaxZstdWindowSize),
+				zstd.WithDecoderMaxMemory(MaxJSONDecompressedSize))
 			if err != nil {
 				return err
 			}
@@ -520,7 +563,9 @@ func (s *EasyStream) StreamJSONRawMessage(data *json.RawMessage, isNullTerminate
 			if err = binary.Read(s.r, binary.LittleEndian, &l32); err != nil {
 				return fmt.Errorf("zstd length read error: %w", err)
 			}
-			r, err := zstd.NewReader(s.r)
+			r, err := zstd.NewReader(s.r,
+				zstd.WithDecoderMaxWindow(MaxZstdWindowSize),
+				zstd.WithDecoderMaxMemory(MaxJSONDecompressedSize))
 			if err != nil {
 				return err
 			}
