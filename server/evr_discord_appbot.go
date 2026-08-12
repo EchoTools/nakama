@@ -3554,7 +3554,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			// Resolve a friendly display name by looking up the live server.
 			displayName := extIP
 			minSize, maxSize := 0, 100
-			query := fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/ +label.broadcaster.region_codes:default", Query.QuoteStringValue(groupID))
+			query := fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/ +label.broadcaster.region_codes:default", regexEscapeForBluge(groupID))
 			if matchList, err := nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query); err == nil {
 				for _, m := range matchList {
 					label := MatchLabel{}

@@ -658,7 +658,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 
 	if len(p.RequiredFeatures) > 0 {
 		for _, f := range p.RequiredFeatures {
-			qparts = append(qparts, fmt.Sprintf("+label.features:/.*%s.*/", Query.QuoteStringValue(f)))
+			qparts = append(qparts, fmt.Sprintf("+label.features:/.*%s.*/", regexEscapeForBluge(f)))
 		}
 	}
 
@@ -802,7 +802,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	qparts := []string{
 		"+properties.game_mode:" + p.Mode.String(),
 		fmt.Sprintf("+properties.group_id:%s", Query.QuoteStringValue(p.GroupID.String())),
-		fmt.Sprintf(`-properties.blocked_ids:/.*%s.*/`, Query.QuoteStringValue(p.UserID.String())),
+		fmt.Sprintf(`-properties.blocked_ids:/.*%s.*/`, regexEscapeForBluge(p.UserID.String())),
 		//"+properties.version_lock:" + p.VersionLock.String(),
 		p.MatchmakingQueryAddon,
 	}
