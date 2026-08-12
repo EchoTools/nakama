@@ -283,40 +283,77 @@ func loginHistoryCompare(a, b *LoginHistory) []*AlternateSearchMatch {
 	if a.userID == b.userID {
 		return nil // Skip self-comparison.
 	}
-	matches := make([]*AlternateSearchMatch, 0)
+	// Every match this function can emit carries the SAME OtherUserID (b.userID),
+	// so the only information in the result is the SET of distinct values the two
+	// accounts have in common. Emitting one match per matching entry-PAIR produced
+	// len(a.History) * len(b.History) objects, all keyed identically.
+	//
+	// That Cartesian product is a remotely-triggerable memory bomb. A client
+	// controls its own History size -- entries are keyed on
+	// xpid.Token()+":"+clientIP (see loginHistoryEntryKey), so rotating either
+	// mints a fresh entry on every login, and nothing caps the entry COUNT (the
+	// only guard is the 5MB marshal prune in MarshalJSON). Two accounts each
+	// carrying ~1,700 entries that share one uncommon SystemProfile yield
+	// ~2.9M objects for that pair alone; UpdateAlternates then stores every one
+	// of them under a single map key. Measured in production 2026-08-12:
+	// 5.3M live objects, ~728 B each, ~3.9 GB, killed at the 6 GiB cgroup limit
+	// eight times.
+	//
+	// Comparison stays POSITIONAL -- XPID only matches XPID, IP only matches IP,
+	// and so on -- exactly as the pairwise loop did. Only the deduplication is new.
+	// Memory is now O(distinct items) instead of O(N*M).
+	const (
+		fieldXPID = iota
+		fieldClientIP
+		fieldSystemProfile
+		fieldHMDSerial
+		fieldCount
+	)
+	entryItems := func(e *LoginHistoryEntry) [fieldCount]string {
+		return [fieldCount]string{
+			e.XPID.String(),
+			e.ClientIP,
+			e.SystemProfile(),
+			e.LoginData.HMDSerialNumber,
+		}
+	}
 
-	// Collect the authUserData from both histories.
-	authUserData := make([][][]string, 2)
-	for i, h := range []map[string]*LoginHistoryEntry{a.History, b.History} {
-		authUserData[i] = make([][]string, 0, len(h))
-		for _, e := range h {
-			items := []string{
-				e.XPID.String(),
-				e.ClientIP,
-				e.SystemProfile(),
-				e.LoginData.HMDSerialNumber,
-			}
-			authUserData[i] = append(authUserData[i], items)
-		}
+	var seenA [fieldCount]map[string]struct{}
+	for i := range seenA {
+		seenA[i] = make(map[string]struct{})
 	}
-	// Compare the entries from both histories.
-	for _, itemsA := range authUserData[0] {
-		for _, itemsB := range authUserData[1] {
-			matchingItems := make([]string, 0, len(itemsA))
-			for i, item := range itemsA {
-				if item == itemsB[i] && item != "" && !matchIgnoredAltPattern(item) {
-					// The items match.
-					matchingItems = append(matchingItems, item)
-				}
-			}
-			// If there are matching items, create a match entry.
-			if len(matchingItems) > 0 {
-				matches = append(matches, &AlternateSearchMatch{
-					OtherUserID: b.userID,
-					Items:       matchingItems,
-				})
+	for _, e := range a.History {
+		for i, item := range entryItems(e) {
+			if item != "" {
+				seenA[i][item] = struct{}{}
 			}
 		}
 	}
-	return matches
+
+	matchingSet := make(map[string]struct{})
+	for _, e := range b.History {
+		for i, item := range entryItems(e) {
+			if item == "" || matchIgnoredAltPattern(item) {
+				continue
+			}
+			if _, ok := seenA[i][item]; ok {
+				matchingSet[item] = struct{}{}
+			}
+		}
+	}
+
+	if len(matchingSet) == 0 {
+		return nil
+	}
+
+	matchingItems := make([]string, 0, len(matchingSet))
+	for item := range matchingSet {
+		matchingItems = append(matchingItems, item)
+	}
+	slices.Sort(matchingItems) // deterministic output
+
+	return []*AlternateSearchMatch{{
+		OtherUserID: b.userID,
+		Items:       matchingItems,
+	}}
 }
