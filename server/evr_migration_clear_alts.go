@@ -116,12 +116,12 @@ func (m *MigrationClearAlternateMatches) MigrateSystem(ctx context.Context, logg
 		}
 
 		logger.WithFields(map[string]any{
-			"batch":       len(writes),
-			"cleared":     cleared,
-			"rebuilt":     rebuilt,
-			"walked":      walked,
-			"batch_time":  time.Since(batchStart).String(),
-			"total_time":  time.Since(startTime).String(),
+			"batch":      len(writes),
+			"cleared":    cleared,
+			"rebuilt":    rebuilt,
+			"walked":     walked,
+			"batch_time": time.Since(batchStart).String(),
+			"total_time": time.Since(startTime).String(),
 		}).Info("alt-clear migration: progress")
 
 		if nextCursor == "" {
