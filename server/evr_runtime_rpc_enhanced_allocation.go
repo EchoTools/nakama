@@ -95,7 +95,7 @@ func ReserveMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 }
 
 // processReservationAllocation handles allocation using an existing reservation
-func processReservationAllocation(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, request EnhancedAllocateMatchRequest, reservationMgr *ReservationManager, response *EnhancedAllocateMatchResponse) (string, error) {
+func processReservationAllocation(ctx context.Context, logger runtime.Logger, _ runtime.NakamaModule, request EnhancedAllocateMatchRequest, reservationMgr *ReservationManager, response *EnhancedAllocateMatchResponse) (string, error) {
 	// Get the reservation
 	reservation, err := reservationMgr.GetReservation(ctx, request.ReservationID)
 	if err != nil {
@@ -156,7 +156,7 @@ func processReservationAllocation(ctx context.Context, logger runtime.Logger, nk
 }
 
 // processAllocationWithPurging handles allocation that may require purging existing matches
-func processAllocationWithPurging(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, request EnhancedAllocateMatchRequest, preemptionMgr *MatchPreemptionManager, response *EnhancedAllocateMatchResponse) (string, error) {
+func processAllocationWithPurging(ctx context.Context, _ runtime.Logger, _ runtime.NakamaModule, request EnhancedAllocateMatchRequest, preemptionMgr *MatchPreemptionManager, response *EnhancedAllocateMatchResponse) (string, error) {
 	// Create preemption request
 	preemptionReq := &PreemptionRequest{
 		RequestingUserID:         request.OwnerID,
@@ -201,7 +201,7 @@ func processAllocationWithPurging(ctx context.Context, logger runtime.Logger, nk
 }
 
 // processNormalAllocation handles normal allocation when servers are available
-func processNormalAllocation(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, request EnhancedAllocateMatchRequest, response *EnhancedAllocateMatchResponse) (string, error) {
+func processNormalAllocation(_ context.Context, _ runtime.Logger, _ *sql.DB, _ runtime.NakamaModule, _ EnhancedAllocateMatchRequest, response *EnhancedAllocateMatchResponse) (string, error) {
 	// TODO: Implement normal allocation by calling the existing AllocateMatchRPC
 	// For now, return success
 	response.Success = true
@@ -211,7 +211,7 @@ func processNormalAllocation(ctx context.Context, logger runtime.Logger, db *sql
 }
 
 // checkServerAvailability checks if there are available servers
-func checkServerAvailability(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger) (bool, error) {
+func checkServerAvailability(ctx context.Context, nk runtime.NakamaModule, _ runtime.Logger) (bool, error) {
 	// Get current match count
 	matches, err := nk.MatchList(ctx, 100, true, "", nil, nil, "*")
 	if err != nil {

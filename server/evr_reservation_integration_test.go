@@ -105,15 +105,6 @@ func (m *mockReservationNakamaModule) GroupsList(ctx context.Context, name, lang
 	return result, "", nil
 }
 
-// Helper to create GroupMetadata with guild_id
-func createGroupMetadataJSON(guildID string) string {
-	md := GroupMetadata{
-		GuildID: guildID,
-	}
-	data, _ := json.Marshal(md)
-	return string(data)
-}
-
 // TestGetGuildAuditChannelID_Valid tests fetching audit channel ID from valid guild
 func TestGetGuildAuditChannelID_Valid(t *testing.T) {
 	ctx := context.Background()

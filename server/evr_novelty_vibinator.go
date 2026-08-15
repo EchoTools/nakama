@@ -118,7 +118,7 @@ func vibinatorsGravityCheck(
 
 // vibinatorsCurrentCombatMatch returns the MatchLabel for vibinator's current echo_combat match,
 // or nil if vibinator is not in one.
-func vibinatorsCurrentCombatMatch(ctx context.Context, p *EvrPipeline, logger *zap.Logger) (*MatchLabel, error) {
+func vibinatorsCurrentCombatMatch(ctx context.Context, p *EvrPipeline, _ *zap.Logger) (*MatchLabel, error) {
 	presences, err := p.nk.StreamUserList(StreamModeService, vibinatorsUserID, "", StreamLabelMatchService, false, true)
 	if err != nil {
 		return nil, fmt.Errorf("stream list: %w", err)
@@ -150,7 +150,7 @@ func vibinatorsCurrentCombatMatch(ctx context.Context, p *EvrPipeline, logger *z
 //
 // Strategy: find vibinator's login session, load their LobbySessionParameters from context,
 // then check the matchmaking stream for that GroupID to confirm they are queued for combat.
-func vibinatorsIsMatchmakingForCombat(ctx context.Context, p *EvrPipeline, logger *zap.Logger) (bool, error) {
+func vibinatorsIsMatchmakingForCombat(_ context.Context, p *EvrPipeline, logger *zap.Logger) (bool, error) {
 	// Get vibinator's active login session presence.
 	loginPresences, err := p.nk.StreamUserList(StreamModeService, vibinatorsUserID, "", StreamLabelLoginService, false, true)
 	if err != nil {

@@ -376,7 +376,7 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 				account: account,
 				updated: updateTime,
 				matches: map[string]time.Time{
-					"username: " + username: time.Time{},
+					"username: " + username: {},
 				},
 			})
 		}

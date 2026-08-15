@@ -412,7 +412,7 @@ func (h *ReservationSlashCommandHandler) handleReservationStatus(_ context.Conte
 	return h.respondError(dg, i, "Reservation status not yet implemented")
 }
 
-func (h *ReservationSlashCommandHandler) handleDashboard(ctx context.Context, dg *discordgo.Session, i *discordgo.InteractionCreate, userID, guildID string, options []*discordgo.ApplicationCommandInteractionDataOption) error {
+func (h *ReservationSlashCommandHandler) handleDashboard(_ context.Context, dg *discordgo.Session, i *discordgo.InteractionCreate, _, _ string, _ []*discordgo.ApplicationCommandInteractionDataOption) error {
 	// TODO: Implement dashboard
 	return h.respondError(dg, i, "Dashboard not yet implemented")
 }

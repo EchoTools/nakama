@@ -240,7 +240,7 @@ func moderatorClaimRequest() *evr.LobbyFindSessionRequest {
 // A nil pipeline module is therefore the assertion that it does not regress: if
 // some future edit reintroduces a p.nk read on this path, this test panics
 // rather than quietly going back to needing a database.
-func newLobbyParamsTestSession(t *testing.T, logger *zap.Logger, nk runtime.NakamaModule, isGlobalOperator bool) *sessionWS {
+func newLobbyParamsTestSession(t *testing.T, logger *zap.Logger, _ runtime.NakamaModule, isGlobalOperator bool) *sessionWS {
 	t.Helper()
 	userID := uuid.Must(uuid.NewV4())
 
@@ -253,7 +253,7 @@ func newLobbyParamsTestSession(t *testing.T, logger *zap.Logger, nk runtime.Naka
 	params := &SessionParameters{
 		profile:          &EVRProfile{}, // non-nil: GetGroupIGN/GetActiveGroupID dereference it
 		isGlobalOperator: isGlobalOperator,
-		latencyHistory:   atomic.NewPointer[LatencyHistory](NewLatencyHistory()),
+		latencyHistory:   atomic.NewPointer(NewLatencyHistory()),
 	}
 	ctx := context.WithValue(context.Background(), ctxSessionParametersKey{}, atomic.NewPointer(params))
 

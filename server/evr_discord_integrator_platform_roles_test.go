@@ -70,9 +70,10 @@ func TestPlatformRoleClassification_AppId(t *testing.T) {
 			case tt.appId == PcvrAppId:
 				gotPCVR = true
 			default:
-				if tt.buildNumber == evr.PCVRBuild {
+				switch tt.buildNumber {
+				case evr.PCVRBuild:
 					gotPCVR = true
-				} else if tt.buildNumber == evr.StandaloneBuildNumber {
+				case evr.StandaloneBuildNumber:
 					gotStandalone = true
 				}
 			}

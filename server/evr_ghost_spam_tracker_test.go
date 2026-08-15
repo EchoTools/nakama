@@ -9,13 +9,13 @@ import (
 )
 
 func TestRemoveTriggeredPlayers_NilTriggered(t *testing.T) {
-	list := []evr.EvrId{evr.EvrId{PlatformCode: 1, AccountId: 100}, evr.EvrId{PlatformCode: 1, AccountId: 200}}
+	list := []evr.EvrId{{PlatformCode: 1, AccountId: 100}, {PlatformCode: 1, AccountId: 200}}
 	result := removeTriggeredPlayers(list, nil)
 	assert.Equal(t, list, result)
 }
 
 func TestRemoveTriggeredPlayers_EmptyTriggered(t *testing.T) {
-	list := []evr.EvrId{evr.EvrId{PlatformCode: 1, AccountId: 100}, evr.EvrId{PlatformCode: 1, AccountId: 200}}
+	list := []evr.EvrId{{PlatformCode: 1, AccountId: 100}, {PlatformCode: 1, AccountId: 200}}
 	result := removeTriggeredPlayers(list, map[string]bool{})
 	assert.Equal(t, list, result)
 }

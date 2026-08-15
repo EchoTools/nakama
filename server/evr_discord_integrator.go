@@ -1450,11 +1450,12 @@ func (d *DiscordIntegrator) updatePlatformRoles(ctx context.Context, _ *zap.Logg
 			return fmt.Errorf("error updating PCVR role: %w", err)
 		}
 	default:
-		if mostRecentEntry.LoginData.BuildNumber == evr.PCVRBuild {
+		switch mostRecentEntry.LoginData.BuildNumber {
+		case evr.PCVRBuild:
 			if err := d.updateMemberRole(member, group.RoleMap.PCVR, true); err != nil {
 				return fmt.Errorf("error updating PCVR role: %w", err)
 			}
-		} else if mostRecentEntry.LoginData.BuildNumber == evr.StandaloneBuildNumber {
+		case evr.StandaloneBuildNumber:
 			if err := d.updateMemberRole(member, group.RoleMap.Standalone, true); err != nil {
 				return fmt.Errorf("error updating Standalone role: %w", err)
 			}

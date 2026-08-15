@@ -102,7 +102,7 @@ type DiscordMessenger interface {
 }
 
 // cleanupExpiredReservations removes expired reservations and updates states
-func (ri *ReservationIntegration) cleanupExpiredReservations(ctx context.Context) {
+func (ri *ReservationIntegration) cleanupExpiredReservations(_ context.Context) {
 	ri.logger.Debug("Running reservation cleanup task - no Discord session available")
 }
 

@@ -95,13 +95,6 @@ type EarlyQuitPlayerState struct {
 	version string
 }
 
-// earlyQuitPlayerStateLegacy is used to detect and migrate old storage format.
-type earlyQuitPlayerStateLegacy struct {
-	EarlyQuitPenaltyLevel int32     `json:"early_quit_penalty_level"`
-	LastEarlyQuitTime     time.Time `json:"last_early_quit_time"`
-	TotalEarlyQuits       int32     `json:"total_early_quits"`
-}
-
 // UnmarshalJSON handles backward-compatible deserialization from old storage format.
 func (s *EarlyQuitPlayerState) UnmarshalJSON(data []byte) error {
 	// First try the new format (aliased struct to avoid recursion)

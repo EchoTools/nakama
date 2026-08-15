@@ -1337,7 +1337,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 	return nil
 }
 
-func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) error {
+func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, _ runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, _ string, groupID string) error {
 	// Get the current guild roles
 	metadata, err := GroupMetadataLoad(ctx, d.db, groupID)
 	if err != nil {

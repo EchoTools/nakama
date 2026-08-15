@@ -154,19 +154,6 @@ func charListAll(t *testing.T, si StorageIndex, indexName string, limit int) (*a
 	return objs, err
 }
 
-// charUserIDs extracts and sorts the user IDs from a result set.
-func charUserIDs(objs *api.StorageObjects) []string {
-	if objs == nil {
-		return nil
-	}
-	out := make([]string, 0, len(objs.Objects))
-	for _, o := range objs.Objects {
-		out = append(out, o.UserId)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // --- Group A: index semantics -------------------------------------------
 
 // A1. indexOnly:true stores ONLY the registered fields. Everything else in the

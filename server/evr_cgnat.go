@@ -427,7 +427,7 @@ func loadASNData(ctx context.Context, url, cachePath string, isV4 bool) ([]rawAS
 	return parseASNGzip(data, isV4)
 }
 
-func parseASNGzip(data []byte, isV4 bool) ([]rawASNRange, error) {
+func parseASNGzip(data []byte, _ bool) ([]rawASNRange, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("decompressing: %w", err)

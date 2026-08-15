@@ -43,7 +43,7 @@ var globalEmbedTracker = &ServerEmbedTracker{
 	embeds: make(map[string]*ServerEmbedInfo),
 }
 
-func (d *DiscordAppBot) handleShowServerEmbeds(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID, groupID, region string) error {
+func (d *DiscordAppBot) handleShowServerEmbeds(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, _ string, groupID, region string) error {
 	region = normalizeRegionCode(region)
 	if region == "" {
 		region = "all"
