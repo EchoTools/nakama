@@ -454,7 +454,7 @@ func BenchmarkHashMatchmakerEntries(b *testing.B) {
 
 	// Run the benchmark
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		HashMatchmakerEntries(entries)
 	}
 }
@@ -533,7 +533,7 @@ func BenchmarkPredictCandidateOutcomesWithConfig(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 
-				for i := 0; i < b.N; i++ {
+				for b.Loop() {
 					predictions := make([]PredictedMatch, 0, len(cs.candidates))
 					for p := range predictCandidateOutcomesWithConfig(cs.candidates, cfg.config) {
 						predictions = append(predictions, p)
@@ -558,7 +558,7 @@ func BenchmarkPredictCandidateOutcomesWithConfig_Throughput(b *testing.B) {
 	b.ResetTimer()
 
 	totalPredictions := 0
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		count := 0
 		for range predictCandidateOutcomesWithConfig(candidates, config) {
 			count++
@@ -655,7 +655,7 @@ done:
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		predictions := make([]PredictedMatch, 0, len(candidates)*2)
 		for p := range predictCandidateOutcomesWithConfig(candidates, config) {
 			predictions = append(predictions, p)
@@ -686,7 +686,7 @@ func BenchmarkPredictCandidateOutcomesWithConfig_DuplicateFiltering(b *testing.B
 		b.ReportAllocs()
 		b.ResetTimer()
 
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			predictions := make([]PredictedMatch, 0, len(baseCandidates))
 			for p := range predictCandidateOutcomesWithConfig(candidatesWithDupes, config) {
 				predictions = append(predictions, p)
@@ -698,7 +698,7 @@ func BenchmarkPredictCandidateOutcomesWithConfig_DuplicateFiltering(b *testing.B
 		b.ReportAllocs()
 		b.ResetTimer()
 
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			predictions := make([]PredictedMatch, 0, len(baseCandidates))
 			for p := range predictCandidateOutcomesWithConfig(baseCandidates, config) {
 				predictions = append(predictions, p)
