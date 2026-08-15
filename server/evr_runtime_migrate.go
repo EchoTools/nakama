@@ -67,7 +67,7 @@ func MigrateAllUsers(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 		update_time DESC
 	`
 
-	rows, err := db.Query(query)
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return fmt.Errorf("error fetching users: %w", err)
 	}
@@ -80,6 +80,9 @@ func MigrateAllUsers(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 			return fmt.Errorf("error scanning user id: %w", err)
 		}
 		userIDs = append(userIDs, userID)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating user rows: %w", err)
 	}
 
 	for _, userID := range userIDs {

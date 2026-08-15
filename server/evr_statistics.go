@@ -519,10 +519,6 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 
 	rows, err := db.QueryContext(ctx, query, ownerID, allBoardIDs)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			// Return the default profile's stats
-			return playerStatistics, boardMap, nil
-		}
 		return nil, nil, fmt.Errorf("failed to query leaderboard records: %w", err)
 	}
 	defer rows.Close()
@@ -534,7 +530,6 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 
 		err = rows.Scan(&dbLeaderboardID, &dbScore, &dbSubscore)
 		if err != nil {
-
 			return nil, nil, fmt.Errorf("failed to scan leaderboard record: %w", err)
 		}
 
@@ -555,6 +550,9 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 		}
 		v.SetValue(val)
 
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error iterating leaderboard records: %w", err)
 	}
 
 	// Use the GamesPlayed stat to fill in all the cnt's

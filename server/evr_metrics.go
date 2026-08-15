@@ -393,5 +393,8 @@ func CountLinkedUsers(ctx context.Context, nk runtime.NakamaModule, db *sql.DB) 
 			return 0, err
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
 	return count, nil
 }
