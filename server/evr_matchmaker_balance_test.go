@@ -679,8 +679,7 @@ func BenchmarkTeamFormation(b *testing.B) {
 		candidates[0][i] = e
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		for range predictCandidateOutcomesWithConfig(candidates, defaultPredictionConfig()) {
 			// consume
 		}

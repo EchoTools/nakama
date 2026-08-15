@@ -575,8 +575,10 @@ var benchmarkExpressions = []string{
 var benchmarkExpressionsLen = len(benchmarkExpressions)
 
 func BenchmarkParse(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		_ = MustParse(benchmarkExpressions[i%benchmarkExpressionsLen])
+		i++
 	}
 }
 
@@ -587,8 +589,10 @@ func BenchmarkNext(b *testing.B) {
 	}
 	from := time.Now()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
+		i := 0
 		expr := exprs[i%benchmarkExpressionsLen]
+			i++
 		next := expr.Next(from)
 		next = expr.Next(next)
 		next = expr.Next(next)

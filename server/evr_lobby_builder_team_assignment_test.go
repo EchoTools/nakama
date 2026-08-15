@@ -473,8 +473,8 @@ func BenchmarkTeamSplitting_SlicingApproach(b *testing.B) {
 		}
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		teamSize := len(entrants) / 2
 		_ = [2][]*MatchmakerEntry{
 			entrants[:teamSize],
@@ -498,8 +498,8 @@ func BenchmarkTeamSplitting_LoopAppendApproach(b *testing.B) {
 		}
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		teamSize := len(entrants) / 2
 		teams := [2][]*MatchmakerEntry{}
 		for j, e := range entrants {

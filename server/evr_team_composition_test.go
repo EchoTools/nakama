@@ -316,8 +316,8 @@ func TestEntryArchetype_InvalidValues(t *testing.T) {
 func BenchmarkScoreTeamComposition(b *testing.B) {
 	team1 := []string{ArchetypeStriker, ArchetypePlaymaker, ArchetypeInterceptor, ArchetypeGoalie}
 	team2 := []string{ArchetypeStriker, ArchetypePlaymaker, ArchetypeInterceptor, ArchetypeGoalie}
-	b.ResetTimer()
-	for range b.N {
+	
+	for b.Loop() {
 		scoreTeamComposition(team1, team2, false, false)
 	}
 }
@@ -346,8 +346,8 @@ func BenchmarkSelectBestTeamSplit(b *testing.B) {
 		}
 	}
 
-	b.ResetTimer()
-	for range b.N {
+	
+	for b.Loop() {
 		selectBestTeamSplit(entries, splits, 50)
 	}
 }
