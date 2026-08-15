@@ -263,37 +263,6 @@ func (e *DiscordAppBot) discordGoLogger(msgL int, caller int, format string, a .
 	}
 }
 
-func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string, group *GuildGroup) *rate.Limiter {
-	key := strings.Join([]string{userID, groupID}, ":")
-
-	// Use guild group setting if available, otherwise use default
-	ratePerSecond := e.prepareMatchRatePerSecond
-	if group != nil && group.CreateCommandRateLimitPerMinute > 0 {
-		ratePerSecond = rate.Limit(group.CreateCommandRateLimitPerMinute / 60.0) // Convert from per-minute to per-second
-	}
-
-	// Try to load existing limiter
-	if limiter, ok := e.prepareMatchRateLimiters.Load(key); ok {
-		// Check if the rate has changed, if so, update it
-		if limiter.Limit() != ratePerSecond {
-			limiter.SetLimit(ratePerSecond)
-		}
-		return limiter
-	}
-
-	// Create a new limiter if none exists
-	limiter := rate.NewLimiter(ratePerSecond, e.prepareMatchBurst)
-	e.prepareMatchRateLimiters.Store(key, limiter)
-	return limiter
-}
-
-// loadPublicMatchRateLimiter returns the rate limiter for public match creation (1 per 15 minutes)
-func (e *DiscordAppBot) loadPublicMatchRateLimiter(userID, groupID string) *rate.Limiter {
-	key := strings.Join([]string{userID, groupID, "public"}, ":")
-	limiter, _ := e.matchCreateRateLimiters.LoadOrStore(key, rate.NewLimiter(e.publicMatchRatePerSecond, e.publicMatchBurst))
-	return limiter
-}
-
 var (
 	partyGroupIDPattern = regexp.MustCompile("^[a-z0-9]+$")
 
@@ -3915,9 +3884,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 					choices, err = svc.NameChoices(ctx, userID, focusedValue)
 				case "set":
-					if focusedName == "slot" {
+					switch focusedName {
+					case "slot":
 						choices = svc.SlotChoices(focusedValue)
-					} else if focusedName == "value" {
+					case "value":
 						choices, err = svc.ValueChoices(ctx, userID, slotValue, focusedValue)
 					}
 				default:
@@ -4792,7 +4762,7 @@ func (d *DiscordAppBot) canShutdownMatch(ctx context.Context, userID string, lab
 }
 
 // presentRegionFallbackOptions presents the user with fallback region options when matchmaking fails
-func (d *DiscordAppBot) presentRegionFallbackOptions(s *discordgo.Session, i *discordgo.InteractionCreate, fallbackInfo *RegionFallbackInfo, action string, region string, mode evr.Symbol, level evr.Symbol, startTime time.Time) error {
+func (d *DiscordAppBot) presentRegionFallbackOptions(s *discordgo.Session, i *discordgo.InteractionCreate, fallbackInfo *RegionFallbackInfo, _ string, region string, _ evr.Symbol, _ evr.Symbol, _ time.Time) error {
 	if fallbackInfo == nil {
 		return errors.New("no fallback info provided")
 	}
