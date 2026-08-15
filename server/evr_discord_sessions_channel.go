@@ -221,7 +221,7 @@ func (sm *SessionsChannelManager) PostSessionMessage(label *MatchLabel, guildGro
 }
 
 // createSessionEmbed creates the Discord embed and components for a session
-func (sm *SessionsChannelManager) createSessionEmbed(label *MatchLabel, guildGroup *GuildGroup) ([]*discordgo.MessageEmbed, []discordgo.MessageComponent) {
+func (sm *SessionsChannelManager) createSessionEmbed(label *MatchLabel, _ *GuildGroup) ([]*discordgo.MessageEmbed, []discordgo.MessageComponent) {
 	sessionUUID := strings.ToUpper(label.ID.UUID.String())
 
 	// Calculate duration (this will be updated in the loop)

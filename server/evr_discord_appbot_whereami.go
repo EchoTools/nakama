@@ -960,7 +960,7 @@ func (d *DiscordAppBot) getServerStatsByHost(ctx context.Context, logger runtime
 
 // getOrCreateHostThread gets or creates a thread for a specific host in the report channel
 // Returns the thread ID
-func (d *DiscordAppBot) getOrCreateHostThread(ctx context.Context, logger runtime.Logger, s *discordgo.Session, channelID, hostIP, serverVersion string) (string, error) {
+func (d *DiscordAppBot) getOrCreateHostThread(_ context.Context, logger runtime.Logger, s *discordgo.Session, channelID, hostIP, serverVersion string) (string, error) {
 	// List active threads in the channel
 	threads, err := s.ThreadsActive(channelID)
 	if err != nil {

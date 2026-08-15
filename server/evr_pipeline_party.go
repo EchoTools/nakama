@@ -82,10 +82,6 @@ func (p *EvrPipeline) lookupPartyUUID(snsID uint64) (uuid.UUID, bool) {
 	return p.snsPartyIDToUUID.Load(snsID)
 }
 
-func (p *EvrPipeline) lookupSNSPartyID(partyUUID uuid.UUID) (uint64, bool) {
-	return p.snsPartyUUIDToID.Load(partyUUID)
-}
-
 func (p *EvrPipeline) removeSNSPartyMapping(snsID uint64, partyUUID uuid.UUID) {
 	p.snsPartyIDToUUID.Delete(snsID)
 	p.snsPartyUUIDToID.Delete(partyUUID)
@@ -126,7 +122,7 @@ func (p *EvrPipeline) resolveUserIDToAccountID(ctx context.Context, userID uuid.
 // Broadcasting to party members
 // ---------------------------------------------------------------------------
 
-func (p *EvrPipeline) sendEVRMessageToPartyMembers(logger *zap.Logger, partyUUID uuid.UUID, excludeSessionID uuid.UUID, messages ...evr.Message) {
+func (p *EvrPipeline) sendEVRMessageToPartyMembers(_ *zap.Logger, partyUUID uuid.UUID, excludeSessionID uuid.UUID, messages ...evr.Message) {
 	stream := PresenceStream{Mode: StreamModeParty, Subject: partyUUID, Label: p.node}
 	presences := p.nk.tracker.ListByStream(stream, true, true)
 	for _, presence := range presences {
@@ -145,7 +141,7 @@ func (p *EvrPipeline) sendEVRMessageToPartyMembers(logger *zap.Logger, partyUUID
 // Party join/leave helpers (shared by create, join, respond-to-invite)
 // ---------------------------------------------------------------------------
 
-func (p *EvrPipeline) snsPartyTrackAndJoin(ctx context.Context, logger *zap.Logger, session *sessionWS, partyUUID uuid.UUID, snsPartyID uint64, params *SessionParameters) error {
+func (p *EvrPipeline) snsPartyTrackAndJoin(_ context.Context, logger *zap.Logger, session *sessionWS, partyUUID uuid.UUID, snsPartyID uint64, params *SessionParameters) error {
 	stream := PresenceStream{Mode: StreamModeParty, Subject: partyUUID, Label: p.node}
 	success, isNew := p.nk.tracker.Track(session.Context(), session.ID(), stream, session.UserID(), PresenceMeta{
 		Format:   session.Format(),
@@ -182,7 +178,7 @@ func clearPartyParams(ctx context.Context, params *SessionParameters) {
 	StoreParams(ctx, params)
 }
 
-func (p *EvrPipeline) snsPartyLeaveCleanup(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) {
+func (p *EvrPipeline) snsPartyLeaveCleanup(_ context.Context, _ *zap.Logger, session *sessionWS, params *SessionParameters) {
 	if params.currentPartyID == uuid.Nil {
 		return
 	}

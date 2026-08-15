@@ -123,7 +123,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 // handleMatchmakingError classifies a matchmaking error and performs cleanup.
 // Returns nil if the error is a context cancellation (no error to report),
 // or a wrapped LobbyError for all other cases.
-func handleMatchmakingError(logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, metrics Metrics, err error) error {
+func handleMatchmakingError(logger *zap.Logger, _ *sessionWS, lobbyParams *LobbySessionParameters, metrics Metrics, err error) error {
 	if errors.Is(err, context.Canceled) {
 		logger.Debug("Matchmaking context canceled")
 		return nil

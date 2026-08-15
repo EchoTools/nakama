@@ -28,7 +28,7 @@ func TestShouldFollowerFindOrCreateSocial(t *testing.T) {
 // sets the interval to 1 hour (effectively disabling automatic flushes).
 // For tests that depend on label indexing (MatchList queries), use a small
 // interval such as 10ms.
-func createTestMatchRegistryWithInterval(_t fatalable, logger *zap.Logger, intervalMs int) (*LocalMatchRegistry, RuntimeMatchCreateFunction, context.CancelFunc, error) {
+func createTestMatchRegistryWithInterval(_ fatalable, logger *zap.Logger, intervalMs int) (*LocalMatchRegistry, RuntimeMatchCreateFunction, context.CancelFunc, error) {
 	cfg := NewConfig(logger)
 	cfg.GetMatch().LabelUpdateIntervalMs = intervalMs
 	messageRouter := &testMessageRouter{}
