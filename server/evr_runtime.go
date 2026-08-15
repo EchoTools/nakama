@@ -324,7 +324,7 @@ func connectMongoDB(ctx context.Context, mongoURI string) (*mongo.Client, error)
 	return client, nil
 }
 
-func createCoreGroups(ctx context.Context, logger runtime.Logger, _db *sql.DB, nk runtime.NakamaModule, _initializer runtime.Initializer) error {
+func createCoreGroups(ctx context.Context, logger runtime.Logger, _ *sql.DB, nk runtime.NakamaModule, _ runtime.Initializer) error {
 	// Create user for use by the discord bot (and core group ownership)
 	userId, _, _, err := nk.AuthenticateDevice(ctx, SystemUserID, "discordbot", true)
 	if err != nil {
@@ -638,6 +638,7 @@ func GetGuildGroupIDsByUser(ctx context.Context, db *sql.DB, userID string) (map
 	if err != nil {
 		return nil, fmt.Errorf("error finding guild groups: %w", err)
 	}
+	defer rows.Close()
 
 	groups := make(map[string]string, 0)
 
@@ -647,7 +648,9 @@ func GetGuildGroupIDsByUser(ctx context.Context, db *sql.DB, userID string) (map
 		}
 		groups[dbGuildID] = dbGroupID
 	}
-	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating guild group rows: %w", err)
+	}
 	return groups, nil
 }
 
