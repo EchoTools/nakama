@@ -74,7 +74,7 @@ func newBlacklistTestNK() *blacklistTestNK {
 }
 
 // seed writes a raw stored value for a user's blacklist record.
-func (m *blacklistTestNK) seed(userID, value string) {
+func (m *blacklistTestNK) seed(_, value string) {
 	if _, ok := m.storage[ServerBlacklistStorageCollection]; !ok {
 		m.storage[ServerBlacklistStorageCollection] = make(map[string]string)
 	}

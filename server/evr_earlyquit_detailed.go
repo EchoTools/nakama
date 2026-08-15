@@ -293,9 +293,10 @@ func CreateQuitRecordFromParticipation(state *MatchLabel, participation *PlayerP
 
 	// Determine if player was losing at quit
 	wasLosing := false
-	if participation.Team == BlueTeam {
+	switch participation.Team {
+	case BlueTeam:
 		wasLosing = participation.ScoresAtLeave[0] < participation.ScoresAtLeave[1]
-	} else if participation.Team == OrangeTeam {
+	case OrangeTeam:
 		wasLosing = participation.ScoresAtLeave[1] < participation.ScoresAtLeave[0]
 	}
 

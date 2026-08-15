@@ -12,7 +12,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
-func (d *DiscordAppBot) handleUnlinkVRML(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+func (d *DiscordAppBot) handleUnlinkVRML(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, _ *discordgo.Member, userID string, _ string) error {
 	nk := d.nk
 	db := d.db
 
