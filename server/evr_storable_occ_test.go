@@ -648,6 +648,14 @@ func (multiUpdateRejectNK) MultiUpdate(ctx context.Context, accountUpdates []*ru
 	return nil, nil, runtime.ErrStorageRejectedVersion
 }
 
+// MetricsCounterAdd is a no-op. This double embeds a nil runtime.NakamaModule,
+// so any method it does not define panics when the code under test calls it;
+// EVRProfileUpdate counts its write outcome, so the method must exist. Nothing
+// here asserts on counters — see evr_account_metrics_test.go for the double
+// that does.
+func (multiUpdateRejectNK) MetricsCounterAdd(name string, tags map[string]string, delta int64) {
+}
+
 // TestEVRProfileUpdate_VersionConflictStaysRetryable guards the one caller that
 // would fail SILENTLY if the substring-to-sentinel switch missed a path: the
 // display-name update loop (evr_discord_integrator.go) stops retrying and
