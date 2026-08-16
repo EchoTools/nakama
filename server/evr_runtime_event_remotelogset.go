@@ -338,7 +338,7 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			// profile, so a conflict costs the write, not the player's equip.
 			applyEquip := func(p *EVRProfile) error {
 				var applyErr error
-				p.LoadoutCosmetics.Loadout, applyErr = EquipAndSanitize(p.LoadoutCosmetics.Loadout, category, name, owned)
+				p.LoadoutCosmetics.Loadout, applyErr = EquipAndSanitize(p.LoadoutCosmetics.Loadout, category, name, owned, nk.MetricsCounterAdd)
 				return applyErr
 			}
 			if err := applyEquip(profile); err != nil {

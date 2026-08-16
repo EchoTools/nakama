@@ -44,6 +44,37 @@ type StarterCosmeticLoadouts struct {
 	Loadouts []*StoredCosmeticLoadout `json:"loadouts"`
 }
 
+// metricsCounterAddFunc is the one method of runtime.NakamaModule the sanitize path
+// needs. Taking the method value rather than the module keeps sanitizeLoadout a pure
+// function of its arguments, which is what lets a test hand it a recorder — the same
+// seam warnVPNDegraded (evr_lobby_joinentrant.go) uses.
+type metricsCounterAddFunc func(name string, tags map[string]string, delta int64)
+
+// cosmeticStrippedCounter counts slots reset to their default because the player did
+// not own what was equipped there. Tagged "slot" (one of the CosmeticLoadout json
+// keys, a fixed set of 22) and "path" (loadoutSanitizePath, a fixed set of 3) — both
+// bounded at compile time, so the tag cardinality cannot grow with traffic.
+const cosmeticStrippedCounter = "profile_cosmetic_stripped"
+
+// loadoutSanitizePath names which of the three entry points into sanitizeLoadout
+// reached a strip. Without it the counter answers "how often" but not "on write or on
+// read", and those have different meanings: a strip on a write path is an equip the
+// player just lost, while a strip on the serve path is a stored loadout that was
+// already poisoned before the equip-time checks existed.
+type loadoutSanitizePath string
+
+const (
+	// sanitizePathEquip is EquipAndSanitize, the in-game equip write path
+	// (RemoteLogSet -> evr_runtime_event_remotelogset.go).
+	sanitizePathEquip loadoutSanitizePath = "equip"
+	// sanitizePathServe is equippedCosmeticsForProfile, the read/regeneration path
+	// that runs on every login, lobby join and equip event.
+	sanitizePathServe loadoutSanitizePath = "serve"
+	// sanitizePathGameServer is sanitizeGameServerLoadout, the write path for
+	// GameServerSaveLoadoutRequest from NativeSupport game servers.
+	sanitizePathGameServer loadoutSanitizePath = "gameserver"
+)
+
 func walletToCosmetics(wallet map[string]int64, unlocks map[string]map[string]bool) map[string]map[string]bool {
 	if unlocks == nil {
 		unlocks = make(map[string]map[string]bool)
@@ -92,12 +123,14 @@ func profileOwnedCosmetics(evrProfile *EVRProfile) (map[string]map[string]bool, 
 // broadcast path (NewUserServerProfile), so the stored loadout can never hold an item
 // the player is not entitled to, while default items and legitimately-owned cosmetics
 // pass through unchanged.
-func EquipAndSanitize(loadout evr.CosmeticLoadout, category, name string, owned map[string]map[string]bool) (evr.CosmeticLoadout, error) {
+//
+// metricsCounterAdd may be nil; see sanitizeLoadout.
+func EquipAndSanitize(loadout evr.CosmeticLoadout, category, name string, owned map[string]map[string]bool, metricsCounterAdd metricsCounterAddFunc) (evr.CosmeticLoadout, error) {
 	equipped, err := LoadoutEquipItem(loadout, category, name)
 	if err != nil {
 		return loadout, err
 	}
-	return sanitizeLoadout(equipped, owned), nil
+	return sanitizeLoadout(equipped, owned, metricsCounterAdd, sanitizePathEquip), nil
 }
 
 // equippedCosmeticsForProfile computes the sanitized cosmetic loadout that is safe to
@@ -111,13 +144,15 @@ func EquipAndSanitize(loadout evr.CosmeticLoadout, category, name string, owned 
 // value. No backfill of already-poisoned accounts is required for the "other players
 // see it" concern because of this: every regeneration re-derives ownership from the
 // current wallet and strips anything not currently owned.
-func equippedCosmeticsForProfile(evrProfile *EVRProfile) (evr.CosmeticLoadout, map[string]map[string]bool, error) {
+//
+// metricsCounterAdd may be nil; see sanitizeLoadout.
+func equippedCosmeticsForProfile(evrProfile *EVRProfile, metricsCounterAdd metricsCounterAddFunc) (evr.CosmeticLoadout, map[string]map[string]bool, error) {
 	cosmetics, err := profileOwnedCosmetics(evrProfile)
 	if err != nil {
 		return evr.CosmeticLoadout{}, nil, err
 	}
 
-	cosmeticLoadout := sanitizeLoadout(evrProfile.LoadoutCosmetics.Loadout, cosmetics)
+	cosmeticLoadout := sanitizeLoadout(evrProfile.LoadoutCosmetics.Loadout, cosmetics, metricsCounterAdd, sanitizePathServe)
 
 	return cosmeticLoadout, cosmetics, nil
 }
@@ -128,7 +163,7 @@ func UserServerProfileFromParameters(ctx context.Context, logger *zap.Logger, db
 
 func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, evrProfile *EVRProfile, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol, displayName string) (*evr.ServerProfile, error) {
 
-	cosmeticLoadout, cosmetics, err := equippedCosmeticsForProfile(evrProfile)
+	cosmeticLoadout, cosmetics, err := equippedCosmeticsForProfile(evrProfile, nk.MetricsCounterAdd)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +252,20 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 // sanitizeLoadout replaces any equipped cosmetic the player does not own
 // (per the wallet-derived cosmetics map) with the safe default for that slot.
 // Empty fields are left untouched.
-func sanitizeLoadout(loadout evr.CosmeticLoadout, cosmetics map[string]map[string]bool) evr.CosmeticLoadout {
+//
+// The strip is deliberate and is not changing: an item nobody owns must not be
+// served or stored. What is new here is that it is no longer silent to US. Every
+// reset increments cosmeticStrippedCounter tagged with the slot and the path that
+// reached it, because until now a player equipped an item, was told the save
+// succeeded, wore the default, and the server recorded nothing at all — no log, no
+// error, no metric. The counter does not tell the PLAYER anything; it only makes the
+// rate visible to operators, and it exists to be reconciled against the
+// independently measured strip-eligible rate (0.326%-0.3498% of equips). Two
+// instruments built from different data that disagree mean one of them is wrong.
+//
+// metricsCounterAdd may be nil, which disables counting: tests that exercise the
+// sanitize logic itself pass nil rather than growing a metrics dependency.
+func sanitizeLoadout(loadout evr.CosmeticLoadout, cosmetics map[string]map[string]bool, metricsCounterAdd metricsCounterAddFunc, path loadoutSanitizePath) evr.CosmeticLoadout {
 	defaults := evr.DefaultCosmeticLoadout()
 	defaultMap := defaults.ToMap() // json_key → default item ID
 	result := loadout
@@ -239,6 +287,12 @@ func sanitizeLoadout(loadout evr.CosmeticLoadout, cosmetics map[string]map[strin
 		if !unlocked {
 			if def, ok := defaultMap[jsonTag]; ok {
 				v.Field(i).SetString(def)
+				if metricsCounterAdd != nil {
+					metricsCounterAdd(cosmeticStrippedCounter, map[string]string{
+						"slot": jsonTag,
+						"path": string(path),
+					}, 1)
+				}
 			}
 		}
 	}
