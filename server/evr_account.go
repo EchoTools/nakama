@@ -14,6 +14,7 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -490,7 +491,72 @@ func EVRProfileLoad(ctx context.Context, nk runtime.NakamaModule, userID string)
 	// question "is any live account in this state?" has no other answer short of a
 	// production database read.
 	nk.MetricsCounterAdd(profileReadCounter, map[string]string{"source": "metadata"}, 1)
-	return BuildEVRProfileFromAccount(account)
+	profile, err = BuildEVRProfileFromAccount(account)
+	if err != nil {
+		return nil, err
+	}
+
+	evrProfileSelfHeal(ctx, nk, userID, profile)
+	return profile, nil
+}
+
+// evrProfileSelfHealGroup coalesces the repairing writes issued by the branch
+// above, keyed by user id. Without it, N concurrent row-less loads for one user
+// — eight players entering a lobby and requesting each other's profiles is the
+// shape that actually occurs — each issue their own create.
+var evrProfileSelfHealGroup singleflight.Group
+
+// evrProfileSelfHeal repairs the row-less state EVRProfileLoad just fell back
+// from, by writing the rebuilt profile to storage and adopting the resulting
+// version onto profile.
+//
+// The version is the point. Creating the row while leaving the caller holding
+// an empty version fixes nothing: EVRProfileUpdate sends the profile's own
+// version on the wire, and core_storage.go executes an empty one as an explicit
+// "last write wins" upsert with no OCC check and no error — so a concurrent
+// writer's changes are silently overwritten. Adopting the ack's version puts
+// this caller back under optimistic concurrency control for its next write,
+// which is the actual defect being closed.
+//
+// ADVISORY, NOT BLOCKING. Every failure here is swallowed and counted. The read
+// already has a correct profile to return; refusing to return it because a
+// repair failed would convert a silent, bounded, one-write hazard into an
+// outright login failure. The counter is therefore the only evidence the write
+// was attempted at all — which is why the test for that path asserts on the
+// attempt and not merely on the read succeeding.
+//
+// The write is create-only ("*", via storableCreate). A repair for a
+// last-write-wins hazard must not itself be a last-write-wins write: if another
+// writer created the row between this read and this write — handleClientProfileUpdate
+// does exactly that, ~23,993 times a day — that writer's object wins and is
+// adopted, rather than being clobbered by a profile rebuilt from stale metadata.
+//
+// It runs synchronously on the caller's context, adding one storage write to a
+// row-less read. That cost is paid once per user: the row exists afterwards, so
+// every later load takes the storage branch and writes nothing.
+func evrProfileSelfHeal(ctx context.Context, nk runtime.NakamaModule, userID string, profile *EVRProfile) {
+	version, err, _ := evrProfileSelfHealGroup.Do(userID, func() (any, error) {
+		if err := storableCreate(ctx, nk, userID, profile); err != nil {
+			return "", err
+		}
+		return profile.StorageMeta().Version, nil
+	})
+	if err != nil {
+		nk.MetricsCounterAdd(profileSelfHealCounter, map[string]string{"outcome": "error"}, 1)
+		return
+	}
+
+	// Followers of the coalesced flight adopt the leader's version. They hold a
+	// different *EVRProfile built from the same account metadata in the same
+	// instant, so the version describes their bytes too. Even where it does not,
+	// a version that may lose a later OCC check is strictly better than the empty
+	// one they would otherwise carry, which cannot lose because it never checks.
+	if v, ok := version.(string); ok && v != "" {
+		meta := profile.StorageMeta()
+		meta.Version = v
+		profile.SetStorageMeta(meta)
+	}
+	nk.MetricsCounterAdd(profileSelfHealCounter, map[string]string{"outcome": "repaired"}, 1)
 }
 
 // EVRProfileUpdate persists md for userID in a single atomic transaction: the
