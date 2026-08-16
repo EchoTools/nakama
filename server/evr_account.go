@@ -39,13 +39,20 @@ const (
 //
 //	evr_profile_write_count{outcome="committed"|"conflict"|"error"}
 //	evr_profile_read_count{source="storage"|"metadata"}
+//	evr_profile_self_heal_count{outcome="repaired"|"error"}
 //
 // There is deliberately no "noop" outcome. EVRProfileUpdate has no skip-write
 // branch, so the outcome cannot occur; a counter that can only ever read zero
 // tells a reader nothing and cannot be distinguished from one that is broken.
+//
+// evr_profile_self_heal_count is the only report the repairing write in
+// EVRProfileLoad's metadata-fallback branch makes. That write is advisory: its
+// failure must not fail the read, so it cannot surface as a returned error and
+// this counter is the sole evidence it was attempted at all.
 const (
-	profileWriteCounter = "evr_profile_write_count"
-	profileReadCounter  = "evr_profile_read_count"
+	profileWriteCounter    = "evr_profile_write_count"
+	profileReadCounter     = "evr_profile_read_count"
+	profileSelfHealCounter = "evr_profile_self_heal_count"
 )
 
 type GroupInGameName struct {

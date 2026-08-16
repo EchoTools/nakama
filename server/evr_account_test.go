@@ -17,6 +17,7 @@ type mockProfileLoadNakamaModule struct {
 	account        *api.Account
 	storageReadErr error
 	storageObjs    []*api.StorageObject
+	storageWrites  int
 }
 
 func (m *mockProfileLoadNakamaModule) AccountGetId(ctx context.Context, userID string) (*api.Account, error) {
@@ -35,6 +36,34 @@ func (m *mockProfileLoadNakamaModule) StorageRead(ctx context.Context, reads []*
 // EVRProfileLoad counts its read source, so the method must exist. Nothing here
 // asserts on counters — see evr_account_metrics_test.go for the double that does.
 func (m *mockProfileLoadNakamaModule) MetricsCounterAdd(name string, tags map[string]string, delta int64) {
+}
+
+// StorageWrite records the attempt and reports success. Same reason as
+// MetricsCounterAdd above: the nil embedded runtime.NakamaModule panics on any
+// undefined method, and EVRProfileLoad's metadata-fallback branch now issues a
+// repairing write.
+//
+// AGENTS.md defect class #1 ("a method added to a shared test double silently
+// disables subclass fault injection") does not apply to this double on either
+// of the two counts that make that hazard real:
+//
+//  1. Nothing embeds mockProfileLoadNakamaModule — it is used only by this file
+//     (`grep -rn mockProfileLoadNakamaModule server/`), so there is no subclass
+//     whose override could be shadowed.
+//  2. The call reaches this method as an interface call through
+//     runtime.NakamaModule, which dispatches to the outermost type. The class-#1
+//     hazard is about *internal* calls within the base double, where Go
+//     embedding resolves statically to the base's own implementation.
+//
+// If either fact changes — an embedder appears, or production starts calling
+// this through a concrete type — re-check the argument before trusting it.
+func (m *mockProfileLoadNakamaModule) StorageWrite(ctx context.Context, writes []*runtime.StorageWrite) ([]*api.StorageObjectAck, error) {
+	m.storageWrites += len(writes)
+	acks := make([]*api.StorageObjectAck, 0, len(writes))
+	for range writes {
+		acks = append(acks, &api.StorageObjectAck{Version: "v-written"})
+	}
+	return acks, nil
 }
 
 func TestBuildEVRProfileFromAccount_NullMetadata(t *testing.T) {
