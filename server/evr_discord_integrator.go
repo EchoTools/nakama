@@ -545,7 +545,7 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 	// Update headset-linked role
 	roleID := group.RoleMap.AccountLinked
 	hasRole := profile.IsLinked() && !profile.IsDisabled()
-	if err := c.updateMemberRole(member, roleID, hasRole); err != nil {
+	if _, err := c.updateMemberRole(member, roleID, hasRole); err != nil {
 		logger.Warn("Error updating headset-linked role", zap.String("role", roleID), zap.Error(err))
 	}
 
@@ -586,7 +586,7 @@ func (d *DiscordIntegrator) updateLinkStatus(ctx context.Context, discordID stri
 			continue
 		}
 		// If the guild has a linked role, update it.
-		if err := d.updateMemberRole(member, g.RoleMap.AccountLinked, isLinked); err != nil {
+		if _, err := d.updateMemberRole(member, g.RoleMap.AccountLinked, isLinked); err != nil {
 			d.logger.Warn("Error updating headset-linked role", zap.String("discord_id", discordID), zap.String("guild_id", gid), zap.String("role", g.RoleMap.AccountLinked), zap.Error(err))
 			continue
 		}
@@ -944,11 +944,14 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 
 	accountUpdate := false
 
-	// If the guild has a linked role, update it.
+	// If the guild has a linked role, update it. Gate on whether the role
+	// actually moved: this returns cleanly for a member whose roles already
+	// match, which is the overwhelmingly common case, and treating that as a
+	// change made almost every member-update event issue an account write.
 	isActive := evrAccount.IsLinked() && !evrAccount.IsDisabled()
-	if err := d.updateMemberRole(e.Member, group.RoleMap.AccountLinked, isActive); err != nil {
+	if roleChanged, err := d.updateMemberRole(e.Member, group.RoleMap.AccountLinked, isActive); err != nil {
 		logger.Warn("Error updating headset-linked role", zap.String("role", group.RoleMap.AccountLinked), zap.Error(err))
-	} else {
+	} else if roleChanged {
 		accountUpdate = true
 	}
 
@@ -1142,20 +1145,32 @@ func (d *DiscordIntegrator) SendDisplayNameInUseNotification(ctx context.Context
 	}
 	return nil
 }
-func (d *DiscordIntegrator) updateMemberRole(member *discordgo.Member, roleID string, hasRole bool) error {
+
+// updateMemberRole grants or revokes roleID on member, and reports whether it
+// actually changed anything.
+//
+// Three paths here do nothing at all: an unconfigured (empty) role ID, a nil
+// member, and -- by far the most common -- a member whose roles already match
+// the requested state. All three used to return a bare nil, which is
+// indistinguishable from "I changed something" to a caller that only checks the
+// error. Callers that gate a side effect must gate it on changed, not on
+// err == nil.
+func (d *DiscordIntegrator) updateMemberRole(member *discordgo.Member, roleID string, hasRole bool) (changed bool, err error) {
 	if roleID == "" || member == nil {
-		return nil
+		return false, nil
 	}
 	if hasRole && !slices.Contains(member.Roles, roleID) {
 		if err := d.dg.GuildMemberRoleAdd(member.GuildID, member.User.ID, roleID); err != nil {
-			return fmt.Errorf("error adding role to member: %w", err)
+			return false, fmt.Errorf("error adding role to member: %w", err)
 		}
+		return true, nil
 	} else if !hasRole && slices.Contains(member.Roles, roleID) {
 		if err := d.dg.GuildMemberRoleRemove(member.GuildID, member.User.ID, roleID); err != nil {
-			return fmt.Errorf("error removing role from member: %w", err)
+			return false, fmt.Errorf("error removing role from member: %w", err)
 		}
+		return true, nil
 	}
-	return nil
+	return false, nil
 }
 
 func (d *DiscordIntegrator) GuildGroupMemberRemove(ctx context.Context, guildID, discordID string, callerDiscordID string) error {
@@ -1460,21 +1475,21 @@ func (d *DiscordIntegrator) updatePlatformRoles(ctx context.Context, _ *zap.Logg
 
 	switch {
 	case mostRecentEntry.LoginData.AppId == QuestAppId:
-		if err := d.updateMemberRole(member, group.RoleMap.Standalone, true); err != nil {
+		if _, err := d.updateMemberRole(member, group.RoleMap.Standalone, true); err != nil {
 			return fmt.Errorf("error updating Standalone role: %w", err)
 		}
 	case mostRecentEntry.LoginData.AppId == PcvrAppId:
-		if err := d.updateMemberRole(member, group.RoleMap.PCVR, true); err != nil {
+		if _, err := d.updateMemberRole(member, group.RoleMap.PCVR, true); err != nil {
 			return fmt.Errorf("error updating PCVR role: %w", err)
 		}
 	default:
 		switch mostRecentEntry.LoginData.BuildNumber {
 		case evr.PCVRBuild:
-			if err := d.updateMemberRole(member, group.RoleMap.PCVR, true); err != nil {
+			if _, err := d.updateMemberRole(member, group.RoleMap.PCVR, true); err != nil {
 				return fmt.Errorf("error updating PCVR role: %w", err)
 			}
 		case evr.StandaloneBuildNumber:
-			if err := d.updateMemberRole(member, group.RoleMap.Standalone, true); err != nil {
+			if _, err := d.updateMemberRole(member, group.RoleMap.Standalone, true); err != nil {
 				return fmt.Errorf("error updating Standalone role: %w", err)
 			}
 		}
