@@ -533,9 +533,13 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 
 	// Update the display name if needed
 	if currentDisplayName, _ := profile.GetGroupDisplayName(groupID); full || currentDisplayName != InGameName(member) {
-		if err := c.syncMembersIGN(ctx, logger, profile, member, group); err != nil {
+		// Adopt the returned profile: a conflict retry reloads it, and the role
+		// check below reads IsLinked/IsDisabled off whichever object was written.
+		updated, err := c.syncMembersIGN(ctx, logger, profile, member, group)
+		if err != nil {
 			return fmt.Errorf("error syncing display name: %w", err)
 		}
+		profile = updated
 	}
 
 	// Update headset-linked role
@@ -982,9 +986,13 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 
 	// Update the display name if it has changed.
 	if InGameName(e.Member) != evrAccount.GetGroupIGNData(groupID).DisplayName {
-		if err := d.syncMembersIGN(ctx, logger, evrAccount, e.Member, group); err != nil {
+		// Adopt the returned profile: a conflict retry reloads it, and the
+		// account metadata written below is marshalled from this pointer.
+		updated, err := d.syncMembersIGN(ctx, logger, evrAccount, e.Member, group)
+		if err != nil {
 			return fmt.Errorf("error syncing display name: %w", err)
 		}
+		evrAccount = updated
 		accountUpdate = true
 	}
 
@@ -1035,7 +1043,17 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 	return nil
 }
 
-func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logger, profile *EVRProfile, member *discordgo.Member, guildGroup *GuildGroup) error {
+// syncMembersIGN updates the member's in-game name for guildGroup from Discord.
+//
+// It returns the profile that was actually written. On a version conflict the
+// retry below RE-READS the stored profile, which rebinds the local `profile` to
+// a different object -- so a caller that keeps using the pointer it passed in is
+// holding a profile that predates the reload, and any account metadata it builds
+// from that pointer discards whatever the concurrent writer committed. That is
+// the exact clobber the retry exists to prevent, so the new pointer is returned
+// and callers must adopt it. The no-op paths return the caller's own profile
+// unchanged; only an error returns nil.
+func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logger, profile *EVRProfile, member *discordgo.Member, guildGroup *GuildGroup) (*EVRProfile, error) {
 	groupID := guildGroup.IDStr()
 	displayName := InGameName(member)
 
@@ -1043,20 +1061,20 @@ func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logg
 	currentIGN := profile.GetGroupIGNData(groupID)
 	if currentIGN.IsLocked {
 		// Don't update locked display names from Discord
-		return nil
+		return profile, nil
 	}
 
 	// Check if display name actually changed
 	if currentIGN.DisplayName == displayName {
 		// No change needed
-		return nil
+		return profile, nil
 	}
 
 	ownerMap, err := DisplayNameOwnerSearch(ctx, d.nk, []string{displayName})
 	if err != nil {
 		// If it errors, set the display name to their username
 		logger.Error("Error checking owner of display name.", zap.String("display_name", displayName), zap.Error(err))
-		return err
+		return nil, err
 	}
 	if len(ownerMap) > 0 && !slices.Contains(ownerMap[displayName], profile.ID()) {
 		// The display name is owned by some one else.
@@ -1068,7 +1086,7 @@ func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logg
 				logger.Debug("Error sending display name in use notification", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.Error(err))
 			}
 		}
-		return nil
+		return profile, nil
 	}
 
 	// This user may use this display name.
@@ -1080,7 +1098,7 @@ func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logg
 			var err error
 			profile, err = EVRProfileLoad(ctx, d.nk, profile.ID())
 			if err != nil {
-				return fmt.Errorf("error reloading EVR profile for retry: %w", err)
+				return nil, fmt.Errorf("error reloading EVR profile for retry: %w", err)
 			}
 		}
 		profile.SetGroupDisplayName(groupID, displayName)
@@ -1090,7 +1108,7 @@ func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logg
 		}
 		if !isVersionConflictError(err) || attempt == maxDisplayNameRetries-1 {
 			logger.Error("Error updating EVR profile with new display name", zap.String("display_name", displayName), zap.Error(err))
-			return fmt.Errorf("error updating EVR profile: %w", err)
+			return nil, fmt.Errorf("error updating EVR profile: %w", err)
 		}
 		logger.Warn("Version conflict updating display name, retrying", zap.Int("attempt", attempt+1), zap.String("display_name", displayName))
 	}
@@ -1098,13 +1116,13 @@ func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logg
 	// Update the display name history as well
 	history, err := DisplayNameHistoryLoad(ctx, d.nk, profile.ID())
 	if err != nil {
-		return fmt.Errorf("error loading display name history: %w", err)
+		return nil, fmt.Errorf("error loading display name history: %w", err)
 	}
 	// Update and store the display name history.
 	history.Update(groupID, displayName, member.User.Username, false)
 	err = DisplayNameHistoryStore(ctx, d.nk, profile.ID(), history)
 	if err != nil {
-		return fmt.Errorf("error storing display name history: %w", err)
+		return nil, fmt.Errorf("error storing display name history: %w", err)
 	}
 
 	logger.Info("Updated display name from Discord",
@@ -1113,7 +1131,7 @@ func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logg
 		zap.String("old_display_name", currentIGN.DisplayName),
 		zap.String("new_display_name", displayName))
 
-	return nil
+	return profile, nil
 }
 
 func (d *DiscordIntegrator) SendDisplayNameInUseNotification(ctx context.Context, discordID, ownerDiscordID, displayName string, fallbackDisplayName string) error {
