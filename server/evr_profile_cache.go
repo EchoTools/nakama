@@ -119,12 +119,6 @@ func equippedCosmeticsForProfile(evrProfile *EVRProfile) (evr.CosmeticLoadout, m
 
 	cosmeticLoadout := sanitizeLoadout(evrProfile.LoadoutCosmetics.Loadout, cosmetics)
 
-	// If the player has "kissy lips" emote equipped, set their emote to default.
-	if cosmeticLoadout.Emote == "emote_kissy_lips_a" {
-		cosmeticLoadout.Emote = "emote_blink_smiley_a"
-		cosmeticLoadout.SecondEmote = "emote_blink_smiley_a"
-	}
-
 	return cosmeticLoadout, cosmetics, nil
 }
 

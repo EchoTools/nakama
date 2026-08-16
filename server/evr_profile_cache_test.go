@@ -246,6 +246,57 @@ func TestEquippedCosmeticsForProfile_WalletGrantedItemStillServed(t *testing.T) 
 	}
 }
 
+// TestEquippedCosmeticsForProfile_KissyLipsIsServedAsEquipped guards the deletion of a
+// hardcoded emote override that lived in equippedCosmeticsForProfile from db55d1fdc
+// (2025-01-27) until 2026-08-16: a player who equipped emote_kissy_lips_a was served
+// emote_blink_smiley_a instead, and their SecondEmote was overwritten with it too.
+// The override was unconditional and ownership-irrelevant — it fired for a player who
+// owned the emote (everyone does; see the premise check below) and reported nothing.
+//
+// It was characterized first, in the form asserting the override fired, and that form
+// was proven able to fail by mutating the compared constant. This is that test with the
+// assertions inverted: what the player equips is what is served.
+func TestEquippedCosmeticsForProfile_KissyLipsIsServedAsEquipped(t *testing.T) {
+	// Premise the whole test rests on: emote_kissy_lips_a is a legitimately ownable
+	// item, granted to everyone by default. If it were NOT ownable, sanitizeLoadout
+	// would reset the emote slot to the default before anything else could, and this
+	// test would be asserting the strip rather than the override.
+	owned := cosmeticDefaults(false)
+	for _, item := range []string{"emote_kissy_lips_a", "emote_sleepy_zzz_a"} {
+		isOwned := false
+		for _, modeUnlocks := range owned {
+			if modeUnlocks[item] {
+				isOwned = true
+				break
+			}
+		}
+		if !isOwned {
+			t.Fatalf("premise broken: %q is not in the default-owned cosmetic set, so this test cannot distinguish the emote override from the ownership strip", item)
+		}
+	}
+
+	profile := &EVRProfile{
+		account: &api.Account{Wallet: "{}"},
+	}
+	profile.LoadoutCosmetics.Loadout = evr.DefaultCosmeticLoadout()
+	profile.LoadoutCosmetics.Loadout.Emote = "emote_kissy_lips_a"
+	// A distinct, also-owned second emote: the deleted override clobbered this slot as
+	// well, which is what made it more than a one-slot substitution.
+	profile.LoadoutCosmetics.Loadout.SecondEmote = "emote_sleepy_zzz_a"
+
+	loadout, _, err := equippedCosmeticsForProfile(profile)
+	if err != nil {
+		t.Fatalf("equippedCosmeticsForProfile returned error: %v", err)
+	}
+
+	if loadout.Emote != "emote_kissy_lips_a" {
+		t.Errorf("equipped emote was overridden; got %q, want %q", loadout.Emote, "emote_kissy_lips_a")
+	}
+	if loadout.SecondEmote != "emote_sleepy_zzz_a" {
+		t.Errorf("second emote was clobbered; got %q, want %q", loadout.SecondEmote, "emote_sleepy_zzz_a")
+	}
+}
+
 func TestSanitizeLoadout_CombatChassis(t *testing.T) {
 	// Bug: sanitizeLoadout only checks cosmetics["arena"], so combat-only
 	// items (e.g. rwd_chassis_body_s10_a) get reverted to the default chassis
