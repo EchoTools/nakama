@@ -47,7 +47,7 @@ func TestApplyGameServerLoadout_UsesBaseFromProfilePassedIn(t *testing.T) {
 	freshLoadout.Tag = retryTestOwnedTag
 	fresh := newLoadoutRetryProfile(freshLoadout)
 
-	written, err := applyGameServerLoadout(fresh, equips, -1)
+	written, err := applyGameServerLoadout(fresh, equips, -1, nil)
 	require.NoError(t, err)
 
 	require.Equal(t, retryTestOwnedTag, written.Tag,
@@ -61,7 +61,7 @@ func TestApplyGameServerLoadout_UsesBaseFromProfilePassedIn(t *testing.T) {
 	// default tag. That is exactly what would have been written back had the base
 	// loadout been captured before the conflict instead of taken from the argument.
 	stale := newLoadoutRetryProfile(evr.DefaultCosmeticLoadout())
-	staleWritten, err := applyGameServerLoadout(stale, equips, -1)
+	staleWritten, err := applyGameServerLoadout(stale, equips, -1, nil)
 	require.NoError(t, err)
 	require.Equal(t, evr.DefaultCosmeticLoadout().Tag, staleWritten.Tag)
 	require.NotEqual(t, written.Tag, staleWritten.Tag,
@@ -79,7 +79,7 @@ func TestApplyGameServerLoadout_StillStripsUnownedCosmetics(t *testing.T) {
 
 	equips := []gameServerLoadoutEquip{{slot: "tag", equipped: retryTestOwnedTag}}
 
-	written, err := applyGameServerLoadout(profile, equips, -1)
+	written, err := applyGameServerLoadout(profile, equips, -1, nil)
 	require.NoError(t, err)
 	require.Equal(t, evr.DefaultCosmeticLoadout().Tag, written.Tag,
 		"an unowned cosmetic must still be stripped (COSMETIC-1)")
@@ -93,9 +93,9 @@ func TestApplyGameServerLoadout_IsIdempotent(t *testing.T) {
 	}
 	profile := newLoadoutRetryProfile(evr.DefaultCosmeticLoadout())
 
-	first, err := applyGameServerLoadout(profile, equips, 7)
+	first, err := applyGameServerLoadout(profile, equips, 7, nil)
 	require.NoError(t, err)
-	second, err := applyGameServerLoadout(profile, equips, 7)
+	second, err := applyGameServerLoadout(profile, equips, 7, nil)
 	require.NoError(t, err)
 
 	require.Equal(t, first, second)
@@ -108,7 +108,7 @@ func TestApplyGameServerLoadout_NegativeJerseyNumberLeavesItAlone(t *testing.T) 
 	profile := newLoadoutRetryProfile(evr.DefaultCosmeticLoadout())
 	profile.LoadoutCosmetics.JerseyNumber = 42
 
-	_, err := applyGameServerLoadout(profile, nil, -1)
+	_, err := applyGameServerLoadout(profile, nil, -1, nil)
 	require.NoError(t, err)
 	require.Equal(t, int64(42), profile.LoadoutCosmetics.JerseyNumber)
 }
@@ -157,6 +157,24 @@ type loadoutRetryModule struct {
 
 func (m *loadoutRetryModule) AccountGetId(ctx context.Context, userID string) (*api.Account, error) {
 	return &api.Account{User: &api.User{Id: userID, Username: "tester"}, Wallet: m.wallet}, nil
+}
+
+// MetricsCounterAdd is a no-op, and exists only so these tests do not panic:
+// persistGameServerLoadout now hands nk.MetricsCounterAdd to the sanitize path, and
+// occTestNakamaModule — this double's base, two levels up — embeds a nil
+// runtime.NakamaModule, so a method nobody implemented is a nil dereference at call
+// time rather than a compile error. That is how this surfaced: the loadout retry test
+// segfaulted inside sanitizeLoadout.
+//
+// It is defined on the leaf rather than on that shared base deliberately. A no-op on
+// occTestNakamaModule is the right long-term seam and is S1's to place; a leaf method
+// shadows a promoted base method with no conflict, whereas two definitions on the same
+// receiver would not compile. This placement cannot collide with S1; a base one would.
+//
+// It counts nothing on purpose. A test asserting on strip counters passes its own
+// recorder to the sanitize entry point (TestSanitizeLoadout_StripCounterFiresOnEveryPath)
+// rather than reaching through this double.
+func (m *loadoutRetryModule) MetricsCounterAdd(name string, tags map[string]string, delta int64) {
 }
 
 func newLoadoutRetryModule() *loadoutRetryModule {

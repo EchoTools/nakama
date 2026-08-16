@@ -38,13 +38,13 @@ type gameServerLoadoutEquip struct{ slot, equipped string }
 // a concurrent writer's other slots survive. Deriving the base loadout from a
 // profile captured BEFORE the conflict would instead stamp a stale full loadout
 // back over that writer's work.
-func applyGameServerLoadout(profile *EVRProfile, equips []gameServerLoadoutEquip, jerseyNumber int) (evr.CosmeticLoadout, error) {
+func applyGameServerLoadout(profile *EVRProfile, equips []gameServerLoadoutEquip, jerseyNumber int, metricsCounterAdd metricsCounterAddFunc) (evr.CosmeticLoadout, error) {
 	loadout := profile.LoadoutCosmetics.Loadout
 	for _, e := range equips {
 		setLoadoutSlot(&loadout, e.slot, e.equipped)
 	}
 
-	sanitized, err := sanitizeGameServerLoadout(loadout, profile)
+	sanitized, err := sanitizeGameServerLoadout(loadout, profile, metricsCounterAdd)
 	if err != nil {
 		return evr.CosmeticLoadout{}, fmt.Errorf("failed to compute owned cosmetics: %w", err)
 	}
@@ -146,7 +146,7 @@ func persistGameServerLoadout(ctx context.Context, nk runtime.NakamaModule, user
 	var written evr.CosmeticLoadout
 
 	apply := func(profile *EVRProfile) error {
-		w, err := applyGameServerLoadout(profile, equips, jerseyNumber)
+		w, err := applyGameServerLoadout(profile, equips, jerseyNumber, nk.MetricsCounterAdd)
 		if err != nil {
 			return err
 		}
@@ -168,12 +168,14 @@ func persistGameServerLoadout(ctx context.Context, nk runtime.NakamaModule, user
 // for the RemoteLogSet equip path (COSMETIC-1). It is a separate entry point because
 // this handler builds a full loadout from a set of slot->item pairs rather than a single
 // category/name equip.
-func sanitizeGameServerLoadout(loadout evr.CosmeticLoadout, evrProfile *EVRProfile) (evr.CosmeticLoadout, error) {
+//
+// metricsCounterAdd may be nil; see sanitizeLoadout.
+func sanitizeGameServerLoadout(loadout evr.CosmeticLoadout, evrProfile *EVRProfile, metricsCounterAdd metricsCounterAddFunc) (evr.CosmeticLoadout, error) {
 	owned, err := profileOwnedCosmetics(evrProfile)
 	if err != nil {
 		return loadout, err
 	}
-	return sanitizeLoadout(loadout, owned), nil
+	return sanitizeLoadout(loadout, owned, metricsCounterAdd, sanitizePathGameServer), nil
 }
 
 // gameServerSaveLoadoutRequest handles loadout save requests from the game server.
