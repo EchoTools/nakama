@@ -27,8 +27,13 @@ meant to do, not what happened on a particular afternoon.
 
 ## Standards
 
-This project adopts **`/srv/src/metis-core/GO-ADDENDUM-GENERIC.md`** as the
+This project adopts **`~/src/metis-core/GO-ADDENDUM-GENERIC.md`** as the
 binding Go code standard. Read it before writing or reviewing code.
+
+> Path corrected 2026-08-16. This read `/srv/src/metis-core/...`, which does not
+> exist on this host (`ls -d /srv/src/metis-core` → No such file or directory).
+> A mandatory pre-read that cannot be opened is an unenforced gate: every agent
+> that "adopted" the standard read nothing, and nothing failed.
 
 Key requirements for any agent (including heisthecat31 or any AI assistant):
 
@@ -37,12 +42,37 @@ Key requirements for any agent (including heisthecat31 or any AI assistant):
 ```bash
 gofmt -l -w    # format
 go vet ./...   # static analysis
-golangci-lint run  # comprehensive lint
+golangci-lint run --max-issues-per-linter 0 --max-same-issues 0   # see note
 just test      # tests -- repo-wide scope, see TEST_PKGS in the justfile
 go fix ./...   # apply modernizers
 go mod tidy    # clean dependencies
 govulncheck    # vulnerability check
 ```
+
+**On the `golangci-lint` flags, and its baseline.** Bare `golangci-lint run`
+applies the defaults `max-issues-per-linter=50` and `max-same-issues=3`, which
+report **153** of the **377** findings actually present — an under-report of 60%
+that looks exactly like a cleaner tree. The flags above turn the truncation off.
+
+The config was v1-format against a v2 binary from 2023 until 2026-08-16, so this
+gate did **not run at all** for roughly three years — it failed at config load
+with `unsupported version of the configuration: ""`, and the `deep-security-audit`
+workflow that also invokes it had been failing the same way. Migrated in
+`a0c12bae8`; the effective linter set was held identical and verified by full
+set-difference against v1.64.8 rather than assumed.
+
+Consequence to plan around: **377 pre-existing findings** (errcheck 193,
+staticcheck 95, unused 47, ineffassign 21, govet 18, gofmt 3). That is a report,
+not yet a gate. Enforcing it on new work only — `--new-from-rev=origin/main` —
+is the obvious path and is an owner decision, not taken here.
+
+Four files are `gofmt`-non-compliant on `main` and predate this note. Two are
+trailing whitespace (`server/evr_lobby_builder_team_assignment_test.go`,
+`server/evr_team_composition_test.go`); two are mis-indentation that reads like a
+real bug — an `i := 0; i++` immediately before a `for i := 0; ...` that shadows it
+— in `internal/skiplist/skiplist_test.go` and `internal/cronexpr/cronexpr_test.go`.
+The `cronexpr` one is invisible to `golangci-lint` (skipped dir) but **visible to
+`gofmt -l`, and therefore to pre-push check 2**.
 
 ### Pre-push hook (automated gate)
 
@@ -136,7 +166,28 @@ been observed at least once in this repo.
    at a fixed path, read what occupies that path first.
 4. **A guard that reports without preventing.** A check that logs, warns, or
    audits but never blocks — and is then cited as if it enforced. Ask what
-   happens when it fires.
+   happens when it fires. **Worst form, observed 2026-08-16:** `golangci-lint`
+   was listed above as mandatory while failing at config load, so it neither
+   reported *nor* prevented, for about three years. A gate you have never seen
+   produce output is not a gate. Run it once and look.
+
+5. **A test double that embeds a nil `runtime.NakamaModule`, so adding any
+   interface method call to production code panics an unknown subset of the
+   suite.** **38 distinct types across 31 `*_test.go` files** embed the interface
+   and implement only what they need; every other method is a nil dereference at
+   call time, not a compile error. Worse, a Go test panic aborts the whole test
+   binary, so one run reveals exactly **one** offender — you fix it, re-run, find
+   the next. There is no way to enumerate the true break set in advance.
+   Observed three times in one day (2026-08-16), by three independent changes
+   adding `MetricsCounterAdd` and `StorageWrite` calls.
+   **Method:** iterate to green and report the count you reached; do not
+   pre-emptively stub all 38. **Where to put the stub:** on the shared base
+   (`occTestNakamaModule`) when many embedders need it — one edit fixed five —
+   or on the *leaf* double when only one does. A leaf method shadows a promoted
+   one and compiles; two definitions on the same receiver do not. Defect class 1
+   does **not** apply to stubs added this way, but say why in a comment at the
+   method: no embedder defines it, and the call arrives through the interface,
+   which dispatches to the outermost type.
 
 The dominant related anti-pattern, and the one most often found here, is
 **fail-open on a fail-closed control**: a gate that, when its input is missing
