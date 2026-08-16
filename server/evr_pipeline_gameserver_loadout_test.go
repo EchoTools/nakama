@@ -19,7 +19,7 @@ func TestSanitizeGameServerLoadout_RejectsUnownedVRMLTag(t *testing.T) {
 	loadout := evr.DefaultCosmeticLoadout()
 	loadout.Tag = "rwd_tag_s1_vrml_s1_finalist"
 
-	result, err := sanitizeGameServerLoadout(loadout, profile)
+	result, err := sanitizeGameServerLoadout(loadout, profile, nil)
 	if err != nil {
 		t.Fatalf("sanitizeGameServerLoadout returned error: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestSanitizeGameServerLoadout_AllowsOwnedVRMLTag(t *testing.T) {
 	loadout := evr.DefaultCosmeticLoadout()
 	loadout.Tag = "rwd_tag_s1_vrml_s1_finalist"
 
-	result, err := sanitizeGameServerLoadout(loadout, profile)
+	result, err := sanitizeGameServerLoadout(loadout, profile, nil)
 	if err != nil {
 		t.Fatalf("sanitizeGameServerLoadout returned error: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestSanitizeGameServerLoadout_AllowsDefaultItem(t *testing.T) {
 	loadout := evr.DefaultCosmeticLoadout()
 	loadout.Tag = "rwd_tag_s1_a_secondary"
 
-	result, err := sanitizeGameServerLoadout(loadout, profile)
+	result, err := sanitizeGameServerLoadout(loadout, profile, nil)
 	if err != nil {
 		t.Fatalf("sanitizeGameServerLoadout returned error: %v", err)
 	}

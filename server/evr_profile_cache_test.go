@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -127,7 +128,7 @@ func TestEquipAndSanitize_RejectsUnownedVRMLTag(t *testing.T) {
 	owned := cosmeticDefaults(false) // empty wallet: defaults only, all VRML restricted
 
 	loadout := evr.DefaultCosmeticLoadout()
-	result, err := EquipAndSanitize(loadout, "tag", "rwd_tag_s1_vrml_s1_finalist", owned)
+	result, err := EquipAndSanitize(loadout, "tag", "rwd_tag_s1_vrml_s1_finalist", owned, nil)
 	if err != nil {
 		t.Fatalf("EquipAndSanitize returned error: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestEquipAndSanitize_AllowsOwnedVRMLTag(t *testing.T) {
 	}, owned)
 
 	loadout := evr.DefaultCosmeticLoadout()
-	result, err := EquipAndSanitize(loadout, "tag", "rwd_tag_s1_vrml_s1_finalist", owned)
+	result, err := EquipAndSanitize(loadout, "tag", "rwd_tag_s1_vrml_s1_finalist", owned, nil)
 	if err != nil {
 		t.Fatalf("EquipAndSanitize returned error: %v", err)
 	}
@@ -165,7 +166,7 @@ func TestEquipAndSanitize_AllowsDefaultItem(t *testing.T) {
 	owned := cosmeticDefaults(false)
 
 	loadout := evr.DefaultCosmeticLoadout()
-	result, err := EquipAndSanitize(loadout, "tag", "rwd_tag_s1_a_secondary", owned)
+	result, err := EquipAndSanitize(loadout, "tag", "rwd_tag_s1_a_secondary", owned, nil)
 	if err != nil {
 		t.Fatalf("EquipAndSanitize returned error: %v", err)
 	}
@@ -195,7 +196,7 @@ func TestEquippedCosmeticsForProfile_PoisonedAccountNeverServesUnownedItem(t *te
 	profile.LoadoutCosmetics.Loadout.Tag = "rwd_tag_s1_vrml_s1_finalist"
 	profile.LoadoutCosmetics.Loadout.Medal = "rwd_medal_0006"
 
-	loadout, owned, err := equippedCosmeticsForProfile(profile)
+	loadout, owned, err := equippedCosmeticsForProfile(profile, nil)
 	if err != nil {
 		t.Fatalf("equippedCosmeticsForProfile returned error: %v", err)
 	}
@@ -237,12 +238,232 @@ func TestEquippedCosmeticsForProfile_WalletGrantedItemStillServed(t *testing.T) 
 	profile.LoadoutCosmetics.Loadout = evr.DefaultCosmeticLoadout()
 	profile.LoadoutCosmetics.Loadout.Tag = "rwd_tag_s1_vrml_s1_finalist"
 
-	loadout, _, err := equippedCosmeticsForProfile(profile)
+	loadout, _, err := equippedCosmeticsForProfile(profile, nil)
 	if err != nil {
 		t.Fatalf("equippedCosmeticsForProfile returned error: %v", err)
 	}
 	if loadout.Tag != "rwd_tag_s1_vrml_s1_finalist" {
 		t.Errorf("wallet-owned VRML tag was stripped; got %q, want %q", loadout.Tag, "rwd_tag_s1_vrml_s1_finalist")
+	}
+}
+
+// strippedCounterRecorder records every counter increment the sanitize path emits.
+//
+// recordingMetrics (evr_lobby_vpn_degraded_test.go) is not reused here because it
+// aggregates by counter name and keeps only the LAST tag map it saw: a test that must
+// distinguish which slot was stripped, and which of the three paths reached the strip,
+// cannot be written against it without the second strip erasing the first's tags.
+type strippedCounterRecorder struct {
+	mu    sync.Mutex
+	calls []strippedCounterCall
+}
+
+type strippedCounterCall struct {
+	name  string
+	slot  string
+	path  string
+	delta int64
+}
+
+func (r *strippedCounterRecorder) add(name string, tags map[string]string, delta int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, strippedCounterCall{name: name, slot: tags["slot"], path: tags["path"], delta: delta})
+}
+
+// countFor totals the increments for one (slot, path) pair of cosmeticStrippedCounter.
+func (r *strippedCounterRecorder) countFor(slot, path string) int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var n int64
+	for _, c := range r.calls {
+		if c.name == cosmeticStrippedCounter && c.slot == slot && c.path == path {
+			n += c.delta
+		}
+	}
+	return n
+}
+
+// total counts every increment of any counter, so a test asserting "nothing was
+// stripped" cannot be satisfied by a strip that was merely mis-tagged.
+func (r *strippedCounterRecorder) total() int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var n int64
+	for _, c := range r.calls {
+		n += c.delta
+	}
+	return n
+}
+
+// TestSanitizeLoadout_StripCounterFiresOnEveryPath is the positive control for the
+// strip instrumentation. sanitizeLoadout resets an unowned slot to its default and
+// serves success; that is deliberate and correct (see
+// TestEquippedCosmeticsForProfile_PoisonedAccountNeverServesUnownedItem) and is NOT
+// what is under test here. What is under test is that the reset is now counted, on all
+// three entry points into sanitizeLoadout — a strip reached from the read path means
+// something different from one reached from a write path, so a counter that cannot
+// tell them apart is not worth having.
+//
+// Each case forces exactly one strip and asserts the counter moved for that specific
+// (slot, path). The counter was proven able to stay still: deleting the
+// metricsCounterAdd call inside sanitizeLoadout fails every case here.
+func TestSanitizeLoadout_StripCounterFiresOnEveryPath(t *testing.T) {
+	const unowned = "rwd_tag_s1_vrml_s1_finalist" // restricted: no wallet grant below
+
+	poisonedProfile := func() *EVRProfile {
+		p := &EVRProfile{account: &api.Account{Wallet: "{}"}}
+		p.LoadoutCosmetics.Loadout = evr.DefaultCosmeticLoadout()
+		p.LoadoutCosmetics.Loadout.Tag = unowned
+		return p
+	}
+
+	cases := []struct {
+		name string
+		path string
+		run  func(t *testing.T, rec *strippedCounterRecorder)
+	}{
+		{
+			name: "equip path (EquipAndSanitize)",
+			path: string(sanitizePathEquip),
+			run: func(t *testing.T, rec *strippedCounterRecorder) {
+				if _, err := EquipAndSanitize(evr.DefaultCosmeticLoadout(), "tag", unowned, cosmeticDefaults(false), rec.add); err != nil {
+					t.Fatalf("EquipAndSanitize returned error: %v", err)
+				}
+			},
+		},
+		{
+			name: "serve path (equippedCosmeticsForProfile)",
+			path: string(sanitizePathServe),
+			run: func(t *testing.T, rec *strippedCounterRecorder) {
+				if _, _, err := equippedCosmeticsForProfile(poisonedProfile(), rec.add); err != nil {
+					t.Fatalf("equippedCosmeticsForProfile returned error: %v", err)
+				}
+			},
+		},
+		{
+			name: "game server path (sanitizeGameServerLoadout)",
+			path: string(sanitizePathGameServer),
+			run: func(t *testing.T, rec *strippedCounterRecorder) {
+				loadout := evr.DefaultCosmeticLoadout()
+				loadout.Tag = unowned
+				if _, err := sanitizeGameServerLoadout(loadout, poisonedProfile(), rec.add); err != nil {
+					t.Fatalf("sanitizeGameServerLoadout returned error: %v", err)
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &strippedCounterRecorder{}
+			tc.run(t, rec)
+
+			if got := rec.countFor("tag", tc.path); got != 1 {
+				t.Errorf("counter %s{slot=tag,path=%s} = %d, want 1: the strip was not counted on this path", cosmeticStrippedCounter, tc.path, got)
+			}
+			// Exactly one slot was unowned, so exactly one increment may exist. A
+			// higher total would mean the counter fires on slots that were not
+			// stripped, which would make the production rate meaningless.
+			if got := rec.total(); got != 1 {
+				t.Errorf("total counter increments = %d, want 1; recorded: %+v", got, rec.calls)
+			}
+		})
+	}
+}
+
+// TestSanitizeLoadout_StripCounterSilentWhenEverythingOwned is the other half of the
+// control: a counter that is zero because it never fires at all proves nothing, and a
+// counter that fires on the happy path would drown the signal it exists to raise. The
+// same three paths are exercised with a loadout the player fully owns.
+//
+// Measured, not assumed: a DefaultCosmeticLoadout against cosmeticDefaults(false)
+// strips nothing on any path, including the DecalBody that LoadoutEquipItem rewrites
+// to rwd_decalback_default on every equip.
+func TestSanitizeLoadout_StripCounterSilentWhenEverythingOwned(t *testing.T) {
+	ownedProfile := func() *EVRProfile {
+		p := &EVRProfile{account: &api.Account{Wallet: "{}"}}
+		p.LoadoutCosmetics.Loadout = evr.DefaultCosmeticLoadout()
+		return p
+	}
+
+	cases := []struct {
+		name string
+		run  func(t *testing.T, rec *strippedCounterRecorder)
+	}{
+		{
+			name: "equip path (EquipAndSanitize)",
+			run: func(t *testing.T, rec *strippedCounterRecorder) {
+				if _, err := EquipAndSanitize(evr.DefaultCosmeticLoadout(), "tag", "rwd_tag_s1_a_secondary", cosmeticDefaults(false), rec.add); err != nil {
+					t.Fatalf("EquipAndSanitize returned error: %v", err)
+				}
+			},
+		},
+		{
+			name: "serve path (equippedCosmeticsForProfile)",
+			run: func(t *testing.T, rec *strippedCounterRecorder) {
+				if _, _, err := equippedCosmeticsForProfile(ownedProfile(), rec.add); err != nil {
+					t.Fatalf("equippedCosmeticsForProfile returned error: %v", err)
+				}
+			},
+		},
+		{
+			name: "game server path (sanitizeGameServerLoadout)",
+			run: func(t *testing.T, rec *strippedCounterRecorder) {
+				if _, err := sanitizeGameServerLoadout(evr.DefaultCosmeticLoadout(), ownedProfile(), rec.add); err != nil {
+					t.Fatalf("sanitizeGameServerLoadout returned error: %v", err)
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &strippedCounterRecorder{}
+			tc.run(t, rec)
+			if got := rec.total(); got != 0 {
+				t.Errorf("counter fired on a fully-owned loadout: %d increments, recorded: %+v", got, rec.calls)
+			}
+		})
+	}
+}
+
+// TestSanitizeLoadout_StripCounterTagsAreBounded guards the cardinality claim in the
+// cosmeticStrippedCounter doc comment. Tag values that vary with traffic (an item ID,
+// a user ID) turn one time series into unboundedly many and are how a metrics backend
+// gets taken down. Both tag values here are drawn from fixed compile-time sets: the
+// slot from CosmeticLoadout's json keys, the path from loadoutSanitizePath.
+func TestSanitizeLoadout_StripCounterTagsAreBounded(t *testing.T) {
+	slots := make(map[string]bool)
+	for k := range evr.DefaultCosmeticLoadout().ToMap() {
+		slots[k] = true
+	}
+	paths := map[string]bool{
+		string(sanitizePathEquip):      true,
+		string(sanitizePathServe):      true,
+		string(sanitizePathGameServer): true,
+	}
+
+	// A loadout poisoned in several slots at once, so more than one tag value is seen.
+	profile := &EVRProfile{account: &api.Account{Wallet: "{}"}}
+	profile.LoadoutCosmetics.Loadout = evr.DefaultCosmeticLoadout()
+	profile.LoadoutCosmetics.Loadout.Tag = "rwd_tag_s1_vrml_s1_finalist"
+	profile.LoadoutCosmetics.Loadout.Medal = "rwd_medal_0006"
+
+	rec := &strippedCounterRecorder{}
+	if _, _, err := equippedCosmeticsForProfile(profile, rec.add); err != nil {
+		t.Fatalf("equippedCosmeticsForProfile returned error: %v", err)
+	}
+	if len(rec.calls) < 2 {
+		t.Fatalf("expected at least two strips to inspect, got %d: %+v", len(rec.calls), rec.calls)
+	}
+	for _, c := range rec.calls {
+		if !slots[c.slot] {
+			t.Errorf("counter tagged with slot %q, which is not a CosmeticLoadout json key: tag cardinality is unbounded", c.slot)
+		}
+		if !paths[c.path] {
+			t.Errorf("counter tagged with path %q, which is not a loadoutSanitizePath: tag cardinality is unbounded", c.path)
+		}
 	}
 }
 
@@ -262,7 +483,7 @@ func TestSanitizeLoadout_CombatChassis(t *testing.T) {
 	loadout := defaults
 	loadout.Chassis = "rwd_chassis_body_s10_a" // equip combat chassis
 
-	result := sanitizeLoadout(loadout, cosmetics)
+	result := sanitizeLoadout(loadout, cosmetics, nil, sanitizePathServe)
 
 	if result.Chassis != "rwd_chassis_body_s10_a" {
 		t.Errorf("combat chassis was sanitized away: got %q, want %q",
@@ -286,7 +507,7 @@ func TestSanitizeLoadout_AllCombatCosmetics(t *testing.T) {
 		loadout := defaults
 		reflect.ValueOf(&loadout).Elem().FieldByName(slot).SetString(item)
 
-		result := sanitizeLoadout(loadout, cosmetics)
+		result := sanitizeLoadout(loadout, cosmetics, nil, sanitizePathServe)
 		got := reflect.ValueOf(result).FieldByName(slot).String()
 		if got != item {
 			t.Errorf("combat %s %q was sanitized to %q", slot, item, got)
