@@ -25,6 +25,29 @@ const (
 	StorageKeyEVRProfile          = "profile"
 )
 
+// Counters for the profile write path.
+//
+// Every profile mutation in this service funnels through EVRProfileUpdate, and
+// before these counters existed this file contained zero log statements and no
+// logger import — the function at the centre of every profile write could not
+// report anything about itself. A failed write was indistinguishable from a
+// successful one at the metrics layer, so questions like "are profile writes
+// losing to version conflicts in production, and how often" had no answer short
+// of pulling and parsing a day of raw logs.
+//
+// Tag values are closed sets so the cardinality is bounded:
+//
+//	evr_profile_write_count{outcome="committed"|"conflict"|"error"}
+//	evr_profile_read_count{source="storage"|"metadata"}
+//
+// There is deliberately no "noop" outcome. EVRProfileUpdate has no skip-write
+// branch, so the outcome cannot occur; a counter that can only ever read zero
+// tells a reader nothing and cannot be distinguished from one that is broken.
+const (
+	profileWriteCounter = "evr_profile_write_count"
+	profileReadCounter  = "evr_profile_read_count"
+)
+
 type GroupInGameName struct {
 	GroupID     string `json:"group_id"`
 	DisplayName string `json:"display_name"`
@@ -445,12 +468,21 @@ func EVRProfileLoad(ctx context.Context, nk runtime.NakamaModule, userID string)
 	if err := StorableRead(ctx, nk, userID, profile, false); err == nil {
 		// Successfully loaded from storage, attach account
 		profile.account = account
+		nk.MetricsCounterAdd(profileReadCounter, map[string]string{"source": "storage"}, 1)
 		return profile, nil
 	} else if status.Code(err) != codes.NotFound {
 		return nil, err
 	}
 
-	// Fall back to loading from account metadata for backward compatibility
+	// Fall back to loading from account metadata for backward compatibility.
+	//
+	// This branch is the one that matters operationally: the rebuilt profile carries
+	// no storage version, so the next EVRProfileUpdate for this user goes out with
+	// Version: "" — an explicit non-OCC, last-write-wins write. Nothing in the code
+	// path reports that, which is why it is counted here rather than logged: the
+	// question "is any live account in this state?" has no other answer short of a
+	// production database read.
+	nk.MetricsCounterAdd(profileReadCounter, map[string]string{"source": "metadata"}, 1)
 	return BuildEVRProfileFromAccount(account)
 }
 
@@ -510,8 +542,14 @@ func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID strin
 		false,
 	)
 	if err != nil {
+		outcome := "error"
+		if isVersionConflictError(err) {
+			outcome = "conflict"
+		}
+		nk.MetricsCounterAdd(profileWriteCounter, map[string]string{"outcome": outcome}, 1)
 		return fmt.Errorf("failed to update profile: %w", err)
 	}
+	nk.MetricsCounterAdd(profileWriteCounter, map[string]string{"outcome": "committed"}, 1)
 
 	// Update the in-memory version from the write ack.
 	if len(acks) > 0 {
