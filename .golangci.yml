@@ -1,18 +1,74 @@
-run:
-  # Enables skipping of directories:
-  # - vendor$, third_party$, testdata$, examples$, Godeps$, builtin$
-  skip-dirs-use-default: true
-  skip-dirs:
-    - internal/gopher-lua
-    - internal/cronexpr
+version: "2"
 
 linters:
+  # The v2 default set is errcheck, govet, ineffassign, staticcheck, unused.
+  # The v1 config also listed gosimple; upstream merged gosimple and stylecheck
+  # into staticcheck in v2, so the v1 set is preserved without naming gosimple.
+  # gofmt is no longer a linter in v2 -- it moved to `formatters` below.
+  settings:
+    staticcheck:
+      # v2 merged the v1 `stylecheck` (ST*) and `gosimple` (S*) linters into
+      # `staticcheck`, and exposed the quickfix (QF*) family for the first time.
+      # This repo enabled staticcheck and gosimple but never stylecheck, so ST*
+      # and QF* are switched back off to keep the effective check set the one
+      # the config has always described. Turning them on is a deliberate
+      # decision, not a side effect of the v1->v2 format migration: as of this
+      # commit they add 440 ST* and 77 QF* findings.
+      checks:
+        - all
+        - -ST*
+        - -QF*
+  exclusions:
+    # v1's `issues.exclude-use-default: true` was on by default; these four
+    # presets are its v2 spelling.
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      # Stands in for v1's `errcheck.ignore: cleanup`, a regex over function
+      # names that upstream removed in v1.13. v2's `errcheck.exclude-functions`
+      # cannot replace it: it matches package-qualified names, and these are
+      # local func-typed variables. Test helpers return a cleanup closure invoked
+      # as `defer cleanup()`; that error is deliberately unchecked. This covers
+      # 27 of the 30 findings the v1 regex suppressed. The other 3 were
+      # collateral of a loose name match
+      # (`ri.cleanupExpiredReservationsWithDiscord` in
+      # server/evr_reservation_integration_test.go) and are deliberately NOT
+      # re-suppressed -- they are real dropped errors, now visible.
+      - linters:
+          - errcheck
+        source: cleanup\(\)$
+    paths:
+      # v1 `run.skip-dirs` -- vendored third-party sources, not ours to lint.
+      - internal/gopher-lua
+      - internal/cronexpr
+      # v1 `run.skip-dirs-use-default: true`. v2 has no such flag and no
+      # built-in default, so the v1 default list is written out verbatim.
+      - vendor$
+      - third_party$
+      - testdata$
+      - examples$
+      - Godeps$
+      - builtin$
+
+formatters:
   enable:
     - gofmt
-
-linters-settings:
-  gofmt:
-    simplify: false
-
-  errcheck:
-    ignore: cleanup
+  settings:
+    gofmt:
+      simplify: false
+  exclusions:
+    # Formatters carry their own exclusion list in v2; kept in sync with the
+    # linters block above so a skipped directory is skipped by both.
+    paths:
+      - internal/gopher-lua
+      - internal/cronexpr
+      - vendor$
+      - third_party$
+      - testdata$
+      - examples$
+      - Godeps$
+      - builtin$
