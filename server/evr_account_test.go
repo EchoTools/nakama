@@ -30,6 +30,13 @@ func (m *mockProfileLoadNakamaModule) StorageRead(ctx context.Context, reads []*
 	return m.storageObjs, nil
 }
 
+// MetricsCounterAdd is a no-op. This double embeds a nil runtime.NakamaModule,
+// so any method it does not define panics when the code under test calls it;
+// EVRProfileLoad counts its read source, so the method must exist. Nothing here
+// asserts on counters — see evr_account_metrics_test.go for the double that does.
+func (m *mockProfileLoadNakamaModule) MetricsCounterAdd(name string, tags map[string]string, delta int64) {
+}
+
 func TestBuildEVRProfileFromAccount_NullMetadata(t *testing.T) {
 	profile, err := BuildEVRProfileFromAccount(&api.Account{User: &api.User{Metadata: "null"}})
 	require.NoError(t, err)

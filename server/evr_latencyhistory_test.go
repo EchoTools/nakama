@@ -59,6 +59,25 @@ func newOCCTestNakamaModule() *occTestNakamaModule {
 	return &occTestNakamaModule{objects: make(map[string]*api.StorageObject)}
 }
 
+// MetricsCounterAdd is a no-op so that production code under test may count its
+// own outcomes without every embedder having to know that it does.
+//
+// occTestNakamaModule embeds a nil runtime.NakamaModule, so any method it does
+// not define panics on call. EVRProfileUpdate and EVRProfileLoad now emit
+// counters, which made five separate doubles that embed this one panic at once.
+// Defining it here fixes all five without editing any of them.
+//
+// On AGENTS.md defect class 1 ("a method added to a shared test double silently
+// disables subclass fault injection"): that hazard is about an *internal* call
+// within the base resolving to the base's own implementation rather than an
+// embedder's override. It does not apply here on two counts — no embedder
+// defines MetricsCounterAdd, and the call site is an interface method call
+// through runtime.NakamaModule, which dispatches to the outermost type. If a
+// future double needs to assert on counters, it may define its own
+// MetricsCounterAdd and interface dispatch will reach it.
+func (m *occTestNakamaModule) MetricsCounterAdd(name string, tags map[string]string, delta int64) {
+}
+
 func occStorageKey(userID, collection, key string) string {
 	return userID + ":" + collection + ":" + key
 }

@@ -53,6 +53,13 @@ func (n *sec3MockNK) Event(_ context.Context, evt *api.Event) error {
 	return nil
 }
 
+// MetricsCounterAdd is a no-op. This double embeds a nil runtime.NakamaModule,
+// so any method it does not define panics when the code under test calls it;
+// EVRProfileLoad counts its read source, so the method must exist. Nothing here
+// asserts on counters — see evr_account_metrics_test.go for the double that does.
+func (n *sec3MockNK) MetricsCounterAdd(name string, tags map[string]string, delta int64) {
+}
+
 // sec3Fixture builds a live non-arena (combat) match label plus the mock nk and
 // payload that a legitimate server-profile update would carry.
 type sec3Fixture struct {
