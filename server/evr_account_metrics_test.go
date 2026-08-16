@@ -36,6 +36,7 @@ type metricsRecorderNK struct {
 	multiUpdateErr error
 	acks           []*api.StorageObjectAck
 	counters       []recordedCounter
+	storageWrites  int
 }
 
 func (m *metricsRecorderNK) AccountGetId(_ context.Context, userID string) (*api.Account, error) {
@@ -51,6 +52,21 @@ func (m *metricsRecorderNK) MultiUpdate(_ context.Context, _ []*runtime.AccountU
 		return nil, nil, m.multiUpdateErr
 	}
 	return m.acks, nil, nil
+}
+
+// StorageWrite records the attempt and reports success, so that
+// EVRProfileLoad's metadata-fallback repairing write does not panic on this
+// double's nil embedded runtime.NakamaModule. Nothing embeds metricsRecorderNK
+// and the call arrives through the runtime.NakamaModule interface, so AGENTS.md
+// defect class #1 does not apply — the same argument recorded in full at
+// mockProfileLoadNakamaModule.StorageWrite in evr_account_test.go.
+func (m *metricsRecorderNK) StorageWrite(_ context.Context, writes []*runtime.StorageWrite) ([]*api.StorageObjectAck, error) {
+	m.storageWrites += len(writes)
+	acks := make([]*api.StorageObjectAck, 0, len(writes))
+	for range writes {
+		acks = append(acks, &api.StorageObjectAck{Version: "v-written"})
+	}
+	return acks, nil
 }
 
 func (m *metricsRecorderNK) MetricsCounterAdd(name string, tags map[string]string, delta int64) {
