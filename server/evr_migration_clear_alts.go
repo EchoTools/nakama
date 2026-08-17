@@ -28,8 +28,11 @@ import (
 // immediately rather than gradually.
 //
 // Idempotent: a second run finds the maps correct and rebuilds to the same
-// values. Version conflicts are skipped — a racing login rebuilds that
-// account correctly either way.
+// values. A row whose version was moved on by a racing login is skipped and
+// counted in conflicted — that login rebuilds the account correctly either
+// way. Only that row is skipped: because the batch write is one transaction,
+// a rejection rolls all of it back, so the remaining rows are re-submitted
+// individually rather than lost when the cursor advances.
 //
 // An account whose rebuild FAILS is not written at all. The clear happens in
 // memory before the rebuild, so persisting after a failure would store an
@@ -47,6 +50,7 @@ func (m *MigrationClearAlternateMatches) MigrateSystem(ctx context.Context, logg
 	cleared := 0
 	rebuilt := 0
 	rebuildFailed := 0
+	conflicted := 0
 	walked := 0
 	startTime := time.Now()
 
@@ -135,9 +139,39 @@ func (m *MigrationClearAlternateMatches) MigrateSystem(ctx context.Context, logg
 
 		if len(writes) > 0 {
 			if _, writeErr := nk.StorageWrite(ctx, writes); writeErr != nil {
-				logger.WithField("error", writeErr).Warn("alt-clear migration: batch write (version conflict on one or more rows; next login rebuilds those accounts)")
+				// The batch is all-or-nothing. StorageWriteObjects
+				// (core_storage.go:583-613) runs it inside ExecuteInTxPgx and
+				// converts a version rejection into a returned error, so the
+				// transaction rolled back and NOT ONE of these rows committed
+				// — not just the row that raced. Nor was it retried:
+				// executeInTxPostgresPgx (db.go:418-447) retries only when
+				// errors.As finds a *pgconn.PgError with SQLSTATE class 40,
+				// and a version rejection is a Go sentinel wrapped in a
+				// statusError, so it is terminal on the first attempt. The
+				// response carries nil acks, so there is no way to learn WHICH
+				// row raced.
+				//
+				// Previously the cursor then advanced and rebuilt was credited
+				// the full batch, so one racing login silently cost up to 99
+				// uninvolved accounts their correction and overstated the
+				// count by the same amount. Retry the rows one at a time: the
+				// row whose version actually moved on fails again on its own
+				// merits, and the rest are written. This runs only on the
+				// error path, so a healthy batch still costs exactly one
+				// write.
+				logger.WithFields(map[string]any{"error": writeErr, "batch": len(writes)}).Warn("alt-clear migration: batch write rejected and rolled back; retrying rows individually")
+
+				for _, w := range writes {
+					if _, rowErr := nk.StorageWrite(ctx, []*runtime.StorageWrite{w}); rowErr != nil {
+						conflicted++
+						logger.WithFields(map[string]any{"user_id": w.UserID, "error": rowErr}).Warn("alt-clear migration: row write rejected; a racing login rebuilds this account")
+						continue
+					}
+					rebuilt++
+				}
+			} else {
+				rebuilt += len(writes)
 			}
-			rebuilt += len(writes)
 		}
 
 		logger.WithFields(map[string]any{
@@ -145,6 +179,7 @@ func (m *MigrationClearAlternateMatches) MigrateSystem(ctx context.Context, logg
 			"cleared":        cleared,
 			"rebuilt":        rebuilt,
 			"rebuild_failed": rebuildFailed,
+			"conflicted":     conflicted,
 			"walked":         walked,
 			"batch_time":     time.Since(batchStart).String(),
 			"total_time":     time.Since(startTime).String(),
@@ -166,6 +201,7 @@ func (m *MigrationClearAlternateMatches) MigrateSystem(ctx context.Context, logg
 		"cleared":        cleared,
 		"rebuilt":        rebuilt,
 		"rebuild_failed": rebuildFailed,
+		"conflicted":     conflicted,
 		"walked":         walked,
 		"total":          time.Since(startTime).String(),
 	}).Info("alt-clear migration complete")
