@@ -56,6 +56,60 @@ type metricsCounterAddFunc func(name string, tags map[string]string, delta int64
 // bounded at compile time, so the tag cardinality cannot grow with traffic.
 const cosmeticStrippedCounter = "profile_cosmetic_stripped"
 
+// cosmeticStrip is one slot sanitizeLoadout reset because the player did not own what
+// was equipped there.
+//
+// It carries what the counter deliberately cannot. cosmeticStrippedCounter's tags are
+// bounded at compile time so the metrics backend cannot be taken down by traffic
+// (TestSanitizeLoadout_StripCounterTagsAreBounded), which is exactly why it can answer
+// "how often" and never "which player, which item". Those two questions want different
+// instruments: the counter carries the RATE, this carries the IDENTITY, and splitting
+// them means neither has to be at the wrong level to do the other's job.
+type cosmeticStrip struct {
+	Slot      string // CosmeticLoadout json key, e.g. "tag"
+	ItemID    string // what the player had equipped and does not own
+	DefaultID string // what the slot was reset to
+}
+
+// cosmeticRejectLogMsg is the whole message text, held as a constant so a test asserts
+// against the same string production emits and an operator has one thing to grep for.
+const cosmeticRejectLogMsg = "Cosmetic ownership reject: equipped item not owned, slot reset to default"
+
+// logCosmeticStrips records an ownership reject: one line per stripped slot, naming the
+// player and the item.
+//
+// Owner ruling 2026-08-16: "no, a reject does not tell the player. it just logs it."
+// Nothing here reaches the session; the player is sent nothing on any branch.
+//
+// Fields are WHAT (the message) / WHERE (path) / IDENTIFIER (user_id, item_id, slot) /
+// OUTCOME (default_id — reset to the default, and *which* default).
+//
+// DEBUG, not INFO. Level exists to discriminate expected from unexpected, and an
+// ownership reject is the control working as designed — there is no unexpected
+// counterpart on this event, so INFO would assert a signal that is not one. It stays
+// retrievable because production runs at level: debug. The counter-argument is real and
+// recorded rather than dismissed: every strip-eligible item measured is a restricted
+// VRML/award tag, so a reject may be an exploit signal. That question is about volume
+// over time, which is the counter's job and which the counter answers better than grep.
+//
+// One line per slot, not per event: an equip sanitizes the whole loadout, so a poisoned
+// stored loadout can strip several slots at once, and a single line naming two items
+// cannot be grepped for either one.
+//
+// Callers pass only the strips from a persisted write. Calling it on a report from an
+// attempt that was rolled back or retried would record a reject that never happened.
+func logCosmeticStrips(logger runtime.Logger, userID string, path loadoutSanitizePath, strips []cosmeticStrip) {
+	for _, s := range strips {
+		logger.WithFields(map[string]any{
+			"user_id":    userID,
+			"item_id":    s.ItemID,
+			"slot":       s.Slot,
+			"default_id": s.DefaultID,
+			"path":       string(path),
+		}).Debug(cosmeticRejectLogMsg)
+	}
+}
+
 // loadoutSanitizePath names which of the three entry points into sanitizeLoadout
 // reached a strip. Without it the counter answers "how often" but not "on write or on
 // read", and those have different meanings: a strip on a write path is an equip the
@@ -125,12 +179,16 @@ func profileOwnedCosmetics(evrProfile *EVRProfile) (map[string]map[string]bool, 
 // pass through unchanged.
 //
 // metricsCounterAdd may be nil; see sanitizeLoadout.
-func EquipAndSanitize(loadout evr.CosmeticLoadout, category, name string, owned map[string]map[string]bool, metricsCounterAdd metricsCounterAddFunc) (evr.CosmeticLoadout, error) {
+// It returns the strips it made so the equip path can record the reject. The report is
+// empty on a successful owned equip, which is what makes "no line on the happy path" a
+// property of the data rather than of a condition somebody remembered to write.
+func EquipAndSanitize(loadout evr.CosmeticLoadout, category, name string, owned map[string]map[string]bool, metricsCounterAdd metricsCounterAddFunc) (evr.CosmeticLoadout, []cosmeticStrip, error) {
 	equipped, err := LoadoutEquipItem(loadout, category, name)
 	if err != nil {
-		return loadout, err
+		return loadout, nil, err
 	}
-	return sanitizeLoadout(equipped, owned, metricsCounterAdd, sanitizePathEquip), nil
+	sanitized, strips := sanitizeLoadout(equipped, owned, metricsCounterAdd, sanitizePathEquip)
+	return sanitized, strips, nil
 }
 
 // equippedCosmeticsForProfile computes the sanitized cosmetic loadout that is safe to
@@ -152,7 +210,13 @@ func equippedCosmeticsForProfile(evrProfile *EVRProfile, metricsCounterAdd metri
 		return evr.CosmeticLoadout{}, nil, err
 	}
 
-	cosmeticLoadout := sanitizeLoadout(evrProfile.LoadoutCosmetics.Loadout, cosmetics, metricsCounterAdd, sanitizePathServe)
+	// The strip report is deliberately discarded, and this function deliberately takes
+	// no logger. This path runs on every profile regeneration -- login, lobby join, and
+	// every equip event -- against the stored loadout rather than a player action, so an
+	// already-poisoned account strips here on every single regeneration. A line per
+	// regeneration would be a flood that buries the ~3/day the equip path produces. The
+	// rate on this path is the counter's job; it is already tagged path="serve".
+	cosmeticLoadout, _ := sanitizeLoadout(evrProfile.LoadoutCosmetics.Loadout, cosmetics, metricsCounterAdd, sanitizePathServe)
 
 	return cosmeticLoadout, cosmetics, nil
 }
@@ -265,7 +329,15 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 //
 // metricsCounterAdd may be nil, which disables counting: tests that exercise the
 // sanitize logic itself pass nil rather than growing a metrics dependency.
-func sanitizeLoadout(loadout evr.CosmeticLoadout, cosmetics map[string]map[string]bool, metricsCounterAdd metricsCounterAddFunc, path loadoutSanitizePath) evr.CosmeticLoadout {
+//
+// It returns the strips it made alongside the sanitized loadout. Returning only the
+// loadout made "changed" and "no-op" indistinguishable to every caller — the function
+// mutated and reported nothing, so a caller wanting to react to a reject had no signal
+// short of diffing the loadout itself. The report is a query over what the modifier
+// did; callers act on it being non-empty, not on the absence of an error. Callers that
+// do not care (the serve path) ignore it and cost nothing.
+func sanitizeLoadout(loadout evr.CosmeticLoadout, cosmetics map[string]map[string]bool, metricsCounterAdd metricsCounterAddFunc, path loadoutSanitizePath) (evr.CosmeticLoadout, []cosmeticStrip) {
+	var strips []cosmeticStrip
 	defaults := evr.DefaultCosmeticLoadout()
 	defaultMap := defaults.ToMap() // json_key → default item ID
 	result := loadout
@@ -287,6 +359,7 @@ func sanitizeLoadout(loadout evr.CosmeticLoadout, cosmetics map[string]map[strin
 		if !unlocked {
 			if def, ok := defaultMap[jsonTag]; ok {
 				v.Field(i).SetString(def)
+				strips = append(strips, cosmeticStrip{Slot: jsonTag, ItemID: itemID, DefaultID: def})
 				if metricsCounterAdd != nil {
 					metricsCounterAdd(cosmeticStrippedCounter, map[string]string{
 						"slot": jsonTag,
@@ -296,7 +369,7 @@ func sanitizeLoadout(loadout evr.CosmeticLoadout, cosmetics map[string]map[strin
 			}
 		}
 	}
-	return result
+	return result, strips
 }
 
 func NewClientProfile(ctx context.Context, evrProfile *EVRProfile, serverProfile *evr.ServerProfile) *evr.ClientProfile {

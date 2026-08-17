@@ -336,9 +336,16 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			}
 			// Re-applied on every retry attempt against a freshly loaded
 			// profile, so a conflict costs the write, not the player's equip.
+			//
+			// strips is overwritten, never appended to, and is read only after
+			// the write succeeds. apply runs once here and again per retry
+			// attempt, so accumulating would record one reject as several, and
+			// logging inside the closure would emit a line for an attempt that
+			// was then thrown away by a version conflict.
+			var strips []cosmeticStrip
 			applyEquip := func(p *EVRProfile) error {
 				var applyErr error
-				p.LoadoutCosmetics.Loadout, applyErr = EquipAndSanitize(p.LoadoutCosmetics.Loadout, category, name, owned, nk.MetricsCounterAdd)
+				p.LoadoutCosmetics.Loadout, strips, applyErr = EquipAndSanitize(p.LoadoutCosmetics.Loadout, category, name, owned, nk.MetricsCounterAdd)
 				return applyErr
 			}
 			if err := applyEquip(profile); err != nil {
@@ -369,6 +376,13 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				logger.WithField("error", err).Warn("Failed to persist equipped item; session profile left unchanged")
 				continue
 			}
+
+			// The reject is recorded only now, once the sanitized loadout is
+			// actually persisted. Nothing is sent to the player -- the owner's
+			// ruling is that a reject logs and does not tell them -- and an
+			// equip of an item the player owns produces no line here at all,
+			// because strips is empty.
+			logCosmeticStrips(logger, session.UserID().String(), sanitizePathEquip, strips)
 
 			// swap the metadata in the session parameters
 
