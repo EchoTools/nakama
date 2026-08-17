@@ -525,15 +525,45 @@ var evrProfileSelfHealGroup singleflight.Group
 // was attempted at all — which is why the test for that path asserts on the
 // attempt and not merely on the read succeeding.
 //
+// Swallowed does NOT mean the failure leaves no trace on the profile: a failed
+// repair stamps selfHealUnguessedVersion so the caller cannot go on to win a
+// silent non-OCC write. See the error branch below.
+//
 // The write is create-only ("*", via storableCreate). A repair for a
 // last-write-wins hazard must not itself be a last-write-wins write: if another
 // writer created the row between this read and this write — handleClientProfileUpdate
 // does exactly that, ~23,993 times a day — that writer's object wins and is
 // adopted, rather than being clobbered by a profile rebuilt from stale metadata.
+// That adoption happens inside storableCreate, which re-reads the winner on a
+// rejected create; it is not free-standing here. When the adoption itself fails
+// — the re-read errors, or the winner is deleted before it lands — storableCreate
+// returns an error and nothing is adopted, which is the case the error branch
+// below exists to make safe.
 //
 // It runs synchronously on the caller's context, adding one storage write to a
 // row-less read. That cost is paid once per user: the row exists afterwards, so
 // every later load takes the storage branch and writes nothing.
+// selfHealUnguessedVersion is stamped onto the profile when the repairing write
+// fails, so the caller is never left holding the empty version.
+//
+// It is the storage layer's own create-only guard, not an invented poison
+// value: core_storage.go:763-772 executes "*" as a bare INSERT, so the caller's
+// next EVRProfileUpdate lands only if the row is genuinely still absent and is
+// rejected with runtime.ErrStorageRejectedVersion if any writer has since
+// created one. That is precisely the guarantee wanted here and nothing more —
+// "write only if nobody else got there", asserted rather than assumed.
+//
+// Every reachable failure of storableCreate leaves the row in one of two states,
+// and "*" is correct in both: the create was rejected, so a row exists and must
+// not be clobbered; or the write never landed (and any winner was since
+// deleted), so a row is absent and creating one is the repair.
+//
+// The resulting conflict is recoverable, not a new hard failure:
+// evrProfileUpdateWithRetry treats a version conflict as retryable, reloads the
+// profile — which now takes the storage branch and adopts the real version —
+// and the retried write succeeds.
+const selfHealUnguessedVersion = "*"
+
 func evrProfileSelfHeal(ctx context.Context, nk runtime.NakamaModule, userID string, profile *EVRProfile) {
 	version, err, _ := evrProfileSelfHealGroup.Do(userID, func() (any, error) {
 		if err := storableCreate(ctx, nk, userID, profile); err != nil {
@@ -542,6 +572,26 @@ func evrProfileSelfHeal(ctx context.Context, nk runtime.NakamaModule, userID str
 		return profile.StorageMeta().Version, nil
 	})
 	if err != nil {
+		// DISCRIMINATE (RULINGS.md:4256-4268, move 1). Returning here without
+		// touching the version left this caller holding "", which
+		// core_storage.go:738-739 executes as an explicit non-OCC
+		// last-write-wins upsert — so the very next EVRProfileUpdate silently
+		// overwrote whatever row the racing writer had created. A repair for a
+		// last-write-wins hazard must not itself be a last-write-wins write,
+		// and that applies to its failure path too.
+		//
+		// The empty version also made a FAILED repair indistinguishable from a
+		// repair that was never attempted: both read "" downstream. They are now
+		// distinct values.
+		//
+		// Only an empty version is overwritten. storableCreate adopts the
+		// winner's object on an ordinary lost race and returns nil, so a
+		// non-empty version here would be a real adopted one; clobbering it with
+		// a create-only guard would throw away better information.
+		if meta := profile.StorageMeta(); meta.Version == "" {
+			meta.Version = selfHealUnguessedVersion
+			profile.SetStorageMeta(meta)
+		}
 		nk.MetricsCounterAdd(profileSelfHealCounter, map[string]string{"outcome": "error"}, 1)
 		return
 	}
