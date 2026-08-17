@@ -592,7 +592,7 @@ func BenchmarkNext(b *testing.B) {
 	for b.Loop() {
 		i := 0
 		expr := exprs[i%benchmarkExpressionsLen]
-			i++
+		i++
 		next := expr.Next(from)
 		next = expr.Next(next)
 		next = expr.Next(next)
