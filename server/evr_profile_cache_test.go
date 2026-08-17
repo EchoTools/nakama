@@ -128,7 +128,7 @@ func TestEquipAndSanitize_RejectsUnownedVRMLTag(t *testing.T) {
 	owned := cosmeticDefaults(false) // empty wallet: defaults only, all VRML restricted
 
 	loadout := evr.DefaultCosmeticLoadout()
-	result, err := EquipAndSanitize(loadout, "tag", "rwd_tag_s1_vrml_s1_finalist", owned, nil)
+	result, _, err := EquipAndSanitize(loadout, "tag", "rwd_tag_s1_vrml_s1_finalist", owned, nil)
 	if err != nil {
 		t.Fatalf("EquipAndSanitize returned error: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestEquipAndSanitize_AllowsOwnedVRMLTag(t *testing.T) {
 	}, owned)
 
 	loadout := evr.DefaultCosmeticLoadout()
-	result, err := EquipAndSanitize(loadout, "tag", "rwd_tag_s1_vrml_s1_finalist", owned, nil)
+	result, _, err := EquipAndSanitize(loadout, "tag", "rwd_tag_s1_vrml_s1_finalist", owned, nil)
 	if err != nil {
 		t.Fatalf("EquipAndSanitize returned error: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestEquipAndSanitize_AllowsDefaultItem(t *testing.T) {
 	owned := cosmeticDefaults(false)
 
 	loadout := evr.DefaultCosmeticLoadout()
-	result, err := EquipAndSanitize(loadout, "tag", "rwd_tag_s1_a_secondary", owned, nil)
+	result, _, err := EquipAndSanitize(loadout, "tag", "rwd_tag_s1_a_secondary", owned, nil)
 	if err != nil {
 		t.Fatalf("EquipAndSanitize returned error: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestSanitizeLoadout_StripCounterFiresOnEveryPath(t *testing.T) {
 			name: "equip path (EquipAndSanitize)",
 			path: string(sanitizePathEquip),
 			run: func(t *testing.T, rec *strippedCounterRecorder) {
-				if _, err := EquipAndSanitize(evr.DefaultCosmeticLoadout(), "tag", unowned, cosmeticDefaults(false), rec.add); err != nil {
+				if _, _, err := EquipAndSanitize(evr.DefaultCosmeticLoadout(), "tag", unowned, cosmeticDefaults(false), rec.add); err != nil {
 					t.Fatalf("EquipAndSanitize returned error: %v", err)
 				}
 			},
@@ -394,7 +394,7 @@ func TestSanitizeLoadout_StripCounterSilentWhenEverythingOwned(t *testing.T) {
 		{
 			name: "equip path (EquipAndSanitize)",
 			run: func(t *testing.T, rec *strippedCounterRecorder) {
-				if _, err := EquipAndSanitize(evr.DefaultCosmeticLoadout(), "tag", "rwd_tag_s1_a_secondary", cosmeticDefaults(false), rec.add); err != nil {
+				if _, _, err := EquipAndSanitize(evr.DefaultCosmeticLoadout(), "tag", "rwd_tag_s1_a_secondary", cosmeticDefaults(false), rec.add); err != nil {
 					t.Fatalf("EquipAndSanitize returned error: %v", err)
 				}
 			},
@@ -483,7 +483,7 @@ func TestSanitizeLoadout_CombatChassis(t *testing.T) {
 	loadout := defaults
 	loadout.Chassis = "rwd_chassis_body_s10_a" // equip combat chassis
 
-	result := sanitizeLoadout(loadout, cosmetics, nil, sanitizePathServe)
+	result, _ := sanitizeLoadout(loadout, cosmetics, nil, sanitizePathServe)
 
 	if result.Chassis != "rwd_chassis_body_s10_a" {
 		t.Errorf("combat chassis was sanitized away: got %q, want %q",
@@ -507,7 +507,7 @@ func TestSanitizeLoadout_AllCombatCosmetics(t *testing.T) {
 		loadout := defaults
 		reflect.ValueOf(&loadout).Elem().FieldByName(slot).SetString(item)
 
-		result := sanitizeLoadout(loadout, cosmetics, nil, sanitizePathServe)
+		result, _ := sanitizeLoadout(loadout, cosmetics, nil, sanitizePathServe)
 		got := reflect.ValueOf(result).FieldByName(slot).String()
 		if got != item {
 			t.Errorf("combat %s %q was sanitized to %q", slot, item, got)
