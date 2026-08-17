@@ -175,7 +175,12 @@ func sanitizeGameServerLoadout(loadout evr.CosmeticLoadout, evrProfile *EVRProfi
 	if err != nil {
 		return loadout, err
 	}
-	return sanitizeLoadout(loadout, owned, metricsCounterAdd, sanitizePathGameServer), nil
+	// The strip report is discarded here. The owner's ruling covers the equip path; this
+	// is a different entry point (the game server's own save-loadout request) and giving
+	// it a log line is a separate decision, not this change's to make. Wiring it later is
+	// one logCosmeticStrips call, because the report now exists.
+	sanitized, _ := sanitizeLoadout(loadout, owned, metricsCounterAdd, sanitizePathGameServer)
+	return sanitized, nil
 }
 
 // gameServerSaveLoadoutRequest handles loadout save requests from the game server.
