@@ -31,6 +31,13 @@ import (
 // values. Version conflicts are skipped — a racing login rebuilds that
 // account correctly either way.
 //
+// An account whose rebuild FAILS is not written at all. The clear happens in
+// memory before the rebuild, so persisting after a failure would store an
+// empty map as though the account genuinely had no alternates — a transient
+// I/O error and a real "no alternates found" would be indistinguishable in
+// storage. Those accounts are counted in rebuild_failed and retried on the
+// next run.
+//
 // Note: UpdateAlternates itself persists the OTHER side of each link
 // bidirectionally; this migration persists the account's own history after
 // the rebuild, which is the step the login flow performs separately.
@@ -39,6 +46,7 @@ type MigrationClearAlternateMatches struct{}
 func (m *MigrationClearAlternateMatches) MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) error {
 	cleared := 0
 	rebuilt := 0
+	rebuildFailed := 0
 	walked := 0
 	startTime := time.Now()
 
@@ -74,14 +82,31 @@ func (m *MigrationClearAlternateMatches) MigrateSystem(ctx context.Context, logg
 				// place — so clearing must happen before the rebuild.
 				history.AlternateMatches = nil
 				history.SecondDegreeAlternates = nil
-				cleared++
 			}
 
 			// Rebuild against the current detection code. This is the same
 			// path a login runs (evr_pipeline_login.go:638), including the
 			// bidirectional writes to linked accounts.
 			if _, err := history.UpdateAlternates(ctx, logger, nk); err != nil {
-				logger.WithFields(map[string]any{"user_id": obj.UserId, "error": err}).Warn("alt-clear migration: rebuild alternates failed; writing cleared state")
+				// Do NOT persist. The maps were cleared in memory just above,
+				// and every error UpdateAlternates can return is I/O-backed —
+				// the alt index list (evr_authenticate_alts.go:139-141),
+				// AccountsGetId, or a StorableRead — so a context deadline, a
+				// reset connection or an unavailable index all land here.
+				// Writing the cleared state now would turn a transient failure
+				// into the permanent erasure of a genuine disabled-alt link,
+				// and alt-based enforcement would be blind to it until that
+				// account logged in again: a fail-open on a moderation
+				// control. Leaving the row untouched keeps the stored links,
+				// and the migration re-runs from a fresh cursor on the next
+				// process start, which retries this account.
+				rebuildFailed++
+				logger.WithFields(map[string]any{"user_id": obj.UserId, "error": err}).Error("alt-clear migration: rebuild alternates failed; stored state left untouched for retry")
+				continue
+			}
+
+			if hadLinks {
+				cleared++
 			}
 
 			// Persist if anything changed (cleared stale links, or rebuilt
@@ -116,12 +141,13 @@ func (m *MigrationClearAlternateMatches) MigrateSystem(ctx context.Context, logg
 		}
 
 		logger.WithFields(map[string]any{
-			"batch":      len(writes),
-			"cleared":    cleared,
-			"rebuilt":    rebuilt,
-			"walked":     walked,
-			"batch_time": time.Since(batchStart).String(),
-			"total_time": time.Since(startTime).String(),
+			"batch":          len(writes),
+			"cleared":        cleared,
+			"rebuilt":        rebuilt,
+			"rebuild_failed": rebuildFailed,
+			"walked":         walked,
+			"batch_time":     time.Since(batchStart).String(),
+			"total_time":     time.Since(startTime).String(),
 		}).Info("alt-clear migration: progress")
 
 		if nextCursor == "" {
@@ -137,10 +163,11 @@ func (m *MigrationClearAlternateMatches) MigrateSystem(ctx context.Context, logg
 	}
 
 	logger.WithFields(map[string]any{
-		"cleared": cleared,
-		"rebuilt": rebuilt,
-		"walked":  walked,
-		"total":   time.Since(startTime).String(),
+		"cleared":        cleared,
+		"rebuilt":        rebuilt,
+		"rebuild_failed": rebuildFailed,
+		"walked":         walked,
+		"total":          time.Since(startTime).String(),
 	}).Info("alt-clear migration complete")
 
 	return nil
