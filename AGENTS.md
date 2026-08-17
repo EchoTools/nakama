@@ -27,13 +27,21 @@ meant to do, not what happened on a particular afternoon.
 
 ## Standards
 
-This project adopts **`~/src/metis-core/GO-ADDENDUM-GENERIC.md`** as the
-binding Go code standard. Read it before writing or reviewing code.
+This project adopts **`/home/andrew/src/metis-core/GO-ADDENDUM-GENERIC.md`** as
+the binding Go code standard. Read it before writing or reviewing code.
 
-> Path corrected 2026-08-16. This read `/srv/src/metis-core/...`, which does not
-> exist on this host (`ls -d /srv/src/metis-core` → No such file or directory).
-> A mandatory pre-read that cannot be opened is an unenforced gate: every agent
-> that "adopted" the standard read nothing, and nothing failed.
+> Use the explicit absolute path — not `~`, and not `/srv`. This line previously
+> read `/srv/src/metis-core/...`, which is the **retired tethys-era convention**:
+> development no longer happens on tethys, and on this host the local trees are
+> `/home/andrew/src/<repo>`. `/srv/src` survives here only as a decayed
+> root-owned symlink farm holding a single entry, so the old path resolves for
+> nothing this repo needs.
+>
+> Corrected 2026-08-16. An earlier version of this note claimed the file "does
+> not exist on this host" — that was **false** and is retracted: the file exists,
+> and `/srv/src` is a real directory. The path was stale, not imaginary. Recorded
+> because a mandatory pre-read nobody can open is an unenforced gate — every
+> agent that "adopted" the standard read nothing, and nothing failed.
 
 Key requirements for any agent (including heisthecat31 or any AI assistant):
 
