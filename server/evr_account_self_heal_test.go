@@ -40,6 +40,14 @@ type selfHealNK struct {
 	// concurrency test uses it as a start barrier so the goroutines provably
 	// overlap (AGENTS.md defect class #2).
 	beforeRead func()
+	// readErrAfter fails StorageRead with readErr once this many reads have
+	// already succeeded. The lost-race test needs exactly that shape: read #1
+	// (EVRProfileLoad's own) must return "no row" so the fallback branch is
+	// entered at all, and read #2 (storableCreate's adopt-the-winner re-read)
+	// must fail. A blanket readErr would abort the load before it ever reached
+	// the code under test.
+	readErrAfter int
+	readErr      error
 	// duringWrite runs inside StorageWrite while the singleflight leader holds
 	// the flight, so followers have a window in which to coalesce.
 	duringWrite func()
@@ -86,6 +94,10 @@ func (m *selfHealNK) StorageRead(_ context.Context, reads []*runtime.StorageRead
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.readErr != nil && m.reads >= m.readErrAfter {
+		m.reads++
+		return nil, m.readErr
+	}
 	m.reads++
 	out := make([]*api.StorageObject, 0, len(reads))
 	for _, r := range reads {
@@ -137,6 +149,30 @@ func (m *selfHealNK) StorageWrite(_ context.Context, writes []*runtime.StorageWr
 		})
 	}
 	return acks, nil
+}
+
+// MultiUpdate is the path EVRProfileUpdate actually writes through. It exists
+// here so the self-heal failure tests can assert the hazard end-to-end -- "the
+// caller's NEXT update silently overwrote another writer's row" -- rather than
+// asserting that some particular sentinel string was stored on the profile. The
+// storage writes are routed through StorageWrite so the create-only ("*") and
+// OCC version semantics are identical to every other write in this double.
+//
+// Account updates and wallet updates are ignored: nothing under test reads them
+// back. The storage deletes are applied because EVRProfileUpdate always issues
+// one (the ServerProfile cache invalidation) and silently dropping it would let
+// a stale object survive a test that later looked for it.
+func (m *selfHealNK) MultiUpdate(ctx context.Context, _ []*runtime.AccountUpdate, storageWrites []*runtime.StorageWrite, storageDeletes []*runtime.StorageDelete, _ []*runtime.WalletUpdate, _ bool) ([]*api.StorageObjectAck, []*runtime.WalletUpdateResult, error) {
+	acks, err := m.StorageWrite(ctx, storageWrites)
+	if err != nil {
+		return nil, nil, err
+	}
+	m.mu.Lock()
+	for _, d := range storageDeletes {
+		delete(m.objects, selfHealKey(d.Collection, d.Key, d.UserID))
+	}
+	m.mu.Unlock()
+	return acks, nil, nil
 }
 
 func (m *selfHealNK) MetricsCounterAdd(name string, tags map[string]string, delta int64) {
@@ -348,4 +384,170 @@ func TestEVRProfileLoad_SelfHeal_StorageHitWritesNothing(t *testing.T) {
 	nk.requireCounter(t, profileReadCounter, map[string]string{"source": "storage"}, 1, 1)
 	nk.requireCounter(t, profileSelfHealCounter, map[string]string{"outcome": "repaired"}, 0, 0)
 	nk.requireCounter(t, profileSelfHealCounter, map[string]string{"outcome": "error"}, 0, 0)
+}
+
+// --- R5 ----------------------------------------------------------------------
+//
+// R5 is the requirement R2 left open. R2 pins that a FAILED repair still returns
+// a usable profile; it says nothing about what version that profile carries, and
+// the answer was "" -- the empty version core_storage.go:738-739 executes as an
+// explicit non-OCC last-write-wins upsert. So the repair for a last-write-wins
+// hazard reinstated the hazard on its own failure path.
+//
+// This is RULINGS.md:4256-4268 move 1, DISCRIMINATE: the failed-repair state and
+// the never-attempted state produced the same downstream value and were
+// therefore indistinguishable to every later writer.
+//
+// Both tests below assert the property BEHAVIOURALLY -- they drive the caller's
+// next EVRProfileUpdate and require that it cannot silently take the row -- so
+// they pin the requirement rather than the sentinel chosen to meet it. Asserting
+// `version == "*"` would pass against an implementation that stamped "*" and
+// then stripped it before the write.
+
+// requireNextUpdateCannotClobber drives profile's next EVRProfileUpdate against
+// a row another writer owns, and requires that it is refused as a version
+// conflict with the other writer's bytes left intact.
+//
+// The conflict is the WANTED outcome, not a regression: it is only reachable
+// when the repair failed AND someone else owns the row, which is exactly the
+// case where this caller's metadata-rebuilt profile is stale and writing it
+// would destroy data. evrProfileUpdateWithRetry (evr_account.go:687-711) treats
+// a conflict as retryable -- it reloads the profile, which now finds the row and
+// adopts its real version, and the retried write lands. Silence, not the
+// conflict, was the defect.
+func requireNextUpdateCannotClobber(t *testing.T, nk *selfHealNK, userID string, profile *EVRProfile) {
+	t.Helper()
+
+	// Disarm every fixture hook first. The lost-race test leaves duringWrite
+	// armed, and it would fire again inside THIS update and re-seed the row
+	// underneath the assertions below -- making a passing production path look
+	// like a clobber.
+	nk.writeErr = nil
+	nk.readErr = nil
+	nk.duringWrite = nil
+	nk.beforeRead = nil
+	nk.seed(StorageCollectionEVRProfile, StorageKeyEVRProfile, userID,
+		`{"active_group_id":"g-from-the-other-writer"}`, "v-other-writer")
+
+	err := EVRProfileUpdate(context.Background(), nk, userID, profile)
+	require.Error(t, err,
+		"the caller's next update must not silently succeed against a row it never read; "+
+			"an empty version makes this write a non-OCC last-write-wins upsert (core_storage.go:738-739)")
+	require.True(t, isVersionConflictError(err),
+		"the refusal must be a version conflict so evrProfileUpdateWithRetry reloads and retries; got %v", err)
+
+	obj := nk.object(StorageCollectionEVRProfile, StorageKeyEVRProfile, userID)
+	require.NotNil(t, obj, "the other writer's row must still exist")
+	require.Equal(t, "v-other-writer", obj.Version, "the other writer's row must be untouched")
+	require.Contains(t, obj.Value, "g-from-the-other-writer",
+		"the other writer's VALUE must survive; this is the data loss the whole change exists to prevent")
+}
+
+// TestEVRProfileLoad_SelfHeal_WriteFailureLeavesNoSilentClobber is R5 on the
+// plain write-failure path -- the same fixture R2 uses, carried one step
+// further to the consequence R2 stops short of.
+func TestEVRProfileLoad_SelfHeal_WriteFailureLeavesNoSilentClobber(t *testing.T) {
+	userID := selfHealUserID(t)
+	nk := newSelfHealNK(`{"active_group_id":"g-from-metadata"}`)
+	nk.writeErr = errors.New("storage unavailable")
+
+	profile, err := EVRProfileLoad(context.Background(), nk, userID)
+	require.NoError(t, err, "ADVISORY, NOT BLOCKING: a failed repair must never fail the read")
+	require.NotNil(t, profile)
+	require.Equal(t, "g-from-metadata", profile.ActiveGroupID, "the rebuilt profile must still be returned in full")
+	require.Equal(t, 1, nk.writeCount(),
+		"the repair must have been ATTEMPTED and failed; without this the test passes against a build that never writes")
+	nk.requireCounter(t, profileSelfHealCounter, map[string]string{"outcome": "error"}, 1, 1)
+
+	require.NotEmpty(t, profile.StorageMeta().Version,
+		"DISCRIMINATE: a failed repair must not be indistinguishable from a repair that was never attempted")
+
+	requireNextUpdateCannotClobber(t, nk, userID, profile)
+}
+
+// TestEVRProfileLoad_SelfHeal_LostRaceThenFailedAdoptLeavesNoSilentClobber is R5
+// on the literal lost-race path: the create is rejected because another writer
+// created the row in between, and storableCreate's adopt-the-winner re-read then
+// fails, so no version is adopted.
+//
+// This fixture is what makes the test a falsifier rather than a restatement of
+// the one above. storableCreate (evr_storable.go:215-238) ALREADY adopts the
+// winner on an ordinary lost race, so a lost race alone never reaches
+// evrProfileSelfHeal's error branch. Only a lost race whose adopt-read also
+// fails does -- and that is the interleaving where the caller was left holding
+// "" while another writer's row sat in storage, which is the state the doc
+// comment on evrProfileSelfHeal claims cannot happen.
+func TestEVRProfileLoad_SelfHeal_LostRaceThenFailedAdoptLeavesNoSilentClobber(t *testing.T) {
+	userID := selfHealUserID(t)
+	nk := newSelfHealNK(`{"active_group_id":"g-from-metadata"}`)
+
+	// The racing writer lands between this caller's read and its create. The
+	// double's StorageWrite rejects a "*" write against a row that is present,
+	// exactly as core_storage.go:763-772 does, so the create is genuinely
+	// rejected rather than merely made to return an error.
+	nk.duringWrite = func() {
+		nk.seed(StorageCollectionEVRProfile, StorageKeyEVRProfile, userID,
+			`{"active_group_id":"g-from-the-racing-writer"}`, "v-racer")
+	}
+	// Read #1 is EVRProfileLoad's own and must find nothing; read #2 is the
+	// adopt-the-winner re-read and must fail.
+	nk.readErrAfter = 1
+	nk.readErr = errors.New("storage read unavailable")
+
+	profile, err := EVRProfileLoad(context.Background(), nk, userID)
+	require.NoError(t, err, "ADVISORY, NOT BLOCKING: a failed repair must never fail the read")
+	require.NotNil(t, profile)
+	require.Equal(t, "g-from-metadata", profile.ActiveGroupID, "the rebuilt profile must still be returned in full")
+	require.Equal(t, 1, nk.writeCount(), "the repair must have been ATTEMPTED and rejected")
+	nk.requireCounter(t, profileSelfHealCounter, map[string]string{"outcome": "error"}, 1, 1)
+
+	obj := nk.object(StorageCollectionEVRProfile, StorageKeyEVRProfile, userID)
+	require.NotNil(t, obj, "fixture check: the racing writer's row must exist")
+	require.Equal(t, "v-racer", obj.Version,
+		"fixture check: the create must have been REJECTED, not applied -- otherwise this is not a lost race")
+
+	require.NotEmpty(t, profile.StorageMeta().Version,
+		"DISCRIMINATE: the caller lost the race, so it must not walk away holding the empty version that wins unconditionally")
+
+	requireNextUpdateCannotClobber(t, nk, userID, profile)
+}
+
+// TestEVRProfileLoad_SelfHeal_FailedRepairStillCompletesLater is the other half
+// of R5, and the one that keeps the two tests above from being satisfiable by a
+// poison value.
+//
+// "Cannot silently win" is trivially met by stamping a version that can never
+// match anything -- but that would wedge the profile permanently: the row is
+// absent precisely because the repair failed, and a caller that can no longer
+// create it has traded a silent clobber for silent data loss of its own. The
+// version stamped on failure must still permit the write when, and only when,
+// nobody else took the row.
+//
+// Together with requireNextUpdateCannotClobber this pins both directions:
+// refused when a row exists, allowed when one does not.
+func TestEVRProfileLoad_SelfHeal_FailedRepairStillCompletesLater(t *testing.T) {
+	userID := selfHealUserID(t)
+	nk := newSelfHealNK(`{"active_group_id":"g-from-metadata"}`)
+	nk.writeErr = errors.New("storage unavailable")
+
+	profile, err := EVRProfileLoad(context.Background(), nk, userID)
+	require.NoError(t, err)
+	require.Equal(t, 1, nk.writeCount(), "the repair must have been ATTEMPTED and failed")
+	require.Nil(t, nk.object(StorageCollectionEVRProfile, StorageKeyEVRProfile, userID),
+		"fixture check: the repair failed, so no row may exist")
+	nk.requireCounter(t, profileSelfHealCounter, map[string]string{"outcome": "error"}, 1, 1)
+
+	// Storage recovers. No other writer has taken the row.
+	nk.writeErr = nil
+
+	require.NoError(t, EVRProfileUpdate(context.Background(), nk, userID, profile),
+		"a failed repair must not wedge the profile: with no competing writer the caller's next update must still land")
+
+	obj := nk.object(StorageCollectionEVRProfile, StorageKeyEVRProfile, userID)
+	require.NotNil(t, obj, "the update must have created the row the failed repair could not")
+	require.Contains(t, obj.Value, "g-from-metadata")
+	require.NotEqual(t, selfHealUnguessedVersion, profile.StorageMeta().Version,
+		"the caller must have adopted the real acked version, not still be holding the failure marker")
+	require.Equal(t, obj.Version, profile.StorageMeta().Version,
+		"the profile's version must match the row it just wrote, putting this caller back under OCC")
 }
