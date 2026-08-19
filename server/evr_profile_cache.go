@@ -580,7 +580,7 @@ var defaultCosmetics = func() map[string]map[string]bool {
 	}
 	for m, t := range structs {
 		v := reflect.ValueOf(t)
-		if v.Kind() == reflect.Ptr {
+		if v.Kind() == reflect.Pointer {
 			v = v.Elem()
 		}
 

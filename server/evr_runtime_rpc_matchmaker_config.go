@@ -160,7 +160,7 @@ type MatchmakerConfigWithSchema struct {
 func extractSchema(t reflect.Type, _ string) map[string]FieldSchema {
 	schema := make(map[string]FieldSchema)
 
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 
@@ -194,7 +194,7 @@ func extractSchema(t reflect.Type, _ string) map[string]FieldSchema {
 		// Recurse into nested structs
 		if fieldType.Kind() == reflect.Struct {
 			fs.Fields = extractSchema(fieldType, jsonTag+".")
-		} else if fieldType.Kind() == reflect.Ptr && fieldType.Elem().Kind() == reflect.Struct {
+		} else if fieldType.Kind() == reflect.Pointer && fieldType.Elem().Kind() == reflect.Struct {
 			fs.Fields = extractSchema(fieldType.Elem(), jsonTag+".")
 		}
 
@@ -207,7 +207,7 @@ func extractSchema(t reflect.Type, _ string) map[string]FieldSchema {
 // getTypeName returns a human-readable type name
 func getTypeName(t reflect.Type) string {
 	switch t.Kind() {
-	case reflect.Ptr:
+	case reflect.Pointer:
 		return getTypeName(t.Elem())
 	case reflect.Slice:
 		return "array"
