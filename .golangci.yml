@@ -14,6 +14,19 @@ linters:
       # the config has always described. Turning them on is a deliberate
       # decision, not a side effect of the v1->v2 format migration: as of this
       # commit they add 440 ST* and 77 QF* findings.
+      #
+      # CORRECTED 2026-08-19 -- the 440/77 above was itself measured against a
+      # capped run. Uncapped and with a cold cache at 8d2075037, deleting the two
+      # lines below gives 1594 total / staticcheck 1315, against 374 / 95 with them
+      # in place. The suppression hides 1,220 findings, not 517: ST1003 (naming)
+      # 679, ST1008 (error should be the last return value) 247, ST1005 (capitalised
+      # error strings) 176, ST1016 26, ST1013 12, ST1012 2, and QF* 78. The prior
+      # figures are left above rather than overwritten -- amend, never rewrite.
+      #
+      # The decision itself is Andrew's and is open; it was never put to him. The
+      # SA* family, which is the one that finds defects, is fully on and is being
+      # driven to zero. 926 of the 1,220 are ST1003 and ST1008 -- a mass rename and
+      # an API-shape change across a live game service.
       checks:
         - all
         - -ST*

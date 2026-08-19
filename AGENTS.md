@@ -49,7 +49,7 @@ Key requirements for any agent (including heisthecat31 or any AI assistant):
 
 ```bash
 gofmt -l -w    # format
-go vet ./...   # static analysis
+go vet $(go list ./... | grep -v '/internal/gopher-lua')   # static analysis -- see note
 golangci-lint run --max-issues-per-linter 0 --max-same-issues 0   # see note
 just test      # tests -- repo-wide scope, see TEST_PKGS in the justfile
 go fix ./...   # apply modernizers
@@ -74,6 +74,41 @@ staticcheck 95, unused 47, ineffassign 21, govet 18, gofmt 3). That is a report,
 not yet a gate. Enforcing it on new work only — `--new-from-rev=origin/main` —
 is the obvious path and is an owner decision, not taken here.
 
+**On the vet scope.** This block said `go vet ./...` until 2026-08-19. That form
+**cannot pass**: it walks the vendored `internal/gopher-lua`, which has 25 findings
+of its own (self-assignment, non-constant format strings, unreachable code) and is
+not ours to fix. A mandatory command that can never exit 0 is a gate nobody can
+satisfy, so it gets satisfied by ignoring it. The scoped form above is the one the
+justfile, `scripts/test-audit.sh` and `.github/workflows/build.yaml` already use, and
+it is clean at `8d2075037`. The `grep .` guard those three carry is load-bearing for
+a different reason — see the comment in `build.yaml`.
+
+**CONFIRMED 2026-08-19 — 377 is right, and the "451" that replaced it was not.**
+Amend-never-rewrite: everything above stands. Between 2026-08-17 and 2026-08-19 a
+campaign reported this baseline as **451** (staticcheck 168, unused 48) and recorded
+377 as an under-count. Re-measured at `8d2075037`:
+
+```
+$ golangci-lint run --max-issues-per-linter 0 --max-same-issues 0     # warm cache
+447 issues: errcheck 193, staticcheck 168, unused 47, ineffassign 21, govet 18
+$ golangci-lint cache clean
+$ golangci-lint run --max-issues-per-linter 0 --max-same-issues 0     # cold cache
+374 issues: errcheck 193, staticcheck 95, unused 47, ineffassign 21, govet 18
+```
+
+**374 + the 3 gofmt findings this file recorded = 377.** The number above was correct
+and is restored. The gap was a **stale analyzer cache**: 123 of the warm-cache
+findings carried paths under `/var/tmp/nakama-lint/`, a scratch copy of this repo
+that no longer exists (`ls` → No such file or directory). Two effects, the second
+silent and the expensive one: those `file:line` citations pointed at nothing, and
+generated-file detection has to *read* the file to find `DO NOT EDIT.`, so
+`console/console.pb.go` lost its exclusion and contributed **71** findings on its own
+— 73 of the 79 phantom `SA1019` hits. Under a real path, `SA1019` is 6.
+
+So the standing baseline is **374 at `8d2075037`** (the 3 gofmt findings below were
+fixed in `3258006b0`). Measure it with a cold cache, or with the foreign-path check
+described in the defect class below.
+
 Four files are `gofmt`-non-compliant on `main` and predate this note. Two are
 trailing whitespace (`server/evr_lobby_builder_team_assignment_test.go`,
 `server/evr_team_composition_test.go`); two are mis-indentation that reads like a
@@ -81,6 +116,24 @@ real bug — an `i := 0; i++` immediately before a `for i := 0; ...` that shadow
 — in `internal/skiplist/skiplist_test.go` and `internal/cronexpr/cronexpr_test.go`.
 The `cronexpr` one is invisible to `golangci-lint` (skipped dir) but **visible to
 `gofmt -l`, and therefore to pre-push check 2**.
+**Resolved 2026-08-19, and one of the two was a real bug.** All four files were
+reformatted in `3258006b0`; `just fmt-check` and `gofmt -l` are clean at
+`8d2075037`. Checking what the mis-indentation had been hiding:
+`internal/skiplist/skiplist_test.go` is fine — its `for i := 0; i < len(ret); i++`
+shadows nothing. `internal/cronexpr/cronexpr_test.go:592-596` is **not**:
+
+```go
+for b.Loop() {
+    i := 0                                    // declared INSIDE the loop body
+    expr := exprs[i%benchmarkExpressionsLen]
+    i++                                       // dead -- reset to 0 next iteration
+```
+
+`BenchmarkNext` therefore benchmarks `exprs[0]` on every iteration instead of
+cycling all 21 expressions. Same class as `5985fa448` ("repair b.Loop() conversions
+that dropped the loop index"), which missed this one because `internal/cronexpr` is
+a `.golangci.yml` skipped dir — so `ineffassign` never sees it. Not fixed here:
+this note is a record correction, not a code change. It is a work-ledger item.
 
 ### Pre-push hook (automated gate)
 
@@ -196,6 +249,21 @@ been observed at least once in this repo.
    does **not** apply to stubs added this way, but say why in a comment at the
    method: no embedder defines it, and the call arrives through the interface,
    which dispatches to the outermost type.
+
+6. **A stale analyzer cache inflates a measurement while every flag is honest.**
+   Observed 2026-08-19. `golangci-lint` reported 447 findings warm and **374** cold
+   at the same commit. 123 of the warm findings carried paths under
+   `/var/tmp/nakama-lint/` — a scratch copy of this repo that no longer existed. The
+   cache had retained analysis results keyed to that tree's paths. Nothing was
+   truncated and nothing reported itself; the number was simply larger than the tree,
+   which is what makes it worse than the capped-count failure `FORMS.md §Bound`
+   covers. The expensive half was silent: **generated-file exclusion has to read the
+   file** to find `DO NOT EDIT.`, so an unreadable path defeats it, and
+   `console/console.pb.go` alone contributed 71 phantom findings. A campaign planned
+   against the inflated number and recorded it over a correct one.
+   **Detector, and it is cheap:** a finding whose path does not resolve to a file
+   inside the repo. Any measurement used to plan work runs `golangci-lint cache
+   clean` first, or greps its own output for a foreign path. Wired into `just verify`.
 
 The dominant related anti-pattern, and the one most often found here, is
 **fail-open on a fail-closed control**: a gate that, when its input is missing
