@@ -101,7 +101,7 @@ func StorableRead(ctx context.Context, nk runtime.NakamaModule, userID string, d
 	// Validate the destination object.
 	if dst == nil {
 		return status.Error(codes.InvalidArgument, "dst is nil")
-	} else if dstValue := reflect.ValueOf(dst); dstValue.Kind() != reflect.Ptr {
+	} else if dstValue := reflect.ValueOf(dst); dstValue.Kind() != reflect.Pointer {
 		return status.Error(codes.InvalidArgument, "dst is not a pointer")
 	}
 	if userID == "" {
