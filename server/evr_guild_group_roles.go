@@ -65,10 +65,10 @@ type guildGroupPermissions struct {
 func (m guildGroupPermissions) ToUint64() uint64 {
 	var i uint64 = 0
 	b := m.asBitSet()
-	if len(b.Bytes()) == 0 {
+	if len(b.Words()) == 0 {
 		return i
 	}
-	return uint64(b.Bytes()[0])
+	return uint64(b.Words()[0])
 }
 
 func (m *guildGroupPermissions) FromUint64(v uint64) {
