@@ -322,6 +322,29 @@ act: act-list
 # like a cleaner tree. Every number this repo records is taken with these flags.
 LINT_FLAGS := "--max-issues-per-linter 0 --max-same-issues 0"
 
+# Per-checkout lint cache, keyed on the checkout's own path.
+#
+# golangci-lint defaults to one shared ~/.cache/golangci-lint for every checkout
+# on the machine. Two consequences, both observed on 2026-08-19 with two cogs
+# working in sibling worktrees of this repo:
+#
+#   1. It takes an exclusive lock. The second run dies with
+#      `Error: parallel golangci-lint is running` -- so one worktree linting
+#      blocks every other worktree, including CI-shaped local runs.
+#   2. Worse, and silent: the cache is keyed in a way that let one worktree's
+#      results surface in another's report, carrying THAT worktree's paths. One
+#      cog cleaned the cache, and it re-poisoned within the same session with
+#      paths under `../agent-abdd5b1f3c3316791/...`. That is AGENTS.md defect
+#      class 6 arriving from a live sibling rather than from a stale directory,
+#      which the foreign-path guard below catches but cannot prevent.
+#
+# A cache per checkout removes both. Cost is real and worth naming: each
+# checkout pays its own cold run (~40s) and ~12MB. Under /var/tmp, not /tmp --
+# /tmp is RAM-backed here.
+#
+# An explicitly set GOLANGCI_LINT_CACHE wins, so this can still be overridden.
+LINT_CACHE := "/var/tmp/nakama-golangci-cache/" + sha256(justfile_directory())
+
 # The backlog ratchet. Measured, not chosen: 290 with a cold cache, down
 # from 374 at 17b79b0fd. BOLT 9 cleared 30 (govet inline 18, SA1019 8, SA1006 2,
 # S1011 1, S1002 1); BOLT 2 cleared 54 (the discarded RestrictAPIFunctionAccess
@@ -359,6 +382,7 @@ LINT_BASELINE := "290"
 # Uncapped golangci-lint; non-zero if the backlog rises above LINT_BASELINE
 lint:
     @set -u; \
+    export GOLANGCI_LINT_CACHE="${GOLANGCI_LINT_CACHE:-{{ LINT_CACHE }}}"; \
     out="$(golangci-lint run {{ LINT_FLAGS }} 2>&1)"; rc=$?; \
     if [ "$rc" != "0" ] && [ "$rc" != "1" ]; then \
         echo "ERROR: golangci-lint exited $rc -- it did not run, it failed."; \
@@ -406,7 +430,8 @@ lint:
 
 # Lint only what this branch added, against REF; non-zero on any new finding
 lint-new REF="origin/main":
-    @golangci-lint run {{ LINT_FLAGS }} --new-from-merge-base {{ REF }} \
+    @GOLANGCI_LINT_CACHE="${GOLANGCI_LINT_CACHE:-{{ LINT_CACHE }}}" \
+        golangci-lint run {{ LINT_FLAGS }} --new-from-merge-base {{ REF }} \
         && echo "lint: no new findings against {{ REF }}"
 
 # go vet over the same scope the tests use.
