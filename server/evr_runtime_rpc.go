@@ -1516,7 +1516,7 @@ func parseURLParams(params url.Values, target any) error {
 		default:
 			// Get the underlying type of the field
 			fieldType := fieldValue.Type()
-			if fieldType.Kind() == reflect.Ptr {
+			if fieldType.Kind() == reflect.Pointer {
 				fieldType = fieldType.Elem()
 			}
 

@@ -112,7 +112,7 @@ func (q query) QuoteStringValue(input any) string {
 	case float64:
 		s = strconv.FormatFloat(v, 'f', -1, 64)
 	case bool:
-		if v == true {
+		if v {
 			s = "T"
 		} else {
 			s = "F"
