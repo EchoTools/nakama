@@ -21,6 +21,34 @@ This applies regardless of context — even if the task seems to require deploym
 
 **Cross-guild matchmaking must NEVER be implemented.** Players only match within their own guild group. Any code that sets `GroupID = uuid.Nil` in `MatchmakingStream()`, `GuildGroupStream()`, `MatchmakingParameters()`, `BackfillSearchQuery()`, or any other matchmaking path to enable cross-guild pooling is wrong and must not be introduced. If you see such code, flag it as a bug.
 
+## Verify — one command, and it is the one every claim resolves against
+
+`just verify` = fmt-check + exec-bit-check + vet + mod-tidy-check + lint +
+test-audit. Non-zero if any fails; it runs all six and then reports, so a red
+gofmt does not hide a red test suite. "Done", "fixed", "verified" and "green"
+mean this recipe passed and nothing else.
+
+`just lint` carries the backlog ratchet. `LINT_BASELINE` in the justfile is a
+CEILING, measured cold, not a target — lower it in the same commit that clears
+findings, or the ground is given back. It is deleted when the backlog reaches
+zero. Always measure with a cold cache (`golangci-lint cache clean`), or via
+`just lint`, which refuses any finding whose path is outside the repo — see
+AGENTS.md defect class 6.
+
+Running two lint jobs at once fails with `parallel golangci-lint is running`.
+In a second worktree, set `GOLANGCI_LINT_CACHE` to a private dir under
+`/var/tmp` — that sidesteps the lock and guarantees the cold cache at the same
+time.
+
+## Bugs — the ledger is GitHub issues, and `BUGS.md` is gitignored on purpose
+
+Measured defects are filed as issues, labelled `bug`, with `path:line @ sha` and
+the evidence adjacent. Status lives as a comment on the issue. That is what
+AGENTS.md's routing table already prescribes, and `BUGS.md` is in `.gitignore`
+(`:739`, since `c4e38e9ff`) so a repo-local ledger cannot quietly become a second
+source of truth. If you arrive with a canon that says "open a work ledger at
+`BUGS.md`": it is already open, it is `gh issue list`, and 23 entries are in it.
+
 ## Build
 
 - Go project: `just nakama` builds the binary locally
