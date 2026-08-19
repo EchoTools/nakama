@@ -41,7 +41,7 @@ func isNilPresence(p runtime.Presence) bool {
 	}
 	v := reflect.ValueOf(p)
 	switch v.Kind() {
-	case reflect.Ptr, reflect.Interface, reflect.Chan, reflect.Func, reflect.Map, reflect.Slice:
+	case reflect.Pointer, reflect.Interface, reflect.Chan, reflect.Func, reflect.Map, reflect.Slice:
 		return v.IsNil()
 	}
 	return false
