@@ -307,3 +307,174 @@ act-lint:
 
 # Alias for act-list (show available workflows)
 act: act-list
+
+# ---------------------------------------------------------------------------
+# Static analysis, and the one entry point everything resolves against.
+#
+# AGENTS.md has listed `golangci-lint` as a MUST-run-before-committing gate for
+# years. It was a gate in exactly zero places: not in .githooks/pre-push, not in
+# .github/workflows/build.yaml, and there was no recipe at all -- so the only
+# thing enforcing it was prose, and for three of those years the config would not
+# even load (a0c12bae8). `just verify` is where that stops being true.
+
+# Uncapped. Bare `golangci-lint run` applies max-issues-per-linter=50 and
+# max-same-issues=3 and reports 153 of the findings present, which looks exactly
+# like a cleaner tree. Every number this repo records is taken with these flags.
+LINT_FLAGS := "--max-issues-per-linter 0 --max-same-issues 0"
+
+# The backlog ratchet. Measured, not chosen: 374 at 17b79b0fd with a cold cache
+# (errcheck 193, staticcheck 95, unused 47, ineffassign 21, govet 18). It is a
+# CEILING, not a target -- `just lint` fails if the count rises and tells you to
+# lower this number when it falls. It exists only until the backlog reaches zero,
+# at which point this variable and the whole comparison are DELETED and a bare
+# non-zero exit becomes the gate. A ratchet kept past zero is furniture
+# (AGENTS.md defect class 4).
+LINT_BASELINE := "374"
+
+# Run the uncapped linter and hold the backlog ratchet; non-zero if it rises.
+#
+# Three failure modes are handled explicitly, because each has already happened
+# here or is one keystroke away:
+#
+#   1. THE LINTER DID NOT RUN. golangci-lint exits 0 with no issues, 1 with
+#      issues, and something else on a config or usage error. From 2023 to
+#      2026-08-16 it exited 3 on every invocation ("unsupported version of the
+#      configuration") and the workflow that called it had been failing the same
+#      way, unnoticed. Anything other than 0 or 1 is a hard failure here, with
+#      the output printed -- never a silent zero-issue pass.
+#
+#   2. THE FINDINGS ARE NOT ABOUT THIS TREE. AGENTS.md defect class 6: a stale
+#      analyzer cache made this command report 447 findings against 374 actually
+#      present, 123 of them citing paths under a /var/tmp scratch copy that no
+#      longer existed. It also silently defeated the generated-file exclusion,
+#      since detecting "DO NOT EDIT." requires READING the file -- one generated
+#      protobuf contributed 71 phantom findings on its own. golangci-lint emits
+#      paths relative to the repo root, so a leading `/` or `../` means the
+#      finding is not about this tree. Hard failure, with the fix.
+#
+#   3. THE BACKLOG SILENTLY GREW. That is the ratchet below.
+
+# Uncapped golangci-lint; non-zero if the backlog rises above LINT_BASELINE
+lint:
+    @set -u; \
+    out="$(golangci-lint run {{ LINT_FLAGS }} 2>&1)"; rc=$?; \
+    if [ "$rc" != "0" ] && [ "$rc" != "1" ]; then \
+        echo "ERROR: golangci-lint exited $rc -- it did not run, it failed."; \
+        echo "A zero-issue result from a linter that never ran is the failure"; \
+        echo "mode this check exists for. Output follows:"; \
+        printf '%s\n' "$out" | sed 's/^/  /'; \
+        exit 1; \
+    fi; \
+    foreign="$(printf '%s\n' "$out" | grep -oE '^(/|\.\./)[^ :]*\.go:[0-9]+:[0-9]+:' | sort -u)"; \
+    if [ -n "$foreign" ]; then \
+        echo "ERROR: golangci-lint reported findings whose paths are not in this repo:"; \
+        printf '%s\n' "$foreign" | head -5 | sed 's/^/  /'; \
+        echo "  ... $(printf '%s\n' "$foreign" | wc -l | tr -d ' ') distinct foreign paths"; \
+        echo ""; \
+        echo "This is a stale analyzer cache (AGENTS.md defect class 6). The count"; \
+        echo "is inflated and the file:line citations point at nothing."; \
+        echo "Fix with: golangci-lint cache clean"; \
+        exit 1; \
+    fi; \
+    count="$(printf '%s\n' "$out" | grep -cE '^[^ ]+\.go:[0-9]+:[0-9]+: ')"; \
+    if [ "$count" -gt "{{ LINT_BASELINE }}" ]; then \
+        echo "ERROR: lint findings rose to $count, above the {{ LINT_BASELINE }} baseline."; \
+        printf '%s\n' "$out" | tail -20 | sed 's/^/  /'; \
+        echo ""; \
+        echo "See what THIS branch added with:  just lint-new"; \
+        echo "See the full report with:         golangci-lint run {{ LINT_FLAGS }}"; \
+        exit 1; \
+    fi; \
+    if [ "$count" -lt "{{ LINT_BASELINE }}" ]; then \
+        echo "lint: $count findings -- BELOW the {{ LINT_BASELINE }} baseline."; \
+        echo "Lower LINT_BASELINE in the justfile to $count in this same commit,"; \
+        echo "or the ground you just took is given back to the next change."; \
+        exit 1; \
+    fi; \
+    echo "lint: $count findings, at the {{ LINT_BASELINE }} baseline (0 foreign paths)"
+
+# Findings introduced by the current branch, regardless of the backlog.
+#
+# This is the check that actually holds the line, and it is what CI runs on a
+# pull request: the ratchet above only catches a NET rise, so fixing one old
+# finding while adding one new one passes it. --new-from-merge-base does not
+# care about the backlog at all, only about what this branch added.
+#
+# Requires full history (actions/checkout fetch-depth: 0).
+
+# Lint only what this branch added, against REF; non-zero on any new finding
+lint-new REF="origin/main":
+    @golangci-lint run {{ LINT_FLAGS }} --new-from-merge-base {{ REF }} \
+        && echo "lint: no new findings against {{ REF }}"
+
+# go vet over the same scope the tests use.
+#
+# NOT `go vet ./...`, which AGENTS.md prescribed until 2026-08-19 and which
+# cannot pass: it walks the vendored internal/gopher-lua, whose 25 findings are
+# not ours to fix. A mandatory command that can never exit 0 does not get
+# satisfied, it gets ignored. See TEST_PKGS above for the same exclusion and for
+# why the `grep .` fallback in it is load-bearing.
+
+# go vet over the test scope (not ./..., which cannot pass); non-zero on failure
+vet:
+    @go vet {{ TEST_PKGS }} && echo "vet: clean over the test scope"
+
+# Refuse a tree whose go.mod/go.sum do not survive `go mod tidy`.
+#
+# `go mod tidy` rewrites both files in place, so this snapshots and restores them
+# whatever the outcome -- a check that mutates the tree it is checking leaves the
+# developer with changes they did not make. .githooks/pre-push check 5 does the
+# same thing for the same reason; this is that check, available without a push.
+
+# Verify go.mod/go.sum survive `go mod tidy` unchanged; restores them either way
+mod-tidy-check:
+    @set -u; \
+    backup="$(mktemp -d)"; \
+    cp go.mod go.sum "$backup/"; \
+    go mod tidy; \
+    drift="$(git status --porcelain -- go.mod go.sum)"; \
+    cp "$backup/go.mod" "$backup/go.sum" .; \
+    rm -rf "$backup"; \
+    if [ -n "$drift" ]; then \
+        echo "ERROR: go.mod/go.sum are not tidy:"; \
+        printf '%s\n' "$drift" | sed 's/^/  /'; \
+        echo "Fix with: go mod tidy"; \
+        exit 1; \
+    fi; \
+    echo "mod tidy: go.mod and go.sum are tidy"
+
+# THE verify entry point. Every "done / verified / it's green" claim about this
+# repo resolves against this recipe and nothing else.
+#
+# It runs ALL six checks and then reports, rather than aborting on the first
+# failure. That is deliberate: `just verify` stopping at gofmt, leaving you to
+# discover after fixing it that the tests were red too, is how a one-command
+# gate turns back into a seven-command checklist. The exit code is non-zero if
+# any check failed, and the summary names which.
+#
+# Content is AGENTS.md's "You MUST run before committing" block, minus the two
+# that are not gates: `go fix` and `gofmt -w` MUTATE (their check-only forms are
+# fmt-check and lint), and govulncheck depends on an upstream advisory database
+# that can turn a commit red without the tree changing -- it belongs on a
+# schedule, which .github/workflows/deep-security-audit.yml already gives it.
+
+# THE gate: fmt-check + exec-bit-check + vet + mod-tidy-check + lint + test-audit
+verify:
+    #!/usr/bin/env bash
+    set -u
+    failed=()
+    for check in fmt-check exec-bit-check vet mod-tidy-check lint test-audit; do
+        echo ""
+        echo "=== just $check ==="
+        if ! just "$check"; then
+            failed+=("$check")
+        fi
+    done
+    echo ""
+    echo "======================================================================"
+    if [ ${#failed[@]} -eq 0 ]; then
+        echo "verify: all 6 checks passed"
+        exit 0
+    fi
+    echo "verify: ${#failed[@]} of 6 checks FAILED -- ${failed[*]}"
+    exit 1

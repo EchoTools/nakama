@@ -4,7 +4,7 @@
 # 0. Destination: refuse a push that RESOLVES to main
 # 1. Tag format: reject semver tags without -evr.<N>
 # 2. Go quality: run fast checks on changed files
-#    (gofmt, go vet, gopls check, go mod tidy)
+#    (gofmt, go vet, golangci-lint via `just lint`, gopls check, go mod tidy)
 #
 # Install: automatic on the first `just <recipe>`; or `just hooks`; or
 #          git config core.hooksPath .githooks
@@ -201,6 +201,31 @@ if [ -n "$CHANGED_GO" ]; then
     else
         fail "go vet ./server/... failed:"
         echo "$VET_OUTPUT" | head -20 | sed 's/^/       /'
+    fi
+
+    # golangci-lint, via `just lint` -- the backlog ratchet, not a bare run.
+    #
+    # AGENTS.md has called this a MUST-run gate for years while it ran in no
+    # hook, no workflow and no recipe; from 2023 to 2026-08-16 it could not even
+    # load its config. It is here now.
+    #
+    # `just lint` rather than golangci-lint directly, deliberately: the baseline
+    # the ratchet compares against lives in the justfile, and a second copy of
+    # that number here is a second thing to forget to update. It also brings the
+    # stale-cache and did-not-run guards with it (AGENTS.md defect classes 4, 6).
+    #
+    # Skipped with a warning when `just` is absent, the same way gopls is --
+    # a hook that hard-fails on a missing tool gets bypassed wholesale, and a
+    # bypassed hook enforces nothing at all.
+    if command -v just &>/dev/null; then
+        if LINT_OUTPUT=$(just lint 2>&1); then
+            pass "golangci-lint (backlog ratchet held)"
+        else
+            fail "golangci-lint:"
+            echo "$LINT_OUTPUT" | head -20 | sed 's/^/       /'
+        fi
+    else
+        warn "just not installed — skipping golangci-lint"
     fi
 
     # gopls check (static analysis)

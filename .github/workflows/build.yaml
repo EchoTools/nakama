@@ -29,6 +29,50 @@ jobs:
       - name: Verify formatting
         run: just fmt-check
 
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # lint-new resolves a merge-base
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+
+      # Pinned, not @latest. The justfile's LINT_BASELINE is a count, and a
+      # linter release that adds a check or fixes a false negative moves that
+      # count -- so @latest would turn an upstream release into a red build on
+      # a commit that changed nothing. v2.12.2 is the version the 374 baseline
+      # was measured with. Bump it and the baseline together, deliberately.
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+
+      - name: Download modules
+        run: go mod download
+
+      # The check that actually holds the line. The backlog ratchet below only
+      # catches a NET rise, so fixing one old finding while adding a new one
+      # slips past it; this does not care about the backlog at all, only about
+      # what the branch added.
+      - name: No new findings on this branch
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          just lint-new "origin/${{ github.base_ref }}"
+
+      # Same recipe developers run locally, so CI and local cannot drift. It
+      # also carries the did-not-run and stale-cache guards -- see the comments
+      # on `lint` in the justfile, and AGENTS.md defect classes 4 and 6.
+      - name: Backlog ratchet
+        run: just lint
+
   exec_bit_check:
     name: Check script exec bits
     runs-on: ubuntu-latest
