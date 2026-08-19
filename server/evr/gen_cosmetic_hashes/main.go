@@ -60,7 +60,7 @@ func collectCosmeticStrings() []string {
 }
 
 func collectFromStruct(t reflect.Type, seen map[string]struct{}) {
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {

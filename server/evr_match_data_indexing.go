@@ -20,7 +20,7 @@ func EnsureMatchDataIndexes(ctx context.Context, mongoClient *mongo.Client) erro
 	// Create index on match_id for efficient queries
 	matchIDIndex := mongo.IndexModel{
 		Keys:    bson.D{{Key: "match_id", Value: 1}},
-		Options: options.Index().SetBackground(true).SetName("match_id_1"),
+		Options: options.Index().SetName("match_id_1"),
 	}
 
 	// Create compound index on match_id and created_at for temporal queries
@@ -29,20 +29,19 @@ func EnsureMatchDataIndexes(ctx context.Context, mongoClient *mongo.Client) erro
 			{Key: "match_id", Value: 1},
 			{Key: "created_at", Value: -1},
 		},
-		Options: options.Index().SetBackground(true).SetName("match_id_created_at_-1"),
+		Options: options.Index().SetName("match_id_created_at_-1"),
 	}
 
 	// Create index on updated_at for efficient cleanup queries
 	updatedAtIndex := mongo.IndexModel{
 		Keys:    bson.D{{Key: "updated_at", Value: -1}},
-		Options: options.Index().SetBackground(true).SetName("updated_at_-1"),
+		Options: options.Index().SetName("updated_at_-1"),
 	}
 
 	// Create TTL index for automatic cleanup of old data (optional, 30 days retention)
 	ttlIndex := mongo.IndexModel{
 		Keys: bson.D{{Key: "created_at", Value: 1}},
 		Options: options.Index().
-			SetBackground(true).
 			SetName("created_at_ttl").
 			SetExpireAfterSeconds(int32(30 * 24 * time.Hour.Seconds())), // 30 days
 	}
@@ -73,12 +72,11 @@ func EnsurePlayerMatchResultIndexes(ctx context.Context, mongoClient *mongo.Clie
 				{Key: "mode", Value: 1},
 				{Key: "created_at", Value: -1},
 			},
-			Options: options.Index().SetBackground(true).SetName("user_mode_created_at"),
+			Options: options.Index().SetName("user_mode_created_at"),
 		},
 		{
 			Keys: bson.D{{Key: "created_at", Value: 1}},
 			Options: options.Index().
-				SetBackground(true).
 				SetName("created_at_ttl_90d").
 				SetExpireAfterSeconds(int32(90 * 24 * time.Hour.Seconds())),
 		},

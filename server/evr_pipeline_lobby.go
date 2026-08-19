@@ -24,9 +24,7 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 	lobbyUUID := uuid.FromStringOrNil(message.LobbySessionId)
 	if lobbyUUID == uuid.Nil {
 		baseLogger.Warn("Lobby ID is invalid")
-		for _, entrantID := range message.EntrantIds {
-			rejectedIDs = append(rejectedIDs, entrantID)
-		}
+		rejectedIDs = append(rejectedIDs, message.EntrantIds...)
 	}
 
 	matchID, _ := NewMatchID(lobbyUUID, p.node)

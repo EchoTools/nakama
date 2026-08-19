@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -252,11 +253,11 @@ func parseSuspensionDuration(inputDuration string) (time.Duration, error) {
 	hasOtherUnits := strings.ContainsAny(duration, "mhs")
 
 	if hasD && hasW {
-		return 0, fmt.Errorf(errCompoundDurationWithDW)
+		return 0, errors.New(errCompoundDurationWithDW)
 	}
 
 	if (hasD || hasW) && hasOtherUnits {
-		return 0, fmt.Errorf(errCompoundDurationWithDW)
+		return 0, errors.New(errCompoundDurationWithDW)
 	}
 
 	// Try parsing with Go's time.ParseDuration first for compound durations (e.g., "2h25m")

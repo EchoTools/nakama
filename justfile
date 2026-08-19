@@ -322,14 +322,14 @@ act: act-list
 # like a cleaner tree. Every number this repo records is taken with these flags.
 LINT_FLAGS := "--max-issues-per-linter 0 --max-same-issues 0"
 
-# The backlog ratchet. Measured, not chosen: 374 at 17b79b0fd with a cold cache
-# (errcheck 193, staticcheck 95, unused 47, ineffassign 21, govet 18). It is a
+# The backlog ratchet. Measured, not chosen: 344 at f99ff023a with a cold cache
+# (errcheck 193, staticcheck 83, unused 47, ineffassign 21). It is a
 # CEILING, not a target -- `just lint` fails if the count rises and tells you to
 # lower this number when it falls. It exists only until the backlog reaches zero,
 # at which point this variable and the whole comparison are DELETED and a bare
 # non-zero exit becomes the gate. A ratchet kept past zero is furniture
 # (AGENTS.md defect class 4).
-LINT_BASELINE := "374"
+LINT_BASELINE := "344"
 
 # Run the uncapped linter and hold the backlog ratchet; non-zero if it rises.
 #
