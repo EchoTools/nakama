@@ -210,6 +210,18 @@ func BeforeListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.D
 // not tell an operator which endpoint was left open.
 //
 // A non-nil error means the endpoint is NOT restricted. It is never advisory.
+//
+// The name is a literal, so it can drift from the method it labels and nothing
+// mechanical would catch it -- an operator would then be told the wrong endpoint
+// was left open. No drift has been observed, so this is a note rather than a
+// test: one anecdote is not a pattern. If it happens twice, mint the check. The
+// check itself is one line, and it currently reports zero mismatches across all
+// 53 entries:
+//
+//	grep -oE 'RestrictAPIFunctionAccess\("([A-Za-z]+)", initializer\.([A-Za-z]+)\)' \
+//	  server/evr_runtime_api_perms.go \
+//	  | sed -E 's/.*\("([A-Za-z]+)", initializer\.([A-Za-z]+)\)/\1 \2/' \
+//	  | awk '$1!=$2'
 func RestrictAPIFunctionAccess[T any](name string, beforeFn func(fn func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, in T) (T, error)) error) error {
 
 	noopFn := func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, in T) (v T, err error) {
