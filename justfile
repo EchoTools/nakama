@@ -354,7 +354,7 @@ LINT_CACHE := "/var/tmp/nakama-golangci-cache/" + sha256(justfile_directory())
 # at which point this variable and the whole comparison are DELETED and a bare
 # non-zero exit becomes the gate. A ratchet kept past zero is furniture
 # (AGENTS.md defect class 4).
-LINT_BASELINE := "290"
+LINT_BASELINE := "289"
 
 # Run the uncapped linter and hold the backlog ratchet; non-zero if it rises.
 #
