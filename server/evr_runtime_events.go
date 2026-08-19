@@ -252,7 +252,7 @@ func (h *EventDispatcher) unmarshalEventFactory(events []Event) func(event *api.
 	eventMap := make(map[string]reflect.Type)
 	for _, e := range events {
 		t := reflect.TypeOf(e)
-		if t.Kind() != reflect.Ptr {
+		if t.Kind() != reflect.Pointer {
 			continue
 		}
 		eventMap[fmt.Sprintf("%T", e)] = t.Elem()

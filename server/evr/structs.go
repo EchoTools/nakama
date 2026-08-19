@@ -100,7 +100,7 @@ func SizeOf(v interface{}) int {
 
 func sizeOfValue(val reflect.Value) uintptr {
 	switch val.Kind() {
-	case reflect.Ptr, reflect.Interface:
+	case reflect.Pointer, reflect.Interface:
 		if val.IsNil() {
 			return 0
 		}
