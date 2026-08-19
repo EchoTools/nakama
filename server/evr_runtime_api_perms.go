@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
@@ -201,14 +203,21 @@ func BeforeListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.D
 	return in, nil
 }
 
-func RestrictAPIFunctionAccess[T any](beforeFn func(fn func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, in T) (T, error)) error) error {
+// RestrictAPIFunctionAccess denies client access to an upstream endpoint by
+// registering a before-hook that returns an empty request. name identifies the
+// endpoint in the returned error -- the call site passes a bare method value,
+// which carries no name of its own, and "RestrictAPIFunctionAccess failed" does
+// not tell an operator which endpoint was left open.
+//
+// A non-nil error means the endpoint is NOT restricted. It is never advisory.
+func RestrictAPIFunctionAccess[T any](name string, beforeFn func(fn func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, in T) (T, error)) error) error {
 
 	noopFn := func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, in T) (v T, err error) {
 		return v, nil
 	}
 
 	if err := beforeFn(noopFn); err != nil {
-		return err
+		return fmt.Errorf("%s: %w", name, err)
 	}
 	return nil
 }
@@ -245,92 +254,101 @@ func registerAPIGuards(initializer runtime.Initializer) error {
 		//"Rpc",
 	}
 
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeAddGroupUsers)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateApple)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateCustom)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateDevice)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateEmail)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateFacebook)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateFacebookInstantGame)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateGameCenter)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateGoogle)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeAuthenticateSteam)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeBanGroupUsers)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeBlockFriends)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeCreateGroup)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteFriends)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteGroup)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteLeaderboardRecord)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteStorageObjects)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteTournamentRecord)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDemoteGroupUsers)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeDemoteGroupUsers)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeGetSubscription)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeGetUsers)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeImportFacebookFriends)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeImportSteamFriends)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeJoinGroup)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeJoinTournament)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeKickGroupUsers)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeLeaveGroup)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeLinkApple)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeLinkCustom)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeLinkDevice)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeLinkEmail)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeLinkFacebook)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeLinkFacebookInstantGame)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeLinkGameCenter)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeLinkGoogle)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeLinkSteam)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListChannelMessages)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListFriends)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListGroups)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListGroupUsers)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListLeaderboardRecords)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListLeaderboardRecordsAroundOwner)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListMatches)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeDeleteNotifications)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListNotifications)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListStorageObjects)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListSubscriptions)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeListTournamentRecords)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListTournamentRecordsAroundOwner)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListTournaments)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeListUserGroups)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforePromoteGroupUsers)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeReadStorageObjects)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeSessionLogout)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeSessionRefresh)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeUnlinkApple)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeUnlinkCustom)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeUnlinkDevice)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeUnlinkEmail)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeUnlinkFacebook)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeUnlinkFacebookInstantGame)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeUnlinkGameCenter)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeUnlinkGoogle)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeUnlinkSteam)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeUpdateAccount)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeUpdateGroup)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeValidatePurchaseApple)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeValidatePurchaseFacebookInstant)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeValidatePurchaseGoogle)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeValidatePurchaseHuawei)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeValidateSubscriptionApple)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeValidateSubscriptionGoogle)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeWriteLeaderboardRecord)
-	//RestrictAPIFunctionAccess(initializer.RegisterBeforeWriteStorageObjects)
-	RestrictAPIFunctionAccess(initializer.RegisterBeforeWriteTournamentRecord)
+	// Each entry below DENIES client access to an upstream Nakama endpoint. A
+	// registration that fails leaves that endpoint reachable, so the results are
+	// collected instead of discarded: one failure must not hide the others, and
+	// each error names the endpoint it belongs to.
+	//
+	// The commented-out entries are a deliberate record of what is NOT
+	// restricted. Do not delete them and do not enable them here.
+	registrations := []error{
+		RestrictAPIFunctionAccess("RegisterBeforeAddGroupUsers", initializer.RegisterBeforeAddGroupUsers),
+		RestrictAPIFunctionAccess("RegisterBeforeAuthenticateApple", initializer.RegisterBeforeAuthenticateApple),
+		//RestrictAPIFunctionAccess("RegisterBeforeAuthenticateCustom", initializer.RegisterBeforeAuthenticateCustom),
+		RestrictAPIFunctionAccess("RegisterBeforeAuthenticateDevice", initializer.RegisterBeforeAuthenticateDevice),
+		RestrictAPIFunctionAccess("RegisterBeforeAuthenticateEmail", initializer.RegisterBeforeAuthenticateEmail),
+		RestrictAPIFunctionAccess("RegisterBeforeAuthenticateFacebook", initializer.RegisterBeforeAuthenticateFacebook),
+		RestrictAPIFunctionAccess("RegisterBeforeAuthenticateFacebookInstantGame", initializer.RegisterBeforeAuthenticateFacebookInstantGame),
+		RestrictAPIFunctionAccess("RegisterBeforeAuthenticateGameCenter", initializer.RegisterBeforeAuthenticateGameCenter),
+		RestrictAPIFunctionAccess("RegisterBeforeAuthenticateGoogle", initializer.RegisterBeforeAuthenticateGoogle),
+		RestrictAPIFunctionAccess("RegisterBeforeAuthenticateSteam", initializer.RegisterBeforeAuthenticateSteam),
+		RestrictAPIFunctionAccess("RegisterBeforeBanGroupUsers", initializer.RegisterBeforeBanGroupUsers),
+		//RestrictAPIFunctionAccess("RegisterBeforeBlockFriends", initializer.RegisterBeforeBlockFriends),
+		RestrictAPIFunctionAccess("RegisterBeforeCreateGroup", initializer.RegisterBeforeCreateGroup),
+		//RestrictAPIFunctionAccess("RegisterBeforeDeleteFriends", initializer.RegisterBeforeDeleteFriends),
+		RestrictAPIFunctionAccess("RegisterBeforeDeleteGroup", initializer.RegisterBeforeDeleteGroup),
+		RestrictAPIFunctionAccess("RegisterBeforeDeleteLeaderboardRecord", initializer.RegisterBeforeDeleteLeaderboardRecord),
+		RestrictAPIFunctionAccess("RegisterBeforeDeleteStorageObjects", initializer.RegisterBeforeDeleteStorageObjects),
+		RestrictAPIFunctionAccess("RegisterBeforeDeleteTournamentRecord", initializer.RegisterBeforeDeleteTournamentRecord),
+		RestrictAPIFunctionAccess("RegisterBeforeDemoteGroupUsers", initializer.RegisterBeforeDemoteGroupUsers),
+		RestrictAPIFunctionAccess("RegisterBeforeGetSubscription", initializer.RegisterBeforeGetSubscription),
+		//RestrictAPIFunctionAccess("RegisterBeforeGetUsers", initializer.RegisterBeforeGetUsers),
+		RestrictAPIFunctionAccess("RegisterBeforeImportFacebookFriends", initializer.RegisterBeforeImportFacebookFriends),
+		RestrictAPIFunctionAccess("RegisterBeforeImportSteamFriends", initializer.RegisterBeforeImportSteamFriends),
+		RestrictAPIFunctionAccess("RegisterBeforeJoinGroup", initializer.RegisterBeforeJoinGroup),
+		RestrictAPIFunctionAccess("RegisterBeforeJoinTournament", initializer.RegisterBeforeJoinTournament),
+		RestrictAPIFunctionAccess("RegisterBeforeKickGroupUsers", initializer.RegisterBeforeKickGroupUsers),
+		RestrictAPIFunctionAccess("RegisterBeforeLeaveGroup", initializer.RegisterBeforeLeaveGroup),
+		RestrictAPIFunctionAccess("RegisterBeforeLinkApple", initializer.RegisterBeforeLinkApple),
+		RestrictAPIFunctionAccess("RegisterBeforeLinkCustom", initializer.RegisterBeforeLinkCustom),
+		RestrictAPIFunctionAccess("RegisterBeforeLinkDevice", initializer.RegisterBeforeLinkDevice),
+		RestrictAPIFunctionAccess("RegisterBeforeLinkEmail", initializer.RegisterBeforeLinkEmail),
+		RestrictAPIFunctionAccess("RegisterBeforeLinkFacebook", initializer.RegisterBeforeLinkFacebook),
+		RestrictAPIFunctionAccess("RegisterBeforeLinkFacebookInstantGame", initializer.RegisterBeforeLinkFacebookInstantGame),
+		RestrictAPIFunctionAccess("RegisterBeforeLinkGameCenter", initializer.RegisterBeforeLinkGameCenter),
+		RestrictAPIFunctionAccess("RegisterBeforeLinkGoogle", initializer.RegisterBeforeLinkGoogle),
+		RestrictAPIFunctionAccess("RegisterBeforeLinkSteam", initializer.RegisterBeforeLinkSteam),
+		//RestrictAPIFunctionAccess("RegisterBeforeListChannelMessages", initializer.RegisterBeforeListChannelMessages),
+		//RestrictAPIFunctionAccess("RegisterBeforeListFriends", initializer.RegisterBeforeListFriends),
+		//RestrictAPIFunctionAccess("RegisterBeforeListGroups", initializer.RegisterBeforeListGroups),
+		//RestrictAPIFunctionAccess("RegisterBeforeListGroupUsers", initializer.RegisterBeforeListGroupUsers),
+		//RestrictAPIFunctionAccess("RegisterBeforeListLeaderboardRecords", initializer.RegisterBeforeListLeaderboardRecords),
+		//RestrictAPIFunctionAccess("RegisterBeforeListLeaderboardRecordsAroundOwner", initializer.RegisterBeforeListLeaderboardRecordsAroundOwner),
+		//RestrictAPIFunctionAccess("RegisterBeforeListMatches", initializer.RegisterBeforeListMatches),
+		//RestrictAPIFunctionAccess("RegisterBeforeDeleteNotifications", initializer.RegisterBeforeDeleteNotifications),
+		//RestrictAPIFunctionAccess("RegisterBeforeListNotifications", initializer.RegisterBeforeListNotifications),
+		//RestrictAPIFunctionAccess("RegisterBeforeListStorageObjects", initializer.RegisterBeforeListStorageObjects),
+		//RestrictAPIFunctionAccess("RegisterBeforeListSubscriptions", initializer.RegisterBeforeListSubscriptions),
+		RestrictAPIFunctionAccess("RegisterBeforeListTournamentRecords", initializer.RegisterBeforeListTournamentRecords),
+		//RestrictAPIFunctionAccess("RegisterBeforeListTournamentRecordsAroundOwner", initializer.RegisterBeforeListTournamentRecordsAroundOwner),
+		//RestrictAPIFunctionAccess("RegisterBeforeListTournaments", initializer.RegisterBeforeListTournaments),
+		//RestrictAPIFunctionAccess("RegisterBeforeListUserGroups", initializer.RegisterBeforeListUserGroups),
+		RestrictAPIFunctionAccess("RegisterBeforePromoteGroupUsers", initializer.RegisterBeforePromoteGroupUsers),
+		//RestrictAPIFunctionAccess("RegisterBeforeReadStorageObjects", initializer.RegisterBeforeReadStorageObjects),
+		//RestrictAPIFunctionAccess("RegisterBeforeSessionLogout", initializer.RegisterBeforeSessionLogout),
+		//RestrictAPIFunctionAccess("RegisterBeforeSessionRefresh", initializer.RegisterBeforeSessionRefresh),
+		RestrictAPIFunctionAccess("RegisterBeforeUnlinkApple", initializer.RegisterBeforeUnlinkApple),
+		RestrictAPIFunctionAccess("RegisterBeforeUnlinkCustom", initializer.RegisterBeforeUnlinkCustom),
+		RestrictAPIFunctionAccess("RegisterBeforeUnlinkDevice", initializer.RegisterBeforeUnlinkDevice),
+		RestrictAPIFunctionAccess("RegisterBeforeUnlinkEmail", initializer.RegisterBeforeUnlinkEmail),
+		RestrictAPIFunctionAccess("RegisterBeforeUnlinkFacebook", initializer.RegisterBeforeUnlinkFacebook),
+		RestrictAPIFunctionAccess("RegisterBeforeUnlinkFacebookInstantGame", initializer.RegisterBeforeUnlinkFacebookInstantGame),
+		RestrictAPIFunctionAccess("RegisterBeforeUnlinkGameCenter", initializer.RegisterBeforeUnlinkGameCenter),
+		RestrictAPIFunctionAccess("RegisterBeforeUnlinkGoogle", initializer.RegisterBeforeUnlinkGoogle),
+		RestrictAPIFunctionAccess("RegisterBeforeUnlinkSteam", initializer.RegisterBeforeUnlinkSteam),
+		RestrictAPIFunctionAccess("RegisterBeforeUpdateAccount", initializer.RegisterBeforeUpdateAccount),
+		RestrictAPIFunctionAccess("RegisterBeforeUpdateGroup", initializer.RegisterBeforeUpdateGroup),
+		RestrictAPIFunctionAccess("RegisterBeforeValidatePurchaseApple", initializer.RegisterBeforeValidatePurchaseApple),
+		RestrictAPIFunctionAccess("RegisterBeforeValidatePurchaseFacebookInstant", initializer.RegisterBeforeValidatePurchaseFacebookInstant),
+		RestrictAPIFunctionAccess("RegisterBeforeValidatePurchaseGoogle", initializer.RegisterBeforeValidatePurchaseGoogle),
+		RestrictAPIFunctionAccess("RegisterBeforeValidatePurchaseHuawei", initializer.RegisterBeforeValidatePurchaseHuawei),
+		RestrictAPIFunctionAccess("RegisterBeforeValidateSubscriptionApple", initializer.RegisterBeforeValidateSubscriptionApple),
+		RestrictAPIFunctionAccess("RegisterBeforeValidateSubscriptionGoogle", initializer.RegisterBeforeValidateSubscriptionGoogle),
+		RestrictAPIFunctionAccess("RegisterBeforeWriteLeaderboardRecord", initializer.RegisterBeforeWriteLeaderboardRecord),
+		//RestrictAPIFunctionAccess("RegisterBeforeWriteStorageObjects", initializer.RegisterBeforeWriteStorageObjects),
+		RestrictAPIFunctionAccess("RegisterBeforeWriteTournamentRecord", initializer.RegisterBeforeWriteTournamentRecord),
+	}
 
 	for _, rtMessage := range rtMessages {
 		if err := initializer.RegisterBeforeRt(rtMessage, func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, envelope *rtapi.Envelope) (*rtapi.Envelope, error) {
 			return nil, nil
 		}); err != nil {
-			return err
+			registrations = append(registrations, fmt.Errorf("RegisterBeforeRt(%s): %w", rtMessage, err))
 		}
 	}
 
-	return nil
+	// Join reports every failed registration and returns nil when all succeeded.
+	return errors.Join(registrations...)
 }
 
 // AfterListMatchesHook filters match data based on user permissions.
