@@ -119,8 +119,7 @@ The `cronexpr` one is invisible to `golangci-lint` (skipped dir) but **visible t
 **Resolved 2026-08-19, and one of the two was a real bug.** All four files were
 reformatted in `3258006b0`; `just fmt-check` and `gofmt -l` are clean at
 `8d2075037`. Checking what the mis-indentation had been hiding:
-`internal/skiplist/skiplist_test.go` is fine — its `for i := 0; i < len(ret); i++`
-shadows nothing. `internal/cronexpr/cronexpr_test.go:592-596` is **not**:
+`internal/cronexpr/cronexpr_test.go:592-596` is a live bug:
 
 ```go
 for b.Loop() {
@@ -134,6 +133,31 @@ cycling all 21 expressions. Same class as `5985fa448` ("repair b.Loop() conversi
 that dropped the loop index"), which missed this one because `internal/cronexpr` is
 a `.golangci.yml` skipped dir — so `ineffassign` never sees it. Not fixed here:
 this note is a record correction, not a code change. It is a work-ledger item.
+
+**CORRECTED 2026-08-19, hours later — `skiplist` is NOT fine; I checked one
+function and generalised to the file.** This paragraph said
+`internal/skiplist/skiplist_test.go` "is fine — its `for i := 0; i < len(ret); i++`
+shadows nothing." That is true of the function I read and false of the file. Three
+of its benchmarks carry the *same* defect as `cronexpr` and three more carry a
+second one (`:216-219`, `:246-249`, `:276-279`, and `:227-230`, `:257-260`,
+`:287-290` @ `3276ffef6`):
+
+```go
+for b.Loop() {
+    i := 0                 // inside the body -- Delete(Int(0)) every iteration
+    sl.Delete(Int(i))
+}
+...
+for i := 0; i < 1000000; i++ {
+    sl.Insert(Int(rand.Int()))
+    i++                    // double increment -- inserts 500,000, not 1,000,000
+}
+```
+
+So `BenchmarkIntDelete`/`Find`/`GetRank` operate on one key forever, and the
+`Random` variants benchmark against a half-size skiplist. Recorded rather than
+fixed, and recorded as a correction rather than an edit, because the wrong version
+was committed in `17b79b0fd` and someone may have read it.
 
 ### Pre-push hook (automated gate)
 
@@ -264,6 +288,22 @@ been observed at least once in this repo.
    **Detector, and it is cheap:** a finding whose path does not resolve to a file
    inside the repo. Any measurement used to plan work runs `golangci-lint cache
    clean` first, or greps its own output for a foreign path. Wired into `just verify`.
+
+7. **A `b.Loop()` conversion that dropped the loop index.** Go 1.24's `b.Loop()`
+   replaced `for i := 0; i < b.N; i++`, and the mechanical conversion has three
+   times produced a benchmark that measures one input forever. Two shapes, both
+   observed here: the index declared **inside** the loop body (so it resets every
+   iteration), and a surviving `i++` in the body of a `for i := 0; ...; i++` (so
+   the loop runs half its iterations). **`ineffassign` and `staticcheck`
+   structurally cannot see either** — the assignment IS used, on the very next
+   line; it is the *reset* that is wrong, not the write.
+   Occurrences: `5985fa448` (a batch, fixed); `internal/cronexpr/cronexpr_test.go`
+   `:592-596`; `internal/skiplist/skiplist_test.go` six sites. The last two were
+   invisible to the linter for a second reason as well — both directories are
+   `.golangci.yml` skipped dirs. **Method:** when converting or reviewing a
+   `b.Loop()` benchmark, print or assert the input actually varies across
+   iterations; a benchmark that never changes its input still reports a plausible
+   ns/op.
 
 The dominant related anti-pattern, and the one most often found here, is
 **fail-open on a fail-closed control**: a gate that, when its input is missing
