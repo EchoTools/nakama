@@ -83,8 +83,9 @@ func TestResolveCallerGuildAccess_GuildAuditor(t *testing.T) {
 
 func TestResolveCallerGuildAccess_Cascade(t *testing.T) {
 	// Test the cascade: global ops → auditor → enforcer.
-	// Stub: the setup this test needs cannot be built until GuildGroup is
-	// mockable, so there is nothing for a body to assert yet.
+	// Stub, like TestResolveCallerGuildAccess_GuildAuditor above: the setup
+	// this test needs cannot be built until GuildGroup is mockable, so there
+	// is nothing for a body to assert yet.
 	t.Skip("Requires mock GuildGroup - will test after implementation")
 }
 
