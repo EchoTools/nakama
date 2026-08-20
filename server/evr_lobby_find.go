@@ -167,7 +167,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			if leader != nil && leader.SessionId == session.id.String() {
 				// We're now the leader — populate entrant list and fall through
 				// to matchmaking as the leader.
-				isLeader = true
 				for _, sid := range memberSessionIDs {
 					if sid == session.id {
 						continue
@@ -209,7 +208,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				// Re-check leadership one more time after polling.
 				leader = lobbyGroup.GetLeader()
 				if leader != nil && leader.SessionId == session.id.String() {
-					isLeader = true
 					for _, sid := range memberSessionIDs {
 						if sid == session.id {
 							continue
@@ -755,11 +753,9 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 			zap.String("query", query),
 		)
 
-		partySize := lobbyParams.GetPartySize()
-		if partySize == 0 {
+		if partySize := lobbyParams.GetPartySize(); partySize == 0 {
 			logger.Warn("party size is 0")
 			lobbyParams.SetPartySize(1)
-			partySize = 1
 		}
 
 		// Set the team for social lobbies

@@ -101,8 +101,7 @@ func ApplyNewPlayerTeamBias(match []runtime.MatchmakerEntry, teamSize, threshold
 			currentImbalance := math.Abs(blueMu - orangeMu)
 
 			swapMu := entryMu(stronger[bestIdx], defaultMu)
-			newBlueMu := blueMu
-			newOrangeMu := orangeMu
+			var newBlueMu, newOrangeMu float64
 
 			if strongerStart == 0 {
 				// stronger=blue, weaker=orange

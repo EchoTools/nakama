@@ -120,8 +120,9 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	var teamAlignments = make(map[string]int, len(request.TeamAlignments))
 	for id, roleName := range request.TeamAlignments {
 
-		// Set the roleID based on the roleName
-		roleID := -1
+		// Set the roleID based on the roleName. The switch below covers every
+		// role (default returns), so no initializer is needed.
+		var roleID int
 		switch roleName {
 		case "blue":
 			roleID = 0

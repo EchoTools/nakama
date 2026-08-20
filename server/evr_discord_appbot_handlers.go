@@ -1014,7 +1014,6 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		timeoutMessage        string
 		actions               = make([]string, 0, len(presences))
 		doDisconnect          = false
-		isEnforcer            = false
 		kickPlayer            = false
 		voidActiveSuspensions = !suspensionExpiry.IsZero() && time.Now().After(suspensionExpiry)
 		addSuspension         = !suspensionExpiry.IsZero() && time.Now().Before(suspensionExpiry)

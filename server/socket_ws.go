@@ -78,7 +78,7 @@ func NewSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry Sess
 		}
 
 		var (
-			ok       bool              = false
+			ok       bool
 			userID   uuid.UUID         = uuid.Nil
 			username string            = ""
 			vars     map[string]string = nil
@@ -86,11 +86,11 @@ func NewSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry Sess
 		)
 		switch format {
 		case SessionFormatEVR:
-			if token == config.GetSocket().ServerKey {
-				// Server key auth — legacy EVR clients, no user identity
-				ok = true
-			} else {
-				// Try JWT auth (device auth flow via Bearer token)
+			if token != config.GetSocket().ServerKey {
+				// Try JWT auth (device auth flow via Bearer token).
+				// Server-key auth is the fall-through: legacy EVR clients carry
+				// no user identity, and falling through to the upgrade below
+				// IS the authorization.
 				userID, username, vars, expiry, _, _, ok = parseToken([]byte(config.GetSession().EncryptionKey), token)
 				if !ok || !sessionCache.IsValidSession(userID, expiry, token) {
 					http.Error(w, "Missing or invalid token", 401)
