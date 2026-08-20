@@ -14,7 +14,7 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 		config := NewEarlyQuitPlayerState()
 
 		// Start in Tier 1
-		oldTier, newTier, changed := config.UpdateTier(ptrInt32(0))
+		_, newTier, _ := config.UpdateTier(ptrInt32(0))
 		if newTier != MatchmakingTier1 {
 			t.Fatalf("Expected initial tier to be Tier 1, got %d", newTier)
 		}
@@ -24,7 +24,7 @@ func TestEarlyQuitTierIntegration(t *testing.T) {
 		config.PenaltyLevel = 1
 
 		// Check tier change
-		oldTier, newTier, changed = config.UpdateTier(ptrInt32(0))
+		oldTier, newTier, changed := config.UpdateTier(ptrInt32(0))
 		if !changed {
 			t.Error("Expected tier to change after early quit")
 		}
