@@ -116,7 +116,7 @@ func TestForgiveLastQuit_IntegrationWithTierUpdate(t *testing.T) {
 	config.TotalCompletedMatches = 10
 	config.NumEarlyQuits = 5
 
-	oldTier, newTier, changed := config.UpdateTier(ptrInt32(0))
+	_, newTier, _ := config.UpdateTier(ptrInt32(0))
 	if newTier != MatchmakingTier2 {
 		t.Fatalf("Expected to start in Tier 2, got %d", newTier)
 	}
@@ -125,8 +125,10 @@ func TestForgiveLastQuit_IntegrationWithTierUpdate(t *testing.T) {
 	config.ForgiveLastQuit()
 	config.PenaltyLevel = 1 // Caller re-resolves penalty level
 
-	// Still in Tier 2 because penalty is 1 (above threshold of 0)
-	oldTier, newTier, changed = config.UpdateTier(ptrInt32(0))
+	// Still in Tier 2 because penalty is 1 (above threshold of 0).
+	// changed is read below; oldTier is not read until the third call's
+	// assignment, so it is declared there, not here.
+	_, newTier, changed := config.UpdateTier(ptrInt32(0))
 	if changed {
 		t.Error("Tier should not change yet (penalty=1, threshold=0)")
 	}
@@ -139,7 +141,7 @@ func TestForgiveLastQuit_IntegrationWithTierUpdate(t *testing.T) {
 	config.PenaltyLevel = 0 // Caller re-resolves penalty level
 
 	// Now should return to Tier 1 (penalty=0, threshold=0)
-	oldTier, newTier, changed = config.UpdateTier(ptrInt32(0))
+	oldTier, newTier, changed := config.UpdateTier(ptrInt32(0))
 	if !changed {
 		t.Error("Tier should change from Tier 2 to Tier 1")
 	}

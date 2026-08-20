@@ -46,7 +46,7 @@ func NewNEVRSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry 
 		}
 
 		var (
-			ok       bool              = false
+			ok       bool
 			userID   uuid.UUID         = uuid.Nil
 			username string            = ""
 			vars     map[string]string = nil

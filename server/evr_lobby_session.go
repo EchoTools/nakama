@@ -63,6 +63,25 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 		}
 
 		if lobbyParams.Role == evr.TeamSpectator {
+			// Spectators are only allowed in arena and combat matches.
+			//
+			// Validated BEFORE the teardown below, and returned rather than
+			// stored. Both halves of that were wrong at c47d6efd6: the
+			// rejection was assigned to the function-scoped `err`, whose only
+			// readers are in the non-spectator branch, so it was discarded and
+			// the function returned nil — and the party teardown had already
+			// run. A refused request must leave the player's party alone.
+			if lobbyParams.Mode != evr.ModeArenaPublic && lobbyParams.Mode != evr.ModeCombatPublic {
+				// warn, not info: the entrant role is client-claimed and no
+				// legitimate client offers spectate outside arena/combat, so
+				// this means a modified client or a bug upstream of here.
+				logger.Warn("Rejected spectate request; mode does not allow spectators, party retained",
+					zap.String("mode", lobbyParams.Mode.String()),
+					zap.String("gid", lobbyParams.GroupID.String()),
+					zap.Int("role", lobbyParams.Role))
+				return NewLobbyErrorf(BadRequest, "spectators are only allowed in arena and combat matches")
+			}
+
 			// Leave the party if the user is in one
 			LeavePartyStream(session)
 			// Group-leave field-clear (D3): LeavePartyStream untracks the party
@@ -71,16 +90,12 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			if params, ok := LoadParams(ctx); ok {
 				clearPartyParams(ctx, params)
 			}
-			// Spectators are only allowed in arena and combat matches.
-			if lobbyParams.Mode != evr.ModeArenaPublic && lobbyParams.Mode != evr.ModeCombatPublic {
-				err = NewLobbyErrorf(BadRequest, "spectators are only allowed in arena and combat matches")
-			} else {
-				// Spectators don't matchmake, and they don't have a delay for backfill.
-				// Spectators also don't timeout.
-				p.nk.metrics.CustomCounter("lobby_find_spectate", lobbyParams.MetricsTags(), 1)
-				logger.Info("Finding spectate match")
-				return p.lobbyFindSpectate(ctx, logger, session, lobbyParams)
-			}
+
+			// Spectators don't matchmake, and they don't have a delay for backfill.
+			// Spectators also don't timeout.
+			p.nk.metrics.CustomCounter("lobby_find_spectate", lobbyParams.MetricsTags(), 1)
+			logger.Info("Finding spectate match")
+			return p.lobbyFindSpectate(ctx, logger, session, lobbyParams)
 		} else {
 			// Otherwise, find a match via the matchmaker or backfill.
 			// This is also responsible for creation of social lobbies.
@@ -91,7 +106,6 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			}
 			return handleMatchmakingError(logger, session, lobbyParams, p.nk.metrics, err)
 		}
-		return nil
 
 	case *evr.LobbyJoinSessionRequest:
 		p.nk.metrics.CustomCounter("lobby_join_session", lobbyParams.MetricsTags(), 1)

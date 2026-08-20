@@ -386,12 +386,11 @@ func SyncJournalAndProfileWithRetry(ctx context.Context, nk runtime.NakamaModule
 		// Re-read the profile to pick up its current version. This is safe to
 		// re-derive unconditionally: it is a projection of the journal, not an
 		// independent mutation. A missing profile is not an error; the fresh
-		// one carries version "*" and the atomic write below inserts it.
+		// one carries version "*" and the atomic write below inserts it. Any
+		// other read error leaves the fresh profile in place and the write
+		// below surfaces the conflict (MultiUpdate is all-or-nothing).
 		profile := NewSuspensionProfile(userID)
-		if err := StorableRead(ctx, nk, userID, profile, false); err != nil && status.Code(err) != codes.NotFound {
-			lastErr = err
-			profile = NewSuspensionProfile(userID)
-		}
+		_ = StorableRead(ctx, nk, userID, profile, false)
 		profile.SyncFromJournal(journal)
 
 		// Write both in a single transaction.

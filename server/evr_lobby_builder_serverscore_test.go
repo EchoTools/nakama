@@ -58,7 +58,7 @@ func TestCalculateServerScore(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := calculateServerScore(tt.bluePings, tt.orangePings)
+			result, err := calculateServerScore(tt.bluePings, tt.orangePings, ServerScoreDefaultMinRTT, ServerScoreDefaultMaxRTT)
 			if err != nil {
 				if err.Error() != "nil pings" {
 				}
