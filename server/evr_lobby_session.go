@@ -66,7 +66,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			// Spectators are only allowed in arena and combat matches.
 			//
 			// Validated BEFORE the teardown below, and returned rather than
-			// stored. Both halves of that were wrong at c47d6efd6: the
+			// stored. Both halves of that were wrong at 57f81b7c5: the
 			// rejection was assigned to the function-scoped `err`, whose only
 			// readers are in the non-spectator branch, so it was discarded and
 			// the function returned nil — and the party teardown had already
@@ -96,16 +96,16 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			p.nk.metrics.CustomCounter("lobby_find_spectate", lobbyParams.MetricsTags(), 1)
 			logger.Info("Finding spectate match")
 			return p.lobbyFindSpectate(ctx, logger, session, lobbyParams)
-		} else {
-			// Otherwise, find a match via the matchmaker or backfill.
-			// This is also responsible for creation of social lobbies.
-
-			err = p.lobbyFind(ctx, logger, session, lobbyParams)
-			if err == nil {
-				return nil
-			}
-			return handleMatchmakingError(logger, session, lobbyParams, p.nk.metrics, err)
 		}
+
+		// Otherwise, find a match via the matchmaker or backfill.
+		// This is also responsible for creation of social lobbies.
+
+		err = p.lobbyFind(ctx, logger, session, lobbyParams)
+		if err == nil {
+			return nil
+		}
+		return handleMatchmakingError(logger, session, lobbyParams, p.nk.metrics, err)
 
 	case *evr.LobbyJoinSessionRequest:
 		p.nk.metrics.CustomCounter("lobby_join_session", lobbyParams.MetricsTags(), 1)
