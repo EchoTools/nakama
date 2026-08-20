@@ -589,8 +589,8 @@ func BenchmarkNext(b *testing.B) {
 	}
 	from := time.Now()
 	b.ResetTimer()
+	i := 0
 	for b.Loop() {
-		i := 0
 		expr := exprs[i%benchmarkExpressionsLen]
 		i++
 		next := expr.Next(from)
