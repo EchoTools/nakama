@@ -247,6 +247,61 @@ func TestEquippedCosmeticsForProfile_WalletGrantedItemStillServed(t *testing.T) 
 	}
 }
 
+// TestEquippedCosmeticsForProfile_KissyLipsIsOverridden guards a moderation
+// control, not an implementation detail.
+//
+// emote_kissy_lips_a renders on the player's face mask. The griefing pattern it
+// exists to stop is physical: equip it, then close distance to another player's
+// head in VR, delivering an unsolicited simulated kiss into their personal
+// space. The target cannot consent and cannot refuse in the moment.
+//
+// The control is deliberately NOT an ownership restriction. 90f458bd7 tried that
+// (validate:"restricted"), and b9715f83c removed the tag on purpose in favour of
+// substituting at serve time -- see that commit's subject, "Ignore equipping
+// kissy lips". So the substitution is SUPPOSED to fire for players who
+// legitimately own the emote. Everyone owns it; ownership is not the control.
+//
+// That property has already been misread once as evidence of a bug -- the
+// argument being that the branch is "unconditional and ownership-irrelevant" and
+// therefore fires wrongly. It fires exactly as intended. If this test goes red,
+// the control has been removed; restore it rather than updating the assertion.
+func TestEquippedCosmeticsForProfile_KissyLipsIsOverridden(t *testing.T) {
+	// Premise: kissy lips must be default-owned, or sanitizeLoadout would reset
+	// the slot before the override could run and this test would pass vacuously.
+	owned := cosmeticDefaults(false)
+	isOwned := false
+	for _, modeUnlocks := range owned {
+		if modeUnlocks["emote_kissy_lips_a"] {
+			isOwned = true
+			break
+		}
+	}
+	if !isOwned {
+		t.Fatalf("premise broken: emote_kissy_lips_a is not default-owned, so this test cannot distinguish the override from the ownership strip")
+	}
+
+	profile := &EVRProfile{
+		account: &api.Account{Wallet: "{}"},
+	}
+	profile.LoadoutCosmetics.Loadout = evr.DefaultCosmeticLoadout()
+	profile.LoadoutCosmetics.Loadout.Emote = "emote_kissy_lips_a"
+	profile.LoadoutCosmetics.Loadout.SecondEmote = "emote_sleepy_zzz_a"
+
+	loadout, _, err := equippedCosmeticsForProfile(profile, nil)
+	if err != nil {
+		t.Fatalf("equippedCosmeticsForProfile returned error: %v", err)
+	}
+
+	if loadout.Emote != "emote_blink_smiley_a" {
+		t.Errorf("kissy lips was served to other players; got Emote=%q, want %q",
+			loadout.Emote, "emote_blink_smiley_a")
+	}
+	if loadout.SecondEmote != "emote_blink_smiley_a" {
+		t.Errorf("second emote slot was not overridden; got %q, want %q",
+			loadout.SecondEmote, "emote_blink_smiley_a")
+	}
+}
+
 // strippedCounterRecorder records every counter increment the sanitize path emits.
 //
 // recordingMetrics (evr_lobby_vpn_degraded_test.go) is not reused here because it
