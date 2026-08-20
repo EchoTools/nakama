@@ -110,4 +110,10 @@ This is a fork of [heroiclabs/nakama](https://github.com/heroiclabs/nakama) with
 - Logs: `/home/echovrce/deployment/logs/nakama.log`
 - Docker Compose service: `nakama` (image `ghcr.io/echotools/nakama:latest`)
 - Restart policy: `unless-stopped`
-- CI: GitHub Actions builds on push to `main` (binary only); Docker images only built on GitHub **release** events
+- CI: GitHub Actions builds on push to `main` (binary only). The nakama image is
+  built and pushed by `.github/workflows/dockerhub-nakama.yaml`, which fires on
+  **`push:` of any tag matching `*evr*`** -- NOT on a GitHub release event. `just
+  release` / `make release` cut and push that tag, and the tag push is what creates
+  the release and ships the image. So pushing an `*evr*` tag IS a deploy, with or
+  without a release object. (`dockerhub-nakama-dsym.yaml` and
+  `dockerhub-pluginbuilder.yaml` are the two that fire on `release: created`.)
