@@ -37,6 +37,9 @@ func CalculateServerScore(rttByPlayerByTeam [][]int, rttMin, rttMax, rttThreshol
 		rttMax = ServerScoreDefaultMaxRTT
 	}
 
+	// Note the default here is the max RTT, not ServerScoreDefaultThreshold:
+	// rttThreshold is an admission cutoff applied below, a different quantity
+	// from the scoring threshold that constant names. See calculateServerScore.
 	if rttThreshold == 0 {
 		rttThreshold = ServerScoreDefaultMaxRTT
 	}
@@ -57,17 +60,26 @@ func CalculateServerScore(rttByPlayerByTeam [][]int, rttMin, rttMax, rttThreshol
 		}
 	}
 
-	return calculateServerScore(rttByPlayerByTeam[0], rttByPlayerByTeam[1])
+	return calculateServerScore(rttByPlayerByTeam[0], rttByPlayerByTeam[1], rttMin, rttMax)
 }
-func calculateServerScore(bluePings, orangePings []int) (float64, error) {
+
+// calculateServerScore scores one lobby against the RTT window [minRTT,maxRTT],
+// which every component below normalises against. Callers pass the window
+// already defaulted; this function does not substitute for a zero.
+func calculateServerScore(bluePings, orangePings []int, minRTT, maxRTT int) (float64, error) {
 	if bluePings == nil || orangePings == nil {
 		return 0, fmt.Errorf("nil pings")
 	}
 
 	ppt := len(bluePings) // players per team
-	minPing := float64(10)
-	maxPing := float64(150)
-	pingThreshold := float64(100)
+	minPing := float64(minRTT)
+	maxPing := float64(maxRTT)
+	// Not the caller's rttThreshold. That one decides whether the lobby is
+	// admitted at all; this one is the ceiling the high/low-ping component is
+	// normalised against, and it is the same quantity VRMLServerScore takes as
+	// thresholdRTT -- which evr_lobby_builder.go passes as
+	// ServerScoreDefaultThreshold. No parameter reaches it.
+	pingThreshold := float64(ServerScoreDefaultThreshold)
 	pointsDistribution := []float64{30, 30, 30, 10}
 
 	bPings := make([]float64, len(bluePings))
