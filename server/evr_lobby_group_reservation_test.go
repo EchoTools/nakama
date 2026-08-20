@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 )
 
 // ===========================================================================
@@ -438,14 +439,22 @@ func TestConfigureParty_Follower_DispatchesReservation(t *testing.T) {
 // BAC-4 — spectator group-leave clears currentPartyID (D3 / step B2)
 // ---------------------------------------------------------------------------
 
-// Drives the real spectator branch of handleLobbySessionRequest. A social-mode
-// spectator request runs LeavePartyStream + clearPartyParams then returns
-// without touching db/nk, so it exercises step B2 end-to-end.
-func TestSpectatorLeave_ClearsCurrentPartyID(t *testing.T) {
+// spectatorPartyEnv is the shared setup for the two spectator-branch tests: a
+// session that is a real member of a group party, with the party stream tracked.
+type spectatorPartyEnv struct {
+	logger     *zap.Logger
+	tracker    *mockMatchmakingTracker
+	session    *sessionWS
+	lobbyGroup *LobbyGroup
+}
+
+func mkSpectatorPartyEnv(t *testing.T) *spectatorPartyEnv {
+	t.Helper()
+
 	logger := loggerForTest(t)
 	tracker := newMockMatchmakingTracker()
 	mm, mmCleanup := createLightMatchmaker(t, logger)
-	defer mmCleanup()
+	t.Cleanup(mmCleanup)
 	tsm := testStreamManager{}
 	dmr := &DummyMessageRouter{}
 	pr := NewLocalPartyRegistry(logger, cfg, mm, tracker, tsm, dmr, "testnode")
@@ -459,21 +468,77 @@ func TestSpectatorLeave_ClearsCurrentPartyID(t *testing.T) {
 	require.True(t, tracker.hasPresence(session.id, lobbyGroup.ph.Stream, session.userID),
 		"setup: on the party stream")
 
-	ep := &EvrPipeline{node: "testnode"}
+	return &spectatorPartyEnv{logger: logger, tracker: tracker, session: session, lobbyGroup: lobbyGroup}
+}
+
+// Drives the real spectator branch of handleLobbySessionRequest on an ACCEPTED
+// mode: arena is supported, so LeavePartyStream + clearPartyParams run and the
+// call proceeds to lobbyFindSpectate. That exercises step B2 end-to-end.
+//
+// The context is pre-cancelled so lobbyFindSpectate returns on its first select
+// instead of polling the match registry; the teardown has already happened by
+// then, which is exactly the ordering under test.
+func TestSpectatorLeave_ClearsCurrentPartyID(t *testing.T) {
+	env := mkSpectatorPartyEnv(t)
+	session := env.session
+
+	ep := &EvrPipeline{
+		node: "testnode",
+		nk:   &RuntimeGoNakamaModule{logger: env.logger, metrics: &testMetrics{}},
+	}
 	lobbyParams := &LobbySessionParameters{
 		Role:      evr.TeamSpectator,
-		Mode:      evr.ModeSocialPublic, // non arena/combat -> spectator error branch, no lobbyFindSpectate
+		Mode:      evr.ModeArenaPublic, // supported -> teardown, then the spectate search
 		PartySize: atomic.NewInt64(1),
 	}
 	in := &evr.LobbyFindSessionRequest{}
 
-	_ = ep.handleLobbySessionRequest(session.Context(), logger, session, in, lobbyParams)
+	ctx, cancel := context.WithCancel(session.Context())
+	cancel()
 
-	params, _ = LoadParams(session.Context())
+	err := ep.handleLobbySessionRequest(ctx, env.logger, session, in, lobbyParams)
+	require.ErrorIs(t, err, context.Canceled,
+		"setup: the accepted path must reach lobbyFindSpectate and short-circuit on the cancelled context")
+
+	params, _ := LoadParams(session.Context())
 	assert.Equal(t, uuid.Nil, params.currentPartyID,
 		"spectator leave must clear currentPartyID (BAC-4)")
-	assert.False(t, tracker.hasPresence(session.id, lobbyGroup.ph.Stream, session.userID),
+	assert.False(t, env.tracker.hasPresence(session.id, env.lobbyGroup.ph.Stream, session.userID),
 		"spectator leave must remove the party stream presence")
+}
+
+// The rejection half of the same branch. A spectate request for a mode that is
+// not arena or combat must be REJECTED, and rejected before any party teardown:
+// the request failed, so it must leave no trace on the player's party.
+//
+// Both halves regressed at once at 57f81b7c5 — the rejection was assigned to a
+// dead `err` and the function returned nil, while the teardown above it had
+// already run. The player lost their party and was told the request succeeded.
+func TestSpectatorUnsupportedMode_RejectsAndKeepsParty(t *testing.T) {
+	env := mkSpectatorPartyEnv(t)
+	session := env.session
+
+	ep := &EvrPipeline{node: "testnode"}
+	lobbyParams := &LobbySessionParameters{
+		Role:      evr.TeamSpectator,
+		Mode:      evr.ModeSocialPublic, // not arena/combat -> rejected
+		PartySize: atomic.NewInt64(1),
+	}
+	in := &evr.LobbyFindSessionRequest{}
+
+	err := ep.handleLobbySessionRequest(session.Context(), env.logger, session, in, lobbyParams)
+
+	require.Error(t, err, "an unsupported spectate mode must be rejected, not reported as success")
+	// LobbyError.Is compares the code only, so this asserts the code the client
+	// renders, not the message text.
+	require.ErrorIs(t, err, NewLobbyError(BadRequest, ""),
+		"the rejection must carry BadRequest so the client renders a failure")
+
+	params, _ := LoadParams(session.Context())
+	assert.Equal(t, env.lobbyGroup.ID(), params.currentPartyID,
+		"a rejected spectate request must not clear currentPartyID")
+	assert.True(t, env.tracker.hasPresence(session.id, env.lobbyGroup.ph.Stream, session.userID),
+		"a rejected spectate request must not untrack the party stream")
 }
 
 // ---------------------------------------------------------------------------
