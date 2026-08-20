@@ -345,7 +345,7 @@ LINT_FLAGS := "--max-issues-per-linter 0 --max-same-issues 0"
 # An explicitly set GOLANGCI_LINT_CACHE wins, so this can still be overridden.
 LINT_CACHE := "/var/tmp/nakama-golangci-cache/" + sha256(justfile_directory())
 
-# The backlog ratchet. Measured, not chosen: 269 with a cold cache, down from
+# The backlog ratchet. Measured, not chosen: 268 with a cold cache, down from
 # 374 before the lint campaign, which cleared 105 in three groups: 30 mechanical
 # (govet inline 18, SA1019 8, SA1006 2, S1011 1, S1002 1); 54 errcheck (the
 # discarded RestrictAPIFunctionAccess returns in registerAPIGuards, which left
@@ -356,7 +356,7 @@ LINT_CACHE := "/var/tmp/nakama-golangci-cache/" + sha256(justfile_directory())
 # at which point this variable and the whole comparison are DELETED and a bare
 # non-zero exit becomes the gate. A ratchet kept past zero is furniture
 # (AGENTS.md defect class 4).
-LINT_BASELINE := "269"
+LINT_BASELINE := "268"
 
 # Run the uncapped linter and hold the backlog ratchet; non-zero if it rises.
 #
