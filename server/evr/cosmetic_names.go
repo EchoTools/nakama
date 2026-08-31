@@ -679,6 +679,26 @@ var cosmeticNames = map[string]string{
 // TintAlignment records which alignment slot a tint belongs to, for tints where
 // the id does not say.
 //
+// SUPERSEDABLE -- READ THIS BEFORE EXTENDING IT BY HAND.
+//
+// The game declares slot semantics itself, in plain JSON, no decompression:
+//
+//	sourcedb/rad15/json/r14/multiplayer/equip_slots.json   (1589 bytes)
+//	  {"equipslot":"tint"}                                  no alignment key
+//	  {"equipslot":"tint_alignment_a","alignmentrequirement":0}   BLUE
+//	  {"equipslot":"tint_alignment_b","alignmentrequirement":1}   ORANGE
+//	  {"equipslot":"tint_body","alignmentrequirement":-1}          none
+//
+// So the SLOTS and their alignment requirements are authoritative there, and
+// this hand-built map should be replaced by reading that file rather than
+// extended. It exists because it was written before the file was found.
+//
+// Found by Teth, 2026-08-31, in the install all three of us had searched.
+//
+// It also settles a question I had asked a person instead: tint and tint_body
+// are INDEPENDENTLY DECLARED slots. They both held tint_neutral_l_default
+// because that is the default, not because they are coupled.
+//
 // # WHY THIS IS SEPARATE FROM cosmeticNames
 //
 // The game's display string is a LABEL and carries no slot information --
