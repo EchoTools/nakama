@@ -775,6 +775,26 @@ func (r loginProfileReapply) apply(profile *EVRProfile) error {
 	return nil
 }
 
+// shouldRefreshIGNFromDiscord reports whether the login-time per-guild resync in
+// initializeSession may replace this group's stored in-game name with the
+// player's Discord nickname for that guild.
+//
+// Two independent rules combine here. IsProtectedFromDiscordSync is the
+// "may Discord touch this name at all" rule and is shared with syncMembersIGN.
+// The isActiveGroup/empty-name test is the login site's own scope rule: only the
+// group the player is currently playing under is resynced every login, plus any
+// group that has no name yet and therefore has nothing to lose.
+//
+// This is extracted from the loop body so the decision can be tested directly;
+// initializeSession itself needs a live session, pipeline, storage and Discord
+// client, and is not reachable from a unit test.
+func shouldRefreshIGNFromDiscord(ign GroupInGameName, isActiveGroup bool) bool {
+	if ign.IsProtectedFromDiscordSync() {
+		return false
+	}
+	return isActiveGroup || ign.DisplayName == ""
+}
+
 func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) error {
 	var err error
 	serviceSettings := ServiceSettings()
@@ -922,13 +942,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 			}
 		}
 
-		if !groupIGN.IsLocked {
-			shouldRefreshFromDiscord := groupID == params.profile.ActiveGroupID || groupIGN.DisplayName == ""
-			if !shouldRefreshFromDiscord {
-				params.profile.SetGroupIGNData(groupID, groupIGN)
-				continue
-			}
-
+		if shouldRefreshIGNFromDiscord(groupIGN, groupID == params.profile.ActiveGroupID) {
 			// Update the in-game name for the guild.
 			if member, err := p.discordCache.GuildMember(gg.GuildID, params.profile.DiscordID()); err != nil {
 				if !IsDiscordErrorCode(err, discordgo.ErrCodeUnknownMember) {
