@@ -649,62 +649,14 @@ var cosmeticNames = map[string]string{
 	"rwd_title_title_e":               "Fists of Fury",
 }
 
-// TintAlignment records which alignment slot a tint belongs to, for tints where
-// the id does not say.
+// TINT ALIGNMENT SLOTS LIVE IN alignmentTints, server/evr_profile_cache.go.
 //
-// SUPERSEDABLE -- READ THIS BEFORE EXTENDING IT BY HAND.
-//
-// The game declares slot semantics itself, in plain JSON, no decompression:
-//
-//	sourcedb/rad15/json/r14/multiplayer/equip_slots.json   (1589 bytes)
-//	  {"equipslot":"tint"}                                  no alignment key
-//	  {"equipslot":"tint_alignment_a","alignmentrequirement":0}   BLUE
-//	  {"equipslot":"tint_alignment_b","alignmentrequirement":1}   ORANGE
-//	  {"equipslot":"tint_body","alignmentrequirement":-1}          none
-//
-// So the SLOTS and their alignment requirements are authoritative there, and
-// this hand-built map should be replaced by reading that file rather than
-// extended. It exists because it was written before the file was found.
-//
-// Found by Teth, 2026-08-31, in the install all three of us had searched.
-//
-// It also settles a question I had asked a person instead: tint and tint_body
-// are INDEPENDENTLY DECLARED slots. They both held tint_neutral_l_default
-// because that is the default, not because they are coupled.
-//
-// # WHY THIS IS SEPARATE FROM cosmeticNames
-//
-// The game's display string is a LABEL and carries no slot information --
-// "Luminescence" does not tell you it lives under the BLUE tab. Andrew's struct
-// field names in core_account.go DO: TintBlueLuminescence on an rwd_tint_s1_*
-// id is the only record anywhere that this is an alignment tint rather than a
-// social one.
-//
-// That distinction is load-bearing. On 2026-08-31 a player could not equip
-// Luminescence because the game routes an alignment tint to the alignment slot,
-// while the remotelog-based cosmetic extraction reports only THAT an item was
-// set and never WHICH SLOT -- so the server guessed, and guessed the social
-// slot. Setting cosmetic_loadout.tint did nothing; tint_alignment_a was the
-// answer.
-//
-// These three are the complete set whose slot is recorded nowhere but in a
-// hand-typed identifier. Extracting display names would have silently lost it.
-//
-// Andrew, 2026-08-31: slot handling is done correctly in nevr-server-rs and the
-// new nevr-runtime DLLs, so this is expected to become unnecessary. Recorded
-// until it is.
-var tintAlignment = map[string]string{
-	"rwd_tint_s1_b_default":         "blue", // Seafoam
-	"rwd_tint_s1_d_default":         "blue", // Luminescence
-	"tint_neutral_summer_a_default": "blue", // Terraformed -- no game string at all
-}
-
-// TintAlignmentSlot reports the alignment slot for a tint id, if known.
-// Not-found means "we have no record", NOT "it is a social tint".
-func TintAlignmentSlot(id string) (string, bool) {
-	s, ok := tintAlignment[id]
-	return s, ok
-}
+// A `tintAlignment` map and a `TintAlignmentSlot` accessor used to stand here.
+// They recorded the right three facts and nothing ever called them, while the
+// map that actually routes a tint -- alignmentTints, inside LoadoutEquipItem --
+// was missing two of them. The knowledge and the wiring were in different
+// files, which is why the bug survived being written down. Merged into the one
+// table that has an effect; the provenance moved with it.
 
 // CosmeticName returns the in-game display name for a cosmetic id.
 //
