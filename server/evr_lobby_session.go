@@ -66,11 +66,29 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			// Spectators are only allowed in arena and combat matches.
 			//
 			// Validated BEFORE the teardown below, and returned rather than
-			// stored. Both halves of that were wrong at 57f81b7c5: the
-			// rejection was assigned to the function-scoped `err`, whose only
-			// readers are in the non-spectator branch, so it was discarded and
-			// the function returned nil — and the party teardown had already
-			// run. A refused request must leave the player's party alone.
+			// stored. Both halves of that broke at 55834b2c6 ("Add detailed
+			// matchmaking errors"), which dropped the trailing
+			// session.SendEvr(params.ResponseFromError(err)) reader and closed
+			// the case with a bare `return nil`. That orphaned this branch's
+			// `err = NewLobbyErrorf(...)`: the only remaining readers of the
+			// function-scoped `err` were in the non-spectator branch, so the
+			// rejection was discarded, the function reported success, and the
+			// party teardown below it had already run.
+			//
+			// Checking ahead of the teardown is a DECISION — recorded in #581,
+			// which resolved KEEP — and not a rule inherited from anywhere. It
+			// follows the precedent of 1fa4f2823 / PR #392, which took
+			// LeavePartyStream out of the matchmaking error path because
+			// "matchmaking timeout/failure should not destroy the player's
+			// party", extended by c68761e65 to three further paths and pinned
+			// by TestHandleMatchmakingError_PreservesPartyStream in
+			// evr_lobby_configure_party_test.go. It supersedes the original
+			// design at f931439f7 (2024-08-07, "Leave the party, if
+			// spectator"), which deliberately tore the party down first and
+			// validated the mode second. The reason to prefer the precedent: a
+			// refused *evr.LobbyFindSessionRequest should look refused. The
+			// client is handed BadRequest and nothing else moves; under the
+			// original order it silently lost its party as well.
 			if lobbyParams.Mode != evr.ModeArenaPublic && lobbyParams.Mode != evr.ModeCombatPublic {
 				// warn, not info: the entrant role is client-claimed and no
 				// legitimate client offers spectate outside arena/combat, so

@@ -27,10 +27,29 @@ import (
 //   - E1 gate resolves for group parties once currentPartyID is set (BAC-2).
 //   - D (E2): a member joining a party whose leader is already in a social
 //     lobby gets a reservation via createReservationForNewPartyMember (BAC-3).
+//   - An ACCEPTED spectate request leaves the party and clears currentPartyID,
+//     so a spectating ex-member carries no stale party state (BAC-4). Scope:
+//     the ACCEPTED path only. A REFUSED spectate request is deliberately NOT
+//     covered by BAC-4 — #581 resolved that separately (KEEP: a refusal has no
+//     side effects and leaves the party intact, following 1fa4f2823 / PR #392).
 //   - Disconnected members are skipped, not mis-seated (BAC-4b).
 //   - E1+E2 for one member yields exactly one reservation, incl. reconnect,
 //     inherited from #512's UserID-keyed dedup (BAC-5).
 //   - Matchmaker-cancel by any group member cancels all members (BAC-6).
+//
+// !! TWO BAC SCHEMES — DO NOT CROSS-RESOLVE THE NUMBERS !!
+//
+// BAC-1..BAC-6 above are LOCAL to this file; this comment is their only
+// definition site. They are cited from production code (BAC-4 at
+// evr_lobby_session.go, BAC-5 at evr_lobby_find.go), so the numbers escape the
+// file even though the definitions do not.
+//
+// They are a DIFFERENT scheme from the zero-padded BAC-001..BAC-025 defined in
+// docs/implementation-plan-party-reservations.md (Section 1, :47; test-mapping
+// table at :1485), and the two do NOT correspond. Worked example: BAC-4 here is
+// the spectator group-leave, whereas BAC-004 there is "Reservation consumed on
+// player join". A reader who resolves an unpadded number against the padded
+// registry gets the wrong contract. Padded => the plan doc; unpadded => here.
 //
 // Reconciliation note: the E2 dispatch lives in configureParty (plan step D1),
 // not in JoinPartyGroup (PR #511's draft site). These tests exercise the
@@ -511,9 +530,12 @@ func TestSpectatorLeave_ClearsCurrentPartyID(t *testing.T) {
 // not arena or combat must be REJECTED, and rejected before any party teardown:
 // the request failed, so it must leave no trace on the player's party.
 //
-// Both halves regressed at once at 57f81b7c5 — the rejection was assigned to a
-// dead `err` and the function returned nil, while the teardown above it had
-// already run. The player lost their party and was told the request succeeded.
+// Both halves regressed at once at 55834b2c6 ("Add detailed matchmaking
+// errors") — the rejection was assigned to a dead `err` and the function
+// returned nil, while the teardown above it had already run. The player lost
+// their party and was told the request succeeded. (57f81b7c5, cited here
+// before, is "build(lint): a lint cache per checkout" and is not an ancestor
+// of HEAD; the history was rewritten 2026-08-20.)
 func TestSpectatorUnsupportedMode_RejectsAndKeepsParty(t *testing.T) {
 	env := mkSpectatorPartyEnv(t)
 	session := env.session
