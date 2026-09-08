@@ -213,30 +213,32 @@ func AllVRMLCosmetics() []string {
 	return out
 }
 
-// RevokeNonEntitledVRMLCosmetics zeros out any VRML cosmetic wallet entries that are not covered by
-// the provided entitlement set. Call this before AssignEntitlements when re-linking an account so that
-// previously granted cosmetics from a different (or fraudulent) VRML account are cleared.
-func RevokeNonEntitledVRMLCosmetics(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, assignerID, assignerUsername, userID, vrmlUserID string, entitlements []*VRMLEntitlement) error {
-	// Build the set of wallet keys the user is legitimately entitled to.
+// vrmlEntitledWalletKeys is the set of wallet keys the given entitlement set
+// legitimately covers. VRMLRevocationChangeset excludes exactly this set;
+// VRMLAssignmentChangeset writes exactly this set. Both derive it from here so
+// the two can never drift apart — see VRMLEntitlementWalletUpdates for why that
+// disjointness is load-bearing.
+func vrmlEntitledWalletKeys(entitlements []*VRMLEntitlement) map[string]struct{} {
 	entitled := make(map[string]struct{})
 	for _, e := range entitlements {
 		for _, id := range e.Cosmetics() {
 			entitled["cosmetic:arena:"+id] = struct{}{}
 		}
 	}
+	return entitled
+}
 
-	// Load the user's wallet.
-	account, err := nk.AccountGetId(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("failed to get account for %s: %w", userID, err)
-	}
+// VRMLRevocationChangeset returns the wallet deltas that zero every known VRML
+// cosmetic the entitlement set does not cover. It is pure: the caller supplies
+// the wallet, so the changeset can be computed from a read the caller already
+// holds and committed in a transaction alongside other operations.
+//
+// An empty result means there is nothing to revoke, and the caller should emit
+// no wallet update at all rather than an empty one — an empty changeset still
+// writes a wallet_ledger row.
+func VRMLRevocationChangeset(wallet map[string]int64, entitlements []*VRMLEntitlement) map[string]int64 {
+	entitled := vrmlEntitledWalletKeys(entitlements)
 
-	wallet := make(map[string]int64)
-	if err := json.Unmarshal([]byte(account.Wallet), &wallet); err != nil {
-		return status.Error(codes.Internal, "failed to unmarshal wallet")
-	}
-
-	// Zero out every known VRML cosmetic that isn't in the entitled set and is currently non-zero.
 	changeset := make(map[string]int64)
 	for _, key := range AllVRMLCosmetics() {
 		if _, ok := entitled[key]; ok {
@@ -246,17 +248,121 @@ func RevokeNonEntitledVRMLCosmetics(ctx context.Context, logger runtime.Logger, 
 			changeset[key] = -v // zero it out
 		}
 	}
+	return changeset
+}
 
-	if len(changeset) == 0 {
-		return nil // nothing to revoke
+// VRMLAssignmentChangeset returns the wallet deltas that bring every cosmetic
+// covered by the entitlement set to exactly 1. Pure, for the same reason as
+// VRMLRevocationChangeset.
+func VRMLAssignmentChangeset(wallet map[string]int64, entitlements []*VRMLEntitlement) map[string]int64 {
+	changeset := make(map[string]int64, len(entitlements))
+	for _, e := range entitlements {
+		for _, cosmeticID := range e.Cosmetics() {
+			name := "cosmetic:arena:" + cosmeticID
+
+			// Make sure it is 1
+			if v, ok := wallet[name]; !ok || v != 1 {
+				changeset[name] = v*-1 + 1
+			}
+		}
 	}
+	return changeset
+}
 
-	metadata := map[string]any{
+// vrmlRevocationMetadata and vrmlAssignmentMetadata are kept separate so that
+// batching the two wallet updates into one transaction still writes two
+// distinguishable wallet_ledger rows. updateWallets (core_wallet.go) appends one
+// ledger row per *walletUpdate, applying them in order against the same
+// in-transaction wallet map, so two entries for one user compose correctly.
+func vrmlRevocationMetadata(assignerID, assignerUsername, vrmlUserID string) map[string]any {
+	return map[string]any{
 		"assigner_username": assignerUsername,
 		"assigner_id":       assignerID,
 		"vrml_user_id":      vrmlUserID,
 		"action":            "revoke_non_entitled",
 	}
+}
+
+func vrmlAssignmentMetadata(assignerID, assignerUsername, vrmlUserID string, entitlements []*VRMLEntitlement) map[string]any {
+	return map[string]any{
+		"assigner_username": assignerUsername,
+		"assigner_id":       assignerID,
+		"vrml_user_id":      vrmlUserID,
+		"entitlements":      entitlements,
+	}
+}
+
+// vrmlLoadWallet reads and decodes a user's wallet.
+func vrmlLoadWallet(ctx context.Context, nk runtime.NakamaModule, userID string) (map[string]int64, error) {
+	account, err := nk.AccountGetId(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get account for %s: %w", userID, err)
+	}
+
+	wallet := make(map[string]int64)
+	if err := json.Unmarshal([]byte(account.Wallet), &wallet); err != nil {
+		return nil, status.Error(codes.Internal, "failed to unmarshal wallet")
+	}
+	return wallet, nil
+}
+
+// VRMLEntitlementWalletUpdates reads the wallet ONCE and returns the revocation
+// and the assignment as runtime.WalletUpdate operations, for a caller that wants
+// to commit them in a single MultiUpdate transaction alongside its storage
+// writes. The revocation is first; it is omitted entirely when there is nothing
+// to revoke.
+//
+// Why one read is sound. The sequential form (RevokeNonEntitledVRMLCosmetics
+// then AssignEntitlements) re-read the wallet in between, so the question is
+// whether the revocation write can change any value the assignment reads. It
+// cannot: VRMLRevocationChangeset only ever emits keys it has excluded via
+// vrmlEntitledWalletKeys, and VRMLAssignmentChangeset only ever emits keys that
+// set contains. The two key sets are disjoint by construction, so the assignment
+// deltas computed from the pre-revocation wallet equal the ones computed from
+// the post-revocation wallet. TestVRMLEntitlementChangesets_Disjoint and
+// TestVRMLEntitlementChangesets_MatchSequentialApplication pin both halves.
+func VRMLEntitlementWalletUpdates(ctx context.Context, nk runtime.NakamaModule, assignerID, assignerUsername, userID, vrmlUserID string, entitlements []*VRMLEntitlement) ([]*runtime.WalletUpdate, error) {
+	wallet, err := vrmlLoadWallet(ctx, nk, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	updates := make([]*runtime.WalletUpdate, 0, 2)
+	if revocation := VRMLRevocationChangeset(wallet, entitlements); len(revocation) > 0 {
+		updates = append(updates, &runtime.WalletUpdate{
+			UserID:    userID,
+			Changeset: revocation,
+			Metadata:  vrmlRevocationMetadata(assignerID, assignerUsername, vrmlUserID),
+		})
+	}
+	updates = append(updates, &runtime.WalletUpdate{
+		UserID:    userID,
+		Changeset: VRMLAssignmentChangeset(wallet, entitlements),
+		Metadata:  vrmlAssignmentMetadata(assignerID, assignerUsername, vrmlUserID, entitlements),
+	})
+	return updates, nil
+}
+
+// RevokeNonEntitledVRMLCosmetics zeros out any VRML cosmetic wallet entries that are not covered by
+// the provided entitlement set. Call this before AssignEntitlements when re-linking an account so that
+// previously granted cosmetics from a different (or fraudulent) VRML account are cleared.
+//
+// This is the standalone form, for callers that revoke without also assigning
+// (the unlink path). A caller doing both should use
+// VRMLEntitlementWalletUpdates, which needs one wallet read instead of two and
+// commits both in one transaction.
+func RevokeNonEntitledVRMLCosmetics(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, assignerID, assignerUsername, userID, vrmlUserID string, entitlements []*VRMLEntitlement) error {
+	wallet, err := vrmlLoadWallet(ctx, nk, userID)
+	if err != nil {
+		return err
+	}
+
+	changeset := VRMLRevocationChangeset(wallet, entitlements)
+	if len(changeset) == 0 {
+		return nil // nothing to revoke
+	}
+
+	metadata := vrmlRevocationMetadata(assignerID, assignerUsername, vrmlUserID)
 
 	if _, _, err := nk.WalletUpdate(ctx, userID, changeset, metadata, true); err != nil {
 		return fmt.Errorf("failed to revoke cosmetics for %s: %w", userID, err)
@@ -272,41 +378,21 @@ func RevokeNonEntitledVRMLCosmetics(ctx context.Context, logger runtime.Logger, 
 	return nil
 }
 
+// AssignEntitlements brings every cosmetic the entitlement set covers to 1.
+//
+// This is the standalone form, for callers that assign without also revoking
+// (the Discord admin grant). A caller doing both should use
+// VRMLEntitlementWalletUpdates.
 func AssignEntitlements(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, assignerID, assignerUsername, userID, vrmlUserID string, entitlements []*VRMLEntitlement) error {
 
-	// Load the user's wallet
-	account, err := nk.AccountGetId(ctx, userID)
+	wallet, err := vrmlLoadWallet(ctx, nk, userID)
 	if err != nil {
-		return fmt.Errorf("failed to get account for %s: %w", userID, err)
+		return err
 	}
 
-	wallet := make(map[string]int64)
+	changeset := VRMLAssignmentChangeset(wallet, entitlements)
 
-	if err := json.Unmarshal([]byte(account.Wallet), &wallet); err != nil {
-		return status.Error(codes.Internal, "failed to unmarshal wallet")
-	}
-
-	// Create a changeset for the wallet
-	changeset := make(map[string]int64, len(entitlements))
-
-	for _, e := range entitlements {
-
-		for _, cosmeticID := range e.Cosmetics() {
-			name := "cosmetic:arena:" + cosmeticID
-
-			// Make sure it is 1
-			if v, ok := wallet[name]; !ok || v != 1 {
-				changeset[name] = v*-1 + 1
-			}
-		}
-	}
-
-	metadata := map[string]any{
-		"assigner_username": assignerUsername,
-		"assigner_id":       assignerID,
-		"vrml_user_id":      vrmlUserID,
-		"entitlements":      entitlements,
-	}
+	metadata := vrmlAssignmentMetadata(assignerID, assignerUsername, vrmlUserID, entitlements)
 
 	if _, _, err := nk.WalletUpdate(ctx, userID, changeset, metadata, true); err != nil {
 		return fmt.Errorf("failed to update wallet for %s: %w", userID, err)

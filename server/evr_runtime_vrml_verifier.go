@@ -229,17 +229,27 @@ func (v *VRMLScanQueue) Start() error {
 			// Count the number of matches played by season
 			entitlements := summary.Entitlements()
 
-			// Revoke any VRML cosmetics the user is no longer entitled to (e.g. from a previously linked account).
-			if err := RevokeNonEntitledVRMLCosmetics(v.ctx, logger, v.nk, SystemUserID, "", entry.UserID, player.User.UserID, entitlements); err != nil {
-				logger.WithField("error", err).Error("Failed to revoke non-entitled cosmetics")
+			// Revoke the cosmetics the user is no longer entitled to (e.g. from a
+			// previously linked account) and assign the ones they are, in one
+			// transaction. These used to be two sequential wallet writes with a
+			// wallet read between them; the two changesets operate on disjoint
+			// keys, so one read serves both — see VRMLEntitlementWalletUpdates.
+			walletUpdates, err := VRMLEntitlementWalletUpdates(v.ctx, v.nk, SystemUserID, "", entry.UserID, player.User.UserID, entitlements)
+			if err != nil {
+				logger.WithField("error", err).Error("Failed to build VRML entitlement wallet updates")
 				continue
 			}
 
-			// Assign the cosmetics the user is entitled to.
-			if err := AssignEntitlements(v.ctx, logger, v.nk, SystemUserID, "", entry.UserID, player.User.UserID, entitlements); err != nil {
-				logger.WithField("error", err).Error("Failed to assign entitlements")
+			if _, _, err := v.nk.MultiUpdate(v.ctx, nil, nil, nil, walletUpdates, true); err != nil {
+				logger.WithField("error", err).Error("Failed to commit VRML entitlement wallet updates")
 				continue
 			}
+
+			logger.WithFields(map[string]any{
+				"user_id":      entry.UserID,
+				"vrml_user_id": player.User.UserID,
+				"entitlements": entitlements,
+			}).Info("committed VRML entitlement wallet updates")
 
 			// Store the entitlements in the ledger
 			ledger.Entries = append(ledger.Entries, &VRMLEntitlementLedgerEntry{
