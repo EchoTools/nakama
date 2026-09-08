@@ -1,6 +1,12 @@
 package evr
 
-// Code generated from the EchoVR client asset packages. DO NOT EDIT BY HAND.
+// HAND-CURATED. Nothing generates this file -- edit it by hand, carefully.
+//
+// There is no generator, no `go:generate` directive, and no committed tool that
+// produces this table. It was extracted once, by hand, from a game asset package
+// that is not in this repository and cannot be checked in (5.87 GB inflated).
+// A "DO NOT EDIT BY HAND" banner previously stood here and was simply false: it
+// told the one true maintenance path -- a careful hand edit -- not to happen.
 //
 // WHAT THIS IS
 //
@@ -30,8 +36,14 @@ package evr
 //
 // Those are Andrew's, typed by hand, and several carry knowledge that exists
 // nowhere else -- TintBlueSeafoam, TintMesopalgic. "Blue" in those names
-// describes the COLOUR, not the alignment slot. This table is added ALONGSIDE
-// them and overwrites nothing.
+// records the ALIGNMENT SLOT, not the colour: TintBlueTerraformed is
+// tint_neutral_summer_a_default, whose id says "neutral" and which the server
+// nonetheless routes to tint_alignment_a. A display name never carries that
+// fact. This table is added ALONGSIDE the field names and overwrites nothing.
+//
+// (An earlier draft of this header said "Blue" described the colour. That was
+// wrong, and the tint-routing bug this file was built for is exactly what it
+// got wrong. See alignmentTints in server/evr_profile_cache.go.)
 //
 // SCOPE, STATED
 //
