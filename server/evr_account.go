@@ -286,6 +286,35 @@ func (a EVRProfile) DisplayNamesByGroupID() map[string]string {
 	}
 	return dnMap
 }
+
+// IsProtectedFromDiscordSync reports whether this stored per-guild in-game name
+// is shielded from being replaced by the player's Discord nickname.
+//
+// There are two writers of the Discord nickname into an IGN: the login-time
+// resync in initializeSession (server/evr_pipeline_login.go) and syncMembersIGN
+// on a Discord member-update (server/evr_discord_integrator.go). Both ask this
+// question, and the answer must be the same at both, which is why it lives on
+// the type rather than being spelled out twice — both sites previously checked
+// IsLocked alone and dropped explicit overrides (EchoTools/nakama#586).
+//
+// Two flags shield a name. IsLocked is an administrative freeze. IsOverride
+// marks a deliberate rename — /ign, the guild rename RPC, the admin rename RPC —
+// and is not something the Discord nickname may silently replace; the intent is
+// already stated at server/evr_runtime_rpc.go:2322, "Mark as an explicit
+// override so Discord/member sync will not clobber it."
+//
+// An override only shields a name that exists. A record carrying IsOverride with
+// an empty DisplayName has nothing to protect, and refusing the refresh there
+// would strand the player with no in-game name instead of preserving one, so it
+// is left open. A lock keeps its stricter, pre-existing meaning and shields even
+// an empty name.
+func (g GroupInGameName) IsProtectedFromDiscordSync() bool {
+	if g.IsLocked {
+		return true
+	}
+	return g.IsOverride && g.DisplayName != ""
+}
+
 func (e EVRProfile) GetGroupIGNData(groupID string) GroupInGameName {
 	if e.InGameNames == nil {
 		return GroupInGameName{
