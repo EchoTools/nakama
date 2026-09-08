@@ -203,23 +203,25 @@ if [ -n "$CHANGED_GO" ]; then
         echo "$VET_OUTPUT" | head -20 | sed 's/^/       /'
     fi
 
-    # golangci-lint, via `just lint` -- the backlog ratchet, not a bare run.
+    # golangci-lint, via `just lint` -- new code only, not a bare run.
     #
     # AGENTS.md has called this a MUST-run gate for years while it ran in no
     # hook, no workflow and no recipe; from 2023 to 2026-08-16 it could not even
     # load its config. It is here now.
     #
-    # `just lint` rather than golangci-lint directly, deliberately: the baseline
-    # the ratchet compares against lives in the justfile, and a second copy of
-    # that number here is a second thing to forget to update. It also brings the
-    # stale-cache and did-not-run guards with it (AGENTS.md defect classes 4, 6).
+    # `just lint` rather than golangci-lint directly, deliberately: the recipe
+    # is what CI runs, so a push that passes here passes there, and it brings
+    # the stale-cache and did-not-run guards with it (AGENTS.md defect class 6).
+    # It gates on findings this branch ADDED against origin/main -- exactly the
+    # comparison a pre-push wants -- and not on the size of the backlog, which
+    # was a hand-maintained count that could not be satisfied (justfile `lint`).
     #
     # Skipped with a warning when `just` is absent, the same way gopls is --
     # a hook that hard-fails on a missing tool gets bypassed wholesale, and a
     # bypassed hook enforces nothing at all.
     if command -v just &>/dev/null; then
         if LINT_OUTPUT=$(just lint 2>&1); then
-            pass "golangci-lint (backlog ratchet held)"
+            pass "golangci-lint (no new findings against origin/main)"
         else
             fail "golangci-lint:"
             echo "$LINT_OUTPUT" | head -20 | sed 's/^/       /'
