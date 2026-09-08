@@ -345,20 +345,32 @@ LINT_FLAGS := "--max-issues-per-linter 0 --max-same-issues 0"
 # An explicitly set GOLANGCI_LINT_CACHE wins, so this can still be overridden.
 LINT_CACHE := "/var/tmp/nakama-golangci-cache/" + sha256(justfile_directory())
 
-# The backlog ratchet. Measured, not chosen: 268 with a cold cache, down from
-# 374 before the lint campaign, which cleared 105 in three groups: 30 mechanical
-# (govet inline 18, SA1019 8, SA1006 2, S1011 1, S1002 1); 54 errcheck (the
-# discarded RestrictAPIFunctionAccess returns in registerAPIGuards, which left
-# those endpoints reachable while registration reported success); and 21 from
-# the ineffassign triage. It is a
-# CEILING, not a target -- `just lint` fails if the count rises and tells you to
-# lower this number when it falls. It exists only until the backlog reaches zero,
-# at which point this variable and the whole comparison are DELETED and a bare
-# non-zero exit becomes the gate. A ratchet kept past zero is furniture
-# (AGENTS.md defect class 4).
-LINT_BASELINE := "268"
-
-# Run the uncapped linter and hold the backlog ratchet; non-zero if it rises.
+# THE lint gate: zero findings on the lines this branch changed.
+#
+# It was a count-ratchet until 2026-09-08 -- LINT_BASELINE, a hand-maintained
+# CEILING ("268", set by 30f142505) that this recipe compared a full-tree count
+# against, failing both when the count rose above it AND when it fell below it
+# without the number being lowered in the same commit. Deleted, because it was
+# never satisfiable. Measured 2026-09-08, cold cache, private cache dir:
+#
+#   6e9e5dbb8 (main)   golangci-lint 2.13.1  ->  270    vs LINT_BASELINE 268
+#   30f142505          golangci-lint 2.13.1  ->  270    the commit that SET 268
+#   6e9e5dbb8 (main)   golangci-lint 2.12.2  ->  268    the version CI pins
+#
+# The whole delta is two SA4023 findings at
+# server/evr_discord_reservation_commands.go:261-262 that staticcheck reports
+# from 2.13.1 on and not from 2.12.2. Not a code regression: linter drift. A
+# ceiling whose measurement moves with the developer's linter version is a
+# chore, not a gate, and this one was already red on the commit that authored
+# it -- nobody could have committed under it without lowering it again.
+#
+# What replaces it is the check that was already holding the line on pull
+# requests: --new-from-merge-base. It does not care about the backlog at all,
+# only about what this branch added -- so fixing one old finding while adding a
+# new one no longer nets out to a pass. merge-base rather than --new-from-rev
+# deliberately: it does not fire on findings that main introduced under you.
+#
+# Requires full history (actions/checkout fetch-depth: 0).
 #
 # Three failure modes are handled explicitly, because each has already happened
 # here or is one keystroke away:
@@ -368,7 +380,8 @@ LINT_BASELINE := "268"
 #      2026-08-16 it exited 3 on every invocation ("unsupported version of the
 #      configuration") and the workflow that called it had been failing the same
 #      way, unnoticed. Anything other than 0 or 1 is a hard failure here, with
-#      the output printed -- never a silent zero-issue pass.
+#      the output printed -- never a silent zero-issue pass. A REF that does not
+#      resolve lands here too, which is the fail-closed direction.
 #
 #   2. THE FINDINGS ARE NOT ABOUT THIS TREE. AGENTS.md defect class 6: a stale
 #      analyzer cache made this command report 447 findings against 374 actually
@@ -379,10 +392,64 @@ LINT_BASELINE := "268"
 #      paths relative to the repo root, so a leading `/` or `../` means the
 #      finding is not about this tree. Hard failure, with the fix.
 #
-#   3. THE BACKLOG SILENTLY GREW. That is the ratchet below.
+#   3. THIS BRANCH ADDED A FINDING. That is the gate below, and its threshold
+#      is zero. There is no number to raise.
 
-# Uncapped golangci-lint; non-zero if the backlog rises above LINT_BASELINE
-lint:
+# Zero new findings against REF; non-zero on anything this branch added
+lint REF="origin/main":
+    @set -u; \
+    export GOLANGCI_LINT_CACHE="${GOLANGCI_LINT_CACHE:-{{ LINT_CACHE }}}"; \
+    out="$(golangci-lint run {{ LINT_FLAGS }} --new-from-merge-base {{ REF }} 2>&1)"; rc=$?; \
+    if [ "$rc" != "0" ] && [ "$rc" != "1" ]; then \
+        echo "ERROR: golangci-lint exited $rc -- it did not run, it failed."; \
+        echo "A zero-issue result from a linter that never ran is the failure"; \
+        echo "mode this check exists for. Output follows:"; \
+        printf '%s\n' "$out" | sed 's/^/  /'; \
+        exit 1; \
+    fi; \
+    foreign="$(printf '%s\n' "$out" | grep -oE '^(/|\.\./)[^ :]*\.go:[0-9]+:[0-9]+:' | sort -u)"; \
+    if [ -n "$foreign" ]; then \
+        echo "ERROR: golangci-lint reported findings whose paths are not in this repo:"; \
+        printf '%s\n' "$foreign" | head -5 | sed 's/^/  /'; \
+        echo "  ... $(printf '%s\n' "$foreign" | wc -l | tr -d ' ') distinct foreign paths"; \
+        echo ""; \
+        echo "This is a stale analyzer cache (AGENTS.md defect class 6). The count"; \
+        echo "is inflated and the file:line citations point at nothing."; \
+        echo "Fix with: golangci-lint cache clean"; \
+        exit 1; \
+    fi; \
+    count="$(printf '%s\n' "$out" | grep -cE '^[^ ]+\.go:[0-9]+:[0-9]+: ')"; \
+    if [ "$count" != "0" ]; then \
+        echo "ERROR: $count new lint finding(s) against {{ REF }}."; \
+        printf '%s\n' "$out" | sed 's/^/  /'; \
+        echo ""; \
+        echo "These are on lines this branch changed. There is no baseline to"; \
+        echo "raise -- fix them, or the finding ships."; \
+        echo "Full-tree backlog (a report, not a gate): just lint-all"; \
+        exit 1; \
+    fi; \
+    echo "lint: no new findings against {{ REF }} (0 foreign paths)"
+
+# Kept as an alias, not a second opinion: .githooks/pre-push,
+# .github/workflows/build.yaml and three years of muscle memory name it, and it
+# is now the same check `just lint` runs.
+
+# Alias for `just lint REF`
+lint-new REF="origin/main": (lint REF)
+
+# The full-tree backlog, uncapped and printed whole. A REPORT, NOT A GATE: it
+# exits 0 whatever the count. A number nobody is required to move is
+# information; a number everybody is required to move is the chore that was just
+# deleted. It still fails on the two integrity guards above -- a report from a
+# linter that did not run, or one citing another checkout's paths, is worse than
+# no report at all.
+#
+# LINT_FLAGS is not optional here: bare `golangci-lint run` truncates at
+# max-issues-per-linter=50 / max-same-issues=3 and reported 153 of 377, a 60%
+# under-report that looks exactly like a cleaner tree.
+
+# Full-tree uncapped backlog report; exits 0 on any count (not a gate)
+lint-all:
     @set -u; \
     export GOLANGCI_LINT_CACHE="${GOLANGCI_LINT_CACHE:-{{ LINT_CACHE }}}"; \
     out="$(golangci-lint run {{ LINT_FLAGS }} 2>&1)"; rc=$?; \
@@ -405,36 +472,11 @@ lint:
         exit 1; \
     fi; \
     count="$(printf '%s\n' "$out" | grep -cE '^[^ ]+\.go:[0-9]+:[0-9]+: ')"; \
-    if [ "$count" -gt "{{ LINT_BASELINE }}" ]; then \
-        echo "ERROR: lint findings rose to $count, above the {{ LINT_BASELINE }} baseline."; \
-        printf '%s\n' "$out" | tail -20 | sed 's/^/  /'; \
-        echo ""; \
-        echo "See what THIS branch added with:  just lint-new"; \
-        echo "See the full report with:         golangci-lint run {{ LINT_FLAGS }}"; \
-        exit 1; \
-    fi; \
-    if [ "$count" -lt "{{ LINT_BASELINE }}" ]; then \
-        echo "lint: $count findings -- BELOW the {{ LINT_BASELINE }} baseline."; \
-        echo "Lower LINT_BASELINE in the justfile to $count in this same commit,"; \
-        echo "or the ground you just took is given back to the next change."; \
-        exit 1; \
-    fi; \
-    echo "lint: $count findings, at the {{ LINT_BASELINE }} baseline (0 foreign paths)"
-
-# Findings introduced by the current branch, regardless of the backlog.
-#
-# This is the check that actually holds the line, and it is what CI runs on a
-# pull request: the ratchet above only catches a NET rise, so fixing one old
-# finding while adding one new one passes it. --new-from-merge-base does not
-# care about the backlog at all, only about what this branch added.
-#
-# Requires full history (actions/checkout fetch-depth: 0).
-
-# Lint only what this branch added, against REF; non-zero on any new finding
-lint-new REF="origin/main":
-    @GOLANGCI_LINT_CACHE="${GOLANGCI_LINT_CACHE:-{{ LINT_CACHE }}}" \
-        golangci-lint run {{ LINT_FLAGS }} --new-from-merge-base {{ REF }} \
-        && echo "lint: no new findings against {{ REF }}"
+    printf '%s\n' "$out"; \
+    echo ""; \
+    echo "lint-all: $count findings in the full tree (0 foreign paths)."; \
+    echo "This is a REPORT and does not gate. The gate is 'just lint':"; \
+    echo "zero new findings against origin/main."
 
 # go vet over the same scope the tests use.
 #
