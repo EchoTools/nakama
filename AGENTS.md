@@ -74,6 +74,37 @@ staticcheck 95, unused 47, ineffassign 21, govet 18, gofmt 3). That is a report,
 not yet a gate. Enforcing it on new work only — `--new-from-rev=origin/main` —
 is the obvious path and is an owner decision, not taken here.
 
+**DECIDED 2026-09-08 — the owner decision above is taken, and the count-ratchet
+that preceded it is deleted.** Amend-never-rewrite: the 377 / 447 / 374 / 268
+measurements below and above all stand as recorded. What changed is what gates.
+Between then and now the backlog was held by `LINT_BASELINE` in the justfile, a
+hand-maintained CEILING (374, then 268) that `just lint` compared a full-tree
+count against — failing when the count rose, and failing when it fell without
+the number being lowered in the same commit. It was never satisfiable. Measured
+2026-09-08, cold cache, private cache dir:
+
+```
+6e9e5dbb8 (main)   golangci-lint 2.13.1  ->  270   vs LINT_BASELINE 268
+30f142505          golangci-lint 2.13.1  ->  270   the commit that SET 268
+6e9e5dbb8 (main)   golangci-lint 2.12.2  ->  268   the version .github/workflows/build.yaml pins
+```
+
+The entire delta is two `SA4023` findings at
+`server/evr_discord_reservation_commands.go:261-262` that staticcheck reports
+from 2.13.1 on and not from 2.12.2 — linter drift, not a code regression. A
+ceiling whose measurement moves with the developer's linter version is a chore,
+not a gate, and this one was already red on the commit that authored it.
+
+So: `just lint` is now `--new-from-merge-base=origin/main`, zero new findings
+tolerated, and it is what `.githooks/pre-push` and the PR job in
+`.github/workflows/build.yaml` run. `just lint-new` is an alias for it.
+merge-base rather than `--new-from-rev` deliberately: it does not fire on
+findings `main` introduced under you. The full-tree backlog is `just lint-all`,
+uncapped, printed whole, and **not a gate** — it exits 0 at any count. Both
+recipes keep the did-not-run guard and the foreign-path guard of defect class 6
+below; those are what caught the `/var/tmp/nakama-lint/` inflation, and a report
+from a linter that did not run is worse than no report.
+
 **On the vet scope.** This block said `go vet ./...` until 2026-08-19. That form
 **cannot pass**: it walks the vendored `internal/gopher-lua`, which has 25 findings
 of its own (self-assignment, non-constant format strings, unreachable code) and is

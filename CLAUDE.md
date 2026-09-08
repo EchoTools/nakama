@@ -28,12 +28,19 @@ test-audit. Non-zero if any fails; it runs all six and then reports, so a red
 gofmt does not hide a red test suite. "Done", "fixed", "verified" and "green"
 mean this recipe passed and nothing else.
 
-`just lint` carries the backlog ratchet. `LINT_BASELINE` in the justfile is a
-CEILING, measured cold, not a target — lower it in the same commit that clears
-findings, or the ground is given back. It is deleted when the backlog reaches
-zero. Always measure with a cold cache (`golangci-lint cache clean`), or via
-`just lint`, which refuses any finding whose path is outside the repo — see
-AGENTS.md defect class 6.
+`just lint` enforces NEW CODE ONLY: `--new-from-merge-base=origin/main`, zero
+findings tolerated on the lines your branch changed. There is no number to
+raise, lower, or babysit. `just lint-new` is an alias for it, and takes a REF.
+The `LINT_BASELINE` count-ratchet was deleted on 2026-09-08 — it was never
+satisfiable, since `30f142505`, the commit that set the ceiling to 268, itself
+measures 270 with golangci-lint 2.13.1 and 268 with the 2.12.2 CI pins.
+
+`just lint-all` prints the full-tree backlog, uncapped, and does NOT gate. Both
+recipes refuse any finding whose path is outside the repo, and refuse a linter
+that exited without running — a stale cache inflates the count and cites lines
+that do not exist (AGENTS.md defect class 6). Measure the backlog with `just
+lint-all` or a cold cache (`golangci-lint cache clean`), never a bare
+`golangci-lint run`, which truncates by 60%.
 
 Running two lint jobs at once fails with `parallel golangci-lint is running`.
 In a second worktree, set `GOLANGCI_LINT_CACHE` to a private dir under
