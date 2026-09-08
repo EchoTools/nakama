@@ -277,11 +277,6 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		logger.Info("Registered /static/ file server for development environment.")
 	}
 
-	// Add telemetry stream RPCs
-	if err := RegisterTelemetryStreamRPCs(ctx, logger, db, nk, initializer); err != nil {
-		return fmt.Errorf("unable to register telemetry stream RPCs: %w", err)
-	}
-
 	// Register the fleet manager
 	zapLogger := RuntimeLoggerToZapLogger(logger)
 	fm := fleetmanager.NewFleetManager(zapLogger)
