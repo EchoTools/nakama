@@ -50,24 +50,41 @@ func VRMLEntitlementLedgerLoad(ctx context.Context, nk runtime.NakamaModule) (*V
 	return &ledger, nil
 }
 
-func VRMLEntitlementLedgerStore(ctx context.Context, nk runtime.NakamaModule, ledger *VRMLEntitlementLedger) error {
-
+// vrmlEntitlementLedgerWriteOp renders the ledger as a storage write operation
+// without committing it, so a caller that has other work to commit in the same
+// transaction can carry it along. VRMLEntitlementLedgerStore is the standalone
+// form for callers that do not.
+func vrmlEntitlementLedgerWriteOp(ledger *VRMLEntitlementLedger) (*runtime.StorageWrite, error) {
 	data, err := json.Marshal(ledger)
+	if err != nil {
+		return nil, err
+	}
+
+	return &runtime.StorageWrite{
+		Collection: StorageCollectionVRML,
+		Key:        StorageKeyVRMLVerificationLedger,
+		UserID:     SystemUserID,
+		Value:      string(data),
+
+		PermissionRead:  0,
+		PermissionWrite: 0,
+	}, nil
+}
+
+// VRMLEntitlementLedgerStore commits the ledger on its own.
+//
+// It goes through MultiUpdate rather than StorageWrite for the reason recorded
+// on StorableWriteMany: MultiUpdate is the single entry point that can also
+// carry account updates, deletes and wallet updates, so a caller that later
+// needs to widen the atomic unit does not have to change shape. The VRML
+// verifier has already done exactly that — see commitVRMLVerification.
+func VRMLEntitlementLedgerStore(ctx context.Context, nk runtime.NakamaModule, ledger *VRMLEntitlementLedger) error {
+	op, err := vrmlEntitlementLedgerWriteOp(ledger)
 	if err != nil {
 		return err
 	}
 
-	if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
-		{
-			Collection: StorageCollectionVRML,
-			Key:        StorageKeyVRMLVerificationLedger,
-			UserID:     SystemUserID,
-			Value:      string(data),
-
-			PermissionRead:  0,
-			PermissionWrite: 0,
-		},
-	}); err != nil {
+	if _, _, err := nk.MultiUpdate(ctx, nil, []*runtime.StorageWrite{op}, nil, nil, false); err != nil {
 		return err
 	}
 
