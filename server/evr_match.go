@@ -361,6 +361,8 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		logger.WithFields(map[string]any{
 			"uid":            meta.Presence.GetUserId(),
 			"role_alignment": rr.Presence.RoleAlignment,
+			"reservation_id": rr.ID,
+			"expires_in_s":   time.Until(rr.Expiry).Seconds(),
 		}).Info("Player reconnecting from crash. Restoring role alignment.")
 	}
 
@@ -539,8 +541,11 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			meta.Presence.RoleAlignment = evr.TeamSocial
 
 		case evr.ModeArenaPublic, evr.ModeCombatPublic:
-			// Select the team with the fewest players
-			if state.RoleCount(evr.TeamBlue) < state.RoleCount(evr.TeamOrange) {
+			// Select the team with the fewest committed seats. Reservations must
+			// count here: the role gate below subtracts them, so balancing on
+			// connected presences alone would steer a joiner onto a team that is
+			// full by reservation and refuse them while the other team had room.
+			if state.CommittedRoleCount(evr.TeamBlue) < state.CommittedRoleCount(evr.TeamOrange) {
 				meta.Presence.RoleAlignment = evr.TeamBlue
 			} else {
 				meta.Presence.RoleAlignment = evr.TeamOrange
@@ -937,18 +942,22 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			if disconnectedFromGameServer && enabled && !state.GameState.IsMatchOver() && mp.IsPlayer() {
 				window := time.Duration(crashWindow) * time.Second
 				expiry := time.Now().Add(window)
+				reservationID := uuid.Must(uuid.NewV4()).String()
 				state.reconnectReservations[mp.GetUserId()] = &reconnectReservation{
 					Presence:     mp,
 					Expiry:       expiry,
 					UserID:       mp.GetUserId(),
+					ID:           reservationID,
 					DeferPenalty: state.Mode == evr.ModeArenaPublic && !state.GameState.IsMatchOver() && mp.IsPlayer(),
 				}
 				if err := SetNextMatchID(ctx, nk, mp.GetUserId(), state.ID, TeamIndex(mp.RoleAlignment), ""); err != nil {
 					logger.WithField("error", err).Warn("Failed to set next match ID for crashed player")
 				}
 				logger.WithFields(map[string]any{
-					"uid":    mp.GetUserId(),
-					"expiry": expiry,
+					"uid":            mp.GetUserId(),
+					"expiry":         expiry,
+					"reservation_id": reservationID,
+					"role_alignment": mp.RoleAlignment,
 				}).Info("Created reconnect reservation for crashed player")
 				hasReconnectReservation = true
 				// Update leave reason to reflect crash recovery
@@ -965,12 +974,15 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 				if s := sessions.Get(uuid.FromStringOrNil(p.GetSessionId())); s != nil {
 					if ws, ok := s.(*sessionWS); ok {
 						if lc := getMatchLifecycle(ws); lc != nil && lc.State() == StateInMatch {
+							// Observer mode: an illegal transition is logged and
+							// recorded by TransitionTo itself and never blocks the
+							// player, so there is nothing to do with the error.
 							if hasReconnectReservation {
-								lc.Transition(StateCrashed, "disconnected")
+								_ = lc.Transition(StateCrashed, "disconnected")
 							} else if p.GetReason() == runtime.PresenceReasonLeave || state.GameState.IsMatchOver() {
-								lc.Transition(StateReturning, "match ended")
+								_ = lc.Transition(StateReturning, "match ended")
 							} else {
-								lc.Transition(StateCrashed, "disconnected")
+								_ = lc.Transition(StateCrashed, "disconnected")
 							}
 						}
 					}
@@ -1472,7 +1484,8 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			delete(state.reconnectReservations, id)
 			updateLabel = true
 			logger.WithFields(map[string]any{
-				"uid": rr.UserID,
+				"uid":            rr.UserID,
+				"reservation_id": rr.ID,
 			}).Info("Reconnect reservation expired.")
 
 			if err := DeleteJoinDirective(ctx, nk, rr.UserID); err != nil {

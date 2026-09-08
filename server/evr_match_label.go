@@ -25,9 +25,15 @@ type slotReservation struct {
 }
 
 type reconnectReservation struct {
-	Presence     *EvrMatchPresence
-	Expiry       time.Time
-	UserID       string
+	Presence *EvrMatchPresence
+	Expiry   time.Time
+	UserID   string
+	// ID correlates the three events of a crash-and-return across a session ID
+	// change: the reservation being created, the player reconnecting, and any
+	// rejection they hit on the way back in. The session ID changes across a
+	// crash and the user ID does not, so before this the only join key was
+	// uid + mid + a time window. See #585.
+	ID           string
 	DeferPenalty bool // Whether early quit penalty should be applied on expiry
 }
 
@@ -288,8 +294,27 @@ func (s *MatchLabel) GetPlayerByUserID(userID string) *PlayerInfo {
 	return nil
 }
 
+// ReservedPlayerCount returns the number of player seats held by a reservation
+// (party slot or crash-recovery reconnect) rather than by a connected presence.
+// Mirrors GetPlayerCount: spectator and moderator seats are excluded, because
+// they are governed by MaxSize-PlayerLimit and not by PlayerLimit.
+func (s *MatchLabel) ReservedPlayerCount() int {
+	count := 0
+	for _, p := range s.Players {
+		if p.IsReservation && int(p.Team) != evr.TeamSpectator && int(p.Team) != evr.TeamModerator {
+			count++
+		}
+	}
+	return count
+}
+
+// OpenPlayerSlots answers "how many more players can this lobby take", so a
+// reserved seat is not open: it is committed capacity that OpenSlots() already
+// withholds. Counting only connected presences here let the backfill and
+// matchmaker selectors advertise a crashed player's held seat as free and route
+// a stranger into it (#584).
 func (s *MatchLabel) OpenPlayerSlots() int {
-	return s.PlayerLimit - s.GetPlayerCount()
+	return s.PlayerLimit - s.GetPlayerCount() - s.ReservedPlayerCount()
 }
 
 func (s *MatchLabel) OpenNonPlayerSlots() int {
@@ -305,7 +330,7 @@ func (s *MatchLabel) OpenSlotsByRole(role int) (int, error) {
 		return 0, fmt.Errorf("mode %s is not a valid mode", s.Mode)
 	}
 
-	return s.roleLimit(role) - s.RoleCount(role), nil
+	return s.roleLimit(role) - s.RoleCount(role) - s.RoleReservationCount(role), nil
 }
 
 func (s *MatchLabel) String() string {
@@ -344,6 +369,32 @@ func (s *MatchLabel) RoleCount(role int) int {
 		}
 	}
 	return count
+}
+
+// RoleReservationCount returns the number of seats in the given role that are
+// held by a reservation rather than a connected presence.
+//
+// The whole-lobby gate counts reservations (OpenSlots subtracts
+// ReservationCount) but the per-role gate did not, and in public arena/combat
+// MaxSize (16) exceeds PlayerLimit (8) by the spectator headroom — so the
+// whole-lobby gate is never binding there and the per-role gate is the only
+// one that decides. A reconnect reservation that the per-role gate cannot see
+// therefore protects nothing. See #584.
+func (s *MatchLabel) RoleReservationCount(role int) int {
+	count := 0
+	for _, p := range s.Players {
+		if p.Team == TeamIndex(role) && p.IsReservation {
+			count++
+		}
+	}
+	return count
+}
+
+// CommittedRoleCount is RoleCount plus the seats reserved in that role — the
+// count a capacity or team-balance decision must use, so that balancing never
+// steers a joiner onto a role the gate will then refuse.
+func (s *MatchLabel) CommittedRoleCount(role int) int {
+	return s.RoleCount(role) + s.RoleReservationCount(role)
 }
 
 func (s *MatchLabel) Started() bool {
@@ -476,14 +527,14 @@ func (s *MatchLabel) rebuildCache() {
 	}
 
 	// Include reconnect reservations in the cache (holds slot for crashed players).
-	reconnectSessionIDs := make(map[string]bool, len(s.reconnectReservations))
+	reconnectBySessionID := make(map[string]*reconnectReservation, len(s.reconnectReservations))
 	for uid, r := range s.reconnectReservations {
 		if r.Expiry.Before(time.Now()) {
 			delete(s.reconnectReservations, uid)
 			continue
 		}
 		presences = append(presences, r.Presence)
-		reconnectSessionIDs[r.Presence.SessionID.String()] = true
+		reconnectBySessionID[r.Presence.SessionID.String()] = r
 	}
 
 	// Rebuild the lookup tables.
@@ -534,7 +585,7 @@ func (s *MatchLabel) rebuildCache() {
 					RatingSigma:   p.Rating.Sigma,
 					JoinTime:      s.joinTimeMilliseconds[p.SessionID.String()],
 					SessionID:     p.SessionID.String(),
-					IsReservation: s.reservationMap[p.SessionID.String()] != nil || reconnectSessionIDs[p.SessionID.String()],
+					IsReservation: s.reservationMap[p.SessionID.String()] != nil || reconnectBySessionID[p.SessionID.String()] != nil,
 					GeoHash:       p.GeoHash,
 					PingMillis:    p.PingMillis,
 				})
@@ -552,7 +603,7 @@ func (s *MatchLabel) rebuildCache() {
 					RatingMu:      p.Rating.Mu,
 					RatingSigma:   p.Rating.Sigma,
 					SessionID:     p.SessionID.String(),
-					IsReservation: s.reservationMap[p.SessionID.String()] != nil || reconnectSessionIDs[p.SessionID.String()],
+					IsReservation: s.reservationMap[p.SessionID.String()] != nil || reconnectBySessionID[p.SessionID.String()] != nil,
 					GeoHash:       p.GeoHash,
 					PingMillis:    p.PingMillis,
 				})
@@ -568,7 +619,7 @@ func (s *MatchLabel) rebuildCache() {
 					DiscordID:     p.DiscordID,
 					PartyID:       p.PartyID.String(),
 					SessionID:     p.SessionID.String(),
-					IsReservation: s.reservationMap[p.SessionID.String()] != nil || reconnectSessionIDs[p.SessionID.String()],
+					IsReservation: s.reservationMap[p.SessionID.String()] != nil || reconnectBySessionID[p.SessionID.String()] != nil,
 					GeoHash:       p.GeoHash,
 					PingMillis:    p.PingMillis,
 				})
@@ -583,7 +634,7 @@ func (s *MatchLabel) rebuildCache() {
 					DiscordID:     p.DiscordID,
 					PartyID:       p.PartyID.String(),
 					SessionID:     p.SessionID.String(),
-					IsReservation: s.reservationMap[p.SessionID.String()] != nil || reconnectSessionIDs[p.SessionID.String()],
+					IsReservation: s.reservationMap[p.SessionID.String()] != nil || reconnectBySessionID[p.SessionID.String()] != nil,
 					GeoHash:       p.GeoHash,
 					PingMillis:    p.PingMillis,
 				})
@@ -598,7 +649,7 @@ func (s *MatchLabel) rebuildCache() {
 					DiscordID:     p.DiscordID,
 					PartyID:       p.PartyID.String(),
 					SessionID:     p.SessionID.String(),
-					IsReservation: s.reservationMap[p.SessionID.String()] != nil || reconnectSessionIDs[p.SessionID.String()],
+					IsReservation: s.reservationMap[p.SessionID.String()] != nil || reconnectBySessionID[p.SessionID.String()] != nil,
 					GeoHash:       p.GeoHash,
 					PingMillis:    p.PingMillis,
 				})
@@ -638,6 +689,26 @@ func (s *MatchLabel) rebuildCache() {
 			s.GameState.Teams = meta
 		}
 	}
+	// Annotate held seats with their provenance and expiry. Done as a single
+	// pass rather than at each of the five per-mode PlayerInfo builders above,
+	// so a builder cannot be added later that forgets it.
+	for i := range s.Players {
+		if !s.Players[i].IsReservation {
+			continue
+		}
+		sid := s.Players[i].SessionID
+		if rr, ok := reconnectBySessionID[sid]; ok {
+			expiry := rr.Expiry
+			s.Players[i].ReservationKind = ReservationKindReconnect
+			s.Players[i].ReservationExpiry = &expiry
+			s.Players[i].ReservationID = rr.ID
+		} else if sr, ok := s.reservationMap[sid]; ok {
+			expiry := sr.Expiry
+			s.Players[i].ReservationKind = ReservationKindSlot
+			s.Players[i].ReservationExpiry = &expiry
+		}
+	}
+
 	// Sort the players by team, party ID, and join time.
 	sort.SliceStable(s.Players, func(i, j int) bool {
 		// by team
