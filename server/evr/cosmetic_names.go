@@ -11,7 +11,7 @@ package evr
 // WHAT THIS IS
 //
 // Cosmetic item id -> the display name the game itself shows the player.
-// 624 entries.
+// 568 entries.
 //
 // WHY IT EXISTS
 //
@@ -48,13 +48,30 @@ package evr
 // SCOPE, STATED
 //
 //   - 924 ids were seen in the package; 857 had a display name; 624 survived
-//     junk filtering (strings(1) emits fragments like "vvC" and "EV6" that are
-//     not names).
+//     the first junk filter (strings(1) emits fragments like "vvC" and "EV6"
+//     that are not names).
+//   - A second pass over those 624 removed 56 more that the first filter let
+//     through because they are well-formed English or plausible tokens rather
+//     than obvious fragments. They fell in three shapes:
+//     28 rows reading "This is a short spiel about the item", the asset DB's
+//     placeholder DESCRIPTION leaking into the name column;
+//     24 rows reading "1Afn", a fragment that recurs rather than appearing
+//     once, which is why frequency and not shape is what exposed it;
+//     4 one-off leaks -- "eyeidx4", "UhJ'", "self", "disabled".
+//     A recurring fragment looks like a real shared set name. Counting values
+//     found these; reading them did not.
 //   - 67 ids appear with NO display name in the data at all. They are absent
 //     from this map, and CosmeticName reports that as not-found rather than as
 //     an empty string -- those are different facts.
-//   - One package of four was scanned. This is 624 cosmetics, not provably
+//   - One package of four was scanned. This is 568 cosmetics, not provably
 //     every cosmetic.
+//
+// KEPT DELIBERATELY, so nobody culls them next time:
+//
+//   - "None" on six *_default ids. That IS what the game shows for an empty
+//     slot; it is a name, not a null.
+//   - "ranger" lowercase on three rwd_*_ranger_a ids. The source data is
+//     genuinely lowercase there. Capitalising it would be inventing data.
 //
 // REGENERATE
 //
@@ -69,7 +86,6 @@ var cosmeticNames = map[string]string{
 	"decal_bow_a":                     "Bow",
 	"decal_bullseye_a":                "Bullseye",
 	"decal_cat_a":                     "Classic Cat",
-	"decal_clusters":                  "eyeidx4",
 	"decal_combat_anniversary_a":      "1 Year Combat",
 	"decal_combat_comet_a":            "Comet",
 	"decal_combat_demon_a":            "Lil' Devil",
@@ -169,11 +185,9 @@ var cosmeticNames = map[string]string{
 	"emote_money_bag_a":               "Money Bag",
 	"emote_moustache_a":               "Moustache",
 	"emote_pizza_dance":               "Dancing Pizza",
-	"emote_present_a":                 "UhJ'",
 	"emote_pumpkin_face_a":            "Pumpkin",
 	"emote_question_mark_a":           "Confused",
 	"emote_reticle_a":                 "Reticle",
-	"emote_right_selected":            "self",
 	"emote_rip_a":                     "RIP",
 	"emote_scared_a":                  "Spooked",
 	"emote_shifty_eyes_s2_a":          "Shifty Eyes",
@@ -187,7 +201,6 @@ var cosmeticNames = map[string]string{
 	"emote_star_eyes_a":               "Stars",
 	"emote_star_sparkles_a":           "Sparkles",
 	"emote_stinky_poop_a":             "Stinky Poop",
-	"emote_tabs_reset":                "disabled",
 	"emote_tear_drop_a":               "Tear Drop",
 	"emote_uwu_s2_a":                  "UwU",
 	"emote_vrml_a":                    "VRML",
@@ -357,19 +370,6 @@ var cosmeticNames = map[string]string{
 	"rwd_chassis_trex_s1_a":           "Meteor Rex",
 	"rwd_chassis_wasteland_a":         "Wastelander",
 	"rwd_chassis_wolf_a":              "Fenrir",
-	"rwd_currency_s01_01":             "This is a short spiel about the item",
-	"rwd_currency_s01_02":             "This is a short spiel about the item",
-	"rwd_currency_s01_03":             "This is a short spiel about the item",
-	"rwd_currency_s01_04":             "This is a short spiel about the item",
-	"rwd_currency_s02_01":             "This is a short spiel about the item",
-	"rwd_currency_s02_02":             "This is a short spiel about the item",
-	"rwd_currency_s02_03":             "This is a short spiel about the item",
-	"rwd_currency_s02_04":             "This is a short spiel about the item",
-	"rwd_currency_s04_04":             "1Afn",
-	"rwd_currency_s05_04":             "1Afn",
-	"rwd_currency_s06_04":             "1Afn",
-	"rwd_currency_s07_04":             "1Afn",
-	"rwd_currency_starter_pack_01":    "This is a short spiel about the item",
 	"rwd_decal_0000":                  "Pancakes",
 	"rwd_decal_0001":                  "Graffiti",
 	"rwd_decal_0002":                  "Mixtape",
@@ -415,24 +415,15 @@ var cosmeticNames = map[string]string{
 	"rwd_emissive_0011":               "Coral",
 	"rwd_emissive_0012":               "Wisteria",
 	"rwd_emissive_0013":               "Hot and Cold",
-	"rwd_emissive_0015":               "This is a short spiel about the item",
 	"rwd_emissive_0016":               "Brimstone",
-	"rwd_emissive_0017":               "This is a short spiel about the item",
-	"rwd_emissive_0018":               "This is a short spiel about the item",
-	"rwd_emissive_0019":               "This is a short spiel about the item",
 	"rwd_emissive_0022":               "Sunset",
 	"rwd_emissive_0023":               "Cotton Candy",
 	"rwd_emissive_0024":               "Ghast",
 	"rwd_emissive_0025":               "Black and White",
 	"rwd_emissive_0026":               "Sanguine",
-	"rwd_emissive_0027":               "This is a short spiel about the item",
 	"rwd_emissive_0029":               "Nobility",
 	"rwd_emissive_0030":               "Verdant",
-	"rwd_emissive_0031":               "This is a short spiel about the item",
 	"rwd_emissive_0032":               "Hyperlight",
-	"rwd_emissive_0033":               "This is a short spiel about the item",
-	"rwd_emissive_0035":               "This is a short spiel about the item",
-	"rwd_emissive_0037":               "This is a short spiel about the item",
 	"rwd_emote_0000":                  "Upside Down",
 	"rwd_emote_0001":                  "Equalizer",
 	"rwd_emote_0002":                  "High Note",
@@ -656,36 +647,6 @@ var cosmeticNames = map[string]string{
 	"rwd_title_title_b":               "Flamingo Tamer",
 	"rwd_title_title_default":         "None",
 	"rwd_title_title_e":               "Fists of Fury",
-	"rwd_xp_boost_individual_s01_01":  "This is a short spiel about the item",
-	"rwd_xp_boost_individual_s01_02":  "This is a short spiel about the item",
-	"rwd_xp_boost_individual_s01_03":  "This is a short spiel about the item",
-	"rwd_xp_boost_individual_s01_04":  "This is a short spiel about the item",
-	"rwd_xp_boost_individual_s01_05":  "This is a short spiel about the item",
-	"rwd_xp_boost_individual_s02_01":  "This is a short spiel about the item",
-	"rwd_xp_boost_individual_s02_02":  "This is a short spiel about the item",
-	"rwd_xp_boost_individual_s02_03":  "This is a short spiel about the item",
-	"rwd_xp_boost_individual_s02_04":  "This is a short spiel about the item",
-	"rwd_xp_boost_individual_s02_05":  "This is a short spiel about the item",
-	"rwd_xp_boost_individual_s03_01":  "1Afn",
-	"rwd_xp_boost_individual_s03_02":  "1Afn",
-	"rwd_xp_boost_individual_s03_03":  "1Afn",
-	"rwd_xp_boost_individual_s03_04":  "1Afn",
-	"rwd_xp_boost_individual_s04_01":  "1Afn",
-	"rwd_xp_boost_individual_s04_02":  "1Afn",
-	"rwd_xp_boost_individual_s04_03":  "1Afn",
-	"rwd_xp_boost_individual_s04_04":  "1Afn",
-	"rwd_xp_boost_individual_s05_01":  "1Afn",
-	"rwd_xp_boost_individual_s05_02":  "1Afn",
-	"rwd_xp_boost_individual_s05_03":  "1Afn",
-	"rwd_xp_boost_individual_s05_04":  "1Afn",
-	"rwd_xp_boost_individual_s06_01":  "1Afn",
-	"rwd_xp_boost_individual_s06_02":  "1Afn",
-	"rwd_xp_boost_individual_s06_03":  "1Afn",
-	"rwd_xp_boost_individual_s06_04":  "1Afn",
-	"rwd_xp_boost_individual_s07_01":  "1Afn",
-	"rwd_xp_boost_individual_s07_02":  "1Afn",
-	"rwd_xp_boost_individual_s07_03":  "1Afn",
-	"rwd_xp_boost_individual_s07_04":  "1Afn",
 }
 
 // TintAlignment records which alignment slot a tint belongs to, for tints where
