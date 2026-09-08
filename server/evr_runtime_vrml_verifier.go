@@ -29,6 +29,52 @@ const (
 	VRMLPlayerMapKeyPrefix           = "VRMLUserPlayerMap:"
 )
 
+// commitVRMLVerification commits everything one verification pass produces —
+// the player summary, the entitlement ledger, and the cosmetic revocation and
+// assignment — in a single MultiUpdate transaction.
+//
+// These were four independent writes (two storage, two wallet), leaving three
+// windows in which a crash or a rejected write left the stored VRML state
+// describing entitlements the wallet did not hold, or vice versa. MultiUpdate
+// wraps account updates, storage writes, storage deletes and wallet updates in
+// one pgx.Tx (core_multi.go), so all four now commit or none do.
+//
+// The summary is written under the user; the ledger is a single system-owned
+// object. Both are unconditional writes (no Version), matching what they
+// replaced — the verifier is the only writer of either.
+func commitVRMLVerification(ctx context.Context, nk runtime.NakamaModule, userID, vrmlUserID string, summary []byte, ledger *VRMLEntitlementLedger, entitlements []*VRMLEntitlement) error {
+	ledgerOp, err := vrmlEntitlementLedgerWriteOp(ledger)
+	if err != nil {
+		return fmt.Errorf("failed to render entitlement ledger: %w", err)
+	}
+
+	walletUpdates, err := VRMLEntitlementWalletUpdates(ctx, nk, SystemUserID, "", userID, vrmlUserID, entitlements)
+	if err != nil {
+		return fmt.Errorf("failed to build entitlement wallet updates: %w", err)
+	}
+
+	storageWrites := []*runtime.StorageWrite{
+		{
+			Collection:      StorageCollectionVRML,
+			Key:             StorageKeyVRMLSummary,
+			UserID:          userID,
+			Value:           string(summary),
+			PermissionRead:  1,
+			PermissionWrite: 0,
+		},
+		ledgerOp,
+	}
+
+	// updateLedger stays true: the two wallet updates each wrote a wallet_ledger
+	// row when they were separate nk.WalletUpdate(..., true) calls, and that
+	// audit trail is the record of who granted which cosmetics.
+	if _, _, err := nk.MultiUpdate(ctx, nil, storageWrites, nil, walletUpdates, true); err != nil {
+		return fmt.Errorf("failed to commit VRML verification for %s: %w", userID, err)
+	}
+
+	return nil
+}
+
 type VRMLScanQueueEntry struct {
 	UserID     string `json:"user_id"` // The user ID of the Nakama user
 	VRMLUserID string `json:"vrml_user_id,omitempty"`
@@ -213,56 +259,31 @@ func (v *VRMLScanQueue) Start() error {
 				continue
 			}
 
-			if _, err := v.nk.StorageWrite(v.ctx, []*runtime.StorageWrite{
-				{
-					Collection:      StorageCollectionVRML,
-					Key:             StorageKeyVRMLSummary,
-					UserID:          entry.UserID,
-					Value:           string(data),
-					PermissionRead:  1,
-					PermissionWrite: 0,
-				},
-			}); err != nil {
-				logger.WithField("error", err).Error("Failed to store user")
-				continue
-			}
 			// Count the number of matches played by season
 			entitlements := summary.Entitlements()
 
-			// Revoke the cosmetics the user is no longer entitled to (e.g. from a
-			// previously linked account) and assign the ones they are, in one
-			// transaction. These used to be two sequential wallet writes with a
-			// wallet read between them; the two changesets operate on disjoint
-			// keys, so one read serves both — see VRMLEntitlementWalletUpdates.
-			walletUpdates, err := VRMLEntitlementWalletUpdates(v.ctx, v.nk, SystemUserID, "", entry.UserID, player.User.UserID, entitlements)
-			if err != nil {
-				logger.WithField("error", err).Error("Failed to build VRML entitlement wallet updates")
-				continue
-			}
+			// The ledger entry is staged on a copy: it becomes part of the
+			// in-memory ledger only once the transaction below commits, so a
+			// rejected pass does not leave this process believing it recorded a
+			// user whose wallet it never updated.
+			pending := &VRMLEntitlementLedger{Entries: append(slices.Clone(ledger.Entries), &VRMLEntitlementLedgerEntry{
+				UserID:       entry.UserID,
+				VRMLUserID:   player.User.UserID,
+				VRMLPlayerID: player.ThisGame.PlayerID,
+				Entitlements: entitlements,
+			})}
 
-			if _, _, err := v.nk.MultiUpdate(v.ctx, nil, nil, nil, walletUpdates, true); err != nil {
-				logger.WithField("error", err).Error("Failed to commit VRML entitlement wallet updates")
+			if err := commitVRMLVerification(v.ctx, v.nk, entry.UserID, player.User.UserID, data, pending, entitlements); err != nil {
+				logger.WithField("error", err).Error("Failed to commit VRML verification")
 				continue
 			}
+			ledger.Entries = pending.Entries
 
 			logger.WithFields(map[string]any{
 				"user_id":      entry.UserID,
 				"vrml_user_id": player.User.UserID,
 				"entitlements": entitlements,
-			}).Info("committed VRML entitlement wallet updates")
-
-			// Store the entitlements in the ledger
-			ledger.Entries = append(ledger.Entries, &VRMLEntitlementLedgerEntry{
-				UserID:       entry.UserID,
-				VRMLUserID:   player.User.UserID,
-				VRMLPlayerID: player.ThisGame.PlayerID,
-				Entitlements: entitlements,
-			})
-
-			if err := VRMLEntitlementLedgerStore(v.ctx, v.nk, ledger); err != nil {
-				logger.WithField("error", err).Error("Failed to store ledger")
-				continue
-			}
+			}).Info("committed VRML verification")
 		}
 
 	}()
