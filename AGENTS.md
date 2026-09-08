@@ -159,6 +159,68 @@ So `BenchmarkIntDelete`/`Find`/`GetRank` operate on one key forever, and the
 fixed, and recorded as a correction rather than an edit, because the wrong version
 was committed in `17b79b0fd` and someone may have read it.
 
+**FIXED IN CODE 2026-09-08 — all seven sites are repaired, and this time the
+record was the defect.** Amend-never-rewrite: both blocks above stand as what was
+believed on 2026-08-19. What is no longer true is their disposition. Each ends
+"not fixed here" / "recorded rather than fixed", and that sentence outlived the
+fix by nineteen days. `27adc9169` ("fix(bench): repair b.Loop() conversions that
+measure one key forever") repaired exactly these sites and is an ancestor of
+`6e9e5dbb8` through the merge `a9f11089b`. Verified at `6e9e5dbb8` by reading the
+files, not the log:
+
+- `internal/cronexpr/cronexpr_test.go:592-595` — `i := 0` is hoisted above
+  `for b.Loop()`, `i++` is inside it. `BenchmarkNext` cycles all 21 expressions.
+- `internal/skiplist/skiplist_test.go:216-219`, `:244-247`, `:272-275` — the same
+  hoist, with `Delete`/`Find`/`GetRank(Int(i % 1000000))`.
+- The `Random` variants' setup loops at `:226`, `:254`, `:282` are plain
+  `for i := 0; i < 1000000; i++` with no second increment. They insert 1,000,000.
+
+The orphaned `i := 0`/`i++` pairs `27adc9169` left behind were removed in
+`e73c46634`, also an ancestor. (The `:246-249`/`:276-279` line numbers cited above
+are pre-fix; the repair deleted lines and moved them.)
+
+**What the stale entry cost.** "It is a work-ledger item" is not a description,
+it is an instruction, and it stayed executable after the work was done — on
+2026-09-08 it dispatched an agent to fix seven benchmarks that had been correct
+since 2026-08-20. A "not fixed" note has no expiry and nothing recomputes it: the
+code moved and the record did not. That is precisely the rot the handoff rule at
+the top of this file exists to prevent, occurring in the file that states the
+rule. A defect-class entry must name its disposition **and** the commit that
+changed it, or it keeps dispatching.
+
+**`internal/skiplist` is NOT a `.golangci.yml` skipped dir.** The block above and
+defect class 7 both explain the linter's blindness as "both directories are
+skipped". Half of that is wrong. `exclusions.paths` in `.golangci.yml` lists
+`internal/gopher-lua` and `internal/cronexpr` — and the `formatters` block repeats
+the same two. `internal/skiplist` appears in neither. So `cronexpr` was invisible
+for two reasons and `skiplist` for one: **the linter ran on `skiplist` and still
+could not see the defect.** That is the stronger finding, not the weaker one, and
+it is why the method note in defect class 7 stands unchanged.
+
+**CITATION ROT 2026-09-08 — the 2026-08-20 history rewrite orphaned every SHA
+this file cited before that date.** `5985fa448` above is not the only one; it is
+all of them. The scrub rewrote the commits, so each cited SHA survives only on the
+local branches `backup/pre-scrub-2026-08-20` and
+`backup/post-rebase-pre-msgfilter`. Neither is on `origin`, so in a fresh clone
+these resolve to nothing at all, and in this one they resolve to a commit that is
+not an ancestor of `main` — which reads as "the commit is missing" and is worth
+ruling out before someone re-investigates a settled question. Each rewritten
+commit kept its subject and committer date, so the counterpart is unambiguous:
+
+| cited in this file | subject | resolves from `main` as |
+|---|---|---|
+| `a0c12bae8` | build(lint): migrate .golangci.yml to v2 so the gate can run at all | `1377e1a5c` |
+| `3258006b0` | style: gofmt the four non-compliant files | `36be1d91f` |
+| `8d2075037` | merge: land the P1-2/P1-3 alt-clear migration fixes | `8d1a0916b` |
+| `5985fa448` | fix(test): repair b.Loop() conversions that dropped the loop index | `3a02de044` |
+| `3276ffef6` | build(verify): make golangci-lint a gate, in the three places it wasn't | `11a9be549` |
+| `17b79b0fd` | docs(agents): restore 377 as the lint baseline, and record why 451 was wrong | `10a353fa1` |
+
+The originals are left in place above rather than substituted, because a reader
+who arrives holding one of the dead SHAs needs to find it here. Cite the
+right-hand column going forward. Measurements attributed to `8d2075037` were taken
+at `8d1a0916b`; the tree is identical, only the SHA changed.
+
 ### Pre-push hook (automated gate)
 
 The repo ships a pre-push hook in `.githooks/pre-push` that checks:
@@ -304,6 +366,18 @@ been observed at least once in this repo.
    `b.Loop()` benchmark, print or assert the input actually varies across
    iterations; a benchmark that never changes its input still reports a plausible
    ns/op.
+   **CORRECTED 2026-09-08 — the occurrence list is closed, and one of its two
+   reasons was wrong.** The method note above is untouched and still holds; this
+   corrects only the facts around it. All three occurrences are fixed: the
+   `5985fa448` batch (cite it as `3a02de044`, see the citation-rot table above),
+   the `cronexpr` site and the six `skiplist` sites, the last two in `27adc9169`
+   with follow-up `e73c46634` — both ancestors of `6e9e5dbb8`, verified in the
+   source. Nothing here is open work. And "both directories are skipped dirs" is
+   false: `.golangci.yml` skips `internal/gopher-lua` and `internal/cronexpr`
+   only. `internal/skiplist` is linted, and `ineffassign`/`staticcheck` still saw
+   nothing — which is the point of this entry. The blindness is structural, not a
+   skip-dir artifact, so **a linted directory buys no protection against this
+   class.**
 
 The dominant related anti-pattern, and the one most often found here, is
 **fail-open on a fail-closed control**: a gate that, when its input is missing
