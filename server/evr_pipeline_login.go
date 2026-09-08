@@ -566,6 +566,13 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	if !params.IsWebsocketAuthenticated && !loginHistory.IsAuthorizedIP(session.clientIP) {
 
 		// IP is not authorized. Add a pending authorization entry.
+		//
+		// Not batched with anything (#394 task 2): every path out of this block
+		// returns, so this is the last storage operation the request performs.
+		// The later mutations to loginHistory (Update/UpdateAlternates below) are
+		// unreachable from here and are persisted by the EventUserAuthenticated
+		// handler, in a different goroutine — not a batching candidate, a
+		// different transaction by design.
 		entry := loginHistory.AddPendingAuthorizationIP(params.xpID, session.clientIP, params.loginPayload)
 		if err := StorableWrite(ctx, p.nk, params.profile.ID(), loginHistory); err != nil {
 			return fmt.Errorf("failed to load login history: %w", err)
@@ -1143,6 +1150,12 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		}
 
 		// Use EVRProfileUpdate to persist changes AND invalidate the ServerProfile cache
+		//
+		// Already one transaction, and the only one this function performs (#394
+		// task 2): EVRProfileUpdate commits the account metadata update, the
+		// profile storage write and the ServerProfile cache delete in a single
+		// nk.MultiUpdate (evr_account.go). There is no second write in
+		// initializeSession to batch it with.
 		updated, err := evrProfileUpdateWithRetry(ctx, p.nk, userID, params.profile, reapply.apply)
 		if err != nil {
 			metricsTags["error"] = "failed_update_profile"
@@ -1363,6 +1376,20 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 
 			journal.CommunityValuesCompletedAt = time.Now().UTC()
 
+			// DELIBERATELY NOT batched with the EVRProfileUpdate at the end of
+			// this function (#394 task 2), even though nothing reads between
+			// them: this write and that one have different failure contracts. A
+			// failure here is a warning and the client's profile update still
+			// proceeds; a failure there rejects the request. Folding them into
+			// one transaction would make a version conflict on the enforcement
+			// journal — which is contended enough to have its own retry variant,
+			// SyncJournalAndProfileWithRetry — reject the player's profile
+			// update outright. That is a strictly worse outcome than the
+			// unrecorded community-values timestamp this warning accepts.
+			//
+			// Each write is already atomic in itself: SyncJournalAndProfile
+			// commits the journal and its suspension-profile projection in one
+			// nk.MultiUpdate via StorableWriteMany.
 			if err := SyncJournalAndProfile(ctx, p.nk, userID, journal); err != nil {
 				logger.Warn("Failed to write community values", zap.Error(err))
 			}
@@ -1417,6 +1444,9 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	profile.NewUnlocks = update.NewUnlocks
 	profile.CustomizationPOIs = update.Customization
 
+	// One transaction: account metadata, profile storage write and ServerProfile
+	// cache delete, via nk.MultiUpdate (evr_account.go). See the community-values
+	// write above for why the two are not merged into one.
 	if err := EVRProfileUpdate(ctx, p.nk, userID, profile); err != nil {
 		return fmt.Errorf("failed to update account profile: %w", err)
 	}
@@ -1640,41 +1670,69 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 	}
 }
 
-func (p *EvrPipeline) generateEULA(ctx context.Context, logger *zap.Logger, language string) (evr.EULADocument, error) {
-	// Retrieve the contents from storage
+// eulaDocumentLoadOrSeed reads the stored EULA for a language, seeding storage
+// with the default document on a miss, and returns it with the timestamp that
+// becomes its client-visible version.
+//
+// The seed commits through nk.MultiUpdate rather than nk.StorageWrite (#394
+// task 2 — this was the login path's last raw StorageWrite). There is nothing
+// to batch it WITH: it is a lone system-owned document written only on a read
+// miss, and everything else in the login flow already commits through
+// MultiUpdate. It goes through the same entry point anyway for the reason
+// recorded on StorableWriteMany — MultiUpdate is the one call that can widen to
+// carry account, wallet and delete operations, so a caller that later needs a
+// bigger atomic unit does not change shape.
+//
+// An empty write UserID and SystemUserID are equivalent (runtime_go_nakama.go
+// maps "" to uuid.Nil on both the StorageWrite and the MultiUpdate paths); the
+// owner is now stated explicitly so the write visibly matches the read above it.
+//
+// Split out of generateEULA so it can be tested: EvrPipeline.nk is the concrete
+// *RuntimeGoNakamaModule, and a test cannot substitute a double for it.
+func eulaDocumentLoadOrSeed(ctx context.Context, nk runtime.NakamaModule, language string) (evr.EULADocument, time.Time, error) {
 	key := fmt.Sprintf("eula,%s", language)
 	document := evr.DefaultEULADocument(language)
 
-	var ts time.Time
-
-	if objs, err := p.nk.StorageRead(ctx, []*runtime.StorageRead{{
+	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{{
 		Collection: DocumentStorageCollection,
 		Key:        key,
 		UserID:     SystemUserID,
-	}}); err != nil {
-		return document, fmt.Errorf("failed to read EULA: %w", err)
-	} else if len(objs) > 0 {
-		if err := json.Unmarshal([]byte(objs[0].Value), &document); err != nil {
-			return document, fmt.Errorf("failed to unmarshal EULA: %w", err)
-		}
-		ts = objs[0].UpdateTime.AsTime().UTC()
-	} else {
-		// If the document doesn't exist, store the object
-		jsonBytes, err := json.Marshal(document)
-		if err != nil {
-			return document, fmt.Errorf("failed to marshal EULA: %w", err)
-		}
+	}})
+	if err != nil {
+		return document, time.Time{}, fmt.Errorf("failed to read EULA: %w", err)
+	}
 
-		if _, err = p.nk.StorageWrite(ctx, []*runtime.StorageWrite{{
-			Collection:      DocumentStorageCollection,
-			Key:             key,
-			Value:           string(jsonBytes),
-			PermissionRead:  0,
-			PermissionWrite: 0,
-		}}); err != nil {
-			return document, fmt.Errorf("failed to write EULA: %w", err)
+	if len(objs) > 0 {
+		if err := json.Unmarshal([]byte(objs[0].Value), &document); err != nil {
+			return document, time.Time{}, fmt.Errorf("failed to unmarshal EULA: %w", err)
 		}
-		ts = time.Now().UTC()
+		return document, objs[0].UpdateTime.AsTime().UTC(), nil
+	}
+
+	// The document does not exist yet. Seed it with the default.
+	jsonBytes, err := json.Marshal(document)
+	if err != nil {
+		return document, time.Time{}, fmt.Errorf("failed to marshal EULA: %w", err)
+	}
+
+	if _, _, err := nk.MultiUpdate(ctx, nil, []*runtime.StorageWrite{{
+		Collection:      DocumentStorageCollection,
+		Key:             key,
+		UserID:          SystemUserID,
+		Value:           string(jsonBytes),
+		PermissionRead:  0,
+		PermissionWrite: 0,
+	}}, nil, nil, false); err != nil {
+		return document, time.Time{}, fmt.Errorf("failed to write EULA: %w", err)
+	}
+
+	return document, time.Now().UTC(), nil
+}
+
+func (p *EvrPipeline) generateEULA(ctx context.Context, logger *zap.Logger, language string) (evr.EULADocument, error) {
+	document, ts, err := eulaDocumentLoadOrSeed(ctx, p.nk, language)
+	if err != nil {
+		return document, err
 	}
 
 	msg := document.Text
