@@ -19,14 +19,20 @@ type ImpersonateRequest struct {
 
 // ImpersonateResponse is the response from the admin/impersonate RPC.
 type ImpersonateResponse struct {
-	Token        string             `json:"token"`         // Session JWT
-	RefreshToken string             `json:"refresh_token"` // Refresh JWT
-	UserID       string             `json:"user_id"`
-	Username     string             `json:"username"`
-	DisplayName  string             `json:"display_name"`
-	AvatarURL    string             `json:"avatar_url"`
-	DiscordID    string             `json:"discord_id"`
-	Guilds       []ImpersonateGuild `json:"guilds"` // Guild memberships
+	// RFC 6749 §5.1 field names. `Token` is retained and deprecated so any
+	// deployed caller keeps working; new callers read access_token.
+	AccessToken           string             `json:"access_token"` // Session JWT
+	TokenType             string             `json:"token_type"`   // always "Bearer"
+	ExpiresIn             int                `json:"expires_in"`   // SECONDS FROM NOW
+	RefreshToken          string             `json:"refresh_token"`
+	RefreshTokenExpiresIn int                `json:"refresh_token_expires_in"`
+	Token                 string             `json:"token"` // deprecated: use access_token
+	UserID                string             `json:"user_id"`
+	Username              string             `json:"username"`
+	DisplayName           string             `json:"display_name"`
+	AvatarURL             string             `json:"avatar_url"`
+	DiscordID             string             `json:"discord_id"`
+	Guilds                []ImpersonateGuild `json:"guilds"` // Guild memberships
 }
 
 // ImpersonateGuild is a guild membership entry in the impersonate response.
@@ -152,14 +158,18 @@ func ImpersonateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	}
 
 	response := ImpersonateResponse{
-		Token:        token,
-		RefreshToken: refreshToken,
-		UserID:       targetUserID,
-		Username:     username,
-		DisplayName:  displayName,
-		AvatarURL:    avatarURL,
-		DiscordID:    discordID,
-		Guilds:       guilds,
+		AccessToken:           token,
+		TokenType:             "Bearer",
+		ExpiresIn:             int(time.Until(time.Unix(tokenExpiry, 0)).Seconds()),
+		RefreshToken:          refreshToken,
+		RefreshTokenExpiresIn: int(time.Until(time.Unix(refreshExpiry, 0)).Seconds()),
+		Token:                 token, // deprecated: use AccessToken
+		UserID:                targetUserID,
+		Username:              username,
+		DisplayName:           displayName,
+		AvatarURL:             avatarURL,
+		DiscordID:             discordID,
+		Guilds:                guilds,
 	}
 
 	data, err := json.Marshal(response)

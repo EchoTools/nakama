@@ -28,6 +28,13 @@ type DeviceAuthCode struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 	UserID       string    `json:"user_id,omitempty"`  // set when verified
 	Username     string    `json:"username,omitempty"` // set when verified
+	// Absolute unix expiries of the two tokens above, set when verified.
+	// ExpiresAt is the CODE's 5-minute lifetime and is a different thing --
+	// deriving expires_in from it would report five minutes for a one-hour
+	// token. Stored so the poll response can state RFC 6749 expires_in rather
+	// than making the client decode the JWT or invent a lifetime.
+	TokenExpiry        int64 `json:"token_expiry,omitempty"`
+	RefreshTokenExpiry int64 `json:"refresh_token_expiry,omitempty"`
 }
 
 // loadDeviceAuthCodes loads all pending device auth codes from storage.
@@ -146,7 +153,7 @@ func DeviceAuthRequestRpc(ctx context.Context, logger runtime.Logger, db *sql.DB
 // DeviceAuthPollRpc polls for the status of a device auth code.
 // Public endpoint — no authentication required.
 // Input: { "code": "ABCD-EFGH" }
-// Returns: { "status": "pending" } or { "status": "verified", "token": "...", "refresh_token": "..." }
+// Returns: { "status": "pending" } or { "status": "verified", "access_token": "...", "refresh_token": "..." }
 func DeviceAuthPollRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	if payload == "" {
 		return "", runtime.NewError("missing payload", StatusInvalidArgument)
@@ -185,12 +192,19 @@ func DeviceAuthPollRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 
 	if entry.Status == "verified" {
 		// Return the token and clean up
+		// RFC 6749 §5.1 field names, plus `status` which is this flow's own.
+		// `token` is retained and deprecated so deployed clients keep working;
+		// nevr-runtime reads it today.
 		response, _ := json.Marshal(map[string]interface{}{
-			"status":        "verified",
-			"token":         entry.Token,
-			"refresh_token": entry.RefreshToken,
-			"user_id":       entry.UserID,
-			"username":      entry.Username,
+			"status":                   "verified",
+			"access_token":             entry.Token,
+			"token_type":               "Bearer",
+			"expires_in":               int(time.Until(time.Unix(entry.TokenExpiry, 0)).Seconds()),
+			"refresh_token":            entry.RefreshToken,
+			"refresh_token_expires_in": int(time.Until(time.Unix(entry.RefreshTokenExpiry, 0)).Seconds()),
+			"user_id":                  entry.UserID,
+			"username":                 entry.Username,
+			"token":                    entry.Token, // deprecated: use access_token
 		})
 
 		// Delete the code — one-time use
@@ -297,6 +311,8 @@ func DeviceAuthVerifyRpc(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	entry.RefreshToken = refreshToken
 	entry.UserID = userID
 	entry.Username = username
+	entry.TokenExpiry = tokenExpiry
+	entry.RefreshTokenExpiry = refreshExpiry
 
 	if err := storeDeviceAuthCodes(ctx, nk, codes); err != nil {
 		logger.WithField("error", err).Error("Failed to store verified device auth")
@@ -320,18 +336,30 @@ func DeviceAuthRefreshRpc(ctx context.Context, logger runtime.Logger, db *sql.DB
 		return "", runtime.NewError("missing payload", StatusInvalidArgument)
 	}
 
+	// RFC 6749 §6 names this field `refresh_token`. This RPC originally took
+	// `token`, which is why nevr-runtime sends that; both are accepted so no
+	// deployed client breaks, and `refresh_token` is preferred when both are
+	// present. New clients SHALL send `refresh_token`.
 	var request struct {
-		Token string `json:"token"`
+		RefreshToken string `json:"refresh_token"`
+		Token        string `json:"token"` // deprecated: pre-RFC field name
 	}
-	if err := json.Unmarshal([]byte(payload), &request); err != nil || request.Token == "" {
-		return "", runtime.NewError("invalid payload: token required", StatusInvalidArgument)
+	if err := json.Unmarshal([]byte(payload), &request); err != nil {
+		return "", runtime.NewError("invalid payload: refresh_token required", StatusInvalidArgument)
+	}
+	refreshToken := request.RefreshToken
+	if refreshToken == "" {
+		refreshToken = request.Token
+	}
+	if refreshToken == "" {
+		return "", runtime.NewError("invalid payload: refresh_token required", StatusInvalidArgument)
 	}
 
 	// Validate the refresh token JWT directly (signature + expiry)
 	config := nk.(*RuntimeGoNakamaModule).config
 	encryptionKey := []byte(config.GetSession().EncryptionKey)
 
-	userID, username, tokenVars, exp, _, _, ok := parseToken(encryptionKey, request.Token)
+	userID, username, tokenVars, exp, _, _, ok := parseToken(encryptionKey, refreshToken)
 	if !ok {
 		return "", runtime.NewError("invalid or expired refresh token", StatusUnauthenticated)
 	}
@@ -372,11 +400,24 @@ func DeviceAuthRefreshRpc(ctx context.Context, logger runtime.Logger, db *sql.DB
 		return "", runtime.NewError("failed to generate refresh token", StatusInternalError)
 	}
 
+	// RFC 6749 §5.1: access_token, token_type, expires_in, refresh_token.
+	// `expires_in` is SECONDS FROM NOW, not an absolute time -- without it a
+	// client has to decode the JWT or invent a lifetime, and nevr-runtime
+	// currently invents 30 days for the refresh token
+	// (nevr-runtime plugins/common/include/auth_token_refresh.h:88). A client
+	// guessing at a server's expiry policy is a defect waiting for the policy
+	// to change.
+	//
+	// `token` is retained, deprecated, so deployed clients keep working.
 	response, _ := json.Marshal(map[string]interface{}{
-		"token":         newToken,
-		"refresh_token": newRefresh,
-		"user_id":       userID.String(),
-		"username":      username,
+		"access_token":             newToken,
+		"token_type":               "Bearer",
+		"expires_in":               int(time.Until(time.Unix(tokenExpiry, 0)).Seconds()),
+		"refresh_token":            newRefresh,
+		"refresh_token_expires_in": int(time.Until(time.Unix(refreshExpiry, 0)).Seconds()),
+		"user_id":                  userID.String(),
+		"username":                 username,
+		"token":                    newToken, // deprecated: use access_token
 	})
 
 	logger.WithFields(map[string]interface{}{"username": username, "user_id": userID.String()}).Info("Device auth token refreshed")
