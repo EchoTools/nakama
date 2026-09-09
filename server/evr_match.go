@@ -233,19 +233,12 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 	return &state, int(state.tickRate), string(labelJson)
 }
 
-var (
-	ErrJoinRejectReasonUnassignedLobby           = errors.New("unassigned lobby")
-	ErrJoinRejectReasonDuplicateJoin             = errors.New("duplicate join")
-	ErrJoinRejectDuplicateEvrID                  = errors.New("duplicate evr id")
-	ErrJoinRejectReasonLobbyFull                 = errors.New("lobby full")
-	ErrJoinRejectReasonReservationViolated       = errors.New("lobby full: reservation violated")
-	ErrJoinRejectReasonFailedToAssignTeam        = errors.New("failed to assign team")
-	ErrJoinInvalidRoleForLevel                   = errors.New("invalid role for level")
-	ErrJoinRejectReasonPartyMembersMustHaveRoles = errors.New("party members must have roles")
-	ErrJoinRejectReasonMatchTerminating          = errors.New("match terminating")
-	ErrJoinRejectReasonMatchClosed               = errors.New("match closed to new entrants")
-	ErrJoinRejectReasonFeatureMismatch           = errors.New("feature mismatch")
-)
+// ErrJoinInvalidRoleForLevel is not a MatchJoinAttempt reject reason and never
+// crosses that boundary. The reasons that do are typed *JoinRejectReason values
+// registered in evr_join_reject_reason.go; the returns below put their .Error()
+// on the wire, byte-for-byte as before, and the consumer decodes them back to
+// the typed identity. See #585 proposal 4.
+var ErrJoinInvalidRoleForLevel = errors.New("invalid role for level")
 
 type EntrantMetadata struct {
 	Presence     *EvrMatchPresence

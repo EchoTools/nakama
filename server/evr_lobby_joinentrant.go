@@ -28,67 +28,48 @@ var (
 	ErrFailedToTrackEntrantStream = errors.New("failed to track entrant stream")
 )
 
-// Stable identities for a refused join. These are the values log consumers
-// classify on. They are constants, deliberately decoupled from the wording of
-// the ErrJoinRejectReason* sentinels, so rewording a player-facing message can
-// never silently re-route an alert. See #585 proposal 4.
-const (
-	RejectReasonUnknown               = "unknown"
-	RejectReasonNone                  = ""
-	RejectReasonLobbyFull             = "lobby_full"
-	RejectReasonReservationViolated   = "reservation_violated"
-	RejectReasonMatchClosed           = "match_closed"
-	RejectReasonMatchTerminating      = "match_terminating"
-	RejectReasonDuplicateJoin         = "duplicate_join"
-	RejectReasonDuplicateEvrID        = "duplicate_evr_id"
-	RejectReasonUnassignedLobby       = "unassigned_lobby"
-	RejectReasonFeatureMismatch       = "feature_mismatch"
-	RejectReasonFailedToAssignTeam    = "failed_to_assign_team"
-	RejectReasonPartyMembersNeedRoles = "party_members_must_have_roles"
-	RejectReasonMatchNotFound         = "match_not_found"
-	RejectReasonMatchLabelEmpty       = "match_label_empty"
-)
+// joinRejectOutcome turns a MatchJoinAttempt result into the three things
+// LobbyJoinEntrants needs from it: the error to return to the caller (nil when
+// the join was accepted), the stable reject_reason code for the log line, and
+// whether a slot reservation was violated.
+//
+// Routing is errors.Is over the identity JoinRejectReasonOf decoded at the
+// boundary, never a comparison against a reason message. That is #585
+// proposal 4's typed half, and it is why a prefix-sibling message such as
+// "lobby full: reservation violated" cannot be misrouted as "lobby full": there
+// is no string comparison in this function to loosen.
+//
+// It is a pure function of the four values JoinAttempt returns, so the whole
+// routing table is testable without a session, a registry or a NakamaModule.
+func joinRejectOutcome(found, allowed bool, reason, labelStr string) (rejectCode string, reservationViolated bool, err error) {
+	rejectErr := JoinRejectReasonOf(reason)
 
-// RejectReasonCode maps the free-text reason that crosses the Nakama
-// MatchJoinAttempt boundary to a stable code.
-//
-// This is the cheap half of #585 proposal 4: it removes English-parsing from
-// log consumers and puts the string matching in exactly one place, under test.
-// The expensive half — replacing the string channel with typed sentinels
-// compared via errors.Is — is a separate change; Nakama's MatchJoinAttempt
-// contract returns `reason` as a plain string, so that refactor touches every
-// rejection site and every assertion that pins one.
-//
-// Matching is exact equality, never prefix or substring: "lobby full" is a
-// prefix of "lobby full: reservation violated", so a prefix match would
-// collapse the two. TestRejectReasonCode_NoPrefixCollision pins that.
-func RejectReasonCode(reason string) string {
-	switch reason {
-	case "":
-		return RejectReasonNone
-	case ErrJoinRejectReasonLobbyFull.Error():
-		return RejectReasonLobbyFull
-	case ErrJoinRejectReasonReservationViolated.Error():
-		return RejectReasonReservationViolated
-	case ErrJoinRejectReasonMatchClosed.Error():
-		return RejectReasonMatchClosed
-	case ErrJoinRejectReasonMatchTerminating.Error():
-		return RejectReasonMatchTerminating
-	case ErrJoinRejectReasonDuplicateJoin.Error():
-		return RejectReasonDuplicateJoin
-	case ErrJoinRejectDuplicateEvrID.Error():
-		return RejectReasonDuplicateEvrID
-	case ErrJoinRejectReasonUnassignedLobby.Error():
-		return RejectReasonUnassignedLobby
-	case ErrJoinRejectReasonFeatureMismatch.Error():
-		return RejectReasonFeatureMismatch
-	case ErrJoinRejectReasonFailedToAssignTeam.Error():
-		return RejectReasonFailedToAssignTeam
-	case ErrJoinRejectReasonPartyMembersMustHaveRoles.Error():
-		return RejectReasonPartyMembersNeedRoles
-	default:
-		return RejectReasonUnknown
+	rejectCode = RejectReasonCode(reason)
+	reservationViolated = errors.Is(rejectErr, ErrJoinRejectReasonReservationViolated)
+
+	switch {
+	case !found:
+		err = LobbyErrMatchNotFound
+		rejectCode = RejectReasonMatchNotFound
+	case labelStr == "":
+		err = LobbyErrMatchLabelEmpty
+		rejectCode = RejectReasonMatchLabelEmpty
+	case errors.Is(rejectErr, ErrJoinRejectDuplicateEvrID):
+		err = LobbyErrDuplicateEvrID
+	case errors.Is(rejectErr, ErrJoinRejectReasonMatchClosed):
+		err = LobbyErrMatchClosed
+	case reservationViolated:
+		// The lobby was genuinely over capacity despite the player holding a valid slot
+		// reservation. This is a consistency violation — log at ERROR so it is visible.
+		err = NewLobbyError(ServerIsFull, "lobby full: reservation violated — lobby was over capacity despite a valid slot reservation")
+	case !allowed:
+		// Wrap the base error with the specific reason provided by JoinAttempt.
+		// The raw reason is used deliberately: it is the player-visible text and
+		// must not change with this representation.
+		err = fmt.Errorf("%w: %s", LobbyErrJoinNotAllowed, reason)
 	}
+
+	return rejectCode, reservationViolated, err
 }
 
 // decodeMatchLabel parses the label string the match handler returned alongside
@@ -179,7 +160,6 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 
 	sessionCtx := session.Context()
 
-	var err error
 	var found, allowed, isNew bool
 	var reason string
 	var labelStr string
@@ -187,36 +167,12 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	// Trigger MatchJoinAttempt
 	found, allowed, isNew, reason, labelStr, _ = matchRegistry.JoinAttempt(sessionCtx, label.ID.UUID, label.ID.Node, e.UserID, e.SessionID, e.Username, e.SessionExpiry, nil, e.ClientIP, e.ClientPort, label.ID.Node, metadata)
 
-	if reason == ErrJoinRejectReasonDuplicateJoin.Error() {
+	if errors.Is(JoinRejectReasonOf(reason), ErrJoinRejectReasonDuplicateJoin) {
 		logger.Debug("duplicate join attempt; no-op", zap.String("uid", e.UserID.String()), zap.String("sid", e.SessionID.String()), zap.String("mid", label.ID.UUID.String()))
 		return nil
 	}
 
-	reservationViolated := reason == ErrJoinRejectReasonReservationViolated.Error()
-
-	rejectCode := RejectReasonCode(reason)
-
-	switch {
-	case !found:
-		err = LobbyErrMatchNotFound
-		rejectCode = RejectReasonMatchNotFound
-	case labelStr == "":
-		err = LobbyErrMatchLabelEmpty
-		rejectCode = RejectReasonMatchLabelEmpty
-	case reason == ErrJoinRejectDuplicateEvrID.Error():
-		// Assuming ErrJoinRejectDuplicateEvrID is defined elsewhere and its Error() method returns the specific string
-		err = LobbyErrDuplicateEvrID
-	case reason == ErrJoinRejectReasonMatchClosed.Error():
-		// Assuming ErrJoinRejectReasonMatchClosed is defined elsewhere and its Error() method returns the specific string
-		err = LobbyErrMatchClosed
-	case reservationViolated:
-		// The lobby was genuinely over capacity despite the player holding a valid slot
-		// reservation. This is a consistency violation — log at ERROR so it is visible.
-		err = NewLobbyError(ServerIsFull, "lobby full: reservation violated — lobby was over capacity despite a valid slot reservation")
-	case !allowed:
-		// Wrap the base error with the specific reason provided by JoinAttempt
-		err = fmt.Errorf("%w: %s", LobbyErrJoinNotAllowed, reason)
-	}
+	rejectCode, reservationViolated, err := joinRejectOutcome(found, allowed, reason, labelStr)
 
 	if err != nil {
 		entrantUserIDs := make([]string, len(entrants))

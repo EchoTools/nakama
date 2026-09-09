@@ -82,9 +82,7 @@ func TestReconnectReservation_RoleSlotNotStolenByNewcomer(t *testing.T) {
 		t.Fatalf("newcomer was seated in a role slot held by a live reconnect reservation; "+
 			"blue was 3 seated + 1 reserved against TeamSize %d (reason=%q)", state.TeamSize, reason)
 	}
-	if reason != ErrJoinRejectReasonLobbyFull.Error() {
-		t.Fatalf("expected %q, got %q", ErrJoinRejectReasonLobbyFull.Error(), reason)
-	}
+	requireJoinRejectReason(t, reason, ErrJoinRejectReasonLobbyFull)
 }
 
 // TestReconnectReservation_CrashedPlayerRejoinsAfterNewcomerAttempt is the #584

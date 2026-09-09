@@ -116,7 +116,7 @@ func TestMatchJoinAttempt_LeaderPartyReservations_AtomicAndCapacityGated(t *test
 		existingPlayers   int
 		reservations      int // party followers reserved alongside the leader
 		wantAccepted      bool
-		wantReason        string
+		wantReason        *JoinRejectReason
 		wantReservedCount int
 	}{
 		{
@@ -135,7 +135,7 @@ func TestMatchJoinAttempt_LeaderPartyReservations_AtomicAndCapacityGated(t *test
 			existingPlayers:   11, // OpenSlots() == 1; leader + 1 follower needs 2
 			reservations:      1,
 			wantAccepted:      false,
-			wantReason:        ErrJoinRejectReasonLobbyFull.Error(),
+			wantReason:        ErrJoinRejectReasonLobbyFull,
 			wantReservedCount: 0,
 		},
 	}
@@ -163,8 +163,8 @@ func TestMatchJoinAttempt_LeaderPartyReservations_AtomicAndCapacityGated(t *test
 			require.Truef(t, ok, "MatchJoinAttempt returned non-*MatchLabel: %T", gotState)
 
 			require.Equalf(t, tt.wantAccepted, accepted, "accepted mismatch (reason=%q)", reason)
-			if tt.wantReason != "" {
-				require.Equal(t, tt.wantReason, reason)
+			if tt.wantReason != nil {
+				requireJoinRejectReason(t, reason, tt.wantReason)
 			}
 
 			require.Lenf(t, label.reservationMap, tt.wantReservedCount,

@@ -308,9 +308,9 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 		presence     *EvrMatchPresence
 		spectator    bool
 		wantAccepted bool
-		wantReason   string // expected reject reason when not accepted
-		wantSize     int    // resulting label Size
-		wantCount    int    // resulting label PlayerCount
+		wantReason   *JoinRejectReason // expected reject identity when not accepted
+		wantSize     int               // resulting label Size
+		wantCount    int               // resulting label PlayerCount
 	}
 
 	tests := []testCase{
@@ -320,7 +320,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 			state:        makeState(true, UnassignedLobby, evr.ModeUnloaded, 3, 2, 0, 0, false, presences[1:3]),
 			presence:     presences[0],
 			wantAccepted: false,
-			wantReason:   ErrJoinRejectReasonUnassignedLobby.Error(),
+			wantReason:   ErrJoinRejectReasonUnassignedLobby,
 			wantSize:     2,
 			wantCount:    2,
 		},
@@ -343,7 +343,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 			presence:     presences[0],
 			spectator:    true,
 			wantAccepted: false,
-			wantReason:   ErrJoinRejectReasonMatchTerminating.Error(),
+			wantReason:   ErrJoinRejectReasonMatchTerminating,
 			wantSize:     2,
 			wantCount:    2,
 		},
@@ -353,7 +353,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 			state:        makeState(false, PublicLobby, evr.ModeArenaPublic, 3, 2, 0, 0, false, presences[1:3]),
 			presence:     presences[0],
 			wantAccepted: false,
-			wantReason:   ErrJoinRejectReasonMatchClosed.Error(),
+			wantReason:   ErrJoinRejectReasonMatchClosed,
 			wantSize:     2,
 			wantCount:    2,
 		},
@@ -373,7 +373,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 			state:        makeState(true, PublicLobby, evr.ModeArenaPublic, 2, 2, 4, 0, false, presences[1:3]),
 			presence:     presences[0],
 			wantAccepted: false,
-			wantReason:   ErrJoinRejectReasonLobbyFull.Error(),
+			wantReason:   ErrJoinRejectReasonLobbyFull,
 			wantSize:     2,
 			wantCount:    2,
 		},
@@ -420,8 +420,8 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				if joined.EntrantID == uuid.Nil {
 					t.Errorf("expected a freshly assigned EntrantID, got nil")
 				}
-			} else if gotMsg != tt.wantReason {
-				t.Errorf("reject reason = %q, want %q", gotMsg, tt.wantReason)
+			} else if !isJoinRejectReason(gotMsg, tt.wantReason) {
+				t.Errorf("reject reason %q did not route to %q (code %q)", gotMsg, tt.wantReason.Error(), tt.wantReason.Code())
 			}
 
 			if label.Size != tt.wantSize {
@@ -522,7 +522,7 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 		name        string
 		setup       func() (*MatchLabel, *EvrMatchPresence, map[string]string)
 		wantAllowed bool
-		wantReason  string
+		wantReason  *JoinRejectReason
 	}{
 		{
 			name: "MatchJoinAttempt returns full if both teams are full",
@@ -553,7 +553,7 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 				return state, joiner, NewJoinMetadata(joiner).ToMatchMetadata()
 			},
 			wantAllowed: false,
-			wantReason:  ErrJoinRejectReasonLobbyFull.Error(),
+			wantReason:  ErrJoinRejectReasonLobbyFull,
 		},
 		{
 			name: "MatchJoinAttempt returns full if both teams are full, and player has no team set",
@@ -584,7 +584,7 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 				return state, joiner, NewJoinMetadata(joiner).ToMatchMetadata()
 			},
 			wantAllowed: false,
-			wantReason:  ErrJoinRejectReasonLobbyFull.Error(),
+			wantReason:  ErrJoinRejectReasonLobbyFull,
 		},
 		{
 			name: "Combat: rejects join when both teams are full (5v5)",
@@ -617,7 +617,7 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 				return state, joiner, NewJoinMetadata(joiner).ToMatchMetadata()
 			},
 			wantAllowed: false,
-			wantReason:  ErrJoinRejectReasonLobbyFull.Error(),
+			wantReason:  ErrJoinRejectReasonLobbyFull,
 		},
 		{
 			name: "Combat: rejects join when target team is full but other has space",
@@ -651,7 +651,7 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 				return state, joiner, NewJoinMetadata(joiner).ToMatchMetadata()
 			},
 			wantAllowed: false,
-			wantReason:  ErrJoinRejectReasonLobbyFull.Error(),
+			wantReason:  ErrJoinRejectReasonLobbyFull,
 		},
 		{
 			name: "Arena: rejects join when target team (4) is full",
@@ -685,7 +685,7 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 				return state, joiner, NewJoinMetadata(joiner).ToMatchMetadata()
 			},
 			wantAllowed: false,
-			wantReason:  ErrJoinRejectReasonLobbyFull.Error(),
+			wantReason:  ErrJoinRejectReasonLobbyFull,
 		},
 		{
 			name: "Social: rejects join when lobby is at 12 players",
@@ -714,7 +714,7 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 				return state, joiner, NewJoinMetadata(joiner).ToMatchMetadata()
 			},
 			wantAllowed: false,
-			wantReason:  ErrJoinRejectReasonLobbyFull.Error(),
+			wantReason:  ErrJoinRejectReasonLobbyFull,
 		},
 	}
 	for _, tt := range tests {
@@ -732,8 +732,8 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 			if gotAllowed != tt.wantAllowed {
 				t.Errorf("EvrMatch.MatchJoinAttempt() gotAllowed = %v, want %v", gotAllowed, tt.wantAllowed)
 			}
-			if gotResponse != tt.wantReason {
-				t.Errorf("EvrMatch.MatchJoinAttempt() gotResponse = %v, want %v", gotResponse, tt.wantReason)
+			if !isJoinRejectReason(gotResponse, tt.wantReason) {
+				t.Errorf("EvrMatch.MatchJoinAttempt() reject reason %q did not route to %q (code %q)", gotResponse, tt.wantReason.Error(), tt.wantReason.Code())
 			}
 		})
 	}
@@ -1287,7 +1287,7 @@ func TestReconnectReservation_RejoinRestoresRole(t *testing.T) {
 			if diff := cmp.Diff(true, allowed); diff != "" {
 				t.Fatalf("expected reconnect join to be allowed (-want +got):\n%s", diff)
 			}
-			if diff := cmp.Diff(false, reason == ErrJoinRejectReasonMatchClosed.Error()); diff != "" {
+			if diff := cmp.Diff(false, isJoinRejectReason(reason, ErrJoinRejectReasonMatchClosed)); diff != "" {
 				t.Fatalf("expected reconnect flow to bypass match-closed rejection (-want +got):\n%s", diff)
 			}
 			restored := &EvrMatchPresence{}
@@ -1328,9 +1328,7 @@ func TestReconnectReservation_RejoinBypassesClosedMatch(t *testing.T) {
 			if diff := cmp.Diff(false, allowedWithoutReservation); diff != "" {
 				t.Fatalf("expected closed match join rejection without reservation (-want +got):\n%s", diff)
 			}
-			if diff := cmp.Diff(ErrJoinRejectReasonMatchClosed.Error(), reasonWithoutReservation); diff != "" {
-				t.Fatalf("unexpected rejection reason without reservation (-want +got):\n%s", diff)
-			}
+			requireJoinRejectReason(t, reasonWithoutReservation, ErrJoinRejectReasonMatchClosed)
 
 			state.reconnectReservations[userID.String()] = &reconnectReservation{
 				Presence:     reconnectTestPlayer("bypass-old", evr.TeamOrange),
@@ -1343,7 +1341,7 @@ func TestReconnectReservation_RejoinBypassesClosedMatch(t *testing.T) {
 			if diff := cmp.Diff(true, allowedWithReservation); diff != "" {
 				t.Fatalf("expected reconnect join to bypass closed match (-want +got):\n%s", diff)
 			}
-			if diff := cmp.Diff(false, reasonWithReservation == ErrJoinRejectReasonMatchClosed.Error()); diff != "" {
+			if diff := cmp.Diff(false, isJoinRejectReason(reasonWithReservation, ErrJoinRejectReasonMatchClosed)); diff != "" {
 				t.Fatalf("expected reservation path to bypass match-closed rejection (-want +got):\n%s", diff)
 			}
 		})
@@ -1684,9 +1682,7 @@ func TestMatchJoinAttempt_DifferentUserDuplicateEvrIDStillRejected(t *testing.T)
 	if allowed {
 		t.Fatalf("expected different-user duplicate EVR-ID to be rejected")
 	}
-	if diff := cmp.Diff(ErrJoinRejectDuplicateEvrID.Error(), reason); diff != "" {
-		t.Fatalf("unexpected rejection reason (-want +got):\n%s", diff)
-	}
+	requireJoinRejectReason(t, reason, ErrJoinRejectDuplicateEvrID)
 
 	// Original player should still be in the match
 	if _, ok := state.presenceMap[existing.GetSessionId()]; !ok {
@@ -2138,9 +2134,7 @@ func TestMatchJoinAttempt_LobbyFull_WithoutReservation_ReturnsLobbyFull(t *testi
 	if allowed {
 		t.Fatalf("Expected join to be rejected when lobby is full without reservation")
 	}
-	if reason != ErrJoinRejectReasonLobbyFull.Error() {
-		t.Errorf("Expected reason '%s', got '%s'", ErrJoinRejectReasonLobbyFull.Error(), reason)
-	}
+	requireJoinRejectReason(t, reason, ErrJoinRejectReasonLobbyFull)
 }
 
 // TestMatchJoinAttempt_LobbyFull_WithReservation_ReturnsReservationViolated verifies the
@@ -2217,12 +2211,15 @@ func TestMatchJoinAttempt_LobbyFull_WithReservation_ReturnsReservationViolated(t
 		t.Fatalf("Expected join to be rejected: lobby overflow despite reservation")
 	}
 
-	// The reason should be a reservation violation (not just "lobby full")
-	// We use a string literal since ErrJoinRejectReasonReservationViolated doesn't exist yet
-	expectedReason := "lobby full: reservation violated"
-	if reason != expectedReason && reason != ErrJoinRejectReasonLobbyFull.Error() {
-		// Accept either the new error or the fallback for now
-		t.Logf("Reason: %s", reason)
+	// The reason must route to a capacity refusal — either the broken-promise
+	// identity or plain contention. Asserted on the typed identity, never on the
+	// wire text: the two messages are prefix siblings ("lobby full" prefixes
+	// "lobby full: reservation violated"), which is exactly what #585 proposal 4
+	// stopped routing on.
+	if !isJoinRejectReason(reason, ErrJoinRejectReasonReservationViolated) &&
+		!isJoinRejectReason(reason, ErrJoinRejectReasonLobbyFull) {
+		t.Errorf("expected a capacity refusal (%q or %q), got %q",
+			RejectReasonReservationViolated, RejectReasonLobbyFull, RejectReasonCode(reason))
 	}
 
 	// Most critically: the reservation must be RESTORED, not lost
@@ -2314,9 +2311,11 @@ func TestMatchJoinAttempt_LobbyFull_RoleSlots_WithReservation_ReturnsReservation
 		t.Fatalf("Expected join to be rejected: TeamBlue is full despite reservation")
 	}
 
-	// The reason should indicate a reservation violation or lobby full
-	if reason != ErrJoinRejectReasonLobbyFull.Error() {
-		t.Logf("Reason: %s (expected lobby full or reservation violated)", reason)
+	// The reason should indicate a reservation violation or lobby full.
+	if !isJoinRejectReason(reason, ErrJoinRejectReasonReservationViolated) &&
+		!isJoinRejectReason(reason, ErrJoinRejectReasonLobbyFull) {
+		t.Errorf("expected a capacity refusal (%q or %q), got %q",
+			RejectReasonReservationViolated, RejectReasonLobbyFull, RejectReasonCode(reason))
 	}
 
 	// Most critically: the reservation must be RESTORED, not lost

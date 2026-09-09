@@ -124,9 +124,7 @@ func TestMatchJoinAttempt_CreateReservationHoldsSlotAgainstBackfill(t *testing.T
 	if allowed {
 		t.Fatalf("expected backfill join to be rejected while the party reservation holds the slot, got allowed with reason=%q", reason)
 	}
-	if reason != ErrJoinRejectReasonLobbyFull.Error() {
-		t.Fatalf("expected lobby-full rejection for backfill join, got: %s", reason)
-	}
+	requireJoinRejectReason(t, reason, ErrJoinRejectReasonLobbyFull)
 	state = resultState.(*MatchLabel)
 
 	if _, exists := state.reservationMap[followerLoginSessionID.String()]; !exists {
