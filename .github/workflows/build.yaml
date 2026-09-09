@@ -49,11 +49,33 @@ jobs:
       # Pinned, not @latest, so the finding set CI sees is reproducible and a
       # linter release arrives as a deliberate bump rather than as a red build
       # on a branch that changed nothing near the new check. Version drift is
-      # not hypothetical here: 2.13.1 reports two SA4023 findings on main that
+      # not hypothetical here: 2.13.x reports two SA4023 findings on main that
       # 2.12.2 does not, which is the whole reason the count-ratchet this job
       # used to run was never satisfiable (see `lint` in the justfile).
+      #
+      # 2.12.2 is unusable above, not merely stale. `go-version: stable` is Go
+      # 1.27.1, and 2.12.2 vendors honnef.co/go/tools v0.7.0, whose IR builder
+      # predates Go 1.27's struct initializers with direct references to
+      # embedded fields (golang/go#9859). It hits that construct in the Go 1.27
+      # stdlib -- `internal/poll`, pulled in transitively by nearly every
+      # package -- and dies:
+      #
+      #   [runner] Panic: buildir: package "poll" (isInitialPkg: false,
+      #   needAnalyzeSource: true): unexpected expr: *ast.KeyValueExpr
+      #
+      # golangci-lint exits 3, so this is a did-not-run failure, not a finding
+      # (AGENTS.md defect class 4; the justfile recipe hard-fails on it rather
+      # than reporting a clean tree). Reproduced locally on 069fc479f by
+      # building 2.12.2 with the go1.27.0 toolchain.
+      #
+      # 2.13.2 vendors honnef.co/go/tools v0.8.1 (Staticcheck 2026.2.1), and
+      # 2026.2 is the release that "adds support for ... struct initializers
+      # with direct references to embedded fields". Verified on 069fc479f:
+      # 2.13.2 under Go 1.27 runs to completion with 266 full-tree findings, an
+      # identical set to 2.13.2 under Go 1.26 -- so the toolchain no longer
+      # moves the report either.
       - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
 
       - name: Download modules
         run: go mod download
