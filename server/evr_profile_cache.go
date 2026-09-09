@@ -478,6 +478,37 @@ func GetFieldByJSONProperty(i interface{}, fieldName string) (bool, error) {
 func LoadoutEquipItem(loadout evr.CosmeticLoadout, category string, name string) (evr.CosmeticLoadout, error) {
 	newLoadout := loadout
 
+	// alignmentTints routes a tint to an ALIGNMENT slot. Membership here is the
+	// only thing that makes an alignment tint equippable: the game puts one in
+	// tint_alignment_a/b, while the remotelog-based cosmetic extraction reports
+	// only THAT an item was set and never which slot. A tint missing from this
+	// map falls through to the social Tint field, and the player watches their
+	// selection not save.
+	//
+	// The slot semantics are declared by the game, in plain JSON, no
+	// decompression, at:
+	//
+	//	sourcedb/rad15/json/r14/multiplayer/equip_slots.json   (1589 bytes)
+	//	  {"equipslot":"tint"}                                         no alignment key
+	//	  {"equipslot":"tint_alignment_a","alignmentrequirement":0}    BLUE
+	//	  {"equipslot":"tint_alignment_b","alignmentrequirement":1}    ORANGE
+	//	  {"equipslot":"tint_body","alignmentrequirement":-1}          none
+	//
+	// That file also settles a question that had been guessed: tint and
+	// tint_body are INDEPENDENTLY declared slots. They both hold
+	// tint_neutral_l_default because that is the default, not because they are
+	// coupled. Prefer reading equip_slots.json over extending this list by hand.
+	//
+	// An id does not have to look like its slot. tint_neutral_summer_a_default
+	// says "neutral" and is an A-slot tint; rwd_tint_s1_b_default and
+	// rwd_tint_s1_d_default say nothing at all. For those three the ONLY record
+	// that survived is Andrew's hand-typed field names in evr/core_account.go --
+	// TintBlueTerraformed, TintBlueSeafoam, TintBlueLuminescence. Display names
+	// never carry the slot: "Luminescence" does not tell you it is BLUE.
+	//
+	// Andrew, 2026-08-31: slot handling is done correctly in nevr-server-rs and
+	// the new nevr-runtime DLLs, so this is expected to become unnecessary.
+	// Recorded until it is.
 	alignmentTints := map[string][]string{
 		"tint_alignment_a": {
 			"tint_blue_a_default",
@@ -491,7 +522,9 @@ func LoadoutEquipItem(loadout evr.CosmeticLoadout, category string, name string)
 			"tint_blue_i_default",
 			"tint_blue_j_default",
 			"tint_blue_k_default",
-			"tint_neutral_summer_a_default",
+			"tint_neutral_summer_a_default", // TintBlueTerraformed
+			"rwd_tint_s1_b_default",         // TintBlueSeafoam
+			"rwd_tint_s1_d_default",         // TintBlueLuminescence
 			"rwd_tint_s3_tint_e",
 		},
 		"tint_alignment_b": {
