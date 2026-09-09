@@ -43,6 +43,11 @@ type altClearTestModule struct {
 	// connection or an unavailable index all surface here.
 	indexErr error
 
+	// listErr, when set, fails StorageList. That is how a run dies partway
+	// through: the walk is the only thing that can fail after the completion
+	// marker has been consulted but before it would be written.
+	listErr error
+
 	// conflictUserIDs model a racing login: that row's stored version moved
 	// on, so an OCC write carrying the version the migration read is
 	// rejected -- and with it the entire batch.
@@ -60,10 +65,18 @@ func newAltClearTestModule() *altClearTestModule {
 }
 
 func (m *altClearTestModule) StorageList(ctx context.Context, callerID, userID, collection string, limit int, cursor string) ([]*api.StorageObject, string, error) {
+	if m.listErr != nil {
+		return nil, "", m.listErr
+	}
 	if cursor != "" {
 		return nil, "", nil
 	}
 	return m.listed, "", nil
+}
+
+// migrationTestUserID builds a distinct, well-formed user ID for bulk fixtures.
+func migrationTestUserID(n int) string {
+	return fmt.Sprintf("00000000-0000-0000-0000-%012d", n)
 }
 
 func (m *altClearTestModule) StorageIndexList(ctx context.Context, callerID, indexName, query string, limit int, order []string, cursor string) (*api.StorageObjects, string, error) {
@@ -295,9 +308,17 @@ func TestClearAltsMigration_FixtureReachesTheRebuild(t *testing.T) {
 	}
 
 	// Sanity: the pages the migration submitted are the accounts we seeded.
+	// The completion marker is written through the same StorageWrite and is
+	// owned by SystemUserID, so it is excluded here -- this assertion is about
+	// which login histories were rewritten.
 	var submitted []string
 	for _, batch := range nk.writeBatches {
-		submitted = append(submitted, batch...)
+		for _, userID := range batch {
+			if userID == SystemUserID {
+				continue
+			}
+			submitted = append(submitted, userID)
+		}
 	}
 	sort.Strings(submitted)
 	if fmt.Sprint(submitted) != "[11111111-1111-1111-1111-111111111111]" {
