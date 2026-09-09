@@ -2217,12 +2217,11 @@ func TestMatchJoinAttempt_LobbyFull_WithReservation_ReturnsReservationViolated(t
 		t.Fatalf("Expected join to be rejected: lobby overflow despite reservation")
 	}
 
-	// The reason should be a reservation violation (not just "lobby full")
-	// We use a string literal since ErrJoinRejectReasonReservationViolated doesn't exist yet
-	expectedReason := "lobby full: reservation violated"
-	if reason != expectedReason && reason != ErrJoinRejectReasonLobbyFull.Error() {
-		// Accept either the new error or the fallback for now
-		t.Logf("Reason: %s", reason)
+	// The reason must distinguish a violated reservation from ordinary contention:
+	// only the former is promoted to ERROR at evr_lobby_joinentrant.go, and that
+	// promotion is what makes a broken promise visible in the logs (#584, #585).
+	if reason != ErrJoinRejectReasonReservationViolated.Error() {
+		t.Errorf("reason = %q, want %q", reason, ErrJoinRejectReasonReservationViolated.Error())
 	}
 
 	// Most critically: the reservation must be RESTORED, not lost
@@ -2314,9 +2313,10 @@ func TestMatchJoinAttempt_LobbyFull_RoleSlots_WithReservation_ReturnsReservation
 		t.Fatalf("Expected join to be rejected: TeamBlue is full despite reservation")
 	}
 
-	// The reason should indicate a reservation violation or lobby full
-	if reason != ErrJoinRejectReasonLobbyFull.Error() {
-		t.Logf("Reason: %s (expected lobby full or reservation violated)", reason)
+	// As above: the role-slot gate must also report the violated reservation
+	// rather than plain lobby-full, or the refusal reads as ordinary contention.
+	if reason != ErrJoinRejectReasonReservationViolated.Error() {
+		t.Errorf("reason = %q, want %q", reason, ErrJoinRejectReasonReservationViolated.Error())
 	}
 
 	// Most critically: the reservation must be RESTORED, not lost
