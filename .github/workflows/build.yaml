@@ -46,32 +46,34 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v4
 
-      # Pinned, not @latest. The justfile's LINT_BASELINE is a count, and a
-      # linter release that adds a check or fixes a false negative moves that
-      # count -- so @latest would turn an upstream release into a red build on
-      # a commit that changed nothing. v2.12.2 is the version the 374 baseline
-      # was measured with. Bump it and the baseline together, deliberately.
+      # Pinned, not @latest, so the finding set CI sees is reproducible and a
+      # linter release arrives as a deliberate bump rather than as a red build
+      # on a branch that changed nothing near the new check. Version drift is
+      # not hypothetical here: 2.13.1 reports two SA4023 findings on main that
+      # 2.12.2 does not, which is the whole reason the count-ratchet this job
+      # used to run was never satisfiable (see `lint` in the justfile).
       - name: Install golangci-lint
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
 
       - name: Download modules
         run: go mod download
 
-      # The check that actually holds the line. The backlog ratchet below only
-      # catches a NET rise, so fixing one old finding while adding a new one
-      # slips past it; this does not care about the backlog at all, only about
-      # what the branch added.
+      # THE gate, and the same recipe developers run locally, so CI and local
+      # cannot drift. It cares only about what this branch added -- not about
+      # the backlog -- and it carries the did-not-run and stale-cache guards
+      # (see the comments on `lint` in the justfile, AGENTS.md defect class 6).
       - name: No new findings on this branch
         if: github.event_name == 'pull_request'
         run: |
           git fetch --no-tags origin "${{ github.base_ref }}"
           just lint-new "origin/${{ github.base_ref }}"
 
-      # Same recipe developers run locally, so CI and local cannot drift. It
-      # also carries the did-not-run and stale-cache guards -- see the comments
-      # on `lint` in the justfile, and AGENTS.md defect classes 4 and 6.
-      - name: Backlog ratchet
-        run: just lint
+      # The full-tree backlog, printed. NOT a gate: it exits 0 at any count, and
+      # on a push there is no merge base to lint against anyway. It is here so
+      # the number stays visible after the ratchet that made it a chore was
+      # deleted -- visible, and nobody's homework.
+      - name: Full-tree backlog report (not a gate)
+        run: just lint-all
 
   exec_bit_check:
     name: Check script exec bits

@@ -28,6 +28,101 @@ var (
 	ErrFailedToTrackEntrantStream = errors.New("failed to track entrant stream")
 )
 
+// Stable identities for a refused join. These are the values log consumers
+// classify on. They are constants, deliberately decoupled from the wording of
+// the ErrJoinRejectReason* sentinels, so rewording a player-facing message can
+// never silently re-route an alert. See #585 proposal 4.
+const (
+	RejectReasonUnknown               = "unknown"
+	RejectReasonNone                  = ""
+	RejectReasonLobbyFull             = "lobby_full"
+	RejectReasonReservationViolated   = "reservation_violated"
+	RejectReasonMatchClosed           = "match_closed"
+	RejectReasonMatchTerminating      = "match_terminating"
+	RejectReasonDuplicateJoin         = "duplicate_join"
+	RejectReasonDuplicateEvrID        = "duplicate_evr_id"
+	RejectReasonUnassignedLobby       = "unassigned_lobby"
+	RejectReasonFeatureMismatch       = "feature_mismatch"
+	RejectReasonFailedToAssignTeam    = "failed_to_assign_team"
+	RejectReasonPartyMembersNeedRoles = "party_members_must_have_roles"
+	RejectReasonMatchNotFound         = "match_not_found"
+	RejectReasonMatchLabelEmpty       = "match_label_empty"
+)
+
+// RejectReasonCode maps the free-text reason that crosses the Nakama
+// MatchJoinAttempt boundary to a stable code.
+//
+// This is the cheap half of #585 proposal 4: it removes English-parsing from
+// log consumers and puts the string matching in exactly one place, under test.
+// The expensive half — replacing the string channel with typed sentinels
+// compared via errors.Is — is a separate change; Nakama's MatchJoinAttempt
+// contract returns `reason` as a plain string, so that refactor touches every
+// rejection site and every assertion that pins one.
+//
+// Matching is exact equality, never prefix or substring: "lobby full" is a
+// prefix of "lobby full: reservation violated", so a prefix match would
+// collapse the two. TestRejectReasonCode_NoPrefixCollision pins that.
+func RejectReasonCode(reason string) string {
+	switch reason {
+	case "":
+		return RejectReasonNone
+	case ErrJoinRejectReasonLobbyFull.Error():
+		return RejectReasonLobbyFull
+	case ErrJoinRejectReasonReservationViolated.Error():
+		return RejectReasonReservationViolated
+	case ErrJoinRejectReasonMatchClosed.Error():
+		return RejectReasonMatchClosed
+	case ErrJoinRejectReasonMatchTerminating.Error():
+		return RejectReasonMatchTerminating
+	case ErrJoinRejectReasonDuplicateJoin.Error():
+		return RejectReasonDuplicateJoin
+	case ErrJoinRejectDuplicateEvrID.Error():
+		return RejectReasonDuplicateEvrID
+	case ErrJoinRejectReasonUnassignedLobby.Error():
+		return RejectReasonUnassignedLobby
+	case ErrJoinRejectReasonFeatureMismatch.Error():
+		return RejectReasonFeatureMismatch
+	case ErrJoinRejectReasonFailedToAssignTeam.Error():
+		return RejectReasonFailedToAssignTeam
+	case ErrJoinRejectReasonPartyMembersMustHaveRoles.Error():
+		return RejectReasonPartyMembersNeedRoles
+	default:
+		return RejectReasonUnknown
+	}
+}
+
+// decodeMatchLabel parses the label string the match handler returned alongside
+// its join decision. Returns nil when there is nothing usable, so callers fall
+// back to whatever label they already held.
+func decodeMatchLabel(labelStr string) *MatchLabel {
+	if labelStr == "" {
+		return nil
+	}
+	decoded := &MatchLabel{}
+	if err := json.Unmarshal([]byte(labelStr), decoded); err != nil {
+		return nil
+	}
+	return decoded
+}
+
+// heldReservationFor returns the seat the label shows being held for this user,
+// or nil. This is how the fact "the server had promised this player a slot"
+// reaches the rejection log: MatchJoinAttempt returns only
+// (found, allowed, isNew, reason, labelStr), and the label is the only one of
+// those with room for it.
+func heldReservationFor(label *MatchLabel, userID string) *PlayerInfo {
+	if label == nil || userID == "" {
+		return nil
+	}
+	for i := range label.Players {
+		p := &label.Players[i]
+		if p.IsReservation && p.UserID == userID {
+			return p
+		}
+	}
+	return nil
+}
+
 func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, presences ...*EvrMatchPresence) error {
 	if len(presences) == 0 {
 		return ErrNoPresences
@@ -99,11 +194,15 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 
 	reservationViolated := reason == ErrJoinRejectReasonReservationViolated.Error()
 
+	rejectCode := RejectReasonCode(reason)
+
 	switch {
 	case !found:
 		err = LobbyErrMatchNotFound
+		rejectCode = RejectReasonMatchNotFound
 	case labelStr == "":
 		err = LobbyErrMatchLabelEmpty
+		rejectCode = RejectReasonMatchLabelEmpty
 	case reason == ErrJoinRejectDuplicateEvrID.Error():
 		// Assuming ErrJoinRejectDuplicateEvrID is defined elsewhere and its Error() method returns the specific string
 		err = LobbyErrDuplicateEvrID
@@ -127,37 +226,76 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 			entrantSessionIDs[i] = ent.SessionID.String()
 		}
 
-		groupID := ""
-		if label.GroupID != nil {
-			groupID = label.GroupID.String()
+		// Report capacity from the label the match handler returned with the
+		// decision, not from the caller's `label`, which was fetched before the
+		// attempt (during matchmaking or backfill selection) and can be seconds
+		// stale. See #585 proposal 2 — the caveat there is real.
+		// capacity_source says which one it was, so an aggregation over these
+		// numbers can exclude the stale ones instead of silently mixing them.
+		capacityLabel, capacitySource := label, "caller_label"
+		if decided := decodeMatchLabel(labelStr); decided != nil {
+			capacityLabel, capacitySource = decided, "decision_label"
 		}
 
+		groupID := ""
+		if capacityLabel.GroupID != nil {
+			groupID = capacityLabel.GroupID.String()
+		}
+
+		// Did the server hold a seat for this joiner and then turn them away?
+		// That is a broken promise regardless of which kind of reservation it
+		// was, so it drives the severity; the kind is a field. Ordinary
+		// contention — no reservation of any kind — stays WARN.
+		held := heldReservationFor(capacityLabel, e.UserID.String())
+		promiseBroken := reservationViolated || held != nil
+
 		logFn := logger.Warn
-		if reservationViolated {
+		if promiseBroken {
 			logFn = logger.Error
 		}
-		logFn("failed to join match",
+
+		fields := []zap.Field{
 			zap.Error(err),
 			// Match info
 			zap.String("mid", label.ID.UUID.String()),
-			zap.String("mode", label.Mode.String()),
+			zap.String("mode", capacityLabel.Mode.String()),
 			zap.String("group_id", groupID),
-			zap.Int("player_count", label.PlayerCount),
-			zap.Int("player_limit", label.PlayerLimit),
-			zap.Int("open_slots", label.OpenSlots()),
-			zap.Bool("is_open", label.Open),
+			zap.Int("player_count", capacityLabel.PlayerCount),
+			zap.Int("player_limit", capacityLabel.PlayerLimit),
+			zap.Int("open_slots", capacityLabel.OpenSlots()),
+			zap.Int("reservation_count", capacityLabel.ReservationCount),
+			zap.String("capacity_source", capacitySource),
+			zap.Bool("is_open", capacityLabel.Open),
 			// Request info
 			zap.Int("party_size", len(entrants)),
 			zap.Int("entrant_count", len(entrants)),
 			zap.Strings("entrant_uids", entrantUserIDs),
 			zap.Strings("entrant_sids", entrantSessionIDs),
+			// Rejection identity: a stable code from a constant, never parsed
+			// out of the error message. See #585 proposal 4.
+			zap.String("reject_reason", rejectCode),
 			zap.Bool("reservation_violated", reservationViolated),
-		)
+			zap.Bool("promise_broken", promiseBroken),
+			zap.Bool("had_reconnect_reservation", held != nil && held.ReservationKind == ReservationKindReconnect),
+		}
+		if held != nil {
+			fields = append(fields, zap.String("reservation_kind", held.ReservationKind))
+			if ttl, ok := held.ReservationTimeToExpiry(time.Now()); ok {
+				fields = append(fields, zap.Float64("reservation_expires_in_s", ttl.Seconds()))
+			}
+			if held.ReservationID != "" {
+				fields = append(fields, zap.String("reservation_id", held.ReservationID))
+			}
+		}
+		logFn("failed to join match", fields...)
 
 		// Observer: join failed, player regrouping.
 		if ws, ok := session.(*sessionWS); ok {
 			if lc := getMatchLifecycle(ws); lc != nil {
-				lc.Transition(StateSocialReady, "join failed, regrouping")
+				// Observer mode: an illegal transition is logged and recorded by
+				// TransitionTo itself and never blocks the player, so there is
+				// nothing for this caller to do with the error.
+				_ = lc.Transition(StateSocialReady, "join failed, regrouping")
 			}
 		}
 
