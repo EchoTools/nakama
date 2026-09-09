@@ -35,34 +35,11 @@ func MultiUpdate(ctx context.Context, logger *zap.Logger, db *sql.DB, metrics Me
 	var walletUpdateResults []*runtime.WalletUpdateResult
 
 	if err := ExecuteInTxPgx(ctx, db, func(tx pgx.Tx) error {
-		storageWriteAcks = nil
-		walletUpdateResults = nil
-
-		// Execute any account updates.
-		updateErr := updateAccounts(ctx, logger, tx, accountUpdates)
-		if updateErr != nil {
-			return updateErr
-		}
-
-		// Execute any storage updates.
-		storageWriteOps, storageWriteAcks, updateErr = storageWriteObjects(ctx, logger, metrics, tx, true, storageWrites)
-		if updateErr != nil {
-			return updateErr
-		}
-
-		// Execute any storage deletes.
-		deleteErr := storageDeleteObjects(ctx, logger, tx, true, storageDeletes)
-		if deleteErr != nil {
-			return deleteErr
-		}
-
-		// Execute any wallet updates.
-		walletUpdateResults, updateErr = updateWallets(ctx, logger, tx, walletUpdates, updateLedger)
-		if updateErr != nil {
-			return updateErr
-		}
-
-		return nil
+		var txErr error
+		// Assigned wholesale on every attempt, so a retry cannot leave results
+		// from a previous, rolled-back attempt visible to the caller.
+		storageWriteOps, storageWriteAcks, walletUpdateResults, txErr = multiUpdateTx(ctx, logger, metrics, tx, accountUpdates, storageWrites, storageDeletes, walletUpdates, updateLedger)
+		return txErr
 	}); err != nil {
 		if e, ok := err.(*statusError); ok {
 			return nil, walletUpdateResults, e.Cause()
@@ -82,4 +59,44 @@ func MultiUpdate(ctx context.Context, logger *zap.Logger, db *sql.DB, metrics Me
 	storageIndex.Delete(ctx, storageDeletes)
 
 	return storageWriteAcks, walletUpdateResults, nil
+}
+
+// multiUpdateTx runs one MultiUpdate attempt against a single transaction.
+//
+// This is the atomic unit the whole of #394 rests on: all four operation groups
+// are issued against the SAME pgx.Tx, and the first failure returns immediately
+// so no later group runs. The caller (ExecuteInTxPgx) rolls the transaction back
+// on a non-nil error, which is what makes an earlier group's statements revert
+// when a later group fails — a wallet update undoing a committed storage write
+// is not something this function does, it is something the transaction does by
+// never committing.
+//
+// Split out of the closure in MultiUpdate so it can be driven without a
+// database: the ordering and the abort-on-first-error are control flow, and
+// core_multi_test.go pins them with a fake pgx.Tx. See that file for what those
+// tests do and do not claim.
+func multiUpdateTx(ctx context.Context, logger *zap.Logger, metrics Metrics, tx pgx.Tx, accountUpdates []*accountUpdate, storageWrites StorageOpWrites, storageDeletes StorageOpDeletes, walletUpdates []*walletUpdate, updateLedger bool) (StorageOpWrites, []*api.StorageObjectAck, []*runtime.WalletUpdateResult, error) {
+	// Execute any account updates.
+	if err := updateAccounts(ctx, logger, tx, accountUpdates); err != nil {
+		return nil, nil, nil, err
+	}
+
+	// Execute any storage updates.
+	storageWriteOps, storageWriteAcks, err := storageWriteObjects(ctx, logger, metrics, tx, true, storageWrites)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// Execute any storage deletes.
+	if err := storageDeleteObjects(ctx, logger, tx, true, storageDeletes); err != nil {
+		return nil, nil, nil, err
+	}
+
+	// Execute any wallet updates.
+	walletUpdateResults, err := updateWallets(ctx, logger, tx, walletUpdates, updateLedger)
+	if err != nil {
+		return nil, nil, walletUpdateResults, err
+	}
+
+	return storageWriteOps, storageWriteAcks, walletUpdateResults, nil
 }

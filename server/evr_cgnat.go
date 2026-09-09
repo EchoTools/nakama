@@ -171,6 +171,34 @@ func (d *CGNATDetector) IsWeakSignal(item string) bool {
 	d.mu.RUnlock()
 
 	for _, prefix := range prefixes {
+		// AN EMPTY PREFIX IS A NO-OP, NOT A UNIVERSAL MATCH.
+		//
+		// strings.HasPrefix(anything, "") is ALWAYS true, so a single ""
+		// in the operator-configured commodity_profile_prefixes list makes
+		// this function return true for every non-IP string it is ever
+		// asked about. Measured in production 2026-09-08: the live
+		// Global/settings record carried a "" in that list, and the effect
+		// was total and silent --
+		//
+		//   matchIgnoredAltPattern() drops any item where IsWeakSignal is
+		//   true AND net.ParseIP fails. IPs parse, so IPs survived; XPIDs,
+		//   HMD serials and system profiles do not parse, so ALL THREE were
+		//   filtered out of both LoginHistory.Cache and AltSearchPatterns.
+		//   Alt DISCOVERY is a storage query against value.cache, so the
+		//   strongest signal we have could not surface a candidate at all.
+		//
+		//   Blast radius at the time: 7,254 of 7,254 alternate-account links
+		//   in production -- every single one -- rested on a shared IP, and
+		//   ZERO carried an XPID, serial or profile. The doc comment six
+		//   lines above this loop says "HMD serials and XPIDs are always
+		//   strong signals"; one empty string made them weak.
+		//
+		// The source was correct and had been since 2024-12-17; the defect
+		// was one character of config. So the guard belongs HERE, where no
+		// settings value can reach around it, rather than only at load.
+		if prefix == "" {
+			continue
+		}
 		if strings.HasPrefix(item, prefix) {
 			return true
 		}

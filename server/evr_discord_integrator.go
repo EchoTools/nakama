@@ -1060,10 +1060,12 @@ func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logg
 	groupID := guildGroup.IDStr()
 	displayName := InGameName(member)
 
-	// Check if the current IGN data is locked or an override - if so, don't update from Discord
+	// Check if the current IGN data is locked or an override - if so, don't update from Discord.
+	// The write below goes through SetGroupDisplayName, which stores
+	// IsOverride: false, so letting a protected name through here does not just
+	// shadow the override for one session — it destroys it in storage.
 	currentIGN := profile.GetGroupIGNData(groupID)
-	if currentIGN.IsLocked {
-		// Don't update locked display names from Discord
+	if currentIGN.IsProtectedFromDiscordSync() {
 		return profile, nil
 	}
 
