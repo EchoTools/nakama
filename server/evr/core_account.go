@@ -1086,7 +1086,7 @@ type ArenaUnlocks struct {
 	TintOrangeKDefault          bool `json:"tint_orange_k_default,omitempty"`
 	TintS1ADefault              bool `json:"rwd_tint_s1_a_default,omitempty"`
 	TintS1CDefault              bool `json:"rwd_tint_s1_c_default,omitempty"`
-	TintBlueLuminesence         bool `json:"rwd_tint_s1_d_default,omitempty"`
+	TintBlueLuminescence        bool `json:"rwd_tint_s1_d_default,omitempty"`
 	TintS2BDefault              bool `json:"rwd_tint_s2_b_default,omitempty"`
 	TintS2CDefault              bool `json:"rwd_tint_s2_c_default,omitempty"`
 	TintS3TintA                 bool `json:"rwd_tint_s3_tint_a,omitempty"`

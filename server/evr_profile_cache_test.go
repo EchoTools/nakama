@@ -1554,3 +1554,59 @@ var serverProfile = `
 		"number": 1
 	}
 }`
+
+// TestLoadoutEquipItem_AlignmentTintsReachTheAlignmentSlot covers the bug that
+// produced server/evr/cosmetic_names.go: an ALIGNMENT tint equipped through
+// LoadoutEquipItem must land in TintAlignmentA/B, not only in Tint.
+//
+// The game routes an alignment tint to the alignment slot. The remotelog-based
+// cosmetic extraction reports only THAT an item was set, never which slot, so
+// any alignment tint missing from alignmentTints silently falls through to the
+// social slot and the player cannot equip it -- setting cosmetic_loadout.tint
+// does nothing. Seafoam and Luminescence are alignment tints whose ids do not
+// say so; only the hand-typed field names TintBlueSeafoam and
+// TintBlueLuminescence in evr/core_account.go ever recorded that fact.
+func TestLoadoutEquipItem_AlignmentTintsReachTheAlignmentSlot(t *testing.T) {
+	tests := []struct {
+		name     string
+		id       string
+		wantSlot string // "a" or "b"
+	}{
+		// The two ids this test exists for.
+		{"Seafoam", "rwd_tint_s1_b_default", "a"},
+		{"Luminescence", "rwd_tint_s1_d_default", "a"},
+
+		// Controls. If these fail, the test is wrong, not the wiring.
+		// Terraformed is the precedent for the whole class: an id that says
+		// "neutral" and is nonetheless an A-slot alignment tint.
+		{"Terraformed (control, already wired)", "tint_neutral_summer_a_default", "a"},
+		{"blue_a (control)", "tint_blue_a_default", "a"},
+		{"orange_a (control)", "tint_orange_a_default", "b"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := LoadoutEquipItem(evr.DefaultCosmeticLoadout(), "tint", tt.id)
+			if err != nil {
+				t.Fatalf("LoadoutEquipItem(%q) returned error: %v", tt.id, err)
+			}
+
+			switch tt.wantSlot {
+			case "a":
+				if got.TintAlignmentA != tt.id {
+					t.Errorf("alignment tint %q never reached the A slot:\n"+
+						"  TintAlignmentA = %q, want %q\n"+
+						"  TintAlignmentB = %q\n"+
+						"  Tint           = %q\n"+
+						"when this happens the tint is unequippable in-game",
+						tt.id, got.TintAlignmentA, tt.id, got.TintAlignmentB, got.Tint)
+				}
+			case "b":
+				if got.TintAlignmentB != tt.id {
+					t.Errorf("alignment tint %q never reached the B slot: TintAlignmentB = %q, want %q",
+						tt.id, got.TintAlignmentB, tt.id)
+				}
+			}
+		})
+	}
+}
