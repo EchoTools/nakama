@@ -496,6 +496,26 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, logger runtime.Logg
 		return false, fmt.Errorf("error searching for alternate logins: %w", err)
 	}
 	if len(matches) == 0 {
+		// CAUTION: this early return conflates two different facts, and the
+		// caller cannot tell them apart from here.
+		//
+		//   1. A search RAN and found nothing. Determinate: the account has no
+		//      alternates.
+		//   2. No search was possible. AltSearchPatterns dropped every item as
+		//      an ignored value and returned nil, so LoginAlternateSearch
+		//      returned (nil, nil, nil) without touching the index
+		//      (evr_authenticate_alts.go:112-114, :119-122). Indeterminate:
+		//      nothing is known about this account's alternates.
+		//
+		// For the login flow the distinction does not matter, because it never
+		// clears the maps first -- this returns and the stored links stand.
+		//
+		// It matters absolutely for any caller that clears BEFORE calling, as
+		// MigrationClearAlternateMatches does. Case 2 then reads as "the
+		// rebuild succeeded and found nothing", and the caller persists an
+		// erasure it has no evidence for. That migration guards against it by
+		// checking AltSearchPatterns itself before it clears anything; a future
+		// caller in the same shape must do the same, or change this signature.
 		return false, nil
 	}
 
