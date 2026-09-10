@@ -206,10 +206,11 @@ func TestRecordLoginASNs_RecordsFromLoginLookup(t *testing.T) {
 	if want := map[string]int{starlinkIP: starlinkASN}; !maps.Equal(loginASNs, want) {
 		t.Errorf("recordLoginASNs returned %v, want %v", loginASNs, want)
 	}
-	// The next login from the same address changes nothing here, but the event
-	// handler creates that login's entry afresh, so the address still travels.
-	if again := recordLoginASNs(context.Background(), h, starlinkIP, asnIPInfo{asn: starlinkASN}, resolver); again[starlinkIP] != starlinkASN {
-		t.Errorf("a repeat login from %s returned %v; its own address must always be carried", starlinkIP, again)
+	// A repeat login from the same address learns nothing new, so the event
+	// carries nothing; the handler fills that login's entry from the stored
+	// history (TestLoginEvent_FillsEntriesFromStoredSiblings).
+	if again := recordLoginASNs(context.Background(), h, starlinkIP, asnIPInfo{asn: starlinkASN}, resolver); len(again) != 0 {
+		t.Errorf("a repeat login from %s returned %v; nothing changed, so the event should carry nothing", starlinkIP, again)
 	}
 
 	payload, err := json.Marshal(&EventUserAuthenticated{
@@ -392,7 +393,7 @@ func TestASNBackfill_LoginBudgetStopsNewLookups(t *testing.T) {
 		asns:  map[string]int{oldest: 1, middle: 2, newest: 3},
 		onGet: func(string) { clock = clock.Add(600 * time.Millisecond) }, // each lookup costs 600ms
 	}
-	budgeted := deadlineIPInfoGetter{ipInfoGetter: inner, deadline: now.Add(time.Second), now: func() time.Time { return clock }}
+	budgeted := loginBackfillIPInfoGetter{ipInfoGetter: inner, deadline: now.Add(time.Second), now: func() time.Time { return clock }}
 
 	_, unresolved := backfillLoginHistoryASNs(context.Background(), budgeted, h)
 
@@ -418,6 +419,74 @@ func TestLoginHistoryCompare_EitherSidesASN(t *testing.T) {
 		if matches := loginHistoryCompare(pair[0], pair[1]); len(matches) != 0 {
 			t.Errorf("loginHistoryCompare(%s, %s) = %s; the shared address is AS%d on %s's side", pair[0].userID, pair[1].userID, matchItems(matches), starlinkASN, a.userID)
 		}
+	}
+}
+
+// TestLoginHistoryCompare_ConflictingASNsAreSymmetric: an address that moved
+// between networks carries a different ASN on each side. The pair's edge must
+// not depend on which account is passed first: the newest record wins,
+// whichever history holds it.
+func TestLoginHistoryCompare_ConflictingASNsAreSymmetric(t *testing.T) {
+	withDetector(t, seededCGNATSettings())
+	now := time.Now()
+	older := oldEntry(1, starlinkIP, now.Add(-time.Hour))
+	older.ASN = residentialASN
+	newer := oldEntry(2, starlinkIP, now)
+	newer.ASN = starlinkASN
+	a, b := historyOf("user-a", older), historyOf("user-b", newer)
+
+	ab, ba := loginHistoryCompare(a, b), loginHistoryCompare(b, a)
+	if len(ab) != 0 || len(ba) != 0 {
+		t.Errorf("loginHistoryCompare(a, b) = %s, (b, a) = %s; the newest record of %s is AS%d, a CGNAT ASN, so neither direction may link on it",
+			matchItems(ab), matchItems(ba), starlinkIP, starlinkASN)
+	}
+}
+
+// TestLoginEvent_FillsEntriesFromStoredSiblings: the handler persists the
+// history, so any entry in it whose address is known on a sibling entry is
+// filled there -- including this login's new entry -- without the event having
+// to carry that address.
+func TestLoginEvent_FillsEntriesFromStoredSiblings(t *testing.T) {
+	withDetector(t, seededCGNATSettings())
+	const userID = "44444444-4444-4444-4444-444444444444"
+	known := oldEntry(1, starlinkIP, time.Now().Add(-2*time.Hour))
+	known.ASN = starlinkASN
+	sibling := oldEntry(2, starlinkIP, time.Now().Add(-time.Hour))
+	seeded := historyOf(userID, known, sibling)
+	raw, err := json.Marshal(seeded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newLoginASNTestModule()
+	m.seedObject(userID, LoginStorageCollection, LoginHistoryStorageKey, string(raw))
+
+	stored := processLoginEvent(t, m, `{
+		"user_id": "`+userID+`",
+		"xpid": "OVR-ORG-3930901337016247",
+		"client_ip": "`+starlinkIP+`",
+		"login_data": {"hmdserialnumber": "1WMHH9ABC1234"},
+		"is_websocket_authenticated": true
+	}`)
+
+	for key, e := range stored.History {
+		if e.ClientIP == starlinkIP && e.ASN != starlinkASN {
+			t.Errorf("stored entry %s for %s has ASN %d; a sibling entry records AS%d", key, starlinkIP, e.ASN, starlinkASN)
+		}
+	}
+}
+
+// TestRecordLoginASNs_DoesNotRetryTheLoginsOwnFailedLookup: when the login's
+// own IP info lookup came back empty, the backfill does not ask again for the
+// same address in the same login. The next login does.
+func TestRecordLoginASNs_DoesNotRetryTheLoginsOwnFailedLookup(t *testing.T) {
+	h := NewLoginHistory("55555555-5555-5555-5555-555555555555")
+	h.Update(mustXPID(t, "OVR-ORG-3930901337016247"), starlinkIP, &evr.LoginProfile{}, true)
+	resolver := &stubASNProvider{asns: map[string]int{starlinkIP: starlinkASN}}
+
+	recordLoginASNs(context.Background(), h, starlinkIP, nil, resolver)
+
+	if len(resolver.calls) != 0 {
+		t.Errorf("recordLoginASNs looked up %v; the login's own lookup of %s already failed this login", resolver.calls, starlinkIP)
 	}
 }
 

@@ -1,7 +1,6 @@
 package server
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -338,8 +337,9 @@ func loginHistoryCompare(a, b *LoginHistory) []*AlternateSearchMatch {
 	// only. Either side's record will do -- the ASN belongs to the address, not
 	// the account -- and consulting both is what lets a login whose own history
 	// is backfilled classify an address it shares with an account whose stored
-	// history is not.
-	asnsA, asnsB := a.clientIPASNs(), b.clientIPASNs()
+	// history is not. Where both record one, the newest wins, so the edge does
+	// not depend on which account is a and which is b.
+	asns := mergedClientIPASNs(a, b)
 
 	matchingSet := make(map[string]struct{})
 	for _, e := range b.History {
@@ -352,7 +352,7 @@ func loginHistoryCompare(a, b *LoginHistory) []*AlternateSearchMatch {
 			}
 			asn := 0
 			if i == fieldClientIP {
-				asn = cmp.Or(asnsB[item], asnsA[item])
+				asn = asns[item]
 			}
 			if !matchIgnoredAltPattern(item, asn) {
 				matchingSet[item] = struct{}{}
