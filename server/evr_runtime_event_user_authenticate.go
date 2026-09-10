@@ -16,9 +16,14 @@ import (
 var _ = Event(&EventUserAuthenticated{})
 
 type EventUserAuthenticated struct {
-	UserID                   string            `json:"user_id"`
-	XPID                     evr.EvrId         `json:"xpid"`
-	ClientIP                 string            `json:"client_ip"`
+	UserID   string    `json:"user_id"`
+	XPID     evr.EvrId `json:"xpid"`
+	ClientIP string    `json:"client_ip"`
+	// ClientIPASNs holds the ASNs authorizeSession recorded (recordLoginASNs):
+	// this login's address from its IP info lookup, plus whatever it
+	// backfilled. The handler below persists the history and has no IP info
+	// lookup of its own, so this is how they reach storage.
+	ClientIPASNs             map[string]int    `json:"client_ip_asns,omitempty"`
 	LoginPayload             *evr.LoginProfile `json:"login_data"`
 	IsWebSocketAuthenticated bool              `json:"is_websocket_authenticated"`
 }
@@ -52,6 +57,7 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 
 	// Update the last used time for their ip
 	isNew, allowed := loginHistory.Update(e.XPID, e.ClientIP, e.LoginPayload, e.IsWebSocketAuthenticated)
+	loginHistory.recordASNs(e.ClientIPASNs)
 
 	if allowed && isNew {
 		// Get the account to retrieve the Discord ID

@@ -47,7 +47,11 @@ var (
 	ErrPendingAuthorizationNotFound = errors.New("pending authorization not found")
 )
 
-func matchIgnoredAltPattern(pattern string) bool {
+// matchIgnoredAltPattern reports whether pattern must not be used to link
+// accounts. asn is the ASN recorded for pattern when it is a client IP (see
+// LoginHistory.clientIPASNs), and 0 when none is recorded or pattern is not an
+// IP; an IP with no recorded ASN is classified by the configured CIDRs alone.
+func matchIgnoredAltPattern(pattern string, asn int) bool {
 	// Remove ignored values
 	if _, ok := IgnoredLoginValues[pattern]; ok {
 		return true
@@ -56,12 +60,12 @@ func matchIgnoredAltPattern(pattern string) bool {
 			return true
 		}
 		// Filter CGNAT IPs (Starlink, T-Mobile, etc.)
-		if d := GetCGNATDetector(); d != nil && d.IsCGNAT(pattern) {
+		if d := GetCGNATDetector(); d != nil && d.IsCGNAT(pattern, asn) {
 			return true
 		}
 	}
 	// Filter commodity hardware profiles (Quest headsets)
-	if d := GetCGNATDetector(); d != nil && d.IsWeakSignal(pattern) && net.ParseIP(pattern) == nil {
+	if d := GetCGNATDetector(); d != nil && d.IsWeakSignal(pattern, asn) && net.ParseIP(pattern) == nil {
 		// IsWeakSignal on a non-IP, non-empty, non-"unknown" string means it matched
 		// a commodity profile prefix. Only filter if it's actually a profile match,
 		// not just because IsWeakSignal returns true for empty/"unknown" (those are
@@ -119,6 +123,11 @@ type LoginHistoryEntry struct {
 	XPID      evr.EvrId         `json:"xpi"`
 	ClientIP  string            `json:"client_ip"`
 	LoginData *evr.LoginProfile `json:"login_data"`
+	// ASN is the autonomous system the IP info providers reported for ClientIP,
+	// recorded at login or backfilled later (backfillLoginHistoryASNs). 0 means
+	// unknown: the entry predates recording, or every provider failed. It is
+	// what the CGNAT detector matches against the configured ASN list.
+	ASN int `json:"asn,omitempty"`
 }
 
 func (e *LoginHistoryEntry) Key() string {
@@ -467,9 +476,10 @@ func (h *LoginHistory) SearchPatterns() (patterns []string) {
 	patterns = make([]string, 0, len(h.History)*3)
 	seen := make(map[string]struct{}, len(h.History)*3)
 
+	asns := h.clientIPASNs()
 	for _, e := range h.History {
 		for _, s := range e.Patterns() {
-			if _, found := seen[s]; !found && !matchIgnoredAltPattern(s) {
+			if _, found := seen[s]; !found && !matchIgnoredAltPattern(s, asns[s]) {
 				patterns = append(patterns, s)
 				seen[s] = struct{}{}
 			}
@@ -611,12 +621,13 @@ func (h *LoginHistory) rebuildCache() {
 	h.ClientIPs = make(map[string]time.Time, historyLen)
 
 	cacheSet := make(map[string]bool, historyLen*4)
+	asns := h.clientIPASNs()
 
 	// Process each history entry in one pass
 	for _, e := range h.History {
 		// Process items for cache
 		for _, s := range e.Items() {
-			if _, found := cacheSet[s]; !found && !matchIgnoredAltPattern(s) {
+			if _, found := cacheSet[s]; !found && !matchIgnoredAltPattern(s, asns[s]) {
 				h.Cache = append(h.Cache, s)
 				cacheSet[s] = true
 			}

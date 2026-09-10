@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -102,8 +103,9 @@ func (h *LoginHistory) AltSearchPatterns() []string {
 	slices.Sort(items)
 	items = slices.Compact(items)
 
+	asns := h.clientIPASNs()
 	for i := 0; i < len(items); i++ {
-		if matchIgnoredAltPattern(items[i]) {
+		if matchIgnoredAltPattern(items[i], asns[items[i]]) {
 			items = slices.Delete(items, i, i+1)
 			i--
 		}
@@ -238,10 +240,12 @@ func isMachineFingerprint(item string, detector *CGNATDetector) bool {
 	if len(strings.Split(item, "::")) != systemProfileComponents {
 		return false
 	}
-	if matchIgnoredAltPattern(item) {
+	// Past the check above item is a system profile, never an IP (an IPv6
+	// address holds "::" at most once), so it has no ASN to pass.
+	if matchIgnoredAltPattern(item, 0) {
 		return false
 	}
-	if detector != nil && detector.IsWeakSignal(item) {
+	if detector != nil && detector.IsWeakSignal(item, 0) {
 		return false
 	}
 	return true
@@ -330,13 +334,27 @@ func loginHistoryCompare(a, b *LoginHistory) []*AlternateSearchMatch {
 		}
 	}
 
+	// A client IP both accounts used may have its ASN recorded on one side
+	// only. Either side's record will do -- the ASN belongs to the address, not
+	// the account -- and consulting both is what lets a login whose own history
+	// is backfilled classify an address it shares with an account whose stored
+	// history is not.
+	asnsA, asnsB := a.clientIPASNs(), b.clientIPASNs()
+
 	matchingSet := make(map[string]struct{})
 	for _, e := range b.History {
 		for i, item := range entryItems(e) {
-			if item == "" || matchIgnoredAltPattern(item) {
+			if item == "" {
 				continue
 			}
-			if _, ok := seenA[i][item]; ok {
+			if _, ok := seenA[i][item]; !ok {
+				continue
+			}
+			asn := 0
+			if i == fieldClientIP {
+				asn = cmp.Or(asnsB[item], asnsA[item])
+			}
+			if !matchIgnoredAltPattern(item, asn) {
 				matchingSet[item] = struct{}{}
 			}
 		}
