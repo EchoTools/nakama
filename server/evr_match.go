@@ -158,7 +158,15 @@ type MatchSettings struct {
 // There always is one per broadcaster.
 // The match is spawned and managed directly by nakama.
 // The match can only be communicated with through MatchSignal() and MatchData messages.
-type EvrMatch struct{}
+type EvrMatch struct {
+	// enqueueTermination receives the task MatchTerminate builds. nil means
+	// enqueueMatchTerminationTask, the async worker pool, which is what
+	// production always uses. Tests set it to capture the task and run
+	// processMatchTerminationTask synchronously: the pool gives no completion
+	// signal, so "the game server was NOT disconnected" is otherwise
+	// unobservable.
+	enqueueTermination func(runtime.Logger, matchTerminationTask)
+}
 
 // NewEvrMatch is called by the match handler when creating the match.
 func NewEvrMatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) (m runtime.Match, err error) {
@@ -817,8 +825,8 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	// arrives here with an empty presence map. Letting the empty branch win
 	// would run MatchShutdown with state.server still pointing at the departed
 	// game server — dispatching LobbySessionEvent CODE_ENDED to a presence that
-	// is already gone, storing a label that still advertises the game server,
-	// and handing MatchTerminate a snapshot with a live serverSessionID.
+	// is already gone, and storing a label that still advertises the game
+	// server.
 	for _, p := range presences {
 		if state.GameServer != nil && p.GetSessionId() == state.GameServer.SessionID.String() {
 			logger.Debug("Server left the match. Shutting down.")
@@ -1402,6 +1410,10 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	// that MatchTerminate does not disconnect the game-server session while
 	// players are still on it (orphaning the server).
 	//
+	// Amended for #588: MatchTerminate no longer disconnects the game-server
+	// session on any path. It still disconnects the sessions of the players
+	// left in presenceMap, and waiting for them to leave is what avoids that.
+	//
 	// If the game server does not cooperate (players never leave), the deadline
 	// still forces teardown so a match cannot hang forever.
 	// ═══════════════════════════════════════════════════════════════════════
@@ -1788,18 +1800,23 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 		playerSessionIDs = append(playerSessionIDs, presence.GetSessionId())
 	}
 
-	serverSessionID := ""
-	if state.server != nil {
-		serverSessionID = state.server.GetSessionId()
+	// The game server's session is deliberately not handed to the task. It is
+	// the server's registration websocket, which outlives this match and hosts
+	// the next one: the monitor in gameserverRegistrationRequest re-parks the
+	// server after every match and stops for good when that session closes.
+	// Termination ends a match, not a server. Dropping the server is an
+	// operator decision, made and carried out in one place, SignalShutdown's
+	// DisconnectGameServer branch (#588).
+	enqueue := enqueueMatchTerminationTask
+	if m.enqueueTermination != nil {
+		enqueue = m.enqueueTermination
 	}
-
-	enqueueMatchTerminationTask(logger, matchTerminationTask{
+	enqueue(logger, matchTerminationTask{
 		nk:                           nk,
 		stateSnapshot:                cloneMatchLabelForTermination(logger, state),
 		summaryEvent:                 summaryEvent,
 		matchID:                      state.ID.String(),
 		playerSessionIDs:             playerSessionIDs,
-		serverSessionID:              serverSessionID,
 		schedulePostMatchSocialLobby: state.Mode == evr.ModeArenaPrivate && state.GameState != nil && state.GameState.IsMatchOver(),
 		labelAlreadyStored:           state.terminateTick != 0, // MatchShutdown already stored the label
 	})
@@ -1956,6 +1973,8 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal shutdown payload: %v", err)}.String()
 		}
 
+		// The only place a match drops its game server. MatchTerminate never
+		// does: the session is the server's registration, not the match's (#588).
 		if data.DisconnectGameServer {
 			logger.Warn("Match shutting down, disconnecting game server.")
 			if state.server != nil {
@@ -2517,7 +2536,6 @@ type matchTerminationTask struct {
 	summaryEvent                 *EventMatchSummary
 	matchID                      string
 	playerSessionIDs             []string
-	serverSessionID              string
 	schedulePostMatchSocialLobby bool
 	labelAlreadyStored           bool
 }
@@ -2599,12 +2617,6 @@ func processMatchTerminationTask(task matchTerminationTask) {
 		}
 		if err := task.nk.SessionDisconnect(context.Background(), sid, runtime.PresenceReasonDisconnect); err != nil {
 			logger.WithFields(map[string]any{"match_id": task.matchID, "sid": sid, "error": err}).Warn("Failed to disconnect player on terminate")
-		}
-	}
-
-	if task.serverSessionID != "" {
-		if err := task.nk.SessionDisconnect(context.Background(), task.serverSessionID, runtime.PresenceReasonDisconnect); err != nil {
-			logger.WithFields(map[string]any{"match_id": task.matchID, "sid": task.serverSessionID, "error": err}).Warn("Failed to disconnect broadcaster on terminate")
 		}
 	}
 
