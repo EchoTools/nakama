@@ -104,6 +104,7 @@ func weakSignalHistory(userID string, entries ...*LoginHistoryEntry) *LoginHisto
 // commodity filter exists to solve.
 func TestIsWeakSignal_EmptyCommodityPrefixIsNotAUniversalMatch(t *testing.T) {
 	d := withDetector(t, productionCGNATSettings())
+	markASNDataLoaded(t, d, nil, nil) // so the public-IP row is decided by data, see #596
 
 	commodityProfile := profileString("Meta Quest 2", "WIFI", "", "Unknown", "3", "8", "0", "0")
 	desktopProfile := (&LoginHistoryEntry{LoginData: &evr.LoginProfile{SystemInfo: desktopSystemInfo()}}).SystemProfile()
@@ -143,7 +144,8 @@ func TestIsWeakSignal_EmptyCommodityPrefixIsNotAUniversalMatch(t *testing.T) {
 // layer up, where the consequence actually lands: matchIgnoredAltPattern is
 // what rebuildCache and AltSearchPatterns consult before keeping an item.
 func TestMatchIgnoredAltPattern_EmptyCommodityPrefix(t *testing.T) {
-	withDetector(t, productionCGNATSettings())
+	d := withDetector(t, productionCGNATSettings())
+	markASNDataLoaded(t, d, nil, nil) // so the public-IP row is decided by data, see #596
 
 	commodityProfile := profileString("Meta Quest 2", "WIFI", "", "Unknown", "3", "8", "0", "0")
 	desktopProfile := (&LoginHistoryEntry{LoginData: &evr.LoginProfile{SystemInfo: desktopSystemInfo()}}).SystemProfile()
@@ -188,7 +190,8 @@ func TestMatchIgnoredAltPattern_EmptyCommodityPrefix(t *testing.T) {
 // every other test in this package gets) the assertion passes even on the broken
 // build, which is precisely why nothing caught this.
 func TestRebuildCache_ContainsAllFourItems(t *testing.T) {
-	withDetector(t, productionCGNATSettings())
+	d := withDetector(t, productionCGNATSettings())
+	markASNDataLoaded(t, d, nil, nil) // so the client-IP row is decided by data, see #596
 
 	entry := weakSignalEntry(2097, "45.33.90.154", "WMHD3157200FJE", desktopSystemInfo())
 	h := weakSignalHistory("user-a", entry)
@@ -219,7 +222,8 @@ func TestRebuildCache_ContainsAllFourItems(t *testing.T) {
 // The system profile is deliberately NOT expected here -- it is a comparison
 // key only, by design (see the comment on AltSearchPatterns).
 func TestAltSearchPatterns_ContainsXPIDAndSerial(t *testing.T) {
-	withDetector(t, productionCGNATSettings())
+	d := withDetector(t, productionCGNATSettings())
+	markASNDataLoaded(t, d, nil, nil) // so the client-IP row is decided by data, see #596
 
 	entry := weakSignalEntry(2097, "45.33.90.154", "WMHD3157200FJE", desktopSystemInfo())
 	h := weakSignalHistory("user-a", entry)

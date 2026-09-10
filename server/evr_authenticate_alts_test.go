@@ -208,6 +208,7 @@ func TestFilterStrongAlts(t *testing.T) {
 		CIDRs:                    []string{"100.64.0.0/10"},
 		CommodityProfilePrefixes: []string{"Meta Quest 2::", "Meta Quest 3::", "Meta Quest 3S::"},
 	})
+	markASNDataLoaded(t, detector, nil, nil) // so the non-CGNAT IP row is decided by data, see #596
 
 	tests := []struct {
 		name    string
