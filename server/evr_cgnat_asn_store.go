@@ -93,7 +93,8 @@ func cgnatASNRangesSave(ctx context.Context, nk runtime.NakamaModule, data cgnat
 // cold. Nothing stored installs nothing; the detector then stays not-ready
 // until a refresh succeeds. Meant for boot: it replaces whatever is loaded.
 //
-// A stored row that does not parse rejects the whole object. Installing the
+// A stored row that is not a well-formed range of its family rejects the whole
+// object (validateASNRows, the same rule a download is held to). Installing the
 // rest would claim coverage the data does not have, which is the fail-open
 // this state exists to prevent.
 func (d *CGNATDetector) LoadASNRanges(ctx context.Context, nk runtime.NakamaModule) error {
@@ -101,12 +102,14 @@ func (d *CGNATDetector) LoadASNRanges(ctx context.Context, nk runtime.NakamaModu
 	if err != nil {
 		return err
 	}
+	if err := validateASNRows(asnFamilyV4, stored.V4.Ranges); err != nil {
+		return fmt.Errorf("stored CGNAT ASN ranges not installed: v4: %w", err)
+	}
+	if err := validateASNRows(asnFamilyV6, stored.V6.Ranges); err != nil {
+		return fmt.Errorf("stored CGNAT ASN ranges not installed: v6: %w", err)
+	}
 	ranges4 := convertToRanges4(stored.V4.Ranges)
 	ranges6 := convertToRanges6(stored.V6.Ranges)
-	if len(ranges4) != len(stored.V4.Ranges) || len(ranges6) != len(stored.V6.Ranges) {
-		return fmt.Errorf("stored CGNAT ASN ranges have unparseable rows (v4 %d of %d, v6 %d of %d parsed); not installed",
-			len(ranges4), len(stored.V4.Ranges), len(ranges6), len(stored.V6.Ranges))
-	}
 
 	d.mu.Lock()
 	d.asnRanges4, d.asnCovered4, d.asnUpdated4 = ranges4, asnSet(stored.V4.ASNs), stored.V4.UpdatedAt
