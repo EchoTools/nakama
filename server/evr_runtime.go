@@ -60,29 +60,14 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	// Store skill-based matchmaker globally so it can be connected to the lobby builder
 	globalSkillBasedMatchmaker.Store(sbmm)
 
-	// Initialize CGNAT detector for alt detection filtering
-	cgnat := NewCGNATDetector(logger)
-	if settings := ServiceSettings(); settings != nil {
-		cgnat.UpdateSettings(settings.CGNAT)
-	}
-	SetCGNATDetector(cgnat)
-	// Load ASN data in background (does not block startup).
-	// Use context.Background() since the module init context may be canceled after Init returns.
-	go func() {
-		bgCtx := context.Background()
-		if err := cgnat.RefreshASNData(bgCtx); err != nil {
-			logger.WithField("error", err).Warn("CGNAT: ASN data refresh failed")
-		}
-		// Run retroactive cleanup only if enabled in settings
-		if s := ServiceSettings(); s != nil && s.CGNAT.CleanupOnStartup {
-			brokenLinks, affectedUsers, _, cleanupErr := runCGNATCleanup(bgCtx, logger, nk, cgnat)
-			if cleanupErr != nil {
-				logger.WithField("error", cleanupErr).Warn("CGNAT: startup cleanup failed")
-			} else if brokenLinks > 0 {
-				logger.WithFields(map[string]any{"broken_links": brokenLinks, "affected_users": affectedUsers}).Info("CGNAT: startup cleanup completed")
-			}
-		}
-	}()
+	// Initialize CGNAT detector for alt detection filtering. The configured
+	// ASNs' ranges are read from storage before this returns, so the detector
+	// is never cold; the download that refreshes them runs in the background,
+	// triggered when settings first reach the detector (#596).
+	// context.Background(): the module init context may be canceled after Init returns.
+	cgnat := bootCGNATDetector(ctx, logger, nk)
+	go cgnat.RunASNRefresher(context.Background(), nk)
+	go runCGNATStartupCleanup(logger, nk, cgnat)
 
 	// Register hooks
 	//if err = initializer.RegisterBeforeReadStorageObjects(BeforeReadStorageObjectsHook); err != nil {

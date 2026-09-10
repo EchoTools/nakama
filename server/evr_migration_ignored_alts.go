@@ -21,6 +21,14 @@ import (
 type MigrationBreakIgnoredAlts struct{}
 
 func (m *MigrationBreakIgnoredAlts) MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) error {
+	// This migration only deletes, and it deletes on a POSITIVE "ignored"
+	// verdict. Without ASN data matchIgnoredAltPattern fails closed and reports
+	// every public address as ignored, so running now would break every
+	// IP-only link it walked. Refuse; the next boot runs it again.
+	if d := GetCGNATDetector(); d != nil && !d.ASNDataReady() {
+		return fmt.Errorf("ignored-alts migration: %w", ErrASNDataNotReady)
+	}
+
 	processed := make(map[string]bool)
 	affectedSet := make(map[string]bool)
 	brokenLinks := 0
