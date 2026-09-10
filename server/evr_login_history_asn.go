@@ -30,16 +30,20 @@ type ipInfoGetter interface {
 	Get(ctx context.Context, ip string) (IPInfo, error)
 }
 
-// deadlineIPInfoGetter answers nothing once its deadline has passed, without
-// touching a request already in flight. See loginASNBackfillBudget.
-type deadlineIPInfoGetter struct {
+// loginBackfillIPInfoGetter is the resolver a login's backfill runs through. It
+// answers nothing once its deadline has passed, without touching a request
+// already in flight (see loginASNBackfillBudget), and nothing for lookedUp, the
+// address the login itself just looked up: if that lookup came back empty, the
+// same providers are not asked again within the same login.
+type loginBackfillIPInfoGetter struct {
 	ipInfoGetter
+	lookedUp string
 	deadline time.Time
 	now      func() time.Time
 }
 
-func (g deadlineIPInfoGetter) Get(ctx context.Context, ip string) (IPInfo, error) {
-	if !g.now().Before(g.deadline) {
+func (g loginBackfillIPInfoGetter) Get(ctx context.Context, ip string) (IPInfo, error) {
+	if ip == g.lookedUp || !g.now().Before(g.deadline) {
 		return nil, nil
 	}
 	return g.ipInfoGetter.Get(ctx, ip)
@@ -52,26 +56,45 @@ func (h *LoginHistory) loginHistoryEntryMaps() [3]map[string]*LoginHistoryEntry 
 	return [3]map[string]*LoginHistoryEntry{h.History, h.Active, h.PendingAuthorizations}
 }
 
-// clientIPASNs returns the ASN recorded for each client IP in the history. An
-// address whose entries disagree -- it moved between networks -- takes the ASN
-// of its most recently updated entry. Addresses with no recorded ASN are absent,
-// so a lookup of one yields 0, which every classifier reads as unknown.
+// clientIPASNs returns the ASN recorded for each client IP in the history. See
+// mergedClientIPASNs.
 func (h *LoginHistory) clientIPASNs() map[string]int {
-	if h == nil {
-		return nil
+	return mergedClientIPASNs(h)
+}
+
+// mergedClientIPASNs returns the ASN recorded for each client IP across the
+// given histories. An address whose entries disagree -- it moved between
+// networks -- takes the ASN of its most recently updated entry, whichever
+// history holds it; an exact tie takes the larger ASN. Neither rule depends on
+// the order of the histories or of map iteration, so two accounts compared in
+// either direction see the same ASN. Addresses with no recorded ASN are absent,
+// so a lookup of one yields 0, which every classifier reads as unknown.
+func mergedClientIPASNs(histories ...*LoginHistory) map[string]int {
+	type record struct {
+		asn int
+		at  time.Time
 	}
-	asns := make(map[string]int)
-	newest := make(map[string]time.Time)
-	for _, entries := range h.loginHistoryEntryMaps() {
-		for _, e := range entries {
-			if e == nil || e.ASN <= 0 {
-				continue
-			}
-			if t, ok := newest[e.ClientIP]; ok && !e.UpdatedAt.After(t) {
-				continue
-			}
-			asns[e.ClientIP], newest[e.ClientIP] = e.ASN, e.UpdatedAt
+	newest := make(map[string]record)
+	for _, h := range histories {
+		if h == nil {
+			continue
 		}
+		for _, entries := range h.loginHistoryEntryMaps() {
+			for _, e := range entries {
+				if e == nil || e.ASN <= 0 {
+					continue
+				}
+				r, ok := newest[e.ClientIP]
+				if ok && (r.at.After(e.UpdatedAt) || (r.at.Equal(e.UpdatedAt) && r.asn >= e.ASN)) {
+					continue
+				}
+				newest[e.ClientIP] = record{asn: e.ASN, at: e.UpdatedAt}
+			}
+		}
+	}
+	asns := make(map[string]int, len(newest))
+	for ip, r := range newest {
+		asns[ip] = r.asn
 	}
 	return asns
 }
@@ -159,22 +182,26 @@ func backfillLoginHistoryASNs(ctx context.Context, resolver ipInfoGetter, h *Log
 // login already made -- ipInfo, nil when every provider failed -- and then
 // backfills any other IP in h without one, within loginASNBackfillBudget.
 //
-// It returns what the stored history does not have yet: every ASN this call
-// recorded, plus the client IP's own whenever it is known, because the event
-// handler creates this login's entry afresh and must record it there too. That
-// is what EventUserAuthenticated carries, rather than the whole history's map,
-// so the event stays one address long once a history has converged.
+// It returns what the stored history does not know yet: every address whose
+// ASN this call learned or changed. That is what EventUserAuthenticated
+// carries, rather than the whole history's map; the handler fills everything
+// else from the history it loads (see its Process), so once a history has
+// converged the event carries nothing.
 func recordLoginASNs(ctx context.Context, h *LoginHistory, clientIP string, ipInfo IPInfo, resolver ipInfoGetter) map[string]int {
 	before := h.clientIPASNs()
 	if ipInfo != nil {
 		h.recordASNs(map[string]int{clientIP: ipInfo.ASN()})
 	}
-	budgeted := deadlineIPInfoGetter{ipInfoGetter: resolver, deadline: time.Now().Add(loginASNBackfillBudget), now: time.Now}
-	backfillLoginHistoryASNs(ctx, budgeted, h)
+	backfillLoginHistoryASNs(ctx, loginBackfillIPInfoGetter{
+		ipInfoGetter: resolver,
+		lookedUp:     clientIP,
+		deadline:     time.Now().Add(loginASNBackfillBudget),
+		now:          time.Now,
+	}, h)
 
 	recorded := make(map[string]int)
 	for ip, asn := range h.clientIPASNs() {
-		if ip == clientIP || before[ip] != asn {
+		if before[ip] != asn {
 			recorded[ip] = asn
 		}
 	}

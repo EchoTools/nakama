@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math/rand"
 	"slices"
 	"strings"
@@ -28,16 +29,6 @@ type EventUserAuthenticated struct {
 	IsWebSocketAuthenticated bool              `json:"is_websocket_authenticated"`
 }
 
-func NewUserAuthenticatedEvent(userID string, xpid evr.EvrId, clientIP string, loginPayload *evr.LoginProfile, isWebSocketAuthenticated bool) *EventUserAuthenticated {
-	return &EventUserAuthenticated{
-		UserID:                   userID,
-		XPID:                     xpid,
-		ClientIP:                 clientIP,
-		LoginPayload:             loginPayload,
-		IsWebSocketAuthenticated: isWebSocketAuthenticated,
-	}
-}
-
 func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Logger, dispatcher *EventDispatcher) error {
 
 	if e.UserID == "" {
@@ -57,7 +48,12 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 
 	// Update the last used time for their ip
 	isNew, allowed := loginHistory.Update(e.XPID, e.ClientIP, e.LoginPayload, e.IsWebSocketAuthenticated)
-	loginHistory.recordASNs(e.ClientIPASNs)
+	// What authorizeSession learned this login, over what the stored history
+	// already knows; the latter fills ASN-less entries, this login's new one
+	// included, for addresses the event does not repeat.
+	asns := loginHistory.clientIPASNs()
+	maps.Copy(asns, e.ClientIPASNs)
+	loginHistory.recordASNs(asns)
 
 	if allowed && isNew {
 		// Get the account to retrieve the Discord ID
