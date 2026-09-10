@@ -6,8 +6,10 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -29,7 +31,53 @@ const (
 	ip2asnV6Cache   = "/var/tmp/ip2asn-v6.tsv.gz"
 	asnCacheMaxAge  = 24 * time.Hour
 	defaultMaxIPMap = 100_000
+
+	// asnDownloadTimeout bounds one dataset download end to end, body
+	// included. Measured 2026-09-10: v4 is 6.96 MB gzipped, v6 1.99 MB, so
+	// two minutes still completes below 1 Mbit/s. The fetch used to go through
+	// http.DefaultClient, which has no timeout at all, so a stalled
+	// iptoasn.com held the refresh -- and now readiness -- open indefinitely.
+	asnDownloadTimeout = 2 * time.Minute
+
+	// defaultASNRefreshRetryInterval is how long RunASNRefresher waits before
+	// retrying a failed refresh. A failure can leave the detector not-ready,
+	// which fails closed and costs every IP-based alt signal, so it is retried
+	// rather than left until the next restart -- but not so often that an
+	// iptoasn.com outage is met with a download loop.
+	defaultASNRefreshRetryInterval = 15 * time.Minute
 )
+
+// asnHTTPClient fetches the iptoasn.com datasets. See asnDownloadTimeout.
+var asnHTTPClient = &http.Client{Timeout: asnDownloadTimeout}
+
+// ErrASNDataNotReady is returned by operations that act on a POSITIVE weak or
+// ignored verdict -- breaking alt links -- when the detector cannot yet answer
+// for every configured ASN. In that state every public address outside the
+// configured CIDRs classifies as shared, so such an operation would break every
+// IP-only link it walked. See CGNATDetector.ASNDataReady.
+var ErrASNDataNotReady = errors.New("CGNAT ASN data not ready: addresses outside the configured CIDRs cannot be classified")
+
+// asnFamily selects one of the two iptoasn.com datasets.
+type asnFamily int
+
+const (
+	asnFamilyV4 asnFamily = iota
+	asnFamilyV6
+)
+
+func (f asnFamily) String() string {
+	if f == asnFamilyV4 {
+		return "v4"
+	}
+	return "v6"
+}
+
+func (f asnFamily) source() (url, cachePath string) {
+	if f == asnFamilyV4 {
+		return ip2asnV4URL, ip2asnV4Cache
+	}
+	return ip2asnV6URL, ip2asnV6Cache
+}
 
 // cgnatDetector is the process-wide CGNAT detector, accessed atomically.
 // Complements isKnownSharedIPProvider() in evr_ip_info_shared.go which
@@ -56,17 +104,41 @@ type asnRange6 struct {
 }
 
 // CGNATDetector identifies CGNAT and shared-IP addresses using three layers:
-// CIDR range list (fastest, available immediately), ASN lookup (background loaded),
+// CIDR range list (fastest, available immediately), ASN lookup (the configured
+// ASNs' ranges, loaded from storage at boot and refreshed in the background),
 // and heuristic per-IP account tracking (optional, warns moderators only).
 type CGNATDetector struct {
 	mu         sync.RWMutex
 	asnRanges4 []asnRange4
 	asnRanges6 []asnRange6
-	cidrNets   []*net.IPNet
-	ipCounts   map[string]map[string]time.Time // IP → {userID → lastSeen}
-	lastUpdate time.Time
-	logger     runtime.Logger
-	maxIPCount int
+	// asnCovered4 and asnCovered6 are the ASN lists the loaded ranges were
+	// filtered for, per family. They -- not the ASNs that happen to appear in
+	// the ranges -- define what the detector can answer for: a configured ASN
+	// that announces nothing filters to zero rows and is still covered.
+	asnCovered4 map[int]bool
+	asnCovered6 map[int]bool
+	asnUpdated4 time.Time
+	asnUpdated6 time.Time
+	cidrNets    []*net.IPNet
+	ipCounts    map[string]map[string]time.Time // IP → {userID → lastSeen}
+	logger      runtime.Logger
+	maxIPCount  int
+
+	// fetchASN returns one gzipped iptoasn.com dataset. fetchASNDataset in
+	// production; tests substitute fixtures so nothing touches the network.
+	fetchASN func(ctx context.Context, family asnFamily) ([]byte, error)
+	// refreshRequests carries rebuild requests to RunASNRefresher. Capacity 1:
+	// requests arriving while one is pending coalesce, which is safe because a
+	// refresh reads the ASN list current when it runs, not when it was asked.
+	refreshRequests      chan struct{}
+	refreshRetryInterval time.Duration
+	// stateChanged is closed and replaced whenever readiness may have changed.
+	// WaitASNDataReady blocks on it.
+	stateChanged chan struct{}
+
+	// settingsApplied is false until UpdateSettings first runs. Before that the
+	// detector does not know which ASNs it must answer for, so it is not ready.
+	settingsApplied bool
 
 	// settings cached from CGNATSettings
 	cgnatASNs                map[int]bool
@@ -76,13 +148,18 @@ type CGNATDetector struct {
 	heuristicWindowDays      int
 }
 
-// NewCGNATDetector creates a detector with the given logger.
+// NewCGNATDetector creates a detector with the given logger. It is not ready
+// (see ASNDataReady) until settings are applied and ASN ranges are loaded.
 func NewCGNATDetector(logger runtime.Logger) *CGNATDetector {
 	return &CGNATDetector{
-		logger:     logger,
-		ipCounts:   make(map[string]map[string]time.Time),
-		maxIPCount: defaultMaxIPMap,
-		cgnatASNs:  make(map[int]bool),
+		logger:               logger,
+		ipCounts:             make(map[string]map[string]time.Time),
+		maxIPCount:           defaultMaxIPMap,
+		cgnatASNs:            make(map[int]bool),
+		fetchASN:             fetchASNDataset,
+		refreshRequests:      make(chan struct{}, 1),
+		refreshRetryInterval: defaultASNRefreshRetryInterval,
+		stateChanged:         make(chan struct{}),
 	}
 }
 
@@ -105,12 +182,20 @@ func (d *CGNATDetector) UpdateSettings(settings CGNATSettings) {
 	}
 	d.cidrNets = nets
 
-	// Parse ASNs
+	// Parse ASNs. A changed list needs a rebuilt range set: the stored ranges
+	// hold only the ASNs they were filtered for. The first application at boot
+	// always counts as a change (from the empty list), which is what triggers
+	// each process's background refresh.
 	asnMap := make(map[int]bool, len(settings.ASNs))
 	for _, asn := range settings.ASNs {
 		asnMap[asn] = true
 	}
+	if !maps.Equal(asnMap, d.cgnatASNs) {
+		d.requestASNRefresh()
+	}
 	d.cgnatASNs = asnMap
+	d.settingsApplied = true
+	d.notifyStateChangedLocked()
 
 	d.commodityProfilePrefixes = settings.CommodityProfilePrefixes
 	d.heuristicEnabled = settings.HeuristicEnabled
@@ -118,7 +203,18 @@ func (d *CGNATDetector) UpdateSettings(settings CGNATSettings) {
 	d.heuristicWindowDays = settings.HeuristicWindowDays
 }
 
-// IsCGNAT returns true if the IP belongs to a known CGNAT system.
+// IsCGNAT reports whether ipStr must be treated as a shared address: it is in
+// a configured CIDR, or in a configured ASN, or the detector cannot rule it out.
+//
+// The last case is the fail-closed one (#596). When the loaded IP->ASN ranges
+// for the address's family were not filtered for every configured ASN --
+// nothing loaded yet, a failed download, an ASN added since the last refresh,
+// or no settings applied -- an address outside the CIDRs is reported as shared.
+// Missing data is not evidence of a negative, and the costs are not symmetric:
+// a missed alt link is found again on a later login, while a false one is
+// persisted on both accounts and nothing afterwards tells it from a real one.
+// ASNDataReady reports whether this case can currently occur.
+//
 // Handles both IPv4 and IPv6. Returns false for unparseable input.
 func (d *CGNATDetector) IsCGNAT(ipStr string) bool {
 	ip := net.ParseIP(ipStr)
@@ -136,25 +232,97 @@ func (d *CGNATDetector) IsCGNAT(ipStr string) bool {
 		}
 	}
 
-	// Layer 2: ASN lookup
-	if len(d.cgnatASNs) > 0 {
-		var asn int
-		if ip4 := ip.To4(); ip4 != nil {
-			asn = d.lookupASNv4(ip4)
-		} else {
-			asn = d.lookupASNv6(ip.To16())
-		}
-		if asn > 0 && d.cgnatASNs[asn] {
-			return true
+	// Layer 2: ASN lookup, only on data that can answer for every configured ASN.
+	ip4 := ip.To4()
+	if !d.asnCoveredLocked(ip4 != nil) {
+		return true
+	}
+	var asn int
+	if ip4 != nil {
+		asn = d.lookupASNv4(ip4)
+	} else {
+		asn = d.lookupASNv6(ip.To16())
+	}
+	return asn > 0 && d.cgnatASNs[asn]
+}
+
+// asnCoveredLocked reports whether the loaded ranges for one family were
+// filtered for every configured ASN. Must hold d.mu.
+func (d *CGNATDetector) asnCoveredLocked(v4 bool) bool {
+	if !d.settingsApplied {
+		return false
+	}
+	covered := d.asnCovered6
+	if v4 {
+		covered = d.asnCovered4
+	}
+	for asn := range d.cgnatASNs {
+		if !covered[asn] {
+			return false
 		}
 	}
+	return true
+}
 
-	return false
+// ASNDataReady reports whether IsCGNAT can answer definitively for every
+// address: settings have been applied and, for both IPv4 and IPv6, the loaded
+// ranges were filtered for every configured ASN. While it is false IsCGNAT fails
+// closed, reporting any address outside the configured CIDRs as shared. With no
+// ASNs configured there is nothing to load, and it is true once settings apply.
+//
+// Cheap (a read lock and a pass over the configured ASNs) and safe for
+// concurrent use. It can go false again: adding an ASN in settings makes the
+// detector not-ready until the rebuild for the new list lands.
+//
+// A caller about to make a persistent decision from IsCGNAT, IsWeakSignal or
+// matchIgnoredAltPattern -- a migration that rebuilds or breaks alt links --
+// must require it, or block on WaitASNDataReady with a deadline.
+func (d *CGNATDetector) ASNDataReady() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.asnCoveredLocked(true) && d.asnCoveredLocked(false)
+}
+
+// WaitASNDataReady blocks until ASNDataReady is true or ctx ends, returning
+// ctx's error in the latter case. It does not poll; it wakes on each settings
+// application and each install of ranges.
+func (d *CGNATDetector) WaitASNDataReady(ctx context.Context) error {
+	for {
+		d.mu.RLock()
+		ready := d.asnCoveredLocked(true) && d.asnCoveredLocked(false)
+		changed := d.stateChanged
+		d.mu.RUnlock()
+		if ready {
+			return nil
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for CGNAT ASN data: %w", ctx.Err())
+		}
+	}
+}
+
+// notifyStateChangedLocked wakes every WaitASNDataReady. Must hold d.mu for writing.
+func (d *CGNATDetector) notifyStateChangedLocked() {
+	if d.stateChanged != nil {
+		close(d.stateChanged)
+	}
+	d.stateChanged = make(chan struct{})
+}
+
+// requestASNRefresh asks RunASNRefresher for a rebuild without blocking.
+func (d *CGNATDetector) requestASNRefresh() {
+	select {
+	case d.refreshRequests <- struct{}{}:
+	default: // one is already pending, and it reads the list current when it runs
+	}
 }
 
 // IsWeakSignal returns true if the given alt match item is a weak signal:
 // a CGNAT IP or a commodity system profile. HMD serials and XPIDs are
-// always strong signals.
+// always strong signals. An IP is decided by IsCGNAT, so an address the
+// detector cannot yet classify is weak, never strong.
 func (d *CGNATDetector) IsWeakSignal(item string) bool {
 	if item == "" || item == "unknown" {
 		return true
@@ -284,54 +452,107 @@ func (d *CGNATDetector) evictOldestIPs() {
 	}
 }
 
-// RefreshASNData downloads and parses both IPv4 and IPv6 ASN data.
-// Returns an error only if both datasets fail to load.
-func (d *CGNATDetector) RefreshASNData(ctx context.Context) error {
-	var errs []string
-
-	ranges4, err4 := loadASNData(ctx, ip2asnV4URL, ip2asnV4Cache, true)
-	if err4 != nil {
-		if d.logger != nil {
-			d.logger.WithField("error", err4).Warn("CGNAT: failed to load IPv4 ASN data")
-		}
-		errs = append(errs, fmt.Sprintf("v4: %v", err4))
+// RefreshASNData fetches both iptoasn.com datasets, keeps only the ranges of
+// the configured ASNs, installs them, and -- when nk is non-nil -- persists them
+// for the next boot (see LoadASNRanges). The detector never holds the ~711k
+// rows of the full datasets, only the few hundred it can be asked about.
+//
+// Each family succeeds or fails on its own. One that fails keeps what it held,
+// including the ASN list that data was filtered for, so readiness stays
+// truthful. ANY failure is returned, joined per family: a partial refresh is
+// not a success. (It used to report an error only when both families failed,
+// so a v4-only failure -- the one that matters for nearly every player --
+// looked like success.) Nothing is fetched while no ASNs are configured.
+func (d *CGNATDetector) RefreshASNData(ctx context.Context, nk runtime.NakamaModule) error {
+	d.mu.RLock()
+	asns := maps.Clone(d.cgnatASNs)
+	fetch := d.fetchASN
+	d.mu.RUnlock()
+	if len(asns) == 0 {
+		return nil
 	}
 
-	ranges6, err6 := loadASNData(ctx, ip2asnV6URL, ip2asnV6Cache, false)
-	if err6 != nil {
-		if d.logger != nil {
-			d.logger.WithField("error", err6).Warn("CGNAT: failed to load IPv6 ASN data")
+	var errs []error
+	fetched := make(map[asnFamily][]rawASNRange, 2)
+	for _, family := range []asnFamily{asnFamilyV4, asnFamilyV6} {
+		ranges, err := fetchFilteredASNRanges(ctx, fetch, family, asns)
+		if err == nil {
+			err = validateASNRows(family, ranges)
 		}
-		errs = append(errs, fmt.Sprintf("v6: %v", err6))
+		if err != nil {
+			if d.logger != nil {
+				d.logger.WithFields(map[string]any{"family": family.String(), "error": err}).Warn("CGNAT: failed to load ASN data")
+			}
+			errs = append(errs, fmt.Errorf("%s: %w", family, err))
+			continue
+		}
+		fetched[family] = ranges
 	}
+
+	if len(fetched) > 0 {
+		stored := d.installFetched(fetched, asns)
+		if nk != nil {
+			if err := cgnatASNRangesSave(ctx, nk, stored); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("CGNAT ASN refresh: %w", errors.Join(errs...))
+	}
+	return nil
+}
+
+// installFetched swaps in freshly filtered families and returns the detector's
+// whole ASN state in stored form. Families absent from fetched keep their
+// previous ranges and coverage.
+func (d *CGNATDetector) installFetched(fetched map[asnFamily][]rawASNRange, asns map[int]bool) cgnatASNRangesData {
+	now := time.Now().UTC()
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
-
-	loaded := false
-	if ranges4 != nil {
-		d.asnRanges4 = convertToRanges4(ranges4)
+	if raw, ok := fetched[asnFamilyV4]; ok {
+		d.asnRanges4, d.asnCovered4, d.asnUpdated4 = convertToRanges4(raw), asns, now
 		if d.logger != nil {
 			d.logger.WithField("count", len(d.asnRanges4)).Info("CGNAT: loaded IPv4 ASN ranges")
 		}
-		loaded = true
 	}
-	if ranges6 != nil {
-		d.asnRanges6 = convertToRanges6(ranges6)
+	if raw, ok := fetched[asnFamilyV6]; ok {
+		d.asnRanges6, d.asnCovered6, d.asnUpdated6 = convertToRanges6(raw), asns, now
 		if d.logger != nil {
 			d.logger.WithField("count", len(d.asnRanges6)).Info("CGNAT: loaded IPv6 ASN ranges")
 		}
-		loaded = true
 	}
+	d.notifyStateChangedLocked()
+	return d.storedFormLocked()
+}
 
-	if loaded {
-		d.lastUpdate = time.Now()
+// RunASNRefresher rebuilds the filtered ranges each time one is requested --
+// on the first settings application at boot and on every change to the ASN
+// list, see UpdateSettings -- and persists them through nk. A failed refresh is
+// retried every refreshRetryInterval until one succeeds. Returns when ctx ends.
+func (d *CGNATDetector) RunASNRefresher(ctx context.Context, nk runtime.NakamaModule) {
+	var retry <-chan time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-d.refreshRequests:
+		case <-retry:
+		}
+		retry = nil
+		if err := d.RefreshASNData(ctx, nk); err != nil {
+			if d.logger != nil {
+				d.logger.WithFields(map[string]any{
+					"error":          err,
+					"retry_in":       d.refreshRetryInterval.String(),
+					"asn_data_ready": d.ASNDataReady(),
+				}).Warn("CGNAT: ASN data refresh failed")
+			}
+			retry = time.After(d.refreshRetryInterval)
+		}
 	}
-
-	if ranges4 == nil && ranges6 == nil {
-		return fmt.Errorf("failed to load any ASN data: %s", strings.Join(errs, "; "))
-	}
-	return nil
 }
 
 // lookupASNv4 performs a binary search on IPv4 ranges. Must hold d.mu.RLock.
@@ -403,70 +624,90 @@ func filterStrongAlts(history *LoginHistory, altIDs []string, detector *CGNATDet
 
 // --- ASN data loading ---
 
+// rawASNRange is one iptoasn.com row, and also the stored form of a range.
 type rawASNRange struct {
-	startStr string
-	endStr   string
-	asn      int
+	Start string `json:"start"`
+	End   string `json:"end"`
+	ASN   int    `json:"asn"`
 }
 
-func loadASNData(ctx context.Context, url, cachePath string, isV4 bool) ([]rawASNRange, error) {
-	// Check cache freshness
-	if info, err := os.Stat(cachePath); err == nil {
-		if time.Since(info.ModTime()) < asnCacheMaxAge {
-			data, err := os.ReadFile(cachePath)
-			if err == nil {
-				return parseASNGzip(data, isV4)
-			}
+// fetchFilteredASNRanges fetches one family and keeps only the rows for asns.
+func fetchFilteredASNRanges(ctx context.Context, fetch func(context.Context, asnFamily) ([]byte, error), family asnFamily, asns map[int]bool) ([]rawASNRange, error) {
+	data, err := fetch(ctx, family)
+	if err != nil {
+		return nil, err
+	}
+	return filterASNGzip(data, asns)
+}
+
+// fetchASNDataset returns one gzipped iptoasn.com dataset: from the /var/tmp
+// cache when it is younger than asnCacheMaxAge, else downloaded and cached,
+// else a stale cache as a last resort. The cache only avoids re-downloading
+// within one container's life -- /var/tmp is empty after every recreate. What
+// survives a deploy is the filtered storage object; see LoadASNRanges.
+func fetchASNDataset(ctx context.Context, family asnFamily) ([]byte, error) {
+	url, cachePath := family.source()
+
+	if info, err := os.Stat(cachePath); err == nil && time.Since(info.ModTime()) < asnCacheMaxAge {
+		if data, err := os.ReadFile(cachePath); err == nil {
+			return data, nil
 		}
 	}
 
-	// Download
+	data, err := downloadASNDataset(ctx, url)
+	if err != nil {
+		if cached, cacheErr := os.ReadFile(cachePath); cacheErr == nil {
+			return cached, nil
+		}
+		return nil, err
+	}
+
+	// Cache to disk (non-fatal if it fails -- data is already in memory)
+	_ = os.WriteFile(cachePath, data, 0644)
+	return data, nil
+}
+
+func downloadASNDataset(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
-
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := asnHTTPClient.Do(req)
 	if err != nil {
-		// Fall back to cache if available
-		if data, cacheErr := os.ReadFile(cachePath); cacheErr == nil {
-			return parseASNGzip(data, isV4)
-		}
 		return nil, fmt.Errorf("downloading ASN data: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		if data, cacheErr := os.ReadFile(cachePath); cacheErr == nil {
-			return parseASNGzip(data, isV4)
-		}
-		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
+		return nil, fmt.Errorf("downloading ASN data: unexpected status %d", resp.StatusCode)
 	}
-
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("reading response: %w", err)
 	}
-
-	// Cache to disk
-	// Cache to disk (non-fatal if it fails — data is already in memory)
-	_ = os.WriteFile(cachePath, data, 0644)
-
-	return parseASNGzip(data, isV4)
+	return data, nil
 }
 
-func parseASNGzip(data []byte, _ bool) ([]rawASNRange, error) {
+// filterASNGzip decompresses an iptoasn.com TSV and returns only the rows
+// whose ASN is in asns, streaming, so the rest are never held.
+//
+// A dataset with no routed rows at all is an error, not an empty answer.
+// Recorded as "these ASNs own nothing", it would mark coverage complete over
+// an empty table, report every carrier address as not-CGNAT, and be persisted.
+func filterASNGzip(data []byte, asns map[int]bool) ([]rawASNRange, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("decompressing: %w", err)
 	}
 	defer gz.Close()
 
-	var ranges []rawASNRange
+	var (
+		ranges []rawASNRange
+		routed int
+	)
 	scanner := bufio.NewScanner(gz)
 	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.SplitN(line, "\t", 5)
+		parts := strings.SplitN(scanner.Text(), "\t", 4)
 		if len(parts) < 3 {
 			continue
 		}
@@ -474,20 +715,46 @@ func parseASNGzip(data []byte, _ bool) ([]rawASNRange, error) {
 		if err != nil || asn == 0 {
 			continue // Skip unrouted ranges
 		}
-		ranges = append(ranges, rawASNRange{
-			startStr: parts[0],
-			endStr:   parts[1],
-			asn:      asn,
-		})
+		routed++
+		if asns[asn] {
+			ranges = append(ranges, rawASNRange{Start: parts[0], End: parts[1], ASN: asn})
+		}
 	}
-	return ranges, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("reading dataset: %w", err)
+	}
+	if routed == 0 {
+		return nil, errors.New("dataset has no routed rows")
+	}
+	return ranges, nil
+}
+
+// validateASNRows refuses a family's rows unless every one is a well-formed
+// range of that family: both endpoints parse, both belong to the family, and
+// start <= end. convertToRanges4/6 skip or mis-file a malformed row, so without
+// this the family would be marked covered with that range missing -- every
+// address in it answered not-CGNAT, and the table persisted.
+func validateASNRows(family asnFamily, rows []rawASNRange) error {
+	wantV4 := family == asnFamilyV4
+	for _, r := range rows {
+		start, end := net.ParseIP(r.Start), net.ParseIP(r.End)
+		switch {
+		case start == nil || end == nil:
+			return fmt.Errorf("AS%d row %q-%q: unparseable endpoint", r.ASN, r.Start, r.End)
+		case (start.To4() != nil) != wantV4 || (end.To4() != nil) != wantV4:
+			return fmt.Errorf("AS%d row %s-%s is not an IP%s range", r.ASN, r.Start, r.End, family)
+		case bytes.Compare(start.To16(), end.To16()) > 0:
+			return fmt.Errorf("AS%d row %s-%s is reversed", r.ASN, r.Start, r.End)
+		}
+	}
+	return nil
 }
 
 func convertToRanges4(raw []rawASNRange) []asnRange4 {
 	ranges := make([]asnRange4, 0, len(raw))
 	for _, r := range raw {
-		startIP := net.ParseIP(r.startStr)
-		endIP := net.ParseIP(r.endStr)
+		startIP := net.ParseIP(r.Start)
+		endIP := net.ParseIP(r.End)
 		if startIP == nil || endIP == nil {
 			continue
 		}
@@ -499,7 +766,7 @@ func convertToRanges4(raw []rawASNRange) []asnRange4 {
 		ranges = append(ranges, asnRange4{
 			Start: ipv4ToUint32(start4),
 			End:   ipv4ToUint32(end4),
-			ASN:   r.asn,
+			ASN:   r.ASN,
 		})
 	}
 	sort.Slice(ranges, func(i, j int) bool {
@@ -511,8 +778,8 @@ func convertToRanges4(raw []rawASNRange) []asnRange4 {
 func convertToRanges6(raw []rawASNRange) []asnRange6 {
 	ranges := make([]asnRange6, 0, len(raw))
 	for _, r := range raw {
-		startIP := net.ParseIP(r.startStr)
-		endIP := net.ParseIP(r.endStr)
+		startIP := net.ParseIP(r.Start)
+		endIP := net.ParseIP(r.End)
 		if startIP == nil || endIP == nil {
 			continue
 		}
@@ -522,7 +789,7 @@ func convertToRanges6(raw []rawASNRange) []asnRange6 {
 		ranges = append(ranges, asnRange6{
 			Start: start,
 			End:   end,
-			ASN:   r.asn,
+			ASN:   r.ASN,
 		})
 	}
 	sort.Slice(ranges, func(i, j int) bool {

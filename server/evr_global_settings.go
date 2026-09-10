@@ -331,7 +331,12 @@ func ServiceSettingsLoad(ctx context.Context, logger runtime.Logger, nk runtime.
 		}
 	}
 
-	serviceSettings.Store(&data)
+	// Through ServiceSettingsUpdate, not a bare Store: this is the path that
+	// reads Global/settings (at boot and on every 30 s poll), and the CGNAT
+	// detector only learns its CIDRs, ASNs and commodity prefixes from there.
+	// A bare Store left it unconfigured until the Discord READY handler happened
+	// to call ServiceSettingsUpdate, and never passed on an edit to the record.
+	ServiceSettingsUpdate(&data)
 
 	return &data, nil
 }
