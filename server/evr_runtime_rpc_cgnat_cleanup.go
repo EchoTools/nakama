@@ -56,21 +56,19 @@ func CGNATCleanupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	return string(data), nil
 }
 
-// cgnatStartupReadyWait bounds how long the startup cleanup waits for ASN
-// data. Stored ranges make it ready as soon as settings arrive; the bound
-// covers a first boot with nothing stored, which needs both downloads (each
-// capped at asnDownloadTimeout) to succeed.
+// cgnatStartupReadyWait bounds how long the startup cleanup waits for settings
+// to reach the detector. NewEvrPipeline's ServiceSettingsLoad delivers them
+// during boot, so the bound is only reached by a boot that never gets that far.
 const cgnatStartupReadyWait = 10 * time.Minute
 
-// runCGNATStartupCleanup runs the retroactive cleanup once ASN data is ready,
-// if settings enable it. Not being ready within cgnatStartupReadyWait is logged
-// whether or not cleanup is enabled: until it is, every address outside the
-// configured CIDRs is treated as shared and IP-based alt signals are dark.
+// runCGNATStartupCleanup runs the retroactive cleanup once settings have reached
+// the detector, if they enable it. Until then CleanupOnStartup reads as false
+// and the detector knows no CIDRs or ASNs, so there is nothing to decide with.
 func runCGNATStartupCleanup(logger runtime.Logger, nk runtime.NakamaModule, detector *CGNATDetector) {
 	ctx, cancel := context.WithTimeout(context.Background(), cgnatStartupReadyWait)
 	defer cancel()
-	if err := detector.WaitASNDataReady(ctx); err != nil {
-		logger.WithField("error", err).Warn("CGNAT: ASN data not ready after startup; addresses outside the configured CIDRs are treated as shared until a refresh succeeds")
+	if err := detector.WaitSettingsApplied(ctx); err != nil {
+		logger.WithField("error", err).Warn("CGNAT: settings never reached the detector after startup; startup cleanup skipped")
 		return
 	}
 	if !ServiceSettings().CGNAT.CleanupOnStartup {
@@ -87,17 +85,12 @@ func runCGNATStartupCleanup(logger runtime.Logger, nk runtime.NakamaModule, dete
 // runCGNATCleanup scans all LoginHistory records and breaks alt links based
 // entirely on weak signals. Uses versioned writes with retry on conflict.
 //
-// Refuses with ErrASNDataNotReady unless the detector is ready. This is the one
-// kind of caller whose safe direction is the opposite of IsCGNAT's: it acts on
-// a POSITIVE weak verdict, and without ASN data every public address is weak,
-// so running would break every IP-only link in the database. Readiness is
-// re-checked per history, not once: an ASN added to settings mid-scan makes the
-// detector not-ready from that moment, and the scan stops there.
+// An IP is weak only on positive evidence: a configured CIDR, or a configured
+// ASN recorded for it in the scanned history's own entries (see
+// filterStrongAlts for why the history holds every matched IP). An IP outside
+// the CIDRs with no recorded ASN stays strong, so a history not yet backfilled
+// keeps its links rather than losing them to missing data.
 func runCGNATCleanup(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, detector *CGNATDetector) (brokenLinks, affectedUsers int, details []string, err error) {
-	if !detector.ASNDataReady() {
-		return 0, 0, nil, fmt.Errorf("CGNAT cleanup: %w", ErrASNDataNotReady)
-	}
-
 	processed := make(map[string]bool)
 	affectedSet := make(map[string]bool)
 
@@ -112,9 +105,6 @@ func runCGNATCleanup(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 			if obj.Key != LoginHistoryStorageKey {
 				continue
 			}
-			if !detector.ASNDataReady() {
-				return brokenLinks, len(affectedSet), details, fmt.Errorf("CGNAT cleanup stopped mid-scan: %w", ErrASNDataNotReady)
-			}
 
 			history := NewLoginHistory(obj.UserId)
 			if readErr := json.Unmarshal([]byte(obj.Value), history); readErr != nil {
@@ -127,6 +117,7 @@ func runCGNATCleanup(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 			})
 
 			// Identify alt links to break (all items are weak signals)
+			asns := history.clientIPASNs()
 			toBreak := make([]string, 0)
 			for altID, matches := range history.AlternateMatches {
 				pk := pairKey(obj.UserId, altID)
@@ -137,7 +128,7 @@ func runCGNATCleanup(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 				allWeak := true
 				for _, m := range matches {
 					for _, item := range m.Items {
-						if !detector.IsWeakSignal(item) {
+						if !detector.IsWeakSignal(item, asns[item]) {
 							allWeak = false
 							break
 						}

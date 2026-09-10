@@ -102,7 +102,7 @@ func TestMatchIgnoredAltPattern(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := matchIgnoredAltPattern(tt.pattern)
+			got := matchIgnoredAltPattern(tt.pattern, 0)
 			if got != tt.want {
 				t.Errorf("matchIgnoredAltPattern(%v) = %v, want %v", tt.pattern, got, tt.want)
 			}

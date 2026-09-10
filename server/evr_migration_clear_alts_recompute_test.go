@@ -207,10 +207,10 @@ func newRecomputeFixture(t *testing.T) (*altIndexTestModule, string, string, evr
 
 	// Guard: an XPID or serial that matchIgnoredAltPattern already drops
 	// would make every assertion below vacuous.
-	if matchIgnoredAltPattern(serial) {
+	if matchIgnoredAltPattern(serial, 0) {
 		t.Fatalf("fixture is inert: serial %q is in the ignored set", serial)
 	}
-	if matchIgnoredAltPattern(xpid.Token()) {
+	if matchIgnoredAltPattern(xpid.Token(), 0) {
 		t.Fatalf("fixture is inert: XPID %q is in the ignored set", xpid.Token())
 	}
 

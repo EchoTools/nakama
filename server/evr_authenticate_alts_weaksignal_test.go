@@ -104,7 +104,6 @@ func weakSignalHistory(userID string, entries ...*LoginHistoryEntry) *LoginHisto
 // commodity filter exists to solve.
 func TestIsWeakSignal_EmptyCommodityPrefixIsNotAUniversalMatch(t *testing.T) {
 	d := withDetector(t, productionCGNATSettings())
-	markASNDataLoaded(t, d, nil, nil) // so the public-IP row is decided by data, see #596
 
 	commodityProfile := profileString("Meta Quest 2", "WIFI", "", "Unknown", "3", "8", "0", "0")
 	desktopProfile := (&LoginHistoryEntry{LoginData: &evr.LoginProfile{SystemInfo: desktopSystemInfo()}}).SystemProfile()
@@ -132,7 +131,7 @@ func TestIsWeakSignal_EmptyCommodityPrefixIsNotAUniversalMatch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := d.IsWeakSignal(tt.item); got != tt.want {
+			if got := d.IsWeakSignal(tt.item, 0); got != tt.want {
 				t.Errorf("IsWeakSignal(%q) = %v, want %v; commodity prefixes configured as %q -- an empty prefix matches every string, so it must be skipped rather than applied",
 					tt.item, got, tt.want, productionCGNATSettings().CommodityProfilePrefixes)
 			}
@@ -144,8 +143,7 @@ func TestIsWeakSignal_EmptyCommodityPrefixIsNotAUniversalMatch(t *testing.T) {
 // layer up, where the consequence actually lands: matchIgnoredAltPattern is
 // what rebuildCache and AltSearchPatterns consult before keeping an item.
 func TestMatchIgnoredAltPattern_EmptyCommodityPrefix(t *testing.T) {
-	d := withDetector(t, productionCGNATSettings())
-	markASNDataLoaded(t, d, nil, nil) // so the public-IP row is decided by data, see #596
+	withDetector(t, productionCGNATSettings())
 
 	commodityProfile := profileString("Meta Quest 2", "WIFI", "", "Unknown", "3", "8", "0", "0")
 	desktopProfile := (&LoginHistoryEntry{LoginData: &evr.LoginProfile{SystemInfo: desktopSystemInfo()}}).SystemProfile()
@@ -169,7 +167,7 @@ func TestMatchIgnoredAltPattern_EmptyCommodityPrefix(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := matchIgnoredAltPattern(tt.item); got != tt.want {
+			if got := matchIgnoredAltPattern(tt.item, 0); got != tt.want {
 				t.Errorf("matchIgnoredAltPattern(%q) = %v, want %v; an item dropped here never reaches LoginHistory.Cache and can never surface an alt candidate",
 					tt.item, got, tt.want)
 			}
@@ -190,8 +188,7 @@ func TestMatchIgnoredAltPattern_EmptyCommodityPrefix(t *testing.T) {
 // every other test in this package gets) the assertion passes even on the broken
 // build, which is precisely why nothing caught this.
 func TestRebuildCache_ContainsAllFourItems(t *testing.T) {
-	d := withDetector(t, productionCGNATSettings())
-	markASNDataLoaded(t, d, nil, nil) // so the client-IP row is decided by data, see #596
+	withDetector(t, productionCGNATSettings())
 
 	entry := weakSignalEntry(2097, "45.33.90.154", "WMHD3157200FJE", desktopSystemInfo())
 	h := weakSignalHistory("user-a", entry)
@@ -222,8 +219,7 @@ func TestRebuildCache_ContainsAllFourItems(t *testing.T) {
 // The system profile is deliberately NOT expected here -- it is a comparison
 // key only, by design (see the comment on AltSearchPatterns).
 func TestAltSearchPatterns_ContainsXPIDAndSerial(t *testing.T) {
-	d := withDetector(t, productionCGNATSettings())
-	markASNDataLoaded(t, d, nil, nil) // so the client-IP row is decided by data, see #596
+	withDetector(t, productionCGNATSettings())
 
 	entry := weakSignalEntry(2097, "45.33.90.154", "WMHD3157200FJE", desktopSystemInfo())
 	h := weakSignalHistory("user-a", entry)
