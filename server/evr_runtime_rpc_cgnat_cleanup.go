@@ -90,7 +90,9 @@ func runCGNATStartupCleanup(logger runtime.Logger, nk runtime.NakamaModule, dete
 // Refuses with ErrASNDataNotReady unless the detector is ready. This is the one
 // kind of caller whose safe direction is the opposite of IsCGNAT's: it acts on
 // a POSITIVE weak verdict, and without ASN data every public address is weak,
-// so running would break every IP-only link in the database.
+// so running would break every IP-only link in the database. Readiness is
+// re-checked per history, not once: an ASN added to settings mid-scan makes the
+// detector not-ready from that moment, and the scan stops there.
 func runCGNATCleanup(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, detector *CGNATDetector) (brokenLinks, affectedUsers int, details []string, err error) {
 	if !detector.ASNDataReady() {
 		return 0, 0, nil, fmt.Errorf("CGNAT cleanup: %w", ErrASNDataNotReady)
@@ -109,6 +111,9 @@ func runCGNATCleanup(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 		for _, obj := range objects {
 			if obj.Key != LoginHistoryStorageKey {
 				continue
+			}
+			if !detector.ASNDataReady() {
+				return brokenLinks, len(affectedSet), details, fmt.Errorf("CGNAT cleanup stopped mid-scan: %w", ErrASNDataNotReady)
 			}
 
 			history := NewLoginHistory(obj.UserId)

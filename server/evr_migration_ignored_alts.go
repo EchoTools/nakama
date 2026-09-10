@@ -21,12 +21,8 @@ import (
 type MigrationBreakIgnoredAlts struct{}
 
 func (m *MigrationBreakIgnoredAlts) MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) error {
-	// This migration only deletes, and it deletes on a POSITIVE "ignored"
-	// verdict. Without ASN data matchIgnoredAltPattern fails closed and reports
-	// every public address as ignored, so running now would break every
-	// IP-only link it walked. Refuse; the next boot runs it again.
-	if d := GetCGNATDetector(); d != nil && !d.ASNDataReady() {
-		return fmt.Errorf("ignored-alts migration: %w", ErrASNDataNotReady)
+	if err := ignoredAltsClassifierReady(); err != nil {
+		return err
 	}
 
 	processed := make(map[string]bool)
@@ -43,6 +39,9 @@ func (m *MigrationBreakIgnoredAlts) MigrateSystem(ctx context.Context, logger ru
 		for _, obj := range objects {
 			if obj.Key != LoginHistoryStorageKey {
 				continue
+			}
+			if err := ignoredAltsClassifierReady(); err != nil {
+				return err
 			}
 
 			history := NewLoginHistory(obj.UserId)
@@ -133,6 +132,23 @@ func (m *MigrationBreakIgnoredAlts) MigrateSystem(ctx context.Context, logger ru
 		"affected_users": len(affectedSet),
 	}).Info("ignored-alts migration complete")
 
+	return nil
+}
+
+// ignoredAltsClassifierReady refuses the migration while the CGNAT detector
+// cannot classify addresses. This migration only deletes, and it deletes on a
+// POSITIVE "ignored" verdict; without ASN data matchIgnoredAltPattern fails
+// closed and reports every public address as ignored, so running would break
+// every IP-only link it walked. Checked before the scan and again per history,
+// because an ASN added to settings mid-scan drops readiness from that moment.
+// The next boot runs the migration again.
+//
+// A nil detector is not refused: matchIgnoredAltPattern then consults no CGNAT
+// classification at all and ignores FEWER addresses, which deletes less.
+func ignoredAltsClassifierReady() error {
+	if d := GetCGNATDetector(); d != nil && !d.ASNDataReady() {
+		return fmt.Errorf("ignored-alts migration: %w", ErrASNDataNotReady)
+	}
 	return nil
 }
 

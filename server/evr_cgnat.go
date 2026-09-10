@@ -476,6 +476,9 @@ func (d *CGNATDetector) RefreshASNData(ctx context.Context, nk runtime.NakamaMod
 	fetched := make(map[asnFamily][]rawASNRange, 2)
 	for _, family := range []asnFamily{asnFamilyV4, asnFamilyV6} {
 		ranges, err := fetchFilteredASNRanges(ctx, fetch, family, asns)
+		if err == nil {
+			err = validateASNRows(family, ranges)
+		}
 		if err != nil {
 			if d.logger != nil {
 				d.logger.WithFields(map[string]any{"family": family.String(), "error": err}).Warn("CGNAT: failed to load ASN data")
@@ -724,6 +727,27 @@ func filterASNGzip(data []byte, asns map[int]bool) ([]rawASNRange, error) {
 		return nil, errors.New("dataset has no routed rows")
 	}
 	return ranges, nil
+}
+
+// validateASNRows refuses a family's rows unless every one is a well-formed
+// range of that family: both endpoints parse, both belong to the family, and
+// start <= end. convertToRanges4/6 skip or mis-file a malformed row, so without
+// this the family would be marked covered with that range missing -- every
+// address in it answered not-CGNAT, and the table persisted.
+func validateASNRows(family asnFamily, rows []rawASNRange) error {
+	wantV4 := family == asnFamilyV4
+	for _, r := range rows {
+		start, end := net.ParseIP(r.Start), net.ParseIP(r.End)
+		switch {
+		case start == nil || end == nil:
+			return fmt.Errorf("AS%d row %q-%q: unparseable endpoint", r.ASN, r.Start, r.End)
+		case (start.To4() != nil) != wantV4 || (end.To4() != nil) != wantV4:
+			return fmt.Errorf("AS%d row %s-%s is not an IP%s range", r.ASN, r.Start, r.End, family)
+		case bytes.Compare(start.To16(), end.To16()) > 0:
+			return fmt.Errorf("AS%d row %s-%s is reversed", r.ASN, r.Start, r.End)
+		}
+	}
+	return nil
 }
 
 func convertToRanges4(raw []rawASNRange) []asnRange4 {
