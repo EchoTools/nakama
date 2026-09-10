@@ -1410,6 +1410,10 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	// that MatchTerminate does not disconnect the game-server session while
 	// players are still on it (orphaning the server).
 	//
+	// Amended for #588: MatchTerminate no longer disconnects the game-server
+	// session on any path. It still disconnects the sessions of the players
+	// left in presenceMap, and waiting for them to leave is what avoids that.
+	//
 	// If the game server does not cooperate (players never leave), the deadline
 	// still forces teardown so a match cannot hang forever.
 	// ═══════════════════════════════════════════════════════════════════════

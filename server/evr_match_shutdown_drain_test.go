@@ -8,6 +8,10 @@ package server
 // MatchTerminate disconnects the game-server session, so the server was torn
 // down while players were still on it ("orphaned").
 //
+// Amended for #588: MatchTerminate no longer disconnects the game-server
+// session on any path (see evr_match_terminate_gameserver_test.go). It still
+// disconnects the players left in the presence map, so the drain still matters.
+//
 // The fix performs an orderly drain:
 //  1. Kick the players (entrant reject + CODE_ENDED) so the game server removes
 //     them and MatchLeave fires for each, emptying presenceMap.

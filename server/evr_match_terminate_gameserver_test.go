@@ -4,8 +4,8 @@ package server
 // server's registration websocket.
 //
 // A game server registers once and hosts many matches on that one session. The
-// monitor goroutine gameserverRegistrationRequest starts re-parks the server
-// after each match, and its only exit is the session closing. So the session
+// monitor goroutine started by gameserverRegistrationRequest re-parks the
+// server after each match, and its only exit is the session closing. So the session
 // belongs to the fleet, not to any match.
 //
 // processMatchTerminationTask used to SessionDisconnect it on every
