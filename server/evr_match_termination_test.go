@@ -425,8 +425,7 @@ func TestMatchJoin_OrphanPresenceDoesNotLeakJoinTimeMilliseconds(t *testing.T) {
 // branch used to sit above the game-server check and win that race, running the
 // shutdown with state.server still pointing at the departed game server: a
 // LobbySessionEvent CODE_ENDED dispatched to a presence that has already gone, a
-// stored label still advertising the game server, a 5s grace instead of 2s, and
-// a MatchTerminate snapshot carrying a live serverSessionID.
+// stored label still advertising the game server, and a 5s grace instead of 2s.
 func TestMatchLeave_GameServerLeavingEmptyMatchClearsServer(t *testing.T) {
 	state := reconnectTestState(evr.ModeSocialPublic)
 	state.StartTime = time.Now().UTC().Add(-time.Minute)
