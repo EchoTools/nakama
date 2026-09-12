@@ -61,6 +61,36 @@ func TestGroupInGameNameIsProtectedFromDiscordSync(t *testing.T) {
 			want: true,
 		},
 		{
+			// EchoTools/nakama#602. "Has a name" is decided by
+			// sanitizeDisplayName, which is what every consumer reads through.
+			// "12345" carries no ASCII letter, sanitizes to "", and so shields
+			// nothing — protecting it stranded the player with no IGN.
+			name: "override whose name sanitizes to empty is not protected",
+			ign:  GroupInGameName{DisplayName: "12345", IsOverride: true},
+			want: false,
+		},
+		{
+			name: "override of punctuation only is not protected",
+			ign:  GroupInGameName{DisplayName: "!!!", IsOverride: true},
+			want: false,
+		},
+		{
+			// The transliterating case, and the reason the source-side check is
+			// sanitizeDisplayName and not a raw-bytes regexp: this IS a name,
+			// it renders as "Kirill", and it stays protected.
+			name: "override that transliterates to letters is protected",
+			ign:  GroupInGameName{DisplayName: "Кирилл", IsOverride: true},
+			want: true,
+		},
+		{
+			// The IsLocked short-circuit is untouched by #602: an
+			// administrative freeze outranks the sanitization rescue exactly as
+			// it outranks the empty-name one above.
+			name: "locked name that sanitizes to empty is still protected",
+			ign:  GroupInGameName{DisplayName: "12345", IsLocked: true},
+			want: true,
+		},
+		{
 			name: "zero value is not protected",
 			ign:  GroupInGameName{},
 			want: false,
@@ -154,6 +184,37 @@ func TestShouldRefreshIGNFromDiscord(t *testing.T) {
 			ign:           GroupInGameName{IsOverride: true},
 			isActiveGroup: false,
 			want:          true,
+		},
+		{
+			// EchoTools/nakama#602, the reported reproduction: `?ign=12345`
+			// stored an override that sanitizes to "", the refresh was skipped,
+			// and GetGroupIGN(active) resolved to "".
+			name:          "override whose name sanitizes to empty refreshes in the active group",
+			ign:           GroupInGameName{DisplayName: "12345", IsOverride: true},
+			isActiveGroup: true,
+			want:          true,
+		},
+		{
+			// Characterization, NOT endorsement. #602 fixes the predicate, so
+			// this record is no longer "protected" — but the second clause
+			// (`ign.DisplayName == ""`) still tests the raw string, and it is
+			// byte-identical at v3.27.2-evr.322
+			// (2b5f45bbe:server/evr_pipeline_login.go:926). A non-active group
+			// holding an unrenderable name is stranded exactly as it was before
+			// #586: pre-existing, not a regression, so not fixed here. See
+			// TestGetGroupIGNStrandsAnUnrenderableNameInANonActiveGroup.
+			name:          "override whose name sanitizes to empty is still not refreshed in a non-active group",
+			ign:           GroupInGameName{DisplayName: "!!!", IsOverride: true},
+			isActiveGroup: false,
+			want:          false,
+		},
+		{
+			// Still shielded — a locked name is frozen whether or not it
+			// renders, and #602 does not relax that.
+			name:          "locked name that sanitizes to empty is still kept",
+			ign:           GroupInGameName{DisplayName: "12345", IsLocked: true},
+			isActiveGroup: true,
+			want:          false,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
