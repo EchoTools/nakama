@@ -549,3 +549,86 @@ verify:
     fi
     echo "verify: ${#failed[@]} of 6 checks FAILED -- ${failed[*]}"
     exit 1
+
+# ---------------------------------------------------------------------------
+# THE RELEASE gate: verify + lint everything that ships + no open blocker.
+#
+# `just lint` alone cannot answer "is this releasable". It is
+# --new-from-merge-base, and on `main` the merge base IS HEAD, so it inspects
+# zero lines and passes vacuously. CI has the same hole: lint-new runs only on
+# pull_request, and the push-to-main job runs lint-all, which exits 0 at any
+# count. Nothing lints the whole set of changes that ship between two releases.
+#
+# REF defaults to the tag production actually runs, not the newest tag. Those
+# differ: v3.27.2-evr.323 was tagged and is not what is deployed (identified in
+# issue #588 from log caller line numbers). Pass REF explicitly after a deploy.
+#
+# This recipe does NOT tag and does NOT push. `just release` is a separate,
+# human-only step -- see CLAUDE.md.
+release-check REF="v3.27.2-evr.322" MILESTONE="v3.27.2-evr.324":
+    #!/usr/bin/env bash
+    set -u
+    failed=()
+
+    # 0. Refuse to run against a REF that would make the lint step vacuous.
+    #    A gate that inspects nothing and reports success is the failure mode
+    #    this recipe exists to close, so these are hard exits, not failures
+    #    collected for the summary.
+    if ! git rev-parse -q --verify "{{ REF }}^{commit}" >/dev/null 2>&1; then
+        echo "ERROR: REF '{{ REF }}' does not resolve to a commit."
+        echo "Pass the tag production is running, e.g. just release-check v3.27.2-evr.322"
+        exit 1
+    fi
+    if ! git merge-base --is-ancestor "{{ REF }}" HEAD; then
+        echo "ERROR: REF '{{ REF }}' is not an ancestor of HEAD."
+        echo "Nothing meaningful to lint: the merge base is not the release point."
+        exit 1
+    fi
+    if [ "$(git rev-parse "{{ REF }}^{commit}")" = "$(git rev-parse HEAD^{commit})" ]; then
+        echo "ERROR: REF '{{ REF }}' is HEAD; there is nothing to lint."
+        echo "This is the vacuous pass this gate exists to refuse."
+        exit 1
+    fi
+
+    echo ""
+    echo "=== just verify ==="
+    if ! just verify; then failed+=("verify"); fi
+
+    echo ""
+    echo "=== lint everything since {{ REF }} ==="
+    if ! just lint "{{ REF }}"; then failed+=("lint-since-{{ REF }}"); fi
+
+    echo ""
+    echo "=== open release-blockers in {{ MILESTONE }} ==="
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "ERROR: gh is not available, so the blocker list cannot be checked."
+        echo "Refusing to pass a check that did not run."
+        failed+=("blockers")
+    else
+        out="$(gh issue list --milestone "{{ MILESTONE }}" --label release-blocker \
+               --state open --limit 200 --json number,title 2>&1)"; rc=$?
+        if [ "$rc" != "0" ]; then
+            echo "ERROR: gh failed (exit $rc). Refusing to pass a check that did not run."
+            printf '%s\n' "$out" | sed 's/^/  /'
+            failed+=("blockers")
+        else
+            n="$(printf '%s' "$out" | jq 'length')"
+            if [ "$n" != "0" ]; then
+                printf '%s' "$out" | jq -r '.[] | "  #\(.number) \(.title)"'
+                echo "ERROR: $n open release-blocker(s) in {{ MILESTONE }}."
+                failed+=("blockers")
+            else
+                echo "blockers: none open in {{ MILESTONE }}"
+            fi
+        fi
+    fi
+
+    echo ""
+    echo "======================================================================"
+    if [ ${#failed[@]} -eq 0 ]; then
+        echo "release-check: releasable -- {{ REF }}..HEAD is clean and no blocker is open"
+        echo "Tagging is a human step. See CLAUDE.md."
+        exit 0
+    fi
+    echo "release-check: ${#failed[@]} of 3 FAILED -- ${failed[*]}"
+    exit 1
