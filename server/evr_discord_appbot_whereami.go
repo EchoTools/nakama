@@ -815,9 +815,12 @@ func (d *DiscordAppBot) createServerIssueReportEmbed(user *discordgo.User, issue
 		issueTypeLabel = "Server Lag/Stuttering"
 	}
 
+	// The mention stays: it resolves when Discord cooperates. The username
+	// beside it is for when it does not, which for months has been often enough
+	// that server hosts could not tell who filed the report.
 	embed := &discordgo.MessageEmbed{
 		Title:       "Server Issue Report",
-		Description: fmt.Sprintf("Reported by <@%s>", user.ID),
+		Description: fmt.Sprintf("Reported by <@%s> (%s)", user.ID, EscapeDiscordMarkdown(user.Username)),
 		Color:       EmbedColorOrange,
 		Fields: []*discordgo.MessageEmbedField{
 			{
