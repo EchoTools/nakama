@@ -559,34 +559,92 @@ verify:
 # pull_request, and the push-to-main job runs lint-all, which exits 0 at any
 # count. Nothing lints the whole set of changes that ship between two releases.
 #
-# REF defaults to the tag production actually runs, not the newest tag. Those
-# differ: v3.27.2-evr.323 was tagged and is not what is deployed (identified in
-# issue #588 from log caller line numbers). Pass REF explicitly after a deploy.
+# MILESTONE is REQUIRED and has no default on purpose. A defaulted milestone
+# goes stale the moment a release ships, and `gh issue list --milestone` returns
+# an empty list with exit 0 for a title that matches nothing -- so a stale or
+# mistyped default reports "no blockers" having checked nothing. Naming it each
+# run is the only version of this that cannot rot:
+#
+#     just release-check v3.27.2-evr.324
+#     just release-check v3.27.2-evr.325 v3.27.2-evr.324
+#
+# REF keeps a default because its failure mode is the safe one: an older
+# baseline lints MORE than ships, which is noise, not a vacuous pass. It
+# defaults to the tag production actually runs, which is not the newest tag --
+# v3.27.2-evr.323 was tagged and is not deployed (identified in issue #588 from
+# log caller line numbers).
 #
 # This recipe does NOT tag and does NOT push. `just release` is a separate,
 # human-only step -- see CLAUDE.md.
-release-check REF="v3.27.2-evr.322" MILESTONE="v3.27.2-evr.324":
+release-check MILESTONE REF="v3.27.2-evr.322":
     #!/usr/bin/env bash
     set -u
     failed=()
 
-    # 0. Refuse to run against a REF that would make the lint step vacuous.
-    #    A gate that inspects nothing and reports success is the failure mode
-    #    this recipe exists to close, so these are hard exits, not failures
-    #    collected for the summary.
-    if ! git rev-parse -q --verify "{{ REF }}^{commit}" >/dev/null 2>&1; then
-        echo "ERROR: REF '{{ REF }}' does not resolve to a commit."
-        echo "Pass the tag production is running, e.g. just release-check v3.27.2-evr.322"
+    # 0. Refuse to run against a REF or MILESTONE that would make a step
+    #    vacuous. A gate that inspects nothing and reports success is the
+    #    failure mode this recipe exists to close, so these are hard exits,
+    #    not failures collected for the summary.
+    #
+    #    REF must be a RELEASE TAG, not any commit-ish. `HEAD~1` resolves, is
+    #    an ancestor, and is not HEAD -- it passes a naive check and lints one
+    #    commit instead of the whole release range. So: it must be a tag, and
+    #    it must look like the tags that ship (`*evr*`, which is what
+    #    .github/workflows/dockerhub-nakama.yaml fires on).
+    case "{{ REF }}" in
+        *evr*) ;;
+        *)  echo "ERROR: REF '{{ REF }}' is not a release tag (no 'evr' in the name)."
+            echo "The baseline must be the tag production runs, e.g. v3.27.2-evr.322."
+            exit 1 ;;
+    esac
+    if ! git rev-parse -q --verify "refs/tags/{{ REF }}^{commit}" >/dev/null 2>&1; then
+        echo "ERROR: REF '{{ REF }}' is not an existing tag in this repository."
+        echo "Fetch tags, or pass the tag production is running."
         exit 1
     fi
-    if ! git merge-base --is-ancestor "{{ REF }}" HEAD; then
+    if ! git merge-base --is-ancestor "refs/tags/{{ REF }}" HEAD; then
         echo "ERROR: REF '{{ REF }}' is not an ancestor of HEAD."
         echo "Nothing meaningful to lint: the merge base is not the release point."
         exit 1
     fi
-    if [ "$(git rev-parse "{{ REF }}^{commit}")" = "$(git rev-parse HEAD^{commit})" ]; then
+    if [ "$(git rev-parse "refs/tags/{{ REF }}^{commit}")" = "$(git rev-parse HEAD^{commit})" ]; then
         echo "ERROR: REF '{{ REF }}' is HEAD; there is nothing to lint."
         echo "This is the vacuous pass this gate exists to refuse."
+        exit 1
+    fi
+
+    #    MILESTONE must exist and be OPEN. `gh issue list --milestone` returns
+    #    an empty list with exit 0 for a title that matches nothing, so a typo
+    #    -- or a default left pointing at a milestone that has already shipped
+    #    -- reports "no blockers" and the gate passes having checked nothing.
+    for dep in gh jq; do
+        if ! command -v "$dep" >/dev/null 2>&1; then
+            echo "ERROR: '$dep' is required to check release blockers and is not installed."
+            echo "Refusing to pass a check that cannot run."
+            exit 1
+        fi
+    done
+    ms_state="$(gh api "repos/{owner}/{repo}/milestones?state=all&per_page=200" \
+                --jq '.[] | select(.title == "{{ MILESTONE }}") | .state' 2>&1)"; rc=$?
+    if [ "$rc" != "0" ]; then
+        echo "ERROR: could not list milestones (gh exit $rc)."
+        printf '%s\n' "$ms_state" | sed 's/^/  /'
+        exit 1
+    fi
+    if [ -z "$ms_state" ]; then
+        echo "ERROR: milestone '{{ MILESTONE }}' does not exist."
+        echo "An unknown milestone lists zero blockers and passes having checked nothing."
+        exit 1
+    fi
+    if [ "$ms_state" != "open" ]; then
+        echo "ERROR: milestone '{{ MILESTONE }}' is '$ms_state', not open."
+        echo "A shipped milestone has no open blockers left and would pass"
+        echo "having checked nothing. Name the release being cut."
+        exit 1
+    fi
+    if [ "{{ MILESTONE }}" = "{{ REF }}" ]; then
+        echo "ERROR: milestone '{{ MILESTONE }}' is the same as the baseline tag."
+        echo "The milestone names the release being CUT, not the one running."
         exit 1
     fi
 
@@ -600,11 +658,7 @@ release-check REF="v3.27.2-evr.322" MILESTONE="v3.27.2-evr.324":
 
     echo ""
     echo "=== open release-blockers in {{ MILESTONE }} ==="
-    if ! command -v gh >/dev/null 2>&1; then
-        echo "ERROR: gh is not available, so the blocker list cannot be checked."
-        echo "Refusing to pass a check that did not run."
-        failed+=("blockers")
-    else
+    {
         out="$(gh issue list --milestone "{{ MILESTONE }}" --label release-blocker \
                --state open --limit 200 --json number,title 2>&1)"; rc=$?
         if [ "$rc" != "0" ]; then
@@ -618,10 +672,10 @@ release-check REF="v3.27.2-evr.322" MILESTONE="v3.27.2-evr.324":
                 echo "ERROR: $n open release-blocker(s) in {{ MILESTONE }}."
                 failed+=("blockers")
             else
-                echo "blockers: none open in {{ MILESTONE }}"
+                echo "blockers: none open in {{ MILESTONE }} (milestone verified open)"
             fi
         fi
-    fi
+    }
 
     echo ""
     echo "======================================================================"
