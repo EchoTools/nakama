@@ -308,11 +308,25 @@ func (a EVRProfile) DisplayNamesByGroupID() map[string]string {
 // would strand the player with no in-game name instead of preserving one, so it
 // is left open. A lock keeps its stricter, pre-existing meaning and shields even
 // an empty name.
+//
+// "Exists" is decided by sanitizeDisplayName, not by the raw stored string
+// (EchoTools/nakama#602). Every consumer renders an IGN through that function —
+// GetGroupIGN does — and it returns "" for anything left carrying no ASCII
+// letter after transliteration. Testing the raw string instead made a stored
+// "12345" look like a name worth protecting, so the refresh was skipped and the
+// player was left with nothing at all: the precise outcome the paragraph above
+// exists to prevent.
+//
+// This is what restores v3.27.2-evr.322 behaviour. Before #586 the login-time
+// refresh was gated on IsLocked alone (`if !groupIGN.IsLocked` @ 2b5f45bbe:
+// server/evr_pipeline_login.go:925), so an override that rendered as nothing was
+// overwritten by the Discord nickname rather than sticking. The IsOverride
+// shield #586 added is correct; asking it of the raw string was not.
 func (g GroupInGameName) IsProtectedFromDiscordSync() bool {
 	if g.IsLocked {
 		return true
 	}
-	return g.IsOverride && g.DisplayName != ""
+	return g.IsOverride && sanitizeDisplayName(g.DisplayName) != ""
 }
 
 func (e EVRProfile) GetGroupIGNData(groupID string) GroupInGameName {
