@@ -617,6 +617,12 @@ release-check MILESTONE REF="v3.27.2-evr.322":
     #    an empty list with exit 0 for a title that matches nothing, so a typo
     #    -- or a default left pointing at a milestone that has already shipped
     #    -- reports "no blockers" and the gate passes having checked nothing.
+    if [ "{{ MILESTONE }}" = "{{ REF }}" ]; then
+        echo "ERROR: milestone '{{ MILESTONE }}' is the same as the baseline tag."
+        echo "The milestone names the release being CUT, not the one running."
+        exit 1
+    fi
+
     for dep in gh jq; do
         if ! command -v "$dep" >/dev/null 2>&1; then
             echo "ERROR: '$dep' is required to check release blockers and is not installed."
@@ -642,11 +648,6 @@ release-check MILESTONE REF="v3.27.2-evr.322":
         echo "having checked nothing. Name the release being cut."
         exit 1
     fi
-    if [ "{{ MILESTONE }}" = "{{ REF }}" ]; then
-        echo "ERROR: milestone '{{ MILESTONE }}' is the same as the baseline tag."
-        echo "The milestone names the release being CUT, not the one running."
-        exit 1
-    fi
 
     echo ""
     echo "=== just verify ==="
@@ -658,24 +659,7 @@ release-check MILESTONE REF="v3.27.2-evr.322":
 
     echo ""
     echo "=== open release-blockers in {{ MILESTONE }} ==="
-    {
-        out="$(gh issue list --milestone "{{ MILESTONE }}" --label release-blocker \
-               --state open --limit 200 --json number,title 2>&1)"; rc=$?
-        if [ "$rc" != "0" ]; then
-            echo "ERROR: gh failed (exit $rc). Refusing to pass a check that did not run."
-            printf '%s\n' "$out" | sed 's/^/  /'
-            failed+=("blockers")
-        else
-            n="$(printf '%s' "$out" | jq 'length')"
-            if [ "$n" != "0" ]; then
-                printf '%s' "$out" | jq -r '.[] | "  #\(.number) \(.title)"'
-                echo "ERROR: $n open release-blocker(s) in {{ MILESTONE }}."
-                failed+=("blockers")
-            else
-                echo "blockers: none open in {{ MILESTONE }} (milestone verified open)"
-            fi
-        fi
-    }
+    if ! just _release-blockers "{{ MILESTONE }}"; then failed+=("blockers"); fi
 
     echo ""
     echo "======================================================================"
@@ -686,3 +670,97 @@ release-check MILESTONE REF="v3.27.2-evr.322":
     fi
     echo "release-check: ${#failed[@]} of 3 FAILED -- ${failed[*]}"
     exit 1
+
+# The blocker query, split out so release-check-selftest can exercise it
+# without paying for `just verify`. Exits non-zero when any blocker is open.
+#
+# A blocker can be an ISSUE or a PULL REQUEST. `gh issue list` returns only
+# issues, so querying it alone once reported zero while two labelled PRs sat
+# open in the same milestone -- the gate printed "releasable" with blockers
+# outstanding. Both are queried and the counts summed.
+#
+# RELEASE_BLOCKERS_FIXTURE names a file holding one JSON array of
+# {number, title}; it exists for the self-test and is never set in normal use.
+_release-blockers MILESTONE:
+    #!/usr/bin/env bash
+    set -u
+    blockers_json() {
+        if [ -n "${RELEASE_BLOCKERS_FIXTURE:-}" ]; then
+            cat "$RELEASE_BLOCKERS_FIXTURE"
+            return
+        fi
+        gh issue list --milestone "{{ MILESTONE }}" --label release-blocker \
+            --state open --limit 200 --json number,title || return 1
+        gh pr list --state open --label release-blocker --limit 200 \
+            --json number,title,milestone \
+            --jq '[.[] | select(.milestone.title == "{{ MILESTONE }}") | {number, title}]' || return 1
+    }
+    out="$(blockers_json 2>&1)"; rc=$?
+    if [ "$rc" != "0" ]; then
+        echo "ERROR: the blocker query failed (exit $rc). Refusing to pass a check that did not run."
+        printf '%s\n' "$out" | sed 's/^/  /'
+        exit 1
+    fi
+    n="$(printf '%s' "$out" | jq -s 'add | length')"
+    if [ "$n" != "0" ]; then
+        printf '%s' "$out" | jq -rs 'add | .[] | "  #\(.number) \(.title)"'
+        echo "ERROR: $n open release-blocker(s) in {{ MILESTONE }} (issues and pull requests)."
+        exit 1
+    fi
+    echo "blockers: none open in {{ MILESTONE }} -- issues and PRs both checked"
+
+# Proves each of release-check's refusals still fires. Every hole found in this
+# gate so far was found by a person reading it -- two by a code review, one by
+# noticing a count hit zero. This is the version that runs.
+release-check-selftest:
+    #!/usr/bin/env bash
+    set -u
+    pass=0; fail=0
+    expect_refusal() {  # expect_refusal <substring> <args...>
+        want="$1"; shift
+        got="$(just release-check "$@" 2>&1)"; rc=$?
+        if [ "$rc" = "0" ]; then
+            echo "FAIL: release-check $* exited 0; expected a refusal"; fail=$((fail+1)); return
+        fi
+        if ! printf '%s' "$got" | grep -qF "$want"; then
+            echo "FAIL: release-check $* did not say: $want"
+            printf '%s\n' "$got" | sed 's/^/    /'; fail=$((fail+1)); return
+        fi
+        echo "ok: $*  ->  $want"; pass=$((pass+1))
+    }
+
+    # REF must be a release tag, not any commit-ish. HEAD~1 resolves, is an
+    # ancestor and is not HEAD -- it passed every guard once, and linted one
+    # commit instead of the release range.
+    expect_refusal "is not a release tag" v3.27.2-evr.324 HEAD~1
+    expect_refusal "is not a release tag" v3.27.2-evr.324 v1.2.3
+    expect_refusal "is not an existing tag" v3.27.2-evr.324 v9.9.9-evr.1
+    # A milestone matching nothing lists zero blockers and passes having
+    # checked nothing.
+    expect_refusal "does not exist" v9.9.9-nope
+    # The milestone names the release being cut, not the one running.
+    expect_refusal "same as the baseline tag" v3.27.2-evr.322
+
+    # The counting itself, from fixtures, so it needs no network and cannot
+    # rot into "whatever GitHub happens to hold today".
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    echo '[]' > "$tmp/none.json"
+    echo '[{"number":601,"title":"a blocker that is a PULL REQUEST"}]' > "$tmp/pr.json"
+    echo '[{"number":602,"title":"a blocker that is an ISSUE"}]' > "$tmp/issue.json"
+
+    if RELEASE_BLOCKERS_FIXTURE="$tmp/none.json" just _release-blockers m >/dev/null 2>&1; then
+        echo "ok: empty blocker set passes"; pass=$((pass+1))
+    else
+        echo "FAIL: empty blocker set should pass"; fail=$((fail+1))
+    fi
+    for f in pr issue; do
+        if RELEASE_BLOCKERS_FIXTURE="$tmp/$f.json" just _release-blockers m >/dev/null 2>&1; then
+            echo "FAIL: a $f blocker was not counted"; fail=$((fail+1))
+        else
+            echo "ok: a $f blocker is counted"; pass=$((pass+1))
+        fi
+    done
+
+    echo ""
+    if [ "$fail" != "0" ]; then echo "release-check-selftest: $fail FAILED, $pass passed"; exit 1; fi
+    echo "release-check-selftest: all $pass checks passed"
