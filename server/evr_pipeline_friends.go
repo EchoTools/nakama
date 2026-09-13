@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 )
@@ -411,6 +412,57 @@ func (p *EvrPipeline) snsFriendListRefreshRequest(ctx context.Context, logger *z
 	return p.sendFriendListResponse(ctx, logger, session)
 }
 
+// friendStatusCode maps a friend's online state to the wire StatusCode consumed by
+// pnsrad's CNSRADFriends::StatusNotifyCB (echovr.exe/pnsrad.dll, confirmed via ReVault
+// 2026-09-13 — see AddFriend @ pnsrad.dll/libpnsrad.so, param_5 < 3 gate, 3-way bucket).
+// The only UI consumer found (R15NETFRIENDSEXPRESSION, echovr-reconstruction
+// scripts/e9b0db765f1eb096.cpp:611-619) exposes just "nonline"/"noffline" — no "nbusy"
+// output exists there, so the busy slot (1) is deliberately left unused rather than
+// guessed at; only the online/offline split, which we can source truthfully from
+// Nakama's own presence tracking, is asserted here.
+func friendStatusCode(online bool) uint8 {
+	if online {
+		return 0
+	}
+	return 2
+}
+
+// friendStatusNotification is one (FriendID, StatusCode) pair to send as an
+// SNSFriendStatusNotify.
+type friendStatusNotification struct {
+	FriendID   uint64
+	StatusCode uint8
+}
+
+// friendStatusNotifications selects the confirmed friends (State ==
+// FriendStateFriends) out of friends, resolves each to its wire FriendID via
+// resolveAccountID, and returns the notifications to send. Friends the
+// resolver can't place (e.g. no matching user_device row) are silently
+// skipped by the resolver returning ok=false — logging that is the caller's
+// job, not this function's, so it stays pure and independent of *zap.Logger.
+//
+// Pending invitations (FriendInvitationSent/FriendInvitationReceived) and
+// blocks (FriendStateBlocked) are deliberately excluded: SNSFriendStatusNotify
+// is what populates the ROSTER (see CNSRADFriends::StatusNotifyCB, confirmed
+// via ReVault — it calls AddFriend), and only confirmed friends belong there.
+func friendStatusNotifications(friends []*api.Friend, resolveAccountID func(*api.Friend) (accountID uint64, ok bool)) []friendStatusNotification {
+	var out []friendStatusNotification
+	for _, f := range friends {
+		if f == nil || f.State == nil || f.State.Value != FriendStateFriends || f.User == nil {
+			continue
+		}
+		accountID, ok := resolveAccountID(f)
+		if !ok {
+			continue
+		}
+		out = append(out, friendStatusNotification{
+			FriendID:   accountID,
+			StatusCode: friendStatusCode(f.User.Online),
+		})
+	}
+	return out
+}
+
 func (p *EvrPipeline) sendFriendListResponse(ctx context.Context, logger *zap.Logger, session *sessionWS) error {
 	userID := session.UserID()
 
@@ -436,11 +488,45 @@ func (p *EvrPipeline) sendFriendListResponse(ctx context.Context, logger *zap.Lo
 		}
 	}
 
-	return SendEVRMessages(session, false, &evr.SNSFriendListResponse{
+	if err := SendEVRMessages(session, false, &evr.SNSFriendListResponse{
 		NOnline:  nOnline,
 		NBusy:    nBusy,
 		NOffline: nOffline,
 		NSent:    nSent,
 		NRecv:    nRecv,
+	}); err != nil {
+		return err
+	}
+
+	// SNSFriendListResponse only ever carried aggregate counts (evr/sns_friends.go's
+	// documented 0x20-byte wire format has no per-friend fields) — nothing populated
+	// the client's actual roster. Confirmed via ReVault: CNSRADFriends::StatusNotifyCB
+	// (the ONLY code path that calls AddFriend, i.e. the only thing that inserts a
+	// named entry into the client's friend table) is the listener for
+	// SNSFriendStatusNotify, which was never sent from here. Emit one per confirmed
+	// friend so the roster actually populates.
+	notifications := friendStatusNotifications(friends, func(f *api.Friend) (uint64, bool) {
+		friendUserID, err := uuid.FromString(f.User.Id)
+		if err != nil {
+			logger.Warn("Skipping friend status notify — bad user id", zap.String("user_id", f.User.Id), zap.Error(err))
+			return 0, false
+		}
+		accountID, err := p.resolveUserIDToAccountID(ctx, friendUserID)
+		if err != nil {
+			logger.Warn("Skipping friend status notify — could not resolve account id",
+				zap.String("user_id", f.User.Id), zap.Error(err))
+			return 0, false
+		}
+		return accountID, true
 	})
+	for _, n := range notifications {
+		if err := SendEVRMessages(session, false, &evr.SNSFriendStatusNotify{
+			FriendID:   n.FriendID,
+			StatusCode: n.StatusCode,
+		}); err != nil {
+			logger.Warn("Failed to send friend status notify", zap.Uint64("friend_id", n.FriendID), zap.Error(err))
+		}
+	}
+
+	return nil
 }
