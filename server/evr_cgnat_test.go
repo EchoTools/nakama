@@ -11,22 +11,15 @@ import (
 
 // --- Test Helpers ---
 
-// testDetector is a detector whose settings have been applied with nothing
-// configured: no CIDRs, no ASNs, no prefixes. With no ASNs there is no ASN data
-// to wait for, so it answers definitively (see ASNDataReady).
 func testDetector(t *testing.T) *CGNATDetector {
 	t.Helper()
 	return &CGNATDetector{
-		ipCounts:        make(map[string]map[string]time.Time),
-		maxIPCount:      defaultMaxIPMap,
-		cgnatASNs:       make(map[int]bool),
-		settingsApplied: true,
+		ipCounts:   make(map[string]map[string]time.Time),
+		maxIPCount: defaultMaxIPMap,
+		cgnatASNs:  make(map[int]bool),
 	}
 }
 
-// testDetectorWithASN is a detector configured with asns whose ranges have
-// been loaded for both families: ranges4 and ranges6 are the whole of what
-// those ASNs own (nil meaning "nothing in that family").
 func testDetectorWithASN(t *testing.T, ranges4 []asnRange4, ranges6 []asnRange6, asns []int) *CGNATDetector {
 	t.Helper()
 	d := testDetector(t)
@@ -35,8 +28,6 @@ func testDetectorWithASN(t *testing.T, ranges4 []asnRange4, ranges6 []asnRange6,
 	for _, asn := range asns {
 		d.cgnatASNs[asn] = true
 	}
-	d.asnCovered4 = asnSet(asns)
-	d.asnCovered6 = asnSet(asns)
 	return d
 }
 
@@ -859,9 +850,9 @@ func TestParseASNGzip_ValidData(t *testing.T) {
 	gz.Write([]byte("172.56.0.0\t172.56.255.255\t21928\tUS\tT-MOBILE-AS21928\n"))
 	gz.Close()
 
-	ranges, err := filterASNGzip(buf.Bytes(), asnSet([]int{14593, 21928}))
+	ranges, err := parseASNGzip(buf.Bytes(), true)
 	if err != nil {
-		t.Fatalf("filterASNGzip: %v", err)
+		t.Fatalf("parseASNGzip: %v", err)
 	}
 	// Should skip ASN 0 (Not routed)
 	if len(ranges) != 2 {
@@ -871,8 +862,8 @@ func TestParseASNGzip_ValidData(t *testing.T) {
 
 func TestConvertToRanges4(t *testing.T) {
 	raw := []rawASNRange{
-		{Start: "172.56.0.0", End: "172.56.255.255", ASN: 21928},
-		{Start: "129.222.0.0", End: "129.222.255.255", ASN: 14593},
+		{startStr: "172.56.0.0", endStr: "172.56.255.255", asn: 21928},
+		{startStr: "129.222.0.0", endStr: "129.222.255.255", asn: 14593},
 	}
 	ranges := convertToRanges4(raw)
 	if len(ranges) != 2 {
@@ -886,8 +877,8 @@ func TestConvertToRanges4(t *testing.T) {
 
 func TestConvertToRanges6(t *testing.T) {
 	raw := []rawASNRange{
-		{Start: "2600:1000::", End: "2600:1000:ffff:ffff:ffff:ffff:ffff:ffff", ASN: 7018},
-		{Start: "2406:2d40::", End: "2406:2d40:ffff:ffff:ffff:ffff:ffff:ffff", ASN: 14593},
+		{startStr: "2600:1000::", endStr: "2600:1000:ffff:ffff:ffff:ffff:ffff:ffff", asn: 7018},
+		{startStr: "2406:2d40::", endStr: "2406:2d40:ffff:ffff:ffff:ffff:ffff:ffff", asn: 14593},
 	}
 	ranges := convertToRanges6(raw)
 	if len(ranges) != 2 {
