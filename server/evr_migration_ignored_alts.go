@@ -21,10 +21,6 @@ import (
 type MigrationBreakIgnoredAlts struct{}
 
 func (m *MigrationBreakIgnoredAlts) MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) error {
-	if err := ignoredAltsClassifierReady(); err != nil {
-		return err
-	}
-
 	processed := make(map[string]bool)
 	affectedSet := make(map[string]bool)
 	brokenLinks := 0
@@ -40,9 +36,6 @@ func (m *MigrationBreakIgnoredAlts) MigrateSystem(ctx context.Context, logger ru
 			if obj.Key != LoginHistoryStorageKey {
 				continue
 			}
-			if err := ignoredAltsClassifierReady(); err != nil {
-				return err
-			}
 
 			history := NewLoginHistory(obj.UserId)
 			if readErr := json.Unmarshal([]byte(obj.Value), history); readErr != nil {
@@ -54,13 +47,14 @@ func (m *MigrationBreakIgnoredAlts) MigrateSystem(ctx context.Context, logger ru
 				Version: obj.Version,
 			})
 
+			asns := history.clientIPASNs()
 			toBreak := make([]string, 0)
 			for altID, matches := range history.AlternateMatches {
 				pk := pairKey(obj.UserId, altID)
 				if processed[pk] {
 					continue
 				}
-				if allItemsIgnored(matches) {
+				if allItemsIgnored(matches, asns) {
 					toBreak = append(toBreak, altID)
 					processed[pk] = true
 				}
@@ -135,32 +129,16 @@ func (m *MigrationBreakIgnoredAlts) MigrateSystem(ctx context.Context, logger ru
 	return nil
 }
 
-// ignoredAltsClassifierReady refuses the migration while the CGNAT detector
-// cannot classify addresses. This migration only deletes, and it deletes on a
-// POSITIVE "ignored" verdict; without ASN data matchIgnoredAltPattern fails
-// closed and reports every public address as ignored, so running would break
-// every IP-only link it walked. Checked before the scan and again per history,
-// because an ASN added to settings mid-scan drops readiness from that moment.
-// The next boot runs the migration again.
-//
-// A nil detector is not refused: matchIgnoredAltPattern then consults no CGNAT
-// classification at all and ignores FEWER addresses, which deletes less.
-func ignoredAltsClassifierReady() error {
-	if d := GetCGNATDetector(); d != nil && !d.ASNDataReady() {
-		return fmt.Errorf("ignored-alts migration: %w", ErrASNDataNotReady)
-	}
-	return nil
-}
-
 // allItemsIgnored returns true if every Items entry across every match is
-// covered by matchIgnoredAltPattern. Returns false on empty input (nothing
-// to break).
-func allItemsIgnored(matches []*AlternateSearchMatch) bool {
+// covered by matchIgnoredAltPattern, with an IP item classified by asns, the
+// ASNs recorded in the history holding the matches. Returns false on empty
+// input (nothing to break).
+func allItemsIgnored(matches []*AlternateSearchMatch, asns map[string]int) bool {
 	saw := false
 	for _, m := range matches {
 		for _, item := range m.Items {
 			saw = true
-			if !matchIgnoredAltPattern(item) {
+			if !matchIgnoredAltPattern(item, asns[item]) {
 				return false
 			}
 		}

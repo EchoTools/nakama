@@ -207,10 +207,10 @@ func newRecomputeFixture(t *testing.T) (*altIndexTestModule, string, string, evr
 
 	// Guard: an XPID or serial that matchIgnoredAltPattern already drops
 	// would make every assertion below vacuous.
-	if matchIgnoredAltPattern(serial) {
+	if matchIgnoredAltPattern(serial, 0) {
 		t.Fatalf("fixture is inert: serial %q is in the ignored set", serial)
 	}
-	if matchIgnoredAltPattern(xpid.Token()) {
+	if matchIgnoredAltPattern(xpid.Token(), 0) {
 		t.Fatalf("fixture is inert: XPID %q is in the ignored set", xpid.Token())
 	}
 
@@ -267,10 +267,12 @@ func TestClearAltsMigration_RecomputesXPIDAndSerialLinks(t *testing.T) {
 // TestClearAltsMigration_IsIdempotent runs the migration twice and requires the
 // second run to change nothing.
 //
-// This matters operationally, not just theoretically: the migration is
-// registered unconditionally (server/evr_runtime_migrate.go:24), so it runs on
-// EVERY boot. A pass that rewrites every row whether or not anything changed
-// would put a full-table write behind each restart forever.
+// The completion marker means production only gets one run, so this is no
+// longer the per-boot cost argument it was written as. It is now the gate on
+// the operator re-run path: clearing the marker must be a safe thing to do, and
+// it is only safe if a second pass over converged data is a no-op. The marker
+// is cleared between the two runs below for exactly that reason -- that is the
+// operator action, not a test convenience.
 func TestClearAltsMigration_IsIdempotent(t *testing.T) {
 	nk, userA, userB, _, _ := newRecomputeFixture(t)
 
@@ -280,6 +282,7 @@ func TestClearAltsMigration_IsIdempotent(t *testing.T) {
 		userB: nk.storedValue(t, userB),
 	}
 
+	clearMigrationMarker(t, nk.altClearTestModule)
 	logger := runAltClearMigration(t, nk)
 
 	for _, userID := range []string{userA, userB} {

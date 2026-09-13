@@ -51,7 +51,10 @@ func TestClearAltsMigration_ConflictDoesNotDropInnocentsOrOvercount(t *testing.T
 	if got := completionField(t, logger, "rebuilt"); got != 2 {
 		t.Errorf("rebuilt = %d, want 2: the migration counted rows a rolled-back transaction never committed", got)
 	}
-	if got := completionField(t, logger, "conflicted"); got != 1 {
-		t.Errorf("conflicted = %d, want 1: the rows left behind must be reported, not silently dropped", got)
+	// 2, not 1: the racer's row is submitted, and rejected, by BOTH phases.
+	// Phase 1 writes every seeded row, because it records the cached ASN of
+	// its address, and phase 2 writes the cleared links.
+	if got := completionField(t, logger, "conflicted"); got != 2 {
+		t.Errorf("conflicted = %d, want 2 (one rejection per phase): the rows left behind must be reported, not silently dropped", got)
 	}
 }

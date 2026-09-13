@@ -226,8 +226,9 @@ func (m *evrTestNakamaModule) UsersGetId(ctx context.Context, userIDs []string, 
 //
 // Supplying a dummy token is not a safe alternative: InitializeEvrRuntimeModule
 // would then run to completion and spawn background goroutines (notably
-// `go MigrateSystem(...)`, which sleeps 20s and then issues storage queries)
-// against the nil *sql.DB these tests pass in, panicking mid-run.
+// `go MigrateSystem(...)`, which waits for CGNAT settings and then issues
+// storage queries) against the nil *sql.DB these tests pass in, panicking
+// mid-run.
 //
 // Tests that need a *Runtime only need the generic Nakama runtime, so the EVR
 // module initialisers are disabled for the duration of the NewRuntime call.

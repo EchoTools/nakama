@@ -574,6 +574,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		// handler, in a different goroutine — not a batching candidate, a
 		// different transaction by design.
 		entry := loginHistory.AddPendingAuthorizationIP(params.xpID, session.clientIP, params.loginPayload)
+		recordLoginASN(loginHistory, session.clientIP, params.ipInfo)
 		if err := StorableWrite(ctx, p.nk, params.profile.ID(), loginHistory); err != nil {
 			return fmt.Errorf("failed to load login history: %w", err)
 		}
@@ -642,6 +643,9 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 	// Ensure the current login entry is in history so alt search includes it.
 	loginHistory.Update(params.xpID, session.clientIP, params.loginPayload, params.IsWebsocketAuthenticated)
+	// Before anything classifies an address: the CGNAT detector decides an IP
+	// from the ASN recorded for it in this history.
+	loginASN := recordLoginASN(loginHistory, session.clientIP, params.ipInfo)
 	if _, err := loginHistory.UpdateAlternates(ctx, p.runtimeLogger, p.nk); err != nil {
 		logger.Warn("Failed to discover alternates during login", zap.Error(err))
 	}
@@ -714,6 +718,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		UserID:                   params.profile.ID(),
 		XPID:                     params.xpID,
 		ClientIP:                 session.clientIP,
+		ClientIPASN:              loginASN,
 		LoginPayload:             params.loginPayload,
 		IsWebSocketAuthenticated: params.IsWebsocketAuthenticated,
 	})

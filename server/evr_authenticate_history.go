@@ -47,7 +47,11 @@ var (
 	ErrPendingAuthorizationNotFound = errors.New("pending authorization not found")
 )
 
-func matchIgnoredAltPattern(pattern string) bool {
+// matchIgnoredAltPattern reports whether pattern must not be used to link
+// accounts. asn is the ASN recorded for pattern when it is a client IP (see
+// LoginHistory.clientIPASNs), and 0 when none is recorded or pattern is not an
+// IP; an IP with no recorded ASN is classified by the configured CIDRs alone.
+func matchIgnoredAltPattern(pattern string, asn int) bool {
 	// Remove ignored values
 	if _, ok := IgnoredLoginValues[pattern]; ok {
 		return true
@@ -56,12 +60,12 @@ func matchIgnoredAltPattern(pattern string) bool {
 			return true
 		}
 		// Filter CGNAT IPs (Starlink, T-Mobile, etc.)
-		if d := GetCGNATDetector(); d != nil && d.IsCGNAT(pattern) {
+		if d := GetCGNATDetector(); d != nil && d.IsCGNAT(pattern, asn) {
 			return true
 		}
 	}
 	// Filter commodity hardware profiles (Quest headsets)
-	if d := GetCGNATDetector(); d != nil && d.IsWeakSignal(pattern) && net.ParseIP(pattern) == nil {
+	if d := GetCGNATDetector(); d != nil && d.IsWeakSignal(pattern, asn) && net.ParseIP(pattern) == nil {
 		// IsWeakSignal on a non-IP, non-empty, non-"unknown" string means it matched
 		// a commodity profile prefix. Only filter if it's actually a profile match,
 		// not just because IsWeakSignal returns true for empty/"unknown" (those are
@@ -119,6 +123,13 @@ type LoginHistoryEntry struct {
 	XPID      evr.EvrId         `json:"xpi"`
 	ClientIP  string            `json:"client_ip"`
 	LoginData *evr.LoginProfile `json:"login_data"`
+	// ASN is the autonomous system the IP info providers reported for ClientIP,
+	// recorded at login (recordLoginASN) or read from the providers' cache by the
+	// alt-clear migration (backfillLoginHistoryASNs). 0 means unknown: the
+	// entry predates recording, its lookup failed, or the cache held nothing
+	// for it. It is what the CGNAT detector matches against the configured ASN
+	// list.
+	ASN int `json:"asn,omitempty"`
 }
 
 func (e *LoginHistoryEntry) Key() string {
@@ -467,9 +478,10 @@ func (h *LoginHistory) SearchPatterns() (patterns []string) {
 	patterns = make([]string, 0, len(h.History)*3)
 	seen := make(map[string]struct{}, len(h.History)*3)
 
+	asns := h.clientIPASNs()
 	for _, e := range h.History {
 		for _, s := range e.Patterns() {
-			if _, found := seen[s]; !found && !matchIgnoredAltPattern(s) {
+			if _, found := seen[s]; !found && !matchIgnoredAltPattern(s, asns[s]) {
 				patterns = append(patterns, s)
 				seen[s] = struct{}{}
 			}
@@ -486,6 +498,26 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, logger runtime.Logg
 		return false, fmt.Errorf("error searching for alternate logins: %w", err)
 	}
 	if len(matches) == 0 {
+		// CAUTION: this early return conflates two different facts, and the
+		// caller cannot tell them apart from here.
+		//
+		//   1. A search RAN and found nothing. Determinate: the account has no
+		//      alternates.
+		//   2. No search was possible. AltSearchPatterns dropped every item as
+		//      an ignored value and returned nil, so LoginAlternateSearch
+		//      returned (nil, nil, nil) without touching the index
+		//      (evr_authenticate_alts.go:112-114, :119-122). Indeterminate:
+		//      nothing is known about this account's alternates.
+		//
+		// For the login flow the distinction does not matter, because it never
+		// clears the maps first -- this returns and the stored links stand.
+		//
+		// It matters absolutely for any caller that clears BEFORE calling, as
+		// MigrationClearAlternateMatches does. Case 2 then reads as "the
+		// rebuild succeeded and found nothing", and the caller persists an
+		// erasure it has no evidence for. That migration guards against it by
+		// checking AltSearchPatterns itself before it clears anything; a future
+		// caller in the same shape must do the same, or change this signature.
 		return false, nil
 	}
 
@@ -574,7 +606,14 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, logger runtime.Logg
 
 		// Find matches between current user and the alternate
 		currentUserMatches := loginHistoryCompare(alternateHistory, h)
-		if len(currentUserMatches) > 0 {
+		// Write only a change. The write moves the other row's storage version
+		// on, and a caller holding that row -- MigrationClearAlternateMatches
+		// walks a page of rows and writes each one back with the version it
+		// read -- has its own write of it rejected. Unconditionally, that
+		// rejected both rows of every linked pair in one page. Compared as the
+		// set of items, which is all the link records: its slices hold
+		// pointers, so a direct comparison would see every rebuild as new.
+		if len(currentUserMatches) > 0 && !slices.Equal(alternateMatchItems(alternateHistory.AlternateMatches[h.userID]), alternateMatchItems(currentUserMatches)) {
 			// Update the alternate's matches to include current user
 			alternateHistory.AlternateMatches[h.userID] = currentUserMatches
 
@@ -595,6 +634,18 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, logger runtime.Logg
 	return hasDisabledAlts, nil
 }
 
+// alternateMatchItems reduces the matches with one other account to their
+// sorted, deduplicated items: the comparable form of "linked, and on what
+// evidence".
+func alternateMatchItems(matches []*AlternateSearchMatch) []string {
+	items := make([]string, 0, len(matches))
+	for _, m := range matches {
+		items = append(items, m.Items...)
+	}
+	slices.Sort(items)
+	return slices.Compact(items)
+}
+
 func (h *LoginHistory) GetXPI(xpid evr.EvrId) (time.Time, bool) {
 	if h.XPIs != nil {
 		if t, found := h.XPIs[xpid.String()]; found {
@@ -611,12 +662,13 @@ func (h *LoginHistory) rebuildCache() {
 	h.ClientIPs = make(map[string]time.Time, historyLen)
 
 	cacheSet := make(map[string]bool, historyLen*4)
+	asns := h.clientIPASNs()
 
 	// Process each history entry in one pass
 	for _, e := range h.History {
 		// Process items for cache
 		for _, s := range e.Items() {
-			if _, found := cacheSet[s]; !found && !matchIgnoredAltPattern(s) {
+			if _, found := cacheSet[s]; !found && !matchIgnoredAltPattern(s, asns[s]) {
 				h.Cache = append(h.Cache, s)
 				cacheSet[s] = true
 			}

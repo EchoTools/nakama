@@ -34,6 +34,12 @@ var unrequireMessage = evr.NewSTcpConnectionUnrequireEvent()
 
 var globalMatchmaker = atomic.NewPointer[LocalMatchmaker](nil)
 var globalAppBot = atomic.NewPointer[DiscordAppBot](nil)
+
+// globalIPInfoCache is the pipeline's IP info cache, for the alt-clear
+// migration: it runs from the runtime module, before the pipeline exists, so it
+// cannot be handed the cache. Stored once, in NewEvrPipeline.
+var globalIPInfoCache = atomic.NewPointer[IPInfoCache](nil)
+
 var globalLobbyBuilder = atomic.NewPointer[LobbyBuilder](nil)
 var globalSkillBasedMatchmaker = atomic.NewPointer[SkillBasedMatchmaker](nil)
 var globalEarlyQuitMessageTrigger = atomic.NewPointer[SNSEarlyQuitMessageTrigger](nil)
@@ -212,6 +218,9 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	if err != nil {
 		logger.Fatal("Failed to create IP info cache", zap.Error(err))
 	}
+	// Published for MigrationClearAlternateMatches, which runs from the runtime
+	// module and reads ASNs from this cache alone (waitReady, GetCached).
+	globalIPInfoCache.Store(ipInfoCache)
 
 	var appBot *DiscordAppBot
 	discordIntegrator := NewDiscordIntegrator(ctx, logger, config, metrics, nk, db, dg, guildGroupRegistry)

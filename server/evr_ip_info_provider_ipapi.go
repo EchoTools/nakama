@@ -241,6 +241,27 @@ func (s *ipapiClient) retrieve(ctx context.Context, ip string) (*IPAPIResponse, 
 	return &result, nil
 }
 
+// cached returns the response stored in Redis for ip, and nil when there is
+// none. It is the one definition of ip-api's rule for a usable cached entry --
+// any stored entry, since store is only reached after a "success" status --
+// shared by Get and GetCached so the two cannot disagree.
+func (s *ipapiClient) cached(ip string) (*IPAPIResponse, error) {
+	return s.load(ip)
+}
+
+// GetCached returns the ip-api data Redis already holds for ip, or (nil, nil)
+// on a miss. It never calls retrieve: no request reaches ip-api, whatever the
+// cache holds. The error is a Redis or decode failure, which is not a miss.
+//
+// The context is unused: the go-redis v6 client takes none.
+func (s *ipapiClient) GetCached(_ context.Context, ip string) (IPInfo, error) {
+	result, err := s.cached(ip)
+	if result == nil {
+		return nil, err
+	}
+	return &ipapiData{Response: *result}, nil
+}
+
 func (s *ipapiClient) Get(ctx context.Context, ip string) (IPInfo, error) {
 	if s == nil {
 		return nil, nil
@@ -256,7 +277,7 @@ func (s *ipapiClient) Get(ctx context.Context, ip string) (IPInfo, error) {
 		s.metrics.CustomTimer("ipapi_request_duration", metricsTags, time.Since(startTime))
 	}()
 
-	if result, err := s.load(ip); err != nil {
+	if result, err := s.cached(ip); err != nil {
 		metricsTags["result"] = "cache_error"
 	} else if result != nil {
 		metricsTags["result"] = "cache_hit"

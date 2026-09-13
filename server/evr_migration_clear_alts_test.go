@@ -43,6 +43,11 @@ type altClearTestModule struct {
 	// connection or an unavailable index all surface here.
 	indexErr error
 
+	// listErr, when set, fails StorageList. That is how a run dies partway
+	// through: the walk is the only thing that can fail after the completion
+	// marker has been consulted but before it would be written.
+	listErr error
+
 	// conflictUserIDs model a racing login: that row's stored version moved
 	// on, so an OCC write carrying the version the migration read is
 	// rejected -- and with it the entire batch.
@@ -60,10 +65,43 @@ func newAltClearTestModule() *altClearTestModule {
 }
 
 func (m *altClearTestModule) StorageList(ctx context.Context, callerID, userID, collection string, limit int, cursor string) ([]*api.StorageObject, string, error) {
+	if m.listErr != nil {
+		return nil, "", m.listErr
+	}
 	if cursor != "" {
 		return nil, "", nil
 	}
-	return m.listed, "", nil
+	return m.liveListed(), "", nil
+}
+
+// liveListed returns the listed rows, in listed order, with their CURRENT
+// stored value and version. Production lists from the database, so phase 2
+// sees the rows phase 1 wrote; a frozen seed-time snapshot would make every row
+// phase 1 touched a version conflict in phase 2 that production never has.
+func (m *altClearTestModule) liveListed() []*api.StorageObject {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]*api.StorageObject, 0, len(m.listed))
+	for _, l := range m.listed {
+		obj, ok := m.objects[occStorageKey(l.UserId, l.Collection, l.Key)]
+		if !ok {
+			out = append(out, l)
+			continue
+		}
+		out = append(out, &api.StorageObject{
+			Collection: obj.Collection,
+			Key:        obj.Key,
+			UserId:     obj.UserId,
+			Value:      obj.Value,
+			Version:    obj.Version,
+		})
+	}
+	return out
+}
+
+// migrationTestUserID builds a distinct, well-formed user ID for bulk fixtures.
+func migrationTestUserID(n int) string {
+	return fmt.Sprintf("00000000-0000-0000-0000-%012d", n)
 }
 
 func (m *altClearTestModule) StorageIndexList(ctx context.Context, callerID, indexName, query string, limit int, order []string, cursor string) (*api.StorageObjects, string, error) {
@@ -187,6 +225,7 @@ func (m *altClearTestModule) storedHistory(t *testing.T, userID string) *LoginHi
 
 func runAltClearMigration(t *testing.T, nk runtime.NakamaModule) *captureLogger {
 	t.Helper()
+	ensureAltClearPreconditions(t)
 	logger := newCaptureLogger()
 	m := &MigrationClearAlternateMatches{}
 	if err := m.MigrateSystem(context.Background(), logger, nil, nk); err != nil {
@@ -295,13 +334,23 @@ func TestClearAltsMigration_FixtureReachesTheRebuild(t *testing.T) {
 	}
 
 	// Sanity: the pages the migration submitted are the accounts we seeded.
+	// The completion marker is written through the same StorageWrite and is
+	// owned by SystemUserID, so it is excluded here -- this assertion is about
+	// which login histories were rewritten.
 	var submitted []string
 	for _, batch := range nk.writeBatches {
-		submitted = append(submitted, batch...)
+		for _, userID := range batch {
+			if userID == SystemUserID {
+				continue
+			}
+			submitted = append(submitted, userID)
+		}
 	}
+	// Twice: phase 1 records the cached ASN of the account's address, phase 2
+	// persists the cleared links.
 	sort.Strings(submitted)
-	if fmt.Sprint(submitted) != "[11111111-1111-1111-1111-111111111111]" {
-		t.Errorf("submitted writes = %v, want the one seeded account", submitted)
+	if fmt.Sprint(submitted) != "[11111111-1111-1111-1111-111111111111 11111111-1111-1111-1111-111111111111]" {
+		t.Errorf("submitted writes = %v, want the one seeded account, once per phase", submitted)
 	}
 }
 

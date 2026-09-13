@@ -20,7 +20,32 @@ type UserMigrater interface {
 
 func MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) {
 	systemMigrations := []SystemMigrator{
-		&MigrationBreakIgnoredAlts{},
+		// MigrationBreakIgnoredAlts is deliberately NOT registered. It is
+		// redundant work against production storage, and the type is left in
+		// the tree only so the capability is not lost.
+		//
+		// It can only ever DELETE. Its whole body is a scan for links whose
+		// every item is covered by matchIgnoredAltPattern (allItemsIgnored,
+		// evr_migration_ignored_alts.go:134) followed by two map deletes and
+		// two reciprocal writes; it issues no discovery query and calls neither
+		// LoginAlternateSearch nor UpdateAlternates, so it cannot create a
+		// link.
+		//
+		// MigrationClearAlternateMatches, which ran immediately after it,
+		// clears each account's links wholesale and rebuilds them from a fresh
+		// search. Whatever Break deleted, and whatever it wrote to the far side
+		// of each pair, was therefore overwritten by the very next migration
+		// for every account the rebuild reached -- so Break's storage traffic
+		// bought nothing and was paid against the live database.
+		//
+		// One population it did reach is NOT covered: an account whose every
+		// discovery item is an ignored value has no search patterns, and
+		// MigrationClearAlternateMatches now leaves such accounts untouched
+		// rather than erasing them (evr_migration_clear_alts.go, the
+		// AltSearchPatterns check in phase 2). Breaking those accounts' links
+		// is still available on demand, to an operator, through
+		// CGNATCleanupRPC -- which is the same test applied deliberately
+		// rather than on every boot.
 		&MigrationClearAlternateMatches{},
 	}
 
@@ -32,8 +57,9 @@ func MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 		return
 	}
 
-	// Give the server time to fully initialize before running migrations.
-	<-time.After(20 * time.Second)
+	// No fixed startup delay. MigrationClearAlternateMatches waits, bounded,
+	// for exactly what it needs -- settings on the CGNAT detector and a
+	// configured IP info cache -- and refuses without them (waitReady).
 
 	for _, m := range systemMigrations {
 		startTime := time.Now()

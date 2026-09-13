@@ -60,13 +60,9 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	// Store skill-based matchmaker globally so it can be connected to the lobby builder
 	globalSkillBasedMatchmaker.Store(sbmm)
 
-	// Initialize CGNAT detector for alt detection filtering. The configured
-	// ASNs' ranges are read from storage before this returns, so the detector
-	// is never cold; the download that refreshes them runs in the background,
-	// triggered when settings first reach the detector (#596).
-	// context.Background(): the module init context may be canceled after Init returns.
-	cgnat := bootCGNATDetector(ctx, logger, nk)
-	go cgnat.RunASNRefresher(context.Background(), nk)
+	// Initialize CGNAT detector for alt detection filtering. It needs no data
+	// of its own: an address's ASN is the one its login recorded (#596).
+	cgnat := bootCGNATDetector(logger)
 	go runCGNATStartupCleanup(logger, nk, cgnat)
 
 	// Register hooks
