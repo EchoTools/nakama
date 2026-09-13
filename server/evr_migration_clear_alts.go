@@ -500,9 +500,16 @@ func (m *MigrationClearAlternateMatches) run(ctx context.Context, logger runtime
 				}
 
 				// Feed the safety floor. storedLinks is what this account had
-				// before the clear; AlternateMatches is what the search put back.
+				// before the clear. A stored link counts as rebuilt only if the
+				// search linked the SAME account again: finding as many other
+				// accounts does not keep it, and counting them would let a run
+				// that replaces every link read as one that destroyed none.
 				linksExamined += len(storedLinks)
-				linksRebuilt += len(history.AlternateMatches)
+				for linkedID := range storedLinks {
+					if _, ok := history.AlternateMatches[linkedID]; ok {
+						linksRebuilt++
+					}
+				}
 
 				// Marshal BEFORE deciding, because LoginHistory.MarshalJSON is
 				// where rebuildCache runs (evr_authenticate_history.go:681) — the
@@ -566,9 +573,12 @@ func (m *MigrationClearAlternateMatches) run(ctx context.Context, logger runtime
 		for _, w := range writes {
 			w.Version = ownWrites.current(w.UserID, w.Version)
 		}
-		written, rejected := migrationWriteBatch(ctx, logger, nk, writes, "alt-clear")
+		written, rejected, err := migrationWriteBatch(ctx, logger, nk, writes, "alt-clear")
 		rebuilt += written
 		conflicted += rejected
+		if err != nil {
+			return nil, err
+		}
 
 		logger.WithFields(map[string]any{
 			"batch":          len(writes),
@@ -694,9 +704,12 @@ func (m *MigrationClearAlternateMatches) repairIndexedCaches(ctx context.Context
 			}
 		}
 
-		written, rejected := migrationWriteBatch(ctx, logger, nk, writes, "alt-cache repair")
+		written, rejected, err := migrationWriteBatch(ctx, logger, nk, writes, "alt-cache repair")
 		repaired += written
 		conflicted += rejected
+		if err != nil {
+			return repaired, conflicted, err
+		}
 
 		if nextCursor == "" {
 			break
@@ -799,26 +812,35 @@ func (t *ownWriteTracker) current(userID, version string) string {
 // migrationPageSize-1 uninvolved accounts their correction and overstates the
 // count by the same amount. The retry runs only on the error path, so a
 // healthy batch still costs exactly one write.
-func migrationWriteBatch(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, writes []*runtime.StorageWrite, label string) (written, rejected int) {
+func migrationWriteBatch(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, writes []*runtime.StorageWrite, label string) (written, rejected int, err error) {
 	if len(writes) == 0 {
-		return 0, 0
+		return 0, 0, nil
 	}
 
 	_, writeErr := nk.StorageWrite(ctx, writes)
 	if writeErr == nil {
-		return len(writes), 0
+		return len(writes), 0, nil
 	}
 	logger.WithFields(map[string]any{"error": writeErr, "batch": len(writes)}).Warn(label + ": batch write rejected and rolled back; retrying rows individually")
 
 	for _, w := range writes {
 		if _, rowErr := nk.StorageWrite(ctx, []*runtime.StorageWrite{w}); rowErr != nil {
+			// Only a version rejection is a racing login, which rebuilds the
+			// account itself. StorageWriteObjects returns it bare
+			// (statusError.Cause in core_storage.go). Anything else -- a reset
+			// connection, a database error -- leaves this page with nothing to
+			// repair it, so the run stops, and without a marker. A batch that
+			// failed that way fails here on its first row.
+			if !errors.Is(rowErr, runtime.ErrStorageRejectedVersion) {
+				return written, rejected, fmt.Errorf("%s: row write for %s: %w", label, w.UserID, rowErr)
+			}
 			rejected++
 			logger.WithFields(map[string]any{"user_id": w.UserID, "error": rowErr}).Warn(label + ": row write rejected; a racing login rebuilds this account")
 			continue
 		}
 		written++
 	}
-	return written, rejected
+	return written, rejected, nil
 }
 
 // altLinkItems reduces an AlternateMatches map to one sorted, deduplicated

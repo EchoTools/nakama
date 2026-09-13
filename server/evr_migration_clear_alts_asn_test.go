@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
@@ -466,5 +467,103 @@ func TestClearAltsMigration_RerunOverConvergedLinksWritesNothing(t *testing.T) {
 	}
 	if len(historyWrites) != 0 {
 		t.Errorf("the re-run over converged links wrote login histories %v; a write that changes nothing must not be made", historyWrites)
+	}
+}
+
+// failingWriteModule fails the writes fail selects with err, and passes every
+// other write -- the completion marker included -- to the base.
+type failingWriteModule struct {
+	*altIndexTestModule
+	err  error
+	fail func(writes []*runtime.StorageWrite) bool
+}
+
+func (m *failingWriteModule) StorageWrite(ctx context.Context, writes []*runtime.StorageWrite) ([]*api.StorageObjectAck, error) {
+	if m.fail(writes) {
+		return nil, m.err
+	}
+	return m.altIndexTestModule.StorageWrite(ctx, writes)
+}
+
+// TestClearAltsMigration_WriteFailureThatIsNotAConflictAbortsWithoutMarker: a
+// rejected version is a racing login, which rebuilds the account itself, so it
+// is counted and the run goes on. Any other write failure -- a reset
+// connection, a database error -- leaves the page unrepaired with nothing to
+// repair it, so the run stops and the marker is not written.
+func TestClearAltsMigration_WriteFailureThatIsNotAConflictAbortsWithoutMarker(t *testing.T) {
+	base := newAltClearTestModule()
+	base.seedLinkedAccount(t, "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222")
+	nk := &failingWriteModule{
+		altIndexTestModule: &altIndexTestModule{altClearTestModule: base},
+		err:                errors.New("write tcp 10.0.0.2:26257: connection reset by peer"),
+		fail: func(writes []*runtime.StorageWrite) bool {
+			return writes[0].Collection == LoginStorageCollection
+		},
+	}
+
+	if _, err := runAltClearMigrationExpectingError(t, nk); !strings.Contains(err.Error(), "connection reset") {
+		t.Errorf("error = %q, want it to carry the write failure", err)
+	}
+	if marker := storedMarker(t, base); marker != nil {
+		t.Errorf("a run whose writes failed recorded a completion marker (%+v)", marker)
+	}
+}
+
+// TestClearAltsMigration_SafetyFloorCountsLinksReplacedByOthers: the floor
+// measures the links a run destroys. A link is kept only if the rebuild links
+// the same account again; finding as many OTHER accounts is not keeping it.
+// Here every account loses its one stored link and is re-linked to everyone
+// else on a shared address, so every old link is gone.
+func TestClearAltsMigration_SafetyFloorCountsLinksReplacedByOthers(t *testing.T) {
+	const lostTarget = "99999999-9999-9999-9999-999999999999"
+	installCGNATDetector(t, testDetector(t))
+	installIPInfoCache(t, &recordingIPInfoProvider{cached: map[string]int{cachedResidentialIP: residentialASN}})
+
+	base := newAltClearTestModule()
+	for i := 0; i < migrationClearAltsFloorMinLinks+1; i++ {
+		seedAccountOnIP(t, base, migrationTestUserID(i+1), cachedResidentialIP, uint64(9000+i), map[string][]string{lostTarget: {cachedResidentialIP}})
+	}
+	nk := &altIndexTestModule{altClearTestModule: base}
+
+	logger, err := runAltClearMigrationExpectingError(t, nk)
+	if !strings.Contains(err.Error(), "safety floor") {
+		t.Errorf("error = %q, want the safety floor", err)
+	}
+	if _, ok := logger.find("error", "alt-clear migration: safety floor tripped; aborting the run without writing this page"); !ok {
+		t.Error("the floor did not log its abort")
+	}
+}
+
+// TestClearAltsMigration_FailedFarSideWriteIsRederivedByThatAccount:
+// UpdateAlternates logs a failed far-side write and carries on. In the
+// migration that write is redundant: the far-side account is walked too, and
+// its own rebuild finds the link from its side, so both rows still carry it.
+func TestClearAltsMigration_FailedFarSideWriteIsRederivedByThatAccount(t *testing.T) {
+	idx, userA, userB, _, _ := newRecomputeFixture(t)
+	ensureAltClearPreconditions(t)
+	failed := false
+	nk := &failingWriteModule{
+		altIndexTestModule: idx,
+		err:                errors.New("write tcp 10.0.0.2:26257: connection reset by peer"),
+		fail: func(writes []*runtime.StorageWrite) bool {
+			// The first single-row write to B: phase 1 writes both rows in one
+			// batch, so this is the far-side write A's rebuild makes.
+			if !failed && len(writes) == 1 && writes[0].UserID == userB {
+				failed = true
+				return true
+			}
+			return false
+		},
+	}
+
+	runAltClearMigration(t, nk)
+
+	if !failed {
+		t.Fatal("no far-side write to B was made, so none failed; the test is vacuous")
+	}
+	for _, pair := range [2][2]string{{userA, userB}, {userB, userA}} {
+		if len(idx.storedHistory(t, pair[0]).AlternateMatches[pair[1]]) == 0 {
+			t.Errorf("%s has no stored link to %s after its far-side write failed", pair[0], pair[1])
+		}
 	}
 }
