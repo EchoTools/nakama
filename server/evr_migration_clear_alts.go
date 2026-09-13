@@ -55,14 +55,22 @@ const migrationPageSize = 100
 // pages it only works in one direction. Running phase 1 to completion first is
 // what makes the recompute find every pair rather than most of them.
 //
+// # Runs once, resumable
+//
+// MigrateSystem is gated on a marker in MigrationState/clear_alternate_matches
+// (evr_migration_marker.go). Once the marker has completed_at, the migration
+// does nothing on later boots. If a run stops partway, the next boot resumes:
+// each phase skips rows whose update_time is after that phase's recorded start
+// (plus migrationResumeClockMargin), because those rows were already written by
+// the phase or by a login under the current code. Phase 2 has its own start
+// time because phase 1's writes also move update_time, and those rows still
+// need their links recomputed. To run the migration again, delete the marker.
+//
 // # Idempotence
 //
 // Both phases write only when the recomputed value actually differs from the
-// stored one, so a second run over converged data performs zero writes. That
-// is not a nicety: this migration is registered unconditionally
-// (evr_runtime_migrate.go:24) and runs on every boot, so "rewrite every row
-// whether or not it changed" would put a full-table write behind each restart
-// forever. A row whose version was moved on by a racing login is skipped and
+// stored one, so a second run over converged data performs zero writes. A row
+// whose version was moved on by a racing login is skipped and
 // counted in conflicted — that login rebuilds the account correctly either
 // way. Only that row is skipped: because the batch write is one transaction, a
 // rejection rolls all of it back, so the remaining rows are re-submitted
@@ -81,27 +89,90 @@ const migrationPageSize = 100
 type MigrationClearAlternateMatches struct{}
 
 func (m *MigrationClearAlternateMatches) MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) error {
-	startTime := time.Now()
+	key := MigrationClearAltsStateKey
+	markerLogger := logger.WithFields(map[string]any{"collection": MigrationStateStorageCollection, "key": key})
 
-	// Phase 1. Every account's indexed cache must be correct before the first
-	// discovery query runs — see the type comment.
-	cacheRepaired, cacheConflicted, err := m.repairIndexedCaches(ctx, logger, nk)
+	marker, err := migrationMarkerRead(ctx, nk, key)
+	if err != nil {
+		markerLogger.WithField("error", err).Error("alt-clear migration: marker could not be read; not running")
+		return err
+	}
+	if marker != nil && !marker.CompletedAt.IsZero() {
+		markerLogger.WithFields(map[string]any{
+			"completed_at": marker.CompletedAt.Format(time.RFC3339),
+			"summary":      marker.Summary,
+		}).Info("alt-clear migration: already completed; delete the marker to run it again")
+		return nil
+	}
+
+	if marker == nil {
+		marker = &migrationMarker{Migration: "MigrationClearAlternateMatches", StartedAt: time.Now().UTC()}
+		if err := migrationMarkerWrite(ctx, nk, key, marker); err != nil {
+			markerLogger.WithField("error", err).Error("alt-clear migration: start marker could not be written; not running")
+			return err
+		}
+		markerLogger.Info("alt-clear migration: starting a fresh run")
+	} else {
+		markerLogger.WithFields(map[string]any{
+			"started_at":           marker.StartedAt.Format(time.RFC3339),
+			"phase_two_started_at": marker.PhaseTwoStartedAt,
+		}).Info("alt-clear migration: resuming an unfinished run")
+	}
+
+	cacheRepaired, cacheConflicted := 0, 0
+	if marker.PhaseTwoStartedAt.IsZero() {
+		cacheRepaired, cacheConflicted, err = m.repairIndexedCaches(ctx, logger, nk, marker.StartedAt)
+		if err != nil {
+			return err
+		}
+		marker.PhaseTwoStartedAt = time.Now().UTC()
+		if err := migrationMarkerWrite(ctx, nk, key, marker); err != nil {
+			markerLogger.WithField("error", err).Error("alt-clear migration: phase 2 start could not be recorded; not continuing")
+			return err
+		}
+	}
+
+	summary, err := m.recomputeLinks(ctx, logger, nk, marker.PhaseTwoStartedAt, cacheRepaired, cacheConflicted)
 	if err != nil {
 		return err
 	}
+
+	marker.CompletedAt = time.Now().UTC()
+	marker.Summary = summary
+	if err := migrationMarkerWrite(ctx, nk, key, marker); err != nil {
+		markerLogger.WithField("error", err).Error("alt-clear migration: run completed but the completion marker could not be written; the next boot resumes phase 2 and skips rows already done")
+	}
+	return nil
+}
+
+// run executes both phases with no marker and no resume skipping.
+func (m *MigrationClearAlternateMatches) run(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) error {
+	cacheRepaired, cacheConflicted, err := m.repairIndexedCaches(ctx, logger, nk, time.Time{})
+	if err != nil {
+		return err
+	}
+	_, err = m.recomputeLinks(ctx, logger, nk, time.Time{}, cacheRepaired, cacheConflicted)
+	return err
+}
+
+// recomputeLinks is phase 2: clear and rebuild every account's links. Rows
+// updated after doneSince (see migrationRowDoneSince) are skipped.
+func (m *MigrationClearAlternateMatches) recomputeLinks(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, doneSince time.Time, cacheRepaired, cacheConflicted int) (map[string]any, error) {
+	startTime := time.Now()
 
 	cleared := 0
 	rebuilt := 0
 	rebuildFailed := 0
 	conflicted := cacheConflicted
 	walked := 0
+	skippedDone := 0
 
 	var cursor string
 	for {
 		batchStart := time.Now()
 		objects, nextCursor, listErr := nk.StorageList(ctx, SystemUserID, "", LoginStorageCollection, migrationPageSize, cursor)
 		if listErr != nil {
-			return fmt.Errorf("storage list: %w", listErr)
+			return nil, fmt.Errorf("storage list: %w", listErr)
 		}
 
 		writes := make([]*runtime.StorageWrite, 0, len(objects))
@@ -110,6 +181,10 @@ func (m *MigrationClearAlternateMatches) MigrateSystem(ctx context.Context, logg
 				continue
 			}
 			walked++
+			if migrationRowDoneSince(obj, doneSince) {
+				skippedDone++
+				continue
+			}
 
 			history := NewLoginHistory(obj.UserId)
 			if err := json.Unmarshal([]byte(obj.Value), history); err != nil {
@@ -202,6 +277,7 @@ func (m *MigrationClearAlternateMatches) MigrateSystem(ctx context.Context, logg
 			"rebuild_failed": rebuildFailed,
 			"conflicted":     conflicted,
 			"walked":         walked,
+			"skipped_done":   skippedDone,
 			"batch_time":     time.Since(batchStart).String(),
 			"total_time":     time.Since(startTime).String(),
 		}).Info("alt-clear migration: progress")
@@ -218,17 +294,19 @@ func (m *MigrationClearAlternateMatches) MigrateSystem(ctx context.Context, logg
 		<-time.After(time.Since(batchStart))
 	}
 
-	logger.WithFields(map[string]any{
+	summary := map[string]any{
 		"cache_repaired": cacheRepaired,
 		"cleared":        cleared,
 		"rebuilt":        rebuilt,
 		"rebuild_failed": rebuildFailed,
 		"conflicted":     conflicted,
 		"walked":         walked,
+		"skipped_done":   skippedDone,
 		"total":          time.Since(startTime).String(),
-	}).Info("alt-clear migration complete")
+	}
+	logger.WithFields(summary).Info("alt-clear migration complete")
 
-	return nil
+	return summary, nil
 }
 
 // repairIndexedCaches is phase 1: it rewrites every login history whose stored
@@ -244,9 +322,12 @@ func (m *MigrationClearAlternateMatches) MigrateSystem(ctx context.Context, logg
 //
 // A row that already agrees is not written, so on converged data this pass is
 // read-only.
-func (m *MigrationClearAlternateMatches) repairIndexedCaches(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) (repaired, conflicted int, err error) {
+//
+// Rows updated after doneSince (see migrationRowDoneSince) are skipped.
+func (m *MigrationClearAlternateMatches) repairIndexedCaches(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, doneSince time.Time) (repaired, conflicted int, err error) {
 	startTime := time.Now()
 	walked := 0
+	skippedDone := 0
 
 	var cursor string
 	for {
@@ -262,6 +343,10 @@ func (m *MigrationClearAlternateMatches) repairIndexedCaches(ctx context.Context
 				continue
 			}
 			walked++
+			if migrationRowDoneSince(obj, doneSince) {
+				skippedDone++
+				continue
+			}
 
 			history := NewLoginHistory(obj.UserId)
 			if err := json.Unmarshal([]byte(obj.Value), history); err != nil {
@@ -312,10 +397,11 @@ func (m *MigrationClearAlternateMatches) repairIndexedCaches(ctx context.Context
 	}
 
 	logger.WithFields(map[string]any{
-		"repaired":   repaired,
-		"conflicted": conflicted,
-		"walked":     walked,
-		"total":      time.Since(startTime).String(),
+		"repaired":     repaired,
+		"conflicted":   conflicted,
+		"walked":       walked,
+		"skipped_done": skippedDone,
+		"total":        time.Since(startTime).String(),
 	}).Info("alt-cache repair complete")
 
 	return repaired, conflicted, nil

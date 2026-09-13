@@ -189,8 +189,10 @@ func runAltClearMigration(t *testing.T, nk runtime.NakamaModule) *captureLogger 
 	t.Helper()
 	logger := newCaptureLogger()
 	m := &MigrationClearAlternateMatches{}
-	if err := m.MigrateSystem(context.Background(), logger, nil, nk); err != nil {
-		t.Fatalf("MigrateSystem returned an error: %v", err)
+	// run, not MigrateSystem: these tests exercise the two phases themselves,
+	// and several run the migration twice. The marker gate has its own tests.
+	if err := m.run(context.Background(), logger, nk); err != nil {
+		t.Fatalf("migration run returned an error: %v", err)
 	}
 	return logger
 }
