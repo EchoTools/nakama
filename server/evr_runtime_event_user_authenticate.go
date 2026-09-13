@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"maps"
 	"math/rand"
 	"slices"
 	"strings"
@@ -20,11 +19,11 @@ type EventUserAuthenticated struct {
 	UserID   string    `json:"user_id"`
 	XPID     evr.EvrId `json:"xpid"`
 	ClientIP string    `json:"client_ip"`
-	// ClientIPASNs holds the ASNs authorizeSession recorded (recordLoginASNs):
-	// this login's address from its IP info lookup, plus whatever it
-	// backfilled. The handler below persists the history and has no IP info
-	// lookup of its own, so this is how they reach storage.
-	ClientIPASNs             map[string]int    `json:"client_ip_asns,omitempty"`
+	// ClientIPASN is the ASN authorizeSession's IP info lookup returned for
+	// ClientIP (recordLoginASN), 0 when it returned none. The handler below
+	// persists the history and has no IP info lookup of its own, so this is how
+	// it reaches storage.
+	ClientIPASN              int               `json:"client_ip_asn,omitempty"`
 	LoginPayload             *evr.LoginProfile `json:"login_data"`
 	IsWebSocketAuthenticated bool              `json:"is_websocket_authenticated"`
 }
@@ -48,12 +47,8 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 
 	// Update the last used time for their ip
 	isNew, allowed := loginHistory.Update(e.XPID, e.ClientIP, e.LoginPayload, e.IsWebSocketAuthenticated)
-	// What authorizeSession learned this login, over what the stored history
-	// already knows; the latter fills ASN-less entries, this login's new one
-	// included, for addresses the event does not repeat.
-	asns := loginHistory.clientIPASNs()
-	maps.Copy(asns, e.ClientIPASNs)
-	loginHistory.recordASNs(asns)
+	// The ASN this login's own lookup returned, on every entry for its address.
+	loginHistory.recordASNs(map[string]int{e.ClientIP: e.ClientIPASN})
 
 	if allowed && isNew {
 		// Get the account to retrieve the Discord ID

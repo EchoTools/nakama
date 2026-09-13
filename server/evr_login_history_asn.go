@@ -1,52 +1,19 @@
 package server
 
 import (
-	"cmp"
 	"context"
+	"errors"
 	"maps"
 	"net"
 	"slices"
-	"strings"
 	"time"
 )
 
-// loginASNBackfillBudget bounds how long a login spends starting ASN backfill
-// lookups. It is the per-provider request timeout (IPQSClient.Get,
-// ipapiClient.Get), so the backfill adds about what the login's own IP info
-// lookup can already cost: no lookup is started once it has elapsed, and one in
-// flight finishes under its provider's own timeout. It is deliberately not a
-// context deadline -- cancelling an in-flight provider request counts as a
-// provider failure and opens that provider's circuit breaker for every login.
-//
-// Lookups are answered from Redis (180-day TTL) for any address a login has
-// used in that time, so a converging history costs milliseconds; what the
-// budget bounds is the first login after deploy of an account whose history
-// holds many addresses older than that. What it defers is looked up on the
-// account's next login.
-const loginASNBackfillBudget = time.Second
-
-// ipInfoGetter is the one IPInfoCache method the ASN backfill uses.
-type ipInfoGetter interface {
-	Get(ctx context.Context, ip string) (IPInfo, error)
-}
-
-// loginBackfillIPInfoGetter is the resolver a login's backfill runs through. It
-// answers nothing once its deadline has passed, without touching a request
-// already in flight (see loginASNBackfillBudget), and nothing for lookedUp, the
-// address the login itself just looked up: if that lookup came back empty, the
-// same providers are not asked again within the same login.
-type loginBackfillIPInfoGetter struct {
-	ipInfoGetter
-	lookedUp string
-	deadline time.Time
-	now      func() time.Time
-}
-
-func (g loginBackfillIPInfoGetter) Get(ctx context.Context, ip string) (IPInfo, error) {
-	if ip == g.lookedUp || !g.now().Before(g.deadline) {
-		return nil, nil
-	}
-	return g.ipInfoGetter.Get(ctx, ip)
+// cachedIPInfoReader is the one IPInfoCache method the ASN backfill uses: a
+// read of what the IP info providers already hold in Redis, never a request to
+// a provider.
+type cachedIPInfoReader interface {
+	GetCached(ctx context.Context, ip string) (IPInfo, error)
 }
 
 // loginHistoryEntryMaps are the three places a LoginHistory keeps entries.
@@ -117,28 +84,33 @@ func (h *LoginHistory) recordASNs(asns map[string]int) (changed bool) {
 	return changed
 }
 
-// backfillLoginHistoryASNs looks up an ASN for every public client IP in h that
-// has none recorded, most recently used first, and records each one found on
-// every entry for that IP. It returns whether any entry changed and how many IPs
-// are still without an ASN. The caller persists h; this only mutates it.
+// backfillLoginHistoryASNs reads a cached ASN for every public client IP in h
+// that has none recorded, and records each one found on every entry for that
+// IP. It returns whether any entry changed and how many IPs are still without
+// an ASN. The caller persists h; this only mutates it.
 //
-// Idempotent: an IP with an ASN on any of its entries is never looked up again
-// (its other entries are filled from that one), so a second call over the same
-// history performs no lookups and reports no change.
+// It is MigrationClearAlternateMatches' step, and nothing on the login path
+// calls it: a login records only the ASN of its own address, from the lookup it
+// already makes (recordLoginASN).
 //
-// A lookup that yields nothing records nothing, and the IP is tried again on the
-// next call. That covers a nil IPInfo -- what IPInfoCache.Get returns when every
-// provider failed, since it fails open (SEC-6) -- and an ASN of 0. Both are
-// transient, and neither may be written down as an answer: until an ASN is
-// known the address is classified by the configured CIDRs alone, which is the
-// state it was already in, and the next login's lookup is a Redis read once any
-// provider has answered for it.
+// Cache only, by ruling (#596): resolver answers from what the providers have
+// stored in Redis, and an address with no cache entry stays unknown. Nothing
+// is fetched live -- IPQS is paid, and the addresses in old histories are the
+// ones least likely to be cached. An unknown address is classified by the
+// configured CIDRs alone; it gains a cache entry, and so an ASN, when a login
+// next comes from it.
 //
-// resolver must be non-nil. It is *IPInfoCache in production.
-func backfillLoginHistoryASNs(ctx context.Context, resolver ipInfoGetter, h *LoginHistory) (changed bool, unresolved int) {
+// Idempotent: an IP with an ASN on any of its entries is never read again (its
+// other entries are filled from that one), so a second call over the same
+// history reads nothing and reports no change.
+//
+// err joins the cache read failures. A failure is not a miss -- the cache may
+// hold the address -- so the caller must not treat the IPs it left unresolved
+// as unknown.
+func backfillLoginHistoryASNs(ctx context.Context, resolver cachedIPInfoReader, h *LoginHistory) (changed bool, unresolved int, err error) {
 	known := h.clientIPASNs()
 
-	lastUsed := make(map[string]time.Time)
+	pending := make(map[string]struct{})
 	for _, entries := range h.loginHistoryEntryMaps() {
 		for _, e := range entries {
 			if e == nil {
@@ -148,26 +120,27 @@ func backfillLoginHistoryASNs(ctx context.Context, resolver ipInfoGetter, h *Log
 				continue
 			}
 			// Private and non-routable addresses are never linking keys
-			// (matchIgnoredAltPattern), and IPInfoCache.Get answers them
-			// with an ASN-less stub without asking a provider.
+			// (matchIgnoredAltPattern), and no provider caches them.
 			if ip := net.ParseIP(e.ClientIP); ip == nil || !ip.IsGlobalUnicast() || ip.IsPrivate() {
 				continue
 			}
-			if t, ok := lastUsed[e.ClientIP]; !ok || e.UpdatedAt.After(t) {
-				lastUsed[e.ClientIP] = e.UpdatedAt
-			}
+			pending[e.ClientIP] = struct{}{}
 		}
 	}
 
-	pending := slices.SortedFunc(maps.Keys(lastUsed), func(a, b string) int {
-		return cmp.Or(lastUsed[b].Compare(lastUsed[a]), strings.Compare(a, b))
-	})
-	for _, ip := range pending {
-		if ctx.Err() != nil {
-			unresolved++
-			continue
+	var errs []error
+	ips := slices.Sorted(maps.Keys(pending))
+	for i, ip := range ips {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			// A cancelled run is not a miss either.
+			unresolved += len(ips) - i
+			errs = append(errs, ctxErr)
+			break
 		}
-		info, _ := resolver.Get(ctx, ip) // never returns an error; nil is "unknown"
+		info, readErr := resolver.GetCached(ctx, ip)
+		if readErr != nil {
+			errs = append(errs, readErr)
+		}
 		if info == nil || info.ASN() <= 0 {
 			unresolved++
 			continue
@@ -175,35 +148,22 @@ func backfillLoginHistoryASNs(ctx context.Context, resolver ipInfoGetter, h *Log
 		known[ip] = info.ASN()
 	}
 
-	return h.recordASNs(known), unresolved
+	return h.recordASNs(known), unresolved, errors.Join(errs...)
 }
 
-// recordLoginASNs records the ASN of this login's client IP from the lookup the
-// login already made -- ipInfo, nil when every provider failed -- and then
-// backfills any other IP in h without one, within loginASNBackfillBudget.
+// recordLoginASN records the ASN of this login's client IP from the IP info
+// lookup the login already made -- ipInfo, nil when every provider failed --
+// on every entry for that address, and returns it for EventUserAuthenticated
+// to carry to the handler that persists the history. 0 means the lookup
+// yielded none, and nothing is recorded: the address stays unknown and the
+// next login from it tries again.
 //
-// It returns what the stored history does not know yet: every address whose
-// ASN this call learned or changed. That is what EventUserAuthenticated
-// carries, rather than the whole history's map; the handler fills everything
-// else from the history it loads (see its Process), so once a history has
-// converged the event carries nothing.
-func recordLoginASNs(ctx context.Context, h *LoginHistory, clientIP string, ipInfo IPInfo, resolver ipInfoGetter) map[string]int {
-	before := h.clientIPASNs()
-	if ipInfo != nil {
-		h.recordASNs(map[string]int{clientIP: ipInfo.ASN()})
+// It looks nothing up. Other addresses in the history are not the login's
+// business (#596 ruling); the alt-clear migration reads them from the cache.
+func recordLoginASN(h *LoginHistory, clientIP string, ipInfo IPInfo) int {
+	if ipInfo == nil || ipInfo.ASN() <= 0 {
+		return 0
 	}
-	backfillLoginHistoryASNs(ctx, loginBackfillIPInfoGetter{
-		ipInfoGetter: resolver,
-		lookedUp:     clientIP,
-		deadline:     time.Now().Add(loginASNBackfillBudget),
-		now:          time.Now,
-	}, h)
-
-	recorded := make(map[string]int)
-	for ip, asn := range h.clientIPASNs() {
-		if before[ip] != asn {
-			recorded[ip] = asn
-		}
-	}
-	return recorded
+	h.recordASNs(map[string]int{clientIP: ipInfo.ASN()})
+	return ipInfo.ASN()
 }

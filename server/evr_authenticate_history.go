@@ -124,9 +124,11 @@ type LoginHistoryEntry struct {
 	ClientIP  string            `json:"client_ip"`
 	LoginData *evr.LoginProfile `json:"login_data"`
 	// ASN is the autonomous system the IP info providers reported for ClientIP,
-	// recorded at login or backfilled later (backfillLoginHistoryASNs). 0 means
-	// unknown: the entry predates recording, or every provider failed. It is
-	// what the CGNAT detector matches against the configured ASN list.
+	// recorded at login (recordLoginASN) or read from the providers' cache by the
+	// alt-clear migration (backfillLoginHistoryASNs). 0 means unknown: the
+	// entry predates recording, its lookup failed, or the cache held nothing
+	// for it. It is what the CGNAT detector matches against the configured ASN
+	// list.
 	ASN int `json:"asn,omitempty"`
 }
 
@@ -604,7 +606,14 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, logger runtime.Logg
 
 		// Find matches between current user and the alternate
 		currentUserMatches := loginHistoryCompare(alternateHistory, h)
-		if len(currentUserMatches) > 0 {
+		// Write only a change. The write moves the other row's storage version
+		// on, and a caller holding that row -- MigrationClearAlternateMatches
+		// walks a page of rows and writes each one back with the version it
+		// read -- has its own write of it rejected. Unconditionally, that
+		// rejected both rows of every linked pair in one page. Compared as the
+		// set of items, which is all the link records: its slices hold
+		// pointers, so a direct comparison would see every rebuild as new.
+		if len(currentUserMatches) > 0 && !slices.Equal(alternateMatchItems(alternateHistory.AlternateMatches[h.userID]), alternateMatchItems(currentUserMatches)) {
 			// Update the alternate's matches to include current user
 			alternateHistory.AlternateMatches[h.userID] = currentUserMatches
 
@@ -623,6 +632,18 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, logger runtime.Logg
 
 	// Check if the alternates have changed
 	return hasDisabledAlts, nil
+}
+
+// alternateMatchItems reduces the matches with one other account to their
+// sorted, deduplicated items: the comparable form of "linked, and on what
+// evidence".
+func alternateMatchItems(matches []*AlternateSearchMatch) []string {
+	items := make([]string, 0, len(matches))
+	for _, m := range matches {
+		items = append(items, m.Items...)
+	}
+	slices.Sort(items)
+	return slices.Compact(items)
 }
 
 func (h *LoginHistory) GetXPI(xpid evr.EvrId) (time.Time, bool) {

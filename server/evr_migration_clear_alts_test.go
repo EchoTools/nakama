@@ -71,7 +71,32 @@ func (m *altClearTestModule) StorageList(ctx context.Context, callerID, userID, 
 	if cursor != "" {
 		return nil, "", nil
 	}
-	return m.listed, "", nil
+	return m.liveListed(), "", nil
+}
+
+// liveListed returns the listed rows, in listed order, with their CURRENT
+// stored value and version. Production lists from the database, so phase 2
+// sees the rows phase 1 wrote; a frozen seed-time snapshot would make every row
+// phase 1 touched a version conflict in phase 2 that production never has.
+func (m *altClearTestModule) liveListed() []*api.StorageObject {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]*api.StorageObject, 0, len(m.listed))
+	for _, l := range m.listed {
+		obj, ok := m.objects[occStorageKey(l.UserId, l.Collection, l.Key)]
+		if !ok {
+			out = append(out, l)
+			continue
+		}
+		out = append(out, &api.StorageObject{
+			Collection: obj.Collection,
+			Key:        obj.Key,
+			UserId:     obj.UserId,
+			Value:      obj.Value,
+			Version:    obj.Version,
+		})
+	}
+	return out
 }
 
 // migrationTestUserID builds a distinct, well-formed user ID for bulk fixtures.
@@ -200,6 +225,7 @@ func (m *altClearTestModule) storedHistory(t *testing.T, userID string) *LoginHi
 
 func runAltClearMigration(t *testing.T, nk runtime.NakamaModule) *captureLogger {
 	t.Helper()
+	ensureAltClearPreconditions(t)
 	logger := newCaptureLogger()
 	m := &MigrationClearAlternateMatches{}
 	if err := m.MigrateSystem(context.Background(), logger, nil, nk); err != nil {
@@ -320,9 +346,11 @@ func TestClearAltsMigration_FixtureReachesTheRebuild(t *testing.T) {
 			submitted = append(submitted, userID)
 		}
 	}
+	// Twice: phase 1 records the cached ASN of the account's address, phase 2
+	// persists the cleared links.
 	sort.Strings(submitted)
-	if fmt.Sprint(submitted) != "[11111111-1111-1111-1111-111111111111]" {
-		t.Errorf("submitted writes = %v, want the one seeded account", submitted)
+	if fmt.Sprint(submitted) != "[11111111-1111-1111-1111-111111111111 11111111-1111-1111-1111-111111111111]" {
+		t.Errorf("submitted writes = %v, want the one seeded account, once per phase", submitted)
 	}
 }
 

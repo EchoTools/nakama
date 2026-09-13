@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 
 	"go.uber.org/zap"
@@ -9,7 +11,18 @@ import (
 
 type IPInfoProvider interface {
 	Name() string
+	// Get answers from the provider's cache and, on a miss, asks the provider
+	// live.
 	Get(ctx context.Context, ip string) (IPInfo, error)
+	// GetCached answers from the provider's cache alone, with the same rule for
+	// a usable entry that Get applies, and never asks the provider live. A miss
+	// is (nil, nil); an error is a failure to read the cache.
+	//
+	// A method on the interface rather than an optional one discovered by type
+	// assertion: the cache key and the validity rule are each provider's own,
+	// and a provider added without deciding them should fail to compile, not
+	// silently contribute nothing.
+	GetCached(ctx context.Context, ip string) (IPInfo, error)
 }
 
 type IPInfoCache struct {
@@ -91,6 +104,39 @@ func (s *IPInfoCache) Get(ctx context.Context, ip string) (IPInfo, error) {
 		}
 	}
 	return nil, nil
+}
+
+// GetCached returns IP intelligence for ip from the first provider whose cache
+// holds it, without asking any provider live. It is for work that must not
+// spend provider requests -- IPQS is paid, ip-api's free tier is 45/min -- and
+// must not wait on them: a miss is an unknown, (nil, nil).
+//
+// Unlike Get it does not swallow failures. A provider that could not read its
+// cache is not a miss, and a caller that treated it as one would record
+// "unknown" for an address the cache may well hold. The errors are returned,
+// joined, only when no provider answered.
+//
+// Nil-safe, like IsConfigured: a nil cache answers nothing.
+func (s *IPInfoCache) GetCached(ctx context.Context, ip string) (IPInfo, error) {
+	if s == nil {
+		return nil, nil
+	}
+	if parsedIP := net.ParseIP(ip); parsedIP != nil && (parsedIP.IsLoopback() || parsedIP.IsLinkLocalUnicast() || parsedIP.IsLinkLocalMulticast() || parsedIP.IsMulticast() || parsedIP.IsPrivate()) {
+		return &StubIPInfo{}, nil
+	}
+
+	var errs []error
+	for _, client := range s.clients {
+		result, err := client.GetCached(ctx, ip)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s cache: %w", client.Name(), err))
+			continue
+		}
+		if result != nil {
+			return result, nil
+		}
+	}
+	return nil, errors.Join(errs...)
 }
 
 // IsVPN reports whether the IP is a known VPN. It fails open: an unavailable or

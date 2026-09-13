@@ -271,6 +271,31 @@ func (s *IPQSClient) store(ip string, result *IPQSResponse) error {
 	return nil
 }
 
+// cached returns the response stored in Redis for ip when it is one Get
+// answers from, and nil when there is none. It is the one definition of IPQS's
+// rule for a usable cached entry -- Success, since a quota-exhausted body is
+// Success:false -- shared by Get and GetCached so the two cannot disagree.
+func (s *IPQSClient) cached(ip string) (*IPQSResponse, error) {
+	result, err := s.load(ip)
+	if err != nil || result == nil || !result.Success {
+		return nil, err
+	}
+	return result, nil
+}
+
+// GetCached returns the IPQS data Redis already holds for ip, or (nil, nil) on
+// a miss. It never calls retrieve: no request reaches IPQS, whatever the cache
+// holds. The error is a Redis or decode failure, which is not a miss.
+//
+// The context is unused: the go-redis v6 client takes none.
+func (s *IPQSClient) GetCached(_ context.Context, ip string) (IPInfo, error) {
+	result, err := s.cached(ip)
+	if result == nil {
+		return nil, err
+	}
+	return &IPQSData{Response: *result}, nil
+}
+
 // Get returns IPQS data for ip. It fails open by design: a circuit-breaker
 // trip, an HTTP error, a non-200, or a Success:false body (what quota
 // exhaustion returns) all yield (nil, nil) so the caller proceeds without IP
@@ -291,9 +316,9 @@ func (s *IPQSClient) Get(ctx context.Context, ip string) (IPInfo, error) {
 		s.metrics.CustomTimer("ipqs_request_duration", metricsTags, time.Since(startTime))
 	}()
 
-	if result, err := s.load(ip); err != nil {
+	if result, err := s.cached(ip); err != nil {
 		metricsTags["result"] = "cache_error"
-	} else if result != nil && result.Success {
+	} else if result != nil {
 		metricsTags["result"] = "cache_hit"
 		return &IPQSData{Response: *result}, nil
 	}

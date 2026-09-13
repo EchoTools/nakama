@@ -57,8 +57,9 @@ func MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 		return
 	}
 
-	// Give the server time to fully initialize before running migrations.
-	<-time.After(20 * time.Second)
+	// No fixed startup delay. MigrationClearAlternateMatches waits, bounded,
+	// for exactly what it needs -- settings on the CGNAT detector and a
+	// configured IP info cache -- and refuses without them (waitReady).
 
 	for _, m := range systemMigrations {
 		startTime := time.Now()

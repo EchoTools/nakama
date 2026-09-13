@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -120,20 +119,15 @@ func TestLoginEvent_PersistedCacheKeepsResidentialIP(t *testing.T) {
 	}
 }
 
-// stubASNProvider is a network-free resolver. An address it has no ASN for is
-// a provider failure: (nil, nil), the fail-open result IPInfoCache.Get returns
-// when every provider errored (SEC-6). onGet, when set, runs on every lookup.
+// stubASNProvider is a network-free cached-ASN reader. An address it has no
+// ASN for is a cache miss: (nil, nil).
 type stubASNProvider struct {
 	asns  map[string]int
 	calls []string
-	onGet func(ip string)
 }
 
-func (p *stubASNProvider) Get(ctx context.Context, ip string) (IPInfo, error) {
+func (p *stubASNProvider) GetCached(ctx context.Context, ip string) (IPInfo, error) {
 	p.calls = append(p.calls, ip)
-	if p.onGet != nil {
-		p.onGet(ip)
-	}
 	asn, ok := p.asns[ip]
 	if !ok {
 		return nil, nil
@@ -181,43 +175,32 @@ func historyOf(userID string, entries ...*LoginHistoryEntry) *LoginHistory {
 	return h
 }
 
-// TestRecordLoginASNs_RecordsFromLoginLookup: the login's own IP info lookup
-// supplies the ASN of its client IP, with no second lookup, and the ASNs reach
-// the event handler that persists the history.
-func TestRecordLoginASNs_RecordsFromLoginLookup(t *testing.T) {
+// TestRecordLoginASN_RecordsFromLoginLookup: the login's own IP info lookup
+// supplies the ASN of its client IP, and the ASN reaches the event handler that
+// persists the history.
+func TestRecordLoginASN_RecordsFromLoginLookup(t *testing.T) {
 	withDetector(t, seededCGNATSettings())
 	xpid := mustXPID(t, "OVR-ORG-3930901337016247")
 	h := NewLoginHistory("33333333-3333-3333-3333-333333333333")
 	h.Update(xpid, starlinkIP, &evr.LoginProfile{}, true)
-	known := oldEntry(1, residentialIP, time.Now().Add(-time.Hour))
-	known.ASN = residentialASN
-	h.History[known.Key()] = known
-	resolver := &stubASNProvider{}
 
-	loginASNs := recordLoginASNs(context.Background(), h, starlinkIP, asnIPInfo{asn: starlinkASN}, resolver)
+	loginASN := recordLoginASN(h, starlinkIP, asnIPInfo{asn: starlinkASN})
 
 	if got := h.History[loginHistoryEntryKey(xpid, starlinkIP)].ASN; got != starlinkASN {
-		t.Fatalf("entry ASN = %d after recordLoginASNs, want AS%d from the login's lookup", got, starlinkASN)
+		t.Fatalf("entry ASN = %d after recordLoginASN, want AS%d from the login's lookup", got, starlinkASN)
 	}
-	if len(resolver.calls) != 0 {
-		t.Errorf("recordLoginASNs looked up %v again; the login's own lookup already answered", resolver.calls)
+	if loginASN != starlinkASN {
+		t.Errorf("recordLoginASN returned %d, want AS%d for the event", loginASN, starlinkASN)
 	}
-	// The event carries what storage lacks, not the whole history's map.
-	if want := map[string]int{starlinkIP: starlinkASN}; !maps.Equal(loginASNs, want) {
-		t.Errorf("recordLoginASNs returned %v, want %v", loginASNs, want)
-	}
-	// A repeat login from the same address learns nothing new, so the event
-	// carries nothing; the handler fills that login's entry from the stored
-	// history (TestLoginEvent_FillsEntriesFromStoredSiblings).
-	if again := recordLoginASNs(context.Background(), h, starlinkIP, asnIPInfo{asn: starlinkASN}, resolver); len(again) != 0 {
-		t.Errorf("a repeat login from %s returned %v; nothing changed, so the event should carry nothing", starlinkIP, again)
+	if got := recordLoginASN(h, starlinkIP, nil); got != 0 {
+		t.Errorf("recordLoginASN with no lookup result returned %d, want 0", got)
 	}
 
 	payload, err := json.Marshal(&EventUserAuthenticated{
 		UserID:                   h.userID,
 		XPID:                     xpid,
 		ClientIP:                 starlinkIP,
-		ClientIPASNs:             loginASNs,
+		ClientIPASN:              loginASN,
 		LoginPayload:             &evr.LoginProfile{},
 		IsWebSocketAuthenticated: true,
 	})
@@ -296,7 +279,10 @@ func TestASNBackfill_OldEntryIsBackfilledThenClassified(t *testing.T) {
 	}
 
 	resolver := &stubASNProvider{asns: map[string]int{starlinkIP: starlinkASN, residentialIP: residentialASN}}
-	changed, unresolved := backfillLoginHistoryASNs(context.Background(), resolver, h)
+	changed, unresolved, err := backfillLoginHistoryASNs(context.Background(), resolver, h)
+	if err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
 
 	if !changed || unresolved != 0 {
 		t.Fatalf("backfill = (changed %v, unresolved %d), want (true, 0)", changed, unresolved)
@@ -320,12 +306,15 @@ func TestASNBackfill_Idempotent(t *testing.T) {
 	h := historyOf("user-a", oldEntry(1, starlinkIP, time.Now()), oldEntry(2, residentialIP, time.Now()))
 	resolver := &stubASNProvider{asns: map[string]int{starlinkIP: starlinkASN, residentialIP: residentialASN}}
 
-	if changed, _ := backfillLoginHistoryASNs(context.Background(), resolver, h); !changed {
+	if changed, _, _ := backfillLoginHistoryASNs(context.Background(), resolver, h); !changed {
 		t.Fatal("first backfill changed nothing")
 	}
 	lookups := len(resolver.calls)
 
-	changed, unresolved := backfillLoginHistoryASNs(context.Background(), resolver, h)
+	changed, unresolved, err := backfillLoginHistoryASNs(context.Background(), resolver, h)
+	if err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
 	if changed || unresolved != 0 {
 		t.Errorf("second backfill = (changed %v, unresolved %d), want (false, 0)", changed, unresolved)
 	}
@@ -342,7 +331,10 @@ func TestASNBackfill_FailedLookupRecordsNothing(t *testing.T) {
 	resolver := &stubASNProvider{} // answers nothing
 
 	for pass := 1; pass <= 2; pass++ {
-		changed, unresolved := backfillLoginHistoryASNs(context.Background(), resolver, h)
+		changed, unresolved, err := backfillLoginHistoryASNs(context.Background(), resolver, h)
+		if err != nil {
+			t.Fatalf("backfill: %v", err)
+		}
 		if changed || unresolved != 1 {
 			t.Errorf("pass %d: backfill = (changed %v, unresolved %d), want (false, 1)", pass, changed, unresolved)
 		}
@@ -367,41 +359,15 @@ func TestASNBackfill_FillsSiblingEntries(t *testing.T) {
 	h.PendingAuthorizations = map[string]*LoginHistoryEntry{starlinkIP: pending}
 	resolver := &stubASNProvider{}
 
-	changed, unresolved := backfillLoginHistoryASNs(context.Background(), resolver, h)
+	changed, unresolved, err := backfillLoginHistoryASNs(context.Background(), resolver, h)
+	if err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
 	if !changed || unresolved != 0 || len(resolver.calls) != 0 {
 		t.Errorf("backfill = (changed %v, unresolved %d) with lookups %v; want (true, 0) and none", changed, unresolved, resolver.calls)
 	}
 	if sibling.ASN != starlinkASN || pending.ASN != starlinkASN {
 		t.Errorf("sibling ASN %d, pending ASN %d; want AS%d on both", sibling.ASN, pending.ASN, starlinkASN)
-	}
-}
-
-// TestASNBackfill_LoginBudgetStopsNewLookups: under a deadline, the most recently
-// used addresses are looked up first and no lookup starts once the deadline has
-// passed; what is left is counted unresolved for a later login.
-func TestASNBackfill_LoginBudgetStopsNewLookups(t *testing.T) {
-	now := time.Now()
-	const oldest, middle, newest = "198.51.100.1", "198.51.100.2", "198.51.100.3"
-	h := historyOf("user-a",
-		oldEntry(1, oldest, now.Add(-3*time.Hour)),
-		oldEntry(2, middle, now.Add(-2*time.Hour)),
-		oldEntry(3, newest, now.Add(-1*time.Hour)),
-	)
-
-	clock := now
-	inner := &stubASNProvider{
-		asns:  map[string]int{oldest: 1, middle: 2, newest: 3},
-		onGet: func(string) { clock = clock.Add(600 * time.Millisecond) }, // each lookup costs 600ms
-	}
-	budgeted := loginBackfillIPInfoGetter{ipInfoGetter: inner, deadline: now.Add(time.Second), now: func() time.Time { return clock }}
-
-	_, unresolved := backfillLoginHistoryASNs(context.Background(), budgeted, h)
-
-	if !slices.Equal(inner.calls, []string{newest, middle}) {
-		t.Errorf("lookups = %v; want the two most recently used, newest first, and none started after the 1s budget", inner.calls)
-	}
-	if unresolved != 1 || h.clientIPASNs()[oldest] != 0 {
-		t.Errorf("unresolved = %d, oldest ASN %d; want the oldest deferred", unresolved, h.clientIPASNs()[oldest])
 	}
 }
 
@@ -442,54 +408,6 @@ func TestLoginHistoryCompare_ConflictingASNsAreSymmetric(t *testing.T) {
 	}
 }
 
-// TestLoginEvent_FillsEntriesFromStoredSiblings: the handler persists the
-// history, so any entry in it whose address is known on a sibling entry is
-// filled there -- including this login's new entry -- without the event having
-// to carry that address.
-func TestLoginEvent_FillsEntriesFromStoredSiblings(t *testing.T) {
-	withDetector(t, seededCGNATSettings())
-	const userID = "44444444-4444-4444-4444-444444444444"
-	known := oldEntry(1, starlinkIP, time.Now().Add(-2*time.Hour))
-	known.ASN = starlinkASN
-	sibling := oldEntry(2, starlinkIP, time.Now().Add(-time.Hour))
-	seeded := historyOf(userID, known, sibling)
-	raw, err := json.Marshal(seeded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := newLoginASNTestModule()
-	m.seedObject(userID, LoginStorageCollection, LoginHistoryStorageKey, string(raw))
-
-	stored := processLoginEvent(t, m, `{
-		"user_id": "`+userID+`",
-		"xpid": "OVR-ORG-3930901337016247",
-		"client_ip": "`+starlinkIP+`",
-		"login_data": {"hmdserialnumber": "1WMHH9ABC1234"},
-		"is_websocket_authenticated": true
-	}`)
-
-	for key, e := range stored.History {
-		if e.ClientIP == starlinkIP && e.ASN != starlinkASN {
-			t.Errorf("stored entry %s for %s has ASN %d; a sibling entry records AS%d", key, starlinkIP, e.ASN, starlinkASN)
-		}
-	}
-}
-
-// TestRecordLoginASNs_DoesNotRetryTheLoginsOwnFailedLookup: when the login's
-// own IP info lookup came back empty, the backfill does not ask again for the
-// same address in the same login. The next login does.
-func TestRecordLoginASNs_DoesNotRetryTheLoginsOwnFailedLookup(t *testing.T) {
-	h := NewLoginHistory("55555555-5555-5555-5555-555555555555")
-	h.Update(mustXPID(t, "OVR-ORG-3930901337016247"), starlinkIP, &evr.LoginProfile{}, true)
-	resolver := &stubASNProvider{asns: map[string]int{starlinkIP: starlinkASN}}
-
-	recordLoginASNs(context.Background(), h, starlinkIP, nil, resolver)
-
-	if len(resolver.calls) != 0 {
-		t.Errorf("recordLoginASNs looked up %v; the login's own lookup of %s already failed this login", resolver.calls, starlinkIP)
-	}
-}
-
 // TestLoginEvent_RecordsASNOnEntry: the ASN the login resolved for its client
 // IP is stored on the login history entry the event handler persists.
 func TestLoginEvent_RecordsASNOnEntry(t *testing.T) {
@@ -501,7 +419,7 @@ func TestLoginEvent_RecordsASNOnEntry(t *testing.T) {
 		"user_id": "22222222-2222-2222-2222-222222222222",
 		"xpid": "OVR-ORG-3930901337016247",
 		"client_ip": "`+starlinkIP+`",
-		"client_ip_asns": {"`+starlinkIP+`": 14593},
+		"client_ip_asn": 14593,
 		"login_data": {"hmdserialnumber": "1WMHH9ABC1234"},
 		"is_websocket_authenticated": true
 	}`)
@@ -512,5 +430,63 @@ func TestLoginEvent_RecordsASNOnEntry(t *testing.T) {
 	}
 	if entry.ASN != starlinkASN {
 		t.Errorf("stored entry for %s has ASN %d; the login resolved AS%d for it", starlinkIP, entry.ASN, starlinkASN)
+	}
+}
+
+// TestASNBackfill_CacheMissNeverFetchesLive: the backfill reads each address's
+// ASN from what the providers already cached, and an address with no cache
+// entry is left unknown. It never takes IPInfoCache.Get's path, which on a
+// Redis miss makes a live request to IPQS or ip-api.
+func TestASNBackfill_CacheMissNeverFetchesLive(t *testing.T) {
+	provider := &recordingIPInfoProvider{
+		cached: map[string]int{residentialIP: residentialASN},
+		live:   map[string]int{starlinkIP: starlinkASN},
+	}
+	cache, err := NewIPInfoCache(nil, nil, provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := historyOf("user-a", oldEntry(1, residentialIP, time.Now()), oldEntry(2, starlinkIP, time.Now()))
+
+	if _, _, err := backfillLoginHistoryASNs(context.Background(), cache, h); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+
+	if calls := provider.liveCalls(); len(calls) != 0 {
+		t.Errorf("backfill asked a provider live for %v; it may only read what Redis already holds", calls)
+	}
+	asns := h.clientIPASNs()
+	if asns[residentialIP] != residentialASN {
+		t.Errorf("ASN for %s = %d, want AS%d from the provider's cache", residentialIP, asns[residentialIP], residentialASN)
+	}
+	if asns[starlinkIP] != 0 {
+		t.Errorf("ASN for %s = %d; nothing is cached for it, so nothing may be recorded", starlinkIP, asns[starlinkIP])
+	}
+}
+
+// TestRecordLoginASN_LooksUpNoOtherAddress: a login records the ASN its own IP
+// info lookup returned for its own address, and looks nothing else up -- not
+// live, and not from the cache.
+func TestRecordLoginASN_LooksUpNoOtherAddress(t *testing.T) {
+	provider := &recordingIPInfoProvider{
+		cached: map[string]int{residentialIP: residentialASN},
+		live:   map[string]int{residentialIP: residentialASN},
+	}
+	// Installed as the process-global cache: a login has no resolver to be
+	// handed, so the lookup this guards against would have to reach for one.
+	installIPInfoCache(t, provider)
+	xpid := mustXPID(t, "OVR-ORG-3930901337016247")
+	h := NewLoginHistory("66666666-6666-6666-6666-666666666666")
+	h.Update(xpid, starlinkIP, &evr.LoginProfile{}, true)
+	other := oldEntry(1, residentialIP, time.Now().Add(-time.Hour))
+	h.History[other.Key()] = other
+
+	recordLoginASN(h, starlinkIP, asnIPInfo{asn: starlinkASN})
+
+	if len(provider.getCalls) != 0 || len(provider.cachedCalls) != 0 {
+		t.Errorf("the login looked up live %v and cached %v; it may use only its own lookup of %s", provider.getCalls, provider.cachedCalls, starlinkIP)
+	}
+	if got := h.clientIPASNs(); got[starlinkIP] != starlinkASN || got[residentialIP] != 0 {
+		t.Errorf("recorded ASNs = %v; want only %s as AS%d", got, starlinkIP, starlinkASN)
 	}
 }

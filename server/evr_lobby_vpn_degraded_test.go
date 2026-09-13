@@ -340,6 +340,12 @@ func (p *erroringIPInfoProvider) Get(_ context.Context, _ string) (IPInfo, error
 	return p.info, p.err
 }
 
+// GetCached answers as Get does; these tests are about Get's error handling
+// and never reach it.
+func (p *erroringIPInfoProvider) GetCached(_ context.Context, _ string) (IPInfo, error) {
+	return p.info, p.err
+}
+
 func TestIPInfoCache_ProviderErrorsAreCounted(t *testing.T) {
 	metrics := newRecordingMetrics()
 	core, logs := observer.New(zapcore.DebugLevel)

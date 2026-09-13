@@ -126,6 +126,7 @@ func TestClearAltsMigration_NoPatternsAccountKeepsItsLinks(t *testing.T) {
 // the migration said on the way out.
 func runAltClearMigrationExpectingError(t *testing.T, nk runtime.NakamaModule) (*captureLogger, error) {
 	t.Helper()
+	ensureAltClearPreconditions(t)
 	logger := newCaptureLogger()
 	m := &MigrationClearAlternateMatches{}
 	err := m.MigrateSystem(context.Background(), logger, nil, nk)

@@ -4,11 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
+	"sync"
 	"time"
 
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
@@ -168,6 +171,66 @@ type MigrationClearAlternateMatches struct {
 	// relative to the work it follows -- without waiting on, or flaking on,
 	// real elapsed time.
 	pacer *migrationPacer
+
+	// readyWait bounds how long the run waits for its preconditions (see
+	// waitReady). Zero, in production, means migrationClearAltsReadyWait.
+	readyWait time.Duration
+}
+
+// migrationClearAltsReadyWait bounds the wait for the migration's
+// preconditions. Both arrive during boot, from NewEvrPipeline: settings from
+// its ServiceSettingsLoad, the IP info cache a little after. The bound is only
+// reached by a boot that never gets that far, and matches the startup CGNAT
+// cleanup's (cgnatStartupReadyWait).
+const migrationClearAltsReadyWait = 10 * time.Minute
+
+// migrationReadyPoll is how often waitReady looks for the IP info cache, which
+// is published through an atomic pointer with no signal of its own.
+const migrationReadyPoll = 100 * time.Millisecond
+
+// waitReady waits, bounded, for the two things the run cannot classify an
+// address without, and returns the IP info cache to read ASNs from.
+//
+//   - Settings on the CGNAT detector. Before they arrive it knows no CGNAT
+//     ASNs or CIDRs, so a Starlink address reads as a strong signal and a
+//     discovery key, and the run would link strangers (#596) for good.
+//   - A configured IP info cache. The run reads ASNs from it alone, and a
+//     cache with no providers answers nothing, so every account would be
+//     skipped and the run marked complete having done nothing.
+//
+// Any error is a refusal: the caller runs nothing and writes no marker. It
+// never touches a login.
+func (m *MigrationClearAlternateMatches) waitReady(ctx context.Context) (*IPInfoCache, error) {
+	wait := m.readyWait
+	if wait <= 0 {
+		wait = migrationClearAltsReadyWait
+	}
+	ctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+
+	detector := GetCGNATDetector()
+	if detector == nil {
+		return nil, errors.New("no CGNAT detector")
+	}
+	if err := detector.WaitSettingsApplied(ctx); err != nil {
+		return nil, err
+	}
+
+	ticker := time.NewTicker(migrationReadyPoll)
+	defer ticker.Stop()
+	for {
+		if cache := globalIPInfoCache.Load(); cache != nil {
+			if !cache.IsConfigured() {
+				return nil, errors.New("IP info cache has no providers; a cache-only ASN read would resolve nothing")
+			}
+			return cache, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("waiting for the IP info cache: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 // clock returns the pacer this run should use.
@@ -224,12 +287,26 @@ func (m *MigrationClearAlternateMatches) MigrateSystem(ctx context.Context, logg
 		return nil
 	}
 
+	cache, err := m.waitReady(ctx)
+	if err != nil {
+		logger.WithFields(markerFields(map[string]any{"error": err})).
+			Error("alt-clear migration: preconditions not met; refusing to run, and the migration stays owed")
+		return fmt.Errorf("alt-clear migration refused: %w", err)
+	}
+
 	logger.WithFields(markerFields(nil)).Info("alt-clear migration: no completion marker found, starting a fresh run")
 
-	summary, err := m.run(ctx, logger, nk)
+	summary, err := m.run(ctx, logger, nk, cache)
 	if err != nil {
 		return err
 	}
+
+	// The marker is written after every clean run, however many accounts were
+	// left as they were for an address with no cached ASN (asn_unresolved in
+	// the summary). Ruled by Andrew: a miss is logged and the run moves on.
+	// Withholding the marker would not resolve one: an address gains a cache
+	// entry only when a login comes from it, which a re-run cannot cause, so
+	// it would re-walk every account on every boot.
 
 	if err := migrationMarkerWrite(ctx, nk, MigrationClearAltsStateKey, &migrationCompletionMarker{
 		Migration:   fmt.Sprintf("%T", m),
@@ -251,13 +328,13 @@ func (m *MigrationClearAlternateMatches) MigrateSystem(ctx context.Context, logg
 // completion marker gates it from the outside: run has no opinion about whether
 // it should have been called, and every path out of it is either a clean
 // summary or an error.
-func (m *MigrationClearAlternateMatches) run(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) (map[string]any, error) {
+func (m *MigrationClearAlternateMatches) run(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, cache cachedIPInfoReader) (map[string]any, error) {
 	pacer := m.clock()
 	startTime := pacer.now()
 
 	// Phase 1. Every account's indexed cache must be correct before the first
 	// discovery query runs — see the type comment.
-	cacheRepaired, cacheConflicted, err := m.repairIndexedCaches(ctx, logger, nk)
+	cacheRepaired, cacheConflicted, err := m.repairIndexedCaches(ctx, logger, nk, cache)
 	if err != nil {
 		return nil, err
 	}
@@ -266,6 +343,7 @@ func (m *MigrationClearAlternateMatches) run(ctx context.Context, logger runtime
 	rebuilt := 0
 	rebuildFailed := 0
 	unsearchable := 0
+	asnUnresolved := 0
 	conflicted := cacheConflicted
 	walked := 0
 
@@ -276,7 +354,13 @@ func (m *MigrationClearAlternateMatches) run(ctx context.Context, logger runtime
 	linksExamined := 0
 	linksRebuilt := 0
 
+	// The rebuild runs through ownWrites, which remembers the far-side rows
+	// UpdateAlternates writes, so a row this run moved on itself is not
+	// rejected as though a login had raced it (see ownWriteTracker).
+	ownWrites := newOwnWriteTracker(nk)
+
 	var cursor string
+	var abortErr error
 	for {
 		batchStart := pacer.now()
 		objects, nextCursor, listErr := nk.StorageList(ctx, SystemUserID, "", LoginStorageCollection, migrationPageSize, cursor)
@@ -307,6 +391,31 @@ func (m *MigrationClearAlternateMatches) run(ctx context.Context, logger runtime
 					UserID:  obj.UserId,
 					Version: obj.Version,
 				})
+
+				// Read the ASNs again on this fresh copy. Phase 1 recorded
+				// what the cache holds, so this reads nothing unless phase 1's
+				// write for this row was rejected.
+				asnChanged, unresolved, err := backfillLoginHistoryASNs(ctx, cache, history)
+				if err != nil {
+					abortErr = fmt.Errorf("alt-clear migration: reading cached ASNs for %s: %w", obj.UserId, err)
+					return
+				}
+
+				// An address with no cached ASN cannot be classified: if it is
+				// a carrier exit, it is a false link waiting to be formed; if
+				// it is residential, a rebuild that clears on the strength of
+				// it may destroy a real one. Leave this account's links exactly
+				// as they are, log it, and move on. It is decided at the
+				// account's next login, whose lookup caches the address.
+				//
+				// This check precedes the clear below. Checked after, a cleared
+				// map would be one early exit away from being persisted.
+				if unresolved > 0 {
+					asnUnresolved++
+					logger.WithFields(map[string]any{"user_id": obj.UserId, "asn_unresolved": unresolved}).
+						Info("alt-clear migration: addresses with no cached ASN; links left as they are")
+					return
+				}
 
 				// An account with no discovery patterns cannot be searched, so it
 				// cannot be rebuilt, so it must not be cleared.
@@ -360,7 +469,7 @@ func (m *MigrationClearAlternateMatches) run(ctx context.Context, logger runtime
 				// Rebuild against the current detection code. This is the same
 				// path a login runs (evr_pipeline_login.go:638), including the
 				// bidirectional writes to linked accounts.
-				if _, err := history.UpdateAlternates(ctx, logger, nk); err != nil {
+				if _, err := history.UpdateAlternates(ctx, logger, ownWrites); err != nil {
 					// Do NOT persist. The maps were cleared in memory just above,
 					// and every error UpdateAlternates can return is I/O-backed —
 					// the alt index list (evr_authenticate_alts.go:139-141),
@@ -406,7 +515,8 @@ func (m *MigrationClearAlternateMatches) run(ctx context.Context, logger runtime
 
 				// Persist only a real change: cleared stale links, discovered new
 				// ones, or a cache phase 1 could not have reached.
-				if slices.Equal(storedCache, history.Cache) &&
+				if !asnChanged &&
+					slices.Equal(storedCache, history.Cache) &&
 					slices.Equal(storedSecond, history.SecondDegreeAlternates) &&
 					maps.EqualFunc(storedLinks, altLinkItems(history.AlternateMatches), slices.Equal) {
 					return
@@ -424,6 +534,11 @@ func (m *MigrationClearAlternateMatches) run(ctx context.Context, logger runtime
 				})
 			}()
 			pacer.pace(acctStart)
+			if abortErr != nil {
+				// Nothing of this page has been written; earlier pages have.
+				// No marker, so the run stays owed.
+				return nil, abortErr
+			}
 		}
 
 		// The safety floor, checked BEFORE this page is submitted so a tripped
@@ -448,6 +563,9 @@ func (m *MigrationClearAlternateMatches) run(ctx context.Context, logger runtime
 				destroyed, linksExamined, migrationClearAltsFloorFraction*100)
 		}
 
+		for _, w := range writes {
+			w.Version = ownWrites.current(w.UserID, w.Version)
+		}
 		written, rejected := migrationWriteBatch(ctx, logger, nk, writes, "alt-clear")
 		rebuilt += written
 		conflicted += rejected
@@ -458,6 +576,7 @@ func (m *MigrationClearAlternateMatches) run(ctx context.Context, logger runtime
 			"rebuilt":        rebuilt,
 			"rebuild_failed": rebuildFailed,
 			"unsearchable":   unsearchable,
+			"asn_unresolved": asnUnresolved,
 			"conflicted":     conflicted,
 			"walked":         walked,
 			"batch_time":     pacer.now().Sub(batchStart).String(),
@@ -476,6 +595,7 @@ func (m *MigrationClearAlternateMatches) run(ctx context.Context, logger runtime
 		"rebuilt":        rebuilt,
 		"rebuild_failed": rebuildFailed,
 		"unsearchable":   unsearchable,
+		"asn_unresolved": asnUnresolved,
 		"conflicted":     conflicted,
 		"walked":         walked,
 		"total":          pacer.now().Sub(startTime).String(),
@@ -498,12 +618,13 @@ func (m *MigrationClearAlternateMatches) run(ctx context.Context, logger runtime
 //
 // A row that already agrees is not written, so on converged data this pass is
 // read-only.
-func (m *MigrationClearAlternateMatches) repairIndexedCaches(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule) (repaired, conflicted int, err error) {
+func (m *MigrationClearAlternateMatches) repairIndexedCaches(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, cache cachedIPInfoReader) (repaired, conflicted int, err error) {
 	pacer := m.clock()
 	startTime := pacer.now()
 	walked := 0
 
 	var cursor string
+	var readErr error
 	for {
 		objects, nextCursor, listErr := nk.StorageList(ctx, SystemUserID, "", LoginStorageCollection, migrationPageSize, cursor)
 		if listErr != nil {
@@ -535,6 +656,16 @@ func (m *MigrationClearAlternateMatches) repairIndexedCaches(ctx context.Context
 
 				storedCache := slices.Clone(history.Cache)
 
+				// Record every ASN the providers already hold in Redis for
+				// this history's addresses, before the recompute below
+				// classifies them. A miss is not an error here; phase 2
+				// decides what it means for the account's links.
+				asnChanged, _, err := backfillLoginHistoryASNs(ctx, cache, history)
+				if err != nil {
+					readErr = fmt.Errorf("alt-cache repair: reading cached ASNs for %s: %w", obj.UserId, err)
+					return
+				}
+
 				// MarshalJSON runs rebuildCache, which is the recompute.
 				data, err := json.Marshal(history)
 				if err != nil {
@@ -542,7 +673,7 @@ func (m *MigrationClearAlternateMatches) repairIndexedCaches(ctx context.Context
 					return
 				}
 
-				if slices.Equal(storedCache, history.Cache) {
+				if !asnChanged && slices.Equal(storedCache, history.Cache) {
 					return
 				}
 
@@ -558,6 +689,9 @@ func (m *MigrationClearAlternateMatches) repairIndexedCaches(ctx context.Context
 				})
 			}()
 			pacer.pace(acctStart)
+			if readErr != nil {
+				return repaired, conflicted, readErr
+			}
 		}
 
 		written, rejected := migrationWriteBatch(ctx, logger, nk, writes, "alt-cache repair")
@@ -578,6 +712,73 @@ func (m *MigrationClearAlternateMatches) repairIndexedCaches(ctx context.Context
 	}).Info("alt-cache repair complete")
 
 	return repaired, conflicted, nil
+}
+
+// ownWriteTracker is the NakamaModule phase 2's rebuild runs through. It
+// records, for each login history UpdateAlternates writes as the far side of a
+// link, the version the write replaced and the version it produced.
+//
+// Without it a linked pair walked in one page lost both rows. Rebuilding A
+// writes A's link onto B; B's row in the page snapshot now carries a version
+// storage has moved past, so B's own write is rejected. Rebuilding B does the
+// same to A. Measured: walked=2 rebuilt=0 conflicted=2, and with the one-shot
+// marker there is no later run to retry them. Change detection on the far-side
+// write (UpdateAlternates) does not reach this case: the pair was not linked
+// before the run, so both far-side writes are real changes.
+//
+// current follows the chain from the version a row was read at through this
+// run's own writes to it, and only those. A far-side write that replaced the
+// snapshot version is the run's own change, and the account's rebuild -- which
+// recomputes its links from a fresh search -- supersedes it. A login that
+// wrote the row in between breaks the chain at its own version, so the row is
+// still rejected, as a racing login must make it.
+type ownWriteTracker struct {
+	runtime.NakamaModule
+
+	mu       sync.Mutex
+	replaced map[string]map[string]string // user ID -> version replaced -> version written
+}
+
+func newOwnWriteTracker(nk runtime.NakamaModule) *ownWriteTracker {
+	return &ownWriteTracker{NakamaModule: nk, replaced: make(map[string]map[string]string)}
+}
+
+func (t *ownWriteTracker) StorageWrite(ctx context.Context, writes []*runtime.StorageWrite) ([]*api.StorageObjectAck, error) {
+	acks, err := t.NakamaModule.StorageWrite(ctx, writes)
+	if err != nil {
+		return acks, err
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, w := range writes {
+		if w.Collection != LoginStorageCollection || w.Key != LoginHistoryStorageKey || w.Version == "" || w.Version == "*" {
+			continue
+		}
+		for _, ack := range acks {
+			if ack.GetUserId() == w.UserID && ack.GetCollection() == w.Collection && ack.GetKey() == w.Key {
+				if t.replaced[w.UserID] == nil {
+					t.replaced[w.UserID] = make(map[string]string)
+				}
+				t.replaced[w.UserID][w.Version] = ack.GetVersion()
+			}
+		}
+	}
+	return acks, nil
+}
+
+// current returns the version userID's login history is at if, since it was
+// read at version, only this run has written it; otherwise version unchanged.
+func (t *ownWriteTracker) current(userID, version string) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for seen := 0; seen <= len(t.replaced[userID]); seen++ {
+		next, ok := t.replaced[userID][version]
+		if !ok {
+			break
+		}
+		version = next
+	}
+	return version
 }
 
 // migrationWriteBatch submits writes as one batch and, if that batch is
@@ -630,12 +831,7 @@ func migrationWriteBatch(ctx context.Context, logger runtime.Logger, nk runtime.
 func altLinkItems(matches map[string][]*AlternateSearchMatch) map[string][]string {
 	out := make(map[string][]string, len(matches))
 	for userID, ms := range matches {
-		items := make([]string, 0, len(ms))
-		for _, m := range ms {
-			items = append(items, m.Items...)
-		}
-		slices.Sort(items)
-		out[userID] = slices.Compact(items)
+		out[userID] = alternateMatchItems(ms)
 	}
 	return out
 }

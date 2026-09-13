@@ -83,7 +83,7 @@ func (m *pagingModule) StorageList(ctx context.Context, callerID, userID, collec
 	if end < len(m.listed) {
 		next = strconv.Itoa(end)
 	}
-	return m.listed[start:end], next, nil
+	return m.liveListed()[start:end], next, nil
 }
 
 // seedUnlinkedAccount stores a searchable account that carries NO alt links.
@@ -151,6 +151,7 @@ func TestClearAltsMigration_PacesPerAccountNotPerPage(t *testing.T) {
 
 	clock := newFakeMigrationClock()
 	m := &MigrationClearAlternateMatches{pacer: clock.pacer()}
+	ensureAltClearPreconditions(t)
 
 	logger := newCaptureLogger()
 	if err := m.MigrateSystem(context.Background(), logger, nil, nk); err != nil {
