@@ -1261,17 +1261,17 @@ func (p *EvrPipeline) intendedSocialTargetMatchID(session *sessionWS, lobbyParam
 }
 
 // isFollowerAlreadyInLeaderMatch checks whether the follower is already in
-// the same match as the party leader. This is a lightweight tracker-only
-// check (no match registry calls) used as a fast path at the top of
+// the same match as the party leader. This is a lightweight check (tracker
+// reads plus one match label lookup) used as a fast path at the top of
 // lobbyFind to avoid redundant configureParty / authorization / matchmaking
 // stream / TryFollowPartyLeader work when the client re-sends
 // LobbyFindSessionRequest on its normal message cycle.
 //
 // Returns false when the leader cannot be found, either player is not in a
-// match, or their match IDs differ. When the shared match is the one the
-// client reports as current, it also returns false if the client is leaving
-// it, or if it is a social lobby and requestedMode is not social (the member
-// is queueing from the lobby, not staying in it).
+// match, or their match IDs differ. Otherwise it returns true only when the
+// shared match is a social lobby and requestedMode is social: a shared arena
+// match is being left (or its tracker entry is stale), and a member asking for
+// another mode from a shared social lobby is queueing from it, not staying.
 func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyGroup *LobbyGroup, currentMatchID MatchID, requestedMode evr.Symbol) bool {
 	leader := lobbyGroup.GetLeader()
 	if leader == nil || leader.SessionId == session.id.String() {
@@ -1334,6 +1334,25 @@ func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(ctx context.Context, logger
 		return true
 	}
 
+	// The client does not report the shared match as current (nil, or another
+	// match), so the tracker entry may be stale. Same outcome as above: only a
+	// shared social lobby, for a member asking for a social lobby, is already
+	// converged. Otherwise the follow path decides.
+	isSocial := false
+	if p.nk != nil {
+		label, err := MatchLabelByID(ctx, p.nk, followerMatchID)
+		isSocial = err == nil && label != nil && label.IsSocial()
+	}
+	if !isSocial || !shouldFollowerFindOrCreateSocial(requestedMode) {
+		logger.Debug("Follower and leader share a match the client does not report as current, not skipping",
+			zap.String("shared_match_id", followerMatchID.String()),
+			zap.String("current_match_id", currentMatchID.String()),
+			zap.Bool("shared_is_social", isSocial),
+			zap.String("requested_mode", requestedMode.String()))
+		return false
+	}
+	logger.Debug("Follower and leader share a social lobby, already converged",
+		zap.String("shared_match_id", followerMatchID.String()))
 	return true
 }
 
@@ -1927,6 +1946,23 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 			logger.Info("Leader is in a non-social match during poll, follow path not applicable",
 				zap.String("leader_match_mode", label.Mode.String()))
 			return false
+		}
+
+		// The label can be stale and not yet list the member. If the client
+		// reports this lobby as current and the member's own tracker presence
+		// points at it, the member is there: joining again is the da785b895
+		// snap-back (#624). The tracker entry alone is not enough, since it
+		// is not cleared when the member leaves a match.
+		if params.CurrentMatchID == leaderMatchID {
+			if memberPresence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, PresenceStream{
+				Mode:    StreamModeService,
+				Subject: session.id,
+				Label:   StreamLabelMatchService,
+			}, session.userID); memberPresence != nil && MatchIDFromStringOrNil(memberPresence.GetStatus()) == leaderMatchID {
+				logger.Debug("Follower's tracker presence is already in leader's social lobby, label is stale, not rejoining",
+					zap.String("mid", leaderMatchID.String()))
+				return true
+			}
 		}
 
 		logger.Debug("Joining leader's social lobby during poll", zap.String("mid", leaderMatchID.String()))
