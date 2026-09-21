@@ -2168,7 +2168,7 @@ func TestIsFollowerAlreadyInLeaderMatch_SameMatch(t *testing.T) {
 	env.setLeaderMatch(matchID)
 	env.setFollowerMatch(matchID)
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{})
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{}, env.params.Mode)
 	if !result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return true when both are in the same match")
 	}
@@ -2187,7 +2187,7 @@ func TestIsFollowerAlreadyInLeaderMatch_DifferentMatches(t *testing.T) {
 	env.setLeaderMatch(matchA)
 	env.setFollowerMatch(matchB)
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{})
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{}, env.params.Mode)
 	if result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return false when in different matches")
 	}
@@ -2205,7 +2205,7 @@ func TestIsFollowerAlreadyInLeaderMatch_LeaderNotInMatch(t *testing.T) {
 	// Only follower is in a match; leader is not.
 	env.setFollowerMatch(matchID)
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{})
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{}, env.params.Mode)
 	if result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return false when leader has no match")
 	}
@@ -2223,7 +2223,7 @@ func TestIsFollowerAlreadyInLeaderMatch_FollowerNotInMatch(t *testing.T) {
 	// Only leader is in a match; follower is not.
 	env.setLeaderMatch(matchID)
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{})
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{}, env.params.Mode)
 	if result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return false when follower has no match")
 	}
@@ -2239,7 +2239,7 @@ func TestIsFollowerAlreadyInLeaderMatch_NoLeader(t *testing.T) {
 
 	env.clearLeader()
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{})
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{}, env.params.Mode)
 	if result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return false when there is no leader")
 	}
@@ -2258,7 +2258,7 @@ func TestIsFollowerAlreadyInLeaderMatch_FollowerIsLeader(t *testing.T) {
 	env.setLeader(env.followerSID, env.followerUID, "follower")
 	env.setFollowerMatch(matchID)
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{})
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{}, env.params.Mode)
 	if result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return false when follower is the leader")
 	}
@@ -2562,11 +2562,13 @@ func TestCurrentSocialLobby_FollowToLeaderSameLobby_IsNoop(t *testing.T) {
 // Social lobby snap-back bug -- isFollowerAlreadyInLeaderMatch
 // ---------------------------------------------------------------------------
 
-// TestFollowerInSocialLobby_QueueArena_NoSnapBack verifies that when both
-// the follower and leader are in the same social lobby and the follower
-// queues for an arena, isFollowerAlreadyInLeaderMatch returns true
-// (already converged).
-func TestFollowerInSocialLobby_QueueArena_NoSnapBack(t *testing.T) {
+// TestFollowerInSocialLobby_RequestingSocial_AlreadyConverged verifies that
+// when both the follower and leader are in the same social lobby and the
+// follower requests a social lobby, isFollowerAlreadyInLeaderMatch returns
+// true (already converged). A follower requesting arena from the shared
+// social lobby is not converged (#620); see
+// TestLobbyFind_FollowerInLeaderSocial_RequestingArena_DoesNotSkip.
+func TestFollowerInSocialLobby_RequestingSocial_AlreadyConverged(t *testing.T) {
 	t.Parallel()
 
 	env := newFollowTestEnv(t)
@@ -2585,7 +2587,7 @@ func TestFollowerInSocialLobby_QueueArena_NoSnapBack(t *testing.T) {
 	env.withMockNK(registry)
 
 	result := env.pipeline.isFollowerAlreadyInLeaderMatch(
-		context.Background(), logger, env.session, env.lobbyGroup, socialLobby)
+		context.Background(), logger, env.session, env.lobbyGroup, socialLobby, evr.ModeSocialPublic)
 
 	if !result {
 		t.Fatal("isFollowerAlreadyInLeaderMatch returned false when both players " +
@@ -2614,7 +2616,7 @@ func TestFollowerInArenaLobby_BothLeaving_NotConverged(t *testing.T) {
 	env.withMockNK(registry)
 
 	result := env.pipeline.isFollowerAlreadyInLeaderMatch(
-		context.Background(), logger, env.session, env.lobbyGroup, arenaLobby)
+		context.Background(), logger, env.session, env.lobbyGroup, arenaLobby, env.params.Mode)
 
 	if result {
 		t.Fatal("isFollowerAlreadyInLeaderMatch returned true when both players " +
