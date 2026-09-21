@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/gofrs/uuid/v5"
@@ -251,6 +252,30 @@ func (p *PartyHandler) Join(presences []*Presence) {
 		return
 	}
 
+	// members.Join treats a join from a user already in the party on another
+	// session as a session replacement and drops the old session from the
+	// roster. If that old session was the leader, hand leadership to the
+	// replacing session: otherwise the leader slot names a session that is no
+	// longer a member, and its eventual Leave finds nothing to remove, so no
+	// new leader is ever elected.
+	var leaderReplaced bool
+	if p.leader != nil && !p.isMemberLocked(p.leader.PresenceID) {
+		for _, presence := range presences {
+			if presence.GetUserId() == p.leader.UserPresence.GetUserId() && p.isMemberLocked(&presence.ID) {
+				p.leader = &PartyLeader{
+					PresenceID: &presence.ID,
+					UserPresence: &rtapi.UserPresence{
+						UserId:    presence.GetUserId(),
+						SessionId: presence.GetSessionId(),
+						Username:  presence.GetUsername(),
+					},
+				}
+				leaderReplaced = true
+				break
+			}
+		}
+	}
+
 	presenceIDs := make(map[*PresenceID]*rtapi.Envelope, len(presences))
 	for _, presence := range presences {
 		currentPresence := presence
@@ -281,7 +306,25 @@ func (p *PartyHandler) Join(presences []*Presence) {
 
 	members := p.members.List()
 
+	var leaderEnvelope *rtapi.Envelope
+	if leaderReplaced {
+		leaderEnvelope = &rtapi.Envelope{
+			Message: &rtapi.Envelope_PartyLeader{
+				PartyLeader: &rtapi.PartyLeader{
+					PartyId:  p.IDStr,
+					Presence: p.leader.UserPresence,
+				},
+			},
+		}
+	}
+
 	p.Unlock()
+
+	// Tell the existing members the leader moved to the replacement session,
+	// the same notification Promote and Leave send on a leader change.
+	if leaderEnvelope != nil {
+		p.router.SendToStream(p.logger, p.Stream, leaderEnvelope, true)
+	}
 
 	memberUserPresences := make([]*rtapi.UserPresence, 0, len(members))
 	for _, member := range members {
@@ -306,7 +349,21 @@ func (p *PartyHandler) Leave(presences []*Presence) {
 		return
 	}
 
+	// A leaving leader is re-elected below even when it is no longer in the
+	// roster (e.g. it was dropped as a replaced session), so a leader slot can
+	// never outlive its session.
+	var leaderLeaving *Presence
+	for _, presence := range presences {
+		if p.leader != nil && p.leader.PresenceID.SessionID == presence.ID.SessionID && p.leader.PresenceID.Node == presence.ID.Node {
+			leaderLeaving = presence
+			break
+		}
+	}
+
 	presences, _ = p.members.Leave(presences)
+	if leaderLeaving != nil && !slices.Contains(presences, leaderLeaving) {
+		presences = append(presences, leaderLeaving)
+	}
 	if len(presences) == 0 {
 		p.Unlock()
 		return
@@ -694,4 +751,15 @@ func (p *PartyHandler) DataSend(sessionID, node string, opCode int64, data []byt
 	p.router.SendToPresenceIDs(p.logger, recipients, envelope, true)
 
 	return nil
+}
+
+// isMemberLocked reports whether the presence is currently in the party roster.
+// The caller must hold p's lock.
+func (p *PartyHandler) isMemberLocked(id *PresenceID) bool {
+	for _, member := range p.members.List() {
+		if member.PresenceID.SessionID == id.SessionID && member.PresenceID.Node == id.Node {
+			return true
+		}
+	}
+	return false
 }
