@@ -300,3 +300,165 @@ func TestTryFollow_StaleTrackerSharedMatchBeingLeft_NotAlreadyInLeaderMatch(t *t
 		t.Errorf("expected TryFollowPartyLeader to fall through to leader-match validation")
 	}
 }
+
+// #625: the follow-skip ignored both modes when the client did not report the
+// shared match as current.
+//
+// isFollowerAlreadyInLeaderMatch applied the leaving/social distinction and the
+// requested-mode check (#623) only when CurrentMatchID equalled the match the
+// tracker shows the member sharing with the leader. With a nil CurrentMatchID
+// (the client is at the menu) or a different one, it returned true for any
+// shared match and any requested mode, so lobbyFind returned at the skip before
+// the matchmaking timeout was armed.
+//
+// Correct behaviour, the same outcome as the CurrentMatchID branch: only a
+// shared social lobby, for a member asking for a social lobby, is already
+// converged. Everything else takes the follow path.
+func TestIsFollowerAlreadyInLeaderMatch_CurrentMatchNotShared(t *testing.T) {
+	otherMatch := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	cases := []struct {
+		name       string
+		sharedMode evr.Symbol
+		requested  evr.Symbol
+		current    MatchID
+		want       bool
+	}{
+		{"nil current, shared social, requesting social", evr.ModeSocialPublic, evr.ModeSocialPublic, MatchID{}, true},
+		{"nil current, shared social, requesting arena", evr.ModeSocialPublic, evr.ModeArenaPublic, MatchID{}, false},
+		{"nil current, shared arena, requesting social", evr.ModeArenaPublic, evr.ModeSocialPublic, MatchID{}, false},
+		{"nil current, shared arena, requesting arena", evr.ModeArenaPublic, evr.ModeArenaPublic, MatchID{}, false},
+		{"other current, shared social, requesting social", evr.ModeSocialPublic, evr.ModeSocialPublic, otherMatch, true},
+		{"other current, shared social, requesting arena", evr.ModeSocialPublic, evr.ModeArenaPublic, otherMatch, false},
+		{"other current, shared arena, requesting social", evr.ModeArenaPublic, evr.ModeSocialPublic, otherMatch, false},
+		{"other current, shared arena, requesting arena", evr.ModeArenaPublic, evr.ModeArenaPublic, otherMatch, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newFollowTestEnv(t)
+			shared := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+			env.setLeaderMatch(shared)
+			env.setFollowerMatch(shared)
+
+			registry := newMockFollowMatchRegistry()
+			registry.SetMatch(shared, &MatchLabel{ID: shared, Mode: tc.sharedMode, Open: true, PlayerLimit: 12})
+			env.withMockNK(registry)
+
+			got := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), loggerForTest(t), env.session, env.lobbyGroup, tc.current, tc.requested)
+			if got != tc.want {
+				t.Errorf("isFollowerAlreadyInLeaderMatch(shared %s, requested %s, current %s) = %v, want %v",
+					tc.sharedMode.String(), tc.requested.String(), tc.current.String(), got, tc.want)
+			}
+		})
+	}
+}
+
+// #625 end to end: a member at the menu (nil CurrentMatchID) whom the tracker
+// still shows in the leader's social lobby, requesting echo_arena, must not
+// take lobbyFind's skip path.
+func TestLobbyFind_FollowerNilCurrentMatch_RequestingArena_DoesNotSkip(t *testing.T) {
+	logger, logs := followSkipObservedLogger()
+
+	tracker := newMockMatchmakingTracker()
+	mm, mmCleanup := createLightMatchmaker(t, loggerForTest(t))
+	defer mmCleanup()
+	pr := NewLocalPartyRegistry(loggerForTest(t), cfg, mm, tracker, testStreamManager{}, &DummyMessageRouter{}, "testnode")
+
+	groupName := "follow-skip-625"
+	groupID := uuid.Must(uuid.NewV4())
+	socialMatch := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	leaderSession := newTestSessionForParty(t, "leader", tracker, pr)
+	if _, _, err := JoinPartyGroup(leaderSession, groupName, socialMatch); err != nil {
+		t.Fatalf("leader JoinPartyGroup: %v", err)
+	}
+	followerSession := newTestSessionForParty(t, "follower", tracker, pr)
+
+	tracker.Track(context.Background(), leaderSession.id,
+		PresenceStream{Mode: StreamModeService, Subject: leaderSession.id, Label: StreamLabelMatchService},
+		leaderSession.userID, PresenceMeta{Status: socialMatch.String()})
+	tracker.Track(context.Background(), followerSession.id,
+		PresenceStream{Mode: StreamModeService, Subject: followerSession.id, Label: StreamLabelMatchService},
+		followerSession.userID, PresenceMeta{Status: socialMatch.String()})
+
+	registry := newMockFollowMatchRegistry()
+	registry.SetMatch(socialMatch, &MatchLabel{ID: socialMatch, Mode: evr.ModeSocialPublic, Open: true, PlayerLimit: 12})
+
+	pipeline := newFollowPollPipeline()
+	pipeline.node = "testnode"
+	pipeline.nk = &RuntimeGoNakamaModule{
+		logger:        loggerForTest(t),
+		matchRegistry: registry,
+		partyRegistry: pr,
+		tracker:       tracker,
+		metrics:       &testMetrics{},
+		node:          "testnode",
+	}
+
+	params := makeMatchmakeTestLobbyParams(followerSession.userID, groupID, evr.ModeArenaPublic, 2)
+	params.PartyGroupName = groupName
+	params.CurrentMatchID = MatchID{} // client reports no current match
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Past the skip, lobbyAuthorize fails on this test pipeline before any
+	// goroutine is started. Only whether the skip was taken matters here.
+	findErr := pipeline.lobbyFind(ctx, logger, followerSession, params)
+
+	if n := logs.FilterMessage("Follower already in leader's match, skipping follow path").Len(); n > 0 {
+		t.Errorf("lobbyFind took the follower skip path for a member with a nil CurrentMatchID REQUESTING %s "+
+			"(returned err=%v before the matchmaking timeout was armed); the requested mode must be checked on this path too",
+			params.Mode.String(), findErr)
+	}
+}
+
+// #624: the poll's convergence check trusted only the match label. With a
+// stale label that does not yet list the member, while the member's own
+// tracker presence already points at the leader's social lobby, the poll
+// joined the lobby the member is standing in (the da785b895 snap-back).
+//
+// Correct behaviour: the member's tracker presence in the leader's lobby is
+// convergence; zero join attempts.
+func TestPoll_StaleLabelOmitsMember_TrackerInLeaderLobby_NoSnapBack(t *testing.T) {
+	logger, logs := followSkipObservedLogger()
+
+	env := newFollowTestEnv(t)
+	socialLobby := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	env.setLeaderMatch(socialLobby)
+	env.setFollowerMatch(socialLobby)
+
+	// Stale label: lists the leader only.
+	registry := newMockFollowMatchRegistry()
+	registry.SetMatch(socialLobby, &MatchLabel{
+		ID:          socialLobby,
+		Mode:        evr.ModeSocialPublic,
+		Open:        true,
+		PlayerLimit: 12,
+		Players:     []PlayerInfo{{UserID: env.leaderUID.String(), Team: 0}},
+	})
+	env.withMockNK(registry)
+
+	env.params.Mode = evr.ModeArenaPublic
+	env.params.CurrentMatchID = socialLobby
+	env.pipeline.pollFollowInterval = 10 * time.Millisecond
+	env.pipeline.pollFollowMaxDuration = 500 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	var panicked any
+	func() {
+		defer func() { panicked = recover() }()
+		env.pipeline.pollFollowPartyLeader(ctx, logger, env.session, env.params, env.lobbyGroup)
+	}()
+
+	if n := followSkipJoinAttempts(logs); n != 0 {
+		t.Errorf("snap-back: %d lobbyJoin attempt(s) on the social lobby %s the member's tracker presence already names "+
+			"(stale label omitted the member; lobbyJoin panic=%v)", n, socialLobby.String(), panicked)
+	}
+	if panicked != nil {
+		t.Errorf("pollFollowPartyLeader panicked: %v", panicked)
+	}
+}

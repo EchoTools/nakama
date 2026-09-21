@@ -2154,10 +2154,13 @@ func TestPoll_NilNK_FollowerNotInLeaderMatch_LoopsUntilContextExpiry(t *testing.
 // ---------------------------------------------------------------------------
 
 // TestIsFollowerAlreadyInLeaderMatch_SameMatch verifies that when the follower
-// and leader are in the same match, isFollowerAlreadyInLeaderMatch returns true.
+// and leader are in the same social lobby and the follower asks for social,
+// isFollowerAlreadyInLeaderMatch returns true.
 // This is the fast path that prevents repeated "Joined party group" /
 // "Already in leader's match" churn when the client re-sends
-// LobbyFindSessionRequest on its normal message cycle.
+// LobbyFindSessionRequest on its normal message cycle. Other shared matches and
+// requested modes are covered by
+// TestIsFollowerAlreadyInLeaderMatch_CurrentMatchNotShared (#625).
 func TestIsFollowerAlreadyInLeaderMatch_SameMatch(t *testing.T) {
 	t.Parallel()
 
@@ -2168,7 +2171,11 @@ func TestIsFollowerAlreadyInLeaderMatch_SameMatch(t *testing.T) {
 	env.setLeaderMatch(matchID)
 	env.setFollowerMatch(matchID)
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{}, env.params.Mode)
+	registry := newMockFollowMatchRegistry()
+	registry.SetMatch(matchID, &MatchLabel{ID: matchID, Mode: evr.ModeSocialPublic, Open: true})
+	env.withMockNK(registry)
+
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{}, evr.ModeSocialPublic)
 	if !result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return true when both are in the same match")
 	}
