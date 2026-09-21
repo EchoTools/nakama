@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"testing"
 
@@ -31,7 +32,15 @@ type vrmlLedgerStoreNK struct {
 	// verifier's read of the ledger and its write.
 	beforeVerifierCommit func()
 
+	// beforeUnlinkStore, when set, runs inside a MultiUpdate that writes the
+	// ledger without a player summary (i.e. the unlink's store), before that
+	// write is applied. It models a write that lands between the unlink's
+	// read of the ledger and its write. It is cleared before it runs, so a
+	// hook that wants to fire again must re-arm itself.
+	beforeUnlinkStore func()
+
 	verifierCommits int
+	unlinkStores    int
 }
 
 func (m *vrmlLedgerStoreNK) StorageRead(ctx context.Context, reads []*runtime.StorageRead) ([]*api.StorageObject, error) {
@@ -48,16 +57,27 @@ func (m *vrmlLedgerStoreNK) StorageRead(ctx context.Context, reads []*runtime.St
 }
 
 func (m *vrmlLedgerStoreNK) MultiUpdate(ctx context.Context, accountUpdates []*runtime.AccountUpdate, storageWrites []*runtime.StorageWrite, storageDeletes []*runtime.StorageDelete, walletUpdates []*runtime.WalletUpdate, updateLedger bool) ([]*api.StorageObjectAck, []*runtime.WalletUpdateResult, error) {
-	isVerifierCommit := false
+	isVerifierCommit, writesLedger := false, false
 	for _, w := range storageWrites {
-		if w.Key == StorageKeyVRMLSummary {
+		switch w.Key {
+		case StorageKeyVRMLSummary:
 			isVerifierCommit = true
+		case StorageKeyVRMLVerificationLedger:
+			writesLedger = true
 		}
 	}
 	if isVerifierCommit && m.beforeVerifierCommit != nil {
 		hook := m.beforeVerifierCommit
 		m.beforeVerifierCommit = nil
 		hook()
+	}
+	if writesLedger && !isVerifierCommit {
+		m.unlinkStores++
+		if m.beforeUnlinkStore != nil {
+			hook := m.beforeUnlinkStore
+			m.beforeUnlinkStore = nil
+			hook()
+		}
 	}
 
 	for _, w := range storageWrites {
@@ -236,5 +256,88 @@ func TestVRMLLedger_CreatedObjectSurvivesVerification(t *testing.T) {
 	got := nk.storedLedgerUserIDs(t)
 	if len(got) != 2 || got[0] != created || got[1] != verified {
 		t.Fatalf("stored ledger users = %v, want [%s %s] — the entry created after the verifier's load must survive", got, created, verified)
+	}
+}
+
+// TestVRMLLedger_VerificationSurvivesUnlink is #631, the reverse of #604:
+// UnlinkVRMLAccount loads the ledger, removes the user's entry and writes the
+// ledger back. A verification that commits between that load and that write
+// must survive the unlink, and the unlinked user must still be removed.
+func TestVRMLLedger_VerificationSurvivesUnlink(t *testing.T) {
+	const unlinked, kept, verified = "user-a", "user-b", "user-c"
+
+	nk := &vrmlLedgerStoreNK{}
+	seedVRMLLedger(t, nk, unlinked, kept)
+
+	nk.beforeUnlinkStore = func() {
+		ledger, err := VRMLEntitlementLedgerLoad(context.Background(), nk)
+		if err != nil {
+			t.Fatalf("verifier VRMLEntitlementLedgerLoad: %v", err)
+		}
+		if err := recordVRMLVerification(context.Background(), nk, ledger, verified, "vrml-"+verified, "player-"+verified, []byte(`{}`), nil); err != nil {
+			t.Fatalf("verification pass failed: %v", err)
+		}
+	}
+
+	if err := UnlinkVRMLAccount(context.Background(), drainTestLogger(), nk, SystemUserID, "moderator", unlinked, "vrml-"+unlinked); err != nil {
+		t.Fatalf("UnlinkVRMLAccount: %v", err)
+	}
+
+	if nk.verifierCommits != 1 {
+		t.Fatalf("%d verifier commits applied, want exactly 1", nk.verifierCommits)
+	}
+	got := nk.storedLedgerUserIDs(t)
+	want := []string{kept, verified}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("stored ledger users = %v, want %v — the verification committed during the unlink must survive and the unlinked user %q must be removed", got, want, unlinked)
+	}
+}
+
+// TestVRMLLedger_UnlinkWithoutConcurrentWriter pins the uncontended unlink:
+// one ledger write, the user removed, everyone else kept.
+func TestVRMLLedger_UnlinkWithoutConcurrentWriter(t *testing.T) {
+	const unlinked, kept = "user-a", "user-b"
+
+	nk := &vrmlLedgerStoreNK{}
+	seedVRMLLedger(t, nk, unlinked, kept)
+
+	if err := UnlinkVRMLAccount(context.Background(), drainTestLogger(), nk, SystemUserID, "moderator", unlinked, "vrml-"+unlinked); err != nil {
+		t.Fatalf("UnlinkVRMLAccount: %v", err)
+	}
+	if nk.unlinkStores != 1 {
+		t.Fatalf("%d unlink ledger writes, want 1", nk.unlinkStores)
+	}
+	if got := nk.storedLedgerUserIDs(t); len(got) != 1 || got[0] != kept {
+		t.Fatalf("stored ledger users = %v, want [%s]", got, kept)
+	}
+}
+
+// TestVRMLLedger_UnlinkRetriesAreBounded: when every write the unlink makes
+// loses the version race, it gives up after vrmlLedgerCommitAttempts writes
+// and reports the rejection, as it reports any other ledger store failure.
+func TestVRMLLedger_UnlinkRetriesAreBounded(t *testing.T) {
+	const unlinked, kept = "user-a", "user-b"
+
+	nk := &vrmlLedgerStoreNK{}
+	seedVRMLLedger(t, nk, unlinked, kept)
+
+	// Another writer replaces the ledger (same contents) before every write
+	// the unlink makes.
+	var interfere func()
+	interfere = func() {
+		nk.ledgerVersion++
+		nk.beforeUnlinkStore = interfere
+	}
+	nk.beforeUnlinkStore = interfere
+
+	err := UnlinkVRMLAccount(context.Background(), drainTestLogger(), nk, SystemUserID, "moderator", unlinked, "vrml-"+unlinked)
+	if !errors.Is(err, runtime.ErrStorageRejectedVersion) {
+		t.Fatalf("UnlinkVRMLAccount error = %v, want it to wrap runtime.ErrStorageRejectedVersion", err)
+	}
+	if nk.unlinkStores != vrmlLedgerCommitAttempts {
+		t.Fatalf("%d unlink ledger writes, want %d", nk.unlinkStores, vrmlLedgerCommitAttempts)
+	}
+	if got := nk.storedLedgerUserIDs(t); len(got) != 2 || got[0] != unlinked || got[1] != kept {
+		t.Fatalf("stored ledger users = %v, want the ledger untouched", got)
 	}
 }
