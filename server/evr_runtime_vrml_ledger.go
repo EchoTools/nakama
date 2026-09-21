@@ -18,10 +18,11 @@ type VRMLEntitlementLedger struct {
 	Entries []*VRMLEntitlementLedgerEntry `json:"entries"`
 
 	// version is the storage version this copy was read at, or "*" if the
-	// object did not exist (create-only). commitVRMLVerification writes with
-	// it, so a verifier holding a copy that another writer has since replaced
-	// or created is rejected instead of overwriting that write.
-	// VRMLEntitlementLedgerStore ignores it.
+	// object did not exist (create-only). commitVRMLVerification and
+	// VRMLEntitlementLedgerStore write with it, so a writer holding a copy
+	// that another writer has since replaced or created is rejected instead
+	// of overwriting that write. A ledger built in memory rather than loaded
+	// has "", which writes unconditionally.
 	version string
 }
 
@@ -87,11 +88,16 @@ func vrmlEntitlementLedgerWriteOp(ledger *VRMLEntitlementLedger) (*runtime.Stora
 // carry account updates, deletes and wallet updates, so a caller that later
 // needs to widen the atomic unit does not have to change shape. The VRML
 // verifier has already done exactly that — see commitVRMLVerification.
+//
+// The write is made at ledger.version, so a copy another writer has replaced
+// since it was loaded is rejected with runtime.ErrStorageRejectedVersion
+// rather than overwriting that write.
 func VRMLEntitlementLedgerStore(ctx context.Context, nk runtime.NakamaModule, ledger *VRMLEntitlementLedger) error {
 	op, err := vrmlEntitlementLedgerWriteOp(ledger)
 	if err != nil {
 		return err
 	}
+	op.Version = ledger.version
 
 	if _, _, err := nk.MultiUpdate(ctx, nil, []*runtime.StorageWrite{op}, nil, nil, false); err != nil {
 		return err

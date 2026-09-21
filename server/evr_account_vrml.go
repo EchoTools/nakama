@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -84,21 +85,8 @@ func UnlinkVRMLAccount(ctx context.Context, logger runtime.Logger, nk runtime.Na
 	}
 
 	// 3. Remove the user's entry from the system EntitlementLedger.
-	ledger, err := VRMLEntitlementLedgerLoad(ctx, nk)
-	if err != nil {
-		return fmt.Errorf("failed to load entitlement ledger: %w", err)
-	}
-	filteredEntries := ledger.Entries[:0]
-	for _, e := range ledger.Entries {
-		if e.UserID != userID {
-			filteredEntries = append(filteredEntries, e)
-		}
-	}
-	if len(filteredEntries) != len(ledger.Entries) {
-		ledger.Entries = filteredEntries
-		if err := VRMLEntitlementLedgerStore(ctx, nk, ledger); err != nil {
-			return fmt.Errorf("failed to store entitlement ledger: %w", err)
-		}
+	if err := removeVRMLLedgerEntry(ctx, nk, userID); err != nil {
+		return err
 	}
 
 	// 4. Remove the vrml: device link.
@@ -114,4 +102,35 @@ func UnlinkVRMLAccount(ctx context.Context, logger runtime.Logger, nk runtime.Na
 	}).Info("unlinked VRML account")
 
 	return nil
+}
+
+// removeVRMLLedgerEntry removes userID's entries from the system
+// EntitlementLedger. The ledger is written at the version it was loaded at; if
+// another writer (the VRML verifier) has committed since, the write is rejected,
+// and the ledger is re-read and the removal re-applied on top of that write, up
+// to vrmlLedgerCommitAttempts writes in all.
+func removeVRMLLedgerEntry(ctx context.Context, nk runtime.NakamaModule, userID string) error {
+	for attempt := 1; ; attempt++ {
+		ledger, err := VRMLEntitlementLedgerLoad(ctx, nk)
+		if err != nil {
+			return fmt.Errorf("failed to load entitlement ledger: %w", err)
+		}
+		filteredEntries := ledger.Entries[:0]
+		for _, e := range ledger.Entries {
+			if e.UserID != userID {
+				filteredEntries = append(filteredEntries, e)
+			}
+		}
+		if len(filteredEntries) == len(ledger.Entries) {
+			return nil
+		}
+		ledger.Entries = filteredEntries
+		err = VRMLEntitlementLedgerStore(ctx, nk, ledger)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, runtime.ErrStorageRejectedVersion) || attempt == vrmlLedgerCommitAttempts {
+			return fmt.Errorf("failed to store entitlement ledger: %w", err)
+		}
+	}
 }
