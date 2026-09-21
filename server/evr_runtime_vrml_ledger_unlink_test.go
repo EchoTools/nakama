@@ -206,3 +206,35 @@ func TestVRMLLedger_UnlinkSurvivesVerification(t *testing.T) {
 		})
 	}
 }
+
+// TestVRMLLedger_CreatedObjectSurvivesVerification: when the ledger did not
+// exist at load, the verifier's first commit must only create it. If another
+// writer created the ledger between that load and the commit, the created
+// content must survive; an unconditional first write overwrites it, which is
+// the #604 lost update again.
+func TestVRMLLedger_CreatedObjectSurvivesVerification(t *testing.T) {
+	const created, verified = "user-x", "user-c"
+
+	nk := &vrmlLedgerStoreNK{}
+	ledger, err := VRMLEntitlementLedgerLoad(context.Background(), nk)
+	if err != nil {
+		t.Fatalf("VRMLEntitlementLedgerLoad: %v", err)
+	}
+	if len(ledger.Entries) != 0 {
+		t.Fatalf("loaded %d entries from an absent ledger, want 0", len(ledger.Entries))
+	}
+
+	nk.beforeVerifierCommit = func() { seedVRMLLedger(t, nk, created) }
+
+	if err := recordVRMLVerification(context.Background(), nk, ledger, verified, "vrml-"+verified, "player-"+verified, []byte(`{}`), nil); err != nil {
+		t.Fatalf("verification pass failed: %v", err)
+	}
+
+	if nk.verifierCommits != 1 {
+		t.Fatalf("%d verifier commits applied, want exactly 1", nk.verifierCommits)
+	}
+	got := nk.storedLedgerUserIDs(t)
+	if len(got) != 2 || got[0] != created || got[1] != verified {
+		t.Fatalf("stored ledger users = %v, want [%s %s] — the entry created after the verifier's load must survive", got, created, verified)
+	}
+}

@@ -17,10 +17,11 @@ type VRMLEntitlementLedgerEntry struct {
 type VRMLEntitlementLedger struct {
 	Entries []*VRMLEntitlementLedgerEntry `json:"entries"`
 
-	// version is the storage version this copy was read at ("" if the object
-	// did not exist). commitVRMLVerification writes with it, so a verifier
-	// holding a copy that another writer has since replaced is rejected
-	// instead of overwriting that write. VRMLEntitlementLedgerStore ignores it.
+	// version is the storage version this copy was read at, or "*" if the
+	// object did not exist (create-only). commitVRMLVerification writes with
+	// it, so a verifier holding a copy that another writer has since replaced
+	// or created is rejected instead of overwriting that write.
+	// VRMLEntitlementLedgerStore ignores it.
 	version string
 }
 
@@ -42,6 +43,7 @@ func VRMLEntitlementLedgerLoad(ctx context.Context, nk runtime.NakamaModule) (*V
 	}
 
 	if len(objs) == 0 {
+		ledger.version = "*"
 		return &ledger, nil
 	}
 
