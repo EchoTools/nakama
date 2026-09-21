@@ -1738,13 +1738,16 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 	// The member's tracker entry is cleared only at session close. If, when
 	// the poll starts, it names a match the client does not report as current,
 	// it is stale (#625) and must not stand alone as evidence of convergence
-	// when the match label cannot be read. A placement during the poll
-	// rewrites the entry, so it is not affected. The nil-NK path (no registry
-	// at all) is left as it was.
-	var staleMemberMatchID MatchID
+	// when the match label cannot be read. The stale entry is identified by
+	// the presence record, not the match ID: a placement during the poll
+	// rewrites the entry (tracker.Update on match accept stores a new
+	// *Presence, so GetLocalBySessionIDStreamUserID then returns a different
+	// *PresenceMeta), even when it names the same match. The nil-NK path (no
+	// registry at all) is left as it was.
+	var staleMemberPresence *PresenceMeta
 	if pr := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, memberStream, session.userID); pr != nil {
-		if mid := MatchIDFromStringOrNil(pr.GetStatus()); mid != params.CurrentMatchID {
-			staleMemberMatchID = mid
+		if MatchIDFromStringOrNil(pr.GetStatus()) != params.CurrentMatchID {
+			staleMemberPresence = pr
 		}
 	}
 
@@ -1800,9 +1803,9 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 			if ctx.Err() != nil {
 				return false
 			}
-			// The label is unreadable, so the tracker alone decides: a stale
-			// entry is not convergence.
-			if followerMatchID == staleMemberMatchID {
+			// The label is unreadable, so the tracker alone decides: the
+			// unchanged stale entry is not convergence.
+			if staleMemberPresence != nil && memberPresence == staleMemberPresence {
 				return false
 			}
 		}

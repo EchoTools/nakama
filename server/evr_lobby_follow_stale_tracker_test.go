@@ -195,6 +195,43 @@ func TestCurrentSocialLobby_FollowStaleTracker_ClientNotInIt_NotNoop(t *testing.
 	}
 }
 
+// A stale entry naming M at poll start must not hide a real placement into
+// the same M during the poll. The client reports lobby X; TryFollow's join to
+// M failed (M full), so the member polls. The member is then placed into M
+// (match accept rewrites the entry with tracker.Update,
+// evr_pipeline_lobby.go:63) and M's label read errors. The poll must report
+// convergence, not wait out its budget and release the member to solo
+// matchmaking while it sits in M (a party split).
+func TestPoll_StaleEntryRewrittenToSameMatch_LabelErrors_Converges(t *testing.T) {
+	x := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	env, _, m := staleTrackerEnv(t, nil, evr.ModeSocialPublic, x) // M's label read errors
+	env.pipeline.pollFollowInterval = 20 * time.Millisecond
+	env.pipeline.pollFollowMaxDuration = 2 * time.Second
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	placed := make(chan struct{})
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		env.tracker.Update(context.Background(), env.followerSID,
+			PresenceStream{Mode: StreamModeService, Subject: env.followerSID, Label: StreamLabelMatchService},
+			env.followerUID, PresenceMeta{Status: m.String()})
+		close(placed)
+	}()
+
+	start := time.Now()
+	result := env.pipeline.pollFollowPartyLeader(ctx, loggerForTest(t), env.session, env.params, env.lobbyGroup)
+	elapsed := time.Since(start)
+	<-placed
+
+	if !result {
+		t.Errorf("poll released the member after %v (budget %v) although it was placed into the leader's match %s during the poll; "+
+			"the stale-entry check matched the rewritten entry by match ID alone (party split)",
+			elapsed, env.pipeline.pollFollowMaxDuration, m.String())
+	}
+}
+
 // The client reports M as current and the tracker agrees: every site still
 // treats the member as there, and nothing attempts a join (#624's guard).
 func TestFollow_ClientReportsLeaderSocial_TrackerAgrees_NoJoin(t *testing.T) {
