@@ -69,7 +69,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		// prevents repeated "Joined party group" / "Already in
 		// leader's match" churn when the client re-sends
 		// LobbyFindSessionRequest on its normal message cycle.
-		if !isLeader && p.isFollowerAlreadyInLeaderMatch(ctx, logger, session, lobbyGroup, lobbyParams.CurrentMatchID) {
+		if !isLeader && p.isFollowerAlreadyInLeaderMatch(ctx, logger, session, lobbyGroup, lobbyParams.CurrentMatchID, lobbyParams.Mode) {
 			logger.Debug("Follower already in leader's match, skipping follow path",
 				zap.String("current_match_id", lobbyParams.CurrentMatchID.String()),
 				zap.String("leader_sid", lobbyGroup.GetLeader().GetSessionId()))
@@ -1268,8 +1268,11 @@ func (p *EvrPipeline) intendedSocialTargetMatchID(session *sessionWS, lobbyParam
 // LobbyFindSessionRequest on its normal message cycle.
 //
 // Returns false when the leader cannot be found, either player is not in a
-// match, or their match IDs differ.
-func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyGroup *LobbyGroup, currentMatchID MatchID) bool {
+// match, or their match IDs differ. When the shared match is the one the
+// client reports as current, it also returns false if the client is leaving
+// it, or if it is a social lobby and requestedMode is not social (the member
+// is queueing from the lobby, not staying in it).
+func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyGroup *LobbyGroup, currentMatchID MatchID, requestedMode evr.Symbol) bool {
 	leader := lobbyGroup.GetLeader()
 	if leader == nil || leader.SessionId == session.id.String() {
 		return false
@@ -1310,21 +1313,45 @@ func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(ctx context.Context, logger
 	if !currentMatchID.IsNil() && followerMatchID == currentMatchID {
 		// Both players are in the same match that the client reports as
 		// "current." Distinguish social (staying) from arena (leaving).
-		if p.nk != nil {
-			label, err := MatchLabelByID(ctx, p.nk, followerMatchID)
-			if err == nil && label != nil && label.IsSocial() {
-				logger.Debug("Follower and leader share a social lobby, already converged",
-					zap.String("shared_match_id", followerMatchID.String()))
-				return true
-			}
+		if p.isLeavingSharedMatch(ctx, followerMatchID, currentMatchID) {
+			logger.Debug("Follower and leader share the match being left, not skipping",
+				zap.String("shared_match_id", followerMatchID.String()),
+				zap.String("current_match_id", currentMatchID.String()),
+				zap.String("leader_sid", leader.SessionId))
+			return false
 		}
-		logger.Debug("Follower and leader share the match being left, not skipping",
-			zap.String("shared_match_id", followerMatchID.String()),
-			zap.String("current_match_id", currentMatchID.String()),
-			zap.String("leader_sid", leader.SessionId))
-		return false
+		// A shared social lobby is only "already there" for a member asking
+		// for a social lobby. A member queueing for another mode from it must
+		// take the follow path (matchmaking stream, timeout, late-arrival).
+		if !shouldFollowerFindOrCreateSocial(requestedMode) {
+			logger.Debug("Follower and leader share a social lobby, but follower requested another mode, not skipping",
+				zap.String("shared_match_id", followerMatchID.String()),
+				zap.String("requested_mode", requestedMode.String()))
+			return false
+		}
+		logger.Debug("Follower and leader share a social lobby, already converged",
+			zap.String("shared_match_id", followerMatchID.String()))
+		return true
 	}
 
+	return true
+}
+
+// isLeavingSharedMatch reports whether the client is leaving sharedMatchID, a
+// match the tracker shows it in with the party leader. It is leaving when it
+// reports that match as its current one and the match is not a social lobby:
+// social lobbies persist (players stay while queueing), arena lobbies are
+// dying. The tracker entry for a match being left is stale.
+func (p *EvrPipeline) isLeavingSharedMatch(ctx context.Context, sharedMatchID, currentMatchID MatchID) bool {
+	if currentMatchID.IsNil() || sharedMatchID != currentMatchID {
+		return false
+	}
+	if p.nk != nil {
+		label, err := MatchLabelByID(ctx, p.nk, sharedMatchID)
+		if err == nil && label != nil && label.IsSocial() {
+			return false
+		}
+	}
 	return true
 }
 
@@ -1540,8 +1567,15 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 	if memberPresence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, memberStream, session.userID); memberPresence != nil {
 		memberMatchID := MatchIDFromStringOrNil(memberPresence.GetStatus())
 		if memberMatchID == leaderMatchID {
-			logger.Debug("Already in leader's match")
-			return true
+			// The client reporting this match as current means it is leaving
+			// it, so the member's tracker entry is stale. Fall through and
+			// validate the leader's match instead of stopping here.
+			if !p.isLeavingSharedMatch(ctx, memberMatchID, params.CurrentMatchID) {
+				logger.Debug("Already in leader's match")
+				return true
+			}
+			logger.Debug("Member shares the leader's match but is leaving it, not treating as already in leader's match",
+				zap.String("shared_match_id", memberMatchID.String()))
 		}
 	}
 
@@ -1690,19 +1724,10 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 			return false
 		}
 
-		if !params.CurrentMatchID.IsNil() && leaderMatchID == params.CurrentMatchID {
-			// Both players share the match the client reports as "current."
-			// Social lobbies persist (staying); arena lobbies are dying (leaving).
-			isSocial := false
-			if p.nk != nil {
-				label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
-				if err == nil && label != nil && label.IsSocial() {
-					isSocial = true
-				}
-			}
-			if !isSocial {
-				return false
-			}
+		// The leader's match is the one the client reports as "current."
+		// Social lobbies persist (staying); arena lobbies are dying (leaving).
+		if p.isLeavingSharedMatch(ctx, leaderMatchID, params.CurrentMatchID) {
+			return false
 		}
 
 		memberStream := PresenceStream{
