@@ -349,12 +349,12 @@ func (e *EVRProfile) SetGroupIGNData(groupID string, groupIGN GroupInGameName) {
 
 func (a EVRProfile) GetGroupIGN(groupID string) string {
 	if a.InGameNames != nil {
-		if dn := a.InGameNames[groupID].DisplayName; dn != "" {
+		if dn := sanitizeDisplayName(a.InGameNames[groupID].DisplayName); dn != "" {
 			// Use the group display name, if it exists
-			return sanitizeDisplayName(dn)
-		} else if dn := a.InGameNames[a.ActiveGroupID].DisplayName; dn != "" {
+			return dn
+		} else if dn := sanitizeDisplayName(a.InGameNames[a.ActiveGroupID].DisplayName); dn != "" {
 			// Otherwise, usethe active group display name
-			return sanitizeDisplayName(dn)
+			return dn
 		} else {
 			// Fallback to the username
 			if a.account != nil && a.account.User != nil && a.account.User.Username != "" {

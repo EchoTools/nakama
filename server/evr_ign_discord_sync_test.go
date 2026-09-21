@@ -195,18 +195,20 @@ func TestShouldRefreshIGNFromDiscord(t *testing.T) {
 			want:          true,
 		},
 		{
-			// Characterization, NOT endorsement. #602 fixes the predicate, so
-			// this record is no longer "protected" — but the second clause
-			// (`ign.DisplayName == ""`) still tests the raw string, and it is
-			// byte-identical at v3.27.2-evr.322
-			// (2b5f45bbe:server/evr_pipeline_login.go:926). A non-active group
-			// holding an unrenderable name is stranded exactly as it was before
-			// #586: pre-existing, not a regression, so not fixed here. See
-			// TestGetGroupIGNStrandsAnUnrenderableNameInANonActiveGroup.
-			name:          "override whose name sanitizes to empty is still not refreshed in a non-active group",
+			// EchoTools/nakama#609: the emptiness clause asks the sanitized
+			// name, so a non-active group holding an unrenderable override is
+			// refreshed rather than stranded. See
+			// TestGetGroupIGNDoesNotStrandAnUnrenderableNameInANonActiveGroup.
+			name:          "override whose name sanitizes to empty refreshes in a non-active group",
 			ign:           GroupInGameName{DisplayName: "!!!", IsOverride: true},
 			isActiveGroup: false,
-			want:          false,
+			want:          true,
+		},
+		{
+			name:          "plain name that sanitizes to empty refreshes in a non-active group",
+			ign:           GroupInGameName{DisplayName: "12345"},
+			isActiveGroup: false,
+			want:          true,
 		},
 		{
 			// Still shielded — a locked name is frozen whether or not it

@@ -2,8 +2,10 @@ package server
 
 import (
 	"testing"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/heroiclabs/nakama-common/api"
 )
 
 // EchoTools/nakama#602, the regression half.
@@ -90,25 +92,24 @@ func TestIGNOverrideDoesNotStrandEmptyDisplayName(t *testing.T) {
 	}
 }
 
-// TestGetGroupIGNStrandsAnUnrenderableNameInANonActiveGroup is a
-// CHARACTERIZATION test. It asserts what the code does today, not what it ought
-// to do, and it must not be read as endorsement.
+// TestGetGroupIGNDoesNotStrandAnUnrenderableNameInANonActiveGroup is
+// EchoTools/nakama#609, part 1. It replaces the #608 characterization test
+// (TestGetGroupIGNStrandsAnUnrenderableNameInANonActiveGroup) that pinned the
+// strand.
 //
-// The #602 fix restores the rescue for the ACTIVE group only, because that is
-// the whole of the regression: shouldRefreshIGNFromDiscord's second clause
-// (`isActiveGroup || ign.DisplayName == ""`) and GetGroupIGN's first rung both
-// test the raw stored string, and both are byte-identical at
-// v3.27.2-evr.322 — `2b5f45bbe:server/evr_pipeline_login.go:926` and
-// `2b5f45bbe:server/evr_account.go:276-296`. So a NON-active group holding a
-// name that sanitizes to empty is stranded exactly as it was before #586:
-// never refreshed by any login, and GetGroupIGN short-circuits on the
-// raw-non-empty value and returns "" rather than falling through to the active
-// group or the username.
+// shouldRefreshIGNFromDiscord's second clause (`isActiveGroup ||
+// ign.DisplayName == ""`) and GetGroupIGN's rungs tested the raw stored string,
+// byte-identical at v3.27.2-evr.322. So a NON-active group holding a name that
+// sanitizes to empty was never refreshed by any login, and GetGroupIGN
+// short-circuited on the raw-non-empty value and returned "" rather than
+// falling through to the active group or the username — a live feed for the
+// evr_lobby_joinentrant.go:746 write loop below.
 //
-// That is a real defect and a live feed for the evr_lobby_joinentrant.go:746
-// write loop below, but it is pre-existing, not a regression, so it is pinned
-// here and filed rather than fixed in a regression-only release.
-func TestGetGroupIGNStrandsAnUnrenderableNameInANonActiveGroup(t *testing.T) {
+// Stored names are not always sanitized on write: `?ign=` (the
+// userDisplayNameOverride branch of the login IGN loop) and the /ign slash
+// command (server/evr_discord_appbot.go, the "ign" handler) both store the
+// value verbatim, so this record is reachable.
+func TestGetGroupIGNDoesNotStrandAnUnrenderableNameInANonActiveGroup(t *testing.T) {
 	t.Parallel()
 
 	const (
@@ -126,24 +127,103 @@ func TestGetGroupIGNStrandsAnUnrenderableNameInANonActiveGroup(t *testing.T) {
 
 	rec := profile.GetGroupIGNData(otherGroupID)
 
-	// The predicate is fixed, so the record is no longer "protected"...
 	if rec.IsProtectedFromDiscordSync() {
 		t.Fatalf("IsProtectedFromDiscordSync(%+v) = true; the #602 fix has regressed", rec)
 	}
-	// ...but the refresh still will not run for a non-active group, because the
-	// emptiness test there is on the raw string. Unchanged since .322.
-	if shouldRefreshIGNFromDiscord(rec, false) {
-		t.Errorf("shouldRefreshIGNFromDiscord(%+v, isActiveGroup=false) = true; behaviour changed — if this is deliberate, the strand below is fixed and this test should go", rec)
+	// A name that renders as nothing is no name, so a non-active group is
+	// refreshed exactly as it would be with no name stored at all.
+	if !shouldRefreshIGNFromDiscord(rec, false) {
+		t.Errorf("shouldRefreshIGNFromDiscord(%+v, isActiveGroup=false) = false, want true: a name that sanitizes to %q must be refreshed", rec, sanitizeDisplayName(rec.DisplayName))
 	}
-	// ...and so it renders as nothing, rather than borrowing the active group's
-	// name the fallback chain exists to supply.
-	if got := profile.GetGroupIGN(otherGroupID); got != "" {
-		t.Errorf("GetGroupIGN(otherGroup) = %q, want %q (characterization); the pre-existing strand is fixed and this test should go", got, "")
+	// Until it is, GetGroupIGN falls through to the active group's name.
+	if got := profile.GetGroupIGN(otherGroupID); got != "Kestrel" {
+		t.Errorf("GetGroupIGN(otherGroup) = %q, want %q (the active group's name)", got, "Kestrel")
 	}
-
-	// The active group, which #602 does fix, is unaffected.
 	if got := profile.GetGroupIGN(activeGroupID); got != "Kestrel" {
 		t.Errorf("GetGroupIGN(activeGroup) = %q, want %q", got, "Kestrel")
+	}
+
+	// The same holds one rung down: an unrenderable active-group name falls
+	// through to the username.
+	bothUnrenderable := &EVRProfile{
+		account:       &api.Account{User: &api.User{Username: "kestrel"}},
+		ActiveGroupID: activeGroupID,
+		InGameNames: map[string]GroupInGameName{
+			activeGroupID: ignRecordThatSanitizesEmpty(activeGroupID),
+			otherGroupID:  ignRecordThatSanitizesEmpty(otherGroupID),
+		},
+	}
+	if got := bothUnrenderable.GetGroupIGN(otherGroupID); got != "kestrel" {
+		t.Errorf("GetGroupIGN(otherGroup) with an unrenderable active-group name = %q, want %q (the username)", got, "kestrel")
+	}
+}
+
+// TestIGNFromDisplayNameHistoryFillsAnUnrenderableName is the #609 defect in the
+// login loop's display-name-history fallback: it tested the raw stored string,
+// so a stored "12345" was never defaulted to the history's name. When the
+// Discord lookup that follows then fails (UnknownMember or a transient error),
+// "12345" is what persists.
+func TestIGNFromDisplayNameHistoryFillsAnUnrenderableName(t *testing.T) {
+	t.Parallel()
+
+	const groupID = "1c4c1b5d-6f9e-4b0a-9c3a-2f1d0e8a7b6c"
+
+	history := &DisplayNameHistory{
+		Histories: map[string]map[string]time.Time{
+			groupID: {"Kestrel": time.Unix(1_700_000_000, 0)},
+		},
+	}
+
+	for _, rec := range []GroupInGameName{
+		ignRecordThatSanitizesEmpty(groupID),
+		{GroupID: groupID, DisplayName: "12345"},
+		{GroupID: groupID},
+	} {
+		got := ignFromDisplayNameHistory(rec, groupID, history)
+		if got.DisplayName != "Kestrel" || got.IsOverride {
+			t.Errorf("ignFromDisplayNameHistory(%+v) = %+v, want DisplayName %q, IsOverride false", rec, got, "Kestrel")
+		}
+	}
+
+	// A name that renders is kept; the history is only a default.
+	rec := GroupInGameName{GroupID: groupID, DisplayName: "Falcon", IsOverride: true}
+	if got := ignFromDisplayNameHistory(rec, groupID, history); got != rec {
+		t.Errorf("ignFromDisplayNameHistory(%+v) = %+v, want it unchanged", rec, got)
+	}
+}
+
+// TestIGNFromDiscordClearsOverride is EchoTools/nakama#609, part 2.
+//
+// The login-time rescue replaces DisplayName with the Discord nickname. The
+// records it rescues include overrides that render as nothing, which
+// IsProtectedFromDiscordSync does not shield. Leaving IsOverride set and
+// persisting it promotes a Discord-derived name to an override: on the next
+// login the name renders, IsProtectedFromDiscordSync returns true, and the
+// player's later Discord nickname changes are ignored for that group. The
+// sibling Discord write, syncMembersIGN, already stores IsOverride: false
+// through SetGroupDisplayName.
+func TestIGNFromDiscordClearsOverride(t *testing.T) {
+	t.Parallel()
+
+	const groupID = "1c4c1b5d-6f9e-4b0a-9c3a-2f1d0e8a7b6c"
+
+	for _, rec := range []GroupInGameName{
+		ignRecordThatSanitizesEmpty(groupID),
+		{GroupID: groupID, IsOverride: true},
+	} {
+		got := ignFromDiscord(rec, "Kestrel")
+		if got.DisplayName != "Kestrel" {
+			t.Errorf("ignFromDiscord(%+v).DisplayName = %q, want %q", rec, got.DisplayName, "Kestrel")
+		}
+		if got.IsOverride {
+			t.Errorf("ignFromDiscord(%+v).IsOverride = true, want false: the name came from Discord", rec)
+		}
+		if got.IsProtectedFromDiscordSync() {
+			t.Errorf("ignFromDiscord(%+v) = %+v is protected from Discord sync; later nickname changes would be ignored", rec, got)
+		}
+		if got.GroupID != rec.GroupID || got.IsLocked != rec.IsLocked {
+			t.Errorf("ignFromDiscord(%+v) = %+v; only DisplayName and IsOverride may change", rec, got)
+		}
 	}
 }
 
