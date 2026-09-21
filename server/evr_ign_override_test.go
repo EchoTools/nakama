@@ -2,6 +2,7 @@ package server
 
 import (
 	"testing"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/heroiclabs/nakama-common/api"
@@ -154,6 +155,40 @@ func TestGetGroupIGNDoesNotStrandAnUnrenderableNameInANonActiveGroup(t *testing.
 	}
 	if got := bothUnrenderable.GetGroupIGN(otherGroupID); got != "kestrel" {
 		t.Errorf("GetGroupIGN(otherGroup) with an unrenderable active-group name = %q, want %q (the username)", got, "kestrel")
+	}
+}
+
+// TestIGNFromDisplayNameHistoryFillsAnUnrenderableName is the #609 defect in the
+// login loop's display-name-history fallback: it tested the raw stored string,
+// so a stored "12345" was never defaulted to the history's name. When the
+// Discord lookup that follows then fails (UnknownMember or a transient error),
+// "12345" is what persists.
+func TestIGNFromDisplayNameHistoryFillsAnUnrenderableName(t *testing.T) {
+	t.Parallel()
+
+	const groupID = "1c4c1b5d-6f9e-4b0a-9c3a-2f1d0e8a7b6c"
+
+	history := &DisplayNameHistory{
+		Histories: map[string]map[string]time.Time{
+			groupID: {"Kestrel": time.Unix(1_700_000_000, 0)},
+		},
+	}
+
+	for _, rec := range []GroupInGameName{
+		ignRecordThatSanitizesEmpty(groupID),
+		{GroupID: groupID, DisplayName: "12345"},
+		{GroupID: groupID},
+	} {
+		got := ignFromDisplayNameHistory(rec, groupID, history)
+		if got.DisplayName != "Kestrel" || got.IsOverride {
+			t.Errorf("ignFromDisplayNameHistory(%+v) = %+v, want DisplayName %q, IsOverride false", rec, got, "Kestrel")
+		}
+	}
+
+	// A name that renders is kept; the history is only a default.
+	rec := GroupInGameName{GroupID: groupID, DisplayName: "Falcon", IsOverride: true}
+	if got := ignFromDisplayNameHistory(rec, groupID, history); got != rec {
+		t.Errorf("ignFromDisplayNameHistory(%+v) = %+v, want it unchanged", rec, got)
 	}
 }
 

@@ -813,6 +813,22 @@ func ignFromDiscord(ign GroupInGameName, memberNick string) GroupInGameName {
 	return ign
 }
 
+// ignFromDisplayNameHistory returns ign defaulted to the latest name the display
+// name history holds for groupID, when ign has no name that renders. It is the login loop's
+// fallback ahead of the Discord refresh, extracted so it can be tested directly.
+func ignFromDisplayNameHistory(ign GroupInGameName, groupID string, history *DisplayNameHistory) GroupInGameName {
+	if sanitizeDisplayName(ign.DisplayName) == "" {
+		// Use the latest in-game name from the display name history.
+		if dn, _ := history.LatestGroup(groupID); dn != "" {
+			// If the display name history has a name for this group, default to it.
+			ign.GroupID = groupID
+			ign.DisplayName = sanitizeDisplayName(dn)
+			ign.IsOverride = false
+		}
+	}
+	return ign
+}
+
 func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) error {
 	var err error
 	serviceSettings := ServiceSettings()
@@ -950,15 +966,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 			groupIGN.IsOverride = true
 		}
 
-		if groupIGN.DisplayName == "" {
-			// Use the latest in-game name from the display name history.
-			if dn, _ := displayNameHistory.LatestGroup(groupID); dn != "" {
-				// If the display name history has a name for this group, default to it.
-				groupIGN.GroupID = groupID
-				groupIGN.DisplayName = sanitizeDisplayName(dn)
-				groupIGN.IsOverride = false
-			}
-		}
+		groupIGN = ignFromDisplayNameHistory(groupIGN, groupID, displayNameHistory)
 
 		if shouldRefreshIGNFromDiscord(groupIGN, groupID == params.profile.ActiveGroupID) {
 			// Update the in-game name for the guild.
