@@ -207,6 +207,7 @@ func TestPoll_StaleEntryRewrittenToSameMatch_LabelErrors_Converges(t *testing.T)
 	env, _, m := staleTrackerEnv(t, nil, evr.ModeSocialPublic, x) // M's label read errors
 	env.pipeline.pollFollowInterval = 20 * time.Millisecond
 	env.pipeline.pollFollowMaxDuration = 2 * time.Second
+	env.params.captureMemberRecordAtFind(env.session) // pin the find-time record before any goroutine runs (#625)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

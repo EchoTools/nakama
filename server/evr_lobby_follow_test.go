@@ -639,6 +639,7 @@ func TestPoll_LeaderStillMatchmaking_ThenSettles_FollowerInMatch_ReturnsTrue(t *
 	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	env.setLeaderMatch(matchB)
 	env.setLeaderMatchmaking()
+	env.params.captureMemberRecordAtFind(env.session) // pin the find-time record before any goroutine runs (#625)
 
 	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(15*time.Second))
 	defer cancel()
@@ -727,6 +728,7 @@ func TestPoll_LeaderSwitchesMatches_FollowerInNewMatch_ReturnsTrue(t *testing.T)
 	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	matchC := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	env.setLeaderMatch(matchB)
+	env.params.captureMemberRecordAtFind(env.session) // pin the find-time record before any goroutine runs (#625)
 
 	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(20*time.Second))
 	defer cancel()
@@ -815,6 +817,7 @@ func TestPoll_LeaderChangesPartway_NewLeaderInMatch_ReturnsTrue(t *testing.T) {
 	newLeaderUID := uuid.Must(uuid.NewV4())
 
 	env.setLeaderMatchmaking()
+	env.params.captureMemberRecordAtFind(env.session) // pin the find-time record before any goroutine runs (#625)
 
 	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(15*time.Second))
 	defer cancel()
@@ -1922,6 +1925,8 @@ func TestPoll_RegistryError_FallsBackToTracker(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(10*time.Second))
 	defer cancel()
+
+	env.params.captureMemberRecordAtFind(env.session) // pin the find-time record before any goroutine runs (#625)
 
 	// The member is placed into Match B during the poll. An entry that already
 	// named B when the poll started, with the client not reporting B as
