@@ -179,3 +179,58 @@ func TestStaleLeaderSession_AfterOldSessionCloses_LeaderIsLive(t *testing.T) {
 			leaderSID, f.l1.id, f.l2.id, f.member.id)
 	}
 }
+
+// The leader slot must never outlive its session, whatever path left it
+// orphaned. Drop the leader's session from the roster without going through
+// PartyHandler.Leave, then have a DIFFERENT user join (so Join's same-user
+// transfer does not apply). When the orphaned session's Leave arrives,
+// PartyHandler.Leave must re-elect the oldest member rather than returning
+// early because members.Leave found nothing to remove.
+func TestStaleLeaderSession_OrphanedLeaderLeaveReelectsOldest(t *testing.T) {
+	tracker := &partyForwardingTracker{mockMatchmakingTracker: newMockMatchmakingTracker()}
+	mm, mmCleanup := createLightMatchmaker(t, loggerForTest(t))
+	t.Cleanup(mmCleanup)
+	pr := NewLocalPartyRegistry(loggerForTest(t), cfg, mm, tracker, testStreamManager{}, &DummyMessageRouter{}, "testnode").(*LocalPartyRegistry)
+	tracker.pr = pr
+
+	groupName := "orphaned-leader"
+	leader := newTestSessionForParty(t, "leader", tracker, pr)
+	group, isLeader, err := JoinPartyGroup(leader, groupName, MatchID{})
+	if err != nil || !isLeader {
+		t.Fatalf("fixture: leader JoinPartyGroup err=%v isLeader=%v", err, isLeader)
+	}
+	member := newTestSessionForParty(t, "member", tracker, pr)
+	if _, _, err := JoinPartyGroup(member, groupName, MatchID{}); err != nil {
+		t.Fatalf("fixture: member JoinPartyGroup: %v", err)
+	}
+	ph := group.ph
+
+	// Orphan the leader slot: the leader's session leaves the roster but
+	// p.leader still names it.
+	leaderPresence := &Presence{
+		ID:     PresenceID{Node: "testnode", SessionID: leader.id},
+		Stream: ph.Stream,
+		UserID: leader.userID,
+		Meta:   PresenceMeta{Username: "leader"},
+	}
+	ph.members.Leave([]*Presence{leaderPresence})
+	if got := group.GetLeader().GetSessionId(); got != leader.id.String() {
+		t.Fatalf("fixture: expected orphaned leader slot %s, got %s", leader.id, got)
+	}
+
+	// A different user joins; nothing may transfer to them.
+	other := newTestSessionForParty(t, "other", tracker, pr)
+	if _, _, err := JoinPartyGroup(other, groupName, MatchID{}); err != nil {
+		t.Fatalf("fixture: other JoinPartyGroup: %v", err)
+	}
+	if got := group.GetLeader().GetSessionId(); got != leader.id.String() {
+		t.Fatalf("fixture: a different user's join moved leadership to %s", got)
+	}
+
+	// The orphaned session now closes.
+	tracker.closeSession(leader.id, leader.userID, ph.Stream, "leader")
+
+	if got := group.GetLeader().GetSessionId(); got != member.id.String() {
+		t.Errorf("after orphan leave leader=%s (orphan=%s), want oldest member %s", got, leader.id, member.id)
+	}
+}
