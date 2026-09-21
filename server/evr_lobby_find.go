@@ -1192,6 +1192,17 @@ func (p *EvrPipeline) currentSocialLobbyForSession(ctx context.Context, logger *
 		return MatchID{}
 	}
 
+	// The tracker entry is cleared only at session close, so it names the
+	// player's lobby only when the client reports the same lobby as current
+	// (#625). Outside a party follow the target below is CurrentMatchID
+	// itself, so this check changes nothing there.
+	if lobbyParams.CurrentMatchID != currentMatchID {
+		logger.Debug("Social lobby guard: client does not report the tracked lobby as current, not treating as no-op",
+			zap.String("tracked_mid", currentMatchID.String()),
+			zap.String("current_mid", lobbyParams.CurrentMatchID.String()))
+		return MatchID{}
+	}
+
 	label, err := MatchLabelByID(ctx, p.nk, currentMatchID)
 	if err != nil || label == nil {
 		return MatchID{}
@@ -1268,10 +1279,12 @@ func (p *EvrPipeline) intendedSocialTargetMatchID(session *sessionWS, lobbyParam
 // LobbyFindSessionRequest on its normal message cycle.
 //
 // Returns false when the leader cannot be found, either player is not in a
-// match, or their match IDs differ. Otherwise it returns true only when the
-// shared match is a social lobby and requestedMode is social: a shared arena
-// match is being left (or its tracker entry is stale), and a member asking for
-// another mode from a shared social lobby is queueing from it, not staying.
+// match, their match IDs differ, or the client does not report the shared
+// match as current (the member's tracker entry can be stale, #625). Otherwise
+// it returns true only when the shared match is a social lobby and
+// requestedMode is social: a shared arena match is being left, and a member
+// asking for another mode from a shared social lobby is queueing from it, not
+// staying.
 func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyGroup *LobbyGroup, currentMatchID MatchID, requestedMode evr.Symbol) bool {
 	leader := lobbyGroup.GetLeader()
 	if leader == nil || leader.SessionId == session.id.String() {
@@ -1335,25 +1348,14 @@ func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(ctx context.Context, logger
 	}
 
 	// The client does not report the shared match as current (nil, or another
-	// match), so the tracker entry may be stale. Same outcome as above: only a
-	// shared social lobby, for a member asking for a social lobby, is already
-	// converged. Otherwise the follow path decides.
-	isSocial := false
-	if p.nk != nil {
-		label, err := MatchLabelByID(ctx, p.nk, followerMatchID)
-		isSocial = err == nil && label != nil && label.IsSocial()
-	}
-	if !isSocial || !shouldFollowerFindOrCreateSocial(requestedMode) {
-		logger.Debug("Follower and leader share a match the client does not report as current, not skipping",
-			zap.String("shared_match_id", followerMatchID.String()),
-			zap.String("current_match_id", currentMatchID.String()),
-			zap.Bool("shared_is_social", isSocial),
-			zap.String("requested_mode", requestedMode.String()))
-		return false
-	}
-	logger.Debug("Follower and leader share a social lobby, already converged",
-		zap.String("shared_match_id", followerMatchID.String()))
-	return true
+	// match). The member's tracker entry is cleared only at session close, so
+	// it can be stale: the client's report wins, and the follow path decides
+	// (#625).
+	logger.Debug("Follower and leader share a match the client does not report as current, not skipping",
+		zap.String("shared_match_id", followerMatchID.String()),
+		zap.String("current_match_id", currentMatchID.String()),
+		zap.String("requested_mode", requestedMode.String()))
+	return false
 }
 
 // isLeavingSharedMatch reports whether the client is leaving sharedMatchID, a
@@ -1586,15 +1588,23 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 	if memberPresence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, memberStream, session.userID); memberPresence != nil {
 		memberMatchID := MatchIDFromStringOrNil(memberPresence.GetStatus())
 		if memberMatchID == leaderMatchID {
-			// The client reporting this match as current means it is leaving
-			// it, so the member's tracker entry is stale. Fall through and
-			// validate the leader's match instead of stopping here.
-			if !p.isLeavingSharedMatch(ctx, memberMatchID, params.CurrentMatchID) {
+			// The member's tracker entry is cleared only at session close, so
+			// it counts only when the client reports the same match as current
+			// (#625). A client reporting a non-social match as current is
+			// leaving it. In both cases fall through and validate the leader's
+			// match instead of stopping here.
+			switch {
+			case params.CurrentMatchID != memberMatchID:
+				logger.Debug("Member's tracker entry names the leader's match, but the client does not report it as current",
+					zap.String("shared_match_id", memberMatchID.String()),
+					zap.String("current_match_id", params.CurrentMatchID.String()))
+			case p.isLeavingSharedMatch(ctx, memberMatchID, params.CurrentMatchID):
+				logger.Debug("Member shares the leader's match but is leaving it, not treating as already in leader's match",
+					zap.String("shared_match_id", memberMatchID.String()))
+			default:
 				logger.Debug("Already in leader's match")
 				return true
 			}
-			logger.Debug("Member shares the leader's match but is leaving it, not treating as already in leader's match",
-				zap.String("shared_match_id", memberMatchID.String()))
 		}
 	}
 
@@ -1719,6 +1729,25 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		return false
 	}
 
+	memberStream := PresenceStream{
+		Mode:    StreamModeService,
+		Subject: session.id,
+		Label:   StreamLabelMatchService,
+	}
+
+	// The member's tracker entry is cleared only at session close. If, when
+	// the poll starts, it names a match the client does not report as current,
+	// it is stale (#625) and must not stand alone as evidence of convergence
+	// when the match label cannot be read. A placement during the poll
+	// rewrites the entry, so it is not affected. The nil-NK path (no registry
+	// at all) is left as it was.
+	var staleMemberMatchID MatchID
+	if pr := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, memberStream, session.userID); pr != nil {
+		if mid := MatchIDFromStringOrNil(pr.GetStatus()); mid != params.CurrentMatchID {
+			staleMemberMatchID = mid
+		}
+	}
+
 	// isFollowerInLeaderMatch checks if the follower was placed into the
 	// leader's match (e.g., by the matchmaker).
 	isFollowerInLeaderMatch := func() bool {
@@ -1749,11 +1778,6 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 			return false
 		}
 
-		memberStream := PresenceStream{
-			Mode:    StreamModeService,
-			Subject: session.id,
-			Label:   StreamLabelMatchService,
-		}
 		memberPresence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, memberStream, session.userID)
 		if memberPresence == nil {
 			return false
@@ -1774,6 +1798,11 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 				return label.GetPlayerByUserID(session.userID.String()) != nil
 			}
 			if ctx.Err() != nil {
+				return false
+			}
+			// The label is unreadable, so the tracker alone decides: a stale
+			// entry is not convergence.
+			if followerMatchID == staleMemberMatchID {
 				return false
 			}
 		}
