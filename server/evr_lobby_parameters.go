@@ -76,6 +76,11 @@ type LobbySessionParameters struct {
 	HasSuspensionHistoryFlag     bool          `json:"has_suspension_history"` // True if player has any suspension history (exempt: enforcers/operators always false)
 	latencyHistory               *atomic.Pointer[LatencyHistory]
 	unreachableServers           *atomic.Pointer[UnreachableServers]
+	// memberRecordAtFind is the member's own matchservice tracker record as
+	// it stood when lobbyFind began (#625). Set once, before any goroutine is
+	// started, by captureMemberRecordAtFind; see memberRecordAtFindEntry.
+	memberRecordAtFind         *PresenceMeta
+	memberRecordAtFindCaptured bool
 }
 
 func (p *LobbySessionParameters) GetPartySize() int {

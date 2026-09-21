@@ -358,11 +358,18 @@ func TestTryFollowPartyLeader_LeaderNotMatchmaking_ProceedsNormally(t *testing.T
 	}
 	lobbyGroup := &LobbyGroup{ph: ph}
 
+	// The client reports Match A as its current lobby, a social lobby it is
+	// staying in. A tracker entry the client does not report is stale (#625).
 	params := &LobbySessionParameters{
-		GroupID: uuid.Must(uuid.NewV4()),
+		GroupID:        uuid.Must(uuid.NewV4()),
+		CurrentMatchID: matchA,
 	}
 
+	registry := newMockFollowMatchRegistry()
+	registry.SetMatch(matchA, &MatchLabel{ID: matchA, Mode: evr.ModeSocialPublic, Open: true, PlayerLimit: 12})
+
 	pipeline := newFollowPollPipeline()
+	pipeline.nk = &RuntimeGoNakamaModule{matchRegistry: registry}
 	session := &sessionWS{}
 	session.id = followerSID
 	session.userID = followerUID
@@ -632,6 +639,7 @@ func TestPoll_LeaderStillMatchmaking_ThenSettles_FollowerInMatch_ReturnsTrue(t *
 	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	env.setLeaderMatch(matchB)
 	env.setLeaderMatchmaking()
+	env.params.captureMemberRecordAtFind(env.session) // pin the find-time record before any goroutine runs (#625)
 
 	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(15*time.Second))
 	defer cancel()
@@ -720,6 +728,7 @@ func TestPoll_LeaderSwitchesMatches_FollowerInNewMatch_ReturnsTrue(t *testing.T)
 	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	matchC := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 	env.setLeaderMatch(matchB)
+	env.params.captureMemberRecordAtFind(env.session) // pin the find-time record before any goroutine runs (#625)
 
 	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(20*time.Second))
 	defer cancel()
@@ -808,6 +817,7 @@ func TestPoll_LeaderChangesPartway_NewLeaderInMatch_ReturnsTrue(t *testing.T) {
 	newLeaderUID := uuid.Must(uuid.NewV4())
 
 	env.setLeaderMatchmaking()
+	env.params.captureMemberRecordAtFind(env.session) // pin the find-time record before any goroutine runs (#625)
 
 	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(15*time.Second))
 	defer cancel()
@@ -1896,7 +1906,9 @@ func TestKC1_PollFollowPartyLeader_RefusesPrivateSocialLobby(t *testing.T) {
 // Registry-error fallback: when MatchLabelByID returns an error but both
 // tracker presences point to the same match, isFollowerInLeaderMatch must
 // accept tracker-based evidence rather than returning false (which would
-// trigger a desync). See decision matrix: NK error→tracker → true.
+// trigger a desync). See decision matrix: NK error→tracker → true. The
+// exception is a member entry that was already there when the poll started
+// and that the client does not report as current: it is stale (#625).
 // ---------------------------------------------------------------------------
 
 func TestPoll_RegistryError_FallsBackToTracker(t *testing.T) {
@@ -1910,7 +1922,56 @@ func TestPoll_RegistryError_FallsBackToTracker(t *testing.T) {
 	registry := newMockFollowMatchRegistry()
 	env.withMockNK(registry)
 	env.setLeaderMatch(matchB)
-	env.setFollowerMatch(matchB)
+
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(10*time.Second))
+	defer cancel()
+
+	env.params.captureMemberRecordAtFind(env.session) // pin the find-time record before any goroutine runs (#625)
+
+	// The member is placed into Match B during the poll. An entry that already
+	// named B when the poll started, with the client not reporting B as
+	// current, would be stale and is not convergence (#625, see
+	// TestFollow_StaleTrackerInLeaderNonSocialOrUnreadable_ClientAtMenu_ReachesPoll).
+	env.pipeline.pollFollowInterval = 50 * time.Millisecond
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		env.setFollowerMatch(matchB)
+	}()
+
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(8*time.Second))
+	if timedOut {
+		t.Fatal("pollFollowPartyLeader timed out — expected tracker fallback to return true once the member is placed")
+	}
+	if !result {
+		t.Error("pollFollowPartyLeader returned false when tracker shows convergence and " +
+			"MatchLabelByID returned an error. The tracker-based fallback must accept " +
+			"matching service stream presences as sufficient evidence of convergence.")
+	}
+
+	// Verify that GetMatch was called (confirming the fallback was triggered,
+	// not that the early-convergence path returned before any registry lookup).
+	if registry.getMatchCalls.Load() == 0 {
+		t.Error("Expected MatchLabelByID (GetMatch) to be called before the tracker fallback " +
+			"accepted convergence, but the registry was never queried.")
+	}
+}
+
+// TestPoll_RegistryError_PlacedBeforePoll_FallsBackToTracker is the original
+// ordering of the test above: the member is placed into Match B after its
+// find arrived but before the poll starts. The placement rewrites the record
+// the find captured, so it is convergence, not a stale entry (#625).
+func TestPoll_RegistryError_PlacedBeforePoll_FallsBackToTracker(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	env.withMockNK(registry)
+	env.setLeaderMatch(matchB)
+
+	env.params.captureMemberRecordAtFind(env.session) // the find arrives
+	env.setFollowerMatch(matchB)                      // then the matchmaker places the member
 
 	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(10*time.Second))
 	defer cancel()
@@ -1924,9 +1985,6 @@ func TestPoll_RegistryError_FallsBackToTracker(t *testing.T) {
 			"MatchLabelByID returned an error. The tracker-based fallback must accept " +
 			"matching service stream presences as sufficient evidence of convergence.")
 	}
-
-	// Verify that GetMatch was called (confirming the fallback was triggered,
-	// not that the early-convergence path returned before any registry lookup).
 	if registry.getMatchCalls.Load() == 0 {
 		t.Error("Expected MatchLabelByID (GetMatch) to be called before the tracker fallback " +
 			"accepted convergence, but the registry was never queried.")
@@ -2016,7 +2074,8 @@ func TestTryFollow_LeaderInSocialMatch_FollowerAlreadyInMatch_ReturnsTrue(t *tes
 	})
 	env.withMockNK(registry)
 	env.setLeaderMatch(socialMatchID)
-	env.setFollowerMatch(socialMatchID) // Already in the same lobby
+	env.setFollowerMatch(socialMatchID)       // Already in the same lobby
+	env.params.CurrentMatchID = socialMatchID // and the client reports it (#625)
 
 	logger := loggerForTest(t)
 	result := env.pipeline.TryFollowPartyLeader(
@@ -2158,8 +2217,8 @@ func TestPoll_NilNK_FollowerNotInLeaderMatch_LoopsUntilContextExpiry(t *testing.
 // isFollowerAlreadyInLeaderMatch returns true.
 // This is the fast path that prevents repeated "Joined party group" /
 // "Already in leader's match" churn when the client re-sends
-// LobbyFindSessionRequest on its normal message cycle. Other shared matches and
-// requested modes are covered by
+// LobbyFindSessionRequest on its normal message cycle, reporting the lobby it
+// is in as current. A shared match the client does not report is covered by
 // TestIsFollowerAlreadyInLeaderMatch_CurrentMatchNotShared (#625).
 func TestIsFollowerAlreadyInLeaderMatch_SameMatch(t *testing.T) {
 	t.Parallel()
@@ -2175,7 +2234,7 @@ func TestIsFollowerAlreadyInLeaderMatch_SameMatch(t *testing.T) {
 	registry.SetMatch(matchID, &MatchLabel{ID: matchID, Mode: evr.ModeSocialPublic, Open: true})
 	env.withMockNK(registry)
 
-	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, MatchID{}, evr.ModeSocialPublic)
+	result := env.pipeline.isFollowerAlreadyInLeaderMatch(context.Background(), logger, env.session, env.lobbyGroup, matchID, evr.ModeSocialPublic)
 	if !result {
 		t.Error("isFollowerAlreadyInLeaderMatch should return true when both are in the same match")
 	}

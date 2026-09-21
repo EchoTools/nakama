@@ -311,9 +311,12 @@ func TestTryFollow_StaleTrackerSharedMatchBeingLeft_NotAlreadyInLeaderMatch(t *t
 // shared match and any requested mode, so lobbyFind returned at the skip before
 // the matchmaking timeout was armed.
 //
-// Correct behaviour, the same outcome as the CurrentMatchID branch: only a
-// shared social lobby, for a member asking for a social lobby, is already
-// converged. Everything else takes the follow path.
+// Correct behaviour: the client does not report the shared match, so the
+// member's tracker entry (cleared only at session close) can be stale and the
+// client's report wins. No shared match and no requested mode is already
+// converged; every case takes the follow path. (#628 kept the social/social
+// rows true; that left the find with no join and no reply for a member at the
+// menu, see evr_lobby_follow_stale_tracker_test.go.)
 func TestIsFollowerAlreadyInLeaderMatch_CurrentMatchNotShared(t *testing.T) {
 	otherMatch := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
 
@@ -324,11 +327,11 @@ func TestIsFollowerAlreadyInLeaderMatch_CurrentMatchNotShared(t *testing.T) {
 		current    MatchID
 		want       bool
 	}{
-		{"nil current, shared social, requesting social", evr.ModeSocialPublic, evr.ModeSocialPublic, MatchID{}, true},
+		{"nil current, shared social, requesting social", evr.ModeSocialPublic, evr.ModeSocialPublic, MatchID{}, false},
 		{"nil current, shared social, requesting arena", evr.ModeSocialPublic, evr.ModeArenaPublic, MatchID{}, false},
 		{"nil current, shared arena, requesting social", evr.ModeArenaPublic, evr.ModeSocialPublic, MatchID{}, false},
 		{"nil current, shared arena, requesting arena", evr.ModeArenaPublic, evr.ModeArenaPublic, MatchID{}, false},
-		{"other current, shared social, requesting social", evr.ModeSocialPublic, evr.ModeSocialPublic, otherMatch, true},
+		{"other current, shared social, requesting social", evr.ModeSocialPublic, evr.ModeSocialPublic, otherMatch, false},
 		{"other current, shared social, requesting arena", evr.ModeSocialPublic, evr.ModeArenaPublic, otherMatch, false},
 		{"other current, shared arena, requesting social", evr.ModeArenaPublic, evr.ModeSocialPublic, otherMatch, false},
 		{"other current, shared arena, requesting arena", evr.ModeArenaPublic, evr.ModeArenaPublic, otherMatch, false},

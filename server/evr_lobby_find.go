@@ -40,6 +40,8 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	// Resolve party state early if applicable
 	if lobbyParams.PartyGroupName != "" && lobbyParams.PartyGroupName != "tablet" {
+		lobbyParams.captureMemberRecordAtFind(session)
+
 		var err error
 		lobbyGroup, memberSessionIDs, isLeader, err = p.configureParty(ctx, logger, session, lobbyParams)
 		if err != nil {
@@ -1192,6 +1194,18 @@ func (p *EvrPipeline) currentSocialLobbyForSession(ctx context.Context, logger *
 		return MatchID{}
 	}
 
+	// The tracker entry is cleared only at session close, so the record the
+	// find arrived with names the player's lobby only when the client reports
+	// the same lobby as current; a record rewritten since is a real placement
+	// (#625). Outside a party follow the target below is CurrentMatchID
+	// itself, so this check changes nothing there.
+	if lobbyParams.isStaleMemberRecord(ws, presence) {
+		logger.Debug("Social lobby guard: client does not report the tracked lobby as current, not treating as no-op",
+			zap.String("tracked_mid", currentMatchID.String()),
+			zap.String("current_mid", lobbyParams.CurrentMatchID.String()))
+		return MatchID{}
+	}
+
 	label, err := MatchLabelByID(ctx, p.nk, currentMatchID)
 	if err != nil || label == nil {
 		return MatchID{}
@@ -1268,10 +1282,12 @@ func (p *EvrPipeline) intendedSocialTargetMatchID(session *sessionWS, lobbyParam
 // LobbyFindSessionRequest on its normal message cycle.
 //
 // Returns false when the leader cannot be found, either player is not in a
-// match, or their match IDs differ. Otherwise it returns true only when the
-// shared match is a social lobby and requestedMode is social: a shared arena
-// match is being left (or its tracker entry is stale), and a member asking for
-// another mode from a shared social lobby is queueing from it, not staying.
+// match, their match IDs differ, or the client does not report the shared
+// match as current (the member's tracker entry can be stale, #625). Otherwise
+// it returns true only when the shared match is a social lobby and
+// requestedMode is social: a shared arena match is being left, and a member
+// asking for another mode from a shared social lobby is queueing from it, not
+// staying.
 func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyGroup *LobbyGroup, currentMatchID MatchID, requestedMode evr.Symbol) bool {
 	leader := lobbyGroup.GetLeader()
 	if leader == nil || leader.SessionId == session.id.String() {
@@ -1335,25 +1351,14 @@ func (p *EvrPipeline) isFollowerAlreadyInLeaderMatch(ctx context.Context, logger
 	}
 
 	// The client does not report the shared match as current (nil, or another
-	// match), so the tracker entry may be stale. Same outcome as above: only a
-	// shared social lobby, for a member asking for a social lobby, is already
-	// converged. Otherwise the follow path decides.
-	isSocial := false
-	if p.nk != nil {
-		label, err := MatchLabelByID(ctx, p.nk, followerMatchID)
-		isSocial = err == nil && label != nil && label.IsSocial()
-	}
-	if !isSocial || !shouldFollowerFindOrCreateSocial(requestedMode) {
-		logger.Debug("Follower and leader share a match the client does not report as current, not skipping",
-			zap.String("shared_match_id", followerMatchID.String()),
-			zap.String("current_match_id", currentMatchID.String()),
-			zap.Bool("shared_is_social", isSocial),
-			zap.String("requested_mode", requestedMode.String()))
-		return false
-	}
-	logger.Debug("Follower and leader share a social lobby, already converged",
-		zap.String("shared_match_id", followerMatchID.String()))
-	return true
+	// match). The member's tracker entry is cleared only at session close, so
+	// it can be stale: the client's report wins, and the follow path decides
+	// (#625).
+	logger.Debug("Follower and leader share a match the client does not report as current, not skipping",
+		zap.String("shared_match_id", followerMatchID.String()),
+		zap.String("current_match_id", currentMatchID.String()),
+		zap.String("requested_mode", requestedMode.String()))
+	return false
 }
 
 // isLeavingSharedMatch reports whether the client is leaving sharedMatchID, a
@@ -1586,15 +1591,24 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 	if memberPresence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, memberStream, session.userID); memberPresence != nil {
 		memberMatchID := MatchIDFromStringOrNil(memberPresence.GetStatus())
 		if memberMatchID == leaderMatchID {
-			// The client reporting this match as current means it is leaving
-			// it, so the member's tracker entry is stale. Fall through and
-			// validate the leader's match instead of stopping here.
-			if !p.isLeavingSharedMatch(ctx, memberMatchID, params.CurrentMatchID) {
+			// The member's tracker entry is cleared only at session close, so
+			// the record the find arrived with counts only when the client
+			// reports the same match as current (#625); a record rewritten
+			// since is a real placement. A client reporting a non-social match
+			// as current is leaving it. In both not-there cases fall through
+			// and validate the leader's match instead of stopping here.
+			switch {
+			case params.isStaleMemberRecord(session, memberPresence):
+				logger.Debug("Member's tracker entry names the leader's match, but the client does not report it as current",
+					zap.String("shared_match_id", memberMatchID.String()),
+					zap.String("current_match_id", params.CurrentMatchID.String()))
+			case params.CurrentMatchID == memberMatchID && p.isLeavingSharedMatch(ctx, memberMatchID, params.CurrentMatchID):
+				logger.Debug("Member shares the leader's match but is leaving it, not treating as already in leader's match",
+					zap.String("shared_match_id", memberMatchID.String()))
+			default:
 				logger.Debug("Already in leader's match")
 				return true
 			}
-			logger.Debug("Member shares the leader's match but is leaving it, not treating as already in leader's match",
-				zap.String("shared_match_id", memberMatchID.String()))
 		}
 	}
 
@@ -1706,6 +1720,50 @@ const (
 	pollFollowMaxDurationDefault = 60 * time.Second
 )
 
+// memberMatchServiceRecord returns the session's own matchservice tracker
+// record, or nil.
+func memberMatchServiceRecord(session *sessionWS) *PresenceMeta {
+	return session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, PresenceStream{
+		Mode:    StreamModeService,
+		Subject: session.id,
+		Label:   StreamLabelMatchService,
+	}, session.userID)
+}
+
+// captureMemberRecordAtFind records the member's matchservice record as it
+// stands when the find arrives. That is the moment the client's
+// CurrentMatchID is observed, so a record rewritten after it is a real
+// placement, not a stale entry (#625). The tracker stores a new *Presence on
+// every Track/Update of a record, and GetLocalBySessionIDStreamUserID returns
+// a pointer into it, so pointer identity tells a rewrite from the same record.
+func (params *LobbySessionParameters) captureMemberRecordAtFind(session *sessionWS) {
+	params.memberRecordAtFind = memberMatchServiceRecord(session)
+	params.memberRecordAtFindCaptured = true
+}
+
+// memberRecordAtFindEntry returns the record captured when the find arrived.
+// Without a capture (a caller other than lobbyFind), the find entry is taken
+// to be now.
+func (params *LobbySessionParameters) memberRecordAtFindEntry(session *sessionWS) *PresenceMeta {
+	if params.memberRecordAtFindCaptured {
+		return params.memberRecordAtFind
+	}
+	return memberMatchServiceRecord(session)
+}
+
+// isStaleMemberRecord reports whether pr, the member's matchservice record,
+// is not evidence that the member is in the match it names: it is the same
+// record the find arrived with, and it names a match the client did not
+// report as current. The record is cleared only at session close, so the
+// client's report wins over it (#625). A record rewritten since the find
+// arrived is a real placement.
+func (params *LobbySessionParameters) isStaleMemberRecord(session *sessionWS, pr *PresenceMeta) bool {
+	if pr == nil || MatchIDFromStringOrNil(pr.GetStatus()) == params.CurrentMatchID {
+		return false
+	}
+	return pr == params.memberRecordAtFindEntry(session)
+}
+
 func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, lobbyGroup *LobbyGroup) bool {
 	logger.Debug("Polling to follow party leader")
 
@@ -1718,6 +1776,18 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		logger.Debug("Party leader is this player's own session, not self-following in poll")
 		return false
 	}
+
+	memberStream := PresenceStream{
+		Mode:    StreamModeService,
+		Subject: session.id,
+		Label:   StreamLabelMatchService,
+	}
+
+	// The member's record as it stood when the find arrived (#625). Resolved
+	// once here, so a poll without a lobbyFind capture takes its own start as
+	// the find entry. See isStaleMemberRecord; the nil-NK path (no registry at
+	// all) does not use it.
+	memberRecordAtFind := params.memberRecordAtFindEntry(session)
 
 	// isFollowerInLeaderMatch checks if the follower was placed into the
 	// leader's match (e.g., by the matchmaker).
@@ -1749,11 +1819,6 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 			return false
 		}
 
-		memberStream := PresenceStream{
-			Mode:    StreamModeService,
-			Subject: session.id,
-			Label:   StreamLabelMatchService,
-		}
 		memberPresence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, memberStream, session.userID)
 		if memberPresence == nil {
 			return false
@@ -1774,6 +1839,13 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 				return label.GetPlayerByUserID(session.userID.String()) != nil
 			}
 			if ctx.Err() != nil {
+				return false
+			}
+			// The label is unreadable, so the tracker alone decides: the
+			// record the find arrived with, naming a match the client did not
+			// report, is stale and not convergence. A rewrite since the find
+			// arrived (before or during the poll) is a placement.
+			if memberPresence == memberRecordAtFind && followerMatchID != params.CurrentMatchID {
 				return false
 			}
 		}
