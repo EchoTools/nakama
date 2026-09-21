@@ -39,14 +39,18 @@ const (
 // wraps account updates, storage writes, storage deletes and wallet updates in
 // one pgx.Tx (core_multi.go), so all four now commit or none do.
 //
-// The summary is written under the user; the ledger is a single system-owned
-// object. Both are unconditional writes (no Version), matching what they
-// replaced — the verifier is the only writer of either.
+// The summary is written under the user, unconditionally (no Version). The
+// ledger is a single system-owned object that the verifier is NOT the only
+// writer of: UnlinkVRMLAccount also rewrites it. So the ledger is written at
+// ledger.version, and a copy another writer has replaced since it was read is
+// rejected with runtime.ErrStorageRejectedVersion, rolling back the whole
+// transaction. On success ledger.version is the newly committed version.
 func commitVRMLVerification(ctx context.Context, nk runtime.NakamaModule, userID, vrmlUserID string, summary []byte, ledger *VRMLEntitlementLedger, entitlements []*VRMLEntitlement) error {
 	ledgerOp, err := vrmlEntitlementLedgerWriteOp(ledger)
 	if err != nil {
 		return fmt.Errorf("failed to render entitlement ledger: %w", err)
 	}
+	ledgerOp.Version = ledger.version
 
 	walletUpdates, err := VRMLEntitlementWalletUpdates(ctx, nk, SystemUserID, "", userID, vrmlUserID, entitlements)
 	if err != nil {
@@ -68,11 +72,55 @@ func commitVRMLVerification(ctx context.Context, nk runtime.NakamaModule, userID
 	// updateLedger stays true: the two wallet updates each wrote a wallet_ledger
 	// row when they were separate nk.WalletUpdate(..., true) calls, and that
 	// audit trail is the record of who granted which cosmetics.
-	if _, _, err := nk.MultiUpdate(ctx, nil, storageWrites, nil, walletUpdates, true); err != nil {
+	acks, _, err := nk.MultiUpdate(ctx, nil, storageWrites, nil, walletUpdates, true)
+	if err != nil {
 		return fmt.Errorf("failed to commit VRML verification for %s: %w", userID, err)
+	}
+	for _, ack := range acks {
+		if ack.GetKey() == StorageKeyVRMLVerificationLedger && ack.GetUserId() == SystemUserID {
+			ledger.version = ack.GetVersion()
+		}
 	}
 
 	return nil
+}
+
+// vrmlLedgerCommitAttempts bounds how many times one verification pass
+// re-reads the ledger after losing a version race to another writer.
+const vrmlLedgerCommitAttempts = 3
+
+// recordVRMLVerification appends one verification pass to the ledger and
+// commits it, together with the summary and the wallet updates. If another
+// writer (UnlinkVRMLAccount) has replaced the ledger since it was read, the
+// ledger is re-read and the pass is committed on top of that write.
+func recordVRMLVerification(ctx context.Context, nk runtime.NakamaModule, ledger *VRMLEntitlementLedger, userID, vrmlUserID, vrmlPlayerID string, summary []byte, entitlements []*VRMLEntitlement) error {
+	for attempt := 1; ; attempt++ {
+		// The ledger entry is staged on a copy: it becomes part of the
+		// in-memory ledger only once the transaction below commits, so a
+		// rejected pass does not leave this process believing it recorded a
+		// user whose wallet it never updated.
+		pending := &VRMLEntitlementLedger{Entries: append(slices.Clone(ledger.Entries), &VRMLEntitlementLedgerEntry{
+			UserID:       userID,
+			VRMLUserID:   vrmlUserID,
+			VRMLPlayerID: vrmlPlayerID,
+			Entitlements: entitlements,
+		}), version: ledger.version}
+
+		err := commitVRMLVerification(ctx, nk, userID, vrmlUserID, summary, pending, entitlements)
+		if err == nil {
+			ledger.Entries, ledger.version = pending.Entries, pending.version
+			return nil
+		}
+		if !errors.Is(err, runtime.ErrStorageRejectedVersion) || attempt == vrmlLedgerCommitAttempts {
+			return err
+		}
+
+		current, loadErr := VRMLEntitlementLedgerLoad(ctx, nk)
+		if loadErr != nil {
+			return fmt.Errorf("failed to re-read VRML entitlement ledger: %w", loadErr)
+		}
+		*ledger = *current
+	}
 }
 
 type VRMLScanQueueEntry struct {
@@ -262,22 +310,10 @@ func (v *VRMLScanQueue) Start() error {
 			// Count the number of matches played by season
 			entitlements := summary.Entitlements()
 
-			// The ledger entry is staged on a copy: it becomes part of the
-			// in-memory ledger only once the transaction below commits, so a
-			// rejected pass does not leave this process believing it recorded a
-			// user whose wallet it never updated.
-			pending := &VRMLEntitlementLedger{Entries: append(slices.Clone(ledger.Entries), &VRMLEntitlementLedgerEntry{
-				UserID:       entry.UserID,
-				VRMLUserID:   player.User.UserID,
-				VRMLPlayerID: player.ThisGame.PlayerID,
-				Entitlements: entitlements,
-			})}
-
-			if err := commitVRMLVerification(v.ctx, v.nk, entry.UserID, player.User.UserID, data, pending, entitlements); err != nil {
+			if err := recordVRMLVerification(v.ctx, v.nk, ledger, entry.UserID, player.User.UserID, player.ThisGame.PlayerID, data, entitlements); err != nil {
 				logger.WithField("error", err).Error("Failed to commit VRML verification")
 				continue
 			}
-			ledger.Entries = pending.Entries
 
 			logger.WithFields(map[string]any{
 				"user_id":      entry.UserID,
