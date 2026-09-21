@@ -1951,6 +1951,41 @@ func TestPoll_RegistryError_FallsBackToTracker(t *testing.T) {
 	}
 }
 
+// TestPoll_RegistryError_PlacedBeforePoll_FallsBackToTracker is the original
+// ordering of the test above: the member is placed into Match B after its
+// find arrived but before the poll starts. The placement rewrites the record
+// the find captured, so it is convergence, not a stale entry (#625).
+func TestPoll_RegistryError_PlacedBeforePoll_FallsBackToTracker(t *testing.T) {
+	t.Parallel()
+
+	env := newFollowTestEnv(t)
+	matchB := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+
+	registry := newMockFollowMatchRegistry()
+	env.withMockNK(registry)
+	env.setLeaderMatch(matchB)
+
+	env.params.captureMemberRecordAtFind(env.session) // the find arrives
+	env.setFollowerMatch(matchB)                      // then the matchmaker places the member
+
+	ctx, cancel := context.WithTimeout(context.Background(), scaledDuration(10*time.Second))
+	defer cancel()
+
+	result, timedOut := env.runPollWithTimeout(ctx, t, scaledDuration(8*time.Second))
+	if timedOut {
+		t.Fatal("pollFollowPartyLeader timed out — expected tracker fallback to return true immediately")
+	}
+	if !result {
+		t.Error("pollFollowPartyLeader returned false when tracker shows convergence and " +
+			"MatchLabelByID returned an error. The tracker-based fallback must accept " +
+			"matching service stream presences as sufficient evidence of convergence.")
+	}
+	if registry.getMatchCalls.Load() == 0 {
+		t.Error("Expected MatchLabelByID (GetMatch) to be called before the tracker fallback " +
+			"accepted convergence, but the registry was never queried.")
+	}
+}
+
 // TestTryFollow_LeaderInArenaMatch_ReturnsFalse verifies the defense-in-depth
 // guard in TryFollowPartyLeader: even if the lobbyFind gate fails to prevent
 // entry, TryFollowPartyLeader must return false when the leader's match is

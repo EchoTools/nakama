@@ -232,6 +232,72 @@ func TestPoll_StaleEntryRewrittenToSameMatch_LabelErrors_Converges(t *testing.T)
 	}
 }
 
+// A placement between the find arriving and the poll starting is real, not
+// stale. The member is at the menu (nil current) requesting arena, TryFollow
+// stopped at "Leader is currently matchmaking", and match accept rewrote the
+// member's record to M (tracker.Update, evr_pipeline_lobby.go:63) before the
+// poll began. M's label read errors. The poll must converge, not release the
+// member to solo matchmaking after its budget while it sits in M.
+func TestPoll_PlacedBetweenFindAndPoll_LabelErrors_Converges(t *testing.T) {
+	cases := []struct {
+		name        string
+		staleAtFind bool // the record already named M (stale) when the find arrived
+	}{
+		{"no record at find", false},
+		{"stale record naming M at find", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env, _, m := staleTrackerEnv(t, nil, evr.ModeArenaPublic, MatchID{}) // M's label read errors
+			if !tc.staleAtFind {
+				env.tracker.UntrackLocalByModes(env.followerSID, map[uint8]struct{}{StreamModeService: {}}, PresenceStream{})
+			}
+			env.pipeline.pollFollowMaxDuration = 2 * time.Second
+
+			env.params.captureMemberRecordAtFind(env.session) // lobbyFind entry
+			env.tracker.Update(context.Background(), env.followerSID,
+				PresenceStream{Mode: StreamModeService, Subject: env.followerSID, Label: StreamLabelMatchService},
+				env.followerUID, PresenceMeta{Status: m.String()}) // match accept, before the poll
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			start := time.Now()
+			result := env.pipeline.pollFollowPartyLeader(ctx, loggerForTest(t), env.session, env.params, env.lobbyGroup)
+			if !result {
+				t.Errorf("poll released the member after %v although it was placed into the leader's match %s after its find arrived "+
+					"(party split); the placement was taken for a stale entry", time.Since(start), m.String())
+			}
+		})
+	}
+}
+
+// The same placement seen by TryFollowPartyLeader: the member is in M, so it
+// must not join M again (a duplicate join of the lobby it is in).
+func TestTryFollow_PlacedAfterFindArrived_AlreadyInLeaderMatch_NoJoin(t *testing.T) {
+	logger, logs := followSkipObservedLogger()
+	env, registry, m := staleTrackerEnv(t, &MatchLabel{Mode: evr.ModeSocialPublic, Open: true, PlayerLimit: 12},
+		evr.ModeSocialPublic, MatchID{})
+	env.tracker.UntrackLocalByModes(env.followerSID, map[uint8]struct{}{StreamModeService: {}}, PresenceStream{})
+
+	env.params.captureMemberRecordAtFind(env.session) // lobbyFind entry: member at the menu
+	env.tracker.Update(context.Background(), env.followerSID,
+		PresenceStream{Mode: StreamModeService, Subject: env.followerSID, Label: StreamLabelMatchService},
+		env.followerUID, PresenceMeta{Status: m.String()}) // placed into the leader's lobby
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	readsBefore := registry.readsOf(m)
+	result := env.pipeline.TryFollowPartyLeader(ctx, logger, env.session, env.params, env.lobbyGroup)
+
+	if got := registry.readsOf(m) - readsBefore; got >= 2 || followSkipJoinAttempts(logs) != 0 {
+		t.Errorf("TryFollowPartyLeader attempted a join on %s, the lobby the member was placed into after its find arrived "+
+			"(%d label read(s), result=%v)", m.String(), got, result)
+	}
+	if !result {
+		t.Error("TryFollowPartyLeader did not treat the freshly placed member as already in the leader's match")
+	}
+}
+
 // The client reports M as current and the tracker agrees: every site still
 // treats the member as there, and nothing attempts a join (#624's guard).
 func TestFollow_ClientReportsLeaderSocial_TrackerAgrees_NoJoin(t *testing.T) {
