@@ -412,6 +412,14 @@ func TestLobbyFind_FollowerNilCurrentMatch_RequestingArena_DoesNotSkip(t *testin
 			"(returned err=%v before the matchmaking timeout was armed); the requested mode must be checked on this path too",
 			params.Mode.String(), findErr)
 	}
+	if logs.FilterMessage("Follower and leader share a match the client does not report as current, not skipping").Len() != 1 {
+		t.Errorf("expected isFollowerAlreadyInLeaderMatch to decline the skip on the nil-CurrentMatchID path")
+	}
+	// The leader here is not queueing, so lobbyFind goes on to the existing
+	// heading-to-social rule, as in the CurrentMatchID case.
+	if logs.FilterMessage("Leader is heading to a social lobby, forcing social mode for follower").Len() != 1 {
+		t.Errorf("expected lobbyFind to reach the heading-to-social rule past the skip")
+	}
 }
 
 // #624: the poll's convergence check trusted only the match label. With a
@@ -460,5 +468,57 @@ func TestPoll_StaleLabelOmitsMember_TrackerInLeaderLobby_NoSnapBack(t *testing.T
 	}
 	if panicked != nil {
 		t.Errorf("pollFollowPartyLeader panicked: %v", panicked)
+	}
+}
+
+// #624 guard must not fire for a member who left the leader's social lobby.
+//
+// The member's service-stream match entry is written only on match accept
+// (evr_pipeline_lobby.go) and is not cleared when the member leaves a match, so
+// after the member leaves the leader's social lobby for the menu it still names
+// that lobby. The label, updated on leave, correctly omits the member, and the
+// client reports no current match. The poll must go on to join the leader's
+// lobby as it did before #624, not treat the stale tracker entry as convergence
+// (which ends the find with no join and no reply).
+func TestPoll_LeftLeaderLobbyToMenu_StaleTracker_StillJoins(t *testing.T) {
+	logger, logs := followSkipObservedLogger()
+
+	env := newFollowTestEnv(t)
+	socialLobby := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}
+	env.setLeaderMatch(socialLobby)
+	env.setFollowerMatch(socialLobby) // stale: the member left for the menu
+
+	registry := newMockFollowMatchRegistry()
+	registry.SetMatch(socialLobby, &MatchLabel{
+		ID:          socialLobby,
+		Mode:        evr.ModeSocialPublic,
+		Open:        true,
+		PlayerLimit: 12,
+		Players:     []PlayerInfo{{UserID: env.leaderUID.String(), Team: 0}},
+	})
+	env.withMockNK(registry)
+
+	env.params.Mode = evr.ModeArenaPublic
+	env.params.CurrentMatchID = MatchID{} // client: at the menu
+	env.pipeline.pollFollowInterval = 10 * time.Millisecond
+	env.pipeline.pollFollowMaxDuration = 500 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	var result bool
+	func() {
+		// lobbyJoin panics on this test pipeline; the join attempt is what
+		// is asserted, via its log line.
+		defer func() { _ = recover() }()
+		result = env.pipeline.pollFollowPartyLeader(ctx, logger, env.session, env.params, env.lobbyGroup)
+	}()
+
+	if n := logs.FilterMessage("Follower's tracker presence is already in leader's social lobby, label is stale, not rejoining").Len(); n != 0 || result {
+		t.Errorf("poll treated a stale tracker entry as convergence for a member at the menu (result=%v, logged %d time(s)); "+
+			"the find ends with no join and no reply", result, n)
+	}
+	if n := logs.FilterMessage("Joining leader's social lobby during poll").Len(); n != 1 {
+		t.Errorf("expected the poll to join the leader's social lobby once, got %d", n)
 	}
 }

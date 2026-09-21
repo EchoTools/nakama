@@ -1948,17 +1948,21 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 			return false
 		}
 
-		// The label can be stale and not yet list the member. If the
-		// member's own tracker presence already points at this lobby, it is
-		// there: joining again is the da785b895 snap-back (#624).
-		if memberPresence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, PresenceStream{
-			Mode:    StreamModeService,
-			Subject: session.id,
-			Label:   StreamLabelMatchService,
-		}, session.userID); memberPresence != nil && MatchIDFromStringOrNil(memberPresence.GetStatus()) == leaderMatchID {
-			logger.Debug("Follower's tracker presence is already in leader's social lobby, label is stale, not rejoining",
-				zap.String("mid", leaderMatchID.String()))
-			return true
+		// The label can be stale and not yet list the member. If the client
+		// reports this lobby as current and the member's own tracker presence
+		// points at it, the member is there: joining again is the da785b895
+		// snap-back (#624). The tracker entry alone is not enough, since it
+		// is not cleared when the member leaves a match.
+		if params.CurrentMatchID == leaderMatchID {
+			if memberPresence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, PresenceStream{
+				Mode:    StreamModeService,
+				Subject: session.id,
+				Label:   StreamLabelMatchService,
+			}, session.userID); memberPresence != nil && MatchIDFromStringOrNil(memberPresence.GetStatus()) == leaderMatchID {
+				logger.Debug("Follower's tracker presence is already in leader's social lobby, label is stale, not rejoining",
+					zap.String("mid", leaderMatchID.String()))
+				return true
+			}
 		}
 
 		logger.Debug("Joining leader's social lobby during poll", zap.String("mid", leaderMatchID.String()))
