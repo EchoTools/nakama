@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -66,6 +67,7 @@ type GroupMetadata struct {
 	BlockVPNUsers                        bool              `json:"block_vpn_users"`               // Block VPN users
 	FraudScoreThreshold                  int               `json:"fraud_score_threshold"`         // The fraud score threshold
 	AllowedFeatures                      []string          `json:"allowed_features"`              // Allowed features
+	AllowedLevels                        []string          `json:"allowed_levels"`                // Allowed match/map levels (token strings); empty = no restriction
 	ActiveFeatures                       []string          `json:"active_features,omitempty"`     // Active feature plugins sent to clients at login
 	AlternateAccountNotificationExpiry   time.Time         `json:"alt_notification_threshold"`    // Show alternate notifications newer than this time.
 	EnableEnforcementCountInNames        bool              `json:"enable_enforcement_count_in_names"`
@@ -97,6 +99,7 @@ func NewGuildGroupMetadata(guildID string) *GroupMetadata {
 		GuildID:               guildID,
 		MatchmakingChannelIDs: make(map[string]string),
 		AllowedFeatures:       make([]string, 0),
+		AllowedLevels:         make([]string, 0),
 		CreateCommandMaxPlayersByMode: map[string]int{
 			"echo_arena":          0,
 			"echo_combat":         0,
@@ -128,6 +131,28 @@ func (g *GroupMetadata) MinimumDiscordAccountAge() int {
 // IsPrivate returns true if the group is private, meaning it has members-only matchmaking enabled.
 func (g *GroupMetadata) IsPrivate() bool {
 	return g.EnableMembersOnlyMatchmaking
+}
+
+// AllowsLevel reports whether an explicitly specified level is permitted by the
+// guild's map allowlist.
+//
+// An empty or nil AllowedLevels allowlist imposes no restriction. An
+// unspecified or unloaded level (i.e. no explicit map choice) is always
+// permitted, deferring to the caller's default selection. Otherwise the level's
+// token must be named in the allowlist.
+func (g *GroupMetadata) AllowsLevel(level evr.Symbol) bool {
+	if g == nil || len(g.AllowedLevels) == 0 {
+		return true
+	}
+	if level == evr.LevelUnspecified || level == evr.LevelUnloaded {
+		return true
+	}
+	for _, token := range g.AllowedLevels {
+		if evr.ToSymbol(token) == level {
+			return true
+		}
+	}
+	return false
 }
 
 func (g *GroupMetadata) GetDefaultBlockMinutes() int {

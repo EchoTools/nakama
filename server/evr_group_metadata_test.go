@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -206,4 +207,32 @@ func TestGroupMetadata_TimeBlockRoundtrip(t *testing.T) {
 	assert.Equal(t, original.MaintenanceMinutes, restored.MaintenanceMinutes)
 	assert.Equal(t, original.GetDefaultBlockMinutes(), restored.GetDefaultBlockMinutes())
 	assert.Equal(t, original.GetMaintenanceMinutes(), restored.GetMaintenanceMinutes())
+}
+
+// TestGroupMetadata_AllowsLevel covers the per-guild map allowlist predicate. An
+// empty allowlist imposes no restriction; an unspecified/unloaded level (no
+// explicit map choice) is always permitted; otherwise a level is permitted only
+// when its token is named in the allowlist.
+func TestGroupMetadata_AllowsLevel(t *testing.T) {
+	cases := []struct {
+		name    string
+		allowed []string
+		level   evr.Symbol
+		want    bool
+	}{
+		{name: "nil allowlist allows any level", allowed: nil, level: evr.LevelFission, want: true},
+		{name: "empty allowlist allows any level", allowed: []string{}, level: evr.LevelGauss, want: true},
+		{name: "allowlist allows a named level", allowed: []string{"mpl_combat_fission", "mpl_combat_dyson"}, level: evr.LevelFission, want: true},
+		{name: "allowlist rejects an unnamed level", allowed: []string{"mpl_combat_fission"}, level: evr.LevelDyson, want: false},
+		{name: "unspecified level is always allowed", allowed: []string{"mpl_combat_fission"}, level: evr.LevelUnspecified, want: true},
+		{name: "unloaded level is always allowed", allowed: []string{"mpl_combat_fission"}, level: evr.LevelUnloaded, want: true},
+		{name: "unknown allowlist token rejects a real level", allowed: []string{"not_a_real_level"}, level: evr.LevelFission, want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := &GroupMetadata{AllowedLevels: tc.allowed}
+			assert.Equal(t, tc.want, md.AllowsLevel(tc.level))
+		})
+	}
 }

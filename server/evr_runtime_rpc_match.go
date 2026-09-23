@@ -111,6 +111,10 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		return "", runtime.NewError("user must have the `allocator` in the guild.", StatusPermissionDenied)
 	}
 
+	if level := evr.ToSymbol(request.Level); !gg.AllowsLevel(level) {
+		return "", runtime.NewError(fmt.Sprintf("guild does not allow level '%s'", level.String()), StatusPermissionDenied)
+	}
+
 	// Increase the expiry time to a minimum of 1 minute from now
 	if request.ExpiryTime.AsTime().Before(time.Now().Add(1 * time.Minute)) {
 		request.ExpiryTime = timestamppb.New(time.Now().Add(1 * time.Minute))
