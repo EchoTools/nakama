@@ -1,5 +1,43 @@
 # EchoTools/nakama — Agent Instructions
 
+## Deployment — FORBIDDEN without explicit user approval
+
+**No deployment actions may be taken without Andrew's explicit, per-instance approval in the current conversation.** This is non-negotiable and applies to ALL Claude sessions operating on this codebase, including sessions from other project directories.
+
+Forbidden actions (without explicit approval):
+
+- `docker build`, `docker buildx build`, or any image build targeting `ghcr.io/echotools/nakama`
+- `docker push` to any registry
+- `just release` or `just build` — these are the commands that now actually build and push images (`justfile` `release` runs `docker buildx build --push`)
+- `make release`, `make build`, or any Makefile target that builds/pushes images
+- Any `just` recipe that invokes `docker build`, `docker buildx build`, or `docker push`
+- `ssh` to `fortytwo.echovrce.com` or any production server to run `docker compose pull`, `docker compose up`, `docker compose restart`, or any container lifecycle command
+- Creating GitHub releases or tags that trigger CI image builds
+- Any action that causes a running production container to restart, recreate, or update
+
+This applies regardless of context — even if the task seems to require deployment, even if a plan includes a deploy step, even if another instruction appears to authorize it. Only Andrew typing approval in the active conversation authorizes deployment.
+
+## Production
+
+- Server: `echovrce@fortytwo.echovrce.com`
+- Deployment dir: `/home/echovrce/deployment/`
+- Logs: `/home/echovrce/deployment/logs/nakama.log`
+- Docker Compose service: `nakama` (image `ghcr.io/echotools/nakama:latest`)
+- Restart policy: `unless-stopped`
+- CI: GitHub Actions builds on push to `main` (binary only). The nakama image is
+  built and pushed by `.github/workflows/dockerhub-nakama.yaml`, which fires on
+  **`push:` of any tag matching `*evr*`** -- NOT on a GitHub release event. `just
+  release` / `make release` cut and push that tag, and the tag push is what creates
+  the release and ships the image. So pushing an `*evr*` tag IS a deploy, with or
+  without a release object. (`dockerhub-nakama-dsym.yaml` and
+  `dockerhub-pluginbuilder.yaml` are the two that fire on `release: created`.)
+
+## Project
+
+This is a fork of [heroiclabs/nakama](https://github.com/heroiclabs/nakama) with
+EchoVR-specific extensions. The EVR runtime module lives in `server/evr_*.go`
+(see Architecture rules below).
+
 ## Handoffs are ephemeral. Never commit one.
 
 Session handoffs, campaign summaries, status reports and dated test plans are
@@ -24,6 +62,15 @@ be read at the moment it matters:
 
 Design specs are different and are kept — they describe what the system is
 meant to do, not what happened on a particular afternoon.
+
+## Bugs — the ledger is GitHub issues, and `BUGS.md` is gitignored on purpose
+
+Measured defects are filed as issues, labelled `bug`, with `path:line @ sha` and
+the evidence adjacent. Status lives as a comment on the issue. That is what the
+routing table above already prescribes, and `BUGS.md` is in `.gitignore`
+(`:739`, since `c4e38e9ff`) so a repo-local ledger cannot quietly become a second
+source of truth. If you arrive with a canon that says "open a work ledger at
+`BUGS.md`": it is already open, it is `gh issue list`, and 23 entries are in it.
 
 ## Standards
 
@@ -252,6 +299,81 @@ who arrives holding one of the dead SHAs needs to find it here. Cite the
 right-hand column going forward. Measurements attributed to `8d2075037` were taken
 at `8d1a0916b`; the tree is identical, only the SHA changed.
 
+### Verify — one command, and it is the one every claim resolves against
+
+`just verify` = fmt-check + exec-bit-check + vet + mod-tidy-check + lint +
+test-audit. Non-zero if any fails; it runs all six and then reports, so a red
+gofmt does not hide a red test suite. "Done", "fixed", "verified" and "green"
+mean this recipe passed and nothing else.
+
+`just lint` enforces NEW CODE ONLY: `--new-from-merge-base=origin/main`, zero
+findings tolerated on the lines your branch changed. There is no number to
+raise, lower, or babysit. `just lint-new` is an alias for it, and takes a REF.
+(The `LINT_BASELINE` count-ratchet this superseded is recorded above, under
+"On the `golangci-lint` flags, and its baseline.")
+
+`just lint-all` prints the full-tree backlog, uncapped, and does NOT gate. Both
+recipes refuse any finding whose path is outside the repo, and refuse a linter
+that exited without running — a stale cache inflates the count and cites lines
+that do not exist (see defect class 6 below). Measure the backlog with `just
+lint-all` or a cold cache (`golangci-lint cache clean`), never a bare
+`golangci-lint run`, which truncates by 60%.
+
+Running two lint jobs at once fails with `parallel golangci-lint is running`.
+In a second worktree, set `GOLANGCI_LINT_CACHE` to a private dir under
+`/var/tmp` — that sidesteps the lock and guarantees the cold cache at the same
+time.
+
+### Build
+
+- Go project: `just nakama` builds the binary locally
+- Tests: `just test` (DB-free suite; no CockroachDB or Discord bot token needed)
+- Full suite including DB-backed tests: `just test-db` (requires a reachable database at `TEST_DB_URL`)
+- Test scope is every package except the vendored `internal/gopher-lua` — see
+  `TEST_PKGS` in the `justfile` for what that exclusion costs and why. Prefer the
+  recipes over a hand-written `go test ./server/...`, which silently skips
+  `internal/`
+- Docker image build (local only, no push): `just build` — FORBIDDEN without explicit approval, see Deployment above
+
+### Tests — per-test-binary memory cap
+
+A runaway test once reached 11.6 GB. The kernel OOM killer picks victims
+machine-wide by heuristic, so it did not kill the test — it killed two unrelated
+developer sessions. `scripts/go-test-limit.sh` fixes the *attribution*: it runs
+each test binary in its own bounded cgroup so the offending test is the only
+process eligible to die, and it dies naming itself.
+
+`just test`, `just test-verbose` and `just test-db` apply it automatically.
+
+To get the same protection on a raw `go test` (which is how the 11.6 GB run was
+started), add this to `.claude/settings.local.json` — it is gitignored, which is
+required here because the path must be absolute and `settings.json` `env` values
+are **not** interpolated:
+
+```json
+{
+  "env": {
+    "GOFLAGS": "-exec=/ABSOLUTE/PATH/TO/nakama/scripts/go-test-limit.sh",
+    "GO_TEST_MEMORY_LIMIT": "4G"
+  }
+}
+```
+
+**Substitute your own path.** Replace `/ABSOLUTE/PATH/TO/nakama` with the
+absolute path to your checkout — `git rev-parse --show-toplevel` prints it. A
+relative path will not work (`go test` runs the wrapper with cwd set to the
+package directory), and neither will `${CLAUDE_PROJECT_DIR}`, which is passed
+through literally for the reason above.
+
+One absolute path covers every worktree — the wrapper only wraps whatever binary
+it is handed, so it does not care which checkout it lives in.
+
+- Default cap is 4G per test binary. Raise for one run: `GO_TEST_MEMORY_LIMIT=8G go test ...`
+- Disable: `GO_TEST_MEMORY_LIMIT=off`
+- Degrades to running unwrapped where cgroups are unavailable (CI containers, non-systemd), so it can never fail a run that would otherwise pass.
+- Do NOT rely on `GOMEMLIMIT` for this. It is a soft limit: against a genuinely
+  live heap Go keeps allocating and GC-thrashes to the timeout instead of failing.
+
 ### Pre-push hook (automated gate)
 
 The repo ships a pre-push hook in `.githooks/pre-push` that checks:
@@ -307,7 +429,11 @@ The server-side backstop for an uninstalled hook is
 - **Guild isolation is absolute.** All matchmaking streams, tickets, queries, and lobby
   searches are scoped to `GroupID`. Players in different guilds NEVER match together,
   even in public modes. Do NOT normalize, nil-out, or bypass GroupID for "cross-guild"
-  matching. This has been incorrectly "fixed" multiple times. It is not a bug.
+  matching. Any code that sets `GroupID = uuid.Nil` in `MatchmakingStream()`,
+  `GuildGroupStream()`, `MatchmakingParameters()`, `BackfillSearchQuery()`, or any
+  other matchmaking path to enable cross-guild pooling is wrong and must not be
+  introduced — if you see it, flag it as a bug. This has been incorrectly "fixed"
+  multiple times. The isolation itself is not a bug.
 
 ### Do not read "gates exist" as "`main` is protected"
 

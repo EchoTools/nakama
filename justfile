@@ -575,7 +575,7 @@ verify:
 # log caller line numbers).
 #
 # This recipe does NOT tag and does NOT push. `just release` is a separate,
-# human-only step -- see CLAUDE.md.
+# human-only step -- see AGENTS.md.
 release-check MILESTONE REF="v3.27.2-evr.322":
     #!/usr/bin/env bash
     set -u
@@ -665,7 +665,7 @@ release-check MILESTONE REF="v3.27.2-evr.322":
     echo "======================================================================"
     if [ ${#failed[@]} -eq 0 ]; then
         echo "release-check: releasable -- {{ REF }}..HEAD is clean and no blocker is open"
-        echo "Tagging is a human step. See CLAUDE.md."
+        echo "Tagging is a human step. See AGENTS.md."
         exit 0
     fi
     echo "release-check: ${#failed[@]} of 3 FAILED -- ${failed[*]}"
