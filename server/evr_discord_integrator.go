@@ -688,11 +688,8 @@ func truncateRuneSafe(s string, maxChars int) string {
 // newGuildMetadata builds the initial GroupMetadata for a guild that is
 // registering with Nakama for the first time.
 //
-// It does not inherit suspensions from the service guild, or from anywhere
-// else: EchoVRCE retired global suspension inheritance, so a new guild starts
-// with an empty SuspensionInheritanceGroupIDs and each guild owner chooses
-// what (if anything) to inherit from through their own settings instead of
-// getting the service guild's global bans for free on creation.
+// EchoVRCE retired global suspension inheritance. New guilds start with no
+// inherited suspensions; guild owners choose their own.
 func newGuildMetadata(guildID string) *GroupMetadata {
 	return NewGuildGroupMetadata(guildID)
 }
