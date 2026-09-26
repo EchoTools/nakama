@@ -638,7 +638,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		}
 	}
 
-	params.ignoreDisabledAlternates = loginHistory.IgnoreDisabledAlternates
+	params.ignoreSuspensionsOfAltAccounts = loginHistory.IgnoreSuspensionsOfAltAccounts
 
 	// Ensure the current login entry is in history so alt search includes it.
 	loginHistory.Update(params.xpID, session.clientIP, params.loginPayload, params.IsWebsocketAuthenticated)
@@ -658,10 +658,10 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	// stricter test.
 	//
 	// Off, and it stays off unless the service owner says otherwise -- see
-	// RejectDisabledAlternatesOnMachineMatch. ignoreDisabledAlternates is
+	// RejectDisabledAlternatesOnMachineMatch. ignoreSuspensionsOfAltAccounts is
 	// honoured here exactly as the delayed-kick path honours it, so an account
 	// cleared by a moderator stays cleared.
-	if ServiceSettings().RejectDisabledAlternatesOnMachineMatch && !params.ignoreDisabledAlternates {
+	if ServiceSettings().RejectDisabledAlternatesOnMachineMatch && !params.ignoreSuspensionsOfAltAccounts {
 		if machineIDs := machineMatchedAlts(loginHistory, firstIDs, detector); len(machineIDs) > 0 {
 			disabled, err := disabledAccountIDs(ctx, p.nk, machineIDs)
 			if err != nil {

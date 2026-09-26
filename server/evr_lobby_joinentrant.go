@@ -532,7 +532,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 			}
 			if r.UserID != userID {
 				// The suspension is for an alternate account.
-				if params.ignoreDisabledAlternates {
+				if params.ignoreSuspensionsOfAltAccounts {
 					// User is excluded from suspension checks if they are ignoring disabled alternates.
 					continue
 				}
