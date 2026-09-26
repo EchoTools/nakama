@@ -517,6 +517,19 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		return fmt.Errorf("failed to check enforcement suspensions: %w", freshErr)
 	}
 
+	// The merged result keeps one record per (group, mode): whichever expires
+	// last, the player's or an alt's. The alt settings below discard alt records,
+	// and must not discard the player's own suspension along with them.
+	freshOwnEnforcements, freshOwnErr := CheckOwnEnforcementSuspensions(userID, freshJournals, p.guildGroupRegistry.InheritanceByParentGroupID())
+	if freshOwnErr != nil {
+		p.logger.Error("failed to check own enforcement suspensions at join time; denying join", zap.String("user_id", userID), zap.Error(freshOwnErr))
+		return fmt.Errorf("failed to check enforcement suspensions: %w", freshOwnErr)
+	}
+	ownRecord := func(gameMode evr.Symbol) (GuildEnforcementRecord, bool) {
+		r, ok := freshOwnEnforcements[groupID][gameMode]
+		return r, ok && !r.IsExpired()
+	}
+
 	var (
 		suspensionRecord GuildEnforcementRecord
 	)
@@ -533,12 +546,19 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 			if r.UserID != userID {
 				// The suspension is for an alternate account.
 				if params.ignoreDisabledAlternates {
-					// User is excluded from suspension checks if they are ignoring disabled alternates.
+					// Alt records are excluded if they are ignoring disabled alternates;
+					// their own suspension is not.
+					if o, ok := ownRecord(gameMode); ok && !o.Expiry.Before(suspensionRecord.Expiry) {
+						suspensionRecord = o
+					}
 					continue
 				}
 				if gg.RejectPlayersWithSuspendedAlternates {
 					suspensionRecord = r
 				} else {
+					if o, ok := ownRecord(gameMode); ok && !o.Expiry.Before(suspensionRecord.Expiry) {
+						suspensionRecord = o
+					}
 					logAuditMessage(fmt.Sprintf("Allowed alternate account <@!%s> (%s) of suspended user <@!%s> (%s): `%s` (expires <t:%d:R>)", lobbyParams.DiscordID, lobbyParams.DisplayName, r.UserID, session.Username(), r.UserNoticeText, r.Expiry.Unix()))
 				}
 			} else {
