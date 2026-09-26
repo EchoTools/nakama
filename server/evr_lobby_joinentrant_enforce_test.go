@@ -300,3 +300,108 @@ func TestEnforceJoinSuspension_ExpiredSuspensionAllowed(t *testing.T) {
 		t.Fatalf("expected expired suspension to be allowed, got: %v", err)
 	}
 }
+
+// --- own suspension is never masked by alt settings ---
+
+// withIgnoreDisabledAlternates sets the player's ignore_disabled_alternates flag.
+func withIgnoreDisabledAlternates(s *seatTestSession) *seatTestSession {
+	ptr := s.ctx.Value(ctxSessionParametersKey{}).(*atomic.Pointer[SessionParameters])
+	ptr.Load().ignoreDisabledAlternates = true
+	return s
+}
+
+// A player suspended in a guild whose alt is suspended with a LATER expiry: the
+// alt's record wins the merged (group, mode) slot in CheckEnforcementSuspensions,
+// and the alt toggles then discard it. The player's own suspension must still
+// reject the join.
+func TestEnforceJoinSuspension_OwnSuspensionNotMaskedByAlt(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		ignoreAlts   bool
+		guildRejects bool // guild RejectPlayersWithSuspendedAlternates
+		ownExpiry    time.Duration
+		altExpiry    time.Duration
+		ownSuspended bool
+		altSuspended bool
+		wantReject   bool
+	}{
+		{"own + later alt, player ignores alts", true, true, 1 * time.Hour, 48 * time.Hour, true, true, true},
+		{"own + later alt, guild does not reject alts", false, false, 1 * time.Hour, 48 * time.Hour, true, true, true},
+		{"own + later alt, both toggles off", true, false, 1 * time.Hour, 48 * time.Hour, true, true, true},
+		{"own + earlier alt, player ignores alts", true, true, 48 * time.Hour, 1 * time.Hour, true, true, true},
+		{"alt only, player ignores alts", true, true, 0, 48 * time.Hour, false, true, false},
+		{"alt only, guild does not reject alts", false, false, 0, 48 * time.Hour, false, true, false},
+		{"own only, player ignores alts", true, true, 1 * time.Hour, 0, true, false, true},
+		{"own only, no alt involvement", false, true, 1 * time.Hour, 0, true, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			groupID := uuid.Must(uuid.NewV4()).String()
+			userID := uuid.Must(uuid.NewV4()).String()
+			altID := uuid.Must(uuid.NewV4()).String()
+			nk := newSeatTestNK()
+
+			if tt.ownSuspended {
+				writeSuspension(t, nk, userID, groupID, time.Now().Add(tt.ownExpiry), "own suspension")
+			}
+			if tt.altSuspended {
+				writeSuspension(t, nk, altID, groupID, time.Now().Add(tt.altExpiry), "alt suspension")
+			}
+
+			ggReg := seatTestGuildGroupRegistry(map[string]*GuildGroup{
+				groupID: seatTestGuildGroup(groupID, "TestGuild", tt.guildRejects),
+			})
+			session := newSeatTestSession(uuid.FromStringOrNil(userID), []string{userID, altID})
+			if tt.ignoreAlts {
+				withIgnoreDisabledAlternates(session)
+			}
+
+			err := enforceJoinSuspension(context.Background(), zap.NewNop(), nk, ggReg,
+				makeLabel(groupID, evr.ModeArenaPublic), session)
+			if !tt.wantReject {
+				if err != nil {
+					t.Fatalf("expected join to be allowed, got: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected the player's own suspension to reject the join, got nil")
+			}
+			if lobbyErr, ok := err.(LobbyError); !ok || lobbyErr.Code() != KickedFromLobbyGroup {
+				t.Fatalf("expected KickedFromLobbyGroup LobbyError, got %T: %v", err, err)
+			}
+		})
+	}
+}
+
+func TestCheckOwnEnforcementSuspensions_ExcludesAlts(t *testing.T) {
+	t.Parallel()
+
+	groupID := uuid.Must(uuid.NewV4()).String()
+	userID := uuid.Must(uuid.NewV4()).String()
+	altID := uuid.Must(uuid.NewV4()).String()
+	nk := newSeatTestNK()
+	writeSuspension(t, nk, userID, groupID, time.Now().Add(1*time.Hour), "own")
+	writeSuspension(t, nk, altID, groupID, time.Now().Add(48*time.Hour), "alt")
+
+	journals, err := EnforcementJournalsLoad(context.Background(), nk, []string{userID, altID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	merged, _ := CheckEnforcementSuspensions(journals, nil)
+	if got := merged[groupID][evr.ModeArenaPublic].UserID; got != altID {
+		t.Fatalf("premise: merged slot should hold the later-expiring alt record, got %q", got)
+	}
+	own, err := CheckOwnEnforcementSuspensions(userID, journals, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := own[groupID][evr.ModeArenaPublic].UserID; got != userID {
+		t.Fatalf("own-only result should hold the player's record, got %q", got)
+	}
+}

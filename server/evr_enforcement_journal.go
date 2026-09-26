@@ -560,6 +560,24 @@ func CheckEnforcementSuspensions(journals GuildEnforcementJournalList, inheritan
 	return activeEnforcements, nil
 }
 
+// CheckOwnEnforcementSuspensions is CheckEnforcementSuspensions restricted to
+// the player's own journal.
+//
+// CheckEnforcementSuspensions merges the player and every alt into one record
+// per (group, mode) slot, keeping the record that expires last. When an alt's
+// suspension outlasts the player's own, the alt's record occupies the slot and
+// the player's own record is not in the result at all. Callers that let alt
+// settings (ignore_disabled_alternates, RejectPlayersWithSuspendedAlternates)
+// discard an alt record must therefore consult this result before admitting:
+// the player's own suspension is not subject to those settings.
+func CheckOwnEnforcementSuspensions(userID string, journals GuildEnforcementJournalList, inheritanceMap map[string][]string) (ActiveGuildEnforcements, error) {
+	own := GuildEnforcementJournalList{}
+	if j, ok := journals[userID]; ok {
+		own[userID] = j
+	}
+	return CheckEnforcementSuspensions(own, inheritanceMap)
+}
+
 func FormatDuration(d time.Duration) string {
 
 	// Check if this is a "lifetime" duration (>3 years)
