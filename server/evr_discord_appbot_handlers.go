@@ -647,6 +647,10 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		return nil, 0, status.Error(codes.PermissionDenied, "user does not have the allocator role in this guild.")
 	}
 
+	if !gg.AllowsLevel(level) {
+		return nil, 0, status.Errorf(codes.PermissionDenied, "guild does not allow level '%s'", level.String())
+	}
+
 	// If user is a global operator, ensure the current guild group is included (avoid duplicates)
 	if isGlobalOperator {
 		found := false
@@ -725,6 +729,10 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 
 	if isCreateModeExcluded(mode, group.CreateCommandExcludedModes) {
 		return nil, 0, status.Errorf(codes.PermissionDenied, "guild does not allow /create for mode '%s'", mode.String())
+	}
+
+	if !group.AllowsLevel(level) {
+		return nil, 0, status.Errorf(codes.PermissionDenied, "guild does not allow level '%s'", level.String())
 	}
 
 	isGuildModerator := group.IsEnforcer(userID) || group.IsAuditor(userID)

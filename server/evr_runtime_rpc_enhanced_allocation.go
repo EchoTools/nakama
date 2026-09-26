@@ -8,6 +8,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 // EnhancedAllocateMatchRequest represents an enhanced allocation request with reservation support
@@ -59,6 +60,17 @@ func ReserveMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 	if request.OwnerID == "" {
 		request.OwnerID = userID
+	}
+
+	// An explicitly specified level must be within the guild's map allowlist.
+	if request.Level != "" {
+		gg, err := GuildGroupLoad(ctx, nk, request.GroupID)
+		if err != nil {
+			return "", runtime.NewError("failed to load guild group: "+err.Error(), StatusInternalError)
+		}
+		if level := evr.ToSymbol(request.Level); !gg.AllowsLevel(level) {
+			return "", runtime.NewError(fmt.Sprintf("guild does not allow level '%s'", level.String()), StatusPermissionDenied)
+		}
 	}
 
 	// Initialize managers
