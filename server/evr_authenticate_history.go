@@ -156,20 +156,44 @@ func (h *LoginHistoryEntry) Items() []string {
 }
 
 type LoginHistory struct {
-	Active                   map[string]*LoginHistoryEntry      `json:"active"`                     // map[deviceID]DeviceHistoryEntry
-	History                  map[string]*LoginHistoryEntry      `json:"history"`                    // map[deviceID]DeviceHistoryEntry
-	Cache                    []string                           `json:"cache"`                      // list of IP addresses, EvrID's, HMD Serial Numbers, and System Data
-	XPIs                     map[string]time.Time               `json:"xpis"`                       // list of XPIs
-	ClientIPs                map[string]time.Time               `json:"client_ips"`                 // map[clientIP]time.Time
-	AuthorizedIPs            map[string]time.Time               `json:"authorized_client_ips"`      // map[clientIP]time.Time
-	DeniedClientAddresses    []string                           `json:"denied_client_addrs"`        // list of denied IPs
-	PendingAuthorizations    map[string]*LoginHistoryEntry      `json:"pending_authorizations"`     // map[XPID:ClientIP]LoginHistoryEntry
-	SecondDegreeAlternates   []string                           `json:"second_degree"`              // []userID
-	AlternateMatches         map[string][]*AlternateSearchMatch `json:"alternate_accounts"`         // map of alternate user IDs and what they have in common
-	GroupNotifications       map[string]map[string]time.Time    `json:"notified_groups"`            // list of groups that have been notified of this alternate login
-	IgnoreDisabledAlternates bool                               `json:"ignore_disabled_alternates"` // Ignore disabled alternates
-	userID                   string                             // user ID
-	version                  string                             // storage record version
+	Active                         map[string]*LoginHistoryEntry      `json:"active"`                             // map[deviceID]DeviceHistoryEntry
+	History                        map[string]*LoginHistoryEntry      `json:"history"`                            // map[deviceID]DeviceHistoryEntry
+	Cache                          []string                           `json:"cache"`                              // list of IP addresses, EvrID's, HMD Serial Numbers, and System Data
+	XPIs                           map[string]time.Time               `json:"xpis"`                               // list of XPIs
+	ClientIPs                      map[string]time.Time               `json:"client_ips"`                         // map[clientIP]time.Time
+	AuthorizedIPs                  map[string]time.Time               `json:"authorized_client_ips"`              // map[clientIP]time.Time
+	DeniedClientAddresses          []string                           `json:"denied_client_addrs"`                // list of denied IPs
+	PendingAuthorizations          map[string]*LoginHistoryEntry      `json:"pending_authorizations"`             // map[XPID:ClientIP]LoginHistoryEntry
+	SecondDegreeAlternates         []string                           `json:"second_degree"`                      // []userID
+	AlternateMatches               map[string][]*AlternateSearchMatch `json:"alternate_accounts"`                 // map of alternate user IDs and what they have in common
+	GroupNotifications             map[string]map[string]time.Time    `json:"notified_groups"`                    // list of groups that have been notified of this alternate login
+	IgnoreSuspensionsOfAltAccounts bool                               `json:"ignore_suspensions_of_alt_accounts"` // Ignore suspensions (and disabled state) of alt accounts
+	// Deprecated: renamed to IgnoreSuspensionsOfAltAccounts. Kept only so records
+	// written under the old key can still be read; UnmarshalJSON folds it into the
+	// new field and clears it, and omitempty then drops the key on the next write.
+	// Remove this field, and the fold, once a GC pass has rewritten every record.
+	IgnoreDisabledAlternates bool   `json:"ignore_disabled_alternates,omitempty"`
+	userID                   string // user ID
+	version                  string // storage record version
+}
+
+// UnmarshalJSON migrates the deprecated ignore_disabled_alternates key into
+// ignore_suspensions_of_alt_accounts. It is the one place a LoginHistory is
+// decoded (StorableRead, the batch reader, and any direct json.Unmarshal all
+// land here), so no reader ever sees the old field set.
+//
+// Either key being true yields true: a true is never turned into false, and a
+// moderator editing the stored JSON by hand can use the old key or the new one.
+func (h *LoginHistory) UnmarshalJSON(data []byte) error {
+	type plain LoginHistory // no methods, so no recursion
+	if err := json.Unmarshal(data, (*plain)(h)); err != nil {
+		return err
+	}
+	if h.IgnoreDisabledAlternates {
+		h.IgnoreSuspensionsOfAltAccounts = true
+		h.IgnoreDisabledAlternates = false
+	}
+	return nil
 }
 
 func (h *LoginHistory) StorageMeta() StorableMetadata {
@@ -516,7 +540,7 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, logger runtime.Logg
 	}
 
 	// Check if the player has disabled alternates
-	if !h.IgnoreDisabledAlternates {
+	if !h.IgnoreSuspensionsOfAltAccounts {
 		userIDs := make([]string, 0, len(matches))
 		for userID := range h.AlternateMatches {
 			userIDs = append(userIDs, userID)

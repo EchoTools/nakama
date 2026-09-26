@@ -64,7 +64,7 @@ func enforceJoinSuspension(ctx context.Context, logger *zap.Logger, nk runtime.N
 
 	// Alt suspension: respect the guild's per-guild toggle.
 	if record.UserID != userID {
-		if params.ignoreDisabledAlternates {
+		if params.ignoreSuspensionsOfAltAccounts {
 			return nil
 		}
 		if gg != nil && !gg.RejectPlayersWithSuspendedAlternates {
