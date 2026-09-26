@@ -177,3 +177,23 @@ func TestGuildSyncRejectsUnnamedGuild(t *testing.T) {
 		t.Fatal("guildSync refused a NAMED guild too; the guard is not keyed on the name")
 	}
 }
+
+// TestNewGuildMetadataDoesNotInheritServiceGuildSuspensions pins a deliberate
+// policy change: a newly registered guild must start with NO
+// SuspensionInheritanceGroupIDs, even when a service guild is configured.
+// EchoVRCE retired global-ban inheritance -- guilds now opt in to inheriting
+// from anywhere themselves, through their own settings, instead of getting
+// the service guild's suspensions for free on creation.
+//
+// newGuildMetadata is the small function guildSync's new-guild branch calls
+// to build that initial metadata; guildSync itself cannot be driven to this
+// point in a unit test without a live discordgo session and database (see
+// TestGuildSyncRejectsUnnamedGuild's nil-session panic), so this pins the
+// extracted constructor directly.
+func TestNewGuildMetadataDoesNotInheritServiceGuildSuspensions(t *testing.T) {
+	gm := newGuildMetadata("1522261692355055849")
+
+	if gm.SuspensionInheritanceGroupIDs != nil {
+		t.Fatalf("newGuildMetadata set SuspensionInheritanceGroupIDs = %#v for a new guild; want nil (no auto-inherited suspensions)", gm.SuspensionInheritanceGroupIDs)
+	}
+}
