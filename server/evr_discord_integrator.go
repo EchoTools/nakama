@@ -685,6 +685,18 @@ func truncateRuneSafe(s string, maxChars int) string {
 	return string(runes[:maxChars])
 }
 
+// newGuildMetadata builds the initial GroupMetadata for a guild that is
+// registering with Nakama for the first time.
+//
+// It does not inherit suspensions from the service guild, or from anywhere
+// else: EchoVRCE retired global suspension inheritance, so a new guild starts
+// with an empty SuspensionInheritanceGroupIDs and each guild owner chooses
+// what (if anything) to inherit from through their own settings instead of
+// getting the service guild's global bans for free on creation.
+func newGuildMetadata(guildID string) *GroupMetadata {
+	return NewGuildGroupMetadata(guildID)
+}
+
 // guildSync registers (or updates) the Nakama group backing a Discord guild.
 // When the guild owner is globally banned, the sync normally leaves the guild;
 // leaveOnBannedOwner controls that. Reconciliation during pruning passes false
@@ -765,13 +777,7 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 	groupID = d.GuildIDToGroupID(guild.ID)
 	if groupID == "" {
 		// This is a new guild.
-		gm := NewGuildGroupMetadata(guild.ID)
-		if serviceGuildID := ServiceSettings().ServiceGuildID; serviceGuildID != "" && serviceGuildID != guild.ID {
-			if serviceGroupID := d.GuildIDToGroupID(serviceGuildID); serviceGroupID != "" {
-				// add the service guild ID to the list of inherited groups (global suspensions)
-				gm.SuspensionInheritanceGroupIDs = []string{serviceGroupID}
-			}
-		}
+		gm := newGuildMetadata(guild.ID)
 
 		metadataMap, err := gm.MarshalToMap()
 		if err != nil {
