@@ -1,10 +1,12 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 // TestServiceSettings_NeverReturnsNil verifies that ServiceSettings() returns
@@ -79,4 +81,40 @@ func TestPruneSettingsWireKeysAreLoadBearing(t *testing.T) {
 	// documentation tells operators to set.
 	_, hasReportOnly := prune["report_only"]
 	require.True(t, hasReportOnly, "report_only missing from the serialized prune settings")
+}
+
+// TestServiceSettingsLoad_ReachesCGNATDetector: ServiceSettingsLoad is the path
+// that reads Global/settings, at boot and on every 30 s poll. The CGNAT
+// detector learns its CIDRs and commodity prefixes only from settings, so a
+// load must reach it; otherwise it runs unconfigured until something else
+// happens to call ServiceSettingsUpdate, and an edit to the stored record
+// never arrives.
+func TestServiceSettingsLoad_ReachesCGNATDetector(t *testing.T) {
+	prevSettings := serviceSettings.Load()
+	t.Cleanup(func() { serviceSettings.Store(prevSettings) })
+	serviceSettings.Store(nil)
+
+	d := NewCGNATDetector(nil)
+	prevDetector := GetCGNATDetector()
+	SetCGNATDetector(d)
+	t.Cleanup(func() { SetCGNATDetector(prevDetector) })
+
+	stored := ServiceSettingsData{CGNAT: CGNATSettings{
+		CIDRs:                    []string{"100.64.0.0/10", "203.0.113.0/24"},
+		CommodityProfilePrefixes: []string{"Meta Quest 3::"},
+	}}
+	raw, err := json.Marshal(stored)
+	require.NoError(t, err)
+	nk := newOCCTestNakamaModule()
+	nk.seedObject(SystemUserID, ServiceSettingsStorageCollection, ServiceSettingStorageKey, string(raw))
+
+	_, err = ServiceSettingsLoad(context.Background(), NewRuntimeGoLogger(zap.NewNop()), nk)
+	require.NoError(t, err)
+
+	if !d.IsCGNAT("203.0.113.7") {
+		t.Error("IsCGNAT(203.0.113.7) = false after ServiceSettingsLoad; the stored CIDR 203.0.113.0/24 never reached the detector")
+	}
+	if profile := "Meta Quest 3::WIFI::::Unknown::3::6::0::0"; !d.IsWeakSignal(profile) {
+		t.Errorf("IsWeakSignal(%q) = false after ServiceSettingsLoad; the stored commodity prefix never reached the detector", profile)
+	}
 }
