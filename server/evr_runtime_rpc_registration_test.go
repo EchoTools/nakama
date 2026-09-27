@@ -1,10 +1,14 @@
 package server
 
 import (
+	"context"
+	"database/sql"
 	"testing"
 
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 // findRPCRegistration returns the registration for the given RPC ID, or nil.
@@ -76,4 +80,33 @@ func TestRegistration_NoDuplicateRPCIDs(t *testing.T) {
 	for id, n := range seen {
 		assert.Equalf(t, 1, n, "RPC ID %q registered %d times; must be unique", id, n)
 	}
+}
+
+// TestRegistration_SigninDiscordReachableWithoutSession guards against the
+// regression where signin/discord inherited DefaultRPCPermission (auth + Global
+// Operators). It is the sign-in endpoint: its caller has no session yet, so the
+// middleware must let an unauthenticated call through to the handler, as it does
+// for device/auth/request.
+func TestRegistration_SigninDiscordReachableWithoutSession(t *testing.T) {
+	regs := buildEVRRPCRegistrations(nil, nil)
+
+	reg := findRPCRegistration(regs, "signin/discord")
+	require.NotNil(t, reg, "signin/discord must be registered")
+
+	// The permission RegisterEVRRPCs actually applies.
+	perm := DefaultRPCPermission()
+	if reg.Permission != nil {
+		perm = *reg.Permission
+	}
+
+	reached := false
+	wrapped := WithRPCAuthorization(reg.ID, perm, func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+		reached = true
+		return "", nil
+	})
+
+	// No RUNTIME_CTX_USER_ID: an anonymous browser, or an http_key call.
+	_, err := wrapped(context.Background(), NewRuntimeGoLogger(zap.NewNop()), nil, nil, "")
+	require.NoError(t, err, "signin/discord must not require a session; its caller is signing in")
+	assert.True(t, reached, "the middleware must hand an unauthenticated signin/discord call to the handler")
 }
