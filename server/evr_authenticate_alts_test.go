@@ -204,7 +204,6 @@ func TestFirstLogin_EnforcementUserIDs_MissesAlts(t *testing.T) {
 func TestFilterStrongAlts(t *testing.T) {
 	detector := NewCGNATDetector(nil)
 	detector.UpdateSettings(CGNATSettings{
-		ASNs:                     []int{14593, 21928},
 		CIDRs:                    []string{"100.64.0.0/10"},
 		CommodityProfilePrefixes: []string{"Meta Quest 2::", "Meta Quest 3::", "Meta Quest 3S::"},
 	})

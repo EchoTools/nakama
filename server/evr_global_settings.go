@@ -108,7 +108,6 @@ type ServiceSettingsData struct {
 // CGNATSettings configures detection of CGNAT and shared-IP providers
 // to prevent false-positive alt account linking.
 type CGNATSettings struct {
-	ASNs                      []int    `json:"asns"`                       // ASN numbers known to use CGNAT (e.g. 14593 for Starlink, 21928 for T-Mobile)
 	CIDRs                     []string `json:"cidrs"`                      // CIDR ranges known to be CGNAT (e.g. "100.64.0.0/10")
 	CommodityProfilePrefixes  []string `json:"commodity_profile_prefixes"` // SystemProfile prefixes for commodity hardware (e.g. "Meta Quest 3::")
 	HeuristicEnabled          bool     `json:"heuristic_enabled"`          // Enable heuristic CGNAT detection (warns moderators only)
@@ -561,9 +560,6 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 	}
 
 	// Seed CGNAT detection defaults
-	if len(data.CGNAT.ASNs) == 0 {
-		data.CGNAT.ASNs = []int{14593, 21928} // Starlink, T-Mobile
-	}
 	if len(data.CGNAT.CIDRs) == 0 {
 		data.CGNAT.CIDRs = []string{"100.64.0.0/10"} // RFC 6598 shared address space
 	}

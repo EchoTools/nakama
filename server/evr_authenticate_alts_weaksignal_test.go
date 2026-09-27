@@ -48,13 +48,12 @@ func withDetector(t *testing.T, settings CGNATSettings) *CGNATDetector {
 }
 
 // productionCGNATSettings is the shape the live service actually carried: the
-// seeded defaults from FixDefaultServiceSettings (evr_global_settings.go:563-572,
-// reached via ServiceSettingsLoad at evr_global_settings.go:315) with the empty
+// seeded defaults from FixDefaultServiceSettings (evr_global_settings.go:562-568,
+// reached via ServiceSettingsLoad at evr_global_settings.go:314) with the empty
 // string that was found in the stored record. Note that the seed itself is clean
 // -- the "" was in the operator-edited stored value, not in the defaults.
 func productionCGNATSettings() CGNATSettings {
 	return CGNATSettings{
-		ASNs:                     []int{14593, 21928},
 		CIDRs:                    []string{"100.64.0.0/10"},
 		CommodityProfilePrefixes: []string{"", "Meta Quest 2::", "Meta Quest 3::", "Meta Quest 3S::"},
 	}
