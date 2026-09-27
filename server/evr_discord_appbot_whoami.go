@@ -675,7 +675,7 @@ func (w *WhoAmI) createAlternatesEmbed() *discordgo.MessageEmbed {
 			Fields: []*discordgo.MessageEmbedField{{Name: "Account / Match Items", Value: strings.Join(potentialAlternates, "\n"), Inline: false}},
 		}
 
-		if w.loginHistory.IgnoreDisabledAlternates {
+		if w.loginHistory.IgnoreSuspensionsOfAltAccounts {
 			alternatesEmbed.Footer = &discordgo.MessageEmbedFooter{
 				Text: "Note: Suspended alternates do not carry-over for this player.",
 			}

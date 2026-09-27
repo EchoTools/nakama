@@ -67,7 +67,7 @@ func enforceJoinSuspension(ctx context.Context, logger *zap.Logger, nk runtime.N
 	// alt's can occupy the slot while the player's own is also active; when the
 	// toggles discard the alt's, the player's own suspension still applies.
 	if record.UserID != userID {
-		if params.ignoreDisabledAlternates || (gg != nil && !gg.RejectPlayersWithSuspendedAlternates) {
+		if params.ignoreSuspensionsOfAltAccounts || (gg != nil && !gg.RejectPlayersWithSuspendedAlternates) {
 			ownEnforcements, err := CheckOwnEnforcementSuspensions(userID, journals, ggRegistry.InheritanceByParentGroupID())
 			if err != nil {
 				logger.Error("seat enforcement: failed to check own suspensions",

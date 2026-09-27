@@ -303,10 +303,10 @@ func TestEnforceJoinSuspension_ExpiredSuspensionAllowed(t *testing.T) {
 
 // --- own suspension is never masked by alt settings ---
 
-// withIgnoreDisabledAlternates sets the player's ignore_disabled_alternates flag.
-func withIgnoreDisabledAlternates(s *seatTestSession) *seatTestSession {
+// withIgnoreSuspensionsOfAltAccounts sets the player's ignore_suspensions_of_alt_accounts flag.
+func withIgnoreSuspensionsOfAltAccounts(s *seatTestSession) *seatTestSession {
 	ptr := s.ctx.Value(ctxSessionParametersKey{}).(*atomic.Pointer[SessionParameters])
-	ptr.Load().ignoreDisabledAlternates = true
+	ptr.Load().ignoreSuspensionsOfAltAccounts = true
 	return s
 }
 
@@ -357,7 +357,7 @@ func TestEnforceJoinSuspension_OwnSuspensionNotMaskedByAlt(t *testing.T) {
 			})
 			session := newSeatTestSession(uuid.FromStringOrNil(userID), []string{userID, altID})
 			if tt.ignoreAlts {
-				withIgnoreDisabledAlternates(session)
+				withIgnoreSuspensionsOfAltAccounts(session)
 			}
 
 			err := enforceJoinSuspension(context.Background(), zap.NewNop(), nk, ggReg,
