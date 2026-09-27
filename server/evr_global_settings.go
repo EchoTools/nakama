@@ -331,7 +331,12 @@ func ServiceSettingsLoad(ctx context.Context, logger runtime.Logger, nk runtime.
 		}
 	}
 
-	serviceSettings.Store(&data)
+	// Through ServiceSettingsUpdate, not a bare Store: this is the path that
+	// reads Global/settings (at boot and on every 30 s poll), and the CGNAT
+	// detector learns its CIDRs and commodity prefixes only from settings. A
+	// bare Store left it unconfigured until something else happened to call
+	// ServiceSettingsUpdate, and never passed on an edit to the stored record.
+	ServiceSettingsUpdate(&data)
 
 	return &data, nil
 }
