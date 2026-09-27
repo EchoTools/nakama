@@ -1,10 +1,9 @@
 package server
 
 import (
-	"bytes"
-	"compress/gzip"
+	"encoding/json"
 	"net"
-	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -16,138 +15,24 @@ func testDetector(t *testing.T) *CGNATDetector {
 	return &CGNATDetector{
 		ipCounts:   make(map[string]map[string]time.Time),
 		maxIPCount: defaultMaxIPMap,
-		cgnatASNs:  make(map[int]bool),
 	}
 }
 
-func testDetectorWithASN(t *testing.T, ranges4 []asnRange4, ranges6 []asnRange6, asns []int) *CGNATDetector {
+// testCGNATCIDRs stands in for configured carrier CGNAT ranges: a Starlink-like
+// IPv4 /16, a T-Mobile-like IPv4 /16, and a Starlink-like IPv6 /32.
+var testCGNATCIDRs = []string{"129.222.0.0/16", "172.56.0.0/16", "2406:2d40::/32"}
+
+func testDetectorWithCIDRs(t *testing.T, cidrs ...string) *CGNATDetector {
 	t.Helper()
 	d := testDetector(t)
-	d.asnRanges4 = ranges4
-	d.asnRanges6 = ranges6
-	for _, asn := range asns {
-		d.cgnatASNs[asn] = true
+	for _, c := range cidrs {
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			t.Fatalf("test CIDR %q: %v", c, err)
+		}
+		d.cidrNets = append(d.cidrNets, n)
 	}
 	return d
-}
-
-// Synthetic Starlink-like IPv4 range: 129.222.0.0 - 129.222.255.255 = AS14593
-var testRanges4 = []asnRange4{
-	{Start: ipv4ToUint32(net.ParseIP("10.0.0.0").To4()), End: ipv4ToUint32(net.ParseIP("10.255.255.255").To4()), ASN: 99999},
-	{Start: ipv4ToUint32(net.ParseIP("100.64.0.0").To4()), End: ipv4ToUint32(net.ParseIP("100.127.255.255").To4()), ASN: 55555},
-	{Start: ipv4ToUint32(net.ParseIP("129.222.0.0").To4()), End: ipv4ToUint32(net.ParseIP("129.222.255.255").To4()), ASN: 14593},
-	{Start: ipv4ToUint32(net.ParseIP("172.56.0.0").To4()), End: ipv4ToUint32(net.ParseIP("172.56.255.255").To4()), ASN: 21928},
-	{Start: ipv4ToUint32(net.ParseIP("192.168.0.0").To4()), End: ipv4ToUint32(net.ParseIP("192.168.255.255").To4()), ASN: 88888},
-}
-
-// Synthetic Starlink IPv6 range: 2406:2d40:: - 2406:2d40:ffff:... = AS14593
-var testRanges6 = []asnRange6{
-	{
-		Start: ipv6ToBytes("2406:2d40::"),
-		End:   ipv6ToBytes("2406:2d40:ffff:ffff:ffff:ffff:ffff:ffff"),
-		ASN:   14593,
-	},
-	{
-		Start: ipv6ToBytes("2600:1000::"),
-		End:   ipv6ToBytes("2600:1000:ffff:ffff:ffff:ffff:ffff:ffff"),
-		ASN:   7018,
-	},
-}
-
-func ipv6ToBytes(s string) [16]byte {
-	ip := net.ParseIP(s)
-	var b [16]byte
-	copy(b[:], ip.To16())
-	return b
-}
-
-// --- ASN Lookup Tests ---
-
-func TestASNLookup_KnownCGNATASN_IPv4(t *testing.T) {
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593})
-	if !d.IsCGNAT("129.222.210.50") {
-		t.Error("expected Starlink IPv4 to be CGNAT")
-	}
-}
-
-func TestASNLookup_KnownCGNATASN_IPv6(t *testing.T) {
-	d := testDetectorWithASN(t, nil, testRanges6, []int{14593})
-	if !d.IsCGNAT("2406:2d40:100::1") {
-		t.Error("expected Starlink IPv6 to be CGNAT")
-	}
-}
-
-func TestASNLookup_NonCGNATASN(t *testing.T) {
-	d := testDetectorWithASN(t, testRanges4, testRanges6, []int{14593})
-	// 10.0.0.1 resolves to ASN 99999, not in CGNAT list
-	if d.IsCGNAT("10.0.0.1") {
-		t.Error("non-CGNAT ASN should not be flagged")
-	}
-	// IPv6 in AT&T range (AS7018), not in CGNAT list
-	if d.IsCGNAT("2600:1000::1") {
-		t.Error("non-CGNAT IPv6 ASN should not be flagged")
-	}
-}
-
-func TestASNLookup_EmptyDatabase(t *testing.T) {
-	d := testDetector(t)
-	if d.IsCGNAT("129.222.210.50") {
-		t.Error("empty ASN database should not flag anything")
-	}
-}
-
-func TestASNLookup_BinarySearchEdgeCases_IPv4(t *testing.T) {
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593})
-
-	cases := []struct {
-		ip   string
-		want bool
-		desc string
-	}{
-		{"129.222.0.0", true, "exact start of Starlink range"},
-		{"129.222.255.255", true, "exact end of Starlink range"},
-		{"129.221.255.255", false, "one before Starlink range"},
-		{"129.223.0.0", false, "one after Starlink range"},
-		{"1.0.0.0", false, "before all ranges"},
-		{"250.0.0.0", false, "after all ranges"},
-	}
-	for _, tc := range cases {
-		got := d.IsCGNAT(tc.ip)
-		if got != tc.want {
-			t.Errorf("%s (%s): got %v, want %v", tc.desc, tc.ip, got, tc.want)
-		}
-	}
-}
-
-func TestASNLookup_BinarySearchEdgeCases_IPv6(t *testing.T) {
-	d := testDetectorWithASN(t, nil, testRanges6, []int{14593})
-
-	cases := []struct {
-		ip   string
-		want bool
-		desc string
-	}{
-		{"2406:2d40::", true, "exact start of Starlink IPv6 range"},
-		{"2406:2d40:ffff:ffff:ffff:ffff:ffff:ffff", true, "exact end"},
-		{"2406:2d3f:ffff:ffff:ffff:ffff:ffff:ffff", false, "one before"},
-		{"2406:2d41::", false, "one after"},
-	}
-	for _, tc := range cases {
-		got := d.IsCGNAT(tc.ip)
-		if got != tc.want {
-			t.Errorf("%s (%s): got %v, want %v", tc.desc, tc.ip, got, tc.want)
-		}
-	}
-}
-
-func TestASNLookup_UnparseableInput(t *testing.T) {
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593})
-
-	for _, input := range []string{"", "garbage", "not.an.ip", "999.999.999.999"} {
-		if d.IsCGNAT(input) {
-			t.Errorf("unparseable input %q should return false", input)
-		}
-	}
 }
 
 // --- CIDR Tests ---
@@ -265,7 +150,7 @@ func TestHeuristic_Disabled(t *testing.T) {
 }
 
 func TestHeuristic_DoesNotAutoExempt(t *testing.T) {
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593})
+	d := testDetectorWithCIDRs(t, testCGNATCIDRs...)
 	d.heuristicEnabled = true
 	d.heuristicThreshold = 2
 	d.heuristicWindowDays = 30
@@ -314,42 +199,22 @@ func TestHeuristic_IPv6(t *testing.T) {
 
 // --- Combined / IsWeakSignal Tests ---
 
-func TestIsCGNAT_CIDRWithoutASN(t *testing.T) {
-	d := testDetector(t)
-	_, cidr, _ := net.ParseCIDR("100.64.0.0/10")
-	d.cidrNets = []*net.IPNet{cidr}
-	// No ASN data loaded
-
-	if !d.IsCGNAT("100.64.0.1") {
-		t.Error("CIDR match alone should be sufficient")
-	}
-}
-
-func TestIsCGNAT_ASNWithoutCIDR(t *testing.T) {
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593})
-	// No CIDRs configured
-
-	if !d.IsCGNAT("129.222.210.50") {
-		t.Error("ASN match alone should be sufficient")
-	}
-}
-
 func TestIsWeakSignal_CGNATIP_IPv4(t *testing.T) {
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593})
+	d := testDetectorWithCIDRs(t, testCGNATCIDRs...)
 	if !d.IsWeakSignal("129.222.210.50") {
 		t.Error("CGNAT IPv4 should be weak")
 	}
 }
 
 func TestIsWeakSignal_CGNATIP_IPv6(t *testing.T) {
-	d := testDetectorWithASN(t, nil, testRanges6, []int{14593})
+	d := testDetectorWithCIDRs(t, testCGNATCIDRs...)
 	if !d.IsWeakSignal("2406:2d40:100::1") {
 		t.Error("CGNAT IPv6 should be weak")
 	}
 }
 
 func TestIsWeakSignal_NormalIP(t *testing.T) {
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593})
+	d := testDetectorWithCIDRs(t, testCGNATCIDRs...)
 	if d.IsWeakSignal("73.162.100.1") {
 		t.Error("normal residential IP should not be weak")
 	}
@@ -408,7 +273,6 @@ func TestUpdateSettings_ParsesCIDRs(t *testing.T) {
 	d := testDetector(t)
 	d.UpdateSettings(CGNATSettings{
 		CIDRs: []string{"100.64.0.0/10", "2406:2d40::/32"},
-		ASNs:  []int{14593},
 	})
 
 	if !d.IsCGNAT("100.64.0.1") {
@@ -435,7 +299,7 @@ func TestUpdateSettings_InvalidCIDRLogged(t *testing.T) {
 }
 
 func TestUpdateSettings_HotReload(t *testing.T) {
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593})
+	d := testDetector(t)
 
 	// Initially no CIDRs
 	if d.IsCGNAT("100.64.0.1") {
@@ -445,7 +309,6 @@ func TestUpdateSettings_HotReload(t *testing.T) {
 	// Hot-reload with new CIDR
 	d.UpdateSettings(CGNATSettings{
 		CIDRs: []string{"100.64.0.0/10"},
-		ASNs:  []int{14593},
 	})
 
 	if !d.IsCGNAT("100.64.0.1") {
@@ -456,7 +319,7 @@ func TestUpdateSettings_HotReload(t *testing.T) {
 // --- Enforcement Guard Tests ---
 
 func TestFilterStrongAlts_AllWeakSignals(t *testing.T) {
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593})
+	d := testDetectorWithCIDRs(t, testCGNATCIDRs...)
 
 	history := &LoginHistory{
 		AlternateMatches: map[string][]*AlternateSearchMatch{
@@ -473,7 +336,7 @@ func TestFilterStrongAlts_AllWeakSignals(t *testing.T) {
 }
 
 func TestFilterStrongAlts_MixedSignals(t *testing.T) {
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593})
+	d := testDetectorWithCIDRs(t, testCGNATCIDRs...)
 
 	history := &LoginHistory{
 		AlternateMatches: map[string][]*AlternateSearchMatch{
@@ -490,7 +353,7 @@ func TestFilterStrongAlts_MixedSignals(t *testing.T) {
 }
 
 func TestFilterStrongAlts_AllStrongSignals(t *testing.T) {
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593})
+	d := testDetectorWithCIDRs(t, testCGNATCIDRs...)
 
 	history := &LoginHistory{
 		AlternateMatches: map[string][]*AlternateSearchMatch{
@@ -541,7 +404,7 @@ func TestFilterStrongAlts_CommodityProfileOnly(t *testing.T) {
 
 func TestFilterStrongAlts_TransitionalState(t *testing.T) {
 	// Old false links exist, detector active, cleanup not yet run
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593, 21928})
+	d := testDetectorWithCIDRs(t, testCGNATCIDRs...)
 	d.commodityProfilePrefixes = []string{"Meta Quest 2::"}
 
 	// Simulates the T-Mobile CGNAT production case
@@ -559,35 +422,10 @@ func TestFilterStrongAlts_TransitionalState(t *testing.T) {
 	}
 }
 
-// --- IPv4/IPv6 conversion tests ---
-
-func TestIPv4ToUint32(t *testing.T) {
-	ip := net.ParseIP("192.168.1.1").To4()
-	got := ipv4ToUint32(ip)
-	want := uint32(0xC0A80101)
-	if got != want {
-		t.Errorf("ipv4ToUint32: got %08x, want %08x", got, want)
-	}
-}
-
-func TestIPv6ByteComparison(t *testing.T) {
-	a := ipv6ToBytes("2406:2d40::")
-	b := ipv6ToBytes("2406:2d40:ffff::")
-	c := ipv6ToBytes("2406:2d41::")
-
-	if bytes.Compare(a[:], b[:]) >= 0 {
-		t.Error("a should be less than b")
-	}
-	if bytes.Compare(b[:], c[:]) >= 0 {
-		t.Error("b should be less than c")
-	}
-}
-
 // --- matchIgnoredAltPattern Tests ---
 
 func TestMatchIgnoredAltPattern_CGNATIP(t *testing.T) {
-	// Set up detector with Starlink ASN
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593})
+	d := testDetectorWithCIDRs(t, testCGNATCIDRs...)
 	SetCGNATDetector(d)
 	defer SetCGNATDetector(nil)
 
@@ -622,7 +460,7 @@ func TestMatchIgnoredAltPattern_UniqueProfile(t *testing.T) {
 }
 
 func TestMatchIgnoredAltPattern_NormalIP(t *testing.T) {
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593})
+	d := testDetectorWithCIDRs(t, testCGNATCIDRs...)
 	SetCGNATDetector(d)
 	defer SetCGNATDetector(nil)
 
@@ -690,7 +528,7 @@ func TestPairKey_Ordering(t *testing.T) {
 
 // Test that the cleanup logic correctly identifies weak-signal-only links
 func TestCleanupLogic_IdentifiesWeakOnlyLinks(t *testing.T) {
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593, 21928})
+	d := testDetectorWithCIDRs(t, testCGNATCIDRs...)
 	d.commodityProfilePrefixes = []string{"Meta Quest 2::", "Meta Quest 3::"}
 
 	// Simulate the T-Mobile production case
@@ -713,7 +551,7 @@ func TestCleanupLogic_IdentifiesWeakOnlyLinks(t *testing.T) {
 }
 
 func TestCleanupLogic_PreservesStrongSignalLinks(t *testing.T) {
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593})
+	d := testDetectorWithCIDRs(t, testCGNATCIDRs...)
 	d.commodityProfilePrefixes = []string{"Meta Quest 3::"}
 
 	// Real alt case: shares XPID (strong signal)
@@ -736,7 +574,7 @@ func TestCleanupLogic_PreservesStrongSignalLinks(t *testing.T) {
 }
 
 func TestCleanupLogic_NonCGNATIPIsStrong(t *testing.T) {
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593})
+	d := testDetectorWithCIDRs(t, testCGNATCIDRs...)
 
 	// Non-CGNAT IP (Comcast residential)
 	if d.IsWeakSignal("73.162.100.1") {
@@ -749,7 +587,7 @@ func TestCleanupLogic_NonCGNATIPIsStrong(t *testing.T) {
 // server/testdata/cgnat_test_cases.json
 
 func TestProductionCase_TMobileCGNAT(t *testing.T) {
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593, 21928})
+	d := testDetectorWithCIDRs(t, testCGNATCIDRs...)
 	d.commodityProfilePrefixes = []string{"Meta Quest 2::"}
 
 	// Case: d0ac5390 <-> 8c21297d, shared: 172.56.91.132 + Quest 2 profile + unknown
@@ -768,12 +606,10 @@ func TestProductionCase_TMobileCGNAT(t *testing.T) {
 
 func TestProductionCase_IPOnly(t *testing.T) {
 	d := testDetector(t)
-	// 166.205.97.60 is AT&T (AS7018) — not in CGNAT ASN list by default,
-	// but this is an IP-only link. Without CGNAT detection, it's still "strong" by IP.
-	// This case would need AS7018 added to the CGNAT list, or would be caught by heuristic.
-	// For now, verify the IP is NOT flagged as CGNAT without AT&T in the list.
+	// 166.205.97.60 is AT&T mobile. This is an IP-only link: the address is
+	// "strong" until its range is in the CGNAT CIDRs, or the heuristic warns.
 	if d.IsCGNAT("166.205.97.60") {
-		t.Error("AT&T IP should not be CGNAT without AS7018 in the list")
+		t.Error("AT&T IP should not be CGNAT without its range in the CIDR list")
 	}
 
 	// But if we add it to CIDR:
@@ -784,7 +620,7 @@ func TestProductionCase_IPOnly(t *testing.T) {
 }
 
 func TestProductionCase_RealAltPreserved(t *testing.T) {
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593, 21928})
+	d := testDetectorWithCIDRs(t, testCGNATCIDRs...)
 	d.commodityProfilePrefixes = []string{"Meta Quest 3::"}
 
 	// Case: 165071a9 <-> 001d2cb1, shared: IP + Quest 3 + XPID + unknown
@@ -808,22 +644,10 @@ func TestProductionCase_RealAltPreserved(t *testing.T) {
 }
 
 func TestProductionCase_VodafoneGermany(t *testing.T) {
-	// Vodafone Germany (AS3209) is not CGNAT per se, but dynamic IP pool.
-	// Need to add AS3209 to the list or use heuristic.
-	d := testDetectorWithASN(t, testRanges4, nil, []int{14593, 21928, 3209})
+	// Vodafone Germany is not CGNAT per se, but a dynamic IP pool. It is
+	// covered once its range is in the CGNAT CIDRs, or by the heuristic.
+	d := testDetectorWithCIDRs(t, append(testCGNATCIDRs, "95.88.0.0/14")...)
 	d.commodityProfilePrefixes = []string{"Meta Quest 2::"}
-
-	// Add Vodafone ranges to ASN data (must re-sort for binary search)
-	d.mu.Lock()
-	d.asnRanges4 = append(d.asnRanges4, asnRange4{
-		Start: ipv4ToUint32(net.ParseIP("95.88.0.0").To4()),
-		End:   ipv4ToUint32(net.ParseIP("95.91.255.255").To4()),
-		ASN:   3209,
-	})
-	sort.Slice(d.asnRanges4, func(i, j int) bool {
-		return d.asnRanges4[i].Start < d.asnRanges4[j].Start
-	})
-	d.mu.Unlock()
 
 	// Case: e19ea28b <-> 8ebb578c, shared: 83 Vodafone IPs + Quest 2 + unknown
 	history := &LoginHistory{
@@ -835,62 +659,29 @@ func TestProductionCase_VodafoneGermany(t *testing.T) {
 	}
 	result := filterStrongAlts(history, []string{"8ebb578c-b805-4dd2-995a-69a398b9e056"}, d)
 	if len(result) != 0 {
-		t.Error("Vodafone dynamic IP case should be filtered when AS3209 is in CGNAT list")
+		t.Error("Vodafone dynamic IP case should be filtered when its range is in the CGNAT CIDRs")
 	}
 }
 
-// --- ASN TSV Parsing Tests ---
+// TestCGNATSettings_StoredASNsKeyIsDropped: CGNAT classification is by CIDR
+// only. A stored Global/settings record written before that still carries an
+// "asns" list; it must load without error and must not be written back.
+func TestCGNATSettings_StoredASNsKeyIsDropped(t *testing.T) {
+	stored := `{"cgnat":{"asns":[14593,21928],"cidrs":["100.64.0.0/10"]}}`
 
-func TestParseASNGzip_ValidData(t *testing.T) {
-	// Create a minimal gzipped TSV
-	var buf bytes.Buffer
-	gz := gzipWriter(&buf)
-	gz.Write([]byte("129.222.0.0\t129.222.255.255\t14593\tUS\tSPACEX-STARLINK\n"))
-	gz.Write([]byte("10.0.0.0\t10.255.255.255\t0\tNone\tNot routed\n"))
-	gz.Write([]byte("172.56.0.0\t172.56.255.255\t21928\tUS\tT-MOBILE-AS21928\n"))
-	gz.Close()
+	var data ServiceSettingsData
+	if err := json.Unmarshal([]byte(stored), &data); err != nil {
+		t.Fatalf("a stored record with an asns list must still load: %v", err)
+	}
+	if len(data.CGNAT.CIDRs) != 1 || data.CGNAT.CIDRs[0] != "100.64.0.0/10" {
+		t.Errorf("CIDRs = %v, want [100.64.0.0/10]", data.CGNAT.CIDRs)
+	}
 
-	ranges, err := parseASNGzip(buf.Bytes(), true)
+	out, err := json.Marshal(data.CGNAT)
 	if err != nil {
-		t.Fatalf("parseASNGzip: %v", err)
+		t.Fatalf("marshal: %v", err)
 	}
-	// Should skip ASN 0 (Not routed)
-	if len(ranges) != 2 {
-		t.Errorf("expected 2 ranges (skipping ASN 0), got %d", len(ranges))
+	if strings.Contains(string(out), `"asns"`) {
+		t.Errorf("CGNAT settings written back still carry an asns list: %s", out)
 	}
-}
-
-func TestConvertToRanges4(t *testing.T) {
-	raw := []rawASNRange{
-		{startStr: "172.56.0.0", endStr: "172.56.255.255", asn: 21928},
-		{startStr: "129.222.0.0", endStr: "129.222.255.255", asn: 14593},
-	}
-	ranges := convertToRanges4(raw)
-	if len(ranges) != 2 {
-		t.Fatalf("expected 2 ranges, got %d", len(ranges))
-	}
-	// Should be sorted by start IP
-	if ranges[0].ASN != 14593 {
-		t.Error("ranges should be sorted: 129.x before 172.x")
-	}
-}
-
-func TestConvertToRanges6(t *testing.T) {
-	raw := []rawASNRange{
-		{startStr: "2600:1000::", endStr: "2600:1000:ffff:ffff:ffff:ffff:ffff:ffff", asn: 7018},
-		{startStr: "2406:2d40::", endStr: "2406:2d40:ffff:ffff:ffff:ffff:ffff:ffff", asn: 14593},
-	}
-	ranges := convertToRanges6(raw)
-	if len(ranges) != 2 {
-		t.Fatalf("expected 2 ranges, got %d", len(ranges))
-	}
-	if ranges[0].ASN != 14593 {
-		t.Error("ranges should be sorted: 2406:x before 2600:x")
-	}
-}
-
-// --- Helper for gzip writing in tests ---
-
-func gzipWriter(buf *bytes.Buffer) *gzip.Writer {
-	return gzip.NewWriter(buf)
 }
