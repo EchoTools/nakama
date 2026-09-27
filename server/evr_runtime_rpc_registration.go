@@ -95,6 +95,7 @@ func buildEVRRPCRegistrations(rpcHandler *RPCHandler, sbmm *SkillBasedMatchmaker
 		{ID: "device/auth/poll", Handler: DeviceAuthPollRpc, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
 		{ID: "device/auth/verify", Handler: DeviceAuthVerifyRpc, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 		{ID: "device/auth/refresh", Handler: DeviceAuthRefreshRpc, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
+		{ID: "device/auth/issue", Handler: DeviceAuthIssueRpc, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 
 		// Party management (storage-backed)
 		{ID: "party/create", Handler: PartyCreateRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
