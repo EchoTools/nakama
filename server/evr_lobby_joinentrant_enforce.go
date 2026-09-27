@@ -62,13 +62,23 @@ func enforceJoinSuspension(ctx context.Context, logger *zap.Logger, nk runtime.N
 		return nil
 	}
 
-	// Alt suspension: respect the guild's per-guild toggle.
+	// Alt suspension: respect the guild's per-guild toggle. The toggles govern
+	// alt records only. The merged record above is whichever expires last, so an
+	// alt's can occupy the slot while the player's own is also active; when the
+	// toggles discard the alt's, the player's own suspension still applies.
 	if record.UserID != userID {
-		if params.ignoreDisabledAlternates {
-			return nil
-		}
-		if gg != nil && !gg.RejectPlayersWithSuspendedAlternates {
-			return nil
+		if params.ignoreDisabledAlternates || (gg != nil && !gg.RejectPlayersWithSuspendedAlternates) {
+			ownEnforcements, err := CheckOwnEnforcementSuspensions(userID, journals, ggRegistry.InheritanceByParentGroupID())
+			if err != nil {
+				logger.Error("seat enforcement: failed to check own suspensions",
+					zap.String("uid", userID), zap.String("gid", groupIDStr), zap.Error(err))
+				return NewLobbyError(KickedFromLobbyGroup, "unable to verify suspension status")
+			}
+			own, ok := ownEnforcements[groupIDStr][label.Mode]
+			if !ok || own.IsExpired() {
+				return nil
+			}
+			record = own
 		}
 	}
 
