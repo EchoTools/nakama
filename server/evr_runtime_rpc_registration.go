@@ -88,7 +88,9 @@ func buildEVRRPCRegistrations(rpcHandler *RPCHandler, sbmm *SkillBasedMatchmaker
 		{ID: "link/device", Handler: LinkDeviceRpc},
 		{ID: "link/usernamedevice", Handler: LinkUserIdDeviceRpc},
 		{ID: "link", Handler: LinkingAppRpc},
-		{ID: "signin/discord", Handler: DiscordSignInRpc},
+		// signin/discord is how a caller without a session signs in, so it cannot
+		// require one (compare device/auth/request below).
+		{ID: "signin/discord", Handler: DiscordSignInRpc, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
 
 		// Device code authentication (GitHub-style device flow)
 		{ID: "device/auth/request", Handler: DeviceAuthRequestRpc, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
