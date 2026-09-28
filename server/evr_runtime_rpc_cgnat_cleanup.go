@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 )
@@ -53,6 +54,82 @@ func CGNATCleanupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	}
 	data, _ := json.Marshal(resp)
 	return string(data), nil
+}
+
+// cgnatStartupCleanupDeps is what runCGNATStartupCleanup depends on, injected
+// so the boot ordering can be tested without a database.
+type cgnatStartupCleanupDeps struct {
+	logger runtime.Logger
+	// settings returns the current service settings; ServiceSettings in production.
+	settings func() *ServiceSettingsData
+	// settingsLoaded is closed once the service settings have been loaded.
+	settingsLoaded <-chan struct{}
+	// settingsWait bounds how long to wait for settingsLoaded.
+	settingsWait time.Duration
+	// cleanup runs the retroactive cleanup; runCGNATCleanup in production.
+	cleanup func(ctx context.Context) (brokenLinks, affectedUsers int, err error)
+}
+
+// newCGNATStartupCleanupDeps wires runCGNATStartupCleanup to the process-wide
+// settings, the signal ServiceSettingsLoad closes, and runCGNATCleanup.
+func newCGNATStartupCleanupDeps(logger runtime.Logger, nk runtime.NakamaModule, detector *CGNATDetector) cgnatStartupCleanupDeps {
+	return cgnatStartupCleanupDeps{
+		logger:         logger,
+		settings:       ServiceSettings,
+		settingsLoaded: serviceSettingsLoaded.done(),
+		settingsWait:   cgnatStartupSettingsWait,
+		cleanup: func(ctx context.Context) (int, int, error) {
+			brokenLinks, affectedUsers, _, err := runCGNATCleanup(ctx, logger, nk, detector)
+			return brokenLinks, affectedUsers, err
+		},
+	}
+}
+
+// cgnatStartupSettingsWait bounds how long the startup cleanup waits for the
+// first ServiceSettingsLoad. That load runs synchronously in NewEvrPipeline,
+// moments after InitializeEvrRuntimeModule returns, and its failure is fatal,
+// so the bound is reached only if the load never runs or is stalled for
+// minutes (a hung storage read). Either way the cleanup is skipped for that
+// boot and the skip is logged as a Warn.
+const cgnatStartupSettingsWait = 5 * time.Minute
+
+// runCGNATStartupCleanup runs the retroactive cleanup once at startup, if the
+// loaded settings enable it, and logs the outcome on every path.
+//
+// It waits for the first settings load before reading CleanupOnStartup. The
+// goroutine that runs it is started from InitializeEvrRuntimeModule, inside
+// server.NewRuntime, before NewEvrPipeline does the first ServiceSettingsLoad;
+// until then ServiceSettings() is a zero struct, so reading the flag at once
+// always saw false and the cleanup never ran. Until #653 the RefreshASNData
+// download ahead of this check took long enough to hide that ordering.
+//
+// Waiting here, rather than starting the cleanup from ServiceSettingsLoad,
+// keeps a LoginHistory scan out of the synchronous boot load and out of the
+// 30 s poll that shares it, and leaves the cleanup and detector wiring as
+// they were.
+func runCGNATStartupCleanup(ctx context.Context, d cgnatStartupCleanupDeps) {
+	timer := time.NewTimer(d.settingsWait)
+	defer timer.Stop()
+	select {
+	case <-d.settingsLoaded:
+	case <-timer.C:
+		d.logger.WithField("waited", d.settingsWait.String()).Warn("CGNAT: startup cleanup skipped: service settings did not load in time")
+		return
+	}
+
+	if s := d.settings(); s == nil || !s.CGNAT.CleanupOnStartup {
+		d.logger.Info("CGNAT: startup cleanup skipped: cleanup_on_startup is off")
+		return
+	}
+
+	brokenLinks, affectedUsers, cleanupErr := d.cleanup(ctx)
+	if cleanupErr != nil {
+		d.logger.WithField("error", cleanupErr).Warn("CGNAT: startup cleanup failed")
+		return
+	}
+	// Logged at zero too, so that silence cannot mean either "found nothing"
+	// or "never ran".
+	d.logger.WithFields(map[string]any{"broken_links": brokenLinks, "affected_users": affectedUsers}).Info("CGNAT: startup cleanup completed")
 }
 
 // runCGNATCleanup scans all LoginHistory records and breaks alt links based

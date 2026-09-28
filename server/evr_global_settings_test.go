@@ -118,3 +118,44 @@ func TestServiceSettingsLoad_ReachesCGNATDetector(t *testing.T) {
 		t.Errorf("IsWeakSignal(%q) = false after ServiceSettingsLoad; the stored commodity prefix never reached the detector", profile)
 	}
 }
+
+// TestServiceSettingsLoad_MarksSettingsLoaded: the CGNAT startup cleanup waits
+// on serviceSettingsLoaded before it reads CleanupOnStartup, so the load that
+// reads Global/settings must close it, and a later poll must not panic on a
+// second close.
+func TestServiceSettingsLoad_MarksSettingsLoaded(t *testing.T) {
+	prevSettings := serviceSettings.Load()
+	t.Cleanup(func() { serviceSettings.Store(prevSettings) })
+	serviceSettings.Store(nil)
+
+	prevSignal := serviceSettingsLoaded
+	serviceSettingsLoaded = newSettingsLoadedSignal()
+	t.Cleanup(func() { serviceSettingsLoaded = prevSignal })
+
+	stored := ServiceSettingsData{CGNAT: CGNATSettings{CleanupOnStartup: true}}
+	raw, err := json.Marshal(stored)
+	require.NoError(t, err)
+	nk := newOCCTestNakamaModule()
+	nk.seedObject(SystemUserID, ServiceSettingsStorageCollection, ServiceSettingStorageKey, string(raw))
+
+	select {
+	case <-serviceSettingsLoaded.done():
+		t.Fatal("settings-loaded signal closed before any load")
+	default:
+	}
+
+	_, err = ServiceSettingsLoad(context.Background(), NewRuntimeGoLogger(zap.NewNop()), nk)
+	require.NoError(t, err)
+
+	select {
+	case <-serviceSettingsLoaded.done():
+	default:
+		t.Fatal("settings-loaded signal still open after ServiceSettingsLoad; the CGNAT startup cleanup would wait out its bound and skip")
+	}
+	if !ServiceSettings().CGNAT.CleanupOnStartup {
+		t.Error("cleanup_on_startup not visible through ServiceSettings() once the signal closed")
+	}
+
+	_, err = ServiceSettingsLoad(context.Background(), NewRuntimeGoLogger(zap.NewNop()), nk)
+	require.NoError(t, err, "second load (the 30 s poll)")
+}

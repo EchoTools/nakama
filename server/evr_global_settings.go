@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/atomic"
@@ -15,6 +16,34 @@ const (
 )
 
 var serviceSettings = atomic.NewPointer((*ServiceSettingsData)(nil))
+
+// serviceSettingsLoaded is closed by the first successful ServiceSettingsLoad,
+// the read of the stored Global/settings record. Work started before that
+// load, such as the CGNAT startup cleanup, waits on it rather than reading the
+// zero struct ServiceSettings() returns until then.
+//
+// It is marked by ServiceSettingsLoad and not by every ServiceSettingsUpdate,
+// as a precaution: the Discord READY handler and the status loop update a copy
+// of the current settings, so if either ran before the load it would publish
+// the zero struct's values and a waiter would take them for the stored ones.
+// Today neither can: the Discord session opens (evr_pipeline.go, dg.Open)
+// after NewEvrPipeline's first load. Marking at the load keeps the signal
+// right if that ordering ever changes.
+var serviceSettingsLoaded = newSettingsLoadedSignal()
+
+// settingsLoadedSignal is a channel closed once, however many loads follow.
+type settingsLoadedSignal struct {
+	once sync.Once
+	ch   chan struct{}
+}
+
+func newSettingsLoadedSignal() *settingsLoadedSignal {
+	return &settingsLoadedSignal{ch: make(chan struct{})}
+}
+
+func (s *settingsLoadedSignal) mark() { s.once.Do(func() { close(s.ch) }) }
+
+func (s *settingsLoadedSignal) done() <-chan struct{} { return s.ch }
 
 // ServiceSettings returns the current service settings, never nil.
 // Callers can safely access fields without nil checks.
@@ -336,6 +365,7 @@ func ServiceSettingsLoad(ctx context.Context, logger runtime.Logger, nk runtime.
 	// bare Store left it unconfigured until something else happened to call
 	// ServiceSettingsUpdate, and never passed on an edit to the stored record.
 	ServiceSettingsUpdate(&data)
+	serviceSettingsLoaded.mark()
 
 	return &data, nil
 }
