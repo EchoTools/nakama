@@ -69,8 +69,10 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	// Retroactive cleanup runs in the background (does not block startup).
 	// Use context.Background() since the module init context may be canceled after Init returns.
 	go runCGNATStartupCleanup(context.Background(), cgnatStartupCleanupDeps{
-		logger:   logger,
-		settings: ServiceSettings,
+		logger:         logger,
+		settings:       ServiceSettings,
+		settingsLoaded: serviceSettingsLoaded.done(),
+		settingsWait:   cgnatStartupSettingsWait,
 		cleanup: func(ctx context.Context) (int, int, error) {
 			brokenLinks, affectedUsers, _, err := runCGNATCleanup(ctx, logger, nk, cgnat)
 			return brokenLinks, affectedUsers, err

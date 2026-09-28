@@ -70,18 +70,49 @@ type cgnatStartupCleanupDeps struct {
 	cleanup func(ctx context.Context) (brokenLinks, affectedUsers int, err error)
 }
 
-// runCGNATStartupCleanup runs the retroactive cleanup once at startup, if
-// settings enable it.
+// cgnatStartupSettingsWait bounds how long the startup cleanup waits for the
+// first ServiceSettingsLoad. That load runs synchronously in NewEvrPipeline,
+// moments after InitializeEvrRuntimeModule returns, and its failure is fatal,
+// so the bound is reached only if the load never runs at all.
+const cgnatStartupSettingsWait = 5 * time.Minute
+
+// runCGNATStartupCleanup runs the retroactive cleanup once at startup, if the
+// loaded settings enable it, and logs the outcome on every path.
+//
+// It waits for the first settings load before reading CleanupOnStartup. The
+// goroutine that runs it is started from InitializeEvrRuntimeModule, inside
+// server.NewRuntime, before NewEvrPipeline does the first ServiceSettingsLoad;
+// until then ServiceSettings() is a zero struct, so reading the flag at once
+// always saw false and the cleanup never ran. Until #653 the RefreshASNData
+// download ahead of this check took long enough to hide that ordering.
+//
+// Waiting here, rather than starting the cleanup from ServiceSettingsLoad,
+// keeps a LoginHistory scan out of the synchronous boot load and out of the
+// 30 s poll that shares it, and leaves the cleanup and detector wiring as
+// they were.
 func runCGNATStartupCleanup(ctx context.Context, d cgnatStartupCleanupDeps) {
-	// Run retroactive cleanup only if enabled in settings
-	if s := d.settings(); s != nil && s.CGNAT.CleanupOnStartup {
-		brokenLinks, affectedUsers, cleanupErr := d.cleanup(ctx)
-		if cleanupErr != nil {
-			d.logger.WithField("error", cleanupErr).Warn("CGNAT: startup cleanup failed")
-		} else if brokenLinks > 0 {
-			d.logger.WithFields(map[string]any{"broken_links": brokenLinks, "affected_users": affectedUsers}).Info("CGNAT: startup cleanup completed")
-		}
+	timer := time.NewTimer(d.settingsWait)
+	defer timer.Stop()
+	select {
+	case <-d.settingsLoaded:
+	case <-timer.C:
+		d.logger.WithField("waited", d.settingsWait.String()).Warn("CGNAT: startup cleanup skipped: service settings did not load in time")
+		return
 	}
+
+	if s := d.settings(); s == nil || !s.CGNAT.CleanupOnStartup {
+		d.logger.Info("CGNAT: startup cleanup skipped: cleanup_on_startup is off")
+		return
+	}
+
+	brokenLinks, affectedUsers, cleanupErr := d.cleanup(ctx)
+	if cleanupErr != nil {
+		d.logger.WithField("error", cleanupErr).Warn("CGNAT: startup cleanup failed")
+		return
+	}
+	// Logged at zero too, so that silence cannot mean either "found nothing"
+	// or "never ran".
+	d.logger.WithFields(map[string]any{"broken_links": brokenLinks, "affected_users": affectedUsers}).Info("CGNAT: startup cleanup completed")
 }
 
 // runCGNATCleanup scans all LoginHistory records and breaks alt links based
