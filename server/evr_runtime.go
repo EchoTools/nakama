@@ -68,18 +68,14 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	SetCGNATDetector(cgnat)
 	// Retroactive cleanup runs in the background (does not block startup).
 	// Use context.Background() since the module init context may be canceled after Init returns.
-	go func() {
-		bgCtx := context.Background()
-		// Run retroactive cleanup only if enabled in settings
-		if s := ServiceSettings(); s != nil && s.CGNAT.CleanupOnStartup {
-			brokenLinks, affectedUsers, _, cleanupErr := runCGNATCleanup(bgCtx, logger, nk, cgnat)
-			if cleanupErr != nil {
-				logger.WithField("error", cleanupErr).Warn("CGNAT: startup cleanup failed")
-			} else if brokenLinks > 0 {
-				logger.WithFields(map[string]any{"broken_links": brokenLinks, "affected_users": affectedUsers}).Info("CGNAT: startup cleanup completed")
-			}
-		}
-	}()
+	go runCGNATStartupCleanup(context.Background(), cgnatStartupCleanupDeps{
+		logger:   logger,
+		settings: ServiceSettings,
+		cleanup: func(ctx context.Context) (int, int, error) {
+			brokenLinks, affectedUsers, _, err := runCGNATCleanup(ctx, logger, nk, cgnat)
+			return brokenLinks, affectedUsers, err
+		},
+	})
 
 	// Register hooks
 	//if err = initializer.RegisterBeforeReadStorageObjects(BeforeReadStorageObjectsHook); err != nil {

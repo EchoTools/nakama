@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 )
@@ -53,6 +54,34 @@ func CGNATCleanupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	}
 	data, _ := json.Marshal(resp)
 	return string(data), nil
+}
+
+// cgnatStartupCleanupDeps is what runCGNATStartupCleanup depends on, injected
+// so the boot ordering can be tested without a database.
+type cgnatStartupCleanupDeps struct {
+	logger runtime.Logger
+	// settings returns the current service settings; ServiceSettings in production.
+	settings func() *ServiceSettingsData
+	// settingsLoaded is closed once the service settings have been loaded.
+	settingsLoaded <-chan struct{}
+	// settingsWait bounds how long to wait for settingsLoaded.
+	settingsWait time.Duration
+	// cleanup runs the retroactive cleanup; runCGNATCleanup in production.
+	cleanup func(ctx context.Context) (brokenLinks, affectedUsers int, err error)
+}
+
+// runCGNATStartupCleanup runs the retroactive cleanup once at startup, if
+// settings enable it.
+func runCGNATStartupCleanup(ctx context.Context, d cgnatStartupCleanupDeps) {
+	// Run retroactive cleanup only if enabled in settings
+	if s := d.settings(); s != nil && s.CGNAT.CleanupOnStartup {
+		brokenLinks, affectedUsers, cleanupErr := d.cleanup(ctx)
+		if cleanupErr != nil {
+			d.logger.WithField("error", cleanupErr).Warn("CGNAT: startup cleanup failed")
+		} else if brokenLinks > 0 {
+			d.logger.WithFields(map[string]any{"broken_links": brokenLinks, "affected_users": affectedUsers}).Info("CGNAT: startup cleanup completed")
+		}
+	}
 }
 
 // runCGNATCleanup scans all LoginHistory records and breaks alt links based
