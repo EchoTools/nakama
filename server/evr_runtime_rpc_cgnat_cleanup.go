@@ -88,7 +88,9 @@ func newCGNATStartupCleanupDeps(logger runtime.Logger, nk runtime.NakamaModule, 
 // cgnatStartupSettingsWait bounds how long the startup cleanup waits for the
 // first ServiceSettingsLoad. That load runs synchronously in NewEvrPipeline,
 // moments after InitializeEvrRuntimeModule returns, and its failure is fatal,
-// so the bound is reached only if the load never runs at all.
+// so the bound is reached only if the load never runs or is stalled for
+// minutes (a hung storage read). Either way the cleanup is skipped for that
+// boot and the skip is logged as a Warn.
 const cgnatStartupSettingsWait = 5 * time.Minute
 
 // runCGNATStartupCleanup runs the retroactive cleanup once at startup, if the
