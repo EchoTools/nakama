@@ -214,9 +214,9 @@ func TestCGNATStartupCleanup_WarnsOnCleanupError(t *testing.T) {
 // TestCGNATStartupCleanup_WarnsWhenSettingsNeverLoad: settings never load
 // within the bound. The goroutine gives up after settingsWait, logs a Warn,
 // and does not run the cleanup. The settings source reports
-// cleanup_on_startup=true throughout (as a copy-and-modify ServiceSettingsUpdate
-// caller could publish before the first load) to show the decision waits for
-// the load signal, not for whatever the source says at the time.
+// cleanup_on_startup=true throughout to show the decision waits for the load
+// signal, not for whatever the source says at the time. (No production caller
+// publishes settings before the first load today; see serviceSettingsLoaded.)
 func TestCGNATStartupCleanup_WarnsWhenSettingsNeverLoad(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		h := newCGNATStartupHarness()
@@ -241,4 +241,34 @@ func TestCGNATStartupCleanup_WarnsWhenSettingsNeverLoad(t *testing.T) {
 			t.Errorf("no warn %q; events: %+v", "CGNAT: startup cleanup skipped: service settings did not load in time", *h.logger.events)
 		}
 	})
+}
+
+// TestNewCGNATStartupCleanupDeps_WiresTheLoadSignal: the tests above inject
+// their own signal, so they cannot see the production wiring. If the startup
+// cleanup waited on any channel other than the one ServiceSettingsLoad closes,
+// it would wait out its bound, warn and skip: the original symptom, logged.
+func TestNewCGNATStartupCleanupDeps_WiresTheLoadSignal(t *testing.T) {
+	logger := newCaptureLogger()
+	d := newCGNATStartupCleanupDeps(logger, nil, NewCGNATDetector(nil))
+
+	if d.settingsLoaded != serviceSettingsLoaded.done() {
+		t.Error("settingsLoaded is not the signal ServiceSettingsLoad closes")
+	}
+	if d.settingsWait != cgnatStartupSettingsWait {
+		t.Errorf("settingsWait = %v, want cgnatStartupSettingsWait (%v)", d.settingsWait, cgnatStartupSettingsWait)
+	}
+	if d.logger != logger {
+		t.Error("logger is not the one passed in")
+	}
+	if d.cleanup == nil {
+		t.Fatal("cleanup is nil")
+	}
+
+	prev := serviceSettings.Load()
+	t.Cleanup(func() { serviceSettings.Store(prev) })
+	want := &ServiceSettingsData{CGNAT: CGNATSettings{CleanupOnStartup: true}}
+	serviceSettings.Store(want)
+	if got := d.settings(); got != want {
+		t.Error("settings does not read the process-wide service settings")
+	}
 }

@@ -70,6 +70,21 @@ type cgnatStartupCleanupDeps struct {
 	cleanup func(ctx context.Context) (brokenLinks, affectedUsers int, err error)
 }
 
+// newCGNATStartupCleanupDeps wires runCGNATStartupCleanup to the process-wide
+// settings, the signal ServiceSettingsLoad closes, and runCGNATCleanup.
+func newCGNATStartupCleanupDeps(logger runtime.Logger, nk runtime.NakamaModule, detector *CGNATDetector) cgnatStartupCleanupDeps {
+	return cgnatStartupCleanupDeps{
+		logger:         logger,
+		settings:       ServiceSettings,
+		settingsLoaded: serviceSettingsLoaded.done(),
+		settingsWait:   cgnatStartupSettingsWait,
+		cleanup: func(ctx context.Context) (int, int, error) {
+			brokenLinks, affectedUsers, _, err := runCGNATCleanup(ctx, logger, nk, detector)
+			return brokenLinks, affectedUsers, err
+		},
+	}
+}
+
 // cgnatStartupSettingsWait bounds how long the startup cleanup waits for the
 // first ServiceSettingsLoad. That load runs synchronously in NewEvrPipeline,
 // moments after InitializeEvrRuntimeModule returns, and its failure is fatal,

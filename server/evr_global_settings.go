@@ -22,10 +22,13 @@ var serviceSettings = atomic.NewPointer((*ServiceSettingsData)(nil))
 // load, such as the CGNAT startup cleanup, waits on it rather than reading the
 // zero struct ServiceSettings() returns until then.
 //
-// It is marked by ServiceSettingsLoad and not by every ServiceSettingsUpdate:
-// the Discord READY handler and the status loop update a copy of the current
-// settings, so if either ran before the load it would publish the zero
-// struct's values, and a waiter would take them for the stored ones.
+// It is marked by ServiceSettingsLoad and not by every ServiceSettingsUpdate,
+// as a precaution: the Discord READY handler and the status loop update a copy
+// of the current settings, so if either ran before the load it would publish
+// the zero struct's values and a waiter would take them for the stored ones.
+// Today neither can: the Discord session opens (evr_pipeline.go, dg.Open)
+// after NewEvrPipeline's first load. Marking at the load keeps the signal
+// right if that ordering ever changes.
 var serviceSettingsLoaded = newSettingsLoadedSignal()
 
 // settingsLoadedSignal is a channel closed once, however many loads follow.
