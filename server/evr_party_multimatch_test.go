@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -355,4 +356,130 @@ func TestPartyFormation_MemberQueuesArenaFromLeaderSocialLobby_LeavesOneLiveTick
 	}
 
 	f.checkOneTicket(t, 500*time.Millisecond)
+}
+
+// sessionLiveTickets returns the live tickets that carry sessionID, with the
+// session IDs on each. Unlike liveTickets it also sees a solo ticket, which
+// has no party ID.
+func (f *multiMatchParty) sessionLiveTickets(sessionID string) map[string][]string {
+	f.mm.Lock()
+	defer f.mm.Unlock()
+	tickets := make(map[string][]string)
+	for ticket := range f.mm.sessionTickets[sessionID] {
+		index, ok := f.mm.indexes[ticket]
+		if !ok {
+			continue
+		}
+		sessions := make([]string, 0, len(index.Entries))
+		for _, entry := range index.Entries {
+			sessions = append(sessions, entry.Presence.SessionId)
+		}
+		tickets[ticket] = sessions
+	}
+	return tickets
+}
+
+// (c) What the rebuild is for (#459): a member who joins after the leader's
+// loop has submitted is put on the leader's ticket immediately, not at the
+// fallback timer, and the party still holds exactly one live ticket.
+//
+// The leader starts alone, so its loop skips formation and submits a solo
+// ticket. The member then joins and its find cancels that ticket. The
+// rebuilt ticket must be the leader's only live ticket and carry both.
+func TestPartyTicketRebuild_LateArrivalAfterFirstTicket_OneLiveTicketWithLateMember(t *testing.T) {
+	f := newMultiMatchParty(t)
+	leaderSID := f.leaderSession.id.String()
+	memberSID := f.memberSession.id.String()
+	memberPresence := &Presence{
+		ID:     PresenceID{SessionID: f.memberSession.id, Node: f.pipeline.node},
+		UserID: f.memberSession.userID,
+		Meta:   PresenceMeta{Username: "member"},
+	}
+
+	// The member is not in the party yet.
+	if left, _ := f.ph.members.Leave([]*Presence{memberPresence}); len(left) != 1 || f.lobbyGroup.Size() != 1 {
+		t.Fatalf("fixture: party size %d after removing the member, want 1", f.lobbyGroup.Size())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- f.pipeline.lobbyMatchMakeWithFallback(ctx, f.logger, f.leaderSession, f.leaderParams, f.lobbyGroup)
+	}()
+	var stopped bool
+	stop := func() {
+		if stopped {
+			return
+		}
+		stopped = true
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("leader's matchmaking loop did not exit after cancel")
+		}
+	}
+	t.Cleanup(stop)
+
+	// waitFor polls the leader's live tickets until ok holds.
+	waitFor := func(what string, ok func(map[string][]string) bool) map[string][]string {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			tickets := f.sessionLiveTickets(leaderSID)
+			if ok(tickets) {
+				return tickets
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: leader's live tickets %v; logs: %v", what, tickets, f.logs.All())
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	first := waitFor("the leader's loop never submitted its solo ticket", func(m map[string][]string) bool { return len(m) == 1 })
+	var soloTicket string
+	for ticket, sessions := range first {
+		soloTicket = ticket
+		if len(sessions) != 1 || sessions[0] != leaderSID {
+			t.Fatalf("fixture: first ticket carries %v, want the leader alone", sessions)
+		}
+	}
+
+	// The member joins, then its find reaches the late-arrival check.
+	if _, err := f.ph.members.Join([]*Presence{memberPresence}); err != nil {
+		t.Fatalf("member rejoin: %v", err)
+	}
+	f.pipeline.cancelTicketForLateArrival(context.Background(), f.logger, f.memberSession, f.memberParams, f.lobbyGroup)
+
+	rebuilt := waitFor("the leader's ticket was not rebuilt with the late member", func(m map[string][]string) bool {
+		if len(m) != 1 {
+			return false
+		}
+		for ticket, sessions := range m {
+			return ticket != soloTicket && len(sessions) == 2
+		}
+		return false
+	})
+	for _, sessions := range rebuilt {
+		if !slices.Contains(sessions, memberSID) {
+			t.Errorf("rebuilt ticket carries %v, want the late member %s on it", sessions, memberSID)
+		}
+	}
+	if n := f.logs.FilterMessage("Matchmaking fallback, refreshing ticket with relaxed criteria").Len(); n != 0 {
+		t.Errorf("the ticket was rebuilt by the fallback timer (%d fallback(s)), want the late-arrival signal", n)
+	}
+	if n := f.logs.FilterMessage("Ticket rebuild triggered by late party arrival").Len(); n != 1 {
+		t.Errorf("late-arrival rebuild logged %d time(s), want 1", n)
+	}
+	// Give any further submit a chance to land, then re-check the invariant.
+	time.Sleep(100 * time.Millisecond)
+	if tickets := f.sessionLiveTickets(leaderSID); len(tickets) != 1 {
+		t.Errorf("the leader holds %d live tickets after the rebuild, want exactly 1: %v", len(tickets), tickets)
+	}
+
+	stop()
+	if left := f.sessionLiveTickets(leaderSID); len(left) != 0 {
+		t.Errorf("after the leader's matchmaking loop exited, it still holds %d live ticket(s): %v", len(left), left)
+	}
 }
