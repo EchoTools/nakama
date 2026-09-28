@@ -299,11 +299,15 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 			return ErrMatchmakingTimeout
 
 		case <-rebuildCh:
-			// A late party member arrived and cancelled the current
-			// ticket. Rebuild immediately with the full party.
+			// A late party member arrived. Rebuild immediately with the
+			// full party. replaceTicket removes currentTicket itself: the
+			// signal does not mean the canceller removed it. A signal sent
+			// while this loop held no ticket yet (formation) is still
+			// buffered after the first submit, and the canceller's removal
+			// never saw that ticket. Removing an already-removed ticket is
+			// a no-op.
 			logger.Info("Ticket rebuild triggered by late party arrival",
 				zap.Int("party_size", lobbyGroup.Size()))
-			currentTicket = "" // Already removed by cancelTicketForLateArrival.
 			if err := replaceTicket(ticketConfig); err != nil {
 				return err
 			}
