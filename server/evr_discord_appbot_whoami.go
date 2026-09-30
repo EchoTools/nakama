@@ -981,7 +981,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			// Only add the button if STATIC_HTTP_BASE_URL is configured with a valid scheme
 			baseURL := d.config.GetRuntime().Environment["STATIC_HTTP_BASE_URL"]
 			if baseURL != "" && (strings.HasPrefix(baseURL, "http://") || strings.HasPrefix(baseURL, "https://")) {
-				url := baseURL + "/player-lookup/" + targetID
+				url := playerLookupURL(baseURL, targetID)
 				responseData.Components = []discordgo.MessageComponent{
 					discordgo.ActionsRow{
 						Components: []discordgo.MessageComponent{
@@ -1007,4 +1007,11 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		}
 	}
 	return nil
+}
+
+// playerLookupURL is the website's player lookup page for targetID, under baseURL
+// (STATIC_HTTP_BASE_URL). It joins on exactly one slash whether or not the
+// configured base ends in one.
+func playerLookupURL(baseURL, targetID string) string {
+	return strings.TrimRight(baseURL, "/") + "/player-lookup/" + targetID
 }
