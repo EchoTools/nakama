@@ -83,7 +83,7 @@ func NewSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry Sess
 			username string            = ""
 			vars     map[string]string = nil
 			expiry   int64             = 0
-			tokenID  string            = ""
+			tokenID  string
 		)
 		switch format {
 		case SessionFormatEVR:

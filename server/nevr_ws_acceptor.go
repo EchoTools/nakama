@@ -51,7 +51,7 @@ func NewNEVRSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry 
 			username string            = ""
 			vars     map[string]string = nil
 			expiry   int64             = 0
-			tokenID  string            = ""
+			tokenID  string
 		)
 
 		// Try server key authentication first (for game servers)
