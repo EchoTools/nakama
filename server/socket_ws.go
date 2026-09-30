@@ -83,6 +83,7 @@ func NewSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry Sess
 			username string            = ""
 			vars     map[string]string = nil
 			expiry   int64             = 0
+			tokenID  string            = ""
 		)
 		switch format {
 		case SessionFormatEVR:
@@ -91,15 +92,15 @@ func NewSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry Sess
 				// Server-key auth is the fall-through: legacy EVR clients carry
 				// no user identity, and falling through to the upgrade below
 				// IS the authorization.
-				userID, username, vars, expiry, _, _, ok = parseToken([]byte(config.GetSession().EncryptionKey), token)
-				if !ok || !sessionCache.IsValidSession(userID, expiry, token) {
+				userID, username, vars, expiry, tokenID, _, ok = parseToken([]byte(config.GetSession().EncryptionKey), token)
+				if !ok || !sessionCache.IsValidSession(userID, expiry, tokenID) {
 					http.Error(w, "Missing or invalid token", 401)
 					return
 				}
 			}
 		default:
-			userID, username, vars, expiry, _, _, ok = parseToken([]byte(config.GetSession().EncryptionKey), token)
-			if !ok || !sessionCache.IsValidSession(userID, expiry, token) {
+			userID, username, vars, expiry, tokenID, _, ok = parseToken([]byte(config.GetSession().EncryptionKey), token)
+			if !ok || !sessionCache.IsValidSession(userID, expiry, tokenID) {
 				http.Error(w, "Missing or invalid token", 401)
 				return
 			}

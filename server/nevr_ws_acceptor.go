@@ -51,6 +51,7 @@ func NewNEVRSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry 
 			username string            = ""
 			vars     map[string]string = nil
 			expiry   int64             = 0
+			tokenID  string            = ""
 		)
 
 		// Try server key authentication first (for game servers)
@@ -59,8 +60,8 @@ func NewNEVRSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry 
 			ok = true
 		} else {
 			// JWT token authentication for regular clients
-			userID, username, vars, expiry, _, _, ok = parseToken([]byte(config.GetSession().EncryptionKey), token)
-			if !ok || !sessionCache.IsValidSession(userID, expiry, token) {
+			userID, username, vars, expiry, tokenID, _, ok = parseToken([]byte(config.GetSession().EncryptionKey), token)
+			if !ok || !sessionCache.IsValidSession(userID, expiry, tokenID) {
 				http.Error(w, "Missing or invalid token", 401)
 				return
 			}
