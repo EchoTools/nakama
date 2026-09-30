@@ -148,7 +148,7 @@ func (p *EvrPipeline) sendEVRMessageToPartyMembers(_ *zap.Logger, partyUUID uuid
 // Party join/leave helpers (shared by create, join, respond-to-invite)
 // ---------------------------------------------------------------------------
 
-func (p *EvrPipeline) snsPartyTrackAndJoin(_ context.Context, logger *zap.Logger, session *sessionWS, partyUUID uuid.UUID, snsPartyID uint64, params *SessionParameters) error {
+func (p *EvrPipeline) snsPartyTrackAndJoin(ctx context.Context, logger *zap.Logger, session *sessionWS, partyUUID uuid.UUID, snsPartyID uint64, params *SessionParameters) error {
 	stream := PresenceStream{Mode: StreamModeParty, Subject: partyUUID, Label: p.node}
 	success, isNew := p.nk.tracker.Track(session.Context(), session.ID(), stream, session.UserID(), PresenceMeta{
 		Format:   session.Format(),
@@ -167,6 +167,11 @@ func (p *EvrPipeline) snsPartyTrackAndJoin(_ context.Context, logger *zap.Logger
 
 	// Register EvrId UUID mapping for this member.
 	p.registerEvrUUIDMapping(params.xpID.UUID(), session.UserID())
+	// Clients address a member by the UUID of OVR-ORG-<discord id> (the account id every client is
+	// shown for them, see sessionAccountID), whatever platform that member logged in as.
+	if accountID := p.sessionAccountID(ctx, session, params); accountID != 0 {
+		p.registerEvrUUIDMapping(evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: accountID}.UUID(), session.UserID())
+	}
 
 	// Update session params.
 	params.currentPartyID = partyUUID
