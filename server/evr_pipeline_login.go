@@ -2001,6 +2001,14 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 
 	// Load the server profile by XPID from storage (returns raw JSON), generating if not found
 	data, _, err := ServerProfileLoadByXPID(ctx, logger, p.db, p.nk, request.EvrId, groupID, modes, dailyWeeklyMode)
+	if err != nil || data == nil {
+		// The request names the player by Discord id, which is the id friends and parties use.
+		// The platform in the EvrId is whatever the asking client is, so find the player by
+		// Discord id and load the profile under an EvrId they are actually stored as.
+		if xpID, ok := p.xpIDForDiscordAccount(ctx, request.EvrId.AccountId); ok && xpID != request.EvrId {
+			data, _, err = ServerProfileLoadByXPID(ctx, logger, p.db, p.nk, xpID, groupID, modes, dailyWeeklyMode)
+		}
+	}
 	if err != nil {
 		tags["error"] = "failed_load_profile"
 		logger.Debug("Profile not found for XPID", zap.Error(err), zap.String("evrId", request.EvrId.String()))

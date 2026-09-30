@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
@@ -11,10 +12,39 @@ import (
 	"go.uber.org/zap"
 )
 
-// resolveEvrIDToUserID looks up a Nakama user UUID from an EvrId AccountId.
-// It tries the caller's PlatformCode first, then falls back to all known platforms
-// to support cross-platform friend operations.
+// discordAccountID converts a Discord snowflake into the uint64 the wire carries as an EvrId
+// AccountId. A user's Discord id is their identity on the friends and party wire: the platform
+// part of an EvrId is ignored, so the same person has the same id no matter which platform
+// their client logged in as.
+func discordAccountID(discordID string) (uint64, bool) {
+	id, err := strconv.ParseUint(discordID, 10, 64)
+	if err != nil || id == 0 {
+		return 0, false
+	}
+	return id, true
+}
+
+// sessionAccountID is the AccountId this session's own user goes by in friend and party messages:
+// the Discord id, the same value every other client is shown for them. It falls back to the
+// EvrId the session logged in with only when the user has no Discord id.
+func (p *EvrPipeline) sessionAccountID(ctx context.Context, session *sessionWS, params *SessionParameters) uint64 {
+	if accountID, err := p.resolveUserIDToAccountID(ctx, session.UserID()); err == nil {
+		return accountID
+	}
+	return params.xpID.AccountId
+}
+
+// resolveEvrIDToUserID looks up a Nakama user UUID from an EvrId AccountId. The AccountId is a
+// Discord id, so the user is found by it directly and the platform is ignored. Ids that are not
+// a Discord id (an Oculus or Steam account id from a client that predates this) fall back to the
+// device table: the caller's PlatformCode first, then all known platforms.
 func (p *EvrPipeline) resolveEvrIDToUserID(ctx context.Context, platformCode evr.PlatformCode, accountID uint64) (uuid.UUID, error) {
+	if userID, err := GetUserIDByDiscordID(ctx, p.db, strconv.FormatUint(accountID, 10)); err == nil {
+		if uid := uuid.FromStringOrNil(userID); uid != uuid.Nil {
+			return uid, nil
+		}
+	}
+
 	// Try the caller's platform first, then all others.
 	platforms := []evr.PlatformCode{platformCode}
 	for _, pc := range []evr.PlatformCode{evr.DSC, evr.OVR, evr.OVR_ORG, evr.STM, evr.DMO, evr.XBX, evr.BOT} {
@@ -171,7 +201,7 @@ func (p *EvrPipeline) snsFriendInviteRequest(ctx context.Context, logger *zap.Lo
 		}
 		// Notify the other user.
 		_ = p.sendEVRMessageByUserID(ctx, logger, targetUserID, &evr.SNSFriendAcceptNotify{
-			FriendID: params.xpID.AccountId,
+			FriendID: p.sessionAccountID(ctx, session, params),
 		})
 		return nil
 	}
@@ -185,7 +215,7 @@ func (p *EvrPipeline) snsFriendInviteRequest(ctx context.Context, logger *zap.Lo
 
 	// Notify the target user they have a pending invite.
 	_ = p.sendEVRMessageByUserID(ctx, logger, targetUserID, &evr.SNSFriendInviteNotify{
-		FriendID: params.xpID.AccountId,
+		FriendID: p.sessionAccountID(ctx, session, params),
 	})
 
 	return nil
@@ -252,7 +282,7 @@ func (p *EvrPipeline) snsFriendAcceptRequest(ctx context.Context, logger *zap.Lo
 			return err
 		}
 		_ = p.sendEVRMessageByUserID(ctx, logger, targetUserID, &evr.SNSFriendRemoveNotify{
-			FriendID: params.xpID.AccountId,
+			FriendID: p.sessionAccountID(ctx, session, params),
 		})
 
 	case FriendInvitationSent:
@@ -269,7 +299,7 @@ func (p *EvrPipeline) snsFriendAcceptRequest(ctx context.Context, logger *zap.Lo
 			return err
 		}
 		_ = p.sendEVRMessageByUserID(ctx, logger, targetUserID, &evr.SNSFriendWithdrawnNotify{
-			FriendID: params.xpID.AccountId,
+			FriendID: p.sessionAccountID(ctx, session, params),
 		})
 
 	default:
@@ -348,7 +378,7 @@ func (p *EvrPipeline) snsFriendRemoveRequest(ctx context.Context, logger *zap.Lo
 			return err
 		}
 		_ = p.sendEVRMessageByUserID(ctx, logger, targetUserID, &evr.SNSFriendAcceptNotify{
-			FriendID: params.xpID.AccountId,
+			FriendID: p.sessionAccountID(ctx, session, params),
 		})
 
 	case FriendInvitationSent:
@@ -368,7 +398,7 @@ func (p *EvrPipeline) snsFriendRemoveRequest(ctx context.Context, logger *zap.Lo
 			return err
 		}
 		_ = p.sendEVRMessageByUserID(ctx, logger, targetUserID, &evr.SNSFriendWithdrawnNotify{
-			FriendID: params.xpID.AccountId,
+			FriendID: p.sessionAccountID(ctx, session, params),
 		})
 
 	case FriendStateFriends:
@@ -385,7 +415,7 @@ func (p *EvrPipeline) snsFriendRemoveRequest(ctx context.Context, logger *zap.Lo
 			return err
 		}
 		_ = p.sendEVRMessageByUserID(ctx, logger, targetUserID, &evr.SNSFriendRemoveNotify{
-			FriendID: params.xpID.AccountId,
+			FriendID: p.sessionAccountID(ctx, session, params),
 		})
 
 	default:
@@ -529,4 +559,28 @@ func (p *EvrPipeline) sendFriendListResponse(ctx context.Context, logger *zap.Lo
 	}
 
 	return nil
+}
+
+// xpIDForDiscordAccount finds an EvrId the user with this Discord id is known by, so their stored
+// profile can be loaded for a request that named them by Discord id.
+func (p *EvrPipeline) xpIDForDiscordAccount(ctx context.Context, accountID uint64) (evr.EvrId, bool) {
+	userID, err := GetUserIDByDiscordID(ctx, p.db, strconv.FormatUint(accountID, 10))
+	if err != nil || userID == "" || userID == uuid.Nil.String() {
+		return evr.EvrId{}, false
+	}
+	rows, err := p.db.QueryContext(ctx, "SELECT id FROM user_device WHERE user_id = $1", userID)
+	if err != nil {
+		return evr.EvrId{}, false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var deviceID string
+		if err := rows.Scan(&deviceID); err != nil {
+			return evr.EvrId{}, false
+		}
+		if xpID, err := evr.ParseEvrId(deviceID); err == nil && xpID != nil {
+			return *xpID, true
+		}
+	}
+	return evr.EvrId{}, false
 }

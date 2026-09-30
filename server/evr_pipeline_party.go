@@ -105,6 +105,13 @@ func (p *EvrPipeline) resolveEvrUUIDToUserID(evrUUID [16]byte) (uuid.UUID, bool)
 // ---------------------------------------------------------------------------
 
 func (p *EvrPipeline) resolveUserIDToAccountID(ctx context.Context, userID uuid.UUID) (uint64, error) {
+	// The Discord id is the identity on the wire (see discordAccountID).
+	if discordID, err := GetDiscordIDByUserID(ctx, p.db, userID.String()); err == nil {
+		if accountID, ok := discordAccountID(discordID); ok {
+			return accountID, nil
+		}
+	}
+	// No Discord id (a bot or a non-Discord account): the account id of one of their devices.
 	var deviceID string
 	err := p.db.QueryRowContext(ctx, "SELECT id FROM user_device WHERE user_id = $1 LIMIT 1", userID).Scan(&deviceID)
 	if err != nil {
@@ -249,7 +256,7 @@ func (p *EvrPipeline) snsPartyCreateRequest(ctx context.Context, logger *zap.Log
 
 	return SendEVRMessages(session, false, &evr.SNSPartyCreateSuccess{
 		PartyID: snsID,
-		OwnerID: params.xpID.AccountId,
+		OwnerID: p.sessionAccountID(ctx, session, params),
 	})
 }
 
@@ -313,7 +320,7 @@ func (p *EvrPipeline) snsPartyJoinRequest(ctx context.Context, logger *zap.Logge
 	// Broadcast join notify to other members.
 	p.sendEVRMessageToPartyMembers(logger, partyUUID, session.ID(), &evr.SNSPartyJoinNotify{
 		PartyID:  msg.PartyID,
-		MemberID: params.xpID.AccountId,
+		MemberID: p.sessionAccountID(ctx, session, params),
 	})
 
 	// Create reservation for the new member if leader is in a social match.
@@ -338,7 +345,7 @@ func (p *EvrPipeline) snsPartyLeaveRequest(ctx context.Context, logger *zap.Logg
 	// Broadcast leave notify before we untrack.
 	p.sendEVRMessageToPartyMembers(logger, partyUUID, session.ID(), &evr.SNSPartyLeaveNotify{
 		PartyID:  snsID,
-		MemberID: params.xpID.AccountId,
+		MemberID: p.sessionAccountID(ctx, session, params),
 	})
 
 	// Clear any reservation for the departing member.
@@ -375,7 +382,7 @@ func (p *EvrPipeline) snsPartySendInviteRequest(ctx context.Context, logger *zap
 	inviteList.Add(&snsPartyInvite{
 		PartyUUID:  params.currentPartyID,
 		SNSPartyID: params.currentSNSPartyID,
-		InviterID:  params.xpID.AccountId,
+		InviterID:  p.sessionAccountID(ctx, session, params),
 		InviterUID: session.UserID(),
 		CreatedAt:  time.Now(),
 	})
@@ -383,7 +390,7 @@ func (p *EvrPipeline) snsPartySendInviteRequest(ctx context.Context, logger *zap
 	// Notify the target.
 	_ = p.sendEVRMessageByUserID(ctx, logger, targetUserID, &evr.SNSPartyInviteNotify{
 		PartyID:   params.currentSNSPartyID,
-		InviterID: params.xpID.AccountId,
+		InviterID: p.sessionAccountID(ctx, session, params),
 	})
 
 	return nil
@@ -661,7 +668,7 @@ func (p *EvrPipeline) snsPartyRespondToInviteRequest(ctx context.Context, logger
 
 	p.sendEVRMessageToPartyMembers(logger, partyUUID, session.ID(), &evr.SNSPartyJoinNotify{
 		PartyID:  snsPartyID,
-		MemberID: params.xpID.AccountId,
+		MemberID: p.sessionAccountID(ctx, session, params),
 	})
 
 	// Create reservation for the new member if leader is in a social match.
@@ -700,7 +707,7 @@ func (p *EvrPipeline) snsPartyUpdateMemberRequest(ctx context.Context, logger *z
 
 	p.sendEVRMessageToPartyMembers(logger, params.currentPartyID, session.ID(), &evr.SNSPartyUpdateMemberNotify{
 		PartyID:  snsID,
-		MemberID: params.xpID.AccountId,
+		MemberID: p.sessionAccountID(ctx, session, params),
 	})
 
 	return SendEVRMessages(session, false, &evr.SNSPartyUpdateMemberSuccess{PartyID: snsID})
