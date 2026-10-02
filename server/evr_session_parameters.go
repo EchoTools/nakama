@@ -124,6 +124,20 @@ func (s *SessionParameters) boundDeviceType() string {
 	return boundHeadsetMetricTag(s.loginPayload.SystemInfo.HeadsetType)
 }
 
+// SocialLevel is the social message level the session's client declared at login (0: none, the stock
+// game or an older nevr-runtime).
+func (s *SessionParameters) SocialLevel() int {
+	return s.loginPayload.SocialLevel()
+}
+
+// NevrRuntimeVersion is the nevr-runtime build the client declared at login, "" if none.
+func (s *SessionParameters) NevrRuntimeVersion() string {
+	if s.loginPayload == nil || s.loginPayload.NevrIdentity == nil {
+		return ""
+	}
+	return s.loginPayload.NevrIdentity.Build
+}
+
 func (s *SessionParameters) IsVR() bool {
 	if s.loginPayload == nil {
 		return false

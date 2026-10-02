@@ -163,6 +163,9 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	StoreParams(ctx, params)
+	logger.Info("Login client",
+		zap.String("nevr_runtime", params.NevrRuntimeVersion()),
+		zap.Int("nevr_social", params.SocialLevel()))
 
 	tags := buildLoginSuccessMetricTags(params, loginSystemFingerprintLimiter)
 

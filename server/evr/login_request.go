@@ -64,6 +64,27 @@ type LoginProfile struct {
 	HMDSerialNumber             string      `json:"hmdserialnumber"`
 	DesiredClientProfileVersion int64       `json:"desiredclientprofileversion"`
 	SystemInfo                  SystemInfo  `json:"system_info"`
+	// Written by the nevr-runtime client's login, absent from the stock game's. NevrSocial is the
+	// social message level the client understands; the server sends a newer social message only to a
+	// session that declared its level.
+	NevrIdentity *NevrIdentity `json:"nevr_identity,omitempty"`
+	NevrSocial   int           `json:"nevr_social,omitempty"`
+}
+
+// NevrIdentity is the nevr-runtime build a client declares at login.
+type NevrIdentity struct {
+	Version   string `json:"version"`
+	Commit    string `json:"commit"`
+	Build     string `json:"build"`
+	BuildType string `json:"build_type"`
+}
+
+// SocialLevel is the social message level the client declared, 0 for a client that declared none.
+func (ld *LoginProfile) SocialLevel() int {
+	if ld == nil {
+		return 0
+	}
+	return ld.NevrSocial
 }
 
 func (ld *LoginProfile) String() string {
