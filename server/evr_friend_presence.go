@@ -37,7 +37,7 @@ func friendPresenceText(label *MatchLabel) string {
 	case evr.ModeEchoCombatTournament:
 		return "Combat Tournament Match"
 	default:
-		return "In Main Menu"
+		return "In a Match" // a match of a mode not named above: in a match, not in the menu
 	}
 }
 
@@ -73,6 +73,12 @@ func (p *EvrPipeline) userSessionParams(userID uuid.UUID) *SessionParameters {
 	return nil
 }
 
+// snsPartyOffered is whether a party is offered to a viewer to join now: unlocked, room left, and its
+// join policy admits the viewer (snsPartyPolicyAdmits).
+func snsPartyOffered(open bool, size, maxSize int, admitted bool) bool {
+	return open && size < maxSize && admitted
+}
+
 // friendPartyFor is the friend's SNS party id as this viewer may see it: the party, if the viewer
 // could join it now (open, room left, and its join policy admits the viewer, §4); 0 and false
 // otherwise. The id is withheld when not joinable, as pnsovr only published it then (0x180093279).
@@ -81,11 +87,16 @@ func (p *EvrPipeline) friendPartyFor(ctx context.Context, viewer uuid.UUID, frie
 		return 0, false
 	}
 	ph, ok := p.nk.partyRegistry.Get(friendParams.currentPartyID)
-	if !ok || !snsPartyIsOpen(ph) || ph.members.Size() >= ph.MaxSize {
+	if !ok {
 		return 0, false
 	}
-	allowed, _, err := p.snsPartyJoinAllowed(ctx, viewer, friendParams.currentPartyID, ph)
-	if err != nil || !allowed {
+	open, size := snsPartyIsOpen(ph), ph.members.Size()
+	admitted := false
+	if open && size < ph.MaxSize {
+		allowed, _, err := p.snsPartyJoinAllowed(ctx, viewer, friendParams.currentPartyID, ph)
+		admitted = err == nil && allowed
+	}
+	if !snsPartyOffered(open, size, ph.MaxSize, admitted) {
 		return 0, false
 	}
 	return friendParams.currentSNSPartyID, true
