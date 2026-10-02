@@ -264,14 +264,10 @@ func (p *EvrPipeline) snsPartyCreateRequest(ctx context.Context, logger *zap.Log
 		return SendEVRMessages(session, false, &evr.SNSPartyCreateFailure{ErrorCode: 1})
 	}
 
-	if err := SendEVRMessages(session, false, &evr.SNSPartyCreateSuccess{
+	return SendEVRMessages(session, false, &evr.SNSPartyCreateSuccess{
 		PartyID: snsID,
 		OwnerID: p.sessionAccountID(ctx, session, params),
-	}); err != nil {
-		return err
-	}
-	p.snsPartyDataJoined(ctx, logger, session, ph.ID, snsID)
-	return nil
+	})
 }
 
 // snsPartyJoinRequest joins an existing party by SNS party ID.
@@ -343,6 +339,9 @@ func (p *EvrPipeline) snsPartyJoinRequest(ctx context.Context, logger *zap.Logge
 
 	ownerAccountID := p.getPartyLeaderAccountID(ctx, logger, ph)
 
+	// Party data first, so each side holds the other's when the join is announced (proposal §3).
+	p.snsPartyDataJoining(ctx, logger, session, partyUUID, msg.PartyID)
+
 	// Broadcast join notify to other members.
 	p.sendEVRMessageToPartyMembers(logger, partyUUID, session.ID(), &evr.SNSPartyJoinNotify{
 		PartyID:  msg.PartyID,
@@ -352,14 +351,10 @@ func (p *EvrPipeline) snsPartyJoinRequest(ctx context.Context, logger *zap.Logge
 	// Create reservation for the new member if leader is in a social match.
 	go p.createReservationForNewPartyMember(context.WithoutCancel(ctx), logger, session, partyUUID)
 
-	if err := SendEVRMessages(session, false, &evr.SNSPartyJoinSuccess{
+	return SendEVRMessages(session, false, &evr.SNSPartyJoinSuccess{
 		PartyID: msg.PartyID,
 		OwnerID: ownerAccountID,
-	}); err != nil {
-		return err
-	}
-	p.snsPartyDataJoined(ctx, logger, session, partyUUID, msg.PartyID)
-	return nil
+	})
 }
 
 // snsPartyLeaveRequest leaves the current party.
@@ -719,6 +714,9 @@ func (p *EvrPipeline) snsPartyRespondToInviteRequest(ctx context.Context, logger
 
 	ownerAccountID := p.getPartyLeaderAccountID(ctx, logger, ph)
 
+	// Party data first, so each side holds the other's when the join is announced (proposal §3).
+	p.snsPartyDataJoining(ctx, logger, session, partyUUID, snsPartyID)
+
 	p.sendEVRMessageToPartyMembers(logger, partyUUID, session.ID(), &evr.SNSPartyJoinNotify{
 		PartyID:  snsPartyID,
 		MemberID: p.sessionAccountID(ctx, session, params),
@@ -727,14 +725,10 @@ func (p *EvrPipeline) snsPartyRespondToInviteRequest(ctx context.Context, logger
 	// Create reservation for the new member if leader is in a social match.
 	go p.createReservationForNewPartyMember(context.WithoutCancel(ctx), logger, session, partyUUID)
 
-	if err := SendEVRMessages(session, false, &evr.SNSPartyJoinSuccess{
+	return SendEVRMessages(session, false, &evr.SNSPartyJoinSuccess{
 		PartyID: snsPartyID,
 		OwnerID: ownerAccountID,
-	}); err != nil {
-		return err
-	}
-	p.snsPartyDataJoined(ctx, logger, session, partyUUID, snsPartyID)
-	return nil
+	})
 }
 
 // snsPartyUpdateRequest acknowledges a party metadata update.

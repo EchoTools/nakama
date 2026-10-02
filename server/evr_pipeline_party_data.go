@@ -345,10 +345,13 @@ func (p *EvrPipeline) snsPartyDataUpdateRequest(ctx context.Context, logger *zap
 	return SendEVRMessages(session, false, &evr.SNSPartyUpdateSuccess{PartyID: snsID})
 }
 
-// snsPartyDataJoined sends a session that just joined (or created) a party the party's data and every
-// member's data, its own included, so its client has the server's keys; and sends its member data to
-// the others. Called after the join's PartyJoinSuccess (or PartyCreateSuccess).
-func (p *EvrPipeline) snsPartyDataJoined(ctx context.Context, logger *zap.Logger, session Session, partyUUID uuid.UUID, snsPartyID uint64) {
+// snsPartyDataJoining sends the data a join needs before the join is announced, so a client that
+// fires MemberJoined already holds the member's data (the game reads headsettype there,
+// PartyMemberJoinedCB): the joiner gets the party's data and every other member's before its
+// PartyJoinSuccess (its client keeps data for the party it is joining and adds every member it names,
+// as pnsovr added a member when its data arrived), and the others get the joiner's before
+// PartyJoinNotify. Called after the joiner is tracked in the party, before either message.
+func (p *EvrPipeline) snsPartyDataJoining(ctx context.Context, logger *zap.Logger, session Session, partyUUID uuid.UUID, snsPartyID uint64) {
 	members, readers := p.partyMembers(ctx, partyUUID)
 	ph, ok := p.nk.partyRegistry.Get(partyUUID)
 	if !ok || !readers {
@@ -363,37 +366,35 @@ func (p *EvrPipeline) snsPartyDataJoined(ctx context.Context, logger *zap.Logger
 	}
 	ph.RUnlock()
 
-	snapshot := []*evr.SNSPartyDataNotify{}
-	if leaderSession != uuid.Nil {
+	toJoiner := []*evr.SNSPartyDataNotify{}
+	if leaderSession != uuid.Nil && leaderSession != session.ID() {
 		if n, err := p.partyDataNotify(ctx, state, snsPartyID, snsPartyDataScopeParty, leaderSession, leaderUser, 0); err == nil {
-			snapshot = append(snapshot, n)
+			toJoiner = append(toJoiner, n)
 		}
 	}
+	joiner := []snsPartyMember{}
 	var own *evr.SNSPartyDataNotify
 	for _, m := range members {
 		n, err := p.partyDataNotify(ctx, state, snsPartyID, snsPartyDataScopeMember, m.session.ID(), m.userID, m.accountID)
 		if err != nil {
-			logger.Warn("Party data snapshot skipped a member", zap.Error(err))
+			logger.Warn("Party data skipped a member", zap.Error(err))
 			continue
 		}
-		snapshot = append(snapshot, n)
-		if m.session.ID() == session.ID() {
-			own = n
-		}
-	}
-	joiner := []snsPartyMember{}
-	for _, m := range members {
 		if m.session.ID() == session.ID() {
 			joiner = append(joiner, m)
+			own = n
+			continue
 		}
+		toJoiner = append(toJoiner, n)
 	}
-	sendPartyData(logger, joiner, uuid.Nil, snapshot...)
+	sendPartyData(logger, joiner, uuid.Nil, toJoiner...)
 	others := 0
 	if own != nil {
 		others = sendPartyData(logger, members, session.ID(), own)
 	}
-	logger.Info("Party data snapshot", zap.String("party", partyUUID.String()), zap.Uint64("sns_party_id", snsPartyID),
-		zap.Int("to_joiner", len(snapshot)), zap.Int("joiner_data_to", others))
+	logger.Info("Party data for a join", zap.String("party", partyUUID.String()), zap.Uint64("sns_party_id", snsPartyID),
+		zap.Int("to_joiner", len(toJoiner)), zap.Bool("joiner_reads", len(joiner) == 1 && joiner[0].level >= 1),
+		zap.Int("joiner_data_to", others))
 }
 
 // snsPartyDataMatchChanged re-sends a member's data (and the party's, if they lead it) to the whole
