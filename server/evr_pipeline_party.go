@@ -571,6 +571,17 @@ func (p *EvrPipeline) snsPartyPassOwnershipRequest(ctx context.Context, logger *
 	return SendEVRMessages(session, false, &evr.SNSPartyPassSuccess{})
 }
 
+// respondToInviteMiss is the answer to a RespondToInvite that matches no pending invite (invites live
+// in memory on one node, so a restart or a session on another node loses them). An accept puts the
+// client in a join that only a join reply ends, so it gets PartyJoinFailure (1, unknown party); a
+// reject needs no answer.
+func respondToInviteMiss(param uint32) []evr.Message {
+	if param != 1 {
+		return nil
+	}
+	return []evr.Message{&evr.SNSPartyJoinFailure{PartyID: 0, ErrorCode: 1}}
+}
+
 // snsPartyRespondToInviteRequest accepts or rejects a party invite.
 func (p *EvrPipeline) snsPartyRespondToInviteRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	msg, ok := in.(*evr.SNSPartyRespondToInviteRequest)
@@ -589,8 +600,8 @@ func (p *EvrPipeline) snsPartyRespondToInviteRequest(ctx context.Context, logger
 	// Find the invite for this user.
 	inviteList, ok := p.snsPartyInvites.Load(userID)
 	if !ok {
-		logger.Info("No pending invites for user")
-		return nil
+		logger.Info("No pending invites for user", zap.Uint32("param", msg.Param))
+		return SendEVRMessages(session, false, respondToInviteMiss(msg.Param)...)
 	}
 
 	// The TargetUserUUID is the inviter's EvrId UUID. Find the invite from that party.
@@ -618,8 +629,8 @@ func (p *EvrPipeline) snsPartyRespondToInviteRequest(ctx context.Context, logger
 	}
 
 	if invite == nil {
-		logger.Info("No matching invite found")
-		return nil
+		logger.Info("No matching invite found", zap.Uint32("param", msg.Param))
+		return SendEVRMessages(session, false, respondToInviteMiss(msg.Param)...)
 	}
 
 	partyUUID := invite.PartyUUID
