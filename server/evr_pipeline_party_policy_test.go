@@ -170,3 +170,33 @@ func TestSessionClosedOutsideAPartyLeavesNothing(t *testing.T) {
 	_, kept := p.snsPartyPolicies.Load(other)
 	require.True(t, kept)
 }
+
+// countingPartyRegistry counts Get, the first lookup snsPartyDataMatchChanged makes.
+type countingPartyRegistry struct {
+	PartyRegistry
+	gets int
+}
+
+func (r *countingPartyRegistry) Get(id uuid.UUID) (*PartyHandler, bool) {
+	r.gets++
+	return &PartyHandler{ID: id, members: NewPartyPresenceList(4)}, true
+}
+
+// Every match admission runs snsPartyDataMatchChanged for the entrant. A party group sets
+// currentPartyID but has no SNS party id and no party data, so it is skipped before the registry is
+// read; an SNS party goes on to the relay.
+func TestPartyDataMatchChangeSkipsAPartyGroup(t *testing.T) {
+	p, tracker := partyEndEnv(t)
+	registry := &countingPartyRegistry{}
+	p.nk.partyRegistry = registry
+	s := newPartyMemberSession(t, "entrant", tracker, nil, p)
+	params, _ := LoadParams(s.Context())
+
+	params.currentPartyID = uuid.Must(uuid.NewV4()) // what JoinPartyGroup leaves
+	p.snsPartyDataMatchChanged(context.Background(), loggerForTest(t), s)
+	require.Zero(t, registry.gets, "a party group reached the party data relay")
+
+	params.currentSNSPartyID = 9 // an SNS party
+	p.snsPartyDataMatchChanged(context.Background(), loggerForTest(t), s)
+	require.Equal(t, 1, registry.gets, "an SNS party must reach the relay")
+}

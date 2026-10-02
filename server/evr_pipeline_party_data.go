@@ -417,10 +417,11 @@ func (p *EvrPipeline) snsPartyDataJoining(ctx context.Context, logger *zap.Logge
 }
 
 // snsPartyDataMatchChanged re-sends a member's data (and the party's, if they lead it) to the whole
-// party when they enter a match, so the match keys follow them.
+// party when they enter a match, so the match keys follow them. Only an SNS (tablet) party has party
+// data: a party group sets currentPartyID with no SNS id, and is skipped before any lookup.
 func (p *EvrPipeline) snsPartyDataMatchChanged(ctx context.Context, logger *zap.Logger, session Session) {
 	params, ok := LoadParams(session.Context())
-	if !ok || params.currentPartyID == uuid.Nil {
+	if !ok || params.currentPartyID == uuid.Nil || params.currentSNSPartyID == 0 {
 		return
 	}
 	ph, ok := p.nk.partyRegistry.Get(params.currentPartyID)
