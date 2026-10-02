@@ -130,8 +130,9 @@ func (s *SessionParameters) SocialLevel() int {
 	return s.loginPayload.SocialLevel()
 }
 
-// NevrRuntimeVersion is the nevr-runtime build the client declared at login, "" if none.
-func (s *SessionParameters) NevrRuntimeVersion() string {
+// NevrRuntimeBuild is the nevr-runtime build the game client declared at login: its `git describe`
+// (e.g. "v4.0.0-145-g09a0ed6-dirty", nevr_identity.build), "" if it declared none.
+func (s *SessionParameters) NevrRuntimeBuild() string {
 	if s.loginPayload == nil || s.loginPayload.NevrIdentity == nil {
 		return ""
 	}
