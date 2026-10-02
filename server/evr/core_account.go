@@ -96,6 +96,11 @@ type ServerProfile struct {
 	Social            ServerSocial               `json:"social"`          // Social settings
 	// If DeveloperFeatures is not null, the player will have a gold name
 	DeveloperFeatures *DeveloperFeatures `json:"dev,omitempty"` // Developer features
+	// The player's own early quit state. The client reads earlyquit|penaltyts and the rest from this
+	// profile, not the client profile (CR15NetGame::LoadEarlyQuitPenalty, Quest libr15.so 0x126c958, reads
+	// the local user's profile at netGame+0x28d0). Set only on the copy sent to the player at login, never
+	// on the stored copy other players fetch.
+	EarlyQuitFeatures *EarlyQuitFeatures `json:"earlyquit,omitempty"`
 }
 
 func (s ServerProfile) IsUnlocked(id string) bool {
