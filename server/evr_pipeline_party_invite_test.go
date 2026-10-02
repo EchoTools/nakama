@@ -1,7 +1,11 @@
 package server
 
 import (
+	"errors"
+	"fmt"
 	"testing"
+
+	"github.com/heroiclabs/nakama-common/runtime"
 
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
@@ -23,5 +27,24 @@ func TestRespondToInviteMissAnswersAnAcceptWithAJoinFailure(t *testing.T) {
 	}
 	if reject := respondToInviteMiss(0); len(reject) != 0 {
 		t.Errorf("reject with no invite: got %d messages, want none", len(reject))
+	}
+}
+
+func TestPartyJoinFailureCodeIsTheGamesCode(t *testing.T) {
+	cases := []struct {
+		err  error
+		want uint8
+	}{
+		{runtime.ErrPartyFull, 5},
+		{fmt.Errorf("join: %w", runtime.ErrPartyFull), 5},
+		{ErrPartyNotFound, 1},
+		{runtime.ErrPartyClosed, 1},
+		{runtime.ErrPartyJoinRequestAlreadyMember, 2},
+		{errors.New("anything else"), 2},
+	}
+	for _, c := range cases {
+		if got := partyJoinFailureCode(c.err); got != c.want {
+			t.Errorf("partyJoinFailureCode(%v) = %d, want %d", c.err, got, c.want)
+		}
 	}
 }

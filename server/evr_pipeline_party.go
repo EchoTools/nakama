@@ -2,12 +2,14 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/rtapi"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 )
@@ -296,7 +298,7 @@ func (p *EvrPipeline) snsPartyJoinRequest(ctx context.Context, logger *zap.Logge
 	})
 	if err != nil {
 		logger.Info("Party join request failed", zap.Error(err))
-		return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: msg.PartyID, ErrorCode: 2})
+		return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: msg.PartyID, ErrorCode: partyJoinFailureCode(err)})
 	}
 
 	if !autoJoin {
@@ -571,6 +573,21 @@ func (p *EvrPipeline) snsPartyPassOwnershipRequest(ctx context.Context, logger *
 	return SendEVRMessages(session, false, &evr.SNSPartyPassSuccess{})
 }
 
+// partyJoinFailureCode is the PartyJoinFailure code for a failed party join, in the game's own codes
+// (echovr.exe PartyJoinFailedCB 0x140189590: 1 not found, 3 no permission, 4 locked, 5 full,
+// 6 version), so the game shows the reason. 2 is a refusal with no reason; the client shows it as
+// locked.
+func partyJoinFailureCode(err error) uint8 {
+	switch {
+	case errors.Is(err, runtime.ErrPartyFull):
+		return 5
+	case errors.Is(err, ErrPartyNotFound), errors.Is(err, runtime.ErrPartyClosed):
+		return 1
+	default:
+		return 2
+	}
+}
+
 // respondToInviteMiss is the answer to a RespondToInvite that matches no pending invite (invites live
 // in memory on one node, so a restart or a session on another node loses them). An accept puts the
 // client in a join that only a join reply ends, so it gets PartyJoinFailure (1, unknown party); a
@@ -657,7 +674,7 @@ func (p *EvrPipeline) snsPartyRespondToInviteRequest(ctx context.Context, logger
 	})
 	if err != nil {
 		logger.Info("Party join via invite failed", zap.Error(err))
-		return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: snsPartyID, ErrorCode: 2})
+		return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: snsPartyID, ErrorCode: partyJoinFailureCode(err)})
 	}
 
 	if !autoJoin {
