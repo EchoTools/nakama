@@ -266,6 +266,7 @@ func TestSNSPartySymbols(t *testing.T) {
 		{"SNSPartyLeaveRequest", &SNSPartyLeaveRequest{}, 0xb77b0be7a94a9fb6},
 		{"SNSPartySendInviteRequest", &SNSPartySendInviteRequest{}, 0xcf13f934540b5f5e},
 		{"SNSPartyLockRequest", &SNSPartyLockRequest{}, 0xc2478aa479f3e16a},
+		{"SNSPartySetJoinPolicyRequest", &SNSPartySetJoinPolicyRequest{}, 0xe1d46b6fb78fd9e6},
 		{"SNSPartyUnlockRequest", &SNSPartyUnlockRequest{}, 0x5a4e99802fa3d704},
 		{"SNSPartyKickRequest", &SNSPartyKickRequest{}, 0xfaf57beb59917d64},
 		{"SNSPartyPassOwnershipRequest", &SNSPartyPassOwnershipRequest{}, 0x518543cd886a6946},
@@ -443,5 +444,22 @@ func TestSNSPartyLockNotify_RoundTrip(t *testing.T) {
 	}
 	if m2.PartyID != 0xFF {
 		t.Errorf("mismatch: %+v", m2)
+	}
+}
+
+func TestSNSPartySetJoinPolicyRequest_RoundTripAndRegistry(t *testing.T) {
+	data := buildPayload28(0x77, testUUID1, 0x88, 2)
+	m := &SNSPartySetJoinPolicyRequest{}
+	if err := m.Stream(NewEasyStream(DecodeMode, data)); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if m.TargetParam != 2 {
+		t.Errorf("policy = %d, want 2", m.TargetParam)
+	}
+	if _, ok := SymbolTypes[uint64(m.Symbol())]; !ok {
+		t.Errorf("SNSPartySetJoinPolicyRequest (0x%016x) is not in SymbolTypes", uint64(m.Symbol()))
+	}
+	if got := NewMessageFromHash(uint64(m.Symbol())); got == nil {
+		t.Errorf("NewMessageFromHash does not build SNSPartySetJoinPolicyRequest")
 	}
 }

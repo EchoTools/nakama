@@ -125,6 +125,33 @@ func (m SNSPartyLockRequest) String() string {
 		m.RoutingID, m.LocalUserUUID, m.SessionGUID, m.TargetParam)
 }
 
+// SNSPartySetJoinPolicyRequest is sent by a nevr-runtime client (social level >= 1) when the party
+// leader's game sets the join policy (R15NetPartySetJoinPolicyNode -> slot 16): TargetParam is the
+// policy as the game numbers it, 0 invite only, 1 friends, 2 friends of members, 3 everyone.
+type SNSPartySetJoinPolicyRequest struct {
+	RoutingID     uint64
+	LocalUserUUID [16]byte
+	SessionGUID   uint64
+	TargetParam   uint64
+}
+
+func (m SNSPartySetJoinPolicyRequest) Token() string   { return "SNSPartySetJoinPolicyRequest" }
+func (m *SNSPartySetJoinPolicyRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
+
+func (m *SNSPartySetJoinPolicyRequest) Stream(s *EasyStream) error {
+	return RunErrorFunctions([]func() error{
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.RoutingID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.LocalUserUUID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.SessionGUID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.TargetParam) },
+	})
+}
+
+func (m SNSPartySetJoinPolicyRequest) String() string {
+	return fmt.Sprintf("SNSPartySetJoinPolicyRequest(routing=%016x, user=%x, session=%016x, policy=%d)",
+		m.RoutingID, m.LocalUserUUID, m.SessionGUID, m.TargetParam)
+}
+
 // SNSPartyUnlockRequest is sent by a client to unlock the party.
 type SNSPartyUnlockRequest struct {
 	RoutingID     uint64

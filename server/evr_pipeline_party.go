@@ -285,12 +285,20 @@ func (p *EvrPipeline) snsPartyJoinRequest(ctx context.Context, logger *zap.Logge
 		return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: msg.PartyID, ErrorCode: 1})
 	}
 
-	// Leave any existing party first.
-	if params.currentPartyID != uuid.Nil {
-		p.snsPartyLeaveCleanup(ctx, logger, session, params)
-		params, _ = LoadParams(ctx)
+	// The party's join policy (an invited player is always admitted).
+	if ph, found := p.nk.partyRegistry.Get(partyUUID); found {
+		allowed, policy, err := p.snsPartyJoinAllowed(ctx, session.UserID(), partyUUID, ph)
+		if err != nil {
+			logger.Warn("Party join policy check failed", zap.Error(err))
+			return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: msg.PartyID, ErrorCode: 2})
+		}
+		if !allowed {
+			logger.Info("Party join refused by policy", zap.Uint64("party_id", msg.PartyID), zap.Uint8("policy", policy))
+			return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: msg.PartyID, ErrorCode: 3})
+		}
 	}
 
+	// The player stays in their current party until this one admits them (snsPartyLeaveForJoin below).
 	autoJoin, err := p.nk.partyRegistry.PartyJoinRequest(ctx, partyUUID, p.node, &Presence{
 		ID:     PresenceID{Node: p.node, SessionID: session.ID()},
 		UserID: session.UserID(),
@@ -307,6 +315,8 @@ func (p *EvrPipeline) snsPartyJoinRequest(ctx context.Context, logger *zap.Logge
 		return nil
 	}
 
+	p.snsPartyLeaveForJoin(ctx, logger, session, params, partyUUID)
+	params, _ = LoadParams(ctx)
 	if err := p.snsPartyTrackAndJoin(ctx, logger, session, partyUUID, msg.PartyID, params); err != nil {
 		logger.Error("Failed to track party join", zap.Error(err))
 		return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: msg.PartyID, ErrorCode: 1})
@@ -661,12 +671,7 @@ func (p *EvrPipeline) snsPartyRespondToInviteRequest(ctx context.Context, logger
 		return nil
 	}
 
-	// Accept — join the party.
-	if params.currentPartyID != uuid.Nil {
-		p.snsPartyLeaveCleanup(ctx, logger, session, params)
-		params, _ = LoadParams(ctx)
-	}
-
+	// Accept — join the party. The player stays in their current party until this one admits them.
 	autoJoin, err := p.nk.partyRegistry.PartyJoinRequest(ctx, partyUUID, p.node, &Presence{
 		ID:     PresenceID{Node: p.node, SessionID: session.ID()},
 		UserID: session.UserID(),
@@ -683,6 +688,8 @@ func (p *EvrPipeline) snsPartyRespondToInviteRequest(ctx context.Context, logger
 		return nil
 	}
 
+	p.snsPartyLeaveForJoin(ctx, logger, session, params, partyUUID)
+	params, _ = LoadParams(ctx)
 	if err := p.snsPartyTrackAndJoin(ctx, logger, session, partyUUID, snsPartyID, params); err != nil {
 		return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: snsPartyID, ErrorCode: 1})
 	}

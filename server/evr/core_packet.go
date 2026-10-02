@@ -92,6 +92,7 @@ var (
 		0xb77b0be7a94a9fb6: (*SNSPartyLeaveRequest)(nil),
 		0xcf13f934540b5f5e: (*SNSPartySendInviteRequest)(nil),
 		0xc2478aa479f3e16a: (*SNSPartyLockRequest)(nil),
+		0xe1d46b6fb78fd9e6: (*SNSPartySetJoinPolicyRequest)(nil),
 		0x5a4e99802fa3d704: (*SNSPartyUnlockRequest)(nil),
 		0xfaf57beb59917d64: (*SNSPartyKickRequest)(nil),
 		0x518543cd886a6946: (*SNSPartyPassOwnershipRequest)(nil),

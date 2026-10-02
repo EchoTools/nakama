@@ -173,6 +173,7 @@ SNSPartyLeaveSuccess
 SNSPartyLockFailure
 SNSPartyLockNotify
 SNSPartyLockRequest
+SNSPartySetJoinPolicyRequest
 SNSPartyLockSuccess
 SNSPartyPassFailure
 SNSPartyPassNotify
