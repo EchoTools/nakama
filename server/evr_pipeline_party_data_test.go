@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -124,5 +125,77 @@ func TestPartyDataNotifyRefusesAMemberWithNoAccountID(t *testing.T) {
 	p := &EvrPipeline{}
 	if _, err := p.partyDataNotify(context.Background(), newSNSPartyDataState(), 1, snsPartyDataScopeMember, uuid.Nil, uuid.Nil, 0); err == nil {
 		t.Error("member data with MemberID 0 (the party's id on the wire) was built")
+	}
+}
+
+// The notify path end to end from the user's match and session to the JSON: a member in a match gets
+// the match's lobbyid, mode, their team and the lobby type over whatever their client wrote under those
+// names; a member with no live session is offline with no headset; script keys survive both.
+func TestPartyDataJSONServerKeysOverrideTheClients(t *testing.T) {
+	user := uuid.Must(uuid.NewV4())
+	matchUUID := uuid.Must(uuid.NewV4())
+	label := &MatchLabel{
+		ID:        MatchID{UUID: matchUUID, Node: "n"},
+		Mode:      evr.ModeCombatPrivate,
+		LobbyType: PrivateLobby,
+		Players:   []PlayerInfo{{UserID: user.String(), Team: OrangeTeam}},
+	}
+	params := &SessionParameters{loginPayload: &evr.LoginProfile{
+		SystemInfo:  evr.SystemInfo{HeadsetType: "Oculus Rift S"},
+		BuildNumber: evr.StandaloneBuildNumber + 1,
+	}}
+	client := func() map[string]any {
+		return map[string]any{"lobbyid": "FAKE", "matchtype": 7, "team": 9, "lobbytype": 0, "offline": true,
+			"headsettype": 1, "scriptkey": "kept"}
+	}
+	decode := func(raw []byte) map[string]any {
+		var out map[string]any
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("not JSON: %v", err)
+		}
+		return out
+	}
+
+	raw, err := partyDataJSON(client(), partyServerKeysFor(label, params, user, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := decode(raw)
+	want := map[string]any{
+		"lobbyid":     strings.ToUpper(matchUUID.String()),
+		"matchtype":   float64(int64(evr.ModeCombatPrivate)),
+		"team":        float64(OrangeTeam),
+		"lobbytype":   float64(PrivateLobby),
+		"offline":     false,
+		"headsettype": float64(2),
+		"scriptkey":   "kept",
+	}
+	for k, v := range want {
+		if in[k] != v {
+			t.Errorf("in a match: %s = %v, want %v", k, in[k], v)
+		}
+	}
+
+	raw, err = partyDataJSON(client(), partyServerKeysFor(nil, nil, user, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	off := decode(raw)
+	wantOff := map[string]any{
+		"lobbyid": snsPartyNoLobbyID, "matchtype": float64(-1), "team": float64(65535), "lobbytype": float64(2),
+		"offline": true, "headsettype": float64(0), "scriptkey": "kept",
+	}
+	for k, v := range wantOff {
+		if off[k] != v {
+			t.Errorf("offline: %s = %v, want %v", k, off[k], v)
+		}
+	}
+
+	raw, err = partyDataJSON(map[string]any{}, partyServerKeysFor(label, params, user, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, has := decode(raw)["headsettype"]; has {
+		t.Error("the party's data carries a headsettype")
 	}
 }

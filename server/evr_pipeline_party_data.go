@@ -167,8 +167,13 @@ func partyHeadsetType(deviceType string, pcvr bool) int {
 // partyServerKeys are the keys the server fills for one user's data: the match keys and offline, plus
 // headsettype for a member's data. They override whatever the client sent under the same names.
 func (p *EvrPipeline) partyServerKeys(ctx context.Context, userID uuid.UUID, member bool) map[string]any {
-	keys := partyMatchKeys(p.userCurrentMatch(ctx, userID), userID)
-	params := p.userSessionParams(userID)
+	return partyServerKeysFor(p.userCurrentMatch(ctx, userID), p.userSessionParams(userID), userID, member)
+}
+
+// partyServerKeysFor builds the server's keys from the user's match (nil: none) and one of their live
+// sessions' parameters (nil: no live session, so offline, and no headset known).
+func partyServerKeysFor(label *MatchLabel, params *SessionParameters, userID uuid.UUID, member bool) map[string]any {
+	keys := partyMatchKeys(label, userID)
 	keys["offline"] = params == nil
 	if member {
 		headset := 0
@@ -180,6 +185,18 @@ func (p *EvrPipeline) partyServerKeys(ctx context.Context, userID uuid.UUID, mem
 	return keys
 }
 
+// partyDataJSON is the JSON a notify carries: the stored script keys with the server's keys over them.
+func partyDataJSON(stored, serverKeys map[string]any) ([]byte, error) {
+	for k, v := range serverKeys {
+		stored[k] = v
+	}
+	raw, err := json.Marshal(stored)
+	if err != nil {
+		return nil, fmt.Errorf("party data encode: %w", err)
+	}
+	return raw, nil
+}
+
 // partyDataNotify builds one scope's notify: the stored script keys with the server keys over them.
 // The party scope's server keys are the leader's.
 func (p *EvrPipeline) partyDataNotify(ctx context.Context, state *snsPartyDataState, snsPartyID uint64, scope uint64,
@@ -189,12 +206,9 @@ func (p *EvrPipeline) partyDataNotify(ctx context.Context, state *snsPartyDataSt
 		return nil, fmt.Errorf("party data: no account id for member %s", userID)
 	}
 	data, seq := state.snapshot(scope, sessionID)
-	for k, v := range p.partyServerKeys(ctx, userID, scope == snsPartyDataScopeMember) {
-		data[k] = v
-	}
-	raw, err := json.Marshal(data)
+	raw, err := partyDataJSON(data, p.partyServerKeys(ctx, userID, scope == snsPartyDataScopeMember))
 	if err != nil {
-		return nil, fmt.Errorf("party data encode: %w", err)
+		return nil, err
 	}
 	if scope == snsPartyDataScopeParty {
 		memberID = 0
@@ -322,9 +336,14 @@ func (p *EvrPipeline) snsPartyDataUpdateRequest(ctx context.Context, logger *zap
 		return failure(3)
 	}
 
-	state := p.partyDataState(params.currentPartyID)
 	snsID := params.currentSNSPartyID
 	accountID := p.sessionAccountID(ctx, session, params)
+	if msg.TargetParam == snsPartyDataScopeMember && accountID == 0 {
+		// MemberID 0 is the party's data on the wire: a member with no account id cannot be relayed.
+		logger.Warn("Party data refused: no account id for the sender", zap.String("party", params.currentPartyID.String()))
+		return failure(1)
+	}
+	state := p.partyDataState(params.currentPartyID)
 	stored := state.store(msg.TargetParam, session.ID(), msg.Seq, data)
 	members, _ := p.partyMembers(ctx, params.currentPartyID)
 	sent := 0
