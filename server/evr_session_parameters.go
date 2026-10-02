@@ -62,6 +62,7 @@ type SessionParameters struct {
 	currentSNSPartyID uint64    // SNS wire party ID
 
 	sessionDurationOnce sync.Once // Ensures the session-duration metrics goroutine is spawned exactly once
+	snsPartyCloseOnce   sync.Once // Ensures the SNS party leave-on-close goroutine is spawned exactly once
 
 	// MatchLifecycle tracks this player's position in the match participation
 	// lifecycle (observer mode only — logs transitions, does not gate behavior).

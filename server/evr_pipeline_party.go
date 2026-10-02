@@ -179,7 +179,25 @@ func (p *EvrPipeline) snsPartyTrackAndJoin(ctx context.Context, logger *zap.Logg
 	params.currentPartyID = partyUUID
 	params.currentSNSPartyID = snsPartyID
 	StoreParams(session.Context(), params)
+	params.snsPartyCloseOnce.Do(func() {
+		go p.snsPartyLeaveOnClose(session.logger, session)
+	})
 	return nil
+}
+
+// snsPartyLeaveOnClose waits for the session to end and then leaves its SNS party, if it is still in
+// one, as snsPartyLeaveCleanup does for an explicit leave: a game client that disconnects sends no
+// leave, and without this a party whose last member disconnected kept its data and join policy for
+// the life of the process. Started once per session, at its first party join.
+func (p *EvrPipeline) snsPartyLeaveOnClose(logger *zap.Logger, session *sessionWS) {
+	<-session.Context().Done()
+	params, ok := LoadParams(session.Context())
+	if !ok || params.currentPartyID == uuid.Nil {
+		return
+	}
+	logger.Debug("Session closed in an SNS party: leaving it", zap.String("party_id", params.currentPartyID.String()),
+		zap.Uint64("sns_party_id", params.currentSNSPartyID))
+	p.snsPartyLeaveCleanup(context.Background(), logger, session, params)
 }
 
 // clearPartyParams clears the session's current-party fields and re-stores the

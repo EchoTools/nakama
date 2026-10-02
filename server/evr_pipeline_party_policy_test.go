@@ -115,3 +115,58 @@ func TestPartyPolicyIsDroppedWhenTheDataRelayFindsNobody(t *testing.T) {
 	_, kept = p.snsPartyData.Load(partyUUID)
 	require.False(t, kept)
 }
+
+// A game client that disconnects sends no leave. When the last member's session ends, the party's
+// policy and data are dropped all the same; a member's session ending while others remain drops nothing.
+func TestPartyPolicyIsDroppedWhenTheLastMemberDisconnects(t *testing.T) {
+	p, tracker := partyEndEnv(t)
+	partyUUID := uuid.Must(uuid.NewV4())
+	stream := PresenceStream{Mode: StreamModeParty, Subject: partyUUID, Label: "testnode"}
+	leader := newPartyMemberSession(t, "leader", tracker, nil, p)
+	member := newPartyMemberSession(t, "member", tracker, nil, p)
+	closed := map[*sessionWS]chan struct{}{}
+	for _, s := range []*sessionWS{leader, member} {
+		tracker.Track(context.Background(), s.id, stream, s.userID, PresenceMeta{})
+		params, _ := LoadParams(s.Context())
+		params.currentPartyID = partyUUID
+		params.currentSNSPartyID = 7
+		done := make(chan struct{})
+		closed[s] = done
+		go func(s *sessionWS) {
+			p.snsPartyLeaveOnClose(loggerForTest(t), s)
+			close(done)
+		}(s)
+	}
+	p.snsPartyPolicies.Store(partyUUID, snsPartyPolicyFriends)
+	p.snsPartyData.Store(partyUUID, newSNSPartyDataState())
+
+	leader.ctxCancelFn()
+	<-closed[leader]
+	_, kept := p.snsPartyPolicies.Load(partyUUID)
+	require.True(t, kept, "a member is still in the party")
+	require.Len(t, tracker.ListByStream(stream, true, true), 1, "the closed session left the party stream")
+
+	member.ctxCancelFn()
+	<-closed[member]
+	_, kept = p.snsPartyPolicies.Load(partyUUID)
+	require.False(t, kept, "the last member disconnected and the policy stayed")
+	_, kept = p.snsPartyData.Load(partyUUID)
+	require.False(t, kept, "the last member disconnected and the party data stayed")
+}
+
+// A session that ends after leaving its party (or never joined one) leaves nothing.
+func TestSessionClosedOutsideAPartyLeavesNothing(t *testing.T) {
+	p, tracker := partyEndEnv(t)
+	other := uuid.Must(uuid.NewV4())
+	p.snsPartyPolicies.Store(other, snsPartyPolicyFriends)
+	s := newPartyMemberSession(t, "solo", tracker, nil, p)
+	done := make(chan struct{})
+	go func() {
+		p.snsPartyLeaveOnClose(loggerForTest(t), s)
+		close(done)
+	}()
+	s.ctxCancelFn()
+	<-done
+	_, kept := p.snsPartyPolicies.Load(other)
+	require.True(t, kept)
+}
