@@ -130,13 +130,14 @@ func TestNoTabletPartyThePartyGroupApplies(t *testing.T) {
 	require.Equal(t, groupID, got.ID())
 }
 
-// Rule branch 3: no tablet party and no group name: no lobby party, as before.
+// Rule branch 3: no tablet party and no group name: no lobby party, as before. "tablet" is no longer a
+// placeholder for "no group" (owner, 2026-10-02: only he ever used it); it is a group name like any other.
 func TestNoTabletPartyNoGroupNoLobbyParty(t *testing.T) {
 	e := newTabletEnv(t)
 	solo := e.session("solo", true)
 	e.tabletParty(79, solo)
 	require.False(t, e.ep.lobbyPartyApplies(solo, findParams("")))
-	require.False(t, e.ep.lobbyPartyApplies(solo, findParams("tablet")))
+	require.True(t, e.ep.lobbyPartyApplies(solo, findParams("tablet")))
 }
 
 // Guard: a tablet party with a stock member is not used (the stock client is never told where the

@@ -74,7 +74,7 @@ func (p *EvrPipeline) lobbyPartyApplies(session *sessionWS, lobbyParams *LobbySe
 	if _, inTablet, usable := p.tabletParty(session); inTablet {
 		return usable
 	}
-	return lobbyParams.PartyGroupName != "" && lobbyParams.PartyGroupName != "tablet"
+	return lobbyParams.PartyGroupName != ""
 }
 
 // errTabletPartyNotUsable is returned when the session's tablet party cannot be its lobby party (a
@@ -99,7 +99,7 @@ func (p *EvrPipeline) joinLobbyParty(logger *zap.Logger, session *sessionWS, lob
 		params.currentPartyID = ph.ID
 		StoreParams(session.Context(), params)
 	}
-	group := &LobbyGroup{name: "tablet", ph: ph}
+	group := &LobbyGroup{ph: ph}
 	leader := group.GetLeader()
 	isLeader := leader != nil && leader.SessionId == session.ID().String()
 	logger.Info("Tablet party is the lobby party", zap.String("party_id", ph.ID.String()),
