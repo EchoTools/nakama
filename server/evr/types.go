@@ -134,6 +134,8 @@ SNSFriendRemoveRequest
 SNSFriendRemoveResponse
 SNSFriendStatusNotify
 SNSFriendPresenceNotify
+SNSRecentlyMetListResponse
+SNSRecentlyMetRefreshRequest
 SNSFriendWithdrawnNotify
 SNSGenericMessage
 SNSGenericMessageNotify

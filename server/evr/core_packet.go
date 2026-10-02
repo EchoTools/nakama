@@ -144,6 +144,8 @@ var (
 		0xa78aeb2a4e89b10b: (*SNSFriendListResponse)(nil),
 		0x26a19dc4d2d5579d: (*SNSFriendStatusNotify)(nil),
 		0xbdd8dd00c5e97a63: (*SNSFriendPresenceNotify)(nil),
+		0xc5359d9ff7e1fefe: (*SNSRecentlyMetRefreshRequest)(nil),
+		0xbc3ee692bb03328f: (*SNSRecentlyMetListResponse)(nil),
 		0x7f0c6a3ac83c6f77: (*SNSFriendInviteSuccess)(nil),
 		0x7f197e30c72c6e61: (*SNSFriendInviteFailure)(nil),
 		0xca09b0b36bd981b7: (*SNSFriendInviteNotify)(nil),

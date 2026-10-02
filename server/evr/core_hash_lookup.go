@@ -1132,6 +1132,8 @@ var SymbolCache = map[Symbol]SymbolToken{
 	0xad37c0190158a524: "delegate_OnLeftHandAttachedToRemotePlayer",
 	0x26a19dc4d2d5579d: "SNSFriendStatusNotify",
 	0xbdd8dd00c5e97a63: "SNSFriendPresenceNotify",
+	0xc5359d9ff7e1fefe: "SNSRecentlyMetRefreshRequest",
+	0xbc3ee692bb03328f: "SNSRecentlyMetListResponse",
 	0x03ebbdb238b42d7c: "smoothpursuitleftrightminangleoutput",
 	0x666dc892e75be740: "closestfingerposition",
 	0xbac9fe5721c6d3dc: "IntentComponent",

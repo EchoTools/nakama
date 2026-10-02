@@ -510,3 +510,42 @@ func TestSNSPartyDataNotify_LayoutAndRoundTrip(t *testing.T) {
 		t.Errorf("symbol = 0x%016x, want 0x832143ccbf160955", uint64(m.Symbol()))
 	}
 }
+
+func TestSNSRecentlyMet_SymbolsLayoutAndRegistry(t *testing.T) {
+	req := &SNSRecentlyMetRefreshRequest{}
+	if err := req.Stream(NewEasyStream(DecodeMode, buildPayload28(0, testUUID1, 0, 0)[:0x20])); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if uint64(req.Symbol()) != 0xc5359d9ff7e1fefe {
+		t.Errorf("request symbol = 0x%016x", uint64(req.Symbol()))
+	}
+	resp := &SNSRecentlyMetListResponse{Entries: []RecentlyMetEntry{
+		{AccountID: 900000000000000101, PartyID: 5, Joinable: 1, Status: 0, Name: []byte("Peer"), Text: []byte("Social Lobby")},
+		{AccountID: 42, Status: 2, Name: []byte("Off")},
+	}}
+	if uint64(resp.Symbol()) != 0xbc3ee692bb03328f {
+		t.Errorf("response symbol = 0x%016x", uint64(resp.Symbol()))
+	}
+	enc := NewEasyStream(EncodeMode, []byte{})
+	if err := resp.Stream(enc); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	raw := enc.w.Bytes()
+	// Count(4); entry: AccountID(8) PartyID(8) Joinable(1) Status(1) Reserved(6) NameLen(2) Name TextLen(2) Text
+	if binary.LittleEndian.Uint32(raw[0:4]) != 2 || binary.LittleEndian.Uint16(raw[28:30]) != 4 || string(raw[30:34]) != "Peer" ||
+		binary.LittleEndian.Uint16(raw[34:36]) != 12 || string(raw[36:48]) != "Social Lobby" {
+		t.Fatalf("layout: %x", raw)
+	}
+	back := &SNSRecentlyMetListResponse{}
+	if err := back.Stream(NewEasyStream(DecodeMode, raw)); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(back.Entries) != 2 || back.Entries[1].AccountID != 42 || back.Entries[1].Status != 2 || string(back.Entries[0].Text) != "Social Lobby" {
+		t.Errorf("round trip: %+v", back.Entries)
+	}
+	for _, sym := range []uint64{0xc5359d9ff7e1fefe, 0xbc3ee692bb03328f} {
+		if _, ok := SymbolTypes[sym]; !ok || NewMessageFromHash(sym) == nil {
+			t.Errorf("0x%016x is not registered", sym)
+		}
+	}
+}
