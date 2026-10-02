@@ -246,15 +246,14 @@ func (t *SNSEarlyQuitMessageTrigger) SendEarlyQuitUpdateNotification(ctx context
 		return nil
 	}
 	penaltyExpiry := time.Unix(state.PenaltyTimestamp, 0)
-	lockoutActive := state.PenaltyTimestamp > 0 && time.Now().Unix() < state.PenaltyTimestamp
 	notification := evr.NewEarlyQuitUpdateNotification(
-		0, // playerID — not read by handler
+		0, // playerID — not read by the client
 		penaltyExpiry,
+		state.NumEarlyQuits,
+		state.NumSteadyMatches,
 		state.NumSteadyEarlyQuits,
 		state.PenaltyLevel,
 		state.SteadyPlayerLevel,
-		lockoutActive, // showWarning = true if lockout is active
-		lockoutActive,
 	)
 
 	if found := t.SendEvrMessage(userID, notification); !found {
@@ -264,6 +263,8 @@ func (t *SNSEarlyQuitMessageTrigger) SendEarlyQuitUpdateNotification(ctx context
 
 	t.logger.Debug("Sent early quit update notification",
 		zap.String("user_id", userID),
+		zap.Int64("penalty_expiry", state.PenaltyTimestamp),
+		zap.Int32("num_early_quits", state.NumEarlyQuits),
 		zap.Int32("penalty_level", state.PenaltyLevel),
 		zap.Int32("steady_player_level", state.SteadyPlayerLevel))
 
