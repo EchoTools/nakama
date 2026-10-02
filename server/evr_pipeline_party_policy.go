@@ -40,6 +40,13 @@ func snsPartyPolicyAdmits(policy uint8, invited, friendOfLeader, friendOfMember 
 	}
 }
 
+// snsPartyIsOpen reports whether the party is unlocked (Lock/Unlock set PartyHandler.Open).
+func snsPartyIsOpen(ph *PartyHandler) bool {
+	ph.RLock()
+	defer ph.RUnlock()
+	return ph.Open
+}
+
 // snsPartyPolicy is the party's join policy, everyone when none was set.
 func (p *EvrPipeline) snsPartyPolicy(partyUUID uuid.UUID) uint8 {
 	if policy, ok := p.snsPartyPolicies.Load(partyUUID); ok {

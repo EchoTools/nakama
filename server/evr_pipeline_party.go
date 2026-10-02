@@ -285,8 +285,10 @@ func (p *EvrPipeline) snsPartyJoinRequest(ctx context.Context, logger *zap.Logge
 		return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: msg.PartyID, ErrorCode: 1})
 	}
 
-	// The party's join policy (an invited player is always admitted).
-	if ph, found := p.nk.partyRegistry.Get(partyUUID); found {
+	// The party's join policy (an invited player is always admitted). A locked party is not refused
+	// whatever its policy: its joins queue for the leader's approval with no reply, as the owner ruled
+	// (2026-10-01), so the policy applies only to an open party.
+	if ph, found := p.nk.partyRegistry.Get(partyUUID); found && snsPartyIsOpen(ph) {
 		allowed, policy, err := p.snsPartyJoinAllowed(ctx, session.UserID(), partyUUID, ph)
 		if err != nil {
 			logger.Warn("Party join policy check failed", zap.Error(err))
