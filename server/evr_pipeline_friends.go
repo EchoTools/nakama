@@ -493,6 +493,21 @@ func friendStatusNotifications(friends []*api.Friend, resolveAccountID func(*api
 	return out
 }
 
+// friendNotifies resolves each confirmed friend's account id once (a database lookup each) and uses it
+// for both the status notifies every client is sent and the presence targets only a nevr-runtime
+// client is sent, so a stock client costs no lookups beyond the status notifies it always had.
+func friendNotifies(friends []*api.Friend, resolveAccountID func(*api.Friend) (accountID uint64, ok bool)) ([]friendStatusNotification, []friendPresenceTarget) {
+	var targets []friendPresenceTarget
+	notifications := friendStatusNotifications(friends, func(f *api.Friend) (uint64, bool) {
+		accountID, ok := resolveAccountID(f)
+		if ok {
+			targets = append(targets, friendPresenceTarget{userID: uuid.FromStringOrNil(f.User.Id), accountID: accountID, online: f.User.Online})
+		}
+		return accountID, ok
+	})
+	return notifications, targets
+}
+
 func (p *EvrPipeline) sendFriendListResponse(ctx context.Context, logger *zap.Logger, session *sessionWS) error {
 	userID := session.UserID()
 
@@ -535,7 +550,7 @@ func (p *EvrPipeline) sendFriendListResponse(ctx context.Context, logger *zap.Lo
 	// named entry into the client's friend table) is the listener for
 	// SNSFriendStatusNotify, which was never sent from here. Emit one per confirmed
 	// friend so the roster actually populates.
-	notifications := friendStatusNotifications(friends, func(f *api.Friend) (uint64, bool) {
+	notifications, targets := friendNotifies(friends, func(f *api.Friend) (uint64, bool) {
 		friendUserID, err := uuid.FromString(f.User.Id)
 		if err != nil {
 			logger.Warn("Skipping friend status notify — bad user id", zap.String("user_id", f.User.Id), zap.Error(err))
@@ -559,21 +574,6 @@ func (p *EvrPipeline) sendFriendListResponse(ctx context.Context, logger *zap.Lo
 	}
 
 	// Each friend's presence (party, joinable, status text) for a client that parses it.
-	var targets []friendPresenceTarget
-	for _, f := range friends {
-		if f == nil || f.State == nil || f.State.Value != FriendStateFriends || f.User == nil {
-			continue
-		}
-		friendUserID, err := uuid.FromString(f.User.Id)
-		if err != nil {
-			continue
-		}
-		accountID, err := p.resolveUserIDToAccountID(ctx, friendUserID)
-		if err != nil {
-			continue
-		}
-		targets = append(targets, friendPresenceTarget{userID: friendUserID, accountID: accountID, online: f.User.Online})
-	}
 	p.sendFriendPresence(ctx, logger, session, targets)
 
 	return nil
