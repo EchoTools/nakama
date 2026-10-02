@@ -166,9 +166,30 @@ func storeRecentlyMet(ctx context.Context, nk runtime.NakamaModule, db *sql.DB, 
 	}
 }
 
-// recordRecentlyMet adds who the leaving player met to their list. The participants are read here, on
-// the match loop; the storage work runs off it.
-func recordRecentlyMet(logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, state *MatchLabel, userID string) {
+// leaverReadsRecentlyMet is whether the leaving player's game client reads a recently-met list: a
+// nevr-runtime client at social level >= 1 (only those send SNSRecentlyMetRefreshRequest). A session
+// already gone (a disconnect) cannot say, so nothing is recorded for it.
+func leaverReadsRecentlyMet(sessions SessionRegistry, sessionID string) bool {
+	if sessions == nil {
+		return false
+	}
+	s := sessions.Get(uuid.FromStringOrNil(sessionID))
+	if s == nil {
+		return false
+	}
+	params, ok := LoadParams(s.Context())
+	return ok && params.SocialLevel() >= 1
+}
+
+// recordRecentlyMet adds who the leaving player met to their list, for a game client that reads it
+// (owner, 2026-10-02: stock game clients never ask, so their lists are not written). The participants
+// are read here, on the match loop; the storage work runs off it.
+func recordRecentlyMet(logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, state *MatchLabel, userID, sessionID string) {
+	if !leaverReadsRecentlyMet(evrSessionRegistry(nk), sessionID) {
+		logger.WithFields(map[string]any{"user_id": userID, "sid": sessionID, "mid": state.ID.String()}).
+			Debug("Recently met not recorded: the leaver's game client does not read it (or its session is gone)")
+		return
+	}
 	met := recentlyMetIn(userID, state.participations, time.Now().UTC())
 	if len(met) == 0 {
 		return

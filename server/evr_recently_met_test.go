@@ -1,7 +1,11 @@
 package server
 
 import (
+	"context"
 	"fmt"
+	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/atomic"
 	"testing"
 	"time"
 )
@@ -59,5 +63,32 @@ func TestRecentlyMetInIsWhoseTimeInTheMatchOverlapped(t *testing.T) {
 	}
 	if recentlyMetIn("stranger", parts, join) != nil {
 		t.Error("a player with no participation met someone")
+	}
+}
+
+// Only a game client that reads the list gets one written: a runtime client (social level >= 1). A
+// stock game client (level 0), or a leaver whose session is already gone, is not recorded.
+func TestRecentlyMetIsRecordedOnlyForGameClientsThatReadIt(t *testing.T) {
+	session := func(level int) *sessionWS {
+		params := &SessionParameters{loginPayload: &evr.LoginProfile{NevrSocial: level}}
+		s := &sessionWS{}
+		s.id = uuid.Must(uuid.NewV4())
+		s.ctx = context.WithValue(context.Background(), ctxSessionParametersKey{}, atomic.NewPointer(params))
+		return s
+	}
+	runtimeClient, stockClient := session(1), session(0)
+	registry := &sessionMapRegistry{sessions: map[uuid.UUID]Session{runtimeClient.id: runtimeClient, stockClient.id: stockClient}}
+
+	if !leaverReadsRecentlyMet(registry, runtimeClient.id.String()) {
+		t.Error("a runtime game client (level 1) is not recorded")
+	}
+	if leaverReadsRecentlyMet(registry, stockClient.id.String()) {
+		t.Error("a stock game client (level 0) is recorded")
+	}
+	if leaverReadsRecentlyMet(registry, uuid.Must(uuid.NewV4()).String()) {
+		t.Error("a leaver whose session is gone is recorded")
+	}
+	if leaverReadsRecentlyMet(nil, runtimeClient.id.String()) {
+		t.Error("recorded with no session registry")
 	}
 }

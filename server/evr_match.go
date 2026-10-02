@@ -917,7 +917,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			}
 
 			// Who they met here goes on their recently-met list (proposal §2), off the match loop.
-			recordRecentlyMet(logger, nk, db, state, mp.GetUserId())
+			recordRecentlyMet(logger, nk, db, state, mp.GetUserId(), mp.GetSessionId())
 
 			ts := state.joinTimestamps[mp.GetSessionId()]
 			nk.MetricsTimerRecord("match_player_session_duration", tags, time.Since(ts))
