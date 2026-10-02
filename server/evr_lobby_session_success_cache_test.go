@@ -94,6 +94,15 @@ func TestDuplicateJoinReSendsTheSameLobbySessionSuccess(t *testing.T) {
 	require.Len(t, again, 1, "the duplicate join is answered")
 	require.True(t, bytes.Equal(first[0], again[0]), "the re-sent success must carry the keys the game server holds")
 	require.Empty(t, drain(server.outgoingCh), "the game server already has this success")
+
+	// A retry gets the same answer: the entry stays until it expires.
+	registry.answers = append(registry.answers, func() (bool, bool, bool, string, string) {
+		return true, false, false, ErrJoinRejectReasonDuplicateJoin.Error(), ""
+	})
+	require.NoError(t, LobbyJoinEntrants(loggerForTest(t), registry, tracker, client, server, label, entrant))
+	third := drain(client.outgoingCh)
+	require.Len(t, third, 1, "a retry is answered again")
+	require.True(t, bytes.Equal(first[0], third[0]))
 }
 
 // With nothing kept (expired, another node, a restart), a duplicate join is unanswered, as before.
@@ -108,15 +117,33 @@ func TestDuplicateJoinWithNothingKeptSendsNothing(t *testing.T) {
 func TestKeptLobbySessionSuccessExpires(t *testing.T) {
 	match, session := uuid.Must(uuid.NewV4()), uuid.Must(uuid.NewV4())
 	now := time.Now()
-	rememberLobbySessionSuccess(match, session, &evr.LobbySessionSuccessv5{TeamIndex: 1}, now)
+	require.NoError(t, rememberLobbySessionSuccess(match, session, &evr.LobbySessionSuccessv5{TeamIndex: 1}, now))
 	_, ok := sentLobbySessionSuccessFor(match, session, now.Add(lobbySessionSuccessKeep-time.Second))
 	require.True(t, ok)
 	_, ok = sentLobbySessionSuccessFor(match, session, now.Add(lobbySessionSuccessKeep+time.Second))
 	require.False(t, ok)
 	// A later remember drops expired entries.
-	rememberLobbySessionSuccess(uuid.Must(uuid.NewV4()), session, &evr.LobbySessionSuccessv5{}, now.Add(lobbySessionSuccessKeep+time.Second))
+	require.NoError(t, rememberLobbySessionSuccess(uuid.Must(uuid.NewV4()), session, &evr.LobbySessionSuccessv5{}, now.Add(lobbySessionSuccessKeep+time.Second)))
 	sentLobbySessionSuccesses.Lock()
 	_, kept := sentLobbySessionSuccesses.m[lobbySessionSuccessKey{match, session}]
 	sentLobbySessionSuccesses.Unlock()
 	require.False(t, kept)
+}
+
+// What is replayed is the message as it was when sent: a later change to the message object does not
+// reach the kept bytes.
+func TestKeptLobbySessionSuccessIsTheMessageAsSent(t *testing.T) {
+	tracker := newMockMatchmakingTracker()
+	client := capturingSession(t, tracker)
+	match := uuid.Must(uuid.NewV4())
+	message := &evr.LobbySessionSuccessv5{TeamIndex: int16(evr.TeamOrange), ClientMacKey: []byte{1, 2, 3}}
+	want, err := evr.Marshal(message)
+	require.NoError(t, err)
+	require.NoError(t, rememberLobbySessionSuccess(match, client.id, message, time.Now()))
+	message.TeamIndex = int16(evr.TeamBlue)
+	message.ClientMacKey[0] = 9
+	require.NoError(t, resendLobbySessionSuccess(loggerForTest(t), client, match, &EvrMatchPresence{SessionID: client.id, UserID: client.userID}))
+	got := drain(client.outgoingCh)
+	require.Len(t, got, 1)
+	require.True(t, bytes.Equal(want, got[0]))
 }

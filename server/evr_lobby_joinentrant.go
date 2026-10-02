@@ -413,7 +413,9 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 		logger.Error("failed to send lobby session success to game client", zap.Error(err))
 		return errors.New("failed to send lobby session success to game client")
 	}
-	rememberLobbySessionSuccess(label.ID.UUID, e.SessionID, connectionSettings, time.Now())
+	if err := rememberLobbySessionSuccess(label.ID.UUID, e.SessionID, connectionSettings, time.Now()); err != nil {
+		logger.Warn("lobby session success not kept for a duplicate-join re-send", zap.Error(err))
+	}
 
 	// Clear matchmaking credits for all entrants (primary + reservations).
 	// This ensures the next queue after a completed match starts fresh.
