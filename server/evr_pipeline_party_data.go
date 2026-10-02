@@ -242,7 +242,7 @@ type snsPartyMember struct {
 // partyMembers lists the party's sessions on this node, and drops the stored data of sessions that
 // have left. Account ids (a database lookup each) are resolved only when some member's client reads
 // party data, so a party of stock clients costs nothing; readers reports whether one does.
-func (p *EvrPipeline) partyMembers(ctx context.Context, partyUUID uuid.UUID) (members []snsPartyMember, readers bool) {
+func (p *EvrPipeline) partyMembers(ctx context.Context, logger *zap.Logger, partyUUID uuid.UUID) (members []snsPartyMember, readers bool) {
 	stream := PresenceStream{Mode: StreamModeParty, Subject: partyUUID, Label: p.node}
 	present := map[uuid.UUID]bool{}
 	for _, presence := range p.nk.tracker.ListByStream(stream, true, true) {
@@ -266,7 +266,7 @@ func (p *EvrPipeline) partyMembers(ctx context.Context, partyUUID uuid.UUID) (me
 		}
 	}
 	if len(present) == 0 {
-		p.snsPartyData.Delete(partyUUID) // nobody left: the party is over
+		p.snsPartyEnded(logger, partyUUID) // nobody left: the party is over
 	} else if state, ok := p.snsPartyData.Load(partyUUID); ok {
 		state.prune(present)
 	}
@@ -345,7 +345,7 @@ func (p *EvrPipeline) snsPartyDataUpdateRequest(ctx context.Context, logger *zap
 	}
 	state := p.partyDataState(params.currentPartyID)
 	stored := state.store(msg.TargetParam, session.ID(), msg.Seq, data)
-	members, _ := p.partyMembers(ctx, params.currentPartyID)
+	members, _ := p.partyMembers(ctx, logger, params.currentPartyID)
 	sent := 0
 	if stored {
 		notify, err := p.partyDataNotify(ctx, state, snsID, msg.TargetParam, session.ID(), session.UserID(), accountID)
@@ -371,7 +371,7 @@ func (p *EvrPipeline) snsPartyDataUpdateRequest(ctx context.Context, logger *zap
 // as pnsovr added a member when its data arrived), and the others get the joiner's before
 // PartyJoinNotify. Called after the joiner is tracked in the party, before either message.
 func (p *EvrPipeline) snsPartyDataJoining(ctx context.Context, logger *zap.Logger, session Session, partyUUID uuid.UUID, snsPartyID uint64) {
-	members, readers := p.partyMembers(ctx, partyUUID)
+	members, readers := p.partyMembers(ctx, logger, partyUUID)
 	ph, ok := p.nk.partyRegistry.Get(partyUUID)
 	if !ok || !readers {
 		return
@@ -427,7 +427,7 @@ func (p *EvrPipeline) snsPartyDataMatchChanged(ctx context.Context, logger *zap.
 	if !ok {
 		return
 	}
-	members, readers := p.partyMembers(ctx, params.currentPartyID)
+	members, readers := p.partyMembers(ctx, logger, params.currentPartyID)
 	if !readers {
 		return
 	}

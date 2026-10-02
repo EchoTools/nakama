@@ -192,17 +192,26 @@ func clearPartyParams(ctx context.Context, params *SessionParameters) {
 	StoreParams(ctx, params)
 }
 
-func (p *EvrPipeline) snsPartyLeaveCleanup(_ context.Context, _ *zap.Logger, session *sessionWS, params *SessionParameters) {
+func (p *EvrPipeline) snsPartyLeaveCleanup(_ context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) {
 	if params.currentPartyID == uuid.Nil {
 		return
 	}
 	stream := PresenceStream{Mode: StreamModeParty, Subject: params.currentPartyID, Label: p.node}
 	p.nk.tracker.Untrack(session.ID(), stream, session.UserID())
 	if p.nk.tracker.CountByStream(stream) == 0 {
-		p.snsPartyData.Delete(params.currentPartyID) // the last member left: drop the party's data
+		p.snsPartyEnded(logger, params.currentPartyID) // the last member left
 	}
 
 	clearPartyParams(session.Context(), params)
+}
+
+// snsPartyEnded drops what the pipeline holds for a party nobody is in any more: its party data and its
+// join policy. Both are kept per party UUID for the party's life, and nothing else removes them.
+func (p *EvrPipeline) snsPartyEnded(logger *zap.Logger, partyUUID uuid.UUID) {
+	_, hadData := p.snsPartyData.LoadAndDelete(partyUUID)
+	_, hadPolicy := p.snsPartyPolicies.LoadAndDelete(partyUUID)
+	logger.Debug("SNS party ended: dropped its data and join policy", zap.String("party_id", partyUUID.String()),
+		zap.Bool("had_data", hadData), zap.Bool("had_policy", hadPolicy))
 }
 
 func (p *EvrPipeline) getPartyLeaderAccountID(ctx context.Context, logger *zap.Logger, ph *PartyHandler) uint64 {
