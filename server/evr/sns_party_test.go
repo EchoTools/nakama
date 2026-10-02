@@ -266,6 +266,7 @@ func TestSNSPartySymbols(t *testing.T) {
 		{"SNSPartyLeaveRequest", &SNSPartyLeaveRequest{}, 0xb77b0be7a94a9fb6},
 		{"SNSPartySendInviteRequest", &SNSPartySendInviteRequest{}, 0xcf13f934540b5f5e},
 		{"SNSPartyLockRequest", &SNSPartyLockRequest{}, 0xc2478aa479f3e16a},
+		{"SNSPartySetJoinPolicyRequest", &SNSPartySetJoinPolicyRequest{}, 0xe1d46b6fb78fd9e6},
 		{"SNSPartyUnlockRequest", &SNSPartyUnlockRequest{}, 0x5a4e99802fa3d704},
 		{"SNSPartyKickRequest", &SNSPartyKickRequest{}, 0xfaf57beb59917d64},
 		{"SNSPartyPassOwnershipRequest", &SNSPartyPassOwnershipRequest{}, 0x518543cd886a6946},
@@ -443,5 +444,108 @@ func TestSNSPartyLockNotify_RoundTrip(t *testing.T) {
 	}
 	if m2.PartyID != 0xFF {
 		t.Errorf("mismatch: %+v", m2)
+	}
+}
+
+func TestSNSPartySetJoinPolicyRequest_RoundTripAndRegistry(t *testing.T) {
+	data := buildPayload28(0x77, testUUID1, 0x88, 2)
+	m := &SNSPartySetJoinPolicyRequest{}
+	if err := m.Stream(NewEasyStream(DecodeMode, data)); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if m.TargetParam != 2 {
+		t.Errorf("policy = %d, want 2", m.TargetParam)
+	}
+	if _, ok := SymbolTypes[uint64(m.Symbol())]; !ok {
+		t.Errorf("SNSPartySetJoinPolicyRequest (0x%016x) is not in SymbolTypes", uint64(m.Symbol()))
+	}
+	if got := NewMessageFromHash(uint64(m.Symbol())); got == nil {
+		t.Errorf("NewMessageFromHash does not build SNSPartySetJoinPolicyRequest")
+	}
+}
+
+func TestSNSPartyDataUpdateRequest_LayoutAndRegistry(t *testing.T) {
+	json := []byte(`{"k":"v"}`)
+	buf := bytes.NewBuffer(buildPayload28(0, testUUID1, 0, 1))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(7))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(len(json)))
+	buf.Write(json)
+	m := &SNSPartyDataUpdateRequest{}
+	if err := m.Stream(NewEasyStream(DecodeMode, buf.Bytes())); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if m.TargetParam != 1 || m.Seq != 7 || string(m.Json) != `{"k":"v"}` {
+		t.Errorf("decoded %+v", m)
+	}
+	if uint64(m.Symbol()) != 0x3448ca6e8d9dd0ce {
+		t.Errorf("symbol = 0x%016x, want 0x3448ca6e8d9dd0ce", uint64(m.Symbol()))
+	}
+	if _, ok := SymbolTypes[uint64(m.Symbol())]; !ok {
+		t.Errorf("SNSPartyDataUpdateRequest is not in SymbolTypes")
+	}
+	if got := NewMessageFromHash(uint64(m.Symbol())); got == nil {
+		t.Errorf("NewMessageFromHash does not build SNSPartyDataUpdateRequest")
+	}
+}
+
+func TestSNSPartyDataNotify_LayoutAndRoundTrip(t *testing.T) {
+	m := &SNSPartyDataNotify{PartyID: 3, MemberID: 900000000000000101, Seq: 9, Json: []byte(`{"headsettype":2}`)}
+	enc := NewEasyStream(EncodeMode, []byte{})
+	if err := m.Stream(enc); err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	raw := enc.w.Bytes()
+	// PartyID(8) MemberID(8) Seq(4) JsonLen(4) Json: the runtime's parser reads these offsets.
+	if len(raw) != 24+17 || binary.LittleEndian.Uint32(raw[20:24]) != 17 || string(raw[24:]) != `{"headsettype":2}` {
+		t.Fatalf("layout: %x", raw)
+	}
+	m2 := &SNSPartyDataNotify{}
+	if err := m2.Stream(NewEasyStream(DecodeMode, raw)); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if m2.PartyID != 3 || m2.MemberID != 900000000000000101 || m2.Seq != 9 || string(m2.Json) != string(m.Json) {
+		t.Errorf("round trip: %+v", m2)
+	}
+	if uint64(m.Symbol()) != 0x832143ccbf160955 {
+		t.Errorf("symbol = 0x%016x, want 0x832143ccbf160955", uint64(m.Symbol()))
+	}
+}
+
+func TestSNSRecentlyMet_SymbolsLayoutAndRegistry(t *testing.T) {
+	req := &SNSRecentlyMetRefreshRequest{}
+	if err := req.Stream(NewEasyStream(DecodeMode, buildPayload28(0, testUUID1, 0, 0)[:0x20])); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if uint64(req.Symbol()) != 0xc5359d9ff7e1fefe {
+		t.Errorf("request symbol = 0x%016x", uint64(req.Symbol()))
+	}
+	resp := &SNSRecentlyMetListResponse{Entries: []RecentlyMetEntry{
+		{AccountID: 900000000000000101, PartyID: 5, Joinable: 1, Status: 0, Name: []byte("Peer"), Text: []byte("Social Lobby")},
+		{AccountID: 42, Status: 2, Name: []byte("Off")},
+	}}
+	if uint64(resp.Symbol()) != 0xbc3ee692bb03328f {
+		t.Errorf("response symbol = 0x%016x", uint64(resp.Symbol()))
+	}
+	enc := NewEasyStream(EncodeMode, []byte{})
+	if err := resp.Stream(enc); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	raw := enc.w.Bytes()
+	// Count(4); entry: AccountID(8) PartyID(8) Joinable(1) Status(1) Reserved(6) NameLen(2) Name TextLen(2) Text
+	if binary.LittleEndian.Uint32(raw[0:4]) != 2 || binary.LittleEndian.Uint16(raw[28:30]) != 4 || string(raw[30:34]) != "Peer" ||
+		binary.LittleEndian.Uint16(raw[34:36]) != 12 || string(raw[36:48]) != "Social Lobby" {
+		t.Fatalf("layout: %x", raw)
+	}
+	back := &SNSRecentlyMetListResponse{}
+	if err := back.Stream(NewEasyStream(DecodeMode, raw)); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(back.Entries) != 2 || back.Entries[1].AccountID != 42 || back.Entries[1].Status != 2 || string(back.Entries[0].Text) != "Social Lobby" {
+		t.Errorf("round trip: %+v", back.Entries)
+	}
+	for _, sym := range []uint64{0xc5359d9ff7e1fefe, 0xbc3ee692bb03328f} {
+		if _, ok := SymbolTypes[sym]; !ok || NewMessageFromHash(sym) == nil {
+			t.Errorf("0x%016x is not registered", sym)
+		}
 	}
 }

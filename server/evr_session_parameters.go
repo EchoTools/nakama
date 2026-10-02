@@ -62,6 +62,7 @@ type SessionParameters struct {
 	currentSNSPartyID uint64    // SNS wire party ID
 
 	sessionDurationOnce sync.Once // Ensures the session-duration metrics goroutine is spawned exactly once
+	snsPartyCloseOnce   sync.Once // Ensures the SNS party leave-on-close goroutine is spawned exactly once
 
 	// MatchLifecycle tracks this player's position in the match participation
 	// lifecycle (observer mode only — logs transitions, does not gate behavior).
@@ -122,6 +123,21 @@ func (s *SessionParameters) boundDeviceType() string {
 		return boundHeadsetMetricTag("")
 	}
 	return boundHeadsetMetricTag(s.loginPayload.SystemInfo.HeadsetType)
+}
+
+// SocialLevel is the social message level the session's client declared at login (0: none, the stock
+// game or an older nevr-runtime).
+func (s *SessionParameters) SocialLevel() int {
+	return s.loginPayload.SocialLevel()
+}
+
+// NevrRuntimeBuild is the nevr-runtime build the game client declared at login: its `git describe`
+// (e.g. "v4.0.0-145-g09a0ed6-dirty", nevr_identity.build), "" if it declared none.
+func (s *SessionParameters) NevrRuntimeBuild() string {
+	if s.loginPayload == nil || s.loginPayload.NevrIdentity == nil {
+		return ""
+	}
+	return s.loginPayload.NevrIdentity.Build
 }
 
 func (s *SessionParameters) IsVR() bool {

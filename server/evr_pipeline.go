@@ -97,6 +97,8 @@ type EvrPipeline struct {
 	snsPartyIDCounter atomic.Uint64
 	evrUUIDToUserID   *MapOf[uuid.UUID, uuid.UUID] // EvrId.UUID() -> Nakama user UUID
 	snsPartyInvites   *MapOf[uuid.UUID, *snsPartyInviteList]
+	snsPartyPolicies  *MapOf[uuid.UUID, uint8] // SNS party join policy, absent = everyone
+	snsPartyData      *MapOf[uuid.UUID, *snsPartyDataState]
 
 	remoteLogSem chan struct{} // limits concurrent RemoteLogSet processing
 
@@ -280,6 +282,8 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		snsPartyUUIDToID: &MapOf[uuid.UUID, uint64]{},
 		evrUUIDToUserID:  &MapOf[uuid.UUID, uuid.UUID]{},
 		snsPartyInvites:  &MapOf[uuid.UUID, *snsPartyInviteList]{},
+		snsPartyPolicies: &MapOf[uuid.UUID, uint8]{},
+		snsPartyData:     &MapOf[uuid.UUID, *snsPartyDataState]{},
 
 		remoteLogSem: make(chan struct{}, 16), // max 16 concurrent RemoteLogSet processors
 
@@ -615,6 +619,10 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		pipelineFn = p.snsPartyLeaveRequest
 	case *evr.SNSPartySendInviteRequest:
 		pipelineFn = p.snsPartySendInviteRequest
+	case *evr.SNSPartySetJoinPolicyRequest:
+		pipelineFn = p.snsPartySetJoinPolicyRequest
+	case *evr.SNSPartyDataUpdateRequest:
+		pipelineFn = p.snsPartyDataUpdateRequest
 	case *evr.SNSPartyLockRequest:
 		pipelineFn = p.snsPartyLockRequest
 	case *evr.SNSPartyUnlockRequest:
@@ -637,6 +645,8 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		pipelineFn = p.snsFriendListSubscribeRequest
 	case *evr.SNSFriendListRefreshRequest:
 		pipelineFn = p.snsFriendListRefreshRequest
+	case *evr.SNSRecentlyMetRefreshRequest:
+		pipelineFn = p.snsRecentlyMetRefreshRequest
 	case *evr.SNSFriendInviteRequest:
 		pipelineFn = p.snsFriendInviteRequest
 	case *evr.SNSFriendAcceptRequest:

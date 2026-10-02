@@ -210,6 +210,12 @@ func NewMessageFromHash(hash uint64) Message {
 		return &SNSPartySendInviteRequest{}
 	case 0xc2478aa479f3e16a:
 		return &SNSPartyLockRequest{}
+	case 0xe1d46b6fb78fd9e6:
+		return &SNSPartySetJoinPolicyRequest{}
+	case 0x3448ca6e8d9dd0ce:
+		return &SNSPartyDataUpdateRequest{}
+	case 0x832143ccbf160955:
+		return &SNSPartyDataNotify{}
 	case 0x5a4e99802fa3d704:
 		return &SNSPartyUnlockRequest{}
 	case 0xfaf57beb59917d64:
@@ -301,6 +307,12 @@ func NewMessageFromHash(hash uint64) Message {
 		return &SNSFriendListResponse{}
 	case 0x26a19dc4d2d5579d:
 		return &SNSFriendStatusNotify{}
+	case 0xbdd8dd00c5e97a63:
+		return &SNSFriendPresenceNotify{}
+	case 0xc5359d9ff7e1fefe:
+		return &SNSRecentlyMetRefreshRequest{}
+	case 0xbc3ee692bb03328f:
+		return &SNSRecentlyMetListResponse{}
 	case 0x7f0c6a3ac83c6f77:
 		return &SNSFriendInviteSuccess{}
 	case 0x7f197e30c72c6e61:

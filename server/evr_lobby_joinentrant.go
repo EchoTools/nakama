@@ -188,8 +188,9 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	found, allowed, isNew, reason, labelStr, _ = matchRegistry.JoinAttempt(sessionCtx, label.ID.UUID, label.ID.Node, e.UserID, e.SessionID, e.Username, e.SessionExpiry, nil, e.ClientIP, e.ClientPort, label.ID.Node, metadata)
 
 	if reason == ErrJoinRejectReasonDuplicateJoin.Error() {
-		logger.Debug("duplicate join attempt; no-op", zap.String("uid", e.UserID.String()), zap.String("sid", e.SessionID.String()), zap.String("mid", label.ID.UUID.String()))
-		return nil
+		// The session already holds a seat here; its game client never acted on the message that
+		// grants it (evr_lobby_session_success_cache.go). Send that message again.
+		return resendLobbySessionSuccess(logger, session, label.ID.UUID, e)
 	}
 
 	reservationViolated := reason == ErrJoinRejectReasonReservationViolated.Error()
@@ -411,6 +412,9 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	if err := SendEVRMessages(session, false, connectionSettings); err != nil {
 		logger.Error("failed to send lobby session success to game client", zap.Error(err))
 		return errors.New("failed to send lobby session success to game client")
+	}
+	if err := rememberLobbySessionSuccess(label.ID.UUID, e.SessionID, connectionSettings, time.Now()); err != nil {
+		logger.Warn("lobby session success not kept for a duplicate-join re-send", zap.Error(err))
 	}
 
 	// Clear matchmaking credits for all entrants (primary + reservations).

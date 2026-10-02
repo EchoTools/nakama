@@ -133,6 +133,9 @@ SNSFriendRemoveNotify
 SNSFriendRemoveRequest
 SNSFriendRemoveResponse
 SNSFriendStatusNotify
+SNSFriendPresenceNotify
+SNSRecentlyMetListResponse
+SNSRecentlyMetRefreshRequest
 SNSFriendWithdrawnNotify
 SNSGenericMessage
 SNSGenericMessageNotify
@@ -173,6 +176,9 @@ SNSPartyLeaveSuccess
 SNSPartyLockFailure
 SNSPartyLockNotify
 SNSPartyLockRequest
+SNSPartySetJoinPolicyRequest
+SNSPartyDataUpdateRequest
+SNSPartyDataNotify
 SNSPartyLockSuccess
 SNSPartyPassFailure
 SNSPartyPassNotify

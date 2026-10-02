@@ -38,8 +38,8 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	var isLeader bool
 	var headingToSocial bool // cached from first isLeaderHeadingToSocial call; reused to avoid TOCTOU double-read
 
-	// Resolve party state early if applicable
-	if lobbyParams.PartyGroupName != "" && lobbyParams.PartyGroupName != "tablet" {
+	// Resolve party state early if applicable: the tablet party or the party group (evr_lobby_tablet.go).
+	if p.lobbyPartyApplies(session, lobbyParams) {
 		lobbyParams.captureMemberRecordAtFind(session)
 
 		var err error
@@ -376,7 +376,7 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 
 	// Join the party if a player has a party group id set.
 	// The lobby group is the party that the user is currently in.
-	lobbyGroup, isLeader, err := JoinPartyGroup(session, lobbyParams.PartyGroupName, lobbyParams.CurrentMatchID)
+	lobbyGroup, isLeader, err := p.joinLobbyParty(logger, session, lobbyParams)
 	if err != nil {
 		if err == runtime.ErrPartyFull {
 			return nil, nil, false, NewLobbyError(ServerIsFull, "party is full")
@@ -788,8 +788,8 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 		// for this follower in a social lobby, join directly without the
 		// tracker-read priority join path.
 		if ws, ok := session.(*sessionWS); ok {
-			if lobbyParams.PartyGroupName != "" && lobbyParams.PartyGroupName != "tablet" {
-				lobbyGroup, _, err := JoinPartyGroup(ws, lobbyParams.PartyGroupName, lobbyParams.CurrentMatchID)
+			if p.lobbyPartyApplies(ws, lobbyParams) {
+				lobbyGroup, _, err := p.joinLobbyParty(logger, ws, lobbyParams)
 				if err != nil {
 					logger.Warn("Failed to join party group in social lobby path",
 						zap.String("username", ws.Username()),
@@ -820,11 +820,10 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 		}
 
 		// Priority 1: If we're in a party, try to find the leader's specific lobby first.
-		if lobbyParams.PartyGroupName != "" && lobbyParams.PartyGroupName != "tablet" {
+		if ws, ok := session.(*sessionWS); ok && p.lobbyPartyApplies(ws, lobbyParams) {
 			// We can use JoinPartyGroup here as it just retrieves/joins the group without side effects if already joined
-			ws, ok := session.(*sessionWS)
-			if ok {
-				lobbyGroup, _, err := JoinPartyGroup(ws, lobbyParams.PartyGroupName, lobbyParams.CurrentMatchID)
+			{
+				lobbyGroup, _, err := p.joinLobbyParty(logger, ws, lobbyParams)
 				if err != nil {
 					logger.Warn("Failed to join party group in priority join path",
 						zap.String("username", ws.Username()),
@@ -1251,7 +1250,7 @@ func (p *EvrPipeline) currentSocialLobbyForSession(ctx context.Context, logger *
 // session's own lobbyParams.CurrentMatchID, which is nil when a relocation was
 // requested. Returns a nil MatchID when no concrete target can be resolved.
 func (p *EvrPipeline) intendedSocialTargetMatchID(session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup) MatchID {
-	if lobbyGroup != nil && lobbyParams.PartyGroupName != "" && lobbyParams.PartyGroupName != "tablet" {
+	if lobbyGroup != nil && p.lobbyPartyApplies(session, lobbyParams) {
 		leader := lobbyGroup.GetLeader()
 		if leader != nil && leader.SessionId != session.ID().String() {
 			leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
