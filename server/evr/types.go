@@ -133,6 +133,7 @@ SNSFriendRemoveNotify
 SNSFriendRemoveRequest
 SNSFriendRemoveResponse
 SNSFriendStatusNotify
+SNSFriendPresenceNotify
 SNSFriendWithdrawnNotify
 SNSGenericMessage
 SNSGenericMessageNotify

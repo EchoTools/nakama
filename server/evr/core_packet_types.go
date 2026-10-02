@@ -303,6 +303,8 @@ func NewMessageFromHash(hash uint64) Message {
 		return &SNSFriendListResponse{}
 	case 0x26a19dc4d2d5579d:
 		return &SNSFriendStatusNotify{}
+	case 0xbdd8dd00c5e97a63:
+		return &SNSFriendPresenceNotify{}
 	case 0x7f0c6a3ac83c6f77:
 		return &SNSFriendInviteSuccess{}
 	case 0x7f197e30c72c6e61:

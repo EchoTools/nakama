@@ -558,6 +558,24 @@ func (p *EvrPipeline) sendFriendListResponse(ctx context.Context, logger *zap.Lo
 		}
 	}
 
+	// Each friend's presence (party, joinable, status text) for a client that parses it.
+	var targets []friendPresenceTarget
+	for _, f := range friends {
+		if f == nil || f.State == nil || f.State.Value != FriendStateFriends || f.User == nil {
+			continue
+		}
+		friendUserID, err := uuid.FromString(f.User.Id)
+		if err != nil {
+			continue
+		}
+		accountID, err := p.resolveUserIDToAccountID(ctx, friendUserID)
+		if err != nil {
+			continue
+		}
+		targets = append(targets, friendPresenceTarget{userID: friendUserID, accountID: accountID, online: f.User.Online})
+	}
+	p.sendFriendPresence(ctx, logger, session, targets)
+
 	return nil
 }
 

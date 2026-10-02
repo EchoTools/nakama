@@ -195,6 +195,47 @@ func (m SNSFriendStatusNotify) String() string {
 	return fmt.Sprintf("SNSFriendStatusNotify(friend=%016x, status=%d)", m.FriendID, m.StatusCode)
 }
 
+// SNSFriendPresenceNotify is a friend's presence for a nevr-runtime client (social level >= 1), sent
+// after SNSFriendStatusNotify: the friend's party (0 when none, or when that party would not admit this
+// viewer, see Joinable), and the text the game shows under the friend's name ("Social Lobby",
+// "Public Arena Match", "In Main Menu", ...; empty when offline). The game read these from Oculus
+// presence (social slots 52, 54, 55); nothing else carries them.
+// Wire format: Header(8) FriendID(8) PartyID(8) Joinable(1) StatusCode(1) Reserved(6) TextLen(2) Text.
+type SNSFriendPresenceNotify struct {
+	Header     uint64
+	FriendID   uint64
+	PartyID    uint64
+	Joinable   uint8
+	StatusCode uint8
+	Reserved   [6]byte
+	TextLen    uint16
+	Text       []byte
+}
+
+func (m SNSFriendPresenceNotify) Token() string   { return "SNSFriendPresenceNotify" }
+func (m *SNSFriendPresenceNotify) Symbol() Symbol { return ToSymbol(m.Token()) }
+
+func (m *SNSFriendPresenceNotify) Stream(s *EasyStream) error {
+	if s.Mode == EncodeMode {
+		m.TextLen = uint16(len(m.Text))
+	}
+	return RunErrorFunctions([]func() error{
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Header) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.FriendID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.PartyID) },
+		func() error { return s.StreamByte(&m.Joinable) },
+		func() error { return s.StreamByte(&m.StatusCode) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Reserved) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.TextLen) },
+		func() error { return s.StreamBytes(&m.Text, int(m.TextLen)) },
+	})
+}
+
+func (m SNSFriendPresenceNotify) String() string {
+	return fmt.Sprintf("SNSFriendPresenceNotify(friend=%016x, party=%d, joinable=%d, status=%d, text=%q)",
+		m.FriendID, m.PartyID, m.Joinable, m.StatusCode, m.Text)
+}
+
 // SNSFriendInviteFailure is sent when a friend invite fails.
 // StatusCode is a FriendInviteError value.
 // Wire format: 0x18 bytes (Header + FriendID + StatusCode + 7 bytes reserved).
