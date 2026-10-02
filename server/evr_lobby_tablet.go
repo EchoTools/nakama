@@ -13,6 +13,8 @@ import (
 //   - a runtime client in a tablet party of 2 or more members matchmakes with it, and its party group
 //     name does not apply;
 //   - otherwise a party group name, if set, applies as before.
+// A tablet party's leader files its ticket without the formation wait (lobbyMatchMakeWithFallback): only
+// the leader finds, so there are no members to wait for.
 // Every tablet player is in a party of one from login, so "in a tablet party" means 2 or more.
 
 // tabletPartyOf is the session's tablet party: the SNS party its SNS id names (not currentPartyID,
@@ -99,7 +101,7 @@ func (p *EvrPipeline) joinLobbyParty(logger *zap.Logger, session *sessionWS, lob
 		params.currentPartyID = ph.ID
 		StoreParams(session.Context(), params)
 	}
-	group := &LobbyGroup{ph: ph}
+	group := &LobbyGroup{ph: ph, tablet: true}
 	leader := group.GetLeader()
 	isLeader := leader != nil && leader.SessionId == session.ID().String()
 	logger.Info("Tablet party is the lobby party", zap.String("party_id", ph.ID.String()),

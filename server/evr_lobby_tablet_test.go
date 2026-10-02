@@ -1,8 +1,10 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/rtapi"
@@ -176,4 +178,79 @@ func TestTabletPartyMustContainTheSession(t *testing.T) {
 	params, _ := LoadParams(outsider.Context())
 	params.currentSNSPartyID = 82
 	require.False(t, e.ep.lobbyPartyApplies(outsider, findParams("")))
+}
+
+// newFormationParty is the multimatch fixture's party of two as the formation wait sees it: both
+// members on the party stream, the leader on the matchmaking stream (it pressed Find) and the member not,
+// with a formation window long enough that only skipping it can file a ticket within the test.
+func newFormationParty(t *testing.T) *multiMatchParty {
+	f := newMultiMatchParty(t)
+	f.pipeline.partyFormationTimeout = time.Minute
+	partyStream := PresenceStream{Mode: StreamModeParty, Subject: f.lobbyGroup.ID(), Label: f.pipeline.node}
+	for _, s := range []*sessionWS{f.leaderSession, f.memberSession} {
+		f.tracker.Track(context.Background(), s.id, partyStream, s.userID, PresenceMeta{Username: s.Username()})
+	}
+	// The formation wait reads the party stream through the leader's tracker; the fixture's mock lists
+	// no stream, which would read as "every member ready" and file at once for any party.
+	listing := &listingTracker{mockMatchmakingTracker: f.tracker}
+	f.leaderSession.tracker = listing
+	require.Len(t, listing.ListByStream(partyStream, true, true), 2)
+	return f
+}
+
+// listingTracker is the mock tracker with ListByStream answered from what was tracked.
+type listingTracker struct {
+	*mockMatchmakingTracker
+}
+
+func (t *listingTracker) ListByStream(stream PresenceStream, _, _ bool) []*Presence {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	var out []*Presence
+	for key, meta := range t.presences {
+		if key.stream == stream {
+			out = append(out, &Presence{ID: PresenceID{SessionID: key.sessionID}, Stream: stream, UserID: key.userID, Meta: *meta})
+		}
+	}
+	return out
+}
+
+// The formation wait (lobbyMatchMakeWithFallback) gives a party group's members time to hit
+// matchmaking before the leader's ticket goes in. A tablet party's members never hit matchmaking: the
+// game client drops a member's find (CR15NetGame::FindIfPartyHost, echovr.exe 0x14016afc0) and members
+// follow the leader from party data. So a tablet party's ticket goes in at once (owner, 2026-10-02),
+// where the wait would always have run its full 15 s.
+func TestTabletPartySkipsTheFormationWait(t *testing.T) {
+	f := newFormationParty(t)
+	f.lobbyGroup.tablet = true
+
+	start := time.Now()
+	tickets, stop := f.runLeaderLoop(t, 0)
+	require.Len(t, tickets, 1, "the tablet party's one ticket")
+	require.Less(t, time.Since(start), 5*time.Second, "the ticket waited for formation")
+	require.Equal(t, 1, f.logs.FilterMessage("Tablet party: submitting ticket without the formation wait").Len())
+	require.Zero(t, f.logs.FilterMessage("Formation timeout -- submitting ticket with ready members").Len())
+	stop()
+}
+
+// Control: a party group in the same state still waits for its members (here, the whole window, since
+// the member never comes), so nothing is filed while it does.
+func TestPartyGroupStillWaitsForFormation(t *testing.T) {
+	f := newFormationParty(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- f.pipeline.lobbyMatchMakeWithFallback(ctx, f.logger, f.leaderSession, f.leaderParams, f.lobbyGroup)
+	}()
+	time.Sleep(300 * time.Millisecond)
+	require.Empty(t, f.liveTickets(), "a party group filed before its members were ready")
+	require.Zero(t, f.logs.FilterMessage("Tablet party: submitting ticket without the formation wait").Len())
+	cancel()
+	select {
+	case err := <-done:
+		require.NoError(t, err, "a cancel during formation returns nil")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the leader's loop did not exit on cancel during formation")
+	}
 }

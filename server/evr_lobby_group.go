@@ -12,6 +12,9 @@ import (
 type LobbyGroup struct {
 	name string
 	ph   *PartyHandler
+	// tablet is set when the group is the session's tablet (SNS) party (joinLobbyParty,
+	// evr_lobby_tablet.go), not a party group.
+	tablet bool
 }
 
 func (g *LobbyGroup) ID() uuid.UUID {
@@ -19,6 +22,11 @@ func (g *LobbyGroup) ID() uuid.UUID {
 		return uuid.Nil
 	}
 	return g.ph.ID
+}
+
+// IsTablet is whether the group is a tablet (SNS) party rather than a party group.
+func (g *LobbyGroup) IsTablet() bool {
+	return g != nil && g.tablet
 }
 
 func (g *LobbyGroup) IDStr() string {
