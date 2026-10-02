@@ -1613,6 +1613,8 @@ var SymbolCache = map[Symbol]SymbolToken{
 	0x17d512aaa8a1dd67: "AILostGame_Celebration1",
 	0xc2478aa479f3e16a: "SNSPartyLockRequest",
 	0xe1d46b6fb78fd9e6: "SNSPartySetJoinPolicyRequest",
+	0x3448ca6e8d9dd0ce: "SNSPartyDataUpdateRequest",
+	0x832143ccbf160955: "SNSPartyDataNotify",
 	0x922f45bb8d62d10f: "fs_downsample",
 	0xb10609684cd4e25b: "CDynArray",
 	0xe32dc7dfcf8a4aa4: "event",

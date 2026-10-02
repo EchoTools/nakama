@@ -175,6 +175,8 @@ SNSPartyLockFailure
 SNSPartyLockNotify
 SNSPartyLockRequest
 SNSPartySetJoinPolicyRequest
+SNSPartyDataUpdateRequest
+SNSPartyDataNotify
 SNSPartyLockSuccess
 SNSPartyPassFailure
 SNSPartyPassNotify

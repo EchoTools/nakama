@@ -463,3 +463,50 @@ func TestSNSPartySetJoinPolicyRequest_RoundTripAndRegistry(t *testing.T) {
 		t.Errorf("NewMessageFromHash does not build SNSPartySetJoinPolicyRequest")
 	}
 }
+
+func TestSNSPartyDataUpdateRequest_LayoutAndRegistry(t *testing.T) {
+	json := []byte(`{"k":"v"}`)
+	buf := bytes.NewBuffer(buildPayload28(0, testUUID1, 0, 1))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(7))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(len(json)))
+	buf.Write(json)
+	m := &SNSPartyDataUpdateRequest{}
+	if err := m.Stream(NewEasyStream(DecodeMode, buf.Bytes())); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if m.TargetParam != 1 || m.Seq != 7 || string(m.Json) != `{"k":"v"}` {
+		t.Errorf("decoded %+v", m)
+	}
+	if uint64(m.Symbol()) != 0x3448ca6e8d9dd0ce {
+		t.Errorf("symbol = 0x%016x, want 0x3448ca6e8d9dd0ce", uint64(m.Symbol()))
+	}
+	if _, ok := SymbolTypes[uint64(m.Symbol())]; !ok {
+		t.Errorf("SNSPartyDataUpdateRequest is not in SymbolTypes")
+	}
+	if got := NewMessageFromHash(uint64(m.Symbol())); got == nil {
+		t.Errorf("NewMessageFromHash does not build SNSPartyDataUpdateRequest")
+	}
+}
+
+func TestSNSPartyDataNotify_LayoutAndRoundTrip(t *testing.T) {
+	m := &SNSPartyDataNotify{PartyID: 3, MemberID: 900000000000000101, Seq: 9, Json: []byte(`{"headsettype":2}`)}
+	enc := NewEasyStream(EncodeMode, []byte{})
+	if err := m.Stream(enc); err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	raw := enc.w.Bytes()
+	// PartyID(8) MemberID(8) Seq(4) JsonLen(4) Json: the runtime's parser reads these offsets.
+	if len(raw) != 24+17 || binary.LittleEndian.Uint32(raw[20:24]) != 17 || string(raw[24:]) != `{"headsettype":2}` {
+		t.Fatalf("layout: %x", raw)
+	}
+	m2 := &SNSPartyDataNotify{}
+	if err := m2.Stream(NewEasyStream(DecodeMode, raw)); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if m2.PartyID != 3 || m2.MemberID != 900000000000000101 || m2.Seq != 9 || string(m2.Json) != string(m.Json) {
+		t.Errorf("round trip: %+v", m2)
+	}
+	if uint64(m.Symbol()) != 0x832143ccbf160955 {
+		t.Errorf("symbol = 0x%016x, want 0x832143ccbf160955", uint64(m.Symbol()))
+	}
+}

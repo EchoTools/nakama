@@ -198,6 +198,9 @@ func (p *EvrPipeline) snsPartyLeaveCleanup(_ context.Context, _ *zap.Logger, ses
 	}
 	stream := PresenceStream{Mode: StreamModeParty, Subject: params.currentPartyID, Label: p.node}
 	p.nk.tracker.Untrack(session.ID(), stream, session.UserID())
+	if p.nk.tracker.CountByStream(stream) == 0 {
+		p.snsPartyData.Delete(params.currentPartyID) // the last member left: drop the party's data
+	}
 
 	clearPartyParams(session.Context(), params)
 }
@@ -261,10 +264,14 @@ func (p *EvrPipeline) snsPartyCreateRequest(ctx context.Context, logger *zap.Log
 		return SendEVRMessages(session, false, &evr.SNSPartyCreateFailure{ErrorCode: 1})
 	}
 
-	return SendEVRMessages(session, false, &evr.SNSPartyCreateSuccess{
+	if err := SendEVRMessages(session, false, &evr.SNSPartyCreateSuccess{
 		PartyID: snsID,
 		OwnerID: p.sessionAccountID(ctx, session, params),
-	})
+	}); err != nil {
+		return err
+	}
+	p.snsPartyDataJoined(ctx, logger, session, ph.ID, snsID)
+	return nil
 }
 
 // snsPartyJoinRequest joins an existing party by SNS party ID.
@@ -345,10 +352,14 @@ func (p *EvrPipeline) snsPartyJoinRequest(ctx context.Context, logger *zap.Logge
 	// Create reservation for the new member if leader is in a social match.
 	go p.createReservationForNewPartyMember(context.WithoutCancel(ctx), logger, session, partyUUID)
 
-	return SendEVRMessages(session, false, &evr.SNSPartyJoinSuccess{
+	if err := SendEVRMessages(session, false, &evr.SNSPartyJoinSuccess{
 		PartyID: msg.PartyID,
 		OwnerID: ownerAccountID,
-	})
+	}); err != nil {
+		return err
+	}
+	p.snsPartyDataJoined(ctx, logger, session, partyUUID, msg.PartyID)
+	return nil
 }
 
 // snsPartyLeaveRequest leaves the current party.
@@ -716,10 +727,14 @@ func (p *EvrPipeline) snsPartyRespondToInviteRequest(ctx context.Context, logger
 	// Create reservation for the new member if leader is in a social match.
 	go p.createReservationForNewPartyMember(context.WithoutCancel(ctx), logger, session, partyUUID)
 
-	return SendEVRMessages(session, false, &evr.SNSPartyJoinSuccess{
+	if err := SendEVRMessages(session, false, &evr.SNSPartyJoinSuccess{
 		PartyID: snsPartyID,
 		OwnerID: ownerAccountID,
-	})
+	}); err != nil {
+		return err
+	}
+	p.snsPartyDataJoined(ctx, logger, session, partyUUID, snsPartyID)
+	return nil
 }
 
 // snsPartyUpdateRequest acknowledges a party metadata update.

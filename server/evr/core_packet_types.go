@@ -212,6 +212,10 @@ func NewMessageFromHash(hash uint64) Message {
 		return &SNSPartyLockRequest{}
 	case 0xe1d46b6fb78fd9e6:
 		return &SNSPartySetJoinPolicyRequest{}
+	case 0x3448ca6e8d9dd0ce:
+		return &SNSPartyDataUpdateRequest{}
+	case 0x832143ccbf160955:
+		return &SNSPartyDataNotify{}
 	case 0x5a4e99802fa3d704:
 		return &SNSPartyUnlockRequest{}
 	case 0xfaf57beb59917d64:
