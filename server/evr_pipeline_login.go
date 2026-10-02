@@ -1341,6 +1341,10 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 				PenaltyLevel:        int(cfg.PenaltyLevel),
 				SteadyPlayerLevel:   int(cfg.SteadyPlayerLevel),
 			}
+			// The client reads its early quit state from the server profile (evr.ServerProfile
+			// EarlyQuitFeatures); this copy is the one sent at login, after the stored one was written.
+			eq := clientProfile.EarlyQuitFeatures
+			serverProfile.EarlyQuitFeatures = &eq
 		}
 	}
 
