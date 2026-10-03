@@ -192,21 +192,11 @@ func (t *SNSEarlyQuitMessageTrigger) SendEvrMessage(userID string, message evr.M
 }
 
 // SendEarlyQuitConfigOnLogin sends the SNSEarlyQuitConfig message when a player logs in
-// This provides the client with the current penalty tier configuration
-// sendEarlyQuitConfig is off: the game client crashes on SNSEarlyQuitConfig (an int3 in
-// CStackAllocator::DirectAlloc, "Stack allocator ran out of memory", right after login; nevr-runtime
-// local_early_quit_lockout runs, 2026-10-02). The lockout does not need it: the penalty comes in the login
-// profile and the feature flags gate the scripts. Every sender goes through SendEarlyQuitConfigOnLogin
-// (login, the Discord early quit command).
-const sendEarlyQuitConfig = false
-
+// This provides the client with the current penalty tier configuration. Every sender goes through it
+// (login, the Discord early quit command). It was switched off while the message lacked the leading byte
+// the client reads past and crashed clients (#665); the message now carries it.
 func (t *SNSEarlyQuitMessageTrigger) SendEarlyQuitConfigOnLogin(ctx context.Context, session *sessionWS) error {
 	if session == nil {
-		return nil
-	}
-	if !sendEarlyQuitConfig {
-		t.logger.Debug("Early quit config not sent (the game client crashes on it)",
-			zap.String("user_id", session.userID.String()))
 		return nil
 	}
 
