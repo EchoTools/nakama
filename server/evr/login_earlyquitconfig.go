@@ -14,8 +14,15 @@ const (
 //
 // Wire layout (variable zstd payload):
 //
-//	+0x00  uint32  size (decompressed JSON size, LE)
-//	+0x04  []byte  zstd-compressed JSON (penalty_levels + steady_player_levels)
+//	+0x00  uint8   leading byte (0)
+//	+0x01  uint32  size (decompressed JSON size, LE)
+//	+0x05  []byte  zstd-compressed JSON (penalty_levels + steady_player_levels)
+//
+// The game client (CR15NetGame::EarlyQuitConfigCB, echovr.exe 0x1401613a0) reads the size one byte into the
+// payload. Without the leading byte it took `03 00 00 28` (671,088,643) as the size, asked its stack
+// allocator for it and trapped ("Stack allocator ran out of memory", int3 at 0x1400d502b); measured by
+// nevr-runtime's allocator probe, caller game+0x161422 (#665, nevr-runtime#68). With it, the client finishes
+// the callback and raises delegate_onearlyquitconfigupdate (local run 20-1dd5331a9563ec2).
 type SNSEarlyQuitConfig struct {
 	PenaltyLevels      []EarlyQuitPenaltyLevelConfig      `json:"penalty_levels"`
 	SteadyPlayerLevels []EarlyQuitSteadyPlayerLevelConfig `json:"steady_player_levels"`
@@ -37,7 +44,11 @@ func (m *SNSEarlyQuitConfig) String() string {
 }
 
 func (m *SNSEarlyQuitConfig) Stream(s *EasyStream) error {
-	// Wire format: u32 decompressed JSON size (LE) + zstd-compressed JSON body.
+	// Wire format: a leading byte, then u32 decompressed JSON size (LE) + zstd-compressed JSON body.
+	lead := byte(0)
+	if err := s.StreamByte(&lead); err != nil {
+		return err
+	}
 	return s.StreamJson(m, false, ZstdCompression)
 }
 
