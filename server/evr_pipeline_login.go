@@ -1382,6 +1382,19 @@ func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *za
 	}
 
 	if err := p.handleClientProfileUpdate(ctx, logger, session, request.XPID, request.Payload); err != nil {
+		// This failure was never logged: the client got UpdateProfileFailure (and
+		// then UpdateProfileSuccess below), and the server kept no record that
+		// the update, a cleared new_unlocks included, was dropped.
+		clearVersion := uint64(0)
+		if c := request.Payload.Customization; c != nil {
+			clearVersion = c.ClearNewUnlocksVersion
+		}
+		logger.Warn("Client profile update was not persisted",
+			zap.Error(err),
+			zap.Bool("version_conflict", isVersionConflictError(err)),
+			zap.Int("new_unlocks", len(request.Payload.NewUnlocks)),
+			zap.Uint64("clear_new_unlocks_version", clearVersion),
+		)
 		if err := session.SendEvr(evr.NewUpdateProfileFailure(request.XPID, uint64(400), err.Error())); err != nil {
 			logger.Error("Failed to send UpdateProfileFailure", zap.Error(err))
 		}
@@ -1448,17 +1461,6 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 		return fmt.Errorf("failed to load account profile: %w", err)
 	}
 
-	profile.TeamName = update.TeamName
-
-	profile.CombatLoadout = CombatLoadout{
-		CombatWeapon:       update.CombatWeapon,
-		CombatGrenade:      update.CombatGrenade,
-		CombatDominantHand: update.CombatDominantHand,
-		CombatAbility:      update.CombatAbility,
-	}
-
-	profile.LegalConsents = update.LegalConsents
-
 	// Determine if this user is an enforcer (global operator or guild enforcer).
 	isEnforcer := params.isGlobalOperator
 	if !isEnforcer {
@@ -1480,21 +1482,52 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 		update.MutedPlayers.Players = removeTriggeredPlayers(update.MutedPlayers.Players, muteTriggered)
 	}
 
+	// One transaction per attempt: account metadata, profile storage write and
+	// ServerProfile cache delete, via nk.MultiUpdate (evr_account.go). See the
+	// community-values write above for why the two are not merged into one.
+	updated, err := persistClientProfileUpdate(ctx, p.nk, userID, profile, update)
+	if err != nil {
+		return fmt.Errorf("failed to update account profile: %w", err)
+	}
+
+	params.profile = updated
+	StoreParams(ctx, params)
+	return nil
+}
+
+// applyClientProfileUpdate copies the fields the client owns from update onto
+// profile. It is the whole of the client's mutation, so it can be re-applied to
+// a freshly loaded profile after a version conflict.
+func applyClientProfileUpdate(profile *EVRProfile, update evr.ClientProfile) {
+	profile.TeamName = update.TeamName
+	profile.CombatLoadout = CombatLoadout{
+		CombatWeapon:       update.CombatWeapon,
+		CombatGrenade:      update.CombatGrenade,
+		CombatDominantHand: update.CombatDominantHand,
+		CombatAbility:      update.CombatAbility,
+	}
+	profile.LegalConsents = update.LegalConsents
 	profile.GhostedPlayers = update.GhostedPlayers.Players
 	profile.MutedPlayers = update.MutedPlayers.Players
 	profile.NewUnlocks = update.NewUnlocks
 	profile.CustomizationPOIs = update.Customization
+}
 
-	// One transaction: account metadata, profile storage write and ServerProfile
-	// cache delete, via nk.MultiUpdate (evr_account.go). See the community-values
-	// write above for why the two are not merged into one.
-	if err := EVRProfileUpdate(ctx, p.nk, userID, profile); err != nil {
-		return fmt.Errorf("failed to update account profile: %w", err)
+// persistClientProfileUpdate applies update to profile and writes it, retrying
+// on a storage version conflict by reloading the stored profile and re-applying
+// the same update.
+//
+// It was a single EVRProfileUpdate. A conflict with any concurrent writer of the
+// same key (the equip paths in evr_runtime_event_remotelogset.go and
+// evr_pipeline_gameserver_loadout.go write it around the same moments) dropped
+// the client's update, including a cleared new_unlocks, and nothing logged it.
+func persistClientProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID string, profile *EVRProfile, update evr.ClientProfile) (*EVRProfile, error) {
+	apply := func(p *EVRProfile) error {
+		applyClientProfileUpdate(p, update)
+		return nil
 	}
-
-	params.profile = profile
-	StoreParams(ctx, params)
-	return nil
+	applyClientProfileUpdate(profile, update)
+	return evrProfileUpdateWithRetry(ctx, nk, userID, profile, apply)
 }
 
 // removeTriggeredPlayers filters out EvrIds that are in the triggered set.
