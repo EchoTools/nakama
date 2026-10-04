@@ -3,7 +3,9 @@ package server
 import (
 	"testing"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -91,4 +93,33 @@ func TestFriendStatusNotifications_UnresolvableFriendSkipped(t *testing.T) {
 	if len(got) != 0 {
 		t.Errorf("got %d notifications, want 0 (unresolvable friend must be skipped): %+v", len(got), got)
 	}
+}
+
+// Each confirmed friend's account id is a database lookup. It is resolved once and used for both the
+// status notify every client gets and the presence a nevr-runtime client gets, so a stock client (which
+// is never sent presence) costs exactly the lookups it had before presence existed: one per confirmed
+// friend. Before, presence resolved every friend a second time, whatever the client.
+func TestFriendAccountIDsAreResolvedOncePerFriend(t *testing.T) {
+	online, offline, unresolvable := uuid.Must(uuid.NewV4()), uuid.Must(uuid.NewV4()), uuid.Must(uuid.NewV4())
+	friends := []*api.Friend{
+		friendFixture(online.String(), FriendStateFriends, true),
+		friendFixture(offline.String(), FriendStateFriends, false),
+		friendFixture(unresolvable.String(), FriendStateFriends, true),
+		friendFixture(uuid.Must(uuid.NewV4()).String(), FriendInvitationSent, false),
+	}
+	accountIDs := map[string]uint64{online.String(): 111, offline.String(): 222}
+	lookups := map[string]int{}
+	notifications, targets := friendNotifies(friends, func(f *api.Friend) (uint64, bool) {
+		lookups[f.User.Id]++
+		id, ok := accountIDs[f.User.Id]
+		return id, ok
+	})
+
+	require.Equal(t, map[string]int{online.String(): 1, offline.String(): 1, unresolvable.String(): 1}, lookups,
+		"one lookup per confirmed friend, none for an invitation")
+	require.Len(t, notifications, 2)
+	require.Equal(t, []friendPresenceTarget{
+		{userID: online, accountID: 111, online: true},
+		{userID: offline, accountID: 222, online: false},
+	}, targets, "presence goes to the friends the notifies resolved, with their ids; an unresolvable friend gets neither")
 }

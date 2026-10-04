@@ -231,7 +231,15 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	// Formation phase: if in a party, wait up to 15 seconds for all
 	// members to start matchmaking before submitting the first ticket.
 	// Solo players or single-member parties skip this phase entirely.
-	if lobbyGroup != nil && lobbyGroup.Size() > 1 {
+	// So does a tablet party: the wait gives party group members time to
+	// hit matchmaking, and a tablet party's members never do (the game
+	// client drops a member's find, CR15NetGame::FindIfPartyHost echovr.exe
+	// 0x14016afc0; members follow the leader from party data), so for it
+	// the wait always ran out.
+	if lobbyGroup.IsTablet() && lobbyGroup.Size() > 1 {
+		logger.Info("Tablet party: submitting ticket without the formation wait",
+			zap.String("party_id", lobbyGroup.IDStr()), zap.Int("party_size", lobbyGroup.Size()))
+	} else if lobbyGroup != nil && lobbyGroup.Size() > 1 {
 		formationTimeout, formationPollInterval := p.partyFormationTiming()
 		formationTimer := time.NewTimer(formationTimeout)
 		defer formationTimer.Stop()

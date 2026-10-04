@@ -226,6 +226,7 @@ func mkGroupReservationEnv(t *testing.T, groupName string) *groupReservationEnv 
 			sessionRegistry: sessions,
 			node:            "testnode",
 		},
+		snsPartyData: &MapOf[uuid.UUID, *snsPartyDataState]{},
 	}
 	return &groupReservationEnv{
 		registry: registry, tracker: tracker, pr: pr, ep: ep,

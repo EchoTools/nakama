@@ -125,6 +125,99 @@ func (m SNSPartyLockRequest) String() string {
 		m.RoutingID, m.LocalUserUUID, m.SessionGUID, m.TargetParam)
 }
 
+// SNSPartySetJoinPolicyRequest is sent by a nevr-runtime client (social level >= 1) when the party
+// leader's game sets the join policy (R15NetPartySetJoinPolicyNode -> slot 16): TargetParam is the
+// policy as the game numbers it, 0 invite only, 1 friends, 2 friends of members, 3 everyone.
+type SNSPartySetJoinPolicyRequest struct {
+	RoutingID     uint64
+	LocalUserUUID [16]byte
+	SessionGUID   uint64
+	TargetParam   uint64
+}
+
+func (m SNSPartySetJoinPolicyRequest) Token() string   { return "SNSPartySetJoinPolicyRequest" }
+func (m *SNSPartySetJoinPolicyRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
+
+func (m *SNSPartySetJoinPolicyRequest) Stream(s *EasyStream) error {
+	return RunErrorFunctions([]func() error{
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.RoutingID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.LocalUserUUID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.SessionGUID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.TargetParam) },
+	})
+}
+
+func (m SNSPartySetJoinPolicyRequest) String() string {
+	return fmt.Sprintf("SNSPartySetJoinPolicyRequest(routing=%016x, user=%x, session=%016x, policy=%d)",
+		m.RoutingID, m.LocalUserUUID, m.SessionGUID, m.TargetParam)
+}
+
+// SNSPartyDataUpdateRequest is sent by a nevr-runtime client (social level >= 1) when the game wrote
+// shared party data: TargetParam 0 is the party's data (leader only), 1 the sender's own member data.
+// Seq orders the sender's updates; Json is a JSON object.
+type SNSPartyDataUpdateRequest struct {
+	RoutingID     uint64
+	LocalUserUUID [16]byte
+	SessionGUID   uint64
+	TargetParam   uint64
+	Seq           uint32
+	JsonLen       uint32
+	Json          []byte
+}
+
+func (m SNSPartyDataUpdateRequest) Token() string   { return "SNSPartyDataUpdateRequest" }
+func (m *SNSPartyDataUpdateRequest) Symbol() Symbol { return ToSymbol(m.Token()) }
+
+func (m *SNSPartyDataUpdateRequest) Stream(s *EasyStream) error {
+	if s.Mode == EncodeMode {
+		m.JsonLen = uint32(len(m.Json))
+	}
+	return RunErrorFunctions([]func() error{
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.RoutingID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.LocalUserUUID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.SessionGUID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.TargetParam) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Seq) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.JsonLen) },
+		func() error { return s.StreamBytes(&m.Json, int(m.JsonLen)) },
+	})
+}
+
+func (m SNSPartyDataUpdateRequest) String() string {
+	return fmt.Sprintf("SNSPartyDataUpdateRequest(scope=%d, seq=%d, json_bytes=%d)", m.TargetParam, m.Seq, len(m.Json))
+}
+
+// SNSPartyDataNotify is a party's shared data for a nevr-runtime client (social level >= 1): MemberID 0
+// is the party's data, else that member's (an account id). Json is the whole JSON object, script keys
+// merged with the keys the server fills (lobbyid, matchtype, team, lobbytype, offline, headsettype).
+type SNSPartyDataNotify struct {
+	PartyID  uint64
+	MemberID uint64
+	Seq      uint32
+	JsonLen  uint32
+	Json     []byte
+}
+
+func (m SNSPartyDataNotify) Token() string   { return "SNSPartyDataNotify" }
+func (m *SNSPartyDataNotify) Symbol() Symbol { return ToSymbol(m.Token()) }
+
+func (m *SNSPartyDataNotify) Stream(s *EasyStream) error {
+	if s.Mode == EncodeMode {
+		m.JsonLen = uint32(len(m.Json))
+	}
+	return RunErrorFunctions([]func() error{
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.PartyID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.MemberID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Seq) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.JsonLen) },
+		func() error { return s.StreamBytes(&m.Json, int(m.JsonLen)) },
+	})
+}
+
+func (m SNSPartyDataNotify) String() string {
+	return fmt.Sprintf("SNSPartyDataNotify(party=%d, member=%d, seq=%d, json_bytes=%d)", m.PartyID, m.MemberID, m.Seq, len(m.Json))
+}
+
 // SNSPartyUnlockRequest is sent by a client to unlock the party.
 type SNSPartyUnlockRequest struct {
 	RoutingID     uint64

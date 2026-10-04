@@ -6,6 +6,7 @@ import (
 
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -163,6 +164,9 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	StoreParams(ctx, params)
+	logger.Info("Login client",
+		zap.String("nevr_runtime_build", params.NevrRuntimeBuild()),
+		zap.Int("nevr_social", params.SocialLevel()))
 
 	tags := buildLoginSuccessMetricTags(params, loginSystemFingerprintLimiter)
 
@@ -2009,14 +2013,16 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 			data, _, err = ServerProfileLoadByXPID(ctx, logger, p.db, p.nk, xpID, groupID, modes, dailyWeeklyMode)
 		}
 	}
+	// A miss is answered, not dropped: the client keeps the player's page open until the request
+	// resolves, so silence left a friend's page blank forever.
 	if err != nil {
 		tags["error"] = "failed_load_profile"
 		logger.Debug("Profile not found for XPID", zap.Error(err), zap.String("evrId", request.EvrId.String()))
-		return nil
+		return SendEVRMessages(session, false, evr.NewOtherUserProfileFailure(request.EvrId, http.StatusNotFound, "profile not found"))
 	} else if data == nil {
 		tags["error"] = "profile_not_found"
 		logger.Warn("Profile does not exist in storage.", zap.String("evrId", request.EvrId.String()))
-		return nil
+		return SendEVRMessages(session, false, evr.NewOtherUserProfileFailure(request.EvrId, http.StatusNotFound, "profile not found"))
 	}
 
 	/*
