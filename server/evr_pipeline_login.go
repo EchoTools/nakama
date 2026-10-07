@@ -152,13 +152,17 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	if err := p.processLoginRequest(ctx, logger, session, params); err != nil {
 
 		discordID := ""
+		username := ""
 		if userID, err := GetUserIDByDeviceID(ctx, p.db, request.XPID.String()); err == nil {
 			discordID = p.discordCache.UserIDToDiscordID(userID)
+			if account, err := p.nk.AccountGetId(ctx, userID); err == nil && account != nil && account.GetUser() != nil {
+				username = account.GetUser().GetUsername()
+			}
 		} else if !errors.Is(err, DeviceNotLinkedError{}) {
 			logger.Debug("Failed to get user ID by device ID", zap.Error(err))
 		}
 
-		errMessage := formatLoginErrorMessage(request.XPID, discordID, err)
+		errMessage := formatLoginErrorMessage(request.XPID, username, discordID, err)
 
 		return session.SendEvrUnrequire(evr.NewLoginFailure(request.XPID, errMessage))
 	}
@@ -306,7 +310,10 @@ func normalizeHeadsetType(headset string) string {
 	return headset
 }
 
-func formatLoginErrorMessage(xpID evr.EvrId, discordID string, err error) string {
+// formatLoginErrorMessage prefixes err with the player's identity. The game's
+// login-failed screen shows only 4 lines, so the prefix must stay on one line
+// or NewLocationError's "Select code" line is pushed off-screen.
+func formatLoginErrorMessage(xpID evr.EvrId, username, discordID string, err error) string {
 	errContent := ""
 	if e, ok := status.FromError(err); ok {
 		errContent = e.Message()
@@ -315,10 +322,10 @@ func formatLoginErrorMessage(xpID evr.EvrId, discordID string, err error) string
 	}
 
 	// Format the error message with the XPID prefix
-	if discordID == "" {
+	if username == "" || discordID == "" {
 		errContent = fmt.Sprintf("[%s]\n %s", xpID.String(), errContent)
 	} else {
-		errContent = fmt.Sprintf("[XPID:%s / Discord:%s]\n %s", xpID.String(), discordID, errContent)
+		errContent = fmt.Sprintf("[%s / %s]\n %s", username, xpID.String(), errContent)
 	}
 
 	// Replace ": " with ":\n" for better readability
