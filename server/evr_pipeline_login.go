@@ -325,7 +325,7 @@ func formatLoginErrorMessage(xpID evr.EvrId, username, discordID string, err err
 	if username == "" || discordID == "" {
 		errContent = fmt.Sprintf("[%s]\n %s", xpID.String(), errContent)
 	} else {
-		errContent = fmt.Sprintf("[%s / %s]\n %s", username, xpID.String(), errContent)
+		errContent = fmt.Sprintf("%s/%s\n %s", username, xpID.String(), errContent)
 	}
 
 	// Replace ": " with ":\n" for better readability
