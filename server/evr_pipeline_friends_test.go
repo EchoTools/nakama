@@ -123,3 +123,63 @@ func TestFriendAccountIDsAreResolvedOncePerFriend(t *testing.T) {
 		{userID: offline, accountID: 222, online: false},
 	}, targets, "presence goes to the friends the notifies resolved, with their ids; an unresolvable friend gets neither")
 }
+
+// A player who was offline when a friend request arrived is told who asked, once per login (#684): the
+// subscribe reply replays one invite per pending received request, after the status notifies. The refresh
+// reply never does, because the nevr runtime answers every invite notify with a refresh and a replay there
+// would be answered by a refresh and replayed again, for ever.
+func TestBuildFriendListReply_ReplaysPendingRequestsOnlyWhenAsked(t *testing.T) {
+	friends := []*api.Friend{
+		friendFixture("friend-online", FriendStateFriends, true),
+		friendFixture("asked-first", FriendInvitationReceived, false),
+		friendFixture("friend-offline", FriendStateFriends, false),
+		friendFixture("i-asked", FriendInvitationSent, false),
+		friendFixture("asked-unresolvable", FriendInvitationReceived, false),
+		friendFixture("blocked", FriendStateBlocked, false),
+		friendFixture("asked-second", FriendInvitationReceived, true),
+	}
+	accounts := map[string]uint64{
+		"friend-online":  111,
+		"friend-offline": 222,
+		"asked-first":    333,
+		"asked-second":   444,
+		"i-asked":        555,
+		"blocked":        666,
+	}
+	lookups := map[string]int{}
+	resolve := func(f *api.Friend) (uint64, bool) {
+		lookups[f.User.Id]++
+		id, ok := accounts[f.User.Id]
+		return id, ok
+	}
+
+	subscribe := buildFriendListReply(friends, resolve, true)
+	require.Equal(t, []uint64{333, 444}, subscribe.inviteSenders,
+		"one per pending received request, in list order; not the request this player sent, not the blocked, not the unresolvable")
+	require.EqualValues(t, 1, subscribe.counts.NOnline)
+	require.EqualValues(t, 1, subscribe.counts.NOffline)
+	require.EqualValues(t, 1, subscribe.counts.NSent)
+	require.EqualValues(t, 3, subscribe.counts.NRecv, "the count is of requests, resolvable or not, as before")
+	require.Len(t, subscribe.statuses, 2, "the roster is unchanged by a replay")
+	require.Equal(t, map[string]int{
+		"friend-online": 1, "friend-offline": 1, "asked-first": 1, "asked-unresolvable": 1, "asked-second": 1,
+	}, lookups, "one lookup per confirmed friend and per replayed request; none for a request this player sent")
+
+	lookups = map[string]int{}
+	refresh := buildFriendListReply(friends, resolve, false)
+	require.Empty(t, refresh.inviteSenders, "a refresh is never answered with a replay")
+	require.Equal(t, subscribe.counts, refresh.counts)
+	require.Equal(t, subscribe.statuses, refresh.statuses)
+	require.Equal(t, map[string]int{"friend-online": 1, "friend-offline": 1}, lookups,
+		"a refresh resolves only the confirmed friends, as before")
+
+	none := buildFriendListReply([]*api.Friend{friendFixture("friend-online", FriendStateFriends, true)}, resolve, true)
+	require.Empty(t, none.inviteSenders, "nothing pending, nothing replayed")
+}
+
+// Which request replays: the subscribe (once per login) and no other. A refresh that replayed would loop
+// with a runtime that refreshes on every invite notify.
+func TestFriendListRequest_OnlySubscribeReplaysInvites(t *testing.T) {
+	require.True(t, friendListSubscribe.replaysInvites())
+	require.False(t, friendListRefresh.replaysInvites(), "a refresh never replays: notify -> refresh -> notify would not end")
+}
