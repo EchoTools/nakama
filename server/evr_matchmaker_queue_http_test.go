@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -173,4 +174,76 @@ func TestMatchmakerQueueNeverAnswersAccepted(t *testing.T) {
 	check("leave", "leave_queue", "tok", "arena")
 	check("after samples", "join_queue", "tok", "arena")
 	check("after samples", "poll_queue_position", "tok", "arena")
+}
+
+func TestMatchmakerQueueRejectsMalformedQueueIDs(t *testing.T) {
+	r := newQueueRouter(NewMatchmakerQueueEstimator(nil))
+	long := strings.Repeat("a", queueIDMaxLength+1)
+	for _, id := range []string{long, "has space", "a/b", "a%00b", "ünï", "a;b", "<x>"} {
+		rr := httptest.NewRecorder()
+		url := "/ready_at_dawn/join_queue?access_token=t&queue_id=" + strings.ReplaceAll(id, " ", "%20")
+		r.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, url, nil))
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("queue_id %q = %d, want 400", id, rr.Code)
+		}
+	}
+	for _, id := range []string{"a", strings.Repeat("a", queueIDMaxLength), "arena_2.0:eu-west"} {
+		if code, _ := queueDo(t, r, http.MethodPost, "join_queue", "t", id); code != http.StatusOK {
+			t.Errorf("queue_id %q = %d, want 200", id, code)
+		}
+	}
+}
+
+func TestMatchmakerQueueOnlyKeepsSamplesForABoundedNumberOfQueues(t *testing.T) {
+	clock := &queueClock{now: time.Unix(1_000_000, 0)}
+	est := NewMatchmakerQueueEstimator(clock.Now)
+	r := newQueueRouter(est)
+	total := queueMaxSampled + 40
+	for i := 0; i < total; i++ {
+		id := "q" + strconv.Itoa(i)
+		queueDo(t, r, http.MethodPost, "join_queue", "t", id)
+		clock.now = clock.now.Add(5 * time.Second)
+		queueDo(t, r, http.MethodPost, "leave_queue", "t", id)
+	}
+	est.mu.Lock()
+	defer est.mu.Unlock()
+	if len(est.samples) != queueMaxSampled || len(est.sampledOrder) != queueMaxSampled {
+		t.Fatalf("sampled queues = %d (order %d), want %d", len(est.samples), len(est.sampledOrder), queueMaxSampled)
+	}
+	if _, ok := est.samples["q0"]; ok {
+		t.Error("the oldest queue id was not evicted")
+	}
+	if _, ok := est.samples["q"+strconv.Itoa(total-1)]; !ok {
+		t.Error("the newest queue id was evicted")
+	}
+}
+
+func TestMatchmakerQueueIgnoresWaitsOutsideTheSaneRange(t *testing.T) {
+	clock := &queueClock{now: time.Unix(1_000_000, 0)}
+	est := NewMatchmakerQueueEstimator(clock.Now)
+	r := newQueueRouter(est)
+	for i, wait := range []time.Duration{0, 500 * time.Millisecond, queueMaxSample + time.Second, 24 * time.Hour} {
+		tok := "t" + strconv.Itoa(i)
+		queueDo(t, r, http.MethodPost, "join_queue", tok, "arena")
+		clock.now = clock.now.Add(wait)
+		queueDo(t, r, http.MethodPost, "leave_queue", tok, "arena")
+	}
+	est.mu.Lock()
+	n := len(est.samples["arena"])
+	est.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d samples kept from out-of-range waits, want 0", n)
+	}
+	// The bounds themselves are kept.
+	for i, wait := range []time.Duration{queueMinSample, queueMaxSample} {
+		tok := "b" + strconv.Itoa(i)
+		queueDo(t, r, http.MethodPost, "join_queue", tok, "arena")
+		clock.now = clock.now.Add(wait)
+		queueDo(t, r, http.MethodPost, "leave_queue", tok, "arena")
+	}
+	est.mu.Lock()
+	defer est.mu.Unlock()
+	if len(est.samples["arena"]) != 2 {
+		t.Errorf("samples = %d, want the two boundary waits", len(est.samples["arena"]))
+	}
 }

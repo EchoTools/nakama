@@ -36,7 +36,31 @@ const (
 	queueEstimateMinSamples   = 3
 	queueEntryTTL             = 30 * time.Minute
 	queueMaxEntries           = 10000
+	// A completed wait outside this range is not a measurement of a queue (a join/leave pair sent back to
+	// back, or an entry that sat until its TTL) and is not sampled.
+	queueMinSample = 1 * time.Second
+	queueMaxSample = 30 * time.Minute
+	// queue_id comes from the request: bounded in length and charset, and only this many distinct ids keep
+	// samples (the oldest is dropped), so junk ids cannot grow the estimator.
+	queueIDMaxLength = 64
+	queueMaxSampled  = 64
 )
+
+// validMatchmakerQueueID: 1..queueIDMaxLength of [A-Za-z0-9_.:-].
+func validMatchmakerQueueID(id string) bool {
+	if id == "" || len(id) > queueIDMaxLength {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_', c == '.', c == ':', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
 
 type matchmakerQueueKey struct {
 	tokenDigest string
@@ -49,6 +73,8 @@ type MatchmakerQueueEstimator struct {
 	now     func() time.Time
 	joined  map[matchmakerQueueKey]time.Time
 	samples map[string][]time.Duration
+	// sampledOrder lists the queue ids in `samples`, oldest first (first sample).
+	sampledOrder []string
 }
 
 func NewMatchmakerQueueEstimator(now func() time.Time) *MatchmakerQueueEstimator {
@@ -127,7 +153,19 @@ func (e *MatchmakerQueueEstimator) Leave(accessToken, queueID string) {
 		return
 	}
 	delete(e.joined, key)
-	s := append(e.samples[queueID], now.Sub(at))
+	wait := now.Sub(at)
+	if wait < queueMinSample || wait > queueMaxSample {
+		return
+	}
+	existing, known := e.samples[queueID]
+	if !known {
+		for len(e.sampledOrder) >= queueMaxSampled {
+			delete(e.samples, e.sampledOrder[0])
+			e.sampledOrder = e.sampledOrder[1:]
+		}
+		e.sampledOrder = append(e.sampledOrder, queueID)
+	}
+	s := append(existing, wait)
 	if len(s) > queueEstimateSampleWindow {
 		s = s[len(s)-queueEstimateSampleWindow:]
 	}
@@ -150,8 +188,8 @@ func NewMatchmakerQueueHandler(estimator *MatchmakerQueueEstimator) http.Handler
 		}
 		q := r.URL.Query()
 		accessToken, queueID := q.Get("access_token"), q.Get("queue_id")
-		if accessToken == "" || queueID == "" {
-			http.Error(w, "access_token and queue_id are required", http.StatusBadRequest)
+		if accessToken == "" || !validMatchmakerQueueID(queueID) {
+			http.Error(w, "access_token and a valid queue_id are required", http.StatusBadRequest)
 			return
 		}
 		var resp matchmakerQueueResponse
