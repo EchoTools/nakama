@@ -1,8 +1,10 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -16,6 +18,25 @@ import (
 // ([{"serviceid","available","message"}], UpdateServiceStatusRequests 0x1401c4c00).
 // Without this route that request is a 404 and the main menu shows no server status.
 const serviceStatusHTTPPath = "/status/{ids:[a-z,]+}"
+
+// serviceStatusBody makes whatever ServiceStatusRPC returned a body the game can parse. The game reads a JSON
+// array of {serviceid, available, message} (UpdateServiceStatusRequests 0x1401c4c00); a stored status that is
+// not active makes the RPC return ServiceSettings().serviceStatusMessage, which is plain text (for example
+// "12 players in 3 matches"), or nothing. An array is served as is. Anything else becomes one "services"
+// element carrying the text as its message (CSymbol64 "services" = 0x25e8860120fc8175, the entry whose
+// available flag and message the game shows).
+func serviceStatusBody(rpcResult string) []byte {
+	trimmed := bytes.TrimSpace([]byte(rpcResult))
+	var elements []json.RawMessage
+	if len(trimmed) > 0 && trimmed[0] == '[' && json.Unmarshal(trimmed, &elements) == nil {
+		return trimmed
+	}
+	wrapped, err := json.Marshal([]ServiceStatusService{{ServiceID: "services", Available: true, Message: string(trimmed)}})
+	if err != nil {
+		return []byte(`[{"serviceid":"services","available":true,"message":""}]`)
+	}
+	return wrapped
+}
 
 // NewServiceStatusHTTPHandler serves the game's service-status request from the same
 // source as the evr/servicestatus RPC, without an HTTP key: the game cannot send one.
@@ -34,7 +55,7 @@ func NewServiceStatusHTTPHandler(logger runtime.Logger, fetch func(ctx context.C
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(body))
+		_, _ = w.Write(serviceStatusBody(body))
 	}
 }
 

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -69,5 +70,42 @@ func TestServiceStatusHTTPAFailedFetchIsA500NotAnEmpty200(t *testing.T) {
 	}
 	if rr.Body.Len() > len("internal error\n") {
 		t.Errorf("error body leaks detail: %q", rr.Body.String())
+	}
+}
+
+// A stored status that is not active makes the RPC return ServiceSettings().serviceStatusMessage: plain text.
+// The game's parser needs the array; the text becomes the message of one "services" element.
+func TestServiceStatusHTTPAlwaysServesAnArray(t *testing.T) {
+	cases := []struct {
+		name, rpc, wantMessage string
+	}{
+		{"plain text", "12 players in 3 matches", "12 players in 3 matches"},
+		{"empty", "", ""},
+		{"whitespace", "  \n", ""},
+		{"json object", `{"message":"x"}`, `{"message":"x"}`},
+		{"text with quotes", `say "hi" \ there`, `say "hi" \ there`},
+	}
+	for _, tc := range cases {
+		h := NewServiceStatusHTTPHandler(newStatusLogger(), func(context.Context) (string, error) { return tc.rpc, nil })
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/status/services,news", nil))
+		var got []ServiceStatusService
+		if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+			t.Errorf("%s: body %q is not a [{serviceid,available,message}] array: %v", tc.name, rr.Body.String(), err)
+			continue
+		}
+		if len(got) != 1 || got[0].ServiceID != "services" || !got[0].Available || got[0].Message != tc.wantMessage {
+			t.Errorf("%s: got %+v, want one available services element with message %q", tc.name, got, tc.wantMessage)
+		}
+	}
+}
+
+func TestServiceStatusHTTPAnActiveArrayIsServedUnchanged(t *testing.T) {
+	const want = `[{"serviceid":"services","available":false,"message":"maintenance"},{"serviceid":"news","available":true,"message":"hi"}]`
+	h := NewServiceStatusHTTPHandler(newStatusLogger(), func(context.Context) (string, error) { return "\n" + want + "\n", nil })
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/status/services,news", nil))
+	if rr.Body.String() != want {
+		t.Errorf("body = %q, want %q", rr.Body.String(), want)
 	}
 }
