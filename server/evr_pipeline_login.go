@@ -128,7 +128,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
-	if request.Payload == (evr.LoginProfile{}) {
+	if request.Payload.IsEmpty() {
 		return errors.New("login profile is empty")
 	}
 
@@ -164,9 +164,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	StoreParams(ctx, params)
-	logger.Info("Login client",
-		zap.String("nevr_runtime_build", params.NevrRuntimeBuild()),
-		zap.Int("nevr_social", params.SocialLevel()))
+	logger.Info("Login client", loginClientLogFields(params)...)
 
 	tags := buildLoginSuccessMetricTags(params, loginSystemFingerprintLimiter)
 
