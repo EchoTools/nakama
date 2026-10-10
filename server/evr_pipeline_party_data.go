@@ -294,6 +294,21 @@ func sendPartyData(logger *zap.Logger, members []snsPartyMember, exclude uuid.UU
 	return sent
 }
 
+// snsPartyUUID is the party a session's party data belongs to: the tablet (SNS) party its SNS id
+// names, as tabletPartyOf resolves it. params.currentPartyID is not that party for a session a party
+// group join has been through: JoinPartyGroup overwrites it with the group's party and leaves
+// currentSNSPartyID alone, so a data write resolved by currentPartyID lands on the group's party, where
+// the session is a member and not the leader. A session with no SNS id, or whose id names no party, has
+// no tablet party and keeps currentPartyID.
+func (p *EvrPipeline) snsPartyUUID(params *SessionParameters) uuid.UUID {
+	if params.currentSNSPartyID != 0 && p.snsPartyIDToUUID != nil {
+		if id, ok := p.snsPartyIDToUUID.Load(params.currentSNSPartyID); ok {
+			return id
+		}
+	}
+	return params.currentPartyID
+}
+
 // snsPartyDataUpdateRequest stores a write of the party's data (leader only) or the sender's own member
 // data, and relays it, with the server's keys filled, to the other members.
 func (p *EvrPipeline) snsPartyDataUpdateRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
@@ -308,13 +323,17 @@ func (p *EvrPipeline) snsPartyDataUpdateRequest(ctx context.Context, logger *zap
 		return SendEVRMessages(session, false, &evr.SNSPartyUpdateFailure{ErrorCode: code})
 	}
 	params, ok := LoadParams(ctx)
-	if !ok || params.currentPartyID == uuid.Nil {
+	var partyUUID uuid.UUID
+	if ok {
+		partyUUID = p.snsPartyUUID(params)
+	}
+	if !ok || partyUUID == uuid.Nil {
 		logger.Info("Party data refused: not in a party", zap.Uint64("scope", msg.TargetParam))
 		return failure(1)
 	}
-	ph, ok := p.nk.partyRegistry.Get(params.currentPartyID)
+	ph, ok := p.nk.partyRegistry.Get(partyUUID)
 	if !ok {
-		logger.Info("Party data refused: party gone", zap.String("party", params.currentPartyID.String()))
+		logger.Info("Party data refused: party gone", zap.String("party", partyUUID.String()))
 		return failure(1)
 	}
 	if msg.TargetParam > snsPartyDataScopeMember {
@@ -326,7 +345,7 @@ func (p *EvrPipeline) snsPartyDataUpdateRequest(ctx context.Context, logger *zap
 		isLeader := ph.leader != nil && ph.leader.UserPresence != nil && ph.leader.UserPresence.SessionId == session.ID().String()
 		ph.RUnlock()
 		if !isLeader {
-			logger.Info("Party data refused: party scope from a non-leader", zap.String("party", params.currentPartyID.String()))
+			logger.Info("Party data refused: party scope from a non-leader", zap.String("party", partyUUID.String()))
 			return failure(2)
 		}
 	}
@@ -340,12 +359,12 @@ func (p *EvrPipeline) snsPartyDataUpdateRequest(ctx context.Context, logger *zap
 	accountID := p.sessionAccountID(ctx, session, params)
 	if msg.TargetParam == snsPartyDataScopeMember && accountID == 0 {
 		// MemberID 0 is the party's data on the wire: a member with no account id cannot be relayed.
-		logger.Warn("Party data refused: no account id for the sender", zap.String("party", params.currentPartyID.String()))
+		logger.Warn("Party data refused: no account id for the sender", zap.String("party", partyUUID.String()))
 		return failure(1)
 	}
-	state := p.partyDataState(params.currentPartyID)
+	state := p.partyDataState(partyUUID)
 	stored := state.store(msg.TargetParam, session.ID(), msg.Seq, data)
-	members, _ := p.partyMembers(ctx, logger, params.currentPartyID)
+	members, _ := p.partyMembers(ctx, logger, partyUUID)
 	sent := 0
 	if stored {
 		notify, err := p.partyDataNotify(ctx, state, snsID, msg.TargetParam, session.ID(), session.UserID(), accountID)
@@ -355,7 +374,7 @@ func (p *EvrPipeline) snsPartyDataUpdateRequest(ctx context.Context, logger *zap
 		}
 		sent = sendPartyData(logger, members, session.ID(), notify)
 	}
-	logger.Info("Party data update", zap.String("party", params.currentPartyID.String()), zap.Uint64("sns_party_id", snsID),
+	logger.Info("Party data update", zap.String("party", partyUUID.String()), zap.Uint64("sns_party_id", snsID),
 		zap.Uint64("scope", msg.TargetParam), zap.Uint32("seq", msg.Seq), zap.Int("keys", len(data)),
 		zap.Bool("stored", stored), zap.Int("relayed_to", sent))
 	if msg.TargetParam == snsPartyDataScopeMember {
@@ -418,21 +437,26 @@ func (p *EvrPipeline) snsPartyDataJoining(ctx context.Context, logger *zap.Logge
 
 // snsPartyDataMatchChanged re-sends a member's data (and the party's, if they lead it) to the whole
 // party when they enter a match, so the match keys follow them. Only an SNS (tablet) party has party
-// data: a party group sets currentPartyID with no SNS id, and is skipped before any lookup.
+// data: a session with no SNS id (a party group member only) is skipped before any lookup, and one a
+// party group join has been through is resolved by its SNS id, not by the overwritten currentPartyID.
 func (p *EvrPipeline) snsPartyDataMatchChanged(ctx context.Context, logger *zap.Logger, session Session) {
 	params, ok := LoadParams(session.Context())
-	if !ok || params.currentPartyID == uuid.Nil || params.currentSNSPartyID == 0 {
+	if !ok || params.currentSNSPartyID == 0 {
 		return
 	}
-	ph, ok := p.nk.partyRegistry.Get(params.currentPartyID)
+	partyUUID := p.snsPartyUUID(params)
+	if partyUUID == uuid.Nil {
+		return
+	}
+	ph, ok := p.nk.partyRegistry.Get(partyUUID)
 	if !ok {
 		return
 	}
-	members, readers := p.partyMembers(ctx, logger, params.currentPartyID)
+	members, readers := p.partyMembers(ctx, logger, partyUUID)
 	if !readers {
 		return
 	}
-	state := p.partyDataStored(params.currentPartyID)
+	state := p.partyDataStored(partyUUID)
 	notifies := []*evr.SNSPartyDataNotify{}
 	ph.RLock()
 	isLeader := ph.leader != nil && ph.leader.UserPresence != nil && ph.leader.UserPresence.SessionId == session.ID().String()
@@ -452,6 +476,6 @@ func (p *EvrPipeline) snsPartyDataMatchChanged(ctx context.Context, logger *zap.
 		notifies = append(notifies, n)
 	}
 	sent := sendPartyData(logger, members, uuid.Nil, notifies...)
-	logger.Info("Party data match change", zap.String("party", params.currentPartyID.String()),
+	logger.Info("Party data match change", zap.String("party", partyUUID.String()),
 		zap.Bool("leader", isLeader), zap.Int("notifies", len(notifies)), zap.Int("sent_to", sent))
 }

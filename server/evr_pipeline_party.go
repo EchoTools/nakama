@@ -451,11 +451,15 @@ func (p *EvrPipeline) snsPartySendInviteRequest(ctx context.Context, logger *zap
 // snsPartyLockRequest locks the party (prevents new joins).
 func (p *EvrPipeline) snsPartyLockRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	params, ok := LoadParams(ctx)
-	if !ok || params.currentPartyID == uuid.Nil {
+	var partyUUID uuid.UUID
+	if ok {
+		partyUUID = p.snsPartyUUID(params)
+	}
+	if !ok || partyUUID == uuid.Nil {
 		return SendEVRMessages(session, false, &evr.SNSPartyLockFailure{ErrorCode: 1})
 	}
 
-	ph, ok := p.nk.partyRegistry.Get(params.currentPartyID)
+	ph, ok := p.nk.partyRegistry.Get(partyUUID)
 	if !ok {
 		return SendEVRMessages(session, false, &evr.SNSPartyLockFailure{ErrorCode: 1})
 	}
@@ -465,7 +469,7 @@ func (p *EvrPipeline) snsPartyLockRequest(ctx context.Context, logger *zap.Logge
 	ph.Unlock()
 
 	snsID := params.currentSNSPartyID
-	p.sendEVRMessageToPartyMembers(logger, params.currentPartyID, uuid.Nil, &evr.SNSPartyLockNotify{
+	p.sendEVRMessageToPartyMembers(logger, partyUUID, uuid.Nil, &evr.SNSPartyLockNotify{
 		PartyID: snsID,
 	})
 
@@ -475,11 +479,15 @@ func (p *EvrPipeline) snsPartyLockRequest(ctx context.Context, logger *zap.Logge
 // snsPartyUnlockRequest unlocks the party (allows joins).
 func (p *EvrPipeline) snsPartyUnlockRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	params, ok := LoadParams(ctx)
-	if !ok || params.currentPartyID == uuid.Nil {
+	var partyUUID uuid.UUID
+	if ok {
+		partyUUID = p.snsPartyUUID(params)
+	}
+	if !ok || partyUUID == uuid.Nil {
 		return SendEVRMessages(session, false, &evr.SNSPartyUnlockFailure{ErrorCode: 1})
 	}
 
-	ph, ok := p.nk.partyRegistry.Get(params.currentPartyID)
+	ph, ok := p.nk.partyRegistry.Get(partyUUID)
 	if !ok {
 		return SendEVRMessages(session, false, &evr.SNSPartyUnlockFailure{ErrorCode: 1})
 	}
@@ -489,7 +497,7 @@ func (p *EvrPipeline) snsPartyUnlockRequest(ctx context.Context, logger *zap.Log
 	ph.Unlock()
 
 	snsID := params.currentSNSPartyID
-	p.sendEVRMessageToPartyMembers(logger, params.currentPartyID, uuid.Nil, &evr.SNSPartyUnlockNotify{
+	p.sendEVRMessageToPartyMembers(logger, partyUUID, uuid.Nil, &evr.SNSPartyUnlockNotify{
 		PartyID: snsID,
 	})
 
