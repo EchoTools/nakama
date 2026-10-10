@@ -208,7 +208,8 @@ func (p *EvrPipeline) snsPartyLeaveOnClose(logger *zap.Logger, session *sessionW
 	// nothing else. The session's context is done, so the account lookup takes its own.
 	stream := PresenceStream{Mode: StreamModeParty, Subject: partyUUID, Label: p.node}
 	for _, presence := range p.nk.tracker.ListByStream(stream, true, true) {
-		if presence.ID.SessionID != session.ID() {
+		// A session in a party group only has no SNS id: there is no tablet party to tell.
+		if params.currentSNSPartyID != 0 && presence.ID.SessionID != session.ID() {
 			p.sendEVRMessageToPartyMembers(logger, partyUUID, session.ID(), &evr.SNSPartyLeaveNotify{
 				PartyID:  params.currentSNSPartyID,
 				MemberID: p.sessionAccountID(context.Background(), session, params),
@@ -248,6 +249,35 @@ func (p *EvrPipeline) snsPartyLeaveCleanup(_ context.Context, logger *zap.Logger
 		return
 	}
 	clearPartyParams(session.Context(), params)
+}
+
+// snsPartyWatchLeader has the SNS party's members told who leads it when the leader leaves and the
+// party handler promotes the oldest member: game clients read SNSPartyPassNotify, not the rtapi
+// PartyLeader the handler sends on the stream.
+func (p *EvrPipeline) snsPartyWatchLeader(ph *PartyHandler) {
+	partyUUID := ph.ID
+	ph.SetLeaderChangedHook(func(leader *rtapi.UserPresence) { p.snsPartyLeaderChanged(partyUUID, leader) })
+}
+
+// snsPartyLeaderChanged sends the members of an SNS party the SNSPartyPassNotify for its new leader.
+func (p *EvrPipeline) snsPartyLeaderChanged(partyUUID uuid.UUID, leader *rtapi.UserPresence) {
+	snsID, ok := p.snsPartyUUIDToID.Load(partyUUID)
+	if !ok || snsID == 0 || leader == nil {
+		return
+	}
+	var ownerID uint64
+	if ws, ok := p.nk.sessionRegistry.Get(uuid.FromStringOrNil(leader.SessionId)).(*sessionWS); ok && ws != nil {
+		if params, ok := LoadParams(ws.Context()); ok {
+			ownerID = p.sessionAccountID(context.Background(), ws, params)
+		}
+	}
+	if ownerID == 0 {
+		ownerID, _ = p.resolveUserIDToAccountID(context.Background(), uuid.FromStringOrNil(leader.UserId))
+	}
+	p.sendEVRMessageToPartyMembers(p.nk.logger, partyUUID, uuid.Nil, &evr.SNSPartyPassNotify{
+		PartyID:    snsID,
+		NewOwnerID: ownerID,
+	})
 }
 
 // snsPartyEnded drops what the pipeline holds for a party nobody is in any more: its party data and its
@@ -304,6 +334,7 @@ func (p *EvrPipeline) snsPartyCreateRequest(ctx context.Context, logger *zap.Log
 	}
 
 	ph := p.nk.partyRegistry.Create(true, 4, presence)
+	p.snsPartyWatchLeader(ph)
 	if ph == nil {
 		logger.Error("Failed to create party")
 		return SendEVRMessages(session, false, &evr.SNSPartyCreateFailure{ErrorCode: 1})
@@ -424,11 +455,14 @@ func (p *EvrPipeline) snsPartyLeaveRequest(ctx context.Context, logger *zap.Logg
 
 	snsID := params.currentSNSPartyID
 
-	// Broadcast leave notify before we untrack.
-	p.sendEVRMessageToPartyMembers(logger, partyUUID, session.ID(), &evr.SNSPartyLeaveNotify{
-		PartyID:  snsID,
-		MemberID: p.sessionAccountID(ctx, session, params),
-	})
+	// Broadcast leave notify before we untrack (a session in a party group only has no SNS id: no
+	// tablet party to tell).
+	if snsID != 0 {
+		p.sendEVRMessageToPartyMembers(logger, partyUUID, session.ID(), &evr.SNSPartyLeaveNotify{
+			PartyID:  snsID,
+			MemberID: p.sessionAccountID(ctx, session, params),
+		})
+	}
 
 	// Clear any reservation for the departing member.
 	// Must run BEFORE snsPartyLeaveCleanup, which clears params.currentPartyID.
