@@ -1237,6 +1237,10 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		},
 	}, s.userID)
 
+	// Their friends are told they are online; Close tells them when this session is what ends it.
+	s.statusTracked.Store(true)
+	p.friendPresenceOnline(ctx, s.logger, s.userID)
+
 	return nil
 }
 

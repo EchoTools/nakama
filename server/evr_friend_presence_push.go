@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 )
 
@@ -178,18 +179,48 @@ func (p *EvrPipeline) friendPresenceMatchEntered(ctx context.Context, logger *za
 	p.friendPresenceChanged(ctx, logger, session.UserID(), "match_entered")
 }
 
-// pushFriendPresence sends each online friend of the subject, on every live session of theirs whose
-// client parses presence (social level >= 1, as sendFriendPresence gates), one SNSFriendPresenceNotify
-// built for that viewer.
+// friendPresenceOfflineGrace is how long a closed session's user is given to have another session
+// again before their friends are told they are offline, so a reconnect does not show as a flash offline.
+const friendPresenceOfflineGrace = friendPresencePushInterval
+
+// friendPresenceOnline is what runs when a session logs in: the user's friends are told they are online.
+func (p *EvrPipeline) friendPresenceOnline(ctx context.Context, logger *zap.Logger, userID uuid.UUID) {
+	p.friendPresenceChanged(ctx, logger, userID, friendTriggerOnline)
+}
+
+// friendPresenceOffline is what runs when a session closes. It never blocks the close: the push, with
+// its friend listing and database lookups, runs on a timer after the grace period and reads whether the
+// user is online then.
+func (p *EvrPipeline) friendPresenceOffline(ctx context.Context, logger *zap.Logger, userID uuid.UUID) {
+	if userID == uuid.Nil {
+		return
+	}
+	ctx = context.WithoutCancel(ctx)
+	p.friendPush.run(friendPresenceOfflineGrace, func() {
+		p.friendPresenceChanged(ctx, logger, userID, friendTriggerOffline)
+	})
+}
+
+// The triggers that are a change of the user's online state: their friends are sent the status
+// notification (the roster entry) as well as the presence.
+const (
+	friendTriggerOnline  = "online"
+	friendTriggerOffline = "offline"
+)
+
+// pushFriendPresence tells each online friend of the subject, on every live session of theirs, where the
+// subject is. A session whose client parses presence (social level >= 1, as sendFriendPresence gates)
+// is sent one SNSFriendPresenceNotify built for that viewer. On a change of online state, and for a
+// subject who has gone offline, every session is also sent the SNSFriendStatusNotify the friend list
+// response sends all clients (it is what puts the friend in the roster, so stock clients parse it).
 func (p *EvrPipeline) pushFriendPresence(ctx context.Context, logger *zap.Logger, subject uuid.UUID, trigger string, trailing bool) {
 	start := time.Now()
 	fields := []zap.Field{zap.String("subject", subject.String()), zap.String("trigger", trigger), zap.Bool("trailing", trailing)}
-	// A user with no live session is not online: friendPresence would say they are. This is also what
-	// ends a trailing push whose subject left while it waited (a closed session has no status presence).
-	if len(p.nk.tracker.ListByStream(PresenceStream{Mode: StreamModeStatus, Subject: subject}, true, true)) == 0 {
-		logger.Debug("Friend presence push: subject is offline", fields...)
-		return
-	}
+	// The state is read now, not when the change happened: a user with no live session is offline, and
+	// a push that waited out its window reports where they are at the end of it.
+	online := len(p.nk.tracker.ListByStream(PresenceStream{Mode: StreamModeStatus, Subject: subject}, true, true)) > 0
+	fields = append(fields, zap.Bool("online", online))
+	sendStatus := !online || trigger == friendTriggerOnline || trigger == friendTriggerOffline
 	friends, err := p.onlineFriendIDs(ctx, logger, subject)
 	if err != nil {
 		logger.Warn("Friend presence push: could not list friends", append(fields, zap.Error(err))...)
@@ -216,12 +247,22 @@ func (p *EvrPipeline) pushFriendPresence(ctx context.Context, logger *zap.Logger
 			if !ok || ws == nil {
 				continue
 			}
-			if params, ok := LoadParams(ws.Context()); !ok || params.SocialLevel() < 1 {
+			params, ok := LoadParams(ws.Context())
+			if !ok {
 				continue
 			}
 			viewers++
-			notify := p.friendPresence(ctx, friend, subject, accountID, true)
-			if err := SendEVRMessages(ws, false, notify); err != nil {
+			var messages []evr.Message
+			if sendStatus {
+				messages = append(messages, &evr.SNSFriendStatusNotify{FriendID: accountID, StatusCode: friendStatusCode(online)})
+			}
+			if params.SocialLevel() >= 1 {
+				messages = append(messages, p.friendPresence(ctx, friend, subject, accountID, online))
+			}
+			if len(messages) == 0 {
+				continue
+			}
+			if err := SendEVRMessages(ws, false, messages...); err != nil {
 				logger.Warn("Friend presence push: send failed", append(fields, zap.String("viewer", friend.String()), zap.Error(err))...)
 				continue
 			}
