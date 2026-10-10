@@ -107,6 +107,9 @@ func (p *EvrPipeline) resolveEvrUUIDToUserID(evrUUID [16]byte) (uuid.UUID, bool)
 // ---------------------------------------------------------------------------
 
 func (p *EvrPipeline) resolveUserIDToAccountID(ctx context.Context, userID uuid.UUID) (uint64, error) {
+	if p.db == nil {
+		return 0, fmt.Errorf("account lookup for user %s: no database", userID)
+	}
 	// The Discord id is the identity on the wire (see discordAccountID).
 	if discordID, err := GetDiscordIDByUserID(ctx, p.db, userID.String()); err == nil {
 		if accountID, ok := discordAccountID(discordID); ok {
@@ -192,11 +195,27 @@ func (p *EvrPipeline) snsPartyTrackAndJoin(ctx context.Context, logger *zap.Logg
 func (p *EvrPipeline) snsPartyLeaveOnClose(logger *zap.Logger, session *sessionWS) {
 	<-session.Context().Done()
 	params, ok := LoadParams(session.Context())
-	if !ok || params.currentPartyID == uuid.Nil {
+	if !ok {
 		return
 	}
-	logger.Debug("Session closed in an SNS party: leaving it", zap.String("party_id", params.currentPartyID.String()),
+	partyUUID := p.snsPartyUUID(params)
+	if partyUUID == uuid.Nil {
+		return
+	}
+	logger.Debug("Session closed in an SNS party: leaving it", zap.String("party_id", partyUUID.String()),
 		zap.Uint64("sns_party_id", params.currentSNSPartyID))
+	// Tell the others, as an explicit leave does: their clients remove a member on this notify and on
+	// nothing else. The session's context is done, so the account lookup takes its own.
+	stream := PresenceStream{Mode: StreamModeParty, Subject: partyUUID, Label: p.node}
+	for _, presence := range p.nk.tracker.ListByStream(stream, true, true) {
+		if presence.ID.SessionID != session.ID() {
+			p.sendEVRMessageToPartyMembers(logger, partyUUID, session.ID(), &evr.SNSPartyLeaveNotify{
+				PartyID:  params.currentSNSPartyID,
+				MemberID: p.sessionAccountID(context.Background(), session, params),
+			})
+			break
+		}
+	}
 	p.snsPartyLeaveCleanup(context.Background(), logger, session, params)
 }
 
@@ -211,15 +230,23 @@ func clearPartyParams(ctx context.Context, params *SessionParameters) {
 }
 
 func (p *EvrPipeline) snsPartyLeaveCleanup(_ context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) {
-	if params.currentPartyID == uuid.Nil {
+	partyUUID := p.snsPartyUUID(params)
+	if partyUUID == uuid.Nil {
 		return
 	}
-	stream := PresenceStream{Mode: StreamModeParty, Subject: params.currentPartyID, Label: p.node}
+	stream := PresenceStream{Mode: StreamModeParty, Subject: partyUUID, Label: p.node}
 	p.nk.tracker.Untrack(session.ID(), stream, session.UserID())
 	if p.nk.tracker.CountByStream(stream) == 0 {
-		p.snsPartyEnded(logger, params.currentPartyID) // the last member left
+		p.snsPartyEnded(logger, partyUUID) // the last member left
 	}
 
+	if params.currentSNSPartyID != 0 && params.currentPartyID != partyUUID {
+		// A party group join replaced currentPartyID with the group's party, which this leave did not
+		// touch: it stays the session's current party, and only the tablet party is forgotten.
+		params.currentSNSPartyID = 0
+		StoreParams(session.Context(), params)
+		return
+	}
 	clearPartyParams(session.Context(), params)
 }
 
@@ -387,12 +414,15 @@ func (p *EvrPipeline) snsPartyJoinRequest(ctx context.Context, logger *zap.Logge
 // snsPartyLeaveRequest leaves the current party.
 func (p *EvrPipeline) snsPartyLeaveRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	params, ok := LoadParams(ctx)
-	if !ok || params.currentPartyID == uuid.Nil {
+	var partyUUID uuid.UUID
+	if ok {
+		partyUUID = p.snsPartyUUID(params)
+	}
+	if !ok || partyUUID == uuid.Nil {
 		return SendEVRMessages(session, false, &evr.SNSPartyLeaveFailure{ErrorCode: 1})
 	}
 
 	snsID := params.currentSNSPartyID
-	partyUUID := params.currentPartyID
 
 	// Broadcast leave notify before we untrack.
 	p.sendEVRMessageToPartyMembers(logger, partyUUID, session.ID(), &evr.SNSPartyLeaveNotify{

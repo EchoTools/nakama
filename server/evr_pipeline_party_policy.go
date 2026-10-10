@@ -156,7 +156,7 @@ func (p *EvrPipeline) snsPartySetJoinPolicyRequest(ctx context.Context, logger *
 // explicit leave does (the other members are told, any reservation is cleared, the stream untracked).
 // A player whose join or accept fails stays in the party they were in.
 func (p *EvrPipeline) snsPartyLeaveForJoin(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters, joined uuid.UUID) {
-	old := params.currentPartyID
+	old := p.snsPartyUUID(params)
 	if old == uuid.Nil || old == joined {
 		return
 	}
