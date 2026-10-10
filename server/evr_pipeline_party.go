@@ -448,7 +448,11 @@ func (p *EvrPipeline) snsPartySendInviteRequest(ctx context.Context, logger *zap
 	}
 
 	params, ok := LoadParams(ctx)
-	if !ok || params.currentPartyID == uuid.Nil {
+	var partyUUID uuid.UUID
+	if ok {
+		partyUUID = p.snsPartyUUID(params)
+	}
+	if !ok || partyUUID == uuid.Nil {
 		logger.Warn("Cannot send invite: not in a party")
 		return nil
 	}
@@ -462,7 +466,7 @@ func (p *EvrPipeline) snsPartySendInviteRequest(ctx context.Context, logger *zap
 	// Store the invite.
 	inviteList, _ := p.snsPartyInvites.LoadOrStore(targetUserID, &snsPartyInviteList{})
 	inviteList.Add(&snsPartyInvite{
-		PartyUUID:  params.currentPartyID,
+		PartyUUID:  partyUUID,
 		SNSPartyID: params.currentSNSPartyID,
 		InviterID:  p.sessionAccountID(ctx, session, params),
 		InviterUID: session.UserID(),
@@ -610,7 +614,11 @@ func (p *EvrPipeline) snsPartyPassOwnershipRequest(ctx context.Context, logger *
 	}
 
 	params, ok := LoadParams(ctx)
-	if !ok || params.currentPartyID == uuid.Nil {
+	var partyUUID uuid.UUID
+	if ok {
+		partyUUID = p.snsPartyUUID(params)
+	}
+	if !ok || partyUUID == uuid.Nil {
 		return SendEVRMessages(session, false, &evr.SNSPartyPassFailure{ErrorCode: 1})
 	}
 
@@ -619,12 +627,12 @@ func (p *EvrPipeline) snsPartyPassOwnershipRequest(ctx context.Context, logger *
 		return SendEVRMessages(session, false, &evr.SNSPartyPassFailure{ErrorCode: 2})
 	}
 
-	targetPresence := p.findPartyMemberPresence(params.currentPartyID, targetUserID)
+	targetPresence := p.findPartyMemberPresence(partyUUID, targetUserID)
 	if targetPresence == nil {
 		return SendEVRMessages(session, false, &evr.SNSPartyPassFailure{ErrorCode: 2})
 	}
 
-	err := p.nk.partyRegistry.PartyPromote(ctx, params.currentPartyID, p.node, session.ID().String(), p.node, targetPresence)
+	err := p.nk.partyRegistry.PartyPromote(ctx, partyUUID, p.node, session.ID().String(), p.node, targetPresence)
 	if err != nil {
 		logger.Info("Party promote failed", zap.Error(err))
 		return SendEVRMessages(session, false, &evr.SNSPartyPassFailure{ErrorCode: 1})
@@ -633,7 +641,7 @@ func (p *EvrPipeline) snsPartyPassOwnershipRequest(ctx context.Context, logger *
 	snsID := params.currentSNSPartyID
 	targetAccountID, _ := p.resolveUserIDToAccountID(ctx, targetUserID)
 
-	p.sendEVRMessageToPartyMembers(logger, params.currentPartyID, uuid.Nil, &evr.SNSPartyPassNotify{
+	p.sendEVRMessageToPartyMembers(logger, partyUUID, uuid.Nil, &evr.SNSPartyPassNotify{
 		PartyID:    snsID,
 		NewOwnerID: targetAccountID,
 	})
@@ -648,7 +656,7 @@ func (p *EvrPipeline) snsPartyPassOwnershipRequest(ctx context.Context, logger *
 	if oldLeaderPresence := p.nk.tracker.GetLocalBySessionIDStreamUserID(session.id, oldLeaderStream, session.userID); oldLeaderPresence != nil {
 		oldMatchID := MatchIDFromStringOrNil(oldLeaderPresence.GetStatus())
 		if !oldMatchID.IsNil() {
-			payload := SignalClearPartyReservationsPayload{PartyID: params.currentPartyID}
+			payload := SignalClearPartyReservationsPayload{PartyID: partyUUID}
 			if _, err := SignalMatch(ctx, p.nk, oldMatchID, SignalClearPartyReservations, payload); err != nil {
 				logger.Warn("Failed to clear old leader's reservations", zap.Error(err))
 			}
@@ -666,7 +674,7 @@ func (p *EvrPipeline) snsPartyPassOwnershipRequest(ctx context.Context, logger *
 				newMatchID := MatchIDFromStringOrNil(newPresence.GetStatus())
 				if !newMatchID.IsNil() {
 					if label, err := MatchLabelByID(ctx, p.nk, newMatchID); err == nil && label != nil && label.IsSocial() {
-						go p.createPartyReservations(context.WithoutCancel(ctx), logger, newMatchID, ws.id, params.currentPartyID)
+						go p.createPartyReservations(context.WithoutCancel(ctx), logger, newMatchID, ws.id, partyUUID)
 					}
 				}
 			}
@@ -819,13 +827,17 @@ func (p *EvrPipeline) snsPartyRespondToInviteRequest(ctx context.Context, logger
 // snsPartyUpdateRequest acknowledges a party metadata update.
 func (p *EvrPipeline) snsPartyUpdateRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	params, ok := LoadParams(ctx)
-	if !ok || params.currentPartyID == uuid.Nil {
+	var partyUUID uuid.UUID
+	if ok {
+		partyUUID = p.snsPartyUUID(params)
+	}
+	if !ok || partyUUID == uuid.Nil {
 		return SendEVRMessages(session, false, &evr.SNSPartyUpdateFailure{ErrorCode: 1})
 	}
 
 	snsID := params.currentSNSPartyID
 
-	p.sendEVRMessageToPartyMembers(logger, params.currentPartyID, session.ID(), &evr.SNSPartyUpdateNotify{
+	p.sendEVRMessageToPartyMembers(logger, partyUUID, session.ID(), &evr.SNSPartyUpdateNotify{
 		PartyID: snsID,
 	})
 
@@ -835,13 +847,17 @@ func (p *EvrPipeline) snsPartyUpdateRequest(ctx context.Context, logger *zap.Log
 // snsPartyUpdateMemberRequest acknowledges a member data update.
 func (p *EvrPipeline) snsPartyUpdateMemberRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	params, ok := LoadParams(ctx)
-	if !ok || params.currentPartyID == uuid.Nil {
+	var partyUUID uuid.UUID
+	if ok {
+		partyUUID = p.snsPartyUUID(params)
+	}
+	if !ok || partyUUID == uuid.Nil {
 		return SendEVRMessages(session, false, &evr.SNSPartyUpdateMemberFailure{ErrorCode: 1})
 	}
 
 	snsID := params.currentSNSPartyID
 
-	p.sendEVRMessageToPartyMembers(logger, params.currentPartyID, session.ID(), &evr.SNSPartyUpdateMemberNotify{
+	p.sendEVRMessageToPartyMembers(logger, partyUUID, session.ID(), &evr.SNSPartyUpdateMemberNotify{
 		PartyID:  snsID,
 		MemberID: p.sessionAccountID(ctx, session, params),
 	})
