@@ -59,6 +59,8 @@ func TestSNSPartyLeaderLeavingTellsTheMembersWhoLeadsNow(t *testing.T) {
 	leader, m1, m2 := e.session("leader", true), e.session("m1", true), e.session("m2", true)
 	ph := e.party(110, leader, m1, m2)
 
+	// As the tracker's party leave listener does: the presence is off the stream, then Leave runs.
+	e.tracker.Untrack(leader.id, PresenceStream{Mode: StreamModeParty, Subject: ph.ID, Label: "testnode"}, leader.userID)
 	ph.Leave([]*Presence{presenceOf(leader)})
 
 	ph.RLock()
