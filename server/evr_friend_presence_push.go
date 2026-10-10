@@ -14,14 +14,18 @@ import (
 // churns (joins, leaves, lock, unlock) costs its members' friends one push per window, not one per event.
 const friendPresencePushInterval = 2 * time.Second
 
+// friendPresenceSweepPeriods is how many intervals pass between sweeps of the limiter's idle windows.
+const friendPresenceSweepPeriods = 4
+
 // friendPresenceLimiter spaces the pushes about each user: the first change goes at once, the changes
 // inside the window after it are folded into one trailing push at the window's end. The zero value works.
 type friendPresenceLimiter struct {
 	interval time.Duration
 	now      func() time.Time
 
-	mu    sync.Mutex
-	state map[uuid.UUID]*friendPresenceWindow
+	mu        sync.Mutex
+	state     map[uuid.UUID]*friendPresenceWindow
+	nextSweep time.Time // the next time the idle windows are dropped
 }
 
 type friendPresenceWindow struct {
@@ -49,12 +53,16 @@ func (l *friendPresenceLimiter) admit(user uuid.UUID) (now bool, schedule time.D
 	if l.state == nil {
 		l.state = map[uuid.UUID]*friendPresenceWindow{}
 	}
-	if len(l.state) > 4096 {
-		for id, w := range l.state { // forget users whose window has passed
+	if !t.Before(l.nextSweep) {
+		// Forget the users whose window has passed. One scan per sweep period, whatever the number of
+		// admits, so the cost per admit is constant and the map holds at most the users seen in about
+		// two periods.
+		for id, w := range l.state {
 			if !w.pending && t.Sub(w.last) >= interval {
 				delete(l.state, id)
 			}
 		}
+		l.nextSweep = t.Add(friendPresenceSweepPeriods * interval)
 	}
 	w := l.state[user]
 	switch {
@@ -176,6 +184,12 @@ func (p *EvrPipeline) friendPresenceMatchEntered(ctx context.Context, logger *za
 func (p *EvrPipeline) pushFriendPresence(ctx context.Context, logger *zap.Logger, subject uuid.UUID, trigger string, trailing bool) {
 	start := time.Now()
 	fields := []zap.Field{zap.String("subject", subject.String()), zap.String("trigger", trigger), zap.Bool("trailing", trailing)}
+	// A user with no live session is not online: friendPresence would say they are. This is also what
+	// ends a trailing push whose subject left while it waited (a closed session has no status presence).
+	if len(p.nk.tracker.ListByStream(PresenceStream{Mode: StreamModeStatus, Subject: subject}, true, true)) == 0 {
+		logger.Debug("Friend presence push: subject is offline", fields...)
+		return
+	}
 	friends, err := p.onlineFriendIDs(ctx, logger, subject)
 	if err != nil {
 		logger.Warn("Friend presence push: could not list friends", append(fields, zap.Error(err))...)
