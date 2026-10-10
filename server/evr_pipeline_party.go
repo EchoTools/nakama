@@ -512,7 +512,11 @@ func (p *EvrPipeline) snsPartyKickRequest(ctx context.Context, logger *zap.Logge
 	}
 
 	params, ok := LoadParams(ctx)
-	if !ok || params.currentPartyID == uuid.Nil {
+	var partyUUID uuid.UUID
+	if ok {
+		partyUUID = p.snsPartyUUID(params)
+	}
+	if !ok || partyUUID == uuid.Nil {
 		return SendEVRMessages(session, false, &evr.SNSPartyKickFailure{ErrorCode: 1})
 	}
 
@@ -523,12 +527,12 @@ func (p *EvrPipeline) snsPartyKickRequest(ctx context.Context, logger *zap.Logge
 	}
 
 	// Find the target's session to build a full UserPresence.
-	targetPresence := p.findPartyMemberPresence(params.currentPartyID, targetUserID)
+	targetPresence := p.findPartyMemberPresence(partyUUID, targetUserID)
 	if targetPresence == nil {
 		return SendEVRMessages(session, false, &evr.SNSPartyKickFailure{ErrorCode: 2})
 	}
 
-	err := p.nk.partyRegistry.PartyRemove(ctx, params.currentPartyID, p.node, session.ID().String(), p.node, targetPresence)
+	err := p.nk.partyRegistry.PartyRemove(ctx, partyUUID, p.node, session.ID().String(), p.node, targetPresence)
 	if err != nil {
 		logger.Info("Party kick failed", zap.Error(err))
 		return SendEVRMessages(session, false, &evr.SNSPartyKickFailure{ErrorCode: 1})
@@ -536,16 +540,32 @@ func (p *EvrPipeline) snsPartyKickRequest(ctx context.Context, logger *zap.Logge
 
 	snsID := params.currentSNSPartyID
 	targetAccountID, _ := p.resolveUserIDToAccountID(ctx, targetUserID)
-
-	p.sendEVRMessageToPartyMembers(logger, params.currentPartyID, uuid.Nil, &evr.SNSPartyKickNotify{
+	notify := &evr.SNSPartyKickNotify{
 		PartyID: snsID,
 		KickID:  targetAccountID,
-	})
+	}
 
-	// Clear any reservation for the kicked member.
+	// The remaining members, and the kicked member itself: the removal took it off the party's stream,
+	// so the broadcast does not reach it, and its client leaves the party only on a notify naming it.
+	p.sendEVRMessageToPartyMembers(logger, partyUUID, uuid.Nil, notify)
+
 	if kickedSession := p.nk.sessionRegistry.Get(uuid.FromStringOrNil(targetPresence.SessionId)); kickedSession != nil {
+		_ = SendEVRMessages(kickedSession, false, notify)
 		if ws, ok := kickedSession.(*sessionWS); ok {
-			p.clearMemberReservation(ctx, logger, ws, params.currentPartyID)
+			// Clear any reservation for the kicked member.
+			p.clearMemberReservation(ctx, logger, ws, partyUUID)
+			// As a leave does: the session is in no tablet party. Only if the party it is in is the one
+			// it was kicked from (it may have joined another since). A party group join may have
+			// replaced currentPartyID with the group's party, which the kick did not touch: that stays.
+			if kickedParams, ok := LoadParams(ws.Context()); ok && kickedParams.currentSNSPartyID != 0 &&
+				p.snsPartyUUID(kickedParams) == partyUUID {
+				if kickedParams.currentPartyID == partyUUID {
+					clearPartyParams(ws.Context(), kickedParams)
+				} else {
+					kickedParams.currentSNSPartyID = 0
+					StoreParams(ws.Context(), kickedParams)
+				}
+			}
 		}
 	}
 
