@@ -185,6 +185,7 @@ func (p *EvrPipeline) snsPartyTrackAndJoin(ctx context.Context, logger *zap.Logg
 	params.snsPartyCloseOnce.Do(func() {
 		go p.snsPartyLeaveOnClose(session.logger, session)
 	})
+	p.friendPresencePartyChanged(ctx, logger, session.UserID(), partyUUID, "party_join")
 	return nil
 }
 
@@ -246,9 +247,11 @@ func (p *EvrPipeline) snsPartyLeaveCleanup(_ context.Context, logger *zap.Logger
 		// touch: it stays the session's current party, and only the tablet party is forgotten.
 		params.currentSNSPartyID = 0
 		StoreParams(session.Context(), params)
+		p.friendPresencePartyChanged(session.Context(), logger, session.UserID(), partyUUID, "party_leave")
 		return
 	}
 	clearPartyParams(session.Context(), params)
+	p.friendPresencePartyChanged(session.Context(), logger, session.UserID(), partyUUID, "party_leave")
 }
 
 // snsPartyWatchLeader has the SNS party's members told who leads it when the leader leaves and the
@@ -278,6 +281,7 @@ func (p *EvrPipeline) snsPartyLeaderChanged(partyUUID uuid.UUID, leader *rtapi.U
 		PartyID:    snsID,
 		NewOwnerID: ownerID,
 	})
+	p.friendPresencePartyChanged(context.Background(), p.nk.logger, uuid.FromStringOrNil(leader.UserId), partyUUID, "party_leader")
 }
 
 // snsPartyEnded drops what the pipeline holds for a party nobody is in any more: its party data and its
@@ -535,6 +539,7 @@ func (p *EvrPipeline) snsPartyLockRequest(ctx context.Context, logger *zap.Logge
 	ph.Lock()
 	ph.Open = false
 	ph.Unlock()
+	p.friendPresencePartyChanged(ctx, logger, session.UserID(), partyUUID, "party_lock")
 
 	snsID := params.currentSNSPartyID
 	p.sendEVRMessageToPartyMembers(logger, partyUUID, uuid.Nil, &evr.SNSPartyLockNotify{
@@ -563,6 +568,7 @@ func (p *EvrPipeline) snsPartyUnlockRequest(ctx context.Context, logger *zap.Log
 	ph.Lock()
 	ph.Open = true
 	ph.Unlock()
+	p.friendPresencePartyChanged(ctx, logger, session.UserID(), partyUUID, "party_unlock")
 
 	snsID := params.currentSNSPartyID
 	p.sendEVRMessageToPartyMembers(logger, partyUUID, uuid.Nil, &evr.SNSPartyUnlockNotify{
@@ -715,6 +721,7 @@ func (p *EvrPipeline) snsPartyPassOwnershipRequest(ctx context.Context, logger *
 		}
 	}
 
+	p.friendPresencePartyChanged(ctx, logger, session.UserID(), partyUUID, "party_pass")
 	return SendEVRMessages(session, false, &evr.SNSPartyPassSuccess{})
 }
 

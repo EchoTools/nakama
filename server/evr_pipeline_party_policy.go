@@ -153,6 +153,7 @@ func (p *EvrPipeline) snsPartySetJoinPolicyRequest(ctx context.Context, logger *
 	logger.Info("Party join policy set", zap.String("party", partyUUID.String()),
 		zap.Uint64("sns_party_id", params.currentSNSPartyID), zap.Uint8("policy", policy))
 	p.sendEVRMessageToPartyMembers(logger, partyUUID, session.ID(), &evr.SNSPartyUpdateNotify{PartyID: params.currentSNSPartyID})
+	p.friendPresencePartyChanged(ctx, logger, session.UserID(), partyUUID, "party_policy")
 	return SendEVRMessages(session, false, &evr.SNSPartyUpdateSuccess{PartyID: params.currentSNSPartyID})
 }
 
