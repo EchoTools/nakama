@@ -434,12 +434,12 @@ func (p *EvrPipeline) snsFriendRemoveRequest(ctx context.Context, logger *zap.Lo
 // snsFriendListResponse builds and sends the friend list counts to the client.
 func (p *EvrPipeline) snsFriendListSubscribeRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	logger.Info("Friend list subscribe request received")
-	return p.sendFriendListResponse(ctx, logger, session)
+	return p.sendFriendListResponse(ctx, logger, session, friendListSubscribe)
 }
 
 func (p *EvrPipeline) snsFriendListRefreshRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	logger.Info("Friend list refresh request received")
-	return p.sendFriendListResponse(ctx, logger, session)
+	return p.sendFriendListResponse(ctx, logger, session, friendListRefresh)
 }
 
 // friendStatusCode maps a friend's online state to the wire StatusCode consumed by
@@ -508,7 +508,81 @@ func friendNotifies(friends []*api.Friend, resolveAccountID func(*api.Friend) (a
 	return notifications, targets
 }
 
-func (p *EvrPipeline) sendFriendListResponse(ctx context.Context, logger *zap.Logger, session *sessionWS) error {
+// friendListRequest is which request a friend-list reply answers.
+type friendListRequest int
+
+const (
+	friendListSubscribe friendListRequest = iota // once per login (the nevr runtime injects it after login)
+	friendListRefresh                            // whenever the client wants the roster again
+)
+
+// replaysInvites says whether the reply tells the client who has a request waiting. Only the subscribe
+// reply does: the nevr runtime answers every SNSFriendInviteNotify with a refresh, so a replay on refresh
+// would be answered by a refresh and replayed again, for ever.
+func (k friendListRequest) replaysInvites() bool { return k == friendListSubscribe }
+
+// friendListReply is what answers a friend-list subscribe or refresh: the counts, a status notify for each
+// confirmed friend (with the presence targets for a client that parses presence), and, when the request
+// asked for a replay, who the pending received requests are from. It holds no connection, so the shape of
+// the reply is testable without a session.
+type friendListReply struct {
+	counts          evr.SNSFriendListResponse
+	statuses        []friendStatusNotification
+	presenceTargets []friendPresenceTarget
+	// inviteSenders are the account ids of the players with a request waiting for this player, in list
+	// order; empty unless the reply replays them.
+	inviteSenders []uint64
+}
+
+// buildFriendListReply sorts friends into the reply. resolveAccountID is called once per confirmed friend
+// and, when replayInvites is set, once per pending received request; an id it cannot place is skipped,
+// never sent as zero. Requests this player sent (FriendInvitationSent) and blocks are never replayed.
+func buildFriendListReply(friends []*api.Friend, resolveAccountID func(*api.Friend) (accountID uint64, ok bool), replayInvites bool) friendListReply {
+	var reply friendListReply
+	for _, f := range friends {
+		if f == nil || f.State == nil || f.User == nil {
+			continue
+		}
+		switch f.State.Value {
+		case FriendStateFriends:
+			if f.User.Online {
+				reply.counts.NOnline++
+			} else {
+				reply.counts.NOffline++
+			}
+		case FriendInvitationSent:
+			reply.counts.NSent++
+		case FriendInvitationReceived:
+			reply.counts.NRecv++
+		}
+	}
+	reply.statuses, reply.presenceTargets = friendNotifies(friends, resolveAccountID)
+	if replayInvites {
+		reply.inviteSenders = friendInviteSenders(friends, resolveAccountID)
+	}
+	return reply
+}
+
+// friendInviteSenders resolves, in list order, the account id of each player with a request waiting for
+// this player (FriendInvitationReceived). A request whose sender cannot be placed is skipped: a zero id
+// would show up on the client as an entry that nobody sent.
+func friendInviteSenders(friends []*api.Friend, resolveAccountID func(*api.Friend) (accountID uint64, ok bool)) []uint64 {
+	var out []uint64
+	for _, f := range friends {
+		if f == nil || f.State == nil || f.State.Value != FriendInvitationReceived || f.User == nil {
+			continue
+		}
+		if accountID, ok := resolveAccountID(f); ok && accountID != 0 {
+			out = append(out, accountID)
+		}
+	}
+	return out
+}
+
+// sendFriendListResponse answers a friend-list request: the counts, a status notify per confirmed friend,
+// their presence, and, for the subscribe request, one SNSFriendInviteNotify per request that arrived while
+// the player was away (the server's list carries only the count of them).
+func (p *EvrPipeline) sendFriendListResponse(ctx context.Context, logger *zap.Logger, session *sessionWS, request friendListRequest) error {
 	userID := session.UserID()
 
 	friends, err := ListPlayerFriends(ctx, logger, p.db, p.nk.statusRegistry, userID)
@@ -517,40 +591,7 @@ func (p *EvrPipeline) sendFriendListResponse(ctx context.Context, logger *zap.Lo
 		return nil
 	}
 
-	var nOnline, nOffline, nBusy, nSent, nRecv uint32
-	for _, f := range friends {
-		switch f.State.Value {
-		case FriendStateFriends:
-			if f.User.Online {
-				nOnline++
-			} else {
-				nOffline++
-			}
-		case FriendInvitationSent:
-			nSent++
-		case FriendInvitationReceived:
-			nRecv++
-		}
-	}
-
-	if err := SendEVRMessages(session, false, &evr.SNSFriendListResponse{
-		NOnline:  nOnline,
-		NBusy:    nBusy,
-		NOffline: nOffline,
-		NSent:    nSent,
-		NRecv:    nRecv,
-	}); err != nil {
-		return err
-	}
-
-	// SNSFriendListResponse only ever carried aggregate counts (evr/sns_friends.go's
-	// documented 0x20-byte wire format has no per-friend fields) — nothing populated
-	// the client's actual roster. Confirmed via ReVault: CNSRADFriends::StatusNotifyCB
-	// (the ONLY code path that calls AddFriend, i.e. the only thing that inserts a
-	// named entry into the client's friend table) is the listener for
-	// SNSFriendStatusNotify, which was never sent from here. Emit one per confirmed
-	// friend so the roster actually populates.
-	notifications, targets := friendNotifies(friends, func(f *api.Friend) (uint64, bool) {
+	reply := buildFriendListReply(friends, func(f *api.Friend) (uint64, bool) {
 		friendUserID, err := uuid.FromString(f.User.Id)
 		if err != nil {
 			logger.Warn("Skipping friend status notify — bad user id", zap.String("user_id", f.User.Id), zap.Error(err))
@@ -563,8 +604,26 @@ func (p *EvrPipeline) sendFriendListResponse(ctx context.Context, logger *zap.Lo
 			return 0, false
 		}
 		return accountID, true
-	})
-	for _, n := range notifications {
+	}, request.replaysInvites())
+
+	if err := SendEVRMessages(session, false, &evr.SNSFriendListResponse{
+		NOnline:  reply.counts.NOnline,
+		NBusy:    reply.counts.NBusy,
+		NOffline: reply.counts.NOffline,
+		NSent:    reply.counts.NSent,
+		NRecv:    reply.counts.NRecv,
+	}); err != nil {
+		return err
+	}
+
+	// SNSFriendListResponse only ever carried aggregate counts (evr/sns_friends.go's
+	// documented 0x20-byte wire format has no per-friend fields) — nothing populated
+	// the client's actual roster. Confirmed via ReVault: CNSRADFriends::StatusNotifyCB
+	// (the ONLY code path that calls AddFriend, i.e. the only thing that inserts a
+	// named entry into the client's friend table) is the listener for
+	// SNSFriendStatusNotify, which was never sent from here. Emit one per confirmed
+	// friend so the roster actually populates.
+	for _, n := range reply.statuses {
 		if err := SendEVRMessages(session, false, &evr.SNSFriendStatusNotify{
 			FriendID:   n.FriendID,
 			StatusCode: n.StatusCode,
@@ -574,7 +633,23 @@ func (p *EvrPipeline) sendFriendListResponse(ctx context.Context, logger *zap.Lo
 	}
 
 	// Each friend's presence (party, joinable, status text) for a client that parses it.
-	p.sendFriendPresence(ctx, logger, session, targets)
+	p.sendFriendPresence(ctx, logger, session, reply.presenceTargets)
+
+	// Who asked, for a request that arrived while the player was away. Each is the message a live request
+	// produces (snsFriendInviteRequest), so the client needs nothing new.
+	for _, senderID := range reply.inviteSenders {
+		if err := SendEVRMessages(session, false, &evr.SNSFriendInviteNotify{FriendID: senderID}); err != nil {
+			logger.Warn("Failed to send friend invite notify", zap.Uint64("friend_id", senderID), zap.Error(err))
+		}
+	}
+	if len(reply.inviteSenders) > 0 {
+		logger.Info("Friend list: replayed pending friend requests",
+			zap.Int("count", len(reply.inviteSenders)), zap.Uint32("pending", reply.counts.NRecv))
+	}
+	if request.replaysInvites() && int(reply.counts.NRecv) > len(reply.inviteSenders) {
+		logger.Warn("Friend list: pending friend requests whose sender could not be resolved",
+			zap.Uint32("pending", reply.counts.NRecv), zap.Int("replayed", len(reply.inviteSenders)))
+	}
 
 	return nil
 }
