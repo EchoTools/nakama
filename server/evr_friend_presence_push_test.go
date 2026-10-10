@@ -377,3 +377,57 @@ func TestFriendPresenceLimiterForgetsIdleUsers(t *testing.T) {
 	require.Less(t, held, 1000, "idle windows must be swept without waiting for a size threshold")
 	require.Greater(t, held, 0)
 }
+
+// Logging in starts the online push and returns: the friend listing and the database lookups are not on
+// the login path, so a lister that never answers cannot hold the login up.
+func TestLoginOnlinePushIsOffTheLoginPath(t *testing.T) {
+	e := newPushEnv(t)
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	e.ep.friendPush.friends = func(context.Context, uuid.UUID) ([]uuid.UUID, error) {
+		<-release
+		return nil, nil
+	}
+	e.ep.friendPush.schedule = nil // the production path: a goroutine
+	subject := e.session("subject", true)
+	e.online(subject)
+
+	returned := make(chan struct{})
+	go func() {
+		// The goroutine the push starts outlives the test, so its logger is not the test's.
+		e.ep.friendPresenceOnline(context.Background(), zap.NewNop(), subject.userID)
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the login hook waited for the friend listing")
+	}
+}
+
+// A push is bounded: a friend listing that honours its context is cut off at the timeout, so a database
+// that hangs cannot pin the push goroutine for ever.
+func TestFriendPresencePushIsBoundedByATimeout(t *testing.T) {
+	e := newPushEnv(t)
+	e.ep.friendPush.timeout = 50 * time.Millisecond
+	sawDeadline := make(chan error, 1)
+	e.ep.friendPush.friends = func(ctx context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+		<-ctx.Done()
+		sawDeadline <- ctx.Err()
+		return nil, ctx.Err()
+	}
+	subject := e.session("subject", true)
+	e.online(subject)
+
+	done := make(chan struct{})
+	go func() {
+		e.ep.pushFriendPresence(context.Background(), loggerForTest(t), subject.userID, "test", false)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the push was not cut off")
+	}
+	require.ErrorIs(t, <-sawDeadline, context.DeadlineExceeded)
+}

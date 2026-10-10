@@ -102,6 +102,8 @@ type friendPresencePush struct {
 	accountID func(ctx context.Context, subject uuid.UUID) (uint64, error)
 	// schedule runs f after delay; nil runs it on its own goroutine (delay 0) or a timer.
 	schedule func(delay time.Duration, f func())
+	// timeout bounds one push; 0 is friendPresencePushTimeout.
+	timeout time.Duration
 }
 
 func (f *friendPresencePush) run(delay time.Duration, fn func()) {
@@ -179,6 +181,10 @@ func (p *EvrPipeline) friendPresenceMatchEntered(ctx context.Context, logger *za
 	p.friendPresenceChanged(ctx, logger, session.UserID(), "match_entered")
 }
 
+// friendPresencePushTimeout bounds one push, so a database that hangs holds a push goroutine for this
+// long, not for the life of the process. The push runs on a context detached from its session's.
+const friendPresencePushTimeout = 15 * time.Second
+
 // friendPresenceOfflineGrace is how long a closed session's user is given to have another session
 // again before their friends are told they are offline, so a reconnect does not show as a flash offline.
 const friendPresenceOfflineGrace = friendPresencePushInterval
@@ -215,6 +221,12 @@ const (
 // response sends all clients (it is what puts the friend in the roster, so stock clients parse it).
 func (p *EvrPipeline) pushFriendPresence(ctx context.Context, logger *zap.Logger, subject uuid.UUID, trigger string, trailing bool) {
 	start := time.Now()
+	timeout := p.friendPush.timeout
+	if timeout <= 0 {
+		timeout = friendPresencePushTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	fields := []zap.Field{zap.String("subject", subject.String()), zap.String("trigger", trigger), zap.Bool("trailing", trailing)}
 	// The state is read now, not when the change happened: a user with no live session is offline, and
 	// a push that waited out its window reports where they are at the end of it.
