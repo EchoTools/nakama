@@ -434,12 +434,12 @@ func (p *EvrPipeline) snsFriendRemoveRequest(ctx context.Context, logger *zap.Lo
 // snsFriendListResponse builds and sends the friend list counts to the client.
 func (p *EvrPipeline) snsFriendListSubscribeRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	logger.Info("Friend list subscribe request received")
-	return p.sendFriendListResponse(ctx, logger, session, friendListSubscribe)
+	return p.sendFriendListResponse(ctx, logger, session, friendListRequestOf(in))
 }
 
 func (p *EvrPipeline) snsFriendListRefreshRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	logger.Info("Friend list refresh request received")
-	return p.sendFriendListResponse(ctx, logger, session, friendListRefresh)
+	return p.sendFriendListResponse(ctx, logger, session, friendListRequestOf(in))
 }
 
 // friendStatusCode maps a friend's online state to the wire StatusCode consumed by
@@ -520,6 +520,16 @@ const (
 // reply does: the nevr runtime answers every SNSFriendInviteNotify with a refresh, so a replay on refresh
 // would be answered by a refresh and replayed again, for ever.
 func (k friendListRequest) replaysInvites() bool { return k == friendListSubscribe }
+
+// friendListRequestOf says which request a friend-list message is, from the message itself, so a handler
+// cannot answer one request as the other. Anything that is not the subscribe is a refresh, which never
+// replays.
+func friendListRequestOf(in evr.Message) friendListRequest {
+	if _, ok := in.(*evr.SNSFriendListSubscribeRequest); ok {
+		return friendListSubscribe
+	}
+	return friendListRefresh
+}
 
 // friendListReply is what answers a friend-list subscribe or refresh: the counts, a status notify for each
 // confirmed friend (with the presence targets for a client that parses presence), and, when the request
