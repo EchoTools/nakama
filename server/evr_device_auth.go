@@ -7,16 +7,72 @@ import (
 	"encoding/json"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
+	"golang.org/x/time/rate"
 )
 
 const (
 	DeviceAuthCollection = "DeviceAuth"
 	DeviceAuthCodesKey   = "pendingCodes"
 	DeviceAuthCodeExpiry = 5 * time.Minute
+
+	// deviceAuthCodeLength is the number of characters in a device auth code.
+	// Codes carry no separator.
+	deviceAuthCodeLength = 4
+	// deviceAuthCodeAlphabet excludes homoglyphs (0/O, 1/I/L, B/8).
+	deviceAuthCodeAlphabet = "ACDEFGHJKMNPRSTUXYZ2345679"
+	// deviceAuthCodeMaxAttempts bounds retries when a generated code collides
+	// with a pending one.
+	deviceAuthCodeMaxAttempts = 100
+
+	// deviceAuthVerifyPerMinute caps device/auth/verify calls per user.
+	deviceAuthVerifyPerMinute = 10
 )
+
+// deviceAuthMu serialises the load-modify-store cycles on the single storage
+// object that holds every pending code, so two concurrent calls cannot both
+// consume one code or overwrite each other's update. It is process-local.
+var deviceAuthMu sync.Mutex
+
+// deviceAuthVerifyLimiter limits device/auth/verify attempts per user. Wrong
+// codes count: the limit is what makes a 4-character code hard to guess.
+var deviceAuthVerifyLimiter = newDeviceAuthRateLimiter(deviceAuthVerifyPerMinute, time.Minute)
+
+// deviceAuthRateLimiter is a per-key token bucket (golang.org/x/time/rate, as
+// used elsewhere in the EVR code) allowing `burst` events per `per`.
+type deviceAuthRateLimiter struct {
+	mu       sync.Mutex
+	burst    int
+	per      time.Duration
+	limiters map[string]*rate.Limiter
+}
+
+func newDeviceAuthRateLimiter(burst int, per time.Duration) *deviceAuthRateLimiter {
+	return &deviceAuthRateLimiter{burst: burst, per: per, limiters: make(map[string]*rate.Limiter)}
+}
+
+// allow reports whether key may make another attempt at time now.
+func (l *deviceAuthRateLimiter) allow(key string, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	// Drop buckets that have fully refilled; they are indistinguishable from new ones.
+	if len(l.limiters) > 1024 {
+		for k, lim := range l.limiters {
+			if lim.TokensAt(now) >= float64(l.burst) {
+				delete(l.limiters, k)
+			}
+		}
+	}
+	lim, ok := l.limiters[key]
+	if !ok {
+		lim = rate.NewLimiter(rate.Every(l.per/time.Duration(l.burst)), l.burst)
+		l.limiters[key] = lim
+	}
+	return lim.AllowN(now, 1)
+}
 
 // DeviceAuthCode represents a pending device authorization code.
 type DeviceAuthCode struct {
@@ -92,27 +148,32 @@ func storeDeviceAuthCodes(ctx context.Context, nk runtime.NakamaModule, codes ma
 	return err
 }
 
-// generateDeviceAuthCode generates an 8-character code in XXXX-XXXX format.
+// generateDeviceAuthCode generates a deviceAuthCodeLength-character code with
+// no separator, drawn from deviceAuthCodeAlphabet.
 // Uses crypto/rand for unpredictable codes (this is an authentication token).
-// Character set excludes homoglyphs (0/O, 1/I/L, B/8).
 func generateDeviceAuthCode() string {
-	validChars := "ACDEFGHJKMNPRSTUXYZ2345679"
-	code := make([]byte, 8)
+	code := make([]byte, deviceAuthCodeLength)
 	for i := range code {
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(validChars))))
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(deviceAuthCodeAlphabet))))
 		if err != nil {
 			panic("crypto/rand failed: " + err.Error())
 		}
-		code[i] = validChars[n.Int64()]
+		code[i] = deviceAuthCodeAlphabet[n.Int64()]
 	}
-	// Format as XXXX-XXXX
-	return string(code[:4]) + "-" + string(code[4:])
+	return string(code)
 }
 
 // DeviceAuthRequestRpc generates a new device auth code.
 // Public endpoint — no authentication required.
-// Returns: { "code": "ABCD-EFGH", "expires_in": 300 }
+// Returns: { "code": "ABCD", "expires_in": 300 }
 func DeviceAuthRequestRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	return deviceAuthRequest(ctx, logger, nk, generateDeviceAuthCode)
+}
+
+func deviceAuthRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, generate func() string) (string, error) {
+	deviceAuthMu.Lock()
+	defer deviceAuthMu.Unlock()
+
 	codes, err := loadDeviceAuthCodes(ctx, nk)
 	if err != nil {
 		logger.WithField("error", err).Error("Failed to load device auth codes")
@@ -121,11 +182,16 @@ func DeviceAuthRequestRpc(ctx context.Context, logger runtime.Logger, db *sql.DB
 
 	// Generate a unique code
 	var code string
-	for i := 0; i < 100; i++ {
-		code = generateDeviceAuthCode()
-		if _, exists := codes[code]; !exists {
+	for i := 0; i < deviceAuthCodeMaxAttempts; i++ {
+		candidate := generate()
+		if _, exists := codes[candidate]; !exists {
+			code = candidate
 			break
 		}
+	}
+	if code == "" {
+		logger.WithField("pending", len(codes)).Error("Could not generate a unique device auth code")
+		return "", runtime.NewError("internal error", StatusInternalError)
 	}
 
 	now := time.Now()
@@ -152,7 +218,7 @@ func DeviceAuthRequestRpc(ctx context.Context, logger runtime.Logger, db *sql.DB
 
 // DeviceAuthPollRpc polls for the status of a device auth code.
 // Public endpoint — no authentication required.
-// Input: { "code": "ABCD-EFGH" }
+// Input: { "code": "ABCD" }
 // Returns: { "status": "pending" } or { "status": "verified", "access_token": "...", "refresh_token": "..." }
 func DeviceAuthPollRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	if payload == "" {
@@ -170,6 +236,9 @@ func DeviceAuthPollRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 	if code == "" {
 		return "", runtime.NewError("missing code", StatusInvalidArgument)
 	}
+
+	deviceAuthMu.Lock()
+	defer deviceAuthMu.Unlock()
 
 	codes, err := loadDeviceAuthCodes(ctx, nk)
 	if err != nil {
@@ -221,15 +290,30 @@ func DeviceAuthPollRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 
 // DeviceAuthVerifyRpc verifies a device auth code.
 // Requires authentication — the calling user's identity is used to generate the token.
-// Input: { "code": "ABCD-EFGH" }
+// Input: { "code": "ABCD" }
 // Returns: { "status": "ok" }
+//
+// Limited to deviceAuthVerifyPerMinute attempts per user per minute; wrong
+// codes count.
 func DeviceAuthVerifyRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	lookup := func(ctx context.Context, userID string) (string, error) {
+		return GetDiscordIDByUserID(ctx, db, userID)
+	}
+	return deviceAuthVerify(ctx, logger, nk, lookup, deviceAuthVerifyLimiter, payload)
+}
+
+func deviceAuthVerify(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, lookupDiscordID discordIDLookup, limiter *deviceAuthRateLimiter, payload string) (string, error) {
 	// Get the authenticated user's ID
 	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 	if !ok || userID == "" {
 		return "", runtime.NewError("authentication required", StatusUnauthenticated)
 	}
 	username, _ := ctx.Value(runtime.RUNTIME_CTX_USERNAME).(string)
+
+	// Every attempt counts, including malformed and wrong codes.
+	if !limiter.allow(userID, time.Now()) {
+		return "", runtime.NewError("too many attempts, try again later", StatusResourceExhausted)
+	}
 
 	if payload == "" {
 		return "", runtime.NewError("missing payload", StatusInvalidArgument)
@@ -243,15 +327,12 @@ func DeviceAuthVerifyRpc(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	}
 
 	code := strings.ToUpper(strings.TrimSpace(request.Code))
-	// Strip dash if user entered it
-	code = strings.ReplaceAll(code, "-", "")
-	if len(code) == 8 {
-		code = code[:4] + "-" + code[4:]
-	}
-
-	if len(code) != 9 { // XXXX-XXXX = 9 chars
+	if len(code) != deviceAuthCodeLength {
 		return "", runtime.NewError("invalid code format", StatusInvalidArgument)
 	}
+
+	deviceAuthMu.Lock()
+	defer deviceAuthMu.Unlock()
 
 	codes, err := loadDeviceAuthCodes(ctx, nk)
 	if err != nil {
@@ -273,7 +354,7 @@ func DeviceAuthVerifyRpc(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	}
 
 	// Look up discord ID for token vars
-	discordID, err := GetDiscordIDByUserID(ctx, db, userID)
+	discordID, err := lookupDiscordID(ctx, userID)
 	if err != nil {
 		logger.WithFields(map[string]interface{}{"user_id": userID, "error": err}).Warn("Could not look up discord ID for user")
 		discordID = ""
