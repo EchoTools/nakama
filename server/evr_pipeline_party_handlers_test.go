@@ -47,6 +47,20 @@ func (t *handlerTracker) CountByStream(stream PresenceStream) int {
 	return len(t.ListByStream(stream, true, true))
 }
 
+// untrackingStreamManager is the test stream manager with the one thing the party registry's removals
+// rely on: UserLeave takes the presence off the stream, as the real stream manager does. Without it a
+// removed member stays on the party stream and a handler that notifies the stream after a removal
+// still reaches it.
+type untrackingStreamManager struct {
+	testStreamManager
+	tracker *handlerTracker
+}
+
+func (m untrackingStreamManager) UserLeave(stream PresenceStream, userID, sessionID uuid.UUID) error {
+	m.tracker.Untrack(sessionID, stream, userID)
+	return nil
+}
+
 // partyHandlerEnv is a pipeline wired for every SNS party handler: a real party registry, a tracker that
 // lists the party stream, the session registry, every SNS map, and the test database.
 type partyHandlerEnv struct {
@@ -70,7 +84,7 @@ func newPartyHandlerEnv(t *testing.T) *partyHandlerEnv {
 	tracker := &handlerTracker{partyStreamTracker: newPartyStreamTracker()}
 	mm, mmCleanup := createLightMatchmaker(t, logger)
 	t.Cleanup(mmCleanup)
-	pr := NewLocalPartyRegistry(logger, cfg, mm, tracker, testStreamManager{}, &DummyMessageRouter{}, "testnode").(*LocalPartyRegistry)
+	pr := NewLocalPartyRegistry(logger, cfg, mm, tracker, untrackingStreamManager{tracker: tracker}, &DummyMessageRouter{}, "testnode").(*LocalPartyRegistry)
 	sessions := &sessionMapRegistry{sessions: map[uuid.UUID]Session{}}
 	ep := &EvrPipeline{
 		node:   "testnode",
