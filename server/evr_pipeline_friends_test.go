@@ -5,6 +5,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
@@ -182,4 +183,14 @@ func TestBuildFriendListReply_ReplaysPendingRequestsOnlyWhenAsked(t *testing.T) 
 func TestFriendListRequest_OnlySubscribeReplaysInvites(t *testing.T) {
 	require.True(t, friendListSubscribe.replaysInvites())
 	require.False(t, friendListRefresh.replaysInvites(), "a refresh never replays: notify -> refresh -> notify would not end")
+}
+
+// The kind of reply comes from the message the handler was given (#685 follow-up): the subscribe is the
+// only request that replays pending friend requests, and swapping the two handlers' kinds would either
+// loop (a refresh that replays) or never tell a returning player who asked.
+func TestFriendListRequestOf_IsDerivedFromTheMessage(t *testing.T) {
+	require.Equal(t, friendListSubscribe, friendListRequestOf(&evr.SNSFriendListSubscribeRequest{}))
+	require.Equal(t, friendListRefresh, friendListRequestOf(&evr.SNSFriendListRefreshRequest{}))
+	require.Equal(t, friendListRefresh, friendListRequestOf(nil), "anything else is a refresh: it never replays")
+	require.Equal(t, friendListRefresh, friendListRequestOf(&evr.SNSFriendInviteRequest{}))
 }
