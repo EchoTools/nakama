@@ -166,6 +166,7 @@ func (e *partyHandlerEnv) party(snsID uint64, members ...*sessionWS) *PartyHandl
 	ph := e.pr.Create(true, 4, &rtapi.UserPresence{
 		UserId: leader.userID.String(), SessionId: leader.id.String(), Username: leader.Username(),
 	})
+	e.ep.snsPartyWatchLeader(ph) // as snsPartyCreateRequest does
 	presences := make([]*Presence, 0, len(members))
 	stream := PresenceStream{Mode: StreamModeParty, Subject: ph.ID, Label: "testnode"}
 	for _, m := range members {

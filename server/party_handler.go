@@ -58,6 +58,10 @@ type PartyHandler struct {
 	expectedInitialLeader *rtapi.UserPresence
 	leader                *PartyLeader
 	joinRequests          []*PartyJoinRequest
+	// onLeaderChanged, when set, is called (after the lock is released) with the member Leave promoted
+	// when the leader left. The stream's PartyLeader envelope is for rtapi clients; a game client reads
+	// the SNS notify its pipeline sends from here.
+	onLeaderChanged func(newLeader *rtapi.UserPresence)
 
 	members *PartyPresenceList
 
@@ -338,6 +342,13 @@ func (p *PartyHandler) Join(presences []*Presence) {
 	}
 }
 
+// SetLeaderChangedHook sets the function Leave calls with the new leader when it promotes one.
+func (p *PartyHandler) SetLeaderChangedHook(fn func(newLeader *rtapi.UserPresence)) {
+	p.Lock()
+	p.onLeaderChanged = fn
+	p.Unlock()
+}
+
 func (p *PartyHandler) Leave(presences []*Presence) {
 	if len(presences) == 0 {
 		return
@@ -370,6 +381,8 @@ func (p *PartyHandler) Leave(presences []*Presence) {
 	}
 
 	// Remove the leader if they've left.
+	var promoted *rtapi.UserPresence
+	var onLeaderChanged func(*rtapi.UserPresence)
 	for _, presence := range presences {
 		if p.leader != nil && p.leader.PresenceID.SessionID == presence.ID.SessionID && p.leader.PresenceID.Node == presence.ID.Node {
 			// Check is only meaningful if a leader exists. Leader may temporarily be nil here until a new
@@ -391,6 +404,9 @@ func (p *PartyHandler) Leave(presences []*Presence) {
 				UserPresence: oldestUserPresence,
 			}
 
+			promoted = p.leader.UserPresence
+			onLeaderChanged = p.onLeaderChanged
+
 			// Send any new leader promotion message to party members.
 			p.router.SendToStream(p.logger, p.Stream, &rtapi.Envelope{
 				Message: &rtapi.Envelope_PartyLeader{
@@ -405,6 +421,10 @@ func (p *PartyHandler) Leave(presences []*Presence) {
 		}
 	}
 	p.Unlock()
+
+	if promoted != nil && onLeaderChanged != nil {
+		onLeaderChanged(promoted)
+	}
 
 	// The party membership has changed, stop any ongoing matchmaking processes.
 	_ = p.matchmaker.RemovePartyAll(p.IDStr)

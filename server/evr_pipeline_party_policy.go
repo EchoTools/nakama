@@ -164,10 +164,12 @@ func (p *EvrPipeline) snsPartyLeaveForJoin(ctx context.Context, logger *zap.Logg
 	if old == uuid.Nil || old == joined {
 		return
 	}
-	p.sendEVRMessageToPartyMembers(logger, old, session.ID(), &evr.SNSPartyLeaveNotify{
-		PartyID:  params.currentSNSPartyID,
-		MemberID: p.sessionAccountID(ctx, session, params),
-	})
+	if params.currentSNSPartyID != 0 { // a party group has no SNS id: no tablet party to tell
+		p.sendEVRMessageToPartyMembers(logger, old, session.ID(), &evr.SNSPartyLeaveNotify{
+			PartyID:  params.currentSNSPartyID,
+			MemberID: p.sessionAccountID(ctx, session, params),
+		})
+	}
 	p.clearMemberReservation(ctx, logger, session, old)
 	p.snsPartyLeaveCleanup(ctx, logger, session, params)
 	logger.Info("Left party for the one joined", zap.String("left", old.String()), zap.String("joined", joined.String()))
