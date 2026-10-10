@@ -2,14 +2,22 @@ package server
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	rtapi "buf.build/gen/go/echotools/nevr-api/protocolbuffers/go/gameservice/v1"
 	"github.com/gofrs/uuid/v5"
+	"github.com/gorilla/websocket"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 func TestFriendPresenceLimiterCoalescesABurst(t *testing.T) {
@@ -220,18 +228,138 @@ func TestLobbyEntrantConnectedPushesPresenceToTheEntrantsFriends(t *testing.T) {
 	require.Equal(t, "Public Arena Match", string(got[0].Text))
 }
 
-// A subject who has no live session is not online: a push about them (a trailing one that waited past
-// their disconnect, or a party leave on session close) tells their friends nothing.
-func TestFriendPresencePushIsSkippedForAnOfflineSubject(t *testing.T) {
+// A subject who has no live session is offline: a push about them (a trailing one that waited past
+// their disconnect, or a party leave on session close) tells their friends so, not where they are.
+func TestFriendPresencePushAboutAnOfflineSubjectSaysOffline(t *testing.T) {
 	e := newPushEnv(t)
-	subject := e.session("subject", true) // no status presence: never went online
+	subject := e.session("subject", true) // no status presence: not online
+	runtimeFriend := e.session("runtime", true)
+	e.online(runtimeFriend)
+	stock := e.session("stock", false)
+	e.online(stock)
+	e.friends[subject.userID] = []uuid.UUID{runtimeFriend.userID, stock.userID}
+
+	e.ep.friendPresenceChanged(context.Background(), loggerForTest(t), subject.userID, "party_leave")
+
+	require.Equal(t, []evr.Message{
+		&evr.SNSFriendStatusNotify{FriendID: 7777, StatusCode: 2},
+		&evr.SNSFriendPresenceNotify{FriendID: 7777, StatusCode: 2},
+	}, sentTo(t, runtimeFriend))
+	require.Equal(t, []evr.Message{&evr.SNSFriendStatusNotify{FriendID: 7777, StatusCode: 2}}, sentTo(t, stock),
+		"a stock client parses the status notification, not the presence")
+}
+
+// Logging in tells the friends: every client the roster status, a runtime client also the presence.
+func TestLoginPushesOnlineToFriends(t *testing.T) {
+	e := newPushEnv(t)
+	subject := e.session("subject", true)
+	e.online(subject)
+	runtimeFriend := e.session("runtime", true)
+	e.online(runtimeFriend)
+	stock := e.session("stock", false)
+	e.online(stock)
+	e.friends[subject.userID] = []uuid.UUID{runtimeFriend.userID, stock.userID}
+
+	e.ep.friendPresenceOnline(context.Background(), loggerForTest(t), subject.userID)
+
+	got := sentTo(t, runtimeFriend)
+	require.Len(t, got, 2)
+	require.Equal(t, &evr.SNSFriendStatusNotify{FriendID: 7777, StatusCode: 0}, got[0])
+	presence, ok := got[1].(*evr.SNSFriendPresenceNotify)
+	require.True(t, ok, "got %T", got[1])
+	require.Equal(t, uint64(7777), presence.FriendID)
+	require.Equal(t, uint8(0), presence.StatusCode)
+	require.Equal(t, "In Main Menu", string(presence.Text))
+	require.Equal(t, []evr.Message{&evr.SNSFriendStatusNotify{FriendID: 7777, StatusCode: 0}}, sentTo(t, stock))
+}
+
+// A session closing is not told to the friends at once: it waits out the grace period, and reads the
+// state when it fires. A user who has a session again by then is not shown offline.
+func TestOfflineIsHeldForTheGraceAndReadAtSendTime(t *testing.T) {
+	e := newPushEnv(t)
+	subject := e.session("subject", true)
+	e.online(subject)
 	friend := e.session("friend", true)
 	e.online(friend)
 	e.friends[subject.userID] = []uuid.UUID{friend.userID}
+	var delays []time.Duration
+	inline := e.ep.friendPush.schedule
+	e.ep.friendPush.schedule = func(d time.Duration, f func()) {
+		delays = append(delays, d)
+		if d == friendPresenceOfflineGrace {
+			e.delayed = append(e.delayed, f) // held: the test fires it
+			return
+		}
+		inline(d, f)
+	}
 
-	e.ep.friendPresenceChanged(context.Background(), loggerForTest(t), subject.userID, "test")
-	require.Empty(t, drain(friend.outgoingCh))
+	e.ep.friendPresenceOffline(context.Background(), loggerForTest(t), subject.userID)
+	require.Equal(t, []time.Duration{friendPresenceOfflineGrace}, delays)
+	require.Empty(t, sentTo(t, friend), "nothing is sent before the grace ends")
+
+	// The user reconnected within the grace: their status presence is on a new session.
+	back := e.session("back", true)
+	back.userID = subject.userID
+	e.online(back)
+	e.delayed[0]()
+	for _, m := range sentTo(t, friend) {
+		if n, ok := m.(*evr.SNSFriendStatusNotify); ok {
+			require.Equal(t, uint8(0), n.StatusCode, "a reconnect within the grace is not shown as offline")
+		}
+	}
 }
+
+// Close hands the offline notice to a timer: it neither lists friends nor reads the database itself, so
+// a slow friend listing cannot hold the teardown. The session that tracked the status presence at login
+// is the one that sends it, once.
+func TestSessionCloseDoesNotWaitForTheFriendListing(t *testing.T) {
+	e := newPushEnv(t)
+	logger := loggerForTest(t)
+	release := make(chan struct{})
+	var listed atomic.Int32
+	e.ep.friendPush.friends = func(context.Context, uuid.UUID) ([]uuid.UUID, error) {
+		listed.Add(1)
+		<-release
+		return nil, nil
+	}
+	e.ep.friendPush.schedule = nil // the production timer
+	t.Cleanup(func() { close(release) })
+
+	mm, cleanup := createLightMatchmaker(t, logger)
+	t.Cleanup(cleanup)
+	cfg := NewConfig(logger)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err == nil {
+			t.Cleanup(func() { _ = c.Close() })
+		}
+	}))
+	t.Cleanup(srv.Close)
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	require.NoError(t, err)
+
+	s := e.session("closing", true)
+	s.conn = conn
+	s.matchmaker = mm
+	s.statusRegistry = NewLocalStatusRegistry(logger, cfg, e.sessions, &protojson.MarshalOptions{})
+	s.sessionRegistry = closeRegistry{e.sessions}
+	s.writeWaitDuration = time.Second
+	s.pingTimer = time.NewTimer(time.Hour)
+	s.runtime = &Runtime{eventFunctions: &RuntimeEventFunctions{}}
+	s.logger = zap.NewNop() // the timer outlives the test; its logger must not be the test's
+	s.statusTracked.Store(true)
+
+	start := time.Now()
+	s.Close("test", runtime.PresenceReasonDisconnect)
+	require.Less(t, time.Since(start), 500*time.Millisecond)
+	require.Zero(t, listed.Load(), "the friend listing runs on the timer, not in Close")
+	require.False(t, s.statusTracked.Load(), "the offline notice is sent once, by the session that put the user online")
+}
+
+// closeRegistry is the test session registry with the Remove a closing session calls.
+type closeRegistry struct{ *sessionMapRegistry }
+
+func (closeRegistry) Remove(uuid.UUID) {}
 
 // The limiter's idle windows are dropped on a sweep, once per few intervals, so a server that sees many
 // users over time holds a bounded number, and no admit scans the map more than once per period.
