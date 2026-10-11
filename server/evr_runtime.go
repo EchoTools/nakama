@@ -153,7 +153,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	// The game's matchmaker queue API (join_queue / poll_queue_position / leave_queue): answers the matchmaking
 	// screen's time remaining.
-	if err := RegisterMatchmakerQueueHTTP(initializer, NewMatchmakerQueueEstimator(nil)); err != nil {
+	if err := RegisterMatchmakerQueueHTTP(logger, initializer, NewMatchmakerQueueEstimator(nil)); err != nil {
 		return fmt.Errorf("unable to register the matchmaker queue routes: %w", err)
 	}
 

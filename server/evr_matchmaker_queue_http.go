@@ -179,17 +179,27 @@ type matchmakerQueueResponse struct {
 
 // NewMatchmakerQueueHandler answers the game's three queue requests; the action is the {action} path variable
 // of matchmakerQueuePath.
-func NewMatchmakerQueueHandler(estimator *MatchmakerQueueEstimator) http.HandlerFunc {
+func NewMatchmakerQueueHandler(logger runtime.Logger, estimator *MatchmakerQueueEstimator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost && r.Method != http.MethodGet {
-			w.Header().Set("Allow", "GET, POST")
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
+		start := time.Now()
+		rec := &routeRecorder{ResponseWriter: w}
 		q := r.URL.Query()
 		accessToken, queueID := q.Get("access_token"), q.Get("queue_id")
+		fields := map[string]interface{}{
+			"action":   mux.Vars(r)["action"],
+			"queue_id": queueID,
+			"token":    routeTokenLabel(accessToken),
+		}
+		// One record per request, whatever path returns.
+		defer func() { recordRoute(logger, "matchmaker queue request", r, rec, start, fields) }()
+
+		if r.Method != http.MethodPost && r.Method != http.MethodGet {
+			rec.Header().Set("Allow", "GET, POST")
+			http.Error(rec, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		if accessToken == "" || !validMatchmakerQueueID(queueID) {
-			http.Error(w, "access_token and a valid queue_id are required", http.StatusBadRequest)
+			http.Error(rec, "access_token and a valid queue_id are required", http.StatusBadRequest)
 			return
 		}
 		var resp matchmakerQueueResponse
@@ -197,19 +207,20 @@ func NewMatchmakerQueueHandler(estimator *MatchmakerQueueEstimator) http.Handler
 		case "join_queue", "poll_queue_position":
 			wait := estimator.JoinOrPoll(accessToken, queueID)
 			resp = matchmakerQueueResponse{Status: "queued", EstimatedWaitTime: &wait}
+			fields["estimated_wait_time"] = wait
 		case "leave_queue":
 			estimator.Leave(accessToken, queueID)
 			resp = matchmakerQueueResponse{Status: "none"}
 		default:
-			http.NotFound(w, r)
+			http.NotFound(rec, r)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
+		rec.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(rec).Encode(resp)
 	}
 }
 
 // RegisterMatchmakerQueueHTTP registers the three queue routes on the runtime's HTTP router.
-func RegisterMatchmakerQueueHTTP(initializer runtime.Initializer, estimator *MatchmakerQueueEstimator) error {
-	return initializer.RegisterHttp(matchmakerQueuePath, NewMatchmakerQueueHandler(estimator), http.MethodPost, http.MethodGet)
+func RegisterMatchmakerQueueHTTP(logger runtime.Logger, initializer runtime.Initializer, estimator *MatchmakerQueueEstimator) error {
+	return initializer.RegisterHttp(matchmakerQueuePath, NewMatchmakerQueueHandler(logger, estimator), http.MethodPost, http.MethodGet)
 }
