@@ -6,9 +6,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
-	"go.uber.org/zap"
 )
 
 // serviceStatusHTTPPath is the path the game itself requests: echovr.exe builds
@@ -43,19 +43,26 @@ func serviceStatusBody(rpcResult string) []byte {
 // `fetch` is ServiceStatusRPC in production.
 func NewServiceStatusHTTPHandler(logger runtime.Logger, fetch func(ctx context.Context) (string, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &routeRecorder{ResponseWriter: w}
+		message := "service status request"
+		fields := map[string]interface{}{}
+		defer func() { recordRoute(logger, message, r, rec, start, fields) }()
+
 		if r.Method != http.MethodGet {
-			w.Header().Set("Allow", http.MethodGet)
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			rec.Header().Set("Allow", http.MethodGet)
+			http.Error(rec, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		body, err := fetch(r.Context())
 		if err != nil {
-			logger.Warn("service status request failed", zap.Error(err))
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			message = "service status request failed"
+			fields["error"] = err.Error()
+			http.Error(rec, "internal error", http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(serviceStatusBody(body))
+		rec.Header().Set("Content-Type", "application/json")
+		_, _ = rec.Write(serviceStatusBody(body))
 	}
 }
 

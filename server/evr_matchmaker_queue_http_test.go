@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"go.uber.org/zap"
 )
 
 type queueClock struct{ now time.Time }
@@ -18,7 +19,7 @@ func (c *queueClock) Now() time.Time { return c.now }
 
 func newQueueRouter(est *MatchmakerQueueEstimator) *mux.Router {
 	r := mux.NewRouter()
-	r.HandleFunc(matchmakerQueuePath, NewMatchmakerQueueHandler(est)).Methods(http.MethodPost, http.MethodGet)
+	r.HandleFunc(matchmakerQueuePath, NewMatchmakerQueueHandler(NewRuntimeGoLogger(zap.NewNop()), est)).Methods(http.MethodPost, http.MethodGet)
 	return r
 }
 
@@ -139,7 +140,7 @@ func TestMatchmakerQueueRejectsMissingParametersAndOtherActions(t *testing.T) {
 		t.Errorf("unknown action = %d, want 404", rr.Code)
 	}
 	rr = httptest.NewRecorder()
-	NewMatchmakerQueueHandler(NewMatchmakerQueueEstimator(nil)).ServeHTTP(rr,
+	NewMatchmakerQueueHandler(NewRuntimeGoLogger(zap.NewNop()), NewMatchmakerQueueEstimator(nil)).ServeHTTP(rr,
 		httptest.NewRequest(http.MethodDelete, "/ready_at_dawn/join_queue?access_token=a&queue_id=b", nil))
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Errorf("DELETE = %d, want 405", rr.Code)
