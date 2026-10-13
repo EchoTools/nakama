@@ -71,6 +71,10 @@ type EvrPipeline struct {
 	partyFormationTimeout      time.Duration
 	partyFormationPollInterval time.Duration
 
+	// lobbyErrorAudit posts a failed lobby session request to the guild's error channel. Nil means
+	// appBot.LogUserErrorMessage (postLobbyErrorAudit); overridable in tests.
+	lobbyErrorAudit func(ctx context.Context, groupID, message string) error
+
 	sessionRegistry SessionRegistry
 	runtime         *Runtime
 	nk              *RuntimeGoNakamaModule

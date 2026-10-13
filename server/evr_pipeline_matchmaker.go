@@ -57,41 +57,92 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 		ctx = context.WithValue(ctx, ctxLobbyParametersKey{}, lobbyParams)
 
 		if err := p.handleLobbySessionRequest(ctx, logger, session, request, lobbyParams); err != nil {
-			if lobbyParams.Verbose {
-				session.Send(&rtapi.Envelope{
-					Message: &rtapi.Envelope_Error{
-						Error: &rtapi.Error{
-							Code:    int32(codes.Internal),
-							Message: err.Error(),
-						},
-					},
-				}, true)
-			}
-
-			if ctx.Err() == context.Canceled || errors.Is(err, context.Canceled) {
-				logger.Debug("Lobby session request was canceled (context.Canceled)")
-				return
-			}
-			logger.Debug("Failed to process lobby session request", zap.Error(err))
-
-			params, ok := LoadParams(ctx)
-			if !ok {
-				logger.Error("Failed to load params from context")
-			} else {
-				params.lastMatchmakingError.Store(err)
-			}
-
-			if _, err := p.appBot.LogUserErrorMessage(ctx, lobbyParams.GroupID.String(), fmt.Sprintf("```fix\n%s\n\n%T failed:\n %v\n```", session.Username(), in, err), false); err != nil {
-				logger.Warn("Failed to log audit message", zap.Error(err))
-			}
-
-			if err := session.SendEvr(LobbySessionFailureFromError(request.GetMode(), request.GetGroupID(), err)); err != nil {
-				logger.Error("Failed to send lobby session failure message", zap.Error(err))
-			}
+			p.answerLobbySessionRequestError(ctx, logger, session, in, request, lobbyParams, err)
 			return
 		}
 	}()
 	return nil
+}
+
+// answerLobbySessionRequestError answers a lobby session request that failed: the client is sent a
+// LobbySessionFailure for err, then the failure is posted to the guild's error channel. It is the one
+// place a failed request is answered. The post goes to Discord, which rate-limits, so it runs after
+// the client's answer and off this goroutine (postLobbyErrorAuditAsync).
+func (p *EvrPipeline) answerLobbySessionRequestError(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message, request evr.LobbySessionRequest, lobbyParams *LobbySessionParameters, err error) {
+	if lobbyParams.Verbose {
+		if sendErr := session.Send(&rtapi.Envelope{
+			Message: &rtapi.Envelope_Error{
+				Error: &rtapi.Error{
+					Code:    int32(codes.Internal),
+					Message: err.Error(),
+				},
+			},
+		}, true); sendErr != nil {
+			logger.Warn("Failed to send verbose lobby session error", zap.Error(sendErr))
+		}
+	}
+
+	if ctx.Err() == context.Canceled || errors.Is(err, context.Canceled) {
+		logger.Debug("Lobby session request was canceled (context.Canceled)")
+		return
+	}
+	logger.Debug("Failed to process lobby session request", zap.Error(err))
+
+	params, ok := LoadParams(ctx)
+	if !ok {
+		logger.Error("Failed to load params from context")
+	} else {
+		params.lastMatchmakingError.Store(err)
+	}
+
+	if err := session.SendEvr(LobbySessionFailureFromError(request.GetMode(), request.GetGroupID(), err)); err != nil {
+		logger.Error("Failed to send lobby session failure message", zap.Error(err))
+	}
+
+	p.postLobbyErrorAuditAsync(ctx, logger, lobbyParams.GroupID.String(), fmt.Sprintf("```fix\n%s\n\n%T failed:\n %v\n```", session.Username(), in, err), err)
+}
+
+const (
+	// lobbyErrorAuditMaxInFlight bounds the error channel posts running at once. A client looping on a
+	// join it cannot get fails several times a second, and each post waits on Discord's rate limit:
+	// in production that queue held one member's failures for about 13 minutes. Past the bound a post
+	// is skipped, with a warn naming the failure it would have carried.
+	lobbyErrorAuditMaxInFlight = 8
+	// lobbyErrorAuditTimeout bounds one post. The request's context ends when the request is answered,
+	// so a post runs on a detached context of its own.
+	lobbyErrorAuditTimeout = 30 * time.Second
+)
+
+// lobbyErrorAuditSlots holds one token per error channel post in flight (lobbyErrorAuditMaxInFlight).
+var lobbyErrorAuditSlots = make(chan struct{}, lobbyErrorAuditMaxInFlight)
+
+// postLobbyErrorAuditAsync posts message to the guild's error channel without waiting for it.
+// requestErr is the failure being posted, for the warn when the post errors or is skipped.
+func (p *EvrPipeline) postLobbyErrorAuditAsync(ctx context.Context, logger *zap.Logger, groupID, message string, requestErr error) {
+	select {
+	case lobbyErrorAuditSlots <- struct{}{}:
+	default:
+		logger.Warn("Lobby error audit post skipped: too many posts in flight",
+			zap.Int("in_flight_limit", lobbyErrorAuditMaxInFlight), zap.String("group_id", groupID), zap.Error(requestErr))
+		return
+	}
+	postCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lobbyErrorAuditTimeout)
+	go func() {
+		defer func() { <-lobbyErrorAuditSlots }()
+		defer cancel()
+		if err := p.postLobbyErrorAudit(postCtx, groupID, message); err != nil {
+			logger.Warn("Failed to log audit message", zap.Error(err), zap.String("group_id", groupID), zap.NamedError("request_error", requestErr))
+		}
+	}()
+}
+
+// postLobbyErrorAudit posts message to the guild's error channel.
+func (p *EvrPipeline) postLobbyErrorAudit(ctx context.Context, groupID, message string) error {
+	if p.lobbyErrorAudit != nil {
+		return p.lobbyErrorAudit(ctx, groupID, message)
+	}
+	_, err := p.appBot.LogUserErrorMessage(ctx, groupID, message, false)
+	return err
 }
 
 // lobbyPingResponse is a message responding to a ping request.
