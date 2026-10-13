@@ -15,6 +15,66 @@ type LobbyGroup struct {
 	// tablet is set when the group is the session's tablet (SNS) party (joinLobbyParty,
 	// evr_lobby_tablet.go), not a party group.
 	tablet bool
+	// sessions resolves a tablet party's members to the sessions they matchmake on
+	// (memberSessionID). Unset for a party group, whose members are those sessions already.
+	sessions SessionRegistry
+}
+
+// memberSessionID is the session a party member matchmakes and joins matches on. A party group's
+// member is that session already: JoinPartyGroup tracks the find session. A tablet party's member is
+// the session that sent the SNS party messages (snsPartyTrackAndJoin). For a client that keeps
+// matchmaking on its own connection that is its login session, and its finds, its matchmaking stream
+// and its match joins are on its lobby session, so the member is shown as that lobby session. With no
+// live lobby session, or one that is the member itself, the member session stands.
+func (g *LobbyGroup) memberSessionID(sessionID string) string {
+	if g == nil || !g.tablet || g.sessions == nil {
+		return sessionID
+	}
+	s := g.sessions.Get(uuid.FromStringOrNil(sessionID))
+	if s == nil {
+		return sessionID
+	}
+	params, ok := LoadParams(s.Context())
+	if !ok || params.lobbySession == nil {
+		return sessionID
+	}
+	lobbyID := params.lobbySession.ID()
+	if g.sessions.Get(lobbyID) == nil {
+		return sessionID // the lobby session has closed
+	}
+	return lobbyID.String()
+}
+
+// rawLeader is the party handler's leader as it stands, or nil.
+func (g *LobbyGroup) rawLeader() (presence *rtapi.UserPresence, node string) {
+	g.ph.RLock()
+	defer g.ph.RUnlock()
+	if g.ph.leader == nil {
+		return g.ph.expectedInitialLeader, ""
+	}
+	return g.ph.leader.UserPresence, g.ph.leader.PresenceID.Node
+}
+
+// isLeaderSession is whether the session sessionID (whose login session is loginSessionID, "" if
+// none) leads the party: the leader is that session, its login session, or is shown as that session
+// (memberSessionID).
+func (g *LobbyGroup) isLeaderSession(sessionID, loginSessionID string) bool {
+	if g == nil || g.ph == nil {
+		return false
+	}
+	leader, _ := g.rawLeader()
+	if leader == nil {
+		return false
+	}
+	switch leader.SessionId {
+	case sessionID:
+		return true
+	case loginSessionID:
+		if loginSessionID != "" {
+			return true
+		}
+	}
+	return g.memberSessionID(leader.SessionId) == sessionID
 }
 
 func (g *LobbyGroup) ID() uuid.UUID {
@@ -36,23 +96,51 @@ func (g *LobbyGroup) IDStr() string {
 	return g.ph.IDStr
 }
 
+// GetLeader is the party's leader, as the session it matchmakes on (memberSessionID).
 func (g *LobbyGroup) GetLeader() *rtapi.UserPresence {
 	if g.ph == nil {
 		return nil
 	}
-	g.ph.RLock()
-	defer g.ph.RUnlock()
-	if g.ph.leader == nil {
-		return g.ph.expectedInitialLeader
+	leader, _ := g.rawLeader()
+	if leader == nil || !g.tablet {
+		return leader
 	}
-	return g.ph.leader.UserPresence
+	sid := g.memberSessionID(leader.SessionId)
+	if sid == leader.SessionId {
+		return leader
+	}
+	return &rtapi.UserPresence{UserId: leader.UserId, SessionId: sid, Username: leader.Username,
+		Persistence: leader.Persistence, Status: leader.Status}
 }
 
+// List is the party's members, each as the session it matchmakes on (memberSessionID).
 func (g *LobbyGroup) List() []*PartyPresenceListItem {
 	if g.ph == nil {
 		return nil
 	}
-	return g.ph.members.List()
+	items := g.ph.members.List()
+	if !g.tablet {
+		return items
+	}
+	out := make([]*PartyPresenceListItem, 0, len(items))
+	for _, item := range items {
+		sid := g.memberSessionID(item.Presence.GetSessionId())
+		if sid == item.Presence.GetSessionId() {
+			out = append(out, item)
+			continue
+		}
+		presence := &Presence{ID: item.Presence.ID, Stream: item.Presence.Stream, UserID: item.Presence.UserID, Meta: item.Presence.Meta}
+		presence.ID.SessionID = uuid.FromStringOrNil(sid)
+		presenceID := presence.ID
+		up := item.UserPresence
+		out = append(out, &PartyPresenceListItem{
+			PresenceID: &presenceID,
+			Presence:   presence,
+			UserPresence: &rtapi.UserPresence{UserId: up.GetUserId(), SessionId: sid, Username: up.GetUsername(),
+				Persistence: up.GetPersistence(), Status: up.GetStatus()},
+		})
+	}
+	return out
 }
 
 func (g *LobbyGroup) Size() int {
@@ -69,7 +157,53 @@ func (g *LobbyGroup) MatchmakerAdd(sessionID, node, query string, minCount, maxC
 	if settings := ServiceSettings(); settings.Matchmaking.DisableMatchmaker {
 		return "", nil, runtime.NewError("matchmaker is disabled", 14) // UNAVAILABLE
 	}
+	if g.tablet {
+		return g.tabletMatchmakerAdd(sessionID, node, query, minCount, maxCount, countMultiple, stringProperties, numericProperties)
+	}
 	return g.ph.MatchmakerAdd(sessionID, node, query, minCount, maxCount, countMultiple, stringProperties, numericProperties)
+}
+
+// tabletMatchmakerAdd is PartyHandler.MatchmakerAdd for a tablet party, with the members as the
+// sessions they matchmake on (List): the ticket must name the sessions the match is joined on, and
+// the leader files it from its find session, which may be its lobby session (memberSessionID).
+func (g *LobbyGroup) tabletMatchmakerAdd(sessionID, node, query string, minCount, maxCount, countMultiple int, stringProperties map[string]string, numericProperties map[string]float64) (string, []*PresenceID, error) {
+	g.ph.RLock()
+	stopped := g.ph.stopped
+	g.ph.RUnlock()
+	if stopped {
+		return "", nil, runtime.ErrPartyClosed
+	}
+	leader, leaderNode := g.rawLeader()
+	if leader == nil || leaderNode != node {
+		return "", nil, runtime.ErrPartyNotLeader
+	}
+	leaderSID := g.memberSessionID(leader.SessionId)
+	if sessionID != leader.SessionId && sessionID != leaderSID {
+		return "", nil, runtime.ErrPartyNotLeader
+	}
+
+	members := g.List()
+	presences := make([]*MatchmakerPresence, 0, len(members))
+	memberPresenceIDs := make([]*PresenceID, 0, len(members))
+	for _, member := range members {
+		presences = append(presences, &MatchmakerPresence{
+			UserId:    member.UserPresence.GetUserId(),
+			SessionId: member.UserPresence.GetSessionId(),
+			Username:  member.UserPresence.GetUsername(),
+			Node:      member.PresenceID.Node,
+			SessionID: member.PresenceID.SessionID,
+		})
+		if member.UserPresence.GetSessionId() == leaderSID {
+			continue
+		}
+		memberPresenceIDs = append(memberPresenceIDs, member.PresenceID)
+	}
+
+	ticket, _, err := g.ph.matchmaker.Add(g.ph.ctx, presences, "", g.ph.IDStr, query, minCount, maxCount, countMultiple, stringProperties, numericProperties)
+	if err != nil {
+		return "", nil, err
+	}
+	return ticket, memberPresenceIDs, nil
 }
 
 // MatchmakerRemoveAll cancels all active matchmaking tickets for this party.

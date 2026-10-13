@@ -744,7 +744,7 @@ func TestStorableErrorf_LobbyAndLoginMessagesUnchanged(t *testing.T) {
 			}
 
 			xpID := evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: 1234}
-			if got, want := formatLoginErrorMessage(xpID, "", current), formatLoginErrorMessage(xpID, "", legacy); got != want {
+			if got, want := formatLoginErrorMessage(xpID, "", "", current), formatLoginErrorMessage(xpID, "", "", legacy); got != want {
 				t.Errorf("login failure message changed:\n got: %q\nwant: %q", got, want)
 			}
 		})

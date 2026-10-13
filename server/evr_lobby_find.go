@@ -1168,6 +1168,10 @@ func (p *EvrPipeline) isLeaderHeadingToSocial(ctx context.Context, logger *zap.L
 // Guild isolation is preserved: a current lobby in a different guild never
 // matches the search group and is rejected before the target comparison.
 //
+// The player must also be a connected presence in the lobby's label. The
+// tracker entry and the client's CurrentMatchID both still name a lobby the
+// player has just left, so neither is evidence the player is in it.
+//
 // Used as a fast-path guard in lobbyFindOrCreateSocial to avoid rejoining a
 // lobby the player is already in — the party follow path can direct a player
 // to a social lobby they never left.
@@ -1217,6 +1221,18 @@ func (p *EvrPipeline) currentSocialLobbyForSession(ctx context.Context, logger *
 	// Guild isolation: a current lobby in a different guild is never the
 	// target of a search scoped to lobbyParams.GroupID.
 	if label.GetGroupID() != lobbyParams.GroupID {
+		return MatchID{}
+	}
+
+	// The tracker entry and CurrentMatchID can both name a lobby the player
+	// has already left: the entry outlives the match presence, and the client
+	// reports the lobby it is leaving. Only the match's own label, which
+	// MatchLeave republishes before it returns, says whether the player is
+	// still there. A no-op for a player who is not sends nothing, and the
+	// client waits in matchmaking until it gives up.
+	if !label.hasConnectedSession(session.ID().String()) {
+		logger.Debug("Social lobby guard: session is not a connected presence in the tracked lobby, not treating as no-op",
+			zap.String("tracked_mid", currentMatchID.String()))
 		return MatchID{}
 	}
 
