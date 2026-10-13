@@ -285,6 +285,18 @@ func (s *MatchLabel) GetPlayerByEvrID(evrID evr.EvrId) *PlayerInfo {
 	return nil
 }
 
+// hasConnectedSession reports whether sessionID holds a connected presence in
+// the match. A reservation (party slot or crash-recovery reconnect) is a held
+// seat, not a presence.
+func (s *MatchLabel) hasConnectedSession(sessionID string) bool {
+	for _, p := range s.Players {
+		if p.SessionID == sessionID && !p.IsReservation {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *MatchLabel) GetPlayerByUserID(userID string) *PlayerInfo {
 	for _, p := range s.Players {
 		if p.UserID == userID {

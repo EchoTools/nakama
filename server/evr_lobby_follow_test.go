@@ -2393,6 +2393,7 @@ func TestCurrentSocialLobby_AlreadyInMatchingSocialLobby(t *testing.T) {
 		Open:        true,
 		PlayerLimit: 12,
 		GroupID:     &groupID,
+		Players:     []PlayerInfo{{SessionID: env.followerSID.String(), UserID: env.followerUID.String()}},
 	})
 	env.withMockNK(registry)
 	env.setFollowerMatch(socialMatchID)
@@ -2606,6 +2607,10 @@ func TestCurrentSocialLobby_FollowToLeaderSameLobby_IsNoop(t *testing.T) {
 		Open:        true,
 		PlayerLimit: 12,
 		GroupID:     &groupID,
+		Players: []PlayerInfo{
+			{SessionID: env.leaderSID.String(), UserID: env.leaderUID.String()},
+			{SessionID: env.followerSID.String(), UserID: env.followerUID.String()},
+		},
 	})
 	env.withMockNK(registry)
 

@@ -100,6 +100,7 @@ type (
 		runtime         *Runtime
 
 		stopped                bool
+		statusTracked          atomic.Bool // the login tracked this session's status presence (the user is online through it)
 		conn                   *websocket.Conn
 		receivedMessageCounter int
 		pingTimer              *time.Timer
@@ -794,6 +795,15 @@ func (s *sessionWS) SendBytes(payload []byte, reliable bool) error {
 	}
 }
 
+// friendsOffline has the user's friends told they are offline, if this session was what put them
+// online. Close runs it; it only starts a timer, so it cannot hold the teardown up.
+func (s *sessionWS) friendsOffline() {
+	if s.evrPipeline == nil || !s.statusTracked.Swap(false) {
+		return
+	}
+	s.evrPipeline.friendPresenceOffline(context.Background(), s.logger, s.userID)
+}
+
 func (s *sessionWS) CloseLock() {
 	s.closeMu.Lock()
 }
@@ -836,6 +846,7 @@ func (s *sessionWS) Close(msg string, reason runtime.PresenceReason, envelopes .
 	if isDebug {
 		//s.logger.Info("Cleaned up closed connection status registry")
 	}
+	s.friendsOffline()
 	s.sessionRegistry.Remove(s.id)
 	if isDebug {
 		// s.logger.Info("Cleaned up closed connection session registry")

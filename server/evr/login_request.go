@@ -2,7 +2,10 @@ package evr
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
+	"reflect"
+	"unicode/utf8"
 
 	"github.com/gofrs/uuid/v5"
 )
@@ -69,6 +72,71 @@ type LoginProfile struct {
 	// session that declared its level.
 	NevrIdentity *NevrIdentity `json:"nevr_identity,omitempty"`
 	NevrSocial   int           `json:"nevr_social,omitempty"`
+	// NevrPlugins is what the client's plugin loader did with each plugin its config lists.
+	NevrPlugins NevrPlugins `json:"nevr_plugins,omitempty"`
+}
+
+// The report is client input that is logged: at most MaxNevrPlugins entries, each text at most
+// MaxNevrPluginText bytes.
+const (
+	MaxNevrPlugins    = 64
+	MaxNevrPluginText = 128
+)
+
+// NevrPlugins is the plugin report of a login. It decodes whatever the client sent without ever failing the
+// login payload it sits in: a value that is not an array is an empty report, an entry of the wrong shape
+// is dropped and the others are kept, at most MaxNevrPlugins entries are kept, and each text is cut to
+// MaxNevrPluginText bytes at a rune boundary (it is logged).
+type NevrPlugins []NevrPlugin
+
+func (l *NevrPlugins) UnmarshalJSON(data []byte) error {
+	*l = nil
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil // not an array (or null): an empty report
+	}
+	for _, entry := range raw {
+		if len(*l) >= MaxNevrPlugins {
+			break
+		}
+		var plugin NevrPlugin
+		if err := json.Unmarshal(entry, &plugin); err != nil {
+			continue
+		}
+		plugin.Name = cutText(plugin.Name, MaxNevrPluginText)
+		plugin.File = cutText(plugin.File, MaxNevrPluginText)
+		plugin.Error = cutText(plugin.Error, MaxNevrPluginText)
+		plugin.Version = cutText(plugin.Version, MaxNevrPluginText)
+		*l = append(*l, plugin)
+	}
+	return nil
+}
+
+// cutText returns s cut to at most max bytes, never in the middle of a rune.
+func cutText(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
+
+// NevrPlugin is one entry of the plugin report a nevr-runtime client declares at login: what its loader
+// did with one configured plugin. Error is set for an enabled plugin that did not load; Version, API and
+// Caps for one that did.
+type NevrPlugin struct {
+	Name     string `json:"name"`
+	File     string `json:"file"`
+	Enabled  bool   `json:"enabled"`
+	Required bool   `json:"required"`
+	Loaded   bool   `json:"loaded"`
+	Error    string `json:"error,omitempty"`
+	Version  string `json:"ver,omitempty"`
+	API      uint32 `json:"api,omitempty"`
+	Caps     uint32 `json:"caps,omitempty"`
 }
 
 // NevrIdentity is the nevr-runtime build a client declares at login.
@@ -77,6 +145,12 @@ type NevrIdentity struct {
 	Commit    string `json:"commit"`
 	Build     string `json:"build"`
 	BuildType string `json:"build_type"`
+}
+
+// IsEmpty reports whether nothing at all was declared: the payload is the zero LoginProfile. (The plugin
+// report is a slice, so the struct is no longer comparable with ==.)
+func (ld *LoginProfile) IsEmpty() bool {
+	return ld == nil || reflect.ValueOf(*ld).IsZero()
 }
 
 // SocialLevel is the social message level the client declared, 0 for a client that declared none.

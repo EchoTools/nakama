@@ -83,17 +83,21 @@ func snsPartyOffered(open bool, size, maxSize int, admitted bool) bool {
 // could join it now (open, room left, and its join policy admits the viewer, §4); 0 and false
 // otherwise. The id is withheld when not joinable, as pnsovr only published it then (0x180093279).
 func (p *EvrPipeline) friendPartyFor(ctx context.Context, viewer uuid.UUID, friendParams *SessionParameters) (uint64, bool) {
-	if friendParams == nil || friendParams.currentPartyID == uuid.Nil || friendParams.currentSNSPartyID == 0 {
+	if friendParams == nil || friendParams.currentSNSPartyID == 0 {
 		return 0, false
 	}
-	ph, ok := p.nk.partyRegistry.Get(friendParams.currentPartyID)
+	partyUUID := p.snsPartyUUID(friendParams)
+	if partyUUID == uuid.Nil {
+		return 0, false
+	}
+	ph, ok := p.nk.partyRegistry.Get(partyUUID)
 	if !ok {
 		return 0, false
 	}
 	open, size := snsPartyIsOpen(ph), ph.members.Size()
 	admitted := false
 	if open && size < ph.MaxSize {
-		allowed, _, err := p.snsPartyJoinAllowed(ctx, viewer, friendParams.currentPartyID, ph)
+		allowed, _, err := p.snsPartyJoinAllowed(ctx, viewer, partyUUID, ph)
 		admitted = err == nil && allowed
 	}
 	if !snsPartyOffered(open, size, ph.MaxSize, admitted) {

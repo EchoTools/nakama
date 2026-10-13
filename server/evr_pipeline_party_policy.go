@@ -129,11 +129,15 @@ func (p *EvrPipeline) snsPartySetJoinPolicyRequest(ctx context.Context, logger *
 		return fmt.Errorf("expected *evr.SNSPartySetJoinPolicyRequest, got %T", in)
 	}
 	params, ok := LoadParams(ctx)
-	if !ok || params.currentPartyID == uuid.Nil {
+	var partyUUID uuid.UUID
+	if ok {
+		partyUUID = p.snsPartyUUID(params)
+	}
+	if !ok || partyUUID == uuid.Nil {
 		logger.Info("Party join policy refused: not in a party", zap.Uint64("policy", msg.TargetParam))
 		return SendEVRMessages(session, false, &evr.SNSPartyUpdateFailure{ErrorCode: 1})
 	}
-	ph, ok := p.nk.partyRegistry.Get(params.currentPartyID)
+	ph, ok := p.nk.partyRegistry.Get(partyUUID)
 	if !ok {
 		return SendEVRMessages(session, false, &evr.SNSPartyUpdateFailure{ErrorCode: 1})
 	}
@@ -145,10 +149,11 @@ func (p *EvrPipeline) snsPartySetJoinPolicyRequest(ctx context.Context, logger *
 		return SendEVRMessages(session, false, &evr.SNSPartyUpdateFailure{ErrorCode: 2})
 	}
 	policy := uint8(msg.TargetParam)
-	p.snsPartyPolicies.Store(params.currentPartyID, policy)
-	logger.Info("Party join policy set", zap.String("party", params.currentPartyID.String()),
+	p.snsPartyPolicies.Store(partyUUID, policy)
+	logger.Info("Party join policy set", zap.String("party", partyUUID.String()),
 		zap.Uint64("sns_party_id", params.currentSNSPartyID), zap.Uint8("policy", policy))
-	p.sendEVRMessageToPartyMembers(logger, params.currentPartyID, session.ID(), &evr.SNSPartyUpdateNotify{PartyID: params.currentSNSPartyID})
+	p.sendEVRMessageToPartyMembers(logger, partyUUID, session.ID(), &evr.SNSPartyUpdateNotify{PartyID: params.currentSNSPartyID})
+	p.friendPresencePartyChanged(ctx, logger, session.UserID(), partyUUID, "party_policy")
 	return SendEVRMessages(session, false, &evr.SNSPartyUpdateSuccess{PartyID: params.currentSNSPartyID})
 }
 
@@ -156,14 +161,16 @@ func (p *EvrPipeline) snsPartySetJoinPolicyRequest(ctx context.Context, logger *
 // explicit leave does (the other members are told, any reservation is cleared, the stream untracked).
 // A player whose join or accept fails stays in the party they were in.
 func (p *EvrPipeline) snsPartyLeaveForJoin(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters, joined uuid.UUID) {
-	old := params.currentPartyID
+	old := p.snsPartyUUID(params)
 	if old == uuid.Nil || old == joined {
 		return
 	}
-	p.sendEVRMessageToPartyMembers(logger, old, session.ID(), &evr.SNSPartyLeaveNotify{
-		PartyID:  params.currentSNSPartyID,
-		MemberID: p.sessionAccountID(ctx, session, params),
-	})
+	if params.currentSNSPartyID != 0 { // a party group has no SNS id: no tablet party to tell
+		p.sendEVRMessageToPartyMembers(logger, old, session.ID(), &evr.SNSPartyLeaveNotify{
+			PartyID:  params.currentSNSPartyID,
+			MemberID: p.sessionAccountID(ctx, session, params),
+		})
+	}
 	p.clearMemberReservation(ctx, logger, session, old)
 	p.snsPartyLeaveCleanup(ctx, logger, session, params)
 	logger.Info("Left party for the one joined", zap.String("left", old.String()), zap.String("joined", joined.String()))

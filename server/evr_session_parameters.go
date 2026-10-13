@@ -8,6 +8,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 )
 
 type SessionParameters struct {
@@ -138,6 +139,64 @@ func (s *SessionParameters) NevrRuntimeBuild() string {
 		return ""
 	}
 	return s.loginPayload.NevrIdentity.Build
+}
+
+// Plugins is the plugin report the session's client declared at login, as decoded (empty for a stock
+// client or an older nevr-runtime).
+func (s *SessionParameters) Plugins() []evr.NevrPlugin {
+	if s == nil || s.loginPayload == nil {
+		return nil
+	}
+	return s.loginPayload.NevrPlugins
+}
+
+// PluginsLoaded names each plugin the client's loader loaded, "name@ver".
+func (s *SessionParameters) PluginsLoaded() []string {
+	loaded := []string{}
+	for _, p := range s.Plugins() {
+		if !p.Loaded {
+			continue
+		}
+		if p.Version != "" {
+			loaded = append(loaded, p.Name+"@"+p.Version)
+		} else {
+			loaded = append(loaded, p.Name)
+		}
+	}
+	return loaded
+}
+
+// PluginsFailed names each plugin the client enabled and could not load, "name: reason"; a required
+// plugin is marked.
+func (s *SessionParameters) PluginsFailed() []string {
+	failed := []string{}
+	for _, p := range s.Plugins() {
+		if !p.Enabled || p.Loaded {
+			continue
+		}
+		name := p.Name
+		if p.Required {
+			name += " (required)"
+		}
+		reason := p.Error
+		if reason == "" {
+			reason = "(no reason given)"
+		}
+		failed = append(failed, name+": "+reason)
+	}
+	return failed
+}
+
+// loginClientLogFields are the fields of the "Login client" line: the nevr-runtime build and social level
+// the client declared, and what its plugin loader did (nevr-runtime#60).
+func loginClientLogFields(s *SessionParameters) []zap.Field {
+	return []zap.Field{
+		zap.String("nevr_runtime_build", s.NevrRuntimeBuild()),
+		zap.Int("nevr_social", s.SocialLevel()),
+		zap.Int("plugins_configured", len(s.Plugins())),
+		zap.Strings("plugins_loaded", s.PluginsLoaded()),
+		zap.Strings("plugins_failed", s.PluginsFailed()),
+	}
 }
 
 func (s *SessionParameters) IsVR() bool {

@@ -146,6 +146,17 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register /evr/api service: %w", err)
 	}
 
+	// The game's own service-status request (GET /status/services,news?env=..&projectid=rad14).
+	if err := RegisterServiceStatusHTTP(logger, db, nk, initializer, rpcHandler); err != nil {
+		return fmt.Errorf("unable to register the service status route: %w", err)
+	}
+
+	// The game's matchmaker queue API (join_queue / poll_queue_position / leave_queue): answers the matchmaking
+	// screen's time remaining.
+	if err := RegisterMatchmakerQueueHTTP(logger, initializer, NewMatchmakerQueueEstimator(nil)); err != nil {
+		return fmt.Errorf("unable to register the matchmaker queue routes: %w", err)
+	}
+
 	// Register HTTP Handler for Discord Linked Roles
 	if err := RegisterDiscordLinkedRolesHandler(ctx, logger, db, nk, initializer); err != nil {
 		return fmt.Errorf("unable to register Discord Linked Roles handler: %w", err)

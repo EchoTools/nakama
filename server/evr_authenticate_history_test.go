@@ -74,6 +74,11 @@ func TestMatchIgnoredAltPattern(t *testing.T) {
 			want:    true,
 		},
 		{
+			name:    "ignores nEVR-Wine serial",
+			pattern: "nEVR-Wine",
+			want:    true,
+		},
+		{
 			name:    "ignores private IP",
 			pattern: "192.168.1.1",
 			want:    true,
@@ -1173,5 +1178,33 @@ func TestLoginHistory_AlternateMaps(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestIgnoredLoginValues_NevrWine(t *testing.T) {
+	if _, ok := IgnoredLoginValues["nEVR-Wine"]; !ok {
+		t.Fatalf("expected nEVR-Wine to be present in IgnoredLoginValues")
+	}
+	if !matchIgnoredAltPattern("nEVR-Wine") {
+		t.Fatalf("expected matchIgnoredAltPattern(\"nEVR-Wine\") to return true")
+	}
+
+	history := &LoginHistory{
+		History: map[string]*LoginHistoryEntry{
+			"entry1": {
+				XPID:     evr.EvrId{PlatformCode: evr.OVR, AccountId: 10001},
+				ClientIP: "1.2.3.4",
+				LoginData: &evr.LoginProfile{
+					HMDSerialNumber: "nEVR-Wine",
+				},
+			},
+		},
+	}
+
+	patterns := history.SearchPatterns()
+	for _, p := range patterns {
+		if p == "nEVR-Wine" {
+			t.Fatalf("SearchPatterns() included ignored HMD serial \"nEVR-Wine\": %v", patterns)
+		}
 	}
 }

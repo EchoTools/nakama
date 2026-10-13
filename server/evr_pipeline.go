@@ -99,6 +99,7 @@ type EvrPipeline struct {
 	snsPartyInvites   *MapOf[uuid.UUID, *snsPartyInviteList]
 	snsPartyPolicies  *MapOf[uuid.UUID, uint8] // SNS party join policy, absent = everyone
 	snsPartyData      *MapOf[uuid.UUID, *snsPartyDataState]
+	friendPush        friendPresencePush // pushes a user's presence to their friends when it changes
 
 	remoteLogSem chan struct{} // limits concurrent RemoteLogSet processing
 

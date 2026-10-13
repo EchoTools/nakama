@@ -42,6 +42,7 @@ var (
 		"VRLINKHMDQUEST2":  {}, // Quest link
 		"VRLINKHMDQUEST3":  {}, // Quest link
 		"VRLINKHMDQUEST3S": {}, // Quest link (Quest 3S, added by Meta)
+		"nEVR-Wine":        {}, // nevr-runtime default HMD serial
 	}
 
 	ErrPendingAuthorizationNotFound = errors.New("pending authorization not found")

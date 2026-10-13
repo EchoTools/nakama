@@ -69,6 +69,8 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 
 		// The member's party data carries the match they are in (proposal §3); off the admission path.
 		go p.snsPartyDataMatchChanged(context.WithoutCancel(ctx), logger, s)
+		// Their friends are told where they are now.
+		p.friendPresenceMatchEntered(ctx, logger, s)
 
 		// Update guild group stream and leave matchmaking streams.
 		if matchLabel != nil {

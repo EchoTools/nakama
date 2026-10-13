@@ -44,8 +44,9 @@ func TestSNSPartyPolicyDefaultsToEveryone(t *testing.T) {
 func partyEndEnv(t *testing.T) (*EvrPipeline, *countingTracker) {
 	tracker := &countingTracker{listingTracker: &listingTracker{mockMatchmakingTracker: newMockMatchmakingTracker()}}
 	return &EvrPipeline{
-		node:             "testnode",
-		nk:               &RuntimeGoNakamaModule{tracker: tracker, node: "testnode"},
+		node: "testnode",
+		nk: &RuntimeGoNakamaModule{tracker: tracker, node: "testnode",
+			sessionRegistry: &sessionMapRegistry{sessions: map[uuid.UUID]Session{}}}, // a disconnect tells the others
 		snsPartyData:     &MapOf[uuid.UUID, *snsPartyDataState]{},
 		snsPartyPolicies: &MapOf[uuid.UUID, uint8]{},
 	}, tracker

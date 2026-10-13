@@ -305,6 +305,12 @@ func TestFollow_ClientReportsLeaderSocial_TrackerAgrees_NoJoin(t *testing.T) {
 	logger, logs := followSkipObservedLogger()
 	env, registry, m := staleTrackerEnv(t, &MatchLabel{Mode: evr.ModeSocialPublic, Open: true, PlayerLimit: 12},
 		evr.ModeSocialPublic, MatchID{})
+	// The member really is in M: the label lists it as a connected presence.
+	label := registry.matches[m.String()]
+	label.Players = []PlayerInfo{
+		{SessionID: env.leaderSID.String(), UserID: env.leaderUID.String()},
+		{SessionID: env.followerSID.String(), UserID: env.followerUID.String()},
+	}
 	env.params.CurrentMatchID = m
 	env.params.PartyGroupName = "squad"
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

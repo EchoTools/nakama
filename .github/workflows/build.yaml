@@ -40,7 +40,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version: 1.27.1
           cache: true
 
       - name: Install just
@@ -53,7 +53,7 @@ jobs:
       # 2.12.2 does not, which is the whole reason the count-ratchet this job
       # used to run was never satisfiable (see `lint` in the justfile).
       #
-      # 2.12.2 is unusable above, not merely stale. `go-version: stable` is Go
+      # 2.12.2 is unusable above, not merely stale. The pinned Go version is
       # 1.27.1, and 2.12.2 vendors honnef.co/go/tools v0.7.0, whose IR builder
       # predates Go 1.27's struct initializers with direct references to
       # embedded fields (golang/go#9859). It hits that construct in the Go 1.27
@@ -71,9 +71,15 @@ jobs:
       # 2.13.2 vendors honnef.co/go/tools v0.8.1 (Staticcheck 2026.2.1), and
       # 2026.2 is the release that "adds support for ... struct initializers
       # with direct references to embedded fields". Verified on 069fc479f:
-      # 2.13.2 under Go 1.27 runs to completion with 266 full-tree findings, an
-      # identical set to 2.13.2 under Go 1.26 -- so the toolchain no longer
-      # moves the report either.
+      # 2.13.2 under Go 1.27.1 runs to completion with 266 full-tree findings, an
+      # identical set to 2.13.2 under Go 1.26 -- so the change to Go 1.27.1
+      # did not move the report.
+      #
+      # `stable` moved to Go 1.27.2 on 2026-10-13; 2.13.2 cannot load that
+      # toolchain's stdlib (it fails to import fmt through errors). Run
+      # 37655686746 passed on 1.27.1; run 38391149951 failed on 1.27.2.
+      # Lift this Go pin by bumping golangci-lint and Go together in one
+      # deliberate change.
       - name: Install golangci-lint
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
 
