@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"time"
 
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -84,21 +83,13 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 	return p.lobbyJoinEntrant(logger, session, label, presence)
 }
 
-// lobbyJoinEntrant seats presence in the match label names.
+// lobbyJoinEntrant seats presence in the match label names. A refusal is returned, not answered:
+// the client is sent its one LobbySessionFailure by whoever owns the request, which for a lobby
+// session request is answerLobbySessionRequestError. The find paths that join speculatively (a party
+// reservation, following the leader) fall through or retry on a refusal, and their client must not be
+// told its find failed while the find goes on.
 func (p *EvrPipeline) lobbyJoinEntrant(logger *zap.Logger, session *sessionWS, label *MatchLabel, presence *EvrMatchPresence) error {
 	if err := p.LobbyJoinEntrants(logger, label, presence); err != nil {
-		// Send the error to the client after a short delay (clients may spam join requests).
-		// Tied to session context so the goroutine exits immediately on disconnect.
-		go func() {
-			select {
-			case <-time.After(3 * time.Second):
-			case <-session.Context().Done():
-				return
-			}
-			if err := SendEVRMessages(session, false, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
-				logger.Debug("Failed to send error message", zap.Error(err))
-			}
-		}()
 		return fmt.Errorf("lobbyJoin: %w", err)
 	}
 	return nil
