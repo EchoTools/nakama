@@ -218,6 +218,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	var appBot *DiscordAppBot
 	discordIntegrator := NewDiscordIntegrator(ctx, logger, config, metrics, nk, db, dg, guildGroupRegistry)
 	discordIntegrator.Start()
+	globalGuildPermissionSource.Store(&guildPermissionSourceBox{src: discordIntegrator})
 
 	appBot, err = NewDiscordAppBot(ctx, runtimeLogger, nk, db, metrics, pipeline, config, discordIntegrator, statusRegistry, dg, ipInfoCache, guildGroupRegistry)
 	if err != nil {

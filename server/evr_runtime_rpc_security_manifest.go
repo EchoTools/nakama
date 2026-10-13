@@ -170,8 +170,10 @@ func SecurityManifestRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	resp.Capabilities["player.profile"] = true
 	resp.Capabilities["player.matchlock"] = isOperator || isEnforcer
 
-	resp.Capabilities["guild.manage"] = isOperator || isOwner || isEnforcer
-	resp.Capabilities["guild.roles.update"] = isOperator || isOwner
+	// Computed once; guild.manage and guild.roles.update both use it.
+	canManage := selectedGuild != nil && canManageGuild(ctx, logger, nk, guildPermissionSourceOrNil(), selectedGuild, userID)
+	resp.Capabilities["guild.manage"] = isOperator || isOwner || isEnforcer || canManage
+	resp.Capabilities["guild.roles.update"] = isOperator || isOwner || canManage
 	resp.Capabilities["guild.transfer"] = isOperator || isOwner
 
 	resp.Capabilities["account.search"] = true
