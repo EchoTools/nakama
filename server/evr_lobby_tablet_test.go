@@ -8,8 +8,12 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/rtapi"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // tabletEnv is a pipeline with a party registry and two or more sessions, some in an SNS (tablet)
@@ -20,6 +24,7 @@ type tabletEnv struct {
 	pr       PartyRegistry
 	tracker  *partyStreamTracker
 	sessions *sessionMapRegistry
+	mm       *LocalMatchmaker
 }
 
 func newTabletEnv(t *testing.T) *tabletEnv {
@@ -41,7 +46,7 @@ func newTabletEnv(t *testing.T) *tabletEnv {
 		},
 		snsPartyIDToUUID: &MapOf[uint64, uuid.UUID]{},
 	}
-	return &tabletEnv{t: t, ep: ep, pr: pr, tracker: tracker, sessions: sessions}
+	return &tabletEnv{t: t, ep: ep, pr: pr, tracker: tracker, sessions: sessions, mm: mm}
 }
 
 // session is a client session; runtime clients declare social level 1 at login, stock ones 0.
@@ -55,6 +60,31 @@ func (e *tabletEnv) session(name string, runtimeClient bool) *sessionWS {
 	params.loginPayload = &evr.LoginProfile{NevrSocial: level}
 	e.sessions.sessions[s.id] = s
 	return s
+}
+
+// splitSession is a runtime client that keeps its matchmaking on its own connection: a login session,
+// which sends the SNS party messages and so is the one in the SNS party, and a lobby session, which
+// sends the finds. The lobby session holds the login session's parameters, as LobbySession
+// (evr_session.go) leaves them.
+func (e *tabletEnv) splitSession(name string) (login, lobby *sessionWS) {
+	login = e.session(name, true)
+	lobby = newPartyMemberSession(e.t, name, e.tracker, e.pr, e.ep)
+	lobby.userID = login.userID
+	params, _ := LoadParams(login.Context())
+	params.loginSession = login
+	params.lobbySession = lobby
+	StoreParams(lobby.Context(), params)
+	e.sessions.sessions[lobby.id] = lobby
+	return login, lobby
+}
+
+// ticketSessionIDs is the set of session ids on a matchmaker ticket.
+func (e *tabletEnv) ticketSessionIDs(ticket string) map[string]struct{} {
+	e.mm.Lock()
+	defer e.mm.Unlock()
+	index, ok := e.mm.indexes[ticket]
+	require.True(e.t, ok, "ticket %s is not in the matchmaker", ticket)
+	return index.SessionIDs
 }
 
 // tabletParty makes an SNS party led by the first session with all of them as members, the way
@@ -253,4 +283,88 @@ func TestPartyGroupStillWaitsForFormation(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the leader's loop did not exit on cancel during formation")
 	}
+}
+
+// A runtime client that keeps matchmaking on its own connection is in the SNS party as its login
+// session (the SNS messages come in on it) and finds from its lobby session. The tablet party is still
+// its lobby party: found through the lobby session's login session, led by the leader's lobby session,
+// and its ticket names the members' lobby sessions, the sessions matchmaking and the match join use.
+// Before this, tabletPartyOf compared the party's members with the lobby session alone, found no
+// tablet party, and the leader's party group ("decway" here) was joined as a party of one instead: a
+// solo ticket, with the members left to follow the leader into a match that had no room for them.
+func TestTabletPartyAcrossSplitLoginAndLobbySessions(t *testing.T) {
+	e := newTabletEnv(t)
+	leaderLogin, leaderLobby := e.splitSession("leader")
+	memberLogin, memberLobby := e.splitSession("member")
+	ph := e.tabletParty(83, leaderLogin, memberLogin)
+
+	core, logs := observer.New(zapcore.DebugLevel)
+	logger := zap.New(core)
+
+	require.True(t, e.ep.lobbyPartyApplies(leaderLobby, findParams("decway")))
+	group, isLeader, err := e.ep.joinLobbyParty(logger, leaderLobby, findParams("decway"))
+	require.NoError(t, err)
+	require.Equal(t, ph.ID, group.ID(), "the tablet party is the lobby party")
+	require.True(t, isLeader, "the leader's lobby session leads")
+	_, found := e.pr.(*LocalPartyRegistry).LookupGroupPartyID("decway")
+	require.False(t, found, "the party group was joined despite the tablet party")
+
+	_, memberIsLeader, err := e.ep.joinLobbyParty(logger, memberLobby, findParams("decway"))
+	require.NoError(t, err)
+	require.False(t, memberIsLeader)
+
+	// The record says which identity matched, and names both sessions.
+	entries := logs.FilterMessage("Tablet party is the lobby party").All()
+	require.Len(t, entries, 2)
+	fields := entries[0].ContextMap()
+	require.Equal(t, "login", fields["matched_identity"])
+	require.Equal(t, leaderLobby.id.String(), fields["lobby_sid"])
+	require.Equal(t, leaderLogin.id.String(), fields["login_sid"])
+
+	// The group shows the members as their lobby sessions.
+	require.Equal(t, leaderLobby.id.String(), group.GetLeader().GetSessionId())
+	listed := map[string]struct{}{}
+	for _, m := range group.List() {
+		listed[m.Presence.GetSessionId()] = struct{}{}
+		require.Equal(t, m.Presence.GetSessionId(), m.UserPresence.GetSessionId())
+	}
+	want := map[string]struct{}{leaderLobby.id.String(): {}, memberLobby.id.String(): {}}
+	require.Equal(t, want, listed)
+
+	ticket, others, err := group.MatchmakerAdd(leaderLobby.id.String(), "testnode", "", 2, 2, 1, nil, nil)
+	require.NoError(t, err, "the leader's lobby session could not file the party's ticket")
+	require.Equal(t, want, e.ticketSessionIDs(ticket))
+	require.Len(t, others, 1)
+	require.Equal(t, memberLobby.id, others[0].SessionID)
+
+	// The member's lobby session is not the leader.
+	_, _, err = group.MatchmakerAdd(memberLobby.id.String(), "testnode", "", 2, 2, 1, nil, nil)
+	require.ErrorIs(t, err, runtime.ErrPartyNotLeader)
+}
+
+// Control: a client on one connection (its finds and its SNS messages on the same session, which is
+// its own lobby session) is unchanged: the session itself is the member, and the ticket names it.
+func TestTabletPartyOnOneSessionIsUnchanged(t *testing.T) {
+	e := newTabletEnv(t)
+	leader, member := e.session("leader", true), e.session("member", true)
+	for _, s := range []*sessionWS{leader, member} {
+		params, _ := LoadParams(s.Context())
+		params.loginSession = s
+		params.lobbySession = s
+	}
+	ph := e.tabletParty(84, leader, member)
+
+	core, logs := observer.New(zapcore.DebugLevel)
+	group, isLeader, err := e.ep.joinLobbyParty(zap.New(core), leader, findParams("decway"))
+	require.NoError(t, err)
+	require.Equal(t, ph.ID, group.ID())
+	require.True(t, isLeader)
+	entries := logs.FilterMessage("Tablet party is the lobby party").All()
+	require.Len(t, entries, 1)
+	require.Equal(t, "lobby", entries[0].ContextMap()["matched_identity"])
+
+	require.Equal(t, leader.id.String(), group.GetLeader().GetSessionId())
+	ticket, _, err := group.MatchmakerAdd(leader.id.String(), "testnode", "", 2, 2, 1, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, map[string]struct{}{leader.id.String(): {}, member.id.String(): {}}, e.ticketSessionIDs(ticket))
 }

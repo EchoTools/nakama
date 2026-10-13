@@ -17,26 +17,56 @@ import (
 // the leader finds, so there are no members to wait for.
 // Every tablet player is in a party of one from login, so "in a tablet party" means 2 or more.
 
+// Which of a find session's identities is in its tablet party (tabletPartyOf).
+const (
+	// tabletMatchedLobby: the find session itself is the member. A client on one connection sends its
+	// SNS party messages and its finds on the same session.
+	tabletMatchedLobby = "lobby"
+	// tabletMatchedLogin: the find session's login session is the member. A client that keeps
+	// matchmaking on its own connection sends its SNS party messages on its login session, so that is
+	// the session snsPartyTrackAndJoin put in the party, and finds on a lobby session (LobbySession,
+	// evr_session.go), which is never a member.
+	tabletMatchedLogin = "login"
+)
+
+// loginSessionOf is the find session's login session, or nil when it has none or is its own.
+func loginSessionOf(session *sessionWS, params *SessionParameters) *sessionWS {
+	if params == nil || params.loginSession == nil || params.loginSession.ID() == session.ID() {
+		return nil
+	}
+	return params.loginSession
+}
+
 // tabletPartyOf is the session's tablet party: the SNS party its SNS id names (not currentPartyID,
-// which a party group join may have overwritten), with this session a member and 2 or more members.
-func (p *EvrPipeline) tabletPartyOf(session *sessionWS, params *SessionParameters) (*PartyHandler, bool) {
+// which a party group join may have overwritten), with this session or its login session a member and
+// 2 or more members. matched is which of the two is the member (tabletMatchedLobby, tabletMatchedLogin).
+func (p *EvrPipeline) tabletPartyOf(session *sessionWS, params *SessionParameters) (ph *PartyHandler, matched string, ok bool) {
 	if params == nil || params.currentSNSPartyID == 0 || p.snsPartyIDToUUID == nil || p.nk == nil || p.nk.partyRegistry == nil {
-		return nil, false
+		return nil, "", false
 	}
 	partyUUID, ok := p.snsPartyIDToUUID.Load(params.currentSNSPartyID)
 	if !ok {
-		return nil, false
+		return nil, "", false
 	}
-	ph, ok := p.nk.partyRegistry.Get(partyUUID)
+	ph, ok = p.nk.partyRegistry.Get(partyUUID)
 	if !ok || ph.members.Size() < 2 {
-		return nil, false
+		return nil, "", false
+	}
+	loginSID := ""
+	if login := loginSessionOf(session, params); login != nil {
+		loginSID = login.ID().String()
 	}
 	for _, m := range ph.members.List() {
-		if m.Presence.GetSessionId() == session.ID().String() {
-			return ph, true
+		switch m.Presence.GetSessionId() {
+		case session.ID().String():
+			return ph, tabletMatchedLobby, true
+		case loginSID:
+			if loginSID != "" {
+				return ph, tabletMatchedLogin, true
+			}
 		}
 	}
-	return nil, false
+	return nil, "", false
 }
 
 // tabletMembersFollow is whether every member's client is a nevr-runtime client that reads party data
@@ -58,22 +88,23 @@ func (p *EvrPipeline) tabletMembersFollow(ph *PartyHandler) bool {
 
 // tabletParty is the session's tablet party if the rule makes it this session's lobby party, and
 // whether the session is in a tablet party at all (which turns its party group off either way).
-func (p *EvrPipeline) tabletParty(session *sessionWS) (ph *PartyHandler, inTablet bool, usable bool) {
+// matched is which of the session's identities is the member (tabletPartyOf).
+func (p *EvrPipeline) tabletParty(session *sessionWS) (ph *PartyHandler, matched string, inTablet bool, usable bool) {
 	params, ok := LoadParams(session.Context())
 	if !ok {
-		return nil, false, false
+		return nil, "", false, false
 	}
-	ph, inTablet = p.tabletPartyOf(session, params)
+	ph, matched, inTablet = p.tabletPartyOf(session, params)
 	if !inTablet {
-		return nil, false, false
+		return nil, "", false, false
 	}
-	return ph, true, p.tabletMembersFollow(ph)
+	return ph, matched, true, p.tabletMembersFollow(ph)
 }
 
 // lobbyPartyApplies is whether this find has a lobby party: a usable tablet party, or (when the
 // session is in no tablet party) a party group name as before.
 func (p *EvrPipeline) lobbyPartyApplies(session *sessionWS, lobbyParams *LobbySessionParameters) bool {
-	if _, inTablet, usable := p.tabletParty(session); inTablet {
+	if _, _, inTablet, usable := p.tabletParty(session); inTablet {
 		return usable
 	}
 	return lobbyParams.PartyGroupName != ""
@@ -87,7 +118,7 @@ var errTabletPartyNotUsable = errors.New("tablet party has a member whose client
 // party when the rule picks it (restoring currentPartyID to it if a party group join had overwritten
 // it), else JoinPartyGroup. JoinPartyGroup is never called for a session in a tablet party.
 func (p *EvrPipeline) joinLobbyParty(logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters) (*LobbyGroup, bool, error) {
-	ph, inTablet, usable := p.tabletParty(session)
+	ph, matched, inTablet, usable := p.tabletParty(session)
 	if !inTablet {
 		return JoinPartyGroup(session, lobbyParams.PartyGroupName, lobbyParams.CurrentMatchID)
 	}
@@ -95,16 +126,24 @@ func (p *EvrPipeline) joinLobbyParty(logger *zap.Logger, session *sessionWS, lob
 		logger.Info("Tablet party not used: a member's client does not follow party data", zap.String("party_id", ph.ID.String()))
 		return nil, false, errTabletPartyNotUsable
 	}
-	if params, ok := LoadParams(session.Context()); ok && params.currentPartyID != ph.ID {
+	params, _ := LoadParams(session.Context())
+	if params != nil && params.currentPartyID != ph.ID {
 		logger.Warn("Tablet party: currentPartyID was not the tablet party; restored",
 			zap.String("was", params.currentPartyID.String()), zap.String("tablet_party", ph.ID.String()))
 		params.currentPartyID = ph.ID
 		StoreParams(session.Context(), params)
 	}
-	group := &LobbyGroup{ph: ph, tablet: true}
-	leader := group.GetLeader()
-	isLeader := leader != nil && leader.SessionId == session.ID().String()
+	group := &LobbyGroup{ph: ph, tablet: true, sessions: p.nk.sessionRegistry}
+	loginSID := ""
+	if params != nil && params.loginSession != nil {
+		loginSID = params.loginSession.ID().String()
+	}
+	// This session leads when the party's leader is this session, its login session, or (as the group
+	// shows members, LobbyGroup.memberSessionID) resolves to this session.
+	isLeader := group.isLeaderSession(session.ID().String(), loginSID)
 	logger.Info("Tablet party is the lobby party", zap.String("party_id", ph.ID.String()),
-		zap.Int("party_size", group.Size()), zap.Bool("is_leader", isLeader))
+		zap.Int("party_size", group.Size()), zap.Bool("is_leader", isLeader),
+		zap.String("matched_identity", matched),
+		zap.String("lobby_sid", session.ID().String()), zap.String("login_sid", loginSID))
 	return group, isLeader, nil
 }
