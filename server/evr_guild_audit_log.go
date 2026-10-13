@@ -96,11 +96,8 @@ func GuildGroupAuditLogRPC(ctx context.Context, logger runtime.Logger, db *sql.D
 		return "", runtime.NewError("guild group not found", 5)
 	}
 
-	if !gg.IsOwner(userID) {
-		isGlobalOp, checkErr := isGlobalOperator(ctx, nk, userID)
-		if checkErr != nil || !isGlobalOp {
-			return "", runtime.NewError("permission denied: only guild owner can view the guild's audit logs", 7)
-		}
+	if !canManageGuild(ctx, logger, nk, guildPermissionSourceOrNil(), gg, userID) {
+		return "", runtime.NewError("permission denied: only a guild admin can view the guild's audit logs", 7)
 	}
 
 	mongoClient := globalMongoClient.Load()

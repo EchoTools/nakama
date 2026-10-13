@@ -622,8 +622,14 @@ func InGameName(m *discordgo.Member) string {
 	return ""
 }
 
-// Loads/Adds a user to the cache.
+// Loads/Adds a user to the cache. When the REST limiter is overloaded it serves
+// an expired cache entry rather than failing; callers that grant privileges
+// from the result must use GuildMemberFresh instead.
 func (c *DiscordIntegrator) GuildMember(guildID, discordID string) (member *discordgo.Member, err error) {
+	return c.guildMember(guildID, discordID, true)
+}
+
+func (c *DiscordIntegrator) guildMember(guildID, discordID string, allowStale bool) (member *discordgo.Member, err error) {
 	cacheKey := guildID + ":" + discordID
 
 	// Check local TTL cache first to avoid redundant Discord API calls.
@@ -646,7 +652,7 @@ func (c *DiscordIntegrator) GuildMember(guildID, discordID string) (member *disc
 		// If the REST limiter is overloaded (too many concurrent requests
 		// blocked by rate limits), return stale cached data rather than
 		// failing the entire login/interaction flow.
-		if errors.Is(err, ErrDiscordRESTOverloaded) {
+		if allowStale && errors.Is(err, ErrDiscordRESTOverloaded) {
 			if cached, ok := c.memberCache.Load(cacheKey); ok {
 				return cached.member, nil
 			}
@@ -658,6 +664,39 @@ func (c *DiscordIntegrator) GuildMember(guildID, discordID string) (member *disc
 	c.dg.State.MemberAdd(member)
 	c.memberCache.Store(cacheKey, cachedMember{member: member, expiresAt: time.Now().Add(memberCacheTTL)})
 	return member, nil
+}
+
+// GuildMemberFresh is GuildMember for callers that grant privileges from the
+// result. A cache hit inside memberCacheTTL is fine, but when the REST limiter
+// is overloaded it fails instead of serving an expired entry.
+func (c *DiscordIntegrator) GuildMemberFresh(guildID, discordID string) (*discordgo.Member, error) {
+	return c.guildMember(guildID, discordID, false)
+}
+
+// GuildRoles returns the guild's roles (with their permission bits), from
+// discordgo's gateway-populated state when present, else from the API.
+func (c *DiscordIntegrator) GuildRoles(guildID string) ([]*discordgo.Role, error) {
+	if c.dg.State != nil {
+		if g, err := c.dg.State.Guild(guildID); err == nil && g != nil && len(g.Roles) > 0 {
+			return g.Roles, nil
+		}
+	}
+	return c.dg.GuildRoles(guildID)
+}
+
+// GuildOwnerID returns the Discord ID of the guild's owner, from discordgo's
+// gateway-populated state when present, else from the API.
+func (c *DiscordIntegrator) GuildOwnerID(guildID string) (string, error) {
+	if c.dg.State != nil {
+		if g, err := c.dg.State.Guild(guildID); err == nil && g != nil && g.OwnerID != "" {
+			return g.OwnerID, nil
+		}
+	}
+	g, err := c.dg.Guild(guildID)
+	if err != nil {
+		return "", err
+	}
+	return g.OwnerID, nil
 }
 
 // maxGroupTextLength is the column size, IN CHARACTERS, of the groups table's
