@@ -81,6 +81,11 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 	}
 
 	presence.RoleAlignment = lobbyParams.Role
+	return p.lobbyJoinEntrant(logger, session, label, presence)
+}
+
+// lobbyJoinEntrant seats presence in the match label names.
+func (p *EvrPipeline) lobbyJoinEntrant(logger *zap.Logger, session *sessionWS, label *MatchLabel, presence *EvrMatchPresence) error {
 	if err := p.LobbyJoinEntrants(logger, label, presence); err != nil {
 		// Send the error to the client after a short delay (clients may spam join requests).
 		// Tied to session context so the goroutine exits immediately on disconnect.
