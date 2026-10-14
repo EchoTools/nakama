@@ -170,9 +170,10 @@ func SecurityManifestRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	resp.Capabilities["player.profile"] = true
 	resp.Capabilities["player.matchlock"] = isOperator || isEnforcer
 
-	// Computed once; guild.manage and guild.roles.update both use it.
+	// Computed once; guild.manage and guild.roles.update both use it. Both mirror the
+	// guild-management RPC gate (canManageGuild); the enforcer role does not grant them.
 	canManage := selectedGuild != nil && canManageGuild(ctx, logger, nk, guildPermissionSourceOrNil(), selectedGuild, userID)
-	resp.Capabilities["guild.manage"] = isOperator || isOwner || isEnforcer || canManage
+	resp.Capabilities["guild.manage"] = isOperator || isOwner || canManage
 	resp.Capabilities["guild.roles.update"] = isOperator || isOwner || canManage
 	resp.Capabilities["guild.transfer"] = isOperator || isOwner
 
