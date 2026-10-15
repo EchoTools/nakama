@@ -22,6 +22,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/netip"
 	"regexp"
 	"slices"
 	"strconv"
@@ -122,12 +123,47 @@ type (
 )
 
 // resolveSessionClientIP returns the client address a new session runs as.
+//
+// CF-Connecting-IP is request data any client can set. It is honoured only
+// when the TCP peer (request.RemoteAddr, which the client does not choose) is
+// inside a published Cloudflare range; otherwise clientIP is returned as is.
+// The peer is compared, not the X-Forwarded-For value that
+// extractClientAddressFromRequest may have put in clientIP, because that value
+// is itself client-supplied. A header from a Cloudflare peer must still parse
+// as an IP address. With no range list available nothing is trusted.
 func resolveSessionClientIP(logger *zap.Logger, request *http.Request, clientIP string, ranges *CloudflareRanges) string {
-	// Support Cloudflare
-	if ip := request.Header.Get("CF-Connecting-IP"); ip != "" {
-		clientIP = ip
+	header := strings.TrimSpace(request.Header.Get("CF-Connecting-IP"))
+	if header == "" {
+		return clientIP
 	}
-	return clientIP
+
+	peer, err := peerAddrFromRemoteAddr(request.RemoteAddr)
+	if err != nil || !ranges.Contains(peer) {
+		logger.Debug("Ignoring CF-Connecting-IP header: the connecting peer is not a Cloudflare address",
+			zap.String("cf_connecting_ip", header), zap.String("remote_addr", request.RemoteAddr), zap.String("client_ip", clientIP))
+		return clientIP
+	}
+
+	addr, err := netip.ParseAddr(header)
+	if err != nil {
+		logger.Debug("Ignoring malformed CF-Connecting-IP header from a Cloudflare peer",
+			zap.String("cf_connecting_ip", header), zap.String("remote_addr", request.RemoteAddr), zap.String("client_ip", clientIP))
+		return clientIP
+	}
+	return addr.Unmap().WithZone("").String()
+}
+
+// peerAddrFromRemoteAddr parses an http.Request.RemoteAddr ("host:port" or a bare host).
+func peerAddrFromRemoteAddr(remoteAddr string) (netip.Addr, error) {
+	remoteAddr = strings.TrimSpace(remoteAddr)
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		remoteAddr = host
+	}
+	addr, err := netip.ParseAddr(remoteAddr)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	return addr.Unmap().WithZone(""), nil
 }
 
 func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessionID, userID uuid.UUID, username string, vars map[string]string, expiry int64, clientIP, clientPort, lang string, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, conn *websocket.Conn, sessionRegistry SessionRegistry, statusRegistry StatusRegistry, matchmaker Matchmaker, tracker Tracker, metrics Metrics, pipeline *Pipeline, evrPipeline *EvrPipeline, runtime *Runtime, request http.Request, storageIndex StorageIndex) Session {
@@ -140,13 +176,14 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		logger = logger.With(zap.String("username", username))
 	}
 
-	logger.Info("New WebSocket session connected", zap.String("request_uri", request.URL.Path), zap.String("query", request.URL.RawQuery), zap.Uint8("format", uint8(format)), zap.String("client_ip", clientIP), zap.String("client_port", clientPort))
-
 	var cloudflareRanges *CloudflareRanges
 	if evrPipeline != nil {
 		cloudflareRanges = evrPipeline.cloudflareRanges
 	}
 	clientIP = resolveSessionClientIP(logger, &request, clientIP, cloudflareRanges)
+
+	// Logged after resolution so the line carries the address the session runs as.
+	logger.Info("New WebSocket session connected", zap.String("request_uri", request.URL.Path), zap.String("query", request.URL.RawQuery), zap.Uint8("format", uint8(format)), zap.String("client_ip", clientIP), zap.String("client_port", clientPort))
 
 	ctx, ctxCancelFn := context.WithCancel(context.Background())
 

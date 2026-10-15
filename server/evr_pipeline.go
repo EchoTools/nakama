@@ -300,6 +300,11 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		pingDiscoveryConfig: LoadPingDiscoveryConfig(vars),
 	}
 
+	// Trusted-proxy ranges for CF-Connecting-IP. Start loads the stored list before
+	// returning, so it is in force before the API server accepts a connection.
+	evrPipeline.cloudflareRanges = NewCloudflareRangesFromNakama(logger, nk)
+	evrPipeline.cloudflareRanges.Start(ctx)
+
 	// Create and store the early quit message trigger for sending SNS messages to players
 	earlyQuitMessageTrigger := NewSNSEarlyQuitMessageTrigger(evrPipeline, logger, nk, db)
 	evrPipeline.earlyQuitMessageTrigger = earlyQuitMessageTrigger
@@ -405,6 +410,7 @@ func DetermineServiceIPs(ctx context.Context) (intIP net.IP, extIP net.IP, err e
 }
 
 func (p *EvrPipeline) Stop() {
+	p.cloudflareRanges.Stop()
 	if p.earlyQuitMessageTrigger != nil {
 		p.earlyQuitMessageTrigger.Stop()
 	}
