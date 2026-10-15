@@ -49,6 +49,9 @@ type EvrPipeline struct {
 	sync.RWMutex
 	ctx context.Context
 
+	// cloudflareRanges is the trusted-proxy list for CF-Connecting-IP; nil trusts nothing.
+	cloudflareRanges *CloudflareRanges
+
 	node              string
 	broadcasterUserID string // The userID used for broadcaster connections
 	internalIP        net.IP

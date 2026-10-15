@@ -121,6 +121,15 @@ type (
 	ctxLoggedInAtKey        struct{} // The time the user logged in
 )
 
+// resolveSessionClientIP returns the client address a new session runs as.
+func resolveSessionClientIP(logger *zap.Logger, request *http.Request, clientIP string, ranges *CloudflareRanges) string {
+	// Support Cloudflare
+	if ip := request.Header.Get("CF-Connecting-IP"); ip != "" {
+		clientIP = ip
+	}
+	return clientIP
+}
+
 func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessionID, userID uuid.UUID, username string, vars map[string]string, expiry int64, clientIP, clientPort, lang string, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, conn *websocket.Conn, sessionRegistry SessionRegistry, statusRegistry StatusRegistry, matchmaker Matchmaker, tracker Tracker, metrics Metrics, pipeline *Pipeline, evrPipeline *EvrPipeline, runtime *Runtime, request http.Request, storageIndex StorageIndex) Session {
 	logger = logger.With(zap.String("sid", sessionID.String()))
 
@@ -133,10 +142,11 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 
 	logger.Info("New WebSocket session connected", zap.String("request_uri", request.URL.Path), zap.String("query", request.URL.RawQuery), zap.Uint8("format", uint8(format)), zap.String("client_ip", clientIP), zap.String("client_port", clientPort))
 
-	// Support Cloudflare
-	if ip := request.Header.Get("CF-Connecting-IP"); ip != "" {
-		clientIP = ip
+	var cloudflareRanges *CloudflareRanges
+	if evrPipeline != nil {
+		cloudflareRanges = evrPipeline.cloudflareRanges
 	}
+	clientIP = resolveSessionClientIP(logger, &request, clientIP, cloudflareRanges)
 
 	ctx, ctxCancelFn := context.WithCancel(context.Background())
 
