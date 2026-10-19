@@ -44,9 +44,10 @@ func (p protoLoadoutPresence) GetNodeId() string    { return p.node }
 // sees a game server, an entrant presence and the entrant's service presence.
 type protoLoadoutNK struct {
 	*evrTestNakamaModule
-	account *api.Account
-	streams map[string][]runtime.Presence
-	users   map[string]runtime.PresenceMeta
+	streamListCalls int
+	account         *api.Account
+	streams         map[string][]runtime.Presence
+	users           map[string]runtime.PresenceMeta
 }
 
 func newProtoLoadoutNK() *protoLoadoutNK {
@@ -72,6 +73,7 @@ func (m *protoLoadoutNK) add(mode uint8, subject, label string, presence runtime
 }
 
 func (m *protoLoadoutNK) StreamUserList(mode uint8, subject, subcontext, label string, includeHidden, includeNotHidden bool) ([]runtime.Presence, error) {
+	m.streamListCalls++
 	return m.streams[streamKey(mode, subject, label)], nil
 }
 
@@ -256,6 +258,30 @@ func TestGameServerSaveLoadoutProtoRejectsWithoutWriting(t *testing.T) {
 	}
 }
 
+func TestProcessRequestEVRDispatchesLegacySaveLoadoutThroughGate(t *testing.T) {
+	f := newProtoLoadoutFixture(t)
+	// The sender is not the game server of the match.
+	delete(f.nk.streams, streamKey(StreamModeGameServer, f.senderID.String(), StreamLabelMatchService))
+	p := &EvrPipeline{loadoutNK: f.nk}
+	ws := &sessionWS{id: f.senderID, userID: uuid.Must(uuid.NewV4()), ctx: context.Background()}
+	req := &evr.GameServerSaveLoadoutRequest{
+		EntrantSessionID: f.entrantSID,
+		LoadoutNumber:    1,
+		Loadout:          []byte(`{"slot":0,"number":1,"loadout_instances":[]}`),
+	}
+	before := f.nk.writeAttempts
+	callsBefore := f.nk.streamListCalls
+	if !p.ProcessRequestEVR(zap.NewNop(), ws, req) {
+		t.Fatal("ProcessRequestEVR returned false; the session read loop would break")
+	}
+	if f.nk.streamListCalls == callsBefore {
+		t.Fatal("legacy dispatch did not reach the gate (no NakamaModule lookup)")
+	}
+	if f.nk.writeAttempts != before {
+		t.Fatalf("legacy dispatch wrote %d time(s) for a non-server sender", f.nk.writeAttempts-before)
+	}
+}
+
 func TestLegacySaveLoadoutRejectsEmptyEntrantBeforeNK(t *testing.T) {
 	// A nil NakamaModule: touching it would panic. The empty entrant must be
 	// rejected before the first NK call.
@@ -307,5 +333,26 @@ func TestGameServerSaveLoadoutProtoRejectsEntrantWhoseSessionMovedMatch(t *testi
 	}
 	if f.nk.writeAttempts != before {
 		t.Fatalf("profile was written for an entrant whose session is in another match")
+	}
+}
+
+// noPresenceTracker answers every stream query with no presences, so a sender
+// that is not a registered game server reaches the gate and is rejected.
+type noPresenceTracker struct{ Tracker }
+
+func (noPresenceTracker) ListByStream(PresenceStream, bool, bool) []*Presence { return nil }
+
+func TestProcessRequestEVRLegacySaveLoadoutGateApplies(t *testing.T) {
+	// A nil db/storage in this NK is deliberate: if the gate let the request
+	// through to profile load/write, the test would panic instead of passing.
+	p := &EvrPipeline{nk: &RuntimeGoNakamaModule{tracker: noPresenceTracker{}}}
+	ws := &sessionWS{id: uuid.Must(uuid.NewV4()), userID: uuid.Must(uuid.NewV4()), ctx: context.Background()}
+	req := &evr.GameServerSaveLoadoutRequest{
+		EntrantSessionID: uuid.Must(uuid.NewV4()),
+		LoadoutNumber:    1,
+		Loadout:          []byte(`{"slot":0,"number":1,"loadout_instances":[]}`),
+	}
+	if !p.ProcessRequestEVR(zap.NewNop(), ws, req) {
+		t.Fatal("ProcessRequestEVR returned false for a legacy save; the session would be dropped")
 	}
 }

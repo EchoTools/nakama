@@ -187,5 +187,9 @@ func sanitizeGameServerLoadout(loadout evr.CosmeticLoadout, evrProfile *EVRProfi
 // The game server receives an internal broadcaster message (SR15NetSaveLoadoutRequest) and
 // forwards it to nakama via the TCP broadcaster WebSocket connection.
 func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *zap.Logger, session Session, request *evr.GameServerSaveLoadoutRequest) error {
-	return applyGameServerSaveLoadoutLegacy(ctx, logger, p.nk, p.sessionRegistry, session.ID(), request)
+	nk := runtime.NakamaModule(p.nk)
+	if p.loadoutNK != nil {
+		nk = p.loadoutNK
+	}
+	return applyGameServerSaveLoadoutLegacy(ctx, logger, nk, p.sessionRegistry, session.ID(), request)
 }

@@ -65,6 +65,10 @@ type EvrPipeline struct {
 	pollFollowInterval    time.Duration
 	pollFollowMaxDuration time.Duration
 
+	// loadoutNK overrides the NakamaModule the legacy save-loadout path uses in
+	// tests; nil means p.nk. Production never sets it.
+	loadoutNK runtime.NakamaModule
+
 	// Party formation timing. Zero means use the package defaults
 	// (partyFormationTimeoutDefault / partyFormationPollIntervalDefault).
 	// Overridable in tests to avoid multi-second real waits.
