@@ -542,7 +542,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 				zap.String("evr_id", msg.EvrID.String()),
 				zap.Int32("loadout_number", msg.LoadoutNumber))
 			// Process the loadout update directly without converting to protobuf
-			if err := p.gameServerSaveLoadoutRequest(session.Context(), logger, msg); err != nil {
+			if err := p.gameServerSaveLoadoutRequest(session.Context(), logger, session, msg); err != nil {
 				logger.Error("Failed to process save loadout request", zap.Error(err))
 			}
 			return true
@@ -990,6 +990,8 @@ func (p *EvrPipeline) ProcessProtobufRequest(logger *zap.Logger, session Session
 		pipelineFn = p.lobbySessionEvent
 	case *rtapi.Envelope_LobbyEntrantRemoved:
 		pipelineFn = p.lobbyEntrantsRemove
+	case *rtapi.Envelope_GameServerSaveLoadout:
+		pipelineFn = p.gameServerSaveLoadoutProtoHandler
 	default:
 		// For all other messages, use the generic protobuf handler
 		return fmt.Errorf("unhandled protobuf message type: %T", in.Message)

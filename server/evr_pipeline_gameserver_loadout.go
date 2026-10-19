@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -187,113 +186,6 @@ func sanitizeGameServerLoadout(loadout evr.CosmeticLoadout, evrProfile *EVRProfi
 // This is triggered when a player updates their loadout at the character customization screen.
 // The game server receives an internal broadcaster message (SR15NetSaveLoadoutRequest) and
 // forwards it to nakama via the TCP broadcaster WebSocket connection.
-func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *zap.Logger, request *evr.GameServerSaveLoadoutRequest) error {
-	logger = logger.With(
-		zap.String("evr_id", request.EvrID.String()),
-		zap.Int32("loadout_number", request.LoadoutNumber),
-		zap.String("entrant_session_id", request.EntrantSessionID.String()),
-	)
-
-	logger.Info("Processing save loadout request", zap.String("raw_json", string(request.Loadout)))
-
-	// Parse the new game server loadout format
-	var payload GameServerLoadoutPayload
-	if err := json.Unmarshal(request.Loadout, &payload); err != nil {
-		logger.Warn("Failed to unmarshal loadout payload", zap.Error(err), zap.String("raw", string(request.Loadout)))
-		return nil
-	}
-
-	logger.Info("Parsed loadout payload",
-		zap.Int("slot", payload.Slot),
-		zap.Int("jersey_number", payload.Number),
-		zap.Int("instance_count", len(payload.LoadoutInstances)))
-
-	// Look up the user by their EvrID (used as device ID)
-	userID, err := GetUserIDByDeviceID(ctx, p.db, request.EvrID.String())
-	if err != nil {
-		return fmt.Errorf("failed to get user ID by EvrID: %w", err)
-	}
-
-	if userID == "" {
-		logger.Warn("No user found for EvrID", zap.String("evr_id", request.EvrID.String()))
-		return nil
-	}
-
-	// Load the user's profile
-	profile, err := EVRProfileLoad(ctx, p.nk, userID)
-	if err != nil {
-		return fmt.Errorf("failed to load EVR profile: %w", err)
-	}
-
-	// Convert the hash-based items to (slot, equipped) name pairs.
-	//
-	// Parsing is deliberately independent of the profile. A retry after a version
-	// conflict must compose these equips onto the loadout of the FRESHLY read
-	// profile; capturing a base loadout here instead would stamp this request's
-	// pre-conflict copy back over whatever the concurrent writer committed —
-	// exactly the clobber evrProfileUpdateWithRetry exists to prevent.
-	equips := make([]gameServerLoadoutEquip, 0, len(payload.LoadoutInstances))
-
-	// Process each loadout instance
-	for _, instance := range payload.LoadoutInstances {
-		for slotHex, equippedHex := range instance.Items {
-			slotSymbol := evr.ToSymbol(slotHex)
-			if slotSymbol == 0 {
-				logger.Warn("Failed to parse slot hash", zap.String("slot", slotHex))
-				continue
-			}
-			equippedSymbol := evr.ToSymbol(equippedHex)
-			if equippedSymbol == 0 {
-				logger.Warn("Failed to parse equipped hash", zap.String("equipped", equippedHex))
-				continue
-			}
-
-			// Convert symbols to their string names
-			slotName := slotSymbol.String()
-			equippedName := equippedSymbol.String()
-
-			logger.Debug("Processing loadout item",
-				zap.String("slot_hash", slotHex),
-				zap.String("slot_name", slotName),
-				zap.String("equipped_hash", equippedHex),
-				zap.String("equipped_name", equippedName))
-
-			if !knownLoadoutSlot(slotName) {
-				logger.Debug("Unknown slot type", zap.String("slot", slotName))
-				continue
-			}
-			equips = append(equips, gameServerLoadoutEquip{slot: slotName, equipped: equippedName})
-		}
-	}
-
-	// Update profile with new loadout, rejecting any cosmetic the player does not own
-	// (COSMETIC-1). This handler is the *sole* persistence path for game servers with
-	// NativeSupport: evr_runtime_event_remotelogset.go's equip handler explicitly skips
-	// itself for NativeSupport matches ("NEVR (non-legacy) servers already persist
-	// loadout equips themselves"), so the ownership fix applied there does not run for
-	// those servers at all. Without this check, a NativeSupport-hosted character
-	// customization equip would persist an unowned cosmetic (e.g. a VRML finalist tag)
-	// exactly like the original remotelogset bug.
-	// persistGameServerLoadout applies the equips and saves the profile, retrying
-	// on a version conflict with a fresh read: a concurrent writer on the same key
-	// (the Discord sync path and the login path both write it) must not cost the
-	// player this equip. The retry composes the equips onto the RE-READ profile, so
-	// only the slots this request named change; see its doc comment.
-	writtenLoadout, err := persistGameServerLoadout(ctx, p.nk, userID, profile, equips, payload.Number)
-	if err != nil {
-		return err
-	}
-
-	// Logged only after the write commits. Emitting it before meant a failed write
-	// still reported a jersey number that never persisted.
-	if payload.Number >= 0 {
-		logger.Info("Updated jersey number", zap.Int("number", payload.Number))
-	}
-
-	logger.Info("Successfully saved loadout update",
-		zap.String("user_id", userID),
-		zap.String("evr_id", request.EvrID.String()),
-		zap.Any("loadout", writtenLoadout))
-
-	return nil
+func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *zap.Logger, session Session, request *evr.GameServerSaveLoadoutRequest) error {
+	return applyGameServerSaveLoadoutLegacy(ctx, logger, p.nk, p.sessionRegistry, session.ID(), request)
 }
