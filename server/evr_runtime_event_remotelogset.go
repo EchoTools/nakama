@@ -307,19 +307,13 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				continue
 			}
 
-			session := sessionRegistry.Get(uuid.FromStringOrNil(s.SessionID))
-			if session == nil {
-				logger.Error("Failed to get session")
-				continue
-			}
+			// The equip is saved for the user the log set came from, not looked up
+			// through their session. Clients send their last log set as they quit, and
+			// by the time it is processed the session is gone; requiring it dropped
+			// that equip, which then reverted on the next login.
+			userID := s.UserID
 
-			params, ok := LoadParams(session.Context())
-			if !ok {
-				logger.Error("Failed to load params")
-				continue
-			}
-
-			profile, err := EVRProfileLoad(ctx, nk, session.UserID().String())
+			profile, err := EVRProfileLoad(ctx, nk, userID)
 			if err != nil {
 				logger.WithField("error", err).Warn("Failed to load account metadata")
 				continue
@@ -367,7 +361,7 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			// evrProfileUpdateWithRetry is what the release built for this; its
 			// sibling equip path in evr_pipeline_gameserver_loadout.go already
 			// uses it.
-			updated, err := evrProfileUpdateWithRetry(ctx, nk, session.UserID().String(), profile, applyEquip)
+			updated, err := evrProfileUpdateWithRetry(ctx, nk, userID, profile, applyEquip)
 			if err != nil {
 				// Do NOT adopt an unpersisted profile. Leaving the session on
 				// the last known-good one means the equip is lost, which the
@@ -382,37 +376,11 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			// ruling is that a reject logs and does not tell them -- and an
 			// equip of an item the player owns produces no line here at all,
 			// because strips is empty.
-			logCosmeticStrips(logger, session.UserID().String(), sanitizePathEquip, strips)
+			logCosmeticStrips(logger, userID, sanitizePathEquip, strips)
 
-			// swap the metadata in the session parameters
-
-			params.profile = updated
-
-			StoreParams(session.Context(), params)
-
-			modes := []evr.Symbol{
-				evr.ModeArenaPublic,
-				evr.ModeCombatPublic,
-			}
-
-			groupID := params.profile.GetActiveGroupID().String()
-			zapLogger := RuntimeLoggerToZapLogger(logger)
-			serverProfile, err := UserServerProfileFromParameters(ctx, zapLogger, db, nk, params, groupID, modes, 0)
-			if err != nil {
-				return fmt.Errorf("failed to get server profile: %w", err)
-			}
-
-			if gg, ok := params.guildGroups[groupID]; ok {
-				if gg.IsEnforcer(session.UserID().String()) && params.isGoldNameTag.Load() && serverProfile.DeveloperFeatures == nil {
-					// Give the user a gold name if they are enabled as a moderator in the guild, and want it.
-					serverProfile.DeveloperFeatures = &evr.DeveloperFeatures{}
-				}
-			}
-
-			// Store the updated server profile
-			if err := ServerProfileStore(ctx, nk, session.UserID().String(), serverProfile); err != nil {
-				logger.WithField("error", err).Warn("Failed to store server profile")
-			}
+			// Swap the saved profile into the player's login session, if it is
+			// still connected, and re-store the server profile served to others.
+			adoptSavedLoadout(ctx, RuntimeLoggerToZapLogger(logger), db, nk, sessionRegistry, userID, updated)
 
 		case *evr.RemoteLogRepairMatrix:
 

@@ -66,30 +66,40 @@ const (
 	maxRemoteLogPayload = 256 * 1024 // 256KB total payload limit
 )
 
-func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, _ *zap.Logger, session *sessionWS, evrID evr.EvrId, request *evr.RemoteLogSet) error {
-	// Gate oversized payloads early
-	if len(request.Logs) > maxRemoteLogEntries {
-		request.Logs = request.Logs[:maxRemoteLogEntries]
+// prepareRemoteLogs filters a log set and then caps it to maxRemoteLogEntries and
+// maxRemoteLogPayload.
+//
+// Filtering comes first on purpose. Browsing the customization room logs one
+// "Customization Item Preview" per item, and those are filtered out anyway; capping
+// first let them fill the 50 entries, so the CUSTOMIZATION_METRICS_PAYLOAD equip
+// after them was cut off and never saved.
+func prepareRemoteLogs(logs []string) []string {
+	logs = filterRemoteLogs(logs)
+	if len(logs) > maxRemoteLogEntries {
+		logs = logs[:maxRemoteLogEntries]
 	}
-
 	totalSize := 0
-	for i, log := range request.Logs {
+	for i, log := range logs {
 		totalSize += len(log)
 		if totalSize > maxRemoteLogPayload {
-			request.Logs = request.Logs[:i]
-			break
+			return logs[:i]
 		}
 	}
+	return logs
+}
 
-	// Filter once, use everywhere
-	filteredLogs := filterRemoteLogs(request.Logs)
-	request.Logs = filteredLogs
+func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, _ *zap.Logger, session *sessionWS, evrID evr.EvrId, request *evr.RemoteLogSet) error {
+	request.Logs = prepareRemoteLogs(request.Logs)
+	filteredLogs := request.Logs
 
 	if !session.userID.IsNil() {
 		p.userRemoteLogJournalRegistry.Add(session.id, session.userID, filteredLogs)
 	}
 	if dispatcher := globalEventDispatcher.Load(); dispatcher != nil {
-		dispatcher.Dispatch(ctx, &EventRemoteLogSet{
+		// ctx is the client's session context. A client sends its last log set as
+		// it quits, so the session can be closed by now, and Dispatch drops an event
+		// whose context is done. The event outlives the session on purpose.
+		dispatcher.Dispatch(context.WithoutCancel(ctx), &EventRemoteLogSet{
 			Node:         p.node,
 			UserID:       session.UserID().String(),
 			SessionID:    session.ID().String(),
@@ -100,7 +110,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, _ *zap.Logger, s
 		return nil
 	}
 	// Fallback to legacy JSON path if dispatcher not yet initialized
-	return SendEvent(ctx, p.nk, &EventRemoteLogSet{
+	return SendEvent(context.WithoutCancel(ctx), p.nk, &EventRemoteLogSet{
 		Node:         p.node,
 		UserID:       session.UserID().String(),
 		SessionID:    session.ID().String(),
