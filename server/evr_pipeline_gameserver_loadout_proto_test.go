@@ -222,6 +222,18 @@ func TestGameServerSaveLoadoutProtoRejectsWithoutWriting(t *testing.T) {
 			delete(f.nk.streams, streamKey(StreamModeEntrant, f.entrantID.String(), f.matchID.Node))
 			f.nk.add(StreamModeEntrant, f.entrantID.String(), other.Node, &EvrMatchPresence{Node: other.Node, SessionID: f.entrantSID, UserID: f.entrantUser})
 		}},
+		{"entrant session in another match", func(f *protoLoadoutFixture) {
+			// The entrant's stream presence stays in the sender's match, but the
+			// entrant session's live service presence reports a different match.
+			// This is the case GetMatchIDBySessionID must reject.
+			other := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: f.matchID.Node}
+			delete(f.nk.streams, streamKey(StreamModeService, f.entrantSID.String(), StreamLabelMatchService))
+			f.nk.add(StreamModeService, f.entrantSID.String(), StreamLabelMatchService,
+				protoLoadoutPresence{status: other.String(), userID: f.entrantUser, sessionID: f.entrantSID, node: other.Node})
+			// The other match's authoritative presence exists, so the session
+			// lookup succeeds and the match comparison is what rejects it.
+			f.nk.users[streamKey(StreamModeMatchAuthoritative, other.UUID.String(), other.Node)+"|"+f.entrantUser.String()+"|"+f.entrantSID.String()] = protoLoadoutPresence{}
+		}},
 		{"sender has no game-server presence", func(f *protoLoadoutFixture) {
 			delete(f.nk.streams, streamKey(StreamModeGameServer, f.senderID.String(), StreamLabelMatchService))
 		}},
@@ -244,6 +256,20 @@ func TestGameServerSaveLoadoutProtoRejectsWithoutWriting(t *testing.T) {
 	}
 }
 
+func TestLegacySaveLoadoutRejectsEmptyEntrantBeforeNK(t *testing.T) {
+	// A nil NakamaModule: touching it would panic. The empty entrant must be
+	// rejected before the first NK call.
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("handler touched NK for an empty entrant: %v", recovered)
+		}
+	}()
+	if err := applyGameServerSaveLoadoutLegacy(context.Background(), zap.NewNop(), nil, nil,
+		uuid.Must(uuid.NewV4()), &evr.GameServerSaveLoadoutRequest{}); err != nil {
+		t.Fatalf("legacy handler returned an error: %v", err)
+	}
+}
+
 func TestLegacySaveLoadoutRequiresSenderGameServerOfMatch(t *testing.T) {
 	f := newProtoLoadoutFixture(t)
 	// Remove the sender's game-server presence: it is not the server of the match.
@@ -260,5 +286,26 @@ func TestLegacySaveLoadoutRequiresSenderGameServerOfMatch(t *testing.T) {
 	}
 	if f.nk.writeAttempts != before {
 		t.Fatalf("legacy handler wrote %d time(s) from a non-server session", f.nk.writeAttempts-before)
+	}
+}
+
+func TestGameServerSaveLoadoutProtoRejectsEntrantWhoseSessionMovedMatch(t *testing.T) {
+	// The entrant's stream presence is in the SENDER's match (so the presence
+	// lookup succeeds), but their live session reports a different match. That
+	// is the case the final match comparison exists for.
+	f := newProtoLoadoutFixture(t)
+	other := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "othernode"}
+
+	delete(f.nk.streams, streamKey(StreamModeService, f.entrantSID.String(), StreamLabelMatchService))
+	f.nk.add(StreamModeService, f.entrantSID.String(), StreamLabelMatchService,
+		protoLoadoutPresence{status: other.String(), userID: f.entrantUser, sessionID: f.entrantSID, node: other.Node})
+	f.nk.users[streamKey(StreamModeMatchAuthoritative, other.UUID.String(), other.Node)+"|"+f.entrantUser.String()+"|"+f.entrantSID.String()] = protoLoadoutPresence{}
+
+	before := f.nk.writeAttempts
+	if err := applyGameServerSaveLoadoutProto(context.Background(), zap.NewNop(), f.nk, nil, f.senderID, f.msg); err != nil {
+		t.Fatalf("handler returned an error (would drop the session): %v", err)
+	}
+	if f.nk.writeAttempts != before {
+		t.Fatalf("profile was written for an entrant whose session is in another match")
 	}
 }

@@ -92,6 +92,10 @@ func applyGameServerSaveLoadoutLegacy(ctx context.Context, logger *zap.Logger, n
 	if request == nil {
 		return nil
 	}
+	if request.EntrantSessionID.IsNil() {
+		logger.Warn("Rejecting legacy save loadout with an empty entrant session id")
+		return nil
+	}
 	presence, _, err := resolveGameServerLoadoutTarget(nk, senderID, request.EntrantSessionID)
 	if err != nil {
 		logger.Warn("Rejecting legacy save loadout", zap.String("entrant_session_id", request.EntrantSessionID.String()), zap.Error(err))
