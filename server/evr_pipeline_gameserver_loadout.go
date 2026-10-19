@@ -295,16 +295,5 @@ func (p *EvrPipeline) gameServerSaveLoadoutRequest(ctx context.Context, logger *
 		zap.String("evr_id", request.EvrID.String()),
 		zap.Any("loadout", writtenLoadout))
 
-	// Hand the save to the player's login session. Without this the session keeps
-	// its pre-save profile and the next lobby join stores that over the save; see
-	// adoptSavedLoadout. Re-read rather than reuse profile: after a retry the stored
-	// profile is not the object this handler loaded.
-	saved, err := EVRProfileLoad(ctx, p.nk, userID)
-	if err != nil {
-		logger.Warn("Failed to reload saved profile for the login session", zap.Error(err))
-		return nil
-	}
-	adoptSavedLoadout(ctx, logger, p.db, p.nk, p.sessionRegistry, userID, saved)
-
 	return nil
 }

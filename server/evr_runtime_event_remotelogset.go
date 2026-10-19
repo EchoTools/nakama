@@ -291,10 +291,17 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			}
 
 			// NEVR (non-legacy) servers already persist loadout equips themselves.
-			if matchID, _, err := GetMatchIDBySessionID(nk, uuid.FromStringOrNil(s.SessionID)); err == nil && !matchID.IsNil() {
-				if label, err := MatchLabelByID(ctx, nk, matchID); err == nil && label != nil && label.GameServer != nil && label.GameServer.NativeSupport {
-					continue
+			//
+			// The server type is read from the match the equip was made in, which the
+			// log names, not from the match the player's login session is in now: the
+			// equip is saved even after that session is gone (below), and a late log
+			// set from a NEVR match must still be skipped, or it could overwrite a
+			// newer save the game server already made.
+			if skip, reason := skipRemoteLogEquip(ctx, nk, msg.SessionUUID(), uuid.FromStringOrNil(s.SessionID), s.Node); skip {
+				if reason != "" {
+					logger.WithField("match_session_id", msg.SessionUUID().String()).Debug(reason)
 				}
+				continue
 			}
 
 			category, name, err := msg.GetEquippedCustomization()
@@ -378,9 +385,44 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			// because strips is empty.
 			logCosmeticStrips(logger, userID, sanitizePathEquip, strips)
 
-			// Swap the saved profile into the player's login session, if it is
-			// still connected, and re-store the server profile served to others.
-			adoptSavedLoadout(ctx, RuntimeLoggerToZapLogger(logger), db, nk, sessionRegistry, userID, updated)
+			// Swap the metadata into the session parameters, if the player's login
+			// session is still connected. The equip is already saved either way.
+			session := sessionRegistry.Get(uuid.FromStringOrNil(s.SessionID))
+			if session == nil {
+				continue
+			}
+			params, ok := LoadParams(session.Context())
+			if !ok {
+				continue
+			}
+
+			params.profile = updated
+
+			StoreParams(session.Context(), params)
+
+			modes := []evr.Symbol{
+				evr.ModeArenaPublic,
+				evr.ModeCombatPublic,
+			}
+
+			groupID := params.profile.GetActiveGroupID().String()
+			zapLogger := RuntimeLoggerToZapLogger(logger)
+			serverProfile, err := UserServerProfileFromParameters(ctx, zapLogger, db, nk, params, groupID, modes, 0)
+			if err != nil {
+				return fmt.Errorf("failed to get server profile: %w", err)
+			}
+
+			if gg, ok := params.guildGroups[groupID]; ok {
+				if gg.IsEnforcer(userID) && params.isGoldNameTag.Load() && serverProfile.DeveloperFeatures == nil {
+					// Give the user a gold name if they are enabled as a moderator in the guild, and want it.
+					serverProfile.DeveloperFeatures = &evr.DeveloperFeatures{}
+				}
+			}
+
+			// Store the updated server profile
+			if err := ServerProfileStore(ctx, nk, userID, serverProfile); err != nil {
+				logger.WithField("error", err).Warn("Failed to store server profile")
+			}
 
 		case *evr.RemoteLogRepairMatrix:
 
@@ -1243,4 +1285,33 @@ func VOIPLoudnessRecordMetadataFromString(data string) (*VOIPLoudnessRecordMetad
 		MaxLoudness: maxLoudness,
 		Count:       count,
 	}, nil
+}
+
+// skipRemoteLogEquip reports whether an item_equipped remote log must not be
+// saved, and why (empty when there is nothing worth logging).
+//
+// The match is the one named in the log (matchSessionID). Logs that carry none
+// fall back to the match the login session is in. NEVR (NativeSupport) game
+// servers persist loadouts themselves, so their equips are skipped; so is an
+// equip whose match can no longer be found, because without it there is no
+// telling whether a NEVR server already saved a newer loadout.
+func skipRemoteLogEquip(ctx context.Context, nk runtime.NakamaModule, matchSessionID, loginSessionID uuid.UUID, node string) (bool, string) {
+	var matchID MatchID
+	if !matchSessionID.IsNil() {
+		matchID, _ = NewMatchID(matchSessionID, node)
+	} else if id, _, err := GetMatchIDBySessionID(nk, loginSessionID); err == nil {
+		matchID = id
+	}
+	if matchID.IsNil() {
+		// No match to check: the equip was made outside one (e.g. the main menu).
+		return false, ""
+	}
+	label, err := MatchLabelByID(ctx, nk, matchID)
+	if err != nil || label == nil {
+		return true, "Skipping equip from a match that no longer exists; cannot tell whether its server saved the loadout"
+	}
+	if label.GameServer != nil && label.GameServer.NativeSupport {
+		return true, ""
+	}
+	return false, ""
 }
