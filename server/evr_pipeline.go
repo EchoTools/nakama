@@ -997,8 +997,17 @@ func (p *EvrPipeline) ProcessProtobufRequest(logger *zap.Logger, session Session
 	case *rtapi.Envelope_GameServerSaveLoadout:
 		pipelineFn = p.gameServerSaveLoadoutProtoHandler
 	default:
-		// For all other messages, use the generic protobuf handler
-		return fmt.Errorf("unhandled protobuf message type: %T", in.Message)
+		// An unrecognized message type must not drop the connection (an error
+		// here makes the session read loop close the game server's session).
+		// Log it and keep the session, as the legacy path does.
+		fields := []zap.Field{zap.String("message_type", fmt.Sprintf("%T", in.Message))}
+		if session != nil {
+			fields = append(fields,
+				zap.String("sid", session.ID().String()),
+				zap.String("uid", session.UserID().String()))
+		}
+		logger.Warn("Received unhandled protobuf message", fields...)
+		return nil
 	}
 
 	ws, ok := session.(*sessionWS)
