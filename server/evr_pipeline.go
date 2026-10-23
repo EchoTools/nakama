@@ -65,6 +65,10 @@ type EvrPipeline struct {
 	pollFollowInterval    time.Duration
 	pollFollowMaxDuration time.Duration
 
+	// loadoutNK overrides the NakamaModule the legacy save-loadout path uses in
+	// tests; nil means p.nk. Production never sets it.
+	loadoutNK runtime.NakamaModule
+
 	// Party formation timing. Zero means use the package defaults
 	// (partyFormationTimeoutDefault / partyFormationPollIntervalDefault).
 	// Overridable in tests to avoid multi-second real waits.
@@ -542,7 +546,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 				zap.String("evr_id", msg.EvrID.String()),
 				zap.Int32("loadout_number", msg.LoadoutNumber))
 			// Process the loadout update directly without converting to protobuf
-			if err := p.gameServerSaveLoadoutRequest(session.Context(), logger, msg); err != nil {
+			if err := p.gameServerSaveLoadoutRequest(session.Context(), logger, session, msg); err != nil {
 				logger.Error("Failed to process save loadout request", zap.Error(err))
 			}
 			return true
@@ -990,9 +994,20 @@ func (p *EvrPipeline) ProcessProtobufRequest(logger *zap.Logger, session Session
 		pipelineFn = p.lobbySessionEvent
 	case *rtapi.Envelope_LobbyEntrantRemoved:
 		pipelineFn = p.lobbyEntrantsRemove
+	case *rtapi.Envelope_GameServerSaveLoadout:
+		pipelineFn = p.gameServerSaveLoadoutProtoHandler
 	default:
-		// For all other messages, use the generic protobuf handler
-		return fmt.Errorf("unhandled protobuf message type: %T", in.Message)
+		// An unrecognized message type must not drop the connection (an error
+		// here makes the session read loop close the game server's session).
+		// Log it and keep the session, as the legacy path does.
+		fields := []zap.Field{zap.String("message_type", fmt.Sprintf("%T", in.Message))}
+		if session != nil {
+			fields = append(fields,
+				zap.String("sid", session.ID().String()),
+				zap.String("uid", session.UserID().String()))
+		}
+		logger.Warn("Received unhandled protobuf message", fields...)
+		return nil
 	}
 
 	ws, ok := session.(*sessionWS)
