@@ -360,7 +360,7 @@ func deviceAuthVerify(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		discordID = ""
 	}
 
-	pair, err := mintDeviceAuthTokenPair(nk, userID, username, discordID)
+	pair, err := mintDeviceAuthTokenPairWithNewSession(ctx, logger, nk, userID, username, discordID, deviceSessionKindVerify)
 	if err != nil {
 		logger.WithField("error", err).Error("Failed to generate tokens for device auth")
 		return "", err
@@ -396,6 +396,27 @@ const (
 	deviceAuthRefreshTokenTTL = 30 * 24 * time.Hour
 )
 
+// Storage contract for device-auth revocation. All objects are owned by the
+// user, written by the system, and unreadable and unwritable by the client
+// (permission read=0 write=0). Tokens and secrets are never stored.
+const (
+	// deviceAuthStateCollection / deviceAuthRevokedBeforeKey: one object per
+	// user, {"revoked_before": <unix seconds>}. Refresh tokens issued at or
+	// before this second are refused. Absent means no revocation.
+	deviceAuthStateCollection  = "device_auth"
+	deviceAuthRevokedBeforeKey = "revoked_before"
+	// deviceAuthSessionsCollection: one object per device session, key = dsid,
+	// so listing a user's device sessions is a single StorageList call.
+	deviceAuthSessionsCollection = "device_auth_sessions"
+)
+
+// Device session kinds recorded at creation.
+const (
+	deviceSessionKindVerify = "device-verify"
+	deviceSessionKindIssue  = "issue"
+	deviceSessionKindLegacy = "legacy" // a pre-dsid refresh token, adopted on its first refresh
+)
+
 // deviceAuthTokenPair is an access token and the long-lived refresh token that
 // device/auth/refresh will accept for it.
 type deviceAuthTokenPair struct {
@@ -410,9 +431,15 @@ type deviceAuthTokenPair struct {
 // device/auth/refresh requires; a token without it is refused there. Device
 // verify, device refresh and device/auth/issue all mint through here so the
 // three cannot drift apart.
-func mintDeviceAuthTokenPair(nk runtime.NakamaModule, userID, username, discordID string) (*deviceAuthTokenPair, error) {
+//
+// dsid, when non-empty, is the device session id carried in the REFRESH token
+// only (vars["dsid"]); access tokens never carry it.
+func mintDeviceAuthTokenPair(nk runtime.NakamaModule, userID, username, discordID, dsid string) (*deviceAuthTokenPair, error) {
 	accessVars := map[string]string{}
 	refreshVars := map[string]string{"refresh": "true"}
+	if dsid != "" {
+		refreshVars["dsid"] = dsid
+	}
 	if discordID != "" {
 		accessVars["did"] = discordID
 		refreshVars["did"] = discordID
@@ -502,7 +529,7 @@ func deviceAuthRefresh(ctx context.Context, logger runtime.Logger, nk runtime.Na
 	}
 
 	// Validate the refresh token JWT directly (signature + expiry)
-	userID, username, tokenVars, exp, _, _, ok := parseToken(encryptionKey, refreshToken)
+	userID, username, tokenVars, exp, _, issuedAt, ok := parseToken(encryptionKey, refreshToken)
 	if !ok {
 		return "", runtime.NewError("invalid or expired refresh token", StatusUnauthenticated)
 	}
@@ -513,20 +540,49 @@ func deviceAuthRefresh(ctx context.Context, logger runtime.Logger, nk runtime.Na
 		return "", runtime.NewError("not a refresh token", StatusInvalidArgument)
 	}
 
+	// Revocation checks. Every refusal returns the SAME message, because
+	// nevr-runtime falls back to device login only on that exact string; the
+	// reason goes to the log, never to the caller.
+	uid := userID.String()
+	dsid := tokenVars["dsid"]
+	if refusal := checkRefreshAllowed(ctx, logger, nk, uid, dsid, issuedAt); refusal != nil {
+		return "", refusal
+	}
+
+	// A legacy token (no dsid) that passed the checks above keeps refreshing,
+	// and from here on it is tracked: the rotated pair gets a fresh device
+	// session record, so the user's sessions are listable and revocable per
+	// device like any other.
+	newSession := false
+	if dsid == "" {
+		var err error
+		dsid, err = createDeviceSession(ctx, nk, uid, deviceSessionKindLegacy)
+		if err != nil {
+			logger.WithFields(map[string]interface{}{"user_id": uid, "error": err}).Error("Failed to create device session record for legacy refresh token")
+			return "", runtime.NewError("internal error", StatusInternalError)
+		}
+		newSession = true
+	} else if refusal := touchDeviceSession(ctx, logger, nk, uid, dsid); refusal != nil {
+		return "", refusal
+	}
+
 	// Look up discord ID for new token vars
-	discordID, err := lookupDiscordID(ctx, userID.String())
+	discordID, err := lookupDiscordID(ctx, uid)
 	if err != nil {
 		logger.WithField("error", err).Warn("Could not look up discord ID for refresh")
 		discordID = ""
 	}
 
-	pair, err := mintDeviceAuthTokenPair(nk, userID.String(), username, discordID)
+	pair, err := mintDeviceAuthTokenPair(nk, uid, username, discordID, dsid)
 	if err != nil {
+		if newSession {
+			deleteDeviceSessions(ctx, logger, nk, uid, []string{dsid})
+		}
 		return "", err
 	}
 
-	logger.WithFields(map[string]interface{}{"username": username, "user_id": userID.String()}).Info("Device auth token refreshed")
-	return deviceAuthTokenResponse(pair, userID.String(), username), nil
+	logger.WithFields(map[string]interface{}{"username": username, "user_id": uid, "dsid": dsid}).Info("Device auth token refreshed")
+	return deviceAuthTokenResponse(pair, uid, username), nil
 }
 
 // DeviceAuthIssueRpc (device/auth/issue) exchanges the caller's authenticated
@@ -575,7 +631,7 @@ func deviceAuthIssue(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 		discordID = ""
 	}
 
-	pair, err := mintDeviceAuthTokenPair(nk, userID, username, discordID)
+	pair, err := mintDeviceAuthTokenPairWithNewSession(ctx, logger, nk, userID, username, discordID, deviceSessionKindIssue)
 	if err != nil {
 		logger.WithField("error", err).Error("Failed to generate tokens for device auth issue")
 		return "", err
