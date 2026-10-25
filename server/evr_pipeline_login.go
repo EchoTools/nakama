@@ -1341,15 +1341,9 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 
 	if params.earlyQuitConfig != nil {
 		if cfg := params.earlyQuitConfig.Load(); cfg != nil {
-			// Populate all 6 binary profile fields
-			clientProfile.EarlyQuitFeatures = evr.EarlyQuitFeatures{
-				PenaltyTimestamp:    cfg.PenaltyTimestamp,
-				NumEarlyQuits:       int(cfg.NumEarlyQuits),
-				NumSteadyMatches:    int(cfg.NumSteadyMatches),
-				NumSteadyEarlyQuits: int(cfg.NumSteadyEarlyQuits),
-				PenaltyLevel:        int(cfg.PenaltyLevel),
-				SteadyPlayerLevel:   int(cfg.SteadyPlayerLevel),
-			}
+			// Populate all 6 binary profile fields. penaltyts is the stamp; the lockout expiry follows in the
+			// update sent after the profile, because the client's login path passes no expiry.
+			clientProfile.EarlyQuitFeatures = loginEarlyQuitFeatures(userID, cfg, time.Now())
 			// The client reads its early quit state from the server profile (evr.ServerProfile
 			// EarlyQuitFeatures); this copy is the one sent at login, after the stored one was written.
 			eq := clientProfile.EarlyQuitFeatures
@@ -1373,11 +1367,14 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	// Send early quit config and feature flags on login (unless penalty system is disabled or silent mode is enabled)
 	ss := ServiceSettings()
 	if p.earlyQuitMessageTrigger != nil && ss != nil && ss.Matchmaking.EnableEarlyQuitPenalty && !ss.Matchmaking.SilentEarlyQuitSystem {
-		if err := p.earlyQuitMessageTrigger.SendEarlyQuitConfigOnLogin(ctx, session); err != nil {
-			logger.Warn("Failed to send early quit config on login", zap.Error(err))
+		state := NewEarlyQuitPlayerState()
+		if params.earlyQuitConfig != nil {
+			if cfg := params.earlyQuitConfig.Load(); cfg != nil {
+				state = cfg
+			}
 		}
-		if err := p.earlyQuitMessageTrigger.SendFeatureFlagsOnLogin(ctx, session); err != nil {
-			logger.Warn("Failed to send early quit feature flags on login", zap.Error(err))
+		if err := p.earlyQuitMessageTrigger.SendEarlyQuitOnLogin(ctx, session, state); err != nil {
+			logger.Warn("Failed to send early quit messages on login", zap.Error(err))
 		}
 	}
 

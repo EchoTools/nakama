@@ -18,8 +18,8 @@ func TestEarlyQuitFeatureFlags(t *testing.T) {
 	if len(b) != 1 {
 		t.Fatalf("encoded %d bytes, want exactly 1", len(b))
 	}
-	if b[0] != 0x0f {
-		t.Errorf("encoded byte = 0x%02x, want 0x0f", b[0])
+	if b[0] != 0x23 {
+		t.Errorf("encoded byte = 0x%02x, want 0x23 (bits 0, 1 and 5, the ones the game scripts read)", b[0])
 	}
 
 	// Unmarshal
@@ -28,7 +28,7 @@ func TestEarlyQuitFeatureFlags(t *testing.T) {
 	if err := out.Stream(d); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if out.Flags != 0x0f {
-		t.Errorf("decoded flags = 0x%02x, want 0x0f", out.Flags)
+	if out.Flags != 0x23 {
+		t.Errorf("decoded flags = 0x%02x, want 0x23", out.Flags)
 	}
 }
