@@ -125,7 +125,7 @@ func (r *LocalSessionRegistry) Disconnect(ctx context.Context, sessionID uuid.UU
 		}
 
 		if ban {
-			session.Close("server-side session disconnect", runtime.PresenceReasonDisconnect,
+			session.Close(closeReasonBanned, runtime.PresenceReasonDisconnect,
 				&rtapi.Envelope{Message: &rtapi.Envelope_Notifications{
 					Notifications: &rtapi.Notifications{
 						Notifications: []*api.Notification{
@@ -142,7 +142,7 @@ func (r *LocalSessionRegistry) Disconnect(ctx context.Context, sessionID uuid.UU
 					},
 				}})
 		} else {
-			session.Close("server-side session disconnect", reasonOverride)
+			session.Close(closeReasonServerDisconnect, reasonOverride)
 		}
 	}
 	return nil
@@ -158,7 +158,7 @@ func (r *LocalSessionRegistry) SingleSession(ctx context.Context, tracker Tracke
 		session, ok := r.sessions.Load(foundSessionID)
 		if ok {
 			// No need to remove the session from the map, session.Close() will do that.
-			session.Close("server-side session disconnect", runtime.PresenceReasonDisconnect,
+			session.Close(closeReasonDuplicateSession, runtime.PresenceReasonDisconnect,
 				&rtapi.Envelope{Message: &rtapi.Envelope_Notifications{
 					Notifications: &rtapi.Notifications{
 						Notifications: []*api.Notification{
