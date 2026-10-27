@@ -293,8 +293,8 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 				return "", fmt.Errorf("failed to unmarshal match label: %w", err)
 			}
 
-			// Remove location data, then build the public view from the redacted label.
-			label = label.RedactLocation()
+			// Remove player location, then build the public view from the redacted label.
+			label = label.RedactPlayerLocation()
 
 			if label.LobbyType == UnassignedLobby && label.GameServer != nil {
 				for _, id := range label.GameServer.GroupIDs {

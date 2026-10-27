@@ -776,18 +776,17 @@ func (l *MatchLabel) CalculateRatingWeights() map[evr.EvrId]int {
 	return byPlayer
 }
 
-// RedactLocation returns a copy of the label with every field that says where a
-// player or the game server is removed: each player's ClientIP and GeoHash, and
-// the game server's endpoint, city, geohash, coordinates and ASN. The region,
-// default region, region codes and country code of the game server stay: a region
-// label for the whole match is not a location.
+// RedactPlayerLocation returns a copy of the label with every field that says
+// where a player is removed: each player's ClientIP and the GeoHash derived from
+// it. The game server's endpoint, region and coordinates stay: where a server runs
+// is not a player's location, and allocators join through the endpoint.
 //
-// This is the one place location is stripped. Every surface that returns a label
-// to a caller without GroupGlobalPrivateDataAccess must pass it through here
-// first. TestRedactLocation_ClassifiesEveryField fails when PlayerInfo or
-// GameServerPresence gains a field that has not been classified as location or
-// not, so a new field cannot reach a caller by omission.
-func (l *MatchLabel) RedactLocation() *MatchLabel {
+// This is the one place player location is stripped. Every surface that returns a
+// label to a caller without GroupGlobalPrivateDataAccess must pass it through here
+// first. TestRedactPlayerLocation_ClassifiesEveryField fails when PlayerInfo gains
+// a field that has not been classified as player location or not, so a new field
+// cannot reach a caller by omission.
+func (l *MatchLabel) RedactPlayerLocation() *MatchLabel {
 	if l == nil {
 		return nil
 	}
@@ -799,17 +798,6 @@ func (l *MatchLabel) RedactLocation() *MatchLabel {
 			p.GeoHash = ""
 			redacted.Players[i] = p
 		}
-	}
-	if l.GameServer != nil {
-		gs := *l.GameServer
-		gs.Endpoint = evr.Endpoint{}
-		gs.EndpointID = ""
-		gs.City = ""
-		gs.GeoHash = ""
-		gs.Latitude = 0
-		gs.Longitude = 0
-		gs.ASNumber = 0
-		redacted.GameServer = &gs
 	}
 	return &redacted
 }

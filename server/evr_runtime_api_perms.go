@@ -11,6 +11,7 @@ import (
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/internal/intents"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
@@ -364,8 +365,9 @@ func registerAPIGuards(initializer runtime.Initializer) error {
 
 // AfterListMatchesHook filters match data based on user permissions.
 //   - Complete match data is shown only for guilds where user has audit role OR is the server host
-//   - Location (client IPs, geohashes, server coordinates and endpoint) is shown only to global
-//     operators and members of Global Private Data Access; everyone else gets RedactLocation()
+//   - Global operators can see client IPs
+//   - Player location (client IPs, geohashes) is shown only to global operators and members of
+//     Global Private Data Access; everyone else gets RedactPlayerLocation()
 //   - Public match label data is available for any guild the user is a member of
 //   - Suspended users see no match data except for servers they run
 func AfterListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, out *api.MatchList, in *api.ListMatchesRequest) error {
@@ -524,18 +526,22 @@ func filterMatchForUser(match *api.Match, userID string, isGlobalOperator, hasPr
 	// Global operators can see all match data
 	canSeeFullData := isGlobalOperator || isServerHost || isAuditor
 
-	// Can see location (client IPs, geohashes, server coordinates and endpoint)
-	// only if global operator or in the Global Private Data Access group.
-	canSeeLocation := isGlobalOperator || hasPrivateDataAccess
+	// Can see the server endpoint only if global operator
+	canSeeClientIPs := isGlobalOperator
+
+	// Can see player location (client IPs, geohashes) only if global operator
+	// or in the Global Private Data Access group.
+	canSeePlayerLocation := isGlobalOperator || hasPrivateDataAccess
 
 	// Create filtered label based on permissions
 	var labelJSON []byte
 	var err error
 	if canSeeFullData {
-		if !canSeeLocation {
-			label = label.RedactLocation()
+		filteredLabel := createFullMatchLabel(label, canSeeClientIPs)
+		if !canSeePlayerLocation {
+			filteredLabel = filteredLabel.RedactPlayerLocation()
 		}
-		labelJSON, err = json.Marshal(label)
+		labelJSON, err = json.Marshal(filteredLabel)
 	} else if isMember || label.IsPublic() {
 		publicLabel := createPublicMatchLabel(label)
 		labelJSON, err = json.Marshal(publicLabel)
@@ -574,8 +580,9 @@ type PublicMatchLabel struct {
 	StartTime   string    `json:"start_time,omitempty"`
 	CreatedAt   string    `json:"created_at,omitempty"`
 	RatingMu    float64   `json:"rating_mu,omitempty"`
-	// Server region label (no IPs, no city, no coordinates)
+	// Server location info (no IPs)
 	ServerRegion  string `json:"server_region,omitempty"`
+	ServerCity    string `json:"server_city,omitempty"`
 	ServerCountry string `json:"server_country,omitempty"`
 }
 
@@ -605,11 +612,25 @@ func createPublicMatchLabel(label *MatchLabel) *PublicMatchLabel {
 		public.CreatedAt = label.CreatedAt.Format("2006-01-02T15:04:05Z07:00")
 	}
 
-	// Add the server's region label, nothing finer
+	// Add server location but not IP
 	if label.GameServer != nil {
 		public.ServerRegion = label.GameServer.DefaultRegion
+		public.ServerCity = label.GameServer.City
 		public.ServerCountry = label.GameServer.CountryCode
 	}
 
 	return public
+}
+
+func createFullMatchLabel(label *MatchLabel, includeClientIPs bool) *MatchLabel {
+	// Return the full label, but potentially redact IPs if not authorized
+	if !includeClientIPs && label.GameServer != nil {
+		// Create a copy with redacted endpoint
+		labelCopy := *label
+		serverCopy := *label.GameServer
+		serverCopy.Endpoint = evr.Endpoint{} // Redact the endpoint (contains IPs)
+		labelCopy.GameServer = &serverCopy
+		return &labelCopy
+	}
+	return label
 }

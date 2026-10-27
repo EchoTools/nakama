@@ -19,9 +19,9 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-// Synthetic values only (documentation ranges); each is searched for verbatim
-// in the marshalled response, so a field renamed to dodge a key check still
-// fails the test.
+// Synthetic values only (documentation ranges); the player values are searched
+// for verbatim in the marshalled response, so a field renamed to dodge a key
+// check still fails the test.
 const (
 	testLocPlayerIP      = "203.0.113.77"
 	testLocPlayerGeoHash = "gbsuv7ztq"
@@ -29,15 +29,13 @@ const (
 	testLocServerCity    = "Testville"
 	testLocServerRegion  = "us-test-1"
 	testLocServerCountry = "ZZ"
+	testLocServerIP      = "198.51.100.9"
 )
 
-// locationJSONKeys are the JSON keys that carry where a player or a server is.
-// Region and country_code are deliberately absent: a region label for the whole
-// match is allowed.
-var locationJSONKeys = []string{
-	"client_ip", "geohash", "latitude", "longitude", "city", "asn",
-	"endpoint", "endpoint_id", "InternalIP", "ExternalIP",
-}
+// playerLocationJSONKeys are the JSON keys of a player entry that say where the
+// player is. Server location is not in this list: where a server runs is not a
+// player's location.
+var playerLocationJSONKeys = []string{"client_ip", "geohash"}
 
 // stubMembershipDriver answers CheckSystemGroupMembership's one query: the DSN
 // "member" returns a row (caller is in the group), anything else returns none.
@@ -145,8 +143,8 @@ func newLocationTestLabel(t *testing.T) *MatchLabel {
 		},
 		GameServer: &GameServerPresence{
 			OperatorID:    uuid.Must(uuid.NewV4()),
-			Endpoint:      evr.Endpoint{ExternalIP: net.ParseIP("198.51.100.9"), InternalIP: net.ParseIP("10.0.0.9"), Port: 6792},
-			EndpointID:    "10.0.0.9:198.51.100.9:6792",
+			Endpoint:      evr.Endpoint{ExternalIP: net.ParseIP(testLocServerIP), InternalIP: net.ParseIP("10.0.0.9"), Port: 6792},
+			EndpointID:    "10.0.0.9:" + testLocServerIP + ":6792",
 			DefaultRegion: testLocServerRegion,
 			Region:        testLocServerRegion,
 			CountryCode:   testLocServerCountry,
@@ -159,50 +157,25 @@ func newLocationTestLabel(t *testing.T) *MatchLabel {
 	}
 }
 
-// isEmptyJSON reports whether a decoded JSON value carries nothing: null, "",
-// 0, false, or an object or array holding only such values. An always-emitted
-// but empty key (GameServerPresence.Endpoint has no omitempty) tells a caller
-// nothing about where anyone is.
-func isEmptyJSON(v any) bool {
-	switch x := v.(type) {
-	case nil:
-		return true
-	case string:
-		return x == ""
-	case float64:
-		return x == 0
-	case bool:
-		return !x
-	case map[string]any:
-		for _, child := range x {
-			if !isEmptyJSON(child) {
-				return false
-			}
-		}
-		return true
-	case []any:
-		for _, child := range x {
-			if !isEmptyJSON(child) {
-				return false
-			}
-		}
-		return true
-	}
-	return false
-}
-
-// assertNoLocation fails if any location key carries a value, or any location
-// value appears anywhere, in the JSON document.
-func assertNoLocation(t *testing.T, name, doc string) {
+// assertNoPlayerLocation fails if any entry of a "players" array carries a
+// player location key with a value, or if a player location value appears
+// anywhere in the JSON document.
+func assertNoPlayerLocation(t *testing.T, name, doc string) {
 	t.Helper()
 	var walk func(v any)
 	walk = func(v any) {
 		switch x := v.(type) {
 		case map[string]any:
 			for k, child := range x {
-				for _, forbidden := range locationJSONKeys {
-					if strings.EqualFold(k, forbidden) && !isEmptyJSON(child) {
-						t.Errorf("%s: location key %q present with value %v", name, k, child)
+				if k == "players" {
+					players, _ := child.([]any)
+					for _, entry := range players {
+						fields, _ := entry.(map[string]any)
+						for _, key := range playerLocationJSONKeys {
+							if value, ok := fields[key]; ok && value != "" && value != nil {
+								t.Errorf("%s: player key %q present with value %v", name, key, value)
+							}
+						}
 					}
 				}
 				walk(child)
@@ -218,9 +191,9 @@ func assertNoLocation(t *testing.T, name, doc string) {
 		t.Fatalf("%s: response is not JSON: %v", name, err)
 	}
 	walk(parsed)
-	for _, value := range []string{testLocPlayerIP, testLocPlayerGeoHash, testLocServerGeoHash, testLocServerCity, "198.51.100.9", "10.0.0.9"} {
+	for _, value := range []string{testLocPlayerIP, testLocPlayerGeoHash} {
 		if strings.Contains(doc, value) {
-			t.Errorf("%s: location value %q present", name, value)
+			t.Errorf("%s: player location value %q present", name, value)
 		}
 	}
 }
@@ -230,7 +203,7 @@ func matchRPCContext(userID string) context.Context {
 	return context.WithValue(ctx, runtime.RUNTIME_CTX_VARS, map[string]string{})        //nolint:staticcheck // nakama runtime ctx keys are plain strings
 }
 
-func TestMatchRPC_UnprivilegedCallerGetsNoLocation(t *testing.T) {
+func TestMatchRPC_UnprivilegedCallerGetsNoPlayerLocation(t *testing.T) {
 	nk := &locationLabelNK{label: newLocationTestLabel(t)}
 	db := openStubMembershipDB(t, false)
 
@@ -238,7 +211,7 @@ func TestMatchRPC_UnprivilegedCallerGetsNoLocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MatchRPC: %v", err)
 	}
-	assertNoLocation(t, "MatchRPC unprivileged", out)
+	assertNoPlayerLocation(t, "MatchRPC unprivileged", out)
 
 	// The region label for the whole match is allowed, and must survive.
 	if !strings.Contains(out, testLocServerRegion) {
@@ -249,7 +222,7 @@ func TestMatchRPC_UnprivilegedCallerGetsNoLocation(t *testing.T) {
 // The detector itself: a privileged caller gets the raw label, which carries
 // location. If this stops failing assertNoLocation, the unprivileged test above
 // has stopped proving anything.
-func TestMatchRPC_PrivilegedCallerKeepsLocation(t *testing.T) {
+func TestMatchRPC_PrivilegedCallerKeepsPlayerLocation(t *testing.T) {
 	nk := &locationLabelNK{label: newLocationTestLabel(t)}
 	db := openStubMembershipDB(t, true)
 
@@ -257,7 +230,7 @@ func TestMatchRPC_PrivilegedCallerKeepsLocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MatchRPC: %v", err)
 	}
-	for _, want := range []string{testLocPlayerIP, testLocPlayerGeoHash, testLocServerGeoHash} {
+	for _, want := range []string{testLocPlayerIP, testLocPlayerGeoHash} {
 		if !strings.Contains(out, want) {
 			t.Errorf("privileged response lost %q: %s", want, out)
 		}
@@ -266,7 +239,7 @@ func TestMatchRPC_PrivilegedCallerKeepsLocation(t *testing.T) {
 
 // filterMatchForUser backs the ListMatches hook. Auditors, enforcers and the
 // server host see the full label, so the full label is where location leaks.
-func TestFilterMatchForUser_NoLocationWithoutPrivateDataAccess(t *testing.T) {
+func TestFilterMatchForUser_NoPlayerLocationWithoutPrivateDataAccess(t *testing.T) {
 	label := newLocationTestLabel(t)
 	nk := &locationLabelNK{label: label}
 	userID := label.GameServer.OperatorID.String() // the server host: sees the full label
@@ -276,10 +249,17 @@ func TestFilterMatchForUser_NoLocationWithoutPrivateDataAccess(t *testing.T) {
 	if got == nil {
 		t.Fatal("server host got no match")
 	}
-	assertNoLocation(t, "filterMatchForUser host", got.GetLabel().GetValue())
+	assertNoPlayerLocation(t, "filterMatchForUser host", got.GetLabel().GetValue())
+
+	// Only players are narrowed: the server's own location is still in the label.
+	for _, want := range []string{testLocServerGeoHash, testLocServerCity, testLocServerRegion} {
+		if !strings.Contains(got.GetLabel().GetValue(), want) {
+			t.Errorf("server field %q was removed from the host's label", want)
+		}
+	}
 }
 
-func TestFilterMatchForUser_PrivilegedKeepsLocation(t *testing.T) {
+func TestFilterMatchForUser_PrivilegedKeepsPlayerLocation(t *testing.T) {
 	for name, args := range map[string][2]bool{"global operator": {true, false}, "private data access": {false, true}} {
 		label := newLocationTestLabel(t)
 		nk := &locationLabelNK{label: label}
@@ -288,7 +268,7 @@ func TestFilterMatchForUser_PrivilegedKeepsLocation(t *testing.T) {
 		if got == nil {
 			t.Fatalf("%s: got no match", name)
 		}
-		for _, want := range []string{testLocPlayerIP, testLocPlayerGeoHash, testLocServerGeoHash} {
+		for _, want := range []string{testLocPlayerIP, testLocPlayerGeoHash} {
 			if !strings.Contains(got.GetLabel().GetValue(), want) {
 				t.Errorf("%s: lost %q", name, want)
 			}
@@ -297,20 +277,23 @@ func TestFilterMatchForUser_PrivilegedKeepsLocation(t *testing.T) {
 }
 
 // The member and anonymous views are built from PublicMatchLabel and PublicView.
-func TestPublicViews_NoLocation(t *testing.T) {
+func TestPublicViews_NoPlayerLocation(t *testing.T) {
 	label := newLocationTestLabel(t)
 
 	member, err := json.Marshal(createPublicMatchLabel(label))
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertNoLocation(t, "createPublicMatchLabel", string(member))
+	assertNoPlayerLocation(t, "createPublicMatchLabel", string(member))
+	if !strings.Contains(string(member), testLocServerCity) {
+		t.Errorf("server_city was dropped from the public match label: %s", member)
+	}
 
 	view, err := json.Marshal(label.PublicView())
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertNoLocation(t, "PublicView", string(view))
+	assertNoPlayerLocation(t, "PublicView", string(view))
 
 	list := &api.MatchList{Matches: []*api.Match{(&locationLabelNK{label: label}).match(t)}}
 	if err := filterMatchesForAnonymous(list); err != nil {
@@ -319,120 +302,74 @@ func TestPublicViews_NoLocation(t *testing.T) {
 	if len(list.Matches) != 1 {
 		t.Fatalf("anonymous list has %d matches, want 1", len(list.Matches))
 	}
-	assertNoLocation(t, "filterMatchesForAnonymous", list.Matches[0].GetLabel().GetValue())
+	assertNoPlayerLocation(t, "filterMatchesForAnonymous", list.Matches[0].GetLabel().GetValue())
 }
 
-// locationFieldClassification names every exported field of the two structs a
-// match label carries to callers, and says whether the field tells where a
-// player or the game server is. Adding a field to either struct fails
-// TestRedactLocation_ClassifiesEveryField until it is listed here, which is the
-// moment to decide whether RedactLocation has to clear it.
-var locationFieldClassification = map[string]map[string]bool{
-	"PlayerInfo": {
-		"DisplayName": false, "PartyID": false, "IsReservation": false, "Team": false,
-		"JoinTime": false, "RatingMu": false, "RatingSigma": false, "Username": false,
-		"DiscordID": false, "UserID": false, "EvrID": false, "SessionID": false,
-		"PingMillis": false, "MatchmakingAt": false, "ReservationKind": false,
-		"ReservationExpiry": false, "ReservationID": false,
-		"ClientIP": true, "GeoHash": true,
-	},
-	"GameServerPresence": {
-		"Node": false, "Username": false, "SessionID": false, "OperatorID": false,
-		"GroupIDs": false, "VersionLock": false, "AppID": false, "DefaultRegion": false,
-		"RegionCodes": false, "ServerID": false, "Features": false, "Tags": false,
-		"DesignatedModes": false, "TimeStepUsecs": false, "NativeSupport": false,
-		"NativeVersion": false, "Region": false, "CountryCode": false,
-		"Endpoint": true, "EndpointID": true, "City": true, "GeoHash": true,
-		"Latitude": true, "Longitude": true, "ASNumber": true,
-	},
+// playerLocationClassification names every exported field of PlayerInfo and says
+// whether the field tells where the player is. Adding a field to PlayerInfo fails
+// TestRedactPlayerLocation_ClassifiesEveryField until it is listed here, which is
+// the moment to decide whether RedactPlayerLocation has to clear it.
+var playerLocationClassification = map[string]bool{
+	"DisplayName": false, "PartyID": false, "IsReservation": false, "Team": false,
+	"JoinTime": false, "RatingMu": false, "RatingSigma": false, "Username": false,
+	"DiscordID": false, "UserID": false, "EvrID": false, "SessionID": false,
+	"PingMillis": false, "MatchmakingAt": false, "ReservationKind": false,
+	"ReservationExpiry": false, "ReservationID": false,
+	"ClientIP": true, "GeoHash": true,
 }
 
-func TestRedactLocation_ClassifiesEveryField(t *testing.T) {
-	for name, typ := range map[string]reflect.Type{
-		"PlayerInfo":         reflect.TypeOf(PlayerInfo{}),
-		"GameServerPresence": reflect.TypeOf(GameServerPresence{}),
-	} {
-		classified := locationFieldClassification[name]
-		for i := 0; i < typ.NumField(); i++ {
-			if _, ok := classified[typ.Field(i).Name]; !ok {
-				t.Errorf("%s.%s is not classified in locationFieldClassification: decide whether it is location, and teach MatchLabel.RedactLocation if it is", name, typ.Field(i).Name)
-			}
+func TestRedactPlayerLocation_ClassifiesEveryField(t *testing.T) {
+	typ := reflect.TypeOf(PlayerInfo{})
+	for i := 0; i < typ.NumField(); i++ {
+		if _, ok := playerLocationClassification[typ.Field(i).Name]; !ok {
+			t.Errorf("PlayerInfo.%s is not classified in playerLocationClassification: decide whether it says where the player is (it does if it is derived from the player's IP), and teach MatchLabel.RedactPlayerLocation if so", typ.Field(i).Name)
 		}
-		for field := range classified {
-			if _, ok := typ.FieldByName(field); !ok {
-				t.Errorf("locationFieldClassification names %s.%s, which no longer exists", name, field)
-			}
+	}
+	for field := range playerLocationClassification {
+		if _, ok := typ.FieldByName(field); !ok {
+			t.Errorf("playerLocationClassification names PlayerInfo.%s, which no longer exists", field)
 		}
 	}
 }
 
-// fillNonZero sets every field of the struct behind v to a non-zero value, for
-// the fields chosen by want.
-func fillNonZero(t *testing.T, v reflect.Value, typeName string, want bool) {
-	t.Helper()
-	for i := 0; i < v.NumField(); i++ {
-		name := v.Type().Field(i).Name
-		if locationFieldClassification[typeName][name] != want {
-			continue
-		}
-		f := v.Field(i)
-		switch f.Kind() {
-		case reflect.String:
-			f.SetString("x-" + name)
-		case reflect.Float64:
-			f.SetFloat(1.5)
-		case reflect.Int:
-			f.SetInt(7)
-		case reflect.Struct:
-			if f.Type() == reflect.TypeOf(evr.Endpoint{}) {
-				f.Set(reflect.ValueOf(evr.Endpoint{ExternalIP: net.ParseIP("198.51.100.9"), Port: 6792}))
-			}
-		}
-	}
-}
-
-func TestRedactLocation_ClearsEveryLocationFieldAndNothingElse(t *testing.T) {
+func TestRedactPlayerLocation_ClearsEveryLocationFieldAndNothingElse(t *testing.T) {
 	player := PlayerInfo{}
-	fillNonZero(t, reflect.ValueOf(&player).Elem(), "PlayerInfo", true)
-	server := GameServerPresence{}
-	fillNonZero(t, reflect.ValueOf(&server).Elem(), "GameServerPresence", true)
-
-	// Region labels and identity fields the redaction must leave alone.
+	pv := reflect.ValueOf(&player).Elem()
+	for name, isLocation := range playerLocationClassification {
+		if f := pv.FieldByName(name); isLocation && f.Kind() == reflect.String {
+			f.SetString("x-" + name)
+		}
+	}
 	player.Username, player.PingMillis = "kept", 42
-	server.Region, server.DefaultRegion, server.CountryCode = "us-test-1", "us-test-1", "ZZ"
 
-	label := &MatchLabel{Players: []PlayerInfo{player}, GameServer: &server}
-	redacted := label.RedactLocation()
+	server := newLocationTestLabel(t).GameServer
+	label := &MatchLabel{Players: []PlayerInfo{player}, GameServer: server}
+	redacted := label.RedactPlayerLocation()
 
-	rp, rs := redacted.Players[0], redacted.GameServer
-	for name, isLocation := range locationFieldClassification["PlayerInfo"] {
-		if isLocation && !reflect.ValueOf(rp).FieldByName(name).IsZero() {
-			t.Errorf("PlayerInfo.%s survived RedactLocation", name)
+	rp := reflect.ValueOf(redacted.Players[0])
+	for name, isLocation := range playerLocationClassification {
+		if isLocation && !rp.FieldByName(name).IsZero() {
+			t.Errorf("PlayerInfo.%s survived RedactPlayerLocation", name)
 		}
 	}
-	for name, isLocation := range locationFieldClassification["GameServerPresence"] {
-		if isLocation && !reflect.ValueOf(*rs).FieldByName(name).IsZero() {
-			t.Errorf("GameServerPresence.%s survived RedactLocation", name)
-		}
+	if redacted.Players[0].Username != "kept" || redacted.Players[0].PingMillis != 42 {
+		t.Errorf("non-location player fields were cleared: %+v", redacted.Players[0])
 	}
-	if rp.Username != "kept" || rp.PingMillis != 42 {
-		t.Errorf("non-location player fields were cleared: %+v", rp)
-	}
-	if rs.Region != "us-test-1" || rs.DefaultRegion != "us-test-1" || rs.CountryCode != "ZZ" {
-		t.Errorf("match-level region label was cleared: %+v", rs)
+	if redacted.GameServer != server {
+		t.Error("the game server was copied or changed: only players are redacted")
 	}
 
 	// The input is not touched: a privileged reader of the same label still sees it.
-	if label.Players[0].ClientIP == "" || label.Players[0].GeoHash == "" || label.GameServer.GeoHash == "" {
-		t.Error("RedactLocation mutated the label it was given")
+	if label.Players[0].ClientIP == "" || label.Players[0].GeoHash == "" {
+		t.Error("RedactPlayerLocation mutated the label it was given")
 	}
 }
 
-func TestRedactLocation_NilSafe(t *testing.T) {
-	if (*MatchLabel)(nil).RedactLocation() != nil {
+func TestRedactPlayerLocation_NilSafe(t *testing.T) {
+	if (*MatchLabel)(nil).RedactPlayerLocation() != nil {
 		t.Error("nil label must redact to nil")
 	}
-	if got := (&MatchLabel{}).RedactLocation(); got == nil || got.GameServer != nil || got.Players != nil {
+	if got := (&MatchLabel{}).RedactPlayerLocation(); got == nil || got.GameServer != nil || got.Players != nil {
 		t.Errorf("empty label changed shape: %+v", got)
 	}
 }
