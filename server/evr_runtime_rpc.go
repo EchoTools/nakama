@@ -763,8 +763,28 @@ type ServiceStatusService struct {
 }
 
 // the this format is for the `/status/services,news?env=live&projectid=rad14` request
+//
+// With ?components=auth the response is instead {"services": <the response
+// below, unchanged>, "components": {"auth": {"status", "reason"}}}.
 func (h *RPCHandler) ServiceStatusRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	response, err := h.serviceStatusResponse(ctx, nk)
+	if err != nil {
+		return "", err
+	}
 
+	requested := requestedStatusComponents(ctx)
+	if len(requested) == 0 {
+		return response, nil
+	}
+
+	var pinger dbPinger // stays a nil interface when db is nil
+	if db != nil {
+		pinger = db
+	}
+	return h.serviceStatusWithRequestedComponents(ctx, logger, pinger, response, requested)
+}
+
+func (h *RPCHandler) serviceStatusResponse(ctx context.Context, nk runtime.NakamaModule) (string, error) {
 	if cachedResponse, _, found := h.responseCache.Get("server-status"); found {
 		return cachedResponse.(string), nil
 	}
