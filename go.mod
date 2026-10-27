@@ -47,7 +47,7 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20260112192933-99fd39fd28a9
 	google.golang.org/grpc v1.78.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.36.12
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -74,7 +74,7 @@ require (
 )
 
 require (
-	buf.build/gen/go/echotools/nevr-api/protocolbuffers/go v1.36.11-20260320084729-a3dfb29cd431.1
+	buf.build/gen/go/echotools/nevr-api/protocolbuffers/go v1.36.12-20261027024255-259a506a3e1b.2
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/RoaringBitmap/roaring v1.9.4 // indirect
 	github.com/axiomhq/hyperloglog v0.2.5 // indirect
