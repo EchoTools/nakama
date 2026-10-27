@@ -291,6 +291,11 @@ func NewMessageFromHash(hash uint64) Message {
 		return &SNSPartyUpdateMemberFailure{}
 	case 0x451eb6ca40dde289:
 		return &SNSPartyUpdateMemberNotify{}
+	// Store (transaction service)
+	case 0xf1cefc446985b4f5:
+		return &SNSPurchaseItems{}
+	case 0x8d049b8991fc695a:
+		return &SNSPurchaseItemsResult{}
 	// SNS Friends messages — client requests
 	case 0xcdc02fd1dbee3aaa:
 		return &SNSFriendListSubscribeRequest{}

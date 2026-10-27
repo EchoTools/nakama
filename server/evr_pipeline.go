@@ -581,6 +581,10 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 	case *evr.ReconcileIAP:
 		isAuthenticationRequired = false
 		pipelineFn = p.reconcileIAP
+	case *evr.SNSPurchaseItems:
+		// Arrives on the transaction connection, which has no login.
+		isAuthenticationRequired = false
+		pipelineFn = p.purchaseItems
 
 	// Login/Profile Service
 	case *evr.RemoteLogSet:
