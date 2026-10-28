@@ -555,3 +555,111 @@ func TestInviteRegions_RegisteredHandlerRecordsAsInviteRegions(t *testing.T) {
 		t.Errorf("records = %v", w.logs.All())
 	}
 }
+
+// ---- the caller must still belong to the active guild --------------------------
+
+// A player who left the guild they last set as active, or was suspended there,
+// is refused as create refuses them, and the guild's servers are not listed to them.
+func TestInviteRegions_NotAMemberOrSuspendedIsDenied(t *testing.T) {
+	w := newInviteWorld(t)
+	w.regionSet = fiveRegions()
+	w.noAccess[userA] = true
+	_, err := w.regions(userA, map[string]any{})
+	if err == nil {
+		t.Fatal("a caller outside the active guild must be refused")
+	}
+	if got := inviteToken(t, err); got != "denied" {
+		t.Errorf("token = %q, want denied", got)
+	}
+	if w.regionCall != 0 {
+		t.Error("the guild's servers were listed to a caller who may not use them")
+	}
+	if _, err := w.regions(userB, map[string]any{}); err != nil {
+		t.Errorf("another account is refused too: %v", err)
+	}
+}
+
+func TestInviteCreate_NotAMemberOrSuspendedIsDeniedBeforeAnyRegionLookup(t *testing.T) {
+	w := newInviteWorld(t)
+	w.groups[userA] = uuid.Must(uuid.NewV4())
+	w.regionSet = fiveRegions()
+	w.noAccess[userA] = true
+	_, err := w.call(withInviteRecord("create", InviteCreateRPC), userA, map[string]any{"experience": "arena", "region": "us-or-portland"})
+	if err == nil {
+		t.Fatal("a caller outside the active guild must be refused")
+	}
+	if got := inviteToken(t, err); got != "denied" {
+		t.Errorf("token = %q, want denied", got)
+	}
+	if w.regionCall != 0 || len(w.allocs) != 0 {
+		t.Errorf("region lookups = %d, allocations = %d; want none", w.regionCall, len(w.allocs))
+	}
+}
+
+// With no bot to ask, membership cannot be shown, so it is not assumed.
+func TestDefaultInviteGuildAccess_FailsClosedWithoutTheBot(t *testing.T) {
+	prev := globalAppBot.Load()
+	globalAppBot.Store(nil)
+	t.Cleanup(func() { globalAppBot.Store(prev) })
+	ok, err := defaultInviteGuildAccess(context.Background(), newInviteTestNakama(), userA, uuid.Must(uuid.NewV4()))
+	if ok || err == nil {
+		t.Errorf("ok=%v err=%v, want not ok and an error", ok, err)
+	}
+}
+
+// guildAccessTestNakama answers the one call defaultInviteGuildAccess makes.
+type guildAccessTestNakama struct {
+	*inviteTestNakama
+	groups []*api.UserGroupList_UserGroup
+}
+
+func (n *guildAccessTestNakama) UserGroupsList(_ context.Context, _ string, _ int, _ *int, _ string) ([]*api.UserGroupList_UserGroup, string, error) {
+	return n.groups, "", nil
+}
+
+func TestDefaultInviteGuildAccess(t *testing.T) {
+	member := uuid.Must(uuid.NewV4()).String()
+	suspended := uuid.Must(uuid.NewV4()).String()
+	notJoined := uuid.Must(uuid.NewV4()).String()
+	applicant := uuid.Must(uuid.NewV4()).String() // join requested, not yet a member
+
+	gg := func(id string) *GuildGroup {
+		g := seatTestGuildGroup(id, "g", false)
+		g.RoleMap.Suspended = "suspended-role"
+		return g
+	}
+	susp := gg(suspended)
+	susp.State.RoleCache = map[string]map[string]bool{"suspended-role": {userA: true}}
+	reg := seatTestGuildGroupRegistry(map[string]*GuildGroup{member: gg(member), suspended: susp, notJoined: gg(notJoined), applicant: gg(applicant)})
+
+	userGroup := func(id string, state api.UserGroupList_UserGroup_State) *api.UserGroupList_UserGroup {
+		return &api.UserGroupList_UserGroup{Group: &api.Group{Id: id, LangTag: GuildGroupLangTag}, State: wrapperspb.Int32(int32(state))}
+	}
+	nk := &guildAccessTestNakama{inviteTestNakama: newInviteTestNakama(), groups: []*api.UserGroupList_UserGroup{
+		userGroup(member, api.UserGroupList_UserGroup_MEMBER),
+		userGroup(suspended, api.UserGroupList_UserGroup_MEMBER),
+		userGroup(applicant, api.UserGroupList_UserGroup_JOIN_REQUEST),
+	}}
+	prev := globalAppBot.Load()
+	globalAppBot.Store(&DiscordAppBot{guildGroupRegistry: reg})
+	t.Cleanup(func() { globalAppBot.Store(prev) })
+
+	for _, tc := range []struct {
+		name    string
+		groupID string
+		want    bool
+	}{
+		{"a member", member, true},
+		{"a member suspended in that guild", suspended, false},
+		{"a guild the user never joined", notJoined, false},
+		{"a pending join request", applicant, false},
+		{"a guild nobody knows", uuid.Must(uuid.NewV4()).String(), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ok, err := defaultInviteGuildAccess(context.Background(), nk, userA, uuid.FromStringOrNil(tc.groupID))
+			if err != nil || ok != tc.want {
+				t.Errorf("ok=%v err=%v, want %v", ok, err, tc.want)
+			}
+		})
+	}
+}

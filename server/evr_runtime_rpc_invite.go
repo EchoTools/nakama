@@ -526,6 +526,11 @@ func InviteCreateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		return "", inviteRefusal("denied")
 	}
 	rec.groupID = groupID.String()
+	if member, err := inviteGuildAccess(ctx, nk, userID, groupID); err != nil {
+		return "", fmt.Errorf("invite create: guild access: %w", err)
+	} else if !member {
+		return "", inviteRefusal("denied")
+	}
 
 	// Before the allocation: handleCreateMatch spends the creator's rate token
 	// before it reads the history, so a no-history account would be told "rate"

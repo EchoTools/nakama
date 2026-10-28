@@ -39,7 +39,30 @@ var (
 	inviteHasHistory = defaultInviteHasHistory
 	// inviteRegions lists the regions the account can choose from.
 	inviteRegions = defaultInviteRegions
+	// inviteGuildAccess reports whether the caller is a member of the guild group
+	// and not suspended there.
+	inviteGuildAccess = defaultInviteGuildAccess
 )
+
+// defaultInviteGuildAccess is handleCreateMatch's membership and suspension
+// check, asked before anything about the guild's servers is revealed: the active
+// group is a stored choice, and the player may have left or been suspended in it
+// since. Without the bot there is no registry to ask, and membership is not assumed.
+func defaultInviteGuildAccess(ctx context.Context, nk runtime.NakamaModule, userID string, groupID uuid.UUID) (bool, error) {
+	appBot := globalAppBot.Load()
+	if appBot == nil || appBot.guildGroupRegistry == nil {
+		return false, errors.New("the Discord bot is not running")
+	}
+	groups, err := GuildUserGroupsList(ctx, nk, appBot.guildGroupRegistry, userID)
+	if err != nil {
+		return false, err
+	}
+	group, ok := groups[groupID.String()]
+	if !ok {
+		return false, nil
+	}
+	return !group.IsSuspended(userID, nil), nil
+}
 
 func defaultInviteHasHistory(ctx context.Context, nk runtime.NakamaModule, userID string) (bool, error) {
 	history := NewLatencyHistory()
@@ -119,6 +142,11 @@ func InviteRegionsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		return "", inviteRefusal("denied")
 	}
 	rec.groupID = groupID.String()
+	if member, err := inviteGuildAccess(ctx, nk, userID, groupID); err != nil {
+		return "", fmt.Errorf("invite regions: guild access: %w", err)
+	} else if !member {
+		return "", inviteRefusal("denied")
+	}
 
 	hasHistory, err := inviteHasHistory(ctx, nk, userID)
 	if err != nil {

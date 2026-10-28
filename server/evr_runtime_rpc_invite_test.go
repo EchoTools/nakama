@@ -75,6 +75,7 @@ type inviteTestWorld struct {
 	ip     string
 
 	noHistory  map[string]bool // user id -> has no stored latency history
+	noAccess   map[string]bool // user id -> not a member of the active guild, or suspended there
 	regionSet  inviteRegionSet
 	regionsErr error
 	regionCall int
@@ -91,12 +92,16 @@ func newInviteWorld(t *testing.T) *inviteTestWorld {
 		now:       time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC),
 		groups:    map[string]uuid.UUID{},
 		noHistory: map[string]bool{},
+		noAccess:  map[string]bool{},
 		logs:      logs,
 		ip:        "203.0.113.7",
 		logger:    NewRuntimeGoLogger(zap.New(core)),
 	}
 	origNow, origAlloc, origLimiter, origGroup, origCode := inviteNow, inviteAllocate, inviteLimiter, inviteActiveGroup, inviteNewCode
-	origHistory, origRegions := inviteHasHistory, inviteRegions
+	origHistory, origRegions, origAccess := inviteHasHistory, inviteRegions, inviteGuildAccess
+	inviteGuildAccess = func(_ context.Context, _ runtime.NakamaModule, userID string, _ uuid.UUID) (bool, error) {
+		return !w.noAccess[userID], nil
+	}
 	inviteHasHistory = func(_ context.Context, _ runtime.NakamaModule, userID string) (bool, error) {
 		return !w.noHistory[userID], nil
 	}
@@ -123,7 +128,7 @@ func newInviteWorld(t *testing.T) *inviteTestWorld {
 	}
 	t.Cleanup(func() {
 		inviteNow, inviteAllocate, inviteLimiter, inviteActiveGroup, inviteNewCode = origNow, origAlloc, origLimiter, origGroup, origCode
-		inviteHasHistory, inviteRegions = origHistory, origRegions
+		inviteHasHistory, inviteRegions, inviteGuildAccess = origHistory, origRegions, origAccess
 	})
 	return w
 }
