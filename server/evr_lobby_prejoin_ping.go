@@ -88,6 +88,10 @@ func (p *EvrPipeline) prewarmEntrantPings(ctx context.Context, logger *zap.Logge
 	waiters := make([]waiterEntry, 0, len(entrants))
 
 	for _, ent := range entrants {
+		if ent.ReservationOnly {
+			continue
+		}
+
 		sess := p.nk.sessionRegistry.Get(ent.SessionID)
 		if sess == nil {
 			continue
@@ -217,9 +221,16 @@ func (p *EvrPipeline) validatePreJoinPing(
 		history  *LatencyHistory
 	}
 
-	// Gather sessions and latency histories for all entrants.
+	// Gather sessions and latency histories for the entrants that are joining.
+	// A reservation placeholder is a party member who has not started their own
+	// find; if they are online without being in a match they never answer the
+	// ping, and counting them failed the check for every member who was joining
+	// (#714). Their own join runs this check for them.
 	checks := make([]memberCheck, 0, len(entrants))
 	for _, ent := range entrants {
+		if ent.ReservationOnly {
+			continue
+		}
 		sess := p.nk.sessionRegistry.Get(ent.SessionID)
 		if sess == nil {
 			// Session gone; skip (will fail at join attempt anyway).
@@ -401,6 +412,22 @@ func (p *EvrPipeline) validatePreJoinPing(
 	)
 	if _, err := p.appBot.LogUserErrorMessage(ctx, groupID, errorMsg, false); err != nil {
 		logger.Warn("Failed to send pre-join ping error message", zap.Error(err))
+	}
+
+	// The first entrant is the session running this find. If every failure is
+	// someone else, the player did nothing wrong: say it was their party rather
+	// than "internal error". The wrapped sentinel is the same either way, so
+	// callers still skip the server.
+	initiatorFailed := false
+	for _, f := range failures {
+		if len(entrants) > 0 && f.SessionID == entrants[0].SessionID {
+			initiatorFailed = true
+			break
+		}
+	}
+	if !initiatorFailed {
+		return fmt.Errorf("%w: %w", ErrPreJoinPingFailed, NewLobbyErrorf(BadRequest, "party member could not reach server %s (%d of %d party members failed the ping check)",
+			endpoint.ExternalAddress(), len(failures), len(entrants)))
 	}
 
 	return fmt.Errorf("%w: %w", ErrPreJoinPingFailed, NewLobbyErrorf(InternalError, "pre-join ping validation failed: %d of %d party members could not reach server %s",
