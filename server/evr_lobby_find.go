@@ -1524,6 +1524,8 @@ func appendPartyReservationPlaceholders(logger *zap.Logger, entrants []*EvrMatch
 			PartyID:       lobbyParams.PartyID,
 			RoleAlignment: evr.TeamSocial,
 			Node:          node,
+
+			ReservationOnly: true,
 		}
 		entrants = append(entrants, placeholder)
 		logger.Debug("Added party reservation placeholder",
