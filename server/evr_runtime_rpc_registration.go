@@ -106,6 +106,7 @@ func buildEVRRPCRegistrations(rpcHandler *RPCHandler, sbmm *SkillBasedMatchmaker
 		{ID: "party/kick", Handler: PartyKickRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 		{ID: "party/promote", Handler: PartyPromoteRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 		{ID: "party/members", Handler: PartyListMembersRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+		{ID: "party/mine", Handler: PartyMineRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 
 		// Match management
 		{ID: "match/public", Handler: rpcHandler.MatchListPublicRPC, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
