@@ -423,16 +423,20 @@ func PartyMineRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 	}()
 
 	store := NewPartyRosterStore(nk)
-	roster, err := store.Mine(ctx, userID)
-	if err != nil {
-		logger.WithField("error", err).Error("failed to load party roster")
-		return "", runtime.NewError("failed to load party", StatusInternalError)
-	}
-
 	resp := struct {
 		Party *PartyMineParty `json:"party"`
 	}{}
-	if roster != nil {
+	// Twice: an expiry that loses to a join landing in between looks at the roster again, now fresh.
+	for range 2 {
+		roster, err := store.Mine(ctx, userID)
+		if err != nil {
+			logger.WithField("error", err).Error("failed to load party roster")
+			return "", runtime.NewError("failed to load party", StatusInternalError)
+		}
+		if roster == nil {
+			outcome = "none"
+			break
+		}
 		partyID = roster.PartyID
 		party := &PartyMineParty{PartyID: roster.PartyID, LeaderID: roster.LeaderID, UpdatedAt: roster.UpdatedAt, Members: make([]PartyMineMember, 0, len(roster.Members))}
 		anyOnline := false
@@ -441,16 +445,22 @@ func PartyMineRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 			anyOnline = anyOnline || online
 			party.Members = append(party.Members, PartyMineMember{UserID: m.UserID, Username: m.Username, Leader: m.UserID == roster.LeaderID, Online: online})
 		}
-		if !anyOnline && store.now().Sub(roster.UpdatedAt) > partyRosterRetention {
-			if err := store.Delete(ctx, roster.PartyID); err != nil {
-				logger.WithField("error", err).Warn("failed to delete expired party roster")
-			}
-			outcome = "expired"
-		} else {
+		if anyOnline || store.now().Sub(roster.UpdatedAt) <= partyRosterRetention {
 			resp.Party, members, outcome = party, len(party.Members), "ok"
+			break
 		}
-	} else {
-		outcome = "none"
+		err = store.DeleteIfUnchanged(ctx, roster)
+		if partyRosterConflict(err) {
+			continue
+		}
+		if err != nil {
+			logger.WithField("error", err).Warn("failed to delete expired party roster")
+		}
+		outcome = "expired"
+		break
+	}
+	if outcome == "error" {
+		outcome = "contended" // both looks lost to a concurrent change: nothing to report this call
 	}
 
 	out, err := json.Marshal(resp)

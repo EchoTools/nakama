@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
+	"google.golang.org/grpc/codes"
 
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
@@ -22,19 +24,30 @@ import (
 type rosterTestNK struct {
 	*occTestNakamaModule
 	online map[string]bool
+
+	beforeDelete func()
 }
 
 func newRosterTestNK() *rosterTestNK {
 	return &rosterTestNK{occTestNakamaModule: newOCCTestNakamaModule(), online: map[string]bool{}}
 }
 
+// StorageDelete answers a versioned delete that matched nothing the way the storage layer does
+// (core_storage.go, rowsAffected == 0): a StatusError(InvalidArgument), NOT runtime.ErrStorageRejectedVersion.
+// beforeDelete, if set, runs once before the first delete, to land a concurrent write in the gap between
+// the caller's read and its delete.
 func (n *rosterTestNK) StorageDelete(_ context.Context, deletes []*runtime.StorageDelete) error {
+	if hook := n.beforeDelete; hook != nil {
+		n.beforeDelete = nil
+		hook()
+	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	for _, d := range deletes {
 		k := occStorageKey(d.UserID, d.Collection, d.Key)
-		if cur, ok := n.objects[k]; ok && d.Version != "" && d.Version != "*" && cur.Version != d.Version {
-			return runtime.ErrStorageRejectedVersion
+		cur, ok := n.objects[k]
+		if d.Version != "" && d.Version != "*" && (!ok || cur.Version != d.Version) {
+			return StatusError(codes.InvalidArgument, "Storage delete rejected.", errors.New("Storage delete rejected - not found, version check failed, or permission denied."))
 		}
 		delete(n.objects, k)
 	}
@@ -58,6 +71,14 @@ func (n *rosterTestNK) roster(t *testing.T, partyID string) *PartyRoster {
 	r := &PartyRoster{}
 	require.NoError(t, json.Unmarshal([]byte(objs[0].Value), r))
 	return r
+}
+
+func (n *rosterTestNK) rawRoster(t *testing.T, partyID string) string {
+	t.Helper()
+	objs, err := n.StorageRead(context.Background(), []*runtime.StorageRead{{Collection: PartyRosterCollection, Key: partyID, UserID: SystemUserID}})
+	require.NoError(t, err)
+	require.Len(t, objs, 1)
+	return objs[0].Value
 }
 
 func (n *rosterTestNK) pointer(t *testing.T, userID string) string {
@@ -254,6 +275,51 @@ func TestPartyRosterNilStoreRecordsNothing(t *testing.T) {
 	require.NoError(t, store.SetLeader("p", a.UserID))
 }
 
+// The last member leaving deletes the roster with a versioned delete. When that loses to a write that
+// landed in between, the storage layer answers with a StatusError, not ErrStorageRejectedVersion; the leave
+// must read again and finish, not stop with the leaver still listed.
+func TestPartyRosterLastLeaveRetriesAConflictedDelete(t *testing.T) {
+	nk := newRosterTestNK()
+	store := NewPartyRosterStore(nk)
+	partyID := uuid.Must(uuid.NewV4()).String()
+	aID, a := rosterMember("a")
+	require.NoError(t, store.Join(partyID, "", a))
+
+	// Something rewrites the roster (same members) between the leave's read and its delete.
+	nk.beforeDelete = func() {
+		nk.seedObject(SystemUserID, PartyRosterCollection, partyID, nk.rawRoster(t, partyID))
+	}
+
+	require.NoError(t, store.Leave(partyID, aID, ""))
+
+	require.Nil(t, nk.roster(t, partyID), "the leaver stayed listed after a conflicted delete")
+	require.Empty(t, nk.pointer(t, aID))
+}
+
+// A member who joins while the last member's delete is in flight keeps the party: the retry sees them.
+func TestPartyRosterLeaveRetryKeepsAMemberWhoJoinedMeanwhile(t *testing.T) {
+	nk := newRosterTestNK()
+	store := NewPartyRosterStore(nk)
+	partyID := uuid.Must(uuid.NewV4()).String()
+	aID, a := rosterMember("a")
+	bID, b := rosterMember("b")
+	require.NoError(t, store.Join(partyID, "", a))
+
+	nk.beforeDelete = func() {
+		r := nk.roster(t, partyID)
+		r.Members = append(r.Members, b)
+		data, err := json.Marshal(r)
+		require.NoError(t, err)
+		nk.seedObject(SystemUserID, PartyRosterCollection, partyID, string(data))
+	}
+
+	require.NoError(t, store.Leave(partyID, aID, ""))
+
+	r := nk.roster(t, partyID)
+	require.NotNil(t, r, "the joiner's party was deleted with the leaver")
+	require.Equal(t, []string{bID}, memberIDs(r))
+}
+
 // --- party/mine ---
 
 func rosterRPCContext(userID string) context.Context {
@@ -368,6 +434,29 @@ func TestPartyMineRetention(t *testing.T) {
 		require.NotNil(t, resp.Party)
 		require.NotNil(t, nk.roster(t, partyID))
 	})
+}
+
+// The expiry delete is versioned: a join that lands between party/mine's read and its delete keeps the
+// party, and the caller is shown it.
+func TestPartyMineExpiryLosesToAJoinThatLandsFirst(t *testing.T) {
+	nk := newRosterTestNK()
+	store := NewPartyRosterStore(nk)
+	store.now = func() time.Time { return time.Now().UTC().Add(-(partyRosterRetention + time.Hour)) }
+	partyID := uuid.Must(uuid.NewV4()).String()
+	aID, a := rosterMember("alpha")
+	bID, b := rosterMember("bravo")
+	require.NoError(t, store.Join(partyID, "", a))
+
+	nk.beforeDelete = func() {
+		require.NoError(t, NewPartyRosterStore(nk).Join(partyID, "", b)) // now, so fresh
+	}
+
+	resp, _ := callPartyMine(t, nk, aID)
+
+	require.NotNil(t, resp.Party, "the join that landed first was wiped by the expiry")
+	require.Len(t, resp.Party.Members, 2)
+	require.Equal(t, bID, resp.Party.Members[1].UserID)
+	require.NotNil(t, nk.roster(t, partyID))
 }
 
 // AGENTS.md logging rule: one structured record per call, attributable, with the

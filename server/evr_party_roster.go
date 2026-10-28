@@ -11,6 +11,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
 )
 
 // A party roster is the persisted shadow of an in-game (SNS) party: who is in
@@ -58,6 +59,9 @@ type PartyRoster struct {
 	LeaderID  string              `json:"leader_id"`
 	Members   []PartyRosterMember `json:"members"`
 	UpdatedAt time.Time           `json:"updated_at"`
+
+	// version is the storage version this roster was read at, "" for one not read from storage.
+	version string
 }
 
 func (r *PartyRoster) hasMember(userID string) bool {
@@ -79,6 +83,15 @@ func NewPartyRosterStore(nk runtime.NakamaModule) *PartyRosterStore {
 	return &PartyRosterStore{nk: nk, now: func() time.Time { return time.Now().UTC() }}
 }
 
+// partyRosterConflict reports whether err is storage refusing a versioned write or delete because the
+// object changed (or is gone). A write says so with runtime.ErrStorageRejectedVersion; a delete does not:
+// StorageDeleteObjects returns a StatusError(InvalidArgument, "Storage delete rejected.") for a versioned
+// delete that matched no row (core_storage.go, rowsAffected == 0), which is not that sentinel.
+func partyRosterConflict(err error) bool {
+	var se *statusError
+	return errors.Is(err, runtime.ErrStorageRejectedVersion) || (errors.As(err, &se) && se.Code() == codes.InvalidArgument)
+}
+
 // readRoster returns the roster and its storage version, or (nil, "", nil) if there is none.
 func (s *PartyRosterStore) readRoster(ctx context.Context, partyID string) (*PartyRoster, string, error) {
 	objs, err := s.nk.StorageRead(ctx, []*runtime.StorageRead{{Collection: PartyRosterCollection, Key: partyID, UserID: SystemUserID}})
@@ -92,6 +105,7 @@ func (s *PartyRosterStore) readRoster(ctx context.Context, partyID string) (*Par
 	if err := json.Unmarshal([]byte(objs[0].Value), roster); err != nil {
 		return nil, "", fmt.Errorf("decode roster %s: %w", partyID, err)
 	}
+	roster.version = objs[0].Version
 	return roster, objs[0].Version, nil
 }
 
@@ -124,8 +138,8 @@ func (s *PartyRosterStore) updateRoster(ctx context.Context, partyID string, fn 
 				Value: string(data), Version: version, PermissionRead: 0, PermissionWrite: 0,
 			}})
 		}
-		if errors.Is(err, runtime.ErrStorageRejectedVersion) {
-			continue
+		if partyRosterConflict(err) {
+			continue // the roster changed under us: read it again and reapply
 		}
 		return roster, err
 	}
@@ -277,10 +291,11 @@ func (s *PartyRosterStore) Mine(ctx context.Context, userID string) (*PartyRoste
 	return roster, nil
 }
 
-// Delete removes a roster outright. Members' pointers are left: with no roster
-// behind them they resolve to nothing.
-func (s *PartyRosterStore) Delete(ctx context.Context, partyID string) error {
-	return s.nk.StorageDelete(ctx, []*runtime.StorageDelete{{Collection: PartyRosterCollection, Key: partyID, UserID: SystemUserID}})
+// DeleteIfUnchanged removes a roster as it was read (by Mine), and only if it has not changed since: a
+// member who joined in between keeps the party. A conflict is returned for the caller to check with
+// partyRosterConflict. Members' pointers are left: with no roster behind them they resolve to nothing.
+func (s *PartyRosterStore) DeleteIfUnchanged(ctx context.Context, roster *PartyRoster) error {
+	return s.nk.StorageDelete(ctx, []*runtime.StorageDelete{{Collection: PartyRosterCollection, Key: roster.PartyID, UserID: SystemUserID, Version: roster.version}})
 }
 
 // partyLeaderUserID is the user who leads the in-memory party, or "" when the
