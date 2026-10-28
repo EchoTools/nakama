@@ -106,6 +106,7 @@ func buildEVRRPCRegistrations(rpcHandler *RPCHandler, sbmm *SkillBasedMatchmaker
 		{ID: "party/kick", Handler: PartyKickRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 		{ID: "party/promote", Handler: PartyPromoteRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 		{ID: "party/members", Handler: PartyListMembersRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+		{ID: "party/mine", Handler: PartyMineRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 
 		// Invite codes for the CREATE GAME / JOIN VIA CODE wizard (ADR 0017). Any
 		// signed-in player may use them; the guild checks run inside create, and
