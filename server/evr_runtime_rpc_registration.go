@@ -107,6 +107,13 @@ func buildEVRRPCRegistrations(rpcHandler *RPCHandler, sbmm *SkillBasedMatchmaker
 		{ID: "party/promote", Handler: PartyPromoteRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 		{ID: "party/members", Handler: PartyListMembersRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 
+		// Invite codes for the CREATE GAME / JOIN VIA CODE wizard (ADR 0017). Any
+		// signed-in player may use them; the guild checks run inside create, and
+		// the join that follows a resolve runs the usual guild authorization.
+		{ID: "invite/create", Handler: withInviteRecord("create", InviteCreateRPC), Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+		{ID: "invite/resolve", Handler: withInviteRecord("resolve", InviteResolveRPC), Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+		{ID: "invite/revoke", Handler: withInviteRecord("revoke", InviteRevokeRPC), Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+
 		// Match management
 		{ID: "match/public", Handler: rpcHandler.MatchListPublicRPC, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
 		{ID: "match", Handler: MatchRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
