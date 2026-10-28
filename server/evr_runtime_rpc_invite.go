@@ -30,9 +30,11 @@ import (
 // it names runs the same guild authorization as any join by id (D2).
 //
 // A refusal is a runtime.Error whose message is exactly one token the client
-// maps to the wizard's text: invalid, expired, closed, denied, limit, rate. The
-// one extra, "unavailable", is create finding no server; the client reads
-// nothing else from the message.
+// maps to the wizard's text: invalid, expired, closed, denied, limit, rate. Two
+// extras: "unavailable" is create finding no server for an account that has
+// latency history, and "no_history" is the account having none (invite/regions
+// and invite/create both answer it); the client reads nothing else from the
+// message.
 
 const (
 	// InviteCodeCollection holds one object per code, owned by the system user,
@@ -108,6 +110,8 @@ func inviteRefusal(token string) error {
 	case "unavailable":
 		code = StatusUnavailable
 	}
+	// "no_history" stays INVALID_ARGUMENT (HTTP 400), like "invalid": the request
+	// cannot be served for this account until it has played.
 	return runtime.NewError(token, code)
 }
 
@@ -523,6 +527,29 @@ func InviteCreateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	}
 	rec.groupID = groupID.String()
 
+	// Before the allocation: handleCreateMatch spends the creator's rate token
+	// before it reads the history, so a no-history account would be told "rate"
+	// on its second try.
+	hasHistory, err := inviteHasHistory(ctx, nk, userID)
+	if err != nil {
+		return "", fmt.Errorf("invite create: latency history: %w", err)
+	}
+	if !hasHistory {
+		return "", inviteRefusal("no_history")
+	}
+	// "default" and "" take the allocator's own choice by ping. Any other region
+	// must be a code of a server the guild has; one that is known but full now is
+	// left to the allocation, which answers "unavailable".
+	if req.Region != "" && req.Region != RegionDefault {
+		set, err := inviteRegions(ctx, logger, nk, userID, groupID)
+		if err != nil {
+			return "", fmt.Errorf("invite create: regions: %w", err)
+		}
+		if !set.Known[req.Region] {
+			return "", inviteRefusal("invalid")
+		}
+	}
+
 	live, err := liveInviteCodes(ctx, nk, userID)
 	if err != nil {
 		return "", fmt.Errorf("invite create: live codes: %w", err)
@@ -633,6 +660,9 @@ func liveInviteCodes(ctx context.Context, nk runtime.NakamaModule, ownerID strin
 }
 
 func inviteAllocationToken(err error) string {
+	if errors.Is(err, ErrNoLatencyHistory) {
+		return "no_history"
+	}
 	switch status.Code(err) {
 	case codes.PermissionDenied:
 		return "denied"
