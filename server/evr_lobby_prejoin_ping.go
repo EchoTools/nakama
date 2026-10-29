@@ -294,7 +294,6 @@ func (p *EvrPipeline) validatePreJoinPing(
 	for i := range pending {
 		np := &pending[i]
 		np.waiter = registerPreJoinPingWaiter(np.presence.SessionID)
-		np.sentAt = time.Now()
 		if err := SendEVRMessages(np.session, true, evr.NewLobbyPingRequest(preJoinPingRTTMax, []evr.Endpoint{endpoint})); err != nil {
 			cleanupPreJoinPingWaiter(np.presence.SessionID)
 			np.waiter = nil
@@ -303,6 +302,7 @@ func (p *EvrPipeline) validatePreJoinPing(
 				zap.String("sid", np.presence.SessionID.String()),
 				zap.Error(err))
 		} else {
+			np.sentAt = time.Now()
 			logger.Info("Pre-join ping sent",
 				zap.String("uid", np.presence.UserID.String()),
 				zap.String("sid", np.presence.SessionID.String()),
