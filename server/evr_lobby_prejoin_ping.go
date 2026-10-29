@@ -430,8 +430,7 @@ func (p *EvrPipeline) validatePreJoinPing(
 			endpoint.ExternalAddress(), len(failures), len(entrants)))
 	}
 
-	return fmt.Errorf("%w: %w", ErrPreJoinPingFailed, NewLobbyErrorf(InternalError, "pre-join ping validation failed: %d of %d party members could not reach server %s",
-		len(failures), len(entrants), endpoint.ExternalAddress()))
+	return fmt.Errorf("%w: %w", ErrPreJoinPingFailed, NewLobbyErrorf(ServerFindFailed, "your connection to that server is too slow or unreachable"))
 }
 
 // isPrivateMatch returns true if the mode is a private lobby that should

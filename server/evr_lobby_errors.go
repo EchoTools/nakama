@@ -184,8 +184,12 @@ func LobbySessionFailureFromError(mode evr.Symbol, groupID uuid.UUID, err error)
 		// If the error is a wrapped LobbyError, use the code and original message
 	} else if errors.As(err, &lErr) {
 		code = evr.LobbySessionFailureErrorCode(lErr.code)
-		// Keep the original message.
+		// Keep the original message, except for a pre-join ping failure: its
+		// chain text is internal detail, so the player gets the plain message.
 		message = err.Error()
+		if errors.Is(err, ErrPreJoinPingFailed) {
+			message = lErr.Message()
+		}
 
 	} else if status.Code(err) != codes.Unknown {
 		// This is a grpc status error.

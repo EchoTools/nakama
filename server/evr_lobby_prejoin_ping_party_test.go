@@ -177,11 +177,10 @@ func TestPrewarmEntrantPings_SkipsReservationPlaceholders(t *testing.T) {
 // is their party, not "internal error"; when it is the player themself, the
 // code is unchanged.
 func TestValidatePreJoinPing_FailureAttribution(t *testing.T) {
-	w := newPingTestWorld(t)
-
+	// Each subtest builds its own world and runs serially: the world writes to
+	// shared maps and newPingTestWorld sets global service settings.
 	t.Run("joining party member silent: tells the player it is the party", func(t *testing.T) {
-		// Not parallel: partyOfTwo writes the shared registry map, and the
-		// parallel siblings race on it (concurrent map read and write).
+		w := newPingTestWorld(t)
 		entrants, _, _ := w.partyOfTwo(t, 79, 0)
 		// Both members are joining: the leader is a real entrant, not a placeholder.
 		entrants[1] = &EvrMatchPresence{SessionID: entrants[1].SessionID, UserID: entrants[1].UserID, Username: "leader"}
@@ -199,6 +198,7 @@ func TestValidatePreJoinPing_FailureAttribution(t *testing.T) {
 	})
 
 	t.Run("the player themself silent: coded, plain message, never internal error", func(t *testing.T) {
+		w := newPingTestWorld(t)
 		entrants, _, _ := w.partyOfTwo(t, 0, 79)
 		entrants[1] = &EvrMatchPresence{SessionID: entrants[1].SessionID, UserID: entrants[1].UserID, Username: "leader"}
 
