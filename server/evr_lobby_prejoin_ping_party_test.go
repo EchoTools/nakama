@@ -205,13 +205,13 @@ func TestValidatePreJoinPing_FailureAttribution(t *testing.T) {
 		err := w.pipeline.validatePreJoinPing(context.Background(), zap.NewNop(), w.label, entrants)
 
 		require.ErrorIs(t, err, ErrPreJoinPingFailed)
-		assert.Equal(t, ServerFindFailed, LobbyErrorCode(err), "the initiator's own failure is a coded server-find failure")
+		assert.Equal(t, Timeout, LobbyErrorCode(err), "the initiator's own failure is a coded timeout, which the client shows as Timeout")
 		assert.NotEqual(t, InternalError, LobbyErrorCode(err), "the initiator's own failure is never an internal error")
 
 		msg, ok := LobbySessionFailureFromError(evr.ModeSocialPublic, uuid.Nil, err).(*evr.LobbySessionFailurev4)
 		require.True(t, ok, "the outgoing message must be a LobbySessionFailure v4")
 		assert.NotEqual(t, evr.LobbySessionFailure_InternalError, msg.ErrorCode, "the player must not be told internal error")
-		assert.Equal(t, evr.LobbySessionFailure_ServerFindFailed, msg.ErrorCode)
+		assert.Equal(t, evr.LobbySessionFailure_Timeout_ServerFindFailed, msg.ErrorCode)
 		assert.Equal(t, "your connection to that server is too slow or unreachable", msg.Message, "the player gets the plain message only")
 	})
 }
