@@ -147,6 +147,7 @@ func (p *EvrPipeline) postLobbyErrorAudit(ctx context.Context, groupID, message 
 
 // lobbyPingResponse is a message responding to a ping request.
 func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+	receivedAt := time.Now()
 	response, ok := in.(*evr.LobbyPingResponse)
 	if !ok {
 		return fmt.Errorf("expected *evr.LobbyPingResponse, got %T", in)
@@ -234,7 +235,14 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 	}
 
 	// Signal any pre-join ping waiter for this session.
-	notifyPreJoinPingWaiter(session.ID())
+	if notifyPreJoinPingWaiter(session.ID()) {
+		logger.Info("Pre-join ping response delivered",
+			zap.String("uid", session.UserID().String()),
+			zap.String("sid", session.ID().String()),
+			zap.Int64("handler_ms", time.Since(receivedAt).Milliseconds()),
+			zap.Int("results", len(response.Results)),
+		)
+	}
 
 	return nil
 }

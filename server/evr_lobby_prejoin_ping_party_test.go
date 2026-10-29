@@ -177,11 +177,10 @@ func TestPrewarmEntrantPings_SkipsReservationPlaceholders(t *testing.T) {
 // is their party, not "internal error"; when it is the player themself, the
 // code is unchanged.
 func TestValidatePreJoinPing_FailureAttribution(t *testing.T) {
-	w := newPingTestWorld(t)
-
+	// Each subtest builds its own world and runs serially: the world writes to
+	// shared maps and newPingTestWorld sets global service settings.
 	t.Run("joining party member silent: tells the player it is the party", func(t *testing.T) {
-		// Not parallel: partyOfTwo writes the shared registry map, and the
-		// parallel siblings race on it (concurrent map read and write).
+		w := newPingTestWorld(t)
 		entrants, _, _ := w.partyOfTwo(t, 79, 0)
 		// Both members are joining: the leader is a real entrant, not a placeholder.
 		entrants[1] = &EvrMatchPresence{SessionID: entrants[1].SessionID, UserID: entrants[1].UserID, Username: "leader"}
@@ -191,15 +190,28 @@ func TestValidatePreJoinPing_FailureAttribution(t *testing.T) {
 		require.ErrorIs(t, err, ErrPreJoinPingFailed, "the caller still skips the server on this error")
 		assert.NotEqual(t, InternalError, LobbyErrorCode(err), "a party member's failure is not an internal error")
 		assert.Contains(t, err.Error(), "party", "the message must say it is the party")
+
+		msg, ok := LobbySessionFailureFromError(evr.ModeSocialPublic, uuid.Nil, err).(*evr.LobbySessionFailurev4)
+		require.True(t, ok, "the outgoing message must be a LobbySessionFailure v4")
+		assert.NotEqual(t, evr.LobbySessionFailure_InternalError, msg.ErrorCode, "the player must not be told internal error")
+		assert.Contains(t, msg.Message, "party", "the outgoing message must say it is the party")
 	})
 
-	t.Run("the player themself silent: still an internal error", func(t *testing.T) {
+	t.Run("the player themself silent: coded, plain message, never internal error", func(t *testing.T) {
+		w := newPingTestWorld(t)
 		entrants, _, _ := w.partyOfTwo(t, 0, 79)
 		entrants[1] = &EvrMatchPresence{SessionID: entrants[1].SessionID, UserID: entrants[1].UserID, Username: "leader"}
 
 		err := w.pipeline.validatePreJoinPing(context.Background(), zap.NewNop(), w.label, entrants)
 
 		require.ErrorIs(t, err, ErrPreJoinPingFailed)
-		assert.Equal(t, InternalError, LobbyErrorCode(err), "the initiator's own failure keeps its code")
+		assert.Equal(t, Timeout, LobbyErrorCode(err), "the initiator's own failure is a coded timeout, which the client shows as Timeout")
+		assert.NotEqual(t, InternalError, LobbyErrorCode(err), "the initiator's own failure is never an internal error")
+
+		msg, ok := LobbySessionFailureFromError(evr.ModeSocialPublic, uuid.Nil, err).(*evr.LobbySessionFailurev4)
+		require.True(t, ok, "the outgoing message must be a LobbySessionFailure v4")
+		assert.NotEqual(t, evr.LobbySessionFailure_InternalError, msg.ErrorCode, "the player must not be told internal error")
+		assert.Equal(t, evr.LobbySessionFailure_Timeout_ServerFindFailed, msg.ErrorCode)
+		assert.Equal(t, "your connection to that server is too slow or unreachable", msg.Message, "the player gets the plain message only")
 	})
 }
