@@ -326,7 +326,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	} else {
 		switch action {
 		case vibinatorsGravityJoinMatch:
-			if err := p.LobbyJoinEntrants(logger, label, entrants...); err != nil {
+			if err := p.joinPartyEntrants(logger, "vibinator", label, entrants...); err != nil {
 				logger.Warn("vibinatorsGravity: join failed, continuing normally", zap.Error(err))
 			} else {
 				return nil
@@ -798,7 +798,7 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 						zap.Error(err))
 				}
 				if err == nil && lobbyGroup != nil {
-					if reservationMatchID, found := p.findReservation(ctx, logger, ws, lobbyGroup); found {
+					if reservationMatchID, found := p.findReservation(ctx, logger, ws, lobbyGroup); found && p.reservationFits(ctx, logger, reservationMatchID, entrants) {
 						logger.Info("Found party reservation in social lobby path, joining directly",
 							zap.String("reservation_mid", reservationMatchID.String()))
 						if err := p.lobbyJoin(ctx, logger, ws, lobbyParams, reservationMatchID); err != nil {
@@ -869,7 +869,7 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 
 								if leaderMatch != nil && leaderMatch.State.IsSocial() {
 									logger.Info("Priority join: Found party leader's social lobby", zap.String("mid", leaderMatchID.String()))
-									if err := p.LobbyJoinEntrants(logger, leaderMatch.State, entrants...); err == nil {
+									if err := p.joinPartyEntrants(logger, "priority_leader", leaderMatch.State, entrants...); err == nil {
 										return nil
 									} else {
 										logger.Warn("Failed priority join to leader's lobby", zap.Error(err))
@@ -917,7 +917,7 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 
 									if followerMatch != nil && followerMatch.State.IsSocial() {
 										logger.Info("Priority join: Leader joining follower's social lobby", zap.String("mid", memberMatchID.String()))
-										if err := p.LobbyJoinEntrants(logger, followerMatch.State, entrants...); err == nil {
+										if err := p.joinPartyEntrants(logger, "priority_follower", followerMatch.State, entrants...); err == nil {
 											return nil
 										} else {
 											logger.Warn("Failed priority join to follower's lobby", zap.Error(err))
@@ -952,7 +952,7 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 			logger.Debug("Joining social lobby.")
 			p.nk.metrics.CustomCounter("lobby_join_backfill", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
 
-			if err := p.LobbyJoinEntrants(logger, l, entrants...); err != nil {
+			if err := p.joinPartyEntrants(logger, "social_search", l, entrants...); err != nil {
 				if LobbyErrorCode(err) == ServerIsFull {
 					logger.Debug("Server is full, ignoring.")
 					continue
@@ -1703,6 +1703,18 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 		return false
 	}
 
+	// Capacity pre-check: the follower alone against the leader's lobby, counted the
+	// way the join gate counts it. A refused follow exits as a failed follow does.
+	if err := checkPartyCapacity(logger, "follow", label, &EvrMatchPresence{
+		SessionID: session.id,
+		UserID:    session.userID,
+	}); err != nil {
+		if params.CurrentMatchID.IsNil() {
+			return false
+		}
+		return p.pollFollowPartyLeader(ctx, logger, session, params, lobbyGroup)
+	}
+
 	// Try to join the leader's match.
 	logger.Debug("Joining leader's lobby", zap.String("mid", leaderMatchID.String()))
 	if err := p.lobbyJoin(ctx, logger, session, params, leaderMatchID); err != nil {
@@ -2070,6 +2082,22 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		}
 		return true
 	}
+}
+
+// reservationFits is the reservation path's capacity pre-check. entrants[0] is the
+// joiner, checked alone against the reserved lobby as the gate counts it. A lobby
+// that cannot be loaded is not refused here; lobbyJoin reports that as it always has.
+func (p *EvrPipeline) reservationFits(ctx context.Context, logger *zap.Logger, mid MatchID, entrants []*EvrMatchPresence) bool {
+	if len(entrants) == 0 {
+		return true
+	}
+	label, err := MatchLabelByID(ctx, p.nk, mid)
+	if err != nil || label == nil {
+		logger.Warn("Failed to load reserved lobby for capacity check; joining without pre-check",
+			zap.String("mid", mid.String()), zap.Error(err))
+		return true
+	}
+	return checkPartyCapacity(logger, "reservation", label, entrants[:1]...) == nil
 }
 
 // findReservation checks whether the party leader's current match has a

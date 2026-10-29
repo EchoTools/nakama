@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
@@ -44,8 +45,6 @@ import (
 //   P4 follow            TryFollowPartyLeader joins the leader's lobby
 //   P5 social_search     the generic social search loop
 //   P6 vibinator         vibinator's gravity join (not drivable, see its test)
-
-const partyJoinSkippedMsg = "party join skipped: insufficient capacity"
 
 // partyCapFixture wires a tablet-party pipeline (real party registry and
 // matchmaker) to the fake match registry, so the real find functions run.
@@ -286,11 +285,11 @@ func TestPartyJoinCapacity_P2_LeaderJoinsFollowerSocialLobby(t *testing.T) {
 // TestPartyJoinCapacity_P3_ReservationPath drives the reservation path in
 // lobbyFindOrCreateSocial. The lobby holds the joiner's own reservation and is
 // overbooked: Size 12, ReservationCount 1, so OpenSlots() == -1 and the real gate
-// also refuses (reservation_violated). The reservation path's own attempt is the
-// "Found party reservation" Info record with reservation_mid, followed by the
-// lobbyJoin failure Warn. The LobbyJoinEntrants count is NOT asserted here: the
-// generic priority joins after the reservation path also reach it, so it would
-// not be P3's own signal.
+// also refuses (reservation_violated). On main the reservation path's own attempt
+// is the Info "Found party reservation" record (reservation_mid) followed by the
+// lobbyJoin failure Warn. The fix must leave neither record, and must log the skip.
+// The LobbyJoinEntrants count is NOT asserted here: the generic priority joins
+// that run after the reservation path also reach it, so it is not P3's own signal.
 func TestPartyJoinCapacity_P3_ReservationPath(t *testing.T) {
 	f := newPartyCapFixture(t)
 	leader := f.session("leader", true)
@@ -309,9 +308,9 @@ func TestPartyJoinCapacity_P3_ReservationPath(t *testing.T) {
 
 	_ = f.env.ep.lobbyFindOrCreateSocial(member.Context(), f.logger, member, lobbyParams, group, f.presence(member))
 
-	f.requireLog(zapcore.InfoLevel, "Found party reservation in social lobby path, joining directly",
+	f.requireNoLog(zapcore.InfoLevel, "Found party reservation in social lobby path, joining directly",
 		map[string]any{"reservation_mid": overbooked.ID.String()})
-	f.requireLog(zapcore.WarnLevel, "Failed to join via reservation in social path, falling through to legacy priority join", nil)
+	f.requireNoLog(zapcore.WarnLevel, "Failed to join via reservation in social path, falling through to legacy priority join", nil)
 	f.requireSkipLogged("reservation", overbooked.ID)
 }
 
@@ -342,9 +341,10 @@ func TestPartyJoinCapacity_P3_ReservedFollowerInFullLobbyStillJoins(t *testing.T
 }
 
 // TestPartyJoinCapacity_P4_FollowLeaderLobby drives TryFollowPartyLeader; the
-// leader's lobby is full (0 open) and the follower holds no reservation. The
-// follow path's own attempt is the Debug "Failed to join leader's lobby" record,
-// which is written only in the lobbyJoin error branch.
+// leader's lobby is full (0 open) and the follower holds no reservation. On main
+// the follow path's own attempt is the Debug "Failed to join leader's lobby"
+// record, written in the lobbyJoin error branch. The fix must leave it out and
+// log the skip.
 func TestPartyJoinCapacity_P4_FollowLeaderLobby(t *testing.T) {
 	f := newPartyCapFixture(t)
 	leader := f.session("leader", true)
@@ -358,7 +358,7 @@ func TestPartyJoinCapacity_P4_FollowLeaderLobby(t *testing.T) {
 
 	f.env.ep.TryFollowPartyLeader(member.Context(), f.logger, member, lobbyParams, group)
 
-	f.requireLog(zapcore.DebugLevel, "Failed to join leader's lobby", nil)
+	f.requireNoLog(zapcore.DebugLevel, "Failed to join leader's lobby", nil)
 	f.requireSkipLogged("follow", full.ID)
 }
 
@@ -454,4 +454,71 @@ func TestPartyJoinCapacity_P6_VibinatorJoin(t *testing.T) {
 
 	f.requireLog(zapcore.WarnLevel, "vibinatorsGravity: join failed, continuing normally", nil)
 	f.requireSkipLogged("vibinator", combat.ID)
+}
+
+// reserveForJoiner gives entrants[0] a live reservation in the lobby, the way the
+// leader's join leaves a follower's seat held. rebuildCache folds it into
+// ReservationCount and Players, as it does in production.
+func reserveForJoiner(state *MatchLabel, joiner *EvrMatchPresence) {
+	state.reservationMap[joiner.GetSessionId()] = &slotReservation{
+		Presence: joiner,
+		Expiry:   time.Now().Add(time.Hour),
+	}
+	state.rebuildCache()
+}
+
+// TestCanSeatEntrants_MatchesJoinGate checks the pre-check's formula against the real
+// join gate (MatchJoinAttempt) over the states a party join meets. Each row must
+// agree with the gate on accept or refuse, and the expected value is the gate's
+// own answer, so a row that disagrees fails on both counts.
+func TestCanSeatEntrants_MatchesJoinGate(t *testing.T) {
+	tests := []struct {
+		name            string
+		maxSize         int
+		existingPlayers int
+		joinerReserved  bool // entrants[0] holds a reservation in this lobby
+		party           int  // entrants, including the joiner
+		wantAccepted    bool
+	}{
+		{name: "room for the whole party", maxSize: 12, existingPlayers: 0, party: 2, wantAccepted: true},
+		{name: "one open seat, party of two", maxSize: 12, existingPlayers: 11, party: 2, wantAccepted: false},
+		{name: "one open seat, solo", maxSize: 12, existingPlayers: 11, party: 1, wantAccepted: true},
+		{name: "full lobby, solo, no reservation", maxSize: 12, existingPlayers: 12, party: 1, wantAccepted: false},
+		{name: "joiner holds the seat in a full lobby, solo", maxSize: 12, existingPlayers: 11,
+			joinerReserved: true, party: 1, wantAccepted: true},
+		{name: "joiner holds a seat, party of two, one other seat free", maxSize: 12, existingPlayers: 10,
+			joinerReserved: true, party: 2, wantAccepted: true},
+		{name: "joiner holds a seat, party of two, none free", maxSize: 12, existingPlayers: 11,
+			joinerReserved: true, party: 2, wantAccepted: false},
+		{name: "overbooked by the joiner's own reservation", maxSize: 12, existingPlayers: 12,
+			joinerReserved: true, party: 2, wantAccepted: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := atJoinSocialLabel(t, tt.maxSize, tt.maxSize, tt.existingPlayers)
+			joiner := atJoinPresence(evr.TeamSocial, 1)
+			entrants := []*EvrMatchPresence{joiner}
+			for i := 1; i < tt.party; i++ {
+				entrants = append(entrants, atJoinPresence(evr.TeamSocial, uint64(100+i)))
+			}
+			if tt.joinerReserved {
+				reserveForJoiner(state, joiner)
+			}
+
+			// The pre-check reads the lobby before the gate mutates it.
+			helper := state.CanSeatEntrants(entrants...)
+
+			m := &EvrMatch{}
+			meta := EntrantMetadata{Presence: joiner, Reservations: entrants[1:]}
+			_, accepted, reason := m.MatchJoinAttempt(
+				context.Background(), reconnectTestLogger(), nil, nil, nil, 10,
+				state, joiner, meta.ToMatchMetadata())
+
+			require.Equalf(t, tt.wantAccepted, accepted,
+				"the gate's own answer differs from the table (reason=%q): the row is wrong", reason)
+			require.Equalf(t, accepted, helper,
+				"CanSeatEntrants disagrees with the join gate (gate accepted=%v, reason=%q)", accepted, reason)
+		})
+	}
 }

@@ -180,7 +180,8 @@ func TestValidatePreJoinPing_FailureAttribution(t *testing.T) {
 	w := newPingTestWorld(t)
 
 	t.Run("joining party member silent: tells the player it is the party", func(t *testing.T) {
-		t.Parallel()
+		// Not parallel: partyOfTwo writes the shared registry map, and the
+		// parallel siblings race on it (concurrent map read and write).
 		entrants, _, _ := w.partyOfTwo(t, 79, 0)
 		// Both members are joining: the leader is a real entrant, not a placeholder.
 		entrants[1] = &EvrMatchPresence{SessionID: entrants[1].SessionID, UserID: entrants[1].UserID, Username: "leader"}
@@ -193,7 +194,6 @@ func TestValidatePreJoinPing_FailureAttribution(t *testing.T) {
 	})
 
 	t.Run("the player themself silent: still an internal error", func(t *testing.T) {
-		t.Parallel()
 		entrants, _, _ := w.partyOfTwo(t, 0, 79)
 		entrants[1] = &EvrMatchPresence{SessionID: entrants[1].SessionID, UserID: entrants[1].UserID, Username: "leader"}
 

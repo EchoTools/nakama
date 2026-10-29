@@ -337,6 +337,22 @@ func (s *MatchLabel) OpenSlots() int {
 	return int(s.MaxSize) - s.Size - s.ReservationCount
 }
 
+// CanSeatEntrants reports whether the join gate (MatchJoinAttempt) would seat
+// these entrants. The gate consumes the joiner's own held reservation before it
+// counts free seats, so a held reservation for entrants[0] is one more seat. Party
+// joins pre-check with this so a lobby the gate would refuse as lobby_full is
+// never sent a join.
+func (s *MatchLabel) CanSeatEntrants(entrants ...*EvrMatchPresence) bool {
+	if len(entrants) == 0 {
+		return true
+	}
+	open := s.OpenSlots()
+	if heldReservationFor(s, entrants[0].UserID.String()) != nil {
+		open++
+	}
+	return open >= len(entrants)
+}
+
 func (s *MatchLabel) OpenSlotsByRole(role int) (int, error) {
 	if evr.RolesByMode[s.Mode] == nil {
 		return 0, fmt.Errorf("mode %s is not a valid mode", s.Mode)

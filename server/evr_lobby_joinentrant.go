@@ -123,6 +123,39 @@ func heldReservationFor(label *MatchLabel, userID string) *PlayerInfo {
 	return nil
 }
 
+// partyJoinSkippedMsg is the Info record for a party join the capacity pre-check
+// refused. Its fields are the gate's own numbers, so the skip can be checked
+// against the gate's refusal.
+const partyJoinSkippedMsg = "party join skipped: insufficient capacity"
+
+// checkPartyCapacity refuses a join the gate would refuse as lobby_full, before
+// the join is attempted. It logs the skip at Info with the numbers the decision
+// was made from. path names the call site (priority_leader, reservation, follow,
+// ...). A nil label or no entrants passes; the join path reports those itself.
+func checkPartyCapacity(logger *zap.Logger, path string, label *MatchLabel, entrants ...*EvrMatchPresence) error {
+	if label == nil || len(entrants) == 0 || label.CanSeatEntrants(entrants...) {
+		return nil
+	}
+	logger.Info(partyJoinSkippedMsg,
+		zap.String("path", path),
+		zap.String("mid", label.ID.String()),
+		zap.Int("party_size", len(entrants)),
+		zap.Int("open_slots", label.OpenSlots()),
+		zap.Int("reservation_count", label.ReservationCount),
+		zap.Bool("held_reservation", heldReservationFor(label, entrants[0].UserID.String()) != nil),
+	)
+	return NewLobbyErrorf(ServerIsFull, "party of %d does not fit in lobby %s", len(entrants), label.ID.String())
+}
+
+// joinPartyEntrants is LobbyJoinEntrants for a party join. It runs checkPartyCapacity
+// first, so an undersized lobby is skipped before the join is sent.
+func (p *EvrPipeline) joinPartyEntrants(logger *zap.Logger, path string, label *MatchLabel, entrants ...*EvrMatchPresence) error {
+	if err := checkPartyCapacity(logger, path, label, entrants...); err != nil {
+		return err
+	}
+	return p.LobbyJoinEntrants(logger, label, entrants...)
+}
+
 func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, presences ...*EvrMatchPresence) error {
 	if len(presences) == 0 {
 		return ErrNoPresences
