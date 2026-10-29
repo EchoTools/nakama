@@ -8,6 +8,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -144,6 +145,20 @@ func (f *partyCapFixture) register(labels ...*MatchLabel) {
 		f.registry.SetMatch(l.ID, l)
 		f.registry.listMatches = append(f.registry.listMatches, &api.Match{MatchId: l.ID.String()})
 	}
+}
+
+// registerSnapshotLive registers one lobby whose list snapshot (ListMatches +
+// GetState, what the find's match list holds) differs from its live label
+// (GetMatch, what MatchLabelByID returns).
+func (f *partyCapFixture) registerSnapshotLive(snapshot, live *MatchLabel) {
+	f.registry.mu.Lock()
+	defer f.registry.mu.Unlock()
+	require.Equal(f.t, snapshot.ID, live.ID)
+	b, err := json.Marshal(snapshot)
+	require.NoError(f.t, err)
+	f.registry.labelJSON[snapshot.ID.String()] = string(b)
+	f.registry.SetMatch(live.ID, live)
+	f.registry.listMatches = append(f.registry.listMatches, &api.Match{MatchId: snapshot.ID.String()})
 }
 
 // trackService records the session's current match in the matchservice stream.
@@ -338,6 +353,92 @@ func TestPartyJoinCapacity_P2_SeatedFollowerMakesItFit(t *testing.T) {
 		map[string]any{"mid": oneOpen.ID.String()})
 	f.requireNoLog(zapcore.InfoLevel, partyJoinSkippedMsg, map[string]any{"path": "priority_follower"})
 	require.Positivef(t, f.joinsTo(oneOpen.ID), "the join to %s was not attempted", oneOpen.ID.UUID)
+}
+
+// TestPartyJoinCapacity_P1_StaleFullSnapshotLiveRoomyJoins: the list snapshot
+// says the leader's lobby is full, the live label has a seat. The priority path
+// must check the live label, so the join is attempted and not skipped.
+func TestPartyJoinCapacity_P1_StaleFullSnapshotLiveRoomyJoins(t *testing.T) {
+	f := newPartyCapFixture(t)
+	leader := f.session("leader", true)
+	member := f.session("member", true)
+	lobbyParams := makeMatchmakeTestLobbyParams(member.userID, f.groupID, evr.ModeSocialPublic, 2)
+	group := f.tabletPartyPair(leader, member, lobbyParams)
+
+	snapshot := f.socialLabel(SocialLobbyMaxSize, 0, seatedIn(leader)) // OpenSlots() == 0
+	live := *snapshot
+	live.Size = SocialLobbyMaxSize - 1 // OpenSlots() == 1
+	f.registerSnapshotLive(snapshot, &live)
+	f.trackService(leader, snapshot.ID)
+
+	_ = f.env.ep.lobbyFindOrCreateSocial(member.Context(), f.logger, member, lobbyParams, group, f.presence(member))
+
+	f.requireLog(zapcore.InfoLevel, "Priority join: Found party leader's social lobby",
+		map[string]any{"mid": snapshot.ID.String()})
+	f.requireNoLog(zapcore.InfoLevel, partyJoinSkippedMsg, map[string]any{"path": "priority_leader"})
+	require.Positivef(t, f.joinsTo(snapshot.ID), "the join to %s was not attempted", snapshot.ID.UUID)
+}
+
+// TestPartyJoinCapacity_P1_LiveFullSkips: the snapshot has a seat, the live label
+// is full. The priority path checks the live label and skips.
+func TestPartyJoinCapacity_P1_LiveFullSkips(t *testing.T) {
+	f := newPartyCapFixture(t)
+	leader := f.session("leader", true)
+	member := f.session("member", true)
+	lobbyParams := makeMatchmakeTestLobbyParams(member.userID, f.groupID, evr.ModeSocialPublic, 2)
+	group := f.tabletPartyPair(leader, member, lobbyParams)
+
+	snapshot := f.socialLabel(SocialLobbyMaxSize-1, 0, seatedIn(leader)) // OpenSlots() == 1
+	live := *snapshot
+	live.Size = SocialLobbyMaxSize // OpenSlots() == 0
+	f.registerSnapshotLive(snapshot, &live)
+	f.trackService(leader, snapshot.ID)
+
+	_ = f.env.ep.lobbyFindOrCreateSocial(member.Context(), f.logger, member, lobbyParams, group, f.presence(member))
+
+	f.requireSkipLogged("priority_leader", snapshot.ID)
+}
+
+// TestPartyJoinCapacity_P2_StaleFullSnapshotLiveRoomyJoins is the P2 counterpart:
+// the leader joins the follower's lobby, snapshot full, live with a seat.
+func TestPartyJoinCapacity_P2_StaleFullSnapshotLiveRoomyJoins(t *testing.T) {
+	f := newPartyCapFixture(t)
+	leader := f.session("leader", true)
+	member := f.session("member", true)
+	lobbyParams := makeMatchmakeTestLobbyParams(leader.userID, f.groupID, evr.ModeSocialPublic, 2)
+	group := f.tabletPartyPair(leader, member, lobbyParams)
+
+	snapshot := f.socialLabel(SocialLobbyMaxSize, 0, seatedIn(member)) // OpenSlots() == 0
+	live := *snapshot
+	live.Size = SocialLobbyMaxSize - 1 // OpenSlots() == 1
+	f.registerSnapshotLive(snapshot, &live)
+	f.trackService(member, snapshot.ID)
+
+	_ = f.env.ep.lobbyFindOrCreateSocial(leader.Context(), f.logger, leader, lobbyParams, group, f.presence(leader))
+
+	f.requireLog(zapcore.InfoLevel, "Priority join: Leader joining follower's social lobby",
+		map[string]any{"mid": snapshot.ID.String()})
+	f.requireNoLog(zapcore.InfoLevel, partyJoinSkippedMsg, map[string]any{"path": "priority_follower"})
+	require.Positivef(t, f.joinsTo(snapshot.ID), "the join to %s was not attempted", snapshot.ID.UUID)
+}
+
+// TestPartyJoinCapacity_P2_LiveFullSkips: snapshot with a seat, live full: skip.
+func TestPartyJoinCapacity_P2_LiveFullSkips(t *testing.T) {
+	f := newPartyCapFixture(t)
+	leader := f.session("leader", true)
+	member := f.session("member", true)
+	lobbyParams := makeMatchmakeTestLobbyParams(leader.userID, f.groupID, evr.ModeSocialPublic, 2)
+	group := f.tabletPartyPair(leader, member, lobbyParams)
+
+	snapshot := f.socialLabel(SocialLobbyMaxSize-1, 0, seatedIn(member)) // OpenSlots() == 1
+	live := *snapshot
+	live.Size = SocialLobbyMaxSize // OpenSlots() == 0
+	f.registerSnapshotLive(snapshot, &live)
+	f.trackService(member, snapshot.ID)
+
+	_ = f.env.ep.lobbyFindOrCreateSocial(leader.Context(), f.logger, leader, lobbyParams, group, f.presence(leader))
+
+	f.requireSkipLogged("priority_follower", snapshot.ID)
 }
 
 // TestPartyJoinCapacity_P3_ReservationPath drives the reservation path in
@@ -581,6 +682,9 @@ func TestCanSeatEntrants_MatchesJoinGate(t *testing.T) {
 	type follower struct {
 		seated   bool // already a connected presence in the lobby
 		reserved bool // holds a reservation in the lobby
+		// reservedOtherSession: holds a reservation under a session id other than
+		// its current one. The gate frees reservations by entrant session id only.
+		reservedOtherSession bool
 	}
 	tests := []struct {
 		name            string
@@ -588,8 +692,18 @@ func TestCanSeatEntrants_MatchesJoinGate(t *testing.T) {
 		existingPlayers int // strangers, connected
 		joinerReserved  bool
 		joinerSeated    bool
-		followers       []follower // entrants[1:]
-		wantReason      string     // the gate's refusal reason; "" = accepted
+		// joinerStaleSeat: the joiner's user is connected under another session
+		// with the same EVR-ID. The gate evicts it (evr_match.go:430-445).
+		joinerStaleSeat bool
+		// joinerReservedByUser: a reservation for the joiner's user under another
+		// session id (the gate's by-user-id fallback, heldReservationFor).
+		joinerReservedByUser bool
+		// joinerReconnect: a crash-recovery reconnect reservation for the joiner.
+		joinerReconnect bool
+		// duplicateFollower: entrants[1:] lists its last follower twice.
+		duplicateFollower bool
+		followers         []follower // entrants[1:]
+		wantReason        string     // the gate's refusal reason; "" = accepted
 	}{
 		{name: "room for the whole party", maxSize: 12, existingPlayers: 0, followers: []follower{{}}},
 		{name: "one open seat, party of two", maxSize: 12, existingPlayers: 11, followers: []follower{{}},
@@ -634,6 +748,26 @@ func TestCanSeatEntrants_MatchesJoinGate(t *testing.T) {
 		// Genuinely does not fit after trimming.
 		{name: "party of three, one seated, one seat free", maxSize: 12, existingPlayers: 10,
 			followers: []follower{{seated: true}, {}}, wantReason: ErrJoinRejectReasonLobbyFull.Error()},
+
+		// F1: a stale same-user presence is evicted before the count.
+		{name: "joiner's stale same-user presence in a full lobby", maxSize: 12, existingPlayers: 11,
+			joinerStaleSeat: true},
+		{name: "joiner's stale same-user presence, party of two, full", maxSize: 12, existingPlayers: 11,
+			joinerStaleSeat: true, followers: []follower{{}}, wantReason: ErrJoinRejectReasonLobbyFull.Error()},
+		// F2: slot reservation and reconnect reservation both free a seat.
+		{name: "joiner holds slot and reconnect reservations, party of two, full", maxSize: 12, existingPlayers: 10,
+			joinerReserved: true, joinerReconnect: true, followers: []follower{{}}},
+		{name: "joiner holds a reconnect reservation, solo, full", maxSize: 12, existingPlayers: 11,
+			joinerReconnect: true},
+		// The gate's by-user-id fallback for entrants[0].
+		{name: "joiner reserved by user id under another session, solo, full", maxSize: 12, existingPlayers: 11,
+			joinerReservedByUser: true},
+		// entrants[1:] reserved under another session: the gate does not free it.
+		{name: "follower reserved under another session, one seat free", maxSize: 12, existingPlayers: 10,
+			followers: []follower{{reservedOtherSession: true}}, wantReason: ErrJoinRejectReasonLobbyFull.Error()},
+		// The same entrant listed twice needs a seat each time, at the gate.
+		{name: "duplicate follower entrant, two seats free", maxSize: 12, existingPlayers: 10,
+			followers: []follower{{}}, duplicateFollower: true, wantReason: ErrJoinRejectReasonLobbyFull.Error()},
 	}
 
 	for _, tt := range tests {
@@ -651,6 +785,31 @@ func TestCanSeatEntrants_MatchesJoinGate(t *testing.T) {
 				if fw.reserved {
 					state.reservationMap[e.GetSessionId()] = &slotReservation{Presence: e, Expiry: time.Now().Add(time.Hour)}
 				}
+				if fw.reservedOtherSession {
+					old := *e
+					old.SessionID = uuid.Must(uuid.NewV4())
+					state.reservationMap[old.GetSessionId()] = &slotReservation{Presence: &old, Expiry: time.Now().Add(time.Hour)}
+				}
+			}
+			if tt.duplicateFollower {
+				entrants = append(entrants, entrants[len(entrants)-1])
+			}
+			if tt.joinerStaleSeat {
+				stale := *joiner
+				stale.SessionID = uuid.Must(uuid.NewV4())
+				state.presenceMap[stale.GetSessionId()] = &stale
+			}
+			if tt.joinerReservedByUser {
+				old := *joiner
+				old.SessionID = uuid.Must(uuid.NewV4())
+				state.reservationMap[old.GetSessionId()] = &slotReservation{Presence: &old, Expiry: time.Now().Add(time.Hour)}
+			}
+			if tt.joinerReconnect {
+				old := *joiner
+				old.SessionID = uuid.Must(uuid.NewV4())
+				state.reconnectReservations[joiner.GetUserId()] = &reconnectReservation{
+					Presence: &old, Expiry: time.Now().Add(time.Hour), UserID: joiner.GetUserId(),
+				}
 			}
 			if tt.joinerSeated {
 				state.presenceMap[joiner.GetSessionId()] = joiner
@@ -666,8 +825,13 @@ func TestCanSeatEntrants_MatchesJoinGate(t *testing.T) {
 
 			m := &EvrMatch{}
 			meta := EntrantMetadata{Presence: joiner, Reservations: entrants[1:]}
+			// An accepted reconnect reads early-quit history through nk.
+			var nk runtime.NakamaModule
+			if tt.joinerReconnect {
+				nk = &reconnectTestNakamaModule{}
+			}
 			_, accepted, reason := m.MatchJoinAttempt(
-				context.Background(), reconnectTestLogger(), nil, nil, nil, 10,
+				context.Background(), reconnectTestLogger(), nil, nk, nil, 10,
 				state, joiner, meta.ToMatchMetadata())
 
 			// On accept the gate's third value is the presence, not a reason.
@@ -682,4 +846,27 @@ func TestCanSeatEntrants_MatchesJoinGate(t *testing.T) {
 				"CanSeatEntrants disagrees with the join gate (gate accepted=%v, reason=%q)", accepted, reason)
 		})
 	}
+}
+
+// TestCanSeatEntrants_NilEntrants: a nil entrant must not panic. A nil entrants[0]
+// answers fits (nothing to refuse); a nil in entrants[1:] is skipped.
+func TestCanSeatEntrants_NilEntrants(t *testing.T) {
+	state := atJoinSocialLabel(t, 12, 12, 11) // one open seat
+	joiner := atJoinPresence(evr.TeamSocial, 1)
+
+	require.NotPanics(t, func() {
+		require.True(t, state.CanSeatEntrants(nil), "nil entrants[0] must answer fits")
+	})
+	require.NotPanics(t, func() {
+		require.True(t, state.CanSeatEntrants(nil, joiner), "nil entrants[0] must answer fits")
+	})
+	require.NotPanics(t, func() {
+		require.True(t, state.CanSeatEntrants(joiner, nil), "a nil follower needs no seat")
+	})
+	require.NotPanics(t, func() {
+		require.NoError(t, checkPartyCapacity(zap.NewNop(), "test", state, nil))
+	})
+	require.NotPanics(t, func() {
+		require.NoError(t, checkPartyCapacity(zap.NewNop(), "test", state, joiner, nil))
+	})
 }
