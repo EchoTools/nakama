@@ -2066,8 +2066,17 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 			}
 		}
 
+		// Capacity pre-check: the follower alone, as TryFollowPartyLeader checks it.
+		// A refusal is ServerIsFull and takes the same exit as a full join below.
 		logger.Debug("Joining leader's social lobby during poll", zap.String("mid", leaderMatchID.String()))
-		if err := p.lobbyJoin(ctx, logger, session, params, leaderMatchID); err != nil {
+		err = checkPartyCapacity(logger, "follow_poll", label, &EvrMatchPresence{
+			SessionID: session.id,
+			UserID:    session.userID,
+		})
+		if err == nil {
+			err = p.lobbyJoin(ctx, logger, session, params, leaderMatchID)
+		}
+		if err != nil {
 			code := LobbyErrorCode(err)
 			if code == ServerIsFull || code == ServerIsLocked {
 				<-time.After(5 * time.Second)

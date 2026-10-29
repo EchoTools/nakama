@@ -136,13 +136,16 @@ func checkPartyCapacity(logger *zap.Logger, path string, label *MatchLabel, entr
 	if label == nil || len(entrants) == 0 || label.CanSeatEntrants(entrants...) {
 		return nil
 	}
+	c := label.countSeats(entrants...)
 	logger.Info(partyJoinSkippedMsg,
 		zap.String("path", path),
 		zap.String("mid", label.ID.String()),
 		zap.Int("party_size", len(entrants)),
 		zap.Int("open_slots", label.OpenSlots()),
 		zap.Int("reservation_count", label.ReservationCount),
-		zap.Bool("held_reservation", heldReservationFor(label, entrants[0].UserID.String()) != nil),
+		zap.Bool("held_reservation", c.heldReservation),
+		zap.Int("seated_entrants", c.seatedEntrants),
+		zap.Int("needed_seats", c.need),
 	)
 	return NewLobbyErrorf(ServerIsFull, "party of %d does not fit in lobby %s", len(entrants), label.ID.String())
 }

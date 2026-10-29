@@ -337,20 +337,101 @@ func (s *MatchLabel) OpenSlots() int {
 	return int(s.MaxSize) - s.Size - s.ReservationCount
 }
 
-// CanSeatEntrants reports whether the join gate (MatchJoinAttempt) would seat
-// these entrants. The gate consumes the joiner's own held reservation before it
-// counts free seats, so a held reservation for entrants[0] is one more seat. Party
-// joins pre-check with this so a lobby the gate would refuse as lobby_full is
-// never sent a join.
+// seatCount is the gate's capacity arithmetic for one join, read from the label.
+type seatCount struct {
+	joinerSeated    bool // entrants[0] is already a connected presence
+	heldReservation bool // entrants[0] holds a reservation (by session id or user id)
+	seatedEntrants  int  // entrants[1:] already connected; they need no seat
+	open            int  // OpenSlots() plus every reservation the gate frees
+	need            int  // seats the gate requires: entrants[0] plus unseated entrants[1:]
+}
+
+func (c seatCount) fits() bool { return c.joinerSeated || c.open >= c.need }
+
+// hasReservationForSession reports whether the label holds a reservation keyed
+// by sessionID, as the gate's reservationMap is.
+func (s *MatchLabel) hasReservationForSession(sessionID string) bool {
+	for _, p := range s.Players {
+		if p.IsReservation && p.SessionID == sessionID {
+			return true
+		}
+	}
+	return false
+}
+
+// countSeats mirrors MatchJoinAttempt's capacity steps (evr_match.go), in order:
+//
+//   - :388 entrants[0] already a connected presence: the gate answers
+//     DuplicateJoin, which the caller treats as success. Not a capacity refusal.
+//   - :397-412 each of entrants[1:]: a held reservation for its session is
+//     deleted (one seat freed), and an entrant already connected is dropped from
+//     the list (needs no seat). Both apply independently.
+//   - :459-473 entrants[0]'s own held reservation, by session id else user id,
+//     is consumed (one seat freed).
+//   - :517-521 refused as lobby_full (or reservation_violated) when OpenSlots()
+//     plus the freed seats is less than entrants[0] plus the surviving entrants[1:].
+//
+// Deliberately NOT mirrored: the reconnect reservation's +1 at :518 is covered
+// only through the held-reservation +1 for entrants[0] (the label shows a reconnect
+// reservation as a held seat for that user); the same-user EVR-ID eviction that
+// can free a seat is not modelled; and the role gate (evr_match.go:579) is a
+// separate gate, kept as the OpenSlotsByRole check at the generic-search site.
+// seatedInLabel reports whether sessionID is a connected presence as far as the
+// label can tell. A non-reservation row says so directly. Two or more rows for one
+// session also say so: rebuildCache (evr_match_label.go:616, :634, :650, :665,
+// :680 @ 8d796a21c) sets IsReservation from reservationMap by session id, so a
+// seated player who also holds a reservation appears as the presence row AND the
+// reservation row, both marked IsReservation. Fail-open by principle: the
+// pre-check may only skip what the gate would refuse, so an ambiguous label
+// answers "seated" (fits) rather than "needs a seat". A wrongly skipped join is
+// the party split; a wrongly attempted join is one more gate refusal.
+func (s *MatchLabel) seatedInLabel(sessionID string) bool {
+	if s.hasConnectedSession(sessionID) {
+		return true
+	}
+	rows := 0
+	for _, p := range s.Players {
+		if p.SessionID == sessionID {
+			rows++
+		}
+	}
+	return rows > 1
+}
+
+func (s *MatchLabel) countSeats(entrants ...*EvrMatchPresence) seatCount {
+	c := seatCount{open: s.OpenSlots(), need: 1}
+	joinerSID := entrants[0].SessionID.String()
+	if s.seatedInLabel(joinerSID) {
+		c.joinerSeated = true
+		return c
+	}
+	if s.hasReservationForSession(joinerSID) || heldReservationFor(s, entrants[0].UserID.String()) != nil {
+		c.heldReservation = true
+		c.open++
+	}
+	for _, e := range entrants[1:] {
+		sid := e.SessionID.String()
+		if s.hasReservationForSession(sid) {
+			c.open++
+		}
+		if s.seatedInLabel(sid) {
+			c.seatedEntrants++
+		} else {
+			c.need++
+		}
+	}
+	return c
+}
+
+// CanSeatEntrants reports whether the join gate (MatchJoinAttempt) would not
+// refuse these entrants for capacity. See countSeats for exactly what is and is
+// not mirrored. Party joins pre-check with this so a lobby the gate would refuse
+// as lobby_full is never sent a join.
 func (s *MatchLabel) CanSeatEntrants(entrants ...*EvrMatchPresence) bool {
 	if len(entrants) == 0 {
 		return true
 	}
-	open := s.OpenSlots()
-	if heldReservationFor(s, entrants[0].UserID.String()) != nil {
-		open++
-	}
-	return open >= len(entrants)
+	return s.countSeats(entrants...).fits()
 }
 
 func (s *MatchLabel) OpenSlotsByRole(role int) (int, error) {
