@@ -399,6 +399,38 @@ func TestPartyJoinCapacity_P1_LiveFullSkips(t *testing.T) {
 	f.requireSkipLogged("priority_leader", snapshot.ID)
 }
 
+// TestPartyJoinCapacity_P1_LiveLabelUnreadableJoinsWithoutPreCheck: the list
+// snapshot is full and the live label cannot be read (GetMatch has no match for
+// the id, so MatchLabelByID fails). joinPartyEntrantsLive must skip the pre-check,
+// write the Warn, and attempt the join. The gate decides, so no skip is logged.
+func TestPartyJoinCapacity_P1_LiveLabelUnreadableJoinsWithoutPreCheck(t *testing.T) {
+	f := newPartyCapFixture(t)
+	leader := f.session("leader", true)
+	member := f.session("member", true)
+	lobbyParams := makeMatchmakeTestLobbyParams(member.userID, f.groupID, evr.ModeSocialPublic, 2)
+	group := f.tabletPartyPair(leader, member, lobbyParams)
+
+	snapshot := f.socialLabel(SocialLobbyMaxSize, 0, seatedIn(leader)) // OpenSlots() == 0
+	f.register(snapshot)
+	// The snapshot stays in the list and GetState; only the match-by-id lookup
+	// that MatchLabelByID makes is removed.
+	f.registry.mockFollowMatchRegistry.mu.Lock()
+	delete(f.registry.matches, snapshot.ID.String())
+	f.registry.mockFollowMatchRegistry.mu.Unlock()
+	f.trackService(leader, snapshot.ID)
+
+	_ = f.env.ep.lobbyFindOrCreateSocial(member.Context(), f.logger, member, lobbyParams, group, f.presence(member))
+
+	f.requireLog(zapcore.InfoLevel, "Priority join: Found party leader's social lobby",
+		map[string]any{"mid": snapshot.ID.String()})
+	f.requireLog(zapcore.WarnLevel, "Failed to refresh lobby label for capacity check; joining without pre-check",
+		map[string]any{"path": "priority_leader", "mid": snapshot.ID.String()})
+	// The mock rejects every join, so the search falls through to later call sites
+	// (social_search) that may skip the full snapshot. Only this path's skip is checked.
+	f.requireNoLog(zapcore.InfoLevel, partyJoinSkippedMsg, map[string]any{"path": "priority_leader", "mid": snapshot.ID.String()})
+	require.Positivef(t, f.joinsTo(snapshot.ID), "the join to %s was not attempted", snapshot.ID.UUID)
+}
+
 // TestPartyJoinCapacity_P2_StaleFullSnapshotLiveRoomyJoins is the P2 counterpart:
 // the leader joins the follower's lobby, snapshot full, live with a seat.
 func TestPartyJoinCapacity_P2_StaleFullSnapshotLiveRoomyJoins(t *testing.T) {
@@ -685,6 +717,9 @@ func TestCanSeatEntrants_MatchesJoinGate(t *testing.T) {
 		// reservedOtherSession: holds a reservation under a session id other than
 		// its current one. The gate frees reservations by entrant session id only.
 		reservedOtherSession bool
+		// staleSeat: connected under another session id with the same user and
+		// EVR-ID. The gate evicts it before the count (evr_match.go:430-445).
+		staleSeat bool
 	}
 	tests := []struct {
 		name            string
@@ -754,6 +789,11 @@ func TestCanSeatEntrants_MatchesJoinGate(t *testing.T) {
 			joinerStaleSeat: true},
 		{name: "joiner's stale same-user presence, party of two, full", maxSize: 12, existingPlayers: 11,
 			joinerStaleSeat: true, followers: []follower{{}}, wantReason: ErrJoinRejectReasonLobbyFull.Error()},
+		// F1, follower side: a follower's stale same-user presence is evicted too.
+		{name: "follower's stale same-user presence, party of two, one open seat", maxSize: 12, existingPlayers: 10,
+			followers: []follower{{staleSeat: true}}},
+		{name: "follower's stale same-user presence, party of two, still one seat short", maxSize: 12, existingPlayers: 11,
+			followers: []follower{{staleSeat: true}}, wantReason: ErrJoinRejectReasonLobbyFull.Error()},
 		// F2: slot reservation and reconnect reservation both free a seat.
 		{name: "joiner holds slot and reconnect reservations, party of two, full", maxSize: 12, existingPlayers: 10,
 			joinerReserved: true, joinerReconnect: true, followers: []follower{{}}},
@@ -789,6 +829,11 @@ func TestCanSeatEntrants_MatchesJoinGate(t *testing.T) {
 					old := *e
 					old.SessionID = uuid.Must(uuid.NewV4())
 					state.reservationMap[old.GetSessionId()] = &slotReservation{Presence: &old, Expiry: time.Now().Add(time.Hour)}
+				}
+				if fw.staleSeat {
+					old := *e
+					old.SessionID = uuid.Must(uuid.NewV4())
+					state.presenceMap[old.GetSessionId()] = &old
 				}
 			}
 			if tt.duplicateFollower {
