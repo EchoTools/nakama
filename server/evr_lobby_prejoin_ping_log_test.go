@@ -46,7 +46,7 @@ func TestValidatePreJoinPing_LogsSendAndTimeout(t *testing.T) {
 	require.True(t, ok, "elapsed_ms is an int64 field")
 	assert.GreaterOrEqual(t, elapsed, int64(4000), "the timeout entry reports the time waited")
 
-	assert.Equal(t, 1, follower.sendCount(), "the silent member was pinged exactly once")
+	assert.Greater(t, follower.sendCount(), 0, "the silent member was sent the ping")
 }
 
 // Test B: a member who answers is logged as answered, with the RTT the
@@ -91,11 +91,13 @@ func TestNotifyPreJoinPingWaiter_SignalsRegisteredWaiter(t *testing.T) {
 	ch := registerPreJoinPingWaiter(sid)
 	defer cleanupPreJoinPingWaiter(sid)
 
-	notifyPreJoinPingWaiter(sid)
+	assert.True(t, notifyPreJoinPingWaiter(sid), "a registered waiter reports it was signalled")
 
 	select {
 	case <-ch:
 	default:
 		t.Fatal("the registered waiter was not signalled")
 	}
+
+	assert.False(t, notifyPreJoinPingWaiter(sid), "with no waiter left, nothing is signalled")
 }

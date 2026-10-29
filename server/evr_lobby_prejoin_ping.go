@@ -50,14 +50,17 @@ func registerPreJoinPingWaiter(sessionID uuid.UUID) chan struct{} {
 }
 
 // notifyPreJoinPingWaiter signals the waiter for the given session, if any.
-// Called from lobbyPingResponse after updating the latency history.
-func notifyPreJoinPingWaiter(sessionID uuid.UUID) {
+// Called from lobbyPingResponse after updating the latency history. It returns
+// true if a waiter was registered and signalled.
+func notifyPreJoinPingWaiter(sessionID uuid.UUID) bool {
 	if ch, ok := preJoinPingWaiters.LoadAndDelete(sessionID); ok {
 		select {
 		case ch <- struct{}{}:
 		default:
 		}
+		return true
 	}
+	return false
 }
 
 // cleanupPreJoinPingWaiter removes a waiter registration without signaling.
@@ -262,6 +265,7 @@ func (p *EvrPipeline) validatePreJoinPing(
 	type needsPing struct {
 		memberCheck
 		waiter chan struct{}
+		sentAt time.Time
 	}
 
 	var pending []needsPing
@@ -290,6 +294,7 @@ func (p *EvrPipeline) validatePreJoinPing(
 	for i := range pending {
 		np := &pending[i]
 		np.waiter = registerPreJoinPingWaiter(np.presence.SessionID)
+		np.sentAt = time.Now()
 		if err := SendEVRMessages(np.session, true, evr.NewLobbyPingRequest(preJoinPingRTTMax, []evr.Endpoint{endpoint})); err != nil {
 			cleanupPreJoinPingWaiter(np.presence.SessionID)
 			np.waiter = nil
@@ -297,6 +302,14 @@ func (p *EvrPipeline) validatePreJoinPing(
 				zap.String("uid", np.presence.UserID.String()),
 				zap.String("sid", np.presence.SessionID.String()),
 				zap.Error(err))
+		} else {
+			logger.Info("Pre-join ping sent",
+				zap.String("uid", np.presence.UserID.String()),
+				zap.String("sid", np.presence.SessionID.String()),
+				zap.String("mid", label.ID.UUID.String()),
+				zap.String("endpoint", endpoint.String()),
+				zap.Int64("timeout_ms", preJoinPingTimeout.Milliseconds()),
+			)
 		}
 	}
 
@@ -335,15 +348,33 @@ func (p *EvrPipeline) validatePreJoinPing(
 					}
 				}
 				entry, found := history.LatestEntry(extIP)
+				rttMs := 0
+				if found {
+					rttMs = int(entry.RTT.Milliseconds())
+				}
+				logger.Info("Pre-join ping answered",
+					zap.String("uid", np.presence.UserID.String()),
+					zap.String("sid", np.presence.SessionID.String()),
+					zap.String("mid", label.ID.UUID.String()),
+					zap.Int64("elapsed_ms", time.Since(np.sentAt).Milliseconds()),
+					zap.Int64("rtt_ms", int64(rttMs)),
+					zap.Bool("over_max", rttMs > maxRTT),
+				)
 				if !found {
 					result.Err = fmt.Errorf("no latency data after ping response")
 					return
 				}
-				result.RTT = int(entry.RTT.Milliseconds())
+				result.RTT = rttMs
 				if result.RTT > maxRTT && !relaxRTT {
 					result.Err = fmt.Errorf("RTT %dms exceeds max %dms", result.RTT, maxRTT)
 				}
 			case <-timer.C:
+				logger.Warn("Pre-join ping timed out",
+					zap.String("uid", np.presence.UserID.String()),
+					zap.String("sid", np.presence.SessionID.String()),
+					zap.String("mid", label.ID.UUID.String()),
+					zap.Int64("elapsed_ms", time.Since(np.sentAt).Milliseconds()),
+				)
 				result.Err = fmt.Errorf("ping response timed out after %s", preJoinPingTimeout)
 			case <-ctx.Done():
 				result.Err = fmt.Errorf("context canceled: %w", ctx.Err())
