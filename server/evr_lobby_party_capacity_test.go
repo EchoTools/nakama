@@ -174,8 +174,8 @@ func (f *partyCapFixture) joinsTo(mid MatchID) int {
 func (f *partyCapFixture) requireNotReached(mid MatchID) {
 	f.t.Helper()
 	if n := f.joinsTo(mid); n != 0 {
-		f.t.Errorf("LobbyJoinEntrants was reached %d time(s) for undersized lobby %s "+
-			"(open slots 1, party of 2): the join gate refuses it as lobby_full", n, mid.UUID)
+		f.t.Errorf("LobbyJoinEntrants was reached %d time(s) for undersized lobby %s: "+
+			"the join gate refuses it as lobby_full", n, mid.UUID)
 	}
 }
 
@@ -222,7 +222,7 @@ func (f *partyCapFixture) requireSkipLogged(path string, mid MatchID) {
 	ctx, ok := f.findLog(zapcore.InfoLevel, partyJoinSkippedMsg, map[string]any{"path": path, "mid": mid.String()})
 	require.Truef(f.t, ok, "no %q record with path=%s mid=%s (found %d skip records)",
 		partyJoinSkippedMsg, path, mid.String(), len(f.logs.FilterMessage(partyJoinSkippedMsg).All()))
-	for _, k := range []string{"party_size", "open_slots", "reservation_count", "held_reservation"} {
+	for _, k := range []string{"party_size", "open_slots", "reservation_count", "held_reservation", "seated_entrants", "needed_seats"} {
 		require.Containsf(f.t, ctx, k, "skip record missing field %q", k)
 	}
 }
@@ -238,8 +238,20 @@ func (f *partyCapFixture) tabletPartyPair(leader, member *sessionWS, lobbyParams
 	return group
 }
 
+// seatedIn is the roster entry for a party member who is already a connected
+// presence in the lobby, as production has it on the priority paths: the member
+// whose lobby the joiner is sent to is sitting in it.
+func seatedIn(sess *sessionWS) PlayerInfo {
+	return PlayerInfo{
+		UserID: sess.userID.String(), SessionID: sess.id.String(),
+		Team: TeamIndex(evr.TeamSocial),
+	}
+}
+
 // TestPartyJoinCapacity_P1_MemberJoinsLeaderSocialLobby drives
-// lobbyFindOrCreateSocial, member session, leader's lobby undersized (1 open, party of 2).
+// lobbyFindOrCreateSocial, member session, into the leader's lobby with the leader
+// seated in it. The leader needs no seat (the gate drops a seated entrant), so the
+// member needs one. Full lobby: no seat for the member, the join is skipped.
 func TestPartyJoinCapacity_P1_MemberJoinsLeaderSocialLobby(t *testing.T) {
 	f := newPartyCapFixture(t)
 	leader := f.session("leader", true)
@@ -247,7 +259,7 @@ func TestPartyJoinCapacity_P1_MemberJoinsLeaderSocialLobby(t *testing.T) {
 	lobbyParams := makeMatchmakeTestLobbyParams(member.userID, f.groupID, evr.ModeSocialPublic, 2)
 	group := f.tabletPartyPair(leader, member, lobbyParams)
 
-	undersized := f.socialLabel(SocialLobbyMaxSize-1, 0)
+	undersized := f.socialLabel(SocialLobbyMaxSize, 0, seatedIn(leader)) // OpenSlots() == 0
 	roomy := f.socialLabel(0, 0)
 	f.register(undersized, roomy)
 	f.trackService(leader, undersized.ID)
@@ -260,8 +272,32 @@ func TestPartyJoinCapacity_P1_MemberJoinsLeaderSocialLobby(t *testing.T) {
 	f.requireSkipLogged("priority_leader", undersized.ID)
 }
 
+// TestPartyJoinCapacity_P1_SeatedLeaderMakesItFit: one open seat, party of two,
+// leader seated. It looks undersized before the gate drops the seated leader and
+// fits after, so the join must be attempted and not skipped.
+func TestPartyJoinCapacity_P1_SeatedLeaderMakesItFit(t *testing.T) {
+	f := newPartyCapFixture(t)
+	leader := f.session("leader", true)
+	member := f.session("member", true)
+	lobbyParams := makeMatchmakeTestLobbyParams(member.userID, f.groupID, evr.ModeSocialPublic, 2)
+	group := f.tabletPartyPair(leader, member, lobbyParams)
+
+	oneOpen := f.socialLabel(SocialLobbyMaxSize-1, 0, seatedIn(leader)) // OpenSlots() == 1
+	f.register(oneOpen)
+	f.trackService(leader, oneOpen.ID)
+
+	_ = f.env.ep.lobbyFindOrCreateSocial(member.Context(), f.logger, member, lobbyParams, group, f.presence(member))
+
+	f.requireLog(zapcore.InfoLevel, "Priority join: Found party leader's social lobby",
+		map[string]any{"mid": oneOpen.ID.String()})
+	f.requireNoLog(zapcore.InfoLevel, partyJoinSkippedMsg, map[string]any{"path": "priority_leader"})
+	require.Positivef(t, f.joinsTo(oneOpen.ID), "the join to %s was not attempted", oneOpen.ID.UUID)
+}
+
 // TestPartyJoinCapacity_P2_LeaderJoinsFollowerSocialLobby drives
-// lobbyFindOrCreateSocial, leader session, follower's lobby undersized.
+// lobbyFindOrCreateSocial, leader session, into the follower's lobby with the
+// follower seated in it (entrants: leader plus the follower's placeholder). Full
+// lobby: no seat for the leader, the join is skipped.
 func TestPartyJoinCapacity_P2_LeaderJoinsFollowerSocialLobby(t *testing.T) {
 	f := newPartyCapFixture(t)
 	leader := f.session("leader", true)
@@ -269,7 +305,7 @@ func TestPartyJoinCapacity_P2_LeaderJoinsFollowerSocialLobby(t *testing.T) {
 	lobbyParams := makeMatchmakeTestLobbyParams(leader.userID, f.groupID, evr.ModeSocialPublic, 2)
 	group := f.tabletPartyPair(leader, member, lobbyParams)
 
-	undersized := f.socialLabel(SocialLobbyMaxSize-1, 0)
+	undersized := f.socialLabel(SocialLobbyMaxSize, 0, seatedIn(member)) // OpenSlots() == 0
 	roomy := f.socialLabel(0, 0)
 	f.register(undersized, roomy)
 	f.trackService(member, undersized.ID)
@@ -280,6 +316,28 @@ func TestPartyJoinCapacity_P2_LeaderJoinsFollowerSocialLobby(t *testing.T) {
 		map[string]any{"mid": undersized.ID.String()})
 	f.requireNotReached(undersized.ID)
 	f.requireSkipLogged("priority_follower", undersized.ID)
+}
+
+// TestPartyJoinCapacity_P2_SeatedFollowerMakesItFit: one open seat, leader plus
+// the seated follower's placeholder. The gate drops the seated follower, so the
+// leader fits: the join must be attempted and not skipped.
+func TestPartyJoinCapacity_P2_SeatedFollowerMakesItFit(t *testing.T) {
+	f := newPartyCapFixture(t)
+	leader := f.session("leader", true)
+	member := f.session("member", true)
+	lobbyParams := makeMatchmakeTestLobbyParams(leader.userID, f.groupID, evr.ModeSocialPublic, 2)
+	group := f.tabletPartyPair(leader, member, lobbyParams)
+
+	oneOpen := f.socialLabel(SocialLobbyMaxSize-1, 0, seatedIn(member)) // OpenSlots() == 1
+	f.register(oneOpen)
+	f.trackService(member, oneOpen.ID)
+
+	_ = f.env.ep.lobbyFindOrCreateSocial(leader.Context(), f.logger, leader, lobbyParams, group, f.presence(leader))
+
+	f.requireLog(zapcore.InfoLevel, "Priority join: Leader joining follower's social lobby",
+		map[string]any{"mid": oneOpen.ID.String()})
+	f.requireNoLog(zapcore.InfoLevel, partyJoinSkippedMsg, map[string]any{"path": "priority_follower"})
+	require.Positivef(t, f.joinsTo(oneOpen.ID), "the join to %s was not attempted", oneOpen.ID.UUID)
 }
 
 // TestPartyJoinCapacity_P3_ReservationPath drives the reservation path in
@@ -386,6 +444,52 @@ func TestPartyJoinCapacity_P4_ReservedFollowerInFullLeaderLobbyStillJoins(t *tes
 	f.requireNoLog(zapcore.InfoLevel, partyJoinSkippedMsg, map[string]any{"path": "follow"})
 }
 
+// pollFollowLeader runs pollFollowPartyLeader once against the leader's lobby. The
+// follower's own find is arena (a social find never reaches the poll's join) and
+// the leader's lobby is social; the poll is short so the test is bounded by the
+// ServerIsFull retry wait at most once.
+func (f *partyCapFixture) pollFollowLeader(lobby *MatchLabel) {
+	f.t.Helper()
+	leader := f.session("leader", true)
+	member := f.session("member", true)
+	lobbyParams := makeMatchmakeTestLobbyParams(member.userID, f.groupID, evr.ModeSocialPublic, 2)
+	group := f.tabletPartyPair(leader, member, lobbyParams)
+	lobbyParams.Mode = evr.ModeArenaPublic
+
+	f.register(lobby)
+	f.trackService(leader, lobby.ID)
+	f.env.ep.pollFollowInterval = time.Millisecond
+	f.env.ep.pollFollowMaxDuration = 50 * time.Millisecond
+
+	_ = f.env.ep.pollFollowPartyLeader(member.Context(), f.logger, member, lobbyParams, group)
+}
+
+// TestPartyJoinCapacity_P4_PollFullLeaderLobbySkips: the poll's own pre-check
+// (OpenPlayerSlots, which reads the roster) admits a lobby whose counters leave no
+// seat (Size 12, roster empty, the 10-28 shape), and the gate refuses it. The poll
+// must skip it. The attempt marker is the Warn "Failed to join leader's lobby
+// during poll": in this DB-free harness the join dies at the statistics query, and
+// that failure stands in for the join having been attempted.
+func TestPartyJoinCapacity_P4_PollFullLeaderLobbySkips(t *testing.T) {
+	f := newPartyCapFixture(t)
+	full := f.socialLabel(SocialLobbyMaxSize, 0) // OpenSlots() == 0, OpenPlayerSlots() == 12
+	f.pollFollowLeader(full)
+
+	f.requireNoLog(zapcore.WarnLevel, "Failed to join leader's lobby during poll", nil)
+	f.requireSkipLogged("follow_poll", full.ID)
+}
+
+// TestPartyJoinCapacity_P4_PollLeaderLobbyWithSeatStillJoins: one open seat, the
+// follower alone needs one, so the poll must attempt the join and not skip.
+func TestPartyJoinCapacity_P4_PollLeaderLobbyWithSeatStillJoins(t *testing.T) {
+	f := newPartyCapFixture(t)
+	oneOpen := f.socialLabel(SocialLobbyMaxSize-1, 0) // OpenSlots() == 1
+	f.pollFollowLeader(oneOpen)
+
+	f.requireLog(zapcore.WarnLevel, "Failed to join leader's lobby during poll", nil)
+	f.requireNoLog(zapcore.InfoLevel, partyJoinSkippedMsg, map[string]any{"path": "follow_poll"})
+}
+
 // TestPartyJoinCapacity_P5_SocialSearchLoop reproduces the 10-28 production shape:
 // MaxSize 12, PlayerLimit 12, Size 10, ReservationCount 1, Players empty.
 // OpenSlots() == 1 (what the gate sees) while OpenSlotsByRole(TeamSocial) == 12
@@ -468,30 +572,68 @@ func reserveForJoiner(state *MatchLabel, joiner *EvrMatchPresence) {
 }
 
 // TestCanSeatEntrants_MatchesJoinGate checks the pre-check's formula against the real
-// join gate (MatchJoinAttempt) over the states a party join meets. Each row must
-// agree with the gate on accept or refuse, and the expected value is the gate's
-// own answer, so a row that disagrees fails on both counts.
+// join gate (MatchJoinAttempt) over the states a party join meets. The pre-check
+// must say "fits" exactly when the gate does not refuse for capacity (lobby_full,
+// or reservation_violated when the joiner's own reservation was consumed). A
+// DuplicateJoin is not a capacity refusal: the caller re-sends success. Each row
+// also pins the gate's own reason, so a row that misdescribes the gate fails.
 func TestCanSeatEntrants_MatchesJoinGate(t *testing.T) {
+	type follower struct {
+		seated   bool // already a connected presence in the lobby
+		reserved bool // holds a reservation in the lobby
+	}
 	tests := []struct {
 		name            string
 		maxSize         int
-		existingPlayers int
-		joinerReserved  bool // entrants[0] holds a reservation in this lobby
-		party           int  // entrants, including the joiner
-		wantAccepted    bool
+		existingPlayers int // strangers, connected
+		joinerReserved  bool
+		joinerSeated    bool
+		followers       []follower // entrants[1:]
+		wantReason      string     // the gate's refusal reason; "" = accepted
 	}{
-		{name: "room for the whole party", maxSize: 12, existingPlayers: 0, party: 2, wantAccepted: true},
-		{name: "one open seat, party of two", maxSize: 12, existingPlayers: 11, party: 2, wantAccepted: false},
-		{name: "one open seat, solo", maxSize: 12, existingPlayers: 11, party: 1, wantAccepted: true},
-		{name: "full lobby, solo, no reservation", maxSize: 12, existingPlayers: 12, party: 1, wantAccepted: false},
-		{name: "joiner holds the seat in a full lobby, solo", maxSize: 12, existingPlayers: 11,
-			joinerReserved: true, party: 1, wantAccepted: true},
+		{name: "room for the whole party", maxSize: 12, existingPlayers: 0, followers: []follower{{}}},
+		{name: "one open seat, party of two", maxSize: 12, existingPlayers: 11, followers: []follower{{}},
+			wantReason: ErrJoinRejectReasonLobbyFull.Error()},
+		{name: "one open seat, solo", maxSize: 12, existingPlayers: 11},
+		{name: "full lobby, solo, no reservation", maxSize: 12, existingPlayers: 12,
+			wantReason: ErrJoinRejectReasonLobbyFull.Error()},
+		{name: "joiner holds the seat in a full lobby, solo", maxSize: 12, existingPlayers: 11, joinerReserved: true},
 		{name: "joiner holds a seat, party of two, one other seat free", maxSize: 12, existingPlayers: 10,
-			joinerReserved: true, party: 2, wantAccepted: true},
+			joinerReserved: true, followers: []follower{{}}},
 		{name: "joiner holds a seat, party of two, none free", maxSize: 12, existingPlayers: 11,
-			joinerReserved: true, party: 2, wantAccepted: false},
+			joinerReserved: true, followers: []follower{{}}, wantReason: ErrJoinRejectReasonReservationViolated.Error()},
 		{name: "overbooked by the joiner's own reservation", maxSize: 12, existingPlayers: 12,
-			joinerReserved: true, party: 2, wantAccepted: false},
+			joinerReserved: true, followers: []follower{{}}, wantReason: ErrJoinRejectReasonReservationViolated.Error()},
+
+		// entrants[1:] already seated: the gate drops them, they need no seat.
+		{name: "leader joins follower's lobby, follower seated, one seat free", maxSize: 12, existingPlayers: 10,
+			followers: []follower{{seated: true}}},
+		{name: "leader joins follower's lobby, follower seated, full", maxSize: 12, existingPlayers: 11,
+			followers: []follower{{seated: true}}, wantReason: ErrJoinRejectReasonLobbyFull.Error()},
+		// entrants[1:] holding a reservation: the gate deletes it, freeing its seat.
+		{name: "follower holds a reservation, one other seat", maxSize: 12, existingPlayers: 10,
+			followers: []follower{{reserved: true}}},
+		{name: "two followers hold reservations, one other seat", maxSize: 12, existingPlayers: 9,
+			followers: []follower{{reserved: true}, {reserved: true}}},
+		{name: "follower reserved, another not, one other seat", maxSize: 12, existingPlayers: 10,
+			followers: []follower{{reserved: true}, {}}, wantReason: ErrJoinRejectReasonLobbyFull.Error()},
+		// Both: the reservation is freed and the seated follower needs nothing.
+		{name: "follower both reserved and seated, one seat free", maxSize: 12, existingPlayers: 9,
+			followers: []follower{{seated: true, reserved: true}}},
+		{name: "follower both reserved and seated, lobby full", maxSize: 12, existingPlayers: 10,
+			followers: []follower{{seated: true, reserved: true}}},
+		// entrants[0] already seated: DuplicateJoin, not a capacity refusal.
+		{name: "joiner already seated in a full lobby", maxSize: 12, existingPlayers: 11, joinerSeated: true,
+			followers: []follower{{}}, wantReason: ErrJoinRejectReasonDuplicateJoin.Error()},
+		// entrants[0] reserved plus entrants[1:] seated.
+		{name: "joiner reserved, follower seated, lobby full", maxSize: 12, existingPlayers: 10,
+			joinerReserved: true, followers: []follower{{seated: true}}},
+		{name: "joiner reserved, one follower seated, one not, lobby full", maxSize: 12, existingPlayers: 10,
+			joinerReserved: true, followers: []follower{{seated: true}, {}},
+			wantReason: ErrJoinRejectReasonReservationViolated.Error()},
+		// Genuinely does not fit after trimming.
+		{name: "party of three, one seated, one seat free", maxSize: 12, existingPlayers: 10,
+			followers: []follower{{seated: true}, {}}, wantReason: ErrJoinRejectReasonLobbyFull.Error()},
 	}
 
 	for _, tt := range tests {
@@ -499,9 +641,22 @@ func TestCanSeatEntrants_MatchesJoinGate(t *testing.T) {
 			state := atJoinSocialLabel(t, tt.maxSize, tt.maxSize, tt.existingPlayers)
 			joiner := atJoinPresence(evr.TeamSocial, 1)
 			entrants := []*EvrMatchPresence{joiner}
-			for i := 1; i < tt.party; i++ {
-				entrants = append(entrants, atJoinPresence(evr.TeamSocial, uint64(100+i)))
+			for i, fw := range tt.followers {
+				e := atJoinPresence(evr.TeamSocial, uint64(100+i))
+				entrants = append(entrants, e)
+				if fw.seated {
+					state.presenceMap[e.GetSessionId()] = e
+					state.presenceByEvrID[e.EvrID] = e
+				}
+				if fw.reserved {
+					state.reservationMap[e.GetSessionId()] = &slotReservation{Presence: e, Expiry: time.Now().Add(time.Hour)}
+				}
 			}
+			if tt.joinerSeated {
+				state.presenceMap[joiner.GetSessionId()] = joiner
+				state.presenceByEvrID[joiner.EvrID] = joiner
+			}
+			state.rebuildCache()
 			if tt.joinerReserved {
 				reserveForJoiner(state, joiner)
 			}
@@ -515,9 +670,15 @@ func TestCanSeatEntrants_MatchesJoinGate(t *testing.T) {
 				context.Background(), reconnectTestLogger(), nil, nil, nil, 10,
 				state, joiner, meta.ToMatchMetadata())
 
-			require.Equalf(t, tt.wantAccepted, accepted,
+			// On accept the gate's third value is the presence, not a reason.
+			require.Equalf(t, tt.wantReason == "", accepted,
 				"the gate's own answer differs from the table (reason=%q): the row is wrong", reason)
-			require.Equalf(t, accepted, helper,
+			if !accepted {
+				require.Equalf(t, tt.wantReason, reason, "the gate refused for a different reason: the row is wrong")
+			}
+			capacityRefused := !accepted && (reason == ErrJoinRejectReasonLobbyFull.Error() ||
+				reason == ErrJoinRejectReasonReservationViolated.Error())
+			require.Equalf(t, !capacityRefused, helper,
 				"CanSeatEntrants disagrees with the join gate (gate accepted=%v, reason=%q)", accepted, reason)
 		})
 	}
