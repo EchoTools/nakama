@@ -123,6 +123,59 @@ func heldReservationFor(label *MatchLabel, userID string) *PlayerInfo {
 	return nil
 }
 
+// partyJoinSkippedMsg is the Info record for a party join the capacity pre-check
+// refused. Its fields are the gate's own numbers, so the skip can be checked
+// against the gate's refusal.
+const partyJoinSkippedMsg = "party join skipped: insufficient capacity"
+
+// checkPartyCapacity refuses a join the gate would refuse as lobby_full, before
+// the join is attempted. It logs the skip at Info with the numbers the decision
+// was made from. path names the call site (priority_leader, reservation, follow,
+// ...). A nil label or no entrants passes; the join path reports those itself.
+func checkPartyCapacity(logger *zap.Logger, path string, label *MatchLabel, entrants ...*EvrMatchPresence) error {
+	// A nil entrants[0] fits (CanSeatEntrants), so the log below never sees one.
+	if label == nil || len(entrants) == 0 || label.CanSeatEntrants(entrants...) {
+		return nil
+	}
+	c := label.countSeats(entrants...)
+	logger.Info(partyJoinSkippedMsg,
+		zap.String("path", path),
+		zap.String("mid", label.ID.String()),
+		zap.Int("party_size", len(entrants)),
+		zap.Int("open_slots", label.OpenSlots()),
+		zap.Int("reservation_count", label.ReservationCount),
+		zap.Bool("held_reservation", c.heldReservation),
+		zap.Int("seated_entrants", c.seatedEntrants),
+		zap.Int("needed_seats", c.need),
+	)
+	return NewLobbyErrorf(ServerIsFull, "party of %d does not fit in lobby %s", len(entrants), label.ID.String())
+}
+
+// joinPartyEntrants is LobbyJoinEntrants for a party join. It runs checkPartyCapacity
+// first, so an undersized lobby is skipped before the join is sent.
+func (p *EvrPipeline) joinPartyEntrants(logger *zap.Logger, path string, label *MatchLabel, entrants ...*EvrMatchPresence) error {
+	if err := checkPartyCapacity(logger, path, label, entrants...); err != nil {
+		return err
+	}
+	return p.LobbyJoinEntrants(logger, label, entrants...)
+}
+
+// joinPartyEntrantsLive is joinPartyEntrants against the live label. The priority
+// paths hold a label that may come from the find's list snapshot, and a stale full
+// snapshot would skip the very lobby the party should join, so the label is
+// re-read with MatchLabelByID before the pre-check. If it cannot be re-read the
+// pre-check is skipped and the join attempted, as the other sites do on a load
+// error: the gate still decides.
+func (p *EvrPipeline) joinPartyEntrantsLive(ctx context.Context, logger *zap.Logger, path string, mid MatchID, label *MatchLabel, entrants ...*EvrMatchPresence) error {
+	live, err := MatchLabelByID(ctx, p.nk, mid)
+	if err != nil || live == nil {
+		logger.Warn("Failed to refresh lobby label for capacity check; joining without pre-check",
+			zap.String("path", path), zap.String("mid", mid.String()), zap.Error(err))
+		return p.LobbyJoinEntrants(logger, label, entrants...)
+	}
+	return p.joinPartyEntrants(logger, path, live, entrants...)
+}
+
 func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, presences ...*EvrMatchPresence) error {
 	if len(presences) == 0 {
 		return ErrNoPresences
