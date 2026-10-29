@@ -869,7 +869,7 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 
 								if leaderMatch != nil && leaderMatch.State.IsSocial() {
 									logger.Info("Priority join: Found party leader's social lobby", zap.String("mid", leaderMatchID.String()))
-									if err := p.joinPartyEntrants(logger, "priority_leader", leaderMatch.State, entrants...); err == nil {
+									if err := p.joinPartyEntrantsLive(ctx, logger, "priority_leader", leaderMatchID, leaderMatch.State, entrants...); err == nil {
 										return nil
 									} else {
 										logger.Warn("Failed priority join to leader's lobby", zap.Error(err))
@@ -917,7 +917,7 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 
 									if followerMatch != nil && followerMatch.State.IsSocial() {
 										logger.Info("Priority join: Leader joining follower's social lobby", zap.String("mid", memberMatchID.String()))
-										if err := p.joinPartyEntrants(logger, "priority_follower", followerMatch.State, entrants...); err == nil {
+										if err := p.joinPartyEntrantsLive(ctx, logger, "priority_follower", memberMatchID, followerMatch.State, entrants...); err == nil {
 											return nil
 										} else {
 											logger.Warn("Failed priority join to follower's lobby", zap.Error(err))

@@ -133,6 +133,7 @@ const partyJoinSkippedMsg = "party join skipped: insufficient capacity"
 // was made from. path names the call site (priority_leader, reservation, follow,
 // ...). A nil label or no entrants passes; the join path reports those itself.
 func checkPartyCapacity(logger *zap.Logger, path string, label *MatchLabel, entrants ...*EvrMatchPresence) error {
+	// A nil entrants[0] fits (CanSeatEntrants), so the log below never sees one.
 	if label == nil || len(entrants) == 0 || label.CanSeatEntrants(entrants...) {
 		return nil
 	}
@@ -157,6 +158,22 @@ func (p *EvrPipeline) joinPartyEntrants(logger *zap.Logger, path string, label *
 		return err
 	}
 	return p.LobbyJoinEntrants(logger, label, entrants...)
+}
+
+// joinPartyEntrantsLive is joinPartyEntrants against the live label. The priority
+// paths hold a label that may come from the find's list snapshot, and a stale full
+// snapshot would skip the very lobby the party should join, so the label is
+// re-read with MatchLabelByID before the pre-check. If it cannot be re-read the
+// pre-check is skipped and the join attempted, as the other sites do on a load
+// error: the gate still decides.
+func (p *EvrPipeline) joinPartyEntrantsLive(ctx context.Context, logger *zap.Logger, path string, mid MatchID, label *MatchLabel, entrants ...*EvrMatchPresence) error {
+	live, err := MatchLabelByID(ctx, p.nk, mid)
+	if err != nil || live == nil {
+		logger.Warn("Failed to refresh lobby label for capacity check; joining without pre-check",
+			zap.String("path", path), zap.String("mid", mid.String()), zap.Error(err))
+		return p.LobbyJoinEntrants(logger, label, entrants...)
+	}
+	return p.joinPartyEntrants(logger, path, live, entrants...)
 }
 
 func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, presences ...*EvrMatchPresence) error {
