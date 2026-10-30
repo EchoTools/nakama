@@ -164,7 +164,11 @@ func Secondary(s *sessionWS, loginSession *sessionWS, isLobby bool, isServer boo
 }
 
 func parseUserQueryFunc(request *http.Request, key string, maxLength int, pattern *regexp.Regexp) string {
-	v := request.URL.Query().Get(key)
+	return sanitizeQueryValue(request.URL.Query().Get(key), maxLength, pattern)
+}
+
+// sanitizeQueryValue truncates v to maxLength and returns "" when it does not match pattern.
+func sanitizeQueryValue(v string, maxLength int, pattern *regexp.Regexp) string {
 	if v != "" {
 		if len(v) > maxLength {
 			v = v[:maxLength]
@@ -177,26 +181,36 @@ func parseUserQueryFunc(request *http.Request, key string, maxLength int, patter
 }
 
 func parseUserQueryCommaDelimited(request *http.Request, key string, maxLength int, pattern *regexp.Regexp) []string {
-	// Add the items list to the urlparam, sanitizing it
-	items := make([]string, 0)
-	if v := request.URL.Query().Get(key); v != "" {
-		s := strings.Split(v, ",")
-		for _, f := range s {
-			if f == "" {
-				continue
-			}
-			if len(f) > maxLength {
-				f = f[:maxLength]
-			}
-			if pattern != nil && !pattern.MatchString(f) {
-				continue
-			}
-			items = append(items, f)
-		}
-		if len(items) == 0 {
-			return nil
-		}
+	return sanitizeCommaDelimited(request.URL.Query().Get(key), maxLength, pattern)
+}
+
+// sanitizeCommaDelimited splits v on commas and sanitizes the items with sanitizeList.
+func sanitizeCommaDelimited(v string, maxLength int, pattern *regexp.Regexp) []string {
+	if v == "" {
+		return make([]string, 0)
 	}
-	slices.Sort(items)
-	return items
+	return sanitizeList(strings.Split(v, ","), maxLength, pattern)
+}
+
+// sanitizeList drops empty items and items that do not match pattern, truncates the
+// rest to maxLength and sorts them. It returns nil when no item survives.
+func sanitizeList(items []string, maxLength int, pattern *regexp.Regexp) []string {
+	out := make([]string, 0, len(items))
+	for _, f := range items {
+		if f == "" {
+			continue
+		}
+		if len(f) > maxLength {
+			f = f[:maxLength]
+		}
+		if pattern != nil && !pattern.MatchString(f) {
+			continue
+		}
+		out = append(out, f)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	slices.Sort(out)
+	return out
 }
