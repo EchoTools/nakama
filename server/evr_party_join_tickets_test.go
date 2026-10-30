@@ -66,13 +66,15 @@ func TestCancelTicketsOnPartyJoin_JoinerIsPlacedOnlyByThePartyTicket(t *testing.
 		"after the leader queues, the joiner is on the party ticket only: one placement")
 }
 
-// The cancel is the joiner's own: another player's ticket and the party ticket survive it.
+// The cancel is the joiner's own: another player's ticket and a party ticket built before the
+// join (which cannot name the joiner) survive it.
 func TestCancelTicketsOnPartyJoin_LeavesOthersTicketsAlone(t *testing.T) {
 	t.Parallel()
 
-	lg, mm, sids, cleanup := makeTicketRebuildParty(t, 2)
+	lg, mm, sids, cleanup := makeTicketRebuildParty(t, 1)
 	defer cleanup()
-	leaderSID, joinerSID := sids[0], sids[1]
+	leaderSID := sids[0]
+	joinerSID := uuid.Must(uuid.NewV4())
 
 	bystanderSID := uuid.Must(uuid.NewV4())
 	bystanderTicket := submitSoloTicket(t, mm, bystanderSID, uuid.Must(uuid.NewV4()))
@@ -81,8 +83,9 @@ func TestCancelTicketsOnPartyJoin_LeavesOthersTicketsAlone(t *testing.T) {
 
 	cancelTicketsOnPartyJoin(loggerForTest(t), mm, &untrackRecorder{}, joinerSID, uuid.Must(uuid.NewV4()))
 
+	assert.Empty(t, sessionTicketIDs(mm, joinerSID), "the joiner's own ticket is gone")
 	assert.Equal(t, []string{bystanderTicket}, sessionTicketIDs(mm, bystanderSID), "a bystander's ticket is untouched")
-	assert.Contains(t, sessionTicketIDs(mm, leaderSID), partyTicket, "the leader's party ticket is untouched")
+	assert.Equal(t, []string{partyTicket}, sessionTicketIDs(mm, leaderSID), "the leader's party ticket is untouched")
 }
 
 // A joiner with no ticket is the common case: the cancel must be a quiet no-op.

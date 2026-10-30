@@ -425,6 +425,7 @@ func (p *EvrPipeline) snsPartyJoinRequest(ctx context.Context, logger *zap.Logge
 	}
 
 	p.snsPartyLeaveForJoin(ctx, logger, session, params, partyUUID)
+	cancelTicketsOnPartyJoin(logger, session.matchmaker, session.tracker, session.ID(), partyUUID)
 	params, _ = LoadParams(ctx)
 	if err := p.snsPartyTrackAndJoin(ctx, logger, session, partyUUID, msg.PartyID, params); err != nil {
 		logger.Error("Failed to track party join", zap.Error(err))
@@ -849,6 +850,7 @@ func (p *EvrPipeline) snsPartyRespondToInviteRequest(ctx context.Context, logger
 	}
 
 	p.snsPartyLeaveForJoin(ctx, logger, session, params, partyUUID)
+	cancelTicketsOnPartyJoin(logger, session.matchmaker, session.tracker, session.ID(), partyUUID)
 	params, _ = LoadParams(ctx)
 	if err := p.snsPartyTrackAndJoin(ctx, logger, session, partyUUID, snsPartyID, params); err != nil {
 		return SendEVRMessages(session, false, &evr.SNSPartyJoinFailure{PartyID: snsPartyID, ErrorCode: 1})
