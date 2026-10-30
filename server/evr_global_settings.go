@@ -203,6 +203,7 @@ type GlobalMatchmakingSettings struct {
 	GreenDivisionMaxAccountAgeDays int                     `json:"green_division_max_account_age_days"` // The maximum account age to be in the green division
 	EnableEarlyQuitPenalty         bool                    `json:"enable_early_quit_penalty"`           // Disable early quit penalty
 	SilentEarlyQuitSystem          bool                    `json:"silent_early_quit_system"`            // Disable Discord DM notifications for tier changes
+	DisableEarlyQuitAutoReport     bool                    `json:"disable_early_quit_auto_report"`      // Disable the auto-report at max early quit penalty (on by default)
 	EarlyQuitTier1Threshold        *int32                  `json:"early_quit_tier1_threshold"`          // Penalty level threshold for Tier 1 (good standing). Players with penalty <= threshold stay in Tier 1. Nil means not configured.
 	EarlyQuitTier2Threshold        *int32                  `json:"early_quit_tier2_threshold"`          // Penalty level threshold for Tier 2 (reserved for future Tier 3+ implementation). Nil means not configured.
 	ServerSelection                ServerSelectionSettings `json:"server_selection"`                    // The server selection settings

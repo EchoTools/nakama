@@ -1162,10 +1162,8 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 										if penaltyLevel > MaxEarlyQuitPenaltyLevel {
 											penaltyLevel = int32(MaxEarlyQuitPenaltyLevel)
 										}
-										if penaltyLevel >= 3 {
-											if evr.DefaultEarlyQuitFeatureFlags()&evr.EarlyQuitFlagAutoReport != 0 {
-												TriggerAutoReport(ctx, logger, mp.GetUserId(), penaltyLevel)
-											}
+										if shouldAutoReportEarlyQuit(&serviceSettings.Matchmaking, penaltyLevel) {
+											TriggerAutoReport(ctx, logger, mp.GetUserId(), penaltyLevel)
 										}
 									}
 
@@ -2518,6 +2516,16 @@ func (m *EvrMatch) sendEntrantReject(ctx context.Context, logger runtime.Logger,
 		return fmt.Errorf("failed to dispatch message: %w", err)
 	}
 	return nil
+}
+
+// earlyQuitAutoReportLevel is the penalty level at which an early quitter is auto-reported.
+const earlyQuitAutoReportLevel = 3
+
+// shouldAutoReportEarlyQuit reports whether a player at penaltyLevel is auto-reported. It is a service
+// setting (on unless DisableEarlyQuitAutoReport); it was bit 3 of the SNSEarlyQuitFeatureFlags wire
+// byte, which the client never reads (#712).
+func shouldAutoReportEarlyQuit(settings *GlobalMatchmakingSettings, penaltyLevel int32) bool {
+	return penaltyLevel >= earlyQuitAutoReportLevel && !settings.DisableEarlyQuitAutoReport
 }
 
 // TriggerAutoReport logs an auto-report event for players at max early quit penalty level
