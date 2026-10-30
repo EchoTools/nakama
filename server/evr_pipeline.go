@@ -760,6 +760,10 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		logger.Error("Session is not a WebSocket session")
 		return false
 	}
+	// A tablet party action moves the player off any party group code, at this one entry point for
+	// every SNS party request. A failure is logged and the action still runs: the group is a bias for
+	// matchmaking, and the party action itself must not fail on it.
+	applyTabletPartyGroup(session.Context(), logger, p.nk, session.UserID(), in)
 	if err := pipelineFn(session.Context(), logger, ws, in); err != nil {
 		// Unwrap the error
 		logger.Error("Pipeline error", zap.Error(err))

@@ -191,6 +191,7 @@ type Matchmaker interface {
 	RemoveAll(node string)
 	Remove(tickets []string)
 	HasSessionOnPartyTicket(partyID, sessionID string) bool
+	TicketsForPartyOrSessions(partyID string, sessionIDs []string) []string
 	GetStats() *api.MatchmakerStats
 	SetStats(*api.MatchmakerStats)
 }
@@ -1076,6 +1077,31 @@ func (m *LocalMatchmaker) RemovePartyAll(partyID string) error {
 		return runtime.ErrMatchmakerDelete
 	}
 	return nil
+}
+
+// TicketsForPartyOrSessions returns the id of every active ticket that is keyed by partyID or that
+// names any of sessionIDs, each once. A party change cancels all of them: the party's own tickets and
+// the solo tickets its members filed on their own. Tickets are not removed here; pass the result to Remove.
+func (m *LocalMatchmaker) TicketsForPartyOrSessions(partyID string, sessionIDs []string) []string {
+	m.Lock()
+	defer m.Unlock()
+
+	found := make(map[string]struct{})
+	if partyID != "" {
+		for ticket := range m.partyTickets[partyID] {
+			found[ticket] = struct{}{}
+		}
+	}
+	for _, sessionID := range sessionIDs {
+		for ticket := range m.sessionTickets[sessionID] {
+			found[ticket] = struct{}{}
+		}
+	}
+	tickets := make([]string, 0, len(found))
+	for ticket := range found {
+		tickets = append(tickets, ticket)
+	}
+	return tickets
 }
 
 // HasSessionOnPartyTicket reports whether sessionID is included on any active

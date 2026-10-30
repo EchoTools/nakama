@@ -333,11 +333,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		}
 	}
 
-	var lobbyGroupName string
-
-	if userSettings.LobbyGroupName != "" {
-		lobbyGroupName = userSettings.LobbyGroupName
-	}
+	lobbyGroupName := lobbyGroupNameFromSettings(userSettings)
 
 	node := session.pipeline.node
 
