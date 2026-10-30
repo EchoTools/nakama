@@ -122,10 +122,13 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	if s := ServiceSettings(); s.DisableLoginMessage != "" {
+		// The login is blocked: send the failure and stop. Without this return the handler went on to
+		// log the player in and send LoginSuccess after the failure.
 		if err := session.SendEvrUnrequire(evr.NewLoginFailure(request.XPID, "System is Temporarily Unavailable:\n"+s.DisableLoginMessage)); err != nil {
 			// If there's an error, prefix it with the XPID
 			return fmt.Errorf("failed to send LoginFailure: %w", err)
 		}
+		return nil
 	}
 
 	if request.Payload.IsEmpty() {
