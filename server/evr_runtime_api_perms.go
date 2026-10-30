@@ -364,10 +364,12 @@ func registerAPIGuards(initializer runtime.Initializer) error {
 }
 
 // AfterListMatchesHook filters match data based on user permissions.
-// - Complete match data is shown only for guilds where user has audit role OR is the server host
-// - Global operators can see client IPs
-// - Public match label data is available for any guild the user is a member of
-// - Suspended users see no match data except for servers they run
+//   - Complete match data is shown only for guilds where user has audit role OR is the server host
+//   - Global operators can see client IPs
+//   - Player location (client IPs, geohashes) is shown only to global operators and members of
+//     Global Private Data Access; everyone else gets RedactPlayerLocation()
+//   - Public match label data is available for any guild the user is a member of
+//   - Suspended users see no match data except for servers they run
 func AfterListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, out *api.MatchList, in *api.ListMatchesRequest) error {
 	if out == nil || len(out.Matches) == 0 {
 		return nil
@@ -399,11 +401,15 @@ func AfterListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.DB
 	// Build a map of group IDs the user is a member of
 	memberGroupIDs := make(map[string]bool)
 	isGlobalOperatorMember := false
+	hasPrivateDataAccess := false
 	for _, ug := range userGroups {
 		if ug.State != nil && ug.State.Value <= 2 { // Member, Admin, or Superadmin
 			memberGroupIDs[ug.Group.Id] = true
 			if ug.Group != nil && ug.Group.Name == GroupGlobalOperators {
 				isGlobalOperatorMember = true
+			}
+			if ug.Group != nil && ug.Group.Name == GroupGlobalPrivateDataAccess {
+				hasPrivateDataAccess = true
 			}
 		}
 	}
@@ -436,7 +442,7 @@ func AfterListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.DB
 	// Filter each match based on permissions
 	filteredMatches := make([]*api.Match, 0, len(out.Matches))
 	for _, match := range out.Matches {
-		filteredMatch := filterMatchForUser(match, userID, isGlobalOperator, guildGroups, suspendedGroupIDs, memberGroupIDs)
+		filteredMatch := filterMatchForUser(match, userID, isGlobalOperator, hasPrivateDataAccess, guildGroups, suspendedGroupIDs, memberGroupIDs)
 		if filteredMatch != nil {
 			filteredMatches = append(filteredMatches, filteredMatch)
 		}
@@ -481,7 +487,7 @@ func filterMatchesForAnonymous(out *api.MatchList) error {
 	return nil
 }
 
-func filterMatchForUser(match *api.Match, userID string, isGlobalOperator bool, guildGroups map[string]*GuildGroup, suspendedGroupIDs, memberGroupIDs map[string]bool) *api.Match {
+func filterMatchForUser(match *api.Match, userID string, isGlobalOperator, hasPrivateDataAccess bool, guildGroups map[string]*GuildGroup, suspendedGroupIDs, memberGroupIDs map[string]bool) *api.Match {
 	// Parse the label
 	if match.Label == nil {
 		return nil
@@ -520,14 +526,21 @@ func filterMatchForUser(match *api.Match, userID string, isGlobalOperator bool, 
 	// Global operators can see all match data
 	canSeeFullData := isGlobalOperator || isServerHost || isAuditor
 
-	// Can see client IPs only if global operator
+	// Can see the server endpoint only if global operator
 	canSeeClientIPs := isGlobalOperator
+
+	// Can see player location (client IPs, geohashes) only if global operator
+	// or in the Global Private Data Access group.
+	canSeePlayerLocation := isGlobalOperator || hasPrivateDataAccess
 
 	// Create filtered label based on permissions
 	var labelJSON []byte
 	var err error
 	if canSeeFullData {
 		filteredLabel := createFullMatchLabel(label, canSeeClientIPs)
+		if !canSeePlayerLocation {
+			filteredLabel = filteredLabel.RedactPlayerLocation()
+		}
 		labelJSON, err = json.Marshal(filteredLabel)
 	} else if isMember || label.IsPublic() {
 		publicLabel := createPublicMatchLabel(label)

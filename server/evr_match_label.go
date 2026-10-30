@@ -921,6 +921,32 @@ func (l *MatchLabel) CalculateRatingWeights() map[evr.EvrId]int {
 	return byPlayer
 }
 
+// RedactPlayerLocation returns a copy of the label with every field that says
+// where a player is removed: each player's ClientIP and the GeoHash derived from
+// it. The game server's endpoint, region and coordinates stay: where a server runs
+// is not a player's location, and allocators join through the endpoint.
+//
+// This is the one place player location is stripped. Every surface that returns a
+// label to a caller without GroupGlobalPrivateDataAccess must pass it through here
+// first. TestRedactPlayerLocation_ClassifiesEveryField fails when PlayerInfo gains
+// a field that has not been classified as player location or not, so a new field
+// cannot reach a caller by omission.
+func (l *MatchLabel) RedactPlayerLocation() *MatchLabel {
+	if l == nil {
+		return nil
+	}
+	redacted := *l
+	if l.Players != nil {
+		redacted.Players = make([]PlayerInfo, len(l.Players))
+		for i, p := range l.Players {
+			p.ClientIP = ""
+			p.GeoHash = ""
+			redacted.Players[i] = p
+		}
+	}
+	return &redacted
+}
+
 func (l *MatchLabel) PublicView() *MatchLabel {
 	// Remove private data
 	var gs *GameState
