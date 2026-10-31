@@ -264,8 +264,27 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		"state":     string(label.GetLabel()),
 	}).Info("Match prepared")
 
+	// The label carries the players of a match that already exists. Only Global
+	// Private Data Access sees where they are; the server endpoint stays.
+	privileged, err := callerHasPrivateDataAccess(ctx, db, userID)
+	if err != nil {
+		return "", runtime.NewError("failed to check private data access", StatusInternalError)
+	}
+	if !privileged {
+		label = label.RedactPlayerLocation()
+	}
+
 	// Return the match label as a JSON string
 	return string(label.GetLabelIndented()), nil
+}
+
+// callerHasPrivateDataAccess reports whether the caller is in the Global Private
+// Data Access system group, the gate for every player location field.
+func callerHasPrivateDataAccess(ctx context.Context, db *sql.DB, userID string) (bool, error) {
+	if perms := PermissionsFromContext(ctx); perms != nil {
+		return perms.IsGlobalPrivateDataAccess, nil
+	}
+	return CheckSystemGroupMembership(ctx, db, userID, GroupGlobalPrivateDataAccess)
 }
 
 type shutdownMatchRequest struct {
