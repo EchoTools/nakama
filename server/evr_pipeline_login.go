@@ -870,6 +870,15 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		}
 	}
 
+	if serviceSettings.SyncGuildMembersWithoutIntent {
+		params.guildGroups, err = syncGuildMembersAndReloadGroups(ctx, logger, params.profile.DiscordID(), params.guildGroups, true, p.discordCache.syncMember, func() (map[string]*GuildGroup, error) {
+			return GuildUserGroupsList(ctx, p.nk, p.guildGroupRegistry, params.profile.ID())
+		})
+		if err != nil {
+			return fmt.Errorf("failed to reload guild groups after role sync: %w", err)
+		}
+	}
+
 	if len(params.guildGroups) == 0 {
 		// User is not in any groups, and the default group could not be joined.
 		metricsTags["error"] = "user_not_in_any_groups"

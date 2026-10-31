@@ -126,12 +126,15 @@ type ServiceSettingsData struct {
 	EnableContinuousGameserverHealthCheck  bool   `json:"enable_continuous_gameserver_health_check"`
 	DisplayNameInUseNotifications          bool   `json:"display_name_in_use_notifications"` // Display name in use notifications
 	EnableSessionDebug                     bool   `json:"enable_session_debug"`
-	version                                string
-	serviceStatusMessage                   string
-	PingServerBeforeJoin                   bool          `json:"ping_server_before_join"`   // Ping the server before joining to measure latency
-	EnableVibinatorsGravity                bool          `json:"enable_vibinators_gravity"` // Novelty: redirect social-lobby echo_arena matchmakers toward vibinator's echo_combat
-	UseQuestEncoderFlags                   bool          `json:"use_quest_encoder_flags"`   // Send Quest-shifted encoder flag bit layout in LobbySessionSuccessv5 for standalone clients
-	CGNAT                                  CGNATSettings `json:"cgnat"`
+	// SyncGuildMembersWithoutIntent replaces member gateway events with REST
+	// syncs; changing the Identify intent takes effect after a process restart.
+	SyncGuildMembersWithoutIntent bool `json:"sync_guild_members_without_intent"`
+	version                       string
+	serviceStatusMessage          string
+	PingServerBeforeJoin          bool          `json:"ping_server_before_join"`   // Ping the server before joining to measure latency
+	EnableVibinatorsGravity       bool          `json:"enable_vibinators_gravity"` // Novelty: redirect social-lobby echo_arena matchmakers toward vibinator's echo_combat
+	UseQuestEncoderFlags          bool          `json:"use_quest_encoder_flags"`   // Send Quest-shifted encoder flag bit layout in LobbySessionSuccessv5 for standalone clients
+	CGNAT                         CGNATSettings `json:"cgnat"`
 }
 
 // CGNATSettings configures detection of CGNAT and shared-IP providers
