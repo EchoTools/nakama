@@ -818,7 +818,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 
 	if len(filteredIPs) == 0 {
 		if !hasLatencyData {
-			return nil, 0, fmt.Errorf("no latency history exists for your account; play some matches first to establish server latency data")
+			return nil, 0, ErrNoLatencyHistory
 		}
 		return nil, 0, fmt.Errorf("no servers within %dms of your location. Your best server has %dms latency", MaxRegionPingMs, minLatencyMs)
 	}

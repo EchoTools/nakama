@@ -185,6 +185,7 @@ func (p *EvrPipeline) snsPartyTrackAndJoin(ctx context.Context, logger *zap.Logg
 	params.snsPartyCloseOnce.Do(func() {
 		go p.snsPartyLeaveOnClose(session.logger, session)
 	})
+	p.recordPartyJoin(logger, session, partyUUID)
 	p.friendPresencePartyChanged(ctx, logger, session.UserID(), partyUUID, "party_join")
 	return nil
 }
@@ -218,7 +219,9 @@ func (p *EvrPipeline) snsPartyLeaveOnClose(logger *zap.Logger, session *sessionW
 			break
 		}
 	}
-	p.snsPartyLeaveCleanup(context.Background(), logger, session, params)
+	// Not snsPartyLeaveCleanup: a closed session is not a player leaving. The in-memory party lets go of
+	// it, but the party's roster keeps the member (offline) until they leave, are kicked, or join another.
+	p.snsPartyDetach(logger, session, params)
 }
 
 // clearPartyParams clears the session's current-party fields and re-stores the
@@ -231,10 +234,20 @@ func clearPartyParams(ctx context.Context, params *SessionParameters) {
 	StoreParams(ctx, params)
 }
 
+// snsPartyLeaveCleanup is a player leaving their SNS party (an explicit leave, or leaving it for another):
+// the session leaves the in-memory party and the member comes off the party's roster.
 func (p *EvrPipeline) snsPartyLeaveCleanup(_ context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) {
+	if partyUUID := p.snsPartyDetach(logger, session, params); partyUUID != uuid.Nil {
+		p.recordPartyLeave(logger, partyUUID, session.UserID())
+	}
+}
+
+// snsPartyDetach takes the session out of its in-memory SNS party, ending the party if it was the last
+// session in it, and returns the party it left (uuid.Nil if it was in none). It leaves the roster alone.
+func (p *EvrPipeline) snsPartyDetach(logger *zap.Logger, session *sessionWS, params *SessionParameters) uuid.UUID {
 	partyUUID := p.snsPartyUUID(params)
 	if partyUUID == uuid.Nil {
-		return
+		return uuid.Nil
 	}
 	stream := PresenceStream{Mode: StreamModeParty, Subject: partyUUID, Label: p.node}
 	p.nk.tracker.Untrack(session.ID(), stream, session.UserID())
@@ -248,10 +261,11 @@ func (p *EvrPipeline) snsPartyLeaveCleanup(_ context.Context, logger *zap.Logger
 		params.currentSNSPartyID = 0
 		StoreParams(session.Context(), params)
 		p.friendPresencePartyChanged(session.Context(), logger, session.UserID(), partyUUID, "party_leave")
-		return
+		return partyUUID
 	}
 	clearPartyParams(session.Context(), params)
 	p.friendPresencePartyChanged(session.Context(), logger, session.UserID(), partyUUID, "party_leave")
+	return partyUUID
 }
 
 // snsPartyWatchLeader has the SNS party's members told who leads it when the leader leaves and the
@@ -268,6 +282,7 @@ func (p *EvrPipeline) snsPartyLeaderChanged(partyUUID uuid.UUID, leader *rtapi.U
 	if !ok || snsID == 0 || leader == nil {
 		return
 	}
+	p.recordPartyLeader(p.nk.logger, partyUUID, uuid.FromStringOrNil(leader.UserId))
 	var ownerID uint64
 	if ws, ok := p.nk.sessionRegistry.Get(uuid.FromStringOrNil(leader.SessionId)).(*sessionWS); ok && ws != nil {
 		if params, ok := LoadParams(ws.Context()); ok {
@@ -611,6 +626,7 @@ func (p *EvrPipeline) snsPartyKickRequest(ctx context.Context, logger *zap.Logge
 		logger.Info("Party kick failed", zap.Error(err))
 		return SendEVRMessages(session, false, &evr.SNSPartyKickFailure{ErrorCode: 1})
 	}
+	p.recordPartyLeave(logger, partyUUID, targetUserID)
 
 	snsID := params.currentSNSPartyID
 	targetAccountID, _ := p.resolveUserIDToAccountID(ctx, targetUserID)
@@ -677,6 +693,8 @@ func (p *EvrPipeline) snsPartyPassOwnershipRequest(ctx context.Context, logger *
 		logger.Info("Party promote failed", zap.Error(err))
 		return SendEVRMessages(session, false, &evr.SNSPartyPassFailure{ErrorCode: 1})
 	}
+	// The handler's leader hook only fires for the promotion a leave causes; an explicit pass is recorded here.
+	p.recordPartyLeader(logger, partyUUID, targetUserID)
 
 	snsID := params.currentSNSPartyID
 	targetAccountID, _ := p.resolveUserIDToAccountID(ctx, targetUserID)

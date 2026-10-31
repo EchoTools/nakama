@@ -8,12 +8,14 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/types"
+	"go.uber.org/zap"
 )
 
 func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, entries []runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int, []PredictedMatch) {
 
 	settings := ServiceSettings()
 	hardDivisions := settings != nil && settings.Matchmaking.HardDivisionsEnabled()
+	zapLogger := RuntimeLoggerToZapLogger(logger)
 
 	var candidates [][]runtime.MatchmakerEntry
 	if hardDivisions {
@@ -21,7 +23,7 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 		// Entries from different divisions never appear in the same candidate.
 		grouped := FilterEntriesByDivision(entries)
 		for division, divEntries := range grouped {
-			divCandidates := groupEntriesSequentially(divEntries)
+			divCandidates := groupEntriesSequentially(zapLogger, divEntries)
 			candidates = append(candidates, divCandidates...)
 			logger.WithFields(map[string]any{
 				"division":   division,
@@ -30,7 +32,7 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 			}).Info("Hard division queue status")
 		}
 	} else {
-		candidates = groupEntriesSequentially(entries)
+		candidates = groupEntriesSequentially(zapLogger, entries)
 	}
 
 	filterCounts := make(map[string]int)
@@ -150,7 +152,7 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 	return candidates, madeMatches, filterCounts, predictions
 }
 
-func groupEntriesSequentially(entries []runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
+func groupEntriesSequentially(logger *zap.Logger, entries []runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -306,6 +308,11 @@ func groupEntriesSequentially(entries []runtime.MatchmakerEntry) [][]runtime.Mat
 
 		// If this ticket alone exceeds maxCount, it can't fit in any candidate — skip it.
 		if len(tg.entries) > maxCount {
+			logger.Info("Matchmaker ticket larger than max candidate size, skipped",
+				zap.String("ticket", ticket),
+				zap.Int("size", len(tg.entries)),
+				zap.Int("max_count", maxCount),
+			)
 			continue
 		}
 

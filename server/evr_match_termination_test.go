@@ -393,7 +393,7 @@ func TestMatchJoin_OrphanPresenceDoesNotLeakJoinTimeMilliseconds(t *testing.T) {
 	state.StartTime = time.Now().UTC().Add(-time.Minute)
 	state.levelLoaded = true
 	// A live scoreboard is what makes MatchJoin record a join clock time at all.
-	state.GameState = &GameState{SessionScoreboard: NewSessionScoreboard(RoundDuration, time.Now())}
+	state.GameState = &GameState{SessionScoreboard: NewSessionScoreboard(DefaultPublicArenaRoundDuration, time.Now())}
 	state.rebuildCache()
 
 	// The orphan is deliberately NOT in the presence map: MatchJoinAttempt

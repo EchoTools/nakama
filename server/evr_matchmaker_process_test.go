@@ -11,6 +11,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // Test filtering candidates based on max RTT to common servers
@@ -333,7 +335,7 @@ func TestGroupEntriesSequentially_NoStraddle(t *testing.T) {
 				}
 			}
 
-			candidates := groupEntriesSequentially(entries)
+			candidates := groupEntriesSequentially(zap.NewNop(), entries)
 
 			// Sizes alone would pass for an implementation that emitted the
 			// right count of entries built from a truncated ticket, so check
@@ -388,10 +390,10 @@ func TestGroupEntriesSequentially_Boundaries(t *testing.T) {
 	small := map[string]any{"max_team_size": 2.0, "count_multiple": 2.0}
 
 	t.Run("empty input returns no candidates", func(t *testing.T) {
-		if got := groupEntriesSequentially(nil); got != nil {
+		if got := groupEntriesSequentially(zap.NewNop(), nil); got != nil {
 			t.Errorf("expected nil for empty input, got %v", candidateSizes(got))
 		}
-		if got := groupEntriesSequentially([]runtime.MatchmakerEntry{}); got != nil {
+		if got := groupEntriesSequentially(zap.NewNop(), []runtime.MatchmakerEntry{}); got != nil {
 			t.Errorf("expected nil for empty slice, got %v", candidateSizes(got))
 		}
 	})
@@ -401,7 +403,7 @@ func TestGroupEntriesSequentially_Boundaries(t *testing.T) {
 		// party is atomic, so no legal 2v2 exists. Prediction would reject it
 		// at len(blueTeam) != len(orangeTeam); emitting it is pure waste.
 		entries := makePartyTicket("quad", 4, small)
-		if got := groupEntriesSequentially(entries); len(got) != 0 {
+		if got := groupEntriesSequentially(zap.NewNop(), entries); len(got) != 0 {
 			t.Errorf("expected no candidates for a lone 4-party at maxCount=4, got %v", candidateSizes(got))
 		}
 	})
@@ -411,7 +413,7 @@ func TestGroupEntriesSequentially_Boundaries(t *testing.T) {
 		entries = append(entries, makePartyTicket("duoA", 2, small)...)
 		entries = append(entries, makePartyTicket("duoB", 2, small)...)
 
-		candidates := groupEntriesSequentially(entries)
+		candidates := groupEntriesSequentially(zap.NewNop(), entries)
 		if len(candidates) != 1 {
 			t.Fatalf("expected 1 candidate, got %d: %v", len(candidates), candidateSizes(candidates))
 		}
@@ -422,7 +424,7 @@ func TestGroupEntriesSequentially_Boundaries(t *testing.T) {
 
 	t.Run("party larger than maxCount is skipped entirely", func(t *testing.T) {
 		entries := makePartyTicket("toobig", 5, small)
-		if got := groupEntriesSequentially(entries); len(got) != 0 {
+		if got := groupEntriesSequentially(zap.NewNop(), entries); len(got) != 0 {
 			t.Errorf("expected no candidates for a 5-party at maxCount=4, got %v", candidateSizes(got))
 		}
 	})
@@ -434,7 +436,7 @@ func TestGroupEntriesSequentially_Boundaries(t *testing.T) {
 		entries = append(entries, makePartyTicket("s1", 1, small)...)
 		entries = append(entries, makePartyTicket("s2", 1, small)...)
 
-		candidates := groupEntriesSequentially(entries)
+		candidates := groupEntriesSequentially(zap.NewNop(), entries)
 		if len(candidates) != 1 {
 			t.Fatalf("expected 1 candidate, got %d: %v", len(candidates), candidateSizes(candidates))
 		}
@@ -529,5 +531,36 @@ func TestFilterWithinMaxRTT(t *testing.T) {
 				t.Errorf("filterWithinMaxRTT() candidates = %v, want %v", tt.candidates, tt.want)
 			}
 		})
+	}
+}
+
+// TestGroupEntriesSequentially_OversizedTicketIsLogged: a ticket larger than maxCount
+// is still skipped, and the skip is logged at Info with the ticket, its size and the
+// maxCount it exceeded. Before the fix the skip was silent.
+func TestGroupEntriesSequentially_OversizedTicketIsLogged(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	small := map[string]any{"max_team_size": 2.0, "count_multiple": 2.0} // maxCount == 4
+	entries := makePartyTicket("toobig", 5, small)
+
+	if got := groupEntriesSequentially(zap.New(core), entries); len(got) != 0 {
+		t.Fatalf("expected the 5-party to be skipped, got %v", candidateSizes(got))
+	}
+
+	recs := logs.FilterMessage("Matchmaker ticket larger than max candidate size, skipped").All()
+	if len(recs) != 1 {
+		t.Fatalf("expected exactly one skip record, got %d", len(recs))
+	}
+	if recs[0].Level != zapcore.InfoLevel {
+		t.Errorf("skip record level = %v, want info", recs[0].Level)
+	}
+	ctx := recs[0].ContextMap()
+	if got := ctx["ticket"]; got != "toobig" {
+		t.Errorf("ticket = %v, want toobig", got)
+	}
+	if got := ctx["size"]; got != int64(5) {
+		t.Errorf("size = %v, want 5", got)
+	}
+	if got := ctx["max_count"]; got != int64(4) {
+		t.Errorf("max_count = %v, want 4", got)
 	}
 }
