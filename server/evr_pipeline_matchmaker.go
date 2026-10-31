@@ -107,6 +107,8 @@ const (
 	// lobbyErrorAuditMaxInFlight bounds concurrent posts from one session, so
 	// one retrying client cannot occupy every audit slot for every other client.
 	lobbyErrorAuditMaxInFlight = 8
+	// lobbyErrorAuditMaxInFlightTotal bounds the aggregate work held behind Discord rate limits.
+	lobbyErrorAuditMaxInFlightTotal = 32
 	// lobbyErrorAuditTimeout bounds one post. The request's context ends when the request is answered,
 	// so a post runs on a detached context of its own.
 	lobbyErrorAuditTimeout = 30 * time.Second
@@ -117,9 +119,19 @@ var lobbyErrorAuditSessions = struct {
 	slots map[string]chan struct{}
 }{slots: make(map[string]chan struct{})}
 
+var lobbyErrorAuditGlobalSlots = make(chan struct{}, lobbyErrorAuditMaxInFlightTotal)
+
 // postLobbyErrorAuditAsync posts message to the guild's error channel without waiting for it.
 // requestErr is the failure being posted, for the warn when the post errors or is skipped.
 func (p *EvrPipeline) postLobbyErrorAuditAsync(ctx context.Context, logger *zap.Logger, sessionID, groupID, message string, requestErr error) {
+	select {
+	case lobbyErrorAuditGlobalSlots <- struct{}{}:
+	default:
+		logger.Warn("Lobby error audit post skipped: too many posts in flight",
+			zap.String("limit", "global"), zap.Int("in_flight_limit", lobbyErrorAuditMaxInFlightTotal),
+			zap.String("session_id", sessionID), zap.String("group_id", groupID), zap.Error(requestErr))
+		return
+	}
 	lobbyErrorAuditSessions.Lock()
 	slots := lobbyErrorAuditSessions.slots[sessionID]
 	if slots == nil {
@@ -131,13 +143,16 @@ func (p *EvrPipeline) postLobbyErrorAuditAsync(ctx context.Context, logger *zap.
 		lobbyErrorAuditSessions.Unlock()
 	default:
 		lobbyErrorAuditSessions.Unlock()
+		<-lobbyErrorAuditGlobalSlots
 		logger.Warn("Lobby error audit post skipped: too many posts in flight",
-			zap.Int("in_flight_limit", lobbyErrorAuditMaxInFlight), zap.String("group_id", groupID), zap.Error(requestErr))
+			zap.String("limit", "session"), zap.Int("in_flight_limit", lobbyErrorAuditMaxInFlight),
+			zap.String("session_id", sessionID), zap.String("group_id", groupID), zap.Error(requestErr))
 		return
 	}
 	postCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lobbyErrorAuditTimeout)
 	go func() {
 		defer func() {
+			<-lobbyErrorAuditGlobalSlots
 			lobbyErrorAuditSessions.Lock()
 			<-slots
 			if len(slots) == 0 {
