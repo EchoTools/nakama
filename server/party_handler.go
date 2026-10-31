@@ -107,7 +107,42 @@ func (p *PartyHandler) stop() {
 	p.ctxCancelFn()
 	p.partyRegistry.Delete(p.ID)
 	p.tracker.UntrackByStream(p.Stream)
-	_ = p.matchmaker.RemovePartyAll(p.IDStr)
+}
+
+// Party changes (partyChange*) are the kinds cancelMatchmakingOnPartyChange logs.
+const (
+	partyChangeJoin         = "join"
+	partyChangeLeave        = "leave"
+	partyChangeRemove       = "remove"
+	partyChangeLeaderChange = "leader_change"
+	partyChangeDisband      = "disband"
+)
+
+// cancelMatchmakingOnPartyChange is the one place a party membership change cancels matchmaking
+// (owner, 2026-10-30: any party change cancels it, so no ticket outlives the party it was built for).
+// It removes every ticket that names a current member, a member the change added or took away
+// (changed), or the party itself, whether the party filed it or the member filed it alone, and the
+// members queue again as the party they are now. It does nothing, and logs nothing, when there is
+// nothing to cancel. Call it with the handler unlocked.
+func (p *PartyHandler) cancelMatchmakingOnPartyChange(change string, changed ...*Presence) {
+	sessionIDs := make([]string, 0, 4+len(changed))
+	for _, member := range p.members.List() {
+		sessionIDs = append(sessionIDs, member.PresenceID.SessionID.String())
+	}
+	for _, presence := range changed {
+		sessionIDs = append(sessionIDs, presence.ID.SessionID.String())
+	}
+
+	tickets := p.matchmaker.TicketsForPartyOrSessions(p.IDStr, sessionIDs)
+	if len(tickets) == 0 {
+		return
+	}
+	p.matchmaker.Remove(tickets)
+	p.logger.Info("Cancelled matchmaking on party change",
+		zap.String("party_id", p.IDStr),
+		zap.String("change", change),
+		zap.Int("tickets_removed", len(tickets)),
+		zap.Strings("tickets", tickets))
 }
 
 func (p *PartyHandler) JoinRequest(presence *Presence) (bool, error) {
@@ -157,8 +192,7 @@ func (p *PartyHandler) JoinRequest(presence *Presence) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		// The party membership has changed, stop any ongoing matchmaking processes.
-		_ = p.matchmaker.RemovePartyAll(p.IDStr)
+		p.cancelMatchmakingOnPartyChange(partyChangeJoin, presence)
 		return true, nil
 	}
 	// Check if party has room for more join requests.
@@ -248,7 +282,7 @@ func (p *PartyHandler) Join(presences []*Presence) {
 		}
 	}
 
-	_, err := p.members.Join(presences)
+	joined, err := p.members.Join(presences)
 	if err != nil {
 		p.Unlock()
 		// Should not happen, this process is just a confirmation.
@@ -340,6 +374,13 @@ func (p *PartyHandler) Join(presences []*Presence) {
 		envelope.GetParty().Presences = memberUserPresences
 		p.router.SendToPresenceIDs(p.logger, []*PresenceID{presenceID}, envelope, true)
 	}
+
+	// Only a join that added someone is a party change: JoinRequest and Accept add the member before
+	// the stream hook calls this, and cancelling again would take a ticket the leader had already
+	// rebuilt for the new party.
+	if len(joined) > 0 {
+		p.cancelMatchmakingOnPartyChange(partyChangeJoin, joined...)
+	}
 }
 
 // SetLeaderChangedHook sets the function Leave calls with the new leader when it promotes one.
@@ -394,6 +435,7 @@ func (p *PartyHandler) Leave(presences []*Presence) {
 				// Party is now empty, close it.
 				p.stopped = true
 				p.Unlock()
+				p.cancelMatchmakingOnPartyChange(partyChangeDisband, presences...)
 				p.stop()
 				return
 			}
@@ -426,8 +468,11 @@ func (p *PartyHandler) Leave(presences []*Presence) {
 		onLeaderChanged(promoted)
 	}
 
-	// The party membership has changed, stop any ongoing matchmaking processes.
-	_ = p.matchmaker.RemovePartyAll(p.IDStr)
+	change := partyChangeLeave
+	if promoted != nil {
+		change = partyChangeLeaderChange
+	}
+	p.cancelMatchmakingOnPartyChange(change, presences...)
 }
 
 func (p *PartyHandler) Promote(sessionID, node string, presence *rtapi.UserPresence) error {
@@ -475,6 +520,8 @@ func (p *PartyHandler) Promote(sessionID, node string, presence *rtapi.UserPrese
 	}
 
 	p.router.SendToStream(p.logger, p.Stream, envelope, true)
+
+	p.cancelMatchmakingOnPartyChange(partyChangeLeaderChange)
 
 	return nil
 }
@@ -539,8 +586,7 @@ func (p *PartyHandler) Accept(sessionID, node string, presence *rtapi.UserPresen
 		p.tracker.UntrackLocalByModes(joinRequestPresence.ID.SessionID, partyStreamMode, p.Stream)
 	}
 
-	// The party membership has changed, stop any ongoing matchmaking processes.
-	_ = p.matchmaker.RemovePartyAll(p.IDStr)
+	p.cancelMatchmakingOnPartyChange(partyChangeJoin, joinRequestPresence)
 
 	return nil
 }
@@ -595,8 +641,7 @@ func (p *PartyHandler) Remove(sessionID, node string, presence *rtapi.UserPresen
 		return runtime.ErrPartyNotMember
 	}
 
-	// The party membership has changed, stop any ongoing matchmaking processes.
-	_ = p.matchmaker.RemovePartyAll(p.IDStr)
+	p.cancelMatchmakingOnPartyChange(partyChangeRemove, removeMember.Presence)
 
 	p.members.Leave([]*Presence{removeMember.Presence})
 
@@ -633,6 +678,7 @@ func (p *PartyHandler) Close(sessionID, node string) error {
 		PartyId: p.IDStr,
 	}}}, true)
 
+	p.cancelMatchmakingOnPartyChange(partyChangeDisband)
 	p.stop()
 	return nil
 }

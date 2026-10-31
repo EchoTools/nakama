@@ -122,10 +122,13 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	if s := ServiceSettings(); s.DisableLoginMessage != "" {
+		// The login is blocked: send the failure and stop. Without this return the handler went on to
+		// log the player in and send LoginSuccess after the failure.
 		if err := session.SendEvrUnrequire(evr.NewLoginFailure(request.XPID, "System is Temporarily Unavailable:\n"+s.DisableLoginMessage)); err != nil {
 			// If there's an error, prefix it with the XPID
 			return fmt.Errorf("failed to send LoginFailure: %w", err)
 		}
+		return nil
 	}
 
 	if request.Payload.IsEmpty() {
@@ -858,10 +861,23 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	}
 
 	if len(params.guildGroups) == 0 {
-		// User is not in any groups
+		// A user in no guild at all (a new /device account outside every
+		// EchoVRCE-enabled Discord server) lands in the default guild group
+		// rather than being refused (#749).
+		params.guildGroups, err = ensureDefaultGuildMembership(ctx, logger, p.nk, p.guildGroupRegistry, params.profile.ID(), params.guildGroups)
+		if err != nil {
+			logger.Warn("Could not add user to the default guild group", zap.String("uid", params.profile.ID()), zap.Error(err))
+		}
+	}
+
+	if len(params.guildGroups) == 0 {
+		// User is not in any groups, and the default group could not be joined.
 		metricsTags["error"] = "user_not_in_any_groups"
-		guildID := p.discordCache.GroupIDToGuildID(params.profile.ActiveGroupID)
-		p.discordCache.QueueSyncMember(guildID, params.profile.DiscordID(), true)
+		// A profile with no active group resolves to no guild; syncing an
+		// unresolvable guild only produces "guild group not found".
+		if guildID := p.discordCache.GroupIDToGuildID(params.profile.ActiveGroupID); isSyncableGuildID(guildID) {
+			p.discordCache.QueueSyncMember(guildID, params.profile.DiscordID(), true)
+		}
 
 		return fmt.Errorf("user is not in any groups, try again in 30 seconds")
 	}

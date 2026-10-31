@@ -99,7 +99,7 @@ func TestFollow_StaleTrackerInLeaderSocial_ClientNotInIt_JoinsLeader(t *testing.
 		t.Run(tc.name, func(t *testing.T) {
 			logger, logs := followSkipObservedLogger()
 			env, registry, m := staleTrackerEnv(t,
-				&MatchLabel{Mode: evr.ModeSocialPublic, Open: true, PlayerLimit: 12}, // does not list the member
+				&MatchLabel{Mode: evr.ModeSocialPublic, Open: true, MaxSize: SocialLobbyMaxSize, PlayerLimit: 12}, // a 12-seat social lobby that does not list the member
 				tc.requested, tc.current)
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
