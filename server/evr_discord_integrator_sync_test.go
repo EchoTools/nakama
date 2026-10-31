@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"testing"
@@ -14,6 +15,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type accountCosmeticUpdateRecorder struct {
@@ -66,6 +69,45 @@ func TestSyncGuildMembersForSession_RefreshesEveryGuildWhenEnabled(t *testing.T)
 	require.Empty(t, got, "disabled flag must preserve today's behavior")
 	require.NoError(t, syncGuildMembersForSession(context.Background(), logger, true, "discord-account", guilds, true, syncMember))
 	require.ElementsMatch(t, []string{"guild-a", "guild-b"}, got)
+}
+
+func TestLoginGuildRoleSyncFailureKeepsLoadedGroups(t *testing.T) {
+	testGuildRoleSyncFailureKeepsLoadedGroups(t, true)
+}
+
+func TestLobbyAuthorizationGuildRoleSyncFailureKeepsLoadedGroups(t *testing.T) {
+	testGuildRoleSyncFailureKeepsLoadedGroups(t, false)
+}
+
+func testGuildRoleSyncFailureKeepsLoadedGroups(t *testing.T, full bool) {
+	t.Helper()
+	loadedGroups := map[string]*GuildGroup{
+		"group": {GroupMetadata: GroupMetadata{GuildID: "guild"}},
+	}
+	core, logs := observer.New(zapcore.WarnLevel)
+	logger := zap.New(core)
+	reloadCalled := false
+	gotGroups, err := syncGuildMembersAndReloadGroups(
+		context.Background(), logger, "discord-account", loadedGroups, full,
+		func(_ context.Context, _ *zap.Logger, _, guildID string, gotFull bool) error {
+			assert.Equal(t, "guild", guildID)
+			assert.Equal(t, full, gotFull)
+			return errors.New("Discord REST rate limit")
+		},
+		func() (map[string]*GuildGroup, error) {
+			reloadCalled = true
+			return nil, errors.New("must not reload after failed sync")
+		},
+	)
+
+	require.NoError(t, err, "Discord role sync failure must not block login or lobby authorization")
+	require.Equal(t, loadedGroups, gotGroups, "continue with the groups already loaded")
+	require.False(t, reloadCalled, "skip reloading after a partial role sync")
+	require.Equal(t, []string{"guild"}, []string{gotGroups["group"].GuildID})
+	entries := logs.FilterMessage("Failed to sync guild member").All()
+	require.Len(t, entries, 1)
+	require.Equal(t, zapcore.WarnLevel, entries[0].Level)
+	require.Equal(t, "guild", entries[0].ContextMap()["guild_id"])
 }
 
 func TestSyncMember_RemovesGuildMembershipWhenDiscordMemberIsAbsent(t *testing.T) {

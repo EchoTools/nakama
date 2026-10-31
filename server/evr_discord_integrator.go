@@ -504,6 +504,17 @@ func syncGuildMembersForSession(ctx context.Context, logger *zap.Logger, enabled
 	return errors.Join(syncErrors...)
 }
 
+// syncGuildMembersAndReloadGroups keeps the groups loaded for the current login
+// or lobby authorization when any Discord role refresh fails. The sync helper
+// logs each failed guild with its guild_id; reloading after a partial sync
+// could otherwise apply an incomplete role snapshot to the current request.
+func syncGuildMembersAndReloadGroups(ctx context.Context, logger *zap.Logger, discordID string, groups map[string]*GuildGroup, full bool, syncMember func(context.Context, *zap.Logger, string, string, bool) error, reloadGroups func() (map[string]*GuildGroup, error)) (map[string]*GuildGroup, error) {
+	if err := syncGuildMembersForSession(ctx, logger, true, discordID, groups, full, syncMember); err != nil {
+		return groups, nil
+	}
+	return reloadGroups()
+}
+
 // Syncs a user to all of their guilds.
 func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, discordID, guildID string, full bool) error {
 	if guildID == "" {

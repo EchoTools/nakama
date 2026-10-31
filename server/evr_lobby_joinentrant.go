@@ -528,10 +528,9 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		return errors.New("failed to get session parameters")
 	}
 	if ServiceSettings().SyncGuildMembersWithoutIntent {
-		if err := syncGuildMembersForSession(ctx, logger, true, params.profile.DiscordID(), params.guildGroups, false, p.discordCache.syncMember); err != nil {
-			return fmt.Errorf("failed to refresh guild roles before lobby authorization: %w", err)
-		}
-		guildGroups, err := GuildUserGroupsList(ctx, p.nk, p.guildGroupRegistry, params.profile.ID())
+		guildGroups, err := syncGuildMembersAndReloadGroups(ctx, logger, params.profile.DiscordID(), params.guildGroups, false, p.discordCache.syncMember, func() (map[string]*GuildGroup, error) {
+			return GuildUserGroupsList(ctx, p.nk, p.guildGroupRegistry, params.profile.ID())
+		})
 		if err != nil {
 			return fmt.Errorf("failed to reload guild groups after role sync: %w", err)
 		}

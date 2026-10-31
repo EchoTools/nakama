@@ -871,10 +871,9 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	}
 
 	if serviceSettings.SyncGuildMembersWithoutIntent {
-		if err := syncGuildMembersForSession(ctx, logger, true, params.profile.DiscordID(), params.guildGroups, true, p.discordCache.syncMember); err != nil {
-			return fmt.Errorf("failed to refresh guild roles: %w", err)
-		}
-		params.guildGroups, err = GuildUserGroupsList(ctx, p.nk, p.guildGroupRegistry, params.profile.ID())
+		params.guildGroups, err = syncGuildMembersAndReloadGroups(ctx, logger, params.profile.DiscordID(), params.guildGroups, true, p.discordCache.syncMember, func() (map[string]*GuildGroup, error) {
+			return GuildUserGroupsList(ctx, p.nk, p.guildGroupRegistry, params.profile.ID())
+		})
 		if err != nil {
 			return fmt.Errorf("failed to reload guild groups after role sync: %w", err)
 		}
