@@ -549,3 +549,9 @@ or its dependency errors, admits instead of refusing.
 - Parallel goroutine joins to the same match (use sequential with early termination)
 - Hardcoded Symbol values instead of `ToSymbol()`
 - Matchmaker changes without running integration tests
+
+## Commit identity
+
+> **Maintainers only.** Work an agent does for the maintainers is authored as `Spritz Metis Sprock <spritz@sprock.io>`, unsigned (`--no-gpg-sign`), with one `Co-Authored-By: <agent name> <agents@sprock.io>` trailer for the agent that wrote it and `Co-Authored-By: Andrew Bates <a@sprock.io>`. A new seat worktree sets that identity with `git config extensions.worktreeConfig true`, then `git config --worktree user.name "Spritz Metis Sprock"`, `git config --worktree user.email spritz@sprock.io` and `git config --worktree commit.gpgsign false`. Your own checkout keeps your identity and signing. Verify after each commit: `git log --format='%h %G? %an %ae %(trailers:key=Co-Authored-By,valueonly)' -1`.
+
+Contributors: commit as yourself, under the name and email you use on GitHub. If an agent helped write the change, add one `Co-Authored-By: <agent name> <email>` trailer for it. Verify with the same `git log` line.
