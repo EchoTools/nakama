@@ -643,23 +643,28 @@ func (b *PostMatchmakerBackfill) ExtractCandidatesFromMatchmaker(extracts []*Mat
 	return result
 }
 
-// GetBackfillMatches retrieves matches that can accept backfill candidates
-func (b *PostMatchmakerBackfill) GetBackfillMatches(ctx context.Context, groupID uuid.UUID, mode evr.Symbol) ([]*BackfillMatch, error) {
-	// Build query for open matches in the same group with the same mode
+// backfillMatchesQuery builds the match-list query GetBackfillMatches runs: open
+// matches in the group and mode, minus matches whose round-end lock has fired.
+func backfillMatchesQuery(groupID uuid.UUID, mode evr.Symbol) string {
 	qparts := []string{
 		"+label.open:T",
 		fmt.Sprintf("+label.mode:%s", mode.String()),
 		fmt.Sprintf("+label.group_id:%s", Query.QuoteStringValue(groupID.String())),
 	}
 
-	// For arena matches, exclude matches in round_closing (match is about to end).
-	// The match stays Open during RoundClosing (Open=false is set at PostMatch),
-	// so this query filter is the primary mechanism to prevent arena backfill.
-	if mode == evr.ModeArenaPublic {
+	// Exclude matches in round_closing (the round is about to end). The match
+	// stays Open during RoundClosing (Open=false is set at PostMatch), so this
+	// query filter is the primary mechanism that stops backfill after the lock.
+	if modeHasRoundLock(mode) {
 		qparts = append(qparts, fmt.Sprintf(`-label.game_status:%s`, GameStatusRoundClosing.String()))
 	}
 
-	query := strings.Join(qparts, " ")
+	return strings.Join(qparts, " ")
+}
+
+// GetBackfillMatches retrieves matches that can accept backfill candidates
+func (b *PostMatchmakerBackfill) GetBackfillMatches(ctx context.Context, groupID uuid.UUID, mode evr.Symbol) ([]*BackfillMatch, error) {
+	query := backfillMatchesQuery(groupID, mode)
 
 	// Backfill search: minSize=0 ensures we can find freshly-prepared matches
 	// that have not yet registered a presence (same rationale as

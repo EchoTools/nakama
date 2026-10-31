@@ -34,7 +34,7 @@ const (
 	StatGroupCombat MatchStatGroup = "combat"
 
 	DefaultPublicArenaTeamSize  = 4
-	DefaultPublicCombatTeamSize = 5
+	DefaultPublicCombatTeamSize = 4
 
 	// Defaults for public arena matches
 	DefaultPublicArenaRoundDuration = 480 * time.Second
@@ -2141,20 +2141,27 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 
 	case SignalLockSession:
-		// Lock signal indicates ~1:45 remaining in an arena match.
-		// Only set GameStatusRoundClosing for arena — combat/social are unaffected.
+		// The lock signal marks the end of a round (~1:45 remaining in arena; the
+		// round-end lock in combat). Public arena and public combat move to
+		// GameStatusRoundClosing; other modes are unaffected.
 		// Do NOT set Open=false here — the match stays open so the label is queryable.
-		// Backfill exclusion is handled by query filters on game_status:round_closing.
-		// Open=false is set later at PostMatch (round/match end), not here.
-		// LockedAt is set here to record when the closing phase began; it persists
-		// until an unlock signal (which the game server does not currently send).
-		if state.Mode == evr.ModeArenaPublic {
+		// Backfill exclusion is handled by query filters on game_status:round_closing
+		// (see modeHasRoundLock). Open=false is set later at PostMatch (round/match
+		// end), not here.
+		// LockedAt records when the closing phase began. Arena keeps it until the
+		// match ends (it ignores unlock); combat clears it on unlock.
+		if modeHasRoundLock(state.Mode) {
+			if state.GameStatus != GameStatusRoundClosing {
+				// Remember the in-round status so a combat unlock can restore it. A
+				// repeated lock must not overwrite it with round_closing itself.
+				state.preLockGameStatus = state.GameStatus
+			}
 			state.GameStatus = GameStatusRoundClosing
 			now := time.Now().UTC()
 			state.LockedAt = &now
 			logger.Info("Lock signal received, setting game status to round_closing")
 		} else {
-			logger.Debug("Lock signal received, ignoring for non-arena match")
+			logger.Debug("Lock signal received, ignoring for match mode without a round lock")
 		}
 
 	case SignalUnlockSession:
@@ -2162,6 +2169,21 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		switch state.Mode {
 		case evr.ModeArenaPublic:
 			logger.Debug("Ignoring unlock signal for arena public match.")
+		case evr.ModeCombatPublic:
+			// The game sends an unlock ~15 s after each round-end lock, between
+			// rounds. If the match is over there is no next round to reopen for.
+			if state.GameStatus == GameStatusPostMatch || state.GameState.IsMatchOver() {
+				logger.Info("Ignoring unlock for combat match: match is over")
+				break
+			}
+			logger.Debug("Unlocking combat session")
+			// Clear LockedAt regardless of GameState: with the status restored
+			// below, a lingering LockedAt would trip the MatchLoop hard-close.
+			state.LockedAt = nil
+			state.Open = true
+			if state.GameStatus == GameStatusRoundClosing {
+				state.GameStatus = state.preLockGameStatus
+			}
 		default:
 			logger.Debug("Unlocking session")
 			if state.GameState != nil {
