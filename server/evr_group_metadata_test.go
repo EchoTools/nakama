@@ -93,6 +93,8 @@ func TestGroupMetadata_PublicArenaRoundLength(t *testing.T) {
 	}{
 		{name: "default", metadata: &GroupMetadata{}, want: 480 * time.Second},
 		{name: "configured", metadata: &GroupMetadata{PublicArenaRoundLengthSeconds: 600}, want: 600 * time.Second},
+		{name: "clamped", metadata: &GroupMetadata{PublicArenaRoundLengthSeconds: 999999}, want: 1800 * time.Second},
+		{name: "negative", metadata: &GroupMetadata{PublicArenaRoundLengthSeconds: -1}, want: 480 * time.Second},
 		{name: "nil metadata", want: 480 * time.Second},
 	}
 	for _, tt := range tests {

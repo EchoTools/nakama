@@ -26,8 +26,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/atomic"
 )
 
 // startFailDispatcher fails every broadcast (so MatchStart's dispatchMessages,
@@ -137,6 +139,54 @@ func TestMatchStart_SuccessfulStartCommitsTheLabel(t *testing.T) {
 	}
 	if state.GameState == nil || state.GameState.SessionScoreboard == nil {
 		t.Fatal("a successful arena start left no SessionScoreboard")
+	}
+}
+
+func TestMatchStart_PublicArenaRoundLengthUsesGuildRegistryOrDefault(t *testing.T) {
+	previousBot := globalAppBot.Load()
+	t.Cleanup(func() { globalAppBot.Store(previousBot) })
+
+	groupID := uuid.Must(uuid.NewV4())
+	registryGroups := map[string]*GuildGroup{
+		groupID.String(): &GuildGroup{GroupMetadata: GroupMetadata{PublicArenaRoundLengthSeconds: 600}},
+	}
+	registry := &GuildGroupRegistry{
+		guildGroups:    atomic.NewPointer(&registryGroups),
+		inheritanceMap: atomic.NewPointer(&map[string][]string{}),
+	}
+	globalAppBot.Store(&DiscordAppBot{guildGroupRegistry: registry})
+
+	tests := []struct {
+		name       string
+		registered bool
+		want       time.Duration
+	}{
+		{name: "configured guild", registered: true, want: 600 * time.Second},
+		{name: "missing guild falls back and starts", want: DefaultPublicArenaRoundDuration},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.registered {
+				registry.guildGroups.Store(&registryGroups)
+			} else {
+				registry.guildGroups.Store(&map[string]*GuildGroup{})
+			}
+			state := startRetryState(evr.ModeArenaPublic, 1)
+			state.GroupID = &groupID
+			state.StartTime = time.Now().UTC().Add(time.Minute)
+			if _, err := (&EvrMatch{}).MatchStart(context.Background(), reconnectTestLogger(), nil, &reconnectTestNakamaModule{}, &reconnectTestDispatcher{}, state); err != nil {
+				t.Fatalf("MatchStart failed: %v", err)
+			}
+			if state.GameState == nil || state.GameState.SessionScoreboard == nil {
+				t.Fatal("public Arena start did not install a scoreboard")
+			}
+			if got := state.GameState.SessionScoreboard.RoundDuration; got != tt.want {
+				t.Fatalf("scoreboard round duration = %s, want %s", got, tt.want)
+			}
+			if !state.levelLoaded {
+				t.Fatal("MatchStart did not complete")
+			}
+		})
 	}
 }
 

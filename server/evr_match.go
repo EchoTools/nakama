@@ -2360,14 +2360,7 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, db *sq
 	var newGameState *GameState
 	switch state.Mode {
 	case evr.ModeArenaPublic, evr.ModeArenaPublicAI:
-		roundDuration := DefaultPublicArenaRoundDuration
-		if state.GroupID != nil {
-			metadata, err := GroupMetadataLoad(ctx, db, state.GroupID.String())
-			if err != nil {
-				return nil, fmt.Errorf("failed to load public Arena round length: %w", err)
-			}
-			roundDuration = metadata.PublicArenaRoundLength()
-		}
+		roundDuration := publicArenaRoundDuration(logger, state.GroupID)
 		newGameState = &GameState{
 			SessionScoreboard: NewSessionScoreboard(roundDuration, time.Now().Add(PublicMatchWaitTime)),
 		}
@@ -2461,6 +2454,31 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, db *sq
 		State: state,
 	})
 	return state, nil
+}
+
+func publicArenaRoundDuration(logger runtime.Logger, groupID *uuid.UUID) time.Duration {
+	if groupID == nil {
+		logger.Warn("Guild missing for public Arena round length; using default")
+		return DefaultPublicArenaRoundDuration
+	}
+	appBot := globalAppBot.Load()
+	if appBot == nil || appBot.guildGroupRegistry == nil {
+		logger.WithField("group_id", groupID.String()).Warn("Guild registry unavailable for public Arena round length; using default")
+		return DefaultPublicArenaRoundDuration
+	}
+	group := appBot.guildGroupRegistry.Get(groupID.String())
+	if group == nil {
+		logger.WithField("group_id", groupID.String()).Warn("Guild missing from registry for public Arena round length; using default")
+		return DefaultPublicArenaRoundDuration
+	}
+	if group.PublicArenaRoundLengthSeconds > MaxPublicArenaRoundLengthSeconds {
+		logger.WithFields(map[string]any{
+			"group_id":           groupID.String(),
+			"configured_seconds": group.PublicArenaRoundLengthSeconds,
+			"maximum_seconds":    MaxPublicArenaRoundLengthSeconds,
+		}).Warn("Public Arena round length exceeds maximum; clamping")
+	}
+	return group.PublicArenaRoundLength()
 }
 
 func (m *EvrMatch) dispatchMessages(_ context.Context, logger runtime.Logger, dispatcher runtime.MatchDispatcher, messages []evr.Message, presences []runtime.Presence, sender runtime.Presence) error {

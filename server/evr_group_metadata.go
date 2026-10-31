@@ -99,10 +99,13 @@ type GroupMetadata struct {
 // defaulting to eight minutes when unset or invalid.
 func (g *GroupMetadata) PublicArenaRoundLength() time.Duration {
 	if g != nil && g.PublicArenaRoundLengthSeconds > 0 {
-		return time.Duration(g.PublicArenaRoundLengthSeconds) * time.Second
+		seconds := min(g.PublicArenaRoundLengthSeconds, MaxPublicArenaRoundLengthSeconds)
+		return time.Duration(seconds) * time.Second
 	}
 	return DefaultPublicArenaRoundDuration
 }
+
+const MaxPublicArenaRoundLengthSeconds = 1800
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {
 	return &GroupMetadata{
