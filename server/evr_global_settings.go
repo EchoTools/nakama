@@ -126,6 +126,7 @@ type ServiceSettingsData struct {
 	EnableContinuousGameserverHealthCheck  bool   `json:"enable_continuous_gameserver_health_check"`
 	DisplayNameInUseNotifications          bool   `json:"display_name_in_use_notifications"` // Display name in use notifications
 	EnableSessionDebug                     bool   `json:"enable_session_debug"`
+	SyncGuildMembersWithoutIntent          bool   `json:"sync_guild_members_without_intent"`
 	version                                string
 	serviceStatusMessage                   string
 	PingServerBeforeJoin                   bool          `json:"ping_server_before_join"`   // Ping the server before joining to measure latency

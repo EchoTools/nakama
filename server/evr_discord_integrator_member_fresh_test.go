@@ -1,7 +1,10 @@
 package server
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -9,6 +12,23 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/stretchr/testify/require"
 )
+
+type fixedMemberTransport struct {
+	member *discordgo.Member
+}
+
+func (t fixedMemberTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	body, err := json.Marshal(t.member)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(bytes.NewReader(body)),
+		Request:    req,
+	}, nil
+}
 
 type overloadedTransport struct{}
 
@@ -62,4 +82,29 @@ func TestGuildMember_OverloadedStillServesStale(t *testing.T) {
 	got, err := d.GuildMember(testGuildID, testManagerDisc)
 	require.NoError(t, err)
 	require.Same(t, want, got)
+}
+
+func TestGuildMember_UsesRESTInsteadOfStateWithoutMembersIntent(t *testing.T) {
+	previous := ServiceSettings()
+	updated := *previous
+	updated.SyncGuildMembersWithoutIntent = true
+	ServiceSettingsUpdate(&updated)
+	t.Cleanup(func() { ServiceSettingsUpdate(previous) })
+
+	dg, err := discordgo.New("Bot test")
+	require.NoError(t, err)
+	dg.StateEnabled = true
+	dg.State = discordgo.NewState()
+	stale := &discordgo.Member{User: &discordgo.User{ID: testManagerDisc, Username: "stale"}, Roles: []string{"old"}}
+	require.NoError(t, dg.State.GuildAdd(&discordgo.Guild{ID: testGuildID, Members: []*discordgo.Member{stale}}))
+	fresh := &discordgo.Member{User: &discordgo.User{ID: testManagerDisc, Username: "fresh"}, Roles: []string{"new"}}
+	dg.Client.Transport = fixedMemberTransport{member: fresh}
+
+	d := &DiscordIntegrator{dg: dg, memberCache: &MapOf[string, cachedMember]{}}
+	got, err := d.GuildMember(testGuildID, testManagerDisc)
+	require.NoError(t, err)
+	require.Equal(t, []string{"new"}, got.Roles)
+	stateMember, err := dg.State.Member(testGuildID, testManagerDisc)
+	require.NoError(t, err)
+	require.Equal(t, []string{"old"}, stateMember.Roles)
 }

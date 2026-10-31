@@ -643,10 +643,13 @@ func (c *DiscordIntegrator) guildMember(guildID, discordID string, allowStale bo
 		return cached.member, nil
 	}
 
-	// Check discordgo's state cache (populated by gateway events).
-	if member, err = c.dg.State.Member(guildID, discordID); err == nil && member != nil {
-		c.memberCache.Store(cacheKey, cachedMember{member: member, expiresAt: time.Now().Add(memberCacheTTL)})
-		return member, nil
+	// With the members intent disabled, state has no member-update events to
+	// keep it current. Use the TTL cache and REST as the only sources then.
+	if !ServiceSettings().SyncGuildMembersWithoutIntent && c.dg.State != nil {
+		if member, err = c.dg.State.Member(guildID, discordID); err == nil && member != nil {
+			c.memberCache.Store(cacheKey, cachedMember{member: member, expiresAt: time.Now().Add(memberCacheTTL)})
+			return member, nil
+		}
 	}
 
 	// Fall back to the Discord API.
@@ -667,7 +670,9 @@ func (c *DiscordIntegrator) guildMember(guildID, discordID string, allowStale bo
 		return nil, fmt.Errorf("error getting guild member: %w", err)
 	}
 
-	c.dg.State.MemberAdd(member)
+	if !ServiceSettings().SyncGuildMembersWithoutIntent && c.dg.State != nil {
+		c.dg.State.MemberAdd(member)
+	}
 	c.memberCache.Store(cacheKey, cachedMember{member: member, expiresAt: time.Now().Add(memberCacheTTL)})
 	return member, nil
 }
