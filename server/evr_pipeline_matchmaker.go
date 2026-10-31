@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -99,36 +100,51 @@ func (p *EvrPipeline) answerLobbySessionRequestError(ctx context.Context, logger
 		logger.Error("Failed to send lobby session failure message", zap.Error(err))
 	}
 
-	p.postLobbyErrorAuditAsync(ctx, logger, lobbyParams.GroupID.String(), fmt.Sprintf("```fix\n%s\n\n%T failed:\n %v\n```", session.Username(), in, err), err)
+	p.postLobbyErrorAuditAsync(ctx, logger, session.ID().String(), lobbyParams.GroupID.String(), fmt.Sprintf("```fix\n%s\n\n%T failed:\n %v\n```", session.Username(), in, err), err)
 }
 
 const (
-	// lobbyErrorAuditMaxInFlight bounds the error channel posts running at once. A client looping on a
-	// join it cannot get fails several times a second, and each post waits on Discord's rate limit:
-	// in production that queue held one member's failures for about 13 minutes. Past the bound a post
-	// is skipped, with a warn naming the failure it would have carried.
+	// lobbyErrorAuditMaxInFlight bounds concurrent posts from one session, so
+	// one retrying client cannot occupy every audit slot for every other client.
 	lobbyErrorAuditMaxInFlight = 8
 	// lobbyErrorAuditTimeout bounds one post. The request's context ends when the request is answered,
 	// so a post runs on a detached context of its own.
 	lobbyErrorAuditTimeout = 30 * time.Second
 )
 
-// lobbyErrorAuditSlots holds one token per error channel post in flight (lobbyErrorAuditMaxInFlight).
-var lobbyErrorAuditSlots = make(chan struct{}, lobbyErrorAuditMaxInFlight)
+var lobbyErrorAuditSessions = struct {
+	sync.Mutex
+	slots map[string]chan struct{}
+}{slots: make(map[string]chan struct{})}
 
 // postLobbyErrorAuditAsync posts message to the guild's error channel without waiting for it.
 // requestErr is the failure being posted, for the warn when the post errors or is skipped.
-func (p *EvrPipeline) postLobbyErrorAuditAsync(ctx context.Context, logger *zap.Logger, groupID, message string, requestErr error) {
+func (p *EvrPipeline) postLobbyErrorAuditAsync(ctx context.Context, logger *zap.Logger, sessionID, groupID, message string, requestErr error) {
+	lobbyErrorAuditSessions.Lock()
+	slots := lobbyErrorAuditSessions.slots[sessionID]
+	if slots == nil {
+		slots = make(chan struct{}, lobbyErrorAuditMaxInFlight)
+		lobbyErrorAuditSessions.slots[sessionID] = slots
+	}
 	select {
-	case lobbyErrorAuditSlots <- struct{}{}:
+	case slots <- struct{}{}:
+		lobbyErrorAuditSessions.Unlock()
 	default:
+		lobbyErrorAuditSessions.Unlock()
 		logger.Warn("Lobby error audit post skipped: too many posts in flight",
 			zap.Int("in_flight_limit", lobbyErrorAuditMaxInFlight), zap.String("group_id", groupID), zap.Error(requestErr))
 		return
 	}
 	postCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lobbyErrorAuditTimeout)
 	go func() {
-		defer func() { <-lobbyErrorAuditSlots }()
+		defer func() {
+			lobbyErrorAuditSessions.Lock()
+			<-slots
+			if len(slots) == 0 {
+				delete(lobbyErrorAuditSessions.slots, sessionID)
+			}
+			lobbyErrorAuditSessions.Unlock()
+		}()
 		defer cancel()
 		if err := p.postLobbyErrorAudit(postCtx, groupID, message); err != nil {
 			logger.Warn("Failed to log audit message", zap.Error(err), zap.String("group_id", groupID), zap.NamedError("request_error", requestErr))

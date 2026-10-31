@@ -61,7 +61,6 @@ func TestFailedLobbyJoinIsAnsweredOnce(t *testing.T) {
 	e := newFailureSendEnv(t)
 	e.p.lobbyErrorAudit = func(context.Context, string, string) error { return nil }
 
-	request := &evr.LobbyJoinSessionRequest{}
 	label := &MatchLabel{ID: MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}, Mode: evr.ModeArenaPublic}
 	presence := &EvrMatchPresence{SessionID: e.session.id, UserID: e.session.userID}
 
@@ -69,6 +68,7 @@ func TestFailedLobbyJoinIsAnsweredOnce(t *testing.T) {
 	joinErr := e.p.lobbyJoinEntrant(loggerForTest(t), e.session, label, presence)
 	require.Error(t, joinErr)
 
+	request := &evr.LobbyJoinSessionRequest{}
 	lobbyParams := &LobbySessionParameters{GroupID: uuid.Must(uuid.NewV4())}
 	e.p.answerLobbySessionRequestError(context.Background(), loggerForTest(t), e.session, request, request, lobbyParams, joinErr)
 
@@ -147,35 +147,43 @@ func TestLobbyFailureAuditErrorIsLogged(t *testing.T) {
 
 // Past lobbyErrorAuditMaxInFlight posts in flight, a post is skipped with a warn carrying the failure,
 // and the client's failure is still sent: the bound caps the goroutines a join loop can start.
-func TestLobbyFailureAuditPastTheBoundIsSkippedLoudly(t *testing.T) {
+func TestLobbyFailureAuditSlotsAreScopedToSession(t *testing.T) {
 	e := newFailureSendEnv(t)
-	audited := make(chan struct{}, 1)
-	e.p.lobbyErrorAudit = func(context.Context, string, string) error {
-		audited <- struct{}{}
+	audited := make(chan string, 2)
+	e.p.lobbyErrorAudit = func(_ context.Context, groupID, _ string) error {
+		audited <- groupID
 		return nil
 	}
+	blockedSession := uuid.Must(uuid.NewV4()).String()
+	otherSession := uuid.Must(uuid.NewV4()).String()
+	lobbyErrorAuditSessions.Lock()
+	slots := make(chan struct{}, lobbyErrorAuditMaxInFlight)
+	lobbyErrorAuditSessions.slots[blockedSession] = slots
 	for range lobbyErrorAuditMaxInFlight {
-		lobbyErrorAuditSlots <- struct{}{}
+		slots <- struct{}{}
 	}
+	lobbyErrorAuditSessions.Unlock()
 	t.Cleanup(func() {
+		lobbyErrorAuditSessions.Lock()
 		for range lobbyErrorAuditMaxInFlight {
-			<-lobbyErrorAuditSlots
+			<-slots
 		}
+		delete(lobbyErrorAuditSessions.slots, blockedSession)
+		lobbyErrorAuditSessions.Unlock()
 	})
 	core, logs := observer.New(zapcore.DebugLevel)
 
-	request := &evr.LobbyJoinSessionRequest{}
 	lobbyParams := &LobbySessionParameters{GroupID: uuid.Must(uuid.NewV4())}
-	e.p.answerLobbySessionRequestError(context.Background(), zap.New(core), e.session, request, request, lobbyParams, NewLobbyError(ServerIsFull, "join not allowed"))
+	e.p.postLobbyErrorAuditAsync(context.Background(), zap.New(core), blockedSession, lobbyParams.GroupID.String(), "blocked", NewLobbyError(ServerIsFull, "join not allowed"))
+	e.p.postLobbyErrorAuditAsync(context.Background(), zap.New(core), otherSession, lobbyParams.GroupID.String(), "other", NewLobbyError(ServerIsFull, "join not allowed"))
 
-	require.Len(t, e.failures(t, 500*time.Millisecond), 1)
+	select {
+	case got := <-audited:
+		require.Equal(t, lobbyParams.GroupID.String(), got)
+	case <-time.After(time.Second):
+		t.Fatal("other session's audit post was blocked by a saturated session")
+	}
 	entries := logs.FilterMessage("Lobby error audit post skipped: too many posts in flight").All()
 	require.Len(t, entries, 1)
 	require.Equal(t, zapcore.WarnLevel, entries[0].Level)
-	require.Equal(t, "server is full: join not allowed", entries[0].ContextMap()["error"])
-	select {
-	case <-audited:
-		t.Fatal("a post was made past the bound")
-	default:
-	}
 }
