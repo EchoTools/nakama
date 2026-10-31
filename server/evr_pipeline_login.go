@@ -861,10 +861,23 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	}
 
 	if len(params.guildGroups) == 0 {
-		// User is not in any groups
+		// A user in no guild at all (a new /device account outside every
+		// EchoVRCE-enabled Discord server) lands in the default guild group
+		// rather than being refused (#749).
+		params.guildGroups, err = ensureDefaultGuildMembership(ctx, logger, p.nk, p.guildGroupRegistry, params.profile.ID(), params.guildGroups)
+		if err != nil {
+			logger.Warn("Could not add user to the default guild group", zap.String("uid", params.profile.ID()), zap.Error(err))
+		}
+	}
+
+	if len(params.guildGroups) == 0 {
+		// User is not in any groups, and the default group could not be joined.
 		metricsTags["error"] = "user_not_in_any_groups"
-		guildID := p.discordCache.GroupIDToGuildID(params.profile.ActiveGroupID)
-		p.discordCache.QueueSyncMember(guildID, params.profile.DiscordID(), true)
+		// A profile with no active group resolves to no guild; syncing an
+		// unresolvable guild only produces "guild group not found".
+		if guildID := p.discordCache.GroupIDToGuildID(params.profile.ActiveGroupID); isSyncableGuildID(guildID) {
+			p.discordCache.QueueSyncMember(guildID, params.profile.DiscordID(), true)
+		}
 
 		return fmt.Errorf("user is not in any groups, try again in 30 seconds")
 	}
