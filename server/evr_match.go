@@ -37,15 +37,15 @@ const (
 	DefaultPublicCombatTeamSize = 5
 
 	// Defaults for public arena matches
-	RoundDuration              = 300 * time.Second
-	AfterGoalDuration          = 15 * time.Second
-	RespawnDuration            = 3 * time.Second
-	RoundCatapultDelayDuration = 5 * time.Second
-	CatapultDuration           = 15 * time.Second
-	RoundWaitDuration          = 59 * time.Second
-	PreMatchWaitTime           = 45 * time.Second
-	PublicMatchWaitTime        = PreMatchWaitTime + CatapultDuration + RoundCatapultDelayDuration
-	PreMatchToPlayingTimeout   = 60 * time.Second
+	DefaultPublicArenaRoundDuration = 480 * time.Second
+	AfterGoalDuration               = 15 * time.Second
+	RespawnDuration                 = 3 * time.Second
+	RoundCatapultDelayDuration      = 5 * time.Second
+	CatapultDuration                = 15 * time.Second
+	RoundWaitDuration               = 59 * time.Second
+	PreMatchWaitTime                = 45 * time.Second
+	PublicMatchWaitTime             = PreMatchWaitTime + CatapultDuration + RoundCatapultDelayDuration
+	PreMatchToPlayingTimeout        = 60 * time.Second
 
 	// MatchStartMaxAttempts bounds how many times MatchLoop retries a failing
 	// MatchStart before giving up and shutting the match down. Attempts after
@@ -1593,7 +1593,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		if state.startAttempts == 0 || tick-state.lastStartAttemptTick >= throttleTicks {
 			state.startAttempts++
 			state.lastStartAttemptTick = tick
-			started, err := m.MatchStart(ctx, logger, nk, dispatcher, state)
+			started, err := m.MatchStart(ctx, logger, db, nk, dispatcher, state)
 			if err != nil {
 				logger.WithFields(map[string]any{
 					"error":    err,
@@ -2338,7 +2338,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 }
 
-func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *MatchLabel) (*MatchLabel, error) {
+func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *MatchLabel) (*MatchLabel, error) {
 	// Do not attempt to start without a game server presence; avoids nil dispatch.
 	if state.server == nil {
 		return state, fmt.Errorf("cannot start match: server presence is nil")
@@ -2360,8 +2360,16 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 	var newGameState *GameState
 	switch state.Mode {
 	case evr.ModeArenaPublic, evr.ModeArenaPublicAI:
+		roundDuration := DefaultPublicArenaRoundDuration
+		if state.GroupID != nil {
+			metadata, err := GroupMetadataLoad(ctx, db, state.GroupID.String())
+			if err != nil {
+				return nil, fmt.Errorf("failed to load public Arena round length: %w", err)
+			}
+			roundDuration = metadata.PublicArenaRoundLength()
+		}
 		newGameState = &GameState{
-			SessionScoreboard: NewSessionScoreboard(RoundDuration, time.Now().Add(PublicMatchWaitTime)),
+			SessionScoreboard: NewSessionScoreboard(roundDuration, time.Now().Add(PublicMatchWaitTime)),
 		}
 	case evr.ModeArenaPrivate:
 		newGameState = &GameState{

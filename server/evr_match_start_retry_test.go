@@ -86,7 +86,7 @@ func TestMatchStart_FailedStartDoesNotMutateTheLabel(t *testing.T) {
 	dispatcher := &startFailDispatcher{}
 	m := &EvrMatch{}
 
-	got, err := m.MatchStart(context.Background(), reconnectTestLogger(), nk, dispatcher, state)
+	got, err := m.MatchStart(context.Background(), reconnectTestLogger(), nil, nk, dispatcher, state)
 	if err == nil {
 		t.Fatal("test did not exercise the failing-start path")
 	}
@@ -119,7 +119,7 @@ func TestMatchStart_SuccessfulStartCommitsTheLabel(t *testing.T) {
 	dispatcher := &reconnectTestDispatcher{}
 	m := &EvrMatch{}
 
-	if _, err := m.MatchStart(context.Background(), reconnectTestLogger(), nk, dispatcher, state); err != nil {
+	if _, err := m.MatchStart(context.Background(), reconnectTestLogger(), nil, nk, dispatcher, state); err != nil {
 		t.Fatalf("MatchStart failed unexpectedly: %v", err)
 	}
 
