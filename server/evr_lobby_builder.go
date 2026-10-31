@@ -999,6 +999,11 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 			continue
 		}
 
+		// A server that reports its installed levels must have the match's level.
+		if !label.GameServer.CanHostLevel(settings.Level) {
+			continue
+		}
+
 		regionMatch := false
 		for _, region := range label.GameServer.RegionCodes {
 			if region == RegionDefault {

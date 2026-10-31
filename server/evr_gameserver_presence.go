@@ -31,6 +31,7 @@ type GameServerPresence struct {
 	Features        []string     `json:"features,omitempty"`         // The features of the server.
 	Tags            []string     `json:"tags,omitempty"`             // The tags given on the urlparam for the match.
 	DesignatedModes []evr.Symbol `json:"designated_modes,omitempty"` // The priority modes for the server.
+	InstalledLevels []evr.Symbol `json:"installed_levels,omitempty"` // The level symbols the server can load, from the registration. Empty means it reported none.
 	TimeStepUsecs   uint32       `json:"time_step_usecs,omitempty"`  // The time step in microseconds.
 	NativeSupport   bool         `json:"native,omitempty"`           // The native support of the server.
 	NativeVersion   string       `json:"native_version,omitempty"`   // The native version of the server.
@@ -95,6 +96,20 @@ func (g GameServerPresence) Location(includeCity bool) string {
 
 func (g *GameServerPresence) IsPriorityFor(mode evr.Symbol) bool {
 	return slices.Contains(g.DesignatedModes, mode)
+}
+
+// CanHostLevel reports whether the server may be allocated a match on level.
+// A match with no level (unspecified or unloaded) fits any server. A server that
+// reports no installed levels is still eligible; only one that reports a list
+// without the level is skipped.
+func (g *GameServerPresence) CanHostLevel(level evr.Symbol) bool {
+	if level == evr.LevelUnspecified || level == evr.LevelUnloaded {
+		return true
+	}
+	if len(g.InstalledLevels) == 0 {
+		return true
+	}
+	return slices.Contains(g.InstalledLevels, level)
 }
 
 func NewGameServerPresence(userId, sessionId uuid.UUID, serverId uint64, internalIP, externalIP net.IP, port uint16, groupIDs []uuid.UUID, defaultRegion string, regionCodes []string, versionLock evr.Symbol, tags, features []string, timeStepUsecs uint32, ipInfo IPInfo, geoPrecision int, isNative bool, nativeVersion string) *GameServerPresence {
