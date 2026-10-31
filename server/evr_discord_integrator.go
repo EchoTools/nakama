@@ -734,7 +734,9 @@ func (c *DiscordIntegrator) guildMember(guildID, discordID string, allowStale bo
 	}
 
 	if !ServiceSettings().SyncGuildMembersWithoutIntent && c.dg.State != nil {
-		c.dg.State.MemberAdd(member)
+		if err := c.dg.State.MemberAdd(member); err != nil {
+			c.logger.Debug("Error caching guild member in Discord state", zap.String("guild_id", guildID), zap.String("discord_id", discordID), zap.Error(err))
+		}
 	}
 	c.memberCache.Store(cacheKey, cachedMember{member: member, expiresAt: time.Now().Add(memberCacheTTL)})
 	return member, nil
