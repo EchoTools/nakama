@@ -8,10 +8,33 @@ import (
 	"testing"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
+
+type accountCosmeticUpdateRecorder struct {
+	runtime.NakamaModule
+	called   bool
+	userID   string
+	username string
+	langTag  string
+	avatar   string
+}
+
+// AccountUpdateId shadows the nil embedded interface method used by this leaf
+// double; the production helper invokes the call through runtime.NakamaModule.
+func (r *accountCosmeticUpdateRecorder) AccountUpdateId(_ context.Context, userID, username string, _ map[string]any, _, _, _, langTag, avatarURL string) error {
+	r.called = true
+	r.userID = userID
+	r.username = username
+	r.langTag = langTag
+	r.avatar = avatarURL
+	return nil
+}
 
 type unknownMemberTransport struct{}
 
@@ -70,4 +93,25 @@ func TestSyncMember_RemovesGuildMembershipWhenDiscordMemberIsAbsent(t *testing.T
 	d.idcache.Store("guild", "group")
 	require.NoError(t, d.syncMember(context.Background(), zap.NewNop(), "account", "guild", false))
 	require.Equal(t, 1, removed)
+}
+
+func TestSyncMemberProfileCosmetics_UpdatesUsernameAvatarAndLocale(t *testing.T) {
+	userID := uuid.Must(uuid.NewV4()).String()
+	groupID := uuid.Must(uuid.NewV4())
+	profile := &EVRProfile{account: &api.Account{User: &api.User{
+		Id: userID, Username: "before", LangTag: "en", AvatarUrl: "old-avatar",
+	}}}
+	profile.SetActiveGroupID(groupID)
+	member := &discordgo.Member{
+		GuildID: groupID.String(),
+		Avatar:  "new-avatar",
+		User:    &discordgo.User{ID: uuid.Must(uuid.NewV4()).String(), Username: "after", Locale: "fr"},
+	}
+	module := &accountCosmeticUpdateRecorder{}
+	require.NoError(t, syncMemberProfileCosmetics(context.Background(), module, profile, member, groupID.String()))
+	require.True(t, module.called)
+	require.Equal(t, userID, module.userID)
+	require.Equal(t, "after", module.username)
+	require.Equal(t, "fr", module.langTag)
+	require.Equal(t, member.AvatarURL("512"), module.avatar)
 }

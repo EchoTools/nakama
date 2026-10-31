@@ -593,6 +593,11 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 		}
 		profile = updated
 	}
+	if ServiceSettings().SyncGuildMembersWithoutIntent {
+		if err := syncMemberProfileCosmetics(ctx, c.nk, profile, member, groupID); err != nil {
+			return fmt.Errorf("error syncing account cosmetics: %w", err)
+		}
+	}
 
 	// Update headset-linked role
 	roleID := group.RoleMap.AccountLinked
@@ -606,6 +611,32 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 		logger.Warn("Error updating platform roles", zap.Error(err))
 	}
 
+	return nil
+}
+
+func syncMemberProfileCosmetics(ctx context.Context, nk runtime.NakamaModule, profile *EVRProfile, member *discordgo.Member, groupID string) error {
+	if member == nil || member.User == nil {
+		return errors.New("guild member is missing user data")
+	}
+	username := member.User.Username
+	locale := profile.LangTag()
+	if member.User.Locale != "" {
+		locale = member.User.Locale
+	}
+	avatarURL := profile.AvatarURL()
+	if profile.GetActiveGroupID().String() == groupID {
+		avatarURL = member.AvatarURL("512")
+	}
+	if profile.Username() == username && profile.LangTag() == locale && profile.AvatarURL() == avatarURL {
+		return nil
+	}
+	metadata, err := profile.MarshalMap()
+	if err != nil {
+		return fmt.Errorf("failed to marshal account metadata: %w", err)
+	}
+	if err := nk.AccountUpdateId(ctx, profile.ID(), username, metadata, profile.GetActiveGroupDisplayName(), "", "", locale, avatarURL); err != nil {
+		return fmt.Errorf("failed to update account: %w", err)
+	}
 	return nil
 }
 
