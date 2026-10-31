@@ -34,7 +34,7 @@ const (
 	StatGroupCombat MatchStatGroup = "combat"
 
 	DefaultPublicArenaTeamSize  = 4
-	DefaultPublicCombatTeamSize = 5
+	DefaultPublicCombatTeamSize = 4
 
 	// Defaults for public arena matches
 	DefaultPublicArenaRoundDuration = 480 * time.Second

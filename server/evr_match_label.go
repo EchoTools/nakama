@@ -52,7 +52,7 @@ type MatchLabel struct {
 	GameState        *GameState   `json:"game_state,omitempty"` // The game state for the match.
 	GameStatus       GameStatus   `json:"game_status"`          // The current phase of the match.
 
-	TeamSize         int      `json:"team_size,omitempty"`    // The size of each team in arena/combat (either 4 or 5)
+	TeamSize         int      `json:"team_size,omitempty"`    // The size of each team in arena/combat (4 for public arena and combat)
 	MaxSize          int      `json:"limit,omitempty"`        // The total lobby size limit (players + specs)
 	PlayerLimit      int      `json:"player_limit,omitempty"` // The number of players in the match (not including spectators).
 	RequiredFeatures []string `json:"features,omitempty"`     // The required features for the match.

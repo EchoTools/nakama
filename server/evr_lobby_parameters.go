@@ -779,15 +779,8 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		"is_ambassador":          strconv.FormatBool(p.IsAmbassador),
 		"has_suspension_history": strconv.FormatBool(p.HasSuspensionHistoryFlag),
 	}
-	var minTeamSize, maxTeamSize float64
-	switch p.Mode {
-	case evr.ModeCombatPublic:
-		minTeamSize = 1
-		maxTeamSize = 5
-	default:
-		minTeamSize = 4
-		maxTeamSize = 4
-	}
+	// Public arena and public combat are both 4v4.
+	const minTeamSize, maxTeamSize = 4.0, 4.0
 
 	numericProperties := map[string]float64{
 		"timestamp":        float64(p.MatchmakingTimestamp.UTC().Unix()),
