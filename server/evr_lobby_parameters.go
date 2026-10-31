@@ -629,8 +629,8 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 	if p.Mode != evr.ModeSocialPublic {
 		qparts = append(qparts, fmt.Sprintf(`+label.start_time:>="%s"`, minStartTime))
 	}
-	// For arena matches, exclude matches in round_closing (about to end).
-	if p.Mode == evr.ModeArenaPublic {
+	// Exclude matches in round_closing (about to end) for modes with a round lock.
+	if modeHasRoundLock(p.Mode) {
 		qparts = append(qparts, fmt.Sprintf(`-label.game_status:%s`, GameStatusRoundClosing.String()))
 	}
 

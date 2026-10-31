@@ -85,6 +85,7 @@ type MatchLabel struct {
 	terminateTick        int64                           // The tick count at which the match will be shut down.
 	goals                []*evr.MatchGoal                // The goals scored in the match.
 	matchSummarySent     bool                            // Whether the match summary has been sent.
+	preLockGameStatus    GameStatus                      // GameStatus before SignalLockSession set RoundClosing; restored by a combat unlock.
 }
 
 func (s *MatchLabel) LoadAndDeleteReservation(sessionID string) (*EvrMatchPresence, bool) {

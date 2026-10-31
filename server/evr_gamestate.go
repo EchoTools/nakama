@@ -47,6 +47,14 @@ var gameStatusValues = func() map[string]GameStatus {
 	return m
 }()
 
+// modeHasRoundLock reports whether the game server's round-end lock signal
+// drives this mode's GameStatus into GameStatusRoundClosing, and so whether
+// backfill queries must exclude round_closing matches. SignalLockSession and
+// both backfill queries share this one predicate so they cannot drift apart.
+func modeHasRoundLock(mode evr.Symbol) bool {
+	return mode == evr.ModeArenaPublic || mode == evr.ModeCombatPublic
+}
+
 func (g GameStatus) String() string {
 	if name, ok := gameStatusNames[g]; ok {
 		return name
