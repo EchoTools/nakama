@@ -3270,7 +3270,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						return fmt.Errorf("failed to unmarshal matchmaking config: %w", err)
 					}
 				}
-				if matchmakingConfig.LobbyGroupName == "" {
+				if lobbyGroupNameFromSettings(*matchmakingConfig) == "" {
 					return errors.New("set a group ID first with `/party group`")
 				}
 
@@ -3356,7 +3356,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				// Validate the group is not a reserved group
-				if lo.Contains([]string{"admin", "moderator", "verified"}, groupName) {
+				if lo.Contains([]string{"admin", "moderator", "verified", tabletPartyGroup}, groupName) {
 					return errors.New("invalid group ID. It is a reserved group")
 				}
 				// lowercase the group

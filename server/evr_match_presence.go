@@ -38,6 +38,14 @@ type EvrMatchPresence struct {
 	PingMillis        int          `json:"ping_ms,omitempty"`
 	MatchmakingAt     *time.Time   `json:"matchmaking_at,omitempty"` // Whether the player is matchmaking
 	EntrantID         uuid.UUID    `json:"entrant_id,omitempty"`     // Single-use entrant ID for this connection attempt
+
+	// ReservationOnly marks a presence that holds a slot for a party member who
+	// is not joining on this attempt (see appendPartyReservationPlaceholders).
+	// Such a member has not started their own find and may be online without
+	// being in a match, in which case they never answer a ping request. The
+	// pre-join ping check skips them; their own join validates them. Not
+	// serialized: it only matters to the session that built the entrant list.
+	ReservationOnly bool `json:"-"`
 }
 
 func (p EvrMatchPresence) GetEntrantID() uuid.UUID {

@@ -194,7 +194,7 @@ func (c *DiscordIntegrator) Start() {
 				logger.Warn("Stopping Discord integrator syncing")
 				return
 			case entry := <-c.queueCh:
-				if entry.GuildID == "" || entry.DiscordID == "" {
+				if !isSyncableGuildID(entry.GuildID) || entry.DiscordID == "" {
 					logger.Warn("Invalid queue entry", zap.String("discord_id", entry.DiscordID), zap.String("guild_id", entry.GuildID))
 					continue
 				}
@@ -225,7 +225,7 @@ func (c *DiscordIntegrator) Start() {
 						)
 						c.queueCooldowns.Delete(entry)
 						processed++
-						if entry.GuildID == "" || entry.DiscordID == "" {
+						if !isSyncableGuildID(entry.GuildID) || entry.DiscordID == "" {
 							logger.Warn("Invalid queue entry", zap.String("discord_id", entry.DiscordID), zap.String("guild_id", entry.GuildID))
 							return true
 						} else if err := c.syncMember(c.ctx, logger, entry.DiscordID, entry.GuildID, entry.DoFullUpdate); err != nil {
@@ -310,6 +310,12 @@ func (c *DiscordIntegrator) Start() {
 
 // Queue a user for caching/updating.
 func (c *DiscordIntegrator) QueueSyncMember(guildID, discordID string, full bool) {
+	if !isSyncableGuildID(guildID) {
+		// No guild to sync against (empty or the all-zero id). Say who asked,
+		// at debug: it is expected for a groupless profile.
+		c.logger.Debug("Skipping member sync with no guild", zap.String("discord_id", discordID), zap.String("guild_id", guildID), zap.String("caller", callerName(2)))
+		return
+	}
 	metricsTags := map[string]string{
 		"guild_id": guildID,
 		"group_id": c.GuildIDToGroupID(guildID),
@@ -1253,6 +1259,13 @@ func (d *DiscordIntegrator) updateMemberRole(member *discordgo.Member, roleID st
 func (d *DiscordIntegrator) GuildGroupMemberRemove(ctx context.Context, guildID, discordID string, callerDiscordID string) error {
 	groupID := d.GuildIDToGroupID(guildID)
 	if groupID == "" {
+		return nil
+	}
+
+	// Membership of the default guild group is not derived from Discord, so a
+	// Discord-driven removal (no issuing moderator) must not undo it (#749).
+	// An explicit kick or ban by a moderator still applies.
+	if callerDiscordID == "" && isDefaultGuildGroup(groupID) {
 		return nil
 	}
 

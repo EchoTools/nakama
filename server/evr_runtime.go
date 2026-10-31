@@ -672,6 +672,10 @@ func GetPartyGroupUserIDs(ctx context.Context, nk runtime.NakamaModule, groupNam
 	if groupName == "" {
 		return nil, status.Error(codes.InvalidArgument, "user ID is required")
 	}
+	if groupName == tabletPartyGroup {
+		// The tablet marker is shared by every tablet player; it names no group to list.
+		return nil, status.Error(codes.InvalidArgument, "tablet is not a party group")
+	}
 
 	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, ActivePartyGroupIndex, fmt.Sprintf("+value.group_id:%s", Query.EscapeIndexValue(groupName)), 100, nil, "")
 	if err != nil {
@@ -718,12 +722,13 @@ func getPartyMembersForUser(ctx context.Context, nk runtime.NakamaModule, partyR
 		return []string{userID}
 	}
 
-	if settings.LobbyGroupName == "" {
+	groupName := lobbyGroupNameFromSettings(settings)
+	if groupName == "" {
 		return []string{userID}
 	}
 
 	// Look up the party UUID from the registry instead of deriving it deterministically.
-	partyUUID, ok := partyRegistry.LookupGroupPartyID(settings.LobbyGroupName)
+	partyUUID, ok := partyRegistry.LookupGroupPartyID(groupName)
 	if !ok {
 		return []string{userID}
 	}
