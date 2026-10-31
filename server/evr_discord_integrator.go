@@ -485,6 +485,23 @@ func (c *DiscordIntegrator) GroupIDToGuildID(groupID string) string {
 	return guildID
 }
 
+func syncGuildMembersForSession(ctx context.Context, logger *zap.Logger, enabled bool, discordID string, groups map[string]*GuildGroup, full bool, syncMember func(context.Context, *zap.Logger, string, string, bool) error) error {
+	if !enabled || discordID == "" {
+		return nil
+	}
+	var syncErrors []error
+	for _, group := range groups {
+		if group == nil || !isSyncableGuildID(group.GuildID) {
+			continue
+		}
+		if err := syncMember(ctx, logger, discordID, group.GuildID, full); err != nil {
+			logger.Warn("Failed to sync guild member", zap.String("guild_id", group.GuildID), zap.Error(err))
+			syncErrors = append(syncErrors, fmt.Errorf("guild %s: %w", group.GuildID, err))
+		}
+	}
+	return errors.Join(syncErrors...)
+}
+
 // Syncs a user to all of their guilds.
 func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, discordID, guildID string, full bool) error {
 	if guildID == "" {
@@ -495,11 +512,20 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 		return errors.New("guild group not found")
 	}
 
-	member, err := c.GuildMember(guildID, discordID)
+	var member *discordgo.Member
+	var err error
+	if ServiceSettings().SyncGuildMembersWithoutIntent {
+		member, err = c.GuildMemberFresh(guildID, discordID)
+	} else {
+		member, err = c.GuildMember(guildID, discordID)
+	}
 	if errors.Is(err, ErrDiscordRESTOverloaded) {
 		// Discord REST API is temporarily unavailable due to rate limiting.
 		// Skip the sync rather than treating this as "user not found."
 		logger.Warn("Discord REST overloaded, skipping guild member sync", zap.String("discord_id", discordID), zap.String("guild_id", guildID))
+		if ServiceSettings().SyncGuildMembersWithoutIntent {
+			return fmt.Errorf("Discord REST overloaded during no-intent member sync: %w", err)
+		}
 		return nil
 	}
 	if errors.Is(err, ErrMemberNotFound) {
