@@ -53,11 +53,12 @@ type DiscordIntegrator struct {
 	db *sql.DB
 	dg *discordgo.Session
 
-	guildGroupRegistry *GuildGroupRegistry
-	queueCh            chan QueueEntry
-	queueCooldowns     *MapOf[QueueEntry, time.Time]
-	idcache            *MapOf[string, string]
-	memberCache        *MapOf[string, cachedMember]
+	guildGroupRegistry       *GuildGroupRegistry
+	queueCh                  chan QueueEntry
+	queueCooldowns           *MapOf[QueueEntry, time.Time]
+	idcache                  *MapOf[string, string]
+	memberCache              *MapOf[string, cachedMember]
+	guildGroupMemberRemoveFn func(context.Context, string, string, string) error
 
 	// ignSyncMu serializes syncMembersIGN per Nakama user id. discordgo
 	// dispatches each gateway event handler in its own goroutine, and a single
@@ -529,7 +530,11 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 		return nil
 	}
 	if errors.Is(err, ErrMemberNotFound) {
-		if removeErr := c.GuildGroupMemberRemove(ctx, guildID, discordID, ""); removeErr != nil {
+		removeMember := c.guildGroupMemberRemoveFn
+		if removeMember == nil {
+			removeMember = c.GuildGroupMemberRemove
+		}
+		if removeErr := removeMember(ctx, guildID, discordID, ""); removeErr != nil {
 			return fmt.Errorf("failed to remove guild group member: %w", removeErr)
 		}
 		logger.Info("Member not found, removed from guild group", zap.String("discord_id", discordID), zap.String("guild_id", guildID))

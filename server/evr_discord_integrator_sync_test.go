@@ -1,12 +1,28 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"io"
+	"net/http"
 	"testing"
 
+	"github.com/bwmarrin/discordgo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
+
+type unknownMemberTransport struct{}
+
+func (unknownMemberTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusNotFound,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(bytes.NewBufferString(`{"message":"Unknown Member","code":10007}`)),
+		Request:    req,
+	}, nil
+}
 
 func TestSyncGuildMembersForSession_RefreshesEveryGuildWhenEnabled(t *testing.T) {
 	guilds := map[string]*GuildGroup{
@@ -27,4 +43,31 @@ func TestSyncGuildMembersForSession_RefreshesEveryGuildWhenEnabled(t *testing.T)
 	require.Empty(t, got, "disabled flag must preserve today's behavior")
 	require.NoError(t, syncGuildMembersForSession(context.Background(), logger, true, "discord-account", guilds, true, syncMember))
 	require.ElementsMatch(t, []string{"guild-a", "guild-b"}, got)
+}
+
+func TestSyncMember_RemovesGuildMembershipWhenDiscordMemberIsAbsent(t *testing.T) {
+	previous := ServiceSettings()
+	updated := *previous
+	updated.SyncGuildMembersWithoutIntent = true
+	ServiceSettingsUpdate(&updated)
+	t.Cleanup(func() { ServiceSettingsUpdate(previous) })
+
+	dg, err := discordgo.New("Bot test")
+	require.NoError(t, err)
+	dg.Client.Transport = unknownMemberTransport{}
+	removed := 0
+	d := &DiscordIntegrator{
+		dg:          dg,
+		memberCache: &MapOf[string, cachedMember]{},
+		idcache:     &MapOf[string, string]{},
+		guildGroupMemberRemoveFn: func(_ context.Context, guildID, discordID, _ string) error {
+			assert.Equal(t, "guild", guildID)
+			assert.Equal(t, "account", discordID)
+			removed++
+			return nil
+		},
+	}
+	d.idcache.Store("guild", "group")
+	require.NoError(t, d.syncMember(context.Background(), zap.NewNop(), "account", "guild", false))
+	require.Equal(t, 1, removed)
 }
