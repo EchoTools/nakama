@@ -25,8 +25,8 @@ type accountCosmeticUpdateRecorder struct {
 	avatar   string
 }
 
-// AccountUpdateId shadows the nil embedded interface method used by this leaf
-// double; the production helper invokes the call through runtime.NakamaModule.
+// No embedder defines AccountUpdateId; this leaf method shadows the nil
+// embedded interface method reached through runtime.NakamaModule.
 func (r *accountCosmeticUpdateRecorder) AccountUpdateId(_ context.Context, userID, username string, _ map[string]any, _, _, _, langTag, avatarURL string) error {
 	r.called = true
 	r.userID = userID

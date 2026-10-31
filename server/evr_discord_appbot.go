@@ -137,11 +137,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 
 	//bot.LogLevel = discordgo.LogDebug
 	dg.StateEnabled = true
-
-	dg.Identify.Intents = discordgo.IntentsNone
-	dg.Identify.Intents |= discordgo.IntentGuilds
-	dg.Identify.Intents |= discordgo.IntentGuildMembers
-	dg.Identify.Intents |= discordgo.IntentGuildBans
+	dg.Identify.Intents = discordIdentifyIntents(ServiceSettings().SyncGuildMembersWithoutIntent)
 
 	dg.AddHandlerOnce(func(s *discordgo.Session, m *discordgo.Ready) {
 
@@ -230,6 +226,14 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 	}()
 
 	return &appbot, nil
+}
+
+func discordIdentifyIntents(syncGuildMembersWithoutIntent bool) discordgo.Intent {
+	intents := discordgo.IntentGuilds | discordgo.IntentGuildBans
+	if !syncGuildMembersWithoutIntent {
+		intents |= discordgo.IntentGuildMembers
+	}
+	return intents
 }
 
 func (e *DiscordAppBot) discordGoLogger(msgL int, caller int, format string, a ...interface{}) {

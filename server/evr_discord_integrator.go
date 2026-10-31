@@ -53,11 +53,12 @@ type DiscordIntegrator struct {
 	db *sql.DB
 	dg *discordgo.Session
 
-	guildGroupRegistry       *GuildGroupRegistry
-	queueCh                  chan QueueEntry
-	queueCooldowns           *MapOf[QueueEntry, time.Time]
-	idcache                  *MapOf[string, string]
-	memberCache              *MapOf[string, cachedMember]
+	guildGroupRegistry *GuildGroupRegistry
+	queueCh            chan QueueEntry
+	queueCooldowns     *MapOf[QueueEntry, time.Time]
+	idcache            *MapOf[string, string]
+	memberCache        *MapOf[string, cachedMember]
+	// guildGroupMemberRemoveFn replaces the external removal boundary in focused tests.
 	guildGroupMemberRemoveFn func(context.Context, string, string, string) error
 
 	// ignSyncMu serializes syncMembersIGN per Nakama user id. discordgo
