@@ -206,6 +206,15 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 			// Record the session duration
 			p.nk.metrics.CustomGauge("session_duration_seconds", metricsTags, time.Since(timer).Seconds())
 		}(metricsTags)
+
+		// Count the session in nevr_runtime_sessions_gauge, and uncount it when the session's context ends.
+		// The ceiling above only bounds the duration metric, so the gauge does not use it: after 72h the
+		// session is still open and must still be counted.
+		end := trackNevrRuntimeSession(nevrRuntimeSessions, params, p.nk.metrics.CustomGauge)
+		go func() {
+			<-session.Context().Done()
+			end()
+		}()
 	})
 
 	// Prepare messages to send on login
