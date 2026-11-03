@@ -141,6 +141,15 @@ func (s *SessionParameters) NevrRuntimeBuild() string {
 	return s.loginPayload.NevrIdentity.Build
 }
 
+// NevrRuntimeVersion is the nevr-runtime version the game client declared at login (nevr_identity.version),
+// "" if it declared none.
+func (s *SessionParameters) NevrRuntimeVersion() string {
+	if s.loginPayload == nil || s.loginPayload.NevrIdentity == nil {
+		return ""
+	}
+	return s.loginPayload.NevrIdentity.Version
+}
+
 // Plugins is the plugin report the session's client declared at login, as decoded (empty for a stock
 // client or an older nevr-runtime).
 func (s *SessionParameters) Plugins() []evr.NevrPlugin {
