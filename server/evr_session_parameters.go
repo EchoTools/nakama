@@ -187,16 +187,42 @@ func (s *SessionParameters) PluginsFailed() []string {
 	return failed
 }
 
+// maxLoginHeadsetLogChars caps the headset_type the "Login client" line logs. It is the client's own
+// string, logged as declared, cut to this many characters.
+const maxLoginHeadsetLogChars = 64
+
 // loginClientLogFields are the fields of the "Login client" line: the nevr-runtime build and social level
-// the client declared, and what its plugin loader did (nevr-runtime#60).
+// the client declared, what its plugin loader did (nevr-runtime#60), and the build number, app id and
+// headset it declared. nevr_runtime_version and nevr_runtime_commit are "" for a client that declared no
+// nevr_identity.
 func loginClientLogFields(s *SessionParameters) []zap.Field {
+	var appID uint64
+	var headset, nevrVersion, nevrCommit string
+	if s.loginPayload != nil {
+		appID = s.loginPayload.AppId
+		headset = truncateRuneSafe(s.loginPayload.SystemInfo.HeadsetType, maxLoginHeadsetLogChars)
+		if id := s.loginPayload.NevrIdentity; id != nil {
+			nevrVersion = id.Version
+			nevrCommit = id.Commit
+		}
+	}
 	return []zap.Field{
 		zap.String("nevr_runtime_build", s.NevrRuntimeBuild()),
 		zap.Int("nevr_social", s.SocialLevel()),
+		zap.Int64("buildversion", int64(s.BuildNumber())),
+		zap.Uint64("appid", appID),
+		zap.String("headset_type", headset),
+		zap.String("nevr_runtime_version", nevrVersion),
+		zap.String("nevr_runtime_commit", nevrCommit),
 		zap.Int("plugins_configured", len(s.Plugins())),
 		zap.Strings("plugins_loaded", s.PluginsLoaded()),
 		zap.Strings("plugins_failed", s.PluginsFailed()),
 	}
+}
+
+// logLoginClient writes the "Login client" record for a session that has logged in.
+func logLoginClient(logger *zap.Logger, s *SessionParameters) {
+	logger.Info("Login client", loginClientLogFields(s)...)
 }
 
 func (s *SessionParameters) IsVR() bool {

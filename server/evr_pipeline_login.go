@@ -171,7 +171,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	StoreParams(ctx, params)
-	logger.Info("Login client", loginClientLogFields(params)...)
+	logLoginClient(logger, params)
 
 	tags := buildLoginSuccessMetricTags(params, loginSystemFingerprintLimiter)
 

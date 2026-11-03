@@ -65,11 +65,16 @@ func TestLoginClientLogFields(t *testing.T) {
 		f.AddTo(enc)
 	}
 	require.Equal(t, map[string]any{
-		"nevr_runtime_build": "v4.0.0-145-g09a0ed6",
-		"nevr_social":        int64(1),
-		"plugins_configured": int64(3),
-		"plugins_loaded":     []any{"example@1.0.0"},
-		"plugins_failed":     []any{"session-unlocker (required): LoadLibrary failed (126)"},
+		"nevr_runtime_build":   "v4.0.0-145-g09a0ed6",
+		"nevr_social":          int64(1),
+		"buildversion":         int64(0),
+		"appid":                uint64(0),
+		"headset_type":         "",
+		"nevr_runtime_version": "",
+		"nevr_runtime_commit":  "",
+		"plugins_configured":   int64(3),
+		"plugins_loaded":       []any{"example@1.0.0"},
+		"plugins_failed":       []any{"session-unlocker (required): LoadLibrary failed (126)"},
 	}, enc.Fields)
 
 	stock := zapcore.NewMapObjectEncoder()
