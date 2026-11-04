@@ -1136,10 +1136,6 @@ var (
 				},
 			},
 		},
-		{
-			Name:        "ambassador",
-			Description: "Toggle ambassador mode to mentor newer players in lower divisions.",
-		},
 	}
 )
 
@@ -3576,7 +3572,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			return editInteractionResponse(s, i, fmt.Sprintf("Server `%s` has been removed from your blacklist.", displayName))
 		},
 		"vrml-verify": d.handleVRMLVerify,
-		"ambassador":  d.handleAmbassadorCommand,
 	}
 
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
