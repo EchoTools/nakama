@@ -785,6 +785,16 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		for _, playerInfo := range label.Players {
 			if playerInfo.Team == BlueTeam || playerInfo.Team == OrangeTeam {
 				if stats, ok := statsByPlayer[playerInfo.EvrID]; ok {
+					if label.Mode == evr.ModeCombatPublic {
+						// Combat sends CombatWins/CombatLosses, not the arena keys.
+						// A player with neither (nor an arena key) says nothing
+						// about the result.
+						if decided, blue := combatBlueWins(playerInfo.Team, stats); decided {
+							blueWins = blue
+							break
+						}
+						continue
+					}
 					blueWins = (playerInfo.Team == BlueTeam && stats.ArenaWins > 0) || (playerInfo.Team == OrangeTeam && stats.ArenaLosses > 0)
 					break
 				}
@@ -1022,6 +1032,12 @@ func iterateMatchTypeStatsFields(stats evr.MatchTypeStats, fn func(statName stri
 
 		opTag := field.Tag.Get("op")
 		opParts := strings.Split(opTag, ",")
+
+		// op:"-" is parsed for the post-match result and is not a leaderboard
+		// stat here; see the combat fields of evr.MatchTypeStats.
+		if opParts[0] == "-" {
+			continue
+		}
 
 		if value.IsZero() && slices.Contains(opParts, "omitzero") {
 			continue
@@ -1275,4 +1291,22 @@ func VOIPLoudnessRecordMetadataFromString(data string) (*VOIPLoudnessRecordMetad
 		MaxLoudness: maxLoudness,
 		Count:       count,
 	}, nil
+}
+
+// combatBlueWins reads a combat player's result: CombatWins / CombatLosses, the
+// keys the game sends for combat, and failing those the arena keys, which are
+// what this path read before. decided is false when the stats carry none of
+// them.
+func combatBlueWins(team TeamIndex, stats evr.MatchTypeStats) (decided, blueWins bool) {
+	switch {
+	case stats.CombatWins > 0:
+		return true, team == BlueTeam
+	case stats.CombatLosses > 0:
+		return true, team == OrangeTeam
+	case stats.ArenaWins > 0:
+		return true, team == BlueTeam
+	case stats.ArenaLosses > 0:
+		return true, team == OrangeTeam
+	}
+	return false, false
 }

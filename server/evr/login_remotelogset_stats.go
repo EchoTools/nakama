@@ -73,6 +73,12 @@ type MatchTypeStats struct {
 	TopSpeedsTotal               float64 `json:"TopSpeedsTotal,omitempty" op:"add"`
 	TwoPointGoals                int64   `json:"TwoPointGoals,omitempty" op:"add"`
 	XP                           float64 `json:"XP,omitempty" op:"add"`
+
+	// Combat result. Names and types match the combat fields #771 adds. op:"-":
+	// parsed for the post-match result only; the combat leaderboards have
+	// another writer (the game server's profile update).
+	CombatLosses float64 `json:"CombatLosses,omitempty" op:"-"`
+	CombatWins   float64 `json:"CombatWins,omitempty" op:"-"`
 }
 
 type MatchGoal struct {

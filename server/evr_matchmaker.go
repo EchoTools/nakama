@@ -207,7 +207,8 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		predictions  []PredictedMatch
 	)
 
-	candidates, matches, filterCounts, predictions = m.processPotentialMatches(logger, entries)
+	var combatDecisions []combatSortDecision
+	candidates, matches, filterCounts, predictions, combatDecisions = m.processPotentialMatchesWith(ctx, nk, logger, entries)
 
 	// For combat mode, prefer backfilling into existing open matches over
 	// creating new ones. Only build a new match when no open combat matches
@@ -229,6 +230,10 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 			matches = nil
 		}
 	}
+
+	// Record the combat sorts of the matches that stand (the backfill-first path
+	// above may have dropped them).
+	persistCombatSplitHistory(ctx, nk, logger, combatDecisionsStillMade(combatDecisions, matches))
 
 	// Extract all players from the candidates
 	playerSet := make(map[string]struct{}, 0)

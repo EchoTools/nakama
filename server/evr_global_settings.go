@@ -250,6 +250,8 @@ type GlobalMatchmakingSettings struct {
 	QualityFloorMinimum            float64                 `json:"quality_floor_minimum"`               // Floor never drops below this value (default 0.0)
 	EnableArchetypeBalancing       *bool                   `json:"enable_archetype_balancing"`          // Use archetype data to prefer balanced team compositions as a tiebreaker (default false, needs tuning)
 	EnableCombatMatchmaking        bool                    `json:"enable_combat_matchmaking"`           // Enable combat-specific matchmaking: split party tickets and allow uneven teams
+	CombatDrawTolerance            float64                 `json:"combat_draw_tolerance"`               // Combat team sort: how far (in draw probability) a split that keeps every party together may fall short of the closest-to-draw split and still be taken (default 0.02; 0 = default)
+	CombatSplitPenaltyWeight       float64                 `json:"combat_split_penalty_weight"`         // Combat team sort: mu points charged per unit of a moved player's recent-split score when parties must be split (default 1.0; 0 = default)
 }
 
 type QueryAddons struct {
@@ -474,6 +476,17 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 
 	if data.Matchmaking.SBMMMinPlayerCount == 0 {
 		data.Matchmaking.SBMMMinPlayerCount = 24
+	}
+
+	// Combat team sort (#775): a party is kept together unless that costs more
+	// than this much draw probability against the closest-to-draw split; when it
+	// is split, each unit of the moved player's recent-split score costs this
+	// many mu points.
+	if data.Matchmaking.CombatDrawTolerance <= 0 {
+		data.Matchmaking.CombatDrawTolerance = DefaultCombatDrawTolerance
+	}
+	if data.Matchmaking.CombatSplitPenaltyWeight <= 0 {
+		data.Matchmaking.CombatSplitPenaltyWeight = DefaultCombatSplitPenaltyWeight
 	}
 
 	// Set default party skill boost (10% = 0.10)
