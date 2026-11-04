@@ -57,8 +57,6 @@ type SessionParameters struct {
 	enforcementUserIDs             []string                              // User IDs (self + alts) used for enforcement journal queries
 	ignoreSuspensionsOfAltAccounts bool                                  // Ignore suspensions of alt accounts (own suspensions are always enforced)
 
-	isAmbassadorMatch *atomic.Bool // True if the player is ambassadoring in the current match
-
 	currentPartyID    uuid.UUID // current party (SNS or group) — Nakama party UUID the session is currently in
 	currentSNSPartyID uint64    // SNS wire party ID
 
