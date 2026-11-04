@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"sort"
 	"strings"
 	"time"
@@ -12,6 +13,15 @@ import (
 )
 
 func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, entries []runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int, []PredictedMatch) {
+	candidates, madeMatches, filterCounts, predictions, _ := m.processPotentialMatchesWith(context.Background(), nil, logger, entries)
+	return candidates, madeMatches, filterCounts, predictions
+}
+
+// processPotentialMatchesWith is processPotentialMatches with the context and
+// Nakama module the combat team sort reads its history through. A nil nk sorts
+// with no history. The decisions are for the caller to persist once it knows
+// which of the made matches stand.
+func (m *SkillBasedMatchmaker) processPotentialMatchesWith(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, entries []runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int, []PredictedMatch, []combatSortDecision) {
 
 	settings := ServiceSettings()
 	hardDivisions := settings != nil && settings.Matchmaking.HardDivisionsEnabled()
@@ -149,7 +159,18 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(logger runtime.Logger, en
 		madeMatches = m.assembleUniqueMatches(predictions)
 	}
 
-	return candidates, madeMatches, filterCounts, predictions
+	// Combat only: sort each made combat match's players onto the draw-closest
+	// teams. After the quality filter and assembly above, before the lobby
+	// builder takes the first half as blue (evr_lobby_builder.go). Arena matches
+	// pass through untouched.
+	var combatDecisions []combatSortDecision
+	var matchSettings *GlobalMatchmakingSettings
+	if settings != nil {
+		matchSettings = &settings.Matchmaking
+	}
+	madeMatches, combatDecisions = sortCombatMatches(ctx, nk, logger, madeMatches, config.OpenSkillOptions, matchSettings)
+
+	return candidates, madeMatches, filterCounts, predictions, combatDecisions
 }
 
 func groupEntriesSequentially(logger *zap.Logger, entries []runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {

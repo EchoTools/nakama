@@ -767,7 +767,8 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		copy(playersWithPlayerRatings, label.Players)
 
 		serviceSettings := ServiceSettings()
-		if serviceSettings.UseSkillBasedMatchmaking() {
+		ratingsOn := serviceSettings.UseSkillBasedMatchmaking()
+		if ratingsOn {
 			for i, p := range playersWithTeamRatings {
 				// Only load ratings for competitors (blue/orange team)
 				if !p.IsCompetitor() {
@@ -803,19 +804,41 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		// Determine winning team once for the entire match
 		// Check the first player's stats to determine which team won
 		var blueWins bool
+		resultDecided := label.Mode != evr.ModeCombatPublic // arena has always rated on whatever it read
 		for _, playerInfo := range label.Players {
 			if playerInfo.Team == BlueTeam || playerInfo.Team == OrangeTeam {
 				if stats, ok := statsByPlayer[playerInfo.EvrID]; ok {
+					if label.Mode == evr.ModeCombatPublic {
+						// Combat sends CombatWins/CombatLosses, not the arena keys.
+						// A player with neither (nor an arena key) says nothing
+						// about the result.
+						if decided, blue := combatBlueWins(playerInfo.Team, stats); decided {
+							blueWins = blue
+							resultDecided = true
+							break
+						}
+						continue
+					}
 					blueWins = (playerInfo.Team == BlueTeam && stats.ArenaWins > 0) || (playerInfo.Team == OrangeTeam && stats.ArenaLosses > 0)
 					break
 				}
 			}
 		}
 
+		// A combat match with no decided winner (a tie, or no result key) moves no
+		// rating; before, it was rated as an orange win.
+		if ratingsOn && !resultDecided {
+			ratingsOn = false
+			logger.WithFields(map[string]any{
+				"mid":  matchID.String(),
+				"mode": label.Mode.String(),
+			}).Info("Combat match has no decided winner; ratings not updated")
+		}
+
 		// Calculate new ratings once for all players (before the loop to avoid O(n²) complexity)
 		var teamRatings map[string]types.Rating
 		var playerRatings map[string]types.Rating
-		if serviceSettings.UseSkillBasedMatchmaking() {
+		if ratingsOn {
 			// For combat mode, use win/loss only (no individual stats) for rating calculation
 			// For arena mode, use full stats-based rating calculation
 			statsForRating := statsByPlayer
@@ -888,7 +911,7 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 			if typeStats.ArenaWins > 0 || typeStats.ArenaLosses > 0 {
 				matchResultWon = typeStats.ArenaWins > 0
 				hasMatchResult = true
-			} else if label.Mode == evr.ModeCombatPublic {
+			} else if label.Mode == evr.ModeCombatPublic && resultDecided {
 				matchResultWon = (playerInfo.Team == BlueTeam && blueWins) || (playerInfo.Team == OrangeTeam && !blueWins)
 				hasMatchResult = true
 			}
@@ -917,7 +940,7 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 				}
 			}
 
-			if serviceSettings.UseSkillBasedMatchmaking() {
+			if ratingsOn {
 
 				// Use the pre-calculated team ratings for this player
 				if rating, ok := teamRatings[playerInfo.SessionID]; ok {
@@ -1360,4 +1383,22 @@ func VOIPLoudnessRecordMetadataFromString(data string) (*VOIPLoudnessRecordMetad
 		MaxLoudness: maxLoudness,
 		Count:       count,
 	}, nil
+}
+
+// combatBlueWins reads a combat player's result: CombatWins / CombatLosses, the
+// keys the game sends for combat, and failing those the arena keys, which are
+// what this path read before. decided is false when the stats carry none of
+// them.
+func combatBlueWins(team TeamIndex, stats evr.MatchTypeStats) (decided, blueWins bool) {
+	switch {
+	case stats.CombatWins > 0:
+		return true, team == BlueTeam
+	case stats.CombatLosses > 0:
+		return true, team == OrangeTeam
+	case stats.ArenaWins > 0:
+		return true, team == BlueTeam
+	case stats.ArenaLosses > 0:
+		return true, team == OrangeTeam
+	}
+	return false, false
 }

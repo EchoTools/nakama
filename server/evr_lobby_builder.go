@@ -609,6 +609,25 @@ func repairSplitTicketTeams(logger *zap.Logger, teams [2][]*MatchmakerEntry) ([2
 	}
 }
 
+// combatModeOf is the mode of a made match, read from its tickets. A missing
+// mode is not an error here (buildMatch reports that itself, below).
+func combatModeOf(entrants []*MatchmakerEntry) evr.Symbol {
+	if len(entrants) == 0 {
+		return evr.Symbol(0)
+	}
+	return evr.ToSymbol(entrants[0].StringProperties["game_mode"])
+}
+
+// repairTeamsForMode reunites a split party's members on one team, except in
+// combat: combat has no party preference, and the combat team sort
+// (sortCombatMatches) has already put the players where the draw is closest.
+func repairTeamsForMode(logger *zap.Logger, mode evr.Symbol, teams [2][]*MatchmakerEntry) ([2][]*MatchmakerEntry, error) {
+	if mode == evr.ModeCombatPublic {
+		return teams, nil
+	}
+	return repairSplitTicketTeams(logger, teams)
+}
+
 func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntry) (matchID *MatchID, err error) {
 	// Build matches one at a time.
 
@@ -642,7 +661,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		entrants[:teamSize], // Blue team (first half)
 		entrants[teamSize:], // Orange team (second half)
 	}
-	teams, err = repairSplitTicketTeams(logger, teams)
+	teams, err = repairTeamsForMode(logger, combatModeOf(entrants), teams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to repair team assignments: %w", err)
 	}

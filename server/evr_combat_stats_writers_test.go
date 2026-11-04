@@ -366,6 +366,13 @@ func TestCombatStats_OneWriterPerLeaderboardRow(t *testing.T) {
 			var problems []string
 			for _, r := range []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime} {
 				for stat, w := range want {
+					// Level is a career value: only the all-time group has a
+					// default (evr.NewStatistics), and since the daily and weekly
+					// rows hold that period's total (#772) a player with no
+					// history has no Level row there.
+					if stat == "Level" && r != evr.ResetScheduleAllTime {
+						continue
+					}
 					id := StatisticBoardID(combatTestGroupID, evr.ModeCombatPublic, stat, r)
 					g, ok := got[id]
 					switch {

@@ -13,7 +13,7 @@ func TestStatisticsToEntries_CombatBestEliminationStreakKeepsTheBest(t *testing.
 	for _, tc := range []struct{ stored, match, want float64 }{{5, 3, 5}, {3, 5, 5}} {
 		prev := &evr.CombatStatistics{CombatBestEliminationStreak: &evr.StatisticValue{Value: tc.stored, Count: 1}}
 		update := &evr.CombatStatistics{CombatBestEliminationStreak: &evr.StatisticValue{Value: tc.match, Count: 1}}
-		entries, err := StatisticsToEntries("00000000-0000-4000-8000-00000000c0b1", "synthetic-player", "00000000-0000-4000-8000-00000000c0b3", evr.ModeCombatPublic, prev, update)
+		entries, err := StatisticsToEntries("00000000-0000-4000-8000-00000000c0b1", "synthetic-player", "00000000-0000-4000-8000-00000000c0b3", evr.ModeCombatPublic, evr.ResetScheduleAllTime, prev, update)
 		if err != nil {
 			t.Fatal(err)
 		}
