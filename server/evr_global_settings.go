@@ -251,7 +251,7 @@ type GlobalMatchmakingSettings struct {
 	EnableArchetypeBalancing       *bool                   `json:"enable_archetype_balancing"`          // Use archetype data to prefer balanced team compositions as a tiebreaker (default false, needs tuning)
 	EnableCombatMatchmaking        bool                    `json:"enable_combat_matchmaking"`           // Enable combat-specific matchmaking: split party tickets and allow uneven teams
 	CombatDrawTolerance            float64                 `json:"combat_draw_tolerance"`               // Combat team sort: how far (in draw probability) a split that keeps every party together may fall short of the closest-to-draw split and still be taken (default 0.003; 0 = default)
-	CombatSplitPenaltyWeight       float64                 `json:"combat_split_penalty_weight"`         // Combat team sort: mu points charged per unit of a moved player's recent-split score when parties must be split (default 1.0; 0 = default)
+	CombatSplitPenaltyWeight       float64                 `json:"combat_split_penalty_weight"`         // Combat team sort: when parties must be split, mu points charged per moved player, multiplied by (1 + that player's recent-split score) (default 1.0; 0 = default)
 }
 
 type QueryAddons struct {
