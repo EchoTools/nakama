@@ -220,7 +220,7 @@ func tryImmediateJoin(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 	}
 
 	// Build entrant presence from the active session
-	presence, err := EntrantPresenceFromSession(session, uuid.Nil, resolveImmediateJoinRole(request.Role), types.Rating{}, label.GetGroupID().String(), 0, "")
+	presence, err := EntrantPresenceFromSessionNoStamp(session, uuid.Nil, resolveImmediateJoinRole(request.Role), types.Rating{}, label.GetGroupID().String(), 0, "")
 	if err != nil {
 		return fmt.Sprintf("failed to create entrant presence: %s", err.Error())
 	}

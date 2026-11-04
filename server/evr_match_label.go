@@ -746,6 +746,7 @@ func (s *MatchLabel) rebuildCache() {
 					IsReservation: s.reservationMap[p.SessionID.String()] != nil || reconnectBySessionID[p.SessionID.String()] != nil,
 					GeoHash:       p.GeoHash,
 					PingMillis:    p.PingMillis,
+					Ambassador:    p.ambassadorInMatch(s.Mode),
 				})
 			case evr.ModeCombatPublic, evr.ModeSocialPublic:
 				s.Players = append(s.Players, PlayerInfo{
@@ -764,6 +765,7 @@ func (s *MatchLabel) rebuildCache() {
 					IsReservation: s.reservationMap[p.SessionID.String()] != nil || reconnectBySessionID[p.SessionID.String()] != nil,
 					GeoHash:       p.GeoHash,
 					PingMillis:    p.PingMillis,
+					Ambassador:    p.ambassadorInMatch(s.Mode),
 				})
 
 			case evr.ModeArenaPrivate, evr.ModeCombatPrivate:

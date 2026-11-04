@@ -2056,6 +2056,13 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 		return nil
 	}
 
+	// A player who queued into this match in ambassador mode has their own stats
+	// left unwritten.
+	if playerInfo.Ambassador {
+		logAmbassadorStatsSuppressed(NewRuntimeGoLogger(logger), playerInfo, label.ID.String(), label.Mode, statsSiteProfile)
+		return nil
+	}
+
 	return SendEvent(ctx, nk, &EventServerProfileUpdate{
 		UserID:      playerInfo.UserID,
 		GroupID:     groupIDStr,

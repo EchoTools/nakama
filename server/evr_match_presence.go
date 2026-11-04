@@ -39,6 +39,11 @@ type EvrMatchPresence struct {
 	MatchmakingAt     *time.Time   `json:"matchmaking_at,omitempty"` // Whether the player is matchmaking
 	EntrantID         uuid.UUID    `json:"entrant_id,omitempty"`     // Single-use entrant ID for this connection attempt
 
+	// AmbassadorQueueMode is the mode the player queued into while in ambassador
+	// mode, or zero. The label marks the player an ambassador in this match only
+	// when it equals the match's mode. See ambassadorQueueStamp.
+	AmbassadorQueueMode evr.Symbol `json:"ambassador_queue_mode,omitempty"`
+
 	// ReservationOnly marks a presence that holds a slot for a party member who
 	// is not joining on this attempt (see appendPartyReservationPlaceholders).
 	// Such a member has not started their own find and may be online without
@@ -110,7 +115,24 @@ func NewEntrantID() uuid.UUID {
 	return uuid.Must(uuid.NewV4())
 }
 
+// EntrantPresenceFromSession builds the presence a session joins a match with.
+// It carries the session's ambassador-mode stamp, when it is valid for groupID
+// and role: this is the one place the stamp is applied, so the matchmaker, the
+// post-matchmaker backfill, find and join all get it without touching them.
+// Callers that are not queueing into a match (spectate, set-next-match) use
+// EntrantPresenceFromSessionNoStamp.
 func EntrantPresenceFromSession(session Session, partyID uuid.UUID, roleAlignment int, rating types.Rating, groupID string, ping int, query string) (*EvrMatchPresence, error) {
+	return entrantPresenceFromSession(session, partyID, roleAlignment, rating, groupID, ping, query, true)
+}
+
+// EntrantPresenceFromSessionNoStamp is EntrantPresenceFromSession without the
+// ambassador-mode stamp, for spectating and set-next-match, which are not
+// queue entries.
+func EntrantPresenceFromSessionNoStamp(session Session, partyID uuid.UUID, roleAlignment int, rating types.Rating, groupID string, ping int, query string) (*EvrMatchPresence, error) {
+	return entrantPresenceFromSession(session, partyID, roleAlignment, rating, groupID, ping, query, false)
+}
+
+func entrantPresenceFromSession(session Session, partyID uuid.UUID, roleAlignment int, rating types.Rating, groupID string, ping int, query string, stamp bool) (*EvrMatchPresence, error) {
 
 	params, ok := LoadParams(session.Context())
 	if !ok {
@@ -121,7 +143,7 @@ func EntrantPresenceFromSession(session Session, partyID uuid.UUID, roleAlignmen
 		return nil, errors.New("failed to get login session parameters")
 	}
 
-	return &EvrMatchPresence{
+	presence := &EvrMatchPresence{
 		Node:              params.node,
 		UserID:            session.UserID(),
 		SessionID:         session.ID(),
@@ -143,5 +165,9 @@ func EntrantPresenceFromSession(session Session, partyID uuid.UUID, roleAlignmen
 		DisableMAC:        params.disableMAC,
 		PingMillis:        ping,
 		Query:             query,
-	}, nil
+	}
+	if stamp {
+		presence.AmbassadorQueueMode = ambassadorStampFor(params, groupID, roleAlignment, time.Now())
+	}
+	return presence, nil
 }

@@ -44,18 +44,22 @@ type SessionParameters struct {
 	defaultRegion       string              // The default region code for the server
 	urlParameters       map[string][]string // The URL parameters
 
-	profile                        *EVRProfile                           // The account
-	matchmakingSettings            *MatchmakingSettings                  // The matchmaking settings
-	guildGroups                    map[string]*GuildGroup                // map[string]*GuildGroup
-	earlyQuitConfig                *atomic.Pointer[EarlyQuitPlayerState] // The early quit config
-	isGoldNameTag                  *atomic.Bool                          // If this user should have a gold name tag
-	lastMatchmakingError           *atomic.Error                         // The last matchmaking error
-	latencyHistory                 *atomic.Pointer[LatencyHistory]       // The latency history
-	unreachableServers             *atomic.Pointer[UnreachableServers]   // Per-player unreachable game servers
-	isIGPOpen                      *atomic.Bool                          // The user has IGPU open
-	gameModeSuspensionsByGroupID   ActiveGuildEnforcements               // The active suspension records
-	enforcementUserIDs             []string                              // User IDs (self + alts) used for enforcement journal queries
-	ignoreSuspensionsOfAltAccounts bool                                  // Ignore suspensions of alt accounts (own suspensions are always enforced)
+	profile              *EVRProfile                           // The account
+	matchmakingSettings  *MatchmakingSettings                  // The matchmaking settings
+	guildGroups          map[string]*GuildGroup                // map[string]*GuildGroup
+	earlyQuitConfig      *atomic.Pointer[EarlyQuitPlayerState] // The early quit config
+	isGoldNameTag        *atomic.Bool                          // If this user should have a gold name tag
+	lastMatchmakingError *atomic.Error                         // The last matchmaking error
+	latencyHistory       *atomic.Pointer[LatencyHistory]       // The latency history
+	unreachableServers   *atomic.Pointer[UnreachableServers]   // Per-player unreachable game servers
+	// ambassadorQueue is the ambassador-mode stamp from this session's most
+	// recent lobby session request, or nil. See ambassadorQueueStamp.
+	ambassadorQueue atomic.Pointer[ambassadorQueueStamp]
+
+	isIGPOpen                      *atomic.Bool            // The user has IGPU open
+	gameModeSuspensionsByGroupID   ActiveGuildEnforcements // The active suspension records
+	enforcementUserIDs             []string                // User IDs (self + alts) used for enforcement journal queries
+	ignoreSuspensionsOfAltAccounts bool                    // Ignore suspensions of alt accounts (own suspensions are always enforced)
 
 	currentPartyID    uuid.UUID // current party (SNS or group) — Nakama party UUID the session is currently in
 	currentSNSPartyID uint64    // SNS wire party ID
