@@ -53,8 +53,8 @@ Every player always has a combat rating: the combat-mode `TeamSkillRating`, or t
 mu/sigma when there is no record. No arena fallback.
 
 A ticket carries `rating_mu` / `rating_sigma` only when `enable_skill_based_mm` is on
-(`evr_lobby_parameters.go`); that is not changed. For a player whose ticket carries none,
-the sort loads the rating at sort time with the ticket's own loader, `MatchmakingRatingLoad`
+(`evr_lobby_parameters.go`); that is not changed. If it is ever off, the sort still has a
+rating for every player: for a player whose ticket carries none, the sort loads the rating at sort time with the ticket's own loader, `MatchmakingRatingLoad`
 for the combat mode, and uses the default when there is no record or the read fails
 (Warn). Tickets that carry a rating are not loaded again. The sort therefore does not depend on
 `enable_skill_based_mm`.
@@ -78,6 +78,6 @@ was returned to the matchmaker) and `history_persisted`. History also counts a m
 `processPostMatchMessages` reads a combat player's result from `CombatWins` / `CombatLosses`
 (then the arena keys), so a combat win moves the winners' `TeamSkillRating` up.
 
-Combat ratings are written whether or not `enable_skill_based_mm` is on (arena's still
-follow it). A combat match with no decided winner (a tie, or no result key) moves no
+Ratings are written only when `enable_skill_based_mm` is on (unchanged; it is on in
+production). A combat match with no decided winner (a tie, or no result key) moves no
 rating; an Info record says so.

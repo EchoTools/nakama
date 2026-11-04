@@ -155,18 +155,8 @@ func TestArenaPostMatch_BlueWinRatesBlueUp(t *testing.T) {
 	}
 }
 
-// Combat ratings are kept from the start: with enable_skill_based_mm OFF a
-// combat blue win still moves the combat TeamSkillRating (blue up, orange down).
-// Red before: ratings were written only when SBMM was on, so nothing moved.
-func TestCombatPostMatch_SBMMOff_RatingsStillMove(t *testing.T) {
-	r := runCombatPostMatch(t, evr.ModeCombatPublic, `"CombatWins":1`, `"CombatLosses":1`, false, NewRuntimeGoLogger(zap.NewNop()))
-	def := NewDefaultRating().Mu
-	if r.n != 2 || !(r.blueMu > def && r.orangeMu < def) {
-		t.Errorf("SBMM off, blue won: %d rating entries, blue mu=%.4f orange mu=%.4f (default %.4f)", r.n, r.blueMu, r.orangeMu, def)
-	}
-}
-
-// Arena twin: with SBMM off arena writes no ratings, as before.
+// With SBMM off arena writes no ratings (and neither does combat: both follow
+// enable_skill_based_mm, which stays on in production).
 func TestArenaPostMatch_SBMMOff_NoRatingWrites(t *testing.T) {
 	r := runCombatPostMatch(t, evr.ModeArenaPublic, `"ArenaWins":1`, `"ArenaLosses":1`, false, NewRuntimeGoLogger(zap.NewNop()))
 	if r.n != 0 {
@@ -180,7 +170,8 @@ func TestArenaPostMatch_SBMMOff_NoRatingWrites(t *testing.T) {
 // with no result key at all. It is logged at Info with the reason.
 // Red before: such a match was rated as an orange win.
 func TestCombatPostMatch_NoDecidedWinner_MovesNoRating(t *testing.T) {
-	for _, sbmm := range []bool{true, false} {
+	const sbmm = true
+	{
 		for _, key := range []string{`"CombatTies":1`, `"CombatMVPs":1`} {
 			core, logs := observer.New(zapcore.InfoLevel)
 			r := runCombatPostMatch(t, evr.ModeCombatPublic, key, key, sbmm, NewRuntimeGoLogger(zap.New(core)))

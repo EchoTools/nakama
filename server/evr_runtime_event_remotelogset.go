@@ -746,9 +746,7 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		copy(playersWithPlayerRatings, label.Players)
 
 		serviceSettings := ServiceSettings()
-		// Combat ratings are kept from the start (#775): combat does not wait for
-		// enable_skill_based_mm. Arena's follow it, as before.
-		ratingsOn := serviceSettings.UseSkillBasedMatchmaking() || label.Mode == evr.ModeCombatPublic
+		ratingsOn := serviceSettings.UseSkillBasedMatchmaking()
 		if ratingsOn {
 			for i, p := range playersWithTeamRatings {
 				// Only load ratings for competitors (blue/orange team)
