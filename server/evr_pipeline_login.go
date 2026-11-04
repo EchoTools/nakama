@@ -1150,12 +1150,6 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		logger.Warn("Failed to load matchmaking settings", zap.Error(err))
 		return fmt.Errorf("failed to load matchmaking settings: %w", err)
 	} else {
-		updated := false
-
-		// Check if user is a moderator (enforcer or operator) with green division
-		hasGreenInDivisions := slices.Contains(settings.Divisions, "green")
-		hasGreenInExcluded := slices.Contains(settings.ExcludedDivisions, "green")
-
 		// Determine if user is a moderator - use cached permissions
 		isModerator := userPerms.IsGlobalOperator
 		if !isModerator && params.profile.ActiveGroupID != "" {
@@ -1165,40 +1159,10 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 			}
 		}
 
-		// Moderators with green in their divisions are protected from automatic removal
-		isProtectedModerator := isModerator && hasGreenInDivisions
-
-		// If the player account is less than 7 days old, then assign the "green" division to the player.
-		if params.profile.account != nil && params.profile.account.User != nil && params.profile.account.User.CreateTime != nil && time.Since(params.profile.account.User.CreateTime.AsTime()) < time.Duration(serviceSettings.Matchmaking.GreenDivisionMaxAccountAgeDays)*24*time.Hour {
-			if !hasGreenInDivisions {
-				settings.Divisions = append(settings.Divisions, "green")
-				updated = true
-			}
-			if hasGreenInExcluded {
-				updated = true
-				// Remove the "green" division from the excluded divisions.
-				settings.ExcludedDivisions, _ = RemoveFromStringSlice(settings.ExcludedDivisions, "green")
-			}
-
-		} else {
-			// Old accounts lose green UNLESS they're protected moderators
-			if hasGreenInDivisions && !isProtectedModerator {
-				// Remove the "green" division from the divisions.
-				updated = true
-				settings.Divisions, _ = RemoveFromStringSlice(settings.Divisions, "green")
-			}
-			// Only add to excluded if:
-			// - Not already in excluded
-			// - Not a moderator (moderators manage their own divisions)
-			// - Green is not in divisions (was removed or never had it)
-			// Check after potential removal
-			if !hasGreenInExcluded && !isModerator && !slices.Contains(settings.Divisions, "green") {
-				updated = true
-				// Add the "green" division to the excluded divisions.
-				settings.ExcludedDivisions = append(settings.ExcludedDivisions, "green")
-
-			}
-		}
+		// If the player account is younger than the configured maximum age, put the
+		// player in the new-player ("green") pool; otherwise take them out of it.
+		createTime, haveCreateTime := params.profile.AccountCreateTime()
+		updated := applyNewPlayerPool(&settings, createTime, haveCreateTime, time.Now(), serviceSettings.Matchmaking.GreenDivisionMaxAccountAgeDays, isModerator)
 
 		if updated {
 			if err := StoreMatchmakingSettings(ctx, p.nk, session.userID.String(), settings); err != nil {
