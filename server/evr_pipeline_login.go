@@ -243,6 +243,8 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 //   - SystemInfo strings/ints via addSystemInfoMetricTags (allow-list + buckets)
 //   - device_type / build_version via params.MetricsTags() (bounded at that source)
 //   - build_number / app_id / publisher_lock via their allow-lists
+//   - nevr_version, the nevr-runtime version the client declared (per-player cap, then
+//     nevrVersionLabels: a process-wide cap on distinct versions, the rest metricTagOther)
 //
 // Note: on login_success, headset_type (from addSystemInfoMetricTags) always equals
 // device_type (from MetricsTags), and build_number always equals build_version, since
@@ -269,7 +271,14 @@ func buildLoginSuccessMetricTags(params *SessionParameters, limiter *systemFinge
 	tags["build_number"] = boundBuildNumberTag(params.loginPayload.BuildNumber)
 	tags["app_id"] = boundAppIDTag(params.loginPayload.AppId)
 	tags["publisher_lock"] = publisherLockAllowlist.normalize(params.loginPayload.PublisherLock)
+	// The fingerprint hashes the normalized version, so the per-player cap sees every distinct one. The
+	// process-wide label cap is applied after it, and only to a login the cap let through: an account
+	// cycling versions has collapsed to metricTagOther by then and takes no slot from anyone else.
+	tags[nevrVersionTag] = normalizeNevrVersion(params.nevrIdentity())
 	boundSystemsPerPlayer(limiter, tags, params.UserID())
+	if tags[nevrVersionTag] != metricTagOther {
+		tags[nevrVersionTag] = nevrVersionLabels.label(params.nevrIdentity())
+	}
 	return tags
 }
 

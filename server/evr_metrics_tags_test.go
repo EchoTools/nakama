@@ -183,6 +183,7 @@ func TestSystemInfoFingerprintDeterministicAndDistinct(t *testing.T) {
 			"total_memory": "16", "num_logical_cores": "8", "num_physical_cores": "8",
 			"build_number": "630783", "app_id": "0", "publisher_lock": "rad15_live",
 			"device_type": headset, "build_version": "630783",
+			nevrVersionTag: "4.2.0",
 		}
 	}
 	a, b := mk("Meta Quest 3"), mk("Meta Quest 3")
@@ -199,7 +200,7 @@ func TestSystemInfoFingerprintDeterministicAndDistinct(t *testing.T) {
 		t.Errorf("total_memory is a fingerprint field and must affect the fingerprint")
 	}
 	// LoginProfile-derived fields ARE part of the fingerprint (folded into the cap).
-	for _, f := range []string{"build_number", "app_id", "publisher_lock"} {
+	for _, f := range []string{"build_number", "app_id", "publisher_lock", nevrVersionTag} {
 		v := mk("Meta Quest 3")
 		v[f] = "different-bounded-value"
 		if systemInfoFingerprint(a) == systemInfoFingerprint(v) {

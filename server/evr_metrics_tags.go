@@ -37,6 +37,7 @@ var loginMetricFingerprintFields = []string{
 	"total_memory", "num_logical_cores", "num_physical_cores",
 	"build_number", "app_id", "publisher_lock",
 	"device_type", "build_version",
+	nevrVersionTag, // appended: order is load-bearing, so new fields go last
 }
 
 // metricTagOther is the sentinel bucket for any client-supplied SystemInfo
@@ -247,6 +248,8 @@ func systemInfoTagCardinalityBound(field string) int {
 		return len(knownAppIDSet) + 1
 	case "publisher_lock":
 		return len(publisherLockAllowlist) + 1
+	case nevrVersionTag:
+		return nevrVersionTagCardinalityBound
 	default:
 		return 0
 	}

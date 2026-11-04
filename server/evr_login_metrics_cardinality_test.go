@@ -26,7 +26,7 @@ var loginAttackerTagFields = []string{
 	"network_type", "headset_type", "total_memory",
 	"num_logical_cores", "num_physical_cores",
 	"build_number", "app_id", "publisher_lock",
-	"device_type", "build_version",
+	"device_type", "build_version", nevrVersionTag,
 }
 
 // maxDistinctPerLoginField is a generous per-field ceiling: larger than any single
@@ -43,6 +43,7 @@ func adversarialLoginPayload(rng *rand.Rand, i int) *evr.LoginProfile {
 		BuildNumber:   evr.BuildNumber(rng.Int63()),
 		AppId:         rng.Uint64(),
 		PublisherLock: fmt.Sprintf("pub-%d-%d", i, rng.Int63()),
+		NevrIdentity:  &evr.NevrIdentity{Version: fmt.Sprintf("%d.%d.%d", i, rng.Intn(1000), rng.Intn(1000))},
 		SystemInfo: evr.SystemInfo{
 			HeadsetType:      fmt.Sprintf("hmd-%d-%d", i, rng.Int63()),
 			DriverVersion:    fmt.Sprintf("drv-%d-%d", i, rng.Int63()),
