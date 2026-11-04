@@ -63,8 +63,8 @@ func TestCombatSort_SBMMOff_LoadsCombatRatings(t *testing.T) {
 	if sameTeam(matches[0], "p00", "p01") {
 		t.Errorf("the two strong players were left on the same team: %s", memberOrder(matches))
 	}
-	if len(decisions) != 1 || decisions[0].DrawAfter <= decisions[0].DrawBefore {
-		t.Errorf("sort did not improve the draw: %+v", decisions)
+	if len(decisions) != 1 || decisions[0].DrawAfter != decisions[0].DrawBest {
+		t.Errorf("sort did not reach the closest-to-draw split: %+v", decisions)
 	}
 	if nk.loads == 0 {
 		t.Errorf("no combat rating was loaded")

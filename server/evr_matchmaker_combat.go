@@ -79,22 +79,35 @@ func (CombatSplitHistory) StorageMeta() StorableMetadata {
 
 func (h *CombatSplitHistory) SetStorageMeta(meta StorableMetadata) { h.meta = meta }
 
+// combatPlayerRating is the rating the sort used for one player and where it
+// came from: "ticket" (the ticket carried rating_mu), "loaded" (the combat
+// TeamSkillRating, read at sort time), or "default" (no record, the read failed,
+// or there is no storage; the default rating).
+type combatPlayerRating struct {
+	UserID string  `json:"user_id"`
+	Mu     float64 `json:"mu"`
+	Sigma  float64 `json:"sigma"`
+	Source string  `json:"source"`
+}
+
 // combatSortDecision is what one combat sort did. It is the structured record
 // logged per sort, and the input to the history update.
 type combatSortDecision struct {
-	Sorted       bool     // false when the match was left as it was (size outside 2..16, or odd)
-	SessionIDs   []string // the match's players, session id order
-	UserIDs      []string // same order as SessionIDs
-	Parties      int      // tickets with more than one player
-	KeptParties  bool     // no party was split
-	Fallback     bool     // the party-keeping split was outside the draw tolerance
-	Moved        []string // user ids moved away from their party
-	DrawBefore   float64  // PredictDraw of the arrangement the match came in with
-	DrawAfter    float64  // PredictDraw of the chosen split
-	DrawBest     float64  // PredictDraw of the closest-to-draw split, parties ignored
-	DrawKept     float64  // PredictDraw of the closest party-keeping split (0 if none exists)
-	Cost         float64  // |dmu| + weight x penalty of the chosen split
-	Splits       int      // splits evaluated
+	GroupID      string               // the match's guild group
+	Players      []combatPlayerRating // each player's rating used, session id order
+	Sorted       bool                 // false when the match was left as it was (size outside 2..16, or odd)
+	SessionIDs   []string             // the match's players, session id order
+	UserIDs      []string             // same order as SessionIDs
+	Parties      int                  // tickets with more than one player
+	KeptParties  bool                 // no party was split
+	Fallback     bool                 // the party-keeping split was outside the draw tolerance
+	Moved        []string             // user ids moved away from their party
+	DrawBefore   float64              // PredictDraw of the arrangement the match came in with
+	DrawAfter    float64              // PredictDraw of the chosen split
+	DrawBest     float64              // PredictDraw of the closest-to-draw split, parties ignored
+	DrawKept     float64              // PredictDraw of the closest party-keeping split (0 if none exists)
+	Cost         float64              // |dmu| + weight x penalty of the chosen split
+	Splits       int                  // splits evaluated
 	Tolerance    float64
 	Weight       float64
 	scoresBefore map[string]float64 // party members' recent-split scores before this sort
@@ -108,9 +121,11 @@ type combatSortDecision struct {
 //     smallest |sum(mu) - sum(mu)|. If its draw probability is within tolerance
 //     of the closest-to-draw split's, that is the result.
 //  2. Otherwise score every split as |dmu| + weight x the sum, over the players
-//     moved away from their party, of that player's scores[userID], and take the
-//     lowest. A split party's "home" side is the one that makes this sum
-//     smallest, so the cheaper member is the one moved.
+//     moved away from their party, of (1 + that player's scores[userID]), and
+//     take the lowest. The 1 is a base cost per moved player, so the fewest
+//     parties are broken; the score decides who moves. A split party's "home" side
+//     is the one that makes this sum smallest, so the cheaper member is the one
+//     moved.
 //
 // For two teams, rating.PredictDraw depends on the split only through |dmu|
 // (the summed sigma^2 is the same for every split), and falls as |dmu| grows,
@@ -134,6 +149,18 @@ func resortCombatTeams(match []runtime.MatchmakerEntry, opts *types.OpenSkillOpt
 	mus := make([]float64, n)
 	for i, r := range ratings {
 		mus[i] = r.Mu
+	}
+	d.GroupID, _ = players[0].GetProperties()["group_id"].(string)
+	def := NewDefaultRating()
+	for i, p := range players {
+		uid := p.GetPresence().GetUserId()
+		source := "default"
+		if _, has := p.GetProperties()["rating_mu"].(float64); has {
+			source = "ticket"
+		} else if lr, ok := loaded[uid]; ok && (lr.Mu != def.Mu || lr.Sigma != def.Sigma) {
+			source = "loaded"
+		}
+		d.Players = append(d.Players, combatPlayerRating{UserID: uid, Mu: ratings[i].Mu, Sigma: ratings[i].Sigma, Source: source})
 	}
 
 	d.Sorted = true
@@ -185,9 +212,9 @@ func resortCombatTeams(match []runtime.MatchmakerEntry, opts *types.OpenSkillOpt
 			var costBlue, costOrange float64
 			for _, i := range p {
 				if mask>>uint(i)&1 == 1 {
-					costOrange += scores[d.UserIDs[i]]
+					costOrange += 1 + scores[d.UserIDs[i]]
 				} else {
-					costBlue += scores[d.UserIDs[i]]
+					costBlue += 1 + scores[d.UserIDs[i]]
 				}
 			}
 			homeBlue := costBlue < costOrange
@@ -454,7 +481,8 @@ func loadCombatSplitScores(ctx context.Context, nk runtime.NakamaModule, logger 
 // sortCombatMatches re-sorts every combat match in matches onto the draw-closest
 // teams and returns the new matches (new slices; matches and the slices in it are
 // not modified) with one decision per sorted match. Other modes pass through
-// untouched. Each sort is logged once.
+// untouched. The decisions are logged and recorded by finishCombatSorts, once it
+// is known which matches stand.
 func sortCombatMatches(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, matches [][]runtime.MatchmakerEntry, opts *types.OpenSkillOptions, settings *GlobalMatchmakingSettings) ([][]runtime.MatchmakerEntry, []combatSortDecision) {
 	tolerance, weight := DefaultCombatDrawTolerance, DefaultCombatSplitPenaltyWeight
 	if settings != nil {
@@ -485,23 +513,6 @@ func sortCombatMatches(ctx context.Context, nk runtime.NakamaModule, logger runt
 			continue
 		}
 		decisions = append(decisions, d)
-		logger.WithFields(map[string]any{
-			"mode":         evr.ModeCombatPublic.String(),
-			"session_ids":  d.SessionIDs,
-			"user_ids":     d.UserIDs,
-			"parties":      d.Parties,
-			"kept_parties": d.KeptParties,
-			"fallback":     d.Fallback,
-			"moved":        d.Moved,
-			"draw_before":  d.DrawBefore,
-			"draw_after":   d.DrawAfter,
-			"draw_best":    d.DrawBest,
-			"draw_kept":    d.DrawKept,
-			"cost":         d.Cost,
-			"splits":       d.Splits,
-			"tolerance":    d.Tolerance,
-			"weight":       d.Weight,
-		}).Info("Combat teams sorted")
 	}
 	if out == nil {
 		return matches, nil
@@ -526,25 +537,76 @@ func nextCombatSplitScore(old float64, moved bool) float64 {
 // away from their party gain 1. A record is written only when its value changes.
 // Failures are logged at Warn and do not fail the matchmaker.
 func persistCombatSplitHistory(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, decisions []combatSortDecision) {
+	for _, d := range decisions {
+		persistCombatDecision(ctx, nk, logger, d)
+	}
+}
+
+// persistCombatDecision records one decision's history and reports whether every
+// write that was needed succeeded (false with a nil nk).
+func persistCombatDecision(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, d combatSortDecision) bool {
 	if nk == nil {
-		return
+		return false
+	}
+	moved := make(map[string]bool, len(d.Moved))
+	for _, uid := range d.Moved {
+		moved[uid] = true
+	}
+	ok := true
+	for _, uid := range d.partyUserIDs {
+		old := d.scoresBefore[uid]
+		next := nextCombatSplitScore(old, moved[uid])
+		if next == old {
+			continue
+		}
+		h := &CombatSplitHistory{Score: next}
+		if err := StorableWrite(ctx, nk, uid, h); err != nil {
+			ok = false
+			logger.WithFields(map[string]any{"user_id": uid, "error": err.Error()}).Warn("Failed to write combat split history")
+		}
+	}
+	return ok
+}
+
+// finishCombatSorts logs one record per combat sort and records the history of
+// the sorts whose match stands. It runs after EvrMatchmakerFn's backfill-first
+// step may have dropped made matches, so the record says what became of the sort:
+// made (the match was returned to the matchmaker) and history_persisted. A match
+// can still be discarded after this (LocalMatchmaker.Process drops a match whose
+// tickets are gone, and LobbyBuilder.buildMatch can fail and reinsert the
+// tickets); the history has been counted by then.
+func finishCombatSorts(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, decisions []combatSortDecision, matches [][]runtime.MatchmakerEntry) {
+	stands := map[string]bool{}
+	for _, d := range combatDecisionsStillMade(decisions, matches) {
+		stands[strings.Join(d.SessionIDs, ",")] = true
 	}
 	for _, d := range decisions {
-		moved := make(map[string]bool, len(d.Moved))
-		for _, uid := range d.Moved {
-			moved[uid] = true
+		made := stands[strings.Join(d.SessionIDs, ",")]
+		persisted := false
+		if made {
+			persisted = persistCombatDecision(ctx, nk, logger, d)
 		}
-		for _, uid := range d.partyUserIDs {
-			old := d.scoresBefore[uid]
-			next := nextCombatSplitScore(old, moved[uid])
-			if next == old {
-				continue
-			}
-			h := &CombatSplitHistory{Score: next}
-			if err := StorableWrite(ctx, nk, uid, h); err != nil {
-				logger.WithFields(map[string]any{"user_id": uid, "error": err.Error()}).Warn("Failed to write combat split history")
-			}
-		}
+		logger.WithFields(map[string]any{
+			"mode":              evr.ModeCombatPublic.String(),
+			"group_id":          d.GroupID,
+			"session_ids":       d.SessionIDs,
+			"user_ids":          d.UserIDs,
+			"players":           d.Players,
+			"parties":           d.Parties,
+			"kept_parties":      d.KeptParties,
+			"fallback":          d.Fallback,
+			"moved":             d.Moved,
+			"draw_before":       d.DrawBefore,
+			"draw_after":        d.DrawAfter,
+			"draw_best":         d.DrawBest,
+			"draw_kept":         d.DrawKept,
+			"cost":              d.Cost,
+			"splits":            d.Splits,
+			"tolerance":         d.Tolerance,
+			"weight":            d.Weight,
+			"made":              made,
+			"history_persisted": persisted,
+		}).Info("Combat teams sorted")
 	}
 }
 

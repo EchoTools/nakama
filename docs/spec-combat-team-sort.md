@@ -20,8 +20,10 @@ packing that already exists. Reservation, widening, release and the failsafe are
 - Parties (a ticket with more than one player) are kept together if the best split that
   keeps every party together is within `combat_draw_tolerance` of the closest-to-draw
   split's draw probability.
-- Otherwise every split is scored `|dmu| + combat_split_penalty_weight x sum(recent-split
-  score of each player moved away from their party)` and the lowest wins. For a split
+- Otherwise every split is scored `|dmu| + combat_split_penalty_weight x sum over the
+  players moved away from their party of (1 + that player's recent-split score)` and the
+  lowest wins. The 1 is a base cost per moved player, so the fewest parties are broken;
+  the score decides who moves. For a split
   party, the side that makes the sum smallest is its "home"; the members off it are the
   ones moved. With equal scores the larger group, then the lowest session id's side, is home.
 - Players are ordered by session id first, and the colour is alternated by a hash of
@@ -41,7 +43,7 @@ only in matches that contain a party for that player.
 | key | default | meaning |
 |---|---|---|
 | `combat_draw_tolerance` | 0.003 | draw probability a party-keeping split may fall short by (about 3.5 mu of team-sum difference at the default sigma) |
-| `combat_split_penalty_weight` | 1.0 | mu points per unit of a moved player's recent-split score |
+| `combat_split_penalty_weight` | 1.0 | mu points per moved player (base cost 1) plus per unit of that player's recent-split score |
 
 Zero means the default, as for the other float settings in that struct.
 
@@ -59,9 +61,12 @@ for the combat mode, and uses the default when there is no record or the read fa
 
 ## Logging
 
-One Info record per sorted match, `Combat teams sorted`: `user_ids`, `parties`,
-`kept_parties`, `fallback`, `moved`, `draw_before`, `draw_after`, `draw_best`, `draw_kept`,
-`cost`, `splits`, `tolerance`, `weight`.
+One Info record per sorted match, `Combat teams sorted`, written by `finishCombatSorts` after
+the backfill-first step: `group_id`, `players` (each `user_id`, `mu`, `sigma`, `source` of
+`ticket` / `loaded` / `default`), `parties`, `kept_parties`, `fallback`, `moved`, `draw_before`,
+`draw_after`, `draw_best`, `draw_kept`, `cost`, `splits`, `tolerance`, `weight`, `made` (the match
+was returned to the matchmaker) and `history_persisted`. History also counts a match that
+`LocalMatchmaker.Process` later discards or whose `buildMatch` fails and reinserts the tickets.
 
 ## Builder
 
@@ -72,3 +77,7 @@ One Info record per sorted match, `Combat teams sorted`: `user_ids`, `parties`,
 
 `processPostMatchMessages` reads a combat player's result from `CombatWins` / `CombatLosses`
 (then the arena keys), so a combat win moves the winners' `TeamSkillRating` up.
+
+Combat ratings are written whether or not `enable_skill_based_mm` is on (arena's still
+follow it). A combat match with no decided winner (a tie, or no result key) moves no
+rating; an Info record says so.

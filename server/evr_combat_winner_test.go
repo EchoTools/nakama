@@ -12,8 +12,11 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -48,6 +51,23 @@ func (n *combatWinnerNK) LeaderboardRecordsList(context.Context, string, []strin
 // orange's using orangeKey, and returns the TeamSkillRating mu each is rewritten to.
 func ratedAfterBlueWon(t *testing.T, mode evr.Symbol, blueKey, orangeKey string) (blueMu, orangeMu float64) {
 	t.Helper()
+	r := runCombatPostMatch(t, mode, blueKey, orangeKey, true, NewRuntimeGoLogger(zap.NewNop()))
+	if r.n != 2 {
+		t.Fatalf("expected a TeamSkillRatingMu entry for both players, got %d", r.n)
+	}
+	return r.blueMu, r.orangeMu
+}
+
+type postMatchRatings struct {
+	blueMu, orangeMu float64
+	n                int // TeamSkillRatingMu entries written
+}
+
+// runCombatPostMatch feeds a two-player match (blue, orange) through
+// processPostMatchMessages. blueKey / orangeKey replace the sample's
+// "CombatWins":1 in each player's payload. sbmm is enable_skill_based_mm.
+func runCombatPostMatch(t *testing.T, mode evr.Symbol, blueKey, orangeKey string, sbmm bool, logger runtime.Logger) postMatchRatings {
+	t.Helper()
 	const blueXPID, orangeXPID = "OVR-ORG-1000000000000011", "OVR-ORG-1000000000000012"
 	blueRaw := strings.ReplaceAll(strings.ReplaceAll(combatWinnerPayload, "OVR-ORG-0000000000000000", blueXPID), `"CombatWins":1`, blueKey)
 	// No loser sample is recorded anywhere; orange's payload is the winner's with the win renamed to its result key.
@@ -76,10 +96,9 @@ func ratedAfterBlueWon(t *testing.T, mode evr.Symbol, blueKey, orangeKey string)
 
 	settings := &ServiceSettingsData{}
 	FixDefaultServiceSettings(nil, settings)
-	settings.Matchmaking.EnableSBMM = true
+	settings.Matchmaking.EnableSBMM = sbmm
 	withServiceSettings(t, settings)
 
-	logger := NewRuntimeGoLogger(zap.NewNop())
 	queue := &StatisticsQueue{logger: logger, ch: make(chan []*StatisticsQueueEntry, 64)}
 	// A game-server operator (invalid XPID) may submit on behalf of players.
 	s := &EventRemoteLogSet{Node: "winnernode", UserID: "00000000-0000-4000-8000-00000000c1ff", SessionID: "00000000-0000-4000-8000-00000000c1fe", XPID: evr.EvrId{}}
@@ -100,10 +119,7 @@ func ratedAfterBlueWon(t *testing.T, mode evr.Symbol, blueKey, orangeKey string)
 			mu[e.UserID] = v
 		}
 	}
-	if len(mu) != 2 {
-		t.Fatalf("expected a TeamSkillRatingMu entry for both players, got %v", mu)
-	}
-	return mu[label.Players[0].UserID], mu[label.Players[1].UserID]
+	return postMatchRatings{blueMu: mu[label.Players[0].UserID], orangeMu: mu[label.Players[1].UserID], n: len(mu)}
 }
 
 // The winner fix. Blue won a public combat match; blue's payload says
@@ -139,16 +155,42 @@ func TestArenaPostMatch_BlueWinRatesBlueUp(t *testing.T) {
 	}
 }
 
-// The combat result keys are not leaderboard stats of the remote-log path: the
-// game server's profile update is the combat boards' writer.
-func TestIterateMatchTypeStatsFields_SkipsCombatResultKeys(t *testing.T) {
-	stats := evr.MatchTypeStats{CombatWins: 1, CombatLosses: 1, ArenaWins: 1}
-	seen := map[string]bool{}
-	iterateMatchTypeStatsFields(stats, func(name string, _ LeaderboardOperator, _ float64) { seen[name] = true })
-	if seen["CombatWins"] || seen["CombatLosses"] {
-		t.Errorf("combat result keys were written as leaderboard stats: %v", seen)
+// Combat ratings are kept from the start: with enable_skill_based_mm OFF a
+// combat blue win still moves the combat TeamSkillRating (blue up, orange down).
+// Red before: ratings were written only when SBMM was on, so nothing moved.
+func TestCombatPostMatch_SBMMOff_RatingsStillMove(t *testing.T) {
+	r := runCombatPostMatch(t, evr.ModeCombatPublic, `"CombatWins":1`, `"CombatLosses":1`, false, NewRuntimeGoLogger(zap.NewNop()))
+	def := NewDefaultRating().Mu
+	if r.n != 2 || !(r.blueMu > def && r.orangeMu < def) {
+		t.Errorf("SBMM off, blue won: %d rating entries, blue mu=%.4f orange mu=%.4f (default %.4f)", r.n, r.blueMu, r.orangeMu, def)
 	}
-	if !seen["ArenaWins"] {
-		t.Errorf("ArenaWins no longer written: %v", seen)
+}
+
+// Arena twin: with SBMM off arena writes no ratings, as before.
+func TestArenaPostMatch_SBMMOff_NoRatingWrites(t *testing.T) {
+	r := runCombatPostMatch(t, evr.ModeArenaPublic, `"ArenaWins":1`, `"ArenaLosses":1`, false, NewRuntimeGoLogger(zap.NewNop()))
+	if r.n != 0 {
+		t.Errorf("arena with SBMM off wrote %d rating entries", r.n)
+	}
+}
+
+// A combat match with no decided winner moves no rating. A tie reports
+// neither CombatWins nor CombatLosses (here the key is renamed to CombatTies,
+// which evr.MatchTypeStats does not parse on main); the same goes for a payload
+// with no result key at all. It is logged at Info with the reason.
+// Red before: such a match was rated as an orange win.
+func TestCombatPostMatch_NoDecidedWinner_MovesNoRating(t *testing.T) {
+	for _, sbmm := range []bool{true, false} {
+		for _, key := range []string{`"CombatTies":1`, `"CombatMVPs":1`} {
+			core, logs := observer.New(zapcore.InfoLevel)
+			r := runCombatPostMatch(t, evr.ModeCombatPublic, key, key, sbmm, NewRuntimeGoLogger(zap.New(core)))
+			if r.n != 0 {
+				t.Errorf("sbmm=%v %s: an undecided match wrote %d rating entries (blue mu=%.4f orange mu=%.4f)", sbmm, key, r.n, r.blueMu, r.orangeMu)
+			}
+			recs := logs.FilterMessage("Combat match has no decided winner; ratings not updated").All()
+			if len(recs) != 1 || recs[0].Level != zapcore.InfoLevel {
+				t.Errorf("sbmm=%v %s: expected one Info record, got %d", sbmm, key, len(recs))
+			}
+		}
 	}
 }

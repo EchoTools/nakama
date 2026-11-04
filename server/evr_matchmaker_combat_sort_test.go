@@ -148,11 +148,13 @@ func TestSortCombatMatches_LeavesArenaAlone(t *testing.T) {
 	}
 }
 
-// N10: one structured record per combat sort, none for arena, carrying who was
-// split and the draw probability.
+// N10: one structured record per combat sort, none for arena, carrying the group,
+// each player's rating and where it came from, who was split, the draw
+// probability, and what became of the sort (made / history persisted).
 func TestCombatSort_LogsOneRecordPerSort(t *testing.T) {
 	core, logs := observer.New(zapcore.InfoLevel)
 	logger := NewRuntimeGoLogger(zap.New(core))
+	nk := &combatRatingNK{evrTestNakamaModule: newEvrTestNakamaModule(), groupID: "00000000-0000-4000-8000-0000000c0de1"}
 
 	duo := combatSolos(5, 6, 7, 8, 9, 10)
 	duo = append(duo,
@@ -164,6 +166,8 @@ func TestCombatSort_LogsOneRecordPerSort(t *testing.T) {
 		e.Presence.UserId = "u-x" + string(rune('a'+i))
 		e.Presence.Username = "x" + string(rune('a'+i))
 	}
+	solo[0].Properties["rating_mu"] = nil // a ticket without a rating: not "ticket"
+	delete(solo[0].Properties, "rating_mu")
 	arena := combatSolos(11, 12, 13, 14, 15, 16, 17, 18)
 	for i, e := range arena {
 		e.Properties["game_mode"] = evr.ModeArenaPublic.String()
@@ -171,11 +175,17 @@ func TestCombatSort_LogsOneRecordPerSort(t *testing.T) {
 		e.Presence.UserId = "u-y" + string(rune('a'+i))
 	}
 
-	_, decisions := sortCombatMatches(context.Background(), nil, logger,
+	made, decisions := sortCombatMatches(context.Background(), nk, logger,
 		[][]runtime.MatchmakerEntry{asRuntime(duo), asRuntime(arena), asRuntime(solo)}, nil, nil)
 	if len(decisions) != 2 {
 		t.Fatalf("decisions = %d, want 2 (two combat matches, one arena)", len(decisions))
 	}
+	if n := len(logs.FilterMessage("Combat teams sorted").All()); n != 0 {
+		t.Fatalf("sortCombatMatches logged %d records; logging waits for finishCombatSorts", n)
+	}
+	// The solo match is dropped (backfill-first); the duo match stands.
+	finishCombatSorts(context.Background(), nk, logger, decisions, [][]runtime.MatchmakerEntry{made[0], made[1]})
+
 	recs := logs.FilterMessage("Combat teams sorted").All()
 	if len(recs) != 2 {
 		t.Fatalf("log records = %d, want 2", len(recs))
@@ -185,10 +195,13 @@ func TestCombatSort_LogsOneRecordPerSort(t *testing.T) {
 			t.Errorf("level = %v, want info", rec.Level)
 		}
 		ctx := rec.ContextMap()
-		for _, k := range []string{"user_ids", "kept_parties", "moved", "draw_before", "draw_after", "draw_best", "parties", "tolerance", "weight", "splits"} {
+		for _, k := range []string{"group_id", "players", "user_ids", "kept_parties", "moved", "draw_before", "draw_after", "draw_best", "parties", "tolerance", "weight", "splits", "made", "history_persisted"} {
 			if _, ok := ctx[k]; !ok {
 				t.Errorf("record lacks %q: %v", k, ctx)
 			}
+		}
+		if ctx["group_id"] != "00000000-0000-4000-8000-0000000c0de1" {
+			t.Errorf("group_id = %v", ctx["group_id"])
 		}
 	}
 	first := recs[0].ContextMap()
@@ -200,6 +213,30 @@ func TestCombatSort_LogsOneRecordPerSort(t *testing.T) {
 	}
 	if d1, _ := first["draw_after"].(float64); d1 <= first["draw_before"].(float64) {
 		t.Errorf("draw_after %v not above draw_before %v", first["draw_after"], first["draw_before"])
+	}
+	if first["made"] != true || first["history_persisted"] != true {
+		t.Errorf("duo match stands: made=%v history_persisted=%v", first["made"], first["history_persisted"])
+	}
+	players, _ := first["players"].([]combatPlayerRating)
+	if len(players) != 8 {
+		t.Fatalf("players = %v", first["players"])
+	}
+	if players[0].Source != "ticket" || players[0].Mu != 40 {
+		t.Errorf("rated ticket: %+v, want source ticket, mu 40", players[0])
+	}
+
+	dropped := recs[1].ContextMap()
+	if dropped["made"] != false || dropped["history_persisted"] != false {
+		t.Errorf("dropped match: made=%v history_persisted=%v", dropped["made"], dropped["history_persisted"])
+	}
+	var sawDefault bool
+	for _, p := range dropped["players"].([]combatPlayerRating) {
+		if p.Source == "default" {
+			sawDefault = true
+		}
+	}
+	if !sawDefault {
+		t.Errorf("a ticket with no rating and no stored record should be sourced \"default\": %v", dropped["players"])
 	}
 }
 
@@ -536,5 +573,45 @@ func TestCombatBlueWins(t *testing.T) {
 		if decided != c.decided || blue != c.blu {
 			t.Errorf("%s: got (%v,%v), want (%v,%v)", c.name, decided, blue, c.decided, c.blu)
 		}
+	}
+}
+
+// The combat result keys are not leaderboard stats of the remote-log path: the
+// game server's profile update is the combat boards' writer.
+func TestIterateMatchTypeStatsFields_SkipsCombatResultKeys(t *testing.T) {
+	stats := evr.MatchTypeStats{CombatWins: 1, CombatLosses: 1, ArenaWins: 1}
+	seen := map[string]bool{}
+	iterateMatchTypeStatsFields(stats, func(name string, _ LeaderboardOperator, _ float64) { seen[name] = true })
+	if seen["CombatWins"] || seen["CombatLosses"] {
+		t.Errorf("combat result keys were written as leaderboard stats: %v", seen)
+	}
+	if !seen["ArenaWins"] {
+		t.Errorf("ArenaWins no longer written: %v", seen)
+	}
+}
+
+// Fallback breaks as few parties as it must. Duo B (40, 38) cannot stay together
+// without stacking a team; duo A (12.1, 10.7) can stay together inside the draw
+// tolerance. The closest-to-draw split splits both; the fallback must split only B.
+// Intent: a party that does not need to be split is not.
+func TestCombatSort_FallbackSplitsOnlyThePartyThatMustSplit(t *testing.T) {
+	es := combatSolos(3.6, 14.3, 14.4, 6.8)
+	es = append(es,
+		combatSortEntry(evr.ModeCombatPublic.String(), "t-A", "a1", 12.1),
+		combatSortEntry(evr.ModeCombatPublic.String(), "t-A", "a2", 10.7),
+		combatSortEntry(evr.ModeCombatPublic.String(), "t-B", "b1", 40),
+		combatSortEntry(evr.ModeCombatPublic.String(), "t-B", "b2", 38))
+	out, d := resortCombatTeams(asRuntime(es), combatOpenSkillOptions(nil), DefaultCombatDrawTolerance, DefaultCombatSplitPenaltyWeight, nil, nil)
+	if !d.Fallback {
+		t.Fatalf("expected the fallback (B cannot stay together): %+v", d)
+	}
+	if sameTeam(out, "b1", "b2") {
+		t.Errorf("B was kept together: %s", memberOrder([][]runtime.MatchmakerEntry{out}))
+	}
+	if !sameTeam(out, "a1", "a2") {
+		t.Errorf("A was split although it can stay together: %s (moved %v)", memberOrder([][]runtime.MatchmakerEntry{out}), d.Moved)
+	}
+	if len(d.Moved) != 1 {
+		t.Errorf("moved %v, want exactly one member of B", d.Moved)
 	}
 }

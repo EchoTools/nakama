@@ -231,9 +231,9 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		}
 	}
 
-	// Record the combat sorts of the matches that stand (the backfill-first path
-	// above may have dropped them).
-	persistCombatSplitHistory(ctx, nk, logger, combatDecisionsStillMade(combatDecisions, matches))
+	// Log the combat sorts and record the history of the matches that stand (the
+	// backfill-first path above may have dropped them).
+	finishCombatSorts(ctx, nk, logger, combatDecisions, matches)
 
 	// Extract all players from the candidates
 	playerSet := make(map[string]struct{}, 0)
