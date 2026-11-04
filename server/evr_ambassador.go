@@ -344,6 +344,9 @@ func (s *ambassadorService) Grant(ctx context.Context, c ambassadorCaller, t amb
 // removalDM is the DM an ambassador gets when a moderator removes the role.
 // The user name is markdown-escaped; the reason is the moderator's text, verbatim.
 func removalDM(displayName, reason string) string {
+	if strings.TrimSpace(displayName) == "" {
+		displayName = "there"
+	}
 	return fmt.Sprintf("Hi %s. Please read the following:\n"+
 		"We (%s) have unfortunately decided to remove you from the ambassador team. "+
 		"We are thankful for your work, but some things came up that we don't allow our ambassadors to do. "+

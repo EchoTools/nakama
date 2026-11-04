@@ -1140,6 +1140,8 @@ var (
 )
 
 func init() {
+	mainSlashCommands = append(mainSlashCommands, ambassadorSlashCommands()...)
+
 	// Only allow slash commands in guild context - they require guild/member data
 	guildOnly := []discordgo.InteractionContextType{discordgo.InteractionContextGuild}
 	for _, cmd := range mainSlashCommands {
@@ -3571,7 +3573,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			return editInteractionResponse(s, i, fmt.Sprintf("Server `%s` has been removed from your blacklist.", displayName))
 		},
-		"vrml-verify": d.handleVRMLVerify,
+		"vrml-verify":       d.handleVRMLVerify,
+		cmdSetAmbassador:    d.handleSetAmbassadorCommand,
+		cmdAmbassadorRemove: d.handleAmbassadorRemoveCommand,
+		cmdAmbassadorToggle: d.handleAmbassadorToggleCommand,
+		cmdAmbassadorReady:  d.handleAmbassadorReadyCommand,
+		cmdLevelSelfPromote: d.handleLevelSelfPromoteCommand,
+		cmdLevelDemote:      d.handleLevelDemoteCommand,
 	}
 
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
