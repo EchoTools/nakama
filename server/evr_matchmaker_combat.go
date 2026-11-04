@@ -119,7 +119,7 @@ type combatSortDecision struct {
 //
 // match is not modified. Players are ordered by session id first, so the result
 // does not depend on the order they arrive in.
-func resortCombatTeams(match []runtime.MatchmakerEntry, opts *types.OpenSkillOptions, tolerance, weight float64, scores map[string]float64) ([]runtime.MatchmakerEntry, combatSortDecision) {
+func resortCombatTeams(match []runtime.MatchmakerEntry, opts *types.OpenSkillOptions, tolerance, weight float64, scores map[string]float64, loaded map[string]types.Rating) ([]runtime.MatchmakerEntry, combatSortDecision) {
 	n := len(match)
 	d := combatSortDecision{Tolerance: tolerance, Weight: weight}
 	if n < 2 || n%2 != 0 || n > combatSortMaxPlayers {
@@ -130,7 +130,7 @@ func resortCombatTeams(match []runtime.MatchmakerEntry, opts *types.OpenSkillOpt
 	sort.SliceStable(players, func(i, j int) bool {
 		return players[i].GetPresence().GetSessionId() < players[j].GetPresence().GetSessionId()
 	})
-	ratings := MatchmakerEntries(players).Ratings(opts)
+	ratings := combatRatings(players, opts, loaded)
 	mus := make([]float64, n)
 	for i, r := range ratings {
 		mus[i] = r.Mu
@@ -311,7 +311,7 @@ func resortCombatTeams(match []runtime.MatchmakerEntry, opts *types.OpenSkillOpt
 	}
 	d.KeptParties = len(d.Moved) == 0
 	d.DrawAfter = drawOf(chosen)
-	d.DrawBefore = combatDrawOfArrangement(match, opts)
+	d.DrawBefore = combatDrawOfArrangement(match, opts, loaded)
 
 	// Which colour is which does not matter to the rating. Alternate it by a
 	// hash of the players so the player with the lowest session id is not always
@@ -356,13 +356,57 @@ func combatOpenSkillOptions(opts *types.OpenSkillOptions) *types.OpenSkillOption
 
 // combatDrawOfArrangement is rating.PredictDraw of a match as it is laid out:
 // the first half is blue, the second orange.
-func combatDrawOfArrangement(match []runtime.MatchmakerEntry, opts *types.OpenSkillOptions) float64 {
+func combatDrawOfArrangement(match []runtime.MatchmakerEntry, opts *types.OpenSkillOptions, loaded map[string]types.Rating) float64 {
 	n := len(match)
 	if n < 2 || n%2 != 0 {
 		return 0
 	}
-	r := MatchmakerEntries(match).Ratings(opts)
+	r := combatRatings(match, opts, loaded)
 	return rating.PredictDraw([]types.Team{r[:n/2], r[n/2:]}, opts)
+}
+
+// combatRatings are the players' ratings: the ticket's rating_mu / rating_sigma
+// where it carries them, and for a player in loaded (one whose ticket carried
+// none) the rating loaded from their combat TeamSkillRating.
+func combatRatings(players []runtime.MatchmakerEntry, opts *types.OpenSkillOptions, loaded map[string]types.Rating) []types.Rating {
+	ratings := MatchmakerEntries(players).Ratings(opts)
+	for i, p := range players {
+		if r, ok := loaded[p.GetPresence().GetUserId()]; ok {
+			ratings[i] = r
+		}
+	}
+	return ratings
+}
+
+// loadCombatRatings loads the combat TeamSkillRating of every player in match
+// whose ticket carries no rating_mu (the ticket only carries one when
+// enable_skill_based_mm is on, evr_lobby_parameters.go). It is the loader the
+// ticket uses, MatchmakingRatingLoad, for the combat mode; a player with no
+// record, or whose record cannot be read, gets the default rating. With a nil nk
+// nothing is loaded and such a player is the default rating.
+func loadCombatRatings(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, match []runtime.MatchmakerEntry) map[string]types.Rating {
+	if nk == nil {
+		return nil
+	}
+	var loaded map[string]types.Rating
+	for _, e := range match {
+		props := e.GetProperties()
+		if _, has := props["rating_mu"].(float64); has {
+			continue
+		}
+		groupID, _ := props["group_id"].(string)
+		uid := e.GetPresence().GetUserId()
+		r, err := MatchmakingRatingLoad(ctx, nk, uid, groupID, evr.ModeCombatPublic)
+		if err != nil {
+			logger.WithFields(map[string]any{"user_id": uid, "group_id": groupID, "error": err.Error()}).Warn("Failed to load combat rating; using the default")
+			r = NewDefaultRating()
+		}
+		if loaded == nil {
+			loaded = map[string]types.Rating{}
+		}
+		loaded[uid] = r
+	}
+	return loaded
 }
 
 // isCombatMatch reports whether a made match is public combat, by the same
@@ -434,7 +478,8 @@ func sortCombatMatches(ctx context.Context, nk runtime.NakamaModule, logger runt
 			out = slices.Clone(matches)
 		}
 		scores := loadCombatSplitScores(ctx, nk, logger, match)
-		sorted, d := resortCombatTeams(match, opts, tolerance, weight, scores)
+		loaded := loadCombatRatings(ctx, nk, logger, match)
+		sorted, d := resortCombatTeams(match, opts, tolerance, weight, scores, loaded)
 		out[i] = sorted
 		if !d.Sorted {
 			continue

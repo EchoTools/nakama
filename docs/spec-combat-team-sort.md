@@ -47,10 +47,15 @@ Zero means the default, as for the other float settings in that struct.
 
 ## Ratings
 
-The sort reads `rating_mu` / `rating_sigma` from the ticket, which are present only when
-`enable_skill_based_mm` is on: the combat-mode `TeamSkillRating` (`MatchmakingRatingLoad`),
-the default rating for a player without a record, no arena fallback. Without ratings every
-split ties and the result is the lowest split in session-id order.
+Every player always has a combat rating: the combat-mode `TeamSkillRating`, or the default
+mu/sigma when there is no record. No arena fallback.
+
+A ticket carries `rating_mu` / `rating_sigma` only when `enable_skill_based_mm` is on
+(`evr_lobby_parameters.go`); that is not changed. For a player whose ticket carries none,
+the sort loads the rating at sort time with the ticket's own loader, `MatchmakingRatingLoad`
+for the combat mode, and uses the default when there is no record or the read fails
+(Warn). Tickets that carry a rating are not loaded again. The sort therefore does not depend on
+`enable_skill_based_mm`.
 
 ## Logging
 

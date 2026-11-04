@@ -65,12 +65,12 @@ func TestCombatSort_DrawIsFunctionOfMuDifference(t *testing.T) {
 				}
 				bestDraw = math.Max(bestDraw, rating.PredictDraw([]types.Team{blue, orange}, opts))
 			}
-			out, d := resortCombatTeams(es, opts, 1, 1, nil)
-			if got := combatDrawOfArrangement(out, opts); bestDraw-got > 1e-12 {
+			out, d := resortCombatTeams(es, opts, 1, 1, nil, nil)
+			if got := combatDrawOfArrangement(out, opts, nil); bestDraw-got > 1e-12 {
 				t.Fatalf("n=%d trial %d: sorted draw %.12f, best over all splits %.12f", n, trial, got, bestDraw)
 			}
-			if math.Abs(d.DrawAfter-combatDrawOfArrangement(out, opts)) > 1e-12 {
-				t.Fatalf("decision DrawAfter %.12f differs from the arrangement's %.12f", d.DrawAfter, combatDrawOfArrangement(out, opts))
+			if math.Abs(d.DrawAfter-combatDrawOfArrangement(out, opts, nil)) > 1e-12 {
+				t.Fatalf("decision DrawAfter %.12f differs from the arrangement's %.12f", d.DrawAfter, combatDrawOfArrangement(out, opts, nil))
 			}
 		}
 	}
@@ -83,7 +83,7 @@ func TestCombatSort_SixteenIsExhaustive(t *testing.T) {
 	r := rand.New(rand.NewSource(16))
 	es := randomCombatEntries(r, 16)
 	start := time.Now()
-	out, d := resortCombatTeams(asRuntime(es), combatOpenSkillOptions(nil), 1, 1, nil)
+	out, d := resortCombatTeams(asRuntime(es), combatOpenSkillOptions(nil), 1, 1, nil, nil)
 	elapsed := time.Since(start)
 	if d.Splits != 6435 {
 		t.Errorf("evaluated %d splits, want C(15,7) = 6435", d.Splits)
@@ -101,7 +101,7 @@ func TestCombatSort_SixteenIsExhaustive(t *testing.T) {
 // 8 players is 35 splits.
 func TestCombatSort_EightIsThirtyFiveSplits(t *testing.T) {
 	r := rand.New(rand.NewSource(8))
-	_, d := resortCombatTeams(asRuntime(randomCombatEntries(r, 8)), combatOpenSkillOptions(nil), 1, 1, nil)
+	_, d := resortCombatTeams(asRuntime(randomCombatEntries(r, 8)), combatOpenSkillOptions(nil), 1, 1, nil, nil)
 	if d.Splits != 35 {
 		t.Errorf("evaluated %d splits, want 35", d.Splits)
 	}
@@ -113,7 +113,7 @@ func TestCombatSort_DoesNotMutateInput(t *testing.T) {
 	r := rand.New(rand.NewSource(9))
 	es := asRuntime(randomCombatEntries(r, 8))
 	before := slices.Clone(es)
-	out, _ := resortCombatTeams(es, combatOpenSkillOptions(nil), 0.003, 1, nil)
+	out, _ := resortCombatTeams(es, combatOpenSkillOptions(nil), 0.003, 1, nil, nil)
 	if !slices.Equal(es, before) {
 		t.Errorf("resortCombatTeams reordered its input")
 	}
@@ -226,7 +226,7 @@ func TestCombatSort_PartySplitBurdenAlternates(t *testing.T) {
 				es = append(es,
 					combatSortEntry(evr.ModeCombatPublic.String(), "t-duo", "d1", 40),
 					combatSortEntry(evr.ModeCombatPublic.String(), "t-duo", "d2", tc.d2))
-				_, d := resortCombatTeams(asRuntime(es), combatOpenSkillOptions(nil), DefaultCombatDrawTolerance, DefaultCombatSplitPenaltyWeight, scores)
+				_, d := resortCombatTeams(asRuntime(es), combatOpenSkillOptions(nil), DefaultCombatDrawTolerance, DefaultCombatSplitPenaltyWeight, scores, nil)
 				if d.KeptParties || len(d.Moved) != 1 {
 					t.Fatalf("round %d: expected the duo to be split with one member moved, got kept=%v moved=%v", round, d.KeptParties, d.Moved)
 				}
