@@ -2,7 +2,6 @@ package server
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -39,94 +38,106 @@ func TestNormalizeNevrVersion(t *testing.T) {
 
 // Past maxNevrVersionLabels distinct versions, a new version is bucketed to metricTagOther, a version
 // already labelled keeps its label, and the stock and unknown sentinels take no slot.
-func TestNevrRuntimeSessionTrackerCapsDistinctVersions(t *testing.T) {
-	tr := newNevrRuntimeSessionTracker()
+func TestNevrVersionLabelerCapsDistinctVersions(t *testing.T) {
+	l := newNevrVersionLabeler()
 	for i := 0; i < maxNevrVersionLabels; i++ {
 		v := fmt.Sprintf("1.%d.0", i)
-		if got := tr.keyFor(&evr.NevrIdentity{Version: v}, "d").version; got != v {
+		if got := l.label(&evr.NevrIdentity{Version: v}); got != v {
 			t.Fatalf("version %q under the cap = %q, want its own label", v, got)
 		}
 	}
 
-	if got := tr.keyFor(&evr.NevrIdentity{Version: "9.9.9"}, "d").version; got != metricTagOther {
+	if got := l.label(&evr.NevrIdentity{Version: "9.9.9"}); got != metricTagOther {
 		t.Fatalf("version past the cap = %q, want %q", got, metricTagOther)
 	}
-	if got := tr.keyFor(&evr.NevrIdentity{Version: "1.0.0"}, "d").version; got != "1.0.0" {
+	if got := l.label(&evr.NevrIdentity{Version: "1.0.0"}); got != "1.0.0" {
 		t.Fatalf("version already labelled = %q, want 1.0.0", got)
 	}
-	if got := tr.keyFor(nil, "d").version; got != nevrVersionStock {
+	if got := l.label(nil); got != nevrVersionStock {
 		t.Fatalf("stock = %q, want %q", got, nevrVersionStock)
 	}
-	if got := tr.keyFor(&evr.NevrIdentity{Version: "junk"}, "d").version; got != nevrVersionUnknown {
+	if got := l.label(&evr.NevrIdentity{Version: "junk"}); got != nevrVersionUnknown {
 		t.Fatalf("unknown = %q, want %q", got, nevrVersionUnknown)
 	}
-	if n := len(tr.versions); n != maxNevrVersionLabels {
+	if n := len(l.versions); n != maxNevrVersionLabels {
 		t.Fatalf("labelled versions = %d, want %d (sentinels must not take a slot)", n, maxNevrVersionLabels)
 	}
 }
 
 // A client that varies its version on every login gets at most maxNevrVersionLabels+1 distinct labels.
-func TestNevrRuntimeSessionTrackerFloodStaysBounded(t *testing.T) {
-	tr := newNevrRuntimeSessionTracker()
+func TestNevrVersionLabelerFloodStaysBounded(t *testing.T) {
+	l := newNevrVersionLabeler()
 	labels := map[string]struct{}{}
 	for i := 0; i < 1000; i++ {
-		labels[tr.keyFor(&evr.NevrIdentity{Version: fmt.Sprintf("2.%d.0", i)}, "d").version] = struct{}{}
+		labels[l.label(&evr.NevrIdentity{Version: fmt.Sprintf("2.%d.0", i)})] = struct{}{}
 	}
 	if len(labels) != maxNevrVersionLabels+1 {
 		t.Fatalf("distinct version labels after 1000 versions = %d, want %d", len(labels), maxNevrVersionLabels+1)
 	}
 }
 
-type gaugeWrite struct {
-	name  string
-	tags  map[string]string
-	value float64
+// useFreshNevrVersionLabels swaps the process-wide labeler for an empty one for the length of a test, so
+// the version set other tests have filled does not decide this test's labels.
+func useFreshNevrVersionLabels(t *testing.T) {
+	t.Helper()
+	prev := nevrVersionLabels
+	nevrVersionLabels = newNevrVersionLabeler()
+	t.Cleanup(func() { nevrVersionLabels = prev })
 }
 
-type gaugeRecorder struct {
-	writes []gaugeWrite
-}
+// The version rides on the login_success tag set the login path emits, next to the dimensions it is meant
+// to be correlated with, rather than on a metric of its own.
+func TestLoginSuccessCarriesNevrVersionWithItsOtherDimensions(t *testing.T) {
+	useFreshNevrVersionLabels(t)
+	limiter := newSystemFingerprintLimiter(maxDistinctSystemsPerPlayer, maxTrackedPlayersForSystemLimit)
 
-func (r *gaugeRecorder) set(name string, tags map[string]string, value float64) {
-	r.writes = append(r.writes, gaugeWrite{name: name, tags: tags, value: value})
-}
-
-func loginParamsFor(identity *evr.NevrIdentity, headset string) *SessionParameters {
-	return &SessionParameters{loginPayload: &evr.LoginProfile{
-		NevrIdentity: identity,
-		SystemInfo:   evr.SystemInfo{HeadsetType: headset},
-	}}
-}
-
-func sessionTags(version, device string) map[string]string {
-	return map[string]string{"nevr_version": version, "device_type": device}
-}
-
-// The gauge rises when a session logs in and falls when it ends, per series, and a series with no session
-// open is written at 0 and dropped from the map.
-func TestNevrRuntimeSessionsGaugeIncDecOnStartAndEnd(t *testing.T) {
-	tr := newNevrRuntimeSessionTracker()
-	rec := &gaugeRecorder{}
-
-	endA := trackNevrRuntimeSession(tr, loginParamsFor(&evr.NevrIdentity{Version: "4.2.0"}, "Meta Quest 3"), rec.set)
-	endB := trackNevrRuntimeSession(tr, loginParamsFor(&evr.NevrIdentity{Version: "4.2.0"}, "Meta Quest 3"), rec.set)
-	endC := trackNevrRuntimeSession(tr, loginParamsFor(nil, "Meta Quest 3"), rec.set)
-	endB()
-	endA()
-	endC()
-
-	want := []gaugeWrite{
-		{nevrRuntimeSessionsGauge, sessionTags("4.2.0", "Meta Quest 3"), 1},
-		{nevrRuntimeSessionsGauge, sessionTags("4.2.0", "Meta Quest 3"), 2},
-		{nevrRuntimeSessionsGauge, sessionTags("stock", "Meta Quest 3"), 1},
-		{nevrRuntimeSessionsGauge, sessionTags("4.2.0", "Meta Quest 3"), 1},
-		{nevrRuntimeSessionsGauge, sessionTags("4.2.0", "Meta Quest 3"), 0},
-		{nevrRuntimeSessionsGauge, sessionTags("stock", "Meta Quest 3"), 0},
+	for _, tc := range []struct {
+		name     string
+		identity *evr.NevrIdentity
+		want     string
+	}{
+		{"nevr-runtime client", &evr.NevrIdentity{Version: "v4.2.0+abc"}, "4.2.0"},
+		{"stock client", nil, nevrVersionStock},
+		{"unusable version", &evr.NevrIdentity{Version: "junk"}, nevrVersionUnknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := &evr.LoginProfile{
+				NevrIdentity: tc.identity,
+				SystemInfo:   evr.SystemInfo{HeadsetType: "Quest 3", NetworkType: "WiFi"},
+			}
+			tags := buildLoginSuccessMetricTags(paramsWithPayload(payload, ""), limiter)
+			if got := tags[nevrVersionTag]; got != tc.want {
+				t.Fatalf("%s = %q, want %q", nevrVersionTag, got, tc.want)
+			}
+			if got := tags["headset_type"]; got != "Meta Quest 3" {
+				t.Fatalf("headset_type = %q, want Meta Quest 3 on the same tag set", got)
+			}
+			if got := tags["device_type"]; got != "Meta Quest 3" {
+				t.Fatalf("device_type = %q, want Meta Quest 3 on the same tag set", got)
+			}
+		})
 	}
-	if !reflect.DeepEqual(rec.writes, want) {
-		t.Fatalf("gauge writes\n got: %+v\nwant: %+v", rec.writes, want)
+}
+
+// One account varying its version cannot burn the process-wide version slots for everyone: the version is
+// part of the per-player fingerprint, so past maxDistinctSystemsPerPlayer it collapses to metricTagOther
+// and takes no new slot.
+func TestLoginSuccessNevrVersionCountsAgainstPerPlayerCap(t *testing.T) {
+	useFreshNevrVersionLabels(t)
+	limiter := newSystemFingerprintLimiter(maxDistinctSystemsPerPlayer, maxTrackedPlayersForSystemLimit)
+
+	for i := 0; i < 3*maxDistinctSystemsPerPlayer; i++ {
+		payload := &evr.LoginProfile{
+			NevrIdentity: &evr.NevrIdentity{Version: fmt.Sprintf("3.%d.0", i)},
+			SystemInfo:   evr.SystemInfo{HeadsetType: "Quest 3", NetworkType: "WiFi"},
+		}
+		buildLoginSuccessMetricTags(paramsWithPayload(payload, "one-account"), limiter)
 	}
-	if len(tr.open) != 0 {
-		t.Fatalf("open series after every session ended = %d, want 0", len(tr.open))
+
+	nevrVersionLabels.mu.Lock()
+	n := len(nevrVersionLabels.versions)
+	nevrVersionLabels.mu.Unlock()
+	if n > maxDistinctSystemsPerPlayer {
+		t.Fatalf("one account took %d process-wide version slots, want at most %d", n, maxDistinctSystemsPerPlayer)
 	}
 }
