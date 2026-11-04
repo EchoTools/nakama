@@ -1101,28 +1101,11 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		logger.Warn("Failed to check display name owner", zap.Any("display_names", displayNames), zap.Error(err))
 	} else {
 		// Prune the in-game names that are owned by someone else.
-		for _, dn := range params.profile.DisplayNamesByGroupID() {
-			if ownerIDs, ok := ownerMap[dn]; ok && !slices.Contains(ownerIDs, params.profile.ID()) {
-				// This display name is owned by someone else.
-				displayNamesOwnedByOthers = append(displayNamesOwnedByOthers, dn)
-				for gID, gn := range params.profile.DisplayNamesByGroupID() {
-					if strings.EqualFold(gn, dn) {
-						// This display name is owned by someone else.
-						params.profile.DeleteGroupDisplayName(gID)
-						if serviceSettings.DisplayNameInUseNotifications {
-							// Notify the player that this display name is in use.
-							ownerDiscordID := p.discordCache.UserIDToDiscordID(ownerIDs[0])
-							go func(displayName string) {
-								if err := p.discordCache.SendDisplayNameInUseNotification(ctx, notifyDiscordID, ownerDiscordID, displayName, notifyUsername); err != nil {
-									if IsDiscordErrorCode(err, discordgo.ErrCodeCannotSendMessagesToThisUser) {
-										logger.Warn("Failed to send display name in use notification", zap.Error(err))
-									}
-								}
-							}(dn)
-						}
-					}
-				}
-			}
+		var notices []displayNameNotice
+		displayNamesOwnedByOthers, notices = pruneDisplayNamesOwnedByOthers(params.profile, displayNameHistory, ownerMap, serviceSettings.DisplayNameInUseNotifications, time.Now())
+		if len(notices) > 0 {
+			player := displayNameNoticePlayer{UserID: params.profile.ID(), DiscordID: notifyDiscordID, Username: notifyUsername}
+			go sendDisplayNameNotices(ctx, logger, p.discordCache.displayNameNoticeDeps(), player, notices)
 		}
 	}
 

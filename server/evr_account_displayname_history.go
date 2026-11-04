@@ -37,6 +37,14 @@ type DisplayNameHistory struct {
 	LastUsed     map[string]time.Time            `json:"ign_last_used"` // map[displayName]lastUsedTime
 	ActiveCache  []string                        `json:"active"`        // (lowercased) names that the user has active/reserved
 	HistoryCache []string                        `json:"cache"`         // (lowercased) used for searching
+
+	// InUseNotified remembers which "this name is taken" DMs this player has
+	// already been sent, so a login does not repeat one (#777). Keyed by
+	// InUseNoticeKey; the value is when it was sent. It is deliberately kept for
+	// good: the notice is promised at most once per (player, name, owner), and an
+	// entry is a few dozen bytes per distinct conflict. Not part of the storage
+	// index fields.
+	InUseNotified map[string]time.Time `json:"in_use_notified,omitempty"`
 }
 
 func (h *DisplayNameHistory) StorageMeta() StorableMetadata {
@@ -225,6 +233,29 @@ func (h *DisplayNameHistory) LatestGroup(groupID string) (string, time.Time) {
 		}
 	}
 	return latest, latestTime
+}
+
+// InUseNoticeKey is the InUseNotified key for a name owned by ownerUserID. The
+// name is compared case-insensitively, as ownership is; the owner is the stable
+// user id, so a rename cannot rewrite which notice was sent.
+func InUseNoticeKey(displayName, ownerUserID string) string {
+	return ownerUserID + ":" + strings.ToLower(displayName)
+}
+
+// InUseNoticeSent reports whether this player was already told that displayName
+// is held by ownerUserID.
+func (h *DisplayNameHistory) InUseNoticeSent(displayName, ownerUserID string) bool {
+	_, ok := h.InUseNotified[InUseNoticeKey(displayName, ownerUserID)]
+	return ok
+}
+
+// RecordInUseNotice remembers that the player was told displayName is held by
+// ownerUserID.
+func (h *DisplayNameHistory) RecordInUseNotice(displayName, ownerUserID string, at time.Time) {
+	if h.InUseNotified == nil {
+		h.InUseNotified = make(map[string]time.Time)
+	}
+	h.InUseNotified[InUseNoticeKey(displayName, ownerUserID)] = at
 }
 
 func (h *DisplayNameHistory) AddReserved(displayName string) {
