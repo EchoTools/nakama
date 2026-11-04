@@ -19,6 +19,11 @@ func TestNormalizeNevrVersion(t *testing.T) {
 		{"semver", &evr.NevrIdentity{Version: "4.2.0"}, "4.2.0"},
 		{"leading v is dropped", &evr.NevrIdentity{Version: "v4.2.0"}, "4.2.0"},
 		{"prerelease is kept", &evr.NevrIdentity{Version: "4.2.0-rc.1"}, "4.2.0-rc.1"},
+		{"release is its version", &evr.NevrIdentity{Version: "6.16.5"}, "6.16.5"},
+		{"dev build is dev", &evr.NevrIdentity{Version: "6.16.5-dev.8"}, nevrVersionDev},
+		{"dev build with commit metadata is dev", &evr.NevrIdentity{Version: "6.16.5-dev.8+b0521f78"}, nevrVersionDev},
+		{"dev build with a leading v is dev", &evr.NevrIdentity{Version: "v6.16.5-dev.8+b0521f78"}, nevrVersionDev},
+		{"only the -dev. part marks a dev build", &evr.NevrIdentity{Version: "4.2.0-developer.1"}, "4.2.0-developer.1"},
 		{"build metadata is dropped", &evr.NevrIdentity{Version: "4.2.0+abc.5"}, "4.2.0"},
 		{"empty version is unknown", &evr.NevrIdentity{Version: ""}, nevrVersionUnknown},
 		{"not a version is unknown", &evr.NevrIdentity{Version: "latest"}, nevrVersionUnknown},
@@ -64,6 +69,24 @@ func TestNevrVersionLabelerCapsDistinctVersions(t *testing.T) {
 	}
 }
 
+// Dev builds are one value, "dev": they take no slot of the maxNevrVersionLabels, so a run of distinct dev
+// builds can neither mint series nor push a release out of its own.
+func TestNevrVersionLabelerDevBuildsAreOneValueAndTakeNoSlot(t *testing.T) {
+	l := newNevrVersionLabeler()
+	for i := 0; i < maxNevrVersionLabels; i++ {
+		l.label(&evr.NevrIdentity{Version: fmt.Sprintf("1.%d.0", i)})
+	}
+	for i := 0; i < 100; i++ {
+		v := fmt.Sprintf("2.0.1-dev.%d+%07x", i, i)
+		if got := l.label(&evr.NevrIdentity{Version: v}); got != nevrVersionDev {
+			t.Fatalf("dev build %q = %q, want %q even with every version slot taken", v, got, nevrVersionDev)
+		}
+	}
+	if n := len(l.versions); n != maxNevrVersionLabels {
+		t.Fatalf("labelled versions = %d, want %d (dev must not take a slot)", n, maxNevrVersionLabels)
+	}
+}
+
 // A client that varies its version on every login gets at most maxNevrVersionLabels+1 distinct labels.
 func TestNevrVersionLabelerFloodStaysBounded(t *testing.T) {
 	l := newNevrVersionLabeler()
@@ -99,6 +122,9 @@ func TestLoginSuccessCarriesNevrVersionWithItsOtherDimensions(t *testing.T) {
 		{"nevr-runtime client", &evr.NevrIdentity{Version: "v4.2.0+abc"}, "4.2.0"},
 		{"stock client", nil, nevrVersionStock},
 		{"unusable version", &evr.NevrIdentity{Version: "junk"}, nevrVersionUnknown},
+		{"empty version", &evr.NevrIdentity{Version: ""}, nevrVersionUnknown},
+		{"release", &evr.NevrIdentity{Version: "6.16.5"}, "6.16.5"},
+		{"dev build", &evr.NevrIdentity{Version: "6.16.5-dev.8+b0521f78"}, nevrVersionDev},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			payload := &evr.LoginProfile{

@@ -2,6 +2,7 @@ package server
 
 import (
 	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -17,6 +18,8 @@ const (
 	nevrVersionStock = "stock"
 	// nevrVersionUnknown labels a login whose client declared an identity with no usable version.
 	nevrVersionUnknown = "unknown"
+	// nevrVersionDev labels a login from a development build of nevr-runtime.
+	nevrVersionDev = "dev"
 	// maxNevrVersionLabels bounds the distinct versions that get their own series. The version is client
 	// input, so a client that varies it per login must not mint a series per value. Past the cap a version
 	// is bucketed to metricTagOther, the same sentinel the SEC-4 allow-lists use.
@@ -26,8 +29,16 @@ const (
 )
 
 // nevrVersionTagCardinalityBound is the most distinct values nevr_version can take: the labelled
-// versions plus the stock, unknown and other sentinels.
-const nevrVersionTagCardinalityBound = maxNevrVersionLabels + 3
+// versions plus the stock, unknown, dev and other sentinels.
+const nevrVersionTagCardinalityBound = maxNevrVersionLabels + 4
+
+// nevrDevVersionMarker is the part of a nevr-runtime version that marks a development build. nevr-runtime
+// stamps every build that is not a CI build on a release tag X.Y.(Z+1)-dev.<N>+<sha>
+// (nevr-runtime cmake/set_project_version_from_git.cmake; .github/workflows/build.yml), and decides
+// NEVR_BUILD_IS_DEV by searching the version for this same "-dev." (cmake/nevr_build_info.cmake). The
+// version is all the login declares, so a CI build of an rc tag, which nevr-runtime itself counts as a
+// release although its version carries "-dev.", is a dev build here.
+const nevrDevVersionMarker = "-dev."
 
 // nevrVersionPattern accepts MAJOR.MINOR.PATCH with an optional leading "v" and an optional prerelease,
 // the semver shapes nevr-runtime declares. Build metadata ("+...") is accepted and dropped from the label,
@@ -35,8 +46,9 @@ const nevrVersionTagCardinalityBound = maxNevrVersionLabels + 3
 var nevrVersionPattern = regexp.MustCompile(`^v?((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?)(?:\+[0-9A-Za-z.-]+)?$`)
 
 // normalizeNevrVersion returns the version label for the identity a client declared at login. A nil
-// identity is the stock game. An identity whose version does not parse as semver is unknown. The result
-// is still unbounded in principle (any well-formed version); the cap in nevrVersionLabeler bounds it.
+// identity is the stock game. An identity whose version does not parse as semver is unknown. A development
+// build, whatever its number and commit, is dev. The result is still unbounded in principle (any
+// well-formed release version); the cap in nevrVersionLabeler bounds it.
 func normalizeNevrVersion(identity *evr.NevrIdentity) string {
 	if identity == nil {
 		return nevrVersionStock
@@ -44,6 +56,9 @@ func normalizeNevrVersion(identity *evr.NevrIdentity) string {
 	match := nevrVersionPattern.FindStringSubmatch(identity.Version)
 	if match == nil || len(match[1]) > maxNevrVersionLabelLen {
 		return nevrVersionUnknown
+	}
+	if strings.Contains(match[1], nevrDevVersionMarker) {
+		return nevrVersionDev
 	}
 	return match[1]
 }
@@ -64,10 +79,10 @@ var nevrVersionLabels = newNevrVersionLabeler()
 
 // label returns the tag value for this identity. The version is bounded here: a version seen before, or
 // one that fits under the cap, keeps its own label. Anything past the cap is metricTagOther. The
-// sentinels stock and unknown are fixed strings and take no slot.
+// sentinels stock, unknown and dev are fixed strings and take no slot.
 func (l *nevrVersionLabeler) label(identity *evr.NevrIdentity) string {
 	version := normalizeNevrVersion(identity)
-	if version == nevrVersionStock || version == nevrVersionUnknown {
+	if version == nevrVersionStock || version == nevrVersionUnknown || version == nevrVersionDev {
 		return version
 	}
 	l.mu.Lock()
