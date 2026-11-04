@@ -8,7 +8,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 // New-player ambassadors.
@@ -218,6 +220,7 @@ type ambassadorEvent struct {
 	Reason        string // why a command was denied or did nothing
 	RemovalReason string // the text a moderator typed on ambassador-remove
 	Before, After map[string]any
+	Extra         map[string]any // event-specific fields, e.g. match_id for stats_suppressed
 	Err           error
 }
 
@@ -243,6 +246,9 @@ func logAmbassadorEvent(logger runtime.Logger, ev ambassadorEvent) {
 	}
 	if ev.RemovalReason != "" {
 		fields["removal_reason"] = ev.RemovalReason
+	}
+	for k, v := range ev.Extra {
+		fields[k] = v
 	}
 	if ev.Before != nil {
 		fields["before"] = ev.Before
@@ -539,4 +545,75 @@ func (s *ambassadorService) Demote(ctx context.Context, c ambassadorCaller, t am
 	res := ambassadorResult{Outcome: outcomeOK}
 	res.DMFailed = s.deliverDM(ctx, c, c.Staff, t, tierDM(TierTo, TierFrom, tierReasonStaff))
 	return res, nil
+}
+
+// ambassadorQueueStamp records that a session's latest lobby session request was
+// made in ambassador mode. It is set or cleared on EVERY request, so it cannot
+// go stale across requests, and it lives on the session, not on the matchmaker
+// ticket: nothing about it reaches the matchmaker.
+//
+// The match entrant is stamped from it when the presence is built, only for the
+// same group and only until ExpiresAt; the label then keeps the stamp only when
+// the match's mode equals Mode.
+type ambassadorQueueStamp struct {
+	Mode      evr.Symbol
+	GroupID   uuid.UUID
+	ExpiresAt time.Time
+}
+
+// ambassadorStampSlack is how long past a request's own timeout a stamp stays valid.
+const ambassadorStampSlack = 2 * time.Minute
+
+// ambassadorModeApplies reports whether stats-off can apply to a match of this mode.
+func ambassadorModeApplies(mode evr.Symbol) bool {
+	return mode == evr.ModeArenaPublic || mode == evr.ModeCombatPublic
+}
+
+// ambassadorStampFor returns the queue mode to put on a presence being built
+// for groupID in role, or zero. Spectators and moderators are never stamped.
+func ambassadorStampFor(params *SessionParameters, groupID string, role int, now time.Time) evr.Symbol {
+	if params == nil {
+		return 0
+	}
+	st := params.ambassadorQueue.Load()
+	if st == nil || !ambassadorModeApplies(st.Mode) {
+		return 0
+	}
+	if role == evr.TeamSpectator || role == evr.TeamModerator {
+		return 0
+	}
+	if st.GroupID.String() != groupID {
+		return 0
+	}
+	if !now.Before(st.ExpiresAt) {
+		return 0
+	}
+	return st.Mode
+}
+
+// ambassadorInMatch reports whether this presence is an ambassador in a match
+// of the given mode.
+func (p *EvrMatchPresence) ambassadorInMatch(mode evr.Symbol) bool {
+	return p != nil && p.AmbassadorQueueMode != 0 && p.AmbassadorQueueMode == mode && ambassadorModeApplies(mode)
+}
+
+// Where a match-end write was left out for an ambassador.
+const (
+	statsSiteRatings   = "S1" // the skill rating entries
+	statsSiteTypeStats = "S2" // the per-match type stats
+	statsSiteProfile   = "S3" // the combat server-profile stats
+)
+
+// logAmbassadorStatsSuppressed records that a match-end write was left out for
+// a player who queued into the match in ambassador mode: who, which match, and
+// which site.
+func logAmbassadorStatsSuppressed(logger runtime.Logger, p *PlayerInfo, matchID string, mode evr.Symbol, site string) {
+	logAmbassadorEvent(logger, ambassadorEvent{
+		Event:    "stats_suppressed",
+		Caller:   ambassadorCaller{Command: "match_end"},
+		Capacity: capacityAmbassador,
+		Target:   ambassadorTarget{UserID: p.UserID, DiscordID: p.DiscordID},
+		Outcome:  outcomeOK,
+		Extra:    map[string]any{"match_id": matchID, "mode": mode.String(), "site": site},
+	})
 }
