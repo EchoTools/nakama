@@ -53,6 +53,20 @@ type EventRemoteLogSet struct {
 	XPID         evr.EvrId         `json:"xp_id"`
 	Username     string            `json:"username"`
 	RemoteLogSet *evr.RemoteLogSet `json:"remote_log_set"`
+
+	// matchStatsStore overrides where combat match stats are kept. Nil means
+	// match_summaries in MongoDB when a client is configured.
+	matchStatsStore playerMatchStatsStore
+}
+
+func (s *EventRemoteLogSet) playerMatchStatsStore() playerMatchStatsStore {
+	if s.matchStatsStore != nil {
+		return s.matchStatsStore
+	}
+	if mc := globalMongoClient.Load(); mc != nil {
+		return mongoPlayerMatchStatsStore{client: mc}
+	}
+	return nil
 }
 
 func NewEventPostMatchRemoteLog(userID, sessionID string, xpid evr.EvrId, username string, node string, logSet *evr.RemoteLogSet) *EventRemoteLogSet {
@@ -674,6 +688,7 @@ func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logge
 
 func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, sessionRegistry SessionRegistry, statisticsQueue *StatisticsQueue, matchID MatchID, msgs []evr.RemoteLog) error {
 	var statsByPlayer = make(map[evr.EvrId]evr.MatchTypeStats, 8)
+	var matchStatsByPlayer = make(map[evr.EvrId]*evr.RemoteLogPostMatchMatchStats, 1)
 
 	//var xpLevel *evr.RemoteLogPostMatchMatchTypeXPLevel
 
@@ -682,7 +697,17 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		case *evr.RemoteLogPostMatchMatchTypeXPLevel:
 			continue
 		case *evr.RemoteLogPostMatchMatchStats:
-			continue
+			xpid, err := evr.ParseEvrId(m.XPID)
+			if err != nil {
+				// Not fatal, unlike the type stats below: these are kept, not
+				// scored, and must not cost the player their type stats.
+				logger.WithFields(map[string]any{"error": err, "claimed": m.XPID}).Warn("Failed to parse evr ID in match stats")
+				continue
+			}
+			if !s.mayReportPostMatchStats(logger, *xpid) {
+				continue
+			}
+			matchStatsByPlayer[*xpid] = m
 		case *evr.RemoteLogPostMatchTypeStats:
 
 			xpid, err := evr.ParseEvrId(m.XPID)
@@ -690,18 +715,7 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 				return fmt.Errorf("failed to parse evr ID: %w", err)
 			}
 
-			// Accept stats if:
-			// 1. The submitter is reporting their own stats (self-reporting), OR
-			// 2. The submitter is a game server operator (unknown platform code / UNK-*),
-			//    which is a trusted authority submitting stats on behalf of players.
-			// Reject any other cross-player submission to prevent stat injection attacks.
-			isSelfReporting := *xpid == s.XPID
-			isGameServerOperator := !s.XPID.IsValid()
-			if !isSelfReporting && !isGameServerOperator {
-				logger.WithFields(map[string]interface{}{
-					"submitter": s.XPID.String(),
-					"claimed":   xpid.String(),
-				}).Warn("Rejected stats submission for mismatched XPID")
+			if !s.mayReportPostMatchStats(logger, *xpid) {
 				continue
 			}
 
@@ -721,6 +735,13 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 			return fmt.Errorf("failed to get match label: %w", err)
 		}
 	}
+
+	// Kept before the public-only gate below: a private combat match's stats
+	// are as much the match's record as a public one's.
+	if label.Mode == evr.ModeCombatPublic || label.Mode == evr.ModeCombatPrivate {
+		s.keepCombatMatchStats(logger, label, matchStatsByPlayer)
+	}
+
 	if label.Mode != evr.ModeArenaPublic && label.Mode != evr.ModeCombatPublic {
 		if err := DeleteStoredMatchLabel(ctx, nk, matchID); err != nil && !errors.Is(err, ErrMatchNotFound) {
 			logger.WithField("error", err).Warn("failed to delete stored match label for non-public mode")
@@ -1036,6 +1057,64 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 	})
 }
 
+// mayReportPostMatchStats reports whether this log set's sender may submit
+// post-match stats for the claimed player:
+//  1. the sender is reporting their own stats (self-reporting), or
+//  2. the sender is a game server operator (unknown platform code / UNK-*),
+//     a trusted authority submitting stats on behalf of players.
+//
+// Any other cross-player submission is rejected, to prevent stat injection.
+func (s *EventRemoteLogSet) mayReportPostMatchStats(logger runtime.Logger, claimed evr.EvrId) bool {
+	isSelfReporting := claimed == s.XPID
+	isGameServerOperator := !s.XPID.IsValid()
+	if !isSelfReporting && !isGameServerOperator {
+		logger.WithFields(map[string]any{
+			"submitter": s.XPID.String(),
+			"claimed":   claimed.String(),
+		}).Warn("Rejected stats submission for mismatched XPID")
+		return false
+	}
+	return true
+}
+
+// keepCombatMatchStats puts each player's POST_MATCH_MATCH_STATS on the
+// match's record. The Info line carries the stats too, so a combat match's
+// numbers survive in the server log even where no MongoDB is configured.
+func (s *EventRemoteLogSet) keepCombatMatchStats(logger runtime.Logger, label *MatchLabel, byPlayer map[evr.EvrId]*evr.RemoteLogPostMatchMatchStats) {
+	if len(byPlayer) == 0 {
+		return
+	}
+	store := s.playerMatchStatsStore()
+	matchID := label.ID.String()
+	for xpid, m := range byPlayer {
+		rec := PlayerMatchStats{
+			XPID:         xpid.String(),
+			SenderUserID: s.UserID,
+			MatchType:    m.MatchType,
+			Stats:        m.MatchStats.Values(),
+			ReceivedAt:   time.Now().UTC(),
+		}
+		if p := label.GetPlayerByEvrID(xpid); p != nil {
+			rec.UserID = p.UserID
+		}
+		logger.WithFields(map[string]any{
+			"mid":         matchID,
+			"mode":        label.Mode.String(),
+			"player_xpid": rec.XPID,
+			"player_uid":  rec.UserID,
+			"sender_uid":  rec.SenderUserID,
+			"match_type":  rec.MatchType,
+			"stats":       rec.Stats,
+		}).Info("Combat match stats received")
+
+		if store == nil {
+			logger.WithField("mid", matchID).Debug("mongodb client not configured; combat match stats not kept on the match summary")
+			continue
+		}
+		store.Store(logger, matchID, rec)
+	}
+}
+
 func iterateMatchTypeStatsFields(stats evr.MatchTypeStats, fn func(statName string, op LeaderboardOperator, value float64)) {
 	statsBaseType := reflect.TypeOf(stats)
 	statsValue := reflect.ValueOf(stats)
@@ -1046,8 +1125,8 @@ func iterateMatchTypeStatsFields(stats evr.MatchTypeStats, fn func(statName stri
 		opTag := field.Tag.Get("op")
 		opParts := strings.Split(opTag, ",")
 
-		// op:"-" is parsed for the post-match result and is not a leaderboard
-		// stat here; see the combat fields of evr.MatchTypeStats.
+		// op:"-" is parsed for the match record but has another writer on the
+		// leaderboards; see the combat fields of evr.MatchTypeStats.
 		if opParts[0] == "-" {
 			continue
 		}
