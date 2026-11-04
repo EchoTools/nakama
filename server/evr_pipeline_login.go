@@ -1162,7 +1162,8 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		// If the player account is younger than the configured maximum age, put the
 		// player in the new-player ("green") pool; otherwise take them out of it.
 		createTime, haveCreateTime := params.profile.AccountCreateTime()
-		updated := applyNewPlayerPool(&settings, createTime, haveCreateTime, time.Now(), serviceSettings.Matchmaking.GreenDivisionMaxAccountAgeDays, isModerator)
+		graduated := loginGraduated(ctx, p.nk, logger, session.userID.String())
+		updated := applyNewPlayerPool(&settings, createTime, haveCreateTime, time.Now(), serviceSettings.Matchmaking.GreenDivisionMaxAccountAgeDays, graduated, isModerator)
 
 		if updated {
 			if err := StoreMatchmakingSettings(ctx, p.nk, session.userID.String(), settings); err != nil {

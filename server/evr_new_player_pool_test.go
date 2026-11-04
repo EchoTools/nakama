@@ -1,9 +1,17 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // These pin the pool placement the login code applied before it was extracted
@@ -77,7 +85,7 @@ func TestApplyNewPlayerPool_Characterization(t *testing.T) {
 			if tt.excluded == nil {
 				settings.ExcludedDivisions = nil
 			}
-			got := applyNewPlayerPool(&settings, tt.created, tt.haveCreated, now, tt.maxAgeDays, tt.isModerator)
+			got := applyNewPlayerPool(&settings, tt.created, tt.haveCreated, now, tt.maxAgeDays, false, tt.isModerator)
 			if got != tt.wantUpdated {
 				t.Errorf("updated = %v, want %v", got, tt.wantUpdated)
 			}
@@ -89,4 +97,97 @@ func TestApplyNewPlayerPool_Characterization(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A graduated account is kept out of the new-player pool even when it is under
+// the age limit. The graduated mark is read at login; it takes effect at the
+// next login after the account was graduated.
+func TestApplyNewPlayerPool_Graduated(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	young := now.Add(-24 * time.Hour)
+
+	t.Run("a graduated young account is not put in the pool and is excluded", func(t *testing.T) {
+		s := MatchmakingSettings{}
+		if !applyNewPlayerPool(&s, young, true, now, 7, true, false) {
+			t.Error("expected the settings to change")
+		}
+		if len(s.Divisions) != 0 || !reflect.DeepEqual(s.ExcludedDivisions, []string{"green"}) {
+			t.Errorf("Divisions=%v Excluded=%v; want no pool and green excluded", s.Divisions, s.ExcludedDivisions)
+		}
+	})
+	t.Run("a graduated young account in the pool loses it", func(t *testing.T) {
+		s := MatchmakingSettings{Divisions: []string{"green"}}
+		if !applyNewPlayerPool(&s, young, true, now, 7, true, false) {
+			t.Error("expected the settings to change")
+		}
+		if len(s.Divisions) != 0 || !reflect.DeepEqual(s.ExcludedDivisions, []string{"green"}) {
+			t.Errorf("Divisions=%v Excluded=%v; want it out of the pool", s.Divisions, s.ExcludedDivisions)
+		}
+	})
+	t.Run("a graduated moderator who holds the pool keeps it, as an old moderator does", func(t *testing.T) {
+		s := MatchmakingSettings{Divisions: []string{"green"}}
+		if applyNewPlayerPool(&s, young, true, now, 7, true, true) {
+			t.Error("a protected moderator's settings changed")
+		}
+		if !reflect.DeepEqual(s.Divisions, []string{"green"}) {
+			t.Errorf("Divisions=%v, want the moderator's pool kept", s.Divisions)
+		}
+	})
+	t.Run("a graduated account already excluded is unchanged", func(t *testing.T) {
+		s := MatchmakingSettings{ExcludedDivisions: []string{"green"}}
+		if applyNewPlayerPool(&s, young, true, now, 7, true, false) {
+			t.Error("settings changed with nothing to do")
+		}
+	})
+	t.Run("not graduated is unchanged: a young account is still put in the pool", func(t *testing.T) {
+		s := MatchmakingSettings{}
+		applyNewPlayerPool(&s, young, true, now, 7, false, false)
+		if !reflect.DeepEqual(s.Divisions, []string{"green"}) {
+			t.Errorf("Divisions=%v, want green", s.Divisions)
+		}
+	})
+	t.Run("graduated changes nothing where the pool is never assigned (max age 0)", func(t *testing.T) {
+		a, b := MatchmakingSettings{}, MatchmakingSettings{}
+		applyNewPlayerPool(&a, young, true, now, 0, true, false)
+		applyNewPlayerPool(&b, young, true, now, 0, false, false)
+		if !reflect.DeepEqual(a, b) {
+			t.Errorf("graduated and not differ at max age 0: %+v vs %+v", a, b)
+		}
+	})
+}
+
+func TestLoginGraduated_ReadsTheMarkAndFailsToAgePlacementLoudly(t *testing.T) {
+	ctx := context.Background()
+	const uid = "00000000-0000-4000-8000-0000000000c1"
+	core, logs := observer.New(zapcore.WarnLevel)
+	logger := zap.New(core)
+
+	nk := newOCCTestNakamaModule()
+	if loginGraduated(ctx, nk, logger, uid) {
+		t.Error("an account with no stored mark reads as graduated")
+	}
+	a := AmbassadorAccount{Graduated: true, version: "*"}
+	if err := StorableWrite(ctx, nk, uid, &a); err != nil {
+		t.Fatal(err)
+	}
+	if !loginGraduated(ctx, nk, logger, uid) {
+		t.Error("a stored graduated mark was not read")
+	}
+	if logs.Len() != 0 {
+		t.Errorf("a successful read logged: %v", logs.All())
+	}
+
+	failing := &graduatedReadFailsNK{occTestNakamaModule: nk}
+	if loginGraduated(ctx, failing, logger, uid) {
+		t.Error("a failed read reported graduated")
+	}
+	if logs.FilterMessageSnippet("Failed to load the graduated mark").Len() != 1 {
+		t.Errorf("a failed read was not logged at Warn: %v", logs.All())
+	}
+}
+
+type graduatedReadFailsNK struct{ *occTestNakamaModule }
+
+func (n *graduatedReadFailsNK) StorageRead(context.Context, []*runtime.StorageRead) ([]*api.StorageObject, error) {
+	return nil, errors.New("storage down")
 }
