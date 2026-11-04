@@ -132,6 +132,13 @@ type ServiceSettingsData struct {
 	EnableVibinatorsGravity                bool          `json:"enable_vibinators_gravity"` // Novelty: redirect social-lobby echo_arena matchmakers toward vibinator's echo_combat
 	UseQuestEncoderFlags                   bool          `json:"use_quest_encoder_flags"`   // Send Quest-shifted encoder flag bit layout in LobbySessionSuccessv5 for standalone clients
 	CGNAT                                  CGNATSettings `json:"cgnat"`
+
+	// BlockedQuestVersions refuses the login of a standalone Quest client whose nevr_identity.version (leading
+	// "v" ignored) is listed, unless the account is a Global Operator or Global Developer. Empty changes nothing.
+	// PCVR clients are never refused by it.
+	BlockedQuestVersions []string `json:"blocked_quest_versions"`
+	// BlockedQuestVersionsMessage is what a refused Quest login is shown. Empty uses a default.
+	BlockedQuestVersionsMessage string `json:"blocked_quest_versions_message"`
 }
 
 // CGNATSettings configures detection of CGNAT and shared-IP providers
