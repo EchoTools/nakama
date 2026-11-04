@@ -604,13 +604,13 @@ func TestGraduated_OnlyDemoteClearsIt(t *testing.T) {
 		name string
 		run  func()
 	}{
-		{"toggle on", func() { env.svc.Toggle(ctx, amb) }},
-		{"toggle off", func() { env.svc.Toggle(ctx, amb) }},
-		{"grant (noop)", func() { env.svc.Grant(ctx, mod, tAmb) }},
-		{"ready on self refused", func() { env.svc.Ready(ctx, amb, tAmb) }},
-		{"self-promote (noop)", func() { env.svc.SelfPromote(ctx, amb) }},
-		{"remove role", func() { env.svc.Remove(ctx, mod, tAmb, "r") }},
-		{"grant again", func() { env.svc.Grant(ctx, mod, tAmb) }},
+		{"toggle on", func() { _, _ = env.svc.Toggle(ctx, amb) }},
+		{"toggle off", func() { _, _ = env.svc.Toggle(ctx, amb) }},
+		{"grant (noop)", func() { _, _ = env.svc.Grant(ctx, mod, tAmb) }},
+		{"ready on self refused", func() { _, _ = env.svc.Ready(ctx, amb, tAmb) }},
+		{"self-promote (noop)", func() { _, _ = env.svc.SelfPromote(ctx, amb) }},
+		{"remove role", func() { _, _ = env.svc.Remove(ctx, mod, tAmb, "r") }},
+		{"grant again", func() { _, _ = env.svc.Grant(ctx, mod, tAmb) }},
 	}
 	for _, s := range steps {
 		s.run()
@@ -635,42 +635,45 @@ func TestEveryCommandPathLogsAnEvent(t *testing.T) {
 	player := tPlayer(tOtherUID, "100000000000000009", "c", nil)
 	mod := tMod("c", nil)
 	calls := []call{
-		{"grant ok", func(e *ambassadorTestEnv) { e.svc.Grant(ctx, mod, tAmb) }},
-		{"grant denied", func(e *ambassadorTestEnv) { e.svc.Grant(ctx, player, tAmb) }},
+		{"grant ok", func(e *ambassadorTestEnv) { _, _ = e.svc.Grant(ctx, mod, tAmb) }},
+		{"grant denied", func(e *ambassadorTestEnv) { _, _ = e.svc.Grant(ctx, player, tAmb) }},
 		{"grant noop", func(e *ambassadorTestEnv) {
 			e.seed(t, tAmbUID, AmbassadorAccount{Ambassador: true})
-			e.svc.Grant(ctx, mod, tAmb)
+			_, _ = e.svc.Grant(ctx, mod, tAmb)
 		}},
 		{"remove ok", func(e *ambassadorTestEnv) {
 			e.seed(t, tAmbUID, AmbassadorAccount{Ambassador: true})
-			e.svc.Remove(ctx, mod, tAmb, "r")
+			_, _ = e.svc.Remove(ctx, mod, tAmb, "r")
 		}},
-		{"remove denied", func(e *ambassadorTestEnv) { e.svc.Remove(ctx, player, tAmb, "r") }},
-		{"remove noop", func(e *ambassadorTestEnv) { e.svc.Remove(ctx, mod, tAmb, "r") }},
-		{"remove no reason", func(e *ambassadorTestEnv) { e.svc.Remove(ctx, mod, tAmb, "") }},
+		{"remove denied", func(e *ambassadorTestEnv) { _, _ = e.svc.Remove(ctx, player, tAmb, "r") }},
+		{"remove noop", func(e *ambassadorTestEnv) { _, _ = e.svc.Remove(ctx, mod, tAmb, "r") }},
+		{"remove no reason", func(e *ambassadorTestEnv) { _, _ = e.svc.Remove(ctx, mod, tAmb, "") }},
 		{"toggle ok", func(e *ambassadorTestEnv) {
 			e.seed(t, tAmbUID, AmbassadorAccount{Ambassador: true})
-			e.svc.Toggle(ctx, amb)
+			_, _ = e.svc.Toggle(ctx, amb)
 		}},
-		{"toggle denied", func(e *ambassadorTestEnv) { e.svc.Toggle(ctx, player) }},
+		{"toggle denied", func(e *ambassadorTestEnv) { _, _ = e.svc.Toggle(ctx, player) }},
 		{"ready ok", func(e *ambassadorTestEnv) {
 			e.seed(t, tAmbUID, AmbassadorAccount{Ambassador: true})
-			e.svc.Ready(ctx, amb, tNew)
+			_, _ = e.svc.Ready(ctx, amb, tNew)
 		}},
-		{"ready denied", func(e *ambassadorTestEnv) { e.svc.Ready(ctx, player, tNew) }},
+		{"ready denied", func(e *ambassadorTestEnv) { _, _ = e.svc.Ready(ctx, player, tNew) }},
 		{"ready noop", func(e *ambassadorTestEnv) {
 			e.seed(t, tAmbUID, AmbassadorAccount{Ambassador: true})
 			e.seed(t, tNewUID, AmbassadorAccount{Graduated: true})
-			e.svc.Ready(ctx, amb, tNew)
+			_, _ = e.svc.Ready(ctx, amb, tNew)
 		}},
-		{"self-promote ok", func(e *ambassadorTestEnv) { e.svc.SelfPromote(ctx, player) }},
-		{"self-promote noop", func(e *ambassadorTestEnv) { e.svc.SelfPromote(ctx, player); e.svc.SelfPromote(ctx, player) }},
+		{"self-promote ok", func(e *ambassadorTestEnv) { _, _ = e.svc.SelfPromote(ctx, player) }},
+		{"self-promote noop", func(e *ambassadorTestEnv) {
+			_, _ = e.svc.SelfPromote(ctx, player)
+			_, _ = e.svc.SelfPromote(ctx, player)
+		}},
 		{"demote ok", func(e *ambassadorTestEnv) {
 			e.seed(t, tNewUID, AmbassadorAccount{Graduated: true})
-			e.svc.Demote(ctx, mod, tNew)
+			_, _ = e.svc.Demote(ctx, mod, tNew)
 		}},
-		{"demote denied", func(e *ambassadorTestEnv) { e.svc.Demote(ctx, player, tNew) }},
-		{"demote noop", func(e *ambassadorTestEnv) { e.svc.Demote(ctx, mod, tNew) }},
+		{"demote denied", func(e *ambassadorTestEnv) { _, _ = e.svc.Demote(ctx, player, tNew) }},
+		{"demote noop", func(e *ambassadorTestEnv) { _, _ = e.svc.Demote(ctx, mod, tNew) }},
 	}
 	for _, c := range calls {
 		t.Run(c.name, func(t *testing.T) {

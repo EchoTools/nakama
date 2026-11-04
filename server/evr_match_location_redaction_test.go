@@ -316,6 +316,10 @@ var playerLocationClassification = map[string]bool{
 	"PingMillis": false, "MatchmakingAt": false, "ReservationKind": false,
 	"ReservationExpiry": false, "ReservationID": false,
 	"ClientIP": true, "GeoHash": true,
+	// Ambassador says the player queued in ambassador mode, not where they are.
+	// Privileged full-label views carry it; the public views build their players
+	// from an explicit field list and do not.
+	"Ambassador": false,
 }
 
 func TestRedactPlayerLocation_ClassifiesEveryField(t *testing.T) {
