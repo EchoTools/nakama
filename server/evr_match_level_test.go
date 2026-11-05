@@ -43,6 +43,21 @@ func TestResolveSessionLevel_InstalledLevels(t *testing.T) {
 			t.Fatal("combat level not listed on server accepted for arena")
 		}
 	})
+	t.Run("shipped level of another mode is refused even when installed", func(t *testing.T) {
+		listsArena := &GameServerPresence{InstalledLevels: []evr.Symbol{evr.LevelArena, evr.LevelDyson}}
+		if _, err := resolveSessionLevel(evr.ModeCombatPrivate, evr.LevelArena, listsArena); err == nil {
+			t.Error("arena level accepted for combat")
+		}
+		if _, err := resolveSessionLevel(evr.ModeArenaPrivate, evr.LevelDyson, listsArena); err == nil {
+			t.Error("combat level accepted for arena")
+		}
+	})
+	t.Run("custom level is accepted for any known mode on a server listing it", func(t *testing.T) {
+		got, err := resolveSessionLevel(evr.ModeArenaPrivate, custom, withCustom)
+		if err != nil || got != custom {
+			t.Fatalf("got (%v, %v), want (%v, nil)", got, err, custom)
+		}
+	})
 	t.Run("unset level picks a shipped level", func(t *testing.T) {
 		got, err := resolveSessionLevel(evr.ModeSocialPrivate, evr.LevelUnspecified, withCustom)
 		if err != nil || got != evr.LevelSocial {

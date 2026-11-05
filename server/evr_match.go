@@ -2793,8 +2793,10 @@ func allocatePostMatchSocialLobby(ctx context.Context, logger runtime.Logger, nk
 
 // resolveSessionLevel validates the level for a session about to start on gs and
 // returns the level to use. The mode must be a known mode. An unset level becomes
-// a random shipped level for the mode. A level passes when it is shipped for the
-// mode (evr.LevelsByMode) or when gs lists it in its installed levels.
+// a random shipped level for the mode. A shipped level (one in any evr.LevelsByMode
+// list) passes only for its own modes. A custom level (in no shipped list) passes
+// when gs lists it in its installed levels; installed levels carry no mode, so the
+// escape never applies to a shipped level.
 func resolveSessionLevel(mode, level evr.Symbol, gs *GameServerPresence) (evr.Symbol, error) {
 	levels, ok := evr.LevelsByMode[mode]
 	if !ok {
@@ -2805,8 +2807,21 @@ func resolveSessionLevel(mode, level evr.Symbol, gs *GameServerPresence) (evr.Sy
 	if level == evr.LevelUnspecified || level == 0 {
 		return levels[rand.Intn(len(levels))], nil
 	}
-	if !slices.Contains(levels, level) && !gs.HasInstalledLevel(level) {
-		return level, fmt.Errorf("bad request: invalid level `%v` for mode `%v`", level, mode)
+	if slices.Contains(levels, level) {
+		return level, nil
 	}
-	return level, nil
+	if !isShippedLevel(level) && gs.HasInstalledLevel(level) {
+		return level, nil
+	}
+	return level, fmt.Errorf("bad request: invalid level `%v` for mode `%v`", level, mode)
+}
+
+// isShippedLevel reports whether level is in any mode's shipped level list.
+func isShippedLevel(level evr.Symbol) bool {
+	for _, levels := range evr.LevelsByMode {
+		if slices.Contains(levels, level) {
+			return true
+		}
+	}
+	return false
 }
