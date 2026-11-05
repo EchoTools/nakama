@@ -739,6 +739,16 @@ func (r *LocalMatchRegistry) JoinAttempt(ctx context.Context, id uuid.UUID, node
 	}
 }
 
+// JoinMarkerAge reports how long ago the join attempt for sessionID was accepted
+// by the match, if its join marker is still pending. Read-only; used for logging.
+func (r *LocalMatchRegistry) JoinMarkerAge(id uuid.UUID, sessionID uuid.UUID) (time.Duration, bool) {
+	mh, ok := r.matches.Load(id)
+	if !ok {
+		return 0, false
+	}
+	return mh.JoinMarkerList.Age(sessionID)
+}
+
 func (r *LocalMatchRegistry) Join(id uuid.UUID, presences []*MatchPresence) {
 	mh, ok := r.matches.Load(id)
 	if !ok {
