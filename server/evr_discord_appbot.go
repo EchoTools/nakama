@@ -4840,6 +4840,10 @@ func isExpectedUserError(err error) bool {
 	if errors.Is(err, ErrMatchmakingNoAvailableServers) {
 		return true
 	}
+	// Every game server refused the requested level for the mode.
+	if IsInvalidLevelError(err) {
+		return true
+	}
 	// A targeted player was not found in the requested match/guild.
 	if errors.Is(err, ErrPlayerNotFound) || strings.Contains(err.Error(), "player not found") {
 		return true
