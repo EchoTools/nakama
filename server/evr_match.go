@@ -2033,19 +2033,11 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		if ok, err := CheckSystemGroupMembership(ctx, db, settings.SpawnedBy, GroupGlobalDevelopers); err != nil {
 			return state, SignalResponse{Message: fmt.Sprintf("failed to check group membership: %v", err)}.String()
 		} else if !ok {
-			// Validate the mode
-			if levels, ok := evr.LevelsByMode[settings.Mode]; !ok {
-				return state, SignalResponse{Message: fmt.Sprintf("bad request: invalid mode: %v", settings.Mode)}.String()
-			} else {
-				// Set the level to a random level if it is not set.
-				// math/rand is fine: game-level selection, not security-sensitive.
-				if settings.Level == 0xffffffffffffffff || settings.Level == 0 {
-					settings.Level = levels[rand.Intn(len(levels))]
-					// Validate the level, if provided.
-				} else if !slices.Contains(levels, settings.Level) {
-					return state, SignalResponse{Message: fmt.Sprintf("bad request: invalid level `%v` for mode `%v`", settings.Level, settings.Mode)}.String()
-				}
+			level, err := resolveSessionLevel(settings.Mode, settings.Level, state.GameServer)
+			if err != nil {
+				return state, SignalResponse{Message: err.Error()}.String()
 			}
+			settings.Level = level
 		}
 
 		state.Mode = settings.Mode
@@ -2797,4 +2789,24 @@ func allocatePostMatchSocialLobby(ctx context.Context, logger runtime.Logger, nk
 	}
 
 	return nil
+}
+
+// resolveSessionLevel validates the level for a session about to start on gs and
+// returns the level to use. The mode must be a known mode. An unset level becomes
+// a random shipped level for the mode. A level passes when it is shipped for the
+// mode (evr.LevelsByMode) or when gs lists it in its installed levels.
+func resolveSessionLevel(mode, level evr.Symbol, gs *GameServerPresence) (evr.Symbol, error) {
+	levels, ok := evr.LevelsByMode[mode]
+	if !ok {
+		return level, fmt.Errorf("bad request: invalid mode: %v", mode)
+	}
+	// Set the level to a random level if it is not set.
+	// math/rand is fine: game-level selection, not security-sensitive.
+	if level == evr.LevelUnspecified || level == 0 {
+		return levels[rand.Intn(len(levels))], nil
+	}
+	if !slices.Contains(levels, level) && !gs.HasInstalledLevel(level) {
+		return level, fmt.Errorf("bad request: invalid level `%v` for mode `%v`", level, mode)
+	}
+	return level, nil
 }

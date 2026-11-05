@@ -1128,6 +1128,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 
 	// Find the first available game server
 	var label *MatchLabel
+	var prepareErr error
 	for _, index := range indexes {
 		if index.Label.LobbyType != UnassignedLobby {
 			continue
@@ -1139,10 +1140,16 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 				"mid": index.Label.ID.UUID.String(),
 				"err": err,
 			}).Warn("Failed to prepare session")
+			prepareErr = err
 			continue
 		}
 
 		return label, nil
+	}
+
+	// Every candidate refused the level: say so instead of "No available servers".
+	if prepareErr != nil && strings.Contains(prepareErr.Error(), "bad request: invalid level") {
+		return nil, NewLobbyErrorf(BadRequest, "invalid level")
 	}
 
 	return nil, ErrMatchmakingNoAvailableServers
