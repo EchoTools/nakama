@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -305,8 +306,20 @@ func loop(mh *MatchHandler) {
 
 	// Every 30 seconds clear expired join markers.
 	if mh.tick%(mh.Rate*30) == 0 {
-		presences := mh.JoinMarkerList.ClearExpired(mh.tick)
-		if len(presences) != 0 {
+		markers := mh.JoinMarkerList.ClearExpired(mh.tick)
+		if len(markers) != 0 {
+			presences := make([]*MatchPresence, 0, len(markers))
+			for _, marker := range markers {
+				mh.logger.Info("Join marker expired; removing player",
+					zap.String("match_id", mh.IDStr),
+					zap.String("user_id", marker.presence.UserID.String()),
+					zap.String("session_id", marker.presence.SessionID.String()),
+					zap.String("entrant_id", marker.entrantID),
+					zap.Int64("marker_age_ms", time.Since(marker.startedAt).Milliseconds()),
+					zap.Int64("deadline_ms", mh.JoinMarkerList.expiryDelayMs),
+					zap.Int32("reason", int32(marker.presence.Reason)))
+				presences = append(presences, marker.presence)
+			}
 			// Doesn't matter if the call queue was full here. If the match is being closed then leaves don't matter anyway.
 			mh.QueueLeave(presences)
 		}
@@ -344,6 +357,22 @@ func (mh *MatchHandler) processDeferred() {
 
 		mh.router.SendDeferred(mh.logger, deferredMessages)
 	}
+}
+
+// entrantIDFromJoinReason reads the entrant id out of a join attempt's reason
+// string, which the EVR match handler fills with the JSON of the new presence.
+// It returns "" for any other handler's reason. Only used for logging.
+func entrantIDFromJoinReason(reason string) string {
+	if reason == "" {
+		return ""
+	}
+	var p struct {
+		EntrantID string `json:"entrant_id"`
+	}
+	if err := json.Unmarshal([]byte(reason), &p); err != nil {
+		return ""
+	}
+	return p.EntrantID
 }
 
 func (mh *MatchHandler) QueueJoinAttempt(ctx context.Context, resultCh chan<- *MatchJoinAttemptResult, userID, sessionID uuid.UUID, username string, sessionExpiry int64, vars map[string]string, clientIP, clientPort, node string, metadata map[string]string) bool {
@@ -388,7 +417,7 @@ func (mh *MatchHandler) QueueJoinAttempt(ctx context.Context, resultCh chan<- *M
 		mh.state = state
 		if allow {
 			presence := &MatchPresence{Node: node, UserID: userID, SessionID: sessionID, Username: username}
-			mh.JoinMarkerList.Add(presence, mh.tick)
+			mh.JoinMarkerList.Add(presence, mh.tick, entrantIDFromJoinReason(reason))
 			mh.QueueJoin([]*MatchPresence{presence}, false)
 		}
 		// Signal client.
