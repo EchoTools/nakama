@@ -25,6 +25,8 @@ type GameSettings struct {
 	RemoteLogRichPresence bool `json:"remote_log_rich_presence"` // send remote logs for rich presence
 	RemoteLogSocial       bool `json:"remote_log_social"`        // send remote logs for social events
 	RemoteLogWarnings     bool `json:"remote_log_warnings"`      // send remote logs for warnings
+
+	QuestCombatUnlocked bool `json:"quest_combat_unlocked"` // lets Quest players join combat lobbies (otherwise the client shows "Echo Combat required")
 }
 
 func NewGameSettings(configData ConfigData, env string, iapUnlocked bool, matchmakerQueueMode string, remoteLogErrors bool, remoteLogMetrics bool, remoteLogRichPresence bool, remoteLogSocial bool, remoteLogWarnings bool) *GameSettings {
@@ -37,6 +39,7 @@ func NewGameSettings(configData ConfigData, env string, iapUnlocked bool, matchm
 		RemoteLogRichPresence: remoteLogRichPresence,
 		RemoteLogSocial:       remoteLogSocial,
 		RemoteLogWarnings:     remoteLogWarnings,
+		QuestCombatUnlocked:   true,
 	}
 }
 
@@ -119,6 +122,7 @@ func NewSeasonPassSchedule(id string, start, end time.Time) SeasonPassSchedule {
 func NewDefaultGameSettings() *GameSettings {
 	return &GameSettings{
 		IapUnlocked:           true,
+		QuestCombatUnlocked:   true,
 		RemoteLogSocial:       false,
 		RemoteLogWarnings:     false,
 		RemoteLogErrors:       false,
