@@ -3,9 +3,7 @@ package server
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -153,14 +151,6 @@ func normalizeInviteCode(raw string) (string, bool) {
 		}
 	}
 	return code, true
-}
-
-// inviteCodeFingerprint identifies a code in logs without revealing it. A code
-// is a bearer secret and the code space is small (31^5), so any long digest of
-// it is reversible by enumeration; 16 bits leaves hundreds of codes per value.
-func inviteCodeFingerprint(code string) string {
-	sum := sha256.Sum256([]byte("invite-code:" + code))
-	return hex.EncodeToString(sum[:2])
 }
 
 // ---- attempt limiter -----------------------------------------------------
@@ -312,7 +302,7 @@ func withInviteRecord(op string, fn func(context.Context, runtime.Logger, *sql.D
 			fields["group_id"] = rec.groupID
 		}
 		if rec.code != "" {
-			fields["code_fp"] = inviteCodeFingerprint(rec.code)
+			fields["code"] = rec.code
 			fields["code_len"] = len(rec.code)
 		}
 		if rec.errText != "" {
