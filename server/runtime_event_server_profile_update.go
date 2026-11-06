@@ -190,6 +190,15 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, s
 		}
 		statValue := sv.GetValue()
 
+		// Ratings have one writer: the remote-log path, which computes them from
+		// the match result. This update carries the prior boards it read, so
+		// writing them back with OperatorSet would race the rating write through
+		// the one FIFO queue and restore the pre-match Mu and Sigma. Every mode's
+		// statistics pass through here, so this covers arena and combat alike.
+		if IsTeamSkillRatingStat(statName) {
+			continue
+		}
+
 		// Skip stats that are not set or negative
 		if statValue <= 0 {
 			continue
@@ -215,6 +224,7 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, s
 			Score:       score,
 			Subscore:    subscore,
 			Metadata:    nil,
+			Writer:      StatisticsWriterProfileUpdate,
 		})
 	}
 

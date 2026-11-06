@@ -22,6 +22,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -409,4 +410,124 @@ func jsonNumber(f float64) string {
 		return string(b) + ".0"
 	}
 	return string(b)
+}
+
+// seedRating writes a player's pre-match TeamSkillRating Mu and Sigma boards.
+func (h *combatStatsHarness) seedRating(t *testing.T, mu, sigma float64) {
+	t.Helper()
+	for stat, v := range map[string]float64{TeamSkillRatingMuStatisticID: mu, TeamSkillRatingSigmaStatisticID: sigma} {
+		score, sub, err := Float64ToScore(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		op := 2
+		id := StatisticBoardID(combatTestGroupID, evr.ModeCombatPublic, stat, evr.ResetScheduleAllTime)
+		if _, err := h.nk.LeaderboardRecordWrite(context.Background(), id, combatTestUserID, "synthetic-player", score, sub, nil, &op); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestCombatStats_ProfileUpdateNeverWritesTeamSkillRating is the production
+// ordering: the game server's profile update reads the player's boards
+// (pre-match ratings), then the remote-log path writes the post-match ratings,
+// then the profile update's batch -- which carried the pre-match Mu and Sigma
+// back out as OperatorSet entries -- lands last and puts them back. Ratings
+// have one writer, the remote-log path, so the post-match values must survive.
+func TestCombatStats_ProfileUpdateNeverWritesTeamSkillRating(t *testing.T) {
+	raw := readServerRemoteLogFixture(t, "post_match_match_type_stats_combat.json")
+	sample := fixtureObject(t, raw, "stats")
+	settings := &ServiceSettingsData{}
+	FixDefaultServiceSettings(nil, settings)
+	settings.Matchmaking.EnableSBMM = true
+	withServiceSettings(t, settings)
+
+	h := newCombatStatsHarness(t)
+	// An orange opponent, so the blue win moves Mu as well as Sigma.
+	h.nk.label.Players = append(h.nk.label.Players, PlayerInfo{
+		UserID: "00000000-0000-4000-8000-00000000c0b5", SessionID: "00000000-0000-4000-8000-00000000c0b6",
+		EvrID: evr.EvrId{PlatformCode: 4, AccountId: 2}, Team: OrangeTeam, DisplayName: "synthetic-opponent",
+	})
+	const preMu, preSigma = 30.5, 7.25
+	h.seedRating(t, preMu, preSigma)
+
+	msg, err := evr.UnmarshalRemoteLog(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The profile update gets its own queue so its batch can land after the
+	// remote-log write, as it did in production.
+	pq := &StatisticsQueue{logger: h.logger, ch: make(chan []*StatisticsQueueEntry, 64)}
+	ev := NewEventServerProfileUpdate(combatTestUserID, combatTestGroupID, "synthetic-player", evr.ModeCombatPublic,
+		evr.ServerProfileUpdate{Statistics: &evr.ServerProfileUpdateStatistics{Combat: combatProfileUpdateFromSample(t, sample)}})
+	if err := ev.Process(context.Background(), h.logger, &EventDispatcher{db: h.db, nk: h.nk, statisticsQueue: pq}); err != nil {
+		t.Fatal(err)
+	}
+	h.remoteLog(t, msg) // rating write, drained
+
+	muID := StatisticBoardID(combatTestGroupID, evr.ModeCombatPublic, TeamSkillRatingMuStatisticID, evr.ResetScheduleAllTime)
+	sigmaID := StatisticBoardID(combatTestGroupID, evr.ModeCombatPublic, TeamSkillRatingSigmaStatisticID, evr.ResetScheduleAllTime)
+	after := h.nk.rows(t, combatTestUserID)
+	postMu, postSigma := after[muID], after[sigmaID]
+	if postMu == preMu || postSigma == preSigma {
+		t.Fatalf("remote log did not rate: mu %v sigma %v (pre %v / %v)", postMu, postSigma, preMu, preSigma)
+	}
+
+	for len(pq.ch) > 0 { // the profile update's batch lands last
+		for _, e := range <-pq.ch {
+			processSingleEntry(context.Background(), h.logger, h.nk, e)
+		}
+	}
+
+	final := h.nk.rows(t, combatTestUserID)
+	if final[muID] != postMu {
+		t.Errorf("TeamSkillRatingMu = %v after profile update, want post-match %v (pre-match %v)", final[muID], postMu, preMu)
+	}
+	if final[sigmaID] != postSigma {
+		t.Errorf("TeamSkillRatingSigma = %v after profile update, want post-match %v (pre-match %v)", final[sigmaID], postSigma, preSigma)
+	}
+}
+
+// TestTeamSkillRatingWrite_IsLogged runs the real remote-log rating write and
+// asserts the write path emitted one INFO record per TeamSkillRating board with
+// who, which board, previous and new value, writer and match.
+func TestTeamSkillRatingWrite_IsLogged(t *testing.T) {
+	raw := readServerRemoteLogFixture(t, "post_match_match_type_stats_combat.json")
+	settings := &ServiceSettingsData{}
+	FixDefaultServiceSettings(nil, settings)
+	settings.Matchmaking.EnableSBMM = true
+	withServiceSettings(t, settings)
+
+	h := newCombatStatsHarness(t)
+	h.nk.label.Players = append(h.nk.label.Players, PlayerInfo{
+		UserID: "00000000-0000-4000-8000-00000000c0b5", SessionID: "00000000-0000-4000-8000-00000000c0b6",
+		EvrID: evr.EvrId{PlatformCode: 4, AccountId: 2}, Team: OrangeTeam, DisplayName: "synthetic-opponent",
+	})
+	h.seedRating(t, 30.5, 7.25)
+	core, logs := observer.New(zap.InfoLevel)
+	h.logger = NewRuntimeGoLogger(zap.New(core))
+
+	msg, err := evr.UnmarshalRemoteLog(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.remoteLog(t, msg)
+
+	muID := StatisticBoardID(combatTestGroupID, evr.ModeCombatPublic, TeamSkillRatingMuStatisticID, evr.ResetScheduleAllTime)
+	var rec map[string]any
+	for _, e := range logs.FilterMessage("TeamSkillRating board write").All() {
+		m := e.ContextMap()
+		if m["leaderboard_id"] == muID && m["user_id"] == combatTestUserID {
+			rec = m
+		}
+	}
+	if rec == nil {
+		t.Fatalf("no TeamSkillRating write record for %s; logged: %v", muID, logs.All())
+	}
+	t.Logf("record: %v", rec)
+	got := h.nk.rows(t, combatTestUserID)[muID]
+	if rec["previous_value"] != 30.5 || rec["new_value"] != got || rec["writer"] != StatisticsWriterRemoteLog || rec["match_id"] != combatTestMatchUUID+"."+combatTestNode || rec["previous_known"] != true {
+		t.Errorf("record fields wrong: %v (board now %v)", rec, got)
+	}
 }
