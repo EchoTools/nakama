@@ -231,7 +231,9 @@ func LeaderboardMetaFromID(id string) (LeaderboardMeta, error) {
 }
 
 // IsTeamSkillRatingStat reports whether statName is one of the TeamSkillRating
-// boards (Mu, Sigma, Ordinal), which only the remote-log path may write.
+// boards (Mu, Sigma, Ordinal). Two writers exist: the remote-log path (Mu and
+// Sigma) and the operator MMR RPC (Mu, Sigma and Ordinal). The Ordinal board is
+// written only by the RPC.
 func IsTeamSkillRatingStat(statName string) bool {
 	return strings.HasPrefix(statName, "TeamSkillRating")
 }
