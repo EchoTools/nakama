@@ -276,7 +276,11 @@ func readTeamSkillRatingPrevious(ctx context.Context, nk runtime.NakamaModule, b
 	if _, owners, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 1, "", 0); err == nil {
 		p.Known = true
 		if len(owners) > 0 {
-			if v, err := ScoreToFloat64(owners[0].Score, owners[0].Subscore); err == nil {
+			v, err := ScoreToFloat64(owners[0].Score, owners[0].Subscore)
+			if err != nil {
+				// A record exists but cannot be decoded: that is not "no record".
+				p.Known = false
+			} else {
 				p.Value = &v
 			}
 		}
