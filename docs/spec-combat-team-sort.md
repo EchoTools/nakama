@@ -70,8 +70,9 @@ was returned to the matchmaker) and `history_persisted`. History also counts a m
 
 ## Builder
 
-`repairSplitTicketTeams` reunites a split party in `buildMatch`; it is skipped for combat
-(`repairTeamsForMode`), so the sorted teams are the teams. Arena is unchanged.
+`repairSplitTicketTeams` reunites a split party in `buildMatch`, in every mode including
+combat. A party the sort split is put back on one team by swapping its stray members with
+solos; when no solos are available the split is accepted and a Warn is logged.
 
 ## Combat result
 

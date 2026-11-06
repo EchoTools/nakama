@@ -503,18 +503,17 @@ func TestCombatSortSettings_ToleranceIsRead(t *testing.T) {
 	}
 }
 
-// N4: combat keeps the sorted teams; arena still reunites a split party.
-func TestRepairTeamsForMode(t *testing.T) {
+// A party the combat sort split across the teams is reunited, as in arena:
+// buildMatch repairs every mode's teams the same way.
+func TestRepairSplitTicketTeams_ReunitesCombatParty(t *testing.T) {
 	mk := func(ticket, name string) *MatchmakerEntry {
 		return &MatchmakerEntry{Ticket: ticket, Presence: &MatchmakerPresence{UserId: "u-" + name, SessionId: "s-" + name, Username: name}, PartyId: ""}
 	}
-	build := func() [2][]*MatchmakerEntry {
-		return [2][]*MatchmakerEntry{
-			{mk("P", "a1"), mk("s1", "s1"), mk("s2", "s2"), mk("s3", "s3")},
-			{mk("P", "a2"), mk("s4", "s4"), mk("s5", "s5"), mk("s6", "s6")},
-		}
+	teams := [2][]*MatchmakerEntry{
+		{mk("P", "a1"), mk("s1", "s1"), mk("s2", "s2"), mk("s3", "s3")},
+		{mk("P", "a2"), mk("s4", "s4"), mk("s5", "s5"), mk("s6", "s6")},
 	}
-	teamOf := func(teams [2][]*MatchmakerEntry, name string) int {
+	teamOf := func(name string) int {
 		for ti, team := range teams {
 			for _, e := range team {
 				if e.Presence.Username == name {
@@ -524,30 +523,13 @@ func TestRepairTeamsForMode(t *testing.T) {
 		}
 		return -1
 	}
-	logger := zap.NewNop()
 
-	combat, err := repairTeamsForMode(logger, evr.ModeCombatPublic, build())
+	teams, err := repairSplitTicketTeams(zap.NewNop(), teams)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if teamOf(combat, "a1") == teamOf(combat, "a2") {
-		t.Errorf("combat: split party was reunited")
-	}
-
-	arena, err := repairTeamsForMode(logger, evr.ModeArenaPublic, build())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if teamOf(arena, "a1") != teamOf(arena, "a2") {
-		t.Errorf("arena twin: split party was not reunited")
-	}
-	ref, _ := repairSplitTicketTeams(logger, build())
-	for ti := range ref {
-		for i := range ref[ti] {
-			if arena[ti][i].Presence.Username != ref[ti][i].Presence.Username {
-				t.Errorf("arena team differs from repairSplitTicketTeams at %d/%d", ti, i)
-			}
-		}
+	if teamOf("a1") != teamOf("a2") {
+		t.Errorf("combat party members on teams %d and %d, want one team", teamOf("a1"), teamOf("a2"))
 	}
 }
 
