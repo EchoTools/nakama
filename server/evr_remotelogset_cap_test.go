@@ -111,8 +111,8 @@ func ratedPlayers(t *testing.T, logger *zap.Logger, set, xpids []string) int {
 	return len(rated)
 }
 
-// Every player in a full post-match set is rated. Red on main: the first 50 of
-// 72 (54) entries survive, which holds the type stats of 3 of 8 (3 of 6).
+// Every player in a full post-match set is rated. Red on main: only the first
+// 50 entries survive, and this set's order rates 3 of 8 players and 5 of 6.
 func TestRemoteLogCap_PostMatchSetReachesEveryPlayer(t *testing.T) {
 	for _, n := range []int{6, 8} {
 		t.Run(fmt.Sprintf("%d_players", n), func(t *testing.T) {
