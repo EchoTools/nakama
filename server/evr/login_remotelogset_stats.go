@@ -147,9 +147,12 @@ type MatchTypeStats struct {
 	// the two together. float64 for the reason given on MatchStats.
 	//
 	// op:"-" keeps every one of them off the leaderboards from this path. The
-	// combat boards have one writer, the game server's profile update
+	// Combat* boards have one writer, the game server's profile update
 	// (EventServerProfileUpdate, evr_pipeline_login.go), which is authoritative
-	// for the match and sets each board to what it read plus the match. A board
+	// for the match and sets each board to what it read plus the match. The
+	// TeamSkillRating* boards are the opposite: their one writer is the
+	// remote-log path (processPostMatchMessages), and StatisticsToEntries drops
+	// them from the profile update (IsTeamSkillRatingStat). A board
 	// ID does not include the operator, so an "add" here would increment that
 	// same row and every combat match would count twice
 	// (TestCombatStats_OneWriterPerLeaderboardRow).

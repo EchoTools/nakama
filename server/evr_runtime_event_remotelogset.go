@@ -1048,6 +1048,10 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		}
 
 		if len(allStatEntries) > 0 {
+			for _, e := range allStatEntries {
+				e.Writer = StatisticsWriterRemoteLog
+				e.MatchID = matchID.String()
+			}
 			if err := statisticsQueue.Add(allStatEntries); err != nil {
 				return err
 			}

@@ -17,7 +17,17 @@ type StatisticsQueueEntry struct {
 	Score       int64
 	Subscore    int64
 	Metadata    map[string]string
+	// Writer names the code path that produced the entry, and MatchID the match
+	// it reports on when known. Both are for the write log only.
+	Writer  string
+	MatchID string
 }
+
+// Writers of statistics queue entries, as recorded in the write log.
+const (
+	StatisticsWriterRemoteLog     = "remotelog"
+	StatisticsWriterProfileUpdate = "profile_update"
+)
 
 // Override converts the entry operator to a LeaderboardRecordWrite override value.
 // Always returns OperatorSet (2) — the resolved value to write — because:
@@ -189,6 +199,10 @@ func processSingleEntry(ctx context.Context, logger runtime.Logger, nk runtime.N
 		return false
 	}
 
+	if IsTeamSkillRatingStat(e.BoardMeta.StatName) {
+		logTeamSkillRatingWrite(ctx, logger, nk, e)
+	}
+
 	if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, md, override); err != nil {
 
 		// Try to create the leaderboard
@@ -218,6 +232,31 @@ func processSingleEntry(ctx context.Context, logger runtime.Logger, nk runtime.N
 	}
 
 	return true
+}
+
+// logTeamSkillRatingWrite records one INFO line for a TeamSkillRating board
+// write: who, which board, the value being replaced (previous_known=false when
+// it could not be read), the new value, the writer and the match.
+func logTeamSkillRatingWrite(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, e *StatisticsQueueEntry) {
+	newVal, _ := ScoreToFloat64(e.Score, e.Subscore)
+	fields := map[string]any{
+		"user_id":        e.UserID,
+		"leaderboard_id": e.BoardMeta.ID(),
+		"stat":           e.BoardMeta.StatName,
+		"new_value":      newVal,
+		"writer":         e.Writer,
+		"match_id":       e.MatchID,
+		"previous_known": false,
+	}
+	if _, owners, _, _, err := nk.LeaderboardRecordsList(ctx, e.BoardMeta.ID(), []string{e.UserID}, 1, "", 0); err == nil {
+		fields["previous_known"] = true
+		if len(owners) > 0 {
+			if prev, err := ScoreToFloat64(owners[0].Score, owners[0].Subscore); err == nil {
+				fields["previous_value"] = prev
+			}
+		}
+	}
+	logger.WithFields(fields).Info("TeamSkillRating board write")
 }
 
 type StatisticsQueue struct {

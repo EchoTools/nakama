@@ -230,6 +230,12 @@ func LeaderboardMetaFromID(id string) (LeaderboardMeta, error) {
 	}, nil
 }
 
+// IsTeamSkillRatingStat reports whether statName is one of the TeamSkillRating
+// boards (Mu, Sigma, Ordinal), which only the remote-log path may write.
+func IsTeamSkillRatingStat(statName string) bool {
+	return strings.HasPrefix(statName, "TeamSkillRating")
+}
+
 func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, userID, groupID string, mode evr.Symbol) (types.Rating, error) {
 	// Look for an existing account.
 
