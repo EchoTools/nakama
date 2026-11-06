@@ -243,7 +243,7 @@ type inviteRecord struct {
 	args    map[string]any
 	matchID string
 	groupID string
-	code    string // never logged; its fingerprint is
+	code    string // logged as `code`
 	errText string
 }
 
@@ -260,8 +260,8 @@ func inviteRecordFrom(ctx context.Context) *inviteRecord {
 // writes exactly one structured record: who (user, session, client, address),
 // what (the operation, its arguments, the resolved match and guild ids), the
 // outcome, the latency and the size of the answer. It is the single point the
-// three RPCs pass through. The code is a bearer secret: only its fingerprint
-// is written.
+// three RPCs pass through. The code is written as `code`, as
+// the request carried it.
 func withInviteRecord(op string, fn func(context.Context, runtime.Logger, *sql.DB, runtime.NakamaModule, string) (string, error)) func(context.Context, runtime.Logger, *sql.DB, runtime.NakamaModule, string) (string, error) {
 	return func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 		start := inviteNow()

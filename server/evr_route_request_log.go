@@ -11,7 +11,7 @@ import (
 
 // The service-status and matchmaker-queue routes are called by game clients, which cannot send an HTTP key.
 // Nothing authenticates those requests, so the record each one leaves is its only attribution: the client
-// address, a label for the token it carried (never the token), what it asked for, the outcome, the latency
+// address, the token it carried, what it asked for, the outcome, the latency
 // and the size of the answer. One record per request, written where the handler returns.
 
 // routeRecorder remembers the status and the size of what a handler wrote.

@@ -565,7 +565,7 @@ func TestInviteCodeAlphabet(t *testing.T) {
 }
 
 // One structured record per RPC: who, what with resolved ids, outcome, latency, size.
-// The code itself is a bearer secret and never appears in it.
+// The record carries the code itself, as `code`.
 func TestInviteRPCsWriteOneRecordEachCarryingTheCode(t *testing.T) {
 	w := newInviteWorld(t)
 	c := w.create(userA, defaultCreate)
