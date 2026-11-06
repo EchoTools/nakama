@@ -2740,7 +2740,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			logger.WithField("label", label).Info("Match prepared")
-			return editInteractionResponse(s, i, fmt.Sprintf("Match prepared with label ```json\n%s\n```\nhttps://echo.taxi/spark://c/%s", label.GetLabelIndented(), strings.ToUpper(label.ID.UUID.String())))
+			return editInteractionResponse(s, i, allocateReply(label.GetLabelIndented(), strings.ToUpper(label.ID.UUID.String())))
 		},
 		"show": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
