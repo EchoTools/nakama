@@ -3,11 +3,15 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/bwmarrin/discordgo"
+	"github.com/heroiclabs/nakama-common/runtime"
 )
 
 // captureTransport records the request body that reaches the wire.
@@ -75,8 +79,8 @@ func TestDiscordRESTContentIsClampedToTwoThousandRunes(t *testing.T) {
 				ct := sendThroughLimiter(t, method, "application/json", body)
 				got, m := wireContent(t, ct)
 
-				if n := utf8.RuneCountInString(got); n > 2000 {
-					t.Fatalf("content reached Discord with %d runes; limit is 2000", n)
+				if n := utf8.RuneCountInString(got); n > 2000 || (!tc.untouched && n != 2000) {
+					t.Fatalf("content reached Discord with %d runes; want at most 2000 (exactly 2000 when cut)", n)
 				}
 				if !utf8.ValidString(got) {
 					t.Fatalf("content was cut mid-rune")
@@ -147,5 +151,97 @@ func TestAllocateReplyFitsAndKeepsTheJoinLink(t *testing.T) {
 		if !strings.HasSuffix(got, "```\nhttps://echo.taxi/spark://c/"+id) {
 			t.Fatalf("closing fence/join link lost: %q", got[max(0, len(got)-80):])
 		}
+	}
+}
+
+// logRecorder captures what the limiter logs, to prove no token is written.
+type logRecorder struct {
+	runtime.Logger
+	lines []string
+}
+
+func (r *logRecorder) WithFields(f map[string]interface{}) runtime.Logger {
+	r.lines = append(r.lines, fmt.Sprintf("%v", f))
+	return r
+}
+func (r *logRecorder) Warn(format string, v ...interface{}) {
+	r.lines = append(r.lines, fmt.Sprintf(format, v...))
+}
+
+// TestDiscordRESTClampsInteractionRepliesThroughRealDiscordgo drives the real
+// discordgo client. InteractionRespond nests the text at data.content, and the
+// webhook/interaction routes carry the interaction token in the URL path.
+func TestDiscordRESTClampsInteractionRepliesThroughRealDiscordgo(t *testing.T) {
+	const token = "SECRET-INTERACTION-TOKEN-abc123"
+	long := strings.Repeat("あ", 2001)
+
+	ct := &captureTransport{}
+	rec := &logRecorder{}
+	limiter := newDiscordRESTLimiter(ct)
+	limiter.logger = rec
+
+	s, err := discordgo.New("Bot test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Client.Transport = limiter
+
+	ix := &discordgo.Interaction{ID: "1", AppID: "2", Token: token}
+	check := func(name string, send func() error) {
+		t.Helper()
+		ct.body = nil
+		_ = send() // the fake transport's "{}" reply may not decode; only the wire body matters
+		var m map[string]any
+		if err := json.Unmarshal(ct.body, &m); err != nil {
+			t.Fatalf("%s: wire body not JSON: %v: %q", name, err, ct.body)
+		}
+		content, _ := m["content"].(string)
+		if data, ok := m["data"].(map[string]any); ok {
+			content, _ = data["content"].(string)
+		}
+		if n := utf8.RuneCountInString(content); n != 2000 {
+			t.Fatalf("%s: content reached the wire with %d runes, want exactly 2000", name, n)
+		}
+	}
+
+	check("InteractionRespond", func() error {
+		return s.InteractionRespond(ix, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{Content: long},
+		})
+	})
+	check("InteractionResponseEdit", func() error {
+		_, err := s.InteractionResponseEdit(ix, &discordgo.WebhookEdit{Content: &long})
+		return err
+	})
+	check("ChannelMessageSend", func() error {
+		_, err := s.ChannelMessageSend("123", long)
+		return err
+	})
+	check("FollowupMessageCreate", func() error {
+		_, err := s.FollowupMessageCreate(ix, true, &discordgo.WebhookParams{Content: long})
+		return err
+	})
+
+	if len(rec.lines) == 0 {
+		t.Fatal("no warn record was written for the clamped sends")
+	}
+	for _, l := range rec.lines {
+		if strings.Contains(l, token) {
+			t.Fatalf("log record contains the interaction token: %s", l)
+		}
+	}
+}
+
+func TestDiscordRESTDoesNotMutateTheCallersRequest(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{"content": strings.Repeat("a", 3000)})
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://discord.com/api/v9/channels/1/messages", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	before := req.ContentLength
+	if _, err := newDiscordRESTLimiter(&captureTransport{}).RoundTrip(req); err != nil {
+		t.Fatal(err)
+	}
+	if req.ContentLength != before {
+		t.Fatalf("caller's request was mutated: ContentLength %d -> %d", before, req.ContentLength)
 	}
 }
