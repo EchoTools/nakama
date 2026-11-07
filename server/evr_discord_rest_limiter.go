@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -78,62 +79,109 @@ func truncateDiscordContent(s string) (string, bool) {
 	return s[:end] + discordContentTruncatedMarker, true
 }
 
-// clampContent rewrites a JSON message body whose top-level "content" exceeds
-// Discord's limit. Every send path in the bot (interaction replies, webhook
-// edits, channel messages, DMs) goes through this transport, so none of them can
-// reach Discord with an over-long content. Bodies that are not JSON (multipart
-// uploads), not parseable, or without a string content are forwarded untouched.
-func (l *discordRESTLimiter) clampContent(req *http.Request) {
+// redactDiscordRoute turns a request path into a loggable route template. The
+// webhook and interaction routes carry the interaction token in the path
+// (/webhooks/{app}/{token}/..., /interactions/{id}/{token}/callback); a token
+// is a credential and must never reach a log.
+func redactDiscordRoute(path string) string {
+	parts := strings.Split(path, "/")
+	for i, p := range parts {
+		if (p == "webhooks" || p == "interactions") && i+2 < len(parts) {
+			parts[i+1] = "{id}"
+			parts[i+2] = "{token}"
+			break
+		}
+	}
+	return strings.Join(parts, "/")
+}
+
+// clampJSONContent returns the body with any over-long message text cut to the
+// limit. Interaction responses nest the text at data.content; every other send
+// (channel message, webhook edit, followup) has it at the top level. ok is false
+// when nothing changed. original is the rune count of the longest text found.
+func clampJSONContent(raw []byte) (out []byte, original int, ok bool) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil {
+		return raw, 0, false
+	}
+	clamp := func(m map[string]json.RawMessage) bool {
+		var content string
+		c, has := m["content"]
+		if !has || json.Unmarshal(c, &content) != nil {
+			return false
+		}
+		cut, changed := truncateDiscordContent(content)
+		if !changed {
+			return false
+		}
+		if n := utf8.RuneCountInString(content); n > original {
+			original = n
+		}
+		m["content"], _ = json.Marshal(cut)
+		return true
+	}
+	changed := clamp(fields)
+	if d, has := fields["data"]; has {
+		var data map[string]json.RawMessage
+		if json.Unmarshal(d, &data) == nil && clamp(data) {
+			fields["data"], _ = json.Marshal(data)
+			changed = true
+		}
+	}
+	if !changed {
+		return raw, 0, false
+	}
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return raw, 0, false
+	}
+	return out, original, true
+}
+
+// clampContent returns the request to send: the caller's own request unless a
+// message text exceeds Discord's limit, in which case a clone carrying the cut
+// body (the caller's request is never mutated). Every send path in the bot
+// (interaction replies, webhook edits, channel messages, DMs) goes through this
+// transport, so none can reach Discord over-long.
+//
+// Multipart bodies (file uploads, e.g. evr_discord_appbot_whoami.go) are not
+// clamped: their text is inside a form part, and the callers that upload files
+// send bounded text. Malformed or non-JSON bodies are forwarded untouched.
+func (l *discordRESTLimiter) clampContent(req *http.Request) *http.Request {
 	if req.Body == nil || (req.Method != http.MethodPost && req.Method != http.MethodPatch && req.Method != http.MethodPut) {
-		return
+		return req
 	}
 	if mt, _, err := mime.ParseMediaType(req.Header.Get("Content-Type")); err != nil || mt != "application/json" {
-		return
+		return req
 	}
 	raw, err := io.ReadAll(req.Body)
 	_ = req.Body.Close()
-	restore := func(b []byte) {
-		req.Body = io.NopCloser(bytes.NewReader(b))
-		req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(b)), nil }
-		req.ContentLength = int64(len(b))
-		if req.Header.Get("Content-Length") != "" {
-			req.Header.Set("Content-Length", fmt.Sprint(len(b)))
+	forward := func(b []byte) *http.Request {
+		r := req.Clone(req.Context())
+		r.Body = io.NopCloser(bytes.NewReader(b))
+		r.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(b)), nil }
+		r.ContentLength = int64(len(b))
+		if r.Header.Get("Content-Length") != "" {
+			r.Header.Set("Content-Length", fmt.Sprint(len(b)))
 		}
+		return r
 	}
 	if err != nil {
-		restore(raw)
-		return
+		return forward(raw)
 	}
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(raw, &fields) != nil {
-		restore(raw)
-		return
-	}
-	var content string
-	if c, ok := fields["content"]; !ok || json.Unmarshal(c, &content) != nil {
-		restore(raw)
-		return
-	}
-	cut, changed := truncateDiscordContent(content)
+	out, original, changed := clampJSONContent(raw)
 	if !changed {
-		restore(raw)
-		return
-	}
-	fields["content"], _ = json.Marshal(cut)
-	out, err := json.Marshal(fields)
-	if err != nil {
-		restore(raw)
-		return
+		return forward(raw)
 	}
 	if l.logger != nil {
 		l.logger.WithFields(map[string]interface{}{
 			"method":         req.Method,
-			"path":           req.URL.Path,
-			"original_runes": utf8.RuneCountInString(content),
+			"route":          redactDiscordRoute(req.URL.Path),
+			"original_runes": original,
 			"limit_runes":    discordMaxContentRunes,
 		}).Warn("Discord message content exceeded the limit and was truncated")
 	}
-	restore(out)
+	return forward(out)
 }
 
 // timeout returns the semaphore acquisition timeout for this limiter.
@@ -174,8 +222,7 @@ func (l *discordRESTLimiter) RoundTrip(req *http.Request) (*http.Response, error
 	}
 	defer l.sem.Release(1)
 
-	l.clampContent(req)
-	return l.inner.RoundTrip(req)
+	return l.inner.RoundTrip(l.clampContent(req))
 }
 
 // allocateReply formats the /allocate reply. The label is shortened, not the
