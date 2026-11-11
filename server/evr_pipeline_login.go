@@ -263,6 +263,8 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 //   - SystemInfo strings/ints via addSystemInfoMetricTags (allow-list + buckets)
 //   - device_type / build_version via params.MetricsTags() (bounded at that source)
 //   - build_number / app_id / publisher_lock via their allow-lists
+//   - nevr_version, the nevr-runtime version the client declared (per-player cap, then
+//     nevrVersionLabels: a process-wide cap on distinct versions, the rest metricTagOther)
 //
 // Note: on login_success, headset_type (from addSystemInfoMetricTags) always equals
 // device_type (from MetricsTags), and build_number always equals build_version, since
@@ -289,7 +291,14 @@ func buildLoginSuccessMetricTags(params *SessionParameters, limiter *systemFinge
 	tags["build_number"] = boundBuildNumberTag(params.loginPayload.BuildNumber)
 	tags["app_id"] = boundAppIDTag(params.loginPayload.AppId)
 	tags["publisher_lock"] = publisherLockAllowlist.normalize(params.loginPayload.PublisherLock)
+	// The fingerprint hashes the normalized version, so the per-player cap sees every distinct one. The
+	// process-wide label cap is applied after it, and only to a login the cap let through: an account
+	// cycling versions has collapsed to metricTagOther by then and takes no slot from anyone else.
+	tags[nevrVersionTag] = normalizeNevrVersion(params.nevrIdentity())
 	boundSystemsPerPlayer(limiter, tags, params.UserID())
+	if tags[nevrVersionTag] != metricTagOther {
+		tags[nevrVersionTag] = nevrVersionLabels.label(params.nevrIdentity())
+	}
 	return tags
 }
 
@@ -738,6 +747,11 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 	params.ignoreSuspensionsOfAltAccounts = loginHistory.IgnoreSuspensionsOfAltAccounts
 
+	// Decide now, from the history as stored: Update below overwrites it. The count is emitted just
+	// before SendEvent, after the last rejection, because the history is only saved once the login is
+	// accepted and a rejected login that retries would otherwise be counted on every attempt.
+	nevrVersionFirstSeen := nevrVersionFirstSeenToday(loginHistory, normalizeNevrVersion(nevrLoginIdentity(params.loginPayload)), time.Now())
+
 	// Ensure the current login entry is in history so alt search includes it.
 	loginHistory.Update(params.xpID, session.clientIP, params.loginPayload, params.IsWebsocketAuthenticated)
 	if _, err := loginHistory.UpdateAlternates(ctx, p.runtimeLogger, p.nk); err != nil {
@@ -807,6 +821,10 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	}
 
 	metricsTags["error"] = "nil"
+
+	if nevrVersionFirstSeen {
+		emitNevrVersionFirstSeen(logger, p.nk.metrics, nevrVersionLabels, params.profile.ID(), params.loginPayload, time.Now())
+	}
 
 	SendEvent(ctx, p.nk, &EventUserAuthenticated{
 		UserID:                   params.profile.ID(),
