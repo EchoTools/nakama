@@ -599,6 +599,23 @@ func extractClientAddressFromRequest(logger *zap.Logger, r *http.Request) (strin
 	return extractClientAddress(logger, clientAddr, r, "request")
 }
 
+// redactSensitiveHeaders copies headers for logging, replacing the values of
+// anything that can carry a credential (Authorization, Cookie, API keys,
+// tokens, secrets) with "[REDACTED]". It accepts http.Header and gRPC metadata.
+func redactSensitiveHeaders[H ~map[string][]string](h H) map[string][]string {
+	out := make(map[string][]string, len(h))
+	for k, v := range h {
+		lk := strings.ToLower(k)
+		if strings.Contains(lk, "auth") || strings.Contains(lk, "cookie") || strings.Contains(lk, "token") ||
+			strings.Contains(lk, "secret") || strings.Contains(lk, "key") || strings.Contains(lk, "password") {
+			out[k] = []string{"[REDACTED]"}
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
 func extractClientAddress(logger *zap.Logger, clientAddr string, source interface{}, sourceType string) (string, string) {
 	var clientIP, clientPort string
 
@@ -626,8 +643,12 @@ func extractClientAddress(logger *zap.Logger, clientAddr string, source interfac
 	}
 
 	if clientIP == "" {
-		if r, isRequest := source.(*http.Request); isRequest {
-			source = map[string]interface{}{"headers": r.Header, "remote_addr": r.RemoteAddr}
+		switch src := source.(type) {
+		case *http.Request:
+			source = map[string]interface{}{"headers": redactSensitiveHeaders(src.Header), "remote_addr": src.RemoteAddr}
+		case context.Context:
+			md, _ := metadata.FromIncomingContext(src)
+			source = map[string]interface{}{"headers": redactSensitiveHeaders(md)}
 		}
 		logger.Warn("cannot extract client address", zap.String("address_source_type", sourceType), zap.Any("address_source", source))
 	}
