@@ -2,6 +2,10 @@
 name: Run tests
 on:
   workflow_dispatch: {}
+
+# Least privilege: the job only checks out the repo and runs tests.
+permissions:
+  contents: read
 #  pull_request:
 #    types: [opened, synchronize]
 jobs:
