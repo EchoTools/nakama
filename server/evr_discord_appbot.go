@@ -137,7 +137,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 
 	//bot.LogLevel = discordgo.LogDebug
 	dg.StateEnabled = true
-	dg.Identify.Intents = discordIdentifyIntents(ServiceSettings().SyncGuildMembersWithoutIntent)
+	dg.Identify.Intents = discordIdentifyIntents(ServiceSettings().SyncGuildMembersWithoutIntent())
 
 	dg.AddHandlerOnce(func(s *discordgo.Session, m *discordgo.Ready) {
 

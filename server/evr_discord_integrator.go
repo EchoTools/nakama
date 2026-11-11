@@ -527,7 +527,7 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 
 	var member *discordgo.Member
 	var err error
-	if ServiceSettings().SyncGuildMembersWithoutIntent {
+	if ServiceSettings().SyncGuildMembersWithoutIntent() {
 		member, err = c.GuildMemberFresh(guildID, discordID)
 	} else {
 		member, err = c.GuildMember(guildID, discordID)
@@ -536,7 +536,7 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 		// Discord REST API is temporarily unavailable due to rate limiting.
 		// Skip the sync rather than treating this as "user not found."
 		logger.Warn("Discord REST overloaded, skipping guild member sync", zap.String("discord_id", discordID), zap.String("guild_id", guildID))
-		if ServiceSettings().SyncGuildMembersWithoutIntent {
+		if ServiceSettings().SyncGuildMembersWithoutIntent() {
 			return fmt.Errorf("Discord REST overloaded during no-intent member sync: %w", err)
 		}
 		return nil
@@ -605,7 +605,7 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 		}
 		profile = updated
 	}
-	if ServiceSettings().SyncGuildMembersWithoutIntent {
+	if ServiceSettings().SyncGuildMembersWithoutIntent() {
 		if err := syncMemberProfileCosmetics(ctx, c.nk, profile, member, groupID); err != nil {
 			return fmt.Errorf("error syncing account cosmetics: %w", err)
 		}
@@ -719,7 +719,7 @@ func (c *DiscordIntegrator) guildMember(guildID, discordID string, allowStale bo
 
 	// With the members intent disabled, state has no member-update events to
 	// keep it current. Use the TTL cache and REST as the only sources then.
-	if !ServiceSettings().SyncGuildMembersWithoutIntent && c.dg.State != nil {
+	if !ServiceSettings().SyncGuildMembersWithoutIntent() && c.dg.State != nil {
 		if member, err = c.dg.State.Member(guildID, discordID); err == nil && member != nil {
 			c.memberCache.Store(cacheKey, cachedMember{member: member, expiresAt: time.Now().Add(memberCacheTTL)})
 			return member, nil
@@ -744,7 +744,7 @@ func (c *DiscordIntegrator) guildMember(guildID, discordID string, allowStale bo
 		return nil, fmt.Errorf("error getting guild member: %w", err)
 	}
 
-	if !ServiceSettings().SyncGuildMembersWithoutIntent && c.dg.State != nil {
+	if !ServiceSettings().SyncGuildMembersWithoutIntent() && c.dg.State != nil {
 		if err := c.dg.State.MemberAdd(member); err != nil {
 			c.logger.Debug("Error caching guild member in Discord state", zap.String("guild_id", guildID), zap.String("discord_id", discordID), zap.Error(err))
 		}

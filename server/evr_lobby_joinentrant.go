@@ -527,7 +527,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	if !ok {
 		return errors.New("failed to get session parameters")
 	}
-	if ServiceSettings().SyncGuildMembersWithoutIntent {
+	if ServiceSettings().SyncGuildMembersWithoutIntent() {
 		guildGroups, err := syncGuildMembersAndReloadGroups(ctx, logger, params.profile.DiscordID(), params.guildGroups, false, p.discordCache.syncMember, func() (map[string]*GuildGroup, error) {
 			return GuildUserGroupsList(ctx, p.nk, p.guildGroupRegistry, params.profile.ID())
 		})

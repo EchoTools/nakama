@@ -113,7 +113,7 @@ func testGuildRoleSyncFailureKeepsLoadedGroups(t *testing.T, full bool) {
 func TestSyncMember_RemovesGuildMembershipWhenDiscordMemberIsAbsent(t *testing.T) {
 	previous := ServiceSettings()
 	updated := *previous
-	updated.SyncGuildMembersWithoutIntent = true
+	updated.RequestGuildMembersIntent = false
 	ServiceSettingsUpdate(&updated)
 	t.Cleanup(func() { ServiceSettingsUpdate(previous) })
 
