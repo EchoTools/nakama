@@ -1,6 +1,9 @@
 package server
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"strconv"
 	"testing"
 	"time"
@@ -121,5 +124,86 @@ func TestRecordNevrVersionFirstSeenStaysBounded(t *testing.T) {
 	}
 	if len(seen) > nevrVersionTagCardinalityBound {
 		t.Fatalf("counter took %d distinct nevr_version values, bound %d", len(seen), nevrVersionTagCardinalityBound)
+	}
+}
+
+// The history is saved only by the EventUserAuthenticated handler, which authorizeSession sends after
+// its last rejection. A count made before a rejection is made again on every retry. authorizeSession
+// cannot be driven in this suite (it needs a database, a guild registry and a session), so this pins the
+// order in the source: the emit call is in authorizeSession (where the history is loaded and the rejections are), after its last `return` of a non-nil
+// error, and the decision call is before loginHistory.Update.
+func TestNevrVersionFirstSeenIsEmittedAfterTheLastRejection(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "evr_pipeline_login.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fn *ast.FuncDecl
+	for _, d := range file.Decls {
+		if f, ok := d.(*ast.FuncDecl); ok && f.Name.Name == "authorizeSession" {
+			fn = f
+		}
+	}
+	if fn == nil {
+		t.Fatal("authorizeSession not found")
+	}
+	var emit, decide, update, lastRejection token.Pos
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.FuncLit:
+			return false // a closure's returns are not the function's
+		case *ast.CallExpr:
+			switch f := x.Fun.(type) {
+			case *ast.Ident:
+				switch f.Name {
+				case "emitNevrVersionFirstSeen":
+					emit = x.Pos()
+				case "nevrVersionFirstSeenToday":
+					decide = x.Pos()
+				}
+			case *ast.SelectorExpr:
+				if f.Sel.Name == "Update" {
+					if id, ok := f.X.(*ast.Ident); ok && id.Name == "loginHistory" {
+						update = x.Pos()
+					}
+				}
+			}
+		case *ast.ReturnStmt:
+			for _, r := range x.Results {
+				if id, ok := r.(*ast.Ident); ok && id.Name == "nil" {
+					continue
+				}
+				if x.Pos() > lastRejection {
+					lastRejection = x.Pos()
+				}
+			}
+		}
+		return true
+	})
+	if emit == 0 || decide == 0 || update == 0 {
+		t.Fatalf("authorizeSession must call nevrVersionFirstSeenToday (%v), loginHistory.Update (%v) and emitNevrVersionFirstSeen (%v)", decide != 0, update != 0, emit != 0)
+	}
+	if decide > update {
+		t.Fatal("the first-seen decision must be made before loginHistory.Update, which overwrites the history it reads")
+	}
+	if emit < lastRejection {
+		t.Fatalf("emitNevrVersionFirstSeen at %v is before a rejection return at %v: a rejected login that retries is counted each attempt", fset.Position(emit), fset.Position(lastRejection))
+	}
+}
+
+// Deciding before Update and emitting after must count once, and must not count when never emitted.
+func TestNevrVersionFirstSeenDecisionSurvivesUpdate(t *testing.T) {
+	now := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
+	h := NewLoginHistory("user-1")
+	login := nevrLogin("6.16.5")
+	first := nevrVersionFirstSeenToday(h, normalizeNevrVersion(login.NevrIdentity), now)
+	h.Update(evr.EvrId{PlatformCode: 4, AccountId: 1}, "10.0.0.1", login, true)
+	if !first {
+		t.Fatal("first login of the day was not first seen")
+	}
+	m := newRecordingMetrics()
+	emitNevrVersionFirstSeen(zap.NewNop(), m, newNevrVersionLabeler(), "user-1", login, now)
+	if got := m.count(nevrVersionFirstSeenCounter); got != 1 {
+		t.Fatalf("counter = %d, want 1", got)
 	}
 }

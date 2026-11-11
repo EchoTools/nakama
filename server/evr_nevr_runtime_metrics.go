@@ -1,12 +1,12 @@
 package server
 
 import (
-	"time"
-
-	"go.uber.org/zap"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
@@ -131,20 +131,30 @@ func nevrVersionFirstSeenToday(h *LoginHistory, version string, now time.Time) b
 	return true
 }
 
-// recordNevrVersionFirstSeen increments nevrVersionFirstSeenCounter when this login is the account's first
-// of its version today. It must run before the login is written into h. The label is bounded by labels.
-func recordNevrVersionFirstSeen(logger *zap.Logger, m Metrics, labels *nevrVersionLabeler, h *LoginHistory, userID string, login *evr.LoginProfile, now time.Time) {
-	var identity *evr.NevrIdentity
-	if login != nil {
-		identity = login.NevrIdentity
-	}
-	if !nevrVersionFirstSeenToday(h, normalizeNevrVersion(identity), now) {
-		return
-	}
-	label := labels.label(identity)
+// emitNevrVersionFirstSeen increments nevrVersionFirstSeenCounter and logs it. The caller decides first-seen
+// with nevrVersionFirstSeenToday before it writes the login into the history, and calls this only once the
+// login can no longer be rejected: the history is saved after the last rejection, so a count made earlier
+// is made again on every retry of a rejected login. The label is bounded by labels.
+func emitNevrVersionFirstSeen(logger *zap.Logger, m Metrics, labels *nevrVersionLabeler, userID string, login *evr.LoginProfile, now time.Time) {
+	label := labels.label(nevrLoginIdentity(login))
 	m.CustomCounter(nevrVersionFirstSeenCounter, map[string]string{nevrVersionTag: label}, 1)
 	logger.Info("nevr version first seen",
 		zap.String("user_id", userID),
 		zap.String(nevrVersionTag, label),
 		zap.String("day", now.UTC().Format("2006-01-02")))
+}
+
+// recordNevrVersionFirstSeen decides and emits in one step, for callers with nothing between the two.
+func recordNevrVersionFirstSeen(logger *zap.Logger, m Metrics, labels *nevrVersionLabeler, h *LoginHistory, userID string, login *evr.LoginProfile, now time.Time) {
+	if nevrVersionFirstSeenToday(h, normalizeNevrVersion(nevrLoginIdentity(login)), now) {
+		emitNevrVersionFirstSeen(logger, m, labels, userID, login, now)
+	}
+}
+
+// nevrLoginIdentity is the declared nevr_identity of a login, nil for a nil login or a stock client.
+func nevrLoginIdentity(login *evr.LoginProfile) *evr.NevrIdentity {
+	if login == nil {
+		return nil
+	}
+	return login.NevrIdentity
 }

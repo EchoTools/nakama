@@ -747,9 +747,10 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 	params.ignoreSuspensionsOfAltAccounts = loginHistory.IgnoreSuspensionsOfAltAccounts
 
-	// Count the account once per nevr-runtime version per UTC day. Before Update, which overwrites the
-	// history this decides from.
-	recordNevrVersionFirstSeen(logger, p.nk.metrics, nevrVersionLabels, loginHistory, params.profile.ID(), params.loginPayload, time.Now())
+	// Decide now, from the history as stored: Update below overwrites it. The count is emitted just
+	// before SendEvent, after the last rejection, because the history is only saved once the login is
+	// accepted and a rejected login that retries would otherwise be counted on every attempt.
+	nevrVersionFirstSeen := nevrVersionFirstSeenToday(loginHistory, normalizeNevrVersion(nevrLoginIdentity(params.loginPayload)), time.Now())
 
 	// Ensure the current login entry is in history so alt search includes it.
 	loginHistory.Update(params.xpID, session.clientIP, params.loginPayload, params.IsWebsocketAuthenticated)
@@ -820,6 +821,10 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	}
 
 	metricsTags["error"] = "nil"
+
+	if nevrVersionFirstSeen {
+		emitNevrVersionFirstSeen(logger, p.nk.metrics, nevrVersionLabels, params.profile.ID(), params.loginPayload, time.Now())
+	}
 
 	SendEvent(ctx, p.nk, &EventUserAuthenticated{
 		UserID:                   params.profile.ID(),
