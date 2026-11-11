@@ -1629,7 +1629,7 @@ func AccountSearchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 				case "display_name":
 					request.DisplayNamePattern = v[0]
 				case "limit":
-					limit, err := strconv.ParseUint(v[0], 10, 64)
+					limit, err := strconv.ParseUint(v[0], 10, 31)
 					if err != nil {
 						return "", runtime.NewError("invalid limit", StatusInvalidArgument)
 					}

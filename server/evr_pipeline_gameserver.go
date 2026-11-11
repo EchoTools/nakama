@@ -293,7 +293,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		}
 
 		// Parse the external port
-		if p, err := strconv.Atoi(parts[1]); err != nil {
+		if p, err := strconv.ParseUint(parts[1], 10, 16); err != nil {
 			return errFailedRegistration(session, logger, fmt.Errorf("invalid external port: %s", parts[1]), evr.BroadcasterRegistration_Unknown)
 		} else {
 			externalPort = uint16(p)
