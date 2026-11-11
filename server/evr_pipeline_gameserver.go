@@ -24,6 +24,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
+	"golang.org/x/mod/semver"
 )
 
 const MINIMUM_NATIVE_SERVER_VERSION = "2.0.0"
@@ -222,9 +223,9 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	if uuid.FromStringOrNil(request.LoginSessionId) != uuid.Nil {
 		isNative = true
 		logger.Info("Game server registration request", zap.String("login_session_id", loginSessionID.String()), zap.Uint64("server_id", serverID), zap.String("internal_ip", internalIP.String()), zap.Uint16("port", externalPort), zap.String("region", regionHash.String()), zap.String("version_lock", versionLock.String()), zap.Uint32("time_step_usecs", request.TimeStepUsecs), zap.String("version", request.Version))
-		if request.Version < MINIMUM_NATIVE_SERVER_VERSION {
-			logger.Warn("Game server version is below minimum required version", zap.String("version", request.Version), zap.String("minimum_version", MINIMUM_NATIVE_SERVER_VERSION))
-			return errFailedRegistration(session, logger, fmt.Errorf("game server version is below minimum required version: %s < %s", request.Version, MINIMUM_NATIVE_SERVER_VERSION), evr.BroadcasterRegistration_Unknown)
+		if err := checkNativeServerVersion(request.Version); err != nil {
+			logger.Warn("Game server version refused", zap.String("version", request.Version), zap.String("minimum_version", MINIMUM_NATIVE_SERVER_VERSION), zap.Error(err))
+			return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Unknown)
 		}
 
 		// Get the login session ID
@@ -1010,4 +1011,23 @@ func GameServerBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (MatchI
 		return MatchID{}, nil, err
 	}
 	return matchID, presence, nil
+}
+
+// checkNativeServerVersion admits a game server whose version has semver precedence at or above
+// MINIMUM_NATIVE_SERVER_VERSION (semver.org §9, §11: a pre-release sorts below its release). A leading "v" is
+// accepted; a version that is not valid semver is refused.
+func checkNativeServerVersion(version string) error {
+	v := version
+	if !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	core, _, _ := strings.Cut(strings.SplitN(v, "+", 2)[0], "-")
+	// x/mod/semver also accepts the shorthands vMAJOR and vMAJOR.MINOR; semver.org does not.
+	if !semver.IsValid(v) || strings.Count(core, ".") != 2 {
+		return fmt.Errorf("game server version %q is not a valid semantic version", version)
+	}
+	if semver.Compare(v, "v"+MINIMUM_NATIVE_SERVER_VERSION) < 0 {
+		return fmt.Errorf("game server version is below minimum required version: %s < %s", version, MINIMUM_NATIVE_SERVER_VERSION)
+	}
+	return nil
 }
