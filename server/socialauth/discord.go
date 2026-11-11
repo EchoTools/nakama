@@ -64,8 +64,8 @@ func (s *SocialAuthHandler) discordHttpCallbackHandler(w http.ResponseWriter, r 
 	// If there was a redirect path specified, redirect there. Only allow
 	// relative paths (no scheme, no host) to prevent open redirect attacks.
 	if redirectPath := queryParams.Get("redirect"); redirectPath != "" {
-		if u, err := url.Parse(redirectPath); err == nil && u.Scheme == "" && u.Host == "" {
-			http.Redirect(w, r, u.RequestURI(), http.StatusFound)
+		if target, ok := safeRedirectPath(redirectPath); ok {
+			http.Redirect(w, r, target, http.StatusFound)
 			return
 		}
 	}
