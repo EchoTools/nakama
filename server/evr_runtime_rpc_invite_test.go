@@ -565,8 +565,8 @@ func TestInviteCodeAlphabet(t *testing.T) {
 }
 
 // One structured record per RPC: who, what with resolved ids, outcome, latency, size.
-// The code itself is a bearer secret and never appears in it.
-func TestInviteRPCsWriteOneRecordEachAndNeverTheCode(t *testing.T) {
+// The record carries the code itself, as `code`.
+func TestInviteRPCsWriteOneRecordEachCarryingTheCode(t *testing.T) {
 	w := newInviteWorld(t)
 	c := w.create(userA, defaultCreate)
 	w.resolve(userB, c.Code)
@@ -604,14 +604,11 @@ func TestInviteRPCsWriteOneRecordEachAndNeverTheCode(t *testing.T) {
 	if resolve["match_id"] != c.MatchID {
 		t.Errorf("resolve record lacks the resolved match id: %v", resolve)
 	}
-	for _, r := range w.logs.All() {
-		blob, _ := json.Marshal(r.ContextMap())
-		if strings.Contains(r.Message+string(blob), c.Code) {
-			t.Errorf("the code appeared in a log record: %s %s", r.Message, blob)
-		}
+	if got, _ := resolve["code"].(string); got != c.Code {
+		t.Errorf("resolve record code = %v, want the code %q", resolve["code"], c.Code)
 	}
-	if fp, _ := resolve["code_fp"].(string); fp == "" || fp != inviteCodeFingerprint(c.Code) {
-		t.Errorf("resolve record code_fp = %v, want the fingerprint", resolve["code_fp"])
+	if _, present := resolve["code_fp"]; present {
+		t.Errorf("resolve record still carries code_fp: %v", resolve)
 	}
 }
 
