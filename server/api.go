@@ -599,21 +599,31 @@ func extractClientAddressFromRequest(logger *zap.Logger, r *http.Request) (strin
 	return extractClientAddress(logger, clientAddr, r, "request")
 }
 
-// redactSensitiveHeaders copies headers for logging, replacing the values of
-// anything that can carry a credential (Authorization, Cookie, API keys,
-// tokens, secrets) with "[REDACTED]". It accepts http.Header and gRPC metadata.
+// redactSensitiveHeaders copies headers for logging, replacing only credential
+// values with "[REDACTED]": Authorization, Proxy-Authorization, Cookie,
+// Set-Cookie, X-Api-Key, and any name ending in token, secret or password.
+// Exact names, not substrings: Sec-WebSocket-Key is a public handshake nonce
+// and X-Authenticated-User / WWW-Authenticate carry no credential. It accepts
+// http.Header and gRPC metadata (lower-case keys).
 func redactSensitiveHeaders[H ~map[string][]string](h H) map[string][]string {
 	out := make(map[string][]string, len(h))
 	for k, v := range h {
-		lk := strings.ToLower(k)
-		if strings.Contains(lk, "auth") || strings.Contains(lk, "cookie") || strings.Contains(lk, "token") ||
-			strings.Contains(lk, "secret") || strings.Contains(lk, "key") || strings.Contains(lk, "password") {
+		if isCredentialHeader(k) {
 			out[k] = []string{"[REDACTED]"}
 			continue
 		}
 		out[k] = v
 	}
 	return out
+}
+
+func isCredentialHeader(name string) bool {
+	switch n := strings.ToLower(name); n {
+	case "authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key":
+		return true
+	default:
+		return strings.HasSuffix(n, "token") || strings.HasSuffix(n, "secret") || strings.HasSuffix(n, "password")
+	}
 }
 
 func extractClientAddress(logger *zap.Logger, clientAddr string, source interface{}, sourceType string) (string, string) {
