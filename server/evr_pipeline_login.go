@@ -77,26 +77,6 @@ type NewLocationError struct {
 	useDMs      bool
 }
 
-// newLocationCheckNotRequired reports whether the new-location check is skipped for this login: the
-// IP is already authorized, or the session proved its identity out of band. A session is
-// authenticated when its websocket carried a valid token (session.userID is set by socket_ws.go) or
-// when the login websocket itself was authenticated (params.IsWebsocketAuthenticated, set by
-// NewSessionWS). Such a session has nothing further to prove by location, so a new IP does not
-// refuse it. An unauthenticated login from a new IP returns false and is still checked.
-//
-// The skip for an authenticated session from a new IP is logged at Info. logger must already carry
-// the xpid, as loginRequest arranges.
-func newLocationCheckNotRequired(logger *zap.Logger, session *sessionWS, params *SessionParameters, ipAuthorized bool) bool {
-	if ipAuthorized {
-		return true
-	}
-	if !params.IsWebsocketAuthenticated && session.userID.IsNil() {
-		return false
-	}
-	logger.Info("Skipped new-location check: session authenticated by token", zap.String("reason", "token_authenticated"))
-	return true
-}
-
 // ipVerificationLocationError picks how to tell a player their IP is
 // unverified, given whatever naming information was resolvable.
 //
@@ -660,8 +640,8 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
 
-	// Require IP verification, unless the IP is authorized or the session was authenticated (see newLocationCheckNotRequired).
-	if !newLocationCheckNotRequired(logger, session, params, loginHistory.IsAuthorizedIP(session.clientIP)) {
+	// Require IP verification, if the session is not authenticated.
+	if !params.IsWebsocketAuthenticated && !loginHistory.IsAuthorizedIP(session.clientIP) {
 
 		// IP is not authorized. Add a pending authorization entry.
 		//
