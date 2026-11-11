@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/assert"
@@ -81,6 +82,27 @@ func TestGroupMetadata_TimeBlockCustom(t *testing.T) {
 	// Total block should be 95 minutes
 	totalBlock := metadata.GetDefaultBlockMinutes() + metadata.GetMaintenanceMinutes()
 	assert.Equal(t, 95, totalBlock)
+}
+
+func TestGroupMetadata_PublicArenaRoundLength(t *testing.T) {
+	require.Nil(t, NewSessionScoreboard(0, time.Time{}))
+	tests := []struct {
+		name     string
+		metadata *GroupMetadata
+		want     time.Duration
+	}{
+		{name: "default", metadata: &GroupMetadata{}, want: 480 * time.Second},
+		{name: "configured", metadata: &GroupMetadata{PublicArenaRoundLengthSeconds: 600}, want: 600 * time.Second},
+		{name: "clamped", metadata: &GroupMetadata{PublicArenaRoundLengthSeconds: 999999}, want: 1800 * time.Second},
+		{name: "negative", metadata: &GroupMetadata{PublicArenaRoundLengthSeconds: -1}, want: 480 * time.Second},
+		{name: "nil metadata", want: 480 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scoreboard := NewSessionScoreboard(tt.metadata.PublicArenaRoundLength(), time.Time{})
+			require.LessOrEqual(t, tt.want-scoreboard.RemainingTime(), 20*time.Millisecond)
+		})
+	}
 }
 
 func TestGroupMetadata_BackwardCompatJSON(t *testing.T) {

@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"go.uber.org/zap"
 	"testing"
 
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -231,7 +232,7 @@ func TestCrossDivisionCandidatesNeverFormed(t *testing.T) {
 
 	// Run groupEntriesSequentially on each division separately, as the feature does
 	for division, divEntries := range grouped {
-		candidates := groupEntriesSequentially(divEntries)
+		candidates := groupEntriesSequentially(zap.NewNop(), divEntries)
 		for _, candidate := range candidates {
 			for _, e := range candidate {
 				d, _ := e.GetProperties()["division"].(string)
@@ -254,7 +255,7 @@ func TestCrossDivisionCandidatesNeverFormed_MixedInput(t *testing.T) {
 	grouped := FilterEntriesByDivision(entries)
 
 	for division, divEntries := range grouped {
-		candidates := groupEntriesSequentially(divEntries)
+		candidates := groupEntriesSequentially(zap.NewNop(), divEntries)
 		for _, candidate := range candidates {
 			for _, e := range candidate {
 				d, _ := e.GetProperties()["division"].(string)
@@ -492,7 +493,7 @@ func TestDivisionMismatchPartyBug_SmallDividedQueuesCannotFormMatches(t *testing
 	// Count total candidates across all divisions
 	totalCandidates := 0
 	for division, divEntries := range grouped {
-		candidates := groupEntriesSequentially(divEntries)
+		candidates := groupEntriesSequentially(zap.NewNop(), divEntries)
 		totalCandidates += len(candidates)
 
 		// Each candidate needs maxCount (8) players minimum for a 4v4 match

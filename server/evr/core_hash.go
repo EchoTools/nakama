@@ -42,8 +42,10 @@ func CalculateSymbolValue(str string, base uint64, precache [0x100]uint64, maxle
 			ch += 32 // Convert to lowercase
 		}
 
-		// XOR the character with the shifted/precached value
-		hash = uint64(ch) ^ shifted
+		// XOR the character with the shifted/precached value. The game widens
+		// the byte with sign extension (MOVSX / sxtb), so a byte >= 0x80
+		// contributes 0xFFFFFFFFFFFFFFxx, not 0x00000000000000xx.
+		hash = uint64(int64(int8(ch))) ^ shifted
 
 		// Update high byte for next iteration
 		highByte = uint8((hash >> 56) & 0xFF)

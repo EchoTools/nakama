@@ -1,6 +1,7 @@
 package server
 
 import (
+	"go.uber.org/zap"
 	"testing"
 	"time"
 
@@ -49,7 +50,7 @@ func TestCombatMatchmakingRules(t *testing.T) {
 			}
 
 			// 1. Test Ticket Grouping (Party Splitting)
-			candidates := groupEntriesSequentially(entries)
+			candidates := groupEntriesSequentially(zap.NewNop(), entries)
 
 			// 2. Test Team Formation (Prediction)
 			predictionChan := predictCandidateOutcomesWithConfig(candidates, cfg)
@@ -138,7 +139,7 @@ func TestCombatGate_ExactBoundary_60Seconds(t *testing.T) {
 		},
 	}
 
-	candidates := groupEntriesSequentially(entries)
+	candidates := groupEntriesSequentially(zap.NewNop(), entries)
 	predChan := predictCandidateOutcomesWithConfig(candidates, cfg)
 
 	var prediction *PredictedMatch

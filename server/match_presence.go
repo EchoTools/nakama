@@ -16,6 +16,7 @@ package server
 
 import (
 	"sync"
+	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -62,6 +63,11 @@ func (p *MatchPresence) GetReason() runtime.PresenceReason {
 type MatchJoinMarker struct {
 	presence   *MatchPresence
 	expiryTick int64
+	// startedAt is when the join attempt was accepted; only read for logging.
+	startedAt time.Time
+	// entrantID is the entrant id the join attempt handed out, if the match
+	// handler reported one; only read for logging.
+	entrantID string
 }
 
 type MatchJoinMarkerList struct {
@@ -79,11 +85,13 @@ func NewMatchJoinMarkerList(config Config, tickRate int64) *MatchJoinMarkerList 
 	}
 }
 
-func (m *MatchJoinMarkerList) Add(presence *MatchPresence, currentTick int64) {
+func (m *MatchJoinMarkerList) Add(presence *MatchPresence, currentTick int64, entrantID string) {
 	m.Lock()
 	m.joinMarkers[presence.SessionID] = &MatchJoinMarker{
 		presence:   presence,
 		expiryTick: currentTick + (m.tickRate * (m.expiryDelayMs / 1000)),
+		startedAt:  time.Now(),
+		entrantID:  entrantID,
 	}
 	m.Unlock()
 }
@@ -94,17 +102,29 @@ func (m *MatchJoinMarkerList) Mark(sessionID uuid.UUID) {
 	m.Unlock()
 }
 
-func (m *MatchJoinMarkerList) ClearExpired(tick int64) []*MatchPresence {
-	presences := make([]*MatchPresence, 0, 1)
+// Age reports how long ago the join attempt for sessionID was accepted, if its
+// marker is still pending.
+func (m *MatchJoinMarkerList) Age(sessionID uuid.UUID) (time.Duration, bool) {
+	m.RLock()
+	defer m.RUnlock()
+	joinMarker, ok := m.joinMarkers[sessionID]
+	if !ok {
+		return 0, false
+	}
+	return time.Since(joinMarker.startedAt), true
+}
+
+func (m *MatchJoinMarkerList) ClearExpired(tick int64) []*MatchJoinMarker {
+	markers := make([]*MatchJoinMarker, 0, 1)
 	m.Lock()
 	for sessionID, joinMarker := range m.joinMarkers {
 		if joinMarker.expiryTick <= tick {
-			presences = append(presences, joinMarker.presence)
+			markers = append(markers, joinMarker)
 			delete(m.joinMarkers, sessionID)
 		}
 	}
 	m.Unlock()
-	return presences
+	return markers
 }
 
 // Maintains the match presences for routing and validation purposes.

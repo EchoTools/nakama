@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go.uber.org/zap"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -79,7 +80,7 @@ func TestGroupEntriesNeverSplitsTicket(t *testing.T) {
 				entries = append(entries, makePartyTicket(id, sz, nil)...)
 			}
 
-			candidates := groupEntriesSequentially(entries)
+			candidates := groupEntriesSequentially(zap.NewNop(), entries)
 
 			// Invariant 1: every candidate size is a multiple of countMultiple (2).
 			// Invariant 2: every candidate size is <= maxCount (8).
@@ -129,7 +130,7 @@ func TestGroupEntriesNeverSplitsTicket(t *testing.T) {
 //	    Error:    "[]" should have 1 item(s), but has 0
 //	    Messages: expected exactly one candidate (4+2), got 0
 //
-// Expected: groupEntriesSequentially([5,4,2]) yields one candidate pairing the
+// Expected: groupEntriesSequentially(zap.NewNop(), [5,4,2]) yields one candidate pairing the
 // 4-party with the 2-party. Actual: it yields NO candidates at all -- every
 // party is deferred. TestGroupEntriesPartyAtomicity/party_exactly_fills_candidate
 // fails the same way ("expected 1 candidate, got 0"), so both are very likely the
@@ -143,7 +144,7 @@ func TestGroupEntries_5_4_2_NoPlayerDropped(t *testing.T) {
 	entries = append(entries, makePartyTicket("b", 4, nil)...)
 	entries = append(entries, makePartyTicket("c", 2, nil)...)
 
-	candidates := groupEntriesSequentially(entries)
+	candidates := groupEntriesSequentially(zap.NewNop(), entries)
 
 	// Expect exactly one candidate: [b(4) + c(2)] = 6 entries.
 	require.Len(t, candidates, 1, "expected exactly one candidate (4+2), got %d", len(candidates))

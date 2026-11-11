@@ -101,11 +101,16 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 		// Gate all Discord REST calls through a concurrency-limiting
 		// semaphore to prevent goroutine pileup during rate-limit storms.
-		dg.Client.Transport = newDiscordRESTLimiter(dg.Client.Transport)
+		restLimiter := newDiscordRESTLimiter(dg.Client.Transport)
+		restLimiter.logger = logger
+		dg.Client.Transport = restLimiter
 	}
 
 	// Register RPC's for device linking
 	rpcHandler := NewRPCHandler(ctx, db, dg)
+	if gnk, ok := nk.(*RuntimeGoNakamaModule); ok {
+		rpcHandler.sessionKey = gnk.config.GetSession().EncryptionKey
+	}
 
 	// Register all EVR RPCs with authorization middleware
 	if err = RegisterEVRRPCs(ctx, logger, db, nk, initializer, rpcHandler, sbmm); err != nil {
@@ -672,6 +677,10 @@ func GetPartyGroupUserIDs(ctx context.Context, nk runtime.NakamaModule, groupNam
 	if groupName == "" {
 		return nil, status.Error(codes.InvalidArgument, "user ID is required")
 	}
+	if groupName == tabletPartyGroup {
+		// The tablet marker is shared by every tablet player; it names no group to list.
+		return nil, status.Error(codes.InvalidArgument, "tablet is not a party group")
+	}
 
 	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, ActivePartyGroupIndex, fmt.Sprintf("+value.group_id:%s", Query.EscapeIndexValue(groupName)), 100, nil, "")
 	if err != nil {
@@ -718,12 +727,13 @@ func getPartyMembersForUser(ctx context.Context, nk runtime.NakamaModule, partyR
 		return []string{userID}
 	}
 
-	if settings.LobbyGroupName == "" {
+	groupName := lobbyGroupNameFromSettings(settings)
+	if groupName == "" {
 		return []string{userID}
 	}
 
 	// Look up the party UUID from the registry instead of deriving it deterministically.
-	partyUUID, ok := partyRegistry.LookupGroupPartyID(settings.LobbyGroupName)
+	partyUUID, ok := partyRegistry.LookupGroupPartyID(groupName)
 	if !ok {
 		return []string{userID}
 	}

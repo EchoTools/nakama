@@ -211,8 +211,9 @@ func (t *SNSEarlyQuitMessageTrigger) SendEarlyQuitConfigOnLogin(ctx context.Cont
 		return err
 	}
 
-	t.logger.Debug("Sent SNSEarlyQuitConfig on login",
-		zap.String("user_id", session.userID.String()))
+	t.logger.Info("Sent early quit config",
+		zap.String("user_id", session.userID.String()),
+		zap.String("session_id", session.ID().String()))
 
 	return nil
 }
@@ -235,22 +236,42 @@ func (t *SNSEarlyQuitMessageTrigger) SendFeatureFlagsOnLogin(ctx context.Context
 		return err
 	}
 
-	t.logger.Debug("Sent SNSEarlyQuitFeatureFlags on login",
-		zap.String("user_id", session.userID.String()))
+	t.logger.Info("Sent early quit feature flags",
+		zap.String("user_id", session.userID.String()),
+		zap.String("session_id", session.ID().String()),
+		zap.Uint8("flags", flags.Flags))
 
 	return nil
 }
 
-// SendEarlyQuitUpdateNotification sends the player's current early quit state.
+// SendEarlyQuitOnLogin sends what the client needs after its profile: the penalty tiers, the feature
+// flags, and an update carrying the lockout expiry. The update is not optional. The client's login
+// path passes no expiry to the game's setter (it gets -1), so a lockout in force at login starts its
+// countdown only from this message (#712).
+func (t *SNSEarlyQuitMessageTrigger) SendEarlyQuitOnLogin(ctx context.Context, session *sessionWS, state *EarlyQuitPlayerState) error {
+	if session == nil {
+		return nil
+	}
+	if err := t.SendEarlyQuitConfigOnLogin(ctx, session); err != nil {
+		return err
+	}
+	if err := t.SendFeatureFlagsOnLogin(ctx, session); err != nil {
+		return err
+	}
+	return t.SendEarlyQuitUpdateNotification(ctx, session.userID.String(), state)
+}
+
+// SendEarlyQuitUpdateNotification sends the player's current early quit state: a stamp at +0x18 that is
+// greater than the last one sent to the player, and the lockout expiry at +0x20.
 // The state parameter provides all fields needed for the notification.
 func (t *SNSEarlyQuitMessageTrigger) SendEarlyQuitUpdateNotification(ctx context.Context, userID string, state *EarlyQuitPlayerState) error {
 	if state == nil {
 		return nil
 	}
-	penaltyExpiry := time.Unix(state.PenaltyTimestamp, 0)
 	notification := evr.NewEarlyQuitUpdateNotification(
 		0, // playerID — not read by the client
-		penaltyExpiry,
+		earlyQuitStampRegistry.Next(userID, time.Now()),
+		state.PenaltyTimestamp,
 		state.NumEarlyQuits,
 		state.NumSteadyMatches,
 		state.NumSteadyEarlyQuits,
@@ -258,17 +279,18 @@ func (t *SNSEarlyQuitMessageTrigger) SendEarlyQuitUpdateNotification(ctx context
 		state.SteadyPlayerLevel,
 	)
 
-	if found := t.SendEvrMessage(userID, notification); !found {
-		t.logger.Debug("Player not connected for early quit update",
-			zap.String("user_id", userID))
-	}
+	sessions := len(t.getEvrSessions(userID))
+	t.SendEvrMessage(userID, notification)
 
-	t.logger.Debug("Sent early quit update notification",
+	t.logger.Info("Sent early quit update",
 		zap.String("user_id", userID),
-		zap.Int64("penalty_expiry", state.PenaltyTimestamp),
+		zap.Int("sessions", sessions),
+		zap.Int64("stamp", notification.Stamp),
+		zap.Int64("penalty_expiry", notification.PenaltyExpiry),
+		zap.Uint8("flags", evr.DefaultEarlyQuitFeatureFlags()),
 		zap.Int32("num_early_quits", state.NumEarlyQuits),
-		zap.Int32("penalty_level", state.PenaltyLevel),
-		zap.Int32("steady_player_level", state.SteadyPlayerLevel))
+		zap.Uint8("penalty_level", notification.PenaltyLevel),
+		zap.Uint8("steady_player_level", notification.SteadyPlayerLevel))
 
 	return nil
 }

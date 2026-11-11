@@ -379,3 +379,105 @@ func PartyListMembersRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	}
 	return string(resp), nil
 }
+
+// PartyMineMember is one member in the party/mine response.
+type PartyMineMember struct {
+	UserID   string `json:"user_id"`
+	Username string `json:"username"`
+	Leader   bool   `json:"leader"`
+	Online   bool   `json:"online"`
+}
+
+// PartyMineParty is the caller's party as party/mine returns it.
+type PartyMineParty struct {
+	PartyID   string            `json:"party_id"`
+	LeaderID  string            `json:"leader_id"`
+	UpdatedAt time.Time         `json:"updated_at"`
+	Members   []PartyMineMember `json:"members"`
+}
+
+// PartyMineRPC returns the caller's party from its persisted roster, whether or
+// not anyone in it is online: {"party": null} when they have none. This is the
+// website's view (#732); it does not touch the in-game party. A roster with
+// nobody online and no change for partyRosterRetention is treated as gone and
+// deleted.
+func PartyMineRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	start := time.Now()
+	userID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if userID == "" {
+		return "", runtime.NewError("unauthenticated", StatusUnauthenticated)
+	}
+
+	// One record per call, written however the call ends. The fields are the
+	// ones a later question needs: who asked, from where, what came back.
+	outcome, partyID, members, resultSize := "error", "", 0, 0
+	defer func() {
+		username, _ := ctx.Value(runtime.RUNTIME_CTX_USERNAME).(string)
+		sessionID, _ := ctx.Value(runtime.RUNTIME_CTX_SESSION_ID).(string)
+		clientIP, _ := ctx.Value(runtime.RUNTIME_CTX_CLIENT_IP).(string)
+		logger.WithFields(map[string]interface{}{
+			"rpc_id": "party/mine", "user_id": userID, "username": username, "session_id": sessionID,
+			"client_ip": clientIP, "args": payload, "party_id": partyID, "members": members,
+			"outcome": outcome, "latency_ms": time.Since(start).Milliseconds(), "result_size": resultSize,
+		}).Info("RPC")
+	}()
+
+	store := NewPartyRosterStore(nk)
+	resp := struct {
+		Party *PartyMineParty `json:"party"`
+	}{}
+	// Twice: an expiry that loses to a join landing in between looks at the roster again, now fresh.
+	for range 2 {
+		roster, err := store.Mine(ctx, userID)
+		if err != nil {
+			logger.WithField("error", err).Error("failed to load party roster")
+			return "", runtime.NewError("failed to load party", StatusInternalError)
+		}
+		if roster == nil {
+			outcome = "none"
+			break
+		}
+		partyID = roster.PartyID
+		party := &PartyMineParty{PartyID: roster.PartyID, LeaderID: roster.LeaderID, UpdatedAt: roster.UpdatedAt, Members: make([]PartyMineMember, 0, len(roster.Members))}
+		anyOnline := false
+		for _, m := range roster.Members {
+			online := partyMemberOnline(nk, logger, m.UserID)
+			anyOnline = anyOnline || online
+			party.Members = append(party.Members, PartyMineMember{UserID: m.UserID, Username: m.Username, Leader: m.UserID == roster.LeaderID, Online: online})
+		}
+		if anyOnline || store.now().Sub(roster.UpdatedAt) <= partyRosterRetention {
+			resp.Party, members, outcome = party, len(party.Members), "ok"
+			break
+		}
+		err = store.DeleteIfUnchanged(ctx, roster)
+		if partyRosterConflict(err) {
+			continue
+		}
+		if err != nil {
+			logger.WithField("error", err).Warn("failed to delete expired party roster")
+		}
+		outcome = "expired"
+		break
+	}
+	if outcome == "error" {
+		outcome = "contended" // both looks lost to a concurrent change: nothing to report this call
+	}
+
+	out, err := json.Marshal(resp)
+	if err != nil {
+		return "", runtime.NewError("failed to marshal response", StatusInternalError)
+	}
+	resultSize = len(out)
+	return string(out), nil
+}
+
+// partyMemberOnline reports whether the user has a logged-in session: the
+// notification stream is tracked at login and untracked at close.
+func partyMemberOnline(nk runtime.NakamaModule, logger runtime.Logger, userID string) bool {
+	presences, err := nk.StreamUserList(StreamModeNotifications, userID, "", "", false, true)
+	if err != nil {
+		logger.WithFields(map[string]interface{}{"user_id": userID, "error": err}).Warn("failed to read member presence for party/mine")
+		return false
+	}
+	return len(presences) > 0
+}

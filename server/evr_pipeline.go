@@ -65,6 +65,10 @@ type EvrPipeline struct {
 	pollFollowInterval    time.Duration
 	pollFollowMaxDuration time.Duration
 
+	// loadoutNK overrides the NakamaModule the legacy save-loadout path uses in
+	// tests; nil means p.nk. Production never sets it.
+	loadoutNK runtime.NakamaModule
+
 	// Party formation timing. Zero means use the package defaults
 	// (partyFormationTimeoutDefault / partyFormationPollIntervalDefault).
 	// Overridable in tests to avoid multi-second real waits.
@@ -103,6 +107,7 @@ type EvrPipeline struct {
 	snsPartyInvites   *MapOf[uuid.UUID, *snsPartyInviteList]
 	snsPartyPolicies  *MapOf[uuid.UUID, uint8] // SNS party join policy, absent = everyone
 	snsPartyData      *MapOf[uuid.UUID, *snsPartyDataState]
+	partyRoster       *PartyRosterStore  // persisted shadow of SNS parties; nil records nothing
 	friendPush        friendPresencePush // pushes a user's presence to their friends when it changes
 
 	remoteLogSem chan struct{} // limits concurrent RemoteLogSet processing
@@ -167,7 +172,9 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 		// Gate all Discord REST calls through a concurrency-limiting
 		// semaphore to prevent goroutine pileup during rate-limit storms.
-		dg.Client.Transport = newDiscordRESTLimiter(dg.Client.Transport)
+		restLimiter := newDiscordRESTLimiter(dg.Client.Transport)
+		restLimiter.logger = NewRuntimeGoLogger(logger)
+		dg.Client.Transport = restLimiter
 	}
 
 	runtimeLogger := NewRuntimeGoLogger(logger)
@@ -289,6 +296,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		evrUUIDToUserID:  &MapOf[uuid.UUID, uuid.UUID]{},
 		snsPartyInvites:  &MapOf[uuid.UUID, *snsPartyInviteList]{},
 		snsPartyPolicies: &MapOf[uuid.UUID, uint8]{},
+		partyRoster:      NewPartyRosterStore(nk),
 		snsPartyData:     &MapOf[uuid.UUID, *snsPartyDataState]{},
 
 		remoteLogSem: make(chan struct{}, 16), // max 16 concurrent RemoteLogSet processors
@@ -542,7 +550,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 				zap.String("evr_id", msg.EvrID.String()),
 				zap.Int32("loadout_number", msg.LoadoutNumber))
 			// Process the loadout update directly without converting to protobuf
-			if err := p.gameServerSaveLoadoutRequest(session.Context(), logger, msg); err != nil {
+			if err := p.gameServerSaveLoadoutRequest(session.Context(), logger, session, msg); err != nil {
 				logger.Error("Failed to process save loadout request", zap.Error(err))
 			}
 			return true
@@ -577,6 +585,10 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 	case *evr.ReconcileIAP:
 		isAuthenticationRequired = false
 		pipelineFn = p.reconcileIAP
+	case *evr.SNSPurchaseItems:
+		// Arrives on the transaction connection, which has no login.
+		isAuthenticationRequired = false
+		pipelineFn = p.purchaseItems
 
 	// Login/Profile Service
 	case *evr.RemoteLogSet:
@@ -750,6 +762,10 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		logger.Error("Session is not a WebSocket session")
 		return false
 	}
+	// A tablet party action moves the player off any party group code, at this one entry point for
+	// every SNS party request. A failure is logged and the action still runs: the group is a bias for
+	// matchmaking, and the party action itself must not fail on it.
+	applyTabletPartyGroup(session.Context(), logger, p.nk, session.UserID(), in)
 	if err := pipelineFn(session.Context(), logger, ws, in); err != nil {
 		// Unwrap the error
 		logger.Error("Pipeline error", zap.Error(err))
@@ -990,9 +1006,20 @@ func (p *EvrPipeline) ProcessProtobufRequest(logger *zap.Logger, session Session
 		pipelineFn = p.lobbySessionEvent
 	case *rtapi.Envelope_LobbyEntrantRemoved:
 		pipelineFn = p.lobbyEntrantsRemove
+	case *rtapi.Envelope_GameServerSaveLoadout:
+		pipelineFn = p.gameServerSaveLoadoutProtoHandler
 	default:
-		// For all other messages, use the generic protobuf handler
-		return fmt.Errorf("unhandled protobuf message type: %T", in.Message)
+		// An unrecognized message type must not drop the connection (an error
+		// here makes the session read loop close the game server's session).
+		// Log it and keep the session, as the legacy path does.
+		fields := []zap.Field{zap.String("message_type", fmt.Sprintf("%T", in.Message))}
+		if session != nil {
+			fields = append(fields,
+				zap.String("sid", session.ID().String()),
+				zap.String("uid", session.UserID().String()))
+		}
+		logger.Warn("Received unhandled protobuf message", fields...)
+		return nil
 	}
 
 	ws, ok := session.(*sessionWS)

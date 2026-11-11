@@ -24,6 +24,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
+	"golang.org/x/mod/semver"
 )
 
 const MINIMUM_NATIVE_SERVER_VERSION = "2.0.0"
@@ -222,9 +223,9 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	if uuid.FromStringOrNil(request.LoginSessionId) != uuid.Nil {
 		isNative = true
 		logger.Info("Game server registration request", zap.String("login_session_id", loginSessionID.String()), zap.Uint64("server_id", serverID), zap.String("internal_ip", internalIP.String()), zap.Uint16("port", externalPort), zap.String("region", regionHash.String()), zap.String("version_lock", versionLock.String()), zap.Uint32("time_step_usecs", request.TimeStepUsecs), zap.String("version", request.Version))
-		if request.Version < MINIMUM_NATIVE_SERVER_VERSION {
-			logger.Warn("Game server version is below minimum required version", zap.String("version", request.Version), zap.String("minimum_version", MINIMUM_NATIVE_SERVER_VERSION))
-			return errFailedRegistration(session, logger, fmt.Errorf("game server version is below minimum required version: %s < %s", request.Version, MINIMUM_NATIVE_SERVER_VERSION), evr.BroadcasterRegistration_Unknown)
+		if err := checkNativeServerVersion(request.Version); err != nil {
+			logger.Warn("Game server version refused", zap.String("version", request.Version), zap.String("minimum_version", MINIMUM_NATIVE_SERVER_VERSION), zap.Error(err))
+			return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Unknown)
 		}
 
 		// Get the login session ID
@@ -251,6 +252,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	if !ok {
 		return fmt.Errorf("session parameters not provided")
 	}
+	applyRegistrationMessage(params, request)
 
 	userIDStr := session.userID.String()
 
@@ -338,6 +340,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 
 	// Create the broadcaster config
 	config := NewGameServerPresence(session.UserID(), session.id, serverID, internalIP, externalIP, externalPort, hostingGroupIDs, defaultRegion, regionCodes, versionLock, params.serverTags, params.supportedFeatures, request.TimeStepUsecs, ipInfo, params.geoHashPrecision, isNative, request.Version)
+	config.InstalledLevels = installedLevelsFromRegistration(request.InstalledLevels)
 
 	logger = logger.With(zap.String("internal_ip", internalIP.String()), zap.String("external_ip", externalIP.String()), zap.Uint16("port", externalPort))
 
@@ -504,6 +507,66 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	}
 
 	return session.SendEvrUnrequire(protobufMsg, evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP))
+}
+
+// applyRegistrationMessage overlays the registration message onto the session
+// parameters parsed from the server's WebSocket URL. A value set in the message
+// wins. An unset (zero) value leaves the URL parameter standing, so a server that
+// does not send fields 10-19 keeps its URL configuration. Proto3 scalars cannot
+// tell zero from unset, so debug, verbose and geo_precision can be turned on or
+// set from the message but not forced off or to zero over a URL value.
+// Message values go through the same patterns and length caps as the URL values.
+func applyRegistrationMessage(params *SessionParameters, msg *rtapi.GameServerRegistrationMessage) {
+	if regions := sanitizeList(msg.Regions, 32, regionPattern); len(regions) > 0 {
+		params.serverRegions = regions
+	}
+	if guilds := sanitizeList(msg.Guilds, 32, guildPattern); len(guilds) > 0 {
+		params.serverGuilds = guilds
+	}
+	if tags := sanitizeList(msg.Tags, 32, tagsPattern); len(tags) > 0 {
+		params.serverTags = tags
+	}
+	if features := sanitizeList(msg.Features, 32, featurePattern); len(features) > 0 {
+		params.supportedFeatures = features
+	}
+	if requires := sanitizeList(msg.Requires, 32, featurePattern); len(requires) > 0 {
+		params.requiredFeatures = requires
+	}
+	// A required feature is also a supported one (see session_ws.go), whichever source it came from.
+	for _, f := range params.requiredFeatures {
+		if !slices.Contains(params.supportedFeatures, f) {
+			params.supportedFeatures = append(params.supportedFeatures, f)
+		}
+	}
+	slices.Sort(params.supportedFeatures)
+
+	if v := sanitizeQueryValue(msg.DefaultRegion, 32, regionPattern); v != "" {
+		params.defaultRegion = v
+	}
+	if msg.GeoPrecision != 0 {
+		params.geoHashPrecision = min(max(int(msg.GeoPrecision), 0), 12)
+	}
+	if v := sanitizeQueryValue(msg.ServerAddress, 64, nil); v != "" {
+		params.externalServerAddr = v
+	}
+	if msg.Debug {
+		params.enableAllRemoteLogs = true
+	}
+	if msg.Verbose {
+		params.relayOutgoing = true
+	}
+}
+
+// installedLevelsFromRegistration converts the CSymbol64 level hashes from the registration message.
+func installedLevelsFromRegistration(levels []uint64) []evr.Symbol {
+	if len(levels) == 0 {
+		return nil
+	}
+	out := make([]evr.Symbol, 0, len(levels))
+	for _, l := range levels {
+		out = append(out, evr.Symbol(l))
+	}
+	return out
 }
 
 // buildRegionCodes constructs the region codes list and determines the default region.
@@ -948,4 +1011,23 @@ func GameServerBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (MatchI
 		return MatchID{}, nil, err
 	}
 	return matchID, presence, nil
+}
+
+// checkNativeServerVersion admits a game server whose version has semver precedence at or above
+// MINIMUM_NATIVE_SERVER_VERSION (semver.org §9, §11: a pre-release sorts below its release). A leading "v" is
+// accepted; a version that is not valid semver is refused.
+func checkNativeServerVersion(version string) error {
+	v := version
+	if !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	core, _, _ := strings.Cut(strings.SplitN(v, "+", 2)[0], "-")
+	// x/mod/semver also accepts the shorthands vMAJOR and vMAJOR.MINOR; semver.org does not.
+	if !semver.IsValid(v) || strings.Count(core, ".") != 2 {
+		return fmt.Errorf("game server version %q is not a valid semantic version", version)
+	}
+	if semver.Compare(v, "v"+MINIMUM_NATIVE_SERVER_VERSION) < 0 {
+		return fmt.Errorf("game server version is below minimum required version: %s < %s", version, MINIMUM_NATIVE_SERVER_VERSION)
+	}
+	return nil
 }

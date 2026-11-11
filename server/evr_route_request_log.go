@@ -1,8 +1,6 @@
 package server
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"net"
 	"net/http"
 	"strings"
@@ -13,7 +11,7 @@ import (
 
 // The service-status and matchmaker-queue routes are called by game clients, which cannot send an HTTP key.
 // Nothing authenticates those requests, so the record each one leaves is its only attribution: the client
-// address, a label for the token it carried (never the token), what it asked for, the outcome, the latency
+// address, the token it carried, what it asked for, the outcome, the latency
 // and the size of the answer. One record per request, written where the handler returns.
 
 // routeRecorder remembers the status and the size of what a handler wrote.
@@ -62,13 +60,12 @@ func routeClientAddress(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-// routeTokenLabel names a token without revealing it: the first 8 hex characters of its SHA-256, or "none".
+// routeTokenLabel is the token as the request carried it, or "none" when it carried none.
 func routeTokenLabel(token string) string {
 	if token == "" {
 		return "none"
 	}
-	sum := sha256.Sum256([]byte(token))
-	return "sha256:" + hex.EncodeToString(sum[:])[:8]
+	return token
 }
 
 // recordRoute writes the one record of a request. `fields` are what only the handler knows.

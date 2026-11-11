@@ -404,6 +404,9 @@ func (s *sessionNEVR) CloseUnlock() {
 	s.closeMu.Unlock()
 }
 
+// Close ends the session. The first caller wins (s.stopped), so the reason
+// logged and sent to EventSessionEnd is the first caller's; later calls return
+// without effect. An empty msg means the client closed the socket.
 func (s *sessionNEVR) Close(msg string, reason runtime.PresenceReason, envelopes ...*rtapi.Envelope) {
 	s.CloseLock()
 	// Cancel any ongoing operations tied to this session.
@@ -473,7 +476,7 @@ func (s *sessionNEVR) Close(msg string, reason runtime.PresenceReason, envelopes
 	}
 	s.Unlock()
 
-	s.logger.Info("Closed client connection")
+	logSessionClosed(s.logger, msg, reason)
 
 	// Fire an event for session end.
 	if fn := s.runtime.EventSessionEnd(); fn != nil {

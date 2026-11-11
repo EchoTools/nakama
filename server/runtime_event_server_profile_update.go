@@ -53,31 +53,52 @@ func (s *EventServerProfileUpdate) Process(ctx context.Context, logger runtime.L
 		return fmt.Errorf("unknown mode: %s", s.Mode)
 	}
 
-	// Get the players existing statistics
+	// Get the player's existing statistics: all-time, and the current day and
+	// week (dailyWeeklyStatMode is this mode).
 	prevPlayerStats, _, err := PlayerStatisticsGetID(ctx, db, nk, s.UserID, s.GroupID, []evr.Symbol{s.Mode}, s.Mode)
 	if err != nil {
 		return fmt.Errorf("failed to get player statistics: %w", err)
 	}
-	g := evr.StatisticsGroup{
-		Mode:          s.Mode,
-		ResetSchedule: evr.ResetScheduleAllTime,
+
+	// Each schedule merges the match into its own row's current value, so a
+	// daily row holds today's total and a weekly row this week's. Merging into
+	// the all-time value and writing it to all three made every daily and
+	// weekly board a copy of the all-time one.
+	entries := make([]*StatisticsQueueEntry, 0)
+	for _, r := range []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime} {
+		g := evr.StatisticsGroup{
+			Mode:          s.Mode,
+			ResetSchedule: r,
+		}
+
+		// Use defaults if the player has no existing statistics
+		prevStats, ok := prevPlayerStats[g]
+		if !ok {
+			prevStats = evr.NewServerProfile().Statistics[g]
+		}
+
+		scheduleEntries, err := StatisticsToEntries(s.UserID, s.DisplayName, s.GroupID, s.Mode, r, prevStats, stats)
+		if err != nil {
+			return fmt.Errorf("failed to convert %s statistics to entries: %w", r, err)
+		}
+		entries = append(entries, scheduleEntries...)
 	}
 
-	// Use defaults if the player has no existing statistics
-	prevStats, ok := prevPlayerStats[g]
-	if !ok {
-		prevStats = evr.NewServerProfile().Statistics[g]
-	}
-
-	entries, err := StatisticsToEntries(s.UserID, s.DisplayName, s.GroupID, s.Mode, prevStats, stats)
-	if err != nil {
-		return fmt.Errorf("failed to convert statistics to entries: %w", err)
-	}
+	logger.WithFields(map[string]any{
+		"uid":     s.UserID,
+		"gid":     s.GroupID,
+		"mode":    s.Mode.String(),
+		"entries": len(entries),
+	}).Debug("Server profile update queued")
 
 	return statisticsQueue.Add(entries)
 }
 
-func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, prev, update evr.Statistics) ([]*StatisticsQueueEntry, error) {
+// StatisticsToEntries merges a match's stats (update) into prev, the player's
+// current stats for one schedule, and returns the queue entries that set that
+// schedule's rows to the result. prev must be that schedule's own stats: the
+// daily total for the daily rows, not the all-time one.
+func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, schedule evr.ResetSchedule, prev, update evr.Statistics) ([]*StatisticsQueueEntry, error) {
 
 	// Merge the update (match stats) into the previous stats (totals)
 	// to get the new totals.
@@ -147,14 +168,12 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, p
 	// Recalculate fields (percentages, averages, etc.) based on the new totals
 	total.CalculateFields()
 
-	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
-
 	// Use OperatorSet for everything because the absolute totals have been calculated.
 	// This avoids the Float64ToScore offset accumulation issue with OperatorIncrement.
 	operator := OperatorSet
 
 	// construct the entries
-	entries := make([]*StatisticsQueueEntry, 0, len(resetSchedules)*totalElem.NumField())
+	entries := make([]*StatisticsQueueEntry, 0, totalElem.NumField())
 	for i := 0; i < totalElem.NumField(); i++ {
 		totalField := totalElem.Field(i)
 		if totalField.IsNil() {
@@ -171,35 +190,42 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, p
 		}
 		statValue := sv.GetValue()
 
+		// Ratings have one writer: the remote-log path, which computes them from
+		// the match result. This update carries the prior boards it read, so
+		// writing them back with OperatorSet would race the rating write through
+		// the one FIFO queue and restore the pre-match Mu and Sigma. Every mode's
+		// statistics pass through here, so this covers arena and combat alike.
+		if IsTeamSkillRatingStat(statName) {
+			continue
+		}
+
 		// Skip stats that are not set or negative
 		if statValue <= 0 {
 			continue
 		}
 
-		for _, r := range resetSchedules {
-
-			meta := LeaderboardMeta{
-				GroupID:       groupID,
-				Mode:          mode,
-				StatName:      statName,
-				Operator:      operator,
-				ResetSchedule: r,
-			}
-
-			score, subscore, err := Float64ToScore(statValue)
-			if err != nil {
-				return nil, fmt.Errorf("failed to convert float64 to int64 pair: %w", err)
-			}
-
-			entries = append(entries, &StatisticsQueueEntry{
-				BoardMeta:   meta,
-				UserID:      userID,
-				DisplayName: displayName,
-				Score:       score,
-				Subscore:    subscore,
-				Metadata:    nil,
-			})
+		meta := LeaderboardMeta{
+			GroupID:       groupID,
+			Mode:          mode,
+			StatName:      statName,
+			Operator:      operator,
+			ResetSchedule: schedule,
 		}
+
+		score, subscore, err := Float64ToScore(statValue)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert float64 to int64 pair: %w", err)
+		}
+
+		entries = append(entries, &StatisticsQueueEntry{
+			BoardMeta:   meta,
+			UserID:      userID,
+			DisplayName: displayName,
+			Score:       score,
+			Subscore:    subscore,
+			Metadata:    nil,
+			Writer:      StatisticsWriterProfileUpdate,
+		})
 	}
 
 	return entries, nil

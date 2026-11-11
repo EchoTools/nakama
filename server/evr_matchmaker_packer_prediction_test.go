@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"go.uber.org/zap"
 	"math"
 	"testing"
 	"time"
@@ -162,7 +163,7 @@ func TestEmittedCandidatesSurvivePrediction(t *testing.T) {
 					for i, r := range perm {
 						mus[i] = spread.mu(r)
 					}
-					candidates := groupEntriesSequentially(buildArenaPool(shape, mus))
+					candidates := groupEntriesSequentially(zap.NewNop(), buildArenaPool(shape, mus))
 
 					want := 0
 					for _, c := range candidates {

@@ -156,6 +156,9 @@ var (
 		0xe06972f49cd72265: (*SNSFriendRemoveNotify)(nil),
 		0x191aa30801ec6d03: (*SNSFriendWithdrawnNotify)(nil),
 		0xb9b86c0ce8e8d0c1: (*SNSFriendRejectNotify)(nil),
+		// Store (transaction service)
+		0xf1cefc446985b4f5: (*SNSPurchaseItems)(nil),
+		0x8d049b8991fc695a: (*SNSPurchaseItemsResult)(nil),
 		// Custom messages
 		0x9ee5107d9e29fd63: (*NEVRProtobufMessageV1)(nil),
 		0xc6b3710cd9c4ef47: (*NEVRProtobufJSONMessageV1)(nil),

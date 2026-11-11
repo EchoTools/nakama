@@ -154,6 +154,15 @@ func UpdateMMRRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 	}
 	displayName := users[0].GetDisplayName()
 
+	callerID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	logLanded := func(boardID, stat string, score, subscore int64, prev teamSkillRatingPrevious) {
+		logTeamSkillRatingWrite(logger, teamSkillRatingWrite{
+			UserID: req.UserID, BoardID: boardID, Stat: stat,
+			Score: score, Subscore: subscore,
+			Writer: StatisticsWriterMMRRPC, OperatorID: callerID,
+		}, prev)
+	}
+
 	// Write Mu to leaderboard
 	muBoardID := StatisticBoardID(req.GroupID, mode, TeamSkillRatingMuStatisticID, evr.ResetScheduleAllTime)
 	muScore, muSubscore, err := Float64ToScore(req.Mu)
@@ -161,6 +170,7 @@ func UpdateMMRRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 		return "", runtime.NewError(fmt.Sprintf("Invalid Mu value: %v", err), StatusInvalidArgument)
 	}
 
+	muPrev := readTeamSkillRatingPrevious(ctx, nk, muBoardID, req.UserID)
 	if _, err := nk.LeaderboardRecordWrite(ctx, muBoardID, req.UserID, displayName, muScore, muSubscore, nil, &operatorSet); err != nil {
 		// Try creating the leaderboard first
 		if createErr := nk.LeaderboardCreate(ctx, muBoardID, true, "desc", "set", "", nil, true); createErr != nil {
@@ -179,6 +189,8 @@ func UpdateMMRRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 		}
 	}
 
+	logLanded(muBoardID, TeamSkillRatingMuStatisticID, muScore, muSubscore, muPrev)
+
 	// Write Sigma to leaderboard
 	sigmaBoardID := StatisticBoardID(req.GroupID, mode, TeamSkillRatingSigmaStatisticID, evr.ResetScheduleAllTime)
 	sigmaScore, sigmaSubscore, err := Float64ToScore(req.Sigma)
@@ -186,6 +198,7 @@ func UpdateMMRRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 		return "", runtime.NewError(fmt.Sprintf("Invalid Sigma value: %v", err), StatusInvalidArgument)
 	}
 
+	sigmaPrev := readTeamSkillRatingPrevious(ctx, nk, sigmaBoardID, req.UserID)
 	if _, err := nk.LeaderboardRecordWrite(ctx, sigmaBoardID, req.UserID, displayName, sigmaScore, sigmaSubscore, nil, &operatorSet); err != nil {
 		if createErr := nk.LeaderboardCreate(ctx, sigmaBoardID, true, "desc", "set", "", nil, true); createErr != nil {
 			logger.WithFields(map[string]interface{}{
@@ -203,20 +216,28 @@ func UpdateMMRRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk run
 		}
 	}
 
+	logLanded(sigmaBoardID, TeamSkillRatingSigmaStatisticID, sigmaScore, sigmaSubscore, sigmaPrev)
+
 	// Also write the ordinal
 	ordinal := req.Mu - 3*req.Sigma // Z=3 default
 	ordinalBoardID := StatisticBoardID(req.GroupID, mode, TeamSkillRatingOrdinalStatisticID, evr.ResetScheduleAllTime)
 	ordinalScore, ordinalSubscore, err := Float64ToScore(ordinal)
 	if err == nil {
+		ordinalPrev := readTeamSkillRatingPrevious(ctx, nk, ordinalBoardID, req.UserID)
+		landed := true
 		if _, err := nk.LeaderboardRecordWrite(ctx, ordinalBoardID, req.UserID, displayName, ordinalScore, ordinalSubscore, nil, &operatorSet); err != nil {
 			// Non-fatal: ordinal leaderboard may not exist yet
+			landed = false
 			if createErr := nk.LeaderboardCreate(ctx, ordinalBoardID, true, "desc", "set", "", nil, true); createErr == nil {
-				nk.LeaderboardRecordWrite(ctx, ordinalBoardID, req.UserID, displayName, ordinalScore, ordinalSubscore, nil, &operatorSet)
+				_, retryErr := nk.LeaderboardRecordWrite(ctx, ordinalBoardID, req.UserID, displayName, ordinalScore, ordinalSubscore, nil, &operatorSet)
+				landed = retryErr == nil
 			}
+		}
+		if landed {
+			logLanded(ordinalBoardID, TeamSkillRatingOrdinalStatisticID, ordinalScore, ordinalSubscore, ordinalPrev)
 		}
 	}
 
-	callerID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 	logger.WithFields(map[string]interface{}{
 		"caller_id": callerID,
 		"user_id":   req.UserID,

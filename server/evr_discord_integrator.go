@@ -58,6 +58,8 @@ type DiscordIntegrator struct {
 	queueCooldowns     *MapOf[QueueEntry, time.Time]
 	idcache            *MapOf[string, string]
 	memberCache        *MapOf[string, cachedMember]
+	// guildGroupMemberRemoveFn replaces the external removal boundary in focused tests.
+	guildGroupMemberRemoveFn func(context.Context, string, string, string) error
 
 	// ignSyncMu serializes syncMembersIGN per Nakama user id. discordgo
 	// dispatches each gateway event handler in its own goroutine, and a single
@@ -194,7 +196,7 @@ func (c *DiscordIntegrator) Start() {
 				logger.Warn("Stopping Discord integrator syncing")
 				return
 			case entry := <-c.queueCh:
-				if entry.GuildID == "" || entry.DiscordID == "" {
+				if !isSyncableGuildID(entry.GuildID) || entry.DiscordID == "" {
 					logger.Warn("Invalid queue entry", zap.String("discord_id", entry.DiscordID), zap.String("guild_id", entry.GuildID))
 					continue
 				}
@@ -225,7 +227,7 @@ func (c *DiscordIntegrator) Start() {
 						)
 						c.queueCooldowns.Delete(entry)
 						processed++
-						if entry.GuildID == "" || entry.DiscordID == "" {
+						if !isSyncableGuildID(entry.GuildID) || entry.DiscordID == "" {
 							logger.Warn("Invalid queue entry", zap.String("discord_id", entry.DiscordID), zap.String("guild_id", entry.GuildID))
 							return true
 						} else if err := c.syncMember(c.ctx, logger, entry.DiscordID, entry.GuildID, entry.DoFullUpdate); err != nil {
@@ -310,6 +312,12 @@ func (c *DiscordIntegrator) Start() {
 
 // Queue a user for caching/updating.
 func (c *DiscordIntegrator) QueueSyncMember(guildID, discordID string, full bool) {
+	if !isSyncableGuildID(guildID) {
+		// No guild to sync against (empty or the all-zero id). Say who asked,
+		// at debug: it is expected for a groupless profile.
+		c.logger.Debug("Skipping member sync with no guild", zap.String("discord_id", discordID), zap.String("guild_id", guildID), zap.String("caller", callerName(2)))
+		return
+	}
 	metricsTags := map[string]string{
 		"guild_id": guildID,
 		"group_id": c.GuildIDToGroupID(guildID),
@@ -479,6 +487,34 @@ func (c *DiscordIntegrator) GroupIDToGuildID(groupID string) string {
 	return guildID
 }
 
+func syncGuildMembersForSession(ctx context.Context, logger *zap.Logger, enabled bool, discordID string, groups map[string]*GuildGroup, full bool, syncMember func(context.Context, *zap.Logger, string, string, bool) error) error {
+	if !enabled || discordID == "" {
+		return nil
+	}
+	var syncErrors []error
+	for _, group := range groups {
+		if group == nil || !isSyncableGuildID(group.GuildID) {
+			continue
+		}
+		if err := syncMember(ctx, logger, discordID, group.GuildID, full); err != nil {
+			logger.Warn("Failed to sync guild member", zap.String("guild_id", group.GuildID), zap.Error(err))
+			syncErrors = append(syncErrors, fmt.Errorf("guild %s: %w", group.GuildID, err))
+		}
+	}
+	return errors.Join(syncErrors...)
+}
+
+// syncGuildMembersAndReloadGroups keeps the groups loaded for the current login
+// or lobby authorization when any Discord role refresh fails. The sync helper
+// logs each failed guild with its guild_id; reloading after a partial sync
+// could otherwise apply an incomplete role snapshot to the current request.
+func syncGuildMembersAndReloadGroups(ctx context.Context, logger *zap.Logger, discordID string, groups map[string]*GuildGroup, full bool, syncMember func(context.Context, *zap.Logger, string, string, bool) error, reloadGroups func() (map[string]*GuildGroup, error)) (map[string]*GuildGroup, error) {
+	if err := syncGuildMembersForSession(ctx, logger, true, discordID, groups, full, syncMember); err != nil {
+		return groups, nil
+	}
+	return reloadGroups()
+}
+
 // Syncs a user to all of their guilds.
 func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, discordID, guildID string, full bool) error {
 	if guildID == "" {
@@ -489,15 +525,28 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 		return errors.New("guild group not found")
 	}
 
-	member, err := c.GuildMember(guildID, discordID)
+	var member *discordgo.Member
+	var err error
+	if ServiceSettings().SyncGuildMembersWithoutIntent() {
+		member, err = c.GuildMemberFresh(guildID, discordID)
+	} else {
+		member, err = c.GuildMember(guildID, discordID)
+	}
 	if errors.Is(err, ErrDiscordRESTOverloaded) {
 		// Discord REST API is temporarily unavailable due to rate limiting.
 		// Skip the sync rather than treating this as "user not found."
 		logger.Warn("Discord REST overloaded, skipping guild member sync", zap.String("discord_id", discordID), zap.String("guild_id", guildID))
+		if ServiceSettings().SyncGuildMembersWithoutIntent() {
+			return fmt.Errorf("Discord REST overloaded during no-intent member sync: %w", err)
+		}
 		return nil
 	}
 	if errors.Is(err, ErrMemberNotFound) {
-		if removeErr := c.GuildGroupMemberRemove(ctx, guildID, discordID, ""); removeErr != nil {
+		removeMember := c.guildGroupMemberRemoveFn
+		if removeMember == nil {
+			removeMember = c.GuildGroupMemberRemove
+		}
+		if removeErr := removeMember(ctx, guildID, discordID, ""); removeErr != nil {
 			return fmt.Errorf("failed to remove guild group member: %w", removeErr)
 		}
 		logger.Info("Member not found, removed from guild group", zap.String("discord_id", discordID), zap.String("guild_id", guildID))
@@ -556,6 +605,11 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 		}
 		profile = updated
 	}
+	if ServiceSettings().SyncGuildMembersWithoutIntent() {
+		if err := syncMemberProfileCosmetics(ctx, c.nk, profile, member, groupID); err != nil {
+			return fmt.Errorf("error syncing account cosmetics: %w", err)
+		}
+	}
 
 	// Update headset-linked role
 	roleID := group.RoleMap.AccountLinked
@@ -569,6 +623,32 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 		logger.Warn("Error updating platform roles", zap.Error(err))
 	}
 
+	return nil
+}
+
+func syncMemberProfileCosmetics(ctx context.Context, nk runtime.NakamaModule, profile *EVRProfile, member *discordgo.Member, groupID string) error {
+	if member == nil || member.User == nil {
+		return errors.New("guild member is missing user data")
+	}
+	username := member.User.Username
+	locale := profile.LangTag()
+	if member.User.Locale != "" {
+		locale = member.User.Locale
+	}
+	avatarURL := profile.AvatarURL()
+	if profile.GetActiveGroupID().String() == groupID {
+		avatarURL = member.AvatarURL("512")
+	}
+	if profile.Username() == username && profile.LangTag() == locale && profile.AvatarURL() == avatarURL {
+		return nil
+	}
+	metadata, err := profile.MarshalMap()
+	if err != nil {
+		return fmt.Errorf("failed to marshal account metadata: %w", err)
+	}
+	if err := nk.AccountUpdateId(ctx, profile.ID(), username, metadata, profile.GetActiveGroupDisplayName(), "", "", locale, avatarURL); err != nil {
+		return fmt.Errorf("failed to update account: %w", err)
+	}
 	return nil
 }
 
@@ -637,10 +717,13 @@ func (c *DiscordIntegrator) guildMember(guildID, discordID string, allowStale bo
 		return cached.member, nil
 	}
 
-	// Check discordgo's state cache (populated by gateway events).
-	if member, err = c.dg.State.Member(guildID, discordID); err == nil && member != nil {
-		c.memberCache.Store(cacheKey, cachedMember{member: member, expiresAt: time.Now().Add(memberCacheTTL)})
-		return member, nil
+	// With the members intent disabled, state has no member-update events to
+	// keep it current. Use the TTL cache and REST as the only sources then.
+	if !ServiceSettings().SyncGuildMembersWithoutIntent() && c.dg.State != nil {
+		if member, err = c.dg.State.Member(guildID, discordID); err == nil && member != nil {
+			c.memberCache.Store(cacheKey, cachedMember{member: member, expiresAt: time.Now().Add(memberCacheTTL)})
+			return member, nil
+		}
 	}
 
 	// Fall back to the Discord API.
@@ -661,7 +744,11 @@ func (c *DiscordIntegrator) guildMember(guildID, discordID string, allowStale bo
 		return nil, fmt.Errorf("error getting guild member: %w", err)
 	}
 
-	c.dg.State.MemberAdd(member)
+	if !ServiceSettings().SyncGuildMembersWithoutIntent() && c.dg.State != nil {
+		if err := c.dg.State.MemberAdd(member); err != nil {
+			c.logger.Debug("Error caching guild member in Discord state", zap.String("guild_id", guildID), zap.String("discord_id", discordID), zap.Error(err))
+		}
+	}
 	c.memberCache.Store(cacheKey, cachedMember{member: member, expiresAt: time.Now().Add(memberCacheTTL)})
 	return member, nil
 }
@@ -1144,7 +1231,7 @@ func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logg
 			// Notify the user that the display name they have chosen is in use.
 			ownerID := ownerMap[displayName][0]
 			logger.Warn("Display name in use", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.String("caller_user_id", profile.ID()))
-			if err := d.SendDisplayNameInUseNotification(ctx, member.User.ID, d.UserIDToDiscordID(ownerID), displayName, member.User.Username); err != nil {
+			if err := d.SendDisplayNameInUseNotification(ctx, member.User.ID, d.ownerUsername(ctx, ownerID), displayName, member.User.Username); err != nil {
 				logger.Debug("Error sending display name in use notification", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.Error(err))
 			}
 		}
@@ -1214,9 +1301,9 @@ func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logg
 	return profile, nil
 }
 
-func (d *DiscordIntegrator) SendDisplayNameInUseNotification(ctx context.Context, discordID, ownerDiscordID, displayName string, fallbackDisplayName string) error {
+func (d *DiscordIntegrator) SendDisplayNameInUseNotification(ctx context.Context, discordID, ownerUsername, displayName string, fallbackDisplayName string) error {
 	// Only notify the user if the force display name to match IGN is set.
-	message := fmt.Sprintf("The display name `%s` is already in use/reserved by <@%s>. Your in-game name will be your username: `%s`", displayName, ownerDiscordID, fallbackDisplayName)
+	message := displayNameInUseMessage(displayName, ownerUsername, fallbackDisplayName)
 	if _, err := SendUserMessage(ctx, d.dg, discordID, message); err != nil {
 		return fmt.Errorf("error sending message: %w", err)
 	}
@@ -1253,6 +1340,13 @@ func (d *DiscordIntegrator) updateMemberRole(member *discordgo.Member, roleID st
 func (d *DiscordIntegrator) GuildGroupMemberRemove(ctx context.Context, guildID, discordID string, callerDiscordID string) error {
 	groupID := d.GuildIDToGroupID(guildID)
 	if groupID == "" {
+		return nil
+	}
+
+	// Membership of the default guild group is not derived from Discord, so a
+	// Discord-driven removal (no issuing moderator) must not undo it (#749).
+	// An explicit kick or ban by a moderator still applies.
+	if callerDiscordID == "" && isDefaultGuildGroup(groupID) {
 		return nil
 	}
 

@@ -137,11 +137,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 
 	//bot.LogLevel = discordgo.LogDebug
 	dg.StateEnabled = true
-
-	dg.Identify.Intents = discordgo.IntentsNone
-	dg.Identify.Intents |= discordgo.IntentGuilds
-	dg.Identify.Intents |= discordgo.IntentGuildMembers
-	dg.Identify.Intents |= discordgo.IntentGuildBans
+	dg.Identify.Intents = discordIdentifyIntents(ServiceSettings().SyncGuildMembersWithoutIntent())
 
 	dg.AddHandlerOnce(func(s *discordgo.Session, m *discordgo.Ready) {
 
@@ -230,6 +226,14 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 	}()
 
 	return &appbot, nil
+}
+
+func discordIdentifyIntents(syncGuildMembersWithoutIntent bool) discordgo.Intent {
+	intents := discordgo.IntentGuilds | discordgo.IntentGuildBans
+	if !syncGuildMembersWithoutIntent {
+		intents |= discordgo.IntentGuildMembers
+	}
+	return intents
 }
 
 func (e *DiscordAppBot) discordGoLogger(msgL int, caller int, format string, a ...interface{}) {
@@ -2740,7 +2744,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			logger.WithField("label", label).Info("Match prepared")
-			return editInteractionResponse(s, i, fmt.Sprintf("Match prepared with label ```json\n%s\n```\nhttps://echo.taxi/spark://c/%s", label.GetLabelIndented(), strings.ToUpper(label.ID.UUID.String())))
+			_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+				Embeds: &[]*discordgo.MessageEmbed{allocateEmbed(label, region)},
+			})
+			return err
 		},
 		"show": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
@@ -3270,7 +3277,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						return fmt.Errorf("failed to unmarshal matchmaking config: %w", err)
 					}
 				}
-				if matchmakingConfig.LobbyGroupName == "" {
+				if lobbyGroupNameFromSettings(*matchmakingConfig) == "" {
 					return errors.New("set a group ID first with `/party group`")
 				}
 
@@ -3356,7 +3363,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				// Validate the group is not a reserved group
-				if lo.Contains([]string{"admin", "moderator", "verified"}, groupName) {
+				if lo.Contains([]string{"admin", "moderator", "verified", tabletPartyGroup}, groupName) {
 					return errors.New("invalid group ID. It is a reserved group")
 				}
 				// lowercase the group
@@ -4838,6 +4845,10 @@ func isExpectedUserError(err error) bool {
 	}
 	// Allocation could not find a free game server.
 	if errors.Is(err, ErrMatchmakingNoAvailableServers) {
+		return true
+	}
+	// Every game server refused the requested level for the mode.
+	if IsInvalidLevelError(err) {
 		return true
 	}
 	// A targeted player was not found in the requested match/guild.

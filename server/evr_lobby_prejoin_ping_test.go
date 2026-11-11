@@ -19,7 +19,7 @@ import (
 // than returning the failure to the player.
 func TestErrPreJoinPingFailed_Sentinel(t *testing.T) {
 	// Reproduce the exact wrapping done in validatePreJoinPing.
-	inner := NewLobbyErrorf(InternalError, "pre-join ping validation failed: 1 of 1 party members could not reach server 157.211.9.85:6792")
+	inner := NewLobbyErrorf(Timeout, "your connection to that server is too slow or unreachable")
 	wrapped := fmt.Errorf("%w: %w", ErrPreJoinPingFailed, inner)
 
 	t.Run("errors.Is detects sentinel", func(t *testing.T) {
@@ -27,9 +27,9 @@ func TestErrPreJoinPingFailed_Sentinel(t *testing.T) {
 			"caller must be able to detect ping failure via errors.Is to skip the server")
 	})
 
-	t.Run("LobbyErrorCode still returns InternalError", func(t *testing.T) {
-		assert.Equal(t, InternalError, LobbyErrorCode(wrapped),
-			"LobbyErrorCode must unwrap to InternalError so the client error code is preserved on direct-join paths")
+	t.Run("LobbyErrorCode returns the coded error", func(t *testing.T) {
+		assert.Equal(t, Timeout, LobbyErrorCode(wrapped),
+			"LobbyErrorCode must unwrap to Timeout so the client gets a coded, plain-language failure")
 	})
 
 	t.Run("unrelated error is not ErrPreJoinPingFailed", func(t *testing.T) {

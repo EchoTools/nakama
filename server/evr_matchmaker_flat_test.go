@@ -136,7 +136,7 @@ func TestGroupEntriesPartyAtomicity(t *testing.T) {
 			})
 		}
 
-		candidates := groupEntriesSequentially(entries)
+		candidates := groupEntriesSequentially(zap.NewNop(), entries)
 
 		// Verify no candidate splits the party ticket across boundaries
 		for _, candidate := range candidates {
@@ -217,7 +217,7 @@ func TestGroupEntriesPartyAtomicity(t *testing.T) {
 			})
 		}
 
-		candidates := groupEntriesSequentially(entries)
+		candidates := groupEntriesSequentially(zap.NewNop(), entries)
 
 		// The party (size 4) must appear in the first candidate, not be
 		// pushed to a leftover remainder by 8 solos filling it first.
@@ -302,7 +302,7 @@ func TestGroupEntriesPartyAtomicity(t *testing.T) {
 			})
 		}
 
-		candidates := groupEntriesSequentially(entries)
+		candidates := groupEntriesSequentially(zap.NewNop(), entries)
 
 		// First candidate should contain the large party (4) + small party (2) + 2 solos = 8
 		if len(candidates) == 0 {
@@ -364,7 +364,7 @@ func TestGroupEntriesPartyAtomicity(t *testing.T) {
 			})
 		}
 
-		candidates := groupEntriesSequentially(entries)
+		candidates := groupEntriesSequentially(zap.NewNop(), entries)
 		if len(candidates) != 1 {
 			t.Fatalf("expected 1 candidate, got %d", len(candidates))
 		}
@@ -404,7 +404,7 @@ func TestGroupEntriesPartyAtomicity(t *testing.T) {
 			})
 		}
 
-		candidates := groupEntriesSequentially(entries)
+		candidates := groupEntriesSequentially(zap.NewNop(), entries)
 		// The oversized party should be skipped, no candidates produced
 		if len(candidates) != 0 {
 			t.Fatalf("expected 0 candidates for oversized party, got %d", len(candidates))

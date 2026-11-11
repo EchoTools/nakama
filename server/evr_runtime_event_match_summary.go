@@ -92,6 +92,11 @@ type MatchSummaryState struct {
 
 	// Goal history for the match
 	Goals []MatchGoalRecord `json:"goals,omitempty" bson:"goals,omitempty"`
+
+	// Each player's end-of-match combat stats, keyed by XPID. Written per
+	// player by the remote-log path (mongoPlayerMatchStatsStore), never by
+	// BuildMatchSummary; omitempty keeps the summary's $set from clearing it.
+	PlayerStats map[string]PlayerMatchStats `json:"player_stats,omitempty" bson:"player_stats,omitempty"`
 }
 
 // MatchGoalRecord stores goal information for replay/analysis.

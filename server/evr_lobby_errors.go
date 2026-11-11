@@ -65,6 +65,20 @@ var LobbyErrorMessages = map[LobbyErrorCodeValue]string{
 	NotALobbyGroupMod:       "not_a_lobby_group_mod",
 }
 
+const invalidLevelMessage = "invalid level"
+
+// NewInvalidLevelError is the BadRequest returned when every game server refused
+// the requested level for the mode.
+func NewInvalidLevelError() LobbyError {
+	return NewLobbyError(BadRequest, invalidLevelMessage)
+}
+
+// IsInvalidLevelError reports whether err is, or wraps, the error from NewInvalidLevelError.
+func IsInvalidLevelError(err error) bool {
+	var lerr LobbyError
+	return errors.As(err, &lerr) && lerr.Code() == BadRequest && lerr.Message() == invalidLevelMessage
+}
+
 // LobbyError struct that implements the error interface.
 type LobbyError struct {
 	code       LobbyErrorCodeValue
@@ -184,8 +198,12 @@ func LobbySessionFailureFromError(mode evr.Symbol, groupID uuid.UUID, err error)
 		// If the error is a wrapped LobbyError, use the code and original message
 	} else if errors.As(err, &lErr) {
 		code = evr.LobbySessionFailureErrorCode(lErr.code)
-		// Keep the original message.
+		// Keep the original message, except for a pre-join ping failure: its
+		// chain text is internal detail, so the player gets the plain message.
 		message = err.Error()
+		if errors.Is(err, ErrPreJoinPingFailed) {
+			message = lErr.Message()
+		}
 
 	} else if status.Code(err) != codes.Unknown {
 		// This is a grpc status error.

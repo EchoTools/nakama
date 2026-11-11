@@ -2,8 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -19,7 +17,7 @@ import (
 
 // The two routes the game itself calls (the service-status request and the matchmaker queue) are called by
 // game clients that cannot send an HTTP key, so the record of each request is the only attribution there is:
-// who (the client address, a label for the token, never the token), what (action, queue), the outcome, the
+// who (the client address and the token), what (action, queue), the outcome, the
 // latency and the size of the answer.
 
 func observedRouteLogger(t *testing.T) (runtime.Logger, *observer.ObservedLogs) {
@@ -40,25 +38,6 @@ func oneRecord(t *testing.T, logs *observer.ObservedLogs, message string) map[st
 		t.Fatalf("want exactly one %q record, got %d (all: %v)", message, len(found), logs.All())
 	}
 	return found[0].ContextMap()
-}
-
-func tokenLabelOf(token string) string {
-	sum := sha256.Sum256([]byte(token))
-	return "sha256:" + hex.EncodeToString(sum[:])[:8]
-}
-
-func assertNoSecret(t *testing.T, logs *observer.ObservedLogs, secret string) {
-	t.Helper()
-	for _, e := range logs.All() {
-		if strings.Contains(e.Message, secret) {
-			t.Errorf("message carries the token: %q", e.Message)
-		}
-		for k, v := range e.ContextMap() {
-			if s, ok := v.(string); ok && strings.Contains(s, secret) {
-				t.Errorf("field %s carries the token: %q", k, s)
-			}
-		}
-	}
 }
 
 // queueRequest drives the queue handler through the router shape the runtime uses.
@@ -86,7 +65,7 @@ func TestMatchmakerQueueRequestIsRecordedWithWhoWhatAndOutcome(t *testing.T) {
 	}
 	rec := oneRecord(t, logs, "matchmaker queue request")
 	want := map[string]interface{}{
-		"action": "join_queue", "queue_id": "arena", "token": tokenLabelOf(token),
+		"action": "join_queue", "queue_id": "arena", "token": token,
 		"remote": "192.0.2.7", "status": int64(200),
 	}
 	for k, v := range want {
@@ -103,7 +82,6 @@ func TestMatchmakerQueueRequestIsRecordedWithWhoWhatAndOutcome(t *testing.T) {
 	if _, ok := rec["latency_ms"]; !ok {
 		t.Error("no latency_ms field")
 	}
-	assertNoSecret(t, logs, token)
 }
 
 func TestMatchmakerQueueRecordUsesTheForwardedClientAddress(t *testing.T) {

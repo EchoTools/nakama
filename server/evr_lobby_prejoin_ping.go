@@ -50,14 +50,17 @@ func registerPreJoinPingWaiter(sessionID uuid.UUID) chan struct{} {
 }
 
 // notifyPreJoinPingWaiter signals the waiter for the given session, if any.
-// Called from lobbyPingResponse after updating the latency history.
-func notifyPreJoinPingWaiter(sessionID uuid.UUID) {
+// Called from lobbyPingResponse after updating the latency history. It returns
+// true if a waiter was registered and signalled.
+func notifyPreJoinPingWaiter(sessionID uuid.UUID) bool {
 	if ch, ok := preJoinPingWaiters.LoadAndDelete(sessionID); ok {
 		select {
 		case ch <- struct{}{}:
 		default:
 		}
+		return true
 	}
+	return false
 }
 
 // cleanupPreJoinPingWaiter removes a waiter registration without signaling.
@@ -88,6 +91,10 @@ func (p *EvrPipeline) prewarmEntrantPings(ctx context.Context, logger *zap.Logge
 	waiters := make([]waiterEntry, 0, len(entrants))
 
 	for _, ent := range entrants {
+		if ent.ReservationOnly {
+			continue
+		}
+
 		sess := p.nk.sessionRegistry.Get(ent.SessionID)
 		if sess == nil {
 			continue
@@ -217,9 +224,16 @@ func (p *EvrPipeline) validatePreJoinPing(
 		history  *LatencyHistory
 	}
 
-	// Gather sessions and latency histories for all entrants.
+	// Gather sessions and latency histories for the entrants that are joining.
+	// A reservation placeholder is a party member who has not started their own
+	// find; if they are online without being in a match they never answer the
+	// ping, and counting them failed the check for every member who was joining
+	// (#714). Their own join runs this check for them.
 	checks := make([]memberCheck, 0, len(entrants))
 	for _, ent := range entrants {
+		if ent.ReservationOnly {
+			continue
+		}
 		sess := p.nk.sessionRegistry.Get(ent.SessionID)
 		if sess == nil {
 			// Session gone; skip (will fail at join attempt anyway).
@@ -251,6 +265,7 @@ func (p *EvrPipeline) validatePreJoinPing(
 	type needsPing struct {
 		memberCheck
 		waiter chan struct{}
+		sentAt time.Time
 	}
 
 	var pending []needsPing
@@ -286,6 +301,15 @@ func (p *EvrPipeline) validatePreJoinPing(
 				zap.String("uid", np.presence.UserID.String()),
 				zap.String("sid", np.presence.SessionID.String()),
 				zap.Error(err))
+		} else {
+			np.sentAt = time.Now()
+			logger.Info("Pre-join ping sent",
+				zap.String("uid", np.presence.UserID.String()),
+				zap.String("sid", np.presence.SessionID.String()),
+				zap.String("mid", label.ID.UUID.String()),
+				zap.String("endpoint", endpoint.String()),
+				zap.Int64("timeout_ms", preJoinPingTimeout.Milliseconds()),
+			)
 		}
 	}
 
@@ -324,15 +348,33 @@ func (p *EvrPipeline) validatePreJoinPing(
 					}
 				}
 				entry, found := history.LatestEntry(extIP)
+				rttMs := 0
+				if found {
+					rttMs = int(entry.RTT.Milliseconds())
+				}
+				logger.Info("Pre-join ping answered",
+					zap.String("uid", np.presence.UserID.String()),
+					zap.String("sid", np.presence.SessionID.String()),
+					zap.String("mid", label.ID.UUID.String()),
+					zap.Int64("elapsed_ms", time.Since(np.sentAt).Milliseconds()),
+					zap.Int64("rtt_ms", int64(rttMs)),
+					zap.Bool("over_max", rttMs > maxRTT),
+				)
 				if !found {
 					result.Err = fmt.Errorf("no latency data after ping response")
 					return
 				}
-				result.RTT = int(entry.RTT.Milliseconds())
+				result.RTT = rttMs
 				if result.RTT > maxRTT && !relaxRTT {
 					result.Err = fmt.Errorf("RTT %dms exceeds max %dms", result.RTT, maxRTT)
 				}
 			case <-timer.C:
+				logger.Warn("Pre-join ping timed out",
+					zap.String("uid", np.presence.UserID.String()),
+					zap.String("sid", np.presence.SessionID.String()),
+					zap.String("mid", label.ID.UUID.String()),
+					zap.Int64("elapsed_ms", time.Since(np.sentAt).Milliseconds()),
+				)
 				result.Err = fmt.Errorf("ping response timed out after %s", preJoinPingTimeout)
 			case <-ctx.Done():
 				result.Err = fmt.Errorf("context canceled: %w", ctx.Err())
@@ -403,8 +445,23 @@ func (p *EvrPipeline) validatePreJoinPing(
 		logger.Warn("Failed to send pre-join ping error message", zap.Error(err))
 	}
 
-	return fmt.Errorf("%w: %w", ErrPreJoinPingFailed, NewLobbyErrorf(InternalError, "pre-join ping validation failed: %d of %d party members could not reach server %s",
-		len(failures), len(entrants), endpoint.ExternalAddress()))
+	// The first entrant is the session running this find. If every failure is
+	// someone else, the player did nothing wrong: say it was their party rather
+	// than "internal error". The wrapped sentinel is the same either way, so
+	// callers still skip the server.
+	initiatorFailed := false
+	for _, f := range failures {
+		if len(entrants) > 0 && f.SessionID == entrants[0].SessionID {
+			initiatorFailed = true
+			break
+		}
+	}
+	if !initiatorFailed {
+		return fmt.Errorf("%w: %w", ErrPreJoinPingFailed, NewLobbyErrorf(BadRequest, "party member could not reach server %s (%d of %d party members failed the ping check)",
+			endpoint.ExternalAddress(), len(failures), len(entrants)))
+	}
+
+	return fmt.Errorf("%w: %w", ErrPreJoinPingFailed, NewLobbyErrorf(Timeout, "your connection to that server is too slow or unreachable"))
 }
 
 // isPrivateMatch returns true if the mode is a private lobby that should

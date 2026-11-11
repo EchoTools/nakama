@@ -280,9 +280,11 @@ func predictCandidateOutcomesWithConfig(candidates [][]runtime.MatchmakerEntry, 
 			}
 		}
 
-		// Predefine constants for maximum sizes
+		// Predefine constants for maximum sizes. These size the reusable buffers
+		// below; they do not cap a match (that is max_team_size on the ticket).
+		// Every matchmade mode (public arena and public combat) is 4v4.
 		const (
-			MaxTeamSize              = 5
+			MaxTeamSize              = 4
 			MaxPlayersPerMatch       = MaxTeamSize * 2
 			MaxGroupsPerMatch        = MaxPlayersPerMatch // Worst case: all single-player groups
 			InitialTicketCacheSize   = 40
