@@ -301,7 +301,7 @@ success messages:**
 - **Latency for relay-fronted servers is a sum.** Latency history is keyed by external IP (`evr_latencyhistory.go:265`),
   so the relay's address cannot stand in for each server it fronts. The expected RTT is client→relay (one shared key
   for the relay, measured by the client's ping) plus relay→server (measured by the relay over the server's standing
-  hello). Ping discovery (`evr_ping_discovery.go:79-110`) and the pre-join check (`evr_lobby_prejoin_ping.go:181-195`)
+  hello). Ping discovery (`evr_ping_discovery.go:79-111`) and the pre-join check (`evr_lobby_prejoin_ping.go:181-201`)
   must learn to read that sum for `nat-reflexive` servers, otherwise every relay-fronted server fails pre-join.
 - **New protocol surface.**
   - Hello format: nakama and the runtime.
