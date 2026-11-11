@@ -126,12 +126,16 @@ type ServiceSettingsData struct {
 	EnableContinuousGameserverHealthCheck  bool   `json:"enable_continuous_gameserver_health_check"`
 	DisplayNameInUseNotifications          bool   `json:"display_name_in_use_notifications"` // Display name in use notifications
 	EnableSessionDebug                     bool   `json:"enable_session_debug"`
-	version                                string
-	serviceStatusMessage                   string
-	PingServerBeforeJoin                   bool          `json:"ping_server_before_join"`   // Ping the server before joining to measure latency
-	EnableVibinatorsGravity                bool          `json:"enable_vibinators_gravity"` // Novelty: redirect social-lobby echo_arena matchmakers toward vibinator's echo_combat
-	UseQuestEncoderFlags                   bool          `json:"use_quest_encoder_flags"`   // Send Quest-shifted encoder flag bit layout in LobbySessionSuccessv5 for standalone clients
-	CGNAT                                  CGNATSettings `json:"cgnat"`
+	// RequestGuildMembersIntent asks Discord for the privileged GUILD_MEMBERS
+	// intent and uses member gateway events. Off by default: members are synced
+	// over REST instead. Changing it takes effect after a process restart.
+	RequestGuildMembersIntent bool `json:"request_guild_members_intent"`
+	version                   string
+	serviceStatusMessage      string
+	PingServerBeforeJoin      bool          `json:"ping_server_before_join"`   // Ping the server before joining to measure latency
+	EnableVibinatorsGravity   bool          `json:"enable_vibinators_gravity"` // Novelty: redirect social-lobby echo_arena matchmakers toward vibinator's echo_combat
+	UseQuestEncoderFlags      bool          `json:"use_quest_encoder_flags"`   // Send Quest-shifted encoder flag bit layout in LobbySessionSuccessv5 for standalone clients
+	CGNAT                     CGNATSettings `json:"cgnat"`
 
 	// BlockedQuestVersions refuses the login of a standalone Quest client whose nevr_identity.version (leading
 	// "v" ignored) is listed, unless the account is a Global Operator or Global Developer. Empty changes nothing.
@@ -387,6 +391,12 @@ var ValidTeamStatFields = map[string]bool{
 	"PossessionTime": true, "PunchesReceived": true, "Saves": true, "ShotsOnGoal": true,
 	"ShotsOnGoalAgainst": true, "Steals": true, "Stuns": true, "ThreePointGoals": true,
 	"TwoPointGoals": true,
+}
+
+// SyncGuildMembersWithoutIntent reports whether members are synced over REST
+// rather than through the privileged GUILD_MEMBERS gateway intent.
+func (s *ServiceSettingsData) SyncGuildMembersWithoutIntent() bool {
+	return !s.RequestGuildMembersIntent
 }
 
 func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData) {
