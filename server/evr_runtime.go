@@ -101,7 +101,9 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 		// Gate all Discord REST calls through a concurrency-limiting
 		// semaphore to prevent goroutine pileup during rate-limit storms.
-		dg.Client.Transport = newDiscordRESTLimiter(dg.Client.Transport)
+		restLimiter := newDiscordRESTLimiter(dg.Client.Transport)
+		restLimiter.logger = logger
+		dg.Client.Transport = restLimiter
 	}
 
 	// Register RPC's for device linking
