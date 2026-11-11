@@ -13,12 +13,18 @@ type SNSEarlyQuitFeatureFlags struct {
 	Flags uint8
 }
 
-// Feature flag bit positions within Flags.
+// Feature flag bit positions within Flags, named for what the client reads.
+//
+// The client reads bit N of the stored byte through R15NetEarlyQuitFeatureFlagExpression
+// (echovr.exe 0x140d960a0). Across the 26 Quest script libraries that use it, N is only 0, 1 or 5;
+// nothing reads bit 2 or 3, so those are not sent (#712). The stock client stores the byte as
+// byte & 0xdd (PC 0x1401618b0, Quest libr15.so 0x136ac24), which clears bits 1 and 5; nevr-runtime's
+// client keeps every bit. Server-side switches (penalty enforcement, auto-report) are service settings,
+// not bits of this byte.
 const (
-	EarlyQuitFlagEnabled              uint8 = 1 << 0 // Early quit system on/off
-	EarlyQuitFlagSteadyPlayerTracking uint8 = 1 << 1 // Steady player tracking
-	EarlyQuitFlagPenaltyEnforcement   uint8 = 1 << 2 // Penalty enforcement
-	EarlyQuitFlagAutoReport           uint8 = 1 << 3 // Auto-report at max penalty
+	EarlyQuitFlagLockoutBar   uint8 = 1 << 0 // One LOCKOUT-bar gate
+	EarlyQuitFlagLockoutTimer uint8 = 1 << 1 // The "Lockout Timer" tooltip and the FIND MATCH lockout elements
+	EarlyQuitFlagInfoUI       uint8 = 1 << 5 // The early-quit info and warning UI (EARLY QUIT INFO, LOYALTY TIER, scoreboard values)
 )
 
 func (m SNSEarlyQuitFeatureFlags) Token() string {
@@ -37,30 +43,21 @@ func (m *SNSEarlyQuitFeatureFlags) Stream(s *EasyStream) error {
 	return s.StreamByte(&m.Flags)
 }
 
-// DefaultEarlyQuitFeatureFlags returns the default enabled feature flags.
+// DefaultEarlyQuitFeatureFlags returns the flags sent to every player: 0x23, bits 0, 1 and 5.
 func DefaultEarlyQuitFeatureFlags() uint8 {
-	return EarlyQuitFlagEnabled | EarlyQuitFlagSteadyPlayerTracking |
-		EarlyQuitFlagPenaltyEnforcement | EarlyQuitFlagAutoReport
+	return EarlyQuitFlagLockoutBar | EarlyQuitFlagLockoutTimer | EarlyQuitFlagInfoUI
 }
 
 // Helper accessors for the bitfield.
 
-func (m *SNSEarlyQuitFeatureFlags) IsEnabled() bool {
-	return m.Flags&EarlyQuitFlagEnabled != 0
+func (m *SNSEarlyQuitFeatureFlags) IsLockoutBarEnabled() bool {
+	return m.Flags&EarlyQuitFlagLockoutBar != 0
 }
 
-func (m *SNSEarlyQuitFeatureFlags) SetEnabled(v bool) {
-	if v {
-		m.Flags |= EarlyQuitFlagEnabled
-	} else {
-		m.Flags &^= EarlyQuitFlagEnabled
-	}
+func (m *SNSEarlyQuitFeatureFlags) IsLockoutTimerEnabled() bool {
+	return m.Flags&EarlyQuitFlagLockoutTimer != 0
 }
 
-func (m *SNSEarlyQuitFeatureFlags) IsPenaltyEnforcementEnabled() bool {
-	return m.Flags&EarlyQuitFlagPenaltyEnforcement != 0
-}
-
-func (m *SNSEarlyQuitFeatureFlags) IsAutoReportEnabled() bool {
-	return m.Flags&EarlyQuitFlagAutoReport != 0
+func (m *SNSEarlyQuitFeatureFlags) IsInfoUIEnabled() bool {
+	return m.Flags&EarlyQuitFlagInfoUI != 0
 }

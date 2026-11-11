@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -40,12 +41,20 @@ func (c RegionAutocompleteData) Description() string {
 	return fmt.Sprintf("%s -- %dms-%dms [%d/%d]", c.Location, c.MinPing, c.MaxPing, c.Total-c.Available, c.Total)
 }
 
-func (d *DiscordAppBot) autocompleteRegions(ctx context.Context, logger runtime.Logger, userID string, groupID string, mode evr.Symbol) ([]*discordgo.ApplicationCommandOptionChoice, error) {
+// regionView is the one computation behind /create's region autocomplete and
+// invite/regions: every region the guild has a game server in, with the caller's
+// average RTT to it. HasHistory is false when the caller has no stored RTTs.
+type regionView struct {
+	HasHistory bool
+	All        map[string]*RegionAutocompleteData
+}
+
+func regionsFor(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID string, groupID string) (regionView, error) {
 
 	latencyHistory := NewLatencyHistory()
-	if err := StorableRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
+	if err := StorableRead(ctx, nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
 		logger.Error("Failed to read latency history", zap.Error(err))
-		return nil, err
+		return regionView{}, err
 	}
 
 	rtts := latencyHistory.AverageRTTs(true)
@@ -55,10 +64,10 @@ func (d *DiscordAppBot) autocompleteRegions(ctx context.Context, logger runtime.
 	maxSize := 100
 	query := fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/ +label.broadcaster.region_codes:default", regexEscapeForBluge(groupID))
 
-	matches, err := d.nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
+	matches, err := nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
 	if err != nil {
 		logger.Error("Failed to list servers", zap.Error(err))
-		return nil, err
+		return regionView{}, err
 	}
 
 	regionDatas := make(map[string]*RegionAutocompleteData, len(matches))
@@ -100,6 +109,17 @@ func (d *DiscordAppBot) autocompleteRegions(ctx context.Context, logger runtime.
 		}
 
 	}
+
+	return regionView{HasHistory: len(rtts) > 0, All: regionDatas}, nil
+}
+
+func (d *DiscordAppBot) autocompleteRegions(ctx context.Context, logger runtime.Logger, userID string, groupID string, mode evr.Symbol) ([]*discordgo.ApplicationCommandOptionChoice, error) {
+
+	view, err := regionsFor(ctx, logger, d.nk, userID, groupID)
+	if err != nil {
+		return nil, err
+	}
+	regionDatas := view.All
 
 	// Only restrict regions by ping for public arena mode
 	restrictPing := mode == evr.ModeArenaPublic
@@ -232,8 +252,20 @@ func (d *DiscordAppBot) autocompleteGameServers(ctx context.Context, logger runt
 // (no ping data) are excluded.
 // Exported for testing.
 func filterAndSortRegionChoices(regionDatas map[string]*RegionAutocompleteData, privileged bool) []*discordgo.ApplicationCommandOptionChoice {
-	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(regionDatas))
+	datas := filterAndSortRegions(regionDatas, privileged)
+	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(datas))
+	for _, data := range datas {
+		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
+			Name:  data.Description(),
+			Value: data.RegionCode,
+		})
+	}
+	return choices
+}
 
+// filterAndSortRegions is the filtering and ordering of filterAndSortRegionChoices
+// before it becomes Discord choices; invite/regions lists the same slice.
+func filterAndSortRegions(regionDatas map[string]*RegionAutocompleteData, privileged bool) []*RegionAutocompleteData {
 	datas := make([]*RegionAutocompleteData, 0, len(regionDatas))
 
 	// Filter out regions with no available servers,
@@ -276,15 +308,10 @@ func filterAndSortRegionChoices(regionDatas map[string]*RegionAutocompleteData, 
 			return 1
 		}
 
-		return 0
+		// Equal pings: the map was iterated in random order, so break the tie by
+		// code to make the same two regions list in the same order every time.
+		return strings.Compare(a.RegionCode, b.RegionCode)
 	})
 
-	for _, data := range datas {
-		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
-			Name:  data.Description(),
-			Value: data.RegionCode,
-		})
-	}
-
-	return choices
+	return datas
 }

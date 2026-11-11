@@ -80,6 +80,9 @@ func validateServiceSettings(s *ServiceSettingsData) []string {
 	if len(s.DisableLoginMessage) > 500 {
 		errs = append(errs, "disable_login_message must be at most 500 characters")
 	}
+	if len(s.BlockedQuestVersionsMessage) > 200 {
+		errs = append(errs, "blocked_quest_versions_message must be at most 200 characters")
+	}
 	if len(s.ReportURL) > 500 {
 		errs = append(errs, "report_url must be at most 500 characters")
 	}

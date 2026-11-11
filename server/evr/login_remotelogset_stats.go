@@ -1,5 +1,10 @@
 package evr
 
+import (
+	"reflect"
+	"strings"
+)
+
 // Remote log PostMatchMatchStats
 type MatchStats struct {
 	Assists            int64   `json:"Assists"`
@@ -24,6 +29,67 @@ type MatchStats struct {
 	Stuns              int64   `json:"Stuns"`
 	ThreePointGoals    int64   `json:"ThreePointGoals"`
 	TwoPointGoals      int64   `json:"TwoPointGoals"`
+
+	// Combat. Key names are the game's, as sent in match_stats; the eight from
+	// CombatHealingReceived down are sent only here. Every name is also a
+	// CombatStatistics field (TestCombatStatistics_IsTheSchemaTheRemoteLogStructsMirror).
+	//
+	// Every combat field is float64, including the counts. json.Unmarshal fails
+	// the whole message when a decimal such as 3.000000 meets an int64 field,
+	// and the game's number formatting is only observed for the keys in the
+	// testdata fixtures. A float64 field accepts both forms.
+	CombatAssists                  float64 `json:"CombatAssists,omitempty"`
+	CombatBestEliminationStreak    float64 `json:"CombatBestEliminationStreak,omitempty"`
+	CombatDamage                   float64 `json:"CombatDamage,omitempty"`
+	CombatDamageAbsorbed           float64 `json:"CombatDamageAbsorbed,omitempty"`
+	CombatDamageTaken              float64 `json:"CombatDamageTaken,omitempty"`
+	CombatDeaths                   float64 `json:"CombatDeaths,omitempty"`
+	CombatEliminations             float64 `json:"CombatEliminations,omitempty"`
+	CombatHeadshotKills            float64 `json:"CombatHeadshotKills,omitempty"`
+	CombatHealing                  float64 `json:"CombatHealing,omitempty"`
+	CombatHillCaptures             float64 `json:"CombatHillCaptures,omitempty"`
+	CombatHillDefends              float64 `json:"CombatHillDefends,omitempty"`
+	CombatKills                    float64 `json:"CombatKills,omitempty"`
+	CombatObjectiveDamage          float64 `json:"CombatObjectiveDamage,omitempty"`
+	CombatObjectiveEliminations    float64 `json:"CombatObjectiveEliminations,omitempty"`
+	CombatObjectiveTime            float64 `json:"CombatObjectiveTime,omitempty"`
+	CombatSoloKills                float64 `json:"CombatSoloKills,omitempty"`
+	CombatStuns                    float64 `json:"CombatStuns,omitempty"`
+	CombatTeammateHealing          float64 `json:"CombatTeammateHealing,omitempty"`
+	CombatHealingReceived          float64 `json:"CombatHealingReceived,omitempty"`
+	CombatStunsReceived            float64 `json:"CombatStunsReceived,omitempty"`
+	CombatScans                    float64 `json:"CombatScans,omitempty"`
+	CombatScansReceived            float64 `json:"CombatScansReceived,omitempty"`
+	CombatSuicides                 float64 `json:"CombatSuicides,omitempty"`
+	CombatSelfDamage               float64 `json:"CombatSelfDamage,omitempty"`
+	CombatCurrentEliminationStreak float64 `json:"CombatCurrentEliminationStreak,omitempty"`
+	CombatEliminationDeathRatio    float64 `json:"CombatEliminationDeathRatio,omitempty"`
+}
+
+// Values returns every non-zero stat keyed by the game's own key name. It is
+// what a match record keeps: the keys the game sent, without the zero-valued
+// fields of the other mode.
+func (s MatchStats) Values() map[string]float64 {
+	v := reflect.ValueOf(s)
+	t := v.Type()
+	out := make(map[string]float64)
+	for i := 0; i < t.NumField(); i++ {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		f := v.Field(i)
+		var x float64
+		switch {
+		case f.CanInt():
+			x = float64(f.Int())
+		case f.CanFloat():
+			x = f.Float()
+		default:
+			continue
+		}
+		if x != 0 {
+			out[name] = x
+		}
+	}
+	return out
 }
 
 // Post-match match type statistics sent in the remote log message
@@ -73,6 +139,53 @@ type MatchTypeStats struct {
 	TopSpeedsTotal               float64 `json:"TopSpeedsTotal,omitempty" op:"add"`
 	TwoPointGoals                int64   `json:"TwoPointGoals,omitempty" op:"add"`
 	XP                           float64 `json:"XP,omitempty" op:"add"`
+
+	// Combat. Key names are the game's CR15NetProfileStats names, each also a
+	// CombatStatistics field (core_account_statistics.go), which is the combat
+	// schema: it cannot parse these bare numbers itself, so this mirrors its
+	// names, and TestCombatStatistics_IsTheSchemaTheRemoteLogStructsMirror pins
+	// the two together. float64 for the reason given on MatchStats.
+	//
+	// op:"-" keeps every one of them off the leaderboards from this path. The
+	// Combat* boards have one writer, the game server's profile update
+	// (EventServerProfileUpdate, evr_pipeline_login.go), which is authoritative
+	// for the match and sets each board to what it read plus the match. The
+	// TeamSkillRating* boards are the opposite: their one writer is the
+	// remote-log path (processPostMatchMessages), and StatisticsToEntries drops
+	// them from the profile update (IsTeamSkillRatingStat). A board
+	// ID does not include the operator, so an "add" here would increment that
+	// same row and every combat match would count twice
+	// (TestCombatStats_OneWriterPerLeaderboardRow).
+	CombatAssists                      float64 `json:"CombatAssists,omitempty" op:"-"`
+	CombatAverageEliminationDeathRatio float64 `json:"CombatAverageEliminationDeathRatio,omitempty" op:"-"`
+	CombatBestEliminationStreak        float64 `json:"CombatBestEliminationStreak,omitempty" op:"-"`
+	CombatDamage                       float64 `json:"CombatDamage,omitempty" op:"-"`
+	CombatDamageAbsorbed               float64 `json:"CombatDamageAbsorbed,omitempty" op:"-"`
+	CombatDamageTaken                  float64 `json:"CombatDamageTaken,omitempty" op:"-"`
+	CombatDeaths                       float64 `json:"CombatDeaths,omitempty" op:"-"`
+	CombatEliminations                 float64 `json:"CombatEliminations,omitempty" op:"-"`
+	CombatHeadshotKills                float64 `json:"CombatHeadshotKills,omitempty" op:"-"`
+	CombatHealing                      float64 `json:"CombatHealing,omitempty" op:"-"`
+	CombatHillCaptures                 float64 `json:"CombatHillCaptures,omitempty" op:"-"`
+	CombatHillDefends                  float64 `json:"CombatHillDefends,omitempty" op:"-"`
+	CombatKills                        float64 `json:"CombatKills,omitempty" op:"-"`
+	CombatLosses                       float64 `json:"CombatLosses,omitempty" op:"-"`
+	CombatMVPs                         float64 `json:"CombatMVPs,omitempty" op:"-"`
+	CombatObjectiveDamage              float64 `json:"CombatObjectiveDamage,omitempty" op:"-"`
+	CombatObjectiveEliminations        float64 `json:"CombatObjectiveEliminations,omitempty" op:"-"`
+	CombatObjectiveTime                float64 `json:"CombatObjectiveTime,omitempty" op:"-"`
+	CombatPayloadGamesPlayed           float64 `json:"CombatPayloadGamesPlayed,omitempty" op:"-"`
+	CombatPayloadWinPercentage         float64 `json:"CombatPayloadWinPercentage,omitempty" op:"-"`
+	CombatPayloadWins                  float64 `json:"CombatPayloadWins,omitempty" op:"-"`
+	CombatPointCaptureGamesPlayed      float64 `json:"CombatPointCaptureGamesPlayed,omitempty" op:"-"`
+	CombatPointCaptureWinPercentage    float64 `json:"CombatPointCaptureWinPercentage,omitempty" op:"-"`
+	CombatPointCaptureWins             float64 `json:"CombatPointCaptureWins,omitempty" op:"-"`
+	CombatSoloKills                    float64 `json:"CombatSoloKills,omitempty" op:"-"`
+	CombatStuns                        float64 `json:"CombatStuns,omitempty" op:"-"`
+	CombatTeammateHealing              float64 `json:"CombatTeammateHealing,omitempty" op:"-"`
+	CombatWinPercentage                float64 `json:"CombatWinPercentage,omitempty" op:"-"`
+	CombatWins                         float64 `json:"CombatWins,omitempty" op:"-"`
+	CombatTies                         float64 `json:"CombatTies,omitempty" op:"-"`
 }
 
 type MatchGoal struct {

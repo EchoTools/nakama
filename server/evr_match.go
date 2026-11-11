@@ -34,18 +34,18 @@ const (
 	StatGroupCombat MatchStatGroup = "combat"
 
 	DefaultPublicArenaTeamSize  = 4
-	DefaultPublicCombatTeamSize = 5
+	DefaultPublicCombatTeamSize = 4
 
 	// Defaults for public arena matches
-	RoundDuration              = 300 * time.Second
-	AfterGoalDuration          = 15 * time.Second
-	RespawnDuration            = 3 * time.Second
-	RoundCatapultDelayDuration = 5 * time.Second
-	CatapultDuration           = 15 * time.Second
-	RoundWaitDuration          = 59 * time.Second
-	PreMatchWaitTime           = 45 * time.Second
-	PublicMatchWaitTime        = PreMatchWaitTime + CatapultDuration + RoundCatapultDelayDuration
-	PreMatchToPlayingTimeout   = 60 * time.Second
+	DefaultPublicArenaRoundDuration = 480 * time.Second
+	AfterGoalDuration               = 15 * time.Second
+	RespawnDuration                 = 3 * time.Second
+	RoundCatapultDelayDuration      = 5 * time.Second
+	CatapultDuration                = 15 * time.Second
+	RoundWaitDuration               = 59 * time.Second
+	PreMatchWaitTime                = 45 * time.Second
+	PublicMatchWaitTime             = PreMatchWaitTime + CatapultDuration + RoundCatapultDelayDuration
+	PreMatchToPlayingTimeout        = 60 * time.Second
 
 	// MatchStartMaxAttempts bounds how many times MatchLoop retries a failing
 	// MatchStart before giving up and shutting the match down. Attempts after
@@ -1162,10 +1162,8 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 										if penaltyLevel > MaxEarlyQuitPenaltyLevel {
 											penaltyLevel = int32(MaxEarlyQuitPenaltyLevel)
 										}
-										if penaltyLevel >= 3 {
-											if evr.DefaultEarlyQuitFeatureFlags()&evr.EarlyQuitFlagAutoReport != 0 {
-												TriggerAutoReport(ctx, logger, mp.GetUserId(), penaltyLevel)
-											}
+										if shouldAutoReportEarlyQuit(&serviceSettings.Matchmaking, penaltyLevel) {
+											TriggerAutoReport(ctx, logger, mp.GetUserId(), penaltyLevel)
 										}
 									}
 
@@ -1593,7 +1591,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		if state.startAttempts == 0 || tick-state.lastStartAttemptTick >= throttleTicks {
 			state.startAttempts++
 			state.lastStartAttemptTick = tick
-			started, err := m.MatchStart(ctx, logger, nk, dispatcher, state)
+			started, err := m.MatchStart(ctx, logger, db, nk, dispatcher, state)
 			if err != nil {
 				logger.WithFields(map[string]any{
 					"error":    err,
@@ -2035,19 +2033,11 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		if ok, err := CheckSystemGroupMembership(ctx, db, settings.SpawnedBy, GroupGlobalDevelopers); err != nil {
 			return state, SignalResponse{Message: fmt.Sprintf("failed to check group membership: %v", err)}.String()
 		} else if !ok {
-			// Validate the mode
-			if levels, ok := evr.LevelsByMode[settings.Mode]; !ok {
-				return state, SignalResponse{Message: fmt.Sprintf("bad request: invalid mode: %v", settings.Mode)}.String()
-			} else {
-				// Set the level to a random level if it is not set.
-				// math/rand is fine: game-level selection, not security-sensitive.
-				if settings.Level == 0xffffffffffffffff || settings.Level == 0 {
-					settings.Level = levels[rand.Intn(len(levels))]
-					// Validate the level, if provided.
-				} else if !slices.Contains(levels, settings.Level) {
-					return state, SignalResponse{Message: fmt.Sprintf("bad request: invalid level `%v` for mode `%v`", settings.Level, settings.Mode)}.String()
-				}
+			level, err := resolveSessionLevel(settings.Mode, settings.Level, state.GameServer)
+			if err != nil {
+				return state, SignalResponse{Message: err.Error()}.String()
 			}
+			settings.Level = level
 		}
 
 		state.Mode = settings.Mode
@@ -2143,20 +2133,27 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 
 	case SignalLockSession:
-		// Lock signal indicates ~1:45 remaining in an arena match.
-		// Only set GameStatusRoundClosing for arena — combat/social are unaffected.
+		// The lock signal marks the end of a round (~1:45 remaining in arena; the
+		// round-end lock in combat). Public arena and public combat move to
+		// GameStatusRoundClosing; other modes are unaffected.
 		// Do NOT set Open=false here — the match stays open so the label is queryable.
-		// Backfill exclusion is handled by query filters on game_status:round_closing.
-		// Open=false is set later at PostMatch (round/match end), not here.
-		// LockedAt is set here to record when the closing phase began; it persists
-		// until an unlock signal (which the game server does not currently send).
-		if state.Mode == evr.ModeArenaPublic {
+		// Backfill exclusion is handled by query filters on game_status:round_closing
+		// (see modeHasRoundLock). Open=false is set later at PostMatch (round/match
+		// end), not here.
+		// LockedAt records when the closing phase began. Arena keeps it until the
+		// match ends (it ignores unlock); combat clears it on unlock.
+		if modeHasRoundLock(state.Mode) {
+			if state.GameStatus != GameStatusRoundClosing {
+				// Remember the in-round status so a combat unlock can restore it. A
+				// repeated lock must not overwrite it with round_closing itself.
+				state.preLockGameStatus = state.GameStatus
+			}
 			state.GameStatus = GameStatusRoundClosing
 			now := time.Now().UTC()
 			state.LockedAt = &now
 			logger.Info("Lock signal received, setting game status to round_closing")
 		} else {
-			logger.Debug("Lock signal received, ignoring for non-arena match")
+			logger.Debug("Lock signal received, ignoring for match mode without a round lock")
 		}
 
 	case SignalUnlockSession:
@@ -2164,6 +2161,21 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		switch state.Mode {
 		case evr.ModeArenaPublic:
 			logger.Debug("Ignoring unlock signal for arena public match.")
+		case evr.ModeCombatPublic:
+			// The game sends an unlock ~15 s after each round-end lock, between
+			// rounds. If the match is over there is no next round to reopen for.
+			if state.GameStatus == GameStatusPostMatch || state.GameState.IsMatchOver() {
+				logger.Info("Ignoring unlock for combat match: match is over")
+				break
+			}
+			logger.Debug("Unlocking combat session")
+			// Clear LockedAt regardless of GameState: with the status restored
+			// below, a lingering LockedAt would trip the MatchLoop hard-close.
+			state.LockedAt = nil
+			state.Open = true
+			if state.GameStatus == GameStatusRoundClosing {
+				state.GameStatus = state.preLockGameStatus
+			}
 		default:
 			logger.Debug("Unlocking session")
 			if state.GameState != nil {
@@ -2338,7 +2350,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 }
 
-func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *MatchLabel) (*MatchLabel, error) {
+func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *MatchLabel) (*MatchLabel, error) {
 	// Do not attempt to start without a game server presence; avoids nil dispatch.
 	if state.server == nil {
 		return state, fmt.Errorf("cannot start match: server presence is nil")
@@ -2360,8 +2372,9 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 	var newGameState *GameState
 	switch state.Mode {
 	case evr.ModeArenaPublic, evr.ModeArenaPublicAI:
+		roundDuration := publicArenaRoundDuration(logger, state.GroupID)
 		newGameState = &GameState{
-			SessionScoreboard: NewSessionScoreboard(RoundDuration, time.Now().Add(PublicMatchWaitTime)),
+			SessionScoreboard: NewSessionScoreboard(roundDuration, time.Now().Add(PublicMatchWaitTime)),
 		}
 	case evr.ModeArenaPrivate:
 		newGameState = &GameState{
@@ -2455,6 +2468,31 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 	return state, nil
 }
 
+func publicArenaRoundDuration(logger runtime.Logger, groupID *uuid.UUID) time.Duration {
+	if groupID == nil {
+		logger.Warn("Guild missing for public Arena round length; using default")
+		return DefaultPublicArenaRoundDuration
+	}
+	appBot := globalAppBot.Load()
+	if appBot == nil || appBot.guildGroupRegistry == nil {
+		logger.WithField("group_id", groupID.String()).Warn("Guild registry unavailable for public Arena round length; using default")
+		return DefaultPublicArenaRoundDuration
+	}
+	group := appBot.guildGroupRegistry.Get(groupID.String())
+	if group == nil {
+		logger.WithField("group_id", groupID.String()).Warn("Guild missing from registry for public Arena round length; using default")
+		return DefaultPublicArenaRoundDuration
+	}
+	if group.PublicArenaRoundLengthSeconds > MaxPublicArenaRoundLengthSeconds {
+		logger.WithFields(map[string]any{
+			"group_id":           groupID.String(),
+			"configured_seconds": group.PublicArenaRoundLengthSeconds,
+			"maximum_seconds":    MaxPublicArenaRoundLengthSeconds,
+		}).Warn("Public Arena round length exceeds maximum; clamping")
+	}
+	return group.PublicArenaRoundLength()
+}
+
 func (m *EvrMatch) dispatchMessages(_ context.Context, logger runtime.Logger, dispatcher runtime.MatchDispatcher, messages []evr.Message, presences []runtime.Presence, sender runtime.Presence) error {
 	for _, message := range messages {
 		logger.WithField("message", message).Debug("Sending message from match")
@@ -2518,6 +2556,16 @@ func (m *EvrMatch) sendEntrantReject(ctx context.Context, logger runtime.Logger,
 		return fmt.Errorf("failed to dispatch message: %w", err)
 	}
 	return nil
+}
+
+// earlyQuitAutoReportLevel is the penalty level at which an early quitter is auto-reported.
+const earlyQuitAutoReportLevel = 3
+
+// shouldAutoReportEarlyQuit reports whether a player at penaltyLevel is auto-reported. It is a service
+// setting (on unless DisableEarlyQuitAutoReport); it was bit 3 of the SNSEarlyQuitFeatureFlags wire
+// byte, which the client never reads (#712).
+func shouldAutoReportEarlyQuit(settings *GlobalMatchmakingSettings, penaltyLevel int32) bool {
+	return penaltyLevel >= earlyQuitAutoReportLevel && !settings.DisableEarlyQuitAutoReport
 }
 
 // TriggerAutoReport logs an auto-report event for players at max early quit penalty level
@@ -2741,4 +2789,39 @@ func allocatePostMatchSocialLobby(ctx context.Context, logger runtime.Logger, nk
 	}
 
 	return nil
+}
+
+// resolveSessionLevel validates the level for a session about to start on gs and
+// returns the level to use. The mode must be a known mode. An unset level becomes
+// a random shipped level for the mode. A shipped level (one in any evr.LevelsByMode
+// list) passes only for its own modes. A custom level (in no shipped list) passes
+// when gs lists it in its installed levels; installed levels carry no mode, so the
+// escape never applies to a shipped level.
+func resolveSessionLevel(mode, level evr.Symbol, gs *GameServerPresence) (evr.Symbol, error) {
+	levels, ok := evr.LevelsByMode[mode]
+	if !ok {
+		return level, fmt.Errorf("bad request: invalid mode: %v", mode)
+	}
+	// Set the level to a random level if it is not set.
+	// math/rand is fine: game-level selection, not security-sensitive.
+	if level == evr.LevelUnspecified || level == 0 {
+		return levels[rand.Intn(len(levels))], nil
+	}
+	if slices.Contains(levels, level) {
+		return level, nil
+	}
+	if !isShippedLevel(level) && gs.HasInstalledLevel(level) {
+		return level, nil
+	}
+	return level, fmt.Errorf("bad request: invalid level `%v` for mode `%v`", level, mode)
+}
+
+// isShippedLevel reports whether level is in any mode's shipped level list.
+func isShippedLevel(level evr.Symbol) bool {
+	for _, levels := range evr.LevelsByMode {
+		if slices.Contains(levels, level) {
+			return true
+		}
+	}
+	return false
 }

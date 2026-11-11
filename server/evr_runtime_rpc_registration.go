@@ -114,6 +114,7 @@ func buildEVRRPCRegistrations(rpcHandler *RPCHandler, sbmm *SkillBasedMatchmaker
 		{ID: "invite/create", Handler: withInviteRecord("create", InviteCreateRPC), Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 		{ID: "invite/resolve", Handler: withInviteRecord("resolve", InviteResolveRPC), Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 		{ID: "invite/revoke", Handler: withInviteRecord("revoke", InviteRevokeRPC), Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+		{ID: "invite/regions", Handler: withInviteRecord("regions", InviteRegionsRPC), Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 
 		// Match management
 		{ID: "match/public", Handler: rpcHandler.MatchListPublicRPC, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},

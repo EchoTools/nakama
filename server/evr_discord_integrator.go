@@ -1231,7 +1231,7 @@ func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logg
 			// Notify the user that the display name they have chosen is in use.
 			ownerID := ownerMap[displayName][0]
 			logger.Warn("Display name in use", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.String("caller_user_id", profile.ID()))
-			if err := d.SendDisplayNameInUseNotification(ctx, member.User.ID, d.UserIDToDiscordID(ownerID), displayName, member.User.Username); err != nil {
+			if err := d.SendDisplayNameInUseNotification(ctx, member.User.ID, d.ownerUsername(ctx, ownerID), displayName, member.User.Username); err != nil {
 				logger.Debug("Error sending display name in use notification", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.Error(err))
 			}
 		}
@@ -1301,9 +1301,9 @@ func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logg
 	return profile, nil
 }
 
-func (d *DiscordIntegrator) SendDisplayNameInUseNotification(ctx context.Context, discordID, ownerDiscordID, displayName string, fallbackDisplayName string) error {
+func (d *DiscordIntegrator) SendDisplayNameInUseNotification(ctx context.Context, discordID, ownerUsername, displayName string, fallbackDisplayName string) error {
 	// Only notify the user if the force display name to match IGN is set.
-	message := fmt.Sprintf("The display name `%s` is already in use/reserved by <@%s>. Your in-game name will be your username: `%s`", displayName, ownerDiscordID, fallbackDisplayName)
+	message := displayNameInUseMessage(displayName, ownerUsername, fallbackDisplayName)
 	if _, err := SendUserMessage(ctx, d.dg, discordID, message); err != nil {
 		return fmt.Errorf("error sending message: %w", err)
 	}

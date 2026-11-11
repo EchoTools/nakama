@@ -643,23 +643,28 @@ func (b *PostMatchmakerBackfill) ExtractCandidatesFromMatchmaker(extracts []*Mat
 	return result
 }
 
-// GetBackfillMatches retrieves matches that can accept backfill candidates
-func (b *PostMatchmakerBackfill) GetBackfillMatches(ctx context.Context, groupID uuid.UUID, mode evr.Symbol) ([]*BackfillMatch, error) {
-	// Build query for open matches in the same group with the same mode
+// backfillMatchesQuery builds the match-list query GetBackfillMatches runs: open
+// matches in the group and mode, minus matches whose round-end lock has fired.
+func backfillMatchesQuery(groupID uuid.UUID, mode evr.Symbol) string {
 	qparts := []string{
 		"+label.open:T",
 		fmt.Sprintf("+label.mode:%s", mode.String()),
 		fmt.Sprintf("+label.group_id:%s", Query.QuoteStringValue(groupID.String())),
 	}
 
-	// For arena matches, exclude matches in round_closing (match is about to end).
-	// The match stays Open during RoundClosing (Open=false is set at PostMatch),
-	// so this query filter is the primary mechanism to prevent arena backfill.
-	if mode == evr.ModeArenaPublic {
+	// Exclude matches in round_closing (the round is about to end). The match
+	// stays Open during RoundClosing (Open=false is set at PostMatch), so this
+	// query filter is the primary mechanism that stops backfill after the lock.
+	if modeHasRoundLock(mode) {
 		qparts = append(qparts, fmt.Sprintf(`-label.game_status:%s`, GameStatusRoundClosing.String()))
 	}
 
-	query := strings.Join(qparts, " ")
+	return strings.Join(qparts, " ")
+}
+
+// GetBackfillMatches retrieves matches that can accept backfill candidates
+func (b *PostMatchmakerBackfill) GetBackfillMatches(ctx context.Context, groupID uuid.UUID, mode evr.Symbol) ([]*BackfillMatch, error) {
+	query := backfillMatchesQuery(groupID, mode)
 
 	// Backfill search: minSize=0 ensures we can find freshly-prepared matches
 	// that have not yet registered a presence (same rationale as
@@ -970,135 +975,62 @@ func (b *PostMatchmakerBackfill) ProcessAndExecuteBackfill(ctx context.Context, 
 		preparedMatches := b.prepareMatches(rawMatches, bctx)
 		groupIDStr := key.GroupID.String()
 
-		// Process and execute each candidate immediately
-		// For Combat, we split candidates into individual players to allow fair distribution
-		// and pair-wise joining to maintain balance.
-		var pool []*preparedBackfillCandidate
-		if key.Mode == evr.ModeCombatPublic {
-			for _, c := range groupCandidates {
-				if len(c.Entries) == 1 {
-					pool = append(pool, c)
-				} else {
-					// Split party into individual candidates
-					for _, entry := range c.Entries {
-						pool = append(pool, &preparedBackfillCandidate{
-							BackfillCandidate: &BackfillCandidate{
-								Ticket:         c.Ticket,
-								Entries:        []*MatchmakerEntry{entry},
-								GroupID:        c.GroupID,
-								Mode:           c.Mode,
-								Rating:         c.Rating,
-								SubmissionTime: c.SubmissionTime,
-								RTTs:           c.RTTs,
-								MaxRTT:         c.MaxRTT,
-								TeamAlignment:  c.TeamAlignment,
-								Intervals:      c.Intervals,
-							},
-							sessions:           b.prepareCandidates([]*BackfillCandidate{{Entries: []*MatchmakerEntry{entry}}})[0].sessions,
-							partySize:          1,
-							BlacklistedServers: c.BlacklistedServers,
-						})
-					}
-				}
-			}
-		} else {
-			pool = groupCandidates
+		groupResults, err := b.placeGroupCandidates(ctx, logger, groupCandidates, preparedMatches, bctx, groupIDStr, b.executeBackfillResultOptimized)
+		results = append(results, groupResults...)
+		if err != nil {
+			return results, err
+		}
+	}
+
+	return results, nil
+}
+
+// backfillExecutor joins a candidate's sessions to the match and team in result,
+// returning how many joined. It is a parameter of placeGroupCandidates so the
+// placement decisions can be tested without a running match registry.
+type backfillExecutor func(ctx context.Context, logger *zap.Logger, result *BackfillResult, sessions []Session, groupID string) int
+
+// placeGroupCandidates places one group+mode's candidates into preparedMatches,
+// executing each placement immediately through execute. A candidate is a whole
+// ticket: a party is placed on one team in one placement or not at all, in every
+// mode.
+func (b *PostMatchmakerBackfill) placeGroupCandidates(
+	ctx context.Context,
+	logger *zap.Logger,
+	groupCandidates []*preparedBackfillCandidate,
+	preparedMatches []*preparedBackfillMatch,
+	bctx *backfillContext,
+	groupIDStr string,
+	execute backfillExecutor,
+) ([]*BackfillResult, error) {
+	results := make([]*BackfillResult, 0)
+
+	// Process and execute each candidate immediately
+	for _, candidate := range groupCandidates {
+		// Check for context cancellation before processing each candidate
+		select {
+		case <-ctx.Done():
+			b.logger.Debug("Backfill cancelled during candidate processing", zap.Error(ctx.Err()))
+			return results, ctx.Err()
+		default:
 		}
 
-		for len(pool) > 0 {
-			// Check for context cancellation
-			select {
-			case <-ctx.Done():
-				return results, ctx.Err()
-			default:
-			}
+		// Find best match using pre-computed data
+		result := b.findBestBackfillMatchOptimized(candidate, preparedMatches, bctx)
+		if result == nil || result.Score <= BackfillMinAcceptableScore {
+			continue
+		}
 
-			candidate := pool[0]
-			pool = pool[1:]
+		// Execute backfill immediately using pre-resolved sessions
+		successCount := execute(ctx, logger, result, candidate.sessions, groupIDStr)
+		if successCount > 0 {
+			results = append(results, result)
+			// Update tracked slots and team counts for successfully joined entrants
+			result.Match.OpenSlots[result.Team] -= successCount
+			result.Match.TeamCounts[result.Team] += successCount
 
-			// For Combat, if we are at an even state, try to find another player to join as a pair
-			if key.Mode == evr.ModeCombatPublic {
-				// Find matches that are currently balanced
-				// We need another player from the pool to join this match together
-				result := b.findBestBackfillMatchOptimized(candidate, preparedMatches, bctx)
-				if result != nil && result.Score > BackfillMinAcceptableScore {
-					// If the match is already uneven, this player will join the smaller team (restoring balance)
-					if result.Match.TeamCounts[evr.TeamBlue] != result.Match.TeamCounts[evr.TeamOrange] {
-						successCount := b.executeBackfillResultOptimized(ctx, logger, result, candidate.sessions, groupIDStr)
-						if successCount > 0 {
-							results = append(results, result)
-							result.Match.OpenSlots[result.Team] -= successCount
-							result.Match.TeamCounts[result.Team] += successCount
-							b.logBackfillSummary(logger, result)
-						}
-						continue
-					}
-
-					// If the match is even, we need a second player to join the opposite team
-					if len(pool) > 0 {
-						secondCandidate := pool[0]
-						otherTeam := evr.TeamOrange
-						if result.Team == evr.TeamOrange {
-							otherTeam = evr.TeamBlue
-						}
-
-						// The second player did not select this match; the first
-						// player did. Honor the second player's blacklist before
-						// pairing them onto result.Match. Skip the pairing (leave
-						// them in the pool for a later cycle) if blacklisted.
-						matchExtIP := ""
-						if result.Match.Label != nil && result.Match.Label.GameServer != nil {
-							matchExtIP = result.Match.Label.GameServer.Endpoint.GetExternalIP()
-						}
-						if candidateServerBlacklisted(secondCandidate, matchExtIP) {
-							continue
-						}
-
-						if result.Match.OpenSlots[otherTeam] >= 1 {
-							// Found a pair! Execute both.
-							pool = pool[1:] // Consume the second player
-
-							// Join first player
-							s1 := b.executeBackfillResultOptimized(ctx, logger, result, candidate.sessions, groupIDStr)
-							if s1 > 0 {
-								results = append(results, result)
-								result.Match.OpenSlots[result.Team] -= s1
-								result.Match.TeamCounts[result.Team] += s1
-								b.logBackfillSummary(logger, result)
-							}
-
-							// Join second player to the other team
-							result2 := &BackfillResult{
-								Candidate: secondCandidate.BackfillCandidate,
-								Match:     result.Match,
-								Team:      otherTeam,
-								Score:     result.Score,
-							}
-							s2 := b.executeBackfillResultOptimized(ctx, logger, result2, secondCandidate.sessions, groupIDStr)
-							if s2 > 0 {
-								results = append(results, result2)
-								result2.Match.OpenSlots[result2.Team] -= s2
-								result2.Match.TeamCounts[result2.Team] += s2
-								b.logBackfillSummary(logger, result2)
-							}
-						}
-					}
-				}
-			} else {
-				// Standard backfill for non-combat modes
-				result := b.findBestBackfillMatchOptimized(candidate, preparedMatches, bctx)
-				if result == nil || result.Score <= BackfillMinAcceptableScore {
-					continue
-				}
-
-				successCount := b.executeBackfillResultOptimized(ctx, logger, result, candidate.sessions, groupIDStr)
-				if successCount > 0 {
-					results = append(results, result)
-					result.Match.OpenSlots[result.Team] -= successCount
-					result.Match.TeamCounts[result.Team] += successCount
-					b.logBackfillSummary(logger, result)
-				}
-			}
+			// Log structured summary after each backfill operation
+			b.logBackfillSummary(logger, result)
 		}
 	}
 

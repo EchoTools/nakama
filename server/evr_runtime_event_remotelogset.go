@@ -53,6 +53,20 @@ type EventRemoteLogSet struct {
 	XPID         evr.EvrId         `json:"xp_id"`
 	Username     string            `json:"username"`
 	RemoteLogSet *evr.RemoteLogSet `json:"remote_log_set"`
+
+	// matchStatsStore overrides where combat match stats are kept. Nil means
+	// match_summaries in MongoDB when a client is configured.
+	matchStatsStore playerMatchStatsStore
+}
+
+func (s *EventRemoteLogSet) playerMatchStatsStore() playerMatchStatsStore {
+	if s.matchStatsStore != nil {
+		return s.matchStatsStore
+	}
+	if mc := globalMongoClient.Load(); mc != nil {
+		return mongoPlayerMatchStatsStore{client: mc}
+	}
+	return nil
 }
 
 func NewEventPostMatchRemoteLog(userID, sessionID string, xpid evr.EvrId, username string, node string, logSet *evr.RemoteLogSet) *EventRemoteLogSet {
@@ -674,6 +688,7 @@ func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logge
 
 func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, sessionRegistry SessionRegistry, statisticsQueue *StatisticsQueue, matchID MatchID, msgs []evr.RemoteLog) error {
 	var statsByPlayer = make(map[evr.EvrId]evr.MatchTypeStats, 8)
+	var matchStatsByPlayer = make(map[evr.EvrId]*evr.RemoteLogPostMatchMatchStats, 1)
 
 	//var xpLevel *evr.RemoteLogPostMatchMatchTypeXPLevel
 
@@ -682,7 +697,17 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		case *evr.RemoteLogPostMatchMatchTypeXPLevel:
 			continue
 		case *evr.RemoteLogPostMatchMatchStats:
-			continue
+			xpid, err := evr.ParseEvrId(m.XPID)
+			if err != nil {
+				// Not fatal, unlike the type stats below: these are kept, not
+				// scored, and must not cost the player their type stats.
+				logger.WithFields(map[string]any{"error": err, "claimed": m.XPID}).Warn("Failed to parse evr ID in match stats")
+				continue
+			}
+			if !s.mayReportPostMatchStats(logger, *xpid) {
+				continue
+			}
+			matchStatsByPlayer[*xpid] = m
 		case *evr.RemoteLogPostMatchTypeStats:
 
 			xpid, err := evr.ParseEvrId(m.XPID)
@@ -690,18 +715,7 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 				return fmt.Errorf("failed to parse evr ID: %w", err)
 			}
 
-			// Accept stats if:
-			// 1. The submitter is reporting their own stats (self-reporting), OR
-			// 2. The submitter is a game server operator (unknown platform code / UNK-*),
-			//    which is a trusted authority submitting stats on behalf of players.
-			// Reject any other cross-player submission to prevent stat injection attacks.
-			isSelfReporting := *xpid == s.XPID
-			isGameServerOperator := !s.XPID.IsValid()
-			if !isSelfReporting && !isGameServerOperator {
-				logger.WithFields(map[string]interface{}{
-					"submitter": s.XPID.String(),
-					"claimed":   xpid.String(),
-				}).Warn("Rejected stats submission for mismatched XPID")
+			if !s.mayReportPostMatchStats(logger, *xpid) {
 				continue
 			}
 
@@ -721,6 +735,13 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 			return fmt.Errorf("failed to get match label: %w", err)
 		}
 	}
+
+	// Kept before the public-only gate below: a private combat match's stats
+	// are as much the match's record as a public one's.
+	if label.Mode == evr.ModeCombatPublic || label.Mode == evr.ModeCombatPrivate {
+		s.keepCombatMatchStats(logger, label, matchStatsByPlayer)
+	}
+
 	if label.Mode != evr.ModeArenaPublic && label.Mode != evr.ModeCombatPublic {
 		if err := DeleteStoredMatchLabel(ctx, nk, matchID); err != nil && !errors.Is(err, ErrMatchNotFound) {
 			logger.WithField("error", err).Warn("failed to delete stored match label for non-public mode")
@@ -746,7 +767,8 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		copy(playersWithPlayerRatings, label.Players)
 
 		serviceSettings := ServiceSettings()
-		if serviceSettings.UseSkillBasedMatchmaking() {
+		ratingsOn := serviceSettings.UseSkillBasedMatchmaking()
+		if ratingsOn {
 			for i, p := range playersWithTeamRatings {
 				// Only load ratings for competitors (blue/orange team)
 				if !p.IsCompetitor() {
@@ -782,19 +804,41 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		// Determine winning team once for the entire match
 		// Check the first player's stats to determine which team won
 		var blueWins bool
+		resultDecided := label.Mode != evr.ModeCombatPublic // arena has always rated on whatever it read
 		for _, playerInfo := range label.Players {
 			if playerInfo.Team == BlueTeam || playerInfo.Team == OrangeTeam {
 				if stats, ok := statsByPlayer[playerInfo.EvrID]; ok {
+					if label.Mode == evr.ModeCombatPublic {
+						// Combat sends CombatWins/CombatLosses, not the arena keys.
+						// A player with neither (nor an arena key) says nothing
+						// about the result.
+						if decided, blue := combatBlueWins(playerInfo.Team, stats); decided {
+							blueWins = blue
+							resultDecided = true
+							break
+						}
+						continue
+					}
 					blueWins = (playerInfo.Team == BlueTeam && stats.ArenaWins > 0) || (playerInfo.Team == OrangeTeam && stats.ArenaLosses > 0)
 					break
 				}
 			}
 		}
 
+		// A combat match with no decided winner (a tie, or no result key) moves no
+		// rating; before, it was rated as an orange win.
+		if ratingsOn && !resultDecided {
+			ratingsOn = false
+			logger.WithFields(map[string]any{
+				"mid":  matchID.String(),
+				"mode": label.Mode.String(),
+			}).Info("Combat match has no decided winner; ratings not updated")
+		}
+
 		// Calculate new ratings once for all players (before the loop to avoid O(n²) complexity)
 		var teamRatings map[string]types.Rating
 		var playerRatings map[string]types.Rating
-		if serviceSettings.UseSkillBasedMatchmaking() {
+		if ratingsOn {
 			// For combat mode, use win/loss only (no individual stats) for rating calculation
 			// For arena mode, use full stats-based rating calculation
 			statsForRating := statsByPlayer
@@ -867,7 +911,7 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 			if typeStats.ArenaWins > 0 || typeStats.ArenaLosses > 0 {
 				matchResultWon = typeStats.ArenaWins > 0
 				hasMatchResult = true
-			} else if label.Mode == evr.ModeCombatPublic {
+			} else if label.Mode == evr.ModeCombatPublic && resultDecided {
 				matchResultWon = (playerInfo.Team == BlueTeam && blueWins) || (playerInfo.Team == OrangeTeam && !blueWins)
 				hasMatchResult = true
 			}
@@ -896,7 +940,7 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 				}
 			}
 
-			if serviceSettings.UseSkillBasedMatchmaking() {
+			if ratingsOn {
 
 				// Use the pre-calculated team ratings for this player
 				if rating, ok := teamRatings[playerInfo.SessionID]; ok {
@@ -1004,6 +1048,10 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 		}
 
 		if len(allStatEntries) > 0 {
+			for _, e := range allStatEntries {
+				e.Writer = StatisticsWriterRemoteLog
+				e.MatchID = matchID.String()
+			}
 			if err := statisticsQueue.Add(allStatEntries); err != nil {
 				return err
 			}
@@ -1011,6 +1059,64 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 
 		return nil
 	})
+}
+
+// mayReportPostMatchStats reports whether this log set's sender may submit
+// post-match stats for the claimed player:
+//  1. the sender is reporting their own stats (self-reporting), or
+//  2. the sender is a game server operator (unknown platform code / UNK-*),
+//     a trusted authority submitting stats on behalf of players.
+//
+// Any other cross-player submission is rejected, to prevent stat injection.
+func (s *EventRemoteLogSet) mayReportPostMatchStats(logger runtime.Logger, claimed evr.EvrId) bool {
+	isSelfReporting := claimed == s.XPID
+	isGameServerOperator := !s.XPID.IsValid()
+	if !isSelfReporting && !isGameServerOperator {
+		logger.WithFields(map[string]any{
+			"submitter": s.XPID.String(),
+			"claimed":   claimed.String(),
+		}).Warn("Rejected stats submission for mismatched XPID")
+		return false
+	}
+	return true
+}
+
+// keepCombatMatchStats puts each player's POST_MATCH_MATCH_STATS on the
+// match's record. The Info line carries the stats too, so a combat match's
+// numbers survive in the server log even where no MongoDB is configured.
+func (s *EventRemoteLogSet) keepCombatMatchStats(logger runtime.Logger, label *MatchLabel, byPlayer map[evr.EvrId]*evr.RemoteLogPostMatchMatchStats) {
+	if len(byPlayer) == 0 {
+		return
+	}
+	store := s.playerMatchStatsStore()
+	matchID := label.ID.String()
+	for xpid, m := range byPlayer {
+		rec := PlayerMatchStats{
+			XPID:         xpid.String(),
+			SenderUserID: s.UserID,
+			MatchType:    m.MatchType,
+			Stats:        m.MatchStats.Values(),
+			ReceivedAt:   time.Now().UTC(),
+		}
+		if p := label.GetPlayerByEvrID(xpid); p != nil {
+			rec.UserID = p.UserID
+		}
+		logger.WithFields(map[string]any{
+			"mid":         matchID,
+			"mode":        label.Mode.String(),
+			"player_xpid": rec.XPID,
+			"player_uid":  rec.UserID,
+			"sender_uid":  rec.SenderUserID,
+			"match_type":  rec.MatchType,
+			"stats":       rec.Stats,
+		}).Info("Combat match stats received")
+
+		if store == nil {
+			logger.WithField("mid", matchID).Debug("mongodb client not configured; combat match stats not kept on the match summary")
+			continue
+		}
+		store.Store(logger, matchID, rec)
+	}
 }
 
 func iterateMatchTypeStatsFields(stats evr.MatchTypeStats, fn func(statName string, op LeaderboardOperator, value float64)) {
@@ -1022,6 +1128,12 @@ func iterateMatchTypeStatsFields(stats evr.MatchTypeStats, fn func(statName stri
 
 		opTag := field.Tag.Get("op")
 		opParts := strings.Split(opTag, ",")
+
+		// op:"-" is parsed for the match record but has another writer on the
+		// leaderboards; see the combat fields of evr.MatchTypeStats.
+		if opParts[0] == "-" {
+			continue
+		}
 
 		if value.IsZero() && slices.Contains(opParts, "omitzero") {
 			continue
@@ -1275,4 +1387,22 @@ func VOIPLoudnessRecordMetadataFromString(data string) (*VOIPLoudnessRecordMetad
 		MaxLoudness: maxLoudness,
 		Count:       count,
 	}, nil
+}
+
+// combatBlueWins reads a combat player's result: CombatWins / CombatLosses, the
+// keys the game sends for combat, and failing those the arena keys, which are
+// what this path read before. decided is false when the stats carry none of
+// them.
+func combatBlueWins(team TeamIndex, stats evr.MatchTypeStats) (decided, blueWins bool) {
+	switch {
+	case stats.CombatWins > 0:
+		return true, team == BlueTeam
+	case stats.CombatLosses > 0:
+		return true, team == OrangeTeam
+	case stats.ArenaWins > 0:
+		return true, team == BlueTeam
+	case stats.ArenaLosses > 0:
+		return true, team == OrangeTeam
+	}
+	return false, false
 }

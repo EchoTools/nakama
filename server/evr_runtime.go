@@ -106,6 +106,9 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	// Register RPC's for device linking
 	rpcHandler := NewRPCHandler(ctx, db, dg)
+	if gnk, ok := nk.(*RuntimeGoNakamaModule); ok {
+		rpcHandler.sessionKey = gnk.config.GetSession().EncryptionKey
+	}
 
 	// Register all EVR RPCs with authorization middleware
 	if err = RegisterEVRRPCs(ctx, logger, db, nk, initializer, rpcHandler, sbmm); err != nil {

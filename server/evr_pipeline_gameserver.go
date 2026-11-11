@@ -251,6 +251,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	if !ok {
 		return fmt.Errorf("session parameters not provided")
 	}
+	applyRegistrationMessage(params, request)
 
 	userIDStr := session.userID.String()
 
@@ -338,6 +339,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 
 	// Create the broadcaster config
 	config := NewGameServerPresence(session.UserID(), session.id, serverID, internalIP, externalIP, externalPort, hostingGroupIDs, defaultRegion, regionCodes, versionLock, params.serverTags, params.supportedFeatures, request.TimeStepUsecs, ipInfo, params.geoHashPrecision, isNative, request.Version)
+	config.InstalledLevels = installedLevelsFromRegistration(request.InstalledLevels)
 
 	logger = logger.With(zap.String("internal_ip", internalIP.String()), zap.String("external_ip", externalIP.String()), zap.Uint16("port", externalPort))
 
@@ -504,6 +506,66 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	}
 
 	return session.SendEvrUnrequire(protobufMsg, evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP))
+}
+
+// applyRegistrationMessage overlays the registration message onto the session
+// parameters parsed from the server's WebSocket URL. A value set in the message
+// wins. An unset (zero) value leaves the URL parameter standing, so a server that
+// does not send fields 10-19 keeps its URL configuration. Proto3 scalars cannot
+// tell zero from unset, so debug, verbose and geo_precision can be turned on or
+// set from the message but not forced off or to zero over a URL value.
+// Message values go through the same patterns and length caps as the URL values.
+func applyRegistrationMessage(params *SessionParameters, msg *rtapi.GameServerRegistrationMessage) {
+	if regions := sanitizeList(msg.Regions, 32, regionPattern); len(regions) > 0 {
+		params.serverRegions = regions
+	}
+	if guilds := sanitizeList(msg.Guilds, 32, guildPattern); len(guilds) > 0 {
+		params.serverGuilds = guilds
+	}
+	if tags := sanitizeList(msg.Tags, 32, tagsPattern); len(tags) > 0 {
+		params.serverTags = tags
+	}
+	if features := sanitizeList(msg.Features, 32, featurePattern); len(features) > 0 {
+		params.supportedFeatures = features
+	}
+	if requires := sanitizeList(msg.Requires, 32, featurePattern); len(requires) > 0 {
+		params.requiredFeatures = requires
+	}
+	// A required feature is also a supported one (see session_ws.go), whichever source it came from.
+	for _, f := range params.requiredFeatures {
+		if !slices.Contains(params.supportedFeatures, f) {
+			params.supportedFeatures = append(params.supportedFeatures, f)
+		}
+	}
+	slices.Sort(params.supportedFeatures)
+
+	if v := sanitizeQueryValue(msg.DefaultRegion, 32, regionPattern); v != "" {
+		params.defaultRegion = v
+	}
+	if msg.GeoPrecision != 0 {
+		params.geoHashPrecision = min(max(int(msg.GeoPrecision), 0), 12)
+	}
+	if v := sanitizeQueryValue(msg.ServerAddress, 64, nil); v != "" {
+		params.externalServerAddr = v
+	}
+	if msg.Debug {
+		params.enableAllRemoteLogs = true
+	}
+	if msg.Verbose {
+		params.relayOutgoing = true
+	}
+}
+
+// installedLevelsFromRegistration converts the CSymbol64 level hashes from the registration message.
+func installedLevelsFromRegistration(levels []uint64) []evr.Symbol {
+	if len(levels) == 0 {
+		return nil
+	}
+	out := make([]evr.Symbol, 0, len(levels))
+	for _, l := range levels {
+		out = append(out, evr.Symbol(l))
+	}
+	return out
 }
 
 // buildRegionCodes constructs the region codes list and determines the default region.

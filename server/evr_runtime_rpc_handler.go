@@ -15,6 +15,10 @@ type RPCHandler struct {
 
 	responseCache *Cache
 	idcache       *MapOf[string, string]
+
+	// sessionKey is the server's session token signing key, used only by the
+	// servicestatus auth probe. Never logged or returned.
+	sessionKey string
 }
 
 func NewRPCHandler(ctx context.Context, db *sql.DB, dg *discordgo.Session) *RPCHandler {

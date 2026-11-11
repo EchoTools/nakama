@@ -586,7 +586,7 @@ type CombatStatistics struct {
 	RecentWinPercentage                *float64        `json:"-"` // In-memory override for rolling win rate
 	CombatAssists                      *StatisticValue `json:"CombatAssists,omitempty" op:"add,omitzero" type:"int"`
 	CombatAverageEliminationDeathRatio *StatisticValue `json:"CombatAverageEliminationDeathRatio" op:"rep,omitzero" type:"float"`
-	CombatBestEliminationStreak        *StatisticValue `json:"CombatBestEliminationStreak,omitempty" op:"add,omitzero" type:"int"`
+	CombatBestEliminationStreak        *StatisticValue `json:"CombatBestEliminationStreak,omitempty" op:"max,omitzero" type:"int"`
 	CombatDamage                       *StatisticValue `json:"CombatDamage,omitempty" op:"add,omitzero" type:"float"`
 	CombatDamageAbsorbed               *StatisticValue `json:"CombatDamageAbsorbed,omitempty" op:"add,omitzero" type:"float"`
 	CombatDamageTaken                  *StatisticValue `json:"CombatDamageTaken,omitempty" op:"add,omitzero" type:"float"`
@@ -613,19 +613,30 @@ type CombatStatistics struct {
 	CombatWins                         *StatisticValue `json:"CombatWins,omitempty" op:"add,omitzero" type:"int"`
 	CombatLosses                       *StatisticValue `json:"CombatLosses,omitempty" op:"add,omitzero" type:"int"`
 	CombatWinPercentage                *StatisticValue `json:"CombatWinPercentage,omitempty" op:"rep,omitzero" type:"float"`
-	Level                              *StatisticValue `json:"Level,omitempty" op:"add,omitzero" type:"int"`
-	XP                                 *StatisticValue `json:"XP,omitempty" op:"rep,omitzero" type:"float"`
-	GamesPlayed                        *StatisticValue `json:"GamesPlayed,omitempty" op:"add,omitzero" type:"int"`
-	SkillRatingMu                      *StatisticValue `json:"SkillRatingMu,omitempty" op:"rep,omitzero" type:"float"`            // Deprecated: Use TeamSkillRatingMu
-	SkillRatingSigma                   *StatisticValue `json:"SkillRatingSigma,omitempty" op:"rep,omitzero" type:"float"`         // Deprecated: Use TeamSkillRatingSigma
-	SkillRatingOrdinal                 *StatisticValue `json:"SkillRatingOrdinal,omitempty" op:"rep,omitzero" type:"float"`       // Deprecated: Use TeamSkillRatingOrdinal
-	TeamSkillRatingMu                  *StatisticValue `json:"TeamSkillRatingMu,omitempty" op:"rep,omitzero" type:"float"`        // Team-based skill rating Mu
-	TeamSkillRatingSigma               *StatisticValue `json:"TeamSkillRatingSigma,omitempty" op:"rep,omitzero" type:"float"`     // Team-based skill rating Sigma
-	TeamSkillRatingOrdinal             *StatisticValue `json:"TeamSkillRatingOrdinal,omitempty" op:"rep,omitzero" type:"float"`   // Team-based skill rating Ordinal
-	PlayerSkillRatingMu                *StatisticValue `json:"PlayerSkillRatingMu,omitempty" op:"rep,omitzero" type:"float"`      // Individual player skill rating Mu
-	PlayerSkillRatingSigma             *StatisticValue `json:"PlayerSkillRatingSigma,omitempty" op:"rep,omitzero" type:"float"`   // Individual player skill rating Sigma
-	PlayerSkillRatingOrdinal           *StatisticValue `json:"PlayerSkillRatingOrdinal,omitempty" op:"rep,omitzero" type:"float"` // Individual player skill rating Ordinal
-	LobbyTime                          *StatisticValue `json:"LobbyTime,omitempty" op:"rep,omitzero" type:"float"`
+	CombatTies                         *StatisticValue `json:"CombatTies,omitempty" op:"add,omitzero" type:"int"`
+	// Sent only in POST_MATCH_MATCH_STATS. Counts add; a current streak and a
+	// ratio describe the latest match, so they replace.
+	CombatHealingReceived          *StatisticValue `json:"CombatHealingReceived,omitempty" op:"add,omitzero" type:"float"`
+	CombatStunsReceived            *StatisticValue `json:"CombatStunsReceived,omitempty" op:"add,omitzero" type:"int"`
+	CombatScans                    *StatisticValue `json:"CombatScans,omitempty" op:"add,omitzero" type:"int"`
+	CombatScansReceived            *StatisticValue `json:"CombatScansReceived,omitempty" op:"add,omitzero" type:"int"`
+	CombatSuicides                 *StatisticValue `json:"CombatSuicides,omitempty" op:"add,omitzero" type:"int"`
+	CombatSelfDamage               *StatisticValue `json:"CombatSelfDamage,omitempty" op:"add,omitzero" type:"float"`
+	CombatCurrentEliminationStreak *StatisticValue `json:"CombatCurrentEliminationStreak,omitempty" op:"rep,omitzero" type:"int"`
+	CombatEliminationDeathRatio    *StatisticValue `json:"CombatEliminationDeathRatio,omitempty" op:"rep,omitzero" type:"float"`
+	Level                          *StatisticValue `json:"Level,omitempty" op:"add,omitzero" type:"int"`
+	XP                             *StatisticValue `json:"XP,omitempty" op:"rep,omitzero" type:"float"`
+	GamesPlayed                    *StatisticValue `json:"GamesPlayed,omitempty" op:"add,omitzero" type:"int"`
+	SkillRatingMu                  *StatisticValue `json:"SkillRatingMu,omitempty" op:"rep,omitzero" type:"float"`            // Deprecated: Use TeamSkillRatingMu
+	SkillRatingSigma               *StatisticValue `json:"SkillRatingSigma,omitempty" op:"rep,omitzero" type:"float"`         // Deprecated: Use TeamSkillRatingSigma
+	SkillRatingOrdinal             *StatisticValue `json:"SkillRatingOrdinal,omitempty" op:"rep,omitzero" type:"float"`       // Deprecated: Use TeamSkillRatingOrdinal
+	TeamSkillRatingMu              *StatisticValue `json:"TeamSkillRatingMu,omitempty" op:"rep,omitzero" type:"float"`        // Team-based skill rating Mu
+	TeamSkillRatingSigma           *StatisticValue `json:"TeamSkillRatingSigma,omitempty" op:"rep,omitzero" type:"float"`     // Team-based skill rating Sigma
+	TeamSkillRatingOrdinal         *StatisticValue `json:"TeamSkillRatingOrdinal,omitempty" op:"rep,omitzero" type:"float"`   // Team-based skill rating Ordinal
+	PlayerSkillRatingMu            *StatisticValue `json:"PlayerSkillRatingMu,omitempty" op:"rep,omitzero" type:"float"`      // Individual player skill rating Mu
+	PlayerSkillRatingSigma         *StatisticValue `json:"PlayerSkillRatingSigma,omitempty" op:"rep,omitzero" type:"float"`   // Individual player skill rating Sigma
+	PlayerSkillRatingOrdinal       *StatisticValue `json:"PlayerSkillRatingOrdinal,omitempty" op:"rep,omitzero" type:"float"` // Individual player skill rating Ordinal
+	LobbyTime                      *StatisticValue `json:"LobbyTime,omitempty" op:"rep,omitzero" type:"float"`
 }
 
 func (s *CombatStatistics) MarshalJSON() ([]byte, error) {
@@ -678,13 +689,21 @@ func (s *CombatStatistics) CalculateFieldsWithOptions(_ bool) {
 		}
 	}
 
-	if s.CombatAssists != nil && s.GamesPlayed != nil && s.GamesPlayed.Value != 0 {
-		// Validate CombatAssists value to prevent corrupted statistics
-		assistsValue := s.CombatAssists.GetValue()
-		if assistsValue < 0 || assistsValue > 1e6 {
-			assistsValue = 0
+	// Eliminations per death, as the game computes it: its own type stats for
+	// a match carry CombatEliminations 7, CombatDeaths 4 and
+	// CombatAverageEliminationDeathRatio 1.75. Undefined with no deaths, so
+	// left as it is then.
+	if s.CombatEliminations != nil && s.CombatDeaths != nil && s.CombatDeaths.GetValue() > 0 {
+		// Validate values to prevent corrupted statistics
+		eliminationsValue := s.CombatEliminations.GetValue()
+		deathsValue := s.CombatDeaths.GetValue()
+		if eliminationsValue < 0 || eliminationsValue > 1e6 || deathsValue > 1e6 {
+			eliminationsValue = 0
 		}
-		s.CombatAverageEliminationDeathRatio.Value = assistsValue / float64(s.GamesPlayed.Value)
+		s.CombatAverageEliminationDeathRatio = &StatisticValue{
+			Value: eliminationsValue / deathsValue,
+			Count: 1,
+		}
 	}
 
 	if s.CombatPayloadWins != nil && s.CombatPayloadGamesPlayed != nil && s.CombatPayloadGamesPlayed.Value != 0 {
@@ -695,7 +714,10 @@ func (s *CombatStatistics) CalculateFieldsWithOptions(_ bool) {
 			payloadGamesValue < 0 || payloadGamesValue > 1e6 {
 			payloadWinsValue = 0
 		}
-		s.CombatPayloadWinPercentage.Value = payloadWinsValue / payloadGamesValue * 100
+		s.CombatPayloadWinPercentage = &StatisticValue{
+			Value: payloadWinsValue / payloadGamesValue * 100,
+			Count: 1,
+		}
 	}
 
 	if s.CombatPointCaptureWins != nil && s.CombatPointCaptureGamesPlayed != nil && s.CombatPointCaptureGamesPlayed.Value != 0 {
@@ -706,7 +728,10 @@ func (s *CombatStatistics) CalculateFieldsWithOptions(_ bool) {
 			captureGamesValue < 0 || captureGamesValue > 1e6 {
 			captureWinsValue = 0
 		}
-		s.CombatPointCaptureWinPercentage.Value = captureWinsValue / captureGamesValue * 100
+		s.CombatPointCaptureWinPercentage = &StatisticValue{
+			Value: captureWinsValue / captureGamesValue * 100,
+			Count: 1,
+		}
 	}
 
 	// Calculate legacy skill rating ordinal (for backwards compatibility)

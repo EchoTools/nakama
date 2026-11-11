@@ -131,6 +131,10 @@ func (b *fakeBatchResults) Query() (pgx.Rows, error) {
 }
 func (b *fakeBatchResults) Close() error { return nil }
 
+// Tx satisfies pgx.BatchResults, which gained this method in pgx v5.12.0. A
+// batch runs on the transaction that sent it, so that is what it reports.
+func (b *fakeBatchResults) Tx() pgx.Tx { return b.tx }
+
 func (b *fakeBatchResults) QueryRow() pgx.Row {
 	b.tx.batchRowsScanned++
 	if b.tx.failBatchScan != nil {

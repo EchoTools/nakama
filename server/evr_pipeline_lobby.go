@@ -3,12 +3,19 @@ package server
 import (
 	"context"
 	"fmt"
+	"time"
 
 	rtapi "buf.build/gen/go/echotools/nevr-api/protocolbuffers/go/gameservice/v1"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 )
+
+// joinMarkerAger is implemented by match registries that can say how long ago a
+// session's join attempt was accepted (LocalMatchRegistry). Logging only.
+type joinMarkerAger interface {
+	JoinMarkerAge(id uuid.UUID, sessionID uuid.UUID) (time.Duration, bool)
+}
 
 func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) error {
 	message := in.GetLobbyEntrantConnected()
@@ -72,6 +79,15 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 		// Their friends are told where they are now.
 		p.friendPresenceMatchEntered(ctx, logger, s)
 
+		// Read the join marker's age before Track below, which lets the match clear it.
+		// -1 means the marker is gone or the registry cannot say.
+		joinAttemptMs := int64(-1)
+		if ager, ok := p.nk.matchRegistry.(joinMarkerAger); ok {
+			if age, found := ager.JoinMarkerAge(matchID.UUID, presence.SessionID); found {
+				joinAttemptMs = age.Milliseconds()
+			}
+		}
+
 		// Update guild group stream and leave matchmaking streams.
 		if matchLabel != nil {
 			guildGroupStream := PresenceStream{Mode: StreamModeGuildGroup, Subject: matchLabel.GetGroupID(), Label: matchLabel.Mode.String()}
@@ -101,6 +117,14 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 		}
 
 		acceptedIDs = append(acceptedIDs, entrantID)
+
+		baseLogger.Info("Entrant ack accepted",
+			zap.String("sid", presence.GetSessionId()),
+			zap.String("uid", presence.GetUserId()),
+			zap.String("entrant_id", entrantID),
+			zap.String("gs_sid", session.ID().String()),
+			zap.Int64("join_attempt_ms", joinAttemptMs),
+			zap.Bool("matchmaking_untracked", matchLabel != nil))
 
 		// Deliberately NO party-reservation creation here. Slot reservations are
 		// Nakama-internal capacity accounting (state.reservationMap / OpenSlots,

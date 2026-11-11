@@ -135,6 +135,13 @@ type ServiceSettingsData struct {
 	EnableVibinatorsGravity       bool          `json:"enable_vibinators_gravity"` // Novelty: redirect social-lobby echo_arena matchmakers toward vibinator's echo_combat
 	UseQuestEncoderFlags          bool          `json:"use_quest_encoder_flags"`   // Send Quest-shifted encoder flag bit layout in LobbySessionSuccessv5 for standalone clients
 	CGNAT                         CGNATSettings `json:"cgnat"`
+
+	// BlockedQuestVersions refuses the login of a standalone Quest client whose nevr_identity.version (leading
+	// "v" ignored) is listed, unless the account is a Global Operator or Global Developer. Empty changes nothing.
+	// PCVR clients are never refused by it.
+	BlockedQuestVersions []string `json:"blocked_quest_versions"`
+	// BlockedQuestVersionsMessage is what a refused Quest login is shown. Empty uses a default.
+	BlockedQuestVersionsMessage string `json:"blocked_quest_versions_message"`
 }
 
 // CGNATSettings configures detection of CGNAT and shared-IP providers
@@ -206,6 +213,7 @@ type GlobalMatchmakingSettings struct {
 	GreenDivisionMaxAccountAgeDays int                     `json:"green_division_max_account_age_days"` // The maximum account age to be in the green division
 	EnableEarlyQuitPenalty         bool                    `json:"enable_early_quit_penalty"`           // Disable early quit penalty
 	SilentEarlyQuitSystem          bool                    `json:"silent_early_quit_system"`            // Disable Discord DM notifications for tier changes
+	DisableEarlyQuitAutoReport     bool                    `json:"disable_early_quit_auto_report"`      // Disable the auto-report at max early quit penalty (on by default)
 	EarlyQuitTier1Threshold        *int32                  `json:"early_quit_tier1_threshold"`          // Penalty level threshold for Tier 1 (good standing). Players with penalty <= threshold stay in Tier 1. Nil means not configured.
 	EarlyQuitTier2Threshold        *int32                  `json:"early_quit_tier2_threshold"`          // Penalty level threshold for Tier 2 (reserved for future Tier 3+ implementation). Nil means not configured.
 	ServerSelection                ServerSelectionSettings `json:"server_selection"`                    // The server selection settings
@@ -252,6 +260,8 @@ type GlobalMatchmakingSettings struct {
 	QualityFloorMinimum            float64                 `json:"quality_floor_minimum"`               // Floor never drops below this value (default 0.0)
 	EnableArchetypeBalancing       *bool                   `json:"enable_archetype_balancing"`          // Use archetype data to prefer balanced team compositions as a tiebreaker (default false, needs tuning)
 	EnableCombatMatchmaking        bool                    `json:"enable_combat_matchmaking"`           // Enable combat-specific matchmaking: split party tickets and allow uneven teams
+	CombatDrawTolerance            float64                 `json:"combat_draw_tolerance"`               // Combat team sort: how far (in draw probability) a split that keeps every party together may fall short of the closest-to-draw split and still be taken (default 0.003; 0 = default)
+	CombatSplitPenaltyWeight       float64                 `json:"combat_split_penalty_weight"`         // Combat team sort: when parties must be split, mu points charged per moved player, multiplied by (1 + that player's recent-split score) (default 1.0; 0 = default)
 }
 
 type QueryAddons struct {
@@ -476,6 +486,17 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 
 	if data.Matchmaking.SBMMMinPlayerCount == 0 {
 		data.Matchmaking.SBMMMinPlayerCount = 24
+	}
+
+	// Combat team sort (#775): a party is kept together unless that costs more
+	// than this much draw probability against the closest-to-draw split; when it
+	// is split, each unit of the moved player's recent-split score costs this
+	// many mu points.
+	if data.Matchmaking.CombatDrawTolerance <= 0 {
+		data.Matchmaking.CombatDrawTolerance = DefaultCombatDrawTolerance
+	}
+	if data.Matchmaking.CombatSplitPenaltyWeight <= 0 {
+		data.Matchmaking.CombatSplitPenaltyWeight = DefaultCombatSplitPenaltyWeight
 	}
 
 	// Set default party skill boost (10% = 0.10)

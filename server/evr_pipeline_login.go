@@ -60,6 +60,16 @@ func (e AccountDisabledError) Is(target error) bool {
 	return ok
 }
 
+// BlockedQuestVersionError refuses the login of a standalone Quest client on a nevr-runtime version the
+// operator listed in blocked_quest_versions. Its message is what the player is shown.
+type BlockedQuestVersionError struct {
+	message string
+}
+
+func (e BlockedQuestVersionError) Error() string {
+	return e.message
+}
+
 type NewLocationError struct {
 	guildName   string
 	code        string
@@ -345,6 +355,18 @@ func (p *EvrPipeline) processLoginRequest(ctx context.Context, logger *zap.Logge
 		return err
 	}
 
+	// Refuse a listed Quest version here, before authorizeSession records login history or emits
+	// EventUserAuthenticated. The permissions lookup runs only for a login that matches the list.
+	if err = blockedQuestVersionRefusal(logger, ServiceSettings(), params.xpID.Token(), session.clientIP, params.profile.ID(), params.BuildNumber(), params.NevrRuntimeVersion(), func() (bool, error) {
+		perms, err := ResolveUserPermissions(ctx, p.db, params.profile.ID())
+		if err != nil {
+			return false, err
+		}
+		return perms.IsGlobalOperator || perms.IsGlobalDeveloper, nil
+	}); err != nil {
+		return err
+	}
+
 	if params.profile, err = EVRProfileLoad(ctx, p.nk, params.profile.ID()); err != nil {
 		return fmt.Errorf("failed to get account: %w", err)
 	}
@@ -358,6 +380,50 @@ func (p *EvrPipeline) processLoginRequest(ctx context.Context, logger *zap.Logge
 	}
 
 	return nil
+}
+
+// blockedQuestVersionRefusal decides whether blocked_quest_versions refuses a login. It returns the
+// BlockedQuestVersionError to send the player, or nil to admit the login.
+//
+// Only a standalone Quest login (buildversion == StandaloneBuildNumber) whose nevr_identity.version is listed
+// is refused, with a leading "v" ignored on both sides. PCVR clients are never refused. exempt runs only for a
+// listed login and reports whether the account is a Global Operator or Global Developer. A lookup error refuses
+// the login, because the exemption cannot be proven.
+//
+// The version is declared by the client, so this stops a client that reports the blocked version honestly. It
+// is not an access control.
+func blockedQuestVersionRefusal(logger *zap.Logger, settings *ServiceSettingsData, xpid, clientIP, uid string, buildNumber evr.BuildNumber, nevrVersion string, exempt func() (bool, error)) error {
+	version := strings.TrimPrefix(nevrVersion, "v")
+	if version == "" || buildNumber != evr.StandaloneBuildNumber {
+		return nil
+	}
+	listed := slices.ContainsFunc(settings.BlockedQuestVersions, func(v string) bool {
+		return strings.TrimPrefix(v, "v") == version
+	})
+	if !listed {
+		return nil
+	}
+
+	isExempt, err := exempt()
+	if err != nil {
+		return fmt.Errorf("failed to resolve user permissions: %w", err)
+	}
+	if isExempt {
+		return nil
+	}
+
+	logger.Info("Rejected login: blocked Quest version",
+		zap.String("xpid", xpid),
+		zap.String("client_ip", clientIP),
+		zap.String("uid", uid),
+		zap.String("nevr_version", nevrVersion),
+	)
+
+	message := settings.BlockedQuestVersionsMessage
+	if message == "" {
+		message = "This game version is blocked on this server."
+	}
+	return BlockedQuestVersionError{message: message}
 }
 
 // authenticateSession handles the authentication of the login connection.
@@ -1044,28 +1110,11 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		logger.Warn("Failed to check display name owner", zap.Any("display_names", displayNames), zap.Error(err))
 	} else {
 		// Prune the in-game names that are owned by someone else.
-		for _, dn := range params.profile.DisplayNamesByGroupID() {
-			if ownerIDs, ok := ownerMap[dn]; ok && !slices.Contains(ownerIDs, params.profile.ID()) {
-				// This display name is owned by someone else.
-				displayNamesOwnedByOthers = append(displayNamesOwnedByOthers, dn)
-				for gID, gn := range params.profile.DisplayNamesByGroupID() {
-					if strings.EqualFold(gn, dn) {
-						// This display name is owned by someone else.
-						params.profile.DeleteGroupDisplayName(gID)
-						if serviceSettings.DisplayNameInUseNotifications {
-							// Notify the player that this display name is in use.
-							ownerDiscordID := p.discordCache.UserIDToDiscordID(ownerIDs[0])
-							go func(displayName string) {
-								if err := p.discordCache.SendDisplayNameInUseNotification(ctx, notifyDiscordID, ownerDiscordID, displayName, notifyUsername); err != nil {
-									if IsDiscordErrorCode(err, discordgo.ErrCodeCannotSendMessagesToThisUser) {
-										logger.Warn("Failed to send display name in use notification", zap.Error(err))
-									}
-								}
-							}(dn)
-						}
-					}
-				}
-			}
+		var notices []displayNameNotice
+		displayNamesOwnedByOthers, notices = pruneDisplayNamesOwnedByOthers(params.profile, displayNameHistory, ownerMap, serviceSettings.DisplayNameInUseNotifications, time.Now())
+		if len(notices) > 0 {
+			player := displayNameNoticePlayer{UserID: params.profile.ID(), DiscordID: notifyDiscordID, Username: notifyUsername}
+			go sendDisplayNameNotices(ctx, logger, p.discordCache.displayNameNoticeDeps(), player, notices)
 		}
 	}
 
@@ -1366,15 +1415,9 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 
 	if params.earlyQuitConfig != nil {
 		if cfg := params.earlyQuitConfig.Load(); cfg != nil {
-			// Populate all 6 binary profile fields
-			clientProfile.EarlyQuitFeatures = evr.EarlyQuitFeatures{
-				PenaltyTimestamp:    cfg.PenaltyTimestamp,
-				NumEarlyQuits:       int(cfg.NumEarlyQuits),
-				NumSteadyMatches:    int(cfg.NumSteadyMatches),
-				NumSteadyEarlyQuits: int(cfg.NumSteadyEarlyQuits),
-				PenaltyLevel:        int(cfg.PenaltyLevel),
-				SteadyPlayerLevel:   int(cfg.SteadyPlayerLevel),
-			}
+			// Populate all 6 binary profile fields. penaltyts is the stamp; the lockout expiry follows in the
+			// update sent after the profile, because the client's login path passes no expiry.
+			clientProfile.EarlyQuitFeatures = loginEarlyQuitFeatures(userID, cfg, time.Now())
 			// The client reads its early quit state from the server profile (evr.ServerProfile
 			// EarlyQuitFeatures); this copy is the one sent at login, after the stored one was written.
 			eq := clientProfile.EarlyQuitFeatures
@@ -1398,11 +1441,14 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	// Send early quit config and feature flags on login (unless penalty system is disabled or silent mode is enabled)
 	ss := ServiceSettings()
 	if p.earlyQuitMessageTrigger != nil && ss != nil && ss.Matchmaking.EnableEarlyQuitPenalty && !ss.Matchmaking.SilentEarlyQuitSystem {
-		if err := p.earlyQuitMessageTrigger.SendEarlyQuitConfigOnLogin(ctx, session); err != nil {
-			logger.Warn("Failed to send early quit config on login", zap.Error(err))
+		state := NewEarlyQuitPlayerState()
+		if params.earlyQuitConfig != nil {
+			if cfg := params.earlyQuitConfig.Load(); cfg != nil {
+				state = cfg
+			}
 		}
-		if err := p.earlyQuitMessageTrigger.SendFeatureFlagsOnLogin(ctx, session); err != nil {
-			logger.Warn("Failed to send early quit feature flags on login", zap.Error(err))
+		if err := p.earlyQuitMessageTrigger.SendEarlyQuitOnLogin(ctx, session, state); err != nil {
+			logger.Warn("Failed to send early quit messages on login", zap.Error(err))
 		}
 	}
 

@@ -71,17 +71,18 @@ type GroupMetadata struct {
 	ActiveFeatures                       []string          `json:"active_features,omitempty"`     // Active feature plugins sent to clients at login
 	AlternateAccountNotificationExpiry   time.Time         `json:"alt_notification_threshold"`    // Show alternate notifications newer than this time.
 	EnableEnforcementCountInNames        bool              `json:"enable_enforcement_count_in_names"`
-	NegatedEnforcerIDs                   []string          `json:"negated_enforcer_ids"`                     // Enforcers that are not allowed to enforce this group
-	RejectPlayersWithSuspendedAlternates bool              `json:"reject_players_with_suspended_alternates"` // Reject players with suspended alternate accounts
-	SuspensionInheritanceGroupIDs        []string          `json:"suspension_inheritence_group_ids"`         // Groups that this group inherits suspensions from
-	DisplayNameForceNickToIGN            bool              `json:"force_nick_to_ign"`                        // Force nicknames to be the same as the in-game name
-	DisplayNameInUseNotifications        bool              `json:"display_name_in_use_notifications"`        // Display name in use notification on nick change
-	EnableGlobalPingForServers           bool              `json:"enable_global_ping_for_servers"`           // Enable global ping for servers (they will be in all pools for ping checks)
-	CreateCommandRateLimitPerMinute      float64           `json:"create_command_rate_limit_per_minute"`     // Rate limit for /create command (max creates per minute), 0 = disabled
-	CreateCommandExcludedModes           []string          `json:"create_command_excluded_modes"`            // Explicitly excluded /create modes for this guild group
-	CreateCommandMaxPlayersByMode        map[string]int    `json:"create_command_max_players_by_mode"`       // Max online players (per mode) before /create is disabled for non-privileged users (0 = no limit)
-	EnableServerEmbedsCommand            bool              `json:"enable_server_embeds_command"`             // Enable /show command for allocators to see server status embeds
-	DefaultBlockMinutes                  int               `json:"default_block_minutes,omitempty"`          // Default match block duration in minutes (default: 50)
+	NegatedEnforcerIDs                   []string          `json:"negated_enforcer_ids"`                        // Enforcers that are not allowed to enforce this group
+	RejectPlayersWithSuspendedAlternates bool              `json:"reject_players_with_suspended_alternates"`    // Reject players with suspended alternate accounts
+	SuspensionInheritanceGroupIDs        []string          `json:"suspension_inheritence_group_ids"`            // Groups that this group inherits suspensions from
+	DisplayNameForceNickToIGN            bool              `json:"force_nick_to_ign"`                           // Force nicknames to be the same as the in-game name
+	DisplayNameInUseNotifications        bool              `json:"display_name_in_use_notifications"`           // Display name in use notification on nick change
+	EnableGlobalPingForServers           bool              `json:"enable_global_ping_for_servers"`              // Enable global ping for servers (they will be in all pools for ping checks)
+	CreateCommandRateLimitPerMinute      float64           `json:"create_command_rate_limit_per_minute"`        // Rate limit for /create command (max creates per minute), 0 = disabled
+	CreateCommandExcludedModes           []string          `json:"create_command_excluded_modes"`               // Explicitly excluded /create modes for this guild group
+	CreateCommandMaxPlayersByMode        map[string]int    `json:"create_command_max_players_by_mode"`          // Max online players (per mode) before /create is disabled for non-privileged users (0 = no limit)
+	EnableServerEmbedsCommand            bool              `json:"enable_server_embeds_command"`                // Enable /show command for allocators to see server status embeds
+	DefaultBlockMinutes                  int               `json:"default_block_minutes,omitempty"`             // Default match block duration in minutes (default: 50)
+	PublicArenaRoundLengthSeconds        int               `json:"public_arena_round_length_seconds,omitempty"` // Public Arena round length in seconds (default: 480)
 
 	MaintenanceMinutes int `json:"maintenance_minutes,omitempty"` // Maintenance window duration in minutes (default: 10)
 
@@ -93,6 +94,18 @@ type GroupMetadata struct {
 	LoadoutCommandDiscordIDs []string `json:"loadout_command_user_ids"`             // Discord user IDs allowed to use /loadout
 	SuspensionDMFooter       string   `json:"suspension_dm_footer"`                 // Custom footer for suspension DM notifications; empty = default footer
 }
+
+// PublicArenaRoundLength returns the configured public Arena round length,
+// defaulting to eight minutes when unset or invalid.
+func (g *GroupMetadata) PublicArenaRoundLength() time.Duration {
+	if g != nil && g.PublicArenaRoundLengthSeconds > 0 {
+		seconds := min(g.PublicArenaRoundLengthSeconds, MaxPublicArenaRoundLengthSeconds)
+		return time.Duration(seconds) * time.Second
+	}
+	return DefaultPublicArenaRoundDuration
+}
+
+const MaxPublicArenaRoundLengthSeconds = 1800
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {
 	return &GroupMetadata{

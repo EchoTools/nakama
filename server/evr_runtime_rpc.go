@@ -293,17 +293,8 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 				return "", fmt.Errorf("failed to unmarshal match label: %w", err)
 			}
 
-			// Remove sensitive data
-			if label.GameServer != nil {
-				label.GameServer.Latitude = 0
-				label.GameServer.Longitude = 0
-				label.GameServer.ServerID = 0
-				label.GameServer.Endpoint = evr.Endpoint{}
-			}
-			for i, p := range label.Players {
-				p.ClientIP = ""
-				label.Players[i] = p
-			}
+			// Remove player location, then build the public view from the redacted label.
+			label = label.RedactPlayerLocation()
 
 			if label.LobbyType == UnassignedLobby && label.GameServer != nil {
 				for _, id := range label.GameServer.GroupIDs {
@@ -763,8 +754,28 @@ type ServiceStatusService struct {
 }
 
 // the this format is for the `/status/services,news?env=live&projectid=rad14` request
+//
+// With ?components=auth the response is instead {"services": <the response
+// below, unchanged>, "components": {"auth": {"status", "reason"}}}.
 func (h *RPCHandler) ServiceStatusRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	response, err := h.serviceStatusResponse(ctx, nk)
+	if err != nil {
+		return "", err
+	}
 
+	requested := requestedStatusComponents(ctx)
+	if len(requested) == 0 {
+		return response, nil
+	}
+
+	var pinger dbPinger // stays a nil interface when db is nil
+	if db != nil {
+		pinger = db
+	}
+	return h.serviceStatusWithRequestedComponents(ctx, logger, pinger, response, requested)
+}
+
+func (h *RPCHandler) serviceStatusResponse(ctx context.Context, nk runtime.NakamaModule) (string, error) {
 	if cachedResponse, _, found := h.responseCache.Get("server-status"); found {
 		return cachedResponse.(string), nil
 	}
