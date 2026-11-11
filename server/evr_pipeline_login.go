@@ -1403,7 +1403,7 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 			ChannelUuid:  strings.ToUpper(g.ID().String()),
 			Name:         g.Name(),
 			Description:  g.Description(),
-			Rules:        g.Description() + "\n" + g.State.RulesText,
+			Rules:        guildRulesLine(g.Description(), g.State.RulesText),
 			RulesVersion: 1,
 			Link:         fmt.Sprintf("https://discord.gg/channel/%s", g.GuildID),
 			Priority:     uint64(i),

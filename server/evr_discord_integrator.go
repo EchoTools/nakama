@@ -944,14 +944,9 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 	}
 
 	gg.OwnerID = ownerUserID
-	gg.State.RulesText = "No #rules channel found. Please create the channel and set the topic to the rules."
-
-	for _, channel := range guild.Channels {
-		if channel.Type == discordgo.ChannelTypeGuildText && channel.Name == "rules" {
-			gg.State.RulesText = channel.Topic
-			break
-		}
-	}
+	// RulesText is set by guild admins through the guild/group/update RPC and is
+	// never derived from Discord. Only the legacy placeholder is erased here.
+	migrateRulesText(gg.State)
 
 	if err := GuildGroupStore(ctx, d.nk, d.guildGroupRegistry, gg); err != nil {
 		logger.Error("Error storing guild group", zap.Error(err))
